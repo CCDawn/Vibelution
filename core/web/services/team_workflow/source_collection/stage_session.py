@@ -309,27 +309,40 @@ def _canonical_problem_understanding_record_id(workflow_run_id: str) -> str:
 def _problem_understanding_authority_scope(
     team_id: str, workflow_run_id: str, source_run_id: str,
 ) -> tuple[str, str]:
-    """Resolve sideflow input through Ledger parentage, never client refs."""
+    """Resolve sideflow input through Ledger parentage, never client refs.
+
+    Repair and evidence-supplement children attach to the sideflow run whose
+    node they redo, so the formal ancestor that owns the problem-understanding
+    artifact may sit several parent hops above.  Walk the chain until the first
+    non-sideflow ancestor instead of assuming the immediate parent is formal.
+    """
     import json
 
     from core.research.workflow.knowledge_sideflow_definition import KNOWLEDGE_SIDEFLOW_WORKFLOW_ID
     from core.web.services.team_workflow.research_runtime import runtime_factory
 
     runtime = runtime_factory.production_workflow_runtime()
-    child = runtime.store.get_run(workflow_run_id) if runtime is not None else None
-    if child is None or child.workflow_id != KNOWLEDGE_SIDEFLOW_WORKFLOW_ID:
+    current = runtime.store.get_run(workflow_run_id) if runtime is not None else None
+    if current is None or current.workflow_id != KNOWLEDGE_SIDEFLOW_WORKFLOW_ID:
         return workflow_run_id, source_run_id
-    parent = runtime.store.get_run(child.parent_run_id or "")
-    if (
-        parent is None or child.team_id != team_id or parent.team_id != team_id
-        or child.question_id != parent.question_id or child.project_id != parent.project_id
-    ):
-        raise _service().TeamWorkflowOrchestrationError("Knowledge sideflow problem authority lineage is invalid.")
-    parent_snapshot = json.loads(parent.input_snapshot_json or "{}")
-    parent_source_id = str(parent_snapshot.get("sourceCollectionRunId") or "").strip()
-    if not parent_source_id:
+    seen = {workflow_run_id}
+    while getattr(current, "workflow_id", "") == KNOWLEDGE_SIDEFLOW_WORKFLOW_ID:
+        parent = runtime.store.get_run(current.parent_run_id or "")
+        if (
+            parent is None or current.team_id != team_id or parent.team_id != team_id
+            or current.question_id != parent.question_id or current.project_id != parent.project_id
+            or parent.run_id in seen
+        ):
+            raise _service().TeamWorkflowOrchestrationError(
+                "Knowledge sideflow problem authority lineage is invalid."
+            )
+        seen.add(parent.run_id)
+        current = parent
+    root_snapshot = json.loads(current.input_snapshot_json or "{}")
+    root_source_id = str(root_snapshot.get("sourceCollectionRunId") or "").strip()
+    if not root_source_id:
         raise _service().TeamWorkflowOrchestrationError("Knowledge sideflow parent problem authority is missing.")
-    return parent.run_id, parent_source_id
+    return current.run_id, root_source_id
 
 
 def _source_collection_problem_understanding_context(

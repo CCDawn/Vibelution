@@ -70,6 +70,84 @@ def test_sideflow_reads_parent_artifact_without_reassigning_its_session(
     ) == ("child", "source_finding")
 
 
+def test_repair_sideflow_resolves_problem_artifact_through_sideflow_parent_chain(
+    monkeypatch, tmp_path,
+) -> None:
+    """A repair child attached to a sideflow parent still binds the formal root.
+
+    Evidence-supplement children carry parentRunId of the sideflow run whose
+    node they redo; the problem-understanding artifact lives on the formal
+    ancestor several hops above, so a single-hop resolution blocks finding with
+    a missing-artifact error.
+    """
+    from core.research.workflow.knowledge_sideflow_definition import KNOWLEDGE_SIDEFLOW_WORKFLOW_ID
+    from core.web.services.team_workflow.research_runtime import runtime_factory
+
+    service = SimpleNamespace(TeamWorkflowOrchestrationError=ValueError,
+        _trim_text=lambda value, max_length: str(value or "").strip()[:max_length])
+    monkeypatch.setattr(stage_session, "_service", lambda: service)
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    payload = {"scope": "Testable scope", "subquestions": ["What changes?"],
+        "assumptions": ["Comparable inputs"], "known_unknowns": ["Effect size"],
+        "human_gate": {"required": True, "decision": "pending", "rationale": "Collect evidence"}}
+    write_problem_understanding_artifact(
+        team_id="team-a", workflow_run_id="root", source_collection_run_id="root-source",
+        node_run_id="nr-root-problem-a1", problem_understanding=payload,
+    )
+    runs = {
+        "repair-child": SimpleNamespace(workflow_id=KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
+            parent_run_id="sideflow-mid", team_id="team-a", question_id="Q1", project_id="project"),
+        "sideflow-mid": SimpleNamespace(run_id="sideflow-mid",
+            workflow_id=KNOWLEDGE_SIDEFLOW_WORKFLOW_ID, parent_run_id="root",
+            team_id="team-a", question_id="Q1", project_id="project",
+            input_snapshot_json=json.dumps({"sourceCollectionRunId": "mid-source"})),
+        "root": SimpleNamespace(run_id="root", workflow_id="challenge-cup-research",
+            team_id="team-a", question_id="Q1", project_id="project",
+            input_snapshot_json=json.dumps({"sourceCollectionRunId": "root-source"})),
+    }
+    store = SimpleNamespace(get_run=runs.get, read=lambda fn: fn(SimpleNamespace(
+        list_attempts=lambda _: [SimpleNamespace(node_id="problem_understanding", status="succeeded",
+            attempt=1, node_run_id="nr-root-problem-a1")],
+    )))
+    monkeypatch.setattr(runtime_factory, "production_workflow_runtime", lambda: SimpleNamespace(store=store))
+    source_run = {"scope": {"teamId": "team-a", "workflowRunId": "repair-child"}}
+    context = stage_session._source_collection_problem_understanding_context(
+        "team-a", "repair-child-source", source_run,
+    )
+    assert context["workflowRunId"] == "root"
+    assert context["sourceCollectionRunId"] == "root-source"
+    assert context["canonicalRef"].startswith("problem_understanding://team-a/root-source/")
+    assert context["payload"] == payload
+
+
+def test_repair_sideflow_parent_chain_cycle_is_rejected(monkeypatch, tmp_path) -> None:
+    from core.research.workflow.knowledge_sideflow_definition import KNOWLEDGE_SIDEFLOW_WORKFLOW_ID
+    from core.web.services.team_workflow.research_runtime import runtime_factory
+
+    service = SimpleNamespace(TeamWorkflowOrchestrationError=ValueError,
+        _trim_text=lambda value, max_length: str(value or "").strip()[:max_length])
+    monkeypatch.setattr(stage_session, "_service", lambda: service)
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    runs = {
+        "sideflow-a": SimpleNamespace(run_id="sideflow-a",
+            workflow_id=KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
+            parent_run_id="sideflow-b", team_id="team-a", question_id="Q1", project_id="project"),
+        "sideflow-b": SimpleNamespace(run_id="sideflow-b",
+            workflow_id=KNOWLEDGE_SIDEFLOW_WORKFLOW_ID, parent_run_id="sideflow-a",
+            team_id="team-a", question_id="Q1", project_id="project",
+            input_snapshot_json=json.dumps({"sourceCollectionRunId": "b-source"})),
+    }
+    store = SimpleNamespace(get_run=runs.get, read=lambda fn: fn(SimpleNamespace(
+        list_attempts=lambda _: [],
+    )))
+    monkeypatch.setattr(runtime_factory, "production_workflow_runtime", lambda: SimpleNamespace(store=store))
+    source_run = {"scope": {"teamId": "team-a", "workflowRunId": "sideflow-a"}}
+    with pytest.raises(ValueError, match="lineage is invalid"):
+        stage_session._source_collection_problem_understanding_context(
+            "team-a", "a-source", source_run,
+        )
+
+
 def _function_source(name: str) -> str:
     tree = ast.parse(_SOURCE_PATH.read_text(encoding="utf-8"))
     node = next(
