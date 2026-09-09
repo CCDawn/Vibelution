@@ -338,6 +338,14 @@ def _compensate_completion_pending_reservations(
     return compensated
 
 
+# Sentinel problem carried by a zombie active attempt that reconcile
+# finalizes without any terminal dispatch problem to copy (defect ⑭ layer 2).
+_RECONCILE_ZOMBIE_ATTEMPT_PROBLEM = {
+    "code": "reconcile_zombie_attempt_finalized",
+    "detail": "active attempt has no live dispatch after reconcile",
+}
+
+
 def _apply_ledger_reconcile_for_run(
     uow,
     *,
@@ -348,19 +356,125 @@ def _apply_ledger_reconcile_for_run(
     """Re-project one run onto ledger authority inside the caller's transaction.
 
     Shared re-plan core for the formal parent reconcile and the knowledge
-    sideflow child cascade: (a) load the run's attempts, (b) re-derive the
-    authority plan from the ledger, (c) retire plan-superseded blocked
-    attempts as STALE and cancel their graph_dispatch rows, (d) re-arm failed
-    graph_dispatch rows for this run so the worker gets a fresh routing
-    decision.  Rows whose node's latest attempt holds a readiness-pipeline
-    verdict (``auto_advance_not_ready``) stay dead in every scope: replaying
-    them would deterministically re-fail and overwrite that verdict, which
-    both the landing ladder and the V2 rerun mapping depend on.  Returns
-    ``(plan, revived_dispatch_count)``; reservation compensation and the run's
-    own landing stay owned by the caller.
+    sideflow child cascade.  The passes run in a fixed order so each pass
+    sees ledger truth instead of stale projection:
+
+    (1) finalize zombie active attempts: an attempt in
+        starting/dispatching/running whose node_run_id has NO pending/leased
+        outbox row (any action_kind) can never be driven again (the worker
+        only advances attempts through dispatch execution), yet it pins
+        ``_run_has_active_work`` forever and hides the honest landing from
+        the plan (defect ⑭ layer 2: run-1ca97605acf3's source_finding-a2
+        stayed ``running`` over its terminally failed adapter dispatch).  It
+        is finalized ``failed`` (``finished_at_ms`` set); the carried problem
+        copies the newest terminal dispatch row's ``last_problem_json``
+        verbatim so the real failure reason survives, falling back to the
+        ``reconcile_zombie_attempt_finalized`` sentinel when the attempt has
+        no terminal dispatch problem.  Two deliberate keep-alives: an active
+        attempt with a failed graph_dispatch row is not a zombie because the
+        revive pass below re-arms that row in this same transaction; and a
+        completion-pending adapter failure whose budget receipt is still
+        ``reserved`` is left untouched so the caller's compensation pass can
+        find the stranded reservation on a ``running`` attempt (defect ⑬) —
+        the next reconcile finalizes it.  ``waiting_human`` attempts are
+        driven by human gate acceptance, not dispatch rows — never finalized.
+    (2) re-derive the authority plan from the ledger,
+    (3) retire plan-superseded blocked attempts as STALE and cancel their
+        graph_dispatch rows,
+    (4) re-arm failed graph_dispatch rows for this run so the worker gets a
+        fresh routing decision.  Rows stay dead in every scope when
+        replaying them cannot succeed: a dispatch bound to a terminal
+        attempt is definitionally fulfilled or superseded — the cascade
+        revival of a succeeded-attempt-bound duplicate dispatch re-failed
+        with the identical receipt-mismatch and flipped the run straight
+        back (defect ⑭ layer 1, act-8ec85658 on the succeeded
+        evidence_relations-a3) — and rows whose node's latest attempt holds
+        a readiness-pipeline verdict (``auto_advance_not_ready``) would
+        deterministically re-fail and overwrite that verdict, which both the
+        landing ladder and the V2 rerun mapping depend on.  Failed-attempt
+        (or attempt-less) rows stay revivable (the checkpoint_node_mismatch
+        repair shape).
+
+    Returns ``(plan, revived_dispatch_count)``; reservation compensation and
+    the run's own landing stay owned by the caller.
     """
+    from .completion_dependency import COMPLETION_PENDING
+
+    # -- (1) zombie active attempts: finalize BEFORE the plan is computed. --
+    zombie_rows = uow.repository.execute(
+        """
+        SELECT na.node_run_id
+        FROM node_attempts na
+        WHERE na.run_id = ?
+          AND na.status IN ('starting', 'dispatching', 'running')
+          AND NOT EXISTS (
+            SELECT 1 FROM outbox_actions oa
+            WHERE oa.node_run_id = na.node_run_id
+              AND oa.status IN ('pending', 'leased')
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM outbox_actions oa
+            WHERE oa.node_run_id = na.node_run_id
+              AND oa.action_kind = 'graph_dispatch'
+              AND oa.status = 'failed'
+          )
+        """,
+        (run.run_id,),
+    ).fetchall()
+    for (zombie_node_run_id,) in zombie_rows:
+        # A completion-pending zombie whose reservation is still 'reserved'
+        # must stay 'running': the caller's compensation pass scans running
+        # attempts only, and finalizing here would strand the reservation
+        # (defect ⑬ regression).  Once the receipt is settled/voided, the
+        # next reconcile finalizes the attempt.
+        owed_reservation = uow.repository.execute(
+            """
+            SELECT 1 FROM outbox_actions oa
+            WHERE oa.node_run_id = ?
+              AND oa.action_kind = 'adapter_dispatch'
+              AND oa.status = 'failed'
+              AND INSTR(oa.last_problem_json, ?) > 0
+              AND EXISTS (
+                SELECT 1 FROM budget_receipts br
+                WHERE br.reservation_id = ?
+                  AND br.status = 'reserved'
+              )
+            """,
+            (
+                zombie_node_run_id,
+                COMPLETION_PENDING,
+                f"reservation-{zombie_node_run_id}",
+            ),
+        ).fetchone()
+        if owed_reservation is not None:
+            continue
+        problem_row = uow.repository.execute(
+            """
+            SELECT last_problem_json FROM outbox_actions
+            WHERE node_run_id = ?
+              AND status IN ('failed', 'cancelled')
+              AND last_problem_json IS NOT NULL
+            ORDER BY updated_at_ms DESC
+            LIMIT 1
+            """,
+            (zombie_node_run_id,),
+        ).fetchone()
+        problem_json = str(problem_row[0] or "").strip() if problem_row else ""
+        if not problem_json:
+            problem_json = json.dumps(
+                _RECONCILE_ZOMBIE_ATTEMPT_PROBLEM, ensure_ascii=False
+            )
+        uow.repository.update_attempt_status(
+            zombie_node_run_id,
+            NodeAttemptStatus.FAILED.value,
+            now_ms,
+            problem_json=problem_json,
+            finished_at_ms=now_ms,
+        )
+    # -- (2) plan from ledger truth (post-finalization). --------------------
     attempts = uow.repository.list_attempts(run.run_id)
     plan = plan_ledger_authority(attempts, node_order=node_order)
+    # -- (3) supersede pass: retire plan-dirty blocked attempts as STALE. ---
     for node_run_id in plan.superseded_node_run_ids:
         uow.repository.update_attempt_status(
             node_run_id,
@@ -381,6 +495,7 @@ def _apply_ledger_reconcile_for_run(
             """,
             (now_ms, node_run_id),
         )
+    # -- (4) revive pass: re-arm failed graph_dispatch rows. ----------------
     # Reconciliation re-derives execution from the durable ledger.  A
     # blocked run usually got there via a terminal-failed graph_dispatch
     # (e.g. checkpoint_node_mismatch); reviving only the run status would
@@ -388,7 +503,8 @@ def _apply_ledger_reconcile_for_run(
     # flips it back to reconciliation_required.  Give the worker a fresh
     # routing decision by re-arming failed dispatch rows in this same
     # transaction (same repair shape as _repair_starting_without_progress);
-    # live or deliberately cancelled rows stay untouched.
+    # live or deliberately cancelled rows stay untouched.  Rows bound to a
+    # terminal attempt stay dead (see docstring pass 4).
     uow.repository.execute(
         """
         UPDATE outbox_actions
@@ -405,8 +521,13 @@ def _apply_ledger_reconcile_for_run(
           AND NOT EXISTS (
             SELECT 1 FROM node_attempts na
             WHERE na.node_run_id = outbox_actions.node_run_id
-              AND na.status = 'blocked'
-              AND INSTR(na.problem_json, 'auto_advance_not_ready') > 0
+              AND (
+                na.status IN ('succeeded', 'stale')
+                OR (
+                  na.status = 'blocked'
+                  AND INSTR(na.problem_json, 'auto_advance_not_ready') > 0
+                )
+              )
           )
         """,
         (now_ms, now_ms, run.run_id),

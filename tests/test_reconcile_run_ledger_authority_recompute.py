@@ -499,7 +499,11 @@ def test_reconciled_shape_does_not_reenter_reconciliation_loop(tmp_path: Path) -
 
 
 def test_plain_drift_reconcile_still_revives_live_rows(tmp_path: Path) -> None:
-    """97e227263 的常规漂移形态保持原契约：复活 running 所需的 dispatch。"""
+    """97e227263 的常规漂移形态保持原契约：复活 running 所需的 dispatch。
+
+    缺陷 ⑭ 第一层收窄了复活面：绑定终态 attempt（succeeded/stale）的死
+    dispatch 不再复活（fulfilled/superseded，重放必再失败）；常规漂移
+    契约守的是「活 run 的 dispatch 瞬态死了」，attempt 仍在 running。"""
     commands = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         record = build_run_record(
@@ -527,7 +531,7 @@ def test_plain_drift_reconcile_still_revives_live_rows(tmp_path: Path) -> None:
                     run_id="run-drift",
                     node_id="evidence_relations",
                     attempt=2,
-                    status="succeeded",
+                    status="running",
                     command_id="cmd-rel",
                 )
             )
@@ -1202,6 +1206,17 @@ def _attempt_status(commands: CommandHarness, node_run_id: str) -> str:
     ).result(timeout=10)[0]
 
 
+def _attempt_problem(commands: CommandHarness, node_run_id: str) -> dict[str, Any]:
+    raw = commands.store.submit(
+        lambda uow: uow.repository.execute(
+            "SELECT problem_json FROM node_attempts WHERE node_run_id = ?",
+            (node_run_id,),
+        ).fetchone(),
+        force_flush=True,
+    ).result(timeout=10)[0]
+    return json.loads(str(raw or "") or "{}")
+
+
 def test_reconcile_cascades_ledger_replan_to_stuck_knowledge_child_run(
     tmp_path: Path,
 ) -> None:
@@ -1297,9 +1312,14 @@ def test_reconcile_cascades_ledger_replan_to_stuck_knowledge_child_run(
         assert payload["staleAttemptIds"] == []
         assert payload["parentRunId"] == run_id
 
-        # 父 run 行为不变：自身 attempt 仍在跑 → 落 RUNNING。
+        # 缺陷 ⑭ 第二层：父 run 自身的 running attempt 只挂着终态 failed
+        # 的 adapter_dispatch（无任何活 dispatch）→ 僵尸，对账先终态化，
+        # 父 run 落在自己的 failed 前沿（可重试），不再伪造 RUNNING。
         parent = store.get_run(run_id)
-        assert parent.status == "running"
+        assert parent.status == "blocked"
+        assert json.loads(str(parent.blocked_problem_json)) == {
+            "code": "adapter_execution_exception"
+        }
         # 子 run 有复活 → worker 必须被唤醒。
         assert commands.wake_count == 1
     finally:
@@ -1544,8 +1564,13 @@ def test_reconcile_cascade_skips_blocked_and_terminal_children(
             assert store.list_events(child_run_id) == [], child_run_id
         assert _outbox_status(commands, "act-blocked-child-dispatch") == "failed"
 
+        # 缺陷 ⑭ 第二层：父 run 的 running attempt 只挂着终态 failed 的
+        # adapter_dispatch → 僵尸终态化，父 run 落在自己的 failed 前沿。
         parent = store.get_run(run_id)
-        assert parent.status == "running"
+        assert parent.status == "blocked"
+        assert json.loads(str(parent.blocked_problem_json)) == {
+            "code": "adapter_execution_exception"
+        }
         assert commands.wake_count == 0
     finally:
         commands.close()
@@ -1637,7 +1662,532 @@ def test_reconcile_cascade_is_idempotent_across_repeated_reconciles(
         payload = json.loads(child_events[-1].payload_json)
         assert payload["revivedDispatchCount"] == 1
 
+        # 缺陷 ⑭ 第二层：父 run 的 running attempt 只挂着终态 failed 的
+        # adapter_dispatch → 僵尸终态化；第二次对账 blocked→blocked 幂等。
         parent = store.get_run(run_id)
-        assert parent.status == "running"
+        assert parent.status == "blocked"
+        assert json.loads(str(parent.blocked_problem_json)) == {
+            "code": "adapter_execution_exception"
+        }
+    finally:
+        commands.close()
+
+
+# --------------------------------------------------------------------------
+# 缺陷 ⑭：reconcile 的两枚陈旧投影（production run-1ca97605acf3 无限循环）
+#
+# 生产现场：对账级联复活了绑定已成功 attempt 的重复 successor dispatch，
+# worker 重放它并以同一 receipt 身份错配再次失败，run 翻回
+# reconciliation_required（复活→再失败→再对账…）；同时 source_finding-a2
+# 的 running 僵尸 attempt 钉死 has_active_work，落态梯永远到不了诚实的
+# BLOCKED。修复必须在 plan 之前终态化僵尸 attempt，并让绑定终态 attempt
+# 的 dispatch 保持死。
+# --------------------------------------------------------------------------
+
+
+def test_reconcile_keeps_succeeded_attempt_dispatch_dead(tmp_path: Path) -> None:
+    """第一层：绑定已成功 attempt 的死 dispatch 不得复活。
+
+    重跑竞态窗口留下的重复 dispatch，其 expected-frontier receipt 已被那次
+    重跑本身作废——重放永远过不了提交期 receipt 校验，复活只会再失败一次
+    并把 run 翻回 reconciliation_required。对账后该行保持 failed，run 不得
+    因它落 RUNNING。"""
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        run_id = "run-succeeded-bound"
+        bound_node_run_id = f"nr-{run_id}-evidence_relations-a3"
+        store = commands.store
+
+        def seed(uow):
+            uow.repository.insert_run(
+                build_run_record(
+                    workflow_version_id=_PINNED_WORKFLOW_VERSION_ID,
+                    run_id=run_id,
+                    status="reconciliation_required",
+                    run_version=3,
+                    last_event_sequence=8,
+                )
+            )
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-succeeded-bound",
+                    run_id=run_id,
+                    idempotency_key="key:succeeded-bound",
+                    node_id="evidence_relations",
+                )
+            )
+            uow.repository.insert_attempt(
+                _attempt(
+                    "evidence_relations",
+                    attempt=3,
+                    status="succeeded",
+                    run_id=run_id,
+                    command_id="cmd-succeeded-bound",
+                )
+            )
+            uow.repository.insert_outbox(
+                replace(
+                    build_outbox_record(
+                        "act-succeeded-bound-dead",
+                        run_id=run_id,
+                        command_id="cmd-succeeded-bound",
+                        action_kind="graph_dispatch",
+                        status="failed",
+                    ),
+                    node_run_id=bound_node_run_id,
+                    last_problem_json=json.dumps(
+                        _RECEIPT_MISMATCH_PROBLEM, ensure_ascii=False
+                    ),
+                )
+            )
+
+        store.submit(seed, force_flush=True).result(timeout=10)
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=3,
+                idempotency_key="ui:reconcile-succeeded-bound",
+            )
+        )
+
+        # 复活排除：行保持 failed；run 落零工作的诚实态而非 RUNNING。
+        assert _outbox_status(commands, "act-succeeded-bound-dead") == "failed"
+        run = store.get_run(run_id)
+        assert run.status == "reconciliation_required"
+        assert commands.wake_count == 0
+        events = [
+            event
+            for event in store.list_events(run_id)
+            if event.event_type == "run_blocked"
+        ]
+        payload = json.loads(events[-1].payload_json)
+        assert payload["revivedDispatchCount"] == 0
+        assert payload["reconciledStatus"] == "reconciliation_required"
+    finally:
+        commands.close()
+
+
+def test_reconcile_finalizes_zombie_attempts_and_lands_real_blocker(
+    tmp_path: Path,
+) -> None:
+    """第二层：无任何活 dispatch 的活跃 attempt 必须在 plan 前终态化。
+
+    running/dispatching attempt 只挂着终态 dispatch 时已无人能驱动，却把
+    has_active_work 与 plan 前沿永久钉死。对账先按 ledger 真相把它终态化
+    （problem 逐字复制自最近一条终态 dispatch，保真真实原因；无终态
+    dispatch 问题可拷时用哨兵码），随后 plan 与落态看到的就是最深真实
+    blocker，而不是僵尸还活着的假象。"""
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        run_id = "run-zombie-attempts"
+        zombie_with_row = f"nr-{run_id}-hypothesis_design-a2"
+        zombie_no_rows = f"nr-{run_id}-protocol_design-a1"
+        store = commands.store
+
+        def seed(uow):
+            uow.repository.insert_run(
+                build_run_record(
+                    workflow_version_id=_PINNED_WORKFLOW_VERSION_ID,
+                    run_id=run_id,
+                    status="reconciliation_required",
+                    run_version=3,
+                    last_event_sequence=8,
+                )
+            )
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-zombie-attempts",
+                    run_id=run_id,
+                    idempotency_key="key:zombie-attempts",
+                    node_id="hypothesis_design",
+                )
+            )
+            # 链条权威：problem_understanding → hypothesis_design 已成功。
+            uow.repository.insert_attempt(
+                _attempt(
+                    "problem_understanding",
+                    status="succeeded",
+                    run_id=run_id,
+                    command_id="cmd-zombie-attempts",
+                )
+            )
+            uow.repository.insert_attempt(
+                _attempt(
+                    "hypothesis_design",
+                    attempt=1,
+                    status="succeeded",
+                    run_id=run_id,
+                    command_id="cmd-zombie-attempts",
+                )
+            )
+            # 僵尸一：同节点 a2 仍在 running，唯一 dispatch 已终态 failed。
+            uow.repository.insert_attempt(
+                _attempt(
+                    "hypothesis_design",
+                    attempt=2,
+                    status="running",
+                    run_id=run_id,
+                    command_id="cmd-zombie-attempts",
+                )
+            )
+            uow.repository.insert_outbox(
+                replace(
+                    build_outbox_record(
+                        "act-zombie-attempts-adapter",
+                        run_id=run_id,
+                        command_id="cmd-zombie-attempts",
+                        action_kind="adapter_dispatch",
+                        status="failed",
+                    ),
+                    node_run_id=zombie_with_row,
+                    last_problem_json=json.dumps(
+                        {
+                            "code": "adapter_execution_exception",
+                            "detail": "hypothesis_design adapter raised",
+                        }
+                    ),
+                )
+            )
+            # 僵尸二：running 且连一条 outbox 行都没有（哨兵兜底形态）。
+            uow.repository.insert_attempt(
+                _attempt(
+                    "protocol_design",
+                    status="running",
+                    run_id=run_id,
+                    command_id="cmd-zombie-attempts",
+                )
+            )
+            # 最深真实 blocker：评估管线自己的 readiness 裁决。
+            uow.repository.insert_attempt(
+                _attempt(
+                    "protocol_freeze",
+                    status="blocked",
+                    problem=_READINESS_PROBLEM,
+                    run_id=run_id,
+                    command_id="cmd-zombie-attempts",
+                )
+            )
+
+        store.submit(seed, force_flush=True).result(timeout=10)
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=3,
+                idempotency_key="ui:reconcile-zombie-attempts",
+            )
+        )
+
+        # 僵尸终态化：带终态 dispatch 的拷贝真实原因，无行的落哨兵码。
+        assert _attempt_status(commands, zombie_with_row) == "failed"
+        assert _attempt_problem(commands, zombie_with_row) == {
+            "code": "adapter_execution_exception",
+            "detail": "hypothesis_design adapter raised",
+        }
+        assert _attempt_status(commands, zombie_no_rows) == "failed"
+        assert _attempt_problem(commands, zombie_no_rows) == {
+            "code": "reconcile_zombie_attempt_finalized",
+            "detail": "active attempt has no live dispatch after reconcile",
+        }
+        # 落态反映最深真实 blocker，而不是僵尸 running 撑起的假活。
+        run = store.get_run(run_id)
+        assert run.status == "blocked"
+        assert run.active_node_id == "protocol_freeze"
+        assert json.loads(str(run.blocked_problem_json)) == _READINESS_PROBLEM
+        assert commands.wake_count == 0
+    finally:
+        commands.close()
+
+
+def test_reconcile_never_finalizes_waiting_human_attempt(tmp_path: Path) -> None:
+    """waiting_human 由人工闸门驱动，与 dispatch 无关——不得终态化。"""
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        run_id = "run-waiting-human"
+        waiting_node_run_id = f"nr-{run_id}-result_evaluation-a1"
+        store = commands.store
+
+        def seed(uow):
+            uow.repository.insert_run(
+                build_run_record(
+                    workflow_version_id=_PINNED_WORKFLOW_VERSION_ID,
+                    run_id=run_id,
+                    status="reconciliation_required",
+                    run_version=3,
+                    last_event_sequence=8,
+                )
+            )
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-waiting-human",
+                    run_id=run_id,
+                    idempotency_key="key:waiting-human",
+                    node_id="result_evaluation",
+                )
+            )
+            uow.repository.insert_attempt(
+                _attempt(
+                    "result_evaluation",
+                    status="waiting_human",
+                    run_id=run_id,
+                    command_id="cmd-waiting-human",
+                )
+            )
+
+        store.submit(seed, force_flush=True).result(timeout=10)
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=3,
+                idempotency_key="ui:reconcile-waiting-human",
+            )
+        )
+
+        assert _attempt_status(commands, waiting_node_run_id) == "waiting_human"
+        # 人工闸门仍是活跃工作：run 落 RUNNING。
+        assert store.get_run(run_id).status == "running"
+    finally:
+        commands.close()
+
+
+def test_reconcile_never_finalizes_attempt_with_live_dispatch(
+    tmp_path: Path,
+) -> None:
+    """有 pending/leased 行（任意 action_kind）的 attempt 不是僵尸。"""
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        run_id = "run-live-dispatch"
+        live_node_run_id = f"nr-{run_id}-hypothesis_design-a1"
+        store = commands.store
+
+        def seed(uow):
+            uow.repository.insert_run(
+                build_run_record(
+                    workflow_version_id=_PINNED_WORKFLOW_VERSION_ID,
+                    run_id=run_id,
+                    status="reconciliation_required",
+                    run_version=3,
+                    last_event_sequence=8,
+                )
+            )
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-live-dispatch",
+                    run_id=run_id,
+                    idempotency_key="key:live-dispatch",
+                    node_id="hypothesis_design",
+                )
+            )
+            uow.repository.insert_attempt(
+                _attempt(
+                    "hypothesis_design",
+                    status="running",
+                    run_id=run_id,
+                    command_id="cmd-live-dispatch",
+                )
+            )
+            uow.repository.insert_outbox(
+                replace(
+                    build_outbox_record(
+                        "act-live-dispatch-pending",
+                        run_id=run_id,
+                        command_id="cmd-live-dispatch",
+                        action_kind="adapter_dispatch",
+                        status="pending",
+                    ),
+                    node_run_id=live_node_run_id,
+                )
+            )
+            uow.repository.insert_outbox(
+                replace(
+                    build_outbox_record(
+                        "act-live-dispatch-leased",
+                        run_id=run_id,
+                        command_id="cmd-live-dispatch",
+                        action_kind="graph_dispatch",
+                        status="leased",
+                    ),
+                    node_run_id=live_node_run_id,
+                )
+            )
+
+        store.submit(seed, force_flush=True).result(timeout=10)
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=3,
+                idempotency_key="ui:reconcile-live-dispatch",
+            )
+        )
+
+        assert _attempt_status(commands, live_node_run_id) == "running"
+        assert _outbox_status(commands, "act-live-dispatch-pending") == "pending"
+        assert _outbox_status(commands, "act-live-dispatch-leased") == "leased"
+        assert store.get_run(run_id).status == "running"
+    finally:
+        commands.close()
+
+
+def test_reconcile_finalizes_completion_pending_zombie_once_reservation_settled(
+    tmp_path: Path,
+) -> None:
+    """completion-pending 僵尸分两拍收敛，且不碰补偿契约（缺陷 ⑬）。
+
+    第一拍：receipt 仍 reserved，僵尸终态化会让只扫 running attempt 的
+    补偿错过搁浅预留——故本拍保持 running，由同一事务的补偿把预留关掉；
+    第二拍：预留已 settled，无物可护，僵尸被终态化（真实
+    completion-pending 原因逐字保留）。"""
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        run_id = "run-zombie-converge"
+        zombie_node_run_id = f"nr-{run_id}-source_finding-a2"
+        other_node_run_id = f"nr-{run_id}-source_extraction-a1"
+        store = commands.store
+
+        def seed(uow):
+            uow.repository.insert_run(
+                build_run_record(
+                    workflow_version_id=_PINNED_WORKFLOW_VERSION_ID,
+                    run_id=run_id,
+                    status="reconciliation_required",
+                    run_version=3,
+                    last_event_sequence=8,
+                )
+            )
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-zombie-converge",
+                    run_id=run_id,
+                    idempotency_key="key:zombie-converge",
+                    node_id="source_finding",
+                )
+            )
+            uow.repository.insert_attempt(
+                _attempt(
+                    "source_finding",
+                    attempt=2,
+                    status="running",
+                    run_id=run_id,
+                    command_id="cmd-zombie-converge",
+                )
+            )
+            uow.repository.insert_outbox(
+                replace(
+                    build_outbox_record(
+                        "act-converge-zombie-adapter",
+                        run_id=run_id,
+                        command_id="cmd-zombie-converge",
+                        action_kind="adapter_dispatch",
+                        status="failed",
+                    ),
+                    node_run_id=zombie_node_run_id,
+                    last_problem_json=json.dumps(
+                        {
+                            "code": COMPLETION_PENDING,
+                            "dependencyStatus": "unavailable",
+                        }
+                    ),
+                )
+            )
+            uow.repository.insert_budget_receipt(
+                receipt_id="budget-receipt-converge",
+                run_id=run_id,
+                node_run_id=zombie_node_run_id,
+                reservation_id=f"reservation-{zombie_node_run_id}",
+                stage_id="knowledge_collection",
+                policy_hash="p-1",
+                reserved_json=json.dumps(
+                    {
+                        "reserved": {
+                            "estimatedTokens": 1_480_468,
+                            "tokens": 1_480_468,
+                        },
+                        "limits": {"tokens": 2_000_000},
+                    }
+                ),
+                created_at_ms=FIXED_NOW_MS,
+            )
+            uow.repository.update_budget_receipt(
+                "budget-receipt-converge",
+                status="reserved",
+                now_ms=FIXED_NOW_MS,
+                settled_json=json.dumps(
+                    {
+                        "usage": {"tokens": 1_066_138},
+                        "invocations": {"i1": {"tokens": 1_066_138}},
+                    }
+                ),
+            )
+            # 非 completion-pending 的僵尸：无预留可护，第一拍即终态化。
+            uow.repository.insert_attempt(
+                _attempt(
+                    "source_extraction",
+                    status="running",
+                    run_id=run_id,
+                    command_id="cmd-zombie-converge",
+                )
+            )
+            uow.repository.insert_outbox(
+                replace(
+                    build_outbox_record(
+                        "act-converge-other-adapter",
+                        run_id=run_id,
+                        command_id="cmd-zombie-converge",
+                        action_kind="adapter_dispatch",
+                        status="failed",
+                    ),
+                    node_run_id=other_node_run_id,
+                    last_problem_json=json.dumps(
+                        {"code": "adapter_execution_exception"}
+                    ),
+                )
+            )
+
+        store.submit(seed, force_flush=True).result(timeout=10)
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=3,
+                idempotency_key="ui:reconcile-converge-1",
+            )
+        )
+
+        # 第一拍：completion-pending 僵尸保持 running，预留被补偿关闭；
+        # 非 completion-pending 僵尸立即终态化。
+        assert _attempt_status(commands, zombie_node_run_id) == "running"
+        assert _attempt_status(commands, other_node_run_id) == "failed"
+        receipt_status = store.submit(
+            lambda uow: uow.repository.execute(
+                "SELECT status FROM budget_receipts WHERE reservation_id = ?",
+                (f"reservation-{zombie_node_run_id}",),
+            ).fetchone(),
+            force_flush=True,
+        ).result(timeout=10)[0]
+        assert receipt_status == "settled"
+
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=4,
+                idempotency_key="ui:reconcile-converge-2",
+            )
+        )
+
+        # 第二拍：预留已 settled，僵尸终态化且真实原因逐字保留。
+        assert _attempt_status(commands, zombie_node_run_id) == "failed"
+        assert _attempt_problem(commands, zombie_node_run_id)["code"] == (
+            COMPLETION_PENDING
+        )
     finally:
         commands.close()

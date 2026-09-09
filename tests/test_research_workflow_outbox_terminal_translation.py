@@ -18,7 +18,6 @@ from pathlib import Path
 from core.research.workflow.contracts import WorkflowCommandKind
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.research.workflow.definition_registry import register_or_resolve
-from core.research.workflow.ledger.outbox import lease_ready_actions
 from core.research.workflow.transitions import RunStatus, require_run_transition
 from core.web.services.team_workflow.research_runtime.command_offers.reconcile_run import (
     build_reconcile_run_offer,
@@ -148,7 +147,11 @@ def test_terminal_failed_dispatch_reconciles_stranded_running_run(tmp_path: Path
 
 
 def test_terminal_failed_translation_enables_reconcile_command(tmp_path: Path) -> None:
-    """After the sweep translated the stranded run, reconcile_run is accepted."""
+    """After the sweep translated the stranded run, reconcile_run is accepted.
+
+    缺陷 ⑭ 第一层收窄了复活面：绑定已成功 attempt 的死 dispatch 不再复活
+    （重放它只会以同一 receipt 身份错配再次失败，run-1ca97605acf3 死循环）。
+    命令仍被接受，run 落零工作的诚实 reconciliation_required，行保持死。"""
     commands = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         _seed_stuck_production_shape(commands)
@@ -168,7 +171,17 @@ def test_terminal_failed_translation_enables_reconcile_command(tmp_path: Path) -
         assert receipt.accepted_run_version is not None
 
         recovered = commands.store.get_run("run-test")
-        assert recovered.status == "running"
+        # 不再伪造 RUNNING：succeeded 绑定的死行保持死，落零工作诚实态。
+        assert recovered.status == "reconciliation_required"
+        assert json.loads(str(recovered.blocked_problem_json))["code"] == (
+            "reconcile_no_active_work"
+        )
+        revived = commands.store.read(
+            lambda repo: repo.get_outbox(
+                "act-a244894b8c1044d59f31701696b967ff"
+            )
+        )
+        assert revived is not None and revived.status == "failed"
     finally:
         commands.close()
 
@@ -334,20 +347,23 @@ def test_identity_mismatch_fails_fast_without_transient_loop(tmp_path: Path) -> 
         commands.close()
 
 
-def test_reconcile_command_accepts_blocked_run_and_revives_failed_dispatch(
+def test_reconcile_command_accepts_blocked_run_and_keeps_succeeded_dispatch_dead(
     tmp_path: Path,
 ) -> None:
-    """SCI-003: a blocked run with a terminal-failed dispatch is the exact
-    shape reconcile_run exists for.  The command must be accepted (V2 keeps
-    no other recovery entry) and must re-arm the failed graph_dispatch so
-    the worker actually re-derives routing instead of stranding a running
-    run nothing will ever advance."""
+    """SCI-003 形态上的对账命令仍被接受，但复活面已被缺陷 ⑭ 第一层收窄。
+
+    原契约（成功 attempt 绑定的死 dispatch 复活并把 run 落 RUNNING）正是
+    run-1ca97605acf3 死循环的成因：重放绑定终态 attempt 的 dispatch 会以
+    同一 receipt 身份错配确定性再失败。命令必须被接受（V2 仍保留此恢复
+    入口），行保持死、不叫醒 worker，run 落零工作的诚实 fail-closed 态，
+    不再伪造 RUNNING。"""
     commands = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         _seed_stuck_production_shape(commands, run_status="blocked")
         run_before = commands.store.get_run("run-test")
         require_run_transition(RunStatus(run_before.status), RunStatus.RUNNING)
         assert build_reconcile_run_offer(run=run_before).available is True
+        wake_before = commands.wake_count
 
         receipt = commands.service.submit(
             commands.request(
@@ -360,26 +376,19 @@ def test_reconcile_command_accepts_blocked_run_and_revives_failed_dispatch(
         assert receipt.accepted_run_version is not None
 
         recovered = commands.store.get_run("run-test")
-        assert recovered.status == "running"
-        revived = commands.store.read(
+        # 绑定 succeeded attempt 的死行不复活；run 落 fail-closed 而非 RUNNING。
+        assert recovered.status == "reconciliation_required"
+        assert json.loads(str(recovered.blocked_problem_json))["code"] == (
+            "reconcile_no_active_work"
+        )
+        dead = commands.store.read(
             lambda repo: repo.get_outbox(
                 "act-a244894b8c1044d59f31701696b967ff"
             )
         )
-        assert revived is not None and revived.status == "pending"
-        assert revived.attempt_count == 0
-        # 复活了可推进的 dispatch，必须叫醒 worker 立即重算路由。
-        assert commands.wake_count >= 1
-
-        # 下一 tick 能真正领到复活后的 dispatch（不是永远停在 pending）。
-        leased = lease_ready_actions(
-            commands.store,
-            owner="graph-worker-test",
-            now_ms=FIXED_NOW_MS + 5000,
-        )
-        assert [action.action_id for action in leased] == [
-            "act-a244894b8c1044d59f31701696b967ff"
-        ]
+        assert dead is not None and dead.status == "failed"
+        assert dead.attempt_count == 5
+        assert commands.wake_count == wake_before
     finally:
         commands.close()
 
