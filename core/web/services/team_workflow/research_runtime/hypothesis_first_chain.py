@@ -11484,6 +11484,28 @@ def _project_live_stage_one_question_detail(
         return None
     selected_statement = str(selected_row.get("claim") or "").strip()
     selected_rationale = str(selected_row.get("rationale") or "").strip()
+    # A04 minimal alignment: when the accepted round carries a FORMAL R2
+    # revision envelope, the proposal binds the same hash-pinned R2 authority
+    # the result package reads (shared resolver), so the plan never presents
+    # the pre-revision R1 claim as the selected hypothesis.  The canonical
+    # revision snapshot excludes prose, so rationale/novelty stay R1 by the
+    # revision contract itself; any binding conflict degrades to the caller's
+    # fail-closed blocker via the None return below.
+    final_claim = ""
+    try:
+        from .result_package_v2 import _final_revision_bindings_from_round
+
+        binding = _final_revision_bindings_from_round(accepted_round).get(
+            selected_candidate_id
+        )
+        if binding is not None:
+            final_claim = str(binding.get("claim") or "").strip()
+            if not final_claim:
+                return None
+    except Exception:  # noqa: BLE001 - final-version conflicts stay fail-closed
+        return None
+    if final_claim:
+        selected_statement = final_claim
     round_id = str(accepted_round.get("roundId") or "").strip()
     acceptance_gate = {
         "required": True,
@@ -11552,7 +11574,15 @@ def _project_live_stage_one_question_detail(
             "hypotheses": [
                 {
                     "hypothesis_id": str(item.get("candidateId") or "").strip(),
-                    "statement": str(item.get("claim") or "").strip(),
+                    # The selected row carries the bound final (R2) claim when
+                    # a revision envelope exists; unselected candidates stay
+                    # at their R1 content.
+                    "statement": (
+                        selected_statement
+                        if str(item.get("candidateId") or "").strip()
+                        == selected_candidate_id
+                        else str(item.get("claim") or "").strip()
+                    ),
                 }
                 for item in round_candidates
             ],
