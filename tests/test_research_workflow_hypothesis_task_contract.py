@@ -608,3 +608,57 @@ def test_hypothesis_quality_gate_rejects_an_empty_portfolio() -> None:
             manifests=[manifest],
             payloads={manifest["artifactId"]: payload},
         )
+
+
+def test_stage_one_grounded_context_accepts_stage_one_pinned_definition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """2026-09-09 production stall: live runs pin 3.1.0-stage-one.
+
+    The definition gate compared only against the global 3.0.0
+    SCHEMA_VERSION, so every stage-one run resolved
+    ``workflow_definition_unavailable``: stageOneGroundedContextReady stayed
+    False, the open_generation offer never appeared, and the chain stalled on
+    ``hypothesis_round_unconverged`` after knowledge absorption.
+    """
+    from types import SimpleNamespace
+
+    from core.research.workflow.definition_registry import register_or_resolve
+    from core.research.workflow.stage_one_definition import (
+        build_stage_one_workflow_definition,
+    )
+    from core.web.services.team_workflow import research_project_hypothesis_context
+
+    monkeypatch.setattr(
+        research_project_hypothesis_context,
+        "build_hypothesis_input_context",
+        lambda *_args, **_kwargs: {
+            "status": "ready",
+            "allowedEvidenceRefs": ["evidence:accepted-1"],
+        },
+    )
+    monkeypatch.setattr(
+        research_project_hypothesis_context,
+        "_grounded_problem_context",
+        lambda *_args, **_kwargs: {"contentHash": "current-problem-hash"},
+    )
+    identity = register_or_resolve(build_stage_one_workflow_definition())
+    run = SimpleNamespace(
+        team_id="research-team",
+        question_id="SCI-009",
+        workflow_version_id=identity.workflowVersionId,
+        input_snapshot_json=json.dumps(
+            {"sourceCollectionRunId": "source-stage-one"}
+        ),
+    )
+    store = SimpleNamespace(get_run=lambda _run_id: run)
+
+    context = build_stage_one_grounded_generation_context(
+        "research-team",
+        "run-stage-one",
+        question_id="SCI-009",
+        store=store,
+    )
+
+    assert context["status"] == "ready"
+    assert context["allowedEvidenceRefs"] == ["evidence:accepted-1"]
