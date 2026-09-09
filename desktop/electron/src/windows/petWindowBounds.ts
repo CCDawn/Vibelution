@@ -12,8 +12,8 @@ export type DisplayWorkArea = {
   height: number;
 };
 
-export const PET_WINDOW_WIDTH = 320;
-export const PET_WINDOW_HEIGHT = 410;
+export const PET_WINDOW_WIDTH = 300;
+export const PET_WINDOW_HEIGHT = 330;
 export const PET_WINDOW_MARGIN = 18;
 
 export function defaultPetWindowBounds(workArea: DisplayWorkArea): PetWindowBounds {

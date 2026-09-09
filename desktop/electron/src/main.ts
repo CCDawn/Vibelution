@@ -1,4 +1,4 @@
-import { BrowserWindow, Notification, app, dialog, ipcMain, nativeImage, nativeTheme, protocol, type IpcMainInvokeEvent } from "electron";
+import { BrowserWindow, Notification, app, dialog, ipcMain, nativeImage, nativeTheme, protocol, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -217,6 +217,12 @@ import type { ManagedWindowState } from "./windows/windowProviderTypes.js";
 import { createLauncherWindow } from "./windows/launcherWindow.js";
 import { createWorkbenchWindow } from "./windows/workbenchWindow.js";
 import { createPetWindow, isDesktopPetWindowUrl } from "./windows/petWindow.js";
+import {
+  beginDesktopPetWindowDrag,
+  desktopPetWindowBoundsAt,
+  isDesktopPetDragPoint,
+  type DesktopPetWindowDrag,
+} from "./windows/petWindowDrag.js";
 import {
     resolveLauncherWindowUrl,
   resolveWorkbenchUrl
@@ -2929,13 +2935,51 @@ ipcMain.handle(IPC_CHANNELS.openConversationFromPet, async (event, rawSessionId:
   return { schemaVersion: 1, opened: state.open && delivered };
 });
 
-function assertDesktopPetIpcSender(event: IpcMainInvokeEvent): void {
-  assertTrustedIpcSender(event, trustedIpcOrigins());
+let activeDesktopPetWindowDrag: { senderId: number; drag: DesktopPetWindowDrag } | null = null;
+
+function assertDesktopPetIpcSender(event: IpcMainInvokeEvent | IpcMainEvent): void {
+  assertTrustedIpcSender(event as IpcMainInvokeEvent, trustedIpcOrigins());
   const rawUrl = String(event.senderFrame?.url || "");
   if (!isDesktopPetWindowUrl(rawUrl)) {
     throw new Error("blocked desktop pet ipc sender");
   }
 }
+
+function desktopPetWindowFromEvent(event: IpcMainEvent): BrowserWindow | null {
+  try {
+    assertDesktopPetIpcSender(event);
+  } catch {
+    return null;
+  }
+  const window = BrowserWindow.fromWebContents(event.sender);
+  return window && !window.isDestroyed() ? window : null;
+}
+
+ipcMain.on(IPC_CHANNELS.beginDesktopPetWindowDrag, (event, rawPoint: unknown) => {
+  const window = desktopPetWindowFromEvent(event);
+  if (window === null || !isDesktopPetDragPoint(rawPoint)) {
+    return;
+  }
+  activeDesktopPetWindowDrag = {
+    senderId: event.sender.id,
+    drag: beginDesktopPetWindowDrag(rawPoint, window.getBounds()),
+  };
+});
+
+ipcMain.on(IPC_CHANNELS.moveDesktopPetWindowDrag, (event, rawPoint: unknown) => {
+  const window = desktopPetWindowFromEvent(event);
+  const active = activeDesktopPetWindowDrag;
+  if (window === null || active === null || active.senderId !== event.sender.id || !isDesktopPetDragPoint(rawPoint)) {
+    return;
+  }
+  window.setBounds(desktopPetWindowBoundsAt(active.drag, rawPoint), false);
+});
+
+ipcMain.on(IPC_CHANNELS.endDesktopPetWindowDrag, (event) => {
+  if (activeDesktopPetWindowDrag?.senderId === event.sender.id) {
+    activeDesktopPetWindowDrag = null;
+  }
+});
 
 ipcMain.handle(IPC_CHANNELS.requestDesktopShellExit, async (event) => {
   assertTrustedIpcSender(event, trustedIpcOrigins());

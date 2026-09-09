@@ -1,6 +1,6 @@
 const styles = {
   root: "desktop-pet-root",
-  dragStrip: "desktop-pet-drag-strip",
+  stage: "desktop-pet-stage",
   toolbar: "desktop-pet-toolbar",
   status: "desktop-pet-status",
   statusDot: "desktop-pet-status__dot",

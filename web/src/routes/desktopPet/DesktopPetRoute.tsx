@@ -19,8 +19,11 @@ import {
 } from "./desktopPetModel";
 import {
   beginDesktopPetDrag,
+  desktopPetWindowDragBridge,
   updateDesktopPetDrag,
+  type DesktopPetDragPoint,
   type DesktopPetDragState,
+  type DesktopPetWindowDragBridge,
 } from "./desktopPetWindowDrag";
 
 const EMPTY_ACTIVITY: PetActivity = {
@@ -60,6 +63,10 @@ export function DesktopPetRoute() {
   const [expanded, setExpanded] = useState(false);
   const [dragging, setDragging] = useState(false);
   const dragStateRef = useRef<DesktopPetDragState | null>(null);
+  const dragBridgeRef = useRef<DesktopPetWindowDragBridge | null>(desktopPetWindowDragBridge());
+  const pendingDragPointRef = useRef<DesktopPetDragPoint | null>(null);
+  const dragFrameRef = useRef<number | null>(null);
+  const nativeDragActiveRef = useRef(false);
   const suppressClickRef = useRef(false);
   const activityQuery = useQuery({
     queryKey: queryKeys.petActivity(),
@@ -73,10 +80,42 @@ export function DesktopPetRoute() {
     document.documentElement.dataset.vibelutionDesktopPet = "true";
     document.body.dataset.vibelutionDesktopPet = "true";
     return () => {
+      finishWindowDrag();
       delete document.documentElement.dataset.vibelutionDesktopPet;
       delete document.body.dataset.vibelutionDesktopPet;
     };
   }, []);
+
+  function flushWindowDrag() {
+    dragFrameRef.current = null;
+    const point = pendingDragPointRef.current;
+    pendingDragPointRef.current = null;
+    if (point !== null && nativeDragActiveRef.current) {
+      dragBridgeRef.current?.moveDesktopPetWindowDrag(point);
+    }
+  }
+
+  function queueWindowDrag(point: DesktopPetDragPoint) {
+    pendingDragPointRef.current = point;
+    if (dragFrameRef.current === null) {
+      dragFrameRef.current = window.requestAnimationFrame(flushWindowDrag);
+    }
+  }
+
+  function finishWindowDrag(finalPoint?: DesktopPetDragPoint) {
+    if (finalPoint) {
+      pendingDragPointRef.current = finalPoint;
+    }
+    if (dragFrameRef.current !== null) {
+      window.cancelAnimationFrame(dragFrameRef.current);
+      dragFrameRef.current = null;
+    }
+    flushWindowDrag();
+    if (nativeDragActiveRef.current) {
+      dragBridgeRef.current?.endDesktopPetWindowDrag();
+      nativeDragActiveRef.current = false;
+    }
+  }
 
   async function openSession(sessionId: string) {
     if (await openSessionFromDesktopPet(sessionId)) {
@@ -109,13 +148,20 @@ export function DesktopPetRoute() {
       return;
     }
     dragStateRef.current = update.state;
-    if (update.state.moved) {
+    if (!current.moved && update.state.moved) {
       suppressClickRef.current = true;
       setDragging(true);
     }
     if (update.delta !== null) {
       event.preventDefault();
-      window.moveBy(update.delta.screenX, update.delta.screenY);
+      const bridge = dragBridgeRef.current;
+      if (!nativeDragActiveRef.current && bridge !== null) {
+        bridge.beginDesktopPetWindowDrag(current.start);
+        nativeDragActiveRef.current = true;
+      }
+      if (nativeDragActiveRef.current) {
+        queueWindowDrag({ screenX: event.screenX, screenY: event.screenY });
+      }
     }
   }
 
@@ -125,6 +171,7 @@ export function DesktopPetRoute() {
       return;
     }
     dragStateRef.current = null;
+    finishWindowDrag({ screenX: event.screenX, screenY: event.screenY });
     setDragging(false);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
@@ -158,71 +205,71 @@ export function DesktopPetRoute() {
       data-dragging={dragging ? "true" : "false"}
       aria-label={copy.name}
     >
-      <div className={styles.dragStrip} aria-hidden="true" />
+      <div className={styles.stage}>
+        <div className={styles.toolbar}>
+          <span className={styles.status} role="status" aria-live="polite">
+            <span className={styles.statusDot} aria-hidden="true" />
+            {statusText}
+          </span>
+          <VIconButton
+            label={copy.close}
+            icon={<X size={14} aria-hidden="true" />}
+            variant="ghost"
+            className={styles.close}
+            onPress={() => window.close()}
+          />
+        </div>
 
-      <div className={styles.toolbar}>
-        <span className={styles.status} role="status" aria-live="polite">
-          <span className={styles.statusDot} aria-hidden="true" />
-          {statusText}
-        </span>
-        <VIconButton
-          label={copy.close}
-          icon={<X size={14} aria-hidden="true" />}
-          variant="ghost"
-          className={styles.close}
-          onPress={() => window.close()}
-        />
-      </div>
-
-      {expanded ? (
-        <section className={styles.hud} aria-label={copy.sessions}>
-          <header className={styles.hudHeader}>
-            <strong>{copy.sessions}</strong>
-            <span>{activity.activeCount}</span>
-          </header>
-          <div className={styles.hudList}>
-            {visibleSessions.length > 0 ? visibleSessions.map((session) => (
-              <VNativeButton
-                key={session.sessionId}
-                className={styles.session}
-                data-tone={session.tone}
-                onClick={() => void openSession(session.sessionId)}
-              >
-                <span className={styles.sessionMarker} aria-hidden="true" />
-                <span className={styles.sessionCopy}>
-                  <strong>{session.title}</strong>
-                  <span>
-                    {session.agentDisplayName ? `${session.agentDisplayName} · ` : ""}
-                    {petPhaseLabel(session.phase, lang)}
+        {expanded ? (
+          <section className={styles.hud} aria-label={copy.sessions}>
+            <header className={styles.hudHeader}>
+              <strong>{copy.sessions}</strong>
+              <span>{activity.activeCount}</span>
+            </header>
+            <div className={styles.hudList}>
+              {visibleSessions.length > 0 ? visibleSessions.map((session) => (
+                <VNativeButton
+                  key={session.sessionId}
+                  className={styles.session}
+                  data-tone={session.tone}
+                  onClick={() => void openSession(session.sessionId)}
+                >
+                  <span className={styles.sessionMarker} aria-hidden="true" />
+                  <span className={styles.sessionCopy}>
+                    <strong>{session.title}</strong>
+                    <span>
+                      {session.agentDisplayName ? `${session.agentDisplayName} · ` : ""}
+                      {petPhaseLabel(session.phase, lang)}
+                    </span>
                   </span>
-                </span>
-              </VNativeButton>
-            )) : (
-              <p className={styles.hudEmpty}>{copy.empty}</p>
-            )}
-          </div>
-        </section>
-      ) : null}
+                </VNativeButton>
+              )) : (
+                <p className={styles.hudEmpty}>{copy.empty}</p>
+              )}
+            </div>
+          </section>
+        ) : null}
 
-      <VNativeButton
-        className={styles.characterButton}
-        aria-expanded={expanded}
-        aria-label={expanded ? copy.collapse : copy.open}
-        onClick={toggleExpanded}
-        onPointerDown={beginCharacterDrag}
-        onPointerMove={moveCharacterDrag}
-        onPointerUp={endCharacterDrag}
-        onPointerCancel={cancelCharacterDrag}
-      >
-        <DesktopPetCharacter
-          name={copy.name}
-          tone={activity.aggregateTone}
-          animationState={activity.animationState}
-        />
-        <span className={styles.expandCue} aria-hidden="true">
-          {expanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-        </span>
-      </VNativeButton>
+        <VNativeButton
+          className={styles.characterButton}
+          aria-expanded={expanded}
+          aria-label={expanded ? copy.collapse : copy.open}
+          onClick={toggleExpanded}
+          onPointerDown={beginCharacterDrag}
+          onPointerMove={moveCharacterDrag}
+          onPointerUp={endCharacterDrag}
+          onPointerCancel={cancelCharacterDrag}
+        >
+          <DesktopPetCharacter
+            name={copy.name}
+            tone={activity.aggregateTone}
+            animationState={activity.animationState}
+          />
+          <span className={styles.expandCue} aria-hidden="true">
+            {expanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+          </span>
+        </VNativeButton>
+      </div>
     </main>
   );
 }

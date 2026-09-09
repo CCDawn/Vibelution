@@ -1211,13 +1211,16 @@ describe("resolveWorkbenchUrl", () => {
 describe("IPC channels", () => {
   it("keeps the bridge narrow", () => {
     expect(Object.keys(IPC_CHANNELS).sort()).toEqual([
+      "beginDesktopPetWindowDrag",
       "conversationNotificationOpened",
+      "endDesktopPetWindowDrag",
       "focusWorkbenchWindow",
       "getDesktopShellSummary",
       "getLauncherState",
       "getVersion",
       "launcherInvoke",
       "launcherStateChanged",
+      "moveDesktopPetWindowDrag",
       "notifyConversationCompleted",
       "openConversationFromPet",
       "refreshLauncherState",

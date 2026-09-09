@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { beginDesktopPetDrag, updateDesktopPetDrag } from "./desktopPetWindowDrag";
+import {
+  beginDesktopPetDrag,
+  desktopPetWindowDragBridge,
+  updateDesktopPetDrag,
+} from "./desktopPetWindowDrag";
 
 describe("desktop pet window drag", () => {
   it("keeps a small pointer movement available for the character click", () => {
@@ -35,5 +39,24 @@ describe("desktop pet window drag", () => {
     const state = beginDesktopPetDrag(7, { screenX: 100, screenY: 200 });
 
     expect(updateDesktopPetDrag(state, 8, { screenX: 120, screenY: 220 })).toBeNull();
+  });
+
+  it("uses the Electron-owned fixed-bounds drag bridge when all operations are available", () => {
+    const beginDesktopPetWindowDrag = () => undefined;
+    const moveDesktopPetWindowDrag = () => undefined;
+    const endDesktopPetWindowDrag = () => undefined;
+
+    expect(desktopPetWindowDragBridge({
+      vibelutionLauncher: {
+        beginDesktopPetWindowDrag,
+        moveDesktopPetWindowDrag,
+        endDesktopPetWindowDrag,
+      },
+    })).toEqual({
+      beginDesktopPetWindowDrag,
+      moveDesktopPetWindowDrag,
+      endDesktopPetWindowDrag,
+    });
+    expect(desktopPetWindowDragBridge({ vibelutionLauncher: { moveDesktopPetWindowDrag } })).toBeNull();
   });
 });

@@ -35,7 +35,13 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
   ...(isDesktopPetWindow
     ? {
         openConversationFromPet: (sessionId: string) =>
-          ipcRenderer.invoke(IPC_CHANNELS.openConversationFromPet, sessionId)
+          ipcRenderer.invoke(IPC_CHANNELS.openConversationFromPet, sessionId),
+        beginDesktopPetWindowDrag: (point: unknown) =>
+          ipcRenderer.send(IPC_CHANNELS.beginDesktopPetWindowDrag, point),
+        moveDesktopPetWindowDrag: (point: unknown) =>
+          ipcRenderer.send(IPC_CHANNELS.moveDesktopPetWindowDrag, point),
+        endDesktopPetWindowDrag: () =>
+          ipcRenderer.send(IPC_CHANNELS.endDesktopPetWindowDrag)
       }
     : {})
 });

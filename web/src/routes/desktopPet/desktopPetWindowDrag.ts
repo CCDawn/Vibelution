@@ -15,7 +15,33 @@ export type DesktopPetDragUpdate = {
   delta: DesktopPetDragPoint | null;
 };
 
+export type DesktopPetWindowDragBridge = {
+  beginDesktopPetWindowDrag: (point: DesktopPetDragPoint) => void;
+  moveDesktopPetWindowDrag: (point: DesktopPetDragPoint) => void;
+  endDesktopPetWindowDrag: () => void;
+};
+
 export const DESKTOP_PET_DRAG_THRESHOLD_PX = 4;
+
+export function desktopPetWindowDragBridge(globalLike: unknown = globalThis): DesktopPetWindowDragBridge | null {
+  const bridge = (globalLike as { vibelutionLauncher?: unknown })?.vibelutionLauncher;
+  if (typeof bridge !== "object" || bridge === null) {
+    return null;
+  }
+  const candidate = bridge as Partial<DesktopPetWindowDragBridge>;
+  if (
+    typeof candidate.beginDesktopPetWindowDrag !== "function"
+    || typeof candidate.moveDesktopPetWindowDrag !== "function"
+    || typeof candidate.endDesktopPetWindowDrag !== "function"
+  ) {
+    return null;
+  }
+  return {
+    beginDesktopPetWindowDrag: candidate.beginDesktopPetWindowDrag,
+    moveDesktopPetWindowDrag: candidate.moveDesktopPetWindowDrag,
+    endDesktopPetWindowDrag: candidate.endDesktopPetWindowDrag,
+  };
+}
 
 export function beginDesktopPetDrag(pointerId: number, point: DesktopPetDragPoint): DesktopPetDragState {
   return {
