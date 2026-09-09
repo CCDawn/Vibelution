@@ -674,6 +674,10 @@ class ToolExecutor:
             # 假说侧知识请求会解析任务绑定并可能执行一次有界公开检索预览，
             # 同样不能按轻量查询工具的 30 秒预算截断。
             "research_knowledge_request_tool": 90,
+            # 受控资料上下文会装配 25 候选 × 记录原文块的受限快照，是有界
+            # 重查询；30 秒预算在并行负载下必然截断，导致提炼阶段反复
+            # blocked（quote 锚验证无法继续）。
+            "source_collection_context_tool": 90,
         }
         self._retryable_tools = {"grep_search_tool"}
 

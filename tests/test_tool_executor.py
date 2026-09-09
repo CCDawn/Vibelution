@@ -64,6 +64,12 @@ class TestToolExecutorInit:
 
         assert executor._resolve_timeout("source_collection_stage_writeback_tool", {}) == 180
 
+    def test_source_collection_context_uses_bounded_heavy_query_timeout(self):
+        """受控资料上下文是有界重查询，不能被通用 30 秒预算截断。"""
+        executor = ToolExecutor()
+
+        assert executor._resolve_timeout("source_collection_context_tool", {}) == 90
+
     def test_get_tool_executor_singleton(self):
         """测试单例模式"""
         executor1 = get_tool_executor()
