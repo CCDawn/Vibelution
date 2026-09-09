@@ -1,6 +1,6 @@
 import type { EffectiveAgentBinding, ResearchBudgetLedgerSnapshot } from "../../../api/types/researchWorkflow";
 import { isOperatorGatedOffer, type CommandOffer } from "../../../api/types/research-workflow/commands";
-import { isFetchJsonHttpError } from "../../../api/client";
+import { isFetchJsonHttpError } from "../../../api/research-workflow";
 import type { VStatusTone } from "../../../components/vui";
 
 export const NODE_INSPECTOR_BUDGET_WARN_PERCENT = 80;

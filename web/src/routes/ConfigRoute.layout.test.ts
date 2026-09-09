@@ -377,7 +377,7 @@ describe("ConfigRoute layout contract", () => {
     expect(quickSetupStyles.field).toContain("[&_[data-vui=select-trigger]]:!h-10");
     expect(quickSetupStyles.field).toContain("[&_[data-vui=select-trigger]]:!min-h-10");
     expect(quickSetupStyles.primaryAction).toContain("min-h-10");
-    expect(styles.providerModeButton).toContain("min-h-10");
+    expect(styles.providerModeButton).toContain("min-h-8");
     expect(routeSource).toContain("aria-pressed={providerConnecting}");
     expect(routeSource).toContain("aria-pressed={providerShowMore}");
     expect(routeSource).not.toContain('aria-pressed={providerWorkspaceMode === "quick"}');
@@ -998,7 +998,7 @@ describe("ConfigRoute layout contract", () => {
     // Header chrome lives inside VSettingsFormPage (settings-form-page recipe).
     expect(routeSource).toContain("VSettingsFormPage");
     expect(routeSource).not.toMatch(/<VRouteHeader[\s\S]*?<VStatusStrip[\s\S]*?<\/VRouteHeader>/);
-    expect(styles.configHeader).toContain("[grid-template-columns:minmax(0,1fr)]");
+    expect(styles.configHeader).toContain("[&>[data-vui=route-header]]:!border-0");
   });
 
   it("keeps a canonical Config h1 across loaded and placeholder states", () => {

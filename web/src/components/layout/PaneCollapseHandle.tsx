@@ -1,7 +1,7 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { KeyboardEvent, MouseEvent, PointerEvent, ReactNode } from "react";
 
-import { VButton } from "../vui";
+import { VIconButton } from "../vui";
 import styles from "./PaneCollapseHandle.styles";
 import { paneResizeHandleStyles } from "./PaneResizeHandle";
 
@@ -91,14 +91,13 @@ export function PaneCollapseHandle({
       onKeyDown={onKeyDown}
     >
       {children}
-      <VButton
+      <VIconButton
         type="button"
-        isIconOnly
         className={[
           styles.paneToggleButtonClass,
           active ? styles.paneToggleButtonActive : "",
         ].filter(Boolean).join(" ")}
-        aria-label={label}
+        label={label}
         title={tooltip}
         aria-pressed={collapsed}
         onPointerDown={stopHandleDrag}
