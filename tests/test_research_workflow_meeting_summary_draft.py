@@ -29,7 +29,6 @@ from core.web.services.team_workflow.research_runtime.operator_authorization imp
 from tests.test_research_workflow_hypothesis_first_chain import (
     _QUESTION_ID,
     _ROLES,
-    _build_runtime,
     _candidate_generation_runner,
     _fake_collection_runs,
     _hf_env,
@@ -37,7 +36,6 @@ from tests.test_research_workflow_hypothesis_first_chain import (
     _open_first_meeting,
     _patch_approved_question,
     _selection_payload,
-    _seed_parent_run,
 )
 
 
@@ -420,12 +418,15 @@ def test_approve_review_digest_rejects_mixed_source_type_contract(
     team_id, agents = _hf_env(tmp_path, monkeypatch)
     _patch_approved_question(monkeypatch)
     collection_calls = _fake_collection_runs(monkeypatch)
-    runtime = _build_runtime(tmp_path)
     from core.web.services.team_workflow import hypothesis_selection as selections
 
     agent_ids = [agents[role] for role in _ROLES]
     with server_operator_scope("u-1", roles=("operator",)):
-        _seed_parent_run(runtime, team_id, agents["experiment_planner"])
+        # No seeded workflow run: the review rooms stay preformal and accept
+        # free-marker output, which is the only path where an invalid
+        # sourceTypes value can survive message ingestion and reach the
+        # digest boundary under test. Formal scoped rooms enforce the same
+        # producer contract at ingestion (tests/test_meeting_message_payload.py).
         recorded = selections.record_hypothesis_selection(
             team_id,
             {
@@ -469,7 +470,6 @@ def test_approve_review_digest_rejects_mixed_source_type_contract(
             meeting_id,
             closed_by=agent_ids[0],
             expected_digest_content_hash=drafted["digestDraft"]["contentHash"],
-            runtime=runtime,
         )
         assert approved["closed"] is False
         assert approved["status"] == "awaiting_approval"
