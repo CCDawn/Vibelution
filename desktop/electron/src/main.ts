@@ -217,6 +217,7 @@ import type { ManagedWindowState } from "./windows/windowProviderTypes.js";
 import { createLauncherWindow } from "./windows/launcherWindow.js";
 import { createWorkbenchWindow } from "./windows/workbenchWindow.js";
 import { createPetWindow, isDesktopPetWindowUrl } from "./windows/petWindow.js";
+import { PET_WINDOW_HEIGHT, PET_WINDOW_WIDTH } from "./windows/petWindowBounds.js";
 import {
   beginDesktopPetWindowDrag,
   desktopPetWindowBoundsAt,
@@ -2960,9 +2961,15 @@ ipcMain.on(IPC_CHANNELS.beginDesktopPetWindowDrag, (event, rawPoint: unknown) =>
   if (window === null || !isDesktopPetDragPoint(rawPoint)) {
     return;
   }
+  const { x, y } = window.getBounds();
   activeDesktopPetWindowDrag = {
     senderId: event.sender.id,
-    drag: beginDesktopPetWindowDrag(rawPoint, window.getBounds()),
+    drag: beginDesktopPetWindowDrag(rawPoint, {
+      x,
+      y,
+      width: PET_WINDOW_WIDTH,
+      height: PET_WINDOW_HEIGHT,
+    }),
   };
 });
 

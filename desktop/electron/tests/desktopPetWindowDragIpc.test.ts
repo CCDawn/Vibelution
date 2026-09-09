@@ -17,7 +17,10 @@ describe("desktop pet fixed-bounds drag IPC", () => {
 
   it("moves the owning BrowserWindow with fixed bounds in the main process", () => {
     expect(mainSource).toContain("BrowserWindow.fromWebContents(event.sender)");
-    expect(mainSource).toContain("beginDesktopPetWindowDrag(rawPoint, window.getBounds())");
+    expect(mainSource).toContain("const { x, y } = window.getBounds()");
+    expect(mainSource).toContain("width: PET_WINDOW_WIDTH");
+    expect(mainSource).toContain("height: PET_WINDOW_HEIGHT");
+    expect(mainSource).not.toContain("beginDesktopPetWindowDrag(rawPoint, window.getBounds())");
     expect(mainSource).toContain("window.setBounds(desktopPetWindowBoundsAt(active.drag, rawPoint), false)");
     expect(mainSource).not.toContain("window.moveBy(update.delta.screenX");
   });
