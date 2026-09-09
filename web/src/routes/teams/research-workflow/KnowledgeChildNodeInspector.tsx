@@ -1,6 +1,11 @@
 import { VButton, VStateSurface } from "../../../components/vui";
 import type { CommandOffer } from "../../../api/types/research-workflow/commands";
+import type { TeamWorkflowCandidateListPayload } from "../../../api/types";
+import { fetchTeamWorkflowCandidates } from "../../../api/teamExperiment";
+import { useShellI18n } from "../../../i18n/useShellI18n";
 import { getNodeAdapter } from "./nodeAdapterModel";
+import { latestWorkflowCandidate, workflowCandidateGraphFromCandidate } from "../teamRouteShellModel";
+import { MissingLinkWaiverSection } from "./MissingLinkWaiverSection";
 import { ResearchProcessNodeInspector } from "./ResearchProcessNodeInspector";
 import { useNodeDetailState } from "./useNodeDetailState";
 import { useResearchWorkflowCommand } from "./useResearchWorkflowCommand";
@@ -62,8 +67,36 @@ export function KnowledgeChildReadPanel(props: {
   nodeId: string;
   panel: "evidence" | "timeline";
 }) {
+  const { lang } = useShellI18n();
+  // 缺陷⑰: the evidence_graph_incomplete waiver lives next to the read-only
+  // evidence graph. ``props.runId`` is the knowledge sideflow CHILD workflow
+  // run id (threaded from the run-level invocation badges); the waive endpoint
+  // resolves the candidate-graph authority from that run's frozen input
+  // snapshot, so it must never be replaced by the formal URL run id. The
+  // team-scoped latest candidate_graph record is the same record this child
+  // run scopes to; the waive call re-resolves the scoped authority server-side.
+  const candidateGraph = useQuery({
+    queryKey: queryKeys.teamWorkflowCandidateGraph(props.teamId || "none"),
+    queryFn: ({ signal }) => fetchTeamWorkflowCandidates<TeamWorkflowCandidateListPayload>(
+      props.teamId,
+      { candidateType: "candidate_graph", limit: 20, includeStore: false, signal },
+    ),
+    enabled: Boolean(props.teamId && props.runId),
+  });
+  const candidateGraphPayload = workflowCandidateGraphFromCandidate(
+    latestWorkflowCandidate(candidateGraph.data?.candidates ?? []),
+  );
   return props.panel === "evidence"
-    ? <EvidenceGraphView teamId={props.teamId} runId={props.runId} />
+    ? <>
+        <EvidenceGraphView teamId={props.teamId} runId={props.runId} />
+        <MissingLinkWaiverSection
+          lang={lang}
+          teamId={props.teamId}
+          childWorkflowRunId={props.runId}
+          graph={candidateGraphPayload}
+          refetchGraph={() => candidateGraph.refetch()}
+        />
+      </>
     : <KnowledgeChildTimeline {...props} />;
 }
 

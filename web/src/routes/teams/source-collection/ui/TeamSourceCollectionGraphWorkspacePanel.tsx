@@ -1,18 +1,20 @@
 /**
  * Source-collection ingestion graph workspace body.
  * Wave 8L: extracted from TeamsRoute.tsx for domain componentization.
- * 缺陷⑪: missing-link rows carry the confirmed human waiver surface.
+ * 缺陷⑪/⑰: missing-link rows render the shared MissingLinkWaiverSection so
+ * this panel and the workflow-canvas knowledge sideflow evidence tab stay on
+ * one waiver surface. The run id passed here is the run whose frozen input
+ * snapshot scopes the candidate-graph authority (same contract as the canvas
+ * child run id).
  */
 import { useState, type ReactNode } from "react";
 
-import { waiveEvidenceGraphMissingLink } from "../../../../api/researchWorkflow";
+import { MissingLinkWaiverSection } from "../../research-workflow/MissingLinkWaiverSection";
 import type {
   TeamWorkflowCandidate,
-  TeamWorkflowCandidateGraphEdge,
   TeamWorkflowCandidateGraphPayload,
 } from "../../../../api/types";
 import { TeamCandidateCard } from "../../../../components/vui/product/team-management";
-import { VNativeButton, VNativeInput } from "../../../../components/vui";
 import {
   sourceCollectionCandidateProvenance,
   sourceCollectionCandidateSourceCategory,
@@ -32,25 +34,12 @@ import { workflowGraphLayout } from "../../../TeamWorkflowGraphLayout";
 import { TeamWorkflowGraphView } from "../../../TeamWorkflowGraphView";
 import { workflowStateLabel } from "../../workflowPresentation";
 import { TeamSourceCollectionGraphPanel } from "./TeamSourceCollectionGraphPanel";
-import panelStyles from "./TeamSourceCollectionGraphWorkspacePanel.styles";
 import shellStyles from "../../../TeamsRoute.styles";
 import workflowStyles from "../../../TeamsRoute.workflow.styles";
 
 const styles = { ...shellStyles, ...workflowStyles } as Record<string, string>;
 
 type Lang = "zh" | "en";
-
-const WAIVER_JUSTIFICATION_MIN_CHARS = 8;
-
-const missingLinkEdgeKey = (edge: TeamWorkflowCandidateGraphEdge) =>
-  `${edge.sourceCandidateId}->${edge.targetCandidateId}:${edge.relation}`;
-
-/** Same waiver detection rule as the readiness read side (fetch_evidence_graph_stats). */
-const missingLinkIsWaived = (edge: TeamWorkflowCandidateGraphEdge) =>
-  Boolean(edge.waived)
-  || String(edge.status || "").trim().toLowerCase() === "waived"
-  || String(edge.status || "").trim().toLowerCase() === "accepted"
-  || Boolean(edge.waiver);
 
 export type TeamSourceCollectionGraphWorkspacePanelProps = {
   lang: Lang;
@@ -109,117 +98,6 @@ export function TeamSourceCollectionGraphWorkspacePanel(props: TeamSourceCollect
   } = props;
 
   const [unresolvedNodeNotice, setUnresolvedNodeNotice] = useState<string | null>(null);
-  const [waiverEditorKey, setWaiverEditorKey] = useState<string | null>(null);
-  const [waiverJustification, setWaiverJustification] = useState("");
-  const [waiverPending, setWaiverPending] = useState(false);
-  const [waiverError, setWaiverError] = useState<string | null>(null);
-  const [waiverNotice, setWaiverNotice] = useState<string | null>(null);
-
-  const openWaiverEditor = (edge: TeamWorkflowCandidateGraphEdge) => {
-    setWaiverEditorKey(missingLinkEdgeKey(edge));
-    setWaiverJustification("");
-    setWaiverError(null);
-    setWaiverNotice(null);
-  };
-  const closeWaiverEditor = () => {
-    setWaiverEditorKey(null);
-    setWaiverJustification("");
-    setWaiverError(null);
-  };
-  const submitWaiver = async (edge: TeamWorkflowCandidateGraphEdge) => {
-    if (!workflowRunId || waiverPending) return;
-    setWaiverPending(true);
-    setWaiverError(null);
-    try {
-      const response = await waiveEvidenceGraphMissingLink({
-        runId: workflowRunId,
-        teamId,
-        sourceCandidateId: edge.sourceCandidateId,
-        targetCandidateId: edge.targetCandidateId,
-        relation: edge.relation,
-        justification: waiverJustification.trim(),
-        confirmed: true,
-      });
-      setWaiverNotice(
-        response.alreadyWaived
-          ? (lang === "zh"
-            ? "该缺口此前已登记豁免，无需重复操作。"
-            : "This gap was already waived; nothing changed.")
-          : (lang === "zh"
-            ? "已登记豁免：缺口保留计数，但不再阻塞知识入库就绪门。"
-            : "Waiver recorded: the gap stays counted but no longer blocks the ingestion gate."),
-      );
-      setWaiverEditorKey(null);
-      setWaiverJustification("");
-      await teamWorkflowCandidateGraphQuery.refetch();
-    } catch (error) {
-      setWaiverError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setWaiverPending(false);
-    }
-  };
-
-  const renderMissingLinkWaiverRow = (edge: TeamWorkflowCandidateGraphEdge) => {
-    const edgeKey = missingLinkEdgeKey(edge);
-    const waived = missingLinkIsWaived(edge);
-    const editorOpen = waiverEditorKey === edgeKey;
-    const justificationReady = waiverJustification.trim().length >= WAIVER_JUSTIFICATION_MIN_CHARS;
-    return (
-      <div key={edgeKey} className={panelStyles.graphMissingLinkRow} data-testid="graph-missing-link-row">
-        <div className={panelStyles.graphMissingLinkMeta}>
-          <span className={panelStyles.graphMissingLinkPath}>
-            {edge.relation}: {edge.sourceCandidateId} → {edge.targetCandidateId}
-          </span>
-          {waived ? (
-            <span className={panelStyles.graphMissingLinkWaivedBadge} data-testid="graph-missing-link-waived">
-              {lang === "zh" ? "已豁免" : "waived"}
-            </span>
-          ) : null}
-          {!waived && workflowRunId ? (
-            <VNativeButton
-              data-testid="graph-missing-link-waive"
-              className={panelStyles.graphMissingLinkWaiveButton}
-              disabled={waiverPending}
-              title={lang === "zh" ? "人工确认接受该缺口（需理由，缺口仍保留计数）" : "Accept this gap with a confirmed waiver (justification required; the gap stays counted)"}
-              onClick={() => openWaiverEditor(edge)}
-            >
-              {lang === "zh" ? "豁免" : "Waive"}
-            </VNativeButton>
-          ) : null}
-        </div>
-        {editorOpen ? (
-          <div className={panelStyles.graphMissingLinkEditor} data-testid="graph-missing-link-editor">
-            <VNativeInput
-              aria-label={lang === "zh" ? "豁免理由" : "Waiver justification"}
-              placeholder={lang === "zh"
-                ? `填写豁免理由（至少 ${WAIVER_JUSTIFICATION_MIN_CHARS} 字，写入审计）`
-                : `Justification (min ${WAIVER_JUSTIFICATION_MIN_CHARS} chars, audited)`}
-              value={waiverJustification}
-              disabled={waiverPending}
-              onChange={(event) => setWaiverJustification(event.target.value)}
-            />
-            <div className={panelStyles.graphMissingLinkMeta}>
-              <VNativeButton
-                data-testid="graph-missing-link-waive-confirm"
-                disabled={waiverPending || !justificationReady}
-                onClick={() => void submitWaiver(edge)}
-              >
-                {lang === "zh" ? "确认豁免" : "Confirm waiver"}
-              </VNativeButton>
-              <VNativeButton disabled={waiverPending} onClick={closeWaiverEditor}>
-                {lang === "zh" ? "取消" : "Cancel"}
-              </VNativeButton>
-            </div>
-            {waiverError ? (
-              <div role="alert" data-testid="graph-missing-link-error" className={panelStyles.graphMissingLinkError}>
-                {waiverError}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-    );
-  };
 
   const graphForSelectedSourceRun =
       selectedSourceCollectionRunEffectiveId && sourceCollectionGraphProjection
@@ -271,31 +149,13 @@ export function TeamSourceCollectionGraphWorkspacePanel(props: TeamSourceCollect
     : null;
   const pagedGraphNodes = sourceCollectionPageItems("relations", visibleGraph?.nodes ?? []);
   const missingLinksSection = (visibleGraph?.missingLinks.length ?? 0) > 0 ? (
-    <section
-      data-testid="graph-missing-links"
-      aria-label={lang === "zh" ? "缺口清单与豁免" : "Missing links and waivers"}
-      className={panelStyles.graphMissingLinkSection}
-    >
-      <div className={panelStyles.graphMissingLinkMeta}>
-        <strong>{lang === "zh" ? "缺口" : "Missing links"}</strong>
-        <span className={panelStyles.graphMissingLinkHint}>
-          {lang === "zh"
-            ? "豁免 = 人工接受该缺口（需理由审计）；缺口计数保留，不放宽门禁。"
-            : "Waiver = human acceptance with an audited justification; the gap stays counted and the gate is not loosened."}
-        </span>
-        {!workflowRunId ? (
-          <span className={panelStyles.graphMissingLinkHint}>
-            {lang === "zh" ? "缺少正式运行上下文，暂不能登记豁免。" : "No formal run context; waivers are unavailable here."}
-          </span>
-        ) : null}
-      </div>
-      {visibleGraph?.missingLinks.map(renderMissingLinkWaiverRow)}
-      {waiverNotice ? (
-        <div role="status" data-testid="graph-missing-link-notice" className={panelStyles.graphMissingLinkNotice}>
-          {waiverNotice}
-        </div>
-      ) : null}
-    </section>
+    <MissingLinkWaiverSection
+      lang={lang}
+      teamId={teamId}
+      childWorkflowRunId={workflowRunId}
+      graph={visibleGraph}
+      refetchGraph={teamWorkflowCandidateGraphQuery.refetch}
+    />
   ) : null;
   const graphNodeCards = visibleGraph?.nodes.length ? pagedGraphNodes.items.map((node) => {
     const candidate = teamWorkflowCandidatesById.get(node.candidateId) ?? null;
