@@ -25,7 +25,7 @@ select {
 .fg-preview {
   min-height: 100vh;
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent-cool) 4%, var(--bg-canvas)), var(--bg-canvas) 260px),
+    var(--vui-gradient-preview-canvas),
     var(--bg-canvas);
   color: var(--fg-primary);
 }
