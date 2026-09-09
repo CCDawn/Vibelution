@@ -1,4 +1,6 @@
-import { VButton, VStateSurface } from "../../../components/vui";
+import { useState } from "react";
+
+import { VButton, VErrorSummary, VStateSurface } from "../../../components/vui";
 import type { CommandOffer } from "../../../api/types/research-workflow/commands";
 import type { TeamWorkflowCandidateListPayload } from "../../../api/types";
 import { fetchTeamWorkflowCandidates } from "../../../api/teamExperiment";
@@ -25,12 +27,19 @@ export function KnowledgeChildNodeInspector(props: {
   const run = useResearchWorkflowRun(props.teamId, props.runId);
   const detail = useNodeDetailState(props.teamId, props.runId, props.nodeId, run.lastSequence);
   const command = useResearchWorkflowCommand(props.teamId, props.runId, props.nodeId);
+  // 缺陷㉑: a rejected command offer (412 node_not_ready 等) must be visible to
+  // the operator. The transport already folds the structured 412 blockers
+  // (title + detail) into the error message, so surfacing `commandError`
+  // verbatim keeps the actionable text. The last offer is kept so the surface
+  // can offer a real retry instead of a dead error line.
+  const [lastOffer, setLastOffer] = useState<CommandOffer | null>(null);
   const handoffs = useQuery({
     queryKey: queryKeys.researchWorkflowHandoffs(props.runId, props.teamId),
     queryFn: () => fetchResearchWorkflowHandoffs(props.runId, { teamId: props.teamId }),
     enabled: Boolean(props.runId),
   });
   const submit = async (offer: CommandOffer) => {
+    setLastOffer(offer);
     try {
       await command.submit(offer);
     } finally {
@@ -46,18 +55,43 @@ export function KnowledgeChildNodeInspector(props: {
   </VStateSurface>;
   if (detail.state.kind !== "ready") return <VStateSurface tone="loading"
     title={props.lang === "zh" ? "加载知识节点" : "Loading knowledge node"} />;
-  return <ResearchProcessNodeInspector
-    teamId={props.teamId}
-    nodeId={props.nodeId}
-    adapter={getNodeAdapter(props.nodeId)}
-    detail={detail.state.detail}
-    effectiveBindings={null}
-    budget={null}
-    handoffs={handoffsForNode(handoffs.data?.handoffs ?? [], props.nodeId)}
-    handoffPending={Boolean(run.run?.humanTasks?.some((task) => task.nodeId === props.nodeId && task.status === "pending"))}
-    busy={command.busy || run.busy}
-    onOffer={submit}
-  />;
+  const commandErrorActions = <>
+    {lastOffer ? (
+      <VButton
+        variant="secondary"
+        density="compact"
+        isPending={command.busy}
+        onClick={() => { void submit(lastOffer); }}
+      >
+        {props.lang === "zh" ? "重试命令" : "Retry command"}
+      </VButton>
+    ) : null}
+    <VButton variant="ghost" density="compact" onClick={command.clearCommandError}>
+      {props.lang === "zh" ? "清除" : "Dismiss"}
+    </VButton>
+  </>;
+  return <>
+    {command.commandError ? (
+      <VErrorSummary
+        data-testid="knowledge-child-command-error"
+        label={props.lang === "zh" ? "命令提交失败" : "Command failed"}
+        summary={command.commandError}
+        actions={commandErrorActions}
+      />
+    ) : null}
+    <ResearchProcessNodeInspector
+      teamId={props.teamId}
+      nodeId={props.nodeId}
+      adapter={getNodeAdapter(props.nodeId)}
+      detail={detail.state.detail}
+      effectiveBindings={null}
+      budget={null}
+      handoffs={handoffsForNode(handoffs.data?.handoffs ?? [], props.nodeId)}
+      handoffPending={Boolean(run.run?.humanTasks?.some((task) => task.nodeId === props.nodeId && task.status === "pending"))}
+      busy={command.busy || run.busy}
+      onOffer={submit}
+    />
+  </>;
 }
 
 /** Read surfaces retain the selected child run; no parent-run commands. */
