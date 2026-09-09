@@ -133,7 +133,24 @@ async function renderModelDetails(models: ConfigCatalogModel[], options: {liveRe
 }
 
 describe("ConfigProviderRegistryPanel", () => {
-  it("edits a service without allocating another desktop pane and exits before route editing", async () => {
+  it("adds only discovered models matching the current search", async () => {
+    const models = [model("alpha", "observed"), model("beta", "observed")];
+    const onPin = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    await act(async () => root.render(<ProviderModelsTab provider={provider(models)} disabled={false}
+      modelQuery="alpha" modelFilter="discovered" liveReferenceCountByModelRef={{}}
+      onQueryChange={() => {}} onFilterChange={() => {}} onPin={onPin} onUnpin={() => {}}
+      onTestModel={() => {}} onProbeImageInput={() => {}} />));
+    const bulk = container.querySelector<HTMLButtonElement>('[data-model-action="pin-all"]');
+    expect(bulk?.textContent).toContain("添加当前结果（1）");
+    await act(async () => bulk!.click());
+    expect(onPin).toHaveBeenCalledWith("relay_a", [models[0]]);
+  });
+
+  it("keeps address editing in the same service dialog", async () => {
     const onSaveContextWindow = vi.fn();
     const onEditRoute = vi.fn();
     const container = document.createElement("div");
@@ -150,7 +167,7 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(onSaveContextWindow).toHaveBeenCalledWith("relay_a", 128000);
     await act(async () => dialog!.querySelector<HTMLButtonElement>('[data-provider-action="route"]')!.click());
     expect(onEditRoute).toHaveBeenCalledWith("relay_a");
-    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
   });
 
   it("renders a searchable model toolbar with status counts", () => {
@@ -163,35 +180,35 @@ describe("ConfigProviderRegistryPanel", () => {
     const markup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...panelProps(models)} />);
 
     expect(markup).toContain('aria-label="搜索模型"');
-    expect(markup).toContain("搜索 modelRef、Upstream ID 或名称");
+    expect(markup).toContain("搜索模型名称或 ID");
     expect(markup).toContain("全部 3");
-    expect(markup).toContain("已固定 1");
-    expect(markup).toContain("已发现 1");
-    expect(markup).toContain("不可用 1");
+    expect(markup).toContain("已添加 1");
+    expect(markup).toContain("添加模型 1");
+    expect(markup).not.toContain("不可用 1");
     expect(markup).toContain('aria-pressed="true"');
   });
 
   it("renders pin controls for discovered models and bulk pin banner", async () => {
     const observedMarkup = await renderModelDetails([model("observed", "observed")]);
-    expect(observedMarkup).toContain("固定到配置");
-    expect(renderModels([model("observed", "observed")])).toContain("固定全部已发现");
+    expect(observedMarkup).toContain("添加到模型库");
+    expect(renderModels([model("observed", "observed")], { filter: "discovered" })).toContain("添加当前结果");
     expect(observedMarkup).toContain('data-model-action="pin"');
-    expect(renderModels([model("observed", "observed")])).toContain('data-model-action="pin-all"');
-    expect(observedMarkup).not.toContain("取消固定");
+    expect(renderModels([model("observed", "observed")], { filter: "discovered" })).toContain('data-model-action="pin-all"');
+    expect(renderModels([model("observed", "observed")], { filter: "pinned" })).not.toContain('data-model-action="pin-all"');
+    expect(observedMarkup).not.toContain("从模型库移除");
     expect(observedMarkup).not.toContain("测试调用");
     expect(observedMarkup).toContain("验证推理 low / high");
-    expect(renderModels([model("disabled", "disabled")])).toContain("不可用");
-    expect(renderModels([model("disabled", "disabled")])).not.toContain("取消固定");
+    expect(renderModels([model("disabled", "disabled")])).toContain("已禁用");
+    expect(renderModels([model("disabled", "disabled")])).not.toContain("从模型库移除");
 
     const pinned = model("pinned", "pinned");
     const inUseMarkup = await renderModelDetails([pinned], { liveReferences: { [pinned.modelRef]: 2 } });
     expect(inUseMarkup).toContain("使用中 · 2 个引用");
-    expect(inUseMarkup).not.toContain("取消固定");
+    expect(inUseMarkup).not.toContain("从模型库移除");
 
     expect(renderModels([pinned])).toContain("测试调用");
-    expect(await renderModelDetails([pinned])).toContain("取消固定");
+    expect(await renderModelDetails([pinned])).toContain("从模型库移除");
     expect(observedMarkup).not.toContain("发现 1 个可固定模型");
-    expect(observedMarkup).not.toContain("「发现」不等于已入库");
   });
 
   it("exposes a per-model image input capability probe with current-state copy", async () => {
@@ -257,7 +274,7 @@ describe("ConfigProviderRegistryPanel", () => {
   });
 
   it("distinguishes an empty directory from filtered no results", () => {
-    expect(renderModels([])).toContain("该 Provider 暂无模型");
+    expect(renderModels([])).toContain("还没有模型目录");
     expect(renderModels([model("alpha", "observed")], { query: "missing" })).toContain("没有匹配的模型");
   });
 
@@ -269,7 +286,7 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(markup).not.toContain("reasoning: 未声明");
     expect(markup).toContain("详情");
     expect(markup).not.toContain("unknown · 未观测");
-    expect(panelStyles.tableScroll).toContain("h-full");
+    expect(panelStyles.tableScroll).toContain("min-h-0");
     expect(panelStyles.tableScroll).not.toContain("max-h-[calc(100dvh-33rem)]");
     expect(panelStyles.tableScroll).toContain("overflow-auto");
     expect(panelStyles.table).not.toContain("min-w-[820px]");
@@ -291,11 +308,11 @@ describe("ConfigProviderRegistryPanel", () => {
   it("fills the desktop workspace with large Provider rows and a bottom danger zone", () => {
     expect(panelStyles.sectionSurface).toContain("h-full");
     expect(panelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(18rem,24vw,22rem)]");
-    expect(panelStyles.providerList).toContain("h-full");
-    expect(panelStyles.providerButton).toContain("!min-h-[3.5rem]");
+    expect(panelStyles.providerList).toContain("min-h-0");
+    expect(panelStyles.providerButton).toContain("!min-h-16");
     expect(panelStyles.providerLabel).toContain("whitespace-normal");
     expect(panelStyles.providerLabel).toContain("break-words");
-    expect(panelStyles.inspectorPanel).toContain("max-h-[65vh]");
+    expect(panelStyles.inspectorPanel).toContain("max-h-[72vh]");
     expect(panelStyles.detailBody).toContain("min-h-0");
     expect(panelSource).toContain('data-provider-action="edit-asset"');
     expect(panelSource).toContain('data-provider-danger-zone="true"');
@@ -306,15 +323,10 @@ describe("ConfigProviderRegistryPanel", () => {
   it("keeps selected provider cards readable and parks help copy on hover", () => {
     expect(panelSource).not.toContain('variant={selected ? "primary" : "ghost"}');
     expect(panelSource).toContain('variant="ghost"');
-    expect(panelStyles.providerRow).toContain("!bg-[color-mix(in_srgb,var(--accent-cool)_14%,var(--vui-surface-row))]");
-    expect(panelStyles.providerRow).toContain("data-[active=true]:[&_.providerLabel]:!text-vui-fg-primary");
-    expect(panelSource).toContain("左栏默认只显示可用服务");
-    expect(panelSource).toContain('tooltip="左栏默认只显示可用服务');
     expect(panelSource).not.toContain("styles.workspaceLead");
     expect(panelSource).not.toContain("styles.connectionLead");
     expect(panelSource).not.toContain("styles.pinBannerCopy");
     expect(panelSource).not.toContain("styles.modelFilterHint");
-    expect(panelSource).toContain("「发现」不等于已入库");
   });
 
   it("resets local model tools from the actual rendered Provider identity", () => {
@@ -339,8 +351,8 @@ describe("ConfigProviderRegistryPanel", () => {
     const markup = renderToStaticMarkup(
       <ConfigProviderRegistryPanel {...panelProps([])} />,
     );
-    expect(markup).toContain("编辑");
-    expect(markup).toContain("服务与模型");
+    expect(markup).toContain("连接设置");
+    expect(markup).toContain("已配置服务");
   });
 
   it("collapses abnormal services and surfaces a strong save prompt when draft is dirty", () => {
@@ -354,8 +366,8 @@ describe("ConfigProviderRegistryPanel", () => {
     const collapsed = renderToStaticMarkup(
       <ConfigProviderRegistryPanel {...panelProps([], { rows: [healthy, broken] })} />,
     );
-    expect(collapsed).toContain("可用服务");
-    expect(collapsed).toContain("异常服务 · 1");
+    expect(collapsed).toContain("已配置服务");
+    expect(collapsed).toContain("需要处理 · 1");
     expect(collapsed).toContain('data-abnormal-expanded="false"');
     expect(collapsed).toContain("Relay A");
     expect(collapsed).not.toContain("Broken Relay");
@@ -372,9 +384,8 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(dirty).toContain('data-save-prompt="pending"');
     expect(dirty).toContain("有未保存的模型配置");
     expect(dirty).toContain("保存到外部配置");
-    expect(dirty).toContain("有未保存修改");
     // savePrompt must not steal the 1fr row from the workspace when present
-    expect(panelStyles.sectionSurface).toContain("[&:has(>_.savePrompt)]:[grid-template-rows:auto_auto_minmax(0,1fr)]");
+    expect(panelStyles.sectionSurface).toContain("[&:has(>_.savePrompt)]:grid-rows-[auto_minmax(0,1fr)]");
     expect(panelStyles.savePrompt).toContain("shrink-0");
   });
 
@@ -432,6 +443,6 @@ describe("ConfigProviderRegistryPanel", () => {
       <ConfigProviderRegistryPanel {...panelProps([], { rows: [timedOut] })} />,
     );
     expect(markup).toContain("discovery_failed");
-    expect(markup).toContain("编辑");
+    expect(markup).toContain("连接设置");
   });
 });

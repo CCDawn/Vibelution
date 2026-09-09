@@ -8,7 +8,6 @@ import {
   VStateSurface,
   VStatusChip,
   VStringSelect,
-  VTooltip,
 } from "../components/vui";
 import {
   initialProviderWizardState,
@@ -53,27 +52,29 @@ function templateServiceClass(template: ConfigProviderPresetOption): string {
   return "self_hosted";
 }
 
-function templateToProvider(template: ConfigProviderPresetOption): ProviderWizardState {
+export function templateToProvider(template: ConfigProviderPresetOption): ProviderWizardState {
   const provider = asRecord(template.provider);
+  const model = asRecord(template.default_model);
   const protocols = asRecord(provider.protocols);
   const deployment = asRecord(provider.deployment);
-  const credentialRef = asString(provider.credential_ref) || "none";
+  const credentialRef = asString(provider.credential_ref);
   const rawAuthKind = asString(provider.auth_kind);
   const authKind: ProviderAuthKind = rawAuthKind === "none" || rawAuthKind === "oauth" || rawAuthKind === "api_key"
     ? rawAuthKind
-    : credentialRef === "none" ? "none" : "api_key";
+    : provider.requires_api_key === false || provider.requires_credential === false || credentialRef === "none"
+      ? "none" : "api_key";
   const allowedProtocols = asStringArray(protocols.allowed);
-  const defaultProtocol = asString(protocols.default) || allowedProtocols[0] || "responses";
+  const defaultProtocol = asString(protocols.default) || allowedProtocols[0] || asString(model.transport) || "chat_completions";
   return {
     ...initialProviderWizardState(),
     templateId: template.provider_preset_id,
     serviceClass: templateServiceClass(template),
     providerId: template.provider_id,
     label: template.label,
-    baseUrl: asString(provider.base_url),
+    baseUrl: asString(provider.base_url).includes(".example.com") ? "" : asString(provider.base_url),
     authKind,
     credentialRef: authKind === "none" ? "none" : credentialRef,
-    driver: asString(provider.driver),
+    driver: asString(provider.driver) || (defaultProtocol === "anthropic_messages" ? "anthropic" : defaultProtocol === "gemini_generate_content" ? "gemini" : "openai"),
     defaultProtocol,
     allowedProtocols: allowedProtocols.length ? allowedProtocols : [defaultProtocol],
     runtimeFramework: asString(deployment.runtime_framework),
@@ -115,6 +116,7 @@ export function ConfigQuickSetupPanel({
   const selectedTemplate = templates.find((template) => template.provider_preset_id === state.provider.templateId);
   const canDetect = Boolean(
     state.provider.templateId
+    && state.provider.baseUrl.trim()
     && (state.provider.authKind === "none" || credentialValue.trim())
     && !disabled
     && state.phase !== "checking"
@@ -140,13 +142,15 @@ export function ConfigQuickSetupPanel({
     : state.phase === "review"
       ? `推荐理由：${state.recommendationReason || "等待选择"}`
       : state.phase === "success"
-        ? "当前模型连接已经保存并同步。"
+        ? "模型已保存，可在 Agent 配置中选择使用。"
         : "保持当前页面，完成后会在这里显示结果。";
   const credentialHint = "凭据只用于本次本地检测；确认前不会写入正式配置。";
   const detectDisabledReason = disabled
     ? "当前配置暂不可编辑。"
     : !state.provider.templateId
       ? "先选择服务商。"
+      : !state.provider.baseUrl.trim()
+        ? "先填写服务地址。"
       : state.provider.authKind !== "none" && !credentialValue.trim()
         ? "先填写 API Key。"
         : state.phase === "checking" || state.phase === "saving"
@@ -159,7 +163,6 @@ export function ConfigQuickSetupPanel({
       aria-labelledby="provider-quick-setup-title"
       eyebrow="Model connection"
       title="连接一个模型服务"
-      meta="约 1 分钟"
       tooltip="选择服务商并填写凭据，系统会自动发现模型并给出默认推荐。"
       tooltipLabel="快速模型连接说明"
     >
@@ -171,7 +174,7 @@ export function ConfigQuickSetupPanel({
               <VStringSelect
                 ariaLabel="选择服务商"
                 value={state.provider.templateId}
-                placeholder="选择 Provider 模板"
+                placeholder="选择服务商或自定义服务"
                 isDisabled={disabled || state.phase === "checking" || state.phase === "saving"}
                 options={templates.map((template) => ({
                   value: template.provider_preset_id,
@@ -185,6 +188,15 @@ export function ConfigQuickSetupPanel({
               />
             </label>
 
+            {selectedTemplate ? (
+              <label className={styles.field}>
+                <span>服务地址</span>
+                <VInput type="url" value={state.provider.baseUrl} disabled={disabled || state.phase === "checking" || state.phase === "saving"}
+                  placeholder="https://你的服务地址/v1"
+                  onChange={(event) => onProviderChange({ ...state.provider, baseUrl: event.target.value })} />
+              </label>
+            ) : null}
+
             {state.provider.authKind === "none" ? (
               <div className={styles.field}>
                 <span>凭据</span>
@@ -196,16 +208,15 @@ export function ConfigQuickSetupPanel({
             ) : (
               <label className={styles.field}>
                 <span>API Key</span>
-                <VTooltip content={credentialHint} width="wide">
                   <VInput
                     type="password"
+                    title={credentialHint}
                     autoComplete="new-password"
                     value={credentialValue}
                     disabled={disabled || state.phase === "checking" || state.phase === "saving"}
                     placeholder="仅用于本次本地配置请求"
                     onChange={(event) => onCredentialChange(event.target.value)}
                   />
-                </VTooltip>
               </label>
             )}
 
@@ -215,7 +226,7 @@ export function ConfigQuickSetupPanel({
                 variant="primary"
                 icon={<Search size={14} />}
                 isDisabled={!canDetect}
-                tooltip="自动检测服务端点、协议和模型目录，不会直接写入正式配置。"
+                title="自动检测服务端点、协议和模型目录，不会直接写入正式配置。"
                 disabledReason={detectDisabledReason}
                 onPress={() => onDetect({ provider: state.provider, credentialValue })}
               >
@@ -228,12 +239,24 @@ export function ConfigQuickSetupPanel({
             <summary className={styles.advancedSummary}>高级参数</summary>
             <div className={styles.advancedGrid}>
               <label className={styles.field}>
-                <span>服务端点</span>
-                <VInput value={state.provider.baseUrl} readOnly />
+                <span>协议</span>
+                <VStringSelect ariaLabel="连接协议" value={state.provider.defaultProtocol}
+                  isDisabled={disabled || state.phase === "checking" || state.phase === "saving"}
+                  options={[
+                    { value: "chat_completions", label: "OpenAI Chat Completions（兼容接口）" },
+                    { value: "responses", label: "OpenAI Responses" },
+                    { value: "anthropic_messages", label: "Anthropic Messages" },
+                    { value: "gemini_generate_content", label: "Gemini" },
+                  ]}
+                  onValueChange={(protocol) => onProviderChange({ ...state.provider, defaultProtocol: protocol, allowedProtocols: [protocol],
+                    driver: protocol === "anthropic_messages" ? "anthropic" : protocol === "gemini_generate_content" ? "gemini" : "openai" })} />
               </label>
               <label className={styles.field}>
-                <span>协议</span>
-                <VInput value={state.provider.defaultProtocol} readOnly />
+                <span>认证方式</span>
+                <VStringSelect ariaLabel="认证方式" value={state.provider.authKind}
+                  isDisabled={disabled || state.phase === "checking" || state.phase === "saving"}
+                  options={[{ value: "api_key", label: "API Key" }, { value: "none", label: "无需认证（仅限服务明确支持）" }]}
+                  onValueChange={(authKind) => onProviderChange({ ...state.provider, authKind: authKind as ProviderAuthKind, credentialRef: authKind === "none" ? "none" : "" })} />
               </label>
             </div>
           </details>

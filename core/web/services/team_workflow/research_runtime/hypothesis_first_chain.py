@@ -708,16 +708,55 @@ def selection_version_for(
     )[:24]
 
 
+# Parsed-ledger memoization. The chain ledger grows to megabyte-scale and the
+# recovery sweeps re-read it many times per pass; re-parsing the whole file on
+# every read starved the backend's CPU (defect 18: one recovery thread holding
+# the GIL in ``json.loads`` for minutes, HTTP dead). Reads are therefore cached
+# per storage path and validated by ``(st_mtime_ns, st_size)``: any writer —
+# this module's ``_append_jsonl`` / ``_rewrite_jsonl``, another process, or an
+# external tool — changes at least the size, so the next read re-parses.
+# ``append_jsonl_locked`` replaces the file atomically (fresh mtime, larger
+# size), so the stat check alone invalidates correctly; the in-module writers
+# additionally drop their entry eagerly to keep the invariant local. Record
+# dicts are shared parsed snapshots and must stay immutable; callers receive a
+# shallow list copy so cache structure can never be mutated through a result.
+_RECORDS_CACHE: dict[Path, tuple[int, int, list[dict[str, Any]]]] = {}
+_RECORDS_CACHE_MAX_ENTRIES = 64
+
+
+def _records_cache_stamp(path: Path) -> tuple[int, int] | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return (stat.st_mtime_ns, stat.st_size)
+
+
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     from core.web.services.team_workflow.storage_durability import read_jsonl_tolerant
 
-    return read_jsonl_tolerant(path)
+    with _LOCK:
+        stamp = _records_cache_stamp(path)
+        if stamp is not None:
+            cached = _RECORDS_CACHE.get(path)
+            if cached is not None and (cached[0], cached[1]) == stamp:
+                return list(cached[2])
+        records = read_jsonl_tolerant(path)
+        if stamp is None:
+            _RECORDS_CACHE.pop(path, None)
+        else:
+            if len(_RECORDS_CACHE) >= _RECORDS_CACHE_MAX_ENTRIES:
+                _RECORDS_CACHE.clear()
+            _RECORDS_CACHE[path] = (stamp[0], stamp[1], records)
+        return list(records)
 
 
 def _append_jsonl(path: Path, record: dict[str, Any]) -> None:
     from core.web.services.team_workflow.storage_durability import append_jsonl_locked
 
     append_jsonl_locked(path, record)
+    with _LOCK:
+        _RECORDS_CACHE.pop(path, None)
 
 
 def _latest_by_id(
@@ -740,6 +779,8 @@ def _rewrite_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
         for record in records
     )
     atomic_write_text(path, payload)
+    with _LOCK:
+        _RECORDS_CACHE.pop(path, None)
 
 
 def _latest_records(records: list[dict[str, Any]], field: str) -> dict[str, dict[str, Any]]:
@@ -1060,6 +1101,7 @@ def reset_question_chain(
 
 
 def _records(team_id: str) -> list[dict[str, Any]]:
+    """Parsed chain ledger for one team (memoized on file mtime + size)."""
     with _LOCK:
         return _read_jsonl(_storage_path(team_id))
 
@@ -3623,10 +3665,18 @@ def auto_retry_blocked_formal_nodes(
 _FENCED_REVIEW_REDRIVE_INFLIGHT: dict[tuple[str, str], object] = {}
 _CLOSED_GENERATION_RETRY_INFLIGHT: dict[tuple[str, str], object] = {}
 
+# GIL courtesy between serial sweep iterations (defect 18): a restart-time
+# drain walks many fenced meetings/questions in one pass; a tiny sleep lets
+# the asyncio loop and HTTP handlers run between iterations instead of the
+# recovery thread monopolizing a core for minutes. Scheduling only — the
+# per-iteration decisions and their order are unchanged.
+_SWEEP_ITERATION_YIELD_SECONDS = 0.002
+
 
 def _fenced_review_redrive_plan(
     team_id: str,
     meeting: Mapping[str, Any],
+    records: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     """Resolve the redrive plan for one fenced, discussion-complete review meeting.
 
@@ -3635,7 +3685,10 @@ def _fenced_review_redrive_plan(
     this meeting still owns the newest attempt for every candidate — a newer
     attempt means the fence was already redriven and a second hop would
     duplicate the round.  The attempt cap reuses ``HARD_ROUND_LIMIT`` so a
-    dispatch identity cannot loop forever.
+    dispatch identity cannot loop forever.  ``records`` optionally carries a
+    ledger snapshot taken once per sweep pass (read acquisition only; the
+    decision below is unchanged and the dispatch itself re-validates against
+    fresh state).
     """
 
     from core.web.services.team_workflow import meeting_rounds
@@ -3651,7 +3704,7 @@ def _fenced_review_redrive_plan(
     link = next(
         (
             dict(item)
-            for item in list_review_round_links(team_id).get("links") or []
+            for item in list_review_round_links(team_id, records=records).get("links") or []
             if str(item.get("meetingRoundId") or "").strip() == meeting_round_id
         ),
         {},
@@ -3675,7 +3728,7 @@ def _fenced_review_redrive_plan(
     if not candidate_ids:
         return None
     round_index = int(link.get("roundIndex") or 0)
-    records = _records(team_id)
+    records = records if records is not None else _records(team_id)
     eligible: list[str] = []
     attempt_number = 0
     for candidate_id in candidate_ids:
@@ -3718,6 +3771,7 @@ def auto_redrive_fenced_review_meeting(
     team_id: str,
     *,
     question_id: str,
+    records: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Auto-execute the retry-review-dispatch recovery for one fenced review.
 
@@ -3736,7 +3790,10 @@ def auto_redrive_fenced_review_meeting(
     at most one meeting per call (one hop per sweep per question), capped by
     ``HARD_ROUND_LIMIT`` attempts per identity.  Best-effort: nothing raises;
     every outcome lands as a ``hypothesis_first.auto_redrive_fenced_review``
-    scene event.
+    scene event.  ``records`` optionally carries the ledger snapshot taken
+    once per sweep pass so plan construction for many fenced meetings does
+    not re-parse the whole chain file per meeting; the dispatch itself keeps
+    reading fresh state.
     """
 
     normalized_team_id = str(team_id or "").strip()
@@ -3758,7 +3815,9 @@ def auto_redrive_fenced_review_meeting(
         if str(meeting.get("status") or "").strip().lower() == "closed"
         and _is_auto_recoverable_execution_stop(meeting)
     ]
-    for meeting in meetings:
+    for meeting_index, meeting in enumerate(meetings):
+        if meeting_index:
+            time.sleep(_SWEEP_ITERATION_YIELD_SECONDS)
         summary["fenced"] += 1
         meeting_round_id = str(meeting.get("meetingRoundId") or "").strip()
         inflight_key = (normalized_team_id, meeting_round_id)
@@ -3769,7 +3828,9 @@ def auto_redrive_fenced_review_meeting(
             summary["skipped"] += 1
             continue
         try:
-            plan = _fenced_review_redrive_plan(normalized_team_id, meeting)
+            plan = _fenced_review_redrive_plan(
+                normalized_team_id, meeting, records=records
+            )
             if plan is None:
                 summary["skipped"] += 1
                 continue
@@ -3928,7 +3989,9 @@ def auto_retry_fenced_generation_attempt(
         if str(meeting.get("status") or "").strip().lower() == "closed"
         and _is_auto_recoverable_execution_stop(meeting)
     ]
-    for meeting in meetings:
+    for meeting_index, meeting in enumerate(meetings):
+        if meeting_index:
+            time.sleep(_SWEEP_ITERATION_YIELD_SECONDS)
         summary["fenced"] += 1
         meeting_round_id = str(meeting.get("meetingRoundId") or "").strip()
         inflight_key = (normalized_team_id, meeting_round_id)
@@ -5443,11 +5506,20 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
     for team_id in team_ids:
         summary["teams"] += 1
         try:
-            question_ids = question_ids_with_chain_records(team_id)
+            # One ledger read per team per sweep pass: the redrive plan
+            # construction below receives this snapshot instead of re-parsing
+            # the whole chain file per meeting/question (defect 18). Mutation
+            # steps still read fresh state through the memoized reader.
+            team_records = _records(team_id)
+            question_ids = question_ids_with_chain_records(
+                team_id, records=team_records
+            )
         except Exception:  # noqa: BLE001 - one broken team cannot stop the sweep
             summary["skipped"] += 1
             continue
-        for question_id in question_ids:
+        for question_index, question_id in enumerate(question_ids):
+            if question_index:
+                time.sleep(_SWEEP_ITERATION_YIELD_SECONDS)
             summary["questions"] += 1
             try:
                 # Step zero, before adjudication: approve landed review and
@@ -5530,7 +5602,7 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
                 # whose discussion really completed (the offer 068c92ba5 made
                 # executable, now driven automatically, one hop per pass).
                 fenced_review = auto_redrive_fenced_review_meeting(
-                    team_id, question_id=question_id
+                    team_id, question_id=question_id, records=team_records
                 )
                 summary["fencedReviewsRedriven"] += int(
                     fenced_review.get("redriven") or 0
@@ -5584,14 +5656,18 @@ def _team_ids_with_chain_storage() -> list[str]:
     return sorted(set(team_ids))
 
 
-def question_ids_with_chain_records(team_id: str) -> list[str]:
+def question_ids_with_chain_records(
+    team_id: str,
+    records: list[dict[str, Any]] | None = None,
+) -> list[str]:
     """Question ids present in one team's chain ledger (read-only scan).
 
     Reset questions have no remaining chain records, so a reset can never be
     resurrected from history.  Used by the maintenance sweep as the cheap
-    enumeration step before the per-question guards run.
+    enumeration step before the per-question guards run.  ``records``
+    optionally supplies the ledger snapshot the sweep already parsed.
     """
-    records = _read_jsonl(_storage_path(team_id))
+    records = records if records is not None else _records(team_id)
     question_ids = {
         str(item.get("questionId") or "").strip().upper()
         for item in records
@@ -7367,8 +7443,13 @@ def list_review_round_links(
     *,
     question_id: str = "",
     workflow_run_id: str = "",
+    records: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """List review-round lineage links ordered by round index."""
+    """List review-round lineage links ordered by round index.
+
+    ``records`` optionally supplies an already-parsed chain ledger snapshot
+    (same team) so sweep-pass callers avoid one full ledger read per call.
+    """
     from core.web.services.team_service import assert_team_exists
 
     normalized_team_id = assert_team_exists(team_id)
@@ -7376,7 +7457,9 @@ def list_review_round_links(
     normalized_workflow_run_id = str(workflow_run_id or "").strip()
     if normalized_workflow_run_id and not normalized_question_id:
         raise ContractValidationError("questionId is required when runId is provided")
-    links = _review_round_links(_records(normalized_team_id))
+    links = _review_round_links(
+        records if records is not None else _records(normalized_team_id)
+    )
     if normalized_question_id:
         links = [
             record

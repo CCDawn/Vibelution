@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { ConfigProviderPresetOption } from "../api/types";
-import { ConfigQuickSetupPanel, type ConfigQuickSetupPanelProps } from "./ConfigQuickSetupPanel";
+import { ConfigQuickSetupPanel, templateToProvider, type ConfigQuickSetupPanelProps } from "./ConfigQuickSetupPanel";
 import panelSource from "./ConfigQuickSetupPanel.tsx?raw";
 import styles from "./ConfigQuickSetupPanel.styles";
 import { initialProviderQuickSetupState, initialProviderWizardState } from "./configProviderLogic";
@@ -44,14 +44,25 @@ function props(overrides: Partial<ConfigQuickSetupPanelProps> = {}): ConfigQuick
 }
 
 describe("ConfigQuickSetupPanel", () => {
+  it("maps actual preset credential requirements instead of treating missing credential_ref as no auth", () => {
+    const preset = { ...templates[0], provider: { kind: "openai_compatible", requires_api_key: true, base_url: "https://relay.example.com/v1", api_key_env: "OPENAI_API_KEY" }, default_model: { transport: "chat_completions" } };
+    const provider = templateToProvider(preset);
+    expect(provider).toMatchObject({ authKind: "api_key", driver: "openai", baseUrl: "", defaultProtocol: "chat_completions" });
+    const markup = renderToStaticMarkup(<ConfigQuickSetupPanel {...props({ templates: [preset], state: { ...initialProviderQuickSetupState(), provider } })} />);
+    expect(markup).toContain('type="password"');
+    expect(markup).toContain('type="url"');
+    expect(markup).not.toContain('readonly');
+    expect(markup).toContain("先填写服务地址");
+    expect(templateToProvider({ ...preset, provider: { ...preset.provider, requires_api_key: false } }).authKind).toBe("none");
+  });
   it("uses a full-width desktop workspace and announces progressive feedback", () => {
     expect(styles.workspace).toContain("w-full");
-    expect(styles.workspace).toContain("max-w-none");
+    expect(styles.workspace).toContain("max-w-4xl");
     expect(styles.field).toContain("[&_[data-vui=select-trigger]]:!min-h-10");
     expect(styles.primaryAction).toContain("min-h-10");
     expect(styles.reviewActions).toContain("items-end");
     expect(panelSource).toContain('aria-live="polite"');
-    expect(panelSource).toContain("<VTooltip content={credentialHint}");
+    expect(panelSource).toContain("title={credentialHint}");
     expect(panelSource).toContain("disabledReason={detectDisabledReason}");
     expect(panelSource).not.toContain("<small className={styles.hint}>{credentialHint}</small>");
   });
