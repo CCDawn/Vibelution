@@ -176,7 +176,11 @@ def _merge_validated_candidate(root: Path, candidate: Path, *, expected_head: st
     binding = git_claim_guard.read_claim_binding(candidate)
     if binding is None:
         raise CandidateIntegrationError("候选缺少开发归属记录，请在受管 codex 分支完成候选验证后重试。")
-    if binding.branch != _git_text(candidate, "branch", "--show-current"):
+    if (
+        not binding.branch.startswith("codex/")
+        or Path(binding.worktree).resolve() != candidate.resolve()
+        or binding.branch != _git_text(candidate, "branch", "--show-current")
+    ):
         raise CandidateIntegrationError("候选分支与开发归属记录不匹配，禁止集成。")
     context = task_closeout.CloseoutContext(root, candidate, binding.branch)
     merged_sha = ""
@@ -200,7 +204,7 @@ def _merge_validated_candidate(root: Path, candidate: Path, *, expected_head: st
                 or _git_text(candidate, "rev-parse", "HEAD") != candidate_head
             ):
                 raise CandidateIntegrationError("stale_main: 主线或候选验证证据已变化，请重新评估候选。")
-            merged_sha = task_closeout.merge_ff_only(context, integration_claim_id=lease)
+            merged_sha = task_closeout.merge_ff_only(context, integration_claim_id=lease, target_sha=candidate_head)
         finally:
             try:
                 task_closeout.release_claim(context, lease, status="released", reason="Supervised integration finished")

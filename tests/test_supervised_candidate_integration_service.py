@@ -3,7 +3,6 @@ from __future__ import annotations
 import subprocess
 import sys
 from types import SimpleNamespace
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -18,19 +17,19 @@ def isolated_validation_authority(monkeypatch, tmp_path):
 
 def install_validation_authority(monkeypatch, tmp_path):
     """Model passed validation; keep the production permit and Git merge real."""
-    monkeypatch.setattr(service.git_claim_guard, "read_claim_binding", lambda candidate: SimpleNamespace(
-        branch=_git(candidate, "branch", "--show-current").stdout.strip(), claim_id="development-test", agent_id="test-owner",
-    ))
+    def binding(candidate):
+        branch = _git(candidate, "branch", "--show-current").stdout.strip()
+        if not branch.startswith("codex/"):
+            branch = "codex/isolated-candidate"
+            _git(candidate, "switch", "-c", branch)
+        return SimpleNamespace(branch=branch, worktree=str(candidate), claim_id="development-test", agent_id="test-owner")
+    monkeypatch.setattr(service.git_claim_guard, "read_claim_binding", binding)
     monkeypatch.setattr(service.task_closeout, "validate_development_claim", lambda *a, **kw: None)
     monkeypatch.setattr(service.task_closeout, "discover_manifest", lambda *a: tmp_path / "validated.json")
     monkeypatch.setattr(service.local_quality_gate, "verify_manifest", lambda *a: SimpleNamespace(outcome="passed", manifest_path=tmp_path / "validated.json"))
     monkeypatch.setattr(service.task_closeout, "acquire_integration_claim_with_retry", lambda *a, **kw: "integration-test")
     monkeypatch.setattr(service.task_closeout, "release_claim", lambda *a, **kw: None)
     monkeypatch.setattr(service.task_closeout, "complete_agent", lambda *a, **kw: None)
-    merge = service.task_closeout.merge_ff_only
-    monkeypatch.setattr(service.task_closeout, "merge_ff_only", lambda context, **kw: merge(
-        replace(context, branch="refs/vibelution/supervised-promote"), **kw,
-    ))
 
 
 def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -138,6 +137,38 @@ def test_candidate_changed_during_validation_is_not_promoted(tmp_path, monkeypat
     monkeypatch.setattr(service.task_closeout, "acquire_integration_claim_with_retry", acquire)
     with pytest.raises(service.CandidateIntegrationError, match="stale_main"):
         service._merge_validated_candidate(project, candidate, expected_head=base, candidate_head=frozen)
+    assert _git(project, "rev-parse", "HEAD").stdout.strip() == base
+
+
+def test_branch_advancing_after_validation_only_merges_approved_sha(tmp_path, monkeypatch):
+    project, candidate = tmp_path / "project", tmp_path / "candidate"
+    base = _init_repo(project)
+    approved = _candidate_worktree(project, candidate)
+    merge = service.task_closeout.merge_ff_only
+
+    def advance_then_merge(context, **kwargs):
+        (candidate / "agent.py").write_text("UNREVIEWED = True\n", encoding="utf-8")
+        _git(candidate, "add", "agent.py")
+        _git(candidate, "commit", "-m", "late unreviewed change")
+        return merge(context, **kwargs)
+
+    monkeypatch.setattr(service.task_closeout, "merge_ff_only", advance_then_merge)
+    service._merge_validated_candidate(project, candidate, expected_head=base, candidate_head=approved)
+    assert _git(project, "rev-parse", "HEAD").stdout.strip() == approved
+    assert _git(candidate, "rev-parse", "HEAD").stdout.strip() != approved
+    assert (project / "agent.py").read_text(encoding="utf-8") == "BASELINE = False\n"
+
+
+def test_mismatched_worktree_binding_cannot_integrate(tmp_path, monkeypatch):
+    project, candidate = tmp_path / "project", tmp_path / "candidate"
+    base = _init_repo(project)
+    approved = _candidate_worktree(project, candidate)
+    monkeypatch.setattr(service.git_claim_guard, "read_claim_binding", lambda *a: SimpleNamespace(
+        branch="codex/supervised-candidate", worktree=str(tmp_path / "another-candidate"),
+        claim_id="development-test", agent_id="test-owner",
+    ))
+    with pytest.raises(service.CandidateIntegrationError, match="归属记录不匹配"):
+        service._merge_validated_candidate(project, candidate, expected_head=base, candidate_head=approved)
     assert _git(project, "rev-parse", "HEAD").stdout.strip() == base
 
 

@@ -330,10 +330,10 @@ def prune_coordination(context: CloseoutContext) -> None:
     _coordination_call(context, "prune")
 
 
-def merge_ff_only(context: CloseoutContext, *, integration_claim_id: str) -> str:
+def merge_ff_only(context: CloseoutContext, *, integration_claim_id: str, target_sha: str | None = None) -> str:
     if gate.git_lines(context.main_root, "status", "--porcelain"):
         raise ManagedCloseoutError("dirty_main")
-    target_sha = gate.rev_parse(context.task_root, "HEAD")
+    target_sha = gate.rev_parse(context.task_root, target_sha or "HEAD")
     old_sha = gate.rev_parse(context.main_root, "HEAD")
     claim_guard.issue_main_permit(
         context.main_root,
@@ -343,7 +343,7 @@ def merge_ff_only(context: CloseoutContext, *, integration_claim_id: str) -> str
     )
     try:
         completed = gate.run_process(
-            ["git", "merge", "--ff-only", context.branch],
+            ["git", "merge", "--ff-only", target_sha],
             context.main_root,
         )
     finally:
