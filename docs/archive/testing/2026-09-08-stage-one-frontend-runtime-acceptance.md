@@ -159,3 +159,13 @@
 
 - ⑫ 修复（72f1af139）：`_handle_reconcile_run` 抽出 `_apply_ledger_reconcile_for_run` 复用核心；父落态后同事务级联 `reconciliation_required` 子 run（`KNOWLEDGE_SIDEFLOW_NODE_IDS` 重排、同款 auto_advance_not_ready 排除、同款落位梯 lands_blocked→BLOCKED/有活→RUNNING/零活→保持、子 run 版本递增 + reconciled run_blocked 事件含 parentRunId）。+5 测试（16 全绿，含幂等与 readiness 裁决保护）。
 - ⑪（19ae6ffad→rebase）：`evidence_graph_waiver` 服务 + `POST /api/research/workflow-runs/{run_id}/evidence-graph/missing-links/waive`（服务端 428 闭合 confirmed/理由≥8 字、404 族、operator scope、幂等 no-op 不改写审计）；写入走 knowledge_kernel 正规候选店面（同锁同 `sourceCollectionRunId` 权威 scope）；`missingLinkCount` 冻结、`waiverCount` 按读侧同口径重算——**门禁不放宽，只登记人工接受**；图工作台「缺口」行清单 + 豁免两段式交互（理由输入→确认），成功后 refetch。后端 18 测试 + 面板 5 测试绿；首版因 VUI 边界门（本地类常量/内联视觉串）打回返工，类串迁入兄弟 `.styles.ts` 后过门。
+
+### B.16 缺陷⑭：对账级联复活「已成功 attempt 绑定的死 dispatch」+ 僵尸 running attempt——reconcile 死循环（现场定案，修复中）
+
+- 复验环境：⑪⑫⑬ 合入（9e1946382/00ca5099b、72f1af139、2fa079183），rebuild-and-start，code-freshness=current。真实前端链：团队 → 选 SCI-009 → 继续运行 → formal 面板「对账运行」。
+- ⑫ 级联**半程生效**：子 run 事件 seq94 = `reconciled run_blocked {reconciled:true, revivedDispatchCount:1, activeWorkFound:true, reconciledStatus:"running", parentRunId:"run-332a539909a6"}`（复活 + 落位 + 事件 + 父唤醒全部按设计工作）；但 seq95 worker 重放该 dispatch 再次终态失败——**同一 `graph_dispatch_invalid` 回执身份失配**（expected ingestion-a2 时代前沿 vs got evidence_relations-a3），子 run 又被打回 reconciliation_required。对账→复活→重撞→再对账 = 死循环。
+- 两层耦合根因（live ledger 证据）：
+  1. 子 run 唯一 failed graph_dispatch（act-8ec85658）绑定的 attempt `evidence_relations-a3` 状态 **succeeded**（其兄弟 graph/adapter dispatch 均成功）——它是重跑竞速窗口遗留的重复后继 dispatch，期望前沿被 a3 重跑本身作废，重放永不可能过回执检查；现复活 SQL 只排除 blocked+auto_advance_not_ready，不排除 succeeded/stale。
+  2. `source_finding-a2` attempt 状态 **running** 僵尸（其 adapter dispatch 早已终态 failed `agent_completion_dependency_pending`，无任何 pending/leased dispatch 能再驱动它），却永久撑起 `has_active_work` 并让 plan 无法落 lands_blocked——落位梯永远走 RUNNING。
+- 修复方向（codex/fix-reconcile-zombie-attempts）：`_apply_ledger_reconcile_for_run` 内先做僵尸 attempt 终局化（starting/dispatching/running 且无 pending/leased dispatch → failed 带 reconciliation 审计问题；waiting_human 与有活 dispatch 的不动），再 plan→supersede→复活；复活排除扩展到 succeeded/stale 绑定（failed 绑定保持可复活，保住 checkpoint_node_mismatch 修复形状）。
+- 预期修复后子 run 诚实落位 BLOCKED（最深真实阻塞 = knowledge_ingestion-a1 的预算问题，预算上限已两次提高、重试可通过准入），随后走 重试知识入库 → readiness（图缺口）→ 豁免 → 执行链。
