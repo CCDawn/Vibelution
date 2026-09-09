@@ -97,7 +97,7 @@ const styles = {
   configStatusActions:
     "vui-routes-configroute configStatusActions [display:flex] [align-items:center] [justify-content:end] [gap:6px] [flex-wrap:wrap] max-[720px]:[justify-content:start]",
   configHeader:
-    `vui-routes-configroute configHeader ${readablePanelSurface} [display:grid] [grid-template-columns:minmax(0,1fr)] [align-items:stretch] [gap:8px] [padding:10px_12px] [min-width:0] [border-radius:0]`,
+    "vui-routes-configroute configHeader min-w-0 !border-0 !rounded-none !shadow-none !bg-vui-surface-panel [&>[data-vui=route-header]]:!border-0 [&>[data-vui=route-header]]:!rounded-none [&>[data-vui=route-header]]:!shadow-none [&>[data-vui=route-header]]:!bg-transparent [&>[data-vui=route-header]]:!py-2 [&>[data-vui=route-header]]:!px-3",
   configStatusMeta:
     "vui-routes-configroute configStatusMeta [display:flex] [align-items:center] [gap:6px] [flex-wrap:wrap] [min-width:0]",
   configStatusPath:
@@ -113,7 +113,7 @@ const styles = {
   providerModelsLayout:
     "vui-routes-configroute providerModelsLayout flex flex-col h-full min-h-0 min-w-0 gap-4 overflow-y-auto overflow-x-hidden [&>#config-models]:flex-1 [&>#config-models]:min-h-[28rem]",
   providerModeButton:
-    "vui-routes-configroute providerModeButton min-h-10 self-start px-3.5 [font-size:var(--vui-font-sm)] font-semibold",
+    "vui-routes-configroute providerModeButton min-h-8 self-start px-3.5 [font-size:var(--vui-font-sm)] font-semibold",
   providerRouteEditSurface:
     "vui-routes-configroute providerRouteEditSurface grid min-w-0 gap-2",
   providerRouteEditGrid:
