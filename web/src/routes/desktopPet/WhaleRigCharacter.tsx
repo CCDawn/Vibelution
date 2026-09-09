@@ -7,9 +7,9 @@ import {
 
 import type { PetAnimationState, PetActivityTone } from "../../api/types/petActivity";
 import { useShellI18n } from "../../i18n/useShellI18n";
-import styles from "./DesktopPetCharacter.styles";
 import { whaleRigStateForPetAnimation } from "./desktopPetCharacterModel";
 import type { Live2dStatus } from "./live2dContract";
+import styles from "./WhaleRigCharacter.styles";
 
 type WhaleRigCharacterProps = {
   animationState: PetAnimationState;
