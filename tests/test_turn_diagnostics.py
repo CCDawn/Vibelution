@@ -327,6 +327,9 @@ def test_completion_snapshot_reads_only_legacy_receipt_from_journal_after_restar
 
     class _RestartedSessionService:
         PROJECT_ROOT = tmp_path
+        EVENT_TURN_COMPLETED = "turn_completed"
+        EVENT_TURN_FAILED = "turn_failed"
+        EVENT_TURN_INTERRUPTED = "turn_interrupted"
         _RUNNING_SESSIONS_LOCK = threading.Lock()
         _RUNNING_SESSION_IDS = set()
         _SESSION_ACTIVE_TURN_IDS = {}
@@ -378,3 +381,44 @@ def test_completion_snapshot_reads_only_legacy_receipt_from_journal_after_restar
     # it must not recreate the registry-only receipt from ``TurnOutcome``.
     assert snapshot["modelInvocationReceipt"] == earlier_receipt
     assert snapshot["modelInvocationReceipts"] == [earlier_receipt]
+
+
+def test_completion_snapshot_reconciles_before_acquiring_chat_state_lock(monkeypatch, tmp_path):
+    """Stale settlement must not request the non-reentrant chat lock recursively."""
+    from core.web.services.session import turn_diagnostics as session_turn_diagnostics
+
+    class _TrackingLock:
+        held = False
+
+        def __enter__(self):
+            assert not self.held
+            self.held = True
+            return self
+
+        def __exit__(self, *_args):
+            self.held = False
+
+    class _SessionService:
+        PROJECT_ROOT = tmp_path
+        _RUNNING_SESSIONS_LOCK = threading.Lock()
+        _RUNNING_SESSION_IDS = set()
+        _SESSION_ACTIVE_TURN_IDS = {}
+        _CHAT_STATE_LOCK = _TrackingLock()
+
+        def __init__(self):
+            self.reconcile_lock_states: list[bool] = []
+
+        def reconcile_stale_chat_turn_work_runs(self):
+            self.reconcile_lock_states.append(self._CHAT_STATE_LOCK.held)
+
+        @staticmethod
+        def load_session_chat_state(_project_root, _session_id):
+            return None
+
+    service = _SessionService()
+    monkeypatch.setattr(session_turn_diagnostics, "_service", lambda: service)
+
+    snapshot = session_turn_diagnostics.get_session_turn_completion_snapshot("session-a", "turn-a")
+
+    assert service.reconcile_lock_states == [False]
+    assert snapshot["completionSource"] == "missing_conversation"

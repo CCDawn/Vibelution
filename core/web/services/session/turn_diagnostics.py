@@ -183,11 +183,15 @@ def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> 
         active_turn_id = str(s._SESSION_ACTIVE_TURN_IDS.get(normalized_session_id) or "").strip()
     turn_current = bool(is_running and (not normalized_turn_id or active_turn_id == normalized_turn_id))
 
+    # Reconciliation may settle a stale work-run, and settlement needs this
+    # same lock to persist the terminal conversation state.  Run it before
+    # entering the read-side critical section so an orphaned turn cannot
+    # self-deadlock the supervising poller.
+    try:
+        s.reconcile_stale_chat_turn_work_runs()
+    except Exception:
+        pass
     with s._CHAT_STATE_LOCK:
-        try:
-            s.reconcile_stale_chat_turn_work_runs()
-        except Exception:
-            pass
         conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
         if conversation is not None and s._repair_stale_running_conversation(conversation):
             s.save_session_chat_state(s.PROJECT_ROOT, normalized_session_id, conversation)
