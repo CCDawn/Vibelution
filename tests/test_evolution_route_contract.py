@@ -268,7 +268,7 @@ def test_evolution_json_routes_keep_unknown_fields(monkeypatch) -> None:
     )
     monkeypatch.setattr(evolution_routes, "get_self_evolution_light_overview", lambda: {"enabled": False})
     monkeypatch.setattr(evolution_routes, "get_active_supervised_worktree_run", lambda: None)
-    monkeypatch.setattr(evolution_routes, "list_supervised_worktree_runs", lambda: [])
+    monkeypatch.setattr(evolution_routes, "list_supervised_worktree_runs", lambda **kwargs: [])
     monkeypatch.setattr(
         evolution_routes,
         "build_workspace_runtime_projection",
