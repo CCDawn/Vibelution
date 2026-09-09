@@ -29,6 +29,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 import os
 import threading
 import time
@@ -42,6 +43,8 @@ from core.infrastructure import developer_sandbox
 from core.research.workflow.contracts import ContractValidationError, scope_hash_for
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 from core.research.workflow.knowledge_sideflow_definition import KNOWLEDGE_SIDEFLOW_WORKFLOW_ID
+
+logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
 _HARD_ROUND_LIMIT_DEFAULT = 3
@@ -4977,19 +4980,25 @@ def auto_backfill_missing_round_authorities(
     stored round: a reusable (``reviewed``/``closed``) round whose scoped
     ``dimension_reviews`` artifact is absent.
 
-    The action reuses :func:`regenerate_hypothesis_round` unchanged: the
-    content-addressed round id hits the pre-generation dedup, so the stored
-    round is replayed with zero review calls and the full sibling authority
-    batch (dimension reviews, review independence, feedback iterations,
-    stage-one plan + competition alignment) re-runs through the production
-    binding code.  A replay is only attempted when the trigger meeting's
-    current fan-in group still equals the round's bound meeting set — a moved
-    group would compute a different round id and spend review budget.  A
-    still-failing materialization stays fail-closed: the blocked authority is
-    reported (never faked) and the next sweep pass retries naturally.
+    The action reuses :func:`regenerate_hypothesis_round` in ``replay_only``
+    mode: review runners are never resolved (the reuse dedup cannot reach the
+    executor, so a missing evaluator configuration can no longer reject the
+    replay the way the formal runner fence did for live closed rounds), and a
+    derived round id that no longer addresses a stored round surfaces as a
+    structured ``replay_miss`` skip instead of ever degrading into a fresh
+    budget-spending generation.  The full sibling authority batch (dimension
+    reviews, review independence, feedback iterations, stage-one plan +
+    competition alignment) re-runs through the production binding code.  A
+    replay is only attempted when the trigger meeting's current fan-in group
+    still equals the round's bound meeting set — a moved group would compute
+    a different round id, which the replay-only guard then refuses anyway.
+    A still-failing materialization stays fail-closed: the blocked authority
+    is reported (never faked) and the next sweep pass retries naturally.
     Nothing here raises: one broken round is isolated and counted, and each
-    outcome lands as a ``hypothesis_first.auto_backfill_round_authorities``
-    scene event.
+    non-trivial outcome lands as a
+    ``hypothesis_first.auto_backfill_round_authorities`` scene event plus a
+    ``logger.warning`` — the runtime scene sink is best-effort in production,
+    so the log line is the durable observability trail for stuck rounds.
     """
 
     from core.web.services.team_workflow import hypothesis_rounds as _hypothesis_rounds
@@ -5073,6 +5082,16 @@ def auto_backfill_missing_round_authorities(
             summary["skipped"] += 1
             if decisive is None:
                 decisive = {"status": "skipped", "reason": "fan_in_unreadable"}
+            logger.warning(
+                "hypothesis_first.auto_backfill_round_authorities skipped "
+                "(fan_in_unreadable): team=%s question=%s round=%s trigger=%s "
+                "error=%s",
+                normalized_team_id,
+                normalized_question_id,
+                round_id,
+                str(trigger.get("meetingRoundId") or ""),
+                str(exc)[:200],
+            )
             _record_scene_event(
                 "hypothesis_first.auto_backfill_round_authorities",
                 outcome="skipped",
@@ -5090,6 +5109,14 @@ def auto_backfill_missing_round_authorities(
             summary["skipped"] += 1
             if decisive is None:
                 decisive = {"status": "skipped", "reason": "fan_in_group_moved"}
+            logger.warning(
+                "hypothesis_first.auto_backfill_round_authorities skipped "
+                "(fan_in_group_moved): team=%s question=%s round=%s trigger=%s",
+                normalized_team_id,
+                normalized_question_id,
+                round_id,
+                trigger_id,
+            )
             _record_scene_event(
                 "hypothesis_first.auto_backfill_round_authorities",
                 outcome="skipped",
@@ -5097,11 +5124,23 @@ def auto_backfill_missing_round_authorities(
             )
             continue
         try:
-            result = regenerate_hypothesis_round(normalized_team_id, trigger_id)
+            result = regenerate_hypothesis_round(
+                normalized_team_id, trigger_id, replay_only=True
+            )
         except HypothesisFirstChainError as exc:
             summary["skipped"] += 1
             if decisive is None:
                 decisive = {"status": "skipped", "reason": str(exc)[:200]}
+            logger.warning(
+                "hypothesis_first.auto_backfill_round_authorities skipped "
+                "(domain rejection): team=%s question=%s round=%s trigger=%s "
+                "reason=%s",
+                normalized_team_id,
+                normalized_question_id,
+                round_id,
+                trigger_id,
+                str(exc)[:200],
+            )
             _record_scene_event(
                 "hypothesis_first.auto_backfill_round_authorities",
                 outcome="skipped",
@@ -5115,6 +5154,16 @@ def auto_backfill_missing_round_authorities(
                 "reason": type(exc).__name__,
                 "error": str(exc)[:400],
             }
+            logger.warning(
+                "hypothesis_first.auto_backfill_round_authorities failed "
+                "(%s): team=%s question=%s round=%s trigger=%s error=%s",
+                type(exc).__name__,
+                normalized_team_id,
+                normalized_question_id,
+                round_id,
+                trigger_id,
+                str(exc)[:400],
+            )
             _record_scene_event(
                 "hypothesis_first.auto_backfill_round_authorities",
                 outcome="failed",
@@ -5130,6 +5179,20 @@ def auto_backfill_missing_round_authorities(
                     "status": "skipped",
                     "reason": result_status or "unexpected_status",
                 }
+            if result_status == "replay_miss":
+                # The stored round is no longer addressable from this
+                # meeting's current fan-in identity; the replay-only guard
+                # refused before any executor work (zero review budget).
+                logger.warning(
+                    "hypothesis_first.auto_backfill_round_authorities skipped "
+                    "(replay_miss): team=%s question=%s round=%s trigger=%s "
+                    "derivedRoundId=%s",
+                    normalized_team_id,
+                    normalized_question_id,
+                    round_id,
+                    trigger_id,
+                    str(result.get("roundId") or ""),
+                )
             _record_scene_event(
                 "hypothesis_first.auto_backfill_round_authorities",
                 outcome="skipped",
@@ -5144,12 +5207,23 @@ def auto_backfill_missing_round_authorities(
         if str(dimension_authority.get("status") or "") != "written":
             # Fail-closed: the writer refused (or persisted nothing) and the
             # blocked authority must stay visible instead of being faked.
+            blocker_codes = list(dimension_authority.get("blockerCodes") or [])
             summary["failed"] += 1
             decisive = {
                 "status": "failed",
                 "reason": "authority_still_blocked",
-                "blockerCodes": list(dimension_authority.get("blockerCodes") or []),
+                "blockerCodes": blocker_codes,
             }
+            logger.warning(
+                "hypothesis_first.auto_backfill_round_authorities failed "
+                "(authority_still_blocked): team=%s question=%s round=%s "
+                "trigger=%s blockers=%s",
+                normalized_team_id,
+                normalized_question_id,
+                round_id,
+                trigger_id,
+                blocker_codes,
+            )
             _record_scene_event(
                 "hypothesis_first.auto_backfill_round_authorities",
                 outcome="failed",
@@ -5157,7 +5231,7 @@ def auto_backfill_missing_round_authorities(
                 fields={
                     **plan_fields,
                     "reason": "authority_still_blocked",
-                    "blockerCodes": list(dimension_authority.get("blockerCodes") or []),
+                    "blockerCodes": blocker_codes,
                 },
             )
             continue
@@ -12651,6 +12725,7 @@ def _generate_hypothesis_round(
     pareto_runner: Any = None,
     metareview_runner: Any = None,
     revision_runner: Any = None,
+    replay_only: bool = False,
 ) -> dict[str, Any]:
     """Best-effort selection-level HypothesisRound fan-in after closure.
 
@@ -12659,6 +12734,11 @@ def _generate_hypothesis_round(
     never rolls the closure back; the readiness layer keeps blocking on
     ``hypothesis_round_unconverged`` until a round converges (fail-closed).
     Replays reuse the already-generated round through HF-3 idempotency.
+
+    ``replay_only=True`` restricts the call to pure reuse (authority
+    re-materialization): the derived round id must address a stored completed
+    round, otherwise a structured ``replay_miss`` result is returned instead
+    of running the review executor.
 
     Every non-ready or failed attempt additionally appends a durable trace
     to the ``hypothesis_round_failures`` ledger (``blocked`` for a pending
@@ -12805,6 +12885,7 @@ def _generate_hypothesis_round(
             pareto_runner=pareto_runner,
             metareview_runner=metareview_runner,
             revision_runner=revision_runner,
+            replay_only=replay_only,
         )
         round_record = result.get("round") if isinstance(result.get("round"), Mapping) else {}
         receipt_authority = (
@@ -13041,6 +13122,29 @@ def _generate_hypothesis_round(
                 ),
             }
             return rejection
+        if isinstance(
+            exc,
+            _hypothesis_rounds_service.ResearchHypothesisRoundReplayMissError,
+        ):
+            # Replay-only generation: the derived round id no longer addresses
+            # a stored completed round (the fan-in identity moved since the
+            # round was generated).  No review budget was spent and the
+            # executor never ran, so report a structured miss — never a
+            # failure trace (the stored round, if any, stays untouched) and
+            # never a faked success.
+            return {
+                "status": "replay_miss",
+                "roundId": str(getattr(exc, "round_id", "") or "") or round_id,
+                "selectionId": selection_id,
+                "meetingRoundIds": meeting_round_ids,
+                "error": str(exc),
+                "errorType": type(exc).__name__,
+                "retryHint": (
+                    "the stored round is not addressable from this meeting's "
+                    "current fan-in identity; regenerate only through the "
+                    "explicit non-replay command path"
+                ),
+            }
         failure_trace = _record_round_persistence_failure(
             team_id,
             meeting_round,
@@ -14431,6 +14535,7 @@ def regenerate_hypothesis_round(
     pareto_runner: Any = None,
     metareview_runner: Any = None,
     revision_runner: Any = None,
+    replay_only: bool = False,
 ) -> dict[str, Any]:
     """Re-run selection-level HypothesisRound generation for a closed meeting.
 
@@ -14442,6 +14547,13 @@ def regenerate_hypothesis_round(
     fails again, a fresh failure trace is appended.  The fan-in
     ``waiting_for_sibling_reviews`` case needs no command: closing the last
     pending sibling review regenerates the round automatically.
+
+    ``replay_only=True`` restricts the call to pure reuse of an
+    already-stored round: review runners are not resolved (the reuse dedup
+    never invokes them, so a missing evaluator configuration can no longer
+    reject a pure authority re-materialization) and a derived round id that
+    misses the ledger surfaces as a structured ``replay_miss`` result
+    instead of a fresh generation.
     """
     from core.web.services import team_service
     from core.web.services.team_workflow import meeting_rounds
@@ -14463,16 +14575,30 @@ def regenerate_hypothesis_round(
             f"Review meeting {normalized_round_id} is not closed; close it "
             "before regenerating the hypothesis round."
         )
-    resolved_runners = _resolve_review_runners(
-        meeting_round,
-        normalized_round_id,
-        meeting_type,
-        reflection_runner=reflection_runner,
-        pairwise_runner=pairwise_runner,
-        pareto_runner=pareto_runner,
-        metareview_runner=metareview_runner,
-        revision_runner=revision_runner,
-    )
+    if replay_only:
+        # The reuse dedup never invokes review runners, so a replay must not
+        # depend on evaluator configuration: resolving real runners here
+        # would let a transient config failure reject a pure authority
+        # re-materialization (and building fixtures/LLM runners for a call
+        # that cannot reach the executor is dead work either way).
+        resolved_runners = {
+            "reflection_runner": None,
+            "pairwise_runner": None,
+            "pareto_runner": None,
+            "metareview_runner": None,
+            "revision_runner": None,
+        }
+    else:
+        resolved_runners = _resolve_review_runners(
+            meeting_round,
+            normalized_round_id,
+            meeting_type,
+            reflection_runner=reflection_runner,
+            pairwise_runner=pairwise_runner,
+            pareto_runner=pareto_runner,
+            metareview_runner=metareview_runner,
+            revision_runner=revision_runner,
+        )
     return _generate_hypothesis_round(
         normalized_team_id,
         meeting_round,
@@ -14481,6 +14607,7 @@ def regenerate_hypothesis_round(
         pareto_runner=resolved_runners["pareto_runner"],
         metareview_runner=resolved_runners["metareview_runner"],
         revision_runner=resolved_runners["revision_runner"],
+        replay_only=replay_only,
     )
 
 

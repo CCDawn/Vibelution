@@ -77,6 +77,28 @@ class ResearchHypothesisRoundGenerationInProgressError(ResearchHypothesisRoundEr
         )
 
 
+class ResearchHypothesisRoundReplayMissError(ResearchHypothesisRoundError):
+    """Raised by replay-only generation when no stored round matches.
+
+    ``generate_hypothesis_round_from_meeting(..., replay_only=True)`` asks to
+    reuse an already-generated round (zero review calls).  When the
+    content-addressed round id derived from the current ledger state no
+    longer addresses a stored completed round, the fan-in identity has moved
+    since the round was generated — generation must never proceed from a
+    replay request, so this fails closed before the review executor with the
+    derived id instead of spending review budget on a different round.
+    """
+
+    def __init__(self, team_id: str, round_id: str) -> None:
+        self.team_id = str(team_id)
+        self.round_id = str(round_id)
+        super().__init__(
+            f"replay-only generation found no stored round {self.round_id} "
+            f"for team {self.team_id}; the derived fan-in identity does not "
+            "address a stored completed round, so nothing was re-generated"
+        )
+
+
 def _project_root() -> Path:
     return Path(PROJECT_ROOT)
 
@@ -492,6 +514,7 @@ def generate_hypothesis_round_from_meeting(
     pareto_runner: Any = None,
     metareview_runner: Any = None,
     revision_runner: Any = None,
+    replay_only: bool = False,
 ) -> dict[str, Any]:
     """Generate one closed HypothesisRound after its bound review meetings close.
 
@@ -506,6 +529,13 @@ def generate_hypothesis_round_from_meeting(
     digests and decisions are combined only for the review executor. Re-running
     the same ordered group and scope reuses the existing round (append-only
     idempotency).
+
+    ``replay_only=True`` restricts the call to pure reuse: after the
+    pre-generation dedup resolves the round id, a stored completed round is
+    returned and a miss raises
+    :class:`ResearchHypothesisRoundReplayMissError` instead of running the
+    review executor.  Authority re-materialization replays use this to
+    guarantee zero review calls regardless of ledger drift.
 
     Pre-generation dedup: the round id is content-addressed, so it is resolved
     against the ledger before the review executor runs.  A stored completed
@@ -711,6 +741,11 @@ def generate_hypothesis_round_from_meeting(
     reusable_round = find_reusable_hypothesis_round(normalized_team_id, round_id)
     if reusable_round is not None:
         return _reuse_generation_result(normalized_team_id, reusable_round)
+    if replay_only:
+        # Fail closed before the executor: a replay request that no longer
+        # addresses a stored round must never degrade into a fresh
+        # (budget-spending) generation under a different round id.
+        raise ResearchHypothesisRoundReplayMissError(normalized_team_id, round_id)
 
     closed_prior_rounds = [
         record

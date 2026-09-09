@@ -1927,6 +1927,7 @@ def _seed_backfill_chain(*, round_status: str = "closed") -> None:
             "updatedAt": _offset_iso(100),
             "closedAt": _offset_iso(100),
             "participants": ["agent-a"],
+            "inputArtifactRefs": [f"hypothesis_selection:{_BACKFILL_SELECTION_ID}"],
             "discussionScope": {"workflowRunId": _BACKFILL_RUN_ID},
         }
     )
@@ -2052,6 +2053,7 @@ def test_auto_backfill_is_idempotent_once_authority_is_present(
     """权威已在 → 第二次 backfill 直接 skip，不重放、store 记录不翻倍。"""
     _backfill_env(tmp_path, monkeypatch)
     _seed_backfill_chain()
+    _seed_backfill_selection()
     regen_calls: list[str] = []
 
     def _regen(team_id, meeting_round_id, **_kwargs):
@@ -2135,6 +2137,7 @@ def test_auto_backfill_skips_replay_when_fan_in_group_moved(
     （不同 round id 会绕过 reuse 去重、产生真实评审预算消耗）。"""
     _backfill_env(tmp_path, monkeypatch)
     _seed_backfill_chain()
+    _seed_backfill_selection()
     regen_calls: list[str] = []
 
     def _regen(team_id, meeting_round_id, **_kwargs):
@@ -2205,6 +2208,378 @@ def test_maintenance_sweep_counts_backfilled_authorities_in_summary(
     assert summary["authoritiesBackfilled"] == 1
     assert summary["failed"] == 0
     assert _adjudications(ledger_path) == []
+
+
+# ---------------------------------------------------------------------------
+# livefix: the production replay entry.  The closed formal rounds of real runs
+# carry server-owned receipt authority, so the old replay entry
+# (regenerate_hypothesis_round) resolved real review runners first and the
+# formal fence rejected the pure re-materialization whenever the evaluator
+# configuration did not resolve — the backfill silently skipped forever (the
+# scene sink is best-effort in production, so nothing was visible).  The
+# backfill now replays through replay_only=True: runners are never resolved,
+# the content-addressed dedup must hit, and a miss raises a structured
+# ResearchHypothesisRoundReplayMissError instead of ever reaching the
+# executor.
+
+
+def test_auto_backfill_replays_without_resolving_review_runners(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """正式轮次的权威补写不再解析评审 runners：fence 即使配置缺失也无法拒绝
+    replay，replay_only=True 一路传到生成入口且补写成功。"""
+    _backfill_env(tmp_path, monkeypatch)
+    _seed_backfill_chain()
+    _seed_backfill_selection()
+    # Make the meeting writer-satisfiable: the binding needs node identity and
+    # the input snapshot hash from the meeting.  The ledger is append-only, so
+    # the updated meeting record supersedes the seeded one for latest-reads.
+    _seed_meeting(
+        {
+            "meetingRoundId": _BACKFILL_MEETING_ID,
+            "question": _QUESTION_ID,
+            "meetingType": "hypothesis_review",
+            "status": "closed",
+            "startedAt": _offset_iso(0),
+            "updatedAt": _offset_iso(100),
+            "closedAt": _offset_iso(100),
+            "participants": ["agent-a"],
+            "inputArtifactRefs": [f"hypothesis_selection:{_BACKFILL_SELECTION_ID}"],
+            "workflowRunId": _BACKFILL_RUN_ID,
+            "modelInvocationReceiptAuthority": {
+                "authorityKind": "workflow_run",
+                "teamId": _TEAM_ID,
+                "questionId": _QUESTION_ID,
+                "workflowRunId": _BACKFILL_RUN_ID,
+            },
+            "discussionScope": {"workflowRunId": _BACKFILL_RUN_ID},
+            "nodeRunId": "node-backfill-1",
+            "inputSnapshotHash": "a" * 64,
+        }
+    )
+
+    def _forbidden_fence(*_args, **_kwargs):
+        raise AssertionError(
+            "replay backfill must never resolve review runners"
+        )
+
+    monkeypatch.setattr(chain, "_resolve_review_runners", _forbidden_fence)
+    generation_calls: list[dict[str, Any]] = []
+
+    def _fake_generation(team_id, meeting_round_id, payload=None, **kwargs):
+        generation_calls.append({"replayOnly": kwargs.get("replay_only")})
+        stored = hrounds._latest_by_id(
+            hrounds._read_jsonl(hrounds._storage_path(team_id)),
+            "roundId",
+            _BACKFILL_ROUND_ID,
+        )
+        assert kwargs.get("replay_only") is True
+        # Mirrors the real dedup hit: the stored round comes back untouched.
+        return {"status": "reused", "round": stored}
+
+    monkeypatch.setattr(
+        hrounds, "generate_hypothesis_round_from_meeting", _fake_generation
+    )
+
+    summary = chain.auto_backfill_missing_round_authorities(
+        _TEAM_ID, question_id=_QUESTION_ID
+    )
+
+    assert generation_calls == [{"replayOnly": True}]
+    assert summary["status"] == "backfilled"
+    assert summary["backfilled"] == 1
+    rows = _dimension_reviews_store_rows()
+    assert len(rows) == 1
+    assert rows[0]["payload"]["nodeRunId"] == "node-backfill-1"
+
+
+def test_auto_backfill_replay_miss_skips_without_generation_or_failure_trace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """replay_only 未命中已存轮次 → 结构化 replay_miss skip：不写失败 trace
+    （轮次账本保持只读事实）、不触发评审执行器、store 不变。"""
+    _backfill_env(tmp_path, monkeypatch)
+    _seed_backfill_chain()
+    _seed_backfill_selection()
+    events = _backfill_env_events(monkeypatch)
+
+    def _forbidden_executor(*_args, **_kwargs):
+        raise AssertionError("replay miss must never reach the review executor")
+
+    from core.web.services.team_workflow import hypothesis_review_executor
+
+    monkeypatch.setattr(
+        hypothesis_review_executor, "execute_hypothesis_review", _forbidden_executor
+    )
+
+    def _fake_generation(team_id, meeting_round_id, payload=None, **kwargs):
+        assert kwargs.get("replay_only") is True
+        raise hrounds.ResearchHypothesisRoundReplayMissError(
+            team_id, "hround-derived-miss"
+        )
+
+    monkeypatch.setattr(
+        hrounds, "generate_hypothesis_round_from_meeting", _fake_generation
+    )
+
+    summary = chain.auto_backfill_missing_round_authorities(
+        _TEAM_ID, question_id=_QUESTION_ID
+    )
+
+    assert summary["status"] == "skipped"
+    assert summary["reason"] == "replay_miss"
+    assert summary["backfilled"] == 0
+    assert summary["failed"] == 0
+    # No ghost failure trace: the stored round ledger stays untouched.
+    assert hrounds.list_hypothesis_round_failures(_TEAM_ID)["failureCount"] == 0
+    assert _dimension_reviews_store_rows() == []
+    miss_events = [
+        item
+        for item in events
+        if item["code"] == "hypothesis_first.auto_backfill_round_authorities"
+    ]
+    assert miss_events and miss_events[-1]["outcome"] == "skipped"
+
+
+def test_generate_replay_only_fails_closed_before_executor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """generate_hypothesis_round_from_meeting(replay_only=True) 在推导 round id
+    未命中已存轮次时、于评审执行器之前抛结构化 ReplayMiss。"""
+    from core.research.workflow.contracts import scope_hash_for
+    from core.web.services.team_workflow import hypothesis_review_executor
+
+    _backfill_env(tmp_path, monkeypatch)
+    scope = {
+        "program": "challenge",
+        "theme": "theme-x",
+        "campaign": "campaign-x",
+        "question": _QUESTION_ID,
+        "branch": "main",
+        "workflow": "challenge-cup-research",
+        "agentId": "agent-a",
+        "mode": "dev",
+    }
+    scope_hash = scope_hash_for(
+        **{
+            key: scope[key]
+            for key in ("program", "theme", "campaign", "question", "branch", "workflow")
+        },
+        agent_id=scope["agentId"],
+        mode=scope["mode"],
+    )
+    _seed_meeting(
+        {
+            "meetingRoundId": _BACKFILL_MEETING_ID,
+            "question": _QUESTION_ID,
+            "meetingType": "hypothesis_review",
+            "status": "closed",
+            "startedAt": _offset_iso(0),
+            "updatedAt": _offset_iso(100),
+            "closedAt": _offset_iso(100),
+            "participants": ["agent-a"],
+            "closedBy": "agent-a",
+            "digestId": "digest-backfill-1",
+            "decisionRefs": ["decision-backfill-1"],
+            **scope,
+            "scopeHash": scope_hash,
+        }
+    )
+    meeting_rounds._append_jsonl(
+        meeting_rounds._digests_path(_TEAM_ID),
+        {
+            "digestId": "digest-backfill-1",
+            "meetingRoundId": _BACKFILL_MEETING_ID,
+            "sourceMessageRefs": ["chat_message:room-1:1"],
+        },
+    )
+    meeting_rounds._append_jsonl(
+        meeting_rounds._decisions_path(_TEAM_ID),
+        {"decisionId": "decision-backfill-1"},
+    )
+
+    def _forbidden_executor(*_args, **_kwargs):
+        raise AssertionError("replay miss must never reach the review executor")
+
+    monkeypatch.setattr(
+        hypothesis_review_executor, "execute_hypothesis_review", _forbidden_executor
+    )
+
+    with pytest.raises(
+        hrounds.ResearchHypothesisRoundReplayMissError
+    ) as excinfo:
+        hrounds.generate_hypothesis_round_from_meeting(
+            _TEAM_ID, _BACKFILL_MEETING_ID, replay_only=True
+        )
+
+    assert excinfo.value.round_id.startswith("hround-")
+    # The non-replay path still owns generation; replay-only never appended a
+    # round or touched the failure ledger.
+    assert hrounds.list_hypothesis_rounds(_TEAM_ID)["roundCount"] == 0
+    assert hrounds.list_hypothesis_round_failures(_TEAM_ID)["failureCount"] == 0
+
+
+def test_auto_backfill_surfaces_blockers_for_legacy_review_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """真实数据形态回归（脱敏）：轮次候选行携带非 canonical 证据引用且会议/轮
+    /receipt authority 均无 inputSnapshotHash 时，backfill 穿透到物化器并
+    fail-closed 暴露精确 blocker，store 零写入、不伪造。"""
+    events = _backfill_env(tmp_path, monkeypatch)
+    _seed_review_link(_BACKFILL_MEETING_ID, round_index=1)
+    _seed_backfill_selection()
+    # Production shape: no nodeRunId/inputSnapshotHash anywhere on the meeting,
+    # dev-mode scope with server-owned run authority, discussionScope carries
+    # the run identity.
+    _seed_meeting(
+        {
+            "meetingRoundId": _BACKFILL_MEETING_ID,
+            "question": _QUESTION_ID,
+            "meetingType": "hypothesis_review",
+            "status": "closed",
+            "startedAt": _offset_iso(0),
+            "updatedAt": _offset_iso(100),
+            "closedAt": _offset_iso(100),
+            "participants": ["agent-a"],
+            "mode": "dev",
+            "inputArtifactRefs": [f"hypothesis_selection:{_BACKFILL_SELECTION_ID}"],
+            "modelInvocationReceiptAuthority": {
+                "authorityKind": "workflow_run",
+                "teamId": _TEAM_ID,
+                "questionId": _QUESTION_ID,
+                "workflowRunId": _BACKFILL_RUN_ID,
+            },
+            "discussionScope": {"workflowRunId": _BACKFILL_RUN_ID},
+        }
+    )
+    # Production shape: the explicit rows ride on the candidates, with raw
+    # chat-candidate citation ids (non-canonical) and empty refs; no
+    # dimensionReviews at the round top level, no snapshot hash anywhere.
+    dimensions = ("evidence_support", "novelty", "methodology", "factual_accuracy")
+    legacy_rows_a = [
+        {
+            "hypothesis_id": _BACKFILL_CANDIDATE_A,
+            "dimension": dimension,
+            "rating": "mixed",
+            "reviewer": "llm:reviewer-1",
+            "evidence_refs": (
+                ["candidate-20260908171714-7c13f5b4"]
+                if index == 0
+                else []
+            ),
+        }
+        for index, dimension in enumerate(dimensions)
+    ]
+    legacy_rows_b = [
+        {
+            "hypothesis_id": _BACKFILL_CANDIDATE_B,
+            "dimension": dimension,
+            "rating": "adequate",
+            "reviewer": "llm:reviewer-1",
+            "evidence_refs": [],
+        }
+        for dimension in dimensions
+    ]
+    hrounds._append_jsonl(
+        hrounds._storage_path(_TEAM_ID),
+        {
+            "roundId": _BACKFILL_ROUND_ID,
+            "question": _QUESTION_ID,
+            "status": "closed",
+            "candidates": [
+                {
+                    "candidateId": _BACKFILL_CANDIDATE_A,
+                    "claim": "claim a",
+                    "dimensionReviews": legacy_rows_a,
+                },
+                {
+                    "candidateId": _BACKFILL_CANDIDATE_B,
+                    "claim": "claim b",
+                    "dimensionReviews": legacy_rows_b,
+                },
+            ],
+            "pareto": {
+                "paretoFrontCandidateIds": [_BACKFILL_CANDIDATE_A],
+                "dominatedCandidateIds": [_BACKFILL_CANDIDATE_B],
+            },
+            "metaReview": {
+                "recommendationCandidateId": _BACKFILL_CANDIDATE_A,
+                "rationale": "收敛结论已确认。",
+                "accepted": True,
+            },
+            "meetingRefs": [{"kind": "meeting_round", "id": _BACKFILL_MEETING_ID}],
+        },
+    )
+    generation_calls: list[dict[str, Any]] = []
+
+    def _fake_generation(team_id, meeting_round_id, payload=None, **kwargs):
+        generation_calls.append({"replayOnly": kwargs.get("replay_only")})
+        stored = hrounds._latest_by_id(
+            hrounds._read_jsonl(hrounds._storage_path(team_id)),
+            "roundId",
+            _BACKFILL_ROUND_ID,
+        )
+        return {"status": "reused", "round": stored}
+
+    monkeypatch.setattr(
+        hrounds, "generate_hypothesis_round_from_meeting", _fake_generation
+    )
+
+    summary = chain.auto_backfill_missing_round_authorities(
+        _TEAM_ID, question_id=_QUESTION_ID
+    )
+
+    assert generation_calls == [{"replayOnly": True}]
+    assert summary["status"] == "failed"
+    assert summary["reason"] == "authority_still_blocked"
+    assert summary["backfilled"] == 0
+    blockers = set(summary["blockerCodes"])
+    assert "inputSnapshotHash_missing" in blockers
+    assert "input_snapshot_hash_invalid" in blockers
+    assert "dimension_review_evidence_ref_invalid" in blockers
+    assert "dimension_review_evidence_refs_missing" in blockers
+    assert _dimension_reviews_store_rows() == []
+    failed_events = [
+        item
+        for item in events
+        if item["code"] == "hypothesis_first.auto_backfill_round_authorities"
+    ]
+    assert failed_events and failed_events[-1]["outcome"] == "failed"
+    assert failed_events[-1]["level"] == "warning"
+
+
+def _backfill_env_events(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Capture scene events on an already-built backfill env."""
+    events: list[dict[str, Any]] = []
+
+    def _capture(code, *, outcome, fields=None, level="info"):
+        events.append({"code": code, "outcome": outcome, "level": level, "fields": fields or {}})
+
+    monkeypatch.setattr(chain, "_record_scene_event", _capture)
+    return events
+
+
+def _seed_backfill_selection() -> None:
+    """Seed the hypothesis selection the replay's fan-in binding resolves.
+
+    ``_generate_hypothesis_round`` looks the selection up before the round
+    generation and requires its scope/question to match the trigger meeting.
+    """
+    from core.web.services.team_workflow import hypothesis_selection
+
+    hypothesis_selection._append_jsonl(
+        hypothesis_selection._storage_path(_TEAM_ID),
+        {
+            "selectionId": _BACKFILL_SELECTION_ID,
+            "questionId": _QUESTION_ID,
+            "scopeHash": "",
+            "selectedCandidateIds": [_BACKFILL_CANDIDATE_A, _BACKFILL_CANDIDATE_B],
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
