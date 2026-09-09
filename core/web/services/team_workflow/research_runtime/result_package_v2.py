@@ -9,6 +9,7 @@ free-form task summaries.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import Any
@@ -17,6 +18,9 @@ from core.research.competition import (
     CATALOG_ID,
     CATALOG_SHA256,
     load_science_question_catalog,
+)
+from core.web.services.team_workflow.research_projects import (
+    resolve_research_project_workspace_root,
 )
 
 from .artifact_readback_registry import (
@@ -598,45 +602,116 @@ def _cited_evidence_run_ids(dimension_payload: Mapping[str, Any]) -> list[str]:
     return sorted(runs)
 
 
-def _source_candidate_title_index(
-    *, team_id: str, cited_run_ids: Sequence[str]
-) -> dict[str, str]:
-    """Index ``sourceUrl -> title`` over the cited runs' source candidates.
+def _index_candidate_records(records: Sequence[Any]) -> dict[str, dict[str, str]]:
+    """Reduce candidate-store records to ``sourceUrl -> {title, source_kind}``.
 
-    Lean claim-evidence cards carry only a URL-shaped ``sourceId``, so their
-    display title is resolved against the source candidates the very runs the
-    reviews cited collected (production shape: ``candidateType ==
-    "source_manifest"`` records whose DOI ``sourceUrl`` equals the card's
-    ``sourceId``).  Both the top-level ``sourceUrl``/``title`` and the
-    ``metadata`` envelope of a candidate record are read; a run whose source
-    batch is absent contributes nothing.  This reads the same strict scoped
-    loader as every other authority here — resolution stays truthful or the
-    card keeps failing closed.
+    Top-level fields win with the ``metadata`` envelope as fallback; the kind
+    is read from ``sourceKind`` then ``sourceType`` (then
+    ``metadata.sourceKind``).  ``candidate_graph`` rows are not source
+    manifests and records without a URL+title pair contribute nothing; the
+    first record seen for a URL wins (store order is the persistence order).
     """
 
-    index: dict[str, str] = {}
+    index: dict[str, dict[str, str]] = {}
+    for candidate in records:
+        if not isinstance(candidate, Mapping):
+            continue
+        if _text(candidate.get("candidateType")) == "candidate_graph":
+            continue
+        metadata = candidate.get("metadata")
+        metadata = metadata if isinstance(metadata, Mapping) else {}
+        url = _text(candidate.get("sourceUrl") or metadata.get("sourceUrl"))
+        title = _text(candidate.get("title") or metadata.get("title"))
+        source_kind = _text(
+            candidate.get("sourceKind")
+            or candidate.get("sourceType")
+            or metadata.get("sourceKind")
+        )
+        if url and title and url not in index:
+            index[url] = {"title": title, "source_kind": source_kind}
+    return index
+
+
+def _cited_runs_candidate_record_index(
+    *, team_id: str, cited_run_ids: Sequence[str]
+) -> dict[str, dict[str, str]]:
+    """Cited-runs fallback authority: scoped per-run candidate batches.
+
+    Used only when the frozen run scope names no research project; reads the
+    same strict scoped loader as every other artifact authority here, so no
+    run the reviews did not cite is ever read.
+    """
+
+    records: list[Any] = []
     for run_id in cited_run_ids:
         envelope = load_scoped_artifact_payload(
             "source_candidate_batch",
             team_id=team_id,
             authority_run_id=run_id,
         )
-        if not isinstance(envelope, Mapping):
-            continue
-        for candidate in _list_of_mappings(
-            envelope.get("candidates") or envelope.get("candidateSources")
-        ):
-            metadata = candidate.get("metadata")
-            metadata = metadata if isinstance(metadata, Mapping) else {}
-            url = _text(candidate.get("sourceUrl") or metadata.get("sourceUrl"))
-            title = _text(candidate.get("title") or metadata.get("title"))
-            if url and title and url not in index:
-                index[url] = title
-    return index
+        if isinstance(envelope, Mapping):
+            records.extend(
+                envelope.get("candidates") or envelope.get("candidateSources") or []
+            )
+    return _index_candidate_records(records)
+
+
+def _project_candidate_record_index(
+    *, team_id: str, research_project_id: str
+) -> dict[str, dict[str, str]]:
+    """Index the run owner project's whole candidate store (read once).
+
+    The strict per-run scope is what canonical artifacts need, but the
+    title/kind resolver's truth domain is "sources this project collected":
+    production hypothesis-first cards cite DOIs whose ``source_manifest``
+    records live on an earlier collection run of the same project that the
+    dimension reviews never cite, so the scoped read-back under-covers while
+    the project-wide store covers every card.  This reads the store's own
+    ``candidate_store/index.json`` under the project workspace root directly —
+    deliberately bypassing ``load_scoped_artifact_payload`` — and keeps the
+    first record's title and source kind per URL.  A store that cannot be
+    resolved or read yields an empty index, so the cards keep failing closed
+    instead of being guessed at.
+    """
+
+    try:
+        workspace = resolve_research_project_workspace_root(
+            team_id, research_project_id
+        )
+        payload = json.loads(
+            (workspace / "candidate_store" / "index.json").read_text(encoding="utf-8")
+        )
+    except Exception:
+        return {}
+    records = payload.get("candidates") if isinstance(payload, Mapping) else None
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes, bytearray)):
+        return {}
+    return _index_candidate_records(records)
+
+
+def _source_candidate_record_index(
+    *,
+    team_id: str,
+    cited_run_ids: Sequence[str],
+    research_project_id: str = "",
+) -> dict[str, dict[str, str]]:
+    """Resolve lean-card title/kind from the project store, cited runs fallback.
+
+    The frozen run scope names the owning research project for every formal
+    challenge run, so the project-wide store is the primary authority; without
+    a project id there is nothing to resolve against but the cited runs' own
+    scoped batches, and guessing a project is never an option.
+    """
+
+    if research_project_id:
+        return _project_candidate_record_index(
+            team_id=team_id, research_project_id=research_project_id
+        )
+    return _cited_runs_candidate_record_index(team_id=team_id, cited_run_ids=cited_run_ids)
 
 
 def _project_lean_evidence_card(
-    card: Mapping[str, Any], title_index: Mapping[str, str]
+    card: Mapping[str, Any], record_index: Mapping[str, Mapping[str, str]]
 ) -> dict[str, Any]:
     """Project the v2 envelope fields a lean claim-evidence card lacks.
 
@@ -645,16 +720,23 @@ def _project_lean_evidence_card(
     no collection-stage envelope — so the strict ``_evidence_item``
     requirements would fail closed.  Each missing field is filled only from an
     authority the card already carries: the ``kind: "url"`` locator becomes
-    ``source_url``, the store timestamps become ``retrieved_at``, the
-    evidence-kind vocabulary (``_SOURCE_KIND_SOURCE_TYPES``; unknown kinds such
-    as ``primary_result`` land on the schema's non-authoritative ``other``)
-    becomes ``source_type``, and the cited runs' candidate title resolves the
-    URL-shaped ``sourceId``.  Nothing is invented: a field that cannot be
-    resolved from those authorities stays absent so the strict producer still
-    raises.
+    ``source_url``, the store timestamps become ``retrieved_at``, and the
+    URL-shaped ``sourceId`` resolves title and source kind against the cited
+    runs' candidate records — a recognized candidate kind maps through the
+    existing ``_SOURCE_KIND_SOURCE_TYPES`` vocabulary (``paper`` →
+    ``peer_reviewed_paper``), and only an unrecognized or missing candidate
+    kind falls back to the evidence-kind vocabulary (``primary_result`` lands
+    on the schema's non-authoritative ``other``).  Nothing is invented: a
+    field that cannot be resolved from those authorities stays absent so the
+    strict producer still raises.  Cards bound to a candidate id keep the
+    exact id-authority resolution (or orphan gate) in ``_evidence`` and are
+    returned unchanged.
     """
 
+    if _text(card.get("candidateId") or card.get("recordId")):
+        return dict(card)
     projected = dict(card)
+    matched = record_index.get(_text(card.get("sourceId"))) or {}
     locator = card.get("locator")
     if isinstance(locator, Mapping) and _text(locator.get("kind")).casefold() == "url":
         if not _text(_pick(projected, "source_url", "sourceUrl")):
@@ -666,20 +748,28 @@ def _project_lean_evidence_card(
         if retrieved_at:
             projected["retrieved_at"] = retrieved_at
     if not _text(_pick(projected, "source_type", "sourceType")):
-        evidence_kind = _text(card.get("evidenceKind")).casefold()
-        if evidence_kind:
-            projected["source_type"] = _SOURCE_KIND_SOURCE_TYPES.get(
-                evidence_kind, "other"
-            )
+        candidate_kind = _text(matched.get("source_kind")).casefold()
+        mapped = _SOURCE_KIND_SOURCE_TYPES.get(candidate_kind, "")
+        if mapped:
+            projected["source_type"] = mapped
+        else:
+            evidence_kind = _text(card.get("evidenceKind")).casefold()
+            if evidence_kind:
+                projected["source_type"] = _SOURCE_KIND_SOURCE_TYPES.get(
+                    evidence_kind, "other"
+                )
     if not _text(_pick(projected, "title")):
-        title = _text(title_index.get(_text(card.get("sourceId"))))
+        title = _text(matched.get("title"))
         if title:
             projected["title"] = title
     return projected
 
 
 def _aggregated_evidence_card_payload(
-    *, team_id: str, cited_run_ids: Sequence[str]
+    *,
+    team_id: str,
+    cited_run_ids: Sequence[str],
+    research_project_id: str = "",
 ) -> dict[str, Any] | None:
     """Merge every review-cited run's evidence-card batch into one payload.
 
@@ -736,10 +826,12 @@ def _aggregated_evidence_card_payload(
         for card in cards
     )
     if lean_projection:
-        title_index = _source_candidate_title_index(
-            team_id=team_id, cited_run_ids=cited_run_ids
+        record_index = _source_candidate_record_index(
+            team_id=team_id,
+            cited_run_ids=cited_run_ids,
+            research_project_id=research_project_id,
         )
-        cards = [_project_lean_evidence_card(card, title_index) for card in cards]
+        cards = [_project_lean_evidence_card(card, record_index) for card in cards]
     return {
         "teamId": team_id,
         "sourceCollectionRunIds": aggregated_runs,
@@ -755,6 +847,7 @@ def _evidence_card_payload(
     workflow_run_id: str,
     authority_run_id: str,
     dimension_payload: Mapping[str, Any],
+    research_project_id: str = "",
 ) -> dict[str, Any]:
     """Read evidence cards: authority run first, review-cited runs second.
 
@@ -766,7 +859,9 @@ def _evidence_card_payload(
     Cards that carry no candidate id and no collection-stage envelope (the
     lean hypothesis-first store shape) additionally get their envelope fields
     projected from authorities they already carry; every other card keeps the
-    exact id-authority resolution below.
+    exact id-authority resolution below.  Lean resolution reads the run owner
+    project's candidate store when the frozen scope names the project, and
+    falls back to the cited runs' scoped batches otherwise.
     """
 
     missing_error: ResultPackageV2Error | None = None
@@ -789,6 +884,7 @@ def _evidence_card_payload(
     aggregated = _aggregated_evidence_card_payload(
         team_id=team_id,
         cited_run_ids=_cited_evidence_run_ids(dimension_payload),
+        research_project_id=research_project_id,
     )
     if aggregated is not None:
         return aggregated
@@ -1703,6 +1799,10 @@ def build_challenge_result_package_v2(
         snapshot.get("questionId") or record.get("questionId"), "identity.question_id"
     ).upper()
     question = _catalog_question(question_id)
+    # The frozen run scope names the owning research project; the lean-card
+    # resolver below reads that project's candidate store, not just the runs
+    # the reviews cite.
+    scope = _scope(snapshot)
     authority = _text(source_collection_run_id) or workflow_run_id
     problem = _artifact_payload(
         "problem_understanding",
@@ -1736,6 +1836,7 @@ def build_challenge_result_package_v2(
         workflow_run_id=workflow_run_id,
         authority_run_id=authority,
         dimension_payload=dimension_payload,
+        research_project_id=scope["research_project_id"],
     )
     research_payload = _artifact_payload(
         "stage1_research_plan" if is_proposal_only_challenge_run(record) else "research_plan",
@@ -1809,7 +1910,7 @@ def build_challenge_result_package_v2(
             "is_specialty_question": question.get("domain")
             in {"information_science", "neuroscience"},
         },
-        "scope": _scope(snapshot),
+        "scope": scope,
         "run": _model_run(
             record,
             team_id=team_id,
