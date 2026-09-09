@@ -374,7 +374,7 @@ def test_closeout_merge_issues_exact_main_permit(
                 },
             ),
         ),
-        ("merge", (["git", "merge", "--ff-only", context.branch], context.main_root)),
+        ("merge", (["git", "merge", "--ff-only", "new-sha"], context.main_root)),
         ("clear", context.main_root),
     ]
 
