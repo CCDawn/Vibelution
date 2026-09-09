@@ -1984,14 +1984,11 @@ export function ToolsRoute() {
               {editablePolicyTools.length ? (
                 <div className={styles.toolPermissionList}>
                   {editablePolicyGroups.map((group) => (
-                    <section key={group.bundleId} className={styles.toolPermissionGroup}>
-                      <VPanelHeader
-                        className={styles.toolPermissionGroupHeader}
-                        headingLevel={null}
-                        title={group.label}
-                        eyebrow={`${group.tools.length} tools · ${lang === "zh" ? "允许" : "Allowed"} ${group.allowedCount} · ${lang === "zh" ? "禁用" : "Blocked"} ${group.blockedCount} · ${lang === "zh" ? "未允许" : "Not allowed"} ${group.inheritedCount}`}
-                        actions={group.highRiskCount ? <small>{lang === "zh" ? "高风险" : "High risk"} {group.highRiskCount}</small> : undefined}
-                      />
+                    <details key={`${group.bundleId}:${Boolean(toolPolicySearchText.trim())}`} open={Boolean(toolPolicySearchText.trim())} className={styles.toolPermissionGroup}>
+                      <summary className={styles.permissionSummary}>
+                        <span>{group.label}</span>
+                        <small>{group.tools.length} · {lang === "zh" ? "允许" : "Allowed"} {group.allowedCount} · {lang === "zh" ? "禁用" : "Blocked"} {group.blockedCount} · {lang === "zh" ? "高风险" : "High risk"} {group.highRiskCount}</small>
+                      </summary>
                       <div className={styles.toolPermissionGroupList}>
                         {group.tools.map((tool) => {
                           const mode = policyDraftMode(toolPolicyDraft, tool.name);
@@ -2006,7 +2003,7 @@ export function ToolsRoute() {
                                 <span className={styles.toolPermissionMeta}>
                                   <em>{toolTierLabel(tool.permissionTier, lang)}</em>
                                   <small>{toolCategoryLabel(tool.category, tool.categoryLabel, lang)}</small>
-                                  {tags.length ? <small>{tags.join(" / ")}</small> : null}
+                                  {tags.length ? <small title={tags.join(" / ")}>{tags.slice(0, 2).join(" / ")}</small> : null}
                                 </span>
                               </span>
                               {(() => {
@@ -2050,7 +2047,7 @@ export function ToolsRoute() {
                           );
                         })}
                       </div>
-                    </section>
+                    </details>
                   ))}
                 </div>
               ) : (

@@ -67,7 +67,6 @@ const surfaceFreeRepeatedLayoutStyles = [
   "toolBundleSelect",
   "toolCopy",
   "toolList",
-  "toolPermissionGroupHeader",
   "toolPermissionGroupList",
   "toolPermissionList",
   "toolPermissionMeta",

@@ -76,10 +76,6 @@ pre {
   color: var(--fg-primary);
 }
 
-:where([class*="page"], [class*="route"]) {
-  color: var(--fg-primary);
-}
-
 :where([class*="toolbar"], [class*="header"]) {
   letter-spacing: 0;
 }

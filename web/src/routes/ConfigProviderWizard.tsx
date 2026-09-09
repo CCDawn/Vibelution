@@ -253,6 +253,7 @@ export function ConfigProviderWizard({
                     {groupTemplates.map((template) => (
                       <VButton
                         key={template.provider_preset_id}
+                        className={styles.templateButton}
                         contentLayout="plain"
                         variant={state.templateId === template.provider_preset_id ? "primary" : "secondary"}
                         onPress={() => {

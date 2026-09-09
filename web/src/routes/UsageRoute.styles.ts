@@ -8,6 +8,7 @@ const panelSurface = vuiFlatPanelClass;
 const rowSurface = vuiOpaqueRowClass;
 
 const styles = {
+  technicalDetails: "min-w-0 [&>summary]:cursor-pointer [&>summary]:py-2 [&_strong]:!whitespace-normal [&_strong]:break-all",
   page:
     "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden overflow-x-hidden text-vui-fg-primary max-[860px]:overflow-y-auto max-[860px]:overflow-x-hidden",
   header:
@@ -27,7 +28,7 @@ const styles = {
   rollupPanel:
     `grid min-h-0 min-w-0 max-w-full gap-1.5 overflow-hidden ${panelSurface} p-2`,
   recordPanel:
-    `grid min-h-0 min-w-0 max-w-full grid-rows-[auto_auto_minmax(0,1fr)] gap-1.5 overflow-hidden ${panelSurface} p-2 max-[980px]:overflow-y-visible max-[980px]:overflow-x-hidden`,
+    `grid min-h-0 min-w-0 max-w-full content-start gap-3 overflow-auto ${panelSurface} p-2 max-[980px]:overflow-y-visible max-[980px]:overflow-x-hidden`,
   panelHeader:
     "flex min-w-0 max-w-full flex-wrap items-center justify-between gap-1.5 [&>div]:min-w-0 [&_h2]:m-0 [&_h2]:min-w-0 [&_h2]:overflow-hidden [&_h2]:text-ellipsis [&_h2]:whitespace-nowrap [&_h2]:text-[0.9rem] [&_h2]:leading-tight [&_h2]:text-vui-fg-primary",
   panelEyebrow:
@@ -35,7 +36,7 @@ const styles = {
   countPill:
     "inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 overflow-hidden text-ellipsis whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] px-2 [font-size:var(--vui-font-xs)] text-[var(--accent-cool)] [&_svg]:flex-none",
   sourceGrid:
-    "grid min-w-0 max-w-full grid-cols-[repeat(2,minmax(0,1fr))] gap-1 max-[520px]:grid-cols-1",
+    "grid min-w-0 max-w-full grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-2 max-[520px]:grid-cols-1",
   sourceTile:
     `grid min-h-[50px] min-w-0 max-w-full gap-0.5 ${rowSurface} px-2 py-1.5 [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[0.9rem] [&_strong]:leading-tight [&_strong]:text-vui-fg-primary`,
   sourceTileObserved:
@@ -51,9 +52,9 @@ const styles = {
   rollupGrid:
     "grid min-w-0 max-w-full grid-cols-[repeat(2,minmax(0,1fr))] gap-1 max-[720px]:grid-cols-1",
   usageRow:
-    `grid min-w-0 max-w-full grid-cols-[minmax(96px,0.64fr)_minmax(0,1fr)_minmax(58px,max-content)_minmax(54px,max-content)] items-center gap-1.5 ${vuiDenseRowClass} px-2 py-1.5 max-[620px]:grid-cols-[minmax(0,1fr)] max-[620px]:items-start [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary [&_code]:inline-flex [&_code]:min-w-0 [&_code]:max-w-full [&_code]:items-center [&_code]:gap-1 [&_code]:overflow-hidden [&_code]:text-ellipsis [&_code]:whitespace-nowrap [&_code]:font-mono [&_code]:[font-size:var(--vui-font-xs)] [&_code]:text-[var(--accent-cool)]`,
+    `grid min-w-0 max-w-full grid-cols-[minmax(96px,0.2fr)_minmax(0,1fr)_minmax(58px,max-content)_minmax(54px,max-content)] items-center gap-1.5 ${vuiDenseRowClass} px-2 py-1.5 max-[620px]:grid-cols-[minmax(0,1fr)] max-[620px]:items-start [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary [&_code]:inline-flex [&_code]:min-w-0 [&_code]:max-w-full [&_code]:items-center [&_code]:gap-1 [&_code]:overflow-hidden [&_code]:text-ellipsis [&_code]:whitespace-nowrap [&_code]:font-mono [&_code]:[font-size:var(--vui-font-xs)] [&_code]:text-[var(--accent-cool)]`,
   usageRowWide:
-    "grid grid-cols-[minmax(104px,0.68fr)_minmax(0,1.1fr)_minmax(72px,max-content)] max-[620px]:grid-cols-[minmax(0,1fr)]",
+    "grid grid-cols-[minmax(104px,1fr)_auto] max-[620px]:grid-cols-[minmax(0,1fr)]",
   refreshButton:
     "h-[var(--vui-control-height-sm)] min-h-8 w-[var(--vui-control-height-sm)] flex-none p-0",
   progressTrack:
