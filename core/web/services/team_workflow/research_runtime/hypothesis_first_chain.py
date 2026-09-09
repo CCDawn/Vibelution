@@ -44,7 +44,30 @@ from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 from core.research.workflow.knowledge_sideflow_definition import KNOWLEDGE_SIDEFLOW_WORKFLOW_ID
 
 SCHEMA_VERSION = 1
-HARD_ROUND_LIMIT = 3
+_HARD_ROUND_LIMIT_DEFAULT = 3
+_HARD_ROUND_LIMIT_ENV = "VIBELUTION_HF_ROUND_LIMIT"
+
+
+def _resolve_hard_round_limit() -> int:
+    """Resolve the review/dispatch round cap, digest-TTL env style.
+
+    A temporary per-deployment cost lever: unset, unparseable or
+    out-of-[1, default] values keep the built-in default, so the
+    product contract can only shrink, never grow, through this env.
+    """
+    raw = str(os.environ.get(_HARD_ROUND_LIMIT_ENV) or "").strip()
+    if not raw:
+        return _HARD_ROUND_LIMIT_DEFAULT
+    try:
+        normalized = int(raw)
+    except ValueError:
+        return _HARD_ROUND_LIMIT_DEFAULT
+    if normalized < 1 or normalized > _HARD_ROUND_LIMIT_DEFAULT:
+        return _HARD_ROUND_LIMIT_DEFAULT
+    return normalized
+
+
+HARD_ROUND_LIMIT = _resolve_hard_round_limit()
 COLLECTION_REQUEST_KIND = "collection_request"
 REVIEW_ROUND_LINK_KIND = "review_round_link"
 CANDIDATE_KIND = "hypothesis_candidate"

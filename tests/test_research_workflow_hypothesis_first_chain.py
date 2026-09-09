@@ -9215,3 +9215,20 @@ def test_auto_adjudication_rechecks_after_frontend_scope_lock(tmp_path, monkeypa
     records = _auto_adjudication_records(ledger_path)
     assert len(records) == 1
     assert records[0]["idempotencyKey"] == "frontend-key"
+
+
+def test_hard_round_limit_env_resolution(monkeypatch):
+    from core.web.services.team_workflow.research_runtime import hypothesis_first_chain as chain
+
+    assert chain._resolve_hard_round_limit() == 3  # unset keeps the default
+    assert chain.HARD_ROUND_LIMIT == 3
+
+    monkeypatch.setenv(chain._HARD_ROUND_LIMIT_ENV, "2")
+    assert chain._resolve_hard_round_limit() == 2
+
+    for invalid in ("", "0", "4", "abc", "-1"):
+        monkeypatch.setenv(chain._HARD_ROUND_LIMIT_ENV, invalid)
+        assert chain._resolve_hard_round_limit() == 3, invalid
+
+    monkeypatch.delenv(chain._HARD_ROUND_LIMIT_ENV, raising=False)
+    assert chain._resolve_hard_round_limit() == 3
