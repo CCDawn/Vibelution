@@ -359,7 +359,7 @@ def _apply_ledger_reconcile_for_run(
     run,
     node_order,
     now_ms: int,
-) -> tuple[Any, int]:
+) -> tuple[Any, int, list[str]]:
     """Re-project one run onto ledger authority inside the caller's transaction.
 
     Shared re-plan core for the formal parent reconcile and the knowledge
@@ -388,7 +388,25 @@ def _apply_ledger_reconcile_for_run(
     (2) re-derive the authority plan from the ledger,
     (3) retire plan-superseded blocked attempts as STALE and cancel their
         graph_dispatch rows,
-    (4) re-arm failed graph_dispatch rows for this run so the worker gets a
+    (4) accept orphaned auto-gate handoffs: a handoff still ``ready`` whose
+        from-attempt is ``succeeded`` can never be accepted by its only other
+        executor (the graph worker's success finalize ``_commit_upstream_accept``
+        runs when the attempt advances through dispatch execution; a success
+        that landed via the receipt write-back path never runs it).  Readiness
+        then pins the successor on ``handoff_not_accepted`` forever — retries
+        412 and no product surface accepted the handoff (defect ⑳,
+        run-1ca97605acf3's evidence_relations→knowledge_ingestion ho-f67bc7db).
+        The repair is deliberately narrow: only ``gate_kind='auto'`` (human
+        gates keep their own acceptance semantics, e.g.
+        ``auto_accept_knowledge_handoffs``) and only a ``succeeded``
+        from-attempt (stale/blocked/running from-attempts mean a supersede
+        chain will still offer a newer handoff).  Idempotent by the
+        ``status='ready'`` filter; ``ready→accepted`` is a legal frozen
+        transition and the ``accepted_by`` shape mirrors the worker's.  Like
+        the worker's finalize, no dedicated event is written — the
+        acceptance is audited through the caller's reconcile event payload
+        (``autoAcceptedHandoffIds``).
+    (5) re-arm failed graph_dispatch rows for this run so the worker gets a
         fresh routing decision.  Rows stay dead in every scope when
         replaying them cannot succeed: a dispatch bound to a terminal
         attempt is definitionally fulfilled or superseded — the cascade
@@ -402,8 +420,9 @@ def _apply_ledger_reconcile_for_run(
         (or attempt-less) rows stay revivable (the checkpoint_node_mismatch
         repair shape).
 
-    Returns ``(plan, revived_dispatch_count)``; reservation compensation and
-    the run's own landing stay owned by the caller.
+    Returns ``(plan, revived_dispatch_count, auto_accepted_handoff_ids)``;
+    reservation compensation and the run's own landing stay owned by the
+    caller.
     """
     from .completion_dependency import COMPLETION_PENDING
 
@@ -502,7 +521,36 @@ def _apply_ledger_reconcile_for_run(
             """,
             (now_ms, node_run_id),
         )
-    # -- (4) revive pass: re-arm failed graph_dispatch rows. ----------------
+    # -- (4) orphaned auto-gate handoff acceptance (defect ⑳). --------------
+    # Runs AFTER the supersede pass so stale/succeeded attempt statuses are
+    # already settled, and BEFORE the revive pass so every revived routing
+    # decision in this same UoW sees the handoff accepted.
+    auto_accepted_handoff_ids = [
+        str(row[0])
+        for row in uow.repository.execute(
+            """
+            SELECT h.handoff_id
+            FROM handoffs h
+            JOIN node_attempts na ON na.node_run_id = h.from_node_run_id
+            WHERE h.run_id = ?
+              AND h.status = 'ready'
+              AND h.gate_kind = 'auto'
+              AND na.run_id = h.run_id
+              AND na.status = 'succeeded'
+            """,
+            (run.run_id,),
+        ).fetchall()
+    ]
+    for handoff_id in auto_accepted_handoff_ids:
+        uow.repository.update_handoff_status(
+            handoff_id,
+            "accepted",
+            now_ms,
+            accepted_by_json=json.dumps(
+                {"actorType": "system", "actorId": "reconcile"}
+            ),
+        )
+    # -- (5) revive pass: re-arm failed graph_dispatch rows. ----------------
     # Reconciliation re-derives execution from the durable ledger.  A
     # blocked run usually got there via a terminal-failed graph_dispatch
     # (e.g. checkpoint_node_mismatch); reviving only the run status would
@@ -540,7 +588,7 @@ def _apply_ledger_reconcile_for_run(
         (now_ms, now_ms, run.run_id),
     )
     revived = int(uow.repository.affected() or 0)
-    return plan, revived
+    return plan, revived, auto_accepted_handoff_ids
 
 
 def _bump_child_run_version(
@@ -1749,7 +1797,7 @@ class WorkflowCommandService:
             prepared=prepared_artifact,
             now_ms=now_ms,
         )
-        plan, revived = _apply_ledger_reconcile_for_run(
+        plan, revived, auto_accepted_handoff_ids = _apply_ledger_reconcile_for_run(
             uow,
             run=run,
             node_order=formal_node_order(run),
@@ -1832,6 +1880,7 @@ class WorkflowCommandService:
                     "reconciledStatus": target_status.value,
                     "artifactReceiptIds": list(artifact_receipt_ids),
                     "staleAttemptIds": list(plan.superseded_node_run_ids),
+                    "autoAcceptedHandoffIds": auto_accepted_handoff_ids,
                     "compensatedReservations": compensated,
                     "recomputedActiveNodeId": plan.active_node_id,
                     "landingProblemCode": (
@@ -1865,11 +1914,13 @@ class WorkflowCommandService:
             child = uow.repository.get_run(child_run_id)
             if child is None or child.status != RunStatus.RECONCILIATION_REQUIRED.value:
                 continue
-            child_plan, revived_child = _apply_ledger_reconcile_for_run(
-                uow,
-                run=child,
-                node_order=KNOWLEDGE_SIDEFLOW_NODE_IDS,
-                now_ms=now_ms,
+            child_plan, revived_child, child_auto_accepted = (
+                _apply_ledger_reconcile_for_run(
+                    uow,
+                    run=child,
+                    node_order=KNOWLEDGE_SIDEFLOW_NODE_IDS,
+                    now_ms=now_ms,
+                )
             )
             child_has_active_work = revived_child > 0 or _run_has_active_work(
                 uow, run_id=child.run_id
@@ -1950,6 +2001,7 @@ class WorkflowCommandService:
                 "activeWorkFound": child_has_active_work,
                 "reconciledStatus": child_target.value,
                 "staleAttemptIds": list(child_plan.superseded_node_run_ids),
+                "autoAcceptedHandoffIds": child_auto_accepted,
                 "parentRunId": run.run_id,
             }
             if child_landing:
