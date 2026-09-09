@@ -169,3 +169,16 @@
   2. `source_finding-a2` attempt 状态 **running** 僵尸（其 adapter dispatch 早已终态 failed `agent_completion_dependency_pending`，无任何 pending/leased dispatch 能再驱动它），却永久撑起 `has_active_work` 并让 plan 无法落 lands_blocked——落位梯永远走 RUNNING。
 - 修复方向（codex/fix-reconcile-zombie-attempts）：`_apply_ledger_reconcile_for_run` 内先做僵尸 attempt 终局化（starting/dispatching/running 且无 pending/leased dispatch → failed 带 reconciliation 审计问题；waiting_human 与有活 dispatch 的不动），再 plan→supersede→复活；复活排除扩展到 succeeded/stale 绑定（failed 绑定保持可复活，保住 checkpoint_node_mismatch 修复形状）。
 - 预期修复后子 run 诚实落位 BLOCKED（最深真实阻塞 = knowledge_ingestion-a1 的预算问题，预算上限已两次提高、重试可通过准入），随后走 重试知识入库 → readiness（图缺口）→ 豁免 → 执行链。
+
+#### B.16 续：⑭ 复验 + ⑮ 定案与复验（reconcile 死循环全闭合）
+
+- ⑭ 复验（fe06b9420 合入重启后第二次「对账运行」）：三层全部生效——僵尸 source_finding-a2 终局化为 failed（`agent_completion_dependency_pending` 真实原因逐字保留）、绑定已成功 attempt 的问题 dispatch（act-8ec85658）不再复活、搁浅预算预留被同事务补偿（formal evt13-15 reconciled 记录 compensatedReservations 含子 run）。但子 run 仍无落位：`plan_ledger_authority` 按设计只让 readiness 裁决 authored 落位，唯一存活的 ingestion-a1 是预算类事件性阻塞 → 级联走「零工作 continue」= 缺陷⑮。
+- ⑮ 修复（2075ef49c）：级联零工作分支对子 run 专属扩展——重查 post-supersede 尝试，存在存活 blocked attempt 时落 BLOCKED（problem_json 逐字复制、空则哨兵兜底、事件带 `landing: surviving_blocker` 判别符）；真零工作与父 run 行为不变（父 run 事件性阻塞形状有回归测试钉死 reconcile_no_active_work）。
+- ⑮ 前端复验（第三次「对账运行」，真实按钮）：子 run run-1ca97605acf3 落位 **blocked v17**，active_node=knowledge_ingestion，blocked_problem=预算阻塞 verbatim，evt96 `{"reconciled":true, "revivedDispatchCount":0, "reconciledStatus":"blocked", "landing":"surviving_blocker", "parentRunId":"run-332a539909a6"}`。UI 投影随即翻转为「知识搜集失败；可按剩余预算重试」。**reconcile 死循环四层（⑫⑭⑮）+ 预算自续环（⑧⑨⑬）全部闭合。**
+
+### B.17 缺陷⑯：cancel 清理队列残留任务在启动排空时崩溃后端——runtime 无法拉起（P0，事故定案，修复中）
+
+- 事故：⑮ 复验后 ~09:44 后端进程死亡，Launcher start/restart 均 bridge_failed exit 3 无法拉起；前端「后端 离线 / Failed to fetch」。
+- 根因（backend.stderr 五连 traceback + 账本交叉）：`cancel_run_cleanup._handle → _finalize_budget_receipts → finalize_cancelled_run_budget_receipts` 对 run-20f4bcdf8c84 硬断言 `status=='cancelled'`，而该 run 早在 09-05 已从 cancelled 归档为 **archived**（run_archived evt13 archivedFromStatus=cancelled）→ `BudgetAuthorityError` 未捕获穿透 → 进程崩溃；每次启动排空清理队列即重演 = 崩溃环，后端起不来。
+- 影响面：全部运行时验证被硬阻塞（本 run 数据完好：formal blocked v8 / child blocked v17，账本无损）。
+- 修复方向（codex/fix-cancel-cleanup-crash-loop）：(1) finalize 接受 archived-from-cancelled（归档来源权威判定，其余终态保持 fail-loud）；(2) 清理 handler 每任务异常隔离 + 有界重试/停驻，毒条目不得杀进程；(3) 排查四天前陈旧任务为何仍在队列被 re-arm，补完成标记幂等性。
