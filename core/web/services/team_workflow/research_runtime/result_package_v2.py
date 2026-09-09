@@ -598,6 +598,86 @@ def _cited_evidence_run_ids(dimension_payload: Mapping[str, Any]) -> list[str]:
     return sorted(runs)
 
 
+def _source_candidate_title_index(
+    *, team_id: str, cited_run_ids: Sequence[str]
+) -> dict[str, str]:
+    """Index ``sourceUrl -> title`` over the cited runs' source candidates.
+
+    Lean claim-evidence cards carry only a URL-shaped ``sourceId``, so their
+    display title is resolved against the source candidates the very runs the
+    reviews cited collected (production shape: ``candidateType ==
+    "source_manifest"`` records whose DOI ``sourceUrl`` equals the card's
+    ``sourceId``).  Both the top-level ``sourceUrl``/``title`` and the
+    ``metadata`` envelope of a candidate record are read; a run whose source
+    batch is absent contributes nothing.  This reads the same strict scoped
+    loader as every other authority here — resolution stays truthful or the
+    card keeps failing closed.
+    """
+
+    index: dict[str, str] = {}
+    for run_id in cited_run_ids:
+        envelope = load_scoped_artifact_payload(
+            "source_candidate_batch",
+            team_id=team_id,
+            authority_run_id=run_id,
+        )
+        if not isinstance(envelope, Mapping):
+            continue
+        for candidate in _list_of_mappings(
+            envelope.get("candidates") or envelope.get("candidateSources")
+        ):
+            metadata = candidate.get("metadata")
+            metadata = metadata if isinstance(metadata, Mapping) else {}
+            url = _text(candidate.get("sourceUrl") or metadata.get("sourceUrl"))
+            title = _text(candidate.get("title") or metadata.get("title"))
+            if url and title and url not in index:
+                index[url] = title
+    return index
+
+
+def _project_lean_evidence_card(
+    card: Mapping[str, Any], title_index: Mapping[str, str]
+) -> dict[str, Any]:
+    """Project the v2 envelope fields a lean claim-evidence card lacks.
+
+    Hypothesis-first stores persist cards with only ``quote`` / ``sourceId`` /
+    ``locator`` / store timestamps / ``evidenceKind`` — no ``candidateId`` and
+    no collection-stage envelope — so the strict ``_evidence_item``
+    requirements would fail closed.  Each missing field is filled only from an
+    authority the card already carries: the ``kind: "url"`` locator becomes
+    ``source_url``, the store timestamps become ``retrieved_at``, the
+    evidence-kind vocabulary (``_SOURCE_KIND_SOURCE_TYPES``; unknown kinds such
+    as ``primary_result`` land on the schema's non-authoritative ``other``)
+    becomes ``source_type``, and the cited runs' candidate title resolves the
+    URL-shaped ``sourceId``.  Nothing is invented: a field that cannot be
+    resolved from those authorities stays absent so the strict producer still
+    raises.
+    """
+
+    projected = dict(card)
+    locator = card.get("locator")
+    if isinstance(locator, Mapping) and _text(locator.get("kind")).casefold() == "url":
+        if not _text(_pick(projected, "source_url", "sourceUrl")):
+            url = _text(locator.get("url"))
+            if url:
+                projected["source_url"] = url
+    if not _text(_pick(projected, "retrieved_at", "retrievedAt")):
+        retrieved_at = _text(card.get("updatedAt")) or _text(card.get("createdAt"))
+        if retrieved_at:
+            projected["retrieved_at"] = retrieved_at
+    if not _text(_pick(projected, "source_type", "sourceType")):
+        evidence_kind = _text(card.get("evidenceKind")).casefold()
+        if evidence_kind:
+            projected["source_type"] = _SOURCE_KIND_SOURCE_TYPES.get(
+                evidence_kind, "other"
+            )
+    if not _text(_pick(projected, "title")):
+        title = _text(title_index.get(_text(card.get("sourceId"))))
+        if title:
+            projected["title"] = title
+    return projected
+
+
 def _aggregated_evidence_card_payload(
     *, team_id: str, cited_run_ids: Sequence[str]
 ) -> dict[str, Any] | None:
@@ -646,6 +726,20 @@ def _aggregated_evidence_card_payload(
             cards.append(card)
     if not cards:
         return None
+    # Lean cards (no candidateId, no collection-stage envelope) would fail
+    # closed at ``_evidence_item``; project their envelope fields from the
+    # authorities they already carry.  Cards bound to a candidate id keep the
+    # exact id-authority resolution (or orphan gate) below, untouched.
+    lean_projection = any(
+        not _text(card.get("candidateId") or card.get("recordId"))
+        and not _text(card.get("title"))
+        for card in cards
+    )
+    if lean_projection:
+        title_index = _source_candidate_title_index(
+            team_id=team_id, cited_run_ids=cited_run_ids
+        )
+        cards = [_project_lean_evidence_card(card, title_index) for card in cards]
     return {
         "teamId": team_id,
         "sourceCollectionRunIds": aggregated_runs,
@@ -669,6 +763,10 @@ def _evidence_card_payload(
     with the canonical missing error — or comes back without cards — does
     the aggregation layer read the runs the dimension_reviews actually cite.
     When nothing is aggregatable, the original fail-closed error stands.
+    Cards that carry no candidate id and no collection-stage envelope (the
+    lean hypothesis-first store shape) additionally get their envelope fields
+    projected from authorities they already carry; every other card keeps the
+    exact id-authority resolution below.
     """
 
     missing_error: ResultPackageV2Error | None = None
