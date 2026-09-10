@@ -190,6 +190,69 @@ def _normalized_str_list(value: Any) -> list[str]:
     return [str(item or "").strip() for item in list(value or []) if str(item or "").strip()]
 
 
+def _dimension_review_ref(
+    *,
+    round_id: str,
+    review_id: str,
+    workflow_run_id: str,
+    hypothesis_id: str,
+) -> dict[str, str]:
+    """Minimal locator for one candidate's audit rows in the authority store.
+
+    ``reviewId`` is content-addressed (round identity + input snapshot), so a
+    regenerated round with different review inputs cannot be mistaken for the
+    same authority.  Resolution goes through the ``dimension_reviews``
+    workflow artifact store (kind + reviewRoundId, scoped by workflowRunId
+    when the round carries a run identity).
+    """
+    ref = {
+        "kind": "dimension_reviews",
+        "reviewId": review_id,
+        "reviewRoundId": round_id,
+    }
+    if workflow_run_id:
+        ref["workflowRunId"] = workflow_run_id
+    if hypothesis_id:
+        ref["hypothesisId"] = hypothesis_id
+    return ref
+
+
+def _refs_only_candidate(
+    candidate: Any,
+    rows_by_candidate: dict[str, list[dict[str, Any]]],
+    *,
+    round_id: str,
+    review_id: str,
+    workflow_run_id: str,
+) -> Any:
+    """Replace one candidate's embedded review rows with authority references.
+
+    The append-only round row must not carry a second copy of the
+    ``dimension_reviews`` payload: two writable copies drift.  Only the rows'
+    locator stays on the candidate; the payload itself is persisted exactly
+    once by the canonical authority writer on the same generation path.
+    """
+    if not isinstance(candidate, Mapping):
+        return candidate
+    candidate_id = str(candidate.get("candidateId") or "").strip()
+    if candidate_id not in rows_by_candidate:
+        return dict(candidate)
+    stripped = {
+        key: value
+        for key, value in candidate.items()
+        if key not in ("dimensionReviews", "dimension_reviews")
+    }
+    stripped["dimensionReviewRefs"] = [
+        _dimension_review_ref(
+            round_id=round_id,
+            review_id=review_id,
+            workflow_run_id=workflow_run_id,
+            hypothesis_id=candidate_id,
+        )
+    ]
+    return stripped
+
+
 def _claim_round_generation(team_id: str, round_id: str) -> bool:
     """Atomically claim the in-flight generation slot for one round id.
 
@@ -991,6 +1054,65 @@ def generate_hypothesis_round_from_meeting(
             )
         )
         review = {**review, "candidates": canonical_review["candidates"]}
+        # Single payload authority: the audit-seven rows this generation
+        # produced are persisted ONLY in the canonical ``dimension_reviews``
+        # authority, which the generation chain materializes from the payload
+        # returned below right after the round lands.  A second copy embedded
+        # on the append-only round row is what let the two stores drift, so
+        # NEW rounds carry minimal references instead and the rows ride the
+        # in-memory generation result exactly once.  Historical rounds keep
+        # their embedded rows untouched: readers fall back to them for
+        # pre-ref records (hypothesis_first_chain._dimension_review_authority_input).
+        dimension_review_rows_by_candidate: dict[str, list[dict[str, Any]]] = {}
+        for candidate in review["candidates"]:
+            if not isinstance(candidate, Mapping):
+                continue
+            candidate_id = str(candidate.get("candidateId") or "").strip()
+            rows = candidate.get("dimensionReviews")
+            if not isinstance(rows, (list, tuple)):
+                rows = candidate.get("dimension_reviews")
+            if not candidate_id or not isinstance(rows, (list, tuple)) or not rows:
+                continue
+            dimension_review_rows_by_candidate[candidate_id] = [
+                dict(row) for row in rows if isinstance(row, Mapping)
+            ]
+        dimension_review_payload: dict[str, Any] | None = None
+        if dimension_review_rows_by_candidate:
+            review_id = (
+                f"drev-{_stable_hash(
+                    {
+                        "roundId": round_id,
+                        "scopeHash": scope_hash,
+                        "inputSnapshotHash": input_snapshot_hash,
+                    }
+                )[:12]}"
+            )
+            dimension_review_payload = {
+                "reviewId": review_id,
+                "reviewRoundId": round_id,
+                "candidates": [
+                    {
+                        "candidateId": candidate_id,
+                        "dimensionReviews": dimension_review_rows_by_candidate[
+                            candidate_id
+                        ],
+                    }
+                    for candidate_id in dimension_review_rows_by_candidate
+                ],
+            }
+            review = {
+                **review,
+                "candidates": [
+                    _refs_only_candidate(
+                        candidate,
+                        dimension_review_rows_by_candidate,
+                        round_id=round_id,
+                        review_id=review_id,
+                        workflow_run_id=workflow_run_id,
+                    )
+                    for candidate in review["candidates"]
+                ],
+            }
         meeting_refs: list[dict[str, str]] = []
         for bound_meeting, digest, decision_ids in zip(
             meetings, digests, meeting_decision_ids
@@ -1051,6 +1173,10 @@ def generate_hypothesis_round_from_meeting(
             },
         )
         result["closed"] = True
+        if dimension_review_payload is not None:
+            # In-memory only: the rows for the chain's authority write on the
+            # same generation path.  They are never persisted on the round row.
+            result["dimensionReviewsPayload"] = dimension_review_payload
         result["review"] = {
             "contextId": review["reviewContextId"],
             "positionSeed": review["positionSeed"],

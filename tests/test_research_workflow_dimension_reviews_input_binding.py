@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -350,10 +351,20 @@ def test_generation_persists_recomputable_snapshot_hash_and_canonical_rows(
     assert binding.recompute_round_input_snapshot_hash(_TEAM_ID, stored) == snapshot_hash
 
     # 评审行的裸 candidate-* 引用被映射为可读回的 canonical ref。
-    rows = stored["candidates"][0]["dimensionReviews"]
-    assert rows and all(
-        row["evidence_refs"] == [canonical_ref] for row in rows
+    # Single-authority:新轮次不再内嵌 payload,行只随生成结果在内存中走一次
+    # (dimensionReviewsPayload),轮次行携带 minimal references。
+    payload = result.get("dimensionReviewsPayload")
+    assert isinstance(payload, Mapping)
+    payload_rows = payload["candidates"][0]["dimensionReviews"]
+    assert payload_rows and all(
+        row["evidence_refs"] == [canonical_ref] for row in payload_rows
     )
+    stored_rows = stored["candidates"][0].get("dimensionReviews")
+    assert not stored_rows
+    refs = stored["candidates"][0].get("dimensionReviewRefs")
+    assert refs and refs[0]["reviewRoundId"] == stored["roundId"]
+    assert refs[0]["hypothesisId"] == stored["candidates"][0]["candidateId"]
+    assert refs[0]["kind"] == "dimension_reviews"
 
     # 输入变化必须可见：摘要内容哈希改变 → 快照哈希改变。
     tampered = dict(stored)
