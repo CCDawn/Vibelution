@@ -127,6 +127,46 @@ def test_candidate_runtime_executes_candidate_harness_contract_in_isolated_proce
     assert not (candidate / ".runtime" / "supervised-candidate-runtime").exists()
 
 
+def test_candidate_runtime_input_stays_in_candidate_worktree_when_runtime_home_is_external(
+    tmp_path, monkeypatch
+):
+    candidate, variant, module_sha = _candidate(tmp_path)
+    shared_runtime_home = tmp_path / "shared-runtime"
+    monkeypatch.setattr(
+        service,
+        "resolve_project_runtime_home",
+        lambda _path: shared_runtime_home,
+        raising=False,
+    )
+
+    def fake_sandbox(*_args, **_kwargs):
+        inputs = list((candidate / ".runtime" / "supervised-candidate-runtime").glob("*.json"))
+        assert len(inputs) == 1
+        result = {
+            "protocolVersion": 1,
+            "status": "success",
+            "executionBackend": "isolated_candidate_subprocess",
+            "candidateVariantId": variant["variantId"],
+            "candidatePatchSha256": variant["patchSha256"],
+            "moduleSha256": module_sha,
+            "processId": os.getpid() + 100,
+            "evolutionSummary": {},
+            "workspaceEvidence": {},
+            "extensionEvidence": {},
+        }
+        return f"{service.CANDIDATE_RUNTIME_RESULT_PREFIX}{json.dumps(result)}"
+
+    evidence = service.run_candidate_runtime_evidence(
+        candidate_path=candidate,
+        candidate_variant=variant,
+        harness_result=_harness_result(candidate),
+        sandbox_runner=fake_sandbox,
+    )
+
+    assert evidence["status"] == "verified"
+    assert not shared_runtime_home.exists()
+
+
 def test_candidate_runtime_fails_closed_when_subprocess_module_hash_does_not_match(tmp_path):
     candidate, variant, _ = _candidate(tmp_path)
 

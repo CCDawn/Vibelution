@@ -39,6 +39,18 @@ def test_python_lint_tool_degrades_cleanly_without_ruff(monkeypatch, tmp_path):
     assert payload["missing_dependency"] == "ruff"
 
 
+def test_python_lint_tool_reports_a_missing_target(monkeypatch, tmp_path):
+    monkeypatch.setattr(pit, "_module_available", lambda name: True)
+    monkeypatch.setattr(pit, "_project_root", lambda: tmp_path)
+
+    payload = json.loads(pit.python_lint_tool("missing.py"))
+
+    assert payload["status"] == "error"
+    assert payload["error"] == "target_missing"
+    assert payload["target"] == "missing.py"
+    assert payload["issue_count"] == 0
+
+
 def test_python_lint_tool_parses_ruff_json(monkeypatch, tmp_path):
     source = tmp_path / "demo.py"
     source.write_text("import os\n", encoding="utf-8")

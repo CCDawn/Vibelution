@@ -17,9 +17,6 @@ from core.infrastructure.codex_cli_sandbox import (
     write_codex_sandbox_terminal_stdin,
 )
 from scripts.evolution_harness import HarnessResult
-from vibelution_storage import resolve_project_runtime_home
-
-
 CANDIDATE_RUNTIME_PROTOCOL_VERSION = 1
 CANDIDATE_RUNTIME_RESULT_PREFIX = "VIBELUTION_CANDIDATE_RUNTIME_RESULT="
 _CANDIDATE_RUNTIME_INPUT_LIMIT = 120_000
@@ -173,7 +170,9 @@ def _candidate_runtime_events(result: HarnessResult) -> list[dict[str, Any]]:
 
 
 def _runtime_input_path(candidate_path: Path) -> Path:
-    runtime_dir = (resolve_project_runtime_home(candidate_path) / "supervised-candidate-runtime").resolve()
+    runtime_dir = (
+        candidate_path.resolve() / ".runtime" / "supervised-candidate-runtime"
+    )
     runtime_dir.mkdir(parents=True, exist_ok=True)
     return runtime_dir / f"{uuid.uuid4().hex}.json"
 

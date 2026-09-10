@@ -338,10 +338,27 @@ def python_lint_tool(target: str = ".", max_issues: int = 100) -> str:
     Returns:
         JSON 字符串
     """
+    resolved = _resolve_path(target)
+    if not resolved.exists():
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "target_missing",
+                "tool": "ruff",
+                "target": _safe_rel(resolved),
+                "issue_count": 0,
+                "returned_issue_count": 0,
+                "issues": [],
+                "stderr": "",
+                "message": "Lint 目标不存在。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     if not _module_available("ruff"):
         return _missing_dependency_message("ruff", "python_lint")
 
-    resolved = _resolve_path(target)
     command = [
         sys.executable,
         "-m",
