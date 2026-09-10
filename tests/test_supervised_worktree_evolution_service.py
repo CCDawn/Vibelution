@@ -8,7 +8,9 @@ import pytest
 from core.infrastructure import developer_sandbox
 from core.web.services import supervised_worktree_evolution_service as service
 from scripts.evolution_harness import HarnessResult
-from tests.test_supervised_candidate_integration_service import install_validation_authority
+from tests.test_supervised_candidate_integration_service import (
+    install_validation_authority,
+)
 
 pytestmark = pytest.mark.slow
 
@@ -2815,6 +2817,54 @@ def test_get_supervised_worktree_run_cleanses_nested_candidate_worktree_path(tmp
     assert "pathValidationError" in snapshot["candidateWorktree"]
     assert "主项目目录内" in snapshot["candidateWorktree"]["pathValidationError"]
     assert snapshot["actionStates"]["discard"]["enabled"] is False
+
+
+def test_candidate_worktree_path_accepts_only_the_owned_harness_entry_in_branch_pool(tmp_path):
+    project_root = tmp_path / "project"
+    _init_repo(project_root)
+    run_id = "swte-branch-pool"
+    candidate = project_root / ".worktrees" / "vibelution-harness-swte-bra-12345678"
+    candidate.mkdir(parents=True)
+    unrelated = project_root / ".worktrees" / "another-task"
+    unrelated.mkdir()
+
+    accepted = service._coerce_candidate_worktree_path(
+        {"path": str(candidate)},
+        project_root=project_root,
+        run_id=run_id,
+    )
+
+    assert accepted == candidate.resolve()
+    with pytest.raises(service.SupervisedWorktreeRunValidationError, match="主项目目录内"):
+        service._coerce_candidate_worktree_path(
+            {"path": str(unrelated)},
+            project_root=project_root,
+            run_id=run_id,
+        )
+
+
+def test_candidate_worktree_cleanup_allows_owned_harness_entry_in_branch_pool(tmp_path):
+    project_root = tmp_path / "project"
+    _init_repo(project_root)
+    run_id = "swte-branch-pool"
+    candidate = project_root / ".worktrees" / "vibelution-harness-swte-bra-12345678"
+    candidate.mkdir(parents=True)
+
+    plan = service._candidate_worktree_cleanup_plan(
+        {"runId": run_id},
+        project_root=project_root,
+        worktree={
+            "path": str(candidate),
+            "cleanupOwner": service.RUN_KIND,
+            "cleanupRunId": run_id,
+        },
+    )
+
+    assert plan == {
+        "status": "allowed",
+        "reason": "owned_candidate_worktree",
+        "path": str(candidate.resolve()),
+    }
 
 
 def test_list_supervised_worktree_runs_cleanses_invalid_candidate_worktree_path(tmp_path):

@@ -17,12 +17,12 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from core.evaluation import load_supervised_bundle, prepare_dataset_run
-from vibelution_storage import resolve_project_workspace_home
 from core.evaluation.supervised_evolution import (
     normalize_supervised_mental_model_mode,
     supervised_mental_model_enabled_for_mode,
 )
 from core.infrastructure import developer_sandbox, git_process
+from core.infrastructure.branch_workspace import BranchWorkspaceError, branch_pool_path
 from core.launcher import service as launcher_service
 from core.llm.errors import classify_exception
 from core.runtime_manager import work_run_store
@@ -35,25 +35,26 @@ from core.runtime_manager.work_run_leases import (
 )
 from core.runtime_manager.work_run_store import WorkRunStore
 from scripts.evolution_harness import (
+    HarnessResult,
     create_checkpoint_snapshot,
     create_worktree,
     delete_checkpoint_ref,
-    HarnessResult,
     remove_worktree,
 )
+from vibelution_storage import resolve_project_workspace_home
 
 from .i18n import get_web_language, text_for
 from .runtime_scene_service import record_runtime_scene_event
 from .session_service import list_active_session_work_runs
 from .supervised_agent_service import supervised_agent_bindings
-from .supervised_candidate_runtime_service import (
-    CandidateRuntimeExecutionError,
-    run_candidate_runtime_evidence,
-)
 from .supervised_candidate_integration_service import (
     CandidateIntegrationError,
     integrate_candidate,
     revert_candidate_commit,
+)
+from .supervised_candidate_runtime_service import (
+    CandidateRuntimeExecutionError,
+    run_candidate_runtime_evidence,
 )
 from .supervised_conversation_harness_adapter import run_supervised_conversation_harness
 from .supervised_judge_closed_loop import (
@@ -64,7 +65,6 @@ from .supervised_judge_closed_loop import (
     normalize_judge_evaluation,
     normalize_judge_rubric,
 )
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SOURCE_PROJECT_ROOT = PROJECT_ROOT
@@ -2109,6 +2109,25 @@ def _default_worktree_factory(project_root: Path, run_id: str) -> dict[str, Any]
     }
 
 
+def _is_owned_harness_worktree_path(
+    candidate_path: Path,
+    *,
+    project_root: Path,
+    run_id: str,
+) -> bool:
+    """Allow only this run's harness checkout in the authoritative branch pool."""
+
+    try:
+        branch_pool = branch_pool_path(project_root)
+        relative = candidate_path.relative_to(branch_pool)
+    except (BranchWorkspaceError, ValueError):
+        return False
+    return (
+        len(relative.parts) == 1
+        and candidate_path.name.startswith(f"vibelution-harness-{run_id[:8]}-")
+    )
+
+
 def _coerce_candidate_worktree_path(
     candidate_worktree: dict[str, Any],
     *,
@@ -2139,6 +2158,12 @@ def _coerce_candidate_worktree_path(
         raise SupervisedWorktreeRunValidationError(
             f"候选工作树路径不可为主项目目录（runId={run_id}）。"
         )
+    if _is_owned_harness_worktree_path(
+        candidate_path,
+        project_root=project_root,
+        run_id=run_id,
+    ):
+        return candidate_path
     try:
         candidate_path.relative_to(project_root)
     except ValueError:
@@ -4106,21 +4131,30 @@ def _candidate_worktree_cleanup_plan(
         return {"status": "skipped", "reason": "invalid_path", "path": raw_path}
 
     project_root = project_root.resolve()
+    if not candidate_path.exists():
+        return {"status": "skipped", "reason": "missing_path", "path": str(candidate_path)}
+    if not candidate_path.is_dir():
+        return {"status": "skipped", "reason": "not_directory", "path": str(candidate_path)}
     if candidate_path == project_root:
         return {"status": "skipped", "reason": "candidate_is_project_root", "path": str(candidate_path)}
+    cleanup_owner = str(worktree.get("cleanupOwner") or "").strip()
+    cleanup_run_id = str(worktree.get("cleanupRunId") or "").strip()
+    if (
+        cleanup_owner == RUN_KIND
+        and cleanup_run_id == run_id
+        and _is_owned_harness_worktree_path(
+            candidate_path,
+            project_root=project_root,
+            run_id=run_id,
+        )
+    ):
+        return {"status": "allowed", "reason": "owned_candidate_worktree", "path": str(candidate_path)}
     try:
         candidate_path.relative_to(project_root)
         return {"status": "skipped", "reason": "candidate_inside_project_root", "path": str(candidate_path)}
     except ValueError:
         pass
 
-    if not candidate_path.exists():
-        return {"status": "skipped", "reason": "missing_path", "path": str(candidate_path)}
-    if not candidate_path.is_dir():
-        return {"status": "skipped", "reason": "not_directory", "path": str(candidate_path)}
-
-    cleanup_owner = str(worktree.get("cleanupOwner") or "").strip()
-    cleanup_run_id = str(worktree.get("cleanupRunId") or "").strip()
     if cleanup_owner == RUN_KIND and cleanup_run_id == run_id:
         return {"status": "allowed", "reason": "owned_candidate_worktree", "path": str(candidate_path)}
 
