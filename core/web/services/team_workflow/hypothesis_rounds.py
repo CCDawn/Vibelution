@@ -313,6 +313,20 @@ def create_hypothesis_round(team_id: str, payload: Mapping[str, Any] | None = No
         "closedAt": str(request.get("closedAt") or "").strip(),
         "closedBy": str(request.get("closedBy") or "").strip(),
     }
+    # Additive identity bindings for NEW rounds: ``questionId`` is the
+    # normalized question identity (e.g. ``SCI-014``) and ``workflowRunId``
+    # is the driving run when the round was created inside one.  Both are
+    # deliberately outside ``_round_definition`` (same reasoning as
+    # ``inputSnapshotHash`` below): the derived binding must not flip
+    # append-only id reuse for rounds stored before the fields existed.
+    # Unknown values stay absent so the row keeps the historical shape and
+    # every reader keeps treating missing exactly as before.
+    question_id = str(request.get("questionId") or "").strip().upper()
+    if question_id:
+        record["questionId"] = question_id
+    workflow_run_id = str(request.get("workflowRunId") or "").strip()
+    if workflow_run_id:
+        record["workflowRunId"] = workflow_run_id
     review_context_id = str(request.get("reviewContextId") or "").strip()
     if review_context_id:
         record.update(
@@ -731,6 +745,40 @@ def generate_hypothesis_round_from_meeting(
             raise ResearchHypothesisRoundError(
                 "fan-in meetings must belong to the same question",
             )
+    # Additive identity bindings derived from the bound review meetings.
+    # Their scope ``question`` field carries the question id (the same value
+    # the chain writes into selections and receipt-bound contexts), and a
+    # meeting created inside a workflow run carries that run through its
+    # server-owned receipt authority, with the validated discussion scope as
+    # the read-compatible fallback.  Rounds generated without any run
+    # authority (dev/chain-only rounds) store no ``workflowRunId``: the
+    # binding is only ever written when it is actually known, never guessed.
+    question_id = (
+        str(request.get("questionId") or "").strip()
+        or str(meeting.get("question") or "").strip()
+    ).upper()
+    meeting_workflow_run_ids: set[str] = set()
+    for bound_meeting in meetings:
+        run_id = ""
+        bound_receipt_authority = bound_meeting.get("modelInvocationReceiptAuthority")
+        if isinstance(bound_receipt_authority, Mapping):
+            run_id = str(bound_receipt_authority.get("workflowRunId") or "").strip()
+        if not run_id:
+            discussion_scope = bound_meeting.get("discussionScope")
+            if isinstance(discussion_scope, Mapping):
+                run_id = str(discussion_scope.get("workflowRunId") or "").strip()
+        if not run_id:
+            run_id = str(bound_meeting.get("workflowRunId") or "").strip()
+        if run_id:
+            meeting_workflow_run_ids.add(run_id)
+    if len(meeting_workflow_run_ids) > 1:
+        raise ResearchHypothesisRoundError(
+            "bound review meetings belong to different workflow runs; "
+            "refusing to bind the hypothesis round to a workflow run",
+        )
+    workflow_run_id = str(request.get("workflowRunId") or "").strip() or (
+        next(iter(meeting_workflow_run_ids)) if meeting_workflow_run_ids else ""
+    )
     round_seed = (
         {"meetingRoundIds": meeting_ids, "scopeHash": scope_hash}
         if requested_meeting_ids
@@ -965,6 +1013,12 @@ def generate_hypothesis_round_from_meeting(
             {
                 **scope,
                 "roundId": round_id,
+                "questionId": question_id,
+                **(
+                    {"workflowRunId": workflow_run_id}
+                    if workflow_run_id
+                    else {}
+                ),
                 "candidates": review["candidates"],
                 "pairwiseComparisons": review["pairwiseComparisons"],
                 "pareto": review["pareto"],

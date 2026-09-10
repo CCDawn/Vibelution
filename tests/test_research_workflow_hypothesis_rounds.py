@@ -849,3 +849,201 @@ def test_negative_quality_round_is_persisted_and_reused_without_losing_verdict(t
     assert reused is not None
     for key, value in quality.items():
         assert reused[key] == value
+
+
+# ---------------------------------------------------------------------------
+# additive identity bindings (questionId / workflowRunId)
+#
+# New round rows carry the owning question id (normalized uppercase) and,
+# when the round was generated inside a workflow run, that run id.  Both
+# fields are additive: unknown values stay absent, historical rows are never
+# rewritten, and no existing reader scopes rounds by them.
+
+
+def _generate_once(monkeypatch, team_id, payload, meeting_id="meeting-a"):
+    """Run one full generation with a fake (zero-cost) review executor."""
+    from core.web.services.team_workflow import (
+        hypothesis_review_executor,
+        research_memory_context,
+    )
+
+    monkeypatch.setattr(
+        research_memory_context,
+        "build_hypothesis_review_context",
+        lambda **_kwargs: {"contextId": "ctx-identity"},
+    )
+    monkeypatch.setattr(
+        hypothesis_review_executor,
+        "execute_hypothesis_review",
+        lambda context, **kwargs: _complete_review_output(),
+    )
+    return hypothesis_rounds_service.generate_hypothesis_round_from_meeting(
+        team_id, meeting_id, dict(payload)
+    )
+
+
+def _with_meeting_extra_field(monkeypatch, extra_by_meeting):
+    """Overlay extra fields onto the fan-in meetings served by _race_env."""
+    from core.web.services.team_workflow import meeting_rounds
+
+    original_get = meeting_rounds.get_meeting_round
+
+    def get_meeting(*args, **kwargs):
+        result = original_get(*args, **kwargs)
+        meeting_id = str((result.get("meetingRound") or {}).get("meetingRoundId") or "")
+        extra = extra_by_meeting.get(meeting_id)
+        if not extra:
+            return result
+        return {
+            **result,
+            "meetingRound": {**result["meetingRound"], **extra},
+        }
+
+    monkeypatch.setattr(meeting_rounds, "get_meeting_round", get_meeting)
+
+
+def test_generated_round_carries_question_id_and_workflow_run_id(
+    tmp_path, monkeypatch
+) -> None:
+    """A round generated inside a workflow run binds questionId + run id."""
+    team_id = _race_env(tmp_path, monkeypatch)
+    _with_meeting_extra_field(
+        monkeypatch,
+        {
+            "meeting-a": {"discussionScope": {"workflowRunId": "run-fanin-1"}},
+            "meeting-b": {"discussionScope": {"workflowRunId": "run-fanin-1"}},
+        },
+    )
+
+    result = _generate_once(monkeypatch, team_id, _group_payload())
+
+    assert result["status"] == "created"
+    stored = hypothesis_rounds_service.find_reusable_hypothesis_round(
+        team_id, result["round"]["roundId"]
+    )
+    assert stored is not None
+    assert stored["questionId"] == "SCI-091"
+    assert stored["workflowRunId"] == "run-fanin-1"
+
+
+def test_generated_round_without_a_workflow_run_carries_question_id_only(
+    tmp_path, monkeypatch
+) -> None:
+    """Dev/chain-only generation binds questionId; no run id is invented."""
+    team_id = _race_env(tmp_path, monkeypatch)
+
+    result = _generate_once(monkeypatch, team_id, _group_payload())
+
+    assert result["status"] == "created"
+    stored = hypothesis_rounds_service.find_reusable_hypothesis_round(
+        team_id, result["round"]["roundId"]
+    )
+    assert stored is not None
+    assert stored["questionId"] == "SCI-091"
+    assert "workflowRunId" not in stored
+
+
+def test_generation_refuses_meetings_from_different_workflow_runs(
+    tmp_path, monkeypatch
+) -> None:
+    """Disagreeing run identities across the fan-in fail closed unbound."""
+    team_id = _race_env(tmp_path, monkeypatch)
+    _with_meeting_extra_field(
+        monkeypatch,
+        {
+            "meeting-a": {"discussionScope": {"workflowRunId": "run-1"}},
+            "meeting-b": {"discussionScope": {"workflowRunId": "run-2"}},
+        },
+    )
+
+    with pytest.raises(
+        hypothesis_rounds_service.ResearchHypothesisRoundError
+    ) as excinfo:
+        _generate_once(monkeypatch, team_id, _group_payload())
+    assert "different workflow runs" in str(excinfo.value)
+    assert (
+        hypothesis_rounds_service.list_hypothesis_rounds(team_id)["roundCount"] == 0
+    )
+
+
+def test_create_round_binds_question_id_only_when_known(tmp_path, monkeypatch) -> None:
+    """Direct creates bind the normalized questionId; absent keys stay absent."""
+    team_id = _team(tmp_path, monkeypatch)
+
+    with_run = hypothesis_rounds_service.create_hypothesis_round(
+        team_id,
+        _round_payload(questionId="sci-091", workflowRunId="run-create-1"),
+    )
+    assert with_run["round"]["questionId"] == "SCI-091"
+    assert with_run["round"]["workflowRunId"] == "run-create-1"
+
+    question_only = hypothesis_rounds_service.create_hypothesis_round(
+        team_id,
+        _round_payload(roundId="hround-test-question-only", questionId="SCI-091"),
+    )
+    assert question_only["round"]["questionId"] == "SCI-091"
+    assert "workflowRunId" not in question_only["round"]
+
+    legacy_shape = hypothesis_rounds_service.create_hypothesis_round(
+        team_id,
+        _round_payload(roundId="hround-test-legacy-shape"),
+    )
+    assert "questionId" not in legacy_shape["round"]
+    assert "workflowRunId" not in legacy_shape["round"]
+
+
+def test_closure_copy_carries_identity_bindings(tmp_path, monkeypatch) -> None:
+    """Closing a round appends the closure copy with the bindings intact."""
+    team_id = _team(tmp_path, monkeypatch)
+    created = hypothesis_rounds_service.create_hypothesis_round(
+        team_id,
+        _round_payload(questionId="sci-091", workflowRunId="run-create-1"),
+    )
+
+    closed = hypothesis_rounds_service.close_hypothesis_round(
+        team_id, created["round"]["roundId"], _closure(created["round"])
+    )
+
+    assert closed["round"]["questionId"] == "SCI-091"
+    assert closed["round"]["workflowRunId"] == "run-create-1"
+
+
+def test_round_stored_without_identity_fields_still_reuses_across_binding(
+    tmp_path, monkeypatch
+) -> None:
+    """The derived binding never flips append-only id reuse (historical rows)."""
+    team_id = _team(tmp_path, monkeypatch)
+    # Deterministic metaReview: the default embeds createdAt, which would
+    # conflict on any re-presentation regardless of identity bindings.
+    fixed_meta_review = {
+        "metaReviewId": "meta-historical-1",
+        "reviewerAgentId": "agent-meta",
+        "recommendationCandidateId": "",
+        "rationale": "",
+        "riskNotes": "",
+        "accepted": False,
+    }
+
+    # Historical shape: the request carries no identity fields, so the stored
+    # row has neither key — exactly like the pre-binding production rows.
+    historical = hypothesis_rounds_service.create_hypothesis_round(
+        team_id, _round_payload(metaReview=fixed_meta_review)
+    )
+    assert "questionId" not in historical["round"]
+
+    # Re-presenting the same round id with the now-derived binding must reuse
+    # the stored row instead of failing with a content conflict.
+    reused = hypothesis_rounds_service.create_hypothesis_round(
+        team_id,
+        _round_payload(
+            metaReview=fixed_meta_review,
+            questionId="SCI-091",
+            workflowRunId="run-late-1",
+        ),
+    )
+    assert reused["status"] == "reused"
+    assert "questionId" not in reused["round"]
+    assert "workflowRunId" not in reused["round"]
+    assert (
+        hypothesis_rounds_service.list_hypothesis_rounds(team_id)["roundCount"] == 1
+    )
