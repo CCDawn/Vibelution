@@ -120,7 +120,7 @@ from core.llm.agent_runtime import (
 
 # A supervised Judge only returns a compact evidence-based verdict.  Its output
 # budget stays local to that turn, so operator model profiles remain unchanged.
-SUPERVISED_JUDGE_MAX_OUTPUT_TOKENS = 4_096
+SUPERVISED_JUDGE_MAX_OUTPUT_TOKENS = 8_192
 
 # 导入工具
 from tools import Key_Tools
