@@ -1239,8 +1239,52 @@ def _message_without_lifecycle_projected_tool_results(
     return stripped
 
 
+def _reasoning_content_by_assistant_event(events: list[TurnJournalEvent]) -> dict[str, str]:
+    """Map assistant-message event ids to the journaled reasoning preceding them.
+
+    Thinking providers journal the model's reasoning as ``assistant_item_committed``
+    events with ``kind == "reasoning"``. Those events are not model-visible, so the
+    main replay loop never sees them; DeepSeek-class thinking endpoints nevertheless
+    require a non-empty ``reasoning_content`` on replayed assistant messages that
+    carry ``tool_calls`` ("The `reasoning_content` in the thinking mode must be
+    passed back to the API").
+
+    Reasoning entries belong to the next assistant message of the same turn:
+    events arrive in sequence order and thinking precedes its output. The same
+    reasoning text can be journaled twice (UI capture + persist), so entries are
+    deduped per turn by text. Reasoning is never fabricated: turns without
+    reasoning entries yield no mapping.
+    """
+
+    reasoning_by_event: dict[str, str] = {}
+    pending_by_turn: dict[str, list[str]] = {}
+    seen: set[tuple[str, str]] = set()
+
+    def _consume(turn_id: str, event_id: str) -> None:
+        texts = pending_by_turn.pop(turn_id, [])
+        if texts:
+            reasoning_by_event[event_id] = "\n".join(texts)
+
+    for event in events:
+        turn_id = str(event.turn_id or "").strip()
+        if event.event_type == EVENT_ASSISTANT_ITEM_COMMITTED:
+            payload = event.payload or {}
+            kind = str(payload.get("kind") or "")
+            if kind == "reasoning":
+                text = str(payload.get("text") or "").strip()
+                if text and (turn_id, text) not in seen:
+                    seen.add((turn_id, text))
+                    pending_by_turn.setdefault(turn_id, []).append(text)
+            elif kind == "assistant_message":
+                _consume(turn_id, event.event_id)
+        elif event.event_type == EVENT_ASSISTANT_MESSAGE:
+            _consume(turn_id, event.event_id)
+    return reasoning_by_event
+
+
 def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> list[dict[str, Any]]:
     event_list = list(events or [])
+    reasoning_content_by_event = _reasoning_content_by_assistant_event(event_list)
     messages: list[dict[str, Any]] = []
     latest_partial_by_turn: dict[str, dict[str, Any]] = {}
     final_turn_ids: set[str] = set()
@@ -1346,6 +1390,12 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
                 in {"aborted", "cancelled", "canceled", "interrupted", "stopped", "stopped_by_user"},
             )
             if _message_has_visible_payload(message):
+                reasoning_text = reasoning_content_by_event.get(event.event_id, "")
+                if reasoning_text and (message.get("toolCalls") or message.get("tool_calls")):
+                    # Thinking providers require the reasoning text to round-trip
+                    # on assistant messages that carry tool_calls; attaching it
+                    # here does not affect the conversation-layer fingerprint.
+                    message["reasoning_content"] = reasoning_text
                 messages.append(message)
                 final_turn_ids.add(turn_id)
                 assistant_message_index_by_turn[turn_id] = len(messages) - 1

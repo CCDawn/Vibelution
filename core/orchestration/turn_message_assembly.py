@@ -387,7 +387,22 @@ def langchain_messages_from_conversation_layer(messages: Iterable[Any]) -> list:
         elif role == "user":
             restored.append({"role": "user", "content": content})
         elif role == "assistant":
-            restored.append(AIMessage(content=_coerce_text(content), tool_calls=assistant_tool_calls))
+            additional_kwargs: Dict[str, Any] = {}
+            reasoning_content = _coerce_text(item.get("reasoning_content")).strip()
+            if reasoning_content:
+                # DeepSeek-class thinking endpoints require the journaled
+                # reasoning text to round-trip on tool-call assistant messages.
+                additional_kwargs["reasoning_content"] = reasoning_content
+            if additional_kwargs:
+                restored.append(
+                    AIMessage(
+                        content=_coerce_text(content),
+                        tool_calls=assistant_tool_calls,
+                        additional_kwargs=additional_kwargs,
+                    )
+                )
+            else:
+                restored.append(AIMessage(content=_coerce_text(content), tool_calls=assistant_tool_calls))
         elif role == "tool":
             tool_call_id = _coerce_text(_mapping_get(item, "tool_call_id", "toolCallId")).strip()
             if tool_call_id:
