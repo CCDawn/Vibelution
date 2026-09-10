@@ -310,6 +310,7 @@ def _round_definition(record: Mapping[str, Any]) -> dict[str, Any]:
             "qualityStatus",
             "qualityFailureCode",
             "qualityFailureCandidateIds",
+            "coherenceFeedbackCandidateIds",
             "lineage",
             "meetingRefs",
         )
@@ -424,6 +425,7 @@ def create_hypothesis_round(team_id: str, payload: Mapping[str, Any] | None = No
     for key in (
         "coreHypothesisCoherence", "coreHypothesisCoherenceArtifactRef",
         "qualityStatus", "qualityFailureCode", "qualityFailureCandidateIds",
+        "coherenceFeedbackCandidateIds",
     ):
         if key in request:
             record[key] = request[key]
@@ -1156,6 +1158,7 @@ def generate_hypothesis_round_from_meeting(
                     for key in (
                         "coreHypothesisCoherence", "coreHypothesisCoherenceArtifactRef",
                         "qualityStatus", "qualityFailureCode", "qualityFailureCandidateIds",
+                        "coherenceFeedbackCandidateIds",
                     )
                     if key in review
                 },

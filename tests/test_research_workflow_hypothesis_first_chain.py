@@ -9380,6 +9380,144 @@ def test_quality_failed_round_automatically_records_rejected_terminal_result(tmp
     assert len(_auto_adjudication_records(ledger_path)) == 1
 
 
+def test_recommendation_scoped_round_accepts_instead_of_quality_reject(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SCI-085 e2e: sibling coherence failure must not reject the round.
+
+    A round whose recommended candidate passed every coherence check flows
+    through human acceptance and budget-exhaustion auto-adjudication as
+    accepted; only a failure of the recommended candidate itself can still
+    produce the rejected terminal result.
+    """
+    from core.research.workflow.contracts import (
+        CORE_HYPOTHESIS_COHERENCE_CHECK_IDS,
+        SCORE_DIMENSIONS,
+    )
+    from core.web.services.team_workflow import hypothesis_review_executor
+
+    def _scoped_review_result() -> dict[str, Any]:
+        scores = {dimension: 0.7 for dimension in SCORE_DIMENSIONS}
+
+        def reflection(candidate, context):
+            payload = {
+                "scores": dict(scores),
+                "claim": candidate["claim"],
+                "differenceFromAlternatives": candidate["differenceFromAlternatives"],
+                "rationale": "独立评分依据",
+            }
+            payload["coreHypothesisCoherence"] = {
+                "candidateId": candidate["candidateId"],
+                "reviewer": "llm:reviewer",
+                "checks": [
+                    {
+                        "checkId": check_id,
+                        "passed": (
+                            check_id != "prediction_entails_mechanism"
+                            or candidate["candidateId"] == _AUTO_CANDIDATE_ID
+                        ),
+                        "rationale": f"{check_id} 已逐项核对",
+                        "claimRefs": [f"claim:{candidate['candidateId']}:core"],
+                        "evidenceRefs": [f"evidence:{candidate['candidateId']}:support"],
+                    }
+                    for check_id in CORE_HYPOTHESIS_COHERENCE_CHECK_IDS
+                ],
+            }
+            return payload
+
+        def pairwise(left, right, context):
+            return {"outcome": "left_wins", "justification": "左侧候选领先"}
+
+        def metareview(context, candidates, pairwise, pareto):
+            return {
+                "recommendationCandidateId": _AUTO_CANDIDATE_ID,
+                "rationale": "位于 Pareto 前沿",
+                "riskNotes": "",
+                "accepted": True,
+            }
+
+        return hypothesis_review_executor.execute_hypothesis_review(
+            {
+                "contextId": "ctx-auto-advance-scoped",
+                "candidates": [
+                    {
+                        "candidateId": _AUTO_CANDIDATE_ID,
+                        "claim": "推荐候选的核心机制陈述",
+                        "differenceFromAlternatives": "推荐候选的机制路径差异",
+                    },
+                    {
+                        "candidateId": "hyp-auto-b",
+                        "claim": "兄弟候选的核心机制陈述",
+                        "differenceFromAlternatives": "兄弟候选的机制路径差异",
+                    },
+                ],
+                "requireCoreHypothesisCoherence": True,
+            },
+            reflection_runner=reflection,
+            pairwise_runner=pairwise,
+            metareview_runner=metareview,
+            reviewer_assignments={"metareview": "coordinator"},
+        )
+
+    review_result = _scoped_review_result()
+    # The executor scoped the round verdict to the recommended candidate and
+    # kept the sibling failure as feedback only.
+    assert review_result["qualityStatus"] == "passed"
+    assert review_result["qualityFailureCandidateIds"] == []
+    assert review_result["coherenceFeedbackCandidateIds"] == ["hyp-auto-b"]
+
+    # Human acceptance of the recommended candidate is no longer blocked by
+    # the sibling's coherence failure.
+    accept_root = tmp_path / "accept"
+    accept_root.mkdir()
+    team_id, ledger_path, _events = _auto_advance_env(accept_root, monkeypatch)
+    _allow_chain_claim_belief_gate(monkeypatch)
+    record = chain._question_hypothesis_rounds(team_id, _QUESTION_ID)[0]
+    record["metaReview"]["accepted"] = True
+    record.update({
+        "qualityStatus": review_result["qualityStatus"],
+        "qualityFailureCode": review_result["qualityFailureCode"],
+        "qualityFailureCandidateIds": review_result["qualityFailureCandidateIds"],
+        "coherenceFeedbackCandidateIds": review_result["coherenceFeedbackCandidateIds"],
+        "coreHypothesisCoherence": review_result["coreHypothesisCoherence"],
+    })
+    chain.record_human_adjudication(
+        team_id, question_id=_QUESTION_ID, hypothesis_round_id=_AUTO_ROUND_ID,
+        decision="accepted", rationale="accept recommended candidate",
+        idempotency_key="accept-scoped-round",
+    )
+    accepted = [
+        item
+        for item in _auto_adjudication_records(ledger_path)
+        if item.get("decision") == "accepted"
+    ]
+    assert len(accepted) == 1
+
+    # Budget-exhaustion auto-adjudication accepts the same scoped round
+    # instead of recording the rejected terminal result.
+    auto_root = tmp_path / "auto"
+    auto_root.mkdir()
+    auto_team_id, auto_ledger_path, _events = _auto_advance_env(
+        auto_root, monkeypatch
+    )
+    auto_record = chain._question_hypothesis_rounds(auto_team_id, _QUESTION_ID)[0]
+    auto_record.update({
+        "qualityStatus": review_result["qualityStatus"],
+        "qualityFailureCode": review_result["qualityFailureCode"],
+        "qualityFailureCandidateIds": review_result["qualityFailureCandidateIds"],
+        "coherenceFeedbackCandidateIds": review_result["coherenceFeedbackCandidateIds"],
+        "coreHypothesisCoherence": review_result["coreHypothesisCoherence"],
+    })
+    _allow_chain_claim_belief_gate(monkeypatch)
+    auto_result = chain.auto_adjudicate_exhausted_round(
+        auto_team_id, question_id=_QUESTION_ID
+    )
+    assert auto_result["decision"] == "accepted"
+    auto_records = _auto_adjudication_records(auto_ledger_path)
+    assert len(auto_records) == 1
+    assert auto_records[0]["decision"] == "accepted"
+
+
 @pytest.mark.parametrize("request_status", ["handed_off", "collecting"])
 def test_auto_adjudicate_accepted_second_round_preserves_handoff_gate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request_status: str

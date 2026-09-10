@@ -751,7 +751,7 @@ def _coherence_payload(candidate_id: str, *, failed_check: str = "") -> dict:
     }
 
 
-def test_stage_one_coherence_failure_keeps_review_steps_and_marks_quality():
+def test_stage_one_quality_scopes_to_recommended_candidate_and_keeps_feedback():
     calls = {"pairwise": 0, "pareto": 0, "metareview": 0}
     runners = _complete_review_runners()
 
@@ -787,10 +787,81 @@ def test_stage_one_coherence_failure_keeps_review_steps_and_marks_quality():
     )
 
     assert calls == {"pairwise": 1, "pareto": 0, "metareview": 1}
+    # The MetaReview recommendation (cand-a) passed every coherence check, so
+    # the round-level verdict — the accept/convergence authority — passes
+    # even though sibling cand-b failed.  SCI-085: sibling failure stays
+    # revision feedback instead of killing the recommended candidate's round.
+    assert result["qualityStatus"] == "passed"
+    assert result["qualityFailureCode"] == ""
+    assert result["qualityFailureCandidateIds"] == []
+    assert result["coherenceFeedbackCandidateIds"] == ["cand-b"]
+    assert result["coreHypothesisCoherence"][1]["passed"] is False
+
+
+def test_stage_one_recommended_candidate_failure_still_fails_the_round():
+    runners = _complete_review_runners()
+
+    def reflection(candidate, context):
+        payload = runners["reflection_runner"](candidate, context)
+        payload["coreHypothesisCoherence"] = _coherence_payload(
+            candidate["candidateId"],
+            failed_check=(
+                "prediction_entails_mechanism"
+                if candidate["candidateId"] == "cand-b"
+                else ""
+            ),
+        )
+        return payload
+
+    def metareview(context, candidates, pairwise, pareto):
+        # Recommend the coherence-failing candidate: the round must fail.
+        return {
+            "recommendationCandidateId": "cand-b",
+            "rationale": "位于 Pareto 前沿",
+            "riskNotes": "",
+            "accepted": True,
+        }
+
+    result = hypothesis_review_executor.execute_hypothesis_review(
+        {
+            **_direct_review_context(),
+            "requireCoreHypothesisCoherence": True,
+        },
+        reflection_runner=reflection,
+        pairwise_runner=runners["pairwise_runner"],
+        pareto_runner=runners["pareto_runner"],
+        metareview_runner=metareview,
+        reviewer_assignments={"metareview": "coordinator"},
+    )
+
     assert result["qualityStatus"] == "failed"
     assert result["qualityFailureCode"] == "coherence_failure"
     assert result["qualityFailureCandidateIds"] == ["cand-b"]
-    assert result["coreHypothesisCoherence"][1]["passed"] is False
+    assert result["coherenceFeedbackCandidateIds"] == ["cand-b"]
+
+
+def test_recommendation_scoped_quality_fails_closed_without_recommendation():
+    """Missing/unresolvable recommendation keeps the legacy any-failure verdict."""
+    failed = ["cand-a", "cand-b"]
+    coherence_results = [
+        {"candidateId": "cand-a", "passed": False},
+        {"candidateId": "cand-b", "passed": False},
+    ]
+
+    # No recommendation at all: fail closed instead of passing on absence.
+    assert hypothesis_review_executor._recommendation_scoped_coherence_quality(
+        {}, coherence_results, failed
+    ) == ("failed", "coherence_failure", ["cand-a", "cand-b"])
+
+    # Recommendation outside the coherence result set: fail closed too.
+    assert hypothesis_review_executor._recommendation_scoped_coherence_quality(
+        {"recommendationCandidateId": "cand-z"}, coherence_results, failed
+    ) == ("failed", "coherence_failure", ["cand-a", "cand-b"])
+
+    # Resolvable recommendation scopes the verdict back to that candidate.
+    assert hypothesis_review_executor._recommendation_scoped_coherence_quality(
+        {"recommendationCandidateId": "cand-a"}, coherence_results, failed
+    ) == ("failed", "coherence_failure", ["cand-a"])
 
 
 def test_formal_stage_one_coherence_failure_runs_all_review_steps_and_revision(
@@ -818,7 +889,7 @@ def test_formal_stage_one_coherence_failure_runs_all_review_steps_and_revision(
                     args[0]["candidateId"],
                     failed_check=(
                         "prediction_entails_mechanism"
-                        if args[0]["candidateId"] == "cand-b"
+                        if args[0]["candidateId"] == "cand-a"
                         else ""
                     ),
                 )
@@ -859,8 +930,11 @@ def test_formal_stage_one_coherence_failure_runs_all_review_steps_and_revision(
         "metareview": 1,
         "revision": 1,
     }
+    # cand-a is both the MetaReview recommendation and the coherence failure,
+    # so the recommendation-scoped verdict still fails the round.
     assert result["qualityStatus"] == "failed"
-    assert result["qualityFailureCandidateIds"] == ["cand-b"]
+    assert result["qualityFailureCandidateIds"] == ["cand-a"]
+    assert result["coherenceFeedbackCandidateIds"] == ["cand-a"]
     assert result["coreHypothesisCoherenceArtifactRef"]
     assert result["revisionEnvelope"]["revision"]["status"] == "completed"
 

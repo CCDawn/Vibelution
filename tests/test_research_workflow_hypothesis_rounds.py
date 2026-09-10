@@ -851,6 +851,31 @@ def test_negative_quality_round_is_persisted_and_reused_without_losing_verdict(t
         assert reused[key] == value
 
 
+def test_coherence_feedback_candidate_ids_persist_as_recommendation_scoped_feedback(tmp_path, monkeypatch):
+    """Recommendation-scoped rounds persist feedback-only candidate ids."""
+    team_id = _team(tmp_path, monkeypatch)
+    quality = {
+        "qualityStatus": "passed", "qualityFailureCode": "",
+        "qualityFailureCandidateIds": [],
+        "coherenceFeedbackCandidateIds": ["cand-b"],
+        "coreHypothesisCoherence": [
+            {"candidateId": "cand-a", "passed": True},
+            {"candidateId": "cand-b", "passed": False},
+        ],
+        "coreHypothesisCoherenceArtifactRef": "artifact:coherence-feedback",
+    }
+    payload = _round_payload(**quality)
+    created = hypothesis_rounds_service.create_hypothesis_round(team_id, payload)
+    closed = hypothesis_rounds_service.close_hypothesis_round(
+        team_id, created["round"]["roundId"], _closure(created["round"]),
+    )
+    assert closed["round"]["status"] == "closed"
+    reused = hypothesis_rounds_service.find_reusable_hypothesis_round(team_id, created["round"]["roundId"])
+    assert reused is not None
+    for key, value in quality.items():
+        assert reused[key] == value
+
+
 # ---------------------------------------------------------------------------
 # additive identity bindings (questionId / workflowRunId)
 #

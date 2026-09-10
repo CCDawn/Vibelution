@@ -6014,6 +6014,26 @@ def _derived_round_iteration(
         quality_failure_code = str(round_record.get("qualityFailureCode") or "").strip()
         if quality_failure_code:
             unresolved_issues.append(f"quality_failure:{quality_failure_code}")
+        # Recommendation-scoped round verdicts: coherenceFeedbackCandidateIds
+        # carries every coherence failure (including non-recommended
+        # candidates that no longer fail the round).  Legacy rounds without
+        # the field fall back to qualityFailureCandidateIds so the feedback
+        # surface never loses candidates.
+        feedback_candidate_ids = [
+            str(item).strip()
+            for item in list(round_record.get("coherenceFeedbackCandidateIds") or [])
+            if str(item or "").strip()
+        ]
+        if feedback_candidate_ids:
+            if not quality_failure_code:
+                unresolved_issues.append(
+                    "coherence_feedback:non_recommended_failures"
+                )
+            unresolved_issues.extend(
+                f"quality_failure_candidate:{candidate_id}"
+                for candidate_id in feedback_candidate_ids
+            )
+        elif quality_failure_code:
             unresolved_issues.extend(
                 f"quality_failure_candidate:{str(item).strip()}"
                 for item in list(round_record.get("qualityFailureCandidateIds") or [])

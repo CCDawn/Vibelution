@@ -1060,6 +1060,39 @@ def _fixture_metareview(
     }
 
 
+def _recommendation_scoped_coherence_quality(
+    meta_review: Mapping[str, Any],
+    coherence_results: list[dict[str, Any]],
+    failed: list[str],
+) -> tuple[str, str, list[str]]:
+    """Scope the round-level coherence verdict to the recommended candidate.
+
+    The accept and convergence authorities read the round-level
+    ``qualityStatus``, so that verdict must reflect the candidate the
+    MetaReview actually recommends — not the weakest sibling.  Failures of
+    non-recommended candidates stay visible as revision feedback through
+    ``coherenceFeedbackCandidateIds`` (the full ``failed`` list) instead of
+    killing the round for a candidate that was never going to be accepted.
+    A missing or unresolvable recommendation fails closed to the legacy
+    any-failure verdict: absent recommendation data never relaxes quality.
+    """
+    recommended_id = str(
+        (meta_review or {}).get("recommendationCandidateId") or ""
+    ).strip()
+    recommended_in_results = recommended_id in {
+        str(item.get("candidateId") or "") for item in coherence_results
+    }
+    if recommended_id and recommended_in_results:
+        failure_candidate_ids = [recommended_id] if recommended_id in failed else []
+    else:
+        # Fail closed: without a resolvable recommendation the legacy
+        # any-failure verdict still applies.
+        failure_candidate_ids = list(failed)
+    quality_status = "failed" if failure_candidate_ids else "passed"
+    quality_failure_code = "coherence_failure" if failure_candidate_ids else ""
+    return quality_status, quality_failure_code, failure_candidate_ids
+
+
 def _metareview_step(
     context: Mapping[str, Any],
     candidates: list[dict[str, Any]],
@@ -1563,12 +1596,13 @@ def execute_hypothesis_review(
         # continue through pairwise/Pareto/MetaReview and, in FORMAL mode,
         # revision.  The round owner can persist this explicit status and keep
         # approval/readiness blocked without spending the same reflection wave
-        # again on every maintenance sweep.
-        coherence_quality_status = "failed" if failed else "passed"
+        # again on every maintenance sweep.  The round-level verdict itself is
+        # scoped to the MetaReview recommendation and derived after MetaReview
+        # (see ``_recommendation_scoped_coherence_quality``); ``failed`` stays
+        # the full per-candidate feedback list.
     else:
         coherence_artifact_ref = ""
         failed = []
-        coherence_quality_status = ""
     # One bounded wave carries the pairwise fan-out and the single Pareto
     # call (Pareto only consumes the reflection scores); the raw outputs are
     # then validated sequentially — pairwise first, then Pareto — so the
@@ -1665,16 +1699,33 @@ def execute_hypothesis_review(
         result["modelInvocationReceipts"] = formal_receipts
         result["revisionEnvelope"] = revision_envelope
     if require_core_coherence:
+        quality_status, quality_failure_code, quality_failure_candidate_ids = (
+            _recommendation_scoped_coherence_quality(
+                meta_review, coherence_results, failed
+            )
+        )
         result["coreHypothesisCoherence"] = coherence_results
         result["coreHypothesisCoherenceArtifactRef"] = coherence_artifact_ref
-        result["qualityStatus"] = coherence_quality_status
-        result["qualityFailureCode"] = "coherence_failure" if failed else ""
-        result["qualityFailureCandidateIds"] = failed
+        result["qualityStatus"] = quality_status
+        result["qualityFailureCode"] = quality_failure_code
+        result["qualityFailureCandidateIds"] = quality_failure_candidate_ids
+        # Full visibility of every coherence failure (including
+        # non-recommended candidates): revision feedback, not a round verdict.
+        result["coherenceFeedbackCandidateIds"] = list(failed)
         if failed:
-            _LOGGER.warning(
-                "stage-one hypothesis review closed with coherence quality failure: "
-                "candidateIds=%s artifactRef=%s",
-                ",".join(failed),
-                coherence_artifact_ref or "<none>",
-            )
+            if quality_failure_candidate_ids:
+                _LOGGER.warning(
+                    "stage-one hypothesis review closed with coherence quality failure: "
+                    "candidateIds=%s artifactRef=%s",
+                    ",".join(failed),
+                    coherence_artifact_ref or "<none>",
+                )
+            else:
+                _LOGGER.info(
+                    "stage-one hypothesis review passed on the recommended candidate; "
+                    "non-recommended coherence failures kept as feedback-only: "
+                    "candidateIds=%s artifactRef=%s",
+                    ",".join(failed),
+                    coherence_artifact_ref or "<none>",
+                )
     return result
