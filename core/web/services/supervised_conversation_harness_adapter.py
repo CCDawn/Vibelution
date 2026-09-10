@@ -628,11 +628,9 @@ def run_supervised_conversation_harness(
     if cancel_requested:
         inferred_status = "cancelled"
         inferred_reason = "监督运行已按请求终止。"
-    elif last_status == "failed":
-        turn_error = latest_detail.get("lastTurnError") if isinstance(latest_detail.get("lastTurnError"), dict) else {}
-        error_message = str(turn_error.get("message") or inferred_reason or "隐藏监督会话执行失败。").strip()
+    elif last_status in {"failed", "failed_provider", "failed_runtime", "error"}:
         inferred_status = "failed"
-        inferred_reason = error_message
+        inferred_reason = f"隐藏监督会话以 {last_status} 终止。"
     return _conversation_harness_result(
         run_id=run_id,
         status=inferred_status,
