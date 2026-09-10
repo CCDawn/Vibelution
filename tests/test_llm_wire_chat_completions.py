@@ -504,3 +504,101 @@ def test_chat_non_prefix_reasoning_replacement_is_emitted_whole():
     events = [event for event in decoded if event.kind == "reasoning_delta"]
 
     assert [event.text for event in events] == ["先看日志", "改查配置"]
+
+
+def reasoning_roundtrip_route():
+    base = route()
+    base.compat = SimpleNamespace(reasoning_roundtrip=True)
+    return base
+
+
+def test_reasoning_roundtrip_route_injects_placeholder_on_tool_call_assistant_without_reasoning():
+    call = CanonicalToolCall(
+        identity=identity("call-item"),
+        call_id="call-9",
+        name="lookup",
+        arguments={"query": "stars"},
+    )
+    result = CanonicalToolResult(
+        identity=identity("result-item"),
+        call_id="call-9",
+        tool_name="lookup",
+        output="42",
+    )
+    request = SemanticModelRequest(
+        scope=scope(),
+        messages=(
+            SemanticMessage(role="user", parts=(TextPart("go"),)),
+            SemanticMessage(role="assistant", parts=(ToolCallPart(call),)),
+            SemanticMessage(role="tool", parts=(ToolResultPart(result),)),
+        ),
+        tools=(),
+        settings=SemanticGenerationSettings(max_output_tokens=32, stream=False),
+    )
+
+    payload = ChatCompletionsWireAdapter().encode_request(request, route=reasoning_roundtrip_route()).body
+
+    assistant = payload["messages"][1]
+    assert assistant["tool_calls"][0]["id"] == "call-9"
+    assert str(assistant.get("reasoning_content") or "").strip()
+
+
+def test_reasoning_roundtrip_route_keeps_existing_reasoning_text():
+    call = CanonicalToolCall(
+        identity=identity("call-item"),
+        call_id="call-10",
+        name="lookup",
+        arguments={"query": "stars"},
+    )
+    result = CanonicalToolResult(
+        identity=identity("result-item"),
+        call_id="call-10",
+        tool_name="lookup",
+        output="42",
+    )
+    request = SemanticModelRequest(
+        scope=scope(),
+        messages=(
+            SemanticMessage(
+                role="assistant",
+                parts=(ToolCallPart(call), ReasoningTextPart("真实的思考内容")),
+            ),
+            SemanticMessage(role="tool", parts=(ToolResultPart(result),)),
+        ),
+        tools=(),
+        settings=SemanticGenerationSettings(max_output_tokens=32, stream=False),
+    )
+
+    payload = ChatCompletionsWireAdapter().encode_request(request, route=reasoning_roundtrip_route()).body
+
+    assert payload["messages"][0]["reasoning_content"] == "真实的思考内容"
+
+
+def test_no_reasoning_placeholder_without_roundtrip_compat():
+    call = CanonicalToolCall(
+        identity=identity("call-item"),
+        call_id="call-11",
+        name="lookup",
+        arguments={"query": "stars"},
+    )
+    result = CanonicalToolResult(
+        identity=identity("result-item"),
+        call_id="call-11",
+        tool_name="lookup",
+        output="42",
+    )
+    request = SemanticModelRequest(
+        scope=scope(),
+        messages=(
+            SemanticMessage(role="assistant", parts=(ToolCallPart(call),)),
+            SemanticMessage(role="tool", parts=(ToolResultPart(result),)),
+            SemanticMessage(role="assistant", parts=(TextPart("纯文本回复"),)),
+        ),
+        tools=(),
+        settings=SemanticGenerationSettings(max_output_tokens=32, stream=False),
+    )
+
+    payload = ChatCompletionsWireAdapter().encode_request(request, route=route()).body
+
+    assert "reasoning_content" not in payload["messages"][0]
+    assert "reasoning_content" not in payload["messages"][1]

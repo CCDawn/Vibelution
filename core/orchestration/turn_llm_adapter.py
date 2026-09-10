@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import tempfile
 import time
 import traceback
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
@@ -214,6 +217,63 @@ def sanitize_llm_turn_messages(messages: list) -> list:
     return clean_messages
 
 
+def _record_reasoning_roundtrip_send_diagnostic(messages: list) -> None:
+    """Append a per-send reasoning-presence trace when the diag gate exists.
+
+    DeepSeek thinking-mode relays 400 the whole request when a tool-call
+    assistant leaves without ``reasoning_content``. The journal never records
+    the outgoing payload shape, so drop-point hunts had no ground truth. The
+    diagnostic is self-gated: it only writes while
+    ``%TEMP%/vibelution_rc_diag`` exists, one JSONL line per send with role /
+    tool-call / reasoning-length facts only — never message content.
+    """
+
+    try:
+        gate_dir = Path(tempfile.gettempdir()) / "vibelution_rc_diag"
+        if not gate_dir.is_dir():
+            return
+        assistant_facts = []
+        roles: list[str] = []
+        for index, message in enumerate(_coerce_message_list(messages)):
+            role = _coerce_text(
+                getattr(message, "type", "") or (message.get("role") if isinstance(message, Mapping) else "") or ""
+            ).strip().lower()
+            roles.append({"human": "user", "ai": "assistant"}.get(role, role) or "unknown")
+            if role not in {"ai", "assistant"}:
+                continue
+            tool_calls = getattr(message, "tool_calls", None)
+            if tool_calls is None and isinstance(message, Mapping):
+                tool_calls = message.get("tool_calls") or message.get("toolCalls")
+            additional_kwargs = getattr(message, "additional_kwargs", None)
+            if additional_kwargs is None and isinstance(message, Mapping):
+                additional_kwargs = message.get("additional_kwargs")
+            reasoning = ""
+            if isinstance(additional_kwargs, Mapping):
+                reasoning = _coerce_text(additional_kwargs.get("reasoning_content", ""))
+            if not reasoning and isinstance(message, Mapping):
+                reasoning = _coerce_text(message.get("reasoning_content", ""))
+            assistant_facts.append(
+                {
+                    "index": index,
+                    "toolCalls": len(list(tool_calls or [])),
+                    "reasoningLen": len(reasoning.strip()),
+                }
+            )
+        if not any(fact["toolCalls"] for fact in assistant_facts):
+            return
+        entry = {
+            "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "messageCount": len(roles),
+            "roles": roles,
+            "assistants": assistant_facts,
+        }
+        gate_dir.mkdir(parents=True, exist_ok=True)
+        with (gate_dir / "send_diag.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        return
+
+
 def _message_digest_entries(messages: list) -> list[Dict[str, Any]]:
     """Summarize outgoing LLM messages as role + SHA-256 prefix + char count.
 
@@ -344,6 +404,7 @@ def invoke_agent_llm_turn(
         fields={"messageDigests": _message_digest_entries(clean_messages)},
         level="debug",
     )
+    _record_reasoning_roundtrip_send_diagnostic(clean_messages)
 
     with ui.thinking("?? 思考中..."), hooks.llm_cancel_context(hooks.current_stop_reason):
         route_attempt = 0

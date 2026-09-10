@@ -114,6 +114,39 @@ class ChatDecodedStream:
         self._outcome = assembler.outcome
 
 
+REASONING_ROUNDTRIP_PLACEHOLDER = "（历史推理内容未随消息保留，此占位满足思考模式回传要求。）"
+
+
+def _ensure_reasoning_roundtrip_messages(
+    messages: Sequence[SemanticMessage],
+    *,
+    route: Any,
+) -> list[SemanticMessage]:
+    """Guarantee non-empty ``reasoning_content`` on tool-call assistants.
+
+    DeepSeek thinking-mode relays reject the whole request when any historical
+    assistant that carries ``tool_calls`` lacks ``reasoning_content``. The
+    upstream chain (stream outcome projection, agent restore, ledger replay)
+    is supposed to round-trip real reasoning, but a single missed hop bricks
+    the turn. This wire-boundary backstop appends a clearly-marked placeholder
+    only when the real text is absent, and only for routes that declared
+    ``compat.reasoning_roundtrip``.
+    """
+
+    if not bool(getattr(getattr(route, "compat", None), "reasoning_roundtrip", False)):
+        return list(messages)
+    patched: list[SemanticMessage] = []
+    for message in messages:
+        parts = tuple(message.parts)
+        if message.role == "assistant" and parts:
+            has_tool_call = any(isinstance(part, ToolCallPart) for part in parts)
+            has_reasoning = any(isinstance(part, ReasoningTextPart) for part in parts)
+            if has_tool_call and not has_reasoning:
+                parts = (*parts, ReasoningTextPart(REASONING_ROUNDTRIP_PLACEHOLDER))
+        patched.append(SemanticMessage(role=message.role, parts=parts))
+    return patched
+
+
 class ChatCompletionsWireAdapter:
     adapter_id = "chat_completions"
     wire_protocol = WireProtocol.CHAT_COMPLETIONS
@@ -122,9 +155,10 @@ class ChatCompletionsWireAdapter:
         if request.replay_state is not None:
             raise ValueError("standard Chat Completions does not accept provider replay state")
         validate_provider_ready_messages(request.messages)
+        roundtrip_messages = _ensure_reasoning_roundtrip_messages(request.messages, route=route)
         payload: dict[str, Any] = {
             "model": str(getattr(route, "effective_model", "") or ""),
-            "messages": self._encode_messages(request),
+            "messages": self._encode_messages(roundtrip_messages),
             "max_tokens": request.settings.max_output_tokens,
             "stream": request.settings.stream,
         }
@@ -203,9 +237,9 @@ class ChatCompletionsWireAdapter:
             for result in results
         ]
 
-    def _encode_messages(self, request: SemanticModelRequest) -> list[dict[str, Any]]:
+    def _encode_messages(self, messages: Sequence[SemanticMessage]) -> list[dict[str, Any]]:
         encoded: list[dict[str, Any]] = []
-        for message in request.messages:
+        for message in messages:
             encoded.extend(self._encode_message(message))
         return encoded
 

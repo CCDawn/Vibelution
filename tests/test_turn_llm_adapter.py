@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import json
+
 import pytest
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 
@@ -648,3 +650,57 @@ def test_adapter_parses_camelcase_error_details_without_treating_true_as_attempt
     )
     assert truthy.last_failure_attempts == 0
     assert truthy.last_error_details["provider_stream_retry_exhausted"] is False
+
+
+def test_reasoning_roundtrip_send_diagnostic_writes_role_facts_only_when_gated(tmp_path, monkeypatch):
+    from core.orchestration import turn_llm_adapter as adapter_module
+
+    gate = tmp_path / "vibelution_rc_diag"
+    gate.mkdir()
+    monkeypatch.setattr(adapter_module.tempfile, "gettempdir", lambda: str(tmp_path))
+
+    messages = [
+        build_chat_user_message("继续"),
+        AIMessage(
+            content="",
+            tool_calls=[{"name": "grep_search_tool", "args": {"pattern": "x"}, "id": "call-1"}],
+            additional_kwargs={"reasoning_content": "真实思考" * 10},
+        ),
+        ToolMessage(content="结果", tool_call_id="call-1"),
+        AIMessage(
+            content="我先看一下。",
+            tool_calls=[{"name": "glob_tool", "args": {"pattern": "y"}, "id": "call-2"}],
+            additional_kwargs={},
+        ),
+    ]
+
+    adapter_module._record_reasoning_roundtrip_send_diagnostic(messages)
+
+    lines = (gate / "send_diag.jsonl").read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1
+    entry = json.loads(lines[0])
+    assert entry["messageCount"] == 4
+    assert entry["roles"] == ["user", "assistant", "tool", "assistant"]
+    assert entry["assistants"] == [
+        {"index": 1, "toolCalls": 1, "reasoningLen": 40},
+        {"index": 3, "toolCalls": 1, "reasoningLen": 0},
+    ]
+    # 不落任何消息内容
+    assert "真实思考" not in lines[0]
+    assert "我先看一下" not in lines[0]
+
+
+def test_reasoning_roundtrip_send_diagnostic_silent_without_gate(tmp_path, monkeypatch):
+    from core.orchestration import turn_llm_adapter as adapter_module
+
+    monkeypatch.setattr(adapter_module.tempfile, "gettempdir", lambda: str(tmp_path))
+    messages = [
+        AIMessage(
+            content="",
+            tool_calls=[{"name": "grep_search_tool", "args": {"pattern": "x"}, "id": "call-1"}],
+        ),
+    ]
+
+    adapter_module._record_reasoning_roundtrip_send_diagnostic(messages)
+
+    assert not (tmp_path / "vibelution_rc_diag" / "send_diag.jsonl").exists()
