@@ -119,3 +119,32 @@ def test_terminal_error_is_a_failed_turn_item_instead_of_a_second_error_message_
     assert assistant["turnItems"][0]["type"] == "error"
     assert assistant["turnItems"][0]["status"] == "failed"
     assert "content" not in assistant
+
+
+def test_window_slim_keeps_tool_result_text_visible_beyond_header_lines():
+    # window 投影曾把工具文本截到 400 字符：grep 输出头部（正则/目录/计数行）
+    # 就会吃光预算，匹配内容在聊天 UI 完全不可见。工具文本放宽到 4000。
+    from core.web.services.session.projection import _slim_session_turn_items_for_window_payload
+
+    header = "[搜索] 正则: ttft\n[搜索] 目录: C:\repo\n[搜索] 类型: .py\n[搜索] 找到 3 个匹配\n"
+    matches = "\n".join(f"core/web/file{i}.py:{i * 10}: TTFT_FIRST_CHUNK_MS = {i}" for i in range(60))
+    tool_text = header + matches
+
+    slimmed = _slim_session_turn_items_for_window_payload(
+        [
+            {"type": "tool_call", "status": "completed", "text": tool_text},
+            {"type": "reasoning", "status": "completed", "text": "x" * 900},
+            {"type": "agent_message", "status": "completed", "text": "final answer"},
+        ]
+    )
+
+    by_type = {item["type"]: item for item in slimmed}
+    tool_item = by_type["tool_call"]
+    # 头部行完整保留，且大部分匹配行随 4000 上限保留下来。
+    assert tool_item["text"].startswith(header)
+    assert "TTFT_FIRST_CHUNK_MS" in tool_item["text"]
+    assert len(tool_item["text"]) <= 4001
+    # 非工具类目维持原 400 上限。
+    assert len(by_type["reasoning"]["text"]) <= 401
+    # 最终答案文本不受影响。
+    assert by_type["agent_message"]["text"] == "final answer"

@@ -2723,6 +2723,11 @@ def _slim_session_turn_items_for_window_payload(
 
     Final-answer and non-commentary assistant text must stay complete so the UI
     has a single authoritative body without length heuristics.
+
+    Tool results are the content users open tool cards for; a 400-char slice
+    gets eaten by the result header lines alone (e.g. grep prints regex/dir
+    lines before matches), which made search output invisible in the chat UI.
+    Tool text keeps a larger bounded cap instead.
     """
     s = _service()
     slim_items: list[dict[str, Any]] = []
@@ -2737,14 +2742,15 @@ def _slim_session_turn_items_for_window_payload(
             and phase != "commentary"
             and phase != "interim"
         ) or phase == "final_answer" or next_item.get("terminal") is True
+        text_cap = 4000 if kind in {"tool_call", "tool_result"} else 400
         for field in ("text", "summary", "title"):
             value = next_item.get(field)
             if not isinstance(value, str) or not value.strip():
                 continue
             if keep_full_text and field == "text":
                 continue
-            if len(value) > 400:
-                next_item[field] = f"{value[:400]}…"
+            if len(value) > text_cap:
+                next_item[field] = f"{value[:text_cap]}…"
         # Drop unbounded diagnostic blobs from window payloads.
         diagnostic = next_item.get("diagnosticSummary")
         if isinstance(diagnostic, dict) and len(json.dumps(diagnostic, ensure_ascii=False)) > 1200:
