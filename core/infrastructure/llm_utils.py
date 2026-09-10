@@ -221,6 +221,36 @@ def build_cacheable_system_message(static_text: Any, dynamic_text: Any = "") -> 
     return {"role": "system", "content": content_blocks}
 
 
+def build_cacheable_user_prefix_message(prefix_text: Any, tail_text: Any = "") -> Any:
+    """Build a user message whose stable leading block carries cache_control.
+
+    Use this when one user message decomposes into (a) a byte-stable shared
+    prefix (round-invariant candidates/literature/rubric context shared by a
+    wave of concurrent calls) and (b) a per-call tail (the specific question,
+    pair, or role).  The prefix block is marked ``cache_control`` so the
+    provider caches the system block plus the shared prefix; the tail block
+    stays unmarked so per-call differences never extend the cached prefix.
+
+    ``prefix_text + tail_text`` must equal the message's original single-string
+    content byte for byte: the provider only replays an exact prefix match.
+    """
+
+    prefix_content = str(prefix_text or "")
+    tail_content = str(tail_text or "")
+    if not prefix_content:
+        return {"role": "user", "content": tail_content}
+    content_blocks: list[dict[str, Any]] = [
+        {
+            "type": "text",
+            "text": prefix_content,
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+    if tail_content:
+        content_blocks.append({"type": "text", "text": tail_content})
+    return {"role": "user", "content": content_blocks}
+
+
 def _normalized_static_context_text(static_context_blocks: Any) -> str:
     if isinstance(static_context_blocks, str):
         blocks = [static_context_blocks]

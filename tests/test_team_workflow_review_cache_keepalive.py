@@ -77,6 +77,14 @@ def _probe_outcomes(events):
     ]
 
 
+def _chain_events(events):
+    return [
+        event
+        for event in events
+        if event["args"][2] == "review_cache_keepalive.chained"
+    ]
+
+
 def _wait_for_condition(condition, *, timeout_s: float = 3.0) -> bool:
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
@@ -127,6 +135,8 @@ def test_duplicate_round_key_schedules_only_once(monkeypatch, keepalive_events):
 
 def test_probe_reuses_marked_prefix_with_minimal_budget(monkeypatch, keepalive_events):
     monkeypatch.setenv("VIBELUTION_MEETING_CACHE_KEEPALIVE_DELAY_MS", "10")
+    # Probe mechanics only: keep the TTL chain out of this test's assertions.
+    monkeypatch.setenv("VIBELUTION_MEETING_CACHE_KEEPALIVE_CHAIN_MAX_PROBES", "1")
     _open_meeting_round(monkeypatch)
     calls: list[dict[str, Any]] = []
 
@@ -250,6 +260,7 @@ def test_probe_skipped_while_another_probe_holds_the_global_slot(
 def test_probe_failure_is_quiet_bounded_scene_event(monkeypatch, keepalive_events):
     from core.web.services.team_workflow import llm_review_runners
 
+    monkeypatch.setenv("VIBELUTION_MEETING_CACHE_KEEPALIVE_CHAIN_MAX_PROBES", "1")
     _open_meeting_round(monkeypatch)
     probe_attempts: list[int] = []
 
@@ -316,26 +327,28 @@ def test_probe_without_resolvable_review_llm_fails_quietly(
     assert failed[0]["kwargs"]["fields"]["reason"] == "review_llm_unavailable"
 
 
-def test_default_probe_uses_the_shared_reflection_prefix(monkeypatch):
+def test_default_schedules_probes_for_every_review_step_prompt(monkeypatch):
+    """L3: without an explicit prompt, every review step prefix gets a probe."""
+
     from core.web.services.team_workflow.llm_review_runners import (
-        _REFLECTION_SYSTEM_PROMPT,
+        review_step_system_prompts,
     )
 
-    captured: dict[str, Any] = {}
+    captured: list[dict[str, Any]] = []
 
     def fake_timer(delay, fn, args=None, kwargs=None):
-        captured["delay"] = delay
-        captured["kwargs"] = dict(kwargs or {})
+        record = {"delay": delay, "kwargs": dict(kwargs or {}), "started": False}
 
         class _FakeTimer:
             daemon = False
 
             def start(self):
-                captured["started"] = True
+                record["started"] = True
 
             def cancel(self):
-                captured["cancelled"] = True
+                record["cancelled"] = True
 
+        captured.append(record)
         return _FakeTimer()
 
     monkeypatch.setenv("VIBELUTION_MEETING_CACHE_KEEPALIVE_DELAY_MS", "240000")
@@ -348,9 +361,119 @@ def test_default_probe_uses_the_shared_reflection_prefix(monkeypatch):
     )
 
     assert result["status"] == "scheduled"
-    assert captured["delay"] == 240.0
-    assert captured["kwargs"]["system_prompt"] == _REFLECTION_SYSTEM_PROMPT
-    assert captured["started"] is True
+    step_prompts = dict(review_step_system_prompts())
+    assert len(step_prompts) == 5
+    assert len(captured) == 5
+    assert all(record["delay"] == 240.0 for record in captured)
+    assert all(record["started"] for record in captured)
+    assert all(record["kwargs"]["chain_index"] == 1 for record in captured)
+    assert {record["kwargs"]["prompt_tag"] for record in captured} == set(step_prompts)
+    assert {record["kwargs"]["system_prompt"] for record in captured} == set(
+        step_prompts.values()
+    )
+
+
+def test_probe_chain_re_arms_until_the_budget_is_exhausted(
+    monkeypatch, keepalive_events
+):
+    """TTL-aware chaining: bounded follow-up probes while the round stays open."""
+
+    monkeypatch.setenv("VIBELUTION_MEETING_CACHE_KEEPALIVE_DELAY_MS", "10")
+    monkeypatch.setenv("VIBELUTION_MEETING_CACHE_KEEPALIVE_CHAIN_MAX_PROBES", "3")
+    _open_meeting_round(monkeypatch)
+    probe_calls: list[dict[str, Any]] = []
+
+    def fake_invoke_llm(client, messages, tools=None, context=None, **kwargs):
+        probe_calls.append({"messages": messages})
+        return SimpleNamespace(content=".", response_metadata={})
+
+    monkeypatch.setattr(review_cache_keepalive, "invoke_llm", fake_invoke_llm)
+
+    result = review_cache_keepalive.schedule_meeting_cache_keepalive(
+        "team-1",
+        "meeting-1",
+        dedupe_key="round-1",
+        system_prompt="shared-review-prefix",
+        resolve=lambda: _resolved_llm(),
+    )
+    assert result["status"] == "scheduled"
+
+    assert _wait_for_condition(lambda: len(probe_calls) >= 3)
+    # The chain is bounded: no probe beyond the configured budget fires.
+    time.sleep(0.15)
+    assert len(probe_calls) == 3
+    assert len(_chain_events(keepalive_events)) == 2
+    chained = _chain_events(keepalive_events)
+    assert chained[0]["kwargs"]["fields"]["chainIndex"] == 2
+    assert chained[-1]["kwargs"]["fields"]["chainIndex"] == 3
+
+
+def test_probe_chain_stops_when_the_meeting_closes(monkeypatch, keepalive_events):
+    """No active review wave: a closed round neither probes nor chains."""
+
+    monkeypatch.setenv("VIBELUTION_MEETING_CACHE_KEEPALIVE_DELAY_MS", "10")
+    monkeypatch.setenv("VIBELUTION_MEETING_CACHE_KEEPALIVE_CHAIN_MAX_PROBES", "6")
+    _open_meeting_round(monkeypatch, status="closed")
+    probe_calls: list[dict[str, Any]] = []
+
+    def fake_invoke_llm(client, messages, tools=None, context=None, **kwargs):
+        probe_calls.append({"messages": messages})
+        return SimpleNamespace(content=".", response_metadata={})
+
+    monkeypatch.setattr(review_cache_keepalive, "invoke_llm", fake_invoke_llm)
+
+    review_cache_keepalive.schedule_meeting_cache_keepalive(
+        "team-1",
+        "meeting-1",
+        dedupe_key="round-1",
+        system_prompt="shared-review-prefix",
+        resolve=lambda: _resolved_llm(),
+    )
+    assert _wait_for_condition(
+        lambda: bool(_probe_outcomes(keepalive_events))
+    )
+    time.sleep(0.15)
+    assert probe_calls == []
+    assert _chain_events(keepalive_events) == []
+
+
+def test_probe_chain_stops_after_the_meeting_closes_mid_chain(
+    monkeypatch, keepalive_events
+):
+    """A round closing between chain probes ends the chain at the next hop."""
+
+    monkeypatch.setenv("VIBELUTION_MEETING_CACHE_KEEPALIVE_DELAY_MS", "10")
+    monkeypatch.setenv("VIBELUTION_MEETING_CACHE_KEEPALIVE_CHAIN_MAX_PROBES", "6")
+    _open_meeting_round(monkeypatch)
+    probe_calls: list[dict[str, Any]] = []
+    round_status = {"status": "open"}
+
+    def fake_invoke_llm(client, messages, tools=None, context=None, **kwargs):
+        probe_calls.append({"messages": messages})
+        round_status["status"] = "closed"
+        return SimpleNamespace(content=".", response_metadata={})
+
+    monkeypatch.setattr(review_cache_keepalive, "invoke_llm", fake_invoke_llm)
+    monkeypatch.setattr(
+        meeting_rounds,
+        "get_meeting_round",
+        lambda team_id, meeting_round_id: {
+            "meetingRound": {"status": round_status["status"]}
+        },
+    )
+
+    review_cache_keepalive.schedule_meeting_cache_keepalive(
+        "team-1",
+        "meeting-1",
+        dedupe_key="round-1",
+        system_prompt="shared-review-prefix",
+        resolve=lambda: _resolved_llm(),
+    )
+    assert _wait_for_condition(lambda: bool(probe_calls))
+    time.sleep(0.15)
+    # The first probe fired and closed the round; the chain never continued.
+    assert len(probe_calls) == 1
+    assert _chain_events(keepalive_events) == []
 
 
 def test_probe_timer_never_blocks_interpreter_exit(monkeypatch, keepalive_events):

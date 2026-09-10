@@ -53,7 +53,10 @@ from datetime import datetime, timezone
 from typing import Any
 
 from config import get_config
-from core.infrastructure.llm_utils import build_cacheable_system_message
+from core.infrastructure.llm_utils import (
+    build_cacheable_system_message,
+    build_cacheable_user_prefix_message,
+)
 from core.llm import LLMInvocationContext, get_llm_client, invoke_llm
 from core.llm.agent_runtime import agent_dialogue_model_id, config_for_agent_llm_model
 from core.llm.error_classification import classify_error
@@ -608,6 +611,279 @@ def _user_payload_context_id(user_payload: Mapping[str, Any]) -> str:
     if isinstance(context, Mapping):
         return str(context.get("contextId") or "").strip()
     return ""
+
+
+# ---------------------------------------------------------------------------
+# Prompt-cache levers for the review wave (SCI-009 cache-hitrate follow-up)
+# ---------------------------------------------------------------------------
+#
+# Live review rounds measured only ~5.9% cached input because (a) only the
+# ~1.6k-token system block is cache-marked while ~91% of the input — the
+# shared per-wave user payload — is not, and (b) the N concurrent calls of a
+# wave start <0.4s apart with cold prefixes, so every call misses.  Two
+# mechanical levers close most of that gap:
+#
+# L2 (dispatch stagger): when a wave fires N concurrent calls for the same
+# (session, purpose, context), calls 2..N wait a small bounded stagger so the
+# first call warms the shared prefix and the rest hit.  Live evidence: a
+# +16s stagger produced cache hits where simultaneous starts produced zero.
+#
+# L1 (shared user-prefix marking): for steps whose payload has a clean
+# wave-invariant prefix, the user message is split into a marked invariant
+# prefix block plus an unmarked per-call tail, so the provider caches the
+# system block AND the shared payload prefix.  The combined text is byte-
+# identical to the previous single-string content (only key order changed,
+# which is semantically irrelevant for a JSON object); the reorder is
+# documented per step below.
+
+
+def review_step_system_prompts() -> tuple[tuple[str, str], ...]:
+    """``(promptTag, systemPrompt)`` for every review step's shared prefix.
+
+    Keepalive probes (``review_cache_keepalive``) fan out over this list so
+    every step's prefix — not only the heaviest reflection one — stays warm
+    across the round gap.
+    """
+
+    return (
+        ("reflection", _REFLECTION_SYSTEM_PROMPT),
+        ("pairwise", _PAIRWISE_SYSTEM_PROMPT),
+        ("pareto", _PARETO_SYSTEM_PROMPT),
+        ("metareview", _METAREVIEW_SYSTEM_PROMPT),
+        ("revision", _REVISION_SYSTEM_PROMPT),
+    )
+
+
+# Wave-invariant user-payload prefix keys per step.  A key qualifies only when
+# it is byte-stable across every call of one review wave (same context, same
+# round) AND can be moved to the front of the payload without changing the
+# payload's semantics (JSON object key order is insignificant to the model):
+#
+# - ``hypothesis_reflection``: ``context`` (contextId+question), the rubric
+#   dimension constants, and ``literatureContrast`` (retrieved once per
+#   context) are wave-invariant; the reordered payload carries them first.
+#   ``candidate``, ``requireCoreHypothesisCoherence`` (derived from the
+#   candidate's authority) and ``refsWhitelist`` (candidate-bound) stay in the
+#   per-call tail.
+# - ``hypothesis_pairwise``: only ``context`` is wave-invariant; the left and
+#   right candidates are the per-call tail.  The prefix is small but the split
+#   is clean, so it is marked anyway.
+# - pareto / metareview / revision / meeting_digest are skipped: each fires at
+#   most one call per wave (or carries per-wave-unique aggregated results), so
+#   there is no wave-invariant prefix to mark.
+_REVIEW_CACHEABLE_USER_PREFIX_KEYS: dict[str, tuple[str, ...]] = {
+    "hypothesis_reflection": (
+        "context",
+        "scoreDimensions",
+        "reviewDimensions",
+        "allowedRatings",
+        "literatureContrast",
+    ),
+    "hypothesis_pairwise": ("context",),
+}
+
+
+def _reorder_user_payload_for_cacheable_prefix(
+    purpose: str,
+    user_payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return the payload with wave-invariant keys first (documented reorder)."""
+
+    prefix_keys = _REVIEW_CACHEABLE_USER_PREFIX_KEYS.get(str(purpose or ""), ())
+    reordered: dict[str, Any] = {}
+    for key in prefix_keys:
+        if key in user_payload:
+            reordered[key] = user_payload[key]
+    for key, value in user_payload.items():
+        if key not in reordered:
+            reordered[key] = value
+    return reordered
+
+
+def _build_review_user_message(
+    purpose: str,
+    user_payload: Mapping[str, Any],
+) -> tuple[dict[str, Any], str, int]:
+    """Build the user message, marking the wave-invariant prefix when clean.
+
+    Returns ``(message, combinedText, markedPrefixChars)``.  When the step has
+    a clean invariant prefix, the message content is two text blocks — the
+    marked prefix and the unmarked tail — whose concatenation equals the full
+    serialized payload byte for byte.  Any shape mismatch (empty payload, no
+    tail keys, serialization drift) falls back to the historical single-string
+    content so the call can never be changed by a failed split.
+    """
+
+    payload = _reorder_user_payload_for_cacheable_prefix(purpose, user_payload)
+    combined_text = json.dumps(payload, ensure_ascii=False)
+    prefix_keys = _REVIEW_CACHEABLE_USER_PREFIX_KEYS.get(str(purpose or ""), ())
+    prefix_keys_present = [key for key in prefix_keys if key in payload]
+    has_tail = any(key not in prefix_keys_present for key in payload)
+    if prefix_keys_present and has_tail:
+        invariant_text = json.dumps(
+            {key: payload[key] for key in prefix_keys_present},
+            ensure_ascii=False,
+        )
+        prefix_text = invariant_text[:-1] + ","
+        if combined_text.startswith(prefix_text):
+            message = build_cacheable_user_prefix_message(
+                prefix_text,
+                combined_text[len(prefix_text) :],
+            )
+            return message, combined_text, len(prefix_text)
+    return {"role": "user", "content": combined_text}, combined_text, 0
+
+
+# L2: wave dispatch stagger tuning.
+#
+# ``VIBELUTION_REVIEW_WAVE_STAGGER_SECONDS``: wait between consecutive wave
+# calls (default 15s — live evidence shows a +16s gap converts cold misses
+# into hits; 0 disables the stagger entirely).
+# ``VIBELUTION_REVIEW_WAVE_STAGGER_MAX_WAIT_SECONDS``: per-call wait ceiling,
+# bounding the total added latency of one wave well under 60s.
+_REVIEW_WAVE_STAGGER_SECONDS_ENV = "VIBELUTION_REVIEW_WAVE_STAGGER_SECONDS"
+_REVIEW_WAVE_STAGGER_SECONDS_DEFAULT = 15.0
+_REVIEW_WAVE_STAGGER_SECONDS_MAX = 120.0
+_REVIEW_WAVE_STAGGER_MAX_WAIT_SECONDS_ENV = (
+    "VIBELUTION_REVIEW_WAVE_STAGGER_MAX_WAIT_SECONDS"
+)
+_REVIEW_WAVE_STAGGER_MAX_WAIT_SECONDS_DEFAULT = 45.0
+_REVIEW_WAVE_STAGGER_MAX_WAIT_SECONDS_MAX = 120.0
+
+# Registrations older than this window belong to a previous wave: the counter
+# resets so a later round with the same key never inherits a stale index.
+_REVIEW_WAVE_STAGGER_REGISTRATION_WINDOW_SECONDS = 120.0
+
+_wave_stagger_state_lock = threading.Lock()
+_wave_stagger_state: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+
+def review_wave_stagger_seconds() -> float:
+    """Wait between consecutive calls of one review wave (``0`` disables)."""
+
+    return _env_float(
+        _REVIEW_WAVE_STAGGER_SECONDS_ENV,
+        _REVIEW_WAVE_STAGGER_SECONDS_DEFAULT,
+        minimum=0.0,
+        maximum=_REVIEW_WAVE_STAGGER_SECONDS_MAX,
+    )
+
+
+def review_wave_stagger_max_wait_seconds() -> float:
+    """Per-call stagger ceiling; bounds one wave's added latency."""
+
+    return _env_float(
+        _REVIEW_WAVE_STAGGER_MAX_WAIT_SECONDS_ENV,
+        _REVIEW_WAVE_STAGGER_MAX_WAIT_SECONDS_DEFAULT,
+        minimum=0.0,
+        maximum=_REVIEW_WAVE_STAGGER_MAX_WAIT_SECONDS_MAX,
+    )
+
+
+def reset_review_wave_stagger_for_tests() -> None:
+    """Drop wave stagger registration state between tests."""
+
+    with _wave_stagger_state_lock:
+        _wave_stagger_state.clear()
+
+
+def _review_wave_absolute_deadline_at_ms(
+    deadline_at_ms: int | None,
+) -> int | None:
+    """Resolve the same absolute deadline fence the call itself will face."""
+
+    from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
+        current_challenge_task_deadline_at_ms,
+    )
+
+    candidates: list[int] = []
+    for value in (deadline_at_ms, current_challenge_task_deadline_at_ms()):
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            candidates.append(value)
+    return min(candidates) if candidates else None
+
+
+class _ReviewWaveCall:
+    """One wave call's stagger bookkeeping (sleep applied, slot held)."""
+
+    def __init__(self, *, delay_seconds: float, release_key: tuple[str, str, str] | None):
+        self.delay_seconds = float(delay_seconds)
+        self._release_key = release_key
+
+    @property
+    def delay_ms(self) -> int:
+        return max(0, int(self.delay_seconds * 1000))
+
+    def release(self) -> None:
+        if self._release_key is None:
+            return
+        with _wave_stagger_state_lock:
+            entry = _wave_stagger_state.get(self._release_key)
+            if entry is not None and entry["in_flight"] > 0:
+                entry["in_flight"] -= 1
+        self._release_key = None
+
+
+def _begin_review_wave_call(
+    *,
+    purpose: str,
+    session_id: str,
+    user_payload: Mapping[str, Any],
+    deadline_at_ms: int | None,
+) -> _ReviewWaveCall:
+    """Register one wave call, sleep its stagger share, and return the release.
+
+    The first call of a wave never waits.  Calls 2..N wait only while a
+    sibling call is still in flight (a completed sibling already warmed the
+    cache, so waiting would add latency for nothing) and always fire
+    un-staggered when the wait would breach the absolute challenge deadline.
+    Sequential callers never observe a delay.
+    """
+
+    step_seconds = review_wave_stagger_seconds()
+    wave_key = (
+        str(session_id or ""),
+        str(purpose or ""),
+        _user_payload_context_id(user_payload),
+    )
+    if step_seconds <= 0:
+        return _ReviewWaveCall(delay_seconds=0.0, release_key=None)
+    now = time.monotonic()
+    index = 0
+    sibling_in_flight = False
+    with _wave_stagger_state_lock:
+        for stale_key in [
+            key
+            for key, entry in _wave_stagger_state.items()
+            if now - entry["last_at"] > _REVIEW_WAVE_STAGGER_REGISTRATION_WINDOW_SECONDS
+        ]:
+            del _wave_stagger_state[stale_key]
+        entry = _wave_stagger_state.get(wave_key)
+        if entry is None:
+            entry = {"index": 0, "in_flight": 0, "last_at": now}
+            _wave_stagger_state[wave_key] = entry
+        index = entry["index"]
+        entry["index"] += 1
+        entry["last_at"] = now
+        sibling_in_flight = entry["in_flight"] > 0
+        entry["in_flight"] += 1
+    delay_seconds = 0.0
+    if index > 0 and sibling_in_flight:
+        delay_seconds = min(
+            step_seconds * index,
+            review_wave_stagger_max_wait_seconds(),
+        )
+    if delay_seconds > 0:
+        deadline = _review_wave_absolute_deadline_at_ms(deadline_at_ms)
+        if deadline is not None:
+            now_ms = time.time() * 1000
+            if now_ms + delay_seconds * 1000 >= deadline:
+                # Deadline budget wins: fire un-staggered rather than push the
+                # call past the existing deadline logic.
+                delay_seconds = 0.0
+    if delay_seconds > 0:
+        time.sleep(delay_seconds)
+    return _ReviewWaveCall(delay_seconds=delay_seconds, release_key=wave_key)
 
 
 def _response_usage_fields(response: Any) -> dict[str, Any]:
@@ -1205,16 +1481,41 @@ def _parse_json_object(text: str, *, what: str) -> dict[str, Any]:
 
 
 def _invoke_review_llm(llm: Mapping[str, Any], **kwargs: Any) -> Any:
-    """Give each parallel review its own abortable transport and lifetime."""
-    factory = llm.get("clientFactory")
-    if factory is None:
-        # Explicitly injected clients remain owned by their caller.
-        return _invoke_review_llm_impl(llm, **kwargs)
-    client = factory()
+    """Give each parallel review its own abortable transport and lifetime.
+
+    L2 wave stagger: concurrent calls of one review wave are registered and
+    delayed *before* the per-call transport is built, so a waiting call never
+    holds an HTTP client or a global LLM gate slot, and the wait can never
+    consume the per-call budget (only the absolute challenge deadline fences
+    it; a deadline-tight wave fires un-staggered).
+    """
+
+    wave_call = _begin_review_wave_call(
+        purpose=str(kwargs.get("purpose") or ""),
+        session_id=str(kwargs.get("session_id") or ""),
+        user_payload=kwargs.get("user_payload") or {},
+        deadline_at_ms=kwargs.get("deadline_at_ms"),
+    )
     try:
-        return _invoke_review_llm_impl({**llm, "client": client}, **kwargs)
+        factory = llm.get("clientFactory")
+        if factory is None:
+            # Explicitly injected clients remain owned by their caller.
+            return _invoke_review_llm_impl(
+                llm,
+                stagger_delay_ms=wave_call.delay_ms,
+                **kwargs,
+            )
+        client = factory()
+        try:
+            return _invoke_review_llm_impl(
+                {**llm, "client": client},
+                stagger_delay_ms=wave_call.delay_ms,
+                **kwargs,
+            )
+        finally:
+            client.close_http_clients()
     finally:
-        client.close_http_clients()
+        wave_call.release()
 
 
 def _invoke_review_llm_impl(
@@ -1229,19 +1530,23 @@ def _invoke_review_llm_impl(
     require_provider_receipt: bool = False,
     deadline_at_ms: int | None = None,
     response_mode: str = "json_object",
+    stagger_delay_ms: int = 0,
 ) -> dict[str, Any] | str | ProviderBoundReviewResult:
     """Run one review model call and return its requested response form."""
 
     # Gate/cooldown attribution key: provider-qualified modelRef when present,
     # falling back to the bare model id.
     model_gate_ref = str(llm.get("modelRef") or llm.get("modelId") or "")
-    user_content = json.dumps(dict(user_payload), ensure_ascii=False)
+    # L1 shared user-prefix marking: the wave-invariant payload prefix travels
+    # in a marked text block with the per-call tail unmarked behind it; the
+    # combined text stays byte-identical to the historical single-string form.
+    user_message, user_content, cache_prefix_chars = _build_review_user_message(
+        purpose,
+        user_payload,
+    )
     messages: list[Any] = [
         build_cacheable_system_message(system_prompt),
-        {
-            "role": "user",
-            "content": user_content,
-        },
+        user_message,
     ]
     receipt_binding = (
         receipt_context.get("questionStageBinding")
@@ -1332,6 +1637,11 @@ def _invoke_review_llm_impl(
             "deadlineRemainingMs": max(0, int(deadline_at_ms - time.time() * 1000))
             if deadline_at_ms
             else 0,
+            # Prompt-cache lever observability: how long the wave dispatcher
+            # held this call back (0 = first call / disabled / deadline
+            # bypass), and how many prefix chars the shared user block marks.
+            "staggerDelayMs": max(0, int(stagger_delay_ms)),
+            "cachePrefixChars": max(0, int(cache_prefix_chars)),
         }
         # Every review-profile purpose emits bounded call telemetry: the
         # digest keeps its historical meeting_digest.llm.* codes, the other
@@ -2096,12 +2406,20 @@ def build_hypothesis_review_runners(
             agent_id=str(resolved.get("agentId") or "challenge_cup_evaluator"),
             purpose="hypothesis_reflection",
             system_prompt=_REFLECTION_SYSTEM_PROMPT,
+            # Key order is wave-invariant-prefix-first (documented L1 reorder):
+            # context/rubric constants/literature contrast are byte-stable
+            # across the wave's calls and land in the marked cacheable prefix;
+            # candidate, coherence flag and refs whitelist are per-call tail.
             user_payload={
-                "candidate": dict(candidate),
                 "context": {
                     "contextId": str(context.get("contextId") or ""),
                     "question": str(context.get("question") or ""),
                 },
+                "scoreDimensions": list(HYPOTHESIS_SCORE_DIMENSIONS),
+                "reviewDimensions": list(REQUIRED_REVIEW_DIMENSIONS),
+                "allowedRatings": list(REVIEW_DIMENSION_RATINGS),
+                "literatureContrast": _literature_contrast_payload(context),
+                "candidate": dict(candidate),
                 "requireCoreHypothesisCoherence": bool(
                     context.get("requireCoreHypothesisCoherence")
                 )
@@ -2110,10 +2428,6 @@ def build_hypothesis_review_runners(
                     == "formal_grounded_candidate"
                 ),
                 "refsWhitelist": refs_whitelist,
-                "scoreDimensions": list(HYPOTHESIS_SCORE_DIMENSIONS),
-                "reviewDimensions": list(REQUIRED_REVIEW_DIMENSIONS),
-                "allowedRatings": list(REVIEW_DIMENSION_RATINGS),
-                "literatureContrast": _literature_contrast_payload(context),
             },
             session_id=_context_session(context),
             receipt_context=_receipt_context(
@@ -2188,13 +2502,15 @@ def build_hypothesis_review_runners(
             agent_id=str(resolved.get("agentId") or "challenge_cup_evaluator"),
             purpose="hypothesis_pairwise",
             system_prompt=_PAIRWISE_SYSTEM_PROMPT,
+            # L1 reorder: the wave-invariant context first (marked prefix),
+            # the per-call left/right candidates after (unmarked tail).
             user_payload={
-                "left": dict(left),
-                "right": dict(right),
                 "context": {
                     "contextId": str(context.get("contextId") or ""),
                     "question": str(context.get("question") or ""),
                 },
+                "left": dict(left),
+                "right": dict(right),
             },
             session_id=_context_session(context),
             receipt_context=_receipt_context(

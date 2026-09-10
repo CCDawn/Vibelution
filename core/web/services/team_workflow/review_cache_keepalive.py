@@ -1,22 +1,37 @@
-"""DashScope explicit prompt-cache keepalive probe for active meetings.
+"""DashScope explicit prompt-cache keepalive probes for active meetings.
 
 DashScope explicit ``cache_control`` entries live ~5 minutes and every hit
 re-arms the TTL.  Challenge review/generation rounds are typically spaced
-6-15 minutes apart, so the marked shared prefixes (the hypothesis review
-rubric prompts, the digest prompt) reliably expire between rounds and every
-next-round call pays the full uncached input price.
+6-15 minutes apart (measured round gaps run 18-92 minutes), so the marked
+shared prefixes — every review step's system prompt — reliably expire between
+rounds and each next-round call pays the full uncached input price.
 
-After a meeting round closes, the meeting discussion driver schedules ONE
-delayed minimal probe (default ~4 minutes) through this module.  The probe
-re-sends a ``cache_control``-marked shared prefix with a tiny output budget
-via the normal review LLM channel, so the provider re-arms the prefix TTL for
-the next round.
+After a meeting round closes, the meeting discussion driver schedules delayed
+minimal probes (default ~4 minutes, before the TTL expires) through this
+module.  One probe fans out over EVERY review step's system prompt
+(reflection / pairwise / pareto / metareview / revision, via
+``llm_review_runners.review_step_system_prompts``): the historical
+single-prompt probe kept only the heaviest reflection prefix warm while the
+other steps' shorter prompts never got probed and always started cold.  Each
+probe re-sends a ``cache_control``-marked shared prefix with a tiny output
+budget via the normal review LLM channel, so the provider re-arms that
+prefix's TTL for the next round.
+
+TTL-aware chaining: one probe only re-arms the TTL for roughly the next five
+minutes, far shorter than measured round gaps, so each fired probe chains a
+bounded number of follow-up probes (``VIBELUTION_MEETING_CACHE_KEEPALIVE_CHAIN_MAX_PROBES``)
+spaced one keepalive delay apart.  Chaining stops as soon as the meeting round
+closes or becomes unreadable — no active review wave means no probing, so idle
+meetings never burn tokens.
 
 Hard guards (keepalive is a pure optimization and must never affect the main
 chain or its accounting):
 
 - ``VIBELUTION_MEETING_CACHE_KEEPALIVE_DELAY_MS=0`` disables the feature;
-- at most one scheduled probe per (meeting, closed round) per process;
+- ``VIBELUTION_MEETING_CACHE_KEEPALIVE_CHAIN_MAX_PROBES`` bounds the per-prompt
+  probe chain (default 6 probes ≈ one 24-minute gap at the default delay);
+- at most one scheduled probe chain per (meeting, closed round, prompt) per
+  process;
 - at fire time the meeting round must still be open (``status != "closed"``),
   so meetings that already closed never emit a probe;
 - global probe concurrency is 1 — a probe arriving while another one runs is
@@ -50,6 +65,16 @@ _KEEPALIVE_DELAY_MS_ENV = "VIBELUTION_MEETING_CACHE_KEEPALIVE_DELAY_MS"
 _KEEPALIVE_DELAY_MS_DEFAULT = 240_000
 _KEEPALIVE_DELAY_MS_MAX = 3_600_000
 
+# TTL-aware probe chain: DashScope cache entries expire ~5 minutes after the
+# last hit, so probes spaced one keepalive delay apart (default 4 minutes)
+# keep a prefix continuously warm for ``chain_max_probes * delay``.  The
+# default 6 probes covers the short end of the measured 18-92 minute round
+# gaps; longer gaps trade a cold first call for bounded idle burn.
+_KEEPALIVE_CHAIN_MAX_PROBES_ENV = "VIBELUTION_MEETING_CACHE_KEEPALIVE_CHAIN_MAX_PROBES"
+_KEEPALIVE_CHAIN_MAX_PROBES_DEFAULT = 6
+_KEEPALIVE_CHAIN_MAX_PROBES_MIN = 1
+_KEEPALIVE_CHAIN_MAX_PROBES_MAX = 48
+
 # The probe discards its output; the smallest bounded budget only exists so
 # providers that reject ``max_tokens`` below their floor keep accepting the
 # call while the re-armed prefix still dominates the bill.
@@ -72,7 +97,7 @@ _KEEPALIVE_TIMEOUT_SECONDS_MAX = 600.0
 _PROBE_USER_CONTENT = "."
 _PROBE_PURPOSE = "review_cache_keepalive"
 
-_scheduled_keys: set[tuple[str, str, str]] = set()
+_scheduled_keys: set[tuple[str, str, str, str]] = set()
 _scheduled_keys_lock = threading.Lock()
 _pending_timers: list[threading.Timer] = []
 _pending_timers_lock = threading.Lock()
@@ -87,6 +112,17 @@ def meeting_cache_keepalive_delay_ms() -> int:
         _KEEPALIVE_DELAY_MS_DEFAULT,
         minimum=0,
         maximum=_KEEPALIVE_DELAY_MS_MAX,
+    )
+
+
+def keepalive_chain_max_probes() -> int:
+    """Bounded probe chain length per (round, prompt); every hit re-arms the TTL."""
+
+    return _env_int(
+        _KEEPALIVE_CHAIN_MAX_PROBES_ENV,
+        _KEEPALIVE_CHAIN_MAX_PROBES_DEFAULT,
+        minimum=_KEEPALIVE_CHAIN_MAX_PROBES_MIN,
+        maximum=_KEEPALIVE_CHAIN_MAX_PROBES_MAX,
     )
 
 
@@ -158,11 +194,85 @@ def _meeting_round_is_active(team_id: str, meeting_round_id: str) -> bool:
     return str(meeting_round.get("status") or "").strip().lower() != "closed"
 
 
+def _schedule_keepalive_timer(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    system_prompt: str,
+    prompt_tag: str,
+    chain_index: int,
+    resolve: Callable[[], dict[str, Any] | None] | None,
+) -> None:
+    """Start one daemon fire-and-forget probe timer and register it."""
+
+    timer = threading.Timer(
+        meeting_cache_keepalive_delay_ms() / 1000.0,
+        _run_probe,
+        args=(team_id, meeting_round_id),
+        kwargs={
+            "system_prompt": system_prompt,
+            "prompt_tag": prompt_tag,
+            "chain_index": chain_index,
+            "resolve": resolve,
+        },
+    )
+    timer.daemon = True
+    with _pending_timers_lock:
+        _pending_timers.append(timer)
+    timer.start()
+
+
+def _maybe_chain_next_probe(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    system_prompt: str,
+    prompt_tag: str,
+    chain_index: int,
+    resolve: Callable[[], dict[str, Any] | None] | None,
+) -> None:
+    """Re-arm this prompt's prefix before the TTL expires again.
+
+    Chained from a *fired* probe only, bounded by the chain budget, and only
+    while the meeting round is still active — a closed or unreadable round
+    means no review wave is anticipated, so the chain stops here.
+    """
+
+    next_index = chain_index + 1
+    if chain_index < 1 or next_index > keepalive_chain_max_probes():
+        return
+    if meeting_cache_keepalive_delay_ms() <= 0:
+        return
+    if not _meeting_round_is_active(team_id, meeting_round_id):
+        return
+    _schedule_keepalive_timer(
+        team_id,
+        meeting_round_id,
+        system_prompt=system_prompt,
+        prompt_tag=prompt_tag,
+        chain_index=next_index,
+        resolve=resolve,
+    )
+    _record_keepalive_scene_event(
+        "review_cache_keepalive.chained",
+        outcome="started",
+        fields={
+            "teamId": str(team_id),
+            "meetingRoundId": str(meeting_round_id),
+            "promptTag": str(prompt_tag),
+            "chainIndex": int(next_index),
+            "delayMs": meeting_cache_keepalive_delay_ms(),
+        },
+    )
+
+
 def _run_probe(
     team_id: str,
     meeting_round_id: str,
     *,
     system_prompt: str,
+    prompt_tag: str = "custom",
+    chain_index: int = 0,
     resolve: Callable[[], dict[str, Any] | None] | None = None,
 ) -> None:
     """Fire one keepalive probe; every failure path stays quiet and bounded."""
@@ -174,6 +284,8 @@ def _run_probe(
     base_fields = {
         "teamId": str(team_id),
         "meetingRoundId": str(meeting_round_id),
+        "promptTag": str(prompt_tag),
+        "chainIndex": int(chain_index),
     }
     if not _meeting_round_is_active(team_id, meeting_round_id):
         _record_keepalive_scene_event(
@@ -267,6 +379,16 @@ def _run_probe(
         )
     finally:
         _probe_slot.release()
+    # TTL-aware chaining: only a probe that actually fired may extend the
+    # chain; skip paths (closed meeting, busy slot) never do.
+    _maybe_chain_next_probe(
+        team_id,
+        meeting_round_id,
+        system_prompt=system_prompt,
+        prompt_tag=prompt_tag,
+        chain_index=chain_index,
+        resolve=resolve,
+    )
 
 
 def schedule_meeting_cache_keepalive(
@@ -277,11 +399,14 @@ def schedule_meeting_cache_keepalive(
     system_prompt: str | None = None,
     resolve: Callable[[], dict[str, Any] | None] | None = None,
 ) -> dict[str, str]:
-    """Schedule one delayed cache keepalive probe for a closed meeting round.
+    """Schedule delayed cache keepalive probes for a closed meeting round.
 
     Fire-and-forget: callers (the discussion driver) must never observe a
     failure from scheduling.  ``dedupe_key`` should identify the round that
-    just closed so each round interval schedules at most one probe.
+    just closed so each round interval schedules at most one probe chain per
+    prompt.  Without an explicit ``system_prompt``, one probe is scheduled for
+    EVERY review step's shared system prompt — keeping only the heaviest
+    reflection prefix warm left the other steps' prompts permanently cold.
     """
 
     normalized_team_id = str(team_id or "").strip()
@@ -295,37 +420,45 @@ def schedule_meeting_cache_keepalive(
     }
     if not normalized_team_id or not normalized_round_id or delay_ms <= 0:
         return {"status": "disabled", "delayMs": str(delay_ms)}
-    dedupe = (normalized_team_id, normalized_round_id, normalized_dedupe_key)
-    with _scheduled_keys_lock:
-        if dedupe in _scheduled_keys:
-            return {"status": "duplicate", "delayMs": str(delay_ms)}
-        _scheduled_keys.add(dedupe)
     if system_prompt is None:
-        # The reflection prompt is the heaviest prefix every review wave
-        # re-sends per question, so keeping it warm benefits the next round
-        # the most.  Imported lazily to keep module import weight low.
+        # One probe per review step system prompt, imported lazily to keep
+        # module import weight low.
         from core.web.services.team_workflow.llm_review_runners import (
-            _REFLECTION_SYSTEM_PROMPT,
+            review_step_system_prompts,
         )
 
-        system_prompt = _REFLECTION_SYSTEM_PROMPT
-    timer = threading.Timer(
-        delay_ms / 1000.0,
-        _run_probe,
-        args=(normalized_team_id, normalized_round_id),
-        kwargs={
-            "system_prompt": system_prompt,
-            "resolve": resolve,
-        },
-    )
-    timer.daemon = True
-    with _pending_timers_lock:
-        _pending_timers.append(timer)
-    timer.start()
+        targets: tuple[tuple[str, str], ...] = review_step_system_prompts()
+    else:
+        targets = (("custom", str(system_prompt)),)
+    scheduled_any = False
+    scheduled_tags: list[str] = []
+    for prompt_tag, prompt in targets:
+        dedupe = (
+            normalized_team_id,
+            normalized_round_id,
+            normalized_dedupe_key,
+            str(prompt_tag),
+        )
+        with _scheduled_keys_lock:
+            if dedupe in _scheduled_keys:
+                continue
+            _scheduled_keys.add(dedupe)
+        _schedule_keepalive_timer(
+            normalized_team_id,
+            normalized_round_id,
+            system_prompt=prompt,
+            prompt_tag=str(prompt_tag),
+            chain_index=1,
+            resolve=resolve,
+        )
+        scheduled_any = True
+        scheduled_tags.append(str(prompt_tag))
+    if not scheduled_any:
+        return {"status": "duplicate", "delayMs": str(delay_ms)}
     _record_keepalive_scene_event(
         "review_cache_keepalive.scheduled",
         outcome="started",
-        fields=base_fields,
+        fields={**base_fields, "promptTags": scheduled_tags},
     )
     return {"status": "scheduled", "delayMs": str(delay_ms)}
 

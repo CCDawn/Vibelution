@@ -78,6 +78,25 @@ class _FakeResponse:
         self.response_metadata = dict(response_metadata or {})
 
 
+def _user_message_text(message: dict) -> str:
+    """Full text of one outgoing message (single string or block content)."""
+
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    return "".join(
+        str(block.get("text") or "")
+        for block in content
+        if isinstance(block, dict)
+    )
+
+
+def _user_request_payload(message: dict) -> dict:
+    """Parse the review request JSON carried by the outgoing user message."""
+
+    return json.loads(_user_message_text(message))
+
+
 def _install_fake_llm(monkeypatch, payloads: list[str]):
     """Patch ``invoke_llm`` to return the queued JSON payloads in order."""
 
@@ -1581,7 +1600,7 @@ def test_runners_compose_with_execute_hypothesis_review(monkeypatch):
 
     def ordered_fake_invoke_llm(client, messages, tools=None, context=None, **kwargs):
         assert context is not None, "review calls must carry an invocation context"
-        request = json.loads(str(messages[-1].get("content") or "{}"))
+        request = _user_request_payload(messages[-1])
         candidate_id = str(
             (request.get("candidate") or {}).get("candidateId") or ""
         )
@@ -1641,7 +1660,7 @@ def test_runner_executor_round_and_review_artifacts_integrate(
     def fake_invoke_llm(client, messages, tools=None, invocation_context=None, context=None, **kwargs):
         call_context = invocation_context or context
         purpose = str(call_context.metadata.get("purpose") or "")
-        request = json.loads(messages[-1]["content"])
+        request = _user_request_payload(messages[-1])
         if purpose == "hypothesis_reflection":
             candidate = request["candidate"]
             candidate_id = candidate["candidateId"]
@@ -2697,3 +2716,290 @@ def test_receipt_bound_reflection_submits_canonical_ref_enum(monkeypatch):
     assert isinstance(result, ProviderBoundReviewResult)
     refs = captured[0]["properties"]["dimensionReviews"]["items"]["properties"]["evidence_refs"]
     assert list(refs["items"]["enum"]) == ["canonical:one"]
+
+
+# ---------------------------------------------------------------------------
+# Prompt-cache levers: shared user-prefix marking (L1) and wave stagger (L2)
+# ---------------------------------------------------------------------------
+
+
+def _capture_review_messages(monkeypatch):
+    """Patch ``invoke_llm`` to record outgoing messages and return valid JSON."""
+
+    captured: list[dict[str, Any]] = []
+
+    def fake_invoke_llm(client, messages, tools=None, context=None, **kwargs):
+        captured.append({"messages": messages, "context": context})
+        return _FakeResponse('{"ok": true}')
+
+    monkeypatch.setattr(llm_review_runners, "invoke_llm", fake_invoke_llm)
+    return captured
+
+
+def test_reflection_user_message_marks_wave_invariant_prefix(monkeypatch):
+    """L1: the marked prefix is byte-stable across the wave; the tail differs."""
+
+    captured = _capture_review_messages(monkeypatch)
+    literature = {
+        "papers": [{"title": "对比论文", "year": 2025}],
+        "degraded": False,
+        "retrievalMeta": {},
+    }
+    for candidate_id in ("cand-a", "cand-b"):
+        llm_review_runners._invoke_review_llm(
+            dict(_FAKE_LLM),
+            agent_id="reviewer",
+            purpose="hypothesis_reflection",
+            system_prompt="score",
+            user_payload={
+                "context": {"contextId": "ctx-1", "question": "SCI-096"},
+                "scoreDimensions": list(HYPOTHESIS_SCORE_DIMENSIONS),
+                "reviewDimensions": list(REQUIRED_REVIEW_DIMENSIONS),
+                "allowedRatings": ["strong", "adequate", "weak"],
+                "literatureContrast": literature,
+                "candidate": _candidate(candidate_id, f"假说 {candidate_id}"),
+                "requireCoreHypothesisCoherence": False,
+                "refsWhitelist": [f"evidence:{candidate_id}"],
+            },
+            session_id="team-1",
+        )
+
+    assert len(captured) == 2
+    contents = [call["messages"][1]["content"] for call in captured]
+    assert all(
+        isinstance(content, list) and len(content) == 2 for content in contents
+    )
+    prefix_blocks = [content[0] for content in contents]
+    tail_blocks = [content[1] for content in contents]
+    # Only the leading wave-invariant block carries the cache marker.
+    assert all(
+        block["cache_control"] == {"type": "ephemeral"} for block in prefix_blocks
+    )
+    assert all(not block.get("cache_control") for block in tail_blocks)
+    # The marked prefix is byte-identical across the wave's calls (the cold
+    # first call warms it, the next call hits), while per-call tails differ.
+    assert prefix_blocks[0]["text"] == prefix_blocks[1]["text"]
+    assert tail_blocks[0]["text"] != tail_blocks[1]["text"]
+    assert '"context"' in prefix_blocks[0]["text"]
+    assert '"candidate"' in tail_blocks[0]["text"]
+    # Combined text stays byte-identical to the full (reordered) payload, and
+    # the reorder places the documented wave-invariant keys first.
+    expected_prefix_keys = (
+        "context",
+        "scoreDimensions",
+        "reviewDimensions",
+        "allowedRatings",
+        "literatureContrast",
+    )
+    for prefix_block, tail_block in zip(prefix_blocks, tail_blocks):
+        payload = json.loads(prefix_block["text"] + tail_block["text"])
+        assert list(payload)[: len(expected_prefix_keys)] == list(expected_prefix_keys)
+        assert payload["candidate"]["candidateId"] in ("cand-a", "cand-b")
+
+
+def test_pairwise_user_message_marks_context_prefix(monkeypatch):
+    """L1 pairwise split: context is the marked prefix, candidates the tail."""
+
+    captured = _capture_review_messages(monkeypatch)
+    for left_id in ("cand-a", "cand-b"):
+        llm_review_runners._invoke_review_llm(
+            dict(_FAKE_LLM),
+            agent_id="reviewer",
+            purpose="hypothesis_pairwise",
+            system_prompt="compare",
+            user_payload={
+                "context": {"contextId": "ctx-1", "question": "SCI-096"},
+                "left": _candidate(left_id, "假说"),
+                "right": _candidate("cand-c", "假说 C"),
+            },
+            session_id="team-1",
+        )
+
+    contents = [call["messages"][1]["content"] for call in captured]
+    assert all(isinstance(content, list) and len(content) == 2 for content in contents)
+    prefix_texts = [content[0]["text"] for content in contents]
+    assert contents[0][0]["cache_control"] == {"type": "ephemeral"}
+    assert not contents[0][1].get("cache_control")
+    # The context-only prefix is shared across the pairwise wave.
+    assert prefix_texts[0] == prefix_texts[1]
+    assert '"context"' in prefix_texts[0]
+    combined = json.loads(prefix_texts[0] + contents[0][1]["text"])
+    assert list(combined) == ["context", "left", "right"]
+
+
+def test_single_call_purposes_keep_unmarked_string_user_content(monkeypatch):
+    """Steps without a wave-invariant prefix keep the historical wire shape."""
+
+    captured = _capture_review_messages(monkeypatch)
+    for purpose, payload in (
+        ("hypothesis_pareto", {"scoresByCandidate": {"cand-a": {"novelty": 0.8}}}),
+        (
+            "hypothesis_metareview",
+            {"context": {"contextId": "ctx-1"}, "candidates": []},
+        ),
+        ("meeting_digest", {"meetingRoundId": "m-1", "messages": []}),
+    ):
+        llm_review_runners._invoke_review_llm(
+            dict(_FAKE_LLM),
+            agent_id="reviewer",
+            purpose=purpose,
+            system_prompt="s",
+            user_payload=payload,
+            session_id="team-1",
+        )
+    assert all(
+        isinstance(call["messages"][1]["content"], str) for call in captured
+    )
+
+
+def test_reflection_payload_reorder_keeps_schema_binding_source_payload():
+    """The strict-schema whitelist still binds from the (reordered) payload."""
+
+    llm = _fake_llm_with_strict_json_capability(supported=True)
+    payload = {
+        "context": {"contextId": "ctx-1"},
+        "refsWhitelist": ["evidence:one"],
+        "candidate": {},
+    }
+    output = llm_review_runners._purpose_output_schema(
+        "hypothesis_reflection", llm, user_payload=payload
+    )
+    refs = output.schema["properties"]["dimensionReviews"]["items"]["properties"][
+        "evidence_refs"
+    ]
+    assert list(refs["items"]["enum"]) == ["evidence:one"]
+
+
+def test_review_call_telemetry_reports_prefix_chars(monkeypatch):
+    """The started event carries bounded prompt-cache lever observability."""
+
+    events = _capture_scene_events(monkeypatch)
+    _install_fake_llm(monkeypatch, ['{"ok": true}'])
+    llm_review_runners._invoke_review_llm(
+        dict(_FAKE_LLM),
+        agent_id="reviewer",
+        purpose="hypothesis_pairwise",
+        system_prompt="compare",
+        user_payload={
+            "context": {"contextId": "ctx-1", "question": "q"},
+            "left": {"candidateId": "a"},
+            "right": {"candidateId": "b"},
+        },
+        session_id="team-1",
+    )
+    started = next(
+        event for event in events if event["eventCode"] == "review_llm.call.started"
+    )
+    assert started["fields"]["cachePrefixChars"] > 0
+    assert started["fields"]["staggerDelayMs"] == 0
+
+
+def test_wave_stagger_delays_sibling_calls_with_bounded_total_wait(monkeypatch):
+    """L2: wave calls 2..N dispatch in order, bounded by the max wait."""
+
+    monkeypatch.setenv("VIBELUTION_REVIEW_WAVE_STAGGER_SECONDS", "0.2")
+    monkeypatch.setenv("VIBELUTION_REVIEW_WAVE_STAGGER_MAX_WAIT_SECONDS", "0.4")
+    dispatch_times: list[float] = []
+    first_dispatch = time.monotonic()
+    parties = 3
+    barrier = threading.Barrier(parties)
+
+    def fake_invoke_llm(client, messages, tools=None, context=None, **kwargs):
+        dispatch_times.append(time.monotonic())
+        barrier.wait(timeout=10)
+        return _FakeResponse('{"ok": true}')
+
+    monkeypatch.setattr(llm_review_runners, "invoke_llm", fake_invoke_llm)
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    def call():
+        return llm_review_runners._invoke_review_llm(
+            dict(_FAKE_LLM),
+            agent_id="reviewer",
+            purpose="hypothesis_reflection",
+            system_prompt="score",
+            user_payload={"context": {"contextId": "ctx-1"}, "candidate": {}},
+            session_id="team-1",
+        )
+
+    with ThreadPoolExecutor(max_workers=parties) as pool:
+        futures = [pool.submit(call) for _ in range(parties)]
+        assert [future.result(timeout=15) for future in futures] == [
+            {"ok": True}
+        ] * parties
+
+    offsets = sorted(value - first_dispatch for value in dispatch_times)
+    assert len(offsets) == parties
+    # The first call fires immediately; siblings dispatch in stagger order and
+    # the whole wave stays bounded well under the 60s product budget.
+    assert offsets[0] <= 0.15
+    assert offsets[1] >= 0.15
+    assert offsets[2] >= offsets[1] + 0.15
+    assert offsets[2] <= 0.8
+
+
+def test_wave_stagger_bypasses_when_the_deadline_is_tight(monkeypatch):
+    """L2: a deadline-tight wave fires un-staggered instead of breaching it."""
+
+    monkeypatch.setenv("VIBELUTION_REVIEW_WAVE_STAGGER_SECONDS", "30")
+    dispatch_times: list[float] = []
+    barrier = threading.Barrier(2)
+
+    def fake_invoke_llm(client, messages, tools=None, context=None, **kwargs):
+        dispatch_times.append(time.monotonic())
+        barrier.wait(timeout=10)
+        return _FakeResponse('{"ok": true}')
+
+    monkeypatch.setattr(llm_review_runners, "invoke_llm", fake_invoke_llm)
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    started_at = time.monotonic()
+    # The 30s configured stagger would breach any near deadline, so a wait
+    # must be bypassed; the fence itself stays generous enough for the two
+    # calls to complete their barrier handshake.  Deadlines are epoch ms.
+    deadline_at_ms = int((time.time() + 8) * 1000)
+
+    def call():
+        return llm_review_runners._invoke_review_llm(
+            dict(_FAKE_LLM),
+            agent_id="reviewer",
+            purpose="hypothesis_reflection",
+            system_prompt="score",
+            user_payload={"context": {"contextId": "ctx-1"}, "candidate": {}},
+            session_id="team-1",
+            deadline_at_ms=deadline_at_ms,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(call) for _ in range(2)]
+        assert [future.result(timeout=10) for future in futures] == [
+            {"ok": True}
+        ] * 2
+
+    assert len(dispatch_times) == 2
+    # Both calls dispatched inside the deadline window: the sibling never
+    # waited the configured 30s.
+    assert time.monotonic() - started_at < 10
+    assert max(dispatch_times) - min(dispatch_times) < 5
+
+
+def test_sequential_wave_calls_never_stagger(monkeypatch):
+    """L2: without a sibling still in flight there is no wait at all."""
+
+    monkeypatch.setenv("VIBELUTION_REVIEW_WAVE_STAGGER_SECONDS", "30")
+    captured = _capture_review_messages(monkeypatch)
+
+    started_at = time.monotonic()
+    for _ in range(2):
+        llm_review_runners._invoke_review_llm(
+            dict(_FAKE_LLM),
+            agent_id="reviewer",
+            purpose="hypothesis_reflection",
+            system_prompt="score",
+            user_payload={"context": {"contextId": "ctx-1"}, "candidate": {}},
+            session_id="team-1",
+        )
+    assert time.monotonic() - started_at < 10
+    assert len(captured) == 2

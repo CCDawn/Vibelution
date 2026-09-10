@@ -295,6 +295,33 @@ def isolate_team_workflow_review_llm(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def isolate_review_wave_stagger(monkeypatch):
+    """Review wave stagger must never add sleeps to unrelated tests.
+
+    The wave dispatcher (``llm_review_runners._begin_review_wave_call``)
+    delays calls 2..N of one concurrent review wave so the first call warms
+    the shared prompt-cache prefix.  Production default is 15s per step;
+    tests that do not assert the stagger must stay instantaneous, so the
+    feature is pinned off here and re-enabled (with tiny durations) inside
+    the stagger tests via ``monkeypatch.setenv``.
+    """
+    monkeypatch.setenv("VIBELUTION_REVIEW_WAVE_STAGGER_SECONDS", "0")
+    try:
+        from core.web.services.team_workflow import llm_review_runners
+
+        llm_review_runners.reset_review_wave_stagger_for_tests()
+    except Exception:  # noqa: BLE001 - test isolation must never fail collection
+        pass
+    yield
+    try:
+        from core.web.services.team_workflow import llm_review_runners
+
+        llm_review_runners.reset_review_wave_stagger_for_tests()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+@pytest.fixture(autouse=True)
 def isolate_team_workflow_literature_contrast(monkeypatch):
     """Hypothesis review must never hit real literature providers in tests.
 
