@@ -1565,7 +1565,20 @@ class SelfEvolvingAgent:
                 else:
                     restored.append(build_chat_user_message(content))
             elif role == "assistant":
-                restored.append(AIMessage(content=str(content), tool_calls=assistant_tool_calls))
+                assistant_kwargs: Dict[str, Any] = {}
+                seeded_reasoning = str(item.get("reasoning_content") or "").strip()
+                if assistant_tool_calls and seeded_reasoning:
+                    # DeepSeek thinking-mode relays require tool-call assistants
+                    # to round-trip reasoning_content; the ledger seed already
+                    # carries it, so it must survive the LangChain restore.
+                    assistant_kwargs["reasoning_content"] = seeded_reasoning
+                restored.append(
+                    AIMessage(
+                        content=str(content),
+                        tool_calls=assistant_tool_calls,
+                        additional_kwargs=assistant_kwargs,
+                    )
+                )
             elif role == "tool":
                 tool_call_id = str(item.get("tool_call_id") or item.get("toolCallId") or "").strip()
                 if tool_call_id:

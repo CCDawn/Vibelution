@@ -784,6 +784,60 @@ class TestToolMessageFlow:
         assert messages[0].content.endswith("[错误] binary result")
         assert messages[0].tool_call_id == "call_binary"
 
+    def test_seed_chat_history_keeps_reasoning_content_on_tool_call_assistant(self):
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.mode_policy = ModePolicy(
+            mode=AgentMode.CHAT,
+            orchestrator_kind="chat",
+            keep_multi_turn_context=True,
+            allow_auto_loop=False,
+            capture_chat_dataset_candidates=True,
+            reset_context_before_turn=False,
+            reset_context_between_cases=False,
+            allow_direct_supervised_payload=False,
+            finish_after_direct_response=False,
+            runtime_input_builder=build_chat_user_message,
+        )
+        agent.config = isolated_settings_config()
+        agent._mental_model_enabled_override = False
+        agent.mental_model = None
+
+        agent.seed_chat_history(
+            [
+                {"role": "user", "content": "继续"},
+                {
+                    "role": "assistant",
+                    "content": "我先定位上下文。",
+                    "tool_calls": [
+                        {
+                            "id": "call_r1",
+                            "name": "grep_search_tool",
+                            "args": {"regex_pattern": "x"},
+                        }
+                    ],
+                    "reasoning_content": "用户要继续，先搜索定位上下文再调用工具。",
+                },
+                {"role": "tool", "tool_call_id": "call_r1", "content": "[搜索] 找到 2 处"},
+                {
+                    "role": "assistant",
+                    "content": "已定位完成，结论如下。",
+                },
+            ]
+        )
+
+        restored = list(agent._active_turn_messages or [])
+        assistants = [m for m in restored if isinstance(m, AIMessage)]
+        tool_call_assistants = [m for m in assistants if getattr(m, "tool_calls", None)]
+        plain_assistants = [m for m in assistants if not getattr(m, "tool_calls", None)]
+
+        assert tool_call_assistants, "seed restore must keep the tool-call assistant"
+        assert (
+            tool_call_assistants[0].additional_kwargs.get("reasoning_content")
+            == "用户要继续，先搜索定位上下文再调用工具。"
+        )
+        assert plain_assistants, "seed restore must keep the plain final assistant"
+        assert not plain_assistants[0].additional_kwargs.get("reasoning_content")
+
     def test_seed_chat_history_restores_persisted_tool_results(self):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
         agent.mode_policy = ModePolicy(
