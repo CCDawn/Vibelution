@@ -99,7 +99,11 @@ from core.llm import (
     invoke_llm,
     stream_llm,
 )
-from core.llm.client import current_llm_status_context, llm_cancel_context
+from core.llm.client import (
+    MAX_OUTPUT_TOKENS_OVERRIDE_METADATA_KEY,
+    current_llm_status_context,
+    llm_cancel_context,
+)
 from core.llm.invocation import invoke_llm_outcome, run_streaming_llm_outcome
 from core.llm.legacy_xml_tool_decoder import canonical_outcome_from_message, canonicalize_legacy_xml_outcome
 from core.llm.semantic_messages import InvocationScope
@@ -112,6 +116,11 @@ from core.llm.agent_runtime import (
     normalize_agent_llm_bindings,
     resolve_agent_llm,
 )
+
+
+# A supervised Judge only returns a compact evidence-based verdict.  Its output
+# budget stays local to that turn, so operator model profiles remain unchanged.
+SUPERVISED_JUDGE_MAX_OUTPUT_TOKENS = 2_048
 
 # 导入工具
 from tools import Key_Tools
@@ -1160,6 +1169,8 @@ class SelfEvolvingAgent:
         return True
 
     def _should_stream_llm_for_turn(self, llm_for_turn: Any = None) -> bool:
+        if bool(getattr(self, "_supervised_judge_execution_profile", False)):
+            return False
         try:
             return bool(self._should_stream_llm(llm_for_turn))
         except TypeError as exc:
@@ -1914,7 +1925,25 @@ class SelfEvolvingAgent:
             excluded.append("RUNTIME_LOG_INDEX")
         if bool(getattr(self, "_core_prompt_snapshot_seeded_by_host", False)):
             excluded.extend(CORE_PROMPT_NAMES)
+        if bool(getattr(self, "_supervised_judge_execution_profile", False)):
+            excluded.extend(
+                [
+                    "CODEBASE_MAP",
+                    "DELEGATION_RULES",
+                    "DELEGATION_STATE",
+                    "CONFIG_AWARENESS",
+                    "GIT_RULES",
+                    "MEMORY",
+                    "ENV_INFO",
+                    "SESSION_CHILD_ROUTING",
+                ]
+            )
         return list(dict.fromkeys(excluded))
+
+    def set_supervised_judge_execution_profile(self, enabled: bool = False) -> None:
+        """Configure one cached runtime Agent for a Judge-only session turn."""
+
+        self._supervised_judge_execution_profile = bool(enabled)
 
     def _prompt_assembly_context_for_turn(self):
         client = getattr(self, "_base_llm", None)
@@ -3057,7 +3086,7 @@ class SelfEvolvingAgent:
         except Exception:
             mode_value = ""
             orchestrator_kind = ""
-        return build_llm_invocation_context(
+        invocation_context = build_llm_invocation_context(
             runtime_binding=getattr(self, "runtime_agent_binding", {}) or {},
             mode_value=mode_value,
             orchestrator_kind=orchestrator_kind,
@@ -3068,6 +3097,17 @@ class SelfEvolvingAgent:
             route_attempt=route_attempt,
             turn_runtime_fn=_turn_runtime_from_env,
             status_context_fn=current_llm_status_context,
+        )
+        if not bool(getattr(self, "_supervised_judge_execution_profile", False)):
+            return invocation_context
+        return replace(
+            invocation_context,
+            prompt_purpose="supervised_judge",
+            metadata={
+                **dict(invocation_context.metadata or {}),
+                MAX_OUTPUT_TOKENS_OVERRIDE_METADATA_KEY: SUPERVISED_JUDGE_MAX_OUTPUT_TOKENS,
+                "supervisedJudgeExecution": True,
+            },
         )
 
     def _report_round_state_stall_signals(self, round_state) -> None:

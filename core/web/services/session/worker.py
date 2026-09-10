@@ -54,6 +54,19 @@ _CONTINUATION_TOOL_FAILURE_STATUSES = frozenset(
 )
 
 
+def _is_supervised_judge_execution(
+    context: dict[str, Any],
+    supervised_role: str,
+) -> bool:
+    """Keep the compact Judge transport isolated from every other session turn."""
+
+    return (
+        str(context.get("user_message_source") or "").strip().casefold()
+        == "supervised_evolution"
+        and str(supervised_role or "").strip().casefold() == "judge"
+    )
+
+
 def _normalized_tool_signature_value(value: Any) -> Any:
     """Build a stable, JSON-safe tool observation without call-local noise."""
 
@@ -1032,6 +1045,10 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
     except Exception:
         runtime_status_enabled = runtime_status_requested is not False
     supervised_runtime_role = s._supervised_role_for_runtime_context(context, agent_instance)
+    supervised_judge_execution = _is_supervised_judge_execution(
+        context,
+        supervised_runtime_role,
+    )
     supervised_runtime_tool_grants = s._supervised_runtime_tool_grants_for_context(
         context,
         supervised_runtime_role,
@@ -1108,6 +1125,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
             context,
             attachments=turn_attachments,
         )
+        effective_disable_tools = lightweight_chat_payload or supervised_judge_execution
         prepare_timings["lightweightChatDecisionMs"] = s._elapsed_ms(stage_started_at)
         prepare_timings["lightweightChatPayload"] = lightweight_chat_payload
         prepare_timings["lightweightChatPayloadReason"] = lightweight_chat_payload_reason
@@ -1383,7 +1401,8 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
             "hasAgentContextPacket": agent_context_packet is not None,
             "lightweightChatPayload": lightweight_chat_payload,
             "lightweightChatPayloadReason": lightweight_chat_payload_reason,
-            "disableTools": lightweight_chat_payload,
+            "disableTools": effective_disable_tools,
+            "supervisedJudgeExecution": supervised_judge_execution,
             "internalAutoContinueAllowed": allow_internal_auto_continue,
             "internalAutoContinueMaxTurns": internal_auto_continue_max_turns,
             "sourceCollectionStageTaskAutoContinue": bool(source_collection_stage_task_auto_continue),
@@ -1535,6 +1554,13 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                             turn_id=turn_id,
                         )
                     )
+                judge_execution_configurer = getattr(
+                    runtime_agent,
+                    "set_supervised_judge_execution_profile",
+                    None,
+                )
+                if callable(judge_execution_configurer):
+                    judge_execution_configurer(supervised_judge_execution)
                 agent_create_ms = s._elapsed_ms(stage_started_at)
                 attachments = s._normalize_message_attachments(context.get("attachments") or [])
                 resolved_llm_model_id = str(getattr(resolved_agent_llm, "model_id", "") or "").strip() or s._session_agent_llm_slot_model_id(
@@ -1580,7 +1606,8 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                         ),
                         "lightweightChatPayload": lightweight_chat_payload,
                         "lightweightChatPayloadReason": lightweight_chat_payload_reason,
-                        "disableTools": lightweight_chat_payload,
+                        "disableTools": effective_disable_tools,
+                        "supervisedJudgeExecution": supervised_judge_execution,
                         **(resolved_agent_llm.log_fields() if resolved_agent_llm is not None else {}),
                     },
                 )
@@ -1840,7 +1867,8 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                         "activeSkillContractSkillHash": str((active_skill_contract or {}).get("skillHash") or "").strip(),
                         "lightweightChatPayload": lightweight_chat_payload,
                         "lightweightChatPayloadReason": lightweight_chat_payload_reason,
-                        "disableTools": lightweight_chat_payload,
+                        "disableTools": effective_disable_tools,
+                        "supervisedJudgeExecution": supervised_judge_execution,
                         "restoreAvailable": callable(getattr(runtime_agent, "seed_chat_history", None)),
                         "staticRuntimeContextSeedAvailable": callable(static_runtime_context_seed),
                         "runtimeContextSeedAvailable": callable(runtime_context_seed),
@@ -1988,7 +2016,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                             agent_id=agent_id,
                             llm_slot=llm_slot,
                             llm_model_id=llm_model_id_for_turn,
-                            disable_tools=lightweight_chat_payload,
+                            disable_tools=effective_disable_tools,
                             allow_internal_auto_continue=allow_internal_auto_continue,
                             max_internal_auto_continue_turns=internal_auto_continue_max_turns,
                             require_tool_progress=bool(source_collection_stage_task_auto_continue),

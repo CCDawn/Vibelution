@@ -441,6 +441,70 @@ def test_chat_invocation_context_uses_active_status_turn_identity(monkeypatch):
     assert scope.turn_id == "turn-live-42"
 
 
+def test_supervised_judge_execution_uses_compact_nonstreaming_invocation(monkeypatch):
+    captured: dict[str, object] = {}
+    calls: list[str] = []
+
+    class DummyContext:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class DummyUI:
+        def thinking(self, _label):
+            return DummyContext()
+
+        def add_log(self, *_args, **_kwargs):
+            return None
+
+    class JudgeLLM(_CanonicalAgentTestLLM):
+        profile_id = "relay_openai/gpt-5.6-luna"
+
+        def stream_events(self, *_args, **_kwargs):
+            pytest.fail("Judge must not use the streaming transport")
+            yield
+
+        def invoke_outcome(self, _messages, **kwargs):
+            calls.append("invoke")
+            captured["metadata"] = dict(kwargs["metadata"])
+            return _canonical_agent_test_outcome(text="评分完成")
+
+    monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
+    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    llm = JudgeLLM()
+    agent.llm_with_tools = llm
+    agent._base_llm = llm
+    agent.key_tools = []
+    agent.mode_policy = SimpleNamespace(mode=AgentMode.SUPERVISED_EVOLUTION)
+    agent.runtime_agent_binding = {}
+    agent.set_supervised_judge_execution_profile(True)
+
+    result = agent._invoke_llm([AIMessage(content="请基于证据评分")])
+
+    assert result is not None
+    assert calls == ["invoke"]
+    metadata = captured["metadata"]
+    assert metadata["llmMaxOutputTokensOverride"] == 2_048
+    assert metadata["promptPurpose"] == "supervised_judge"
+    assert metadata["supervisedJudgeExecution"] is True
+    excluded = agent._excluded_system_prompt_sections_for_turn(stable_session_prompt=False)
+    assert {
+        "CODEBASE_MAP",
+        "DELEGATION_RULES",
+        "GIT_RULES",
+        "MEMORY",
+        "ENV_INFO",
+    }.issubset(excluded)
+
+    agent.set_supervised_judge_execution_profile(False)
+    assert agent._should_stream_llm_for_turn(llm) is True
+    assert "CODEBASE_MAP" not in agent._excluded_system_prompt_sections_for_turn(
+        stable_session_prompt=False
+    )
+
+
 def test_numbered_task_list_without_confirmation_keeps_user_goal():
     prompt = "1,修复缓存链路,2,补测试,3,运行验证"
 

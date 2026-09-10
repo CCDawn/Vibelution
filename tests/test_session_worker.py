@@ -37,6 +37,21 @@ def test_internal_auto_continue_context_helpers() -> None:
     ) == 7
 
 
+def test_supervised_judge_execution_is_limited_to_the_judge_harness_turn() -> None:
+    assert worker._is_supervised_judge_execution(
+        {"user_message_source": "supervised_evolution"},
+        "judge",
+    ) is True
+    assert worker._is_supervised_judge_execution(
+        {"user_message_source": "supervised_evolution"},
+        "baseline",
+    ) is False
+    assert worker._is_supervised_judge_execution(
+        {"user_message_source": "agent_inbox"},
+        "judge",
+    ) is False
+
+
 def test_research_project_agent_task_gets_bounded_internal_continuation() -> None:
     context = {
         "user_message_source": "agent_inbox",
