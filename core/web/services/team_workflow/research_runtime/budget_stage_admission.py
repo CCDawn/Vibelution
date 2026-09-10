@@ -29,6 +29,7 @@ blocked run retryable without manual data repair.
 
 from __future__ import annotations
 
+import os
 import statistics
 from dataclasses import dataclass
 from typing import Any
@@ -57,6 +58,52 @@ DEFAULT_CONSERVATIVE_REFERENCE_TOKENS = 100_000
 #: Both steps reuse existing commands; no data repair is involved.
 RECOVERY_COMMAND = "extend_budget"
 RECOVERY_FOLLOWUP_COMMAND = "retry_node"
+
+#: Automated recovery actor (P0-B, 2026-09): the maintenance sweep may drive
+#: the SAME extend_budget → retry_node contract above when a blocked attempt
+#: carries a policy-compliant ``suggestedExtensionTokens`` suggestion.  The
+#: actor id is a system identity (never an operator), so ledger audit rows
+#: stay distinguishable from human clicks; the command requests still carry
+#: ``requested_by=ActorRef("system", ...)`` while the high-impact
+#: ``extend_budget`` authorization binds the same server-internal privileged
+#: scope the ``local_control_operator`` control-plane precedent uses.
+AUTO_BUDGET_RECOVERY_ACTOR_ID = "system:auto-budget-recovery"
+
+#: Bounded self-healing: at most this many automated extensions per blocked
+#: node (across its attempt chain).  Once spent, the sweep leaves the existing
+#: human-visible stop intact and records a decline recovery_record instead —
+#: the operator's own extend_budget / retry_node contract is never limited.
+DEFAULT_AUTO_BUDGET_RECOVERY_MAX_EXTENSIONS = 2
+AUTO_BUDGET_RECOVERY_MAX_EXTENSIONS_ENV = (
+    "VIBELUTION_AUTO_BUDGET_RECOVERY_MAX_EXTENSIONS"
+)
+
+#: Config gate for the automated recovery step (default ON).  Set to
+#: ``0`` / ``false`` / ``off`` to restore the purely manual recovery contract
+#: (digest-TTL env style: absent or any other value keeps the step enabled).
+AUTO_BUDGET_RECOVERY_ENV = "VIBELUTION_AUTO_BUDGET_RECOVERY"
+
+
+def auto_budget_recovery_enabled() -> bool:
+    """Configured ON/OFF switch for the automated budget recovery step."""
+
+    raw = str(os.environ.get(AUTO_BUDGET_RECOVERY_ENV) or "").strip().lower()
+    return raw not in {"0", "false", "off"}
+
+
+def auto_budget_recovery_max_extensions() -> int:
+    """Configured per-node automated extension cap (nonpositive → default)."""
+
+    raw = str(os.environ.get(AUTO_BUDGET_RECOVERY_MAX_EXTENSIONS_ENV) or "").strip()
+    if not raw:
+        return DEFAULT_AUTO_BUDGET_RECOVERY_MAX_EXTENSIONS
+    try:
+        normalized = int(raw)
+    except ValueError:
+        return DEFAULT_AUTO_BUDGET_RECOVERY_MAX_EXTENSIONS
+    if normalized <= 0:
+        return DEFAULT_AUTO_BUDGET_RECOVERY_MAX_EXTENSIONS
+    return normalized
 
 _EVALUATION_TIMEOUT_SECONDS = 10
 
@@ -309,10 +356,16 @@ def _median(samples: list[int]) -> float:
 
 
 __all__ = [
+    "AUTO_BUDGET_RECOVERY_ACTOR_ID",
+    "AUTO_BUDGET_RECOVERY_ENV",
+    "AUTO_BUDGET_RECOVERY_MAX_EXTENSIONS_ENV",
     "BUDGET_PRECHECK_INSUFFICIENT_CODE",
+    "DEFAULT_AUTO_BUDGET_RECOVERY_MAX_EXTENSIONS",
     "DEFAULT_CONSERVATIVE_REFERENCE_TOKENS",
     "RECOVERY_COMMAND",
     "RECOVERY_FOLLOWUP_COMMAND",
     "StageBudgetAdmission",
+    "auto_budget_recovery_enabled",
+    "auto_budget_recovery_max_extensions",
     "evaluate_stage_budget_admission",
 ]

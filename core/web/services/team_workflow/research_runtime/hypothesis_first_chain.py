@@ -44,6 +44,11 @@ from core.research.workflow.contracts import ContractValidationError, scope_hash
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 from core.research.workflow.knowledge_sideflow_definition import KNOWLEDGE_SIDEFLOW_WORKFLOW_ID
 
+from .budget_stage_admission import (
+    AUTO_BUDGET_RECOVERY_ACTOR_ID,
+    BUDGET_PRECHECK_INSUFFICIENT_CODE,
+)
+
 logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
@@ -3705,6 +3710,532 @@ def auto_retry_blocked_formal_nodes(
 _FENCED_REVIEW_REDRIVE_INFLIGHT: dict[tuple[str, str], object] = {}
 _CLOSED_GENERATION_RETRY_INFLIGHT: dict[tuple[str, str], object] = {}
 
+# Bounded automated budget recovery (auto-advance, before the blocked-node
+# retry step).  The 2026-09-08→09-09 SCI-009 overnight stall (sideflow child
+# run blocked ``budget_precheck_insufficient`` while the operator slept) left
+# a fully machine-recoverable block untouched for 8.3h: the reconcile
+# revive-pass deliberately never revives readiness-pipeline blocks, and the
+# manual extend_budget → retry_node contract has no automated driver.  The
+# sweep step below drives the SAME contract through the same command service
+# (extend exactly the stored ``suggestedExtensionTokens`` suggestion, then
+# retry the blocked node), bounded per node by
+# ``auto_budget_recovery_max_extensions`` and config-gated by
+# ``VIBELUTION_AUTO_BUDGET_RECOVERY`` (default ON) — see
+# ``budget_stage_admission`` for the contract constants.
+
+
+def _latest_budget_precheck_blocked_attempt(
+    store: Any,
+    run_id: str,
+) -> tuple[str, int, dict[str, Any]] | None:
+    """Newest ``(nodeId, attemptNo, problem)`` blocked on the budget precheck.
+
+    Same latest-per-node resolution as ``_latest_auto_advance_blocked_attempt``
+    (attempt number first, then wall-clock), keyed on the structured
+    ``budget_precheck_insufficient`` problem the graph dispatch worker commits
+    at the stage boundary.  Only a node whose *latest* attempt is still
+    blocked on exactly this code qualifies; a policy-compliant suggestion
+    requires a positive ``suggestedExtensionTokens`` plus a known stage and
+    stage limit.  ``None`` means the caller must not touch the run.
+    """
+
+    latest_by_node: dict[str, tuple[int, int, Any]] = {}
+    for attempt in store.list_attempts(run_id):
+        node_id = str(getattr(attempt, "node_id", "") or "").strip()
+        if not node_id:
+            continue
+        key = (
+            int(getattr(attempt, "attempt", 0) or 0),
+            int(getattr(attempt, "updated_at_ms", 0) or 0),
+        )
+        current = latest_by_node.get(node_id)
+        if current is None or key > (current[0], current[1]):
+            latest_by_node[node_id] = (key[0], key[1], attempt)
+    best_key: tuple[int, int] | None = None
+    best: tuple[str, int, dict[str, Any]] | None = None
+    for node_id, (attempt_no, updated_at_ms, attempt) in latest_by_node.items():
+        if str(getattr(attempt, "status", "") or "").strip() != "blocked":
+            continue
+        try:
+            problem = json.loads(
+                str(getattr(attempt, "problem_json", "") or "") or "{}"
+            )
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(problem, Mapping):
+            continue
+        if str(problem.get("code") or "").strip() != BUDGET_PRECHECK_INSUFFICIENT_CODE:
+            continue
+        suggested = problem.get("suggestedExtensionTokens")
+        stage_limit = problem.get("stageLimitTokens")
+        if not str(problem.get("stageId") or "").strip():
+            continue
+        if not isinstance(suggested, int) or isinstance(suggested, bool):
+            continue
+        if suggested <= 0:
+            continue
+        if not isinstance(stage_limit, int) or isinstance(stage_limit, bool):
+            continue
+        if stage_limit <= 0:
+            continue
+        key = (updated_at_ms, attempt_no)
+        if best_key is None or key > best_key:
+            best_key = key
+            best = (node_id, attempt_no, dict(problem))
+    return best
+
+
+def _run_stage_limit_override(run: Any, stage_id: str) -> int:
+    """Current operator stage-token limit for ``stage_id`` (0 when unset).
+
+    ``safety_limits_json`` is the auditable extension ledger: comparing it
+    against the block's ``stageLimitTokens`` distinguishes "an extension
+    already happened" (manual click or a prior auto hop) from "still at the
+    frozen contract" without parsing events.
+    """
+
+    try:
+        limits = json.loads(str(getattr(run, "safety_limits_json", "") or "") or "{}")
+    except (TypeError, ValueError):
+        return 0
+    if not isinstance(limits, Mapping):
+        return 0
+    stage_tokens = limits.get("stageTokens")
+    if isinstance(stage_tokens, Mapping):
+        value = stage_tokens.get(stage_id)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return int(value)
+    return 0
+
+
+def _count_auto_budget_extensions(
+    store: Any, *, run_id: str, node_id: str
+) -> int:
+    """Automated extensions already applied for one blocked node.
+
+    Reads the recovery_records audit trail this module writes (actor
+    ``system:auto-budget-recovery``, action ``auto_extend``, exact quoted
+    nodeId match), so the cap survives process restarts without extra state.
+    """
+
+    marker = f'"nodeId":"{node_id}"'
+    rows = store.submit(
+        lambda uow: uow.repository.execute(
+            "SELECT COUNT(*) FROM recovery_records "
+            "WHERE run_id = ? AND problem_code = ? AND status = 'resolved' "
+            "AND INSTR(evidence_json, ?) > 0 "
+            "AND INSTR(evidence_json, '\"action\":\"auto_extend\"') > 0 "
+            "AND INSTR(evidence_json, ?) > 0",
+            (
+                run_id,
+                BUDGET_PRECHECK_INSUFFICIENT_CODE,
+                marker,
+                f'"actor":"{AUTO_BUDGET_RECOVERY_ACTOR_ID}"',
+            ),
+        ).fetchone(),
+        force_flush=True,
+    ).result(timeout=10)
+    try:
+        return int(rows[0] or 0) if rows else 0
+    except (TypeError, ValueError, IndexError):
+        return 0
+
+
+def _record_auto_budget_recovery(
+    store: Any,
+    *,
+    run_id: str,
+    node_id: str,
+    attempt_no: int,
+    action: str,
+    resolution: dict[str, Any],
+    now_ms: int,
+) -> bool:
+    """Write one deterministic audit row into ``recovery_records``.
+
+    The recovery id derives from (run, node, attempt, action), so re-running
+    the sweep can never duplicate an entry.  Rows are written ``resolved`` —
+    an ``open`` recovery_record is a readiness blocker
+    (``recovery_blocked``), and a decline must not harden the stop it only
+    explains.  Best-effort: audit failures never break the sweep.
+    """
+
+    import hashlib
+
+    from .ids import new_id
+
+    digest = hashlib.sha256(
+        f"{run_id}:{node_id}:{attempt_no}:{action}".encode()
+    ).hexdigest()[:16]
+    recovery_id = f"rec-auto-budget-{digest}"
+    # Compact separators: the cap counter matches exact `"key":"value"`
+    # substrings inside evidence_json, so the serialized shape is normative.
+    evidence = json.dumps(
+        {
+            "actor": AUTO_BUDGET_RECOVERY_ACTOR_ID,
+            "action": action,
+            "nodeId": node_id,
+            "attempt": attempt_no,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    resolution_json = json.dumps(
+        resolution, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+
+    def mutate(uow):
+        existing = uow.repository.execute(
+            "SELECT 1 FROM recovery_records WHERE recovery_id = ?",
+            (recovery_id,),
+        ).fetchone()
+        if existing is not None:
+            return False
+        uow.repository.execute(
+            "INSERT INTO recovery_records ("
+            "recovery_id, run_id, problem_code, evidence_json, status, "
+            "resolution_json, created_at_ms, resolved_at_ms"
+            ") VALUES (?, ?, ?, ?, 'resolved', ?, ?, ?)",
+            (
+                recovery_id or new_id("rec"),
+                run_id,
+                BUDGET_PRECHECK_INSUFFICIENT_CODE,
+                evidence,
+                resolution_json,
+                now_ms,
+                now_ms,
+            ),
+        )
+        return True
+
+    try:
+        return bool(
+            store.submit(mutate, force_flush=True).result(timeout=10)
+        )
+    except Exception:  # noqa: BLE001 - audit must never break the recovery
+        return False
+
+
+def _submit_auto_budget_command(
+    runtime: Any,
+    *,
+    team_id: str,
+    run_id: str,
+    kind: Any,
+    node_id: str | None,
+    payload: dict[str, Any],
+    idempotency_key: str,
+) -> tuple[str, str]:
+    """Submit one extend_budget / retry_node through the command SSOT.
+
+    Returns ``(summary_key, reason)`` where summary_key is ``accepted``,
+    ``skipped``, or ``failed``.  The submit runs under a server-bound system
+    operator scope (``AUTO_BUDGET_RECOVERY_ACTOR_ID`` with the operator role)
+    because ``extend_budget`` is a high-impact command whose authorization
+    must come from server context — the exact precedent of the auto
+    knowledge-handoff accept (``_submit_auto_knowledge_handoff_accept``).
+    Typed command rejections (stale run version, readiness refuses, forbidden,
+    conflict) are structured waits for the next tick, never crashes.
+    """
+
+    from core.research.workflow.contracts import ActorRef, CommandRequest
+    from core.research.workflow.ledger import (
+        CommandNotAllowedError as LedgerCommandNotAllowedError,
+        IdempotencyConflictError as LedgerIdempotencyConflictError,
+        RunVersionConflictError as LedgerRunVersionConflictError,
+    )
+
+    from .command_service import (
+        NodeNotReadyError,
+        WorkflowCommandError,
+    )
+    from .ids import new_id
+    from .operator_authorization import server_operator_scope
+
+    run = runtime.store.get_run(run_id)
+    if run is None or str(run.team_id or "") != team_id:
+        return "skipped", "run_unavailable"
+    try:
+        with server_operator_scope(
+            AUTO_BUDGET_RECOVERY_ACTOR_ID,
+            display_name="Auto budget precheck recovery",
+            roles=("operator",),
+        ):
+            receipt = runtime.command_service.submit(
+                CommandRequest(
+                    command_id=new_id("cmd"),
+                    run_id=run_id,
+                    team_id=team_id,
+                    command=kind,
+                    node_id=node_id,
+                    expected_run_version=int(run.run_version),
+                    idempotency_key=idempotency_key,
+                    payload=payload,
+                    requested_by=ActorRef("system", AUTO_BUDGET_RECOVERY_ACTOR_ID),
+                    requested_at_ms=int(time.time() * 1000),
+                )
+            )
+    except HypothesisFirstChainError as exc:
+        return "skipped", str(exc)[:200] or type(exc).__name__
+    except (
+        NodeNotReadyError,
+        WorkflowCommandError,
+        LedgerRunVersionConflictError,
+        LedgerIdempotencyConflictError,
+        LedgerCommandNotAllowedError,
+    ) as exc:
+        return "skipped", str(exc)[:200] or type(exc).__name__
+    except Exception as exc:  # noqa: BLE001 - one submit is isolated
+        return "failed", f"{type(exc).__name__}: {str(exc)[:180]}"
+    return "accepted", str(getattr(receipt, "status", "") or "accepted")
+
+
+def auto_extend_budget_blocked_nodes(
+    team_id: str,
+    *,
+    question_id: str,
+) -> dict[str, Any]:
+    """Auto-recover budget-precheck blocks: extend_budget then retry_node.
+
+    Budget-precheck auto-recovery, step two-six (before the transient
+    ``auto_advance_not_ready`` retry).  A blocked run whose latest node
+    attempt carries the structured ``budget_precheck_insufficient`` problem
+    is machine-recoverable when a positive ``suggestedExtensionTokens``
+    exists: this helper extends the stage limit by exactly the stored
+    suggestion (same overrun-aware baseline ``max(stageLimitTokens,
+    stageConsumedTokens) + suggested`` as the operator's one-click inbox CTA)
+    and then submits the retry through the same command service the manual
+    clicks reach — never a second write path, never an invented amount.
+
+    Bounded and idempotent: at most
+    ``auto_budget_recovery_max_extensions()`` automated extensions per
+    blocked node (counted from the ``recovery_records`` audit trail this
+    step writes, so the cap survives restarts); a manual extension is
+    detected from ``safety_limits_json`` and the step then only retries;
+    deterministic idempotency keys make replays converge; once the cap is
+    spent the existing human-visible stop is left intact and a decline
+    ``recovery_record`` states why (never an ``open`` record — those are
+    readiness blockers).  Both formal runs and knowledge sideflow child runs
+    are covered (the stalled run was a child).  Best-effort: nothing raises;
+    every outcome is counted and, when it acts, recorded as a scene event.
+    """
+
+    from .budget_stage_admission import (
+        auto_budget_recovery_enabled,
+        auto_budget_recovery_max_extensions,
+    )
+
+    normalized_question_id = str(question_id or "").strip().upper()
+    summary: dict[str, Any] = {
+        "blockedRuns": 0,
+        "extended": 0,
+        "retried": 0,
+        "declined": 0,
+        "skipped": 0,
+        "ineligible": 0,
+        "failed": 0,
+    }
+    if not auto_budget_recovery_enabled():
+        return summary
+    if not normalized_question_id:
+        return summary
+    try:
+        from .formal_read_runtime import get_query_service
+
+        blocked_runs: list[dict[str, Any]] = []
+        seen_run_ids: set[str] = set()
+        for workflow_id in (CHALLENGE_CUP_WORKFLOW_ID, KNOWLEDGE_SIDEFLOW_WORKFLOW_ID):
+            payload = get_query_service().list_runs(
+                team_id=team_id, workflow_id=workflow_id
+            )
+            for run in list((payload or {}).get("runs") or []):
+                if not isinstance(run, Mapping):
+                    continue
+                if (
+                    str(run.get("questionId") or "").strip().upper()
+                    != normalized_question_id
+                    or str(run.get("status") or "").strip().lower() != "blocked"
+                ):
+                    continue
+                run_id = str(run.get("runId") or "").strip()
+                if run_id and run_id not in seen_run_ids:
+                    seen_run_ids.add(run_id)
+                    blocked_runs.append(dict(run))
+    except Exception:  # noqa: BLE001 - formal runtime absent (command line)
+        return summary
+    from .runtime_factory import production_workflow_runtime
+
+    runtime = production_workflow_runtime()
+    if runtime is None:
+        return summary
+
+    from core.research.workflow.contracts import WorkflowCommandKind
+
+    now_ms = int(time.time() * 1000)
+    for run in blocked_runs:
+        summary["blockedRuns"] += 1
+        run_id = str(run.get("runId") or "").strip()
+        if not run_id:
+            continue
+        try:
+            target = _latest_budget_precheck_blocked_attempt(runtime.store, run_id)
+            if target is None:
+                summary["ineligible"] += 1
+                continue
+            node_id, attempt_no, problem = target
+            stage_id = str(problem.get("stageId") or "").strip()
+            stage_limit = int(problem.get("stageLimitTokens") or 0)
+            consumed = int(problem.get("stageConsumedTokens") or 0)
+            suggested = int(problem.get("suggestedExtensionTokens") or 0)
+            current_run = runtime.store.get_run(run_id)
+            if current_run is None:
+                summary["ineligible"] += 1
+                continue
+            current_stage_limit = _run_stage_limit_override(current_run, stage_id)
+            baseline = max(stage_limit, consumed if consumed > 0 else 0)
+            new_stage_tokens = baseline + suggested
+            extend_key = (
+                f"auto-budget-recovery:{run_id}:{stage_id}"
+                f":extend:{new_stage_tokens}"
+            )
+            retry_key = (
+                f"auto-budget-recovery:{run_id}:{node_id}"
+                f":retry_node:a{attempt_no}"
+            )
+            if current_stage_limit < new_stage_tokens:
+                applied = _count_auto_budget_extensions(
+                    runtime.store, run_id=run_id, node_id=node_id
+                )
+                cap = auto_budget_recovery_max_extensions()
+                if applied >= cap:
+                    # Cap spent: leave the human-visible stop intact and only
+                    # record WHY the auto actor declines (deterministic id —
+                    # one entry per blocked attempt, never a loop).
+                    _record_auto_budget_recovery(
+                        runtime.store,
+                        run_id=run_id,
+                        node_id=node_id,
+                        attempt_no=attempt_no,
+                        action="declined",
+                        resolution={
+                            "reason": "auto_extension_cap_exhausted",
+                            "autoExtensionsApplied": applied,
+                            "maxAutoExtensions": cap,
+                            "suggestedExtensionTokens": suggested,
+                            "newStageTokens": new_stage_tokens,
+                            "recovery": "manual extend_budget + retry_node",
+                        },
+                        now_ms=now_ms,
+                    )
+                    summary["declined"] += 1
+                    _record_scene_event(
+                        "hypothesis_first.auto_budget_recovery",
+                        outcome="declined",
+                        fields={
+                            "teamId": team_id,
+                            "questionId": normalized_question_id,
+                            "runId": run_id,
+                            "nodeId": node_id,
+                            "reason": "auto_extension_cap_exhausted",
+                        },
+                    )
+                    continue
+                outcome, reason = _submit_auto_budget_command(
+                    runtime,
+                    team_id=team_id,
+                    run_id=run_id,
+                    kind=WorkflowCommandKind.EXTEND_BUDGET,
+                    node_id=None,
+                    payload={
+                        "limits": {"stageTokens": {stage_id: new_stage_tokens}},
+                        "recovery": {
+                            "command": "extend_budget",
+                            "then": "retry_node",
+                            "actor": AUTO_BUDGET_RECOVERY_ACTOR_ID,
+                        },
+                    },
+                    idempotency_key=extend_key,
+                )
+                if outcome != "accepted":
+                    summary["skipped" if outcome == "skipped" else "failed"] += 1
+                    if outcome == "failed":
+                        _record_scene_event(
+                            "hypothesis_first.auto_budget_recovery",
+                            outcome="failed",
+                            level="warning",
+                            fields={
+                                "teamId": team_id,
+                                "runId": run_id,
+                                "nodeId": node_id,
+                                "error": reason[:200],
+                            },
+                        )
+                    continue
+                summary["extended"] += 1
+                _record_auto_budget_recovery(
+                    runtime.store,
+                    run_id=run_id,
+                    node_id=node_id,
+                    attempt_no=attempt_no,
+                    action="auto_extend",
+                    resolution={
+                        "stageId": stage_id,
+                        "newStageTokens": new_stage_tokens,
+                        "suggestedExtensionTokens": suggested,
+                        "idempotencyKey": extend_key,
+                    },
+                    now_ms=now_ms,
+                )
+                _record_scene_event(
+                    "hypothesis_first.auto_budget_recovery",
+                    outcome="extended",
+                    fields={
+                        "teamId": team_id,
+                        "questionId": normalized_question_id,
+                        "runId": run_id,
+                        "nodeId": node_id,
+                        "stageId": stage_id,
+                        "newStageTokens": new_stage_tokens,
+                        "suggestedExtensionTokens": suggested,
+                    },
+                )
+            # Extension already in place (manual click, or this step's earlier
+            # hop): only the retry remains.  Deterministic per-attempt key —
+            # a replayed submit is an idempotent replay, and once the retry
+            # lands the blocked attempt goes stale so the key never fires
+            # twice for the same attempt.
+            outcome, _reason = _submit_auto_budget_command(
+                runtime,
+                team_id=team_id,
+                run_id=run_id,
+                kind=WorkflowCommandKind.RETRY_NODE,
+                node_id=node_id,
+                payload={},
+                idempotency_key=retry_key,
+            )
+            if outcome == "accepted":
+                summary["retried"] += 1
+                _record_scene_event(
+                    "hypothesis_first.auto_budget_recovery",
+                    outcome="retried",
+                    fields={
+                        "teamId": team_id,
+                        "questionId": normalized_question_id,
+                        "runId": run_id,
+                        "nodeId": node_id,
+                    },
+                )
+            elif outcome == "skipped":
+                summary["skipped"] += 1
+            else:
+                summary["failed"] += 1
+        except Exception:  # noqa: BLE001 - one broken run is isolated
+            summary["failed"] += 1
+    return summary
+
+
+
 # GIL courtesy between serial sweep iterations (defect 18): a restart-time
 # drain walks many fenced meetings/questions in one pass; a tiny sleep lets
 # the asyncio loop and HTTP handlers run between iterations instead of the
@@ -6523,7 +7054,10 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
     once-failed writeback get their idempotent handoff retried past the
     grace (unblocking the pending count in the same pass), exhausted rounds
     get their accepted adjudication, converged chains get the formal run
-    created and started, and formal nodes blocked on the transient
+    created and started, runs blocked on the stage-boundary budget precheck
+    get the extend_budget → retry_node contract driven automatically within
+    the per-node extension cap (formal runs and knowledge sideflow children
+    alike), and formal nodes blocked on the transient
     ``auto_advance_not_ready`` gate get their offer-gated retry resubmitted.
     Nothing here raises: one broken team or question is isolated and
     counted; questions whose latest round is not an unadjudicated exhausted
@@ -6543,6 +7077,9 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
         "rejected": 0,
         "formalRuns": 0,
         "knowledgeHandoffsAccepted": 0,
+        "budgetExtends": 0,
+        "budgetRetries": 0,
+        "budgetDeclined": 0,
         "retried": 0,
         "fencedReviewsRedriven": 0,
         "closedGenerationsRetried": 0,
@@ -6702,6 +7239,23 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
                 summary["knowledgeHandoffsAccepted"] += int(
                     handoff_accept.get("accepted") or 0
                 )
+                # Step two-six, every question every pass: drive the
+                # extend_budget → retry_node recovery contract for runs
+                # blocked on the stage-boundary budget precheck (formal runs
+                # AND knowledge sideflow child runs), bounded per node and
+                # config-gated; read-only unless an eligible block exists.
+                budget_recovery = auto_extend_budget_blocked_nodes(
+                    team_id, question_id=question_id
+                )
+                summary["budgetExtends"] += int(
+                    budget_recovery.get("extended") or 0
+                )
+                summary["budgetRetries"] += int(
+                    budget_recovery.get("retried") or 0
+                )
+                summary["budgetDeclined"] += int(
+                    budget_recovery.get("declined") or 0
+                )
                 # Step three, every question every pass: resubmit the
                 # offer-gated retry for formal nodes blocked on the transient
                 # auto_advance_not_ready verdict (read-only unless an eligible
@@ -6754,6 +7308,9 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
             "rejected": int(summary["rejected"]),
             "formalRuns": int(summary["formalRuns"]),
             "knowledgeHandoffsAccepted": int(summary["knowledgeHandoffsAccepted"]),
+            "budgetExtends": int(summary["budgetExtends"]),
+            "budgetRetries": int(summary["budgetRetries"]),
+            "budgetDeclined": int(summary["budgetDeclined"]),
             "retried": int(summary["retried"]),
             "fencedReviewsRedriven": int(summary["fencedReviewsRedriven"]),
             "closedGenerationsRetried": int(summary["closedGenerationsRetried"]),
