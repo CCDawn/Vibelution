@@ -132,6 +132,20 @@ SOURCE_COLLECTION_AUTO_RETRY_BACKOFF_FACTOR = 2.0
 SOURCE_COLLECTION_AUTO_RETRY_MAX_DELAY_SECONDS = 120.0
 COLLECTION_AUTO_RETRY_TAXONOMY_CODE = "collection_auto_retry_exhausted"
 
+# Bounded retry for one failing review-dispatch identity (SCI-092 storm
+# fix): a (selection, candidate, round) identity whose dispatch keeps
+# failing must not mint a fresh attempt on every sweep pass — the storm
+# shape was one queued+failed attempt pair per pass with no backoff and no
+# ceiling.  Before a fresh attempt supersedes failed ones, the queued
+# append waits an exponential backoff (5 min doubling, 24 h ceiling) measured
+# from the newest failure, and at ``REVIEW_DISPATCH_ATTEMPT_FAILURE_CAP``
+# failed attempts it appends ONE terminal ``capped`` marker attempt and
+# never queues that identity again (check-before-append keeps the marker
+# single).  The historical failed attempts stay as append-only history.
+REVIEW_DISPATCH_RETRY_BACKOFF_BASE_SECONDS = 300.0
+REVIEW_DISPATCH_RETRY_BACKOFF_MAX_SECONDS = 86_400.0
+REVIEW_DISPATCH_ATTEMPT_FAILURE_CAP = 8
+
 # Digest auto-approval (auto-advance, step zero): how long a digest may sit
 # in ``awaiting_approval`` before the maintenance sweep approves it.  Both
 # digest-carrying round types are covered: hypothesis-review rounds and
@@ -4742,6 +4756,50 @@ def _iso_timestamp_ms(value: Any) -> int | None:
     return int(parsed.timestamp() * 1000)
 
 
+def _digest_auto_approval_block_reason(meeting: Mapping[str, Any]) -> str:
+    """Why the digest auto-approve quality gate refuses one awaiting meeting.
+
+    ``""`` when the digest passes the gate (safe to auto-approve once its TTL
+    elapses). This is the single gate predicate shared by the auto-approve
+    sweep and the awaiting-approval reaper: a digest that failed here is the
+    only meeting shape the reaper may escalate or auto-reject — a passing
+    digest keeps its existing auto-approve path and is never reaped.
+    """
+
+    if not isinstance(meeting, Mapping):
+        return "unreadable_meeting"
+    meeting_type = str(meeting.get("meetingType") or "").strip().lower()
+    if str(meeting.get("summaryDraftError") or "").strip():
+        return "summary_draft_error"
+    draft = (
+        dict(meeting.get("digestDraft"))
+        if isinstance(meeting.get("digestDraft"), Mapping)
+        else {}
+    )
+    if not str(draft.get("contentHash") or "").strip():
+        return "digest_missing"
+    if meeting_type == CANDIDATE_GENERATION_MEETING_TYPE:
+        # Quality gate for the automatic candidate-generation approval:
+        # a draft with validation errors or without a single proposed
+        # candidate is not safe to close automatically, so the human gate
+        # stays and a reminder event keeps the wait auditable.
+        validation_errors = [
+            item
+            for item in list(draft.get("validationErrors") or [])
+            if isinstance(item, Mapping)
+        ]
+        proposals = [
+            item
+            for item in list(draft.get("proposedCandidates") or [])
+            if isinstance(item, Mapping)
+        ]
+        if validation_errors:
+            return "candgen_digest_validation_errors"
+        if not proposals:
+            return "candgen_digest_no_proposals"
+    return ""
+
+
 def auto_approve_awaiting_review_digests(
     team_id: str,
     *,
@@ -4841,60 +4899,42 @@ def auto_approve_awaiting_review_digests(
             if isinstance(meeting.get("digestDraft"), Mapping)
             else {}
         )
-        if str(meeting.get("summaryDraftError") or "").strip():
-            summary["skipped"] += 1
-            _record_scene_event(
-                "hypothesis_first.auto_approve_review_digest",
-                outcome="skipped",
-                fields={**fields, "reason": "summary_draft_error"},
-            )
-            continue
         content_hash = str(draft.get("contentHash") or "").strip()
-        if not content_hash:
+        block_reason = _digest_auto_approval_block_reason(meeting)
+        if block_reason:
+            # The shared quality gate refused the digest: the human gate
+            # stays (the awaiting-approval reaper owns escalation for the
+            # stuck shape), and a reminder event keeps the wait auditable.
             summary["skipped"] += 1
+            extra_fields: dict[str, Any] = {}
+            event_level = "info"
+            if block_reason.startswith("candgen_digest_"):
+                validation_errors = [
+                    item
+                    for item in list(draft.get("validationErrors") or [])
+                    if isinstance(item, Mapping)
+                ]
+                proposals = [
+                    item
+                    for item in list(draft.get("proposedCandidates") or [])
+                    if isinstance(item, Mapping)
+                ]
+                extra_fields = {
+                    "validationErrorCount": len(validation_errors),
+                    "proposedCandidateCount": len(proposals),
+                    "reminder": (
+                        "candgen digest awaits manual approval: the "
+                        "auto-approve quality gate did not pass"
+                    ),
+                }
+                event_level = "warning"
             _record_scene_event(
                 "hypothesis_first.auto_approve_review_digest",
                 outcome="skipped",
-                fields={**fields, "reason": "digest_missing"},
+                level=event_level,
+                fields={**fields, "reason": block_reason, **extra_fields},
             )
             continue
-        if meeting_type == CANDIDATE_GENERATION_MEETING_TYPE:
-            # Quality gate for the automatic candidate-generation approval:
-            # a draft with validation errors or without a single proposed
-            # candidate is not safe to close automatically, so the human gate
-            # stays and a reminder event keeps the wait auditable.
-            validation_errors = [
-                item
-                for item in list(draft.get("validationErrors") or [])
-                if isinstance(item, Mapping)
-            ]
-            proposals = [
-                item
-                for item in list(draft.get("proposedCandidates") or [])
-                if isinstance(item, Mapping)
-            ]
-            if validation_errors or not proposals:
-                summary["skipped"] += 1
-                _record_scene_event(
-                    "hypothesis_first.auto_approve_review_digest",
-                    outcome="skipped",
-                    level="warning",
-                    fields={
-                        **fields,
-                        "reason": (
-                            "candgen_digest_validation_errors"
-                            if validation_errors
-                            else "candgen_digest_no_proposals"
-                        ),
-                        "validationErrorCount": len(validation_errors),
-                        "proposedCandidateCount": len(proposals),
-                        "reminder": (
-                            "candgen digest awaits manual approval: the "
-                            "auto-approve quality gate did not pass"
-                        ),
-                    },
-                )
-                continue
         updated_at_ms = _iso_timestamp_ms(meeting.get("updatedAt"))
         if updated_at_ms is None:
             summary["skipped"] += 1
@@ -8517,14 +8557,46 @@ def _latest_review_dispatch_attempt(
     round_index: int,
 ) -> dict[str, Any] | None:
     """Newest attempt for one (selection, candidate, round) dispatch identity."""
-    matched = [
+    matched = _identity_review_dispatch_attempts(
+        records,
+        selection_id=selection_id,
+        candidate_id=candidate_id,
+        round_index=round_index,
+    )
+    return matched[-1] if matched else None
+
+
+def _identity_review_dispatch_attempts(
+    records: list[dict[str, Any]],
+    *,
+    selection_id: str,
+    candidate_id: str,
+    round_index: int,
+) -> list[dict[str, Any]]:
+    """All durable attempts for one (selection, candidate, round) identity.
+
+    Latest state per attempt id, oldest first — the same view
+    :func:`_latest_review_dispatch_attempt` picks the tail of.
+    """
+
+    normalized_candidate_id = str(candidate_id or "").strip()
+    return [
         item
         for item in _review_dispatch_attempts(
             records, selection_id=selection_id, round_index=round_index
         )
-        if str(item.get("candidateId") or "").strip() == str(candidate_id or "").strip()
+        if str(item.get("candidateId") or "").strip() == normalized_candidate_id
     ]
-    return matched[-1] if matched else None
+
+
+def _review_dispatch_backoff_seconds(failed_attempts: int) -> float:
+    """Exponential dispatch retry backoff: 5 min doubling, 24 h ceiling."""
+
+    return min(
+        REVIEW_DISPATCH_RETRY_BACKOFF_BASE_SECONDS
+        * (2 ** max(int(failed_attempts), 0)),
+        REVIEW_DISPATCH_RETRY_BACKOFF_MAX_SECONDS,
+    )
 
 
 def _append_review_dispatch_attempt_state(
@@ -8552,8 +8624,21 @@ def _append_review_dispatch_attempt_state(
     superseded the same way, so a retry after a terminated review opens a fresh
     attempt instead of reusing the dead meeting. Terminal
     transitions update the same attempt id.
+
+    Failing identities are bounded (SCI-092 storm fix): when the newest
+    failure is younger than ``_review_dispatch_backoff_seconds`` of the
+    identity's failed-attempt count, nothing is appended and the returned
+    record carries ``dispatchGate="backoff"``; at
+    ``REVIEW_DISPATCH_ATTEMPT_FAILURE_CAP`` failed attempts exactly one
+    terminal ``capped`` marker attempt is appended (idempotent on replay) and
+    the identity never queues again — later calls return the capped record
+    with ``dispatchGate="capped"``. The gate rides every re-entry
+    (selection commit, ``retry_review_dispatch``,
+    ``open_next_review_meeting``) because they all funnel into this queued
+    append.
     """
     now = _utc_now()
+    cap_event_fields: dict[str, Any] | None = None
     with _LOCK:
         records = _read_jsonl(_storage_path(team_id))
         current = _latest_review_dispatch_attempt(
@@ -8562,13 +8647,66 @@ def _append_review_dispatch_attempt_state(
             candidate_id=candidate_id,
             round_index=round_index,
         )
+        cap_marker = False
         if lifecycle == "queued":
+            identity_attempts = _identity_review_dispatch_attempts(
+                records,
+                selection_id=selection_id,
+                candidate_id=candidate_id,
+                round_index=round_index,
+            )
+            capped_attempt = next(
+                (item for item in identity_attempts if item.get("capped")), None
+            )
+            if capped_attempt is not None:
+                # The identity is terminal: never queue again (check-before-
+                # append keeps the single capped marker the only capped row).
+                return {**capped_attempt, "dispatchGate": "capped"}
             if (
                 current is not None
                 and str(current.get("lifecycle") or "") != "failed"
                 and not _attempt_bound_meeting_is_terminal(team_id, current)
             ):
                 return current
+            failed_attempts = [
+                item
+                for item in identity_attempts
+                if str(item.get("lifecycle") or "") == "failed"
+                # A fence/restart supersede is a verdict about a dead
+                # meeting, not a repeated dispatch failure, and the capped
+                # marker is terminal by itself — neither counts toward the
+                # backoff window or the failure cap.
+                and str(item.get("outcome") or "none")
+                not in {"superseded", "capped"}
+            ]
+            if len(failed_attempts) >= REVIEW_DISPATCH_ATTEMPT_FAILURE_CAP:
+                cap_marker = True
+            elif failed_attempts:
+                failed_ms_values = [
+                    value
+                    for value in (
+                        _iso_timestamp_ms(item.get("updatedAt"))
+                        for item in failed_attempts
+                    )
+                    if value is not None
+                ]
+                now_ms = _iso_timestamp_ms(now)
+                if failed_ms_values and now_ms is not None:
+                    backoff_ms = (
+                        _review_dispatch_backoff_seconds(len(failed_attempts))
+                        * 1000.0
+                    )
+                    since_last_failure_ms = now_ms - max(failed_ms_values)
+                    if since_last_failure_ms < backoff_ms:
+                        gate_source = current or failed_attempts[-1]
+                        return {
+                            **gate_source,
+                            "dispatchGate": "backoff",
+                            "backoffSeconds": int(
+                                (backoff_ms - since_last_failure_ms) // 1000
+                            )
+                            + 1,
+                        }
             attempt_number = int(current.get("attemptNumber") or 0) + 1 if current else 1
         else:
             if current is None:
@@ -8617,8 +8755,40 @@ def _append_review_dispatch_attempt_state(
             "createdAt": str(previous.get("createdAt") or "") or now,
             "updatedAt": now,
         }
+        if cap_marker:
+            # Additive terminal marker on the attempt-record schema: the row
+            # is a terminal ``failed`` attempt for every existing consumer
+            # while ``capped`` marks the identity closed for the queued gate.
+            record["lifecycle"] = "failed"
+            record["outcome"] = "capped"
+            record["capped"] = True
+            record["capFailedAttempts"] = REVIEW_DISPATCH_ATTEMPT_FAILURE_CAP
+            record["error"] = (
+                "review dispatch capped after "
+                f"{REVIEW_DISPATCH_ATTEMPT_FAILURE_CAP} failed attempts; "
+                "the identity never queues again"
+            )
+            record["errorType"] = "ReviewDispatchAttemptCapReached"
+            record["idempotencyKey"] = f"{record['idempotencyKey']}:capped"
+            cap_event_fields = {
+                "teamId": team_id,
+                "questionId": str(question_id or ""),
+                "selectionId": selection_id,
+                "candidateId": candidate_id,
+                "roundIndex": int(round_index),
+                "attemptId": record["attemptId"],
+                "failedAttempts": REVIEW_DISPATCH_ATTEMPT_FAILURE_CAP,
+            }
         _append_jsonl(_storage_path(team_id), record)
-    return record
+    if cap_event_fields is not None:
+        _record_scene_event(
+            "review_dispatch.capped",
+            outcome="capped",
+            level="warning",
+            fields=cap_event_fields,
+        )
+    gate = "capped" if cap_marker else ""
+    return {**record, "dispatchGate": gate} if gate else record
 
 
 def _meeting_round_is_terminal(meeting_round: Any) -> bool:
@@ -9493,6 +9663,7 @@ def open_review_meeting_for_selection(
         # the meeting id below takes its attempt number, keeping ledger and
         # meeting identity consistent.
         candidate_attempt_numbers: dict[str, int] = {}
+        gated_candidates: dict[str, str] = {}
         for candidate_id in selected_candidate_ids:
             attempt_record = _append_review_dispatch_attempt_state(
                 normalized_team_id,
@@ -9503,9 +9674,34 @@ def open_review_meeting_for_selection(
                 round_index=normalized_round_index,
                 lifecycle="queued",
             )
+            gate_reason = str(attempt_record.get("dispatchGate") or "").strip()
+            if gate_reason:
+                # Backoff/capped identity: skip this pass without opening a
+                # meeting, so a failing identity stops minting attempts (the
+                # gate itself already skipped the queued append).
+                gated_candidates[candidate_id] = gate_reason
+                continue
             candidate_attempt_numbers[candidate_id] = int(
                 attempt_record.get("attemptNumber") or 1
             )
+        dispatchable_ids = [
+            candidate_id
+            for candidate_id in selected_candidate_ids
+            if candidate_id in candidate_attempt_numbers
+        ]
+        if not dispatchable_ids:
+            # Every candidate is gated: report the structured skip instead of
+            # opening anything. Zero further queued appends is the contract.
+            return {
+                "schemaVersion": SCHEMA_VERSION,
+                "teamId": normalized_team_id,
+                "status": "dispatch_gated",
+                "gated": True,
+                "gatedCandidates": gated_candidates,
+                "reviewMeetings": [],
+                "candidateCount": 0,
+                "discussionDrivers": [],
+            }
         _record_scene_event(
             "review_dispatch.started",
             outcome="started",
@@ -9514,11 +9710,12 @@ def open_review_meeting_for_selection(
                 "questionId": question_id,
                 "selectionId": selection_id,
                 "roundIndex": normalized_round_index,
-                "candidateCount": len(selected_candidate_ids),
+                "candidateCount": len(dispatchable_ids),
+                "gatedCandidateCount": len(gated_candidates),
             },
         )
         opened_candidates: list[dict[str, Any]] = []
-        for candidate_order, candidate_id in enumerate(selected_candidate_ids):
+        for candidate_order, candidate_id in enumerate(dispatchable_ids):
             candidate_meeting_id = _candidate_review_meeting_id(
                 selection_id,
                 candidate_id,
@@ -9744,6 +9941,14 @@ def open_review_meeting_for_selection(
             round_index=normalized_round_index,
             lifecycle="queued",
         )
+        if str(attempt_record.get("dispatchGate") or "").strip():
+            # The identity is backoff-gated or capped: no fresh attempt may be
+            # minted for the terminated meeting on this pass.
+            raise HypothesisFirstChainError(
+                "review dispatch for this identity is "
+                f"{str(attempt_record.get('dispatchGate'))}gated; the "
+                "terminated meeting cannot be redriven right now"
+            )
         fresh_meeting_round_id = _candidate_review_meeting_id(
             selection_id,
             _formal_candidate_id,

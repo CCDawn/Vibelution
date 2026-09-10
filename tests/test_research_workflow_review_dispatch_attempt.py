@@ -28,6 +28,23 @@ def _fresh_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+class _FakeChainClock:
+    """Injectable chain clock: no wall-clock dependence in gate tests."""
+
+    def __init__(self, start_ms: int = 1_700_000_000_000) -> None:
+        self.now_ms = start_ms
+
+    def __call__(self) -> str:
+        return (
+            datetime.fromtimestamp(self.now_ms / 1000, tz=timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+
+    def advance(self, seconds: float) -> None:
+        self.now_ms += int(seconds * 1000)
+
+
 def _fanout_env(tmp_path, monkeypatch, *, open_meeting=None):
     """Patch fan-out surroundings; attempts hit the real JSONL ledger."""
     from core.web.services import team_service
@@ -244,6 +261,8 @@ def test_failed_candidate_keeps_durable_error_and_projects_retry(
 
 
 def test_retry_bumps_attempt_number_and_recovers(tmp_path, monkeypatch) -> None:
+    clock = _FakeChainClock()
+    monkeypatch.setattr(chain, "_utc_now", clock)
 
     state = {"fail_hyp_b": True}
 
@@ -264,6 +283,9 @@ def test_retry_bumps_attempt_number_and_recovers(tmp_path, monkeypatch) -> None:
     with pytest.raises(RuntimeError, match="transient dispatch failure"):
         chain.open_review_meeting_for_selection(team_id, selection, background=False)
 
+    # The retry backoff gates an immediate re-dispatch after a real failure:
+    # the next attempt is only minted once the exponential window elapsed.
+    clock.advance(chain._review_dispatch_backoff_seconds(1) + 1)
     state["fail_hyp_b"] = False
     chain.retry_review_dispatch(team_id, "selection-dispatch-1", ["hyp-b"])
 
@@ -343,7 +365,9 @@ def test_retry_bumps_attempt_for_open_meeting_with_dead_silent_latest_round(
     monkeypatch.setattr(
         chat_room_service,
         "get_chat_room_detail",
-        lambda room_id: {
+        # meeting_rounds reads bound rounds with get_chat_room_detail(room_id,
+        # reconcile=False) since the bounded-sweep read path landed on main.
+        lambda room_id, **_kwargs: {
             "roomId": "team-room",
             "rounds": [
                 {"roundId": "round-hyp-b", "status": "stopped", "messages": []}
@@ -581,3 +605,230 @@ def test_completed_attempt_without_link_is_integrity_problem() -> None:
     assert [problem["code"] for problem in by_candidate["hyp-b"]["problems"]] == [
         "review_dispatch_missing"
     ]
+
+
+# ---------------------------------------------------------------------------
+# Failing-identity backoff + cap (SCI-092 storm fix)
+
+
+def _persist_single_selection(
+    team_id: str, candidate_id: str = "hyp-solo"
+) -> dict:
+    record = {
+        "schemaVersion": 1,
+        "selectionId": "selection-solo",
+        "program": "XH-202619",
+        "theme": "theme-1",
+        "campaign": "campaign-1",
+        "question": "SCI-096",
+        "branch": "main",
+        "workflow": "hypothesis_and_plan",
+        "agentId": "agent-a",
+        "mode": "formal",
+        "scopeHash": "scope-hash",
+        "questionId": "SCI-096",
+        "selectedCandidateIds": [candidate_id],
+        "previousSelectionId": "",
+        "decidedBy": "agent-a",
+        "selectionHash": "hash-solo",
+        "createdAt": "2026-08-26T00:00:00Z",
+    }
+    selections._append_jsonl(selections._storage_path(team_id), record)
+    return record
+
+
+def _raw_dispatch_rows(team_id: str) -> list[dict]:
+    return [
+        dict(record)
+        for record in _chain_records(team_id)
+        if record.get("recordKind") == chain.REVIEW_DISPATCH_ATTEMPT_KIND
+    ]
+
+
+def test_retry_backoff_gates_immediate_requeue_after_failure(
+    tmp_path, monkeypatch
+) -> None:
+    """A failing identity mints no fresh attempt inside the backoff window."""
+    clock = _FakeChainClock()
+    monkeypatch.setattr(chain, "_utc_now", clock)
+
+    def always_fails(_team_id, payload, **_kwargs):
+        raise RuntimeError("workflowRunId does not resolve to a Ledger run")
+
+    team_id = _fanout_env(tmp_path, monkeypatch, open_meeting=always_fails)
+    selection = _persist_single_selection(team_id)
+
+    with pytest.raises(RuntimeError, match="does not resolve"):
+        chain.open_review_meeting_for_selection(team_id, selection, background=False)
+    assert len(_raw_dispatch_rows(team_id)) == 2  # one queued + one failed
+
+    # Sweep pass 98s later (the storm cadence): the identity is inside the
+    # 5-min baseline window, so nothing is appended and nothing opens.
+    clock.advance(98)
+    result = chain.open_review_meeting_for_selection(
+        team_id, selection, background=False
+    )
+    assert result["status"] == "dispatch_gated"
+    assert result["gated"] is True
+    assert result["gatedCandidates"] == {"hyp-solo": "backoff"}
+    assert result["candidateCount"] == 0
+    assert len(_raw_dispatch_rows(team_id)) == 2
+
+    # Still inside the window: repeated passes stay zero-append.
+    clock.advance(98)
+    again = chain.open_review_meeting_for_selection(
+        team_id, selection, background=False
+    )
+    assert again["status"] == "dispatch_gated"
+    assert len(_raw_dispatch_rows(team_id)) == 2
+
+    # A human retry entry rides the same gate (one choke point).
+    replay = chain.retry_review_dispatch(team_id, "selection-solo", ["hyp-solo"])
+    assert replay["status"] == "dispatch_gated"
+    assert len(_raw_dispatch_rows(team_id)) == 2
+
+
+def test_retry_backoff_expires_into_a_fresh_attempt(tmp_path, monkeypatch) -> None:
+    """Past the window the identity retries and recovers normally."""
+    clock = _FakeChainClock()
+    monkeypatch.setattr(chain, "_utc_now", clock)
+
+    state = {"fail": True}
+
+    def recoverable_open(_team_id, payload, **_kwargs):
+        if state["fail"]:
+            raise RuntimeError("transient dispatch failure")
+        return {
+            "status": "created",
+            "meetingRound": {"meetingRoundId": payload["meetingRoundId"]},
+            "roomId": "team-room",
+            "roundId": f"round-{payload['candidateId']}",
+            "chatRoomRoundIds": [f"round-{payload['candidateId']}"],
+        }
+
+    team_id = _fanout_env(tmp_path, monkeypatch, open_meeting=recoverable_open)
+    selection = _persist_single_selection(team_id)
+
+    with pytest.raises(RuntimeError, match="transient"):
+        chain.open_review_meeting_for_selection(team_id, selection, background=False)
+    clock.advance(chain._review_dispatch_backoff_seconds(1) + 1)
+    state["fail"] = False
+    result = chain.retry_review_dispatch(team_id, "selection-solo", ["hyp-solo"])
+    assert result["candidateCount"] == 1
+    attempts = {item["candidateId"]: item for item in _attempts(team_id)}
+    assert attempts["hyp-solo"]["attemptNumber"] == 2
+    assert attempts["hyp-solo"]["lifecycle"] == "completed"
+
+
+def test_cap_appends_one_capped_marker_then_never_queues_again(
+    tmp_path, monkeypatch
+) -> None:
+    """Eight failed attempts cap the identity; repeated passes append zero."""
+    clock = _FakeChainClock()
+    monkeypatch.setattr(chain, "_utc_now", clock)
+
+    def always_fails(_team_id, payload, **_kwargs):
+        raise RuntimeError("workflowRunId does not resolve to a Ledger run")
+
+    team_id = _fanout_env(tmp_path, monkeypatch, open_meeting=always_fails)
+    selection = _persist_single_selection(team_id)
+
+    # Drive 8 real failures, each past its own backoff window.
+    for failure_count in range(chain.REVIEW_DISPATCH_ATTEMPT_FAILURE_CAP):
+        with pytest.raises(RuntimeError, match="does not resolve"):
+            chain.open_review_meeting_for_selection(
+                team_id, selection, background=False
+            )
+        clock.advance(
+            chain._review_dispatch_backoff_seconds(failure_count + 1) + 1
+        )
+
+    assert len(_raw_dispatch_rows(team_id)) == 2 * chain.REVIEW_DISPATCH_ATTEMPT_FAILURE_CAP
+
+    # The next pass appends exactly ONE terminal capped marker, opens nothing
+    # and does not raise (the gate returns before any meeting side effect).
+    result = chain.open_review_meeting_for_selection(
+        team_id, selection, background=False
+    )
+    assert result["status"] == "dispatch_gated"
+    assert result["gatedCandidates"] == {"hyp-solo": "capped"}
+    rows = _raw_dispatch_rows(team_id)
+    assert len(rows) == 2 * chain.REVIEW_DISPATCH_ATTEMPT_FAILURE_CAP + 1
+    capped = next(item for item in rows if item.get("capped"))
+    assert capped["lifecycle"] == "failed"
+    assert capped["outcome"] == "capped"
+    assert capped["errorType"] == "ReviewDispatchAttemptCapReached"
+    assert capped["idempotencyKey"].endswith(":capped")
+
+    # Repeated sweep passes: the capped identity produces ZERO further
+    # queued appends (check-before-append on the single marker).
+    for _ in range(3):
+        clock.advance(24 * 60 * 60)
+        replay = chain.open_review_meeting_for_selection(
+            team_id, selection, background=False
+        )
+        assert replay["status"] == "dispatch_gated"
+        assert replay["gatedCandidates"] == {"hyp-solo": "capped"}
+    assert (
+        len(_raw_dispatch_rows(team_id))
+        == 2 * chain.REVIEW_DISPATCH_ATTEMPT_FAILURE_CAP + 1
+    )
+    assert sum(1 for item in _raw_dispatch_rows(team_id) if item.get("capped")) == 1
+
+
+def test_retry_backoff_seconds_growth() -> None:
+    """5 min doubling, 24 h ceiling."""
+    assert chain._review_dispatch_backoff_seconds(0) == 300.0
+    assert chain._review_dispatch_backoff_seconds(1) == 600.0
+    assert chain._review_dispatch_backoff_seconds(2) == 1200.0
+    assert chain._review_dispatch_backoff_seconds(7) == 38400.0
+    assert chain._review_dispatch_backoff_seconds(8) == 76800.0
+    assert chain._review_dispatch_backoff_seconds(20) == 86400.0
+
+
+def test_superseded_attempts_do_not_count_as_dispatch_failures(
+    tmp_path, monkeypatch
+) -> None:
+    """A fence/restart supersede is a verdict, not a repeated dispatch
+    failure: the dead-silent requeue stays immediately available."""
+    from core.web.services import chat_room_service
+
+    team_id = _fanout_env(tmp_path, monkeypatch)
+    selection = _persist_single_selection(team_id, candidate_id="hyp-solo")
+
+    chain.open_review_meeting_for_selection(team_id, selection, background=False)
+    attempts = {item["candidateId"]: item for item in _attempts(team_id)}
+    orphan_meeting_id = attempts["hyp-solo"]["meetingRoundId"]
+
+    def staged_get_meeting_round(_team_id, meeting_round_id, **_kwargs):
+        if meeting_round_id == orphan_meeting_id:
+            return {
+                "meetingRound": {
+                    "meetingRoundId": orphan_meeting_id,
+                    "meetingType": "hypothesis_review",
+                    "status": "open",
+                    "linkedChatRoomId": "team-room",
+                    "chatRoomRoundIds": ["round-hyp-solo"],
+                }
+            }
+        raise meetings.ResearchMeetingRoundNotFoundError("missing")
+
+    monkeypatch.setattr(meetings, "get_meeting_round", staged_get_meeting_round)
+    monkeypatch.setattr(
+        chat_room_service,
+        "get_chat_room_detail",
+        lambda room_id, **_kwargs: {
+            "roomId": "team-room",
+            "rounds": [
+                {"roundId": "round-hyp-solo", "status": "stopped", "messages": []}
+            ],
+        }
+        if room_id == "team-room"
+        else None,
+    )
+
+    result = chain.retry_review_dispatch(team_id, "selection-solo", ["hyp-solo"])
+    assert result["candidateCount"] == 1
+    latest = {item["candidateId"]: item for item in _attempts(team_id)}["hyp-solo"]
+    assert latest["attemptNumber"] == 2
+    assert latest["lifecycle"] == "completed"

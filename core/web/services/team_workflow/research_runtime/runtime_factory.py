@@ -181,7 +181,24 @@ class WorkflowRuntime:
     def run_hypothesis_recovery_once(self, limit: int = 4) -> int:
         """Run slow review recovery without starving delivery and repairs."""
         self._sweep_auto_advance_closure_best_effort()
+        self._reap_awaiting_approval_best_effort()
         return 0
+
+    def _reap_awaiting_approval_best_effort(self) -> None:
+        """Escalate / auto-reject forever-waiting awaiting_approval digests.
+
+        Hosted on the same dedicated serial hypothesis recovery tick as the
+        auto-advance closure sweep with the same peek + never-raises
+        discipline: the reaper module owns its kill switch
+        (``VIBELUTION_AWAITING_APPROVAL_REAPER``) and self-throttle, and any
+        failure is swallowed after logging.
+        """
+        try:
+            from . import reaper
+
+            reaper.reap_awaiting_approval_meetings()
+        except Exception:  # noqa: BLE001 - the reaper must never break recovery
+            logger.exception("awaiting_approval reaper sweep failed")
 
     def _recover_missing_knowledge_sideflows_best_effort(self, *, limit: int) -> None:
         """Recover knowledge children lost after problem-understanding commit."""
