@@ -35,7 +35,7 @@ from core.llm.client import (
 from core.llm.errors import classify_exception
 from core.llm.provider_replay_state import OpaqueReplayItem, ProviderReplayState, endpoint_fingerprint
 from core.llm.semantic_messages import InvocationScope, SemanticOutputSchema
-from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, LLMError, LLMRouteGateTimeoutError, LLMStreamTotalDeadlineError, TurnOutcome
+from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, LLMError, LLMRouteGateTimeoutError, LLMStreamIdleDeadlineError, LLMStreamTotalDeadlineError, TurnOutcome
 from core.llm.wire.responses import ResponsesWireAdapter
 from core.llm.recovery import plan_recovery
 from core.llm.routing import attach_recovery_fallback, select_recovery_profile
@@ -7088,6 +7088,242 @@ def test_stream_total_deadline_env_values_are_clamped(monkeypatch):
     monkeypatch.setenv("VIBELUTION_LLM_ROUTE_GATE_WAIT_SECONDS", "")
     assert client_module._llm_stream_total_deadline_seconds() == 900.0
     assert client_module._llm_route_gate_wait_seconds() == 120.0
+
+
+def test_stream_idle_chunk_deadline_env_values_are_clamped(monkeypatch):
+    from core.llm import client as client_module
+
+    monkeypatch.delenv("VIBELUTION_LLM_STREAM_IDLE_CHUNK_DEADLINE_SECONDS", raising=False)
+    assert client_module._llm_stream_idle_chunk_deadline_seconds() == 300.0
+
+    monkeypatch.setenv("VIBELUTION_LLM_STREAM_IDLE_CHUNK_DEADLINE_SECONDS", "10")
+    assert client_module._llm_stream_idle_chunk_deadline_seconds() == 30.0
+
+    monkeypatch.setenv("VIBELUTION_LLM_STREAM_IDLE_CHUNK_DEADLINE_SECONDS", "29.5")
+    assert client_module._llm_stream_idle_chunk_deadline_seconds() == 30.0
+
+    monkeypatch.setenv("VIBELUTION_LLM_STREAM_IDLE_CHUNK_DEADLINE_SECONDS", "30")
+    assert client_module._llm_stream_idle_chunk_deadline_seconds() == 30.0
+
+    monkeypatch.setenv("VIBELUTION_LLM_STREAM_IDLE_CHUNK_DEADLINE_SECONDS", "900")
+    assert client_module._llm_stream_idle_chunk_deadline_seconds() == 900.0
+
+    monkeypatch.setenv("VIBELUTION_LLM_STREAM_IDLE_CHUNK_DEADLINE_SECONDS", "99999")
+    assert client_module._llm_stream_idle_chunk_deadline_seconds() == 900.0
+
+    monkeypatch.setenv("VIBELUTION_LLM_STREAM_IDLE_CHUNK_DEADLINE_SECONDS", "abc")
+    assert client_module._llm_stream_idle_chunk_deadline_seconds() == 300.0
+
+
+# ---------------------------------------------------------------------------
+# LLM 流式 idle chunk-gap 看门狗：只被有效解码事件喂狗（provider 保活字节
+# 不算活性），死间隙必真断连；同构先例：AWS SDK stalled-stream protection、
+# Temporal 心跳超时。
+# ---------------------------------------------------------------------------
+
+
+def _arm_idle_watchdog_test(monkeypatch, *, idle_seconds=0.5, total_seconds=60.0):
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_LIMIT", None)
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_GATES", {})
+    monkeypatch.setattr(
+        "core.llm.client._LLM_STREAM_IDLE_CHUNK_DEADLINE_LIMIT", idle_seconds
+    )
+    monkeypatch.setattr(
+        "core.llm.client._LLM_STREAM_TOTAL_DEADLINE_LIMIT", total_seconds
+    )
+
+
+def _assert_route_slots_released(client):
+    """若有槽位泄漏，拿满默认 4 个槽必然失败。"""
+
+    route_key = _llm_route_concurrency_key(
+        client.provider, client.profile, profile_id=client.profile_id
+    )
+    gate = _llm_route_concurrency_gate(route_key, limit=4)
+    acquired = [gate.acquire(blocking=False) for _ in range(4)]
+    assert all(acquired)
+    for _ in range(4):
+        gate.release()
+
+
+@pytest.mark.slow
+def test_silent_stream_idle_deadline_force_closes_and_surfaces_idle_timeout(monkeypatch):
+    """静默挂死流：idle 看门狗强关底层连接并抛类型化 idle 超时。"""
+
+    _arm_idle_watchdog_test(monkeypatch)
+    monkeypatch.setattr(
+        "core.llm.client._retry_policy_max_attempts", lambda profile, role="": 1
+    )
+    force_closed = threading.Event()
+    unblock = threading.Event()
+
+    class SilentHungStream:
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if not unblock.wait(5.0):
+                raise AssertionError("idle-deadline closer never fired")
+            raise RuntimeError("connection aborted by idle force close")
+
+        def close(self):
+            force_closed.set()
+            unblock.set()
+
+    client = _liveness_stream_client(lambda _payload: SilentHungStream())
+    started = time.monotonic()
+    with pytest.raises(LLMStreamIdleDeadlineError) as raised:
+        list(client.stream_events([{"role": "user", "content": "ping"}]))
+    elapsed = time.monotonic() - started
+
+    assert raised.value.category == "timeout"
+    assert raised.value.retryable is True
+    assert raised.value.idle_seconds == 0.5
+    assert "0.5s" in str(raised.value)
+    assert force_closed.wait(1.0)
+    assert 0.4 <= elapsed < 8.0
+    _assert_route_slots_released(client)
+
+
+@pytest.mark.slow
+def test_one_chunk_then_idle_deadline_surfaces_timeout_after_first_chunk(monkeypatch):
+    """产出首个 chunk 后挂死：首 chunk 正常到达，随后 idle 强关抛类型化超时。"""
+
+    _arm_idle_watchdog_test(monkeypatch)
+    monkeypatch.setattr(
+        "core.llm.client._retry_policy_max_attempts", lambda profile, role="": 1
+    )
+    force_closed = threading.Event()
+    unblock = threading.Event()
+
+    class OneChunkThenHungStream:
+        def __init__(self):
+            self._first = True
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if self._first:
+                self._first = False
+                return {"choices": [{"delta": {"content": "partial"}}]}
+            if not unblock.wait(5.0):
+                raise AssertionError("idle-deadline closer never fired")
+            raise RuntimeError("connection reset by idle force close")
+
+        def close(self):
+            force_closed.set()
+            unblock.set()
+
+    client = _liveness_stream_client(lambda _payload: OneChunkThenHungStream())
+    received: list[str] = []
+    started = time.monotonic()
+    with pytest.raises(LLMStreamIdleDeadlineError) as raised:
+        for event in client.stream_events([{"role": "user", "content": "ping"}]):
+            received.append(event.type)
+    elapsed = time.monotonic() - started
+
+    assert received == ["text_delta"]
+    assert raised.value.category == "timeout"
+    assert raised.value.retryable is True
+    assert raised.value.idle_seconds == 0.5
+    assert force_closed.wait(1.0)
+    assert 0.4 <= elapsed < 8.0
+    _assert_route_slots_released(client)
+
+
+@pytest.mark.slow
+def test_silent_stream_idle_deadline_force_closes_and_retry_recovers(monkeypatch):
+    """第一次 attempt 被 idle 看门狗解卷后，重试 attempt 重新起算并成功。"""
+
+    _arm_idle_watchdog_test(monkeypatch)
+    monkeypatch.setattr(
+        "core.llm.client._retry_policy_backoff_seconds",
+        lambda profile, attempt, category="": 0.05,
+    )
+    attempts = {"count": 0}
+    force_closed = threading.Event()
+    unblock = threading.Event()
+
+    class SilentHungStream:
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if not unblock.wait(5.0):
+                raise AssertionError("idle-deadline closer never fired")
+            raise RuntimeError("connection aborted by idle force close")
+
+        def close(self):
+            force_closed.set()
+            unblock.set()
+
+    def backend(_payload):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            return SilentHungStream()
+
+        def chunks():
+            yield {"choices": [{"delta": {"content": "recovered"}}]}
+
+        return chunks()
+
+    client = _liveness_stream_client(backend)
+    events = [
+        event.type
+        for event in client.stream_events([{"role": "user", "content": "ping"}])
+    ]
+
+    assert events == ["text_delta", "done"]
+    # 第一次 attempt 被 idle closer 解卷，第二次 attempt 重新起算并成功。
+    assert attempts["count"] == 2
+    assert force_closed.wait(1.0)
+    _assert_route_slots_released(client)
+
+
+def test_normal_stream_completes_and_idle_watchdog_timers_are_cancelled(monkeypatch):
+    """正常流完整结束：无错误，且已挂载的 watchdog Timer 全部被取消，无泄漏。"""
+
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_LIMIT", None)
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_GATES", {})
+    monkeypatch.setattr("core.llm.client._LLM_STREAM_IDLE_CHUNK_DEADLINE_LIMIT", 30.0)
+    monkeypatch.setattr("core.llm.client._LLM_STREAM_TOTAL_DEADLINE_LIMIT", 120.0)
+
+    def backend(_payload):
+        def chunks():
+            yield {"choices": [{"delta": {"content": "hello"}}]}
+            yield {"choices": [{"delta": {}, "finish_reason": "stop"}]}
+
+        return chunks()
+
+    client = _liveness_stream_client(backend)
+
+    created = []
+
+    class RecordingTimer(threading.Timer):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            created.append(self)
+
+    monkeypatch.setattr("core.llm.client.threading.Timer", RecordingTimer)
+
+    events = [
+        event.type
+        for event in client.stream_events([{"role": "user", "content": "ping"}])
+    ]
+    # 让已被 cancel 的 Timer 线程有时间退出等待循环。
+    time.sleep(0.1)
+
+    assert events == ["text_delta", "done"]
+    # idle：流打开时初始 arm + 每个 event 各喂狗重置一次（text_delta、done）；
+    # total：流打开时 arm 一次（interval 是剩余时长，接近但不等于 120）。
+    # 全部必须在 teardown 时被 cancel。
+    idle_timers = [timer for timer in created if timer.interval == 30.0]
+    total_timers = [timer for timer in created if 110.0 < timer.interval <= 120.0]
+    assert len(idle_timers) == 3
+    assert len(total_timers) == 1
+    for timer in idle_timers + total_timers:
+        assert timer.finished.is_set(), "watchdog timer leaked without cancellation"
 
 
 def test_cancel_llm_turn_scope_marks_cancel_reason_and_closes_registered_streams():

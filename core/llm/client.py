@@ -24,6 +24,7 @@ from config.llm_security import is_llm_local_network_base_url
 from config.models import (
     DEFAULT_LLM_ROUTE_CONCURRENCY,
     DEFAULT_LLM_ROUTE_GATE_WAIT_SECONDS,
+    DEFAULT_LLM_STREAM_IDLE_CHUNK_DEADLINE_SECONDS,
     DEFAULT_LLM_STREAM_TOTAL_DEADLINE_SECONDS,
 )
 from core.context.volatility import is_volatile_context_text
@@ -51,7 +52,7 @@ from .stream_http_timing import (
 from .streaming import ResponsesStreamNormalizer, extract_message_tool_calls, extract_text_content
 from .semantic_messages import SemanticGenerationSettings, SemanticOutputSchema
 from .semantic_projector import SemanticProjectionError, SemanticProjectionInput, project_semantic_request
-from .types import LLMCapabilities, LLMError, LLMOutputTruncatedError, LLMProtocolEvent, LLMRouteGateTimeoutError, LLMStreamTotalDeadlineError, StreamChunk, ToolCall, TurnOutcome, UsageStats
+from .types import LLMCapabilities, LLMError, LLMOutputTruncatedError, LLMProtocolEvent, LLMRouteGateTimeoutError, LLMStreamIdleDeadlineError, LLMStreamTotalDeadlineError, StreamChunk, ToolCall, TurnOutcome, UsageStats
 from .usage import read_usage_int as _read_provider_usage_int
 from .usage import cache_usage_observation_from_payload, usage_stats_from_payload, usage_to_dict
 from .wire.registry import build_default_wire_adapter_registry
@@ -104,6 +105,14 @@ _LLM_STREAM_TOTAL_DEADLINE_DEFAULT_SECONDS = DEFAULT_LLM_STREAM_TOTAL_DEADLINE_S
 _LLM_STREAM_TOTAL_DEADLINE_MIN_SECONDS = 60.0
 _LLM_STREAM_TOTAL_DEADLINE_MAX_SECONDS = 3600.0
 _LLM_STREAM_TOTAL_DEADLINE_LIMIT: float | None = None
+
+# 独立的 idle chunk-gap 看门狗旋钮：只被有效解码事件喂狗（provider 保活
+# 字节不重置计时），语义与安全范围登记在 config/models.py。
+_LLM_STREAM_IDLE_CHUNK_DEADLINE_ENV = "VIBELUTION_LLM_STREAM_IDLE_CHUNK_DEADLINE_SECONDS"
+_LLM_STREAM_IDLE_CHUNK_DEADLINE_DEFAULT_SECONDS = DEFAULT_LLM_STREAM_IDLE_CHUNK_DEADLINE_SECONDS
+_LLM_STREAM_IDLE_CHUNK_DEADLINE_MIN_SECONDS = 30.0
+_LLM_STREAM_IDLE_CHUNK_DEADLINE_MAX_SECONDS = 900.0
+_LLM_STREAM_IDLE_CHUNK_DEADLINE_LIMIT: float | None = None
 
 # DashScope explicit cache entries expire after roughly five minutes.  A long
 # streaming generation can therefore outlive the entry that its next tool
@@ -169,6 +178,20 @@ def _llm_stream_total_deadline_seconds() -> float:
         default=_LLM_STREAM_TOTAL_DEADLINE_DEFAULT_SECONDS,
         minimum=_LLM_STREAM_TOTAL_DEADLINE_MIN_SECONDS,
         maximum=_LLM_STREAM_TOTAL_DEADLINE_MAX_SECONDS,
+    )
+
+
+def _llm_stream_idle_chunk_deadline_seconds() -> float:
+    """Max gap between decoded stream events before force-closing the stream."""
+
+    override = _LLM_STREAM_IDLE_CHUNK_DEADLINE_LIMIT
+    if isinstance(override, (int, float)) and not isinstance(override, bool) and override > 0:
+        return float(override)
+    return _clamp_env_seconds(
+        os.environ.get(_LLM_STREAM_IDLE_CHUNK_DEADLINE_ENV),
+        default=_LLM_STREAM_IDLE_CHUNK_DEADLINE_DEFAULT_SECONDS,
+        minimum=_LLM_STREAM_IDLE_CHUNK_DEADLINE_MIN_SECONDS,
+        maximum=_LLM_STREAM_IDLE_CHUNK_DEADLINE_MAX_SECONDS,
     )
 
 
@@ -4609,6 +4632,39 @@ class LLMClient:
             if turn_key:
                 _unregister_llm_stream_close_hook(turn_key, _force_close_stream_on_deadline)
 
+        # 独立的 idle chunk-gap 看门狗：同样永远挂载，不受门控。与 total
+        # deadline 不同，它只在「有效解码事件」到达时喂狗重置（provider
+        # 保活字节在 wire 层就被消化，不会经过喂狗点），因此能发现被保活
+        # 字节无限续命的死间隙（同构先例：AWS SDK stalled-stream
+        # protection、Temporal 心跳超时）。首个有效事件到达前以流打开时刻
+        # 起算，兼作 time-to-first-chunk 上限。Timer 到点同样走 force
+        # close，让阻塞的 read 以异常解卷，绝不遗弃线程。
+        idle_fired = threading.Event()
+        idle_timer_holder: list[threading.Timer] = []
+
+        def _force_close_stream_on_idle() -> None:
+            idle_fired.set()
+            force_close_llm_stream(stream_iterator_holder[0] if stream_iterator_holder else None)
+
+        def _arm_stream_idle_guard() -> None:
+            # 喂狗 = 先 cancel 旧 Timer 再挂新 Timer；Timer 创建是廉价系统
+            # 调用，逐 chunk 重置的开销可接受。idle_fired 一旦置位就保持
+            # sticky：连接已被强关，attempt 必然以 idle 超时收场。
+            while idle_timer_holder:
+                idle_timer_holder.pop().cancel()
+            interval = _llm_stream_idle_chunk_deadline_seconds()
+            timer = threading.Timer(interval, _force_close_stream_on_idle)
+            timer.daemon = True
+            try:
+                timer.start()
+            except Exception:
+                return
+            idle_timer_holder.append(timer)
+
+        def _teardown_stream_idle_guard() -> None:
+            while idle_timer_holder:
+                idle_timer_holder.pop().cancel()
+
         def _raise_if_stream_deadline_exceeded() -> None:
             if stream_deadline_at is None:
                 return
@@ -4637,6 +4693,7 @@ class LLMClient:
                 iterator = self._open_provider_stream(payload)
                 stream_iterator_holder.append(iterator)
                 _arm_stream_deadline_guard()
+                _arm_stream_idle_guard()
                 _raise_if_stream_deadline_exceeded()
                 if turn_key:
                     _register_llm_stream_close_hook(turn_key, _force_close_stream_on_deadline)
@@ -4793,11 +4850,18 @@ class LLMClient:
                 origin_host=origin_host,
             ) as timings:
                 try:
-                    yield from events()
+                    # 喂狗点：只有已解码真事件跨越消费者边界（即
+                    # stream_events 消费循环拿到的每个 event）才重置 idle
+                    # 计时；wire 层 raw_event 循环里的保活字节不会经过这里，
+                    # 因此无法给死间隙续命。
+                    for chunk in events():
+                        _arm_stream_idle_guard()
+                        yield chunk
                 except Exception as exc:
-                    # total-deadline timer 强制关闭底层连接后，阻塞的读会以
-                    # 任意连接类异常解卷；把它归一为 timeout/retryable，
-                    # 走现有的可重试错误路径。真正的取消/LLMError 保持原样。
+                    # total/idle watchdog 强制关闭底层连接后，阻塞的读会以
+                    # 任意连接类异常解卷；按各自 fired Event 归一为
+                    # timeout/retryable，走现有的可重试错误路径。真正的
+                    # 取消/LLMError 保持原样。两者同时触发时 total 优先。
                     if (
                         deadline_fired.is_set()
                         and not isinstance(exc, (LLMError, LLMCancelledError))
@@ -4807,9 +4871,19 @@ class LLMClient:
                             provider=self.provider.kind,
                             model=self.profile.model,
                         ) from exc
+                    if (
+                        idle_fired.is_set()
+                        and not isinstance(exc, (LLMError, LLMCancelledError))
+                    ):
+                        raise LLMStreamIdleDeadlineError(
+                            idle_seconds=_llm_stream_idle_chunk_deadline_seconds(),
+                            provider=self.provider.kind,
+                            model=self.profile.model,
+                        ) from exc
                     raise
                 finally:
                     _teardown_stream_deadline_guard()
+                    _teardown_stream_idle_guard()
                     _record_stream_http_timing_summary(timings, identity=identity)
 
         return timed_events(), lambda: emitted, lambda: turn_outcome

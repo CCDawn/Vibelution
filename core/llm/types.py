@@ -408,3 +408,34 @@ class LLMStreamTotalDeadlineError(LLMError):
             model=model,
         )
         self.deadline_seconds = float(deadline_seconds)
+
+
+class LLMStreamIdleDeadlineError(LLMError):
+    """流式调用两个有效解码事件之间的间隔超过 idle 硬上限。
+
+    httpx read timeout 是「chunk 间隔」型但会被 provider 保活字节重置；
+    本错误表示即使传输层仍被保活字节喂养，两个有效解码事件之间的间隔也
+    超过上限，必须强制收卷（同构先例：AWS SDK stalled-stream protection、
+    Temporal 心跳超时）。首个有效事件到达前的等待也按同一上限计（兼作
+    time-to-first-chunk 上限）。分类为 ``timeout`` 且 ``retryable=True``：
+    超时后连接已被强制关闭，重试是安全且可能有意义的。
+    """
+
+    def __init__(
+        self,
+        *,
+        idle_seconds: float,
+        provider: str = "",
+        model: str = "",
+    ) -> None:
+        super().__init__(
+            "timeout",
+            (
+                f"LLM stream exceeded its idle chunk-gap deadline of "
+                f"{float(idle_seconds):g}s without a decodable event and was force-closed"
+            ),
+            retryable=True,
+            provider=provider,
+            model=model,
+        )
+        self.idle_seconds = float(idle_seconds)

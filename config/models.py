@@ -571,8 +571,15 @@ DEFAULT_LLM_ROUTE_CONCURRENCY = 4
 #   会无限重置它，所以必须有总时长）。默认 900.0s，钳制 60-3600s；必须保持
 #   不小于挑战 per-call fence（team_workflow.challenge_deadline_policy.
 #   PER_CALL_MAX_MS = 800s），否则会截断本应完成的合法长调用。
+# - VIBELUTION_LLM_STREAM_IDLE_CHUNK_DEADLINE_SECONDS：流式两个有效解码
+#   事件之间的最大间隔（独立 threading.Timer 看门狗，与数据到达无关）。
+#   provider 保活字节不重置计时，只有真解码事件喂狗；首个有效事件到达前
+#   的等待按同一上限计（兼作 time-to-first-chunk 上限）。默认 300.0s，
+#   钳制 30-900s；与上面的总时长硬顶独立生效，触发后强制关闭底层连接并
+#   抛可重试 timeout（LLMStreamIdleDeadlineError）。
 DEFAULT_LLM_ROUTE_GATE_WAIT_SECONDS = 120.0
 DEFAULT_LLM_STREAM_TOTAL_DEADLINE_SECONDS = 900.0
+DEFAULT_LLM_STREAM_IDLE_CHUNK_DEADLINE_SECONDS = 300.0
 
 
 class LLMConfig(BaseModel):
