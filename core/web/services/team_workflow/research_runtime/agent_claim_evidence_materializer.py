@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -40,6 +41,9 @@ from .source_extraction_evidence_cards import (
     extraction_has_materializable_evidence,
     normalize_challenge_evidence_fields,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class EvidenceMaterializationError(RuntimeError):
@@ -406,6 +410,142 @@ def _backfill_replayed_task_retrieved_at(task: dict[str, Any]) -> dict[str, Any]
     return backfill_persisted_extraction_task_retrieved_at(task)
 
 
+def _first_non_empty_text(*values: object) -> str:
+    for value in values:
+        text = _text(value)
+        if text:
+            return text
+    return ""
+
+
+def _candidate_metadata(candidate: Mapping[str, Any]) -> Mapping[str, Any]:
+    metadata = candidate.get("metadata")
+    return metadata if isinstance(metadata, Mapping) else {}
+
+
+def _collection_envelope_from_candidate(
+    candidate: Mapping[str, Any],
+    *,
+    locator: Mapping[str, Any] | None = None,
+) -> dict[str, str]:
+    """Build the collection envelope from one matched source candidate record.
+
+    Fill-missing and never fabricating: every field is read only from the
+    matched record itself — the top-level ``title`` / ``sourceUrl`` /
+    ``sourceKind`` (or ``sourceType``) / ``createdAt`` spellings first, the
+    candidate ``metadata`` fallbacks second, with the explicitly provided
+    top-level value always winning — and ``url`` copies the card locator's
+    URL verbatim.  A field the record does not carry stays absent, so a
+    source candidate without collection metadata yields an empty envelope
+    and the card keeps today's lean shape.
+    """
+    metadata = _candidate_metadata(candidate)
+    envelope = {
+        "title": _first_non_empty_text(candidate.get("title"), metadata.get("title")),
+        "sourceUrl": _first_non_empty_text(
+            candidate.get("sourceUrl"), metadata.get("sourceUrl")
+        ),
+        "sourceType": _first_non_empty_text(
+            candidate.get("sourceKind"),
+            candidate.get("sourceType"),
+            metadata.get("sourceKind"),
+            metadata.get("sourceType"),
+        ),
+        "retrievedAt": _first_non_empty_text(candidate.get("createdAt")),
+    }
+    if isinstance(locator, Mapping) and _text(locator.get("url")):
+        envelope["url"] = _text(locator.get("url"))
+    return {key: value for key, value in envelope.items() if value}
+
+
+def _run_source_candidate_index(
+    team_id: str,
+    source_collection_run_id: str,
+) -> tuple[dict[str, Mapping[str, Any]], bool]:
+    """Load one run's source-candidate batch keyed by candidateId.
+
+    The chain-level bridge reads the same authority per materialization, so
+    the extraction writeback path may too: ``candidateId`` references the
+    source candidates collected for the same ``sourceCollectionRunId``.
+    Fail-open: an unavailable candidate store returns an empty index and
+    ``False`` so callers can distinguish "id not in batch" (a dangling
+    reference worth naming) from "batch unreadable" (no judgment possible,
+    and cards simply keep the lean shape — envelope enrichment is never a
+    gate).
+    """
+    from core.web.services.team_workflow.source_collection.candidates import (
+        list_candidate_store,
+    )
+
+    normalized_team = _text(team_id)
+    normalized_run = _text(source_collection_run_id)
+    if not normalized_team or not normalized_run:
+        return {}, False
+    try:
+        response = list_candidate_store(normalized_team, run_id=normalized_run, limit=500)
+    except Exception:  # noqa: BLE001 - enrichment must never fail the write
+        return {}, False
+    index: dict[str, Mapping[str, Any]] = {}
+    for item in list(response.get("candidates") or []):
+        if isinstance(item, Mapping) and _text(item.get("candidateId")):
+            index.setdefault(_text(item.get("candidateId")), item)
+    return index, True
+
+
+def _is_hypothesis_chain_candidate_id(
+    candidate_id: str,
+    question_scope: Mapping[str, Any],
+) -> bool:
+    """True when the id belongs to the hypothesis-chain candidate id space.
+
+    Chain candidate ids mint themselves with the lowercased question id as
+    prefix (``SCI-009`` → ``sci-009-<hex>``), so the scoped question supplies
+    the prefix.  Such ids never resolve against a source-candidate batch but
+    are legitimate card dimensions (hypothesis-dimension review evidence),
+    so they must never be reported as dangling.  A chain id minted for a
+    *different* question stays a tolerated false negative here — the
+    consequence is one warning line, never a rejected write.
+    """
+    question_id = _text(question_scope.get("question"))
+    normalized_candidate = _text(candidate_id)
+    if not question_id or not normalized_candidate:
+        return False
+    prefix = f"{question_id.casefold()}-"
+    return normalized_candidate.casefold().startswith(prefix)
+
+
+def _record_dangling_candidate_event(
+    *,
+    team_id: str,
+    source_collection_run_id: str,
+    candidate_id: str,
+    claim_evidence_id: str,
+) -> None:
+    """Best-effort structured observability for one dangling candidateId.
+
+    Follows the claim-evidence store's ``research_evidence`` / ``claim_ledger``
+    scene-event vocabulary.  Purely observational: the card persists exactly
+    as before because chain ids and cross-era ids are legitimate today.
+    """
+    from core.web.services.runtime_scene_service import (
+        record_runtime_scene_event_quietly,
+    )
+
+    record_runtime_scene_event_quietly(
+        "research_evidence",
+        "claim_ledger",
+        "claim_evidence.dangling_candidate_reference",
+        level="warning",
+        outcome="observed",
+        fields={
+            "teamId": team_id,
+            "sourceCollectionRunId": source_collection_run_id,
+            "candidateId": candidate_id,
+            "claimEvidenceId": claim_evidence_id,
+        },
+    )
+
+
 def materialize_claim_evidence_from_task(
     *,
     project_root: str | Path,
@@ -464,6 +604,9 @@ def materialize_claim_evidence_from_task(
         supplied=hypothesis_candidate_bindings,
     )
     store = ClaimEvidenceStore(project_root)
+    candidate_index, candidates_available = _run_source_candidate_index(
+        normalized_team, normalized_source_run
+    )
     materialized: list[dict[str, Any]] = []
     for extraction, claim, claim_path in _materializable_claims(task):
         challenge_evidence = normalize_challenge_evidence_fields(
@@ -486,6 +629,29 @@ def materialize_claim_evidence_from_task(
         if not extractor_agent_id or not normalized_model_ref:
             raise EvidenceMaterializationError(
                 "anchored model evidence requires extractorAgentId and modelRef"
+            )
+        # Write-side collection envelope: the source record the card's
+        # candidateId names is the card's own source authority, so persist
+        # the collection-stage fields now instead of leaving every reader to
+        # re-project them.  Additive and never a gate: an unresolvable batch
+        # keeps the lean card, a chain id is legitimate, and only a
+        # non-chain id missing from an actually readable batch is named.
+        dangling_candidate_id = ""
+        collection_envelope: dict[str, str] = {}
+        if candidate_id in candidate_index:
+            collection_envelope = _collection_envelope_from_candidate(
+                candidate_index[candidate_id], locator=locator
+            )
+        elif candidates_available and not _is_hypothesis_chain_candidate_id(
+            candidate_id, question_scope
+        ):
+            dangling_candidate_id = candidate_id
+            logger.warning(
+                "claim evidence candidateId %r does not resolve against the "
+                "source-candidate batch of run %s; registering the card "
+                "without a collection envelope",
+                candidate_id,
+                normalized_source_run,
             )
         source_revision = "sha256:" + _sha256(
             {
@@ -535,7 +701,16 @@ def materialize_claim_evidence_from_task(
             "sourceCollectionRunId": normalized_source_run,
             "workflowRunId": normalized_workflow_run,
         }
+        if collection_envelope:
+            evidence_payload["collectionEnvelope"] = dict(collection_envelope)
         stored = store.register(normalized_team, evidence_payload)
+        if dangling_candidate_id:
+            _record_dangling_candidate_event(
+                team_id=normalized_team,
+                source_collection_run_id=normalized_source_run,
+                candidate_id=dangling_candidate_id,
+                claim_evidence_id=_text(stored.get("claimEvidenceId")),
+            )
         # ClaimEvidenceStore intentionally owns its compact legacy record
         # shape.  Keep the explicit v2 envelope on the materialization result
         # so callers can carry the fields without teaching that core store to
@@ -681,6 +856,12 @@ def materialize_candidate_claim_bindings_from_existing_evidence(
                 "sourceCollectionRunId": source["sourceCollectionRunId"],
                 "workflowRunId": normalized_run or source["workflowRunId"],
             }
+            # Copy-through only: the source record's envelope (if any) is the
+            # already-persisted collection truth for this source; nothing is
+            # derived or overwritten here.
+            source_envelope = source.get("collectionEnvelope")
+            if isinstance(source_envelope, Mapping) and source_envelope:
+                payload["collectionEnvelope"] = dict(source_envelope)
             bound = store.register(normalized_team, payload)
             support_refs = (
                 [bound["claimEvidenceId"]]
@@ -1149,7 +1330,7 @@ def materialize_chain_collection_evidence(
         question_scope,
         bridged_candidate_ids,
     )
-    anchored: list[tuple[str, dict[str, Any]]] = []
+    anchored: list[tuple[str, dict[str, Any], dict[str, str]]] = []
     metadata_only_skipped: list[str] = []
     offtopic_skipped: list[dict[str, str]] = []
     for candidate in _chain_source_collection_candidates(normalized_team, normalized_run):
@@ -1173,7 +1354,16 @@ def materialize_chain_collection_evidence(
                 {"candidateId": candidate_id, "reason": off_topic_reason}
             )
             continue
-        anchored.append((candidate_id, anchor))
+        # The candidate record is in hand here — this IS the run's batch — so
+        # the collection envelope is resolved at the write point from the
+        # record itself; unresolved fields stay absent.
+        anchored.append(
+            (
+                candidate_id,
+                anchor,
+                _collection_envelope_from_candidate(candidate, locator=anchor["locator"]),
+            )
+        )
     # Without anchored collected sources there is no evidence to bridge; core
     # claim rows must never be minted empty, or the gate would read a claim
     # row that no evidence dimension can ever reach.
@@ -1197,7 +1387,7 @@ def materialize_chain_collection_evidence(
     # anchored source, collecting one pending evidence ref per source.
     collected_refs: list[dict[str, Any]] = []
     collected_payloads: list[dict[str, Any]] = []
-    for candidate_id, anchor in anchored:
+    for candidate_id, anchor, collection_envelope in anchored:
         model_ref = _chain_agent_model_ref(anchor["extractorAgentId"])
         source_revision = "sha256:" + _sha256(
             {
@@ -1234,6 +1424,8 @@ def materialize_chain_collection_evidence(
             "modelRef": model_ref,
             "sourceCollectionRunId": normalized_run,
         }
+        if collection_envelope:
+            evidence_payload["collectionEnvelope"] = dict(collection_envelope)
         stored = store.register(normalized_team, evidence_payload)
         evidence_count += 1
         collected_payloads.append(evidence_payload)

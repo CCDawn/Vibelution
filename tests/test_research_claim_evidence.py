@@ -167,3 +167,54 @@ def test_model_extracted_evidence_requires_model_identity(tmp_path):
             "research-team",
             _payload(extractionMethod="model", modelRef=""),
         )
+
+
+def test_collection_envelope_is_additive_whitelisted_and_never_fabricated(tmp_path):
+    """An explicitly provided envelope persists verbatim; absence stays lean.
+
+    The envelope is descriptive only — unknown fields and empty values are
+    dropped, a non-mapping or valueless envelope is omitted, and the
+    envelope never enters the ``claimEvidenceId`` identity, so a lean
+    payload and an enriched payload with otherwise identical content are
+    the same card.
+    """
+    store = ClaimEvidenceStore(tmp_path)
+
+    enriched = store.register(
+        "research-team",
+        _payload(
+            collectionEnvelope={
+                "title": "An explicitly provided title",
+                "sourceUrl": "https://example.org/envelope-source",
+                "retrievedAt": "2026-09-01T15:18:49Z",
+                "sourceType": "paper",
+                "url": "https://example.org/envelope-source",
+                "unknownField": "must-be-dropped",
+                "emptyField": "",
+            }
+        ),
+    )
+    assert enriched["collectionEnvelope"] == {
+        "title": "An explicitly provided title",
+        "sourceUrl": "https://example.org/envelope-source",
+        "retrievedAt": "2026-09-01T15:18:49Z",
+        "sourceType": "paper",
+        "url": "https://example.org/envelope-source",
+    }
+
+    # Identical content without an envelope: same identity, nothing invented.
+    lean_identity = store.register("research-team", _payload())
+    assert lean_identity["claimEvidenceId"] == enriched["claimEvidenceId"]
+    assert "collectionEnvelope" in lean_identity
+
+    fresh_lean = store.register(
+        "research-team", _payload(claimId="claim-predictive-coding-3")
+    )
+    assert "collectionEnvelope" not in fresh_lean
+
+    for malformed in ("not-a-mapping", {"title": "   "}):
+        valueless = store.register(
+            "research-team",
+            _payload(claimId="claim-predictive-coding-4", collectionEnvelope=malformed),
+        )
+        assert "collectionEnvelope" not in valueless

@@ -2023,3 +2023,373 @@ def test_chain_collection_core_claims_cite_collected_evidence_refs(
     )
     assert verdict[HYPOTHESIS_CANDIDATE_ID]["status"] == "allowed"
     assert verdict[HYPOTHESIS_CANDIDATE_ID]["reason"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Write-side collection envelope (additive, never a gate)
+#
+
+_LEAN_RECORD_KEYS = {
+    "schemaVersion",
+    "claimEvidenceId",
+    "claimId",
+    "candidateId",
+    "sourceId",
+    "sourceRevision",
+    "locator",
+    "quote",
+    "evidenceKind",
+    "reasoningRole",
+    "supportLevel",
+    "extractionMethod",
+    "extractorAgentId",
+    "modelRef",
+    "sourceCollectionRunId",
+    "workflowRunId",
+    "quoteHash",
+    "reviewStatus",
+    "reviewedBy",
+    "shadowOnly",
+    "formalKnowledgeWriteAllowed",
+    "createdAt",
+    "updatedAt",
+}
+
+
+def test_extraction_card_carries_collection_envelope_from_resolvable_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A resolvable source candidate persists its collection envelope at write time.
+
+    The card's ``candidateId`` names the run's own source-candidate batch, so
+    the writer resolves the envelope from that record — the explicitly
+    provided top-level spellings beat the metadata fallbacks — and copies the
+    locator URL.  The envelope stays out of the card identity, so replay
+    remains idempotent.
+    """
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    _seed_chain_collection_candidates(
+        monkeypatch,
+        [
+            {
+                "candidateId": SOURCE_CANDIDATE_ID,
+                "sourceKind": "paper",
+                "title": "Batch authority title",
+                "sourceUrl": "https://example.org/batch-paper-a",
+                "createdAt": "2026-08-28T02:22:48Z",
+                "metadata": {
+                    "title": "Metadata fallback title",
+                    "sourceUrl": "https://example.org/metadata-fallback",
+                    "sourceType": "peer_reviewed_paper",
+                },
+            }
+        ],
+    )
+    created = materialize_claim_evidence_from_task(
+        project_root=tmp_path,
+        team_id=team_id,
+        workflow_run_id="wf-run-a",
+        source_collection_run_id="sc-run-a",
+        task=_verified_task(team_id=team_id),
+        model_ref="provider/model-a",
+        question_scope=scope,
+    )
+
+    assert len(created) == 1
+    record = ClaimEvidenceStore(tmp_path).list(team_id)[0]
+    # Explicit top-level candidate fields win over the metadata fallbacks;
+    # locator.url is copied verbatim.
+    assert record["collectionEnvelope"] == {
+        "title": "Batch authority title",
+        "sourceUrl": "https://example.org/batch-paper-a",
+        "sourceType": "paper",
+        "retrievedAt": "2026-08-28T02:22:48Z",
+        "url": "https://example.org/paper-a",
+    }
+    assert record["candidateId"] == SOURCE_CANDIDATE_ID
+
+    replay = materialize_claim_evidence_from_task(
+        project_root=tmp_path,
+        team_id=team_id,
+        workflow_run_id="wf-run-a",
+        source_collection_run_id="sc-run-a",
+        task=_verified_task(team_id=team_id),
+        model_ref="provider/model-a",
+        question_scope=scope,
+    )
+    assert replay[0]["claimEvidenceId"] == created[0]["claimEvidenceId"]
+    assert len(ClaimEvidenceStore(tmp_path).list(team_id)) == 1
+
+
+def test_unresolvable_source_keeps_lean_card_shape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An unavailable or chain-id source keeps today's lean card exactly.
+
+    An unreadable candidate batch supports no judgment (no envelope, no
+    dangling warning), and a hypothesis-chain id never resolves against a
+    source batch but is a legitimate dimension, so its card persists lean
+    and quiet.
+    """
+    import logging
+
+    from core.web.services.team_workflow.source_collection import (
+        candidates as candidates_module,
+    )
+
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+
+    def _broken_store(*args: object, **kwargs: object) -> dict:
+        raise RuntimeError("candidate store unavailable")
+
+    monkeypatch.setattr(candidates_module, "list_candidate_store", _broken_store)
+    with caplog.at_level(
+        logging.WARNING,
+        logger="core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer",
+    ):
+        created = materialize_claim_evidence_from_task(
+            project_root=tmp_path,
+            team_id=team_id,
+            workflow_run_id="wf-run-a",
+            source_collection_run_id="sc-run-a",
+            task=_verified_task(team_id=team_id),
+            model_ref="provider/model-a",
+            question_scope=scope,
+        )
+
+    assert len(created) == 1
+    record = ClaimEvidenceStore(tmp_path).list(team_id)[0]
+    assert set(record) == _LEAN_RECORD_KEYS
+    assert "does not resolve" not in caplog.text
+
+    # A chain-shaped candidate id missing from the batch stays lean and quiet.
+    chain_task = _verified_task(team_id=team_id)
+    chain_task["result"]["candidateExtractions"][0]["candidateId"] = "sci-mtz-1-deadbeef"
+    chain_task["result"]["candidateExtractions"][0]["source_url"] = (
+        "https://example.org/chain-paper"
+    )
+    chain_task["result"]["candidateExtractions"][0]["claims"][0]["sourceRef"] = (
+        "https://example.org/chain-paper"
+    )
+    _seed_chain_collection_candidates(
+        monkeypatch,
+        [
+            _collected_source_candidate(
+                "candidate-unrelated", url="https://example.org/unrelated"
+            )
+        ],
+    )
+    with caplog.at_level(
+        logging.WARNING,
+        logger="core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer",
+    ):
+        materialize_claim_evidence_from_task(
+            project_root=tmp_path,
+            team_id=team_id,
+            workflow_run_id="wf-run-a",
+            source_collection_run_id="sc-run-a",
+            task=chain_task,
+            model_ref="provider/model-a",
+            question_scope=scope,
+        )
+    chain_record = next(
+        item
+        for item in ClaimEvidenceStore(tmp_path).list(team_id)
+        if item["candidateId"] == "sci-mtz-1-deadbeef"
+    )
+    assert "collectionEnvelope" not in chain_record
+    assert "does not resolve" not in caplog.text
+
+
+def test_dangling_candidate_reference_warns_but_card_persists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A non-chain id missing from a readable batch is named, never rejected.
+
+    Observability, not a hard gate: the logger names the dangling id, the
+    scene event carries it, and the card registers exactly as before the
+    envelope existed.
+    """
+    import logging
+
+    from core.web.services import runtime_scene_service
+
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    _seed_chain_collection_candidates(
+        monkeypatch,
+        [
+            _collected_source_candidate(
+                "candidate-unrelated", url="https://example.org/unrelated"
+            )
+        ],
+    )
+    scene_events: list[dict] = []
+
+    def _capture_scene_event(*args: object, **kwargs: object) -> dict:
+        scene_events.append({"args": args, "kwargs": kwargs})
+        return {"recorded": True}
+
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "record_runtime_scene_event_quietly",
+        _capture_scene_event,
+    )
+
+    dangling_task = _verified_task(team_id=team_id)
+    dangling_task["result"]["candidateExtractions"][0]["candidateId"] = (
+        "candidate-not-in-batch"
+    )
+    with caplog.at_level(
+        logging.WARNING,
+        logger="core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer",
+    ):
+        created = materialize_claim_evidence_from_task(
+            project_root=tmp_path,
+            team_id=team_id,
+            workflow_run_id="wf-run-a",
+            source_collection_run_id="sc-run-a",
+            task=dangling_task,
+            model_ref="provider/model-a",
+            question_scope=scope,
+        )
+
+    assert len(created) == 1
+    stored = ClaimEvidenceStore(tmp_path).list(team_id)
+    assert len(stored) == 1
+    assert stored[0]["candidateId"] == "candidate-not-in-batch"
+    assert "collectionEnvelope" not in stored[0]
+    assert "candidate-not-in-batch" in caplog.text
+    assert "does not resolve" in caplog.text
+
+    dangling_events = [
+        event
+        for event in scene_events
+        if "claim_evidence.dangling_candidate_reference" in event["args"]
+    ]
+    assert len(dangling_events) == 1
+    fields = dangling_events[0]["kwargs"]["fields"]
+    assert fields["candidateId"] == "candidate-not-in-batch"
+    assert fields["sourceCollectionRunId"] == "sc-run-a"
+    assert fields["claimEvidenceId"] == stored[0]["claimEvidenceId"]
+
+
+def test_chain_collection_cards_carry_collection_envelope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Chain-bridge cards persist the envelope of the collected source record.
+
+    The chain path owns the run's candidate batch at the write point, so the
+    fact card and every bridged hypothesis-dimension card carry the record's
+    collection fields without any read-side projection.
+    """
+    from core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer import (
+        materialize_chain_collection_evidence,
+    )
+
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    candidate = _collected_source_candidate(
+        "candidate-run-a-1",
+        summary="The collected abstract states a bounded mechanism.",
+        url="https://example.org/paper-a",
+        metadata={"title": "Metadata fallback title"},
+    )
+    _seed_chain_collection_candidates(monkeypatch, [candidate])
+    _seed_chain_hypothesis_candidates(
+        team_id,
+        _QUESTION_ID,
+        {HYPOTHESIS_CANDIDATE_ID: "Candidate A predicts a bounded mechanism."},
+    )
+
+    result = materialize_chain_collection_evidence(
+        project_root=tmp_path,
+        team_id=team_id,
+        question_scope=scope,
+        collection_run_id="dprun-chain-1",
+        hypothesis_candidate_ids=[HYPOTHESIS_CANDIDATE_ID],
+    )
+    assert result["status"] == "materialized"
+
+    stored = ClaimEvidenceStore(tmp_path).list(team_id)
+    expected_envelope = {
+        "title": "Collected source candidate-run-a-1",
+        "sourceUrl": "https://example.org/paper-a",
+        "sourceType": "paper",
+        "retrievedAt": "2026-09-01T15:18:49Z",
+        "url": "https://example.org/paper-a",
+    }
+    assert stored
+    assert all(item["collectionEnvelope"] == expected_envelope for item in stored)
+
+
+def test_envelope_never_overwrites_explicitly_provided_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Explicit envelope values are preserved verbatim at every write point.
+
+    The store keeps an explicitly provided envelope untouched (whitelist
+    only, no invention), and the binding bridge copies an existing record's
+    envelope through instead of re-deriving or overwriting it.
+    """
+    from core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer import (
+        materialize_candidate_claim_bindings_from_existing_evidence,
+    )
+
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    explicit_envelope = {
+        "title": "Operator supplied title",
+        "sourceUrl": "https://example.org/explicit-source",
+        "unknownField": "must-be-dropped",
+        "retrievedAt": "",
+    }
+    seed_store = ClaimEvidenceStore(tmp_path)
+    source_record = seed_store.register(
+        team_id,
+        {
+            "claimId": "claim-source-fact",
+            "candidateId": "candidate-20260828022248-fedcba98",
+            "sourceId": "https://example.org/explicit-source",
+            "sourceRevision": "sha256:" + "a" * 64,
+            "locator": {"kind": "url", "url": "https://example.org/explicit-source"},
+            "quote": "A verbatim anchored quote.",
+            "evidenceKind": "primary_result",
+            "reasoningRole": "fact",
+            "supportLevel": "supports",
+            "extractionMethod": "manual",
+            "extractorAgentId": "agent-a",
+            "modelRef": "",
+            "sourceCollectionRunId": "sc-run-a",
+            "workflowRunId": "wf-run-a",
+            "collectionEnvelope": explicit_envelope,
+        },
+    )
+    assert source_record["collectionEnvelope"] == {
+        "title": "Operator supplied title",
+        "sourceUrl": "https://example.org/explicit-source",
+    }
+
+    materialized = materialize_candidate_claim_bindings_from_existing_evidence(
+        project_root=tmp_path,
+        team_id=team_id,
+        workflow_run_id="wf-run-a",
+        question_scope=scope,
+        candidates=[
+            {
+                "candidateId": HYPOTHESIS_CANDIDATE_ID,
+                "statement": "Candidate A predicts a bounded mechanism.",
+                "lineageRefs": ["https://example.org/explicit-source"],
+            }
+        ],
+    )
+
+    assert len(materialized) == 1
+    bound = next(
+        item
+        for item in ClaimEvidenceStore(tmp_path).list(team_id)
+        if item["candidateId"] == HYPOTHESIS_CANDIDATE_ID
+    )
+    # Copy-through: the explicitly provided values are never overwritten and
+    # never re-derived from another authority.
+    assert bound["collectionEnvelope"] == {
+        "title": "Operator supplied title",
+        "sourceUrl": "https://example.org/explicit-source",
+    }

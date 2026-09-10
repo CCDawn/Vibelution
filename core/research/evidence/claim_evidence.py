@@ -23,6 +23,18 @@ _REASONING_ROLES = {"fact", "inference", "analogy", "hypothesis"}
 _EVIDENCE_KINDS = {"primary_result", "review_summary", "metadata", "counter_evidence"}
 _SUPPORT_LEVELS = {"supports", "contradicts", "insufficient", "unverified"}
 _EXTRACTION_METHODS = {"paperqa2", "manual", "model"}
+# Additive collection-stage envelope (title / sourceUrl / retrievedAt /
+# sourceType / locator url) a card writer may persist when the matched source
+# candidate record carries it.  Purely descriptive: it never enters the
+# ``claimEvidenceId`` identity, is never fabricated here, and an absent or
+# empty envelope keeps the historical lean record shape exactly.
+_COLLECTION_ENVELOPE_TEXT_LIMITS = {
+    "title": 500,
+    "sourceUrl": 2000,
+    "retrievedAt": 80,
+    "sourceType": 80,
+    "url": 2000,
+}
 
 
 class ClaimEvidenceError(ValueError):
@@ -233,7 +245,7 @@ class ClaimEvidenceStore:
                 if not isinstance(source, Mapping):
                     continue
                 payload: dict[str, Any] = {key: source.get(key) for key in payload_keys}
-                for optional_key in ("sourceCollectionRunId", "workflowRunId"):
+                for optional_key in ("sourceCollectionRunId", "workflowRunId", "collectionEnvelope"):
                     if source.get(optional_key):
                         payload[optional_key] = source.get(optional_key)
                 try:
@@ -400,7 +412,28 @@ def _normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
         normalized["sourceCollectionRunId"] = source_collection_run_id
     if workflow_run_id:
         normalized["workflowRunId"] = workflow_run_id
+    envelope = _collection_envelope(payload.get("collectionEnvelope"))
+    if envelope:
+        normalized["collectionEnvelope"] = envelope
     return normalized
+
+
+def _collection_envelope(value: Any) -> dict[str, str]:
+    """Normalize an explicitly provided collection envelope (fill-none).
+
+    Only the whitelisted descriptive fields are kept; unknown fields, empty
+    values and non-mapping payloads are dropped, and an envelope with no
+    surviving field is omitted entirely.  Values pass through untouched —
+    the store never overwrites or invents envelope content.
+    """
+    if not isinstance(value, Mapping):
+        return {}
+    envelope: dict[str, str] = {}
+    for field, max_length in _COLLECTION_ENVELOPE_TEXT_LIMITS.items():
+        text = _optional_text(value.get(field), max_length)
+        if text:
+            envelope[field] = text
+    return envelope
 
 
 def _locator(value: Any) -> dict[str, Any]:
