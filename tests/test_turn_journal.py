@@ -9,14 +9,17 @@ from pathlib import Path
 import pytest
 
 import core.chat.turn_journal as turn_journal
+from core.chat.conversation_invariant import check_conversation_payload_invariant
 from core.chat.turn_journal import (
-    EVENT_ASSISTANT_ITEM_COMMITTED,
     EVENT_ASSISTANT_MESSAGE,
+    EVENT_ASSISTANT_ITEM_COMMITTED,
+    EVENT_TOOL_RESULT,
     EVENT_TURN_COMPLETED,
     EVENT_USER_MESSAGE,
     TurnJournalEvent,
     append_turn_event,
     load_turn_events,
+    model_messages_from_events,
     model_visible_messages_from_events,
     rewrite_turn_events,
     turn_journal_path,
@@ -259,3 +262,98 @@ def test_loading_missing_journal_has_no_filesystem_side_effect(tmp_path):
 
     assert load_turn_events(tmp_path, "session-missing") == []
     assert not path.parent.exists()
+
+
+def _incident_shape_event(sequence: int, event_type: str, payload: dict, **kwargs) -> TurnJournalEvent:
+    return TurnJournalEvent(
+        schema_version=1,
+        event_id=f"event-empty-{sequence}",
+        session_id="session-empty-tool-result",
+        turn_id="turn-empty-tool-result",
+        sequence=sequence,
+        event_type=event_type,
+        status="completed",
+        timestamp="2026-09-10T08:16:00Z",
+        source="test",
+        payload=payload,
+        **kwargs,
+    )
+
+
+def test_empty_tool_result_with_call_id_keeps_placeholder_and_closes_provider_chain():
+    """Regression: session-20260910-170320-944065 empty glob_tool result.
+
+    An EVENT_TOOL_RESULT whose body is empty must still close the assistant
+    tool_call at replay; dropping it degraded the chain into
+    historical_unresolved_tool_call and the fail-closed send invariant
+    permanently rejected every later send for the session.
+    """
+
+    events = [
+        _incident_shape_event(1, EVENT_USER_MESSAGE, {"content": "帮我找一下文件"}),
+        _incident_shape_event(
+            2,
+            EVENT_ASSISTANT_MESSAGE,
+            {
+                "content": "",
+                "toolCalls": [
+                    {
+                        "id": "call_01_incident",
+                        "name": "glob_tool",
+                        "arguments": {"pattern": "**/*.md"},
+                    }
+                ],
+            },
+        ),
+        _incident_shape_event(
+            3,
+            EVENT_TOOL_RESULT,
+            {
+                "toolCall": {
+                    "id": "call_01_incident",
+                    "name": "glob_tool",
+                    "status": "done",
+                    "result": [],
+                }
+            },
+            tool_call_id="call_01_incident",
+            correlation_id="call_01_incident",
+        ),
+        _incident_shape_event(4, EVENT_ASSISTANT_MESSAGE, {"content": "没有找到匹配文件。"}),
+        _incident_shape_event(5, EVENT_TURN_COMPLETED, {}),
+    ]
+
+    model_messages = model_messages_from_events(events)
+
+    assistant_calls = [
+        call["id"]
+        for message in model_messages
+        for call in message.get("tool_calls") or []
+        if isinstance(call, dict)
+    ]
+    assert assistant_calls == ["call_01_incident"]
+    tool_messages = [message for message in model_messages if message.get("role") == "tool"]
+    assert [message["tool_call_id"] for message in tool_messages] == ["call_01_incident"]
+    assert tool_messages[0]["content"] == "（空结果）工具已执行但未返回可见输出。"
+    kinds = [str((message.get("metadata") or {}).get("kind") or "") for message in model_messages]
+    assert "historical_unresolved_tool_call" not in kinds
+
+    result = check_conversation_payload_invariant(list(model_messages))
+    assert result.ok, f"{result.error_type}: {result.message}"
+
+
+def test_empty_unlinked_tool_result_event_is_still_dropped():
+    events = [
+        _incident_shape_event(1, EVENT_USER_MESSAGE, {"content": "普通问题"}),
+        _incident_shape_event(2, EVENT_TOOL_RESULT, {"result": []}),
+        _incident_shape_event(3, EVENT_ASSISTANT_MESSAGE, {"content": "已处理。"}),
+        _incident_shape_event(4, EVENT_TURN_COMPLETED, {}),
+    ]
+
+    messages = model_visible_messages_from_events(events)
+
+    contents = [str(message.get("content") or "") for message in messages]
+    assert "帮我" not in "".join(contents)
+    assert "（空结果）工具已执行但未返回可见输出。" not in contents
+    assert "已处理。" in contents
+    assert [str(message.get("role") or "") for message in messages] == ["user", "assistant"]

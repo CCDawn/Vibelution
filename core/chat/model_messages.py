@@ -22,6 +22,13 @@ MODEL_MESSAGE_SCHEMA_VERSION = 1
 # Bound historical tool evidence so prior-turn large outputs do not dominate the next request.
 HISTORY_TOOL_RESULT_CHAR_LIMIT = 2_000
 
+# A tool_result with an empty body still closes its assistant tool_call at
+# replay: dropping it leaves the call dangling, the provider chain repair then
+# degrades it silently and the fail-closed send invariant permanently rejects
+# every later send for that session. Both replay layers synthesize this exact
+# placeholder so calls and results stay one-to-one.
+EMPTY_TOOL_RESULT_PLACEHOLDER_TEXT = "（空结果）工具已执行但未返回可见输出。"
+
 
 @dataclass(frozen=True)
 class ProviderMessageChain:
@@ -168,15 +175,28 @@ def _assistant_provider_messages(message: dict[str, Any], *, source_index: int) 
             continue
         tool_calls.append(normalized)
         result_content = _raw_tool_result_body(entry)
-        if result_content:
-            tool_messages.append(
-                _embedded_tool_result_message(
-                    message,
-                    normalized,
-                    result_content=result_content,
-                    source_index=source_index,
-                )
+        if not result_content:
+            # An embedded tool_call that recorded an empty result container
+            # (journal ``result: []``) still needs a matching tool message:
+            # dropping it orphans the call and trips the fail-closed provider
+            # send invariant. Entries without a result container keep their
+            # results in the paired standalone tool bundles, and interrupted
+            # calls keep the existing behavior (no synthesized result).
+            if (
+                not _explicit_tool_call_id(entry)
+                or not _tool_entry_has_empty_result_container(entry)
+                or str(normalized.get("id") or "").strip() in interrupted_tool_call_ids
+            ):
+                continue
+            result_content = EMPTY_TOOL_RESULT_PLACEHOLDER_TEXT
+        tool_messages.append(
+            _embedded_tool_result_message(
+                message,
+                normalized,
+                result_content=result_content,
+                source_index=source_index,
             )
+        )
     if not tool_calls and not _visible_text(content):
         return []
     assistant = _base_message("assistant", content, source_index=source_index)
@@ -468,6 +488,31 @@ def _explicit_tool_call_id(entry: dict[str, Any]) -> str:
     ).strip()
 
 
+def _tool_entry_has_empty_result_container(entry: dict[str, Any]) -> bool:
+    """True when the entry recorded a result container whose body is empty.
+
+    This separates "the tool executed and returned nothing visible" (an
+    explicit empty ``result``/``resultSegments``/... was journaled, so the
+    assistant tool_call must still be closed with a placeholder) from "no
+    result recorded on this entry at all" (results live in the paired
+    standalone tool bundle or the call is genuinely unresolved).
+    """
+
+    for key in (
+        "result",
+        "error",
+        "resultSegments",
+        "stdoutPreview",
+        "stderrPreview",
+        "resultPreview",
+        "result_preview",
+        "summary",
+    ):
+        if key in entry and entry.get(key) in (None, "", [], {}):
+            return True
+    return False
+
+
 def _embedded_tool_result_message(
     source_message: dict[str, Any],
     normalized_call: dict[str, Any],
@@ -507,7 +552,11 @@ def _coalesce_ledger_tool_result_messages(messages: list[Any]) -> list[Any]:
             continue
         role = _normalize_role(raw.get("role"))
         entries = _tool_entries(raw) if role == "assistant" else []
-        result_entries = [entry for entry in entries if _tool_entry_has_result(entry)]
+        result_entries = [
+            entry
+            for entry in entries
+            if _tool_entry_has_result(entry) or _tool_entry_has_empty_result_container(entry)
+        ]
         result_ids = [_explicit_tool_call_id(entry) for entry in result_entries]
         result_turn_identity = _message_turn_identity(raw)
         same_pending_turn = (
@@ -530,6 +579,11 @@ def _coalesce_ledger_tool_result_messages(messages: list[Any]) -> list[Any]:
                     tool_index=tool_index,
                 )
                 result_content = _tool_result_content(normalized["name"], entry)
+                if not result_content and _tool_entry_has_empty_result_container(entry):
+                    # An empty result container (journal ``result: []``) still
+                    # closes the envelope call: emit the explicit placeholder
+                    # instead of dropping the bundle and orphaning the call.
+                    result_content = EMPTY_TOOL_RESULT_PLACEHOLDER_TEXT
                 if result_content:
                     coalesced.append(
                         _embedded_tool_result_message(
