@@ -251,6 +251,17 @@ def write_stage_one_plan_artifacts(
     if blockers:
         return _blocked(*blockers)
 
+    # Enforce the canonical competition-result caps at write time so future
+    # artifacts can never carry an oversized view (e.g. a stage-one projection
+    # that mirrors the full problem-understanding scope into ``rationale``).
+    # The full scope text keeps its own authorities: the problem_understanding
+    # artifact and the plan's ``objective`` below.  Truncations are recorded
+    # additively instead of silently dropped.
+    from .result_package_v2 import clamp_competition_result_view
+
+    competition_view, view_truncations = clamp_competition_result_view(
+        competition_view
+    )
     alignment_payload = {
         "schemaVersion": SCHEMA_VERSION,
         "artifactKind": COMPETITION_ALIGNMENT_KIND,
@@ -259,10 +270,12 @@ def write_stage_one_plan_artifacts(
             "hypothesisId": selected,
             "statement": _text(selected_row.get("statement")),
         },
-        "competitionResultView": deepcopy(competition_view),
+        "competitionResultView": competition_view,
         "sourceQuestionRunId": _text(record.get("runId")),
         "sourceArtifactSha256": _text(artifact.get("sha256")).lower(),
     }
+    if view_truncations:
+        alignment_payload["competitionResultViewTruncations"] = view_truncations
     plan_payload = deepcopy(research_plan)
     plan_stored = put_workflow_artifact(
         team,

@@ -1813,6 +1813,100 @@ def test_stage_one_plan_writer_projects_only_canonical_question_sections(
     assert alignment["competitionResultView"] == detail["output"][
         "competition_result_view"
     ]
+    assert "competitionResultViewTruncations" not in alignment
+
+
+def test_stage_one_plan_writer_clamps_oversized_competition_view_at_write_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services.team_workflow import challenge_question_runs
+    from core.web.services.team_workflow.research_runtime import (
+        stage_one_plan_artifact_writer as writer,
+    )
+    from jsonschema import Draft202012Validator, FormatChecker
+
+    rows: list[dict[str, Any]] = []
+
+    def fake_put(team_id: str, **kwargs):
+        record = {
+            "recordId": kwargs["artifact_identity"],
+            "teamId": team_id,
+            "kind": kwargs["kind"],
+            "workflowRunId": kwargs["workflow_run_id"],
+            "sourceCollectionRunId": kwargs["source_collection_run_id"],
+            "contentHash": writer.canonical_sha256(kwargs["payload"]),
+            "payload": kwargs["payload"],
+        }
+        rows.append(record)
+        return record
+
+    monkeypatch.setattr(writer, "put_workflow_artifact", fake_put)
+    monkeypatch.setattr(
+        writer,
+        "list_workflow_artifacts",
+        lambda *args, **kwargs: [],
+    )
+    detail = _canonical_stage_one_question_detail()
+    sentence = (
+        "Bounded to the design-and-manufacture dimension of SCI-014: the "
+        "projection stays a proposal-only hypothesis set, not an approved "
+        "product or protocol."
+    )
+    oversized_rationale = " ".join(sentence for _ in range(12))
+    view = detail["output"]["competition_result_view"]
+    view["rationale"] = oversized_rationale
+    view["technical_details"] = "字" * 640  # unsegmentable oversized token
+
+    result = writer.write_stage_one_plan_artifacts(
+        team_id="team-review-authorities",
+        workflow_run_id="workflow-authorities",
+        node_run_id="node-authorities",
+        question_id="SCI-091",
+        selected_candidate_id="hyp-a",
+        question_detail=detail,
+        source_collection_run_id="source-authorities",
+    )
+
+    assert result["status"] == "written"
+    alignment = rows[1]["payload"]
+    stored_view = alignment["competitionResultView"]
+    schema = challenge_question_runs._read_json(
+        challenge_question_runs._schema_path(2)
+    )
+    view_validator = Draft202012Validator(
+        schema["properties"]["competition_result_view"],
+        format_checker=FormatChecker(),
+    )
+    # The artifact keeps the writer's used/planned dataset aliases; the
+    # canonical schema shape only exists after the package builder's alias
+    # mapping, so validate that projected form.
+    from core.web.services.team_workflow.research_runtime import result_package_v2
+
+    projected_view, projected_truncations = (
+        result_package_v2._competition_view_from_payload(
+            {"competitionResultView": stored_view}
+        )
+    )
+    assert list(view_validator.iter_errors(projected_view)) == []
+    assert projected_truncations == []
+    assert 0 < len(stored_view["rationale"]) <= 500
+    assert stored_view["rationale"].endswith(".")
+    assert stored_view["rationale"] in oversized_rationale
+    assert 0 < len(stored_view["technical_details"]) <= 500
+    # The alias-shaped datasets block survives write-time clamping untouched
+    # when its items are compliant.
+    assert alignment["competitionResultViewTruncations"] == [
+        {
+            "field": "rationale",
+            "originalLength": len(oversized_rationale),
+            "truncatedLength": len(stored_view["rationale"]),
+        },
+        {
+            "field": "technical_details",
+            "originalLength": 640,
+            "truncatedLength": len(stored_view["technical_details"]),
+        },
+    ]
 
 
 def test_stage_one_plan_writer_blocks_before_store_when_canonical_sections_are_missing(

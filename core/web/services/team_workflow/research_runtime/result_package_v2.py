@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
+from functools import lru_cache
 from typing import Any
 
 from core.research.competition import (
@@ -1865,6 +1866,127 @@ _COMPETITION_VIEW_TEXT_FIELDS = (
     "paper_abstract",
 )
 _COMPETITION_VIEW_LIST_FIELDS = ("methods", "experiments", "results", "references")
+# The canonical schema closes competition_result_view (additionalProperties:
+# false), so per-field caps are read from that schema instead of restated here.
+_COMPETITION_VIEW_SENTENCE_TERMINATORS = "。！？；.!?;"
+_DEFAULT_COMPETITION_VIEW_MAX_LENGTH = 500
+
+
+@lru_cache(maxsize=1)
+def _competition_view_max_lengths() -> dict[str, int]:
+    """Read the competition result view's per-field caps from the real schema.
+
+    The frozen Challenge Cup submission contract owns these maxLengths; the
+    projection derives them from ``schemas/challenge_question_output.v2.schema.json``
+    so a contract change cannot drift past the builder.  Text fields cap the
+    whole string; list (and dataset) fields cap each item.  When the schema
+    file is unreadable the contract's uniform 500 applies — the real-schema
+    validation at packaging time still fails closed regardless.
+    """
+
+    fields = _COMPETITION_VIEW_TEXT_FIELDS + _COMPETITION_VIEW_LIST_FIELDS
+    caps: dict[str, int] = {
+        field: _DEFAULT_COMPETITION_VIEW_MAX_LENGTH for field in fields
+    }
+    caps["datasets"] = _DEFAULT_COMPETITION_VIEW_MAX_LENGTH
+    from core.web.services.team_workflow import challenge_question_runs
+
+    schema = challenge_question_runs._read_json(challenge_question_runs._schema_path(2))
+    properties = (
+        (schema.get("properties") or {}).get("competition_result_view") or {}
+    ).get("properties") or {}
+    for field in _COMPETITION_VIEW_TEXT_FIELDS:
+        cap = int((properties.get(field) or {}).get("maxLength") or 0)
+        caps[field] = cap if cap > 0 else _DEFAULT_COMPETITION_VIEW_MAX_LENGTH
+    for field in _COMPETITION_VIEW_LIST_FIELDS:
+        cap = int(((properties.get(field) or {}).get("items") or {}).get("maxLength") or 0)
+        caps[field] = cap if cap > 0 else _DEFAULT_COMPETITION_VIEW_MAX_LENGTH
+    dataset_properties = ((properties.get("datasets") or {}).get("properties") or {})
+    dataset_caps = [
+        int(((dataset_properties.get(key) or {}).get("items") or {}).get("maxLength") or 0)
+        for key in ("source", "target")
+    ]
+    dataset_caps = [cap for cap in dataset_caps if cap > 0]
+    if dataset_caps:
+        caps["datasets"] = min(dataset_caps)
+    return caps
+
+
+def _clamp_view_text(value: str, max_length: int) -> tuple[str, bool]:
+    """Clamp one view string under the schema cap without decoration.
+
+    Truncation prefers the last sentence boundary that keeps at least half the
+    allowed budget, falls back to the last word boundary, and finally to a hard
+    slice for unsegmentable text.  No ellipsis or marker is appended (that
+    would break the same contract's constraints); the untouched authority keeps
+    the full text.
+    """
+
+    text = value.strip()
+    if len(text) <= max_length:
+        return text, False
+    window = text[:max_length]
+    sentence_cut = 0
+    for index, char in enumerate(window):
+        if char in _COMPETITION_VIEW_SENTENCE_TERMINATORS and index + 1 >= max_length // 2:
+            sentence_cut = index + 1
+    if sentence_cut:
+        return window[:sentence_cut].strip(), True
+    word_cut = window.rfind(" ")
+    if word_cut > 0:
+        return window[:word_cut].strip(), True
+    return window.strip(), True
+
+
+def clamp_competition_result_view(
+    view: Mapping[str, Any],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Clamp an already-shaped competition result view to the schema caps.
+
+    Returns the clamped deep copy plus additive truncation records — the
+    canonical view object itself is schema-closed, so those records are
+    surfaced at the generic package level by the caller instead.
+    """
+
+    caps = _competition_view_max_lengths()
+    clamped = deepcopy(dict(view))
+    truncations: list[dict[str, Any]] = []
+
+    def _clamp_string(field: str, value: Any, cap: int) -> Any:
+        if not isinstance(value, str):
+            return value
+        result, truncated = _clamp_view_text(value, cap)
+        if truncated:
+            truncations.append(
+                {
+                    "field": field,
+                    "originalLength": len(value.strip()),
+                    "truncatedLength": len(result),
+                }
+            )
+        return result
+
+    def _clamp_string_list(field: str, values: Any, cap: int) -> Any:
+        if not isinstance(values, list):
+            return values
+        return [
+            _clamp_string(f"{field}[{index}]", item, cap)
+            for index, item in enumerate(values)
+        ]
+
+    for field in _COMPETITION_VIEW_TEXT_FIELDS:
+        clamped[field] = _clamp_string(field, clamped.get(field), caps[field])
+    datasets = clamped.get("datasets")
+    if isinstance(datasets, Mapping):
+        # The writer stores ``used``/``planned`` aliases; clamp every list
+        # under datasets so aliasing survives alongside canonical keys.
+        for key in list(datasets):
+            datasets[key] = _clamp_string_list(
+                f"datasets.{key}", datasets[key], caps["datasets"]
+            )
+    for field in _COMPETITION_VIEW_LIST_FIELDS:
+        clamped[field] = _clamp_string_list(field, clamped.get(field), caps[field])
+    return clamped, truncations
 
 
 def _competition_result_view(
@@ -1872,14 +1994,17 @@ def _competition_result_view(
     team_id: str,
     workflow_run_id: str,
     authority_run_id: str,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Project the competition alignment authority's result view.
 
     The stage-one ``competition_alignment`` artifact is the only real
     competition-result authority; its view keys already match the v2 schema
     except ``datasets`` (the stage-one writer stores ``used``/``planned``),
     which project onto the schema's ``source``/``target`` lists.  Missing
-    required view fields fail closed naming the field.
+    required view fields fail closed naming the field.  Fields that exceed the
+    frozen contract's per-field maxLengths are clamped at a sentence boundary
+    and reported additively so one oversized stage-one scope statement can no
+    longer invalidate the whole canonical output.
     """
 
     payload = _artifact_payload(
@@ -1888,6 +2013,12 @@ def _competition_result_view(
         workflow_run_id=workflow_run_id,
         authority_run_id=authority_run_id,
     )
+    return _competition_view_from_payload(payload)
+
+
+def _competition_view_from_payload(
+    payload: Mapping[str, Any],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     view = _first_mapping(payload, "competitionResultView", "competition_result_view")
     if view is None:
         raise ResultPackageV2Error(
@@ -1922,7 +2053,7 @@ def _competition_result_view(
             if _text(value)
         ]
         result[field] = values
-    return result
+    return clamp_competition_result_view(result)
 
 
 def build_challenge_result_package_v2(
@@ -2046,7 +2177,7 @@ def build_challenge_result_package_v2(
         dimension_payload=dimension_payload,
         evidence=evidence,
     )
-    competition_view = _competition_result_view(
+    competition_view, view_truncations = _competition_result_view(
         team_id=team_id,
         workflow_run_id=workflow_run_id,
         authority_run_id=authority,
@@ -2151,6 +2282,10 @@ def build_challenge_result_package_v2(
             "citationChecks": _citation_checks(evidence),
         }
     )
+    if view_truncations:
+        # competition_result_view is schema-closed (additionalProperties:
+        # false), so the truncation record stays at the generic package level.
+        package_core["competitionResultViewTruncations"] = view_truncations
     _copy_package_authorities(
         package_core,
         generic_package=generic_package,
@@ -2268,6 +2403,7 @@ __all__ = [
     "ResultPackageV2Error",
     "build_challenge_result_package_v2",
     "build_proposal_result_package_base",
+    "clamp_competition_result_view",
     "is_official_challenge_run",
     "is_proposal_only_challenge_run",
 ]

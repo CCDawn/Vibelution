@@ -1178,7 +1178,7 @@ def test_competition_result_view_projects_stage_one_alignment(monkeypatch) -> No
         lambda kind, **_kwargs: deepcopy(artifacts[kind]),
     )
 
-    view = result_package_v2._competition_result_view(
+    view, truncations = result_package_v2._competition_result_view(
         team_id="research-team",
         workflow_run_id="run-sci-091",
         authority_run_id="source-sci-091",
@@ -1187,6 +1187,10 @@ def test_competition_result_view_projects_stage_one_alignment(monkeypatch) -> No
     assert view["datasets"] == {"source": ["arxiv:1412.2166"], "target": []}
     assert view["results"] == ["not executed at stage one"]
     assert view["paper_title"] == "Stage-one research proposal"
+    # Compliant stage-one content passes through unchanged: no truncation,
+    # no additive marker anywhere.
+    assert view["rationale"] == "Scoped to measurable calibers."
+    assert truncations == []
 
 
 def test_competition_result_view_fails_closed_without_alignment(monkeypatch) -> None:
@@ -1205,6 +1209,248 @@ def test_competition_result_view_fails_closed_without_alignment(monkeypatch) -> 
             workflow_run_id="run-sci-091",
             authority_run_id="source-sci-091",
         )
+
+
+def _oversized_scope_statement(sentence_count: int = 12) -> str:
+    sentence = (
+        "Bounded to the design-and-manufacture dimension of SCI-014: the "
+        "projection stays a proposal-only hypothesis set, not an approved "
+        "product or protocol."
+    )
+    return " ".join(sentence for _ in range(sentence_count))
+
+
+def _competition_view_validator():
+    from jsonschema import Draft202012Validator, FormatChecker
+
+    schema = challenge_question_runs._read_json(challenge_question_runs._schema_path(2))
+    return Draft202012Validator(
+        schema["properties"]["competition_result_view"],
+        format_checker=FormatChecker(),
+    )
+
+
+def test_competition_view_caps_track_real_schema_max_lengths() -> None:
+    schema = challenge_question_runs._read_json(challenge_question_runs._schema_path(2))
+    properties = schema["properties"]["competition_result_view"]["properties"]
+    caps = result_package_v2._competition_view_max_lengths()
+    for field in (
+        "problem_statement",
+        "rationale",
+        "technical_details",
+        "paper_title",
+        "paper_abstract",
+    ):
+        assert caps[field] == properties[field]["maxLength"]
+    for field in ("methods", "experiments", "results", "references"):
+        assert caps[field] == properties[field]["items"]["maxLength"]
+    assert caps["datasets"] == min(
+        properties["datasets"]["properties"][key]["items"]["maxLength"]
+        for key in ("source", "target")
+    )
+
+
+def test_competition_result_view_clamps_oversized_rationale_and_passes_schema(
+    monkeypatch,
+) -> None:
+    scope_statement = _oversized_scope_statement()
+    artifacts = {
+        "competition_alignment": {
+            "competitionResultView": {
+                "problem_statement": "Is there an upper limit to computer processing speed?",
+                "rationale": scope_statement,
+                "technical_details": "ops/s <= P_cool / (N_e * E_e + overhead).",
+                "datasets": {"planned": [], "used": ["arxiv:1412.2166"]},
+                "methods": ["Q1 caliber split"],
+                "experiments": [],
+                "results": ["not executed at stage one"],
+                "references": [],
+                "paper_title": "Stage-one research proposal",
+                "paper_abstract": "The joint erase-cooling bound.",
+            }
+        }
+    }
+    monkeypatch.setattr(
+        result_package_v2,
+        "_artifact_payload",
+        lambda kind, **_kwargs: deepcopy(artifacts[kind]),
+    )
+
+    view, truncations = result_package_v2._competition_result_view(
+        team_id="research-team",
+        workflow_run_id="run-sci-091",
+        authority_run_id="source-sci-091",
+    )
+
+    rationale = view["rationale"]
+    assert 0 < len(rationale) <= 500
+    assert rationale.endswith(".")
+    assert "..." not in rationale and "…" not in rationale
+    assert rationale in scope_statement
+    assert truncations == [
+        {
+            "field": "rationale",
+            "originalLength": len(scope_statement),
+            "truncatedLength": len(rationale),
+        }
+    ]
+    assert list(_competition_view_validator().iter_errors(view)) == []
+
+
+def test_competition_result_view_respects_every_field_max_length(monkeypatch) -> None:
+    long_token = "未分段超长字段" * 120  # no spaces, no sentence terminators
+    long_prose = _oversized_scope_statement(6)
+    artifacts = {
+        "competition_alignment": {
+            "competitionResultView": {
+                "problem_statement": long_token,
+                "rationale": long_prose,
+                "technical_details": long_token,
+                "datasets": {
+                    "used": [long_prose, "arxiv:1412.2166"],
+                    "planned": [long_token],
+                },
+                "methods": [long_prose, long_token],
+                "experiments": [long_prose],
+                "results": [long_token],
+                "references": [],
+                "paper_title": long_token,
+                "paper_abstract": long_prose,
+            }
+        }
+    }
+    monkeypatch.setattr(
+        result_package_v2,
+        "_artifact_payload",
+        lambda kind, **_kwargs: deepcopy(artifacts[kind]),
+    )
+
+    view, truncations = result_package_v2._competition_result_view(
+        team_id="research-team",
+        workflow_run_id="run-sci-091",
+        authority_run_id="source-sci-091",
+    )
+
+    caps = result_package_v2._competition_view_max_lengths()
+    for field in (
+        "problem_statement",
+        "rationale",
+        "technical_details",
+        "paper_title",
+        "paper_abstract",
+    ):
+        assert 0 < len(view[field]) <= caps[field], field
+    for field in ("methods", "experiments", "results", "references"):
+        for item in view[field]:
+            assert 0 < len(item) <= caps[field], field
+    for key in ("source", "target"):
+        for item in view["datasets"][key]:
+            assert 0 < len(item) <= caps["datasets"], f"datasets.{key}"
+    truncated_fields = {record["field"] for record in truncations}
+    assert "problem_statement" in truncated_fields
+    assert "methods[1]" in truncated_fields
+    # The builder maps the writer's used/planned aliases onto the canonical
+    # source/target lists before clamping, so records carry canonical names.
+    assert "datasets.source[0]" in truncated_fields
+    assert "datasets.target[0]" in truncated_fields
+    assert list(_competition_view_validator().iter_errors(view)) == []
+
+
+def test_full_package_clamps_oversized_stage_one_rationale(monkeypatch) -> None:
+    expected, artifacts = _authority_sections()
+    scope_statement = _oversized_scope_statement()
+    artifacts["competition_alignment"]["competitionResultView"]["rationale"] = (
+        scope_statement
+    )
+    monkeypatch.setattr(
+        result_package_v2,
+        "_artifact_payload",
+        lambda kind, **_kwargs: deepcopy(artifacts[kind]),
+    )
+    monkeypatch.setattr(
+        result_package_v2,
+        "_feedback_iterations",
+        lambda **_kwargs: deepcopy(expected["feedback_iterations"]),
+    )
+    monkeypatch.setattr(
+        result_package_v2,
+        "_model_run",
+        lambda *_args, **_kwargs: {
+            **deepcopy(expected["run"]),
+            "run_id": "run-sci-096",
+        },
+    )
+
+    package = result_package_v2.build_challenge_result_package_v2(
+        generic_package={
+            "runId": "run-sci-096",
+            "teamId": "research-team",
+            "factChainHash": "f" * 64,
+            "packageId": "old",
+            "packageRef": "old",
+            "contentHash": "0" * 64,
+        },
+        record=_record(),
+        team_id="research-team",
+        workflow_run_id="run-sci-096",
+        source_collection_run_id="source-sci-096",
+    )
+
+    output = package["challengeQuestionOutput"]
+    # The exact regression from SCI-014 run-1b64401aa16a attempt a1: an
+    # oversized stage-one scope statement in competitionResultView.rationale
+    # used to fail the whole canonical package at the real schema.
+    assert challenge_question_runs._schema_issues(output) == []
+    assert 0 < len(output["competition_result_view"]["rationale"]) <= 500
+    assert package["competitionResultViewTruncations"] == [
+        {
+            "field": "rationale",
+            "originalLength": len(scope_statement),
+            "truncatedLength": len(output["competition_result_view"]["rationale"]),
+        }
+    ]
+
+
+def test_full_package_compliant_view_has_no_truncation_marker(monkeypatch) -> None:
+    expected, artifacts = _authority_sections()
+    monkeypatch.setattr(
+        result_package_v2,
+        "_artifact_payload",
+        lambda kind, **_kwargs: deepcopy(artifacts[kind]),
+    )
+    monkeypatch.setattr(
+        result_package_v2,
+        "_feedback_iterations",
+        lambda **_kwargs: deepcopy(expected["feedback_iterations"]),
+    )
+    monkeypatch.setattr(
+        result_package_v2,
+        "_model_run",
+        lambda *_args, **_kwargs: {
+            **deepcopy(expected["run"]),
+            "run_id": "run-sci-096",
+        },
+    )
+
+    package = result_package_v2.build_challenge_result_package_v2(
+        generic_package={
+            "runId": "run-sci-096",
+            "teamId": "research-team",
+            "factChainHash": "f" * 64,
+            "packageId": "old",
+            "packageRef": "old",
+            "contentHash": "0" * 64,
+        },
+        record=_record(),
+        team_id="research-team",
+        workflow_run_id="run-sci-096",
+        source_collection_run_id="source-sci-096",
+    )
+
+    assert "competitionResultViewTruncations" not in package
+    assert challenge_question_runs._schema_issues(
+        package["challengeQuestionOutput"]
+    ) == []
 
 
 # ------------------------------------------------------ stage-one model route
