@@ -364,3 +364,66 @@ def test_handoff_without_collected_candidates_keeps_gate_fail_closed(
             assert verdict["reason"] == "claim_data_missing"
         finally:
             runtime.close()
+
+
+def test_resume_parent_runs_already_active_uses_node_run_id() -> None:
+    """The already_active/already_succeeded branches must not touch a
+    non-existent ``attempt_id`` attribute (regression: handoff-triggered
+    resume crashed with AttributeError while a design attempt was live)."""
+
+    import json
+    from types import SimpleNamespace
+
+    from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain as chain_module,
+    )
+
+    def _attempt(status: str) -> SimpleNamespace:
+        # Mirror NodeAttemptRecord: it exposes node_run_id/attempt, never
+        # attempt_id — SimpleNamespace keeps that contract honest.
+        return SimpleNamespace(
+            node_run_id="nr-run-x-hypothesis_design-a1",
+            run_id="run-x",
+            node_id="hypothesis_design",
+            attempt=1,
+            status=status,
+        )
+
+    run = SimpleNamespace(
+        run_id="run-x",
+        team_id="research-team",
+        status="blocked",
+        question_id="SCI-001",
+        input_snapshot_json=json.dumps(
+            {
+                "questionId": "SCI-001",
+                "researchObjectiveContract": {"hypothesisFirst": True},
+            }
+        ),
+    )
+    store = SimpleNamespace(
+        list_runs_for_team=lambda team_id, workflow_id: [run],
+        get_command_by_idempotency=lambda run_id, key: None,
+        latest_attempt=lambda run_id, node_id: _attempt("running"),
+        get_run=lambda run_id: run,
+    )
+    runtime = SimpleNamespace(store=store, command_service=SimpleNamespace())
+
+    result = chain_module.resume_parent_runs(
+        "research-team", question_id="SCI-001", runtime=runtime, trigger="handoff:req-1"
+    )
+    assert result["runs"] == [
+        {
+            "runId": "run-x",
+            "action": "already_active",
+            "attemptId": "nr-run-x-hypothesis_design-a1",
+        }
+    ]
+
+    store.latest_attempt = lambda run_id, node_id: _attempt("succeeded")
+    result = chain_module.resume_parent_runs(
+        "research-team", question_id="SCI-001", runtime=runtime, trigger="handoff:req-2"
+    )
+    assert result["runs"][0]["action"] == "already_succeeded"
+    assert result["runs"][0]["attemptId"] == "nr-run-x-hypothesis_design-a1"

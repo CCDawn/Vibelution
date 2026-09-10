@@ -16800,11 +16800,11 @@ def _resume_one_run(runtime: Any, run: Any, trigger: str) -> dict[str, Any]:
     latest = runtime.store.latest_attempt(run.run_id, HYPOTHESIS_DESIGN_NODE_ID)
     if latest is not None and str(latest.status) in _ACTIVE_ATTEMPT_STATUSES:
         entry["action"] = "already_active"
-        entry["attemptId"] = latest.attempt_id
+        entry["attemptId"] = latest.node_run_id
         return entry
     if latest is not None and str(latest.status) == "succeeded":
         entry["action"] = "already_succeeded"
-        entry["attemptId"] = latest.attempt_id
+        entry["attemptId"] = latest.node_run_id
         return entry
 
     command_kind = (
