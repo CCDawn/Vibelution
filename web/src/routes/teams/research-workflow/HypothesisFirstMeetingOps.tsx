@@ -337,7 +337,19 @@ export function HypothesisFirstMeetingOps(props: {
             ? "纪要已在其他页面更新，已重新加载最新纪要，请再次确认。"
             : "The digest changed on another page. The latest version was reloaded; confirm it again.",
         );
+        return;
       }
+      // A state conflict already refreshed the snapshot above and renders its
+      // state-changed text through the shared operation-error summary; every
+      // other failure (a 422 ContractValidationError whose backend detail the
+      // API client already unwraps, a network fault, an unexpected 5xx) must
+      // not fall through silently after a confirmation click — surface it on
+      // the same blocked-reason path the closed=false validation branch uses.
+      if (isHypothesisFirstCommandStateConflict(error)) return;
+      setApproveBlockedReason(
+        (isZh ? "纪要确认未通过：" : "The digest confirmation failed: ")
+          + (error instanceof Error && error.message ? error.message : String(error)),
+      );
     },
   });
   const rejectMutation = useMutation<unknown, Error, void>({

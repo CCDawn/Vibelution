@@ -601,6 +601,33 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
     );
   });
 
+  it("surfaces a rejected confirmation command instead of failing silently", async () => {
+    const onApproved = vi.fn();
+    mockedFetchMeetingRound.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRound: { ...meetingRound("awaiting_approval"), meetingType: "hypothesis_review" },
+    });
+    mockedExecuteCommand.mockRejectedValueOnce(
+      new Error("a disagreement from the source messages is missing in the meeting digest"),
+    );
+    renderApproved(AWAITING_REVIEW_ACTION, onApproved);
+
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("确认并结束本轮"));
+      const approve = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent?.includes("确认并结束本轮"));
+      approve?.click();
+      await vi.waitFor(() => expect(mockedExecuteCommand).toHaveBeenCalledTimes(1));
+    });
+
+    const blocked = container.querySelector('[data-testid="approve-blocked-reason"]');
+    expect(blocked?.textContent).toContain("纪要确认未通过：");
+    expect(blocked?.textContent)
+      .toContain("a disagreement from the source messages is missing in the meeting digest");
+    expect(onApproved).not.toHaveBeenCalled();
+  });
+
   it("renders and dispatches a canonical-only command that has no legacy equivalent", async () => {
     mockedFetchMeetingRound.mockResolvedValue({
       schemaVersion: 1,
