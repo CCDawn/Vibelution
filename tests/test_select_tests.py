@@ -16,7 +16,6 @@ RETIRED_CHALLENGE_CUP_PATHS = frozenset(
     {
         "core/research/competition/stage_one_completion_policy.py",
         "core/research/workflow/stage_one_completion.py",
-        "core/research/workflow/stage_one_definition.py",
         "tests/test_knowledge_rollout_closeout.py",
         "tests/test_research_workflow_ledger_stage_one_closeout.py",
         "tests/test_research_workflow_stage_one_closeout.py",

@@ -181,6 +181,8 @@ powershell -ExecutionPolicy Bypass -File scripts/install_windows.ps1
 
 首页展示 2026 年 9 月的开发进展，发布记录见 [CHANGELOG](CHANGELOG.md)。欢迎通过 [Issue](https://github.com/CCDawn/Vibelution/issues)反馈研究场景、多 Agent 协作问题和功能建议，或从[贡献指南](CONTRIBUTING.md)参与开发。
 
+本地全量回归：`pytest tests -q --maxfail=0`（测试选择与门禁细则见 [tests/README.md](tests/README.md)）。
+
 [文档地图](docs/README.md) · [开发规范](docs/standards/README.md) · [安全问题](SECURITY.md) · [第三方组件](THIRD_PARTY_COMPONENTS.md) · [MIT 代码许可证](LICENSE)
 
 角色名称与第三方素材的权利归各自权利人所有；代码的 MIT 许可不授予第三方角色或素材的权利。
