@@ -1787,6 +1787,23 @@ def _execute_source_collection_search_body(team_id: str, run_id: str, payload: d
         [item for item in list(final_records_payload.get("records") or []) if isinstance(item, dict)],
         [item for item in list(final_outputs_payload.get("outputs") or []) if isinstance(item, dict)],
     )
+    closure_outputs = _close_exhausted_source_collection_assignments(
+        normalized_run_id,
+        [item for item in list(final_assignments or []) if isinstance(item, dict)],
+        [item for item in list(final_outputs_payload.get("outputs") or []) if isinstance(item, dict)],
+        final_existing_query_ids,
+    )
+    if closure_outputs:
+        # Refresh the tail snapshots so this same batch resolves terminal:
+        # searchOpenAssignmentCount drops to zero and the residual terminal
+        # mapping lands on "completed" instead of a driver-less needs_continue.
+        outputs.extend(closure_outputs)
+        final_assignments = [
+            item
+            for item in list(s.data_processing_service.list_collection_assignments(normalized_run_id)["assignments"])
+            if isinstance(item, dict)
+        ]
+        final_status = s.data_processing_service.get_processing_status(normalized_run_id)
     next_runnable_query_ids = s._source_collection_next_runnable_query_ids(
         [item for item in list(final_assignments or []) if isinstance(item, dict)],
         final_existing_query_ids,
@@ -1906,6 +1923,89 @@ def _execute_source_collection_search_body(team_id: str, run_id: str, payload: d
     }
 
 
+def _close_exhausted_source_collection_assignments(
+    run_id: str,
+    assignments: list[dict[str, Any]],
+    outputs: list[dict[str, Any]],
+    existing_query_ids: set[str],
+) -> list[dict[str, Any]]:
+    """Close zombie search assignments whose queries are all attempted.
+
+    The no-record query tail records a ``returned`` output with
+    ``blockingIssues=["no_importable_search_result"]`` even when the query was
+    the assignment's LAST runnable one.  The assignment then stays in the open
+    set (``returned``), ``searchOpenAssignmentCount`` pins the run in
+    ``needs_continue`` forever, and every re-dispatched worker skips the
+    already-attempted queries and writes another no-op batch.  For each still
+    open search assignment with zero remaining runnable queries whose latest
+    output is exactly that stuck shape, write ONE closing output
+    (``status="completed"``, ``notes="queries exhausted"``) so
+    ``record_collection_output`` flips the assignment to ``completed`` and it
+    leaves the open set.  Idempotent: after the closing output the latest
+    output status is ``completed``, so the rule never fires twice.
+    """
+    s = _service()
+    latest_output_by_assignment: dict[str, dict[str, Any]] = {}
+    for output in outputs:
+        if not isinstance(output, dict):
+            continue
+        output_assignment_id = s._trim_text(output.get("assignmentId"), max_length=128)
+        if output_assignment_id:
+            latest_output_by_assignment[output_assignment_id] = output
+    closed_outputs: list[dict[str, Any]] = []
+    for assignment in assignments:
+        if not isinstance(assignment, dict):
+            continue
+        assignment_id = s._trim_text(assignment.get("assignmentId"), max_length=128)
+        agent_role = s._normalize_source_collection_agent_role(assignment.get("agentRole"))
+        if not assignment_id or agent_role not in s.SOURCE_COLLECTION_SEARCH_EXECUTION_AGENT_ROLES:
+            continue
+        if str(assignment.get("status") or "").strip().lower() not in {"open", "in_progress", "returned"}:
+            continue
+        assigned_query_ids = {
+            s._trim_text(item.get("queryId"), max_length=160)
+            for item in s._source_collection_assigned_queries(assignment)
+            if s._trim_text(item.get("queryId"), max_length=160)
+        }
+        if not assigned_query_ids or assigned_query_ids - existing_query_ids:
+            # No queries seeded, or still runnable queries left: not exhausted.
+            continue
+        latest_output = latest_output_by_assignment.get(assignment_id)
+        if not isinstance(latest_output, dict):
+            continue
+        if str(latest_output.get("status") or "").strip().lower() != "returned":
+            # Includes the closing output itself ("completed"): replay-safe.
+            continue
+        blocking_issues = {
+            s._trim_text(str(item), max_length=500).strip().lower()
+            for item in list(latest_output.get("blockingIssues") or [])
+            if s._trim_text(str(item), max_length=500)
+        }
+        if "no_importable_search_result" not in blocking_issues:
+            continue
+        try:
+            output_response = s.data_processing_service.record_collection_output(
+                run_id,
+                assignment_id,
+                {
+                    "status": "completed",
+                    "records": [],
+                    "notes": "queries exhausted",
+                    "blockingIssues": [],
+                    "qualitySignals": {
+                        "closingOutput": True,
+                        "queriesExhausted": True,
+                        "metadataOnlyDownload": True,
+                        "priorBlockingIssues": ["no_importable_search_result"],
+                    },
+                },
+            )
+        except s.data_processing_service.DataProcessingError as exc:
+            raise s.TeamWorkflowOrchestrationError(str(exc)) from exc
+        closed_outputs.append(output_response["output"])
+    return closed_outputs
+
+
 def _sync_source_collection_stage_round_after_search(
     team_id: str,
     run_id: str,
@@ -2009,10 +2109,17 @@ def _sync_source_collection_stage_round_after_search(
             hypothesis_first_chain,
         )
 
+        raw_attempted_query_count = result.get("attemptedQueryCount")
         hypothesis_first_chain.notify_collection_run_terminal(
             normalized_team_id,
             normalized_run_id,
             terminal_status,
+            attempted_query_count=(
+                int(raw_attempted_query_count)
+                if isinstance(raw_attempted_query_count, (int, float))
+                and not isinstance(raw_attempted_query_count, bool)
+                else None
+            ),
         )
     except Exception:
         pass

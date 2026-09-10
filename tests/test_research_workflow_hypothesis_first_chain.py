@@ -3439,7 +3439,8 @@ def test_needs_continue_never_triggers_auto_retry(
 
     result = chain.notify_collection_run_terminal(team_id, run_id, "needs_continue")
 
-    # red line: needs_continue stays fatal and is never auto-reconciled
+    # red line refined: needs_continue with an UNKNOWN batch outcome (no
+    # attempted-query count threaded) stays manual and is never auto-reconciled
     assert result["status"] == "collection_recovery"
     request = _latest_auto_retry_request(team_id, request_id)
     assert request["collectionRunStatus"] == "needs_continue"
@@ -3452,6 +3453,122 @@ def test_needs_continue_never_triggers_auto_retry(
     assert request["status"] == "failed"
     assert request["collectionRunStatus"] == "cancelled"
     assert scheduled == []
+
+
+def test_needs_continue_zero_work_batch_claims_bounded_auto_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, agents = _auto_retry_env(tmp_path, monkeypatch)
+    request_id, run_id = "hfcr-auto-zombie", "dprun-auto-zombie"
+    _seed_auto_retry_request(team_id, agents, request_id=request_id, run_id=run_id)
+    scheduled = _capture_auto_retry_timer(monkeypatch)
+    ensures, starts = _patch_collection_restart(monkeypatch)
+
+    result = chain.notify_collection_run_terminal(
+        team_id, run_id, "needs_continue", attempted_query_count=0
+    )
+
+    # a zero-work needs_continue batch is a non-terminal zombie: it claims the
+    # same bounded auto-retry budget the failed path uses
+    assert result["status"] == "collection_recovery"
+    claims = result["autoRetryClaims"]
+    assert [claim["phase"] for claim in claims] == ["backoff"]
+    request = _latest_auto_retry_request(team_id, request_id)
+    assert request["collectionRunStatus"] == "needs_continue"
+    auto_retry = request["autoRetry"]
+    assert auto_retry["phase"] == "backoff"
+    assert auto_retry["attemptCount"] == 1
+    assert auto_retry["nextRetryAt"]
+    assert [entry["delaySeconds"] for entry in scheduled] == [30.0]
+    assert "autoRetryEscalations" not in result
+
+    # idempotent replay of the same terminal event while the retry is
+    # scheduled claims nothing and schedules nothing extra (CAS)
+    replay = chain.notify_collection_run_terminal(
+        team_id, run_id, "needs_continue", attempted_query_count=0
+    )
+    assert "autoRetryClaims" not in replay
+    assert [entry["delaySeconds"] for entry in scheduled] == [30.0]
+    request = _latest_auto_retry_request(team_id, request_id)
+    assert request["autoRetry"]["attemptCount"] == 1
+    assert request["autoRetry"]["phase"] == "backoff"
+
+    # the timer callback runs the same in-process recover implementation the
+    # manual button uses (reset_auto_retry=False keeps the budget)
+    scheduled[0]["callback"]()
+    assert len(ensures) == 1
+    assert starts and starts[0]["runId"] == "child-auto-retry"
+    request = _latest_auto_retry_request(team_id, request_id)
+    assert request["status"] == "pending"
+    assert request["collectionRunStatus"] == "running"
+    assert request["autoRetry"]["phase"] == "dispatched"
+    assert request["autoRetry"]["attemptCount"] == 1
+
+
+def test_needs_continue_with_attempted_work_keeps_manual_cadence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, agents = _auto_retry_env(tmp_path, monkeypatch)
+    request_id, run_id = "hfcr-auto-progress", "dprun-auto-progress"
+    _seed_auto_retry_request(team_id, agents, request_id=request_id, run_id=run_id)
+    scheduled = _capture_auto_retry_timer(monkeypatch)
+
+    result = chain.notify_collection_run_terminal(
+        team_id, run_id, "needs_continue", attempted_query_count=3
+    )
+
+    # genuine multi-batch progress is NOT auto-spammed: manual cadence stays
+    assert result["status"] == "collection_recovery"
+    assert "autoRetryClaims" not in result
+    request = _latest_auto_retry_request(team_id, request_id)
+    assert request["collectionRunStatus"] == "needs_continue"
+    assert "autoRetry" not in request
+    assert scheduled == []
+
+
+def test_needs_continue_zero_work_budget_exhausts_to_escalation_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, agents = _auto_retry_env(tmp_path, monkeypatch)
+    request_id, run_id = "hfcr-auto-zombie-exhaust", "dprun-auto-zombie-exhaust"
+    _seed_auto_retry_request(team_id, agents, request_id=request_id, run_id=run_id)
+    scheduled = _capture_auto_retry_timer(monkeypatch, run_inline=True)
+    _patch_collection_restart(monkeypatch, child_run_id=run_id)
+
+    # zero-work batch 1 -> retry 1; zero-work batch 2 -> retry 2;
+    # zero-work batch 3 -> budget exhausted, escalation emitted exactly once
+    chain.notify_collection_run_terminal(
+        team_id, run_id, "needs_continue", attempted_query_count=0
+    )
+    chain.notify_collection_run_terminal(
+        team_id, run_id, "needs_continue", attempted_query_count=0
+    )
+    result = chain.notify_collection_run_terminal(
+        team_id, run_id, "needs_continue", attempted_query_count=0
+    )
+
+    assert [entry["delaySeconds"] for entry in scheduled] == [30.0, 60.0]
+    assert [claim["phase"] for claim in result["autoRetryClaims"]] == ["exhausted"]
+    assert [entry["escalation"]["attempts"] for entry in result["autoRetryEscalations"]] == [2]
+    request = _latest_auto_retry_request(team_id, request_id)
+    assert request["collectionRunStatus"] == "needs_continue"
+    assert request["autoRetry"]["phase"] == "exhausted"
+    assert request["autoRetry"]["attemptCount"] == 2
+    assert request["autoRetry"]["exhaustedAt"]
+    escalation = request["anomalyEscalation"]
+    assert escalation["status"] == "emitted"
+    assert escalation["taxonomyCode"] == "collection_auto_retry_exhausted"
+
+    # exactly-once: another zero-work terminal event claims nothing and
+    # does not re-emit the escalation
+    replay = chain.notify_collection_run_terminal(
+        team_id, run_id, "needs_continue", attempted_query_count=0
+    )
+    assert "autoRetryClaims" not in replay
+    assert "autoRetryEscalations" not in replay
+    request = _latest_auto_retry_request(team_id, request_id)
+    assert request["anomalyEscalation"]["emittedAt"] == escalation["emittedAt"]
+    assert [entry["delaySeconds"] for entry in scheduled] == [30.0, 60.0]
 
 
 def test_auto_retried_collection_completes_through_normal_handoff(

@@ -15555,11 +15555,18 @@ def notify_collection_run_terminal(
     team_id: str,
     collection_run_id: str,
     terminal_status: str,
+    *,
+    attempted_query_count: int | None = None,
 ) -> dict[str, Any]:
     """Bridge a source-collection terminal status into the hypothesis-first chain.
 
     Must be called outside workflow/ledger writer locks. Only ``completed``
     handoffs; ``failed`` / ``needs_continue`` stay in collection recovery.
+    ``attempted_query_count`` is the finished batch's attempted-query count
+    (``None`` when the caller cannot derive it): a ``needs_continue`` batch
+    that attempted zero queries made no progress by definition, so it claims
+    the bounded auto-retry budget below; unknown counts keep the manual
+    cadence.
     """
     from core.web.services import team_service
 
@@ -15587,9 +15594,8 @@ def notify_collection_run_terminal(
             "request": updated[-1] if updated else {},
         }
         if status == "failed":
-            # Bounded self-healing: only ``failed`` schedules the automatic
-            # recover chain; ``needs_continue`` stays fatal (retry taxonomy
-            # P0: never auto-reconciled) and ``cancelled`` is a verdict.
+            # Bounded self-healing: ``failed`` always schedules the automatic
+            # recover chain; ``cancelled`` is a verdict.
             escalations: list[dict[str, Any]] = []
             for record in requests:
                 request_id = str(record.get("requestId") or "").strip()
@@ -15604,6 +15610,34 @@ def notify_collection_run_terminal(
                     escalations.append(outcome)
             if escalations:
                 result["autoRetryEscalations"] = escalations
+        elif status == "needs_continue" and attempted_query_count is not None and int(attempted_query_count) == 0:
+            # Bounded auto-continue for zero-work batches: the batch skipped
+            # every query as already executed, so needs_continue here is a
+            # non-terminal zombie, not a genuine multi-batch pause.  Claim the
+            # SAME bounded auto-retry budget the failed path uses (CAS makes
+            # replays of this terminal event no-ops, and a spent budget ends
+            # in the escalation instead of a dispatch loop).  Genuine
+            # multi-batch runs (attemptedQueryCount > 0) keep their manual
+            # cadence; an unknown count stays manual as well.
+            claims: list[dict[str, Any]] = []
+            zero_work_escalations: list[dict[str, Any]] = []
+            for record in requests:
+                request_id = str(record.get("requestId") or "").strip()
+                if not request_id:
+                    continue
+                claim_outcome = _claim_collection_auto_retry(
+                    normalized_team_id,
+                    request_id,
+                    run_id=run_id,
+                )
+                if claim_outcome:
+                    claims.append(claim_outcome)
+                    if claim_outcome.get("phase") == "exhausted":
+                        zero_work_escalations.append(claim_outcome)
+            if claims:
+                result["autoRetryClaims"] = claims
+            if zero_work_escalations:
+                result["autoRetryEscalations"] = zero_work_escalations
         return result
     if status != "completed":
         return {"status": "ignored", "reason": "non_completed"}
