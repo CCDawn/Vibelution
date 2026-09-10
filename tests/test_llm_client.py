@@ -7431,3 +7431,131 @@ def test_owned_http_clients_close_once_after_invocation():
     assert closed == [completion, responses]
     assert client._cancellable_completion_http_handler is None
     assert client._cancellable_responses_http_handler is None
+
+
+def test_stream_emits_turn_level_ttft_breakdown_once(monkeypatch):
+    from core.llm.ttft_breakdown import llm_ttft_chain_context
+
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+        }
+    )
+    recorded = []
+
+    def backend(_payload):
+        return iter(
+            [
+                {"choices": [{"delta": {"role": "assistant"}}]},
+                {"choices": [{"delta": {"content": "ok"}}]},
+                {
+                    "choices": [{"delta": {}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3},
+                },
+            ]
+        )
+
+    monkeypatch.setattr(
+        "core.llm.client._record_llm_scene_event",
+        lambda *args, **kwargs: recorded.append((args, kwargs)),
+    )
+    client = LLMClient(config=config, backend=backend)
+    accepted_at_perf = time.perf_counter() - 0.5
+
+    with llm_ttft_chain_context(
+        accepted_at_perf=accepted_at_perf,
+        worker_started_at_perf=accepted_at_perf + 0.2,
+        queue_wait_ms=200,
+    ):
+        first_pass = list(
+            client.stream_events(
+                [{"role": "user", "content": "ping"}],
+                metadata={"sessionId": "session-ttft", "turnId": "turn-ttft"},
+            )
+        )
+        # Tool-loop iterations reuse the same turn chain: no second breakdown.
+        second_pass = list(
+            client.stream_events(
+                [{"role": "user", "content": "ping"}],
+                metadata={"sessionId": "session-ttft", "turnId": "turn-ttft"},
+            )
+        )
+
+    assert [event.type for event in first_pass] == ["text_delta", "done"]
+    assert [event.type for event in second_pass] == ["text_delta", "done"]
+
+    breakdowns = [item for item in recorded if item[0][1] == "llm.stream.ttft_breakdown"]
+    assert len(breakdowns) == 1
+    fields = breakdowns[0][1]["fields"]
+
+    # Segment fields lead (scene telemetry keeps only the first 24 keys).
+    segment_keys = list(fields)
+    for key in (
+        "queueWaitMs",
+        "contextBuildMs",
+        "routeGateWaitMs",
+        "payloadBuildMs",
+        "firstChunkMs",
+        "ttftTotalMs",
+    ):
+        assert key in fields
+        assert isinstance(fields[key], int) and fields[key] >= 0
+    assert segment_keys.index("ttftTotalMs") < 24
+    assert fields["queueWaitMs"] == 200
+    assert fields["contextBuildMs"] >= 0
+    assert fields["ttftTotalMs"] >= 500  # accepted 0.5s before the request
+
+    # Identity fields ride along for session/turn attribution.
+    assert fields["sessionId"] == "session-ttft"
+    assert fields["turnId"] == "turn-ttft"
+    assert fields["attempt"] == 1
+    assert fields["messageCount"] == 1
+    assert fields["profileId"]
+    assert fields["model"]
+
+    # The local backend bypasses httpx: the HTTP-headers segment stays missing
+    # (never faked) while wire-level first-event timings are still observable.
+    assert "streamOpenMs" not in fields
+    assert isinstance(fields["firstRawChunkMs"], int) and fields["firstRawChunkMs"] >= 0
+    assert isinstance(fields["firstProjectedChunkMs"], int) and fields["firstProjectedChunkMs"] >= 0
+
+    # The winning attempt's route gate wait lands in the stream summary too.
+    succeeded_fields = next(item for item in recorded if item[0][1] == "llm.stream.succeeded")[1]["fields"]
+    assert isinstance(succeeded_fields["routeGateWaitMs"], int)
+    assert succeeded_fields["routeGateWaitMs"] >= 0
+
+
+def test_stream_without_ttft_chain_context_records_no_breakdown(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+        }
+    )
+    recorded = []
+
+    def backend(_payload):
+        return iter(
+            [
+                {"choices": [{"delta": {"role": "assistant"}}]},
+                {"choices": [{"delta": {"content": "ok"}}]},
+                {"choices": [{"delta": {}, "finish_reason": "stop"}], "usage": {}},
+            ]
+        )
+
+    monkeypatch.setattr(
+        "core.llm.client._record_llm_scene_event",
+        lambda *args, **kwargs: recorded.append((args, kwargs)),
+    )
+    client = LLMClient(config=config, backend=backend)
+    events = list(client.stream_events([{"role": "user", "content": "ping"}]))
+    assert [event.type for event in events] == ["text_delta", "done"]
+
+    assert [item for item in recorded if item[0][1] == "llm.stream.ttft_breakdown"] == []

@@ -2037,9 +2037,21 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                     )
                     return
                 tool_scope = ToolExecutionScope(session_id=session_id, turn_id=turn_id)
+                # TTFT 观测：把「受理/worker 开跑」锚点带给 LLM client，
+                # 首 chunk 时聚合成一条 llm.stream.ttft_breakdown 事件。
+                # 受理锚点缺失（continue 等旁路提交）时该段省略，不造 0。
+                ttft_chain_kwargs: dict[str, Any] = {"worker_started_at_perf": prepare_started_at}
+                submit_started_at = context.get("submit_started_at_monotonic")
+                if submit_started_at is not None:
+                    ttft_chain_kwargs["accepted_at_perf"] = submit_started_at
+                    ttft_chain_kwargs["queue_wait_ms"] = s._elapsed_ms_between(
+                        submit_started_at,
+                        prepare_started_at,
+                    )
                 with (
                     s.session_reference_context(context.get("session_references") or []),
                     tool_execution_scope(tool_scope),
+                    s.llm_ttft_chain_context(**ttft_chain_kwargs),
                 ):
                     try:
                         result = _run_session_continuation_loop(

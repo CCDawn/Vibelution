@@ -49,6 +49,11 @@ from .stream_http_timing import (
     classify_raw_stream_event,
     current_stream_http_timings,
 )
+from .ttft_breakdown import (
+    build_llm_ttft_breakdown_fields,
+    current_llm_ttft_chain,
+    format_llm_ttft_summary,
+)
 from .streaming import ResponsesStreamNormalizer, extract_message_tool_calls, extract_text_content
 from .semantic_messages import SemanticGenerationSettings, SemanticOutputSchema
 from .semantic_projector import SemanticProjectionError, SemanticProjectionInput, project_semantic_request
@@ -917,6 +922,61 @@ def _record_stream_http_timing_summary(timings: Any, *, identity: Dict[str, Any]
         fields={**identity, **timings.summary_scene_fields()},
         lifecycle=False,
     )
+
+
+def _record_llm_ttft_breakdown_event(
+    *,
+    request_started_perf: float,
+    first_chunk_perf: float,
+    payload_build_ms: int,
+    route_gate_wait_ms: int | None,
+    http_timings: Any,
+    first_chunk_ms: int | None,
+    identity: Dict[str, Any],
+) -> None:
+    """Emit the turn-level TTFT segment breakdown at the first projected chunk.
+
+    Only fires when a session worker opened ``llm_ttft_chain_context`` for the
+    current turn, and at most once per turn chain (tool-loop iterations and
+    retry attempts reuse the winning attempt's stream segments).
+    """
+
+    chain = current_llm_ttft_chain()
+    if chain is None or bool(chain.get("breakdownEmitted")):
+        return
+    chain["breakdownEmitted"] = True
+    segments = build_llm_ttft_breakdown_fields(
+        chain=chain,
+        request_started_perf=request_started_perf,
+        first_chunk_perf=first_chunk_perf,
+        payload_build_ms=payload_build_ms,
+        route_gate_wait_ms=route_gate_wait_ms,
+        stream_open_ms=getattr(http_timings, "http_headers_ms", None),
+        first_raw_chunk_ms=getattr(http_timings, "first_raw_event_ms", None),
+        first_projected_chunk_ms=getattr(http_timings, "first_projected_chunk_ms", None),
+        first_chunk_ms=first_chunk_ms,
+    )
+    if not segments:
+        return
+    # Segment fields lead: scene telemetry keeps only the first 24 field keys.
+    fields = {**segments, **identity}
+    _record_llm_scene_event(
+        "stream",
+        "llm.stream.ttft_breakdown",
+        message="LLM turn time-to-first-token segment breakdown.",
+        outcome="observed",
+        fields=fields,
+        lifecycle=False,
+    )
+    try:
+        from core.logging import debug as _debug_logger
+
+        _debug_logger.info(
+            f"LLM TTFT breakdown: {format_llm_ttft_summary(fields)}",
+            tag="LLM",
+        )
+    except Exception:  # noqa: BLE001 - diagnostics must never fail the stream
+        return
 
 
 @contextmanager
@@ -5009,6 +5069,7 @@ class LLMClient:
             tool_call_count = 0
             first_chunk_ms: int | None = None
             first_text_delta_ms: int | None = None
+            route_gate_wait_ms: int | None = None
             first_reasoning_delta_ms: int | None = None
             previous_chunk_at: float | None = None
             max_inter_chunk_ms = 0
@@ -5050,7 +5111,7 @@ class LLMClient:
                     phase="stream",
                     message_count=message_count,
                     tool_count=tool_count,
-                ):
+                ) as route_gate_wait_ms:
                     _raise_if_llm_cancelled()
                     stop_cache_keepalive = self._start_qwen_inflight_cache_keepalive(
                         payload,
@@ -5142,6 +5203,24 @@ class LLMClient:
                                         ),
                                     },
                                     lifecycle=False,
+                                )
+                                _record_llm_ttft_breakdown_event(
+                                    request_started_perf=payload_prepare_started,
+                                    first_chunk_perf=time.perf_counter(),
+                                    payload_build_ms=payload_build_ms,
+                                    route_gate_wait_ms=route_gate_wait_ms,
+                                    http_timings=http_timings,
+                                    first_chunk_ms=first_chunk_ms,
+                                    identity={
+                                        "role": self.role,
+                                        "profileId": self.profile_id,
+                                        "provider": self.provider.kind,
+                                        "model": self.profile.model,
+                                        "sessionId": event_metadata.get("sessionId", ""),
+                                        "turnId": event_metadata.get("turnId", ""),
+                                        "attempt": attempt,
+                                        "messageCount": message_count,
+                                    },
                                 )
                             if previous_chunk_at is not None:
                                 inter_chunk_ms = int((now - previous_chunk_at) * 1000)
@@ -5272,6 +5351,8 @@ class LLMClient:
                         "latencyMs": usage_observation.latency_ms,
                         "messageCount": message_count,
                         "toolCount": tool_count,
+                        "routeGateWaitMs": route_gate_wait_ms,
+                        "payloadBuildMs": payload_build_ms,
                         **event_metadata,
                         "llmPayloadTraceId": llm_payload_trace.get("traceId", ""),
                         "chunkCount": chunk_count,

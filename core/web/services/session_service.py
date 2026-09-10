@@ -82,6 +82,7 @@ from core.infrastructure.feature_gate import (
     resolve_feature_decision,
 )
 from core.llm.client import llm_status_context
+from core.llm.ttft_breakdown import llm_ttft_chain_context
 from core.llm.agent_runtime import (
     AgentLlmResolutionError,
     resolve_agent_llm,
