@@ -5,6 +5,17 @@ accepted and scope-consistent.  Meeting text can never promote a claim
 directly: meeting-sourced claims always start as ``proposed``.  Supersede and
 retract are append-only operations that preserve the affected records and
 their counter-evidence.  Pure offline JSONL under the team workspace.
+
+Content binding on replay: a claim id stays bound to its identity fields
+(claim text, scope, creator, status lineage, counter-evidence and supersede
+links) forever — a replay that changes any of them fails.  ``evidenceRefs``
+are the one deliberate exception: a replay may *attach* previously unknown
+evidence refs (idempotent by ``claimEvidenceId``; existing refs are immutable
+and never rewritten, and the attachment lands as its own append-only ledger
+record carrying the ``attachedEvidenceRefs`` audit trail).  This is what lets
+evidence collected *after* the first proposal (chain collection handoffs)
+still bind to the claim without minting a second row or breaking the content
+binding discipline.
 """
 
 from __future__ import annotations
@@ -200,6 +211,42 @@ def _claim_definition(record: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+# The content binding of a claim id: every definition field except
+# ``evidenceRefs`` (the one replay-attachable field, see module docstring).
+_CLAIM_IDENTITY_FIELDS = tuple(
+    key for key in _claim_definition({"claimId": ""}) if key != "evidenceRefs"
+)
+
+
+def _claim_identity(record: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: record.get(key) for key in _CLAIM_IDENTITY_FIELDS}
+
+
+def _merge_evidence_refs(
+    existing: Any, incoming: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Merge incoming refs into existing ones, idempotent by ``claimEvidenceId``.
+
+    Existing refs are immutable and keep their stored snapshot; an incoming
+    ref whose id is already present is dropped even when its snapshot differs
+    (a replayed pending snapshot must never rewrite an accepted one).  Returns
+    ``(merged_refs, attached_refs)`` where ``attached_refs`` carries only the
+    genuinely new refs in first-seen order.
+    """
+    current = [
+        dict(item) for item in list(existing or []) if isinstance(item, Mapping)
+    ]
+    seen = {str(item.get("claimEvidenceId") or "") for item in current}
+    attached: list[dict[str, Any]] = []
+    for ref in incoming:
+        ref_id = str(ref.get("claimEvidenceId") or "")
+        if not ref_id or ref_id in seen:
+            continue
+        seen.add(ref_id)
+        attached.append(dict(ref))
+    return current + attached, attached
+
+
 def propose_claim(team_id: str, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Append one proposed claim.  Meeting text can never carry evidence refs."""
     from core.web.services.team_service import assert_team_exists
@@ -253,15 +300,38 @@ def propose_claim(team_id: str, payload: Mapping[str, Any] | None = None) -> dic
     with _LOCK:
         existing = _latest_by_id(_read_jsonl(_store_path(normalized_team_id)), "claimId", claim_id)
         if existing is not None and existing.get("schemaVersion") is not None:
-            if _claim_definition(existing) != _claim_definition(record):
+            merged_refs, attached_refs = _merge_evidence_refs(
+                existing.get("evidenceRefs"), evidence_refs
+            )
+            if _claim_identity(existing) != _claim_identity(record):
                 raise ClaimLedgerError(
                     "claim id is already bound to different content"
                 )
+            if not attached_refs:
+                return {
+                    "schemaVersion": SCHEMA_VERSION,
+                    "teamId": normalized_team_id,
+                    "status": "reused",
+                    "attachedRefs": 0,
+                    "claim": existing,
+                    "storagePath": str(_store_path(normalized_team_id)),
+                }
+            # Evidence collected after the first proposal: attach the new refs
+            # as an append-only ledger record.  The row's identity fields are
+            # unchanged (checked above), existing refs are never rewritten and
+            # the attachment is auditable via ``attachedEvidenceRefs``.
+            attached_record = dict(existing)
+            attached_record["evidenceRefs"] = merged_refs
+            attached_record["attachedEvidenceRefs"] = attached_refs
+            attached_record["evidenceRefsAttachedAt"] = _utc_now()
+            ClaimLedgerEntry.from_dict(attached_record)
+            _append_jsonl(_store_path(normalized_team_id), attached_record)
             return {
                 "schemaVersion": SCHEMA_VERSION,
                 "teamId": normalized_team_id,
                 "status": "reused",
-                "claim": existing,
+                "attachedRefs": len(attached_refs),
+                "claim": attached_record,
                 "storagePath": str(_store_path(normalized_team_id)),
             }
         _append_jsonl(_store_path(normalized_team_id), record)

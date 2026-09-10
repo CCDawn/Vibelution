@@ -265,6 +265,12 @@ def _propose_ledger_claim(
     contract validation rejects dangling or malformed ones.  Failures are
     surfaced as ``EvidenceMaterializationError`` instead of being swallowed,
     so an unproposable claim can never silently skip the claim belief gate.
+
+    Replay semantics: when the claim row already exists (proposed ref-less by
+    an earlier selection-time binding), the ledger merges ``evidence_refs``
+    into the stored row (idempotent by ``claimEvidenceId``; existing refs are
+    immutable) instead of failing the content binding, and the returned
+    ``attachedRefs`` count reports how many refs were newly attached.
     """
     from core.web.services.team_workflow import claim_ledger
 
@@ -309,6 +315,9 @@ def _propose_ledger_claim(
         "claimId": claim_id,
         "status": _text(proposed.get("status")),
         "scopeHash": _text(claim.get("scopeHash")) if isinstance(claim, Mapping) else "",
+        "attachedRefs": (
+            int(proposed.get("attachedRefs") or 0) if isinstance(proposed, Mapping) else 0
+        ),
     }
 
 
@@ -1439,16 +1448,20 @@ def materialize_chain_collection_evidence(
             }
         )
     # Phase 2 — hypothesis dimension: one core-claim row per served
-    # candidate, citing every collected source of the run.  The refs are
-    # complete before the single proposal so replayed runs re-propose the
-    # identical definition (the ledger binds claim id to content at first
-    # proposal).  Unreviewed (pending) refs keep the claim ``proposed`` and
-    # the belief state at most ``weakly_supported`` — the gate's blocking
-    # states are untouched.  Fact rows themselves stay ref-less: the ledger
-    # binds a claim id to its definition (including evidenceRefs) at first
-    # proposal, while the evidence id is only resolvable after the claim id
-    # exists, so a fact row cannot cite its own evidence without breaking
-    # the ledger's content-binding contract.
+    # candidate, citing every collected source of the run.  On a fresh run the
+    # single proposal carries the complete refs (the fact evidence records
+    # already exist, so every citation resolves).  On a replay over a core
+    # claim row proposed earlier *without* refs (selection-time candidate
+    # binding), the ledger merges the refs into the stored row — idempotent by
+    # ``claimEvidenceId``, existing refs immutable — and the candidate-
+    # dimension evidence rows below still register (no-op when present), so a
+    # replayed run is zero-write once everything has landed.  Unreviewed
+    # (pending) refs keep the claim ``proposed`` and the belief state at most
+    # ``weakly_supported`` — the gate's blocking states are untouched.  Fact
+    # rows themselves stay ref-less: a fact row cannot cite its own evidence
+    # without breaking the ledger's content-binding contract (the evidence id
+    # is only resolvable after the claim id exists).
+    ref_attachments = 0
     for bridged_candidate_id, statement in statements.items():
         core_claim = _propose_ledger_claim(
             team_id=normalized_team,
@@ -1457,6 +1470,7 @@ def materialize_chain_collection_evidence(
             candidate_id=bridged_candidate_id,
             evidence_refs=collected_refs,
         )
+        ref_attachments += int(core_claim.get("attachedRefs") or 0)
         candidate_claim_ids.add(core_claim["claimId"])
         for evidence_payload in collected_payloads:
             store.register(
@@ -1475,6 +1489,7 @@ def materialize_chain_collection_evidence(
         "factClaimCount": fact_claim_count,
         "candidateClaimCount": len(candidate_claim_ids),
         "evidenceCount": evidence_count,
+        "evidenceRefsAttached": ref_attachments,
         **({"metadataOnlySkipped": metadata_only_skipped} if metadata_only_skipped else {}),
         **({"offtopicSkipped": offtopic_skipped} if offtopic_skipped else {}),
     }

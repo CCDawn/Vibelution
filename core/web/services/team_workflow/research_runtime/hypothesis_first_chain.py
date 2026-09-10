@@ -6615,6 +6615,140 @@ def auto_retry_pending_collection_handoffs(
     return summary
 
 
+def auto_repair_handed_off_claim_refs(
+    team_id: str, *, question_id: str
+) -> dict[str, Any]:
+    """Re-run the chain claim bridge for handed-off requests missing refs.
+
+    Production incident (SCI-085, 2026-09-10): the candidate's core-claim row
+    was proposed ref-less at selection time, so the handoff-time Phase 2
+    proposal collided with the ledger's claim-id content binding, the whole
+    chain materialization failed, and the collected evidence never attached —
+    the convergence gate then read ``evidenceRefs=[]`` and the auto-advance
+    recorded a rejected adjudication for a candidate the reviewers accepted.
+    With ledger-level evidence-ref attachment in place, the idempotent chain
+    bridge (:func:`_materialize_request_collection_claims`) heals such ledgers
+    on replay.  This sweep step finds ``handed_off`` requests whose served
+    hypothesis candidates still have no candidate-dimension evidence record
+    for the request's own collection run, re-runs the bridge once for them,
+    and marks the request (``claimRefsRepairAt``) so the repair is one-shot
+    per request; a failed repair stays unmarked and retries on a later pass.
+    Requests already fully covered, and the terminal-event/operator handoff
+    replay paths, are untouched.  Nothing here raises.
+    """
+    normalized_team_id = str(team_id or "").strip()
+    normalized_question_id = str(question_id or "").strip().upper()
+    summary: dict[str, Any] = {
+        "status": "skipped",
+        "reason": "",
+        "repaired": 0,
+        "skipped": 0,
+        "failed": 0,
+    }
+    if not normalized_team_id or not normalized_question_id:
+        summary["reason"] = "missing_identity"
+        return summary
+    try:
+        requests = [
+            record
+            for record in _collection_requests(_records(normalized_team_id))
+            if str(record.get("questionId") or "").strip().upper()
+            == normalized_question_id
+            and str(record.get("status") or "") == "handed_off"
+        ]
+    except Exception as exc:  # noqa: BLE001 - detection stays best-effort
+        summary["status"] = "failed"
+        summary["reason"] = "detection_failed"
+        summary["error"] = str(exc)[:400]
+        _record_scene_event(
+            "hypothesis_first.auto_repair_claim_refs",
+            outcome="failed",
+            level="warning",
+            fields={
+                "teamId": normalized_team_id,
+                "questionId": normalized_question_id,
+                "reason": "detection_failed",
+                "errorType": type(exc).__name__,
+                "error": str(exc)[:400],
+            },
+        )
+        return summary
+    try:
+        evidence_records = _claim_evidence_records(normalized_team_id)
+    except Exception:  # noqa: BLE001 - unreadable store keeps the gate closed
+        evidence_records = []
+    for request in requests:
+        request_id = str(request.get("requestId") or "").strip()
+        collection_run_id = str(request.get("collectionRunId") or "").strip()
+        served_ids = _normalized_str_list(request.get("hypothesisCandidateIds"))
+        fields = {
+            "teamId": normalized_team_id,
+            "questionId": normalized_question_id,
+            "requestId": request_id,
+            "collectionRunId": collection_run_id,
+        }
+        if not request_id or not collection_run_id or not served_ids:
+            summary["skipped"] += 1
+            continue
+        if str(request.get("claimRefsRepairAt") or "").strip():
+            # One-shot per request: a completed (or markered) repair must not
+            # re-run on every sweep pass even when the run legitimately
+            # produced no anchorable evidence.
+            summary["skipped"] += 1
+            continue
+        served = set(served_ids)
+        covered = {
+            str(record.get("candidateId") or "").strip()
+            for record in evidence_records
+            if str(record.get("sourceCollectionRunId") or "") == collection_run_id
+            and str(record.get("candidateId") or "").strip() in served
+        }
+        if not (served - covered):
+            summary["skipped"] += 1
+            continue
+        try:
+            result = _materialize_request_collection_claims(
+                normalized_team_id, request
+            )
+        except Exception as exc:  # noqa: BLE001 - one request is isolated
+            summary["failed"] += 1
+            _record_scene_event(
+                "hypothesis_first.auto_repair_claim_refs",
+                outcome="failed",
+                level="warning",
+                fields={**fields, "error": str(exc)[:400]},
+            )
+            continue
+        if str(result.get("status") or "") == "failed":
+            summary["failed"] += 1
+            _record_scene_event(
+                "hypothesis_first.auto_repair_claim_refs",
+                outcome="failed",
+                level="warning",
+                fields={**fields, "reason": "materialization_failed"},
+            )
+            continue
+        try:
+            _update_collection_request(
+                normalized_team_id,
+                request_id,
+                claimRefsRepairAt=_utc_now(),
+            )
+        except Exception:  # noqa: BLE001 - the repair itself already landed
+            pass
+        summary["repaired"] += 1
+        _record_scene_event(
+            "hypothesis_first.auto_repair_claim_refs",
+            outcome="repaired",
+            fields={**fields, "materializationStatus": str(result.get("status") or "")},
+        )
+    if summary["repaired"]:
+        summary["status"] = "repaired"
+    elif summary["failed"]:
+        summary["status"] = "failed"
+    return summary
+
+
 def auto_accept_knowledge_handoffs(
     team_id: str,
     *,
@@ -7092,7 +7226,11 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
     authority batch re-materialized by replaying the stored round, zombie
     collection requests parked in ``handoff_pending`` by a
     once-failed writeback get their idempotent handoff retried past the
-    grace (unblocking the pending count in the same pass), exhausted rounds
+    grace (unblocking the pending count in the same pass), handed-off
+    requests whose served candidates still miss their collected
+    candidate-dimension claim evidence (the SCI-085 ref-less-first-proposal
+    ledger defect) get the idempotent chain claim bridge re-run once,
+    exhausted rounds
     get their accepted adjudication, converged chains get the formal run
     created and started, runs blocked on the stage-boundary budget precheck
     get the extend_budget → retry_node contract driven automatically within
@@ -7113,6 +7251,7 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
         "authoritiesBackfilled": 0,
         "feedbackIterationsBackfilled": 0,
         "handoffsRetried": 0,
+        "claimRefsRepaired": 0,
         "adjudicated": 0,
         "rejected": 0,
         "formalRuns": 0,
@@ -7248,6 +7387,20 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
                 summary["handoffsRetried"] += int(
                     handoff_retry.get("retried") or 0
                 )
+                # Step zero-eight-five, after handoff retry and before
+                # adjudication: a handed_off request whose served candidates
+                # still miss the collected candidate-dimension evidence (the
+                # SCI-085 ref-less-first-proposal ledger defect) gets the
+                # idempotent chain claim bridge re-run once, so the belief
+                # gate reads the collected refs instead of an empty list.
+                claim_ref_repair = auto_repair_handed_off_claim_refs(
+                    team_id, question_id=question_id
+                )
+                summary["claimRefsRepaired"] += int(
+                    claim_ref_repair.get("repaired") or 0
+                )
+                if str(claim_ref_repair.get("status") or "") == "failed":
+                    summary["failed"] += 1
                 adjudication = auto_adjudicate_exhausted_round(
                     team_id, question_id=question_id
                 )
@@ -7344,6 +7497,7 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
             "roundsRegenerated": int(summary["roundsRegenerated"]),
             "authoritiesBackfilled": int(summary["authoritiesBackfilled"]),
             "handoffsRetried": int(summary["handoffsRetried"]),
+            "claimRefsRepaired": int(summary["claimRefsRepaired"]),
             "adjudicated": int(summary["adjudicated"]),
             "rejected": int(summary["rejected"]),
             "formalRuns": int(summary["formalRuns"]),

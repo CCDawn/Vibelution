@@ -1747,6 +1747,182 @@ def test_chain_collection_materialization_replay_is_idempotent(
     assert verdict[HYPOTHESIS_CANDIDATE_ID]["status"] == "allowed"
 
 
+def test_chain_collection_attaches_refs_to_preexisting_refless_core_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SCI-085 现场：先提案的 ref-less core claim 行必须在重放时补挂 refs。
+
+    Selection-time binding proposed the candidate's core claim with
+    ``evidenceRefs=[]``; the handoff-time Phase 2 proposal carrying the
+    collected refs used to collide with the ledger's claim-id content
+    binding, fail the whole materialization, and leave the convergence gate
+    reading an empty refs list (auto-rejecting an accepted candidate).  The
+    replay now merges the refs into the stored row, still registers the
+    candidate-dimension evidence rows (zero duplicates on replay), the gate
+    sees the pending refs, and the accepted-adjudication twin chain can
+    finally count accepted support.
+    """
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain as chain,
+    )
+    from core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer import (
+        _propose_ledger_claim,
+        materialize_chain_collection_evidence,
+    )
+
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    # Selection-time shape: ref-less core claim row + one pending
+    # hypothesis-role record under the candidate dimension (strict gate
+    # binding activates exactly as in production).
+    preexisting = _propose_ledger_claim(
+        team_id=team_id,
+        question_scope=scope,
+        claim_text="Candidate A predicts a bounded mechanism.",
+        candidate_id=HYPOTHESIS_CANDIDATE_ID,
+    )
+    store = ClaimEvidenceStore(tmp_path)
+    store.register(
+        team_id,
+        {
+            "claimId": preexisting["claimId"],
+            "candidateId": HYPOTHESIS_CANDIDATE_ID,
+            "sourceId": "https://example.org/selection-review",
+            "sourceRevision": "sha256:" + "a" * 64,
+            "locator": {
+                "kind": "url",
+                "url": "https://example.org/selection-review",
+            },
+            "quote": "Selection review excerpt supporting the candidate.",
+            "evidenceKind": "primary_result",
+            "reasoningRole": "hypothesis",
+            "supportLevel": "supports",
+            "extractionMethod": "manual",
+            "extractorAgentId": "selection-reviewer",
+            "modelRef": "",
+        },
+    )
+
+    _seed_chain_collection_candidates(
+        monkeypatch,
+        [
+            _collected_source_candidate(
+                "candidate-run-a-1",
+                summary="The collected abstract states a bounded mechanism.",
+                url="https://example.org/paper-a",
+            ),
+            _collected_source_candidate(
+                "candidate-run-a-2",
+                summary="A second collected abstract reports a counter case.",
+                url="https://example.org/paper-b",
+            ),
+        ],
+    )
+    _seed_chain_hypothesis_candidates(
+        team_id,
+        _QUESTION_ID,
+        {HYPOTHESIS_CANDIDATE_ID: "Candidate A predicts a bounded mechanism."},
+    )
+    kwargs = {
+        "project_root": tmp_path,
+        "team_id": team_id,
+        "question_scope": scope,
+        "collection_run_id": "dprun-chain-1",
+        "hypothesis_candidate_ids": [HYPOTHESIS_CANDIDATE_ID],
+    }
+
+    result = materialize_chain_collection_evidence(**kwargs)
+    assert result["status"] == "materialized"
+    assert result["evidenceRefsAttached"] == 2
+
+    rows = claim_ledger.list_claims(team_id)["claims"]
+    core_rows = [
+        item for item in rows if item["claimId"] == preexisting["claimId"]
+    ]
+    assert len(core_rows) == 1
+    core_row = core_rows[0]
+    stored = store.list(team_id)
+    fact_evidence_ids = sorted(
+        item["claimEvidenceId"]
+        for item in stored
+        if item["reasoningRole"] == "fact"
+        and item["candidateId"].startswith("candidate-run-a-")
+        and item["claimId"] != preexisting["claimId"]
+    )
+    assert sorted(ref["claimEvidenceId"] for ref in core_row["evidenceRefs"]) == (
+        fact_evidence_ids
+    )
+    assert len(fact_evidence_ids) == 2
+    # The collected refs merged onto the pre-existing row; identity fields
+    # (claim text, status, createdAt) are unchanged and the attachment is
+    # auditable.
+    assert all(ref["reviewStatus"] == "pending" for ref in core_row["evidenceRefs"])
+    assert len(core_row["attachedEvidenceRefs"]) == 2
+    assert core_row["evidenceRefsAttachedAt"]
+    assert core_row["claim"] == "Candidate A predicts a bounded mechanism."
+    assert core_row["status"] == "proposed"
+
+    candidate_dimension = [
+        item for item in stored if item["candidateId"] == HYPOTHESIS_CANDIDATE_ID
+    ]
+    assert len(candidate_dimension) == 3  # selection row + 2 collected rows
+
+    # Replay: zero duplicates, nothing left to attach.
+    replay = materialize_chain_collection_evidence(**kwargs)
+    assert replay["evidenceRefsAttached"] == 0
+    assert claim_ledger.list_claims(team_id)["claimCount"] == 3  # 2 fact + 1 core
+    assert (
+        len({item["claimEvidenceId"] for item in store.list(team_id)}) == 5
+    )  # 2 fact + 2 candidate-dimension + 1 selection
+
+    # Gate read side, pre-adjudication: the store records win the ref
+    # resolution (record-wins semantics) and carry no scope, so pending refs
+    # stay neutral — belief is not promoted, and the accepted count still
+    # depends on the human adjudication (no fabricated acceptance).
+    verdict = chain.evaluate_claim_belief_gate(
+        team_id, _QUESTION_ID, [HYPOTHESIS_CANDIDATE_ID]
+    )
+    gated = verdict[HYPOTHESIS_CANDIDATE_ID]
+    assert gated["status"] == "blocked"
+    assert gated["reason"] == "candidate_evidence_gap"
+    summary = next(
+        item
+        for item in gated["claims"]
+        if item["claimId"] == preexisting["claimId"]
+    )
+    assert summary["acceptedSupportCount"] == 0
+    assert summary["supportingEvidenceIds"] == []
+
+    # The accepted-adjudication authority now works end to end: the refs on
+    # the core row put the collected fact records on the acceptance surface,
+    # audited accepted twins land, and the unchanged gate counts the accepted
+    # support.  Pre-fix the empty refs list kept those records off the
+    # surface forever, so this transition was impossible (SCI-085).
+    acceptance = chain._apply_human_acceptance_for_recommended_candidate(
+        team_id,
+        _QUESTION_ID,
+        HYPOTHESIS_CANDIDATE_ID,
+        hypothesis_round_id="round-sci-085",
+        accepted_by="operator-test",
+    )
+    assert acceptance["status"] == "applied"
+    assert acceptance["coreClaimIds"] == [preexisting["claimId"]]
+    assert acceptance["sourceCount"] == 5  # selection + 2 cited facts + 2 candidate-dimension
+    # Twin identity dedupes on (claimId, candidateId, reasoningRole, ...): the
+    # two collected candidate-dimension fact rows share one identity.
+    assert acceptance["acceptedTwinCount"] == 4
+    verdict_after = chain.evaluate_claim_belief_gate(
+        team_id, _QUESTION_ID, [HYPOTHESIS_CANDIDATE_ID]
+    )
+    allowed = verdict_after[HYPOTHESIS_CANDIDATE_ID]
+    assert allowed["status"] == "allowed"
+    accepted_summary = next(
+        item
+        for item in allowed["claims"]
+        if item["claimId"] == preexisting["claimId"]
+    )
+    assert accepted_summary["acceptedSupportCount"] == 2
+
+
 def test_chain_collection_materialization_requires_question_scope(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

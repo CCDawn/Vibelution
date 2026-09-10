@@ -4139,3 +4139,152 @@ def test_sweep_budget_stops_new_questions_and_resumes_from_stop_cursor(
     assert second["budgetExhausted"] is True
     assert second["questionsDeferred"] == 1
     assert visited == ["SCI-A", "SCI-B"]
+
+
+# ---------------------------------------------------------------------------
+# handed-off claim-ref repair: a handed_off request whose served candidates
+# still miss the collected candidate-dimension evidence (SCI-085: the core
+# claim row was proposed ref-less at selection, the handoff-time Phase 2
+# proposal collided with the ledger's content binding) gets the idempotent
+# chain claim bridge re-run once by the sweep
+
+
+_REPAIR_CANDIDATE_ID = "sci-096-cRepair"
+
+
+def _seed_repair_request() -> None:
+    _seed_zombie_handoff_request(status="handed_off")
+    chain._update_collection_request(
+        _TEAM_ID,
+        _ZOMBIE_REQUEST_ID,
+        hypothesisCandidateIds=[_REPAIR_CANDIDATE_ID],
+    )
+
+
+def _fake_claim_bridge(
+    monkeypatch: pytest.MonkeyPatch, calls: list[str], *, result: dict[str, Any]
+) -> None:
+    def _bridge(_team_id, request):
+        calls.append(str(request.get("requestId") or ""))
+        return dict(result)
+
+    monkeypatch.setattr(
+        chain, "_materialize_request_collection_claims", _bridge
+    )
+
+
+def test_auto_repair_heals_handed_off_claim_refs_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SCI-085 恢复：handed_off 请求的候选维度证据缺失 → 幂等重跑桥一次，
+    写 claimRefsRepairAt 标记；第二遍跳过，不重复触发。"""
+    events = _chain_env(tmp_path, monkeypatch)
+    _seed_repair_request()
+    calls: list[str] = []
+    _fake_claim_bridge(
+        monkeypatch,
+        calls,
+        result={"status": "materialized", "evidenceRefsAttached": 2},
+    )
+
+    summary = chain.auto_repair_handed_off_claim_refs(
+        _TEAM_ID, question_id=_QUESTION_ID
+    )
+
+    assert summary["status"] == "repaired"
+    assert summary["repaired"] == 1
+    assert summary["failed"] == 0
+    assert calls == [_ZOMBIE_REQUEST_ID]
+    repaired = _latest_request()
+    assert repaired["claimRefsRepairAt"]
+
+    # One-shot per request: the marker keeps later sweep passes write-free.
+    second = chain.auto_repair_handed_off_claim_refs(
+        _TEAM_ID, question_id=_QUESTION_ID
+    )
+    assert second["repaired"] == 0
+    assert second["skipped"] == 1
+    assert calls == [_ZOMBIE_REQUEST_ID]
+
+    repaired_events = [
+        item
+        for item in events
+        if item["code"] == "hypothesis_first.auto_repair_claim_refs"
+    ]
+    assert repaired_events and repaired_events[-1]["outcome"] == "repaired"
+
+
+def test_auto_repair_skips_requests_already_covered_by_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ served 候选已有该 collection run 的候选维度证据行 → 检测为已覆盖，
+    不再触发桥。"""
+    from core.research.evidence import ClaimEvidenceStore
+
+    _chain_env(tmp_path, monkeypatch)
+    _seed_repair_request()
+    store = ClaimEvidenceStore(tmp_path)
+    store.register(
+        _TEAM_ID,
+        {
+            "claimId": "claim-covered-1",
+            "candidateId": _REPAIR_CANDIDATE_ID,
+            "sourceId": "https://example.org/covered",
+            "sourceRevision": "sha256:" + "b" * 64,
+            "locator": {"kind": "url", "url": "https://example.org/covered"},
+            "quote": "Covered collected excerpt.",
+            "evidenceKind": "primary_result",
+            "reasoningRole": "fact",
+            "supportLevel": "supports",
+            "extractionMethod": "manual",
+            "extractorAgentId": "collector",
+            "modelRef": "",
+            "sourceCollectionRunId": _ZOMBIE_RUN_ID,
+        },
+    )
+    calls: list[str] = []
+    _fake_claim_bridge(monkeypatch, calls, result={"status": "materialized"})
+
+    summary = chain.auto_repair_handed_off_claim_refs(
+        _TEAM_ID, question_id=_QUESTION_ID
+    )
+
+    assert summary["status"] == "skipped"
+    assert summary["repaired"] == 0
+    assert calls == []
+
+
+def test_auto_repair_retries_failed_materialization_without_marker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """桥重跑失败（status=failed）→ 不写标记、计 failed，下一遍仍会重试。"""
+    events = _chain_env(tmp_path, monkeypatch)
+    _seed_repair_request()
+    calls: list[str] = []
+    _fake_claim_bridge(
+        monkeypatch,
+        calls,
+        result={"status": "failed", "error": "ledger unavailable"},
+    )
+
+    summary = chain.auto_repair_handed_off_claim_refs(
+        _TEAM_ID, question_id=_QUESTION_ID
+    )
+
+    assert summary["status"] == "failed"
+    assert summary["failed"] == 1
+    assert calls == [_ZOMBIE_REQUEST_ID]
+    assert not _latest_request().get("claimRefsRepairAt")
+
+    # A later pass retries the unmarked request.
+    chain.auto_repair_handed_off_claim_refs(_TEAM_ID, question_id=_QUESTION_ID)
+    assert calls == [_ZOMBIE_REQUEST_ID, _ZOMBIE_REQUEST_ID]
+    failed_events = [
+        item
+        for item in events
+        if item["code"] == "hypothesis_first.auto_repair_claim_refs"
+    ]
+    assert failed_events and failed_events[-1]["outcome"] == "failed"
