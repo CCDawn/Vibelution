@@ -5254,6 +5254,597 @@ def auto_backfill_missing_round_authorities(
     return summary
 
 
+# Backfill of the cross-run ``feedback_iterations`` authority from the stored
+# hypothesis-review round chain.  The canonical writer's identity binds each
+# artifact to a node run of the formal workflow run, while its payload uses a
+# node id that is deliberately distinct from ``hypothesis_design``: the package
+# reader's same-run validator owns that node id (exactly two rounds with
+# pinned phases), and this backfill must only ever be read by the cross-run
+# lineage walk.
+FEEDBACK_ITERATIONS_BACKFILL_NODE_ID = "hypothesis_review_revision"
+FEEDBACK_ITERATION_BACKFILL_TRIGGER = "review_round_feedback"
+# Runs still executing have not failed packaging yet; their chain may still
+# grow, so backfilling early could anchor a shorter lineage than the run will
+# finally need.  A blocked/failed run's chain is final.
+FEEDBACK_ITERATION_BACKFILL_RUN_STATUSES = frozenset({"blocked", "failed"})
+_REVISION_STATUS_ALLOWLIST = frozenset({"revised", "completed", "accepted"})
+
+
+def _round_lineage_round_ids(round_record: Mapping[str, Any]) -> set[str]:
+    """Round ids this round names as predecessors in its lineage."""
+    return {
+        str(item.get("id") or "").strip()
+        for item in list(round_record.get("lineage") or [])
+        if isinstance(item, Mapping)
+        and str(item.get("kind") or "").strip() == "round"
+        and str(item.get("id") or "").strip()
+    }
+
+
+def _ordered_round_chain(
+    rounds: Sequence[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], str]:
+    """Order the reusable rounds into one lineage chain, or fail closed.
+
+    The chain is the question's complete revision lineage: every reusable
+    (reviewed/closed) round, ordered by creation time, where each round names
+    its immediate predecessor.  Two independent chains, a skipped link, or a
+    missing predecessor id all mean the lineage is ambiguous — the caller must
+    write nothing rather than anchor a guessed chain under the formal run.
+    """
+
+    from core.web.services.team_workflow import hypothesis_rounds as _hypothesis_rounds
+
+    reusable = [
+        dict(item)
+        for item in rounds
+        if isinstance(item, Mapping)
+        and str(item.get("roundId") or "").strip()
+        and str(item.get("status") or "").strip().lower()
+        in _hypothesis_rounds.REUSABLE_ROUND_STATUSES
+    ]
+    if not reusable:
+        return [], "feedback_iteration_chain_rounds_missing"
+    reusable.sort(
+        key=lambda item: (
+            str(item.get("createdAt") or ""),
+            str(item.get("roundId") or ""),
+        )
+    )
+    round_ids = [str(item["roundId"]).strip() for item in reusable]
+    if len(set(round_ids)) != len(round_ids):
+        return [], "feedback_iteration_chain_ambiguous"
+    for index in range(1, len(reusable)):
+        predecessor = round_ids[index - 1]
+        if predecessor not in _round_lineage_round_ids(reusable[index]):
+            return [], "feedback_iteration_chain_ambiguous"
+    return reusable, ""
+
+
+def _round_candidate_snapshot(round_record: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Canonical candidate statement snapshot of one stored round."""
+
+    from core.web.services.team_workflow import hypothesis_review_executor
+
+    return hypothesis_review_executor.canonical_hypothesis_revision_snapshot(
+        [
+            dict(item)
+            for item in list(round_record.get("candidates") or [])
+            if isinstance(item, Mapping)
+        ]
+    )
+
+
+def _derived_round_iteration(
+    *,
+    round_record: Mapping[str, Any],
+    previous_round: Mapping[str, Any] | None,
+    iteration_round: int,
+) -> tuple[dict[str, Any] | None, str]:
+    """Derive one truthful feedback-iteration record from a stored round.
+
+    Every field comes from evidence the review executor already persisted in
+    the round's ``revisionEnvelope`` (or from the round's own candidates):
+    feedback is the real review rationale, revision is the recorded actual
+    change set, and hashes prefer the envelope's production-time bindings —
+    falling back to the same canonical snapshot hashing the executor used only
+    when the stored envelope predates them.  ``None`` plus a precise blocker
+    code means this round cannot establish an iteration.
+    """
+
+    envelope = (
+        dict(round_record["revisionEnvelope"])
+        if isinstance(round_record.get("revisionEnvelope"), Mapping)
+        else {}
+    )
+    envelope_feedback = (
+        dict(envelope["feedback"])
+        if isinstance(envelope.get("feedback"), Mapping)
+        else {}
+    )
+    envelope_revision = (
+        dict(envelope["revision"])
+        if isinstance(envelope.get("revision"), Mapping)
+        else {}
+    )
+    round_id = str(round_record.get("roundId") or "").strip()
+    if not envelope or not envelope_feedback or not envelope_revision:
+        return None, "feedback_iteration_chain_revision_missing"
+    if envelope_revision.get("actual") is not True:
+        return None, "feedback_iteration_chain_not_actual"
+    human_feedback = str(envelope_feedback.get("humanFeedback") or "").strip()
+    if not human_feedback:
+        return None, "feedback_iteration_chain_feedback_missing"
+    changes = [
+        str(item).strip()
+        for item in list(envelope_revision.get("changes") or [])
+        if str(item or "").strip()
+    ]
+    if not changes:
+        return None, "feedback_iteration_chain_changes_missing"
+
+    input_hash = str(envelope_feedback.get("inputHash") or "").strip()
+    if not _is_sha256_hex(input_hash):
+        if previous_round is None:
+            # Round 1's pre-revision candidate state only exists through the
+            # envelope's own production-time hash; without it there is no
+            # truthful way to bind the input state.
+            return None, "feedback_iteration_chain_input_state_missing"
+        try:
+            input_hash = _stable_hash(_round_candidate_snapshot(previous_round))
+        except ContractValidationError:
+            return None, "feedback_iteration_chain_candidates_invalid"
+    output_hash = str(envelope_revision.get("outputHash") or "").strip()
+    try:
+        round_snapshot = _round_candidate_snapshot(round_record)
+    except ContractValidationError:
+        return None, "feedback_iteration_chain_candidates_invalid"
+    if not _is_sha256_hex(output_hash):
+        output_hash = _stable_hash(round_snapshot)
+
+    input_refs: list[str] = [f"hypothesis_round:{round_id}"]
+    receipt_ref = str(envelope.get("revisionReceiptRef") or "").strip()
+    if receipt_ref:
+        input_refs.append(receipt_ref)
+    for meeting_ref in list(round_record.get("meetingRefs") or []):
+        if not isinstance(meeting_ref, Mapping):
+            continue
+        kind = str(meeting_ref.get("kind") or "").strip()
+        ref_id = str(meeting_ref.get("id") or "").strip()
+        if kind and ref_id:
+            input_refs.append(f"{kind}:{ref_id}")
+    input_refs.extend(
+        str(item).strip()
+        for item in list(envelope_feedback.get("inputRefs") or [])
+        if str(item or "").strip()
+    )
+
+    output_refs = [
+        str(item).strip()
+        for item in list(envelope_revision.get("outputRefs") or [])
+        if str(item or "").strip()
+    ]
+    if not output_refs:
+        parent_candidate_id = str(envelope.get("parentCandidateId") or "").strip()
+        if parent_candidate_id:
+            output_refs.append(f"hypothesis_candidate:{parent_candidate_id}:r{iteration_round}")
+        output_refs.extend(
+            f"hypothesis_candidate:{str(item.get('candidateId') or '').strip()}:r{iteration_round}"
+            for item in round_snapshot
+            if str(item.get("candidateId") or "").strip()
+        )
+
+    unresolved_issues = [
+        str(item).strip()
+        for item in list(envelope_revision.get("unresolvedIssues") or [])
+        if str(item or "").strip()
+    ]
+    if not unresolved_issues:
+        quality_failure_code = str(round_record.get("qualityFailureCode") or "").strip()
+        if quality_failure_code:
+            unresolved_issues.append(f"quality_failure:{quality_failure_code}")
+            unresolved_issues.extend(
+                f"quality_failure_candidate:{str(item).strip()}"
+                for item in list(round_record.get("qualityFailureCandidateIds") or [])
+                if str(item or "").strip()
+            )
+    revision_status = str(envelope_revision.get("status") or "").strip().lower()
+    if revision_status not in _REVISION_STATUS_ALLOWLIST:
+        revision_status = "revised"
+
+    return (
+        {
+            "iteration_round": iteration_round,
+            "round_id": round_id,
+            "human_feedback": human_feedback,
+            "input_refs": list(dict.fromkeys(input_refs)),
+            "input_hash": input_hash.strip().lower(),
+            "changes": changes,
+            "unresolved_issues": unresolved_issues,
+            "output_refs": list(dict.fromkeys(output_refs)),
+            "output_hash": output_hash.strip().lower(),
+            "status": revision_status,
+        },
+        "",
+    )
+
+
+def backfill_feedback_iterations_from_round_chain(
+    *,
+    team_id: str,
+    workflow_run_id: str,
+    question_id: str,
+    source_collection_run_id: str,
+    node_run_id: str,
+    rounds: Sequence[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Replay the stored hypothesis round chain as feedback-iteration authority.
+
+    Live break this closes: a formal run whose hypothesis rounds all carry a
+    truthful ``revisionEnvelope`` (actual revision, real review rationale,
+    recorded changes) can still fail result packaging with ``canonical
+    feedback_iterations contains no actual revision`` when the canonical
+    ``feedback_iterations`` artifacts were never written for its authority —
+    the round ledger is not the artifact authority the package reader walks.
+
+    One artifact is written per round ``k = 1..N`` through the canonical
+    writer, bound to ``node_run_id`` (the formal run's hypothesis-stage node
+    attempt) with ``node_id`` deliberately distinct from ``hypothesis_design``
+    so the package reader's same-run validator never claims them and the
+    cross-run lineage walk does:
+
+    - iteration ``k < N``: ``childRunId`` = round k's id,
+      ``parentRunId`` = round k-1's id (empty for k=1);
+    - iteration ``N`` (terminal round): ``childRunId`` empty so the chain
+      anchors at ``workflowRunId`` (the formal run), ``parentRunId`` =
+      round N-1's id.
+
+    Fail-closed: the derivation validates every round and pre-validates every
+    canonical payload before the first write, so an incomplete chain never
+    leaves a partial artifact chain; nothing is ever synthesized.  Replay is
+    idempotent through the writer's identity (same node run, question, round,
+    and byte-identical evidence reuses the stored artifact).
+    """
+
+    normalized_team_id = str(team_id or "").strip()
+    normalized_run_id = str(workflow_run_id or "").strip()
+    normalized_question_id = str(question_id or "").strip().upper()
+    normalized_source = str(source_collection_run_id or "").strip()
+    normalized_node_run_id = str(node_run_id or "").strip()
+    summary: dict[str, Any] = {
+        "status": "blocked",
+        "reason": "",
+        "blockerCodes": [],
+        "rounds": 0,
+        "written": 0,
+    }
+    if not normalized_team_id or not normalized_run_id or not normalized_question_id:
+        summary["reason"] = "missing_identity"
+        summary["blockerCodes"] = ["feedback_iteration_backfill_identity_missing"]
+        return summary
+    if not normalized_source or not normalized_node_run_id:
+        summary["reason"] = "feedback_iteration_authority_missing"
+        summary["blockerCodes"] = (
+            ["feedback_iteration_authority_missing"]
+            if not normalized_source
+            else ["feedback_iteration_node_run_missing"]
+        )
+        return summary
+    if rounds is None:
+        try:
+            rounds = _question_hypothesis_rounds(
+                normalized_team_id, normalized_question_id
+            )
+        except Exception as exc:  # noqa: BLE001 - fail closed, never partial
+            summary["reason"] = str(exc)[:400] or type(exc).__name__
+            summary["blockerCodes"] = ["feedback_iteration_chain_rounds_unreadable"]
+            return summary
+    chain, chain_blocker = _ordered_round_chain(rounds or [])
+    if chain_blocker:
+        summary["reason"] = chain_blocker
+        summary["blockerCodes"] = [chain_blocker]
+        return summary
+
+    from .feedback_iterations_artifact_writer import (
+        FEEDBACK_ITERATIONS_KIND,
+        validate_feedback_iteration,
+        write_feedback_iterations_artifact,
+    )
+    from .workflow_artifact_store import list_workflow_artifacts
+
+    # Ownership gate: an authority already carrying canonical feedback
+    # iterations from another pipeline (or another question) is never
+    # rewritten by this backfill.
+    try:
+        existing_rows = list_workflow_artifacts(
+            normalized_team_id,
+            kind=FEEDBACK_ITERATIONS_KIND,
+            source_collection_run_id=normalized_source,
+        )
+    except Exception as exc:  # noqa: BLE001 - fail closed, never partial
+        summary["reason"] = str(exc)[:400] or type(exc).__name__
+        summary["blockerCodes"] = ["feedback_iteration_readback_unavailable"]
+        return summary
+    for row in existing_rows:
+        payload = row.get("payload") if isinstance(row.get("payload"), Mapping) else {}
+        existing_node = str(payload.get("nodeId") or "").strip()
+        if existing_node and existing_node != FEEDBACK_ITERATIONS_BACKFILL_NODE_ID:
+            summary["reason"] = "feedback_iteration_authority_owned_elsewhere"
+            summary["blockerCodes"] = ["feedback_iteration_authority_owned_elsewhere"]
+            return summary
+        existing_question = str(payload.get("questionId") or "").strip().upper()
+        if existing_question and existing_question != normalized_question_id:
+            summary["reason"] = "feedback_iteration_question_scope_conflict"
+            summary["blockerCodes"] = ["feedback_iteration_question_scope_conflict"]
+            return summary
+
+    # Derive every iteration first; any failure here stops the whole backfill
+    # before the first write, so no partial chain can be persisted.
+    derived: list[dict[str, Any]] = []
+    previous_round: Mapping[str, Any] | None = None
+    for index, round_record in enumerate(chain, start=1):
+        iteration, derivation_blocker = _derived_round_iteration(
+            round_record=round_record,
+            previous_round=previous_round,
+            iteration_round=index,
+        )
+        if iteration is None:
+            summary["reason"] = derivation_blocker
+            summary["blockerCodes"] = [derivation_blocker]
+            return summary
+        derived.append(iteration)
+        previous_round = round_record
+
+    # Pre-validate every canonical payload through the writer's strict
+    # normalizer before any persistence touch.
+    prepared: list[dict[str, Any]] = []
+    total = len(derived)
+    for iteration in derived:
+        index = iteration["iteration_round"]
+        is_terminal = index == total
+        kwargs = {
+            "team_id": normalized_team_id,
+            "workflow_run_id": normalized_run_id,
+            "node_run_id": normalized_node_run_id,
+            "question_id": normalized_question_id,
+            "iteration_round": index,
+            "feedback": {
+                "trigger": FEEDBACK_ITERATION_BACKFILL_TRIGGER,
+                "humanFeedback": iteration["human_feedback"],
+                "inputRefs": iteration["input_refs"],
+                "inputHash": iteration["input_hash"],
+            },
+            "revision": {
+                "changes": iteration["changes"],
+                "unresolvedIssues": iteration["unresolved_issues"],
+                "outputRefs": iteration["output_refs"],
+                "outputHash": iteration["output_hash"],
+                "status": iteration["status"],
+            },
+            "source_collection_run_id": normalized_source,
+            # The chain maps round ids as the cross-run lineage the package
+            # reader walks: run cursor → terminal artifact (empty childRunId,
+            # anchored at the formal run) → parentRunId back through rounds.
+            "parent_run_id": "" if index == 1 else str(chain[index - 2]["roundId"]),
+            "child_run_id": ""
+            if is_terminal
+            else str(chain[index - 1]["roundId"]),
+            "node_id": FEEDBACK_ITERATIONS_BACKFILL_NODE_ID,
+            "revision_phase": "",
+        }
+        try:
+            validate_feedback_iteration(**kwargs)
+        except Exception as exc:  # noqa: BLE001 - fail closed, never partial
+            summary["reason"] = str(exc)[:400] or type(exc).__name__
+            summary["blockerCodes"] = ["feedback_iteration_evidence_invalid"]
+            summary["round"] = index
+            return summary
+        prepared.append(kwargs)
+
+    for kwargs in prepared:
+        try:
+            recorded = write_feedback_iterations_artifact(**kwargs)
+        except Exception as exc:  # noqa: BLE001 - fail closed, keep evidence
+            summary["reason"] = str(exc)[:400] or type(exc).__name__
+            summary["blockerCodes"] = [
+                "feedback_iteration_authority_persistence_failed"
+            ]
+            summary["round"] = int(kwargs["iteration_round"])
+            return summary
+        if str(recorded.get("status") or "").strip().lower() not in {
+            "recorded",
+            "written",
+        }:
+            summary["reason"] = "writer_blocked"
+            summary["blockerCodes"] = [
+                str(code)
+                for code in list(recorded.get("blockerCodes") or [])
+                if str(code).strip()
+            ] or ["feedback_iteration_evidence_invalid"]
+            summary["round"] = int(kwargs["iteration_round"])
+            return summary
+        summary["written"] += 1
+    summary["status"] = "written"
+    summary["reason"] = "canonical_feedback_iterations_backfilled"
+    summary["rounds"] = total
+    return summary
+
+
+def auto_backfill_missing_feedback_iterations(
+    team_id: str,
+    *,
+    question_id: str,
+) -> dict[str, Any]:
+    """Sweep step: backfill feedback-iteration authority for blocked runs.
+
+    Auto-advance step after ``auto_backfill_missing_round_authorities``.  A
+    blocked (or failed) formal run whose authority carries zero canonical
+    ``feedback_iterations`` artifacts fails result packaging with ``canonical
+    feedback_iterations contains no actual revision`` forever, even though the
+    question's hypothesis-review round chain holds a complete, truthful
+    revision lineage.  Discovery mirrors the blocked-run scan of
+    :func:`auto_retry_blocked_formal_nodes`; the authority and the run's
+    hypothesis-stage node attempt come straight from the workflow ledger, and
+    the write goes through
+    :func:`backfill_feedback_iterations_from_round_chain` (fail-closed,
+    idempotent — a second pass replays byte-identical evidence and writes
+    nothing new).  Nothing here raises: one broken run is isolated and every
+    non-trivial outcome lands as a
+    ``hypothesis_first.auto_backfill_feedback_iterations`` scene event plus a
+    ``logger.warning``.
+    """
+
+    normalized_team_id = str(team_id or "").strip()
+    normalized_question_id = str(question_id or "").strip().upper()
+    summary: dict[str, Any] = {
+        "status": "skipped",
+        "reason": "",
+        "written": 0,
+        "blocked": 0,
+        "skipped": 0,
+        "failed": 0,
+        "runs": [],
+    }
+    if not normalized_team_id or not normalized_question_id:
+        summary["reason"] = "missing_identity"
+        return summary
+    try:
+        from .formal_read_runtime import get_query_service
+
+        payload = get_query_service().list_runs(
+            team_id=normalized_team_id, workflow_id=CHALLENGE_CUP_WORKFLOW_ID
+        )
+    except Exception:  # noqa: BLE001 - formal runtime absent (command line)
+        summary["reason"] = "formal_runtime_unavailable"
+        return summary
+    target_runs = [
+        run
+        for run in list((payload or {}).get("runs") or [])
+        if isinstance(run, Mapping)
+        and str(run.get("questionId") or "").strip().upper()
+        == normalized_question_id
+        and str(run.get("status") or "").strip().lower()
+        in FEEDBACK_ITERATION_BACKFILL_RUN_STATUSES
+    ]
+    if not target_runs:
+        summary["reason"] = "no_target_formal_run"
+        return summary
+    from .runtime_factory import production_workflow_runtime
+
+    runtime = production_workflow_runtime()
+    if runtime is None:
+        summary["reason"] = "formal_runtime_unavailable"
+        return summary
+    try:
+        rounds = _question_hypothesis_rounds(
+            normalized_team_id, normalized_question_id
+        )
+    except Exception as exc:  # noqa: BLE001 - one broken question is isolated
+        summary["reason"] = "rounds_unreadable"
+        summary["error"] = str(exc)[:400]
+        return summary
+    store = runtime.store
+    for run in target_runs:
+        run_id = str(run.get("runId") or "").strip()
+        if not run_id:
+            summary["skipped"] += 1
+            continue
+        run_fields = {
+            "teamId": normalized_team_id,
+            "questionId": normalized_question_id,
+            "runId": run_id,
+        }
+        try:
+            record = store.get_run(run_id)
+            snapshot = json.loads(
+                str(getattr(record, "input_snapshot_json", "") or "") or "{}"
+            )
+            source = (
+                str(snapshot.get("sourceCollectionRunId") or "").strip()
+                if isinstance(snapshot, Mapping)
+                else ""
+            )
+            attempt = store.latest_attempt(run_id, "hypothesis_design")
+            node_run_id = str(getattr(attempt, "node_run_id", "") or "").strip()
+        except Exception as exc:  # noqa: BLE001 - one broken run is isolated
+            summary["failed"] += 1
+            summary["status"] = "failed"
+            summary["runs"].append(
+                {"runId": run_id, "status": "failed", "reason": type(exc).__name__}
+            )
+            logger.warning(
+                "hypothesis_first.auto_backfill_feedback_iterations failed "
+                "(run_record_unreadable): team=%s question=%s run=%s error=%s",
+                normalized_team_id,
+                normalized_question_id,
+                run_id,
+                str(exc)[:200],
+            )
+            _record_scene_event(
+                "hypothesis_first.auto_backfill_feedback_iterations",
+                outcome="failed",
+                level="warning",
+                fields={**run_fields, "reason": type(exc).__name__},
+            )
+            continue
+        result = backfill_feedback_iterations_from_round_chain(
+            team_id=normalized_team_id,
+            workflow_run_id=run_id,
+            question_id=normalized_question_id,
+            source_collection_run_id=source,
+            node_run_id=node_run_id,
+            rounds=rounds,
+        )
+        result_status = str(result.get("status") or "")
+        outcome: dict[str, Any] = {
+            "runId": run_id,
+            "status": result_status,
+            "reason": str(result.get("reason") or ""),
+            "blockerCodes": list(result.get("blockerCodes") or []),
+            "rounds": int(result.get("rounds") or 0),
+        }
+        summary["runs"].append(outcome)
+        if result_status == "written":
+            summary["written"] += int(result.get("written") or 0)
+            summary["status"] = "written"
+            _record_scene_event(
+                "hypothesis_first.auto_backfill_feedback_iterations",
+                outcome="backfilled",
+                fields={
+                    **run_fields,
+                    "rounds": outcome["rounds"],
+                    "sourceCollectionRunId": source,
+                },
+            )
+        elif result_status == "blocked":
+            summary["blocked"] += 1
+            if summary["status"] != "written":
+                summary["status"] = "blocked"
+            summary["reason"] = outcome["reason"]
+            logger.warning(
+                "hypothesis_first.auto_backfill_feedback_iterations blocked: "
+                "team=%s question=%s run=%s reason=%s blockers=%s",
+                normalized_team_id,
+                normalized_question_id,
+                run_id,
+                outcome["reason"],
+                outcome["blockerCodes"],
+            )
+            _record_scene_event(
+                "hypothesis_first.auto_backfill_feedback_iterations",
+                outcome="blocked",
+                level="warning",
+                fields={
+                    **run_fields,
+                    "reason": outcome["reason"],
+                    "blockerCodes": outcome["blockerCodes"],
+                },
+            )
+        else:
+            summary["skipped"] += 1
+    return summary
+
+
 def auto_retry_pending_collection_handoffs(
     team_id: str,
     *,
@@ -5917,7 +6508,8 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
     closing tick may be long gone by the time this runs).  Enumerates the
     team ids that own a hypothesis-first chain ledger read-only, then walks
     each question through approve -> regenerate -> backfill-round-authorities
-    -> retry-handoffs -> adjudicate -> create -> accept-knowledge-handoffs ->
+    -> backfill-feedback-iterations -> retry-handoffs -> adjudicate ->
+    create -> accept-knowledge-handoffs ->
     retry: review
     digests that waited beyond the TTL
     get approved and closed first (so the fan-in / next-round advance can
@@ -5945,6 +6537,7 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
         "approved": 0,
         "roundsRegenerated": 0,
         "authoritiesBackfilled": 0,
+        "feedbackIterationsBackfilled": 0,
         "handoffsRetried": 0,
         "adjudicated": 0,
         "rejected": 0,
@@ -6049,6 +6642,22 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
                     backfill.get("backfilled") or 0
                 )
                 if str(backfill.get("status") or "") == "failed":
+                    summary["failed"] += 1
+                # Step zero-seven, after round-authority backfill: a blocked
+                # formal run whose authority carries zero canonical
+                # feedback_iterations artifacts gets its closed
+                # hypothesis-review round chain replayed as feedback-iteration
+                # authority (fail-closed, idempotent).  Without this, result
+                # packaging fails with "canonical feedback_iterations contains
+                # no actual revision" forever even though every round
+                # truthfully revised.
+                feedback_backfill = auto_backfill_missing_feedback_iterations(
+                    team_id, question_id=question_id
+                )
+                summary["feedbackIterationsBackfilled"] += int(
+                    feedback_backfill.get("written") or 0
+                )
+                if str(feedback_backfill.get("status") or "") == "failed":
                     summary["failed"] += 1
                 # Step zero-eight, after regeneration and before
                 # adjudication: a collection request left in handoff_pending
