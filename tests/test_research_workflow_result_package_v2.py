@@ -1665,18 +1665,26 @@ def test_aggregated_payload_merges_cited_runs_and_dedupes_card_ids(monkeypatch) 
         cited_run_ids=["dprun-run-a", "dprun-run-b", "dprun-run-empty"],
     )
 
+    # Fill-missing projection: the cards carry no collection-stage envelope,
+    # so the evidence-kind umbrella vocabulary fills source_type on each.
     assert payload == {
         "teamId": "research-team",
         "sourceCollectionRunIds": ["dprun-run-a", "dprun-run-b"],
         "evidenceCards": [
-            _claim_evidence_card(claimEvidenceId="ce-a-supports"),
-            shared_card,
-            _claim_evidence_card(
-                claimEvidenceId="ce-b-challenges",
-                candidateId="candidate-2",
-                quote="Counter anchor.",
-                supportLevel="contradicts",
-            ),
+            {
+                **_claim_evidence_card(claimEvidenceId="ce-a-supports"),
+                "source_type": "other",
+            },
+            {**shared_card, "source_type": "other"},
+            {
+                **_claim_evidence_card(
+                    claimEvidenceId="ce-b-challenges",
+                    candidateId="candidate-2",
+                    quote="Counter anchor.",
+                    supportLevel="contradicts",
+                ),
+                "source_type": "other",
+            },
         ],
         "cardCount": 3,
         "aggregatedFromDimensionReviews": True,
@@ -1773,7 +1781,7 @@ def test_evidence_card_payload_layers_aggregation_only_after_missing(
 
 
 def test_v2_build_aggregates_review_cited_evidence_batches(
-    monkeypatch,
+    monkeypatch, tmp_path
 ) -> None:
     """Production SCI-009 shape: the authority run holds no card batch.
 
@@ -1789,6 +1797,10 @@ def test_v2_build_aggregates_review_cited_evidence_batches(
         ]
     )
     del artifacts["evidence_card_batch"]
+    # The frozen scope names a project whose store holds none of these
+    # sources; the fill-missing projection still runs and every card id
+    # resolves through the authority batch.
+    _patch_project_candidate_store(monkeypatch, tmp_path, None)
     cards_by_run = {
         "dprun-run-a": [
             _claim_evidence_card(claimEvidenceId="ce-a-supports"),
@@ -1824,7 +1836,9 @@ def test_v2_build_aggregates_review_cited_evidence_batches(
     assert evidence_ids.index("ce-shared") < evidence_ids.index("ce-b-challenges")
     evidence = {item["evidence_id"]: item for item in output["evidence"]}
     assert evidence["ce-b-challenges"]["relation"] == "challenges"
-    assert evidence["ce-a-supports"]["source_type"] == "peer_reviewed_paper"
+    # Fill-missing projection: the unenveloped card carries the evidence-kind
+    # umbrella source_type, which wins over the batch record's sourceKind.
+    assert evidence["ce-a-supports"]["source_type"] == "other"
     checks = {item["evidenceId"]: item for item in package["citationChecks"]}
     assert set(checks) == set(evidence_ids)
 
@@ -1948,12 +1962,17 @@ def test_v2_aggregated_cards_resolve_hypothesis_level_candidates(
     assert evidence["ce-hypo-a"]["source_type"] == "peer_reviewed_paper"
 
 
-def test_v2_aggregated_card_with_unknown_candidate_fails_closed(monkeypatch) -> None:
+def test_v2_aggregated_card_with_unknown_candidate_fails_closed(
+    monkeypatch, tmp_path
+) -> None:
     _, artifacts = _aggregation_artifacts()
     artifacts["dimension_reviews"] = _aggregation_dimension_artifact(
         [_canonical_batch_ref("dprun-run-a", "a")]
     )
     del artifacts["evidence_card_batch"]
+    # The envelope-complete card never triggers the store read; pin the
+    # resolver anyway so the build stays hermetic.
+    _patch_project_candidate_store(monkeypatch, tmp_path, None)
     cards_by_run = {
         "dprun-run-a": [
             _hypothesis_role_card(
@@ -2205,12 +2224,13 @@ def test_v2_aggregated_lean_card_unresolvable_stays_fail_closed(
 def test_v2_aggregated_candidate_id_cards_keep_id_authority_resolution(
     monkeypatch, tmp_path
 ) -> None:
-    """Cards bound to a candidate id are never URL-projected.
+    """Cards bound to a candidate id keep the id-authority resolution.
 
-    Even in a batch that also contains lean cards, a candidateId-bearing card
-    is returned byte-identical from the aggregated payload and keeps the exact
-    id-authority resolution — its title comes from the candidate store by id,
-    never from the URL index.
+    The fill-missing projection now applies to candidateId-bearing cards too
+    (their id can resolve to an envelope-less authority), but only fills what
+    the card lacks: the id-bound card's title still comes from the candidate
+    store by id, never from the URL index, and a card field is never
+    overwritten.
     """
 
     _, artifacts = _aggregation_artifacts()
@@ -2240,8 +2260,9 @@ def test_v2_aggregated_candidate_id_cards_keep_id_authority_resolution(
 
     # Payload level, no research project in scope: the cited runs' scoped
     # batches are the fallback index authority. The id-bound card is
-    # byte-identical (no fields added) while the lean card next to it is
-    # projected from the scoped candidates.
+    # fill-missing projected (its citation locator and missing timestamps
+    # contribute nothing, the evidence-kind umbrella fills source_type) while
+    # the lean card next to it is projected from the scoped candidates.
     registry_calls = _patch_registry_cards(
         monkeypatch, cards_by_run, candidates_by_run
     )
@@ -2250,14 +2271,15 @@ def test_v2_aggregated_candidate_id_cards_keep_id_authority_resolution(
         cited_run_ids=["dprun-run-a"],
     )
     assert registry_calls == ["dprun-run-a", "dprun-run-a"]
-    assert payload["evidenceCards"][0] == id_bound_card
+    assert payload["evidenceCards"][0] == {**id_bound_card, "source_type": "other"}
     lean_projected = payload["evidenceCards"][1]
     assert lean_projected["title"] == "Pathways to reduce global plastic waste mismanagement"
     assert lean_projected["source_type"] == "peer_reviewed_paper"
 
     # Build level (frozen scope names the project, so the project store is
-    # the index authority): the id-bound card still resolves through the
-    # candidate id authority exactly as before the lean projection existed.
+    # the index authority and the record id authority): the id-bound card
+    # still resolves through the candidate id authority exactly as before —
+    # title and retrieved_at come from the authority batch record by id.
     _patch_project_candidate_store(
         monkeypatch, tmp_path, [_source_manifest_candidate()]
     )
@@ -2267,8 +2289,290 @@ def test_v2_aggregated_candidate_id_cards_keep_id_authority_resolution(
     evidence = {item["evidence_id"]: item for item in output["evidence"]}
     assert set(evidence) == {"ce-id-bound", "ce-lean-doi"}
     assert evidence["ce-id-bound"]["title"] == "Computational Capacity of the Universe"
-    assert evidence["ce-id-bound"]["source_type"] == "peer_reviewed_paper"
+    assert evidence["ce-id-bound"]["source_type"] == "other"
     assert evidence["ce-id-bound"]["retrieved_at"] == "2026-09-02T17:14:45Z"
+
+
+def test_v2_aggregated_card_resolves_candidate_from_project_store(
+    monkeypatch, tmp_path
+) -> None:
+    """Live SCI-009 mirror: a source id only the project store knows.
+
+    The formal run's authority batch is empty of the aggregated cards' ids;
+    the failing card's ``candidate-2026*`` id exists only in the run owner
+    project's candidate store (full title + sourceUrl envelope), so the
+    project records are the id authority — and the store is read exactly
+    once for the whole build.
+    """
+
+    _, artifacts = _aggregation_artifacts()
+    artifacts["source_candidate_batch"] = {"candidates": []}
+    artifacts["dimension_reviews"] = _aggregation_dimension_artifact(
+        [_canonical_batch_ref("dprun-run-a", "a")]
+    )
+    del artifacts["evidence_card_batch"]
+    project_record = {
+        "candidateId": "candidate-20260908171714-7c13f5b4",
+        "candidateType": "source_manifest",
+        "title": "The geographies of community science",
+        "sourceKind": "paper",
+        "sourceUrl": "https://www.nature.com/articles/s41599-018-0212-7",
+        "retrievedAt": "2026-09-08T16:38:35Z",
+    }
+    _patch_project_candidate_store(monkeypatch, tmp_path, [project_record])
+    reads: list[str] = []
+    resolved = result_package_v2.resolve_research_project_workspace_root
+
+    def counting_resolver(team_id, project_id):
+        reads.append(project_id)
+        return resolved(team_id, project_id)
+
+    monkeypatch.setattr(
+        result_package_v2,
+        "resolve_research_project_workspace_root",
+        counting_resolver,
+    )
+    cards_by_run = {
+        "dprun-run-a": [
+            _claim_evidence_card(
+                claimEvidenceId="ce-proj-only",
+                candidateId="candidate-20260908171714-7c13f5b4",
+                sourceId="abstract-block-9",
+                locator={"kind": "citation", "url": "abstract-block-9"},
+            ),
+        ],
+    }
+
+    package, _ = _build_v2_with_aggregation(monkeypatch, artifacts, cards_by_run)
+    output = package["challengeQuestionOutput"]
+
+    assert challenge_question_runs._schema_issues(output) == []
+    evidence = {item["evidence_id"]: item for item in output["evidence"]}
+    item = evidence["ce-proj-only"]
+    # Title/source_url/retrieved_at come from the project record the id
+    # resolves to — not from the card (which carries no envelope) and not
+    # from a URL match (the sourceId is not URL-shaped).
+    assert item["title"] == "The geographies of community science"
+    assert item["source_url"] == "https://www.nature.com/articles/s41599-018-0212-7"
+    assert item["retrieved_at"] == "2026-09-08T16:38:35Z"
+    # Fill-missing semantics: the card's evidenceKind umbrella fills
+    # source_type on the card, and a card field wins over the record kind.
+    assert item["source_type"] == "other"
+    # Single-read proof: the lean index and the id authority share one
+    # memoized store read for the entire package build.
+    assert reads == ["project-sci-096"]
+
+
+def test_v2_aggregated_card_with_id_unknown_everywhere_fails_closed(
+    monkeypatch, tmp_path
+) -> None:
+    """The orphan gate stays: an id no authority knows still fails closed."""
+
+    _, artifacts = _aggregation_artifacts()
+    artifacts["source_candidate_batch"] = {"candidates": []}
+    artifacts["dimension_reviews"] = _aggregation_dimension_artifact(
+        [_canonical_batch_ref("dprun-run-a", "a")]
+    )
+    del artifacts["evidence_card_batch"]
+    _patch_project_candidate_store(
+        monkeypatch, tmp_path, [_source_manifest_candidate()]
+    )
+    cards_by_run = {
+        "dprun-run-a": [
+            _claim_evidence_card(
+                claimEvidenceId="ce-nowhere",
+                candidateId="candidate-20260908171714-000000",
+            ),
+        ],
+    }
+
+    with pytest.raises(
+        result_package_v2.ResultPackageV2Error,
+        match="ce-nowhere references candidate candidate-20260908171714-000000 "
+        "missing from source_candidate_batch",
+    ):
+        _build_v2_with_aggregation(monkeypatch, artifacts, cards_by_run)
+
+
+def test_v2_single_run_authority_path_applies_no_project_authority(
+    monkeypatch, tmp_path
+) -> None:
+    """The single-run chain is byte-identical: no project store is read.
+
+    Even with a resolvable project store on disk, a run whose authority batch
+    holds the evidence cards resolves every card id from the batch alone;
+    the memoized project reader is created but never invoked.
+    """
+
+    _, artifacts = _claim_evidence_artifacts(
+        [_claim_evidence_card(claimEvidenceId="ce-single")]
+    )
+    _patch_project_candidate_store(
+        monkeypatch, tmp_path, [_source_manifest_candidate()]
+    )
+    reads: list[str] = []
+    resolved = result_package_v2.resolve_research_project_workspace_root
+
+    def counting_resolver(team_id, project_id):
+        reads.append(project_id)
+        return resolved(team_id, project_id)
+
+    monkeypatch.setattr(
+        result_package_v2,
+        "resolve_research_project_workspace_root",
+        counting_resolver,
+    )
+
+    package = _build_v2_with_artifacts(monkeypatch, artifacts)
+    output = package["challengeQuestionOutput"]
+
+    assert challenge_question_runs._schema_issues(output) == []
+    evidence = {item["evidence_id"]: item for item in output["evidence"]}
+    assert evidence["ce-single"]["title"] == "Computational Capacity of the Universe"
+    assert evidence["ce-single"]["source_type"] == "peer_reviewed_paper"
+    assert evidence["ce-single"]["retrieved_at"] == "2026-09-02T17:14:45Z"
+    assert reads == []
+
+
+def test_v2_authority_batch_candidate_wins_over_project_store(
+    monkeypatch, tmp_path
+) -> None:
+    """Precedence: the authority batch record keeps the id (first-seen wins)."""
+
+    _, artifacts = _aggregation_artifacts()
+    artifacts["dimension_reviews"] = _aggregation_dimension_artifact(
+        [_canonical_batch_ref("dprun-run-a", "a")]
+    )
+    del artifacts["evidence_card_batch"]
+    _patch_project_candidate_store(
+        monkeypatch,
+        tmp_path,
+        [
+            {
+                "candidateId": "candidate-1",
+                "candidateType": "source_manifest",
+                "title": "Project store shadow title",
+                "sourceKind": "paper",
+                "sourceUrl": "https://doi.org/10.1111/shadow",
+                "retrievedAt": "2026-09-01T00:00:00Z",
+            }
+        ],
+    )
+    cards_by_run = {
+        "dprun-run-a": [
+            _claim_evidence_card(claimEvidenceId="ce-batch-wins"),
+        ],
+    }
+
+    package, _ = _build_v2_with_aggregation(monkeypatch, artifacts, cards_by_run)
+    output = package["challengeQuestionOutput"]
+
+    evidence = {item["evidence_id"]: item for item in output["evidence"]}
+    # candidate-1 exists in both the authority batch and the project store;
+    # the batch record was merged first and keeps the id.
+    assert evidence["ce-batch-wins"]["title"] == (
+        "Computational Capacity of the Universe"
+    )
+    assert evidence["ce-batch-wins"]["retrieved_at"] == "2026-09-02T17:14:45Z"
+
+
+def test_v2_aggregated_cards_resolve_dimension_review_hypothesis_ids(
+    monkeypatch, tmp_path
+) -> None:
+    """Live SCI-009 mirror: chain ids the reviews bind, the set artifact lacks.
+
+    The formal run's hypothesis_set carries only portfolio ids, while the
+    dimension_reviews rows persist the hypothesis-first chain ids the cards
+    are registered under.  The review authority confirms those ids exist
+    (mapped to an empty record — no envelope claims), and the fill-missing
+    projection supplies the envelope from the authorities the card carries.
+    """
+
+    _, artifacts = _aggregation_artifacts()
+    refs = [_canonical_batch_ref("dprun-run-a", "a")]
+    dimension_payload = _aggregation_dimension_artifact(refs)
+    dimension_payload["dimensionReviews"].append(
+        {
+            "hypothesis_id": "sci-009-c38102c57",
+            "dimension": "evidence_support",
+            "rating": "adequate",
+            "rationale": "Independent chain-hypothesis review row.",
+            "evidence_refs": list(refs),
+            "reviewer": "Research Review Agent",
+        }
+    )
+    artifacts["dimension_reviews"] = dimension_payload
+    # Production: the authority batch is empty of every card id.
+    artifacts["source_candidate_batch"] = {"candidates": []}
+    del artifacts["evidence_card_batch"]
+    _patch_project_candidate_store(
+        monkeypatch, tmp_path, [_source_manifest_candidate()]
+    )
+    cards_by_run = {
+        "dprun-run-a": [
+            _lean_production_card(
+                claimEvidenceId="ce-hypo-lean",
+                candidateId="sci-009-c38102c57",
+            ),
+        ],
+    }
+
+    package, registry_calls = _build_v2_with_aggregation(
+        monkeypatch, artifacts, cards_by_run
+    )
+    output = package["challengeQuestionOutput"]
+
+    assert challenge_question_runs._schema_issues(output) == []
+    evidence = {item["evidence_id"]: item for item in output["evidence"]}
+    item = evidence["ce-hypo-lean"]
+    # The envelope comes from the card's own authorities (url locator, store
+    # timestamps, URL-matched project record) — never invented.
+    assert item["title"] == "Pathways to reduce global plastic waste mismanagement"
+    assert item["source_url"] == "https://doi.org/10.1126/science.adr3837"
+    assert item["retrieved_at"] == "2026-09-08T13:05:00.000000+00:00"
+    assert item["source_type"] == "peer_reviewed_paper"
+    assert item["fact"] == (
+        "Global plastic waste mismanagement can be cut sharply by 2050."
+    )
+    assert item["verification_status"] == "unverified"
+    assert registry_calls == ["dprun-run-a"]
+
+
+def test_v2_candidate_id_card_projection_is_fill_missing() -> None:
+    """CandidateId cards get exactly the lean fill rules, idempotently.
+
+    A card with a complete envelope passes through unchanged; a card missing
+    envelope fields gets them filled from its own authorities, and a second
+    pass changes nothing.
+    """
+
+    complete = _hypothesis_role_card()
+    assert (
+        result_package_v2._project_lean_evidence_card(deepcopy(complete), {})
+        == complete
+    )
+
+    sparse = _claim_evidence_card(claimEvidenceId="ce-sparse")
+    record_index = {
+        "abstract-block-1": {
+            "title": "Computational Capacity of the Universe",
+            "source_kind": "paper",
+        }
+    }
+    projected = result_package_v2._project_lean_evidence_card(
+        deepcopy(sparse), record_index
+    )
+    assert projected["title"] == "Computational Capacity of the Universe"
+    assert projected["source_type"] == "peer_reviewed_paper"
+    # A citation locator never fabricates a source_url, and a card without
+    # store timestamps stays without retrieved_at.
+    assert "source_url" not in projected
+    assert "retrieved_at" not in projected
+    # Idempotent: the second pass is a no-op.
+    assert (
+        result_package_v2._project_lean_evidence_card(projected, record_index)
+        == projected
+    )
 
 
 def test_v2_single_run_authority_batch_applies_no_lean_projection(monkeypatch) -> None:

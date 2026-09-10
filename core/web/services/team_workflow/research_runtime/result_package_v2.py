@@ -10,7 +10,7 @@ free-form task summaries.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from typing import Any
 
@@ -521,6 +521,8 @@ def _evidence(
     evidence_payload: Mapping[str, Any],
     candidate_payload: Mapping[str, Any],
     hypothesis_candidates: Sequence[Mapping[str, Any]] | None = None,
+    project_candidates: Sequence[Mapping[str, Any]] | None = None,
+    dimension_hypothesis_ids: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
     direct = _list_of_mappings(evidence_payload.get("evidence"))
     if direct:
@@ -535,13 +537,24 @@ def _evidence(
         _text(item.get("candidateId") or item.get("sourceId") or item.get("recordId")): item
         for item in candidates
     }
-    # Review-cited aggregated batches carry hypothesis-level card bindings:
-    # the claim-evidence store registers hypothesis-role cards under the
-    # hypothesis candidate id, a space disjoint from the source candidate
-    # ids.  The hypothesis_set authority is the second real identity source
-    # for those ids — not a bypass; ids unknown to BOTH authorities still
-    # fail closed below.  Only aggregated payloads pass this parameter, so
-    # the single authority-run path keeps its exact fail-closed behavior.
+    # Aggregated review-cited batches layer three more real identity
+    # authorities onto the authority-run batch, each filling only the ids the
+    # previous layers do not already know (first-seen wins, so the strongest
+    # authority keeps precedence):
+    #   - the hypothesis_set candidates: review-cited batches carry
+    #     hypothesis-level card bindings under the hypothesis candidate id, a
+    #     space disjoint from the source candidate ids;
+    #   - the run owner project's candidate store records: production cards
+    #     cite source ids whose full records live on an earlier collection
+    #     run of the same project that the authority batch does not carry;
+    #   - the hypothesis ids the dimension_reviews payload itself binds:
+    #     production review rows persist chain ids the formal run's
+    #     hypothesis_set does not carry, so the review authority confirms the
+    #     id exists as a reviewed candidate while the empty record mapped
+    #     here makes no envelope claims.
+    # Ids unknown to ALL authorities still fail closed below, and only
+    # aggregated payloads receive these parameters, so the single
+    # authority-run path keeps its exact fail-closed behavior.
     if hypothesis_candidates:
         for item in hypothesis_candidates:
             hypothesis_id = _text(
@@ -551,6 +564,17 @@ def _evidence(
             )
             if hypothesis_id and hypothesis_id not in by_id:
                 by_id[hypothesis_id] = item
+    if project_candidates:
+        for item in project_candidates:
+            candidate_id = _text(
+                item.get("candidateId") or item.get("sourceId") or item.get("recordId")
+            )
+            if candidate_id and candidate_id not in by_id:
+                by_id[candidate_id] = item
+    if dimension_hypothesis_ids:
+        for hypothesis_id in dimension_hypothesis_ids:
+            if hypothesis_id and hypothesis_id not in by_id:
+                by_id[hypothesis_id] = {}
     if not cards:
         raise ResultPackageV2Error("canonical evidence_card_batch contains no evidence")
     projected: list[dict[str, Any]] = []
@@ -600,6 +624,60 @@ def _cited_evidence_run_ids(dimension_payload: Mapping[str, Any]) -> list[str]:
                 if run_id:
                     runs.add(run_id)
     return sorted(runs)
+
+
+def _dimension_hypothesis_ids(dimension_payload: Mapping[str, Any]) -> list[str]:
+    """Hypothesis ids the dimension_reviews authority itself binds.
+
+    Production review rows persist ``hypothesis_id`` (the hypothesis-first
+    chain ids) that the formal run's hypothesis_set artifact does not carry,
+    so the reviews are themselves a real identity authority for the evidence
+    gate: an id the reviews bound is a known reviewed candidate, and the
+    empty record mapped for it in ``_evidence`` makes no envelope claims.
+    Row gathering reuses the ``_cited_evidence_run_ids`` pattern (top-level
+    rows plus rows nested under per-candidate containers); the selection
+    block's candidate ids (selected, rejected, listed candidates) are
+    harvested too.  Duplicates collapse into a sorted list.
+    """
+
+    ids: set[str] = set()
+    rows = _list_of_mappings(
+        dimension_payload.get("dimensionReviews")
+        or dimension_payload.get("dimension_reviews")
+    )
+    for candidate in _list_of_mappings(dimension_payload.get("candidates")):
+        rows.extend(
+            _list_of_mappings(
+                candidate.get("dimensionReviews")
+                or candidate.get("dimension_reviews")
+            )
+        )
+    for row in rows:
+        hypothesis_id = _text(row.get("hypothesis_id") or row.get("hypothesisId"))
+        if hypothesis_id:
+            ids.add(hypothesis_id)
+    selection = _mapping(dimension_payload.get("selection"))
+    selected = _text(selection.get("selected_hypothesis_id"))
+    if selected:
+        ids.add(selected)
+    for key in ("rejected_hypotheses", "candidates"):
+        entries = selection.get(key)
+        if not isinstance(entries, Sequence) or isinstance(
+            entries, (str, bytes, bytearray)
+        ):
+            continue
+        for entry in entries:
+            if isinstance(entry, Mapping):
+                entry_id = _text(
+                    entry.get("hypothesis_id")
+                    or entry.get("hypothesisId")
+                    or entry.get("candidateId")
+                )
+            else:
+                entry_id = _text(entry)
+            if entry_id:
+                ids.add(entry_id)
+    return sorted(ids)
 
 
 def _index_candidate_records(records: Sequence[Any]) -> dict[str, dict[str, str]]:
@@ -656,22 +734,25 @@ def _cited_runs_candidate_record_index(
     return _index_candidate_records(records)
 
 
-def _project_candidate_record_index(
+def _project_candidate_records(
     *, team_id: str, research_project_id: str
-) -> dict[str, dict[str, str]]:
-    """Index the run owner project's whole candidate store (read once).
+) -> list[dict[str, Any]]:
+    """Read the run owner project's whole candidate store (one file read).
 
     The strict per-run scope is what canonical artifacts need, but the
-    title/kind resolver's truth domain is "sources this project collected":
-    production hypothesis-first cards cite DOIs whose ``source_manifest``
-    records live on an earlier collection run of the same project that the
-    dimension reviews never cite, so the scoped read-back under-covers while
-    the project-wide store covers every card.  This reads the store's own
+    aggregated evidence path's truth domain is "sources this project
+    collected": production cards cite ids and DOIs whose records live on
+    earlier collection runs of the same project that the dimension reviews
+    never cite, so the scoped read-back under-covers while the project-wide
+    store covers every card.  This reads the store's own
     ``candidate_store/index.json`` under the project workspace root directly —
-    deliberately bypassing ``load_scoped_artifact_payload`` — and keeps the
-    first record's title and source kind per URL.  A store that cannot be
-    resolved or read yields an empty index, so the cards keep failing closed
-    instead of being guessed at.
+    deliberately bypassing ``load_scoped_artifact_payload`` — exactly once per
+    package build, and returns the raw non-``candidate_graph`` candidate
+    records so BOTH derived views come from that single read: the
+    ``sourceUrl -> {title, source_kind}`` index for the lean projection and
+    the ``candidateId -> record`` id authority for the evidence gate.  A store
+    that cannot be resolved or read yields an empty list, so the cards keep
+    failing closed instead of being guessed at.
     """
 
     try:
@@ -682,11 +763,53 @@ def _project_candidate_record_index(
             (workspace / "candidate_store" / "index.json").read_text(encoding="utf-8")
         )
     except Exception:
-        return {}
+        return []
     records = payload.get("candidates") if isinstance(payload, Mapping) else None
     if not isinstance(records, Sequence) or isinstance(records, (str, bytes, bytearray)):
-        return {}
-    return _index_candidate_records(records)
+        return []
+    return [
+        deepcopy(dict(record))
+        for record in records
+        if isinstance(record, Mapping)
+        and _text(record.get("candidateType")) != "candidate_graph"
+    ]
+
+
+def _project_candidates_reader(
+    *, team_id: str, research_project_id: str
+) -> Callable[[], list[dict[str, Any]]]:
+    """Memoize the single project-store read for one package build.
+
+    The aggregated evidence path consumes the project records twice — as the
+    lean title/kind index inside the aggregation layer and as the
+    ``candidateId`` id authority in ``_evidence`` — and both consumers must be
+    served by the same single file read.  The returned closure reads the store
+    at most once per build; the single-run path never invokes it.
+    """
+
+    records: list[dict[str, Any]] | None = None
+
+    def read() -> list[dict[str, Any]]:
+        nonlocal records
+        if records is None:
+            records = _project_candidate_records(
+                team_id=team_id, research_project_id=research_project_id
+            )
+        return records
+
+    return read
+
+
+def _project_candidate_record_index(
+    *, team_id: str, research_project_id: str
+) -> dict[str, dict[str, str]]:
+    """Derive the lean projection's url title/kind index from one store read."""
+
+    return _index_candidate_records(
+        _project_candidate_records(
+            team_id=team_id, research_project_id=research_project_id
+        )
+    )
 
 
 def _source_candidate_record_index(
@@ -713,28 +836,30 @@ def _source_candidate_record_index(
 def _project_lean_evidence_card(
     card: Mapping[str, Any], record_index: Mapping[str, Mapping[str, str]]
 ) -> dict[str, Any]:
-    """Project the v2 envelope fields a lean claim-evidence card lacks.
+    """Project the v2 envelope fields a claim-evidence card lacks (fill-missing).
 
     Hypothesis-first stores persist cards with only ``quote`` / ``sourceId`` /
-    ``locator`` / store timestamps / ``evidenceKind`` — no ``candidateId`` and
-    no collection-stage envelope — so the strict ``_evidence_item``
-    requirements would fail closed.  Each missing field is filled only from an
-    authority the card already carries: the ``kind: "url"`` locator becomes
-    ``source_url``, the store timestamps become ``retrieved_at``, and the
-    URL-shaped ``sourceId`` resolves title and source kind against the cited
-    runs' candidate records — a recognized candidate kind maps through the
-    existing ``_SOURCE_KIND_SOURCE_TYPES`` vocabulary (``paper`` →
+    ``locator`` / store timestamps / ``evidenceKind`` — no collection-stage
+    envelope — and candidateId-bearing cards can resolve to authorities that
+    carry no envelope either (a dimension-harvested hypothesis id maps to an
+    empty record; a project-store record may lack individual fields), so the
+    strict ``_evidence_item`` requirements would fail closed.  Each missing
+    field is filled only from an authority the card already carries: the
+    ``kind: "url"`` locator becomes ``source_url``, the store timestamps
+    become ``retrieved_at``, and the URL-shaped ``sourceId`` resolves title
+    and source kind against the project-wide (or cited runs') candidate
+    records — a recognized candidate kind maps through the existing
+    ``_SOURCE_KIND_SOURCE_TYPES`` vocabulary (``paper`` →
     ``peer_reviewed_paper``), and only an unrecognized or missing candidate
     kind falls back to the evidence-kind vocabulary (``primary_result`` lands
-    on the schema's non-authoritative ``other``).  Nothing is invented: a
+    on the schema's non-authoritative ``other``).  Nothing is invented and
+    nothing is overwritten: the projection is idempotent fill-missing, so a
+    card whose envelope is already complete is returned unchanged, and a
     field that cannot be resolved from those authorities stays absent so the
-    strict producer still raises.  Cards bound to a candidate id keep the
-    exact id-authority resolution (or orphan gate) in ``_evidence`` and are
-    returned unchanged.
+    strict producer still raises.  The id-authority resolution (or orphan
+    gate) in ``_evidence`` stays untouched.
     """
 
-    if _text(card.get("candidateId") or card.get("recordId")):
-        return dict(card)
     projected = dict(card)
     matched = record_index.get(_text(card.get("sourceId"))) or {}
     locator = card.get("locator")
@@ -770,6 +895,7 @@ def _aggregated_evidence_card_payload(
     team_id: str,
     cited_run_ids: Sequence[str],
     research_project_id: str = "",
+    project_candidates: Callable[[], list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any] | None:
     """Merge every review-cited run's evidence-card batch into one payload.
 
@@ -784,6 +910,11 @@ def _aggregated_evidence_card_payload(
     claim-evidence identity (the append-only store gives one id one
     content).  ``None`` means nothing was aggregatable and the caller keeps
     the original fail-closed behavior.
+
+    ``project_candidates`` is the memoized single-read loader for the run
+    owner project's candidate store; when the frozen scope names no project
+    the caller passes ``None`` and the cited runs' scoped batches stay the
+    lean projection's index authority.
     """
 
     cards: list[dict[str, Any]] = []
@@ -816,21 +947,27 @@ def _aggregated_evidence_card_payload(
             cards.append(card)
     if not cards:
         return None
-    # Lean cards (no candidateId, no collection-stage envelope) would fail
-    # closed at ``_evidence_item``; project their envelope fields from the
-    # authorities they already carry.  Cards bound to a candidate id keep the
-    # exact id-authority resolution (or orphan gate) below, untouched.
+    # Cards missing envelope fields — lean hypothesis-first cards, and
+    # candidateId-bearing cards whose id may resolve to an envelope-less
+    # authority — would fail closed at ``_evidence_item``; fill the missing
+    # fields from the authorities the cards already carry.  The projection
+    # is fill-missing and idempotent, so complete cards pass through
+    # unchanged, and the id-authority resolution (or orphan gate) below
+    # stays untouched.
     lean_projection = any(
         not _text(card.get("candidateId") or card.get("recordId"))
-        and not _text(card.get("title"))
+        or not _text(card.get("title"))
         for card in cards
     )
     if lean_projection:
-        record_index = _source_candidate_record_index(
-            team_id=team_id,
-            cited_run_ids=cited_run_ids,
-            research_project_id=research_project_id,
-        )
+        if project_candidates is not None:
+            record_index = _index_candidate_records(project_candidates())
+        else:
+            record_index = _source_candidate_record_index(
+                team_id=team_id,
+                cited_run_ids=cited_run_ids,
+                research_project_id=research_project_id,
+            )
         cards = [_project_lean_evidence_card(card, record_index) for card in cards]
     return {
         "teamId": team_id,
@@ -848,6 +985,7 @@ def _evidence_card_payload(
     authority_run_id: str,
     dimension_payload: Mapping[str, Any],
     research_project_id: str = "",
+    project_candidates: Callable[[], list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     """Read evidence cards: authority run first, review-cited runs second.
 
@@ -856,11 +994,13 @@ def _evidence_card_payload(
     with the canonical missing error — or comes back without cards — does
     the aggregation layer read the runs the dimension_reviews actually cite.
     When nothing is aggregatable, the original fail-closed error stands.
-    Cards that carry no candidate id and no collection-stage envelope (the
-    lean hypothesis-first store shape) additionally get their envelope fields
-    projected from authorities they already carry; every other card keeps the
-    exact id-authority resolution below.  Lean resolution reads the run owner
-    project's candidate store when the frozen scope names the project, and
+    Cards that lack collection-stage envelope fields (the lean hypothesis-
+    first store shape, and cards whose candidateId may resolve to an
+    envelope-less authority) get those fields filled from authorities the
+    cards already carry; the fill is idempotent, so complete cards pass
+    through unchanged.  Lean resolution reads the run owner project's
+    candidate store when the frozen scope names the project (through the
+    memoized single-read loader, shared with the id authority below), and
     falls back to the cited runs' scoped batches otherwise.
     """
 
@@ -885,6 +1025,7 @@ def _evidence_card_payload(
         team_id=team_id,
         cited_run_ids=_cited_evidence_run_ids(dimension_payload),
         research_project_id=research_project_id,
+        project_candidates=project_candidates,
     )
     if aggregated is not None:
         return aggregated
@@ -1804,6 +1945,17 @@ def build_challenge_result_package_v2(
     # the reviews cite.
     scope = _scope(snapshot)
     authority = _text(source_collection_run_id) or workflow_run_id
+    # The aggregated evidence path consumes the project store twice — as the
+    # lean title/kind index and as the candidateId id authority — so the read
+    # is memoized here: at most one file read per package build, and none on
+    # the single-run path.
+    project_candidates_reader = (
+        _project_candidates_reader(
+            team_id=team_id, research_project_id=scope["research_project_id"]
+        )
+        if scope["research_project_id"]
+        else None
+    )
     problem = _artifact_payload(
         "problem_understanding",
         team_id=team_id,
@@ -1837,6 +1989,7 @@ def build_challenge_result_package_v2(
         authority_run_id=authority,
         dimension_payload=dimension_payload,
         research_project_id=scope["research_project_id"],
+        project_candidates=project_candidates_reader,
     )
     research_payload = _artifact_payload(
         "stage1_research_plan" if is_proposal_only_challenge_run(record) else "research_plan",
@@ -1845,6 +1998,7 @@ def build_challenge_result_package_v2(
         authority_run_id=authority,
     )
     authority_sections = [dimension_payload, hypothesis_set, research_payload]
+    aggregated_cards = bool(evidence_cards.get("aggregatedFromDimensionReviews"))
     evidence = _evidence(
         evidence_cards,
         candidates,
@@ -1852,7 +2006,17 @@ def build_challenge_result_package_v2(
             _list_of_mappings(
                 hypothesis_set.get("candidates") or hypothesis_set.get("hypotheses")
             )
-            if evidence_cards.get("aggregatedFromDimensionReviews")
+            if aggregated_cards
+            else None
+        ),
+        project_candidates=(
+            project_candidates_reader() or None
+            if aggregated_cards and project_candidates_reader is not None
+            else None
+        ),
+        dimension_hypothesis_ids=(
+            _dimension_hypothesis_ids(dimension_payload)
+            if aggregated_cards
             else None
         ),
     )
