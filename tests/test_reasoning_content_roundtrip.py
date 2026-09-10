@@ -323,6 +323,106 @@ def test_fault_session_1955_turn_shape_roundtrip():
     assert check_conversation_payload_invariant(layer).ok
 
 
+def test_completed_turn_canonical_seed_keeps_reasoning_on_tool_call_assistants():
+    """Gap fix: with a final answer item present, the tool-call assistant
+    envelopes are projected from the EVENT_TOOL_RESULT events (the
+    EVENT_ASSISTANT_MESSAGE projection is skipped), and they must still carry
+    the reasoning text for the next request's history."""
+
+    calls = [
+        {"id": f"call-{index}", "name": "web_search", "arguments": {"query": f"q{index}"}}
+        for index in range(1, 5)
+    ]
+    events = [
+        _event(1, EVENT_USER_MESSAGE, {"content": "查四个问题"}),
+        *_reasoning_pair(2, REASONING_ROUND1),
+        _event(4, EVENT_ASSISTANT_MESSAGE, {"content": "", "toolCalls": calls}),
+    ]
+    for offset, call in enumerate(calls, start=5):
+        events.append(
+            _event(
+                offset,
+                EVENT_TOOL_RESULT,
+                {"toolCall": {"id": call["id"], "name": call["name"], "result": f"结果 {call['id']}"}},
+            )
+        )
+    events.extend(_reasoning_pair(9, REASONING_ROUND2))
+    events.append(
+        _event(
+            11,
+            EVENT_ASSISTANT_ITEM_COMMITTED,
+            {
+                "kind": "assistant_message",
+                "channel": "answer",
+                "phase": "final_answer",
+                "text": "这是最终答案",
+                "revision": 1,
+            },
+        )
+    )
+
+    seed = model_messages_from_events(events)
+    tool_call_assistants = [
+        message for message in seed if message.get("role") == "assistant" and message.get("tool_calls")
+    ]
+    assert len(tool_call_assistants) == 4
+    for message in tool_call_assistants:
+        assert message.get("reasoning_content") == REASONING_ROUND1, message
+    final_assistants = [
+        message
+        for message in seed
+        if message.get("role") == "assistant" and not message.get("tool_calls")
+    ]
+    for message in final_assistants:
+        assert "reasoning_content" not in message, message
+
+
+def test_completed_turn_canonical_seed_reasoning_reaches_provider_payload():
+    """The canonical-seed tool-call assistant shapes must carry reasoning_content
+    on the outgoing provider payload (message_to_openai_dict, preserve=True)."""
+
+    calls = [
+        {"id": f"call-{index}", "name": "web_search", "arguments": {"query": f"q{index}"}}
+        for index in range(1, 5)
+    ]
+    events = [
+        _event(1, EVENT_USER_MESSAGE, {"content": "查四个问题"}),
+        *_reasoning_pair(2, REASONING_ROUND1),
+        _event(4, EVENT_ASSISTANT_MESSAGE, {"content": "", "toolCalls": calls}),
+    ]
+    for offset, call in enumerate(calls, start=5):
+        events.append(
+            _event(
+                offset,
+                EVENT_TOOL_RESULT,
+                {"toolCall": {"id": call["id"], "name": call["name"], "result": f"结果 {call['id']}"}},
+            )
+        )
+    events.extend(_reasoning_pair(9, REASONING_ROUND2))
+    events.append(
+        _event(
+            11,
+            EVENT_ASSISTANT_ITEM_COMMITTED,
+            {
+                "kind": "assistant_message",
+                "channel": "answer",
+                "phase": "final_answer",
+                "text": "这是最终答案",
+                "revision": 1,
+            },
+        )
+    )
+
+    seed = model_messages_from_events(events)
+    payload_messages = [message_to_openai_dict(item, preserve_reasoning_content=True) for item in seed]
+    payload_assistants = [
+        item for item in payload_messages if item.get("role") == "assistant" and item.get("tool_calls")
+    ]
+    assert len(payload_assistants) == 4
+    for item in payload_assistants:
+        assert item.get("reasoning_content") == REASONING_ROUND1, item
+
+
 def test_model_messages_provider_chain_copies_top_level_reasoning_content():
     """Verification-only guard: the downstream chain passes reasoning through."""
 

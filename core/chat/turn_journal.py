@@ -1239,31 +1239,44 @@ def _message_without_lifecycle_projected_tool_results(
     return stripped
 
 
-def _reasoning_content_by_assistant_event(events: list[TurnJournalEvent]) -> dict[str, str]:
-    """Map assistant-message event ids to the journaled reasoning preceding them.
+def _reasoning_content_by_assistant_event(
+    events: list[TurnJournalEvent],
+    *,
+    canonical_final_turn_ids: set[str],
+) -> dict[str, str]:
+    """Map assistant/tool-envelope event ids to the journaled reasoning preceding them.
 
     Thinking providers journal the model's reasoning as ``assistant_item_committed``
     events with ``kind == "reasoning"``. Those events are not model-visible, so the
     main replay loop never sees them; DeepSeek-class thinking endpoints nevertheless
-    require a non-empty ``reasoning_content`` on replayed assistant messages that
-    carry ``tool_calls`` ("The `reasoning_content` in the thinking mode must be
-    passed back to the API").
+    require a non-empty ``reasoning_content`` on every replayed assistant message
+    that carries ``tool_calls`` ("The `reasoning_content` in the thinking mode must
+    be passed back to the API").
 
-    Reasoning entries belong to the next assistant message of the same turn:
-    events arrive in sequence order and thinking precedes its output. The same
-    reasoning text can be journaled twice (UI capture + persist), so entries are
-    deduped per turn by text. Reasoning is never fabricated: turns without
-    reasoning entries yield no mapping.
+    Reasoning entries belong to the next assistant output of the same turn: events
+    arrive in sequence order and thinking precedes its output. When the turn has a
+    canonical final answer, the tool-call assistant envelope is projected from the
+    ``EVENT_TOOL_RESULT``/CLI tool events instead of the skipped
+    ``EVENT_ASSISTANT_MESSAGE``, so those events read the current turn segment's
+    reasoning without consuming it (a new reasoning segment supersedes the
+    unconsumed one). The same reasoning text can be journaled twice (UI capture +
+    persist), so entries are deduped per turn by text. Reasoning is never
+    fabricated: turns without reasoning entries yield no mapping.
     """
 
     reasoning_by_event: dict[str, str] = {}
-    pending_by_turn: dict[str, list[str]] = {}
+    segment_by_turn: dict[str, str] = {}
     seen: set[tuple[str, str]] = set()
 
     def _consume(turn_id: str, event_id: str) -> None:
-        texts = pending_by_turn.pop(turn_id, [])
-        if texts:
-            reasoning_by_event[event_id] = "\n".join(texts)
+        text = segment_by_turn.pop(turn_id, "")
+        if text:
+            reasoning_by_event[event_id] = text
+
+    def _read(turn_id: str, event_id: str) -> None:
+        text = segment_by_turn.get(turn_id, "")
+        if text:
+            reasoning_by_event[event_id] = text
 
     for event in events:
         turn_id = str(event.turn_id or "").strip()
@@ -1274,17 +1287,50 @@ def _reasoning_content_by_assistant_event(events: list[TurnJournalEvent]) -> dic
                 text = str(payload.get("text") or "").strip()
                 if text and (turn_id, text) not in seen:
                     seen.add((turn_id, text))
-                    pending_by_turn.setdefault(turn_id, []).append(text)
+                    segment_by_turn[turn_id] = text
             elif kind == "assistant_message":
                 _consume(turn_id, event.event_id)
         elif event.event_type == EVENT_ASSISTANT_MESSAGE:
-            _consume(turn_id, event.event_id)
+            if turn_id not in canonical_final_turn_ids:
+                # Without a canonical final answer this event projects the
+                # tool-call assistant itself; with one, its projection is
+                # skipped and the tool-result envelopes carry the reasoning.
+                _consume(turn_id, event.event_id)
+        elif event.event_type in {EVENT_TOOL_RESULT, EVENT_CLI_TASK_SENT, EVENT_CLI_TASK_RESULT}:
+            _read(turn_id, event.event_id)
     return reasoning_by_event
+
+
+def _attach_replay_reasoning_content(
+    message: dict[str, Any],
+    reasoning_text: str,
+) -> dict[str, Any]:
+    """Attach the segment's reasoning to a replayed tool-call assistant message.
+
+    Only messages that actually carry tool calls get the non-empty reasoning
+    text; nothing else on the message is touched.
+    """
+
+    if reasoning_text and (message.get("toolCalls") or message.get("tool_calls")):
+        message["reasoning_content"] = reasoning_text
+    return message
 
 
 def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> list[dict[str, Any]]:
     event_list = list(events or [])
-    reasoning_content_by_event = _reasoning_content_by_assistant_event(event_list)
+    canonical_final_turn_ids = {
+        event.turn_id
+        for event in event_list
+        if event.event_type == EVENT_ASSISTANT_ITEM_COMMITTED
+        and str(event.payload.get("kind") or "") == "assistant_message"
+        and str(event.payload.get("channel") or "") == "answer"
+        and str(event.payload.get("phase") or "") == "final_answer"
+        and str(event.payload.get("text") or "").strip()
+    }
+    reasoning_content_by_event = _reasoning_content_by_assistant_event(
+        event_list,
+        canonical_final_turn_ids=canonical_final_turn_ids,
+    )
     messages: list[dict[str, Any]] = []
     latest_partial_by_turn: dict[str, dict[str, Any]] = {}
     final_turn_ids: set[str] = set()
@@ -1296,15 +1342,6 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
         if event.visible_in_model and event.event_type in {EVENT_TOOL_RESULT, EVENT_CLI_TASK_RESULT}
         for key in [_event_tool_correlation_key(event)]
         if key
-    }
-    canonical_final_turn_ids = {
-        event.turn_id
-        for event in event_list
-        if event.event_type == EVENT_ASSISTANT_ITEM_COMMITTED
-        and str(event.payload.get("kind") or "") == "assistant_message"
-        and str(event.payload.get("channel") or "") == "answer"
-        and str(event.payload.get("phase") or "") == "final_answer"
-        and str(event.payload.get("text") or "").strip()
     }
 
     for event in event_list:
@@ -1390,13 +1427,12 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
                 in {"aborted", "cancelled", "canceled", "interrupted", "stopped", "stopped_by_user"},
             )
             if _message_has_visible_payload(message):
-                reasoning_text = reasoning_content_by_event.get(event.event_id, "")
-                if reasoning_text and (message.get("toolCalls") or message.get("tool_calls")):
-                    # Thinking providers require the reasoning text to round-trip
-                    # on assistant messages that carry tool_calls; attaching it
-                    # here does not affect the conversation-layer fingerprint.
-                    message["reasoning_content"] = reasoning_text
-                messages.append(message)
+                messages.append(
+                    _attach_replay_reasoning_content(
+                        message,
+                        reasoning_content_by_event.get(event.event_id, ""),
+                    )
+                )
                 final_turn_ids.add(turn_id)
                 assistant_message_index_by_turn[turn_id] = len(messages) - 1
         elif event.event_type in {EVENT_COMPACTION_CHECKPOINT, EVENT_COMPRESSION_ATTEMPT}:
@@ -1411,13 +1447,19 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
                 messages.append(tool_message)
         elif event.event_type in {EVENT_TOOL_RESULT, EVENT_CLI_TASK_SENT, EVENT_CLI_TASK_RESULT}:
             tool_message = _tool_message_from_event(event)
+            reasoning_text = reasoning_content_by_event.get(event.event_id, "")
             if _message_has_visible_payload(tool_message):
-                messages.append(tool_message)
+                messages.append(_attach_replay_reasoning_content(tool_message, reasoning_text))
             elif _event_has_correlated_tool_call(event):
                 # An empty result that closes a real assistant tool_call must
                 # not be dropped: the orphaned call trips the fail-closed
                 # provider send invariant and permanently bricks the session.
-                messages.append(_empty_tool_result_placeholder_message(event, tool_message))
+                messages.append(
+                    _attach_replay_reasoning_content(
+                        _empty_tool_result_placeholder_message(event, tool_message),
+                        reasoning_text,
+                    )
+                )
         elif event.event_type == EVENT_CLI_SESSION_LIFECYCLE:
             lifecycle_message = _lifecycle_message_from_event(event)
             if _message_has_visible_payload(lifecycle_message):
