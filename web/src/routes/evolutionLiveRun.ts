@@ -1,4 +1,13 @@
-import type { EvolutionActiveRun, EvolutionRunCommandAccepted, EvolutionRunCommandStatus } from "../api/types";
+import type {
+  EvolutionActiveRun,
+  EvolutionRunCommandAccepted,
+  EvolutionRunCommandStatus,
+  SupervisedWorktreeRun,
+} from "../api/types";
+
+export type SupervisedRunMonitorSource =
+  | { kind: "worktree"; run: SupervisedWorktreeRun }
+  | { kind: "legacy"; run: EvolutionActiveRun };
 
 export function normalizedSupervisedRunStatus(status: string) {
   return String(status || "").trim().toLowerCase();
@@ -41,6 +50,24 @@ export function selectSupervisedRunStreamTarget(
     return liveRun;
   }
   return null;
+}
+
+/**
+ * The worktree runner is the authority for the supervised four-stage workflow.
+ * Prefer its live snapshot over the legacy active-run projection so the live
+ * monitor never renders an idle state while a worktree run is progressing.
+ */
+export function selectSupervisedRunMonitorSource(input: {
+  worktreeRun: SupervisedWorktreeRun | null | undefined;
+  activeRun: EvolutionActiveRun | null | undefined;
+  liveRun: EvolutionActiveRun | null | undefined;
+}): SupervisedRunMonitorSource | null {
+  if (input.worktreeRun && isLiveSupervisedRunStatus(input.worktreeRun.status)) {
+    return { kind: "worktree", run: input.worktreeRun };
+  }
+
+  const legacyRun = selectSupervisedRunStreamTarget(input.activeRun, input.liveRun);
+  return legacyRun ? { kind: "legacy", run: legacyRun } : null;
 }
 
 export function requireEvolutionRunSnapshot<T extends { runId?: string } | null | undefined>(

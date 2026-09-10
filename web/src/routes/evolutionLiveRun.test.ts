@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { EvolutionActiveRun } from "../api/types";
+import type { EvolutionActiveRun, SupervisedWorktreeRun } from "../api/types";
 import {
   isCompletedEvolutionRunCommandFailure,
   isCompletedEvolutionRunCommandSuccess,
@@ -8,12 +8,17 @@ import {
   parseRunStreamSnapshot,
   requireEvolutionRunSnapshot,
   selectRunSnapshotWithRunId,
+  selectSupervisedRunMonitorSource,
   selectSupervisedRunStreamTarget,
   shouldIgnoreActiveRunSnapshot,
 } from "./evolutionLiveRun";
 
 function run(runId: string, status: string) {
   return { runId, status } as EvolutionActiveRun;
+}
+
+function worktreeRun(runId: string, status: string) {
+  return { runId, status } as SupervisedWorktreeRun;
 }
 
 describe("evolutionLiveRun", () => {
@@ -35,6 +40,24 @@ describe("evolutionLiveRun", () => {
 
   it("falls back to the local live run while active-run query is empty", () => {
     expect(selectSupervisedRunStreamTarget(null, run("run-1", "paused"))?.runId).toBe("run-1");
+  });
+
+  it("prefers the live worktree workflow over a legacy active-run projection", () => {
+    const source = selectSupervisedRunMonitorSource({
+      worktreeRun: worktreeRun("worktree-1", "running"),
+      activeRun: run("legacy-1", "running"),
+      liveRun: null,
+    });
+
+    expect(source).toEqual({ kind: "worktree", run: worktreeRun("worktree-1", "running") });
+  });
+
+  it("uses a live legacy projection only when no live worktree workflow exists", () => {
+    expect(selectSupervisedRunMonitorSource({
+      worktreeRun: worktreeRun("worktree-1", "done"),
+      activeRun: run("legacy-1", "running"),
+      liveRun: null,
+    })).toEqual({ kind: "legacy", run: run("legacy-1", "running") });
   });
 
   it("rejects mutation success payloads without a run id", () => {

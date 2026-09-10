@@ -141,6 +141,7 @@ import {
   isLiveSupervisedRunStatus,
   parseRunStreamSnapshot,
   selectRunSnapshotWithRunId,
+  selectSupervisedRunMonitorSource,
   selectSupervisedRunStreamTarget,
   shouldIgnoreActiveRunSnapshot,
 } from "./evolutionLiveRun";
@@ -589,6 +590,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     : null;
   const monitoredRun = effectiveActiveRunSnapshot
     ?? visibleLiveRunSnapshot;
+  const supervisedRunMonitorSource = selectSupervisedRunMonitorSource({
+    worktreeRun: supervisedWorktreeLiveRun,
+    activeRun: effectiveActiveRunSnapshot,
+    liveRun: visibleLiveRunSnapshot,
+  });
+  const monitoredWorktreeRun = supervisedRunMonitorSource?.kind === "worktree"
+    ? supervisedRunMonitorSource.run
+    : null;
   const supervisedWorkflowRun = supervisedWorktreeLiveRun ?? monitoredRun ?? recentSupervisedWorktreeRun;
   const supervisedMembersRun = monitoredRun && (
     !supervisedWorkflowRun || monitoredRun.runId === supervisedWorkflowRun.runId
@@ -632,14 +641,21 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   );
   const monitoredPreflightIssue = supervisedPreflightIssue(monitoredRun, lang);
   const worktreeRunStopping = String(supervisedWorktreeLiveRun?.status || "").trim().toLowerCase() === "stopping";
-  const monitoredRunIdentity = monitoredRun?.sessionId || monitoredRun?.runId || "";
+  const monitoredRunIdentity = monitoredWorktreeRun?.runId || monitoredRun?.sessionId || monitoredRun?.runId || "";
   const monitoredCaseLabel = monitoredRun?.currentCaseId
     ? `${monitoredRun.currentCaseIndex ?? "--"}/${monitoredRun.caseTotal ?? "--"} ${monitoredRun.currentCaseId}`
     : "--";
   const monitoredTaskLabel = monitoredRun?.currentTask || monitoredRun?.latestMessage || "--";
-  const monitoredStatusLabel = monitoredRun?.decision === "INCONCLUSIVE"
-    ? displayDecisionLabel(monitoredRun.decision)
-    : statusLabel(monitoredRun?.status || "");
+  const monitoredWorktreeDecision = String(
+    monitoredWorktreeRun?.decision?.judgeDecision
+    || monitoredWorktreeRun?.candidateJudgment?.decision
+    || "",
+  );
+  const monitoredStatusLabel = monitoredWorktreeDecision === "INCONCLUSIVE"
+    ? displayDecisionLabel(monitoredWorktreeDecision)
+    : monitoredRun?.decision === "INCONCLUSIVE"
+      ? displayDecisionLabel(monitoredRun.decision)
+      : statusLabel(monitoredWorktreeRun?.status || monitoredRun?.status || "");
   const supervisedMemberReturnTo = `${location.pathname}${location.search}` || "/supervised-evolution";
   const supervisedMemberReturnLabel = lang === "zh" ? "返回监督进化" : "Back to supervised evolution";
   const supervisedMembersRunIdentity = supervisedWorkflowRun?.runId || monitoredRun?.sessionId || "";
@@ -841,6 +857,29 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       roleLabel: runRoleLabel,
     })
     : null;
+  const monitoredWorktreeWorkflowStep = monitoredWorktreeRun?.workflowSteps?.find((step) => step.current) ?? null;
+  const monitoredWorktreeRole = monitoredWorktreeWorkflowStep?.role || "";
+  const monitoredWorktreeSummary = monitoredWorktreeRun
+    ? {
+      status: monitoredWorktreeRun.status,
+      decision: monitoredWorktreeDecision,
+      tone: ["failed", "cancelled"].includes(String(monitoredWorktreeRun.status).toLowerCase())
+        ? "danger" as const
+        : String(monitoredWorktreeRun.status).toLowerCase() === "paused"
+          ? "warning" as const
+          : ["done"].includes(String(monitoredWorktreeRun.status).toLowerCase())
+            ? "success" as const
+            : "running" as const,
+      headline: monitoredWorktreeRun.latestMessage
+        || monitoredWorktreeWorkflowStep?.livePreview
+        || monitoredWorktreeWorkflowStep?.summary
+        || (lang === "zh" ? "监督工作流正在推进。" : "The supervised workflow is progressing."),
+      reason: monitoredWorktreeWorkflowStep?.summary || "",
+      nextAction: lang === "zh"
+        ? "可继续查看当前 Agent 的会话和阶段状态。"
+        : "Continue reviewing the current Agent session and workflow stage.",
+    }
+    : null;
   const supervisedWorkflowTabSummary = (step: SupervisedWorkflowCard | undefined) => {
     if (!supervisedWorkflowRun) {
       return {
@@ -948,7 +987,41 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     ?? startWorktreeRunMutation.error?.message
     ?? "";
   const terminateSupervisedDisabledReason = disabledReason(terminateSupervisedAction);
-  const supervisedActiveRunMonitorMetrics: EvolutionActiveRunMonitorMetric[] = monitoredRun
+  const supervisedActiveRunMonitorMetrics: EvolutionActiveRunMonitorMetric[] = monitoredWorktreeRun
+    ? [
+      {
+        id: "run",
+        label: t("activeRunSession"),
+        value: monitoredRunIdentity,
+        title: monitoredRunIdentity,
+      },
+      {
+        id: "phase",
+        label: t("activeRunPhase"),
+        value: statusLabel(monitoredWorktreeRun.phase || monitoredWorktreeRun.status),
+      },
+      {
+        id: "cases",
+        label: t("activeRunCurrentCase"),
+        value: `${monitoredWorktreeRun.costEstimate.caseCount} cases`,
+      },
+      {
+        id: "role",
+        label: t("activeRunCurrentRole"),
+        value: monitoredWorktreeRole ? runRoleLabel(monitoredWorktreeRole) : "--",
+      },
+      {
+        id: "result",
+        label: t("activeRunResult"),
+        value: monitoredWorktreeDecision ? displayDecisionLabel(monitoredWorktreeDecision) : "--",
+      },
+      {
+        id: "updated",
+        label: t("latestLiveMessage"),
+        value: compactTimestamp(monitoredWorktreeRun.updatedAt),
+      },
+    ]
+    : monitoredRun
     ? [
       {
         id: "session",
@@ -984,7 +1057,15 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       },
     ]
     : [];
-  const supervisedActiveRunMonitorEvents: EvolutionActiveRunMonitorEventItem[] = monitoredRun
+  const supervisedActiveRunMonitorEvents: EvolutionActiveRunMonitorEventItem[] = monitoredWorktreeRun
+    ? (monitoredWorktreeRun.workflowSteps ?? []).map((step) => ({
+      key: `${monitoredWorktreeRun.runId}-${step.id}-${step.status}`,
+      title: step.label,
+      statusLabel: statusLabel(step.status),
+      summary: step.livePreview || step.summary || "--",
+      timestamp: compactTimestamp(monitoredWorktreeRun.updatedAt),
+    }))
+    : monitoredRun
     ? monitoredRun.eventTail.map((item) => ({
       key: `${item.timestamp}-${item.event}-${item.summary}`,
       title: formatRunEventTitle(item),
@@ -1082,7 +1163,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       },
       }
       : null;
-  const supervisedActiveRunMonitorRun: EvolutionActiveRunMonitorRunView | null = monitoredRun
+  const supervisedActiveRunMonitorRun: EvolutionActiveRunMonitorRunView | null = supervisedRunMonitorSource
     ? {
       termination: {
         disabled: !canTerminateSupervisedRun,
@@ -1091,7 +1172,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         ariaLabel: t("terminateSupervisedRun"),
         onClick: handleTerminateSupervisedRun,
       },
-      openSessionAction: monitoredRun.sessionId
+      openSessionAction: monitoredRun?.sessionId
         ? {
           label: t("openLatestRuns"),
           onClick: () => openRun(monitoredRun.sessionId),
@@ -1103,13 +1184,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         ? terminateSupervisedDisabledReason
         : null,
       controlSummary: {
-        status: monitoredRun.status,
-        decision: monitoredRun.decision,
-        tone: monitoredControlSummary?.tone,
-        headline: monitoredControlSummary?.headline || monitoredRun.latestMessage,
-        reason: monitoredControlSummary?.reason,
+        status: monitoredWorktreeSummary?.status || monitoredRun?.status || "",
+        decision: monitoredWorktreeSummary?.decision || monitoredRun?.decision,
+        tone: monitoredWorktreeSummary?.tone || monitoredControlSummary?.tone,
+        headline: monitoredWorktreeSummary?.headline || monitoredControlSummary?.headline || monitoredRun?.latestMessage || "",
+        reason: monitoredWorktreeSummary?.reason || monitoredControlSummary?.reason,
         nextActionLabel: t("nextRecommendedAction"),
-        nextAction: monitoredControlSummary?.nextAction,
+        nextAction: monitoredWorktreeSummary?.nextAction || monitoredControlSummary?.nextAction,
       },
       metrics: supervisedActiveRunMonitorMetrics,
       timelineTitle: t("activeRunTimeline"),
@@ -1402,6 +1483,33 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     setBundleNameInput(savedBundle);
     setFormInitialized(true);
   }, [formInitialized, primaryDatasets, workbenchControl]);
+
+  useEffect(() => {
+    if (!formInitialized || !monitoredWorktreeRun) {
+      return;
+    }
+    const activeSourceKind = monitoredWorktreeRun.sourceKind === "bundle" ? "bundle" : "dataset";
+    if (sourceKind !== activeSourceKind) {
+      setSourceKind(activeSourceKind);
+    }
+    if (datasetName !== monitoredWorktreeRun.datasetName) {
+      setDatasetName(monitoredWorktreeRun.datasetName || "");
+    }
+    if (bundleNameInput !== monitoredWorktreeRun.bundleName) {
+      setBundleNameInput(monitoredWorktreeRun.bundleName || "");
+    }
+    const activeDatasetLimit = toLimitInput(monitoredWorktreeRun.datasetLimit);
+    if (datasetLimitInput !== activeDatasetLimit) {
+      setDatasetLimitInput(activeDatasetLimit);
+    }
+  }, [
+    bundleNameInput,
+    datasetLimitInput,
+    datasetName,
+    formInitialized,
+    monitoredWorktreeRun,
+    sourceKind,
+  ]);
 
   useEffect(() => {
     if (!formInitialized || !workbenchControl || sourceKind !== "dataset") {
@@ -2359,8 +2467,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 eyebrow: t("activeSupervisedRun"),
                 title: monitoredRunIdentity || t("activeSupervisedRun"),
                 titleTooltip: monitoredRunIdentity || undefined,
-                statusLabel: monitoredRun ? monitoredStatusLabel : undefined,
-                sourceKindLabel: monitoredRun ? sourceKindLabel(monitoredRun.sourceKind) : undefined,
+                statusLabel: supervisedRunMonitorSource ? monitoredStatusLabel : undefined,
+                sourceKindLabel: supervisedRunMonitorSource
+                  ? sourceKindLabel(monitoredWorktreeRun?.sourceKind || monitoredRun?.sourceKind || "")
+                  : undefined,
                 fallbackStatusLabel: workbenchSourceLabel(workbenchState?.source ?? "unknown"),
               }}
               run={supervisedActiveRunMonitorRun}
