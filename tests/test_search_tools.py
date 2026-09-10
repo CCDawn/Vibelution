@@ -13,6 +13,8 @@
 
 import os
 import sys
+import json
+import subprocess
 import pytest
 import tempfile
 import shutil
@@ -1011,6 +1013,338 @@ class TestParameterCombinations:
         assert "[阅读导航]" in result
         assert "read_file_tool(" not in result
         assert result.count("📁 ") <= 3
+
+# ============================================================================
+# ripgrep 引擎与 deadline/取消行为测试
+# ============================================================================
+
+class _FakeRgProcess:
+    """模拟 rg 子进程：记录命令与 kwargs，可控输出/超时/kill 行为。"""
+
+    def __init__(self, cmd=None, outputs=None, *, raise_on_timeout=False, returncode=0):
+        self.cmd = cmd or []
+        self.kwargs = {}
+        self._outputs = list(outputs or [])
+        self._raise_on_timeout = raise_on_timeout
+        self._returncode = returncode
+        self.killed = False
+        self.kill_count = 0
+
+    def communicate(self, timeout=None):
+        if self._raise_on_timeout and timeout is not None:
+            raise subprocess.TimeoutExpired(self.cmd, timeout)
+        if self._outputs:
+            return self._outputs.pop(0), ""
+        return "", ""
+
+    def kill(self):
+        self.killed = True
+        self.kill_count += 1
+
+    def poll(self):
+        if self.killed:
+            return -9
+        return self._returncode
+
+
+def _rg_json_line(event_type, path, line_no, text):
+    return json.dumps({
+        "type": event_type,
+        "data": {
+            "path": {"text": path},
+            "lines": {"text": text},
+            "line_number": line_no,
+        },
+    })
+
+
+def _rg_match_stream(path="module1.py"):
+    return "\n".join([
+        json.dumps({"type": "begin", "data": {"path": {"text": path}}}),
+        _rg_json_line("match", path, 49, "def helper_function(arg1, arg2=None):\n"),
+        _rg_json_line("context", path, 50, '    """辅助函数"""\n'),
+        json.dumps({"type": "end", "data": {"path": {"text": path}}}),
+    ]) + "\n"
+
+
+class TestRipgrepDetection:
+    """rg 探测链：配置显式路径 → PATH → 回退纯 Python"""
+
+    def test_detect_ripgrep_prefers_configured_path(self, monkeypatch, tmp_path):
+        from tools import search_tools as st
+        fake_rg = tmp_path / "custom-rg.exe"
+        fake_rg.write_text("", encoding="utf-8")
+        monkeypatch.setattr(st, "_search_defaults", {"RIPGREP_PATH": str(fake_rg)})
+        st.reset_ripgrep_detection()
+        try:
+            assert st._detect_ripgrep() == str(fake_rg)
+        finally:
+            st.reset_ripgrep_detection()
+
+    def test_missing_configured_path_falls_back_to_which(self, monkeypatch, tmp_path):
+        from tools import search_tools as st
+        monkeypatch.setattr(st, "_search_defaults", {"RIPGREP_PATH": str(tmp_path / "missing.exe")})
+        monkeypatch.setattr(shutil, "which", lambda name: "C:/which-rg.exe" if name == "rg" else None)
+        st.reset_ripgrep_detection()
+        try:
+            assert st._detect_ripgrep() == "C:/which-rg.exe"
+        finally:
+            st.reset_ripgrep_detection()
+
+    def test_detection_miss_returns_none_and_python_engine_still_works(self, monkeypatch, sample_project):
+        from tools import search_tools as st
+        monkeypatch.setattr(st, "_search_defaults", {})
+        monkeypatch.setattr(shutil, "which", lambda name: None)
+        st.reset_ripgrep_detection()
+        try:
+            assert st._detect_ripgrep() is None
+            result = st.grep_search_tool("helper_function", ".py", sample_project)
+            assert "[搜索摘要]" in result
+            assert "module1.py" in result
+        finally:
+            st.reset_ripgrep_detection()
+
+
+class TestRipgrepEngine:
+    """rg 主引擎：命令面、JSON 解析、可杀超时、取消、错误回退"""
+
+    def test_command_surface_and_json_parsing(self, monkeypatch, sample_project):
+        from tools import search_tools as st
+        proc = _FakeRgProcess(outputs=[_rg_match_stream()])
+        captured = {}
+
+        def fake_popen(cmd, **kwargs):
+            captured["cmd"] = list(cmd)
+            captured["kwargs"] = dict(kwargs)
+            proc.cmd = list(cmd)
+            proc.kwargs = dict(kwargs)
+            return proc
+
+        monkeypatch.setattr(st.subprocess, "Popen", fake_popen)
+        result = st.grep_search_tool("helper_function", ".py", sample_project)
+
+        cmd = captured["cmd"]
+        # 防用户机器 RIPGREP_CONFIG_PATH 干扰
+        assert "--no-config" in cmd
+        assert "--json" in cmd
+        assert "--max-columns=300" in cmd
+        assert "--max-columns-preview" in cmd
+        assert f"--max-filesize={st.MAX_FILE_SIZE}" in cmd
+        # pattern 走 -e、路径在 -- 之后
+        assert cmd[cmd.index("-e") + 1] == "helper_function"
+        assert cmd[-2] == "--"
+        assert cmd[-1] == str(Path(sample_project).resolve())
+        # 大小写敏感时不加 -i
+        assert "--ignore-case" not in cmd
+        # shell=False 语义（不传 shell 键），无控制台 kwargs
+        assert "shell" not in captured["kwargs"]
+        if os.name == "nt":
+            assert "creationflags" in captured["kwargs"]
+            assert "startupinfo" in captured["kwargs"]
+        # glob 过滤面
+        globs = [cmd[i + 1] for i, c in enumerate(cmd) if c == "--glob"]
+        assert "*.py" in globs
+        assert any(g.startswith("!") for g in globs)
+
+        # JSON 解析：匹配 + 上下文行进入结果
+        assert "[搜索] 找到 1 个匹配" in result
+        assert "def helper_function(arg1, arg2=None):" in result
+        assert "module1.py" in result
+        assert not proc.killed
+
+    def test_case_insensitive_adds_ignore_case(self, monkeypatch, sample_project):
+        from tools import search_tools as st
+        proc = _FakeRgProcess(outputs=[_rg_match_stream()])
+        captured = {}
+
+        def fake_popen(cmd, **kwargs):
+            captured["cmd"] = list(cmd)
+            return proc
+
+        monkeypatch.setattr(st.subprocess, "Popen", fake_popen)
+        st.grep_search_tool("helper_function", ".py", sample_project, case_sensitive=False)
+        assert "--ignore-case" in captured["cmd"]
+
+    def test_deadline_kills_process_and_returns_partial_results(self, monkeypatch, sample_project):
+        from tools import search_tools as st
+        monkeypatch.setattr(st, "GREP_DEADLINE_SECONDS", 0.05)
+        proc = _FakeRgProcess(outputs=[_rg_match_stream()], raise_on_timeout=True)
+        monkeypatch.setattr(st.subprocess, "Popen", lambda cmd, **kwargs: proc)
+
+        result = st.grep_search_tool("helper_function", ".py", sample_project)
+
+        # 超时必须 kill 子进程，且二次回收的部分输出要变成结果而非裸错误
+        assert proc.killed
+        assert proc.kill_count == 1
+        assert "helper_function" in result
+        assert "已超时截断" in result
+        assert "结果不完整" in result
+
+    def test_cancel_checker_kills_process_and_returns_partial_results(self, monkeypatch, sample_project):
+        from tools import search_tools as st
+        proc = _FakeRgProcess(outputs=[_rg_match_stream()], raise_on_timeout=True)
+        monkeypatch.setattr(st.subprocess, "Popen", lambda cmd, **kwargs: proc)
+
+        result = st.grep_search_tool(
+            "helper_function", ".py", sample_project,
+            _cancel_checker=lambda: "用户请求停止",
+        )
+
+        assert proc.killed
+        assert "已按停止请求中止扫描：用户请求停止" in result
+        assert "helper_function" in result
+        assert "结果不完整" in result
+
+    def test_rg_error_exit_without_output_falls_back_to_python(self, monkeypatch, sample_project):
+        from tools import search_tools as st
+        proc = _FakeRgProcess(outputs=[""], returncode=2)
+        monkeypatch.setattr(st.subprocess, "Popen", lambda cmd, **kwargs: proc)
+
+        result = st.grep_search_tool("helper_function", ".py", sample_project)
+
+        # rg exit>=2（如 Rust regex 不支持的语法）→ 回退纯 Python 引擎，仍出正确结果
+        assert "helper_function" in result
+        assert "[搜索摘要]" in result
+
+    def test_zero_matches_keeps_existing_contract(self, monkeypatch, sample_project):
+        from tools import search_tools as st
+        proc = _FakeRgProcess(outputs=[""], returncode=1)
+        monkeypatch.setattr(st.subprocess, "Popen", lambda cmd, **kwargs: proc)
+
+        result = st.grep_search_tool("xyz_no_such_pattern", ".py", sample_project)
+        assert "未找到匹配项" in result
+
+    def test_single_file_mode_extension_mismatch_returns_zero(self, monkeypatch, sample_project):
+        from tools import search_tools as st
+        proc = _FakeRgProcess(outputs=[_rg_match_stream()])
+        monkeypatch.setattr(st.subprocess, "Popen", lambda cmd, **kwargs: proc)
+
+        py_file = os.path.join(sample_project, "python_modules", "module1.py")
+        result = st.grep_search_tool("helper_function", ".js", py_file)
+        assert "未找到匹配项" in result
+
+
+class TestPythonEngineDeadlineAndCancel:
+    """纯 Python 回退引擎：deadline 分片与 cancel checker"""
+
+    def test_deadline_returns_incomplete_notice(self, monkeypatch, sample_project):
+        from tools import search_tools as st
+        monkeypatch.setattr(st, "_detect_ripgrep", lambda: None)
+        # -1 模拟「扫描开始前 deadline 已过期」：Windows monotonic 粒度下 0.0
+        # 可能与首次检查同刻度，负偏移保证第一个 walk 分片即触发截断
+        monkeypatch.setattr(st, "GREP_DEADLINE_SECONDS", -1.0)
+
+        result = st.grep_search_tool("helper_function", ".py", sample_project)
+
+        assert "结果不完整" in result
+        assert "已超时截断" in result
+
+    def test_deadline_keeps_partial_results_collected_before_deadline(self, monkeypatch, sample_project):
+        from tools import search_tools as st
+        monkeypatch.setattr(st, "_detect_ripgrep", lambda: None)
+        # 给一个足够完成小目录扫描但仍触发部分语义的 deadline：无法精确控制，
+        # 因此这里验证正常完成的输出不携带截断提示（deadline 未到 → 完整结果）
+        monkeypatch.setattr(st, "GREP_DEADLINE_SECONDS", 25.0)
+
+        result = st.grep_search_tool("helper_function", ".py", sample_project)
+        assert "helper_function" in result
+        assert "结果不完整" not in result
+
+    def test_cancel_checker_aborts_python_scan(self, monkeypatch, sample_project):
+        from tools import search_tools as st
+        monkeypatch.setattr(st, "_detect_ripgrep", lambda: None)
+
+        result = st.grep_search_tool(
+            "helper_function", ".py", sample_project,
+            _cancel_checker=lambda: "停止扫描",
+        )
+
+        # 取消原因必须显式回传（有无部分匹配对应两条提示分支）
+        assert "停止扫描" in result
+        assert "结果不完整" in result
+        assert "已取消" in result or "已按停止请求中止扫描" in result
+
+
+class TestSearchBaseDirResolution:
+    """search_dir 相对路径锚定 workspace override，不落到进程 CWD"""
+
+    def test_relative_dot_uses_workspace_override(self, tmp_path):
+        from tools import search_tools as st
+        from tools.shell_tools import workspace_root_override
+
+        ws = tmp_path / "ws"
+        (ws / ".git").mkdir(parents=True)
+        (ws / "ws_only_marker.py").write_text("ws_only_marker_value = 'hit'\n", encoding="utf-8")
+
+        with workspace_root_override(ws):
+            result = st.grep_search_tool("ws_only_marker_value", ".py", ".")
+
+        assert "ws_only_marker.py" in result
+        assert "未找到匹配项" not in result
+
+    def test_absolute_path_still_works(self, tmp_path):
+        from tools import search_tools as st
+        (tmp_path / "abs_marker.py").write_text("abs_marker_value = 1\n", encoding="utf-8")
+        result = st.grep_search_tool("abs_marker_value", ".py", str(tmp_path))
+        assert "abs_marker.py" in result
+
+
+class TestSearchConfigWiring:
+    """max_results 配置键接通与 ToolsSearchConfig 新字段"""
+
+    def test_max_results_loaded_from_config(self, monkeypatch, sample_project):
+        from tools import search_tools as st
+        defaults = dict(st._search_defaults) if st._search_defaults else {}
+        defaults["MAX_RESULTS"] = 2
+        monkeypatch.setattr(st, "_search_defaults", defaults)
+
+        result = st.grep_search_tool(r"def \w+", ".py", sample_project)
+
+        assert "[搜索] 找到 2 个匹配" in result
+
+    def test_configured_max_results_still_clamped_to_50(self, monkeypatch, sample_project):
+        from tools import search_tools as st
+        defaults = dict(st._search_defaults) if st._search_defaults else {}
+        defaults["MAX_RESULTS"] = 500
+        monkeypatch.setattr(st, "_search_defaults", defaults)
+
+        # 大量匹配场景：钳制生效，不会返回超过 50
+        for i in range(60):
+            (Path(sample_project) / f"clamp_{i}.py").write_text("def clamped_target():\n    pass\n", encoding="utf-8")
+
+        result = st.grep_search_tool("def clamped_target", ".py", sample_project)
+        assert "[搜索] 找到 50 个匹配" in result
+
+    def test_tools_search_config_new_fields(self):
+        from config.models import ToolsSearchConfig
+
+        cfg = ToolsSearchConfig()
+        assert cfg.max_results == 50
+        assert cfg.ripgrep_path == ""
+        assert 0 < cfg.grep_deadline_seconds < 30
+        assert cfg.grep_deadline_seconds == 25.0
+        assert {".worktrees", ".runtime", "instances"} <= set(cfg.skip_directories)
+
+
+class TestRipgrepRealIntegration:
+    """真机 rg 集成（无 rg 环境自动跳过）"""
+
+    def test_real_ripgrep_matches_python_contract(self, sample_project):
+        from tools import search_tools as st
+        if shutil.which("rg") is None and not st._search_defaults.get("RIPGREP_PATH"):
+            pytest.skip("ripgrep not installed")
+        st.reset_ripgrep_detection()
+        try:
+            assert st._detect_ripgrep() is not None
+            result = st.grep_search_tool("helper_function", ".py", sample_project)
+            assert "[搜索摘要]" in result
+            assert "module1.py" in result
+            assert "def helper_function" in result
+        finally:
+            st.reset_ripgrep_detection()
+
+
+
 
 
 if __name__ == "__main__":

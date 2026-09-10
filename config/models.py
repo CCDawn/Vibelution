@@ -1261,21 +1261,37 @@ class ToolsSearchConfig(BaseModel):
         description="每个文件最大匹配数"
     )
     max_results: int = Field(
-        default=500,
+        default=50,
         gt=0,
-        description="最大总结果数"
+        description="最大总结果数（grep_search_tool 实际生效上限 50，超出部分被钳制）"
     )
     context_lines: int = Field(
         default=3,
         ge=0,
         description="上下文行数"
     )
+    ripgrep_path: str = Field(
+        default="",
+        description=(
+            "ripgrep (rg) 可执行文件显式路径；留空则自动从 PATH 探测，"
+            "探测失败时 grep 静默回退纯 Python 扫描引擎"
+        )
+    )
+    grep_deadline_seconds: float = Field(
+        default=25.0,
+        gt=0,
+        description=(
+            "单次 grep 搜索的软超时秒数，超时 kill rg 子进程并返回已收集的部分结果；"
+            "必须小于 tool executor 的 30 秒硬超时"
+        )
+    )
     skip_directories: List[str] = Field(
         default_factory=lambda: [
             "__pycache__", ".git", ".svn", ".hg", "node_modules",
             ".venv", "venv", "env", ".env", ".idea", ".vscode",
             "dist", "build", ".tox", ".pytest_cache", ".mypy_cache",
-            "site-packages", "egg-info", ".eggs"
+            "site-packages", "egg-info", ".eggs",
+            ".worktrees", ".runtime", "instances"
         ],
         description="搜索时跳过的目录"
     )

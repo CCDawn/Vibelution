@@ -9,7 +9,7 @@ from copy import copy
 from functools import lru_cache
 import json
 from pathlib import Path
-from typing import Dict, List, Literal
+from typing import Callable, Dict, List, Literal, Optional
 from langchain_core.tools import BaseTool, tool, StructuredTool
 from tools.rebirth_tools import trigger_self_restart_tool as _restart_impl
 from tools.memory_tools import (
@@ -386,22 +386,26 @@ def _build_key_tools() -> List[BaseTool]:
     @tool
     def grep_search_tool(regex_pattern: str = "", include_ext: str = ".py",
                          search_dir: str = ".", case_sensitive: bool = True,
-                         max_results: int = 500) -> str:
+                         max_results: Optional[int] = None,
+                         _cancel_checker: Optional[Callable[[], str]] = None) -> str:
         """
         全局正则表达式搜索 (Cursor/Aider 范式)。
 
-        在项目中快速搜索代码，支持正则表达式。普通 Chat/Coding Agent 默认用 cli_tool + rg；
-        该工具保留给需要结构化搜索结果的专用 Agent 使用。
+        在项目中快速搜索代码，支持正则表达式。主引擎为 ripgrep (rg) 子进程，
+        带可杀超时与取消检查；rg 不可用时回退纯 Python 扫描。超时/取消时
+        返回已收集的部分结果与显式截断提示。普通 Chat/Coding Agent 默认用
+        cli_tool + rg；该工具保留给需要结构化搜索结果的专用 Agent 使用。
 
         Args:
             regex_pattern: 正则表达式模式
             include_ext: 要搜索的文件类型，默认 ".py"
-            search_dir: 搜索目录，默认当前目录
+            search_dir: 搜索目录，默认当前工作区根目录
             case_sensitive: 是否区分大小写，默认 True
-            max_results: 最大返回结果数
+            max_results: 最大返回结果数；默认从配置读取，最高 50
+            _cancel_checker: 系统注入的取消检查器，无需手动填写
 
         Returns:
-            JSON 格式的搜索结果，包含文件路径、行号和匹配内容
+            格式化的搜索结果，包含文件路径、行号和匹配内容
         """
         from tools.shell_tools import get_workspace_root_override, resolve_agent_tool_path
 
@@ -424,7 +428,8 @@ def _build_key_tools() -> List[BaseTool]:
             include_ext=include_ext,
             search_dir=str(resolved_search_dir),
             case_sensitive=case_sensitive,
-            max_results=max_results
+            max_results=max_results,
+            _cancel_checker=_cancel_checker,
         )
 
     @tool
