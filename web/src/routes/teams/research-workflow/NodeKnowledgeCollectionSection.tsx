@@ -59,6 +59,12 @@ export type NodeKnowledgeCollectionSectionProps = {
   nodeId?: string | null;
   busy: boolean;
   onOffer: (offer: CommandOffer) => Promise<void>;
+  /** Deep link into the blocked sideflow step's own inspector. The parent
+   * snapshot's commandOffers never carry the child run's retry_node, so the
+   * parent panel alone has no recovery path; navigating to the `ksf_` canvas
+   * selection mounts KnowledgeChildNodeInspector, whose child-run snapshot
+   * does. Absent → the cards stay status-only (previous behavior). */
+  onOpenSideflowNode?: (sideflowNodeId: string) => void;
   lang?: "zh" | "en";
 };
 
@@ -81,6 +87,15 @@ export function NodeKnowledgeCollectionSection(props: NodeKnowledgeCollectionSec
     badge: props.badge,
     ensureOfferAvailable,
   });
+  // Blocked sideflow recovery entry: the first blocked card (canonical order)
+  // plus a resolvable child run are the preconditions for a deep link that
+  // actually reaches the child run's own retry surface.
+  const sideflowCards = sideflowCardStatesForBadge(props.badge);
+  const blockedSideflowCard = sideflowCards.find((card) => card.status === "blocked") ?? null;
+  const sideflowChildRunId = props.badge?.latest?.knowledgeChildRunId ?? null;
+  const canOpenSideflowNode = Boolean(
+    props.onOpenSideflowNode && blockedSideflowCard && sideflowChildRunId,
+  );
   const requirements = offerRequirementLines(knowledgeOffers[0]?.payload);
   const phaseChipTone: "neutral" | "info" | "warning" | "danger" | "success" =
     (model.phase === "failed" || model.phase === "blocked")
@@ -115,17 +130,33 @@ export function NodeKnowledgeCollectionSection(props: NodeKnowledgeCollectionSec
       ) : null}
 
       {model.progress ? (
-        <ol className={styles.cards} data-testid="knowledge-sideflow-progress">
-          {sideflowCardStatesForBadge(props.badge).map((card) => (
-            <li
-              key={card.sideflowNodeId}
-              className={styles.card}
-              data-sideflow-status={card.status}
+        <>
+          <ol className={styles.cards} data-testid="knowledge-sideflow-progress">
+            {sideflowCards.map((card) => (
+              <li
+                key={card.sideflowNodeId}
+                className={card.status === "blocked"
+                  ? `${styles.card} ${styles.cardBlocked}`
+                  : styles.card}
+                data-sideflow-status={card.status}
+              >
+                {SIDEFLOW_NODE_LABELS[card.sideflowNodeId]} · {SIDEFLOW_STATUS_LABELS[card.status] ?? card.status}
+              </li>
+            ))}
+          </ol>
+          {canOpenSideflowNode && blockedSideflowCard ? (
+            <VButton
+              type="button"
+              variant="secondary"
+              density="compact"
+              className={styles.sideflowOpen}
+              data-testid="knowledge-sideflow-open-node"
+              onPress={() => props.onOpenSideflowNode?.(blockedSideflowCard.sideflowNodeId)}
             >
-              {SIDEFLOW_NODE_LABELS[card.sideflowNodeId]} · {SIDEFLOW_STATUS_LABELS[card.status] ?? card.status}
-            </li>
-          ))}
-        </ol>
+              {isZh ? "打开知识子流程节点" : "Open knowledge sideflow node"}
+            </VButton>
+          ) : null}
+        </>
       ) : null}
 
       {model.packageRef ? (

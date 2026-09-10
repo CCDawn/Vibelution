@@ -27,7 +27,7 @@ vi.setConfig({ testTimeout: 30_000 });
 
 const childReadHarness = vi.hoisted(() => ({ props: null as Record<string, unknown> | null }));
 vi.mock("./KnowledgeChildNodeInspector", () => ({
-  KnowledgeChildNodeInspector: () => <div />,
+  KnowledgeChildNodeInspector: () => <div data-testid="mock-knowledge-child-node-inspector" />,
   KnowledgeChildReadPanel: (props: Record<string, unknown>) => { childReadHarness.props = props; return <div />; },
 }));
 
@@ -244,7 +244,7 @@ async function renderInspectorLeaf(
   language: "zh" | "en",
   scope: InspectorProps["scope"],
   nodeDetail: NodeDetailState = { kind: "idle" },
-  extras: Partial<Pick<InspectorProps, "nextAction" | "onRecoverCollection" | "allowLaunchPanel" | "state">> = {},
+  extras: Partial<Pick<InspectorProps, "nextAction" | "onRecoverCollection" | "allowLaunchPanel" | "state" | "actions">> = {},
 ) {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -784,5 +784,79 @@ describe("selected knowledge child read ownership", () => {
     const { root, queryClient, container } = await renderInspectorLeaf("zh", makeInspectorScope(panel, {selectedNodeId: "ksf_evidence_relations"}), {kind: "idle"}, {state});
     expect(childReadHarness.props).toMatchObject({ runId: "child-run", nodeId: "evidence_relations", panel });
     await act(async () => root.unmount()); queryClient.clear(); container.remove();
+  });
+});
+
+describe("blocked knowledge sideflow recovery entry from the parent panel", () => {
+  const blockedBadges = {
+    hypothesis_design: {
+      totalCount: 1,
+      runningCount: 0,
+      awaitingHandoffCount: 0,
+      absorbedCount: 0,
+      latest: {
+        invocationId: "inv-blocked",
+        parentNodeId: "hypothesis_design",
+        status: "blocked",
+        handoffState: null,
+        currentKnowledgeNodeId: null,
+        knowledgeChildRunId: "child-run",
+        updatedAtMs: 10,
+        childNodeStates: { source_finding: "succeeded", source_extraction: "blocked" },
+      },
+      recent: [],
+    },
+  } as unknown as InspectorProps["state"]["invocationBadges"];
+
+  it("deep-links the blocked sideflow card into the child-run inspector surface", async () => {
+    const state = makeInspectorState();
+    state.run = makeRun();
+    state.invocationBadges = blockedBadges;
+    const replaceParams = vi.fn();
+    const first = await renderInspectorLeaf(
+      "zh",
+      makeInspectorScope("node", { selectedNodeId: "hypothesis_design" }),
+      { kind: "idle" },
+      {
+        state,
+        actions: { ...makeInspectorActions(), replaceParams },
+        nextAction: {
+          stage: "converged",
+          targetNodeId: "hypothesis_design",
+          navigationLabel: "假设设计",
+        },
+      },
+    );
+    try {
+      await flushUntil(first.container, "打开知识子流程节点");
+      const button = [...first.container.querySelectorAll("button")]
+        .find((node) => node.textContent?.includes("打开知识子流程节点"));
+      expect(button).toBeTruthy();
+      await act(async () => button!.click());
+      // Same URL encoding as selecting the ksf_ canvas card.
+      expect(replaceParams).toHaveBeenCalledWith({ node: "ksf_source_extraction", panel: "node" });
+    } finally {
+      await act(async () => first.root.unmount());
+      first.queryClient.clear();
+      first.container.remove();
+    }
+
+    // The navigation target really mounts KnowledgeChildNodeInspector: the
+    // sideflow branch resolves the child run from the same invocation badge.
+    const second = await renderInspectorLeaf(
+      "zh",
+      makeInspectorScope("node", { selectedNodeId: "ksf_source_extraction" }),
+      { kind: "idle" },
+      { state },
+    );
+    try {
+      await flushUntil(second.container, "知识子流程概览");
+      expect(second.container.querySelector('[data-testid="mock-knowledge-child-node-inspector"]'))
+        .not.toBeNull();
+    } finally {
+      await act(async () => second.root.unmount());
+      second.queryClient.clear();
+      second.container.remove();
+    }
   });
 });

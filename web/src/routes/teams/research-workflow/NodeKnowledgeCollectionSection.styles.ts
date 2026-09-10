@@ -8,6 +8,8 @@ export default {
   value: "m-0",
   cards: "mt-2 flex flex-wrap gap-1",
   card: "rounded border border-[var(--border-subtle)] px-1.5 py-0.5 font-medium",
+  cardBlocked: "border-[color:var(--vui-status-danger-fg)] bg-[color:var(--vui-status-danger-bg)] text-[color:var(--vui-status-danger-fg)]",
+  sideflowOpen: "mt-2 self-start",
   packageLine: "m-0 mt-2 break-all text-[var(--fg-secondary)]",
   actions: "mt-2 flex flex-wrap items-center gap-2",
   gateNote: "m-0 [font-size:var(--vui-font-2xs)] text-[var(--fg-tertiary)]",

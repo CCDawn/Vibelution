@@ -37,6 +37,7 @@ import {
 } from "./hypothesisFirstCanvasRegion";
 import {
   isKnowledgeSideflowCanvasNode,
+  knowledgeSideflowCanvasNodeId,
   knowledgeSideflowSemanticNodeId,
   sideflowNodeStatesFromBadges,
 } from "./knowledgeSideflowCanvasRegion";
@@ -403,6 +404,14 @@ export function ResearchProcessInspectorPane(props: {
         nodeId={scope.selectedNodeId}
         busy={state.busy}
         onOffer={actions.submitOffer}
+        // Same URL encoding as selecting the ksf_ canvas card (node=ksf_<step>
+        // + panel=node): the pane's sideflow branch mounts
+        // KnowledgeChildNodeInspector, whose child-run snapshot carries the
+        // retry_node recovery the parent offers lack.
+        onOpenSideflowNode={(sideflowNodeId) => actions.replaceParams({
+          node: knowledgeSideflowCanvasNodeId(sideflowNodeId),
+          panel: "node",
+        })}
         lang={lang}
       />
       </>
