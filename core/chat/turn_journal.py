@@ -18,7 +18,7 @@ from uuid import uuid4
 
 from core.infrastructure import developer_sandbox
 
-from .model_messages import normalize_model_messages
+from .model_messages import EMPTY_TOOL_RESULT_PLACEHOLDER_TEXT, normalize_model_messages
 
 
 SCHEMA_VERSION = 2
@@ -1363,6 +1363,11 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
             tool_message = _tool_message_from_event(event)
             if _message_has_visible_payload(tool_message):
                 messages.append(tool_message)
+            elif _event_has_correlated_tool_call(event):
+                # An empty result that closes a real assistant tool_call must
+                # not be dropped: the orphaned call trips the fail-closed
+                # provider send invariant and permanently bricks the session.
+                messages.append(_empty_tool_result_placeholder_message(event, tool_message))
         elif event.event_type == EVENT_CLI_SESSION_LIFECYCLE:
             lifecycle_message = _lifecycle_message_from_event(event)
             if _message_has_visible_payload(lifecycle_message):
@@ -1985,6 +1990,46 @@ def _event_tool_call_id(event: TurnJournalEvent) -> str:
         or tool_call.get("taskId")
         or ""
     ).strip()
+
+
+def _event_has_correlated_tool_call(event: TurnJournalEvent) -> bool:
+    """Whether an empty tool event can still be tied to a real tool_call."""
+
+    if str(event.correlation_id or "").strip():
+        return True
+    return bool(_event_tool_call_id(event))
+
+
+def _empty_tool_result_placeholder_message(
+    event: TurnJournalEvent,
+    tool_message: dict[str, Any],
+) -> dict[str, Any]:
+    """Keep an empty tool result with explicit placeholder text.
+
+    ``_message_has_visible_payload`` semantics are untouched: only events that
+    carry a tool correlation (and therefore close a real assistant tool_call)
+    are rescued here; truly un-linkable empty events stay dropped.
+    """
+
+    if tool_message:
+        message = dict(tool_message)
+        message["content"] = str(EMPTY_TOOL_RESULT_PLACEHOLDER_TEXT)
+        metadata = dict(message.get("metadata") or {})
+        metadata["emptyToolResultPlaceholder"] = True
+        message["metadata"] = metadata
+        return message
+    return {
+        "role": "assistant",
+        "content": str(EMPTY_TOOL_RESULT_PLACEHOLDER_TEXT),
+        "timestamp": event.timestamp,
+        "metadata": {
+            "kind": event.event_type,
+            "turnId": str(event.turn_id or "").strip(),
+            "eventId": event.event_id,
+            "correlationId": str(event.correlation_id or "").strip(),
+            "emptyToolResultPlaceholder": True,
+        },
+    }
 
 
 def _event_tool_correlation_key(event: TurnJournalEvent) -> str:

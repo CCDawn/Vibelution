@@ -580,3 +580,87 @@ def test_collect_chain_tool_call_ids_covers_raw_and_langchain_shapes():
     assert {"call_bundle", "call_live", "call_raw_kwargs"} <= ids
     # Synthesized history ids from the provider projection are included too.
     assert any(tool_call_id.startswith("history_tool_") for tool_call_id in ids)
+
+
+def test_embedded_empty_tool_body_with_call_id_synthesizes_placeholder_result():
+    messages = normalize_model_history_messages(
+        [
+            {"role": "user", "content": "帮我找一下文件"},
+            {
+                "role": "assistant",
+                "content": "",
+                "toolCalls": [
+                    {
+                        "id": "call_empty_body",
+                        "name": "glob_tool",
+                        "status": "done",
+                        "result": [],
+                    }
+                ],
+            },
+            {"role": "user", "content": "继续"},
+        ]
+    )
+
+    assert [message["role"] for message in messages] == ["user", "assistant", "tool", "user"]
+    assert [call["id"] for call in messages[1]["tool_calls"]] == ["call_empty_body"]
+    assert messages[2]["tool_call_id"] == "call_empty_body"
+    assert messages[2]["content"] == "（空结果）工具已执行但未返回可见输出。"
+    kinds = [str((message.get("metadata") or {}).get("kind") or "") for message in messages]
+    assert "historical_unresolved_tool_call" not in kinds
+    assert not any(
+        (message.get("metadata") or {}).get("repairedProviderToolChain") is True
+        for message in messages
+    )
+    assert validate_tool_result_pairing(messages).ok
+
+
+def test_embedded_empty_tool_body_without_call_id_keeps_existing_behavior():
+    messages = normalize_model_history_messages(
+        [
+            {
+                "role": "assistant",
+                "content": "",
+                "toolCalls": [{"name": "mystery_tool", "result": []}],
+            },
+            {"role": "user", "content": "继续"},
+        ]
+    )
+
+    # No explicit call id means no synthesized placeholder: the pre-existing
+    # unresolved-call repair (prose demotion) stays authoritative.
+    tool_messages = [message for message in messages if message.get("role") == "tool"]
+    assert tool_messages == []
+    assert any(
+        "（空结果）工具已执行但未返回可见输出。" not in str(message.get("content") or "")
+        for message in messages
+    )
+    assert validate_tool_result_pairing(messages).ok
+
+
+def test_embedded_empty_tool_body_interrupted_call_keeps_aborted_semantics():
+    messages = normalize_model_history_messages(
+        [
+            {
+                "role": "assistant",
+                "content": "先看一下再继续。",
+                "metadata": {"interrupted": True},
+                "toolCalls": [
+                    {
+                        "id": "call_interrupted_empty",
+                        "name": "read_file_tool",
+                        "result": [],
+                    }
+                ],
+            },
+            {"role": "user", "content": "继续"},
+        ]
+    )
+
+    assert [message["role"] for message in messages] == ["assistant", "tool", "user"]
+    assert "（空结果）工具已执行但未返回可见输出。" not in str(messages[1].get("content") or "")
+    assert messages[1]["tool_call_id"] == "call_interrupted_empty"
+    assert messages[1]["content"] == "aborted"
+    assert messages[1]["metadata"]["kind"] == "interrupted_tool_result"
+    assert messages[0]["metadata"]["interruptedToolCallIds"] == ["call_interrupted_empty"]
+    assert validate_tool_result_pairing(messages).ok
