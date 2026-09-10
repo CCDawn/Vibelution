@@ -2825,11 +2825,13 @@ def test_literature_contrast_is_not_a_marked_prefix_key():
     )
 
 
-def test_pairwise_user_message_marks_context_and_bank_prefix(monkeypatch):
-    """L1 pairwise split: context + candidate bank are the marked prefix.
+def test_pairwise_wave_system_message_carries_the_invariant_payload(monkeypatch):
+    """Pairwise wave construction: ONE marked system block + pair-only user.
 
-    Three pair calls of one wave share the whole bank (every candidate, sorted
-    by candidateId); only the tiny ``pair`` selector differs per call.
+    The wave-invariant payload (context + full candidate bank) rides at the
+    end of the system message behind a single trailing ``cache_control``
+    marker (DashScope compatible-mode only forms cache entries for full
+    system messages); the user message shrinks to the per-call pair selector.
     """
 
     captured = _capture_review_messages(monkeypatch)
@@ -2844,32 +2846,37 @@ def test_pairwise_user_message_marks_context_and_bank_prefix(monkeypatch):
             agent_id="reviewer",
             purpose="hypothesis_pairwise",
             system_prompt="compare",
-            user_payload={
+            cacheable_system_payload={
                 "context": {"contextId": "ctx-1", "question": "SCI-096"},
                 "candidatesBank": bank,
-                "pair": {"leftId": left_id, "rightId": right_id},
             },
+            user_payload={"pair": {"leftId": left_id, "rightId": right_id}},
             session_id="team-1",
         )
 
-    contents = [call["messages"][1]["content"] for call in captured]
-    assert len(contents) == 3
-    assert all(isinstance(content, list) and len(content) == 2 for content in contents)
-    prefix_texts = [content[0]["text"] for content in contents]
-    tail_texts = [content[1]["text"] for content in contents]
-    assert all(content[0]["cache_control"] == {"type": "ephemeral"} for content in contents)
-    assert all(not content[1].get("cache_control") for content in contents)
-    # The context + bank prefix is byte-identical across the pairwise wave.
-    assert len(set(prefix_texts)) == 1
-    assert len(set(tail_texts)) == 3
-    assert '"context"' in prefix_texts[0]
-    assert '"candidatesBank"' in prefix_texts[0]
-    assert '"假说 C"' in prefix_texts[0]
-    assert all('"pair"' in tail for tail in tail_texts)
-    assert all('"candidatesBank"' not in tail for tail in tail_texts)
-    combined = json.loads(prefix_texts[0] + tail_texts[0])
-    assert list(combined) == ["context", "candidatesBank", "pair"]
-    assert combined["pair"] == {"leftId": "cand-a", "rightId": "cand-b"}
+    assert len(captured) == 3
+    systems = [call["messages"][0] for call in captured]
+    # Byte-identical single-block system messages across the wave.
+    assert systems[0] == systems[1] == systems[2]
+    assert len(systems[0]["content"]) == 1
+    assert systems[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+    assert systems[0]["content"][0]["text"] == "compare" + json.dumps(
+        {
+            "context": {"contextId": "ctx-1", "question": "SCI-096"},
+            "candidatesBank": bank,
+        },
+        ensure_ascii=False,
+    )
+    users = [call["messages"][1] for call in captured]
+    assert all(isinstance(user["content"], str) for user in users)
+    assert len({user["content"] for user in users}) == 3
+    assert all(
+        json.loads(user["content"]) == {"pair": {"leftId": left, "rightId": right}}
+        for user, (left, right) in zip(
+            users,
+            (("cand-a", "cand-b"), ("cand-a", "cand-c"), ("cand-b", "cand-c")),
+        )
+    )
 
 
 def test_single_call_purposes_keep_unmarked_string_user_content(monkeypatch):
@@ -2925,11 +2932,11 @@ def test_review_call_telemetry_reports_prefix_chars(monkeypatch):
         agent_id="reviewer",
         purpose="hypothesis_pairwise",
         system_prompt="compare",
-        user_payload={
+        cacheable_system_payload={
             "context": {"contextId": "ctx-1", "question": "q"},
             "candidatesBank": [{"candidateId": "a"}, {"candidateId": "b"}],
-            "pair": {"leftId": "a", "rightId": "b"},
         },
+        user_payload={"pair": {"leftId": "a", "rightId": "b"}},
         session_id="team-1",
     )
     started = next(

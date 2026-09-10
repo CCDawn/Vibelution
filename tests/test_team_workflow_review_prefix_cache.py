@@ -6,17 +6,21 @@ replay across the hypothesis review pipeline:
 * L0 shared system head: every review step's system prompt opens with one
   byte-identical ``cache_control`` head block (rubric + dimension constants +
   JSON-only rule); the step tail follows as a second marked block, and the
-  keepalive probe builds the very same message shape;
-* pairwise candidate bank: the pairwise payload is
-  ``{context, candidatesBank(sorted by candidateId), pair{leftId, rightId}}``
-  with the lexicographically smaller id in the left slot, the verdict mapped
-  back to the executor's debated frame, and the executor handing every pair
-  call the full reviewed bank so MetaReview/Pareto consumers see the same
-  comparison records as before;
+  round-gap keepalive probe builds the very same message shape;
+* pairwise wave system payload: the wave-invariant
+  ``{context, candidatesBank(sorted by candidateId)}`` rides INSIDE the
+  system message as its single ``cache_control``-marked block (DashScope
+  compatible-mode only forms cache entries for full system messages, so a
+  marked user prefix never hit), the user message carries only the per-call
+  ``pair{leftId, rightId}`` selector with the lexicographically smaller id
+  in the left slot, the verdict is mapped back to the executor's debated
+  frame, and the executor hands every pair call the full reviewed bank so
+  MetaReview/Pareto consumers see the same comparison records as before;
 * review-wave gap keepalive: armed when the reflection wave starts, cancelled
   when it completes, so only a wave predicted to outlive the provider TTL
   fires a probe (and does so even though the meeting round is already
-  closed at review time).
+  closed at review time); the probe rebuilds the exact system message the
+  pairwise calls send (byte-identical merged construction).
 
 No real model or network is involved.
 """
@@ -86,6 +90,14 @@ def _message_text(message: dict[str, Any]) -> str:
     if isinstance(content, str):
         return content
     return "".join(str(block.get("text") or "") for block in content if isinstance(block, dict))
+
+
+def _pairwise_system_payload(message: dict[str, Any]) -> dict[str, Any]:
+    """Parse the wave-invariant JSON payload a pairwise system message carries."""
+
+    text = _message_text(message)
+    assert text.startswith(llm_review_runners._PAIRWISE_SYSTEM_PROMPT)
+    return json.loads(text[len(llm_review_runners._PAIRWISE_SYSTEM_PROMPT) :])
 
 
 @pytest.fixture(autouse=True)
@@ -239,17 +251,19 @@ def test_keepalive_probe_builds_the_same_system_message_as_review_calls(
 # ---------------------------------------------------------------------------
 
 
-def test_pairwise_prefix_keys_mark_context_and_bank_only():
-    assert llm_review_runners._REVIEW_CACHEABLE_USER_PREFIX_KEYS["hypothesis_pairwise"] == (
-        "context",
-        "candidatesBank",
+def test_pairwise_no_longer_marks_a_user_prefix():
+    """The pairwise invariant payload moved into the system message."""
+
+    assert (
+        "hypothesis_pairwise"
+        not in llm_review_runners._REVIEW_CACHEABLE_USER_PREFIX_KEYS
     )
     assert "literatureContrast" not in (
         llm_review_runners._REVIEW_CACHEABLE_USER_PREFIX_KEYS["hypothesis_reflection"]
     )
 
 
-def test_pairwise_runner_sends_sorted_bank_with_lexicographic_left_slot(monkeypatch):
+def test_pairwise_runner_sends_sorted_bank_inside_one_marked_system_block(monkeypatch):
     runners = llm_review_runners.build_hypothesis_review_runners(dict(_FAKE_LLM))
     assert runners is not None
     captured = _capture_review_calls(monkeypatch, "tie")
@@ -262,23 +276,26 @@ def test_pairwise_runner_sends_sorted_bank_with_lexicographic_left_slot(monkeypa
     )
 
     assert result["outcome"] == "tie"
-    payload = captured[0]["payload"]
-    assert list(payload) == ["context", "candidatesBank", "pair"]
-    assert [item["candidateId"] for item in payload["candidatesBank"]] == [
-        "cand-a",
-        "cand-b",
-        "cand-c",
-    ]
-    assert payload["pair"] == {"leftId": "cand-a", "rightId": "cand-c"}
-    assert "left" not in payload and "right" not in payload
-    content = captured[0]["messages"][1]["content"]
-    assert content[0]["cache_control"] == {"type": "ephemeral"}
-    assert '"candidatesBank"' in content[0]["text"]
-    assert not content[1].get("cache_control")
-    assert '"pair"' in content[1]["text"]
+    # The system message is ONE block carrying prompt + context + full bank,
+    # marked exactly once at its end.
+    system = captured[0]["messages"][0]
+    assert system["role"] == "system"
+    assert len(system["content"]) == 1
+    assert system["content"][0]["cache_control"] == {"type": "ephemeral"}
+    assert _pairwise_system_payload(system) == {
+        "context": {"contextId": "ctx-1", "question": "SCI-096"},
+        "candidatesBank": [_candidate(f"cand-{tag}", f"假说 {tag}") for tag in ("a", "b", "c")],
+    }
+    # The user message is the unmarked per-call pair selector only.
+    user = captured[0]["messages"][1]
+    assert user["role"] == "user"
+    assert isinstance(user["content"], str)
+    assert not isinstance(user["content"], list)
+    assert json.loads(user["content"]) == {"pair": {"leftId": "cand-a", "rightId": "cand-c"}}
+    assert "candidatesBank" not in user["content"]
 
 
-def test_pairwise_runner_bank_prefix_is_byte_identical_across_the_wave(monkeypatch):
+def test_pairwise_sibling_calls_share_byte_identical_marked_system_message(monkeypatch):
     runners = llm_review_runners.build_hypothesis_review_runners(dict(_FAKE_LLM))
     assert runners is not None
     captured = _capture_review_calls(monkeypatch, "tie")
@@ -289,12 +306,21 @@ def test_pairwise_runner_bank_prefix_is_byte_identical_across_the_wave(monkeypat
         runners["pairwise_runner"](dict(by_id[left_id]), dict(by_id[right_id]), context)
 
     assert len(captured) == 3
-    assert len({call["messages"][1]["content"][0]["text"] for call in captured}) == 1
-    assert [call["payload"]["pair"] for call in captured] == [
+    systems = [call["messages"][0] for call in captured]
+    # Byte-identical (single-block) system messages across the whole wave.
+    assert systems[0] == systems[1] == systems[2]
+    blocks = systems[0]["content"]
+    assert len(blocks) == 1
+    assert blocks[0]["cache_control"] == {"type": "ephemeral"}
+    assert '"candidatesBank"' in blocks[0]["text"]
+    # Users differ only by the pair selector and never carry the bank.
+    users = [call["messages"][1] for call in captured]
+    assert [json.loads(user["content"])["pair"] for user in users] == [
         {"leftId": "cand-a", "rightId": "cand-c"},
         {"leftId": "cand-b", "rightId": "cand-c"},
         {"leftId": "cand-a", "rightId": "cand-b"},
     ]
+    assert all("candidatesBank" not in user["content"] for user in users)
 
 
 @pytest.mark.parametrize(
@@ -322,8 +348,12 @@ def test_pairwise_runner_maps_verdict_back_to_the_debated_frame(
     assert result["outcome"] == expected_outcome
     assert result["justification"] == "cand 依据"
     assert captured[0]["payload"]["pair"] == {"leftId": "cand-a", "rightId": "cand-b"}
-    # Without an executor bank the pair itself is the (sorted) bank.
-    assert [item["candidateId"] for item in captured[0]["payload"]["candidatesBank"]] == [
+    # Without an executor bank the pair itself is the (sorted) bank, riding
+    # inside the wave-invariant system payload.
+    assert [
+        item["candidateId"]
+        for item in _pairwise_system_payload(captured[0]["messages"][0])["candidatesBank"]
+    ] == [
         "cand-a",
         "cand-b",
     ]
@@ -342,9 +372,11 @@ def test_pairwise_runner_keeps_invalid_outcomes_for_executor_validation(monkeypa
 def test_pairwise_runner_provider_bound_result_keeps_receipt_and_maps_verdict(monkeypatch):
     receipt = {"receiptId": "receipt-1", "status": "succeeded"}
     seen: list[dict[str, Any]] = []
+    seen_system_payloads: list[Any] = []
 
     def fake_invoke(llm, **kwargs):
         seen.append(dict(kwargs["user_payload"]))
+        seen_system_payloads.append(kwargs.get("cacheable_system_payload"))
         return ProviderBoundReviewResult(
             {"outcome": "left_wins", "justification": "cand-a 更优"}, receipt
         )
@@ -359,6 +391,10 @@ def test_pairwise_runner_provider_bound_result_keeps_receipt_and_maps_verdict(mo
     assert result.model_invocation_receipt == receipt
     assert result.payload["outcome"] == "right_wins"
     assert seen[0]["pair"] == {"leftId": "cand-a", "rightId": "cand-b"}
+    assert [item["candidateId"] for item in seen_system_payloads[0]["candidatesBank"]] == [
+        "cand-a",
+        "cand-b",
+    ]
 
 
 def test_executor_hands_the_full_reviewed_bank_to_every_pairwise_call():
@@ -410,14 +446,19 @@ def test_pairwise_runner_composes_with_executor_and_downstream_consumers(monkeyp
 
     runners = llm_review_runners.build_hypothesis_review_runners(dict(_FAKE_LLM))
     assert runners is not None
-    pairwise_payloads: list[dict[str, Any]] = []
+    pairwise_wire: list[dict[str, Any]] = []
     metareview_inputs: list[list[dict[str, Any]]] = []
 
     def fake_invoke_llm(client, messages, tools=None, context=None, **kwargs):
         purpose = str(getattr(context, "prompt_purpose", ""))
         payload = json.loads(_message_text(messages[1]))
         if purpose == "hypothesis_pairwise":
-            pairwise_payloads.append(payload)
+            pairwise_wire.append(
+                {
+                    "systemPayload": _pairwise_system_payload(messages[0]),
+                    "pair": payload["pair"],
+                }
+            )
             # Always prefer the lexicographically smaller candidate (left slot).
             return _FakeResponse(
                 json.dumps({"outcome": "left_wins", "justification": "字典序小者胜"}, ensure_ascii=False)
@@ -473,11 +514,13 @@ def test_pairwise_runner_composes_with_executor_and_downstream_consumers(monkeyp
     assert [
         (c["leftCandidateId"], c["rightCandidateId"]) for c in comparisons
     ] == hypothesis_review_executor.deterministic_pairwise_order(ids, "bank-seed")
-    assert len(pairwise_payloads) == 3
-    for payload in pairwise_payloads:
-        assert [item["candidateId"] for item in payload["candidatesBank"]] == ids
-        assert payload["pair"]["leftId"] < payload["pair"]["rightId"]
-        assert all("scores" in item for item in payload["candidatesBank"])
+    assert len(pairwise_wire) == 3
+    for wire in pairwise_wire:
+        system_payload = wire["systemPayload"]
+        assert [item["candidateId"] for item in system_payload["candidatesBank"]] == ids
+        assert all("scores" in item for item in system_payload["candidatesBank"])
+        assert system_payload["context"] == {"contextId": "ctx-bank", "question": "SCI-096"}
+        assert wire["pair"]["leftId"] < wire["pair"]["rightId"]
     # Whatever the debated order, the recorded winner is the smaller id.
     for comparison in comparisons:
         left_id, right_id = comparison["leftCandidateId"], comparison["rightCandidateId"]
@@ -578,11 +621,14 @@ def test_wave_gap_keepalive_probes_the_pairwise_prefix_while_the_wave_outlives_t
     assert handle is not None
     assert _wait(lambda: bool(probe_calls))
     handle.cancel()
-    # The probe targets the next wave: shared head + pairwise tail, built
-    # exactly like the pairwise review call builds its system message.
-    assert probe_calls[0]["messages"][0] == llm_review_runners.build_review_system_message(
-        llm_review_runners._PAIRWISE_SYSTEM_PROMPT
+    # The probe targets the next wave: the pairwise system message is the
+    # merged single-block construction (step prompt + wave-invariant payload
+    # in ONE cache_control-marked block).  A bare arm (no payload inputs yet
+    # at reflection time) sends the exact byte prefix of that construction.
+    assert probe_calls[0]["messages"][0] == llm_review_runners.build_pairwise_wave_system_message(
+        llm_review_runners.pairwise_wave_system_text()
     )
+    assert len(probe_calls[0]["messages"][0]["content"]) == 1
     assert probe_calls[0]["messages"][1] == {"role": "user", "content": "."}
     assert str(getattr(probe_calls[0]["context"], "prompt_purpose", "")) == (
         "review_cache_keepalive"
@@ -592,6 +638,45 @@ def test_wave_gap_keepalive_probes_the_pairwise_prefix_while_the_wave_outlives_t
     assert succeeded[0]["fields"]["promptTag"] == "pairwise"
     # The meeting-round liveness gate never skipped it.
     assert _probe_events(scene_events, "review_cache_keepalive.probe.skipped") == []
+
+
+def test_wave_gap_probe_message_is_byte_identical_to_the_pairwise_call(
+    monkeypatch, scene_events
+):
+    """Given the same (context, bank), the probe replays the pairwise bytes."""
+
+    monkeypatch.setenv("VIBELUTION_MEETING_CACHE_KEEPALIVE_DELAY_MS", "10")
+    monkeypatch.setenv("VIBELUTION_MEETING_CACHE_KEEPALIVE_CHAIN_MAX_PROBES", "1")
+    _closed_meeting(monkeypatch)
+    # A real pairwise call first: its wire system message is the authority.
+    captured = _capture_review_calls(monkeypatch, "tie")
+    bank = [_candidate(f"cand-{tag}", f"假说 {tag}") for tag in ("a", "b", "c")]
+    context = _review_context(
+        teamId="team-1", **{PAIRWISE_CANDIDATE_BANK_CONTEXT_KEY: bank}
+    )
+    runners = llm_review_runners.build_hypothesis_review_runners(dict(_FAKE_LLM))
+    assert runners is not None
+    runners["pairwise_runner"](
+        _candidate("cand-a", "假说 A"), _candidate("cand-b", "假说 B"), context
+    )
+    pairwise_system = captured[0]["messages"][0]
+
+    # The wave-gap probe armed with the same (context, bank) must rebuild it
+    # byte for byte — the provider only replays an exact prefix match.
+    probe_calls = _install_probe_llm(monkeypatch)
+    handle = review_cache_keepalive.schedule_review_wave_gap_keepalive(
+        "team-1",
+        "meeting-1",
+        context={"contextId": "ctx-1", "question": "SCI-096"},
+        candidates_bank=bank,
+        resolve=lambda: _RESOLVED,
+    )
+    assert handle is not None
+    assert _wait(lambda: bool(probe_calls))
+    handle.cancel()
+    assert probe_calls[0]["messages"][0] == pairwise_system
+    assert probe_calls[0]["messages"][1] == {"role": "user", "content": "."}
+    assert len(_probe_events(scene_events, "review_cache_keepalive.probe.succeeded")) == 1
 
 
 def test_wave_gap_keepalive_rearms_until_cancelled_within_the_chain_budget(

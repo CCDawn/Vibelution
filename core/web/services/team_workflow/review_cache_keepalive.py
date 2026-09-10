@@ -29,10 +29,12 @@ after the meeting round closed, and its reflection→pairwise gap measured
 ~323 s — past the TTL — so the pairwise wave started cold even with the
 round-gap probes above.  The hypothesis review executor arms one wave handle
 when the reflection wave starts and cancels it when that wave completes; the
-handle fires a probe (pairwise prompt = shared head + pairwise tail) every
-keepalive delay only while the wave is still running, so short waves never
-probe and long waves keep the next wave's prefix warm.  Same probe path, same
-guards, wave-scoped liveness instead of the meeting-round one.
+handle fires a probe (pairwise system message = the merged single-block
+construction the real pairwise calls send: step prompt + wave-invariant
+payload behind ONE trailing ``cache_control`` marker) every keepalive delay
+only while the wave is still running, so short waves never probe and long
+waves keep the next wave's prefix warm.  Same probe path, same guards,
+wave-scoped liveness instead of the meeting-round one.
 
 Hard guards (keepalive is a pure optimization and must never affect the main
 chain or its accounting):
@@ -211,6 +213,7 @@ def _schedule_keepalive_timer(
     prompt_tag: str,
     chain_index: int,
     resolve: Callable[[], dict[str, Any] | None] | None,
+    system_message: Any | None = None,
 ) -> None:
     """Start one daemon fire-and-forget probe timer and register it."""
 
@@ -223,6 +226,7 @@ def _schedule_keepalive_timer(
             "prompt_tag": prompt_tag,
             "chain_index": chain_index,
             "resolve": resolve,
+            **({"system_message": system_message} if system_message is not None else {}),
         },
     )
     timer.daemon = True
@@ -239,6 +243,7 @@ def _maybe_chain_next_probe(
     prompt_tag: str,
     chain_index: int,
     resolve: Callable[[], dict[str, Any] | None] | None,
+    system_message: Any | None = None,
 ) -> None:
     """Re-arm this prompt's prefix before the TTL expires again.
 
@@ -261,6 +266,7 @@ def _maybe_chain_next_probe(
         prompt_tag=prompt_tag,
         chain_index=next_index,
         resolve=resolve,
+        system_message=system_message,
     )
     _record_keepalive_scene_event(
         "review_cache_keepalive.chained",
@@ -284,13 +290,17 @@ def _run_probe(
     chain_index: int = 0,
     resolve: Callable[[], dict[str, Any] | None] | None = None,
     is_active: Callable[[], bool] | None = None,
+    system_message: Any | None = None,
 ) -> None:
     """Fire one keepalive probe; every failure path stays quiet and bounded.
 
     ``is_active`` lets a caller swap the default "meeting round still open"
     liveness gate (round-gap probes between discussion rounds) for its own
     wave-scoped predicate (the review wave probes below, which run while the
-    meeting round is already closed).
+    meeting round is already closed).  ``system_message`` lets a caller pin
+    the exact outgoing system message (the wave-gap probes, which must be
+    byte-identical to the real pairwise calls' merged construction); without
+    it the round-gap path builds head+tail blocks from ``system_prompt``.
     """
 
     from core.web.services.team_workflow.llm_review_runners import (
@@ -340,9 +350,13 @@ def _run_probe(
         messages: list[Any] = [
             # Byte-identical construction to the review calls: the provider
             # can only hit the cache entry when the marked prefix matches
-            # exactly, so the probe goes through the same shared-head builder
-            # (head block + step tail block) the review calls use.
-            llm_review_runners.build_review_system_message(system_prompt),
+            # exactly.  Round-gap probes go through the same shared-head
+            # builder (head block + step tail block) the review calls use;
+            # wave-gap probes pin the prebuilt merged system message the
+            # pairwise calls send.
+            system_message
+            if system_message is not None
+            else llm_review_runners.build_review_system_message(system_prompt),
             {"role": "user", "content": _PROBE_USER_CONTENT},
         ]
         invocation_context = LLMInvocationContext(
@@ -408,6 +422,7 @@ def _run_probe(
         prompt_tag=prompt_tag,
         chain_index=chain_index,
         resolve=resolve,
+        system_message=system_message,
     )
 
 
@@ -439,12 +454,14 @@ class ReviewWaveGapKeepalive:
         system_prompt: str,
         prompt_tag: str,
         resolve: Callable[[], dict[str, Any] | None] | None,
+        system_message: Any | None = None,
     ) -> None:
         self._team_id = str(team_id)
         self._meeting_round_id = str(meeting_round_id)
         self._system_prompt = str(system_prompt)
         self._prompt_tag = str(prompt_tag)
         self._resolve = resolve
+        self._system_message = system_message
         self._cancelled = threading.Event()
         self._lock = threading.Lock()
         self._timer: threading.Timer | None = None
@@ -490,6 +507,7 @@ class ReviewWaveGapKeepalive:
             chain_index=chain_index,
             resolve=self._resolve,
             is_active=lambda: not self._cancelled.is_set(),
+            system_message=self._system_message,
         )
         # Re-arm for waves that outlive one probe interval, bounded by the
         # same chain budget as the round-gap probes.
@@ -511,34 +529,53 @@ class ReviewWaveGapKeepalive:
             timer.cancel()
 
 
-def review_wave_gap_probe_prompt() -> tuple[str, str]:
-    """Return ``(promptTag, systemPrompt)`` the wave-gap probe should send.
+def review_wave_gap_probe_prompt(
+    context: Any = None,
+    candidates_bank: Any = None,
+) -> tuple[str, str]:
+    """Return ``(promptTag, mergedSystemText)`` the wave-gap probe should send.
 
-    The pairwise prompt is the highest-value target: its marked blocks are
-    (a) the shared system head every next wave reuses and (b) the pairwise
-    step tail itself.  Falls back to the raw reflection prompt if the step
-    list ever changes shape.
+    The pairwise step is the highest-value target, and its system message is
+    now the MERGED single-block construction: step prompt + wave-invariant
+    payload (context + candidatesBank) behind one trailing ``cache_control``
+    marker (``llm_review_runners.pairwise_wave_system_text``).  Given the same
+    ``(context, candidates_bank)`` the real pairwise calls embed, this text —
+    built through ``build_pairwise_wave_system_message`` — is byte-identical
+    to their system message, which is the only shape the provider replays.
+    Without payload inputs (the reflection wave has not produced the reviewed
+    bank yet) the text is the bare step prompt in the same single-block shape
+    — still an exact byte prefix of the real calls' system message.  Falls
+    back to the raw reflection prompt if the step list ever changes shape.
     """
 
     from core.web.services.team_workflow.llm_review_runners import (
+        pairwise_wave_system_text,
         review_step_system_prompts,
     )
 
     prompts = dict(review_step_system_prompts())
-    return "pairwise", prompts.get("pairwise") or prompts.get("reflection", "")
+    if "pairwise" not in prompts:
+        return "pairwise", prompts.get("reflection", "")
+    return "pairwise", pairwise_wave_system_text(context, candidates_bank)
 
 
 def schedule_review_wave_gap_keepalive(
     team_id: str,
     meeting_round_id: str,
     *,
+    context: Any = None,
+    candidates_bank: Any = None,
     resolve: Callable[[], dict[str, Any] | None] | None = None,
 ) -> ReviewWaveGapKeepalive | None:
     """Arm the reflection→pairwise gap keepalive for one review execution.
 
-    Fire-and-forget: returns the handle the executor cancels when the
-    reflection wave completes, or ``None`` when the feature is disabled
-    (keepalive delay 0) or the scope is unusable.  Never raises.
+    ``context`` / ``candidates_bank`` optionally pin the wave-invariant
+    payload so the probe replays the pairwise calls' exact system bytes; the
+    executor arms before the reflection wave, where the reviewed bank does
+    not exist yet, and stays with the bare merged construction.  Fire-and-
+    forget: returns the handle the executor cancels when the reflection wave
+    completes, or ``None`` when the feature is disabled (keepalive delay 0)
+    or the scope is unusable.  Never raises.
     """
 
     normalized_team_id = str(team_id or "").strip()
@@ -550,7 +587,13 @@ def schedule_review_wave_gap_keepalive(
     ):
         return None
     try:
-        prompt_tag, system_prompt = review_wave_gap_probe_prompt()
+        from core.web.services.team_workflow.llm_review_runners import (
+            build_pairwise_wave_system_message,
+        )
+
+        prompt_tag, system_prompt = review_wave_gap_probe_prompt(
+            context, candidates_bank
+        )
         if not system_prompt:
             return None
         return ReviewWaveGapKeepalive(
@@ -559,6 +602,7 @@ def schedule_review_wave_gap_keepalive(
             system_prompt=system_prompt,
             prompt_tag=prompt_tag,
             resolve=resolve,
+            system_message=build_pairwise_wave_system_message(system_prompt),
         ).start()
     except Exception:  # noqa: BLE001 - keepalive scheduling never blocks reviews
         return None

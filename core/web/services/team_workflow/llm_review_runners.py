@@ -615,6 +615,18 @@ def _user_payload_context_id(user_payload: Mapping[str, Any]) -> str:
     return ""
 
 
+def _call_context_id(
+    user_payload: Mapping[str, Any],
+    cacheable_system_payload: Mapping[str, Any] | None = None,
+) -> str:
+    """ContextId view across both payload shapes (user prefix or system block)."""
+
+    context_id = _user_payload_context_id(user_payload)
+    if context_id or not isinstance(cacheable_system_payload, Mapping):
+        return context_id
+    return _user_payload_context_id(cacheable_system_payload)
+
+
 # ---------------------------------------------------------------------------
 # Prompt-cache levers for the review wave (SCI-009 cache-hitrate follow-up)
 # ---------------------------------------------------------------------------
@@ -672,13 +684,15 @@ def review_step_system_prompts() -> tuple[tuple[str, str], ...]:
 #   tail together with ``candidate``, ``requireCoreHypothesisCoherence``
 #   (derived from the candidate's authority) and ``refsWhitelist``
 #   (candidate-bound).
-# - ``hypothesis_pairwise``: ``context`` and ``candidatesBank`` (every
-#   reviewed candidate of the wave, sorted by candidateId) are wave-invariant
-#   and form the marked prefix; only the tiny ``pair`` selector is the
-#   per-call tail.  Historically each pairwise call embedded its own two
-#   candidates as ``left``/``right`` so three pair calls shared ~nothing
-#   beyond the context (measured 0.3% hit rate); the bank makes the heavy
-#   candidate text a shared prefix.
+# - ``hypothesis_pairwise`` has NO entry here any more: DashScope
+#   compatible-mode only forms explicit-cache entries for *full system
+#   messages* — a ``cache_control`` block inside the user message never
+#   formed a hit, so the pairwise wave paid the ~7k-token bank on every
+#   sibling call while only the ~1.1k-token system prefix hit.  The
+#   wave-invariant ``context`` + ``candidatesBank`` now ride INSIDE the
+#   system message behind a single trailing marker
+#   (``pairwise_wave_invariant_payload`` + ``build_pairwise_wave_system_message``);
+#   the user message shrinks to the tiny ``pair`` selector.
 # - pareto / metareview / revision / meeting_digest are skipped: each fires at
 #   most one call per wave (or carries per-wave-unique aggregated results), so
 #   there is no wave-invariant prefix to mark.
@@ -689,7 +703,6 @@ _REVIEW_CACHEABLE_USER_PREFIX_KEYS: dict[str, tuple[str, ...]] = {
         "reviewDimensions",
         "allowedRatings",
     ),
-    "hypothesis_pairwise": ("context", "candidatesBank"),
 }
 
 
@@ -1500,10 +1513,20 @@ def _invoke_review_llm(llm: Mapping[str, Any], **kwargs: Any) -> Any:
     it; a deadline-tight wave fires un-staggered).
     """
 
+    user_payload = kwargs.get("user_payload") or {}
+    system_payload = kwargs.get("cacheable_system_payload")
+    if (
+        isinstance(system_payload, Mapping)
+        and isinstance(system_payload.get("context"), Mapping)
+        and not isinstance(user_payload.get("context"), Mapping)
+    ):
+        # The pairwise wave construction moved ``context`` into the system
+        # message; the wave-stagger key still needs the wave-scoped contextId.
+        user_payload = {"context": system_payload["context"], **user_payload}
     wave_call = _begin_review_wave_call(
         purpose=str(kwargs.get("purpose") or ""),
         session_id=str(kwargs.get("session_id") or ""),
-        user_payload=kwargs.get("user_payload") or {},
+        user_payload=user_payload,
         deadline_at_ms=kwargs.get("deadline_at_ms"),
     )
     try:
@@ -1536,6 +1559,7 @@ def _invoke_review_llm_impl(
     system_prompt: str,
     user_payload: Mapping[str, Any],
     session_id: str,
+    cacheable_system_payload: Mapping[str, Any] | None = None,
     receipt_context: Mapping[str, Any] | None = None,
     require_provider_receipt: bool = False,
     deadline_at_ms: int | None = None,
@@ -1547,19 +1571,38 @@ def _invoke_review_llm_impl(
     # Gate/cooldown attribution key: provider-qualified modelRef when present,
     # falling back to the bare model id.
     model_gate_ref = str(llm.get("modelRef") or llm.get("modelId") or "")
-    # L1 shared user-prefix marking: the wave-invariant payload prefix travels
-    # in a marked text block with the per-call tail unmarked behind it; the
-    # combined text stays byte-identical to the historical single-string form.
-    user_message, user_content, cache_prefix_chars = _build_review_user_message(
-        purpose,
-        user_payload,
-    )
-    # L0 shared system head: the byte-stable head opens every step's system
-    # prompt as its own marked block (see ``build_review_system_message``).
-    messages: list[Any] = [
-        build_review_system_message(system_prompt),
-        user_message,
-    ]
+    if cacheable_system_payload is not None:
+        # Pairwise wave construction: ONE system message carries the step
+        # prompt plus the wave-invariant payload (context + candidatesBank),
+        # marked exactly once at its end; the user message is the unmarked
+        # per-call pair selector.  DashScope compatible-mode only forms
+        # explicit-cache entries for full system messages, so the heavy bank
+        # must ride inside the system block instead of a marked user prefix.
+        system_cacheable_text = system_prompt + json.dumps(
+            cacheable_system_payload, ensure_ascii=False
+        )
+        user_content = json.dumps(user_payload, ensure_ascii=False)
+        cache_prefix_chars = len(system_cacheable_text)
+        messages: list[Any] = [
+            build_pairwise_wave_system_message(system_cacheable_text),
+            {"role": "user", "content": user_content},
+        ]
+    else:
+        # L1 shared user-prefix marking: the wave-invariant payload prefix
+        # travels in a marked text block with the per-call tail unmarked
+        # behind it; the combined text stays byte-identical to the historical
+        # single-string form.
+        user_message, user_content, cache_prefix_chars = _build_review_user_message(
+            purpose,
+            user_payload,
+        )
+        system_cacheable_text = ""
+        # L0 shared system head: the byte-stable head opens every step's system
+        # prompt as its own marked block (see ``build_review_system_message``).
+        messages = [
+            build_review_system_message(system_prompt),
+            user_message,
+        ]
     receipt_binding = (
         receipt_context.get("questionStageBinding")
         if isinstance(receipt_context, Mapping)
@@ -1643,7 +1686,8 @@ def _invoke_review_llm_impl(
                 or ""
             ),
             "messageCount": len(messages),
-            "inputChars": len(system_prompt) + len(user_content),
+            "inputChars": len(system_cacheable_text or system_prompt)
+            + len(user_content),
             "timeoutMs": max(0, int(timeout_seconds * 1000)),
             "deadlinePresent": bool(deadline_at_ms),
             "deadlineRemainingMs": max(0, int(deadline_at_ms - time.time() * 1000))
@@ -1760,7 +1804,7 @@ def _invoke_review_llm_impl(
                 raw_response=content,
                 session_id=session_id,
                 meeting_round_id=str(user_payload.get("meetingRoundId") or ""),
-                context_id=_user_payload_context_id(user_payload),
+                context_id=_call_context_id(user_payload, cacheable_system_payload),
                 model_ref=str(llm.get("modelRef") or ""),
             )
             raise
@@ -2200,7 +2244,7 @@ _PAIRWISE_SYSTEM_TAIL = """
 
 本步骤：两两比较（Pairwise）。你是科研假说评审员，对指定的左右两个候选做一次比较。
 
-输入结构：candidatesBank 按 candidateId 字典序列出本轮全部候选的完整内容；pair.leftId 与 pair.rightId 指定本次要比较的两个候选（左槽固定为字典序较小者），二者都能在 candidatesBank 中按 candidateId 找到；其余候选仅作参照，不参与本次胜负判定。
+输入结构：本 system 消息末尾附带一段 JSON 载荷，给出本轮不变的 context 与 candidatesBank（candidatesBank 按 candidateId 字典序列出本轮全部候选的完整内容）；用户消息只携带 pair 选择器——pair.leftId 与 pair.rightId 指定本次要比较的两个候选（左槽固定为字典序较小者），二者都能在 candidatesBank 中按 candidateId 找到；其余候选仅作参照，不参与本次胜负判定。
 
 要求：
 - outcome 只能是 "left_wins"、"right_wins" 或 "tie"，其中 left 指 pair.leftId、right 指 pair.rightId；只依据候选内容与评审上下文判断。
@@ -2286,6 +2330,29 @@ def build_review_system_message(system_prompt: str) -> Any:
     if not head:
         return build_cacheable_system_message(tail)
     return build_cacheable_system_message_with_shared_head(head, tail)
+
+
+def build_pairwise_wave_system_message(system_text: str) -> Any:
+    """Single-block system message with one trailing ``cache_control`` marker.
+
+    Byte-preserving equivalent of ``build_cacheable_system_message``: the
+    merged pairwise wave text (step prompt + wave-invariant payload) is never
+    stripped, so a probe built from the same — or a shorter — merged text
+    stays an exact byte prefix of the real pairwise calls' system message and
+    the provider can replay it.  Real pairwise calls and wave-gap probes MUST
+    both build through this function.
+    """
+
+    return {
+        "role": "system",
+        "content": [
+            {
+                "type": "text",
+                "text": str(system_text or ""),
+                "cache_control": {"type": "ephemeral"},
+            }
+        ],
+    }
 
 
 def _validated_dimension_review_rows(
@@ -2420,6 +2487,48 @@ def pairwise_candidate_bank(
         if candidate_id not in by_id:
             by_id[candidate_id] = dict(item)
     return [by_id[candidate_id] for candidate_id in sorted(by_id)]
+
+
+def pairwise_wave_invariant_payload(
+    context: Mapping[str, Any] | None,
+    bank: Sequence[Mapping[str, Any]] | None,
+) -> dict[str, Any]:
+    """Wave-invariant pairwise payload: review context plus the full bank.
+
+    The single authoritative shape for the payload both the real pairwise
+    calls (``pairwise_runner``, which passes the normalized
+    ``pairwise_candidate_bank``) and the wave-gap keepalive probe embed at the
+    end of the system prompt; the dict's key order is the serialized order.
+    """
+
+    return {
+        "context": {
+            "contextId": str((context or {}).get("contextId") or ""),
+            "question": str((context or {}).get("question") or ""),
+        },
+        "candidatesBank": [dict(item) for item in list(bank or [])],
+    }
+
+
+def pairwise_wave_system_text(
+    context: Mapping[str, Any] | None = None,
+    bank: Sequence[Mapping[str, Any]] | None = None,
+) -> str:
+    """Merged pairwise system text: step prompt + canonical payload JSON.
+
+    Byte-authoritative for the pairwise wave construction: real calls append
+    exactly this payload serialization to ``_PAIRWISE_SYSTEM_PROMPT``, and the
+    wave-gap probe builds its message from this function so the two can never
+    drift.  With no payload inputs the text is the bare step prompt — still an
+    exact byte prefix of any payload-carrying construction, so a probe armed
+    before the reviewed bank exists keeps the shared head+tail tokens warm.
+    """
+
+    if context is None and bank is None:
+        return _PAIRWISE_SYSTEM_PROMPT
+    return _PAIRWISE_SYSTEM_PROMPT + json.dumps(
+        pairwise_wave_invariant_payload(context, bank), ensure_ascii=False
+    )
 
 
 def pairwise_slot_order(left_id: str, right_id: str) -> tuple[str, str, bool]:
@@ -2638,9 +2747,13 @@ def build_hypothesis_review_runners(
     ):
         left_id = str(left.get("candidateId") or "")
         right_id = str(right.get("candidateId") or "")
-        # L1 + candidate bank: the wave-invariant context and the full
-        # candidate bank (sorted by candidateId) form the marked prefix; the
-        # tiny pair selector is the per-call tail.  The model always sees the
+        # Wave construction: the SYSTEM message alone carries every
+        # wave-invariant byte — step prompt + context + full candidate bank
+        # (sorted by candidateId) — behind a single trailing cache marker, so
+        # the sibling calls of one wave replay one full-system cache entry
+        # (DashScope compatible-mode only forms entries for full system
+        # messages; a marked user prefix never hit).  The user message
+        # shrinks to the per-call pair selector.  The model always sees the
         # lexicographically smaller id in the left slot, and the verdict is
         # mapped back to the caller's (left, right) frame below, so the
         # executor keeps receiving outcomes in the recorded debated order.
@@ -2650,12 +2763,11 @@ def build_hypothesis_review_runners(
             agent_id=str(resolved.get("agentId") or "challenge_cup_evaluator"),
             purpose="hypothesis_pairwise",
             system_prompt=_PAIRWISE_SYSTEM_PROMPT,
+            cacheable_system_payload=pairwise_wave_invariant_payload(
+                context,
+                pairwise_candidate_bank(left, right, context),
+            ),
             user_payload={
-                "context": {
-                    "contextId": str(context.get("contextId") or ""),
-                    "question": str(context.get("question") or ""),
-                },
-                "candidatesBank": pairwise_candidate_bank(left, right, context),
                 "pair": {
                     "leftId": bank_left_id,
                     "rightId": bank_right_id,
