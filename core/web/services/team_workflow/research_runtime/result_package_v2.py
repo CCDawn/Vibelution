@@ -10,6 +10,7 @@ free-form task summaries.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from functools import lru_cache
@@ -2093,6 +2094,103 @@ def _competition_view_from_payload(
     return clamp_competition_result_view(result)
 
 
+_STAGE_ONE_RECEIPT_STATUSES = ("succeeded", "retried")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _stage_one_receipt_authority(
+    *,
+    record: Mapping[str, Any],
+    team_id: str,
+    question_id: str,
+    workflow_run_id: str,
+) -> dict[str, Any] | None:
+    """Assemble the canonical-package evidence keys for a proposal-only run.
+
+    The stage-one receipt registry is the only honest route/receipt authority
+    for proposal runs (see ``_stage_one_model_route``).  This projects the
+    already-validated receipts and the run's frozen model policy into the
+    canonical-package evidence keys that
+    ``challenge_question_runs.register_challenge_question_output`` package mode
+    consumes, so automatic Challenge Program registration can bind the record
+    to a canonical result package instead of degrading to
+    ``officialModelCall=false``.
+
+    The return is ``None`` — never a partial authority — whenever the frozen
+    policy or the per-stage receipt coverage cannot fully support package mode;
+    the caller then keeps the historical receipt-less package (fail closed).
+    """
+
+    from core.research.competition.question_result_package import (
+        REQUIRED_RECEIPT_STAGES,
+        QuestionResultPackageError,
+        canonical_model_policy,
+    )
+    from core.web.services.team_workflow.challenge_question_runs import (
+        is_challenge_official_model_evidence_eligible,
+    )
+
+    snapshot = _mapping(record.get("inputSnapshot"))
+    routing = _mapping(snapshot.get("modelRoutingPolicy"))
+    required_policy = routing.get("requiredModelPolicy")
+    frozen_policy_sha256 = _text(routing.get("modelPolicySha256")).lower()
+    if not isinstance(required_policy, Mapping) or len(frozen_policy_sha256) != 64:
+        return None
+    try:
+        policy = canonical_model_policy(required_policy)
+    except (QuestionResultPackageError, TypeError, ValueError):
+        return None
+    if str(policy.get("policySha256") or "") != frozen_policy_sha256:
+        return None
+
+    selected: dict[str, dict[str, Any]] = {}
+    # Registry order is the append order; the latest successful call of each
+    # stage is the invocation whose output the run carried forward.
+    for receipt in question_model_invocation_receipts(
+        team_id,
+        question_id=question_id,
+        workflow_run_id=workflow_run_id,
+    ):
+        if _text(receipt.get("status")) not in _STAGE_ONE_RECEIPT_STATUSES:
+            continue
+        scope = _mapping(receipt.get("scope"))
+        stage = _text(scope.get("stageId") or scope.get("stage_id")).lower()
+        if stage not in REQUIRED_RECEIPT_STAGES:
+            continue
+        if _text(scope.get("modelPolicySha256") or scope.get("model_policy_sha256")).lower() != frozen_policy_sha256:
+            continue
+        selected[stage] = deepcopy(dict(receipt))
+    if set(selected) != set(REQUIRED_RECEIPT_STAGES):
+        return None
+    providers = {_text(receipt.get("provider")) for receipt in selected.values()}
+    providers.discard("")
+    if len(providers) != 1:
+        return None
+    if not all(
+        is_challenge_official_model_evidence_eligible(
+            policy,
+            provider_id=receipt.get("provider"),
+            model_ref=receipt.get("model"),
+            model_id=receipt.get("model") or receipt.get("requestedModel"),
+        )
+        for receipt in selected.values()
+    ):
+        return None
+    snapshot_sha256 = _text(
+        snapshot.get("snapshotHash")
+        or record.get("inputSnapshotHash")
+        or record.get("researchBriefHash")
+    ).lower()
+    if not _SHA256_RE.fullmatch(snapshot_sha256):
+        return None
+    return {
+        "modelInvocationReceipts": selected,
+        "modelPolicy": policy,
+        "authorizedModelPolicySha256": frozen_policy_sha256,
+        "inputSnapshotSha256": snapshot_sha256,
+    }
+
+
 def build_challenge_result_package_v2(
     *,
     generic_package: Mapping[str, Any],
@@ -2378,6 +2476,22 @@ def build_challenge_result_package_v2(
         generic_package=generic_package,
         record=record,
     )
+    if is_proposal_only_challenge_run(record):
+        # Proposal-only generic packages carry no canonical-package evidence of
+        # their own, so the already-validated registry receipt authority rides
+        # at the package top level.  Without it the Challenge Program bridge
+        # can never enter package mode and the record permanently degrades to
+        # officialModelCall=false.  Incomplete authority attaches nothing and
+        # keeps the historical receipt-less package (fail closed).
+        receipt_authority = _stage_one_receipt_authority(
+            record=record,
+            team_id=team_id,
+            question_id=question_id,
+            workflow_run_id=workflow_run_id,
+        )
+        if receipt_authority is not None:
+            for key, value in receipt_authority.items():
+                package_core.setdefault(key, value)
     content_hash = canonical_sha256(package_core)
     return {
         **package_core,

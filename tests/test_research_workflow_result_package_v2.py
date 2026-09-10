@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from core.research.competition.question_result_package import canonical_model_policy
 from core.web.services.team_workflow import challenge_question_runs
 from core.web.services.team_workflow.research_runtime import result_package_v2
 from tests.test_challenge_question_runs import _output
@@ -1547,6 +1548,177 @@ def test_stage_one_model_route_fails_closed_without_receipts(monkeypatch) -> Non
             workflow_run_id="run-sci-091",
             authority_run_id="source-sci-091",
         )
+
+
+# ----------------------------- stage-one canonical-package receipt authority
+
+
+def _stage_one_frozen_policy() -> dict:
+    return canonical_model_policy(
+        {
+            "family": "qwen",
+            "providerIds": ["dashscope_main"],
+            "modelIds": ["qwen3.6-plus"],
+            "requireOfficialProvider": True,
+        }
+    )
+
+
+def _stage_one_registry_receipt(
+    stage: str, receipt_id: str, policy_sha256: str
+) -> dict:
+    return {
+        "receiptId": receipt_id,
+        "provider": "dashscope_main",
+        "model": "qwen3.6-plus",
+        "requestedModel": "qwen3.6-plus",
+        "status": "succeeded",
+        "scope": {
+            "questionId": "SCI-096",
+            "workflowRunId": "run-sci-096",
+            "stageId": stage,
+            "modelPolicySha256": policy_sha256,
+        },
+    }
+
+
+def _patch_stage_one_registry(
+    monkeypatch, *, stages: set[str]
+) -> list[dict]:
+    policy = _stage_one_frozen_policy()
+    receipts: list[dict] = []
+    if "generation" in stages:
+        receipts.append(
+            _stage_one_registry_receipt(
+                "generation", "receipt-generation-1", policy["policySha256"]
+            )
+        )
+    for stage in ("generation", "review", "revision"):
+        if stage not in stages:
+            continue
+        receipts.append(
+            _stage_one_registry_receipt(
+                stage,
+                f"receipt-{stage}-2" if stage == "generation" else f"receipt-{stage}",
+                policy["policySha256"],
+            )
+        )
+    monkeypatch.setattr(
+        result_package_v2,
+        "question_model_invocation_receipts",
+        lambda *_a, **_k: deepcopy(receipts),
+    )
+    monkeypatch.setattr(
+        result_package_v2,
+        "question_model_invocation_receipt_refs",
+        lambda *_a, **_k: [
+            {"receiptId": item["receiptId"], "receiptSha256": "d" * 64}
+            for item in receipts
+        ],
+    )
+    return receipts
+
+
+def _stage_one_authority_record() -> dict:
+    record = _proposal_only_record()
+    policy = _stage_one_frozen_policy()
+    record["inputSnapshot"]["modelRoutingPolicy"] = {
+        "requiredModelPolicy": deepcopy(policy),
+        "modelPolicySha256": policy["policySha256"],
+    }
+    record["inputSnapshot"]["snapshotHash"] = "c" * 64
+    return record
+
+
+def test_stage_one_v2_package_carries_registry_receipt_authority(monkeypatch) -> None:
+    expected, artifacts = _authority_sections()
+    artifacts["stage1_research_plan"] = artifacts["research_plan"]
+    monkeypatch.setattr(
+        result_package_v2,
+        "_artifact_payload",
+        lambda kind, **_kwargs: deepcopy(artifacts[kind]),
+    )
+    monkeypatch.setattr(
+        result_package_v2,
+        "_feedback_iterations",
+        lambda **_kwargs: deepcopy(expected["feedback_iterations"]),
+    )
+    monkeypatch.setattr(
+        result_package_v2,
+        "_model_run",
+        lambda *_args, **_kwargs: {
+            **deepcopy(expected["run"]),
+            "run_id": "run-sci-096",
+        },
+    )
+    _patch_stage_one_registry(
+        monkeypatch, stages={"generation", "review", "revision"}
+    )
+
+    package = result_package_v2.build_challenge_result_package_v2(
+        generic_package={"runId": "run-sci-096", "factChainHash": "f" * 64},
+        record=_stage_one_authority_record(),
+        team_id="research-team",
+        workflow_run_id="run-sci-096",
+        source_collection_run_id="source-sci-096",
+    )
+
+    policy = _stage_one_frozen_policy()
+    receipts = package["modelInvocationReceipts"]
+    assert set(receipts) == {"generation", "review", "revision"}
+    # Registry order decides: the latest successful generation call wins.
+    assert receipts["generation"]["receiptId"] == "receipt-generation-2"
+    assert package["modelPolicy"] == policy
+    assert package["authorizedModelPolicySha256"] == policy["policySha256"]
+    assert package["inputSnapshotSha256"] == "c" * 64
+    # The sealed receipts stay aligned with the hash-verified registry refs.
+    ref_ids = {
+        ref["receiptId"]
+        for ref in result_package_v2.question_model_invocation_receipt_refs(
+            "research-team", question_id="SCI-096", workflow_run_id="run-sci-096"
+        )
+    }
+    assert {item["receiptId"] for item in receipts.values()} <= ref_ids
+
+
+def test_stage_one_v2_package_omits_incomplete_receipt_authority(monkeypatch) -> None:
+    expected, artifacts = _authority_sections()
+    artifacts["stage1_research_plan"] = artifacts["research_plan"]
+    monkeypatch.setattr(
+        result_package_v2,
+        "_artifact_payload",
+        lambda kind, **_kwargs: deepcopy(artifacts[kind]),
+    )
+    monkeypatch.setattr(
+        result_package_v2,
+        "_feedback_iterations",
+        lambda **_kwargs: deepcopy(expected["feedback_iterations"]),
+    )
+    monkeypatch.setattr(
+        result_package_v2,
+        "_model_run",
+        lambda *_args, **_kwargs: {
+            **deepcopy(expected["run"]),
+            "run_id": "run-sci-096",
+        },
+    )
+    _patch_stage_one_registry(monkeypatch, stages={"generation", "review"})
+
+    package = result_package_v2.build_challenge_result_package_v2(
+        generic_package={"runId": "run-sci-096", "factChainHash": "f" * 64},
+        record=_stage_one_authority_record(),
+        team_id="research-team",
+        workflow_run_id="run-sci-096",
+        source_collection_run_id="source-sci-096",
+    )
+
+    # Incomplete per-stage coverage attaches nothing: the package keeps the
+    # historical receipt-less shape and registration degrades exactly as
+    # before (fail closed).
+    assert "modelInvocationReceipts" not in package
+    assert "modelPolicy" not in package
+    assert "authorizedModelPolicySha256" not in package
+    assert "inputSnapshotSha256" not in package
 
 
 # ----------------------------- end-to-end stage-one accepted-round build

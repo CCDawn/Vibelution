@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 
@@ -1597,3 +1598,231 @@ def test_reverify_citation_receipts_requires_registered_record(tmp_path, monkeyp
             "run-missing",
             doi_verifier=lambda _doi: None,
         )
+
+
+# ---------------- legacy proposal records: sanctioned registration repair
+
+
+def _repair_stage_one_policy() -> dict:
+    return canonical_model_policy(
+        {
+            "family": "qwen",
+            "providerIds": ["dashscope_main"],
+            "modelIds": ["qwen3.6-plus"],
+            "requireOfficialProvider": True,
+        }
+    )
+
+
+def _repair_registry_receipt(stage: str, run_id: str, policy_sha256: str) -> dict:
+    receipt_id = f"receipt-{stage}"
+    node_run_id = f"node-run-{stage}"
+    scope = {
+        "questionId": "SCI-096",
+        "workflowRunId": run_id,
+        "sessionId": f"session-{stage}",
+        "taskId": f"task-{stage}",
+        "turnId": f"turn-{stage}",
+        "formalNodeId": f"node-{stage}",
+        "formalNodeRunId": node_run_id,
+        "stageId": stage,
+        "modelPolicySha256": policy_sha256,
+    }
+    return ModelInvocationReceipt.from_invocation(
+        receipt_id=receipt_id,
+        run_id=run_id,
+        node_run_id=node_run_id,
+        scope=scope,
+        provider="dashscope_main",
+        model="qwen3.6-plus",
+        requested_model="qwen3.6-plus",
+        request_content={"kind": stage, "input": "bounded"},
+        response_content={"kind": stage, "output": "bounded"},
+        started_at_ms=100,
+        finished_at_ms=120,
+        token_usage={"inputTokens": 10, "outputTokens": 5, "totalTokens": 15},
+        metadata={
+            "outcomeKinds": ["candidate" if stage == "generation" else stage]
+        },
+        evidence_locator={
+            **scope,
+            "kind": "turn_journal",
+            "outputRef": f"session:{scope['sessionId']}/turn:{scope['turnId']}",
+            "outputSha256": "b" * 64,
+            "receiptId": receipt_id,
+            "invocationId": f"invocation-{stage}",
+            "attempt": 1,
+        },
+    ).to_dict()
+
+
+def _seed_repair_run_authority(monkeypatch, tmp_path, *, stages) -> dict:
+    """Freeze the run policy, seed the registry and isolate the run store."""
+
+    from core.web.services.team_workflow.research_runtime import (
+        model_invocation_receipt_registry as registry,
+        store as run_store_module,
+    )
+
+    policy = _repair_stage_one_policy()
+    monkeypatch.setattr(
+        run_store_module,
+        "default_run_store_dir",
+        lambda: tmp_path / "runs",
+    )
+    run_store = run_store_module.WorkflowRunStore(root=tmp_path / "runs")
+    run_store.create_run(
+        {
+            "runId": "run-sci-096",
+            "teamId": "research-team",
+            "questionId": "SCI-096",
+            "inputSnapshot": {
+                "questionId": "SCI-096",
+                "snapshotHash": "c" * 64,
+                "modelRoutingPolicy": {
+                    "requiredModelPolicy": deepcopy(policy),
+                    "modelPolicySha256": policy["policySha256"],
+                },
+            },
+        }
+    )
+    receipts = {
+        stage: _repair_registry_receipt(
+            stage, "run-sci-096", policy["policySha256"]
+        )
+        for stage in stages
+    }
+    registry.register_question_model_invocation_receipts(
+        "research-team",
+        question_id="SCI-096",
+        workflow_run_id="run-sci-096",
+        receipts=list(deepcopy(receipts).values()),
+    )
+    return receipts
+
+
+def _register_legacy_proposal_record(tmp_path, monkeypatch) -> dict:
+    output = _output()
+    output["run"]["run_id"] = "run-sci-096"
+    # Schema requires non-empty evidence refs; the placeholder matches no
+    # official evidence row, so the legacy gate keeps officialModelCall false.
+    output["run"]["invocation_evidence_refs"] = [
+        "model-invocation-receipt:unregistered-receipt"
+    ]
+    registered = challenge_question_runs.register_challenge_question_output(
+        "research-team",
+        {
+            "output": output,
+            "citationChecks": _citation_checks(output),
+            "registeredBy": "legacy-bridge",
+        },
+    )
+    record = registered["record"]
+    assert record["validation"]["officialModelCall"] is False
+    assert record["validation"]["modelInvocationReceiptIssue"] == (
+        "canonical_result_package_missing"
+    )
+    return output
+
+
+def test_repair_upgrades_legacy_proposal_record_and_review_gate_passes(
+    tmp_path, monkeypatch
+):
+    _isolate_store(tmp_path, monkeypatch)
+    # The receipts existed before registration; only the canonical-package
+    # evidence keys did not. Seeding before registering mirrors the live
+    # records and keeps the trace projection consistent.
+    _seed_repair_run_authority(
+        monkeypatch, tmp_path, stages=("generation", "review", "revision")
+    )
+    output = _register_legacy_proposal_record(tmp_path, monkeypatch)
+
+    result = challenge_question_runs.repair_challenge_question_output_registration(
+        "research-team", "SCI-096", "run-sci-096"
+    )
+
+    assert result["repaired"] is True
+    assert result["officialModelCall"] is True
+    record = result["record"]
+    validation = record["validation"]
+    assert validation["officialModelCall"] is True
+    assert validation["modelInvocationReceipts"] == "passed"
+    assert "modelInvocationReceiptIssue" not in validation
+    assert set(record["modelInvocationReceiptRefs"]) == {
+        "generation",
+        "review",
+        "revision",
+    }
+    package_metadata = record["resultPackage"]
+    assert Path(package_metadata["locator"]).is_file()
+    assert package_metadata["canonicalHash"] == result["resultPackage"][
+        "canonicalHash"
+    ]
+    # The stored record was rewritten, not just the in-memory copy.
+    store = json.loads(
+        challenge_question_runs._store_path("research-team").read_text(
+            encoding="utf-8"
+        )
+    )
+    stored = store["records"][0]
+    assert stored["validation"]["officialModelCall"] is True
+    assert stored["resultPackage"]["locator"] == package_metadata["locator"]
+
+    # The final review gate now accepts the reconciled candidate.
+    reviewed = challenge_question_runs.review_challenge_question_output(
+        "research-team",
+        "SCI-096",
+        "run-sci-096",
+        {
+            "reviewer": "operator",
+            "rationale": "Program review after registration repair.",
+            "decisions": {
+                gate: "approved"
+                for gate in (
+                    "H1_problem_understanding",
+                    "H2_hypothesis_selection",
+                    "H3_research_plan",
+                    "H4_external_output",
+                )
+            },
+        },
+    )
+    assert reviewed["record"]["status"] == "approved"
+    assert reviewed["record"]["submissionEligible"] is True
+
+    # A second repair is a no-op on the already-bound record.
+    again = challenge_question_runs.repair_challenge_question_output_registration(
+        "research-team", "SCI-096", "run-sci-096"
+    )
+    assert again["repaired"] is False
+    assert again["reason"] == "canonical_result_package_already_bound"
+
+
+def test_repair_fails_closed_without_full_stage_receipts(tmp_path, monkeypatch):
+    _isolate_store(tmp_path, monkeypatch)
+    _seed_repair_run_authority(
+        monkeypatch, tmp_path, stages=("generation", "review")
+    )
+    _register_legacy_proposal_record(tmp_path, monkeypatch)
+
+    with pytest.raises(ValueError, match="authority_incomplete"):
+        challenge_question_runs.repair_challenge_question_output_registration(
+            "research-team", "SCI-096", "run-sci-096"
+        )
+
+    store = json.loads(
+        challenge_question_runs._store_path("research-team").read_text(
+            encoding="utf-8"
+        )
+    )
+    record = store["records"][0]
+    assert "resultPackage" not in record
+    assert record["validation"]["officialModelCall"] is False
+    assert record["validation"]["modelInvocationReceiptIssue"] == (
+        "canonical_result_package_missing"
+    )
+    assert not list(
+        (tmp_path / "challenge_program" / "question_runs" / "SCI-096").glob(
+            "*.result-package.v2.json"
+        )
+    )

@@ -5,11 +5,17 @@ from __future__ import annotations
 import hashlib
 import json
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 
+from core.research.competition.question_result_package import canonical_model_policy
+from core.research.workflow.contracts.model_invocation_receipt import (
+    ModelInvocationReceipt,
+)
 from core.web.services.team_workflow import challenge_question_runs
 from core.web.services.team_workflow.research_runtime import (
+    model_invocation_receipt_registry as receipt_registry,
     program_candidate_handoff,
 )
 from tests.test_challenge_question_runs import _citation_checks, _isolate_store, _output
@@ -303,3 +309,224 @@ def test_v2_handoff_trace_projection_mismatch_fails_closed(monkeypatch):
     assert result["receiptTraceVerified"] is False
     assert result["receiptTraceCount"] == 0
     assert result["receiptTraceDigest"] == ""
+
+
+# ---------------------- stage-one registry authority end-to-end registration
+
+
+def _stage_one_frozen_policy() -> dict:
+    return canonical_model_policy(
+        {
+            "family": "qwen",
+            "providerIds": ["dashscope_main"],
+            "modelIds": ["qwen3.6-plus"],
+            "requireOfficialProvider": True,
+        }
+    )
+
+
+def _registered_stage_one_receipt(
+    stage: str, run_id: str, policy_sha256: str
+) -> dict:
+    """A registry-valid stage-one receipt, minted the way sessions mint them."""
+
+    receipt_id = f"receipt-{stage}"
+    node_run_id = f"node-run-{stage}"
+    scope = {
+        "questionId": "SCI-096",
+        "workflowRunId": run_id,
+        "sessionId": f"session-{stage}",
+        "taskId": f"task-{stage}",
+        "turnId": f"turn-{stage}",
+        "formalNodeId": f"node-{stage}",
+        "formalNodeRunId": node_run_id,
+        "stageId": stage,
+        "modelPolicySha256": policy_sha256,
+    }
+    return ModelInvocationReceipt.from_invocation(
+        receipt_id=receipt_id,
+        run_id=run_id,
+        node_run_id=node_run_id,
+        scope=scope,
+        provider="dashscope_main",
+        model="qwen3.6-plus",
+        requested_model="qwen3.6-plus",
+        request_content={"kind": stage, "input": "bounded"},
+        response_content={"kind": stage, "output": "bounded"},
+        started_at_ms=100,
+        finished_at_ms=120,
+        token_usage={"inputTokens": 10, "outputTokens": 5, "totalTokens": 15},
+        metadata={
+            "outcomeKinds": ["candidate" if stage == "generation" else stage]
+        },
+        evidence_locator={
+            **scope,
+            "kind": "turn_journal",
+            "outputRef": f"session:{scope['sessionId']}/turn:{scope['turnId']}",
+            "outputSha256": "b" * 64,
+            "receiptId": receipt_id,
+            "invocationId": f"invocation-{stage}",
+            "attempt": 1,
+        },
+    ).to_dict()
+
+
+def _seed_stage_one_registry(run_id: str) -> dict[str, dict]:
+    policy = _stage_one_frozen_policy()
+    receipts = {
+        stage: _registered_stage_one_receipt(
+            stage, run_id, policy["policySha256"]
+        )
+        for stage in ("generation", "review", "revision")
+    }
+    receipt_registry.register_question_model_invocation_receipts(
+        "research-team",
+        question_id="SCI-096",
+        workflow_run_id=run_id,
+        receipts=[deepcopy(receipts[stage]) for stage in receipts],
+    )
+    return receipts
+
+
+def _stage_one_v2_artifact(
+    output: dict, receipts: dict[str, dict], *, with_authority: bool
+) -> dict:
+    """The research_result_package payload the v2 producer now commits."""
+
+    package: dict = {
+        "runId": "run-sci-096",
+        "questionId": "SCI-096",
+        "contentHash": "a" * 64,
+        "challengeQuestionOutput": output,
+        "citationChecks": _citation_checks(output),
+    }
+    if with_authority:
+        policy = _stage_one_frozen_policy()
+        package.update(
+            {
+                "modelInvocationReceipts": deepcopy(receipts),
+                "modelPolicy": deepcopy(policy),
+                "authorizedModelPolicySha256": policy["policySha256"],
+                "inputSnapshotSha256": "c" * 64,
+            }
+        )
+    return {
+        "teamId": "research-team",
+        "workflowRunId": "run-sci-096",
+        "sourceCollectionRunId": "run-sci-096",
+        "package": package,
+    }
+
+
+def _patch_stage_one_v2_artifact(
+    monkeypatch, artifact: dict
+) -> None:
+    monkeypatch.setattr(
+        program_candidate_handoff,
+        "load_scoped_artifact_payload",
+        lambda *args, **kwargs: {
+            "teamId": "research-team",
+            "workflowRunId": "run-sci-096",
+            "sourceCollectionRunId": "run-sci-096",
+            "payload": artifact,
+        },
+    )
+
+
+def test_stage_one_v2_handoff_registers_canonical_package_end_to_end(
+    tmp_path, monkeypatch
+):
+    _isolate_store(tmp_path, monkeypatch)
+    output = _output()
+    output["run"]["run_id"] = "run-sci-096"
+    # The legacy evidence-id proxy must not satisfy the official gate; only
+    # the canonical package path may flip officialModelCall.
+    # A non-empty schema-required ref list whose ids match no official
+    # evidence row, so only the canonical package path can flip the gate.
+    output["run"]["invocation_evidence_refs"] = [
+        "model-invocation-receipt:unregistered-receipt"
+    ]
+    receipts = _seed_stage_one_registry("run-sci-096")
+    _patch_stage_one_v2_artifact(
+        monkeypatch,
+        _stage_one_v2_artifact(output, receipts, with_authority=True),
+    )
+
+    result = program_candidate_handoff.handoff_result_package_to_challenge_program(
+        team_id="research-team",
+        workflow_run_id="run-sci-096",
+    )
+
+    assert result["status"] == "registered"
+    assert result["officialModelCall"] is True
+    package_metadata = result["resultPackage"]
+    assert isinstance(package_metadata, dict)
+    assert package_metadata["locator"]
+    assert Path(package_metadata["locator"]).is_file()
+
+    store = json.loads(
+        challenge_question_runs._store_path("research-team").read_text(
+            encoding="utf-8"
+        )
+    )
+    record = store["records"][0]
+    assert record["validation"]["officialModelCall"] is True
+    assert record["validation"]["modelInvocationReceipts"] == "passed"
+    assert "modelInvocationReceiptIssue" not in record["validation"]
+    assert set(record["modelInvocationReceiptRefs"]) == {
+        "generation",
+        "review",
+        "revision",
+    }
+    assert record["resultPackage"]["canonicalHash"] == (
+        package_metadata["canonicalHash"]
+    )
+
+    replay = (
+        program_candidate_handoff.handoff_result_package_to_challenge_program(
+            team_id="research-team",
+            workflow_run_id="run-sci-096",
+        )
+    )
+    assert replay["status"] == "idempotent"
+    assert replay["officialModelCall"] is True
+
+
+def test_stage_one_v2_handoff_without_receipt_authority_keeps_legacy_degradation(
+    tmp_path, monkeypatch
+):
+    _isolate_store(tmp_path, monkeypatch)
+    output = _output()
+    output["run"]["run_id"] = "run-sci-096"
+    # A non-empty schema-required ref list whose ids match no official
+    # evidence row, so only the canonical package path can flip the gate.
+    output["run"]["invocation_evidence_refs"] = [
+        "model-invocation-receipt:unregistered-receipt"
+    ]
+    # A package built while the receipt registry was incomplete carries no
+    # canonical-package evidence keys, so the bridge must register exactly as
+    # it did before this fix (fail closed, officialModelCall false).
+    _patch_stage_one_v2_artifact(
+        monkeypatch,
+        _stage_one_v2_artifact(output, receipts={}, with_authority=False),
+    )
+
+    result = program_candidate_handoff.handoff_result_package_to_challenge_program(
+        team_id="research-team",
+        workflow_run_id="run-sci-096",
+    )
+
+    assert result["status"] == "registered"
+    assert result["officialModelCall"] is False
+    assert result["receiptStatus"] == "failed"
+    store = json.loads(
+        challenge_question_runs._store_path("research-team").read_text(
+            encoding="utf-8"
+        )
+    )
+    record = store["records"][0]
+    assert record["validation"]["officialModelCall"] is False
+    assert record["validation"]["modelInvocationReceiptIssue"] == (
+        "canonical_result_package_missing"
+    )
+    assert "resultPackage" not in record

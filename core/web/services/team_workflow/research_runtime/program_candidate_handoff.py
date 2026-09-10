@@ -501,6 +501,12 @@ def handoff_result_package_to_challenge_program(
             )
         if authorized_policy:
             registration_payload["authorizedModelPolicySha256"] = str(authorized_policy)
+        input_snapshot_sha256 = _first_value_from_layers(
+            authority_layers,
+            ("inputSnapshotSha256", "input_snapshot_sha256"),
+        )
+        if input_snapshot_sha256:
+            registration_payload["inputSnapshotSha256"] = str(input_snapshot_sha256)
         official_model_call = _first_value_from_layers(
             authority_layers,
             ("officialModelCall", "official_model_call"),

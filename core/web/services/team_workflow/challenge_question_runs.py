@@ -17,6 +17,8 @@ from uuid import uuid4
 from jsonschema import Draft202012Validator, FormatChecker
 
 from core.research.competition.question_result_package import (
+    REQUIRED_RECEIPT_STAGES,
+    QuestionResultPackage,
     QuestionResultPackageError,
     canonical_model_policy,
 )
@@ -2211,6 +2213,269 @@ def get_challenge_question_run_detail(
     }
 
 
+def _output_is_proposal_only(output: dict[str, Any]) -> bool:
+    """Return true only for schema-v2 outputs classified as proposal-only."""
+
+    result_classification = (
+        output.get("result_classification")
+        if isinstance(output.get("result_classification"), dict)
+        else {}
+    )
+    return _output_schema_version(output) == 2 and (
+        str(result_classification.get("classification") or "").strip()
+        == "proposal_only"
+    )
+
+
+def _stage_one_selected_receipts(
+    receipts: Any,
+    *,
+    policy_sha256: str,
+) -> dict[str, dict[str, Any]]:
+    """Select one successful registry receipt per canonical package stage.
+
+    Registry order is the append order; the latest successful call of each
+    stage is the invocation whose output the run carried forward.  Receipts
+    minted under a different model policy never qualify.
+    """
+
+    if not isinstance(receipts, dict):
+        raise ValueError(
+            "challenge_question_stage_one_receipts_invalid: stage-one package "
+            "receipts must be a mapping keyed by canonical stage."
+        )
+    selected: dict[str, dict[str, Any]] = {}
+    for stage, receipt in receipts.items():
+        if stage not in REQUIRED_RECEIPT_STAGES:
+            raise ValueError(
+                "challenge_question_stage_one_receipts_invalid: unsupported "
+                f"receipt stage: {stage}"
+            )
+        if not isinstance(receipt, Mapping):
+            raise ValueError(
+                f"challenge_question_stage_one_receipts_invalid: receipt.{stage} "
+                "must be an object."
+            )
+        normalized = deepcopy(dict(receipt))
+        scope = (
+            normalized.get("scope")
+            if isinstance(normalized.get("scope"), dict)
+            else {}
+        )
+        receipt_stage = str(
+            scope.get("stageId") or scope.get("stage_id") or ""
+        ).strip().lower()
+        if receipt_stage != stage:
+            raise ValueError(
+                f"challenge_question_stage_one_receipts_invalid: receipt.{stage} "
+                "stage binding does not match its stage key."
+            )
+        receipt_policy = str(
+            scope.get("modelPolicySha256") or scope.get("model_policy_sha256") or ""
+        ).strip().lower()
+        if receipt_policy != policy_sha256:
+            raise ValueError(
+                f"challenge_question_stage_one_receipts_invalid: receipt.{stage} "
+                "was not minted under the authorized model policy."
+            )
+        selected[stage] = normalized
+    missing = [stage for stage in REQUIRED_RECEIPT_STAGES if stage not in selected]
+    if missing:
+        raise ValueError(
+            "challenge_question_stage_one_receipts_incomplete: missing receipt "
+            "stages: " + ", ".join(missing)
+        )
+    return selected
+
+
+def _build_stage_one_question_result_package(
+    output: dict[str, Any],
+    *,
+    catalog_scope: Any,
+    receipts: Any,
+    model_policy: Any,
+    authorized_policy_sha256: str,
+    input_snapshot_sha256: str,
+    package_id: str = "",
+) -> QuestionResultPackage:
+    """Seal one canonical stage-one package from the registry receipt authority.
+
+    Proposal-only outputs are assembled by the workflow from canonical
+    artifacts, so the legacy adapter contract — one canonical turn output per
+    receipt whose revision turn carries the complete business content — is
+    structurally unreachable for them.  This producer keeps every package
+    validator (schema, policy hash, receipt/policy/scope binding, canonical
+    seal) at full strength and replaces only the legacy turn binding with the
+    immutable registry binding verified by
+    ``_verify_stage_one_registry_binding``.
+    """
+
+    identity = (
+        output.get("identity") if isinstance(output.get("identity"), dict) else {}
+    )
+    run = output.get("run") if isinstance(output.get("run"), dict) else {}
+    question_id = str(identity.get("question_id") or "").strip().upper()
+    run_id = str(run.get("run_id") or "").strip()
+    if not question_id or not run_id:
+        raise ValueError(
+            "challenge_question_stage_one_package_identity_incomplete: "
+            "output.identity.question_id and output.run.run_id are required."
+        )
+    normalized_policy_sha256 = str(authorized_policy_sha256 or "").strip().lower()
+    try:
+        policy = canonical_model_policy(model_policy)
+    except QuestionResultPackageError as exc:
+        raise ValueError(
+            "challenge_question_stage_one_model_policy_invalid: "
+            "stage-one model policy is not canonical."
+        ) from exc
+    if str(policy.get("policySha256") or "") != normalized_policy_sha256:
+        raise ValueError(
+            "challenge_question_stage_one_model_policy_invalid: authorized "
+            "model policy hash does not match the policy content."
+        )
+    selected = _stage_one_selected_receipts(
+        receipts, policy_sha256=normalized_policy_sha256
+    )
+    snapshot_sha256 = str(input_snapshot_sha256 or "").strip().lower()
+    package_payload: dict[str, Any] = {
+        "schema_version": 2,
+        "package_id": str(package_id or "").strip()
+        or f"qrp-{question_id.lower()}-{run_id}",
+        "scope": catalog_scope.to_dict(),
+        "model_policy": policy,
+        "question_id": question_id,
+        "run_id": run_id,
+        "input_snapshot_sha256": snapshot_sha256,
+        "model_invocation_receipts": {
+            stage: _stage_one_catalog_scope_receipt(
+                selected[stage], catalog_scope
+            )
+            for stage in REQUIRED_RECEIPT_STAGES
+        },
+    }
+    for field in (
+        "hypotheses",
+        "dimension_reviews",
+        "selection",
+        "research_plan",
+        "feedback_iterations",
+        "result_classification",
+        "competition_result_view",
+    ):
+        package_payload[field] = deepcopy(output.get(field))
+    failure = (
+        deepcopy(output.get("failure"))
+        if isinstance(output.get("failure"), dict)
+        else None
+    )
+    if failure is not None:
+        package_payload["failure"] = failure
+    try:
+        unsealed = QuestionResultPackage.create(package_payload)
+        canonical = unsealed.to_dict()
+        return QuestionResultPackage.from_dict(
+            canonical,
+            expected_model_policy_sha256=normalized_policy_sha256,
+        )
+    except QuestionResultPackageError as exc:
+        raise ValueError(
+            "challenge_question_stage_one_package_invalid: " + str(exc)
+        ) from exc
+
+
+def _stage_one_catalog_scope_receipt(
+    receipt: dict[str, Any],
+    catalog_scope: Any,
+) -> dict[str, Any]:
+    """Project the tracked catalog scope into one registry receipt's scope.
+
+    Registry receipts are minted before a package exists and therefore carry
+    question/run/policy scope but no catalog identity.  The canonical package
+    schema requires receipts to be bound to the same tracked catalog scope as
+    the package itself; the four fields are server-owned constants of the
+    tracked catalog the question already belongs to.
+    """
+
+    annotated = deepcopy(dict(receipt))
+    scope = dict(annotated.get("scope") or {})
+    scope.setdefault("catalogId", catalog_scope.catalog_id)
+    scope.setdefault("catalogVersion", catalog_scope.catalog_version)
+    scope.setdefault("catalogSha256", catalog_scope.catalog_sha256)
+    scope.setdefault("scopeHash", catalog_scope.scope_hash)
+    annotated["scope"] = scope
+    return annotated
+
+
+def _verify_stage_one_registry_binding(
+    team_id: str,
+    *,
+    question_id: str,
+    run_id: str,
+    package: QuestionResultPackage,
+) -> None:
+    """Bind the sealed package receipts to the immutable receipt registry."""
+
+    from core.web.services.team_workflow.research_runtime.model_invocation_receipt_registry import (
+        question_model_invocation_receipt_refs,
+    )
+
+    refs = question_model_invocation_receipt_refs(
+        team_id,
+        question_id=question_id,
+        workflow_run_id=run_id,
+    )
+    if not refs:
+        raise ValueError(
+            "challenge_question_stage_one_registry_unverified: the run has no "
+            "hash-verified receipt registry entries."
+        )
+    registered_ids = {str(ref.get("receiptId") or "") for ref in refs}
+    package_ids = {
+        receipt.receipt_id
+        for receipt in package.model_invocation_receipts.values()
+    }
+    unverified = sorted(package_ids - registered_ids)
+    if unverified:
+        raise ValueError(
+            "challenge_question_stage_one_registry_unverified: package receipts "
+            "are not registered in the immutable receipt registry: "
+            + ", ".join(unverified)
+        )
+
+
+def _stage_one_official_model_call(package: QuestionResultPackage) -> bool:
+    """Derive the stage-one official-call gate from policy and sealed receipts.
+
+    Every packaged invocation must sit inside the frozen official model
+    policy; the receipts themselves are the immutable registry proof that the
+    calls really happened.
+    """
+
+    if not package.model_invocation_receipts:
+        return False
+    # Package policies persist id lists as tuples; the eligibility gate
+    # compares against the canonical (list-typed) policy snapshot.
+    policy = (
+        dict(package.model_policy)
+        if isinstance(package.model_policy, Mapping)
+        else package.model_policy
+    )
+    if isinstance(policy, dict):
+        for field in ("providerIds", "modelIds"):
+            if isinstance(policy.get(field), tuple):
+                policy[field] = list(policy[field])
+    return all(
+        is_challenge_official_model_evidence_eligible(
+            policy,
+            provider_id=receipt.provider,
+            model_ref=receipt.model,
+            model_id=receipt.model,
+        )
+        for receipt in package.model_invocation_receipts.values()
+    )
+
+
 def register_challenge_question_output(team_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     team_service.get_team(team_id)
     raw_output = payload.get("output")
@@ -2277,6 +2542,7 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
     audit["output_sha256"] = output_hash
 
     canonical_package = None
+    stage_one_package = False
     package_metadata: dict[str, Any] | None = None
     package_input = payload.get("resultPackage")
     package_mode = isinstance(package_input, dict) or any(
@@ -2319,24 +2585,55 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
             adapt_question_result_package,
         )
 
-        canonical_package = adapt_question_result_package(
-            raw_output,
-            catalog_scope=CatalogScope.from_tracked_resources(),
-            run_binding={"questionId": question_id, "runId": run_id},
-            authorized_model_policy_sha256=str(authorized_policy_sha256),
-            result_package=package_input,
-            model_policy=model_policy if isinstance(model_policy, dict) else None,
-            model_invocation_receipts=receipts,
-            official_model_evidence=evidence_store,
-            input_snapshot_sha256=str(
-                payload.get("inputSnapshotSha256")
-                or payload.get("input_snapshot_sha256")
-                or ""
-            ),
-            package_id=str(payload.get("packageId") or ""),
-            request_identity=payload,
-            canonical_turn_resolver=_canonical_turn_binding_for_evidence,
-        )
+        if (
+            _output_is_proposal_only(output)
+            and isinstance(receipts, dict)
+            and not package_input
+        ):
+            # Proposal-only outputs are assembled by the workflow from
+            # canonical artifacts, so the legacy three-turn canonical binding
+            # cannot exist for them.  The sealed registry receipt authority
+            # (frozen policy + hash-verified receipts) is the sanctioned
+            # stage-one producer path into package mode.
+            canonical_package = _build_stage_one_question_result_package(
+                output,
+                catalog_scope=CatalogScope.from_tracked_resources(),
+                receipts=receipts,
+                model_policy=model_policy if isinstance(model_policy, dict) else None,
+                authorized_policy_sha256=str(authorized_policy_sha256),
+                input_snapshot_sha256=str(
+                    payload.get("inputSnapshotSha256")
+                    or payload.get("input_snapshot_sha256")
+                    or ""
+                ),
+                package_id=str(payload.get("packageId") or ""),
+            )
+            _verify_stage_one_registry_binding(
+                team_id,
+                question_id=question_id,
+                run_id=run_id,
+                package=canonical_package,
+            )
+            stage_one_package = True
+        else:
+            canonical_package = adapt_question_result_package(
+                raw_output,
+                catalog_scope=CatalogScope.from_tracked_resources(),
+                run_binding={"questionId": question_id, "runId": run_id},
+                authorized_model_policy_sha256=str(authorized_policy_sha256),
+                result_package=package_input,
+                model_policy=model_policy if isinstance(model_policy, dict) else None,
+                model_invocation_receipts=receipts,
+                official_model_evidence=evidence_store,
+                input_snapshot_sha256=str(
+                    payload.get("inputSnapshotSha256")
+                    or payload.get("input_snapshot_sha256")
+                    or ""
+                ),
+                package_id=str(payload.get("packageId") or ""),
+                request_identity=payload,
+                canonical_turn_resolver=_canonical_turn_binding_for_evidence,
+            )
         package_path = _result_package_artifact_path(team_id, question_id, run_id)
         package_metadata = {
             "schemaVersion": canonical_package.schema_version,
@@ -2361,12 +2658,15 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
             set(matched_evidence_refs)
             | {item for item in receipt_evidence_refs if item}
         )
-        official_call = _official_call_from_canonical_package(
-            model_policy=canonical_package.model_policy,
-            model_provider=model_provider,
-            model_ref=run.get("model_id"),
-            receipt_refs=model_invocation_receipt_refs,
-        )
+        if stage_one_package:
+            official_call = _stage_one_official_model_call(canonical_package)
+        else:
+            official_call = _official_call_from_canonical_package(
+                model_policy=canonical_package.model_policy,
+                model_provider=model_provider,
+                model_ref=run.get("model_id"),
+                receipt_refs=model_invocation_receipt_refs,
+            )
 
     record = {
         "recordId": f"{question_id}:{run_id}",
@@ -2568,6 +2868,194 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
     return {
         "record": record,
         "output": output,
+        "summary": summary,
+    }
+
+
+def repair_challenge_question_output_registration(
+    team_id: str,
+    question_id: str,
+    run_id: str,
+) -> dict[str, Any]:
+    """Reconcile one proposal-only record that registered without its package.
+
+    Runs registered before the stage-one v2 package carried the canonical
+    receipt authority were stored without ``resultPackage`` metadata and with
+    ``officialModelCall=false``, so the final review gate could never accept
+    them.  The register idempotent branch deliberately rejects such upgrades
+    (the canonical package binding is immutable), so this is the single
+    sanctioned reconciliation path: it revalidates the registered output
+    artifact, re-reads the run's frozen model policy and the hash-verified
+    receipt registry, seals the same canonical package
+    ``register_challenge_question_output`` would have produced, and rewrites
+    the record's receipt/package/validation projections in place.  Records
+    whose authority cannot fully support the package fail closed and stay
+    untouched.
+    """
+
+    normalized_team_id = str(team_id or "").strip()
+    normalized_question_id = str(question_id or "").strip().upper()
+    normalized_run_id = str(run_id or "").strip()
+    team_service.get_team(normalized_team_id)
+    if not normalized_question_id or not normalized_run_id:
+        raise ValueError("questionId and runId are required.")
+
+    from core.research.competition.result_set import CatalogScope
+    from core.web.services.team_workflow.research_runtime.model_invocation_receipt_registry import (
+        question_model_invocation_receipts,
+    )
+    from core.web.services.team_workflow.research_runtime.result_package_v2 import (
+        _stage_one_receipt_authority,
+    )
+    from core.web.services.team_workflow.research_runtime.store import WorkflowRunStore
+
+    with _STORE_LOCK:
+        store = _load_store(normalized_team_id)
+        records = [item for item in store.get("records", []) if isinstance(item, dict)]
+        record = next(
+            (
+                item
+                for item in records
+                if item.get("recordId")
+                == f"{normalized_question_id}:{normalized_run_id}"
+            ),
+            None,
+        )
+        if record is None:
+            raise ValueError("Challenge question run record was not found.")
+        if isinstance(record.get("resultPackage"), dict):
+            return {
+                "teamId": normalized_team_id,
+                "questionId": normalized_question_id,
+                "runId": normalized_run_id,
+                "repaired": False,
+                "reason": "canonical_result_package_already_bound",
+                "officialModelCall": (
+                    record.get("validation", {}).get("officialModelCall") is True
+                ),
+                "record": deepcopy(record),
+            }
+        output = _read_json(
+            _artifact_path(normalized_team_id, normalized_question_id, normalized_run_id)
+        )
+        if not output or _output_sha256(output) != record.get("outputSha256"):
+            raise ValueError(
+                "challenge_question_run_repair_artifact_mismatch: registered "
+                "output artifact does not match its index record."
+            )
+        if not _output_is_proposal_only(output):
+            raise ValueError(
+                "challenge_question_run_repair_unsupported: only proposal-only "
+                "v2 records can be reconciled."
+            )
+        run_record = WorkflowRunStore().get_run(normalized_run_id)
+        if (
+            not isinstance(run_record, dict)
+            or str(run_record.get("teamId") or "").strip() != normalized_team_id
+            or str(run_record.get("questionId") or "").strip().upper()
+            != normalized_question_id
+        ):
+            raise ValueError(
+                "challenge_question_run_repair_run_scope_mismatch: the workflow "
+                "run record does not bind this team and question."
+            )
+        authority = _stage_one_receipt_authority(
+            record=run_record,
+            team_id=normalized_team_id,
+            question_id=normalized_question_id,
+            workflow_run_id=normalized_run_id,
+        )
+        if authority is None:
+            raise ValueError(
+                "challenge_question_run_repair_authority_incomplete: the run's "
+                "frozen model policy and per-stage receipt registry cannot "
+                "support a canonical package; record left unchanged."
+            )
+        canonical_package = _build_stage_one_question_result_package(
+            output,
+            catalog_scope=CatalogScope.from_tracked_resources(),
+            receipts=authority["modelInvocationReceipts"],
+            model_policy=authority["modelPolicy"],
+            authorized_policy_sha256=authority["authorizedModelPolicySha256"],
+            input_snapshot_sha256=authority["inputSnapshotSha256"],
+        )
+        _verify_stage_one_registry_binding(
+            normalized_team_id,
+            question_id=normalized_question_id,
+            run_id=normalized_run_id,
+            package=canonical_package,
+        )
+        official_call = _stage_one_official_model_call(canonical_package)
+        # Sanity: the registry receipts the package sealed must be exactly the
+        # receipts the run registry still reports for this run.
+        registered_receipts = question_model_invocation_receipts(
+            normalized_team_id,
+            question_id=normalized_question_id,
+            workflow_run_id=normalized_run_id,
+        )
+        if not registered_receipts:
+            raise ValueError(
+                "challenge_question_run_repair_registry_unreadable: the receipt "
+                "registry is unavailable; record left unchanged."
+            )
+        receipt_refs = _model_invocation_receipt_refs_from_package(canonical_package)
+        package_path = _result_package_artifact_path(
+            normalized_team_id, normalized_question_id, normalized_run_id
+        )
+        package_metadata = {
+            "schemaVersion": canonical_package.schema_version,
+            "packageId": canonical_package.package_id,
+            "canonicalHash": canonical_package.canonical_hash,
+            "idempotencyKey": canonical_package.idempotency_key,
+            "modelPolicySha256": canonical_package.model_policy["policySha256"],
+            "locator": str(package_path),
+        }
+        # Deliberate in-place upgrade of the pre-package projection state; the
+        # register replay guard rejects exactly this transition, which is why
+        # the reconciliation path exists.
+        record["modelInvocationReceiptRefs"] = deepcopy(receipt_refs)
+        validation = (
+            dict(record.get("validation"))
+            if isinstance(record.get("validation"), dict)
+            else {}
+        )
+        validation["modelInvocationReceipts"] = "passed" if receipt_refs else "failed"
+        validation.pop("modelInvocationReceiptIssue", None)
+        validation["officialModelCall"] = official_call
+        record["validation"] = validation
+        record["resultPackage"] = package_metadata
+        _apply_question_model_invocation_trace_projection(normalized_team_id, record)
+        store["updatedAt"] = _utc_now()
+        _write_json_bundle(
+            [
+                (package_path, canonical_package.to_dict()),
+                (_store_path(normalized_team_id), store),
+            ]
+        )
+        summary = challenge_question_run_summary(normalized_team_id)
+    record_runtime_scene_event(
+        "team_workflow_orchestration",
+        "challenge_question_run",
+        "challenge_question_run.registration_repaired",
+        message="Challenge Cup question run registration was reconciled with its canonical result package.",
+        outcome="passed" if official_call else "blocked",
+        fields={
+            "teamId": normalized_team_id,
+            "questionId": normalized_question_id,
+            "runId": normalized_run_id,
+            "officialModelCall": official_call,
+            "packageId": str(package_metadata.get("packageId") or ""),
+        },
+        lifecycle=True,
+    )
+    return {
+        "teamId": normalized_team_id,
+        "questionId": normalized_question_id,
+        "runId": normalized_run_id,
+        "repaired": True,
+        "officialModelCall": official_call,
+        "record": deepcopy(record),
+        "resultPackage": deepcopy(package_metadata),
         "summary": summary,
     }
 
