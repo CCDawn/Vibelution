@@ -1035,7 +1035,11 @@ def _evidence_card_payload(
     return payload
 
 
-def _citation_checks(evidence: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+def _citation_checks(
+    evidence: Sequence[Mapping[str, Any]],
+    *,
+    doi_verification: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     """Build the citation receipts consumed by the Challenge Program gate.
 
     Citation validation is intentionally derived from the canonical evidence
@@ -1047,6 +1051,16 @@ def _citation_checks(evidence: Sequence[Mapping[str, Any]]) -> list[dict[str, An
     status is a projection of the canonical verification authority, not a new
     validation authority.  The downstream validator still applies the evidence
     quality thresholds (authoritative and challenge/boundary counts).
+
+    ``doi_verification`` is an optional caller-supplied report (see
+    ``doi_metadata_verification.verify_failed_receipt_dois``) mapping source
+    URLs to a confirmed DOI-registry lookup.  A receipt that would fail on
+    the canonical verification floor but whose URL was confirmed this way is
+    marked ``passed`` with ``verificationMethod: "doi_metadata"`` and keeps
+    the original failing status in ``pageVerificationFailureReason`` for
+    audit.  Without the report the projection stays unchanged, pure and
+    offline — paywalled/auth-walled publisher pages therefore remain failed
+    unless the caller explicitly ran the fallback.
     """
 
     passed_verification_statuses = {
@@ -1068,18 +1082,22 @@ def _citation_checks(evidence: Sequence[Mapping[str, Any]]) -> list[dict[str, An
             _pick(item, "verification_status", "verificationStatus"),
             "citation.verification_status",
         )
-        checks.append(
-            {
-                "evidenceId": evidence_id,
-                "sourceUrl": source_url,
-                "verificationStatus": verification_status,
-                "status": (
-                    "passed"
-                    if verification_status.casefold() in passed_verification_statuses
-                    else "failed"
-                ),
-            }
-        )
+        passed = verification_status.casefold() in passed_verification_statuses
+        check: dict[str, Any] = {
+            "evidenceId": evidence_id,
+            "sourceUrl": source_url,
+            "verificationStatus": verification_status,
+            "status": "passed" if passed else "failed",
+        }
+        if (
+            not passed
+            and doi_verification is not None
+            and bool(doi_verification.get(source_url))
+        ):
+            check["status"] = "passed"
+            check["verificationMethod"] = "doi_metadata"
+            check["pageVerificationFailureReason"] = verification_status
+        checks.append(check)
     if not checks:
         raise ResultPackageV2Error(
             "canonical evidence has no citation receipts",
@@ -2082,8 +2100,17 @@ def build_challenge_result_package_v2(
     team_id: str,
     workflow_run_id: str,
     source_collection_run_id: str,
+    verify_doi_metadata: bool = False,
 ) -> dict[str, Any]:
-    """Attach a schema-valid v2 output to a deterministic generic package."""
+    """Attach a schema-valid v2 output to a deterministic generic package.
+
+    ``verify_doi_metadata`` enables the DOI-registry fallback for citation
+    receipts (production entry points pass True): evidence URLs that failed
+    page verification but resolve to a DOI are checked against Crossref /
+    doi.org with bounded timeouts, and confirmed DOIs pass their receipt as
+    ``verificationMethod: "doi_metadata"``.  The default stays False so the
+    builder remains pure and offline unless a caller opts in.
+    """
 
     snapshot = _mapping(record.get("inputSnapshot"))
     question_id = _require_text(
@@ -2309,11 +2336,33 @@ def build_challenge_result_package_v2(
     package_core = deepcopy(dict(generic_package))
     for key in ("packageId", "packageRef", "contentHash"):
         package_core.pop(key, None)
+    if verify_doi_metadata:
+        # Bounded, exception-safe DOI-registry fallback for paywalled/auth-
+        # walled publisher pages: only failing receipts with a resolvable DOI
+        # are checked, and any network trouble keeps them failed.  Receipts
+        # and evidence rows are index-aligned by construction (the projector
+        # iterates the same sequence once), so the explicit per-row ``doi``
+        # hint rides along for publisher pages whose URL hides the DOI.
+        from ..doi_metadata_verification import verify_failed_receipt_dois
+
+        preliminary = _citation_checks(evidence)
+        verification_input = [
+            {**check, "doi": _text(item.get("doi"))}
+            for check, item in zip(preliminary, evidence)
+        ]
+        doi_verification = verify_failed_receipt_dois(verification_input)[
+            "verifiedSourceUrls"
+        ]
+    else:
+        doi_verification = None
     package_core.update(
         {
             "questionId": question_id,
             "challengeQuestionOutput": output,
-            "citationChecks": _citation_checks(evidence),
+            "citationChecks": _citation_checks(
+                evidence,
+                doi_verification=doi_verification,
+            ),
         }
     )
     if view_truncations:

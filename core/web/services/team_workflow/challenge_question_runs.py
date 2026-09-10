@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2700,3 +2700,155 @@ def review_challenge_question_output(
         lifecycle=True,
     )
     return {"record": deepcopy(record), "output": output, "summary": summary}
+
+
+def reverify_citation_receipts(
+    team_id: str,
+    question_id: str,
+    run_id: str,
+    *,
+    doi_verifier: Callable[[str], Mapping[str, Any] | None] | None = None,
+) -> dict[str, Any]:
+    """Re-run failed citation receipts of one registered run via DOI metadata.
+
+    Sanctioned backlog repair for registered Challenge Question runs whose
+    ``validation.citationValidation`` failed only because publisher auth
+    walls / paywalls made the evidence page unfetchable: each still-failing
+    receipt whose URL resolves to a DOI is re-verified against the DOI
+    registry (Crossref, else doi.org content negotiation) with bounded
+    timeouts.  When the receipts now cover every evidence source URL the
+    stored citation projection is refreshed in place, following the same
+    sanctioned post-registration write precedent as the human-review path
+    (``audit.citation_validation`` / ``audit.output_sha256`` are
+    registration-time projections excluded from replay identity); a
+    ``citationReverification`` audit block on the record keeps the refresh
+    traceable.  Behaviour:
+
+    * already-``passed`` records short-circuit (idempotent, no writes, no
+      network);
+    * no DOI on a receipt, or a DOI the registries do not know, keeps that
+      receipt failed and — unless every missing URL is covered — leaves the
+      stored record untouched (fail-closed, no partial relaxation);
+    * the immutable ``sourceResultPackageHash`` binding and the evidence
+      rows themselves are never modified.
+
+    ``doi_verifier`` injects the DOI metadata lookup (tests); the default
+    performs the real bounded network calls.  Returns a report with the
+    resulting status (``already_passed`` / ``reverified`` / ``still_failed``),
+    the refreshed record and the citation validation summary.
+    """
+
+    from .doi_metadata_verification import verify_failed_receipt_dois
+    from .research_runtime.result_package_v2 import _citation_checks
+
+    team_service.get_team(team_id)
+    normalized_question_id = str(question_id or "").strip().upper()
+    normalized_run_id = str(run_id or "").strip()
+    if not normalized_question_id or not normalized_run_id:
+        raise ValueError("questionId and runId are required.")
+
+    artifact_path = _artifact_path(team_id, normalized_question_id, normalized_run_id)
+    with _STORE_LOCK:
+        store = _load_store(team_id)
+        record = next(
+            (
+                item
+                for item in store.get("records", [])
+                if isinstance(item, dict)
+                and item.get("questionId") == normalized_question_id
+                and item.get("runId") == normalized_run_id
+            ),
+            None,
+        )
+        if record is None:
+            raise ValueError("Challenge question run record was not found.")
+        output = _read_json(artifact_path)
+        if not output:
+            raise ValueError("Challenge question run artifact is missing.")
+        stored_hash = str(record.get("outputSha256") or "").strip().lower()
+        if stored_hash and _output_sha256(output) != stored_hash:
+            raise ValueError(
+                "Challenge question run artifact does not match its immutable "
+                "index record; refusing to re-verify citations."
+            )
+        validation = record.get("validation") if isinstance(record.get("validation"), dict) else {}
+        if validation.get("citationValidation") == "passed":
+            return {
+                "status": "already_passed",
+                "record": deepcopy(record),
+                "output": output,
+                "citation": deepcopy(validation.get("citation") or {}),
+                "verification": {"verifiedSourceUrls": {}, "attemptedCount": 0, "verifiedCount": 0},
+                "summary": challenge_question_run_summary(team_id),
+            }
+
+        evidence = output.get("evidence") if isinstance(output.get("evidence"), list) else []
+        # Rebuild the canonical receipts with the v2 producer's own projector,
+        # so the stored gate and the package producer can never drift.  The
+        # projector accepts one receipt per evidence row in order, so the zip
+        # below stays index-aligned with the registered output.
+        receipts = _citation_checks(evidence)
+        verification_input = [
+            {**check, "doi": str(item.get("doi") or "").strip()}
+            for check, item in zip(receipts, evidence)
+        ]
+        verification = verify_failed_receipt_dois(verification_input, verifier=doi_verifier)
+        checks = _citation_checks(
+            evidence,
+            doi_verification=verification["verifiedSourceUrls"],
+        )
+        citation = _citation_validation(output, checks)
+        if citation["status"] != "passed":
+            return {
+                "status": "still_failed",
+                "record": deepcopy(record),
+                "output": output,
+                "citation": citation,
+                "verification": verification,
+                "summary": challenge_question_run_summary(team_id),
+            }
+
+        verified_urls = sorted(verification["verifiedSourceUrls"])
+        failure_reasons = {
+            str(check.get("sourceUrl") or ""): str(check.get("pageVerificationFailureReason") or "")
+            for check in checks
+            if check.get("verificationMethod") == "doi_metadata"
+        }
+        output.setdefault("audit", {})["citation_validation"] = "passed"
+        output["audit"]["output_sha256"] = _output_sha256(output)
+        validation["citationValidation"] = "passed"
+        validation["citation"] = citation
+        record["outputSha256"] = output["audit"]["output_sha256"]
+        record["citationReverification"] = {
+            "verifiedAt": _utc_now(),
+            "method": "doi_metadata",
+            "verifiedSourceUrls": verified_urls,
+            "attemptedCount": int(verification.get("attemptedCount") or 0),
+            "pageVerificationFailureReasons": failure_reasons,
+        }
+        store["updatedAt"] = _utc_now()
+        _write_json_bundle([(artifact_path, output), (_store_path(team_id), store)])
+        summary = challenge_question_run_summary(team_id)
+    record_runtime_scene_event(
+        "team_workflow_orchestration",
+        "challenge_question_run",
+        "challenge_question_run.citation_reverified",
+        message="Challenge Cup citation receipts were re-verified through DOI registry metadata.",
+        outcome="passed",
+        fields={
+            "teamId": team_id,
+            "questionId": normalized_question_id,
+            "runId": normalized_run_id,
+            "verifiedUrlCount": len(verified_urls),
+            "attemptedCount": int(verification.get("attemptedCount") or 0),
+        },
+        lifecycle=True,
+    )
+    return {
+        "status": "reverified",
+        "record": deepcopy(record),
+        "output": output,
+        "citation": citation,
+        "verification": verification,
+        "summary": summary,
+    }

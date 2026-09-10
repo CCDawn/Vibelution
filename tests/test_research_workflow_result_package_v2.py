@@ -2889,3 +2889,247 @@ def test_full_package_compliant_boundary_has_no_classification_marker(monkeypatc
     _, artifacts = _authority_sections()
     package = _build_v2_with_artifacts(monkeypatch, artifacts)
     assert "resultClassificationTruncations" not in package
+
+
+def test_citation_checks_doi_metadata_fallback_marks_verified_receipt_passed() -> None:
+    output = _output(96)
+    evidence = deepcopy(output["evidence"])
+    evidence[0]["verification_status"] = "unverified"
+    evidence[0]["source_url"] = "https://doi.org/10.1103/PhysRevLett.88.237901"
+
+    checks = result_package_v2._citation_checks(
+        evidence,
+        doi_verification={"https://doi.org/10.1103/PhysRevLett.88.237901": True},
+    )
+
+    assert checks[0] == {
+        "evidenceId": evidence[0]["evidence_id"],
+        "sourceUrl": "https://doi.org/10.1103/PhysRevLett.88.237901",
+        "verificationStatus": "unverified",
+        "status": "passed",
+        "verificationMethod": "doi_metadata",
+        "pageVerificationFailureReason": "unverified",
+    }
+    # Receipts that already passed on the canonical verification authority
+    # never carry the fallback markers.
+    assert all("verificationMethod" not in item for item in checks[1:])
+
+
+def test_citation_checks_doi_metadata_miss_keeps_failed() -> None:
+    output = _output(96)
+    evidence = deepcopy(output["evidence"])
+    evidence[0]["verification_status"] = "unverified"
+    evidence[0]["source_url"] = "https://doi.org/10.1103/PhysRevLett.88.237901"
+
+    for report in (
+        {"https://doi.org/10.1103/PhysRevLett.88.237901": False},
+        {},
+        None,
+    ):
+        checks = result_package_v2._citation_checks(evidence, doi_verification=report)
+        assert checks[0] == {
+            "evidenceId": evidence[0]["evidence_id"],
+            "sourceUrl": "https://doi.org/10.1103/PhysRevLett.88.237901",
+            "verificationStatus": "unverified",
+            "status": "failed",
+        }
+
+
+def test_verify_failed_receipt_dois_skips_passed_and_doi_less_urls() -> None:
+    from core.web.services.team_workflow import doi_metadata_verification
+
+    def _forbidden(_doi: str):
+        raise AssertionError("network must not be attempted")
+
+    report = doi_metadata_verification.verify_failed_receipt_dois(
+        [
+            {"sourceUrl": "https://example.org/paper", "status": "failed"},
+            {
+                "sourceUrl": "https://doi.org/10.1103/PhysRevLett.88.237901",
+                "status": "passed",
+            },
+        ],
+        verifier=_forbidden,
+    )
+
+    assert report == {
+        "verifiedSourceUrls": {},
+        "attemptedCount": 0,
+        "verifiedCount": 0,
+        "unresolvedSourceUrls": [],
+    }
+
+
+def test_verify_failed_receipt_dois_resolves_doi_org_links_and_doi_hints() -> None:
+    from core.web.services.team_workflow import doi_metadata_verification
+
+    def _verifier(doi: str):
+        return {"DOI": doi} if doi == "10.1103/PhysRevLett.88.237901" else None
+
+    report = doi_metadata_verification.verify_failed_receipt_dois(
+        [
+            {
+                "sourceUrl": "https://doi.org/10.1103/PhysRevLett.88.237901",
+                "status": "failed",
+            },
+            {
+                "sourceUrl": "https://www.sciencedirect.com/science/article/pii/S000000000000000X",
+                "doi": "10.1016/j.neunet.2024.06.013",
+                "status": "failed",
+            },
+        ],
+        verifier=_verifier,
+    )
+
+    assert report["verifiedSourceUrls"] == {
+        "https://doi.org/10.1103/PhysRevLett.88.237901": True
+    }
+    assert report["unresolvedSourceUrls"] == [
+        "https://www.sciencedirect.com/science/article/pii/S000000000000000X"
+    ]
+    assert report["attemptedCount"] == 2
+    assert report["verifiedCount"] == 1
+
+
+def test_extract_doi_forms() -> None:
+    from core.web.services.team_workflow import doi_metadata_verification
+
+    assert (
+        doi_metadata_verification.extract_doi(
+            "https://doi.org/10.1103/PhysRevLett.88.237901"
+        )
+        == "10.1103/PhysRevLett.88.237901"
+    )
+    assert (
+        doi_metadata_verification.extract_doi(
+            "https://www.sciencedirect.com/science/article/pii/S0X?doi=10.1016/j.a.B"
+        )
+        == "10.1016/j.a.B"
+    )
+    assert (
+        doi_metadata_verification.extract_doi(
+            "https://example.org/paper", "10.1016/j.neunet.2024.06.013"
+        )
+        == "10.1016/j.neunet.2024.06.013"
+    )
+    assert doi_metadata_verification.extract_doi("https://example.org/paper") == ""
+    assert doi_metadata_verification.extract_doi("https://doi.org/not-a-doi") == ""
+
+
+class _FakeResponse:
+    def __init__(self, payload: bytes) -> None:
+        self._payload = payload
+
+    def read(self, limit: int = -1) -> bytes:
+        return self._payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        return False
+
+
+def test_fetch_doi_metadata_falls_back_from_crossref_to_doi_org(monkeypatch) -> None:
+    import urllib.error
+
+    from core.web.services.team_workflow import doi_metadata_verification as dmv
+
+    seen_urls: list[str] = []
+
+    def _fake_urlopen(request, timeout=None):
+        seen_urls.append(request.full_url)
+        if "api.crossref.org" in request.full_url:
+            raise urllib.error.HTTPError(request.full_url, 404, "not found", hdrs=None, fp=None)
+        assert request.get_header("Accept") == dmv._CSL_JSON_ACCEPT
+        return _FakeResponse(json.dumps({"DOI": "10.1/x", "title": ["T"]}).encode())
+
+    monkeypatch.setattr(dmv, "urlopen", _fake_urlopen)
+
+    metadata = dmv.fetch_doi_metadata("10.1103/PhysRevLett.88.237901")
+
+    assert metadata == {"DOI": "10.1/x", "title": ["T"]}
+    assert seen_urls == [
+        "https://api.crossref.org/works/10.1103/PhysRevLett.88.237901",
+        "https://doi.org/10.1103/PhysRevLett.88.237901",
+    ]
+
+
+def test_fetch_doi_metadata_all_failures_collapse_to_none(monkeypatch) -> None:
+    from core.web.services.team_workflow import doi_metadata_verification as dmv
+
+    def _timeout(_request, timeout=None):
+        raise TimeoutError("network unreachable")
+
+    monkeypatch.setattr(dmv, "urlopen", _timeout)
+    assert dmv.fetch_doi_metadata("10.1103/PhysRevLett.88.237901") is None
+    # A non-DOI argument never reaches the network layer.
+    assert dmv.fetch_doi_metadata("not-a-doi") is None
+
+
+def test_build_v2_verify_doi_metadata_flips_paywalled_receipt(monkeypatch) -> None:
+    from core.web.services.team_workflow import doi_metadata_verification
+
+    expected, artifacts = _authority_sections()
+    expected["evidence"][0]["verification_status"] = "unverified"
+    expected["evidence"][0]["source_url"] = "https://doi.org/10.1103/PhysRevLett.88.237901"
+    artifacts["evidence_card_batch"] = {"evidence": deepcopy(expected["evidence"])}
+    monkeypatch.setattr(
+        result_package_v2,
+        "_artifact_payload",
+        lambda kind, **_kwargs: deepcopy(artifacts[kind]),
+    )
+    monkeypatch.setattr(
+        result_package_v2,
+        "_feedback_iterations",
+        lambda **_kwargs: deepcopy(expected["feedback_iterations"]),
+    )
+    monkeypatch.setattr(
+        result_package_v2,
+        "_model_run",
+        lambda *_args, **_kwargs: {
+            **deepcopy(expected["run"]),
+            "run_id": "run-sci-096",
+        },
+    )
+    monkeypatch.setattr(
+        doi_metadata_verification,
+        "fetch_doi_metadata",
+        lambda _doi: {"DOI": "10.1103/PhysRevLett.88.237901"},
+    )
+
+    def _build(**kwargs) -> dict:
+        return result_package_v2.build_challenge_result_package_v2(
+            generic_package={
+                "runId": "run-sci-096",
+                "teamId": "research-team",
+                "factChainHash": "f" * 64,
+                "packageId": "old",
+                "packageRef": "old",
+                "contentHash": "0" * 64,
+            },
+            record=_record(),
+            team_id="research-team",
+            workflow_run_id="run-sci-096",
+            source_collection_run_id="source-sci-096",
+            **kwargs,
+        )
+
+    enabled = _build(verify_doi_metadata=True)
+    enabled_check = next(
+        item
+        for item in enabled["citationChecks"]
+        if item["sourceUrl"] == "https://doi.org/10.1103/PhysRevLett.88.237901"
+    )
+    assert enabled_check["status"] == "passed"
+    assert enabled_check["verificationMethod"] == "doi_metadata"
+
+    # The pure default keeps the receipt failed: paywalled pages stay failed
+    # unless the caller explicitly opts into the DOI fallback.
+    disabled = _build()
+    disabled_check = next(
+        item
+        for item in disabled["citationChecks"]
+        if item["sourceUrl"] == "https://doi.org/10.1103/PhysRevLett.88.237901"
+    )
+    assert disabled_check["status"] == "failed"

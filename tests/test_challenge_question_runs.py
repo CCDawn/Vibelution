@@ -1476,3 +1476,124 @@ def test_summary_lists_registered_questions_independently_of_validation(monkeypa
     summary = challenge_question_runs.challenge_question_run_summary("research-team")
     assert summary["registeredQuestionIds"] == expected
     assert summary["validatedQuestionIds"] == []
+
+
+def _paywalled_output() -> dict:
+    output = _output()
+    output["evidence"][0]["source_url"] = "https://doi.org/10.1103/PhysRevLett.88.237901"
+    output["evidence"][0]["doi"] = "10.1103/PhysRevLett.88.237901"
+    output["evidence"][0]["verification_status"] = "unverified"
+    return output
+
+
+def _register_paywalled_run(tmp_path, monkeypatch, output: dict) -> dict:
+    _isolate_store(tmp_path, monkeypatch)
+    checks = [
+        {"sourceUrl": item["source_url"], "status": "passed"}
+        for item in output["evidence"]
+        if item["evidence_id"] != "E1"
+    ]
+    response = challenge_question_runs.register_challenge_question_output(
+        "research-team",
+        {"output": output, "citationChecks": checks, "registeredBy": "test-agent"},
+    )
+    return response["record"]
+
+
+def test_reverify_citation_receipts_passes_paywalled_doi_and_is_idempotent(tmp_path, monkeypatch):
+    output = _paywalled_output()
+    record = _register_paywalled_run(tmp_path, monkeypatch, output)
+    assert record["validation"]["citationValidation"] == "failed"
+
+    calls: list[str] = []
+
+    def _verifier(doi: str):
+        calls.append(doi)
+        return {"DOI": doi, "title": ["Real paper"]}
+
+    response = challenge_question_runs.reverify_citation_receipts(
+        "research-team",
+        "SCI-096",
+        "run-sci-096",
+        doi_verifier=_verifier,
+    )
+
+    assert response["status"] == "reverified"
+    assert calls == ["10.1103/PhysRevLett.88.237901"]
+    stored_record = challenge_question_runs._load_store("research-team")["records"][0]
+    assert stored_record["validation"]["citationValidation"] == "passed"
+    assert stored_record["validation"]["citation"]["missingUrls"] == []
+    assert stored_record["citationReverification"]["method"] == "doi_metadata"
+    assert stored_record["citationReverification"]["verifiedSourceUrls"] == [
+        "https://doi.org/10.1103/PhysRevLett.88.237901"
+    ]
+    assert stored_record["citationReverification"]["pageVerificationFailureReasons"] == {
+        "https://doi.org/10.1103/PhysRevLett.88.237901": "unverified"
+    }
+    artifact = challenge_question_runs._read_json(
+        challenge_question_runs._artifact_path("research-team", "SCI-096", "run-sci-096")
+    )
+    assert artifact["audit"]["citation_validation"] == "passed"
+    assert challenge_question_runs._output_sha256(artifact) == stored_record["outputSha256"]
+
+    # Idempotent replay: an already-passed record short-circuits without
+    # touching the DOI verifier again.
+    second = challenge_question_runs.reverify_citation_receipts(
+        "research-team",
+        "SCI-096",
+        "run-sci-096",
+        doi_verifier=_verifier,
+    )
+    assert second["status"] == "already_passed"
+    assert len(calls) == 1
+
+
+def test_reverify_citation_receipts_keeps_failed_when_doi_unknown(tmp_path, monkeypatch):
+    output = _paywalled_output()
+    record = _register_paywalled_run(tmp_path, monkeypatch, output)
+    assert record["validation"]["citationValidation"] == "failed"
+
+    response = challenge_question_runs.reverify_citation_receipts(
+        "research-team",
+        "SCI-096",
+        "run-sci-096",
+        doi_verifier=lambda _doi: None,
+    )
+
+    assert response["status"] == "still_failed"
+    assert response["citation"]["status"] == "failed"
+    stored_record = challenge_question_runs._load_store("research-team")["records"][0]
+    assert stored_record["validation"]["citationValidation"] == "failed"
+    assert "citationReverification" not in stored_record
+
+
+def test_reverify_citation_receipts_never_attempts_urls_without_doi(tmp_path, monkeypatch):
+    output = _output()
+    output["evidence"][0]["verification_status"] = "unverified"
+    record = _register_paywalled_run(tmp_path, monkeypatch, output)
+    assert record["validation"]["citationValidation"] == "failed"
+
+    def _forbidden(_doi: str):
+        raise AssertionError("no DOI authority: network must not be attempted")
+
+    response = challenge_question_runs.reverify_citation_receipts(
+        "research-team",
+        "SCI-096",
+        "run-sci-096",
+        doi_verifier=_forbidden,
+    )
+
+    assert response["status"] == "still_failed"
+    assert response["verification"]["attemptedCount"] == 0
+    assert response["citation"]["missingUrls"] == ["https://example.org/paper-1"]
+
+
+def test_reverify_citation_receipts_requires_registered_record(tmp_path, monkeypatch):
+    _isolate_store(tmp_path, monkeypatch)
+    with pytest.raises(ValueError, match="record was not found"):
+        challenge_question_runs.reverify_citation_receipts(
+            "research-team",
+            "SCI-096",
+            "run-missing",
+            doi_verifier=lambda _doi: None,
+        )

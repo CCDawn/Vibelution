@@ -3723,6 +3723,7 @@ def _ledger_result_package(
                         )
                         or action.run_id
                     ),
+                    verify_doi_metadata=True,
                 )
         except (ResultPackageError, ResultPackageV2Error) as exc:
             if not proposal_only:

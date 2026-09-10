@@ -80,6 +80,7 @@ def execute_result_package_action(
                     (record.get("inputSnapshot") or {}).get("sourceCollectionRunId")
                     or record["runId"]
                 ),
+                verify_doi_metadata=True,
             )
     except (ResultPackageError, ResultPackageV2Error) as exc:
         raise SystemActionError(
