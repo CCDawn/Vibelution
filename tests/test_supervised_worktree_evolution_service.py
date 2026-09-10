@@ -528,6 +528,44 @@ def test_real_candidate_modifier_retries_judgment_protocol_drift_in_same_session
     assert "SUPERVISED_AGENT_JUDGMENT" not in calls[2]["prompt"]
 
 
+def test_real_candidate_modifier_preserves_provider_terminal_from_conversation_summary(tmp_path, monkeypatch):
+    def fake_conversation_harness(**kwargs):
+        result = _fake_harness_result(
+            role="baseline",
+            repo_root=tmp_path,
+            prompt=str(kwargs.get("prompt") or ""),
+            session_id="session-baseline",
+        )
+        result.reason = "检测到完整回合结束统计"
+        result.evolution_summary["conversation_backend"] = {
+            "observed_terminal_status": "failed_provider",
+        }
+        return result
+
+    monkeypatch.setattr(service, "run_supervised_conversation_harness", fake_conversation_harness)
+
+    result = service._real_candidate_modifier(
+        tmp_path,
+        "Implement the evidence-backed improvement in this candidate worktree.",
+        {
+            "runId": "swte-provider-terminal",
+            "options": {
+                "agentBindings": {
+                    "baseline": {
+                        "agentId": "agent-baseline",
+                        "role": "baseline",
+                    }
+                }
+            },
+            "conversationSessionId": "session-baseline",
+        },
+    )
+
+    assert result["status"] == "failed"
+    assert result["summary"] == "隐藏监督会话以 failed_provider 终止。"
+    assert result["phaseRetryCount"] == 0
+
+
 def test_real_candidate_modifier_fails_closed_after_two_phase_corrections(tmp_path, monkeypatch):
     calls: list[dict] = []
 

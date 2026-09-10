@@ -2013,7 +2013,7 @@ def _real_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str
     conversation_session_id = str(context.get("conversationSessionId") or "").strip()
 
     def run_self_edit_turn(turn_prompt: str, *, session_id: str) -> HarnessResult:
-        return run_supervised_conversation_harness(
+        result = run_supervised_conversation_harness(
             repo_root=worktree_path,
             mode="single_turn",
             prompt=turn_prompt,
@@ -2030,6 +2030,7 @@ def _real_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str
             progress_callback=progress_callback,
             cancel_checker=cancel_checker,
         )
+        return _preserve_candidate_modifier_conversation_terminal(result)
 
     prompt += (
         "\n候选提交必须遵守当前项目的开发门禁：保留受管 codex 分支，"
@@ -2088,6 +2089,16 @@ def _real_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str
         "workspaceOverride": str(worktree_path),
         "phaseRetryCount": retry_count,
     }
+
+
+def _preserve_candidate_modifier_conversation_terminal(result: HarnessResult) -> HarnessResult:
+    summary = result.evolution_summary if isinstance(result.evolution_summary, dict) else {}
+    backend = summary.get("conversation_backend") if isinstance(summary.get("conversation_backend"), dict) else {}
+    terminal_status = str(backend.get("observed_terminal_status") or "").strip().lower()
+    if terminal_status in {"failed_provider", "failed_runtime", "failed", "error"}:
+        result.status = "failed"
+        result.reason = f"隐藏监督会话以 {terminal_status} 终止。"
+    return result
 
 
 def _default_worktree_factory(project_root: Path, run_id: str) -> dict[str, Any]:
