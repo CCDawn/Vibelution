@@ -4286,6 +4286,18 @@ def project_state_from_records(
         current_phase = "selection"
     else:
         current_phase = "generation"
+    # While a formal run is blocked (status blocked / reconciliation_required)
+    # review dispatch is rejected at the run level, so a live review loop is
+    # an unadvanceable phantom phase: route authority to formal_runtime so the
+    # run's retry/reconcile/cancel recovery reaches the UI through the phase
+    # fence.  Every other resolved phase (stage-one generation entry, a
+    # converged formal_runtime, ...) keeps the existing authority.
+    if (
+        current_phase == "review"
+        and formal_phase == "formal_runtime"
+        and formal_runtime.get("actionability") == "blocked"
+    ):
+        current_phase = "formal_runtime"
     phase_lookup = {
         "generation": generation,
         "selection": selection,

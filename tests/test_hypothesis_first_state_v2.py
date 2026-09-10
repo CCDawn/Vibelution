@@ -1045,6 +1045,178 @@ def _retry_offer(node_id: str = "source_extraction") -> dict[str, Any]:
     }
 
 
+def _review_active_records() -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """An open review loop: selection + linked candidates + awaiting meetings."""
+    candidates = ("candidate-a", "candidate-b")
+    chain_records = [
+        {
+            "recordKind": "hypothesis_candidate",
+            "candidateId": candidate_id,
+            "questionId": "SCI-001",
+            "createdAt": "2026-08-25T00:00:00Z",
+        }
+        for candidate_id in candidates
+    ] + [
+        {
+            "recordKind": "review_round_link",
+            "linkId": f"link-{candidate_id}",
+            "questionId": "SCI-001",
+            "selectionId": "selection-1",
+            "candidateId": candidate_id,
+            "candidateOrder": order,
+            "roundIndex": 1,
+            "meetingRoundId": f"meeting-{candidate_id}",
+            "createdAt": "2026-08-25T00:02:00Z",
+        }
+        for order, candidate_id in enumerate(candidates)
+    ]
+    selection_records = [
+        {
+            "selectionId": "selection-1",
+            "questionId": "SCI-001",
+            "selectedCandidateIds": list(candidates),
+            "createdAt": "2026-08-25T00:01:00Z",
+        }
+    ]
+    meeting_records = [
+        {
+            "meetingRoundId": f"meeting-{candidate_id}",
+            "meetingType": "hypothesis_review",
+            "question": "SCI-001",
+            "selectionId": "selection-1",
+            "status": "awaiting_approval",
+            "linkedChatRoomId": f"room-{candidate_id}",
+            "createdAt": "2026-08-25T00:03:00Z",
+        }
+        for candidate_id in candidates
+    ]
+    return chain_records, selection_records, meeting_records
+
+
+def _project_review_loop_with_formal_run(
+    *,
+    run_id: str,
+    run_status: str,
+    command_offers: list[dict[str, Any]],
+) -> Any:
+    chain_records, selection_records, meeting_records = _review_active_records()
+    return HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=chain_records,
+            selection_records=selection_records,
+            meeting_records=meeting_records,
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            formal_runs=[{
+                "runId": run_id,
+                "teamId": "team-1",
+                "questionId": "SCI-001",
+                "status": run_status,
+                "runVersion": 7,
+                "activeNodeId": "result_package",
+            }],
+            formal_snapshots={
+                run_id: {
+                    "activeNodeIds": ["result_package"],
+                    "commandOffers": command_offers,
+                }
+            },
+        )
+    )
+
+
+def test_blocked_formal_run_routes_review_loop_to_formal_runtime_phase() -> None:
+    """A blocked run rejects review dispatch, so formal_runtime owns the phase.
+
+    The live review loop behind a run-level block is an unadvanceable phantom
+    phase: the authoritative phase must flip to formal_runtime so the run's
+    recovery actions (retry/reconcile/cancel) survive the phase fence instead
+    of dead-ending the question with zero sanctioned exits (SCI-014).
+    """
+    state = _project_review_loop_with_formal_run(
+        run_id="run-blocked-loop",
+        run_status="blocked",
+        command_offers=[_retry_offer("result_package"), _RECONCILE_OFFER],
+    )
+
+    assert state.currentPhase == "formal_runtime"
+    assert state.formalRuntime.runStatus == "blocked"
+    assert state.formalRuntime.actionability == "blocked"
+    formal_commands = [
+        action.command
+        for action in state.allowedActions
+        if action.kind == "command"
+        and action.command
+        in {"retry_formal_node", "reconcile_formal_run", "cancel_run"}
+    ]
+    # Source order preserved: retries, then reconcile, then confirmed cancel.
+    assert formal_commands == [
+        "retry_formal_node",
+        "reconcile_formal_run",
+        "cancel_run",
+    ]
+    retry_action = next(
+        action
+        for action in state.allowedActions
+        if action.kind == "command" and action.command == "retry_formal_node"
+    )
+    assert retry_action.targetNodeId == "result_package"
+    assert retry_action.idempotencyKey == "offer:retry:result_package:v7"
+    assert retry_action.model_dump(mode="json")["payload"] == {
+        "runId": "run-blocked-loop",
+        "nodeId": "result_package",
+    }
+
+
+def test_running_formal_run_keeps_review_phase_and_fenced_formal_actions() -> None:
+    """A healthy run must not steal phase authority from the review loop."""
+    state = _project_review_loop_with_formal_run(
+        run_id="run-running-loop",
+        run_status="running",
+        command_offers=[_retry_offer("result_package")],
+    )
+
+    assert state.currentPhase == "review"
+    assert state.formalRuntime.runStatus == "running"
+    commands = [
+        action.command for action in state.allowedActions if action.kind == "command"
+    ]
+    assert "retry_formal_node" not in commands
+    assert "reconcile_formal_run" not in commands
+    assert "cancel_run" not in commands
+    # The review loop keeps its own phase-scoped recovery surface.
+    assert "approve_summary" in commands
+
+
+def test_formal_phase_flip_still_retargets_meeting_recovery_commands() -> None:
+    """Flipping authority to formal_runtime must not swallow review repairs."""
+    state = _project_review_loop_with_formal_run(
+        run_id="run-blocked-retarget",
+        run_status="blocked",
+        command_offers=[_retry_offer("result_package")],
+    )
+
+    assert state.currentPhase == "formal_runtime"
+    approve_actions = [
+        action
+        for action in state.allowedActions
+        if action.kind == "command" and action.command == "approve_summary"
+    ]
+    assert [action.payload.meetingRoundId for action in approve_actions] == [
+        "meeting-candidate-a",
+        "meeting-candidate-b",
+    ]
+    # The retarget loop re-targets the meeting-scoped repairs to the new
+    # authoritative phase so phase-equal consumers keep receiving them.
+    assert all(
+        action.targetPhase == "formal_runtime" for action in approve_actions
+    )
+
+
 def _project_formal_commands(
     *,
     run_id: str,
@@ -5009,7 +5181,11 @@ def test_formal_hypothesis_stage_failure_keeps_fenced_candidates_recoverable() -
     When the formal run's hypothesis stage has NOT succeeded (blocked on
     hypothesis_design), the fenced review candidates must stay failed and the
     retry_review_dispatch offer must remain — that offer is the sanctioned
-    recovery for the classic fence scenario.
+    recovery for the classic fence scenario.  Because the blocked run rejects
+    review dispatch at the run level, the authoritative phase flips to
+    formal_runtime (the run's own retry/reconcile/cancel recovery becomes
+    visible) while the review candidates and their repairs are preserved:
+    retry_review_dispatch survives via the meeting-recovery retarget.
     """
 
     state = HypothesisFirstStateV2.model_validate(
@@ -5033,7 +5209,9 @@ def test_formal_hypothesis_stage_failure_keeps_fenced_candidates_recoverable() -
         )
     )
 
-    assert state.currentPhase == "review"
+    # The blocked run owns phase authority; the review loop cannot advance.
+    assert state.currentPhase == "formal_runtime"
+    assert state.formalRuntime.runStatus == "blocked"
     for candidate in state.review.candidates:
         assert candidate.lifecycle == "failed"
     assert state.review.aggregate.failed == 2
@@ -5047,6 +5225,14 @@ def test_formal_hypothesis_stage_failure_keeps_fenced_candidates_recoverable() -
     )
     assert retry.payload.selectionId == "selection-1"
     assert retry.payload.candidateIds == ["cand-a", "cand-b"]
+    assert retry.targetPhase == "formal_runtime"
+    # The run's own recovery is now the forward path beside the review repair.
+    formal_retry = next(
+        action
+        for action in state.allowedActions
+        if action.kind == "command" and action.command == "retry_formal_node"
+    )
+    assert formal_retry.payload.nodeId == "hypothesis_design"
 
 
 def test_superseded_stage_rejects_stale_retry_review_dispatch_envelope(
