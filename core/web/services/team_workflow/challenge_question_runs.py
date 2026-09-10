@@ -2872,6 +2872,56 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
     }
 
 
+def _load_ledger_run_record(run_id: str) -> dict[str, Any] | None:
+    """Read one workflow run row from the sqlite ledger (read-only).
+
+    The ledger is the production authority for run records; the legacy JSON
+    run store no longer carries them.  The row projects into the same shape
+    the stage-one authority consumers already read: the frozen
+    ``inputSnapshot`` (camelCase contract, includes ``modelRoutingPolicy``
+    and ``snapshotHash``) plus the ledger's own ``inputSnapshotHash``.  No
+    writer is opened and no write transaction is started.
+    """
+    from core.research.workflow.ledger import WorkflowLedgerStore
+    from core.research.workflow.ledger.errors import WorkflowLedgerError
+    from core.web.services.team_workflow.research_runtime.paths import (
+        workflow_ledger_path,
+    )
+
+    ledger_path = workflow_ledger_path()
+    if not ledger_path.exists():
+        raise ValueError(
+            "challenge_question_run_repair_run_unreadable: the workflow "
+            f"ledger is missing at {ledger_path}; record left unchanged."
+        )
+    ledger_store = WorkflowLedgerStore(ledger_path)
+    try:
+        run = ledger_store.read(lambda repo: repo.get_run(run_id))
+    except WorkflowLedgerError as exc:
+        raise ValueError(
+            "challenge_question_run_repair_run_unreadable: the workflow "
+            f"ledger could not be read ({exc}); record left unchanged."
+        ) from exc
+    finally:
+        ledger_store.close()
+    if run is None:
+        return None
+    try:
+        snapshot = json.loads(str(run.input_snapshot_json or "{}"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "challenge_question_run_repair_run_unreadable: the ledger run's "
+            f"input snapshot is not valid JSON ({exc}); record left unchanged."
+        ) from exc
+    return {
+        "runId": run.run_id,
+        "teamId": run.team_id,
+        "questionId": run.question_id,
+        "inputSnapshot": snapshot if isinstance(snapshot, dict) else {},
+        "inputSnapshotHash": run.input_snapshot_hash,
+    }
+
+
 def repair_challenge_question_output_registration(
     team_id: str,
     question_id: str,
@@ -2885,7 +2935,8 @@ def repair_challenge_question_output_registration(
     them.  The register idempotent branch deliberately rejects such upgrades
     (the canonical package binding is immutable), so this is the single
     sanctioned reconciliation path: it revalidates the registered output
-    artifact, re-reads the run's frozen model policy and the hash-verified
+    artifact, re-reads the run's frozen model policy (from the sqlite
+    ledger, the production run-record authority) and the hash-verified
     receipt registry, seals the same canonical package
     ``register_challenge_question_output`` would have produced, and rewrites
     the record's receipt/package/validation projections in place.  Records
@@ -2907,7 +2958,6 @@ def repair_challenge_question_output_registration(
     from core.web.services.team_workflow.research_runtime.result_package_v2 import (
         _stage_one_receipt_authority,
     )
-    from core.web.services.team_workflow.research_runtime.store import WorkflowRunStore
 
     with _STORE_LOCK:
         store = _load_store(normalized_team_id)
@@ -2948,10 +2998,14 @@ def repair_challenge_question_output_registration(
                 "challenge_question_run_repair_unsupported: only proposal-only "
                 "v2 records can be reconciled."
             )
-        run_record = WorkflowRunStore().get_run(normalized_run_id)
+        run_record = _load_ledger_run_record(normalized_run_id)
+        if run_record is None:
+            raise ValueError(
+                "challenge_question_run_repair_run_not_found: workflow run "
+                f"{normalized_run_id} does not exist in the workflow ledger."
+            )
         if (
-            not isinstance(run_record, dict)
-            or str(run_record.get("teamId") or "").strip() != normalized_team_id
+            str(run_record.get("teamId") or "").strip() != normalized_team_id
             or str(run_record.get("questionId") or "").strip().upper()
             != normalized_question_id
         ):

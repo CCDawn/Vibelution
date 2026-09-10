@@ -1656,36 +1656,85 @@ def _repair_registry_receipt(stage: str, run_id: str, policy_sha256: str) -> dic
     ).to_dict()
 
 
-def _seed_repair_run_authority(monkeypatch, tmp_path, *, stages) -> dict:
-    """Freeze the run policy, seed the registry and isolate the run store."""
+def _seed_repair_ledger_run(
+    monkeypatch,
+    tmp_path,
+    *,
+    run_id: str = "run-sci-096",
+    team_id: str = "research-team",
+    question_id: str = "SCI-096",
+    with_row: bool = True,
+    filename: str = "workflow-ledger.sqlite",
+) -> Path:
+    """Create a real sqlite ledger holding the run's frozen input snapshot.
 
-    from core.web.services.team_workflow.research_runtime import (
-        model_invocation_receipt_registry as registry,
-        store as run_store_module,
-    )
+    Production authority for run records is the workflow ledger, so the
+    fixture seeds a real ``workflow_runs`` row whose ``input_snapshot_json``
+    carries the frozen camelCase snapshot (``modelRoutingPolicy`` +
+    ``snapshotHash``) and routes ``workflow_ledger_path`` to it via the env
+    override.  ``with_row=False`` keeps the (missing) ledger for run
+    not-found cases.
+    """
+    from core.research.workflow.ledger import RunRecord
+    from tests._support.workflow_ledger_helpers import open_ledger_store
 
-    policy = _repair_stage_one_policy()
-    monkeypatch.setattr(
-        run_store_module,
-        "default_run_store_dir",
-        lambda: tmp_path / "runs",
-    )
-    run_store = run_store_module.WorkflowRunStore(root=tmp_path / "runs")
-    run_store.create_run(
-        {
-            "runId": "run-sci-096",
-            "teamId": "research-team",
-            "questionId": "SCI-096",
-            "inputSnapshot": {
-                "questionId": "SCI-096",
+    ledger_path = tmp_path / filename
+    store = open_ledger_store(ledger_path)
+    try:
+        if with_row:
+            policy = _repair_stage_one_policy()
+            snapshot = {
+                "questionId": question_id,
                 "snapshotHash": "c" * 64,
                 "modelRoutingPolicy": {
                     "requiredModelPolicy": deepcopy(policy),
                     "modelPolicySha256": policy["policySha256"],
                 },
-            },
-        }
+            }
+            record = RunRecord(
+                run_id=run_id,
+                team_id=team_id,
+                workflow_id="challenge-cup-research",
+                workflow_version_id="wv-268aa6e8dea8",
+                thread_id=run_id,
+                project_id="challenge-sci-096",
+                question_id=question_id,
+                status="succeeded",
+                run_version=1,
+                last_event_sequence=0,
+                input_snapshot_json=json.dumps(snapshot),
+                input_snapshot_hash="c" * 64,
+                safety_limits_json="{}",
+                binding_snapshot_set_id="binding-set-1",
+                active_node_id=None,
+                parent_run_id=None,
+                forked_from_checkpoint_id=None,
+                completion_kind=None,
+                terminal_reason=None,
+                blocked_problem_json=None,
+                created_at_ms=1_750_000_000_000,
+                updated_at_ms=1_750_000_000_000,
+                completed_at_ms=None,
+            )
+            store.submit(
+                lambda uow: uow.repository.insert_run(record),
+                force_flush=True,
+            ).result(timeout=10)
+    finally:
+        store.close()
+    monkeypatch.setenv("VIBELUTION_RESEARCH_WORKFLOW_LEDGER_PATH", str(ledger_path))
+    return ledger_path
+
+
+def _seed_repair_run_authority(monkeypatch, tmp_path, *, stages) -> dict:
+    """Freeze the run policy, seed the registry and the ledger run row."""
+
+    from core.web.services.team_workflow.research_runtime import (
+        model_invocation_receipt_registry as registry,
     )
+
+    policy = _repair_stage_one_policy()
+    _seed_repair_ledger_run(monkeypatch, tmp_path)
     receipts = {
         stage: _repair_registry_receipt(
             stage, "run-sci-096", policy["policySha256"]
@@ -1826,3 +1875,75 @@ def test_repair_fails_closed_without_full_stage_receipts(tmp_path, monkeypatch):
             "*.result-package.v2.json"
         )
     )
+
+
+def test_repair_run_missing_and_scope_mismatch_fail_distinctly(tmp_path, monkeypatch):
+    _isolate_store(tmp_path, monkeypatch)
+    _seed_repair_run_authority(
+        monkeypatch, tmp_path, stages=("generation", "review", "revision")
+    )
+    _register_legacy_proposal_record(tmp_path, monkeypatch)
+
+    # A ledger without this run row fails with the precise not-found message.
+    _seed_repair_ledger_run(
+        monkeypatch, tmp_path, with_row=False, filename="workflow-ledger-empty.sqlite"
+    )
+    with pytest.raises(ValueError, match="repair_run_not_found"):
+        challenge_question_runs.repair_challenge_question_output_registration(
+            "research-team", "SCI-096", "run-sci-096"
+        )
+
+    # A ledger run bound to another question keeps the scope mismatch code.
+    _seed_repair_ledger_run(
+        monkeypatch,
+        tmp_path,
+        run_id="run-sci-096",
+        team_id="research-team",
+        question_id="SCI-097",
+        filename="workflow-ledger-mismatch.sqlite",
+    )
+    with pytest.raises(ValueError, match="repair_run_scope_mismatch"):
+        challenge_question_runs.repair_challenge_question_output_registration(
+            "research-team", "SCI-096", "run-sci-096"
+        )
+
+    # Neither failure touched the stored record.
+    store = json.loads(
+        challenge_question_runs._store_path("research-team").read_text(
+            encoding="utf-8"
+        )
+    )
+    record = store["records"][0]
+    assert "resultPackage" not in record
+    assert record["validation"]["officialModelCall"] is False
+
+
+def test_load_ledger_run_record_projects_frozen_snapshot(tmp_path, monkeypatch):
+    """The ledger row projects into the inputSnapshot authority consumers read."""
+    ledger_path = _seed_repair_ledger_run(
+        monkeypatch, tmp_path, run_id="run-proj", team_id="research-team"
+    )
+    assert ledger_path.is_file()
+
+    projected = challenge_question_runs._load_ledger_run_record("run-proj")
+
+    assert projected["runId"] == "run-proj"
+    assert projected["teamId"] == "research-team"
+    assert projected["questionId"] == "SCI-096"
+    policy = _repair_stage_one_policy()
+    snapshot = projected["inputSnapshot"]
+    assert snapshot["questionId"] == "SCI-096"
+    assert snapshot["snapshotHash"] == "c" * 64
+    assert projected["inputSnapshotHash"] == "c" * 64
+    assert snapshot["modelRoutingPolicy"]["modelPolicySha256"] == (
+        policy["policySha256"]
+    )
+    assert snapshot["modelRoutingPolicy"]["requiredModelPolicy"] == policy
+
+    # A missing ledger file fails closed instead of pretending the run is gone.
+    monkeypatch.setenv(
+        "VIBELUTION_RESEARCH_WORKFLOW_LEDGER_PATH",
+        str(tmp_path / "absent" / "workflow-ledger.sqlite"),
+    )
+    with pytest.raises(ValueError, match="repair_run_unreadable"):
+        challenge_question_runs._load_ledger_run_record("run-proj")
