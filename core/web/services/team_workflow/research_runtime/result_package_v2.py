@@ -1873,6 +1873,25 @@ _DEFAULT_COMPETITION_VIEW_MAX_LENGTH = 500
 
 
 @lru_cache(maxsize=1)
+def _claim_boundary_max_length() -> int:
+    """Read result_classification.claim_boundary's cap from the real schema.
+
+    Same contract-ownership rule as the view caps: the frozen maxLength is
+    derived from the schema file, with the uniform 500 fallback when the file
+    is unreadable (packaging-time validation still fails closed).
+    """
+
+    from core.web.services.team_workflow import challenge_question_runs
+
+    schema = challenge_question_runs._read_json(challenge_question_runs._schema_path(2))
+    properties = (
+        (schema.get("properties") or {}).get("result_classification") or {}
+    ).get("properties") or {}
+    cap = int((properties.get("claim_boundary") or {}).get("maxLength") or 0)
+    return cap if cap > 0 else _DEFAULT_COMPETITION_VIEW_MAX_LENGTH
+
+
+@lru_cache(maxsize=1)
 def _competition_view_max_lengths() -> dict[str, int]:
     """Read the competition result view's per-field caps from the real schema.
 
@@ -2182,14 +2201,29 @@ def build_challenge_result_package_v2(
         workflow_run_id=workflow_run_id,
         authority_run_id=authority,
     )
+    boundary_text = _require_text(
+        _pick(final_summary, "answer_boundary", "answerBoundary"),
+        "result_classification.claim_boundary",
+    )
+    boundary_clamped, boundary_truncated = _clamp_view_text(
+        boundary_text, _claim_boundary_max_length()
+    )
+    classification_truncations: list[dict[str, Any]] = []
+    if boundary_truncated:
+        # final_summary keeps the full answer_boundary as the untouched
+        # authority; only the classification's schema-capped copy is clamped.
+        classification_truncations.append(
+            {
+                "field": "result_classification.claim_boundary",
+                "originalLength": len(boundary_text.strip()),
+                "truncatedLength": len(boundary_clamped),
+            }
+        )
     result_classification = {
         "status": "review_required",
         "actual_execution": False,
         "classification": "proposal_only",
-        "claim_boundary": _require_text(
-            _pick(final_summary, "answer_boundary", "answerBoundary"),
-            "result_classification.claim_boundary",
-        ),
+        "claim_boundary": boundary_clamped,
         "final_summary": final_summary,
     }
     output: dict[str, Any] = {
@@ -2286,6 +2320,10 @@ def build_challenge_result_package_v2(
         # competition_result_view is schema-closed (additionalProperties:
         # false), so the truncation record stays at the generic package level.
         package_core["competitionResultViewTruncations"] = view_truncations
+    if classification_truncations:
+        # result_classification is schema-closed the same way; its truncation
+        # record rides at the generic package level beside the view's.
+        package_core["resultClassificationTruncations"] = classification_truncations
     _copy_package_authorities(
         package_core,
         generic_package=generic_package,

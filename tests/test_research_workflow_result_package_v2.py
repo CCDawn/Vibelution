@@ -2855,3 +2855,37 @@ def test_v2_single_run_authority_batch_applies_no_lean_projection(monkeypatch) -
     ):
         _build_v2_with_artifacts(monkeypatch, artifacts)
     assert registry_calls == []
+
+
+def test_full_package_clamps_oversized_claim_boundary(monkeypatch) -> None:
+    # The exact regression from SCI-014 run-1b64401aa16a attempt a2: an
+    # oversized problem_understanding.scope flows verbatim into
+    # result_classification.claim_boundary (via final_summary.answer_boundary)
+    # and fails the canonical schema at its 500 cap.
+    _, artifacts = _authority_sections()
+    scope_statement = _oversized_scope_statement()
+    artifacts["problem_understanding"]["scope"] = scope_statement
+    package = _build_v2_with_artifacts(monkeypatch, artifacts)
+    output = package["challengeQuestionOutput"]
+    assert challenge_question_runs._schema_issues(output) == []
+    boundary = output["result_classification"]["claim_boundary"]
+    assert 0 < len(boundary) <= 500
+    assert package["resultClassificationTruncations"] == [
+        {
+            "field": "result_classification.claim_boundary",
+            "originalLength": len(scope_statement),
+            "truncatedLength": len(boundary),
+        }
+    ]
+    # The untouched authority keeps the full scope statement.
+    assert output["final_summary"] if "final_summary" in output else True
+    assert (
+        output["result_classification"]["final_summary"]["answer_boundary"]
+        == scope_statement
+    )
+
+
+def test_full_package_compliant_boundary_has_no_classification_marker(monkeypatch) -> None:
+    _, artifacts = _authority_sections()
+    package = _build_v2_with_artifacts(monkeypatch, artifacts)
+    assert "resultClassificationTruncations" not in package
