@@ -17,6 +17,7 @@ const previewMock = vi.hoisted(() => ({
       hypothesisRoundCount: 1,
       collectionRequestCount: 1,
       collectionRunCount: 1,
+      formalRunCount: 1,
     },
   },
 }));
@@ -28,7 +29,7 @@ const apiMock = vi.hoisted(() => ({
     teamId: "research-team",
     questionId: "SCI-004",
     removed: previewMock.current.impact,
-    nextAction: { targetNodeId: "hf_generation", label: "生成候选假说" },
+    nextAction: { targetNodeId: "hf_generation", label: "创建第一阶段运行" },
   })),
 }));
 
@@ -106,6 +107,7 @@ beforeEach(() => {
       hypothesisRoundCount: 1,
       collectionRequestCount: 1,
       collectionRunCount: 1,
+      formalRunCount: 1,
     },
   };
   apiMock.fetchQuestionRunResetPreview.mockClear();
@@ -122,6 +124,7 @@ describe("ChallengeQuestionRunResetDialog", () => {
 
     expect(document.body.textContent).toContain("候选假说");
     expect(document.body.textContent).toContain("资料搜集运行");
+    expect(document.body.textContent).toContain("将取消的正式运行");
     expect(document.body.textContent).toContain("请输入 SCI-004 以解锁重置操作。");
     expect(confirm.disabled).toBe(true);
 

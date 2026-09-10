@@ -25,6 +25,7 @@ const IMPACT_ROWS = [
   ["hypothesisRoundCount", "评审轮次"],
   ["collectionRequestCount", "资料搜集请求"],
   ["collectionRunCount", "资料搜集运行"],
+  ["formalRunCount", "将取消的正式运行"],
 ] as const;
 
 /** One-question destructive confirmation. The server remains the reset authority. */

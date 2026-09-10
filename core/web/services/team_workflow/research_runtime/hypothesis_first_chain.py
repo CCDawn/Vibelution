@@ -203,6 +203,12 @@ AUTO_KNOWLEDGE_HANDOFF_REASON = (
     "accepted + knowledge review approved); knowledge handoff accepted per "
     "operator automation policy"
 )
+# Question run reset (destructive, one question): formal runs that are still
+# live (non-terminal) at reset time are cancelled through the command SSOT
+# under this server-bound system operator identity.  Without this
+# reconciliation the deleted chain would leave the old run blocking the
+# ``create_stage_one_run`` offer forever (the question reset dead state).
+QUESTION_RESET_RUN_ACTOR_ID = "system:question-run-reset"
 
 # In-flight marker, one regeneration per (teamId, questionId) per process.
 # The maintenance tick is serial, but one regeneration can spend the whole
@@ -842,6 +848,107 @@ def _latest_records(records: list[dict[str, Any]], field: str) -> dict[str, dict
     return latest
 
 
+def _question_live_formal_runs(
+    team_id: str, question_id: str
+) -> list[dict[str, Any]] | None:
+    """The question's formal runs that have not reached a terminal status.
+
+    Terminal means the same set the v2 ``_active_stage_one_run`` offer accepts
+    (succeeded / failed / cancelled / archived); anything else keeps the
+    create-stage-one offer gated, so a question reset must reconcile these
+    runs first.  ``None`` means the formal read runtime is unavailable — the
+    caller skips the reconciliation (the established ``None -> skip``
+    precedent) instead of failing the whole reset.
+    """
+    from .formal_read_runtime import get_query_service
+
+    try:
+        query_service = get_query_service()
+        payload = query_service.list_runs(
+            team_id=team_id, workflow_id=CHALLENGE_CUP_WORKFLOW_ID
+        )
+    except Exception:  # noqa: BLE001 - formal runtime absent (command line)
+        return None
+    normalized_question_id = str(question_id or "").strip().upper()
+    return [
+        dict(run)
+        for run in list((payload or {}).get("runs") or [])
+        if isinstance(run, Mapping)
+        and str(run.get("runId") or "").strip()
+        and str(run.get("questionId") or "").strip().upper()
+        == normalized_question_id
+        and str(run.get("status") or "").strip().lower()
+        not in _TERMINAL_RUN_STATUSES
+    ]
+
+
+def _cancel_live_formal_runs_for_reset(
+    team_id: str,
+    runs: Sequence[Mapping[str, Any]],
+) -> list[str]:
+    """Cancel every live formal run of one question before a destructive reset.
+
+    Fail-loud reconciliation: the cancellation reuses the existing
+    ``cancel_run`` command channel (the same SSOT the operator's stop button
+    uses) under a server-bound system operator scope, with one deterministic
+    idempotency key per run.  The key intentionally carries no reset id — a
+    repeated reset replays the first cancel command and CANCELLED ->
+    CANCELLED is a legal same-state transition.  Any submit failure (stale
+    version, operator refusal, conflict) aborts the reset before a single
+    destructive write happens; only an unreadable/foreign run is skipped.
+    """
+    from core.research.workflow.contracts import (
+        ActorRef,
+        CommandRequest,
+        WorkflowCommandKind,
+    )
+
+    from .ids import new_id
+    from .operator_authorization import server_operator_scope
+    from .runtime_factory import production_workflow_runtime
+
+    runtime = production_workflow_runtime()
+    if runtime is None:
+        raise HypothesisFirstChainError("无法收口本题活跃正式运行：formal runtime 不可用")
+    cancelled_run_ids: list[str] = []
+    for summary in runs:
+        run_id = str(summary.get("runId") or "").strip()
+        if not run_id:
+            continue
+        try:
+            run = runtime.store.get_run(run_id)
+        except Exception:  # noqa: BLE001 - unreadable run cannot be cancelled
+            run = None
+        if run is None or str(getattr(run, "team_id", "") or "") != team_id:
+            continue
+        try:
+            with server_operator_scope(
+                QUESTION_RESET_RUN_ACTOR_ID,
+                display_name="Question run reset",
+                roles=("operator",),
+            ):
+                runtime.command_service.submit(
+                    CommandRequest(
+                        command_id=new_id("cmd"),
+                        run_id=run_id,
+                        team_id=team_id,
+                        command=WorkflowCommandKind.CANCEL_RUN,
+                        node_id=None,
+                        expected_run_version=int(run.run_version),
+                        idempotency_key=f"hf2:reset-cancel-run:{run_id}",
+                        payload={"reason": "question run reset"},
+                        requested_by=ActorRef("system", QUESTION_RESET_RUN_ACTOR_ID),
+                        requested_at_ms=int(time.time() * 1000),
+                    )
+                )
+        except Exception as exc:  # noqa: BLE001 - fail loud before reset writes
+            raise HypothesisFirstChainError(
+                f"本题正式运行收口失败（{run_id}）：{exc}"
+            ) from exc
+        cancelled_run_ids.append(run_id)
+    return cancelled_run_ids
+
+
 def _question_reset_snapshot(team_id: str, question_id: str) -> dict[str, Any]:
     """Read the exact question-owned artifacts before a guarded reset.
 
@@ -933,6 +1040,7 @@ def _question_reset_snapshot(team_id: str, question_id: str) -> dict[str, Any]:
         for record in target_collection_requests
         if str(record.get("collectionRunId") or "").strip()
     }
+    live_formal_runs = _question_live_formal_runs(team_id, normalized_question_id)
     impact = {
         "candidateCount": len(candidate_ids),
         "selectionCount": len(target_selection_ids),
@@ -940,6 +1048,7 @@ def _question_reset_snapshot(team_id: str, question_id: str) -> dict[str, Any]:
         "hypothesisRoundCount": len(target_rounds),
         "collectionRequestCount": len(request_ids),
         "collectionRunCount": 0,
+        "formalRunCount": len(live_formal_runs or []),
     }
     active_meetings = [
         meeting_id
@@ -973,6 +1082,9 @@ def _question_reset_snapshot(team_id: str, question_id: str) -> dict[str, Any]:
         "targetMeetingIds": target_meeting_ids,
         "targetRoundIds": set(target_rounds),
         "collectionRunIds": collection_run_ids,
+        # None keeps "formal read runtime unavailable" distinct from "no live
+        # formal runs"; the reset only skips the reconciliation on None.
+        "liveFormalRuns": live_formal_runs,
         "impact": impact,
         "activeMeetingIds": active_meetings,
         "activeRequestIds": active_requests,
@@ -1059,6 +1171,25 @@ def reset_question_chain(
                 str(source_preview.get("blockingReason") or "本题资料运行暂不能重置。")
             )
         snapshot["impact"]["collectionRunCount"] = int(source_preview.get("runCount") or 0)
+        # Reconcile live formal runs before any destructive write: a surviving
+        # non-terminal run would keep the create_stage_one_run offer gated
+        # forever and leave the question in a dead state after the reset.
+        live_formal_runs = snapshot["liveFormalRuns"]
+        cancelled_formal_run_ids: list[str] = []
+        if live_formal_runs is None:
+            _record_scene_event(
+                "hypothesis_first.question_reset_formal_runtime_unavailable",
+                outcome="skipped",
+                level="warning",
+                fields={
+                    "teamId": normalized_team_id,
+                    "questionId": normalized_question_id,
+                },
+            )
+        elif live_formal_runs:
+            cancelled_formal_run_ids = _cancel_live_formal_runs_for_reset(
+                normalized_team_id, live_formal_runs
+            )
         target_meeting_ids = set(snapshot["targetMeetingIds"])
         target_round_ids = set(snapshot["targetRoundIds"])
         chain_records = [
@@ -1076,6 +1207,7 @@ def reset_question_chain(
             "questionId": normalized_question_id,
             "resetAt": _utc_now(),
             "removed": dict(snapshot["impact"]),
+            "cancelledFormalRunIds": list(cancelled_formal_run_ids),
         }
         chain_records.append(audit_record)
         selection_records = [
@@ -1142,7 +1274,7 @@ def reset_question_chain(
         "teamId": normalized_team_id,
         "questionId": normalized_question_id,
         "removed": dict(snapshot["impact"]),
-        "nextAction": {"targetNodeId": "hf_generation", "label": "生成候选假说"},
+        "nextAction": {"targetNodeId": "hf_generation", "label": "创建第一阶段运行"},
     }
 
 

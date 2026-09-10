@@ -26,6 +26,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -3891,6 +3892,7 @@ def test_question_reset_clears_only_the_target_questions_closed_hypothesis_chain
         "hypothesisRoundCount": 1,
         "collectionRequestCount": 1,
         "collectionRunCount": 0,
+        "formalRunCount": 0,
     }
 
     result = chain.reset_question_chain(
@@ -3902,7 +3904,7 @@ def test_question_reset_clears_only_the_target_questions_closed_hypothesis_chain
     assert result["removed"] == preview["impact"]
     assert result["nextAction"] == {
         "targetNodeId": "hf_generation",
-        "label": "生成候选假说",
+        "label": "创建第一阶段运行",
     }
     assert chain.list_hypothesis_candidates(team_id, question_id=_QUESTION_ID)["candidates"] == []
     assert selections.list_hypothesis_selections(team_id, question_id=_QUESTION_ID)["selections"] == []
@@ -4038,6 +4040,142 @@ def test_question_reset_restores_hypothesis_records_if_source_cleanup_late_block
         )
 
     assert chain.list_hypothesis_candidates(team_id, question_id=_QUESTION_ID)["candidates"]
+
+
+class _FakeResetQueryService:
+    """Stand-in for the formal read query service (reset tests only)."""
+
+    def __init__(self, runs: list[dict[str, Any]]) -> None:
+        self._runs = runs
+
+    def list_runs(self, *, team_id: str, workflow_id: str) -> dict[str, Any]:
+        return {"runs": self._runs}
+
+
+class _FakeResetStore:
+    def __init__(self) -> None:
+        self.runs: dict[str, Any] = {}
+
+    def get_run(self, run_id: str) -> Any:
+        return self.runs.get(run_id)
+
+
+class _FakeResetCommandService:
+    def __init__(self, store: _FakeResetStore, error: Exception | None = None) -> None:
+        self._store = store
+        self._error = error
+        self.requests: list[CommandRequest] = []
+
+    def submit(self, request: CommandRequest) -> Any:
+        self.requests.append(request)
+        if self._error is not None:
+            raise self._error
+        run = self._store.runs[request.run_id]
+        run.status = "cancelled"
+        return SimpleNamespace(status="submitted")
+
+
+def _install_question_reset_formal_fakes(
+    monkeypatch: pytest.MonkeyPatch,
+    team_id: str,
+    *,
+    run_id: str = "run-hf4-reset-blocked",
+    submit_error: Exception | None = None,
+) -> _FakeResetCommandService:
+    """Patch the formal read/write access points the reset reconciliation uses."""
+    store = _FakeResetStore()
+    store.runs[run_id] = SimpleNamespace(
+        run_id=run_id, team_id=team_id, run_version=3, status="blocked"
+    )
+    command_service = _FakeResetCommandService(store, error=submit_error)
+    runtime = SimpleNamespace(store=store, command_service=command_service)
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.formal_read_runtime.get_query_service",
+        lambda: _FakeResetQueryService(
+            [{"runId": run_id, "questionId": _QUESTION_ID, "status": "blocked"}]
+        ),
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.runtime_factory.production_workflow_runtime",
+        lambda: runtime,
+    )
+    return command_service
+
+
+def test_question_reset_cancels_live_formal_run_before_clearing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A surviving non-terminal run must not outlive its question's reset."""
+
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    _seed_question_reset_artifacts(team_id, _QUESTION_ID)
+    blocked_run_id = "run-hf4-reset-blocked"
+    command_service = _install_question_reset_formal_fakes(
+        monkeypatch, team_id, run_id=blocked_run_id
+    )
+
+    preview = chain.preview_question_reset(team_id, _QUESTION_ID)
+    assert preview["impact"]["formalRunCount"] == 1
+    assert preview["canReset"] is True
+
+    result = chain.reset_question_chain(
+        team_id,
+        _QUESTION_ID,
+        confirmation_question_id=_QUESTION_ID,
+    )
+
+    assert result["removed"]["formalRunCount"] == 1
+    assert len(command_service.requests) == 1
+    request = command_service.requests[0]
+    assert request.command == WorkflowCommandKind.CANCEL_RUN
+    assert request.run_id == blocked_run_id
+    assert request.team_id == team_id
+    assert request.expected_run_version == 3
+    assert request.idempotency_key == f"hf2:reset-cancel-run:{blocked_run_id}"
+    assert request.requested_by == ActorRef("system", chain.QUESTION_RESET_RUN_ACTOR_ID)
+    assert chain.list_hypothesis_candidates(team_id, question_id=_QUESTION_ID)["candidates"] == []
+    audit_records = [
+        record
+        for record in chain._records(team_id)
+        if record.get("recordKind") == chain.QUESTION_RESET_AUDIT_KIND
+    ]
+    assert audit_records[-1]["cancelledFormalRunIds"] == [blocked_run_id]
+
+
+def test_question_reset_aborts_before_destructive_writes_when_cancel_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refused cancel must stop the reset before any ledger write."""
+
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    seeded = _seed_question_reset_artifacts(team_id, _QUESTION_ID)
+    _install_question_reset_formal_fakes(
+        monkeypatch,
+        team_id,
+        submit_error=RuntimeError("version conflict"),
+    )
+
+    with pytest.raises(chain.HypothesisFirstChainError, match="收口失败"):
+        chain.reset_question_chain(
+            team_id,
+            _QUESTION_ID,
+            confirmation_question_id=_QUESTION_ID,
+        )
+
+    assert chain.list_hypothesis_candidates(team_id, question_id=_QUESTION_ID)["candidates"]
+    assert (
+        selections.list_hypothesis_selections(team_id, question_id=_QUESTION_ID)["selections"]
+    )
+    assert [item["meetingRoundId"] for item in meetings.list_meeting_rounds(team_id)["meetings"]] == [
+        seeded["meetingId"]
+    ]
+    assert [item["roundId"] for item in hrounds.list_hypothesis_rounds(team_id)["rounds"]] == [
+        seeded["roundId"]
+    ]
+    assert all(
+        record.get("recordKind") != chain.QUESTION_RESET_AUDIT_KIND
+        for record in chain._records(team_id)
+    )
 
 
 def _build_runtime(tmp_path: Path):

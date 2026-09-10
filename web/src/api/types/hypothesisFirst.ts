@@ -1015,6 +1015,7 @@ export type QuestionRunResetImpact = {
   hypothesisRoundCount: number;
   collectionRequestCount: number;
   collectionRunCount: number;
+  formalRunCount: number;
 };
 
 export type QuestionRunResetPreview = {
