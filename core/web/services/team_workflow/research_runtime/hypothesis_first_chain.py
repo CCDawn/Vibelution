@@ -13883,6 +13883,138 @@ def _record_round_persistence_failure(
         return {"failureRecordError": str(exc) or type(exc).__name__}
 
 
+def _round_dimension_review_rows_from_authority(
+    team_id: str,
+    round_record: Mapping[str, Any],
+    workflow_run_id: str,
+) -> dict[str, list[dict[str, Any]]]:
+    """Resolve a refs-only round's audit rows from the canonical authority.
+
+    Mirrors ``_round_has_dimension_reviews_authority`` scoping: the
+    ``dimension_reviews`` store is read scoped by the round's run id first and
+    falls back to a team-wide payload match when the round carries no run
+    identity.  Only the latest matching record is consulted (append order is
+    authority order), and its rows are grouped by persisted ``hypothesis_id``.
+    Any read failure resolves to no rows: the caller keeps the stored round
+    and the writer's existing fail-closed blockers keep judging the round.
+    """
+
+    from .workflow_artifact_store import list_workflow_artifacts
+
+    round_id = str(round_record.get("roundId") or "").strip()
+    if not round_id:
+        return {}
+    scoped_run_id = str(workflow_run_id or "").strip()
+
+    def _matching(records: Any) -> list[Mapping[str, Any]]:
+        matched: list[Mapping[str, Any]] = []
+        for item in list(records or []):
+            if not isinstance(item, Mapping):
+                continue
+            payload = (
+                item.get("payload") if isinstance(item.get("payload"), Mapping) else {}
+            )
+            if str(payload.get("reviewRoundId") or "") == round_id:
+                matched.append(payload)
+        return matched
+
+    matched: list[Mapping[str, Any]] = []
+    if scoped_run_id:
+        try:
+            matched = _matching(
+                list_workflow_artifacts(
+                    team_id, kind="dimension_reviews", workflow_run_id=scoped_run_id
+                )
+            )
+        except Exception:  # noqa: BLE001 - unresolved refs degrade fail-open
+            matched = []
+    if not matched and not scoped_run_id:
+        try:
+            matched = _matching(
+                list_workflow_artifacts(team_id, kind="dimension_reviews")
+            )
+        except Exception:  # noqa: BLE001 - unresolved refs degrade fail-open
+            matched = []
+    if not matched:
+        return {}
+    rows_by_candidate: dict[str, list[dict[str, Any]]] = {}
+    for row in list(matched[-1].get("dimensionReviews") or []):
+        if not isinstance(row, Mapping):
+            continue
+        hypothesis_id = str(
+            row.get("hypothesis_id") or row.get("hypothesisId") or ""
+        ).strip()
+        if not hypothesis_id:
+            continue
+        rows_by_candidate.setdefault(hypothesis_id, []).append(dict(row))
+    return rows_by_candidate
+
+
+def _dimension_review_authority_input(
+    team_id: str,
+    generation_result: Mapping[str, Any],
+    round_record: Mapping[str, Any],
+    workflow_run_id: str,
+) -> Mapping[str, Any]:
+    """Review projection for the round authority materialization.
+
+    Resolution order keeps ``dimension_reviews`` the single payload owner:
+
+    1. the in-memory rows of the generation that just ran
+       (``dimensionReviewsPayload``) — new rounds no longer embed rows;
+    2. the canonical authority store, resolved through the round's
+       ``dimensionReviewRefs`` (replayed or reused refs-only rounds);
+    3. the historical rows embedded on the stored round — append-only rows
+       written before the reference binding existed are never rewritten.
+
+    With no rows at any layer the stored round is returned unchanged, so the
+    writer keeps its exact fail-closed behavior for rounds without reviews.
+    """
+
+    candidates = list(round_record.get("candidates") or [])
+    rows_by_candidate: dict[str, list[dict[str, Any]]] = {}
+    payload = (
+        generation_result.get("dimensionReviewsPayload")
+        if isinstance(generation_result, Mapping)
+        else None
+    )
+    if isinstance(payload, Mapping):
+        for item in list(payload.get("candidates") or []):
+            if not isinstance(item, Mapping):
+                continue
+            candidate_id = str(item.get("candidateId") or "").strip()
+            rows = [
+                dict(row)
+                for row in list(item.get("dimensionReviews") or [])
+                if isinstance(row, Mapping)
+            ]
+            if candidate_id and rows:
+                rows_by_candidate[candidate_id] = rows
+    elif any(
+        isinstance(candidate, Mapping) and candidate.get("dimensionReviewRefs")
+        for candidate in candidates
+    ):
+        rows_by_candidate = _round_dimension_review_rows_from_authority(
+            team_id, round_record, workflow_run_id
+        )
+    if not rows_by_candidate:
+        return round_record
+    projected_candidates: list[Any] = []
+    for candidate in candidates:
+        if not isinstance(candidate, Mapping):
+            projected_candidates.append(candidate)
+            continue
+        candidate_id = str(candidate.get("candidateId") or "").strip()
+        rows = rows_by_candidate.get(candidate_id)
+        if not rows:
+            projected_candidates.append(candidate)
+            continue
+        merged = dict(candidate)
+        merged["dimensionReviews"] = rows
+        projected_candidates.append(merged)
+    return {**round_record, "candidates": projected_candidates}
+
+
 # Closure authorities the hypothesis_design node readback expects alongside
 # the node's own hypothesis_set.
 def _generate_hypothesis_round(
@@ -14105,9 +14237,12 @@ def _generate_hypothesis_round(
             )
             or workflow_run_id
         ).strip()
-        # The HypothesisRound preserves the independent 5+2 score projection
-        # and explicit audit-seven rows.  Each canonical authority is written
-        # from the same immutable round; neither is derived from the other.
+        # The HypothesisRound preserves the independent 5+2 score projection.
+        # The audit-seven rows have a single payload owner: the canonical
+        # ``dimension_reviews`` authority written here from (in resolution
+        # order) the generation's in-memory rows, the store itself for
+        # refs-only rounds, or the historical embedded rows of pre-ref
+        # rounds.  The round row never becomes a second writable copy.
         dimension_reviews_authority: dict[str, Any]
         try:
             from core.web.services.team_workflow.research_runtime.dimension_reviews_input_binding import (
@@ -14149,7 +14284,12 @@ def _generate_hypothesis_round(
             # untouched).  Citation-less rows stay empty: the writer's
             # fail-closed contract, not this projection, judges them.
             review_projection, evidence_binding_report = (
-                canonicalize_dimension_review_evidence(team_id, round_record)
+                canonicalize_dimension_review_evidence(
+                    team_id,
+                    _dimension_review_authority_input(
+                        team_id, result, round_record, workflow_run_id
+                    ),
+                )
             )
             dimension_reviews_authority = materialize_dimension_reviews_authority(
                 team_id=team_id,
