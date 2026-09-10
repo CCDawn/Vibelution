@@ -8,6 +8,12 @@ from __future__ import annotations
 
 from typing import Any
 
+# web_fetch_tool 成功回执的两种前缀（tools/web_search_tool.web_fetch）：
+# HTML 走 [网页内容]，PDF 走 [PDF 文本]。PDF 回执同样携带真实抓取原文，
+# 必须进入 quotable 供给——只认 HTML 前缀会让纯 PDF 来源（如 arXiv /pdf/）
+# 即使抓取成功也必然 no_quotable_text。
+_RECEIPT_PREFIXES = ("[网页内容] ", "[PDF 文本] ")
+
 
 def task_fetched_text(task: dict[str, Any]) -> dict[str, dict[str, str]]:
     from core.web.services import team_workflow_orchestration_service as s
@@ -32,7 +38,13 @@ def task_fetched_text(task: dict[str, Any]) -> dict[str, dict[str, str]]:
             args = s._source_collection_stage_tool_call_args(call)
             locator = str(args.get("url") or "").strip()
             result = call.get("result")
-            if not locator or not isinstance(result, str) or not result.startswith("[网页内容] "):
+            if not locator or not isinstance(result, str):
+                continue
+            receipt_prefix = next(
+                (prefix for prefix in _RECEIPT_PREFIXES if result.startswith(prefix)),
+                None,
+            )
+            if not receipt_prefix:
                 continue
             header, separator, body = result.partition("\n\n")
             if not separator or not body.strip():
@@ -42,7 +54,7 @@ def task_fetched_text(task: dict[str, Any]) -> dict[str, dict[str, str]]:
             texts[locator] = {
                 "text": body,
                 "locator": locator,
-                "resolvedUrl": header.splitlines()[0].removeprefix("[网页内容] "),
+                "resolvedUrl": header.splitlines()[0].removeprefix(receipt_prefix),
                 "eventId": str(getattr(event, "event_id", "")),
                 "sessionId": session_id,
                 "turnId": str(getattr(event, "turn_id", "")),

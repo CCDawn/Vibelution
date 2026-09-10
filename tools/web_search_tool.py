@@ -75,6 +75,15 @@ _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
+# 浏览器式 Accept/Accept-Language：部分站点（如 AIP/MDPI 之外的静态强校验点）会按
+# 缺失或非浏览器形状的 Accept 头直接拒绝；与 UA 一起构成完整的浏览器请求形状。
+_FETCH_ACCEPT_HEADER = "text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.8"
+_FETCH_ACCEPT_LANGUAGE_HEADER = "en;q=0.9,zh;q=0.8"
+# arXiv 对数据中心出口 IP 抓取 www/arxiv.org 的 /abs/、/pdf/ 页面有严格频控，
+# 拦截页只剩导航文本。export.arxiv.org 是 arXiv 官方程序化访问镜像，同路径可用；
+# 仅改写 GET 抓取路径，搜索阶段（providers/facade_helpers 的 export API 调用）不受影响。
+_ARXIV_MIRROR_HOSTS = ("arxiv.org", "www.arxiv.org")
+_ARXIV_EXPORT_HOST = "export.arxiv.org"
 _BLOCKED_HOST_SUFFIXES = (".localhost", ".local", ".internal")
 _TOKEN_HEALTH_CACHE: dict[str, Any] = {"checkedAt": 0.0, "status": None, "refreshing": False}
 _TOKEN_HEALTH_CACHE_LOCK = threading.Lock()
@@ -840,6 +849,26 @@ def _format_http_fetch_error(status_code: int, url: str) -> str:
     return base
 
 
+def _arxiv_export_mirror_url(url: str) -> str:
+    """Map arxiv.org /abs/ and /pdf/ GET fetches to the official export mirror.
+
+    Pure function over the request URL: only the host is rewritten when the
+    request targets an arXiv abstract/PDF page; every other URL (including
+    arxiv.org listing/help paths and non-arXiv hosts) is returned unchanged.
+    The search stage never goes through this helper.
+    """
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").strip().lower()
+    if host not in _ARXIV_MIRROR_HOSTS:
+        return url
+    path = parsed.path or ""
+    if not (path.startswith("/abs/") or path.startswith("/pdf/")):
+        return url
+    # TODO(arxiv): export 镜像在出口 IP 被频控时仍可能返回 429；如需进一步稳态，
+    # 可在抓取层加带退避的单次重试，但不得滑向无界重试螺旋（与 _format_http_fetch_error 契约一致）。
+    return parsed._replace(netloc=_ARXIV_EXPORT_HOST).geturl()
+
+
 def _fetch_with_same_site_redirects(url: str) -> tuple[str, httpx.Response | None]:
     current_url = url
     original_host = (urlparse(url).hostname or "").lower()
@@ -854,7 +883,14 @@ def _fetch_with_same_site_redirects(url: str) -> tuple[str, httpx.Response | Non
                 if validation_error:
                     return f"[错误] {validation_error}: {current_url}", None
                 try:
-                    response = client.get(current_url, headers={"User-Agent": _USER_AGENT})
+                    response = client.get(
+                        current_url,
+                        headers={
+                            "User-Agent": _USER_AGENT,
+                            "Accept": _FETCH_ACCEPT_HEADER,
+                            "Accept-Language": _FETCH_ACCEPT_LANGUAGE_HEADER,
+                        },
+                    )
                 except TypeError:
                     response = client.get(current_url)
                 if response.status_code in {301, 302, 303, 307, 308}:
@@ -919,7 +955,8 @@ def web_fetch(url: str, max_chars: int = 8000, prompt: str = "") -> str:
     if validation_error:
         return f"[错误] {validation_error}: {url}"
 
-    final_url_or_error, response = _fetch_with_same_site_redirects(url)
+    fetch_url = _arxiv_export_mirror_url(url)
+    final_url_or_error, response = _fetch_with_same_site_redirects(fetch_url)
     if response is None:
         return final_url_or_error
 
@@ -942,7 +979,12 @@ def web_fetch(url: str, max_chars: int = 8000, prompt: str = "") -> str:
         return f"[网页抓取] URL 内容为空: {final_url_or_error}"
 
     focus = f"\n关注点: {prompt.strip()[:240]}" if prompt and prompt.strip() else ""
-    prefix = f"[PDF 文本] {final_url_or_error}" if is_pdf else f"[网页内容] {final_url_or_error}"
+    # 回执 URL 策略：arXiv 改道抓取时回执行仍报告原始请求 URL——下游
+    # extraction（task_fetched_text → source_quotable_blocks）以 web_fetch_tool
+    # 的调用参数（原始 URL）为 locator 做精确串匹配，报 export 镜像 URL 会让
+    # 「源 URL=arxiv.org/abs/x」的回执永不命中。
+    receipt_url = url if fetch_url != url else final_url_or_error
+    prefix = f"[PDF 文本] {receipt_url}" if is_pdf else f"[网页内容] {receipt_url}"
     return f"{prefix}{focus}\n\n{text}"
 
 

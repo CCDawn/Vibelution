@@ -20,8 +20,8 @@ class FakeClient:
     def __exit__(self, *args):
         return False
 
-    def get(self, url):
-        return self.handler("GET", url)
+    def get(self, url, **kwargs):
+        return self.handler("GET", url, **kwargs)
 
     def post(self, url, **kwargs):
         return self.handler("POST", url, **kwargs)
@@ -459,3 +459,116 @@ def test_registrable_host_suffix_rules():
     assert registrable("www.oecd.org") == registrable("oecd.org") == "oecd.org"
     assert registrable("bbc.co.uk") == registrable("www.bbc.co.uk") == "bbc.co.uk"
     assert registrable("bbc.co.uk") != registrable("itv.co.uk")
+
+
+# ============================================================================
+# web_fetch: arXiv export 镜像改道与浏览器式请求头
+# ============================================================================
+
+
+def test_web_fetch_sends_browser_shaped_accept_headers(monkeypatch):
+    requests = []
+
+    def fake_get(method, url, **kwargs):
+        requests.append((url, kwargs.get("headers")))
+        return httpx.Response(
+            200,
+            request=httpx.Request("GET", url),
+            text="<html><body><article>Plain article body</article></body></html>",
+        )
+
+    install_fake_client(monkeypatch, fake_get)
+
+    result = web_search_tool.web_fetch("https://www.nature.com/articles/s41586-026-1")
+
+    assert "Plain article body" in result
+    headers = requests[0][1]
+    assert headers["User-Agent"] == web_search_tool._USER_AGENT
+    assert headers["Accept"] == "text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.8"
+    assert headers["Accept-Language"] == "en;q=0.9,zh;q=0.8"
+
+
+def test_web_fetch_reroutes_arxiv_abs_to_export_mirror(monkeypatch):
+    fetched_urls = []
+
+    def fake_get(method, url, **kwargs):
+        fetched_urls.append(url)
+        return httpx.Response(
+            200,
+            request=httpx.Request("GET", url),
+            text="<html><body><article>Export mirror abstract body</article></body></html>",
+        )
+
+    install_fake_client(monkeypatch, fake_get)
+
+    result = web_search_tool.web_fetch("https://arxiv.org/abs/2401.12345")
+
+    # 实际请求走官方程序化镜像，回执行按策略 (a) 仍报告原始请求 URL，
+    # 保证 extraction 侧以原始 URL 为 locator 的精确串匹配继续命中。
+    assert fetched_urls == ["https://export.arxiv.org/abs/2401.12345"]
+    assert result.startswith("[网页内容] https://arxiv.org/abs/2401.12345\n")
+    assert "Export mirror abstract body" in result
+    assert "export.arxiv.org" not in result
+
+
+def test_web_fetch_reroutes_arxiv_pdf_to_export_mirror(monkeypatch):
+    pdf_bytes = _build_pdf_bytes("Mirror pdf page marker")
+
+    def fake_get(method, url, **kwargs):
+        assert url == "https://export.arxiv.org/pdf/2401.12345v2"
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/pdf"},
+            content=pdf_bytes,
+            request=httpx.Request("GET", url),
+        )
+
+    install_fake_client(monkeypatch, fake_get)
+
+    result = web_search_tool.web_fetch("https://arxiv.org/pdf/2401.12345v2")
+
+    assert result.startswith("[PDF 文本] https://arxiv.org/pdf/2401.12345v2\n")
+    assert "Mirror pdf page marker" in result
+
+
+def test_web_fetch_keeps_non_arxiv_and_non_paper_paths_unmirrored(monkeypatch):
+    fetched_urls = []
+
+    def fake_get(method, url, **kwargs):
+        fetched_urls.append(url)
+        return httpx.Response(
+            200,
+            request=httpx.Request("GET", url),
+            text="<html><body><article>Original host body</article></body></html>",
+        )
+
+    install_fake_client(monkeypatch, fake_get)
+
+    # 非 arXiv 主机：即使路径形状相同也不改道。
+    result = web_search_tool.web_fetch("https://example.org/abs/2401.12345")
+    assert fetched_urls[-1] == "https://example.org/abs/2401.12345"
+    assert result.startswith(f"[网页内容] https://example.org/abs/2401.12345\n")
+
+    # arXiv 主机但非 /abs/、/pdf/ 路径：不改道。
+    result = web_search_tool.web_fetch("https://arxiv.org/list/cs.LG/recent")
+    assert fetched_urls[-1] == "https://arxiv.org/list/cs.LG/recent"
+    assert result.startswith("[网页内容] https://arxiv.org/list/cs.LG/recent\n")
+    assert "Original host body" in result
+
+
+def test_arxiv_export_mirror_url_pure_mapping():
+    mirror = web_search_tool._arxiv_export_mirror_url
+
+    # arxiv.org / www.arxiv.org 的 /abs/、/pdf/ 均改写到 export 镜像，scheme/query/fragment 保留。
+    assert mirror("https://arxiv.org/abs/2401.12345") == "https://export.arxiv.org/abs/2401.12345"
+    assert mirror("https://www.arxiv.org/abs/2401.12345v2") == "https://export.arxiv.org/abs/2401.12345v2"
+    assert mirror("https://arxiv.org/pdf/2401.12345") == "https://export.arxiv.org/pdf/2401.12345"
+    assert (
+        mirror("http://arxiv.org/abs/2401.12345?fmt=txt#section")
+        == "http://export.arxiv.org/abs/2401.12345?fmt=txt#section"
+    )
+    # 其余 URL 一律原样返回。
+    assert mirror("https://arxiv.org/list/cs.LG/recent") == "https://arxiv.org/list/cs.LG/recent"
+    assert mirror("https://arxiv.org/help") == "https://arxiv.org/help"
+    assert mirror("https://export.arxiv.org/abs/2401.12345") == "https://export.arxiv.org/abs/2401.12345"
+    assert mirror("https://example.org/abs/2401.12345") == "https://example.org/abs/2401.12345"
