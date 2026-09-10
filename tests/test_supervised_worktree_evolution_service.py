@@ -741,6 +741,24 @@ def test_active_baseline_keeps_future_approval_pending():
     assert workflow_steps[3]["current"] is False
 
 
+def test_active_candidate_setup_keeps_approval_pending_until_a_candidate_exists():
+    snapshot = {
+        "runId": "swte-live-candidate-setup",
+        "status": "running",
+        "phase": "candidate_worktree",
+        "candidateAvailability": {"status": "unavailable"},
+        "baseline": {"status": "failed"},
+        "candidate": {},
+        "candidateModification": {},
+        "decision": {},
+    }
+
+    workflow_steps = service._build_workflow_steps(snapshot)
+
+    assert workflow_steps[2]["status"] == "running"
+    assert workflow_steps[5]["status"] == "pending"
+
+
 def test_task_contract_uses_the_same_baseline_prompt_that_the_agent_executes():
     contract = service._build_task_contract(
         {

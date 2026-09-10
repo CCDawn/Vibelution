@@ -3136,18 +3136,22 @@ def _approval_workflow_status(snapshot: dict[str, Any]) -> str:
     outcome = str(snapshot.get("outcome") or "")
     activation = snapshot.get("runtimeActivation") or {}
     approval = snapshot.get("approvalDecision") or {}
+    status = str(snapshot.get("status") or "").strip().lower()
+    phase = str(snapshot.get("phase") or "").strip().lower()
     if outcome == "applied" or activation.get("status") == "applied":
         return "done"
     if outcome == "activation_failed" or activation.get("status") in {"activation_failed", "activation_blocked"}:
         return "failed"
-    if snapshot.get("phase") == "approval" or activation.get("status") in {"restart_queued", "activating", "activation_verifying"}:
+    if phase == "approval" or activation.get("status") in {"restart_queued", "activating", "activation_verifying"}:
         return "running"
     if approval.get("status") == "decided" and approval.get("decision") in {"REJECT", "RERUN_REQUIRED"}:
         return "done"
+    if status in _ACTIVE_STATUSES:
+        return "pending"
     if (snapshot.get("candidateAvailability") or {}).get("status") == "unavailable" and not snapshot.get("merge"):
         return "failed"
-    if snapshot.get("status") in {"failed", "cancelled"}:
-        return str(snapshot["status"])
+    if status in {"failed", "cancelled"}:
+        return status
     return "pending"
 
 

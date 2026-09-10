@@ -505,6 +505,7 @@ def test_conversation_harness_can_reuse_existing_supervised_session(monkeypatch,
     assert result.evolution_summary["conversation_backend"]["session_id"] == "session-improver"
     assert progress_events[0]["phase"] == "conversation_session_reused"
     assert progress_events[0]["conversation_session_id"] == "session-improver"
+    assert progress_events[-1]["latest_output_label"] == "候选 Agent 正在处理任务"
 
 
 def test_conversation_harness_continues_needs_continue_turn_before_finishing(monkeypatch, tmp_path: Path):

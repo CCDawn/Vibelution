@@ -81,6 +81,21 @@ _CONVERSATION_HARNESS_MESSAGE_FIELDS = {
 }
 
 
+def _supervised_progress_label(role: str, state: str = "running") -> str:
+    """Return the user-facing actor/state label for a managed background turn."""
+    actor = {
+        "baseline": "基线 Agent",
+        "baseline_rerun": "独立复跑 Agent",
+        "candidate": "候选 Agent",
+        "judge": "Judge Agent",
+    }.get(str(role or "").strip().lower(), "监督 Agent")
+    if state == "created":
+        return f"{actor} 会话已准备"
+    if state == "cancel_requested":
+        return f"{actor} 已收到停止请求"
+    return f"{actor} 正在处理任务"
+
+
 def _supervised_continuation_prompt(*, role: str, scenario: str) -> str:
     normalized_role = str(role or "").strip().lower()
     normalized_scenario = str(scenario or "").strip().lower()
@@ -227,7 +242,7 @@ def run_supervised_conversation_harness(
                 "latest_input": prompt_text,
                 "latest_output": "",
                 "latest_output_kind": "status",
-                "latest_output_label": "conversation_session_created",
+                "latest_output_label": _supervised_progress_label(role, "created"),
                 "updated_at": created_at,
                 "transcript": [
                     {
@@ -317,7 +332,7 @@ def run_supervised_conversation_harness(
                         "latest_input": prompt_text,
                         "latest_output": cancel_reason,
                         "latest_output_kind": "status",
-                        "latest_output_label": "cancel_requested",
+                        "latest_output_label": _supervised_progress_label(role, "cancel_requested"),
                         "updated_at": _now_timestamp(),
                         "transcript": _conversation_harness_transcript(latest_detail),
                         "conversation_messages": _conversation_harness_messages(latest_detail),
@@ -364,7 +379,7 @@ def run_supervised_conversation_harness(
                     "latest_input": prompt_text,
                     "latest_output": latest_output,
                     "latest_output_kind": "assistant" if latest_output else "status",
-                    "latest_output_label": "hidden conversation",
+                    "latest_output_label": _supervised_progress_label(role),
                     "updated_at": str(latest_detail.get("updatedAt") or _now_timestamp()),
                     "transcript": _conversation_harness_transcript(latest_detail),
                     "conversation_messages": _conversation_harness_messages(latest_detail),
