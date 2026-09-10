@@ -49,6 +49,16 @@ DEFAULT_SESSION_TOKEN_BUDGET = 2_000_000
 MIN_INVOCATION_OUTPUT_TOKENS = 4_096
 _MIN_INVOCATION_OUTPUT_TOKENS_ENV = "VIBELUTION_MIN_INVOCATION_OUTPUT_TOKENS"
 
+# Total wall-clock budget for the turn-teardown wait on tool-execution
+# quiescence. The wait loop has no cancellation checkpoints (executor threads
+# are never force-killed), so a leaked tool thread would otherwise stall the
+# turn's finally block indefinitely while the watchdog has already failed the
+# turn. Once the budget elapses the wait is abandoned with a warning lifecycle
+# event and teardown continues. Normal path (tools settle) is unaffected.
+# Override with VIBELUTION_TOOL_QUIESCENCE_WAIT_BUDGET_SECONDS.
+TOOL_QUIESCENCE_WAIT_BUDGET_SECONDS = 10.0
+_TOOL_QUIESCENCE_WAIT_BUDGET_ENV = "VIBELUTION_TOOL_QUIESCENCE_WAIT_BUDGET_SECONDS"
+
 _CONTINUATION_TOOL_FAILURE_STATUSES = frozenset(
     {"error", "failed", "failure", "timeout", "timed_out"}
 )
@@ -155,6 +165,18 @@ def _min_invocation_output_tokens() -> int:
         if value > 0:
             return value
     return MIN_INVOCATION_OUTPUT_TOKENS
+
+
+def _tool_quiescence_wait_budget_seconds() -> float:
+    raw = os.environ.get(_TOOL_QUIESCENCE_WAIT_BUDGET_ENV, "").strip()
+    if raw:
+        try:
+            value = float(raw)
+        except ValueError:
+            return TOOL_QUIESCENCE_WAIT_BUDGET_SECONDS
+        if value > 0:
+            return value
+    return TOOL_QUIESCENCE_WAIT_BUDGET_SECONDS
 
 
 def _challenge_deadline_stop_reason(
@@ -780,7 +802,26 @@ def _wait_for_tool_execution_quiescence(scope: ToolExecutionScope) -> None:
         fields=initial_snapshot,
     )
     extended_wait_recorded = False
-    while not scope.wait_for_quiescence(timeout=1.0):
+    budget_seconds = _tool_quiescence_wait_budget_seconds()
+    budget_deadline = time.monotonic() + budget_seconds
+    while True:
+        remaining_budget = budget_deadline - time.monotonic()
+        if remaining_budget <= 0:
+            snapshot = scope.snapshot()
+            s._record_session_turn_lifecycle_event(
+                scope.session_id,
+                "tool_quiescence_wait_budget_exhausted",
+                turn_id=scope.turn_id,
+                level="warning",
+                outcome="abandoned_wait",
+                fields={
+                    **snapshot,
+                    "budgetSeconds": round(budget_seconds, 3),
+                },
+            )
+            return
+        if scope.wait_for_quiescence(timeout=min(1.0, remaining_budget)):
+            break
         snapshot = scope.snapshot()
         if not extended_wait_recorded and int(snapshot.get("ageMs") or 0) >= 30_000:
             extended_wait_recorded = True
