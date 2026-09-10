@@ -1084,7 +1084,49 @@ class SelfEvolvingAgent:
         base_llm = getattr(self, "_base_llm", None) or self.llm_with_tools
         if profile_id and profile_id != getattr(base_llm, "profile_id", None):
             base_llm = get_llm_client(profile_id=profile_id, config=self.config)
-        if disable_tools or not client_supports_tool_calling(base_llm):
+        if disable_tools:
+            # 政策性关闭工具：保持原行为，静默返回未绑定工具的 client。
+            return base_llm
+        if not client_supports_tool_calling(base_llm):
+            # fail-fast 门：仅拦「resolver 无条件兜底落 basic_chat_no_tools」（协议猜不中）。
+            # 显式 contract=basic_chat、llamacpp local 等合法选择（旗标 False）行为不变。
+            fallback_route = getattr(base_llm, "protocol_route", None)
+            basic_chat_fallback = bool(getattr(base_llm, "basic_chat_fallback", False)) or bool(
+                getattr(fallback_route, "basic_chat_fallback", False)
+            )
+            if basic_chat_fallback:
+                profile = getattr(base_llm, "profile", None)
+                model_name = str(getattr(profile, "model", "") or "") or "unknown"
+                provider_name = str(
+                    getattr(getattr(base_llm, "provider", None), "provider_id", "") or ""
+                )
+                message = (
+                    f"模型 `{model_name}` 的协议无法按名字识别，被兜底到 basic_chat_no_tools"
+                    "（不支持工具调用），本次有工具需要绑定，已拦截而不静默丢弃工具。"
+                    "修复路径（三选一）："
+                    "① 在模型 pin 配置显式声明支持工具调用的 model_protocol / wire_protocol；"
+                    "② 换用支持工具调用的模型；"
+                    "③ 确实不需要工具时，显式声明 contract=basic_chat 以确认这是有意选择。"
+                )
+                _record_agent_scene_event(
+                    "llm_bind",
+                    "agent.llm.basic_chat_fallback_blocked",
+                    message=message,
+                    level="error",
+                    outcome="blocked",
+                    fields={
+                        "profileId": getattr(base_llm, "profile_id", ""),
+                        "providerId": provider_name,
+                        "model": model_name,
+                    },
+                )
+                raise LLMError(
+                    "capability_error",
+                    message,
+                    retryable=False,
+                    provider=provider_name,
+                    model=model_name,
+                )
             return base_llm
         turn_allowed = getattr(self, "_turn_allowed_tool_names", None)
         if turn_allowed is not None:

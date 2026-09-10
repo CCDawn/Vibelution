@@ -54,6 +54,10 @@ class ResolvedProtocolRoute:
     backend_identity: str
     route_fingerprint: str
     warnings: tuple[str, ...] = ()
+    # True 仅当最终 protocol 落在 BASIC_CHAT_NO_TOOLS 且走的是无条件兜底
+    # （非显式 protocol、非 contract 显式声明、非 model hint/local 路由）。
+    # agent bind 门用它区分「显式 basic_chat 的合法选择」与「协议猜不中落网」。
+    basic_chat_fallback: bool = False
 
     def log_summary(self) -> dict[str, Any]:
         return {
@@ -76,6 +80,7 @@ class ResolvedProtocolRoute:
             "backendIdentity": self.backend_identity,
             "routeFingerprint": self.route_fingerprint,
             "protocolWarnings": list(self.warnings),
+            "basicChatFallback": self.basic_chat_fallback,
             "reasoningRoundtripEnabled": self.compat.reasoning_roundtrip,
             "thinkingFormat": self.compat.thinking_format,
             "toolChoiceMode": self.compat.tool_choice_mode,
@@ -581,9 +586,17 @@ def resolve_model_protocol(
         protocol = _protocol_from_model_hint(provider, profile)
         if protocol is not None:
             source = "inferred"
+    basic_chat_fallback = False
     if protocol is None:
+        # 无条件兜底：explicit protocol / provider api / contract / model hint 全部未命中。
+        # 仅这种「猜不中落网」标记 basic_chat_fallback；显式 basic_chat contract 是合法选择，不标记。
         protocol = ModelProtocol.BASIC_CHAT_NO_TOOLS
-        warnings.append("model protocol fell back to basic_chat_no_tools")
+        basic_chat_fallback = True
+        warnings.append(
+            "model_protocol.basic_chat_fallback: "
+            "model protocol fell back to basic_chat_no_tools "
+            "(no explicit protocol, provider api, contract, or model hint matched)"
+        )
     if source in {"profile_contract", "inferred", "fallback"} and not explicit_protocol and not provider_api:
         warnings.append("model_protocol.missing_explicit_protocol")
     if source == "inferred":
@@ -656,6 +669,7 @@ def resolve_model_protocol(
         backend_identity=backend_identity,
         route_fingerprint=route_fingerprint,
         warnings=tuple(warnings),
+        basic_chat_fallback=basic_chat_fallback,
     )
 
 

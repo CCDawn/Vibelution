@@ -2458,6 +2458,8 @@ class LLMClient:
                 self.provider,
                 model_entry=model_entry if isinstance(model_entry, dict) else None,
             )
+            # 协议兜底旗标：区分「显式 basic_chat」与「协议猜不中的无条件兜底」（agent bind 门消费）。
+            self.basic_chat_fallback = bool(getattr(self.protocol_route, "basic_chat_fallback", False))
         except ProtocolResolutionError as exc:
             _record_llm_scene_event(
                 "protocol",

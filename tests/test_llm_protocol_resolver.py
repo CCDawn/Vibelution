@@ -206,7 +206,82 @@ def test_profile_contract_wins_over_model_name_inference():
 
     assert route.protocol == ModelProtocol.BASIC_CHAT_NO_TOOLS
     assert route.source == "profile_contract"
+    assert route.basic_chat_fallback is False
     assert "model_protocol.missing_explicit_protocol" in route.warnings
+
+
+def test_unknown_relay_model_falls_back_and_flags_basic_chat_fallback():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "custom_relay",
+            "llm.providers.default.base_url": "https://relay.example.test/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "mystery-chat-v9",
+            "llm.profiles.primary.contract": "tool_chat",
+        }
+    )
+
+    profile = config.llm.get_profile("primary")
+    provider = config.llm.get_provider(profile.provider_id)
+    route = resolve_model_protocol(profile, provider)
+
+    assert route.protocol == ModelProtocol.BASIC_CHAT_NO_TOOLS
+    assert route.source == "fallback"
+    assert route.basic_chat_fallback is True
+    assert route.policy.allow_tools is False
+    assert route.log_summary()["basicChatFallback"] is True
+    assert any(
+        warning.startswith("model_protocol.basic_chat_fallback") for warning in route.warnings
+    )
+
+
+def test_basic_chat_fallback_flag_stays_false_for_explicit_or_local_routes():
+    explicit_contract_config = make_config(
+        **{
+            "llm.providers.default.kind": "custom_relay",
+            "llm.providers.default.base_url": "https://relay.example.test/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "mystery-chat-v9",
+            "llm.profiles.primary.contract": "basic_chat",
+        }
+    )
+    profile = explicit_contract_config.llm.get_profile("primary")
+    provider = explicit_contract_config.llm.get_provider(profile.provider_id)
+    contract_route = resolve_model_protocol(profile, provider)
+    assert contract_route.protocol == ModelProtocol.BASIC_CHAT_NO_TOOLS
+    assert contract_route.source == "profile_contract"
+    assert contract_route.basic_chat_fallback is False
+
+    explicit_protocol_config = make_config(
+        **{
+            "llm.providers.default.kind": "custom_relay",
+            "llm.providers.default.base_url": "https://relay.example.test/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "mystery-chat-v9",
+            "llm.profiles.primary.protocol": "openai_chat_tools",
+        }
+    )
+    profile = explicit_protocol_config.llm.get_profile("primary")
+    provider = explicit_protocol_config.llm.get_provider(profile.provider_id)
+    protocol_route = resolve_model_protocol(profile, provider)
+    assert protocol_route.source == "explicit_model"
+    assert protocol_route.basic_chat_fallback is False
+
+    local_hint_config = make_config(
+        **{
+            "llm.providers.default.kind": "llamacpp",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://127.0.0.1:8081/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "HiModel_xh2_generic.gguf",
+        }
+    )
+    profile = local_hint_config.llm.get_profile("primary")
+    provider = local_hint_config.llm.get_provider(profile.provider_id)
+    local_route = resolve_model_protocol(profile, provider)
+    assert local_route.protocol == ModelProtocol.LLAMACPP_BASIC
+    assert local_route.source == "inferred"
+    assert local_route.basic_chat_fallback is False
 
 
 def test_inferred_local_qwen_route_reports_diagnostic_warnings():

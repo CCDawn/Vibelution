@@ -5,11 +5,12 @@ from types import SimpleNamespace
 
 import pytest
 
+import agent as agent_module
 from agent import SelfEvolvingAgent
 from core.orchestration.agent_modes import AgentMode
 from core.orchestration.runtime_goal import RuntimeGoalPacket
 from core.llm.protocols import ModelProtocol, get_protocol_policy
-from core.llm.types import LLMCapabilities
+from core.llm.types import LLMCapabilities, LLMError
 from core.prompt_manager.assembly_contract import estimate_prompt_tokens
 from core.prompt_manager.builder import get_system_prompt, to_string
 from core.prompt_manager.provider_adapters import (
@@ -127,6 +128,72 @@ def test_agent_uses_unbound_client_when_protocol_disallows_tools() -> None:
     agent._base_llm = base
     agent.llm_with_tools = bound
     agent._is_restart_focus_mode = lambda: False
+
+    assert agent._get_llm_for_current_mode() is base
+
+
+def _basic_chat_fallback_route() -> SimpleNamespace:
+    route = _route(ModelProtocol.BASIC_CHAT_NO_TOOLS)
+    route.basic_chat_fallback = True
+    return route
+
+
+def _agent_with_base_llm(base: SimpleNamespace) -> SelfEvolvingAgent:
+    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent._base_llm = base
+    agent.llm_with_tools = object()
+    agent._is_restart_focus_mode = lambda: False
+    return agent
+
+
+def test_agent_blocks_tool_binding_on_resolver_basic_chat_fallback(monkeypatch) -> None:
+    scene_events: list[tuple[str, str, dict]] = []
+    monkeypatch.setattr(
+        agent_module,
+        "_record_agent_scene_event",
+        lambda phase, code, **kwargs: scene_events.append(
+            (phase, code, kwargs.get("fields") or {})
+        ),
+    )
+    base = SimpleNamespace(
+        capabilities=LLMCapabilities(supports_tool_calling=False),
+        protocol_route=_basic_chat_fallback_route(),
+        profile=SimpleNamespace(model="mystery-chat-v9"),
+        provider=SimpleNamespace(provider_id="custom_relay"),
+        profile_id="primary",
+    )
+    agent = _agent_with_base_llm(base)
+
+    with pytest.raises(LLMError) as error:
+        agent._get_llm_for_current_mode()
+
+    assert error.value.category == "capability_error"
+    assert error.value.retryable is False
+    message = str(error.value)
+    assert "model_protocol" in message
+    assert "wire_protocol" in message
+    assert "contract=basic_chat" in message
+    assert any(code == "agent.llm.basic_chat_fallback_blocked" for _, code, _ in scene_events)
+
+
+def test_agent_disable_tools_still_bypasses_silently_on_fallback_route() -> None:
+    base = SimpleNamespace(
+        capabilities=LLMCapabilities(supports_tool_calling=False),
+        protocol_route=_basic_chat_fallback_route(),
+    )
+    agent = _agent_with_base_llm(base)
+
+    assert agent._get_llm_for_current_mode(disable_tools=True) is base
+
+
+def test_agent_explicit_basic_chat_route_keeps_unbound_client_without_raise() -> None:
+    route = _route(ModelProtocol.BASIC_CHAT_NO_TOOLS)
+    route.basic_chat_fallback = False
+    base = SimpleNamespace(
+        capabilities=LLMCapabilities(supports_tool_calling=False),
+        protocol_route=route,
+    )
+    agent = _agent_with_base_llm(base)
 
     assert agent._get_llm_for_current_mode() is base
 
