@@ -79,6 +79,23 @@ _BUDGET_PROBLEM = {
     "suggestedExtensionTokens": 500,
 }
 
+# 真实生产形态原文（run-f9bf7be5985e，2026-09-10 19:18Z）：外层
+# adapter_execution_exception 包装，原始 agent_turn_terminal_failed 拒绝是
+# detail 字段里的 JSON 字符串（sessionId/turnId 为生产值/脱敏占位）。
+_WRAPPED_DEAD_TURN_PROBLEM_JSON = (
+    '{"code": "adapter_execution_exception", '
+    '"detail": "{\\"code\\": \\"agent_turn_terminal_failed\\", '
+    '\\"sessionId\\": \\"session-20260910-191836-883980\\", '
+    '\\"turnId\\": \\"...\\", '
+    '\\"terminalStatus\\": \\"interrupted\\", '
+    '\\"completionSource\\": \\"turn_journal\\", '
+    '\\"terminalProblemCode\\": null, '
+    '\\"terminalReason\\": null, '
+    '\\"failureClass\\": \\"terminal_non_success\\", '
+    '\\"failureDisposition\\": \\"permanent\\"}", '
+    '"actionId": "act-..."}'
+)
+
 
 @pytest.fixture(autouse=True)
 def _isolated_registry():
@@ -99,6 +116,30 @@ def test_dead_turn_parser_accepts_only_failure_terminal_turn_problems() -> None:
     assert dead_agent_turn_block_problem(json.dumps(failed)) is not None
 
 
+def test_dead_turn_parser_unwraps_real_production_wrapped_shape() -> None:
+    """生产真实形态：外层 adapter_execution_exception + detail 内嵌 JSON 字符串。
+
+    run-f9bf7be5985e 的 durable blocked_problem_json 就是这个包装形态；解析
+    必须命中并返回【内层 dict】（sessionId/turnId 等审计字段在内层），否则
+    sweep 候选过滤与 reconcile 死 turn 分支在生产全部静默失配。
+    """
+    parsed = dead_agent_turn_block_problem(_WRAPPED_DEAD_TURN_PROBLEM_JSON)
+    assert parsed is not None
+    # 命中返回内层 dict，审计字段可直取。
+    assert parsed["code"] == "agent_turn_terminal_failed"
+    assert parsed["terminalStatus"] == "interrupted"
+    assert parsed["sessionId"] == "session-20260910-191836-883980"
+    assert parsed["completionSource"] == "turn_journal"
+    assert parsed["failureDisposition"] == "permanent"
+    # 内层 TerminalProblemCode 为 null 的字段不出现在审计载荷（可为空）。
+    assert "terminalProblemCode" not in parsed or parsed["terminalProblemCode"] is None
+
+    # detail 已是解析好的 dict（等价形态）也命中。
+    outer = json.loads(_WRAPPED_DEAD_TURN_PROBLEM_JSON)
+    outer["detail"] = json.loads(outer["detail"])
+    assert dead_agent_turn_block_problem(json.dumps(outer)) is not None
+
+
 @pytest.mark.parametrize(
     "problem",
     [
@@ -113,6 +154,47 @@ def test_dead_turn_parser_accepts_only_failure_terminal_turn_problems() -> None:
 )
 def test_dead_turn_parser_rejects_other_blocked_shapes(problem: dict) -> None:
     assert dead_agent_turn_block_problem(json.dumps(problem)) is None
+
+
+@pytest.mark.parametrize(
+    "inner",
+    [
+        # 内层不是死 turn 证明：预算/围栏类 code 不动。
+        {"code": "budget_precheck_insufficient", "terminalStatus": "interrupted"},
+        {"code": "auto_advance_not_ready", "detail": "knowledge_package_not_materialized"},
+        # 内层 turn 终态不是 failure-terminal（cancelled 可恢复）→ 不动。
+        dict(_DEAD_TURN_PROBLEM, terminalStatus="cancelled"),
+        dict(_DEAD_TURN_PROBLEM, terminalStatus="needs_continue"),
+        dict(_DEAD_TURN_PROBLEM, terminalStatus=""),
+    ],
+)
+def test_dead_turn_parser_wrapped_non_dead_inner_returns_none(inner: dict) -> None:
+    wrapped = {
+        "code": "adapter_execution_exception",
+        "detail": json.dumps(inner, ensure_ascii=False),
+        "actionId": "act-wrapped",
+    }
+    assert dead_agent_turn_block_problem(json.dumps(wrapped)) is None
+
+
+@pytest.mark.parametrize(
+    "wrapped",
+    [
+        # detail 是纯文本（非 JSON）→ 无法证明，fail-closed 返回 None。
+        {"code": "adapter_execution_exception", "detail": "boom at runtime"},
+        # detail 缺失。
+        {"code": "adapter_execution_exception"},
+        # detail 是无关节点列表。
+        {"code": "adapter_execution_exception", "detail": "[1,2,3]"},
+        # 内层 JSON 根不是对象。
+        {
+            "code": "adapter_execution_exception",
+            "detail": json.dumps("agent_turn_terminal_failed"),
+        },
+    ],
+)
+def test_dead_turn_parser_wrapped_malformed_detail_returns_none(wrapped: dict) -> None:
+    assert dead_agent_turn_block_problem(json.dumps(wrapped)) is None
 
 
 @pytest.mark.parametrize("raw", ["", None, "not-json", "[1,2]"])
@@ -288,8 +370,20 @@ def _submit_reconcile(store, service: WorkflowCommandService, run_id: str) -> No
         )
 
 
+@pytest.mark.parametrize(
+    "child_problem",
+    [
+        _DEAD_TURN_PROBLEM,
+        # 生产包装形态：外层 adapter_execution_exception + detail 内层 JSON 字符串。
+        {
+            "code": "adapter_execution_exception",
+            "detail": json.dumps(_DEAD_TURN_PROBLEM, ensure_ascii=False),
+            "actionId": "act-dead-turn-dispatch",
+        },
+    ],
+)
 def test_reconcile_marks_dead_turn_blocked_child_invocation_failed(
-    tmp_path: Path,
+    tmp_path: Path, child_problem: dict
 ) -> None:
     """父 run 对账把死 turn blocked 子 run 的 invocation 标 FAILED（含审计字段）。"""
     store = open_ledger_store(tmp_path / "ledger.sqlite3")
@@ -299,7 +393,7 @@ def test_reconcile_marks_dead_turn_blocked_child_invocation_failed(
             run_id="run-parent-dead",
             child_run_id="run-child-dead",
             child_status="blocked",
-            child_problem=_DEAD_TURN_PROBLEM,
+            child_problem=child_problem,
             invocation_status="running",
         )
         service = _build_command_service(store)
@@ -325,6 +419,12 @@ def test_reconcile_marks_dead_turn_blocked_child_invocation_failed(
         _BUDGET_PROBLEM,
         dict(_DEAD_TURN_PROBLEM, terminalStatus="running"),
         {"code": "auto_advance_not_ready", "detail": "knowledge_package_not_materialized"},
+        # 包装形态但内层不是死 turn 证明：同样不动。
+        {
+            "code": "adapter_execution_exception",
+            "detail": json.dumps(_BUDGET_PROBLEM, ensure_ascii=False),
+            "actionId": "act-wrapped-budget",
+        },
     ],
 )
 def test_reconcile_leaves_non_dead_turn_blocked_children_alive(
@@ -415,7 +515,23 @@ def _build_runtime(tmp_path: Path):
     )
 
 
-def _seed_blocked_parent_with_dead_turn_child(store, *, tmp_artifact_seeded: bool = True):
+def _wrapped_dead_turn_problem_json() -> str:
+    """生产包装形态：adapter_execution_exception 外壳 + detail 内嵌 JSON。"""
+    return json.dumps(
+        {
+            "code": "adapter_execution_exception",
+            "detail": json.dumps(_DEAD_TURN_PROBLEM, ensure_ascii=False),
+            "actionId": "act-dead-turn-dispatch",
+        },
+        ensure_ascii=False,
+    )
+
+
+def _seed_blocked_parent_with_dead_turn_child(
+    store,
+    *,
+    child_problem_json: str,
+):
     """Parent blocked on missing knowledge + live invocation + dead-turn child."""
     run_id = "run-deadlock"
     child_run_id = "run-deadlock-child"
@@ -468,7 +584,7 @@ def _seed_blocked_parent_with_dead_turn_child(store, *, tmp_artifact_seeded: boo
         structure_hash=_PINNED.structureHash,
         workflow_id=KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
         active_node_id="evidence_relations",
-        blocked_problem_json=json.dumps(_DEAD_TURN_PROBLEM, ensure_ascii=False),
+        blocked_problem_json=child_problem_json,
     )
     invocation = KnowledgeInvocationRecord(
         invocation_id="ki-deadlock",
@@ -527,14 +643,26 @@ def _seed_blocked_parent_with_dead_turn_child(store, *, tmp_artifact_seeded: boo
     return run_id
 
 
+@pytest.mark.parametrize(
+    "child_problem_json",
+    [
+        # 生产真实形态（run-f9bf7be5985e）：外层 adapter_execution_exception
+        # 包装，死 turn 证明在 detail 内层 JSON 字符串。
+        _WRAPPED_DEAD_TURN_PROBLEM_JSON,
+        # 未包装形态：顶层 code 即 agent_turn_terminal_failed（向后兼容）。
+        json.dumps(_DEAD_TURN_PROBLEM, ensure_ascii=False),
+    ],
+)
 def test_maintenance_sweep_clears_dead_turn_deadlock_and_reensures(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, child_problem_json: str
 ) -> None:
     """重启后无需人工点击：sweep 先对账清死 turn，再在预算内自动重新发起。"""
     _seed_problem_artifact(monkeypatch, tmp_path, "run-deadlock")
     runtime = _build_runtime(tmp_path)
     try:
-        run_id = _seed_blocked_parent_with_dead_turn_child(runtime.store)
+        run_id = _seed_blocked_parent_with_dead_turn_child(
+            runtime.store, child_problem_json=child_problem_json
+        )
 
         runtime.run_maintenance_once(limit=4)
 

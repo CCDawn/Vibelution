@@ -895,13 +895,32 @@ _DEAD_TURN_AUDIT_FIELDS = (
 )
 
 
+def _dead_turn_problem_shape(problem: Mapping[str, Any]) -> dict[str, Any] | None:
+    """One shape check: canonical dead-turn rejection with a dead terminal status.
+
+    ``agent_turn_terminal_failed`` with ``terminalStatus`` in
+    ``{interrupted, failed}`` proves the blocking turn is failure-terminal;
+    every other code or terminal status returns ``None`` (fail-closed).
+    """
+    if str(problem.get("code") or "").strip() != DEAD_AGENT_TURN_BLOCK_CODE:
+        return None
+    terminal_status = str(problem.get("terminalStatus") or "").strip().lower()
+    if terminal_status not in DEAD_AGENT_TURN_TERMINAL_STATUSES:
+        return None
+    return dict(problem)
+
+
 def dead_agent_turn_block_problem(raw_problem_json: str | None) -> dict[str, Any] | None:
     """Parse the durable dead-turn proof from ``blocked_problem_json``.
 
-    Returns the raw problem dict ONLY when it proves the blocking agent turn
-    is already terminal-failed (``agent_turn_terminal_failed`` with
-    ``terminalStatus`` in ``{interrupted, failed}``).  Every other blocked
-    reason (budget, fence, waiting, unknown shapes) returns ``None`` — the
+    Two durable shapes are recognized (production run-f9bf7be5985e used the
+    second): the canonical rejection at the TOP level, or wrapped as a
+    dispatch failure — outer ``code="adapter_execution_exception"`` whose
+    ``detail`` carries the original rejection as a JSON string (or an
+    already-parsed dict).  The INNER problem dict is returned on a hit so the
+    audit fields (sessionId/turnId/...) stay attached to the turn that
+    actually died.  Every other blocked reason (budget, fence, waiting,
+    unknown shapes, non-failure terminal statuses) returns ``None`` — the
     caller must leave the deliberately non-terminal blocked child alone.
     """
     try:
@@ -910,12 +929,19 @@ def dead_agent_turn_block_problem(raw_problem_json: str | None) -> dict[str, Any
         return None
     if not isinstance(problem, Mapping):
         return None
-    if str(problem.get("code") or "").strip() != DEAD_AGENT_TURN_BLOCK_CODE:
+    direct = _dead_turn_problem_shape(problem)
+    if direct is not None:
+        return direct
+    # 包装形态：adapter_execution_exception 的 detail 内嵌原始异常 JSON。
+    detail = problem.get("detail")
+    if isinstance(detail, str):
+        try:
+            detail = json.loads(detail)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+    if not isinstance(detail, Mapping):
         return None
-    terminal_status = str(problem.get("terminalStatus") or "").strip().lower()
-    if terminal_status not in DEAD_AGENT_TURN_TERMINAL_STATUSES:
-        return None
-    return dict(problem)
+    return _dead_turn_problem_shape(detail)
 
 
 def record_knowledge_sideflow_child_failure(
