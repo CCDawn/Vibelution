@@ -65,11 +65,22 @@ export type NodeKnowledgeCollectionSectionProps = {
 export function NodeKnowledgeCollectionSection(props: NodeKnowledgeCollectionSectionProps) {
   const isZh = props.lang !== "en";
   const [lineageOpen, setLineageOpen] = useState(false);
-  const model = buildKnowledgeCollectionInspectorModel({ badge: props.badge });
   const knowledgeOffers = props.offers.filter(
     (offer) => KNOWLEDGE_COMMANDS.has(offer.command)
       && (props.nodeId == null || offer.nodeId == null || offer.nodeId === props.nodeId),
   );
+  // ensure offer 的真实可点性（available + 非 operator 门 + 版本未过期），
+  // 与按钮禁用逻辑共用同一个 reason 判定，保证文案承诺与按钮状态一致。
+  const ensureOffer = knowledgeOffers.find(
+    (offer) => offer.command === "ensure_knowledge_collection",
+  ) ?? null;
+  const ensureOfferAvailable = Boolean(
+    ensureOffer && commandOfferUnavailableReason(ensureOffer, isZh) === "",
+  );
+  const model = buildKnowledgeCollectionInspectorModel({
+    badge: props.badge,
+    ensureOfferAvailable,
+  });
   const requirements = offerRequirementLines(knowledgeOffers[0]?.payload);
   const phaseChipTone: "neutral" | "info" | "warning" | "danger" | "success" =
     (model.phase === "failed" || model.phase === "blocked")

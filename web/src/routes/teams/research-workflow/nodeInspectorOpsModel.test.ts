@@ -233,4 +233,38 @@ describe("nodeInspectorOpsModel", () => {
       expect(isUnknownOutcomeCommandError(httpError)).toBe(false);
     });
   });
+
+  it("renders Chinese reasons for knowledge collection availability blockers", () => {
+    // 死 turn 死局场景：invocation 卡在 live，ensure offer 被服务端标不可用，
+    // 前端必须渲染可读理由而不是裸 reason code。
+    const inFlight = offer({
+      command: "ensure_knowledge_collection",
+      label: "发起知识搜集",
+      available: false,
+      reasonCode: "knowledge_collection_in_flight",
+      blockerIds: ["knowledge_collection_in_flight"],
+    });
+    expect(commandOfferUnavailableReason(inFlight, true)).toBe("已有进行中的知识搜集请求");
+    expect(commandOfferUnavailableReason(inFlight, false))
+      .toBe("A knowledge collection request is already in flight");
+    const terminal = offer({
+      command: "ensure_knowledge_collection",
+      label: "发起知识搜集",
+      available: false,
+      reasonCode: "run_terminal",
+      blockerIds: ["run_terminal"],
+    });
+    expect(commandOfferUnavailableReason(terminal, true)).toBe("运行已结束，无法发起知识搜集");
+    expect(commandOfferUnavailableReason(terminal, false))
+      .toBe("The run has ended; knowledge collection is unavailable");
+    // blockerIds 兜底路径同样映射（reasonCode 缺失时）。
+    const blockerOnly = offer({
+      command: "ensure_knowledge_collection",
+      label: "发起知识搜集",
+      available: false,
+      reasonCode: "",
+      blockerIds: ["knowledge_collection_in_flight"],
+    });
+    expect(commandOfferUnavailableReason(blockerOnly, true)).toBe("已有进行中的知识搜集请求");
+  });
 });

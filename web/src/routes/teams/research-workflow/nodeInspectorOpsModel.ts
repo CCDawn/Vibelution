@@ -213,6 +213,12 @@ export function commandOfferUnavailableReason(
   if (code === "rebind_target_required") return isZh ? "请先选择要重绑的 Agent" : "Select the replacement Agent first";
   if (code === "node_in_flight") return isZh ? "当前节点已在执行" : "Node is already running";
   if (code === "node_already_succeeded") return isZh ? "当前节点已完成" : "Node already completed";
+  if (code === "knowledge_collection_in_flight") {
+    return isZh ? "已有进行中的知识搜集请求" : "A knowledge collection request is already in flight";
+  }
+  if (code === "run_terminal") {
+    return isZh ? "运行已结束，无法发起知识搜集" : "The run has ended; knowledge collection is unavailable";
+  }
   return code;
 }
 

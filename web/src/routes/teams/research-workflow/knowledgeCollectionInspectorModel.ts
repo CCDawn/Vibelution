@@ -95,6 +95,11 @@ const PHASE_HEADLINES: Record<KnowledgeCollectionPhase, string> = {
 
 export function buildKnowledgeCollectionInspectorModel(input: {
   badge: KnowledgeInvocationBadge | null | undefined;
+  /** Whether the ensure_knowledge_collection offer is currently actionable
+   * (available, not operator-gated, not version-stale).  Fail-closed default:
+   * without server-offer proof the copy must NOT claim a retry click, so the
+   * failed phase reads as "wait for the system to reconcile" instead. */
+  ensureOfferAvailable?: boolean;
 }): KnowledgeCollectionInspectorModel {
   const badge = input.badge;
   if (!badge || (badge.totalCount ?? 0) <= 0 || !badge.latest) {
@@ -126,7 +131,12 @@ export function buildKnowledgeCollectionInspectorModel(input: {
       case "cancelled": return "知识请求已取消，后续步骤不会继续执行。";
       case "blocked": return "知识搜集已阻塞，请查看节点原因和可用操作。";
       case "failed":
-        return "知识搜集失败；可按剩余预算重试，失败节点与子运行见下方。";
+        // 文案与 offer 可用性一致：只有 ensure offer 真正可点时才宣称可重试；
+        // 不可用时（请求仍在途或等待系统对账）不再给出「可按剩余预算重试」
+        // 的误导承诺。
+        return input.ensureOfferAvailable
+          ? "知识搜集失败；可重新发起知识搜集，失败节点与子运行见下方。"
+          : "知识搜集失败；请等待系统对账恢复后再重试，失败节点与子运行见下方。";
       default:
         return null;
     }

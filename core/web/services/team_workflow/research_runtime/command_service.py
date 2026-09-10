@@ -1804,7 +1804,10 @@ class WorkflowCommandService:
         # active_node_id and re-derive the same failing dispatch forever.
         if run is None:
             raise RunNotFoundError(request.run_id)
-        from .knowledge_sideflow_service import record_knowledge_sideflow_child_failure
+        from .knowledge_sideflow_service import (
+            dead_agent_turn_block_problem,
+            record_knowledge_sideflow_child_failure,
+        )
 
         knowledge_child_run_ids: list[str] = []
         for invocation in uow.repository.list_knowledge_invocations_for_parent(run.run_id):
@@ -1817,6 +1820,23 @@ class WorkflowCommandService:
                 record_knowledge_sideflow_child_failure(
                     uow, run_id=child.run_id, outcome=child.status, now_ms=now_ms,
                 )
+            elif child.status == RunStatus.BLOCKED.value:
+                # 死 turn 开口子（fail-closed）：blocked 故意不是终态，但当
+                # blocked_problem_json 已证明阻塞原因是 failure-terminal 的
+                # agent turn（interrupted/failed；turn journal 落定的 durable
+                # 字段）时，操作员对该 turn 没有任何修复面，invocation 永远
+                # 停在 live 状态并把 ensure offer 永久锁死。只信 ledger
+                # durable 字段，不做任何活性探测；其他 blocked 原因（预算、
+                # 围栏、waiting）一律不动。
+                dead_turn = dead_agent_turn_block_problem(child.blocked_problem_json)
+                if dead_turn is not None:
+                    record_knowledge_sideflow_child_failure(
+                        uow,
+                        run_id=child.run_id,
+                        outcome="failed_dead_turn",
+                        now_ms=now_ms,
+                        dead_turn_detail=dead_turn,
+                    )
         command_id = new_id("cmd")
         bumped = _bump(uow, request, event_count=1, now_ms=now_ms)
         accepted_version, sequence = bumped

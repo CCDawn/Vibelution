@@ -876,13 +876,68 @@ def record_knowledge_sideflow_child_success(
     return payload.dedupKey
 
 
+#: The only ``blocked`` shape that is treated as a dead child: the durable
+#: ``blocked_problem_json`` carries the canonical ``agent_turn_terminal_failed``
+#: rejection and the turn's terminal status is itself failure-terminal.  The
+#: turn journal already settled the turn, so no liveness probing is allowed —
+#: only this ledger field decides (fail-closed).
+DEAD_AGENT_TURN_BLOCK_CODE = "agent_turn_terminal_failed"
+DEAD_AGENT_TURN_TERMINAL_STATUSES = frozenset({"interrupted", "failed"})
+
+_DEAD_TURN_AUDIT_FIELDS = (
+    "code",
+    "terminalStatus",
+    "sessionId",
+    "turnId",
+    "completionSource",
+    "terminalProblemCode",
+    "terminalReason",
+)
+
+
+def dead_agent_turn_block_problem(raw_problem_json: str | None) -> dict[str, Any] | None:
+    """Parse the durable dead-turn proof from ``blocked_problem_json``.
+
+    Returns the raw problem dict ONLY when it proves the blocking agent turn
+    is already terminal-failed (``agent_turn_terminal_failed`` with
+    ``terminalStatus`` in ``{interrupted, failed}``).  Every other blocked
+    reason (budget, fence, waiting, unknown shapes) returns ``None`` — the
+    caller must leave the deliberately non-terminal blocked child alone.
+    """
+    try:
+        problem = json.loads(str(raw_problem_json or "") or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(problem, Mapping):
+        return None
+    if str(problem.get("code") or "").strip() != DEAD_AGENT_TURN_BLOCK_CODE:
+        return None
+    terminal_status = str(problem.get("terminalStatus") or "").strip().lower()
+    if terminal_status not in DEAD_AGENT_TURN_TERMINAL_STATUSES:
+        return None
+    return dict(problem)
+
+
 def record_knowledge_sideflow_child_failure(
-    uow, *, run_id: str, outcome: str, now_ms: int
+    uow,
+    *,
+    run_id: str,
+    outcome: str,
+    now_ms: int,
+    dead_turn_detail: Mapping[str, Any] | None = None,
 ) -> str | None:
     """A failed/cancelled child never fakes a successful handoff.
 
     ``blocked`` is deliberately not terminal: the operator can still repair
     the child, so the invocation stays in its current non-terminal status.
+    The single sanctioned exception is ``outcome="failed_dead_turn"``: the
+    caller has already proven from the child's durable ``blocked_problem_json``
+    (see :func:`dead_agent_turn_block_problem`) that the blocking agent turn
+    is failure-terminal, so the invocation is marked FAILED and the original
+    turn identity (code/terminalStatus/sessionId/turnId) is preserved in
+    ``error_json`` for audit.  The external behavior is identical to a plain
+    ``failed`` outcome: the invocation row lands in the terminal FAILED
+    status either way.
     """
     run = uow.repository.get_run(run_id)
     if run is None or not is_knowledge_sideflow_run(run):
@@ -892,8 +947,24 @@ def record_knowledge_sideflow_child_failure(
         return None
     if invocation.status in KNOWLEDGE_INVOCATION_TERMINAL_STATUSES:
         return None
-    if str(outcome) not in {"failed", "cancelled"}:
+    if str(outcome) not in {"failed", "cancelled", "failed_dead_turn"}:
         return None
+    if str(outcome) == "failed_dead_turn":
+        error_payload: dict[str, Any] = {
+            "code": "knowledge_sideflow_child_failed_dead_turn",
+            "outcome": "failed_dead_turn",
+        }
+        if isinstance(dead_turn_detail, Mapping):
+            error_payload["deadTurn"] = {
+                field: dead_turn_detail.get(field)
+                for field in _DEAD_TURN_AUDIT_FIELDS
+                if dead_turn_detail.get(field) is not None
+            }
+    else:
+        error_payload = {
+            "code": "knowledge_sideflow_child_failed",
+            "outcome": str(outcome),
+        }
     uow.repository.update_knowledge_invocation(
         invocation.invocation_id,
         now_ms,
@@ -902,10 +973,7 @@ def record_knowledge_sideflow_child_failure(
             if str(outcome) == "cancelled"
             else KnowledgeInvocationStatus.FAILED.value
         ),
-        error_json=json.dumps(
-            {"code": "knowledge_sideflow_child_failed", "outcome": str(outcome)},
-            ensure_ascii=False,
-        ),
+        error_json=json.dumps(error_payload, ensure_ascii=False),
     )
     return invocation.invocation_id
 

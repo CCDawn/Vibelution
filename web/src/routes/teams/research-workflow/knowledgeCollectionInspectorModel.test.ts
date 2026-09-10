@@ -161,6 +161,40 @@ describe("buildKnowledgeCollectionInspectorModel", () => {
     expect(model.detail).toContain("失败");
   });
 
+  it("claims a retry click only when the ensure offer is actually available", () => {
+    const failedBadge = badge({
+      failedCount: 1,
+      latest: {
+        invocationId: "inv-dead-turn",
+        parentNodeId: "evidence_relations",
+        status: "failed",
+        handoffState: null,
+        currentKnowledgeNodeId: "knowledge_ingestion",
+        updatedAtMs: 9,
+      },
+    });
+    const available = buildKnowledgeCollectionInspectorModel({
+      badge: failedBadge,
+      ensureOfferAvailable: true,
+    });
+    expect(available.detail).toContain("可重新发起知识搜集");
+    expect(available.detail).not.toContain("等待系统对账恢复");
+
+    // 死 turn 死局：请求仍在途/等待对账时，不再宣称「可按剩余预算重试」。
+    const unavailable = buildKnowledgeCollectionInspectorModel({
+      badge: failedBadge,
+      ensureOfferAvailable: false,
+    });
+    expect(unavailable.detail).toContain("等待系统对账恢复");
+    expect(unavailable.detail).not.toContain("可重新发起");
+    expect(unavailable.detail).not.toContain("剩余预算");
+
+    // fail-closed 缺省：未传 offer 可用性时不承诺可点按钮。
+    const omitted = buildKnowledgeCollectionInspectorModel({ badge: failedBadge });
+    expect(omitted.detail).toContain("等待系统对账恢复");
+    expect(omitted.detail).not.toContain("剩余预算");
+  });
+
   it("reports the request count in the headline", () => {
     const model = buildKnowledgeCollectionInspectorModel({
       badge: badge({ totalCount: 3, latest: null }),

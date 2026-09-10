@@ -169,6 +169,8 @@ class WorkflowRuntime:
         handled += self.graph_worker.run_repairs_once()
         handled += self.adapter_worker.run_repairs_once(limit=limit)
         self._recover_missing_knowledge_sideflows_best_effort(limit=limit)
+        self._recover_dead_turn_knowledge_children_best_effort(limit=limit)
+        self._recover_failed_knowledge_invocations_best_effort(limit=limit)
         self._recover_blocked_quote_anchor_extractions_best_effort(limit=limit)
         self._reconcile_expired_task_bundles_best_effort()
         self._sweep_stuck_digest_works_best_effort()
@@ -211,6 +213,45 @@ class WorkflowRuntime:
                 )
         except Exception:  # noqa: BLE001 - recovery must never break maintenance
             logger.exception("knowledge sideflow recovery sweep failed")
+
+    def _recover_dead_turn_knowledge_children_best_effort(self, *, limit: int) -> None:
+        """Clear knowledge children deadlocked on failure-terminal turns.
+
+        The 2026-09-10 run-f9bf7be5985e restart left a sideflow child blocked
+        on ``agent_turn_terminal_failed`` (interrupted turn journal) with its
+        invocation stuck live forever — the ensure offer never unlocks and no
+        operator surface can repair the dead turn.  This maintenance pass
+        drives the parent ``reconcile_run`` contract (whose dead-turn
+        fail-closed exception marks the invocation FAILED and cascades the
+        replan into the child) so a restart self-heals without a manual
+        reconcile click.  Same peek + never-raises discipline as the sibling
+        knowledge recoveries.
+        """
+        try:
+            recovered = self.knowledge_sideflow_trigger.recover_dead_turn_children(
+                limit=limit
+            )
+            if recovered:
+                logger.info(
+                    "knowledge sideflow recovery submitted %s dead-turn reconcile(s)",
+                    recovered,
+                )
+        except Exception:  # noqa: BLE001 - recovery must never break maintenance
+            logger.exception("knowledge sideflow dead-turn recovery sweep failed")
+
+    def _recover_failed_knowledge_invocations_best_effort(self, *, limit: int) -> None:
+        """Re-ensure failed knowledge collections while the retry budget lasts."""
+        try:
+            recovered = self.knowledge_sideflow_trigger.recover_failed_invocations(
+                limit=limit
+            )
+            if recovered:
+                logger.info(
+                    "knowledge sideflow recovery re-ensured %s failed invocation(s)",
+                    recovered,
+                )
+        except Exception:  # noqa: BLE001 - recovery must never break maintenance
+            logger.exception("knowledge sideflow failed-invocation recovery sweep failed")
 
     def _recover_blocked_quote_anchor_extractions_best_effort(
         self, *, limit: int
