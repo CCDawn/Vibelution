@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import replace
 from typing import Any
@@ -117,6 +118,31 @@ class ChatDecodedStream:
 REASONING_ROUNDTRIP_PLACEHOLDER = "（历史推理内容未随消息保留，此占位满足思考模式回传要求。）"
 
 
+def _dump_roundtrip_gate_payload(payload: dict[str, Any]) -> None:
+    """Dump the exact outgoing wire payload while the diag gate exists.
+
+    Task-scoped temporary evidence for the DeepSeek reasoning-400 hunt: the
+    payload carries no credentials, and the dump is gated on the presence of
+    ``%TEMP%/vibelution_rc_diag`` so production never writes it. Delete the
+    directory (and these files) when the investigation closes.
+    """
+
+    try:
+        import json as _json
+        import os as _os
+        import tempfile as _tempfile
+
+        gate_dir = _os.path.join(_tempfile.gettempdir(), "vibelution_rc_diag")
+        if not _os.path.isdir(gate_dir):
+            return
+        stamp = int(time.time() * 1000)
+        path = _os.path.join(gate_dir, f"wire_payload_{stamp}_{_os.getpid()}.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(_json.dumps(payload, ensure_ascii=False, default=str))
+    except Exception:
+        return
+
+
 def _ensure_reasoning_roundtrip_messages(
     messages: Sequence[SemanticMessage],
     *,
@@ -150,7 +176,6 @@ def _ensure_reasoning_roundtrip_messages(
 class ChatCompletionsWireAdapter:
     adapter_id = "chat_completions"
     wire_protocol = WireProtocol.CHAT_COMPLETIONS
-
     def encode_request(self, request: SemanticModelRequest, *, route: Any) -> BuiltPayload:
         if request.replay_state is not None:
             raise ValueError("standard Chat Completions does not accept provider replay state")
@@ -162,6 +187,7 @@ class ChatCompletionsWireAdapter:
             "max_tokens": request.settings.max_output_tokens,
             "stream": request.settings.stream,
         }
+        _dump_roundtrip_gate_payload(payload)
         if request.tools:
             payload["tools"] = [
                 {
