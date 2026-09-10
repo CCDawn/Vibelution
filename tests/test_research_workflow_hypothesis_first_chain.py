@@ -9448,15 +9448,17 @@ def test_hard_round_limit_env_resolution(monkeypatch):
     from core.web.services.team_workflow.research_runtime import hypothesis_first_chain as chain
 
     default = chain._HARD_ROUND_LIMIT_DEFAULT
-    assert default == 2  # temporary acceptance-cost lever; restore with the acceptance wrap-up
+    assert default == 3  # restored with the acceptance wrap-up
     assert chain._resolve_hard_round_limit() == default  # unset keeps the default
 
     monkeypatch.setenv(chain._HARD_ROUND_LIMIT_ENV, "1")
     assert chain._resolve_hard_round_limit() == 1
+    monkeypatch.setenv(chain._HARD_ROUND_LIMIT_ENV, "3")
+    assert chain._resolve_hard_round_limit() == 3
 
-    # Values above the default (including the historical 3) fall back to the
-    # built-in default: the env can only shrink the budget, never grow it.
-    for invalid in ("", "0", "3", "4", "abc", "-1"):
+    # Values above the default fall back to the built-in default: the env
+    # can only shrink the budget, never grow it.
+    for invalid in ("", "0", "4", "abc", "-1"):
         monkeypatch.setenv(chain._HARD_ROUND_LIMIT_ENV, invalid)
         assert chain._resolve_hard_round_limit() == default, invalid
 
