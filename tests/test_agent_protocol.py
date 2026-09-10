@@ -486,7 +486,7 @@ def test_supervised_judge_execution_uses_compact_nonstreaming_invocation(monkeyp
     assert result is not None
     assert calls == ["invoke"]
     metadata = captured["metadata"]
-    assert metadata["llmMaxOutputTokensOverride"] == 2_048
+    assert metadata["llmMaxOutputTokensOverride"] == 4_096
     assert metadata["promptPurpose"] == "supervised_judge"
     assert metadata["supervisedJudgeExecution"] is True
     excluded = agent._excluded_system_prompt_sections_for_turn(stable_session_prompt=False)
