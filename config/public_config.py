@@ -2120,10 +2120,18 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
         return _probe_llm_http(provider, profile, api_key)
 
     probe_timeout = coerce_llm_runtime_probe_timeout(provider, profile.connect_timeout, profile.timeout)
+    # Thinking-default models emit reasoning tokens before any visible output, so a
+    # 1-token budget deterministically returns finish_reason=length for them.
+    probe_max_output_tokens = 1
+    if (
+        str(getattr(profile, "contract", "") or "").strip().lower() == "reasoning_chat"
+        or str(getattr(profile, "reasoning_state_field", "") or "").strip()
+    ):
+        probe_max_output_tokens = 2048
     try:
         probe_profile = profile.model_copy(
             update={
-                "max_output_tokens": 1,
+                "max_output_tokens": probe_max_output_tokens,
                 "timeout": probe_timeout,
                 "connect_timeout": min(int(getattr(profile, "connect_timeout", probe_timeout) or probe_timeout), probe_timeout),
                 "streaming": False,
@@ -2132,7 +2140,7 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
         )
     except AttributeError:
         probe_profile = copy.deepcopy(profile)
-        probe_profile.max_output_tokens = 1
+        probe_profile.max_output_tokens = probe_max_output_tokens
         probe_profile.timeout = probe_timeout
         probe_profile.connect_timeout = min(int(getattr(profile, "connect_timeout", probe_timeout) or probe_timeout), probe_timeout)
         probe_profile.streaming = False

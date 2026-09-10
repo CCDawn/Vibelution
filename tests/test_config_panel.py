@@ -1583,6 +1583,82 @@ def test_runtime_llm_probe_extends_private_lan_local_timeout(monkeypatch):
     assert captured["stream"] is False
 
 
+def test_runtime_llm_probe_allows_reasoning_budget_for_thinking_models(monkeypatch):
+    provider = ProviderConfig(
+        provider_id="relay_thinking",
+        kind="relay",
+        api_key_env="VIBELUTION_LLM_MODEL_RELAY_THINKING_API_KEY",
+        base_url="https://1.1.1.1/v1",
+        compat_mode="openai",
+        requires_api_key=True,
+    )
+    profile = LLMProfile(
+        profile_id="primary",
+        provider_id="relay_thinking",
+        model="deepseek-v4.1-flash",
+        contract="reasoning_chat",
+        reasoning_state_field="reasoning_content",
+        temperature=1.0,
+        max_output_tokens=128000,
+        timeout=600,
+        connect_timeout=30,
+    )
+    captured = {}
+
+    def fake_backend(payload):
+        captured.update(payload)
+        return {
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+    monkeypatch.setattr("core.llm.client._default_completion_backend", fake_backend)
+
+    result = _probe_llm_runtime(provider, profile, "relay-secret")
+
+    assert result["ok"] is True, result
+    assert result["max_tokens"] == 2048, result
+    assert captured["max_tokens"] == 2048
+    assert captured["stream"] is False
+
+
+def test_runtime_llm_probe_keeps_single_token_budget_without_reasoning_contract(monkeypatch):
+    provider = ProviderConfig(
+        provider_id="relay_plain",
+        kind="relay",
+        api_key_env="VIBELUTION_LLM_MODEL_RELAY_PLAIN_API_KEY",
+        base_url="https://1.1.1.1/v1",
+        compat_mode="openai",
+        requires_api_key=True,
+    )
+    profile = LLMProfile(
+        profile_id="primary",
+        provider_id="relay_plain",
+        model="some-plain-model",
+        contract="tool_chat",
+        temperature=0.7,
+        max_output_tokens=4096,
+        timeout=120,
+        connect_timeout=30,
+    )
+    captured = {}
+
+    def fake_backend(payload):
+        captured.update(payload)
+        return {
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+    monkeypatch.setattr("core.llm.client._default_completion_backend", fake_backend)
+
+    result = _probe_llm_runtime(provider, profile, "relay-secret")
+
+    assert result["ok"] is True, result
+    assert result["max_tokens"] == 1
+    assert captured["max_tokens"] == 1
+
+
 def test_legacy_profile_llm_test_endpoint_is_removed(tmp_path, monkeypatch):
     public_config = _load_schema_v1_inline_public_config()
     config_path = tmp_path / "config.toml"
