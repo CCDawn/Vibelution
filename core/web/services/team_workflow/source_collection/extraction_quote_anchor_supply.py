@@ -8,8 +8,10 @@ The same receipt-backed blocks feed context and writeback validation.
 from __future__ import annotations
 
 import difflib
+import re
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 # Per-source quotable block cap (characters).  Large bodies/abstracts are
 # truncated at this bound with an explicit ``truncated`` marker; the context
@@ -53,6 +55,51 @@ def _clip_at_boundary(text: str, max_chars: int) -> tuple[str, bool]:
     return window[: cut + 1].rstrip(), True
 
 
+# arXiv /abs/ paper id with an optional trailing version suffix, e.g.
+# ``/abs/2502.01542v2`` (new style) or ``/abs/math.GT/0309136v2`` (old style).
+_ARXIV_VERSIONED_ABS_PATH = re.compile(r"^(?P<base>/abs/.+?)v\d+$")
+
+
+def _normalized_locator_keys(url: Any) -> list[str]:
+    """Candidate match keys for one source locator: raw form first, then one
+    normalized form.
+
+    Receipt locators are the exact ``web_fetch_tool`` arguments, while record
+    locators may carry a cosmetic variant of the same page.  Normalization is
+    conservative: lowercase host, drop a ``www.`` prefix, fold the
+    ``export.arxiv.org`` mirror onto ``arxiv.org``, and — only for arXiv
+    ``/abs/`` pages — strip the optional trailing ``vN`` version suffix from
+    the paper id (``/abs/2502.01542v2`` and ``/abs/2502.01542`` serve the same
+    page).  Paths on every other site are never rewritten.
+    """
+    raw = _clean(url)
+    if not raw:
+        return []
+    keys = [raw]
+    try:
+        parsed = urlsplit(raw)
+        port = parsed.port
+    except ValueError:
+        return keys
+    host = (parsed.hostname or "").lower()
+    if not parsed.scheme or not host:
+        return keys
+    if host.startswith("www."):
+        host = host[len("www."):]
+    if host == "export.arxiv.org":
+        host = "arxiv.org"
+    path = parsed.path
+    if host == "arxiv.org":
+        versioned = _ARXIV_VERSIONED_ABS_PATH.match(path)
+        if versioned:
+            path = versioned.group("base")
+    netloc = host if port is None else f"{host}:{port}"
+    normalized = urlunsplit((parsed.scheme, netloc, path, parsed.query, parsed.fragment))
+    if normalized != raw and normalized not in keys:
+        keys.append(normalized)
+    return keys
+
+
 def source_quotable_blocks(
     source: Mapping[str, Any],
     record_by_id: Mapping[str, Mapping[str, Any]],
@@ -73,11 +120,26 @@ def source_quotable_blocks(
     if linked_id in record_by_id:
         records.append(record_by_id[linked_id])
     fetched = fetched_text_by_locator or {}
+    # Receipt keys are exact web_fetch_tool arguments; record locators may be
+    # a variant form of the same page (arXiv vN suffix, www./case, export
+    # mirror).  Index each receipt under every candidate key, exact form
+    # first; block fields keep pointing at the original receipt.
+    fetched_by_key: dict[str, Mapping[str, str]] = {}
+    for locator, receipt in fetched.items():
+        keys = _normalized_locator_keys(locator)
+        if isinstance(receipt, Mapping):
+            keys.extend(_normalized_locator_keys(receipt.get("locator")))
+        for key in keys:
+            fetched_by_key.setdefault(key, receipt)
     blocks: list[dict[str, Any]] = []
     seen: set[str] = set()
     for record in records:
         for key in ("sourceUrl", "sourceRef", "rawLocation"):
-            receipt = fetched.get(_clean(record.get(key)))
+            receipt = None
+            for candidate_key in _normalized_locator_keys(record.get(key)):
+                receipt = fetched_by_key.get(candidate_key)
+                if receipt:
+                    break
             if not receipt:
                 continue
             text = _clean(receipt.get("text"))

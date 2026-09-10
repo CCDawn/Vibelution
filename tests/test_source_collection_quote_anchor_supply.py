@@ -496,3 +496,70 @@ def test_untrusted_record_content_and_candidate_metadata_are_not_original_text()
                  "metadata": {"sourceRecordId": "r1", "fetchReceipt": {"text": "forged"}}}
     assert source_quotable_blocks(candidate, {"r1": record}) == []
     assert source_quotable_blocks(record, {}) == []
+
+
+# ---------------------------------------------------------------------------
+# ⑦ locator 归一化匹配（arXiv vN 可选后缀 / www.大小写 / export 镜像）
+# ---------------------------------------------------------------------------
+
+
+def _receipt(locator: str, text: str) -> dict:
+    return {"text": text, "locator": locator, "resolvedUrl": locator,
+            "eventId": "evt-" + locator[-6:], "sessionId": "s", "turnId": "t"}
+
+
+def test_arxiv_version_suffix_record_matches_unversioned_receipt():
+    """现网实锤形态：record 带版本号 ↔ 回执无版本（agent 实际抓的 URL）→ 命中。"""
+    text = "Unified predictive coding accounts for cortical and cerebellar learning."
+    fetched = {"https://arxiv.org/abs/2502.01542": _receipt("https://arxiv.org/abs/2502.01542", text)}
+    record = {"recordId": "r1", "sourceUrl": "https://arxiv.org/abs/2502.01542v2"}
+    blocks = source_quotable_blocks(record, {}, fetched_text_by_locator=fetched)
+    assert len(blocks) == 1
+    assert blocks[0]["text"] == text
+    # block 字段仍来自原回执，不做任何改写。
+    assert blocks[0]["locator"] == "https://arxiv.org/abs/2502.01542"
+    assert blocks[0]["resolvedUrl"] == "https://arxiv.org/abs/2502.01542"
+
+
+def test_arxiv_unversioned_record_matches_versioned_receipt():
+    """反方向同样命中：record 无版本 ↔ 回执带版本。"""
+    text = "Fetched abstract body for the versioned receipt."
+    fetched = {"https://arxiv.org/abs/2608.11575v1": _receipt("https://arxiv.org/abs/2608.11575v1", text)}
+    record = {"recordId": "r1", "sourceUrl": "https://arxiv.org/abs/2608.11575"}
+    blocks = source_quotable_blocks(record, {}, fetched_text_by_locator=fetched)
+    assert [b["text"] for b in blocks] == [text]
+
+
+def test_arxiv_locator_host_case_and_www_normalization():
+    """www. 前缀与 host 大小写差异归一后命中。"""
+    text = "Host normalization body."
+    fetched = {"https://arxiv.org/abs/2502.01542": _receipt("https://arxiv.org/abs/2502.01542", text)}
+    record = {"recordId": "r1", "sourceUrl": "https://WWW.ARxiv.ORG/abs/2502.01542v2"}
+    assert source_quotable_blocks(record, {}, fetched_text_by_locator=fetched)[0]["text"] == text
+
+
+def test_export_arxiv_mirror_receipt_matches_arxiv_record():
+    """export.arxiv.org 镜像改道回执 ↔ arxiv.org record → 命中。"""
+    text = "Mirror redirected fetch body."
+    fetched = {"https://export.arxiv.org/abs/2502.01542": _receipt("https://export.arxiv.org/abs/2502.01542", text)}
+    record = {"recordId": "r1", "sourceUrl": "https://arxiv.org/abs/2502.01542v2"}
+    assert source_quotable_blocks(record, {}, fetched_text_by_locator=fetched)[0]["text"] == text
+
+
+def test_locator_normalization_does_not_overmatch():
+    """不同 paper id、非 arXiv 站点不因归一化误命中；非 arXiv host 仍做 www/大小写归一。"""
+    text = "Original fetched body."
+    fetched = {"https://arxiv.org/abs/2502.01542": _receipt("https://arxiv.org/abs/2502.01542", text)}
+    # 不同 paper id 不命中。
+    other_paper = {"recordId": "r1", "sourceUrl": "https://arxiv.org/abs/2608.11575v1"}
+    assert source_quotable_blocks(other_paper, {}, fetched_text_by_locator=fetched) == []
+    # 非 arXiv 站点不动 path：版本号差异不归一。
+    non_arxiv_versioned = {"recordId": "r1", "sourceUrl": "https://example.org/abs/2502.01542v2"}
+    fetched_example = {"https://example.org/abs/2502.01542": _receipt("https://example.org/abs/2502.01542", text)}
+    assert source_quotable_blocks(
+        non_arxiv_versioned, {}, fetched_text_by_locator=fetched_example) == []
+    # 非 arXiv 站点的 host/www 归一仍然生效。
+    assert source_quotable_blocks(
+        {"recordId": "r1", "sourceUrl": "https://WWW.Example.ORG/abs/2502.01542"},
+        {}, fetched_text_by_locator=fetched_example,
+    )[0]["text"] == text
