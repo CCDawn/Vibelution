@@ -1920,6 +1920,21 @@ def submit_meeting_digest_draft(
     if not normalized_round_id:
         raise ResearchMeetingRoundError("Meeting round id is required.")
     normalized_draft = dict(draft) if isinstance(draft, Mapping) else {}
+    with _read_lock("submit_meeting_digest_draft"):
+        meeting_round = _load_meeting_round(normalized_team_id, normalized_round_id)
+        _ensure_transition_from(meeting_round, "summarizing", "awaiting_approval")
+        # Digest round race (SCI-085): a draft persisted while a bound
+        # discussion round is still speaking can never cover that round's
+        # markers, so approve_meeting_closure would then fail closed forever
+        # and strand the meeting in awaiting_approval.  Blocking the persist
+        # keeps the meeting in summarizing where the existing retry and
+        # recovery paths can redraft once the round is terminal.
+        running_round_ids = running_bound_round_ids(meeting_round)
+        if running_round_ids:
+            raise ContractValidationError(
+                "cannot persist a digest draft while a bound discussion round "
+                f"is still running: {running_round_ids[0]}"
+            )
     with _write_lock("submit_meeting_digest_draft"):
         meeting_round = _load_meeting_round(normalized_team_id, normalized_round_id)
         _ensure_transition_from(meeting_round, "summarizing", "awaiting_approval")

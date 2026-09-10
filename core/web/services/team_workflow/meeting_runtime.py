@@ -2884,7 +2884,15 @@ def sweep_meetings_missing_digest(
       product — ``run_digest`` was never scheduled;
     - a ``summarizing`` meeting whose digest work is not live and either
       failed under :data:`MAX_DIGEST_AUTO_REDRIVE_ATTEMPTS` or carries no
-      intent at all — the draft died mid-run.
+      intent at all — the draft died mid-run;
+    - an ``awaiting_approval`` meeting whose persisted draft carries a
+      ``sourceMessageContentHash`` that no longer matches the current bound
+      messages while every bound round is terminal and no digest work is
+      live — the SCI-085 summarize/round race stranded the draft before the
+      last round's markers existed.  The stale draft is rejected first (a
+      no-op-safe transition that only fires while still awaiting_approval),
+      then the meeting re-enters the same ``schedule_meeting_digest_redrive``
+      path as the other shapes.
 
     Meetings with any live (pending/running) digest intent, an in-flight
     redrive, or a digest product are never touched.  Idempotency reuses the
@@ -2897,6 +2905,7 @@ def sweep_meetings_missing_digest(
         "teams": 0,
         "scanned": 0,
         "scheduled": 0,
+        "repaired": 0,
         "skipped": 0,
     }
     current_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
@@ -2920,7 +2929,7 @@ def sweep_meetings_missing_digest(
 
 def _sweep_team_meetings_missing_digest(team_id: str, summary: dict[str, Any]) -> None:
     meetings = meeting_rounds.list_meeting_rounds(
-        team_id, status=("open", "summarizing")
+        team_id, status=("open", "summarizing", "awaiting_approval")
     )["meetings"]
     for meeting in meetings:
         summary["scanned"] += 1
@@ -2929,7 +2938,30 @@ def _sweep_team_meetings_missing_digest(team_id: str, summary: dict[str, Any]) -
             summary["skipped"] += 1
             continue
         try:
+            meeting_status = str(meeting.get("status") or "").strip().lower()
             if _meeting_missing_digest(team_id, meeting_round_id, meeting):
+                if meeting_status == "awaiting_approval":
+                    # Stale awaiting-approval repair (SCI-085): the draft must
+                    # leave awaiting_approval before the redrive can persist a
+                    # fresh one (submit re-gates on summarizing).  Reject is
+                    # inherently idempotent here — it raises unless the
+                    # meeting is still awaiting_approval, so a concurrent
+                    # repair can never tear freshly redrafted state; such a
+                    # lost race only counts as skipped.
+                    try:
+                        meeting_rounds.reject_meeting_digest_draft(
+                            team_id,
+                            meeting_round_id,
+                            actor="system:summary-repair",
+                            reason=(
+                                "stored digest draft no longer matches the "
+                                "bound source messages"
+                            ),
+                        )
+                        summary["repaired"] = int(summary.get("repaired") or 0) + 1
+                    except Exception:  # noqa: BLE001 - already repaired elsewhere
+                        summary["skipped"] += 1
+                        continue
                 result = schedule_meeting_digest_redrive(team_id, meeting_round_id)
                 if str(result.get("status") or "") == "scheduled":
                     summary["scheduled"] += 1
@@ -2941,6 +2973,58 @@ def _sweep_team_meetings_missing_digest(team_id: str, summary: dict[str, Any]) -
             summary["skipped"] += 1
 
 
+def _digest_work_live(team_id: str, meeting_round_id: str) -> bool:
+    """True when an in-process digest job or a live durable intent exists.
+
+    Shared gate for every sweep shape: an in-flight redrive or a failed
+    intent at the auto-redrive cap means the meeting's digest work is either
+    already owned or deliberately parked, so the sweep must not stack more.
+    """
+
+    key = (team_id, meeting_round_id)
+    with _MEETING_DIGEST_JOBS_LOCK:
+        if key in _MEETING_DIGEST_JOBS:
+            return True
+    try:
+        latest = meeting_driver_work.latest_intent(
+            team_id, meeting_round_id, action_kind=meeting_driver_work.ACTION_RUN_DIGEST
+        )
+    except Exception:  # noqa: BLE001 - an unreadable intent is treated as live
+        return True
+    status = str((latest or {}).get("status") or "").strip().lower()
+    if status in {meeting_driver_work.STATUS_PENDING, meeting_driver_work.STATUS_RUNNING}:
+        return True
+    if status == meeting_driver_work.STATUS_FAILED:
+        if meeting_driver_work._attempt_count(latest) >= MAX_DIGEST_AUTO_REDRIVE_ATTEMPTS:
+            return True
+    return False
+
+
+def _awaiting_approval_digest_stale(meeting: Mapping[str, Any]) -> bool:
+    """True when a persisted awaiting-approval draft provably misses sources.
+
+    Only a draft carrying a ``sourceMessageContentHash`` that differs from the
+    current bound-message hash counts as stale: hash-less (legacy or
+    route-submitted) drafts carry no comparable version, so the sweep must not
+    tear them down.  A bound round still running also disqualifies the repair
+    — the message set is not final yet, so the current hash cannot prove
+    staleness either way.
+    """
+
+    draft = meeting.get("digestDraft")
+    if not isinstance(draft, Mapping) or not draft:
+        return False
+    stored_hash = str(draft.get("sourceMessageContentHash") or "").strip()
+    if not stored_hash:
+        return False
+    if meeting_rounds.running_bound_round_ids(meeting):
+        return False
+    current_hash = meeting_rounds.source_message_content_hash(
+        meeting_rounds.meeting_source_messages(meeting)
+    )
+    return stored_hash != current_hash
+
+
 def _meeting_missing_digest(
     team_id: str,
     meeting_round_id: str,
@@ -2948,25 +3032,18 @@ def _meeting_missing_digest(
 ) -> bool:
     """True when the digest must be (re-)scheduled for one meeting."""
 
+    meeting_status = str(meeting.get("status") or "").strip().lower()
+    if meeting_status == "awaiting_approval":
+        # Third sweep shape (SCI-085 stale awaiting-approval draft): a digest
+        # product already exists, so the missing-product check below can never
+        # see it; staleness is judged against the live source hash instead.
+        return _awaiting_approval_digest_stale(meeting) and not _digest_work_live(
+            team_id, meeting_round_id
+        )
     if _meeting_has_digest_product(meeting):
         return False
-    key = (team_id, meeting_round_id)
-    with _MEETING_DIGEST_JOBS_LOCK:
-        if key in _MEETING_DIGEST_JOBS:
-            return False
-    try:
-        latest = meeting_driver_work.latest_intent(
-            team_id, meeting_round_id, action_kind=meeting_driver_work.ACTION_RUN_DIGEST
-        )
-    except Exception:  # noqa: BLE001 - an unreadable intent is treated as live
+    if _digest_work_live(team_id, meeting_round_id):
         return False
-    status = str((latest or {}).get("status") or "").strip().lower()
-    if status in {meeting_driver_work.STATUS_PENDING, meeting_driver_work.STATUS_RUNNING}:
-        return False
-    if status == meeting_driver_work.STATUS_FAILED:
-        if meeting_driver_work._attempt_count(latest) >= MAX_DIGEST_AUTO_REDRIVE_ATTEMPTS:
-            return False
-    meeting_status = str(meeting.get("status") or "").strip().lower()
     if meeting_status == "open":
         # The discussion must really be done: no running bound round and the
         # last bound round produced citable speech (068c92ba5 view — history
@@ -3002,6 +3079,7 @@ def _record_digest_missing_sweep_event(summary: Mapping[str, Any]) -> None:
                 "teams": int(summary.get("teams") or 0),
                 "scanned": int(summary.get("scanned") or 0),
                 "scheduled": int(summary.get("scheduled") or 0),
+                "repaired": int(summary.get("repaired") or 0),
                 "skipped": int(summary.get("skipped") or 0),
             },
             lifecycle=True,
@@ -4137,6 +4215,19 @@ def _prepare_meeting_summary_draft_locked(
             )
         )
     )
+    # Stale awaiting-approval repair (SCI-085 digest round race), generalized
+    # to every meeting type: a persisted draft whose source hash no longer
+    # matches the current bound messages was drafted from an older message
+    # set, so approve_meeting_closure would fail closed on the missing
+    # markers and strand the meeting in awaiting_approval forever.  When all
+    # bound rounds are terminal the draft is provably unfixable in place —
+    # reject it and fall through to a fresh draft over the full source set.
+    stale_awaiting_draft = (
+        status == "awaiting_approval"
+        and not stale_generation_draft
+        and str(existing_draft.get("sourceMessageContentHash") or "") != source_hash
+        and not meeting_rounds.running_bound_round_ids(meeting_round)
+    )
     if status == "closed":
         _record_meeting_digest_scene_event(
             "meeting_digest.prepare.reused",
@@ -4158,12 +4249,16 @@ def _prepare_meeting_summary_draft_locked(
             "digestDraft": existing_draft or None,
             "storagePath": str(meeting_rounds._rounds_path(normalized_team_id)),
         }
-    if status == "awaiting_approval" and stale_generation_draft:
+    if status == "awaiting_approval" and (stale_generation_draft or stale_awaiting_draft):
         meeting_rounds.reject_meeting_digest_draft(
             normalized_team_id,
             normalized_round_id,
             actor=actor or "system:summary-repair",
-            reason="recovered candidate markers missing from the stored draft",
+            reason=(
+                "recovered candidate markers missing from the stored draft"
+                if stale_generation_draft
+                else "stored draft no longer matches the bound source messages"
+            ),
         )
         meeting_round = meeting_rounds.get_meeting_round(
             normalized_team_id, normalized_round_id
