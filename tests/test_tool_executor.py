@@ -12,6 +12,8 @@
 import os
 import sys
 import json
+import inspect
+import re
 import subprocess
 import pytest
 import threading
@@ -969,17 +971,38 @@ class TestToolExecutorExecute:
                 test_file.unlink()
 
     def test_execute_glob_tool(self, executor):
-        """测试文件模式匹配工具"""
+        """测试文件模式匹配工具：输出为人类可读文本（计数首行 + 相对路径行）"""
         test_dir = Path(__file__).parent
-        
+
         result, action = executor.execute("glob_tool", {
             "pattern": "test_*.py",
             "search_dir": str(test_dir),
         })
-        
+
         assert action is None
-        assert result is not None
-        assert any(item["name"].startswith("test_") for item in result)
+        assert isinstance(result, str) and result.strip()
+        assert "共找到" in result.splitlines()[0]
+        assert re.search(r"(?m)^test_.+\.py$", result)
+
+    def test_glob_tool_signature_accepts_cancel_checker(self, executor):
+        """executor 通过签名识别 glob_tool 并注入取消检查器（与 execute_shell_command 同模式）"""
+        func = executor._tool_map["glob_tool"]
+        assert "_cancel_checker" in inspect.signature(func).parameters
+
+    def test_glob_tool_stop_request_returns_explicit_cancel_text(self, executor):
+        """executor 停止请求会传导到 glob_tool 执行路径，输出显式取消文案而非空结果"""
+        test_dir = Path(__file__).parent
+        executor.set_cancel_checker(lambda: "user requested stop")
+        try:
+            result, action = executor.execute("glob_tool", {
+                "pattern": "test_*.py",
+                "search_dir": str(test_dir),
+            })
+        finally:
+            executor.set_cancel_checker(None)
+
+        assert action is None
+        assert "[取消]" in str(result)
 
     def test_execute_python_lint_valid(self, executor):
         """测试 canonical Python lint 工具可执行并返回结构化结果。"""

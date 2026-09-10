@@ -1468,18 +1468,21 @@ def _build_key_tools() -> List[BaseTool]:
         return create_file(file_path=file_path, content=content)
 
     @tool
-    def glob_tool(pattern: str, search_dir: str = ".") -> str:
+    def glob_tool(pattern: str, search_dir: str = ".", _cancel_checker=None) -> str:
         """
-        【文件模式匹配】按 glob 模式查找文件。
+        【文件模式匹配】按 glob 模式查找文件，返回人类可读文本结果。
 
         支持标准 glob 模式：*.py、**/*.ts、src/**/*.md 等。
+        结果按最近改动时间倒序，最多返回 100 条；零匹配会回显 pattern 与搜索目录，
+        目录不存在、截断、超时与取消均有显式说明。
 
         Args:
             pattern: Glob 模式（如 "*.py", "**/*.py"）
             search_dir: 搜索起始目录，默认当前目录
+            _cancel_checker: 工具执行器注入的取消检查器（内部参数，请勿传入）
 
         Returns:
-            JSON 格式的匹配文件列表
+            人类可读文本：首行计数 + 相对路径列表（每行一个）；异常路径均有显式说明。
         """
         from tools.shell_tools import (
             get_workspace_root_override,
@@ -1501,7 +1504,11 @@ def _build_key_tools() -> List[BaseTool]:
             )
         except PermissionError as exc:
             return f"[Glob] [SECURITY] {exc}"
-        return glob_files(pattern=pattern, search_dir=str(resolved_search_dir))
+        return glob_files(
+            pattern=pattern,
+            search_dir=str(resolved_search_dir),
+            _cancel_checker=_cancel_checker,
+        )
 
     # ── TaskManager 工具（基于 tasks.json） ─────────────────────────────
 

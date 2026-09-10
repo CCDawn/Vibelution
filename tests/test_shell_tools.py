@@ -312,9 +312,11 @@ class TestCreateFile:
 class TestDeterministicPaths:
     """路径确定性测试"""
 
-    def test_glob_files_nonexistent_search_dir_returns_empty(self):
+    def test_glob_files_nonexistent_search_dir_returns_explicit_error(self):
         result = shell_tools_module.glob_files("*.py", search_dir="definitely_missing_search_dir_xyz")
-        assert result == []
+        assert isinstance(result, str) and result.strip()
+        assert "[Glob]" in result
+        assert "不存在" in result
 
     def test_read_file_relative_path_is_anchored_to_project_root(self, monkeypatch, temp_test_dir):
         monkeypatch.chdir(temp_test_dir)
@@ -323,6 +325,107 @@ class TestDeterministicPaths:
 
         monkeypatch.chdir(shell_tools_module.PROJECT_ROOT)
         assert str(shell_tools_module.PROJECT_ROOT / "agent.py") in result
+
+
+# ============================================================================
+# glob_files 测试（人类可读文本契约）
+# ============================================================================
+
+class TestGlobFiles:
+    """glob_files 文本输出契约测试：计数首行、零匹配回显、截断、mtime 倒序、deadline/cancel"""
+
+    @staticmethod
+    def _make_files(directory, names):
+        for name in names:
+            (Path(directory) / name).write_text("x", encoding="utf-8")
+
+    def test_success_returns_counted_relative_path_list(self, temp_test_dir):
+        self._make_files(temp_test_dir, ["a.py", "b.py", "note.txt"])
+
+        result = shell_tools_module.glob_files("*.py", search_dir=temp_test_dir)
+
+        assert isinstance(result, str) and result.strip()
+        first_line = result.splitlines()[0]
+        assert "共找到 2 个匹配文件" in first_line
+        assert '*.py' in first_line
+        body_lines = result.splitlines()[1:]
+        assert "a.py" in body_lines
+        assert "b.py" in body_lines
+        assert "note.txt" not in body_lines
+
+    def test_zero_match_echoes_pattern_and_base_dir(self, temp_test_dir):
+        self._make_files(temp_test_dir, ["a.py"])
+
+        result = shell_tools_module.glob_files("*.definitely_missing_ext", search_dir=temp_test_dir)
+
+        assert isinstance(result, str) and result.strip()
+        assert "未找到匹配文件" in result
+        assert '*.definitely_missing_ext' in result
+        assert Path(temp_test_dir).name in result
+        assert "收窄" in result or "扩大" in result
+
+    def test_invalid_pattern_returns_explicit_error(self, temp_test_dir):
+        result = shell_tools_module.glob_files("", search_dir=temp_test_dir)
+
+        assert isinstance(result, str) and result.strip()
+        assert "[Glob]" in result
+        assert "pattern" in result
+
+    def test_results_sorted_by_mtime_desc(self, temp_test_dir):
+        self._make_files(temp_test_dir, ["old.py", "new.py", "mid.py"])
+        base = Path(temp_test_dir)
+        now = time.time()
+        os.utime(base / "old.py", (now - 3000, now - 3000))
+        os.utime(base / "mid.py", (now - 60, now - 60))
+        os.utime(base / "new.py", (now, now))
+
+        result = shell_tools_module.glob_files("*.py", search_dir=temp_test_dir)
+
+        lines = [line for line in result.splitlines()[1:] if line.strip()]
+        assert lines.index("new.py") < lines.index("mid.py") < lines.index("old.py")
+
+    def test_truncates_at_100_with_flag(self, temp_test_dir):
+        self._make_files(temp_test_dir, [f"f_{i:03}.py" for i in range(120)])
+
+        result = shell_tools_module.glob_files("*.py", search_dir=temp_test_dir)
+
+        assert "共找到 100 个匹配文件" in result.splitlines()[0]
+        assert "[截断]" in result
+        assert "100" in result
+        path_lines = [line for line in result.splitlines()[1:] if line.strip()]
+        listed = [line for line in path_lines if not line.startswith("[")]
+        assert len(listed) == 100
+
+    def test_deadline_returns_partial_with_timeout_flag(self, temp_test_dir, monkeypatch):
+        self._make_files(temp_test_dir, [f"f_{i:03}.py" for i in range(50)])
+        monkeypatch.setattr(shell_tools_module, "GLOB_DEADLINE_SECONDS", 0.0)
+
+        result = shell_tools_module.glob_files("*.py", search_dir=temp_test_dir)
+
+        assert isinstance(result, str) and result.strip()
+        assert "[超时]" in result
+        assert "收窄" in result
+        assert "未找到匹配文件" not in result
+
+    def test_cancel_checker_aborts_search(self, temp_test_dir):
+        self._make_files(temp_test_dir, ["a.py", "b.py", "c.py"])
+
+        result = shell_tools_module.glob_files(
+            "*.py", search_dir=temp_test_dir, _cancel_checker=lambda: "user stop"
+        )
+
+        assert isinstance(result, str) and result.strip()
+        assert "[取消]" in result
+        assert "user stop" in result
+
+    def test_cancel_checker_none_is_ignored(self, temp_test_dir):
+        self._make_files(temp_test_dir, ["a.py"])
+
+        result = shell_tools_module.glob_files(
+            "*.py", search_dir=temp_test_dir, _cancel_checker=None
+        )
+
+        assert "共找到 1 个匹配文件" in result
 
 
 # ============================================================================

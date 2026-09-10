@@ -62,54 +62,119 @@ from core.logging import debug as _debug_logger
 # 文件 Glob 搜索
 # ============================================================================
 
-def glob_files(pattern: str = "**/*.py", search_dir: str = ".") -> list:
+# Glob 结果硬上限与单次搜索时限（deadline 需小于 tool_executor 的 30s 硬门）
+GLOB_MAX_RESULTS = 100
+GLOB_DEADLINE_SECONDS = 25.0
+
+
+def glob_files(
+    pattern: str = "**/*.py",
+    search_dir: str = ".",
+    _cancel_checker: Optional[Callable[[], str]] = None,
+) -> str:
     """
-    【文件模式匹配】按 glob 模式查找文件。
+    【文件模式匹配】按 glob 模式查找文件，返回人类可读文本结果。
 
     支持标准 glob 模式：*.py、**/*.ts、src/**/*.md 等。
+    结果按最近改动时间倒序（最近改动优先），最多返回 GLOB_MAX_RESULTS 条；
+    零匹配、目录不存在、截断、超时与取消均返回显式文案，绝不返回空容器。
 
     Args:
         pattern: Glob 模式（如 "*.py", "**/*.py"）
         search_dir: 搜索起始目录，默认当前目录
+        _cancel_checker: 由 tool_executor 注入的取消检查器；返回非空字符串表示
+            已收到停止请求（内部参数，请勿手动传入）
 
     Returns:
-        JSON 格式的匹配文件列表
+        人类可读文本：首行计数 + 相对路径列表（每行一个）；异常路径均有显式说明。
     """
 
     # 解析模式
     if not pattern or not isinstance(pattern, str):
-        return []
+        return '[Glob] 错误：pattern 参数无效（必须为非空字符串），例如 "*.py" 或 "**/*.ts"。'
 
     # 获取搜索目录
     try:
         abs_search_dir = str(_resolve_project_path(search_dir))
-    except Exception:
-        return []
+    except Exception as exc:
+        return f"[Glob] 错误：无法解析搜索目录 '{search_dir}'：{exc}"
     if not os.path.exists(abs_search_dir):
-        return []
+        return f"[Glob] 错误：搜索目录不存在：{abs_search_dir}"
 
-    # 使用 glob 搜索
+    # 使用 glob 惰性搜索：每产出一个候选即检查 cancel/deadline，避免大目录长阻塞
+    collected: List[tuple] = []  # (相对路径, mtime)
+    truncated = False
+    timed_out = False
+    cancel_reason = ""
+    midway_error = ""
+    deadline_at = time.monotonic() + GLOB_DEADLINE_SECONDS
+
     try:
-        matches = glob_module.glob(
+        for match in glob_module.iglob(
             pattern,
             root_dir=abs_search_dir,
-            recursive=True
-        )
+            recursive=True,
+        ):
+            if callable(_cancel_checker):
+                try:
+                    cancel_reason = str(_cancel_checker() or "").strip()
+                except Exception:
+                    cancel_reason = ""
+                if cancel_reason:
+                    break
+            if time.monotonic() >= deadline_at:
+                timed_out = True
+                break
+            if len(collected) >= GLOB_MAX_RESULTS:
+                truncated = True
+                break
+            abs_path = os.path.join(abs_search_dir, match)
+            try:
+                match_mtime = os.path.getmtime(abs_path)
+            except OSError:
+                match_mtime = 0.0
+            collected.append((match, match_mtime))
     except Exception as e:
         _debug_logger.warning(f"glob_files: 模式 '{pattern}' 搜索失败 - {e}")
-        return []
+        midway_error = str(e)
 
-    # 转换路径
-    result = []
-    for match in matches:
-        abs_path = os.path.join(abs_search_dir, match)
-        result.append({
-            "path": abs_path,
-            "name": os.path.basename(abs_path),
-            "size": os.path.getsize(abs_path)
-        })
+    # 零结果时区分取消/超时/真实零匹配，绝不静默返回空输出
+    if not collected:
+        if cancel_reason:
+            return f"[取消] 搜索已被终止：{cancel_reason}（尚未收集到结果）。"
+        if timed_out:
+            return (
+                f"[超时] 搜索达到 {GLOB_DEADLINE_SECONDS:g} 秒时限且未收集到结果；"
+                "请收窄 pattern 或 search_dir。"
+            )
+        if midway_error:
+            return f"[Glob] 错误：模式 '{pattern}' 搜索失败：{midway_error}"
+        return (
+            f'未找到匹配文件（pattern="{pattern}"，base={abs_search_dir}）；'
+            "请检查 pattern 或扩大/收窄搜索目录。"
+        )
 
-    return result
+    # 按最近改动倒序输出（agent 最常寻找最近改动的文件）
+    collected.sort(key=lambda item: item[1], reverse=True)
+
+    lines = [
+        f'共找到 {len(collected)} 个匹配文件（pattern="{pattern}"，base={abs_search_dir}）：'
+    ]
+    lines.extend(rel_path for rel_path, _ in collected)
+    if truncated:
+        lines.append(
+            f"[截断] 结果已截断至 {GLOB_MAX_RESULTS} 条，请收窄 pattern 或 search_dir 以查看更多。"
+        )
+    if timed_out:
+        lines.append(
+            f"[超时] 搜索达到 {GLOB_DEADLINE_SECONDS:g} 秒时限，以上为部分结果；请收窄 pattern 或 search_dir。"
+        )
+    if cancel_reason:
+        lines.append(f"[取消] 搜索已被终止：{cancel_reason}；以上为部分结果。")
+    if midway_error:
+        lines.append(f"[Glob] 错误：搜索中途失败：{midway_error}；以上为部分结果。")
+
+    return "\n".join(lines)
 
 
 # 向后兼容别名
