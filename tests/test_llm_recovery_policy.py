@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from core.llm.errors import LLMError
+from core.llm.errors import LLMError, classify_exception
 from core.llm.recovery import plan_recovery
 from core.llm.routing import attach_recovery_fallback
 from tests.helpers.isolated_config import isolated_settings_config
@@ -71,4 +71,33 @@ def test_recovery_policy_keeps_provider_protocol_error_fail_fast():
     assert decision.category == "provider_protocol_error"
     assert decision.action == "fail_fast"
     assert decision.retryable is False
+    assert decision.stop_current_turn is True
+
+
+def test_recovery_policy_retries_deepseek_thinking_roundtrip_rejection():
+    # 生产路径里裸异常先经 client 的 classify_error 包成 LLMError 再上抛，
+    # 这里用两种入口验证同一决策：同体重试、不终止当前 turn。
+    message = (
+        "Error code: 400 - {'error': {'message': 'The `reasoning_content` in "
+        "the thinking mode must be passed back to the API'}}"
+    )
+
+    for exc in (Exception(message), classify_exception(Exception(message))):
+        decision = plan_recovery(exc, attempt=1, max_attempts=5)
+        assert decision.category == "server_error"
+        assert decision.action == "retry_with_backoff"
+        assert decision.retryable is True
+        assert decision.stop_current_turn is False
+        assert decision.wait_seconds > 0
+
+
+def test_recovery_policy_stops_turn_after_thinking_roundtrip_retry_budget():
+    message = (
+        "Error code: 400 - {'error': {'message': 'The `reasoning_content` in "
+        "the thinking mode must be passed back to the API'}}"
+    )
+
+    decision = plan_recovery(Exception(message), attempt=5, max_attempts=5)
+
+    assert decision.retryable is True
     assert decision.stop_current_turn is True

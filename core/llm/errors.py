@@ -22,6 +22,18 @@ def classify_exception(exc: Exception) -> LLMError:
         return LLMError("payload_protocol_error", exc_msg or "本地 payload 协议校验失败", retryable=False)
     if exc_type == "KeyboardInterrupt":
         return LLMError("user_interrupt", "用户主动中断", retryable=False)
+    # DeepSeek 思考模式回传 400（"The `reasoning_content` in the thinking mode
+    # must be passed back to the API"）：实测同一 body 原样重放必过（raw 直连、
+    # litellm、产品全链路均 200，含 4 连发），是聚合网关按内部路由的非确定性
+    # 拒绝而非载荷缺陷；wire 层占位符保证已杜绝客户端侧真实缺 rc。按服务端
+    # 瞬态处理，同体重试是实证有效的恢复手段。
+    if "reasoning_content" in lower and "thinking mode" in lower and "passed back" in lower:
+        return LLMError(
+            "server_error",
+            exc_msg or "provider 思考模式回传校验瞬时拒绝",
+            retryable=True,
+            details={"httpStatus": 400, "reasoningRoundtripRejection": True},
+        )
     if "context_length" in lower or "context length" in lower or "maximum context" in lower or "too many tokens" in lower:
         return LLMError("context_length_error", "上下文长度超过模型限制", retryable=False)
     if "quota" in lower or "insufficient_quota" in lower or "billing" in lower:

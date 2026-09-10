@@ -46,6 +46,13 @@ _CLASSIFICATION_TABLE = [
     ("502 bad gateway", "server_error", TRANSIENT_RETRYABLE),
     ("503 service unavailable", "server_error", TRANSIENT_RETRYABLE),
     ("litellm.InternalServerError: upstream failed", "server_error", TRANSIENT_RETRYABLE),
+    # DeepSeek 思考模式回传 400：同一 body 实测重放必过，属聚合网关路由
+    # 非确定性拒绝，按服务端瞬态同体重试（见 errors.classify_exception）。
+    (
+        "Error code: 400 - {'error': {'message': 'The `reasoning_content` in the thinking mode must be passed back to the API'}}",
+        "server_error",
+        TRANSIENT_RETRYABLE,
+    ),
     # --- 预算/上下文族 → budget_or_context --------------------------------
     ("maximum context length exceeded", "context_length_error", BUDGET_OR_CONTEXT),
     ("insufficient_quota: billing limit reached", "quota_error", BUDGET_OR_CONTEXT),
@@ -157,6 +164,32 @@ def test_http_408_rule_never_touches_llm_error_passthrough():
     # provider 后端透传的 LLMError 保持 retryable 判定平价，408 规则不生效。
     exc = LLMError("provider_protocol_error", "HTTP 408 from gateway", retryable=False)
     classification = classify_error(exc)
+    assert classification.disposition == PERMANENT
+
+
+def test_deepseek_thinking_roundtrip_rejection_is_transient_retryable():
+    # 同一 body 实测重放必过（raw 直连/litellm/产品全链路均 200），该 400 属
+    # 聚合网关路由非确定性拒绝，按服务端瞬态同体重试。
+    message = (
+        "Error code: 400 - {'error': {'message': 'The `reasoning_content` in "
+        "the thinking mode must be passed back to the API'}}"
+    )
+    bare = classify_exception(Exception(message))
+    assert bare.category == "server_error"
+    assert bare.retryable is True
+    assert bare.details.get("reasoningRoundtripRejection") is True
+
+    classification = classify_error(Exception(message))
+    assert classification.category == "server_error"
+    assert classification.disposition == TRANSIENT_RETRYABLE
+
+
+def test_thinking_roundtrip_rule_requires_full_phrase_conjunction():
+    # 只命中部分短语（缺 "passed back"）时维持 fail-closed，不放宽 400。
+    classification = classify_error(
+        Exception("Error code: 400 - reasoning_content missing in thinking mode")
+    )
+    assert classification.category == "provider_protocol_error"
     assert classification.disposition == PERMANENT
 
 
