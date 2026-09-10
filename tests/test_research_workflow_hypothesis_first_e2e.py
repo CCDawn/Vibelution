@@ -306,21 +306,242 @@ def _selection_payload(agent_id: str, **overrides):
     return payload
 
 
+def _structured_meeting_output(conclusion: str, protocol: dict) -> str:
+    """One schema-valid challenge_meeting_message payload (schemaVersion 1)."""
+    return json.dumps(
+        {
+            "schemaVersion": 1,
+            "display": {"conclusion": conclusion, "sections": []},
+            "protocol": protocol,
+        },
+        ensure_ascii=False,
+    )
+
+
+_EMPTY_PROTOCOL: dict[str, list] = {
+    "agreements": [],
+    "disagreements": [],
+    "risks": [],
+    "actionItems": [],
+    "knowledgeCandidates": [],
+    "proposedCandidates": [],
+    "evidenceRequests": [],
+}
+
+
 def _marker_runner(participant, prompt, context):
-    """Round 1 carries the DEV fixture markers; follow-up critique rounds pass."""
-    if "批评与修订" in str(prompt):
-        return {"status": "completed", "raw_output": "pass", "summary": "pass"}
+    """Round 1 carries the protocol facts; follow-up critique rounds pass.
+
+    Scoped review rooms ingest speaker output through the structured
+    meeting-message contract, so the fixture must emit the same protocol JSON
+    the production runner is required to produce: legacy line markers are
+    fail-closed as invalid output and would leave the meeting without citable
+    speech.  The critique round keeps its pass semantics via a structured
+    payload whose compatibility content is exactly ``pass``.
+    """
     role = str(participant.get("teamRole") or "participant")
-    if role == "challenge_cup_search":
-        content = "AGREE: hyp-a 的机制证据最完整，进入有界验证"
+    if "批评与修订" in str(prompt):
+        conclusion = "pass"
+        protocol = _EMPTY_PROTOCOL
+    elif role == "challenge_cup_search":
+        conclusion = "AGREE: hyp-a 的机制证据最完整，进入有界验证"
+        protocol = {
+            **_EMPTY_PROTOCOL,
+            "agreements": ["hyp-a 的机制证据最完整，进入有界验证"],
+        }
     else:
-        content = (
-            "DISAGREE: hyp-b 的泛化证据不足\n"
-            "RISK: 数据集偏差尚未评估\n"
-            "ACTION: challenge_cup_experiment_revision | 补充 hyp-b 的消融实验证据\n"
-            "KNOWLEDGE: 预测编码层级最新综述"
+        conclusion = "DISAGREE: hyp-b 的泛化证据不足，需要补充消融实验证据"
+        protocol = {
+            **_EMPTY_PROTOCOL,
+            "disagreements": [
+                {
+                    "issue": "hyp-b 的泛化证据不足",
+                    "positions": [f"{role}: hyp-b 需要补充消融实验证据"],
+                    "unresolvedReason": "数据集偏差尚未评估",
+                }
+            ],
+            "risks": ["数据集偏差尚未评估"],
+            "actionItems": [
+                {
+                    "ownerRoleId": "challenge_cup_experiment_revision",
+                    "action": "补充 hyp-b 的消融实验证据",
+                    "dueGate": "review",
+                }
+            ],
+            "knowledgeCandidates": ["预测编码层级最新综述"],
+        }
+    return {
+        "status": "completed",
+        "raw_output": _structured_meeting_output(conclusion, protocol),
+        "summary": "pass" if conclusion == "pass" else "ok",
+    }
+
+
+def _receipt_bound_review_runners() -> dict:
+    """Five deterministic review runners, each call provider-receipt-bound.
+
+    Run-bound review meetings (``modelInvocationReceiptAuthority`` present)
+    close through FORMAL review execution: the closure fence refuses the DEV
+    fixture fallback and every model call must carry a unique provider-bound
+    receipt.  The runner shapes mirror the sanctioned fixture in
+    ``tests/test_research_workflow_hypothesis_review_executor.py``; the
+    MetaReview recommendation is derived from the Pareto front and pairwise
+    wins instead of a hardcoded candidate id.  A fresh instance must be built
+    per closure so receipt ids never repeat across meetings.
+    """
+    import threading
+
+    from core.research.workflow.contracts.model_invocation_receipt import (
+        ModelInvocationReceipt,
+        ModelInvocationStatus,
+    )
+    from core.web.services.team_workflow import hypothesis_review_executor
+
+    call_index = 0
+    call_index_lock = threading.Lock()
+
+    def _receipt(outcome_kinds: tuple[str, ...]) -> dict:
+        nonlocal call_index
+        with call_index_lock:
+            call_index += 1
+            index = call_index
+        return ModelInvocationReceipt.from_invocation(
+            receipt_id=f"hf7-e2e-review-{index}",
+            run_id=_RUN_ID,
+            node_run_id=f"review-node-{index}",
+            scope={
+                "questionId": _QUESTION_ID,
+                "workflowRunId": _RUN_ID,
+                "questionStage": "review",
+            },
+            provider="opencode",
+            model="deepseek-v4-flash",
+            requested_model="deepseek-v4-flash",
+            status=ModelInvocationStatus.SUCCEEDED,
+            request_content={"receiptId": f"hf7-e2e-review-{index}"},
+            response_content={"ok": True},
+            started_at_ms=_FIXED_NOW_MS,
+            finished_at_ms=_FIXED_NOW_MS + 10,
+            retry_count=0,
+            metadata={
+                "questionStage": "review",
+                "outcomeKinds": list(outcome_kinds),
+            },
+            evidence_locator={"kind": "hypothesis_review_step"},
+        ).to_dict()
+
+    def _bound(payload: dict, outcome_kinds: tuple[str, ...]):
+        return hypothesis_review_executor.ProviderBoundReviewResult(
+            payload=payload,
+            model_invocation_receipt=_receipt(outcome_kinds),
         )
-    return {"status": "completed", "raw_output": content, "summary": "ok"}
+
+    def reflection(candidate, context):
+        _ = context
+        return _bound(
+            {
+                "scores": {
+                    dimension: 0.7
+                    for dimension in hypothesis_review_executor.SCORE_DIMENSIONS
+                },
+                "claim": str(candidate.get("claim") or ""),
+                "differenceFromAlternatives": str(
+                    candidate.get("differenceFromAlternatives") or ""
+                ),
+                "rationale": "五维独立评分依据",
+            },
+            ("review",),
+        )
+
+    def pairwise(left, right, context):
+        _ = (context,)
+        return _bound(
+            {"outcome": "left_wins", "justification": "左侧候选在机制维度领先"},
+            ("review",),
+        )
+
+    def pareto(scores_by_candidate, context):
+        _ = context
+        ids = list(scores_by_candidate)
+        return _bound(
+            {
+                "paretoFrontCandidateIds": ids[:1],
+                "dominatedCandidateIds": ids[1:],
+                "notes": "按五个决策维度分类",
+            },
+            ("review",),
+        )
+
+    def metareview(context, candidates, pairwise_rows, pareto_result):
+        wins = {
+            str(item["candidateId"]): 0
+            for item in candidates
+        }
+        for comparison in pairwise_rows:
+            if comparison["outcome"] == "left_wins":
+                wins[str(comparison["leftCandidateId"])] += 1
+            elif comparison["outcome"] == "right_wins":
+                wins[str(comparison["rightCandidateId"])] += 1
+        front = [
+            str(item)
+            for item in list(pareto_result.get("paretoFrontCandidateIds") or [])
+        ]
+        recommendation = min(
+            front, key=lambda candidate_id: (-wins[candidate_id], candidate_id)
+        )
+        return _bound(
+            {
+                "recommendationCandidateId": recommendation,
+                "rationale": f"推荐 {recommendation}：位于 Pareto 前沿且两两比较胜出。",
+                "riskNotes": "",
+                "accepted": True,
+            },
+            ("review",),
+        )
+
+    def revision(context, parent_candidate, candidates, meta_review):
+        _ = (context, candidates, meta_review)
+        parent = dict(parent_candidate)
+        return _bound(
+            {
+                "revisedCandidate": {
+                    **parent,
+                    "claim": str(parent.get("claim") or "") + "（根据评审收窄边界）",
+                },
+                "changes": ["收窄了适用边界。"],
+                "unresolvedIssues": ["外部有效性仍待验证。"],
+            },
+            ("review", "revision"),
+        )
+
+    return {
+        "reflection_runner": reflection,
+        "pairwise_runner": pairwise,
+        "pareto_runner": pareto,
+        "metareview_runner": metareview,
+        "revision_runner": revision,
+    }
+
+
+def _close_review_meeting(
+    team_id: str,
+    meeting_round_id: str,
+    payload: dict,
+    *,
+    runtime,
+) -> dict:
+    """Close one review meeting with the receipt-bound fixture runners.
+
+    Every closure builds fresh runners so each FORMAL review execution carries
+    its own unique receipt set.
+    """
+    return chain.close_review_meeting(
+        team_id,
+        meeting_round_id,
+        payload,
+        runtime=runtime,
+        **_receipt_bound_review_runners(),
+    )
 
 
 def _stateful_collection_fakes(
@@ -630,7 +851,7 @@ def _drive_to_awaiting_approval(team_id: str, meeting_round_id: str, actor: str)
     drafted = meeting_runtime.prepare_meeting_summary_draft(
         team_id, meeting_round_id, actor=actor, force=False
     )
-    assert drafted["status"] == "awaiting_approval"
+    assert drafted["status"] == "awaiting_approval", drafted.get("blocker")
 
 
 def _freeze_template_baseline(team_id: str, agent_id: str) -> dict:
@@ -664,7 +885,7 @@ def _close_first_meeting_with_envelope(
     team_id: str, agent_ids: list[str], meeting_round_id: str, runtime
 ) -> dict:
     _drive_to_awaiting_approval(team_id, meeting_round_id, agent_ids[0])
-    return chain.close_review_meeting(
+    return _close_review_meeting(
         team_id,
         meeting_round_id,
         _closure_payload(agent_ids, [_envelope_decision(agent_ids[0])]),
@@ -705,7 +926,7 @@ def _close_sibling_meetings(
     final_closure: dict = {}
     for sibling_id in _sibling_meeting_ids(team_id, meeting_round_id):
         _drive_to_awaiting_approval(team_id, sibling_id, agent_ids[0])
-        final_closure = chain.close_review_meeting(
+        final_closure = _close_review_meeting(
             team_id,
             sibling_id,
             _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
@@ -794,7 +1015,11 @@ def test_end_to_end_fixture_chain_with_ledger_audit(
             design = _evaluate(runtime, team_id, "hypothesis_design")
             design_codes = _blocker_codes(design)
             assert "hypothesis_round_unconverged" in design_codes
-            assert "template_baseline_missing" in design_codes
+            # dd1acce0a scoped the frozen template-baseline gate to phase two
+            # (runs whose constraintSnapshot carries phaseOneKnowledgePackage).
+            # This seeded run stays in phase one, so pre-selection design
+            # readiness must not report the template gate.
+            assert "template_baseline_missing" not in design_codes
 
             # 1. 假说选择（多选 hyp-a/hyp-b）→ 每个候选各开一场评审会议
             #    （fan-out），首轮讨论自动开启，房间双向互引。
@@ -1005,7 +1230,7 @@ def test_end_to_end_fixture_chain_with_ledger_audit(
             # 6. 第二轮关门（select_candidate，无新缺口）→ 第二个
             #    HypothesisRound lineage 回链第一轮；随后冻结模板基线。
             _drive_to_awaiting_approval(team_id, second_meeting_id, agent_ids[0])
-            closed_second = chain.close_review_meeting(
+            closed_second = _close_review_meeting(
                 team_id,
                 second_meeting_id,
                 _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
@@ -1030,16 +1255,13 @@ def test_end_to_end_fixture_chain_with_ledger_audit(
             _freeze_template_baseline(team_id, agent_ids[0])
 
             # 7. 收敛（MetaReview.accepted 且无新缺口）+ 模板冻结 →
-            #    hypothesis_design 放行，父运行恢复并派发。
-            design = _evaluate(runtime, team_id, "hypothesis_design")
-            assert design.ready, [b.code for b in design.blockers]
-            resumed = chain.resume_parent_runs(
-                team_id,
-                question_id=_QUESTION_ID,
-                runtime=runtime,
-                trigger="test:converged",
-            )
-            assert resumed["runs"][0]["action"] == "started"
+            #    最后一场 sibling 关门自动恢复父运行（close:<meeting> 触发，
+            #    幂等键 close:{meetingRoundId}），hypothesis_design 直接派发；
+            #    重复恢复会命中 node_live_attempt fail-closed 门。
+            last_resume = sibling_closed_second["resume"]
+            assert last_resume["runs"][0]["ready"] is True
+            assert last_resume["runs"][0]["blockers"] == []
+            assert last_resume["runs"][0]["action"] == "started"
             attempt = runtime.store.latest_attempt(_RUN_ID, "hypothesis_design")
             assert attempt is not None
             assert attempt.status in {"starting", "dispatching", "running"}
@@ -1056,7 +1278,8 @@ def test_end_to_end_fixture_chain_with_ledger_audit(
             assert len(set(sequences)) == len(sequences)
             command = runtime.store.get_command_by_idempotency(
                 _RUN_ID,
-                f"hf-chain:{_RUN_ID}:hypothesis_design:test:converged",
+                f"hf-chain:{_RUN_ID}:hypothesis_design:"
+                f"close:{links[3]['meetingRoundId']}",
             )
             assert command is not None
             assert attempt.command_id == command.command_id
@@ -1194,7 +1417,7 @@ def test_reselection_chain_and_round_lineage_walk(
                 "meetingRoundId"
             ]
             _drive_to_awaiting_approval(team_id, second_meeting_id, agent_ids[0])
-            chain.close_review_meeting(
+            _close_review_meeting(
                 team_id,
                 second_meeting_id,
                 _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
@@ -1349,7 +1572,7 @@ def test_closure_replay_produces_no_duplicate_artifacts(
 
             # 相同 payload 重复关门：全部 artifact 复用，零新增（reused 路径
             # 不再重写任何存储，记忆候选数保持不变即为不重复证据）。
-            reclosed = chain.close_review_meeting(
+            reclosed = _close_review_meeting(
                 team_id, first_meeting_id, payload, runtime=runtime
             )
             assert reclosed["status"] == "reused"
@@ -1374,7 +1597,7 @@ def test_closure_replay_produces_no_duplicate_artifacts(
             with pytest.raises(
                 meetings.ResearchMeetingRoundError, match="different closure content"
             ):
-                chain.close_review_meeting(
+                _close_review_meeting(
                     team_id,
                     first_meeting_id,
                     _closure_payload(
@@ -1510,7 +1733,7 @@ def test_interruption_replay_across_chain_points(
             )
             request = closed["collection"]["requests"][0]
             _close_sibling_meetings(team_id, agent_ids, first_meeting_id, runtime)
-            reclosed = chain.close_review_meeting(
+            reclosed = _close_review_meeting(
                 team_id,
                 first_meeting_id,
                 _closure_payload(agent_ids, [_envelope_decision(agent_ids[0])]),
@@ -1580,11 +1803,9 @@ def test_interruption_replay_across_chain_points(
             assert resumed["runs"][0]["action"] == "not_ready"
             assert runtime.store.latest_attempt(_RUN_ID, "hypothesis_design") is None
 
-            # 重启后继续推进链路：第二轮关门（fan-in 归档全组兄弟）→ 冻结 →
-            # 恢复派发；同 trigger 重放复用命令，ledger 中只有一个
-            # hypothesis_design attempt。
+            # 重启后继续推进链路：第二轮关门（fan-in 归档全组兄弟）→ 冻结。
             _drive_to_awaiting_approval(team_id, second_meeting_id, agent_ids[0])
-            chain.close_review_meeting(
+            _close_review_meeting(
                 team_id,
                 second_meeting_id,
                 _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
@@ -1595,20 +1816,21 @@ def test_interruption_replay_across_chain_points(
             )
             assert sibling_closed_second["hypothesisRound"]["status"] == "created"
             _freeze_template_baseline(team_id, agent_ids[0])
-            resumed = chain.resume_parent_runs(
-                team_id,
-                question_id=_QUESTION_ID,
-                runtime=runtime,
-                trigger="test:converged",
-            )
-            assert resumed["runs"][0]["action"] == "started"
+            # 重启后继续推进链路：第二轮最后一场 sibling 关门已用
+            # close:<meeting> 触发自动恢复并派发；同 trigger 重放复用命令，
+            # ledger 中只有一个 hypothesis_design attempt。
+            last_sibling_meeting_id = _sibling_meeting_ids(
+                team_id, second_meeting_id
+            )[0]
+            last_resume = sibling_closed_second["resume"]
+            assert last_resume["runs"][0]["action"] == "started"
             attempt = runtime.store.latest_attempt(_RUN_ID, "hypothesis_design")
             assert attempt is not None
             replayed_resume = chain.resume_parent_runs(
                 team_id,
                 question_id=_QUESTION_ID,
                 runtime=runtime,
-                trigger="test:converged",
+                trigger=f"close:{last_sibling_meeting_id}",
             )
             assert replayed_resume["runs"][0]["action"] == "replayed"
             attempts = [
@@ -1745,7 +1967,7 @@ def test_fresh_run_zero_seed_bridge_fed_gate_allows_and_accepts(
 
             # 评审决策带 candidateRefs → request 携带候选维度，不被拒绝。
             _drive_to_awaiting_approval(team_id, first_meeting_id, agent_ids[0])
-            closed = chain.close_review_meeting(
+            closed = _close_review_meeting(
                 team_id,
                 first_meeting_id,
                 _closure_payload(
@@ -1825,7 +2047,7 @@ def test_fresh_run_zero_seed_bridge_fed_gate_allows_and_accepts(
                 *_sibling_meeting_ids(team_id, second_meeting_id),
             ]:
                 _drive_to_awaiting_approval(team_id, group_meeting_id, agent_ids[0])
-                closed_second = chain.close_review_meeting(
+                closed_second = _close_review_meeting(
                     team_id,
                     group_meeting_id,
                     _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
@@ -1859,8 +2081,16 @@ def test_fresh_run_zero_seed_bridge_fed_gate_allows_and_accepts(
                 decided_by=agent_ids[0],
             )
             assert adjudication["status"] == "created"
-            design = _evaluate(runtime, team_id, "hypothesis_design")
-            assert design.ready, [b.code for b in design.blockers]
+            # 收敛后的 hypothesis_design readiness 在真实桥接数据上放行：
+            # 最后一场关门已自动恢复父运行并派发；派发落地后节点占用
+            # node_live_attempt，fail-closed 拒绝二次派发。
+            last_resume = closed_second["resume"]
+            assert last_resume["runs"][0]["ready"] is True
+            assert last_resume["runs"][0]["blockers"] == []
+            assert last_resume["runs"][0]["action"] == "started"
+            attempt = runtime.store.latest_attempt(_RUN_ID, "hypothesis_design")
+            assert attempt is not None
+            assert attempt.status in {"starting", "dispatching", "running"}
     finally:
         runtime.close()
 
@@ -1894,7 +2124,7 @@ def test_zero_collection_convergence_gate_fails_closed_pending_decision(
 
             # 首轮只做 select 决策：零 EVIDENCE_REQUEST、零搜集、零 claim 数据。
             _drive_to_awaiting_approval(team_id, first_meeting_id, agent_ids[0])
-            closed = chain.close_review_meeting(
+            closed = _close_review_meeting(
                 team_id,
                 first_meeting_id,
                 _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
