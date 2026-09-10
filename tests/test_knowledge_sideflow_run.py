@@ -938,6 +938,266 @@ def test_maintenance_retries_only_blocked_quote_anchor_extraction_once(
         runtime.close()
 
 
+@pytest.mark.parametrize(
+    "case",
+    [
+        "retries_settled_turn",
+        "retries_grace_elapsed",
+        "skips_live_turn_snapshot",
+        "skips_turn_status_running",
+        "skips_grace_pending",
+        "skips_already_retried",
+    ],
+)
+def test_maintenance_retries_self_parked_needs_review_extraction_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    """An agent self-parked needs_review extraction gets one bounded retry.
+
+    Without a structured remediation payload the quote-anchor path skips the
+    task, so a knowledge child stays blocked forever (SCI-085). The sweep
+    must retry exactly when the task is an extraction needs_review self-park
+    (writeback.agentRequestedStatus echoes needs_review) AND the task's turn
+    is provably settled; a possibly live turn (store turn field or session
+    completion snapshot) or an unexpired grace window keeps it untouched, and
+    a second blocked attempt (retry_of_node_run_id set) is never retried.
+    """
+
+    from datetime import datetime, timezone
+
+    from core.research.workflow.contracts import WorkflowCommandKind
+    from core.web.services.session import turn_diagnostics
+    from core.web.services.team_workflow.research_runtime import (
+        stage_task_remediation,
+    )
+    from core.web.services.team_workflow.research_runtime.human_gate_artifacts import (
+        canonical_sha256,
+    )
+    from core.web.services.team_workflow.research_runtime.runtime_factory import (
+        build_workflow_runtime,
+    )
+    from tests._support.workflow_ledger_helpers import (
+        FIXED_NOW_MS,
+        build_attempt_record,
+        build_command_record,
+        build_run_record,
+    )
+
+    identity = register_or_resolve(build_knowledge_sideflow_workflow_definition())
+    runtime = build_workflow_runtime(
+        tmp_path / "ledger.sqlite3",
+        checkpoint_path=tmp_path / "checkpoints.sqlite3",
+    )
+    problem = json.dumps(
+        {
+            "code": "required_artifact_missing",
+            "detail": "source_extraction requires ['evidence_card_batch']",
+        }
+    )
+    node_run_id = "nr-run-quote-source_extraction-a1"
+    child = replace(
+        build_run_record(
+            run_id="run-quote",
+            workflow_id=KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
+            workflow_version_id=identity.workflowVersionId,
+            status="blocked",
+        ),
+        active_node_id="source_extraction",
+        blocked_problem_json=problem,
+        input_snapshot_json=json.dumps(
+            {
+                "snapshotHash": "a" * 64,
+                "sourceCollectionRunId": "source-quote",
+                "agentBindingSnapshot": [
+                    {
+                        "snapshotId": "snap:run-quote:source_extraction",
+                        "nodeId": "source_extraction",
+                        "agentId": "agent-extractor",
+                        "roleKey": "source_extractor",
+                        "actorKind": "agent",
+                        "resolvedFrom": "workflow_default",
+                    }
+                ],
+            }
+        ),
+        structure_hash=identity.structureHash,
+    )
+    attempt = replace(
+        build_attempt_record(
+            node_run_id=node_run_id,
+            run_id=child.run_id,
+            node_id="source_extraction",
+            status="blocked",
+            command_id="cmd-quote-a1",
+            problem_json=problem,
+        ),
+        finished_at_ms=FIXED_NOW_MS + 1,
+        retry_of_node_run_id="nr-prior" if case == "skips_already_retried" else None,
+        attempt=2 if case == "skips_already_retried" else 1,
+    )
+    runtime.store.submit(
+        lambda uow: (
+            uow.repository.insert_run(child),
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id=attempt.command_id,
+                    run_id=child.run_id,
+                    node_id="source_extraction",
+                    idempotency_key="quote-a1",
+                )
+            ),
+            uow.repository.insert_attempt(
+                replace(attempt, node_run_id="nr-prior", attempt=1, retry_of_node_run_id=None)
+            ) if case == "skips_already_retried" else None,
+            uow.repository.insert_attempt(attempt),
+        ),
+        force_flush=True,
+    ).result(timeout=10)
+
+    session_id = "sess-quote"
+    turn_id = "turn-quote-1"
+    # FIXED_NOW_MS is far in the past relative to the runtime's real-time
+    # clock, so it stands for "grace long elapsed"; datetime.now() stands for
+    # "just parked, grace still pending".
+    updated_at = (
+        datetime.now(timezone.utc).isoformat()
+        if case == "skips_grace_pending"
+        else datetime.fromtimestamp(FIXED_NOW_MS / 1000, tz=timezone.utc).isoformat()
+    )
+    task = {
+        "stageId": "extraction",
+        "status": "needs_review",
+        "writeback": {"agentRequestedStatus": "needs_review"},
+        "sessionId": session_id,
+        "turn": {
+            "accepted": True,
+            "turnId": turn_id,
+            "sessionId": session_id,
+            "status": "running" if case == "skips_turn_status_running" else "needs_review",
+            "acceptedAt": updated_at,
+        },
+        "updatedAt": updated_at,
+    }
+
+    observed: list[tuple[str, str, str]] = []
+
+    def task_for_node_run(*, team_id, source_run_id, node_run_id):
+        observed.append((team_id, source_run_id, node_run_id))
+        return dict(task)
+
+    monkeypatch.setattr(
+        stage_task_remediation,
+        "source_stage_task_for_node_run",
+        task_for_node_run,
+    )
+    monkeypatch.setattr(
+        runtime.readiness,
+        "evaluate",
+        lambda **_kwargs: SimpleNamespace(ready=True, blockers=()),
+    )
+    snapshot_calls: list[tuple[str, str]] = []
+
+    def fake_snapshot(called_session_id, called_turn_id):
+        snapshot_calls.append((called_session_id, called_turn_id))
+        if case == "retries_settled_turn":
+            return {
+                "sessionId": called_session_id,
+                "turnId": called_turn_id,
+                "terminal": True,
+                "terminalStatus": "completed",
+                "completionSource": "turn_journal",
+                "isRunning": False,
+                "activeTurnId": "",
+                "turnCurrent": False,
+            }
+        if case == "skips_live_turn_snapshot":
+            return {
+                "sessionId": called_session_id,
+                "turnId": called_turn_id,
+                "terminal": False,
+                "terminalStatus": "",
+                "completionSource": "conversation_journal",
+                "isRunning": True,
+                "activeTurnId": called_turn_id,
+                "turnCurrent": True,
+            }
+        return {
+            "sessionId": called_session_id,
+            "turnId": called_turn_id,
+            "terminal": False,
+            "completionSource": "missing_conversation",
+            "isRunning": False,
+            "turnCurrent": False,
+        }
+
+    monkeypatch.setattr(
+        turn_diagnostics,
+        "get_session_turn_completion_snapshot",
+        fake_snapshot,
+    )
+    recovery_events: list[dict[str, str]] = []
+    monkeypatch.setattr(
+        runtime.knowledge_sideflow_trigger,
+        "_record_quote_retry",
+        lambda status, _run, **fields: recovery_events.append(
+            {"status": status, **fields}
+        ),
+    )
+    try:
+        first = runtime.knowledge_sideflow_trigger.recover_blocked_quote_anchor_extractions(
+            limit=2
+        )
+        second = runtime.knowledge_sideflow_trigger.recover_blocked_quote_anchor_extractions(
+            limit=2
+        )
+
+        if case.startswith("retries"):
+            assert first == 1
+            assert second == 0
+            assert observed == [("research-team", "source-quote", node_run_id)]
+            assert recovery_events[0]["status"] == "submitted"
+            assert recovery_events[0]["reason"] == "needs_review_no_remediation"
+            identity_hash = canonical_sha256(
+                {
+                    "runId": child.run_id,
+                    "nodeId": "source_extraction",
+                    "nodeRunId": node_run_id,
+                    "reason": "quote_anchor_remediation",
+                }
+            )
+            command = runtime.store.read(
+                lambda repo: repo.find_command_by_idempotency(
+                    child.run_id, f"knowledge-auto-quote-retry:{identity_hash}"
+                )
+            )
+            assert command is not None
+            assert command.command_kind == WorkflowCommandKind.RETRY_NODE.value
+            request = json.loads(str(command.request_json))
+            assert request["payload"]["reason"] == "quote_anchor_remediation"
+            assert request["payload"]["retryOfNodeRunId"] == node_run_id
+            latest = runtime.store.latest_attempt(child.run_id, "source_extraction")
+            assert latest is not None
+            assert latest.attempt == 2
+            assert latest.retry_of_node_run_id == node_run_id
+            return
+        assert first == second == 0
+        assert recovery_events == []
+        assert runtime.store.latest_attempt(child.run_id, "source_extraction").attempt == attempt.attempt
+        if case == "skips_turn_status_running":
+            # Store turn field short-circuits before the session snapshot.
+            assert snapshot_calls == []
+        elif case == "skips_already_retried":
+            assert snapshot_calls == []
+            assert observed == []
+        else:
+            # Every snapshot probe targeted exactly this task's turn.
+            assert set(snapshot_calls) == {(session_id, turn_id)}
+    finally:
+        runtime.close()
+
+
 def test_manual_knowledge_request_uses_completed_problem_scope(tmp_path: Path, monkeypatch) -> None:
     from core.research.workflow.contracts import WorkflowCommandKind
     from core.web.services.team_workflow.research_runtime import workflow_artifact_store

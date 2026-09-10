@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -27,6 +28,140 @@ RECOVERABLE_BLOCK_CODE = "auto_advance_not_ready"
 MISSING_KNOWLEDGE_BLOCKER = "knowledge_package_not_materialized"
 QUOTE_ANCHOR_RETRY_NODE_ID = "source_extraction"
 QUOTE_ANCHOR_MISSING_ARTIFACT = "evidence_card_batch"
+QUOTE_ANCHOR_STAGE_ID = "extraction"
+SELF_PARKED_NEEDS_REVIEW_RETRY_REASON = "needs_review_no_remediation"
+# Grace window for the self-parked needs_review fallback: when neither the
+# task's turn fields nor the session completion snapshot can prove the turn
+# settled, only a task untouched for this long is retried. Must outlast one
+# ordinary in-flight turn so a mid-turn writeback park is never double-driven.
+NEEDS_REVIEW_RETRY_GRACE_MS_DEFAULT = 900_000
+
+
+def _needs_review_retry_grace_ms() -> int:
+    """Read one positive integer millisecond grace budget from the environment."""
+
+    raw = str(os.environ.get("VIBELUTION_HF_NEEDS_REVIEW_RETRY_GRACE_MS") or "").strip()
+    if not raw:
+        return NEEDS_REVIEW_RETRY_GRACE_MS_DEFAULT
+    try:
+        value = int(raw)
+    except ValueError:
+        return NEEDS_REVIEW_RETRY_GRACE_MS_DEFAULT
+    return value if value > 0 else NEEDS_REVIEW_RETRY_GRACE_MS_DEFAULT
+
+
+_STAGE_TASK_ACTIVE_TURN_STATUSES = {"queued", "running"}
+
+
+def _stage_task_turn_is_active(task: Mapping[str, Any]) -> bool:
+    """Store-field only liveness: the recorded turn still claims queued/running."""
+
+    turn = task.get("turn") if isinstance(task.get("turn"), Mapping) else {}
+    return (
+        str(turn.get("status") or "").strip().lower()
+        in _STAGE_TASK_ACTIVE_TURN_STATUSES
+    )
+
+
+def _stage_task_turn_snapshot_liveness(
+    task: Mapping[str, Any],
+) -> tuple[bool, bool, bool]:
+    """Judge turn liveness from the session completion snapshot.
+
+    Returns ``(available, live, terminal)``; ``(False, False, False)`` when
+    the session or turn identity is missing or the snapshot cannot be read,
+    which lets the caller fall back to the grace window instead of guessing.
+    """
+
+    turn = task.get("turn") if isinstance(task.get("turn"), Mapping) else {}
+    session_id = str(task.get("sessionId") or turn.get("sessionId") or "").strip()
+    turn_id = str(turn.get("turnId") or "").strip()
+    if not session_id or not turn_id:
+        return False, False, False
+    try:
+        from core.web.services.session.turn_diagnostics import (
+            get_session_turn_completion_snapshot,
+        )
+
+        snapshot = get_session_turn_completion_snapshot(session_id, turn_id)
+    except Exception:  # noqa: BLE001 - unreadable session falls back to the grace window
+        return False, False, False
+    if not isinstance(snapshot, Mapping):
+        return False, False, False
+    if (
+        str(snapshot.get("completionSource") or "").strip()
+        in {"missing_session_id", "missing_conversation"}
+    ):
+        return False, False, False
+    if bool(snapshot.get("turnCurrent")):
+        # The session worker is executing this exact turn right now.
+        return True, True, False
+    terminal = bool(snapshot.get("terminal"))
+    # Not terminal yet: any live worker on this session keeps the turn live.
+    return True, bool(snapshot.get("isRunning")), terminal
+
+
+def _stage_task_updated_at_ms(task: Mapping[str, Any]) -> int | None:
+    from core.web.services.session.timebase import parse_timestamp_utc
+
+    parsed = parse_timestamp_utc(task.get("updatedAt"))
+    if parsed is None:
+        return None
+    return int(parsed.timestamp() * 1000)
+
+
+def _self_parked_needs_review_extraction(task: Mapping[str, Any] | None) -> bool:
+    """True for an extraction task the agent honestly parked at needs_review.
+
+    The writeback echoes the agent's own requested status; unlike the
+    structured quote-anchor gate there is no remediation payload any
+    automation can follow, so the only repair is a formal node retry.
+    """
+
+    if not isinstance(task, Mapping):
+        return False
+    if str(task.get("stageId") or "").strip().lower() != QUOTE_ANCHOR_STAGE_ID:
+        return False
+    if str(task.get("status") or "").strip().lower() != "needs_review":
+        return False
+    writeback = (
+        task.get("writeback") if isinstance(task.get("writeback"), Mapping) else {}
+    )
+    return (
+        str(writeback.get("agentRequestedStatus") or "").strip().lower()
+        == "needs_review"
+    )
+
+
+def _self_parked_needs_review_retry_ready(
+    task: Mapping[str, Any] | None,
+    *,
+    now_ms: int,
+) -> bool:
+    """Second bounded recovery gate: self-parked, turn settled, one shot.
+
+    Fail-closed ordering: the store turn field wins, then the session
+    completion snapshot; only when neither can judge liveness does the grace
+    window on ``updatedAt`` decide, and an unparsable ``updatedAt`` keeps the
+    task untouched.
+    """
+
+    if not _self_parked_needs_review_extraction(task):
+        return False
+    if _stage_task_turn_is_active(task):
+        return False
+    available, live, terminal = _stage_task_turn_snapshot_liveness(task)
+    if available:
+        if live:
+            return False
+        if terminal:
+            return True
+        # Non-terminal and not running: race-protect with the same grace
+        # window before declaring the turn silently dead.
+    updated_at_ms = _stage_task_updated_at_ms(task)
+    if updated_at_ms is None:
+        return False
+    return max(0, int(now_ms) - updated_at_ms) >= _needs_review_retry_grace_ms()
 
 
 class KnowledgeSideflowTrigger:
@@ -511,8 +646,17 @@ class KnowledgeSideflowTrigger:
     def recover_blocked_quote_anchor_extractions(self, *, limit: int = 4) -> int:
         """Retry only knowledge children blocked after correctable quote review.
 
-        The node blocker alone is insufficient: the matching canonical stage
-        task must still carry the exact automatic quote-anchor remediation.
+        Two bounded first-attempt recovery paths share one idempotent
+        RETRY_NODE submission shape:
+        - the canonical stage task still carries the exact automatic
+          quote-anchor remediation; or
+        - the agent honestly self-parked the extraction task at needs_review
+          (``writeback.agentRequestedStatus == "needs_review"``) and no
+          structured remediation payload is actionable.  Liveness is judged
+          from the task's turn field, then the session completion snapshot;
+          when neither can judge, a grace window on ``updatedAt``
+          (``VIBELUTION_HF_NEEDS_REVIEW_RETRY_GRACE_MS``, default 15 minutes)
+          keeps a possibly in-flight turn untouched.
         The retry uses the normal command service and an attempt-scoped
         idempotency key, so maintenance replays cannot create a second retry.
         """
@@ -561,6 +705,7 @@ class KnowledgeSideflowTrigger:
         )
 
         for run, attempt, source_run_id in candidates:
+            retry_reason = ""
             try:
                 task = source_stage_task_for_node_run(
                     team_id=run.team_id,
@@ -568,7 +713,17 @@ class KnowledgeSideflowTrigger:
                     node_run_id=attempt.node_run_id,
                 )
                 if not extraction_quote_anchor_remediation(task):
-                    continue
+                    # Second bounded recovery path (SCI-085): the agent ended
+                    # its turn with an honest needs_review self-report, so no
+                    # remediation payload exists and no other sweep reopens
+                    # the task. Only a settled turn plus the first blocked
+                    # attempt qualifies, and the same attempt-scoped idempotent
+                    # RETRY_NODE below keeps replays convergent.
+                    if not _self_parked_needs_review_retry_ready(
+                        task, now_ms=self._now()
+                    ):
+                        continue
+                    retry_reason = SELF_PARKED_NEEDS_REVIEW_RETRY_REASON
                 fresh = self._store.get_run(run.run_id)
                 if (
                     fresh is None
@@ -604,10 +759,17 @@ class KnowledgeSideflowTrigger:
                     )
                 )
             except Exception as exc:  # noqa: BLE001 - isolate one stale child
-                self._record_quote_retry("failed", run, error=type(exc).__name__)
+                self._record_quote_retry(
+                    "failed", run, reason=retry_reason, error=type(exc).__name__
+                )
                 continue
             recovered += 1
-            self._record_quote_retry("submitted", run, node_run_id=attempt.node_run_id)
+            self._record_quote_retry(
+                "submitted",
+                run,
+                node_run_id=attempt.node_run_id,
+                reason=retry_reason or "quote_anchor_remediation",
+            )
         return recovered
 
     @staticmethod
@@ -716,6 +878,7 @@ class KnowledgeSideflowTrigger:
         run: Any,
         *,
         node_run_id: str = "",
+        reason: str = "",
         error: str = "",
     ) -> None:
         try:
@@ -732,6 +895,7 @@ class KnowledgeSideflowTrigger:
                 fields={
                     "runId": str(run.run_id or ""),
                     "nodeRunId": str(node_run_id or ""),
+                    "reason": str(reason or ""),
                     "error": error,
                 },
             )
