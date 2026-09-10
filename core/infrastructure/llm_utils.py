@@ -221,6 +221,48 @@ def build_cacheable_system_message(static_text: Any, dynamic_text: Any = "") -> 
     return {"role": "system", "content": content_blocks}
 
 
+def build_cacheable_system_message_with_shared_head(
+    shared_head_text: Any,
+    step_tail_text: Any = "",
+) -> Any:
+    """Build a system message whose byte-stable shared head is its own block.
+
+    Use this when several distinct call sites (e.g. the five review steps)
+    share one identical leading system text and differ only in a trailing
+    step-specific section.  The head travels in a leading ``cache_control``
+    block that is byte-identical across every call site, so the provider can
+    replay it for any step once one step has warmed it; the step tail follows
+    as a second ``cache_control`` block so the full (head + tail) system prefix
+    stays cacheable within one step exactly like a single-block prompt.
+
+    ``shared_head_text + step_tail_text`` must equal the intended system prompt
+    text.  Neither block is stripped: the tail keeps its leading separator so a
+    provider that concatenates blocks reproduces the original prompt bytes.
+    Without a head the call degrades to :func:`build_cacheable_system_message`.
+    """
+
+    head_content = str(shared_head_text or "")
+    tail_content = str(step_tail_text or "")
+    if not head_content.strip():
+        return build_cacheable_system_message(tail_content)
+    content_blocks: list[dict[str, Any]] = [
+        {
+            "type": "text",
+            "text": head_content,
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+    if tail_content:
+        content_blocks.append(
+            {
+                "type": "text",
+                "text": tail_content,
+                "cache_control": {"type": "ephemeral"},
+            }
+        )
+    return {"role": "system", "content": content_blocks}
+
+
 def build_cacheable_user_prefix_message(prefix_text: Any, tail_text: Any = "") -> Any:
     """Build a user message whose stable leading block carries cache_control.
 

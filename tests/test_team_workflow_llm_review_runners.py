@@ -2737,15 +2737,23 @@ def _capture_review_messages(monkeypatch):
 
 
 def test_reflection_user_message_marks_wave_invariant_prefix(monkeypatch):
-    """L1: the marked prefix is byte-stable across the wave; the tail differs."""
+    """L1: the marked prefix is byte-stable across the wave; the tail differs.
+
+    ``literatureContrast`` is retrieved per candidate (with per-call retrieval
+    stamps), so it must ride in the unmarked tail: two sibling calls with
+    different literature still share one byte-identical marked prefix.
+    """
 
     captured = _capture_review_messages(monkeypatch)
-    literature = {
-        "papers": [{"title": "对比论文", "year": 2025}],
-        "degraded": False,
-        "retrievalMeta": {},
-    }
-    for candidate_id in ("cand-a", "cand-b"):
+    for index, candidate_id in enumerate(("cand-a", "cand-b")):
+        literature = {
+            "papers": [{"title": f"对比论文 {candidate_id}", "year": 2025}],
+            "degraded": False,
+            "retrievalMeta": {
+                "retrievedAt": f"2026-09-10T00:00:0{index}Z",
+                "durationMs": 100 + index,
+            },
+        }
         llm_review_runners._invoke_review_llm(
             dict(_FAKE_LLM),
             agent_id="reviewer",
@@ -2776,11 +2784,14 @@ def test_reflection_user_message_marks_wave_invariant_prefix(monkeypatch):
         block["cache_control"] == {"type": "ephemeral"} for block in prefix_blocks
     )
     assert all(not block.get("cache_control") for block in tail_blocks)
-    # The marked prefix is byte-identical across the wave's calls (the cold
-    # first call warms it, the next call hits), while per-call tails differ.
+    # The marked prefix is byte-identical across the wave's calls even though
+    # each call carries its own literature contrast (the cold first call warms
+    # it, the next call hits), while per-call tails differ.
     assert prefix_blocks[0]["text"] == prefix_blocks[1]["text"]
     assert tail_blocks[0]["text"] != tail_blocks[1]["text"]
     assert '"context"' in prefix_blocks[0]["text"]
+    assert '"literatureContrast"' not in prefix_blocks[0]["text"]
+    assert '"literatureContrast"' in tail_blocks[0]["text"]
     assert '"candidate"' in tail_blocks[0]["text"]
     # Combined text stays byte-identical to the full (reordered) payload, and
     # the reorder places the documented wave-invariant keys first.
@@ -2789,19 +2800,45 @@ def test_reflection_user_message_marks_wave_invariant_prefix(monkeypatch):
         "scoreDimensions",
         "reviewDimensions",
         "allowedRatings",
-        "literatureContrast",
     )
     for prefix_block, tail_block in zip(prefix_blocks, tail_blocks):
         payload = json.loads(prefix_block["text"] + tail_block["text"])
         assert list(payload)[: len(expected_prefix_keys)] == list(expected_prefix_keys)
         assert payload["candidate"]["candidateId"] in ("cand-a", "cand-b")
+        assert payload["literatureContrast"]["papers"][0]["title"].endswith(
+            payload["candidate"]["candidateId"]
+        )
 
 
-def test_pairwise_user_message_marks_context_prefix(monkeypatch):
-    """L1 pairwise split: context is the marked prefix, candidates the tail."""
+def test_literature_contrast_is_not_a_marked_prefix_key():
+    """Per-candidate literature retrieval can never be a wave-invariant key."""
+
+    reflection_prefix_keys = llm_review_runners._REVIEW_CACHEABLE_USER_PREFIX_KEYS[
+        "hypothesis_reflection"
+    ]
+    assert "literatureContrast" not in reflection_prefix_keys
+    assert reflection_prefix_keys == (
+        "context",
+        "scoreDimensions",
+        "reviewDimensions",
+        "allowedRatings",
+    )
+
+
+def test_pairwise_user_message_marks_context_and_bank_prefix(monkeypatch):
+    """L1 pairwise split: context + candidate bank are the marked prefix.
+
+    Three pair calls of one wave share the whole bank (every candidate, sorted
+    by candidateId); only the tiny ``pair`` selector differs per call.
+    """
 
     captured = _capture_review_messages(monkeypatch)
-    for left_id in ("cand-a", "cand-b"):
+    bank = [
+        _candidate("cand-a", "假说 A"),
+        _candidate("cand-b", "假说 B"),
+        _candidate("cand-c", "假说 C"),
+    ]
+    for left_id, right_id in (("cand-a", "cand-b"), ("cand-a", "cand-c"), ("cand-b", "cand-c")):
         llm_review_runners._invoke_review_llm(
             dict(_FAKE_LLM),
             agent_id="reviewer",
@@ -2809,22 +2846,30 @@ def test_pairwise_user_message_marks_context_prefix(monkeypatch):
             system_prompt="compare",
             user_payload={
                 "context": {"contextId": "ctx-1", "question": "SCI-096"},
-                "left": _candidate(left_id, "假说"),
-                "right": _candidate("cand-c", "假说 C"),
+                "candidatesBank": bank,
+                "pair": {"leftId": left_id, "rightId": right_id},
             },
             session_id="team-1",
         )
 
     contents = [call["messages"][1]["content"] for call in captured]
+    assert len(contents) == 3
     assert all(isinstance(content, list) and len(content) == 2 for content in contents)
     prefix_texts = [content[0]["text"] for content in contents]
-    assert contents[0][0]["cache_control"] == {"type": "ephemeral"}
-    assert not contents[0][1].get("cache_control")
-    # The context-only prefix is shared across the pairwise wave.
-    assert prefix_texts[0] == prefix_texts[1]
+    tail_texts = [content[1]["text"] for content in contents]
+    assert all(content[0]["cache_control"] == {"type": "ephemeral"} for content in contents)
+    assert all(not content[1].get("cache_control") for content in contents)
+    # The context + bank prefix is byte-identical across the pairwise wave.
+    assert len(set(prefix_texts)) == 1
+    assert len(set(tail_texts)) == 3
     assert '"context"' in prefix_texts[0]
-    combined = json.loads(prefix_texts[0] + contents[0][1]["text"])
-    assert list(combined) == ["context", "left", "right"]
+    assert '"candidatesBank"' in prefix_texts[0]
+    assert '"假说 C"' in prefix_texts[0]
+    assert all('"pair"' in tail for tail in tail_texts)
+    assert all('"candidatesBank"' not in tail for tail in tail_texts)
+    combined = json.loads(prefix_texts[0] + tail_texts[0])
+    assert list(combined) == ["context", "candidatesBank", "pair"]
+    assert combined["pair"] == {"leftId": "cand-a", "rightId": "cand-b"}
 
 
 def test_single_call_purposes_keep_unmarked_string_user_content(monkeypatch):
@@ -2882,8 +2927,8 @@ def test_review_call_telemetry_reports_prefix_chars(monkeypatch):
         system_prompt="compare",
         user_payload={
             "context": {"contextId": "ctx-1", "question": "q"},
-            "left": {"candidateId": "a"},
-            "right": {"candidateId": "b"},
+            "candidatesBank": [{"candidateId": "a"}, {"candidateId": "b"}],
+            "pair": {"leftId": "a", "rightId": "b"},
         },
         session_id="team-1",
     )

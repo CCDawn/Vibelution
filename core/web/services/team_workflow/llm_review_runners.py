@@ -55,6 +55,7 @@ from typing import Any
 from config import get_config
 from core.infrastructure.llm_utils import (
     build_cacheable_system_message,
+    build_cacheable_system_message_with_shared_head,
     build_cacheable_user_prefix_message,
 )
 from core.llm import LLMInvocationContext, get_llm_client, invoke_llm
@@ -83,6 +84,7 @@ from core.research.workflow.contracts.hypothesis_quality import (
 )
 from core.web.services.team.team_constants import CHALLENGE_CUP_RESEARCH_TEAM_ID
 from core.web.services.team_workflow.hypothesis_review_executor import (
+    PAIRWISE_CANDIDATE_BANK_CONTEXT_KEY,
     ProviderBoundReviewResult,
 )
 
@@ -659,15 +661,24 @@ def review_step_system_prompts() -> tuple[tuple[str, str], ...]:
 # round) AND can be moved to the front of the payload without changing the
 # payload's semantics (JSON object key order is insignificant to the model):
 #
-# - ``hypothesis_reflection``: ``context`` (contextId+question), the rubric
-#   dimension constants, and ``literatureContrast`` (retrieved once per
-#   context) are wave-invariant; the reordered payload carries them first.
-#   ``candidate``, ``requireCoreHypothesisCoherence`` (derived from the
-#   candidate's authority) and ``refsWhitelist`` (candidate-bound) stay in the
-#   per-call tail.
-# - ``hypothesis_pairwise``: only ``context`` is wave-invariant; the left and
-#   right candidates are the per-call tail.  The prefix is small but the split
-#   is clean, so it is marked anyway.
+# - ``hypothesis_reflection``: ``context`` (contextId+question) and the rubric
+#   dimension constants are wave-invariant; the reordered payload carries
+#   them first.  ``literatureContrast`` is NOT invariant: the executor
+#   retrieves it per candidate (``_reflection_step`` calls
+#   ``retrieve_literature_contrast(candidate)`` inside each reflection thunk)
+#   and the retrieval meta carries per-call ``retrievedAt``/``durationMs``
+#   stamps, so marking it as prefix forked the "shared" block after a few
+#   hundred bytes and every sibling call missed.  It stays in the per-call
+#   tail together with ``candidate``, ``requireCoreHypothesisCoherence``
+#   (derived from the candidate's authority) and ``refsWhitelist``
+#   (candidate-bound).
+# - ``hypothesis_pairwise``: ``context`` and ``candidatesBank`` (every
+#   reviewed candidate of the wave, sorted by candidateId) are wave-invariant
+#   and form the marked prefix; only the tiny ``pair`` selector is the
+#   per-call tail.  Historically each pairwise call embedded its own two
+#   candidates as ``left``/``right`` so three pair calls shared ~nothing
+#   beyond the context (measured 0.3% hit rate); the bank makes the heavy
+#   candidate text a shared prefix.
 # - pareto / metareview / revision / meeting_digest are skipped: each fires at
 #   most one call per wave (or carries per-wave-unique aggregated results), so
 #   there is no wave-invariant prefix to mark.
@@ -677,9 +688,8 @@ _REVIEW_CACHEABLE_USER_PREFIX_KEYS: dict[str, tuple[str, ...]] = {
         "scoreDimensions",
         "reviewDimensions",
         "allowedRatings",
-        "literatureContrast",
     ),
-    "hypothesis_pairwise": ("context",),
+    "hypothesis_pairwise": ("context", "candidatesBank"),
 }
 
 
@@ -1544,8 +1554,10 @@ def _invoke_review_llm_impl(
         purpose,
         user_payload,
     )
+    # L0 shared system head: the byte-stable head opens every step's system
+    # prompt as its own marked block (see ``build_review_system_message``).
     messages: list[Any] = [
-        build_cacheable_system_message(system_prompt),
+        build_review_system_message(system_prompt),
         user_message,
     ]
     receipt_binding = (
@@ -2138,10 +2150,35 @@ def _rubric_block() -> str:
     return json.dumps(canonical_hypothesis_score_rubric(), ensure_ascii=False)
 
 
-_REFLECTION_SYSTEM_PROMPT = f"""你是科研假说评审员（独立评分步骤）。按官方五维 rubric 对单个假说候选独立评分。
+# Shared review system head (prefix-cache lever L0).
+#
+# The five review steps historically carried five unrelated system prompts
+# that diverged around the 11th character ("你是科研假说评审员（独立评分…" vs
+# "…（两两比较…"), so the provider's explicit prompt cache could never replay
+# one step's system block for another step: every step paid its own cold
+# system prefix once per wave.  The truly common part — the pipeline
+# identity, the official rubric and dimension constants, and the JSON-only
+# output rule — now lives in ONE byte-stable head that opens every step's
+# system prompt; each step's own identity, requirements and output structure
+# follow as a step tail.  ``build_review_system_message`` sends the head as a
+# leading ``cache_control`` block that is byte-identical across the five
+# steps (``test_review_step_prompts_share_one_byte_identical_head``), so one
+# warm head serves reflection, pairwise, Pareto, MetaReview and revision.
+#
+# The head must stay a pure function of contract constants: any per-call or
+# per-round text here would silently defeat the cross-step replay.
+REVIEW_SHARED_SYSTEM_HEAD = f"""你是科研假说评审流水线的执行者。流水线固定包含五个步骤：独立评分（Reflection）、两两比较（Pairwise）、Pareto 分类、MetaReview、修订（Revision）；每次调用只执行「本步骤」段落指定的一个步骤，你在该步骤中的具体身份由该段落给出。
 
-Rubric（分数 0.0-1.0，两位小数，按分档描述对号入座）：
+通用约定（对所有步骤生效）：
+- 官方五维评分 rubric（分数 0.0-1.0，两位小数，按分档描述对号入座）：
 {_rubric_block()}
+- 五维评分维度固定为 {list(HYPOTHESIS_SCORE_DIMENSIONS)}。
+- 审计七维固定为 {list(REQUIRED_REVIEW_DIMENSIONS)}，审计 rating 只能取 {list(REVIEW_DIMENSION_RATINGS)}。
+- 严格输出单个 JSON 对象。"""
+
+_REFLECTION_SYSTEM_TAIL = f"""
+
+本步骤：独立评分（Reflection）。你是科研假说评审员，按官方五维 rubric 对单个假说候选独立评分。
 
 要求：
 - scores 必须恰好包含五个维度：{list(HYPOTHESIS_SCORE_DIMENSIONS)}。
@@ -2154,47 +2191,53 @@ Rubric（分数 0.0-1.0，两位小数，按分档描述对号入座）：
 - 输出可选顶层 noveltyContrast 对象 {{"overlapPapers": [str], "deltaStatement": str, "basis": "retrieved" | "degraded"}}：overlapPapers 列出确实覆盖候选内容的具体论文 title（无重叠则为空数组），deltaStatement 一句话说明相对已检索文献的真正增量，basis 按实际检索情况取值。确实无法给出时可省略该对象，省略不影响其余输出的有效性。
 - reviewedBy 固定为 "llm"，status 固定为 "reviewed"。
 - 若输入 requireCoreHypothesisCoherence=true，必须在同一次 Reflection 输出 coreHypothesisCoherence，不得新增模型调用。它必须恰好按顺序覆盖 {list(CORE_HYPOTHESIS_COHERENCE_CHECK_IDS)}；每项包含 checkId、passed、非空 rationale、claimRefs、evidenceRefs。evidenceRefs 只能来自 refsWhitelist；五项分别审查因果链、prediction 是否由 mechanism 推导、falsifier 是否命中机制、population/boundary 是否冲突、候选边界是否与替代方案可区分。
-- 严格输出单个 JSON 对象。
 
 输出 JSON 结构：
 {{"claim": str, "rationale": str, "differenceFromAlternatives": str, "lineageRefs": [str], "scores": {{{", ".join(f'"{d}": float' for d in HYPOTHESIS_SCORE_DIMENSIONS)}}}, "reviewedBy": "llm", "status": "reviewed", "dimensionReviews": [dict], "noveltyContrast": {{"overlapPapers": [str], "deltaStatement": str, "basis": "retrieved" | "degraded"}}, "coreHypothesisCoherence": {{"candidateId": str, "reviewer": str, "checks": [{{"checkId": str, "passed": bool, "rationale": str, "claimRefs": [str], "evidenceRefs": [str]}}]}}}}
 """
 
-_PAIRWISE_SYSTEM_PROMPT = """你是科研假说评审员（两两比较步骤）。对给出的左右两个候选做一次比较。
+_PAIRWISE_SYSTEM_TAIL = """
+
+本步骤：两两比较（Pairwise）。你是科研假说评审员，对指定的左右两个候选做一次比较。
+
+输入结构：candidatesBank 按 candidateId 字典序列出本轮全部候选的完整内容；pair.leftId 与 pair.rightId 指定本次要比较的两个候选（左槽固定为字典序较小者），二者都能在 candidatesBank 中按 candidateId 找到；其余候选仅作参照，不参与本次胜负判定。
 
 要求：
-- outcome 只能是 "left_wins"、"right_wins" 或 "tie"；只依据候选内容与评审上下文判断。
-- justification 用中文说明胜负依据，必须非空。
-- 严格输出单个 JSON 对象。
+- outcome 只能是 "left_wins"、"right_wins" 或 "tie"，其中 left 指 pair.leftId、right 指 pair.rightId；只依据候选内容与评审上下文判断。
+- justification 用中文说明胜负依据，必须非空；提及候选时写出其 candidateId，不要只用「左/右」指代。
 
 输出 JSON 结构：
 {"outcome": "left_wins" | "right_wins" | "tie", "justification": str}
 """
 
-_PARETO_SYSTEM_PROMPT = """你是科研假说评审员（Pareto 分类步骤）。基于五维评分把所有候选划分为 Pareto 前沿与被支配两类。
+_PARETO_SYSTEM_TAIL = """
+
+本步骤：Pareto 分类。你是科研假说评审员，基于五维评分把所有候选划分为 Pareto 前沿与被支配两类。
 
 要求：
 - paretoFrontCandidateIds 与 dominatedCandidateIds 的并集必须恰好覆盖全部候选 id，且两集合不相交。
 - 前沿集合不能为空；notes 用中文说明划分依据。
-- 严格输出单个 JSON 对象。
 
 输出 JSON 结构：
 {"paretoFrontCandidateIds": [str], "dominatedCandidateIds": [str], "notes": str}
 """
 
-_METAREVIEW_SYSTEM_PROMPT = """你是科研团队 Coordinator（MetaReview 步骤）。综合独立评分、两两比较与 Pareto 分类，给出最终推荐。
+_METAREVIEW_SYSTEM_TAIL = """
+
+本步骤：MetaReview。你是科研团队 Coordinator，综合独立评分、两两比较与 Pareto 分类，给出最终推荐。
 
 要求：
 - recommendationCandidateId 必须从给出的候选 id 中选择。
 - rationale 用中文说明推荐依据；riskNotes 汇总未解决风险。
 - accepted 表示本轮评审结论是否可接受（推荐候选质量足以进入下一轮修订或第一阶段研究计划设计）；不得据此声称实验已设计或执行。
-- 严格输出单个 JSON 对象。
 
 输出 JSON 结构：
 {"recommendationCandidateId": str, "rationale": str, "riskNotes": str, "accepted": bool}
 """
 
-_REVISION_SYSTEM_PROMPT = """你是科研假说修订员。根据 MetaReview 的明确反馈，真正改写被推荐的 R1 假说，产出 R2；你不是复述评分或推荐理由。
+_REVISION_SYSTEM_TAIL = """
+
+本步骤：修订（Revision）。你是科研假说修订员，根据 MetaReview 的明确反馈，真正改写被推荐的 R1 假说，产出 R2；你不是复述评分或推荐理由。
 
 要求：
 - revisedCandidate.candidateId 必须与 parentCandidate.candidateId 完全一致，但 claim 必须是实质修订后的新文本，不能复制原文。
@@ -2202,11 +2245,47 @@ _REVISION_SYSTEM_PROMPT = """你是科研假说修订员。根据 MetaReview 的
 - 父候选已有的 testablePrediction、falsifier、axisProfile、lineageRefs 若非空，修订必须保留或完善它们，不得显式输出空字符串、空对象或空列表。
 - changes 必须逐条说明实际改动且不能为空；unresolvedIssues 必须存在且为字符串列表，逐条保留仍未解决的边界或风险；若本次反馈全部解决可为空。
 - 不得把 MetaReview rationale、riskNotes、分数或收据本身冒充 revisedCandidate。
-- 严格输出单个 JSON 对象。
 
 输出 JSON 结构：
 {"revisedCandidate": {"candidateId": str, "claim": str, "rationale": str, "differenceFromAlternatives": str, "lineageRefs": [str], "testablePrediction": str, "falsifier": str, "axisProfile": dict}, "changes": [str], "unresolvedIssues": [str]}
 """
+
+_REFLECTION_SYSTEM_PROMPT = REVIEW_SHARED_SYSTEM_HEAD + _REFLECTION_SYSTEM_TAIL
+_PAIRWISE_SYSTEM_PROMPT = REVIEW_SHARED_SYSTEM_HEAD + _PAIRWISE_SYSTEM_TAIL
+_PARETO_SYSTEM_PROMPT = REVIEW_SHARED_SYSTEM_HEAD + _PARETO_SYSTEM_TAIL
+_METAREVIEW_SYSTEM_PROMPT = REVIEW_SHARED_SYSTEM_HEAD + _METAREVIEW_SYSTEM_TAIL
+_REVISION_SYSTEM_PROMPT = REVIEW_SHARED_SYSTEM_HEAD + _REVISION_SYSTEM_TAIL
+
+
+def split_review_system_prompt(system_prompt: str) -> tuple[str, str]:
+    """Return ``(sharedHead, stepTail)`` for a review system prompt.
+
+    Prompts that do not open with the shared head (custom probes, the digest
+    prompt, test stand-ins) return an empty head and the full text as tail.
+    """
+
+    text = str(system_prompt or "")
+    head = REVIEW_SHARED_SYSTEM_HEAD
+    if text.startswith(head) and len(text) > len(head):
+        return head, text[len(head):]
+    return "", text
+
+
+def build_review_system_message(system_prompt: str) -> Any:
+    """Build the system message every review call and keepalive probe sends.
+
+    The shared head becomes the leading ``cache_control`` block (byte-identical
+    across the five steps) and the step tail the second marked block, so the
+    provider replays the head across steps and the full head+tail within a
+    step.  Prompts without the head keep the historical single-block shape.
+    Review calls and keepalive probes MUST both build through this function:
+    the provider only replays an exact block-for-block prefix match.
+    """
+
+    head, tail = split_review_system_prompt(system_prompt)
+    if not head:
+        return build_cacheable_system_message(tail)
+    return build_cacheable_system_message_with_shared_head(head, tail)
 
 
 def _validated_dimension_review_rows(
@@ -2314,6 +2393,64 @@ def _literature_contrast_payload(context: Mapping[str, Any]) -> dict[str, Any]:
     return {"papers": [], "degraded": True, "retrievalMeta": {}}
 
 
+def pairwise_candidate_bank(
+    left: Mapping[str, Any],
+    right: Mapping[str, Any],
+    context: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Return the wave-invariant pairwise candidate bank, sorted by candidateId.
+
+    The executor hands every reviewed candidate of the wave to each pairwise
+    call under ``PAIRWISE_CANDIDATE_BANK_CONTEXT_KEY``; the bank copies win
+    over the positional pair so all calls of the wave serialize identical
+    bank bytes.  Direct callers without a bank degrade to the two candidates
+    of the pair (still sorted, still a valid bank).
+    """
+
+    raw_bank = context.get(PAIRWISE_CANDIDATE_BANK_CONTEXT_KEY)
+    by_id: dict[str, dict[str, Any]] = {}
+    for item in list(raw_bank) if isinstance(raw_bank, (list, tuple)) else []:
+        if not isinstance(item, Mapping):
+            continue
+        candidate_id = str(item.get("candidateId") or "")
+        if candidate_id and candidate_id not in by_id:
+            by_id[candidate_id] = dict(item)
+    for item in (left, right):
+        candidate_id = str(item.get("candidateId") or "")
+        if candidate_id not in by_id:
+            by_id[candidate_id] = dict(item)
+    return [by_id[candidate_id] for candidate_id in sorted(by_id)]
+
+
+def pairwise_slot_order(left_id: str, right_id: str) -> tuple[str, str, bool]:
+    """Return ``(bankLeftId, bankRightId, flipped)`` for one debated pair.
+
+    The model always sees the lexicographically smaller candidateId in the
+    left slot so the ``(bank, pair)`` payload never depends on the debated
+    order.  ``flipped`` tells the runner that the caller's ``left`` landed in
+    the model's right slot and the verdict must be mirrored back.
+    """
+
+    bank_left_id, bank_right_id = sorted((str(left_id), str(right_id)))
+    return bank_left_id, bank_right_id, bank_left_id != str(left_id)
+
+
+def pairwise_outcome_in_caller_frame(outcome: Any, *, flipped: bool) -> str:
+    """Map a model verdict from the lexicographic slot frame to the caller's.
+
+    Invalid or empty verdicts pass through (lower-cased and stripped, exactly
+    what the executor normalizes today) so the executor's strict outcome
+    validation still fails them the same way.
+    """
+
+    normalized = str(outcome or "").strip().lower()
+    if not flipped:
+        return normalized
+    return {"left_wins": "right_wins", "right_wins": "left_wins"}.get(
+        normalized, normalized
+    )
+
+
 def _normalized_novelty_contrast(
     raw: Any,
     *,
@@ -2407,9 +2544,11 @@ def build_hypothesis_review_runners(
             purpose="hypothesis_reflection",
             system_prompt=_REFLECTION_SYSTEM_PROMPT,
             # Key order is wave-invariant-prefix-first (documented L1 reorder):
-            # context/rubric constants/literature contrast are byte-stable
-            # across the wave's calls and land in the marked cacheable prefix;
-            # candidate, coherence flag and refs whitelist are per-call tail.
+            # context and the rubric constants are byte-stable across the
+            # wave's calls and land in the marked cacheable prefix; the
+            # literature contrast (retrieved per candidate, with per-call
+            # retrieval stamps), candidate, coherence flag and refs whitelist
+            # are the per-call tail.
             user_payload={
                 "context": {
                     "contextId": str(context.get("contextId") or ""),
@@ -2497,33 +2636,53 @@ def build_hypothesis_review_runners(
     def pairwise_runner(
         left: dict[str, Any], right: dict[str, Any], context: dict[str, Any]
     ):
-        return _invoke_review_llm(
+        left_id = str(left.get("candidateId") or "")
+        right_id = str(right.get("candidateId") or "")
+        # L1 + candidate bank: the wave-invariant context and the full
+        # candidate bank (sorted by candidateId) form the marked prefix; the
+        # tiny pair selector is the per-call tail.  The model always sees the
+        # lexicographically smaller id in the left slot, and the verdict is
+        # mapped back to the caller's (left, right) frame below, so the
+        # executor keeps receiving outcomes in the recorded debated order.
+        bank_left_id, bank_right_id, flipped = pairwise_slot_order(left_id, right_id)
+        produced = _invoke_review_llm(
             resolved,
             agent_id=str(resolved.get("agentId") or "challenge_cup_evaluator"),
             purpose="hypothesis_pairwise",
             system_prompt=_PAIRWISE_SYSTEM_PROMPT,
-            # L1 reorder: the wave-invariant context first (marked prefix),
-            # the per-call left/right candidates after (unmarked tail).
             user_payload={
                 "context": {
                     "contextId": str(context.get("contextId") or ""),
                     "question": str(context.get("question") or ""),
                 },
-                "left": dict(left),
-                "right": dict(right),
+                "candidatesBank": pairwise_candidate_bank(left, right, context),
+                "pair": {
+                    "leftId": bank_left_id,
+                    "rightId": bank_right_id,
+                },
             },
             session_id=_context_session(context),
             receipt_context=_receipt_context(
                 context,
                 review_step="pairwise",
-                identity_parts=(
-                    str(left.get("candidateId") or ""),
-                    str(right.get("candidateId") or ""),
-                ),
+                identity_parts=(left_id, right_id),
             ),
             require_provider_receipt=require_provider_receipts,
             deadline_at_ms=int(context.get("challengeDeadlineAtMs") or 0) or None,
         )
+        provider_receipt = None
+        if isinstance(produced, ProviderBoundReviewResult):
+            provider_receipt = produced.model_invocation_receipt
+            result = dict(produced.payload)
+        else:
+            result = dict(produced)
+        result["outcome"] = pairwise_outcome_in_caller_frame(
+            result.get("outcome"),
+            flipped=flipped,
+        )
+        if provider_receipt is not None:
+            return ProviderBoundReviewResult(result, provider_receipt)
+        return result
 
     def pareto_runner(scores_by_candidate: dict[str, dict[str, float]], context: dict[str, Any]):
         produced = _invoke_review_llm(

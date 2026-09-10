@@ -367,6 +367,30 @@ def _pareto_model_call_required(candidate_count: int) -> bool:
     return candidate_count != 2
 
 
+# Context key under which every pairwise call of one wave receives the full
+# reviewed candidate set.  The LLM pairwise runner serializes it as the
+# wave-invariant ``candidatesBank`` prefix (sorted by candidateId) so the heavy
+# candidate text is a shared, cacheable block instead of a per-pair tail; the
+# runner still receives the debated ``(left, right)`` pair as positional
+# arguments and returns its verdict in that frame, so this key never changes
+# what the executor records.
+PAIRWISE_CANDIDATE_BANK_CONTEXT_KEY = "pairwiseCandidateBank"
+
+
+def pairwise_runner_context(
+    context: Mapping[str, Any],
+    reviewed_candidates: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Return the per-wave context handed to every pairwise runner call."""
+
+    return {
+        **dict(context),
+        PAIRWISE_CANDIDATE_BANK_CONTEXT_KEY: [
+            dict(item) for item in reviewed_candidates
+        ],
+    }
+
+
 def _collect_pairwise_and_pareto_outputs(
     context: Mapping[str, Any],
     reviewed_candidates: list[dict[str, Any]],
@@ -391,11 +415,12 @@ def _collect_pairwise_and_pareto_outputs(
 
     by_id = {str(item["candidateId"]): item for item in reviewed_candidates}
     pairs = deterministic_pairwise_order(list(by_id), position_seed)
+    pairwise_context = pairwise_runner_context(context, reviewed_candidates)
     calls: list[Callable[[], ReviewRunnerResult]] = []
     if pairwise_runner is not None:
         calls.extend(
             lambda left=by_id[left_id], right=by_id[right_id]: pairwise_runner(
-                dict(left), dict(right), dict(context)
+                dict(left), dict(right), dict(pairwise_context)
             )
             for left_id, right_id in pairs
         )
@@ -701,6 +726,73 @@ def _reflection_step(
     return reviewed
 
 
+def _arm_review_wave_gap_keepalive(
+    context: Mapping[str, Any],
+    *,
+    runner: ReflectionRunner | None,
+) -> Any:
+    """Arm the reflection→pairwise prefix keepalive; never raises, may be None.
+
+    Only a real runner wave can outlive the provider cache TTL, and the probe
+    needs the meeting scope (``teamId`` + ``meetingRoundId``) the FORMAL
+    review context carries; fixture reviews and scope-less contexts stay
+    probe-free.  The keepalive module owns every guard (env delay gate, LLM
+    gate, quiet diagnostics), so this hook only decides *when* to arm.
+    """
+
+    if runner is None:
+        return None
+    team_id = str(context.get("teamId") or "").strip()
+    meeting_round_id = str(context.get("meetingRoundId") or "").strip()
+    if not team_id or not meeting_round_id:
+        return None
+    try:
+        from core.web.services.team_workflow import review_cache_keepalive
+
+        return review_cache_keepalive.schedule_review_wave_gap_keepalive(
+            team_id,
+            meeting_round_id,
+        )
+    except Exception:  # noqa: BLE001 - a keepalive must never block the review
+        return None
+
+
+def _run_reflection_wave_with_gap_keepalive(
+    context: Mapping[str, Any],
+    candidates: list[dict[str, Any]],
+    *,
+    runner: ReflectionRunner | None,
+    agent_id: str,
+    formal_receipts: list[dict[str, Any]] | None,
+    require_core_coherence: bool,
+    max_concurrent_calls: int,
+) -> list[dict[str, Any]]:
+    """Run the reflection wave with the wave-gap keepalive armed around it.
+
+    The handle is cancelled as soon as the wave returns (the pairwise wave
+    dispatches right after), so a wave shorter than one keepalive delay never
+    fires a probe and a longer one keeps the pairwise prefix warm.
+    """
+
+    keepalive = _arm_review_wave_gap_keepalive(context, runner=runner)
+    try:
+        return _reflection_step(
+            context,
+            candidates,
+            runner=runner,
+            agent_id=agent_id,
+            formal_receipts=formal_receipts,
+            require_core_coherence=require_core_coherence,
+            max_concurrent_calls=max_concurrent_calls,
+        )
+    finally:
+        if keepalive is not None:
+            try:
+                keepalive.cancel()
+            except Exception:  # noqa: BLE001 - cleanup must never mask the wave
+                pass
+
+
 def _fixture_debate_outcome(
     left: Mapping[str, Any],
     right: Mapping[str, Any],
@@ -760,10 +852,11 @@ def _pairwise_step(
         if precomputed_outputs is not None:
             produced_by_pair = list(precomputed_outputs)
         else:
+            pairwise_context = pairwise_runner_context(context, candidates)
             produced_by_pair = _collect_runner_outputs(
                 [
                     lambda left=by_id[left_id], right=by_id[right_id]: runner(
-                        dict(left), dict(right), dict(context)
+                        dict(left), dict(right), dict(pairwise_context)
                     )
                     for left_id, right_id in pairs
                 ],
@@ -1406,7 +1499,7 @@ def execute_hypothesis_review(
         }
     )[:16]
 
-    reviewed_candidates = _reflection_step(
+    reviewed_candidates = _run_reflection_wave_with_gap_keepalive(
         context,
         candidates,
         runner=reflection_runner,

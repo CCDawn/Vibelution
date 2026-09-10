@@ -24,6 +24,16 @@ spaced one keepalive delay apart.  Chaining stops as soon as the meeting round
 closes or becomes unreadable — no active review wave means no probing, so idle
 meetings never burn tokens.
 
+Review-wave gap probes (``ReviewWaveGapKeepalive``): the review itself runs
+after the meeting round closed, and its reflection→pairwise gap measured
+~323 s — past the TTL — so the pairwise wave started cold even with the
+round-gap probes above.  The hypothesis review executor arms one wave handle
+when the reflection wave starts and cancels it when that wave completes; the
+handle fires a probe (pairwise prompt = shared head + pairwise tail) every
+keepalive delay only while the wave is still running, so short waves never
+probe and long waves keep the next wave's prefix warm.  Same probe path, same
+guards, wave-scoped liveness instead of the meeting-round one.
+
 Hard guards (keepalive is a pure optimization and must never affect the main
 chain or its accounting):
 
@@ -50,7 +60,6 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from core.infrastructure.llm_utils import build_cacheable_system_message
 from core.llm import LLMInvocationContext, invoke_llm
 from core.llm.client import MAX_OUTPUT_TOKENS_OVERRIDE_METADATA_KEY
 from core.web.services.team_workflow.llm_review_runners import (
@@ -274,8 +283,15 @@ def _run_probe(
     prompt_tag: str = "custom",
     chain_index: int = 0,
     resolve: Callable[[], dict[str, Any] | None] | None = None,
+    is_active: Callable[[], bool] | None = None,
 ) -> None:
-    """Fire one keepalive probe; every failure path stays quiet and bounded."""
+    """Fire one keepalive probe; every failure path stays quiet and bounded.
+
+    ``is_active`` lets a caller swap the default "meeting round still open"
+    liveness gate (round-gap probes between discussion rounds) for its own
+    wave-scoped predicate (the review wave probes below, which run while the
+    meeting round is already closed).
+    """
 
     from core.web.services.team_workflow.llm_review_runners import (
         _response_usage_fields,
@@ -287,7 +303,10 @@ def _run_probe(
         "promptTag": str(prompt_tag),
         "chainIndex": int(chain_index),
     }
-    if not _meeting_round_is_active(team_id, meeting_round_id):
+    active_check = is_active or (
+        lambda: _meeting_round_is_active(team_id, meeting_round_id)
+    )
+    if not active_check():
         _record_keepalive_scene_event(
             "review_cache_keepalive.probe.skipped",
             outcome="skipped",
@@ -319,10 +338,11 @@ def _run_probe(
             return
         model_ref = str(resolved.get("modelRef") or "")
         messages: list[Any] = [
-            # Byte-identical construction to the review/digest calls: the
-            # provider can only hit the cache entry when the marked prefix
-            # matches exactly.
-            build_cacheable_system_message(system_prompt),
+            # Byte-identical construction to the review calls: the provider
+            # can only hit the cache entry when the marked prefix matches
+            # exactly, so the probe goes through the same shared-head builder
+            # (head block + step tail block) the review calls use.
+            llm_review_runners.build_review_system_message(system_prompt),
             {"role": "user", "content": _PROBE_USER_CONTENT},
         ]
         invocation_context = LLMInvocationContext(
@@ -389,6 +409,159 @@ def _run_probe(
         chain_index=chain_index,
         resolve=resolve,
     )
+
+
+class ReviewWaveGapKeepalive:
+    """Re-arm the next review wave's cacheable prefix while one wave runs.
+
+    Measured review waves gap longer than the ~5 minute DashScope explicit-cache
+    TTL: the last reflection call warms the shared prefix, then the pairwise
+    wave's first dispatch lands ~5.5 minutes later and pays full price.  The
+    executor arms this handle when the reflection wave starts; a timer fires
+    one minimal probe every keepalive delay (default 4 minutes) *only while
+    the wave is still running* — cancelling the handle (reflection wave done,
+    pairwise wave follows immediately) leaves short waves completely
+    probe-free, so the probe is scheduled exactly when the reflection→pairwise
+    gap is predicted to cross the TTL.  Probes ride ``_run_probe`` unchanged
+    (same LLM gate, budget, metering, quiet diagnostics) with a wave-scoped
+    liveness predicate instead of the meeting-round one: the review runs after
+    the meeting round already closed.
+
+    Re-arms are bounded by ``keepalive_chain_max_probes()`` and everything is
+    fire-and-forget: ``cancel()`` is idempotent and never raises.
+    """
+
+    def __init__(
+        self,
+        *,
+        team_id: str,
+        meeting_round_id: str,
+        system_prompt: str,
+        prompt_tag: str,
+        resolve: Callable[[], dict[str, Any] | None] | None,
+    ) -> None:
+        self._team_id = str(team_id)
+        self._meeting_round_id = str(meeting_round_id)
+        self._system_prompt = str(system_prompt)
+        self._prompt_tag = str(prompt_tag)
+        self._resolve = resolve
+        self._cancelled = threading.Event()
+        self._lock = threading.Lock()
+        self._timer: threading.Timer | None = None
+        self._probes_armed = 0
+
+    def start(self) -> "ReviewWaveGapKeepalive | None":
+        """Arm the first delayed probe; ``None``-equivalent when disabled."""
+
+        if meeting_cache_keepalive_delay_ms() <= 0:
+            self._cancelled.set()
+            return None
+        self._schedule_timer()
+        return self
+
+    def _schedule_timer(self) -> None:
+        timer = threading.Timer(
+            meeting_cache_keepalive_delay_ms() / 1000.0,
+            self._fire,
+        )
+        timer.daemon = True
+        with self._lock:
+            if self._cancelled.is_set():
+                return
+            self._timer = timer
+            self._probes_armed += 1
+        # Register with the module registry so test resets cancel wave timers
+        # the same way they cancel round-gap probe timers.
+        with _pending_timers_lock:
+            _pending_timers.append(timer)
+        timer.start()
+
+    def _fire(self) -> None:
+        if self._cancelled.is_set():
+            return
+        with self._lock:
+            self._timer = None
+            chain_index = self._probes_armed
+        _run_probe(
+            self._team_id,
+            self._meeting_round_id,
+            system_prompt=self._system_prompt,
+            prompt_tag=self._prompt_tag,
+            chain_index=chain_index,
+            resolve=self._resolve,
+            is_active=lambda: not self._cancelled.is_set(),
+        )
+        # Re-arm for waves that outlive one probe interval, bounded by the
+        # same chain budget as the round-gap probes.
+        if (
+            not self._cancelled.is_set()
+            and chain_index < keepalive_chain_max_probes()
+            and meeting_cache_keepalive_delay_ms() > 0
+        ):
+            self._schedule_timer()
+
+    def cancel(self) -> None:
+        """Stop the chain; the wave ended, so no further probe may fire."""
+
+        self._cancelled.set()
+        with self._lock:
+            timer = self._timer
+            self._timer = None
+        if timer is not None:
+            timer.cancel()
+
+
+def review_wave_gap_probe_prompt() -> tuple[str, str]:
+    """Return ``(promptTag, systemPrompt)`` the wave-gap probe should send.
+
+    The pairwise prompt is the highest-value target: its marked blocks are
+    (a) the shared system head every next wave reuses and (b) the pairwise
+    step tail itself.  Falls back to the raw reflection prompt if the step
+    list ever changes shape.
+    """
+
+    from core.web.services.team_workflow.llm_review_runners import (
+        review_step_system_prompts,
+    )
+
+    prompts = dict(review_step_system_prompts())
+    return "pairwise", prompts.get("pairwise") or prompts.get("reflection", "")
+
+
+def schedule_review_wave_gap_keepalive(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    resolve: Callable[[], dict[str, Any] | None] | None = None,
+) -> ReviewWaveGapKeepalive | None:
+    """Arm the reflection→pairwise gap keepalive for one review execution.
+
+    Fire-and-forget: returns the handle the executor cancels when the
+    reflection wave completes, or ``None`` when the feature is disabled
+    (keepalive delay 0) or the scope is unusable.  Never raises.
+    """
+
+    normalized_team_id = str(team_id or "").strip()
+    normalized_round_id = str(meeting_round_id or "").strip()
+    if (
+        not normalized_team_id
+        or not normalized_round_id
+        or meeting_cache_keepalive_delay_ms() <= 0
+    ):
+        return None
+    try:
+        prompt_tag, system_prompt = review_wave_gap_probe_prompt()
+        if not system_prompt:
+            return None
+        return ReviewWaveGapKeepalive(
+            team_id=normalized_team_id,
+            meeting_round_id=normalized_round_id,
+            system_prompt=system_prompt,
+            prompt_tag=prompt_tag,
+            resolve=resolve,
+        ).start()
+    except Exception:  # noqa: BLE001 - keepalive scheduling never blocks reviews
+        return None
 
 
 def schedule_meeting_cache_keepalive(

@@ -51,7 +51,9 @@ def _receipt(**overrides):
 
 def test_from_invocation_bounds_content_and_hashes() -> None:
     receipt = _receipt()
-    assert len(receipt.request_excerpt) <= 259
+    # Request excerpts carry the canonical shape summary and get the wider
+    # 1024-char budget; response excerpts keep the tight 256-char bound.
+    assert len(receipt.request_excerpt) <= 1027
     assert len(receipt.response_excerpt) <= 259
     assert "ROUND_PROMPT" * 500 not in receipt.request_excerpt
     assert "ROUND_RESPONSE" * 500 not in receipt.response_excerpt
@@ -60,6 +62,44 @@ def test_from_invocation_bounds_content_and_hashes() -> None:
     assert receipt.request_summary_hash != receipt.response_summary_hash
     again = _receipt()
     assert again.request_summary_hash == receipt.request_summary_hash
+
+
+def test_request_excerpt_keeps_the_full_payload_shape_summary() -> None:
+    """The prefix-cache shape fields must survive the request excerpt bound.
+
+    ``_canonical_receipt_request_summary`` yields ~650 chars of canonical JSON;
+    the historical 256-char bound cut ``payloadShape`` (including
+    ``firstSystemCacheControlBlockCount``) out of every persisted receipt.
+    """
+
+    from core.llm.client import _canonical_receipt_request_summary
+
+    payload = {
+        "model": "qwen-plus",
+        "messages": [
+            {
+                "role": "system",
+                "content": [
+                    {"type": "text", "text": "h" * 2000, "cache_control": {"type": "ephemeral"}},
+                    {"type": "text", "text": "t" * 500, "cache_control": {"type": "ephemeral"}},
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "p" * 700, "cache_control": {"type": "ephemeral"}},
+                    {"type": "text", "text": "q" * 300},
+                ],
+            },
+        ],
+    }
+    summary = _canonical_receipt_request_summary(payload)
+    receipt = _receipt(request_content=summary)
+    excerpt = receipt.to_dict()["requestExcerpt"]
+    assert not excerpt.endswith("...")
+    assert '"firstSystemCacheControlBlockCount":2' in excerpt
+    assert '"conversationSha256"' in excerpt
+    assert ModelInvocationReceipt.from_dict(receipt.to_dict()).request_excerpt == excerpt
 
 
 def test_serialization_scrubs_secrets_and_bounds_excerpts() -> None:
@@ -89,10 +129,12 @@ def test_serialization_scrubs_secrets_and_bounds_excerpts() -> None:
 
 
 def test_direct_construction_is_bounded_on_serialization() -> None:
-    receipt = _receipt(request_content="x" * 5000)
+    receipt = _receipt(request_content="x" * 5000, response_content="y" * 5000)
     payload = receipt.to_dict()
-    assert len(payload["requestExcerpt"]) <= 259
+    assert len(payload["requestExcerpt"]) <= 1027
+    assert len(payload["responseExcerpt"]) <= 259
     assert "x" * 5000 not in payload["requestExcerpt"]
+    assert "y" * 5000 not in payload["responseExcerpt"]
 
 
 def test_six_statuses_roundtrip() -> None:

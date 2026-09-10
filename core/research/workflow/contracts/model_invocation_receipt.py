@@ -30,6 +30,15 @@ class ModelInvocationStatus(str, Enum):
 
 
 _MAX_EXCERPT_CHARS = 256
+# The request excerpt carries the canonical *shape* summary
+# (``_canonical_receipt_request_summary``: conversation hash + message count +
+# ``payloadShape`` fields such as ``firstSystemCacheControlBlockCount``), never
+# prompt text.  Its canonical JSON runs ~650+ chars, so the generic 256-char
+# bound truncated the payloadShape tail out of every persisted receipt and hid
+# the very fields prefix-cache observability needs.  The request budget is
+# relaxed just enough to fit the full shape summary; the response budget keeps
+# the tighter generic bound because responses carry model output text.
+_MAX_REQUEST_EXCERPT_CHARS = 1024
 _REDACTED = "<redacted>"
 
 _SENSITIVE_KEY_SUBSTRINGS = (
@@ -52,13 +61,18 @@ _REDACT_PATTERN = re.compile(
 )
 
 
-def bound_excerpt(text: Any) -> str:
+def bound_excerpt(text: Any, *, max_chars: int = _MAX_EXCERPT_CHARS) -> str:
     """Bound and scrub a text excerpt; never returns full raw content."""
     value = _content_text(text)
     value = _REDACT_PATTERN.sub(_REDACTED, value)
-    if len(value) > _MAX_EXCERPT_CHARS:
-        value = value[:_MAX_EXCERPT_CHARS].rstrip() + "..."
+    if len(value) > max_chars:
+        value = value[:max_chars].rstrip() + "..."
     return value
+
+
+def bound_request_excerpt(text: Any) -> str:
+    """Bound the request-side excerpt with the wider shape-summary budget."""
+    return bound_excerpt(text, max_chars=_MAX_REQUEST_EXCERPT_CHARS)
 
 
 def sanitize_metadata(value: Any) -> Any:
@@ -225,7 +239,7 @@ class ModelInvocationReceipt:
             status=status,
             request_summary_hash=_content_digest(request_content),
             response_summary_hash=_content_digest(response_content),
-            request_excerpt=bound_excerpt(request_content),
+            request_excerpt=bound_request_excerpt(request_content),
             response_excerpt=bound_excerpt(response_content),
             started_at_ms=started_at_ms,
             finished_at_ms=finished_at_ms,
@@ -251,7 +265,7 @@ class ModelInvocationReceipt:
             "status": self.status.value,
             "requestSummaryHash": self.request_summary_hash,
             "responseSummaryHash": self.response_summary_hash,
-            "requestExcerpt": bound_excerpt(self.request_excerpt),
+            "requestExcerpt": bound_request_excerpt(self.request_excerpt),
             "responseExcerpt": bound_excerpt(self.response_excerpt),
             "startedAtMs": self.started_at_ms,
             "finishedAtMs": self.finished_at_ms,
@@ -285,7 +299,9 @@ class ModelInvocationReceipt:
             status=status,
             request_summary_hash=str(payload.get("requestSummaryHash") or ""),
             response_summary_hash=str(payload.get("responseSummaryHash") or ""),
-            request_excerpt=bound_excerpt(str(payload.get("requestExcerpt") or "")),
+            request_excerpt=bound_request_excerpt(
+                str(payload.get("requestExcerpt") or "")
+            ),
             response_excerpt=bound_excerpt(str(payload.get("responseExcerpt") or "")),
             started_at_ms=int(payload.get("startedAtMs") or 0),
             finished_at_ms=int(payload.get("finishedAtMs") or 0),
