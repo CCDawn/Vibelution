@@ -300,7 +300,12 @@ def run_supervised_conversation_harness(
             mental_model_enabled=mental_model_enabled,
         )
 
-    deadline = time.monotonic() + max(1, int(timeout_seconds or 1))
+    turn_timeout_seconds = max(1, int(timeout_seconds or 1))
+    # ``needs_continue`` starts a new, explicitly bounded session turn.  A
+    # continuation must receive the same turn budget as the initial submission;
+    # otherwise a first turn that settles near its deadline is guaranteed to
+    # time out before its accepted continuation can finish.
+    deadline = time.monotonic() + turn_timeout_seconds
     cancel_requested = False
     cancel_reason_text = ""
     cancel_deadline: float | None = None
@@ -421,6 +426,7 @@ def run_supervised_conversation_harness(
                 turn_id = str(accepted.get("turnId") or accepted.get("startedTurnId") or "").strip()
                 if turn_id:
                     turn_ids.append(turn_id)
+                deadline = time.monotonic() + turn_timeout_seconds
                 latest_completion_snapshot = {}
                 if callable(progress_callback):
                     progress_callback(

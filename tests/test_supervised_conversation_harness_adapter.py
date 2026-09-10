@@ -575,6 +575,63 @@ def test_conversation_harness_continues_needs_continue_turn_before_finishing(mon
     assert backend["turn_ids"] == ["turn-1", "turn-2"]
 
 
+def test_conversation_harness_gives_each_continuation_its_own_timeout_budget(monkeypatch, tmp_path: Path):
+    submissions: list[str] = []
+    stop_calls: list[str] = []
+    clock = {"value": 0.0}
+
+    def snapshot(session_id, turn_id):
+        if turn_id == "turn-1":
+            clock["value"] = 0.9
+            return {
+                "terminal": True,
+                "terminalStatus": "needs_continue",
+                "lastTurnStatus": "needs_continue",
+                "assistantText": "首回合需要继续。",
+            }
+        if clock["value"] < 1.5:
+            clock["value"] = 1.1
+            return {
+                "terminal": False,
+                "terminalStatus": "",
+                "lastTurnStatus": "running",
+                "assistantText": "",
+            }
+        return {
+            "terminal": True,
+            "terminalStatus": "ready",
+            "lastTurnStatus": "ready",
+            "assistantText": "续回合已完成。",
+        }
+
+    monkeypatch.setattr(adapter, "create_supervised_agent_session", lambda **kwargs: {"id": "session-hidden"})
+    monkeypatch.setattr(
+        adapter,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: submissions.append(content) or {"turnId": f"turn-{len(submissions)}"},
+    )
+    monkeypatch.setattr(adapter, "get_session_turn_completion_snapshot", snapshot)
+    monkeypatch.setattr(adapter, "request_stop_session_turn", lambda session_id: stop_calls.append(session_id))
+    monkeypatch.setattr(adapter.time, "monotonic", lambda: clock["value"])
+    monkeypatch.setattr(adapter.time, "sleep", lambda seconds: clock.__setitem__("value", clock["value"] + seconds))
+
+    result = adapter.run_supervised_conversation_harness(
+        repo_root=tmp_path,
+        mode="single_turn",
+        prompt="improve candidate",
+        timeout_seconds=1,
+        expect_restart=False,
+        post_restart_observe_seconds=0,
+        keep_worktree=True,
+        scenario="candidate_self_improvement",
+        agent_binding={"agentId": "agent-candidate", "role": "candidate"},
+    )
+
+    assert result.status == "success"
+    assert len(submissions) == 2
+    assert stop_calls == []
+
+
 def test_conversation_harness_does_not_continue_after_transaction_closed(monkeypatch, tmp_path: Path):
     submissions: list[str] = []
     close_summary = (
