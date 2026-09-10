@@ -5609,6 +5609,44 @@ def test_stream_splits_reasoning_when_think_tags_span_chunks():
     assert streamed[2].content == "结论"
 
 
+def test_stream_exposes_reasoning_details_deltas_without_polluting_content():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "deepseek",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://api.deepseek.com/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "deepseek-reasoner",
+        }
+    )
+    chunks = [
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "reasoning_content": "字符串思考",
+                        "reasoning_details": [{"type": "reasoning.text", "text": "先看"}],
+                    }
+                }
+            ]
+        },
+        {"choices": [{"delta": {"reasoning_details": [{"type": "reasoning.text", "text": "先看日志"}]}}]},
+        {"choices": [{"delta": {"reasoning_details": [{"type": "reasoning.encrypted", "data": "bm9w"}]}}]},
+        {"choices": [{"delta": {"content": "结论"}}]},
+    ]
+
+    client = LLMClient(config=config, backend=lambda payload: iter(chunks))
+    streamed = list(client.stream([{"role": "user", "content": "read"}]))
+
+    reasoning_deltas = [
+        chunk.additional_kwargs.get("reasoning_content_delta")
+        for chunk in streamed
+        if chunk.additional_kwargs.get("reasoning_content_delta")
+    ]
+    assert reasoning_deltas == ["先看", "日志"]
+    assert "".join(str(chunk.content) for chunk in streamed if chunk.content) == "结论"
+
+
 def test_stream_events_record_reasoning_source_summary(monkeypatch):
     config = make_config(
         **{

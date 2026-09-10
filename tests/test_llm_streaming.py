@@ -169,3 +169,37 @@ def test_accumulator_complete_arguments_are_not_marked_unparsable():
     assert calls[0].arguments_unparsable is False
     assert calls[1].arguments == {}
     assert calls[1].arguments_unparsable is False
+
+
+def test_stream_normalizer_reasoning_details_match_wire_chain_behavior():
+    normalizer = LiteLLMStreamNormalizer()
+    events = list(
+        normalizer.events(
+            [
+                {"choices": [{"delta": {"reasoning_details": [{"type": "reasoning.text", "text": "先看"}]}}]},
+                {"choices": [{"delta": {"reasoning_details": [{"type": "reasoning.text", "text": "先看日志"}]}}]},
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "reasoning_content": "字符串思考",
+                                "reasoning_details": [{"type": "reasoning.text", "text": "先看日志再回答"}],
+                            }
+                        }
+                    ]
+                },
+                {"choices": [{"delta": {"reasoning_details": [{"type": "reasoning.encrypted", "data": "bm9w"}]}}]},
+                {"choices": [{"delta": {"content": "结论"}}]},
+            ]
+        )
+    )
+
+    reasoning_events = [event for event in events if event.type == "reasoning_delta"]
+
+    assert [event.text for event in reasoning_events] == ["先看", "日志", "再回答"]
+    assert [event.provider_payload.get("reasoning_source") for event in reasoning_events] == [
+        "reasoning_details",
+        "reasoning_details",
+        "reasoning_details",
+    ]
+    assert "".join(event.text for event in events if event.type == "text_delta") == "结论"

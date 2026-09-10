@@ -49,6 +49,50 @@ _OPEN_THINK_BLOCK_RE = re.compile(
 _THINK_TAG_RE = re.compile(r"</?(?:think|thinking)\b[^>]*>", flags=re.IGNORECASE)
 
 
+REASONING_TEXT_DETAIL_TYPE = "reasoning.text"
+REASONING_SUMMARY_DETAIL_TYPE = "reasoning.summary"
+REASONING_ENCRYPTED_DETAIL_TYPE = "reasoning.encrypted"
+THINKING_BLOCK_DETAIL_TYPE = "thinking"
+
+
+def extract_reasoning_details_text(value: Any) -> str:
+    """Flatten an OpenRouter-style ``reasoning_details`` array into text.
+
+    Detail items arrive as ``{type, id?, text|summary|data, signature?, format?,
+    index?}`` and are appended in arrival order. ``reasoning.text`` carries the
+    full payload (``text``); ``reasoning.summary`` is only a digest
+    (``summary``); ``reasoning.encrypted`` has no readable text (``data``).
+    Text items win; summaries are used only when no text item exists.
+    Encrypted and unknown types are skipped. Returns ``""`` when nothing is
+    readable.
+    """
+    text_parts: list[str] = []
+    summary_parts: list[str] = []
+    for item in _detail_item_dicts(value):
+        item_type = str(item.get("type") or "")
+        if item_type == REASONING_TEXT_DETAIL_TYPE:
+            text_parts.append(_detail_str(item.get("text")))
+        elif item_type == REASONING_SUMMARY_DETAIL_TYPE:
+            summary_parts.append(_detail_str(item.get("summary")))
+    combined = "".join(text_parts)
+    if combined:
+        return combined
+    return "".join(summary_parts)
+
+
+def extract_thinking_blocks_text(value: Any) -> str:
+    """Flatten a litellm-style ``thinking_blocks`` array into text.
+
+    Elements look like ``{type: "thinking", thinking, signature}``; only the
+    ``thinking`` field of ``type == "thinking"`` items is readable.
+    """
+    parts: list[str] = []
+    for item in _detail_item_dicts(value):
+        if str(item.get("type") or "") == THINKING_BLOCK_DETAIL_TYPE:
+            parts.append(_detail_str(item.get("thinking")))
+    return "".join(parts)
+
+
 def extract_reasoning_text(
     payload: Any,
     text_extractor: TextExtractor,
@@ -65,17 +109,35 @@ def extract_reasoning_text(
     if not isinstance(payload_dict, dict):
         return ReasoningExtraction("")
 
+    details_text = extract_reasoning_details_text(payload_dict.get("reasoning_details"))
+    if details_text:
+        return ReasoningExtraction(details_text, "reasoning_details")
+
+    additional = payload_dict.get("additional_kwargs")
+    if isinstance(additional, dict):
+        details_text = extract_reasoning_details_text(additional.get("reasoning_details"))
+        if details_text:
+            return ReasoningExtraction(details_text, "additional_kwargs.reasoning_details")
+
     for key in REASONING_FIELD_CANDIDATES:
         extracted = _extract_field(payload_dict, key, text_extractor)
         if extracted:
             return ReasoningExtraction(extracted, key)
 
-    additional = payload_dict.get("additional_kwargs")
     if isinstance(additional, dict):
         for key in REASONING_FIELD_CANDIDATES:
             extracted = _extract_field(additional, key, text_extractor)
             if extracted:
                 return ReasoningExtraction(extracted, f"additional_kwargs.{key}")
+
+    thinking_blocks_text = extract_thinking_blocks_text(payload_dict.get("thinking_blocks"))
+    if thinking_blocks_text:
+        return ReasoningExtraction(thinking_blocks_text, "thinking_blocks")
+
+    if isinstance(additional, dict):
+        thinking_blocks_text = extract_thinking_blocks_text(additional.get("thinking_blocks"))
+        if thinking_blocks_text:
+            return ReasoningExtraction(thinking_blocks_text, "additional_kwargs.thinking_blocks")
 
     if include_content_tags:
         content = text_extractor(payload_dict.get("content") or "")
@@ -196,6 +258,37 @@ def _extract_field(payload: dict[str, Any], key: str, text_extractor: TextExtrac
     return text.strip()
 
 
+def _detail_item_dicts(value: Any) -> list[dict[str, Any]]:
+    """Coerce a structured-detail value into a list of item dicts.
+
+    Accepts the raw list, a single detail object/dict, or a container dict
+    holding the list under ``reasoning_details``; elements may be dicts or
+    objects exposing ``dict()``/``model_dump()``.
+    """
+    if isinstance(value, list):
+        items: list[dict[str, Any]] = []
+        for entry in value:
+            converted = _as_dict(entry)
+            if isinstance(converted, dict):
+                items.append(converted)
+        return items
+    converted = _as_dict(value)
+    if not isinstance(converted, dict):
+        return []
+    nested = converted.get("reasoning_details")
+    if isinstance(nested, list):
+        return _detail_item_dicts(nested)
+    return [converted]
+
+
+def _detail_str(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return ""
+    return str(value)
+
+
 def _as_dict(value: Any) -> dict[str, Any] | None:
     if isinstance(value, dict):
         return value
@@ -222,7 +315,9 @@ __all__ = [
     "ReasoningExtraction",
     "ThinkTagStreamParser",
     "ThinkTagStreamResult",
+    "extract_reasoning_details_text",
     "extract_reasoning_text",
     "extract_think_tag_reasoning",
+    "extract_thinking_blocks_text",
     "strip_think_tag_reasoning",
 ]

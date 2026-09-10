@@ -506,6 +506,101 @@ def test_chat_non_prefix_reasoning_replacement_is_emitted_whole():
     assert [event.text for event in events] == ["先看日志", "改查配置"]
 
 
+def test_chat_reasoning_details_incremental_arrays_emit_per_chunk_deltas():
+    decoded = ChatCompletionsWireAdapter().decode_stream(
+        [
+            {"choices": [{"index": 0, "delta": {"reasoning_details": [{"type": "reasoning.text", "text": "先看"}]}}]},
+            {"choices": [{"index": 0, "delta": {"reasoning_details": [{"type": "reasoning.text", "text": "日志"}]}}]},
+            {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+        ],
+        route=route(),
+        scope=scope(),
+    )
+
+    events = [event for event in decoded if event.kind == "reasoning_delta"]
+
+    assert [event.text for event in events] == ["先看", "日志"]
+    assert [event.diagnostic_summary["reasoningSource"] for event in events] == [
+        "reasoning_details",
+        "reasoning_details",
+    ]
+
+
+def test_chat_reasoning_details_snapshot_arrays_emit_prefix_diff_deltas():
+    decoded = ChatCompletionsWireAdapter().decode_stream(
+        [
+            {"choices": [{"index": 0, "delta": {"reasoning_details": [{"type": "reasoning.text", "text": "先看"}]}}]},
+            {"choices": [{"index": 0, "delta": {"reasoning_details": [{"type": "reasoning.text", "text": "先看日志"}]}}]},
+            {"choices": [{"index": 0, "delta": {"reasoning_details": [{"type": "reasoning.text", "text": "先看日志"}]}}]},
+            {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+        ],
+        route=route(),
+        scope=scope(),
+    )
+
+    events = [event for event in decoded if event.kind == "reasoning_delta"]
+
+    assert [event.text for event in events] == ["先看", "日志"]
+    assert [event.diagnostic_summary["reasoningSource"] for event in events] == [
+        "reasoning_details",
+        "reasoning_details",
+    ]
+
+
+def test_chat_reasoning_details_skip_encrypted_and_fall_back_to_summary():
+    decoded = ChatCompletionsWireAdapter().decode_stream(
+        [
+            {
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {
+                            "reasoning_details": [
+                                {"type": "reasoning.encrypted", "data": "bm9w"},
+                                {"type": "reasoning.summary", "summary": "摘要"},
+                            ]
+                        },
+                    }
+                ]
+            },
+            {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+        ],
+        route=route(),
+        scope=scope(),
+    )
+
+    events = [event for event in decoded if event.kind == "reasoning_delta"]
+
+    assert [event.text for event in events] == ["摘要"]
+    assert [event.diagnostic_summary["reasoningSource"] for event in events] == ["reasoning_details"]
+
+
+def test_chat_reasoning_details_win_over_same_chunk_reasoning_content():
+    decoded = ChatCompletionsWireAdapter().decode_stream(
+        [
+            {
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {
+                            "reasoning_content": "字符串思考",
+                            "reasoning_details": [{"type": "reasoning.text", "text": "结构化思考"}],
+                        },
+                    }
+                ]
+            },
+            {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+        ],
+        route=route(),
+        scope=scope(),
+    )
+
+    events = [event for event in decoded if event.kind == "reasoning_delta"]
+
+    assert [event.text for event in events] == ["结构化思考"]
+    assert [event.diagnostic_summary["reasoningSource"] for event in events] == ["reasoning_details"]
+
+
 def reasoning_roundtrip_route():
     base = route()
     base.compat = SimpleNamespace(reasoning_roundtrip=True)
