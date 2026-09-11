@@ -52,6 +52,13 @@ export type WorkflowKnowledgeBadgeInput = {
   /** Current sideflow node of the latest invocation (lineage tooltip). */
   currentKnowledgeNodeId?: string | null;
   knowledgeChildRunId?: string | null;
+  /** Auto-accept policy facts for the waiting gate (SCI-049 O-02); absent on
+   * legacy snapshots — the tooltip then keeps the bare counter. */
+  autoAccept?: {
+    pending: boolean;
+    actor: string;
+    intervalMs: number;
+  } | null;
 };
 
 export type WorkflowCanvasNodeInput = {

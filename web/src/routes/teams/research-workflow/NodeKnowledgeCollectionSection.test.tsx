@@ -11,6 +11,7 @@ function badgeWith(overrides: {
   status?: string;
   knowledgeChildRunId?: string | null;
   childNodeStates?: Record<string, string>;
+  autoAccept?: { pending: boolean; actor: string; intervalMs: number } | null;
 }): KnowledgeInvocationBadge {
   return {
     nodeId: "hypothesis_design",
@@ -18,6 +19,7 @@ function badgeWith(overrides: {
     runningCount: 0,
     awaitingHandoffCount: 0,
     absorbedCount: 0,
+    autoAccept: overrides.autoAccept === undefined ? null : overrides.autoAccept,
     latest: {
       invocationId: "inv-1",
       parentNodeId: "hypothesis_design",
@@ -135,5 +137,77 @@ describe("NodeKnowledgeCollectionSection blocked sideflow recovery entry", () =>
     const rendered = await renderSection({ badge: badgeWith({}) });
     root = rendered.root;
     expect(openButton(rendered.container)).toBeNull();
+  });
+});
+
+describe("NodeKnowledgeCollectionSection waiting-gate auto-accept copy (SCI-049 O-02)", () => {
+  let root: Root | null = null;
+
+  afterEach(async () => {
+    if (root) {
+      await act(async () => root?.unmount());
+      root = null;
+    }
+    document.body.innerHTML = "";
+  });
+
+  const awaitingHandoffBadge = badgeWith({
+    status: "awaiting_handoff",
+    childNodeStates: {
+      source_finding: "succeeded",
+      source_extraction: "succeeded",
+      evidence_relations: "succeeded",
+      knowledge_ingestion: "succeeded",
+      knowledge_handoff: "waiting_human",
+    },
+  });
+
+  it("quotes the server-vouched auto-accept cadence on the waiting card", async () => {
+    const rendered = await renderSection({
+      badge: {
+        ...awaitingHandoffBadge,
+        awaitingHandoffCount: 1,
+        autoAccept: { pending: true, actor: "auto_advance_sweep", intervalMs: 30000 },
+      },
+    });
+    root = rendered.root;
+    const card = rendered.container.querySelector('[data-sideflow-status="waiting_human"]');
+    expect(card).not.toBeNull();
+    expect(card!.textContent).toContain("等待交接 · 约 30s 内自动接受");
+  });
+
+  it("keeps the bare waiting label on legacy snapshots without autoAccept", async () => {
+    const rendered = await renderSection({ badge: awaitingHandoffBadge });
+    root = rendered.root;
+    const card = rendered.container.querySelector('[data-sideflow-status="waiting_human"]');
+    expect(card).not.toBeNull();
+    expect(card!.textContent).toContain("等待交接");
+    expect(card!.textContent).not.toContain("自动接受");
+  });
+
+  it("keeps the bare waiting label when the sweep has nothing pending", async () => {
+    const rendered = await renderSection({
+      badge: {
+        ...awaitingHandoffBadge,
+        autoAccept: { pending: false, actor: "auto_advance_sweep", intervalMs: 30000 },
+      },
+    });
+    root = rendered.root;
+    const card = rendered.container.querySelector('[data-sideflow-status="waiting_human"]');
+    expect(card!.textContent).not.toContain("自动接受");
+  });
+
+  it("localizes the auto-accept promise to English", async () => {
+    const rendered = await renderSection({
+      badge: {
+        ...awaitingHandoffBadge,
+        awaitingHandoffCount: 1,
+        autoAccept: { pending: true, actor: "auto_advance_sweep", intervalMs: 45000 },
+      },
+      lang: "en",
+    });
+    root = rendered.root;
+    const card = rendered.container.querySelector('[data-sideflow-status="waiting_human"]');
+    expect(card!.textContent).toContain("auto-accepted within ~45s");
   });
 });

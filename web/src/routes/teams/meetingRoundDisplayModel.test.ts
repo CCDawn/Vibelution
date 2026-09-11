@@ -92,7 +92,7 @@ describe("meetingDiscussionProgress", () => {
       complete: false,
       nextCode: "A001",
     });
-    expect(progress.label).toBe("已发言 0/9 · 待 A001");
+    expect(progress.label).toBe("本轮已发言 0/9 · 待 A001");
   });
 
   it("renders 3/9 with the next speaker code", () => {
@@ -107,7 +107,7 @@ describe("meetingDiscussionProgress", () => {
       complete: false,
       nextCode: "A004",
     });
-    expect(progress.label).toBe("已发言 3/9 · 待 A004");
+    expect(progress.label).toBe("本轮已发言 3/9 · 待 A004");
   });
 
   it("renders 9/9 as discussion complete", () => {
@@ -122,7 +122,7 @@ describe("meetingDiscussionProgress", () => {
       complete: true,
       nextCode: null,
     });
-    expect(progress.label).toBe("讨论完成，待整理");
+    expect(progress.label).toBe("本轮讨论完成，待整理");
   });
 
   it("keeps explicit A0xx codes when the speaker id is already a display code", () => {
@@ -130,7 +130,7 @@ describe("meetingDiscussionProgress", () => {
       speakerOrder: ["A018", "A019", "A020"],
       messages: spoken(["A018"]),
     });
-    expect(progress.label).toBe("已发言 1/3 · 待 A019");
+    expect(progress.label).toBe("本轮已发言 1/3 · 待 A019");
   });
 
   it("maps a session speaker order to the room's real participant codes", () => {
@@ -152,7 +152,7 @@ describe("meetingDiscussionProgress", () => {
       complete: false,
       nextCode: "A019",
     });
-    expect(progress.label).toBe("已发言 2/4 · 待 A019");
+    expect(progress.label).toBe("本轮已发言 2/4 · 待 A019");
   });
 
   it("matches a mapped participant code when a message omits its session id", () => {
@@ -172,7 +172,7 @@ describe("meetingDiscussionProgress", () => {
       expected: 4,
       nextCode: "A017",
     });
-    expect(progress.label).toBe("已发言 1/4 · 待 A017");
+    expect(progress.label).toBe("本轮已发言 1/4 · 待 A017");
   });
 
   it("does not infer real participant codes from generic session ids", () => {
@@ -188,7 +188,7 @@ describe("meetingDiscussionProgress", () => {
       complete: false,
       nextCode: "第 1 位参与者",
     });
-    expect(progress.label).toBe("已发言 0/4 · 待第 1 位参与者");
+    expect(progress.label).toBe("本轮已发言 0/4 · 待第 1 位参与者");
     expect(progress.label).not.toContain("A015");
     expect(progress.label).not.toContain("A017");
   });
@@ -206,7 +206,7 @@ describe("meetingDiscussionProgress", () => {
       complete: false,
       nextCode: "第 1 位参与者",
     });
-    expect(progress.label).toBe("已发言 0/3 · 待第 1 位参与者");
+    expect(progress.label).toBe("本轮已发言 0/3 · 待第 1 位参与者");
     expect(progress.label).not.toContain("A001");
   });
 });

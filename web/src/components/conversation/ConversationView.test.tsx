@@ -1411,7 +1411,13 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("下轮启用心智模型");
     expect(html).not.toContain("发送选项");
   });it("renders current turn error provider diagnostics with HTTP status", () => {
-    const html = renderConversation([], {
+    const userMessage: ConversationMessage = {
+      id: "message-user",
+      role: "user",
+      content: "检查这条失败",
+      timestamp: "2026-05-22T00:00:00Z",
+    };
+    const html = renderConversation([userMessage], {
       turnError: {
         message: "模型服务上游暂时失败，本轮没有完成。",
         errorType: "provider_upstream_error",
@@ -1430,7 +1436,8 @@ describe("ConversationView edit resend affordance", () => {
       },
     });
 
-    expect(html).toContain("turnErrorText");
+    expect(html).toContain("检查这条失败");
+    expect(html.match(/turnErrorText/g)?.length).toBe(1);
     expect(html).toContain("诊断详情");
     expect(html).toContain("<details");
     expect(html).toContain("状态码: 503");

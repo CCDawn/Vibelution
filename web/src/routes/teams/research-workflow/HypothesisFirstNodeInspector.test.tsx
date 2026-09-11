@@ -110,6 +110,7 @@ vi.mock("../challenge-cup/HypothesisSelectionList", () => ({
 
 import { FetchJsonHttpError } from "../../../api/client";
 import {
+  commandButtonAriaLabel,
   discussionMemberCompletion,
   HypothesisFirstNodeInspector,
   inspectorNodeOwnsCurrentStep,
@@ -2113,5 +2114,67 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(discussionMemberCompletion(detail)).toEqual({ spoken: 2, total: 3 });
     expect(discussionMemberCompletion({ participants: [], rounds: [] })).toBeNull();
     expect(discussionMemberCompletion(undefined)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Canonical command accessible names (SCI-049 D-03)
+// ---------------------------------------------------------------------------
+
+describe("commandButtonAriaLabel disambiguates sibling approve gates", () => {
+  const buildAction = (overrides: Record<string, unknown>) => ({
+    kind: "command",
+    command: "approve_summary",
+    actionId: "approve-summary:candidate-b",
+    label: "确认候选纪要",
+    enabled: true,
+    disabledReason: null,
+    targetPhase: "review",
+    targetNodeId: "hf_review",
+    payload: { meetingRoundId: "meeting-1" },
+    inputSchemaRef: null,
+    idempotencyKey: "hf2:approve-summary:candidate-b",
+    expectedStateVersion: "hf2-action:state-1",
+    requiresConfirmation: false,
+    confirmationText: null,
+    ...overrides,
+  } as unknown as Parameters<typeof commandButtonAriaLabel>[0]);
+
+  it("appends the payload candidateId when the server label is legacy-ambiguous", () => {
+    const action = buildAction({
+      payload: { meetingRoundId: "meeting-1", candidateId: "candidate-b" },
+    });
+    expect(commandButtonAriaLabel(action)).toBe("确认候选纪要（候选 candidate-b）");
+  });
+
+  it("falls back to the candidateId parsed from the actionId", () => {
+    const action = buildAction({ payload: { meetingRoundId: "meeting-1" } });
+    expect(commandButtonAriaLabel(action)).toBe("确认候选纪要（候选 candidate-b）");
+  });
+
+  it("keeps the server label verbatim when it already names the candidate", () => {
+    const action = buildAction({
+      label: "确认候选纪要 · 候选 candidate-b：增长假设证据更充分",
+      payload: { meetingRoundId: "meeting-1", candidateId: "candidate-b" },
+    });
+    expect(commandButtonAriaLabel(action)).toBe(
+      "确认候选纪要 · 候选 candidate-b：增长假设证据更充分",
+    );
+  });
+
+  it("leaves the generation gate and non-approve commands untouched", () => {
+    const generation = buildAction({
+      actionId: "approve-generation-summary:meeting-1",
+      label: "确认候选生成纪要",
+      payload: { meetingRoundId: "meeting-1" },
+    });
+    expect(commandButtonAriaLabel(generation)).toBe("确认候选生成纪要");
+    const reopen = buildAction({
+      command: "reopen_review",
+      actionId: "reopen-review:meeting-1",
+      label: "重新发起评审讨论",
+      payload: { meetingRoundId: "meeting-1" },
+    });
+    expect(commandButtonAriaLabel(reopen)).toBe("重新发起评审讨论");
   });
 });

@@ -71,6 +71,16 @@ def _auto_advance_sweep_interval_ms() -> int:
     return AUTO_ADVANCE_SWEEP_INTERVAL_MS
 
 
+def auto_advance_sweep_interval_ms() -> int:
+    """Public read-only accessor for the auto-advance sweep cadence (ms).
+
+    Projections (state-v2 ``collection.autoAccept`` and the research-workflow
+    knowledge badge) quote this so the "auto-accept within ~Ns" copy matches
+    what the sweep actually does, including the operator env override.
+    """
+    return _auto_advance_sweep_interval_ms()
+
+
 def _auto_advance_sweep_due(now_ms: int) -> bool:
     global _LAST_AUTO_ADVANCE_SWEEP_MS
     with _AUTO_ADVANCE_SWEEP_LOCK:
