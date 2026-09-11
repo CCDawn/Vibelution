@@ -464,6 +464,9 @@ def _codex_tool_lifecycle_projection_from_source(
             "timestamp": str(source.get("timestamp") or "").strip(),
             "terminalOperationId": terminal_operation_id,
             "tracePath": str(source.get("tracePath") or "").strip(),
+            "arguments": s._safe_tool_argument_details(
+                source.get("arguments") if isinstance(source.get("arguments"), dict) else source.get("args")
+            ),
             "error": s._trim_tool_detail_text(source.get("error") or "", max_chars=1200, max_lines=10),
             "resultPreview": s._trim_tool_detail_text(source.get("resultPreview") or "", max_chars=4000, max_lines=80),
             "resultType": str(source.get("resultType") or source.get("result_type") or "").strip(),

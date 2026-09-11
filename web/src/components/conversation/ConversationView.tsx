@@ -155,6 +155,8 @@ import {
   ConversationToolActivityPills,
   toolActivityAriaTitle,
 } from "./ConversationToolActivityPills";
+import { ConversationPatchDiff } from "./ConversationPatchDiff";
+import { conversationToolPatchText } from "./conversationPatchModel";
 import {
   buildConversationTerminalToolDetail,
   ConversationTerminalToolDetail,
@@ -2622,26 +2624,39 @@ export function ConversationView({
     const terminalDetail = buildConversationTerminalToolDetail(cell, lang);
     const rows = terminalDetail ? [] : codexTranscriptToolDetailRows(cell);
     const rolloutEvents = renderCodexTranscriptRolloutEvents(cell);
+    const patchText = conversationToolPatchText(cell);
+    const patchDiff = patchText
+      ? <ConversationPatchDiff patchText={patchText} language={lang} />
+      : null;
     if (!terminalDetail && rows.length === 0 && !rolloutEvents) {
       const extraRows = buildConversationToolActivityDetailRows(cell, lang);
       if (extraRows.length === 0) {
         return (
-          <p className={styles.codexTranscriptCellMeta}>{conversationToolActivityEmptyDetailLabel(lang)}</p>
+          <>
+            {patchDiff}
+            {!patchDiff ? (
+              <p className={styles.codexTranscriptCellMeta}>{conversationToolActivityEmptyDetailLabel(lang)}</p>
+            ) : null}
+          </>
         );
       }
       return (
-        <dl className={styles.turnErrorReasonList} data-codex-tool-activity-detail="true">
-          {extraRows.map((row) => (
-            <div key={`${cell.id}-${row.label}-${row.value}`} className={styles.turnErrorReasonRow}>
-              <dt>{row.label}</dt>
-              <dd>{row.value}</dd>
-            </div>
-          ))}
-        </dl>
+        <>
+          {patchDiff}
+          <dl className={styles.turnErrorReasonList} data-codex-tool-activity-detail="true">
+            {extraRows.map((row) => (
+              <div key={`${cell.id}-${row.label}-${row.value}`} className={styles.turnErrorReasonRow}>
+                <dt>{row.label}</dt>
+                <dd>{row.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </>
       );
     }
     return (
       <>
+        {patchDiff}
         {terminalDetail ? (
           <ConversationTerminalToolDetail detail={terminalDetail} language={lang} />
         ) : rows.length > 0 ? (

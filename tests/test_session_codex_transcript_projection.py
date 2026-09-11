@@ -1,3 +1,5 @@
+import json
+
 from core.web.services import session_service
 
 
@@ -63,6 +65,38 @@ def test_live_tool_revision_survives_the_codex_projection() -> None:
     assert tool_item["revision"] == 2
     assert tool_item["createdAt"] == "2026-08-10T00:00:01Z"
     assert tool_item["updatedAt"] == "2026-08-10T00:00:02Z"
+
+
+def test_tool_turn_item_carries_canonical_arguments_for_patch_diff():
+    patch_text = "\n".join([
+        "*** Begin Patch",
+        "*** Update File: demo.py",
+        "@@",
+        "-value = 1",
+        "+value = 2",
+        "*** End Patch",
+    ])
+
+    messages = session_service._normalize_messages(
+        "session-patch",
+        [{
+            "role": "assistant",
+            "timestamp": "2026-08-10T00:00:00Z",
+            "streaming": True,
+            "feedback_events": [{
+                "sequence": 1,
+                "kind": "tool",
+                "status": "running",
+                "name": "apply_patch_tool",
+                "callId": "call-patch",
+                "summary": "editing",
+                "arguments": {"patch_text": patch_text},
+            }],
+        }],
+    )
+
+    tool_item = next(item for item in messages[0]["turnItems"] if item["type"] == "tool_call")
+    assert json.loads(tool_item["input"])["patch_text"] == patch_text
 
 
 def test_turn_item_protocol_normalizes_legacy_internal_kinds_without_serializing_aliases():

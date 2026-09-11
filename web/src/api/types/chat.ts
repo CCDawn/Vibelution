@@ -410,6 +410,8 @@ export type CodexToolCall = {
   title: string;
   summary?: string;
   rawToolName?: string;
+  /** Canonical tool input; names what a running tool is working on. */
+  arguments?: Record<string, unknown>;
   runtimeKind: "terminal" | "tool" | string;
   sequence?: number;
   timestamp?: string;

@@ -659,4 +659,46 @@ describe("ConversationView native Codex transcript surface", () => {
     ], "trace");
     expect(searchRunning).toContain("resolveSessionDetail");
   });
+
+  it("renders the apply_patch payload as an inline diff", () => {
+    const patchMessage: ConversationMessage = {
+      id: "assistant-apply-patch",
+      role: "assistant",
+      timestamp: "2026-09-11T06:00:00Z",
+      turnId: "turn-apply-patch",
+      status: "completed",
+      turnItems: [{
+        id: "apply-patch-r1",
+        itemId: "apply-patch",
+        version: 3,
+        sessionId: "session-1",
+        turnId: "turn-apply-patch",
+        type: "tool_call",
+        callId: "call-apply-patch",
+        toolName: "apply_patch_tool",
+        status: "completed",
+        revision: 1,
+        sequence: 1,
+        terminal: true,
+        input: JSON.stringify({
+          patch_text: [
+            "*** Begin Patch",
+            "*** Update File: web/src/app.ts",
+            "@@",
+            "-const value = 1;",
+            "+const value = 2;",
+            "*** End Patch",
+          ].join("\n"),
+        }),
+      }],
+    };
+
+    const html = renderConversation([patchMessage], "trace");
+    expect(html).toContain('data-codex-patch-diff="true"');
+    expect(html).toContain("web/src/app.ts");
+    expect(html).toContain('data-patch-line-kind="del"');
+    expect(html).toContain('data-patch-line-kind="add"');
+    expect(html).toContain("const value = 1;");
+    expect(html).toContain("const value = 2;");
+  });
 });
