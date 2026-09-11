@@ -52,7 +52,6 @@ import {
   ChatRoomDetail,
   FileContent,
   MentalStateSnapshot,
-  PetActionResponse,
   ChatNextStateSignalSummary,
   SessionGuidanceMode,
   ConversationSummary,
@@ -237,10 +236,7 @@ import {
   runtimeHasChatTurnForSession,
 } from "./chatRuntimeWorkRuns";
 import {
-  buildChatActiveSkillViewModel,
-  buildChatPetCompanionViewModel,
   buildChatSessionStateViewModel,
-  type ActiveSkillContract,
 } from "./chatSessionSurfaceModel";
 import {
   chatRoomModeLabel,
@@ -334,21 +330,12 @@ const AgentContextMenu = lazy(() =>
 );
 
 /** S2: not required for first paint of direct chat center. */
-const ChatStatusRail = lazy(() =>
-  import("./ChatStatusRail").then((module) => ({ default: module.ChatStatusRail })),
-);
 const ChatGroupCenterSurface = lazy(() =>
   import("./ChatGroupCenterSurface").then((module) => ({ default: module.ChatGroupCenterSurface })),
 );
 const ChatFileWorkspaceTabs = lazy(() =>
   import("./ChatFileWorkspaceTabs").then((module) => ({ default: module.ChatFileWorkspaceTabs })),
 );
-
-type SessionDetailWithActiveSkill = SessionDetail & {
-  activeSkillContract?: ActiveSkillContract | null;
-};
-
-type PetInteractionAction = "feed" | "talk" | "care";
 
 /**
  * Stable session-detail placeholder for the active-session detail query.
@@ -538,8 +525,8 @@ export function useStableSessionDetailPaint(options: {
 }
 
 export function ChatCodingRouteWorkbench() {
-  // pet + evolution: companion rail shows mental/pet labels (otherwise raw keys leak).
-  const { lang, t, statusLabel } = useAppI18n({ domains: ["chat", "agents", "pet", "evolution"] });
+  // evolution: the companion rail shows evolution labels (otherwise raw keys leak).
+  const { lang, t, statusLabel } = useAppI18n({ domains: ["chat", "agents", "evolution"] });
   const queryClient = useQueryClient();
   const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
   const navigate = useNavigate();
@@ -617,7 +604,6 @@ export function ChatCodingRouteWorkbench() {
     editingSessionTitleRef.current = editingSessionTitle;
   }, [editingSessionTitle]);
 
-  const [petActionFeedback, setPetActionFeedback] = useState("");
   const [directoryFilterText, setDirectoryFilterText] = useState("");
   const [mentalModelEnabledForNextTurn, setMentalModelEnabledForNextTurn] = useState<boolean>(
     () => readStoredMentalModelToggle() ?? false,
@@ -861,7 +847,7 @@ export function ChatCodingRouteWorkbench() {
     setLeftRailCollapsed,
     setRightPaneCollapsed,
     setResponsiveOverlayPane,
-  } = useChatWorkbenchLayout({ standardGroupRoomActive });
+  } = useChatWorkbenchLayout({ standardGroupRoomActive, statusRailEnabled: verifiedCompanionMode });
   const directSessionPanelActive = Boolean(activeSessionId) && !groupPanelActive;
   const sessionQueryText = sessionFilter.trim();
   const [directSessionBackgroundSyncActive, setDirectSessionBackgroundSyncActive] = useState(false);
@@ -879,10 +865,9 @@ export function ChatCodingRouteWorkbench() {
   useEffect(() => {
     if (chatRouteSelection.kind === "room" || chatRouteSelection.kind === "project_bus") {
       setRightIndexPanel("members");
-      setRightPaneCollapsed(false);
       setGroupRoomActionError("");
     }
-  }, [chatRouteSelection.kind, setGroupRoomActionError, setRightIndexPanel, setRightPaneCollapsed]);
+  }, [chatRouteSelection.kind, setGroupRoomActionError, setRightIndexPanel]);
 
   const sessionStreamRouteSettling = resolveSessionStreamRouteSettling({
     activeSessionId,
@@ -1027,7 +1012,6 @@ export function ChatCodingRouteWorkbench() {
 
   const {
     runtimeQuery,
-    petQuery,
     configSummaryQuery,
     selectedAgentId,
     setSelectedAgentId,
@@ -1505,7 +1489,6 @@ export function ChatCodingRouteWorkbench() {
     loadEarlierSessionMessagesMutation,
     resolveToolApprovalMutation,
     resolveSessionToolApprovalMutation,
-    petActionMutation,
   } = useChatSessionDetailMutations({
     queryClient,
     chatWorkspaceCache,
@@ -1513,7 +1496,6 @@ export function ChatCodingRouteWorkbench() {
     describeError,
     activeSessionId,
     setSessionComposerErrors,
-    setPetActionFeedback,
   });
 
   const activeGroupRoom = activeGroupRoomQuery.data;
@@ -1700,7 +1682,6 @@ export function ChatCodingRouteWorkbench() {
     () => new Set(runtimeChatTurnSessionIds),
     [runtimeChatTurnSessionIds],
   );
-  const pet = petQuery.data;
   // Prefer live query data, but always re-read RQ cache for optimistic temp shells
   // (disabled queries often omit data even after setQueryData).
   const rawSessionDetail = resolveActiveSessionDetailForUi({
@@ -1947,26 +1928,6 @@ export function ChatCodingRouteWorkbench() {
   const lastContextComposition = detail?.lastContextComposition ?? null;
   const lastCacheComposition = detail?.lastCacheComposition ?? null;
   const lastLlmPayloadTrace = detail?.lastLlmPayloadTrace ?? null;
-  const {
-    activeSkillCommand,
-    activeSkillName,
-    activeSkillStatus,
-    activeSkillStatusLabel,
-    activeSkillShortHash,
-    activeSkillSummary,
-    activeSkillTitle,
-    hasActiveSkill,
-  } = buildChatActiveSkillViewModel({
-    contract: (detail as SessionDetailWithActiveSkill | undefined)?.activeSkillContract,
-    lang,
-    numberFormatter,
-    formatTime,
-  });
-  const activeSkillStatusStyle = activeSkillStatus === "stale"
-    ? styles.activeSkillStatus_stale
-    : activeSkillStatus === "missing"
-      ? styles.activeSkillStatus_missing
-      : styles.activeSkillStatus_active;
   const projectBusTimeline = projectAgentBusQuery.data;
   const projectBusEvents = projectBusTimeline?.events ?? [];
   const sessionDetailErrorState = deriveSessionDetailQueryErrorState(detail, sessionDetailQuery.isError, {
@@ -2137,7 +2098,7 @@ export function ChatCodingRouteWorkbench() {
     : conversationComposer;
   const activeAgentDisplay = detail
     ? sessionAgentDisplayInfo(detail, activeSessionAgent, lang, resolveModelLabel)
-    : { name: pet?.name || "Agent", functionLabel: "", tone: "chat" as const, meta: "" };
+    : { name: "Agent", functionLabel: "", tone: "chat" as const, meta: "" };
   const activeAgentDisplayName = activeAgentDisplay.name;
   const activeAgentAvatarImageUrl = avatarImageUrlFrom(activeSessionAgent, detail);
   const activeAgentAvatarFallback = avatarInitials(detail?.agentCode, activeAgentDisplayName);
@@ -2197,6 +2158,27 @@ export function ChatCodingRouteWorkbench() {
       latestControlSignal.summary,
     ].filter(Boolean).join(" · ")
     : "";
+  // The control signal surfaces as a runtime notice above the conversation. It
+  // used to live only in the status rail; `warning` is the highest severity that
+  // still renders as a compact row, and the message stays bounded by the stack's
+  // own error summarizer.
+  const sessionNotices = useMemo<SessionRuntimeNotice[]>(() => {
+    if (!latestControlSignal || !latestControlSignalLine) {
+      return activeRuntimeNotices;
+    }
+    return [
+      ...activeRuntimeNotices,
+      {
+        id: `control-signal-${latestControlSignal.turnId || latestControlSignal.createdAt || latestControlSignal.kind || "latest"}`,
+        kind: "next_state_signal",
+        level: "warning",
+        message: [latestControlSignalLine, latestControlSignalSummary].filter(Boolean).join(" · "),
+        timestamp: String(latestControlSignal.createdAt ?? ""),
+        source: String(latestControlSignal.source || latestControlSignal.kind || ""),
+        turnId: latestControlSignal.turnId,
+      },
+    ];
+  }, [activeRuntimeNotices, latestControlSignal, latestControlSignalLine, latestControlSignalSummary]);
 
   const {
     handleSubmitTurn,
@@ -2284,23 +2266,6 @@ export function ChatCodingRouteWorkbench() {
   }, [activeAgentImageInputUnsupported, activeImageAttachments.length, activeSessionId]);
 
 
-  const {
-    petVitals,
-    petPresetLabel,
-    petAvatarPresetKey,
-    petAvatarSymbol,
-    petCompactLine,
-    petInteractionLabels,
-  } = buildChatPetCompanionViewModel({
-    pet,
-    petQueryError: petQuery.isError,
-    petQueryErrorMessage: describeError(petQuery.error, t("loadFailed")),
-    petActionPending: petActionMutation.isPending,
-    lang,
-    t,
-    numberFormatter,
-  });
-  const petAvatarSkinStyle = styles[`petShowcaseAvatar_${petAvatarPresetKey}`] ?? styles.petShowcaseAvatar_default;
   const {
     activeSurfaceTitle,
     sessionStateLabel,
@@ -2521,7 +2486,6 @@ export function ChatCodingRouteWorkbench() {
     t,
   });
   const {
-    handlePetInteraction,
     handleCreateSession,
     handleOpenProjectAgentBus,
     handleOpenDirectSession,
@@ -2585,7 +2549,6 @@ export function ChatCodingRouteWorkbench() {
     groupDeleteDisabled,
     groupResetDisabled,
     activeGroupRoom,
-    setPetActionFeedback,
     createSessionMutation,
     createGroupRoomMutation,
     startGroupRoundMutation,
@@ -2598,7 +2561,6 @@ export function ChatCodingRouteWorkbench() {
     deleteSessionMutation,
     clearSessionHistoryMutation,
     addSessionToReviewMutation,
-    petActionMutation,
     openDeleteSessionConfirm,
     openClearSessionHistoryConfirm,
     openDeleteGroupConfirm,
@@ -2901,53 +2863,7 @@ export function ChatCodingRouteWorkbench() {
           });
         }}
       />
-      ) : (
-      <Suspense fallback={null}>
-      <ChatStatusRail
-        statusRailClassName={statusRailClassName}
-        statusRailCollapsed={statusRailCollapsed}
-        statusRailOverlayOpen={statusRailOverlayOpen}
-        standardGroupRoomActive={standardGroupRoomActive}
-        groupRoomInitialLoading={groupRoomInitialLoading}
-        groupRoomLoadError={activeGroupRoomQuery.isError ? describeError(activeGroupRoomQuery.error, t("loadFailed")) : ""}
-        lang={lang}
-        t={t}
-        numberFormatter={numberFormatter}
-        activeGroupRoom={activeGroupRoom}
-        activeGroupTeamOwned={activeGroupTeamOwned}
-        availableGroupParticipantCount={availableGroupParticipantCount}
-        statusLabel={statusLabel}
-        groupRoundRunning={groupRoundRunning}
-        activeSurfaceTitle={activeSurfaceTitle}
-        sessionStateValue={sessionStateValue}
-        sessionStateLabel={sessionStateLabel}
-        sessionStateLine={sessionStateLine}
-        compactSessionStateLine={compactSessionStateLine}
-        agentDirectSessionMismatch={agentDirectSessionMismatch}
-        sessionBindingMismatchLine={sessionBindingMismatchLine}
-        sessionCompactRows={sessionCompactRows}
-        activeSkillSummary={hasActiveSkill}
-        activeSkillStatusStyle={activeSkillStatusStyle}
-        activeSkillTitle={activeSkillTitle}
-        activeSkillName={activeSkillName}
-        activeSkillCommand={activeSkillCommand}
-        activeSkillStatusLabel={activeSkillStatusLabel}
-        activeSkillShortHash={activeSkillShortHash}
-        promptSnapshot={detail?.agentPromptSnapshot}
-        promptAssembly={detail?.lastPromptAssembly}
-        lastLlmPayloadTrace={lastLlmPayloadTrace}
-        pet={pet}
-        petPresetLabel={petPresetLabel}
-        petCompactLine={petCompactLine}
-        petAvatarSkinStyle={petAvatarSkinStyle}
-        petAvatarSymbol={petAvatarSymbol}
-        petVitals={petVitals}
-        petInteractionLabels={petInteractionLabels}
-        petActionPending={petActionMutation.isPending}
-        petActionFeedback={petActionFeedback}
-      />
-      </Suspense>
-      )}
+      ) : null}
       leftResizeHandle={
       responsiveLayout.leftVisible ? verifiedCompanionMode ? <PaneCollapseHandle
         side="left"
@@ -3011,6 +2927,7 @@ export function ChatCodingRouteWorkbench() {
             leftOverlayVisible={responsiveLayout.leftVisible}
             rightOverlayVisible={responsiveLayout.rightVisible}
             conversationIndexOverlayOpen={conversationIndexOverlayOpen}
+            statusRailAvailable={verifiedCompanionMode}
             statusRailOverlayOpen={statusRailOverlayOpen}
             onActivateAgentFallbackTab={() => {
               activeSessionId && setActiveTab(activeSessionId, "agent");
@@ -3233,11 +3150,6 @@ export function ChatCodingRouteWorkbench() {
                       onOpen: () => handleOpenDirectSession(agentPrimaryDirectSessionId),
                       onPrefetch: () => handlePrefetchDirectSession(agentPrimaryDirectSessionId),
                     } : null}
-                    companion={pet ? {
-                      name: pet.name,
-                      pending: petActionMutation.isPending,
-                      onAction: handlePetInteraction,
-                    } : null}
                     group={standardGroupRoomActive && activeGroupRoom ? {
                       title: activeGroupRoom.title,
                       onManage: () => setGroupManageDialogOpen(true),
@@ -3322,7 +3234,7 @@ export function ChatCodingRouteWorkbench() {
               lang={lang}
               loadingSessionLabel={t("loadingSession")}
               noSessionsLabel={t("noSessionsYet")}
-              notices={activeRuntimeNotices}
+              notices={sessionNotices}
               sessionsPending={sessionsQuery.isPending}
               toolApproval={toolApproval}
               transientErrorMessage={sessionDetailErrorMessage}
@@ -3337,7 +3249,7 @@ export function ChatCodingRouteWorkbench() {
       />
       )}
       rightResizeHandle={
-      responsiveLayout.rightVisible ? <PaneCollapseHandle
+      verifiedCompanionMode && responsiveLayout.rightVisible ? <PaneCollapseHandle
         side="right"
         collapsed={statusRailCollapsed}
         separatorLabel={t("resizeRightPanel")}
@@ -3512,6 +3424,9 @@ export function ChatCodingRouteWorkbench() {
             upperBoundCachedInputTokens={upperBoundCachedInputTokens}
             upperBoundCacheCompositionPercent={upperBoundCacheCompositionPercent}
             upperBoundCacheInputTokens={upperBoundCacheInputTokens}
+            promptSnapshot={detail?.agentPromptSnapshot}
+            promptAssembly={detail?.lastPromptAssembly}
+            lastLlmPayloadTrace={lastLlmPayloadTrace}
           />
         </Suspense>
       ) : null}

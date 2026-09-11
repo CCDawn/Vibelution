@@ -138,7 +138,6 @@ describe("router route contracts", () => {
     expect(chatMarkup).toContain('data-route-loading="chat"');
     expect(chatMarkup).toContain('data-loading-region="chat-index"');
     expect(chatMarkup).toContain('data-loading-region="chat-workspace"');
-    expect(chatMarkup).toContain('data-loading-region="chat-status-rail"');
     expect(chatMarkup).toContain('data-vui="chat-session-workbench-shell"');
     expect(chatMarkup).toContain('data-vui="skeleton"');
     expect(chatMarkup).not.toContain("animate-spin");

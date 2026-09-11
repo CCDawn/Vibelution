@@ -49,14 +49,15 @@ describe("Wave 3B Chat session workbench composition", () => {
     expect(layoutSource).not.toMatch(/import\s*\{[^}]*usePersistedPaneResize/);
   });
 
-  it("marks index and status rails as composition regions", () => {
+  it("marks the index rail as a composition region and keeps the companion life rail as the right-rail slot", () => {
     const indexSource = readFileSync(
       resolve(routesRoot, "chat/ChatConversationIndexRail.tsx"),
       "utf8",
     );
-    const statusSource = readFileSync(resolve(routesRoot, "chat/ChatStatusRail.tsx"), "utf8");
+    // The chat status rail retired; the right slot only mounts the companion life rail.
+    const statusSource = readFileSync(resolve(routesRoot, "companions/CompanionLifeRail.tsx"), "utf8");
     expect(indexSource).toContain('data-vui-region="chat-session-index"');
-    expect(statusSource).toContain('data-vui-region="chat-status-rail"');
+    expect(statusSource).toContain("export function CompanionLifeRail");
   });
 
   it("keeps session index structure on dense/selected/chrome recipes", () => {

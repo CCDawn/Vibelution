@@ -4,7 +4,6 @@ import {
   buildAgentSessionTabs,
   buildChatActiveSkillViewModel,
   buildChatMentalStateViewModel,
-  buildChatPetCompanionViewModel,
   buildChatSessionStateViewModel,
 } from "./chatSessionSurfaceModel";
 
@@ -70,31 +69,6 @@ describe("chatSessionSurfaceModel", () => {
     });
     expect(model.mentalStateLabel).toBe("未判定");
     expect(model.mentalStateLabel).not.toContain("mentalCognitiveState_");
-  });
-
-  it("builds pet vitals and companion line", () => {
-    const model = buildChatPetCompanionViewModel({
-      pet: {
-        hunger: 80,
-        energy: 80,
-        health: 90,
-        love: 70,
-        totalTokens: 1200,
-        heartActive: true,
-        inDream: false,
-        avatarPreset: "cat",
-        name: "Mika",
-      } as never,
-      petQueryError: false,
-      petQueryErrorMessage: "",
-      petActionPending: false,
-      lang: "en",
-      t: ((key: string) => key) as never,
-      numberFormatter: new Intl.NumberFormat("en-US"),
-    });
-    expect(model.petVitals).toHaveLength(4);
-    expect(model.petAvatarPresetKey).toBe("cat");
-    expect(model.petCompanionLine).toBe("petCompanionStable");
   });
 
   it("builds session surface and compact rows for direct session", () => {

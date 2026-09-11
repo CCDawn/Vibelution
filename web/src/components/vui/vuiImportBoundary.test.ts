@@ -25,7 +25,6 @@ const productSharedParentStyleConsumers = [
   "routes/chat/CacheDetailDialog.tsx",
   "routes/chat/ChatConversationIndexRail.tsx",
   "routes/chat/chatRoutePresentation.tsx",
-  "routes/chat/ChatStatusRail.tsx",
   "routes/chat/TokenCoreStatusPanel.tsx",
   "routes/chat/useChatWorkbenchLayout.ts",
   // Known Launcher surface subcomponent sharing the parent placement style
@@ -180,7 +179,6 @@ const legacyStyleMapFiles = new Set<string>([
   "routes/chat/ChatMessageChromeHeader.tsx",
   "routes/chat/ChatSessionWorkbenchShell.tsx",
   "routes/chat/ChatWorkbenchCenterColumn.tsx",
-  "routes/chat/TurnStatusTailPanel.tsx",
   "routes/EvolutionDatasetCatalogPanel.tsx",
   "routes/EvolutionSupervisedCaseTracePanel.tsx",
   "routes/EvolutionSupervisedConversationEvidencePanel.tsx",

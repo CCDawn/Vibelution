@@ -23,6 +23,11 @@ const styles: Record<string, string> = {
   cacheDetailBoundaryUnknown:
     "vui-routes-chatcodingroute cacheDetailBoundaryUnknown block h-full min-w-0 bg-[color-mix(in_srgb,var(--fg-tertiary)_55%,transparent)] w-[var(--cache-boundary-unknown-width)]",
   cacheDetailCalibrationNote: `vui-routes-chatcodingroute cacheDetailCalibrationNote min-w-0 ${vuiGlassPanelClass} !grid gap-1 p-2.5 [font-size:var(--vui-font-xs)] leading-snug text-[var(--fg-secondary)] [&_strong]:text-[var(--fg-primary)] [&_em]:text-[var(--fg-tertiary)] [&_em]:not-italic`,
+  // Diagnostics live below the metric body so they never compete with cache hits.
+  cacheDetailDiagnostics:
+    "vui-routes-chatcodingroute cacheDetailDiagnostics min-w-0 grid gap-2 border-t border-[var(--vui-border-subtle)] pt-3",
+  cacheDetailDiagnosticsHeading:
+    "vui-routes-chatcodingroute cacheDetailDiagnosticsHeading m-0 min-w-0 [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)]",
   cacheDetailTooltipSurface:
     "vui-routes-chatcodingroute cacheDetailTooltipSurface !px-2.5 !py-2 text-left",
   cacheDetailTooltip:

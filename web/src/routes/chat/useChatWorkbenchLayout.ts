@@ -34,6 +34,12 @@ type DragState = {
 
 export type UseChatWorkbenchLayoutOptions = {
   standardGroupRoomActive: boolean;
+  /**
+   * Whether a status rail exists for this session surface. The rail slot is only
+   * populated in companion mode; when false the rail track is reclaimed for the
+   * conversation and no right resize/collapse affordance is exposed.
+   */
+  statusRailEnabled: boolean;
 };
 
 export type UseChatWorkbenchLayoutResult = {
@@ -74,6 +80,7 @@ export const CHAT_WORKBENCH_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.chat;
 
 export function useChatWorkbenchLayout({
   standardGroupRoomActive,
+  statusRailEnabled,
 }: UseChatWorkbenchLayoutOptions): UseChatWorkbenchLayoutResult {
   const chatPanelWidths = useShellStore((state) => state.chatPanelWidths);
   const setChatPanelWidths = useShellStore((state) => state.setChatPanelWidths);
@@ -109,8 +116,8 @@ export function useChatWorkbenchLayout({
     ? leftRailCollapsed
     : responsiveOverlayPane !== "left";
   const conversationIndexOverlayOpen = !responsiveLayout.leftVisible && responsiveOverlayPane === "left";
-  const statusRailOverlayOpen = !responsiveLayout.rightVisible && responsiveOverlayPane === "right";
-  const statusRailDocked = responsiveLayout.rightVisible && !rightPaneCollapsed;
+  const statusRailOverlayOpen = statusRailEnabled && !responsiveLayout.rightVisible && responsiveOverlayPane === "right";
+  const statusRailDocked = statusRailEnabled && responsiveLayout.rightVisible && !rightPaneCollapsed;
   const statusRailCollapsed = !statusRailDocked && !statusRailOverlayOpen;
   const responsiveOverlayOpen = conversationIndexOverlayOpen || statusRailOverlayOpen;
 
@@ -160,10 +167,10 @@ export function useChatWorkbenchLayout({
   useEffect(() => {
     if (responsiveOverlayPane === "left" && responsiveLayout.leftVisible) {
       setResponsiveOverlayPane(null);
-    } else if (responsiveOverlayPane === "right" && responsiveLayout.rightVisible) {
+    } else if (responsiveOverlayPane === "right" && (responsiveLayout.rightVisible || !statusRailEnabled)) {
       setResponsiveOverlayPane(null);
     }
-  }, [responsiveLayout.leftVisible, responsiveLayout.rightVisible, responsiveOverlayPane]);
+  }, [responsiveLayout.leftVisible, responsiveLayout.rightVisible, responsiveOverlayPane, statusRailEnabled]);
 
   const handleResizeStart = useCallback((side: ResizableSide, event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) {

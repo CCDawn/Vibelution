@@ -68,7 +68,7 @@ describe("workbench layout gate (Wave 5)", () => {
   it("keeps Chat workbench on shared axis resize session + registry layout id", () => {
     const chatLayout = readFileSync(resolve(webSrc, "routes/chat/useChatWorkbenchLayout.ts"), "utf-8");
     const chatRoute = readFileSync(resolve(webSrc, "routes/chat/ChatCodingRouteWorkbench.tsx"), "utf-8");
-    const statusRail = readFileSync(resolve(webSrc, "routes/chat/ChatStatusRail.tsx"), "utf-8");
+    const statusRail = readFileSync(resolve(webSrc, "routes/companions/CompanionLifeRail.tsx"), "utf-8");
     const indexRail = readFileSync(resolve(webSrc, "routes/chat/ChatConversationIndexRail.tsx"), "utf-8");
     const sessionTabs = readFileSync(resolve(webSrc, "routes/AgentSessionTabStrip.styles.ts"), "utf-8");
     expect(chatLayout).toContain("attachAxisResizeSession");
@@ -93,7 +93,9 @@ describe("workbench layout gate (Wave 5)", () => {
       || chatShell.includes("PaneCollapseHandle")
       || chatRoute.includes("PaneCollapseHandle"),
     ).toBe(true);
-    expect(statusRail).toContain('data-vui-region="chat-status-rail"');
+    // Chat status rail retired: the right rail slot only mounts the companion life rail.
+    expect(statusRail).toContain("export function CompanionLifeRail");
+    expect(statusRail).toContain("overlayOpen");
     expect(indexRail).toContain('data-vui-region="chat-session-index"');
     // Soft cool active tab — not full ink slab fill.
     expect(sessionTabs).toContain("agentSessionTabActive");
@@ -248,18 +250,12 @@ describe("workbench layout gate (Wave 5)", () => {
     expect(maintenance).toContain("LAUNCHER_NOISE_ITEM_GRID_HEIGHT_PANE");
   });
 
-  it("keeps Chat compact-details body on height API and dialogs on viewport clamp (Wave 6H)", () => {
-    const chatHeights = readFileSync(resolve(webSrc, "routes/chat/chatListHeights.ts"), "utf-8");
-    const statusRail = readFileSync(resolve(webSrc, "routes/chat/ChatStatusRail.tsx"), "utf-8");
+  it("keeps dialogs on the viewport clamp policy (Wave 6H)", () => {
     const chatStyles = readFileSync(resolve(webSrc, "routes/ChatCodingRoute.styles.ts"), "utf-8");
     const cacheDialog = readFileSync(resolve(webSrc, "routes/chat/CacheDetailDialog.tsx"), "utf-8");
     const wizardDialog = readFileSync(resolve(webSrc, "routes/agent-create/AgentCreateWizardDialog.tsx"), "utf-8");
     const wizardStyles = readFileSync(resolve(webSrc, "routes/agent-create/AgentCreateWizardDialog.styles.ts"), "utf-8");
     const policy = readFileSync(resolve(webSrc, "components/layout/dialogHeightPolicy.ts"), "utf-8");
-    expect(chatHeights).toContain("compact-details");
-    expect(statusRail).toContain("CHAT_COMPACT_DETAILS_HEIGHT_PANE");
-    expect(statusRail).toContain("compactDetailsBody");
-    expect(chatStyles).not.toMatch(/compactDetails:\s*`[^`]*max-h-\[220px\]/);
     expect(chatStyles).toContain("100dvh");
     expect(cacheDialog).not.toContain("usePersistedPaneHeight");
     expect(cacheDialog).not.toContain("PersistedHeightListShell");
@@ -376,8 +372,6 @@ describe("workbench layout gate (Wave 5)", () => {
       { file: "routes/LauncherDiagnosticsPanel.styles.ts", key: "guardianTableResizeHandle" },
       { file: "routes/LauncherDeveloperModePanel.styles.ts", key: "cleanupConsoleResizeHandle" },
       { file: "routes/LauncherProjectMaintenancePanel.styles.ts", key: "cleanupConsoleResizeHandle" },
-      { file: "routes/chat/ChatStatusRail.styles.ts", key: "groupMemberPickerResizeHandle" },
-      { file: "routes/chat/ChatStatusRail.styles.ts", key: "compactDetailsResizeHandle" },
       { file: "routes/LauncherDeveloperModePanel.styles.ts", key: "noiseItemGridResizeHandle" },
       { file: "routes/LauncherProjectMaintenancePanel.styles.ts", key: "noiseItemGridResizeHandle" },
     ];

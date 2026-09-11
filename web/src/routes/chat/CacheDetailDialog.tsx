@@ -1,9 +1,20 @@
-import { type CSSProperties } from "react";
+import { lazy, Suspense, type CSSProperties } from "react";
 
-import type { SessionCacheCompositionSegment } from "../../api/types";
+import type {
+  SessionAgentPromptSnapshot,
+  SessionCacheCompositionSegment,
+  SessionLlmPayloadTrace,
+  SessionPromptAssemblyManifest,
+} from "../../api/types";
 import { VDialog, VTooltip } from "../../components/vui";
 import routeStyles from "../ChatCodingRoute.styles";
 import styles from "./CacheDetailDialog.styles";
+import { ChatPromptAssemblyInspector } from "./ChatPromptAssemblyInspector";
+
+/** Developer payload detail stays lazy and DEV-gated; production ships without it. */
+const LlmPayloadTracePanel = lazy(() =>
+  import("./LlmPayloadTracePanel").then((module) => ({ default: module.LlmPayloadTracePanel })),
+);
 
 function CacheHoverLines({ lines }: { lines: string[] }) {
   const rows = lines.map((line) => line.trim()).filter(Boolean).slice(0, 5);
@@ -61,6 +72,10 @@ type CacheDetailDialogProps = {
   upperBoundCachedInputTokens: number;
   upperBoundCacheCompositionPercent: number;
   upperBoundCacheInputTokens: number;
+  /** Diagnostics: prompt assembly manifest (user-facing) and last payload trace (DEV only). */
+  promptSnapshot?: SessionAgentPromptSnapshot;
+  promptAssembly?: SessionPromptAssemblyManifest;
+  lastLlmPayloadTrace?: SessionLlmPayloadTrace | null;
 };
 
 function promptSegmentCategory(segment: Pick<SessionCacheCompositionSegment, "key" | "promptCategory">) {
@@ -354,6 +369,9 @@ export function CacheDetailDialog({
   upperBoundCachedInputTokens,
   upperBoundCacheCompositionPercent,
   upperBoundCacheInputTokens,
+  promptSnapshot,
+  promptAssembly,
+  lastLlmPayloadTrace,
 }: CacheDetailDialogProps) {
   const trueHitHover = [
     `${numberFormatter.format(providerCachedInputTokens)} / ${numberFormatter.format(providerCacheInputTokens)} tokens`,
@@ -633,6 +651,19 @@ export function CacheDetailDialog({
             </section>
           </div>
         </div>
+        {promptSnapshot || (import.meta.env.DEV && lastLlmPayloadTrace) ? (
+          <section className={styles.cacheDetailDiagnostics} aria-label={lang === "zh" ? "诊断" : "Diagnostics"}>
+            <h3 className={styles.cacheDetailDiagnosticsHeading}>{lang === "zh" ? "诊断" : "Diagnostics"}</h3>
+            {promptSnapshot ? (
+              <ChatPromptAssemblyInspector lang={lang} snapshot={promptSnapshot} manifest={promptAssembly} />
+            ) : null}
+            {import.meta.env.DEV && lastLlmPayloadTrace ? (
+              <Suspense fallback={null}>
+                <LlmPayloadTracePanel lang={lang} trace={lastLlmPayloadTrace} />
+              </Suspense>
+            ) : null}
+          </section>
+        ) : null}
     </VDialog>
   );
 }
