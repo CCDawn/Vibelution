@@ -746,6 +746,20 @@ def submit_session_message(
     submit_timing_fields["sessionAdmissionDisposition"] = str(
         journal_receipt.get("admissionDisposition") or "disabled"
     )
+    try:
+        from . import title_generation
+
+        title_generation.maybe_schedule_session_title_generation(
+            conversation_id,
+            message=message,
+            message_source=normalized_message_source,
+            had_previous_user_message=s._latest_user_message_index(previous_messages) >= 0,
+        )
+    except Exception as exc:
+        s._debug_logger.warning(
+            f"session title scheduling skipped: {type(exc).__name__}: {exc}",
+            tag="LOGS",
+        )
     live_publish_started_at = s._perf_counter()
     s._set_session_waiting_live_output(conversation_id, turn_id=turn_control.turn_id)
     submit_timing_fields["initialLiveDeltaPublishMs"] = s._elapsed_ms(live_publish_started_at)
