@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from core.infrastructure.path_containment import PROJECT_ROOT
+from core.web.services.team_workflow.storage_ids import safe_storage_component
 from vibelution_storage import resolve_project_workspace_home
 
 from .atomic_fs import CorruptWorkflowStoreError, atomic_write_text
@@ -62,7 +63,17 @@ def _path(team_id: str, kind: str) -> Path:
     kind_key = str(kind or "").strip()
     if not team or kind_key not in _SUPPORTED_KINDS:
         raise ValueError(f"unsupported workflow artifact kind/team: {kind_key}/{team}")
-    return resolve_project_workspace_home(_root()) / "teams" / team / "workflow_artifacts" / f"{kind_key}.jsonl"
+    # The team id becomes one path component: sanitize it through the shared
+    # contract so ``..``/separators cannot leave the teams namespace, matching
+    # every other team-scoped store.
+    team_component = safe_storage_component(team, fallback="team")
+    return (
+        resolve_project_workspace_home(_root())
+        / "teams"
+        / team_component
+        / "workflow_artifacts"
+        / f"{kind_key}.jsonl"
+    )
 
 
 # The stage-one closure writers embed the human gate / model receipts as new
