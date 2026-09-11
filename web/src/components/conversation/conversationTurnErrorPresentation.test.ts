@@ -23,6 +23,19 @@ describe("conversationTurnErrorPresentation", () => {
     expect(conversationViewSource).not.toContain("function turnErrorBannerRows(");
   });
 
+  it("renders the turn-error block inside the timeline instead of pinning it above the composer", () => {
+    const pinnedSlot = conversationViewSource.slice(
+      conversationViewSource.indexOf("data-codex-tool-approval-fallback"),
+      conversationViewSource.indexOf("{showComposer ? ("),
+    );
+    expect(pinnedSlot).not.toContain("styles.turnError");
+
+    const virtualSpacerIndex = conversationViewSource.indexOf("timelineVirtualRange.bottomSpacerPx > 0");
+    const inlineTurnErrorIndex = conversationViewSource.indexOf("turnErrorSupersededByFinalAnswer ? (");
+    expect(virtualSpacerIndex).toBeGreaterThan(-1);
+    expect(inlineTurnErrorIndex).toBeGreaterThan(virtualSpacerIndex);
+  });
+
   it("resolves trimmed turn-error type from camelCase or snake_case metadata", () => {
     expect(resolveConversationTurnErrorType({
       metadata: { errorType: " provider_failure " },

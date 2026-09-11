@@ -326,6 +326,14 @@ export type KnowledgeInvocationBadge = {
   absorbedCount: number;
   failedCount?: number;
   latest?: KnowledgeInvocationRecentSummary | null;
+  /** Auto-accept policy facts for the residual handoff gate (SCI-049 O-02).
+   * Absent/null on legacy snapshots — the UI then omits the auto-accept
+   * promise instead of inventing a cadence. */
+  autoAccept?: {
+    pending: boolean;
+    actor: string;
+    intervalMs: number;
+  } | null;
 };
 
 export type ResearchWorkflowSnapshot = {

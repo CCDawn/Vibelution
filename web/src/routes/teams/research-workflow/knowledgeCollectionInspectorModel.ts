@@ -120,12 +120,19 @@ export function buildKnowledgeCollectionInspectorModel(input: {
   }
   const phase = phaseOf(badge);
   const latest = badge.latest;
+  // SCI-049 O-02: quote the server-vouched sweep cadence on the waiting gate
+  // so "等待交接" never reads as a stuck human wait.
+  const autoAcceptSeconds = badge.autoAccept?.pending
+    ? Math.max(1, Math.round(badge.autoAccept.intervalMs / 1000))
+    : null;
   const detail = (() => {
     switch (phase) {
       case "collecting":
         return "知识搜集子运行进行中，可在下方查看五节点进度与停止动作。";
       case "awaiting_handoff":
-        return "知识包已产出并等待人工交接确认；请核对来源与风险后接受或要求修订。";
+        return autoAcceptSeconds !== null
+          ? `知识包已产出，等待交接确认；系统将在约 ${autoAcceptSeconds}s 内自动接受，也可先核对来源与风险后手动处理。`
+          : "知识包已产出并等待人工交接确认；请核对来源与风险后接受或要求修订。";
       case "handed_off":
         return "知识包已被父运行吸收并回写；下方可追溯包引用与来源节点。";
       case "cancelled": return "知识请求已取消，后续步骤不会继续执行。";

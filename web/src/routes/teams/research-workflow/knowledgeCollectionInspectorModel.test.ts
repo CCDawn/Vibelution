@@ -122,6 +122,27 @@ describe("buildKnowledgeCollectionInspectorModel", () => {
     expect(model.packageHash).toBe("a".repeat(64));
   });
 
+  it("quotes the server auto-accept cadence on the awaiting_handoff detail (SCI-049 O-02)", () => {
+    const model = buildKnowledgeCollectionInspectorModel({
+      badge: badge({
+        awaitingHandoffCount: 1,
+        autoAccept: { pending: true, actor: "auto_advance_sweep", intervalMs: 30000 },
+        latest: {
+          invocationId: "inv-2",
+          parentNodeId: "source_finding",
+          status: "awaiting_handoff",
+          handoffState: "awaiting_human",
+          currentKnowledgeNodeId: "knowledge_handoff",
+          childNodeStates: {source_finding: "succeeded", source_extraction: "succeeded", evidence_relations: "succeeded", knowledge_ingestion: "succeeded"},
+          knowledgePackageRef: "kb://pkg-1",
+          updatedAtMs: 6,
+        },
+      }),
+    });
+    expect(model.phase).toBe("awaiting_handoff");
+    expect(model.detail).toContain("约 30s 内自动接受");
+  });
+
   it("derives handed_off as fully completed progress", () => {
     const model = buildKnowledgeCollectionInspectorModel({
       badge: badge({

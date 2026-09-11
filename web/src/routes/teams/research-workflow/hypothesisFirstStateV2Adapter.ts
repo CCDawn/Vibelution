@@ -409,7 +409,16 @@ function defaultStatus(
     case "generation": return state.isInitial ? "可以开始生成候选假说" : "候选生成状态已更新";
     case "selection": return "请选择进入评审的候选假说";
     case "review": return `本轮候选评审：已完成 ${state.review.aggregate.completed}/${state.review.aggregate.total}`;
-    case "collection": return `资料搜集 ${state.collection.aggregate.completed}/${state.collection.aggregate.total}`;
+    case "collection": {
+      // SCI-049 O-02: a waiting handoff gate is auto-accepted by the sweep;
+      // the status line quotes the server cadence instead of a silent wait.
+      const auto = state.collection.autoAccept;
+      if (state.collection.lifecycle === "waiting_human" && auto?.pending) {
+        const seconds = Math.max(1, Math.round(auto.intervalMs / 1000));
+        return `知识包交接待确认，约 ${seconds}s 内自动接受`;
+      }
+      return `资料搜集 ${state.collection.aggregate.completed}/${state.collection.aggregate.total}`;
+    }
     case "convergence": return state.convergence.accepted
       ? "假说已经收敛"
       : state.convergence.outcome === "rejected"
