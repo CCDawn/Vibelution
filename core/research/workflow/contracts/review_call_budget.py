@@ -45,7 +45,10 @@ CLOSING_REVIEW_CALLS = 2
 
 #: Largest candidate set that can reach review: the bounded review context
 #: truncates candidates at the same cap (research_memory_context
-#: MAX_REVIEW_CANDIDATES), so a budget beyond it is unreachable.
+#: MAX_REVIEW_CANDIDATES), so a budget beyond it is unreachable. FORMAL
+#: reviews fail closed at MAX_FINALIST_LIMIT (3); DEV reviews intentionally
+#: keep running above 3 with a warning, so the cap must stay derivable up
+#: to the context truncation bound.
 MAX_BUDGET_FINALIST_COUNT = 16
 
 
