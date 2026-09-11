@@ -47,7 +47,7 @@ const styles: Record<string, string> = {
   conversationIndexLayout:
     "vui-routes-chatcodingroute conversationIndexLayout grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-2",
   conversationIndexPanelBody:
-    "vui-routes-chatcodingroute conversationIndexPanelBody !overflow-hidden",
+    "vui-routes-chatcodingroute conversationIndexPanelBody !overflow-hidden !pr-0 ![scrollbar-gutter:auto]",
   conversationIndexScrollRegion:
     "vui-routes-chatcodingroute conversationIndexScrollRegion min-h-0 overflow-y-auto pr-1 [scrollbar-gutter:stable]",
   createGroupButton:
