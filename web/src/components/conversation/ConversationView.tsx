@@ -2,10 +2,12 @@ import {
   ArrowDown,
   ArrowUp,
   BrainCircuit,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   CircleDot,
+  Copy,
   ExternalLink,
   ImagePlus,
   Link2,
@@ -359,6 +361,27 @@ const ConversationTurnRow = React.memo(function ConversationTurnRow({
   return <>{renderTurn()}</>;
 }, conversationTurnRowPropsAreEqual);
 
+async function copyTextToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textArea = document.createElement("textarea");
+  textArea.value = text;
+  textArea.setAttribute("readonly", "true");
+  textArea.style.position = "absolute";
+  textArea.style.opacity = "0";
+  textArea.style.pointerEvents = "none";
+  document.body.appendChild(textArea);
+  textArea.select();
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textArea);
+  if (!copied) {
+    throw new Error("copy failed");
+  }
+}
+
 export function ConversationView({
   sessionId,
   title,
@@ -495,6 +518,8 @@ export function ConversationView({
   const [timelineRowHeightVersion, setTimelineRowHeightVersion] = useState(0);
   const [computerUseSessionResults, setComputerUseSessionResults] = useState<Record<string, ComputerUseResult>>({});
   const [computerUseSessionPending, setComputerUseSessionPending] = useState<Record<string, "confirm" | "cancel" | undefined>>({});
+  const [copiedAnswerMessageId, setCopiedAnswerMessageId] = useState("");
+  const copyAnswerFeedbackTimerRef = useRef<number | null>(null);
   const resolvedActionMode = resolveComposerActionMode(composerActionMode);
   const hasComposerAttachments = composerAttachments.length > 0;
   const hasComposerReferences = composerReferences.length > 0;
@@ -1218,6 +1243,12 @@ export function ConversationView({
     };
     timelineVirtualRowRefCallbacksRef.current.set(key, callback);
     return callback;
+  }, []);
+
+  useEffect(() => () => {
+    if (copyAnswerFeedbackTimerRef.current !== null) {
+      window.clearTimeout(copyAnswerFeedbackTimerRef.current);
+    }
   }, []);
 
   useLayoutEffect(() => {
@@ -1977,6 +2008,23 @@ export function ConversationView({
         {items.map((item) => renderAgentMessageTimelineItem(message, item, rowIdentity, item.id === activeItemId))}
       </div>
     );
+  }
+
+  function handleCopyAnswer(messageId: string, text: string) {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      return;
+    }
+    void copyTextToClipboard(trimmed).then(() => {
+      setCopiedAnswerMessageId(messageId);
+      if (copyAnswerFeedbackTimerRef.current !== null) {
+        window.clearTimeout(copyAnswerFeedbackTimerRef.current);
+      }
+      copyAnswerFeedbackTimerRef.current = window.setTimeout(() => {
+        copyAnswerFeedbackTimerRef.current = null;
+        setCopiedAnswerMessageId((current) => (current === messageId ? "" : current));
+      }, 1600);
+    }).catch(() => undefined);
   }
 
   function renderCodexTranscriptCells(
@@ -4037,6 +4085,11 @@ export function ConversationView({
               && answerOnlyProcessMode
               && isStreamingStatusPlaceholderContent(responseText);
             const isResponseStreaming = assistantTurnIsStreaming(message) && showResponseBlock && !isStreamingStatusPlaceholder;
+            const copyableAnswerText = message.role === "assistant"
+              && !turnErrorMessage
+              && !assistantTurnIsStreaming(message)
+              ? responseText.trim()
+              : "";
             const showResponseSpinner = isResponseStreaming && !hasActiveProcess;
             const defaultResponseExpanded = assistantTurnIsStreaming(message) || defaultExpandedResponseIds.has(message.id);
             const responseExpanded = getExpansionState(message.id, "response", defaultResponseExpanded);
@@ -4193,6 +4246,16 @@ export function ConversationView({
                 metaActions={
                   <>
                     {message.timestamp ? <span>{formatTimestamp(message.timestamp)}</span> : null}
+                    {copyableAnswerText ? (
+                      <VButton
+                        type="button"
+                        className={styles.turnIconButton}
+                        onClick={() => handleCopyAnswer(message.id, copyableAnswerText)}
+                        title={t("copyAnswer")}
+                        aria-label={t("copyAnswer")}
+                        isIconOnly
+                        icon={copiedAnswerMessageId === message.id ? <Check size={14}/> : <Copy size={14}/>} />
+                    ) : null}
                     {userAuthoredMessage && !steerGuidanceMessage && message.id === latestUserMessageId && onEditUserMessage ? (
                       <VButton
                         type="button"

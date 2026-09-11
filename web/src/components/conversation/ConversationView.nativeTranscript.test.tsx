@@ -525,6 +525,39 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain(">model_retry<");
   });
 
+  it("offers a copy action on a settled assistant answer", () => {
+    const answer = (status: "running" | "completed"): ConversationMessage => ({
+      id: `assistant-copy-${status}`,
+      role: "assistant",
+      timestamp: "2026-09-11T08:00:00Z",
+      turnId: `turn-copy-${status}`,
+      status,
+      turnItems: [{
+        id: `answer-copy-${status}:0`,
+        itemId: `answer-copy-${status}`,
+        version: 3,
+        sessionId: "session-1",
+        turnId: `turn-copy-${status}`,
+        type: "agent_message",
+        phase: "final_answer",
+        status,
+        revision: 0,
+        sequence: 1,
+        terminal: status === "completed",
+        text: "这是可以复制的最终回答。",
+      }],
+    });
+
+    const settled = renderConversation([answer("completed")]);
+    expect(settled).toContain("这是可以复制的最终回答。");
+    // Static render has no loaded dictionary pack, so t() falls back to the key.
+    expect(settled).toContain('aria-label="copyAnswer"');
+
+    // While the answer is still streaming the clipboard must stay untouched.
+    const streaming = renderConversation([answer("running")]);
+    expect(streaming).not.toContain('aria-label="copyAnswer"');
+  });
+
   it("shows what a running tool is working on, from its arguments", () => {
     const runningTool = (
       toolName: string,
