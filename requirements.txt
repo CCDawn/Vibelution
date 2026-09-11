@@ -13,7 +13,9 @@ langchain>=0.1.0
 langchain-core>=0.1.0
 langchain-community>=0.0.10
 langchain-openai>=0.0.2
-litellm>=1.51.0
+# litellm==1.82.7/1.82.8 曾在 2026-03 被投毒（PyPI 供应链事件）；原下界 1.51.0 对全新安装
+# 等于没有约束。下界抬到实际运行版本并加上界，避免解析到任意（含被污染的）版本。
+litellm>=1.96.0,<2.0
 openai[realtime]>=2.38.0
 socksio>=1.0.0             # httpx SOCKS proxy support for LiteLLM when ALL_PROXY is set
 mcp==2.0.0                 # Official MCP Python SDK v2; legacy + modern protocol eras
