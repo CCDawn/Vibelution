@@ -701,4 +701,43 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).toContain("const value = 1;");
     expect(html).toContain("const value = 2;");
   });
+
+  it("suppresses the standalone turn error banner when the same turn rendered a final answer", () => {
+    const answeredMessage: ConversationMessage = {
+      id: "assistant-answered",
+      role: "assistant",
+      timestamp: "2026-05-22T00:01:00Z",
+      turnId: "turn-1",
+      status: "completed",
+      turnItems: [{
+        id: "answer-r1",
+        itemId: "answer-1",
+        version: 3,
+        sessionId: "session-1",
+        turnId: "turn-1",
+        type: "agent_message",
+        phase: "final_answer",
+        status: "completed",
+        revision: 1,
+        sequence: 1,
+        terminal: true,
+        text: "结论：无需修改。",
+      }],
+    };
+    const turnError = {
+      message: "模型服务上游暂时失败，本轮没有完成。",
+      errorType: "provider_upstream_error",
+      reasonCode: "upstream_unavailable",
+      turnId: "turn-1",
+    };
+
+    const supersededHtml = renderConversation([answeredMessage], "trace", false, { turnError });
+    expect(supersededHtml).toContain("无需修改。");
+    expect(supersededHtml).not.toContain("turnErrorText");
+
+    const unmatchedHtml = renderConversation([answeredMessage], "trace", false, {
+      turnError: { ...turnError, turnId: "turn-other" },
+    });
+    expect(unmatchedHtml).toContain("turnErrorText");
+  });
 });
