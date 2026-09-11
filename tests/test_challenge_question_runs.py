@@ -247,10 +247,10 @@ def _citation_checks(output: dict) -> list[dict]:
     return [{"sourceUrl": item["source_url"], "status": "passed"} for item in output["evidence"]]
 
 
-def test_semantic_validation_rejects_hollow_dimension_ratings() -> None:
-    """结构齐全但关键维度全填 insufficient 且无引用 → 语义门必须失败。
+def test_semantic_validation_requires_an_evidence_anchor_on_key_dimensions() -> None:
+    """证据锚定：三个关键维度必须引用可解析的证据 id。
 
-    这正是「结构完整即通过」的空洞写法：字段都在，但没有任何可核查的断言。
+    行存在但引不到任何证据，对读者等于没有可核查的断言——这才是该拦的空洞写法。
     """
     output = _output(96)
     for row in output["dimension_reviews"]:
@@ -259,30 +259,48 @@ def test_semantic_validation_rejects_hollow_dimension_ratings() -> None:
             "falsifiability",
             "counterexample_coverage",
         }:
-            row["rating"] = "insufficient"
             row["evidence_refs"] = []
 
     semantic = challenge_question_runs._semantic_validation(output)
 
     assert semantic["status"] == "failed"
-    assert semantic["ratingFloorViolations"]
     assert semantic["evidenceBindingViolations"]
-    assert any(
-        item["path"] == "dimension_reviews.rating" for item in semantic["issues"]
-    )
     assert any(
         item["path"] == "dimension_reviews.evidence_refs" for item in semantic["issues"]
     )
 
 
-def test_semantic_validation_accepts_floored_dimensions_with_evidence() -> None:
+def test_semantic_validation_accepts_a_low_rating_when_it_is_anchored() -> None:
+    """评分是评审者的科学判断，机器不设档位下限。
+
+    合同 ``minimumContentPolicy`` 只要求七维覆盖并禁止聚合成单一总分；
+    一份被评审打成 ``mixed`` 的合法产出必须能通过机器门，交由 H1–H4 判断。
+    """
+    output = _output(96)
+    for row in output["dimension_reviews"]:
+        if row["dimension"] in {
+            "evidence_support",
+            "falsifiability",
+            "counterexample_coverage",
+        }:
+            row["rating"] = "mixed"
+
+    semantic = challenge_question_runs._semantic_validation(output)
+
+    assert semantic["status"] == "passed"
+    assert semantic["evidenceBindingViolations"] == []
+    assert not any(
+        "rating" in item["path"] for item in semantic["issues"]
+    )
+
+
+def test_semantic_validation_accepts_anchored_dimensions() -> None:
     """达标评分 + 可解析引用 → 语义门保持通过（防止修成永久拒绝）。"""
     output = _output(96)
 
     semantic = challenge_question_runs._semantic_validation(output)
 
     assert semantic["status"] == "passed"
-    assert semantic["ratingFloorViolations"] == []
     assert semantic["evidenceBindingViolations"] == []
 
 

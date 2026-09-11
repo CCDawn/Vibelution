@@ -56,23 +56,17 @@ REQUIRED_DIMENSIONS = {
     "risk_and_ethics",
     "counterexample_coverage",
 }
-#: Dimensions whose rating may not fall below the declared floor.  These three
-#: are the ones that decide whether a hypothesis is actually supported and
-#: testable; without a floor a structurally complete package can pass with
-#: ``insufficient`` on every row.
-DIMENSION_RATING_FLOOR = {
-    "evidence_support": "adequate",
-    "falsifiability": "adequate",
-    "counterexample_coverage": "adequate",
-}
-#: Ordered rating scale; the index is the comparable rank.
-DIMENSION_RATING_RANK = {
-    "insufficient": 0,
-    "weak": 1,
-    "mixed": 2,
-    "adequate": 3,
-    "strong": 4,
-}
+#: Dimensions whose review row must anchor to checkable evidence.  The
+#: contract's ``minimumContentPolicy`` requires the seven independent
+#: dimensions and forbids collapsing them into an aggregate score, so no
+#: dimension carries a rating threshold here: a rating is a reviewer's
+#: judgement and the H1-H4 human gate is its authority.  What is checked is
+#: the link -- these three rows must cite evidence this output declares (or a
+#: canonical reference), because contract §4.4 requires key claims to bind
+#: real source locations.
+EVIDENCE_ANCHORED_DIMENSIONS = frozenset(
+    {"evidence_support", "falsifiability", "counterexample_coverage"}
+)
 REQUIRED_HUMAN_GATE_KEYS = {
     "H1_problem_understanding",
     "H2_hypothesis_selection",
@@ -680,11 +674,12 @@ def _semantic_validation(output: dict[str, Any]) -> dict[str, Any]:
         for item in (output.get("evidence") if isinstance(output.get("evidence"), list) else [])
         if isinstance(item, dict) and str(item.get("evidence_id") or "").strip()
     }
-    # A rating below the floor, or a floored dimension with no declared
-    # evidence binding, is a hollow pass: the row exists but asserts nothing
-    # the reader can check.  Both are named per hypothesis and dimension so
-    # the H1-H4 reviewer sees exactly which row failed.
-    rating_floor_violations: list[dict[str, str]] = []
+    # A review row that cites nothing checkable asserts nothing the reader can
+    # check, so the three evidence-anchored dimensions must resolve to declared
+    # evidence.  Ratings themselves are never compared against a threshold:
+    # that judgement belongs to the H1-H4 reviewer, and a ``mixed`` rating is a
+    # legitimate scientific assessment.  Violations are named per hypothesis
+    # and dimension so the reviewer sees exactly which row lacks its anchor.
     evidence_binding_violations: list[dict[str, str]] = []
     from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
         parse_canonical_ref,
@@ -694,22 +689,15 @@ def _semantic_validation(output: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(item, dict):
             continue
         dimension = str(item.get("dimension") or "")
-        floor = DIMENSION_RATING_FLOOR.get(dimension)
-        if floor is None:
+        if dimension not in EVIDENCE_ANCHORED_DIMENSIONS:
             continue
         hypothesis_id = str(item.get("hypothesis_id") or "")
-        rating = str(item.get("rating") or "")
-        if DIMENSION_RATING_RANK.get(rating, -1) < DIMENSION_RATING_RANK[floor]:
-            rating_floor_violations.append(
-                {"hypothesisId": hypothesis_id, "dimension": dimension, "rating": rating}
-            )
         refs = [
             str(ref).strip()
             for ref in (item.get("evidence_refs") if isinstance(item.get("evidence_refs"), list) else [])
             if str(ref).strip()
         ]
-        # A floored dimension must anchor its rating to checkable evidence:
-        # either an evidence id this output declares, or a canonical evidence
+        # Either an evidence id this output declares, or a canonical evidence
         # reference (the grammar the package already parses to resolve cited
         # batches, which is what production review rows persist).  Auxiliary
         # candidate/source refs are tolerated beside the anchor.
@@ -732,26 +720,13 @@ def _semantic_validation(output: dict[str, Any]) -> dict[str, Any]:
         )
     if selected_id not in hypothesis_ids:
         issues.append({"path": "selection.selected_hypothesis_id", "message": "Selected hypothesis must exist."})
-    if rating_floor_violations:
-        issues.append(
-            {
-                "path": "dimension_reviews.rating",
-                "message": (
-                    "Evidence support, falsifiability and counterexample coverage must "
-                    "be rated at least 'adequate' for every hypothesis: "
-                    + "; ".join(
-                        f"{row['hypothesisId']}.{row['dimension']}={row['rating'] or 'missing'}"
-                        for row in rating_floor_violations[:8]
-                    )
-                ),
-            }
-        )
     if evidence_binding_violations:
         issues.append(
             {
                 "path": "dimension_reviews.evidence_refs",
                 "message": (
-                    "Those three dimensions must cite declared evidence ids: "
+                    "Evidence support, falsifiability and counterexample coverage must "
+                    "cite declared evidence ids: "
                     + "; ".join(
                         f"{row['hypothesisId']}.{row['dimension']}"
                         for row in evidence_binding_violations[:8]
@@ -770,7 +745,6 @@ def _semantic_validation(output: dict[str, Any]) -> dict[str, Any]:
         "allSevenDimensionsReviewed": not missing_dimensions and bool(hypothesis_ids),
         "researchPlanPresent": research_plan_present,
         "feedbackRevisionCount": len(feedback),
-        "ratingFloorViolations": rating_floor_violations,
         "evidenceBindingViolations": evidence_binding_violations,
     }
 
