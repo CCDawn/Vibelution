@@ -414,11 +414,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("detail?.runtimeNotices");
     expect(routeSource).toContain(".slice(-1)");
     expect(routeSource).toContain("<ChatSessionWorkspacePanel");
-    // The stack receives only backend runtime notices; control signals stay in
-    // the conversation transcript and the compact session-state row.
-    expect(routeSource).toContain("notices={activeRuntimeNotices}");
-    expect(routeSource).not.toContain("notices={sessionNotices}");
-    expect(routeSource).not.toContain('kind: "next_state_signal"');
+    // The stack receives backend runtime notices plus the aggregated control
+    // signal. Neither the retired status rail nor the conversation timeline
+    // renders that signal, so dropping it here would hide it completely.
+    expect(routeSource).toContain("notices={sessionNotices}");
+    expect(routeSource).toContain('kind: "next_state_signal"');
     expect(chatSessionWorkspacePanelSource).toContain("<ChatRuntimeNoticeStack");
     expect(chatSessionWorkspacePanelSource.indexOf("<ChatRuntimeNoticeStack")).toBeLessThan(
       chatSessionWorkspacePanelSource.indexOf("<ChatConversationComposerBridge"),
@@ -1709,7 +1709,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndTokenStatusSource).not.toContain("compression?.effectiveTokenLimit\n      ?? compression?.contextWindowLimit");
   });
 
-  it("keeps recent control signals out of the runtime notice stack", () => {
+  it("surfaces recent control signals in the runtime notice stack", () => {
     expect(routeSource).toContain("const activeControlSignals = useMemo<ChatNextStateSignalSummary[]>");
     expect(routeSource).toContain(
       "shouldShowNextStateSignalInConversation(signal, phase, detail?.messages ?? [])",
@@ -1721,9 +1721,15 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndSessionSurfaceSource).toContain("label: t(\"nextStateSignalsLabel\")");
     expect(routeAndSessionSurfaceSource).toContain("value: latestControlSignalLine");
     expect(routeAndSessionSurfaceSource).toContain("title: latestControlSignalTitle");
-    expect(routeSource).not.toContain('kind: "next_state_signal"');
-    expect(routeSource).not.toContain("control-signal-");
-    expect(routeSource).not.toContain("notices={sessionNotices}");
+    // The retired status rail was this signal's only host, and the conversation
+    // timeline still does not render it, so the notice stack is what keeps the
+    // aggregated kind/count visible. `warning` stays a compact row, not an alert.
+    expect(routeSource).toContain("const sessionNotices = useMemo<SessionRuntimeNotice[]>");
+    expect(routeSource).toContain('kind: "next_state_signal"');
+    expect(routeSource).toContain("control-signal-");
+    expect(routeSource).toContain('level: "warning"');
+    expect(routeSource).toContain("notices={sessionNotices}");
+    expect(routeSource).not.toContain("notices={activeRuntimeNotices}");
     expect(routeSource).not.toContain("nextStateSignals={detail.nextStateSignals ?? []}");
   });
 
