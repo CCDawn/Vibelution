@@ -220,7 +220,7 @@ Vibelution 支持通过 `pytest-xdist` 做进程级并行。直接运行 pytest 
 `scripts/local_quality_gate.py` 有三个 mode，按任务阶段选择：
 
 - `commit`：由 pre-commit hook 自动调用，以 staged paths 驱动；只做 staged diff check 与 Python fatal Ruff。gate-definition 同时有 staged/unstaged 内容时拒绝提交；行为测试统一留给最终 closeout，避免同一批 gate 测试在 commit 与 closeout 重复执行。
-- `closeout --base main --claim-id <claim-id>`：针对已提交且 clean 的 task worktree，在精确 HEAD 上执行一次完整 selector，绑定 `active/ready` claim、本地 `main` SHA、HEAD SHA、验证 toolchain 身份、命令和 merge preflight。selector 的 `.venv` 是逻辑命令；任务与 integration worktree 的 `requirements.txt` 字节一致时，只读复用 integration `.venv`，不要求任务树存在 `.venv`。实现文件有变更时加载 reuse evidence schema 3：已定位小修可用 `LOCAL_ONLY`，需要仓外对照时用 `EXTERNAL` 并固定候选 commit/blob。
+- `closeout --base main --claim-id <claim-id>`：针对已提交且 clean 的 task worktree，在精确 HEAD 上执行一次完整 selector，绑定 `active/ready` claim、本地 `main` SHA、HEAD SHA、验证 toolchain 身份、命令和 merge preflight。selector 的 `.venv` 是逻辑命令；任务声明的依赖已由 integration `.venv` 满足时（两处 `requirements.txt` 字节一致，或逐条依赖均已安装且版本符合），只读复用 integration `.venv`，不要求任务树存在 `.venv`。依赖未满足时返回 `validation_toolchain_mismatch`，并在 detail 中点名未满足的条目。实现文件有变更时加载 reuse evidence schema 3：已定位小修可用 `LOCAL_ONLY`，需要仓外对照时用 `EXTERNAL` 并固定候选 commit/blob。
 - `verify-manifest --manifest <path> --base main`：在进入 root local `main` fast-forward gate 前复核 manifest 的 schema、outcome、branch/worktree、main/HEAD/changed files、active claim、clean 状态、checks、验证 toolchain 身份、复用研究快照与固定候选 commit、allowlisted command 结果和 fast-forward ancestry。`passed` 是当前授权证据，不表示已经 merge。
 
 日常收口从 root local `main` cwd 调用 `scripts/task_closeout.py --task-worktree <path> --claim-id <id> --agent-id <id>`。它只跑一次 selector，再短时有界等待 `integration/main`；若仍冲突，返回 `manifest_path` / `next_action=retry_with_manifest`，后续必须带 `--manifest`，不得重测。`stale_main` 会返回一次性 token；同步最新 `main` 后才可用 `--reserve-integration --stale-retry-token <path>`。`merged_cleanup_pending` 已经合入，只运行 `--cleanup-only --branch <branch>`，不再验证或 merge。
@@ -245,7 +245,7 @@ Outcome 必须结合 mode 解释，每个组合只对应一个恢复动作：
 | `closeout` | `unsupported_validation_command` | 修正 matrix 为允许命令族，不放宽到 shell，然后重跑 closeout |
 | `closeout` | `reuse_research_missing` | 已定位小修记录 `LOCAL_ONLY`；需要仓外对照的任务记录 `EXTERNAL`，然后重跑 closeout |
 | `closeout` | `reuse_research_invalid` | 修正 mode/任务绑定/本地 owner；EXTERNAL 再修候选 HEAD、clone、许可证或 source ref，重新记录后重跑 |
-| `commit/closeout/verify-manifest` | `validation_toolchain_mismatch` | 当前 worktree 与 integration worktree 的 `requirements.txt` 不同；不得复用共享环境或创建 Junction，等待兼容环境池或先使依赖身份一致 |
+| `commit/closeout/verify-manifest` | `validation_toolchain_mismatch` | 当前 worktree 的 `requirements.txt` 有共享环境未满足的依赖（未安装、版本冲突，或无法静态校验的行）；按 detail 补齐共享环境后重跑，不得创建 Junction |
 | `commit/closeout/verify-manifest` | `validation_toolchain_missing` | 修复 integration worktree 的 `.venv`，然后重跑；不要在任务 worktree 建链接 |
 | `commit/closeout/verify-manifest` | `validation_toolchain_requirements_missing` | 恢复当前或 integration worktree 的 `requirements.txt` 后重跑 |
 | `commit/closeout/verify-manifest` | `validation_toolchain_unhealthy` | 修复 integration `.venv` 的解释器健康状态后重跑 |

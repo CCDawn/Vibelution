@@ -8,9 +8,19 @@ import pytest
 from scripts import validation_toolchain
 
 
+_INSTALLED = {"pytest": "8.3.0", "ruff": "0.6.5", "tzdata": "2025.2"}
+
+
 @pytest.fixture(autouse=True)
 def _healthy_pip(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(validation_toolchain, "_pip_check", lambda _python: None)
+    # The distribution probe is the satisfiability input. Without a default, every
+    # test whose requirements differ would shell out to the real interpreter.
+    monkeypatch.setattr(
+        validation_toolchain,
+        "_probe_distributions",
+        lambda _python: dict(_INSTALLED),
+    )
 
 
 def _git(root: Path, *args: str) -> str:
@@ -70,20 +80,135 @@ def test_task_without_local_venv_reuses_matching_integration_venv(
     assert resolved.snapshot()["fingerprint"] == resolved.fingerprint
 
 
-def test_task_requirements_mismatch_is_explicit(
+def _stub_interpreter(main: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Give the integration worktree a probeable interpreter."""
+
+    python = validation_toolchain.venv_python(main / ".venv")
+    python.parent.mkdir(parents=True, exist_ok=True)
+    python.write_text("probe", encoding="utf-8")
+    monkeypatch.setattr(validation_toolchain, "_probe_python", lambda _python: _identity())
+    return python
+
+
+def _write_task_requirements(task: Path, body: str) -> None:
+    (task / "requirements.txt").write_text(body, encoding="utf-8")
+
+
+def test_task_requirement_the_environment_already_satisfies_still_reuses(
     linked_worktrees: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The gate checks satisfiability, not file bytes.
+
+    Adding a requirement the shared environment already provides is safe reuse;
+    refusing it was the bug that made dependency changes unlandable.
+    """
+
+    main, task = linked_worktrees
+    _stub_interpreter(main, monkeypatch)
+    _write_task_requirements(task, "pytest>=7\nruff>=0.6\ntzdata>=2025.2\n")
+
+    resolved = validation_toolchain.resolve_validation_toolchain(task)
+
+    assert resolved.source == "integration_venv"
+    assert resolved.requirements_sha256 == validation_toolchain._requirements_sha256(
+        task / "requirements.txt"
+    )
+
+
+def test_comment_only_requirements_change_still_reuses(
+    linked_worktrees: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     main, task = linked_worktrees
-    (task / "requirements.txt").write_text(
-        "pytest>=7\nruff>=0.6\ntzdata>=2025.2\n",
-        encoding="utf-8",
+    _stub_interpreter(main, monkeypatch)
+    _write_task_requirements(
+        task,
+        "# explain why the floor exists\npytest>=7\nruff>=0.6  # inline note\n",
     )
+
+    resolved = validation_toolchain.resolve_validation_toolchain(task)
+
+    assert resolved.source == "integration_venv"
+
+
+def test_requirements_include_is_followed(
+    linked_worktrees: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    main, task = linked_worktrees
+    _stub_interpreter(main, monkeypatch)
+    (task / "extra-requirements.txt").write_text("tzdata>=2025.2\n", encoding="utf-8")
+    _write_task_requirements(task, "pytest>=7\n-r extra-requirements.txt\n")
+
+    resolved = validation_toolchain.resolve_validation_toolchain(task)
+
+    assert resolved.source == "integration_venv"
+
+
+def test_task_requirements_mismatch_is_explicit(
+    linked_worktrees: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    main, task = linked_worktrees
+    _stub_interpreter(main, monkeypatch)
+    _write_task_requirements(task, "pytest>=7\nruff>=0.6\nbranch-only-package>=1.0\n")
 
     with pytest.raises(validation_toolchain.ValidationToolchainError) as raised:
         validation_toolchain.resolve_validation_toolchain(task)
 
     assert raised.value.code == "validation_toolchain_mismatch"
     assert "requirements.txt" in str(raised.value)
+    assert "branch-only-package" in str(raised.value)
+
+
+def test_task_requirement_version_conflict_is_explicit(
+    linked_worktrees: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    main, task = linked_worktrees
+    _stub_interpreter(main, monkeypatch)
+    _write_task_requirements(task, "pytest>=99\nruff>=0.6\n")
+
+    with pytest.raises(validation_toolchain.ValidationToolchainError) as raised:
+        validation_toolchain.resolve_validation_toolchain(task)
+
+    assert raised.value.code == "validation_toolchain_mismatch"
+    assert "pytest>=99" in str(raised.value)
+    assert "installed 8.3.0" in str(raised.value)
+
+
+def test_unsatisfied_requirement_inside_an_include_is_explicit(
+    linked_worktrees: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    main, task = linked_worktrees
+    _stub_interpreter(main, monkeypatch)
+    (task / "extra-requirements.txt").write_text("branch-only>=2.0\n", encoding="utf-8")
+    _write_task_requirements(task, "pytest>=7\n-r extra-requirements.txt\n")
+
+    with pytest.raises(validation_toolchain.ValidationToolchainError) as raised:
+        validation_toolchain.resolve_validation_toolchain(task)
+
+    assert raised.value.code == "validation_toolchain_mismatch"
+    assert "branch-only" in str(raised.value)
+
+
+def test_unverifiable_requirement_line_is_refused(
+    linked_worktrees: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fail closed: a line the gate cannot check is not a pass."""
+
+    main, task = linked_worktrees
+    _stub_interpreter(main, monkeypatch)
+    _write_task_requirements(task, "pytest>=7\n-e ./local-package\n")
+
+    with pytest.raises(validation_toolchain.ValidationToolchainError) as raised:
+        validation_toolchain.resolve_validation_toolchain(task)
+
+    assert raised.value.code == "validation_toolchain_mismatch"
+    assert "-e ./local-package" in str(raised.value)
 
 
 def test_matching_task_reports_missing_integration_python(

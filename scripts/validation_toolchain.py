@@ -2,9 +2,16 @@
 """Resolve the read-only Python toolchain shared by linked Git worktrees.
 
 Phase 1 deliberately does not create or mutate virtual environments.  A task
-worktree may reuse the integration worktree's ``.venv`` only when both
-``requirements.txt`` files have identical bytes and the interpreter is
-healthy enough to report a stable Python identity.
+worktree may reuse the integration worktree's ``.venv`` when that environment can
+actually run the checkout: either both ``requirements.txt`` files are
+byte-identical, or every requirement the checkout declares is already satisfied
+there.
+
+Comparing bytes alone refused safe reuse.  A comment edit, a reordered block, or a
+bound the shared environment already meets all failed the gate even though the
+interpreter was perfectly usable, which made dependency changes unlandable without
+an environment rebuild.  The property that matters is satisfiability, so that is
+what gets checked; a requirement the environment cannot satisfy still fails closed.
 """
 
 from __future__ import annotations
@@ -14,11 +21,16 @@ import hashlib
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Sequence
+from typing import Iterator, Literal, Mapping, Sequence
+
+from packaging.markers import default_environment
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.version import InvalidVersion, Version
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -96,6 +108,31 @@ def _requirements_sha256(path: Path) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+def _run_captured(argv: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
+    """Run a probe without a visible window and without inheriting stdin."""
+
+    kwargs: dict[str, object] = {}
+    if os.name == "nt":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    return subprocess.run(
+        argv,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+        check=False,
+        **kwargs,
+    )
+
+
+def _normalize_distribution_name(name: str) -> str:
+    """PEP 503 normalization, matching the key form the probes emit."""
+
+    return re.sub(r"[-_.]+", "-", str(name)).lower()
+
+
 def _probe_python(python_executable: Path) -> PythonIdentity:
     probe = (
         "import hashlib,importlib.metadata,json,platform,re,sys;"
@@ -110,20 +147,7 @@ def _probe_python(python_executable: Path) -> PythonIdentity:
         "'distributionsSha256':hashlib.sha256(('\\n'.join(packages)).encode()).hexdigest()"
         "},sort_keys=True))"
     )
-    kwargs: dict[str, object] = {}
-    if os.name == "nt":
-        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    completed = subprocess.run(
-        [str(python_executable), "-I", "-c", probe],
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=15,
-        check=False,
-        **kwargs,
-    )
+    completed = _run_captured([str(python_executable), "-I", "-c", probe], timeout=15)
     if completed.returncode != 0:
         detail = completed.stderr.strip() or completed.stdout.strip()
         raise RuntimeError(detail or f"python probe exited {completed.returncode}")
@@ -151,24 +175,142 @@ def _probe_python(python_executable: Path) -> PythonIdentity:
     )
 
 
+def _probe_distributions(python_executable: Path) -> dict[str, str]:
+    """Return the interpreter's installed distributions as name -> version."""
+
+    probe = (
+        "import importlib.metadata,json,re;"
+        "print(json.dumps({"
+        "re.sub(r'[-_.]+','-',str(d.metadata.get('Name') or '')).lower(): d.version "
+        "for d in importlib.metadata.distributions()"
+        "},sort_keys=True))"
+    )
+    completed = _run_captured([str(python_executable), "-I", "-c", probe], timeout=30)
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        raise RuntimeError(detail or f"distribution probe exited {completed.returncode}")
+    payload = json.loads(completed.stdout)
+    if not isinstance(payload, dict):
+        raise RuntimeError("distribution probe returned a non-object payload")
+    return {
+        _normalize_distribution_name(str(name)): str(version).strip()
+        for name, version in payload.items()
+    }
+
+
 def _pip_check(python_executable: Path) -> None:
-    kwargs: dict[str, object] = {}
-    if os.name == "nt":
-        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    completed = subprocess.run(
+    completed = _run_captured(
         [str(python_executable), "-I", "-m", "pip", "check"],
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
         timeout=30,
-        check=False,
-        **kwargs,
     )
     if completed.returncode != 0:
         detail = completed.stderr.strip() or completed.stdout.strip()
         raise RuntimeError(detail or f"pip check exited {completed.returncode}")
+
+
+_REQUIREMENT_COMMENT = re.compile(r"(^|\s)#")
+
+
+def _iter_requirement_lines(
+    path: Path,
+    _seen: frozenset[Path] = frozenset(),
+) -> Iterator[str]:
+    """Yield logical requirement lines from a requirements file.
+
+    Comments (a ``#`` at line start or after whitespace, so a URL fragment
+    survives), blank lines, and backslash continuations are resolved, and
+    ``-r``/``--requirement`` includes are followed recursively.  Anything else
+    is yielded verbatim so the caller can report it as unverifiable.
+    """
+
+    resolved = path.resolve()
+    if resolved in _seen:
+        raise ValueError(f"requirements include cycle at {resolved}")
+    try:
+        text = resolved.read_text(encoding="utf-8")
+    except OSError as error:
+        raise ValueError(f"cannot read {resolved}: {error}") from error
+
+    pending = ""
+    for raw in text.splitlines():
+        comment = _REQUIREMENT_COMMENT.search(raw)
+        line = (raw[: comment.start(1)] if comment else raw).strip()
+        if pending:
+            line = f"{pending} {line}".strip()
+            pending = ""
+        if not line:
+            continue
+        if line.endswith("\\"):
+            pending = line[:-1].strip()
+            continue
+        if line.startswith("-r") or line.startswith("--requirement"):
+            parts = line.split(None, 1)
+            if len(parts) == 2:
+                yield from _iter_requirement_lines(
+                    (resolved.parent / parts[1].strip()).resolve(),
+                    _seen | {resolved},
+                )
+                continue
+        yield line
+    if pending:
+        raise ValueError(f"dangling line continuation in {resolved}")
+
+
+def _unsatisfied_requirements(
+    requirements_path: Path,
+    installed: Mapping[str, str],
+) -> list[str]:
+    """Return one human-readable reason per requirement the environment misses."""
+
+    try:
+        lines = list(_iter_requirement_lines(requirements_path))
+    except ValueError as error:
+        return [str(error)]
+
+    reasons: list[str] = []
+    marker_environment = default_environment()
+    for line in lines:
+        try:
+            requirement = Requirement(line)
+        except InvalidRequirement:
+            reasons.append(f"{line} (unverifiable requirement line)")
+            continue
+        if requirement.url:
+            reasons.append(f"{line} (direct URL reference is unverifiable)")
+            continue
+        if requirement.marker is not None and not requirement.marker.evaluate(
+            marker_environment
+        ):
+            continue
+        current = installed.get(_normalize_distribution_name(requirement.name))
+        if current is None:
+            reasons.append(f"{line} (not installed)")
+            continue
+        try:
+            if Version(current) not in requirement.specifier:
+                reasons.append(f"{line} (installed {current})")
+        except InvalidVersion:
+            reasons.append(f"{line} (unparsable installed version {current!r})")
+    return reasons
+
+
+def _assert_requirements_satisfied(
+    requirements_path: Path,
+    python_executable: Path,
+) -> None:
+    """Refuse reuse the installed distributions cannot honour."""
+
+    installed = _probe_distributions(python_executable)
+    reasons = _unsatisfied_requirements(requirements_path, installed)
+    if not reasons:
+        return
+    shown = "; ".join(reasons[:3])
+    more = "" if len(reasons) <= 3 else f" (+{len(reasons) - 3} more)"
+    raise ValidationToolchainError(
+        "validation_toolchain_mismatch",
+        f"{requirements_path.name} is not satisfied by the shared environment: "
+        f"{shown}{more}",
+    )
 
 
 def _toolchain_fingerprint(
@@ -197,12 +339,6 @@ def resolve_validation_toolchain(checkout: Path | str) -> ValidationToolchain:
     integration_requirements = integration_root / "requirements.txt"
     checkout_sha256 = _requirements_sha256(checkout_requirements)
     integration_sha256 = _requirements_sha256(integration_requirements)
-    if checkout_sha256 != integration_sha256:
-        raise ValidationToolchainError(
-            "validation_toolchain_mismatch",
-            "requirements.txt differs from the integration worktree; "
-            "phase 1 refuses unsafe shared-environment reuse",
-        )
 
     python_executable = venv_python(integration_root / ".venv").resolve()
     if not python_executable.is_file():
@@ -213,6 +349,13 @@ def resolve_validation_toolchain(checkout: Path | str) -> ValidationToolchain:
     try:
         identity = _probe_python(python_executable)
         _pip_check(python_executable)
+        if checkout_sha256 != integration_sha256:
+            # The files differ, so reuse is safe only if the shared environment
+            # already satisfies what this checkout declares. Identical bytes need
+            # no probe: that is the pre-existing contract for every other task.
+            _assert_requirements_satisfied(checkout_requirements, python_executable)
+    except ValidationToolchainError:
+        raise
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as error:
         raise ValidationToolchainError(
             "validation_toolchain_unhealthy",
