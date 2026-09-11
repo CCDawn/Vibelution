@@ -595,7 +595,10 @@ def persist_workbench_launcher_state_after_open(
             "browserWindowPid": browser_window_pid,
             "workbenchBrowserLaunchPid": browser_launch_pid,
             "workbenchBrowserWindowPid": browser_window_pid,
-            "url": str(observed.get("url") or previous_state.get("url") or DEFAULT_URL).strip() or DEFAULT_URL,
+            "url": _origin_only_workbench_url(
+                str(observed.get("url") or previous_state.get("url") or DEFAULT_URL),
+                context="persist_workbench_launcher_state_after_open",
+            ).strip() or DEFAULT_URL,
             "backendPort": backend_port,
             "port": backend_port,
             "statusLine": status_line,
@@ -640,6 +643,29 @@ def persist_workbench_launcher_state_after_open(
         suppress_io_errors=True,
     )
     return result
+
+
+def _origin_only_workbench_url(url: object, *, context: str) -> str:
+    """Collapse a workbench URL to its origin (``scheme://host:port``).
+
+    state.json persists the app entrypoint, never live navigation; deep paths
+    such as ``/chat?session=...`` must not be pinned across restarts (SCI-049
+    window pinning). Fail-open: a URL that fails to parse is returned unchanged
+    so persistence is never blocked, and the failure is logged for diagnosis.
+    """
+    raw = str(url or "").strip()
+    try:
+        parsed = urllib.parse.urlsplit(raw)
+        if not parsed.scheme or not parsed.netloc:
+            return raw
+        return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+    except ValueError:
+        append_runtime_manager_file_event(
+            "workbench.url.origin_normalize_failed",
+            {"context": context, "reason": "url_parse_failed", "urlPreview": truncate_event_text(raw, limit=120)},
+            suppress_io_errors=True,
+        )
+        return raw
 
 
 def _health_url_for(url: str) -> str:
@@ -711,6 +737,9 @@ def _reconcile_workbench_endpoint(
 ) -> tuple[str, int]:
     """Prefer a live backendPort / ports.json over a stale state.json url."""
 
+    # A state.json url can carry a stale deep path (e.g. /chat?session=...);
+    # normalization keeps the reconciled endpoint on the app entrypoint origin.
+    url = _origin_only_workbench_url(url, context="reconcile_workbench_endpoint")
     current_port = _positive_tcp_port(port) or _port_for_url(url)
     if current_port > 0 and _port_is_listening_socket(current_port):
         return (str(url or "").strip() or _workbench_url_for_port(current_port), current_port)

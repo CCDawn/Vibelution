@@ -782,7 +782,7 @@ export class ElectronWindowProvider {
     }
     this.discardExtraWorkbenchWindows(this.listLiveWorkbenchWindows(), workbenchWindow);
 
-    if (this.workbenchReadyUrl !== safeUrl) {
+    if (this.shouldReloadWorkbenchWindow(safeUrl)) {
       this.workbenchReadyUrl = null;
       workbenchWindow.hide();
       try {
@@ -799,6 +799,27 @@ export class ElectronWindowProvider {
 
     presentElectronWindow(workbenchWindow);
     return this.reportAndReturn(this.stateFor("workbench"));
+  }
+
+  /**
+   * Reload the workbench window only when the target actually moves it to
+   * another origin (restore after close, backend port move). Same-origin path
+   * differences belong to the frontend router: the user may have navigated to
+   * a deep page (e.g. /teams?questionId=...), and repeated open/focus actions
+   * (desktop open_workbench converge, pet handoff) must never force that page
+   * back (SCI-049 pinning/bounce). Only tracked loads (workbenchReadyUrl)
+   * count as "already there"; unknown URLs stay conservative and reload.
+   */
+  private shouldReloadWorkbenchWindow(safeUrl: string): boolean {
+    if (!this.workbenchReadyUrl) {
+      return true;
+    }
+    const currentOrigin = originOfUrl(this.workbenchReadyUrl);
+    const targetOrigin = originOfUrl(safeUrl);
+    if (!currentOrigin || !targetOrigin) {
+      return true;
+    }
+    return currentOrigin !== targetOrigin;
   }
 
   private discardFailedWorkbenchWindow(window: ElectronWindowLike): void {
@@ -1016,6 +1037,14 @@ function isManagedWorkbenchUrl(requestUrl: string, workbenchOrigin: string): boo
     return new URL(requestUrl).origin === workbenchOrigin;
   } catch {
     return false;
+  }
+}
+
+function originOfUrl(value: string): string {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return "";
   }
 }
 
