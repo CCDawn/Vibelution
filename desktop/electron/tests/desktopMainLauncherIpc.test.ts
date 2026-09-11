@@ -131,7 +131,8 @@ describe("Electron main Launcher IPC facade", () => {
     expect(lifecycleBody).toContain("signal: intentLease.signal");
 
     const readyStart = mainSource.indexOf("async function openWorkbenchAfterLifecycleReady");
-    const readyBody = mainSource.slice(readyStart, readyStart + 1800);
+    // Window covers the post-start serving verification plus the ready gates.
+    const readyBody = mainSource.slice(readyStart, readyStart + 2600);
     expect(readyBody).not.toContain("waitForWorkbenchLifecycleReady");
     expect(readyBody).not.toContain("readRuntimeManagerLauncherStatusSummary(paths.workspaceRoot, lease.commandId)");
     expect(readyBody).toContain("launcherLifecycleSupervisor.isCurrent(lease)");
@@ -255,8 +256,10 @@ describe("Electron main Launcher IPC facade", () => {
 
   it("checks the verified release before reusing a live workbench", () => {
     const readyStart = mainSource.indexOf("async function openWorkbenchAfterLifecycleReady");
-    const readyBody = mainSource.slice(readyStart, readyStart + 700);
+    // Window covers the serving verification plus the URL refresh gate.
+    const readyBody = mainSource.slice(readyStart, readyStart + 1250);
     expect(readyBody).toContain("await refreshLiveWorkbenchUrl(paths)");
+    expect(readyBody).toContain("verifyRestartedServingVersion");
     const lifecycleStart = mainSource.indexOf("async function orchestrateLauncherLifecycle");
     const lifecycleBody = mainSource.slice(lifecycleStart, mainSource.indexOf("async function orchestrateBranchInstanceLifecycle"));
     expect(lifecycleBody.indexOf("await ensureLatestLauncher(")).toBeGreaterThanOrEqual(0);

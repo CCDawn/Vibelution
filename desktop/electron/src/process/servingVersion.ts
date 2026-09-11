@@ -299,3 +299,96 @@ export function servingVersionStateFilePort(workspaceRoot: string): number {
   const value = Number(ports.backendPort || 0);
   return Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
 }
+
+export type ServingProcessIdentity = {
+  pid: number;
+  createTime: number;
+};
+
+export type RestartedServingVerification = {
+  ok: boolean;
+  reason: string;
+  inspection: ServingVersionInspection | null;
+};
+
+// Transient health reasons are worth a bounded retry: runWorkbenchLifecycle has
+// already accepted the lifecycle mutation, so a slow-to-answer (but alive) new
+// backend must not be reported as a failed restart verification.
+const TRANSIENT_VERIFICATION_REASONS = new Set([
+  "health_unreachable",
+  "health_not_ready",
+  "health_invalid_json",
+]);
+
+function sameProcessIdentity(
+  previous: ServingProcessIdentity,
+  current: ServingProcessIdentity,
+): boolean {
+  return previous.pid === current.pid
+    && Math.abs(previous.createTime - current.createTime) <= 0.001;
+}
+
+/**
+ * Prove a lifecycle start/restart actually replaced the serving backend with a
+ * process built from the current checkout before the workbench window opens.
+ *
+ * - `inspectWorkbenchServingVersion` already proves the serving head matches
+ *   the checkout HEAD (backend_code_mismatch otherwise) plus identity/release
+ *   handshake.
+ * - When a pre-restart backend identity is known, pid or createTime MUST have
+ *   changed; an unchanged identity means the "restart" silently kept the old
+ *   process (2026-09-11: acceptance ran against a 09-09 build while main had
+ *   moved two days ahead, with no failure surfaced).
+ *
+ * Never spawns visible consoles: reuses the health fetch and the hidden
+ * python JSON bridge inside `inspectWorkbenchServingVersion`.
+ */
+export async function verifyRestartedServingVersion(input: {
+  workspaceRoot: string;
+  previousBackendIdentity?: ServingProcessIdentity | null;
+  inspect?: typeof inspectWorkbenchServingVersion;
+  attempts?: number;
+  delayMs?: number;
+  delay?: (ms: number) => Promise<void>;
+}): Promise<RestartedServingVerification> {
+  const inspect = input.inspect ?? inspectWorkbenchServingVersion;
+  const attempts = Math.max(1, Math.trunc(input.attempts ?? 3));
+  const delayMs = Math.max(0, Math.trunc(input.delayMs ?? 1_000));
+  const delay = input.delay ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const previous = input.previousBackendIdentity ?? null;
+  const hasPrevious = Boolean(
+    previous && Number.isFinite(previous.pid) && previous.pid > 0
+      && Number.isFinite(previous.createTime) && previous.createTime > 0,
+  );
+
+  let last: RestartedServingVerification = { ok: false, reason: "verification_not_run", inspection: null };
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (attempt > 0) {
+      await delay(delayMs);
+    }
+    const inspection = await inspect({ workspaceRoot: input.workspaceRoot });
+    if (!inspection.ok) {
+      last = { ok: false, reason: inspection.reason, inspection };
+      if (!TRANSIENT_VERIFICATION_REASONS.has(inspection.reason)) {
+        return last;
+      }
+      continue;
+    }
+    const healthRecord = isRecord(inspection.health) ? inspection.health : null;
+    const servingRecord = healthRecord && isRecord(healthRecord.serving) ? healthRecord.serving : null;
+    const backendRecord = servingRecord && isRecord(servingRecord.backend) ? servingRecord.backend : null;
+    const current: ServingProcessIdentity = {
+      pid: Number(inspection.backendPid || 0),
+      createTime: Number(backendRecord?.createTime || 0),
+    };
+    if (hasPrevious && sameProcessIdentity(previous as ServingProcessIdentity, current)) {
+      return {
+        ok: false,
+        reason: "serving_process_not_replaced",
+        inspection,
+      };
+    }
+    return { ok: true, reason: inspection.reason, inspection };
+  }
+  return last;
+}
