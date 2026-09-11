@@ -891,17 +891,29 @@ def _normalize_competition_view(payload: Any) -> dict[str, Any]:
             raise QuestionResultPackageError(
                 f"competition_result_view.datasets is missing required field {field}"
             )
+        # Stage-one proposal views deliberately carry no used/planned datasets
+        # (the chain assembly emits them empty with results pinned to
+        # "not executed at stage one"); the key must exist and stay well-typed.
         datasets[field] = _string_list(
             datasets[field],
             f"competition_result_view.datasets.{field}",
-            allow_empty=False,
+            allow_empty=True,
         )
     normalized["datasets"] = datasets
-    for field in ("methods", "experiments", "results", "references"):
+    for field in ("methods", "results"):
         normalized[field] = _string_list(
             normalized[field],
             f"competition_result_view.{field}",
             allow_empty=False,
+        )
+    for field in ("experiments", "references"):
+        # Nothing is executed at stage one and citations live in the
+        # evidence array, so the official stage-one assembly emits both
+        # empty; keep them key-required and well-typed only.
+        normalized[field] = _string_list(
+            normalized[field],
+            f"competition_result_view.{field}",
+            allow_empty=True,
         )
     return normalized
 
