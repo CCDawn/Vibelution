@@ -1108,8 +1108,18 @@ class TestRipgrepDetection:
 class TestRipgrepEngine:
     """rg 主引擎：命令面、JSON 解析、可杀超时、取消、错误回退"""
 
+    @staticmethod
+    def _force_ripgrep_engine(monkeypatch, st) -> None:
+        """把 rg 主引擎钉在被测路径上，不依赖本机是否安装 ripgrep。
+
+        ripgrep 是可选加速器（缺失时产品回退纯 Python 引擎，只在日志里提示）；
+        这些用例验证的是 rg 分支本身，所以显式注入探测结果，而不是跳过。
+        """
+        monkeypatch.setattr(st, "_detect_ripgrep", lambda: "rg")
+
     def test_command_surface_and_json_parsing(self, monkeypatch, sample_project):
         from tools import search_tools as st
+        self._force_ripgrep_engine(monkeypatch, st)
         proc = _FakeRgProcess(outputs=[_rg_match_stream()])
         captured = {}
 
@@ -1154,6 +1164,7 @@ class TestRipgrepEngine:
 
     def test_case_insensitive_adds_ignore_case(self, monkeypatch, sample_project):
         from tools import search_tools as st
+        self._force_ripgrep_engine(monkeypatch, st)
         proc = _FakeRgProcess(outputs=[_rg_match_stream()])
         captured = {}
 
@@ -1167,6 +1178,7 @@ class TestRipgrepEngine:
 
     def test_deadline_kills_process_and_returns_partial_results(self, monkeypatch, sample_project):
         from tools import search_tools as st
+        self._force_ripgrep_engine(monkeypatch, st)
         monkeypatch.setattr(st, "GREP_DEADLINE_SECONDS", 0.05)
         proc = _FakeRgProcess(outputs=[_rg_match_stream()], raise_on_timeout=True)
         monkeypatch.setattr(st.subprocess, "Popen", lambda cmd, **kwargs: proc)
@@ -1182,6 +1194,7 @@ class TestRipgrepEngine:
 
     def test_cancel_checker_kills_process_and_returns_partial_results(self, monkeypatch, sample_project):
         from tools import search_tools as st
+        self._force_ripgrep_engine(monkeypatch, st)
         proc = _FakeRgProcess(outputs=[_rg_match_stream()], raise_on_timeout=True)
         monkeypatch.setattr(st.subprocess, "Popen", lambda cmd, **kwargs: proc)
 
@@ -1197,6 +1210,7 @@ class TestRipgrepEngine:
 
     def test_rg_error_exit_without_output_falls_back_to_python(self, monkeypatch, sample_project):
         from tools import search_tools as st
+        self._force_ripgrep_engine(monkeypatch, st)
         proc = _FakeRgProcess(outputs=[""], returncode=2)
         monkeypatch.setattr(st.subprocess, "Popen", lambda cmd, **kwargs: proc)
 
