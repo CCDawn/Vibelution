@@ -493,6 +493,8 @@ export type CodexTranscriptCell = {
   /** Canonical tool input; names what a running tool is working on. */
   toolArguments?: Record<string, unknown>;
   sourceItemId?: string;
+  /** Canonical SessionTurnItem type that produced this render cell. */
+  originType?: SessionTurnItem["type"];
 };
 
 export type CodexTranscriptProjection = CodexToolLifecycleModel & {

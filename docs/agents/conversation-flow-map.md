@@ -31,7 +31,7 @@
 | LLM 调用 | `agent.py::_invoke_llm` + `core/llm/invocation.py` | 统一经过 streaming/invoke helper，并携带 invocation metadata 与 prompt-cache partition。 |
 | 事实源 | `core/chat/turn_journal.py` | append-only turn 事件日志，用于 replay、模型上下文和可见消息投影。 |
 | 前端流式层 | `web/src/routes/sessionAssistantDeltaScheduler.ts` 和 `web/src/routes/chatActiveTurnLayer.ts` | 平滑消费 `assistant_delta`，在最终 `session_detail` 到来前维护 live assistant 响应。 |
-| 最终渲染 | `web/src/components/conversation/ConversationView.tsx` | 主路径 `package_cells`（`turnItems → codexTranscript.cells`）；无包时 `legacy` 走 content/timeline。 |
+| 最终渲染 | `web/src/components/conversation/ConversationView.tsx` | 单轨 `turn_items`（`turnItems → codexTranscript.cells`）；无可见包时 `empty`（占位骨架），没有 content/timeline 第二轨。 |
 
 ## 单轮时序
 
@@ -75,30 +75,26 @@
 - 发给模型的对话层不得靠 payload 入口静默修补孤儿/未完成 tool chain；系统层（runtime context、Turn Status Bar、skill）不算 transcript。
 - 同一轮内后续 `_invoke_llm`：当前 turn 的 assistant/tool 对话层从 `turn_journal.jsonl` 重建并拼回已组装的 system/history/current user；Turn Status Bar 仍每轮重写，不进 transcript。历史 seed 仍排除当前 turn。journal 不完整或 replay invariant 失败时 **fail-closed**，不再静默回退内存链；**每次 chat LLM 前**与 ledger 对账并携带 `ledgerConversationFingerprint`；history seed 与 `seed_chat_history` 禁止 silent repair。
 - **`SessionTurnItem[]`（`message.turnItems`）是 UI 主包 / 单一投影源。**
-- `assistant_delta` 是 transport，不是事实源；流式时按 item 身份更新 active-turn 草稿包。
+- `assistant_delta` 是 transport，不是事实源；流式时按 item 身份更新 active-turn 草稿包；payload 只带 `turnItems` 与 `stage`/`done`/`ledgerSeq`（`publish.py::_publish_session_assistant_delta`）。feedback 已由 status/tool/retry TurnItems 表示，事件不再携带 text delta、feedback 或 transcript 字段。
 - `codexTranscript` 是 cells 渲染适配层，由 `turnItems` 单向派生，不得成为第二写入者。
-- `content` / `timelineItems` 是**故意保留的兼容面**，不是第二写入者：
-  - **新/正常 settle**：后端投影尽量产出 `turnItems`（含 content→`final_answer` 边界合成），前端走 `package_cells`。
-  - **无 `turnItems` 的旧会话 / 缓存快照**：前端 **故意** 走 `legacy`（`content` + `timelineItems`），不在客户端合成包，以免破坏历史折叠 UX。
-  - 有包时 `content`/`timeline` 不得与 package 抢 final 所有权（答案行由 cells 拥有）。
-- `assistantDisplayPlan.renderMode`：`package_cells`（主路径）/ `native_transcript`（有 native cells 但无 package 时的过渡）/ `legacy`（无包：content/timeline）。
+- `AssistantConversationTurn` 只携带 `turnItems`；`content`/`timelineItems` 兼容面已退役，ConversationMessage 类型不再包含，禁止以第二轨方式回加。旧会话由后端 projection 在边界从 content 合成 `final_answer` item（`projection.py`），客户端不得自行合成 turnItems。
+- `assistantDisplayPlan.renderMode`：`turn_items`（有可见包：native cells 或 canonical answer item）/ `empty`（无可见包，显示占位骨架）；`answerOwner` 相应为 `canonical_turn_items` / `none`（`assistantDisplayPlan.ts`）。
 
 ## 投影边界
 
 - `session_detail` 是校准 snapshot（full/windowed）。window 可瘦诊断字段，但 **final_answer 全文与 turnItems 语义不可丢**。
-- `assistant_delta` 携带 text delta、feedback、**完整 turnItems 快照**与可选 transcript；active-turn 在存在 turnItems 时只认该包。
-- `session_live_overlay`（detail 重连/校准桥）也必须挂 **同一 turnItems 包**；answer cells 由包派生，不得只剩 content/timeline 第二轨。
+- `assistant_delta` 携带 **完整 turnItems 快照**与 `stage`/`done`；active-turn 只认该包。
+- `session_live_overlay`（detail 重连/校准桥）也挂 **同一 turnItems 包**；answer cells 由包派生，不得只剩 content/timeline 第二轨。
 - journal 已有 tool/process items 但尚无 final_answer 时，后端 projection 用 live content **桥接 provisional final_answer** 到同一包（不覆盖已 committed 终稿）。
-- `ConversationView` 主路径：`turnItems → codexTranscript.cells → package_cells 单轨渲染`。response 区块与 timeline 答案行仅 `legacy` 模式使用。
-- `timelineItems` 在 package 模式下剥离 `assistant_text`，只保留过程行（若 cells 未覆盖 process）。
+- `ConversationView` 主路径：`turnItems → codexTranscript.cells` 单轨渲染；无可见包时走 `empty` 占位，没有 content/timeline 答案行回退。
+- 过程行只由 turnItems/cells 投影；不再有 timelineItems 兼容轨。
 - `chatActiveTurnLayer` 是 in-flight bridge；`session_detail` settle 同一 `turnId` 且已 committed final 后必须清理。同 turn 的 live overlay 在 projection 中并入 active-turn / committed，不双行绘制。
 - **会话切换 keep-alive / scroll memory**：`chatSessionPaintCache` sticky last-good + keep-alive ring；`conversationSessionScrollMemory` 在 remount 后恢复 mid-history 视口（跟 tail 时仍 pin 底部）。删除会话时 paint 与 scroll 记忆一并 forget。
-- **Legacy 冻结策略（故意保留）**：
-  1. 无 `turnItems` 的旧会话仍走 **content / timeline**——这是兼容路径，不是遗漏删除。
-  2. 新/正常 settle 的 detail、window 与 live overlay 必须带 `turnItems`（后端 fallback：content→`final_answer`）。
-  3. 前端无包时 `renderMode=legacy`，仅覆盖过程-only、status placeholder、或尚未升级的缓存快照。
+- **Single-track 约束**：
+  1. 新/正常 settle 的 detail、window 与 live overlay 必须带 `turnItems`（后端 fallback：content→`final_answer`）。
+  2. 旧会话在 projection 边界补齐 `final_answer` item；前端不做基于 `content` 的内容回退。
+  3. 前端无可见包时 `renderMode=empty`，只显示占位骨架；不存在基于 `content`/`timelineItems` wire 字段的第二轨渲染分支。
   4. **禁止**客户端随意合成 `turnItems` 包；合成只允许在后端 projection 边界。
-  5. 确认无流量后再考虑删除纯 process 的 legacy 死分支（见优化队列）。
 
 ## 当前观察点
 
@@ -126,6 +122,6 @@
 
 ## 优化队列
 
-1. ~~SessionTurnItem 包主路径（A/B/C）~~：后端 detail/window 产出 turnItems；流式 active-turn 认包；ConversationView `package_cells`；legacy 冻结为无包 fallback。
+1. ~~SessionTurnItem 包主路径（A/B/C）~~：后端 detail/window 产出 turnItems；流式 active-turn 认包；ConversationView 单轨 `turn_items`；无可见包时 `empty` 占位。
 2. 只读诊断：`scripts/diagnose_session_turn.py`、`scripts/probe_conversation_runtime_scene.py`（已有）。
-3. 后续可选：进一步收缩 `session_service` facade 边界；确认无流量后删除纯 process 的 legacy 死分支。
+3. 后续可选：进一步收缩 `session_service` facade 边界；评估清理不再命中的兼容渲染分支。

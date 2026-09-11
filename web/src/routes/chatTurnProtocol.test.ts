@@ -104,6 +104,28 @@ describe("canonical SessionTurnItem v3 rendering", () => {
     });
   });
 
+  it("keeps a retry cell identifiable without leaking its protocol code as the display title", () => {
+    const retry: SessionTurnItem = {
+      ...base,
+      id: "retry-r1",
+      itemId: "retry",
+      type: "retry",
+      attempt: 2,
+      targetItemId: "answer",
+      reason: "模型连接正在重试...\n第 2/3 次；原因：server_error。本轮仍在继续，请不要重复提交。",
+      status: "running",
+      revision: 1,
+      sequence: 1,
+    };
+
+    expect(codexTranscriptFromTurnItems([retry]).cells[0]).toMatchObject({
+      kind: "status",
+      originType: "retry",
+      status: "running",
+      text: "模型连接正在重试...\n第 2/3 次；原因：server_error。本轮仍在继续，请不要重复提交。",
+    });
+  });
+
   it("preserves an exact tool start from an older-sequence live enrichment", () => {
     const cached: SessionTurnItem = {
       ...base, id: "tool-cached", itemId: "tool", type: "tool_call", callId: "call-1",
