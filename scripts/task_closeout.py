@@ -684,6 +684,12 @@ def run_managed_closeout(
                 validation_result.errors.append(
                     f"stale_retry_token_pending: {_bounded_error(error)}"
                 )
+        if validation_result.errors == ["head_moved"]:
+            # The validated task content changed after the run. Nothing in the
+            # manifest can be reused, so the only correct next step is a fresh
+            # validation of the current head; no token is issued for that.
+            validation_result.retryable = True
+            validation_result.next_action = "rerun_closeout_for_current_head"
         if integration_claim_id:
             try:
                 release_claim(
@@ -744,6 +750,9 @@ def run_managed_closeout(
                 retry_token_path = str(retry_token)
                 retryable = True
                 next_action = "sync_main_then_reserve_with_token"
+            elif verified.outcome == "head_moved":
+                retryable = True
+                next_action = "rerun_closeout_for_current_head"
             result = ManagedCloseoutResult(
                 status="validation_failed",
                 exit_code=1,

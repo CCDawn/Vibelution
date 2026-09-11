@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -34,6 +35,7 @@ Outcome = Literal[
     "passed",
     "failed",
     "stale_main",
+    "head_moved",
     "claim_conflict",
     "dirty_worktree",
     "merge_conflict",
@@ -503,6 +505,122 @@ def changed_python_files(root: Path, base_sha: str, head_sha: str) -> list[str]:
     ]
 
 
+def head_files_fingerprint(root: Path, files: Sequence[str]) -> str:
+    """Hash the validated files' contents at HEAD.
+
+    Validation evidence is bound to *content* rather than to the commit that
+    happened to carry it.  A rebase onto newer main rewrites the commit but
+    reapplies the same patch, so the same fingerprint still proves the same
+    thing; an amend or a new edit changes it and forces re-validation.
+    """
+
+    normalized = sorted({normalize_path(path) for path in files})
+    if not normalized:
+        return ""
+    completed = subprocess.run(
+        ["git", "ls-tree", "-r", "-z", "HEAD", "--", *normalized],
+        cwd=root,
+        capture_output=True,
+        check=False,
+        **no_window_subprocess_kwargs(),
+    )
+    if completed.returncode != 0:
+        error = completed.stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(error or "git ls-tree failed")
+    blobs: dict[str, str] = {}
+    for raw_entry in completed.stdout.split(b"\0"):
+        if not raw_entry:
+            continue
+        meta, separator, raw_path = raw_entry.partition(b"\t")
+        fields = meta.split()
+        if not separator or len(fields) != 3:
+            continue
+        blobs[normalize_path(os.fsdecode(raw_path))] = fields[2].decode("ascii", "replace")
+    digest = hashlib.sha256()
+    for path in normalized:
+        digest.update(f"{path}:{blobs.get(path, '<absent>')}\n".encode("utf-8"))
+    return digest.hexdigest()
+
+
+def main_revision_sha(root: Path, base: str) -> str:
+    main_root = main_worktree(root, base)
+    return rev_parse(main_root, "HEAD" if current_branch(main_root) == base else base)
+
+
+def validation_surface(files: Sequence[str]) -> set[str]:
+    """Paths whose change invalidates already-collected validation evidence.
+
+    The task's own files are the obvious part.  Gate definition files are added
+    because they decide *how* the task was validated, so evidence collected
+    under a different gate contract does not carry over.
+
+    Deliberately not included: unrelated files elsewhere in the repository.
+    A concurrent merge can still alter a shared test helper without touching
+    these paths, so reuse is a bounded tradeoff: the validated content is proven
+    byte-identical and the main delta is disjoint from the task, while CI and the
+    next integration run remain the backstop for cross-cutting regressions.
+    """
+
+    surface = {normalize_path(path) for path in files}
+    surface.update(GATE_DEFINITION_FILES)
+    return surface
+
+
+def main_advance_skips_files(
+    root: Path,
+    base: str,
+    validated_main_sha: str,
+    files: Sequence[str],
+) -> bool:
+    """True when main moved forward without touching the validation surface.
+
+    A concurrent merge that touches none of the validated paths cannot change
+    what the task's commands proved about them, so re-running them would only
+    re-prove the same result.  Rewritten history (the validated main is no
+    longer an ancestor of current main) is never treated as an advance.
+    """
+
+    current = main_revision_sha(root, base)
+    if current == validated_main_sha:
+        return True
+    if not validated_main_sha or not is_ancestor(root, validated_main_sha, current):
+        return False
+    moved = {
+        normalize_path(path)
+        for path in git_paths(
+            root,
+            "diff",
+            "--name-only",
+            "-z",
+            f"{validated_main_sha}..{current}",
+        )
+    }
+    return not moved.intersection(validation_surface(files))
+
+
+def manifest_reuse_covers_main(
+    root: Path,
+    base: str,
+    *,
+    validated_main_sha: str,
+    head_sha: str,
+    files: Sequence[str],
+) -> bool:
+    """Whether evidence validated against ``validated_main_sha`` still applies.
+
+    Reuse requires both that the delta left the task's files alone and that the
+    branch already contains current main: the merge is ff-only, so a branch that
+    does not contain main cannot be integrated with this evidence anyway.
+    """
+
+    current = main_revision_sha(root, base)
+    if current == validated_main_sha:
+        return True
+    if not is_ancestor(root, current, head_sha):
+        return False
+    return main_advance_skips_files(root, base, validated_main_sha, files)
+
+
 def main_worktree(root: Path, base: str) -> Path:
     completed = run_process(["git", "worktree", "list", "--porcelain"], root)
     if completed.returncode != 0:
@@ -650,6 +768,7 @@ def manifest_payload(
     reuse_research_required: bool = False,
     reuse_research: dict[str, object] | None = None,
     validation_toolchain: dict[str, object] | None = None,
+    head_files_fingerprint_sha256: str = "",
 ) -> dict[str, object]:
     return {
         "schemaVersion": MANIFEST_SCHEMA_VERSION,
@@ -659,6 +778,7 @@ def manifest_payload(
         "claimId": claim_id,
         "validatedMainSha": validated_main_sha,
         "headSha": head_sha,
+        "headFilesFingerprint": head_files_fingerprint_sha256,
         "changedFiles": list(files),
         "commands": [
             {
@@ -833,6 +953,9 @@ def run_closeout(root: Path, base: str, claim_id: str) -> GateResult:
                 if validation_toolchain is not None
                 else None
             ),
+            head_files_fingerprint_sha256=(
+                head_files_fingerprint(root, files) if files else ""
+            ),
         )
         path = write_manifest(root, task_id, payload)
         return GateResult(
@@ -892,7 +1015,12 @@ def run_closeout(root: Path, base: str, claim_id: str) -> GateResult:
     checks["commandsAllowlisted"] = True
 
     def main_is_fresh() -> bool:
-        return rev_parse(main_root, main_revision) == validated_main_sha
+        # Validation takes minutes while other sessions merge into main.  Only a
+        # rewritten main or a merge touching this task's own files invalidates
+        # what the running commands are proving; an unrelated merge does not.
+        # The final reuse decision still requires the branch to contain current
+        # main, which is what the ff-only merge needs.
+        return main_advance_skips_files(root, base, validated_main_sha, files)
 
     for spec in specs:
         if not main_is_fresh():
@@ -940,9 +1068,16 @@ def verify_manifest(path: Path, root: Path, base: str) -> GateResult:
         return GateResult(outcome="failed", exit_code=1, manifest_path=path)
     if payload.get("outcome") != "passed":
         return GateResult(outcome="failed", exit_code=1, manifest_path=path)
-    main_root = main_worktree(root, base)
-    main_revision = "HEAD" if current_branch(main_root) == base else base
-    if payload.get("validatedMainSha") != rev_parse(main_root, main_revision):
+    validated_main_sha = str(payload.get("validatedMainSha") or "")
+    current_main_sha = main_revision_sha(root, base)
+    # Cheap structural staleness first: an unknown or rewritten validated main
+    # can never be reused, and reporting it here keeps staleness ahead of the
+    # payload-shape checks that follow.
+    if validated_main_sha != current_main_sha and not is_ancestor(
+        root,
+        validated_main_sha,
+        current_main_sha,
+    ):
         return GateResult(outcome="stale_main", exit_code=1, manifest_path=path)
     branch = current_branch(root)
     payload_branch = payload.get("branch")
@@ -958,20 +1093,37 @@ def verify_manifest(path: Path, root: Path, base: str) -> GateResult:
     payload_worktree = payload.get("worktree")
     if not isinstance(payload_worktree, str) or Path(payload_worktree).resolve() != root:
         return GateResult(outcome="failed", exit_code=1, manifest_path=path)
-    if payload.get("headSha") != rev_parse(root, "HEAD"):
-        return GateResult(outcome="failed", exit_code=1, manifest_path=path)
-    if not is_ancestor(
-        root,
-        str(payload["validatedMainSha"]),
-        str(payload["headSha"]),
-    ):
-        return GateResult(outcome="stale_main", exit_code=1, manifest_path=path)
     payload_files = payload.get("changedFiles")
     if not isinstance(payload_files, list) or not all(
         isinstance(item, str) for item in payload_files
     ):
         return GateResult(outcome="failed", exit_code=1, manifest_path=path)
     files = [normalize_path(item) for item in payload_files]
+    validated_head_sha = str(payload.get("headSha") or "")
+    head_sha = rev_parse(root, "HEAD")
+    if validated_head_sha != head_sha:
+        # The commit moved (a rebase onto newer main, typically). The evidence
+        # stays usable while the validated file contents are byte-identical, so
+        # a rebase costs a fingerprint check instead of a full re-validation.
+        # Manifests written before the fingerprint existed keep the strict
+        # commit-identity requirement.
+        fingerprint = payload.get("headFilesFingerprint")
+        if (
+            not isinstance(fingerprint, str)
+            or not fingerprint
+            or fingerprint != head_files_fingerprint(root, files)
+        ):
+            return GateResult(outcome="head_moved", exit_code=1, manifest_path=path)
+    if not manifest_reuse_covers_main(
+        root,
+        base,
+        validated_main_sha=validated_main_sha,
+        head_sha=head_sha,
+        files=files,
+    ):
+        return GateResult(outcome="stale_main", exit_code=1, manifest_path=path)
+    if not is_ancestor(root, validated_main_sha, head_sha):
+        return GateResult(outcome="stale_main", exit_code=1, manifest_path=path)
     if files != changed_files(root, base):
         return GateResult(outcome="failed", exit_code=1, manifest_path=path)
     checks = payload.get("checks")
@@ -1022,7 +1174,7 @@ def verify_manifest(path: Path, root: Path, base: str) -> GateResult:
     if git_lines(root, "status", "--porcelain"):
         return GateResult(outcome="dirty_worktree", exit_code=1, manifest_path=path)
     try:
-        claim_valid = validate_claim(main_root, claim_id, files)
+        claim_valid = validate_claim(main_worktree(root, base), claim_id, files)
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError):
         claim_valid = False
     if not claim_valid:
@@ -1091,13 +1243,32 @@ def run_commit_gate(root: Path) -> GateResult:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Vibelution local quality gate")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Vibelution local quality gate. "
+            "This script only measures: it validates and writes an evidence "
+            "manifest. Merging and cleanup belong to scripts/task_closeout.py, "
+            "which is the single entry point for integration."
+        )
+    )
     subparsers = parser.add_subparsers(dest="mode", required=True)
-    subparsers.add_parser("commit")
-    closeout = subparsers.add_parser("closeout")
+    subparsers.add_parser("commit", help="Pre-commit gate: hygiene plus fatal lint on staged blobs.")
+    closeout = subparsers.add_parser(
+        "closeout",
+        help=(
+            "Validate the task branch and write its evidence manifest. "
+            "Does not merge or clean up."
+        ),
+    )
     closeout.add_argument("--base", default="main")
     closeout.add_argument("--claim-id", required=True)
-    verify = subparsers.add_parser("verify-manifest")
+    verify = subparsers.add_parser(
+        "verify-manifest",
+        help=(
+            "Re-check an existing manifest against the current tree without "
+            "re-running its commands."
+        ),
+    )
     verify.add_argument("--manifest", type=Path, required=True)
     verify.add_argument("--base", default="main")
     return parser
