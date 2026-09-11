@@ -233,7 +233,7 @@ function ToolActivityItem({
       leadingIcon={<ToolStatusIcon cell={cell} language={language} />}
     />
   );
-  const emptyDetail = language === "zh" ? "没有额外输出" : "No extra output";
+  const emptyDetail = language === "zh" ? "无更多详情" : "No further details";
 
   return (
     <details

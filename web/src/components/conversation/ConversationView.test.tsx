@@ -582,7 +582,10 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.composerAttachmentName).toContain("truncate");
     expect(styles.composerAttachmentRemoveButton).toContain("!w-6");
     expect(styles.composerFieldCodex).toContain("[@media(max-height:520px)]:min-h-[84px]");
-    expect(styles.composerFieldCodex).toContain("[@media(max-height:520px)]:[&_textarea]:min-h-[44px]");
+    expect(styles.composerFieldCodex).toContain("[@media(max-height:520px)]:[&_textarea]:!min-h-[44px]");
+    expect(styles.composerFieldCodex).toContain("!flex !flex-col");
+    expect(styles.composerFieldCodex).toContain("[&_textarea]:!min-h-[48px]");
+    expect(styles.composerFieldCodex).not.toContain("grid-rows-");
 
     const composerActionStackSource = conversationViewSource.slice(
       conversationViewSource.indexOf("const composerActions = ("),
@@ -1199,6 +1202,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain('aria-label="打断引导"');
     expect(html).toContain('aria-label="终止"');
     expect(html.match(/composerRoundButton/g)?.length).toBe(1);
+    expect(html).not.toContain("sendButton");
   });
 
   it("shows queued follow-ups above the composer and offers immediate steer when the draft is empty", () => {

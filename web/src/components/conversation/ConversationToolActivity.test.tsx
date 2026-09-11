@@ -355,7 +355,7 @@ describe("ConversationToolActivity", () => {
 
     expect(html).toContain('data-codex-tool-detail="true"');
     expect(html).toContain('data-codex-tool-detail-toggle="inline-symbol"');
-    expect(html).toContain("没有额外输出");
+    expect(html).toContain("无更多详情");
     expect(html).not.toContain("itemStatic");
   });
 
