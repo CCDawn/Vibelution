@@ -413,6 +413,84 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html.slice(commentaryStart, commentaryEnd)).not.toContain("思考");
   });
 
+  it("renders commentary in a clamped progress lane and drops the copy the answer repeats", () => {
+    const repeated = "我已经定位到问题并完成修复，接下来运行定向测试验证没有回归。";
+    const html = renderConversation([
+      {
+        id: "assistant-progress-lane",
+        role: "assistant",
+        timestamp: "2026-09-11T06:00:00Z",
+        turnId: "turn-progress-lane",
+        status: "completed",
+        turnItems: [
+          {
+            id: "reasoning-lane:0",
+            itemId: "reasoning-lane",
+            version: 3,
+            sessionId: "session-1",
+            turnId: "turn-progress-lane",
+            type: "reasoning",
+            status: "completed",
+            revision: 0,
+            sequence: 1,
+            terminal: true,
+            text: "这是内部推理，不占进展位置。",
+          },
+          {
+            id: "progress-lane:0",
+            itemId: "progress-lane",
+            version: 3,
+            sessionId: "session-1",
+            turnId: "turn-progress-lane",
+            type: "agent_message",
+            phase: "commentary",
+            status: "completed",
+            revision: 0,
+            sequence: 2,
+            terminal: true,
+            text: "先检查配置，再运行回归测试。",
+          },
+          {
+            id: "progress-dup:0",
+            itemId: "progress-dup",
+            version: 3,
+            sessionId: "session-1",
+            turnId: "turn-progress-lane",
+            type: "agent_message",
+            phase: "commentary",
+            status: "completed",
+            revision: 0,
+            sequence: 3,
+            terminal: true,
+            text: repeated,
+          },
+          {
+            id: "answer-progress:0",
+            itemId: "answer-progress",
+            version: 3,
+            sessionId: "session-1",
+            turnId: "turn-progress-lane",
+            type: "agent_message",
+            phase: "final_answer",
+            status: "completed",
+            revision: 0,
+            sequence: 4,
+            terminal: true,
+            text: repeated,
+          },
+        ],
+      },
+    ]);
+
+    expect(html).toContain('data-codex-progress-cell="true"');
+    expect(html).toContain("先检查配置，再运行回归测试。");
+    expect(html).toContain('data-codex-progress-clamped="true"');
+    expect(html).toContain("line-clamp-3");
+    // The progress copy that repeats the final answer must paint once.
+    expect(html.split(repeated).length - 1).toBe(1);
+    expect(html).toContain("思考");
+  });
+
   it("renders context compression outcomes in their canonical event order", () => {
     const marker = (
       turnId: string,

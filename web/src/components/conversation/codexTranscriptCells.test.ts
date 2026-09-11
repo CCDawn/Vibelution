@@ -8,6 +8,7 @@ import {
   buildCodexTranscriptCells,
   compactCodexTranscriptCellsAcrossMessages,
   dedupeCodexTranscriptCellsForDisplay,
+  dedupeProgressAgainstAnswerCells,
   dedupeThoughtLikeTranscriptCells,
   dedupeToolTranscriptCells,
   settleCodexTranscriptActiveStatuses,
@@ -28,7 +29,7 @@ function message(overrides: Partial<AgentMessage>): AgentMessage {
 }
 
 describe("codexTranscriptCells", () => {
-  it("dedupes overlapping thought and commentary cells into one live box", () => {
+  it("keeps the user-facing commentary copy when it restates the reasoning stream", () => {
     const cells: CodexTranscriptCell[] = [
       {
         id: "thought-done",
@@ -51,8 +52,9 @@ describe("codexTranscriptCells", () => {
     ];
     const deduped = dedupeThoughtLikeTranscriptCells(cells);
     expect(deduped).toHaveLength(1);
-    expect(deduped[0].id).toBe("thought-running");
-    expect(deduped[0].status).toBe("running");
+    // Commentary is the user-facing lane; dedupe must not swallow it into thinking.
+    expect(deduped[0].id).toBe("thought-done");
+    expect(deduped[0].status).toBe("completed");
   });
 
   it("dedupes duplicate tool rows that share the same call id", () => {
@@ -157,7 +159,62 @@ describe("codexTranscriptCells", () => {
       },
     ];
     const deduped = dedupeCodexTranscriptCellsForDisplay(cells);
-    expect(deduped.map((cell) => cell.id)).toEqual(["reasoning-full"]);
+    expect(deduped.map((cell) => cell.id)).toEqual(["commentary-segment"]);
+  });
+
+  it("drops a progress narration copy that the final answer repeats", () => {
+    const repeated = "我已经定位到问题并完成修复，接下来运行定向测试验证没有回归。";
+    const cells = [
+      {
+        id: "commentary-dup",
+        kind: "assistant_markdown" as const,
+        messageId: "m1",
+        status: "completed" as const,
+        tone: "neutral" as const,
+        phase: "commentary" as const,
+        channel: "commentary" as const,
+        text: repeated,
+      },
+      {
+        id: "answer",
+        kind: "assistant_markdown" as const,
+        messageId: "m1",
+        status: "completed" as const,
+        tone: "neutral" as const,
+        phase: "final_answer" as const,
+        text: repeated,
+      },
+    ];
+    expect(dedupeProgressAgainstAnswerCells(cells).map((cell) => cell.id)).toEqual(["answer"]);
+    expect(dedupeCodexTranscriptCellsForDisplay(cells).map((cell) => cell.id)).toEqual(["answer"]);
+  });
+
+  it("keeps a short progress fragment that the final answer happens to mention", () => {
+    const cells = [
+      {
+        id: "commentary-short",
+        kind: "assistant_markdown" as const,
+        messageId: "m1",
+        status: "completed" as const,
+        tone: "neutral" as const,
+        phase: "commentary" as const,
+        channel: "commentary" as const,
+        text: "继续验证",
+      },
+      {
+        id: "answer",
+        kind: "assistant_markdown" as const,
+        messageId: "m1",
+        status: "completed" as const,
+        tone: "neutral" as const,
+        phase: "final_answer" as const,
+        text: "继续验证后确认全部通过。",
+      },
+    ];
+    expect(dedupeProgressAgainstAnswerCells(cells).map((cell) => cell.id)).toEqual([
+      "commentary-short",
+      "answer",
+    ]);
   });
 
   it("keeps non-overlapping thought and commentary separate", () => {

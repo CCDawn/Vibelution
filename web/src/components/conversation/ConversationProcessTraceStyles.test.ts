@@ -84,7 +84,8 @@ describe("conversation process trace styles", () => {
   });
 
   it("separates narrative body color from process/tool rail color like Codex", () => {
-    // Commentary/reasoning share thoughtScrollBody; final answer stays primary.
+    // Reasoning keeps the boxed thought body; commentary owns a lighter progress
+    // lane; final answer stays primary.
     expect(styles.thoughtScrollBody).toContain("max-h-[12rem]");
     expect(styles.thoughtScrollBody).toContain("overflow-y-auto");
     expect(styles.codexTranscriptReasoningText).toContain("text-[var(--fg-secondary)]");
@@ -94,6 +95,18 @@ describe("conversation process trace styles", () => {
     expect(styles.codexTranscriptCellTitle).toContain("font-normal");
     expect(styles).not.toHaveProperty("codexTranscriptCommentaryCell");
     expect(styles).not.toHaveProperty("codexTranscriptReasoningInlinePreview");
+    // Progress lane: no box chrome, clamped preview, expandable full text.
+    expect(styles.codexTranscriptProgressCell).toContain("codexTranscriptProgressCell");
+    expect(styles.codexTranscriptProgressCell).not.toContain("border-l");
+    expect(styles.codexTranscriptProgressCell).not.toContain("rounded-[var(--radius-control)] border");
+    expect(styles.codexTranscriptProgressClamped).toContain("line-clamp-3");
+    expect(styles.codexTranscriptProgressClamped).toContain("whitespace-pre-wrap");
+    expect(styles.codexTranscriptProgressClamped).toContain("text-[var(--fg-secondary)]");
+    expect(styles.codexTranscriptProgressBody).toContain("max-h-[min(24rem,50vh)]");
+    expect(styles.codexTranscriptProgressBody).toContain("overflow-y-auto");
+    expect(styles.codexTranscriptProgressBody).not.toContain("bg-[color-mix");
+    expect(styles.codexTranscriptProgressText).toContain("text-[var(--fg-secondary)]");
+    expect(styles.codexTranscriptProgressHeader).toContain("grid-cols-[20px_minmax(0,1fr)]");
   });
 
   it("keeps compact chat surface readable over the page background", () => {

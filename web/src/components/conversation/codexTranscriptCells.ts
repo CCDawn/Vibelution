@@ -870,10 +870,7 @@ function normalizeCellStatus(status: string | undefined): CodexTranscriptCellSta
   return "completed";
 }
 
-function isThoughtLikeTranscriptCell(cell: CodexTranscriptCell) {
-  if (cell.kind === "reasoning_summary") {
-    return true;
-  }
+function isCommentaryTranscriptCell(cell: CodexTranscriptCell) {
   if (cell.kind !== "assistant_markdown") {
     return false;
   }
@@ -882,14 +879,26 @@ function isThoughtLikeTranscriptCell(cell: CodexTranscriptCell) {
   return phase === "commentary" || phase === "interim" || channel === "commentary";
 }
 
+function isThoughtLikeTranscriptCell(cell: CodexTranscriptCell) {
+  if (cell.kind === "reasoning_summary") {
+    return true;
+  }
+  return isCommentaryTranscriptCell(cell);
+}
+
 function thoughtLikeCellText(cell: CodexTranscriptCell) {
   return String(cell.text || cell.summary || "").replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Commentary is the user-facing progress lane. When it and a reasoning summary
+ * restate the same stream, keep the commentary copy instead of swallowing the
+ * narration into the thinking lane. Live/longer still wins within a lane.
+ */
 function thoughtLikeCellRank(cell: CodexTranscriptCell) {
-  const textLen = thoughtLikeCellText(cell).length;
+  const commentaryBoost = isCommentaryTranscriptCell(cell) ? 2_000_000_000 : 0;
   const liveBoost = cell.status === "running" || cell.status === "pending" ? 1_000_000 : 0;
-  return liveBoost + textLen;
+  return commentaryBoost + liveBoost + thoughtLikeCellText(cell).length;
 }
 
 /**
@@ -1002,11 +1011,47 @@ export function dedupeToolTranscriptCells(
   return cells.filter((_, index) => !drop.has(index));
 }
 
+function isFinalAnswerTranscriptCell(cell: CodexTranscriptCell) {
+  return cell.kind === "assistant_markdown"
+    && !isCommentaryTranscriptCell(cell)
+    && Boolean(thoughtLikeCellText(cell));
+}
+
+/**
+ * Codex can emit the same sentence as progress commentary and then again as the
+ * final answer (openai/codex#15633). Show the answer once: drop the progress
+ * copy only when the repeated text is long enough to be a real duplicate rather
+ * than a short fragment the answer legitimately mentions.
+ */
+export function dedupeProgressAgainstAnswerCells(
+  cells: readonly CodexTranscriptCell[],
+): CodexTranscriptCell[] {
+  const answerTexts = cells
+    .filter(isFinalAnswerTranscriptCell)
+    .map(thoughtLikeCellText)
+    .filter(Boolean);
+  if (answerTexts.length === 0) {
+    return [...cells];
+  }
+  const MIN_DUPLICATE_TEXT_LENGTH = 40;
+  const repeatsAnswer = (text: string) => answerTexts.some((answer) => {
+    if (text === answer) {
+      return true;
+    }
+    const shorter = text.length <= answer.length ? text : answer;
+    const longer = shorter === text ? answer : text;
+    return shorter.length >= MIN_DUPLICATE_TEXT_LENGTH && longer.includes(shorter);
+  });
+  return cells.filter((cell) => !isCommentaryTranscriptCell(cell) || !repeatsAnswer(thoughtLikeCellText(cell)));
+}
+
 /** Apply thought + tool identity dedupe for a single transcript cell list. */
 export function dedupeCodexTranscriptCellsForDisplay(
   cells: readonly CodexTranscriptCell[],
 ): CodexTranscriptCell[] {
-  return dedupeToolTranscriptCells(dedupeThoughtLikeTranscriptCells(cells));
+  return dedupeProgressAgainstAnswerCells(
+    dedupeToolTranscriptCells(dedupeThoughtLikeTranscriptCells(cells)),
+  );
 }
 
 function settleActiveCellToCompleted(cell: CodexTranscriptCell): CodexTranscriptCell {

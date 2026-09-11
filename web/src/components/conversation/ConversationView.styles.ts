@@ -423,6 +423,18 @@ const styles: Record<string, string> = {
     "vui-components-conversationview codexTranscriptReasoningTitleRow inline-flex min-w-0 max-w-full flex-nowrap items-center gap-x-2 overflow-hidden",
   codexTranscriptReasoningText:
     "vui-components-conversationview codexTranscriptReasoningText min-w-0 max-w-[min(100%,128ch)] whitespace-pre-wrap break-words [overflow-wrap:anywhere] border-0 bg-transparent p-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  // User-facing progress narration: a lighter lane than thinking (no box chrome),
+  // clamped while settled so long narration stays scannable.
+  codexTranscriptProgressCell:
+    "vui-components-conversationview codexTranscriptProgressCell min-w-0 grid min-h-0 content-start gap-1 border-0 bg-transparent py-0.5 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)]",
+  codexTranscriptProgressHeader:
+    "vui-components-conversationview codexTranscriptProgressHeader min-w-0 overflow-hidden !grid !h-auto !min-h-0 !w-full !max-w-full grid-cols-[20px_minmax(0,1fr)] !items-center !justify-start gap-x-2 gap-y-0 !border-0 !bg-transparent !p-0 !text-left !shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+  codexTranscriptProgressBody:
+    "vui-components-conversationview codexTranscriptProgressBody min-w-0 max-h-[min(24rem,50vh)] overflow-y-auto overflow-x-hidden overscroll-contain [scrollbar-gutter:stable] border-0 bg-transparent px-0 py-0",
+  codexTranscriptProgressClamped:
+    "vui-components-conversationview codexTranscriptProgressClamped min-w-0 max-w-[min(100%,128ch)] line-clamp-3 whitespace-pre-wrap break-words [overflow-wrap:anywhere] border-0 bg-transparent p-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  codexTranscriptProgressText:
+    "vui-components-conversationview codexTranscriptProgressText min-w-0 max-w-[min(100%,128ch)] whitespace-pre-wrap break-words [overflow-wrap:anywhere] border-0 bg-transparent p-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   /** Shared thought body: max ~8–10 lines, scroll inside the box when longer. */
   thoughtScrollBody:
     "vui-components-conversationview thoughtScrollBody min-w-0 max-h-[12rem] overflow-y-auto overflow-x-hidden overscroll-contain [scrollbar-gutter:stable] rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_55%,transparent)] px-2.5 py-2",
