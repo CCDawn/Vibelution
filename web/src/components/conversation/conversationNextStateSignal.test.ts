@@ -38,6 +38,7 @@ describe("shouldShowNextStateSignalInConversation", () => {
     const signal = {
       ...nextStateSignal("tool_error"),
       summary: "Tool failed: challenge_cup_iteration_writeback_tool",
+      createdAt: "2026-08-02T01:55:30Z",
     };
     const messages = [
       {
@@ -77,6 +78,7 @@ describe("shouldShowNextStateSignalInConversation", () => {
     const signal = {
       ...nextStateSignal("tool_error"),
       summary: "Tool failed: challenge_cup_iteration_writeback_tool",
+      createdAt: "2026-08-02T01:55:30Z",
     };
     const messages = [
       {
@@ -121,4 +123,83 @@ describe("shouldShowNextStateSignalInConversation", () => {
     ];
 
     expect(shouldShowNextStateSignalInConversation(signal, "ready", messages)).toBe(true);
-  });});
+  });
+
+  it("hides failure signals that belong to an earlier user turn", () => {
+    const staleSignals = [
+      {
+        ...nextStateSignal("tool_error"),
+        summary: "Tool failed: code_symbol_tool",
+        createdAt: "2026-09-11T05:20:00Z",
+      },
+      {
+        ...nextStateSignal("provider_failure"),
+        summary: "Provider failed",
+        createdAt: "2026-09-10T12:00:00Z",
+      },
+    ];
+    const messages = [
+      {
+        id: "user-1",
+        role: "user" as const,
+        content: "继续",
+        timestamp: "2026-09-11T05:24:10Z",
+      },
+    ];
+
+    for (const signal of staleSignals) {
+      expect(shouldShowNextStateSignalInConversation(signal, "ready", messages)).toBe(false);
+    }
+  });
+
+  it("keeps failure signals emitted after the latest user message", () => {
+    const signal = {
+      ...nextStateSignal("provider_failure"),
+      summary: "Provider failed",
+      createdAt: "2026-09-11T05:25:00Z",
+    };
+    const messages = [
+      {
+        id: "user-1",
+        role: "user" as const,
+        content: "继续",
+        timestamp: "2026-09-11T05:24:10Z",
+      },
+    ];
+
+    expect(shouldShowNextStateSignalInConversation(signal, "ready", messages)).toBe(true);
+  });
+
+  it("keeps the busy-state continue rule independent of the current-turn anchor", () => {
+    const signal = nextStateSignal("user_continues");
+    const messages = [
+      {
+        id: "user-1",
+        role: "user" as const,
+        content: "继续",
+        timestamp: "2026-08-02T01:55:00Z",
+      },
+    ];
+
+    expect(shouldShowNextStateSignalInConversation(signal, "running", messages)).toBe(true);
+    expect(shouldShowNextStateSignalInConversation(signal, "ready", messages)).toBe(false);
+  });
+
+  it("keeps signals visible when the anchor or signal timestamp is unusable", () => {
+    const signal = {
+      ...nextStateSignal("tool_error"),
+      summary: "Tool failed: code_symbol_tool",
+      createdAt: "not-a-date",
+    };
+    const messages = [
+      {
+        id: "user-1",
+        role: "user" as const,
+        content: "继续",
+        timestamp: "",
+      },
+    ];
+
+    expect(shouldShowNextStateSignalInConversation(signal, "ready", messages)).toBe(true);
+  });
+});

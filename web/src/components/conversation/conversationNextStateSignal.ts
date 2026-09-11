@@ -22,6 +22,32 @@ function toolCallIdentity(toolCall: ToolCallTurnItem) {
   return toolCall.toolName.trim();
 }
 
+function latestUserMessageTimestamp(messages: ConversationMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === "user") {
+      return message.timestamp;
+    }
+  }
+  return "";
+}
+
+function signalPrecedesLatestUserTurn(
+  signal: ChatNextStateSignalSummary,
+  messages: ConversationMessage[],
+) {
+  const anchorTimestamp = latestUserMessageTimestamp(messages);
+  if (!anchorTimestamp) {
+    return false;
+  }
+  const signalTime = Date.parse(signal.createdAt);
+  const anchorTime = Date.parse(anchorTimestamp);
+  if (!Number.isFinite(signalTime) || !Number.isFinite(anchorTime)) {
+    return false;
+  }
+  return signalTime < anchorTime;
+}
+
 function latestTurnRecoveredToolFailure(
   signal: ChatNextStateSignalSummary,
   messages: ConversationMessage[],
@@ -56,6 +82,9 @@ export function shouldShowNextStateSignalInConversation(
 ) {
   if (signal.kind === "user_continues") {
     return isBusyConversationPhase(phase);
+  }
+  if (signalPrecedesLatestUserTurn(signal, messages)) {
+    return false;
   }
   if (
     signal.kind === "tool_error"
