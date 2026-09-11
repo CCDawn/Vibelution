@@ -220,6 +220,40 @@ def test_append_flushes_and_fsyncs_before_return(tmp_path, monkeypatch):
     assert load_turn_events(tmp_path, "session-fsync")[0].payload == {"content": "durable"}
 
 
+def test_post_terminal_write_raises_dedicated_error_and_reports_settled_turn(tmp_path):
+    append_turn_event(tmp_path, "session-settled", "turn-1", EVENT_USER_MESSAGE, payload={"content": "hi"})
+    assert turn_journal.turn_has_terminal_event(tmp_path, "session-settled", "turn-1") is False
+
+    append_turn_event(
+        tmp_path,
+        "session-settled",
+        "turn-1",
+        turn_journal.EVENT_TURN_INTERRUPTED,
+        status="interrupted",
+        payload={"reason": "detail_loaded_after_restart"},
+    )
+
+    assert turn_journal.turn_has_terminal_event(tmp_path, "session-settled", "turn-1") is True
+    with pytest.raises(turn_journal.TurnJournalPostTerminalWriteError) as excinfo:
+        append_turn_event(
+            tmp_path,
+            "session-settled",
+            "turn-1",
+            EVENT_ASSISTANT_ITEM_COMMITTED,
+            payload={"kind": "reasoning", "text": "late"},
+        )
+    assert isinstance(excinfo.value, ValueError)
+    assert "after terminal event" in str(excinfo.value)
+
+
+def test_turn_has_terminal_event_ignores_unknown_and_empty_turns(tmp_path):
+    append_turn_event(tmp_path, "session-settled", "turn-1", EVENT_USER_MESSAGE, payload={"content": "hi"})
+
+    assert turn_journal.turn_has_terminal_event(tmp_path, "session-settled", "") is False
+    assert turn_journal.turn_has_terminal_event(tmp_path, "session-settled", "turn-other") is False
+    assert turn_journal.turn_has_terminal_event(tmp_path, "session-missing", "turn-1") is False
+
+
 def test_rewrite_failure_preserves_original_parseable_journal(tmp_path, monkeypatch):
     append_turn_event(
         tmp_path,

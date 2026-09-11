@@ -5,6 +5,12 @@
 
 export const SESSION_STREAM_MIN_APPLY_INTERVAL_MS = 350;
 export const SESSION_STREAM_ROUTE_SWITCH_GRACE_MS = 4_000;
+/**
+ * Minimum spacing between authoritative refetches triggered by stream errors.
+ * A flapping stream reports an error on every reconnect attempt; refreshing per
+ * error rewrites the session cache repeatedly and can drive a render loop.
+ */
+export const SESSION_STREAM_ERROR_REFRESH_MIN_INTERVAL_MS = 10_000;
 
 export type SessionStreamDecisionSnapshot = {
   sessionId: string;

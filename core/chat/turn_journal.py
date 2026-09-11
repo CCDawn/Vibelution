@@ -82,6 +82,18 @@ AUDIT_ONLY_EVENT_TYPES = {
 
 POST_TERMINAL_MODEL_EVENT_TYPES = MODEL_VISIBLE_EVENT_TYPES - {EVENT_TURN_INTERRUPTED}
 
+
+class TurnJournalPostTerminalWriteError(ValueError):
+    """Raised when a model-visible event arrives after the turn terminal event.
+
+    The guard exists to protect the ledger contract, but the *arrival* of such a
+    write is a race (turn reconciled/stopped while capture was still committing),
+    not a caller bug. Callers that own a settled turn should degrade to dropping
+    the late write and recording telemetry instead of failing the turn again;
+    ``isinstance(exc, ValueError)`` remains true for existing classifiers.
+    """
+
+
 _LATEST_PREVIEW_PARSED_EVENT_TYPES = {
     EVENT_USER_MESSAGE,
     EVENT_ASSISTANT_PARTIAL,
@@ -238,6 +250,29 @@ def turn_journal_path(
     return workspace_root / token / "turn_journal.jsonl"
 
 
+def turn_has_terminal_event(
+    project_root: Path,
+    session_id: str,
+    turn_id: str,
+    *,
+    journal_workspace_root: Path | None = None,
+) -> bool:
+    """True when this turn already carries a terminal event.
+
+    Lets a writer that is about to persist a turn result detect that another
+    authority (restart reconciliation, queued-stop snapshot) already closed the
+    turn, instead of discovering it through a rejected append.
+    """
+
+    normalized_turn_id = str(turn_id or "").strip()
+    if not normalized_turn_id:
+        return False
+    return _turn_has_terminal_event(
+        turn_journal_path(project_root, session_id, journal_workspace_root=journal_workspace_root),
+        normalized_turn_id,
+    )
+
+
 def append_turn_event(
     project_root: Path,
     session_id: str,
@@ -267,7 +302,7 @@ def append_turn_event(
                 normalized_event_type in POST_TERMINAL_MODEL_EVENT_TYPES
                 and _turn_has_terminal_event(path, normalized_turn_id)
             ):
-                raise ValueError(
+                raise TurnJournalPostTerminalWriteError(
                     f"Cannot append {normalized_event_type} after terminal event for turn {normalized_turn_id}."
                 )
             sequence = _next_sequence(path)

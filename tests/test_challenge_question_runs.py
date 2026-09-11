@@ -1917,6 +1917,10 @@ def test_repair_fails_closed_without_full_stage_receipts(tmp_path, monkeypatch):
     _seed_repair_run_authority(
         monkeypatch, tmp_path, stages=("generation", "review")
     )
+    # Generation+review receipts with NO durable convergence facts (the chain
+    # read model is not converged) must keep failing closed; the skipped
+    # revision slot is only available to provably first-round-converged runs.
+    _patch_chain_state(monkeypatch, converged=False)
     _register_legacy_proposal_record(tmp_path, monkeypatch)
 
     with pytest.raises(ValueError, match="authority_incomplete"):
@@ -1940,6 +1944,230 @@ def test_repair_fails_closed_without_full_stage_receipts(tmp_path, monkeypatch):
             "*.result-package.v2.json"
         )
     )
+
+
+# ---------------- first-round convergence: the revision slot may be skipped
+
+
+def _patch_chain_state(
+    monkeypatch,
+    *,
+    converged: bool,
+    round_count: int = 1,
+    round_id: str = "hypothesis-round-1",
+) -> None:
+    """Pin the hypothesis-first chain read model to explicit durable facts.
+
+    ``chain_state`` is the aggregation every readiness evaluator already
+    trusts; the repair contract consumes it (never a re-derivation), so the
+    tests pin the read model itself and assert the run scoping is honored.
+    """
+
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain,
+    )
+
+    seen: dict[str, str] = {}
+
+    def fake_chain_state(team_id, question_id, *, workflow_run_id=""):
+        seen["teamId"] = team_id
+        seen["questionId"] = question_id
+        seen["workflowRunId"] = workflow_run_id
+        return {
+            "teamId": team_id,
+            "questionId": question_id,
+            "hypothesisConverged": converged,
+            "hypothesisRoundCount": round_count,
+            "latestHypothesisRoundId": round_id if converged else "",
+        }
+
+    monkeypatch.setattr(hypothesis_first_chain, "chain_state", fake_chain_state)
+    return seen
+
+
+def test_repair_accepts_first_round_convergence_without_revision_receipts(
+    tmp_path, monkeypatch
+):
+    _isolate_store(tmp_path, monkeypatch)
+    # The run converged on review round 1: generation and review receipts
+    # exist, no revision step ever ran, and the chain read model proves it.
+    _seed_repair_run_authority(
+        monkeypatch, tmp_path, stages=("generation", "review")
+    )
+    seen = _patch_chain_state(monkeypatch, converged=True, round_count=1)
+    _register_legacy_proposal_record(tmp_path, monkeypatch)
+
+    result = challenge_question_runs.repair_challenge_question_output_registration(
+        "research-team", "SCI-096", "run-sci-096"
+    )
+
+    # The convergence read was scoped to this exact run.
+    assert seen == {
+        "teamId": "research-team",
+        "questionId": "SCI-096",
+        "workflowRunId": "run-sci-096",
+    }
+    assert result["repaired"] is True
+    assert result["officialModelCall"] is True
+    record = result["record"]
+    validation = record["validation"]
+    assert validation["officialModelCall"] is True
+    assert validation["modelInvocationReceipts"] == "passed"
+    assert "modelInvocationReceiptIssue" not in validation
+    refs = record["modelInvocationReceiptRefs"]
+    assert set(refs) == {"generation", "review", "revision"}
+    # The revision entry is the explicit skipped marker, never a receipt.
+    assert refs["revision"]["skipped"] is True
+    assert refs["revision"]["receipt_id"] == ""
+    assert refs["revision"]["node_run_id"] == ""
+    assert refs["revision"]["evidence_locator"]["reason"] == (
+        "converged_without_revision"
+    )
+    assert refs["revision"]["evidence_locator"]["convergenceRecordId"] == (
+        "hypothesis-round-1"
+    )
+    package_metadata = record["resultPackage"]
+    package_path = Path(package_metadata["locator"])
+    assert package_path.is_file()
+    # The persisted package itself must restore with the skipped revision slot.
+    from core.research.competition.question_result_package import (
+        QuestionResultPackage,
+    )
+
+    stored_package = json.loads(package_path.read_text(encoding="utf-8"))
+    assert stored_package["model_invocation_receipts"]["revision"] == {
+        "skipped": True,
+        "reason": "converged_without_revision",
+        "convergenceRecordId": "hypothesis-round-1",
+    }
+    restored = QuestionResultPackage.from_dict(
+        stored_package,
+        expected_model_policy_sha256=str(package_metadata["modelPolicySha256"]),
+    )
+    assert set(restored.model_invocation_receipts) == {"generation", "review"}
+    assert set(restored.skipped_receipt_stages) == {"revision"}
+
+    # The final review gate now accepts the reconciled candidate.
+    reviewed = challenge_question_runs.review_challenge_question_output(
+        "research-team",
+        "SCI-096",
+        "run-sci-096",
+        {
+            "reviewer": "operator",
+            "rationale": "Program review after registration repair.",
+            "decisions": {
+                gate: "approved"
+                for gate in (
+                    "H1_problem_understanding",
+                    "H2_hypothesis_selection",
+                    "H3_research_plan",
+                    "H4_external_output",
+                )
+            },
+        },
+    )
+    assert reviewed["record"]["status"] == "approved"
+    assert reviewed["record"]["submissionEligible"] is True
+
+
+def test_repair_fails_closed_without_revision_receipts_and_convergence_facts(
+    tmp_path, monkeypatch
+):
+    _isolate_store(tmp_path, monkeypatch)
+    _seed_repair_run_authority(
+        monkeypatch, tmp_path, stages=("generation", "review")
+    )
+    # No durable convergence facts: the chain read model is not converged.
+    _patch_chain_state(monkeypatch, converged=False)
+    _register_legacy_proposal_record(tmp_path, monkeypatch)
+
+    with pytest.raises(ValueError, match="authority_incomplete"):
+        challenge_question_runs.repair_challenge_question_output_registration(
+            "research-team", "SCI-096", "run-sci-096"
+        )
+
+    store = json.loads(
+        challenge_question_runs._store_path("research-team").read_text(
+            encoding="utf-8"
+        )
+    )
+    record = store["records"][0]
+    assert "resultPackage" not in record
+    assert record["validation"]["officialModelCall"] is False
+
+
+def test_repair_fails_closed_when_convergence_does_not_prove_zero_revisions(
+    tmp_path, monkeypatch
+):
+    _isolate_store(tmp_path, monkeypatch)
+    _seed_repair_run_authority(
+        monkeypatch, tmp_path, stages=("generation", "review")
+    )
+    # Converged, but the rounds ledger shows two completed rounds: round 2 IS
+    # a revision round in the chain-driven flow, so the no-revision proof is
+    # ambiguous and the authority must fail closed.
+    _patch_chain_state(monkeypatch, converged=True, round_count=2)
+    _register_legacy_proposal_record(tmp_path, monkeypatch)
+
+    with pytest.raises(ValueError, match="authority_incomplete"):
+        challenge_question_runs.repair_challenge_question_output_registration(
+            "research-team", "SCI-096", "run-sci-096"
+        )
+
+
+def test_register_first_round_convergence_binds_official_package_without_revision(
+    tmp_path, monkeypatch
+):
+    """The original registration path shares the same authority fix.
+
+    Delivery orchestration hands the receipt authority keys straight to
+    ``register_challenge_question_output`` package mode, so a first-round-
+    converged run must bind its canonical package (officialModelCall=true)
+    at registration time, not only through the later repair.
+    """
+
+    _isolate_store(tmp_path, monkeypatch)
+    seeded = _seed_repair_run_authority(
+        monkeypatch, tmp_path, stages=("generation", "review")
+    )
+    _patch_chain_state(monkeypatch, converged=True, round_count=1)
+    output = _output()
+    output["run"]["run_id"] = "run-sci-096"
+    output["run"]["invocation_evidence_refs"] = [
+        "model-invocation-receipt:unregistered-receipt"
+    ]
+
+    policy = _repair_stage_one_policy()
+    registered = challenge_question_runs.register_challenge_question_output(
+        "research-team",
+        {
+            "output": output,
+            "citationChecks": _citation_checks(output),
+            "registeredBy": "research_result_package_bridge",
+            "modelInvocationReceipts": {
+                "generation": seeded["generation"],
+                "review": seeded["review"],
+                "revision": {
+                    "skipped": True,
+                    "reason": "converged_without_revision",
+                    "convergenceRecordId": "hypothesis-round-1",
+                },
+            },
+            "modelPolicy": policy,
+            "authorizedModelPolicySha256": policy["policySha256"],
+            "inputSnapshotSha256": "c" * 64,
+        },
+    )
+
+    record = registered["record"]
+    assert record["validation"]["officialModelCall"] is True
+    assert record["resultPackage"]["schemaVersion"] == 2
+    assert set(record["modelInvocationReceiptRefs"]) == {
+        "generation",
+        "review",
+        "revision",
+    }
+    assert record["modelInvocationReceiptRefs"]["revision"]["skipped"] is True
 
 
 def test_repair_run_missing_and_scope_mismatch_fail_distinctly(tmp_path, monkeypatch):
