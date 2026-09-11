@@ -19,9 +19,10 @@ describe("useAppI18n domain wiring (D1 follow-up)", () => {
   });
 
   it("scopes primary routes to domain packs", () => {
-    // Companion rail needs pet + evolution packs (mental/pet labels); without them raw keys leak.
+    // Chat status rail retired (57fae148a): chat keeps chat/agents/evolution packs,
+    // and no chat-route component reads pet-domain copy anymore.
     expect(chatRouteSource).toContain(
-      'useAppI18n({ domains: ["chat", "agents", "pet", "evolution"] })',
+      'useAppI18n({ domains: ["chat", "agents", "evolution"] })',
     );
     expect(conversationViewSource).toContain('useAppI18n({ domains: ["chat"] })');
     expect(evolutionRouteSource).toContain('useAppI18n({ domains: ["evolution"] })');
