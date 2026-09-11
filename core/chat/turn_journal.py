@@ -135,7 +135,8 @@ TURN_INTERRUPTED_MARKER = (
 
 _SAFE_SESSION_CHARS = re.compile(r"[^A-Za-z0-9_.-]+")
 _SEQUENCE_CACHE_LOCK = threading.Lock()
-_SEQUENCE_CACHE: dict[str, tuple[int, int, int]] = {}
+# path -> (sequence, journal mtime_ns, journal size, watermark mtime_ns, watermark size)
+_SEQUENCE_CACHE: dict[str, tuple[int, int, int, int, int]] = {}
 # 进程内 terminal 事件集合缓存（key: journal path -> (terminal turn ids, mtime_ns, size)）
 # 只做加速，不替代文件锁：签名不匹配时回退全文件扫描。
 _TERMINAL_SET_CACHE_LOCK = threading.Lock()
@@ -734,13 +735,16 @@ def rewrite_turn_events(project_root: Path, session_id: str, events: Iterable[Tu
 
     Allowed owners: edit-resubmit truncation and group-room transcript cleanup.
     Model context must reconstruct from the rewritten JSONL afterwards; do not
-    treat rewrite as a second conversation fact source.
+    treat rewrite as a second conversation fact source. The sequence watermark
+    keeps every previously issued cursor valid: the next append starts above
+    both the retained tail and any dropped event.
     """
     path = turn_journal_path(project_root, session_id)
     event_list = [event for event in list(events or []) if isinstance(event, TurnJournalEvent)]
     with _journal_thread_lock(path):
         _ensure_journal_parent(path)
         with _journal_file_lock(path):
+            previous_sequence = _latest_sequence(path)
             if not event_list:
                 try:
                     path.unlink()
@@ -750,7 +754,10 @@ def rewrite_turn_events(project_root: Path, session_id: str, events: Iterable[Tu
                 except OSError:
                     return
                 _forget_sequence(path)
+                # Dropping the file must not reissue cursors clients already saw.
+                _write_sequence_watermark(path, previous_sequence)
                 return
+            retained_sequence = max((event.sequence for event in event_list), default=0)
             tmp_path = path.with_name(f"{path.name}.{uuid4().hex}.tmp")
             try:
                 encoded = b"".join(
@@ -767,6 +774,7 @@ def rewrite_turn_events(project_root: Path, session_id: str, events: Iterable[Tu
                 os.replace(tmp_path, path)
                 _fsync_directory(path.parent)
                 _forget_sequence(path)
+                _write_sequence_watermark(path, max(previous_sequence, retained_sequence))
             except OSError:
                 try:
                     tmp_path.unlink()
@@ -2327,27 +2335,80 @@ def latest_turn_sequence(project_root: Path, session_id: str) -> int:
     path = turn_journal_path(project_root, session_id)
     if not path.exists():
         _forget_sequence(path)
-        return 0
+        return _read_sequence_watermark(path)
     with _journal_thread_lock(path):
         with _journal_file_lock(path):
             return _latest_sequence(path)
 
 
+def _sequence_watermark_path(path: Path) -> Path:
+    return path.with_name(f"{path.name}.watermark")
+
+
+def _read_sequence_watermark(path: Path) -> int:
+    try:
+        raw = _sequence_watermark_path(path).read_text(encoding="utf-8").strip()
+    except OSError:
+        return 0
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 0
+
+
+def _write_sequence_watermark(path: Path, sequence: int) -> None:
+    """Persist the highest issued sequence so a rewrite never reissues cursors.
+
+    Sequence values are logical cursors clients and SSE payloads already
+    consumed, not physical line indexes. Truncating events may drop the highest
+    sequence, but the next append must stay above every published value; this
+    watermark is what keeps ``ledgerSeq`` monotonic across edit-resubmit
+    truncation and group-room transcript cleanup.
+    """
+
+    normalized = max(0, int(sequence or 0))
+    if normalized <= 0 or _read_sequence_watermark(path) >= normalized:
+        return
+    target = _sequence_watermark_path(path)
+    _ensure_journal_parent(target)
+    tmp_path = target.with_name(f"{target.name}.{uuid4().hex}.tmp")
+    try:
+        with tmp_path.open("x", encoding="utf-8") as handle:
+            handle.write(f"{normalized}\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, target)
+        _fsync_directory(target.parent)
+    except OSError:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+
+
 def _latest_sequence(path: Path) -> int:
     if not path.exists():
         _forget_sequence(path)
-        return 0
+        return _read_sequence_watermark(path)
     key = _sequence_cache_key(path)
     mtime_ns, size = _sequence_file_signature(path)
+    watermark_mtime_ns, watermark_size = _sequence_file_signature(_sequence_watermark_path(path))
     with _SEQUENCE_CACHE_LOCK:
         cached = _SEQUENCE_CACHE.get(key)
-    if cached is not None and cached[1] == mtime_ns and cached[2] == size:
+    if (
+        cached is not None
+        and cached[1] == mtime_ns
+        and cached[2] == size
+        and cached[3] == watermark_mtime_ns
+        and cached[4] == watermark_size
+    ):
         return cached[0]
     last_sequence = _latest_sequence_from_tail(path)
     if last_sequence <= 0:
         last_sequence = _latest_sequence_from_scan(path)
+    last_sequence = max(last_sequence, _read_sequence_watermark(path))
     with _SEQUENCE_CACHE_LOCK:
-        _SEQUENCE_CACHE[key] = (last_sequence, mtime_ns, size)
+        _SEQUENCE_CACHE[key] = (last_sequence, mtime_ns, size, watermark_mtime_ns, watermark_size)
     return last_sequence
 
 
@@ -2402,11 +2463,14 @@ def _latest_sequence_from_scan(path: Path) -> int:
 
 def _remember_sequence(path: Path, sequence: int) -> None:
     mtime_ns, size = _sequence_file_signature(path)
+    watermark_mtime_ns, watermark_size = _sequence_file_signature(_sequence_watermark_path(path))
     with _SEQUENCE_CACHE_LOCK:
         _SEQUENCE_CACHE[_sequence_cache_key(path)] = (
             max(0, int(sequence or 0)),
             mtime_ns,
             size,
+            watermark_mtime_ns,
+            watermark_size,
         )
 
 
