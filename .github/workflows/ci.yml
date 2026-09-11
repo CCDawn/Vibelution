@@ -160,3 +160,30 @@ jobs:
 
       - name: Build frontend
         run: npm run build
+
+  electron-tests:
+    name: Electron Launcher Tests
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      NODE_ENV: test
+    defaults:
+      run:
+        working-directory: desktop/electron
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: desktop/electron/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Electron main-process tests
+        run: npm test
