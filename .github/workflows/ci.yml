@@ -161,6 +161,9 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Verify bundle budgets
+        run: npm run check:bundle
+
   electron-tests:
     name: Electron Launcher Tests
     runs-on: windows-latest

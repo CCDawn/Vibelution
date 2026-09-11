@@ -2,7 +2,8 @@
  * Research primary surface renderers (launcher / overview / stage standalone).
  * Extracted from TeamsRoute; does not own React state.
  */
-import type { ReactNode } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
+import { ProgressiveRegionSkeleton } from "../shared/ProgressiveRegionSkeleton";
 import { ResearchOverviewSurface } from "./ResearchOverviewSurface";
 import { ResearchStageNav } from "./ResearchStageNav";
 import { ResearchWorkflowErrorSurface } from "./ResearchWorkflowErrorSurface";
@@ -12,8 +13,17 @@ import {
 import { createExperimentController } from "./createExperimentController";
 import { workflowStateLabel } from "./workflowPresentation";
 import type { ResearchStageWorkspaceView } from "./researchWorkspaceModel";
-import { ResearchProcessWorkspace } from "./research-workflow/ResearchProcessWorkspace";
 import { TeamShellToolbar } from "./TeamShellToolbar";
+
+/**
+ * The research process workspace owns its own canvas/inspector/model pack. Keeping it
+ * behind its own dynamic boundary keeps that pack out of the Teams SC-phase chunk,
+ * which it would otherwise dominate.
+ */
+const LazyResearchProcessWorkspace = lazy(async () => {
+  const module = await import("./research-workflow/ResearchProcessWorkspace");
+  return { default: module.ResearchProcessWorkspace };
+});
 
 /** Loose context bag from TeamsRoute. */
 export type ResearchPrimarySurfaceRenderContext = {
@@ -224,32 +234,41 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
       );
     }
     return (
-      <ResearchProcessWorkspace
-        teamId={teamId}
-        lang={lang}
-        teamName={String(selectedTeam?.name || "")}
-        linkedChatRoomId={String(selectedTeam?.linkedChatRoomId || "")}
-        toolbarLeading={(
-          <TeamShellToolbar
-            lang={lang}
-            teamName={String(selectedTeam?.name || "")}
-            purpose={String(selectedTeam?.purpose || "")}
-            teamOptions={(visibleTeams ?? []).map((team: { teamId: string; name: string; purpose?: string }) => ({
-              id: team.teamId,
-              label: team.name,
-              description: team.purpose || team.teamId,
-            }))}
-            selectedTeamId={String(effectiveTeamId || "")}
-            onSelectTeamId={(teamId) => {
-              const team = (visibleTeams ?? []).find((item: { teamId: string }) => item.teamId === teamId);
-              if (team) {
-                selectTeamRecord(team);
-              }
-            }}
-            switchClassName="min-w-0 w-full"
+      <Suspense
+        fallback={
+          <ProgressiveRegionSkeleton
+            variant="canvas"
+            label={lang === "en" ? "Loading research process…" : "正在载入科研流程…"}
           />
-        )}
-      />
+        }
+      >
+        <LazyResearchProcessWorkspace
+          teamId={teamId}
+          lang={lang}
+          teamName={String(selectedTeam?.name || "")}
+          linkedChatRoomId={String(selectedTeam?.linkedChatRoomId || "")}
+          toolbarLeading={(
+            <TeamShellToolbar
+              lang={lang}
+              teamName={String(selectedTeam?.name || "")}
+              purpose={String(selectedTeam?.purpose || "")}
+              teamOptions={(visibleTeams ?? []).map((team: { teamId: string; name: string; purpose?: string }) => ({
+                id: team.teamId,
+                label: team.name,
+                description: team.purpose || team.teamId,
+              }))}
+              selectedTeamId={String(effectiveTeamId || "")}
+              onSelectTeamId={(teamId) => {
+                const team = (visibleTeams ?? []).find((item: { teamId: string }) => item.teamId === teamId);
+                if (team) {
+                  selectTeamRecord(team);
+                }
+              }}
+              switchClassName="min-w-0 w-full"
+            />
+          )}
+        />
+      </Suspense>
     );
   }
 

@@ -43,6 +43,14 @@ describe("researchWorkflowNoDuplicateSurface", () => {
     expect(workspaceSource).not.toContain("ChallengeCupOperationsWorkspace");
   });
 
+  it("keeps the research process workspace behind its own lazy boundary", () => {
+    // The workspace owns the canvas/inspector/model pack; loading it statically here
+    // put that pack into the Teams SC-phase chunk and blew its bundle budget.
+    expect(primarySource).toContain('await import("./research-workflow/ResearchProcessWorkspace")');
+    expect(primarySource).toContain("LazyResearchProcessWorkspace");
+    expect(primarySource).not.toMatch(/^import\s+\{\s*ResearchProcessWorkspace\s*\}/m);
+  });
+
   it("autofocuses the current HITL task from the process workspace", () => {
     expect(workspaceSource).toContain("useResearchProcessAutofocus");
     expect(workspaceSource).toContain("atCurrentTask");
