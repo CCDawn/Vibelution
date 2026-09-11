@@ -182,10 +182,13 @@ describe("hypothesis-first API", () => {
       const pending = executeHypothesisFirstCommand("team-1", "SCI-002", action, { candidateIds: ["candidate-1"] });
       const settled = vi.fn();
       pending.then(settled, settled);
-      // The accepted POST resolves only after the attempt reaches a terminal
-      // status through the poll endpoint.
-      await vi.advanceTimersByTimeAsync(5_000);
+      // First window spans exactly one poll cycle (poll fires at t=1.5s and
+      // still reports "running"): a non-terminal attempt must not settle the
+      // accepted POST.
+      await vi.advanceTimersByTimeAsync(2_000);
       expect(settled).toHaveBeenCalledTimes(0);
+      // Second cycle (t=3s) reports "succeeded"; only the terminal poll
+      // resolves the envelope with the stored result.
       await vi.advanceTimersByTimeAsync(5_000);
       const [resolution] = settled.mock.calls[0];
       expect(resolution).toEqual(
