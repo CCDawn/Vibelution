@@ -743,8 +743,12 @@ def _normalize_research_plan(payload: Any) -> dict[str, Any]:
         )
     normalized["work_packages"] = normalized_work_packages
     for field in _REQUIRED_RESEARCH_PLAN_LIST_FIELDS[1:]:
+        # Stage-one proposal plans legitimately leave protocol sections
+        # (variables/timeline/risks/...) unplanned; the v2 projection emits
+        # them empty and the output schema accepts empty, so only the key
+        # must be present and well-typed.
         normalized[field] = _string_list(
-            normalized.get(field), f"research_plan.{field}", allow_empty=False
+            normalized.get(field), f"research_plan.{field}", allow_empty=True
         )
     normalized["human_gate"] = _normalize_human_gate(
         normalized.get("human_gate"), "research_plan.human_gate"

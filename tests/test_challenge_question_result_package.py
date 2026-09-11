@@ -510,7 +510,6 @@ def test_selection_requires_tradeoffs_and_reasons_for_every_unselected_candidate
 @pytest.mark.parametrize(
     "field",
     [
-        "work_packages",
         "variables",
         "controls",
         "data_and_materials",
@@ -523,9 +522,64 @@ def test_selection_requires_tradeoffs_and_reasons_for_every_unselected_candidate
         "risks",
     ],
 )
-def test_research_plan_requires_every_execution_field_non_empty(field: str) -> None:
+def test_research_plan_accepts_empty_stage_one_protocol_sections(field: str) -> None:
     payload = _valid_payload()
     payload["research_plan"][field] = []
+
+    package = _create(payload)
+
+    assert list(package.research_plan[field]) == []
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "variables",
+        "controls",
+        "data_and_materials",
+        "analysis",
+        "success_criteria",
+        "failure_criteria",
+        "stop_conditions",
+        "resources",
+        "timeline",
+        "risks",
+    ],
+)
+def test_research_plan_still_requires_protocol_section_keys(field: str) -> None:
+    payload = _valid_payload()
+    payload["research_plan"].pop(field)
+
+    with pytest.raises(QuestionResultPackageError, match="missing required fields"):
+        _create(payload)
+
+
+def test_research_plan_requires_non_empty_work_packages() -> None:
+    payload = _valid_payload()
+    payload["research_plan"]["work_packages"] = []
+
+    with pytest.raises(QuestionResultPackageError, match="work_packages"):
+        _create(payload)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "variables",
+        "controls",
+        "data_and_materials",
+        "analysis",
+        "success_criteria",
+        "failure_criteria",
+        "stop_conditions",
+        "resources",
+        "timeline",
+        "risks",
+    ],
+)
+def test_research_plan_rejects_malformed_protocol_sections(field: str) -> None:
+    payload = _valid_payload()
+    payload["research_plan"][field] = "not-a-list"
 
     with pytest.raises(QuestionResultPackageError, match=field):
         _create(payload)
