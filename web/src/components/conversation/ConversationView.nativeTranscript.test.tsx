@@ -740,4 +740,88 @@ describe("ConversationView native Codex transcript surface", () => {
     });
     expect(unmatchedHtml).toContain("turnErrorText");
   });
+
+  it("renders a plan tool call as an inline step checklist", () => {
+    const planMessage: ConversationMessage = {
+      id: "assistant-plan",
+      role: "assistant",
+      timestamp: "2026-05-22T00:02:00Z",
+      turnId: "turn-plan",
+      status: "running",
+      turnItems: [{
+        id: "plan-call-r1",
+        itemId: "plan-call",
+        version: 3,
+        sessionId: "session-1",
+        turnId: "turn-plan",
+        type: "tool_call",
+        callId: "call-plan",
+        toolName: "plan_update_tool",
+        status: "completed",
+        revision: 1,
+        sequence: 1,
+        terminal: true,
+        input: JSON.stringify({
+          plan: [
+            { step: "审查工具契约", status: "completed" },
+            { step: "补齐回归测试", status: "in_progress" },
+            { step: "运行完整验证", status: "pending" },
+          ],
+          explanation: "同步当前对齐进度",
+        }),
+      }],
+    };
+
+    const html = renderConversation([planMessage], "trace");
+    expect(html).toContain('data-codex-tool-checklist="true"');
+    expect(html).toContain('data-codex-tool-checklist-tool="plan_update_tool"');
+    expect(html.match(/data-checklist-item-status="completed"/g)).toHaveLength(1);
+    expect(html.match(/data-checklist-item-status="in_progress"/g)).toHaveLength(1);
+    expect(html.match(/data-checklist-item-status="pending"/g)).toHaveLength(1);
+    expect(html).toContain("审查工具契约");
+    expect(html).toContain("补齐回归测试");
+    expect(html).toContain("运行完整验证");
+    expect(html).toContain("同步当前对齐进度");
+    expect(html).not.toContain('data-codex-tool-activity-item="true"');
+  });
+
+  it("renders a task creation tool call as a pending task checklist", () => {
+    const taskMessage: ConversationMessage = {
+      id: "assistant-task",
+      role: "assistant",
+      timestamp: "2026-05-22T00:03:00Z",
+      turnId: "turn-task",
+      status: "running",
+      turnItems: [{
+        id: "task-call-r1",
+        itemId: "task-call",
+        version: 3,
+        sessionId: "session-1",
+        turnId: "turn-task",
+        type: "tool_call",
+        callId: "call-task",
+        toolName: "task_create_tool",
+        status: "completed",
+        revision: 1,
+        sequence: 1,
+        terminal: true,
+        input: JSON.stringify({
+          task_list: [
+            { description: "复现缺陷" },
+            { description: "修复持久化判定" },
+          ],
+          goal: "修复错误卡常驻",
+        }),
+      }],
+    };
+
+    const html = renderConversation([taskMessage], "trace");
+    expect(html).toContain('data-codex-tool-checklist="true"');
+    expect(html).toContain('data-codex-tool-checklist-tool="task_create_tool"');
+    expect(html.match(/data-checklist-item-status="pending"/g)).toHaveLength(2);
+    expect(html).toContain("复现缺陷");
+    expect(html).toContain("修复持久化判定");
+    expect(html).toContain("修复错误卡常驻");
+    expect(html).not.toContain('data-codex-tool-activity-item="true"');
+  });
 });

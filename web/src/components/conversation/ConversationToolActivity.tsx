@@ -16,6 +16,11 @@ import {
   type ConversationToolPresentationLanguage,
 } from "./conversationToolPresentation";
 import {
+  conversationToolChecklistModel,
+  type ConversationToolChecklistModel,
+} from "./conversationToolChecklistModel";
+import { ConversationToolChecklist } from "./ConversationToolChecklist";
+import {
   buildConversationToolActivityDigestPresentation,
   buildConversationToolActivityPresentation,
   conversationToolActivityHasNonzeroTerminalExit,
@@ -314,6 +319,17 @@ function ToolActivityBatch({
   );
 }
 
+function checklistModelForBatch(
+  item: Extract<ConversationToolActivityPresentationItem, { kind: "batch" }>,
+  language: ConversationToolPresentationLanguage,
+): ConversationToolChecklistModel | null {
+  const models = item.cells.map((cell) => conversationToolChecklistModel(cell, language));
+  if (models.length === 0 || models.some((model) => model === null)) {
+    return null;
+  }
+  return models[models.length - 1] ?? null;
+}
+
 function ToolActivityRows({
   items,
   language,
@@ -325,15 +341,22 @@ function ToolActivityRows({
 }) {
   return (
     <>
-      {items.map((item) => (
-        <div key={item.id} className={styles.activityRow}>
-          {item.kind === "batch" ? (
-            <ToolActivityBatch item={item} language={language} renderToolDetails={renderToolDetails} />
-          ) : (
-            <ToolActivityItem cell={item.cell} language={language} renderToolDetails={renderToolDetails} />
-          )}
-        </div>
-      ))}
+      {items.map((item) => {
+        const checklist = item.kind === "batch"
+          ? checklistModelForBatch(item, language)
+          : conversationToolChecklistModel(item.cell, language);
+        return (
+          <div key={item.id} className={styles.activityRow}>
+            {checklist ? (
+              <ConversationToolChecklist model={checklist} language={language} />
+            ) : item.kind === "batch" ? (
+              <ToolActivityBatch item={item} language={language} renderToolDetails={renderToolDetails} />
+            ) : (
+              <ToolActivityItem cell={item.cell} language={language} renderToolDetails={renderToolDetails} />
+            )}
+          </div>
+        );
+      })}
     </>
   );
 }
