@@ -676,6 +676,72 @@ export function extractToolDisplayCommand(args?: Record<string, unknown> | null)
   return "";
 }
 
+const TOOL_ARGUMENT_PATH_KEYS = [
+  "path",
+  "file_path",
+  "filePath",
+  "file",
+  "target_file",
+  "notebook_path",
+  "directory",
+  "dir",
+];
+const TOOL_ARGUMENT_QUERY_KEYS = ["query", "pattern", "regex", "symbol", "term", "search"];
+const TOOL_ARGUMENT_URL_KEYS = ["url", "href"];
+const TOOL_ARGUMENT_COMMAND_KEYS = ["displayCommand", "cmd", "command"];
+const TOOL_ARGUMENT_SUBJECT_MAX_LENGTH = 72;
+
+function compactArgumentSubject(value: string) {
+  return value.length > TOOL_ARGUMENT_SUBJECT_MAX_LENGTH
+    ? `${value.slice(0, TOOL_ARGUMENT_SUBJECT_MAX_LENGTH - 1).trimEnd()}…`
+    : value;
+}
+
+/**
+ * Name what a tool is working on, from its canonical arguments.
+ *
+ * Result-derived summaries only exist once a tool finishes, so while it runs the
+ * arguments are the only source for the target — a bare action label ("读取文件")
+ * does not tell the reader which file. Paths win over queries because they are
+ * the more specific answer, and a path is shown as a basename to stay scannable.
+ */
+export function subjectFromToolArguments(options: {
+  toolArguments?: Record<string, unknown> | null;
+  language: ConversationToolPresentationLanguage;
+}): string {
+  const args = objectRecord(options.toolArguments);
+  if (!args) {
+    return "";
+  }
+  const target = objectRecord(args.target);
+  const pick = (keys: string[]) => {
+    for (const key of keys) {
+      const value = firstScalar(args, [key]);
+      if (value) {
+        return value;
+      }
+    }
+    return "";
+  };
+
+  const path = pick(TOOL_ARGUMENT_PATH_KEYS)
+    || (target ? firstScalar(target, ["filePath", "file_path", "path"]) : "");
+  if (path) {
+    return compactArgumentSubject(basenamePath(path));
+  }
+  const query = pick(TOOL_ARGUMENT_QUERY_KEYS)
+    || (target ? firstScalar(target, ["symbol", "name"]) : "");
+  if (query) {
+    return compactArgumentSubject(query);
+  }
+  const url = pick(TOOL_ARGUMENT_URL_KEYS);
+  if (url) {
+    return compactArgumentSubject(url);
+  }
+  const command = pick(TOOL_ARGUMENT_COMMAND_KEYS);
+  return command ? compactArgumentSubject(command) : "";
+}
+
 /**
  * Codex tool-row model: action + optional status + muted subject/duration.
  * UI must not render dual status chips for running/completed — the leading
@@ -692,6 +758,7 @@ export function buildCodexToolActivityPills(options: {
   resultPreview?: string;
   displayCommand?: string;
   filePath?: string;
+  toolArguments?: Record<string, unknown> | null;
   timedOut?: boolean;
   noMatch?: boolean;
   nonzeroExit?: boolean;
@@ -726,6 +793,14 @@ export function buildCodexToolActivityPills(options: {
     || subjectKey.endsWith("_tool")
   ) {
     subject = "";
+  }
+  if (!subject) {
+    // Nothing to summarize from a result yet (a running tool has none), so fall
+    // back to the arguments: "读取文件" alone does not name the file.
+    subject = subjectFromToolArguments({
+      toolArguments: options.toolArguments,
+      language,
+    });
   }
   const durationLabel = String(options.durationLabel || "").trim();
 

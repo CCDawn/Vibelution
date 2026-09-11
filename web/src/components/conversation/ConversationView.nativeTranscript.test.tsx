@@ -493,4 +493,46 @@ describe("ConversationView native Codex transcript surface", () => {
     // The one-line preview keeps the collapsed cell scannable.
     expect(settled).toContain(styles.timelineThoughtInlinePreview);
   });
+
+  it("shows what a running tool is working on, from its arguments", () => {
+    const runningTool = (
+      toolName: string,
+      input: string,
+      status: "running" | "completed" = "running",
+    ): ConversationMessage => ({
+      id: `assistant-${toolName}-${status}`,
+      role: "assistant",
+      timestamp: "2026-09-11T06:00:00Z",
+      turnId: `turn-${toolName}-${status}`,
+      status,
+      turnItems: [{
+        id: `${toolName}-${status}-r1`,
+        itemId: `${toolName}-${status}`,
+        version: 3,
+        sessionId: "session-1",
+        turnId: `turn-${toolName}-${status}`,
+        type: "tool_call",
+        callId: `call-${toolName}-${status}`,
+        toolName,
+        status,
+        revision: 1,
+        sequence: 1,
+        terminal: status === "completed",
+        input,
+      }],
+    });
+
+    // While it runs there is no result to summarize, so the subject has to come
+    // from the arguments; otherwise the row says only "读取文件" with no target.
+    const readRunning = renderConversation([
+      runningTool("read_file_tool", JSON.stringify({ path: "web/src/routes/chat/useSessionDetailStream.ts" })),
+    ], "trace");
+    expect(readRunning).toContain('data-codex-tool-subject="true"');
+    expect(readRunning).toContain("useSessionDetailStream.ts");
+
+    const searchRunning = renderConversation([
+      runningTool("grep_search_tool", JSON.stringify({ pattern: "resolveSessionDetail" })),
+    ], "trace");
+    expect(searchRunning).toContain("resolveSessionDetail");
+  });
 });

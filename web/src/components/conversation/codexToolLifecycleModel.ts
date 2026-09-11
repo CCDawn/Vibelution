@@ -13,6 +13,8 @@ export type CodexToolCall = {
   title: string;
   summary?: string;
   rawToolName?: string;
+  /** Canonical tool input; names what a running tool is working on. */
+  arguments?: Record<string, unknown>;
   runtimeKind: CodexToolRuntimeKind;
   sequence?: number;
   timestamp?: string;
@@ -162,6 +164,7 @@ function appendToolOperation(model: CodexToolLifecycleModel, operation: AgentMes
     title: operation.label,
     summary: compactText(operation.summary),
     rawToolName: compactText(operation.rawLabel || operation.label),
+    arguments: operation.arguments,
     runtimeKind,
     sequence: operation.sequence,
     timestamp: operation.timestamp,

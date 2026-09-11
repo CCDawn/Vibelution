@@ -1,4 +1,5 @@
 import type { ConversationMessage, SessionTurnItem } from "../api/types";
+import { parseToolCallInput } from "../api/toolCallInput";
 import type {
   AgentMentalPart,
   AgentMentalSnapshot,
@@ -107,6 +108,9 @@ function assistantTurnItemsToAgentParts(items: readonly SessionTurnItem[]): Agen
           name: compactText(item.toolName) || "tool",
           status: item.status,
           summary: compactText(item.summary),
+          // The canonical tool input is what lets a *running* tool row name its
+          // target; result-derived summaries do not exist until it finishes.
+          arguments: parseToolCallInput(item.input),
           resultPreview: compactText(item.output),
           sequence: item.sequence,
           timestamp: item.updatedAt ?? item.createdAt,
