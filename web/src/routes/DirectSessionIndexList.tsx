@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { DragEvent, MouseEvent } from "react";
 
 import type { AgentInstance, ConversationSummary, SessionReferenceAttachment, SessionSummary, Team } from "../api/types";
@@ -176,19 +177,25 @@ export function DirectSessionIndexList({
   bulkSelectLabel = "",
   onToggleBulk,
 }: DirectSessionIndexListProps) {
-  const approvalSessionIds = new Set(
-    sessionIdsNeedingApproval.map((id) => String(id || "").trim()).filter(Boolean),
+  const approvalSessionIds = useMemo(
+    () =>
+      new Set(
+        sessionIdsNeedingApproval.map((id) => String(id || "").trim()).filter(Boolean),
+      ),
+    [sessionIdsNeedingApproval],
   );
-  const runtimeSessionIds = new Set(
-    runtimeRunningSessionIds.map((id) => String(id || "").trim()).filter(Boolean),
+  const runtimeSessionIds = useMemo(
+    () =>
+      new Set(
+        runtimeRunningSessionIds.map((id) => String(id || "").trim()).filter(Boolean),
+      ),
+    [runtimeRunningSessionIds],
   );
-  return (
-    <>
-      {conversations.map((conversation) => {
+  const preparedItems = useMemo(
+    () =>
+      conversations.map((conversation) => {
         const session = conversationToSessionSummary(conversation, sessionsById);
         const sessionIsBusy = isBusyPhase(session.currentPhase || session.status);
-        const sessionRenamePending = renamePending && renameSessionId === session.id;
-        const isEditingTitle = editingSessionId === session.id;
         const itemError = sessionComposerErrors[session.id] ?? "";
         const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
         const sessionAvatarImageUrl = avatarImageUrlFrom(sessionAgent, session);
@@ -202,6 +209,42 @@ export function DirectSessionIndexList({
           session,
           sessionBusy: sessionIsBusy,
         });
+        const sessionReferencePayloadFrom = () =>
+          buildSessionReferencePayload(
+            session,
+            sessionView.sessionAgentMeta || sessionView.sessionDisplay.name,
+            sessionView.sessionSummary,
+          );
+        return {
+          session,
+          sessionView,
+          sessionAvatarFallback: avatarInitials(session.agentCode, sessionView.sessionTitle),
+          sessionAvatarImageUrl,
+          onDragStart: (event: DragEvent<HTMLElement>) =>
+            onDragReference(event, sessionReferencePayloadFrom()),
+        };
+      }),
+    [
+      addToReviewSucceededLabel,
+      agentsById,
+      avatarImageUrlFrom,
+      avatarInitials,
+      buildSessionReferencePayload,
+      conversations,
+      deleteBusyLabel,
+      isBusyPhase,
+      lang,
+      onDragReference,
+      resolveModelLabel,
+      sessionComposerErrors,
+      sessionsById,
+    ],
+  );
+  return (
+    <>
+      {preparedItems.map(({ session, sessionView, sessionAvatarFallback, sessionAvatarImageUrl, onDragStart }) => {
+        const sessionRenamePending = renamePending && renameSessionId === session.id;
+        const isEditingTitle = editingSessionId === session.id;
         return (
           <DirectSessionIndexItem
             key={session.id}
@@ -216,7 +259,7 @@ export function DirectSessionIndexList({
             isRuntimeRunning={runtimeSessionIds.has(session.id)}
             renamePending={sessionRenamePending}
             session={session}
-            sessionAvatarFallback={avatarInitials(session.agentCode, sessionView.sessionTitle)}
+            sessionAvatarFallback={sessionAvatarFallback}
             sessionAvatarImageUrl={sessionAvatarImageUrl}
             sessionDisplay={sessionView.sessionDisplay}
             sessionSummary={sessionView.sessionSummary}
@@ -228,15 +271,7 @@ export function DirectSessionIndexList({
             t={t}
             onCancelRename={onCancelRename}
             onContextMenu={onContextMenu}
-            onDragStart={(event) =>
-              onDragReference(
-                event,
-                buildSessionReferencePayload(
-                  session,
-                  sessionView.sessionAgentMeta || sessionView.sessionDisplay.name,
-                  sessionView.sessionSummary,
-                ),
-              )}
+            onDragStart={onDragStart}
             onOpen={onOpen}
             onPrefetch={onPrefetch}
             onRenameTitleChange={onRenameTitleChange}
