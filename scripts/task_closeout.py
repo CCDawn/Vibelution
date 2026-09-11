@@ -24,6 +24,15 @@ CLEANUP_RETRY_SECONDS = 2.0
 CLEANUP_RETRY_DELAY_SECONDS = 0.2
 STALE_RETRY_SCHEMA_VERSION = 1
 
+# Validation outcomes whose next step is one specific, mechanical action. Naming
+# it here keeps the operator or agent from rediscovering the workflow from the
+# docs: a missing or stale reuse-research record is fixed by recording it for
+# this branch and re-running the same closeout, not by editing code.
+RECOVERABLE_VALIDATION_ACTIONS = {
+    "reuse_research_missing": "record_reuse_research_evidence",
+    "reuse_research_invalid": "fix_reuse_research_evidence",
+}
+
 CloseoutStatus = Literal[
     "merged_clean",
     "merged_cleanup_pending",
@@ -778,6 +787,15 @@ def run_managed_closeout(
             # validation of the current head; no token is issued for that.
             validation_result.retryable = True
             validation_result.next_action = "rerun_closeout_for_current_head"
+        recoverable_action = RECOVERABLE_VALIDATION_ACTIONS.get(
+            validation_result.errors[0] if validation_result.errors else ""
+        )
+        if recoverable_action:
+            # Mechanically recoverable: apply the named step, then re-run the same
+            # closeout. No rebase and no token are needed because the tree did not
+            # change; this check runs before the expensive commands.
+            validation_result.retryable = True
+            validation_result.next_action = recoverable_action
         if integration_claim_id:
             try:
                 release_claim(
