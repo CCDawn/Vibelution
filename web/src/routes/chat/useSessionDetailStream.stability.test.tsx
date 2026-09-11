@@ -10,7 +10,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../../api/queryKeys";
-import { SESSION_STREAM_ROUTE_SWITCH_GRACE_MS } from "./chatSessionStreamConnect";
+import { SESSION_STREAM_ERROR_REFRESH_MIN_INTERVAL_MS, SESSION_STREAM_ROUTE_SWITCH_GRACE_MS } from "./chatSessionStreamConnect";
 import {
   useSessionDetailStream,
   type UseSessionDetailStreamOptions,
@@ -296,6 +296,37 @@ describe("useSessionDetailStream stream lifecycle stability", () => {
       expect.objectContaining({ queryKey: queryKeys.session("s2") }),
     );
     unmount(root);
+  });
+
+  it("rate limits authoritative refresh across repeated stream errors", () => {
+    vi.useFakeTimers();
+    const { options, invalidateSpy } = baseOptions({ activeSessionId: "s1" });
+    const root = mount(options);
+    act(() => {
+      FakeEventSource.instances[0].open();
+    });
+
+    // First error refreshes once so missed events are recovered.
+    act(() => {
+      FakeEventSource.instances[0].fail();
+    });
+    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+
+    // A flapping stream re-fails every reconnect attempt; those must not keep
+    // rewriting the session cache.
+    act(() => {
+      vi.advanceTimersByTime(SESSION_STREAM_ERROR_REFRESH_MIN_INTERVAL_MS - 1_000);
+      FakeEventSource.instances[0].fail();
+    });
+    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      vi.advanceTimersByTime(2_000);
+      FakeEventSource.instances[0].fail();
+    });
+    expect(invalidateSpy).toHaveBeenCalledTimes(2);
+    unmount(root);
+    vi.useRealTimers();
   });
 
   it("closes the old stream synchronously on route switch and reuses grace only for the same session", () => {

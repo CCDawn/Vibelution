@@ -268,6 +268,7 @@ from .runtime_scene.diagnosis import (
     _runtime_scene_primary_cause_label,
     _runtime_scene_primary_cause_token,
     _runtime_scene_primary_issue_cluster,
+    _runtime_scene_primary_issue_from_cluster,
     _runtime_scene_recommended_reading_order,
     _runtime_scene_recovery_evidence_events,
     _runtime_scene_resolution_event_matches,

@@ -1,4 +1,5 @@
 import { Bot, Check, CheckSquare, LoaderCircle, MessageCircle, Square, X } from "lucide-react";
+import { memo } from "react";
 import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
 
 import type { AgentInstance, SessionSummary, Team } from "../api/types";
@@ -281,7 +282,7 @@ function renderSessionAvatar(className: string, imageUrl: string | undefined, fa
   );
 }
 
-export function DirectSessionIndexItem({
+export const DirectSessionIndexItem = memo(function DirectSessionIndexItem({
   active,
   contextMenuActive = false,
   editing,
@@ -558,4 +559,4 @@ export function DirectSessionIndexItem({
       ) : null}
     </div>
   );
-}
+});

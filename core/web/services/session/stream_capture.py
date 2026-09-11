@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core.chat.chat_task_types import trim_lines
+from core.chat.turn_journal import TurnJournalPostTerminalWriteError
 
 
 def _service():
@@ -28,6 +29,100 @@ def _service():
     from core.web.services import session_service
 
     return session_service
+
+
+def _record_capture_late_write_dropped(
+    session_id: str,
+    turn_id: str,
+    *,
+    event_type: str,
+    source: str,
+) -> None:
+    """Record that a settled turn rejected a late capture write.
+
+    Dropping is expected during restart reconciliation or stop races; telemetry
+    keeps the race visible without turning an already-settled turn into a failure.
+    """
+
+    s = _service()
+    try:
+        s.record_runtime_scene_event(
+            "conversation",
+            "capture_write_dropped",
+            "chat.capture.write_dropped",
+            level="warning",
+            outcome="discarded",
+            message="Capture write arrived after the turn terminal event and was dropped.",
+            fields={
+                "reason": "post_terminal_write",
+                "sessionId": session_id,
+                "turnId": turn_id,
+                "eventType": event_type,
+                "source": source,
+            },
+        )
+    except Exception:
+        pass
+
+
+def _append_capture_journal_event(
+    session_id: str,
+    turn_id: str,
+    event_type: str,
+    *,
+    source: str,
+    **kwargs: Any,
+) -> bool:
+    """Append one capture-owned journal event, dropping late writes on settled turns.
+
+    A turn terminal written by restart reconciliation or a stop request settles the
+    ledger while capture may still be committing. That arrival is a race, not a
+    journal bug, so the late event is dropped and reported instead of escalating
+    into ``turn_failed`` (which would leave the turn with two terminal events).
+
+    Returns ``True`` when the event was handed to the journal, ``False`` when it
+    was dropped because the turn had already settled.
+    """
+
+    s = _service()
+    try:
+        s._append_session_conversation_event(
+            session_id,
+            turn_id,
+            event_type,
+            source=source,
+            **kwargs,
+        )
+    except TurnJournalPostTerminalWriteError:
+        _record_capture_late_write_dropped(
+            session_id,
+            turn_id,
+            event_type=event_type,
+            source=source,
+        )
+        return False
+    return True
+
+
+def _append_capture_turn_outcome(
+    session_id: str,
+    turn_id: str,
+    outcome: Any,
+) -> bool:
+    """Commit a canonical outcome unless the turn already settled."""
+
+    s = _service()
+    try:
+        s.append_conversation_turn_outcome(s.PROJECT_ROOT, session_id, turn_id, outcome)
+    except TurnJournalPostTerminalWriteError:
+        _record_capture_late_write_dropped(
+            session_id,
+            turn_id,
+            event_type="canonical_turn_outcome",
+            source="session_ui_capture_llm_response",
+        )
+        return False
+    return True
 
 
 _SESSION_UI_CAPTURE_LOCK = threading.Lock()
@@ -881,7 +976,7 @@ def _append_session_reasoning_item_if_needed(
         if isinstance(item, dict)
     ):
         return False
-    s._append_session_conversation_event(
+    appended = _append_capture_journal_event(
         normalized_session_id,
         normalized_turn_id,
         s.EVENT_ASSISTANT_ITEM_COMMITTED,
@@ -916,7 +1011,7 @@ def _append_session_reasoning_item_if_needed(
         source_kind="session_reasoning",
     )
     s._invalidate_session_conversation_events_cache(normalized_session_id)
-    return True
+    return appended
 
 
 def _outcome_contains_reasoning_item(outcome: Any) -> bool:
@@ -986,7 +1081,7 @@ def _commit_session_capture_assistant_segment(
             "content": segment,
         }
     )
-    s._append_session_conversation_event(
+    appended = _append_capture_journal_event(
         session_id,
         capture.turn_id,
         s.EVENT_ASSISTANT_DELTA_COMMITTED,
@@ -1003,6 +1098,8 @@ def _commit_session_capture_assistant_segment(
         projection_kind="assistant_timeline_segment",
     )
     capture.mark_content_committed()
+    if not appended:
+        return
     s._set_session_live_output(
         session_id,
         turn_id=capture.turn_id,
@@ -1260,7 +1357,7 @@ def _capture_session_ui_stream(
         if call_id:
             tool_call_payload["callId"] = call_id
         s._copy_tool_result_fact_fields(fact_fields, tool_call_payload)
-        s._append_session_conversation_event(
+        _append_capture_journal_event(
             session_id,
             capture.turn_id,
             s.EVENT_TOOL_CALL_STARTED if event.name == s.EventNames.TOOL_START else s.EVENT_TOOL_RESULT,
@@ -1407,7 +1504,8 @@ def _capture_session_ui_stream(
             # failed_runtime persistence path.  Never commit a success outcome
             # that has no durable receipt intent.
             return
-        s.append_conversation_turn_outcome(s.PROJECT_ROOT, session_id, capture.turn_id, outcome)
+        if not _append_capture_turn_outcome(session_id, capture.turn_id, outcome):
+            return
         s._invalidate_session_conversation_events_cache(session_id)
         capture.mark_content_committed()
 

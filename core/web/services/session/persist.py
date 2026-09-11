@@ -13,6 +13,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from core.chat.turn_journal import turn_has_terminal_event
 from core.web.services.session.turn_failure_classification import classify_turn_failure
 
 
@@ -340,6 +341,45 @@ def _persist_session_turn_result(
     source_collection_stage_task_metadata: dict[str, str] = {}
     runtime_stop_requested = s._is_session_stop_requested(session_id)
     if turn_id and not s._is_session_turn_current(session_id, turn_id):
+        return
+    if turn_id and turn_has_terminal_event(s.PROJECT_ROOT, session_id, turn_id):
+        # Another authority already closed this turn while the worker was still
+        # finishing: restart reconciliation writes turn_interrupted, and a
+        # queued-stop snapshot settles before the worker starts. Transcript
+        # writes here would be rejected by the journal guard and escalate into a
+        # second terminal event (turn_failed) for an already-settled turn, so
+        # only runtime state is settled.
+        settled_summary = s.text_for(
+            lang,
+            zh="本轮已由其它权威收口，结果未重复写入。",
+            en="This turn was already settled by another authority; its result was not written again.",
+        )
+        s._persist_chat_turn_work_run(
+            session_id=session_id,
+            turn_id=turn_id,
+            status="stopped",
+            summary=settled_summary,
+            finished_at=s._now_timestamp(),
+        )
+        s._clear_session_live_output(session_id)
+        try:
+            s.record_runtime_scene_event(
+                "conversation",
+                "turn_result_dropped",
+                "conversation.turn_result.dropped_after_terminal",
+                level="warning",
+                outcome="discarded",
+                message="Turn result was dropped because the turn already had a terminal event.",
+                fields={
+                    "sessionId": session_id,
+                    "turnId": turn_id,
+                    "resultStatus": str(result.get("status") or "").strip()
+                    if isinstance(result, dict)
+                    else "",
+                },
+            )
+        except Exception:
+            pass
         return
     messages = s._session_ledger_visible_messages(session_id)
     conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
@@ -1138,6 +1178,43 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
         return turn_error
 
     turn_id = str(context.get("turn_id") or "")
+    if turn_id and turn_has_terminal_event(s.PROJECT_ROOT, session_id, turn_id):
+        # The turn was settled by another authority while this worker was still
+        # running. Writing a failure terminal now would leave the turn with two
+        # terminal events and report a failure that never owned the turn's
+        # outcome, so only runtime state is settled and the race is reported.
+        timestamp = s._now_timestamp()
+        s._clear_session_live_output(session_id, turn_id=turn_id)
+        s._persist_chat_turn_work_run(
+            session_id=session_id,
+            turn_id=turn_id,
+            status="stopped",
+            summary=s.text_for(
+                lang,
+                zh="本轮已由其它权威收口，失败未重复写入。",
+                en="This turn was already settled by another authority; the failure was not written again.",
+            ),
+            finished_at=timestamp,
+            updated_at=timestamp,
+        )
+        try:
+            s.record_runtime_scene_event(
+                "conversation",
+                "turn_failure_dropped",
+                "conversation.turn_failure.dropped_after_terminal",
+                level="warning",
+                outcome="discarded",
+                message="Turn failure was dropped because the turn already had a terminal event.",
+                fields={
+                    "sessionId": session_id,
+                    "turnId": turn_id,
+                    "errorType": error_type,
+                    "errorPreview": raw_error[:200],
+                },
+            )
+        except Exception:
+            pass
+        return
     work_run_summary = s.text_for(
         lang,
         zh="网页工作台这一轮执行失败，完整错误已写入运行日志。",

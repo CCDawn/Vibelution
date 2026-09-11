@@ -798,9 +798,14 @@ def _build_research_organization_context_block(agent_id: str, *, limit: int = 6)
         )
         signature = _research_organization_context_signature(project_root, research_organization_service)
         cache_key = (normalized_agent_id, bounded_limit, signature)
+        written_at = _perf_counter()
         with _RESEARCH_ORG_CONTEXT_CACHE_LOCK:
+            for key, entry in list(_RESEARCH_ORG_CONTEXT_CACHE.items()):
+                age_seconds = written_at - float(entry.get("createdAt") or 0)
+                if not 0 <= age_seconds <= _RESEARCH_ORG_CONTEXT_CACHE_TTL_SECONDS:
+                    _RESEARCH_ORG_CONTEXT_CACHE.pop(key, None)
             _RESEARCH_ORG_CONTEXT_CACHE[cache_key] = {
-                "createdAt": _perf_counter(),
+                "createdAt": written_at,
                 "contextBlock": context_block,
             }
         return {
