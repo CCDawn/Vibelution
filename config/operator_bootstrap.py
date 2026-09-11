@@ -67,6 +67,7 @@ _LEGACY_THIN_LOCAL_ONLY_STARTER_PAYLOAD = tomllib.loads(
 _SKIP_PRESET_IDS = frozenset(
     {
         "custom_openai_compatible_relay",
+        "custom_opencode_relay",
         "custom_relay_responses",
     }
 )

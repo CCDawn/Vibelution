@@ -840,6 +840,11 @@ def test_model_preset_options_include_codex_preset():
     assert presets["custom_relay_responses"]["category"] == "relay"
     assert presets["custom_relay_responses"]["provider"]["kind"] == "relay"
     assert presets["custom_relay_responses"]["model"]["transport"] == "responses"
+    assert presets["custom_opencode_relay"]["category"] == "relay"
+    assert presets["custom_opencode_relay"]["provider"]["kind"] == "relay"
+    assert presets["custom_opencode_relay"]["provider"]["api"] == "opencode-go"
+    assert presets["custom_opencode_relay"]["model"]["transport"] == "responses"
+    assert presets["custom_opencode_relay"]["model"]["wire_protocol"] == "responses"
     assert "xiaomi_mimo_v2_5_pro_token_plan" in presets
     assert presets["xiaomi_mimo_v2_5_pro_token_plan"]["category"] == "official"
     assert presets["xiaomi_mimo_v2_5_pro_token_plan"]["model"]["model"] == "mimo-v2.5-pro"
