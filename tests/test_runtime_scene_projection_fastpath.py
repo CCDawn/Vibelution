@@ -9,6 +9,27 @@ from core.web.services import runtime_scene_service
 from tests.helpers.web_runtime_scene import _seed_runtime_scene_bundle
 
 
+@pytest.fixture(autouse=True)
+def _pin_periodic_package_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the throttled periodic package refresh out of these assertions.
+
+    Ordinary events also ride a deliberately throttled (30s) package refresh that
+    keeps summary/package_index fresh for diagnosis; that behavior has its own
+    contract in ``test_runtime_scene_summary_refresh.py``.  The clock behind it is
+    a lazily created process-global, so on a fresh process it reads as ``0.0`` and
+    the refresh fires on the first event -- which made the fastpath assertions
+    below depend on how recently some earlier test happened to refresh.  Pinning
+    it keeps each test here measuring the per-event fastpath it claims to measure.
+    """
+
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "_last_scene_package_refresh_at",
+        float("inf"),
+        raising=False,
+    )
+
+
 class _RecordingPipelineMetrics:
     def __init__(self) -> None:
         self.operations: list[tuple[str, str]] = []
