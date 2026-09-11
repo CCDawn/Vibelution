@@ -1087,22 +1087,91 @@ def edit_and_resubmit_session_message(
 ) -> dict:
     """Replace the latest user message, truncate later turns, and start a new turn."""
 
+    return _resubmit_session_user_message(
+        session_id,
+        message_id,
+        content=content,
+        content_utf8_base64=content_utf8_base64,
+        mental_model_enabled=mental_model_enabled,
+        runtime_status_enabled=runtime_status_enabled,
+        turn_status_tail=turn_status_tail,
+        client_submission_id=client_submission_id,
+        turn_mode=turn_mode,
+        write_intent=write_intent,
+        trace_context_carrier=trace_context_carrier,
+        operation="edit",
+    )
+
+
+def regenerate_session_message(
+    session_id: str,
+    message_id: str,
+    mental_model_enabled: bool | None = None,
+    runtime_status_enabled: bool | None = None,
+    turn_status_tail: dict[str, Any] | None = None,
+    *,
+    client_submission_id: str = "",
+    turn_mode: str = "",
+    write_intent: bool | None = None,
+    trace_context_carrier: Mapping[str, Any] | None = None,
+) -> dict:
+    """Rerun the latest user message after truncating its assistant output."""
+
+    return _resubmit_session_user_message(
+        session_id,
+        message_id,
+        content="",
+        content_utf8_base64="",
+        mental_model_enabled=mental_model_enabled,
+        runtime_status_enabled=runtime_status_enabled,
+        turn_status_tail=turn_status_tail,
+        client_submission_id=client_submission_id,
+        turn_mode=turn_mode,
+        write_intent=write_intent,
+        trace_context_carrier=trace_context_carrier,
+        operation="regenerate",
+    )
+
+
+def _resubmit_session_user_message(
+    session_id: str,
+    message_id: str,
+    *,
+    content: str,
+    content_utf8_base64: str,
+    mental_model_enabled: bool | None,
+    runtime_status_enabled: bool | None,
+    turn_status_tail: dict[str, Any] | None,
+    client_submission_id: str,
+    turn_mode: str,
+    write_intent: bool | None,
+    trace_context_carrier: Mapping[str, Any] | None,
+    operation: str,
+) -> dict:
+    """Shared edit/regenerate body: truncate from the target user message and rerun it."""
+
     s = _service()
     lang = s.get_web_language()
     conversation_id = str(session_id or "").strip()
     normalized_trace_context_carrier = _normalize_trace_context_carrier(trace_context_carrier)
     target_message_id = str(message_id or "").strip()
     normalized_client_submission_id = str(client_submission_id or "").strip()
-    message = _resolve_user_message_content(content, content_utf8_base64=content_utf8_base64)
+    is_regenerate = str(operation or "").strip() == "regenerate"
+    message = "" if is_regenerate else _resolve_user_message_content(content, content_utf8_base64=content_utf8_base64)
     if not conversation_id:
         raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
     if not target_message_id:
-        raise s.SessionValidationError(s.text_for(lang, zh="请选择要重新编辑的消息。", en="Choose a message to edit."))
-    if not message:
+        raise s.SessionValidationError(
+            s.text_for(lang, zh="请选择要重新生成的回答。", en="Choose an answer to regenerate.")
+            if is_regenerate
+            else s.text_for(lang, zh="请选择要重新编辑的消息。", en="Choose a message to edit.")
+        )
+    if not is_regenerate and not message:
         raise s.SessionValidationError(
             s.text_for(lang, zh="请输入重新发送的消息。", en="Enter the edited message before sending.")
         )
-    s._validate_user_message_not_encoding_replacement(message, lang=lang)
+    if not is_regenerate:
+        s._validate_user_message_not_encoding_replacement(message, lang=lang)
 
     admit_lock = _session_submit_admit_lock(conversation_id)
     admit_lock.acquire()
@@ -1117,12 +1186,16 @@ def edit_and_resubmit_session_message(
         s._ensure_conversation_workspace_metadata(conversation)
 
         previous_messages = s._session_ledger_visible_messages(conversation_id)
-        skill_command = s.parse_skill_slash_command(message)
-        skill_invocation = s._skill_invocation_payload(skill_command) if skill_command is not None else None
         target_index = s._find_user_message_index_by_api_id(conversation_id, previous_messages, target_message_id)
         if target_index < 0:
             raise s.SessionValidationError(
-                s.text_for(lang, zh="只能重新编辑历史用户消息。", en="Only historical user messages can be edited and resent.")
+                s.text_for(
+                    lang,
+                    zh="只能重新生成最新一条用户消息的回答。",
+                    en="Only the latest user message answer can be regenerated.",
+                )
+                if is_regenerate
+                else s.text_for(lang, zh="只能重新编辑历史用户消息。", en="Only historical user messages can be edited and resent.")
             )
         latest_user_index = s._latest_user_message_index(previous_messages)
         if target_index != latest_user_index:
@@ -1135,10 +1208,39 @@ def edit_and_resubmit_session_message(
                 reason="not_latest_user_message",
                 latest_message_id=latest_message_id,
                 target_preview=previous_messages[target_index].get("content") or "",
+                operation=operation,
             )
             raise s.SessionValidationError(
-                s.text_for(lang, zh="只能重新编辑最新一条用户消息。", en="Only the latest user message can be edited and resent.")
+                s.text_for(
+                    lang,
+                    zh="只能重新生成最新一条用户消息的回答。",
+                    en="Only the latest user message answer can be regenerated.",
+                )
+                if is_regenerate
+                else s.text_for(lang, zh="只能重新编辑最新一条用户消息。", en="Only the latest user message can be edited and resent.")
             )
+
+        attachments: list[dict[str, Any]] = []
+        session_references: list[dict[str, Any]] = []
+        if is_regenerate:
+            message = str(previous_messages[target_index].get("content") or "").strip()
+            stored_attachments = previous_messages[target_index].get("attachments")
+            if isinstance(stored_attachments, list):
+                attachments = s._normalize_message_attachments(stored_attachments)
+            stored_references = previous_messages[target_index].get("references")
+            if isinstance(stored_references, list):
+                session_references = s._normalize_session_references(stored_references)
+            if not message and not attachments:
+                raise s.SessionValidationError(
+                    s.text_for(
+                        lang,
+                        zh="找不到可重新生成的用户消息。",
+                        en="No user message is available to regenerate.",
+                    )
+                )
+            s._validate_user_message_not_encoding_replacement(message, lang=lang)
+        skill_command = s.parse_skill_slash_command(message)
+        skill_invocation = s._skill_invocation_payload(skill_command) if skill_command is not None else None
 
         active_task = s._normalize_session_active_task(conversation.get("active_task") or conversation.get("activeTask"))
         if not s._is_task_tool_backed_active_task(active_task):
@@ -1178,7 +1280,11 @@ def edit_and_resubmit_session_message(
         original_was_slash_skill = isinstance(original_metadata.get("slashSkillCommand"), dict)
         superseded_turn_id = ""
         if s._is_session_running(conversation_id):
-            superseded_turn_id = s._supersede_active_session_turn_for_edit(conversation_id, lang=lang)
+            superseded_turn_id = s._supersede_active_session_turn_for_edit(
+                conversation_id,
+                lang=lang,
+                operation=operation,
+            )
         turn_control = s._create_session_turn_control(conversation_id)
         active_skill_contract = (
             s._active_skill_contract_from_invocation(skill_invocation, turn_id=turn_control.turn_id)
@@ -1201,7 +1307,13 @@ def edit_and_resubmit_session_message(
             conversation.pop("active_skill_contract", None)
             conversation.pop("activeSkillContract", None)
         user_metadata.setdefault("turnId", turn_control.turn_id)
-        user_entry = s._make_chat_message("user", message, metadata=user_metadata)
+        user_entry = s._make_chat_message(
+            "user",
+            message,
+            metadata=user_metadata,
+            attachments=attachments,
+            references=session_references,
+        )
         conversation.pop("messages", None)
         conversation.pop("last_turn_error", None)
         conversation.pop("lastTurnError", None)
@@ -1221,28 +1333,42 @@ def edit_and_resubmit_session_message(
         )
     finally:
         admit_lock.release()
+    user_payload: dict[str, Any] = {
+        "content": message,
+        "source": "regenerated_user_message" if is_regenerate else "edited_user_message",
+        "metadata": user_entry.get("metadata") if isinstance(user_entry.get("metadata"), dict) else user_metadata,
+    }
+    if attachments:
+        user_payload["attachments"] = attachments
+    if session_references:
+        user_payload["references"] = session_references
     s._append_session_conversation_event(
         conversation_id,
         turn_control.turn_id,
         s.EVENT_USER_MESSAGE,
         status="recorded",
-        payload={
-            "content": message,
-            "source": "edited_user_message",
-            "metadata": user_entry.get("metadata") if isinstance(user_entry.get("metadata"), dict) else user_metadata,
-        },
-        source="edit_and_resubmit_session_message",
+        payload=user_payload,
+        source="regenerate_session_message" if is_regenerate else "edit_and_resubmit_session_message",
     )
 
     s._set_session_waiting_live_output(conversation_id, turn_id=turn_control.turn_id)
-    s._record_session_message_edit_resubmit_event(
-        conversation_id,
-        target_message_id=target_message_id,
-        turn_id=turn_control.turn_id,
-        truncated_count=max(0, len(previous_messages) - target_index - 1),
-        original_content=original_entry.get("content") or "",
-        edited_content=message,
-    )
+    if is_regenerate:
+        s._record_session_message_regenerate_event(
+            conversation_id,
+            target_message_id=target_message_id,
+            turn_id=turn_control.turn_id,
+            truncated_count=max(0, len(previous_messages) - target_index - 1),
+            attachment_count=len(attachments),
+        )
+    else:
+        s._record_session_message_edit_resubmit_event(
+            conversation_id,
+            target_message_id=target_message_id,
+            turn_id=turn_control.turn_id,
+            truncated_count=max(0, len(previous_messages) - target_index - 1),
+            original_content=original_entry.get("content") or "",
+            edited_content=message,
+        )
     s._record_chat_next_state_signal(
         session_id=conversation_id,
         turn_id=turn_control.turn_id,
@@ -1250,11 +1376,21 @@ def edit_and_resubmit_session_message(
         kind="assistant_output_edited",
         polarity="neutral",
         mode="directive",
-        related_event_code="conversation.message_edited_resubmitted",
-        summary=s.text_for(
-            lang,
-            zh="用户编辑最新消息并重新提交，后续 assistant 输出被截断重跑。",
-            en="The user edited the latest message and resubmitted, truncating later assistant output.",
+        related_event_code=(
+            "conversation.message_regenerated" if is_regenerate else "conversation.message_edited_resubmitted"
+        ),
+        summary=(
+            s.text_for(
+                lang,
+                zh="用户要求重新生成最新回答，旧 assistant 输出被截断重跑。",
+                en="The user asked to regenerate the latest answer, truncating the previous assistant output.",
+            )
+            if is_regenerate
+            else s.text_for(
+                lang,
+                zh="用户编辑最新消息并重新提交，后续 assistant 输出被截断重跑。",
+                en="The user edited the latest message and resubmitted, truncating later assistant output.",
+            )
         ),
         metadata={
             "messageId": target_message_id,
@@ -1262,12 +1398,14 @@ def edit_and_resubmit_session_message(
             "originalLength": len(str(original_entry.get("content") or "")),
             "editedLength": len(message),
             "supersededTurnId": superseded_turn_id,
+            "regenerated": is_regenerate,
+            "preservedAttachmentCount": len(attachments),
         },
     )
     s._record_session_cycle_message(
         conversation_id,
         user_entry,
-        event="user_message_edited_resubmitted",
+        event="user_message_regenerated" if is_regenerate else "user_message_edited_resubmitted",
         status="running",
     )
     s._record_session_turn_started_event(
@@ -1277,6 +1415,7 @@ def edit_and_resubmit_session_message(
         user_message=message,
         raw_user_message=message,
         user_message_source="raw",
+        attachments=attachments,
         trace_context_carrier=normalized_trace_context_carrier,
     )
     s._publish_session_detail_snapshot(conversation_id)
@@ -1303,6 +1442,8 @@ def edit_and_resubmit_session_message(
         "user_message": effective_user_message,
         "raw_user_message": message,
         "user_message_source": user_message_source,
+        "attachments": attachments,
+        "session_references": session_references,
         "history_messages": history_before_target,
         "mental_model_enabled": mental_model_enabled,
         "runtime_status_enabled": runtime_status_enabled,

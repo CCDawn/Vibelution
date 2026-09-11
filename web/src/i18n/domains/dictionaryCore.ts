@@ -1,4 +1,4 @@
-/** Route/domain dictionary slice: core (473 keys). */
+/** Route/domain dictionary slice: core (474 keys). */
 export const dictionaryCore = {
   zh: {
     appTitle: "Vibelution 工作台",
@@ -216,6 +216,7 @@ export const dictionaryCore = {
     saveAndRerunMessage: "保存并重跑",
     cancelEditMessage: "取消编辑",
     editResubmitFailed: "编辑重发失败",
+    regenerateFailed: "重新生成失败",
     sendPending: "发送中",
     submitFailed: "发送失败",
     send: "发送",
@@ -708,6 +709,7 @@ export const dictionaryCore = {
     saveAndRerunMessage: "Save and rerun",
     cancelEditMessage: "Cancel edit",
     editResubmitFailed: "Edit resend failed",
+    regenerateFailed: "Regenerate failed",
     sendPending: "Sending",
     submitFailed: "Send failed",
     send: "Send",

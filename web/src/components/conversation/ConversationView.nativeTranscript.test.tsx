@@ -13,6 +13,7 @@ function renderConversation(
   messages: ConversationMessage[],
   processDisplayMode: "answer" | "trace" = "trace",
   companionMode = false,
+  overrides: Partial<React.ComponentProps<typeof ConversationView>> = {},
 ) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -45,6 +46,7 @@ function renderConversation(
         onClear={() => undefined}
         onJumpToLatest={() => undefined}
         onCreateNewSession={() => undefined}
+        {...overrides}
       />
     </QueryClientProvider>,
   );
@@ -556,6 +558,64 @@ describe("ConversationView native Codex transcript surface", () => {
     // While the answer is still streaming the clipboard must stay untouched.
     const streaming = renderConversation([answer("running")]);
     expect(streaming).not.toContain('aria-label="copyAnswer"');
+  });
+
+  it("offers regenerate only for the latest settled assistant answer", () => {
+    const answer = (status: "running" | "completed"): ConversationMessage => ({
+      id: `assistant-copy-${status}`,
+      role: "assistant",
+      timestamp: "2026-09-11T08:10:00Z",
+      turnId: `turn-copy-${status}`,
+      status,
+      turnItems: [{
+        id: `answer-copy-${status}:0`,
+        itemId: `answer-copy-${status}`,
+        version: 3,
+        sessionId: "session-1",
+        turnId: `turn-copy-${status}`,
+        type: "agent_message",
+        phase: "final_answer",
+        status,
+        revision: 0,
+        sequence: 1,
+        terminal: status === "completed",
+        text: "可以重新生成的回答。",
+      }],
+    });
+    const onRegenerateAssistantMessage = () => undefined;
+
+    const settled = renderConversation(
+      [answer("completed")],
+      "trace",
+      false,
+      {
+        regenerableAssistantMessageId: "assistant-copy-completed",
+        onRegenerateAssistantMessage,
+      },
+    );
+    expect(settled).toContain('aria-label="regenerateAnswer"');
+
+    const historical = renderConversation(
+      [answer("completed")],
+      "trace",
+      false,
+      {
+        regenerableAssistantMessageId: "assistant-another-turn",
+        onRegenerateAssistantMessage,
+      },
+    );
+    expect(historical).not.toContain('aria-label="regenerateAnswer"');
+
+    const streaming = renderConversation(
+      [answer("running")],
+      "trace",
+      false,
+      {
+        regenerableAssistantMessageId: "assistant-copy-running",
+        onRegenerateAssistantMessage,
+      },
+    );
+    expect(streaming).not.toContain('aria-label="regenerateAnswer"');
   });
 
   it("shows what a running tool is working on, from its arguments", () => {

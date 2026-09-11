@@ -1380,7 +1380,12 @@ def _source_collection_stage_task_continuation_prompt(metadata: dict[str, Any]) 
     return "\n".join(lines)
 
 
-def _supersede_active_session_turn_for_edit(session_id: str, *, lang: str) -> str:
+def _supersede_active_session_turn_for_edit(
+    session_id: str,
+    *,
+    lang: str,
+    operation: str = "edit",
+) -> str:
     s = _service()
     controller = s._get_session_turn_control(session_id)
     if controller is None:
@@ -1388,10 +1393,19 @@ def _supersede_active_session_turn_for_edit(session_id: str, *, lang: str) -> st
     turn_id = str(getattr(controller, "turn_id", "") or "").strip()
     if not turn_id:
         return ""
-    reason = s.text_for(
-        lang,
-        zh="用户编辑并重新提交了最新消息，当前轮已被新输入取代。",
-        en="The user edited and resubmitted the latest message, superseding the active turn.",
+    is_regenerate = str(operation or "").strip() == "regenerate"
+    reason = (
+        s.text_for(
+            lang,
+            zh="用户要求重新生成最新回答，当前轮已被新请求取代。",
+            en="The user asked to regenerate the latest answer, superseding the active turn.",
+        )
+        if is_regenerate
+        else s.text_for(
+            lang,
+            zh="用户编辑并重新提交了最新消息，当前轮已被新输入取代。",
+            en="The user edited and resubmitted the latest message, superseding the active turn.",
+        )
     )
     controller.request_stop(reason)
     s._cancel_queued_session_turn(session_id, turn_id)
@@ -1413,17 +1427,19 @@ def _supersede_active_session_turn_for_edit(session_id: str, *, lang: str) -> st
         kind="user_edit_supersedes_turn",
         polarity="neutral",
         mode="directive",
-        related_event_code="conversation.message_edited_resubmitted",
+        related_event_code=(
+            "conversation.message_regenerated" if is_regenerate else "conversation.message_edited_resubmitted"
+        ),
         summary=reason,
         metadata={"supersededTurnId": turn_id},
     )
     s._record_session_turn_lifecycle_event(
         session_id,
-        "superseded_by_edit_resubmit",
+        "superseded_by_regenerate" if is_regenerate else "superseded_by_edit_resubmit",
         turn_id=turn_id,
         outcome="superseded",
         fields={
-            "reason": "edit_resubmit",
+            "reason": "regenerate" if is_regenerate else "edit_resubmit",
         },
     )
     return turn_id
