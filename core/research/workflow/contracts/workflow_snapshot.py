@@ -281,6 +281,10 @@ class KnowledgeInvocationBadge:
     absorbed_count: int
     failed_count: int = 0
     latest: KnowledgeInvocationRecentSummary | None = None
+    # SCI-049 O-02: auto-accept policy facts for the residual handoff gate —
+    # {"pending": bool, "actor": str, "intervalMs": int}.  ``None`` on legacy
+    # snapshots; readers omit the "auto-accepted within ~Ns" promise then.
+    auto_accept: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -291,6 +295,7 @@ class KnowledgeInvocationBadge:
             "absorbedCount": self.absorbed_count,
             "failedCount": self.failed_count,
             "latest": self.latest.to_dict() if self.latest is not None else None,
+            "autoAccept": dict(self.auto_accept) if self.auto_accept is not None else None,
         }
 
 

@@ -1476,6 +1476,56 @@ def _meeting_is_stalled(meeting: Mapping[str, Any]) -> bool:
     }
 
 
+def _candidate_short_id(candidate_id: str) -> str:
+    """Compact display form of a candidate id (tail keeps the hash part)."""
+    normalized = str(candidate_id or "").strip()
+    if len(normalized) <= 16:
+        return normalized
+    return f"…{normalized[-12:]}"
+
+
+def _approve_summary_label(
+    candidate_id: str | None,
+    meeting: Mapping[str, Any] | None,
+) -> str:
+    """Disambiguating label for a candidate approve gate (SCI-049 D-03).
+
+    Two candidates can await digest approval on the same panel; the bare
+    ``确认候选纪要`` renders twice and the candidate identity only hides in
+    the opaque ``actionId``.  The label therefore carries the candidate short
+    id plus a truncated digest summary so each button names the candidate it
+    confirms.  Without a digest draft the short id alone still disambiguates.
+    """
+    if not candidate_id:
+        return "确认候选生成纪要"
+    parts = [f"候选 {_candidate_short_id(candidate_id)}"]
+    digest = (
+        meeting.get("digestDraft")
+        if isinstance(meeting, Mapping)
+        else None
+    )
+    summary = (
+        str(digest.get("summary") or "").strip()
+        if isinstance(digest, Mapping)
+        else ""
+    )
+    if summary:
+        parts.append(f"{summary[:30]}…" if len(summary) > 30 else summary)
+    return f"确认候选纪要 · {'：'.join(parts)}"
+
+
+def _approve_summary_payload(
+    meeting_id: str,
+    candidate_id: str | None,
+) -> dict[str, Any]:
+    """Approve payload; candidate-scoped gates carry their candidateId."""
+    payload: dict[str, Any] = {"meetingRoundId": meeting_id}
+    normalized = str(candidate_id or "").strip()
+    if normalized:
+        payload["candidateId"] = normalized
+    return payload
+
+
 def _meeting_recovery_actions(
     *,
     question_id: str,
@@ -1620,10 +1670,10 @@ def _meeting_recovery_actions(
                     if candidate_id
                     else f"approve-generation-summary:{meeting_id}"
                 ),
-                label="确认候选纪要" if candidate_id else "确认候选生成纪要",
+                label=_approve_summary_label(candidate_id, meeting),
                 target_phase=target_phase,
                 target_node_id=target_node_id,
-                payload={"meetingRoundId": meeting_id},
+                payload=_approve_summary_payload(meeting_id, candidate_id),
                 input_schema_ref="hypothesis-first/approve-summary/v1",
             )
         )
@@ -3506,10 +3556,25 @@ def project_state_from_records(
         collection_phase = _phase("waiting_human", "none", "waiting_user", updated_at=computed_at)
     else:
         collection_phase = _phase("running", "none", "waiting_system", updated_at=computed_at)
+    # SCI-049 O-02: the residual knowledge-handoff human gate is auto-accepted
+    # by the budget-exhaustion auto-advance sweep (operator policy); a bare
+    # "waiting" panel reads as stuck.  Quote the sweep cadence so the UI can
+    # say "auto-accepted within ~Ns" instead of a silent wait.
+    from .runtime_factory import auto_advance_sweep_interval_ms
+
+    collection_auto_accept = {
+        "pending": any(
+            item.get("handoff", {}).get("lifecycle") == "waiting_human"
+            for item in collection_requests
+        ),
+        "actor": "auto_advance_sweep",
+        "intervalMs": auto_advance_sweep_interval_ms(),
+    }
     collection = {
         **collection_phase,
         "aggregate": collection_aggregate,
         "requests": collection_requests,
+        "autoAccept": collection_auto_accept,
     }
 
     latest_round = (
@@ -3968,10 +4033,16 @@ def project_state_from_records(
                     _command_action(
                         "approve_summary",
                         action_id=f"approve-summary:{candidate['candidateId']}",
-                        label="确认候选纪要",
+                        label=_approve_summary_label(
+                            str(candidate["candidateId"]),
+                            None,
+                        ),
                         target_phase="review",
                         target_node_id="hf_review",
-                        payload={"meetingRoundId": candidate["meetingRoundId"]},
+                        payload=_approve_summary_payload(
+                            str(candidate["meetingRoundId"] or ""),
+                            str(candidate["candidateId"]),
+                        ),
                         input_schema_ref="hypothesis-first/approve-summary/v1",
                     )
                 )
@@ -4016,12 +4087,13 @@ def project_state_from_records(
                 _command_action(
                     "approve_summary",
                     action_id=f"approve-summary:{candidate_id}",
-                    label="确认候选纪要",
+                    label=_approve_summary_label(candidate_id, stale_meeting),
                     target_phase="review",
                     target_node_id="hf_review",
-                    payload={
-                        "meetingRoundId": str(link.get("meetingRoundId") or "")
-                    },
+                    payload=_approve_summary_payload(
+                        str(stale_meeting.get("meetingRoundId") or ""),
+                        candidate_id,
+                    ),
                     input_schema_ref="hypothesis-first/approve-summary/v1",
                 )
             )

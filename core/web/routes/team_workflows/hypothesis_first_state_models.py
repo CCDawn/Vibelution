@@ -197,6 +197,14 @@ class MeetingActionPayload(StrictWireModel):
     meetingRoundId: str = Field(..., min_length=1)
 
 
+class ApproveSummaryPayload(MeetingActionPayload):
+    # SCI-049 D-03: candidate-scoped approve gates carry their candidateId so
+    # the UI can disambiguate sibling approve buttons without parsing the
+    # opaque actionId.  The generation-meeting entry omits the field, and the
+    # unset-excluded serialization keeps it absent there.
+    candidateId: str | None = None
+
+
 class RetryCollectionPayload(StrictWireModel):
     requestId: str = Field(..., min_length=1)
     childRunId: str | None
@@ -246,6 +254,7 @@ ActionPayload = (
     | RetryGenerationPayload
     | RecordSelectionPayload
     | RetryReviewDispatchPayload
+    | ApproveSummaryPayload
     | MeetingActionPayload
     | RetryCollectionPayload
     | CollectionChildRunPayload
@@ -268,7 +277,7 @@ _ACTION_PAYLOAD_TYPES: dict[str, type[StrictWireModel]] = {
     "resume_discussion": MeetingActionPayload,
     "stop_discussion": MeetingActionPayload,
     "regenerate_summary": MeetingActionPayload,
-    "approve_summary": MeetingActionPayload,
+    "approve_summary": ApproveSummaryPayload,
     "retry_collection": RetryCollectionPayload,
     "continue_collection": CollectionChildRunPayload,
     "stop_collection": CollectionChildRunPayload,
@@ -544,9 +553,25 @@ class ReviewState(PhaseState):
         return self
 
 
+class CollectionAutoAcceptState(StrictWireModel):
+    """Auto-accept policy facts for the residual knowledge-handoff gate.
+
+    ``pending`` = at least one handoff gate awaits the auto-advance sweep's
+    accept; ``actor`` names the sweep; ``intervalMs`` quotes its cadence so
+    the UI can promise "auto-accepted within ~Ns" (SCI-049 O-02).
+    """
+
+    pending: bool
+    actor: str = Field(..., min_length=1)
+    intervalMs: int = Field(..., gt=0)
+
+
 class CollectionState(PhaseState):
     aggregate: StateAggregate
     requests: list[CollectionRequestState]
+    # Optional with a default so hand-built test fixtures and older
+    # serialized snapshots still validate; the V2 projection always sets it.
+    autoAccept: CollectionAutoAcceptState | None = None
 
     @model_validator(mode="after")
     def _validate_aggregate(self) -> CollectionState:

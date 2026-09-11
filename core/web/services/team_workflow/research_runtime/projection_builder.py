@@ -31,7 +31,10 @@ from .command_offers.retry_node import (
     succeeded_node_rerun_available,
     succeeded_node_rerun_target,
 )
-from .knowledge_invocation_projection import project_knowledge_invocation_badges
+from .knowledge_invocation_projection import (
+    current_knowledge_node_id_from_child_states,
+    project_knowledge_invocation_badges,
+)
 from .offer_authorization import build_offer_authorizations
 
 
@@ -69,6 +72,10 @@ class ProjectionInputs:
     knowledge_child_node_states: Mapping[str, Mapping[str, str]] = field(
         default_factory=dict
     )
+    # Auto-advance sweep cadence (ms) for the knowledge-handoff auto-accept
+    # hint (SCI-049 O-02).  ``None`` keeps the field off the badges so the UI
+    # never quotes a cadence the caller did not vouch for.
+    auto_accept_interval_ms: int | None = None
     # Offer authorization signing: explicit key/now keep the builder
     # deterministic for tests; ``None`` resolves the server control secret and
     # wall clock.
@@ -225,31 +232,57 @@ def _invocation_badges(
     if not inputs.knowledge_invocations:
         return {}
     raw_badges = project_knowledge_invocation_badges(inputs.knowledge_invocations)
+    # SCI-049 O-02: quote the auto-advance sweep cadence (None = caller did
+    # not supply it, e.g. legacy projection inputs; readers then omit the
+    # "auto-accepted within ~Ns" promise instead of inventing one).
+    interval_ms = inputs.auto_accept_interval_ms
+    auto_accept: dict[str, Any] | None = (
+        {
+            "pending": False,
+            "actor": "auto_advance_sweep",
+            "intervalMs": int(interval_ms),
+        }
+        if interval_ms is not None and int(interval_ms) > 0
+        else None
+    )
     badges: dict[str, KnowledgeInvocationBadge] = {}
     for node_id, payload in raw_badges.items():
         latest_row = payload.get("latest")
+        child_states: dict[str, str] = dict(
+            inputs.knowledge_child_node_states.get(
+                str(latest_row.get("knowledgeChildRunId") or ""), {}
+            )
+        ) if isinstance(latest_row, Mapping) else {}
         latest = (
             KnowledgeInvocationRecentSummary(
                 invocation_id=str(latest_row.get("invocationId") or ""),
                 parent_node_id=str(latest_row.get("parentNode_id") or node_id),
                 status=latest_row.get("status"),
                 handoff_state=latest_row.get("handoffState"),
-                current_knowledge_node_id=latest_row.get("currentKnowledgeNodeId"),
+                # SCI-049 O-03: the child run's real per-node attempts decide
+                # the live node; the invocation-status derivation (which only
+                # ever sees entry/handoff) is the degraded fallback.
+                current_knowledge_node_id=current_knowledge_node_id_from_child_states(
+                    child_states,
+                    fallback_status=latest_row.get("status"),
+                ),
                 knowledge_child_run_id=latest_row.get("knowledgeChildRunId"),
                 knowledge_package_ref=latest_row.get("knowledgePackageRef"),
                 package_content_hash=latest_row.get("packageContentHash"),
                 error_summary=latest_row.get("errorSummary"),
                 created_at_ms=int(latest_row.get("createdAtMs") or 0),
                 updated_at_ms=int(latest_row.get("updatedAtMs") or 0),
-                child_node_states=dict(
-                    inputs.knowledge_child_node_states.get(
-                        str(latest_row.get("knowledgeChildRunId") or ""), {}
-                    )
-                ),
+                child_node_states=child_states,
             )
             if isinstance(latest_row, Mapping)
             else None
         )
+        badge_auto_accept: dict[str, Any] | None = None
+        if auto_accept is not None:
+            badge_auto_accept = {
+                **auto_accept,
+                "pending": int(payload.get("awaitingHandoffCount") or 0) > 0,
+            }
         badges[node_id] = KnowledgeInvocationBadge(
             node_id=node_id,
             total_count=int(payload.get("totalCount") or 0),
@@ -258,6 +291,7 @@ def _invocation_badges(
             absorbed_count=int(payload.get("absorbedCount") or 0),
             failed_count=int(payload.get("failedCount") or 0),
             latest=latest,
+            auto_accept=badge_auto_accept,
         )
     return badges
 

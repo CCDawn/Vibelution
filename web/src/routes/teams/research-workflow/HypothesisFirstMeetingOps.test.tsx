@@ -106,16 +106,21 @@ const AWAITING_REVIEW_ACTION: HypothesisFirstNextAction = {
 // Two candidate review rooms can sit in awaiting_approval at the same time;
 // the selection-level nextAction then aggregates the FIRST room while the
 // sibling panel must stay operable through its own canonicalActions entry.
+// SCI-049 D-03: the server labels carry the candidate short id + digest
+// summary so the sibling panels are never two identical buttons.
 const APPROVE_ACTION_A = {
   ...APPROVE_SUMMARY_ACTION,
   actionId: "approve-summary:candidate-a",
   idempotencyKey: "hf2:approve-summary:candidate-a",
+  label: "确认候选纪要 · 候选 candidate-a：增长假设证据更充分",
+  payload: { meetingRoundId: "meeting-1", candidateId: "candidate-a" },
 };
 const APPROVE_ACTION_B = {
   ...APPROVE_SUMMARY_ACTION,
   actionId: "approve-summary:candidate-b",
   idempotencyKey: "hf2:approve-summary:candidate-b",
-  payload: { meetingRoundId: "meeting-2" },
+  label: "确认候选纪要 · 候选 candidate-b：成本假设存疑",
+  payload: { meetingRoundId: "meeting-2", candidateId: "candidate-b" },
 };
 const DUAL_ROOM_ACTION: HypothesisFirstV2NextAction = {
   ...AWAITING_REVIEW_ACTION,
@@ -700,9 +705,11 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
     await act(async () => {
       // The sibling room's primary label comes from its own canonical action,
       // not the selection-level commandLabel (which describes room A).
-      await vi.waitFor(() => expect(container.textContent).toContain("确认本轮结论"));
+      // SCI-049 D-03: the server label names the candidate, so two sibling
+      // approve panels are never identical buttons.
+      await vi.waitFor(() => expect(container.textContent).toContain("候选 candidate-b"));
       const approve = [...container.querySelectorAll("button")]
-        .find((button) => button.textContent?.includes("确认本轮结论"));
+        .find((button) => button.textContent?.includes("确认候选纪要 · 候选 candidate-b：成本假设存疑"));
       const reject = [...container.querySelectorAll("button")]
         .find((button) => button.textContent?.includes("退回重新整理"));
       expect(approve).toBeTruthy();
