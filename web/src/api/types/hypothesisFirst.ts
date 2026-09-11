@@ -601,7 +601,7 @@ export type ActionCommand =
 export type ActionPayloadByCommand = {
   create_stage_one_run: { questionId: string };
   open_generation: { questionId: string };
-  retry_generation: { questionId: string; previousAttemptId: string };
+  retry_generation: { questionId: string; previousAttemptId: string; runId?: string };
   record_selection: { questionId: string; generationAttemptId: string; previousSelectionId?: string };
   retry_review_dispatch: { selectionId: string; candidateIds: string[] };
   reopen_review: { meetingRoundId: string };
