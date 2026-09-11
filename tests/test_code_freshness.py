@@ -439,3 +439,182 @@ def test_invalid_migration_marker_blocks_fingerprint_read_and_write(tmp_path: Pa
     result = code_freshness.write_running_code_fingerprint(project_root=project_root, source="test")
     assert result["written"] is False
     assert result["errorType"] == ProjectStorageMigrationStateError.__name__
+
+
+# --- 2026-09-11 freshness-gate incident regressions ---
+# Incident: the serving backend was a 09-09 build while checkout main was two
+# days ahead. The on-disk running-code fingerprint was missing, so the whole
+# verdict collapsed to "unknown" and the UI rendered a neutral chip with no
+# stale warning. The startup-pinned serving metadata is the same-event
+# fallback, and a behind verdict must never be suppressed by an unknown panel.
+
+def test_backend_falls_back_to_serving_metadata_when_snapshot_missing(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # Event anchor: checkout main moved ahead of the running 09-09 build while
+    # the fingerprint file was unreadable; verdict must still be behind.
+    monkeypatch.setattr(code_freshness, "read_running_code_fingerprint", lambda root: None)
+
+    def fake_git(root, args):
+        if args[:2] == ["rev-parse", "HEAD"]:
+            return "freshhead0000"
+        if args[:2] == ["branch", "--show-current"]:
+            return "main"
+        if args[:3] == ["rev-list", "--count", "oldhead00000..freshhead0000"]:
+            return "189"
+        return ""
+
+    monkeypatch.setattr(code_freshness, "_capture_git_text", fake_git)
+    fallback = {
+        "runningHead": "oldhead00000",
+        "runningBranch": "main",
+        "dirty": False,
+        "dirtyTreeDigest": hashlib.sha256(b"").hexdigest(),
+        "pid": 33076,
+        "createTime": 1788923484.7,
+        "executable": "pythonw.exe",
+        "startedAt": "2026-09-09T03:11:25+00:00",
+        "source": "serving_metadata_fallback",
+    }
+    result = code_freshness.resolve_backend_freshness(
+        project_root=tmp_path,
+        fallback_snapshot=fallback,
+    )
+    assert result["available"] is True
+    assert result["behind"] is True
+    assert result["behindCount"] == 189
+    assert result["source"] == "serving_metadata_fallback"
+
+    verdict = code_freshness.resolve_code_freshness(
+        project_root=tmp_path,
+        fallback_snapshot=fallback,
+    )
+    assert verdict["verdict"] in {"backend_behind", "backend_and_frontend_behind"}
+
+
+def test_verdict_backend_unknown_with_stale_frontend_reports_frontend_behind(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # A pre-digest snapshot (written by an older backend) leaves the backend
+    # panel unavailable, but the frontend panel still proves the serving build
+    # is behind. The combined verdict must surface that instead of collapsing
+    # to "unknown" (which the old UI rendered as a neutral chip).
+    path = code_freshness.running_code_fingerprint_path(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "runningHead": "oldhead00000",
+                "runningBranch": "main",
+                "servingFrontendBuildKey": "key",
+                "servingFrontendRelease": "release-test",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        code_freshness,
+        "_capture_git_text",
+        lambda root, args: "diskhead00000" if args[:2] == ["rev-parse", "HEAD"] else "main",
+    )
+    monkeypatch.setattr(
+        code_freshness,
+        "_inspect_active_frontend_build",
+        lambda root: {
+            "current": False,
+            "reason": "frontend build key differs from active release",
+            "provenance": {"builtFromCommit": "oldhead00000", "frontendTree": "oldtree", "buildKey": "key"},
+        },
+    )
+    result = code_freshness.resolve_code_freshness(project_root=tmp_path)
+    assert result["backend"]["available"] is False
+    assert result["frontend"]["available"] is True
+    assert result["frontend"]["stale"] is True
+    assert result["verdict"] == "frontend_behind"
+
+    # An unavailable frontend panel is "cannot confirm", not proven behind:
+    # with the backend panel unknown too, the verdict stays unknown.
+    code_freshness.running_code_fingerprint_path(tmp_path).unlink()
+    result = code_freshness.resolve_code_freshness(project_root=tmp_path)
+    assert result["backend"]["available"] is False
+    assert result["frontend"]["available"] is False
+    assert result["verdict"] == "unknown"
+
+
+def test_fallback_snapshot_from_serving_metadata_mapping() -> None:
+    from core.web.services.code_freshness import fallback_snapshot_from_serving_metadata
+
+    metadata = {
+        "backend": {
+            "head": "oldhead00000",
+            "dirty": False,
+            "dirtyTreeDigest": "digest",
+            "pid": 12,
+            "createTime": 34.5,
+            "executable": "pythonw.exe",
+            "startedAt": "started",
+        }
+    }
+    snapshot = fallback_snapshot_from_serving_metadata(metadata)
+    assert snapshot is not None
+    assert snapshot["runningHead"] == "oldhead00000"
+    assert snapshot["dirtyTreeDigest"] == "digest"
+    assert snapshot["pid"] == 12
+    assert snapshot["source"] == "serving_metadata_fallback"
+
+    # Missing head or digest cannot support a behind decision: no fallback.
+    assert fallback_snapshot_from_serving_metadata({"backend": {"head": "x"}}) is None
+    assert fallback_snapshot_from_serving_metadata({"backend": {"dirtyTreeDigest": "d"}}) is None
+    assert fallback_snapshot_from_serving_metadata(None) is None
+    assert fallback_snapshot_from_serving_metadata({}) is None
+
+
+def test_runtime_route_passes_pinned_serving_metadata_fallback(tmp_path: Path, monkeypatch) -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from core.web.routes import runtime as runtime_routes
+
+    pinned = {
+        "schemaVersion": 1,
+        "apiContractVersion": "v1",
+        "frontend": {"buildKey": "k", "release": "release-k", "dist": "", "builtFromCommit": "oldhead00000"},
+        "backend": {
+            "schemaVersion": 1,
+            "head": "oldhead00000",
+            "dirty": False,
+            "dirtyTreeDigest": hashlib.sha256(b"").hexdigest(),
+            "pid": os.getpid(),
+            "createTime": 123.5,
+            "executable": "pythonw.exe",
+            "startedAt": "started",
+        },
+    }
+    captured: dict[str, object] = {}
+
+    def fake_resolve(*, project_root, fallback_snapshot=None):
+        captured["project_root"] = str(project_root)
+        captured["fallback_snapshot"] = fallback_snapshot
+        return {
+            "schemaVersion": 1,
+            "verdict": "backend_behind",
+            "backend": {"available": True, "behind": True, "behindCount": 189, "reason": "", "source": "serving_metadata_fallback"},
+            "frontend": {"available": True, "stale": False, "reason": "", "builtFromCommit": "", "frontendTree": "", "buildKey": "", "servingBuildKey": "", "servingRelease": "", "activeRelease": ""},
+        }
+
+    monkeypatch.setattr(runtime_routes, "resolve_code_freshness", fake_resolve)
+    app = FastAPI()
+    app.include_router(runtime_routes.router, prefix="/api")
+    app.state.serving_metadata = json.loads(json.dumps(pinned))
+    with TestClient(app) as client:
+        payload = client.get("/api/runtime/code-freshness").json()
+
+    assert payload["verdict"] == "backend_behind"
+    fallback = captured["fallback_snapshot"]
+    assert isinstance(fallback, dict)
+    assert fallback["runningHead"] == "oldhead00000"
+    assert fallback["dirtyTreeDigest"] == pinned["backend"]["dirtyTreeDigest"]
+    assert captured["project_root"] == str(runtime_routes.PROJECT_ROOT)

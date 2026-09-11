@@ -1,4 +1,4 @@
-import type { BackendHealth, RuntimeSummary, WorkRunSnapshot } from "../api/types";
+import type { BackendHealth, CodeFreshnessVerdict, RuntimeSummary, WorkRunSnapshot } from "../api/types";
 
 export type SystemStatusTone = "idle" | "running" | "failed" | "caution";
 
@@ -800,4 +800,18 @@ export function lifecycleStateLabel(state: string, lang: "zh" | "en"): string {
     running: "Running",
   };
   return (lang === "en" ? en : zh)[normalized] || state;
+}
+
+// Code-freshness: a behind runtime build is a caution-grade system condition.
+// Kept as one shared predicate so the primary status card and the status guide
+// panel can never disagree about whether a stale instance must be surfaced
+// (2026-09-11: a stale backend used to render as a neutral "unknown" chip).
+export function codeFreshnessStale(
+  verdict: CodeFreshnessVerdict | undefined | null,
+): boolean {
+  return (
+    verdict === "backend_behind"
+    || verdict === "frontend_behind"
+    || verdict === "backend_and_frontend_behind"
+  );
 }

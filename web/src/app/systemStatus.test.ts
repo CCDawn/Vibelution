@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   backendSystemTone,
+  codeFreshnessStale,
   deriveActiveWorkIndicator,
   deriveBackendSystemState,
   deriveFrontendSystemState,
@@ -1203,4 +1204,21 @@ describe("systemStatus", () => {
       ).toBeNull();
     },
   );
+});
+
+describe("codeFreshnessStale", () => {
+  it("treats every behind verdict as a caution-grade stale condition", () => {
+    expect(codeFreshnessStale("backend_behind")).toBe(true);
+    expect(codeFreshnessStale("frontend_behind")).toBe(true);
+    expect(codeFreshnessStale("backend_and_frontend_behind")).toBe(true);
+  });
+
+  it("never treats current or unknown verdicts as stale", () => {
+    // 2026-09-11: "unknown" used to render as a neutral chip while the
+    // serving backend was two days behind checkout main.
+    expect(codeFreshnessStale("current")).toBe(false);
+    expect(codeFreshnessStale("unknown")).toBe(false);
+    expect(codeFreshnessStale(undefined)).toBe(false);
+    expect(codeFreshnessStale(null)).toBe(false);
+  });
 });

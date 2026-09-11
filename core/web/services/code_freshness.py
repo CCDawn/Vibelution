@@ -249,17 +249,60 @@ def _parse_behind_count(value: str) -> int | None:
     return parsed if parsed >= 0 else None
 
 
+def fallback_snapshot_from_serving_metadata(serving_metadata: Any) -> dict[str, Any] | None:
+    """Map the startup-pinned ``app.state.serving_metadata`` backend identity
+    into a fingerprint-shaped snapshot.
+
+    The fingerprint file is the primary freshness input, but its write is
+    best-effort (storage fail-closed, migration races, legacy processes), so a
+    missing file used to silently downgrade the whole verdict to ``unknown``
+    and the UI showed nothing (2026-09-11 SCI-049 incident).  The pinned
+    serving metadata in ``app.state`` is the authoritative immutable snapshot
+    of the code this process mounted, so it is a safe same-event fallback.
+    """
+
+    backend = serving_metadata.get("backend") if isinstance(serving_metadata, dict) else None
+    if not isinstance(backend, dict):
+        return None
+    head = str(backend.get("head") or "").strip()
+    digest = str(backend.get("dirtyTreeDigest") or "").strip()
+    if not head or not digest:
+        return None
+    try:
+        pid = int(backend.get("pid") or 0)
+    except (TypeError, ValueError):
+        pid = 0
+    return {
+        "runningHead": head,
+        "runningBranch": "",
+        "dirty": bool(backend.get("dirty")),
+        "dirtyTreeDigest": digest,
+        "pid": pid,
+        "createTime": backend.get("createTime"),
+        "executable": str(backend.get("executable") or ""),
+        "startedAt": str(backend.get("startedAt") or ""),
+        "source": "serving_metadata_fallback",
+    }
+
+
 def resolve_backend_freshness(
     *,
     project_root: Path | str,
+    fallback_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compare the running snapshot with the current disk HEAD.
 
     Pure decision inputs keep this function unit-testable; git reads are the
     only side effect and they never lock (GIT_OPTIONAL_LOCKS=0).
+    ``fallback_snapshot`` (from the startup-pinned serving metadata) keeps the
+    verdict decidable when the on-disk fingerprint file is missing or unreadable.
     """
     root = Path(project_root)
     running = read_running_code_fingerprint(root)
+    snapshot_source = "fingerprint_file"
+    if running is None and isinstance(fallback_snapshot, dict) and fallback_snapshot:
+        running = fallback_snapshot
+        snapshot_source = str(fallback_snapshot.get("source") or "serving_metadata_fallback")
     disk_head = _capture_git_text(root, ["rev-parse", "HEAD"])
     disk_branch = _capture_git_text(root, ["branch", "--show-current"])
     disk_dirty = _dirty_tree_summary(root)
@@ -306,6 +349,7 @@ def resolve_backend_freshness(
     return {
         "available": True,
         "reason": "",
+        "source": snapshot_source,
         "behind": running_head != disk_head or dirty_differs,
         "behindCount": behind_count,
         "running": {
@@ -390,26 +434,45 @@ def resolve_frontend_freshness(*, project_root: Path | str) -> dict[str, Any]:
     }
 
 
-def resolve_code_freshness(*, project_root: Path | str) -> dict[str, Any]:
-    """Combine backend + frontend freshness into one verdict for the UI."""
-    backend = resolve_backend_freshness(project_root=project_root)
+def resolve_code_freshness(
+    *,
+    project_root: Path | str,
+    fallback_snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Combine backend + frontend freshness into one verdict for the UI.
+
+    A behind verdict is never suppressed by the other panel being unknown:
+    before the 2026-09-11 fix, a missing backend fingerprint forced the whole
+    verdict to ``unknown`` even when the frontend panel independently proved
+    the serving build was behind, and the UI rendered ``unknown`` as a neutral
+    chip with no stale warning at all.
+    """
+    backend = resolve_backend_freshness(
+        project_root=project_root,
+        fallback_snapshot=fallback_snapshot,
+    )
     frontend = resolve_frontend_freshness(project_root=project_root)
 
     backend_behind = bool(backend.get("behind"))
-    frontend_stale = bool(frontend.get("stale"))
     backend_available = bool(backend.get("available"))
     frontend_available = bool(frontend.get("available"))
+    frontend_stale_raw = bool(frontend.get("stale"))
+    # Only a confirmed frontend verdict may drive the combined verdict; an
+    # unavailable frontend panel (e.g. serving_metadata_missing) reports
+    # stale=True as "cannot confirm", not as proven behind. The response keeps
+    # the raw stale flag so callers can distinguish the two.
+    frontend_stale = frontend_available and frontend_stale_raw
 
-    if not backend_available or not frontend_available:
-        verdict = "unknown"
-    elif backend_behind and frontend_stale:
+    if backend_behind and frontend_stale:
         verdict = "backend_and_frontend_behind"
     elif backend_behind:
         verdict = "backend_behind"
     elif frontend_stale:
         verdict = "frontend_behind"
-    else:
+    elif backend_available and frontend_available:
         verdict = "current"
+    else:
+        verdict = "unknown"
 
     return {
         "schemaVersion": FINGERPRINT_SCHEMA_VERSION,
@@ -419,12 +482,13 @@ def resolve_code_freshness(*, project_root: Path | str) -> dict[str, Any]:
             "behind": backend_behind,
             "behindCount": backend.get("behindCount"),
             "reason": backend.get("reason") or "",
+            "source": backend.get("source") or "",
             "running": backend.get("running"),
             "disk": backend.get("disk"),
         },
         "frontend": {
             "available": frontend_available,
-            "stale": frontend_stale,
+            "stale": frontend_stale_raw,
             "reason": frontend.get("reason") or "",
             "builtFromCommit": _short_sha(str(frontend.get("builtFromCommit") or "")),
             "frontendTree": str(frontend.get("frontendTree") or ""),
