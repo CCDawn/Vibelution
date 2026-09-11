@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import type { AgentInstance } from "../api/types";
+import type { AgentInstance, ConversationSummary, Team } from "../api/types";
 import {
   agentDirectorySessionCount,
   AgentConversationDirectory,
@@ -33,6 +33,52 @@ function agent(overrides: Partial<AgentInstance> = {}): AgentInstance {
     metadata: { conversationIndexKind: "personal_agent" },
     createdAt: "2026-07-21T00:00:00Z",
     updatedAt: "2026-07-21T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function team(overrides: Partial<Team> = {}): Team {
+  return {
+    teamId: "team-1",
+    name: "SCI-009 科研团队",
+    description: "",
+    purpose: "科研",
+    status: "active",
+    teamKind: "research",
+    teamCategory: "research",
+    teamSource: "manual",
+    members: [],
+    memberCount: 0,
+    linkedChatRoomId: "room-linked",
+    linkedChatRoom: {
+      roomId: "room-linked",
+      title: "SCI-009 科研团队 团队群聊",
+      status: "active",
+      mode: "group",
+      purpose: "team",
+      participantCount: 2,
+      updatedAt: "2026-09-11T09:00:00Z",
+    },
+    canvasPath: "",
+    createdAt: "2026-07-01T00:00:00Z",
+    updatedAt: "2026-09-11T09:00:00Z",
+    canvas: { path: "", nodeCount: 0, edgeCount: 0 },
+    ...overrides,
+  };
+}
+
+function room(overrides: Partial<ConversationSummary> = {}): ConversationSummary {
+  return {
+    conversationId: "room-1",
+    roomId: "room-1",
+    type: "group_room",
+    teamId: "team-1",
+    teamName: "SCI-009 科研团队",
+    title: "SCI-009 | 候选评审 | sci-009-abc",
+    status: "ready",
+    summary: "",
+    updatedAt: "2026-09-10T12:00:00Z",
+    workspacePath: "",
     ...overrides,
   };
 }
@@ -116,6 +162,31 @@ describe("AgentConversationDirectory", () => {
     expect(directorySource).toContain('displayTitle={lang === "zh" ? "团队群聊" : "Team chat"}');
     expect(directorySource).toContain("onOpenGroupRoom");
     expect(directorySource).toContain("teams = []");
+  });
+
+  it("folds a team's past group rooms under its block and keeps the linked room separate", () => {
+    const html = renderToStaticMarkup(<AgentConversationDirectory
+      activeAgentId="" agents={[agent()]} avatarInitials={() => "A"}
+      filterText="SCI-009" formatTime={() => "12:00"} lang="zh" resolveModelLabel={() => "GPT"}
+      sessions={[]} statusLabel={(value) => value}
+      teams={[team()]}
+      teamRoomsByTeamId={new Map([["team-1", [
+        room({ roomId: "room-linked", title: "SCI-009 科研团队 团队群聊" }),
+        room({ roomId: "room-sci-009", title: "SCI-009 | 候选评审 | sci-009-abc" }),
+      ]]])}
+      onContextMenu={() => undefined} onOpenAgent={() => undefined}
+    />);
+
+    expect(html).toContain("历史群聊");
+    expect(html).toContain('title="1 个历史群聊"');
+    expect(html).toContain("候选评审");
+  });
+
+  it("sources the team room history fold from the workbench room map", () => {
+    expect(directorySource).toContain("buildAgentDirectoryTeamRoomHistoryGroups");
+    expect(directorySource).toContain("teamRoomsByTeamId");
+    expect(directorySource).toContain('lang === "zh" ? "历史群聊" : "Chat history"');
+    expect(directorySource).toContain("GroupConversationIndexItem");
   });
 
   it("counts an active hidden direct session without double-counting a visible summary", () => {

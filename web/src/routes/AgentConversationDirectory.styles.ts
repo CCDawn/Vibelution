@@ -8,6 +8,10 @@ const styles = {
     "agentSection grid min-w-0 gap-0.5 [&>button]:min-h-10 [&>button]:font-medium [&>button]:!text-vui-fg-secondary [&>button]:[font-size:var(--vui-font-xs)] [&>div]:gap-0.5 [&>div]:pl-0",
   agentDirectoryList:
     "agentDirectoryList grid min-w-0 gap-0.5",
+  agentRoomHistory:
+    "agentRoomHistory grid min-w-0 gap-0.5 pl-1 [&>button]:min-h-8 [&>button]:font-medium [&>button]:[font-size:var(--vui-font-xs)] [&>div]:gap-0.5 [&>div]:pl-0",
+  agentRoomHistoryTopic:
+    "agentRoomHistoryTopic grid min-w-0 gap-0.5 [&>button]:min-h-7 [&>button]:font-normal [&>button]:[font-size:var(--vui-font-2xs)] [&>div]:gap-0.5 [&>div]:pl-1",
   // surface-role: hover-fill — the trailing count and activity stay on the row mid-line.
   agentRow:
     "agentRow !grid !h-auto !min-h-[54px] !w-full min-w-0 max-w-full " +

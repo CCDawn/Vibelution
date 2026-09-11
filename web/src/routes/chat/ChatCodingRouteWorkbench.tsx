@@ -115,6 +115,7 @@ import { AgentSessionTabStrip, type CliAgentRunTab } from "../AgentSessionTabStr
 import {
   AgentConversationDirectory,
 } from "../AgentConversationDirectory";
+import { directoryTeamBlockIds } from "../agentConversationDirectoryModel";
 import { ConversationIndexTree } from "../ConversationIndexTree";
 import { teamWorkspaceRoute } from "../teams/researchWorkspaceModel";
 import {
@@ -2430,6 +2431,7 @@ export function ChatCodingRouteWorkbench() {
     sessionsById,
     teams,
   });
+  const directoryTeamIds = useMemo(() => directoryTeamBlockIds(teams), [teams]);
   const {
     groupedGroupConversations,
     groupedGroupConversationCount,
@@ -2440,10 +2442,23 @@ export function ChatCodingRouteWorkbench() {
     sessionIndexProgressVisible,
   } = useChatSessionIndexRailModel({
     groupedConversations,
+    directoryTeamIds,
     rawSessionsQuery: toSessionIndexProgressQuerySlice(rawSessionsQuery),
     lang,
     numberFormatter,
   });
+  const teamRoomsByTeamId = useMemo(() => {
+    const roomsByTeamId = new Map<string, ConversationSummary[]>();
+    for (const conversation of conversationsQuery.data ?? []) {
+      if (String(conversation.type || "").trim() !== "group_room") continue;
+      const teamId = String(conversation.teamId || "").trim();
+      if (!teamId) continue;
+      const rooms = roomsByTeamId.get(teamId) ?? [];
+      rooms.push(conversation);
+      roomsByTeamId.set(teamId, rooms);
+    }
+    return roomsByTeamId;
+  }, [conversationsQuery.data]);
   const {
     selectedBulkSessionIds,
     selectedBulkSessions,
@@ -2667,6 +2682,7 @@ export function ChatCodingRouteWorkbench() {
             sessionIdsNeedingApproval={sessionIdsNeedingApproval}
             statusLabel={statusLabel}
             teams={teams}
+            teamRoomsByTeamId={teamRoomsByTeamId}
             onContextMenu={openAgentContextMenu}
             onOpenAgent={(agent) => {
               if (!handleOpenAgent(agent)) {
