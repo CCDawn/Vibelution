@@ -44,6 +44,7 @@ import glob as glob_module
 import re
 import time
 import threading
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, List
@@ -56,7 +57,6 @@ import locale
 import platform
 
 from core.infrastructure.event_bus import get_event_bus, EventNames
-from core.infrastructure.security import get_security_validator
 from core.logging import debug as _debug_logger
 # ============================================================================
 # 文件 Glob 搜索
@@ -1031,6 +1031,142 @@ def _get_allowed_root_dirs() -> list[Path]:
     return unique
 
 
+_PROJECT_STORAGE_ROOTS_CACHE: dict[str, list[Path]] = {}
+
+
+def _project_storage_roots() -> list[Path]:
+    """本项目自有的运行态存储根（checkout 之外，但归属本项目，不是任意系统路径）。
+
+    工具会读写这些位置（workspace / 日志 / 缓存 / 运行态），所以它们是合法根；
+    其他项目或任意系统目录不在此列。
+    """
+    cached = _PROJECT_STORAGE_ROOTS_CACHE.get(str(PROJECT_ROOT))
+    if cached is not None:
+        return list(cached)
+    roots: list[Path] = []
+    try:
+        from vibelution_storage import (
+            resolve_project_cache_home,
+            resolve_project_logs_home,
+            resolve_project_memory_home,
+            resolve_project_runtime_home,
+            resolve_project_workspace_home,
+        )
+
+        for resolver in (
+            resolve_project_workspace_home,
+            resolve_project_data_home,
+            resolve_project_runtime_home,
+            resolve_project_logs_home,
+            resolve_project_memory_home,
+            resolve_project_cache_home,
+        ):
+            try:
+                roots.append(Path(resolver(PROJECT_ROOT)).resolve())
+            except Exception:
+                continue
+    except Exception:
+        roots = []
+    _PROJECT_STORAGE_ROOTS_CACHE[str(PROJECT_ROOT)] = list(roots)
+    return roots
+
+
+def _configured_allowed_directories() -> list[Path]:
+    """Operator 在 config 里显式允许的目录（`security.allowed_directories`）。
+
+    刻意不读 `tools.allowed_directories`：它的默认值包含整个用户主目录，
+    用作工具边界会把主目录下的凭据目录一起放行。
+    """
+    try:
+        from config import get_config
+
+        configured = list(getattr(get_config().security, "allowed_directories", []) or [])
+    except Exception:
+        return []
+    roots: list[Path] = []
+    for entry in configured:
+        text = str(entry or "").strip()
+        if not text:
+            continue
+        try:
+            roots.append(Path(text).expanduser().resolve())
+        except (OSError, ValueError):
+            continue
+    return roots
+
+
+def _runner_temp_roots() -> list[Path]:
+    """临时根：系统 temp，以及测试运行器声明的 basetemp 根。"""
+    roots: list[Path] = []
+    candidates = [tempfile.gettempdir(), os.environ.get("PYTEST_DEBUG_TEMPROOT")]
+    for candidate in candidates:
+        text = str(candidate or "").strip()
+        if not text:
+            continue
+        try:
+            roots.append(Path(text).resolve())
+        except (OSError, ValueError):
+            continue
+    return roots
+
+
+def _tool_path_roots() -> list[Path]:
+    """Agent 文件工具的允许根集合（项目 / 工作区 / 本项目存储 / 临时 / 显式配置）。"""
+    roots = [
+        *_get_allowed_root_dirs(),
+        *_project_storage_roots(),
+        *_runner_temp_roots(),
+        *_configured_allowed_directories(),
+    ]
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        try:
+            normalized = root.resolve()
+        except (OSError, ValueError):
+            continue
+        key = str(normalized).rstrip("\\/") or str(normalized)
+        if key and key not in seen:
+            seen.add(key)
+            unique.append(normalized)
+    # 子目录已被父根覆盖时不再单列，报错信息与判定都更稳定。
+    return [
+        root
+        for root in unique
+        if not any(other != root and _path_is_within(root, other) for other in unique)
+    ]
+
+
+def _path_boundary_message(path_str: str | Path, *, operation: str) -> str:
+    """越界时的可操作说明：列出允许根，并说明如何显式扩展边界。"""
+    roots = ", ".join(str(root) for root in _tool_path_roots())
+    return (
+        f"操作路径不在允许范围内（{operation}）：{path_str}；"
+        f"允许的根目录：{roots}；"
+        "如需扩展请在 config 的 security.allowed_directories 中添加目录，"
+        "或为该 Agent 开启 danger_full_access 沙箱模式。"
+    )
+
+
+def _is_path_allowed(file_path: str) -> bool:
+    """路径是否落在允许根内。
+
+    显式绝对路径不再一律放行：那让写入工具完全绕过工作区边界
+    （任意绝对路径都可读写）。需要跨边界时用 `security.allowed_directories`
+    或 danger_full_access 显式开启。
+    """
+    if _agent_has_danger_full_access():
+        return True
+    try:
+        resolved = Path(file_path).resolve()
+    except (OSError, ValueError):
+        return False
+    for allowed_dir in _tool_path_roots():
+        if _path_is_within(resolved, allowed_dir):
+            return True
+    return False
+
+
 def _resolve_tool_path(path_str: str, *, base_dir: Optional[Path] = None) -> Path:
     """将用户路径稳定解析到固定基准目录，而不是当前 cwd。"""
     raw = Path(path_str)
@@ -1147,24 +1283,6 @@ def _is_command_dangerous(command: str) -> tuple[bool, str]:
     except Exception as e:
         from core.logging import debug as _debug_logger; _debug_logger.warning(f"Security module load failed: {e}")
     return False, ""
-
-
-def _is_path_allowed(file_path: str) -> bool:
-    """检查路径是否在允许范围内"""
-    abs_path = Path(file_path).resolve()
-    for allowed_dir in _get_allowed_root_dirs():
-        try:
-            if abs_path.is_relative_to(allowed_dir):
-                return True
-        except AttributeError:
-            if str(abs_path).startswith(str(allowed_dir)):
-                return True
-        except Exception:
-            continue
-    if Path(file_path).is_absolute():
-        # 显式绝对路径保留可访问能力，避免受控测试/临时目录行为突变。
-        return True
-    return False
 
 
 def _resolve_project_path(path_str: str) -> Path:
@@ -1576,7 +1694,7 @@ def read_file(
         return f"[文件读取] 错误: 无效的路径格式 - {file_path}"
 
     if not _is_path_allowed(str(abs_path)):
-        return f"[文件读取] 错误: 路径超出允许范围 - {abs_path}"
+        return "[文件读取] 错误: " + _path_boundary_message(abs_path, operation="读取文件")
 
     if not _is_path_safe(str(abs_path)):
         return f"[文件读取] 错误: 禁止读取敏感文件 - {abs_path.name}"
@@ -1713,7 +1831,7 @@ def list_directory(
         return json.dumps({"status": "error", "code": "INVALID_PATH", "message": f"无效的路径格式 - {path}"}, ensure_ascii=False)
 
     if not _is_path_allowed(str(abs_path)):
-        return json.dumps({"status": "error", "code": "PATH_NOT_ALLOWED", "message": f"路径超出允许范围 - {abs_path}"}, ensure_ascii=False)
+        return json.dumps({"status": "error", "code": "PATH_NOT_ALLOWED", "message": _path_boundary_message(abs_path, operation="列出目录")}, ensure_ascii=False)
 
     if not abs_path.exists():
         return json.dumps({"status": "error", "code": "PATH_NOT_EXISTS", "message": f"路径不存在 - {abs_path}"}, ensure_ascii=False)
@@ -1837,15 +1955,13 @@ def create_file(
 
     existed_before = os.path.exists(abs_path)
 
-    # PathSandbox 校验：确保文件在项目目录内
-    try:
-        sandbox = get_security_validator()
-        sandbox_path = sandbox.path_sandbox
-        is_valid, err_msg = sandbox_path.validate_path(abs_path, operation="write")
-        if not is_valid and not original_is_absolute and not _is_path_allowed(abs_path):
-            return f"[创建文件] [SECURITY] {err_msg}"
-    except Exception:
-        pass  # 安全校验器不可用时降级放行
+    # 边界校验对相对与绝对输入一视同仁：以往绝对路径直接跳过校验，
+    # 于是 write_file_tool 可以覆盖任意系统路径。
+    # 这里取代了原先的 PathSandbox 调用：PathSandbox 只认项目根，而本工具的
+    # 合法写入目标（实例 workspace / 运行态存储）本就在项目根之外，它此前靠
+    # “绝对路径一律放行”才没有拦住正常写入；边界规则现在只有这一个权威来源。
+    if not _is_path_allowed(abs_path):
+        return "[创建文件] [SECURITY] " + _path_boundary_message(abs_path, operation="创建/覆盖文件")
 
     # 确保目录存在
     parent_dir = os.path.dirname(abs_path)
@@ -1913,6 +2029,10 @@ def edit_file(
         abs_path = Path(file_path).resolve()
     except Exception as e:
         return f"[文件编辑] 错误: 无效的路径 - {e}"
+
+    # 编辑同样受边界约束（此前 edit_file 完全没有包含性检查）。
+    if not _is_path_allowed(str(abs_path)):
+        return "[文件编辑] [SECURITY] " + _path_boundary_message(abs_path, operation="编辑文件")
 
     if not abs_path.exists():
         return f"[文件编辑] 错误: 文件不存在 - {abs_path}"

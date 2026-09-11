@@ -7,6 +7,7 @@
 | [domain.md](domain.md) | 领域词汇 |
 | [worktree-collaboration.md](worktree-collaboration.md) | Worktree / claim / 多 Agent 合并 |
 | [tool-authorization-entrypoints.md](tool-authorization-entrypoints.md) | 工具授权入口 |
+| [tool-path-boundary.md](tool-path-boundary.md) | Agent 文件工具路径边界：允许根、放宽方式与守卫 |
 | [mcp-managed-agent-gateway.md](mcp-managed-agent-gateway.md) | 外部 Agent MCP 部署、自动发现、显式审批与调用操作指南 |
 | [project-operation-catalog.md](project-operation-catalog.md) | 项目操作目录：后端 API 盘点、访问类、检索卡片与安全生命周期语义 |
 | [knowledge-steward-workflow.md](knowledge-steward-workflow.md) | 知识库管理员固定流程：角色 MD 入口、版本更新、权限边界及场景走查 |
