@@ -280,6 +280,8 @@ type Copy = {
   memoryCount: string;
   groupHasMemory: string;
   groupNoMemory: string;
+  expandGroup: string;
+  collapseGroup: string;
   groupChat: string;
   groupResearch: string;
   groupSelfEvolution: string;
@@ -807,6 +809,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     memoryCount: "条记忆",
     groupHasMemory: "有记忆",
     groupNoMemory: "暂无记忆",
+    expandGroup: "展开",
+    collapseGroup: "收起",
     groupChat: "对话",
     groupResearch: "研究",
     groupSelfEvolution: "自进化",
@@ -1230,6 +1234,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     memoryCount: "memories",
     groupHasMemory: "Has memory",
     groupNoMemory: "No memory yet",
+    expandGroup: "Expand",
+    collapseGroup: "Collapse",
     groupChat: "Chat",
     groupResearch: "Research",
     groupSelfEvolution: "Self-evolution",
@@ -3774,6 +3780,8 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
         noContent: copy.noContent,
         searchPlaceholder: copy.searchTeam,
         ungrouped: copy.groupTeamFallback,
+        expandGroup: copy.expandGroup,
+        collapseGroup: copy.collapseGroup,
       }}
       searchText={searchText}
       onSearchTextChange={setSearchText}
@@ -3844,6 +3852,8 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
           noContent: copy.noContent,
           searchPlaceholder: copy.searchLibrary,
           ungrouped: copy.groupLibrary,
+          expandGroup: copy.expandGroup,
+          collapseGroup: copy.collapseGroup,
         }}
         searchText={searchText}
         onSearchTextChange={setSearchText}
