@@ -1681,6 +1681,60 @@ def test_verify_manifest_rejects_non_ancestor_validated_main(
     assert result.outcome == "stale_main"
 
 
+def test_verify_manifest_reuses_evidence_across_disjoint_rebase(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rebase onto an unrelated main keeps validation evidence usable."""
+
+    manifest = create_passed_manifest(git_repo, monkeypatch)
+    task_head = git(git_repo, "rev-parse", "HEAD").stdout.strip()
+
+    git(git_repo, "switch", "main")
+    commit_file(git_repo, "README.md", "unrelated\n", "unrelated main change")
+    git(git_repo, "switch", "codex/test-task")
+    git(git_repo, "rebase", "main")
+
+    rebased_head = git(git_repo, "rev-parse", "HEAD").stdout.strip()
+    assert rebased_head != task_head
+
+    result = gate.verify_manifest(manifest, git_repo, "main")
+
+    assert result.outcome == "passed"
+
+
+def test_verify_manifest_rejects_head_content_change(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Editing the validated file after the run must force re-validation."""
+
+    manifest = create_passed_manifest(git_repo, monkeypatch)
+    commit_file(git_repo, "docs/note.md", "edited after validation\n", "edit note")
+
+    result = gate.verify_manifest(manifest, git_repo, "main")
+
+    assert result.outcome == "head_moved"
+
+
+def test_verify_manifest_rejects_main_advance_touching_gate_definition(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Evidence collected under a different gate contract is not reusable."""
+
+    manifest = create_passed_manifest(git_repo, monkeypatch)
+
+    git(git_repo, "switch", "main")
+    commit_file(git_repo, "tests/select_tests.py", "# changed gate input\n", "gate input change")
+    git(git_repo, "switch", "codex/test-task")
+    git(git_repo, "rebase", "main")
+
+    result = gate.verify_manifest(manifest, git_repo, "main")
+
+    assert result.outcome == "stale_main"
+
+
 def test_closeout_detects_main_moving_during_commands(
     git_repo: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1797,10 +1851,18 @@ def test_closeout_rejects_clean_diverged_history_even_when_merge_tree_passes(
     assert manifest["checks"]["mergePreflight"] is False
 
 
-def test_closeout_reports_stale_main_when_main_moves_during_merge_tree_preflight(
+def test_closeout_keeps_evidence_when_main_moves_during_merge_tree_preflight(
     git_repo: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """An unrelated merge on main must not throw away a finished validation.
+
+    Validation takes minutes while other sessions merge into main.  When the
+    delta leaves this task's paths alone, the collected evidence still describes
+    the validated content, so the run keeps it and mergeability is decided at
+    verification time (which requires the branch to contain current main).
+    """
+
     git(git_repo, "branch", "-M", "main")
     git(git_repo, "switch", "-c", "codex/test-task")
     commit_file(git_repo, "task.txt", "task\n", "task side")
@@ -1841,8 +1903,16 @@ def test_closeout_reports_stale_main_when_main_moves_during_merge_tree_preflight
     assert result.manifest_path is not None
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
     assert merge_bases == [validated_main_sha]
-    assert result.outcome == "stale_main"
-    assert manifest["outcome"] == "stale_main"
+    assert result.outcome == "passed"
+    assert manifest["outcome"] == "passed"
+    # The evidence is recorded against the main it actually ran on.
+    assert manifest["validatedMainSha"] == validated_main_sha
+    # It is not mergeable yet: the branch must contain current main first, so
+    # verification still rejects the un-rebased branch.
+    assert gate.verify_manifest(result.manifest_path, git_repo, "main").outcome == "stale_main"
+    # Rebasing onto current main (the delta is disjoint) keeps the evidence.
+    git(git_repo, "rebase", "main")
+    assert gate.verify_manifest(result.manifest_path, git_repo, "main").outcome == "passed"
 
 
 def test_closeout_reports_stale_main_when_main_moves_during_ancestry_preflight(

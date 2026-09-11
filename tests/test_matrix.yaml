@@ -206,6 +206,31 @@ rules:
       - "The plugin remains isolated by agentId binding; this batch owns its domain, proactive receipt, API, and tool authorization contracts."
       - "The runtime-extension contract also proves ordinary Agent/Session cores do not import or name this concrete plugin."
 
+  - id: chat-turn-journal
+    description: "Durable turn journal: append/rewrite guards, ledger projection, and session transcript contracts."
+    executionLayers:
+      - "focused"
+      - "local-parallel"
+    paths:
+      - "core/chat/turn_journal.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_turn_journal.py tests/test_turn_journal_splice.py tests/test_turn_journal_perf.py tests/test_session_turn_journal.py tests/test_session_journal_bridge.py tests/test_conversation_invariant.py tests/test_conversation_ledger.py tests/test_model_messages.py tests/test_clear_chat_journal_state_script.py tests/test_session_detail_contract.py -q"
+    notes:
+      - "Owns the journal contract directly instead of falling back to the import frontier, which reached 23 files and pulled multi-minute unrelated batches."
+      - "Covers the post-terminal write guard, splice/rewrite, sequence integrity, and the session transcript projection that consumes journal events."
+
+  - id: runtime-scene-diagnosis
+    description: "Runtime scene package diagnosis, issue clusters, and the agent-facing brief."
+    executionLayers:
+      - "focused"
+      - "local-parallel"
+    paths:
+      - "core/web/services/runtime_scene/diagnosis.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_runtime_scene_package_diagnosis.py tests/test_runtime_scene_package_index.py tests/test_runtime_scene_structure_packs.py -q"
+    notes:
+      - "The agent brief and issueState share this module; the package index consumes the brief, so both are asserted together."
+
   - id: web-session-chat
     description: "Direct chat, session routes, and room service/route behavior."
     executionLayers:

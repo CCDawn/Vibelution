@@ -51,6 +51,8 @@ Set-Location "<ROOT_MAIN>"
 .\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --manifest "<MANIFEST_PATH>"
 # 仅 stale_main：同步/提交最新 main 后，携带返回的一次性 token 做一次 reserve retry
 .\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --reserve-integration --stale-retry-token "<TOKEN_PATH>"
+# head_moved：验证后任务内容变了（amend 或 rebase 未重现同一内容），证据作废且无可复用；直接重跑一次 closeout
+.\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>"
 # merged_cleanup_pending 表示已合入，只补清理，不验证/不 merge
 .\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --branch "codex/<TASK>" --agent-id "<AGENT_ID>" --cleanup-only
 
@@ -73,6 +75,18 @@ powershell -NoProfile -File .\scripts\doctor.ps1
 # Launcher
 # %LOCALAPPDATA%\Vibelution\Launcher\VibelutionLauncher.exe --project "<ROOT>" start|stop|restart
 ```
+
+### 证据复用规则（避免无意义重跑）
+
+验证要花几分钟，而 main 可能在此期间被其它会话推进。manifest 因此绑定**内容**而不是绑定某一时刻的 SHA：
+
+- **head 侧**：绑定改动文件的 blob 指纹。rebase 改写提交但重放同一补丁时指纹不变，证据继续有效；amend 或再编辑会改变指纹 → `head_moved`，必须重跑。
+- **main 侧**：main 前进且没有触碰**验证面**（任务自身改动文件 ∪ 门禁定义文件，见 `validation_surface`）时证据继续有效；main 被改写（已验 SHA 不再是当前 main 的祖先）或触碰验证面 → `stale_main`。
+- **可合入性**：复用还要求分支已包含当前 main——ff-only 本来就需要这个条件。因此未 rebase 的分支会被判 `stale_main`，**rebase 到当前 main 后再收口即可复用证据，不必重跑测试**。
+
+代价边界：main 的无关改动仍可能改到共享测试夹具；此时复用属于有界权衡（被验证内容逐字节相同、main 增量与验证面不相交），CI 与下一次集成仍兜底。
+
+入口分工：`scripts/local_quality_gate.py` 只做度量（验证 + 写 manifest），`scripts/task_closeout.py` 是唯一的集成入口（校验 → 租约 → ff-only 合入 → 清理）。不要用 gate 的 closeout 子命令代替集成。
 
 Config 真源：`%USERPROFILE%\Documents\Vibelution\config\config.toml`
 Override：`VIBELUTION_CONFIG_PATH` / `VIBELUTION_CONFIG_HOME`
