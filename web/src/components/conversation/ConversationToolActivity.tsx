@@ -171,6 +171,8 @@ function buildToolActivityPills(
     cellSummary,
     resultPreview: toolCall?.resultPreview || cell.text,
     displayCommand,
+    // Names the target while the tool runs, before any result can be summarized.
+    toolArguments: cell.toolArguments ?? toolCall?.arguments,
     timedOut: cellLooksTimedOut(cell) || Boolean(terminal?.result?.timedOut),
     noMatch: Boolean(options?.noMatch),
     nonzeroExit,

@@ -3,6 +3,7 @@ import type {
   ConversationMessage,
   SessionTurnItem,
 } from "../api/types/chat";
+import { parseToolCallInput } from "../api/toolCallInput";
 
 /** The transport label is retained; the render protocol is now only TurnItems. */
 export type ChatTurnRenderProtocol = "turn_items" | "empty";
@@ -204,6 +205,10 @@ export function codexTranscriptFromTurnItems(
         title: item.toolName,
         text: item.output,
         summary: item.summary,
+        // The canonical input is what can name a *running* tool's target; output
+        // and summary stay empty until it finishes, which left the row showing a
+        // bare action label with nothing to identify the file or query.
+        toolArguments: parseToolCallInput(item.input),
       }];
     }
     if (item.type === "retry") {

@@ -490,6 +490,8 @@ export type CodexTranscriptCell = {
   operationIds?: string[];
   rolloutTraceEvents?: CodexRolloutTraceEvent[];
   toolLifecycleModel?: CodexToolLifecycleModel;
+  /** Canonical tool input; names what a running tool is working on. */
+  toolArguments?: Record<string, unknown>;
   sourceItemId?: string;
 };
 

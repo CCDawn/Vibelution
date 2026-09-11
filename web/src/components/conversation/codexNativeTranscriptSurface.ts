@@ -197,6 +197,7 @@ export function codexNativeTranscriptToCells(
           operationIds,
           rolloutTraceEvents: cellRolloutEvents,
           toolLifecycleModel: cellLifecycleModel,
+          toolArguments: cell.toolArguments,
           sourceItemId: cell.sourceItemId,
         };
       })
