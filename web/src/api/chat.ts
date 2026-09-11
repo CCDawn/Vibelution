@@ -242,7 +242,7 @@ export function fetchSessionLlmOptions(sessionId: string): Promise<SessionLlmOpt
 export type SessionPromptSuggestionResponse = {
   sessionId: string;
   turnId: string;
-  suggestion: string;
+  suggestion: string | null;
   reason?: string;
 };
 
