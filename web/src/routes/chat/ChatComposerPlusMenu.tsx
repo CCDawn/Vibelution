@@ -8,6 +8,7 @@ import {
   MessageSquare,
   Plus,
   Settings2,
+  Sparkles,
   UsersRound,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
@@ -33,9 +34,11 @@ export type ChatComposerPlusMenuProps = {
   onAddSessionReference?: (reference: SessionReferenceAttachment) => void;
   mentalModelEnabled: boolean;
   runtimeStatusEnabled: boolean;
+  promptSuggestionEnabled: boolean;
   capabilityDisabled: boolean;
   onMentalModelEnabledChange: (enabled: boolean) => void;
   onRuntimeStatusEnabledChange: (enabled: boolean) => void;
+  onPromptSuggestionEnabledChange: (enabled: boolean) => void;
   directSession?: {
     id: string;
     label: string;
@@ -78,9 +81,11 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
     onAddSessionReference,
     mentalModelEnabled,
     runtimeStatusEnabled,
+    promptSuggestionEnabled,
     capabilityDisabled,
     onMentalModelEnabledChange,
     onRuntimeStatusEnabledChange,
+    onPromptSuggestionEnabledChange,
     directSession,
     group,
   } = props;
@@ -331,6 +336,15 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
                 checked: runtimeStatusEnabled,
                 disabled: capabilityDisabled,
                 onChange: onRuntimeStatusEnabledChange,
+              })}
+              {renderToggle({
+                id: "prompt-suggestion",
+                label: lang === "zh" ? "输入建议" : "Prompt suggestions",
+                hint: lang === "zh" ? "回答后提示下一句，Tab 补全" : "Suggests the next prompt after a reply, Tab to complete",
+                icon: <Sparkles size={16} />,
+                checked: promptSuggestionEnabled,
+                disabled: capabilityDisabled,
+                onChange: onPromptSuggestionEnabledChange,
               })}
             </>
           )) : null}

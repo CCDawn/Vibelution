@@ -18,6 +18,10 @@ from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 
 from core.infrastructure.llm_utils import MAX_CONSECUTIVE_FAILURES
 from core.llm import LLMError
+from core.llm.turn_request_capture import (
+    capture_turn_request,
+    record_turn_request_outcome,
+)
 from core.orchestration.agent_runtime_bindings import (
     _llm_effective_route_id,
     _llm_effective_route_identity,
@@ -446,6 +450,7 @@ def invoke_agent_llm_turn(
                     prompt_purpose="main_reply",
                     route_attempt=route_attempt,
                 )
+                capture_turn_request(llm_for_turn, clean_messages, invocation_context)
                 route_started_at = time.monotonic()
                 trace_fields = _llm_route_trace_fields(
                     invocation_context,
@@ -482,6 +487,7 @@ def invoke_agent_llm_turn(
                         **stream_kwargs,
                     )
                     outcome = hooks.canonicalize(outcome)
+                    record_turn_request_outcome(outcome)
                     _validate_structured_output_outcome(
                         outcome,
                         hooks.structured_output_contract,
@@ -507,6 +513,7 @@ def invoke_agent_llm_turn(
                     **invoke_kwargs,
                 )
                 outcome = hooks.canonicalize(outcome)
+                record_turn_request_outcome(outcome)
                 _validate_structured_output_outcome(
                     outcome,
                     hooks.structured_output_contract,
