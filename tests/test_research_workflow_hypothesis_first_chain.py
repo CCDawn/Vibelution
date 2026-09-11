@@ -9790,6 +9790,53 @@ def test_auto_adjudication_rechecks_after_frontend_scope_lock(tmp_path, monkeypa
     assert records[0]["idempotencyKey"] == "frontend-key"
 
 
+def test_scope_lock_keeps_same_question_commands_serial(tmp_path, monkeypatch):
+    """SCI-049 解耦后互斥语义不变：同题第二个命令必须等第一个退出 scope 锁
+    后才开始执行（read/re-authorize/write 窗口不重叠）。注意：进程内异题
+    命令仍会因 chain ``_LOCK`` 的命令窗口持有而排队——这是既有行为，本手术
+    只解耦 meeting_rounds；跨进程异题命令走各自 scope 锁文件互不影响。"""
+    import threading
+    import time
+
+    monkeypatch.setattr(
+        chain, "_storage_path", lambda _team_id: tmp_path / "hypothesis_first_chain.jsonl"
+    )
+    team_id = "team-scope-lock"
+    order: list[str] = []
+    first_release = threading.Event()
+    first_entered = threading.Event()
+    second_entered = threading.Event()
+
+    def _command(name: str, question_id: str, release: threading.Event | None = None) -> None:
+        with chain.hypothesis_first_scope_lock(team_id, question_id):
+            order.append(f"{name}:enter")
+            (first_entered if name == "first" else second_entered).set()
+            if release is not None:
+                release.wait(5.0)
+            order.append(f"{name}:exit")
+
+    first = threading.Thread(
+        target=_command, args=("first", _QUESTION_ID, first_release), daemon=True
+    )
+    first.start()
+    assert first_entered.wait(5.0)
+    assert order[0] == "first:enter"
+
+    second = threading.Thread(
+        target=_command, args=("second", _QUESTION_ID), daemon=True
+    )
+    second.start()
+    # 同题命令仍在 scope 锁上排队：第一个未退出前不得进入临界区。
+    time.sleep(0.3)
+    assert second.is_alive()
+    assert "second:enter" not in order
+
+    first_release.set()
+    first.join(timeout=5.0)
+    second.join(timeout=5.0)
+    assert not first.is_alive() and not second.is_alive()
+    assert order.index("first:exit") < order.index("second:enter") < order.index("second:exit")
+
 def test_hard_round_limit_env_resolution(monkeypatch):
     from core.web.services.team_workflow.research_runtime import hypothesis_first_chain as chain
 
