@@ -26,6 +26,7 @@ const IMPACT_ROWS = [
   ["collectionRequestCount", "资料搜集请求"],
   ["collectionRunCount", "资料搜集运行"],
   ["formalRunCount", "将取消的正式运行"],
+  ["archivedFormalRunCount", "将归档的正式运行"],
 ] as const;
 
 /** One-question destructive confirmation. The server remains the reset authority. */

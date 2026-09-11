@@ -3893,6 +3893,7 @@ def test_question_reset_clears_only_the_target_questions_closed_hypothesis_chain
         "collectionRequestCount": 1,
         "collectionRunCount": 0,
         "formalRunCount": 0,
+        "archivedFormalRunCount": 0,
     }
 
     result = chain.reset_question_chain(
@@ -4061,17 +4062,28 @@ class _FakeResetStore:
 
 
 class _FakeResetCommandService:
-    def __init__(self, store: _FakeResetStore, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        store: _FakeResetStore,
+        error: Exception | None = None,
+        archive_error: Exception | None = None,
+    ) -> None:
         self._store = store
         self._error = error
+        self._archive_error = archive_error
         self.requests: list[CommandRequest] = []
 
     def submit(self, request: CommandRequest) -> Any:
         self.requests.append(request)
         if self._error is not None:
             raise self._error
+        if request.command == WorkflowCommandKind.ARCHIVE_RUN and self._archive_error is not None:
+            raise self._archive_error
         run = self._store.runs[request.run_id]
-        run.status = "cancelled"
+        # Mirror the real command service: one accepted command bumps the
+        # stored run version and drives the status to that command's terminal.
+        run.run_version = int(getattr(run, "run_version", 0)) + 1
+        run.status = "archived" if request.command == WorkflowCommandKind.ARCHIVE_RUN else "cancelled"
         return SimpleNamespace(status="submitted")
 
 
@@ -4081,13 +4093,16 @@ def _install_question_reset_formal_fakes(
     *,
     run_id: str = "run-hf4-reset-blocked",
     submit_error: Exception | None = None,
+    archive_error: Exception | None = None,
 ) -> _FakeResetCommandService:
     """Patch the formal read/write access points the reset reconciliation uses."""
     store = _FakeResetStore()
     store.runs[run_id] = SimpleNamespace(
         run_id=run_id, team_id=team_id, run_version=3, status="blocked"
     )
-    command_service = _FakeResetCommandService(store, error=submit_error)
+    command_service = _FakeResetCommandService(
+        store, error=submit_error, archive_error=archive_error
+    )
     runtime = SimpleNamespace(store=store, command_service=command_service)
     monkeypatch.setattr(
         "core.web.services.team_workflow.research_runtime.formal_read_runtime.get_query_service",
@@ -4102,10 +4117,14 @@ def _install_question_reset_formal_fakes(
     return command_service
 
 
-def test_question_reset_cancels_live_formal_run_before_clearing(
+def test_question_reset_cancels_and_archives_live_formal_run_before_clearing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A surviving non-terminal run must not outlive its question's reset."""
+    """A surviving non-terminal run must not outlive its question's reset.
+
+    Cancelling alone would leave a CANCELLED leaf in the formal-run lineage
+    projection, so the reset must chain an archive for the same run.
+    """
 
     team_id, _agents = _hf_env(tmp_path, monkeypatch)
     _seed_question_reset_artifacts(team_id, _QUESTION_ID)
@@ -4116,6 +4135,7 @@ def test_question_reset_cancels_live_formal_run_before_clearing(
 
     preview = chain.preview_question_reset(team_id, _QUESTION_ID)
     assert preview["impact"]["formalRunCount"] == 1
+    assert preview["impact"]["archivedFormalRunCount"] == 1
     assert preview["canReset"] is True
 
     result = chain.reset_question_chain(
@@ -4125,14 +4145,23 @@ def test_question_reset_cancels_live_formal_run_before_clearing(
     )
 
     assert result["removed"]["formalRunCount"] == 1
-    assert len(command_service.requests) == 1
-    request = command_service.requests[0]
-    assert request.command == WorkflowCommandKind.CANCEL_RUN
-    assert request.run_id == blocked_run_id
-    assert request.team_id == team_id
-    assert request.expected_run_version == 3
-    assert request.idempotency_key == f"hf2:reset-cancel-run:{blocked_run_id}"
-    assert request.requested_by == ActorRef("system", chain.QUESTION_RESET_RUN_ACTOR_ID)
+    assert result["removed"]["archivedFormalRunCount"] == 1
+    assert len(command_service.requests) == 2
+    cancel_request, archive_request = command_service.requests
+    assert cancel_request.command == WorkflowCommandKind.CANCEL_RUN
+    assert cancel_request.run_id == blocked_run_id
+    assert cancel_request.team_id == team_id
+    assert cancel_request.expected_run_version == 3
+    assert cancel_request.idempotency_key == f"hf2:reset-cancel-run:{blocked_run_id}"
+    assert cancel_request.requested_by == ActorRef("system", chain.QUESTION_RESET_RUN_ACTOR_ID)
+    assert archive_request.command == WorkflowCommandKind.ARCHIVE_RUN
+    assert archive_request.run_id == blocked_run_id
+    assert archive_request.team_id == team_id
+    # Fresh version read after the cancel bumped it: 3 -> 4.
+    assert archive_request.expected_run_version == 4
+    assert archive_request.idempotency_key == f"hf2:reset-archive-run:{blocked_run_id}"
+    assert archive_request.payload == {"reason": "question run reset"}
+    assert archive_request.requested_by == ActorRef("system", chain.QUESTION_RESET_RUN_ACTOR_ID)
     assert chain.list_hypothesis_candidates(team_id, question_id=_QUESTION_ID)["candidates"] == []
     audit_records = [
         record
@@ -4140,6 +4169,47 @@ def test_question_reset_cancels_live_formal_run_before_clearing(
         if record.get("recordKind") == chain.QUESTION_RESET_AUDIT_KIND
     ]
     assert audit_records[-1]["cancelledFormalRunIds"] == [blocked_run_id]
+    assert audit_records[-1]["archivedFormalRunIds"] == [blocked_run_id]
+
+
+def test_question_reset_aborts_before_destructive_writes_when_archive_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refused archive after a successful cancel must still stop the reset."""
+
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    seeded = _seed_question_reset_artifacts(team_id, _QUESTION_ID)
+    command_service = _install_question_reset_formal_fakes(
+        monkeypatch,
+        team_id,
+        archive_error=RuntimeError("run not terminal"),
+    )
+
+    with pytest.raises(chain.HypothesisFirstChainError, match="收口失败"):
+        chain.reset_question_chain(
+            team_id,
+            _QUESTION_ID,
+            confirmation_question_id=_QUESTION_ID,
+        )
+
+    assert [request.command for request in command_service.requests] == [
+        WorkflowCommandKind.CANCEL_RUN,
+        WorkflowCommandKind.ARCHIVE_RUN,
+    ]
+    assert chain.list_hypothesis_candidates(team_id, question_id=_QUESTION_ID)["candidates"]
+    assert (
+        selections.list_hypothesis_selections(team_id, question_id=_QUESTION_ID)["selections"]
+    )
+    assert [item["meetingRoundId"] for item in meetings.list_meeting_rounds(team_id)["meetings"]] == [
+        seeded["meetingId"]
+    ]
+    assert [item["roundId"] for item in hrounds.list_hypothesis_rounds(team_id)["rounds"]] == [
+        seeded["roundId"]
+    ]
+    assert all(
+        record.get("recordKind") != chain.QUESTION_RESET_AUDIT_KIND
+        for record in chain._records(team_id)
+    )
 
 
 def test_question_reset_aborts_before_destructive_writes_when_cancel_fails(

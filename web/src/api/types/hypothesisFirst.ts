@@ -1017,6 +1017,8 @@ export type QuestionRunResetImpact = {
   collectionRequestCount: number;
   collectionRunCount: number;
   formalRunCount: number;
+  /** Optional: snapshots produced before reset-chained archiving omit it. */
+  archivedFormalRunCount?: number;
 };
 
 export type QuestionRunResetPreview = {

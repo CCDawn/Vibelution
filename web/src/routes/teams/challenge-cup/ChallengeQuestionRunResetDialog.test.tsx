@@ -18,6 +18,7 @@ const previewMock = vi.hoisted(() => ({
       collectionRequestCount: 1,
       collectionRunCount: 1,
       formalRunCount: 1,
+      archivedFormalRunCount: 1,
     },
   },
 }));
@@ -108,6 +109,7 @@ beforeEach(() => {
       collectionRequestCount: 1,
       collectionRunCount: 1,
       formalRunCount: 1,
+      archivedFormalRunCount: 1,
     },
   };
   apiMock.fetchQuestionRunResetPreview.mockClear();
@@ -125,6 +127,7 @@ describe("ChallengeQuestionRunResetDialog", () => {
     expect(document.body.textContent).toContain("候选假说");
     expect(document.body.textContent).toContain("资料搜集运行");
     expect(document.body.textContent).toContain("将取消的正式运行");
+    expect(document.body.textContent).toContain("将归档的正式运行");
     expect(document.body.textContent).toContain("请输入 SCI-004 以解锁重置操作。");
     expect(confirm.disabled).toBe(true);
 
