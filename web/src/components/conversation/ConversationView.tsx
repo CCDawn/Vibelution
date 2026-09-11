@@ -744,6 +744,20 @@ export function ConversationView({
     () => displayMessages.some((message) => isTurnErrorMessage(message)),
     [displayMessages],
   );
+  // A persisted turnError can outlive the answer it belongs to (provider error
+  // raised after the canonical final_answer was committed). Never duplicate the
+  // failure banner under a turn that already rendered its final answer.
+  const turnErrorSupersededByFinalAnswer = useMemo(() => {
+    const errorTurnId = String(turnError?.turnId || "").trim();
+    if (!errorTurnId) {
+      return false;
+    }
+    return displayMessages.some((message) => (
+      message.role === "assistant"
+      && String(message.turnId || "").trim() === errorTurnId
+      && Boolean(assistantFinalAnswerText(message).trim())
+    ));
+  }, [displayMessages, turnError]);
   const visibleMessageCount = resolveVisibleMessageCount({
     displayMessageCount: displayMessages.length,
     visibleLimit: visibleMessageLimit,
@@ -4484,7 +4498,7 @@ export function ConversationView({
         </div>
       ) : null}
 
-      {turnError?.message && !hasVisibleTurnErrorMessage ? (
+      {turnError?.message && !hasVisibleTurnErrorMessage && !turnErrorSupersededByFinalAnswer ? (
         <div className={styles.turnError} role="status" aria-live="polite">
           <div className={styles.turnErrorText}>
             <span className={styles.turnErrorLabel}>{t("turnErrorLabel")}</span>
