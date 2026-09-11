@@ -2158,27 +2158,6 @@ export function ChatCodingRouteWorkbench() {
       latestControlSignal.summary,
     ].filter(Boolean).join(" · ")
     : "";
-  // The control signal surfaces as a runtime notice above the conversation. It
-  // used to live only in the status rail; `warning` is the highest severity that
-  // still renders as a compact row, and the message stays bounded by the stack's
-  // own error summarizer.
-  const sessionNotices = useMemo<SessionRuntimeNotice[]>(() => {
-    if (!latestControlSignal || !latestControlSignalLine) {
-      return activeRuntimeNotices;
-    }
-    return [
-      ...activeRuntimeNotices,
-      {
-        id: `control-signal-${latestControlSignal.turnId || latestControlSignal.createdAt || latestControlSignal.kind || "latest"}`,
-        kind: "next_state_signal",
-        level: "warning",
-        message: [latestControlSignalLine, latestControlSignalSummary].filter(Boolean).join(" · "),
-        timestamp: String(latestControlSignal.createdAt ?? ""),
-        source: String(latestControlSignal.source || latestControlSignal.kind || ""),
-        turnId: latestControlSignal.turnId,
-      },
-    ];
-  }, [activeRuntimeNotices, latestControlSignal, latestControlSignalLine, latestControlSignalSummary]);
 
   const {
     handleSubmitTurn,
@@ -3234,7 +3213,7 @@ export function ChatCodingRouteWorkbench() {
               lang={lang}
               loadingSessionLabel={t("loadingSession")}
               noSessionsLabel={t("noSessionsYet")}
-              notices={sessionNotices}
+              notices={activeRuntimeNotices}
               sessionsPending={sessionsQuery.isPending}
               toolApproval={toolApproval}
               transientErrorMessage={sessionDetailErrorMessage}

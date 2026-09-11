@@ -414,11 +414,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("detail?.runtimeNotices");
     expect(routeSource).toContain(".slice(-1)");
     expect(routeSource).toContain("<ChatSessionWorkspacePanel");
-    // The stack receives runtime notices plus the aggregated control signal, which
-    // used to be a status-rail-only row.
-    expect(routeSource).toContain("notices={sessionNotices}");
-    expect(routeSource).toContain("latestControlSignalLine");
-    expect(routeSource).toContain('kind: "next_state_signal"');
+    // The stack receives only backend runtime notices; control signals stay in
+    // the conversation transcript and the compact session-state row.
+    expect(routeSource).toContain("notices={activeRuntimeNotices}");
+    expect(routeSource).not.toContain("notices={sessionNotices}");
+    expect(routeSource).not.toContain('kind: "next_state_signal"');
     expect(chatSessionWorkspacePanelSource).toContain("<ChatRuntimeNoticeStack");
     expect(chatSessionWorkspacePanelSource.indexOf("<ChatRuntimeNoticeStack")).toBeLessThan(
       chatSessionWorkspacePanelSource.indexOf("<ChatConversationComposerBridge"),
@@ -1709,7 +1709,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndTokenStatusSource).not.toContain("compression?.effectiveTokenLimit\n      ?? compression?.contextWindowLimit");
   });
 
-  it("moves recent control signals into the runtime notice stack", () => {
+  it("keeps recent control signals out of the runtime notice stack", () => {
     expect(routeSource).toContain("const activeControlSignals = useMemo<ChatNextStateSignalSummary[]>");
     expect(routeSource).toContain(
       "shouldShowNextStateSignalInConversation(signal, phase, detail?.messages ?? [])",
@@ -1721,6 +1721,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndSessionSurfaceSource).toContain("label: t(\"nextStateSignalsLabel\")");
     expect(routeAndSessionSurfaceSource).toContain("value: latestControlSignalLine");
     expect(routeAndSessionSurfaceSource).toContain("title: latestControlSignalTitle");
+    expect(routeSource).not.toContain('kind: "next_state_signal"');
+    expect(routeSource).not.toContain("control-signal-");
+    expect(routeSource).not.toContain("notices={sessionNotices}");
     expect(routeSource).not.toContain("nextStateSignals={detail.nextStateSignals ?? []}");
   });
 
