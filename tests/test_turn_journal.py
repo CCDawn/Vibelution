@@ -18,6 +18,7 @@ from core.chat.turn_journal import (
     EVENT_USER_MESSAGE,
     TurnJournalEvent,
     append_turn_event,
+    latest_turn_sequence,
     load_turn_events,
     model_messages_from_events,
     model_visible_messages_from_events,
@@ -289,6 +290,64 @@ def test_rewrite_failure_preserves_original_parseable_journal(tmp_path, monkeypa
     ]
     assert [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
     assert list(path.parent.glob("turn_journal.jsonl.*.tmp")) == []
+
+
+def test_rewrite_preserves_monotonic_sequence_watermark(tmp_path):
+    events = [
+        append_turn_event(
+            tmp_path,
+            "session-watermark",
+            "turn-1",
+            EVENT_USER_MESSAGE,
+            payload={"content": f"message-{index}"},
+        )
+        for index in range(5)
+    ]
+    assert [event.sequence for event in events] == [1, 2, 3, 4, 5]
+    path = turn_journal_path(tmp_path, "session-watermark")
+
+    rewrite_turn_events(tmp_path, "session-watermark", events[:2])
+
+    # The rewrite dropped sequences 3..5; cursors already published must stay valid.
+    assert latest_turn_sequence(tmp_path, "session-watermark") == 5
+    turn_journal._forget_sequence(path)
+    assert latest_turn_sequence(tmp_path, "session-watermark") == 5
+
+    next_event = append_turn_event(
+        tmp_path,
+        "session-watermark",
+        "turn-2",
+        EVENT_USER_MESSAGE,
+        payload={"content": "edited"},
+    )
+    assert next_event.sequence == 6
+    assert [event.sequence for event in load_turn_events(tmp_path, "session-watermark")] == [1, 2, 6]
+
+
+def test_empty_rewrite_keeps_sequence_watermark(tmp_path):
+    events = [
+        append_turn_event(
+            tmp_path,
+            "session-watermark-empty",
+            "turn-1",
+            EVENT_USER_MESSAGE,
+            payload={"content": f"message-{index}"},
+        )
+        for index in range(3)
+    ]
+    assert events[-1].sequence == 3
+
+    rewrite_turn_events(tmp_path, "session-watermark-empty", [])
+
+    assert latest_turn_sequence(tmp_path, "session-watermark-empty") == 3
+    next_event = append_turn_event(
+        tmp_path,
+        "session-watermark-empty",
+        "turn-2",
+        EVENT_USER_MESSAGE,
+        payload={"content": "after-unlink"},
+    )
+    assert next_event.sequence == 4
 
 
 def test_loading_missing_journal_has_no_filesystem_side_effect(tmp_path):
