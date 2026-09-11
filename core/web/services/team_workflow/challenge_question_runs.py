@@ -21,6 +21,8 @@ from core.research.competition.question_result_package import (
     QuestionResultPackage,
     QuestionResultPackageError,
     canonical_model_policy,
+    is_skipped_receipt_payload,
+    normalize_skipped_receipt_stage,
 )
 from core.research.competition.resources import (
     CATALOG_SHA256,
@@ -1764,6 +1766,34 @@ def _validated_model_invocation_receipt_refs(value: Any) -> dict[str, dict[str, 
         item = value.get(stage_id)
         if not isinstance(item, dict):
             return {}
+        if item.get("skipped") is True:
+            # Explicit skipped-stage marker (converged-without-revision run):
+            # the bounded locator is the identity; there is deliberately no
+            # receipt id or node run id to verify against the registry.
+            locator = item.get("evidence_locator")
+            locator_sha256 = str(item.get("evidence_locator_sha256") or "").strip().upper()
+            if (
+                str(item.get("receipt_id") or "").strip()
+                or str(item.get("node_run_id") or "").strip()
+                or not isinstance(locator, dict)
+                or not locator
+                or not re.fullmatch(r"[0-9A-F]{64}", locator_sha256)
+            ):
+                return {}
+            try:
+                expected_locator_sha256 = _receipt_locator_sha256(locator)
+            except (TypeError, ValueError):
+                return {}
+            if locator_sha256 != expected_locator_sha256:
+                return {}
+            normalized[stage_id] = {
+                "receipt_id": "",
+                "node_run_id": "",
+                "evidence_locator": deepcopy(locator),
+                "evidence_locator_sha256": locator_sha256,
+                "skipped": True,
+            }
+            continue
         receipt_id = str(item.get("receipt_id") or "").strip()
         node_run_id = str(item.get("node_run_id") or "").strip()
         locator = item.get("evidence_locator")
@@ -2236,7 +2266,11 @@ def _stage_one_selected_receipts(
 
     Registry order is the append order; the latest successful call of each
     stage is the invocation whose output the run carried forward.  Receipts
-    minted under a different model policy never qualify.
+    minted under a different model policy never qualify.  The revision slot
+    may instead carry an explicit structurally-valid skipped marker
+    (``converged_without_revision``) produced by the receipt authority from
+    the durable convergence record; generation and review receipts are never
+    skippable.
     """
 
     if not isinstance(receipts, dict):
@@ -2256,6 +2290,11 @@ def _stage_one_selected_receipts(
                 f"challenge_question_stage_one_receipts_invalid: receipt.{stage} "
                 "must be an object."
             )
+        if is_skipped_receipt_payload(receipt):
+            # Structural marker, validated by the same contract the sealed
+            # package enforces; it carries no receipt identity of its own.
+            selected[stage] = normalize_skipped_receipt_stage(stage, receipt)
+            continue
         normalized = deepcopy(dict(receipt))
         scope = (
             normalized.get("scope")
@@ -2348,8 +2387,10 @@ def _build_stage_one_question_result_package(
         "run_id": run_id,
         "input_snapshot_sha256": snapshot_sha256,
         "model_invocation_receipts": {
-            stage: _stage_one_catalog_scope_receipt(
-                selected[stage], catalog_scope
+            stage: (
+                deepcopy(selected[stage])
+                if is_skipped_receipt_payload(selected[stage])
+                else _stage_one_catalog_scope_receipt(selected[stage], catalog_scope)
             )
             for stage in REQUIRED_RECEIPT_STAGES
         },

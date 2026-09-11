@@ -2098,6 +2098,52 @@ _STAGE_ONE_RECEIPT_STATUSES = ("succeeded", "retried")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
+def _stage_one_convergence_without_revision(
+    team_id: str,
+    *,
+    question_id: str,
+    workflow_run_id: str,
+) -> dict[str, Any] | None:
+    """Prove "no revision stage ran" from the durable hypothesis-first chain.
+
+    The revision receipt is only produced when a review round actually ran a
+    revision step, so a first-round-converged run legitimately has none.  The
+    proof must come from the same durable chain facts every readiness
+    evaluator already trusts — ``hypothesis_first_chain.chain_state`` — not
+    from re-deriving artifacts: the run's convergence gate must be accepted
+    AND its rounds ledger must show exactly one completed round (any second
+    round IS the revision in the chain-driven flow).  Missing or ambiguous
+    facts return ``None`` and the caller fails closed.
+    """
+
+    from core.web.services.team_workflow.research_runtime.hypothesis_first_chain import (
+        chain_state,
+    )
+
+    try:
+        state = chain_state(
+            team_id,
+            question_id,
+            workflow_run_id=workflow_run_id,
+        )
+    except Exception:  # noqa: BLE001 - unreadable chain state fails closed
+        return None
+    if not isinstance(state, Mapping):
+        return None
+    if state.get("hypothesisConverged") is not True:
+        return None
+    if state.get("hypothesisRoundCount") != 1:
+        return None
+    convergence_record_id = str(state.get("latestHypothesisRoundId") or "").strip()
+    if not convergence_record_id:
+        return None
+    return {
+        "skipped": True,
+        "reason": "converged_without_revision",
+        "convergenceRecordId": convergence_record_id,
+    }
+
+
 def _stage_one_receipt_authority(
     *,
     record: Mapping[str, Any],
@@ -2119,12 +2165,18 @@ def _stage_one_receipt_authority(
     The return is ``None`` — never a partial authority — whenever the frozen
     policy or the per-stage receipt coverage cannot fully support package mode;
     the caller then keeps the historical receipt-less package (fail closed).
+    The one sanctioned exception is the revision slot: when the durable chain
+    record proves the run converged without any revision round, the slot
+    carries an explicit skipped marker (``converged_without_revision`` plus
+    the convergence record identity) instead of a receipt.  Revision receipts
+    present keep the original behavior unchanged.
     """
 
     from core.research.competition.question_result_package import (
         REQUIRED_RECEIPT_STAGES,
         QuestionResultPackageError,
         canonical_model_policy,
+        is_skipped_receipt_payload,
     )
     from core.web.services.team_workflow.challenge_question_runs import (
         is_challenge_official_model_evidence_eligible,
@@ -2160,9 +2212,27 @@ def _stage_one_receipt_authority(
         if _text(scope.get("modelPolicySha256") or scope.get("model_policy_sha256")).lower() != frozen_policy_sha256:
             continue
         selected[stage] = deepcopy(dict(receipt))
-    if set(selected) != set(REQUIRED_RECEIPT_STAGES):
+    required_without_revision = set(REQUIRED_RECEIPT_STAGES) - {"revision"}
+    if set(selected) == required_without_revision:
+        skipped_revision = _stage_one_convergence_without_revision(
+            team_id,
+            question_id=question_id,
+            workflow_run_id=workflow_run_id,
+        )
+        if skipped_revision is None:
+            return None
+        selected["revision"] = skipped_revision
+    elif set(selected) != set(REQUIRED_RECEIPT_STAGES):
         return None
-    providers = {_text(receipt.get("provider")) for receipt in selected.values()}
+    # Provider/model eligibility stays a per-receipt check over the real
+    # receipts only; the skipped marker is structural evidence and must not
+    # be smuggled through (or weaken) the remaining stages' checks.
+    receipted = {
+        stage: receipt
+        for stage, receipt in selected.items()
+        if not is_skipped_receipt_payload(receipt)
+    }
+    providers = {_text(receipt.get("provider")) for receipt in receipted.values()}
     providers.discard("")
     if len(providers) != 1:
         return None
@@ -2173,7 +2243,7 @@ def _stage_one_receipt_authority(
             model_ref=receipt.get("model"),
             model_id=receipt.get("model") or receipt.get("requestedModel"),
         )
-        for receipt in selected.values()
+        for receipt in receipted.values()
     ):
         return None
     snapshot_sha256 = _text(

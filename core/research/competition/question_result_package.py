@@ -28,6 +28,16 @@ from .result_set import CatalogScope, is_official_question_id
 
 QUESTION_RESULT_PACKAGE_SCHEMA_VERSION = 2
 REQUIRED_RECEIPT_STAGES = ("generation", "review", "revision")
+# A stage whose receipt is absent may instead carry an explicit skipped
+# marker only when durable chain evidence proves the stage legitimately
+# never ran (first-round convergence without any revision round).  The
+# marker is structural evidence, not model evidence: it never substitutes
+# for the generation/review receipts and never bypasses their eligibility
+# checks.  ``skipped`` must be literally true and ``reason`` must come
+# from this closed set.
+SKIPPABLE_RECEIPT_STAGES = ("revision",)
+SKIPPED_RECEIPT_REASONS = frozenset({"converged_without_revision"})
+_SKIPPED_RECEIPT_FIELDS = frozenset({"skipped", "reason", "convergenceRecordId"})
 REQUIRED_REVIEW_DIMENSIONS = (
     "evidence_support",
     "factual_accuracy",
@@ -931,6 +941,57 @@ def _scope_value(scope: Mapping[str, Any], *keys: str) -> str:
     return first_value
 
 
+def is_skipped_receipt_payload(value: Any) -> bool:
+    """Return whether a receipt-slot payload declares a skipped marker.
+
+    Any payload carrying a ``skipped`` key is marker-validated, so the
+    ``skipped: true`` literal requirement is enforced in exactly one place;
+    real receipts never carry that field and keep the unchanged receipt path.
+    """
+
+    return isinstance(value, Mapping) and "skipped" in value
+
+
+def normalize_skipped_receipt_stage(stage: str, payload: Any) -> dict[str, Any]:
+    """Validate and normalize one explicit skipped-receipt marker.
+
+    A marker is the structural alternative to a receipt for a skippable
+    stage: ``skipped`` must be literally true, ``reason`` must come from the
+    closed reason set, and ``convergenceRecordId`` must name the durable
+    record that proves the stage never ran.
+    """
+
+    if stage not in SKIPPABLE_RECEIPT_STAGES:
+        raise QuestionResultPackageError(
+            f"receipt.{stage} cannot be skipped; only "
+            + ", ".join(SKIPPABLE_RECEIPT_STAGES)
+            + " may carry a skipped marker"
+        )
+    marker = _mapping(payload, f"receipt.{stage}")
+    unknown = sorted(set(marker) - _SKIPPED_RECEIPT_FIELDS)
+    if unknown:
+        raise QuestionResultPackageError(
+            f"receipt.{stage} skipped marker contains unsupported fields: "
+            + ", ".join(unknown)
+        )
+    if marker.get("skipped") is not True:
+        raise QuestionResultPackageError(
+            f"receipt.{stage} skipped marker requires skipped=true"
+        )
+    reason = _strict_text(marker.get("reason"), f"receipt.{stage}.reason").lower()
+    if reason not in SKIPPED_RECEIPT_REASONS:
+        raise QuestionResultPackageError(f"receipt.{stage}.reason is unsupported")
+    convergence_record_id = _strict_text(
+        marker.get("convergenceRecordId"),
+        f"receipt.{stage}.convergenceRecordId",
+    )
+    return {
+        "skipped": True,
+        "reason": reason,
+        "convergenceRecordId": convergence_record_id,
+    }
+
+
 def _validate_receipt(
     stage: str,
     raw_receipt: Any,
@@ -1047,6 +1108,7 @@ class QuestionResultPackage:
     result_classification: Mapping[str, Any]
     competition_result_view: Mapping[str, Any]
     _model_invocation_receipts: Mapping[str, Mapping[str, Any]]
+    skipped_receipt_stages: Mapping[str, Mapping[str, Any]]
     failure: Mapping[str, Any] | None = None
 
     SCHEMA_VERSION: ClassVar[int] = QUESTION_RESULT_PACKAGE_SCHEMA_VERSION
@@ -1070,6 +1132,7 @@ class QuestionResultPackage:
         result_classification: dict[str, Any],
         competition_result_view: dict[str, Any],
         model_invocation_receipts: Mapping[str, ModelInvocationReceipt],
+        skipped_receipt_stages: Mapping[str, Mapping[str, Any]],
         failure: dict[str, Any] | None,
     ) -> None:
         if _token is not _CONSTRUCTION_TOKEN:
@@ -1128,6 +1191,13 @@ class QuestionResultPackage:
             self,
             "_model_invocation_receipts",
             _deep_freeze(receipt_payloads, "model_invocation_receipts"),
+        )
+        object.__setattr__(
+            self,
+            "skipped_receipt_stages",
+            _deep_freeze(
+                dict(skipped_receipt_stages), "skipped_receipt_stages"
+            ),
         )
         object.__setattr__(
             self,
@@ -1370,17 +1440,23 @@ class QuestionResultPackage:
             raise QuestionResultPackageError(
                 "receipt stages contain unsupported keys: " + ", ".join(unexpected_stages)
             )
-        receipts = {
-            stage: _validate_receipt(
+        receipts: dict[str, ModelInvocationReceipt] = {}
+        skipped_receipt_stages: dict[str, dict[str, Any]] = {}
+        for stage in REQUIRED_RECEIPT_STAGES:
+            raw_entry = receipts_mapping[stage]
+            if is_skipped_receipt_payload(raw_entry):
+                skipped_receipt_stages[stage] = normalize_skipped_receipt_stage(
+                    stage, raw_entry
+                )
+                continue
+            receipts[stage] = _validate_receipt(
                 stage,
-                receipts_mapping[stage],
+                raw_entry,
                 scope=scope,
                 model_policy=model_policy,
                 question_id=question_id,
                 run_id=run_id,
             )
-            for stage in REQUIRED_RECEIPT_STAGES
-        }
         receipt_ids = [receipt.receipt_id for receipt in receipts.values()]
         node_run_ids = [receipt.node_run_id for receipt in receipts.values()]
         if len(set(receipt_ids)) != len(receipt_ids):
@@ -1409,6 +1485,7 @@ class QuestionResultPackage:
             result_classification=result_classification,
             competition_result_view=competition_result_view,
             model_invocation_receipts=receipts,
+            skipped_receipt_stages=skipped_receipt_stages,
             failure=failure,
         )
         expected_idempotency_key = package.idempotency_key
@@ -1547,7 +1624,10 @@ class QuestionResultPackage:
             "result_classification": _deep_thaw(self.result_classification),
             "competition_result_view": _deep_thaw(self.competition_result_view),
             "model_invocation_receipts": _deep_thaw(
-                self._model_invocation_receipts
+                {
+                    **self._model_invocation_receipts,
+                    **self.skipped_receipt_stages,
+                }
             ),
             "idempotency_key": self.idempotency_key,
         }
@@ -1603,13 +1683,17 @@ __all__ = [
     "REQUIRED_RECEIPT_STAGES",
     "REQUIRED_REVIEW_DIMENSIONS",
     "REVIEW_DIMENSION_RATINGS",
+    "SKIPPABLE_RECEIPT_STAGES",
+    "SKIPPED_RECEIPT_REASONS",
     "QuestionResultPackage",
     "QuestionResultPackageError",
     "canonical_model_policy",
     "compute_question_result_package_hash",
     "is_qwen_model_id",
+    "is_skipped_receipt_payload",
     "model_family_for_model_id",
     "model_id_matches_family",
     "normalize_research_plan",
+    "normalize_skipped_receipt_stage",
     "question_result_package_idempotency_key",
 ]
