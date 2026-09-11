@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
-import tempfile
 from pathlib import Path
 from typing import Any, Callable, TypeVar
 
+from core.infrastructure.atomic_io import atomic_write_text
 from core.infrastructure.workspace_manager import get_workspace
 
 from .models import (
@@ -173,12 +172,4 @@ def _atomic_write_json_list(path: Path, payload: list[Any]) -> None:
 
 
 def _atomic_write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_path = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
-            handle.write(text)
-        os.replace(temp_path, path)
-    finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+    atomic_write_text(path, text)

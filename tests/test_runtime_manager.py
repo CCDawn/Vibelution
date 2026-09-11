@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from core.infrastructure import atomic_io
 from core.launcher import desktop_session_store
 from core.runtime_manager import cli as runtime_cli
 from core.runtime_manager import command_queue
@@ -11269,7 +11270,7 @@ def test_evolution_store_atomic_write_retries_permission_error(tmp_path, monkeyp
     target_path = tmp_path / "snapshot.json"
     replace_calls = {"count": 0}
     sleep_calls = []
-    real_replace = evolution_store.os.replace
+    real_replace = atomic_io.os.replace
 
     monkeypatch.setattr(evolution_store, "ensure_evolution_store_dirs", lambda: None)
 
@@ -11279,8 +11280,8 @@ def test_evolution_store_atomic_write_retries_permission_error(tmp_path, monkeyp
             raise PermissionError("locked")
         return real_replace(src, dst)
 
-    monkeypatch.setattr(evolution_store.os, "replace", flaky_replace)
-    monkeypatch.setattr(evolution_store.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+    monkeypatch.setattr(atomic_io.os, "replace", flaky_replace)
+    monkeypatch.setattr(atomic_io.time, "sleep", lambda seconds: sleep_calls.append(seconds))
 
     evolution_store._atomic_write_json(target_path, {"ok": True})
 

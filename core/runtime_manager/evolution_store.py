@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
+
+from core.infrastructure.atomic_io import atomic_write_json
 
 from .constants import RUNTIME_MANAGER_DIR
 from .work_run_store import WorkRunStore, normalize_run_id
@@ -18,7 +18,6 @@ SELF_RUNS_DIR = EVOLUTION_DIR / "self" / "runs"
 SUPERVISED_RUNS_DIR = EVOLUTION_DIR / "supervised" / "runs"
 SELF_INDEX_PATH = EVOLUTION_DIR / "self" / "index.json"
 SUPERVISED_INDEX_PATH = EVOLUTION_DIR / "supervised" / "index.json"
-WRITE_RETRY_TIMEOUT_SECONDS = 5.0
 READ_RETRY_ATTEMPTS = 5
 READ_RETRY_DELAY_SECONDS = 0.05
 _WORK_RUN_STORE = WorkRunStore(root=EVOLUTION_DIR)
@@ -37,24 +36,7 @@ def ensure_evolution_store_dirs() -> None:
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     ensure_evolution_store_dirs()
-    fd, temp_path = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
-        deadline = time.monotonic() + WRITE_RETRY_TIMEOUT_SECONDS
-        attempt = 0
-        while True:
-            try:
-                os.replace(temp_path, path)
-                break
-            except PermissionError:
-                attempt += 1
-                if time.monotonic() >= deadline:
-                    raise
-                time.sleep(min(0.05 * attempt, 0.25))
-    finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+    atomic_write_json(path, payload)
 
 
 def _read_text_with_retry(path: Path) -> str:

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+
+from core.infrastructure.atomic_io import atomic_write_json
 
 from .constants import EVENTS_PATH, RESTART_INTENTS_DIR, ensure_runtime_manager_dirs
 from .scene_logging import append_runtime_manager_file_event, record_runtime_manager_scene_event, truncate_event_text
@@ -137,14 +137,7 @@ def _read_intent(path: Path) -> dict[str, Any]:
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     ensure_runtime_manager_dirs()
-    fd, temp_path = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
-        os.replace(temp_path, path)
-    finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+    atomic_write_json(path, payload)
 
 
 def _append_restart_event(event_type: str, payload: dict[str, Any]) -> None:
