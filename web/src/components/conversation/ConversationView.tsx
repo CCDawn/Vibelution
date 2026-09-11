@@ -199,7 +199,6 @@ import {
   conversationImageDownloadName,
   conversationImagePreviewUrl,
 } from "./conversationImagePreview";
-import { shouldShowNextStateSignalInConversation } from "./conversationNextStateSignal";
 import {
   formatConversationDuration,
   formatConversationTimestamp,
