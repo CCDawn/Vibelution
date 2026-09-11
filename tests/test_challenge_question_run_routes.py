@@ -139,3 +139,97 @@ def test_question_run_status_exposes_registration_without_requiring_validation(m
     )
     assert response.status_code == 200
     assert response.json()["summary"]["registeredQuestionIds"] == ["SCI-004"]
+
+
+def test_reverify_citations_post_passes_ids_through_and_returns_service_report(monkeypatch):
+    calls: list[tuple[str, str, str]] = []
+    report = {
+        "status": "reverified",
+        "record": {"recordId": "SCI-096:stage1-sci-096-v3", "citationValidation": "passed"},
+        "citation": {"status": "passed"},
+        "verification": {"verifiedSourceUrls": {"https://doi.org/10.1/x": True}, "attemptedCount": 1, "verifiedCount": 1},
+    }
+
+    def fake_reverify(team_id: str, question_id: str, run_id: str) -> dict:
+        calls.append((team_id, question_id, run_id))
+        return report
+
+    monkeypatch.setattr(team_workflows_experiment, "reverify_citation_receipts", fake_reverify)
+
+    response = _client().post(
+        "/api/teams/research-team/workflow-orchestration/challenge-program"
+        "/questions/SCI-096/runs/stage1-sci-096-v3/reverify-citations"
+    )
+
+    assert response.status_code == 200
+    assert calls == [("research-team", "SCI-096", "stage1-sci-096-v3")]
+    assert response.json() == report
+
+
+def test_repair_registration_post_passes_ids_through_and_returns_service_report(monkeypatch):
+    calls: list[tuple[str, str, str]] = []
+    report = {
+        "teamId": "research-team",
+        "questionId": "SCI-096",
+        "runId": "stage1-sci-096-v3",
+        "repaired": False,
+        "reason": "canonical_result_package_already_bound",
+        "officialModelCall": True,
+        "record": {"recordId": "SCI-096:stage1-sci-096-v3"},
+    }
+
+    def fake_repair(team_id: str, question_id: str, run_id: str) -> dict:
+        calls.append((team_id, question_id, run_id))
+        return report
+
+    monkeypatch.setattr(
+        team_workflows_experiment,
+        "repair_challenge_question_output_registration",
+        fake_repair,
+    )
+
+    response = _client().post(
+        "/api/teams/research-team/workflow-orchestration/challenge-program"
+        "/questions/SCI-096/runs/stage1-sci-096-v3/repair-registration"
+    )
+
+    assert response.status_code == 200
+    assert calls == [("research-team", "SCI-096", "stage1-sci-096-v3")]
+    assert response.json()["repaired"] is False
+    assert response.json()["reason"] == "canonical_result_package_already_bound"
+
+
+def test_challenge_question_run_repair_routes_map_errors_like_neighbors(monkeypatch):
+    def missing_record(team_id: str, question_id: str, run_id: str) -> dict:
+        raise ValueError("Challenge question run record was not found.")
+
+    def missing_team(team_id: str, question_id: str, run_id: str) -> dict:
+        from core.web.services.team_service import TeamNotFoundError
+
+        raise TeamNotFoundError("team not found: research-team")
+
+    monkeypatch.setattr(team_workflows_experiment, "reverify_citation_receipts", missing_team)
+    missing_team_response = _client().post(
+        "/api/teams/research-team/workflow-orchestration/challenge-program"
+        "/questions/SCI-096/runs/stage1-sci-096-v3/reverify-citations"
+    )
+    assert missing_team_response.status_code == 404
+
+    monkeypatch.setattr(team_workflows_experiment, "reverify_citation_receipts", missing_record)
+    value_error_response = _client().post(
+        "/api/teams/research-team/workflow-orchestration/challenge-program"
+        "/questions/SCI-096/runs/stage1-sci-096-v3/reverify-citations"
+    )
+    assert value_error_response.status_code == 422
+    assert "Challenge question run record was not found." in value_error_response.json()["detail"]
+
+    monkeypatch.setattr(
+        team_workflows_experiment,
+        "repair_challenge_question_output_registration",
+        missing_record,
+    )
+    repair_error_response = _client().post(
+        "/api/teams/research-team/workflow-orchestration/challenge-program"
+        "/questions/SCI-096/runs/stage1-sci-096-v3/repair-registration"
+    )
+    assert repair_error_response.status_code == 422

@@ -225,6 +225,54 @@ def team_workflow_challenge_question_run_review(
         )
 
 
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/challenge-program/questions/{question_id}/runs/{run_id}/reverify-citations",
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
+)
+def team_workflow_challenge_question_run_reverify_citations(
+    team_id: str,
+    question_id: str,
+    run_id: str,
+) -> dict:
+    try:
+        return reverify_citation_receipts(team_id, question_id, run_id)
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        _raise_team_workflow_route_error(
+            "challenge_question_run.reverify_citations",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"questionId": question_id, "runId": run_id},
+        )
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/challenge-program/questions/{question_id}/runs/{run_id}/repair-registration",
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
+)
+def team_workflow_challenge_question_run_repair_registration(
+    team_id: str,
+    question_id: str,
+    run_id: str,
+) -> dict:
+    try:
+        return repair_challenge_question_output_registration(team_id, question_id, run_id)
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        _raise_team_workflow_route_error(
+            "challenge_question_run.repair_registration",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"questionId": question_id, "runId": run_id},
+        )
+
+
 @router.get(
     "/teams/{team_id}/workflow-orchestration/experiments/methods",
     response_model=ExperimentMethodCatalogResponse,

@@ -11,6 +11,7 @@ import type { ChallengeQuestionRunDetailPayload, CommandAction } from "../../../
 import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
 import { VButton, VInput, VSelect, VStatusChip, VSurface, VTextarea } from "../../../components/vui";
 import { trackQuestionReviewSubmit } from "../challengeCupTelemetry";
+import { ChallengeQuestionRepairActions } from "./ChallengeQuestionRepairActions";
 import css from "./ChallengeQuestionDetailPanel.styles";
 
 const GATES = [
@@ -321,6 +322,9 @@ export function ChallengeQuestionReviewForm(props: {
         >
           {isZh ? "提交审核结论" : "Submit review"}
         </VButton>
+        {!officialCallReady ? (
+          <ChallengeQuestionRepairActions detail={detail} lang={props.lang} only="repair" />
+        ) : null}
       </div>
     </VSurface>
   );

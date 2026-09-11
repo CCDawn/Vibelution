@@ -514,3 +514,65 @@ describe("ChallengeQuestionDetailPanel stage zones", () => {
     expect(markup).not.toContain('data-testid="question-stage-zone-plan"');
   });
 });
+
+describe("ChallengeQuestionDetailPanel repair entries", () => {
+  function renderWithValidation(validation?: Record<string, unknown>): string {
+    const base = detail();
+    const payload: ChallengeQuestionRunDetailPayload = {
+      ...base,
+      record: { ...base.record, validation },
+    };
+    return renderPanel(
+      <ChallengeQuestionDetailPanel
+        requestedQuestionId="SCI-096"
+        detail={payload}
+        isLoading={false}
+        onClose={() => undefined}
+      />,
+    );
+  }
+
+  it("offers citation reverification only while the citation validation failed", () => {
+    const failed = renderWithValidation({ citationValidation: "failed", officialModelCall: true });
+    expect(failed).toContain('data-testid="challenge-question-reverify-citations"');
+    expect(failed).toContain("重核引用文献");
+    expect(failed).not.toContain('data-testid="challenge-question-repair-registration"');
+
+    const passed = renderWithValidation({ citationValidation: "passed", officialModelCall: true });
+    expect(passed).not.toContain('data-testid="challenge-question-reverify-citations"');
+    expect(passed).not.toContain("重核引用文献");
+  });
+
+  it("offers registration repair only while the official-model call is unproven", () => {
+    const missing = renderWithValidation({ citationValidation: "passed", officialModelCall: false });
+    expect(missing).toContain('data-testid="challenge-question-repair-registration"');
+    expect(missing).toContain("补齐结果包登记");
+
+    const proven = renderWithValidation({ citationValidation: "passed", officialModelCall: true });
+    expect(proven).not.toContain('data-testid="challenge-question-repair-registration"');
+    expect(proven).not.toContain("补齐结果包登记");
+  });
+
+  it("keeps the read-only archive free of the sanctioned repair entries", () => {
+    const base = detail();
+    const failed: ChallengeQuestionRunDetailPayload = {
+      ...base,
+      record: { ...base.record, validation: { citationValidation: "failed", officialModelCall: false } },
+    };
+    const markup = renderPanel(
+      <ChallengeQuestionDetailPanel
+        requestedQuestionId="SCI-096"
+        detail={failed}
+        isLoading={false}
+        readOnlyArchive
+        onClose={() => undefined}
+      />,
+    );
+    expect(markup).not.toContain('data-testid="challenge-question-reverify-citations"');
+    expect(markup).not.toContain('data-testid="challenge-question-repair-registration"');
+  });
+
+  it("hosts the repair entries through the shared sanctioned repair actions", () => {
+    expect(detailPanelSource).toContain("ChallengeQuestionRepairActions");
+  });
+});

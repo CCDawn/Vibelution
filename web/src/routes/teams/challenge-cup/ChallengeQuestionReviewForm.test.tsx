@@ -6,15 +6,29 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { queryKeys } from "../../../api/queryKeys";
 import type { ChallengeQuestionRunDetailPayload } from "../../../api/types";
 import { ChallengeQuestionReviewForm } from "./ChallengeQuestionReviewForm";
 
 const reviewMock = vi.hoisted(() => vi.fn(async () => ({})));
+const repairMock = vi.hoisted(() => vi.fn(async () => ({
+  teamId: "research-team",
+  questionId: "SCI-096",
+  runId: "stage1-sci-096-v3",
+  repaired: true,
+  officialModelCall: true,
+  record: {},
+})));
 
 vi.mock("../../../api/hypothesisFirst", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   executeHypothesisFirstCommand: reviewMock,
   fetchHypothesisFirstStateV2: vi.fn(async () => stateV2({allowedActions: [command({command: "record_program_review", payload: {}}, "提交审核")]})),
+}));
+
+vi.mock("../../../api/challengeQuestionRuns", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  repairChallengeQuestionRegistration: repairMock,
 }));
 
 vi.mock("../challengeCupTelemetry", () => ({trackQuestionReviewSubmit: () => ({succeeded: vi.fn(), failed: vi.fn()})}));
@@ -221,5 +235,56 @@ describe("ChallengeQuestionReviewForm", () => {
 
     await act(async () => root.unmount());
     container.remove();
+  });
+});
+
+describe("ChallengeQuestionReviewForm registration repair entry", () => {
+  beforeEach(() => {
+    reviewMock.mockClear();
+    repairMock.mockClear();
+    globalThis.localStorage?.clear();
+  });
+
+  function findRepairButton(scope: ParentNode): HTMLButtonElement | undefined {
+    return scope.querySelector(
+      'button[data-testid="challenge-question-repair-registration"]',
+    ) as HTMLButtonElement | undefined;
+  }
+
+  it("hides the registration repair once the official-model call is recorded", async () => {
+    const { container, root } = await renderForm();
+
+    expect(findRepairButton(container)).toBeNull();
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("offers the sanctioned repair beside the blocked submit and refetches afterwards", async () => {
+    const unproven = pendingDetail();
+    unproven.record = { ...unproven.record, validation: { officialModelCall: false } };
+    const invalidateSpy = vi.spyOn(QueryClient.prototype, "invalidateQueries")
+      .mockResolvedValue(undefined as never);
+    const { container, root } = await renderForm(unproven);
+    try {
+      const repair = findRepairButton(container);
+      expect(repair).toBeTruthy();
+      const submit = findButton(container, "提交审核结论");
+      expect(submit!.disabled).toBe(true);
+
+      await act(async () => {
+        repair!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      expect(repairMock).toHaveBeenCalledTimes(1);
+      expect(repairMock).toHaveBeenCalledWith("research-team", "SCI-096", "stage1-sci-096-v3");
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: queryKeys.challengeQuestionRunDetail("research-team", "SCI-096"),
+      });
+    } finally {
+      invalidateSpy.mockRestore();
+      await act(async () => root.unmount());
+      container.remove();
+    }
   });
 });

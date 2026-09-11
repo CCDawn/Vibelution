@@ -26,6 +26,7 @@ import { ChallengeQuestionAnalysisSection } from "./ChallengeQuestionAnalysisSec
 import { ChallengeQuestionEvidenceSection } from "./ChallengeQuestionEvidenceSection";
 import { ChallengeQuestionPlanSection } from "./ChallengeQuestionPlanSection";
 import { ChallengeQuestionRegisterDialog } from "./ChallengeQuestionRegisterDialog";
+import { ChallengeQuestionRepairActions } from "./ChallengeQuestionRepairActions";
 import { ChallengeQuestionRunResetDialog } from "./ChallengeQuestionRunResetDialog";
 import { ChallengeQuestionStageZoneHeading } from "./ChallengeQuestionStageZoneHeading";
 import {
@@ -372,6 +373,9 @@ export function ChallengeQuestionDetailPanel({
             <VButton density="compact" variant="primary" onPress={() => setReviseDialogOpen(true)}>
               {isZh ? "登记修订产出" : "Register revision output"}
             </VButton>
+          ) : null}
+          {!readOnlyArchive ? (
+            <ChallengeQuestionRepairActions detail={detail} lang={lang} />
           ) : null}
           {readOnlyArchive ? (
             <VButton

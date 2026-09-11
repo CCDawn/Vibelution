@@ -577,7 +577,9 @@ from core.web.services.team_workflow.challenge_question_runs import (
     publish_research_project_challenge_question_output,
     register_challenge_task_model_evidence,
     register_challenge_question_output,
+    repair_challenge_question_output_registration,
     review_challenge_question_output,
+    reverify_citation_receipts,
 )
 from core.web.services.team_workflow.challenge_program import (
     build_competition_program_projection,

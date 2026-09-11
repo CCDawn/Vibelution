@@ -44,3 +44,51 @@ export function getChallengeQuestionRunStatus(
     `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/challenge-program/question-runs/status`,
   );
 }
+
+export type ChallengeQuestionCitationReverificationPayload = {
+  /** already_passed | reverified | still_failed */
+  status: string;
+  record: Record<string, unknown>;
+  output?: Record<string, unknown>;
+  citation?: Record<string, unknown>;
+  verification?: {
+    verifiedSourceUrls: Record<string, boolean>;
+    attemptedCount: number;
+    verifiedCount: number;
+  };
+  summary?: Record<string, unknown>;
+};
+
+/** POST …/questions/{questionId}/runs/{runId}/reverify-citations (sanctioned repair). */
+export function reverifyChallengeQuestionCitations(
+  teamId: string,
+  questionId: string,
+  runId: string,
+): Promise<ChallengeQuestionCitationReverificationPayload> {
+  return fetchJson<ChallengeQuestionCitationReverificationPayload>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/challenge-program/questions/${encodeURIComponent(questionId)}/runs/${encodeURIComponent(runId)}/reverify-citations`,
+    { method: "POST" },
+  );
+}
+
+export type ChallengeQuestionRegistrationRepairPayload = {
+  teamId: string;
+  questionId: string;
+  runId: string;
+  repaired: boolean;
+  reason?: string;
+  officialModelCall: boolean;
+  record: Record<string, unknown>;
+};
+
+/** POST …/questions/{questionId}/runs/{runId}/repair-registration (sanctioned repair). */
+export function repairChallengeQuestionRegistration(
+  teamId: string,
+  questionId: string,
+  runId: string,
+): Promise<ChallengeQuestionRegistrationRepairPayload> {
+  return fetchJson<ChallengeQuestionRegistrationRepairPayload>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/challenge-program/questions/${encodeURIComponent(questionId)}/runs/${encodeURIComponent(runId)}/repair-registration`,
+    { method: "POST" },
+  );
+}
