@@ -3106,7 +3106,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.conversationGroupList).toContain("gap-1");
   });
 
-  it("loads session index pages through the paginated query endpoint", () => {
+  it("auto-loads every session index page instead of rendering a load-more control", () => {
     expect(routeSource).toContain("useSessionIndexQuery");
     expect(routeSource).toContain("queryText: sessionQueryText");
     expect(routeSource).toContain("enabled: sessionIndexQueryEnabled");
@@ -3116,15 +3116,15 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("bootstrapIsFetched: activeSessionBootstrapQuery.isFetched");
     expect(routeSource).toContain("bootstrapIsError: activeSessionBootstrapQuery.isError");
     expect(routeSource).toContain("bootstrapFetchStatus: activeSessionBootstrapQuery.fetchStatus");
-    expect(routeSource).toContain("sessionIndexHasMore");
-    expect(chatSessionIndexRailPresentationSource).toContain("加载更多会话");
-    expect(chatSessionIndexRailPresentationSource).toContain("已加载全部会话");
-    expect(routeSource).toContain("sessionIndexProgressVisible");
+    expect(routeSource).toContain("rawSessionsQuery.hasMore");
+    expect(routeSource).toContain("rawSessionsQuery.isFetchNextPageError");
     expect(routeSource).toContain("rawSessionsQuery.loadMore()");
-    expect(routeSource).toContain("styles.sessionLoadMoreButton");
-    expect(routeSource).toContain("styles.sessionLoadMoreStatus");
-    expect(routeStyles.sessionLoadMoreButton).toBeTypeOf("string");
-    expect(routeStyles.sessionLoadMoreStatus).toBeTypeOf("string");
+    expect(routeSource).not.toContain("sessionIndexHasMore");
+    expect(routeSource).not.toContain("sessionIndexProgressVisible");
+    expect(routeSource).not.toContain("styles.sessionLoadMoreButton");
+    expect(routeSource).not.toContain("styles.sessionLoadMoreStatus");
+    expect(routeStyles.sessionLoadMoreButton).toBeUndefined();
+    expect(routeStyles.sessionLoadMoreStatus).toBeUndefined();
   });
 
   it("keeps search, create and collapse together above a compact two-row index", () => {
@@ -3321,7 +3321,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatVisibleSessionCatalogSource).toContain("mergeAllVisibleSessions");
     expect(chatVisibleSessionCatalogModelSource).toContain("isVisibleDirectSession");
     expect(chatAgentSessionTabsSource).toContain("buildAgentSessionTabs");
-    expect(chatSessionIndexRailPresentationSource).toContain("加载更多会话");
+    expect(chatSessionIndexRailPresentationSource).toContain("buildGroupedGroupConversations");
     expect(chatCodingRouteWorkbenchSource).toContain("bulkRemoveSessions");
     expect(chatSessionBulkSelectionSource).toContain("bulkDeleteSessionsMutation");
     expect(chatSessionBulkSelectionSource).toContain('t("bulkRemoveSessionsConfirm")');

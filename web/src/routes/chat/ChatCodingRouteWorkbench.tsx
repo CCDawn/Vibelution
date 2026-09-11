@@ -87,7 +87,6 @@ import {
 } from "../chatSessionState";
 import {
   reconcileAgentSessionDetailCache,
-  SESSION_INDEX_PAGE_SIZE,
   updateSessionSummaryCaches,
 } from "../chatSessionIndexQuery";
 import { isTempSessionId } from "../sessionOptimisticIds";
@@ -212,7 +211,7 @@ import { useChatSessionBulkSelection } from "./useChatSessionBulkSelection";
 import { useChatWorkbenchConfirmDialog } from "./useChatWorkbenchConfirmDialog";
 import { useChatVisibleSessionCatalog } from "./useChatVisibleSessionCatalog";
 import { useChatAgentSessionTabs } from "./useChatAgentSessionTabs";
-import { toSessionIndexProgressQuerySlice, useChatSessionIndexRailModel } from "./useChatSessionIndexRailModel";
+import { useChatSessionIndexRailModel } from "./useChatSessionIndexRailModel";
 import { useChatGroupRoomChromeModel } from "./useChatGroupRoomChromeModel";
 import { useChatAgentDirectoryMaps } from "./useChatAgentDirectoryMaps";
 import { useChatIndexDerivedState } from "./useChatIndexDerivedState";
@@ -2469,18 +2468,25 @@ export function ChatCodingRouteWorkbench() {
   const {
     groupedGroupConversations,
     groupedGroupConversationCount,
-    sessionIndexHasMore,
-    sessionIndexLoadMoreLabel,
-    sessionIndexFullyLoadedLabel,
-    sessionIndexProgressLabel,
-    sessionIndexProgressVisible,
   } = useChatSessionIndexRailModel({
     groupedConversations,
     directoryTeamIds,
-    rawSessionsQuery: toSessionIndexProgressQuerySlice(rawSessionsQuery),
-    lang,
-    numberFormatter,
   });
+  useEffect(() => {
+    if (
+      !rawSessionsQuery.hasMore
+      || rawSessionsQuery.isLoadingMore
+      || rawSessionsQuery.isFetchNextPageError
+    ) {
+      return;
+    }
+    void rawSessionsQuery.loadMore();
+  }, [
+    rawSessionsQuery.hasMore,
+    rawSessionsQuery.isLoadingMore,
+    rawSessionsQuery.isFetchNextPageError,
+    rawSessionsQuery.loadMore,
+  ]);
   const teamRoomsByTeamId = useMemo(() => {
     const roomsByTeamId = new Map<string, ConversationSummary[]>();
     for (const conversation of conversationsQuery.data ?? []) {
@@ -2814,24 +2820,6 @@ export function ChatCodingRouteWorkbench() {
             bulkSelectLabel={lang === "zh" ? "选择会话" : "Select session"}
             onToggleBulk={toggleBulkSession}
           />
-          {sessionIndexHasMore ? (
-            <VButton
-              type="button"
-              variant="ghost"
-              className={styles.sessionLoadMoreButton}
-              onClick={() => rawSessionsQuery.loadMore()}
-              isDisabled={rawSessionsQuery.isLoadingMore}
-              aria-label={sessionIndexLoadMoreLabel}
-            >
-              <span>{sessionIndexLoadMoreLabel}</span>
-              <span className={styles.sessionLoadMoreCount}>{sessionIndexProgressLabel}</span>
-            </VButton>
-          ) : sessionIndexProgressVisible ? (
-            <div className={styles.sessionLoadMoreStatus} role="status">
-              <span>{sessionIndexFullyLoadedLabel}</span>
-              <span className={styles.sessionLoadMoreCount}>{sessionIndexProgressLabel}</span>
-            </div>
-          ) : null}
           {sessionContextMenu && contextMenuSession ? (
             <Suspense fallback={null}>
               <SessionContextMenu
