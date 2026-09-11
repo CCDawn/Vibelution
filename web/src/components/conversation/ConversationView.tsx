@@ -3951,7 +3951,7 @@ export function ConversationView({
       ) : null}
       {runningGuidanceActionsEnabled ? (
         <VButton
-          className={`${styles.sendButton} ${styles.composerRoundButton} ${styles.stopButton}`}
+          className={`${styles.composerRoundButton} ${styles.stopButton}`}
           isIconOnly
           isDisabled={resolvedActionDisabled}
           type="button"

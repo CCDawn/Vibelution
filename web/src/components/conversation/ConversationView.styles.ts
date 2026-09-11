@@ -65,12 +65,12 @@ const composerFieldShell = cv("composerField", composerFieldBase);
 const composerFieldCodexShell = cv(
   "composerFieldCodex",
   composerFieldBase,
-  "grid min-h-[120px] min-w-0 grid-rows-[auto_minmax(56px,1fr)_auto] gap-1.5 px-3.5 py-3 max-[719px]:min-h-[112px] max-[719px]:px-3 max-[719px]:py-2.5 [@media(max-height:520px)]:min-h-[84px] [@media(max-height:520px)]:grid-rows-[auto_minmax(36px,1fr)_auto] [@media(max-height:520px)]:py-2",
+  "!flex !flex-col min-h-[104px] min-w-0 !gap-1.5 px-3.5 py-2.5 [&_textarea]:!min-h-[48px] max-[719px]:min-h-[96px] max-[719px]:px-3 max-[719px]:py-2.5 [@media(max-height:520px)]:min-h-[84px] [@media(max-height:520px)]:[&_textarea]:!min-h-[44px] [@media(max-height:520px)]:py-2",
 );
 const composerToolbarShell = cv("composerToolbar", "flex min-w-0 items-center gap-1 pt-0.5");
 const composerToolbarCodexShell = cv(
   "composerToolbarCodex",
-  "flex min-h-8 min-w-0 items-center justify-between gap-2 border-t border-[color-mix(in_srgb,var(--border-soft)_44%,transparent)] pt-1.5",
+  "flex min-h-8 min-w-0 items-center justify-between gap-2 border-t border-[color-mix(in_srgb,var(--border-soft)_28%,transparent)] pt-1.5",
 );
 const composerFieldDragActiveShell = cv(
   "composerFieldDragActive",
@@ -211,7 +211,7 @@ const styles: Record<string, string> = {
   companionTypingContent:
     "vui-components-conversationview companionTypingContent col-start-2 row-start-1 min-w-0 justify-self-start",
   attachButton:
-    cv("attachButton", "min-w-0 inline-grid", compactIconButtonSize, "place-items-center rounded-[var(--radius-control)] border p-0 [font-size:var(--vui-font-xs)] font-semibold leading-tight", composerIconOnlySlot, composerQuietActionState),
+    cv("attachButton", "min-w-0 inline-grid", compactIconButtonSize, "place-items-center !rounded-full !border-transparent !bg-transparent p-0 [font-size:var(--vui-font-xs)] font-semibold leading-tight", composerIconOnlySlot, composerQuietActionState, "hover:!bg-[var(--vui-control-muted)] active:!bg-[color-mix(in_srgb,var(--vui-control-muted-hover)_78%,transparent)] disabled:hover:!bg-transparent"),
   auxiliaryBlock:
     "vui-components-conversationview auxiliaryBlock min-w-0",
   auxiliaryBlock_active:
@@ -1071,7 +1071,7 @@ const styles: Record<string, string> = {
   composerToolbarStart: "vui-components-conversationview composerToolbarStart flex min-w-0 items-center gap-1.5",
   // End cluster: inference control may shrink; send/stop stays shrink-0 and fully visible.
   composerToolbarEnd: "vui-components-conversationview composerToolbarEnd ml-auto flex min-w-0 max-w-full items-center justify-end gap-1.5 [&_[data-testid=conversation-inference-control]]:min-w-0 [&_[data-testid=conversation-inference-control]]:max-w-full",
-  inputCodex: "vui-components-conversationview inputCodex min-h-[56px] max-h-[240px] w-full resize-none overflow-y-auto !border-0 !bg-transparent !p-0 [font-size:var(--vui-type-chat-size)] font-[var(--vui-weight-regular)] leading-[var(--vui-type-chat-line)] text-[var(--fg-primary)] !shadow-none placeholder:text-[var(--fg-tertiary)] focus:!ring-0",
+  inputCodex: "vui-components-conversationview inputCodex min-h-[48px] max-h-[240px] w-full flex-1 resize-none overflow-y-auto !border-0 !bg-transparent !p-0 [font-size:var(--vui-type-chat-size)] font-[var(--vui-weight-regular)] leading-[var(--vui-type-chat-line)] text-[var(--fg-primary)] !shadow-none placeholder:text-[var(--fg-tertiary)] focus:!ring-0",
   sessionMeta:
     "vui-components-conversationview sessionMeta min-w-0 flex flex-wrap items-center gap-1.5",
   statPill:

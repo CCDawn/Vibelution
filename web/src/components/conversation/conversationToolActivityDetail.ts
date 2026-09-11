@@ -87,7 +87,7 @@ export function buildConversationToolActivityDetailRows(
 }
 
 export function conversationToolActivityEmptyDetailLabel(language: ConversationToolPresentationLanguage) {
-  return language === "zh" ? "没有额外输出" : "No extra output";
+  return language === "zh" ? "无更多详情" : "No further details";
 }
 
 function isDuplicateVisibleLine(
