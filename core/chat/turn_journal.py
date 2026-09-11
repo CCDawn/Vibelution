@@ -1023,6 +1023,7 @@ def session_turn_items_from_events(
     normalized_turn_id = str(turn_id or "").strip()
     event_list = sorted(list(events or []), key=lambda item: (item.sequence, item.event_id))
     tool_outcomes: dict[str, str] = {}
+    tool_semantic_statuses: dict[str, str] = {}
     tool_summaries: dict[str, str] = {}
     for event in event_list:
         if event.event_type not in {EVENT_TOOL_RESULT, EVENT_CLI_TASK_RESULT}:
@@ -1036,6 +1037,14 @@ def session_turn_items_from_events(
         tool_call = dict(payload.get("toolCall") or payload.get("tool_call") or {})
         outcome = _ui_tool_status_from_journal(_tool_status_from_event(event, tool_call))
         tool_outcomes[call_id] = outcome
+        # semanticStatus (degraded/fallback/partial) is orthogonal to the coarse
+        # outcome; it must survive projection or the UI cannot show a degraded
+        # tool as anything other than completed.
+        semantic_status = str(
+            tool_call.get("semanticStatus") or tool_call.get("semantic_status") or ""
+        ).strip().lower()
+        if semantic_status:
+            tool_semantic_statuses[call_id] = semantic_status
         summary = str(
             tool_call.get("summary")
             or tool_call.get("resultPreview")
@@ -1084,6 +1093,8 @@ def session_turn_items_from_events(
         }
         if call_id:
             item["callId"] = call_id
+        if call_id and tool_semantic_statuses.get(call_id):
+            item["semanticStatus"] = tool_semantic_statuses[call_id]
         if str(payload.get("toolName") or ""):
             item["toolName"] = str(payload.get("toolName"))
         if str(payload.get("code") or ""):

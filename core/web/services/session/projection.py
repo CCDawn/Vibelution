@@ -2632,11 +2632,18 @@ def _canonicalize_session_turn_items_for_protocol(
         if item_type not in {"agent_message", "reasoning", "tool_call", "retry", "status", "error"}:
             item_type = "status"
         raw_status = str(raw.get("status") or "").strip().lower()
+        raw_semantic_status = str(
+            raw.get("semanticStatus") or raw.get("semantic_status") or ""
+        ).strip().lower()
+        semantic_status = raw_semantic_status or ("degraded" if raw_status == "degraded" else "")
         status = {
             "in_progress": "running",
             "streaming": "running",
             "done": "completed",
-            "degraded": "failed",
+            # Degraded is a semantic warning on a finished call, not a failure;
+            # keep the four-value status algebra and carry the warning on
+            # semanticStatus so the transcript can show it as degraded.
+            "degraded": "completed",
             "error": "failed",
         }.get(raw_status, raw_status)
         if status not in {"pending", "running", "completed", "failed"}:
@@ -2658,7 +2665,7 @@ def _canonicalize_session_turn_items_for_protocol(
                 "sessionId", "turnId", "messageId", "channel", "phase", "protocol", "provisional",
                 "terminal", "callId", "toolName", "title", "summary", "text", "diagnosticSummary",
                 "source", "sourceCellId", "sourceCellKind", "sourceItemId", "metadata", "code",
-                "input", "output", "createdAt", "updatedAt",
+                "input", "output", "createdAt", "updatedAt", "semanticStatus",
             }
         }
         if raw_item_metadata:
@@ -2691,6 +2698,7 @@ def _canonicalize_session_turn_items_for_protocol(
             item["toolName"] = str(raw.get("toolName") or raw.get("title") or "tool").strip()
             item["input"] = str(raw.get("input") or "").strip() or None
             item["output"] = text or None
+            item["semanticStatus"] = semantic_status or None
         elif item_type == "retry":
             item["attempt"] = max(1, int(raw.get("attempt") or raw.get("iteration") or 1))
             item["targetItemId"] = str(raw.get("targetItemId") or raw.get("sourceItemId") or item_id).strip()

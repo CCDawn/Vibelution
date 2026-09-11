@@ -173,6 +173,19 @@ function cellTone(item: SessionTurnItem): "neutral" | "running" | "warning" | "e
   return "neutral";
 }
 
+/** Semantic tool outcomes that render as a warning on a completed call. */
+const DEGRADED_TOOL_SEMANTIC_STATUSES = new Set(["degraded", "fallback", "partial"]);
+
+function toolSemanticStatus(item: Extract<SessionTurnItem, { type: "tool_call" }>) {
+  return compactText(item.semanticStatus).toLowerCase();
+}
+
+export function toolTurnItemIsDegraded(item: SessionTurnItem): boolean {
+  return item.type === "tool_call"
+    && item.status === "completed"
+    && DEGRADED_TOOL_SEMANTIC_STATUSES.has(toolSemanticStatus(item));
+}
+
 /** A local renderer projection. It is never stored back on ConversationMessage. */
 export function codexTranscriptFromTurnItems(
   items: readonly SessionTurnItem[],
@@ -200,9 +213,12 @@ export function codexTranscriptFromTurnItems(
       return text ? [{ ...base, kind: "reasoning_summary", text }] : [];
     }
     if (item.type === "tool_call") {
+      const degraded = toolTurnItemIsDegraded(item);
       return [{
         ...base,
         kind: "tool_call",
+        status: degraded ? "degraded" : base.status,
+        tone: degraded ? "warning" : base.tone,
         title: item.toolName,
         text: item.output,
         summary: item.summary,

@@ -152,6 +152,53 @@ def test_canonical_outcomes_commit_items_before_tools_and_project_safe_v2(tmp_pa
     assert "opaque" not in str(items).lower()
 
 
+def test_turn_items_carry_degraded_tool_semantic_status_from_tool_result(tmp_path):
+    append_turn_event(tmp_path, "session-a", "turn-1", EVENT_TURN_STARTED, status="running")
+    append_turn_event(
+        tmp_path,
+        "session-a",
+        "turn-1",
+        EVENT_ASSISTANT_ITEM_COMMITTED,
+        status="ready",
+        payload={
+            "kind": "tool_call",
+            "channel": "commentary",
+            "phase": "tool_call",
+            "callId": "call-1",
+            "toolName": "cli_tool",
+            "status": "ready",
+        },
+        tool_call_id="call-1",
+    )
+    append_turn_event(
+        tmp_path,
+        "session-a",
+        "turn-1",
+        EVENT_TOOL_RESULT,
+        status="running",
+        tool_call_id="call-1",
+        payload={
+            "toolCall": {
+                "name": "cli_tool",
+                "callId": "call-1",
+                "status": "degraded",
+                "summary": "[跨平台警告] 在 Windows 上检测到 Unix shell 片段",
+                "result": "[跨平台警告] 在 Windows 上检测到 Unix shell 片段",
+                "transportStatus": "returned",
+                "semanticStatus": "degraded",
+                "timedOut": False,
+            }
+        },
+    )
+
+    items = session_turn_items_from_events(load_turn_events(tmp_path, "session-a"), turn_id="turn-1")
+    tool_item = next(item for item in items if item.get("callId") == "call-1")
+
+    # The coarse status stays terminal; the warning rides on semanticStatus.
+    assert tool_item["status"] == "completed"
+    assert tool_item["semanticStatus"] == "degraded"
+
+
 def test_new_canonical_item_omits_receipt_but_legacy_receipt_remains_readable(tmp_path):
     identity = CanonicalItemIdentity("session-a", "turn-receipt", "inv-1", 0, "answer-1")
     receipt = {

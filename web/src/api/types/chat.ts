@@ -553,6 +553,12 @@ export type ToolCallTurnItem = SessionTurnItemBase & {
   toolName: string;
   input?: string;
   output?: string;
+  /**
+   * Semantic outcome of a finished call (degraded/fallback/partial).
+   * Orthogonal to `status`: a degraded call still counts as completed, but the
+   * transcript surfaces the warning instead of a clean success.
+   */
+  semanticStatus?: string;
 };
 
 export type RetryTurnItem = SessionTurnItemBase & {
