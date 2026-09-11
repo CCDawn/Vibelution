@@ -1265,6 +1265,68 @@ def test_runtime_scene_diagnosis_keeps_memory_status_mirror_out_of_active_cluste
     assert summary["agent_brief"]["primary_issue"] == "tool.execute.degraded"
 
 
+def test_runtime_scene_agent_brief_names_the_primary_cluster_not_the_first_signal(
+    tmp_path, monkeypatch
+):
+    """Triage must start from the dominant cluster, not the earliest signal.
+
+    Production scene 38b6c21f159d reported ``primary_issue`` as the single
+    earliest 404 while the real main cluster was a 26x React error, and its
+    ``active_cluster_count`` (severity-filtered) disagreed with
+    ``issueState.activeClusterCount``.
+    """
+
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_id = "scene-diagnosis-primary-cluster"
+    rows = [
+        {
+            "runtime_scene_id": scene_id,
+            "ts": "2026-05-18T12:00:01Z",
+            "seq": 1,
+            "component": "browser_page",
+            "phase": "api",
+            "event_code": "browser.api.request_failed",
+            "level": "error",
+            "outcome": "failed",
+            "message": "GET /api/teams/research-team/workflow-orchestration/challenge-program/questions/SCI-004 failed (404)",
+            "fields": {"status": 404},
+            "raw_refs": [{"path": "raw/browser.telemetry.log", "tail_lines": 80}],
+        },
+    ]
+    for index in range(3):
+        rows.append(
+            {
+                "runtime_scene_id": scene_id,
+                "ts": f"2026-05-18T12:01:0{index}Z",
+                "seq": 2 + index,
+                "component": "browser_page",
+                "phase": "error",
+                "event_code": "browser.page.error",
+                "level": "error",
+                "outcome": "observed",
+                "message": "Uncaught Error: Minified React error #185",
+                "fields": {"pageInstanceId": "page-1"},
+                "raw_refs": [{"path": "raw/browser.telemetry.log", "tail_lines": 80}],
+            }
+        )
+    _seed_scene(tmp_path, scene_id, rows, status="running")
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+    issue_state = detail["packageDiagnosis"]["issueState"]
+    assert issue_state["firstActiveCluster"]["eventCode"] == "browser.page.error"
+    assert issue_state["activeClusterCount"] == 2
+
+    summary = json.loads(
+        (tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}" / "summary.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    brief = summary["agent_brief"]
+    assert brief["primary_issue"] == "browser.page.error"
+    assert brief["active_cluster_count"] == issue_state["activeClusterCount"]
+    assert brief["severity_cluster_count"] == 2
+
+
 def test_runtime_scene_busy_command_is_actionable_policy_not_active_failure(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
     scene_id = "scene-diagnosis-busy-command"

@@ -474,6 +474,86 @@ def test_persist_challenge_deadline_cancel_is_not_ready_or_success(
     assert any(event.event_type == session_service.EVENT_TURN_INTERRUPTED for event in events)
 
 
+def test_persist_turn_result_drops_result_when_turn_already_settled(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """A settled turn keeps its single terminal when a late result arrives.
+
+    Restart reconciliation (``detail_loaded_after_restart``) closes an open turn
+    while the worker may still be finishing. Persisting that result would be
+    rejected by the journal guard and escalate into a second terminal event.
+    """
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_running_session(tmp_path, "session-a", "turn-a")
+    session_service._append_session_conversation_event(
+        "session-a",
+        "turn-a",
+        session_service.EVENT_TURN_INTERRUPTED,
+        status="interrupted",
+        payload={"reason": "detail_loaded_after_restart"},
+        source="reconcile_stale_session_ledger",
+    )
+
+    persist._persist_session_turn_result(
+        "session-a",
+        {"status": "completed", "summary": "迟到的结果", "raw_output": "迟到的结果"},
+        turn_id="turn-a",
+    )
+
+    events = session_service._load_session_conversation_events_cached("session-a")
+    terminals = [
+        event.event_type
+        for event in events
+        if event.event_type in (
+            session_service.EVENT_TURN_COMPLETED,
+            session_service.EVENT_TURN_FAILED,
+            session_service.EVENT_TURN_INTERRUPTED,
+        )
+    ]
+    assert terminals == [session_service.EVENT_TURN_INTERRUPTED]
+    assert [
+        event for event in events if event.event_type == session_service.EVENT_ASSISTANT_MESSAGE
+    ] == []
+
+
+def test_persist_turn_failure_does_not_add_second_terminal(tmp_path, monkeypatch) -> None:
+    """A late failure never overwrites an already-settled turn's outcome."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_running_session(tmp_path, "session-a", "turn-a")
+    session_service._append_session_conversation_event(
+        "session-a",
+        "turn-a",
+        session_service.EVENT_TURN_INTERRUPTED,
+        status="interrupted",
+        payload={"reason": "detail_loaded_after_restart"},
+        source="reconcile_stale_session_ledger",
+    )
+
+    persist._persist_session_turn_failure(
+        "session-a",
+        {"turn_id": "turn-a"},
+        ValueError(
+            "Cannot append assistant_item_committed after terminal event "
+            "for turn turn-a."
+        ),
+    )
+
+    events = session_service._load_session_conversation_events_cached("session-a")
+    assert [
+        event for event in events if event.event_type == session_service.EVENT_TURN_FAILED
+    ] == []
+    assert (
+        len([event for event in events if event.event_type == session_service.EVENT_TURN_INTERRUPTED])
+        == 1
+    )
+    stored = load_session_chat_state(tmp_path, "session-a")
+    assert stored is not None
+    assert stored.get("last_turn_status") != "failed"
+
+
 def test_persist_operator_stop_keeps_existing_ready_semantics(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_is_session_stop_requested", lambda _sid: True)
