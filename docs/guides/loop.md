@@ -144,7 +144,7 @@ active-work 挡 restart → 固定句（`AGENTS.md`§4），禁止强杀。
 | 需 force、远端删除、或归属不明的删/重置 | 停；要确认；已合入本任务的安全本地清理不重复询问 |
 | SSOT 表填不出 | 停；不实现 |
 | 未评估本地复用，或任务有复杂/开放复用决策却未完成必要仓外排序 | 停；不实现 |
-| `validation_toolchain_mismatch|missing|unhealthy` | 停；修复根共享环境或依赖身份，不创建任务 `.venv` junction |
+| `validation_toolchain_mismatch|missing|unhealthy` | 停；按 detail 补齐共享环境未安装或版本冲突的依赖，不创建任务 `.venv` junction |
 | 仅 archive 有「规定」 | 提炼到现行或标 historical；不直接执行 archive |
 
 ---

@@ -64,7 +64,7 @@ Inside its own worktree, an Agent should:
 - check `git status --short --branch` before staging;
 - stage only files that belong to the current task;
 - run the narrowest useful validation;
-- let the quality gate resolve the integration worktree's read-only `.venv` when `requirements.txt` is byte-identical; do not create a task `.venv` junction. A dependency mismatch is an explicit toolchain blocker until a compatible environment exists;
+- let the quality gate resolve the integration worktree's read-only `.venv` when that environment satisfies the task's `requirements.txt` (byte-identical, or every declared requirement already installed); do not create a task `.venv` junction. A requirement the shared environment cannot satisfy is an explicit toolchain blocker until a compatible environment exists;
 - reuse a passed result when HEAD, command, and all relevant inputs are unchanged; do not rerun the final selector plan before managed closeout;
 - commit locally;
 - self-review the current-task diff and merge readiness without waiting for the user to request review;
