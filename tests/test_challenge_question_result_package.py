@@ -585,6 +585,45 @@ def test_research_plan_rejects_malformed_protocol_sections(field: str) -> None:
         _create(payload)
 
 
+def test_competition_view_accepts_stage_one_empty_protocol_lists() -> None:
+    payload = _valid_payload()
+    payload["competition_result_view"]["datasets"] = {"source": [], "target": []}
+    payload["competition_result_view"]["experiments"] = []
+    payload["competition_result_view"]["references"] = []
+
+    package = _create(payload)
+
+    view = package.competition_result_view
+    assert {key: list(value) for key, value in view["datasets"].items()} == {
+        "source": [],
+        "target": [],
+    }
+    assert list(view["experiments"]) == []
+    assert list(view["references"]) == []
+
+
+@pytest.mark.parametrize("field", ["source", "target"])
+def test_competition_view_still_requires_dataset_keys(field: str) -> None:
+    payload = _valid_payload()
+    payload["competition_result_view"]["datasets"] = {
+        key: value
+        for key, value in payload["competition_result_view"]["datasets"].items()
+        if key != field
+    }
+
+    with pytest.raises(QuestionResultPackageError, match="datasets is missing"):
+        _create(payload)
+
+
+@pytest.mark.parametrize("field", ["methods", "results"])
+def test_competition_view_requires_non_empty_methods_and_results(field: str) -> None:
+    payload = _valid_payload()
+    payload["competition_result_view"][field] = []
+
+    with pytest.raises(QuestionResultPackageError, match=field):
+        _create(payload)
+
+
 @pytest.mark.parametrize(
     "field",
     ["round", "trigger", "input_refs", "changes", "unresolved_issues", "human_feedback"],
