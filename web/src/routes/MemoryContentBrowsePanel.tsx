@@ -1,4 +1,5 @@
 import { Search } from "lucide-react";
+import { useState } from "react";
 
 import { VButton, VNativeInput, VSection, VSkeleton, VStateSurface, VSurface } from "../components/vui";
 import { toReadableMemoryBlocks, type ReadableMemoryBlock } from "./memory/memoryReadableContent";
@@ -28,6 +29,8 @@ export type MemoryContentBrowsePanelCopy = {
   noContent: string;
   searchPlaceholder: string;
   ungrouped?: string;
+  expandGroup: string;
+  collapseGroup: string;
 };
 
 type MemoryContentBrowsePanelProps = {
@@ -44,6 +47,8 @@ type MemoryContentBrowsePanelProps = {
   loading?: boolean;
   errorText?: string;
   entriesLoading?: boolean;
+  /** Group titles that start collapsed; searching always expands them. */
+  collapsibleGroupTitles?: string[];
 };
 
 function groupItems<T extends { id: string; group?: string }>(
@@ -135,11 +140,14 @@ export function MemoryContentBrowsePanel({
   loading = false,
   errorText = "",
   entriesLoading = false,
+  collapsibleGroupTitles = [],
 }: MemoryContentBrowsePanelProps) {
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const ungrouped = copy.ungrouped || copy.browseSelectCard;
   const selectedCard = cards.find((card) => card.id === selectedCardId) ?? null;
   const cardGroups = groupItems(cards, ungrouped);
   const entryGroups = groupItems(entries, selectedCard?.title || ungrouped);
+  const searchActive = Boolean((searchText ?? "").trim());
 
   return (
     <div className={styles.root} data-vui-region="memory-content-browse">
@@ -175,40 +183,58 @@ export function MemoryContentBrowsePanel({
             {!loading && !cards.length && !errorText ? (
               <VStateSurface tone="empty" title={copy.browseEmptyCards} />
             ) : null}
-            {cardGroups.map((group) => (
-              <VSection
-                key={group.key}
-                className={styles.group}
-                title={group.title}
-                meta={`${group.items.length}`}
-              >
-                <div className={styles.cardGrid}>
-                  {group.items.map((card) => (
-                    <VSurface
-                      key={card.id}
-                      as="article"
-                      tone="card"
-                      elevation="panel"
-                      padding="normal"
-                      className={styles.card}
-                      tabIndex={0}
-                      role="button"
-                      aria-label={card.title}
-                      onClick={() => onSelectCard(card.id)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          onSelectCard(card.id);
-                        }
-                      }}
+            {cardGroups.map((group) => {
+              const collapsible = collapsibleGroupTitles.includes(group.title) && group.items.length > 0;
+              const expanded = !collapsible || expandedGroups[group.key] === true;
+              const bodyVisible = expanded || searchActive;
+              return (
+                <VSection
+                  key={group.key}
+                  className={styles.group}
+                  title={group.title}
+                  meta={`${group.items.length}`}
+                  actions={collapsible && !searchActive ? (
+                    <VButton
+                      type="button"
+                      variant="ghost"
+                      density="compact"
+                      aria-expanded={expanded}
+                      onClick={() => setExpandedGroups((current) => ({ ...current, [group.key]: !expanded }))}
                     >
-                      <strong className={styles.cardTitle}>{card.title}</strong>
-                      {card.meta ? <span className={styles.cardMeta}>{card.meta}</span> : null}
-                    </VSurface>
-                  ))}
-                </div>
-              </VSection>
-            ))}
+                      {expanded ? copy.collapseGroup : copy.expandGroup}
+                    </VButton>
+                  ) : undefined}
+                >
+                  {bodyVisible ? (
+                    <div className={styles.cardGrid}>
+                      {group.items.map((card) => (
+                        <VSurface
+                          key={card.id}
+                          as="article"
+                          tone="card"
+                          elevation="panel"
+                          padding="normal"
+                          className={styles.card}
+                          tabIndex={0}
+                          role="button"
+                          aria-label={card.title}
+                          onClick={() => onSelectCard(card.id)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              onSelectCard(card.id);
+                            }
+                          }}
+                        >
+                          <strong className={styles.cardTitle}>{card.title}</strong>
+                          {card.meta ? <span className={styles.cardMeta}>{card.meta}</span> : null}
+                        </VSurface>
+                      ))}
+                    </div>
+                  ) : null}
+                </VSection>
+              );
+            })}
           </>
         ) : (
           <div className={styles.entryList}>
