@@ -237,6 +237,7 @@ def project_v2_llm_for_runtime(public_config: dict[str, Any]) -> dict[str, Any]:
                 "model_ref": "__unconfigured__",
                 "provider_id": "",
                 "model": "",
+                "fallback": str(raw_profile.get("fallback") or "").strip(),
                 "overrides": {},
             }
             continue
@@ -254,6 +255,7 @@ def project_v2_llm_for_runtime(public_config: dict[str, Any]) -> dict[str, Any]:
             "profile_id": str(profile_id),
             "provider_id": provider_id,
             "model_ref": canonical_ref,
+            "fallback": str(raw_profile.get("fallback") or "").strip(),
         }
     llm["providers"] = runtime_providers
     llm["profiles"] = runtime_profiles
