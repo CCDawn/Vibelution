@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from core.infrastructure.atomic_io import atomic_write_text
 from vibelution_storage import (
     STORAGE_MIGRATION_SCHEMA_VERSION,
     ProjectStoragePaths,
@@ -1370,17 +1371,7 @@ def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
 
 
 def _atomic_write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
-    temp_path = Path(temp_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temp_path, path)
-    finally:
-        temp_path.unlink(missing_ok=True)
+    atomic_write_text(path, text)
 
 
 def _sha256_file(path: Path) -> str:

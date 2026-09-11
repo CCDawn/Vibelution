@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 import logging
 import os
-import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+
+from core.infrastructure.atomic_io import atomic_write_json
 
 from .constants import (
     DEFAULT_COMMAND_WAIT_SECONDS,
@@ -68,14 +69,7 @@ def build_command(command_type: str, *, args: dict[str, Any] | None = None, requ
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     ensure_runtime_manager_dirs()
-    fd, temp_path = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
-        os.replace(temp_path, path)
-    finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+    atomic_write_json(path, payload)
 
 
 def _parse_datetime(value: str) -> datetime | None:

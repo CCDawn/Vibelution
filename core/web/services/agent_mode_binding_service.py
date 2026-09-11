@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from core.infrastructure import developer_sandbox
+from core.infrastructure.atomic_io import atomic_write_json
 
 from .agent_directory_service import (
     SESSION_AGENT_VISIBILITY_ACTIVE,
@@ -986,10 +987,7 @@ def _binding_signature(
 
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.tmp")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    atomic_write_json(path, payload)
 
 
 def _relative_project_path(path: Path, *, project_root: Path | None = None) -> str:

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -14,6 +13,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from core.infrastructure import developer_sandbox
+from core.infrastructure.atomic_io import atomic_write_json
 
 from .constants import PROJECT_ROOT, RUNTIME_MANAGER_DIR
 
@@ -21,7 +21,6 @@ from .constants import PROJECT_ROOT, RUNTIME_MANAGER_DIR
 WORK_RUNS_DIR = RUNTIME_MANAGER_DIR / "work_runs"
 RECENT_RUN_IDS_LIMIT = 100
 ACTIVE_RUN_IDS_LIMIT = 64
-WRITE_RETRY_TIMEOUT_SECONDS = 5.0
 READ_RETRY_ATTEMPTS = 5
 READ_RETRY_DELAY_SECONDS = 0.05
 # Index updates are read-modify-write across processes of store instances; a
@@ -222,25 +221,7 @@ def _load_json(path: Path) -> dict[str, Any]:
 
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_path = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
-        deadline = time.monotonic() + WRITE_RETRY_TIMEOUT_SECONDS
-        attempt = 0
-        while True:
-            try:
-                os.replace(temp_path, path)
-                break
-            except PermissionError:
-                attempt += 1
-                if time.monotonic() >= deadline:
-                    raise
-                time.sleep(min(0.05 * attempt, 0.25))
-    finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+    atomic_write_json(path, payload)
 
 
 def _run_sort_key(payload: dict[str, Any]) -> tuple[str, str, str]:

@@ -6,12 +6,12 @@ import hashlib
 import json
 import os
 import re
-import tempfile
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable
 
+from core.infrastructure.atomic_io import atomic_write_text
 from vibelution_storage import resolve_project_workspace_home
 
 
@@ -143,18 +143,7 @@ def _read_json(path: Path) -> list[dict[str, Any]]:
 
 
 def _write_json_atomic(path: Path, records: list[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-            json.dump(records, handle, ensure_ascii=False, indent=2)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary_name, path)
-    finally:
-        if os.path.exists(temporary_name):
-            os.unlink(temporary_name)
+    atomic_write_text(path, json.dumps(records, ensure_ascii=False, indent=2) + "\n")
 
 
 def _required_text(value: Any, field: str, max_length: int) -> str:
