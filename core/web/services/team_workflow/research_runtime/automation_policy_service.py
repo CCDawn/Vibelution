@@ -38,7 +38,14 @@ from core.research.workflow.contracts.automation_policy import (
 CAPABILITY_DESCRIPTIONS: dict[str, str] = {
     "autoCloseMeetingRound": "close a meeting round automatically when its hard gates pass",
     "autoSelectCandidates": "select finalists automatically inside the bounded draft/screen flow",
-    "autoStartEvidenceRepair": "start an evidence repair pass automatically on detected gaps",
+    # No executor body exists for evidence_repair yet: enabling this switch only
+    # records a `not_implemented` audit entry and the human keeps the loop.  The
+    # description says so, because this preview text is what an operator reads
+    # when deciding the switch.
+    "autoStartEvidenceRepair": (
+        "requested only: no executor body exists yet, so enabling this switch "
+        "records a not_implemented audit entry and the human stays in the loop"
+    ),
     "autoConvergeQuestion": "converge a question automatically when all hard gates pass",
     "autoAdvanceBatchGate": "advance a batch gate automatically between questions",
     "autoAdjudicateQuestionReview": (

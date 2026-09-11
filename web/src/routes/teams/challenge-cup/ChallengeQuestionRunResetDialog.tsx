@@ -61,6 +61,11 @@ export function ChallengeQuestionRunResetDialog({
         queryClient.invalidateQueries({ queryKey: queryKeys.teamMeetingRounds(teamId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.teamHypothesisRounds(teamId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.hypothesisFirstSelectionContext(teamId, questionId) }),
+        // A reset changes the question's recorded result state, which the
+        // catalog overview and the single-question detail both read; without
+        // this they keep showing the pre-reset run.
+        queryClient.invalidateQueries({ queryKey: queryKeys.challengeQuestionRunStatus(teamId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.challengeQuestionRunDetail(teamId, questionId) }),
       ]);
       setConfirmationQuestionId("");
       onOpenChange(false);

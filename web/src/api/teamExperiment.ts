@@ -313,6 +313,15 @@ export function publishChallengeQuestionRun<T>(teamId: string, body: unknown): P
   );
 }
 
+/**
+ * Wire-only transport for the backend review route.
+ *
+ * No in-app caller by design: the review decision is taken through the
+ * canonical hypothesis-first command (`record_program_review`) in
+ * `ChallengeQuestionReviewForm`, which carries the gates, rationale and
+ * state-version guard the raw route does not.  Kept as a named transport so
+ * the route stays usable by the submission test API and by scripts.
+ */
 export function reviewChallengeQuestionRun<T>(
   teamId: string,
   questionId: string,
@@ -406,6 +415,15 @@ export function fetchChallengePhaseBoundaryStatus(
   );
 }
 
+/**
+ * Operator-only transport for the program-wide phase-one approval.
+ *
+ * Deliberately has no UI entry point: it approves the whole 125-question
+ * manifest and unlocks phase two, so it stays a privileged operator/script
+ * action rather than a button beside the per-question panels.  The detail
+ * panel only *reads* the resulting boundary through
+ * `fetchChallengePhaseBoundaryStatus`.
+ */
 export function approveChallengePhaseOne(
   teamId: string,
   note = "",

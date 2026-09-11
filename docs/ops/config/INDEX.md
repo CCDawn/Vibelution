@@ -69,4 +69,4 @@
 | `[git]` | 08 |
 | `[ui]` | 08 |
 | `[user_profile]` | 08 |
-| `[research_workflow]` | [auto-advance-policy.active.json 模板](./auto-advance-policy.active.json)：activation 自动推进策略文档的**治理权威**；运行时读的是 `Documents\Vibelution\config` 下的**部署副本**（`auto_advance_policy_path` 显式指定，缺省读 config 目录同名文件，env 次之）。两个读者都 fail-silent：副本过期只会静默禁用自动化，所以模板改动后必须部署并核对 `python scripts/deploy_auto_advance_policy.py`（默认只检查，`--write` 才写入并备份） |
+| `[research_workflow]` | [auto-advance-policy.active.json 模板](./auto-advance-policy.active.json)：activation 自动推进策略文档的**治理权威**；运行时读的是 `Documents\Vibelution\config` 下的**部署副本**（`auto_advance_policy_path` 显式指定，缺省读 config 目录同名文件，env 次之）。两个读者都 fail-silent：副本过期只会静默禁用自动化，所以模板改动后必须部署并核对 `python scripts/deploy_auto_advance_policy.py`（默认只检查，`--write` 才写入并备份；同一次检查也会校验 `VIBELUTION_AUTO_ADVANCE_POLICY_PATH` 指向的**影子文档**——它无仓库模板、由操作者自行维护，缺失或不合规同样只静默停掉影子遥测） |
