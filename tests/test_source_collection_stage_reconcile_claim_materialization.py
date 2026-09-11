@@ -515,6 +515,88 @@ def test_verification_status_alias_routes_by_value(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+def _fetch_receipt(
+    source_url: str, text: str
+) -> dict[str, dict[str, str]]:
+    return {
+        source_url: {
+            "text": text,
+            "locator": source_url,
+            "resolvedUrl": source_url,
+            "eventId": "evt-card-1",
+            "sessionId": "session-card-1",
+            "turnId": "turn-card-1",
+        }
+    }
+
+
+def test_card_verification_status_never_trusts_a_writeback_declaration(
+    tmp_path, monkeypatch
+):
+    """自报 full_text_checked 但没有抓取回执 → 服务端权威降级为 unverified。
+
+    回写里的 verification_status 是 Agent 声明，不是证据：它会为从未抓取的
+    页面写 full_text_checked。卡片状态只能由服务端权威派生。
+    """
+    from core.web.services.team_workflow.research_runtime.source_extraction_evidence_cards import (
+        build_source_extraction_evidence_cards,
+    )
+
+    setup = _seed_completed_extraction_task(tmp_path, monkeypatch)
+    entries = []
+    for index, candidate in enumerate(setup["candidates"], start=1):
+        entry = _anchored_extraction_entry(candidate, index=index)
+        entry["verification_status"] = "full_text_checked"
+        entries.append(entry)
+
+    cards = build_source_extraction_evidence_cards(
+        {"candidateExtractions": entries},
+        fetched_text={},
+    )
+
+    assert len(cards) == len(entries)
+    assert {card["verification_status"] for card in cards} == {"unverified"}
+
+
+def test_card_verification_status_follows_the_fetch_receipt(tmp_path, monkeypatch):
+    """抓取回执含逐字 quote → full_text_checked；回执不含 quote → metadata_checked。"""
+    from core.web.services.team_workflow.research_runtime.source_extraction_evidence_cards import (
+        build_source_extraction_evidence_cards,
+    )
+
+    setup = _seed_completed_extraction_task(tmp_path, monkeypatch)
+    candidates = setup["candidates"]
+    entries = []
+    receipts: dict[str, dict[str, str]] = {}
+    for index, candidate in enumerate(candidates, start=1):
+        entry = _anchored_extraction_entry(candidate, index=index)
+        entry["verification_status"] = "unverified"
+        entry["quote"] = "Predictive coding evidence"
+        entries.append(entry)
+        receipts.update(
+            _fetch_receipt(
+                candidate["sourceUrl"],
+                (
+                    "Predictive coding evidence"
+                    if index == 1
+                    else "unrelated fetched text"
+                ),
+            )
+        )
+
+    cards = build_source_extraction_evidence_cards(
+        {"candidateExtractions": entries},
+        fetched_text=receipts,
+    )
+
+    by_url = {card["source_url"]: card["verification_status"] for card in cards}
+    assert by_url[candidates[0]["sourceUrl"]] == "full_text_checked"
+    assert all(
+        by_url[candidate["sourceUrl"]] == "metadata_checked"
+        for candidate in candidates[1:]
+    )
+
+
 def _untimestamped_extraction_entry(candidate) -> dict:
     """SCI-091 实锤形状：契约字段齐全但缺 retrieved_at（带逐字 quote 锚）。"""
     entry = _anchored_extraction_entry(candidate)

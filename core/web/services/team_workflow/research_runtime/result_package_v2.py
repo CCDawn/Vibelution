@@ -425,6 +425,12 @@ _REVIEW_STATUS_VERIFICATIONS = {
 # the existing source_candidate_batch authority; it verifies nothing new.
 _SOURCE_SCREENED_VERIFICATION = "metadata_checked"
 
+#: The schema's own verification enum.  A value outside it fails closed rather
+#: than riding through a closed schema into the citation gate.
+_CARD_VERIFICATION_STATUSES = frozenset(
+    {"unverified", "metadata_checked", "full_text_checked", "human_verified"}
+)
+
 # Candidate ``sourceKind`` values outside the curated set (e.g. ``url``) fall
 # back to the schema's explicit non-authoritative umbrella classification.
 _SOURCE_KIND_SOURCE_TYPES = {
@@ -446,6 +452,19 @@ def _support_level_relation(card: Mapping[str, Any]) -> str:
 def _review_status_verification(
     card: Mapping[str, Any], candidate: Mapping[str, Any]
 ) -> str:
+    """Resolve one card's verification status under the authority chain.
+
+    The chain is: a card-level human review verdict (accepted/rejected/stale,
+    terminal either way) > the collection stage's own screening
+    (``metadata_checked``) > the card's own status > fail-closed
+    ``unverified``.
+
+    The card value is not the extraction writeback's raw declaration: the
+    canonical card builder derives it from the stage task's Session Journal
+    fetch receipts, so a declaration inflated past those receipts is already
+    ``unverified`` before it reaches this chain.
+    """
+
     review_status = _text(card.get("reviewStatus")).strip().casefold()
     card_decision = _REVIEW_STATUS_VERIFICATIONS.get(review_status, "")
     if card_decision:
@@ -457,6 +476,13 @@ def _review_status_verification(
         == "source_screened"
     ):
         return _SOURCE_SCREENED_VERIFICATION
+    declared = (
+        _text(_pick(card, "verification_status", "verificationStatus"))
+        .strip()
+        .casefold()
+    )
+    if declared in _CARD_VERIFICATION_STATUSES:
+        return declared
     return "unverified"
 
 
@@ -501,8 +527,7 @@ def _evidence_item(card: Mapping[str, Any], candidate: Mapping[str, Any]) -> dic
             "evidence.relation",
         ),
         "verification_status": _require_text(
-            _pick(card, "verification_status", "verificationStatus")
-            or _review_status_verification(card, candidate),
+            _review_status_verification(card, candidate),
             "evidence.verification_status",
         ),
     }
@@ -1708,6 +1733,23 @@ def _copy_package_authorities(
             package_core["authorizedModelPolicySha256"] = policy_hash
 
 
+#: Execution-design research-plan sections that a proposal-only stage-one plan
+#: genuinely does not carry.  The schema requires the lists to be present, so
+#: they are projected empty and the empty ones are recorded as deferred.
+_DEFERRED_RESEARCH_PLAN_SECTIONS = (
+    "variables",
+    "controls",
+    "data_and_materials",
+    "analysis",
+    "success_criteria",
+    "failure_criteria",
+    "stop_conditions",
+    "resources",
+    "timeline",
+    "risks",
+)
+
+
 def _research_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any]:
     """Project the canonical plan authority into the v2 research plan.
 
@@ -1720,6 +1762,9 @@ def _research_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any]:
     carry — the completion policy defers those nodes — so they are projected
     as the empty lists the schema accepts rather than being fabricated.
     Missing objective/method/work_packages/human_gate still fail closed.
+
+    A deferred section stays visible rather than silent: the caller records
+    the empty ones as ``researchPlanDeferredSections`` on the package.
     """
 
     nested = _first_mapping(plan_payload, "researchPlan", "research_plan")
@@ -1786,17 +1831,9 @@ def _research_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any]:
         "objective": objective,
         "method": method,
         "work_packages": projected_packages,
-        # Stage-two protocol sections are genuinely unplanned at stage one.
-        "variables": [],
-        "controls": [],
-        "data_and_materials": [],
-        "analysis": [],
-        "success_criteria": [],
-        "failure_criteria": [],
-        "stop_conditions": [],
-        "resources": [],
-        "timeline": [],
-        "risks": [],
+        # Stage-two protocol sections are genuinely unplanned at stage one;
+        # the caller records which ones stayed empty.
+        **{section: [] for section in _DEFERRED_RESEARCH_PLAN_SECTIONS},
         "human_gate": projected_gate,
     }
     return plan
@@ -2471,6 +2508,18 @@ def build_challenge_result_package_v2(
         # result_classification is schema-closed the same way; its truncation
         # record rides at the generic package level beside the view's.
         package_core["resultClassificationTruncations"] = classification_truncations
+    deferred_plan_sections = [
+        section
+        for section in _DEFERRED_RESEARCH_PLAN_SECTIONS
+        if not research_plan.get(section)
+    ]
+    if deferred_plan_sections:
+        # research_plan is schema-closed too, so the deferral record rides at
+        # the package level: the empty lists the schema requires are stage-two
+        # facts a proposal-only plan genuinely does not carry, and an empty
+        # section must never be mistaken for a satisfied execution-design
+        # contract.
+        package_core["researchPlanDeferredSections"] = deferred_plan_sections
     _copy_package_authorities(
         package_core,
         generic_package=generic_package,

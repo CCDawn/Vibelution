@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from typing import Any, Mapping
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit, urlunsplit
 
 
 class SourceExtractionEvidenceContractError(ValueError):
@@ -56,6 +56,98 @@ _VERIFICATION_STATUSES = {
     "full_text_checked",
     "human_verified",
 }
+
+#: Server authorities that may mint a passing ``verification_status``.  The
+#: extraction writeback's own declaration is deliberately absent: an Agent can
+#: write ``full_text_checked`` for a page it never fetched, so the declared
+#: value is never the authority.
+_FETCH_RECEIPT_VERIFICATION = "full_text_checked"
+_FETCHED_NOT_ANCHORED_VERIFICATION = "metadata_checked"
+_UNVERIFIED_STATUS = "unverified"
+
+
+def _normalized_url_key(value: object) -> str:
+    """Return a comparable key for one source locator.
+
+    Only the scheme and host are case-folded; paths stay case-sensitive so two
+    genuinely different pages cannot collapse into one another.
+    """
+
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    parsed = urlsplit(raw)
+    if not parsed.scheme or not parsed.netloc:
+        return raw.rstrip("/")
+    return urlunsplit(
+        (
+            parsed.scheme.casefold(),
+            parsed.netloc.casefold(),
+            parsed.path.rstrip("/"),
+            parsed.query,
+            "",
+        )
+    )
+
+
+def _fetch_receipt_for_url(
+    source_url: object,
+    fetched_text: Mapping[str, Mapping[str, Any]],
+) -> Mapping[str, Any]:
+    """Return the journal fetch receipt covering ``source_url``, if any.
+
+    ``task_fetched_text`` keys receipts by the requested locator and also
+    exposes the URL the fetch resolved to, so a card citing either form
+    resolves.  Matching a receipt is what makes ``full_text_checked`` a server
+    fact rather than an Agent claim.
+    """
+
+    target = _normalized_url_key(source_url)
+    if not target:
+        return {}
+    for receipt in fetched_text.values():
+        if not isinstance(receipt, Mapping):
+            continue
+        keys = {
+            _normalized_url_key(receipt.get("locator")),
+            _normalized_url_key(receipt.get("resolvedUrl")),
+        }
+        keys.discard("")
+        if target in keys:
+            return receipt
+    return {}
+
+
+def derive_server_verification_status(
+    declared: object,
+    *,
+    source_url: object,
+    quote: object,
+    fetched_text: Mapping[str, Mapping[str, Any]] | None,
+) -> str:
+    """Derive a card's ``verification_status`` from server authorities only.
+
+    Precedence: a real fetch receipt whose text contains the claim's verbatim
+    quote is ``full_text_checked``; a receipt for the page without an anchored
+    quote is ``metadata_checked`` (the page was read, the claim is not anchored
+    in it); anything else is ``unverified``.
+
+    ``fetched_text`` is the Session Journal receipt map from
+    ``extraction_fetch_text.task_fetched_text``.  Callers without a task
+    (legacy fixtures and non-collection readers) keep the declared value by
+    passing ``None``; callers that hold a stage task must pass its receipts so
+    the declaration can no longer self-certify an unfetched source.
+    """
+
+    if fetched_text is None:
+        return str(declared or "").strip().lower() or _UNVERIFIED_STATUS
+    receipt = _fetch_receipt_for_url(source_url, fetched_text)
+    if not receipt:
+        return _UNVERIFIED_STATUS
+    quoted = str(quote or "").strip()
+    if quoted and quoted in str(receipt.get("text") or ""):
+        return _FETCH_RECEIPT_VERIFICATION
+    return _FETCHED_NOT_ANCHORED_VERIFICATION
 
 
 def _text(value: object) -> str:
@@ -358,8 +450,15 @@ def _v2_card(
     parent: Mapping[str, Any],
     *,
     path: str,
+    fetched_text: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     fields = normalize_challenge_evidence_fields(item, parent, path=path)
+    fields["verification_status"] = derive_server_verification_status(
+        fields.get("verification_status"),
+        source_url=fields.get("source_url"),
+        quote=item.get("quote"),
+        fetched_text=fetched_text,
+    )
     locator = _citation_locator(item)
     if not _has_locator_value(locator):
         locator = _citation_locator(parent)
@@ -451,8 +550,16 @@ def build_source_extraction_evidence_cards(
     result: dict[str, Any],
     *,
     mode: str = "challenge_v2",
+    fetched_text: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Build canonical cards; legacy projection requires an explicit mode."""
+    """Build canonical cards; legacy projection requires an explicit mode.
+
+    ``fetched_text`` carries the stage task's Session Journal fetch receipts
+    (``extraction_fetch_text.task_fetched_text``) so each card's
+    ``verification_status`` is derived from a server authority instead of the
+    writeback's own declaration.  Callers that hold a stage task must pass it;
+    ``None`` keeps the declared value for legacy and fixture readers.
+    """
 
     if mode == "legacy":
         return _build_legacy_source_extraction_evidence_cards(result)
@@ -485,6 +592,7 @@ def build_source_extraction_evidence_cards(
                         dict(raw_finding),
                         extraction,
                         path=f"{key}[{extraction_index}].{collection_key}[{finding_index}]",
+                        fetched_text=fetched_text,
                     )
                     identity = json.dumps(
                         card,
@@ -503,6 +611,7 @@ def build_source_extraction_evidence_cards(
                     extraction,
                     extraction,
                     path=f"{key}[{extraction_index}]",
+                    fetched_text=fetched_text,
                 )
             )
     return cards
@@ -511,6 +620,7 @@ def build_source_extraction_evidence_cards(
 __all__ = [
     "SourceExtractionEvidenceContractError",
     "build_source_extraction_evidence_cards",
+    "derive_server_verification_status",
     "extraction_has_materializable_evidence",
     "normalize_challenge_evidence_fields",
 ]

@@ -247,6 +247,71 @@ def _citation_checks(output: dict) -> list[dict]:
     return [{"sourceUrl": item["source_url"], "status": "passed"} for item in output["evidence"]]
 
 
+def test_semantic_validation_rejects_hollow_dimension_ratings() -> None:
+    """结构齐全但关键维度全填 insufficient 且无引用 → 语义门必须失败。
+
+    这正是「结构完整即通过」的空洞写法：字段都在，但没有任何可核查的断言。
+    """
+    output = _output(96)
+    for row in output["dimension_reviews"]:
+        if row["dimension"] in {
+            "evidence_support",
+            "falsifiability",
+            "counterexample_coverage",
+        }:
+            row["rating"] = "insufficient"
+            row["evidence_refs"] = []
+
+    semantic = challenge_question_runs._semantic_validation(output)
+
+    assert semantic["status"] == "failed"
+    assert semantic["ratingFloorViolations"]
+    assert semantic["evidenceBindingViolations"]
+    assert any(
+        item["path"] == "dimension_reviews.rating" for item in semantic["issues"]
+    )
+    assert any(
+        item["path"] == "dimension_reviews.evidence_refs" for item in semantic["issues"]
+    )
+
+
+def test_semantic_validation_accepts_floored_dimensions_with_evidence() -> None:
+    """达标评分 + 可解析引用 → 语义门保持通过（防止修成永久拒绝）。"""
+    output = _output(96)
+
+    semantic = challenge_question_runs._semantic_validation(output)
+
+    assert semantic["status"] == "passed"
+    assert semantic["ratingFloorViolations"] == []
+    assert semantic["evidenceBindingViolations"] == []
+
+
+def test_server_citation_checks_fail_on_unverified_evidence() -> None:
+    """证据行未获服务端佐证 → 门禁回执失败，调用方传入的 checks 不再是权威。"""
+    output = _output(96)
+    for row in output["evidence"]:
+        row["verification_status"] = "unverified"
+
+    checks = challenge_question_runs._server_citation_checks(
+        "research-team", output, question_id="SCI-096", run_id="run-sci-096"
+    )
+
+    assert checks
+    assert all(item["status"] == "failed" for item in checks)
+
+
+def test_server_citation_checks_pass_on_verified_evidence() -> None:
+    """证据行带通过态 → 门禁回执通过（防止修成永久拒绝）。"""
+    output = _output(96)
+
+    checks = challenge_question_runs._server_citation_checks(
+        "research-team", output, question_id="SCI-096", run_id="run-sci-096"
+    )
+
+    assert checks
+    assert all(item["status"] == "passed" for item in checks)
+
+
 def _challenge_task() -> dict:
     return {
         "taskId": "stage-task-sci-096",
