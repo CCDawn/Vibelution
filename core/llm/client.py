@@ -3379,6 +3379,12 @@ class LLMClient:
             metadata=metadata,
             invocation_scope=invocation_scope,
         )
+        from .wire.chat_completions import ensure_chat_completions_reasoning_roundtrip
+
+        final_payload = ensure_chat_completions_reasoning_roundtrip(
+            final_payload,
+            route=self.protocol_route,
+        )
         self._last_payload_protocol_summary = dict(
             built.summary or payload_protocol_summary(final_payload, self.protocol_route)
         )

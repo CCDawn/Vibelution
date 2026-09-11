@@ -317,6 +317,39 @@ def test_deepseek_reasoning_protocol_preserves_assistant_reasoning_roundtrip():
     assert payload["messages"][0]["reasoning_content"] == "先读文件再决定"
 
 
+def test_deepseek_reasoning_protocol_last_mile_guard_repairs_wire_payload(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "deepseek",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://api.deepseek.com/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "deepseek-chat",
+        }
+    )
+    client = LLMClient(config=config, backend=lambda payload: payload)
+
+    def drop_semantic_backstop(messages, *, route):
+        return list(messages)
+
+    monkeypatch.setattr(
+        "core.llm.wire.chat_completions._ensure_reasoning_roundtrip_messages",
+        drop_semantic_backstop,
+    )
+
+    payload = client._build_payload(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[{"id": "call_1", "name": "read_file", "args": {"path": "agent.py"}}],
+            ),
+            ToolMessage(content="file content", tool_call_id="call_1", name="read_file"),
+        ]
+    )
+
+    assert str(payload["messages"][0].get("reasoning_content") or "").strip()
+
+
 def test_payload_protocol_error_after_duplicate_id_normalization_includes_safe_snapshot():
     config = make_config(
         **{
