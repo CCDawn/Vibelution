@@ -3848,6 +3848,15 @@ def project_state_from_records(
                         or generation["generationMeetingId"]
                         or "legacy-generation"
                     ),
+                    # The retry must route the active stage-one run exactly
+                    # like the grounded R1 open offer: without it the launch
+                    # resolver falls back to the authority-less base meeting,
+                    # which the execution fence closes as an orphan.
+                    **(
+                        {"runId": str(active_workflow_run.get("runId") or "")}
+                        if active_workflow_run is not None
+                        else {}
+                    ),
                 },
             )
         )

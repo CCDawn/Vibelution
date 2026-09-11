@@ -172,6 +172,10 @@ class QuestionActionPayload(StrictWireModel):
 
 class RetryGenerationPayload(QuestionActionPayload):
     previousAttemptId: str = Field(..., min_length=1)
+    # Like the grounded R1 open offer, the retry rides its active stage-one run
+    # so an origin-level click cannot fall back to the authority-less base
+    # meeting that the challenge execution fence closes as an orphan.
+    runId: str = ""
 
 
 class OpenGenerationPayload(QuestionActionPayload):
