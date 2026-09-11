@@ -457,4 +457,40 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain("context_compression_skipped_low_savings");
     expect(html).not.toContain("context_compression_failed_preserved");
   });
+
+  it("collapses a settled reasoning cell to a preview and unmounts its body", () => {
+    const reasoning = (status: "running" | "completed"): ConversationMessage => ({
+      id: `assistant-reasoning-${status}`,
+      role: "assistant",
+      timestamp: "2026-09-11T05:00:00Z",
+      turnId: `turn-reasoning-${status}`,
+      status,
+      turnItems: [{
+        id: `reasoning-${status}-r1`,
+        itemId: `reasoning-${status}`,
+        version: 3,
+        sessionId: "session-1",
+        turnId: `turn-reasoning-${status}`,
+        type: "reasoning",
+        status,
+        revision: 1,
+        sequence: 1,
+        terminal: status === "completed",
+        text: "先确认这个函数的两条来源路径，再看函数体。",
+      }],
+    });
+
+    const live = renderConversation([reasoning("running")]);
+    expect(live).toContain('data-thought-expanded="true"');
+    expect(live).toContain('data-thought-scroll-body="true"');
+    expect(live).toContain("先确认这个函数的两条来源路径");
+
+    const settled = renderConversation([reasoning("completed")]);
+    expect(settled).toContain('data-thought-expanded="false"');
+    // Collapsed means the long body is not mounted at all: the finished thought
+    // stops re-rendering its text on every transcript update.
+    expect(settled).not.toContain('data-thought-scroll-body="true"');
+    // The one-line preview keeps the collapsed cell scannable.
+    expect(settled).toContain(styles.timelineThoughtInlinePreview);
+  });
 });

@@ -2119,8 +2119,9 @@ export function ConversationView({
       }
       // Commentary is user-visible progress; reasoning_summary remains the thinking lane.
       if (cell.phase === "commentary") {
-        return renderCodexThoughtScrollCell({
+        return renderCodexThoughtScrollCell(message.id, {
           cellId: cell.id,
+          sectionId: reasoningExpansionSectionId(cell),
           text,
           status: cell.status,
           tone: cell.tone,
@@ -2145,7 +2146,7 @@ export function ConversationView({
       );
     }
     if (cell.kind === "reasoning_summary") {
-      return renderCodexReasoningSummaryCell(cell);
+      return renderCodexReasoningSummaryCell(message, cell);
     }
     if (cell.kind === "error_notice") {
       const rawErrorTitle = cell.title?.trim() || (lang === "zh" ? "执行失败" : "Failed");
@@ -2335,12 +2336,16 @@ export function ConversationView({
   }
 
   /**
-   * Process-trail thought box (reasoning + commentary): always shown in chrono order
-   * with tools; body is height-capped and scrolls when long.
+   * Process-trail thought box (reasoning + commentary): shown in chrono order with
+   * tools, height-capped and scrollable while it streams. Once the segment settles
+   * the body collapses to a one-line preview, so a finished thought neither keeps
+   * covering the transcript nor keeps its text mounted.
    */
   function renderCodexThoughtScrollCell(
+    messageId: string,
     input: {
       cellId: string;
+      sectionId: string;
       text: string;
       status: CodexTranscriptCell["status"];
       tone: CodexTranscriptCell["tone"];
@@ -2356,6 +2361,14 @@ export function ConversationView({
       return null;
     }
     const isLive = input.status === "running" || input.status === "pending";
+    // Open while live so the streamed text is readable; the default flips to
+    // collapsed on completion and the section refreshes to the inline preview.
+    // The section id comes from `reasoningExpansionSectionId`, which prefers
+    // sourceItemId: a stream update that rewrites cell.id keeps the same
+    // open/closed choice, and an explicit toggle always wins over the default.
+    const defaultExpanded = isLive;
+    const expanded = getExpansionState(messageId, input.sectionId, defaultExpanded);
+    const inlinePreview = expanded ? "" : humanizeReasoningPreview(fullText);
     const toneClassName = styles[`codexTranscriptCell_${input.tone}` as keyof typeof styles] ?? "";
     return (
       <section
@@ -2371,12 +2384,22 @@ export function ConversationView({
         data-codex-transcript-cell-channel={input.channel || undefined}
         data-codex-transcript-cell-phase={input.phase ?? ""}
         data-conversation-part-key={input.cellId}
-        data-thought-section={input.cellId}
-        data-thought-expanded="true"
+        data-thought-section={input.sectionId}
+        data-thought-expanded={expanded ? "true" : "false"}
         role={isLive ? "status" : undefined}
         aria-live={isLive ? "polite" : undefined}
       >
-        <div className={styles.codexTranscriptReasoningHeader} aria-hidden={false}>
+        <VButton
+          type="button"
+          contentLayout="plain"
+          className={styles.codexTranscriptReasoningHeader}
+          aria-expanded={expanded}
+          aria-label={expanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden")}
+          onClick={(event) => {
+            event.stopPropagation();
+            toggleSection(messageId, input.sectionId, defaultExpanded);
+          }}
+        >
           <span className={styles.codexTranscriptCellIcon} aria-hidden="true">
             {isLive
               ? <LoaderCircle className={styles.statusSpinner} size={14} />
@@ -2386,23 +2409,31 @@ export function ConversationView({
             <span className={styles.codexTranscriptReasoningTitleRow}>
               <span className={styles.codexTranscriptCellTitle}>{input.title}</span>
               {input.meta ? <span className={styles.codexTranscriptCellMeta}>{input.meta}</span> : null}
+              {!expanded && inlinePreview ? (
+                <>
+                  <span className={styles.timelineCellSeparator} aria-hidden="true">·</span>
+                  <span className={styles.timelineThoughtInlinePreview}>{inlinePreview}</span>
+                </>
+              ) : null}
             </span>
           </span>
-        </div>
-        <ThoughtScrollBody text={fullText} streaming={isLive} />
+        </VButton>
+        {expanded ? <ThoughtScrollBody text={fullText} streaming={isLive} /> : null}
       </section>
     );
   }
 
   function renderCodexReasoningSummaryCell(
+    message: ConversationMessage,
     cell: CodexTranscriptCell,
   ) {
     const fullText = String(cell.text || cell.summary || "").trim();
     if (!fullText) {
       return null;
     }
-    return renderCodexThoughtScrollCell({
+    return renderCodexThoughtScrollCell(message.id, {
       cellId: cell.id,
+      sectionId: reasoningExpansionSectionId(cell),
       text: fullText,
       status: cell.status,
       tone: cell.tone,

@@ -133,3 +133,43 @@ def test_transport_degraded_and_recovered_statuses_remain_in_timeline():
 
     assert degraded[0]["status"] == "degraded"
     assert recovered[0]["status"] == "recovered"
+
+
+def test_merged_thought_reflects_latest_status_so_finished_thinking_collapses():
+    """A thought committed in_progress then done must merge as completed.
+
+    The reasoning lane commits one segment more than once while it streams, so
+    the merge decides what the transcript shows. It used to OR `defaultExpanded`
+    and latch `status="running"`, which meant a finished thought never reported
+    the collapsed default and stayed expanded for the rest of the session.
+    """
+    items = build_conversation_timeline_items(
+        message_id="message-thought-merge",
+        feedback_events=[
+            {"kind": "thought", "status": "running", "sequence": 1, "summary": "先确认来源路径。"},
+            {"kind": "thought", "status": "completed", "sequence": 2, "summary": "再看函数体。"},
+        ],
+        include_assistant_text=False,
+        lang="zh",
+    )
+
+    thought = next(item for item in items if item["kind"] == "thought")
+    assert thought["status"] == "completed"
+    assert thought["defaultExpanded"] is False
+    assert "先确认来源路径。" in thought["text"]
+    assert "再看函数体。" in thought["text"]
+
+
+def test_running_thought_keeps_the_expanded_default_while_it_streams():
+    items = build_conversation_timeline_items(
+        message_id="message-thought-live",
+        feedback_events=[
+            {"kind": "thought", "status": "running", "sequence": 1, "summary": "仍在推理。"},
+        ],
+        include_assistant_text=False,
+        lang="zh",
+    )
+
+    thought = next(item for item in items if item["kind"] == "thought")
+    assert thought["status"] == "running"
+    assert thought["defaultExpanded"] is True
