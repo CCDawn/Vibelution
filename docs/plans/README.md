@@ -7,7 +7,7 @@
 
 | 文件 | Status | 说明 |
 | --- | --- | --- |
-| [2026-09-11-command-code-headless-transport-poc.md](2026-09-11-command-code-headless-transport-poc.md) | USER-REQUESTED / PROPOSED FOR REVIEW | Command Code headless CLI 传输探针：量化 GO/NO-GO 判据、事件与会话采集项、模型对照控制，以及历史权威/工具执行归属等阻碍清单；未执行探针，未改产品路径 |
+| [2026-09-11-command-code-headless-transport-poc.md](2026-09-11-command-code-headless-transport-poc.md) | USER-REQUESTED / PROPOSED FOR REVIEW（P0/P1 已执行） | Command Code headless CLI 传输探针：P0 已证明存在无 shell 层的可用调起路径、P1 已取得完整事件清单与结果帧结构，并据实修订 G3 度量与 G4 判定；G1（坏窗口结构免疫）未测，无 GO/NO-GO 结论；未改产品路径 |
 | [2026-09-05-independent-operator-experiment-flow-plan.md](2026-09-05-independent-operator-experiment-flow-plan.md) | USER-REQUESTED / PROPOSED FOR REVIEW | 独立算子优化实验流：单次讨论、优化假设、知识补齐、真实 GPU 实验与反馈迭代；含成熟项目源码调研、复用裁决、数据隔离、实施顺序和验收，尚未实施 |
 | [2026-09-02-challenge-cup-10-parallel-concurrency-plan.md](2026-09-02-challenge-cup-10-parallel-concurrency-plan.md) | USER-REQUESTED / ACTIVE PLAN | 10 并发链路改造与并发缺陷修复任务清单：搜索 circuit/fan-in 双花 P0、dispatch 并行化关键路径（B1–B5）、串线与丢写批次（C1–C7）、并发测试与 10 并发验收（D1–D2） |
 | [2026-08-30-challenge-cup-automatic-chain-reliability-plan.md](2026-08-30-challenge-cup-automatic-chain-reliability-plan.md) | USER-REQUESTED / ACTIVE PLAN | 挑战杯群聊、摘要、LangGraph/Ledger 调度的 deadline、durable recovery、run 隔离、上下文与自动推进完整修复任务图 |
