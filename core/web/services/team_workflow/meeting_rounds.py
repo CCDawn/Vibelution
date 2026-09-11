@@ -2258,54 +2258,76 @@ def _persist_closure_artifacts(
         record_personal_memory_candidates,
     )
 
+    digests_path = _digests_path(normalized_team_id)
+    decisions_path = _decisions_path(normalized_team_id)
+    # SCI-049: the full digest/decision JSONL parses and the per-agent memory
+    # candidate recording used to run inside the writer's 60s budget, so every
+    # bounded reader queued behind a closure commit.  Both are idempotent and
+    # self-serialized (memory candidates carry their own module lock), so they
+    # run unlocked; the write lock below only has to make each existence
+    # check + append atomic.
+    digest_records = _read_jsonl(digests_path)
+    decision_records = _read_jsonl(decisions_path)
+    digest_cursor = _round_file_cursor(digests_path)
+    decision_cursor = _round_file_cursor(decisions_path)
+    participants = _normalized_str_list(meeting_round.get("participants"))
+    memory_result = record_personal_memory_candidates(
+        normalized_team_id,
+        scope_payload={
+            "program": meeting_round.get("program") or "",
+            "theme": meeting_round.get("theme") or "",
+            "campaign": meeting_round.get("campaign") or "",
+            "question": meeting_round.get("question") or "",
+            "branch": meeting_round.get("branch") or "",
+            "workflow": meeting_round.get("workflow") or "",
+            "agentId": meeting_round.get("agentId") or "",
+            "mode": meeting_round.get("mode") or "",
+        },
+        agents=participants,
+        source_refs=[
+            f"meeting_round:{meeting_round['meetingRoundId']}",
+            f"meeting_digest:{digest['digestId']}",
+            *[f"decision_record:{item['decisionId']}" for item in decisions],
+        ],
+        memory_class=str(request.get("memoryClass") or "personal_reflection"),
+        summaries=request.get("memorySummaries") if isinstance(request.get("memorySummaries"), Mapping) else None,
+        reuse_policy=str(request.get("reusePolicy") or "advisory_only"),
+        evidence_status=str(request.get("evidenceStatus") or "unverified"),
+        accepted=bool(request.get("accepted")),
+    )
+
     with _write_lock("_persist_closure_artifacts"):
+        # The pre-read is authoritative only while the file revision is
+        # unchanged; a racing writer (or a scoped reset rewrite) bumps the
+        # cursor and forces the re-read inside the lock, keeping the reuse
+        # decision atomic with the append.
+        if _round_file_cursor(digests_path) != digest_cursor:
+            digest_records = _read_jsonl(digests_path)
         appended_digest = _latest_by_id(
-            _read_jsonl(_digests_path(normalized_team_id)),
+            digest_records,
             "digestId",
             digest["digestId"],
         )
         if appended_digest is None:
-            _append_jsonl(_digests_path(normalized_team_id), digest)
+            _append_jsonl(digests_path, digest)
         else:
             digest = appended_digest
+        if _round_file_cursor(decisions_path) != decision_cursor:
+            decision_records = _read_jsonl(decisions_path)
         appended_decisions: list[dict[str, Any]] = []
         for decision in decisions:
             existing_decision = _latest_by_id(
-                _read_jsonl(_decisions_path(normalized_team_id)),
+                decision_records,
                 "decisionId",
                 decision["decisionId"],
             )
             if existing_decision is None:
-                _append_jsonl(_decisions_path(normalized_team_id), decision)
+                _append_jsonl(decisions_path, decision)
+                decision_records.append(decision)
             else:
                 decision = existing_decision
             appended_decisions.append(decision)
         decisions = appended_decisions
-        participants = _normalized_str_list(meeting_round.get("participants"))
-        memory_result = record_personal_memory_candidates(
-            normalized_team_id,
-            scope_payload={
-                "program": meeting_round.get("program") or "",
-                "theme": meeting_round.get("theme") or "",
-                "campaign": meeting_round.get("campaign") or "",
-                "question": meeting_round.get("question") or "",
-                "branch": meeting_round.get("branch") or "",
-                "workflow": meeting_round.get("workflow") or "",
-                "agentId": meeting_round.get("agentId") or "",
-                "mode": meeting_round.get("mode") or "",
-            },
-            agents=participants,
-            source_refs=[
-                f"meeting_round:{meeting_round['meetingRoundId']}",
-                f"meeting_digest:{digest['digestId']}",
-                *[f"decision_record:{item['decisionId']}" for item in decisions],
-            ],
-            memory_class=str(request.get("memoryClass") or "personal_reflection"),
-            summaries=request.get("memorySummaries") if isinstance(request.get("memorySummaries"), Mapping) else None,
-            reuse_policy=str(request.get("reusePolicy") or "advisory_only"),
-            evidence_status=str(request.get("evidenceStatus") or "unverified"),
-            accepted=bool(request.get("accepted")),
-        )
     return digest, decisions, memory_result
 
 
@@ -2642,23 +2664,31 @@ def list_meeting_rounds(
         if str(item or "").strip()
     }
     status_key = tuple(sorted(statuses))
-    rows: list[dict[str, Any]]
-    with _read_lock("list_meeting_rounds"):
-        latest = _latest_round_index(normalized_team_id)
-        if not read_only:
-            # Mutation-safe path: build the deep copies outside the read lock
-            # below, exactly as before (the cached index is never mutated in
-            # place, so releasing the lock first stays safe).
-            shared = latest
-        else:
-            path = _rounds_path(normalized_team_id)
-            memo_key = (
-                str(path.resolve()),
-                (_round_file_cursor(path) or ()),
-                status_key,
-            )
-            rows = _ROUND_LIST_COPY_CACHE.get(memo_key)
-            if rows is None:
+    rows: list[dict[str, Any]] | None = None
+    if read_only:
+        # Lock-free memo hit (SCI-049): the memo key pins the exact round-file
+        # revision, so a hit serves an immutable snapshot that exactly matches
+        # that revision without queueing on the module lock — a long write
+        # critical section no longer delays bounded read-only callers.  A
+        # stat/cache race can only miss (falling through to the locked path)
+        # or serve the pinned older revision; the JSONL remains the authority
+        # and every shared element stays read-only per the contract below.
+        path = _rounds_path(normalized_team_id)
+        memo_key = (
+            str(path.resolve()),
+            (_round_file_cursor(path) or ()),
+            status_key,
+        )
+        rows = _ROUND_LIST_COPY_CACHE.get(memo_key)
+    if rows is None:
+        with _read_lock("list_meeting_rounds"):
+            latest = _latest_round_index(normalized_team_id)
+            if not read_only:
+                # Mutation-safe path: build the deep copies outside the read lock
+                # below, exactly as before (the cached index is never mutated in
+                # place, so releasing the lock first stays safe).
+                shared = latest
+            else:
                 rows = sorted(
                     (
                         record
@@ -2668,10 +2698,15 @@ def list_meeting_rounds(
                     ),
                     key=lambda item: str(item.get("startedAt") or ""),
                 )
+                memo_key = (
+                    str(path.resolve()),
+                    (_round_file_cursor(path) or ()),
+                    status_key,
+                )
                 _ROUND_LIST_COPY_CACHE[memo_key] = rows
-            _ROUND_LIST_COPY_CACHE.move_to_end(memo_key)
-            while len(_ROUND_LIST_COPY_CACHE) > _ROUND_LIST_COPY_CACHE_LIMIT:
-                _ROUND_LIST_COPY_CACHE.popitem(last=False)
+                _ROUND_LIST_COPY_CACHE.move_to_end(memo_key)
+                while len(_ROUND_LIST_COPY_CACHE) > _ROUND_LIST_COPY_CACHE_LIMIT:
+                    _ROUND_LIST_COPY_CACHE.popitem(last=False)
     if not read_only:
         rows = sorted(
             (

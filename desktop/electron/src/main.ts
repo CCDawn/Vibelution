@@ -108,12 +108,18 @@ import {
 } from "./process/workbenchLifecycle.js";
 import {
   ensureFrontendRelease,
+  launcherStatePath,
   mainLineBackendIsReachable,
   mainLineBackendIsReusable,
+  readLauncherStateFile,
   spawnWorkbenchBackend
 } from "./process/workbenchBackend.js";
 import { waitForBackendHealthy } from "./process/workbenchBackendHealth.js";
-import { inspectWorkbenchServingVersion } from "./process/servingVersion.js";
+import {
+  inspectWorkbenchServingVersion,
+  verifyRestartedServingVersion,
+  type ServingProcessIdentity
+} from "./process/servingVersion.js";
 import { recordAdmissionOutcome } from "./lifecycle/instanceAdmissionStore.js";
 import { resolveConfigHome, resolveDataHomeForProject } from "./lifecycle/projectStoragePaths.js";
 import {
@@ -3160,6 +3166,16 @@ async function orchestrateLauncherLifecycle(
       console.warn(error instanceof Error ? error.message : String(error));
     }
   }
+  // Snapshot the pre-mutation backend identity so the post-start verification
+  // can prove the lifecycle operation actually replaced the serving process
+  // (2026-09-11: a "restarted" workbench kept serving a two-day-old build).
+  const preMutationBackendState = readLauncherStateFile(launcherStatePath(paths.workspaceRoot));
+  const preMutationBackendIdentity: ServingProcessIdentity | null = Number(preMutationBackendState.backendPid || 0) > 0
+    ? {
+      pid: Number(preMutationBackendState.backendPid),
+      createTime: Number(preMutationBackendState.backendCreateTime || 0)
+    }
+    : null;
   const mutation = await launcherLifecycleSupervisor.executeMutation({
     lease: intentLease,
     mutate: async () => await runWorkbenchLifecycle({
@@ -3224,12 +3240,18 @@ async function orchestrateLauncherLifecycle(
       const readyWaitMs = lifecycleOperation === "rebuild-and-start"
         ? WORKBENCH_REBUILD_READY_WAIT_MS
         : WORKBENCH_START_READY_WAIT_MS;
-      void openWorkbenchAfterLifecycleReady(paths, launcherBootstrap, provider, lease, readyWaitMs)
-        .catch((error: unknown) => {
-          if (!lease.signal.aborted) {
-            console.warn(error instanceof Error ? error.message : String(error));
-          }
-        });
+      void openWorkbenchAfterLifecycleReady(
+        paths,
+        launcherBootstrap,
+        provider,
+        lease,
+        readyWaitMs,
+        preMutationBackendIdentity
+      ).catch((error: unknown) => {
+        if (!lease.signal.aborted) {
+          console.warn(error instanceof Error ? error.message : String(error));
+        }
+      });
     }
   }
   if (
@@ -3533,13 +3555,25 @@ async function openWorkbenchAfterLifecycleReady(
   bootstrap: LauncherBootstrapResult,
   provider: ElectronWindowProvider,
   lease: LauncherLifecycleLease,
-  _timeoutMs: number
+  _timeoutMs: number,
+  previousBackendIdentity?: ServingProcessIdentity | null
 ): Promise<void> {
   // I4b already waited for backend health before returning. Do not poll Python
   // runtime-manager result files: Electron main-line never writes them, so a
   // 90s wait used to block the workbench window after a successful start.
   if (!launcherLifecycleSupervisor.isCurrent(lease)) {
     return;
+  }
+  // Post-start build verification: never reopen the workbench on a stale or
+  // unreplaced serving process (2026-09-11 freshness-gate incident).
+  const servingVerification = await verifyRestartedServingVersion({
+    workspaceRoot: paths.workspaceRoot,
+    previousBackendIdentity: previousBackendIdentity ?? null
+  });
+  if (!servingVerification.ok) {
+    const detail = `Workbench serving verification failed after ${lease.instanceId} start: ${servingVerification.reason}`;
+    console.error(detail);
+    throw new Error(detail);
   }
   const url = await refreshLiveWorkbenchUrl(paths);
   if (!launcherLifecycleSupervisor.isCurrent(lease) || !launcherLifecycleSupervisor.claimReady(lease)) {

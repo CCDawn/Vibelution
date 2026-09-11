@@ -43,6 +43,7 @@ import {
 } from "./browserTelemetry";
 import {
   backendSystemTone,
+  codeFreshnessStale,
   deriveActiveWorkIndicator,
   deriveBackendSystemState,
   deriveFrontendSystemState,
@@ -2109,14 +2110,7 @@ export function AppShell() {
   rightStatusCards[0]);
   // Code-freshness: a behind instance is a caution-grade system condition the
   // user should act on (restart), without masking a real failure.
-  const codeStale = Boolean(
-    codeFreshnessQuery.data
-    && (
-      codeFreshnessQuery.data.verdict === "backend_behind"
-      || codeFreshnessQuery.data.verdict === "frontend_behind"
-      || codeFreshnessQuery.data.verdict === "backend_and_frontend_behind"
-    ),
-  );
+  const codeStale = codeFreshnessStale(codeFreshnessQuery.data?.verdict);
   const effectivePrimaryStatusCard = codeStale && primaryStatusCard.tone !== "failed"
     ? { ...primaryStatusCard, tone: "caution" as const }
     : primaryStatusCard;
