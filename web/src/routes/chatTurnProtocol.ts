@@ -189,6 +189,7 @@ export function codexTranscriptFromTurnItems(
       terminal: item.terminal,
       diagnosticSummary: item.diagnosticSummary,
       sourceItemId: item.itemId,
+      originType: item.type,
     };
     if (item.type === "agent_message") {
       const text = compactText(item.text);

@@ -494,6 +494,37 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(settled).toContain(styles.timelineThoughtInlinePreview);
   });
 
+  it("labels a retry row in human copy instead of the model_retry protocol code", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-retry-row",
+        role: "assistant",
+        timestamp: "2026-09-11T07:00:00Z",
+        turnId: "turn-retry-row",
+        status: "completed",
+        turnItems: [{
+          id: "retry-row-r1",
+          itemId: "retry-row",
+          version: 3,
+          sessionId: "session-1",
+          turnId: "turn-retry-row",
+          type: "retry",
+          attempt: 1,
+          targetItemId: "answer",
+          reason: "模型连接正在重试...\n第 1/3 次；原因：server_error。本轮仍在继续，请不要重复提交。",
+          status: "completed",
+          revision: 1,
+          sequence: 1,
+          terminal: true,
+        }],
+      },
+    ]);
+
+    expect(html).toContain('data-codex-transcript-cell-kind="status"');
+    expect(html).toContain("请求重试");
+    expect(html).not.toContain(">model_retry<");
+  });
+
   it("shows what a running tool is working on, from its arguments", () => {
     const runningTool = (
       toolName: string,

@@ -134,6 +134,7 @@ import {
   type CodexTranscriptCell,
 } from "./codexTranscriptCells";
 import { resolveCodexTranscriptSurface, type CodexTranscriptSurface } from "./codexNativeTranscriptSurface";
+import { activeTurnStageLabel } from "./conversationActiveTurnStatusPresentation";
 import {
   buildCodexTranscriptTimelineNodes,
   codexTranscriptToolDurationSeconds,
@@ -2477,6 +2478,9 @@ export function ConversationView({
     if (cell.status === "running" || cell.status === "pending") {
       return <LoaderCircle className={styles.statusSpinner} size={14} />;
     }
+    if (cell.originType === "retry") {
+      return <RefreshCw size={14} />;
+    }
     if (cell.kind === "reasoning_summary") {
       return <BrainCircuit size={14} />;
     }
@@ -2490,6 +2494,9 @@ export function ConversationView({
   }
 
   function codexTranscriptCellTitle(cell: CodexTranscriptCell) {
+    if (cell.originType === "retry") {
+      return activeTurnStageLabel("model_retry", lang);
+    }
     if (cell.kind === "tool_call") {
       const rawToolName = cell.toolLifecycleModel?.toolCalls?.[0]?.rawToolName?.trim();
       const rawTitle = cell.title?.trim();

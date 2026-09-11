@@ -19,6 +19,15 @@ export type CodexTranscriptCellStatus = "pending" | "running" | "completed" | "f
 
 export type CodexTranscriptCellTone = "neutral" | "running" | "warning" | "error";
 
+/** Canonical SessionTurnItem type that produced this render cell. */
+export type CodexTranscriptCellOriginType =
+  | "agent_message"
+  | "reasoning"
+  | "tool_call"
+  | "retry"
+  | "status"
+  | "error";
+
 export type CodexTranscriptCell = {
   id: string;
   kind: CodexTranscriptCellKind;
@@ -40,6 +49,7 @@ export type CodexTranscriptCell = {
   /** Canonical tool input; names what a running tool is working on. */
   toolArguments?: Record<string, unknown>;
   sourceItemId?: string;
+  originType?: CodexTranscriptCellOriginType;
 };
 
 export type CodexTranscriptCellBuildOptions = {
