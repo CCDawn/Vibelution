@@ -132,8 +132,13 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 
 ### 文件结构
 
-- product：`VWorkflowCanvas.tsx`、`workflowCanvasTypes.ts`、`workflowCanvasModel.ts`
+- product：`VWorkflowCanvas.tsx`、`VWorkflowCanvas.styles.ts`、`workflowCanvasTypes.ts`、`workflowCanvasModel.ts`
 - renderer：`renderers/shadcn/workflow/*`（节点/边/布局/状态/控件各一文件）
+
+**加载边界：** renderer 静态引入 `@xyflow/react` 及其样式表，整条链因此无法被 tree-shake。
+product 门面必须**动态加载** renderer（`lazy` + `Suspense`），否则任何经 VUI barrel 的入口都会把
+画布引擎拖进 eager entry；`VWorkflowCanvas.entryBoundary.test.ts` 固定这条约束，`npm run check:bundle`
+守尺寸。
 
 ## 假说先行区域
 
