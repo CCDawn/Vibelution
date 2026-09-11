@@ -55,6 +55,7 @@ describe("Chat session tool approval API", () => {
   it("owns session turn-command transport outside chat route hooks", () => {
     expect(apiSource).toContain("/messages");
     expect(apiSource).toContain("/messages/edit-resubmit");
+    expect(apiSource).toContain("/messages/regenerate");
     expect(apiSource).toContain("/stop");
     expect(apiSource).toContain("/guidance");
     expect(apiSource).toContain("/attachments");
@@ -62,6 +63,7 @@ describe("Chat session tool approval API", () => {
     expect(apiSource).toContain("/reasoning-effort");
     expect(composerSource).toContain("submitSessionMessage");
     expect(composerSource).toContain("editResubmitSessionMessage");
+    expect(composerSource).toContain("regenerateSessionMessage");
     expect(composerSource).toContain("stopSessionTurn");
     expect(composerSource).toContain("submitSessionGuidance");
     expect(composerModelSource).toContain("postSessionImageAttachment");

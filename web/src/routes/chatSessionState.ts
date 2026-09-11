@@ -241,6 +241,57 @@ export type SessionDetailLoadState = {
   backgroundError: boolean;
 };
 
+export type OptimisticRegenerateInput = {
+  messageId: string;
+};
+
+/**
+ * ChatGPT/Claude-style regenerate: keep the target user message and drop every
+ * message after it so the timeline matches the operation before the server
+ * round-trip. Callers should snapshot the previous detail for rollback.
+ */
+export function applyOptimisticRegenerate(
+  detail: SessionDetail | undefined,
+  input: OptimisticRegenerateInput,
+): SessionDetail | undefined {
+  if (!detail) {
+    return detail;
+  }
+
+  const messageId = String(input.messageId || "").trim();
+  const messages = detail.messages ?? [];
+  const targetIndex = messageId
+    ? messages.findIndex((message) => String(message.id || "").trim() === messageId)
+    : -1;
+
+  if (targetIndex < 0 || messages[targetIndex].role !== "user") {
+    return markSessionDetailRunning(detail);
+  }
+
+  const nextMessages = messages.slice(0, targetIndex + 1);
+  const truncatedCount = messages.length - nextMessages.length;
+  const previousWindow = detail.messageWindow;
+  const nextWindow = previousWindow
+    ? {
+        ...previousWindow,
+        returnedMessages: nextMessages.length,
+        totalMessages: Math.max(0, (previousWindow.totalMessages || messages.length) - truncatedCount),
+        newestMessageIndex: Math.max(
+          previousWindow.oldestMessageIndex || 0,
+          (previousWindow.newestMessageIndex || messages.length) - truncatedCount,
+        ),
+        hasLater: false,
+      }
+    : previousWindow;
+
+  return markSessionDetailRunning({
+    ...detail,
+    messages: nextMessages,
+    ...(nextWindow ? { messageWindow: nextWindow } : {}),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 function messageWindowIndex(message: ConversationMessage): number {
   const match = String(message.id || "").match(/-message-(\d+)$/);
   const index = match ? Number(match[1]) : 0;

@@ -59,6 +59,7 @@ from core.web.services.session_service import (
     list_child_sessions,
     list_sessions,
     query_sessions,
+    regenerate_session_message,
     request_stop_session_turn,
     resolve_session_image_artifact,
     resolve_session_stream_initial_payload,
@@ -167,6 +168,18 @@ class SessionMessagePayload(BaseModel):
 
 class SessionMessageEditPayload(SessionMessagePayload):
     messageId: str = ""
+
+
+class SessionMessageRegeneratePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    clientSubmissionId: str = Field(default_factory=_new_client_submission_id, max_length=128)
+    messageId: str = ""
+    mentalModelEnabled: bool | None = None
+    runtimeStatusEnabled: bool | None = None
+    turnStatusTail: dict | None = None
+    turnMode: str = ""
+    writeIntent: bool | None = None
 
 
 class SessionStopPayload(BaseModel):
@@ -587,6 +600,33 @@ def session_edit_resubmit_message(session_id: str, payload: SessionMessageEditPa
             payload.content,
             client_submission_id=client_submission_id,
             content_utf8_base64=payload.contentUtf8Base64,
+            mental_model_enabled=payload.mentalModelEnabled,
+            runtime_status_enabled=payload.runtimeStatusEnabled,
+            turn_status_tail=payload.turnStatusTail if isinstance(payload.turnStatusTail, dict) else None,
+            turn_mode=payload.turnMode,
+            write_intent=payload.writeIntent,
+        )
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post(
+    "/sessions/{session_id}/messages/regenerate",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=SessionCatalogItem,
+    response_model_exclude_unset=True,
+)
+def session_regenerate_message(session_id: str, payload: SessionMessageRegeneratePayload) -> dict:
+    client_submission_id = str(payload.clientSubmissionId or "").strip() or _new_client_submission_id()
+    try:
+        return regenerate_session_message(
+            session_id,
+            payload.messageId,
+            client_submission_id=client_submission_id,
             mental_model_enabled=payload.mentalModelEnabled,
             runtime_status_enabled=payload.runtimeStatusEnabled,
             turn_status_tail=payload.turnStatusTail if isinstance(payload.turnStatusTail, dict) else None,

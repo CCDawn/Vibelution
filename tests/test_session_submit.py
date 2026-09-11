@@ -53,6 +53,7 @@ def test_facade_reexports_submit_entrypoints() -> None:
     assert session_service.submit_session_message is submit.submit_session_message
     assert session_service.submit_session_message_lightweight is submit.submit_session_message_lightweight
     assert session_service.edit_and_resubmit_session_message is submit.edit_and_resubmit_session_message
+    assert session_service.regenerate_session_message is submit.regenerate_session_message
     assert session_service.submit_session_guidance is submit.submit_session_guidance
 
 

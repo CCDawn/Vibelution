@@ -149,6 +149,10 @@ export type ConversationViewProps = {
   onAddComposerReference?: (reference: SessionReferenceAttachment) => void;
   onRemoveComposerReference?: (referenceId: string) => void;
   onEditUserMessage?: (message: ConversationMessage) => void;
+  onRegenerateAssistantMessage?: (message: ConversationMessage) => void;
+  regenerableAssistantMessageId?: string;
+  regenerateDisabled?: boolean;
+  regeneratePending?: boolean;
   onCancelComposerMode?: () => void;
   onLoadEarlierMessages?: () => void;
   onSubmit: () => void;

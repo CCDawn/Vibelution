@@ -51,6 +51,10 @@ export type ConversationTurnRowProps = {
   };
   resolveTurnAvatar?: (message: ConversationMessage) => TurnAvatarResolution | undefined;
   onEditUserMessage?: (message: ConversationMessage) => void;
+  onRegenerateAssistantMessage?: (message: ConversationMessage) => void;
+  regenerableAssistantMessageId?: string;
+  regenerateDisabled?: boolean;
+  regeneratePending?: boolean;
   sectionExpansionForMessage: Record<string, boolean>;
   computerUseStateForMessage: string;
   imageArtifactUrlsBeforeMessage?: Set<string>;
@@ -97,6 +101,10 @@ export function conversationTurnRowPropsAreEqual(
     && previous.operationLabels === next.operationLabels
     && previous.resolveTurnAvatar === next.resolveTurnAvatar
     && previous.onEditUserMessage === next.onEditUserMessage
+    && previous.onRegenerateAssistantMessage === next.onRegenerateAssistantMessage
+    && previous.regenerableAssistantMessageId === next.regenerableAssistantMessageId
+    && previous.regenerateDisabled === next.regenerateDisabled
+    && previous.regeneratePending === next.regeneratePending
     && previous.sectionExpansionForMessage === next.sectionExpansionForMessage
     && previous.computerUseStateForMessage === next.computerUseStateForMessage
     && previous.imageArtifactUrlsBeforeMessage === next.imageArtifactUrlsBeforeMessage;
