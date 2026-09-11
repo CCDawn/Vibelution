@@ -461,6 +461,10 @@ export function ConversationView({
   onAddComposerReference,
   onRemoveComposerReference,
   onEditUserMessage,
+  onRegenerateAssistantMessage,
+  regenerableAssistantMessageId,
+  regenerateDisabled,
+  regeneratePending,
   onCancelComposerMode,
   onLoadEarlierMessages,
   onSubmit,
@@ -3977,6 +3981,10 @@ export function ConversationView({
                 operationLabels={operationLabels}
                 resolveTurnAvatar={resolveTurnAvatar}
                 onEditUserMessage={onEditUserMessage}
+                onRegenerateAssistantMessage={onRegenerateAssistantMessage}
+                regenerableAssistantMessageId={regenerableAssistantMessageId}
+                regenerateDisabled={regenerateDisabled}
+                regeneratePending={regeneratePending}
                 sectionExpansionForMessage={sectionExpansion[message.id] ?? EMPTY_SECTION_EXPANSION}
                 computerUseStateForMessage={buildComputerUseStateForMessage(
                   message,
@@ -4090,6 +4098,11 @@ export function ConversationView({
               && !assistantTurnIsStreaming(message)
               ? responseText.trim()
               : "";
+            const canRegenerateAnswer = message.role === "assistant"
+              && !turnErrorMessage
+              && !assistantTurnIsStreaming(message)
+              && Boolean(onRegenerateAssistantMessage)
+              && message.id === regenerableAssistantMessageId;
             const showResponseSpinner = isResponseStreaming && !hasActiveProcess;
             const defaultResponseExpanded = assistantTurnIsStreaming(message) || defaultExpandedResponseIds.has(message.id);
             const responseExpanded = getExpansionState(message.id, "response", defaultResponseExpanded);
@@ -4255,6 +4268,18 @@ export function ConversationView({
                         aria-label={t("copyAnswer")}
                         isIconOnly
                         icon={copiedAnswerMessageId === message.id ? <Check size={14}/> : <Copy size={14}/>} />
+                    ) : null}
+                    {canRegenerateAnswer ? (
+                      <VButton
+                        type="button"
+                        className={styles.turnIconButton}
+                        onClick={() => onRegenerateAssistantMessage?.(message)}
+                        isDisabled={regenerateDisabled}
+                        isPending={regeneratePending}
+                        title={regeneratePending ? t("regeneratePending") : t("regenerateAnswer")}
+                        aria-label={regeneratePending ? t("regeneratePending") : t("regenerateAnswer")}
+                        isIconOnly
+                        icon={<RefreshCw size={14}/>} />
                     ) : null}
                     {userAuthoredMessage && !steerGuidanceMessage && message.id === latestUserMessageId && onEditUserMessage ? (
                       <VButton

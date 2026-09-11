@@ -1286,6 +1286,7 @@ export function ChatCodingRouteWorkbench() {
   const {
     submitTurnMutation,
     editResubmitMutation,
+    regenerateMutation,
     stopTurnMutation,
     sessionGuidanceMutation,
   } = useChatComposerTurnMutations({
@@ -2125,6 +2126,17 @@ export function ChatCodingRouteWorkbench() {
     directSessionActiveSummary?.status,
   ]);
   const latestControlSignal = activeControlSignals[0] ?? null;
+  const regenerableAssistantMessageId = useMemo(() => {
+    const messages = detail?.messages ?? [];
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index].role !== "assistant") {
+        continue;
+      }
+      const hasUserBefore = messages.slice(0, index).some((message) => message.role === "user");
+      return hasUserBefore ? messages[index].id : "";
+    }
+    return "";
+  }, [detail?.messages]);
   const latestControlSignalSummary = latestControlSignal?.summary?.trim() ?? "";
   const latestControlSignalKindLabel = (() => {
     if (!latestControlSignal) {
@@ -2169,6 +2181,7 @@ export function ChatCodingRouteWorkbench() {
     handleFollowupQueueMove,
     handleEditUserMessage,
     handleCancelEditMessage,
+    handleRegenerateAssistantMessage,
     handleComposerChange,
     handleMentalModelEnabledChange,
     handleRuntimeStatusEnabledChange,
@@ -2182,6 +2195,7 @@ export function ChatCodingRouteWorkbench() {
     describeError,
     submitTurnMutation,
     editResubmitMutation,
+    regenerateMutation,
     stopTurnMutation,
     sessionGuidanceMutation,
     setSessionDrafts,
@@ -3205,6 +3219,13 @@ export function ChatCodingRouteWorkbench() {
                 onAddComposerReference: handleAddComposerReference,
                 onRemoveComposerReference: handleRemoveComposerReference,
                 onEditUserMessage: handleEditUserMessage,
+                onRegenerateAssistantMessage: handleRegenerateAssistantMessage,
+                regenerableAssistantMessageId,
+                regenerateDisabled: sessionBusy || regenerateMutation.isPending,
+                regeneratePending: (
+                  regenerateMutation.isPending
+                  && regenerateMutation.variables?.sessionId === activeSessionId
+                ),
                 onCancelComposerMode: resolvedEditTarget ? handleCancelEditMessage : undefined,
                 onLoadEarlierMessages: handleLoadEarlierSessionMessages,
                 onSubmit: handleSubmitTurn,
