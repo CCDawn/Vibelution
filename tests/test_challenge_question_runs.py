@@ -662,6 +662,85 @@ def test_register_valid_pending_candidate_counts_sample_but_not_completion(tmp_p
     ] == "canonical_result_package_missing"
 
 
+_EXECUTION_DESIGN_SECTIONS = (
+    "variables",
+    "controls",
+    "data_and_materials",
+    "analysis",
+    "success_criteria",
+    "failure_criteria",
+    "stop_conditions",
+    "resources",
+    "timeline",
+    "risks",
+)
+
+
+def test_register_stores_the_plan_projection_for_the_polling_summary(
+    tmp_path, monkeypatch
+):
+    """The plan-deferral projection is computed once, at registration.
+
+    The summary is a polling read path, so deriving this per record would
+    re-read every artifact on each call.  The stored projection also keeps
+    "deferred" distinct from "satisfied": an empty section is never a met
+    execution-design contract.
+    """
+    _isolate_store(tmp_path, monkeypatch)
+    output = _output()
+    for section in _EXECUTION_DESIGN_SECTIONS:
+        output["research_plan"][section] = []
+
+    response = challenge_question_runs.register_challenge_question_output(
+        "research-team",
+        {
+            "output": output,
+            "citationChecks": _citation_checks(output),
+            "registeredBy": "test-agent",
+        },
+    )
+
+    projection = response["record"]["researchPlan"]
+    assert projection["executionDesignCriteriaPresent"] is False
+    assert set(projection["deferredSections"]) == set(_EXECUTION_DESIGN_SECTIONS)
+
+    # The record is the summary's authority: rewriting it there changes what
+    # the summary reports without touching the artifact on disk.
+    store_path = challenge_question_runs._store_path("research-team")
+    store = json.loads(store_path.read_text(encoding="utf-8"))
+    store["records"][0]["researchPlan"] = {
+        "deferredSections": ["controls"],
+        "executionDesignCriteriaPresent": True,
+    }
+    store_path.write_text(json.dumps(store), encoding="utf-8")
+
+    summary = challenge_question_runs.challenge_question_run_summary("research-team")
+    assert summary["latestCandidate"]["researchPlan"] == {
+        "deferredSections": ["controls"],
+        "executionDesignCriteriaPresent": True,
+    }
+
+
+def test_register_reports_a_fully_specified_plan_as_not_deferred(tmp_path, monkeypatch):
+    """A plan that does carry every section reports no deferral."""
+    _isolate_store(tmp_path, monkeypatch)
+    output = _output()
+
+    response = challenge_question_runs.register_challenge_question_output(
+        "research-team",
+        {
+            "output": output,
+            "citationChecks": _citation_checks(output),
+            "registeredBy": "test-agent",
+        },
+    )
+
+    assert response["record"]["researchPlan"] == {
+        "deferredSections": [],
+        "executionDesignCriteriaPresent": True,
+    }
+
+
 def test_get_question_detail_returns_latest_immutable_artifact(tmp_path, monkeypatch):
     _isolate_store(tmp_path, monkeypatch)
     first_output = _output(approved=True)
