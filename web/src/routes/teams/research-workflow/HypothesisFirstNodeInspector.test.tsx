@@ -1205,6 +1205,50 @@ describe("HypothesisFirstNodeInspector", () => {
     }));
   });
 
+  it("renders the sanctioned repair actions inside the blocked program delivery card", async () => {
+    mockedGetChallengeQuestionRunDetail.mockResolvedValue({
+      teamId: "team-1",
+      questionId: "Q-01",
+      selectedRunId: "run-output-1",
+      record: {
+        runId: "run-output-1",
+        validation: {
+          citationValidation: "failed",
+          officialModelCall: false,
+        },
+      },
+    } as never);
+    mockedChain.mockReturnValue(chainData({
+      stateV2: programState("program_delivery", {
+        actionability: "blocked",
+        problems: [{
+          code: "program_candidate_validation_failed",
+          category: "integrity",
+          severity: "error",
+          message: "Challenge Program 候选输出尚未通过完整校验或缺少官方模型调用证据",
+          recoverable: true,
+          sourceKind: "challenge_question_output",
+          sourceId: "Q-01:run-output-1",
+          detectedAt: "2026-08-25T00:00:00Z",
+        }],
+      }),
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_convergence_gate"
+        onOpenQuestion={() => {}}
+      />,
+    );
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(container.querySelector('[data-testid="challenge-question-reverify-citations"]')).not.toBeNull();
+        expect(container.querySelector('[data-testid="challenge-question-repair-registration"]')).not.toBeNull();
+      });
+    });
+  });
+
   it("shows the canonical program delivery problem instead of falling back upstream", () => {
     mockedChain.mockReturnValue(chainData({
       stateV2: programState("program_delivery", {

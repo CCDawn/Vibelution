@@ -38,6 +38,7 @@ import {
   VStatusChip,
   VSurface,
 } from "../../../components/vui";
+import { ChallengeQuestionRepairActions } from "../challenge-cup/ChallengeQuestionRepairActions";
 import { ChallengeQuestionReviewForm } from "../challenge-cup/ChallengeQuestionReviewForm";
 import { HypothesisSelectionList } from "../challenge-cup/HypothesisSelectionList";
 import {
@@ -1051,6 +1052,9 @@ function InspectorBody(props: {
                 action={nextAction.canonicalAction}
                 lang={lang}
               />
+            ) : null}
+            {programDeliveryQuery.data ? (
+              <ChallengeQuestionRepairActions detail={programDeliveryQuery.data} lang={lang} />
             ) : null}
           </div>
         );
