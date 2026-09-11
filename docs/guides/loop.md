@@ -53,6 +53,8 @@ Set-Location "<ROOT_MAIN>"
 .\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --reserve-integration --stale-retry-token "<TOKEN_PATH>"
 # head_moved：验证后任务内容变了（amend 或 rebase 未重现同一内容），证据作废且无可复用；直接重跑一次 closeout
 .\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>"
+# reuse_research_missing / reuse_research_invalid：先补录或修好复用证据（见下方 record 命令），再原样重跑 closeout；该检查在昂贵命令之前，无需 rebase/token
+.\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>"
 # merged_cleanup_pending 表示已合入，只补清理，不验证/不 merge
 .\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --branch "codex/<TASK>" --agent-id "<AGENT_ID>" --cleanup-only
 

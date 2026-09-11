@@ -943,3 +943,49 @@ def test_cleanup_only_recovers_a_leftover_directory(
     assert result.status == "merged_clean"
     assert result.exit_code == 0
     assert not context.task_root.exists()
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected_action"),
+    [
+        ("reuse_research_missing", "record_reuse_research_evidence"),
+        ("reuse_research_invalid", "fix_reuse_research_evidence"),
+    ],
+)
+def test_reuse_research_failure_names_its_recovery_step(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: str,
+    expected_action: str,
+) -> None:
+    """The record is a gate precondition, so the result must name how to satisfy it.
+
+    This check runs before the expensive commands, so recovery is one specific
+    step and then re-running the same closeout -- no rebase, no token. Leaving
+    next_action empty made the operator rediscover that from the docs.
+    """
+
+    monkeypatch.setattr(closeout, "resolve_context", lambda *_args, **_kwargs: context(tmp_path))
+    monkeypatch.setattr(
+        gate,
+        "run_closeout",
+        lambda *_args, **_kwargs: gate.GateResult(outcome=outcome, exit_code=1),
+    )
+    monkeypatch.setattr(
+        closeout,
+        "merge_ff_only",
+        lambda *_args, **_kwargs: pytest.fail("a failed validation must not merge"),
+    )
+
+    result = closeout.run_managed_closeout(
+        tmp_path / "task",
+        claim_id="claim-dev",
+        agent_id="agent-test",
+        integration_wait_seconds=0,
+    )
+
+    assert result.status == "validation_failed"
+    assert result.merged is False
+    assert result.retryable is True
+    assert result.retry_token_path == ""
+    assert result.next_action == expected_action
