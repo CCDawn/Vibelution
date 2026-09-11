@@ -1,6 +1,7 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+  getChallengeQuestionReverifyProgress,
   repairChallengeQuestionRegistration,
   reverifyChallengeQuestionCitations,
 } from "../../../api/challengeQuestionRuns";
@@ -56,6 +57,17 @@ export function ChallengeQuestionRepairActions({
     mutationFn: () => reverifyChallengeQuestionCitations(detail.teamId, detail.questionId, runId),
     onSuccess: refetchAfterRepair,
   });
+  // SCI-049: while the recheck POST is in flight, poll the read-only
+  // heartbeat surface so the operator sees done/total instead of a frozen
+  // button for minutes.
+  const reverifyProgress = useQuery({
+    queryKey: queryKeys.challengeQuestionReverifyProgress(detail.teamId, detail.questionId, runId),
+    queryFn: () =>
+      getChallengeQuestionReverifyProgress(detail.teamId, detail.questionId, runId),
+    enabled: reverifyMutation.isPending,
+    refetchInterval: 2000,
+  });
+  const progressHeartbeat = reverifyProgress.data?.heartbeat ?? null;
   const repairMutation = useMutation({
     mutationFn: () => repairChallengeQuestionRegistration(detail.teamId, detail.questionId, runId),
     onSuccess: refetchAfterRepair,
@@ -77,7 +89,13 @@ export function ChallengeQuestionRepairActions({
           onClick={() => reverifyMutation.mutate()}
         >
           {reverifyMutation.isPending
-            ? (isZh ? "重核中…" : "Reverifying…")
+            ? (isZh
+              ? progressHeartbeat
+                ? `重核中…（${progressHeartbeat.done}/${progressHeartbeat.total}）`
+                : "重核中…"
+              : progressHeartbeat
+                ? `Reverifying… (${progressHeartbeat.done}/${progressHeartbeat.total})`
+                : "Reverifying…")
             : (isZh ? "重核引用文献" : "Reverify citations")}
         </VButton>
       ) : null}

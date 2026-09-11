@@ -72,6 +72,8 @@ export const queryKeys = {
     ["teams", teamId, "challenge-program", "questions", questionId, runId] as const,
   challengeQuestionRunStatus: (teamId: string) =>
     ["teams", teamId, "challenge-program", "question-runs", "status"] as const,
+  challengeQuestionReverifyProgress: (teamId: string, questionId: string, runId: string) =>
+    ["teams", teamId, "challenge-program", "questions", questionId, runId, "reverify-citations", "progress"] as const,
   challengeSubmissionReadiness: (teamId: string) =>
     ["teams", teamId, "challenge-program", "submission-readiness"] as const,
   challengeCatalogReadiness: (teamId: string) =>

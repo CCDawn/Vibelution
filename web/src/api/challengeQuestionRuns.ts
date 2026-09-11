@@ -71,6 +71,56 @@ export function reverifyChallengeQuestionCitations(
   );
 }
 
+/**
+ * GET …/reverify-citations/progress heartbeat payload
+ * (contract "citation-recheck-heartbeat/v1"; see the core citation_recheck
+ * module for the authoritative payload constants).
+ */
+export type ChallengeQuestionReverifyProgressPayload = {
+  schemaVersion: number;
+  contract: string;
+  /** always "citation_recheck" */
+  stage: string;
+  teamId: string;
+  questionId: string;
+  runId: string;
+  heartbeat: {
+    attemptId: string;
+    done: number;
+    total: number;
+    etaSeconds: number;
+    at: string;
+  } | null;
+  attempt: {
+    attemptId: string;
+    status: string;
+    total: number;
+    forceFull: boolean;
+    outcome: string;
+    at: string;
+  } | null;
+  verifiedSourceUrls: string[];
+  failedSourceUrls: Array<{
+    sourceUrl: string;
+    outcome: string;
+    reason: string;
+    attempts: number;
+    at: string;
+  }>;
+  eventCount: number;
+};
+
+/** GET …/questions/{questionId}/runs/{runId}/reverify-citations/progress (read-only poll surface). */
+export function getChallengeQuestionReverifyProgress(
+  teamId: string,
+  questionId: string,
+  runId: string,
+): Promise<ChallengeQuestionReverifyProgressPayload> {
+  return fetchJson<ChallengeQuestionReverifyProgressPayload>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/challenge-program/questions/${encodeURIComponent(questionId)}/runs/${encodeURIComponent(runId)}/reverify-citations/progress`,
+  );
+}
+
 export type ChallengeQuestionRegistrationRepairPayload = {
   teamId: string;
   questionId: string;
