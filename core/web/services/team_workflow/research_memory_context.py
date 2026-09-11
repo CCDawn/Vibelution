@@ -35,6 +35,11 @@ MAX_SUCCESSFUL_RUNS = 8
 MAX_REVIEW_DIGEST_ITEMS = 8
 MAX_REVIEW_SOURCE_REFS = 16
 MAX_REVIEW_DECISIONS = 4
+# Truncation bound for hypothesis-review candidates. FORMAL reviews fail
+# closed at the frozen finalist limit (candidate_diversity.MAX_FINALIST_LIMIT
+# = 3) long before this cap; DEV reviews intentionally keep processing above
+# 3 with a budget warning, so 16 is the real reachable bound here, mirrored
+# by review_call_budget.MAX_BUDGET_FINALIST_COUNT.
 MAX_REVIEW_CANDIDATES = 16
 CLAIM_STATUS_ORDER = {
     "qualified": 0,

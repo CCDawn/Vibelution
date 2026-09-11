@@ -52,9 +52,9 @@ from .budget_stage_admission import (
 logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
-# Temporary acceptance-cost lever (challenge-cup frontend acceptance): cap review
-# rounds at 2 instead of 3 to cut per-run cost. Restore to 3 once the acceptance
-# program finishes; VIBELUTION_HF_ROUND_LIMIT still clamps into [1, default].
+# Review/dispatch round cap. The temporary acceptance-era reduction to 2 is
+# gone: the built-in default is 3 again. VIBELUTION_HF_ROUND_LIMIT stays a
+# shrink-only per-deployment cost lever and clamps into [1, default].
 _HARD_ROUND_LIMIT_DEFAULT = 3
 _HARD_ROUND_LIMIT_ENV = "VIBELUTION_HF_ROUND_LIMIT"
 

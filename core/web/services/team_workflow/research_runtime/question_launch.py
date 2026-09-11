@@ -862,14 +862,31 @@ def _build_catalog_seed_run_input(
                 scope=hypothesis_scope,
             ),
         },
-        "sourcePolicy": {"minimumPrimarySources": 3, "requireCounterEvidence": True},
+        # Declared launch intent only: no runtime consumes sourcePolicy or
+        # stopPolicy content (the binding quality gate is
+        # evaluationContract.minimumClaimEvidenceCoverage), so the snapshot
+        # must not claim enforced minimums that nothing enforces.
+        "sourcePolicy": {
+            "declaredOnly": True,
+            "note": (
+                "declarative launch intent; no runtime reader enforces "
+                "source-count minimums or counter-evidence requirements, "
+                "the binding quality gate is "
+                "evaluationContract.minimumClaimEvidenceCoverage"
+            ),
+        },
         "budgetPolicy": build_safety_budget_policy(safety_limits),
-        "stopPolicy": {"maxNoImprovementRounds": 2, "stopOnBudgetExhaustion": True},
+        "stopPolicy": {
+            "declaredOnly": True,
+            "note": (
+                "declarative launch intent; no runtime reader consumes "
+                "these stop criteria"
+            ),
+        },
         "environmentSnapshotRef": artifact_ref,
         "modelRoutingPolicy": model_routing_policy,
         "evaluationContract": {
             "minimumClaimEvidenceCoverage": 0.9,
-            "requiredSeeds": [11, 29, 47],
             "questionArtifactSha256": artifact_sha256,
         },
         "createdBy": "operator",
@@ -1006,14 +1023,31 @@ def build_question_run_input(
             or _text(research_plan.get("failure_criteria")),
             "hypothesisFirst": hypothesis_first,
         },
-        "sourcePolicy": {"minimumPrimarySources": 3, "requireCounterEvidence": True},
+        # Declared launch intent only: no runtime consumes sourcePolicy or
+        # stopPolicy content (the binding quality gate is
+        # evaluationContract.minimumClaimEvidenceCoverage), so the snapshot
+        # must not claim enforced minimums that nothing enforces.
+        "sourcePolicy": {
+            "declaredOnly": True,
+            "note": (
+                "declarative launch intent; no runtime reader enforces "
+                "source-count minimums or counter-evidence requirements, "
+                "the binding quality gate is "
+                "evaluationContract.minimumClaimEvidenceCoverage"
+            ),
+        },
         "budgetPolicy": build_safety_budget_policy(safety_limits),
-        "stopPolicy": {"maxNoImprovementRounds": 2, "stopOnBudgetExhaustion": True},
+        "stopPolicy": {
+            "declaredOnly": True,
+            "note": (
+                "declarative launch intent; no runtime reader consumes "
+                "these stop criteria"
+            ),
+        },
         "environmentSnapshotRef": artifact_ref,
         "modelRoutingPolicy": model_routing_policy,
         "evaluationContract": {
             "minimumClaimEvidenceCoverage": 0.9,
-            "requiredSeeds": [11, 29, 47],
             "questionArtifactSha256": artifact_sha256,
         },
         "createdBy": "operator",
