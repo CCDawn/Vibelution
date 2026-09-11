@@ -4,7 +4,8 @@ Covers the fail-closed contract gates (unknown kind, missing/wrong severity,
 broken ordering, unmerged duplicates, timestamp integrity), the dedup/merge
 rule (same scope+kind keeps the earliest firstSeen), the table-driven
 severity mapping, and the pure aggregation service (heartbeat-stale code
-mapping, taxonomy human-required action families, awaiting-human gate,
+mapping, taxonomy human-required action families, formal-run lineage-conflict
+mapping, awaiting-human gate,
 disputed/escalation/drift/retry-budget companion inputs, empty state).
 """
 
@@ -19,6 +20,7 @@ from core.research.workflow.contracts import (
     ANOMALY_KIND_BLOCKED_RUN,
     ANOMALY_KIND_BUDGET_EXHAUSTED,
     ANOMALY_KIND_CLAIM_DISPUTED,
+    ANOMALY_KIND_FORMAL_LINEAGE_CONFLICT,
     ANOMALY_KIND_HEARTBEAT_STALE,
     ANOMALY_KIND_NEEDS_HUMAN_GATE,
     ANOMALY_KIND_RETRY_BUDGET_EXHAUSTED,
@@ -428,6 +430,56 @@ def test_budget_exceeded_maps_to_budget_exhausted_kind() -> None:
     assert item.severity == "critical"
     assert item.recommendedAction == HumanActionFamily.RECONCILE_RUN.value
     assert item.scope.runId == "run-1"
+
+
+# -- formal-run lineage conflict mapping -------------------------------------
+
+
+def test_formal_run_lineage_conflict_maps_to_one_archive_run_item() -> None:
+    state = _state(
+        [
+            _problem(
+                "formal_run_lineage_conflict",
+                message="正式运行存在多个互斥的当前修订",
+                source_kind="formal_run",
+                source_id="run-formal",
+                detected_at="2026-08-28T00:20:00Z",
+            )
+        ]
+    )
+    inbox = anomaly_inbox_service.build_anomaly_inbox(state, generated_at=_GENERATED_AT)
+    assert [item.kind for item in inbox.items] == [
+        ANOMALY_KIND_FORMAL_LINEAGE_CONFLICT
+    ]
+    item = inbox.items[0]
+    # The frozen severity table owns the severity; the conflicted run is the
+    # evidence anchor and the archive decision is the only way forward.
+    assert item.severity == "critical"
+    assert item.scope.runId == "run-formal"
+    assert item.recommendedAction == HumanActionFamily.ARCHIVE_RUN.value
+    assert item.evidence == (
+        "problem:formal_run_lineage_conflict",
+        "source:formal_run:run-formal",
+    )
+    assert AnomalyInbox.from_dict(inbox.to_dict()) == inbox
+
+
+def test_state_without_lineage_conflict_yields_no_lineage_item() -> None:
+    state = _state(
+        [
+            # informational integrity signal, never becomes an inbox item
+            _problem(
+                "formal_run_status_unknown",
+                source_kind="formal_run",
+                source_id="run-formal",
+            )
+        ]
+    )
+    inbox = anomaly_inbox_service.build_anomaly_inbox(state, generated_at=_GENERATED_AT)
+    assert not any(
+        item.kind == ANOMALY_KIND_FORMAL_LINEAGE_CONFLICT for item in inbox.items
+    )
+    assert inbox.items == ()
 
 
 # -- companion inputs and service boundaries --------------------------------

@@ -18,6 +18,8 @@ input signal                               kind                                 
 ``review_heartbeat_stale`` /
 ``review_dispatch_heartbeat_stale``
 problem with code ``budget_exceeded``      ``budget_exhausted``                  ``reconcile_run``
+problem with code                          ``formal_lineage_conflict``           ``archive_run``
+``formal_run_lineage_conflict``
 problem whose code the frozen retry        ``blocked_run``                       the taxonomy entry's first
 taxonomy classifies ``human_required``                                           human action family
 (e.g. ``collection_run_needs_continue``)
@@ -40,10 +42,10 @@ H1-H4 gate waiting past threshold)         overdue gate)                        
                                                                                  ``attach_inbox_actions``)
 =========================================  ====================================  ==============================
 
-Problem codes that are neither heartbeat-stale, budget-exhausted nor
-taxonomy human-required are informational integrity signals (e.g.
-``formal_run_status_unknown``) and are deliberately not inbox items; the
-inbox aggregates the blocking/risk/drift/human surface only.  Severity is
+Problem codes that are neither heartbeat-stale, budget-exhausted,
+lineage-conflicted nor taxonomy human-required are informational integrity
+signals (e.g. ``formal_run_status_unknown``) and are deliberately not inbox
+items; the inbox aggregates the blocking/risk/drift/human surface only.  Severity is
 never chosen here: :meth:`AnomalyInboxItem.create` derives it from the
 frozen ``ANOMALY_KIND_SEVERITY`` table.  Timestamps follow the durable
 facts of each source (``detectedAt``/``lastHeartbeatAt``/``computedAt`` /
@@ -67,6 +69,7 @@ from core.research.workflow.contracts import (
     ANOMALY_KIND_BUDGET_EXHAUSTED,
     ANOMALY_KIND_CLAIM_DISPUTED,
     ANOMALY_KIND_DRIFT_SENTINEL_HIT,
+    ANOMALY_KIND_FORMAL_LINEAGE_CONFLICT,
     ANOMALY_KIND_HEARTBEAT_STALE,
     ANOMALY_KIND_NEEDS_HUMAN_GATE,
     ANOMALY_KIND_REVIEW_DISAGREEMENT_ESCALATION,
@@ -88,6 +91,13 @@ HEARTBEAT_STALE_PROBLEM_CODES = frozenset(
 )
 
 BUDGET_EXHAUSTED_PROBLEM_CODES = frozenset({"budget_exceeded"})
+
+# Formal-run integrity conflict projected by state v2: several mutually
+# exclusive "current" revisions in one formal run lineage.  A human archive
+# decision is the only ledger-authority way forward (kept as a literal code
+# set so this module stays free of runtime-service imports and import
+# cycles, like the other tables here).
+FORMAL_LINEAGE_CONFLICT_PROBLEM_CODES = frozenset({"formal_run_lineage_conflict"})
 
 # Stage-boundary budget admission block (budget_stage_admission is the code
 # authority; kept as a literal so this module stays free of runtime-service
@@ -237,9 +247,10 @@ def _item_for_problem(
     """Map one state problem to an inbox item; None for non-inbox codes.
 
     Kind resolution order is fixed: heartbeat-stale codes first, then the
-    budget-exhausted code, then the frozen retry taxonomy (human_required
-    codes become blocked_run with the taxonomy's primary human action
-    family).  Everything else is not an inbox signal.
+    budget-exhausted code, then the formal-run lineage-conflict code, then
+    the frozen retry taxonomy (human_required codes become blocked_run with
+    the taxonomy's primary human action family).  Everything else is not an
+    inbox signal.
     """
 
     code = _text(problem, "code")
@@ -282,6 +293,21 @@ def _item_for_problem(
             # Taxonomy budget_exceeded: reconcile_run/archive_run rebuild is
             # the only way forward; reconcile_run is the primary family.
             recommended_action=HumanActionFamily.RECONCILE_RUN.value,
+            evidence=evidence,
+        )
+
+    if code in FORMAL_LINEAGE_CONFLICT_PROBLEM_CODES:
+        run_id = source_id if source_kind in _RUN_SOURCE_KINDS else ""
+        return AnomalyInboxItem.create(
+            kind=ANOMALY_KIND_FORMAL_LINEAGE_CONFLICT,
+            scope=_with_scope_ids(base, run_id=run_id),
+            first_seen_at=detected_at,
+            last_seen_at=detected_at,
+            summary=summary,
+            # Mutually exclusive current revisions cannot be resolved by any
+            # automatic path; the ledger-authority remedy is the human
+            # archive decision, so the aligned family is archive_run.
+            recommended_action=HumanActionFamily.ARCHIVE_RUN.value,
             evidence=evidence,
         )
 

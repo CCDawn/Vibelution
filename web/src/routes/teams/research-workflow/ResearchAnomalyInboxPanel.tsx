@@ -50,6 +50,7 @@ const KIND_LABELS: Record<string, { zh: string; en: string }> = {
   drift_sentinel_hit: { zh: "抽样漂移", en: "Drift sentinel" },
   budget_exhausted: { zh: "预算耗尽", en: "Budget exhausted" },
   retry_budget_exhausted: { zh: "重试预算耗尽", en: "Retries exhausted" },
+  formal_lineage_conflict: { zh: "谱系冲突", en: "Lineage conflict" },
 };
 
 const ACTION_LABELS: Record<string, { zh: string; en: string }> = {

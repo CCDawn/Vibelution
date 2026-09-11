@@ -938,7 +938,8 @@ export type AnomalyKind =
   | "review_disagreement_escalation"
   | "drift_sentinel_hit"
   | "budget_exhausted"
-  | "retry_budget_exhausted";
+  | "retry_budget_exhausted"
+  | "formal_lineage_conflict";
 
 export type AnomalyInboxScope = {
   teamId: string;

@@ -29,6 +29,9 @@ kind                                 signal source
 ``budget_exhausted``                 ``budget_exceeded`` problem code
 ``retry_budget_exhausted``           node whose charged business retries exhausted
                                      ``budgetPolicy.maxRetries``
+``formal_lineage_conflict``          ``formal_run_lineage_conflict`` problem
+                                     (multiple mutually exclusive current
+                                     revisions in one formal run lineage)
 ===================================  ==================================================
 
 Severity mapping (frozen table ``ANOMALY_KIND_SEVERITY``, single source of
@@ -36,8 +39,10 @@ truth; ``AnomalyInboxItem.create`` derives severity from the kind and
 ``from_dict`` rejects mismatches, so the rule below is machine-enforced):
 
 - ``critical`` -- the run cannot advance by itself and only a human rebuild
-  can unblock it: ``blocked_run`` (taxonomy human-required code) and
-  ``budget_exhausted`` (no budget means no automatic path at all).
+  can unblock it: ``blocked_run`` (taxonomy human-required code),
+  ``budget_exhausted`` (no budget means no automatic path at all) and
+  ``formal_lineage_conflict`` (mutually exclusive current revisions need a
+  human archive decision).
 - ``high`` -- progress is stalled or a verdict is untrusted until a human
   decides: ``heartbeat_stale`` (executor presumed dead),
   ``needs_human_gate`` (workflow halted at a human gate),
@@ -87,6 +92,7 @@ ANOMALY_KIND_REVIEW_DISAGREEMENT_ESCALATION = "review_disagreement_escalation"
 ANOMALY_KIND_DRIFT_SENTINEL_HIT = "drift_sentinel_hit"
 ANOMALY_KIND_BUDGET_EXHAUSTED = "budget_exhausted"
 ANOMALY_KIND_RETRY_BUDGET_EXHAUSTED = "retry_budget_exhausted"
+ANOMALY_KIND_FORMAL_LINEAGE_CONFLICT = "formal_lineage_conflict"
 
 ANOMALY_KINDS = frozenset(
     {
@@ -98,6 +104,7 @@ ANOMALY_KINDS = frozenset(
         ANOMALY_KIND_DRIFT_SENTINEL_HIT,
         ANOMALY_KIND_BUDGET_EXHAUSTED,
         ANOMALY_KIND_RETRY_BUDGET_EXHAUSTED,
+        ANOMALY_KIND_FORMAL_LINEAGE_CONFLICT,
     }
 )
 
@@ -123,6 +130,7 @@ ANOMALY_SEVERITY_RANK: dict[str, int] = {
 ANOMALY_KIND_SEVERITY: dict[AnomalyKind, str] = {
     ANOMALY_KIND_BLOCKED_RUN: ANOMALY_SEVERITY_CRITICAL,
     ANOMALY_KIND_BUDGET_EXHAUSTED: ANOMALY_SEVERITY_CRITICAL,
+    ANOMALY_KIND_FORMAL_LINEAGE_CONFLICT: ANOMALY_SEVERITY_CRITICAL,
     ANOMALY_KIND_HEARTBEAT_STALE: ANOMALY_SEVERITY_HIGH,
     ANOMALY_KIND_NEEDS_HUMAN_GATE: ANOMALY_SEVERITY_HIGH,
     ANOMALY_KIND_RETRY_BUDGET_EXHAUSTED: ANOMALY_SEVERITY_HIGH,
