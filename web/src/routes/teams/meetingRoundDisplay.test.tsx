@@ -140,7 +140,7 @@ describe("DigestDraftView validation errors", () => {
       );
     });
     expect(container.querySelector('[data-testid="meeting-discussion-progress"]')?.textContent).toBe(
-      "已发言 3/9 · 待 A004",
+      "本轮已发言 3/9 · 待 A004",
     );
   });
 });

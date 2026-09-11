@@ -608,7 +608,7 @@ export type ActionPayloadByCommand = {
   resume_discussion: { meetingRoundId: string };
   stop_discussion: { meetingRoundId: string };
   regenerate_summary: { meetingRoundId: string };
-  approve_summary: { meetingRoundId: string };
+  approve_summary: { meetingRoundId: string; candidateId?: string | null };
   retry_collection: { requestId: string; childRunId: string | null };
   continue_collection: { requestId: string; childRunId: string };
   stop_collection: { requestId: string; childRunId: string };
@@ -818,6 +818,13 @@ export type HypothesisFirstStateV2 = {
   collection: PhaseState & {
     aggregate: StateAggregate;
     requests: CollectionRequestState[];
+    /** Auto-accept policy facts for the residual knowledge-handoff gate
+     * (SCI-049 O-02); absent on legacy snapshots. */
+    autoAccept?: {
+      pending: boolean;
+      actor: string;
+      intervalMs: number;
+    } | null;
   };
   convergence: PhaseState & {
     latestHypothesisRoundId: string | null;
