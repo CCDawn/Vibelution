@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentInstance, Team, TeamMember } from "../api/types";
+import type { AgentInstance, ConversationSummary, Team, TeamMember } from "../api/types";
 import {
   agentDirectoryBucket,
   buildAgentDirectoryPartition,
+  buildAgentDirectoryTeamRoomHistoryGroups,
   compareAgentDirectoryStableOrder,
+  directoryTeamBlockIds,
   isConversationDirectoryAgent,
+  isDirectoryTeamBlockTeam,
   isEligibleDirectoryAgent,
   readDirectoryCollapsedSections,
   writeDirectoryCollapsedSections,
@@ -340,5 +343,73 @@ describe("agentConversationDirectoryModel", () => {
       "agent-newer",
       "agent-older",
     ]);
+  });
+});
+
+function room(overrides: Partial<ConversationSummary> = {}): ConversationSummary {
+  return {
+    conversationId: "room-1",
+    roomId: "room-1",
+    type: "group_room",
+    title: "SCI-009 | 候选评审 | sci-009-abc",
+    status: "ready",
+    summary: "",
+    updatedAt: "2026-09-10T12:00:00Z",
+    workspacePath: "",
+    ...overrides,
+  };
+}
+
+describe("buildAgentDirectoryTeamRoomHistoryGroups", () => {
+  it("folds extra rooms by SCI topic with newest activity first and other last", () => {
+    const groups = buildAgentDirectoryTeamRoomHistoryGroups([
+      room({ roomId: "room-linked", title: "挑战杯ai科研团队 团队群聊", updatedAt: "2026-09-11T09:00:00Z" }),
+      room({ roomId: "room-sci9-b", title: "SCI-009 | 候选生成 | sci-009-b", updatedAt: "2026-09-10T10:00:00Z" }),
+      room({ roomId: "room-sci9-a", title: "SCI-009 | 候选评审 | sci-009-a", updatedAt: "2026-09-11T08:00:00Z" }),
+      room({ roomId: "room-sci56", title: "SCI-056 | 候选评审 | sci-056-a", updatedAt: "2026-09-10T20:00:00Z" }),
+      room({ roomId: "room-other", title: "手工房间", updatedAt: "2026-09-11T10:00:00Z" }),
+    ], { linkedRoomId: "room-linked", otherLabel: "其他群聊" });
+
+    expect(groups.map((group) => group.key)).toEqual(["SCI-009", "SCI-056", "__other__"]);
+    expect(groups.map((group) => group.label)).toEqual(["SCI-009", "SCI-056", "其他群聊"]);
+    expect(groups[0]?.items.map((item) => item.roomId)).toEqual(["room-sci9-a", "room-sci9-b"]);
+    expect(groups[2]?.items.map((item) => item.roomId)).toEqual(["room-other"]);
+    expect(groups.flatMap((group) => group.items).some((item) => item.roomId === "room-linked")).toBe(false);
+  });
+
+  it("falls back to conversationId when a room has no roomId and returns nothing for the linked-only case", () => {
+    const legacyRoom = room({ conversationId: "legacy-1", roomId: "", title: "sci-012 候选生成" });
+    const groups = buildAgentDirectoryTeamRoomHistoryGroups([legacyRoom], { otherLabel: "其他" });
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.key).toBe("SCI-012");
+    expect(groups[0]?.items.map((item) => item.conversationId)).toEqual(["legacy-1"]);
+    expect(buildAgentDirectoryTeamRoomHistoryGroups([room({ roomId: "room-linked" })], {
+      linkedRoomId: "room-linked",
+    })).toEqual([]);
+  });
+});
+
+describe("directoryTeamBlockIds", () => {
+  it("keeps only teams that render a directory block", () => {
+    const memberTeam = team();
+    const orphanTeam = team({
+      teamId: "team-orphan",
+      members: [],
+      memberCount: 0,
+      linkedChatRoomId: "",
+      linkedChatRoom: {
+        roomId: "",
+        title: "",
+        status: "active",
+        mode: "group",
+        purpose: "team",
+        participantCount: 0,
+        updatedAt: "",
+      },
+    });
+
+    expect(isDirectoryTeamBlockTeam(memberTeam)).toBe(true);
+    expect(isDirectoryTeamBlockTeam(orphanTeam)).toBe(false);
+    expect([...directoryTeamBlockIds([memberTeam, orphanTeam])]).toEqual(["team-1"]);
   });
 });

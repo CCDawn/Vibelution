@@ -1,4 +1,4 @@
-import type { AgentInstance, SessionSummary, Team } from "../api/types";
+import type { AgentInstance, ConversationSummary, SessionSummary, Team } from "../api/types";
 import { agentArchiveProtected } from "./agentArchiveProtection";
 import { agentDisplayInfo, type ModelLabelResolver } from "./agentDisplay";
 import {
@@ -182,6 +182,26 @@ export function directoryLinkedRoomIds(teams: readonly Team[] | ConversationInde
   return ids;
 }
 
+/** Teams rendered as team blocks in the Agent directory (members or a linked room). */
+export function isDirectoryTeamBlockTeam(team: Team): boolean {
+  return (
+    isConfiguredConversationIndexTeam(team)
+    || Boolean(String(team.linkedChatRoomId || team.linkedChatRoom?.roomId || "").trim())
+  );
+}
+
+/** Team ids owned by directory team blocks; the rail dedupes tree team groups against this set. */
+export function directoryTeamBlockIds(teams: readonly Team[]): Set<string> {
+  const teamIds = new Set<string>();
+  for (const team of normalizeDirectoryTeams([...teams])) {
+    const teamId = String(team.teamId || "").trim();
+    if (teamId && isDirectoryTeamBlockTeam(team)) {
+      teamIds.add(teamId);
+    }
+  }
+  return teamIds;
+}
+
 export function buildAgentDirectoryPartition(options: {
   agents: AgentInstance[];
   teams: Team[];
@@ -195,10 +215,7 @@ export function buildAgentDirectoryPartition(options: {
   const filterText = String(options.filterText || "").trim();
   const directoryTeams = normalizeDirectoryTeams(options.teams ?? []);
   // Prefer teams with members; still keep room-only teams so chats leave 未归属.
-  const configuredTeams = directoryTeams.filter(
-    (team) => isConfiguredConversationIndexTeam(team)
-      || Boolean(String(team.linkedChatRoomId || team.linkedChatRoom?.roomId || "").trim()),
-  );
+  const configuredTeams = directoryTeams.filter(isDirectoryTeamBlockTeam);
   const primaryTeamByAgentId = buildAgentPrimaryTeamIdMap(directoryTeams);
 
   const agentsById = new Map<string, AgentInstance>();
@@ -304,6 +321,63 @@ export function buildAgentDirectoryPartition(options: {
     teamBlocks,
     listedAgentIds: [...new Set(listedAgentIds)],
   };
+}
+
+export type AgentDirectoryTeamRoomHistoryGroup = {
+  key: string;
+  label: string;
+  items: ConversationSummary[];
+};
+
+const TEAM_ROOM_HISTORY_TOPIC_PATTERN = /(^|[^A-Za-z0-9])sci-(\d+)(?=[^0-9]|$)/i;
+
+function conversationUpdatedAtTimestamp(conversation: Pick<ConversationSummary, "updatedAt">): number {
+  const parsedTimestamp = Date.parse(String(conversation.updatedAt || "").trim());
+  return Number.isFinite(parsedTimestamp) ? parsedTimestamp : 0;
+}
+
+/**
+ * Group a team's extra group rooms for the directory history fold.
+ * Rooms are keyed by their `SCI-xxx` topic when present, otherwise fall into
+ * a single trailing "other" group; both levels sort by most recent activity.
+ */
+export function buildAgentDirectoryTeamRoomHistoryGroups(
+  rooms: readonly ConversationSummary[],
+  options: { linkedRoomId?: string; otherLabel?: string } = {},
+): AgentDirectoryTeamRoomHistoryGroup[] {
+  const linkedRoomId = String(options.linkedRoomId || "").trim();
+  const groups = new Map<string, AgentDirectoryTeamRoomHistoryGroup>();
+  for (const room of rooms) {
+    const roomId = String(room.roomId || room.conversationId || "").trim();
+    if (!roomId || (linkedRoomId && roomId === linkedRoomId)) {
+      continue;
+    }
+    const topicMatch = String(room.title || "").match(TEAM_ROOM_HISTORY_TOPIC_PATTERN);
+    const topic = topicMatch ? `SCI-${topicMatch[2]}` : "";
+    const groupKey = topic || "__other__";
+    const group = groups.get(groupKey) ?? {
+      key: groupKey,
+      label: topic || String(options.otherLabel || ""),
+      items: [],
+    };
+    group.items.push(room);
+    groups.set(groupKey, group);
+  }
+  const ordered = [...groups.values()];
+  for (const group of ordered) {
+    group.items.sort(
+      (left, right) => conversationUpdatedAtTimestamp(right) - conversationUpdatedAtTimestamp(left),
+    );
+  }
+  ordered.sort((left, right) => {
+    if (left.key === "__other__") return right.key === "__other__" ? 0 : 1;
+    if (right.key === "__other__") return -1;
+    const leftLatest = left.items[0] ? conversationUpdatedAtTimestamp(left.items[0]) : 0;
+    const rightLatest = right.items[0] ? conversationUpdatedAtTimestamp(right.items[0]) : 0;
+    if (leftLatest !== rightLatest) return rightLatest - leftLatest;
+    return left.key.localeCompare(right.key);
+  });
+  return ordered;
 }
 
 const DIRECTORY_COLLAPSE_STORAGE_KEY = "vibelution.agent-directory.collapsed.v1";

@@ -1,13 +1,14 @@
 import { LoaderCircle } from "lucide-react";
 import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
 
-import type { AgentInstance, SessionSummary, Team } from "../api/types";
+import type { AgentInstance, ConversationSummary, SessionSummary, Team } from "../api/types";
 import { VButton } from "../components/vui";
 import { agentDisplayInfo } from "./agentDisplay";
 import {
   agentDirectoryBucket,
   agentDirectorySection,
   buildAgentDirectoryPartition,
+  buildAgentDirectoryTeamRoomHistoryGroups,
   isConversationDirectoryAgent,
   isEligibleDirectoryAgent,
   isVisibleFlatDirectoryAgent,
@@ -15,7 +16,7 @@ import {
   writeDirectoryCollapsedSections,
 } from "./agentConversationDirectoryModel";
 import { ConversationIndexSection } from "./ConversationIndexSection";
-import { TeamConversationIndexItem } from "./GroupSessionIndexItems";
+import { GroupConversationIndexItem, TeamConversationIndexItem } from "./GroupSessionIndexItems";
 import {
   resolveAgentActivityTone,
   resolveSessionActivityTone,
@@ -42,6 +43,8 @@ export type AgentConversationDirectoryProps = {
   sessionIdsNeedingApproval?: readonly string[];
   statusLabel: (status: string) => string;
   teams?: Team[];
+  /** Group rooms per team backing the team-block history fold (linked room is filtered at render). */
+  teamRoomsByTeamId?: ReadonlyMap<string, readonly ConversationSummary[]>;
   onContextMenu: (
     event: ReactMouseEvent<HTMLElement>,
     agent: AgentInstance,
@@ -164,6 +167,7 @@ export function AgentConversationDirectory({
   sessionIdsNeedingApproval = [],
   statusLabel,
   teams = [],
+  teamRoomsByTeamId,
   onContextMenu,
   onOpenAgent,
   onOpenGroupRoom,
@@ -364,6 +368,20 @@ export function AgentConversationDirectory({
     const defaultCollapsed = true;
     const expanded = isSectionExpanded(sectionKey, defaultCollapsed);
     const count = block.agents.length;
+    const filterTerm = filterText.trim().toLowerCase();
+    const teamRooms = teamRoomsByTeamId?.get(teamId) ?? [];
+    const historyRooms = filterTerm
+      ? teamRooms.filter((room) => `${room.title} ${room.summary}`.toLowerCase().includes(filterTerm))
+      : teamRooms;
+    const historyGroups = historyRooms.length
+      ? buildAgentDirectoryTeamRoomHistoryGroups(historyRooms, {
+          linkedRoomId: block.roomId,
+          otherLabel: lang === "zh" ? "其他群聊" : "Other chats",
+        })
+      : [];
+    const historyCount = historyGroups.reduce((total, group) => total + group.items.length, 0);
+    const historyKey = `team-room-history:${teamId}`;
+    const historyExpanded = isSectionExpanded(historyKey, true);
     return (
       <ConversationIndexSection
         key={sectionKey}
@@ -386,6 +404,53 @@ export function AgentConversationDirectory({
             statusLabel={statusLabel}
             onOpen={(roomId) => onOpenGroupRoom?.(roomId)}
           />
+          {historyCount ? (
+            <ConversationIndexSection
+              className={styles.agentRoomHistory}
+              count={historyCount}
+              countLabel={lang === "zh" ? `${historyCount} 个历史群聊` : `${historyCount} past chats`}
+              expanded={historyExpanded}
+              label={lang === "zh" ? "历史群聊" : "Chat history"}
+              onToggle={() => toggleSection(historyKey, true)}
+            >
+              <div className={styles.agentDirectoryList}>
+                {historyGroups.map((group) => {
+                  const groupKey = `team-room-topic:${teamId}:${group.key}`;
+                  return (
+                    <ConversationIndexSection
+                      key={group.key}
+                      className={styles.agentRoomHistoryTopic}
+                      count={group.items.length}
+                      countLabel={lang === "zh" ? `${group.items.length} 个群聊` : `${group.items.length} chats`}
+                      expanded={isSectionExpanded(groupKey, true)}
+                      label={group.label || (lang === "zh" ? "其他" : "Other")}
+                      onToggle={() => toggleSection(groupKey, true)}
+                    >
+                      <div className={styles.agentDirectoryList}>
+                        {group.items.map((room) => {
+                          const roomId = String(room.roomId || room.conversationId || "").trim();
+                          return (
+                            <GroupConversationIndexItem
+                              key={roomId}
+                              active={Boolean(activeGroupRoomId && roomId === activeGroupRoomId)}
+                              conversation={room}
+                              kindLabel={lang === "zh" ? "群聊" : "Group"}
+                              fallbackSummary={lang === "zh" ? "群聊" : "Group chat"}
+                              lang={lang}
+                              roomId={roomId}
+                              statusLabel={statusLabel}
+                              formatTime={formatTime}
+                              onOpen={(targetRoomId) => onOpenGroupRoom?.(targetRoomId)}
+                            />
+                          );
+                        })}
+                      </div>
+                    </ConversationIndexSection>
+                  );
+                })}
+              </div>
+            </ConversationIndexSection>
+          ) : null}
           {block.agents.map((agent) => renderAgent(agent, true))}
         </div>
       </ConversationIndexSection>
