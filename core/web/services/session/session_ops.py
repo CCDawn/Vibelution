@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import os
 import re
 import time
@@ -1264,6 +1265,22 @@ def _session_query_matches(
     return query in haystack
 
 
+def _session_turn_item_input_from_codex_cell(cell: Mapping[str, Any]) -> str:
+    """Serialize a tool cell's canonical arguments for the TurnItem input contract."""
+    s = _service()
+    if not isinstance(cell, Mapping):
+        return ""
+    arguments = cell.get("toolArguments")
+    if not isinstance(arguments, dict):
+        lifecycle = cell.get("toolLifecycleModel")
+        tool_calls = lifecycle.get("toolCalls") if isinstance(lifecycle, Mapping) else None
+        first_call = tool_calls[0] if isinstance(tool_calls, list) and tool_calls else None
+        arguments = first_call.get("arguments") if isinstance(first_call, Mapping) else None
+    if not isinstance(arguments, dict) or not arguments:
+        return ""
+    return json.dumps(dict(arguments), ensure_ascii=False)
+
+
 def _session_turn_item_from_codex_cell(
     *,
     session_id: str,
@@ -1306,6 +1323,7 @@ def _session_turn_item_from_codex_cell(
             "title": str(cell.get("title") or "").strip(),
             "summary": str(cell.get("summary") or "").strip(),
             "text": str(cell.get("text") or "").strip(),
+            "input": s._session_turn_item_input_from_codex_cell(cell),
             "sourceItemId": source_item_id,
             "callId": call_id,
             "operationIds": list(cell.get("operationIds") or []),

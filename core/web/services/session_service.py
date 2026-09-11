@@ -626,6 +626,7 @@ from core.web.services.session.session_ops import (
     _session_prompt_cache_partition,
     _session_query_matches,
     _session_turn_item_from_codex_cell,
+    _session_turn_item_input_from_codex_cell,
     _source_collection_stage_task_continuation_metadata,
     _source_collection_stage_task_continuation_prompt,
     _supersede_active_session_turn_for_edit,

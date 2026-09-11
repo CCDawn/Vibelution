@@ -9,6 +9,7 @@ Bodies late-bind ``session_service`` so facade monkeypatches remain effective.
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -248,6 +249,12 @@ def _append_missing_canonical_result_items(
             or tool_call.get("error")
             or "",
         )
+        tool_arguments = tool_call.get("arguments")
+        input_text = (
+            json.dumps(dict(tool_arguments), ensure_ascii=False)
+            if isinstance(tool_arguments, dict) and tool_arguments
+            else ""
+        )
         s._append_session_conversation_event(
             normalized_session_id,
             normalized_turn_id,
@@ -272,6 +279,7 @@ def _append_missing_canonical_result_items(
                 "text": text,
                 "callId": call_id,
                 "toolName": name,
+                "input": input_text,
             },
             source="persist_session_turn_result",
             visible_in_model=False,

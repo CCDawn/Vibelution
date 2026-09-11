@@ -2211,6 +2211,10 @@ def _merge_live_tool_start_metadata_into_turn_items(
             metadata = dict(item.get("metadata") or {}) if isinstance(item.get("metadata"), dict) else {}
             metadata["executionStartedAtEpochMs"] = exact_start
             item["metadata"] = metadata
+        if not str(item.get("input") or "").strip():
+            live_input = s._session_turn_item_input_from_codex_cell(live_cell)
+            if live_input:
+                item["input"] = live_input
         merged.append(item)
 
     for call_id, (index, cell) in live_cell_by_call_id.items():
@@ -2716,6 +2720,22 @@ def _canonicalize_session_turn_items_for_protocol(
     return sorted(canonical, key=lambda item: (int(item.get("sequence") or 0), str(item.get("itemId") or "")))
 
 
+def _slim_session_turn_item_input(raw_input: str, *, max_chars: int = 12000) -> str:
+    """Trim oversized canonical tool input JSON without breaking its shape."""
+    s = _service()
+    try:
+        parsed = json.loads(str(raw_input or ""))
+    except (TypeError, ValueError):
+        return ""
+    if not isinstance(parsed, dict) or not parsed:
+        return ""
+    for key, value in parsed.items():
+        if isinstance(value, str) and len(value) > 4000:
+            parsed[key] = f"{value[:3999].rstrip()}…"
+    serialized = json.dumps(parsed, ensure_ascii=False)
+    return serialized if len(serialized) <= max_chars else ""
+
+
 def _slim_session_turn_items_for_window_payload(
     items: list[dict[str, Any]] | None,
 ) -> list[dict[str, Any]]:
@@ -2751,6 +2771,11 @@ def _slim_session_turn_items_for_window_payload(
                 continue
             if len(value) > text_cap:
                 next_item[field] = f"{value[:text_cap]}…"
+        # `input` carries the canonical tool arguments (including bounded patch
+        # text). Keep it JSON-valid while trimming oversized diff payloads.
+        raw_input = next_item.get("input")
+        if isinstance(raw_input, str) and len(raw_input) > 12000:
+            next_item["input"] = s._slim_session_turn_item_input(raw_input)
         # Drop unbounded diagnostic blobs from window payloads.
         diagnostic = next_item.get("diagnosticSummary")
         if isinstance(diagnostic, dict) and len(json.dumps(diagnostic, ensure_ascii=False)) > 1200:

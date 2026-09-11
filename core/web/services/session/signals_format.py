@@ -1279,7 +1279,12 @@ def _safe_tool_argument_details(value: Any) -> dict[str, Any]:
             details[key] = raw_value
             continue
         if isinstance(raw_value, str):
-            details[key] = s._trim_tool_detail_text(raw_value, max_chars=420, max_lines=4)
+            # The conversation tool row renders patch hunks from `patch_text`;
+            # its budget must fit a real diff rather than the generic preview.
+            if key.lower() in {"patch_text", "patchtext", "patch", "diff"}:
+                details[key] = s._trim_tool_detail_text(raw_value, max_chars=16000, max_lines=400)
+            else:
+                details[key] = s._trim_tool_detail_text(raw_value, max_chars=420, max_lines=4)
             continue
         if isinstance(raw_value, (list, tuple)):
             details[key] = [s._trim_tool_detail_text(item, max_chars=220, max_lines=2) for item in list(raw_value)[:8]]

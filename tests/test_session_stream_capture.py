@@ -388,3 +388,36 @@ def test_live_tool_event_without_call_id_is_dropped_with_reason(monkeypatch) -> 
 
     assert capture.tool_calls == []
     assert discarded[-1]["fields"]["reason"] == "call_id_missing"
+
+
+def test_tool_arguments_keep_bounded_patch_text_for_diff_rendering() -> None:
+    capture = stream_capture.SessionTurnCapture(session_id="cap-patch", turn_id="cap-t-patch")
+    patch_text = "\n".join(
+        [
+            "*** Begin Patch",
+            "*** Update File: demo.py",
+            "@@",
+            "-value = 1",
+            "+value = 2",
+            *[f"+padding line {index} {'x' * 80}" for index in range(10)],
+            "*** End Patch",
+        ]
+    )
+    assert len(patch_text) > 420
+
+    capture.note_tool_event(
+        "apply_patch_tool",
+        "completed",
+        call_id="call-patch",
+        arguments={"patch_text": patch_text, "api_key": "must-not-leak"},
+    )
+    transcript = session_service._build_codex_transcript_projection(
+        message_id="message-patch",
+        feedback_events=capture.feedback_events,
+        tool_calls=capture.tool_calls,
+        streaming=False,
+    )
+
+    arguments = transcript["toolCalls"][0]["arguments"]
+    assert arguments["patch_text"] == patch_text
+    assert "api_key" not in arguments
