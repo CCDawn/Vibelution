@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+import type { TranslationKey } from "../../i18n/dictionary";
 import {
   avatarInitials,
   chatRoomModeLabel,
   compactAgentRoleLabel,
   formatAgentIdentityLabel,
   groupConsecutiveBy,
+  promptSegmentDisplayLabel,
   shouldCollapseGroupMessage,
 } from "./chatRoutePresentation";
 
@@ -40,5 +42,58 @@ describe("chatRoutePresentation", () => {
       (item) => item.speaker,
     );
     expect(groups.map((group) => group.map((item) => item.id))).toEqual([["a", "b"], ["c"]]);
+  });
+});
+
+function testTranslator(key: TranslationKey) {
+  if (key === "contextSegment_history") {
+    return "历史";
+  }
+  return key;
+}
+
+describe("promptSegmentDisplayLabel", () => {
+  it("localizes manifest and runtime context segment keys", () => {
+    expect(promptSegmentDisplayLabel(
+      { key: "agent_prompt_snapshot", label: "agent prompt snapshot", promptCategory: "system_prompt" },
+      "zh",
+      testTranslator,
+    )).toBe("Agent 提示快照");
+    expect(promptSegmentDisplayLabel(
+      { key: "dynamic_runtime_context", label: "dynamic runtime context", promptCategory: "" },
+      "zh",
+      testTranslator,
+    )).toBe("动态运行上下文");
+    expect(promptSegmentDisplayLabel(
+      { key: "computed_missing", label: "computed missing", promptCategory: "" },
+      "zh",
+      testTranslator,
+    )).toBe("无法计算");
+    expect(promptSegmentDisplayLabel(
+      { key: "agent_prompt_snapshot", label: "agent prompt snapshot", promptCategory: "system_prompt" },
+      "en",
+      testTranslator,
+    )).toBe("agent prompt snapshot");
+  });
+
+  it("never leaks a raw english fallback for unknown keys", () => {
+    expect(promptSegmentDisplayLabel(
+      { key: "mystery_segment", label: "mystery segment", promptCategory: "" },
+      "zh",
+      testTranslator,
+    )).toBe("其他上下文");
+    expect(promptSegmentDisplayLabel(
+      { key: "mystery_segment", label: "mystery segment", promptCategory: "" },
+      "en",
+      testTranslator,
+    )).toBe("other context");
+  });
+
+  it("keeps i18n-backed segment names", () => {
+    expect(promptSegmentDisplayLabel(
+      { key: "history", label: "history", promptCategory: "" },
+      "zh",
+      testTranslator,
+    )).toBe("历史");
   });
 });

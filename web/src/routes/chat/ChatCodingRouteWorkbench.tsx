@@ -2007,6 +2007,10 @@ export function ChatCodingRouteWorkbench() {
       detailAvailable: cacheDetailAvailable,
       segments: cachePromptCompositionSegments,
       lang,
+      cacheSource: lastCacheComposition?.source,
+      cacheUsageObserved: lastCacheComposition?.cacheUsageObserved,
+      cachedInputTokens: lastCacheComposition?.cachedInputTokens,
+      cacheCreationInputTokens: lastCacheComposition?.cacheCreationInputTokens,
     });
   }, [
     cacheCompositionPercent,
@@ -2015,6 +2019,10 @@ export function ChatCodingRouteWorkbench() {
     detail?.contextUsage?.limit,
     detail?.contextUsage?.used,
     lang,
+    lastCacheComposition?.cacheCreationInputTokens,
+    lastCacheComposition?.cacheUsageObserved,
+    lastCacheComposition?.cachedInputTokens,
+    lastCacheComposition?.source,
     lastContextComposition?.limitTokens,
     lastContextComposition?.totalTokens,
   ]);
