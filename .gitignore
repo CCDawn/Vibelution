@@ -18,6 +18,8 @@ eggs/
 lib/
 !web/public/desktop-pet/whale-rig/lib/
 !web/public/desktop-pet/whale-rig/lib/*.js
+!web/src/components/vui/lib/
+!/web/src/components/vui/lib/**
 lib64/
 parts/
 sdist/
@@ -113,6 +115,7 @@ workspace/
 /.arts/
 /.claude/
 /.codeartsdoer/
+/.commandcode/
 /.docs/
 /PROJECT_MEMORY.html
 /.superpowers/
