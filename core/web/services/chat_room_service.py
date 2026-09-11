@@ -1431,7 +1431,11 @@ def start_chat_room_round(
             preserve_scoped_session_ids=_is_challenge_discussion_room(room),
         )
         refreshed_participant_count = len(refreshed_participants)
-        participants = _dedupe_chat_room_participants(refreshed_participants)
+        participants = (
+            _dedupe_frozen_participants_by_agent(refreshed_participants)
+            if "participantAgentIds" in round_config
+            else _dedupe_chat_room_participants(refreshed_participants)
+        )
         submit_timings["participantDedupeRemoved"] = max(0, refreshed_participant_count - len(participants))
         submit_timings["participantRefreshMs"] = _elapsed_ms(stage_started_at)
 
@@ -1516,7 +1520,11 @@ def start_chat_room_round(
                 participants=round_participants,
                 case_state=case_state,
             )
-            speakers = _dedupe_chat_room_participants(speakers)
+            speakers = (
+                _dedupe_frozen_participants_by_agent(speakers)
+                if "participantAgentIds" in round_config
+                else _dedupe_chat_room_participants(speakers)
+            )
             try:
                 _require_exact_frozen_speaker_roster(speakers, round_config)
             except ChatRoomValidationError:
@@ -5761,6 +5769,37 @@ def _dedupe_chat_room_participants(participants: list[dict[str, Any]]) -> list[d
         if not isinstance(participant, dict):
             continue
         keys = _chat_room_participant_identity_keys(participant)
+        if keys and any(key in seen for key in keys):
+            continue
+        deduped.append(participant)
+        seen.update(keys)
+    return deduped
+
+
+def _dedupe_frozen_participants_by_agent(
+    participants: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Dedupe a frozen roster by agent identity only.
+
+    Session-derived keys are refreshed metadata for a frozen roster: distinct
+    frozen agents can transiently present the same refreshed session id (one
+    agent's ``directSessionId`` equal to another agent's ``sessionId``), and a
+    session-scoped collapse silently drops a mandated speaker before
+    ``_require_exact_frozen_speaker_roster`` fails the round.  A frozen agent
+    may still not appear twice.
+    """
+
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for participant in list(participants or []):
+        if not isinstance(participant, dict):
+            continue
+        agent_id = str(participant.get("agentId") or "").strip()
+        keys = (
+            [f"agent:{agent_id}"]
+            if agent_id
+            else _chat_room_participant_identity_keys(participant)
+        )
         if keys and any(key in seen for key in keys):
             continue
         deduped.append(participant)
