@@ -1,4 +1,5 @@
 import { ConversationMessage, SessionDetail, SessionMessageWindow, SessionReferenceAttachment, SessionStreamEvent, SessionSummary } from "../api/types";
+import { hasTerminalCanonicalTurnOutcome } from "./chatTurnProtocol";
 
 export type OptimisticUserMessageInput = {
   sessionId: string;
@@ -65,6 +66,74 @@ function removeSettledOptimisticUserMessages(messages: ConversationMessage[]): C
     }
     const clientSubmissionId = conversationMessageClientSubmissionId(message);
     return !clientSubmissionId || !committedSubmissionIds.has(clientSubmissionId);
+  });
+}
+
+const TRANSIENT_LIVE_OVERLAY_KIND = "session_live_overlay";
+
+type AssistantConversationTurnMessage = Extract<ConversationMessage, { role: "assistant" }>;
+
+/**
+ * Backend live overlays project an executing turn (`<sessionId>-message-live-<turnId>`).
+ * They are transient UI state, not durable transcript entries.
+ */
+function isTransientLiveOverlayMessage(message: ConversationMessage): message is AssistantConversationTurnMessage {
+  if (message.role !== "assistant") {
+    return false;
+  }
+  if (String(message.metadata?.kind ?? "").trim() === TRANSIENT_LIVE_OVERLAY_KIND) {
+    return true;
+  }
+  return /-message-live-/.test(String(message.id || ""));
+}
+
+function removeSupersededTransientLiveOverlays(
+  messages: ConversationMessage[],
+): ConversationMessage[] {
+  const terminalAssistantTurnIds = new Set(
+    messages
+      .filter((message): message is AssistantConversationTurnMessage => (
+        message.role === "assistant"
+        && !isTransientLiveOverlayMessage(message)
+        && hasTerminalCanonicalTurnOutcome(message)
+      ))
+      .map((message) => String(message.turnId ?? "").trim())
+      .filter(Boolean),
+  );
+  if (terminalAssistantTurnIds.size === 0) {
+    return messages;
+  }
+  return messages.filter((message) => {
+    if (!isTransientLiveOverlayMessage(message)) {
+      return true;
+    }
+    const turnId = String(message.turnId ?? "").trim();
+    return !turnId || !terminalAssistantTurnIds.has(turnId);
+  });
+}
+
+/**
+ * A newest-tail snapshot that no longer carries a live overlay proves the
+ * server removed it; earlier-page windows and older windows prove nothing.
+ */
+function reconcileTransientLiveOverlays(
+  previous: SessionDetail,
+  next: SessionDetail,
+  messages: ConversationMessage[],
+): ConversationMessage[] {
+  const nextMessageIds = new Set(
+    (next.messages ?? [])
+      .map((message) => String(message.id || "").trim())
+      .filter(Boolean),
+  );
+  const coversNewestTail = next.messageWindow?.hasLater === false
+    && (next.messageWindow?.newestMessageIndex ?? 0) >= (previous.messageWindow?.newestMessageIndex ?? 0);
+  return removeSupersededTransientLiveOverlays(messages).filter((message) => {
+    if (!isTransientLiveOverlayMessage(message)) {
+      return true;
+    }
+    const id = String(message.id || "").trim();
+    return !(coversNewestTail && id && !nextMessageIds.has(id));
   });
 }
 
@@ -396,7 +465,11 @@ export function mergeSessionDetailMessageWindow(
       ? { ...merged, provisionalTranscript: true }
       : { ...merged, provisionalTranscript: undefined };
   }
-  const messages = mergeConversationMessageWindows(previous.messages ?? [], merged.messages ?? []);
+  const messages = reconcileTransientLiveOverlays(
+    previous,
+    merged,
+    mergeConversationMessageWindows(previous.messages ?? [], merged.messages ?? []),
+  );
   const base = merged.messageWindow.hasLater ? previous : merged;
   return {
     ...base,
