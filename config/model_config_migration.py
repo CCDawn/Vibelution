@@ -714,7 +714,9 @@ def preview_v2_canonical_repair(
     if not blocking:
         try:
             canonical = validate_canonical_llm_payload(proposed_llm)
-            EffectiveLLMGraphBuilder().build(canonical)
+            EffectiveLLMGraphBuilder().build(
+                canonical, fallback_profile_ids=canonical.declared_fallback_profile_ids()
+            )
             build_effective_config(proposed)
             validate_llm_public_config(proposed)
         except CanonicalLLMConfigError as exc:
