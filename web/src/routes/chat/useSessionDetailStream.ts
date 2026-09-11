@@ -24,6 +24,7 @@ import {
 import { createSessionAssistantDeltaScheduler } from "../sessionAssistantDeltaScheduler";
 import { chatStreamPerformanceNowMs, isBusyPhase } from "./chatCodingRouteViewModel";
 import {
+  SESSION_STREAM_ERROR_REFRESH_MIN_INTERVAL_MS,
   SESSION_STREAM_MIN_APPLY_INTERVAL_MS,
   SESSION_STREAM_ROUTE_SWITCH_GRACE_MS,
   type SessionStreamDecisionSnapshot,
@@ -81,6 +82,7 @@ export function useSessionDetailStream({
   const [sessionStreamConnected, setSessionStreamConnected] = useState(false);
   const [streamReconnectTick, setStreamReconnectTick] = useState(0);
   const sessionStreamErrorLoggedRef = useRef<Record<string, boolean>>({});
+  const sessionStreamErrorRefreshAtRef = useRef<Record<string, number>>({});
   const sessionStreamPayloadErrorLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamApplyStatsRef = useRef<Record<string, SessionStreamApplyStats>>({});
   const sessionTitleForNotificationsRef = useRef(sessionTitleForNotifications);
@@ -468,7 +470,19 @@ export function useSessionDetailStream({
         setSessionStreamConnected(false);
         const pendingAssistantDeltaCount = assistantDeltaScheduler.pendingCount;
         applyPendingAssistantDeltas("close");
-        void queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) });
+        // The stream reports an error on every reconnect attempt while it keeps
+        // failing. Each authoritative refetch rewrites the session cache and
+        // notifies its subscribers, so refreshing once per error storms React
+        // Query (and the renders it triggers). One refresh per window still
+        // recovers whatever the broken stream missed.
+        const errorAtMs = Date.now();
+        const lastErrorRefreshAtMs = sessionStreamErrorRefreshAtRef.current[streamSessionId] ?? 0;
+        const shouldRefreshAuthoritativeDetail =
+          errorAtMs - lastErrorRefreshAtMs >= SESSION_STREAM_ERROR_REFRESH_MIN_INTERVAL_MS;
+        if (shouldRefreshAuthoritativeDetail) {
+          sessionStreamErrorRefreshAtRef.current[streamSessionId] = errorAtMs;
+          void queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) });
+        }
         if (!sessionStreamErrorLoggedRef.current[streamSessionId]) {
           sessionStreamErrorLoggedRef.current[streamSessionId] = true;
           postBrowserTelemetry({
@@ -490,6 +504,7 @@ export function useSessionDetailStream({
               sessionId: streamSessionId,
               readyState: stream.readyState,
               pendingAssistantDeltaCount,
+              refreshedAuthoritativeDetail: shouldRefreshAuthoritativeDetail,
             },
           });
         }

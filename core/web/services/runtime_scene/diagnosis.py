@@ -184,15 +184,17 @@ def _runtime_scene_agent_brief(diagnosis: dict[str, Any]) -> dict[str, Any]:
     evidence_paths = diagnosis.get("evidencePaths") if isinstance(diagnosis.get("evidencePaths"), list) else []
     severity = str(diagnosis.get("severity") or issue_state.get("severity") or "info")
     active_clusters = issue_state.get("activeClusters") if isinstance(issue_state.get("activeClusters"), list) else []
+    # The brief must agree with issueState/userSummary ("主簇"): triage starts from
+    # the primary cluster, not from whichever signal happened to arrive first.
+    severity_active_count = len(
+        [
+            cluster
+            for cluster in active_clusters
+            if isinstance(cluster, dict) and str(cluster.get("severity") or "") == severity
+        ]
+    )
     active_count = int(issue_state.get("activeClusterCount") or 0)
-    if severity in {"error", "warning"} and active_clusters:
-        active_count = len(
-            [
-                cluster
-                for cluster in active_clusters
-                if isinstance(cluster, dict) and str(cluster.get("severity") or "") == severity
-            ]
-        )
+    primary_cluster_issue = s._runtime_scene_primary_issue_from_cluster(issue_state)
     policy_count = int(issue_state.get("policyClusterCount") or 0)
     historical_count = int(issue_state.get("historicalClusterCount") or 0)
     first_signal = diagnosis.get("firstSignal") if isinstance(diagnosis.get("firstSignal"), dict) else {}
@@ -203,13 +205,17 @@ def _runtime_scene_agent_brief(diagnosis: dict[str, Any]) -> dict[str, Any]:
         needs_action = True
         actionability = "fix_required"
         do_not_do = ["do not ignore active clusters without checking their evidence paths"]
-        primary_issue = s._runtime_scene_agent_brief_issue(first_signal, fallback=diagnosis_status)
+        primary_issue = primary_cluster_issue or s._runtime_scene_agent_brief_issue(
+            first_signal, fallback=diagnosis_status
+        )
     elif policy_count > 0:
         diagnosis_status = "policy_only"
         needs_action = False
         actionability = "policy_acknowledge_only"
         do_not_do = ["do not treat expected policy blocks as product/runtime bugs"]
-        primary_issue = s._runtime_scene_agent_brief_issue(first_signal, fallback=diagnosis_status)
+        primary_issue = primary_cluster_issue or s._runtime_scene_agent_brief_issue(
+            first_signal, fallback=diagnosis_status
+        )
     elif historical_count > 0:
         diagnosis_status = "resolved"
         needs_action = False
@@ -230,6 +236,7 @@ def _runtime_scene_agent_brief(diagnosis: dict[str, Any]) -> dict[str, Any]:
         "primary_issue": primary_issue,
         "severity": severity,
         "active_cluster_count": active_count,
+        "severity_cluster_count": severity_active_count,
         "policy_cluster_count": policy_count,
         "historical_cluster_count": historical_count,
         "next_minimal_action": str(diagnosis.get("agentNextStep") or "read summary.json first"),
@@ -237,6 +244,21 @@ def _runtime_scene_agent_brief(diagnosis: dict[str, Any]) -> dict[str, Any]:
         "work_run_focus": s._runtime_scene_agent_work_run_focus(work_run_summary),
         "do_not_do": do_not_do,
     }
+
+
+def _runtime_scene_primary_issue_from_cluster(issue_state: dict[str, Any]) -> str:
+    """Name the primary cluster using the same authority as userSummary."""
+
+    s = _service()
+    cluster = s._runtime_scene_primary_issue_cluster(issue_state)
+    if not isinstance(cluster, dict):
+        return ""
+    return str(
+        cluster.get("eventCode")
+        or cluster.get("label")
+        or cluster.get("component")
+        or ""
+    ).strip()
 
 
 def _runtime_scene_agent_brief_issue(first_signal: dict[str, Any], *, fallback: str) -> str:

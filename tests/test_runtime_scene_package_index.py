@@ -176,7 +176,10 @@ def test_runtime_scene_event_writes_standalone_package_index(tmp_path, monkeypat
     assert summary["agent_brief"]["needs_action"] is True
     assert summary["agent_brief"]["actionability"] == "fix_required"
     assert summary["agent_brief"]["primary_issue"] == "llm.invoke.failed"
-    assert summary["agent_brief"]["active_cluster_count"] == 1
+    # The brief reports the same active-cluster total as issueState (error +
+    # warning here) and keeps the severity-scoped number separate.
+    assert summary["agent_brief"]["active_cluster_count"] == 2
+    assert summary["agent_brief"]["severity_cluster_count"] == 1
     assert summary["agent_brief"]["evidence_refs"]
     assert summary["primary_files"]["package_index"] == "package_index.json"
     assert summary["primary_files"]["manifest"] == "manifest.json"
