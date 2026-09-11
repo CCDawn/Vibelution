@@ -126,7 +126,7 @@ describe("chat composer plus menu preview loop", () => {
     expect(buttonByText("窄屏预览")).toBeNull();
   });
 
-  it("shows two-level conversation-capabilities toggles without a third menu level", async () => {
+  it("shows grouped sections with direct capability toggles and no third menu level", async () => {
     const host = await mountPreview();
 
     expect(toolbarHasRuntimeStatusButton(host)).toBe(false);
@@ -140,44 +140,30 @@ describe("chat composer plus menu preview loop", () => {
     const panel = document.body.querySelector('[data-vui="popover"]');
     expect(panel?.className).toContain("plus-menu-preview-plus-menu");
 
-    const clusterLabels = ["添加与引用", "对话能力", "会话与陪伴"];
-    for (const label of clusterLabels) {
-      const clusterButton = buttonByLabel(label);
-      expect(clusterButton).toBeTruthy();
-      expect(clusterButton?.querySelector('[data-slot="cluster-icon"]')).toBeTruthy();
-      expect(clusterButton?.getAttribute("aria-haspopup")).toBe("menu");
+    const sectionLabels = ["添加与引用", "对话能力", "会话与陪伴"];
+    for (const label of sectionLabels) {
+      const section = document.body.querySelector(`[role="group"][aria-label="${label}"]`);
+      expect(section).toBeTruthy();
+      expect(section?.querySelector('[data-plus-menu-item="true"]')).toBeTruthy();
     }
-    const primaryMenu = document.body.querySelector(".plus-menu-preview-plus-menu-primary");
-    expect(primaryMenu).toBeTruthy();
-    expect(primaryMenu?.children.length).toBe(clusterLabels.length);
+    expect(document.body.querySelectorAll('[role="group"]').length).toBe(sectionLabels.length);
 
     const menuText = menu?.textContent ?? "";
+    expect(menuText).toContain("图片附件");
+    expect(menuText).toContain("引用会话");
     expect(menuText).not.toContain("输入辅助");
     expect(menuText).not.toContain("斜杠指令");
-    expect(menuText).not.toContain("图片附件");
-    expect(menuText).not.toContain("引用会话");
     expect(menuText).not.toContain("运行状态 2/2");
     expect(menuText).not.toContain("运行状态 1/2");
     expect(menuText).not.toContain("运行状态 0/2");
     expect(menuText).not.toContain("上下文/缓存详情");
     expect(menuText).not.toMatch(/Skill/i);
 
-    await act(async () => {
-      buttonByLabel("对话能力")?.click();
-    });
-
-    const submenu = document.body.querySelector('[role="group"][aria-label="对话能力"]');
-    expect(submenu).toBeTruthy();
-    expect(submenu?.textContent).toContain("心智模型");
-    expect(submenu?.textContent).toContain("运行状态注入");
-    expect(submenu?.textContent).not.toContain("查看并切换运行开关");
-    expect(submenu?.textContent).not.toContain("斜杠指令");
-    expect(document.body.querySelector(".plus-menu-preview-menu-tertiary-flyout")).toBeNull();
-    expect(document.body.querySelectorAll('[role="group"]').length).toBe(1);
-
     const mental = buttonByLabel("心智模型：开启");
     expect(mental?.getAttribute("aria-checked")).toBe("true");
+    expect(mental?.textContent).toContain("下轮生效");
     expect(buttonByLabel("运行状态注入：开启")?.getAttribute("aria-checked")).toBe("true");
+    expect(document.body.querySelector(".plus-menu-preview-menu-tertiary-flyout")).toBeNull();
 
     await act(async () => {
       mental?.click();
@@ -196,7 +182,7 @@ describe("chat composer plus menu preview loop", () => {
     expect(document.body.querySelector('[role="menu"]')).toBeNull();
   });
 
-  it("keeps desktop flyout panels without drill-in back navigation or tertiary groups", async () => {
+  it("keeps one flat grouped panel without drill-in back navigation or tertiary groups", async () => {
     await mountPreview();
 
     await act(async () => {
@@ -204,16 +190,10 @@ describe("chat composer plus menu preview loop", () => {
     });
     expect(buttonByLabel("返回上一级菜单")).toBeNull();
     expect(document.body.querySelector(".plus-menu-preview-menu-tertiary-flyout")).toBeNull();
-
-    await act(async () => {
-      buttonByLabel("添加与引用")?.click();
-    });
-    expect(buttonByLabel("返回上一级菜单")).toBeNull();
-    const submenu = document.body.querySelector('[role="group"][aria-label="添加与引用"]');
-    expect(submenu).toBeTruthy();
-    expect(submenu?.textContent).toContain("图片附件");
-    expect(document.body.querySelector(".plus-menu-preview-plus-menu-primary")).toBeTruthy();
-    expect(document.body.querySelectorAll('[role="group"]').length).toBe(1);
+    expect(document.body.querySelector(".plus-menu-preview-plus-menu-primary")).toBeNull();
+    expect(buttonByLabel("引用会话")).toBeTruthy();
+    expect(buttonByLabel("引用工作区文件")).toBeTruthy();
+    expect(document.body.querySelectorAll('[role="group"]').length).toBeGreaterThanOrEqual(3);
   });
 
   it("omits the removed mental-runtime and context-cache rail sections while keeping other read-only rail content", async () => {
@@ -238,9 +218,6 @@ describe("chat composer plus menu preview loop", () => {
       buttonByLabel("更多操作")?.click();
     });
     await act(async () => {
-      buttonByLabel("对话能力")?.click();
-    });
-    await act(async () => {
       buttonByLabel("心智模型：开启")?.click();
     });
     expect(buttonByLabel("心智模型：关闭")?.getAttribute("aria-checked")).toBe("false");
@@ -256,9 +233,6 @@ describe("chat composer plus menu preview loop", () => {
 
     await act(async () => {
       buttonByLabel("更多操作")?.click();
-    });
-    await act(async () => {
-      buttonByLabel("对话能力")?.click();
     });
     const menuText = document.body.querySelector('[role="menu"]')?.textContent ?? "";
     expect(menuText).not.toContain("Relay GPT-5.6 Luna");
@@ -279,9 +253,6 @@ describe("chat composer plus menu preview loop", () => {
 
     await act(async () => {
       buttonByLabel("更多操作")?.click();
-    });
-    await act(async () => {
-      buttonByLabel("添加与引用")?.click();
     });
     await act(async () => {
       buttonByLabel("引用会话")?.click();
@@ -322,9 +293,6 @@ describe("chat composer plus menu preview loop", () => {
       buttonByLabel("更多操作")?.click();
     });
     await act(async () => {
-      buttonByLabel("添加与引用")?.click();
-    });
-    await act(async () => {
       buttonByLabel("引用会话")?.click();
     });
     dialog = document.body.querySelector('[role="dialog"]');
@@ -338,9 +306,6 @@ describe("chat composer plus menu preview loop", () => {
 
     await act(async () => {
       buttonByLabel("更多操作")?.click();
-    });
-    await act(async () => {
-      buttonByLabel("添加与引用")?.click();
     });
     await act(async () => {
       buttonByLabel("引用工作区文件")?.click();
@@ -432,7 +397,7 @@ describe("chat composer plus menu preview loop", () => {
     expect(host.querySelector('[role="listbox"][aria-label="斜杠指令"]')).toBeNull();
   });
 
-  it("group scene exposes four clusters, desktop flyout second level, and confirms destructive management", async () => {
+  it("group scene exposes grouped sections and confirms destructive management", async () => {
     const host = await mountPreview();
 
     await act(async () => {
@@ -450,16 +415,10 @@ describe("chat composer plus menu preview loop", () => {
     expect(menu?.textContent).toContain("对话能力");
     expect(menu?.textContent).toContain("会话与陪伴");
     expect(menu?.textContent).toContain("群聊与团队");
-    expect(menu?.textContent).not.toContain("管理群聊");
-    expect(menu?.textContent).not.toContain("打开团队");
-
-    await act(async () => {
-      buttonByLabel("群聊与团队")?.click();
-    });
-    const groupSubmenu = document.body.querySelector('[role="group"][aria-label="群聊与团队"]');
-    expect(groupSubmenu?.textContent).toContain("管理群聊");
-    expect(groupSubmenu?.textContent).toContain("打开团队");
+    expect(menu?.textContent).toContain("管理群聊");
+    expect(menu?.textContent).toContain("打开团队");
     expect(buttonByLabel("返回上一级菜单")).toBeNull();
+    expect(document.body.querySelector(".plus-menu-preview-plus-menu-primary")).toBeNull();
 
     await act(async () => {
       buttonByLabel("管理群聊")?.click();
@@ -481,9 +440,6 @@ describe("chat composer plus menu preview loop", () => {
 
     await act(async () => {
       buttonByLabel("更多操作")?.click();
-    });
-    await act(async () => {
-      buttonByLabel("群聊与团队")?.click();
     });
     await act(async () => {
       buttonByLabel("管理群聊")?.click();
