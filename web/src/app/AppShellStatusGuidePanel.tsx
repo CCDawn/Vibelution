@@ -11,6 +11,7 @@ import {
 } from "../components/vui";
 import {
   backendSystemTone,
+  codeFreshnessStale,
   frontendSystemTone,
   lifecycleStateLabel,
   lifecycleStateTone,
@@ -162,11 +163,7 @@ export function AppShellStatusGuidePanel({
     if (codeFreshness.verdict === "current") {
       return { tone: "success" as VStatusTone, label: t("codeFreshnessCurrent"), note: t("codeFreshnessHint") };
     }
-    if (
-      codeFreshness.verdict === "backend_behind"
-      || codeFreshness.verdict === "frontend_behind"
-      || codeFreshness.verdict === "backend_and_frontend_behind"
-    ) {
+    if (codeFreshnessStale(codeFreshness.verdict)) {
       const behindCount = codeFreshness.backend.behindCount;
       const behindText = behindCount != null
         ? `${behindCount} ${t("codeFreshnessBehindSuffix")}`

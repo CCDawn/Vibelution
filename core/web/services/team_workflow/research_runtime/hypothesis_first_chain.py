@@ -1187,7 +1187,14 @@ def reset_question_chain(
     if str(confirmation_question_id or "").strip().upper() != normalized_question_id:
         raise HypothesisFirstChainError("请输入当前题号后再确认重置。")
 
-    with _LOCK, hypothesis_selection._LOCK, meeting_rounds._LOCK, hypothesis_rounds._LOCK:
+    # SCI-049: command mutual exclusion uses the same per-question scope lock
+    # as the V2 commands (cross-process, unlike the in-process module locks
+    # this replaces for meeting rounds), and ``meeting_rounds._LOCK`` only
+    # covers the short meeting-ledger read/rewrite section instead of the
+    # whole reset body whose runtime reconciliation can run long.
+    with hypothesis_first_scope_lock(
+        normalized_team_id, normalized_question_id
+    ), _LOCK, hypothesis_selection._LOCK, hypothesis_rounds._LOCK:
         snapshot = _question_reset_snapshot(normalized_team_id, normalized_question_id)
         if snapshot["activeMeetingIds"]:
             raise HypothesisFirstChainError("本题仍有进行中的讨论，请先结束或停止讨论后再重置。")
@@ -1225,7 +1232,6 @@ def reset_question_chain(
                     normalized_team_id, live_formal_runs
                 )
             )
-        target_meeting_ids = set(snapshot["targetMeetingIds"])
         target_round_ids = set(snapshot["targetRoundIds"])
         chain_records = [
             record
@@ -1251,59 +1257,89 @@ def reset_question_chain(
             for record in snapshot["selectionRecords"]
             if str(record.get("questionId") or "").strip().upper() != normalized_question_id
         ]
-        meeting_records = [
-            record
-            for record in snapshot["meetingRecords"]
-            if str(record.get("meetingRoundId") or "").strip() not in target_meeting_ids
-        ]
-        digest_records = [
-            record
-            for record in snapshot["digestRecords"]
-            if str(record.get("meetingRoundId") or "").strip() not in target_meeting_ids
-        ]
-        decision_records = [
-            record
-            for record in snapshot["decisionRecords"]
-            if str(record.get("meetingRoundId") or "").strip() not in target_meeting_ids
-        ]
         hypothesis_round_records = [
             record
             for record in snapshot["hypothesisRoundRecords"]
             if str(record.get("roundId") or "").strip() not in target_round_ids
         ]
-        writes = (
-            (_storage_path(normalized_team_id), chain_records),
-            (hypothesis_selection._storage_path(normalized_team_id), selection_records),
-            (meeting_rounds._rounds_path(normalized_team_id), meeting_records),
-            (meeting_rounds._digests_path(normalized_team_id), digest_records),
-            (meeting_rounds._decisions_path(normalized_team_id), decision_records),
-            (hypothesis_rounds._storage_path(normalized_team_id), hypothesis_round_records),
-        )
-        originals = {
-            path: path.read_text(encoding="utf-8") if path.exists() else ""
-            for path, _records_to_write in writes
-        }
-        try:
-            for path, records_to_write in writes:
-                _rewrite_jsonl(path, records_to_write)
-            # Source runs are the final destructive step.  A ledger write
-            # failure must leave the collection data untouched; a late source
-            # guard must restore these ledgers before it is surfaced.
-            source_collection_runs.reset_source_collection_runs_for_question(
-                normalized_team_id,
-                set(snapshot["collectionRunIds"]),
+        with meeting_rounds._LOCK:
+            # Short meeting-ledger critical section: re-read the three
+            # meeting ledgers here so records appended while the runtime
+            # reconciliation above ran are filtered against the same question
+            # scope instead of being silently dropped by the rewrite.  This
+            # question's rounds cannot gain new meetings meanwhile (meeting
+            # creation is command-gated and this scope lock excludes
+            # commands), so the fresh filter only folds in unrelated or
+            # target-meeting appends — exactly the split the rewrite needs.
+            linked_meeting_ids = {
+                str(record.get("meetingRoundId") or "").strip()
+                for record in snapshot["chainRecords"]
+                if str(record.get("recordKind") or "") == REVIEW_ROUND_LINK_KIND
+                and str(record.get("questionId") or "").strip().upper() == normalized_question_id
+                and str(record.get("meetingRoundId") or "").strip()
+            }
+            fresh_meeting_records = meeting_rounds._read_jsonl(
+                meeting_rounds._rounds_path(normalized_team_id)
             )
-        except Exception as exc:
-            for path, original in originals.items():
-                try:
-                    from .atomic_fs import atomic_write_text
+            target_meeting_ids = {
+                meeting_id
+                for meeting_id, meeting in _latest_records(
+                    fresh_meeting_records, "meetingRoundId"
+                ).items()
+                if str(meeting.get("question") or "").strip().upper() == normalized_question_id
+            } | linked_meeting_ids
+            meeting_records = [
+                record
+                for record in fresh_meeting_records
+                if str(record.get("meetingRoundId") or "").strip() not in target_meeting_ids
+            ]
+            digest_records = [
+                record
+                for record in meeting_rounds._read_jsonl(
+                    meeting_rounds._digests_path(normalized_team_id)
+                )
+                if str(record.get("meetingRoundId") or "").strip() not in target_meeting_ids
+            ]
+            decision_records = [
+                record
+                for record in meeting_rounds._read_jsonl(
+                    meeting_rounds._decisions_path(normalized_team_id)
+                )
+                if str(record.get("meetingRoundId") or "").strip() not in target_meeting_ids
+            ]
+            writes = (
+                (_storage_path(normalized_team_id), chain_records),
+                (hypothesis_selection._storage_path(normalized_team_id), selection_records),
+                (meeting_rounds._rounds_path(normalized_team_id), meeting_records),
+                (meeting_rounds._digests_path(normalized_team_id), digest_records),
+                (meeting_rounds._decisions_path(normalized_team_id), decision_records),
+                (hypothesis_rounds._storage_path(normalized_team_id), hypothesis_round_records),
+            )
+            originals = {
+                path: path.read_text(encoding="utf-8") if path.exists() else ""
+                for path, _records_to_write in writes
+            }
+            try:
+                for path, records_to_write in writes:
+                    _rewrite_jsonl(path, records_to_write)
+                # Source runs are the final destructive step.  A ledger write
+                # failure must leave the collection data untouched; a late source
+                # guard must restore these ledgers before it is surfaced.
+                source_collection_runs.reset_source_collection_runs_for_question(
+                    normalized_team_id,
+                    set(snapshot["collectionRunIds"]),
+                )
+            except Exception as exc:
+                for path, original in originals.items():
+                    try:
+                        from .atomic_fs import atomic_write_text
 
-                    atomic_write_text(path, original)
-                except OSError:
-                    pass
-            if isinstance(exc, OSError):
-                raise HypothesisFirstChainError("本题运行重置失败，原数据已尝试恢复。") from exc
-            raise
+                        atomic_write_text(path, original)
+                    except OSError:
+                        pass
+                if isinstance(exc, OSError):
+                    raise HypothesisFirstChainError("本题运行重置失败，原数据已尝试恢复。") from exc
+                raise
 
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -1341,12 +1377,20 @@ def hypothesis_first_scope_lock(team_id: str, question_id: str):
     nested acquisition of the same OS file lock is not portable on Windows.
     Late workflow/runtime completions still carry their own meeting/request
     identity and are validated by the owning service.
+
+    The in-process service locks below freeze the chain/selection/rounds
+    ledgers for the command window; ``meeting_rounds._LOCK`` is deliberately
+    NOT held here (SCI-049): commands run 60-150s of orchestration while
+    holding it, which starved every bounded ``list_meeting_rounds`` reader
+    into structured 10s timeouts.  Meeting rounds keep their own per-operation
+    short bounded critical sections — the same discipline cross-process
+    writers were already subject to, where each append is validated by the
+    owning service instead of relying on a whole-command mutex.
     """
 
     from core.web.services.team_workflow import (
         hypothesis_rounds,
         hypothesis_selection,
-        meeting_rounds,
     )
     from core.web.services.team_workflow.storage_durability import (
         inter_process_lock,
@@ -1362,7 +1406,6 @@ def hypothesis_first_scope_lock(team_id: str, question_id: str):
         inter_process_lock(scope_lock, timeout_s=120.0),
         _LOCK,
         hypothesis_selection._LOCK,
-        meeting_rounds._LOCK,
         hypothesis_rounds._LOCK,
     ):
         yield

@@ -7,7 +7,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from core.runtime_manager.command_queue import cancel_lifecycle_command
@@ -21,7 +21,10 @@ from core.web.routes.runtime_models import (
     RuntimeShutdownPayload,
     RuntimeSummaryResponse,
 )
-from core.web.services.code_freshness import resolve_code_freshness
+from core.web.services.code_freshness import (
+    fallback_snapshot_from_serving_metadata,
+    resolve_code_freshness,
+)
 from core.web.services.runtime_scene_service import record_browser_telemetry
 from core.web.services.runtime_service import (
     RuntimeRestartActiveWorkBlocked,
@@ -49,8 +52,17 @@ async def runtime_summary() -> dict:
     response_model=RuntimeCodeFreshnessResponse,
     response_model_exclude_unset=True,
 )
-def runtime_code_freshness() -> dict:
-    return resolve_code_freshness(project_root=PROJECT_ROOT)
+def runtime_code_freshness(request: Request) -> dict:
+    # The startup-pinned serving metadata is the same-event fallback when the
+    # on-disk fingerprint snapshot is missing; without it a stale instance
+    # could silently report verdict=unknown and the UI would show no warning
+    # (2026-09-11 SCI-049 incident).
+    return resolve_code_freshness(
+        project_root=PROJECT_ROOT,
+        fallback_snapshot=fallback_snapshot_from_serving_metadata(
+            getattr(request.app.state, "serving_metadata", None)
+        ),
+    )
 
 
 @router.post(

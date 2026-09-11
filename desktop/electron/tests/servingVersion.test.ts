@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { inspectWorkbenchServingVersion } from "../src/process/servingVersion.js";
+import { inspectWorkbenchServingVersion, verifyRestartedServingVersion } from "../src/process/servingVersion.js";
 
 function healthPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -195,5 +195,96 @@ describe("workbench serving-version handshake", () => {
 
     expect(result.ok).toBe(false);
     expect(result.reason).toBe("serving_backend_identity_mismatch");
+  });
+});
+
+describe("verifyRestartedServingVersion", () => {
+  function baseInspection(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      ok: true,
+      reason: "serving_version_current",
+      port: 8765,
+      backendPid: 4321,
+      health: {
+        status: "ok",
+        serving: { backend: { pid: 4321, createTime: 123.5 } },
+      },
+      ...overrides,
+    };
+  }
+
+  it("rejects when the serving process was not replaced after restart", async () => {
+    // 2026-09-11: a "restarted" workbench kept serving the old process.
+    const inspect = vi.fn(async () => baseInspection() as never);
+    const result = await verifyRestartedServingVersion({
+      workspaceRoot: "C:/workspace",
+      previousBackendIdentity: { pid: 4321, createTime: 123.5 },
+      inspect,
+      attempts: 2,
+      delayMs: 0,
+      delay: async () => {},
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("serving_process_not_replaced");
+  });
+
+  it("accepts when pid or createTime changed and the build is current", async () => {
+    const inspect = vi.fn(async () => baseInspection() as never);
+    const result = await verifyRestartedServingVersion({
+      workspaceRoot: "C:/workspace",
+      previousBackendIdentity: { pid: 4000, createTime: 100.0 },
+      inspect,
+      attempts: 1,
+      delayMs: 0,
+      delay: async () => {},
+    });
+    expect(result.ok).toBe(true);
+    expect(result.reason).toBe("serving_version_current");
+  });
+
+  it("retries transient health reasons before failing", async () => {
+    const inspect = vi.fn()
+      .mockResolvedValueOnce(baseInspection({ ok: false, reason: "health_not_ready" }) as never)
+      .mockResolvedValueOnce(baseInspection({ ok: false, reason: "health_unreachable" }) as never)
+      .mockResolvedValueOnce(baseInspection() as never);
+    const result = await verifyRestartedServingVersion({
+      workspaceRoot: "C:/workspace",
+      previousBackendIdentity: { pid: 4000, createTime: 100.0 },
+      inspect,
+      attempts: 3,
+      delayMs: 0,
+      delay: async () => {},
+    });
+    expect(result.ok).toBe(true);
+    expect(inspect).toHaveBeenCalledTimes(3);
+  });
+
+  it("fails fast on a non-transient mismatch such as a stale build", async () => {
+    // backend_code_mismatch proves the serving head is not the checkout HEAD.
+    const inspect = vi.fn(async () => baseInspection({ ok: false, reason: "backend_code_mismatch" }) as never);
+    const result = await verifyRestartedServingVersion({
+      workspaceRoot: "C:/workspace",
+      previousBackendIdentity: { pid: 4000, createTime: 100.0 },
+      inspect,
+      attempts: 3,
+      delayMs: 0,
+      delay: async () => {},
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("backend_code_mismatch");
+    expect(inspect).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not require a replacement when no previous identity is known", async () => {
+    const inspect = vi.fn(async () => baseInspection() as never);
+    const result = await verifyRestartedServingVersion({
+      workspaceRoot: "C:/workspace",
+      previousBackendIdentity: null,
+      inspect,
+      attempts: 1,
+      delayMs: 0,
+      delay: async () => {},
+    });
+    expect(result.ok).toBe(true);
   });
 });

@@ -805,6 +805,89 @@ def test_list_meeting_rounds_read_only_shares_snapshot_and_default_isolates(tmp_
     assert after_append["meetings"] == meetings.list_meeting_rounds(team_id)["meetings"]
 
 
+def test_list_read_only_memo_hit_avoids_module_lock_queue(tmp_path, monkeypatch):
+    """SCI-049：写方长临界区持锁期间，已预热的 read_only memo 命中走锁外
+    原子读：并发读者零排队、零锁超时（旧实现 memo 判断在 _read_lock 内，
+    读者会在小读预算内直接超时）。"""
+    import threading
+
+    team_id = _team(tmp_path, monkeypatch)
+    meetings.create_meeting_round(team_id, _meeting())
+    monkeypatch.setenv("VIBELUTION_MEETING_ROUNDS_READ_LOCK_TIMEOUT_SECONDS", "0.05")
+
+    warm = meetings.list_meeting_rounds(team_id, read_only=True)
+    assert warm["meetingCount"] == 1
+
+    lock_held = threading.Event()
+    release = threading.Event()
+
+    def _hold_lock_like_long_writer():
+        meetings._LOCK.acquire()
+        lock_held.set()
+        release.wait(5.0)
+        meetings._LOCK.release()
+
+    holder = threading.Thread(target=_hold_lock_like_long_writer, daemon=True)
+    holder.start()
+    assert lock_held.wait(5.0)
+    try:
+        for _ in range(8):
+            snapshot = meetings.list_meeting_rounds(team_id, read_only=True)
+            # 游标未变：命中同一份不可变快照，全程未接触模块锁。
+            assert snapshot["meetings"] is warm["meetings"]
+            assert snapshot["meetingCount"] == 1
+    finally:
+        release.set()
+        holder.join(timeout=5.0)
+    assert not holder.is_alive()
+
+
+def test_scope_lock_command_keeps_meeting_round_readers_unblocked(tmp_path, monkeypatch):
+    """SCI-049：同题 V2 命令在 scope 锁内执行 60-150s 编排期间，
+    meeting_rounds 模块锁必须保持空闲——并发 list_meeting_rounds 在极小读
+    预算内全部成功（事故里的 lock wait exceeded / 503 不再复现）。"""
+    import threading
+
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain as chain,
+    )
+
+    monkeypatch.setattr(
+        chain, "_storage_path", lambda _team_id: tmp_path / "hypothesis_first_chain.jsonl"
+    )
+    team_id = _team(tmp_path, monkeypatch)
+    meetings.create_meeting_round(team_id, _meeting())
+    monkeypatch.setenv("VIBELUTION_MEETING_ROUNDS_READ_LOCK_TIMEOUT_SECONDS", "0.05")
+
+    entered = threading.Event()
+    release = threading.Event()
+    command_errors: list[Exception] = []
+
+    def _long_v2_command():
+        try:
+            with chain.hypothesis_first_scope_lock(team_id, "SCI-091"):
+                entered.set()
+                release.wait(5.0)
+        except Exception as exc:  # pragma: no cover - surfaces setup failures
+            command_errors.append(exc)
+
+    worker = threading.Thread(target=_long_v2_command, daemon=True)
+    worker.start()
+    assert entered.wait(5.0)
+    try:
+        for _ in range(8):
+            snapshot = meetings.list_meeting_rounds(team_id, read_only=True)
+            assert snapshot["meetingCount"] == 1
+        # 解耦断言：scope 锁被持有时，meeting rounds 模块锁已不再被命令占用。
+        assert meetings._LOCK.acquire(blocking=False)
+        meetings._LOCK.release()
+    finally:
+        release.set()
+        worker.join(timeout=5.0)
+    assert not worker.is_alive()
+    assert command_errors == []
+
+
 def test_bound_room_rounds_read_uses_non_reconciling_detail_read(monkeypatch):
     """MR 只读链路（_load_bound_room_rounds）必须以 reconcile=False 读群聊
     detail：sweep 驱动的读不触发写侧 round-state 对账（零写纪律）。"""
