@@ -500,6 +500,14 @@ class OfficialModelEvidencePayload(BaseModel):
 
 
 class ChallengeQuestionOutputPayload(BaseModel):
+    """Register/publish body for one challenge question output.
+
+    ``citationChecks`` is accepted for wire compatibility but is NOT gate
+    evidence: the server derives its citation receipts from the canonical
+    evidence rows itself, so a caller can no longer certify its own citations
+    through the request body.
+    """
+
     output: dict[str, Any]
     citationChecks: list[dict[str, Any]] = Field(default_factory=list, max_length=64)
     registeredBy: str = Field("", max_length=160)

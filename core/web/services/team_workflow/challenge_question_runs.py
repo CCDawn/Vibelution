@@ -2123,25 +2123,20 @@ def _summary_receipt_validation(
     return validation
 
 
-def _research_plan_projection(record: dict[str, Any], *, team_id: str) -> dict[str, Any]:
-    """Report whether one record's plan carries execution-design criteria.
+def _plan_projection_from_output(output: Mapping[str, Any]) -> dict[str, Any]:
+    """Derive the plan-deferral projection from the output itself (pure).
 
-    A stage-one proposal plan legitimately defers those sections, so the
-    projection keeps "deferred" distinct from "satisfied": an empty list must
-    never be read as a met execution-design contract.
+    A stage-one proposal plan legitimately defers the execution-design
+    sections, so the projection keeps "deferred" distinct from "satisfied":
+    an empty list must never be read as a met execution-design contract.
     """
 
-    question_id = str(record.get("questionId") or "").strip()
-    run_id = str(record.get("runId") or "").strip()
-    if not question_id or not run_id:
-        return {"deferredSections": [], "executionDesignCriteriaPresent": False}
     from core.web.services.team_workflow.research_runtime.result_package_v2 import (
         _DEFERRED_RESEARCH_PLAN_SECTIONS,
     )
 
-    artifact = _read_json(_artifact_path(team_id, question_id, run_id))
-    plan = artifact.get("research_plan") if isinstance(artifact, dict) else None
-    plan = plan if isinstance(plan, dict) else {}
+    plan = output.get("research_plan")
+    plan = plan if isinstance(plan, Mapping) else {}
     return {
         "deferredSections": [
             section for section in _DEFERRED_RESEARCH_PLAN_SECTIONS if not plan.get(section)
@@ -2151,6 +2146,25 @@ def _research_plan_projection(record: dict[str, Any], *, team_id: str) -> dict[s
             for section in ("success_criteria", "failure_criteria", "stop_conditions")
         ),
     }
+
+
+def _research_plan_projection(record: dict[str, Any], *, team_id: str) -> dict[str, Any]:
+    """Read one record's plan projection, falling back to its artifact.
+
+    Registration stores the projection on the record, so the summary never
+    pays a per-record artifact read on a polling path.  Records written before
+    that field existed (and fixture rows) still resolve through the artifact.
+    """
+
+    stored = record.get("researchPlan")
+    if isinstance(stored, dict):
+        return deepcopy(stored)
+    question_id = str(record.get("questionId") or "").strip()
+    run_id = str(record.get("runId") or "").strip()
+    if not question_id or not run_id:
+        return {"deferredSections": [], "executionDesignCriteriaPresent": False}
+    artifact = _read_json(_artifact_path(team_id, question_id, run_id))
+    return _plan_projection_from_output(artifact if isinstance(artifact, dict) else {})
 
 
 def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
@@ -2943,6 +2957,9 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
         "humanGates": gates,
         "outputSha256": output_hash,
         "artifactPath": str(_artifact_path(team_id, question_id, run_id)),
+        # Stored once here so the polling summary never re-reads the artifact
+        # per record; an empty deferred section must stay visibly deferred.
+        "researchPlan": _plan_projection_from_output(output),
         "registeredAt": _utc_now(),
         "registeredBy": str(payload.get("registeredBy") or ""),
     }
