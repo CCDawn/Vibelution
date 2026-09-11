@@ -16,10 +16,19 @@ export function WorkflowKnowledgeBadge(props: { badge: WorkflowKnowledgeBadgeInp
   if (badge.absorbed > 0) segments.push(`回写 ${badge.absorbed}`);
   if (failed > 0) segments.push(`失败 ${failed}`);
   const attention = badge.awaitingHandoff > 0 || failed > 0;
+  // SCI-049 O-02: the waiting segment quotes the server-vouched auto-accept
+  // cadence so the tooltip never presents the gate as a silent human wait.
+  const autoAcceptSeconds = badge.autoAccept?.pending && badge.awaitingHandoff > 0
+    ? Math.max(1, Math.round(badge.autoAccept.intervalMs / 1000))
+    : null;
   const title = [
     `知识请求 ${badge.total} 个`,
     badge.running > 0 ? `运行中 ${badge.running}` : null,
-    badge.awaitingHandoff > 0 ? `等待交接 ${badge.awaitingHandoff}` : null,
+    badge.awaitingHandoff > 0
+      ? (autoAcceptSeconds !== null
+        ? `等待交接 ${badge.awaitingHandoff} · 约 ${autoAcceptSeconds}s 内自动接受`
+        : `等待交接 ${badge.awaitingHandoff}`)
+      : null,
     badge.absorbed > 0 ? `已回写 ${badge.absorbed}` : null,
     failed > 0 ? `失败 ${failed}` : null,
     badge.knowledgeChildRunId ? `子运行 ${badge.knowledgeChildRunId}` : null,

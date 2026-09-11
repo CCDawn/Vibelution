@@ -395,6 +395,42 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
       .toBe("正式研究结果正在交付");
   });
 
+  // SCI-049 O-02: the waiting handoff gate is auto-accepted by the sweep;
+  // the status line quotes the server cadence instead of a silent wait.
+  it("quotes the auto-accept cadence while a knowledge handoff waits", () => {
+    const state = stateV2({
+      isInitial: false,
+      currentPhase: "collection",
+      collection: {
+        ...stateV2().collection,
+        lifecycle: "waiting_human",
+        actionability: "waiting_user",
+        autoAccept: { pending: true, actor: "auto_advance_sweep", intervalMs: 45000 },
+      },
+    });
+
+    const action = resolveHypothesisFirstNextActionFromV2(state);
+    expect(action.stage).toBe("handoff_pending");
+    expect(action.statusMessage).toBe("知识包交接待确认，约 45s 内自动接受");
+  });
+
+  it("falls back to the collection counter without an autoAccept payload", () => {
+    const state = stateV2({
+      isInitial: false,
+      currentPhase: "collection",
+      collection: {
+        ...stateV2().collection,
+        lifecycle: "waiting_human",
+        actionability: "waiting_user",
+        autoAccept: null,
+        aggregate: { total: 2, completed: 2, pending: 0, failed: 0, blocked: 0 },
+      },
+    });
+
+    const action = resolveHypothesisFirstNextActionFromV2(state);
+    expect(action.statusMessage).toBe("资料搜集 2/2");
+  });
+
   it("maps an official catalog cold start to the generation CTA", () => {
     const state = stateV2({
       allowedActions: [command({ command: "open_generation", payload: { questionId: "SCI-001" } }, "生成候选假说")],

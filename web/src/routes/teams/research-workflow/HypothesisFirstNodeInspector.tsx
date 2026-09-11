@@ -357,8 +357,10 @@ function ClaimBeliefGatePanel({ gate, lang }: { gate: HypothesisFirstClaimBelief
 }
 
 /**
- * x/y 位成员已发言：分母是房间成员数，分子按消息 sender 去重（仅统计已完成、
- * 内容非空且归属房间成员的发言）。与 HypothesisFirstMeetingOps 的
+ * 会议累计 x/y 位成员已发言：分母是房间成员数，分子按消息 sender 去重，跨
+ * 该会议全部轮次累计（SCI-049 O-04：与 meetingRoundDisplayModel 的
+ * 「本轮已发言 x/y」按轮统计是两个口径，文案必须能区分）。仅统计已完成、
+ * 内容非空且归属房间成员的发言；与 HypothesisFirstMeetingOps 的
  * completedSourceMessageCount（完成消息条数统计）语义不同，互不复用。
  */
 export function discussionMemberCompletion(detail: {
@@ -593,8 +595,8 @@ export function HypothesisFirstNodeInspector({
       {showDiscussionCompletion ? (
         <div role="status" className={styles.status} data-testid="discussion-member-completion">
           {isZh
-            ? `${discussionCompletion?.spoken}/${discussionCompletion?.total} 位成员已发言`
-            : `${discussionCompletion?.spoken}/${discussionCompletion?.total} members have spoken`}
+            ? `会议累计 ${discussionCompletion?.spoken}/${discussionCompletion?.total} 位成员已发言`
+            : `${discussionCompletion?.spoken}/${discussionCompletion?.total} members have spoken in total`}
         </div>
       ) : null}
       {nodeOwnsCurrentStep ? (
@@ -1503,6 +1505,29 @@ function readinessBlockerLabel(blocker: unknown): string {
   return title && detail && title !== detail ? `${title}：${detail}` : title || detail;
 }
 
+/**
+ * Accessible name for a canonical command button (SCI-049 D-03). The server
+ * label already disambiguates sibling approve gates (candidate short id +
+ * digest summary); for older snapshots still carrying the bare label the
+ * candidateId rides in as a suffix — parsed from the payload first, from the
+ * opaque actionId as the fallback — so two identical-sounding approve buttons
+ * are never announced twice.
+ */
+export function commandButtonAriaLabel(action: CommandAction): string {
+  const fromPayload = action.command === "approve_summary"
+    ? String(action.payload.candidateId ?? "").trim()
+    : "";
+  const fromActionId = fromPayload
+    ? ""
+    : (action.actionId.startsWith("approve-summary:")
+      ? action.actionId.slice("approve-summary:".length).trim()
+      : "");
+  const candidateId = fromPayload || fromActionId;
+  return candidateId && !action.label.includes(candidateId)
+    ? `${action.label}（候选 ${candidateId}）`
+    : action.label;
+}
+
 function CanonicalCommandButton(props: {
   teamId: string;
   questionId: string;
@@ -1591,6 +1616,7 @@ function CanonicalCommandButton(props: {
         isPending={mutation.isPending}
         isDisabled={!props.action.enabled}
         disabledReason={props.action.disabledReason || undefined}
+        aria-label={commandButtonAriaLabel(props.action)}
         onPress={() => {
           if (!props.action.enabled || mutation.isPending) return;
           if (props.action.requiresConfirmation) {
