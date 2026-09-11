@@ -1271,22 +1271,38 @@ def team_workflow_hypothesis_first_command(
     The command is re-authorized from the latest V2 ``allowedActions`` inside
     the owning orchestration lock.  Clients send only the action envelope and
     declaration input; labels and target metadata are never trusted.
+
+    SCI-049: the three long paths (open/retry generation, record selection,
+    approve summary) return an ``accepted`` envelope with a
+    ``commandAttemptId`` immediately and finish on a background worker; the
+    client polls ``GET .../chain/command-attempts/{attemptId}`` until the
+    attempt reaches a terminal status.  Every other command stays synchronous.
     """
 
     try:
         with server_operator_scope_from_http(http_request):
+            # ``_find_allowed_command`` re-authorizes by strict payload
+            # equality against the projected offer.  Wire models with
+            # defaulted fields (RecordSelectionPayload.previousSelectionId,
+            # OpenGenerationPayload.runId) inject those defaults into a plain
+            # dump, so a verbatim echo of a two-key offer would gain a third
+            # key and never re-authorize.  ``exclude_unset`` keeps the request
+            # wire-symmetric with the response side's
+            # ``response_model_exclude_unset``: only client-declared fields
+            # reach the command envelope.  The same envelope feeds the async
+            # gate below and the synchronous fallback.
+            command_request = payload.model_dump(exclude_unset=True)
+            accepted = hypothesis_first_chain.submit_v2_command_async(
+                team_id,
+                command_request,
+                question_id=question_id,
+                workflow_run_id=workflow_run_id,
+            )
+            if accepted is not None:
+                return accepted
             return hypothesis_first_chain.execute_v2_command(
                 team_id,
-                # ``_find_allowed_command`` re-authorizes by strict payload
-                # equality against the projected offer.  Wire models with
-                # defaulted fields (RecordSelectionPayload.previousSelectionId,
-                # OpenGenerationPayload.runId) inject those defaults into a
-                # plain dump, so a verbatim echo of a two-key offer would gain
-                # a third key and never re-authorize.  ``exclude_unset`` keeps
-                # the request wire-symmetric with the response side's
-                # ``response_model_exclude_unset``: only client-declared
-                # fields reach the command envelope.
-                payload.model_dump(exclude_unset=True),
+                command_request,
                 question_id=question_id,
                 workflow_run_id=workflow_run_id,
             )
@@ -1313,6 +1329,17 @@ def team_workflow_hypothesis_first_command(
                 "actualInputDigest": exc.actual_input_digest,
             },
         ) from exc
+    except hypothesis_first_chain.CommandAttemptInProgressError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": exc.code,
+                "message": str(exc),
+                "questionId": exc.question_id,
+                "runningCommand": exc.command,
+                "runningActionId": exc.action_id,
+            },
+        ) from exc
     except PermissionError as exc:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -1334,6 +1361,30 @@ def team_workflow_hypothesis_first_command(
         )
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.command", team_id, exc)
+
+
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/hypothesis-first/chain/command-attempts/{attempt_id}",
+    response_model=dict[str, Any],
+    response_model_exclude_unset=True,
+)
+def team_workflow_hypothesis_first_command_attempt(
+    team_id: str,
+    attempt_id: str,
+) -> dict:
+    """Read one async command attempt's delivery status (SCI-049 poll API).
+
+    Returns the attempt's ``status`` (``queued``/``running``/``succeeded``/
+    ``failed``); a succeeded attempt carries the exact response ``result`` the
+    synchronous execution would have returned, and a failed one carries a
+    structured ``error`` with the original domain code so the UI can render
+    the same messages as before.
+    """
+
+    try:
+        return hypothesis_first_chain.get_v2_command_attempt(team_id, attempt_id)
+    except _DOMAIN_ERRORS as exc:
+        _map_domain_error("hypothesis_first.command_attempt", team_id, exc)
 
 
 @router.get(
