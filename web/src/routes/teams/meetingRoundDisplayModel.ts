@@ -196,10 +196,12 @@ export function meetingDiscussionProgress(input: {
       expected,
       nextCode: null,
       complete,
-      label: "讨论完成，待整理",
+      // 「本轮」 scopes the counter to this round so it never collides with
+      // the meeting-wide member tally shown beside it (SCI-049 O-04).
+      label: "本轮讨论完成，待整理",
     };
   }
-  const countLabel = `已发言 ${spoken}/${expected || 0}`;
+  const countLabel = `本轮已发言 ${spoken}/${expected || 0}`;
   return {
     spoken,
     expected,

@@ -33,6 +33,24 @@ const SIDEFLOW_STATUS_LABELS: Record<string, string> = {
   skipped: "已跳过",
 };
 
+/** Card status label; the waiting-human gate quotes the server-vouched
+ * auto-accept cadence so an unattended gate never reads as stuck
+ * (SCI-049 O-02). English mirrors the zh copy. */
+function sideflowStatusLabel(
+  status: string,
+  autoAccept: { pending: boolean; intervalMs: number } | null | undefined,
+  isZh: boolean,
+): string {
+  const base = SIDEFLOW_STATUS_LABELS[status] ?? status;
+  if (status === "waiting_human" && autoAccept?.pending) {
+    const seconds = Math.max(1, Math.round(autoAccept.intervalMs / 1000));
+    return isZh
+      ? `${base} · 约 ${seconds}s 内自动接受`
+      : `${base} · auto-accepted within ~${seconds}s`;
+  }
+  return base;
+}
+
 function offerRequirementLines(payload: Record<string, unknown> | undefined): {
   keywords: string;
   evidenceTypes: string;
@@ -140,7 +158,7 @@ export function NodeKnowledgeCollectionSection(props: NodeKnowledgeCollectionSec
                   : styles.card}
                 data-sideflow-status={card.status}
               >
-                {SIDEFLOW_NODE_LABELS[card.sideflowNodeId]} · {SIDEFLOW_STATUS_LABELS[card.status] ?? card.status}
+                {SIDEFLOW_NODE_LABELS[card.sideflowNodeId]} · {sideflowStatusLabel(card.status, props.badge?.autoAccept, isZh)}
               </li>
             ))}
           </ol>

@@ -206,20 +206,40 @@ def test_snapshot_projects_knowledge_invocation_badges(tmp_path: Path) -> None:
         assert hypothesis_badge.latest.knowledge_child_run_id == "child-run-2"
         assert hypothesis_badge.latest.status == "awaiting_handoff"
         assert hypothesis_badge.latest.handoff_state == "pending"
-        assert hypothesis_badge.latest.current_knowledge_node_id == "knowledge_handoff"
+        # SCI-049 O-03: the child run's real node attempts decide the live
+        # node (evidence_relations is running) — not the invocation-level
+        # status derivation, which would have reported the handoff gate.
+        assert hypothesis_badge.latest.current_knowledge_node_id == "evidence_relations"
         # Real child-run node states ride along for the five-card progress.
         assert hypothesis_badge.latest.child_node_states == {
             "source_finding": "succeeded",
             "source_extraction": "succeeded",
             "evidence_relations": "running",
         }
+        # SCI-049 O-02: the badge quotes the auto-advance sweep cadence and
+        # marks the waiting gate as auto-accept pending.
+        assert hypothesis_badge.auto_accept == {
+            "pending": True,
+            "actor": "auto_advance_sweep",
+            "intervalMs": 30_000,
+        }
+        assert badges["result_evaluation"].auto_accept == {
+            "pending": False,
+            "actor": "auto_advance_sweep",
+            "intervalMs": 30_000,
+        }
 
         serialized = snapshot.to_dict()
         assert serialized["invocationBadges"]["hypothesis_design"]["totalCount"] == 2
         latest = serialized["invocationBadges"]["hypothesis_design"]["latest"]
-        assert latest["currentKnowledgeNodeId"] == "knowledge_handoff"
+        assert latest["currentKnowledgeNodeId"] == "evidence_relations"
         assert latest["knowledgeChildRunId"] == "child-run-2"
         assert latest["childNodeStates"]["evidence_relations"] == "running"
+        assert serialized["invocationBadges"]["hypothesis_design"]["autoAccept"] == {
+            "pending": True,
+            "actor": "auto_advance_sweep",
+            "intervalMs": 30_000,
+        }
     finally:
         harness.close()
 
@@ -424,6 +444,61 @@ def test_knowledge_invocation_projection_maps_status_to_sideflow_node() -> None:
     assert current_knowledge_node_id("awaiting_handoff") == "knowledge_handoff"
     assert current_knowledge_node_id("completed") == "knowledge_handoff"
     assert current_knowledge_node_id("failed") is None
+
+
+def test_current_knowledge_node_id_prefers_child_run_node_states() -> None:
+    """SCI-049 O-03: real per-node attempts win; status only degrades.
+
+    A running child run must not read as the chain entry when its latest
+    attempts already reached a middle node; the invocation-status derivation
+    stays as the fallback for children that expose no attempts.
+    """
+    from core.web.services.team_workflow.research_runtime.knowledge_invocation_projection import (
+        current_knowledge_node_id_from_child_states,
+    )
+
+    # First non-terminal node in chain order is the live position.
+    assert current_knowledge_node_id_from_child_states(
+        {
+            "source_finding": "succeeded",
+            "source_extraction": "succeeded",
+            "evidence_relations": "running",
+        },
+        fallback_status="running",
+    ) == "evidence_relations"
+    # A waiting_human gate is the live position.
+    assert current_knowledge_node_id_from_child_states(
+        {
+            "source_finding": "succeeded",
+            "knowledge_ingestion": "waiting_human",
+        },
+        fallback_status="running",
+    ) == "knowledge_ingestion"
+    # A failed node keeps the attention position instead of disappearing.
+    assert current_knowledge_node_id_from_child_states(
+        {"source_finding": "succeeded", "source_extraction": "failed"},
+        fallback_status=None,
+    ) == "source_extraction"
+    # All known nodes terminal → the last known node is the honest position.
+    assert current_knowledge_node_id_from_child_states(
+        {
+            "source_finding": "succeeded",
+            "source_extraction": "succeeded",
+            "knowledge_handoff": "succeeded",
+        },
+        fallback_status="completed",
+    ) == "knowledge_handoff"
+    # Unreadable node ids are ignored, not invented into the chain.
+    assert current_knowledge_node_id_from_child_states(
+        {"rogue_node": "running"},
+        fallback_status="running",
+    ) == "source_finding"
+    # No child states → the invocation-status derivation degrades.
+    assert current_knowledge_node_id_from_child_states(
+        None,
+        fallback_status="awaiting_handoff",
+    ) == "knowledge_handoff"
+    assert current_knowledge_node_id_from_child_states({}, fallback_status=None) is None
 
     badges = project_knowledge_invocation_badges(
         [

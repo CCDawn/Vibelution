@@ -727,6 +727,166 @@ def test_stale_round_awaiting_candidate_keeps_approve_entry() -> None:
         (action.actionId, action.payload.meetingRoundId)
         for action in approve_actions
     ] == [("approve-summary:candidate-b", "meeting-r1-candidate-b")]
+    # SCI-049 D-03: the label names the candidate (no digest draft on this
+    # fixture, so the short id alone disambiguates) and the payload carries
+    # the candidateId so clients never parse the opaque actionId.
+    assert approve_actions[0].label == "确认候选纪要 · 候选 candidate-b"
+    assert approve_actions[0].payload.candidateId == "candidate-b"
+
+
+def test_approve_summary_label_carries_candidate_and_digest_summary() -> None:
+    """Sibling approve gates must be distinguishable on one panel (D-03).
+
+    A meeting sitting in ``awaiting_approval`` with a digest draft gets a
+    label of ``确认候选纪要 · 候选 <short-id>：<summary[:30]>…``; the digest
+    summary is truncated to keep the button scannable.
+    """
+    long_summary = "候选甲在增长假设上证据更充分，但成本假设与来源数据存在冲突，需要第二轮验证。"
+    state = HypothesisFirstStateV2.model_validate(project_state_from_records(
+        team_id="team-1",
+        question_id="SCI-001",
+        reset_boundary=None,
+        chain_records=[
+            {
+                "recordKind": "hypothesis_candidate",
+                "candidateId": "candidate-a",
+                "questionId": "SCI-001",
+                "createdAt": "2026-08-25T00:00:00Z",
+            },
+            {
+                "recordKind": "review_round_link",
+                "linkId": "link-r1-candidate-a",
+                "questionId": "SCI-001",
+                "selectionId": "selection-1",
+                "candidateId": "candidate-a",
+                "candidateOrder": 0,
+                "roundIndex": 1,
+                "meetingRoundId": "meeting-r1-candidate-a",
+                "createdAt": "2026-08-25T00:02:00Z",
+            },
+        ],
+        selection_records=[
+            {
+                "selectionId": "selection-1",
+                "questionId": "SCI-001",
+                "selectedCandidateIds": ["candidate-a"],
+                "createdAt": "2026-08-25T00:01:00Z",
+            }
+        ],
+        meeting_records=[
+            {
+                "meetingRoundId": "meeting-r1-candidate-a",
+                "meetingType": "hypothesis_review",
+                "question": "SCI-001",
+                "status": "awaiting_approval",
+                "digestDraft": {"summary": long_summary},
+                "createdAt": "2026-08-25T00:03:00Z",
+            }
+        ],
+        digest_records=[],
+        decision_records=[],
+        hypothesis_round_records=[],
+        return_to="/teams/team-1/research?question=SCI-001",
+    ))
+
+    approve_actions = [
+        action
+        for action in state.allowedActions
+        if action.kind == "command" and str(action.command) == "approve_summary"
+    ]
+    assert len(approve_actions) == 1
+    assert approve_actions[0].label == (
+        f"确认候选纪要 · 候选 candidate-a：{long_summary[:30]}…"
+    )
+    assert approve_actions[0].payload.candidateId == "candidate-a"
+    assert approve_actions[0].payload.meetingRoundId == "meeting-r1-candidate-a"
+
+
+def test_approve_summary_label_helper_defaults_and_generation_label() -> None:
+    """Unit contract of the label helper (D-03).
+
+    The generation-meeting gate keeps its historical label and stays
+    candidateId-free; a long candidate id collapses to its tail (the hash
+    part is the discriminator).
+    """
+    from core.web.services.team_workflow.research_runtime.hypothesis_first_state_v2 import (
+        _approve_summary_label,
+        _candidate_short_id,
+    )
+
+    assert _approve_summary_label(None, None) == "确认候选生成纪要"
+    assert _approve_summary_label(None, {"digestDraft": {"summary": "x"}}) == (
+        "确认候选生成纪要"
+    )
+    assert _approve_summary_label("candidate-b", None) == "确认候选纪要 · 候选 candidate-b"
+    assert _approve_summary_label("candidate-b", {}) == "确认候选纪要 · 候选 candidate-b"
+    assert _candidate_short_id("short-id") == "short-id"
+    # Long ids collapse to the tail, which carries the hash discriminator.
+    assert _candidate_short_id("sci-001-c1a2b3c4d5e6f7g8") == "…b3c4d5e6f7g8"
+
+
+def test_collection_auto_accept_quotes_sweep_cadence(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SCI-049 O-02: the collection section quotes the auto-advance sweep.
+
+    ``pending`` mirrors a handoff gate sitting in ``waiting_human``; the
+    interval comes from the sweep's env-governed cadence so the UI's
+    "auto-accepted within ~Ns" promise matches what the sweep actually does.
+    """
+    monkeypatch.setenv("VIBELUTION_AUTO_ADVANCE_SWEEP_INTERVAL_MS", "45000")
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                _collection_request_chain_record(
+                    "request-1",
+                    run_id="child-1",
+                    status="awaiting_handoff",
+                    collection_run_status="succeeded",
+                )
+            ],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+        )
+    )
+
+    assert state.collection.lifecycle == "waiting_human"
+    auto_accept = state.collection.autoAccept
+    assert auto_accept is not None
+    assert auto_accept.pending is True
+    assert auto_accept.actor == "auto_advance_sweep"
+    assert auto_accept.intervalMs == 45000
+
+
+def test_collection_auto_accept_pending_false_without_waiting_handoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("VIBELUTION_AUTO_ADVANCE_SWEEP_INTERVAL_MS", raising=False)
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                _collection_request_chain_record("request-1", run_id="child-1")
+            ],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+        )
+    )
+
+    assert state.collection.lifecycle != "waiting_human"
+    assert state.collection.autoAccept is not None
+    assert state.collection.autoAccept.pending is False
+    # Default cadence when the operator override is absent.
+    assert state.collection.autoAccept.intervalMs == 30_000
 
 
 def test_succeeded_formal_run_with_missing_delivery_stays_program_delivery_blocked() -> None:
