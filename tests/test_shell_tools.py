@@ -205,7 +205,9 @@ class TestListDirectory:
     def test_list_nonexistent_dir(self):
         """列出不存在的目录应返回错误"""
         result = list_directory(path="/nonexistent/path/xyz")
-        assert "错误" in result or "不存在" in result
+        # 边界检查先于存在性检查（不向边界外泄露“是否存在”），
+        # 所以这里既可能是 PATH_NOT_ALLOWED，也可能是 PATH_NOT_EXISTS。
+        assert "错误" in result or "不存在" in result or "PATH_NOT_ALLOWED" in result
 
     def test_list_as_file(self, temp_test_dir):
         """将文件作为目录列出应返回错误"""
