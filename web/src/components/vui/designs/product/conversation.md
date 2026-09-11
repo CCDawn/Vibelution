@@ -58,20 +58,30 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 ## ChatComposerPlusMenu
 
 ### 功能
-桌面端 Chat composer 的统一扩展入口。一级为紧凑纵向聚类列表，悬停或点击后只在右侧展开一个二级面板；不允许三级菜单。
+桌面端 Chat composer 的统一扩展入口。单栏纵向分组菜单：每个分组带小节标题，动作行单行紧凑，能力开关行以内联勾选态直接展示；不出现二级面板或第三级菜单。打开后焦点落在首个可用项，↑/↓/Home/End 在可用项间循环，Escape 关闭。
 
 ### 信息架构
-- `添加与引用`：图片附件、会话引用。
-- `对话能力`：心智模型、运行状态注入，以可切换状态直接展示。
-- `会话与陪伴`：直接会话、投喂、聊天、关怀。
-- `群聊与团队`：群聊管理、打开团队。
+- `添加与引用`：图片附件、会话引用；禁用行用 `disabledReason` 说明原因。
+- `对话能力`：心智模型、运行状态注入；行尾勾选标记表示 `开启`，无标记表示 `关闭`（`role="menuitemcheckbox"` + `aria-checked`）。
+- `会话与陪伴`：仅当存在直接会话绑定时出现，当前提供打开直接会话。
+- `群聊与团队`：管理群聊、打开团队（团队归属可用时）。
+- `引用工作区文件`、陪伴投喂/聊天/关怀只在设计预览中保留，生产数据通路未就绪前不渲染，避免给出无动作的入口。
 
 ### 边界
 - 斜杠指令仍由输入框内联建议负责，不进入加号菜单。
 - 模型、权限、上下文用量、发送/停止仍位于 composer 工具栏。
 - 缓存状态不在加号菜单或右栏展示；上下文详情仍由独立工具栏入口承载。
 - 仅定义桌面交互，不增加手机端变体。
-- 复用 `VPopover`、`VButton`、`VDialog`、`VNativeInput`，不新增第二套 primitive。
+- 复用 `VPopover`、`VButton`、`VDialog`、`VNativeInput`，不新增第二套 primitive；菜单容器只允许一个 `role="menu"`，分组用 `role="group"`。
+
+### 实现落点
+- 源码：`web/src/routes/chat/ChatComposerPlusMenu.tsx`
+- 样式：`web/src/routes/chat/ChatComposerPlusMenu.styles.ts`
+- 隔离预览：`web/src/design/chat-composer-plus-menu-preview.tsx`
+
+### 反冗余
+- 不重新引入悬停聚类 + 右侧二级面板或两栏等高外壳。
+- 不替代 composer 工具栏或斜杠内联建议。
 
 ## ChatGroupManagementDialog
 

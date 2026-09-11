@@ -2,7 +2,7 @@ import {
   Activity,
   ArrowUpRight,
   BrainCircuit,
-  ChevronRight,
+  Check,
   ImagePlus,
   MessageCircleHeart,
   MessageSquare,
@@ -10,7 +10,7 @@ import {
   Settings2,
   UsersRound,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import type { SessionReferenceAttachment } from "../../api/types";
 import { VButton, VDialog, VNativeInput, VPopover } from "../../components/vui";
@@ -50,20 +50,17 @@ export type ChatComposerPlusMenuProps = {
   } | null;
 };
 
-type ClusterId = "add-reference" | "conversation-capabilities" | "session-companion" | "group-team";
-
-type Cluster = {
-  id: ClusterId;
+type SectionDescriptor = {
+  id: string;
   label: string;
-  icon: ReactNode;
 };
 
-function MenuIcon({ children }: { children: ReactNode }) {
+function ItemIcon({ children }: { children: ReactNode }) {
   return (
     <span
-      data-slot="cluster-icon"
+      data-slot="menu-item-icon"
       aria-hidden="true"
-      className={styles.clusterIcon}
+      className={styles.itemIcon}
     >
       {children}
     </span>
@@ -88,47 +85,28 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
     group,
   } = props;
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
-  const hoverCloseTimerRef = useRef<number | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
-  const [activeCluster, setActiveCluster] = useState<ClusterId | null>(null);
-  const [hoverCluster, setHoverCluster] = useState<ClusterId | null>(null);
   const [referenceDialogOpen, setReferenceDialogOpen] = useState(false);
   const [referenceQuery, setReferenceQuery] = useState("");
 
-  const clusters = useMemo<Cluster[]>(() => {
-    const items: Cluster[] = [];
-    if (showAddReference) {
-      items.push({
-        id: "add-reference",
-        label: lang === "zh" ? "添加与引用" : "Add and reference",
-        icon: <ImagePlus size={16} />,
-      });
-    }
-    if (showCapabilities) {
-      items.push({
-        id: "conversation-capabilities",
-        label: lang === "zh" ? "对话能力" : "Conversation capabilities",
-        icon: <BrainCircuit size={16} />,
-      });
-    }
-    if (directSession) {
-      items.push({
-        id: "session-companion",
-        label: lang === "zh" ? "会话与陪伴" : "Session and companion",
-        icon: <MessageCircleHeart size={16} />,
-      });
-    }
-    if (group) {
-      items.push({
-        id: "group-team",
-        label: lang === "zh" ? "群聊与团队" : "Group and team",
-        icon: <UsersRound size={16} />,
-      });
-    }
-    return items;
-  }, [directSession, group, lang, showAddReference, showCapabilities]);
+  const addReferenceSection = useMemo<SectionDescriptor>(() => ({
+    id: "add-reference",
+    label: lang === "zh" ? "添加与引用" : "Add and reference",
+  }), [lang]);
+  const capabilitiesSection = useMemo<SectionDescriptor>(() => ({
+    id: "conversation-capabilities",
+    label: lang === "zh" ? "对话能力" : "Conversation capabilities",
+  }), [lang]);
+  const companionSection = useMemo<SectionDescriptor>(() => ({
+    id: "session-companion",
+    label: lang === "zh" ? "会话与陪伴" : "Session and companion",
+  }), [lang]);
+  const groupSection = useMemo<SectionDescriptor>(() => ({
+    id: "group-team",
+    label: lang === "zh" ? "群聊与团队" : "Group and team",
+  }), [lang]);
 
-  const visibleCluster = hoverCluster ?? activeCluster;
   const filteredReferences = useMemo(() => {
     const query = referenceQuery.trim().toLocaleLowerCase();
     if (!query) {
@@ -137,29 +115,63 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
     return sessionReferences.filter((option) => `${option.title} ${option.meta ?? ""}`.toLocaleLowerCase().includes(query));
   }, [referenceQuery, sessionReferences]);
 
-  useEffect(() => () => {
-    if (hoverCloseTimerRef.current !== null) {
-      window.clearTimeout(hoverCloseTimerRef.current);
+  useEffect(() => {
+    if (!open) {
+      return;
     }
-  }, []);
+    const frame = window.requestAnimationFrame(() => {
+      focusMenuItem(menuRef.current, 0);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [open]);
 
-  function clearHoverCloseTimer() {
-    if (hoverCloseTimerRef.current !== null) {
-      window.clearTimeout(hoverCloseTimerRef.current);
-      hoverCloseTimerRef.current = null;
+  function focusMenuItem(container: HTMLDivElement | null, index: number) {
+    const items = menuItems(container);
+    if (items.length === 0) {
+      return;
     }
+    const nextIndex = (index + items.length) % items.length;
+    items[nextIndex]?.focus();
   }
 
-  function scheduleHoverClose() {
-    clearHoverCloseTimer();
-    hoverCloseTimerRef.current = window.setTimeout(() => setHoverCluster(null), 160);
+  function menuItems(container: HTMLDivElement | null): HTMLButtonElement[] {
+    if (!container) {
+      return [];
+    }
+    return Array.from(
+      container.querySelectorAll<HTMLButtonElement>('[data-plus-menu-item="true"]:not([disabled])'),
+    );
+  }
+
+  function handleMenuKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const items = menuItems(menuRef.current);
+    if (items.length === 0) {
+      return;
+    }
+    const index = items.indexOf(document.activeElement as HTMLButtonElement);
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      focusMenuItem(menuRef.current, index === -1 ? 0 : index + 1);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      focusMenuItem(menuRef.current, index === -1 ? items.length - 1 : index - 1);
+      return;
+    }
+    if (event.key === "Home") {
+      event.preventDefault();
+      focusMenuItem(menuRef.current, 0);
+      return;
+    }
+    if (event.key === "End") {
+      event.preventDefault();
+      focusMenuItem(menuRef.current, items.length - 1);
+    }
   }
 
   function closeMenu() {
     setOpen(false);
-    setActiveCluster(null);
-    setHoverCluster(null);
-    clearHoverCloseTimer();
   }
 
   function selectAction(action: () => void) {
@@ -167,12 +179,27 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
     action();
   }
 
+  function renderSection(section: SectionDescriptor, children: ReactNode) {
+    return (
+      <div
+        key={section.id}
+        className={styles.section}
+        role="group"
+        aria-label={section.label}
+        data-testid={`chat-composer-plus-${section.id}`}
+      >
+        <div className={styles.sectionTitle}>{section.label}</div>
+        {children}
+      </div>
+    );
+  }
+
   function renderAction(options: {
     id: string;
     label: string;
-    hint?: string;
     icon: ReactNode;
     disabled?: boolean;
+    disabledReason?: string;
     onSelect: () => void;
   }) {
     return (
@@ -180,19 +207,16 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
         key={options.id}
         type="button"
         role="menuitem"
+        data-plus-menu-item="true"
+        className={styles.menuItem}
         contentLayout="plain"
         variant="ghost"
-        className={styles.menuItem}
         isDisabled={options.disabled}
+        disabledReason={options.disabled ? options.disabledReason : undefined}
         onPress={() => selectAction(options.onSelect)}
       >
-        <span aria-hidden="true" className={styles.itemIcon}>
-          {options.icon}
-        </span>
-        <span className={styles.itemCopy}>
-          <strong className={styles.itemLabel}>{options.label}</strong>
-          {options.hint ? <small className={styles.itemHint}>{options.hint}</small> : null}
-        </span>
+        <ItemIcon>{options.icon}</ItemIcon>
+        <span className={styles.itemLabel}>{options.label}</span>
       </VButton>
     );
   }
@@ -203,6 +227,7 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
     hint: string;
     icon: ReactNode;
     checked: boolean;
+    disabled?: boolean;
     onChange: (checked: boolean) => void;
   }) {
     const stateLabel = options.checked ? (lang === "zh" ? "开启" : "On") : (lang === "zh" ? "关闭" : "Off");
@@ -213,109 +238,27 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
         role="menuitemcheckbox"
         aria-checked={options.checked}
         aria-label={`${options.label}：${stateLabel}`}
+        data-plus-menu-item="true"
+        className={options.checked ? `${styles.menuItem} ${styles.menuItemChecked}` : styles.menuItem}
         contentLayout="plain"
         variant="ghost"
-        className={styles.menuItem}
-        isDisabled={capabilityDisabled}
+        isDisabled={options.disabled}
         onPress={() => options.onChange(!options.checked)}
       >
-        <span aria-hidden="true" className={styles.itemIcon}>
-          {options.icon}
-        </span>
+        <ItemIcon>{options.icon}</ItemIcon>
         <span className={styles.itemCopy}>
-          <strong className={styles.itemLabel}>{options.label}</strong>
+          <strong className={styles.itemTitle}>{options.label}</strong>
           <small className={styles.itemHint}>{options.hint}</small>
         </span>
-        <span className={options.checked ? styles.toggleStateOn : styles.toggleStateOff}>
-          {stateLabel}
+        <span aria-hidden="true" className={styles.itemCheck}>
+          {options.checked ? <Check size={15} /> : null}
         </span>
       </VButton>
     );
   }
 
-  function renderSecondaryPanel() {
-    if (visibleCluster === "add-reference") {
-      return (
-        <>
-          {renderAction({
-            id: "attach-image",
-            label: lang === "zh" ? "图片附件" : "Image attachment",
-            hint: lang === "zh" ? "选择 PNG、JPEG 或 WebP" : "Choose PNG, JPEG, or WebP",
-            icon: <ImagePlus size={16} />,
-            disabled: attachmentDisabled || !onAddAttachments,
-            onSelect: () => attachmentInputRef.current?.click(),
-          })}
-          {renderAction({
-            id: "reference-session",
-            label: lang === "zh" ? "引用会话" : "Reference session",
-            hint: lang === "zh" ? "选择历史会话加入本轮" : "Attach a previous session to this turn",
-            icon: <MessageSquare size={16} />,
-            disabled: !onAddSessionReference || sessionReferences.length === 0,
-            onSelect: () => {
-              setReferenceQuery("");
-              setReferenceDialogOpen(true);
-            },
-          })}
-        </>
-      );
-    }
-    if (visibleCluster === "conversation-capabilities") {
-      return (
-        <>
-          {renderToggle({
-            id: "mental-model",
-            label: lang === "zh" ? "心智模型" : "Mental model",
-            hint: lang === "zh" ? "下轮生效" : "Applies next turn",
-            icon: <BrainCircuit size={16} />,
-            checked: mentalModelEnabled,
-            onChange: onMentalModelEnabledChange,
-          })}
-          {renderToggle({
-            id: "runtime-status",
-            label: lang === "zh" ? "运行状态注入" : "Runtime status injection",
-            hint: lang === "zh" ? "把预算与进度注入上下文" : "Inject budget and progress into context",
-            icon: <Activity size={16} />,
-            checked: runtimeStatusEnabled,
-            onChange: onRuntimeStatusEnabledChange,
-          })}
-        </>
-      );
-    }
-    if (visibleCluster === "session-companion") {
-      return (
-        <>
-          {directSession ? renderAction({
-            id: "open-direct-session",
-            label: lang === "zh" ? "打开直接会话" : "Open direct session",
-            hint: directSession.label,
-            icon: <ArrowUpRight size={16} />,
-            onSelect: directSession.onOpen,
-          }) : null}
-        </>
-      );
-    }
-    if (visibleCluster === "group-team" && group) {
-      return (
-        <>
-          {renderAction({
-            id: "manage-group",
-            label: lang === "zh" ? "管理群聊" : "Manage group",
-            hint: group.title,
-            icon: <Settings2 size={16} />,
-            onSelect: group.onManage,
-          })}
-          {group.teamId && group.onOpenTeam ? renderAction({
-            id: "open-team",
-            label: lang === "zh" ? "打开团队" : "Open team",
-            hint: group.teamId,
-            icon: <UsersRound size={16} />,
-            onSelect: group.onOpenTeam,
-          }) : null}
-        </>
-      );
-    }
-    return null;
-  }
+  const attachmentUnavailableReason = lang === "zh" ? "当前会话暂不可添加图片" : "Image attachment is unavailable in this session";
+  const referenceUnavailableReason = lang === "zh" ? "没有可引用的历史会话" : "No previous session is available to reference";
 
   return (
     <>
@@ -323,11 +266,6 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
         open={open}
         onOpenChange={(nextOpen) => {
           setOpen(nextOpen);
-          if (!nextOpen) {
-            setActiveCluster(null);
-            setHoverCluster(null);
-            clearHoverCloseTimer();
-          }
         }}
         side="top"
         align="start"
@@ -345,53 +283,83 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
         )}
       >
         <div
+          ref={menuRef}
           className={styles.menu}
           role="menu"
           aria-label={lang === "zh" ? "更多操作菜单" : "More actions menu"}
-          onPointerLeave={scheduleHoverClose}
+          onKeyDown={handleMenuKeyDown}
         >
-          <div className={styles.primaryPanel} data-testid="chat-composer-plus-primary">
-            {clusters.map((cluster) => {
-              const expanded = cluster.id === visibleCluster;
-              return (
-                <VButton
-                  key={cluster.id}
-                  type="button"
-                  role="menuitem"
-                  aria-haspopup="menu"
-                  aria-expanded={expanded}
-                  className={expanded ? `${styles.clusterButton} ${styles.clusterButtonExpanded}` : styles.clusterButton}
-                  contentLayout="plain"
-                  variant="ghost"
-                  onPointerEnter={() => {
-                    clearHoverCloseTimer();
-                    setHoverCluster(cluster.id);
-                    cluster.id === "session-companion" && directSession?.onPrefetch?.();
-                  }}
-                  onPress={() => {
-                    setActiveCluster((current) => current === cluster.id ? null : cluster.id);
-                    setHoverCluster(cluster.id);
-                  }}
-                >
-                  <MenuIcon>{cluster.icon}</MenuIcon>
-                  <strong className={styles.clusterLabel}>{cluster.label}</strong>
-                  <ChevronRight size={15} className={styles.clusterChevron} aria-hidden="true" />
-                </VButton>
-              );
-            })}
-          </div>
-          {visibleCluster ? (
-            <div
-              className={styles.secondaryPanel}
-              role="group"
-              aria-label={clusters.find((cluster) => cluster.id === visibleCluster)?.label}
-              onPointerEnter={clearHoverCloseTimer}
-              onPointerLeave={scheduleHoverClose}
-              data-testid="chat-composer-plus-secondary"
-            >
-              {renderSecondaryPanel()}
-            </div>
-          ) : null}
+          {showAddReference ? renderSection(addReferenceSection, (
+            <>
+              {renderAction({
+                id: "attach-image",
+                label: lang === "zh" ? "图片附件" : "Image attachment",
+                icon: <ImagePlus size={16} />,
+                disabled: attachmentDisabled || !onAddAttachments,
+                disabledReason: attachmentUnavailableReason,
+                onSelect: () => attachmentInputRef.current?.click(),
+              })}
+              {renderAction({
+                id: "reference-session",
+                label: lang === "zh" ? "引用会话" : "Reference session",
+                icon: <MessageSquare size={16} />,
+                disabled: !onAddSessionReference || sessionReferences.length === 0,
+                disabledReason: referenceUnavailableReason,
+                onSelect: () => {
+                  setReferenceQuery("");
+                  setReferenceDialogOpen(true);
+                },
+              })}
+            </>
+          )) : null}
+          {showCapabilities ? renderSection(capabilitiesSection, (
+            <>
+              {renderToggle({
+                id: "mental-model",
+                label: lang === "zh" ? "心智模型" : "Mental model",
+                hint: lang === "zh" ? "下轮生效" : "Applies next turn",
+                icon: <BrainCircuit size={16} />,
+                checked: mentalModelEnabled,
+                disabled: capabilityDisabled,
+                onChange: onMentalModelEnabledChange,
+              })}
+              {renderToggle({
+                id: "runtime-status",
+                label: lang === "zh" ? "运行状态注入" : "Runtime status injection",
+                hint: lang === "zh" ? "把预算与进度注入上下文" : "Inject budget and progress into context",
+                icon: <Activity size={16} />,
+                checked: runtimeStatusEnabled,
+                disabled: capabilityDisabled,
+                onChange: onRuntimeStatusEnabledChange,
+              })}
+            </>
+          )) : null}
+          {directSession ? renderSection(companionSection, (
+            <>
+              {renderAction({
+                id: "open-direct-session",
+                label: lang === "zh" ? "打开直接会话" : "Open direct session",
+                icon: <ArrowUpRight size={16} />,
+                onSelect: directSession.onOpen,
+              })}
+            </>
+          )) : null}
+          {group ? renderSection(groupSection, (
+            <>
+              {renderAction({
+                id: "manage-group",
+                label: lang === "zh" ? "管理群聊" : "Manage group",
+                icon: <Settings2 size={16} />,
+                onSelect: group.onManage,
+              })}
+              {group.teamId && group.onOpenTeam ? renderAction({
+                id: "open-team",
+                label: lang === "zh" ? "打开团队" : "Open team",
+                icon: <UsersRound size={16} />,
+                onSelect: group.onOpenTeam,
+              }) : null}
+            </>
+          )) : null}
         </div>
       </VPopover>
 
