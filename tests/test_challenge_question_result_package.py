@@ -874,6 +874,15 @@ def test_work_package_requires_exact_six_fields(field: str) -> None:
         _create(payload)
 
 
+def test_work_package_dependencies_may_be_empty_for_entry_packages() -> None:
+    payload = _valid_payload()
+    payload["research_plan"]["work_packages"][0]["dependencies"] = []
+
+    package = _create(payload)
+
+    assert list(package.research_plan["work_packages"][0]["dependencies"]) == []
+
+
 def test_work_package_rejects_junk_fields() -> None:
     payload = _valid_payload()
     payload["research_plan"]["work_packages"][0]["junk"] = "ignored"
@@ -900,7 +909,7 @@ def test_work_package_ids_must_be_unique() -> None:
         _create(payload)
 
 
-@pytest.mark.parametrize("field", ["inputs", "procedure", "outputs", "dependencies"])
+@pytest.mark.parametrize("field", ["inputs", "procedure", "outputs"])
 def test_work_package_lists_must_be_non_empty(field: str) -> None:
     payload = _valid_payload()
     payload["research_plan"]["work_packages"][0][field] = []

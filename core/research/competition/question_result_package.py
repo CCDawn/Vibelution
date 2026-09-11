@@ -721,12 +721,20 @@ def _normalize_research_plan(payload: Any) -> dict[str, Any]:
             work_package.get("work_package_id"), f"{field}.work_package_id"
         )
         work_package["goal"] = _text(work_package.get("goal"), f"{field}.goal")
-        for list_field in ("inputs", "procedure", "outputs", "dependencies"):
+        for list_field in ("inputs", "procedure", "outputs"):
             work_package[list_field] = _string_list(
                 work_package.get(list_field),
                 f"{field}.{list_field}",
                 allow_empty=False,
             )
+        # A work-package DAG must allow source nodes: the entry packages of a
+        # plan legitimately have no predecessors, so only a missing or
+        # non-list dependencies value is invalid.
+        work_package["dependencies"] = _string_list(
+            work_package.get("dependencies"),
+            f"{field}.dependencies",
+            allow_empty=True,
+        )
         work_package_ids.append(work_package["work_package_id"])
         normalized_work_packages.append(work_package)
     if len(set(work_package_ids)) != len(work_package_ids):
