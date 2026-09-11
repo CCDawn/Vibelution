@@ -716,7 +716,7 @@ def load_public_config() -> dict:
         "profiles": {},
     }
     for preset_id in LLM_MODEL_PRESETS:
-        if preset_id in {"custom_openai_compatible_relay", "custom_relay_responses"}:
+        if preset_id in {"custom_openai_compatible_relay", "custom_opencode_relay", "custom_relay_responses"}:
             continue
         _ensure_preset_model(public_config, preset_id)
     primary_model_ref = "openai_gpt_5_5"
@@ -871,6 +871,10 @@ def test_config_workspace_exposes_unified_config_payload(monkeypatch):
     assert preset_options["custom_openai_compatible_relay"]["provider"]["kind"] == "openai_compatible"
     assert preset_options["custom_relay_responses"]["category"] == "relay"
     assert preset_options["custom_relay_responses"]["model"]["transport"] == "responses"
+    assert preset_options["custom_opencode_relay"]["category"] == "relay"
+    assert preset_options["custom_opencode_relay"]["provider"]["kind"] == "relay"
+    assert preset_options["custom_opencode_relay"]["provider"]["api"] == "opencode-go"
+    assert preset_options["custom_opencode_relay"]["model"]["wire_protocol"] == "responses"
     assert preset_options["xiaomi_mimo_v2_5_pro_token_plan"]["category"] == "official"
     assert preset_options["xiaomi_mimo_v2_5_pro_token_plan"]["provider"]["kind"] == "xiaomi"
     assert preset_options["xiaomi_mimo_v2_5_pro_token_plan"]["provider"]["base_url"] == (

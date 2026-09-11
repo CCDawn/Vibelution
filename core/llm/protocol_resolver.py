@@ -218,6 +218,30 @@ def _opencode_variant(provider: ProviderConfig) -> str:
     return "zen"
 
 
+def _declared_opencode_api(provider: ProviderConfig) -> str:
+    api = _normalize_provider_api(provider)
+    if api == "opencode" or api.startswith("opencode-"):
+        return api
+    return ""
+
+
+def _wire_protocol_from_declared_opencode(
+    provider: ProviderConfig,
+    effective_model: str,
+    allowed: tuple[str, ...],
+) -> WireProtocol | None:
+    """Route declared opencode providers (including relays) by effective model."""
+
+    if not _declared_opencode_api(provider):
+        return None
+    wire_protocol = _wire_protocol_from_opencode(provider, effective_model)
+    if wire_protocol is None:
+        return None
+    if allowed and wire_protocol.value not in allowed:
+        return None
+    return wire_protocol
+
+
 def _requires_deepseek_reasoning_roundtrip(provider: ProviderConfig, effective_model: str) -> bool:
     model = str(effective_model or "").strip().lower()
     return _opencode_variant(provider) == "go" and model.startswith("deepseek-v4")
@@ -233,6 +257,8 @@ def _wire_protocol_from_opencode(provider: ProviderConfig, effective_model: str)
             return WireProtocol.ANTHROPIC_MESSAGES
         return WireProtocol.CHAT_COMPLETIONS
     if variant == "go":
+        if "gpt" in model:
+            return WireProtocol.RESPONSES
         if "minimax" in model or "qwen" in model:
             return WireProtocol.ANTHROPIC_MESSAGES
         if any(name in model for name in ("glm", "kimi", "deepseek", "mimo")):
@@ -394,6 +420,13 @@ def _resolve_wire_protocol(
             )
         return explicit_wire, "explicit_model_wire", "model"
     if not bool(getattr(provider, "legacy_inference_allowed", True)):
+        declared_opencode_wire = _wire_protocol_from_declared_opencode(
+            provider,
+            effective_model,
+            allowed,
+        )
+        if declared_opencode_wire is not None:
+            return declared_opencode_wire, "provider_declared_opencode", "provider_model"
         provider_default = _provider_default_wire(provider)
         if provider_default is not None:
             return provider_default, "provider_default", "provider"

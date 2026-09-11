@@ -580,6 +580,96 @@ def test_v2_model_wire_override_must_be_allowed_by_provider() -> None:
     assert error.value.model_ref == "relay/gpt-a"
 
 
+def test_v2_declared_opencode_go_routes_gpt_models_to_responses() -> None:
+    provider = _v2_provider(
+        api="opencode-go",
+        protocols={"default": "chat_completions", "allowed": ["chat_completions", "responses"]},
+    )
+    profile = LLMProfile(profile_id="primary", provider_id="relay", model="gpt-5.6-luna")
+
+    route = resolve_model_protocol(
+        profile,
+        provider,
+        model_entry={"model_ref": "relay/gpt-5.6-luna", "model": "gpt-5.6-luna"},
+    )
+
+    assert route.wire_protocol == WireProtocol.RESPONSES
+    assert route.wire_source == "provider_declared_opencode"
+
+
+def test_v2_declared_opencode_go_routes_glm_models_to_chat() -> None:
+    provider = _v2_provider(
+        api="opencode-go",
+        protocols={"default": "chat_completions", "allowed": ["chat_completions", "responses"]},
+    )
+    profile = LLMProfile(profile_id="primary", provider_id="relay", model="glm-5.2")
+
+    route = resolve_model_protocol(
+        profile,
+        provider,
+        model_entry={"model_ref": "relay/glm-5.2", "model": "glm-5.2"},
+    )
+
+    assert route.wire_protocol == WireProtocol.CHAT_COMPLETIONS
+    assert route.wire_source == "provider_declared_opencode"
+
+
+def test_v2_declared_opencode_rule_respects_allowed_protocols() -> None:
+    provider = _v2_provider(
+        api="opencode-go",
+        protocols={"default": "chat_completions", "allowed": ["chat_completions"]},
+    )
+    profile = LLMProfile(profile_id="primary", provider_id="relay", model="gpt-5.6-luna")
+
+    route = resolve_model_protocol(
+        profile,
+        provider,
+        model_entry={"model_ref": "relay/gpt-5.6-luna", "model": "gpt-5.6-luna"},
+    )
+
+    assert route.wire_protocol == WireProtocol.CHAT_COMPLETIONS
+    assert route.wire_source == "provider_default"
+
+
+def test_v2_explicit_model_wire_beats_declared_opencode_rule() -> None:
+    provider = _v2_provider(
+        api="opencode-go",
+        protocols={"default": "chat_completions", "allowed": ["chat_completions", "responses"]},
+    )
+    profile = LLMProfile(profile_id="primary", provider_id="relay", model="gpt-5.6-luna")
+
+    route = resolve_model_protocol(
+        profile,
+        provider,
+        model_entry={
+            "model_ref": "relay/gpt-5.6-luna",
+            "model": "gpt-5.6-luna",
+            "wire_protocol": "chat_completions",
+        },
+    )
+
+    assert route.wire_protocol == WireProtocol.CHAT_COMPLETIONS
+    assert route.wire_source == "explicit_model_wire"
+
+
+def test_v2_opencode_identity_without_declared_api_keeps_provider_default() -> None:
+    provider = _v2_provider(
+        provider_id="opencode_go",
+        base_url="https://opencode.ai/zen/go/v1",
+        protocols={"default": "chat_completions", "allowed": ["chat_completions", "responses"]},
+    )
+    profile = LLMProfile(profile_id="primary", provider_id="opencode_go", model="gpt-5.6-luna")
+
+    route = resolve_model_protocol(
+        profile,
+        provider,
+        model_entry={"model_ref": "opencode_go/gpt-5.6-luna", "model": "gpt-5.6-luna"},
+    )
+
+    assert route.wire_protocol == WireProtocol.CHAT_COMPLETIONS
+    assert route.wire_source == "provider_default"
+
+
 def test_v2_unknown_protocol_fails_closed_without_endpoint_or_model_heuristics() -> None:
     provider = _v2_provider(driver="custom", protocols={"default": "", "allowed": []})
     profile = LLMProfile(profile_id="primary", provider_id="relay", model="qwen-local")
