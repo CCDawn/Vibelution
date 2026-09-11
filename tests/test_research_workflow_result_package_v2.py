@@ -3188,6 +3188,69 @@ def test_extract_doi_forms() -> None:
     assert doi_metadata_verification.extract_doi("https://doi.org/not-a-doi") == ""
 
 
+def test_extract_doi_arxiv_forms() -> None:
+    from core.web.services.team_workflow import doi_metadata_verification
+
+    # Versioned new-style identifier: version suffix stripped (arXiv DOIs are
+    # version-less).
+    assert (
+        doi_metadata_verification.extract_doi("https://arxiv.org/abs/1802.06039v2")
+        == "10.48550/arXiv.1802.06039"
+    )
+    # Non-versioned http URL.
+    assert (
+        doi_metadata_verification.extract_doi("http://arxiv.org/abs/2410.10424")
+        == "10.48550/arXiv.2410.10424"
+    )
+    # Old-style category identifiers survive intact, version stripped.
+    assert (
+        doi_metadata_verification.extract_doi(
+            "http://arxiv.org/abs/astro-ph/0312273v1"
+        )
+        == "10.48550/arXiv.astro-ph/0312273"
+    )
+    # Mirror host and pdf form are accepted too.
+    assert (
+        doi_metadata_verification.extract_doi(
+            "https://export.arxiv.org/pdf/2410.10424v1"
+        )
+        == "10.48550/arXiv.2410.10424"
+    )
+    assert (
+        doi_metadata_verification.extract_doi(
+            "https://www.arxiv.org/abs/2410.10424"
+        )
+        == "10.48550/arXiv.2410.10424"
+    )
+    # Regression: non-arXiv URLs and non-paper arXiv paths keep failing closed.
+    assert doi_metadata_verification.extract_doi("https://example.org/paper") == ""
+    assert (
+        doi_metadata_verification.extract_doi(
+            "https://arxiv.org.list.cs.AI.recent.example.com/abs/1802.06039"
+        )
+        == ""
+    )
+    assert doi_metadata_verification.extract_doi("https://arxiv.org/abs/") == ""
+
+
+def test_verify_failed_receipt_dois_verifies_arxiv_source_urls() -> None:
+    from core.web.services.team_workflow import doi_metadata_verification
+
+    def _verifier(doi: str):
+        return {"DOI": doi} if doi == "10.48550/arXiv.1802.06039" else None
+
+    source_url = "http://arxiv.org/abs/1802.06039v2"
+    report = doi_metadata_verification.verify_failed_receipt_dois(
+        [{"sourceUrl": source_url, "status": "failed"}],
+        verifier=_verifier,
+    )
+
+    assert report["verifiedSourceUrls"] == {source_url: True}
+    assert report["attemptedCount"] == 1
+    assert report["verifiedCount"] == 1
+    assert report["unresolvedSourceUrls"] == []
+
+
 class _FakeResponse:
     def __init__(self, payload: bytes) -> None:
         self._payload = payload

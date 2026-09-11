@@ -33,6 +33,17 @@ _DOI_PATTERN = re.compile(r"^10\.\d{4,9}/\S+$", re.IGNORECASE)
 # `https://doi.org/10.1103/PhysRevLett...` -> `10.1103/PhysRevLett...`
 _DOI_ORG_PATH = re.compile(r"^/(?:doi(?:\.org)?/)?(10\.\d{4,9}/\S+)$", re.IGNORECASE)
 
+# `https://arxiv.org/abs/1802.06039v2` -> `1802.06039`.  arXiv DOIs are
+# version-less (`10.48550/arXiv.1802.06039`), so a trailing `v<digits>` is
+# stripped; old-style identifiers such as `astro-ph/0312273` survive intact.
+_ARXIV_PAPER_PATH = re.compile(r"^/(?:abs|pdf)/(?P<identifier>\S+?)(?:v\d+)?$", re.IGNORECASE)
+
+# arXiv web hosts, mirroring the `export.arxiv.org` mirror already used by the
+# web-search tooling; every arXiv preprint carries the DataCite-registered DOI
+# `10.48550/arXiv.<identifier>`, resolvable via Crossref/doi.org.
+_ARXIV_HOSTS = {"arxiv.org", "www.arxiv.org", "export.arxiv.org"}
+_ARXIV_DOI_PREFIX = "10.48550/arXiv."
+
 _CROSSREF_WORKS_URL = "https://api.crossref.org/works/{doi}"
 _DOI_ORG_URL = "https://doi.org/{doi}"
 _CSL_JSON_ACCEPT = "application/vnd.citationstyles.csl+json"
@@ -66,7 +77,10 @@ def extract_doi(source_url: object, doi_hint: object = "") -> str:
     """Resolve the DOI behind an evidence source URL.
 
     Priority: an explicit ``doi`` field on the evidence row, then
-    ``https://doi.org/10.x/...`` links, then ``?doi=``/``&doi=`` query
+    ``https://doi.org/10.x/...`` links, then arXiv abs (or pdf) links — every
+    arXiv preprint carries the version-less DataCite DOI
+    ``10.48550/arXiv.<identifier>``, so the identifier is derived directly
+    from ``https://arxiv.org/abs/<id>[vN]`` — then ``?doi=``/``&doi=`` query
     parameters on publisher landing pages.  Returns "" when nothing
     DOI-shaped is present — callers must treat that as "no fallback
     authority" and keep the receipt failed.
@@ -87,6 +101,14 @@ def extract_doi(source_url: object, doi_hint: object = "") -> str:
         match = _DOI_ORG_PATH.fullmatch(unquote(parsed.path or ""))
         if match:
             candidate = normalize_doi(match.group(1))
+            if candidate:
+                return candidate
+    if (parsed.hostname or "").lower().rstrip(".") in _ARXIV_HOSTS:
+        # arXiv links carry a version-less registered DOI, derived straight
+        # from the /abs/ (or /pdf/) identifier; malformed paths fall through.
+        match = _ARXIV_PAPER_PATH.fullmatch(unquote(parsed.path or ""))
+        if match:
+            candidate = normalize_doi(f"{_ARXIV_DOI_PREFIX}{match.group('identifier')}")
             if candidate:
                 return candidate
     try:
