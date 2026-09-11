@@ -5,8 +5,8 @@ import {
   Apple,
   ArrowUpRight,
   BrainCircuit,
+  Check,
   ChevronLeft,
-  ChevronRight,
   FileText,
   HeartHandshake,
   ImagePlus,
@@ -61,10 +61,9 @@ type PlusMenuItem = {
   onSelect?: () => void;
 };
 
-type PlusMenuCluster = {
+type PlusMenuSection = {
   id: string;
   label: string;
-  icon: ReactNode;
   items: PlusMenuItem[];
 };
 
@@ -174,8 +173,6 @@ export function ChatComposerPlusMenuPreviewApp() {
   const [runtimeEnabled, setRuntimeEnabled] = useState(true);
   const [draft, setDraft] = useState("");
   const [plusOpen, setPlusOpen] = useState(false);
-  const [plusActiveCluster, setPlusActiveCluster] = useState<string | null>(null);
-  const [plusHoverCluster, setPlusHoverCluster] = useState<string | null>(null);
   const [statusRailOpen, setStatusRailOpen] = useState(false);
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
@@ -187,7 +184,7 @@ export function ChatComposerPlusMenuPreviewApp() {
   const [groupNameDraft, setGroupNameDraft] = useState(GROUP_META.name);
   const [feedback, setFeedback] = useState("");
 
-  const plusCloseTimerRef = useRef<number | null>(null);
+  const plusMenuRef = useRef<HTMLDivElement | null>(null);
 
   const session = scene === "direct" ? DIRECT_SESSION : GROUP_SESSION;
   const transcript = scene === "direct" ? DIRECT_TRANSCRIPT : GROUP_TRANSCRIPT;
@@ -211,30 +208,64 @@ export function ChatComposerPlusMenuPreviewApp() {
     setSlashDismissed(false);
   }, [slashToken?.query, slashToken?.start]);
 
-  function clearPlusCloseTimer() {
-    if (plusCloseTimerRef.current !== null) {
-      window.clearTimeout(plusCloseTimerRef.current);
-      plusCloseTimerRef.current = null;
+  useEffect(() => {
+    if (!plusOpen) {
+      return;
     }
+    const frame = window.requestAnimationFrame(() => {
+      focusPlusMenuItem(0);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [plusOpen]);
+
+  function focusPlusMenuItem(index: number) {
+    const items = plusMenuItems();
+    if (items.length === 0) {
+      return;
+    }
+    items[(index + items.length) % items.length]?.focus();
   }
 
-  function schedulePlusHoverClose() {
-    clearPlusCloseTimer();
-    plusCloseTimerRef.current = window.setTimeout(() => {
-      setPlusHoverCluster(null);
-    }, 180);
+  function plusMenuItems(): HTMLButtonElement[] {
+    const container = plusMenuRef.current;
+    if (!container) {
+      return [];
+    }
+    return Array.from(
+      container.querySelectorAll<HTMLButtonElement>('[data-plus-menu-item="true"]:not([disabled])'),
+    );
   }
 
-  function openPlusCluster(clusterId: string) {
-    clearPlusCloseTimer();
-    setPlusHoverCluster(clusterId);
+  function handlePlusMenuKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const items = plusMenuItems();
+    if (items.length === 0) {
+      return;
+    }
+    const index = items.indexOf(document.activeElement as HTMLButtonElement);
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      focusPlusMenuItem(index === -1 ? 0 : index + 1);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      focusPlusMenuItem(index === -1 ? items.length - 1 : index - 1);
+      return;
+    }
+    if (event.key === "Home") {
+      event.preventDefault();
+      focusPlusMenuItem(0);
+      return;
+    }
+    if (event.key === "End") {
+      event.preventDefault();
+      focusPlusMenuItem(items.length - 1);
+    }
   }
 
   function applyScene(next: Scene) {
     setScene(next);
     setPlusOpen(false);
-    setPlusActiveCluster(null);
-    setPlusHoverCluster(null);
     setGroupDialogOpen(false);
     setConfirmResetOpen(false);
     setConfirmDeleteOpen(false);
@@ -281,24 +312,18 @@ export function ChatComposerPlusMenuPreviewApp() {
 
   function runSimulated(label: string) {
     setPlusOpen(false);
-    setPlusActiveCluster(null);
-    setPlusHoverCluster(null);
     setFeedback(label);
   }
 
   function openGroupManage() {
     setGroupDialogOpen(true);
     setPlusOpen(false);
-    setPlusActiveCluster(null);
-    setPlusHoverCluster(null);
   }
 
   function openReferencePicker(kind: ReferenceKind) {
     setReferenceQuery("");
     setReferencePicker(kind);
     setPlusOpen(false);
-    setPlusActiveCluster(null);
-    setPlusHoverCluster(null);
   }
 
   function chooseReference(kind: ReferenceKind, option: ReferenceOption) {
@@ -352,11 +377,10 @@ export function ChatComposerPlusMenuPreviewApp() {
     setFeedback(msg);
   }
 
-  const plusClusters: PlusMenuCluster[] = [
+  const plusSections: PlusMenuSection[] = [
     {
       id: "add-reference",
       label: "添加与引用",
-      icon: <ImagePlus size={16} />,
       items: [
         {
           id: "attach-image",
@@ -384,7 +408,6 @@ export function ChatComposerPlusMenuPreviewApp() {
     {
       id: "conversation-capabilities",
       label: "对话能力",
-      icon: <BrainCircuit size={16} />,
       items: [
         {
           id: "mental-model",
@@ -409,7 +432,6 @@ export function ChatComposerPlusMenuPreviewApp() {
     {
       id: "session-companion",
       label: "会话与陪伴",
-      icon: <MessageCircleHeart size={16} />,
       items: [
         {
           id: "open-direct-session",
@@ -446,7 +468,6 @@ export function ChatComposerPlusMenuPreviewApp() {
           {
             id: "group-team",
             label: "群聊与团队",
-            icon: <UsersRound size={16} />,
             items: [
               {
                 id: "group-manage",
@@ -468,11 +489,7 @@ export function ChatComposerPlusMenuPreviewApp() {
       : []),
   ];
 
-  const visiblePlusCluster = plusClusters.find(
-    (cluster) => cluster.id === (plusHoverCluster ?? plusActiveCluster),
-  ) ?? null;
-
-  function renderPlusClusterItem(item: PlusMenuItem) {
+  function renderPlusItem(item: PlusMenuItem) {
     if (item.toggle) {
       const active = item.active ?? false;
       return (
@@ -481,7 +498,8 @@ export function ChatComposerPlusMenuPreviewApp() {
           role="menuitemcheckbox"
           aria-checked={active}
           aria-label={`${item.label}：${active ? "开启" : "关闭"}`}
-          className={styles.menuToggleRow}
+          data-plus-menu-item="true"
+          className={styles.menuItem}
           contentLayout="plain"
           variant="ghost"
           icon={item.icon}
@@ -491,8 +509,8 @@ export function ChatComposerPlusMenuPreviewApp() {
             <strong>{item.label}</strong>
             {item.hint ? <small className={styles.menuItemHint}>{item.hint}</small> : null}
           </span>
-          <span className={`${styles.menuToggleValue} ${active ? styles.menuToggleValueOn : ""}`}>
-            {active ? "开启" : "关闭"}
+          <span aria-hidden="true" className={styles.menuCheck}>
+            {active ? <Check size={15} /> : null}
           </span>
         </VButton>
       );
@@ -503,6 +521,7 @@ export function ChatComposerPlusMenuPreviewApp() {
         key={item.id}
         role="menuitem"
         aria-label={item.label}
+        data-plus-menu-item="true"
         className={styles.menuItem}
         contentLayout="plain"
         variant="ghost"
@@ -659,11 +678,6 @@ export function ChatComposerPlusMenuPreviewApp() {
                     open={plusOpen}
                     onOpenChange={(open) => {
                       setPlusOpen(open);
-                      if (!open) {
-                        setPlusActiveCluster(null);
-                        setPlusHoverCluster(null);
-                        clearPlusCloseTimer();
-                      }
                     }}
                     side="top"
                     align="start"
@@ -681,57 +695,23 @@ export function ChatComposerPlusMenuPreviewApp() {
                     )}
                   >
                     <div
-                      className={styles.plusMenuShell}
+                      ref={plusMenuRef}
+                      className={styles.menuBody}
                       role="menu"
                       aria-label="更多操作菜单"
-                      onMouseLeave={schedulePlusHoverClose}
+                      onKeyDown={handlePlusMenuKeyDown}
                     >
-                      <div className={styles.plusMenuPrimary}>
-                        {plusClusters.map((cluster) => {
-                          const expanded = visiblePlusCluster?.id === cluster.id;
-                          return (
-                            <VButton
-                              key={cluster.id}
-                              role="menuitem"
-                              aria-haspopup="menu"
-                              aria-expanded={expanded}
-                              aria-label={cluster.label}
-                              className={`${styles.menuClusterRow} ${expanded ? styles.menuClusterRowActive : ""}`}
-                              contentLayout="plain"
-                              variant="ghost"
-                              onPress={() => {
-                                setPlusActiveCluster((current) => (current === cluster.id ? null : cluster.id));
-                                openPlusCluster(cluster.id);
-                              }}
-                              onMouseEnter={() => {
-                                openPlusCluster(cluster.id);
-                              }}
-                            >
-                              <span data-slot="cluster-icon" aria-hidden="true">
-                                {cluster.icon}
-                              </span>
-                              <span className={styles.menuItemCopy}>
-                                <strong>{cluster.label}</strong>
-                              </span>
-                              <ChevronRight className={styles.menuClusterChevron} size={15} aria-hidden="true" />
-                            </VButton>
-                          );
-                        })}
-                      </div>
-                      {visiblePlusCluster ? (
+                      {plusSections.map((section) => (
                         <div
-                          className={styles.menuSubmenuFlyout}
+                          key={section.id}
+                          className={styles.menuSection}
                           role="group"
-                          aria-label={visiblePlusCluster.label}
-                          onMouseEnter={() => {
-                            clearPlusCloseTimer();
-                            setPlusHoverCluster(visiblePlusCluster.id);
-                          }}
-                          onMouseLeave={schedulePlusHoverClose}
+                          aria-label={section.label}
                         >
-                          {visiblePlusCluster.items.map((item) => renderPlusClusterItem(item))}
+                          <div className={styles.menuSectionTitle}>{section.label}</div>
+                          {section.items.map((item) => renderPlusItem(item))}
                         </div>
-                      ) : null}
+                      ))}
                     </div>
                   </VPopover>
                 </div>
