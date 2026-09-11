@@ -157,8 +157,15 @@ def _merge_adjacent_thought_items(items: list[dict[str, Any]]) -> list[dict[str,
             text = _append_natural_text(previous.get("text") or "", item.get("text") or "")
             previous["text"] = text
             previous["preview"] = _first_paragraph_preview(text)
-            previous["defaultExpanded"] = bool(previous.get("defaultExpanded") or item.get("defaultExpanded"))
-            previous["status"] = "running" if item.get("status") == "running" else previous.get("status") or "completed"
+            # One thinking segment is committed more than once while it streams
+            # (in_progress, then done), so the merged item has to describe its
+            # *latest* state. Taking the newest status is what lets a finished
+            # thought collapse to its preview; OR-ing the previous value instead
+            # pins status="running" and defaultExpanded=True for good, and the
+            # consumer then never sees the false that triggers auto-collapse.
+            status = str(item.get("status") or previous.get("status") or "completed")
+            previous["status"] = status
+            previous["defaultExpanded"] = _is_running_status(status)
             previous["sourceOperationIds"] = [
                 *list(previous.get("sourceOperationIds") or []),
                 *list(item.get("sourceOperationIds") or []),
