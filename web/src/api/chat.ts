@@ -320,6 +320,28 @@ export function editResubmitSessionMessage(
   );
 }
 
+export function regenerateSessionMessage(
+  sessionId: string,
+  payload: {
+    messageId: string;
+    clientSubmissionId: string;
+    mentalModelEnabled?: boolean;
+    runtimeStatusEnabled?: boolean;
+    turnStatusTail?: unknown;
+  },
+): Promise<SessionDetail> {
+  return fetchJson<SessionDetail>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/messages/regenerate`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
 export function stopSessionTurn(sessionId: string, turnId: string): Promise<SessionDetail> {
   return fetchJson<SessionDetail>(`/api/sessions/${encodeURIComponent(sessionId)}/stop`, {
     method: "POST",

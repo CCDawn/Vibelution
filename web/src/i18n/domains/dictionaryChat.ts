@@ -1,4 +1,4 @@
-/** Route/domain dictionary slice: chat (87 keys). */
+/** Route/domain dictionary slice: chat (89 keys). */
 export const dictionaryChat = {
   zh: {
     navChat: "对话",
@@ -74,6 +74,8 @@ export const dictionaryChat = {
     editMessagePlaceholder: "修改最新用户消息后发送即可重跑",
     editMessage: "编辑消息",
     copyAnswer: "复制回答",
+    regenerateAnswer: "重新生成",
+    regeneratePending: "重新生成中",
     editMessageModeNotice: "正在编辑最新用户消息",
     editMessageCurrentContentPrefix: "当前内容",
     editMessageFailureRerunNotice: "上一轮失败；保存并重跑将生成新结果",
@@ -163,6 +165,8 @@ export const dictionaryChat = {
     editMessagePlaceholder: "Edit the latest user message, then send to rerun",
     editMessage: "Edit message",
     copyAnswer: "Copy answer",
+    regenerateAnswer: "Regenerate",
+    regeneratePending: "Regenerating",
     editMessageModeNotice: "Editing latest user message",
     editMessageCurrentContentPrefix: "Current content",
     editMessageFailureRerunNotice: "Previous turn failed; save and rerun to create a new result",

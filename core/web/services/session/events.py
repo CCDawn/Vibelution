@@ -499,16 +499,22 @@ def _record_session_message_edit_resubmit_rejected_event(
     reason: str,
     latest_message_id: str = "",
     target_preview: str = "",
+    operation: str = "edit",
 ) -> None:
     s = _service()
+    is_regenerate = str(operation or "").strip() == "regenerate"
     try:
         s.record_runtime_scene_event(
             "conversation",
-            "message_edit_resubmit_rejected",
-            "conversation.message_edit_resubmit_rejected",
+            "message_regenerate_rejected" if is_regenerate else "message_edit_resubmit_rejected",
+            "conversation.message_regenerate_rejected" if is_regenerate else "conversation.message_edit_resubmit_rejected",
             level="warning",
             outcome="rejected",
-            message="Rejected a message edit because only the latest user message can be edited and resent.",
+            message=(
+                "Rejected a message regenerate because only the latest user message answer can be regenerated."
+                if is_regenerate
+                else "Rejected a message edit because only the latest user message can be edited and resent."
+            ),
             fields={
                 "sessionId": str(session_id or "").strip(),
                 "messageId": str(target_message_id or "").strip(),
@@ -528,6 +534,46 @@ def _record_session_message_edit_resubmit_rejected_event(
     except Exception as exc:
         s._debug_logger.warning(
             f"runtime scene rejected edit log skipped: {type(exc).__name__}: {exc}",
+            tag="LOGS",
+        )
+
+
+def _record_session_message_regenerate_event(
+    session_id: str,
+    *,
+    target_message_id: str,
+    turn_id: str,
+    truncated_count: int,
+    attachment_count: int = 0,
+) -> None:
+    s = _service()
+    try:
+        s.record_runtime_scene_event(
+            "conversation",
+            "message_regenerate",
+            "conversation.message_regenerated",
+            level="info",
+            outcome="accepted",
+            message="Latest user message answer regenerated.",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "messageId": str(target_message_id or "").strip(),
+                "turnId": str(turn_id or "").strip(),
+                "truncatedMessageCount": max(0, int(truncated_count or 0)),
+                "attachmentCount": max(0, int(attachment_count or 0)),
+            },
+            child_log_path=f"conversations/{s._safe_session_workspace_token(session_id)}-regenerates.jsonl",
+            child_log_payload={
+                "session_id": str(session_id or "").strip(),
+                "message_id": str(target_message_id or "").strip(),
+                "turn_id": str(turn_id or "").strip(),
+                "truncated_message_count": max(0, int(truncated_count or 0)),
+                "attachment_count": max(0, int(attachment_count or 0)),
+            },
+        )
+    except Exception as exc:
+        s._debug_logger.warning(
+            f"runtime scene message regenerate log skipped: {type(exc).__name__}: {exc}",
             tag="LOGS",
         )
 

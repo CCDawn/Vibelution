@@ -71,6 +71,7 @@ function Harness({
     describeError: (error, fallback) => (error instanceof Error ? error.message : fallback),
     submitTurnMutation: mutations.submitTurnMutation,
     editResubmitMutation: mutations.editResubmitMutation,
+    regenerateMutation: mutations.regenerateMutation,
     stopTurnMutation: mutations.stopTurnMutation,
     sessionGuidanceMutation: mutations.sessionGuidanceMutation,
     setSessionDrafts: (value) => {
@@ -176,6 +177,7 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
       mutations: {
         submitTurnMutation: mutationStub(submitTurn),
         editResubmitMutation: mutationStub(vi.fn()),
+        regenerateMutation: mutationStub(vi.fn()),
         stopTurnMutation: mutationStub(stopTurn),
         sessionGuidanceMutation: mutationStub(guidance, async (variables) => {
           guidance(variables);
@@ -417,6 +419,7 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
     const mutations = {
       submitTurnMutation: mutationStub(vi.fn()),
       editResubmitMutation: mutationStub(vi.fn()),
+      regenerateMutation: mutationStub(vi.fn()),
       stopTurnMutation: mutationStub(vi.fn()),
       sessionGuidanceMutation: mutationStub(guidance, async (variables) => {
         guidance(variables);

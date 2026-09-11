@@ -10,6 +10,7 @@ import {
 
 import {
   editResubmitSessionMessage,
+  regenerateSessionMessage,
   stopSessionTurn,
   submitSessionGuidance,
   submitSessionMessage,
@@ -34,6 +35,7 @@ import { isTempSessionId } from "../sessionOptimisticIds";
 import {
   appendOptimisticUserMessage,
   applyOptimisticEditResubmit,
+  applyOptimisticRegenerate,
   createClientSubmissionId,
   markOptimisticUserMessageAccepted,
   markSessionDetailRunning,
@@ -113,9 +115,20 @@ export type EditResubmitVariables = {
   attachmentIds?: string[];
 };
 
+export type RegenerateVariables = {
+  sessionId: string;
+  messageId: string;
+  clientSubmissionId: string;
+  content: string;
+  mentalModelEnabled: boolean;
+  runtimeStatusEnabled: boolean;
+  turnStatusTail?: ReturnType<typeof loadTurnStatusTailConfig>;
+};
+
 export type ChatComposerTurnMutations = {
   submitTurnMutation: UseMutationResult<ChatSubmitAcceptedResponse, Error, SubmitTurnVariables, unknown>;
   editResubmitMutation: UseMutationResult<SessionDetail, Error, EditResubmitVariables, unknown>;
+  regenerateMutation: UseMutationResult<SessionDetail, Error, RegenerateVariables, unknown>;
   stopTurnMutation: UseMutationResult<SessionDetail, Error, { sessionId: string; turnId: string }, unknown>;
   sessionGuidanceMutation: UseMutationResult<
     SessionDetail,
@@ -480,6 +493,108 @@ export function useChatComposerTurnMutations({
     },
   });
 
+  const regenerateMutation = useMutation({
+    mutationFn: async (
+      {
+        sessionId,
+        messageId,
+        clientSubmissionId,
+        mentalModelEnabled,
+        runtimeStatusEnabled,
+        turnStatusTail,
+      }: RegenerateVariables,
+    ) =>
+      regenerateSessionMessage(sessionId, {
+        messageId,
+        clientSubmissionId,
+        mentalModelEnabled,
+        runtimeStatusEnabled,
+        turnStatusTail: turnStatusTail ?? loadTurnStatusTailConfig(sessionId),
+      }),
+    onMutate: async (variables) => {
+      const telemetry = startUserAction("session_regenerate", {
+        sessionId: variables.sessionId,
+        messageId: variables.messageId,
+        clientSubmissionId: variables.clientSubmissionId,
+      });
+      const sessionKey = queryKeys.session(variables.sessionId);
+      await queryClient.cancelQueries({ queryKey: sessionKey, exact: true });
+      const previousDetail = queryClient.getQueryData<SessionDetail>(sessionKey);
+      const createdAt = new Date().toISOString();
+      setActiveTurnLayersBySession((current) =>
+        setActiveTurnLayerForSession(
+          current,
+          variables.sessionId,
+          createOptimisticActiveTurnLayer({
+            sessionId: variables.sessionId,
+            turnId: optimisticTurnIdForSubmission("edit", variables.sessionId, createdAt),
+            clientSubmissionId: variables.clientSubmissionId,
+            updatedAt: createdAt,
+          }),
+        )
+      );
+      // Drop the stale assistant output immediately; snapshot for rollback.
+      queryClient.setQueryData<SessionDetail>(sessionKey, (detailState) =>
+        applyOptimisticRegenerate(detailState, { messageId: variables.messageId }),
+      );
+      updateSessionSummaryCaches(queryClient, (sessions) =>
+        markSessionSummaryRunning(sessions, variables.sessionId),
+      );
+      return { previousDetail, telemetry };
+    },
+    onSuccess: (nextDetail, variables, context) => {
+      context?.telemetry?.succeeded({
+        sessionId: variables.sessionId,
+        messageId: variables.messageId,
+        turnId: latestUserTurnId(nextDetail),
+      });
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [variables.sessionId]: "",
+      }));
+      syncSessionDetail(nextDetail);
+      const acceptedTurnId = latestUserTurnId(nextDetail);
+      setActiveTurnLayersBySession((current) => {
+        if (!acceptedTurnId || !isBusyPhase(nextDetail.currentPhase || nextDetail.status)) {
+          return setActiveTurnLayerForSession(current, variables.sessionId, undefined);
+        }
+        return setActiveTurnLayerForSession(
+          current,
+          variables.sessionId,
+          createOptimisticActiveTurnLayer({
+            sessionId: variables.sessionId,
+            turnId: acceptedTurnId,
+            clientSubmissionId: variables.clientSubmissionId,
+            updatedAt: nextDetail.updatedAt,
+          }),
+        );
+      });
+      void chatWorkspaceCache.afterSessionChanged();
+    },
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, {
+        sessionId: variables.sessionId,
+        messageId: variables.messageId,
+      });
+      const previousDetail = context && typeof context === "object" && "previousDetail" in context
+        ? (context as { previousDetail?: SessionDetail }).previousDetail
+        : undefined;
+      if (previousDetail) {
+        queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), previousDetail);
+      } else {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.session(variables.sessionId), exact: true });
+      }
+      setActiveTurnLayersBySession((current) =>
+        setActiveTurnLayerForSession(current, variables.sessionId, undefined)
+      );
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [variables.sessionId]: describeError(error, t("regenerateFailed")),
+      }));
+      void chatWorkspaceCache.afterDirectTurnFailed(variables.sessionId);
+    },
+  });
+
   const stopTurnMutation = useMutation({
     mutationFn: async ({ sessionId, turnId }: { sessionId: string; turnId: string }) =>
       stopSessionTurn(sessionId, turnId),
@@ -571,6 +686,7 @@ export function useChatComposerTurnMutations({
   return {
     submitTurnMutation,
     editResubmitMutation,
+    regenerateMutation,
     stopTurnMutation,
     sessionGuidanceMutation,
   };
@@ -627,6 +743,7 @@ export type UseChatComposerSubmitActionsResult = {
   handleFollowupQueueMove: (fromIndex: number, toIndex: number) => void;
   handleEditUserMessage: (message: ConversationMessage) => void;
   handleCancelEditMessage: () => void;
+  handleRegenerateAssistantMessage: (message: ConversationMessage) => void;
 };
 
 /**
@@ -638,6 +755,7 @@ export function useChatComposerSubmitActions({
   describeError,
   submitTurnMutation,
   editResubmitMutation,
+  regenerateMutation,
   stopTurnMutation,
   sessionGuidanceMutation,
   setSessionDrafts,
@@ -1276,6 +1394,45 @@ export function useChatComposerSubmitActions({
     setSessionReferenceAttachments,
   ]);
 
+  const handleRegenerateAssistantMessage = useCallback((message: ConversationMessage) => {
+    if (message.role !== "assistant" || !activeSessionId || sessionBusy) {
+      return;
+    }
+    const messages = detail?.messages ?? [];
+    const assistantIndex = messages.findIndex(
+      (item) => String(item.id || "").trim() === String(message.id || "").trim(),
+    );
+    if (assistantIndex <= 0) {
+      return;
+    }
+    let userMessage: ConversationMessage | undefined;
+    for (let index = assistantIndex - 1; index >= 0; index -= 1) {
+      if (messages[index].role === "user") {
+        userMessage = messages[index];
+        break;
+      }
+    }
+    if (!userMessage || userMessage.role !== "user") {
+      return;
+    }
+    regenerateMutation.mutate({
+      sessionId: activeSessionId,
+      messageId: userMessage.id,
+      clientSubmissionId: createClientSubmissionId(activeSessionId),
+      content: String(userMessage.content || ""),
+      mentalModelEnabled: mentalModelEnabledForNextTurn,
+      runtimeStatusEnabled: runtimeStatusEnabledForNextTurn,
+      turnStatusTail: loadTurnStatusTailConfig(activeSessionId),
+    });
+  }, [
+    activeSessionId,
+    detail,
+    mentalModelEnabledForNextTurn,
+    regenerateMutation,
+    runtimeStatusEnabledForNextTurn,
+    sessionBusy,
+  ]);
+
   const handleFollowupQueueUpdate = useCallback((id: string, text: string) => {
     if (!activeSessionId) {
       return;
@@ -1453,5 +1610,6 @@ export function useChatComposerSubmitActions({
     handleFollowupQueueMove,
     handleEditUserMessage,
     handleCancelEditMessage,
+    handleRegenerateAssistantMessage,
   };
 }
