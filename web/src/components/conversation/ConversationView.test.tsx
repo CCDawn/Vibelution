@@ -1464,7 +1464,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("最近控制信号");
   });
 
-  it("hides completed continue signals from the main conversation panel", () => {
+  it("hides continue signals from the main conversation panel", () => {
     const continueSignal: ChatNextStateSignalSummary = {
       signalId: "chat-signal-continue",
       sessionId: "session-1",
@@ -1480,7 +1480,7 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(shouldShowNextStateSignalInConversation(continueSignal, "ready")).toBe(false);
     expect(shouldShowNextStateSignalInConversation(continueSignal, "completed")).toBe(false);
-    expect(shouldShowNextStateSignalInConversation(continueSignal, "running")).toBe(true);
+    expect(shouldShowNextStateSignalInConversation(continueSignal, "running")).toBe(false);
 
     const html = renderConversation([], { nextStateSignals: [continueSignal] });
     expect(html).not.toContain("最近控制信号");

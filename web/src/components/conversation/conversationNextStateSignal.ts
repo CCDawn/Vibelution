@@ -81,7 +81,7 @@ export function shouldShowNextStateSignalInConversation(
   messages: ConversationMessage[] = [],
 ) {
   if (signal.kind === "user_continues") {
-    return isBusyConversationPhase(phase);
+    return false;
   }
   if (signalPrecedesLatestUserTurn(signal, messages)) {
     return false;
