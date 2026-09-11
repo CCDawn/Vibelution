@@ -12,6 +12,7 @@ import {
   ImagePlus,
   Link2,
   LoaderCircle,
+  MessageSquareText,
   Pencil,
   RefreshCw,
   Square,
@@ -353,6 +354,49 @@ function ThoughtScrollBody({
       data-thought-scroll-streaming={streaming ? "true" : undefined}
     >
       <pre className={styles.codexTranscriptReasoningText}>{text}</pre>
+    </div>
+  );
+}
+
+/**
+ * Progress narration body: clamped preview while settled, full scrollable text
+ * while live or expanded. No box chrome so it reads lighter than the thinking lane.
+ */
+function ProgressScrollBody({
+  text,
+  streaming,
+  clamped,
+}: {
+  text: string;
+  streaming: boolean;
+  clamped: boolean;
+}) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    if (!streaming || clamped) {
+      return;
+    }
+    const node = scrollRef.current;
+    if (!node) {
+      return;
+    }
+    node.scrollTop = node.scrollHeight;
+  }, [clamped, streaming, text]);
+  if (clamped) {
+    return (
+      <div className={styles.codexTranscriptProgressClamped} data-codex-progress-clamped="true">
+        {text}
+      </div>
+    );
+  }
+  return (
+    <div
+      ref={scrollRef}
+      className={styles.codexTranscriptProgressBody}
+      data-codex-progress-body="true"
+      data-codex-progress-streaming={streaming ? "true" : undefined}
+    >
+      <pre className={styles.codexTranscriptProgressText}>{text}</pre>
     </div>
   );
 }
@@ -2185,18 +2229,10 @@ export function ConversationView({
       if (!text || isNoFinalAnswerStatusContent(text) || isStreamingStatusPlaceholderContent(text)) {
         return null;
       }
-      // Commentary is user-visible progress; reasoning_summary remains the thinking lane.
+      // Commentary is user-facing progress narration: its own lighter lane,
+      // while reasoning_summary remains the collapsible thinking lane.
       if (cell.phase === "commentary") {
-        return renderCodexThoughtScrollCell(message.id, {
-          cellId: cell.id,
-          sectionId: reasoningExpansionSectionId(cell),
-          text,
-          status: cell.status,
-          tone: cell.tone,
-          title: lang === "zh" ? "进展" : "Progress",
-          phase: "commentary",
-          channel: cell.channel,
-        });
+        return renderCodexProgressCell(message.id, cell, text);
       }
       return (
         <section
@@ -2487,6 +2523,68 @@ export function ConversationView({
           </span>
         </VButton>
         {expanded ? <ThoughtScrollBody text={fullText} streaming={isLive} /> : null}
+      </section>
+    );
+  }
+
+  /**
+   * Progress narration lane (commentary): user-facing updates stay visible in
+   * chronological order. Live text streams open; settled text keeps a clamped
+   * preview with an expand toggle instead of collapsing into a one-line stub.
+   */
+  function renderCodexProgressCell(
+    messageId: string,
+    cell: CodexTranscriptCell,
+    text: string,
+  ) {
+    const sectionId = reasoningExpansionSectionId(cell);
+    const isLive = cell.status === "running" || cell.status === "pending";
+    const defaultExpanded = isLive;
+    const expanded = getExpansionState(messageId, sectionId, defaultExpanded);
+    const toneClassName = styles[`codexTranscriptCell_${cell.tone}` as keyof typeof styles] ?? "";
+    return (
+      <section
+        key={cell.id}
+        className={[
+          styles.codexTranscriptCell,
+          styles.codexTranscriptProgressCell,
+          toneClassName,
+        ].filter(Boolean).join(" ")}
+        data-codex-transcript-cell-kind={cell.kind}
+        data-codex-transcript-cell-status={cell.status}
+        data-codex-transcript-cell-tone={cell.tone}
+        data-codex-transcript-cell-channel={cell.channel || undefined}
+        data-codex-transcript-cell-phase={cell.phase ?? ""}
+        data-codex-progress-cell="true"
+        data-conversation-part-key={cell.id}
+        data-progress-section={sectionId}
+        data-progress-expanded={expanded ? "true" : "false"}
+        role={isLive ? "status" : undefined}
+        aria-live={isLive ? "polite" : undefined}
+      >
+        <VButton
+          type="button"
+          contentLayout="plain"
+          className={styles.codexTranscriptProgressHeader}
+          aria-expanded={expanded}
+          aria-label={expanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden")}
+          onClick={(event) => {
+            event.stopPropagation();
+            toggleSection(messageId, sectionId, defaultExpanded);
+          }}
+        >
+          <span className={styles.codexTranscriptCellIcon} aria-hidden="true">
+            {isLive
+              ? <LoaderCircle className={styles.statusSpinner} size={14} />
+              : <MessageSquareText size={14} />}
+          </span>
+          <span className={styles.codexTranscriptReasoningHeaderBody}>
+            <span className={styles.codexTranscriptReasoningTitleRow}>
+              <span className={styles.codexTranscriptCellTitle}>{lang === "zh" ? "进展" : "Progress"}</span>
+            </span>
+          </span>
+        </VButton>
+        <ProgressScrollBody text={text} streaming={isLive} clamped={!expanded} />
       </section>
     );
   }
