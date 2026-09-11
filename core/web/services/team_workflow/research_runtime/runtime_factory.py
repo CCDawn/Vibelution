@@ -172,6 +172,7 @@ class WorkflowRuntime:
         self._recover_dead_turn_knowledge_children_best_effort(limit=limit)
         self._recover_failed_knowledge_invocations_best_effort(limit=limit)
         self._recover_blocked_quote_anchor_extractions_best_effort(limit=limit)
+        self._heal_formal_lineage_stale_leaves_best_effort()
         self._reconcile_expired_task_bundles_best_effort()
         self._sweep_stuck_digest_works_best_effort()
         self._sweep_meetings_missing_digest_best_effort()
@@ -271,6 +272,33 @@ class WorkflowRuntime:
                 )
         except Exception:  # noqa: BLE001 - recovery must never break maintenance
             logger.exception("knowledge sideflow quote-anchor recovery sweep failed")
+
+    def _heal_formal_lineage_stale_leaves_best_effort(self) -> None:
+        """Archive stale CANCELLED leaves behind a formal lineage conflict.
+
+        A question left with more than one leaf run projects
+        ``formal_run_lineage_conflict`` (actionability=blocked, program
+        projection suppressed) and previously only escaped through the
+        frontend's 「归档分支」 offer, which is not always surfaced.  The
+        maintenance tick hosts the bounded archive sweep
+        (``sweep_archive_stale_formal_leaves``: CANCELLED stale leaves only,
+        newest leaf untouched, deterministic per-run idempotency key, ≤3 per
+        pass) with the same peek + never-raises discipline as the sibling
+        knowledge recoveries: any failure is swallowed after logging.
+        """
+        try:
+            from .formal_lineage_heal import sweep_archive_stale_formal_leaves
+
+            summary = sweep_archive_stale_formal_leaves()
+            if int(summary.get("archived") or 0) or int(summary.get("failed") or 0):
+                logger.info(
+                    "formal lineage heal archived %s stale leaf run(s), "
+                    "%s failed",
+                    summary.get("archived"),
+                    summary.get("failed"),
+                )
+        except Exception:  # noqa: BLE001 - recovery must never break maintenance
+            logger.exception("formal lineage stale-leaf archive sweep failed")
 
     def _reconcile_expired_task_bundles_best_effort(self) -> None:
         """Enforce task-bundle ``deadlineSeconds`` from the resident tick.

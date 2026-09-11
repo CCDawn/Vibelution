@@ -26,11 +26,15 @@ from typing import Any
 
 import pytest
 
+from core.research.workflow.ledger.records import RunRecord
 from core.web.services import team_service
 from core.web.services.team_workflow import (
     hypothesis_rounds as hrounds,
 )
 from core.web.services.team_workflow import meeting_rounds
+from core.web.services.team_workflow.research_runtime import (
+    formal_lineage_heal as heal,
+)
 from core.web.services.team_workflow.research_runtime import (
     hypothesis_first_chain as chain,
 )
@@ -4288,3 +4292,314 @@ def test_auto_repair_retries_failed_materialization_without_marker(
         if item["code"] == "hypothesis_first.auto_repair_claim_refs"
     ]
     assert failed_events and failed_events[-1]["outcome"] == "failed"
+
+
+# ---------------------------------------------------------------------------
+# formal lineage auto-heal: the maintenance sweep archives the stale CANCELLED
+# leaf behind a ``formal_run_lineage_conflict`` (the manual 「归档分支」 escape
+# hatch the frontend often never surfaces)
+
+
+def _leaf_run(
+    run_id: str,
+    status: str,
+    *,
+    updated_at_ms: int,
+    parent_run_id: str | None = None,
+    run_version: int = 5,
+    question_id: str = _QUESTION_ID,
+) -> RunRecord:
+    from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
+    from core.research.workflow.ledger.records import RunRecord
+
+    return RunRecord(
+        run_id=run_id,
+        team_id=_TEAM_ID,
+        workflow_id=CHALLENGE_CUP_WORKFLOW_ID,
+        workflow_version_id="wf-v1",
+        thread_id=f"thread-{run_id}",
+        project_id="proj-1",
+        question_id=question_id,
+        status=status,
+        run_version=run_version,
+        last_event_sequence=1,
+        input_snapshot_json="{}",
+        input_snapshot_hash="hash",
+        safety_limits_json="{}",
+        binding_snapshot_set_id="bs-1",
+        active_node_id=None,
+        parent_run_id=parent_run_id,
+        forked_from_checkpoint_id=None,
+        completion_kind=None,
+        terminal_reason=None,
+        blocked_problem_json=None,
+        created_at_ms=updated_at_ms - 1_000,
+        updated_at_ms=updated_at_ms,
+        completed_at_ms=None,
+    )
+
+
+class _HealStore:
+    def __init__(self, runs: list[RunRecord]) -> None:
+        self._runs = runs
+
+    def list_runs_for_team(
+        self, team_id: str, workflow_id: str
+    ) -> list[RunRecord]:
+        return [run for run in self._runs if run.team_id == team_id]
+
+    def get_run(self, run_id: str) -> RunRecord | None:
+        return next(
+            (run for run in self._runs if run.run_id == run_id), None
+        )
+
+
+class _HealCommandService:
+    def __init__(self, fail_run_ids: set[str] | None = None) -> None:
+        self.requests: list[Any] = []
+        self._fail_run_ids = fail_run_ids or set()
+
+    def submit(self, request: Any) -> Any:
+        self.requests.append(request)
+        if request.run_id in self._fail_run_ids:
+            raise RuntimeError("ledger exploded")
+        return SimpleNamespace(status="accepted", run_id=request.run_id)
+
+
+class _HealRuntime:
+    def __init__(
+        self,
+        store: _HealStore,
+        command_service: _HealCommandService,
+    ) -> None:
+        self.store = store
+        self.command_service = command_service
+
+
+def _heal_env(
+    monkeypatch: pytest.MonkeyPatch,
+    runs: list[RunRecord],
+    *,
+    fail_run_ids: set[str] | None = None,
+) -> tuple[list[dict[str, Any]], _HealRuntime]:
+    """Fake runtime + captured scene events; teams enumerated without disk."""
+    runtime = _HealRuntime(_HealStore(runs), _HealCommandService(fail_run_ids))
+    monkeypatch.setattr(chain, "_team_ids_with_chain_storage", lambda: [_TEAM_ID])
+    monkeypatch.setattr(
+        runtime_factory, "production_workflow_runtime", lambda: runtime
+    )
+    events: list[dict[str, Any]] = []
+
+    def _capture(
+        event_code: str,
+        *,
+        outcome: str,
+        fields: dict[str, Any] | None = None,
+        level: str = "info",
+    ) -> None:
+        events.append(
+            {
+                "code": event_code,
+                "outcome": outcome,
+                "fields": dict(fields or {}),
+                "level": level,
+            }
+        )
+
+    monkeypatch.setattr(chain, "_record_scene_event", _capture)
+    monkeypatch.setattr(heal, "_record_scene_event", _capture)
+    return events, runtime
+
+
+def _archive_run_ids(submitted: list[Any]) -> list[str]:
+    return [request.run_id for request in submitted]
+
+
+def test_sweep_archives_only_older_cancelled_leaf(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """两条 leaf：旧 CANCELLED + 新 SUCCEEDED → 只归档旧 cancelled leaf；
+    有 child 的 parent 不是 leaf，非 cancelled 的 stale leaf 不碰。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    events, runtime = _heal_env(
+        monkeypatch,
+        [
+            # The cancelled stale leaf is the older one (updatedAt first).
+            _leaf_run("run-stale-cancelled", "cancelled", updated_at_ms=1_000),
+            _leaf_run("run-current", "succeeded", updated_at_ms=9_000),
+            # A branched parent is never a leaf candidate; its child leaf is
+            # stale but SUCCEEDED — operator-review territory, not touched.
+            _leaf_run("run-parent", "failed", updated_at_ms=500),
+            _leaf_run(
+                "run-child",
+                "succeeded",
+                updated_at_ms=600,
+                parent_run_id="run-parent",
+            ),
+        ],
+    )
+
+    summary = heal.sweep_archive_stale_formal_leaves()
+
+    assert _archive_run_ids(runtime.command_service.requests) == [
+        "run-stale-cancelled"
+    ]
+    request = runtime.command_service.requests[0]
+    assert request.command.value == "archive_run"
+    assert request.team_id == _TEAM_ID
+    assert request.idempotency_key == (
+        "hf2:sweep-archive-stale-leaf:run-stale-cancelled"
+    )
+    assert request.payload == {"reason": "auto-heal formal run lineage conflict"}
+    assert request.expected_run_version == 5
+    assert summary["conflicts"] == 1
+    assert summary["archived"] == 1
+    assert summary["failed"] == 0
+    submitted_events = [
+        item
+        for item in events
+        if item["code"] == "hypothesis_first.stale_leaf_auto_archive"
+    ]
+    assert len(submitted_events) == 1
+    assert submitted_events[0]["outcome"] == "accepted"
+    assert submitted_events[0]["fields"]["runId"] == "run-stale-cancelled"
+    assert submitted_events[0]["fields"]["currentRunId"] == "run-current"
+
+
+def test_sweep_never_archives_newest_cancelled_or_non_cancelled_leaves(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """两条 leaf 都非 cancelled（blocked/running）→ 冲突照记但零命令；
+    cancelled 若是最新 leaf（current revision）同样不碰。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _events, runtime = _heal_env(
+        monkeypatch,
+        [
+            # Conflict A: both leaves non-cancelled.
+            _leaf_run("run-blocked", "blocked", updated_at_ms=1_000),
+            _leaf_run("run-running", "running", updated_at_ms=2_000),
+            # Conflict B (another question): the NEWEST leaf is CANCELLED —
+            # the current revision is never auto-archived, and the stale one
+            # is blocked, not cancelled, so nothing is submitted at all.
+            _leaf_run(
+                "run-old-blocked",
+                "blocked",
+                updated_at_ms=3_000,
+                question_id="SCI-097",
+            ),
+            _leaf_run(
+                "run-new-cancelled",
+                "cancelled",
+                updated_at_ms=9_000,
+                question_id="SCI-097",
+            ),
+        ],
+    )
+
+    summary = heal.sweep_archive_stale_formal_leaves()
+
+    assert runtime.command_service.requests == []
+    assert summary["conflicts"] == 2
+    assert summary["archived"] == 0
+    assert summary["skipped"] == 2  # run-blocked + run-old-blocked
+
+
+def test_sweep_ignores_already_archived_old_leaf(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """旧 leaf 已 archived → 投影口径下不构成 leaf，无冲突、零命令。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _events, runtime = _heal_env(
+        monkeypatch,
+        [
+            _leaf_run("run-archived-old", "archived", updated_at_ms=1_000),
+            _leaf_run("run-current", "succeeded", updated_at_ms=9_000),
+        ],
+    )
+
+    summary = heal.sweep_archive_stale_formal_leaves()
+
+    assert runtime.command_service.requests == []
+    assert summary["conflicts"] == 0
+    assert summary["archived"] == 0
+
+
+def test_sweep_caps_archives_per_pass_and_survives_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """默认 ≤3 次/pass：4 条 cancelled 旧 leaf 只归档最旧 3 条；submit 抛错
+    计 failed 不外抛，剩余预算照常处理后续 leaf。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    runs = [
+        _leaf_run("run-stale-1", "cancelled", updated_at_ms=1_000),
+        _leaf_run("run-stale-2", "cancelled", updated_at_ms=2_000),
+        _leaf_run("run-stale-3", "cancelled", updated_at_ms=3_000),
+        _leaf_run("run-stale-4", "cancelled", updated_at_ms=4_000),
+        _leaf_run("run-current", "running", updated_at_ms=9_000),
+    ]
+    commands = _HealCommandService(fail_run_ids={"run-stale-2"})
+    monkeypatch.setattr(chain, "_team_ids_with_chain_storage", lambda: [_TEAM_ID])
+    monkeypatch.setattr(
+        runtime_factory,
+        "production_workflow_runtime",
+        lambda: _HealRuntime(_HealStore(runs), commands),
+    )
+    monkeypatch.setattr(chain, "_record_scene_event", lambda *a, **kw: None)
+
+    summary = heal.sweep_archive_stale_formal_leaves()
+
+    # Oldest first: 1 accepted, 2 failed, 3 accepted → budget spent; 4 skipped.
+    assert _archive_run_ids(commands.requests) == [
+        "run-stale-1",
+        "run-stale-2",
+        "run-stale-3",
+    ]
+    assert summary["archived"] == 2
+    assert summary["failed"] == 1
+    assert summary["skipped"] == 1
+
+    # An explicit smaller bound is honoured too.
+    commands2 = _HealCommandService()
+    monkeypatch.setattr(
+        runtime_factory,
+        "production_workflow_runtime",
+        lambda: _HealRuntime(_HealStore(runs), commands2),
+    )
+    summary = heal.sweep_archive_stale_formal_leaves(limit=1)
+    assert _archive_run_ids(commands2.requests) == ["run-stale-1"]
+    assert summary["archived"] == 1
+    assert summary["skipped"] == 3
+
+
+def test_maintenance_tick_hosts_stale_leaf_archive_sweep(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """run_maintenance_once 承载 sweep；sweep 抛错被吞掉，不破坏维护循环。"""
+    _sweep_env(tmp_path, monkeypatch)
+    calls: list[dict[str, Any]] = []
+    state = {"boom": True}
+
+    def _sweep() -> dict[str, Any]:
+        calls.append({})
+        if state["boom"]:
+            raise RuntimeError("sweep exploded")
+        return {"archived": 1, "failed": 0}
+
+    monkeypatch.setattr(heal, "sweep_archive_stale_formal_leaves", _sweep)
+    runtime = build_workflow_runtime(
+        tmp_path / "ledger.sqlite3",
+        checkpoint_path=tmp_path / "ledger-checkpoints.sqlite",
+    )
+    try:
+        runtime.run_maintenance_once(limit=2)
+        assert len(calls) == 1  # raised but the loop survived
+        state["boom"] = False
+        runtime.run_maintenance_once(limit=2)
+        assert len(calls) == 2
+    finally:
+        runtime.close()
