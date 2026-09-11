@@ -281,8 +281,10 @@ import {
   clearSessionImageAttachments,
   clearSessionReferenceAttachments,
   readStoredMentalModelToggle,
+  readStoredPromptSuggestionToggle,
   readStoredRuntimeStatusToggle,
   startSessionReferenceDrag,
+  writeStoredPromptSuggestionToggle,
   type ComposerImageAttachment,
 } from "./chatComposerSubmitModel";
 import styles from "../ChatCodingRoute.styles";
@@ -611,6 +613,9 @@ export function ChatCodingRouteWorkbench() {
   const [runtimeStatusEnabledForNextTurn, setRuntimeStatusEnabledForNextTurn] = useState<boolean>(
     () => readStoredRuntimeStatusToggle() ?? true,
   );
+  // Per-session opt-in; the backend only holds the latest capture per session,
+  // so remember the operator choice per session instead of globally.
+  const [promptSuggestionEnabledBySession, setPromptSuggestionEnabledBySession] = useState<Record<string, boolean>>({});
   const [groupManageDialogOpen, setGroupManageDialogOpen] = useState(false);
   const {
     groupComposerOpen,
@@ -2255,6 +2260,19 @@ export function ChatCodingRouteWorkbench() {
     setRuntimeStatusEnabledForNextTurn,
     companionAgentId: companionTransportAgentId,
   });
+  const activePromptSuggestionEnabled = activeSessionId
+    ? promptSuggestionEnabledBySession[activeSessionId] ?? readStoredPromptSuggestionToggle(activeSessionId)
+    : false;
+  const handlePromptSuggestionEnabledChange = useCallback((enabled: boolean) => {
+    if (!activeSessionId) {
+      return;
+    }
+    writeStoredPromptSuggestionToggle(activeSessionId, enabled);
+    setPromptSuggestionEnabledBySession((current) => ({
+      ...current,
+      [activeSessionId]: enabled,
+    }));
+  }, [activeSessionId]);
   const sessionLlmOptions = sessionLlmOptionsQuery.data;
   const sessionLlmControl = activeSessionId && sessionLlmOptions?.model ? {
     model: sessionLlmOptions.model,
@@ -3071,9 +3089,11 @@ export function ChatCodingRouteWorkbench() {
                   sessionReferences={[]}
                   mentalModelEnabled={mentalModelEnabledForNextTurn}
                   runtimeStatusEnabled={runtimeStatusEnabledForNextTurn}
+                  promptSuggestionEnabled={activePromptSuggestionEnabled}
                   capabilityDisabled
                   onMentalModelEnabledChange={handleMentalModelEnabledChange}
                   onRuntimeStatusEnabledChange={handleRuntimeStatusEnabledChange}
+                  onPromptSuggestionEnabledChange={handlePromptSuggestionEnabledChange}
                   group={{
                     title: activeGroupRoom.title,
                     onManage: () => setGroupManageDialogOpen(true),
@@ -3151,6 +3171,7 @@ export function ChatCodingRouteWorkbench() {
                 companionMode: verifiedCompanionMode,
                 // Historical mental snapshots are conversation evidence; next-turn toggle only affects submit.
                 showMentalSnapshots: !verifiedCompanionMode,
+                promptSuggestionEnabled: activePromptSuggestionEnabled,
                 composerFocusSignal:
                   composerFocusRequest.sessionId === activeSessionId
                     ? composerFocusRequest.signal
@@ -3166,9 +3187,11 @@ export function ChatCodingRouteWorkbench() {
                     onAddSessionReference={handleAddComposerReference}
                     mentalModelEnabled={mentalModelEnabledForNextTurn}
                     runtimeStatusEnabled={runtimeStatusEnabledForNextTurn}
+                    promptSuggestionEnabled={activePromptSuggestionEnabled}
                     capabilityDisabled={!activeSessionId}
                     onMentalModelEnabledChange={handleMentalModelEnabledChange}
                     onRuntimeStatusEnabledChange={handleRuntimeStatusEnabledChange}
+                    onPromptSuggestionEnabledChange={handlePromptSuggestionEnabledChange}
                     directSession={agentDirectSessionMismatch && agentPrimaryDirectSessionId ? {
                       id: agentPrimaryDirectSessionId,
                       label: sessionBindingMismatchLine,
