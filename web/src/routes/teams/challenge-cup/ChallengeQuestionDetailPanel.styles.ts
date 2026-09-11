@@ -83,6 +83,11 @@ const styles: Record<string, string> = {
     "grid gap-3 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-card)] p-3",
   reviewSuccess:
     "rounded-[var(--vui-radius-panel-soft)] border border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] px-3 py-2 [font-size:var(--vui-font-2xs)] text-[var(--state-success)]",
+  exportSuccess:
+    "rounded-[var(--vui-radius-panel-soft)] border border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] px-3 py-2 [font-size:var(--vui-font-2xs)] text-[var(--state-success)]",
+  archiveRepair:
+    "grid gap-2 rounded-[var(--vui-radius-panel-soft)] border border-[color-mix(in_srgb,var(--state-warning)_34%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_8%,transparent)] p-3",
+  archiveRepairActions: "flex flex-wrap items-center gap-2",
   reviewSummary:
     "grid gap-2 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-card)] p-3 [&_p]:[font-size:var(--vui-font-2xs)]",
   gateList: "grid gap-1.5",

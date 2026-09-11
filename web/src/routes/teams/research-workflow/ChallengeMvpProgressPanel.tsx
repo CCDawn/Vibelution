@@ -45,6 +45,7 @@ import type { ExperimentPlanningStatusPayload } from "../experimentLoopModel";
 import { experimentPlanningStatusQueryKey } from "../experimentLoopModel";
 import { trackDevBatchRun, trackDevReadinessRun } from "../challengeCupTelemetry";
 import { ChallengeCatalogOverview } from "../challenge-cup/ChallengeCatalogOverview";
+import { ChallengeQuestionRegisterDialog } from "../challenge-cup/ChallengeQuestionRegisterDialog";
 import { ChallengeTokenUsageStrip } from "../challenge-cup/ChallengeTokenUsageStrip";
 import { isTokenUsageOverview } from "../challenge-cup/challengeTokenUsageModel";
 import { ChallengeSubmissionReadinessPanel } from "./ChallengeSubmissionReadinessPanel";
@@ -171,6 +172,7 @@ export function ChallengeMvpProgressPanel({
   const queryClient = useQueryClient();
   const [snapshotRefreshing, setSnapshotRefreshing] = useState(false);
   const [devControlsOpen, setDevControlsOpen] = useState(defaultDevControlsOpen);
+  const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
   const refreshDevControls = async () => {
     setSnapshotRefreshing(true);
     try {
@@ -334,6 +336,21 @@ export function ChallengeMvpProgressPanel({
       {zh ? "重试" : "Retry"}
     </VButton>
   );
+  const tokenRetry = (
+    <VButton type="button" variant="secondary" onClick={() => void tokenUsageQuery.refetch()}>
+      {zh ? "重试" : "Retry"}
+    </VButton>
+  );
+  const jumpTargets: Array<{ id: string; label: string }> = [
+    { id: "ch-cup-program", label: zh ? "比赛状态" : "Program" },
+    { id: "ch-cup-submission", label: zh ? "提交就绪" : "Submission" },
+    { id: "ch-cup-readiness", label: zh ? "目录就绪" : "Catalog gates" },
+    { id: "ch-cup-batches", label: zh ? "真实批次" : "Real batches" },
+    { id: "ch-cup-token", label: "Token" },
+    { id: "ch-cup-catalog", label: zh ? "题目目录" : "Question catalog" },
+    ...(devControlsEnabled ? [{ id: "ch-cup-dev", label: zh ? "开发态" : "DEV" }] : []),
+    { id: "ch-cup-results", label: zh ? "单题结果" : "Question results" },
+  ];
 
   return (
     <VSurface tone="panel" className={styles.root} data-vui="competition-program-progress-panel">
@@ -354,6 +371,19 @@ export function ChallengeMvpProgressPanel({
         </VButton>
       </div>
 
+      <nav className={styles.jumpNav} aria-label={zh ? "进度分区跳转" : "Progress section jump"}>
+        {jumpTargets.map((target) => (
+          <a
+            key={target.id}
+            className={styles.jumpLink}
+            href={`#${target.id}`}
+            data-testid={`ch-cup-jump-${target.id}`}
+          >
+            {target.label}
+          </a>
+        ))}
+      </nav>
+
       {experimentStatusQuery.isPending ? (
         <VStateSurface tone="loading" title={zh ? "读取比赛进度" : "Loading program progress"} className={styles.fill} />
       ) : experimentStatusQuery.isError ? (
@@ -361,7 +391,7 @@ export function ChallengeMvpProgressPanel({
           {experimentStatusQuery.error instanceof Error ? experimentStatusQuery.error.message : String(experimentStatusQuery.error)}
         </VStateSurface>
       ) : program ? (
-        <section className={styles.program} aria-label={zh ? "比赛总合同" : "Program contract"}>
+        <section id="ch-cup-program" className={`${styles.program} ${styles.anchor}`} aria-label={zh ? "比赛总合同" : "Program contract"}>
           <div className={styles.programHeader}>
             <span>{program.program.problemId} · {program.program.track}</span>
             <VStatusChip tone={program.completion.completed ? "accent" : "warning"}>
@@ -429,27 +459,43 @@ export function ChallengeMvpProgressPanel({
         </VEmptyState>
       )}
 
-      <ChallengeSubmissionReadinessPanel teamId={teamId} lang={lang} onOpenQuestion={onOpenQuestion} />
-      <ChallengeCatalogReadinessPanel teamId={teamId} lang={lang} />
-      <ChallengeRealBatchControlPanel teamId={teamId} lang={lang} />
-      {isTokenUsageOverview(tokenUsageQuery.data) ? (
-        <ChallengeTokenUsageStrip
+      <div id="ch-cup-submission" className={styles.anchor}>
+        <ChallengeSubmissionReadinessPanel teamId={teamId} lang={lang} onOpenQuestion={onOpenQuestion} />
+      </div>
+      <div id="ch-cup-readiness" className={styles.anchor}>
+        <ChallengeCatalogReadinessPanel teamId={teamId} lang={lang} />
+      </div>
+      <div id="ch-cup-batches" className={styles.anchor}>
+        <ChallengeRealBatchControlPanel teamId={teamId} lang={lang} />
+      </div>
+      <div id="ch-cup-token" className={styles.anchor}>
+        {tokenUsageQuery.isPending ? (
+          <VStateSurface tone="loading" title={zh ? "读取 token 消耗" : "Loading token usage"} className={styles.fill} />
+        ) : tokenUsageQuery.isError ? (
+          <VStateSurface tone="error" title={zh ? "token 消耗加载失败" : "Token usage failed"} className={styles.fill} actions={tokenRetry}>
+            {tokenUsageQuery.error instanceof Error ? tokenUsageQuery.error.message : String(tokenUsageQuery.error)}
+          </VStateSurface>
+        ) : isTokenUsageOverview(tokenUsageQuery.data) ? (
+          <ChallengeTokenUsageStrip
+            lang={lang}
+            title={zh ? "Program token 消耗" : "Program token usage"}
+            totalTokens={tokenUsageQuery.data.program.totalTokens}
+            callCount={tokenUsageQuery.data.program.callCount}
+            inputTokens={tokenUsageQuery.data.program.inputTokens}
+            outputTokens={tokenUsageQuery.data.program.outputTokens}
+          />
+        ) : null}
+      </div>
+      <div id="ch-cup-catalog" className={styles.anchor}>
+        <ChallengeCatalogOverview
+          teamId={teamId}
           lang={lang}
-          title={zh ? "Program token 消耗" : "Program token usage"}
-          totalTokens={tokenUsageQuery.data.program.totalTokens}
-          callCount={tokenUsageQuery.data.program.callCount}
-          inputTokens={tokenUsageQuery.data.program.inputTokens}
-          outputTokens={tokenUsageQuery.data.program.outputTokens}
+          onOpenQuestion={onOpenQuestion}
+          devBatchControlsEnabled={devControlsEnabled}
         />
-      ) : null}
-      <ChallengeCatalogOverview
-        teamId={teamId}
-        lang={lang}
-        onOpenQuestion={onOpenQuestion}
-        devBatchControlsEnabled={devControlsEnabled}
-      />
+      </div>
 
-      {devControlsEnabled ? <section className={styles.devControls} aria-label={zh ? "开发态就绪与批次控制" : "DEV readiness and batch control"}>
+      {devControlsEnabled ? <section id="ch-cup-dev" className={`${styles.devControls} ${styles.anchor}`} aria-label={zh ? "开发态就绪与批次控制" : "DEV readiness and batch control"}>
         <div className={styles.sectionHeader}>
           <strong>{zh ? "开发态就绪 / 批次 / 证据 locator" : "DEV readiness / batches / locators"}</strong>
           <div className={styles.sectionHeaderActions}>
@@ -734,11 +780,22 @@ export function ChallengeMvpProgressPanel({
         )}
       </section> : null}
 
-      <section className={styles.questionSection} aria-label={zh ? "单题结果" : "Question results"}>
+      <section id="ch-cup-results" className={`${styles.questionSection} ${styles.anchor}`} aria-label={zh ? "单题结果" : "Question results"}>
         <div className={styles.sectionHeader}>
           <strong>{zh ? "单题结果与审核" : "Question results"}</strong>
           <div className={styles.actions}>
             {summary ? <span>{zh ? `已验证 ${summary.validatedQuestionCount}` : `${summary.validatedQuestionCount} validated`}</span> : null}
+            {questionStatusQuery.isSuccess ? (
+              <VButton
+                type="button"
+                variant="secondary"
+                density="compact"
+                data-testid="challenge-question-register-entry"
+                onPress={() => setRegisterDialogOpen(true)}
+              >
+                {zh ? "登记题目 / 发布产出" : "Register question / publish"}
+              </VButton>
+            ) : null}
           </div>
         </div>
         {questionStatusQuery.isPending ? (
@@ -771,6 +828,19 @@ export function ChallengeMvpProgressPanel({
           </>
         )}
       </section>
+
+      {questionStatusQuery.isSuccess && registerDialogOpen ? (
+        <ChallengeQuestionRegisterDialog
+          teamId={teamId}
+          initialMode="register"
+          onClose={() => setRegisterDialogOpen(false)}
+          onOpenQuestion={(questionId) => {
+            setRegisterDialogOpen(false);
+            onOpenQuestion(questionId);
+          }}
+          lang={lang}
+        />
+      ) : null}
 
     </VSurface>
   );

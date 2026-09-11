@@ -65,6 +65,12 @@ describe("ChallengeQuestionDetailPanel archive export", () => {
     // The archive stays free of the acceptance more-actions surface.
     expect(markup).not.toContain("更多操作");
   });
+
+  it("confirms a finished artifact-page export instead of resetting silently", () => {
+    expect(detailPanelSource).toContain("question-archive-export-success");
+    expect(detailPanelSource).toContain("archiveExportResult");
+    expect(detailPanelSource).toContain("roundsAvailable");
+  });
 });
 
 describe("ChallengeQuestionDetailPanel reset entry", () => {
@@ -574,5 +580,46 @@ describe("ChallengeQuestionDetailPanel repair entries", () => {
 
   it("hosts the repair entries through the shared sanctioned repair actions", () => {
     expect(detailPanelSource).toContain("ChallengeQuestionRepairActions");
+  });
+
+  it("reveals the sanctioned repairs behind the archive warning banner on request", () => {
+    const base = detail();
+    const failed: ChallengeQuestionRunDetailPayload = {
+      ...base,
+      record: { ...base.record, validation: { citationValidation: "failed", officialModelCall: false } },
+    };
+    const markup = renderPanel(
+      <ChallengeQuestionDetailPanel
+        requestedQuestionId="SCI-096"
+        detail={failed}
+        isLoading={false}
+        readOnlyArchive
+        onClose={() => undefined}
+      />,
+    );
+    expect(markup).toContain('data-testid="question-archive-repair-banner"');
+    expect(markup).toContain('data-testid="question-archive-repair-toggle"');
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).toContain("去修复");
+    expect(markup).not.toContain('data-testid="question-archive-repair-actions"');
+    expect(markup).not.toContain('data-testid="challenge-question-repair-registration"');
+
+    const proven: ChallengeQuestionRunDetailPayload = {
+      ...base,
+      record: { ...base.record, validation: { citationValidation: "passed", officialModelCall: true } },
+    };
+    const provenMarkup = renderPanel(
+      <ChallengeQuestionDetailPanel
+        requestedQuestionId="SCI-096"
+        detail={proven}
+        isLoading={false}
+        readOnlyArchive
+        onClose={() => undefined}
+      />,
+    );
+    expect(provenMarkup).not.toContain('data-testid="question-archive-repair-banner"');
+
+    const nonArchiveMarkup = renderWithValidation({ citationValidation: "failed", officialModelCall: false });
+    expect(nonArchiveMarkup).not.toContain('data-testid="question-archive-repair-banner"');
   });
 });

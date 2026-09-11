@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 type QueryState = {
   isPending: boolean;
   isError: boolean;
+  isSuccess: boolean;
   error: Error | null;
   data: unknown;
   refetch: () => void;
@@ -27,6 +28,7 @@ const questionQueryState = vi.hoisted((): { current: QueryState } => ({
   current: {
     isPending: false,
     isError: false,
+    isSuccess: false,
     error: null,
     data: undefined,
     refetch: () => {},
@@ -37,6 +39,7 @@ const experimentQueryState = vi.hoisted((): { current: QueryState } => ({
   current: {
     isPending: false,
     isError: false,
+    isSuccess: false,
     error: null,
     data: undefined,
     refetch: () => {},
@@ -47,6 +50,7 @@ const devControlsQueryState = vi.hoisted((): { current: QueryState } => ({
   current: {
     isPending: false,
     isError: false,
+    isSuccess: false,
     error: null,
     data: undefined,
     refetch: () => {},
@@ -57,6 +61,7 @@ const submissionReadinessQueryState = vi.hoisted((): { current: QueryState } => 
   current: {
     isPending: false,
     isError: false,
+    isSuccess: false,
     error: null,
     data: undefined,
     refetch: () => {},
@@ -67,6 +72,7 @@ const catalogOverviewQueryState = vi.hoisted((): { current: QueryState } => ({
   current: {
     isPending: false,
     isError: false,
+    isSuccess: false,
     error: null,
     data: undefined,
     refetch: () => {},
@@ -77,6 +83,7 @@ const tokenUsageQueryState = vi.hoisted((): { current: QueryState } => ({
   current: {
     isPending: false,
     isError: false,
+    isSuccess: false,
     error: null,
     data: undefined,
     refetch: () => {},
@@ -164,6 +171,7 @@ function setQuestionData(data: unknown) {
   Object.assign(questionQueryState.current, {
     isPending: false,
     isError: false,
+    isSuccess: true,
     error: null,
     data,
     refetch: () => {},
@@ -532,6 +540,7 @@ describe("ChallengeMvpProgressPanel", () => {
       Object.assign(state, {
         isPending: false,
         isError: false,
+        isSuccess: false,
         error: null,
         data: undefined,
         refetch: () => {},
@@ -639,14 +648,81 @@ describe("ChallengeMvpProgressPanel", () => {
     expect(markup).toContain("暂无已验证题目");
   });
 
-  it("fails closed without a register or publish entry", () => {
+  it("surfaces the register/publish entry only after the question status loads", () => {
+    setMainData(emptyMainData());
+    setDevControls(devSnapshot());
+    let markup = renderToStaticMarkup(
+      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
+    );
+    expect(markup).toContain("登记题目 / 发布产出");
+    expect(panelSource).toContain("ChallengeQuestionRegisterDialog");
+
+    Object.assign(questionQueryState.current, {
+      isPending: true,
+      isError: false,
+      isSuccess: false,
+      error: null,
+      data: undefined,
+      refetch: vi.fn(),
+    });
+    markup = renderToStaticMarkup(
+      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
+    );
+    expect(markup).not.toContain("登记题目 / 发布产出");
+
+    Object.assign(questionQueryState.current, {
+      isPending: false,
+      isError: true,
+      isSuccess: false,
+      error: new Error("question status unavailable"),
+      data: undefined,
+      refetch: vi.fn(),
+    });
+    markup = renderToStaticMarkup(
+      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
+    );
+    expect(markup).not.toContain("登记题目 / 发布产出");
+  });
+
+  it("renders pending and error states for program token usage instead of hiding them", () => {
+    setMainData(emptyMainData());
+    setDevControls(devSnapshot());
+    Object.assign(tokenUsageQueryState.current, {
+      isPending: true,
+      isError: false,
+      error: null,
+      data: undefined,
+      refetch: vi.fn(),
+    });
+    let markup = renderToStaticMarkup(
+      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
+    );
+    expect(markup).toContain("读取 token 消耗");
+
+    Object.assign(tokenUsageQueryState.current, {
+      isPending: false,
+      isError: true,
+      error: new Error("token usage unavailable"),
+      data: undefined,
+      refetch: vi.fn(),
+    });
+    markup = renderToStaticMarkup(
+      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
+    );
+    expect(markup).toContain("token 消耗加载失败");
+    expect(markup).toContain("token usage unavailable");
+  });
+
+  it("links the jump nav to every rendered progress section", () => {
     setMainData(emptyMainData());
     setDevControls(devSnapshot());
     const markup = renderToStaticMarkup(
       <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
     );
-    expect(markup).not.toContain("登记 / 发布题目产出");
-    expect(panelSource).not.toContain("ChallengeQuestionRegisterDialog");
+    for (const id of ["program", "submission", "readiness", "batches", "token", "catalog", "dev", "results"]) {
+      expect(markup).toContain(`data-testid="ch-cup-jump-ch-cup-${id}"`);
+      expect(markup).toContain(`id="ch-cup-${id}"`);
+    }
   });
 
   it("surfaces a total load error with a retry action", () => {
@@ -836,7 +912,7 @@ describe("ChallengeMvpProgressPanel", () => {
     expect(markup).not.toContain("运行 DEV readiness");
     expect(panelSource).toContain("import.meta.env.DEV");
     expect(panelSource).toContain("fetchChallengeCupDevControlSnapshot(teamId)");
-    expect(panelSource).toContain('<section className={styles.devControls}');
+    expect(panelSource).toContain('{devControlsEnabled ? <section id="ch-cup-dev"');
     expect(panelSource).toContain('import challengeMvpProgressPanelContract from "./ChallengeMvpProgressPanel.contract.json"');
     expect(panelSource).toContain("data-dev-controls={devMarkers.readiness}");
     expect(panelSource).toContain("data-dev-controls={planId}");
