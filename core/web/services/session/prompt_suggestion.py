@@ -104,6 +104,18 @@ class PromptSuggestionError(RuntimeError):
     """Raised when the suggestion service cannot process the request."""
 
 
+def is_user_authored_source(source: str) -> bool:
+    """True when a turn's user message came from the user, not automation.
+
+    Session submits resolve user messages to ``raw_dialogue`` /
+    ``raw_meaningful`` / ``raw_continue`` / ``raw_confirmation`` (plus the
+    attachment/reference variants), while automated traffic uses sources such
+    as ``agent_inbox`` or ``proactive_plugin``.
+    """
+
+    return str(source or "").strip().casefold().startswith("raw")
+
+
 def _coerce_text(value: Any) -> str:
     if value is None:
         return ""
@@ -412,6 +424,7 @@ __all__ = [
     "clean_prompt_suggestion",
     "clear_prompt_suggestion_capture",
     "generate_prompt_suggestion",
+    "is_user_authored_source",
     "register_prompt_suggestion_capture",
     "suggestion_suppression_reason",
 ]

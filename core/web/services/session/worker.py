@@ -2507,21 +2507,21 @@ def _run_session_continuation_loop(
             prompt_cache_partition=prompt_cache_partition,
             llm_model_id=llm_model_id,
         )
-        if normalized_user_message_source == "raw":
-            try:
-                from core.web.services.session import prompt_suggestion as prompt_suggestion_service
+        try:
+            from core.web.services.session import prompt_suggestion as prompt_suggestion_service
 
+            if prompt_suggestion_service.is_user_authored_source(normalized_user_message_source):
                 prompt_suggestion_service.register_prompt_suggestion_capture(
                     session_id=session_id,
                     turn_id=canonical_turn_id,
                     capture=suggestion_capture,
                     reply=s._visible_reply_candidate(result) if isinstance(result, dict) else "",
                 )
-            except Exception as exc:
-                s._debug_logger.warning(
-                    f"prompt suggestion capture registration failed: {type(exc).__name__}: {exc}",
-                    tag="SUGGEST",
-                )
+        except Exception as exc:
+            s._debug_logger.warning(
+                f"prompt suggestion capture registration failed: {type(exc).__name__}: {exc}",
+                tag="SUGGEST",
+            )
         llm_elapsed_ms = s._elapsed_ms(llm_started_at)
         return_stop_reason = s._get_turn_control_stop_reason(turn_control) or s._get_session_stop_reason(session_id)
         if return_stop_reason:
