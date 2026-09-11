@@ -3259,6 +3259,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.railActionButton).toContain("!border-0");
     expect(routeStyles.railActionButton).toContain("!bg-transparent");
     expect(routeStyles.conversationIndexPanelBody).toContain("!overflow-hidden");
+    expect(routeStyles.conversationIndexPanelBody).toContain("!pr-0");
+    expect(routeStyles.conversationIndexPanelBody).toContain("![scrollbar-gutter:auto]");
     expect(routeStyles.conversationIndexLayout).toContain("grid-rows-[minmax(0,1fr)_auto]");
     expect(routeStyles.conversationIndexScrollRegion).toContain("overflow-y-auto");
     expect(routeAndIndexRailSource).toContain("styles.conversationIndexPanelBody");
