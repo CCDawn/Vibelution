@@ -6634,6 +6634,13 @@ def test_v2_command_route_maps_idempotency_conflict_to_409(
         expected_input_digest="digest-a",
         actual_input_digest="digest-b",
     )
+    # SCI-049: record_selection enters through the async gate; both seams map
+    # the conflict through the same route except-clause.
+    monkeypatch.setattr(
+        hypothesis_first_routes.hypothesis_first_chain,
+        "submit_v2_command_async",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(conflict),
+    )
     monkeypatch.setattr(
         hypothesis_first_routes.hypothesis_first_chain,
         "execute_v2_command",
@@ -6783,6 +6790,13 @@ def test_v2_command_route_maps_stale_version_to_409(
         expected="hf2-action:stale:old",
         actual="hf2-action:actual:new",
         snapshot_path="/teams/team-1/workflow-orchestration/hypothesis-first/chain/state-v2?questionId=SCI-001",
+    )
+    # SCI-049: open_generation enters through the async gate; both seams map
+    # the conflict through the same route except-clause.
+    monkeypatch.setattr(
+        hypothesis_first_routes.hypothesis_first_chain,
+        "submit_v2_command_async",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(conflict),
     )
     monkeypatch.setattr(
         hypothesis_first_routes.hypothesis_first_chain,

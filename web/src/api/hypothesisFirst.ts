@@ -354,6 +354,37 @@ export type HypothesisFirstCommandExecutionResponse = {
   idempotencyKey: string;
   acceptedStateVersion: string;
   result: unknown;
+  /** SCI-049: present when the command was accepted for background execution. */
+  status?: "accepted" | "executed" | "reused";
+  /** SCI-049: poll target while `status === "accepted"`. */
+  commandAttemptId?: string;
+};
+
+export type HypothesisFirstCommandAttemptStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed";
+
+/** Read model of `GET .../chain/command-attempts/{attemptId}` (SCI-049). */
+export type HypothesisFirstCommandAttempt = {
+  schemaVersion: number;
+  contract: string;
+  teamId: string;
+  attemptId: string;
+  questionId: string;
+  workflowRunId?: string;
+  command: string;
+  actionId: string;
+  idempotencyKey: string;
+  acceptedStateVersion?: string;
+  status: HypothesisFirstCommandAttemptStatus;
+  createdAt: string;
+  updatedAt: string;
+  /** Present when `status === "succeeded"`: the original sync response body. */
+  result?: unknown;
+  /** Present when `status === "failed"`: the original domain error. */
+  error?: { code?: string; message?: string; statusCode?: number };
 };
 
 export function isHypothesisFirstCommandStateConflict(error: unknown): boolean {
@@ -381,6 +412,89 @@ export function executeHypothesisFirstCommand<C extends ActionCommand>(
       payload: action.payload,
       ...(input === undefined ? {} : { input }),
     },
+  ).then((response) => awaitAcceptedCommandCompletion(teamId, response));
+}
+
+// ---------------------------------------------------------------------------
+// Async command window (SCI-049)
+// ---------------------------------------------------------------------------
+
+const COMMAND_ATTEMPT_POLL_INTERVAL_MS = 1_500;
+// The backend command window is LLM-bounded (meeting close chains, digest
+// drafts) and routinely runs minutes; the poll cap only stops a wedged UI
+// from waiting forever — the attempt itself keeps running server-side.
+const COMMAND_ATTEMPT_POLL_TIMEOUT_MS = 10 * 60_000;
+
+/** Read one async command attempt's delivery status (SCI-049). */
+export function fetchHypothesisFirstCommandAttempt(
+  teamId: string,
+  attemptId: string,
+  options?: { signal?: AbortSignal },
+): Promise<HypothesisFirstCommandAttempt> {
+  return fetchJson<HypothesisFirstCommandAttempt>(
+    `${teamPrefix(teamId)}/hypothesis-first/chain/command-attempts/${encodeURIComponent(attemptId)}`,
+    { signal: options?.signal },
+  );
+}
+
+function isAcceptedCommandResponse(
+  response: HypothesisFirstCommandExecutionResponse,
+): boolean {
+  return response.status === "accepted" && Boolean(response.commandAttemptId);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Resolve an accepted command into its terminal envelope (Temporal-style
+ * start + poll behind the one call the components already make): succeeded
+ * attempts resolve with the exact `result` the synchronous execution used to
+ * return, failed attempts reject with the original domain error shape
+ * (status/code carried so `isFetchJsonHttpError` classifiers keep working).
+ */
+async function awaitAcceptedCommandCompletion(
+  teamId: string,
+  response: HypothesisFirstCommandExecutionResponse,
+): Promise<HypothesisFirstCommandExecutionResponse> {
+  if (!isAcceptedCommandResponse(response)) return response;
+  const attemptId = String(response.commandAttemptId);
+  const deadline = Date.now() + COMMAND_ATTEMPT_POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await sleep(COMMAND_ATTEMPT_POLL_INTERVAL_MS);
+    let attempt: HypothesisFirstCommandAttempt;
+    try {
+      attempt = await fetchHypothesisFirstCommandAttempt(teamId, attemptId);
+    } catch {
+      // A transient poll failure must not kill the command wait; the next
+      // tick retries. Only the deadline ends the loop.
+      if (Date.now() >= deadline) break;
+      continue;
+    }
+    if (attempt.status === "succeeded") {
+      return {
+        ...response,
+        status: "executed",
+        result: attempt.result ?? {},
+      };
+    }
+    if (attempt.status === "failed") {
+      const detail = attempt.error ?? {};
+      const message = detail.message || "后台命令执行失败";
+      const error = new Error(message) as Error & {
+        status?: number;
+        code?: string;
+        commandAttemptId?: string;
+      };
+      error.status = detail.statusCode && detail.statusCode > 0 ? detail.statusCode : 422;
+      error.code = detail.code || "command_attempt_failed";
+      error.commandAttemptId = attemptId;
+      throw error;
+    }
+  }
+  throw new Error(
+    `后台命令仍在执行，请稍后在面板中查看结果（${attemptId}）。`,
   );
 }
 

@@ -118,6 +118,149 @@ describe("hypothesis-first API", () => {
     expect(apiSource).toContain("/hypothesis-first/chain/state");
     expect(apiSource).toContain("/hypothesis-first/chain/state-v2");
     expect(apiSource).toContain("/hypothesis-first/chain/commands");
+    // SCI-049 async command window transports.
+    expect(apiSource).toContain("export function fetchHypothesisFirstCommandAttempt");
+    expect(apiSource).toContain("/hypothesis-first/chain/command-attempts/");
+  });
+
+  it("polls an accepted command attempt to its terminal envelope (SCI-049)", async () => {
+    vi.useFakeTimers();
+    const action = {
+      kind: "command",
+      command: "record_selection",
+      actionId: "action:record-selection",
+      idempotencyKey: "idem:record-selection",
+      expectedStateVersion: "state-1",
+      payload: {
+        questionId: "SCI-002",
+        generationAttemptId: "generation-1",
+      },
+    } as never;
+    const responses: Array<() => Response> = [
+      () => Response.json({
+        schemaVersion: 2,
+        teamId: "team-1",
+        questionId: "SCI-002",
+        command: "record_selection",
+        actionId: "action:record-selection",
+        idempotencyKey: "idem:record-selection",
+        acceptedStateVersion: "state-1",
+        status: "accepted",
+        commandAttemptId: "hf2-attempt-1",
+      }),
+      () => Response.json({
+        schemaVersion: 1,
+        contract: "hypothesis-first-command-attempt/v1",
+        teamId: "team-1",
+        attemptId: "hf2-attempt-1",
+        questionId: "SCI-002",
+        command: "record_selection",
+        actionId: "action:record-selection",
+        idempotencyKey: "idem:record-selection",
+        status: "running",
+      }),
+      () => Response.json({
+        schemaVersion: 1,
+        contract: "hypothesis-first-command-attempt/v1",
+        teamId: "team-1",
+        attemptId: "hf2-attempt-1",
+        questionId: "SCI-002",
+        command: "record_selection",
+        actionId: "action:record-selection",
+        idempotencyKey: "idem:record-selection",
+        status: "succeeded",
+        result: { selectionId: "hsel-1" },
+      }),
+    ];
+    const fetchMock = vi.fn(async () => {
+      const next = responses.shift();
+      return next ? next() : new Response("{}", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    seedControlTokenForTests();
+    try {
+      const pending = executeHypothesisFirstCommand("team-1", "SCI-002", action, { candidateIds: ["candidate-1"] });
+      const settled = vi.fn();
+      pending.then(settled, settled);
+      // The accepted POST resolves only after the attempt reaches a terminal
+      // status through the poll endpoint.
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(settled).toHaveBeenCalledTimes(0);
+      await vi.advanceTimersByTimeAsync(5_000);
+      const [resolution] = settled.mock.calls[0];
+      expect(resolution).toEqual(
+        expect.objectContaining({ status: "executed", result: { selectionId: "hsel-1" } }),
+      );
+      const attemptUrls = fetchMock.mock.calls.map(([input]) => String(input))
+        .filter((url) => url.includes("/chain/command-attempts/hf2-attempt-1"));
+      expect(attemptUrls.length).toBeGreaterThanOrEqual(2);
+      await expect(pending).resolves.toEqual(
+        expect.objectContaining({ status: "executed", result: { selectionId: "hsel-1" } }),
+      );
+    } finally {
+      vi.useRealTimers();
+      clearControlToken();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("rejects with the stored domain error when the attempt fails (SCI-049)", async () => {
+    vi.useFakeTimers();
+    const action = {
+      kind: "command",
+      command: "approve_summary",
+      actionId: "action:approve-summary:hyp-a",
+      idempotencyKey: "idem:approve-summary",
+      expectedStateVersion: "state-1",
+      payload: { meetingRoundId: "meeting-1" },
+    } as never;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({
+        schemaVersion: 2,
+        teamId: "team-1",
+        questionId: "SCI-002",
+        command: "approve_summary",
+        actionId: "action:approve-summary:hyp-a",
+        idempotencyKey: "idem:approve-summary",
+        acceptedStateVersion: "state-1",
+        status: "accepted",
+        commandAttemptId: "hf2-attempt-2",
+      }))
+      .mockResolvedValue(Response.json({
+        schemaVersion: 1,
+        contract: "hypothesis-first-command-attempt/v1",
+        teamId: "team-1",
+        attemptId: "hf2-attempt-2",
+        questionId: "SCI-002",
+        command: "approve_summary",
+        actionId: "action:approve-summary:hyp-a",
+        idempotencyKey: "idem:approve-summary",
+        status: "failed",
+        error: {
+          code: "state_version_conflict",
+          message: "流程状态已更新，请刷新当前题目后重新确认。",
+          statusCode: 409,
+        },
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    seedControlTokenForTests();
+    try {
+      const pending = executeHypothesisFirstCommand("team-1", "SCI-002", action, { decision: "accepted" });
+      const captured: unknown[] = [];
+      pending.catch((error) => captured.push(error));
+      await vi.advanceTimersByTimeAsync(5_000);
+      const error = captured[0] as Error & { status?: number; code?: string };
+      expect(error).toBeInstanceOf(Error);
+      expect(error.status).toBe(409);
+      expect(error.code).toBe("state_version_conflict");
+      // The domain error shape must stay classifier-compatible so panels can
+      // render the state-conflict copy instead of a generic failure.
+      await expect(pending).rejects.toMatchObject({ code: "state_version_conflict", status: 409 });
+    } finally {
+      vi.useRealTimers();
+      clearControlToken();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("publishes typed DTOs for the flow records", () => {

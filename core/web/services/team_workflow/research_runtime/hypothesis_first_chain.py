@@ -455,6 +455,27 @@ class IdempotencyConflictError(HypothesisFirstChainError):
         self.actual = actual_input_digest
 
 
+class CommandAttemptInProgressError(HypothesisFirstChainError):
+    """Another long command is still executing in the background.
+
+    With the async command window, a second distinct command for the same
+    question can no longer queue behind a 60-150s mutation on the HTTP
+    thread; it is rejected immediately with a stable 409 code so the client
+    can wait for the running attempt (or its own poll) instead of hanging.
+    """
+
+    code = "command_attempt_in_progress"
+    status_code = 409
+
+    def __init__(self, *, question_id: str, command: str, action_id: str) -> None:
+        super().__init__(
+            "上一条命令仍在后台执行，请等待其完成后再提交新命令。"
+        )
+        self.question_id = str(question_id or "")
+        self.command = str(command or "")
+        self.action_id = str(action_id or "")
+
+
 class FormalCommandRejectedError(HypothesisFirstChainError):
     """A formal runtime command was rejected with a stable client-facing reason.
 
@@ -8283,6 +8304,241 @@ def execute_v2_command(
         },
     )
     return result
+
+
+def submit_v2_command_async(
+    team_id: str,
+    request: Mapping[str, Any],
+    *,
+    question_id: str = "",
+    workflow_run_id: str = "",
+    _actor: str = _OPERATOR_AGENT_ID,
+) -> dict[str, Any] | None:
+    """Accept-and-queue one long V2 command; ``None`` means "not async".
+
+    SCI-049 contract: the three long paths (``open_generation`` /
+    ``retry_generation``, ``record_selection``, ``approve_summary``) used to
+    hold the HTTP worker for 60-150s.  This gate validates and authorizes the
+    command under the same per-question scope lock, persists a queued attempt,
+    and returns an ``accepted`` envelope carrying the ``commandAttemptId``
+    within milliseconds; the real command body is executed by
+    :func:`hypothesis_command_attempts.submit_execution`, which re-enters
+    :func:`_execute_v2_command_impl` (full scope-lock re-authorization + CAS +
+    idempotent owning mutation).  Anything else — including any command whose
+    actionId inference misses — returns ``None`` and the caller falls back to
+    the synchronous :func:`execute_v2_command`.
+
+    Duplicate submits of the same idempotency key are deduplicated against the
+    attempt ledger: live attempts replay the same ``accepted`` envelope,
+    succeeded attempts replay the stored response verbatim, and a failed
+    attempt mints a fresh attempt so the operator can retry with the same key
+    (the owning services stay the durable replay authority).
+    """
+
+    envelope = dict(request) if isinstance(request, Mapping) else {}
+    action_id = str(envelope.get("actionId") or "").strip()
+    idempotency_key = str(envelope.get("idempotencyKey") or "").strip()
+    if not action_id or not idempotency_key:
+        return None
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_command_attempts as attempts,
+    )
+
+    command = attempts.infer_async_command(action_id, str(envelope.get("command") or ""))
+    if not command:
+        return None
+    payload = envelope.get("payload")
+    payload = dict(payload) if isinstance(payload, Mapping) else {}
+    expected = str(envelope.get("expectedStateVersion") or "").strip()
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
+
+    from core.web.services.team_service import assert_team_exists
+
+    normalized_team_id = assert_team_exists(team_id)
+    normalized_question_id = _command_question_id(
+        normalized_team_id,
+        command,
+        payload,
+        question_id=question_id,
+    )
+    identity = attempts._attempt_identity(
+        team_id=normalized_team_id,
+        question_id=normalized_question_id,
+        action_id=action_id,
+        idempotency_key=idempotency_key,
+        workflow_run_id=normalized_workflow_run_id,
+    )
+
+    def _accepted(existing: Mapping[str, Any]) -> dict[str, Any]:
+        return attempts.accepted_envelope(
+            existing,
+            team_id=normalized_team_id,
+            question_id=normalized_question_id,
+            workflow_run_id=normalized_workflow_run_id,
+        )
+
+    # Cheap pre-lock dedup: the common double-click/retry replay must never
+    # queue behind the scope lock that the running attempt holds for minutes.
+    latest = attempts.find_latest_attempt(normalized_team_id, identity)
+    if latest is not None:
+        status = str(latest.get("status") or "")
+        if status == attempts.STATUS_SUCCEEDED:
+            return attempts.stored_response_envelope(latest)
+        if status in attempts._ACTIVE_STATUSES:
+            return _accepted(latest)
+    active_other = attempts.find_active_attempt_for_question(
+        normalized_team_id,
+        normalized_question_id,
+    )
+    if active_other is not None:
+        # A different live command owns this question's scope lock; rejecting
+        # immediately beats queueing the HTTP thread behind it for minutes.
+        raise CommandAttemptInProgressError(
+            question_id=normalized_question_id,
+            command=str(active_other.get("command") or ""),
+            action_id=str(active_other.get("actionId") or ""),
+        )
+
+    def _authorize_locked() -> dict[str, Any]:
+        """Re-authorize inside the scope lock; returns the queued attempt."""
+
+        nonlocal command
+        snapshot = assert_expected_state_version(
+            normalized_team_id,
+            normalized_question_id,
+            expected,
+            workflow_run_id=normalized_workflow_run_id,
+        )
+        if not command:
+            matching_actions = [
+                item
+                for item in list(snapshot.get("allowedActions") or [])
+                if isinstance(item, Mapping)
+                and item.get("kind") == "command"
+                and str(item.get("actionId") or "") == action_id
+                and dict(item.get("payload") or {}) == payload
+            ]
+            command = (
+                str(matching_actions[0].get("command") or "")
+                if matching_actions
+                else ""
+            )
+        if command not in attempts.ASYNC_COMMANDS:
+            # Inference drift: let the caller execute this short command
+            # synchronously instead of accepting an async envelope for it.
+            return {}
+        action = _find_allowed_command(
+            snapshot,
+            action_id=action_id,
+            command=command,
+            payload=payload,
+        )
+        if str(action.get("idempotencyKey") or "") != idempotency_key:
+            raise HypothesisFirstChainError(
+                "idempotencyKey does not match the server-authorized action"
+            )
+        # Authoritative dedup after the lock: a concurrent gate for the same
+        # key may have registered while this caller waited.
+        latest = attempts.find_latest_attempt(normalized_team_id, identity)
+        if latest is not None:
+            status = str(latest.get("status") or "")
+            if status == attempts.STATUS_SUCCEEDED:
+                return {"replay": attempts.stored_response_envelope(latest)}
+            if status in attempts._ACTIVE_STATUSES:
+                return {"accepted": _accepted(latest)}
+        active_other = attempts.find_active_attempt_for_question(
+            normalized_team_id,
+            normalized_question_id,
+        )
+        if active_other is not None:
+            raise CommandAttemptInProgressError(
+                question_id=normalized_question_id,
+                command=str(active_other.get("command") or ""),
+                action_id=str(active_other.get("actionId") or ""),
+            )
+        attempt = attempts.register_attempt(
+            identity,
+            command=command,
+            accepted_state_version=expected,
+        )
+        return {"attempt": attempt, "command": command}
+
+    with hypothesis_first_scope_lock(normalized_team_id, normalized_question_id):
+        outcome = _authorize_locked()
+    if not outcome:
+        return None
+    if "replay" in outcome:
+        return outcome["replay"]
+    if "accepted" in outcome:
+        return outcome["accepted"]
+
+    attempt = outcome["attempt"]
+    resolved_command = str(outcome.get("command") or command)
+
+    from .operator_authorization import (
+        current_server_operator,
+        server_operator_scope,
+    )
+
+    operator = current_server_operator()
+
+    def _run_command_body() -> dict[str, Any]:
+        # The worker thread has no ambient HTTP context; rebind the exact
+        # operator principal that authorized this command so downstream
+        # server-scope readers see the same identity the sync path had.
+        if operator is not None:
+            with server_operator_scope(
+                operator.operator_id,
+                display_name=operator.display_name,
+                roles=operator.roles,
+            ):
+                return _execute_v2_command_impl(
+                    normalized_team_id,
+                    envelope,
+                    question_id=question_id,
+                    workflow_run_id=normalized_workflow_run_id,
+                    _actor=_actor,
+                )
+        return _execute_v2_command_impl(
+            normalized_team_id,
+            envelope,
+            question_id=question_id,
+            workflow_run_id=normalized_workflow_run_id,
+            _actor=_actor,
+        )
+
+    attempts.submit_execution(attempt, run=_run_command_body)
+    _record_scene_event(
+        "command.async_accepted",
+        outcome="accepted",
+        fields={
+            **identity,
+            "command": resolved_command,
+            "commandAttemptId": str(attempt.get("attemptId") or ""),
+        },
+    )
+    return attempts.accepted_envelope(
+        attempt,
+        team_id=normalized_team_id,
+        question_id=normalized_question_id,
+        workflow_run_id=normalized_workflow_run_id,
+    )
+
+
+def get_v2_command_attempt(team_id: str, attempt_id: str) -> dict[str, Any]:
+    """Read-only attempt status for the async command polling contract."""
+
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_command_attempts as attempts,
+    )
+
+    normalized_team_id = str(team_id or "").strip()
+    attempt = attempts.get_attempt(normalized_team_id, attempt_id)
+    if attempt is None:
+        raise HypothesisFirstChainNotFoundError(
+            f"command attempt {attempt_id} not found"
+        )
+    return attempt
 
 
 def _execute_v2_command_impl(
