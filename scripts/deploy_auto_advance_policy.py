@@ -97,6 +97,61 @@ def _activation_errors(payload: dict[str, Any]) -> list[str]:
     return []
 
 
+def _preview_errors(payload: dict[str, Any]) -> list[str]:
+    """Contract errors for a *shadow* document (preview stage)."""
+
+    from core.research.workflow.contracts.automation_policy import (
+        AutoAdvancePolicyV2,
+        AutomationPolicyValidationError,
+    )
+
+    try:
+        AutoAdvancePolicyV2.from_dict(payload, stage="preview")
+    except AutomationPolicyValidationError as exc:
+        return [
+            f"[{item.get('code')}] {item.get('field')}: {item.get('message')}"
+            for item in exc.errors
+        ]
+    except Exception as exc:  # noqa: BLE001 - an unreadable document is a problem too
+        return [str(exc)]
+    return []
+
+
+def _shadow_source_report() -> dict[str, Any]:
+    """Validate the shadow policy source the environment points at.
+
+    The shadow evaluator resolves its document from
+    ``VIBELUTION_AUTO_ADVANCE_POLICY_PATH`` alone and loads it at the preview
+    stage, so that file must be a *shadow* document.  A broken source is silent
+    in production — shadow telemetry simply stops recording — so it is reported
+    here even though this command never deploys it (there is no tracked
+    template for it; it is operator-local by design).
+    """
+
+    import os
+
+    from core.web.services.team_workflow.research_runtime.policy_shadow_evaluator import (
+        SHADOW_POLICY_ENV,
+    )
+
+    report: dict[str, Any] = {"env": SHADOW_POLICY_ENV, "state": "", "errors": []}
+    raw = str(os.environ.get(SHADOW_POLICY_ENV) or "").strip()
+    report["path"] = raw
+    if not raw:
+        report["state"] = "not_configured"
+        return report
+    path = Path(raw)
+    if not path.is_file():
+        report["state"] = "missing"
+        report["errors"] = [f"{path} does not exist"]
+        return report
+    payload = _read_payload(path)
+    report["identity"] = _identity(payload)
+    report["errors"] = _preview_errors(payload)
+    report["state"] = "invalid" if report["errors"] else "ok"
+    return report
+
+
 def inspect(*, template: Path, deployed: Path) -> dict[str, Any]:
     """Read-only comparison of the authority and the deployed copy."""
 
@@ -155,6 +210,9 @@ def _exit_code(report: dict[str, Any]) -> int:
     state = str(report.get("state") or "")
     if state in {"template_missing", "template_invalid"}:
         return EXIT_TEMPLATE_PROBLEM
+    shadow_state = str((report.get("shadow") or {}).get("state") or "")
+    if shadow_state in {"missing", "invalid"}:
+        return EXIT_DRIFT
     if state in {"in_sync", "deployed"}:
         return EXIT_OK
     return EXIT_DRIFT
@@ -178,6 +236,30 @@ def _human_summary(report: dict[str, Any]) -> str:
         lines.append(f"  template error: {item}")
     for item in report.get("deployedErrors") or []:
         lines.append(f"  deployed error: {item}")
+    shadow = report.get("shadow")
+    if shadow:
+        lines.append(f"shadow source ({shadow['env']}): {shadow.get('path') or '<unset>'}")
+        identity = shadow.get("identity")
+        if identity:
+            lines.append(
+                f"  shadow identity: {identity['policyId']} v{identity['version']} "
+                f"{identity['status']}/{identity['executionMode']}"
+            )
+        for item in shadow.get("errors") or []:
+            lines.append(f"  shadow error: {item}")
+        shadow_state = shadow.get("state")
+        if shadow_state == "not_configured":
+            lines.append(
+                "  shadow note: no shadow source configured; shadow telemetry is "
+                "off (the activation chain above is unaffected)."
+            )
+        elif shadow_state == "missing":
+            lines.append("  shadow note: the configured shadow document is missing.")
+        elif shadow_state == "invalid":
+            lines.append(
+                "  shadow note: the configured shadow document fails the preview "
+                "stage, so shadow telemetry records nothing."
+            )
     state = report.get("state")
     if state == "in_sync":
         lines.append("RESULT: in sync - the runtime reads the approved template.")
@@ -240,6 +322,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.write
         else inspect(template=template, deployed=deployed)
     )
+    # The shadow evaluator reads a different document through the environment;
+    # report it alongside the activation pair so one command covers both
+    # readers that fail silent.
+    report["shadow"] = _shadow_source_report()
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) if args.json else _human_summary(report))
     return _exit_code(report)
 

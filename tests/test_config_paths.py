@@ -282,3 +282,55 @@ def test_policy_deploy_refuses_to_deploy_an_invalid_template(tmp_path):
     assert report["written"] is False
     assert report["state"] == "template_invalid"
     assert policy_deploy._exit_code(report) == policy_deploy.EXIT_TEMPLATE_PROBLEM
+
+
+def test_policy_deploy_reports_the_shadow_source_the_environment_points_at(
+    tmp_path, monkeypatch
+):
+    """The shadow reader resolves a different document and also fails silent.
+
+    A broken shadow source records no telemetry at all, so the same command
+    must report it — while leaving an unconfigured source (a supported state)
+    non-fatal.
+    """
+    from core.web.services.team_workflow.research_runtime.policy_shadow_evaluator import (
+        SHADOW_POLICY_ENV,
+    )
+
+    monkeypatch.delenv(SHADOW_POLICY_ENV, raising=False)
+    unset = policy_deploy._shadow_source_report()
+    assert unset["state"] == "not_configured"
+    assert unset["errors"] == []
+
+    monkeypatch.setenv(SHADOW_POLICY_ENV, str(tmp_path / "absent.json"))
+    missing = policy_deploy._shadow_source_report()
+    assert missing["state"] == "missing"
+    assert missing["errors"]
+
+    shadow_doc = tmp_path / "shadow.json"
+    shadow_doc.write_text('{"policyId": "shadow"}\n', encoding="utf-8")
+    monkeypatch.setenv(SHADOW_POLICY_ENV, str(shadow_doc))
+    invalid = policy_deploy._shadow_source_report()
+    assert invalid["state"] == "invalid"
+    assert any("unsupported_value" in item for item in invalid["errors"])
+
+    # The repo's own tracked template is activation-shaped; as a shadow source
+    # it is rejected for the active mode, which is exactly the misconfiguration
+    # this report exists to catch.
+    monkeypatch.setenv(SHADOW_POLICY_ENV, str(policy_deploy.template_path()))
+    wrong_mode = policy_deploy._shadow_source_report()
+    assert wrong_mode["state"] == "invalid"
+    assert any("active_mode_forbidden_in_preview" in item for item in wrong_mode["errors"])
+
+    # A broken shadow source makes the command drift, even when the activation
+    # pair itself is in sync.
+    encoded = json.dumps(_template_payload(), ensure_ascii=False, indent=2) + "\n"
+    template = tmp_path / "t.json"
+    deployed = tmp_path / "d.json"
+    template.write_text(encoded, encoding="utf-8")
+    deployed.write_text(encoded, encoding="utf-8")
+    in_sync = policy_deploy.inspect(template=template, deployed=deployed)
+    assert in_sync["state"] == "in_sync"
+
+    assert policy_deploy._exit_code({**in_sync, "shadow": wrong_mode}) == policy_deploy.EXIT_DRIFT
+    assert policy_deploy._exit_code({**in_sync, "shadow": unset}) == policy_deploy.EXIT_OK
