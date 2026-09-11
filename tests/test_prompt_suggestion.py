@@ -241,6 +241,44 @@ def test_generate_prompt_suggestion_early_conversation(monkeypatch):
     assert result["reason"] == "early_conversation"
 
 
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("raw", True),
+        ("raw_dialogue", True),
+        ("raw_meaningful", True),
+        ("raw_continue", True),
+        ("raw_confirmation", True),
+        ("raw_with_attachments", True),
+        ("raw_with_session_references", True),
+        (" RAW_DIALOGUE ", True),
+        ("attachments_only", False),
+        ("session_references_only", False),
+        ("agent_inbox", False),
+        ("proactive_plugin", False),
+        ("external_agent_task", False),
+        ("supervised_evolution", False),
+        ("", False),
+    ],
+)
+def test_is_user_authored_source(source, expected):
+    assert prompt_suggestion.is_user_authored_source(source) is expected
+
+
+def test_worker_registration_gate_uses_user_source_predicate():
+    from pathlib import Path
+
+    worker_source = (
+        Path(__file__).resolve().parents[1]
+        / "core"
+        / "web"
+        / "services"
+        / "session"
+        / "worker.py"
+    ).read_text(encoding="utf-8")
+    assert "is_user_authored_source(normalized_user_message_source)" in worker_source
+
+
 def _message_cache_marker_count(message: dict) -> int:
     from core.llm.payload_builder import _message_cache_marker_count as counter
 
