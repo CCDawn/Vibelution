@@ -578,6 +578,7 @@ from core.web.services.team_workflow.challenge_question_runs import (
     register_challenge_task_model_evidence,
     register_challenge_question_output,
     repair_challenge_question_output_registration,
+    read_citation_recheck_progress,
     review_challenge_question_output,
     reverify_citation_receipts,
 )

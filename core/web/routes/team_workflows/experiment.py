@@ -234,14 +234,40 @@ def team_workflow_challenge_question_run_reverify_citations(
     team_id: str,
     question_id: str,
     run_id: str,
+    force_full: bool = False,
 ) -> dict:
     try:
-        return reverify_citation_receipts(team_id, question_id, run_id)
+        return reverify_citation_receipts(team_id, question_id, run_id, force_full=force_full)
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         _raise_team_workflow_route_error(
             "challenge_question_run.reverify_citations",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"questionId": question_id, "runId": run_id},
+        )
+
+
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/challenge-program/questions/{question_id}/runs/{run_id}/reverify-citations/progress",
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
+)
+def team_workflow_challenge_question_run_reverify_citations_progress(
+    team_id: str,
+    question_id: str,
+    run_id: str,
+) -> dict:
+    """Read-only citation-recheck heartbeat progress (pollable mid-run)."""
+    try:
+        return read_citation_recheck_progress(team_id, question_id, run_id)
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        _raise_team_workflow_route_error(
+            "challenge_question_run.reverify_citations_progress",
             team_id,
             exc,
             status_code=422,

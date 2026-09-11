@@ -11,7 +11,7 @@ from core.research.competition.question_result_package import canonical_model_po
 from core.research.workflow.contracts.model_invocation_receipt import (
     ModelInvocationReceipt,
 )
-from core.web.services.team_workflow import challenge_question_runs
+from core.web.services.team_workflow import challenge_question_runs, citation_recheck
 
 
 def _gate(decision: str = "pending") -> dict:
@@ -1721,6 +1721,7 @@ def test_reverify_citation_receipts_keeps_failed_when_doi_unknown(tmp_path, monk
         "SCI-096",
         "run-sci-096",
         doi_verifier=lambda _doi: None,
+        retry_policy=citation_recheck.RetryPolicy(maximum_attempts=1),
     )
 
     assert response["status"] == "still_failed"
@@ -1728,6 +1729,81 @@ def test_reverify_citation_receipts_keeps_failed_when_doi_unknown(tmp_path, monk
     stored_record = challenge_question_runs._load_store("research-team")["records"][0]
     assert stored_record["validation"]["citationValidation"] == "failed"
     assert "citationReverification" not in stored_record
+
+
+def test_reverify_citation_receipts_writes_heartbeat_ledger_and_resumes(tmp_path, monkeypatch):
+    """SCI-049: per-URL heartbeats land in the recheck ledger and a re-trigger
+    resumes from the verified prefix instead of re-verifying it."""
+    output = _paywalled_output()
+    record = _register_paywalled_run(tmp_path, monkeypatch, output)
+    assert record["validation"]["citationValidation"] == "failed"
+
+    # First pass: the DOI lookup keeps failing (single attempt, no sleeps).
+    failed = challenge_question_runs.reverify_citation_receipts(
+        "research-team",
+        "SCI-096",
+        "run-sci-096",
+        doi_verifier=lambda _doi: None,
+        retry_policy=citation_recheck.RetryPolicy(maximum_attempts=1),
+    )
+    assert failed["status"] == "still_failed"
+    assert failed["verification"]["failedSourceUrls"] == [
+        {
+            "sourceUrl": "https://doi.org/10.1103/PhysRevLett.88.237901",
+            "reason": "attempts_exhausted",
+            "attempts": 1,
+        }
+    ]
+
+    ledger_path = (
+        challenge_question_runs._workflow_root("research-team")
+        / "challenge_program"
+        / "question_runs"
+        / "SCI-096"
+        / "run-sci-096.citation-recheck.jsonl"
+    )
+    heartbeats = [r for r in citation_recheck.read_recheck_events(ledger_path) if r["kind"] == "heartbeat"]
+    assert len(heartbeats) == 4  # one per evidence row
+    assert heartbeats[-1]["done"] == 4
+    assert all(heartbeat["total"] == 4 for heartbeat in heartbeats)
+    assert all(heartbeat["stage"] == "citation_recheck" for heartbeat in heartbeats)
+
+    # Second pass: the registry now knows the DOI; the previously failed URL
+    # is re-attempted and succeeds.
+    calls: list[str] = []
+
+    def _verifier(doi: str):
+        calls.append(doi)
+        return {"DOI": doi, "title": ["Real paper"]}
+
+    reverified = challenge_question_runs.reverify_citation_receipts(
+        "research-team",
+        "SCI-096",
+        "run-sci-096",
+        doi_verifier=_verifier,
+        retry_policy=citation_recheck.RetryPolicy(maximum_attempts=1),
+    )
+    assert reverified["status"] == "reverified"
+    assert calls == ["10.1103/PhysRevLett.88.237901"]
+
+    # Third pass short-circuits: the record is now fully validated, and the
+    # progress surface reports the converged ledger.
+    replay = challenge_question_runs.reverify_citation_receipts(
+        "research-team",
+        "SCI-096",
+        "run-sci-096",
+        doi_verifier=_verifier,
+    )
+    assert replay["status"] == "already_passed"
+    progress = challenge_question_runs.read_citation_recheck_progress(
+        "research-team", "SCI-096", "run-sci-096"
+    )
+    assert progress["stage"] == "citation_recheck"
+    assert progress["verifiedSourceUrls"] == ["https://doi.org/10.1103/PhysRevLett.88.237901"]
+    assert progress["heartbeat"]["done"] == 4
+    assert progress == citation_recheck.progress_report(
+        ledger_path, team_id="research-team", question_id="SCI-096", run_id="run-sci-096"
+    )
 
 
 def test_reverify_citation_receipts_never_attempts_urls_without_doi(tmp_path, monkeypatch):

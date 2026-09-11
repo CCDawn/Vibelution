@@ -142,7 +142,7 @@ def test_question_run_status_exposes_registration_without_requiring_validation(m
 
 
 def test_reverify_citations_post_passes_ids_through_and_returns_service_report(monkeypatch):
-    calls: list[tuple[str, str, str]] = []
+    calls: list[tuple[str, str, str, bool]] = []
     report = {
         "status": "reverified",
         "record": {"recordId": "SCI-096:stage1-sci-096-v3", "citationValidation": "passed"},
@@ -150,8 +150,8 @@ def test_reverify_citations_post_passes_ids_through_and_returns_service_report(m
         "verification": {"verifiedSourceUrls": {"https://doi.org/10.1/x": True}, "attemptedCount": 1, "verifiedCount": 1},
     }
 
-    def fake_reverify(team_id: str, question_id: str, run_id: str) -> dict:
-        calls.append((team_id, question_id, run_id))
+    def fake_reverify(team_id: str, question_id: str, run_id: str, *, force_full: bool = False) -> dict:
+        calls.append((team_id, question_id, run_id, force_full))
         return report
 
     monkeypatch.setattr(team_workflows_experiment, "reverify_citation_receipts", fake_reverify)
@@ -162,8 +162,80 @@ def test_reverify_citations_post_passes_ids_through_and_returns_service_report(m
     )
 
     assert response.status_code == 200
-    assert calls == [("research-team", "SCI-096", "stage1-sci-096-v3")]
+    assert calls == [("research-team", "SCI-096", "stage1-sci-096-v3", False)]
     assert response.json() == report
+
+    forced = _client().post(
+        "/api/teams/research-team/workflow-orchestration/challenge-program"
+        "/questions/SCI-096/runs/stage1-sci-096-v3/reverify-citations",
+        params={"force_full": "true"},
+    )
+
+    assert forced.status_code == 200
+    assert calls[-1] == ("research-team", "SCI-096", "stage1-sci-096-v3", True)
+
+
+def test_reverify_citations_progress_get_is_read_only_pollable_surface(monkeypatch):
+    calls: list[tuple[str, str, str]] = []
+    progress = {
+        "schemaVersion": 1,
+        "contract": "citation-recheck-heartbeat/v1",
+        "stage": "citation_recheck",
+        "teamId": "research-team",
+        "questionId": "SCI-096",
+        "runId": "stage1-sci-096-v3",
+        "heartbeat": {
+            "attemptId": "citrecheck-abc",
+            "done": 12,
+            "total": 46,
+            "etaSeconds": 95.0,
+            "at": "2026-01-01T00:00:00Z",
+        },
+        "attempt": {
+            "attemptId": "citrecheck-abc",
+            "status": "running",
+            "total": 46,
+            "forceFull": False,
+            "outcome": "",
+            "at": "2026-01-01T00:00:00Z",
+        },
+        "verifiedSourceUrls": ["https://doi.org/10.1/x"],
+        "failedSourceUrls": [],
+        "eventCount": 14,
+    }
+
+    def fake_progress(team_id: str, question_id: str, run_id: str) -> dict:
+        calls.append((team_id, question_id, run_id))
+        return progress
+
+    monkeypatch.setattr(team_workflows_experiment, "read_citation_recheck_progress", fake_progress)
+
+    response = _client().get(
+        "/api/teams/research-team/workflow-orchestration/challenge-program"
+        "/questions/SCI-096/runs/stage1-sci-096-v3/reverify-citations/progress"
+    )
+
+    assert response.status_code == 200
+    assert calls == [("research-team", "SCI-096", "stage1-sci-096-v3")]
+    assert response.json()["heartbeat"]["done"] == 12
+    assert response.json()["heartbeat"]["total"] == 46
+    assert response.json()["stage"] == "citation_recheck"
+
+
+def test_reverify_citations_progress_get_maps_missing_team_to_404(monkeypatch):
+    def missing_team(team_id: str, question_id: str, run_id: str) -> dict:
+        from core.web.services.team_service import TeamNotFoundError
+
+        raise TeamNotFoundError("team not found: research-team")
+
+    monkeypatch.setattr(team_workflows_experiment, "read_citation_recheck_progress", missing_team)
+
+    response = _client().get(
+        "/api/teams/research-team/workflow-orchestration/challenge-program"
+        "/questions/SCI-096/runs/stage1-sci-096-v3/reverify-citations/progress"
+    )
+
+    assert response.status_code == 404
 
 
 def test_repair_registration_post_passes_ids_through_and_returns_service_report(monkeypatch):
@@ -200,10 +272,10 @@ def test_repair_registration_post_passes_ids_through_and_returns_service_report(
 
 
 def test_challenge_question_run_repair_routes_map_errors_like_neighbors(monkeypatch):
-    def missing_record(team_id: str, question_id: str, run_id: str) -> dict:
+    def missing_record(team_id: str, question_id: str, run_id: str, *, force_full: bool = False) -> dict:
         raise ValueError("Challenge question run record was not found.")
 
-    def missing_team(team_id: str, question_id: str, run_id: str) -> dict:
+    def missing_team(team_id: str, question_id: str, run_id: str, *, force_full: bool = False) -> dict:
         from core.web.services.team_service import TeamNotFoundError
 
         raise TeamNotFoundError("team not found: research-team")

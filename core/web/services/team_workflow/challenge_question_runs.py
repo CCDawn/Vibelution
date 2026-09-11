@@ -10,7 +10,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, unquote, urlparse
 from uuid import uuid4
 
@@ -41,6 +41,9 @@ from core.web.services.team_workflow.research_projects import (
     resolve_research_project_workspace_root,
     resolve_team_program_root,
 )
+
+if TYPE_CHECKING:
+    from core.web.services.team_workflow.citation_recheck import RetryPolicy
 
 STORE_SCHEMA_VERSION = 1
 STORE_KIND = "challenge_question_run_store"
@@ -3493,6 +3496,9 @@ def reverify_citation_receipts(
     run_id: str,
     *,
     doi_verifier: Callable[[str], Mapping[str, Any] | None] | None = None,
+    force_full: bool = False,
+    retry_policy: RetryPolicy | None = None,
+    sleeper: Callable[[float], None] | None = None,
 ) -> dict[str, Any]:
     """Re-run failed citation receipts of one registered run via DOI metadata.
 
@@ -3517,13 +3523,27 @@ def reverify_citation_receipts(
     * the immutable ``sourceResultPackageHash`` binding and the evidence
       rows themselves are never modified.
 
+    SCI-049 progress/checkpoint contract (see
+    :mod:`core.web.services.team_workflow.citation_recheck` for the stable
+    heartbeat payload constants): after every evidence row the loop appends
+    a structured ``citation_recheck`` heartbeat to an append-only JSONL
+    ledger next to the run artifact (``<run>.citation-recheck.jsonl``), and
+    every verified URL is persisted immediately, so a re-trigger resumes
+    from the verified prefix instead of re-verifying the whole set (pass
+    ``force_full=True`` to deliberately re-verify everything).  Transient
+    per-URL failures retry with a Temporal-style RetryPolicy (initial 2s,
+    backoff x2.0, max 60s, 5 attempts, env-overridable); validation-class
+    rejections (no DOI authority, definitive 4xx) are non-retryable and
+    fail the URL immediately.  ``retry_policy``/``sleeper`` are test seams.
+
     ``doi_verifier`` injects the DOI metadata lookup (tests); the default
     performs the real bounded network calls.  Returns a report with the
     resulting status (``already_passed`` / ``reverified`` / ``still_failed``),
     the refreshed record and the citation validation summary.
     """
 
-    from .doi_metadata_verification import DEFAULT_MAX_VERIFICATIONS, verify_failed_receipt_dois
+    from .citation_recheck import read_resume_verified, verify_receipts_with_heartbeat
+    from .doi_metadata_verification import DEFAULT_MAX_VERIFICATIONS
     from .research_runtime.result_package_v2 import _citation_checks
 
     team_service.get_team(team_id)
@@ -3581,13 +3601,26 @@ def reverify_citation_receipts(
         # time, but a still-failed record persists nothing: every retry would
         # re-verify the same first N receipts and never reach the tail.  Lift
         # the cap to cover the whole evidence set (each lookup stays bounded
-        # by its own timeout) so one operator click can converge.
-        verification = verify_failed_receipt_dois(
+        # by its own timeout) so one operator click can converge.  The loop
+        # appends a structured citation_recheck heartbeat per evidence row
+        # and persists every verified URL immediately, so a re-trigger
+        # resumes from the ledger instead of re-verifying verified URLs.
+        ledger_path = artifact_path.with_name(f"{normalized_run_id}.citation-recheck.jsonl")
+        resume_verified = {} if force_full else read_resume_verified(ledger_path)
+        verification = verify_receipts_with_heartbeat(
             verification_input,
+            team_id=team_id,
+            question_id=normalized_question_id,
+            run_id=normalized_run_id,
+            ledger_path=ledger_path,
             verifier=doi_verifier,
             max_verifications=max(
                 DEFAULT_MAX_VERIFICATIONS, len(verification_input)
             ),
+            force_full=force_full,
+            resume_verified=resume_verified,
+            retry_policy=retry_policy,
+            sleeper=sleeper,
         )
         checks = _citation_checks(
             evidence,
@@ -3648,3 +3681,39 @@ def reverify_citation_receipts(
         "verification": verification,
         "summary": summary,
     }
+
+
+def read_citation_recheck_progress(
+    team_id: str,
+    question_id: str,
+    run_id: str,
+) -> dict[str, Any]:
+    """Read-only recheck heartbeat progress for one registered run.
+
+    Read surface for the structured ``citation_recheck`` heartbeats written
+    by :func:`reverify_citation_receipts` (payload contract in
+    :mod:`core.web.services.team_workflow.citation_recheck`).  Deliberately
+    never touches ``_STORE_LOCK`` or the run store: a progress poll must be
+    servable while a minutes-long recheck holds that lock.
+    """
+
+    from .citation_recheck import progress_report
+
+    team_service.get_team(team_id)
+    normalized_question_id = str(question_id or "").strip().upper()
+    normalized_run_id = str(run_id or "").strip()
+    if not normalized_question_id or not normalized_run_id:
+        raise ValueError("questionId and runId are required.")
+    ledger_path = (
+        _workflow_root(team_id)
+        / "challenge_program"
+        / "question_runs"
+        / normalized_question_id
+        / f"{normalized_run_id}.citation-recheck.jsonl"
+    )
+    return progress_report(
+        ledger_path,
+        team_id=team_id,
+        question_id=normalized_question_id,
+        run_id=normalized_run_id,
+    )

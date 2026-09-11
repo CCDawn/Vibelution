@@ -23,6 +23,7 @@ import json
 import re
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
+from urllib.error import HTTPError
 from urllib.parse import parse_qsl, quote, unquote, urlparse
 from urllib.request import Request, urlopen
 
@@ -49,6 +50,26 @@ _DOI_ORG_URL = "https://doi.org/{doi}"
 _CSL_JSON_ACCEPT = "application/vnd.citationstyles.csl+json"
 
 DEFAULT_TIMEOUT_SECONDS = 5.0
+
+
+class DefinitiveDoiRejection(RuntimeError):
+    """A DOI registry definitively rejected the lookup for this DOI.
+
+    Raised only on the opt-in ``raise_definitive_rejections`` path (the
+    citation recheck's retry policy short-circuits these), never on the
+    default swallow-to-None path shared with package builders.  A 4xx other
+    than 408 (request timeout) and 429 (rate limited) means "the registry
+    knows this DOI is not resolvable" — retrying cannot change the answer.
+    """
+
+    def __init__(self, doi: str, status_code: int) -> None:
+        super().__init__(f"DOI registry definitively rejected {doi!r} with HTTP {status_code}")
+        self.doi = doi
+        self.status_code = int(status_code)
+
+
+def _is_definitive_http_rejection(status_code: int) -> bool:
+    return 400 <= int(status_code) < 500 and int(status_code) not in (408, 429)
 
 # Bounded fan-out: the observed failing batches are 8-12 publisher URLs; a
 # package build or re-verification pass must never sweep an unbounded list.
@@ -133,13 +154,19 @@ def _read_json_response(response: Any) -> Mapping[str, Any] | None:
     return data if isinstance(data, Mapping) else None
 
 
-def _crossref_metadata(doi: str, timeout: float) -> Mapping[str, Any] | None:
+def _crossref_metadata(
+    doi: str, timeout: float, *, raise_definitive_rejections: bool = False
+) -> Mapping[str, Any] | None:
     request = Request(  # noqa: S310 - fixed https registry host
         _CROSSREF_WORKS_URL.format(doi=quote(doi, safe="/")),
         headers={"Accept": "application/json", "User-Agent": "Vibelution-citation-verify/1.0"},
     )
     try:
         response = urlopen(request, timeout=timeout)  # noqa: S310 - see above
+    except HTTPError as exc:
+        if raise_definitive_rejections and _is_definitive_http_rejection(exc.code):
+            raise DefinitiveDoiRejection(doi, exc.code) from exc
+        return None
     except Exception:  # noqa: BLE001 - network failures are "unverified"
         return None
     data = _read_json_response(response)
@@ -151,13 +178,19 @@ def _crossref_metadata(doi: str, timeout: float) -> Mapping[str, Any] | None:
     return None
 
 
-def _doi_org_metadata(doi: str, timeout: float) -> Mapping[str, Any] | None:
+def _doi_org_metadata(
+    doi: str, timeout: float, *, raise_definitive_rejections: bool = False
+) -> Mapping[str, Any] | None:
     request = Request(  # noqa: S310 - fixed https registry host
         _DOI_ORG_URL.format(doi=quote(doi, safe="/")),
         headers={"Accept": _CSL_JSON_ACCEPT, "User-Agent": "Vibelution-citation-verify/1.0"},
     )
     try:
         response = urlopen(request, timeout=timeout)  # noqa: S310 - see above
+    except HTTPError as exc:
+        if raise_definitive_rejections and _is_definitive_http_rejection(exc.code):
+            raise DefinitiveDoiRejection(doi, exc.code) from exc
+        return None
     except Exception:  # noqa: BLE001 - network failures are "unverified"
         return None
     return _read_json_response(response)
@@ -167,6 +200,7 @@ def fetch_doi_metadata(
     doi: str,
     *,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+    raise_definitive_rejections: bool = False,
 ) -> Mapping[str, Any] | None:
     """Return DOI registry metadata for ``doi``, else None.
 
@@ -174,17 +208,25 @@ def fetch_doi_metadata(
     DOI, network trouble, non-JSON body) the doi.org content-negotiation
     endpoint is tried as the second registry.  Every failure mode — timeout,
     HTTP error, non-JSON body — collapses to None so callers keep the
-    fail-closed receipt.
+    fail-closed receipt.  With ``raise_definitive_rejections=True`` a 4xx
+    registry rejection other than 408/429 instead raises
+    :class:`DefinitiveDoiRejection` so retry-aware callers (citation
+    recheck) can skip pointless retries; the default keeps the historical
+    None-collapse for package builders and existing tests.
     """
 
     normalized = normalize_doi(doi)
     if not normalized:
         return None
     timeout = max(0.5, float(timeout_seconds))
-    metadata = _crossref_metadata(normalized, timeout)
+    metadata = _crossref_metadata(
+        normalized, timeout, raise_definitive_rejections=raise_definitive_rejections
+    )
     if metadata is not None:
         return metadata
-    return _doi_org_metadata(normalized, timeout)
+    return _doi_org_metadata(
+        normalized, timeout, raise_definitive_rejections=raise_definitive_rejections
+    )
 
 
 def verify_failed_receipt_dois(
@@ -252,6 +294,7 @@ def verify_failed_receipt_dois(
 __all__ = [
     "DEFAULT_MAX_VERIFICATIONS",
     "DEFAULT_TIMEOUT_SECONDS",
+    "DefinitiveDoiRejection",
     "extract_doi",
     "fetch_doi_metadata",
     "normalize_doi",
