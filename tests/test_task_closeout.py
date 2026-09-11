@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -758,6 +759,14 @@ def test_cleanup_moves_own_cwd_and_retries_transient_worktree_remove(
 
     def process(argv, _cwd):
         nonlocal remove_attempts
+        if argv[:3] == ["git", "worktree", "list"]:
+            # The directory is still a registered worktree at this point.
+            return closeout.subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=f"worktree {ctx.main_root}\nworktree {ctx.task_root}\n",
+                stderr="",
+            )
         if argv[:3] == ["git", "worktree", "remove"]:
             remove_attempts += 1
             if remove_attempts == 1:
@@ -836,3 +845,101 @@ def test_cli_refuses_managed_closeout_from_task_worktree_cwd(
 
     assert exit_code == 1
     assert payload["next_action"] == "rerun_from_main"
+
+
+def _run_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _init_main_repo(root: Path) -> None:
+    """A main repo whose ``codex/test-task`` branch is already merged."""
+
+    root.mkdir(parents=True, exist_ok=True)
+    _run_git(root, "init")
+    _run_git(root, "config", "user.email", "closeout@example.invalid")
+    _run_git(root, "config", "user.name", "Closeout Test")
+    (root / ".gitignore").write_text(".worktrees/\n", encoding="utf-8")
+    (root / "seed.txt").write_text("seed\n", encoding="utf-8")
+    _run_git(root, "add", ".gitignore", "seed.txt")
+    _run_git(root, "commit", "-m", "seed")
+    _run_git(root, "branch", "-M", "main")
+    _run_git(root, "branch", "codex/test-task")
+
+
+def _leftover_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> closeout.CloseoutContext:
+    """A task directory that Git no longer tracks, as left by a partial removal."""
+
+    main_root = tmp_path / "main"
+    _init_main_repo(main_root)
+    task_root = main_root / ".worktrees" / "test-task"
+    task_root.mkdir(parents=True)
+    monkeypatch.setattr(closeout, "_coordination_call", lambda *_args, **_kwargs: {"agents": []})
+    monkeypatch.setattr(closeout.time, "sleep", lambda _seconds: None)
+    return closeout.CloseoutContext(
+        main_root=main_root,
+        task_root=task_root,
+        branch="codex/test-task",
+    )
+
+
+def test_cleanup_finishes_when_removal_only_left_the_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A half-completed worktree removal is residue, not a failure to report.
+
+    ``git worktree remove`` unregisters the worktree and deletes its contents
+    before failing to delete the directory itself, so retrying it reports "is
+    not a working tree". That used to surface as pending cleanup the operator
+    could not complete, and the documented ``--cleanup-only`` recovery then
+    refused the same directory as an unsafe path.
+    """
+
+    context = _leftover_context(tmp_path, monkeypatch)
+
+    closeout.cleanup_task_resources(context, agent_id="agent-test")
+
+    assert not context.task_root.exists()
+    assert _run_git(context.main_root, "show-ref", "--verify", "--quiet", "refs/heads/codex/test-task").returncode != 0
+
+
+def test_cleanup_keeps_residue_whose_content_it_cannot_judge(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only an empty leftover directory is removed; anything else is reported."""
+
+    context = _leftover_context(tmp_path, monkeypatch)
+    notes = context.task_root / "notes.txt"
+    notes.write_text("uncommitted work\n", encoding="utf-8")
+
+    with pytest.raises(closeout.ManagedCloseoutError) as raised:
+        closeout.cleanup_task_resources(context, agent_id="agent-test")
+
+    assert raised.value.code == "cleanup_residue_present"
+    assert notes.read_text(encoding="utf-8") == "uncommitted work\n"
+
+
+def test_cleanup_only_recovers_a_leftover_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The documented recovery path must complete instead of refusing the path."""
+
+    context = _leftover_context(tmp_path, monkeypatch)
+
+    result = closeout.run_cleanup_only(
+        context.task_root,
+        branch="codex/test-task",
+        agent_id="agent-test",
+    )
+
+    assert result.status == "merged_clean"
+    assert result.exit_code == 0
+    assert not context.task_root.exists()
