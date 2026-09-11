@@ -21,14 +21,14 @@ function nextStateSignal(kind: ChatNextStateSignalSummary["kind"]): ChatNextStat
 }
 
 describe("shouldShowNextStateSignalInConversation", () => {
-  it("shows user continue signals only while the conversation phase is busy", () => {
+  it("hides user continue signals in every phase", () => {
     const signal = nextStateSignal("user_continues");
 
     expect(shouldShowNextStateSignalInConversation(signal, "ready")).toBe(false);
     expect(shouldShowNextStateSignalInConversation(signal, "completed")).toBe(false);
-    expect(shouldShowNextStateSignalInConversation(signal, "queued")).toBe(true);
-    expect(shouldShowNextStateSignalInConversation(signal, " running ")).toBe(true);
-    expect(shouldShowNextStateSignalInConversation(signal, "STOPPING")).toBe(true);
+    expect(shouldShowNextStateSignalInConversation(signal, "queued")).toBe(false);
+    expect(shouldShowNextStateSignalInConversation(signal, " running ")).toBe(false);
+    expect(shouldShowNextStateSignalInConversation(signal, "STOPPING")).toBe(false);
   });
 
   it("keeps non-continue signals visible after the turn finishes", () => {
@@ -170,7 +170,7 @@ describe("shouldShowNextStateSignalInConversation", () => {
     expect(shouldShowNextStateSignalInConversation(signal, "ready", messages)).toBe(true);
   });
 
-  it("keeps the busy-state continue rule independent of the current-turn anchor", () => {
+  it("hides user continue signals even while busy with a current-turn anchor", () => {
     const signal = nextStateSignal("user_continues");
     const messages = [
       {
@@ -181,7 +181,7 @@ describe("shouldShowNextStateSignalInConversation", () => {
       },
     ];
 
-    expect(shouldShowNextStateSignalInConversation(signal, "running", messages)).toBe(true);
+    expect(shouldShowNextStateSignalInConversation(signal, "running", messages)).toBe(false);
     expect(shouldShowNextStateSignalInConversation(signal, "ready", messages)).toBe(false);
   });
 
