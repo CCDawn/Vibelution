@@ -10,21 +10,12 @@ import {
   vuiOpaqueRowClass,
   vuiRailFillClass,
   vuiStateCoolInfoClass,
-  vuiStateDangerSoftClass,
   vuiStateSelectedRowClass,
-  vuiStateSuccessSoftClass,
   vuiStateWarmSoftClass,
-  vuiStateWarningSoftClass,
   vuiChatFillClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles: Record<string, string> = {
-  activeSkillStatus_active:
-    `vui-routes-chatcodingroute activeSkillStatus_active min-w-0 ${vuiStateSelectedRowClass}`,
-  activeSkillStatus_missing:
-    `vui-routes-chatcodingroute activeSkillStatus_missing min-w-0 ${vuiStateSelectedRowClass}`,
-  activeSkillStatus_stale:
-    `vui-routes-chatcodingroute activeSkillStatus_stale min-w-0 ${vuiStateSelectedRowClass}`,
   agentAvatarImage:
     `vui-routes-chatcodingroute agentAvatarImage min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] ${vuiStateCoolInfoClass}`,
   agentOptionAvatar:
@@ -119,130 +110,6 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute panelNotice grid min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_22%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_5%,var(--vui-surface-row))] px-2 py-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)]",
   panelState:
     "vui-routes-chatcodingroute panelState min-h-[72px] place-items-center !content-center !text-center",
-  petShowcaseAvatar_active:
-    `vui-routes-chatcodingroute petShowcaseAvatar_active min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] ${vuiStateSelectedRowClass}`,
-  petShowcaseAvatar_answering:
-    "vui-routes-chatcodingroute petShowcaseAvatar_answering min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_blocked:
-    `vui-routes-chatcodingroute petShowcaseAvatar_blocked min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] ${vuiStateWarningSoftClass}`,
-  petShowcaseAvatar_bunny:
-    "vui-routes-chatcodingroute petShowcaseAvatar_bunny min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_cache:
-    "vui-routes-chatcodingroute petShowcaseAvatar_cache min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_cat:
-    "vui-routes-chatcodingroute petShowcaseAvatar_cat min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_chat:
-    "vui-routes-chatcodingroute petShowcaseAvatar_chat min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_checking:
-    "vui-routes-chatcodingroute petShowcaseAvatar_checking min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_chick:
-    "vui-routes-chatcodingroute petShowcaseAvatar_chick min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_compression:
-    "vui-routes-chatcodingroute petShowcaseAvatar_compression min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_crab:
-    "vui-routes-chatcodingroute petShowcaseAvatar_crab min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_danger:
-    `vui-routes-chatcodingroute petShowcaseAvatar_danger min-w-0 ${vuiStateDangerSoftClass} inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]`,
-  petShowcaseAvatar_default:
-    "vui-routes-chatcodingroute petShowcaseAvatar_default min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_disoriented:
-    "vui-routes-chatcodingroute petShowcaseAvatar_disoriented min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_done:
-    "vui-routes-chatcodingroute petShowcaseAvatar_done min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_editing:
-    "vui-routes-chatcodingroute petShowcaseAvatar_editing min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_error:
-    `vui-routes-chatcodingroute petShowcaseAvatar_error min-w-0 ${vuiStateDangerSoftClass} inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]`,
-  petShowcaseAvatar_failed:
-    `vui-routes-chatcodingroute petShowcaseAvatar_failed min-w-0 ${vuiStateDangerSoftClass} inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]`,
-  petShowcaseAvatar_general:
-    "vui-routes-chatcodingroute petShowcaseAvatar_general min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_healthy:
-    "vui-routes-chatcodingroute petShowcaseAvatar_healthy min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_idle:
-    "vui-routes-chatcodingroute petShowcaseAvatar_idle min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)]",
-  petShowcaseAvatar_info:
-    `vui-routes-chatcodingroute petShowcaseAvatar_info min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] ${vuiStateCoolInfoClass}`,
-  petShowcaseAvatar_lobster:
-    "vui-routes-chatcodingroute petShowcaseAvatar_lobster min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_looping:
-    "vui-routes-chatcodingroute petShowcaseAvatar_looping min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_memory:
-    "vui-routes-chatcodingroute petShowcaseAvatar_memory min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_mental:
-    "vui-routes-chatcodingroute petShowcaseAvatar_mental min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_missing:
-    "vui-routes-chatcodingroute petShowcaseAvatar_missing min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_modelInput:
-    "vui-routes-chatcodingroute petShowcaseAvatar_modelInput min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
-  petShowcaseAvatar_moose:
-    "vui-routes-chatcodingroute petShowcaseAvatar_moose min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_muted:
-    "vui-routes-chatcodingroute petShowcaseAvatar_muted min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
-  petShowcaseAvatar_needs_input:
-    "vui-routes-chatcodingroute petShowcaseAvatar_needs_input min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
-  petShowcaseAvatar_neutral:
-    "vui-routes-chatcodingroute petShowcaseAvatar_neutral min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_normal:
-    "vui-routes-chatcodingroute petShowcaseAvatar_normal min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_offline:
-    "vui-routes-chatcodingroute petShowcaseAvatar_offline min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_ok:
-    `vui-routes-chatcodingroute petShowcaseAvatar_ok min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] ${vuiStateSuccessSoftClass}`,
-  petShowcaseAvatar_pending:
-    "vui-routes-chatcodingroute petShowcaseAvatar_pending min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_penguin:
-    "vui-routes-chatcodingroute petShowcaseAvatar_penguin min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_planning:
-    "vui-routes-chatcodingroute petShowcaseAvatar_planning min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_productive:
-    "vui-routes-chatcodingroute petShowcaseAvatar_productive min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_reading:
-    "vui-routes-chatcodingroute petShowcaseAvatar_reading min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_ready:
-    `vui-routes-chatcodingroute petShowcaseAvatar_ready min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] ${vuiStateSuccessSoftClass}`,
-  petShowcaseAvatar_research:
-    "vui-routes-chatcodingroute petShowcaseAvatar_research min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_running:
-    `vui-routes-chatcodingroute petShowcaseAvatar_running min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] ${vuiStateSuccessSoftClass}`,
-  petShowcaseAvatar_self:
-    "vui-routes-chatcodingroute petShowcaseAvatar_self min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_shrimp:
-    "vui-routes-chatcodingroute petShowcaseAvatar_shrimp min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_slime:
-    "vui-routes-chatcodingroute petShowcaseAvatar_slime min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_stale:
-    "vui-routes-chatcodingroute petShowcaseAvatar_stale min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_status:
-    "vui-routes-chatcodingroute petShowcaseAvatar_status min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_success:
-    `vui-routes-chatcodingroute petShowcaseAvatar_success min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] ${vuiStateSuccessSoftClass}`,
-  petShowcaseAvatar_supervised:
-    "vui-routes-chatcodingroute petShowcaseAvatar_supervised min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_thinking:
-    "vui-routes-chatcodingroute petShowcaseAvatar_thinking min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_thought:
-    "vui-routes-chatcodingroute petShowcaseAvatar_thought min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_thrashing:
-    "vui-routes-chatcodingroute petShowcaseAvatar_thrashing min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_tool:
-    `vui-routes-chatcodingroute petShowcaseAvatar_tool min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] ${vuiStateWarmSoftClass}`,
-  petShowcaseAvatar_tooling:
-    "vui-routes-chatcodingroute petShowcaseAvatar_tooling min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_tunnel_vision:
-    "vui-routes-chatcodingroute petShowcaseAvatar_tunnel_vision min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_unhealthy:
-    "vui-routes-chatcodingroute petShowcaseAvatar_unhealthy min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_unknown:
-    "vui-routes-chatcodingroute petShowcaseAvatar_unknown min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_verifying:
-    "vui-routes-chatcodingroute petShowcaseAvatar_verifying min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_waiting:
-    "vui-routes-chatcodingroute petShowcaseAvatar_waiting min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_warn:
-    "vui-routes-chatcodingroute petShowcaseAvatar_warn min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  petShowcaseAvatar_warning:
-    `vui-routes-chatcodingroute petShowcaseAvatar_warning min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] ${vuiStateWarningSoftClass}`,
   resizeHandleLeft:
     "vui-routes-chatcodingroute resizeHandleLeft h-full w-full min-w-0 max-[860px]:block [grid-column:2] [grid-row:1]",
   resizeHandleRight:

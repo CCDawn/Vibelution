@@ -23,7 +23,8 @@ describe("ChatComposerPlusMenu contract", () => {
     expect(source).toContain('label: lang === "zh" ? "心智模型"');
     expect(source).toContain('label: lang === "zh" ? "运行状态注入"');
     expect(source).toContain('id: "manage-group"');
-    expect(source).toContain('id: "companion-feed"');
+    // Pet interaction rows retired together with the chat status rail.
+    expect(source).not.toContain('id: "companion-feed"');
   });
 
   it("keeps slash commands, skills, and cache status out of the plus menu", () => {

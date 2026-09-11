@@ -1,6 +1,5 @@
 import {
   Activity,
-  Apple,
   ArrowUpRight,
   BrainCircuit,
   ChevronRight,
@@ -10,7 +9,6 @@ import {
   Plus,
   Settings2,
   UsersRound,
-  HeartHandshake,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
@@ -43,11 +41,6 @@ export type ChatComposerPlusMenuProps = {
     label: string;
     onOpen: () => void;
     onPrefetch?: () => void;
-  } | null;
-  companion?: {
-    name: string;
-    pending: boolean;
-    onAction: (action: "feed" | "talk" | "care") => void;
   } | null;
   group?: {
     title: string;
@@ -92,7 +85,6 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
     onMentalModelEnabledChange,
     onRuntimeStatusEnabledChange,
     directSession,
-    companion,
     group,
   } = props;
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
@@ -119,7 +111,7 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
         icon: <BrainCircuit size={16} />,
       });
     }
-    if (directSession || companion) {
+    if (directSession) {
       items.push({
         id: "session-companion",
         label: lang === "zh" ? "会话与陪伴" : "Session and companion",
@@ -134,7 +126,7 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
       });
     }
     return items;
-  }, [companion, directSession, group, lang, showAddReference, showCapabilities]);
+  }, [directSession, group, lang, showAddReference, showCapabilities]);
 
   const visibleCluster = hoverCluster ?? activeCluster;
   const filteredReferences = useMemo(() => {
@@ -298,30 +290,6 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
             hint: directSession.label,
             icon: <ArrowUpRight size={16} />,
             onSelect: directSession.onOpen,
-          }) : null}
-          {companion ? renderAction({
-            id: "companion-feed",
-            label: lang === "zh" ? "陪伴投喂" : "Feed companion",
-            hint: companion.name,
-            icon: <Apple size={16} />,
-            disabled: companion.pending,
-            onSelect: () => companion.onAction("feed"),
-          }) : null}
-          {companion ? renderAction({
-            id: "companion-talk",
-            label: lang === "zh" ? "陪伴聊天" : "Talk with companion",
-            hint: companion.name,
-            icon: <MessageCircleHeart size={16} />,
-            disabled: companion.pending,
-            onSelect: () => companion.onAction("talk"),
-          }) : null}
-          {companion ? renderAction({
-            id: "companion-care",
-            label: lang === "zh" ? "陪伴关怀" : "Care for companion",
-            hint: companion.name,
-            icon: <HeartHandshake size={16} />,
-            disabled: companion.pending,
-            onSelect: () => companion.onAction("care"),
           }) : null}
         </>
       );

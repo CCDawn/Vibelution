@@ -405,7 +405,7 @@ describe("chat hand-test substitute: agent tabs + skill chip", () => {
     expect(tabs.map((item) => item.id)).toEqual(["primary", "child", "other"]);
   });
 
-  it("builds stale skill chip labels for status rail", () => {
+  it("builds stale skill labels from the active skill contract", () => {
     const skill = buildChatActiveSkillViewModel({
       contract: { status: "stale", command: "review", skillName: "Review", skillHash: "deadbeef00" },
       lang: "zh",
@@ -414,7 +414,6 @@ describe("chat hand-test substitute: agent tabs + skill chip", () => {
     });
     expect(skill.hasActiveSkill).toBe(true);
     expect(skill.activeSkillStatusLabel).toBe("已变更");
-    expect(routeSource).toContain("buildChatActiveSkillViewModel");
   });
 });
 

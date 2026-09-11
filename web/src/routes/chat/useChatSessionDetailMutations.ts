@@ -26,7 +26,6 @@ import {
 } from "./chatSessionDetailHelpers";
 
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
-type PetInteractionAction = "feed" | "talk" | "care";
 
 export type UseChatSessionDetailMutationsOptions = {
   queryClient: QueryClient;
@@ -35,7 +34,6 @@ export type UseChatSessionDetailMutationsOptions = {
   describeError: (error: unknown, fallback: string) => string;
   activeSessionId: string | null | undefined;
   setSessionComposerErrors: Dispatch<SetStateAction<Record<string, string>>>;
-  setPetActionFeedback: Dispatch<SetStateAction<string>>;
 };
 
 export type UseChatSessionDetailMutationsResult = {
@@ -63,17 +61,11 @@ export type UseChatSessionDetailMutationsResult = {
     { request: SessionToolApprovalRequest; decision: SessionToolApprovalDecision },
     unknown
   >;
-  petActionMutation: UseMutationResult<
-    PetActionResponse,
-    Error,
-    { action: PetInteractionAction },
-    unknown
-  >;
 };
 
 /**
  * Session-detail local mutations: reasoning effort, history paging,
- * tool-approval resolve, and pet actions. No EventSource ownership.
+ * and tool-approval resolve. No EventSource ownership.
  */
 export function useChatSessionDetailMutations({
   queryClient,
@@ -82,7 +74,6 @@ export function useChatSessionDetailMutations({
   describeError,
   activeSessionId,
   setSessionComposerErrors,
-  setPetActionFeedback,
 }: UseChatSessionDetailMutationsOptions): UseChatSessionDetailMutationsResult {
   const sessionReasoningEffortMutation = useMutation({
     mutationFn: (variables: { sessionId: string; reasoningEffort: string }) =>
@@ -199,25 +190,10 @@ export function useChatSessionDetailMutations({
     },
   });
 
-  const petActionMutation = useMutation({
-    mutationFn: async ({ action }: { action: PetInteractionAction }) =>
-      postPetAction(action),
-    onSuccess: (payload) => {
-      setPetActionFeedback(payload.message);
-      queryClient.setQueryData(queryKeys.petSummary(), payload.summary);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.petSummary() });
-    },
-    onError: (error) => {
-      setPetActionFeedback(describeError(error, lang === "zh" ? "宠物互动失败" : "Pet interaction failed"));
-      void queryClient.invalidateQueries({ queryKey: queryKeys.petSummary() });
-    },
-  });
-
   return {
     sessionReasoningEffortMutation,
     loadEarlierSessionMessagesMutation,
     resolveToolApprovalMutation,
     resolveSessionToolApprovalMutation,
-    petActionMutation,
   };
 }

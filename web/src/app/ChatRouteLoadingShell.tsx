@@ -38,7 +38,7 @@ export function ChatRouteLoadingShell({
         layoutRef={layoutRef}
         className={chatStyles.layout}
         responsiveMode="wide"
-        statusRailCollapsed={false}
+        statusRailCollapsed
         conversationIndex={(
           <div
             data-loading-region="chat-index"
@@ -61,14 +61,6 @@ export function ChatRouteLoadingShell({
               label={label}
               variant="conversation"
             />
-          </div>
-        )}
-        statusRail={(
-          <div
-            data-loading-region="chat-status-rail"
-            className={`${chatStyles.leftRail} ${styles.paneFill}`}
-          >
-            <ProgressiveRegionSkeleton className={styles.statusRailSkeleton} label={label} variant="panel" />
           </div>
         )}
       />

@@ -25,7 +25,6 @@ import {
 
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
 type RightIndexPanel = "conversations" | "members";
-type PetInteractionAction = "feed" | "talk" | "care";
 
 type MutateLike<TVariables> = {
   mutate: (variables: TVariables) => void;
@@ -76,7 +75,6 @@ export type UseChatWorkspaceActionsOptions = {
   groupDeleteDisabled: boolean;
   groupResetDisabled: boolean;
   activeGroupRoom: ChatRoomDetail | null | undefined;
-  setPetActionFeedback: Dispatch<SetStateAction<string>>;
   createSessionMutation: MutateLike<{ agentId: string }>;
   createGroupRoomMutation: MutateLike<{ title: string; agentIds: string[]; mode: string; purpose: string }>;
   startGroupRoundMutation: MutateLike<{ roomId: string; topic: string; mode: string; purpose: string }>;
@@ -91,7 +89,6 @@ export type UseChatWorkspaceActionsOptions = {
   deleteSessionMutation: MutateLike<{ sessionId: string }>;
   clearSessionHistoryMutation: MutateLike<{ sessionId: string; agentId: string }>;
   addSessionToReviewMutation: MutateLike<{ sessionId: string }>;
-  petActionMutation: MutateLike<{ action: PetInteractionAction }>;
   openDeleteSessionConfirm: (session: SessionSummary) => void;
   openClearSessionHistoryConfirm: (session: SessionSummary) => void;
   openDeleteGroupConfirm: () => void;
@@ -99,7 +96,6 @@ export type UseChatWorkspaceActionsOptions = {
 };
 
 export type UseChatWorkspaceActionsResult = {
-  handlePetInteraction: (action: PetInteractionAction) => void;
   handleCreateSession: () => void;
   handleOpenProjectAgentBus: () => void;
   handleOpenDirectSession: (sessionId: string, options?: { telemetrySource?: string }) => void;
@@ -166,7 +162,6 @@ export function useChatWorkspaceActions({
   groupDeleteDisabled,
   groupResetDisabled,
   activeGroupRoom,
-  setPetActionFeedback,
   createSessionMutation,
   createGroupRoomMutation,
   startGroupRoundMutation,
@@ -179,17 +174,11 @@ export function useChatWorkspaceActions({
   deleteSessionMutation,
   clearSessionHistoryMutation,
   addSessionToReviewMutation,
-  petActionMutation,
   openDeleteSessionConfirm,
   openClearSessionHistoryConfirm,
   openDeleteGroupConfirm,
   openResetGroupConfirm,
 }: UseChatWorkspaceActionsOptions): UseChatWorkspaceActionsResult {
-  const handlePetInteraction = useCallback((action: PetInteractionAction) => {
-    setPetActionFeedback("");
-    petActionMutation.mutate({ action });
-  }, [petActionMutation, setPetActionFeedback]);
-
   const handleCreateSession = useCallback(() => {
     setRightIndexPanel("conversations");
     setSessionComposerErrors((current) => ({
@@ -608,7 +597,6 @@ export function useChatWorkspaceActions({
   }, [addSessionToReviewMutation, setSessionComposerErrors, setSessionContextMenu, t]);
 
   return {
-    handlePetInteraction,
     handleCreateSession,
     handleOpenProjectAgentBus,
     handleOpenDirectSession,

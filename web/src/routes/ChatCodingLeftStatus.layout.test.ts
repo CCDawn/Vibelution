@@ -2,13 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import routeStyles from "./ChatCodingRoute.styles";
 import conversationIndexRailStyles from "./chat/ChatConversationIndexRail.styles";
-import statusRailStyles from "./chat/ChatStatusRail.styles";
 import tokenCoreStyles from "./chat/TokenCoreStatusPanel.styles";
 
 const styles = {
   ...routeStyles,
   ...conversationIndexRailStyles,
-  ...statusRailStyles,
   ...tokenCoreStyles,
 } as Record<string, string>;
 import chatCodingRouteSource from "./chat/ChatCodingRouteWorkbench.tsx?raw";
@@ -43,27 +41,14 @@ describe("ChatCodingRoute left status panel layout contract", () => {
   });
 
   it("keeps critical copy visible and moves token detail to accessible tooltip triggers", () => {
-    expect(styles.currentSessionLine).toContain("[overflow-wrap:anywhere]");
-    expect(styles.activeSkillStatus).toContain("grid-cols-[minmax(0,1fr)]");
+    // Chat status rail retired: the current-session line and active-skill chip
+    // styles went with it; token detail stays behind tooltip triggers.
     expect(styles.tokenStatusMeta).toContain("sr-only");
     expect(styles.tokenStatusMeta).not.toContain("line-clamp");
     expect(tokenCoreStatusPanelSource).toContain("VTooltip");
     expect(tokenCoreStatusPanelSource).toContain("renderTrigger");
     expect(tokenCoreStatusPanelSource).toContain("aria-label={cacheDetailOpenLabel}");
     expect(tokenCoreStatusPanelSource).toContain('aria-label={`${metric.label} ${metric.value}. ${metric.meta}`}');
-    expect(styles.companionCopy).toContain("[&>p]:[overflow-wrap:anywhere]");
-    expect(styles.companionTopLine).toContain("[&_strong]:truncate");
-    expect(styles.companionTopLine).toContain("[&_span]:truncate");
-    expect(styles.companionBlock).toContain("overflow-visible");
-    expect(styles.companionBlock).not.toContain("!flex-1");
-  });
-
-  it("keeps compact meta rows and action labels single-line truncated in the dense rail", () => {
-    expect(styles.inlineMetaList).not.toContain("overflow-auto");
-    expect(styles.inlineMetaPill).toContain("[&_strong]:truncate");
-    expect(styles.inlineStat).toContain("[&_strong]:truncate");
-    expect(styles.featureChip).toContain("[&_strong]:truncate");
-    expect(styles.petShowcaseAction).toContain("[&_span]:truncate");
   });
 
   it("keeps provider failure status compact and hides numeric operator identities", () => {

@@ -1,13 +1,10 @@
-import type { PetSummary, RuntimeSummary, SessionDetail, SessionSummary } from "../../api/types";
+import type { RuntimeSummary, SessionDetail, SessionSummary } from "../../api/types";
 import type { TranslationKey } from "../../i18n/dictionary";
-import { petAvatarPresetLabel } from "../../i18n/petLabels";
 import {
   buildVisiblePanelRows,
-  getPetAvatarPresetKey,
-  getPetAvatarSymbol,
   type CompactPanelRow,
 } from "../chatCompactPanel";
-import { clampPercent, formatRelativeTime } from "../chatShellFormat";
+import { formatRelativeTime } from "../chatShellFormat";
 
 export type ActiveSkillContract = {
   status?: string;
@@ -188,96 +185,6 @@ export function buildChatMentalStateViewModel(options: {
     mentalConfidence,
     mentalRelativeTime,
     mentalCompactLine,
-  };
-}
-
-export type ChatPetCompanionViewModel = {
-  petVitals: Array<{ key: string; label: string; value: number }>;
-  petCompanionLine: string;
-  petPresetLabel: string;
-  petAvatarPresetKey: string;
-  petAvatarSymbol: string;
-  petCompactLine: string;
-  petInteractionLabels: {
-    group: string;
-    pending: string;
-    feed: string;
-    talk: string;
-    care: string;
-    feedTitle: string;
-    talkTitle: string;
-    careTitle: string;
-  };
-};
-
-export function buildChatPetCompanionViewModel(options: {
-  pet: PetSummary | null | undefined;
-  petQueryError: boolean;
-  petQueryErrorMessage: string;
-  petActionPending: boolean;
-  lang: "zh" | "en";
-  t: (key: TranslationKey) => string;
-  numberFormatter: Intl.NumberFormat;
-}): ChatPetCompanionViewModel {
-  const {
-    pet,
-    petQueryError,
-    petQueryErrorMessage,
-    petActionPending,
-    lang,
-    t,
-    numberFormatter,
-  } = options;
-
-  const petVitals = [
-    { key: "hunger", label: t("hunger"), value: clampPercent(pet?.hunger ?? 0) },
-    { key: "energy", label: t("energy"), value: clampPercent(pet?.energy ?? 0) },
-    { key: "health", label: t("health"), value: clampPercent(pet?.health ?? 0) },
-    { key: "love", label: t("love"), value: clampPercent(pet?.love ?? 0) },
-  ];
-  const petCompanionLine = petQueryError
-    ? petQueryErrorMessage
-    : pet?.inDream
-      ? t("petCompanionDreaming")
-      : (pet?.health ?? 0) < 35
-        ? t("petCompanionLowHealth")
-        : (pet?.hunger ?? 0) < 30
-          ? t("petCompanionLowFuel")
-          : (pet?.energy ?? 0) < 35
-            ? t("petCompanionLowEnergy")
-            : t("petCompanionStable");
-  const petPresetLabel = petAvatarPresetLabel(t, pet?.avatarPreset);
-  const petAvatarPresetKey = getPetAvatarPresetKey(pet?.avatarPreset);
-  const petAvatarSymbol = getPetAvatarSymbol(pet?.avatarPreset, pet?.name);
-  const petCompactLine = [
-    petCompanionLine,
-    pet?.heartActive ? t("heartActive") : t("heartIdle"),
-    pet?.inDream ? t("dreamSleeping") : t("dreamAwake"),
-    `${t("tokens")} ${numberFormatter.format(pet?.totalTokens ?? 0)}`,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  const petInteractionLabels = {
-    group: lang === "zh" ? "宠物互动" : "Pet interactions",
-    pending: petActionPending
-      ? lang === "zh" ? "处理中" : "Working"
-      : lang === "zh" ? "即时生效" : "Live",
-    feed: lang === "zh" ? "喂食" : "Feed",
-    talk: lang === "zh" ? "沟通" : "Talk",
-    care: lang === "zh" ? "照看" : "Care",
-    feedTitle: lang === "zh" ? "喂食并刷新宠物状态" : "Feed and refresh pet state",
-    talkTitle: lang === "zh" ? "和宠物沟通并刷新状态" : "Talk and refresh pet state",
-    careTitle: lang === "zh" ? "照看宠物并刷新状态" : "Care and refresh pet state",
-  };
-
-  return {
-    petVitals,
-    petCompanionLine,
-    petPresetLabel,
-    petAvatarPresetKey,
-    petAvatarSymbol,
-    petCompactLine,
-    petInteractionLabels,
   };
 }
 

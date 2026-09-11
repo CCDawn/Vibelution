@@ -16,7 +16,6 @@ import {
   listConversations,
 } from "../../api/chat";
 import { fetchPublicConfig } from "../../api/config";
-import { fetchPetSummary } from "../../api/pet";
 import { listProjectAgentBusTimeline } from "../../api/projectAgentBus";
 import { fetchRuntimeSummary } from "../../api/runtime";
 import { fetchSkillLibrary } from "../../api/skills";
@@ -85,13 +84,6 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     refetchInterval: chatSecondaryPollPolicy.runtimeRefetchInterval,
     refetchIntervalInBackground: chatSecondaryPollPolicy.secondaryRefetchIntervalInBackground,
     structuralSharing: shareRuntimeSummaryIfOnlyVolatileChanged,
-  });
-  const petQuery = useQuery({
-    queryKey: queryKeys.petSummary(),
-    queryFn: () => fetchPetSummary(),
-    enabled: secondaryChatDataEnabled,
-    refetchInterval: chatSecondaryPollPolicy.petRefetchInterval,
-    refetchIntervalInBackground: chatSecondaryPollPolicy.secondaryRefetchIntervalInBackground,
   });
   const configSummaryQuery = useQuery({
     queryKey: queryKeys.configPublic(),
@@ -262,7 +254,6 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
 
   return {
     runtimeQuery,
-    petQuery,
     configSummaryQuery,
     selectedAgentId,
     setSelectedAgentId,

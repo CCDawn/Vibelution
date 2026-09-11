@@ -2,8 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildVisiblePanelRows,
-  getPetAvatarPresetKey,
-  getPetAvatarSymbol,
   isLowValuePanelText,
   resolveChatResponsiveLayout,
   resolveChatUserDisplayName,
@@ -27,19 +25,6 @@ describe("chatCompactPanel", () => {
     );
 
     expect(rows).toEqual([{ label: "当前任务", value: "审查最新日志", title: undefined }]);
-  });
-
-  it("derives compact pet avatar symbols from preset or pet name", () => {
-    expect(getPetAvatarSymbol("cat", "Mika")).toBe("CAT");
-    expect(getPetAvatarSymbol(" PENGUIN ", "Mika")).toBe("PNG");
-    expect(getPetAvatarSymbol("custom", "小鱼")).toBe("小鱼");
-    expect(getPetAvatarSymbol(undefined, "")).toBe("PET");
-  });
-
-  it("normalizes pet avatar preset keys for the showcase skin", () => {
-    expect(getPetAvatarPresetKey(" Moose ")).toBe("moose");
-    expect(getPetAvatarPresetKey("")).toBe("default");
-    expect(getPetAvatarPresetKey(undefined)).toBe("default");
   });
 
   it.each([

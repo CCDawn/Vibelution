@@ -26,6 +26,8 @@ export type ChatCenterTabStripProps = {
   conversationIndexControl?: ReactNode;
   leftOverlayVisible: boolean;
   rightOverlayVisible: boolean;
+  /** The status rail only exists in companion mode; without it there is no toggle. */
+  statusRailAvailable: boolean;
   conversationIndexOverlayOpen: boolean;
   statusRailOverlayOpen: boolean;
   onActivateAgentFallbackTab: () => void;
@@ -50,6 +52,7 @@ export function ChatCenterTabStrip({
   conversationIndexControl,
   leftOverlayVisible,
   rightOverlayVisible,
+  statusRailAvailable,
   conversationIndexOverlayOpen,
   statusRailOverlayOpen,
   onActivateAgentFallbackTab,
@@ -92,7 +95,7 @@ export function ChatCenterTabStrip({
         ) : null)}
         {companionHeader ? null : <Suspense fallback={null}>{fileTabs}</Suspense>}
       </div>
-      {!leftOverlayVisible || !rightOverlayVisible ? (
+      {!leftOverlayVisible || (statusRailAvailable && !rightOverlayVisible) ? (
         <div className={styles.overlayPaneControls}>
           {!leftOverlayVisible ? (
             <VButton
@@ -106,7 +109,7 @@ export function ChatCenterTabStrip({
               {lang === "zh" ? "会话" : "Chats"}
             </VButton>
           ) : null}
-          {!rightOverlayVisible ? (
+          {statusRailAvailable && !rightOverlayVisible ? (
             <VButton
               id="chat-status-toggle"
               type="button"

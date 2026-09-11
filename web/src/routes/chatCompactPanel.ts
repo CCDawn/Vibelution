@@ -24,24 +24,7 @@ export function resolveChatUserDisplayName(candidate: string | null | undefined)
   return !normalized || /^\d+$/.test(normalized) ? "操作者" : normalized;
 }
 
-const PET_AVATAR_SYMBOLS: Record<string, string> = {
-  lobster: "LOB",
-  shrimp: "SHR",
-  crab: "CRB",
-  cat: "CAT",
-  chick: "CHK",
-  bunny: "BUN",
-  slime: "SLM",
-  penguin: "PNG",
-  moose: "MOS",
-};
-
 const LOW_VALUE_VALUES = new Set(["", "--", "workspace"]);
-
-export function getPetAvatarPresetKey(avatarPreset: string | null | undefined) {
-  const normalized = String(avatarPreset ?? "").trim().toLowerCase();
-  return normalized || "default";
-}
 
 export function compactValue(value: string | null | undefined) {
   return String(value ?? "").trim();
@@ -66,13 +49,4 @@ export function buildVisiblePanelRows(
       title: row.title,
     }))
     .filter((row) => row.label.trim() && !isLowValuePanelText(row.value, lowValueLabels));
-}
-
-export function getPetAvatarSymbol(avatarPreset: string | null | undefined, petName: string | null | undefined) {
-  const presetSymbol = PET_AVATAR_SYMBOLS[getPetAvatarPresetKey(avatarPreset)];
-  if (presetSymbol) {
-    return presetSymbol;
-  }
-
-  return petName?.trim()?.slice(0, 2) || "PET";
 }

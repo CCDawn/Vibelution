@@ -96,7 +96,7 @@ Pure helpers extracted from `ChatCodingRoute.tsx`:
 
 ## Phase C (done)
 
-- `ChatStatusRail.tsx` — right status pane (group profile/settings, current session, run modes, token/LLM panels, companion/pet)
+- Right status pane retired (group profile moved to the group center surface header, diagnostics into the cache detail dialog, control signals into the runtime notice stack, companion/pet removed); the right slot now only mounts `../companions/CompanionLifeRail.tsx` in virtual-human mode.
 
 ## Phase D (done)
 
