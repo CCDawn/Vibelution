@@ -172,6 +172,13 @@ describe("ChallengeQuestionReviewForm", () => {
       },
     }, {runId: "stage1-sci-096-v3"});
 
+    // All-approved must lock immediately too: the parent only swaps to the
+    // summary after the detail refetch, and that gap must reject a second click.
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("审核结论已提交"));
+    });
+    expect(findButton(container, "提交审核结论")!.disabled).toBe(true);
+
     await act(async () => {
       root.unmount();
     });
