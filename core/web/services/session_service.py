@@ -632,6 +632,7 @@ from core.web.services.session.session_ops import (
     _supersede_active_session_turn_for_edit,
     _terminal_error_turn_item,
     append_session_assistant_artifact_message,
+    apply_generated_session_title,
     prewarm_session_list_cache,
     update_chat_session,
     update_chat_session_title,
