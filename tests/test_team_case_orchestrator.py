@@ -97,3 +97,54 @@ def test_heletech_non_health_demo_topic_keeps_full_team_delegation():
     assert case_state["nextAction"] == "discuss"
     assert case_state["userFacingMode"] == "team_discussion"
     assert select_speakers_for_case(participants, participants=participants, case_state=case_state) == participants
+
+
+def test_frozen_workflow_roster_ignores_triage_clarify_heuristics():
+    """A frozen workflow meeting keeps its full roster and stays in discuss.
+
+    The triage heuristics are user-facing chat affordances.  A research topic
+    that merely quotes a triage keyword (SCI-125's problem understanding
+    excludes 意识/意向性) previously flipped a frozen generation meeting into
+    ``clarify``, narrowed the speakers to one, and failed the round against the
+    exact-frozen-roster gate.
+    """
+
+    participants = [
+        {"agentId": "agent-search", "participantId": "p1", "teamRole": "challenge_cup_search", "enabled": True},
+        {"agentId": "agent-knowledge", "participantId": "p2", "teamRole": "challenge_cup_knowledge_manager", "enabled": True},
+        {"agentId": "agent-experiment", "participantId": "p3", "teamRole": "challenge_cup_experiment_revision", "enabled": True},
+        {"agentId": "agent-evaluator", "participantId": "p4", "teamRole": "challenge_cup_evaluator", "enabled": True},
+    ]
+    room = {
+        "roomId": "room-challenge-frozen",
+        "config": {"source": "challenge_workflow", "teamId": "research-team"},
+    }
+    topic = "候选假说生成讨论：本范围显式排除了意识/意向性等不可判定分支"
+
+    generic = build_team_case_state(
+        room=room,
+        topic=topic,
+        purpose="meeting",
+        participants=participants,
+        history=[],
+    )
+    assert generic["nextAction"] == "clarify"
+    assert generic["riskFlags"] == ["急症红旗"]
+    assert select_speakers_for_case(
+        participants, participants=participants, case_state=generic
+    ) == participants[:1]
+
+    frozen = build_team_case_state(
+        room=room,
+        topic=topic,
+        purpose="meeting",
+        participants=participants,
+        history=[],
+        config={"participantAgentIds": [item["agentId"] for item in participants]},
+    )
+    assert frozen["riskFlags"] == []
+    assert frozen["nextAction"] == "discuss"
+    assert frozen["status"] == "discussing"
+    assert select_speakers_for_case(
+        participants, participants=participants, case_state=frozen
+    ) == participants

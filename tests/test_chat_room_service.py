@@ -2194,6 +2194,44 @@ def test_frozen_roster_survives_session_key_overlap_after_participant_refresh(
     assert [participant["agentId"] for participant in detail["participants"]] == frozen_agent_ids
 
 
+def test_frozen_roster_round_keeps_speakers_when_topic_quotes_triage_keywords(
+    tmp_path, monkeypatch
+):
+    """A formal meeting topic may cite triage keywords (e.g. 意识).
+
+    Case clarification narrowing is a user-facing chat affordance; it must not
+    collapse a frozen workflow roster into one speaker, which previously made
+    the opening round fail the exact-frozen-speaker-roster gate.
+    """
+
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    sessions = [
+        session_service.create_chat_session(title=f"Participant {index}")
+        for index in range(4)
+    ]
+    frozen_agent_ids = [session["agentId"] for session in sessions]
+    room = chat_room_service.create_chat_room(
+        title="冻结名单会议引用分诊关键词",
+        participant_agent_ids=frozen_agent_ids,
+    )
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "本范围显式排除了意识/意向性等不可判定分支",
+        config={"participantAgentIds": frozen_agent_ids},
+        agent_runner=lambda participant, prompt, context: {
+            "status": "completed",
+            "raw_output": f"{participant['title']} 已发言",
+            "summary": "ok",
+        },
+    )
+
+    latest_round = detail["rounds"][-1]
+    assert [message["agentId"] for message in latest_round["messages"]] == frozen_agent_ids
+    assert latest_round["caseState"]["nextAction"] == "discuss"
+    assert latest_round["caseState"]["riskFlags"] == []
+
+
 @pytest.mark.parametrize("failure_mode", ["disabled", "ambiguous"])
 def test_start_chat_room_round_rejects_unavailable_or_ambiguous_frozen_participant(
     tmp_path, monkeypatch, failure_mode
