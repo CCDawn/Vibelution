@@ -182,3 +182,38 @@ def test_fixed_research_role_preserves_versioned_call_budget_update(tmp_path, mo
     assert response.json()["policyVersion"] == detail["policyVersion"] + 1
     persisted = client.get(f"/api/agents/{agent['agentId']}/tool-policy").json()
     assert persisted["currentPolicy"]["maxCallsPerTurn"] == 64
+
+
+def test_editor_update_keeps_reset_policy_savable(configured_agent, monkeypatch):
+    agent_id = configured_agent["agentId"]
+    reset = agent_directory_service.reset_agent_instance(
+        agent_id,
+        clear_runtime_state=False,
+        reset_direct_session=False,
+        reset_tool_policy=True,
+    )
+    assert reset["resetSummary"]["resetToolPolicy"] is True
+    record = agent_directory_service._find_agent(agent_directory_service.load_state(), agent_id)
+    assert "toolPolicy" not in record
+
+    detail = client.get(f"/api/agents/{agent_id}/tool-policy").json()
+    monkeypatch.setattr(
+        tool_policy_configuration_service.tool_registry_service,
+        "get_tool_registry",
+        lambda: _registry_payload(detail["currentPolicy"]["allowedTools"]),
+    )
+    response = client.put(
+        f"/api/agents/{agent_id}/tool-policy",
+        json={
+            "toolPolicy": {**detail["currentPolicy"], "maxCallsPerTurn": 48},
+            "expectedAgentUpdatedAt": detail["agent"]["updatedAt"],
+            "expectedPolicyFingerprint": detail["policyFingerprint"],
+            "confirmed": True,
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    assert response.json()["currentPolicy"]["maxCallsPerTurn"] == 48
+    assert response.json()["policyVersion"] == detail["policyVersion"] + 1
+    persisted = client.get(f"/api/agents/{agent_id}/tool-policy").json()
+    assert persisted["currentPolicy"]["maxCallsPerTurn"] == 48
