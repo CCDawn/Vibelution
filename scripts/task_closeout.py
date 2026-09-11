@@ -428,6 +428,82 @@ def _remove_worktree_with_retry(context: CloseoutContext) -> subprocess.Complete
         time.sleep(min(CLEANUP_RETRY_DELAY_SECONDS, remaining))
 
 
+def registered_worktree_roots(context: CloseoutContext) -> set[str]:
+    """Resolved, case-normalized paths of the worktrees Git currently tracks."""
+
+    completed = gate.run_process(["git", "worktree", "list", "--porcelain"], context.main_root)
+    if completed.returncode != 0:
+        raise ManagedCloseoutError("worktree_list_failed", _bounded_error(completed.stderr))
+    roots: set[str] = set()
+    for line in completed.stdout.splitlines():
+        if not line.startswith("worktree "):
+            continue
+        raw = line.removeprefix("worktree ").strip()
+        if raw:
+            roots.add(os.path.normcase(str(Path(raw).resolve())))
+    return roots
+
+
+def worktree_is_registered(context: CloseoutContext) -> bool:
+    """Whether this checkout is still a registered worktree of the main repo.
+
+    Git commands run with ``cwd`` inside an *unregistered* leftover directory
+    resolve to the main repository instead, so every check that reads task state
+    through Git has to be gated on this rather than on ``is_dir()``.
+    """
+
+    if not context.task_root.is_dir():
+        return False
+    return os.path.normcase(str(context.task_root.resolve())) in registered_worktree_roots(context)
+
+
+def _remove_leftover_worktree_dir(context: CloseoutContext) -> None:
+    """Finish a half-completed worktree removal by deleting the residue.
+
+    ``git worktree remove`` unregisters the worktree and deletes its contents,
+    then may fail to delete the directory itself (a Windows lock on the path,
+    typically a process whose working directory is inside it). Retrying the Git
+    command then reports "is not a working tree" even though only an empty
+    directory is left.
+
+    Only an empty directory is removed here.  Any remaining entry is reported
+    instead, because a half-deleted checkout can still hold untracked content
+    whose ownership this script cannot judge.
+    """
+
+    deadline = time.monotonic() + CLEANUP_RETRY_SECONDS
+    while True:
+        if not context.task_root.is_dir():
+            return
+        unreadable = False
+        try:
+            residue = sorted(entry.name for entry in context.task_root.iterdir())
+        except OSError:
+            residue = []
+            unreadable = True
+        if not unreadable and not residue:
+            try:
+                context.task_root.rmdir()
+            except FileNotFoundError:
+                return
+            except OSError:
+                pass
+            else:
+                return
+        if time.monotonic() >= deadline:
+            if unreadable:
+                detail = "not readable"
+            elif residue:
+                detail = ", ".join(residue)
+            else:
+                detail = "empty directory is still locked"
+            raise ManagedCloseoutError(
+                "cleanup_residue_present",
+                f"{context.task_root}: {detail}",
+            )
+        time.sleep(CLEANUP_RETRY_DELAY_SECONDS)
+
+
 def ensure_cleanup_unowned(context: CloseoutContext, *, agent_id: str) -> None:
     status = _coordination_call(context, "status")
     agents = status.get("agents")
@@ -453,12 +529,17 @@ def ensure_cleanup_unowned(context: CloseoutContext, *, agent_id: str) -> None:
 def cleanup_task_resources(context: CloseoutContext, *, agent_id: str) -> None:
     ensure_cleanup_unowned(context, agent_id=agent_id)
     task_exists = context.task_root.is_dir()
-    if task_exists and gate.git_lines(context.task_root, "status", "--porcelain"):
+    # Task state must be read through Git only while this directory is still a
+    # registered worktree; otherwise those commands silently answer for the main
+    # repository (its status, its HEAD) and the checks below stop meaning what
+    # they say.
+    worktree_registered = worktree_is_registered(context)
+    if worktree_registered and gate.git_lines(context.task_root, "status", "--porcelain"):
         raise ManagedCloseoutError("dirty_worktree")
     branch_exists = _branch_exists(context)
     task_head = (
         gate.rev_parse(context.task_root, "HEAD")
-        if task_exists
+        if worktree_registered
         else gate.rev_parse(context.main_root, context.branch) if branch_exists else ""
     )
     main_head = gate.rev_parse(context.main_root, "HEAD")
@@ -469,21 +550,23 @@ def cleanup_task_resources(context: CloseoutContext, *, agent_id: str) -> None:
         raise ManagedCloseoutError("unsafe_worktree_path")
 
     if task_exists:
-        for relative in (
-            Path(".venv"),
-            Path("node_modules"),
-            Path("web") / "node_modules",
-            Path("挑战杯"),
-        ):
-            _remove_link_or_junction(context.task_root / relative)
-        if invocation_cwd_is_inside_task(context.task_root):
-            os.chdir(context.main_root)
-        removed = _remove_worktree_with_retry(context)
-        if removed.returncode != 0:
-            raise ManagedCloseoutError(
-                "worktree_remove_failed",
-                _bounded_error(removed.stderr or removed.stdout),
-            )
+        if worktree_registered:
+            for relative in (
+                Path(".venv"),
+                Path("node_modules"),
+                Path("web") / "node_modules",
+                Path("挑战杯"),
+            ):
+                _remove_link_or_junction(context.task_root / relative)
+            if invocation_cwd_is_inside_task(context.task_root):
+                os.chdir(context.main_root)
+            removed = _remove_worktree_with_retry(context)
+            if removed.returncode != 0 and worktree_is_registered(context):
+                raise ManagedCloseoutError(
+                    "worktree_remove_failed",
+                    _bounded_error(removed.stderr or removed.stdout),
+                )
+        _remove_leftover_worktree_dir(context)
     if branch_exists:
         branch_deleted = gate.run_process(
             ["git", "branch", "-d", context.branch],
@@ -519,10 +602,15 @@ def resolve_cleanup_context(
     if not branch.startswith("codex/") or branch == "codex/":
         raise ManagedCloseoutError("invalid_task_branch")
     if task_root.is_dir():
-        if gate.repository_root(task_root).resolve() != task_root:
+        resolved_root = gate.repository_root(task_root).resolve()
+        if resolved_root == task_root:
+            if gate.current_branch(task_root) != branch:
+                raise ManagedCloseoutError("invalid_task_branch")
+        elif resolved_root != main_root:
             raise ManagedCloseoutError("unsafe_worktree_path")
-        if gate.current_branch(task_root) != branch:
-            raise ManagedCloseoutError("invalid_task_branch")
+        # Otherwise the directory is residue from a half-completed removal: Git
+        # resolves it to the main repository, and cleanup finishes deleting it
+        # instead of refusing the recovery the caller was told to run.
     return CloseoutContext(main_root=main_root, task_root=task_root, branch=branch)
 
 
