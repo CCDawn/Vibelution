@@ -2133,6 +2133,67 @@ def test_start_chat_room_round_filters_speakers_to_frozen_participant_agent_ids(
         )
 
 
+def test_frozen_roster_survives_session_key_overlap_after_participant_refresh(
+    tmp_path, monkeypatch
+):
+    """Session-key overlaps are refreshed metadata, not frozen roster identity.
+
+    The generic participant dedupe collapses entries that share a session id.
+    A frozen roster must dedupe by agent identity instead: distinct frozen
+    agents can transiently present the same refreshed session key (one agent's
+    ``directSessionId`` equal to another agent's ``sessionId``), and a
+    session-scoped collapse would silently drop a mandated speaker before
+    ``_require_exact_frozen_speaker_roster`` turns the round into a hard
+    generation-open failure.
+    """
+
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    sessions = [
+        session_service.create_chat_session(title=f"Participant {index}")
+        for index in range(4)
+    ]
+    frozen_agent_ids = [session["agentId"] for session in sessions]
+    room = chat_room_service.create_chat_room(
+        title="冻结名单会话键重叠",
+        participant_agent_ids=frozen_agent_ids,
+    )
+    refresh = chat_room_service._refresh_chat_room_round_participants
+
+    def refresh_with_session_key_overlap(
+        participants, *, preserve_scoped_session_ids=False
+    ):
+        refreshed = refresh(
+            participants,
+            preserve_scoped_session_ids=preserve_scoped_session_ids,
+        )
+        shared_session_id = str(
+            refreshed[0].get("sessionId") or sessions[0]["sessionId"]
+        )
+        refreshed[2]["directSessionId"] = shared_session_id
+        return refreshed
+
+    monkeypatch.setattr(
+        chat_room_service,
+        "_refresh_chat_room_round_participants",
+        refresh_with_session_key_overlap,
+    )
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "身份键重叠不能挤掉冻结讲者",
+        config={"participantAgentIds": frozen_agent_ids},
+        agent_runner=lambda participant, prompt, context: {
+            "status": "completed",
+            "raw_output": f"{participant['title']} 已发言",
+            "summary": "ok",
+        },
+    )
+
+    latest_round = detail["rounds"][-1]
+    assert [message["agentId"] for message in latest_round["messages"]] == frozen_agent_ids
+    assert [participant["agentId"] for participant in detail["participants"]] == frozen_agent_ids
+
+
 @pytest.mark.parametrize("failure_mode", ["disabled", "ambiguous"])
 def test_start_chat_room_round_rejects_unavailable_or_ambiguous_frozen_participant(
     tmp_path, monkeypatch, failure_mode

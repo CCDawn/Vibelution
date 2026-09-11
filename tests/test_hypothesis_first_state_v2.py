@@ -3005,6 +3005,64 @@ def test_single_candidate_completed_attempt_offers_retry_not_selection() -> None
     assert retry.payload.previousAttemptId == "attempt-1"
 
 
+def test_retry_generation_offer_carries_its_active_run_id() -> None:
+    """The retry offer must ride the same run as the grounded R1 offer.
+
+    ``retry_generation`` without a run id resolves no stage-one launch and
+    opens the plain exploratory meeting, which the execution fence then closes
+    as ``legacy_orphan_closeout``.  The command handler already reads
+    ``payload.runId``; the offer must actually carry it whenever the question
+    has an active stage-one run.
+    """
+
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-105",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "generation_attempt",
+                    "attemptId": "attempt-1",
+                    "attemptNumber": 1,
+                    "questionId": "SCI-105",
+                    "meetingRoundId": "meeting-single",
+                    "lifecycle": "completed",
+                    "outcome": "succeeded",
+                    "queuedAt": "2026-08-25T00:00:00Z",
+                    "updatedAt": "2026-08-25T00:05:00Z",
+                },
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-105",
+                },
+            ],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            formal_runs=[
+                {
+                    "runId": "run-stage-one",
+                    "status": "running",
+                    "questionId": "SCI-105",
+                    "createdAt": "2026-08-25T00:00:00Z",
+                }
+            ],
+        )
+    )
+
+    retry = next(
+        action
+        for action in state.allowedActions
+        if action.kind == "command" and action.command == "retry_generation"
+    )
+    assert retry.payload.previousAttemptId == "attempt-1"
+    assert retry.payload.runId == "run-stage-one"
+
+
 def test_single_candidate_orphaned_generation_reports_dead_end_problem(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
