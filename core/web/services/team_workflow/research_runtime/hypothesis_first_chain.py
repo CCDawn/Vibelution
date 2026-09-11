@@ -2379,6 +2379,13 @@ def _apply_human_acceptance_for_recommended_candidate(
     do not cite are never touched, ``contradicts``/boundary records are never
     auto-accepted, and the gate's ``contradicted``/``disputed`` blocking
     states stay fully in force.
+
+    Promotion is restricted to records the server already corroborated: a
+    pending support with no ``collectionEnvelope`` was never matched to a
+    collected source candidate, so accepting it would mint belief support out
+    of an uncorroborated source.  Those records stay pending, are reported as
+    ``uncorroboratedEvidenceIds``, and the gate keeps its
+    ``accepted_support_missing`` gap instead of counting them.
     """
     normalized_candidate = str(candidate_id or "").strip()
     normalized_question = str(question_id or "").strip().upper()
@@ -2429,6 +2436,7 @@ def _apply_human_acceptance_for_recommended_candidate(
         for claim_id in core_claim_ids
     }
     surface: list[dict[str, Any]] = []
+    uncorroborated_evidence_ids: list[str] = []
     seen_evidence_ids: set[str] = set()
     for record in evidence_records:
         evidence_id = str(record.get("claimEvidenceId") or "").strip()
@@ -2469,13 +2477,27 @@ def _apply_human_acceptance_for_recommended_candidate(
         entry = dict(record)
         if scope_hash:
             entry["scopeHash"] = scope_hash
+        if not entry.get("collectionEnvelope"):
+            # A pending record with no collection envelope exists only as a
+            # lean card: the server never matched it to a collected source
+            # candidate, so promoting it would mint belief support out of an
+            # uncorroborated source.  It stays pending and the caller's gate
+            # reports the gap instead of silently counting it as support.
+            uncorroborated_evidence_ids.append(evidence_id)
+            seen_evidence_ids.add(evidence_id)
+            continue
         surface.append(entry)
         seen_evidence_ids.add(evidence_id)
     if not surface:
         return {
-            "status": "no_pending_support_evidence",
+            "status": (
+                "no_corroborated_support_evidence"
+                if uncorroborated_evidence_ids
+                else "no_pending_support_evidence"
+            ),
             "candidateId": normalized_candidate,
             "coreClaimIds": sorted(core_claim_ids),
+            "uncorroboratedEvidenceIds": uncorroborated_evidence_ids,
             "acceptedTwinCount": 0,
         }
     from core.research.evidence import ClaimEvidenceStore
@@ -2494,6 +2516,8 @@ def _apply_human_acceptance_for_recommended_candidate(
         "coreClaimIds": sorted(core_claim_ids),
         "sourceCount": len(surface),
         "acceptedTwinCount": len(twins),
+        "acceptanceSource": "human_adjudication",
+        "uncorroboratedEvidenceIds": uncorroborated_evidence_ids,
     }
 
 
@@ -2911,6 +2935,12 @@ def record_human_adjudication(
                         ),
                         "sourceCount": int(acceptance.get("sourceCount") or 0),
                         "coreClaimIds": list(acceptance.get("coreClaimIds") or []),
+                        # Why nothing was promoted: pending supports the
+                        # server never matched to a collected source stay
+                        # pending so the gate reports the gap.
+                        "uncorroboratedEvidenceIds": list(
+                            acceptance.get("uncorroboratedEvidenceIds") or []
+                        ),
                     },
                 )
             try:

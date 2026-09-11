@@ -15,6 +15,7 @@ from .human_gate_artifacts import canonical_sha256
 from .source_extraction_evidence_cards import (
     build_source_extraction_evidence_cards,
 )
+from ..source_collection.extraction_fetch_text import task_fetched_text
 from ..source_collection.search_execution import (
     project_source_collection_search_trace,
 )
@@ -186,7 +187,13 @@ def _source_extraction_payload(task: dict[str, Any]) -> dict[str, Any]:
     )
     return {
         **result,
-        "evidenceCards": build_source_extraction_evidence_cards(result),
+        # The stage task's Session Journal fetch receipts are the authority for
+        # each card's ``verification_status``; without them the writeback could
+        # self-declare ``full_text_checked`` for a page it never fetched.
+        "evidenceCards": build_source_extraction_evidence_cards(
+            result,
+            fetched_text=task_fetched_text(task_view),
+        ),
     }
 
 

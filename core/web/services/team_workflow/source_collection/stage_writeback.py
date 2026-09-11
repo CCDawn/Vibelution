@@ -274,7 +274,10 @@ def _source_collection_stage_writeback_extraction_card_contract_errors(
     )
 
     try:
-        build_source_extraction_evidence_cards(result_payload)
+        build_source_extraction_evidence_cards(
+            result_payload,
+            fetched_text=task_fetched_text(task),
+        )
     except SourceExtractionEvidenceContractError as exc:
         return [s._trim_text(str(exc), max_length=400)]
     return []

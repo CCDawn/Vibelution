@@ -178,6 +178,21 @@ def _claim_evidence_card(**overrides: Any) -> dict[str, Any]:
 
 def _claim_evidence_artifacts(cards: list[dict]) -> tuple[dict, dict[str, dict]]:
     expected, artifacts = _authority_sections()
+    # Reviews must cite evidence the package actually declares.  The claim-card
+    # projection re-ids evidence rows to their ``claimEvidenceId``, so the
+    # default fixture refs (E1/E4) would name nothing in this package.
+    declared_refs = [
+        str(card.get("claimEvidenceId") or card.get("sourceId") or "")
+        for card in cards
+        if str(card.get("claimEvidenceId") or card.get("sourceId") or "")
+    ]
+    if declared_refs:
+        artifacts["dimension_reviews"] = {
+            "dimensionReviews": [
+                {**deepcopy(row), "evidence_refs": list(declared_refs)}
+                for row in expected["dimension_reviews"]
+            ]
+        }
     artifacts["source_candidate_batch"] = {
         "candidates": [
             {

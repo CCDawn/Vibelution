@@ -54,6 +54,23 @@ REQUIRED_DIMENSIONS = {
     "risk_and_ethics",
     "counterexample_coverage",
 }
+#: Dimensions whose rating may not fall below the declared floor.  These three
+#: are the ones that decide whether a hypothesis is actually supported and
+#: testable; without a floor a structurally complete package can pass with
+#: ``insufficient`` on every row.
+DIMENSION_RATING_FLOOR = {
+    "evidence_support": "adequate",
+    "falsifiability": "adequate",
+    "counterexample_coverage": "adequate",
+}
+#: Ordered rating scale; the index is the comparable rank.
+DIMENSION_RATING_RANK = {
+    "insufficient": 0,
+    "weak": 1,
+    "mixed": 2,
+    "adequate": 3,
+    "strong": 4,
+}
 REQUIRED_HUMAN_GATE_KEYS = {
     "H1_problem_understanding",
     "H2_hypothesis_selection",
@@ -557,6 +574,80 @@ def _citation_validation(output: dict[str, Any], checks: list[dict[str, Any]]) -
     }
 
 
+def _server_citation_checks(
+    team_id: str,
+    output: dict[str, Any],
+    *,
+    question_id: str = "",
+    run_id: str = "",
+) -> list[dict[str, Any]]:
+    """Derive citation receipts from the canonical evidence rows.
+
+    Client-supplied ``citationChecks`` are never gate evidence: a request body
+    can declare any source URL passed without the server ever reading it.  The
+    receipts are produced by the same v2 projector the canonical result package
+    uses, so the gate and the package can never drift apart.
+
+    A DOI reverification already recorded for this run (the sanctioned repair
+    for paywalled publisher pages) still applies: its ``verifiedSourceUrls``
+    are handed to the projector as its ``doi_verification`` input.
+    """
+
+    from core.web.services.team_workflow.research_runtime.result_package_v2 import (
+        ResultPackageV2Error,
+        _citation_checks,
+    )
+
+    evidence = output.get("evidence") if isinstance(output.get("evidence"), list) else []
+    if not evidence:
+        return []
+    try:
+        return _citation_checks(
+            evidence,
+            doi_verification=_recorded_doi_reverification(
+                team_id,
+                question_id=question_id,
+                run_id=run_id,
+            ),
+        )
+    except ResultPackageV2Error:
+        # An evidence set the projector refuses cannot produce passing
+        # receipts; the caller's citation gate then fails closed.
+        return []
+
+
+def _recorded_doi_reverification(
+    team_id: str,
+    *,
+    question_id: str,
+    run_id: str,
+) -> dict[str, Any] | None:
+    """Return one run's recorded DOI reverification map, if any."""
+
+    normalized_question = str(question_id or "").strip().upper()
+    normalized_run = str(run_id or "").strip()
+    if not normalized_question or not normalized_run:
+        return None
+    try:
+        store = _load_store(team_id)
+    except Exception:  # noqa: BLE001 - an unreadable store is simply no reverification
+        return None
+    for item in store.get("records", []):
+        if not isinstance(item, dict):
+            continue
+        if (
+            str(item.get("questionId") or "").strip().upper() != normalized_question
+            or str(item.get("runId") or "").strip() != normalized_run
+        ):
+            continue
+        reverification = item.get("citationReverification")
+        if isinstance(reverification, dict):
+            verified = reverification.get("verifiedSourceUrls")
+            if isinstance(verified, dict) and verified:
+                return dict(verified)
+    return None
+
+
 def _semantic_validation(output: dict[str, Any]) -> dict[str, Any]:
     hypotheses = output.get("hypotheses") if isinstance(output.get("hypotheses"), list) else []
     reviews = output.get("dimension_reviews") if isinstance(output.get("dimension_reviews"), list) else []
@@ -582,6 +673,51 @@ def _semantic_validation(output: dict[str, Any]) -> dict[str, Any]:
     selected_id = str(selection.get("selected_hypothesis_id") or "")
     feedback = output.get("feedback_iterations") if isinstance(output.get("feedback_iterations"), list) else []
     research_plan_present = isinstance(output.get("research_plan"), dict) and bool(output.get("research_plan"))
+    declared_evidence_ids = {
+        str(item.get("evidence_id") or "").strip()
+        for item in (output.get("evidence") if isinstance(output.get("evidence"), list) else [])
+        if isinstance(item, dict) and str(item.get("evidence_id") or "").strip()
+    }
+    # A rating below the floor, or a floored dimension with no declared
+    # evidence binding, is a hollow pass: the row exists but asserts nothing
+    # the reader can check.  Both are named per hypothesis and dimension so
+    # the H1-H4 reviewer sees exactly which row failed.
+    rating_floor_violations: list[dict[str, str]] = []
+    evidence_binding_violations: list[dict[str, str]] = []
+    from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
+        parse_canonical_ref,
+    )
+
+    for item in reviews:
+        if not isinstance(item, dict):
+            continue
+        dimension = str(item.get("dimension") or "")
+        floor = DIMENSION_RATING_FLOOR.get(dimension)
+        if floor is None:
+            continue
+        hypothesis_id = str(item.get("hypothesis_id") or "")
+        rating = str(item.get("rating") or "")
+        if DIMENSION_RATING_RANK.get(rating, -1) < DIMENSION_RATING_RANK[floor]:
+            rating_floor_violations.append(
+                {"hypothesisId": hypothesis_id, "dimension": dimension, "rating": rating}
+            )
+        refs = [
+            str(ref).strip()
+            for ref in (item.get("evidence_refs") if isinstance(item.get("evidence_refs"), list) else [])
+            if str(ref).strip()
+        ]
+        # A floored dimension must anchor its rating to checkable evidence:
+        # either an evidence id this output declares, or a canonical evidence
+        # reference (the grammar the package already parses to resolve cited
+        # batches, which is what production review rows persist).  Auxiliary
+        # candidate/source refs are tolerated beside the anchor.
+        if not refs or not any(
+            ref in declared_evidence_ids or parse_canonical_ref(ref) is not None
+            for ref in refs
+        ):
+            evidence_binding_violations.append(
+                {"hypothesisId": hypothesis_id, "dimension": dimension}
+            )
     issues: list[dict[str, str]] = []
     if len(hypothesis_ids) < 2:
         issues.append({"path": "hypotheses", "message": "At least two distinct hypotheses are required."})
@@ -594,6 +730,33 @@ def _semantic_validation(output: dict[str, Any]) -> dict[str, Any]:
         )
     if selected_id not in hypothesis_ids:
         issues.append({"path": "selection.selected_hypothesis_id", "message": "Selected hypothesis must exist."})
+    if rating_floor_violations:
+        issues.append(
+            {
+                "path": "dimension_reviews.rating",
+                "message": (
+                    "Evidence support, falsifiability and counterexample coverage must "
+                    "be rated at least 'adequate' for every hypothesis: "
+                    + "; ".join(
+                        f"{row['hypothesisId']}.{row['dimension']}={row['rating'] or 'missing'}"
+                        for row in rating_floor_violations[:8]
+                    )
+                ),
+            }
+        )
+    if evidence_binding_violations:
+        issues.append(
+            {
+                "path": "dimension_reviews.evidence_refs",
+                "message": (
+                    "Those three dimensions must cite declared evidence ids: "
+                    + "; ".join(
+                        f"{row['hypothesisId']}.{row['dimension']}"
+                        for row in evidence_binding_violations[:8]
+                    )
+                ),
+            }
+        )
     if not feedback:
         issues.append({"path": "feedback_iterations", "message": "At least one feedback revision is required."})
     if not research_plan_present:
@@ -605,6 +768,8 @@ def _semantic_validation(output: dict[str, Any]) -> dict[str, Any]:
         "allSevenDimensionsReviewed": not missing_dimensions and bool(hypothesis_ids),
         "researchPlanPresent": research_plan_present,
         "feedbackRevisionCount": len(feedback),
+        "ratingFloorViolations": rating_floor_violations,
+        "evidenceBindingViolations": evidence_binding_violations,
     }
 
 
@@ -1548,7 +1713,14 @@ def publish_research_project_challenge_question_output(
 
     preview = deepcopy(output)
     _set_pending_human_gates(preview)
-    citation_checks = payload.get("citationChecks") if isinstance(payload.get("citationChecks"), list) else []
+    # The gate reads server-derived receipts, never the request body: a payload
+    # could otherwise declare every source URL passed.
+    citation_checks = _server_citation_checks(
+        team_id,
+        preview,
+        question_id=question_id,
+        run_id=output_run_id,
+    )
     citation = _citation_validation(preview, citation_checks)
     semantic = _semantic_validation(preview)
     issues = _schema_issues(preview)
@@ -1921,6 +2093,36 @@ def _summary_receipt_validation(
     return validation
 
 
+def _research_plan_projection(record: dict[str, Any], *, team_id: str) -> dict[str, Any]:
+    """Report whether one record's plan carries execution-design criteria.
+
+    A stage-one proposal plan legitimately defers those sections, so the
+    projection keeps "deferred" distinct from "satisfied": an empty list must
+    never be read as a met execution-design contract.
+    """
+
+    question_id = str(record.get("questionId") or "").strip()
+    run_id = str(record.get("runId") or "").strip()
+    if not question_id or not run_id:
+        return {"deferredSections": [], "executionDesignCriteriaPresent": False}
+    from core.web.services.team_workflow.research_runtime.result_package_v2 import (
+        _DEFERRED_RESEARCH_PLAN_SECTIONS,
+    )
+
+    artifact = _read_json(_artifact_path(team_id, question_id, run_id))
+    plan = artifact.get("research_plan") if isinstance(artifact, dict) else None
+    plan = plan if isinstance(plan, dict) else {}
+    return {
+        "deferredSections": [
+            section for section in _DEFERRED_RESEARCH_PLAN_SECTIONS if not plan.get(section)
+        ],
+        "executionDesignCriteriaPresent": all(
+            plan.get(section)
+            for section in ("success_criteria", "failure_criteria", "stop_conditions")
+        ),
+    }
+
+
 def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
     records = _load_store(team_id).get("records")
     records = records if isinstance(records, list) else []
@@ -1982,6 +2184,7 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
             "humanGates": deepcopy(record.get("humanGates") or {}),
             "outputSha256": str(record.get("outputSha256") or ""),
             "artifactPath": str(record.get("artifactPath") or ""),
+            "researchPlan": _research_plan_projection(record, team_id=team_id),
             "modelInvocationReceiptRefs": deepcopy(
                 receipt_refs_by_record_id.get(str(record.get("recordId") or ""), {})
             ),
@@ -2020,6 +2223,7 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
             "humanGates": deepcopy(record.get("humanGates") or {}),
             "outputSha256": str(record.get("outputSha256") or ""),
             "artifactPath": str(record.get("artifactPath") or ""),
+            "researchPlan": _research_plan_projection(record, team_id=team_id),
             "modelInvocationReceiptRefs": deepcopy(
                 receipt_refs_by_record_id.get(str(record.get("recordId") or ""), {})
             ),
@@ -2499,7 +2703,14 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
     audit = output.setdefault("audit", {})
     audit["source_catalog_sha256"] = _catalog_sha256()
     audit["output_sha256"] = "0" * 64
-    checks = payload.get("citationChecks") if isinstance(payload.get("citationChecks"), list) else []
+    # Server-derived receipts only: a direct register call must not be able to
+    # certify its own citations through ``citationChecks`` in the body.
+    checks = _server_citation_checks(
+        team_id,
+        output,
+        question_id=_early_question_id,
+        run_id=_early_run_id,
+    )
     citation = _citation_validation(output, checks)
     semantic = _semantic_validation(output)
     audit["citation_validation"] = citation["status"]

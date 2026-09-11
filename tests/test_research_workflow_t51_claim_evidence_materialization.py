@@ -139,7 +139,12 @@ def test_materializes_only_exactly_anchored_claims_into_canonical_store(
         "retrieved_at": "2026-08-10T00:00:00Z",
         "fact": "The abstract reports a bounded result.",
         "relation": "supports",
-        "verification_status": "metadata_checked",
+        # The writeback declared metadata_checked, but the task carries no
+        # Session Journal fetch receipt and the card builder no longer trusts a
+        # declaration.  A passing state comes from the server authorities
+        # instead: a real fetch receipt at this boundary, or the collection
+        # stage's own screening when the package projector projects the row.
+        "verification_status": "unverified",
     }
 
     duplicate = materialize_claim_evidence_from_task(
@@ -1906,10 +1911,15 @@ def test_chain_collection_attaches_refs_to_preexisting_refless_core_claim(
     )
     assert acceptance["status"] == "applied"
     assert acceptance["coreClaimIds"] == [preexisting["claimId"]]
-    assert acceptance["sourceCount"] == 5  # selection + 2 cited facts + 2 candidate-dimension
+    # Only server-corroborated pending supports reach the acceptance surface:
+    # the record the collection stage never matched to a source candidate has
+    # no collection envelope and stays pending (reported, never silently
+    # promoted into belief support).
+    assert acceptance["sourceCount"] == 4
+    assert len(acceptance["uncorroboratedEvidenceIds"]) == 1
     # Twin identity dedupes on (claimId, candidateId, reasoningRole, ...): the
     # two collected candidate-dimension fact rows share one identity.
-    assert acceptance["acceptedTwinCount"] == 4
+    assert acceptance["acceptedTwinCount"] == 3
     verdict_after = chain.evaluate_claim_belief_gate(
         team_id, _QUESTION_ID, [HYPOTHESIS_CANDIDATE_ID]
     )

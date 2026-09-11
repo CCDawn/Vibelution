@@ -119,25 +119,35 @@ def _register(
     support_level: str = "supports",
     evidence_kind: str = "primary_result",
     quote: str = "",
+    collection_envelope: bool = True,
 ) -> dict[str, Any]:
-    """Register one pending evidence record the way the chain bridges do."""
-    record = store.register(
-        team_id,
-        {
-            "claimId": claim_id,
-            "candidateId": candidate_id,
-            "sourceId": f"artifact:{claim_id}-{candidate_id}-{reasoning_role}",
-            "sourceRevision": "sha256:" + "ab" * 32,
-            "locator": {"kind": "paper", "section": "abstract"},
-            "quote": quote
-            or f"{candidate_id}/{reasoning_role} supports {claim_id} with anchored evidence.",
-            "evidenceKind": evidence_kind,
-            "reasoningRole": reasoning_role,
-            "supportLevel": support_level,
-            "extractionMethod": "manual",
-            "extractorAgentId": "agent-extractor",
-        },
-    )
+    """Register one pending evidence record the way the chain bridges do.
+
+    The bridge attaches the collection envelope it resolved from the run's
+    source-candidate batch, so a bridged record carries one; only a source the
+    stage never matched stays lean.  ``collection_envelope=False`` reproduces
+    that lean shape.
+    """
+    payload: dict[str, Any] = {
+        "claimId": claim_id,
+        "candidateId": candidate_id,
+        "sourceId": f"artifact:{claim_id}-{candidate_id}-{reasoning_role}",
+        "sourceRevision": "sha256:" + "ab" * 32,
+        "locator": {"kind": "paper", "section": "abstract"},
+        "quote": quote
+        or f"{candidate_id}/{reasoning_role} supports {claim_id} with anchored evidence.",
+        "evidenceKind": evidence_kind,
+        "reasoningRole": reasoning_role,
+        "supportLevel": support_level,
+        "extractionMethod": "manual",
+        "extractorAgentId": "agent-extractor",
+    }
+    if collection_envelope:
+        payload["collectionEnvelope"] = {
+            "title": f"{candidate_id} collected source",
+            "sourceUrl": "https://example.org/collected-source",
+        }
+    record = store.register(team_id, payload)
     return dict(record)
 
 
@@ -211,6 +221,7 @@ def _seed_unconverged_candidate(
     team_id: str,
     *,
     boundary: str,
+    collection_envelope: bool = True,
 ) -> dict[str, Any]:
     """Formal grounded candidate whose bridging evidence is only pending.
 
@@ -232,6 +243,9 @@ def _seed_unconverged_candidate(
       vacuous;
     - ``"counter_evidence"`` seeds an accepted, neutral boundary record the
       formal review produced.
+
+    ``collection_envelope=False`` reproduces the lean shape of a source the
+    collection stage never matched to a candidate.
     """
     cited_fact = _register(
         store,
@@ -239,6 +253,7 @@ def _seed_unconverged_candidate(
         claim_id="claim-fact-1",
         candidate_id="src-cand-1",
         quote="Anchored source fact cited by the core claim.",
+        collection_envelope=collection_envelope,
     )
     candidate_fact = _register(
         store,
@@ -247,6 +262,7 @@ def _seed_unconverged_candidate(
         candidate_id=_CANDIDATE_ID,
         reasoning_role="fact",
         quote="Candidate-dimension fact binding for the core claim.",
+        collection_envelope=collection_envelope,
     )
     candidate_hypothesis = _register(
         store,
@@ -255,6 +271,7 @@ def _seed_unconverged_candidate(
         candidate_id=_CANDIDATE_ID,
         reasoning_role="hypothesis",
         quote="Candidate-dimension hypothesis binding for the core claim.",
+        collection_envelope=collection_envelope,
     )
     untouched_fact = _register(
         store,
@@ -454,6 +471,52 @@ def test_accepted_adjudication_upgrades_pending_support_and_passes_gate(
     assert replay["status"] == "reused"
     assert len(store.list(team_id)) == records_before
     assert len(_accepted_twins(store, team_id)) == len(twins)
+
+
+# ---------------------------------------------------------------------------
+# Case A1 — uncorroborated pending support is never minted into belief support
+# ---------------------------------------------------------------------------
+
+
+def test_accepted_adjudication_never_promotes_uncorroborated_support(
+    tmp_path, monkeypatch
+):
+    """服务端未匹配到来源候选的 pending 支持不得铸成 accepted 支持。
+
+    提升只对 collection 阶段已匹配到来源候选（带 collectionEnvelope）的记录
+    生效。leaning 记录留在 pending，门禁如实报 accepted_support_missing，而不是
+    把未经佐证的支持算成生效证据——否则「接受」这一步会自己铸造它要检验的证据。
+    """
+    team_id, store = _env(tmp_path, monkeypatch)
+    seed = _seed_unconverged_candidate(
+        store,
+        team_id,
+        boundary="counter_evidence",
+        collection_envelope=False,
+    )
+    _install_sources(
+        monkeypatch,
+        store,
+        team_id,
+        claim_rows=seed["claim_rows"],
+        formal_candidate_ids={_CANDIDATE_ID},
+    )
+    _install_round_reader(monkeypatch)
+
+    with pytest.raises(chain.ClaimBeliefGateBlockedError):
+        _adjudicate(team_id, decision="accepted", key="authority-lean-1")
+
+    assert _accepted_twins(store, team_id) == []
+    surface_ids = {
+        seed["cited_fact"]["claimEvidenceId"],
+        seed["candidate_fact"]["claimEvidenceId"],
+        seed["candidate_hypothesis"]["claimEvidenceId"],
+    }
+    assert all(
+        record["reviewStatus"] == "pending"
+        for record in store.list(team_id, claim_id="claim-core")
+        if record["claimEvidenceId"] in surface_ids
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -676,6 +739,7 @@ def _register_source(
     quote: str,
     workflow_run_id: str = "",
     source_collection_run_id: str = "",
+    collection_envelope: bool = True,
 ) -> dict[str, Any]:
     payload = {
         "claimId": claim_id,
@@ -694,6 +758,13 @@ def _register_source(
         payload["workflowRunId"] = workflow_run_id
     if source_collection_run_id:
         payload["sourceCollectionRunId"] = source_collection_run_id
+    if collection_envelope:
+        # The chain bridge attaches the envelope it resolved from the run's
+        # source-candidate batch; a collected source therefore carries one.
+        payload["collectionEnvelope"] = {
+            "title": f"{source_id} collected source",
+            "sourceUrl": "https://example.org/collected-source",
+        }
     return dict(store.register(team_id, payload))
 
 

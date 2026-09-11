@@ -38,9 +38,11 @@ from pathlib import Path
 from typing import Any
 
 from .source_extraction_evidence_cards import (
+    derive_server_verification_status,
     extraction_has_materializable_evidence,
     normalize_challenge_evidence_fields,
 )
+from ..source_collection.extraction_fetch_text import task_fetched_text
 
 
 logger = logging.getLogger(__name__)
@@ -600,6 +602,10 @@ def materialize_claim_evidence_from_task(
     # boundary; replayed persisted results (node retry) are repaired here, so
     # both paths reach the validator with server-authoritative times.
     task = _backfill_replayed_task_retrieved_at(task)
+    # The Session Journal fetch receipts are the only authority that can make a
+    # card ``full_text_checked``; the extraction writeback's own declaration is
+    # never trusted, so an Agent cannot certify a page it did not fetch.
+    fetched_text = task_fetched_text(task)
 
     extractor_agent_id = _text(task.get("agentId"))
     normalized_model_ref = _text(model_ref)
@@ -622,6 +628,12 @@ def materialize_claim_evidence_from_task(
             claim,
             extraction,
             path=claim_path,
+        )
+        challenge_evidence["verification_status"] = derive_server_verification_status(
+            challenge_evidence.get("verification_status"),
+            source_url=challenge_evidence.get("source_url"),
+            quote=claim.get("quote"),
+            fetched_text=fetched_text,
         )
         candidate_id = _text(
             challenge_evidence.get("candidateId")
