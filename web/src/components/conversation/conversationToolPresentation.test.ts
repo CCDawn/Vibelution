@@ -131,6 +131,47 @@ describe("conversation tool presentation", () => {
       .not.toBe("source_collection_stage_writeback_tool");
   });
 
+  it("matches whole name tokens so research tools are not read as search", () => {
+    // "research" contains the substring "search", which made every research tool
+    // read "搜索" — including the one that applies a proposal.
+    expect(conversationToolPresentationLabel("research_proposal_apply_tool", "zh"))
+      .toBe("Apply Research Proposal");
+    expect(conversationToolPresentationLabel("research_agent_creation_proposal_tool", "zh"))
+      .not.toBe("搜索");
+    // Genuine search tools keep the short label; the row's subject names the target.
+    expect(conversationToolPresentationLabel("news_search_tool", "zh")).toBe("搜索");
+    expect(conversationToolPresentationLabel("history_search_tool", "zh")).toBe("搜索");
+  });
+
+  it.each([
+    ["task_create_tool", "Create Task"],
+    ["session_delete_tool", "Delete Session"],
+    ["virtual_human_diary_tool", "Virtual Human Diary"],
+    ["knowledge_governance_plan_tool", "Knowledge Governance Plan"],
+    ["get_session_files_tool", "Get Session Files"],
+    ["trigger_self_restart_tool", "Trigger Self Restart"],
+    ["cli_agent_run_tool", "Run CLI Agent"],
+    ["github_project_library_clone_tool", "Clone GitHub Project Library"],
+  ])("derives a readable label for the unlabelled tool %s", (toolName, expected) => {
+    expect(conversationToolPresentationLabel(toolName, "en")).toBe(expected);
+  });
+
+  it("never shows a raw tool identifier, for either language", () => {
+    const catalogTools = [
+      "agent_inbox_list_tool", "agent_tool_permission_request_tool", "append_episodic_memory_tool",
+      "challenge_cup_experiment_writeback_tool", "close_evolution_transaction_tool",
+      "commit_compressed_memory_tool", "computer_use_session_tool", "create_child_session_tool",
+      "get_evolution_fitness_tool", "history_timeline_tool", "knowledge_steward_workbench_tool",
+      "list_workspace_debris_tool", "open_evolution_transaction_tool", "record_learning_tool",
+      "session_reference_query_tool", "supersede_personal_memory_tool", "task_output_tool",
+      "unified_memory_search_tool", "update_diagnosis_rules_tool", "virtual_human_schedule_tool",
+    ];
+    for (const toolName of catalogTools) {
+      expect(conversationToolPresentationLabel(toolName, "zh")).not.toBe(toolName);
+      expect(conversationToolPresentationLabel(toolName, "en")).not.toBe(toolName);
+    }
+  });
+
   it("uses the inspected query instead of a low-value ok status", () => {
     expect(
       completedToolPresentationSummary({

@@ -1137,11 +1137,66 @@ export function conversationToolPresentationLabel(
   if (labels[lower]) {
     return labels[lower][language];
   }
-  if (lower.includes("read") || lower.includes("file")) {
+  // Match whole underscore-delimited tokens, never substrings: "research" must
+  // not answer "search". It used to, so every `research_*` tool read "搜索" --
+  // including research_proposal_apply_tool, which applies a proposal.
+  const tokens = lower.replace(/-/g, "_").split("_").filter(Boolean);
+  if (tokens.includes("read") || tokens.includes("file")) {
     return language === "zh" ? "读取" : "Read";
   }
-  if (lower.includes("search")) {
+  if (tokens.includes("search") || tokens.includes("query")) {
     return language === "zh" ? "搜索" : "Search";
   }
-  return normalized || (language === "zh" ? "工具调用" : "Tool call");
+  // Last resort: derive a readable label instead of leaking the tool id. Every
+  // unlabelled tool used to print its raw snake_case name, so most of the
+  // catalog showed up as `virtual_human_diary_tool`.
+  return humanizeToolName(normalized) || (language === "zh" ? "工具调用" : "Tool call");
+}
+
+/** Verbs that read as the action in English tool ids (`task_create`, `get_files`). */
+const TOOL_NAME_VERBS = new Set([
+  "apply", "append", "archive", "clean", "clone", "close", "commit", "compress",
+  "consume", "create", "delete", "fetch", "get", "grant", "ingest", "list", "open",
+  "propose", "query", "read", "record", "reset", "restart", "run", "search",
+  "start", "stop", "summarize", "supersede", "trigger", "update", "write",
+]);
+
+/** Words that are acronyms or product spellings, not title-case words. */
+const TOOL_NAME_EXACT_CASING: Record<string, string> = {
+  acl: "ACL",
+  api: "API",
+  cli: "CLI",
+  github: "GitHub",
+  llm: "LLM",
+  ui: "UI",
+};
+
+/**
+ * Readable label for a tool with no curated entry: `task_create_tool` becomes
+ * "Create Task" and `virtual_human_diary_tool` becomes "Virtual Human Diary".
+ *
+ * Words are only reordered and capitalised, never translated, so this stays
+ * predictable for names nobody has curated yet and never claims a meaning the id
+ * does not have.
+ */
+function humanizeToolName(name: string) {
+  const trimmed = String(name || "").trim();
+  if (!trimmed) {
+    return "";
+  }
+  const withoutSuffix = trimmed.replace(/[_-]?tool$/i, "");
+  const tokens = (withoutSuffix || trimmed).split(/[_-]+/).filter(Boolean);
+  if (tokens.length === 0) {
+    return trimmed;
+  }
+  const last = tokens[tokens.length - 1];
+  // English ids name the action last (`task_create`), so lead with it — but only
+  // when the id does not already lead with one (`trigger_self_restart` must stay
+  // "Trigger Self Restart", not "Restart Trigger Self").
+  if (tokens.length > 1 && TOOL_NAME_VERBS.has(last) && !TOOL_NAME_VERBS.has(tokens[0])) {
+    tokens.unshift(tokens.pop() as string);
+  }
+  return tokens
+    .map((token) => TOOL_NAME_EXACT_CASING[token] ?? (token.charAt(0).toUpperCase() + token.slice(1)))
+    .join(" ");
 }

@@ -17,7 +17,10 @@ describe("conversation tool renderer registry", () => {
     ["source_collection_context_tool", "files", "读取资料上下文"],
     ["source_collection_stage_writeback_tool", "edit", "资料阶段写回"],
     ["conversation_log_inspect_tool", "conversation", "检查会话日志"],
-    ["unregistered_vendor_tool", "generic", "unregistered_vendor_tool"],
+    // Unregistered tools still resolve to the generic family (the label is only
+    // display text and matches no curated family), but they no longer echo their
+    // raw id — the label is derived from it instead.
+    ["unregistered_vendor_tool", "generic", "Unregistered Vendor"],
   ])("maps %s to a stable family and label", (toolName, family, label) => {
     expect(conversationToolRendererFor(toolName).family).toBe(family);
     expect(conversationToolRendererLabel(toolName, "zh")).toBe(label);
