@@ -3280,7 +3280,7 @@ def reverify_citation_receipts(
     the refreshed record and the citation validation summary.
     """
 
-    from .doi_metadata_verification import verify_failed_receipt_dois
+    from .doi_metadata_verification import DEFAULT_MAX_VERIFICATIONS, verify_failed_receipt_dois
     from .research_runtime.result_package_v2 import _citation_checks
 
     team_service.get_team(team_id)
@@ -3334,7 +3334,18 @@ def reverify_citation_receipts(
             {**check, "doi": str(item.get("doi") or "").strip()}
             for check, item in zip(receipts, evidence)
         ]
-        verification = verify_failed_receipt_dois(verification_input, verifier=doi_verifier)
+        # The default per-call cap exists to bound one invocation's network
+        # time, but a still-failed record persists nothing: every retry would
+        # re-verify the same first N receipts and never reach the tail.  Lift
+        # the cap to cover the whole evidence set (each lookup stays bounded
+        # by its own timeout) so one operator click can converge.
+        verification = verify_failed_receipt_dois(
+            verification_input,
+            verifier=doi_verifier,
+            max_verifications=max(
+                DEFAULT_MAX_VERIFICATIONS, len(verification_input)
+            ),
+        )
         checks = _citation_checks(
             evidence,
             doi_verification=verification["verifiedSourceUrls"],

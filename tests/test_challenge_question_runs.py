@@ -1947,3 +1947,52 @@ def test_load_ledger_run_record_projects_frozen_snapshot(tmp_path, monkeypatch):
     )
     with pytest.raises(ValueError, match="repair_run_unreadable"):
         challenge_question_runs._load_ledger_run_record("run-proj")
+
+
+def test_reverify_citation_receipts_covers_evidence_set_beyond_default_cap(
+    tmp_path, monkeypatch
+):
+    """A still-failed record persists nothing, so the per-call verification cap
+    must never stop the pass short of the evidence set: with more than
+    DEFAULT_MAX_VERIFICATIONS DOI-derivable failing receipts, one operator
+    click must verify them all instead of re-verifying the same first 12
+    forever."""
+    from core.web.services.team_workflow.doi_metadata_verification import (
+        DEFAULT_MAX_VERIFICATIONS,
+    )
+
+    output = _paywalled_output()
+    # One failing, DOI-backed evidence row per number beyond the default cap.
+    for index in range(DEFAULT_MAX_VERIFICATIONS + 4):
+        row = {
+            "evidence_id": f"EX{index}",
+            "title": f"Paywalled paper {index}",
+            "source_type": "peer_reviewed_paper",
+            "source_url": f"https://doi.org/10.1000/paywalled.{index}",
+            "retrieved_at": "2026-07-23T00:00:00Z",
+            "fact": "A paywalled factual statement.",
+            "relation": "supports",
+            "verification_status": "unverified",
+        }
+        output["evidence"].append(row)
+    record = _register_paywalled_run(tmp_path, monkeypatch, output)
+    assert record["validation"]["citationValidation"] == "failed"
+
+    calls: list[str] = []
+
+    def _verifier(doi: str):
+        calls.append(doi)
+        return {"DOI": doi, "title": ["Real paper"]}
+
+    response = challenge_question_runs.reverify_citation_receipts(
+        "research-team",
+        "SCI-096",
+        "run-sci-096",
+        doi_verifier=_verifier,
+    )
+
+    assert response["status"] == "reverified"
+    assert len(calls) == DEFAULT_MAX_VERIFICATIONS + 4 + 1  # +1 for E1
+    stored = challenge_question_runs._load_store("research-team")["records"][0]
+    assert stored["validation"]["citationValidation"] == "passed"
+    assert stored["validation"]["citation"]["missingUrls"] == []
