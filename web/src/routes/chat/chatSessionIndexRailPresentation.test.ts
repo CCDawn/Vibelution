@@ -3,26 +3,10 @@ import { describe, expect, it } from "vitest";
 import type { ConversationIndexGroup } from "../conversationIndexModel";
 import {
   buildGroupedGroupConversations,
-  buildSessionIndexProgressPresentation,
   countGroupedGroupConversations,
-  toSessionIndexProgressQuerySlice,
 } from "./chatSessionIndexRailPresentation";
 
 describe("chatSessionIndexRailPresentation", () => {
-  it("toSessionIndexProgressQuerySlice copies only progress fields", () => {
-    expect(toSessionIndexProgressQuerySlice({
-      loadedCount: 12,
-      totalEstimate: 40,
-      hasMore: true,
-      isLoadingMore: false,
-    })).toEqual({
-      loadedCount: 12,
-      totalEstimate: 40,
-      hasMore: true,
-      isLoadingMore: false,
-    });
-  });
-
   it("buildGroupedGroupConversations keeps only group_room conversations", () => {
     const groups: ConversationIndexGroup[] = [
       {
@@ -70,25 +54,5 @@ describe("chatSessionIndexRailPresentation", () => {
     const filtered = buildGroupedGroupConversations(groups, new Set(["research-team"]));
     expect(filtered.map((group) => group.groupKey)).toEqual(["team:orphan-team", "standaloneGroups"]);
     expect(countGroupedGroupConversations(filtered)).toBe(2);
-  });
-
-  it("buildSessionIndexProgressPresentation formats load-more and progress labels", () => {
-    const formatter = new Intl.NumberFormat("en-US");
-    expect(buildSessionIndexProgressPresentation({
-      loadedCount: 50,
-      totalEstimate: 120,
-      hasMore: true,
-      isLoadingMore: false,
-    }, "en", formatter)).toMatchObject({
-      sessionIndexLoadMoreLabel: "Load more chats",
-      sessionIndexProgressLabel: "50 / 120",
-      sessionIndexProgressVisible: true,
-    });
-    expect(buildSessionIndexProgressPresentation({
-      loadedCount: 50,
-      totalEstimate: 50,
-      hasMore: false,
-      isLoadingMore: true,
-    }, "zh", formatter).sessionIndexLoadMoreLabel).toBe("加载中");
   });
 });
