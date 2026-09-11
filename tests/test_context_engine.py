@@ -1436,3 +1436,24 @@ def test_record_agent_turn_result_parses_json_payload(tmp_path, monkeypatch):
     assert records[0]["toolCallCount"] == 3
     assert records[0]["runId"] == "session-json-result-turn-1"
     assert records[0]["status"] == "completed"
+
+
+def test_research_org_context_cache_drops_expired_entries_on_write(tmp_path, monkeypatch):
+    """研究组织上下文缓存：写入时清理已过期条目，长期运行不再逐轮累积
+    （过期条目按读路径判定本就不会被服务，删除只影响内存占用）。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_tmp_research_org_workspace(tmp_path, monkeypatch)
+
+    clock = {"now": 1_000.0}
+    monkeypatch.setattr(context_engine, "_perf_counter", lambda: clock["now"])
+
+    context_engine._build_research_organization_context_block("agent-a", limit=6)
+    with context_engine._RESEARCH_ORG_CONTEXT_CACHE_LOCK:
+        assert len(context_engine._RESEARCH_ORG_CONTEXT_CACHE) == 1
+
+    clock["now"] += context_engine._RESEARCH_ORG_CONTEXT_CACHE_TTL_SECONDS + 1.0
+    context_engine._build_research_organization_context_block("agent-b", limit=6)
+
+    with context_engine._RESEARCH_ORG_CONTEXT_CACHE_LOCK:
+        remaining = [(key[0], key[1]) for key in context_engine._RESEARCH_ORG_CONTEXT_CACHE]
+    assert remaining == [("agent-b", 6)]
