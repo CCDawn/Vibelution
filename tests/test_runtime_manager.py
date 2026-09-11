@@ -9127,6 +9127,147 @@ def test_persist_workbench_launcher_state_after_open_does_not_treat_pids_as_read
     assert saved["statusLine"] == "Workbench is unavailable."
 
 
+def test_persist_workbench_launcher_state_after_open_normalizes_url_to_origin(tmp_path, monkeypatch):
+    """SCI-049: state.json stores the app entrypoint origin, never a deep path."""
+
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(workbench_controller, "LAUNCHER_STATE_PATH", state_path)
+    monkeypatch.setattr(
+        workbench_controller,
+        "append_runtime_manager_file_event",
+        lambda *_args, **_kwargs: None,
+    )
+
+    workbench_controller.persist_workbench_launcher_state_after_open(
+        {
+            "sessionId": "pinned-url",
+            "backendPid": 31100,
+            "backendLaunchPid": 31100,
+            "backendPort": 8000,
+            "backendObserved": True,
+            "backendHealthy": True,
+            "browserManaged": True,
+            "browserWindowAlive": True,
+            "windowProvider": "electron",
+            "windowManaged": True,
+            "browserLaunchPid": 31200,
+            "browserWindowPid": 31200,
+            "url": "http://127.0.0.1:8000/chat?session=abc&tab=1",
+        }
+    )
+    saved = json.loads(state_path.read_text(encoding="utf-8"))
+
+    assert saved["url"] == "http://127.0.0.1:8000"
+
+
+def test_persist_workbench_launcher_state_after_open_normalizes_previous_state_url(tmp_path, monkeypatch):
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps({"url": "http://localhost:8000/teams?questionId=Q-1#node"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(workbench_controller, "LAUNCHER_STATE_PATH", state_path)
+    monkeypatch.setattr(
+        workbench_controller,
+        "append_runtime_manager_file_event",
+        lambda *_args, **_kwargs: None,
+    )
+
+    workbench_controller.persist_workbench_launcher_state_after_open(
+        {
+            "sessionId": "window-only-dirty-state",
+            "backendPid": 0,
+            "browserManaged": True,
+            "browserWindowAlive": True,
+            "windowProvider": "electron",
+            "windowManaged": True,
+            "browserLaunchPid": 31300,
+            "browserWindowPid": 31300,
+        }
+    )
+    saved = json.loads(state_path.read_text(encoding="utf-8"))
+
+    assert saved["url"] == "http://localhost:8000"
+
+
+def test_persist_workbench_launcher_state_after_open_fail_open_on_unparseable_url(tmp_path, monkeypatch):
+    """SCI-049: normalization must never block persistence; keep the raw value."""
+
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(workbench_controller, "LAUNCHER_STATE_PATH", state_path)
+    events: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        workbench_controller,
+        "append_runtime_manager_file_event",
+        lambda event_type, payload, **_kwargs: events.append((event_type, payload)),
+    )
+
+    workbench_controller.persist_workbench_launcher_state_after_open(
+        {
+            "sessionId": "unparseable-url",
+            "backendPid": 31400,
+            "backendLaunchPid": 31400,
+            "backendPort": 8000,
+            "backendObserved": True,
+            "backendHealthy": True,
+            "browserManaged": True,
+            "browserWindowAlive": True,
+            "windowProvider": "electron",
+            "windowManaged": True,
+            "browserLaunchPid": 31500,
+            "browserWindowPid": 31500,
+            "url": "http://[::1:bad",
+        }
+    )
+    saved = json.loads(state_path.read_text(encoding="utf-8"))
+
+    assert saved["url"] == "http://[::1:bad"
+    normalize_events = [item for item in events if item[0] == "workbench.url.origin_normalize_failed"]
+    assert normalize_events
+    assert normalize_events[-1][1]["context"] == "persist_workbench_launcher_state_after_open"
+    assert normalize_events[-1][1]["reason"] == "url_parse_failed"
+
+
+def test_reconcile_workbench_endpoint_normalizes_state_url_to_origin(monkeypatch):
+    """SCI-049: observation endpoints inherit the origin-only entrypoint."""
+
+    listening_ports = {8000}
+    monkeypatch.setattr(
+        workbench_controller,
+        "_port_is_listening_socket",
+        lambda port: port in listening_ports,
+    )
+
+    listening_url, listening_port = workbench_controller._reconcile_workbench_endpoint(
+        "http://127.0.0.1:8000/chat?session=abc",
+        0,
+        {},
+    )
+    assert listening_url == "http://127.0.0.1:8000"
+    assert listening_port == 8000
+
+    listening_ports.clear()
+    listening_ports.add(8002)
+    fallback_url, fallback_port = workbench_controller._reconcile_workbench_endpoint(
+        "http://127.0.0.1:8000/chat?session=abc",
+        0,
+        {"backendPort": 8002},
+    )
+    assert fallback_url == "http://127.0.0.1:8002"
+    assert fallback_port == 8002
+
+    listening_ports.clear()
+    dead_url, dead_port = workbench_controller._reconcile_workbench_endpoint(
+        "http://127.0.0.1:8000/chat?session=abc",
+        0,
+        {"backendPort": 8003},
+    )
+    assert dead_url == "http://127.0.0.1:8000"
+    assert dead_port == 8000
+
+
 def test_handle_force_close_workbench_marks_work_runs_and_verifies_close(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
     saved_states: list[dict] = []

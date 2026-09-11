@@ -426,6 +426,59 @@ describe("Electron window provider state", () => {
     expect(reports).toEqual([{ open: true, url: "http://127.0.0.1:8002/" }]);
   });
 
+  it("never force-navigates a same-origin page: open actions must not bounce user routing (SCI-049)", async () => {
+    const workbenchWindow = new FakeWindow(42, "", 0);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => workbenchWindow
+    });
+
+    await provider.openOrFocusWorkbench();
+    expect(workbenchWindow.loadedUrls).toEqual(["http://127.0.0.1:8000/"]);
+
+    // The user escaped the restored page inside the app (pushState deep link).
+    await workbenchWindow.loadURL("http://127.0.0.1:8000/teams?questionId=Q-1&runId=run-1");
+
+    // A bare refocus and a stale persisted deep path (open_workbench converge)
+    // must both stay on the user's page: only cross-origin targets reload.
+    await provider.openOrFocusWorkbench();
+    await provider.openOrFocusWorkbench("http://127.0.0.1:8000/chat?session=abc");
+
+    expect(workbenchWindow.loadedUrls).toEqual([
+      "http://127.0.0.1:8000/",
+      "http://127.0.0.1:8000/teams?questionId=Q-1&runId=run-1"
+    ]);
+    expect(provider.snapshot().workbench).toMatchObject({
+      open: true,
+      url: "http://127.0.0.1:8000/teams?questionId=Q-1&runId=run-1"
+    });
+  });
+
+  it("still navigates an open workbench window when the restored target moves origin", async () => {
+    const workbenchWindow = new FakeWindow(42, "", 0);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => workbenchWindow
+    });
+
+    await provider.openOrFocusWorkbench();
+    await provider.openOrFocusWorkbench("http://127.0.0.1:8002/");
+
+    expect(workbenchWindow.loadedUrls).toEqual(["http://127.0.0.1:8000/", "http://127.0.0.1:8002/"]);
+  });
+
+  it("keeps an explicit deep URL when a caller requests one (live targets are not stripped)", async () => {
+    const workbenchWindow = new FakeWindow(42, "", 0);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => workbenchWindow
+    });
+
+    await provider.openOrFocusWorkbench("http://127.0.0.1:8002/teams?questionId=Q-1");
+
+    expect(workbenchWindow.loadedUrls).toEqual(["http://127.0.0.1:8002/teams?questionId=Q-1"]);
+  });
+
   it("keeps a failed navigation hidden and permits the next open action to retry", async () => {
     const failedWindow = new FakeWindow(42, "", 0, true, new Error("ERR_CONNECTION_REFUSED"));
     const recoveredWindow = new FakeWindow(43, "", 4343);
@@ -841,13 +894,15 @@ describe("Electron window provider state", () => {
 
     expect(created).toBe(0);
     expect(state.windowId).toBe(42);
-    expect(first.loadedUrls).toEqual(["http://127.0.0.1:8002/"]);
+    // Adopting a live workbench window preserves the user's current page;
+    // only a cross-origin target may reload it (SCI-049 no re-pinning).
+    expect(first.loadedUrls).toEqual([]);
     expect(extra.destroyCount).toBe(1);
     expect(extra.isDestroyed()).toBe(true);
     expect(provider.snapshot().workbench).toMatchObject({
       open: true,
       windowId: 42,
-      url: "http://127.0.0.1:8002/"
+      url: "http://127.0.0.1:8002/teams"
     });
   });
 
@@ -1198,6 +1253,24 @@ describe("resolveWorkbenchUrl", () => {
   it("prefers a live status URL over the development default", () => {
     expect(
       resolveWorkbenchUrl({ NODE_ENV: "development" } as NodeJS.ProcessEnv, "http://127.0.0.1:8002/")
+    ).toBe("http://127.0.0.1:8002/");
+  });
+
+  it("restores on the app home origin: persisted deep paths and queries are never pinned (SCI-049)", () => {
+    expect(
+      resolveWorkbenchUrl(
+        { NODE_ENV: "production" } as NodeJS.ProcessEnv,
+        "http://127.0.0.1:8000/chat?session=abc"
+      )
+    ).toBe("http://127.0.0.1:8000/");
+    expect(
+      resolveWorkbenchUrl(
+        { NODE_ENV: "production" } as NodeJS.ProcessEnv,
+        "http://localhost:8000/teams?questionId=Q-1#node"
+      )
+    ).toBe("http://localhost:8000/");
+    expect(
+      resolveWorkbenchUrl({ VIBELUTION_WORKBENCH_URL: "http://127.0.0.1:8002/chat?session=abc" } as NodeJS.ProcessEnv)
     ).toBe("http://127.0.0.1:8002/");
   });
 
