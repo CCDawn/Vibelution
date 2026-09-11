@@ -199,6 +199,7 @@ export function codexNativeTranscriptToCells(
           toolLifecycleModel: cellLifecycleModel,
           toolArguments: cell.toolArguments,
           sourceItemId: cell.sourceItemId,
+          originType: cell.originType,
         };
       })
       .filter(shouldDisplayTranscriptCell)),
