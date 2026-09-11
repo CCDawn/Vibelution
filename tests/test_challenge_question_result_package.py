@@ -313,6 +313,81 @@ def test_package_rejects_provider_outside_frozen_model_policy() -> None:
         _create(payload)
 
 
+def _skipped_revision_marker(**overrides: object) -> dict:
+    marker = {
+        "skipped": True,
+        "reason": "converged_without_revision",
+        "convergenceRecordId": "hypothesis-round-1",
+    }
+    marker.update(overrides)
+    return {key: value for key, value in marker.items() if value is not ...}
+
+
+def test_package_accepts_explicit_skipped_revision_marker() -> None:
+    payload = _valid_payload()
+    payload["model_invocation_receipts"]["revision"] = _skipped_revision_marker()
+
+    package = _create(payload)
+
+    # The skipped slot is structural evidence, not a receipt: only the real
+    # generation/review receipts stay in the receipt projection, so receipt
+    # eligibility checks cannot be bypassed through the marker.
+    assert set(package.model_invocation_receipts) == {"generation", "review"}
+    assert set(package.skipped_receipt_stages) == {"revision"}
+    assert package.skipped_receipt_stages["revision"]["reason"] == (
+        "converged_without_revision"
+    )
+    # The persisted canonical payload keeps the marker inside the revision
+    # slot and the sealed hash covers it, so a persisted restore round-trips.
+    serialized = package.to_dict()
+    assert serialized["model_invocation_receipts"]["revision"] == (
+        _skipped_revision_marker()
+    )
+    restored = QuestionResultPackage.from_dict(
+        serialized,
+        expected_model_policy_sha256=serialized["model_policy"]["policySha256"],
+    )
+    assert restored.canonical_hash == package.canonical_hash
+    assert restored.idempotency_key == package.idempotency_key
+    assert restored.canonical_payload() == package.canonical_payload()
+
+
+@pytest.mark.parametrize(
+    "marker, message",
+    [
+        # skipped must be literally true.
+        (_skipped_revision_marker(skipped=False), "skipped=true"),
+        (_skipped_revision_marker(skipped="yes"), "skipped=true"),
+        # reason must come from the closed reason set.
+        (_skipped_revision_marker(reason="model_was_tired"), "reason is unsupported"),
+        (_skipped_revision_marker(reason=""), "reason"),
+        # the convergence record identity is mandatory.
+        (_skipped_revision_marker(convergenceRecordId=...), "convergenceRecordId"),
+        # the marker shape is closed.
+        (
+            _skipped_revision_marker(receiptId="receipt-revision"),
+            "unsupported fields",
+        ),
+    ],
+)
+def test_package_rejects_invalid_skipped_revision_marker(
+    marker: dict, message: str
+) -> None:
+    payload = _valid_payload()
+    payload["model_invocation_receipts"]["revision"] = marker
+
+    with pytest.raises(QuestionResultPackageError, match=message):
+        _create(payload)
+
+
+def test_package_rejects_skipped_marker_on_non_skippable_stage() -> None:
+    payload = _valid_payload()
+    payload["model_invocation_receipts"]["generation"] = _skipped_revision_marker()
+
+    with pytest.raises(QuestionResultPackageError, match="cannot be skipped"):
+        _create(payload)
+
+
 def test_package_rejects_tampered_canonical_hash() -> None:
     payload = _create(_valid_payload()).to_dict()
     payload["competition_result_view"]["rationale"] = "tampered"

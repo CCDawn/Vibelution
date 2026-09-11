@@ -358,6 +358,29 @@ class QuestionResult:
         receipt_identities: dict[str, dict[str, Any]] = {}
         for stage in REQUIRED_PACKAGE_RECEIPT_STAGES:
             receipt = receipts.get(stage)
+            if isinstance(receipt, dict) and receipt.get("skipped") is True:
+                # Explicit skipped-stage marker (e.g. a run that provably
+                # converged without any revision round): project the bounded
+                # marker identity instead of demanding a receipt locator.
+                # The marker was already structurally validated by the
+                # package contract that sealed this snapshot.
+                from .question_result_package import normalize_skipped_receipt_stage
+
+                marker = normalize_skipped_receipt_stage(stage, receipt)
+                locator = {
+                    "kind": "skipped_receipt_stage",
+                    "stage": stage,
+                    "reason": str(marker["reason"]),
+                    "convergenceRecordId": str(marker["convergenceRecordId"]),
+                }
+                receipt_identities[stage] = {
+                    "receipt_id": "",
+                    "node_run_id": "",
+                    "evidence_locator": locator,
+                    "evidence_locator_sha256": _canonical_sha256(locator),
+                    "skipped": True,
+                }
+                continue
             if not isinstance(receipt, dict):
                 raise ResultSetContractError(
                     f"Question result {self.question_id} is missing package receipt {stage}."
