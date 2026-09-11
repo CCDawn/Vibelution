@@ -1,6 +1,6 @@
 import type { SessionCacheCompositionSegment } from "../../api/types";
 
-export type ComposerContextHitKind = "hit" | "miss" | "never";
+export type ComposerContextHitKind = "hit" | "miss" | "never" | "unknown";
 
 export type ComposerContextSegment = {
   key: string;
@@ -8,9 +8,20 @@ export type ComposerContextSegment = {
   tokensLabel: string;
   tokens: number;
   pct: number;
+  pctLabel: string;
   /** CSS color for composition bar / legend swatch. */
   color: string;
   hit: ComposerContextHitKind;
+  contentPreview?: string;
+};
+
+export type ComposerContextCacheState = "observed" | "missing" | "not_called";
+
+export type ComposerContextHitShares = {
+  hit: number;
+  miss: number;
+  never: number;
+  unknown: number;
 };
 
 export type ComposerContextRingModel = {
@@ -18,7 +29,9 @@ export type ComposerContextRingModel = {
   hitPercent: number;
   usedLabel: string;
   empty: boolean;
+  cacheState: ComposerContextCacheState;
   segments: ComposerContextSegment[];
+  hitShares: ComposerContextHitShares;
   detailAvailable: boolean;
 };
 
@@ -87,7 +100,25 @@ export function resolveComposerSegmentHitKind(
   if (policy.includes("volatile") || policy.includes("ephemeral")) {
     return "never";
   }
-  return "miss";
+  return "unknown";
+}
+
+export function resolveComposerCacheState(options: {
+  cacheSource?: string;
+  cacheUsageObserved?: boolean;
+  cachedInputTokens?: number;
+  cacheCreationInputTokens?: number;
+}): ComposerContextCacheState {
+  const source = String(options.cacheSource ?? "").trim();
+  if (source === "not_called") {
+    return "not_called";
+  }
+  if (source !== "provider_usage") {
+    return "missing";
+  }
+  const observed = options.cacheUsageObserved
+    ?? ((options.cachedInputTokens ?? 0) > 0 || (options.cacheCreationInputTokens ?? 0) > 0);
+  return observed ? "observed" : "missing";
 }
 
 export function resolveComposerSegmentColor(
@@ -127,6 +158,10 @@ export function buildComposerContextRingModel(options: {
   detailAvailable: boolean;
   segments: SessionCacheCompositionSegment[];
   lang: "zh" | "en";
+  cacheSource?: string;
+  cacheUsageObserved?: boolean;
+  cachedInputTokens?: number;
+  cacheCreationInputTokens?: number;
 }): ComposerContextRingModel {
   const usageUsed = Math.max(0, options.usageUsed);
   const usageLimit = Math.max(0, options.usageLimit);
@@ -145,17 +180,25 @@ export function buildComposerContextRingModel(options: {
   const segments: ComposerContextSegment[] = totalTokens > 0
     ? positive.map((segment) => {
       const pct = Math.round((segment.tokens / totalTokens) * 1000) / 10;
+      const contentPreview = String(segment.contentPreview ?? "").trim();
       return {
         key: segment.key || segment.label || "segment",
         name: String(segment.label || segment.key || (options.lang === "zh" ? "分段" : "Segment")).trim(),
         tokens: segment.tokens,
         tokensLabel: formatCompactTokenCount(segment.tokens),
         pct,
+        pctLabel: `${pct}%`,
         color: resolveComposerSegmentColor(segment),
         hit: resolveComposerSegmentHitKind(segment),
+        ...(contentPreview ? { contentPreview } : {}),
       };
     })
     : [];
+
+  const hitShares = segments.reduce<ComposerContextHitShares>((shares, segment) => {
+    shares[segment.hit] += segment.pct;
+    return shares;
+  }, { hit: 0, miss: 0, never: 0, unknown: 0 });
 
   const empty = segments.length === 0 && usagePercent === 0;
   const usedLabel = usageLimit > 0
@@ -167,7 +210,9 @@ export function buildComposerContextRingModel(options: {
     hitPercent,
     usedLabel,
     empty,
+    cacheState: resolveComposerCacheState(options),
     segments,
+    hitShares,
     detailAvailable: Boolean(options.detailAvailable),
   };
 }

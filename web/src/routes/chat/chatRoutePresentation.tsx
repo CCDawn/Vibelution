@@ -109,8 +109,19 @@ export function promptSegmentDisplayLabel(
       return lang === "zh" ? "Agent 消息" : "agent messages";
     case "provider_extra_hit":
       return lang === "zh" ? "厂商额外命中" : "provider extra";
-    default:
-      return contextCompositionSegmentLabel(key, segment.label || key, t);
+    case "agent_prompt_snapshot":
+      return lang === "zh" ? "Agent 提示快照" : "agent prompt snapshot";
+    case "dynamic_runtime_context":
+      return lang === "zh" ? "动态运行上下文" : "dynamic runtime context";
+    case "computed_missing":
+      return lang === "zh" ? "无法计算" : "computed missing";
+    default: {
+      const translated = contextCompositionSegmentLabel(key, "", t);
+      if (translated && translated !== key) {
+        return translated;
+      }
+      return lang === "zh" ? "其他上下文" : "other context";
+    }
   }
 }
 
