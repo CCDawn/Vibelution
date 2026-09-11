@@ -7,6 +7,7 @@
 - [ ] 改的是 `Documents\Vibelution\config\config.toml`（或 `VIBELUTION_CONFIG_PATH`）
 - [ ] 未把生产配置写进仓库根
 - [ ] 密钥仅为 `credential_ref = "env:…"`
+- [ ] 若动过 auto-advance 策略模板（[INDEX](./INDEX.md) 的 `[research_workflow]`）：已运行 `python scripts/deploy_auto_advance_policy.py` 且报告 in sync（模板是权威，运行时读部署副本；`--write` 才写入并备份）
 
 ## B. Provider
 

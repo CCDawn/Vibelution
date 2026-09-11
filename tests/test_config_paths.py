@@ -16,6 +16,7 @@ from config.paths import (
     resolve_workspace_home,
 )
 from config.runtime_capabilities import MODEL_CAPABILITY_CACHE_ENV, get_model_capability_cache_path
+from scripts import deploy_auto_advance_policy as policy_deploy
 
 
 def test_resolve_config_path_defaults_to_user_documents(monkeypatch, tmp_path):
@@ -191,3 +192,93 @@ def test_global_config_initialization_upgrades_existing_meta_without_overwriting
     assert upgraded["createdAt"] == "2026-06-11T09:20:00+00:00"
     assert Path(upgraded["backupDir"]) == external_config.parent / "backups"
     assert Path(upgraded["lockPath"]) == external_config.parent / "config-edit.lock"
+
+
+# ---------------------------------------------------------------------------
+# Approved auto-advance policy: tracked template vs deployed copy
+#
+# The template is the governance authority, but the runtime reads the
+# operator's deployed copy, and both readers fail silent.  Commit 3859bbc79
+# added the sixth capability switch to the template while the deployed copy
+# stayed behind, which silently disabled the automation chain; these tests pin
+# both halves of that boundary.
+
+
+def _template_payload() -> dict:
+    return json.loads(policy_deploy.template_path().read_text(encoding="utf-8"))
+
+
+def test_tracked_auto_advance_template_satisfies_the_activation_contract(tmp_path):
+    """A contract change must not leave the repo authority unloadable."""
+
+    template = policy_deploy.template_path()
+    assert template.is_file(), f"tracked template is missing: {template}"
+
+    report = policy_deploy.inspect(template=template, deployed=tmp_path / "absent.json")
+
+    assert report["templateErrors"] == []
+    assert report["state"] == "deployed_missing"
+
+
+def test_policy_deploy_check_reports_drift_for_a_stale_deployed_copy(tmp_path):
+    template = tmp_path / "template.json"
+    deployed = tmp_path / "deployed.json"
+    payload = _template_payload()
+    encoded = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    template.write_text(encoded, encoding="utf-8")
+    deployed.write_text(encoded, encoding="utf-8")
+
+    in_sync = policy_deploy.inspect(template=template, deployed=deployed)
+    assert in_sync["state"] == "in_sync"
+    assert in_sync["inSync"] is True
+    assert policy_deploy._exit_code(in_sync) == policy_deploy.EXIT_OK
+
+    # The exact incident shape: the deployed copy predates a capability that
+    # the contract now requires, so it is drift *and* invalid.
+    stale = json.loads(json.dumps(payload))
+    stale["capabilities"].pop("autoAdjudicateQuestionReview")
+    deployed.write_text(
+        json.dumps(stale, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+
+    drift = policy_deploy.inspect(template=template, deployed=deployed)
+    assert drift["state"] == "drift"
+    assert drift["inSync"] is False
+    assert any("missing_capability" in item for item in drift["deployedErrors"])
+    assert policy_deploy._exit_code(drift) == policy_deploy.EXIT_DRIFT
+
+
+def test_policy_deploy_write_syncs_the_copy_and_backs_up_the_previous_one(tmp_path):
+    template = tmp_path / "template.json"
+    deployed = tmp_path / "deployed.json"
+    encoded = json.dumps(_template_payload(), ensure_ascii=False, indent=2) + "\n"
+    template.write_text(encoded, encoding="utf-8")
+    deployed.write_text('{"policyId": "stale"}\n', encoding="utf-8")
+
+    report = policy_deploy.deploy(template=template, deployed=deployed)
+
+    assert report["written"] is True
+    assert report["state"] == "deployed"
+    assert deployed.read_text(encoding="utf-8") == encoded
+    backup = Path(report["backupPath"])
+    assert backup.is_file()
+    assert backup.read_text(encoding="utf-8") == '{"policyId": "stale"}\n'
+    assert policy_deploy._exit_code(report) == policy_deploy.EXIT_OK
+
+    # Deploying again is a no-op; the runtime source already matches.
+    again = policy_deploy.deploy(template=template, deployed=deployed)
+    assert again["written"] is False
+    assert again["state"] == "in_sync"
+
+
+def test_policy_deploy_refuses_to_deploy_an_invalid_template(tmp_path):
+    template = tmp_path / "template.json"
+    deployed = tmp_path / "deployed.json"
+    template.write_text('{"policyId": "broken"}\n', encoding="utf-8")
+    deployed.write_text('{"policyId": "broken"}\n', encoding="utf-8")
+
+    report = policy_deploy.deploy(template=template, deployed=deployed)
+
+    assert report["written"] is False
+    assert report["state"] == "template_invalid"
+    assert policy_deploy._exit_code(report) == policy_deploy.EXIT_TEMPLATE_PROBLEM
