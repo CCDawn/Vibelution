@@ -5,6 +5,7 @@
 | 文档 | 用途 |
 | --- | --- |
 | [config/INDEX.md](config/INDEX.md) | **Operator config.toml 总索引**（LLM/协议/缓存/厂商） |
+| [instance-storage-retention.md](instance-storage-retention.md) | 实例存储保留策略与 `prune_instance_storage.py` |
 | [linux-bootstrap.md](linux-bootstrap.md) | Linux 部署与验收边界 |
 | [local-model-monitor.md](local-model-monitor.md) | 本地模型监控 |
 | [rust-partial-replacement-pilot.md](rust-partial-replacement-pilot.md) | Rust sidecar 硬化试验（usage / path containment） |
