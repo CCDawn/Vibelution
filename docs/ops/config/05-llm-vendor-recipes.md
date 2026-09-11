@@ -96,10 +96,12 @@ wire_protocol = "chat_completions"
 
 | 检查 | 值 |
 | --- | --- |
-| 分流 | `api = "opencode-go"`：gpt→responses，minimax/qwen→anthropic_messages，glm/kimi/deepseek/mimo→chat_completions；`api = "opencode-zen"`：gpt/codex→responses，claude 系/qwen→anthropic_messages，其余 chat_completions |
+| 分流 | `api = "opencode-go"`：gpt/grok/muse-spark→responses，minimax/qwen→anthropic_messages，glm/kimi/deepseek/mimo/longcat/hy3/hy4/omen→chat_completions；`api = "opencode-zen"`：gpt/codex/grok/muse-spark→responses，claude 系/qwen→anthropic_messages，其余（含 minimax/glm/kimi/deepseek）→chat_completions |
 | 显式优先 | 模型 `wire_protocol` > `api` 规则 > provider `protocols.default`；规则命中但不在 `allowed` 时回退默认 |
 | 发现 | `discovery.adapter = "openai_compatible"`，发现的新模型按同一规则分流 |
-| 注意 | 中转站模型名与官方不一致时以实际声明 `wire_protocol` 为准；grok 系未做名称规则，需显式声明 |
+| 鉴权 | `/messages`（anthropic_messages）只认 `x-api-key`，Bearer 会 401；Vibelution 传输层已按此发送 |
+| 限制 | Zen 的 Gemini 走特殊路径 `zen/v1/models/{model-id}`（Google generateContent 形态），当前不支持；OpenAI 系模型可能受 Region 限制（403）；Muse Spark 仅部分区域可用 |
+| 注意 | 中转站模型名与官方不一致时以实际声明 `wire_protocol` 为准；规则按官方端点表（2026-09）维护，端点变更时同步更新 |
 
 ---
 
