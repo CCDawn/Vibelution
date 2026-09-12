@@ -70,6 +70,11 @@ const AgentContextSectionsView = React.lazy(() =>
 );
 import { ConversationFollowupQueueBar } from "./ConversationFollowupQueueBar";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
+import {
+  resolveComposerPlaceholder,
+  shouldAcceptComposerGhost,
+} from "./composerPromptSuggestionModel";
+import { useComposerPromptSuggestion } from "./useComposerPromptSuggestion";
 import { resolveComposerQueuePrimaryKind } from "./composerFollowupQueueModel";
 import {
   filterSlashCommandSuggestions,
@@ -466,6 +471,7 @@ export function ConversationView({
   composerValue,
   composerPlaceholder,
   composerDisabled,
+  promptSuggestionEnabled = false,
   composerFocusSignal = "",
   onComposerFocusRequestSettled,
   composerActionDisabled,
@@ -571,6 +577,19 @@ export function ConversationView({
   const [copiedAnswerMessageId, setCopiedAnswerMessageId] = useState("");
   const copyAnswerFeedbackTimerRef = useRef<number | null>(null);
   const resolvedActionMode = resolveComposerActionMode(composerActionMode);
+  const composerPromptSuggestion = useComposerPromptSuggestion(
+    {
+      sessionId,
+      enabled: promptSuggestionEnabled && !composerDisabled && !editingMessageId,
+      busy: resolvedActionMode === "stop" || composerPending,
+      draft: composerValue,
+      hasConversation: messages.length > 0,
+    },
+    (suggestion) => {
+      onComposerChange(suggestion);
+      requestAnimationFrame(() => composerInputRef.current?.focus());
+    },
+  );
   const hasComposerAttachments = composerAttachments.length > 0;
   const hasComposerReferences = composerReferences.length > 0;
   const attachmentInputDisabled = composerAttachmentInputDisabled ?? composerDisabled;
@@ -635,11 +654,18 @@ export function ConversationView({
   const resolvedBusyPrimaryLabel = queuePrimaryIsImmediate
     ? resolvedImmediateSteerLabel
     : resolvedQueueFollowupLabel;
-  const resolvedComposerPlaceholder = composerPlaceholder.trim()
+  const baseComposerPlaceholder = composerPlaceholder.trim()
     ? composerPlaceholder
     : resolvedActionMode === "stop"
       ? (followupQueue.length ? t("sessionBusyQueuedPlaceholder") : t("sessionBusyPlaceholder"))
       : composerPlaceholder;
+  const resolvedComposerPlaceholder = resolveComposerPlaceholder({
+    ghost: composerPromptSuggestion.ghost,
+    exampleCommand: composerPromptSuggestion.exampleCommand,
+    hasConversation: messages.length > 0,
+    lang,
+    fallback: baseComposerPlaceholder,
+  });
   // Edit/rerun and running-turn queue/steer are labeled primary pills. Do not mix in
   // round icon-only geometry (composerRoundButtonPrimary forces a square slot).
   const primaryActionClassName = primaryActionIsEditSubmit || primaryActionIsQueueSubmit
@@ -4775,6 +4801,7 @@ export function ConversationView({
             value={composerValue}
             disabled={composerDisabled && resolvedActionMode !== "stop"}
             placeholder={resolvedComposerPlaceholder}
+            data-composer-prompt-suggestion={composerPromptSuggestion.ghost ? "true" : undefined}
             aria-label={lang === "zh" ? "发送消息" : "Message"}
             aria-controls={showSlashSuggestions ? slashSuggestionListId : undefined}
             aria-expanded={showSlashSuggestions ? true : undefined}
@@ -4792,6 +4819,25 @@ export function ConversationView({
               onAddComposerAttachments(files);
             }}
             onKeyDown={(event) => {
+              if (
+                shouldAcceptComposerGhost({
+                  ghost: composerPromptSuggestion.ghost,
+                  key: event.key,
+                  shiftKey: event.shiftKey,
+                  ctrlKey: event.ctrlKey,
+                  metaKey: event.metaKey,
+                  altKey: event.altKey,
+                })
+              ) {
+                event.preventDefault();
+                composerPromptSuggestion.acceptGhost();
+                return;
+              }
+              if (composerPromptSuggestion.ghost && event.key === "Escape") {
+                event.preventDefault();
+                composerPromptSuggestion.dismissGhost();
+                return;
+              }
               if (
                 shouldSubmitComposerOnKeydown({
                   key: event.key,
