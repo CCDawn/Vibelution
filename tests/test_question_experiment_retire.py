@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from core.web.services import team_service
+from core.web.services import data_processing_service, team_service
 from core.web.services.team_workflow import (
     challenge_question_retire,
     challenge_question_runs,
@@ -321,3 +321,56 @@ def test_retire_refuses_golden_sample_and_wrong_confirmation(
             _TARGET,
             confirmation_question_id="SCI-999",
         )
+
+
+def test_retire_survives_source_runs_owned_by_already_retired_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reset must finish when its source runs' owner project was retired first.
+
+    Live data can reference a run whose owner project no longer exists (the
+    earlier cleanup retired that project).  The run directory is gone with the
+    owner workspace, but the processing-run authority still needs removal.
+    """
+
+    team_id = _retire_env(tmp_path, monkeypatch)
+    owner = _seed_project(team_id, _KEEP)["project"]
+    _seed_project(team_id, _TARGET)
+    orphan_run = data_processing_service.create_processing_run(
+        title="orphaned owner run",
+        scope={
+            "teamId": team_id,
+            "questionId": _TARGET,
+            "researchProjectId": str(owner["projectId"]),
+            "workflowStage": "knowledge_collection",
+        },
+        metadata={"startedFrom": "team_workflow_source_collection", "teamId": team_id},
+    )
+    chain._append_jsonl(
+        chain._storage_path(team_id),
+        {
+            "schemaVersion": 1,
+            "recordKind": chain.COLLECTION_REQUEST_KIND,
+            "requestId": "request-orphan",
+            "questionId": _TARGET,
+            "meetingRoundId": "meeting-orphan",
+            "status": "completed",
+            "collectionRunId": orphan_run["runId"],
+        },
+    )
+
+    research_projects.remove_challenge_question_project(
+        team_id,
+        question_id=_KEEP,
+        expected_project_id=str(owner["projectId"]),
+    )
+
+    result = challenge_question_retire.retire_question_experiment(
+        team_id,
+        _TARGET,
+        confirmation_question_id=_TARGET,
+    )
+
+    assert result["errors"] == []
+    with pytest.raises(data_processing_service.DataProcessingNotFoundError):
+        data_processing_service.get_processing_run(orphan_run["runId"])
