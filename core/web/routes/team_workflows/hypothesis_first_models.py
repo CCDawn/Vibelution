@@ -528,3 +528,17 @@ class AnomalyInboxExtendBudgetRequest(BaseModel):
     )
     confirmed: StrictBool = False
     expectedRunVersion: int = Field(0, ge=0)
+
+
+class RoundFailureRetryRequest(BaseModel):
+    """One confirmed manual retry of an open round-generation failure trace.
+
+    ``confirmed`` is the mandatory human-authorization flag (误触防护): the
+    endpoint refuses the request without it.  The regeneration itself is a
+    minutes-long review-LLM path, so the endpoint only accepts the request
+    and a background worker reuses the exact auto-advance command path.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    confirmed: StrictBool = False

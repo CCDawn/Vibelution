@@ -49,6 +49,7 @@ import { buildResearchRunInput } from "./researchRunLaunchContract";
 import { createResearchRunSafetyBudget } from "./researchRunSafetyBudget";
 import { ResearchWorkflowCanvasPane } from "./ResearchWorkflowCanvasPane";
 import { buildResearchWorkflowContext } from "./researchWorkflowContextModel";
+import { ResearchWorkflowRecoveryEntry } from "./ResearchWorkflowRecoveryPanel";
 import {
   buildResearchWorkflowStageNavigatorModel,
   ResearchWorkflowStageNavigator,
@@ -875,16 +876,23 @@ export function ResearchProcessWorkspace({
               : "Search in the current-task panel. Stage progress and the workflow canvas appear after selection."}
           />
         ) : (
-          <ResearchWorkflowCanvasPane
-            key={`${teamId}:${chainQuestionId}:${location.runId}`}
-            unavailableMessage={workspaceModel.scopeMismatch ? "正在切换题目，旧画布已隐藏" : workspaceModel.resyncRequired ? "正在同步研究状态，画布将在同步后显示" : !workspaceReady ? "正在读取当前题目的研究状态" : undefined}
-            graph={workspaceReady && !workspaceModel.scopeMismatch && !workspaceModel.resyncRequired ? graph : null}
-            selectedNodeId={location.selectedNodeId}
-            runtimeCurrentNodeIds={formalRuntimeCurrentNodeIds}
-            currentTaskNodeId={semanticCurrentTaskNodeId}
-            error={displayError}
-            onSelectNode={location.selectNode}
-          />
+          <>
+            <ResearchWorkflowRecoveryEntry
+              teamId={teamId}
+              lang={lang}
+              onOpen={() => location.openPanel("progress")}
+            />
+            <ResearchWorkflowCanvasPane
+              key={`${teamId}:${chainQuestionId}:${location.runId}`}
+              unavailableMessage={workspaceModel.scopeMismatch ? "正在切换题目，旧画布已隐藏" : workspaceModel.resyncRequired ? "正在同步研究状态，画布将在同步后显示" : !workspaceReady ? "正在读取当前题目的研究状态" : undefined}
+              graph={workspaceReady && !workspaceModel.scopeMismatch && !workspaceModel.resyncRequired ? graph : null}
+              selectedNodeId={location.selectedNodeId}
+              runtimeCurrentNodeIds={formalRuntimeCurrentNodeIds}
+              currentTaskNodeId={semanticCurrentTaskNodeId}
+              error={displayError}
+              onSelectNode={location.selectNode}
+            />
+          </>
         )}
         inspector={archiveOpen ? null : (
           <ResearchCurrentTaskInspector
