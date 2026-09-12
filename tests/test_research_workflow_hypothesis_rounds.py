@@ -511,6 +511,77 @@ def test_failure_record_requires_code_and_known_status(
     assert service.list_hypothesis_round_failures(team_id)["failureCount"] == 0
 
 
+def test_blocked_wait_trace_is_idempotent_per_wait_episode(
+    tmp_path, monkeypatch
+) -> None:
+    """Repeated observations of one wait keep one open blocked row.
+
+    The auto-advance sweep re-enters a waiting fan-in every tick; before this
+    guarantee the ledger appended a fresh blocked row per observation
+    (SCI-117: 3,692 identical rows for one stuck question), so wait-state
+    bookkeeping must correlate by scope, not by observation time.
+    """
+    team_id = _team(tmp_path, monkeypatch)
+    service = hypothesis_rounds_service
+    payload = {
+        "status": "blocked",
+        "failureCode": "fan_in_waiting_for_sibling_reviews",
+        "reason": "fan-in pending",
+        "meetingRoundIds": ["meeting-a"],
+        "selectionId": "selection-1",
+        "roundIndex": 1,
+        "context": {"pendingMeetingRoundIds": ["meeting-b", "meeting-c"]},
+    }
+    first = service.record_hypothesis_round_failure(team_id, payload)
+    assert first["deduplicated"] is False
+
+    # Sibling progress changes the context but not the wait identity: the
+    # episode keeps its original row instead of minting a new failure id.
+    shrunk = {
+        **payload,
+        "context": {"pendingMeetingRoundIds": ["meeting-c"]},
+    }
+    for _ in range(3):
+        repeated = service.record_hypothesis_round_failure(team_id, shrunk)
+        assert repeated["status"] == "recorded"
+        assert repeated["deduplicated"] is True
+        assert repeated["failure"]["failureId"] == first["failure"]["failureId"]
+    listed = service.list_hypothesis_round_failures(team_id)
+    assert listed["failureCount"] == 1
+    assert listed["openFailureCount"] == 1
+
+    # Resolving the episode (round generated) closes dedupe: the same scope
+    # may wait again later as a genuinely new episode.
+    assert (
+        service.resolve_hypothesis_round_failures(
+            team_id,
+            resolved_by_round_id="hround-later",
+            selection_id="selection-1",
+            round_index=1,
+            meeting_round_ids=["meeting-a"],
+        )
+        == 1
+    )
+    fresh = service.record_hypothesis_round_failure(team_id, payload)
+    assert fresh["deduplicated"] is False
+    assert fresh["failure"]["failureId"] != first["failure"]["failureId"]
+    assert service.list_hypothesis_round_failures(team_id)["openFailureCount"] == 1
+
+    # Failed generations stay per-attempt: each one spent real work, and the
+    # automatic retry budget counts attempts (never dedupes them away).
+    for index in range(2):
+        recorded = service.record_hypothesis_round_failure(
+            team_id,
+            {
+                **payload,
+                "status": "failed",
+                "failureCode": f"hypothesis_round_generation_error_{index}",
+            },
+        )
+        assert recorded["deduplicated"] is False
+    assert service.list_hypothesis_round_failures(team_id)["failureCount"] == 4
+
+
 # ---------------------------------------------------------------------------
 # Pre-generation dedup: reuse before spend + in-flight rejection
 # ---------------------------------------------------------------------------

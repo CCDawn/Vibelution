@@ -197,6 +197,68 @@ def test_fanout_records_completed_attempt_per_candidate(tmp_path, monkeypatch) -
         assert attempt["meetingRoundId"].startswith("hf-review-selection-dispatch-1-")
 
 
+def test_terminal_transition_replay_never_appends_duplicate_rows(
+    tmp_path, monkeypatch
+) -> None:
+    """终态被重复观察是幂等写入：同一 attempt 的 completed/succeeded 只留一行。
+
+    SCI-056 里单个 attempt 被重复追加了 3,000+ 次完全相同的终态行，账本膨胀到
+    淹没投影与审计；重复读取/围栏清扫不得再写第二行。
+    """
+    team_id = _fanout_env(tmp_path, monkeypatch)
+    queued = chain._append_review_dispatch_attempt_state(
+        team_id,
+        question_id="SCI-096",
+        selection_id="selection-dispatch-1",
+        selection_version="v1",
+        candidate_id="hyp-a",
+        round_index=1,
+        lifecycle="queued",
+    )
+    transition = {
+        "question_id": "SCI-096",
+        "selection_id": "selection-dispatch-1",
+        "selection_version": "v1",
+        "candidate_id": "hyp-a",
+        "round_index": 1,
+        "lifecycle": "completed",
+        "outcome": "succeeded",
+        "meeting_round_id": "hf-review-selection-dispatch-1-hyp-a",
+    }
+    first = chain._append_review_dispatch_attempt_state(team_id, **transition)
+    assert first["attemptId"] == queued["attemptId"]
+
+    for _ in range(3):
+        repeated = chain._append_review_dispatch_attempt_state(team_id, **transition)
+        assert repeated == first
+
+    def attempt_rows() -> list[dict]:
+        return [
+            record
+            for record in _chain_records(team_id)
+            if record.get("recordKind") == chain.REVIEW_DISPATCH_ATTEMPT_KIND
+        ]
+
+    assert len(attempt_rows()) == 2  # queued + one terminal transition
+
+    # A different terminal verdict about the same attempt still appends.
+    superseded = chain._append_review_dispatch_attempt_state(
+        team_id,
+        **{
+            **transition,
+            "lifecycle": "failed",
+            "outcome": "superseded",
+            "error": "ReviewMeetingClosed",
+            "error_type": "ReviewMeetingClosed",
+        },
+    )
+    assert superseded["lifecycle"] == "failed"
+    assert len(attempt_rows()) == 3
+    latest = _attempts(team_id)
+    assert len(latest) == 1
+    assert latest[0]["outcome"] == "superseded"
+
+
 def test_failed_candidate_keeps_durable_error_and_projects_retry(
     tmp_path, monkeypatch
 ) -> None:

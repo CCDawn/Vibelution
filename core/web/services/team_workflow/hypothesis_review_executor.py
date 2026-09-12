@@ -1011,7 +1011,10 @@ def _pareto_step(
     unknown = (set(front) | set(dominated)) - candidate_ids
     if unknown:
         raise ContractValidationError(
-            "Pareto analysis references unknown candidates: " + ", ".join(sorted(unknown))
+            "Pareto analysis references unknown candidates: "
+            + ", ".join(sorted(unknown))
+            + "; it must use the exact candidate ids: "
+            + ", ".join(sorted(candidate_ids))
         )
     missing = candidate_ids - (set(front) | set(dominated))
     if missing:

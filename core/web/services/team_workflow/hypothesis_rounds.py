@@ -1253,6 +1253,29 @@ def _json_safe(value: Any) -> Any:
     return json.loads(json.dumps(value, ensure_ascii=False, default=str))
 
 
+def _failure_scope_key(record: Mapping[str, Any]) -> tuple[Any, ...]:
+    """Correlation key one blocked wait shares across repeated re-entries.
+
+    A wait is a state, not an attempt: every sweep tick observes the same
+    (failureCode, selection, round, meeting set) while the siblings stay
+    open.  The key deliberately excludes ``createdAt``/``context`` so the
+    ledger keeps one open row per wait episode instead of one per tick.
+    """
+
+    round_index_raw = record.get("roundIndex")
+    try:
+        round_index = int(round_index_raw) if round_index_raw is not None else None
+    except (TypeError, ValueError):
+        round_index = None
+    return (
+        str(record.get("failureCode") or "").strip(),
+        str(record.get("selectionId") or "").strip(),
+        round_index,
+        tuple(sorted(_normalized_str_list(record.get("meetingRoundIds")))),
+        str(record.get("roundId") or "").strip(),
+    )
+
+
 def record_hypothesis_round_failure(
     team_id: str, payload: Mapping[str, Any] | None = None
 ) -> dict[str, Any]:
@@ -1266,6 +1289,13 @@ def record_hypothesis_round_failure(
     still open).  Records are append-only; a later successful generation
     resolves matching open records through
     :func:`resolve_hypothesis_round_failures`.
+
+    Blocked waits are idempotent per episode: while an open blocked record
+    with the same scope key exists, a repeated observation returns that
+    record instead of appending a duplicate row.  The auto-advance sweep
+    re-enters the fan-in every tick, so without this the ledger grew to
+    thousands of identical wait rows per stuck question (SCI-117).  Failed
+    generation traces stay per-attempt: each one spent real work.
     """
     request = dict(payload) if isinstance(payload, Mapping) else {}
     status = str(request.get("status") or "failed").strip().lower()
@@ -1314,17 +1344,39 @@ def record_hypothesis_round_failure(
         "workflowRunId": str(request.get("workflowRunId") or "").strip(),
         "scopeHash": str(request.get("scopeHash") or "").strip(),
         "retryHint": str(request.get("retryHint") or "").strip(),
+        "trigger": str(request.get("trigger") or "").strip(),
         "context": _json_safe(context) if isinstance(context, Mapping) else {},
         "createdAt": now,
         "resolvedAt": "",
         "resolvedByRoundId": "",
     }
     with _LOCK:
+        if status == "blocked":
+            scope_key = _failure_scope_key(record)
+            existing = next(
+                (
+                    item
+                    for item in _latest_failure_records(team_id)
+                    if str(item.get("status") or "") in FAILURE_OPEN_STATUSES
+                    and _failure_scope_key(item) == scope_key
+                ),
+                None,
+            )
+            if existing is not None:
+                return {
+                    "schemaVersion": FAILURE_SCHEMA_VERSION,
+                    "teamId": team_id,
+                    "status": "recorded",
+                    "deduplicated": True,
+                    "failure": existing,
+                    "storagePath": str(_failure_storage_path(team_id)),
+                }
         _append_jsonl(_failure_storage_path(team_id), record)
     return {
         "schemaVersion": FAILURE_SCHEMA_VERSION,
         "teamId": team_id,
         "status": "recorded",
+        "deduplicated": False,
         "failure": record,
         "storagePath": str(_failure_storage_path(team_id)),
     }
