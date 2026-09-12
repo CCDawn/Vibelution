@@ -21,6 +21,7 @@ from core.web.services import (
     team_service,
     team_workflow_orchestration_service,
 )
+from core.web.services.session import question_sessions
 from core.web.services.team_workflow import challenge_question_runs
 from core.web.services.team_workflow.research_runtime import workflow_artifact_store
 from core.web.services.team_workflow.research_runtime.problem_understanding_artifact_writer import (
@@ -82,6 +83,7 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_kernel_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(question_sessions, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_workflow_orchestration_service, "PROJECT_ROOT", tmp_path)

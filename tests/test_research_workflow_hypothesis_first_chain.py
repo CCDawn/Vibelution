@@ -3894,6 +3894,9 @@ def test_question_reset_clears_only_the_target_questions_closed_hypothesis_chain
         "collectionRunCount": 0,
         "formalRunCount": 0,
         "archivedFormalRunCount": 0,
+        "conversationRoomCount": 0,
+        "conversationMessageCount": 0,
+        "conversationSessionCount": 0,
     }
 
     result = chain.reset_question_chain(
