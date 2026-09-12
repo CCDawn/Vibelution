@@ -7,6 +7,7 @@ import pytest
 
 from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_MESSAGE,
+    EVENT_BRANCH_REBASE,
     EVENT_TURN_COMPLETED,
     EVENT_TURN_FAILED,
     EVENT_TURN_INTERRUPTED,
@@ -1338,6 +1339,82 @@ def test_reconcile_preserves_open_ledger_for_durable_active_work_run(monkeypatch
 
     assert [event.event_type for event in load_conversation_events(tmp_path, "session-live")] == [
         EVENT_TURN_STARTED,
+    ]
+
+
+def test_reconcile_does_not_interrupt_completed_turn_after_head_select(monkeypatch, tmp_path):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_active_chat_turn_work_run_for_session", lambda *_args, **_kwargs: None)
+
+    append_conversation_event(tmp_path, "session-live", "turn-1", EVENT_TURN_STARTED, status="running")
+    user = append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-1",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "第一版问题"},
+    )
+    assistant = append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-1",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "1"},
+    )
+    append_conversation_event(tmp_path, "session-live", "turn-1", EVENT_TURN_COMPLETED, status="completed")
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-2",
+        EVENT_BRANCH_REBASE,
+        status="recorded",
+        payload={"operation": "edit", "branchId": "branch-2", "fromEventId": user.event_id, "replacedTurnIds": []},
+        parent_event_id=user.event_id,
+    )
+    append_conversation_event(
+        tmp_path, "session-live", "turn-2", EVENT_USER_MESSAGE, status="recorded", payload={"content": "第二版问题"}
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-2",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "2"},
+    )
+    append_conversation_event(tmp_path, "session-live", "turn-2", EVENT_TURN_COMPLETED, status="completed")
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-1",
+        EVENT_BRANCH_REBASE,
+        status="recorded",
+        payload={
+            "operation": "head_select",
+            "branchId": "main",
+            "fromEventId": assistant.event_id,
+            "replacedTurnIds": [],
+        },
+        parent_event_id=assistant.event_id,
+    )
+
+    session_service._reconcile_stale_session_ledger(
+        "session-live",
+        reason="detail_loaded_after_restart",
+    )
+
+    assert [event.event_type for event in load_conversation_events(tmp_path, "session-live")] == [
+        EVENT_TURN_STARTED,
+        EVENT_USER_MESSAGE,
+        EVENT_ASSISTANT_MESSAGE,
+        EVENT_TURN_COMPLETED,
+        EVENT_BRANCH_REBASE,
+        EVENT_USER_MESSAGE,
+        EVENT_ASSISTANT_MESSAGE,
+        EVENT_TURN_COMPLETED,
+        EVENT_BRANCH_REBASE,
     ]
 
 

@@ -157,6 +157,9 @@ export type ConversationViewProps = {
   regenerableAssistantMessageId?: string;
   regenerateDisabled?: boolean;
   regeneratePending?: boolean;
+  onRetryTurn?: () => void;
+  retryTurnDisabled?: boolean;
+  retryTurnPending?: boolean;
   onCancelComposerMode?: () => void;
   onLoadEarlierMessages?: () => void;
   onSubmit: () => void;

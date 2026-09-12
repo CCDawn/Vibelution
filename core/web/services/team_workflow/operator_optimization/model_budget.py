@@ -17,6 +17,7 @@ from typing import Any
 
 from core.research.operator_optimization.model_budget_contracts import (
     OperatorDiscussionBudget,
+    OperatorModelCallBudget,
     OperatorModelPrice,
 )
 from core.research.workflow.ledger import WorkflowLedgerStore
@@ -58,7 +59,8 @@ class ModelBudgetError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class OperatorBudgetSpec:
-    discussion: OperatorDiscussionBudget
+    budget: OperatorModelCallBudget
+    budget_kind: str
     model_cost_limit: Decimal
     currency: str
     model_ref: str | None
@@ -128,6 +130,27 @@ def _discussion(
     except Exception as exc:  # pydantic validation is part of this boundary
         raise ModelBudgetError(
             f"operator discussion budget is invalid: {exc}",
+            code="operator_model_budget_invalid",
+        ) from exc
+
+
+def _call_budget(
+    value: OperatorModelCallBudget | Mapping[str, Any] | None,
+    *,
+    kind: str,
+) -> OperatorModelCallBudget:
+    if value is None:
+        raise ModelBudgetError(
+            f"operator {kind} budget is required; no implicit budget fallback is allowed",
+            code="operator_model_budget_missing",
+        )
+    if isinstance(value, OperatorModelCallBudget):
+        return value
+    try:
+        return OperatorModelCallBudget.model_validate(value)
+    except Exception as exc:
+        raise ModelBudgetError(
+            f"operator {kind} budget is invalid: {exc}",
             code="operator_model_budget_invalid",
         ) from exc
 
@@ -210,7 +233,7 @@ def calculate_max_reserved_cost(
 ) -> Decimal:
     """Return the worst case amount for the frozen discussion call window."""
 
-    discussion = _discussion(discussion_budget)
+    discussion = _call_budget(discussion_budget, kind="discussion")
     max_output = min(
         discussion.tokenLimit,
         discussion.maxCalls * discussion.maxOutputTokensPerCall,
@@ -260,16 +283,26 @@ def _campaign_value(budget: Any, key: str) -> Any:
 def _spec(
     *,
     discussion_budget: OperatorDiscussionBudget | Mapping[str, Any] | None,
+    knowledge_budget: OperatorModelCallBudget | Mapping[str, Any] | None = None,
     model_cost_limit: Any,
     campaign_currency: str | None,
     model_ref: str | None,
     authorized: bool | None = None,
     campaign_budget: Any = None,
+    budget_kind: str | None = None,
 ) -> OperatorBudgetSpec:
-    """Normalize the explicit discussion budget and the frozen campaign fields."""
+    """Normalize one explicit call budget and the frozen campaign fields."""
+
+    if budget_kind is None:
+        budget_kind = "knowledge" if knowledge_budget is not None else "discussion"
+    if budget_kind not in {"discussion", "knowledge"}:
+        raise ModelBudgetError("operator model budget kind is invalid", code="operator_model_budget_invalid")
 
     if campaign_budget is not None:
-        if discussion_budget is None:
+        if budget_kind == "knowledge":
+            if knowledge_budget is None:
+                knowledge_budget = _campaign_value(campaign_budget, "knowledge")
+        elif discussion_budget is None:
             discussion_budget = _campaign_value(campaign_budget, "discussion")
         if model_cost_limit is None:
             model_cost_limit = _campaign_value(campaign_budget, "modelCostLimit")
@@ -280,7 +313,12 @@ def _spec(
             if raw_authorized is not None:
                 authorized = bool(raw_authorized)
 
-    discussion = _discussion(discussion_budget)
+    if budget_kind == "knowledge":
+        if discussion_budget is not None:
+            raise ModelBudgetError("knowledge budget cannot use discussion budget", code="operator_model_budget_contract_conflict")
+        budget = _call_budget(knowledge_budget, kind="knowledge")
+    else:
+        budget = _discussion(discussion_budget)
     if authorized is False:
         raise ModelBudgetError(
             "operator model budget is not authorized",
@@ -293,15 +331,16 @@ def _spec(
             "campaign currency must be CNY or USD",
             code="operator_model_currency_invalid",
         )
-    frozen_prices = _prices(discussion)
+    frozen_prices = _prices(budget)
     if any(str(item.currency) != currency for item in frozen_prices):
         raise ModelBudgetError(
             "campaign currency differs from a frozen model price currency",
             code="operator_model_currency_mismatch",
         )
-    selected_model = _price(discussion, model_ref).modelRef if model_ref else None
+    selected_model = _price(budget, model_ref).modelRef if model_ref else None
     return OperatorBudgetSpec(
-        discussion=discussion,
+        budget=budget,
+        budget_kind=budget_kind,
         model_cost_limit=limit,
         currency=currency,
         model_ref=selected_model,
@@ -511,6 +550,7 @@ def _check_binding(
     round_id: str | None = None,
     model_ref: str | None = None,
     currency: str | None = None,
+    budget_kind: str | None = None,
 ) -> None:
     for key, expected in (
         ("parentRunId", run_id),
@@ -518,6 +558,7 @@ def _check_binding(
         ("optimizationCampaignId", campaign_id),
         ("roundId", round_id),
         ("currency", currency),
+        ("budgetKind", budget_kind),
     ):
         if expected not in (None, "") and str(metadata.get(key) or "") != str(expected):
             raise ModelBudgetError(
@@ -576,6 +617,7 @@ def _reservation_metadata(
     return {
         "schemaVersion": OPERATOR_MODEL_BUDGET_SCHEMA_VERSION,
         "kind": OPERATOR_MODEL_BUDGET_KIND,
+        "budgetKind": spec.budget_kind,
         "optimizationCampaignId": campaign_id,
         "roundId": round_id,
         "parentRunId": run_id,
@@ -587,9 +629,9 @@ def _reservation_metadata(
         "prices": frozen_prices,
         "currency": spec.currency,
         "modelCostLimit": _money_text(spec.model_cost_limit),
-        "tokenLimit": spec.discussion.tokenLimit,
-        "maxOutputTokensPerCall": spec.discussion.maxOutputTokensPerCall,
-        "maxCalls": spec.discussion.maxCalls,
+        "tokenLimit": spec.budget.tokenLimit,
+        "maxOutputTokensPerCall": spec.budget.maxOutputTokensPerCall,
+        "maxCalls": spec.budget.maxCalls,
         "reservedAmount": _money_text(reserved_amount),
         "costStatus": "unsettled",
         "costBasis": "frozen_price_upper_bound",
@@ -607,14 +649,14 @@ def _reserved_payload(
     metadata: Mapping[str, Any], *, spec: OperatorBudgetSpec
 ) -> dict[str, Any]:
     limits = {
-        "tokens": spec.discussion.tokenLimit,
-        "toolCalls": spec.discussion.maxCalls,
+        "tokens": spec.budget.tokenLimit,
+        "toolCalls": spec.budget.maxCalls,
         "seconds": 0,
-        "retries": max(0, spec.discussion.maxCalls - 1),
+        "retries": max(0, spec.budget.maxCalls - 1),
     }
     return {
         "schemaVersion": OPERATOR_MODEL_BUDGET_SCHEMA_VERSION,
-        "reserved": {"estimatedTokens": spec.discussion.tokenLimit, **limits},
+        "reserved": {"estimatedTokens": spec.budget.tokenLimit, **limits},
         "limits": limits,
         "operatorModelBudget": dict(metadata),
         "source": "operator-model-budget",
@@ -675,6 +717,7 @@ def reserve_model_budget_in_uow(
     optimization_campaign_id: str,
     round_id: str,
     discussion_budget: OperatorDiscussionBudget | Mapping[str, Any] | None = None,
+    knowledge_budget: OperatorModelCallBudget | Mapping[str, Any] | None = None,
     model_cost_limit: Any = None,
     campaign_currency: str | None = None,
     model_ref: str | None = None,
@@ -682,6 +725,7 @@ def reserve_model_budget_in_uow(
     reservation_id: str | None = None,
     authorized: bool | None = None,
     campaign_budget: Any = None,
+    budget_kind: str | None = None,
     now_ms: int | None = None,
 ) -> dict[str, Any]:
     """Atomically reserve the operator discussion upper bound."""
@@ -692,14 +736,16 @@ def reserve_model_budget_in_uow(
     round_id = _identity(round_id, "round_id")
     spec = _spec(
         discussion_budget=discussion_budget,
+        knowledge_budget=knowledge_budget,
         model_cost_limit=model_cost_limit,
         campaign_currency=campaign_currency,
         model_ref=model_ref,
         authorized=authorized,
         campaign_budget=campaign_budget,
+        budget_kind=budget_kind,
     )
     reservation_key = _identity(reservation_id or f"reservation-{node_run_id}", "reservation_id")
-    reserved_amount = calculate_max_reserved_cost(spec.discussion)
+    reserved_amount = calculate_max_reserved_cost(spec.budget)
     timestamp = int(now_ms if now_ms is not None else time.time() * 1000)
 
     _check_parent_node(uow, run_id=run_id, node_run_id=node_run_id)
@@ -720,6 +766,7 @@ def reserve_model_budget_in_uow(
             round_id=round_id,
             model_ref=spec.model_ref,
             currency=spec.currency,
+            budget_kind=spec.budget_kind,
         )
         if str(existing.get("policy_hash") or "") != str(policy_hash or ""):
             raise ModelBudgetError(
@@ -784,11 +831,13 @@ def reserve_model_budget(store: WorkflowLedgerStore | None, **kwargs: Any) -> di
 
     _spec(
         discussion_budget=kwargs.get("discussion_budget"),
+        knowledge_budget=kwargs.get("knowledge_budget"),
         model_cost_limit=kwargs.get("model_cost_limit"),
         campaign_currency=kwargs.get("campaign_currency"),
         model_ref=kwargs.get("model_ref"),
         authorized=kwargs.get("authorized"),
         campaign_budget=kwargs.get("campaign_budget"),
+        budget_kind=kwargs.get("budget_kind"),
     )
     if store is None:
         raise ModelBudgetError(

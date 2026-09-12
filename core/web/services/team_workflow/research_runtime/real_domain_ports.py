@@ -393,6 +393,10 @@ class RealDomainPorts:
 
         snapshot = self._run_input_snapshot(action.run_id)
         if action.actor_kind == ActorKind.AGENT:
+            from ..operator_optimization.knowledge_budget_runtime import is_operator_knowledge_run, reserve_knowledge_budget
+
+            if is_operator_knowledge_run(self._store, action.run_id):
+                return reserve_knowledge_budget(self._store, run_id=action.run_id, node_run_id=action.node_run_id)
             # A formal Agent attempt reserves the contract-derived budget,
             # never a flat adapter constant: explicit task budgetRequest
             # first, then the frozen stage budget, then the conservative 2M

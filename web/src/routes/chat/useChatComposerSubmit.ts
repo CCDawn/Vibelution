@@ -824,6 +824,7 @@ export type UseChatComposerSubmitActionsResult = {
   handleEditUserMessage: (message: ConversationMessage) => void;
   handleCancelEditMessage: () => void;
   handleRegenerateAssistantMessage: (message: ConversationMessage) => void;
+  handleRetryFailedTurn: () => void;
   handleSwitchMessageVersion: (message: ConversationMessage, targetNodeId: string) => void;
 };
 
@@ -1522,6 +1523,43 @@ export function useChatComposerSubmitActions({
     sessionBusy,
   ]);
 
+  // A failed turn has no assistant answer to branch from: retry reruns the
+  // latest user message through the same regenerate pipeline as the retry trail.
+  const handleRetryFailedTurn = useCallback(() => {
+    if (!activeSessionId || sessionBusy) {
+      return;
+    }
+    const messages = detail?.messages ?? [];
+    let userMessage: ConversationMessage | undefined;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index].role === "user") {
+        userMessage = messages[index];
+        break;
+      }
+    }
+    if (!userMessage || userMessage.role !== "user") {
+      return;
+    }
+    const baseMessageId = String(userMessage.nodeId || "").trim();
+    regenerateMutation.mutate({
+      sessionId: activeSessionId,
+      messageId: userMessage.id,
+      ...(baseMessageId ? { baseMessageId } : {}),
+      clientSubmissionId: createClientSubmissionId(activeSessionId),
+      content: String(userMessage.content || ""),
+      mentalModelEnabled: mentalModelEnabledForNextTurn,
+      runtimeStatusEnabled: runtimeStatusEnabledForNextTurn,
+      turnStatusTail: loadTurnStatusTailConfig(activeSessionId),
+    });
+  }, [
+    activeSessionId,
+    detail,
+    mentalModelEnabledForNextTurn,
+    regenerateMutation,
+    runtimeStatusEnabledForNextTurn,
+    sessionBusy,
+  ]);
+
   // Head switching is a server-projected snapshot change: no local tree work,
   // the timeline is replaced by the returned detail.
   const handleSwitchMessageVersion = useCallback((message: ConversationMessage, targetNodeId: string) => {
@@ -1713,6 +1751,7 @@ export function useChatComposerSubmitActions({
     handleEditUserMessage,
     handleCancelEditMessage,
     handleRegenerateAssistantMessage,
+    handleRetryFailedTurn,
     handleSwitchMessageVersion,
   };
 }
