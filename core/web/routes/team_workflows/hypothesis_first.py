@@ -90,6 +90,7 @@ from .hypothesis_first_models import (
     QuestionRunResetResponse,
     ReviewNextRoundResponse,
     ReviewRoundLinkListResponse,
+    RoundFailureRetryRequest,
     SelectionContextResponse,
 )
 from .hypothesis_first_state_models import (
@@ -1182,6 +1183,90 @@ def team_workflow_hypothesis_first_anomaly_inbox(
             blocks=budget_precheck_blocks,
         ),
     }
+
+
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/hypothesis-first/chain/round-failures",
+    response_model=dict[str, Any],
+    response_model_exclude_unset=True,
+)
+def team_workflow_hypothesis_first_round_failure_list(
+    team_id: str,
+    unresolved_only: bool = Query(True, alias="unresolvedOnly"),
+) -> dict:
+    """Open round-generation failure traces for the workspace recovery panel.
+
+    薄路由：直接返回 ``hypothesis_rounds`` 的失败账本（latest-per-failure），
+    默认只列 open（failed/blocked）；``blocked`` 是纯 fan-in 等待，面板据此
+    隐藏按钮。写路径不在本路由：人工重试走
+    ``round-failures/{failure_id}/retry``。
+    """
+
+    try:
+        return hypothesis_rounds.list_hypothesis_round_failures(
+            team_id, unresolved_only=unresolved_only
+        )
+    except _DOMAIN_ERRORS as exc:
+        _map_domain_error("hypothesis_first.chain.round_failures", team_id, exc)
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/hypothesis-first/chain/round-failures/{failure_id}/retry",
+    response_model=dict[str, Any],
+    response_model_exclude_unset=True,
+)
+def team_workflow_hypothesis_first_round_failure_retry(
+    team_id: str,
+    failure_id: str,
+    payload: RoundFailureRetryRequest,
+    http_request: Request,
+) -> dict:
+    """Accept one confirmed manual retry of an open round failure trace.
+
+    误触防护在服务端闭合：缺少 ``confirmed=true`` 直接 428 拒绝。重新生成轮
+    是分钟级 review-LLM 路径，端点只接受请求并立即返回 ``accepted``（或
+    同 trace 的 ``in_flight``），由后台 worker 复用自动推进同一条
+    ``regenerate_hypothesis_round`` 命令路径执行；成功后按既有语义 resolve
+    对应的 open 失败记录，面板重新拉取账本即可。``blocked``（纯等待，无
+    可执行重试）返回 409 ``not_retryable``；未知或已解决返回 404。
+    """
+
+    if not payload.confirmed:
+        raise HTTPException(
+            status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+            detail={
+                "code": "confirmation_required",
+                "message": "round failure retry requires confirmed=true",
+            },
+        )
+    try:
+        with server_operator_scope_from_http(http_request):
+            result = hypothesis_first_chain.request_round_failure_recovery(
+                team_id, failure_id
+            )
+    except _DOMAIN_ERRORS as exc:
+        _map_domain_error("hypothesis_first.chain.round_failure_retry", team_id, exc)
+    result_status = str((result or {}).get("status") or "")
+    if result_status == "not_found":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "round_failure_not_found",
+                "message": f"open round failure {failure_id} not found",
+            },
+        )
+    if result_status == "not_retryable":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": str((result or {}).get("reasonCode") or "not_retryable"),
+                "message": (
+                    "this failure is a structured fan-in wait; closing the "
+                    "pending sibling reviews advances it automatically"
+                ),
+            },
+        )
+    return result
 
 
 @router.post(

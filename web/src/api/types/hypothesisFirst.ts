@@ -1102,3 +1102,39 @@ export type CollectionHandoffResponse = {
   nextMeeting?: Record<string, unknown> | null;
   resume?: Record<string, unknown> | null;
 };
+
+export type HypothesisRoundFailureRecord = {
+  failureId: string;
+  status: string;
+  failureCode: string;
+  reason: string;
+  errorType: string;
+  roundId: string;
+  meetingRoundIds: string[];
+  selectionId: string;
+  roundIndex: number | null;
+  questionId: string;
+  workflowRunId: string;
+  scopeHash: string;
+  retryHint: string;
+  trigger: string;
+  createdAt: string;
+  resolvedAt: string;
+  resolvedByRoundId: string;
+};
+
+export type HypothesisRoundFailuresResponse = {
+  schemaVersion: number;
+  teamId: string;
+  failureCount: number;
+  openFailureCount: number;
+  failures: HypothesisRoundFailureRecord[];
+  storagePath: string;
+};
+
+export type HypothesisRoundFailureRetryResponse = {
+  status: string;
+  failureId: string;
+  questionId?: string;
+  meetingRoundId?: string;
+};
