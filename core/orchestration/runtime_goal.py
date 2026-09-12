@@ -241,7 +241,13 @@ class RuntimeGoalPacket:
     max_calls_per_turn: int = 0
 
     def allowed_components(self, registered_components: Iterable[str]) -> set[str]:
-        """返回当前目标包允许激活的提示词组件。"""
+        """返回当前目标包允许激活的提示词组件（描述性）。
+
+        章节门控的实际裁决在 Prompt Assembly resolver：章节通过
+        `capability_requirements` 声明依赖，运行目标能力由
+        `provider_adapters.runtime_goal_capabilities()` 投影。本方法仅
+        用于诊断与测试断言，不再参与 build 过滤。
+        """
 
         allowed = {name.upper() for name in _coerce_name_set(registered_components)}
         if not self.code_context_allowed():

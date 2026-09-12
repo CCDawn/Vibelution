@@ -158,6 +158,7 @@ from core.prompt_manager.core_prompt_sources import CORE_PROMPT_NAMES
 from core.prompt_manager.provider_adapters import (
     build_prompt_assembly_context,
     build_protocol_adapter_section,
+    runtime_goal_capabilities,
     client_supports_tool_calling,
 )
 from core.prompt_manager.task_analyzer import get_task_analyzer
@@ -2000,6 +2001,13 @@ class SelfEvolvingAgent:
 
         self._supervised_judge_execution_profile = bool(enabled)
 
+    def _runtime_goal_prompt_capabilities(self) -> tuple[str, ...]:
+        """Project the turn's runtime goal packet onto prompt capabilities."""
+
+        getter = getattr(self.prompt_manager, "get_runtime_goal_packet", None)
+        packet = getter() if callable(getter) else None
+        return runtime_goal_capabilities(packet)
+
     def _prompt_assembly_context_for_turn(self):
         client = getattr(self, "_base_llm", None)
         route = getattr(client, "protocol_route", None)
@@ -2031,6 +2039,7 @@ class SelfEvolvingAgent:
             enforce_core_floor=not bool(
                 getattr(self, "_core_prompt_snapshot_seeded_by_host", False)
             ),
+            extra_capabilities=self._runtime_goal_prompt_capabilities(),
         )
         section = build_protocol_adapter_section(route, capabilities)
         setter = getattr(self.prompt_manager, "set_protocol_adapter", None)

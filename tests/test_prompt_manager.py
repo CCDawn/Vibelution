@@ -26,11 +26,11 @@ from core.prompt_manager import (
     SystemPromptCache,
     PromptManager,
     get_prompt_manager,
-    build_system_prompt,
-    build_simple_system_prompt,
     split_sys_prompt_prefix,
     to_string,
 )
+from core.prompt_manager.assembly_resolver import PromptAssemblyContext
+from core.prompt_manager.provider_adapters import runtime_goal_capabilities
 from core.orchestration.runtime_goal import RuntimeGoalPacket
 
 
@@ -407,78 +407,6 @@ class TestBuildAPI:
         assert isinstance(result, str)
         assert "优化代码" in result
 
-    def test_repeated_identical_build_reuses_short_window_result(self):
-        pm = PromptManager()
-        calls = {"count": 0}
-
-        def compute_dynamic():
-            calls["count"] += 1
-            return f"dynamic render {calls['count']}"
-
-        pm.register(
-            SystemPromptSection(
-                name="DYNAMIC_TEST",
-                priority=99,
-                compute=compute_dynamic,
-                cache_break=True,
-            )
-        )
-
-        first = pm.build(include=["DYNAMIC_TEST"], current_goal="same goal")
-        second = pm.build(include=["DYNAMIC_TEST"], current_goal="same goal")
-
-        assert second is first
-        assert calls["count"] == 1
-        assert pm._last_build_summary["reuse_cache_hit"] is True
-
-    def test_repeated_build_recomputes_after_dynamic_input_changes(self):
-        pm = PromptManager()
-        calls = {"count": 0}
-
-        def compute_dynamic():
-            calls["count"] += 1
-            return f"dynamic render {calls['count']}"
-
-        pm.register(
-            SystemPromptSection(
-                name="DYNAMIC_TEST",
-                priority=99,
-                compute=compute_dynamic,
-                cache_break=True,
-            )
-        )
-
-        first = pm.build(include=["DYNAMIC_TEST"], current_goal="goal one")
-        second = pm.build(include=["DYNAMIC_TEST"], current_goal="goal two")
-
-        assert second is not first
-        assert calls["count"] == 2
-        assert pm._last_build_summary["reuse_cache_hit"] is False
-
-    def test_repeated_build_does_not_reuse_live_task_checklist(self):
-        pm = PromptManager()
-        calls = {"count": 0}
-
-        def compute_dynamic():
-            calls["count"] += 1
-            return f"task list {calls['count']}"
-
-        pm.register(
-            SystemPromptSection(
-                name="TASK_CHECKLIST",
-                priority=20,
-                compute=compute_dynamic,
-                cache_break=True,
-            )
-        )
-
-        first = to_string(pm.build(include=["TASK_CHECKLIST"]))
-        second = to_string(pm.build(include=["TASK_CHECKLIST"]))
-
-        assert "task list 1" in first
-        assert "task list 2" in second
-        assert calls["count"] == 2
-
     def test_default_build_prunes_heavy_code_map_until_relevant(self):
         """CODEBASE_MAP 是重型代码认知组件，默认启动不应触发代码库扫描。"""
         pm = PromptManager()
@@ -671,7 +599,7 @@ class TestBuildAPI:
         assert "COMMON" in names
         assert "RUNTIME_GOAL" in names
 
-    def test_runtime_goal_packet_filters_disallowed_component_requests(self):
+    def test_goal_without_code_context_blocks_codebase_map_through_resolver(self):
         pm = PromptManager()
         packet = RuntimeGoalPacket(
             goal="只解释当前日志",
@@ -686,43 +614,24 @@ class TestBuildAPI:
         )
 
         pm.set_runtime_goal_packet(packet)
-        pm.select_components(["CODEBASE_MAP", "GIT_RULES", "SOUL"])
-        sp = pm.build()
-        names = [item["name"] for item in pm.get_last_index()]
-        result = to_string(sp)
-
-        assert "SOUL" in names
-        assert "CODEBASE_MAP" not in names
-        assert "GIT_RULES" not in names
-        assert "## 当前运行目标包" in result
-
-    def test_research_agent_tool_policy_blocks_codebase_map_component_request(self):
-        pm = PromptManager()
-        packet = RuntimeGoalPacket(
-            goal="资料搜集阶段任务：搜索神经预测编码资料",
-            source="团队 Agent",
-            objective_type="research_source_collection",
-            allow_auto_continue=True,
-            allow_file_writes=True,
-            allow_git_commit=False,
-            allow_evolution_transaction=False,
-            allow_subagents=False,
-            allow_code_context=False,
-            completion_standard="返回资料线索。",
+        sp = pm.build(
+            include=["CODEBASE_MAP", "GIT_RULES", "SOUL"],
+            assembly_context=PromptAssemblyContext(
+                context_window=128_000,
+                capabilities=frozenset(runtime_goal_capabilities(packet)),
+            ),
         )
-
-        pm.set_runtime_goal_packet(packet)
-        pm.select_components(["CODEBASE_MAP", "SOUL"])
-        sp = pm.build()
-        names = [item["name"] for item in pm.get_last_index()]
         result = to_string(sp)
+        manifest = pm.get_last_assembly_manifest()
+        decisions = {item["key"]: item["decision"] for item in manifest["segments"]}
 
-        assert "SOUL" in names
-        assert "CODEBASE_MAP" not in names
+        assert decisions["CODEBASE_MAP"] == "blocked"
+        assert decisions["GIT_RULES"] == "blocked"
+        assert "## 当前运行目标包" in result
         assert "代码库上下文: 不允许" in result
-        assert "CODEBASE_MAP" in pm.get_status()["last_build_summary"]["runtime_goal_blocked_sections"]
+        assert "# Vibelution Agent 灵魂" in result
 
-    def test_code_agent_tool_policy_allows_explicit_codebase_map_component_request(self):
+    def test_goal_with_code_context_keeps_codebase_map_allowed(self):
         pm = PromptManager()
         packet = RuntimeGoalPacket(
             goal="审查 prompt 拼接架构和调用链",
@@ -738,12 +647,46 @@ class TestBuildAPI:
         )
 
         pm.set_runtime_goal_packet(packet)
-        pm.select_components(["CODEBASE_MAP", "SOUL"])
-        pm.build()
-        names = [item["name"] for item in pm.get_last_index()]
+        pm.build(
+            include=["CODEBASE_MAP", "SOUL"],
+            assembly_context=PromptAssemblyContext(
+                context_window=128_000,
+                capabilities=frozenset(runtime_goal_capabilities(packet)),
+            ),
+        )
+        manifest = pm.get_last_assembly_manifest()
+        decisions = {item["key"]: item["decision"] for item in manifest["segments"]}
 
-        assert "SOUL" in names
-        assert "CODEBASE_MAP" in names
+        assert decisions["CODEBASE_MAP"] != "blocked"
+
+    def test_runtime_goal_capabilities_projection(self):
+        readonly = RuntimeGoalPacket(
+            goal="只解释当前日志",
+            source="只读诊断入口",
+            objective_type="readonly_diagnosis",
+            allow_auto_continue=False,
+            allow_file_writes=False,
+            allow_git_commit=False,
+            allow_evolution_transaction=False,
+            allow_subagents=False,
+            completion_standard="只返回诊断结论。",
+        )
+        code_agent = RuntimeGoalPacket(
+            goal="审查代码",
+            source="代码 Agent",
+            objective_type="user_request",
+            allow_auto_continue=True,
+            allow_file_writes=True,
+            allow_git_commit=False,
+            allow_evolution_transaction=False,
+            allow_subagents=False,
+            allow_code_context=True,
+            completion_standard="返回结果。",
+        )
+
+        assert runtime_goal_capabilities(None) == ("code_context", "git_workflow")
+        assert runtime_goal_capabilities(readonly) == ()
+        assert runtime_goal_capabilities(code_agent) == ("code_context",)
 
     def test_build_subagent_prompt_is_thin_and_structured(self):
         pm = PromptManager()
@@ -801,17 +744,6 @@ class TestBuildAPI:
         assert "## 语言状态" in result
         assert "使用测试语言习惯" in result
         assert "当前默认表达语言：中文" not in result
-
-    def test_select_components_cannot_drop_protected_floor(self):
-        pm = PromptManager()
-        pm.select_components(["SOUL"])
-        sp = pm.build()
-        result = to_string(sp)
-        assert "# Vibelution 通用 Agent 基座" in result
-        assert "## 语言状态" in result
-        names = [item["name"] for item in pm.get_last_index()]
-        for name in ["COMMON", "RUNTIME_GOAL", "SOUL", "SPEC_DIGEST", "MEMORY", "GIT_MEMORY", "RUNTIME_LOG_INDEX", "SESSION_CHILD_ROUTING", "LANGUAGE_AWARENESS"]:
-            assert name in names
 
     def test_build_empty_include(self):
         pm = PromptManager()
@@ -882,16 +814,6 @@ class TestBuildAPI:
 
 class TestCompatibilityFunctions:
     """向后兼容函数测试"""
-
-    def test_build_system_prompt(self):
-        result = build_system_prompt()
-        assert isinstance(result, str)
-        assert len(result) > 0
-
-    def test_build_simple_system_prompt(self):
-        result = build_simple_system_prompt()
-        assert isinstance(result, str)
-        assert len(result) > 0
 
     def test_to_string_on_system_prompt(self):
         pm = PromptManager()

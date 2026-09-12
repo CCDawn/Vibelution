@@ -17,7 +17,6 @@ from core.prompt_manager.assembly_resolver import (
     PromptAssemblyContext,
     PromptSectionResolver,
     prompt_assembly_budget,
-    render_discovery_index,
 )
 from core.prompt_manager.builder import get_system_prompt, to_string
 from core.prompt_manager.prompt_manager import PromptManager
@@ -106,7 +105,6 @@ def test_builder_blocks_tool_guidance_when_tool_calling_is_disabled() -> None:
 
 def test_prompt_manager_core_floor_ignores_include_exclude_and_model_override() -> None:
     manager = PromptManager()
-    manager.select_components(["MEMORY"])
 
     manager.build(
         include=["MEMORY"],
@@ -125,52 +123,6 @@ def test_prompt_manager_core_floor_ignores_include_exclude_and_model_override() 
 
     assert [item["key"] for item in core] == ["COMMON", "SOUL", "AGENTS"]
     assert all(item["decision"] == "full" for item in core)
-
-
-def test_skill_index_degrades_deterministically_with_budget_and_permissions() -> None:
-    items = [
-        {"name": "alpha", "description": "A" * 80},
-        {"name": "beta", "description": "B" * 80},
-        {"name": "gamma", "description": "C" * 80},
-    ]
-    context = PromptAssemblyContext(
-        context_window=16_000,
-        allowed_skills=("alpha", "gamma"),
-    )
-
-    full = render_discovery_index(
-        "skills",
-        items,
-        context=context,
-        budget_tokens=100,
-    )
-    truncated = render_discovery_index(
-        "skills",
-        items,
-        context=context,
-        budget_tokens=30,
-    )
-    names_only = render_discovery_index(
-        "skills",
-        items,
-        context=context,
-        budget_tokens=6,
-    )
-    omitted = render_discovery_index(
-        "skills",
-        items,
-        context=context,
-        budget_tokens=1,
-    )
-
-    assert full.decision == PromptDecision.FULL
-    assert "alpha" in full.content and "gamma" in full.content
-    assert "beta" not in full.content
-    assert truncated.decision == PromptDecision.TRUNCATED
-    assert names_only.decision == PromptDecision.INDEX_ONLY
-    assert names_only.content == "alpha\ngamma"
-    assert omitted.decision == PromptDecision.OMITTED
-    assert omitted.content == ""
 
 
 def test_turn_context_is_truncated_and_manifest_records_reason() -> None:

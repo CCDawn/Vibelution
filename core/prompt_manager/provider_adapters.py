@@ -101,8 +101,15 @@ def build_prompt_assembly_context(
     allowed_agent_names: Iterable[str] = (),
     permission_fingerprint: str = "",
     enforce_core_floor: bool = True,
+    extra_capabilities: Iterable[str] = (),
 ) -> PromptAssemblyContext:
-    """Project a resolved client into the Prompt Assembly runtime contract."""
+    """Project a resolved client into the Prompt Assembly runtime contract.
+
+    ``extra_capabilities`` carries non-protocol runtime boundaries (for
+    example ``code_context`` / ``git_workflow`` from the turn goal packet).
+    They participate in section gating but never in the protocol identity
+    fingerprint.
+    """
 
     route = getattr(client, "protocol_route", None)
     capabilities = getattr(client, "capabilities", None)
@@ -171,10 +178,16 @@ def build_prompt_assembly_context(
         str(permission_fingerprint or "").strip()
         or _fingerprint({"tools": list(allowed_tools)})
     )
+    resolved_capabilities = set(capability_names)
+    resolved_capabilities.update(
+        str(name or "").strip()
+        for name in extra_capabilities
+        if str(name or "").strip()
+    )
     return PromptAssemblyContext(
         context_window=resolved_window,
         max_output_tokens=resolved_output,
-        capabilities=frozenset(capability_names),
+        capabilities=frozenset(resolved_capabilities),
         allowed_tools=allowed_tools,
         allowed_skills=_normalized_names(allowed_skill_names),
         allowed_agents=_normalized_names(allowed_agent_names),
@@ -184,6 +197,28 @@ def build_prompt_assembly_context(
         enforce_core_floor=bool(enforce_core_floor),
         assembly_mode="v2",
     )
+
+
+def runtime_goal_capabilities(packet: Any) -> tuple[str, ...]:
+    """Project a runtime goal packet onto prompt capability names.
+
+    These names gate capability-requiring sections inside the Prompt Assembly
+    resolver (``code_context`` for CODEBASE_MAP, ``git_workflow`` for
+    GIT_RULES).  A missing packet means "no extra restriction", matching the
+    retired runtime-goal section filter's behavior.
+    """
+
+    if packet is None:
+        return ("code_context", "git_workflow")
+    capabilities: list[str] = []
+    code_context_allowed = getattr(packet, "code_context_allowed", None)
+    if callable(code_context_allowed) and code_context_allowed():
+        capabilities.append("code_context")
+    if bool(getattr(packet, "allow_git_commit", False)) or bool(
+        getattr(packet, "allow_evolution_transaction", False)
+    ):
+        capabilities.append("git_workflow")
+    return tuple(capabilities)
 
 
 def client_supports_tool_calling(client: Any) -> bool:

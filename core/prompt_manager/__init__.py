@@ -15,8 +15,6 @@ from core.prompt_manager.builder import (
 from core.prompt_manager.prompt_manager import (
     PromptManager,
     get_prompt_manager,
-    build_system_prompt,
-    build_simple_system_prompt,
     build_restart_focus_state_memory,
     build_state_memory_key,
     compose_state_memory,

@@ -14,7 +14,6 @@ core/prompt_manager/prompt_manager.py — 系统提示词管理器
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import threading
@@ -79,11 +78,6 @@ def build_state_memory_key(summary: str) -> str:
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
-
-
-def _prompt_text_digest(value: Any) -> str:
-    text = str(value or "")
-    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:16]
 
 
 def build_restart_focus_state_memory(allowed_tool_names: tuple[str, ...]) -> str:
@@ -255,10 +249,8 @@ class PromptManager:
     ]
     _OPTIONAL_RELEVANCE_SECTIONS = {"ENV_INFO", "CONFIG_AWARENESS", "GIT_RULES", "SPEC"}
     _HEAVY_SECTIONS = {"CODEBASE_MAP", "SPEC", "ENV_INFO", "CONFIG_AWARENESS", "GIT_RULES"}
-    _BUILD_REUSE_UNSAFE_SECTIONS = {"TASK_CHECKLIST"}
     _MODE_HINTS = {
         "orient": "全局定向",
-        "diagnose": "诊断收束",
         "delegate": "委派验收",
         "execute": "局部执行",
         "verify": "验证收口",
@@ -280,9 +272,6 @@ class PromptManager:
 
         # 章节级缓存
         self._section_cache = SystemPromptCache()
-        self._build_cache_generation = 0
-        self._build_reuse_ttl_seconds = 1.0
-        self._last_build_cache: Optional[Dict[str, Any]] = None
 
         # 构建上下文（每轮 build 前更新，MEMORY 章节的 compute 从中读取）
         self._build_context = BuildContext()
@@ -293,9 +282,6 @@ class PromptManager:
 
         # 当前目标（内存持有，每次动态生成，不从文件加载）
         self.current_goal: str = ""
-
-        # LLM 动态覆盖
-        self._active_sections_override: Optional[List[str]] = None
 
         # 从 config.toml 读取默认章节列表
         self._default_sections = self._load_default_sections_from_config()
@@ -317,8 +303,6 @@ class PromptManager:
         self._last_assembly_manifest: Dict[str, Any] = {}
         self._assembly_manifest_local = threading.local()
         self._protocol_adapter_fingerprint = ""
-        self._last_runtime_goal_blocked_sections: List[str] = []
-        self._pending_runtime_goal_blocked_sections: List[str] = []
 
     # ------------------------------------------------------------------------
     # 章节注册
@@ -363,7 +347,6 @@ class PromptManager:
         """注册或覆盖一个章节。"""
         self._sections[section.name] = section
         self._section_cache.invalidate(section.name)
-        self._invalidate_build_reuse_cache()
         from core.logging import debug as _debug_logger
         _debug_logger.debug(
             f"[PromptManager] 注册章节: {section.name} "
@@ -375,7 +358,6 @@ class PromptManager:
         if name in self._sections:
             del self._sections[name]
             self._section_cache.invalidate(name)
-            self._invalidate_build_reuse_cache()
 
     def set_protocol_adapter(
         self,
@@ -457,26 +439,6 @@ class PromptManager:
         )
         select_duration_ms = (time.perf_counter() - select_started) * 1000
         all_ordered_sections = self._order_sections(list(self._sections.values()))
-        cache_key = self._build_reuse_cache_key(
-            include=include,
-            exclude=exclude,
-            frozen_core_sections=normalized_frozen_core_sections,
-            core_context=core_context,
-            current_goal=effective_current_goal,
-            state_memory=effective_state_memory,
-            selected=selected,
-        )
-        cached = self._get_reusable_build(cache_key)
-        reuse_allowed = assembly_context is None and self._can_reuse_build(selected)
-        if reuse_allowed and cached is not None:
-            self._last_index = [dict(item) for item in cached["last_index"]]
-            self._last_build_summary = dict(cached["summary"])
-            self._last_build_summary["reuse_cache_hit"] = True
-            self._last_build_summary["reuse_cache_age_ms"] = cached["age_ms"]
-            self._last_build_summary["select_duration_ms"] = select_duration_ms
-            self._last_build_summary["total_duration_ms"] = (time.perf_counter() - build_started) * 1000
-            self._log_build_summary()
-            return cached["prompt"]
 
         # 组装
         render_started = time.perf_counter()
@@ -520,12 +482,9 @@ class PromptManager:
                 "tuple_join_duration_ms": build_result.join_duration_ms,
                 "string_join_duration_ms": string_duration_ms,
                 "total_duration_ms": (time.perf_counter() - build_started) * 1000,
-                "reuse_cache_hit": False,
                 "slow_sections": self._slow_section_timings(build_result),
             }
         )
-        if reuse_allowed:
-            self._store_reusable_build(cache_key, sp, self._last_index, self._last_build_summary)
 
         from core.logging import debug as _debug_logger
         _debug_logger.info(
@@ -535,69 +494,6 @@ class PromptManager:
         )
         self._log_build_summary()
         return sp
-
-    def _invalidate_build_reuse_cache(self) -> None:
-        self._build_cache_generation += 1
-        self._last_build_cache = None
-
-    def _build_reuse_cache_key(
-        self,
-        *,
-        include: Optional[List[str]],
-        exclude: Optional[List[str]],
-        frozen_core_sections: set[str],
-        core_context: Optional[str],
-        current_goal: Optional[str],
-        state_memory: Optional[str],
-        selected: List[SystemPromptSection],
-    ) -> tuple[Any, ...]:
-        packet = self._build_context.runtime_goal_packet
-        packet_key = (
-            getattr(packet, "fingerprint", None)
-            or getattr(packet, "task_id", None)
-            or getattr(packet, "goal_id", None)
-            or repr(packet)
-        )
-        return (
-            self._build_cache_generation,
-            self._build_context.prompt_mode,
-            tuple(section.name for section in selected),
-            tuple(include or []),
-            tuple(exclude or []),
-            tuple(sorted(frozen_core_sections)),
-            _prompt_text_digest(core_context),
-            _prompt_text_digest(current_goal),
-            _prompt_text_digest(state_memory),
-            _prompt_text_digest(packet_key),
-        )
-
-    def _get_reusable_build(self, cache_key: tuple[Any, ...]) -> Optional[Dict[str, Any]]:
-        cached = self._last_build_cache
-        if not cached or cached.get("key") != cache_key:
-            return None
-        age_ms = (time.perf_counter() - float(cached.get("created_at") or 0.0)) * 1000
-        if age_ms > self._build_reuse_ttl_seconds * 1000:
-            return None
-        return {**cached, "age_ms": age_ms}
-
-    def _can_reuse_build(self, selected: List[SystemPromptSection]) -> bool:
-        selected_names = {section.name for section in selected}
-        return not bool(selected_names & self._BUILD_REUSE_UNSAFE_SECTIONS)
-
-    def _store_reusable_build(
-        self,
-        cache_key: tuple[Any, ...],
-        prompt: SystemPrompt,
-        last_index: List[Dict[str, Any]],
-        summary: Dict[str, Any],
-    ) -> None:
-        self._last_build_cache = {
-            "key": cache_key,
-            "prompt": prompt,
-            "last_index": [dict(item) for item in last_index],
-            "summary": dict(summary),
-            "created_at": time.perf_counter(),
-        }
 
     @staticmethod
     def _slow_section_timings(build_result: PromptBuildResult) -> List[Dict[str, Any]]:
@@ -628,13 +524,10 @@ class PromptManager:
 
         优先级：
         1. include 非空 → 直接使用（参数优先）
-        2. _active_sections_override 非空 → 使用 override（LLM 标签驱动）
-        3. 使用 _default_sections
+        2. 使用 _default_sections
         """
         if include is not None:
             effective_include = include
-        elif self._active_sections_override is not None:
-            effective_include = self._active_sections_override
         else:
             effective_include = self._default_sections
 
@@ -661,7 +554,6 @@ class PromptManager:
         return self._prune_optional_sections(
             ordered,
             include=include,
-            active_override=self._active_sections_override if include is None else None,
         )
 
     def _apply_protected_floor(
@@ -693,17 +585,16 @@ class PromptManager:
         self,
         sections: List[SystemPromptSection],
         include: Optional[List[str]],
-        active_override: Optional[List[str]],
     ) -> List[SystemPromptSection]:
-        """按当前任务相关性裁剪高噪声可选 section。"""
-        explicit_names = set(include or active_override or [])
+        """按当前任务相关性裁剪高噪声可选 section。
+
+        能力边界（code_context / git 工作流等）不在这里裁决：章节通过
+        ``capability_requirements`` 声明依赖，由 Prompt Assembly resolver
+        按运行时能力统一裁定（见 assembly_resolver）。
+        """
+        explicit_names = set(include or [])
         pruned: List[SystemPromptSection] = []
-        self._last_runtime_goal_blocked_sections = list(self._pending_runtime_goal_blocked_sections)
-        self._pending_runtime_goal_blocked_sections = []
         for section in sections:
-            if not self._runtime_goal_allows_section(section.name):
-                self._last_runtime_goal_blocked_sections.append(section.name)
-                continue
             if section.name not in (self._OPTIONAL_RELEVANCE_SECTIONS | {"CODEBASE_MAP"}):
                 pruned.append(section)
                 continue
@@ -792,8 +683,8 @@ class PromptManager:
                     issue for issue in blocking_issues
                     if "缺少可用 API Key" not in str(issue)
                 ]
-                # 配置告警只在定向配置问题时展开；诊断/验证模式仅允许真实阻断问题打断降噪。
-                if prompt_mode in {"diagnose", "verify"}:
+                # 配置告警只在定向配置问题时展开；验证模式仅允许真实阻断问题打断降噪。
+                if prompt_mode == "verify":
                     return bool(filtered_blockers)
                 return False
             except Exception:
@@ -869,7 +760,7 @@ class PromptManager:
                 matched = self._matching_keywords(text, keywords)
                 if matched:
                     return f"{source_name}:{'/'.join(matched[:2])}"
-            if prompt_mode in {"diagnose", "verify"}:
+            if prompt_mode == "verify":
                 try:
                     from config import get_config
                     diagnosis = get_config().diagnose_config()
@@ -878,7 +769,7 @@ class PromptManager:
                         if "缺少可用 API Key" not in str(issue)
                     ]
                     if blockers:
-                        return f"{prompt_mode}:blocker"
+                        return "verify:blocker"
                 except Exception:
                     return None
             return None
@@ -1002,7 +893,6 @@ class PromptManager:
             "rendered_sections": rendered_names,
             "omitted_sections": omitted_names,
             "omitted_heavy_sections": omitted_heavy,
-            "runtime_goal_blocked_sections": list(self._last_runtime_goal_blocked_sections),
             "dynamic_sections": dynamic_names,
             "cache_prefix_sections": cache_prefix_names,
             "optional_inclusion_reasons": inclusion_reasons,
@@ -1035,11 +925,6 @@ class PromptManager:
             f"string:{float(summary.get('string_join_duration_ms') or 0.0):.1f},"
             f"total:{float(summary.get('total_duration_ms') or 0.0):.1f}"
         )
-        if summary.get("reuse_cache_hit"):
-            message += f" reuse_hit=1 age_ms={float(summary.get('reuse_cache_age_ms') or 0.0):.1f}"
-        blocked_sections = summary.get("runtime_goal_blocked_sections") or []
-        if blocked_sections:
-            message += f" blocked_by_runtime_goal={','.join(str(item) for item in blocked_sections)}"
         slow_sections = summary.get("slow_sections") or []
         if slow_sections:
             slow_text = ",".join(
@@ -1103,75 +988,17 @@ class PromptManager:
                 pass
 
     # ------------------------------------------------------------------------
-    # LLM 动态章节切换
+    # 运行目标包
     # ------------------------------------------------------------------------
-
-    def select_components(self, components: List[str]):
-        """兼容的 runtime-owner 组件选择入口。
-
-        Args:
-            components: 要激活的章节名称列表，如 ["SOUL", "SPEC", "MEMORY"]
-        """
-        if not components:
-            from core.logging import debug as _debug_logger
-            _debug_logger.debug("[PromptManager] select_components 收到空列表，重置为默认")
-            self._active_sections_override = None
-            self._invalidate_build_reuse_cache()
-            return
-
-        known = [c for c in components if c in self._sections]
-        known = self._filter_components_for_runtime_goal(known)
-        if known:
-            self._active_sections_override = known
-            self._invalidate_build_reuse_cache()
-            from core.logging import debug as _debug_logger
-            _debug_logger.info(f"[PromptManager] 动态切换章节: {known}")
-        else:
-            from core.logging import debug as _debug_logger
-            _debug_logger.warning(
-                f"[PromptManager] 未知章节: {components}，保持当前不变"
-            )
 
     def set_runtime_goal_packet(self, packet: Any) -> None:
         """设置统一 agent 本轮目标包，供 RUNTIME_GOAL 动态章节渲染。"""
 
         self._build_context.runtime_goal_packet = packet
         self._section_cache.invalidate("RUNTIME_GOAL")
-        self._invalidate_build_reuse_cache()
 
     def get_runtime_goal_packet(self) -> Any:
         return self._build_context.runtime_goal_packet
-
-    def _filter_components_for_runtime_goal(self, components: List[str]) -> List[str]:
-        packet = self._build_context.runtime_goal_packet
-        if packet is None:
-            return components
-        allowed_fn = getattr(packet, "allowed_components", None)
-        if not callable(allowed_fn):
-            return components
-        allowed = set(allowed_fn(self._sections.keys()))
-        protected = set(self._PROTECTED_FLOOR_SECTIONS)
-        filtered = [
-            component
-            for component in components
-            if component in allowed or component in protected
-        ]
-        self._pending_runtime_goal_blocked_sections = [
-            component
-            for component in components
-            if component not in filtered
-        ]
-        return filtered
-
-    def _runtime_goal_allows_section(self, section_name: str) -> bool:
-        packet = self._build_context.runtime_goal_packet
-        if packet is None:
-            return True
-        allowed_fn = getattr(packet, "allowed_components", None)
-        if not callable(allowed_fn):
-            return True
-        section = str(section_name or "").strip().upper()
-        return section in set(allowed_fn(self._sections.keys()))
 
     # ------------------------------------------------------------------------
     # 状态记忆
@@ -1192,7 +1019,6 @@ class PromptManager:
 
         self.current_goal = normalized_goal
         self._section_cache.invalidate("MEMORY")
-        self._invalidate_build_reuse_cache()
         from core.logging import debug as _debug_logger
         _debug_logger.debug(
             f"[PromptManager] current_goal 更新: {normalized_goal[:80]}"
@@ -1213,7 +1039,6 @@ class PromptManager:
         if changed:
             self.state_memory = normalized
             self._section_cache.invalidate("MEMORY")
-            self._invalidate_build_reuse_cache()
             from core.logging import debug as _debug_logger
             _debug_logger.debug(
                 f"[PromptManager] state_memory 更新，长度={len(normalized)}"
@@ -1236,7 +1061,6 @@ class PromptManager:
             return
         self.state_memory = ""
         self._section_cache.invalidate("MEMORY")
-        self._invalidate_build_reuse_cache()
         if persist:
             try:
                 state_memory_path = self._dynamic_root / "STATE_MEMORY.md"
@@ -1342,7 +1166,6 @@ class PromptManager:
     def invalidate_cache(self, name: Optional[str] = None):
         """清除章节缓存。name 为 None 则清除全部。"""
         self._section_cache.invalidate(name)
-        self._invalidate_build_reuse_cache()
         from core.logging import debug as _debug_logger
         _debug_logger.debug(
             f"[PromptManager] 清除缓存: {name or '全部'}"
@@ -1479,7 +1302,6 @@ class PromptManager:
             "current_goal": self.current_goal,
             "prompt_mode": self._build_context.prompt_mode,
             "prompt_mode_label": self._MODE_HINTS.get(self._build_context.prompt_mode, self._build_context.prompt_mode),
-            "active_sections_override": self._active_sections_override,
             "section_cache": self._section_cache.stats,
             "last_index": self._last_index,
             "last_assembly_manifest": dict(self._last_assembly_manifest),
@@ -1524,28 +1346,3 @@ def get_prompt_manager() -> PromptManager:
     if _prompt_manager is None:
         _prompt_manager = PromptManager()
     return _prompt_manager
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# 便捷函数（向后兼容）
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-def build_system_prompt(
-    core_context: Optional[str] = None,
-    current_goal: Optional[str] = None,
-) -> str:
-    """构建系统提示词字符串（向后兼容）。"""
-    sp = get_prompt_manager().build(
-        core_context=core_context,
-        current_goal=current_goal,
-    )
-    return to_string(sp)
-
-
-def build_simple_system_prompt() -> str:
-    """简化版系统提示词（向后兼容）。"""
-    return build_system_prompt(
-        core_context="",
-        current_goal="",
-    )
