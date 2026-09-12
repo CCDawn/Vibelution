@@ -696,17 +696,21 @@ def self_evolution_agent_bindings() -> dict[str, dict[str, Any]]:
     role_keys = [item["role"] for item in SELF_EVOLUTION_AGENT_ROLES]
     raw_slots = _raw_self_evolution_mode_slots()
     all_slots_configured = True
+    slots_need_repair = False
     for role in role_keys:
         raw_agent_id = str(raw_slots.get(role) or "").strip()
         if not raw_agent_id:
             all_slots_configured = False
             continue
-        if raw_agent_id and not agent_directory_service.get_agent(raw_agent_id, include_archived=False):
+        agent = agent_directory_service.get_agent(raw_agent_id, include_archived=False)
+        if not agent:
             _record_self_evolution_binding_failure(role, agent_id=raw_agent_id, reason="missing_or_archived_slot_agent")
             raise SelfEvolutionRunValidationError(
                 f"Self-evolution role slot points to an archived or missing Agent: {role} ({raw_agent_id})"
             )
-    if all_slots_configured:
+        if str(agent.get("directSessionId") or "").strip() != self_evolution_role_direct_session_id(role):
+            slots_need_repair = True
+    if all_slots_configured and not slots_need_repair:
         payload = agent_mode_binding_service.get_mode_bindings_payload()
         return {
             role: _self_evolution_binding_from_payload(payload, role)
@@ -726,12 +730,14 @@ def self_observation_agent_binding() -> dict[str, Any]:
     role = "observer"
     raw_slots = _raw_self_evolution_mode_slots()
     raw_agent_id = str(raw_slots.get(role) or "").strip()
-    if raw_agent_id and not agent_directory_service.get_agent(raw_agent_id, include_archived=False):
+    existing = agent_directory_service.get_agent(raw_agent_id, include_archived=False) if raw_agent_id else None
+    if raw_agent_id and not existing:
         _record_self_evolution_binding_failure(role, agent_id=raw_agent_id, reason="missing_or_archived_slot_agent")
         raise SelfEvolutionRunValidationError(
             f"Self-evolution role slot points to an archived or missing Agent: {role} ({raw_agent_id})"
         )
-    if raw_agent_id:
+    observer_ready = raw_agent_id and str((existing or {}).get("directSessionId") or "").strip() == self_evolution_role_direct_session_id(role)
+    if observer_ready:
         payload = agent_mode_binding_service.get_mode_bindings_payload()
         return _self_evolution_binding_from_payload(payload, role)
     ensure_self_evolution_agent_instances()
