@@ -66,14 +66,32 @@ export function buildTurnErrorDiagnosticRows(
   ].filter(isTurnErrorDiagnosticRow);
 }
 
+export function formatTurnErrorRetryHistory(
+  turnError: SessionTurnError,
+  lang: ConversationLanguage,
+): string {
+  const history = Array.isArray(turnError.retryHistory) ? turnError.retryHistory : [];
+  return history
+    .map((entry) => {
+      const attempt = Math.max(1, Number(entry.attempt) || 1);
+      const maxAttempts = Math.max(attempt, Number(entry.maxAttempts) || attempt);
+      const label = turnErrorLabel(lang, `第 ${attempt}/${maxAttempts} 次`, `attempt ${attempt}/${maxAttempts}`);
+      const category = String(entry.category || "").trim();
+      return category ? `${label}：${category}` : label;
+    })
+    .join(" → ");
+}
+
 export function buildCurrentTurnErrorRows(
   turnError: SessionTurnError,
   lang: ConversationLanguage,
 ): TurnErrorDiagnosticRow[] {
+  const retryHistory = formatTurnErrorRetryHistory(turnError, lang);
   return [
     turnError.httpStatus ? { label: turnErrorLabel(lang, "状态码", "Status"), value: String(turnError.httpStatus) } : null,
     turnError.reasonSummary ? { label: turnErrorLabel(lang, "原因", "Reason"), value: turnError.reasonSummary } : null,
     turnError.reasonDetail ? { label: turnErrorLabel(lang, "详情", "Detail"), value: turnError.reasonDetail } : null,
+    retryHistory ? { label: turnErrorLabel(lang, "重试记录", "Retries"), value: retryHistory } : null,
     turnError.chainStage ? { label: turnErrorLabel(lang, "阶段", "Stage"), value: turnError.chainStage } : null,
     turnError.protocol ? { label: turnErrorLabel(lang, "协议", "Protocol"), value: turnError.protocol } : null,
     turnError.providerErrorType ? { label: turnErrorLabel(lang, "类型", "Type"), value: turnError.providerErrorType } : null,

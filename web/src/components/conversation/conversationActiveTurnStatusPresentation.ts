@@ -30,6 +30,86 @@ function normalizeStage(value: unknown) {
   return compactText(value).toLowerCase();
 }
 
+export type ActiveTurnRetryProgress = {
+  attempt: number;
+  maxAttempts: number;
+};
+
+const RETRY_STAGE_NAMES = ["model_retry", "retrying"];
+
+function turnItemLooksLikeRetry(item: SessionTurnItem) {
+  if (item.type === "retry") {
+    return true;
+  }
+  if (item.type !== "status") {
+    return false;
+  }
+  const haystack = [item.code, item.title, item.summary, item.text]
+    .map(normalizeStage)
+    .join(" ");
+  return RETRY_STAGE_NAMES.some((stage) => haystack.includes(stage))
+    || haystack.includes("模型连接正在重试")
+    || haystack.includes("请求重试");
+}
+
+function parseRetryProgress(...values: unknown[]): ActiveTurnRetryProgress | null {
+  const content = values.map((value) => String(value ?? "")).join("\n");
+  const zh = content.match(/第\s*(\d+)\s*\/\s*(\d+)\s*次/);
+  if (zh) {
+    return { attempt: Number(zh[1]), maxAttempts: Number(zh[2]) };
+  }
+  const en = content.match(/attempt\s+(\d+)\s*\/\s*(\d+)/i);
+  if (en) {
+    return { attempt: Number(en[1]), maxAttempts: Number(en[2]) };
+  }
+  const loose = content.match(/(\d+)\s*\/\s*(\d+)/);
+  if (loose) {
+    return { attempt: Number(loose[1]), maxAttempts: Number(loose[2]) };
+  }
+  return null;
+}
+
+/**
+ * Latest retry attempt carried by the active turn items.  Structured fields
+ * win; text parsing is the compatibility path for older emitters.
+ */
+export function resolveActiveTurnRetryProgress(
+  message: ActiveTurnStatusMessageLike,
+): ActiveTurnRetryProgress | null {
+  const items = [...(message.turnItems ?? [])]
+    .sort((left, right) => left.sequence - right.sequence || left.revision - right.revision);
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (!item || !turnItemLooksLikeRetry(item)) {
+      continue;
+    }
+    const metadata = item.metadata ?? {};
+    const structuredAttempt = item.type === "retry"
+      ? Number(item.attempt)
+      : Number(metadata.attempt ?? 0);
+    const structuredMax = Number(metadata.maxAttempts ?? metadata.max_attempts ?? 0);
+    if (structuredAttempt > 0) {
+      return {
+        attempt: structuredAttempt,
+        maxAttempts: structuredMax >= structuredAttempt ? structuredMax : structuredAttempt,
+      };
+    }
+    const parsed = parseRetryProgress(
+      item.summary,
+      item.title,
+      item.type === "retry"
+        ? item.reason
+        : item.type === "status" || item.type === "error" || item.type === "agent_message" || item.type === "reasoning"
+          ? item.text
+          : "",
+    );
+    if (parsed) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
 export function resolveActiveTurnProgressStage(message: ActiveTurnStatusMessageLike): string {
   const items = [...(message.turnItems ?? [])]
     .sort((left, right) => left.sequence - right.sequence || left.revision - right.revision);
@@ -199,12 +279,17 @@ export function formatActiveTurnHeartbeatText(
   stage: string,
   elapsedSeconds: number | null,
   lang: "zh" | "en" | string,
+  retryProgress?: ActiveTurnRetryProgress | null,
 ) {
   const label = activeTurnStageLabel(stage, lang);
+  const retrySuffix = retryProgress && retryProgress.attempt > 0
+    ? `${retryProgress.attempt}/${Math.max(retryProgress.attempt, retryProgress.maxAttempts)}`
+    : "";
+  const head = retrySuffix ? `${label} ${retrySuffix}` : label;
   if (elapsedSeconds == null || !Number.isFinite(elapsedSeconds)) {
-    return label;
+    return head;
   }
-  return `${label} · ${Math.max(0, Math.floor(elapsedSeconds))}s`;
+  return `${head} · ${Math.max(0, Math.floor(elapsedSeconds))}s`;
 }
 
 export function buildActiveTurnStageBarItems(

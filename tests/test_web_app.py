@@ -6994,6 +6994,14 @@ def test_capture_session_ui_stream_surfaces_llm_retry_status(tmp_path, monkeypat
     assert live_state.stage == "model_retry"
     assert "模型连接正在重试" in live_state.content
     assert "2/5" in live_state.content
+    retry_event = next(
+        item
+        for item in live_state.feedback_events
+        if item.get("kind") == "status" and item.get("name") == "model_retry"
+    )
+    assert retry_event["attempt"] == 2
+    assert retry_event["maxAttempts"] == 5
+    assert retry_event["category"] == "network_error"
     # Retry progress is delivered through the lightweight assistant_delta
     # turnItems stream; it must not force a full session-detail snapshot.
     assert published == []

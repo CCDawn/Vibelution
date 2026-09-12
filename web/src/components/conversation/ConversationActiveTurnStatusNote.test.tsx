@@ -43,14 +43,15 @@ describe("ConversationActiveTurnStatusNote canonical turn items", () => {
             sequence: 1,
             attempt: 2,
             targetItemId: "request-1",
-            reason: "network_error",
+            reason: "模型连接正在重试...\n第 2/5 次；原因：server_error。",
+            metadata: { maxAttempts: 5 },
           }],
         }}
       />,
     );
 
     expect(html).toContain("data-active-turn-stage=\"model_retry\"");
-    expect(html).toContain("请求");
+    expect(html).toContain("请求重试 2/5");
     expect(html).not.toContain("data-stage-phase");
     expect(html).not.toContain("stageDot");
   });

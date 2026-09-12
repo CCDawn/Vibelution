@@ -6,6 +6,7 @@ import {
   formatActiveTurnHeartbeatText,
   planActiveTurnStageSwitch,
   resolveActiveTurnProgressStage,
+  resolveActiveTurnRetryProgress,
   type ActiveTurnStatusMessageLike,
 } from "./conversationActiveTurnStatusPresentation";
 import styles from "./ConversationActiveTurnStatusNote.styles";
@@ -65,9 +66,12 @@ export function ConversationActiveTurnStatusNote({
   }, [companionMode]);
 
   const elapsedSeconds = activeTurnElapsedSeconds(message.timestamp, nowMs);
+  const retryProgress = stage === "model_retry" || stage === "retrying"
+    ? resolveActiveTurnRetryProgress(message)
+    : null;
   const heartbeatText = companionMode
     ? (lang === "en" ? "Typing…" : "正在输入…")
-    : formatActiveTurnHeartbeatText(stage, elapsedSeconds, lang);
+    : formatActiveTurnHeartbeatText(stage, elapsedSeconds, lang, retryProgress);
   const resolvedStatusLabel = statusLabel
     || (lang === "en" ? "Status" : "状态");
 

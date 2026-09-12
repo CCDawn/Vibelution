@@ -710,6 +710,12 @@ export type SessionBulkDeleteResponse = {
   durationMs?: number;
 };
 
+export type SessionTurnErrorRetry = {
+  attempt: number;
+  maxAttempts: number;
+  category?: string;
+};
+
 export type SessionTurnError = {
   message: string;
   errorType: string;
@@ -729,6 +735,7 @@ export type SessionTurnError = {
   recoverable: boolean;
   timestamp: string;
   turnId: string;
+  retryHistory?: SessionTurnErrorRetry[];
 };
 
 export type SessionRuntimeNotice = {

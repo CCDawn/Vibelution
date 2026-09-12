@@ -500,6 +500,7 @@ from core.web.services.session.turn_diagnostics import (
     _extract_provider_error_message_from_json,
     _sanitize_provider_error_detail,
     _user_visible_failure_summary,
+    _build_session_turn_retry_history,
     _touch_chat_turn_work_run,
     _record_session_chat_review_candidate_event,
 )

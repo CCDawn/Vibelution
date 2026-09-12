@@ -973,6 +973,67 @@ def test_persist_turn_result_does_not_project_failed_legacy_feedback_statuses(tm
     assert all("feedbackEvents" not in message for message in detail["messages"])
 
 
+def test_persist_provider_failure_keeps_bounded_retry_history(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: {"accepted": True},
+    )
+    session_service._set_session_running("session-live", True, turn_id="turn-retry-failed")
+
+    session_service._persist_session_turn_result(
+        "session-live",
+        {
+            "status": "failed",
+            "summary": "provider_protocol_error: server_error upstream failed",
+            "raw_output": "provider_protocol_error: server_error upstream failed",
+            "error": "provider_protocol_error: server_error upstream failed",
+            "outcome": "failed",
+            "feedback_events": [
+                {
+                    "sequence": 1,
+                    "kind": "status",
+                    "status": "running",
+                    "name": "model_retry",
+                    "attempt": 1,
+                    "maxAttempts": 5,
+                    "category": "server_error",
+                    "summary": "模型连接正在重试...\n第 1/5 次；原因：server_error。",
+                },
+                {
+                    "sequence": 2,
+                    "kind": "status",
+                    "status": "running",
+                    "name": "model_retry",
+                    "attempt": 2,
+                    "maxAttempts": 5,
+                    "category": "server_error",
+                    "summary": "模型连接正在重试...\n第 2/5 次；原因：server_error。",
+                },
+            ],
+            "llm_failure": {
+                "category": "server_error",
+                "retryable": True,
+                "attempts": 5,
+                "max_attempts": 5,
+                "consecutive_failures": 5,
+                "stop_reason": "retry budget exhausted",
+            },
+        },
+        turn_id="turn-retry-failed",
+    )
+
+    detail = session_service.get_session_detail("session-live")
+    assert detail["lastTurnError"] is not None
+    assert detail["lastTurnError"]["retryHistory"] == [
+        {"attempt": 1, "maxAttempts": 5, "category": "server_error"},
+        {"attempt": 2, "maxAttempts": 5, "category": "server_error"},
+        {"attempt": 5, "maxAttempts": 5, "category": "server_error"},
+    ]
+
+
 def test_persist_tool_trace_without_conclusion_stays_resumable(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
