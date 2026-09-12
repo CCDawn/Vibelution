@@ -18,6 +18,7 @@ from core.chat.conversation_invariant import (
 )
 from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_MESSAGE,
+    EVENT_BRANCH_REBASE,
     EVENT_TOOL_RESULT,
     EVENT_USER_MESSAGE,
     append_conversation_event,
@@ -59,9 +60,75 @@ def _client_config(**kwargs):
 
 def test_rewrite_exceptions_are_named_owners():
     joined = " ".join(LEDGER_REWRITE_EXCEPTION_OWNERS)
-    assert "truncate_session_ledger_before_message" in joined
+    assert "truncate_session_ledger_before_message" not in joined
     assert "chat_room_service" in joined
     assert "maintenance_reset" in joined
+
+
+def test_canonical_replay_folds_branch_rebase_events(tmp_path):
+    append_conversation_event(
+        tmp_path,
+        "session-rebase",
+        "turn-1",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "原始需求"},
+    )
+    first_answer = append_conversation_event(
+        tmp_path,
+        "session-rebase",
+        "turn-1",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "原始回答"},
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-rebase",
+        "turn-2",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "后续追问"},
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-rebase",
+        "turn-2",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "后续回答"},
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-rebase",
+        "turn-3",
+        EVENT_BRANCH_REBASE,
+        status="recorded",
+        payload={
+            "operation": "edit",
+            "branchId": "branch-1",
+            "fromEventId": first_answer.event_id,
+            "replacedTurnIds": ["turn-2"],
+        },
+        parent_event_id=first_answer.event_id,
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-rebase",
+        "turn-3",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "编辑后的需求"},
+    )
+
+    events = load_conversation_events(tmp_path, "session-rebase")
+    messages = canonical_conversation_messages_from_events(events)
+
+    assert [str(message.get("content") or "") for message in messages] == [
+        "原始需求",
+        "原始回答",
+        "编辑后的需求",
+    ]
 
 
 def test_assembled_history_fingerprint_matches_ledger_reconstruction(tmp_path):

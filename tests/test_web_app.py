@@ -18,11 +18,13 @@ from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_DELTA_COMMITTED,
     EVENT_ASSISTANT_MESSAGE,
     EVENT_ASSISTANT_PARTIAL,
+    EVENT_BRANCH_REBASE,
     EVENT_TOOL_RESULT,
     EVENT_TURN_INTERRUPTED,
     EVENT_TURN_STARTED,
     EVENT_USER_MESSAGE,
     append_conversation_event,
+    fold_active_events,
     load_conversation_events,
 )
 from core.ui.chat_state import load_chat_state, save_chat_state
@@ -5074,6 +5076,32 @@ def test_edit_resubmit_session_message_truncates_following_history_and_starts_tu
     signals = _read_next_state_signals(tmp_path, session_id="session-live")
     assert any(item["kind"] == "assistant_output_edited" and item["turnId"] for item in signals)
 
+    raw_events = load_conversation_events(tmp_path, "session-live")
+    rebase_events = [event for event in raw_events if event.event_type == EVENT_BRANCH_REBASE]
+    assert len(rebase_events) == 1
+    rebase = rebase_events[0]
+    assert rebase.payload["operation"] == "edit"
+    assert rebase.payload["baseMessageId"] == "session-live-message-3"
+    assert rebase.payload["replacedTurnIds"] == ["edit-history-003", "edit-history-004"]
+    fork_index = next(
+        index for index, event in enumerate(raw_events) if event.event_id == rebase.payload["fromEventId"]
+    )
+    assert raw_events[fork_index].event_type == EVENT_ASSISTANT_MESSAGE
+    assert raw_events[fork_index].payload["content"] == "原始回答"
+    assert any(
+        event.event_type == EVENT_ASSISTANT_MESSAGE and event.payload.get("content") == "后续回答"
+        for event in raw_events
+    )
+    active_events = fold_active_events(raw_events)
+    assert not any(
+        event.event_type == EVENT_ASSISTANT_MESSAGE and event.payload.get("content") == "后续回答"
+        for event in active_events
+    )
+    assert any(
+        event.event_type == EVENT_USER_MESSAGE and event.payload.get("content") == "编辑后的需求"
+        for event in active_events
+    )
+
     session_service._set_session_running("session-live", False)
     session_service._clear_session_turn_control("session-live")
     session_service._clear_session_live_output("session-live")
@@ -5334,6 +5362,26 @@ def test_regenerate_session_message_reruns_latest_user_message_with_attachments(
     assert any(event["eventCode"] == "conversation.message_regenerated" for event in events)
     signals = _read_next_state_signals(tmp_path, session_id="session-live")
     assert any(item["kind"] == "assistant_output_edited" and item["turnId"] for item in signals)
+
+    raw_events = load_conversation_events(tmp_path, "session-live")
+    rebase = next(event for event in raw_events if event.event_type == EVENT_BRANCH_REBASE)
+    assert rebase.payload["operation"] == "regenerate"
+    assert rebase.payload["baseMessageId"] == "session-live-message-3"
+    assert rebase.payload["replacedTurnIds"] == ["regenerate-history-003", "regenerate-history-004"]
+    assert any(
+        event.event_type == EVENT_ASSISTANT_MESSAGE and event.payload.get("content") == "后续回答"
+        for event in raw_events
+    )
+    active_events = fold_active_events(raw_events)
+    assert not any(
+        event.event_type == EVENT_ASSISTANT_MESSAGE and event.payload.get("content") == "后续回答"
+        for event in active_events
+    )
+    assert [
+        event.payload.get("content")
+        for event in active_events
+        if event.event_type == EVENT_USER_MESSAGE
+    ] == ["原始需求", "后续追问"]
 
     session_service._set_session_running("session-live", False)
     session_service._clear_session_turn_control("session-live")

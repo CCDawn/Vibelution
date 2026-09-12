@@ -40,6 +40,7 @@ EVENT_TURN_FAILED = "turn_failed"
 EVENT_TURN_INTERRUPTED = "turn_interrupted"
 EVENT_COMPACTION_CHECKPOINT = "compaction_checkpoint"
 EVENT_COMPRESSION_ATTEMPT = "context_compression_attempt"
+EVENT_BRANCH_REBASE = "branch_rebase"
 
 TERMINAL_EVENTS = {
     EVENT_TURN_COMPLETED,
@@ -782,8 +783,49 @@ def rewrite_turn_events(project_root: Path, session_id: str, events: Iterable[Tu
                     pass
 
 
+def fold_active_events(events: Iterable[TurnJournalEvent]) -> list[TurnJournalEvent]:
+    """Return the active-path view of a journal stream.
+
+    ``branch_rebase`` markers record that everything after the referenced fork
+    point was superseded (edit/regenerate) while the old events stay in the
+    file for audit. The fold is a pure function: model replay, turn items,
+    detail projection, and preview fallbacks all use this single
+    implementation. Unknown event types (including markers written by newer
+    schemas) never crash or reorder replay.
+    """
+
+    active: list[TurnJournalEvent] = []
+    for event in list(events or []):
+        if event.event_type != EVENT_BRANCH_REBASE:
+            active.append(event)
+            continue
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        operation = str(payload.get("operation") or "").strip()
+        if operation not in {"edit", "regenerate"}:
+            # ``head_select`` is applied by the API/SSE head pointer (T3-A2);
+            # unknown operations from newer schemas keep the current path
+            # instead of guessing a cut point.
+            continue
+        from_event_id = str(payload.get("fromEventId") or event.parent_event_id or "").strip()
+        if not from_event_id:
+            # Fork at the very start of the conversation history.
+            active = []
+            continue
+        cut_index = -1
+        for index, candidate in enumerate(active):
+            if candidate.event_id == from_event_id:
+                cut_index = index
+                break
+        if cut_index < 0:
+            # Malformed or concurrent marker: keep the current path rather than
+            # dropping the whole transcript.
+            continue
+        active = active[: cut_index + 1]
+    return active
+
+
 def latest_open_turn_id(events: Iterable[TurnJournalEvent]) -> str:
-    event_list = list(events or [])
+    event_list = fold_active_events(events)
     terminal_turn_ids = {
         event.turn_id
         for event in event_list
@@ -1029,7 +1071,9 @@ def session_turn_items_from_events(
     """
 
     normalized_turn_id = str(turn_id or "").strip()
-    event_list = sorted(list(events or []), key=lambda item: (item.sequence, item.event_id))
+    event_list = fold_active_events(
+        sorted(list(events or []), key=lambda item: (item.sequence, item.event_id))
+    )
     tool_outcomes: dict[str, str] = {}
     tool_semantic_statuses: dict[str, str] = {}
     tool_summaries: dict[str, str] = {}
@@ -1371,7 +1415,10 @@ def _attach_replay_reasoning_content(
 
 
 def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> list[dict[str, Any]]:
-    event_list = list(events or [])
+    return _model_visible_messages_from_events(fold_active_events(events))
+
+
+def _model_visible_messages_from_events(event_list: list[TurnJournalEvent]) -> list[dict[str, Any]]:
     canonical_final_turn_ids = {
         event.turn_id
         for event in event_list
@@ -1578,11 +1625,11 @@ def model_messages_from_events(events: Iterable[TurnJournalEvent]) -> list[dict[
     have a single, protocol-valid source.
     """
 
-    event_list = list(events or [])
+    event_list = fold_active_events(events)
     event_by_id = {event.event_id: event for event in event_list if event.event_id}
     lifecycle_tool_identities = _lifecycle_resolved_tool_identities(event_list)
     messages: list[dict[str, Any]] = []
-    for message in _filter_recoverable_status_messages(model_visible_messages_from_events(event_list)):
+    for message in _filter_recoverable_status_messages(_model_visible_messages_from_events(event_list)):
         metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
         if metadata.get("kind") == "context_compression_marker":
             checkpoint_message = _checkpoint_model_message_from_event(
@@ -2548,6 +2595,7 @@ __all__ = [
     "EVENT_ASSISTANT_ITEM_COMMITTED",
     "EVENT_ASSISTANT_PARTIAL",
     "AUDIT_ONLY_EVENT_TYPES",
+    "EVENT_BRANCH_REBASE",
     "EVENT_CLI_SESSION_LIFECYCLE",
     "EVENT_CLI_TASK_SENT",
     "EVENT_CLI_TASK_RESULT",
@@ -2570,6 +2618,7 @@ __all__ = [
     "append_turn_event",
     "event_has_model_projection",
     "event_projection_category",
+    "fold_active_events",
     "latest_turn_sequence",
     "latest_open_turn_id",
     "load_latest_turn_events_for_preview",
