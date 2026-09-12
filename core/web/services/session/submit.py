@@ -1289,7 +1289,6 @@ def _resubmit_session_user_message(
         s._resolve_active_agent_for_turn(conversation_id, agent_id, lang=lang)
         original_entry = dict(previous_messages[target_index])
         history_before_target = previous_messages[:target_index]
-        s._truncate_session_ledger_before_message(conversation_id, original_entry)
         original_metadata = original_entry.get("metadata") if isinstance(original_entry.get("metadata"), dict) else {}
         original_was_slash_skill = isinstance(original_metadata.get("slashSkillCommand"), dict)
         superseded_turn_id = ""
@@ -1344,6 +1343,13 @@ def _resubmit_session_user_message(
             user_message=message,
             started_at=user_entry["timestamp"],
             updated_at=user_entry["timestamp"],
+        )
+        s._append_session_branch_rebase_event(
+            conversation_id,
+            original_entry,
+            operation=operation,
+            turn_id=turn_control.turn_id,
+            base_message_id=target_message_id,
         )
     finally:
         admit_lock.release()
