@@ -61,13 +61,15 @@ describe("VPopover contract", () => {
     expect(contextRing).not.toContain("createPortal(");
   });
 
-  it("AppShell status guide uses VPopover instead of hover cluster panel", () => {
+  it("AppShell keeps a quiet status chip instead of a hover/popover diagnostic panel", () => {
     const shell = readFileSync(resolve(vuiRoot, "../../app/AppShell.tsx"), "utf8");
     const styles = readFileSync(resolve(vuiRoot, "../../app/AppShell.styles.ts"), "utf8");
-    expect(shell).toContain('data-vui="status-guide-popover"');
-    expect(shell).toContain("contentClassName={styles.statusGuidePopoverContent}");
-    expect(shell).toContain("LazyAppShellStatusGuidePanel");
+    expect(shell).not.toContain('data-vui="status-guide-popover"');
+    expect(shell).not.toContain("LazyAppShellStatusGuidePanel");
+    expect(shell).not.toContain("statusGuidePopoverContent");
     expect(shell).not.toContain("onMouseEnter={() => setStatusGuideOpen(true)}");
-    expect(styles).toContain("statusGuidePopoverContent");
+    expect(shell).toContain("styles.statusSummaryChip");
+    expect(styles).not.toContain("statusGuidePopoverContent");
+    expect(styles).toContain("statusSummaryChip");
   });
 });

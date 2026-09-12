@@ -2219,6 +2219,7 @@ export function ChatCodingRouteWorkbench() {
     handleEditUserMessage,
     handleCancelEditMessage,
     handleRegenerateAssistantMessage,
+    handleRetryFailedTurn,
     handleSwitchMessageVersion,
     handleComposerChange,
     handleMentalModelEnabledChange,
@@ -3275,6 +3276,12 @@ export function ChatCodingRouteWorkbench() {
                 regenerableAssistantMessageId,
                 regenerateDisabled: sessionBusy || regenerateMutation.isPending,
                 regeneratePending: (
+                  regenerateMutation.isPending
+                  && regenerateMutation.variables?.sessionId === activeSessionId
+                ),
+                onRetryTurn: handleRetryFailedTurn,
+                retryTurnDisabled: sessionBusy || regenerateMutation.isPending,
+                retryTurnPending: (
                   regenerateMutation.isPending
                   && regenerateMutation.variables?.sessionId === activeSessionId
                 ),

@@ -1239,6 +1239,10 @@ const styles: Record<string, string> = {
     "vui-components-conversationview turnErrorReasonList grid min-w-0 gap-1 border-t border-[color-mix(in_srgb,var(--state-error)_20%,transparent)] pt-1.5 [font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   turnErrorReasonRow:
     "vui-components-conversationview turnErrorReasonRow grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] items-start gap-x-2 gap-y-0.5 [&_dd]:m-0 [&_dd]:min-w-0 [&_dd]:whitespace-pre-wrap [&_dd]:break-words [&_dd]:[overflow-wrap:anywhere] [&_dt]:font-semibold [&_dt]:text-[var(--fg-tertiary)]",
+  turnErrorActions:
+    "vui-components-conversationview turnErrorActions flex min-w-0 flex-wrap items-center justify-end gap-1.5",
+  turnErrorRetryButton:
+    "vui-components-conversationview turnErrorRetryButton w-fit rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_28%,transparent)] px-2 py-0.5 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--state-error)] hover:bg-[color-mix(in_srgb,var(--state-error)_8%,transparent)]",
   turnErrorText:
     "vui-components-conversationview turnErrorText grid min-w-0 gap-1 whitespace-normal break-words [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
   turnErrorTurn:
