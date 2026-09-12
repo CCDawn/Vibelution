@@ -153,6 +153,36 @@ def _retire_ghost_directory_rows(session_ids: list[str]) -> tuple[list[str], lis
     return retired, failed
 
 
+def _open_standalone_archive_store() -> ConversationStore | None:
+    """Open a temporary directory store when the runtime store is not loaded.
+
+    Offline callers (CLI cleanup) have no open directory runtime, and
+    ``archive_directory_session_safe`` intentionally no-ops without one.  The
+    question cleanup must still archive the rows it deleted, so it opens the
+    store for the duration of the removal and closes it again.
+    """
+
+    if directory_runtime.get_open_directory_store() is not None:
+        open_root = directory_runtime.directory_store_project_root()
+        if open_root is not None and Path(open_root).resolve() == _project_root().resolve():
+            return None
+    store = ConversationStore(
+        directory_runtime.conversation_store_path(_project_root())
+    )
+    store.open()
+    return store
+
+
+def _archive_directory_rows(store: ConversationStore | None, session_ids: list[str]) -> None:
+    if store is None:
+        return
+    for session_id in session_ids:
+        try:
+            store.repository.archive_directory_session(session_id).result(timeout=10)
+        except Exception:  # noqa: BLE001 - the session body is already removed
+            continue
+
+
 def remove_question_sessions(
     session_ids: list[str] | None,
     *,
@@ -173,30 +203,39 @@ def remove_question_sessions(
     removed_session_ids: list[str] = []
     skipped: list[dict[str, str]] = []
     failed: list[dict[str, str]] = []
-    for start in range(0, len(requested), MAX_BULK_SESSION_IDS):
-        chunk = requested[start : start + MAX_BULK_SESSION_IDS]
-        result = bulk_delete_chat_sessions(chunk)
-        for item in list(result.get("success") or []):
-            session_id = str(item.get("sessionId") or "").strip()
-            if session_id:
-                removed_session_ids.append(session_id)
-        for item in list(result.get("skipped") or []):
-            session_id = str(item.get("sessionId") or "").strip()
-            reason = str(item.get("reason") or "").strip()
-            if retire_ghost_rows and reason == "not_found" and session_id:
-                retired, ghost_failed = _retire_ghost_directory_rows([session_id])
-                removed_session_ids.extend(retired)
-                failed.extend(ghost_failed)
-                if retired:
-                    continue
-            skipped.append({"sessionId": session_id, "reason": reason})
-        for item in list(result.get("failed") or []):
-            failed.append(
-                {
-                    "sessionId": str(item.get("sessionId") or "").strip(),
-                    "reason": str(item.get("reason") or "").strip(),
-                }
+    archive_store = _open_standalone_archive_store()
+    try:
+        for start in range(0, len(requested), MAX_BULK_SESSION_IDS):
+            chunk = requested[start : start + MAX_BULK_SESSION_IDS]
+            chunk_removed_start = len(removed_session_ids)
+            result = bulk_delete_chat_sessions(chunk)
+            for item in list(result.get("success") or []):
+                session_id = str(item.get("sessionId") or "").strip()
+                if session_id:
+                    removed_session_ids.append(session_id)
+            for item in list(result.get("skipped") or []):
+                session_id = str(item.get("sessionId") or "").strip()
+                reason = str(item.get("reason") or "").strip()
+                if retire_ghost_rows and reason == "not_found" and session_id:
+                    retired, ghost_failed = _retire_ghost_directory_rows([session_id])
+                    removed_session_ids.extend(retired)
+                    failed.extend(ghost_failed)
+                    if retired:
+                        continue
+                skipped.append({"sessionId": session_id, "reason": reason})
+            for item in list(result.get("failed") or []):
+                failed.append(
+                    {
+                        "sessionId": str(item.get("sessionId") or "").strip(),
+                        "reason": str(item.get("reason") or "").strip(),
+                    }
+                )
+            _archive_directory_rows(
+                archive_store, removed_session_ids[chunk_removed_start:]
             )
+    finally:
+        if archive_store is not None:
+            archive_store.close()
     return {
         "requestedSessionCount": len(requested),
         "removedSessionCount": len(removed_session_ids),

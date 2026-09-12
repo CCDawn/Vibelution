@@ -195,6 +195,43 @@ def test_remove_question_sessions_retires_not_found_ghost_rows(
     assert result["failedSessions"] == []
 
 
+def test_remove_question_sessions_archives_directory_rows_offline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store_path = _isolate(tmp_path, monkeypatch)
+    _seed_directory_sessions(
+        store_path,
+        [
+            ("session-team", "SCI-010 团队会话", False),
+            ("session-child", "SCI-010 子会话", True),
+            ("session-other", "SCI-011 团队会话", False),
+        ],
+    )
+
+    def fake_bulk_delete(session_ids: list[str]) -> dict:
+        return {
+            "success": [{"sessionId": item, "deleted": True} for item in session_ids],
+            "skipped": [],
+            "failed": [],
+        }
+
+    monkeypatch.setattr(
+        session_bulk_delete, "bulk_delete_chat_sessions", fake_bulk_delete
+    )
+
+    summaries = question_sessions.list_question_session_summaries("SCI-010")
+    result = question_sessions.remove_question_sessions(
+        [item["sessionId"] for item in summaries]
+    )
+
+    assert result["removedSessionCount"] == 2
+    assert question_sessions.list_question_session_summaries("SCI-010") == []
+    assert [
+        item["sessionId"]
+        for item in question_sessions.list_question_session_summaries("SCI-011")
+    ] == ["session-other"]
+
+
 def test_remove_question_conversations_isolates_step_failures(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
