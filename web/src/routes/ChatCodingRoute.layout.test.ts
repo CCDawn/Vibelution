@@ -2272,7 +2272,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("? chatLiveQueryPolicy.sessionDetailRefetchInterval");
     expect(routeSource).toContain("startupDetailSettledSessionId === activeSessionId");
     expect(routeSource).toContain("refetchInterval: childSessionLiveQueryPolicy.childSessionsRefetchInterval");
-    expect(routeSource).toContain("mergeSessionDetailIntoConversations(conversations, detail)");
+    expect(routeSource).toContain("mergeSessionDetailIntoConversations(conversations, mergedDetail)");
   });
 
   it("does not refetch chat indexes or detail immediately after an accepted direct turn", () => {

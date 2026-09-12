@@ -4,9 +4,11 @@ import { ConversationMessage, SessionDetail, SessionMessageWindow, SessionSummar
 import {
   appendOptimisticUserMessage,
   applyOptimisticEditResubmit,
+  clearSessionDetailStopping,
   deriveSessionDetailQueryErrorState,
   deriveSessionListQueryErrorState,
   markOptimisticUserMessageAccepted,
+  markSessionDetailStopping,
   markSessionSummaryRunning,
   markSessionDetailRunning,
   mergeSessionDetailMessageWindow,
@@ -1329,5 +1331,68 @@ describe("chatSessionState", () => {
         "session-live",
       ),
     ).toBe(false);
+  });
+
+  it("patches a stop control ack without dropping the transcript", () => {
+    const current = makeDetail({
+      messages: [assistantTerminalTurn("assistant-1", "turn-1", "2026-01-01T00:00:00Z")],
+      activeTurnId: "turn-2",
+    });
+    const ack = {
+      id: "session-live",
+      currentPhase: "stopping",
+      stopRequested: true,
+      stopRequestedAt: "2026-01-01T00:00:05Z",
+      activeTurnId: "turn-2",
+    } as unknown as SessionDetail;
+
+    const merged = mergeSessionDetailMessageWindow(current, ack);
+
+    expect(merged.messages).toEqual(current.messages);
+    expect(merged.currentPhase).toBe("stopping");
+    expect(merged.stopRequested).toBe(true);
+    expect(merged.stopRequestedAt).toBe("2026-01-01T00:00:05Z");
+  });
+
+  it("does not apply a foreign control ack onto the active detail", () => {
+    const current = makeDetail();
+    const ack = { id: "other-session", currentPhase: "stopping" } as unknown as SessionDetail;
+
+    expect(mergeSessionDetailMessageWindow(current, ack).id).toBe("other-session");
+  });
+
+  it("marks the detail as stopping optimistically and restores it after failure", () => {
+    const current = makeDetail({ activeTurnId: "turn-2" });
+
+    const stopping = markSessionDetailStopping(current, { requestedAt: "2026-01-01T00:00:05Z" });
+
+    expect(stopping?.currentPhase).toBe("stopping");
+    expect(stopping?.stopRequested).toBe(true);
+    expect(stopping?.stopRequestedAt).toBe("2026-01-01T00:00:05Z");
+    expect(stopping?.messages).toEqual(current.messages);
+
+    const restored = clearSessionDetailStopping(stopping as SessionDetail, {
+      requestedAt: "2026-01-01T00:00:05Z",
+      previous: current,
+    });
+    expect(restored.currentPhase).toBe("running");
+    expect(restored.stopRequested).toBe(false);
+    expect(restored.stopRequestedAt).toBe("");
+  });
+
+  it("keeps a newer server stop state when clearing an optimistic stop", () => {
+    const current = makeDetail();
+    const serverPublished = makeDetail({
+      currentPhase: "stopping",
+      stopRequested: true,
+      stopRequestedAt: "2026-01-01T00:00:06Z",
+    });
+
+    const cleared = clearSessionDetailStopping(serverPublished, {
+      requestedAt: "2026-01-01T00:00:05Z",
+      previous: current,
+    });
+
+    expect(cleared).toBe(serverPublished);
   });
 });
