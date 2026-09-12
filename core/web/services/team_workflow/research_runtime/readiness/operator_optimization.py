@@ -24,8 +24,10 @@ def evaluate_operator_node(run, node, common, context) -> DomainVerdict:
             if active.get("knowledgeRef"):
                 load_knowledge_snapshot(run.team_id, run.run_id)
             elif request.evidenceGaps and not knowledge_reuse_available(run.team_id, run.run_id, request):
-                failures.append(("operator_knowledge_collection_budget_not_implemented",
-                    "缺少匹配的已接受知识包，付费资料搜集预算尚未接入", "budget"))
+                budget = state["campaign"]["budget"]
+                if not budget.get("knowledge") or budget["modelCostLimit"] <= 0:
+                    failures.append(("operator_knowledge_budget_missing",
+                        "补齐新资料需要显式配置知识搜集调用次数、token 预算与模型价目", "budget"))
         except (CampaignConflict, ValueError, FileNotFoundError):
             failures.append(("operator_knowledge_source_unavailable", "无法回读本轮假设或知识来源", "domain"))
     if node.nodeId == "optimization_plan":

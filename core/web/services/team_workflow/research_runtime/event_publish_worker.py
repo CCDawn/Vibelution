@@ -99,6 +99,11 @@ class EventPublishWorker:
         # a failing re-check never fails the delivery (the parent event is
         # already durably absorbed and the ACK below must still land).
         recheck = self._readiness_recheck
+        parent = self._store.get_run(str(payload.get("consumerRunId") or ""))
+        if parent is not None and parent.workflow_id == "operator-optimization":
+            # Absorption transaction resumes the original system action.
+            # A delivery replay must never create a second parent attempt.
+            recheck = None
         # Absorption can commit before a crash prevents the readiness hook.
         # Redelivery must finish that hook too; its command key/live-attempt
         # checks already make repeated invocation idempotent.

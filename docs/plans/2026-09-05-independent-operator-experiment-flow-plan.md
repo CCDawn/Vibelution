@@ -860,3 +860,25 @@ Chat Room 的专属结构化输出应复用现有 `set_turn_structured_output_co
 4. 子流程模型费用明确、人工 handoff 已接受并交付后，才允许 `verified_packages()` 消费新 child 产物并解除 `optimization_knowledge` 的付费阻断。零调用复用仍保持现有行为。
 
 下一段的验收必须包含：原生 source task→worker→LLM→成功/失败回执→人工交付→同一个父 action 恢复；断言不创建第二 child，不产生新 START_NODE，不在费用未知或人工拒绝时推进实验规划。
+
+## 23. 原生资料搜集与父实验恢复（2026-09-13）
+
+本节更新第 20–22 节的接线状态：有证据缺口时，先复用符合请求的已接受包；没有可复用包且活动显式授权 knowledge 预算时，启动真实 knowledge child。未配置预算仍阻断，不借用 discussion 或通用 token 限额。实验规划 Agent 仍未接入，`optimization_plan` 的明确阻断保留。
+
+### 23.1 实现与唯一事实源
+
+- `operator_optimization/source_authority.py` 从 Ledger 校验父实验、最新父/子 attempt、invocation、请求 hash 和冻结 Agent binding，并将该 NodeRun 的真实模型路由与计费策略摘要冻结在 child snapshot 的 `operatorSourceAuthorities`。重放回读冻结路由。这里沿用既有 `sourceCollectionRunId` 的运行期附加字段做法，不改写原始输入 hash，不生成第二份 Session 或 transcript。
+- `RealDomainPorts` 的真实 operator child 分支不再进入第一阶段 `_formal_task_authorities()`。原生 source task 的 private 参数接收该 authority，创建 Session 前验证，submit 前存入 canonical stage task；普通 source contract 保持原路径。collection scope 的 `modelAccountingKind` 只用于在 Ledger 不可读时拒绝降级，不授予调用权限；真正准入仍依赖 Ledger 回读。
+- 找资料阶段读取真实 child 的 `knowledgeRequest`，校验 collection 与 child 的项目、请求、来源运行一致性。独立算子实验不要求第一阶段 `problem_understanding` 产物；其输入是本轮已选假设及证据缺口。
+- 资料寻找的 readiness 同样从真实 child 谱系读取知识请求；`OperatorRunContext` 没有第一阶段的自由文本 `question` 字段，不能继续用该字段是否存在来判断算子资料任务能否启动或重试。
+- 原生 worker 从 canonical task 回读 `operatorSourceAuthority`，绑定真实 Session/Task/Turn 后安装既有知识计费 context。metadata 只用于定位；错误会话、回合或项目不可替代任务身份。成功流式回执复用现有 receipt outbox；失败和重试仍复用既有 LLM 计费回调。
+- source 节点完成须等回执交付成功，并确认实际调用费用结算；未知用量保留预算且停在现有 completion dependency。新 child 的知识包必须已完成、已接受、已交付且各 source 节点费用明确，才允许冻结 `optimization_knowledge`。既有普通知识包可继续零调用复用。
+- `knowledge_wait.py` 在单事务中保存原 system action、输入 hash、父 NodeRun、invocation 和 child 游标，将原 attempt 保持 running、run 置为 blocked。交付吸收或 child 失败后精确重挂同一 outbox action；取消、过期 attempt、其他流程不唤醒。成功未交付不提前恢复，terminal-before-defer 的竞态在同事务回读。operator 的交付事件跳过旧 START_NODE recheck，重复事件不会产生新父 attempt。
+
+### 23.2 复用与验证边界
+
+本批复用本地已成熟的 source stage Session 工厂、worker 模型路由固定、知识 invocation 指纹、预算账本、receipt outbox 和 completion dependency；沿用先前 RD-Agent 调研确认的“假设转换与实验执行分离”，没有引入外部调度器或第二套会话账本。机器可复核的复用裁决记录在任务 Git common-dir 的 reuse research evidence。
+
+`test_operator_source_session.py` 使用隔离原生 source factory、canonical task、worker context、受控流式 provider 和真实 SQLite，覆盖模型冻结、一次收费、回执未交付阻断、同任务重放、错误身份和缺少 Ledger 时拒绝创建会话。`test_operator_knowledge_wait.py` 覆盖真实 SQLite 成功/失败/取消、重复 defer/wake、取消父流程、过期 attempt、未交付和先完成后等待的竞态。`test_operator_knowledge_plan.py` 验证正式 system executor 创建一个 child、相同请求重放及失败不另起 child，保留既有来源撤销和未授权预算拒绝测试。
+
+这些证据包含原生 finding 任务入口和分段交付恢复验证；没有调用生产模型、实际检索外部资料、操作人工接受界面、运行 GPU 或重启产品，不能称为一轮真实科研实验已跑通。下一步是接规划 Agent 的原生任务、受管候选物化与完成回收，再用显式预算验收完整搜集与实验迭代。

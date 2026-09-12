@@ -877,6 +877,90 @@ def test_self_evolution_fixed_roles_get_executable_and_observer_tool_policies(tm
     assert observer_policy["mutationAccess"] == "none"
 
 
+def test_self_evolution_fixed_roles_get_stable_direct_session_ids(tmp_path, monkeypatch):
+    monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(service, "ROLLBACK_ROOT", tmp_path / "workspace" / "web_self_evolution")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+
+    service.ensure_self_evolution_agent_instances()
+    by_role = {
+        agent["roleKey"]: agent
+        for agent in agent_directory_service.load_state()["agents"]
+        if agent.get("primaryMode") == "self_evolution"
+    }
+    expected = {
+        role: service.self_evolution_role_direct_session_id(role)
+        for role in ("executor", "reviewer", "observer")
+    }
+
+    # Tool authorization requires a non-empty sessionId; background fixed roles
+    # use a stable per-role direct-session domain.
+    for role, expected_id in expected.items():
+        assert by_role[role]["directSessionId"] == expected_id
+
+    # Empty legacy values are repaired on the next ensure, and valid values stay put.
+    agent_directory_service.update_agent_instance(by_role["observer"]["agentId"], direct_session_id="")
+    service.ensure_self_evolution_agent_instances()
+    repaired = {
+        agent["roleKey"]: agent
+        for agent in agent_directory_service.load_state()["agents"]
+        if agent.get("primaryMode") == "self_evolution"
+    }
+    for role, expected_id in expected.items():
+        assert repaired[role]["directSessionId"] == expected_id
+
+
+def test_self_evolution_bindings_repair_missing_direct_session_ids(tmp_path, monkeypatch):
+    monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(service, "ROLLBACK_ROOT", tmp_path / "workspace" / "web_self_evolution")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+
+    service.ensure_self_evolution_agent_instances()
+    by_role = {
+        agent["roleKey"]: agent
+        for agent in agent_directory_service.load_state()["agents"]
+        if agent.get("primaryMode") == "self_evolution"
+    }
+    # Simulate fixed-role Agents created before direct-session domains existed.
+    agent_directory_service.update_agent_instance(by_role["executor"]["agentId"], direct_session_id="")
+
+    # Resolving bindings must repair the missing domain instead of reusing the slot.
+    bindings = service.self_evolution_agent_bindings()
+
+    assert bindings["executor"]["directSessionId"] == service.self_evolution_role_direct_session_id("executor")
+    repaired = {
+        agent["roleKey"]: agent
+        for agent in agent_directory_service.load_state()["agents"]
+        if agent.get("primaryMode") == "self_evolution"
+    }
+    for role in ("executor", "reviewer", "observer"):
+        assert repaired[role]["directSessionId"] == service.self_evolution_role_direct_session_id(role)
+
+
+def test_self_observation_agent_binding_repairs_missing_direct_session_id(tmp_path, monkeypatch):
+    monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(service, "ROLLBACK_ROOT", tmp_path / "workspace" / "web_self_evolution")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+
+    service.self_evolution_agent_bindings()
+    by_role = {
+        agent["roleKey"]: agent
+        for agent in agent_directory_service.load_state()["agents"]
+        if agent.get("primaryMode") == "self_evolution"
+    }
+    agent_directory_service.update_agent_instance(by_role["observer"]["agentId"], direct_session_id="")
+
+    observer_binding = service.self_observation_agent_binding()
+
+    assert observer_binding["directSessionId"] == service.self_evolution_role_direct_session_id("observer")
+
+
 def test_self_evolution_agent_repair_does_not_reactivate_archived_fixed_role(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(service, "ROLLBACK_ROOT", tmp_path / "workspace" / "web_self_evolution")

@@ -129,6 +129,18 @@ class RealDomainReadinessContext:
         preferred = str(run_id or "").strip()
         candidate_run_ids = ([preferred] if preferred else _run_ids_for(self._store, team_id))
         for candidate_run_id in candidate_run_ids:
+            from ..operator_optimization.knowledge_budget_runtime import is_operator_knowledge_run, knowledge_lineage
+
+            if is_operator_knowledge_run(self._store, candidate_run_id):
+                attempt = self._store.latest_attempt(candidate_run_id, "source_finding")
+                if attempt is None:
+                    continue
+                child, _, _, _, request = self._store.read(
+                    lambda repo: knowledge_lineage(repo, candidate_run_id, attempt.node_run_id))
+                if child.team_id == team_id and child.question_id == question_id:
+                    return {"questionId": question_id, "question": "\n".join(request.evidenceGaps),
+                        "operatorKnowledgeRequest": request.model_dump(mode="json"), "runId": child.run_id}
+                continue
             run_snapshot = self._input_snapshot(candidate_run_id)
             objective = run_snapshot.get("researchObjectiveContract") or {}
             if str(objective.get("question") or "") and str(

@@ -156,13 +156,49 @@ def test_no_gaps_freezes_real_observations_and_plan_without_calls(activity, hand
 
 def test_gaps_do_not_turn_into_success_or_start_an_unbudgeted_child(activity, handoff):
     run, _, store = selected(activity, handoff, gaps=True)
-    with pytest.raises(CampaignConflict, match="paid collection is not connected"):
+    with pytest.raises(CampaignConflict, match="explicit authorized budget"):
         knowledge.publish_knowledge_snapshot(activity[0], run.run_id)
     assert read_campaign(*activity).rounds[0].knowledgeRef is None
     assert (
         store.read(lambda repo: repo.list_knowledge_invocations_for_parent(run.run_id))
         == []
     )
+
+
+def test_authorized_gap_starts_one_child_and_replays_failure_without_new_run(activity, handoff, monkeypatch):
+    from core.research.operator_optimization.model_budget_contracts import OperatorModelCallBudget
+    from core.web.services.team_workflow.operator_optimization.knowledge_wait import KnowledgeChildPending
+    from core.web.services.team_workflow.research_runtime.real_domain_ports import _execute_real_system_action
+
+    run, _, store = selected(activity, handoff, gaps=True)
+    campaign = read_campaign(*activity)
+    funded = campaign.model_copy(update={"authorizedBy": "operator", "budget": campaign.budget.model_copy(update={
+        "knowledge": OperatorModelCallBudget(tokenLimit=2000, maxCalls=2, maxOutputTokensPerCall=128,
+            prices=[{"modelRef": "default/qwen-alias", "priceVersion": "v1", "currency": "CNY", "inputPerMillion": 1, "outputPerMillion": 2}])})})
+    monkeypatch.setattr(knowledge, "read_campaign", lambda *args: funded)
+    def seed(u):
+        u.repository.insert_command(build_command_record(run_id=run.run_id, command_id="native-knowledge"))
+        u.repository.insert_attempt(build_attempt_record("knowledge-node", run_id=run.run_id,
+            node_id="optimization_knowledge", status="running", command_id="native-knowledge"))
+    store.submit(seed, force_flush=True).result()
+    action = SimpleNamespace(node_id="optimization_knowledge", action_id="native-system", run_id=run.run_id)
+    def execute():
+        return _execute_real_system_action(action, input_snapshot=json.loads(run.input_snapshot_json), required_kinds=("optimization_knowledge",))
+    with pytest.raises(KnowledgeChildPending) as pending:
+        execute()
+    with pytest.raises(KnowledgeChildPending) as replay:
+        execute()
+    assert replay.value.child_run_id == pending.value.child_run_id
+    assert replay.value.invocation_id == pending.value.invocation_id
+    child = store.get_run(pending.value.child_run_id)
+    assert child.parent_run_id == run.run_id
+    assert json.loads(child.input_snapshot_json)["knowledgeRequest"]["consumerContext"]["evidenceGaps"]
+    assert len(store.read(lambda repo: repo.list_knowledge_invocations_for_parent(run.run_id))) == 1
+    store.submit(lambda u: u.repository.update_knowledge_invocation(pending.value.invocation_id, 99, status="failed"), force_flush=True).result()
+    with pytest.raises(CampaignConflict, match="collection failed"):
+        execute()
+    assert read_campaign(*activity).rounds[0].knowledgeRef is None
+    assert len(store.read(lambda repo: repo.list_knowledge_invocations_for_parent(run.run_id))) == 1
 
 
 @pytest.mark.parametrize(
@@ -272,7 +308,7 @@ def test_accepted_reuse_requires_matching_request_delivery_and_live_authority(
             with pytest.raises(CampaignConflict, match="no longer readable"):
                 planning.planning_input(activity[0], run.run_id)
     else:
-        with pytest.raises(CampaignConflict, match="matching accepted package"):
+        with pytest.raises(CampaignConflict, match="explicit authorized budget"):
             knowledge.publish_knowledge_snapshot(activity[0], run.run_id)
 
 
@@ -321,7 +357,7 @@ def test_system_executor_and_readiness_only_enable_verified_reuse(
     verdict = evaluate_operator_node(store.get_run(run.run_id), nodes[1], None, context)
     assert verdict.ready is not gaps
     if gaps:
-        assert "operator_knowledge_collection_budget_not_implemented" in {
+        assert "operator_knowledge_budget_missing" in {
             b.code for b in verdict.blockers
         }
     else:
@@ -415,6 +451,9 @@ def test_discovers_existing_package_and_atomically_binds_current_round_without_c
                 project_id=activity[1],
             )
         )
+        u.repository.insert_run(replace(build_run_record(run_id="source-child", team_id=activity[0]),
+            project_id=activity[1], parent_run_id="previous-run", status="succeeded",
+            workflow_id="challenge-cup-knowledge-sideflow"))
         u.repository.insert_knowledge_invocation(source)
         u.repository.insert_event(
             replace(

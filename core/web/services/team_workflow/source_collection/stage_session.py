@@ -377,6 +377,28 @@ def _source_collection_problem_understanding_context(
         raise s.TeamWorkflowOrchestrationError(
             "Finding stage requires workflowRunId in the source run scope."
         )
+    from ..research_runtime.formal_write_runtime import get_write_store, FormalWriteRuntimeUnavailable
+    from ..operator_optimization.knowledge_budget_runtime import is_operator_knowledge_run, knowledge_lineage
+
+    try:
+        operator_store = get_write_store()
+    except FormalWriteRuntimeUnavailable as exc:
+        if run_scope.get("modelAccountingKind") == "operator_knowledge":
+            raise s.TeamWorkflowOrchestrationError("Operator source task requires readable Workflow Ledger authority") from exc
+        operator_store = None
+    if operator_store is not None and is_operator_knowledge_run(operator_store, workflow_run_id):
+        import json
+
+        attempt = operator_store.latest_attempt(workflow_run_id, "source_finding")
+        child, _, _, _, _ = operator_store.read(lambda repo: knowledge_lineage(repo, workflow_run_id, attempt.node_run_id))
+        child_snapshot = json.loads(child.input_snapshot_json)
+        if (child.team_id != normalized_team_id or child.project_id != run_scope.get("researchProjectId")
+                or child_snapshot.get("sourceCollectionRunId") != normalized_source_run_id
+                or child_snapshot.get("knowledgeRequest") != run_scope.get("knowledgeRequest")):
+            raise s.TeamWorkflowOrchestrationError("Operator finding request differs from its canonical child scope")
+        # Its selected hypothesis and evidence gaps live in knowledgeRequest;
+        # an independent operator run has no first-stage problem artifact.
+        return {}
     workflow_run_id, normalized_source_run_id = _problem_understanding_authority_scope(
         normalized_team_id, workflow_run_id, normalized_source_run_id,
     )
@@ -805,6 +827,7 @@ def start_source_collection_stage_session_task(
     payload: dict[str, Any] | None = None,
     *,
     _challenge_task_contract: dict[str, Any] | None = None,
+    _operator_source_authority: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
@@ -862,6 +885,19 @@ def start_source_collection_stage_session_task(
     scope_workflow_run_id, scope_workflow_node_id = _source_collection_stage_session_workflow_scope(
         run, problem_understanding_context, stage_id=stage_id,
     )
+    from ..research_runtime.formal_write_runtime import get_write_store, FormalWriteRuntimeUnavailable
+    from ..operator_optimization.knowledge_budget_runtime import is_operator_knowledge_run
+
+    try:
+        source_store = get_write_store()
+    except FormalWriteRuntimeUnavailable as exc:
+        if _operator_source_authority is not None or (run.get("scope") or {}).get("modelAccountingKind") == "operator_knowledge":
+            raise s.TeamWorkflowOrchestrationError("Operator source task requires readable Workflow Ledger authority") from exc
+        source_store = None
+    if (((run.get("scope") or {}).get("modelAccountingKind") == "operator_knowledge"
+            or (source_store is not None and is_operator_knowledge_run(source_store, scope_workflow_run_id)))
+            and _operator_source_authority is None):
+        raise s.TeamWorkflowOrchestrationError("Operator source tasks require their server-frozen model authority")
     graph_metrics = _source_collection_run_graph_metrics(
         normalized_team_id,
         normalized_run_id,
@@ -893,6 +929,16 @@ def start_source_collection_stage_session_task(
     if agent_role and agent_role not in allowed_roles:
         raise s.TeamWorkflowOrchestrationError(f"Agent role {agent_role} is not assigned to source collection stage {stage_id}.")
     research_project = s.resolve_research_project_identity_from_record(normalized_team_id, run)
+    if _operator_source_authority is not None:
+        from ..operator_optimization.source_authority import validate_operator_source_authority
+        from ..research_runtime.formal_write_runtime import get_write_store
+
+        validate_operator_source_authority(get_write_store(), _operator_source_authority,
+            team_id=normalized_team_id, project_id=research_project["projectId"],
+            workflow_run_id=scope_workflow_run_id, node_id=scope_workflow_node_id,
+            agent_id=agent_id, agent_role=agent_role)
+        if server_challenge_task_contract:
+            raise s.TeamWorkflowOrchestrationError("Operator source cannot carry a Challenge task contract")
     run_scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
     run_metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
     question_id = s._trim_text(
@@ -1030,7 +1076,7 @@ def start_source_collection_stage_session_task(
 
     dialogue_model_id = s.agent_directory_service.agent_dialogue_model_id(agent)
     try:
-        challenge_task_contract = s.bind_challenge_research_task_model(
+        challenge_task_contract = {} if _operator_source_authority is not None else s.bind_challenge_research_task_model(
             team_id=normalized_team_id,
             research_project_id=research_project["projectId"],
             question_id=question_id,
@@ -1324,6 +1370,7 @@ def start_source_collection_stage_session_task(
         "sessionCreated": experiment_session["sessionCreated"],
         "retryOfSessionId": experiment_session["retryOfSessionId"],
         "challengeTaskContract": challenge_task_contract,
+        **({"operatorSourceAuthority": dict(_operator_source_authority)} if _operator_source_authority is not None else {}),
         "formalRetry": formal_retry,
         "formalRetryRequested": formal_retry_requested,
         "formalRetryReason": formal_retry_reason,

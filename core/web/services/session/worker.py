@@ -340,6 +340,14 @@ def _model_invocation_receipt_context(
             )
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
         return None
+    if task is not None and source_task and isinstance(task.get("operatorSourceAuthority"), dict):
+        task_turn = task.get("turn") or {}
+        stored = str(task_turn.get("turnId") or "")
+        if (task.get("taskId") != task_id or task.get("teamId") != team_id
+                or task.get("sessionId") != session_id
+                or (project_id and task.get("researchProjectId") != project_id)
+                or (stored and stored != turn_id and stored != metadata.get("continuationOfTurnId"))):
+            raise ValueError("Operator source receipt locator differs from its canonical task")
     if task is None or str(task.get("sessionId") or "").strip() != str(session_id or "").strip():
         return None
     if not project_id:
@@ -369,6 +377,11 @@ def _model_invocation_receipt_context(
         != str(metadata.get("continuationOfTurnId") or "").strip()
     ):
         return None
+    if source_task and isinstance(task.get("operatorSourceAuthority"), dict):
+        from core.web.services.team_workflow.operator_optimization.source_authority import source_task_receipt_context
+        from core.web.services.team_workflow.research_runtime.formal_write_runtime import get_write_store
+
+        return source_task_receipt_context(get_write_store(), task, session_id=session_id, turn_id=turn_id)
     seed = task.get("modelInvocationReceiptBinding")
     if isinstance(seed, dict):
         binding = dict(seed)

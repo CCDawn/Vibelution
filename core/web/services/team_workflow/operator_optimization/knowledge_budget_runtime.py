@@ -105,7 +105,12 @@ def knowledge_receipt_context(store, binding, *, expected_model_route):
             run = repo.get_run(binding.workflowRunId)
             parent = repo.get_run(binding.parentRunId)
             attempt = repo.get_attempt(binding.formalNodeRunId)
+            parent_attempt = repo.latest_attempt(binding.parentRunId, "optimization_knowledge")
+            latest = repo.latest_attempt(binding.workflowRunId, binding.formalNodeId)
             if (attempt.finished_at_ms is not None or run.status in {"failed", "cancelled", "archived", "succeeded"}
+                    or latest is None or latest.node_run_id != binding.formalNodeRunId
+                    or parent_attempt is None or parent_attempt.node_run_id != binding.parentNodeRunId
+                    or parent_attempt.finished_at_ms is not None
                     or parent.status in {"failed", "cancelled", "archived", "succeeded"}):
                 raise CampaignConflict("Knowledge source attempt is no longer active")
             return current
