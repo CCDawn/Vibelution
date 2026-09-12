@@ -1125,6 +1125,57 @@ def _bound_chat_rounds_are_terminal(
     return True
 
 
+def _meeting_has_running_bound_round(
+    meeting: Mapping[str, Any],
+    chat_room_round_snapshots: Mapping[str, Mapping[str, Any]] | None,
+) -> bool:
+    """Whether any bound round still reports a running executor.
+
+    ``stop_discussion_meeting`` refuses while a bound round is in a running
+    status, so stop offers are only executable without one.  A missing
+    snapshot keeps the conservative answer (running) and no stop is offered.
+    """
+
+    from core.web.services import chat_room_service
+
+    if not isinstance(chat_room_round_snapshots, Mapping):
+        return True
+    for round_id in [
+        str(round_id or "").strip()
+        for round_id in list(meeting.get("chatRoomRoundIds") or [])
+        if str(round_id or "").strip()
+    ]:
+        snapshot = chat_room_round_snapshots.get(round_id)
+        if not isinstance(snapshot, Mapping):
+            return True
+        status = str(
+            snapshot.get("status") or snapshot.get("currentPhase") or ""
+        ).strip().lower()
+        if status in chat_room_service.RUNNING_ROUND_STATUSES:
+            return True
+    return False
+
+
+def _stop_discussion_action(
+    meeting_id: str,
+    *,
+    target_phase: str,
+    target_node_id: str,
+) -> dict[str, Any]:
+    """The shared stop-discussion command offer (meeting-scoped, confirmed)."""
+
+    return _command_action(
+        "stop_discussion",
+        action_id=f"stop-discussion:{meeting_id}",
+        label="停止本次讨论",
+        target_phase=target_phase,
+        target_node_id=target_node_id,
+        payload={"meetingRoundId": meeting_id},
+        requires_confirmation=True,
+        confirmation_text="停止后将保留失败尝试，并允许重新发起精确的讨论恢复。",
+    )
+
+
 def _load_chat_room_round_snapshot(round_id: str) -> Mapping[str, Any] | None:
     """Read one chat-room WorkRun through the public runtime-store API.
 
@@ -1577,7 +1628,8 @@ def _meeting_recovery_actions(
         # The discussion has already ended and its source rounds are all
         # terminal.  Retry the missing digest from the existing transcript;
         # reopening the discussion would create a new attempt and discard the
-        # useful completed messages from this meeting.
+        # useful completed messages from this meeting.  Stop is the explicit
+        # abandon exit for an operator who does not want the digest at all.
         actions.append(
             _command_action(
                 "regenerate_summary",
@@ -1588,6 +1640,13 @@ def _meeting_recovery_actions(
                 payload={"meetingRoundId": meeting_id},
             )
         )
+        actions.append(
+            _stop_discussion_action(
+                meeting_id,
+                target_phase=target_phase,
+                target_node_id=target_node_id,
+            )
+        )
         return actions, anchor
     linked_round_problem = _linked_chat_room_round_problem(
         meeting,
@@ -1595,7 +1654,9 @@ def _meeting_recovery_actions(
     )
     if status in {"open", "summarizing"} and linked_round_problem:
         # The linked WorkRun is terminal, so there is no live executor to
-        # resume or stop.  A zero-speech review attempt can safely supersede
+        # resume.  stop_discussion is the executable exit that closes the
+        # dead attempt once no bound round still reports running.  A zero-speech
+        # review attempt can safely supersede
         # the failed attempt and open the next budgeted round; an attempt whose
         # latest bound round produced citable completed messages cannot be
         # superseded (the owning service rechecks terminality and latest-round
@@ -1610,6 +1671,14 @@ def _meeting_recovery_actions(
         # retry_review_dispatch, which re-dispatches the same round index as a
         # fresh attempt meeting without burning the round budget (effective
         # once the dead meeting is closed, e.g. through stop_discussion).
+        if not _meeting_has_running_bound_round(meeting, chat_room_round_snapshots):
+            actions.append(
+                _stop_discussion_action(
+                    meeting_id,
+                    target_phase=target_phase,
+                    target_node_id=target_node_id,
+                )
+            )
         if str(meeting.get("meetingType") or "").strip().lower() == _REVIEW_MEETING_TYPE:
             if (
                 selection_id
@@ -1677,6 +1746,18 @@ def _meeting_recovery_actions(
                 input_schema_ref="hypothesis-first/approve-summary/v1",
             )
         )
+        # Approve is the happy path; without an explicit abandon exit an
+        # operator stuck on a digest they do not want can only wait for the
+        # question reset guard.  Stop stays executable until digest approval
+        # (no bound round is running while the panel waits for a human).
+        if not _meeting_has_running_bound_round(meeting, chat_room_round_snapshots):
+            actions.append(
+                _stop_discussion_action(
+                    meeting_id,
+                    target_phase=target_phase,
+                    target_node_id=target_node_id,
+                )
+            )
     if stalled:
         # ``resume_discussion`` is the non-destructive first recovery.  The
         # stop/retry choices are both precise to this meeting and are useful
@@ -1692,15 +1773,10 @@ def _meeting_recovery_actions(
             )
         )
         actions.append(
-            _command_action(
-                "stop_discussion",
-                action_id=f"stop-discussion:{meeting_id}",
-                label="停止本次讨论",
+            _stop_discussion_action(
+                meeting_id,
                 target_phase=target_phase,
                 target_node_id=target_node_id,
-                payload={"meetingRoundId": meeting_id},
-                requires_confirmation=True,
-                confirmation_text="停止后将保留失败尝试，并允许重新发起精确的讨论恢复。",
             )
         )
         actions.append(
@@ -1775,6 +1851,14 @@ def _meeting_recovery_actions(
                 payload={"meetingRoundId": meeting_id},
             )
         )
+        if not _meeting_has_running_bound_round(meeting, chat_room_round_snapshots):
+            actions.append(
+                _stop_discussion_action(
+                    meeting_id,
+                    target_phase=target_phase,
+                    target_node_id=target_node_id,
+                )
+            )
     return actions, anchor
 
 
@@ -4415,19 +4499,28 @@ def project_state_from_records(
             retargeted["targetPhase"] = current_phase
             fenced_actions.append(retargeted)
     allowed_actions = fenced_actions
+    # ``stop_discussion`` is an operator cleanup action: it closes the dead
+    # attempt so a retry can be re-offered, but it is not itself a transition
+    # out of the dead end.  Keep the sentinel diagnosis below when it is the
+    # only command; otherwise a stop button would silently hide the integrity
+    # problem the operator still needs to see.
+    transition_commands = [
+        action
+        for action in allowed_actions
+        if action.get("kind") == "command"
+        and str(action.get("command") or "") != "stop_discussion"
+    ]
     # Dead-state sentinel: a finished (or failed) generation with no
     # candidates, no formal run to fall back on, and no offered command
     # transition would leave the question with no way forward.  A bare
     # navigation offer into the dead room does not count as a transition;
-    # healthy states (any command action, any formal run, or any registered
-    # candidate) must never report this problem.
+    # healthy states (any transition command, any formal run, or any
+    # registered candidate) must never report this problem.
     if (
         formal_phase is None
         and not formal_runs
         and not candidate_ids
-        and not any(
-            action.get("kind") == "command" for action in allowed_actions
-        )
+        and not transition_commands
         and (
             generation["lifecycle"] in {"completed", "failed"}
             or generation.get("outcome") in {"empty", "failed"}
@@ -4467,9 +4560,7 @@ def project_state_from_records(
         formal_phase is None
         and not formal_runs
         and len(candidate_ids) == 1
-        and not any(
-            action.get("kind") == "command" for action in allowed_actions
-        )
+        and not transition_commands
         and generation["lifecycle"] in {"completed", "failed"}
     ):
         # Same dead end with exactly one candidate: a "successful" attempt

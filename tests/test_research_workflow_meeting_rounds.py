@@ -959,3 +959,28 @@ def test_bound_room_round_read_cache_collapses_loads_within_block(monkeypatch):
     fifth = meetings._load_bound_room_rounds(meeting)
     assert calls == ["room-1", "room-1", "room-1", "room-1"]
     assert third == fourth == fifth == first == second
+
+
+def test_live_running_bound_round_ids_uses_heartbeat_freshness(monkeypatch):
+    """运行中但心跳过期的 bound round 是僵尸，不再代表活跃工作。"""
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(
+        meetings,
+        "_load_bound_room_rounds",
+        lambda _meeting: {
+            "fresh": {"status": "running", "heartbeatAt": now.isoformat()},
+            "zombie": {
+                "status": "running",
+                "updatedAt": (now - timedelta(minutes=10)).isoformat(),
+            },
+            "no-heartbeat": {"status": "running"},
+            "done": {"status": "completed", "heartbeatAt": now.isoformat()},
+        },
+    )
+
+    assert meetings.live_running_bound_round_ids({"chatRoomRoundIds": []}) == [
+        "fresh",
+        "no-heartbeat",
+    ]

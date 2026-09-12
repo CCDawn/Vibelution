@@ -1679,6 +1679,53 @@ def running_bound_round_ids(meeting_round: Mapping[str, Any]) -> list[str]:
     ]
 
 
+def live_running_bound_round_ids(meeting_round: Mapping[str, Any]) -> list[str]:
+    """Return bound running rounds whose executor heartbeat is still fresh.
+
+    A running-status room round renews ``heartbeatAt`` (and ``updatedAt``)
+    every ``_CHALLENGE_ROOM_HEARTBEAT_INTERVAL_SECONDS`` while a speaker call
+    runs, and the chat-room reconciler closes a running round as an orphan
+    once that renewal stops.  Only rounds still inside the heartbeat window
+    therefore prove live work that must keep blocking an explicit question
+    reset; a stale running round is a zombie the reconciler owns.
+    """
+
+    from core.web.services import chat_room_service
+
+    # Single source of truth for the liveness window: the chat-room service
+    # owns the renewal cadence and the orphan reconciler that enforces it.
+    window_seconds = float(
+        chat_room_service._CHAT_ROOM_WORK_RUN_HEARTBEAT_FRESH_SECONDS
+    )
+    now = datetime.now(timezone.utc)
+    live: list[str] = []
+    for round_id, room_round in _load_bound_room_rounds(meeting_round).items():
+        if (
+            str(room_round.get("status") or "").strip().lower()
+            not in chat_room_service.RUNNING_ROUND_STATUSES
+        ):
+            continue
+        heartbeat_at = str(
+            room_round.get("heartbeatAt") or room_round.get("updatedAt") or ""
+        ).strip()
+        if not heartbeat_at:
+            # No readable heartbeat: keep the conservative block instead of
+            # guessing death from an absent timestamp.
+            live.append(round_id)
+            continue
+        try:
+            parsed = datetime.fromisoformat(heartbeat_at.replace("Z", "+00:00"))
+        except ValueError:
+            live.append(round_id)
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        age_seconds = (now - parsed.astimezone(timezone.utc)).total_seconds()
+        if age_seconds < window_seconds:
+            live.append(round_id)
+    return live
+
+
 def record_meeting_summary_draft_error(
     team_id: str,
     meeting_round_id: str,
