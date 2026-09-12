@@ -520,6 +520,9 @@ export function ConversationView({
   regenerableAssistantMessageId,
   regenerateDisabled,
   regeneratePending,
+  onRetryTurn,
+  retryTurnDisabled,
+  retryTurnPending,
   onCancelComposerMode,
   onLoadEarlierMessages,
   onSubmit,
@@ -4675,7 +4678,24 @@ export function ConversationView({
                     </div>
                   </details>
                 </div>
-                {turnError.errorType ? <span className={styles.turnErrorType}>{turnError.errorType}</span> : null}
+                <div className={styles.turnErrorActions}>
+                  {onRetryTurn ? (
+                    <VButton
+                      type="button"
+                      contentLayout="plain"
+                      className={styles.turnErrorRetryButton}
+                      onClick={onRetryTurn}
+                      isDisabled={retryTurnDisabled}
+                      isPending={retryTurnPending}
+                      title={lang === "zh" ? "重试这一轮" : "Retry this turn"}
+                      aria-label={lang === "zh" ? "重试这一轮" : "Retry this turn"}
+                    >
+                      <RefreshCw size={12}/>
+                      <span>{lang === "zh" ? "重试" : "Retry"}</span>
+                    </VButton>
+                  ) : null}
+                  {turnError.errorType ? <span className={styles.turnErrorType}>{turnError.errorType}</span> : null}
+                </div>
               </div>
             ) : null}
           </div>

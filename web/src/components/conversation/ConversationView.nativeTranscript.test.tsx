@@ -819,6 +819,40 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(unmatchedHtml).toContain("turnErrorText");
   });
 
+  it("offers the failed-turn card one retry action and no per-attempt retry trail", () => {
+    const turnError = {
+      message: "模型服务上游暂时失败，本轮没有完成。",
+      errorType: "provider_upstream_error",
+      reasonSummary: "provider 上游服务不可用",
+      recoverable: true,
+      timestamp: "2026-09-13T01:00:00Z",
+      turnId: "turn-retry",
+      retryHistory: [
+        { attempt: 1, maxAttempts: 3, category: "server_error" },
+        { attempt: 3, maxAttempts: 3, category: "server_error" },
+      ],
+    } as React.ComponentProps<typeof ConversationView>["turnError"];
+    const userMessage = {
+      id: "user-retry",
+      role: "user",
+      timestamp: "2026-09-13T01:00:00Z",
+      turnId: "turn-retry",
+      status: "completed",
+      content: "请修复登录失败的问题。",
+    } as ConversationMessage;
+
+    const html = renderConversation([userMessage], "trace", false, {
+      turnError,
+      onRetryTurn: () => undefined,
+    });
+    expect(html).toContain("已重试 3 次");
+    expect(html).toContain('aria-label="重试这一轮"');
+    expect(html).not.toContain("第 1/3 次");
+
+    const withoutHandler = renderConversation([userMessage], "trace", false, { turnError });
+    expect(withoutHandler).not.toContain('aria-label="重试这一轮"');
+  });
+
   it("renders a plan tool call as an inline step checklist", () => {
     const planMessage: ConversationMessage = {
       id: "assistant-plan",
