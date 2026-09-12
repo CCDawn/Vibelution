@@ -115,19 +115,23 @@ function removeSupersededTransientLiveOverlays(
 /**
  * A newest-tail snapshot that no longer carries a live overlay proves the
  * server removed it; earlier-page windows and older windows prove nothing.
+ * A strictly newer ledger sequence is authoritative even when the tail shrank,
+ * because edit-resubmit truncation shortens the transcript on purpose.
  */
 function reconcileTransientLiveOverlays(
   previous: SessionDetail,
   next: SessionDetail,
   messages: ConversationMessage[],
+  authoritativeTail = false,
 ): ConversationMessage[] {
   const nextMessageIds = new Set(
     (next.messages ?? [])
       .map((message) => String(message.id || "").trim())
       .filter(Boolean),
   );
-  const coversNewestTail = next.messageWindow?.hasLater === false
-    && (next.messageWindow?.newestMessageIndex ?? 0) >= (previous.messageWindow?.newestMessageIndex ?? 0);
+  const coversNewestTail = authoritativeTail
+    || (next.messageWindow?.hasLater === false
+      && (next.messageWindow?.newestMessageIndex ?? 0) >= (previous.messageWindow?.newestMessageIndex ?? 0));
   return removeSupersededTransientLiveOverlays(messages).filter((message) => {
     if (!isTransientLiveOverlayMessage(message)) {
       return true;
@@ -367,6 +371,62 @@ function messageWindowIndex(message: ConversationMessage): number {
   return Number.isFinite(index) && index > 0 ? index : Number.POSITIVE_INFINITY;
 }
 
+function messageLedgerSeq(detail: SessionDetail | undefined): number {
+  const value = Number(detail?.ledgerSeq ?? 0);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+/**
+ * Edit-resubmit and regenerate truncate the ledger and reissue the transcript
+ * from the edit point, which shrinks the newest tail. When the incoming detail
+ * carries a strictly newer ledger sequence and claims the newest tail
+ * (`hasLater === false`), the server rebuilt the window: windowed messages it
+ * no longer carries were removed and must not be resurrected from accumulated
+ * client state. Equal or unknown sequences keep union semantics so stale or
+ * out-of-order responses cannot delete live history.
+ */
+function authoritativeTruncationTail(previous: SessionDetail, next: SessionDetail): boolean {
+  const nextWindow = next.messageWindow;
+  if (!nextWindow || nextWindow.hasLater !== false) {
+    return false;
+  }
+  if (next.provisionalTranscript === true) {
+    return false;
+  }
+  if (!(Number(nextWindow.oldestMessageIndex ?? 0) > 0)) {
+    return false;
+  }
+  const previousSeq = messageLedgerSeq(previous);
+  const nextSeq = messageLedgerSeq(next);
+  return previousSeq > 0 && nextSeq > 0 && nextSeq > previousSeq;
+}
+
+function reconcileAuthoritativeTailMessages(
+  next: SessionDetail,
+  messages: ConversationMessage[],
+  authoritativeTail: boolean,
+): ConversationMessage[] {
+  if (!authoritativeTail) {
+    return messages;
+  }
+  const nextIds = new Set(
+    (next.messages ?? [])
+      .map((message) => String(message.id || "").trim())
+      .filter(Boolean),
+  );
+  const coveredFrom = Number(next.messageWindow?.oldestMessageIndex ?? 0);
+  return messages.filter((message) => {
+    const id = String(message.id || "").trim();
+    if (!id || nextIds.has(id)) {
+      return true;
+    }
+    const index = messageWindowIndex(message);
+    // Messages outside the covered range are older pages the snapshot never
+    // claimed; non-windowed entries (optimistic shells) settle elsewhere.
+    return !Number.isFinite(index) || index < coveredFrom;
+  });
+}
+
 function mergeConversationMessageWindows(
   previousMessages: ConversationMessage[],
   nextMessages: ConversationMessage[],
@@ -397,20 +457,27 @@ function mergedMessageWindow(
   previous: SessionMessageWindow,
   next: SessionMessageWindow,
   messages: ConversationMessage[],
+  options: { authoritativeTotal?: boolean } = {},
 ): SessionMessageWindow {
-  const totalMessages = Math.max(previous.totalMessages || 0, next.totalMessages || 0);
   const finiteIndexes = messages
     .map(messageWindowIndex)
     .filter((index) => Number.isFinite(index));
+  // A strictly newer authoritative tail owns the transcript length even when
+  // it shrank; otherwise keep the union floor so windowed GETs accumulate.
+  const totalMessages = options.authoritativeTotal
+    ? Math.max(next.totalMessages || 0, finiteIndexes.length ? Math.max(...finiteIndexes) : 0)
+    : Math.max(previous.totalMessages || 0, next.totalMessages || 0);
   const oldestCandidates = [
     ...finiteIndexes,
-    previous.oldestMessageIndex || 0,
-    next.oldestMessageIndex || 0,
+    ...(options.authoritativeTotal
+      ? [next.oldestMessageIndex || 0]
+      : [previous.oldestMessageIndex || 0, next.oldestMessageIndex || 0]),
   ].filter((index) => index > 0);
   const newestCandidates = [
     ...finiteIndexes,
-    previous.newestMessageIndex || 0,
-    next.newestMessageIndex || 0,
+    ...(options.authoritativeTotal
+      ? [next.newestMessageIndex || 0]
+      : [previous.newestMessageIndex || 0, next.newestMessageIndex || 0]),
   ].filter((index) => index > 0);
   const oldestMessageIndex = finiteIndexes.length
     ? Math.min(...oldestCandidates)
@@ -465,10 +532,16 @@ export function mergeSessionDetailMessageWindow(
       ? { ...merged, provisionalTranscript: true }
       : { ...merged, provisionalTranscript: undefined };
   }
+  const authoritativeTail = authoritativeTruncationTail(previous, merged);
   const messages = reconcileTransientLiveOverlays(
     previous,
     merged,
-    mergeConversationMessageWindows(previous.messages ?? [], merged.messages ?? []),
+    reconcileAuthoritativeTailMessages(
+      merged,
+      mergeConversationMessageWindows(previous.messages ?? [], merged.messages ?? []),
+      authoritativeTail,
+    ),
+    authoritativeTail,
   );
   const base = merged.messageWindow.hasLater ? previous : merged;
   return {
@@ -476,7 +549,9 @@ export function mergeSessionDetailMessageWindow(
     ...merged,
     messages,
     provisionalTranscript,
-    messageWindow: mergedMessageWindow(previous.messageWindow, merged.messageWindow, messages),
+    messageWindow: mergedMessageWindow(previous.messageWindow, merged.messageWindow, messages, {
+      authoritativeTotal: authoritativeTail,
+    }),
   };
 }
 
