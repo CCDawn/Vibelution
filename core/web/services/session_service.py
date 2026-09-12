@@ -74,6 +74,11 @@ from core.chat.conversation_ledger import (
     load_conversation_preview_slice,
     rewrite_conversation_events,
 )
+from core.chat.conversation_branches import (
+    analyze_conversation_branches,
+    resolve_active_user_node_id,
+    visible_messages_with_branch_info,
+)
 from core.chat.turn_journal import EVENT_ASSISTANT_ITEM_COMMITTED
 from core.chat.context_assembler import assemble_conversation_context
 from core.chat.skill_registry import build_skill_runtime_context, skill_descriptor_for_log
@@ -202,10 +207,12 @@ from .session.live_output import (
     state_from_checkpoint_payload as _state_from_checkpoint_payload,
     write_session_live_output_checkpoint as _write_session_live_output_checkpoint_core,
 )
+from .session.branch_head import switch_session_head
 from .session import journal_bridge as _journal_bridge
 from .session.submit import (
     _accepted_session_turn_payload,
     _resolve_user_message_content,
+    _session_submit_admit_lock,
     edit_and_resubmit_session_message,
     regenerate_session_message,
     submit_session_guidance,
@@ -961,6 +968,7 @@ from core.web.services.session.projection import (
     _session_agent_status_payload,
     _ledger_latest_preview_messages_for_session,
     _ledger_visible_messages_for_session,
+    _session_branch_metadata,
     _normalize_child_handoff_context,
     _normalize_child_result_card,
     _load_conversations,
