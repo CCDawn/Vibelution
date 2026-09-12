@@ -25,6 +25,8 @@ export type MemoryContentBrowsePanelCopy = {
   browseBack: string;
   browseSelectCard: string;
   browseEmptyCards: string;
+  /** Optional guidance shown with the empty card grid (for example: where to open team knowledge bases). */
+  browseEmptyCardsHint?: string;
   browseEmptyEntries: string;
   noContent: string;
   searchPlaceholder: string;
@@ -181,7 +183,9 @@ export function MemoryContentBrowsePanel({
               </VSection>
             ) : null}
             {!loading && !cards.length && !errorText ? (
-              <VStateSurface tone="empty" title={copy.browseEmptyCards} />
+              <VStateSurface tone="empty" title={copy.browseEmptyCards}>
+                {copy.browseEmptyCardsHint || undefined}
+              </VStateSurface>
             ) : null}
             {cardGroups.map((group) => {
               const collapsible = collapsibleGroupTitles.includes(group.title) && group.items.length > 0;
