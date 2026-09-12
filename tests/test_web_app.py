@@ -130,7 +130,7 @@ def _assert_context_prepare_overlay(message: dict) -> None:
     assert message["status"] == "running"
     assert any(
         item.get("type") == "status"
-        and item.get("code") == "context_prepare"
+        and item.get("code") == "working"
         and item.get("text") == CONTEXT_PREPARE_LIVE_MESSAGE
         for item in message["turnItems"]
     )
