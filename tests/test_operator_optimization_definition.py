@@ -25,6 +25,27 @@ def test_baseline_definition_has_no_hypothesis_prerequisite():
     assert not definition.edges
 
 
+def test_definition_resolution_preserves_explicit_definition_without_identity(monkeypatch):
+    from dataclasses import replace
+    from core.web.services.team_workflow.research_runtime import service
+
+    definition = replace(build_operator_definition(), label="Frozen operator experiment")
+    registered = []
+    identity = object()
+
+    def register(value):
+        registered.append(value)
+        return identity
+
+    monkeypatch.setattr(service, "register_or_resolve", register)
+    resolved, resolved_identity = service._definition_meta_from(
+        definition.workflowId, definition=definition,
+    )
+    assert resolved is definition
+    assert registered == [definition]
+    assert resolved_identity is identity
+
+
 def test_operator_artifacts_keep_protocol_candidate_and_plan_kinds_distinct():
     from core.research.workflow.operator_optimization_definition import OPERATOR_ARTIFACT_KINDS
 
