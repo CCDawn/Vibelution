@@ -5942,7 +5942,7 @@ def test_shutdown_stops_queued_same_agent_turn_before_it_starts(tmp_path, monkey
 def test_runtime_summary_exposes_parallel_chat_turn_active_items(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_manager_snapshot", lambda: {})
     alpha = session_service.create_chat_session(title="Alpha Agent")
@@ -6007,7 +6007,7 @@ def test_runtime_summary_exposes_queued_chat_turn_active_item(tmp_path, monkeypa
         "build_agent_context",
         lambda agent_id, **kwargs: SimpleNamespace(memory_policy={}, context_block="", timings={}),
     )
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_manager_snapshot", lambda: {})
     _install_session_turn_scheduler(monkeypatch, max_active_per_agent=1)
@@ -6355,7 +6355,7 @@ def test_run_session_turn_records_agent_started_scene_event(tmp_path, monkeypatc
 
 
 def test_runtime_summary_exposes_work_run_kinds(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     self_evolution_control_service.persist_manager_run_snapshot(
         "self",

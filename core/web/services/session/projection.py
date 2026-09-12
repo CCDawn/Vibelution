@@ -322,8 +322,13 @@ def get_active_session_detail() -> dict | None:
     return s.get_session_detail(active_id)
 
 
-def get_active_session_summary() -> dict | None:
-    """Return the current active conversation summary for shell-level polling."""
+def get_active_session_summary(*, include_runtime_metrics: bool = False) -> dict | None:
+    """Return the current active conversation summary for shell-level polling.
+
+    ``include_runtime_metrics`` adds live usage/cache/context projections
+    (``runtimeMetrics``) for consumers that must not fall back to the legacy
+    CLI-written runtime snapshot when an active session exists.
+    """
     s = _service()
 
     agent_by_id = s._agent_lookup_for_conversations()
@@ -353,7 +358,65 @@ def get_active_session_summary() -> dict | None:
     if target is None:
         return None
     target = s._with_direct_session_agent_for_summary(target, agent_by_id=agent_by_id)
-    return s._build_session_summary(target, hydrate_agent=False)
+    return s._build_session_summary(
+        target,
+        hydrate_agent=False,
+        include_runtime_metrics=include_runtime_metrics,
+    )
+
+
+def _session_runtime_metrics(
+    conversation: dict[str, Any],
+    messages: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """Live usage/cache/context projections for one session conversation."""
+
+    s = _service()
+    usage_messages = list(messages or [])
+    context_usage = s._build_session_context_usage(conversation, usage_messages)
+    llm_usage = s._session_last_llm_usage(usage_messages)
+    stored_last_cache_composition = s._normalize_session_cache_composition(
+        conversation.get("lastCacheComposition") or conversation.get("last_cache_composition")
+    )
+    if (
+        llm_usage is None
+        and stored_last_cache_composition is not None
+        and str(stored_last_cache_composition.get("source") or "").strip() == "not_called"
+    ):
+        llm_usage = s._normalize_turn_llm_usage(
+            {
+                "source": "not_called",
+                "recordedAt": str(stored_last_cache_composition.get("updatedAt") or "").strip(),
+            }
+        )
+    cache_usage = s._build_session_cache_usage(llm_usage, usage_messages)
+    live_context_composition = s._current_session_live_context_composition(conversation["id"])
+    last_context_composition = live_context_composition or s._normalize_session_context_composition(
+        conversation.get("lastContextComposition") or conversation.get("last_context_composition")
+    )
+    last_cache_composition = (
+        s._build_session_cache_composition(
+            str(live_context_composition.get("turnId") or "").strip(),
+            llm_usage,
+            context_composition=last_context_composition,
+            average_cache=cache_usage,
+        )
+        if live_context_composition is not None
+        else s._session_last_cache_composition(
+            conversation,
+            llm_usage=llm_usage,
+            context_composition=last_context_composition,
+            average_cache=cache_usage,
+            normalized_last_cache_composition=stored_last_cache_composition,
+        )
+    )
+    return {
+        "contextUsage": context_usage,
+        "cacheUsage": cache_usage,
+        "llmUsage": llm_usage,
+        "lastContextComposition": last_context_composition,
+        "lastCacheComposition": last_cache_composition,
+    }
 
 
 def _build_session_detail(
@@ -434,45 +497,14 @@ def _build_session_detail_from_summary(
     if not detail_messages:
         detail_messages = s._normalize_messages(conversation["id"], conversation.get("messages") or [])
     usage_messages = stat_messages or detail_messages
-    context_usage = s._build_session_context_usage(conversation, usage_messages)
-    llm_usage = s._session_last_llm_usage(usage_messages)
-    stored_last_cache_composition = s._normalize_session_cache_composition(
-        conversation.get("lastCacheComposition") or conversation.get("last_cache_composition")
-    )
-    if (
-        llm_usage is None
-        and stored_last_cache_composition is not None
-        and str(stored_last_cache_composition.get("source") or "").strip() == "not_called"
-    ):
-        llm_usage = s._normalize_turn_llm_usage(
-            {
-                "source": "not_called",
-                "recordedAt": str(stored_last_cache_composition.get("updatedAt") or "").strip(),
-            }
-        )
-    cache_usage = s._build_session_cache_usage(llm_usage, usage_messages)
-    live_context_composition = s._current_session_live_context_composition(conversation["id"])
-    last_context_composition = live_context_composition or s._normalize_session_context_composition(
-        conversation.get("lastContextComposition") or conversation.get("last_context_composition")
-    )
+    runtime_metrics = s._session_runtime_metrics(conversation, usage_messages)
+    context_usage = runtime_metrics["contextUsage"]
+    cache_usage = runtime_metrics["cacheUsage"]
+    llm_usage = runtime_metrics["llmUsage"]
+    last_context_composition = runtime_metrics["lastContextComposition"]
+    last_cache_composition = runtime_metrics["lastCacheComposition"]
     last_llm_payload_trace = s._current_session_live_llm_payload_trace(conversation["id"]) or s._normalize_session_llm_payload_trace(
         conversation.get("lastLlmPayloadTrace") or conversation.get("last_llm_payload_trace")
-    )
-    last_cache_composition = (
-        s._build_session_cache_composition(
-            str(live_context_composition.get("turnId") or "").strip(),
-            llm_usage,
-            context_composition=last_context_composition,
-            average_cache=cache_usage,
-        )
-        if live_context_composition is not None
-        else s._session_last_cache_composition(
-            conversation,
-            llm_usage=llm_usage,
-            context_composition=last_context_composition,
-            average_cache=cache_usage,
-            normalized_last_cache_composition=stored_last_cache_composition,
-        )
     )
     agent_available = s._session_agent_is_available(summary)
     available_agent_id = summary.get("agentId") or "" if agent_available else ""
@@ -556,6 +588,7 @@ def _build_session_summary(
     hydrate_agent: bool = True,
     phase_timings: dict[str, int] | None = None,
     agent_inbox_pending_count_cache: dict[str, int] | None = None,
+    include_runtime_metrics: bool = False,
 ) -> dict[str, Any]:
     s = _service()
     status = s._conversation_phase(conversation["id"], conversation)
@@ -659,6 +692,11 @@ def _build_session_summary(
     session_source_ref = s._source_authority_ref("session", session_id)
     session_projection_edit = s._projection_edit_contract("session", session_id)
     agent_source_ref = s._source_authority_ref("agent", agent_id) if agent_id else None
+    runtime_metrics = (
+        s._session_runtime_metrics(conversation, normalized_summary_messages)
+        if include_runtime_metrics
+        else None
+    )
     return {
         "id": session_id,
         "title": display_title,
@@ -714,6 +752,7 @@ def _build_session_summary(
         "sourceRef": session_source_ref,
         "projectionEdit": session_projection_edit,
         "agentSourceRef": agent_source_ref,
+        **({"runtimeMetrics": runtime_metrics} if runtime_metrics is not None else {}),
     }
 
 
