@@ -15,6 +15,39 @@ default:
     - "No focused rule matched; use the runner smoke as a small signal and decide broader validation from the changed surface."
 
 rules:
+  - id: operator-optimization
+    description: "Independent operator contracts, CUDA admission, canonical artifacts and workflow bridges."
+    executionLayers:
+      - "focused"
+    paths:
+      - "core/research/operator_optimization/**"
+      - "core/research/workflow/operator_optimization_definition.py"
+      - "core/research/workflow/definitions/operator-optimization*.json"
+      - "core/web/services/team_workflow/operator_optimization/**"
+      - "core/web/services/team_workflow/research_runtime/readiness/operator_optimization.py"
+      - "core/web/routes/team_workflows/operator_optimization.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_operator_optimization_contract.py tests/test_operator_optimization_definition.py tests/test_operator_optimization_store.py tests/test_operator_optimization_baseline.py tests/test_operator_optimization_rounds.py tests/test_operator_optimization_readiness.py tests/test_operator_optimization_discussion.py tests/test_operator_optimization_discussion_runtime.py tests/test_operator_optimization_budget.py tests/test_operator_optimization_dispatch.py tests/test_operator_optimization_executor.py tests/test_operator_optimization_evaluation.py tests/test_operator_optimization_api.py tests/test_operator_optimization_lifecycle.py tests/test_operator_optimization_plumbing.py -q"
+  - id: operator-workflow-bridges
+    description: "Validate the shared creation, binding and artifact paths used by independent operator runs."
+    executionLayers:
+      - "focused"
+    paths:
+      - "core/research/workflow/contracts/run_input.py"
+      - "core/web/services/team_workflow/research_runtime/run_creation.py"
+      - "core/web/services/team_workflow/research_runtime/service.py"
+      - "core/web/services/team_workflow/research_runtime/binding_config.py"
+      - "core/web/services/team_workflow/research_runtime/artifact_readback_registry.py"
+      - "core/web/services/team_workflow/research_runtime/workflow_artifact_store.py"
+      - "core/web/services/team_workflow/research_runtime/real_readiness_context.py"
+      - "core/web/services/team_workflow/research_runtime/readiness/common.py"
+      - "core/web/services/team_workflow/research_runtime/readiness/service.py"
+      - "core/web/services/team_workflow/research_runtime/adapter_dispatch_worker.py"
+      - "core/web/services/team_workflow/research_runtime/block_projection.py"
+      - "core/web/services/team_workflow/research_runtime/adapters/domain_adapters.py"
+      - "core/web/services/team_workflow/research_runtime/real_domain_ports.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_operator_optimization_definition.py tests/test_operator_optimization_lifecycle.py tests/test_operator_optimization_plumbing.py tests/test_operator_optimization_readiness.py tests/test_knowledge_command_routes.py tests/test_research_workflow_p0_correctness.py tests/test_research_workflow_t51_operator_http_bind.py tests/test_research_workflow_ux_bugfixes.py tests/test_research_workflow_formal_handoff.py tests/test_research_workflow_binding_config_ssot.py tests/test_research_workflow_t51_artifact_readback.py tests/test_research_workflow_adapter_idempotency.py -q"
   - id: retired-challenge-cup-tests
     description: "Intentionally removed 2.x and stage-one suites stay owned without weakening generic missing-file detection."
     allowMissingPaths: true

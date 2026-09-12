@@ -32,6 +32,11 @@ const STREAMING_STATUS_CONTENT_MARKERS = [
   "llm call is starting",
   "thinking, received reasoning",
   "reasoning may appear later",
+  "正在处理...",
+  "等待模型响应...",
+  "排队中，等待空闲槽位...",
+  "waiting for the model...",
+  "queued; waiting for a free slot",
 ];
 
 const INTERNAL_STREAMING_STATUS_STAGES = new Set([
@@ -44,6 +49,8 @@ const INTERNAL_STREAMING_STATUS_STAGES = new Set([
   "model_retry",
   "retrying",
   "followup_prepare",
+  "working",
+  "thinking",
 ]);
 
 function normalizeInternalStreamingStatusText(content: string) {

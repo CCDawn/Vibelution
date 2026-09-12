@@ -65,7 +65,8 @@ function isStreamingRuntimeStatusCarrier(message: ConversationMessage) {
     || kind === "session_live_overlay"
     || kind === "session_active_turn_layer"
     || stage === "model_thinking"
-    || stage === "model_request";
+    || stage === "model_request"
+    || stage === "thinking";
 }
 
 export function isTransientReasoningStatusText(text: unknown) {

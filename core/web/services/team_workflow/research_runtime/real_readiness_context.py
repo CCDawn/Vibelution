@@ -75,16 +75,46 @@ class RealDomainReadinessContext:
 
     # ---------------------------------------------------- protocol methods
 
+    def operator_campaign_state(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
+        from ..operator_optimization.store import read_campaign
+        from ..operator_optimization.budget import budget_summary
+
+        snapshot = self._input_snapshot(run_id)
+        objective = snapshot.get("researchObjectiveContract") or {}
+        if objective.get("kind") != "operator_optimization" or snapshot.get("teamId") != team_id:
+            return None
+        try:
+            campaign = read_campaign(team_id, objective["researchProjectId"], objective["optimizationCampaignId"])
+        except (FileNotFoundError, ValueError):
+            return None
+        # Environment/protocol must be pinned by a verified setup, never inferred
+        # from an environment label or client-supplied boolean.
+        from .artifact_readback_registry import load_scoped_artifact_payload
+        environment = load_scoped_artifact_payload("operator_environment", team_id=team_id,
+            authority_run_id=run_id, workflow_run_id=run_id)
+        protocol = load_scoped_artifact_payload("operator_measurement_protocol", team_id=team_id,
+            authority_run_id=run_id, workflow_run_id=run_id)
+        expected_protocol_hash = (snapshot.get("evaluationContract") or {}).get("protocolArtifactHash")
+        return {"campaign": campaign.model_dump(mode="json"),
+                "budgetSummary": budget_summary(campaign),
+                "environmentVerified": bool(environment and canonical_sha256(environment) == snapshot.get("environmentSnapshotRef")),
+                "protocolFrozen": bool(protocol and canonical_sha256(protocol) == expected_protocol_hash)}
+
     def domain_revision_vector(self, team_id: str, run_id: str) -> Mapping[str, str]:
         override = self._query("domain_revision_vector", team_id, run_id)
         if override is not None:
             return dict(override)
-        return readiness_providers.build_domain_revision_vector(
+        vector = dict(readiness_providers.build_domain_revision_vector(
             team_id,
             run_id,
             input_snapshot=self._input_snapshot(run_id),
             ledger_store=self._store,
-        )
+        ))
+        objective = self._input_snapshot(run_id).get("researchObjectiveContract") or {}
+        if objective.get("kind") == "operator_optimization":
+            state = self.operator_campaign_state(team_id, run_id)
+            vector["operatorCampaign"] = str(state["campaign"]["revision"]) if state else "missing"
+        return vector
 
     def question_snapshot(
         self,

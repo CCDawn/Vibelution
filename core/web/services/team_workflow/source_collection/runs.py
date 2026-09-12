@@ -370,12 +370,25 @@ def _assert_project_source_search_not_active(team_id: str, run_ids: set[str]) ->
 
 def _delete_project_source_collection_runs(team_id: str, run_ids: set[str]) -> list[str]:
     s = _service()
+    from core.web.services.team_workflow.research_projects import (
+        ResearchProjectNotFoundError,
+    )
+
     removed_run_ids: list[str] = []
     for run_id in sorted(run_ids):
         s._source_collection_work_run_store().delete_snapshot(s.SOURCE_COLLECTION_WORK_RUN_KIND, run_id)
-        artifacts = s._source_collection_storage_artifact_paths(team_id, run_id)
-        run_directory = artifacts["runDirectory"]
-        if run_directory.exists():
+        try:
+            run_directory = s._source_collection_storage_artifact_paths(
+                team_id, run_id
+            )["runDirectory"]
+        except ResearchProjectNotFoundError:
+            # The run's owner project was already retired (question cleanup):
+            # its isolated workspace — and every run directory inside it — is
+            # gone.  The processing-run authority below is still removed so the
+            # question reset can finish instead of being stuck forever on
+            # orphaned lineage.
+            run_directory = None
+        if run_directory is not None and run_directory.exists():
             shutil.rmtree(run_directory)
         s.data_processing_service.delete_processing_run(run_id)
         removed_run_ids.append(run_id)

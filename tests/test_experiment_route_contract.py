@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from core.web.routes.team_workflows._models import (
+    ExperimentPlanCreatePayload,
+    ExperimentFullRunExecutionPayload,
+    ExperimentFullRunResultPayload,
+)
+
 from core.web.routes.team_workflows.experiment_models import (
     CandidateStoreListResponse,
     CandidateStoreValidationResponse,
@@ -133,3 +139,13 @@ def test_experiment_planning_status_next_actions_accepts_service_string_list() -
 def test_experiment_write_catch_all_remains_empty_shell() -> None:
     properties = set(ExperimentRouteResponse.model_json_schema().get("properties") or {})
     assert properties == set()
+
+
+def test_experiment_write_requests_preserve_project_identity() -> None:
+    for model in (
+        ExperimentPlanCreatePayload,
+        ExperimentFullRunExecutionPayload,
+        ExperimentFullRunResultPayload,
+    ):
+        payload = model.model_validate({"researchProjectId": "project-original"})
+        assert payload.model_dump()["researchProjectId"] == "project-original"

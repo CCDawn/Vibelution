@@ -12,6 +12,7 @@ from typing import Any
 
 from core.runtime_manager import formal_run_registry
 from core.web.services.team_workflow import experiment_kernel as _experiment_kernel
+from .scope import resolve_experiment_plan_project
 
 _FORMAL_EXECUTION_PATH_KEYS = ("pythonExecutable", "dataRoot", "outputRoot")
 _FORMAL_ENV_OPTIONAL_INTS = (
@@ -167,9 +168,12 @@ def prepare_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
     normalized_plan_id = s._normalize_required_id(plan_id, "Experiment plan id is required.")
     team = s.team_service.get_team(normalized_team_id)
     request_payload = payload if isinstance(payload, dict) else {}
+    research_project_id = resolve_experiment_plan_project(
+        normalized_team_id, normalized_plan_id, request_payload.get("researchProjectId", ""),
+    )
     recorded_by_agent = s._trim_text(request_payload.get("recordedByAgent"), max_length=160) or s.DEFAULT_OWNER_AGENT_ID
     with s._WORKFLOW_LOCK:
-        plan_store = s._load_experiment_plan_store(normalized_team_id)
+        plan_store = s._load_experiment_plan_store(normalized_team_id, research_project_id)
         plan = s._find_experiment_plan(plan_store, normalized_plan_id)
         if plan is None:
             raise s.TeamWorkflowOrchestrationError("Experiment plan not found.")
@@ -199,6 +203,7 @@ def prepare_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
         **preparation,
         "preparationId": s._new_record_id("full-run-preparation"),
         "planId": normalized_plan_id,
+        "researchProjectId": research_project_id,
         "planRevision": s._experiment_plan_revision(plan_snapshot),
         "adapterId": adapter_id,
         "methodConfigDigest": _experiment_kernel._experiment_method_config_digest(plan_snapshot),
@@ -208,7 +213,7 @@ def prepare_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
         "executionConfig": execution_config,
     }
     with s._WORKFLOW_LOCK:
-        plan_store = s._load_experiment_plan_store(normalized_team_id)
+        plan_store = s._load_experiment_plan_store(normalized_team_id, research_project_id)
         plan = s._find_experiment_plan(plan_store, normalized_plan_id)
         if plan is None:
             raise s.TeamWorkflowOrchestrationError("Experiment plan not found.")
@@ -220,14 +225,15 @@ def prepare_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
         plan["updatedAt"] = now
         plan_store["activePlanId"] = plan["planId"]
         plan_store["updatedAt"] = now
-        s._write_json(s._experiment_plan_store_path(normalized_team_id), plan_store)
-        workflow = s._load_or_create_workflow(normalized_team_id)
+        s._write_json(s._experiment_plan_store_path(normalized_team_id, research_project_id), plan_store)
+        workflow = s._load_or_create_workflow(normalized_team_id, research_project_id=research_project_id)
     s._record_workflow_event(
         "experiment.full_run_prepared",
         normalized_team_id,
         fields={
             "workflowId": workflow["workflowId"],
             "planId": normalized_plan_id,
+            "researchProjectId": research_project_id,
             "preparationId": preparation_record["preparationId"],
             "adapter": adapter_id,
             "seedCount": preparation.get("seedCount"),
@@ -281,9 +287,12 @@ def execute_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
     normalized_plan_id = s._normalize_required_id(plan_id, "Experiment plan id is required.")
     team = s.team_service.get_team(normalized_team_id)
     request_payload = payload if isinstance(payload, dict) else {}
+    research_project_id = resolve_experiment_plan_project(
+        normalized_team_id, normalized_plan_id, request_payload.get("researchProjectId", ""),
+    )
     recorded_by_agent = s._trim_text(request_payload.get("recordedByAgent"), max_length=160) or s.DEFAULT_OWNER_AGENT_ID
     with s._WORKFLOW_LOCK:
-        plan_store = s._load_experiment_plan_store(normalized_team_id)
+        plan_store = s._load_experiment_plan_store(normalized_team_id, research_project_id)
         plan = s._find_experiment_plan(plan_store, normalized_plan_id)
         if plan is None:
             raise s.TeamWorkflowOrchestrationError("Experiment plan not found.")
@@ -309,7 +318,7 @@ def execute_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
     started_at = s.utc_now_iso()
     execution_id = s._new_record_id("full-run-execution")
     with s._WORKFLOW_LOCK:
-        plan_store = s._load_experiment_plan_store(normalized_team_id)
+        plan_store = s._load_experiment_plan_store(normalized_team_id, research_project_id)
         plan = s._find_experiment_plan(plan_store, normalized_plan_id)
         if plan is None:
             raise s.TeamWorkflowOrchestrationError("Experiment plan not found.")
@@ -342,6 +351,7 @@ def execute_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
             "executionId": execution_id,
             "status": "running",
             "planId": normalized_plan_id,
+            "researchProjectId": research_project_id,
             "planRevision": plan_revision,
             "adapterId": adapter_id,
             "preparationId": str((preparation_snapshot or {}).get("preparationId") or ""),
@@ -354,14 +364,15 @@ def execute_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
         plan["updatedAt"] = started_at
         plan_store["activePlanId"] = plan["planId"]
         plan_store["updatedAt"] = started_at
-        s._write_json(s._experiment_plan_store_path(normalized_team_id), plan_store)
-        workflow = s._load_or_create_workflow(normalized_team_id)
+        s._write_json(s._experiment_plan_store_path(normalized_team_id, research_project_id), plan_store)
+        workflow = s._load_or_create_workflow(normalized_team_id, research_project_id=research_project_id)
     s._record_workflow_event(
         "experiment.full_run_started",
         normalized_team_id,
         fields={
             "workflowId": workflow["workflowId"],
             "planId": normalized_plan_id,
+            "researchProjectId": research_project_id,
             "executionId": execution_id,
             "adapter": adapter_id,
             "recordedByAgent": recorded_by_agent,
@@ -380,6 +391,7 @@ def execute_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
         s._record_formal_full_run_execution(
             normalized_team_id,
             normalized_plan_id,
+            research_project_id=research_project_id,
             execution_id=execution_id,
             adapter_id=adapter_id,
             recorded_by_agent=recorded_by_agent,
@@ -398,6 +410,7 @@ def execute_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
         execution_record = s._record_formal_full_run_execution(
             normalized_team_id,
             normalized_plan_id,
+            research_project_id=research_project_id,
             execution_id=execution_id,
             adapter_id=adapter_id,
             recorded_by_agent=recorded_by_agent,
@@ -419,11 +432,11 @@ def execute_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
         raise
     formal_run_registry.complete_formal_run(run_id=execution_id, status="completed")
     with s._WORKFLOW_LOCK:
-        plan_store = s._load_experiment_plan_store(normalized_team_id)
+        plan_store = s._load_experiment_plan_store(normalized_team_id, research_project_id)
         plan = s._find_experiment_plan(plan_store, normalized_plan_id)
         if plan is None:
             raise s.TeamWorkflowOrchestrationError("Experiment plan not found.")
-        workflow = s._load_or_create_workflow(normalized_team_id)
+        workflow = s._load_or_create_workflow(normalized_team_id, research_project_id=research_project_id)
     return {
         "execution": execution_record,
         "plan": plan,
@@ -448,6 +461,9 @@ def register_experiment_full_run_result(team_id: str, plan_id: str, payload: dic
     normalized_plan_id = s._normalize_required_id(plan_id, "Experiment plan id is required.")
     team = s.team_service.get_team(normalized_team_id)
     request_payload = payload if isinstance(payload, dict) else {}
+    research_project_id = resolve_experiment_plan_project(
+        normalized_team_id, normalized_plan_id, request_payload.get("researchProjectId", ""),
+    )
     recorded_by_agent = s._trim_text(request_payload.get("recordedByAgent"), max_length=160) or s.DEFAULT_OWNER_AGENT_ID
     evidence_kind = s._trim_text(request_payload.get("evidenceKind"), max_length=80).lower()
     if evidence_kind not in {
@@ -458,11 +474,11 @@ def register_experiment_full_run_result(team_id: str, plan_id: str, payload: dic
             "Full-run result evidenceKind must be explicit: canonical_runner or external_manual."
         )
     with s._WORKFLOW_LOCK:
-        workflow = s._load_or_create_workflow(normalized_team_id)
-        stage_store = s._load_stage_round_store(normalized_team_id)
+        workflow = s._load_or_create_workflow(normalized_team_id, research_project_id=research_project_id)
+        stage_store = s._load_stage_round_store(normalized_team_id, research_project_id)
         rounds = s._stage_rounds(stage_store)
-        candidate_store = s._load_candidate_store(normalized_team_id)
-        plan_store = s._load_experiment_plan_store(normalized_team_id)
+        candidate_store = s._load_candidate_store(normalized_team_id, research_project_id=research_project_id)
+        plan_store = s._load_experiment_plan_store(normalized_team_id, research_project_id)
         plan = s._find_experiment_plan(plan_store, normalized_plan_id)
         if plan is None:
             raise s.TeamWorkflowOrchestrationError("Experiment plan not found.")
@@ -528,13 +544,13 @@ def register_experiment_full_run_result(team_id: str, plan_id: str, payload: dic
         s._refresh_hypothesis_progress(plan)
         plan_store["activePlanId"] = plan["planId"]
         plan_store["updatedAt"] = full_run_result["recordedAt"]
-        s._write_json(s._experiment_plan_store_path(normalized_team_id), plan_store)
+        s._write_json(s._experiment_plan_store_path(normalized_team_id, research_project_id), plan_store)
         stage_round = s._find_stage_round(rounds, str(plan.get("stageRoundId") or ""))
         if stage_round is not None:
             stage_round["experimentPlanRef"] = {
                 "planId": plan["planId"],
                 "status": plan["status"],
-                "storagePath": s._relative_path(s._experiment_plan_store_path(normalized_team_id)),
+                "storagePath": s._relative_path(s._experiment_plan_store_path(normalized_team_id, research_project_id)),
                 "fullRunResultRef": {
                     "fullRunResultId": full_run_result["fullRunResultId"],
                     "status": full_run_result["status"],
@@ -577,7 +593,7 @@ def register_experiment_full_run_result(team_id: str, plan_id: str, payload: dic
             stage_round["updatedAt"] = full_run_result["recordedAt"]
             stage_store["rounds"] = rounds
             stage_store["updatedAt"] = full_run_result["recordedAt"]
-            s._write_json(s._stage_round_store_path(normalized_team_id), stage_store)
+            s._write_json(s._stage_round_store_path(normalized_team_id, research_project_id), stage_store)
         workflow["updatedAt"] = full_run_result["recordedAt"]
         workflow["activeWorkflowItems"] = s._upsert_active_item(
             workflow.get("activeWorkflowItems"),
@@ -586,9 +602,9 @@ def register_experiment_full_run_result(team_id: str, plan_id: str, payload: dic
             status="full_run_result_registered",
             transfer_id="",
         )
-        s._write_json(s._workflow_path(normalized_team_id), workflow)
+        s._write_json(s._workflow_path(normalized_team_id, research_project_id), workflow)
         status_payload = s._experiment_planning_status(normalized_team_id, rounds, candidate_store, plan_store)
-        stage_round_status = s.get_research_stage_round_status(normalized_team_id)
+        stage_round_status = s.get_research_stage_round_status(normalized_team_id, research_project_id)
     s._record_workflow_event(
         "experiment_plan.full_run_result_registered",
         normalized_team_id,

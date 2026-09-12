@@ -587,8 +587,13 @@ def create_run(
         definition = workflow_definition
         identity = register_or_resolve(definition)
     else:
-        definition = build_challenge_cup_workflow_definition()
-        identity = register_or_resolve(definition)
+        from .service import _definition_meta_from
+        definition, identity = _definition_meta_from(workflow_id)
+    if definition.workflowId != workflow_id:
+        raise ResearchWorkflowError("Workflow definition identity mismatch", code="invalid_run_input")
+    scope = run_input.get("researchScopeEnvelope") or {}
+    if scope.get("workflow") != workflow_id:
+        raise ResearchWorkflowError("Run scope workflow identity mismatch", code="invalid_run_input")
     workflow_version_id = identity.workflowVersionId
     fingerprints = _create_request_fingerprints(run_input)
     fingerprint = fingerprints[0]
@@ -643,10 +648,7 @@ def create_run(
     snapshot_dict["createInputFingerprint"] = fingerprint
     snapshot_dict["createIdempotencyKey"] = idempotency_key
     snapshot_dict["checkpointId"] = checkpoint_id
-    first_agent = next(
-        (node.nodeId for node in definition.nodes if node.actorKind is ActorKind.AGENT),
-        None,
-    )
+    entry_node = definition.nodes[0].nodeId
     binding_set_id = str(
         (binding_payloads[0] if binding_payloads else {}).get("snapshotId") or f"binding-{run_id}"
     )
@@ -681,7 +683,7 @@ def create_run(
         input_snapshot_hash=input_snapshot.snapshotHash,
         safety_limits_json=json.dumps(dict(run_input.get("safetyLimits") or {}), ensure_ascii=False),
         binding_snapshot_set_id=binding_set_id,
-        active_node_id=first_agent,
+        active_node_id=entry_node,
         parent_run_id=None,
         forked_from_checkpoint_id=None,
         structure_hash=definition.structureHash,

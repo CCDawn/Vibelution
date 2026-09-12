@@ -453,6 +453,8 @@ export function isInternalPipelineOperation(operation: AgentMessageOperation) {
     "context_prepare",
     "agent_prepare",
     "model_request",
+    "working",
+    "thinking",
     "prepare context",
     "bind agent",
     "request model",

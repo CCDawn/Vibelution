@@ -1919,6 +1919,7 @@ _SESSION_TURN_THINKING_STAGES = {
     "context_prepare",
     "prepare",
     "request",
+    "working",
 }
 
 

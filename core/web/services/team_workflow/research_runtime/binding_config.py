@@ -15,8 +15,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from core.research.workflow.bindings import node_spec
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.operator_optimization_definition import (
+    OPERATOR_BASELINE_WORKFLOW_ID, OPERATOR_WORKFLOW_ID, build_operator_definition,
+)
 from core.research.workflow.models import ActorKind, AgentBindingLayers
 
 from .atomic_fs import atomic_write_text
@@ -99,7 +101,7 @@ class WorkflowBindingConfigStore:
             "nodeOverrides": data.get("nodeOverrides") or {},
         }
         try:
-            self.validate_payload(candidate)
+            self.validate_payload(candidate, workflow_id=workflow_id)
         except BindingConfigValidationError:
             return AgentBindingLayers()
         return AgentBindingLayers(
@@ -118,7 +120,7 @@ class WorkflowBindingConfigStore:
                 "stageOverrides": {k: dict(v) for k, v in layers.stageOverrides.items()},
                 "nodeOverrides": dict(layers.nodeOverrides),
             }
-            self.validate_payload(candidate)
+            self.validate_payload(candidate, workflow_id=workflow_id)
             workflow_defaults = (
                 {}
                 if str(team_id or "").strip()
@@ -135,7 +137,7 @@ class WorkflowBindingConfigStore:
             atomic_write_text(self._path(workflow_id, team_id), json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
             return payload
 
-    def validate_payload(self, payload: dict[str, Any]) -> None:
+    def validate_payload(self, payload: dict[str, Any], *, workflow_id: str = "challenge-cup-research") -> None:
         """Controlled-write validation against the workflow definition."""
         if not isinstance(payload, dict):
             raise BindingConfigValidationError(
@@ -143,6 +145,8 @@ class WorkflowBindingConfigStore:
                 code="invalid_binding_shape",
             )
         definition = build_challenge_cup_workflow_definition()
+        if workflow_id in {OPERATOR_WORKFLOW_ID, OPERATOR_BASELINE_WORKFLOW_ID}:
+            definition = build_operator_definition(baseline=workflow_id == OPERATOR_BASELINE_WORKFLOW_ID)
         agent_nodes = [n for n in definition.nodes if n.actorKind is ActorKind.AGENT]
         role_keys = {n.primaryRoleKey for n in agent_nodes}
         stage_ids = {s.stageId.value for s in definition.stages}
@@ -181,7 +185,7 @@ class WorkflowBindingConfigStore:
                 )
 
         for node_id, agent_id in node_overrides.items():
-            spec = node_spec(str(node_id))
+            spec = next((node for node in definition.nodes if node.nodeId == str(node_id)), None)
             if spec is None or spec.actorKind is not ActorKind.AGENT:
                 raise BindingConfigValidationError(f"Unknown or non-agent nodeId: {node_id}", code="unknown_node")
             _require_agent_id(agent_id, field=f"nodeOverride {node_id}")
