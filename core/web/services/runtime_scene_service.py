@@ -83,6 +83,7 @@ from .runtime_scene.record import (
     _remember_jsonl_file_cache,
     _remember_scene_event_seq,
     _resolve_current_runtime_scene_dir,
+    _resolve_pointer_runtime_scene_dir,
     _resolve_recent_completed_runtime_scene_dir,
     _resolve_scene_child,
     _resolve_scene_dir,
