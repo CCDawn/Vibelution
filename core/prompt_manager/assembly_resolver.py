@@ -5,18 +5,14 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Iterable, Mapping
 
 from core.prompt_manager.assembly_contract import (
     PromptAssemblyManifest,
-    PromptCachePolicy,
     PromptDecision,
-    PromptPlacement,
     PromptSegment,
-    PromptStability,
     PromptTier,
     PromptTrust,
-    estimate_prompt_tokens,
 )
 
 
@@ -208,83 +204,6 @@ class PromptSectionResolver:
         return PromptResolutionResult(segments=tuple(resolved), manifest=manifest)
 
 
-def render_discovery_index(
-    kind: str,
-    items: Sequence[Mapping[str, Any]],
-    *,
-    context: PromptAssemblyContext,
-    budget_tokens: int | None = None,
-) -> PromptSegment:
-    """Render an allowed Skill/Agent index with deterministic degradation."""
-
-    normalized_kind = str(kind or "").strip().lower()
-    if normalized_kind not in {"skills", "agents"}:
-        raise ValueError(f"unsupported_discovery_index:{normalized_kind}")
-    allowed = set(
-        context.allowed_skills
-        if normalized_kind == "skills"
-        else context.allowed_agents
-    )
-    selected = [
-        {
-            "name": str(item.get("name") or "").strip(),
-            "description": str(item.get("description") or "").strip(),
-        }
-        for item in items
-        if str(item.get("name") or "").strip() in allowed
-    ]
-    selected.sort(key=lambda item: item["name"])
-
-    index_cap = min(
-        2_000,
-        max(0, math.floor(context.context_window * 0.01)),
-    )
-    budget = min(
-        index_cap,
-        max(0, int(index_cap if budget_tokens is None else budget_tokens)),
-    )
-    full = "\n".join(
-        f"{item['name']} — {item['description']}".rstrip(" —")
-        for item in selected
-    )
-    truncated = "\n".join(
-        f"{item['name']} — {_truncate_text(item['description'], 24)}".rstrip(" —")
-        for item in selected
-    )
-    names_only = "\n".join(item["name"] for item in selected)
-
-    if full and estimate_prompt_tokens(full) <= budget:
-        content, decision, reason = full, PromptDecision.FULL, "full_description"
-    elif truncated and estimate_prompt_tokens(truncated) <= budget:
-        content, decision, reason = (
-            truncated,
-            PromptDecision.TRUNCATED,
-            "truncated_description",
-        )
-    elif names_only and estimate_prompt_tokens(names_only) <= budget:
-        content, decision, reason = (
-            names_only,
-            PromptDecision.INDEX_ONLY,
-            "names_only",
-        )
-    else:
-        content, decision, reason = "", PromptDecision.OMITTED, "index_budget_exhausted"
-
-    return PromptSegment.from_content(
-        key=f"{normalized_kind.upper()}_INDEX",
-        content=content,
-        tier=PromptTier.SESSION_SNAPSHOT,
-        placement=PromptPlacement.SYSTEM_PREFIX,
-        stability=PromptStability.SESSION_STATIC,
-        trust=PromptTrust.DERIVED_RUNTIME,
-        source=f"prompt_assembly.discovery.{normalized_kind}",
-        budget_tokens=budget,
-        cache_policy=PromptCachePolicy.CACHEABLE,
-        decision=decision,
-        decision_reason=reason,
-    )
-
-
 def _rebuild_segment(
     segment: PromptSegment,
     *,
@@ -317,13 +236,6 @@ def _truncate_to_tokens(content: str, budget_tokens: int) -> str:
     return bounded.decode("utf-8", errors="ignore").rstrip()
 
 
-def _truncate_text(content: str, chars: int) -> str:
-    text = str(content or "").strip()
-    if len(text) <= chars:
-        return text
-    return text[: max(0, chars - 1)].rstrip() + "…"
-
-
 __all__ = [
     "CORE_FLOOR",
     "PromptAssemblyBudgetError",
@@ -332,5 +244,4 @@ __all__ = [
     "PromptSectionResolver",
     "default_tier_budgets",
     "prompt_assembly_budget",
-    "render_discovery_index",
 ]

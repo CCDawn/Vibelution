@@ -298,6 +298,7 @@ def make_codebase_map_section(
         cache_break=True,
         priority=30,
         description="代码库结构认知地图（按当前 Agent 目标自动更新）",
+        capability_requirements=("code_context",),
     )
 
 
@@ -331,6 +332,7 @@ def make_git_rules_section(project_root: Path) -> SystemPromptSection:
         priority=38,
         description="Git 提交纪律摘要（从工作流文档提炼）",
         is_empty=is_empty,
+        capability_requirements=("git_workflow",),
     )
 
 
@@ -621,7 +623,6 @@ def make_spec_digest_section(ctx: BuildContext) -> SystemPromptSection:
         mode = (ctx.prompt_mode or "orient").strip().lower()
         mode_title = {
             "orient": "定向",
-            "diagnose": "诊断",
             "delegate": "委派",
             "execute": "执行",
             "verify": "验证",
@@ -656,10 +657,6 @@ def make_spec_digest_section(ctx: BuildContext) -> SystemPromptSection:
             "orient": [
                 "- 先看 Git 变化与当前目标，再决定是否需要全局地图或配置上下文。",
                 "- 没有明确锚点时先收窄问题，不要把大段规则和全局上下文一起常驻。",
-            ],
-            "diagnose": [
-                "- 先复现，再观测，再读代码，最后推理；没有新增观测时停止长推理。",
-                "- 已形成反馈环后优先围绕单一锚点收窄，禁止横向扩散。",
             ],
             "delegate": [
                 "- 只把边界清晰、阅读量大的问题委派给只读子 agent。",
