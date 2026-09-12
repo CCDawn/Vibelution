@@ -103,6 +103,8 @@ export type ConversationViewProps = {
   composerValue: string;
   composerPlaceholder: string;
   composerDisabled: boolean;
+  /** Per-session AI "next prompt" suggestion (Tab to complete) for the idle composer. */
+  promptSuggestionEnabled?: boolean;
   /** Explicit one-shot request used by destructive route handoffs. */
   composerFocusSignal?: string;
   onComposerFocusRequestSettled?: (focusSignal: string) => void;

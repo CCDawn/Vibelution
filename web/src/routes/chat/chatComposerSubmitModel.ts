@@ -215,6 +215,29 @@ export function writeStoredMentalModelToggle(enabled: boolean) {
   window.localStorage.setItem(MENTAL_MODEL_TOGGLE_STORAGE_KEY, enabled ? "true" : "false");
 }
 
+export const PROMPT_SUGGESTION_TOGGLE_STORAGE_PREFIX = "vibelution.chat.promptSuggestionEnabled:";
+
+export function promptSuggestionToggleStorageKey(sessionId: string): string {
+  return `${PROMPT_SUGGESTION_TOGGLE_STORAGE_PREFIX}${String(sessionId || "").trim()}`;
+}
+
+export function readStoredPromptSuggestionToggle(sessionId: string): boolean {
+  if (typeof window === "undefined" || !String(sessionId || "").trim()) {
+    return false;
+  }
+  return window.localStorage.getItem(promptSuggestionToggleStorageKey(sessionId)) === "true";
+}
+
+export function writeStoredPromptSuggestionToggle(sessionId: string, enabled: boolean) {
+  if (typeof window === "undefined" || !String(sessionId || "").trim()) {
+    return;
+  }
+  window.localStorage.setItem(
+    promptSuggestionToggleStorageKey(sessionId),
+    enabled ? "true" : "false",
+  );
+}
+
 export function readStoredRuntimeStatusToggle(): boolean | null {
   if (typeof window === "undefined") {
     return null;
