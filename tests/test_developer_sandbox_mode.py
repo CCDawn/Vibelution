@@ -72,8 +72,17 @@ def test_chat_state_writes_to_sandbox_without_mutating_formal_state(tmp_path, mo
     save_chat_state(project_root, debug_payload)
     _append_user_message(project_root, "debug", turn_id="debug-001")
 
-    sandbox_path = project_root / ".runtime" / "developer-mode" / "sandboxes" / enabled["sandbox"]["sandboxId"] / "workspace" / "chat" / "chat_state.json"
-    assert sandbox_path.exists()
+    sandbox_store_path = (
+        project_root
+        / ".runtime"
+        / "developer-mode"
+        / "sandboxes"
+        / enabled["sandbox"]["sandboxId"]
+        / "workspace"
+        / "chat"
+        / "conversations.sqlite3"
+    )
+    assert sandbox_store_path.exists()
     assert json.loads(formal_path.read_text(encoding="utf-8")) == formal_payload
     assert _visible_message_content(project_root) == "debug"
 
@@ -84,7 +93,7 @@ def test_chat_state_writes_to_sandbox_without_mutating_formal_state(tmp_path, mo
         project_root=project_root,
     )
 
-    assert not sandbox_path.exists()
+    assert not sandbox_store_path.exists()
     assert _visible_message_content(project_root) == "formal"
 
 
