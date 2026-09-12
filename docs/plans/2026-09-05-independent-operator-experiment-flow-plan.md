@@ -798,7 +798,7 @@ Chat Room 的专属结构化输出应复用现有 `set_turn_structured_output_co
 
 ### 20.2 本次查明的限制与下一批顺序
 
-1. 知识 child 仅复制部分 parent 输入，当前没有完整继承算子货币预算；普通 reserve 缺配置时可能进入通用 token 默认值。下一批需冻结 source roles 的模型价目、逐次准入和失败回执，将费用归回同一活动后才能打开新搜集入口。
+1. 第 22 节已为真实算子 child 接入独立知识预算预留、货币账本及 LLM 回执基础。原生 source task 的模型路由冻结、服务端回执上下文安装与父流程恢复尚未贯通；完成这些路径前仍不能打开新搜集入口。
 2. 子流请求内容传递已按第 21 节补齐：完整消费请求进入 child 冻结快照与 collection scope，缺口进入查询词。算子专属费用身份及原生 source task 的回执接入仍未完成，不能因此开启付费搜集。
 3. 既有知识快照消费事件属于第一阶段 hypothesis fan-out。本批使用独立 `optimization_knowledge` 产物作为本轮消费关联，不伪造旧 selection 或第一阶段节点完成。
 4. 原 `experiment_api.create_experiment_plan()` 依赖旧 stage round/candidate 与阶段激活。本批复用底层合同/产物设施，不把独立算子流送入旧入口。
@@ -835,3 +835,28 @@ Chat Room 的专属结构化输出应复用现有 `set_turn_structured_output_co
 `tests/test_knowledge_request_snapshot.py` 使用真实 SQLite child 创建与重放，并检验原生 source adapter 输出到现有查询词生成函数；覆盖内容冻结、指纹不符、缺失输入及原生 collection scope 传递。复用本地 `source_collection.facade` 的 scope 设计与 `residual` 查询词入口，没有引入新的搜集调度器。
 
 本批不开放算子付费 child，不修改 readiness 费用阻断；模型费用桥、原生 source 完整会话、人工交付唤醒及真实模型/GPU 验收仍未完成。
+
+## 22. 知识搜集预算与真实子流程回执（2026-09-13）
+
+### 22.1 已实现
+
+- `CampaignBudget.knowledge` 显式声明每个 source NodeRun 的 token、调用次数、单次输出及价目；共用 `OperatorModelCallBudget`，允许一个调用。讨论仍使用至少两个调用的专属合同；知识搜集缺配置时不能借用讨论预算。
+- 复用 `model_budget` 的预留、逐次准入、结算与未知费用保留逻辑。同一活动的讨论和各知识子节点共同受 `modelCostLimit` 约束，账本记录 `budgetKind`，同一预留不可在讨论与搜集间切换。
+- `RealDomainPorts.reserve_budget()` 根据 Ledger 中真实 child→parent workflow 关系选择知识预算，校验本轮请求、invocation、父子 attempt、campaign 授权和假设引用。缺知识预算时明确拒绝，不进入通用 token 默认额度。
+- `OperatorKnowledgeInvocationBinding` 保留 `challenge-cup-knowledge-sideflow`、实际 source node、Session/Task/Turn 和父活动谱系；没有讨论 participant 或第一阶段 package-stage 身份。LLMClient 使用同一 operator transport 准入与失败回执机制，source 输出类型为 `source_evidence`。
+- `knowledge_receipt_context()` 提供服务端临时准入及失败回执回调。receipt persistence 在同一个 Ledger 事务内校验 child/invocation/request/campaign/reservation，写费用与 Outbox；去掉 source 回执的算子计费身份不会降级成通用 token 记账。成功回执重放及结算后的重放均不重复收费；失败用量未知时不释放未明确的消耗。
+
+### 22.2 接口验收与真实运行边界
+
+`tests/test_operator_knowledge_budget_contract.py` 验证合同与真实 SQLite 多 run 累计上限。`tests/test_operator_knowledge_model_receipts.py` 创建真实知识 child、NodeRun、invocation、预算行，使用受控 provider 验证 invoke/stream、失败重试、同事务费用和回执、错误活动/请求拒绝及原生 reserve 缺预算阻断。campaign 文件读取与 Session/Task/Turn 身份在该测试中受控，不能据此声称原生 source 会话已贯通。父 agent 独立检查修改并重跑相关回归；模型预算、讨论回执和普通 receipt 回归仍需随最终集成通过。
+
+本批复用项目现有预算账本、LLM transport 重试、source invocation 谱系及 receipt Outbox；没有增加第二份费用存储或外部调度器。未调用生产模型/GPU、未重启产品、未开启付费搜集。
+
+### 22.3 下一步必须一起完成的运行接线
+
+1. 原生 source task factory 需冻结真实 Agent/model route，并在 canonical stage task 保留知识计费 binding；`session.worker._model_invocation_receipt_context()` 回读任务后安装本批 context。当前 source 分支仅传 challenge task contract，不能仅修改通用 `_formal_task_authorities()` 就宣称接通。成功 stream capture 也需识别知识 binding 并走现有 receipt Outbox，不能只安装失败回调。
+2. 为父 system action 保存持久化 child 等待游标，含 invocationId、childRunId、parentNodeRunId 和原 actionId。接受知识后精确重挂原 action；既有 recheck 只在 live attempt 下记录 revision，不能代替唤醒。
+3. 现有失败 child 路径不发布成功的 `knowledge_result_available`，因此必须同时处理失败、取消、人工拒绝的父等待结果，避免永久挂起。不得制造成功包或重新起 child 来恢复。
+4. 子流程模型费用明确、人工 handoff 已接受并交付后，才允许 `verified_packages()` 消费新 child 产物并解除 `optimization_knowledge` 的付费阻断。零调用复用仍保持现有行为。
+
+下一段的验收必须包含：原生 source task→worker→LLM→成功/失败回执→人工交付→同一个父 action 恢复；断言不创建第二 child，不产生新 START_NODE，不在费用未知或人工拒绝时推进实验规划。

@@ -183,13 +183,18 @@ def _validate_receipt(
     if not isinstance(value, Mapping):
         raise ValueError("model invocation receipt must be an object")
     receipt = ModelInvocationReceipt.from_dict(value)
-    operator = receipt.scope.get("workflowId") == "operator-optimization"
+    knowledge = receipt.scope.get("accountingKind") == "operator_knowledge"
+    operator = receipt.scope.get("workflowId") == "operator-optimization" or knowledge
     if operator:
         from core.research.operator_optimization.discussion_contracts import OperatorInvocationBinding
-        fields = OperatorInvocationBinding.model_fields
+        from core.research.operator_optimization.knowledge_invocation import OperatorKnowledgeInvocationBinding
+        contract = OperatorKnowledgeInvocationBinding if knowledge else OperatorInvocationBinding
+        fields = contract.model_fields
         binding = {key: receipt.scope[key] for key in fields if key in receipt.scope}
         binding["formalNodeAttempt"] = int(binding.get("formalNodeAttempt", 0))
-        OperatorInvocationBinding.model_validate(binding)
+        contract.model_validate(binding)
+        if knowledge and _outcome_kinds(receipt) != ("source_evidence",):
+            raise ValueError("operator knowledge receipt must describe source evidence")
     if not operator and receipt.status not in {
         ModelInvocationStatus.SUCCEEDED,
         ModelInvocationStatus.RETRIED,

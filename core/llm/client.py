@@ -3617,12 +3617,14 @@ class LLMClient:
             binding_payload = binding_payload.to_dict()
         binding: Any
         if raw.get("operatorInvocationBinding") is not None:
-            from core.research.operator_optimization.discussion_contracts import OperatorInvocationBinding
+            from core.research.operator_optimization.knowledge_invocation import parse_operator_invocation_binding
 
-            operator_binding = OperatorInvocationBinding.model_validate(raw["operatorInvocationBinding"])
+            operator_binding = parse_operator_invocation_binding(raw["operatorInvocationBinding"])
             binding = operator_binding.model_dump(mode="json")
+            knowledge = binding.get("accountingKind") == "operator_knowledge"
             binding.update({"questionId": "OPERATOR-SOFTMAX", "questionRunId": binding["workflowRunId"],
-                "outcomeKinds": ["optimization_hypothesis"], "mappingPolicyId": "operator-discussion-v1"})
+                "outcomeKinds": ["source_evidence" if knowledge else "optimization_hypothesis"],
+                "mappingPolicyId": "operator-knowledge-v1" if knowledge else "operator-discussion-v1"})
         elif isinstance(binding_payload, Mapping):
             try:
                 from core.research.workflow.contracts.question_stage_binding import (
@@ -4009,7 +4011,7 @@ class LLMClient:
             ).strip()
             if not invocation_id:
                 return outcome
-            if binding.get("workflowId") == "operator-optimization":
+            if raw.get("operatorInvocationBinding") is not None:
                 invocation_id = str(
                     self._attempt_invocation_scope(invocation_scope, provider_attempt).invocation_id
                 )
@@ -4070,7 +4072,7 @@ class LLMClient:
                     token_usage.get("inputTokens", 0) + token_usage.get("outputTokens", 0) > 0 and
                     token_usage.get("totalTokens", 0) in (0,
                         token_usage.get("inputTokens", 0) + token_usage.get("outputTokens", 0)))}
-                    if binding.get("workflowId") == "operator-optimization" else {}),
+                    if raw.get("operatorInvocationBinding") is not None else {}),
                 "captureSource": "llm_provider_boundary",
                 "questionStage": str(binding.get("questionStage") or ""),
                 "outcomeKinds": list(binding.get("outcomeKinds") or []),
@@ -4094,6 +4096,10 @@ class LLMClient:
                 run_id=context["receiptRunId"],
                 node_run_id=binding["formalNodeRunId"],
                 scope={
+                    **({key: str(binding[key]) for key in ("accountingKind", "teamId",
+                        "researchProjectId", "optimizationCampaignId", "roundId", "parentRunId",
+                        "parentNodeRunId", "knowledgeInvocationId", "requestHash")}
+                        if binding.get("accountingKind") == "operator_knowledge" else {}),
                     **({key: str(binding[key]) for key in ("teamId", "researchProjectId",
                         "optimizationCampaignId", "roundId", "participantId")}
                         if binding.get("workflowId") == "operator-optimization" else {}),
