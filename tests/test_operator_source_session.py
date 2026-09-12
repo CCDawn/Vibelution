@@ -324,6 +324,16 @@ def test_native_source_factory_worker_and_stream_receipt(native_source, monkeypa
 
 def test_source_route_is_frozen_and_wrong_agent_rejected(native_source, monkeypatch):
     store, action, binding, _ = native_source
+    from core.web.services.team_workflow.research_runtime.real_readiness_context import (
+        RealDomainReadinessContext,
+    )
+
+    run = store.get_run(action.run_id)
+    question = RealDomainReadinessContext(store).question_snapshot(
+        run.team_id, run.question_id, run_id=run.run_id
+    )
+    assert question["operatorKnowledgeRequest"]["runId"] == "parent1"
+    assert question["question"] == "Check vector load occupancy"
     authority = build_operator_source_authority(
         store, action, agent_id=binding.agent_id
     )
