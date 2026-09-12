@@ -262,6 +262,7 @@ from .runtime_scene.diagnosis import (
     _runtime_scene_issue_state_severity,
     _runtime_scene_issue_state_summary,
     _runtime_scene_key_entries,
+    _runtime_scene_later_resolution_flags,
     _runtime_scene_missing_powershell_command,
     _runtime_scene_package_diagnosis,
     _runtime_scene_package_diagnosis_for_scene,
@@ -272,6 +273,7 @@ from .runtime_scene.diagnosis import (
     _runtime_scene_primary_issue_from_cluster,
     _runtime_scene_recommended_reading_order,
     _runtime_scene_recovery_evidence_events,
+    _runtime_scene_resolution_event_eligible,
     _runtime_scene_resolution_event_matches,
     _runtime_scene_resource_lease_conflict_context,
     _runtime_scene_resource_lease_text,
@@ -442,6 +444,12 @@ ISSUE_IDENTITY_FIELD_KEYS = (
     "sessionId",
     "turnId",
 )
+AGENT_MODEL_REFERENCE_UNRESOLVED_EVENT_CODES = {
+    "agent_config.unresolved_model_reference",
+    "agent_config.unresolved_chat_room_participant_model_reference",
+    "agent_config.model_references.unresolved",
+}
+AGENT_MODEL_REFERENCE_RESOLVED_EVENT_CODE = "agent_config.model_references.resolved"
 TIMELINE_DIAGNOSTIC_ONLY_EVENT_CODES = {
     "agent.repaired",
     "agent_territory.resolved",

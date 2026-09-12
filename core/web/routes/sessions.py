@@ -77,6 +77,7 @@ from core.web.services.session_service import (
     submit_session_guidance,
     submit_session_message,
     submit_session_message_lightweight,
+    switch_session_head,
     update_chat_session,
     update_chat_session_title,
     update_session_reasoning_effort,
@@ -176,6 +177,7 @@ class SessionMessagePayload(BaseModel):
 
 class SessionMessageEditPayload(SessionMessagePayload):
     messageId: str = ""
+    baseMessageId: str = ""
 
 
 class SessionMessageRegeneratePayload(BaseModel):
@@ -183,11 +185,18 @@ class SessionMessageRegeneratePayload(BaseModel):
 
     clientSubmissionId: str = Field(default_factory=_new_client_submission_id, max_length=128)
     messageId: str = ""
+    baseMessageId: str = ""
     mentalModelEnabled: bool | None = None
     runtimeStatusEnabled: bool | None = None
     turnStatusTail: dict | None = None
     turnMode: str = ""
     writeIntent: bool | None = None
+
+
+class SessionHeadPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    nodeId: str = Field(min_length=1, max_length=200)
 
 
 class SessionStopPayload(BaseModel):
@@ -663,6 +672,7 @@ def session_edit_resubmit_message(session_id: str, payload: SessionMessageEditPa
             turn_status_tail=payload.turnStatusTail if isinstance(payload.turnStatusTail, dict) else None,
             turn_mode=payload.turnMode,
             write_intent=payload.writeIntent,
+            base_message_id=payload.baseMessageId,
         )
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -690,7 +700,25 @@ def session_regenerate_message(session_id: str, payload: SessionMessageRegenerat
             turn_status_tail=payload.turnStatusTail if isinstance(payload.turnStatusTail, dict) else None,
             turn_mode=payload.turnMode,
             write_intent=payload.writeIntent,
+            base_message_id=payload.baseMessageId,
         )
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post(
+    "/sessions/{session_id}/head",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=SessionCatalogItem,
+    response_model_exclude_unset=True,
+)
+def session_switch_head(session_id: str, payload: SessionHeadPayload) -> dict:
+    try:
+        return switch_session_head(session_id, payload.nodeId)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SessionBusyError as exc:

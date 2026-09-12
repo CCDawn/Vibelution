@@ -579,6 +579,9 @@ def _build_session_detail_from_summary(
     }
     if message_window is not None:
         detail["messageWindow"] = message_window
+    active_leaf_id, active_branch_id = s._session_branch_metadata(conversation["id"])
+    detail["activeLeafId"] = active_leaf_id
+    detail["activeBranchId"] = active_branch_id
     return detail
 
 
@@ -1484,6 +1487,12 @@ def _normalize_messages(
                 "turnItems": turn_items,
                 "metadata": dict(metadata) if isinstance(metadata, dict) else {},
             }
+        node_id = str(raw.get("nodeId") or "").strip()
+        if node_id:
+            entry["nodeId"] = node_id
+        branch = raw.get("branch")
+        if isinstance(branch, dict) and branch:
+            entry["branch"] = dict(branch)
         messages.append(entry)
     return _coalesce_assistant_messages_by_turn(s._dedupe_turn_error_messages(messages))
 
@@ -4410,7 +4419,22 @@ def _ledger_visible_messages_for_session(session_id: str) -> list[dict[str, Any]
     events = s._load_session_conversation_events_cached(normalized_session_id)
     if not events:
         return []
-    return s.conversation_visible_messages_from_events(events)
+    messages, _active_leaf_id, _active_branch_id = s.visible_messages_with_branch_info(events)
+    return messages
+
+
+def _session_branch_metadata(session_id: str) -> tuple[str, str]:
+    """Return ``(activeLeafId, activeBranchId)`` for the session branch head."""
+
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return "", ""
+    events = s._load_session_conversation_events_cached(normalized_session_id)
+    if not events:
+        return "", ""
+    view = s.analyze_conversation_branches(events)
+    return view.active_leaf_id, view.active_branch_id
 
 
 def _ledger_latest_preview_messages_for_session(

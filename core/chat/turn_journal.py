@@ -40,6 +40,7 @@ EVENT_TURN_FAILED = "turn_failed"
 EVENT_TURN_INTERRUPTED = "turn_interrupted"
 EVENT_COMPACTION_CHECKPOINT = "compaction_checkpoint"
 EVENT_COMPRESSION_ATTEMPT = "context_compression_attempt"
+EVENT_BRANCH_REBASE = "branch_rebase"
 
 TERMINAL_EVENTS = {
     EVENT_TURN_COMPLETED,
@@ -782,8 +783,150 @@ def rewrite_turn_events(project_root: Path, session_id: str, events: Iterable[Tu
                     pass
 
 
+@dataclass(frozen=True)
+class JournalEventTree:
+    """Parent chain + head pointer derived from an append-only event stream."""
+
+    events_by_id: dict[str, TurnJournalEvent]
+    parent_by_id: dict[str, str]
+    branch_by_id: dict[str, str]
+    alias_by_id: dict[str, str]
+    chain_ids: list[str]
+
+
+def build_journal_event_tree(events: Iterable[TurnJournalEvent]) -> JournalEventTree:
+    """Build the shared event tree used by folding and branch analysis.
+
+    ``edit``/``regenerate`` markers cut the active chain back to
+    ``fromEventId``; ``head_select`` markers rebuild the chain from the target
+    event's parent pointers. Regenerate markers also record an alias from the
+    re-appended user message to the message it replaces, so branch metadata can
+    keep assistant alternatives grouped under one logical node.
+    """
+
+    events_by_id: dict[str, TurnJournalEvent] = {}
+    parent_by_id: dict[str, str] = {}
+    branch_by_id: dict[str, str] = {}
+    alias_by_id: dict[str, str] = {}
+    chain_ids: list[str] = []
+    chain_index: dict[str, int] = {}
+    tip = ""
+    current_branch_id = "main"
+    pending_regenerate_alias: tuple[str, str] | None = None
+    for event in list(events or []):
+        event_id = str(getattr(event, "event_id", "") or "").strip()
+        if not event_id:
+            continue
+        if event.event_type != EVENT_BRANCH_REBASE:
+            if event_id in events_by_id:
+                continue
+            events_by_id[event_id] = event
+            parent_by_id[event_id] = tip
+            branch_by_id[event_id] = current_branch_id
+            chain_ids.append(event_id)
+            chain_index[event_id] = len(chain_ids) - 1
+            tip = event_id
+            if pending_regenerate_alias is not None:
+                pending_turn_id, replaced_user_event_id = pending_regenerate_alias
+                if (
+                    event.event_type == EVENT_USER_MESSAGE
+                    and str(event.turn_id or "").strip() == pending_turn_id
+                    and replaced_user_event_id in events_by_id
+                ):
+                    alias_by_id[event_id] = replaced_user_event_id
+                pending_regenerate_alias = None
+            continue
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        operation = str(payload.get("operation") or "").strip()
+        from_event_id = str(payload.get("fromEventId") or event.parent_event_id or "").strip()
+        if operation in {"edit", "regenerate"}:
+            if not from_event_id:
+                # Fork at the very start of the conversation history.
+                chain_ids = []
+                chain_index = {}
+                tip = ""
+                pending_regenerate_alias = None
+                current_branch_id = str(payload.get("branchId") or "").strip() or f"branch-{event_id}"
+                continue
+            cut_index = chain_index.get(from_event_id)
+            if cut_index is None:
+                # Malformed or concurrent marker: keep the current path rather
+                # than dropping the whole transcript.
+                continue
+            replaced_user_event_id = ""
+            if operation == "regenerate":
+                for active_id in chain_ids[cut_index + 1:]:
+                    candidate = events_by_id.get(active_id)
+                    if candidate is not None and candidate.event_type == EVENT_USER_MESSAGE:
+                        replaced_user_event_id = active_id
+                        break
+            chain_ids = chain_ids[: cut_index + 1]
+            chain_index = {active_id: index for index, active_id in enumerate(chain_ids)}
+            tip = chain_ids[-1]
+            pending_regenerate_alias = (
+                (str(event.turn_id or "").strip(), replaced_user_event_id)
+                if operation == "regenerate" and replaced_user_event_id
+                else None
+            )
+            current_branch_id = str(payload.get("branchId") or "").strip() or f"branch-{event_id}"
+            continue
+        if operation == "head_select":
+            if not from_event_id:
+                chain_ids = []
+                chain_index = {}
+                tip = ""
+                pending_regenerate_alias = None
+                continue
+            if from_event_id not in events_by_id:
+                # Target was never seen in this journal segment (bounded preview
+                # or newer schema): keep the current path instead of guessing.
+                continue
+            path: list[str] = []
+            cursor = from_event_id
+            seen: set[str] = set()
+            while cursor and cursor in events_by_id and cursor not in seen:
+                seen.add(cursor)
+                path.append(cursor)
+                cursor = parent_by_id.get(cursor, "")
+            path.reverse()
+            chain_ids = path
+            chain_index = {active_id: index for index, active_id in enumerate(chain_ids)}
+            tip = chain_ids[-1] if chain_ids else ""
+            pending_regenerate_alias = None
+            current_branch_id = branch_by_id.get(from_event_id, current_branch_id)
+            continue
+        # Unknown operations from newer schemas keep the current path instead
+        # of guessing a cut point.
+    return JournalEventTree(
+        events_by_id=events_by_id,
+        parent_by_id=parent_by_id,
+        branch_by_id=branch_by_id,
+        alias_by_id=alias_by_id,
+        chain_ids=chain_ids,
+    )
+
+
+def fold_active_events(events: Iterable[TurnJournalEvent]) -> list[TurnJournalEvent]:
+    """Return the active-path view of a journal stream.
+
+    ``branch_rebase`` markers record forks while the old events stay in the
+    file for audit. The fold is a pure function: model replay, turn items,
+    detail projection, and preview fallbacks all use this single
+    implementation. Unknown event types (including markers written by newer
+    schemas) never crash or reorder replay.
+
+    ``edit``/``regenerate`` markers cut the active path back to
+    ``fromEventId``; ``head_select`` markers move the head pointer to any event
+    already seen in the journal (typically a sibling branch leaf), which lets
+    the fold restore a superseded branch without rewriting the file.
+    """
+
+    tree = build_journal_event_tree(events)
+    return [tree.events_by_id[event_id] for event_id in tree.chain_ids]
+
+
 def latest_open_turn_id(events: Iterable[TurnJournalEvent]) -> str:
-    event_list = list(events or [])
+    event_list = fold_active_events(events)
     terminal_turn_ids = {
         event.turn_id
         for event in event_list
@@ -1029,7 +1172,9 @@ def session_turn_items_from_events(
     """
 
     normalized_turn_id = str(turn_id or "").strip()
-    event_list = sorted(list(events or []), key=lambda item: (item.sequence, item.event_id))
+    event_list = fold_active_events(
+        sorted(list(events or []), key=lambda item: (item.sequence, item.event_id))
+    )
     tool_outcomes: dict[str, str] = {}
     tool_semantic_statuses: dict[str, str] = {}
     tool_summaries: dict[str, str] = {}
@@ -1371,7 +1516,10 @@ def _attach_replay_reasoning_content(
 
 
 def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> list[dict[str, Any]]:
-    event_list = list(events or [])
+    return _model_visible_messages_from_events(fold_active_events(events))
+
+
+def _model_visible_messages_from_events(event_list: list[TurnJournalEvent]) -> list[dict[str, Any]]:
     canonical_final_turn_ids = {
         event.turn_id
         for event in event_list
@@ -1570,6 +1718,19 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
                 }
             )
     return _dedupe_adjacent_messages(messages)
+
+
+def replay_visible_messages(events: Iterable[TurnJournalEvent]) -> list[dict[str, Any]]:
+    """Replay an event list without folding.
+
+    Branch analysis needs to see the messages of every branch, not only the
+    active path, so it replays the raw stream and pairs messages back to their
+    event ids through ``metadata.eventId``.
+    """
+
+    return _model_visible_messages_from_events(list(events or []))
+
+
 def model_messages_from_events(events: Iterable[TurnJournalEvent]) -> list[dict[str, Any]]:
     """Replay journal events into canonical LLM-facing messages.
 
@@ -1578,11 +1739,11 @@ def model_messages_from_events(events: Iterable[TurnJournalEvent]) -> list[dict[
     have a single, protocol-valid source.
     """
 
-    event_list = list(events or [])
+    event_list = fold_active_events(events)
     event_by_id = {event.event_id: event for event in event_list if event.event_id}
     lifecycle_tool_identities = _lifecycle_resolved_tool_identities(event_list)
     messages: list[dict[str, Any]] = []
-    for message in _filter_recoverable_status_messages(model_visible_messages_from_events(event_list)):
+    for message in _filter_recoverable_status_messages(_model_visible_messages_from_events(event_list)):
         metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
         if metadata.get("kind") == "context_compression_marker":
             checkpoint_message = _checkpoint_model_message_from_event(
@@ -2548,6 +2709,7 @@ __all__ = [
     "EVENT_ASSISTANT_ITEM_COMMITTED",
     "EVENT_ASSISTANT_PARTIAL",
     "AUDIT_ONLY_EVENT_TYPES",
+    "EVENT_BRANCH_REBASE",
     "EVENT_CLI_SESSION_LIFECYCLE",
     "EVENT_CLI_TASK_SENT",
     "EVENT_CLI_TASK_RESULT",
@@ -2565,15 +2727,19 @@ __all__ = [
     "EVENT_USER_MESSAGE",
     "TURN_INTERRUPTED_MARKER",
     "TurnJournalEvent",
+    "JournalEventTree",
     "append_interrupted_if_open",
     "append_canonical_turn_outcome",
     "append_turn_event",
+    "build_journal_event_tree",
     "event_has_model_projection",
     "event_projection_category",
+    "fold_active_events",
     "latest_turn_sequence",
     "latest_open_turn_id",
     "load_latest_turn_events_for_preview",
     "load_turn_events",
+    "replay_visible_messages",
     "rewrite_turn_events",
     "model_visible_messages_from_events",
     "model_messages_from_events",

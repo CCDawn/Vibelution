@@ -282,13 +282,12 @@ def _runtime_scene_agent_model_reference_resolution_matches(
     if str(source.get("phase") or "") != "model_binding":
         return False
     source_code = str(source.get("eventCode") or "").strip()
-    if source_code not in {
-        "agent_config.unresolved_model_reference",
-        "agent_config.unresolved_chat_room_participant_model_reference",
-        "agent_config.model_references.unresolved",
-    }:
+    if source_code not in s.AGENT_MODEL_REFERENCE_UNRESOLVED_EVENT_CODES:
         return False
-    return str(candidate.get("eventCode") or "").strip() == "agent_config.model_references.resolved"
+    return (
+        str(candidate.get("eventCode") or "").strip()
+        == s.AGENT_MODEL_REFERENCE_RESOLVED_EVENT_CODE
+    )
 
 
 def _runtime_scene_agent_work_run_focus(work_run_summary: dict[str, Any]) -> dict[str, Any]:
@@ -1370,6 +1369,7 @@ def _runtime_scene_issue_state(events: list[dict]) -> dict[str, Any]:
             }
         )
 
+    later_resolution_flags = s._runtime_scene_later_resolution_flags(events)
     active: list[dict[str, Any]] = []
     policy: list[dict[str, Any]] = []
     historical: list[dict[str, Any]] = []
@@ -1385,7 +1385,7 @@ def _runtime_scene_issue_state(events: list[dict]) -> dict[str, Any]:
         if problem == "policy":
             policy.append(signal)
             continue
-        if s._runtime_scene_signal_has_later_resolution(events, signal):
+        if later_resolution_flags[int(signal.get("index") or 0)]:
             historical.append(signal)
             continue
         active.append(signal)
@@ -1680,10 +1680,17 @@ def _runtime_scene_package_diagnosis_for_scene(
     scene_dir: Path,
     manifest: dict[str, Any],
     scene_id: str,
+    *,
+    timeline: list[dict] | None = None,
+    lifecycle: list[dict] | None = None,
 ) -> dict[str, Any]:
     s = _service()
-    timeline = s._read_scene_timeline(scene_dir)
-    lifecycle = s._read_scene_lifecycle(scene_dir, timeline)
+    timeline = timeline if timeline is not None else s._read_scene_timeline(scene_dir)
+    lifecycle = (
+        lifecycle
+        if lifecycle is not None
+        else s._read_scene_lifecycle(scene_dir, timeline)
+    )
     diagnosis = s._runtime_scene_package_diagnosis(
         scene_dir=scene_dir,
         scene_id=scene_id,
@@ -1827,6 +1834,30 @@ def _runtime_scene_recovery_evidence_events(scene_dir: Path) -> list[dict]:
     return events
 
 
+def _runtime_scene_resolution_event_eligible(candidate: dict[str, Any]) -> bool:
+    """Source-independent gate of ``_runtime_scene_resolution_event_matches``.
+
+    Kept as one helper so the pairwise matcher and the O(N) reverse-resolution
+    index built by ``_runtime_scene_later_resolution_flags`` cannot drift.
+    """
+    s = _service()
+    outcome = str(candidate.get("outcome") or "").strip().lower()
+    status = str(candidate.get("status") or "").strip().lower()
+    fields = candidate.get("fields") if isinstance(candidate.get("fields"), dict) else {}
+    field_outcome = str(fields.get("outcome") or "").strip().lower()
+    field_status = str(fields.get("status") or fields.get("resultStatus") or "").strip().lower()
+    event_code = str(candidate.get("eventCode") or "").strip().lower()
+    return (
+        outcome in s.ISSUE_RESOLUTION_OUTCOMES
+        or status in s.ISSUE_RESOLUTION_OUTCOMES
+        or field_outcome in s.ISSUE_RESOLUTION_OUTCOMES
+        or field_status in s.ISSUE_RESOLUTION_OUTCOMES
+        or event_code.endswith(
+            (".recovered", ".resolved", ".fallback", ".fallback_activated")
+        )
+    )
+
+
 def _runtime_scene_resolution_event_matches(
     candidate: dict[str, Any],
     source: dict[str, Any],
@@ -1835,19 +1866,7 @@ def _runtime_scene_resolution_event_matches(
     s = _service()
     if s._runtime_scene_event_severity(candidate) in {"error", "warning"}:
         return False
-    outcome = str(candidate.get("outcome") or "").strip().lower()
-    status = str(candidate.get("status") or "").strip().lower()
-    fields = candidate.get("fields") if isinstance(candidate.get("fields"), dict) else {}
-    field_outcome = str(fields.get("outcome") or "").strip().lower()
-    field_status = str(fields.get("status") or fields.get("resultStatus") or "").strip().lower()
-    event_code = str(candidate.get("eventCode") or "").strip().lower()
-    if (
-        outcome not in s.ISSUE_RESOLUTION_OUTCOMES
-        and status not in s.ISSUE_RESOLUTION_OUTCOMES
-        and field_outcome not in s.ISSUE_RESOLUTION_OUTCOMES
-        and field_status not in s.ISSUE_RESOLUTION_OUTCOMES
-        and not event_code.endswith((".recovered", ".resolved", ".fallback", ".fallback_activated"))
-    ):
+    if not s._runtime_scene_resolution_event_eligible(candidate):
         return False
     if str(candidate.get("component") or "") != str(source.get("component") or ""):
         return False
@@ -1910,6 +1929,81 @@ def _runtime_scene_signal_has_later_resolution(events: list[dict], signal: dict[
             continue
         return True
     return False
+
+
+def _runtime_scene_later_resolution_flags(events: list[dict]) -> list[bool]:
+    """Whether each event (by position) has a later resolving event.
+
+    Batch equivalent of ``_runtime_scene_signal_has_later_resolution`` for every
+    signal in one O(N) reverse pass: resolution candidates index their identity
+    pairs / component-phase / agent-config model-reference code once, and each
+    error/warning event then checks the index for a strictly later match. The
+    previous per-signal forward scan was O(signals x events) and pinned the
+    backend at ~100% CPU on a multi-week active scene (17k timeline events,
+    690 signals, ~14s per diagnosis under the package write lock).
+    """
+    s = _service()
+    count = len(events)
+    severities = [s._runtime_scene_event_severity(event) for event in events]
+    identities = [s._runtime_scene_event_identity(event) for event in events]
+    components = [str(event.get("component") or "") for event in events]
+    phases = [str(event.get("phase") or "") for event in events]
+    codes = [str(event.get("eventCode") or "").strip() for event in events]
+    eligible = [
+        s._runtime_scene_resolution_event_eligible(event) for event in events
+    ]
+    latest_identity_pair: dict[tuple[str, str, str], int] = {}
+    latest_phase: dict[tuple[str, str], int] = {}
+    latest_model_reference_resolution: dict[str, int] = {}
+    flags = [False] * count
+    for index in range(count - 1, -1, -1):
+        severity = severities[index]
+        if severity in {"error", "warning"}:
+            event = events[index]
+            identity = identities[index]
+            component = components[index]
+            resolved = False
+            if identity:
+                for key, value in identity.items():
+                    if latest_identity_pair.get((component, key, value), -1) > index:
+                        resolved = True
+                        break
+            elif latest_phase.get((component, phases[index]), -1) > index:
+                resolved = True
+            if (
+                not resolved
+                and component == "agent_config"
+                and phases[index] == "model_binding"
+                and codes[index] in s.AGENT_MODEL_REFERENCE_UNRESOLVED_EVENT_CODES
+            ):
+                resolved = (
+                    latest_model_reference_resolution.get(component, -1) > index
+                )
+            if not resolved:
+                resolved = bool(
+                    s._runtime_scene_browser_stale_chunk_signal_has_later_recovery(
+                        events, index, event
+                    )
+                    or s._runtime_scene_browser_session_stream_signal_has_later_recovery(
+                        events, index, event
+                    )
+                )
+            flags[index] = resolved
+        if eligible[index] and severity not in {"error", "warning"}:
+            component = components[index]
+            for key, value in identities[index].items():
+                pair = (component, key, value)
+                if pair not in latest_identity_pair:
+                    latest_identity_pair[pair] = index
+            phase_key = (component, phases[index])
+            if phase_key not in latest_phase:
+                latest_phase[phase_key] = index
+            if (
+                codes[index] == s.AGENT_MODEL_REFERENCE_RESOLVED_EVENT_CODE
+                and component not in latest_model_reference_resolution
+            ):
+                latest_model_reference_resolution[component] = index
+    return flags
 
 
 def _runtime_scene_signal_kind(
