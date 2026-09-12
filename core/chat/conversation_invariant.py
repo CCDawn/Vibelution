@@ -21,6 +21,7 @@ from .conversation_ledger import (
     ConversationLedgerEvent,
     apply_context_compression_checkpoints,
     conversation_model_messages_from_events,
+    fold_active_events,
 )
 
 CONVERSATION_ROLES = frozenset({"user", "assistant", "tool"})
@@ -29,7 +30,6 @@ SILENT_PROVIDER_REPAIR_ERROR = "silent_provider_tool_chain_repair"
 LEDGER_FINGERPRINT_MISMATCH_ERROR = "ledger_conversation_fingerprint_mismatch"
 FORBIDDEN_UI_TOOL_CALLS_ERROR = "ui_tool_calls_field"
 LEDGER_REWRITE_EXCEPTION_OWNERS = (
-    "session.runtime_glue._truncate_session_ledger_before_message",
     "chat_room_service group transcript cleanup",
     "maintenance_reset._execute_chat_history",
 )
@@ -89,7 +89,10 @@ def canonical_conversation_messages_from_events(
     applied here.
     """
 
-    historical = historical_conversation_events(events, current_turn_id=current_turn_id)
+    historical = historical_conversation_events(
+        fold_active_events(events),
+        current_turn_id=current_turn_id,
+    )
     replayed = apply_context_compression_checkpoints(
         historical,
         current_turn_id=current_turn_id,

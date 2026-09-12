@@ -205,6 +205,7 @@ def append_session_conversation_event(
     tool_call_id: str = "",
     correlation_id: str = "",
     source_kind: str = "",
+    parent_event_id: str = "",
     project_root: Path | None = None,
 ) -> Any | None:
     """Append a ledger event and invalidate the session events cache."""
@@ -229,6 +230,7 @@ def append_session_conversation_event(
             tool_call_id=tool_call_id,
             correlation_id=correlation_id,
             source_kind=source_kind,
+            parent_event_id=parent_event_id,
         )
         invalidate_session_conversation_events_cache(normalized_session_id)
         try:
