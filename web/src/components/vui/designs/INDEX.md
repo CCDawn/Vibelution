@@ -19,6 +19,8 @@
 | `ChallengeRealBatchControlPanel` | [product/challenge-real-batch.md](./product/challenge-real-batch.md#challengerealbatchcontrolpanel) |
 | `ResearchAnomalyInboxPanel` | [product/research-anomaly-inbox.md](./product/research-anomaly-inbox.md#researchanomalyinboxpanel) |
 | `ResearchAnomalyInboxExtendCta` | [product/research-anomaly-inbox.md](./product/research-anomaly-inbox.md#researchanomalyinboxextendcta) |
+| `ResearchWorkflowRecoveryPanel` | [product/research-recovery-panel.md](./product/research-recovery-panel.md#researchworkflowrecoverypanel) |
+| `ResearchWorkflowRecoveryEntry` | [product/research-recovery-panel.md](./product/research-recovery-panel.md#researchworkflowrecoveryentry) |
 | `VCommandPalette` | [product/command-palette.md](./product/command-palette.md#vcommandpalette) |
 
 ## Primitives

@@ -29,6 +29,9 @@ import type {
   HypothesisFirstClaimGateEntry,
   HypothesisFirstClaimGateEvidenceGap,
   HypothesisFirstStateV2,
+  HypothesisRoundFailureRecord,
+  HypothesisRoundFailureRetryResponse,
+  HypothesisRoundFailuresResponse,
   HypothesisRoundGetResponse,
   HypothesisRoundListResponse,
   HypothesisSelectionContext,
@@ -71,11 +74,13 @@ function scopedQuery(input: {
   questionId?: string;
   runId?: string;
   includeSourceCursor?: boolean;
+  unresolvedOnly?: boolean;
 }): string {
   const parts: string[] = [];
   if (input.questionId) parts.push(`questionId=${encodeURIComponent(input.questionId)}`);
   if (input.runId) parts.push(`runId=${encodeURIComponent(input.runId)}`);
   if (input.includeSourceCursor) parts.push("includeSourceCursor=true");
+  if (input.unresolvedOnly) parts.push("unresolvedOnly=true");
   return parts.length ? `?${parts.join("&")}` : "";
 }
 
@@ -781,4 +786,90 @@ export function recoverCollectionRequest(
     `${teamPrefix(teamId)}/hypothesis-first/chain/collection-requests/${encodeURIComponent(requestId)}/recover`,
     "POST",
   );
+}
+
+/**
+ * Open round-generation failure traces for the workspace recovery panel.
+ * Malformed payloads fail closed here so the panel never guesses.
+ */
+export function fetchHypothesisRoundFailures(
+  teamId: string,
+  options?: { signal?: AbortSignal },
+): Promise<HypothesisRoundFailuresResponse> {
+  return fetchJson<unknown>(
+    `${teamPrefix(teamId)}/hypothesis-first/chain/round-failures${scopedQuery({ unresolvedOnly: true })}`,
+    { signal: options?.signal },
+  ).then((payload) => parseHypothesisRoundFailures(payload));
+}
+
+/**
+ * Accept one confirmed manual retry of an open round failure trace.  The
+ * server defers the minutes-long regeneration to a background worker; the
+ * panel refetches the ledger until the resolved trace disappears.
+ */
+export function executeHypothesisRoundFailureRetry(
+  teamId: string,
+  failureId: string,
+): Promise<HypothesisRoundFailureRetryResponse> {
+  return writeJson<HypothesisRoundFailureRetryResponse>(
+    `${teamPrefix(teamId)}/hypothesis-first/chain/round-failures/${encodeURIComponent(failureId)}/retry`,
+    "POST",
+    { confirmed: true },
+  );
+}
+
+function parseHypothesisRoundFailures(
+  payload: unknown,
+): HypothesisRoundFailuresResponse {
+  if (!isRecord(payload) || payload.schemaVersion !== 1) {
+    throw new Error("Invalid round failures response");
+  }
+  if (!Array.isArray(payload.failures) || typeof payload.teamId !== "string") {
+    throw new Error("Invalid round failures response");
+  }
+  const failures = payload.failures.map((item) => parseHypothesisRoundFailure(item));
+  return {
+    schemaVersion: 1,
+    teamId: payload.teamId,
+    failureCount:
+      typeof payload.failureCount === "number" ? payload.failureCount : failures.length,
+    openFailureCount:
+      typeof payload.openFailureCount === "number" ? payload.openFailureCount : 0,
+    failures,
+    storagePath: typeof payload.storagePath === "string" ? payload.storagePath : "",
+  };
+}
+
+function parseHypothesisRoundFailure(item: unknown): HypothesisRoundFailureRecord {
+  if (!isRecord(item) || typeof item.failureId !== "string") {
+    throw new Error("Invalid round failure record");
+  }
+  const roundIndex =
+    typeof item.roundIndex === "number" && Number.isFinite(item.roundIndex)
+      ? item.roundIndex
+      : null;
+  const meetingRoundIds = Array.isArray(item.meetingRoundIds)
+    ? item.meetingRoundIds.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  const stringField = (key: string): string =>
+    typeof item[key] === "string" ? (item[key] as string) : "";
+  return {
+    failureId: item.failureId,
+    status: stringField("status"),
+    failureCode: stringField("failureCode"),
+    reason: stringField("reason"),
+    errorType: stringField("errorType"),
+    roundId: stringField("roundId"),
+    meetingRoundIds,
+    selectionId: stringField("selectionId"),
+    roundIndex,
+    questionId: stringField("questionId"),
+    workflowRunId: stringField("workflowRunId"),
+    scopeHash: stringField("scopeHash"),
+    retryHint: stringField("retryHint"),
+    trigger: stringField("trigger"),
+    createdAt: stringField("createdAt"),
+    resolvedAt: stringField("resolvedAt"),
+    resolvedByRoundId: stringField("resolvedByRoundId"),
+  };
 }
