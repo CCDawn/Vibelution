@@ -826,7 +826,7 @@ class AgentConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     name: str = Field(
-        default="SelfEvolvingAgent",
+        default="AgentRuntime",
         description="Agent 名称"
     )
     workspace: str = Field(
@@ -1558,7 +1558,7 @@ class NetworkConfig(BaseModel):
         description="请求超时时间（秒）"
     )
     user_agent: str = Field(
-        default="Mozilla/5.0 (compatible; SelfEvolvingAgent/1.0)",
+        default="Mozilla/5.0 (compatible; AgentRuntime/1.0)",
         description="HTTP User-Agent"
     )
     max_retries: int = Field(

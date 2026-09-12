@@ -14,9 +14,9 @@
   ],
   "binding_entrypoints": [
     {
-      "entrypoint_id": "self_evolving_agent_initial_bind",
+      "entrypoint_id": "agent_runtime_initial_bind",
       "module": "agent.py",
-      "symbol": "SelfEvolvingAgent._init_llm",
+      "symbol": "AgentRuntime._init_llm",
       "run_kinds": ["direct_session", "chat_room", "team_workflow", "research", "self_evolution"],
       "current_policy_source": "filter_llm_tools_for_current_agent",
       "target_owner": "ToolAuthorizationService.resolve_turn_tools"
@@ -24,7 +24,7 @@
     {
       "entrypoint_id": "agent_mode_rebind",
       "module": "agent.py",
-      "symbol": "SelfEvolvingAgent._get_llm_for_current_mode",
+      "symbol": "AgentRuntime._get_llm_for_current_mode",
       "run_kinds": ["direct_session", "chat_room", "team_workflow", "research", "supervised", "self_evolution"],
       "current_policy_source": "mode_and_agent_filter",
       "target_owner": "ToolAuthorizationService.resolve_turn_tools"

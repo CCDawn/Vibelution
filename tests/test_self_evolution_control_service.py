@@ -1002,7 +1002,7 @@ def test_self_evolution_turn_runs_executor_then_reviewer_with_context_packets(tm
     turn_calls: list[dict[str, object]] = []
     scene_events: list[dict[str, object]] = []
 
-    class FakeSelfEvolvingAgent:
+    class FakeAgentRuntime:
         def __init__(self, *, mode=None, workspace_path=None, config=None):
             if captured.get("_active_cache_scope") == "executor":
                 captured["mode"] = str(mode or "")
@@ -1059,7 +1059,7 @@ def test_self_evolution_turn_runs_executor_then_reviewer_with_context_packets(tm
             captured["request_dynamic_runtime_context"] = request.dynamic_runtime_context
         runtime = prepare_agent_turn_runtime(request.runtime) if request.runtime else None
         captured["_active_cache_scope"] = cache_scope
-        agent = FakeSelfEvolvingAgent(
+        agent = FakeAgentRuntime(
             mode=request.mode,
             workspace_path=request.workspace_path,
             config=request.config,

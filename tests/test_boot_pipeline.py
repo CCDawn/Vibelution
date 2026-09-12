@@ -137,7 +137,7 @@ def test_main_test_mode_uses_headless_bootstrap(monkeypatch):
     monkeypatch.setattr(agent_module, "get_ui", lambda: ui)
     monkeypatch.setattr(agent_module, "create_config_from_args", lambda _args: config)
     monkeypatch.setattr(agent_module, "setup_logging", lambda **_kwargs: None)
-    monkeypatch.setattr(agent_module, "SelfEvolvingAgent", DummyAgent)
+    monkeypatch.setattr(agent_module, "AgentRuntime", DummyAgent)
     monkeypatch.setattr(agent_module, "set_ui_test_mode", lambda enabled: created.setdefault("test_mode", enabled))
     monkeypatch.setattr(agent_module.sys, "__stdout__", io.StringIO())
     monkeypatch.setattr(agent_module, "should_launch_workbench", lambda *_args, **_kwargs: False)
@@ -173,7 +173,7 @@ def test_main_runs_preflight_doctor_in_normal_mode(monkeypatch):
     monkeypatch.setattr(agent_module, "get_ui", lambda: ui)
     monkeypatch.setattr(agent_module, "create_config_from_args", lambda _args: config)
     monkeypatch.setattr(agent_module, "setup_logging", lambda **_kwargs: None)
-    monkeypatch.setattr(agent_module, "SelfEvolvingAgent", DummyAgent)
+    monkeypatch.setattr(agent_module, "AgentRuntime", DummyAgent)
     monkeypatch.setattr(agent_module, "run_preflight_doctor", lambda _config: created.setdefault("doctor_ran", True))
     monkeypatch.setattr(agent_module, "should_launch_workbench", lambda *_args, **_kwargs: False)
 
@@ -280,7 +280,7 @@ def test_main_restarted_process_bypasses_workbench_and_reenters_agent_loop(monke
     monkeypatch.setattr(agent_module, "get_ui", lambda: ui)
     monkeypatch.setattr(agent_module, "create_config_from_args", lambda _args: config)
     monkeypatch.setattr(agent_module, "setup_logging", lambda **_kwargs: None)
-    monkeypatch.setattr(agent_module, "SelfEvolvingAgent", DummyAgent)
+    monkeypatch.setattr(agent_module, "AgentRuntime", DummyAgent)
     monkeypatch.setattr(agent_module, "run_preflight_doctor", lambda _config: created.setdefault("doctor_ran", True))
     monkeypatch.setattr(agent_module, "AgentWorkbenchShell", lambda config=None: created.setdefault("shell_created", True))
 
@@ -323,7 +323,7 @@ def test_main_passes_resolved_agent_mode_when_supported(monkeypatch):
     monkeypatch.setattr(agent_module, "get_ui", lambda: ui)
     monkeypatch.setattr(agent_module, "create_config_from_args", lambda _args: config)
     monkeypatch.setattr(agent_module, "setup_logging", lambda **_kwargs: None)
-    monkeypatch.setattr(agent_module, "SelfEvolvingAgent", DummyAgent)
+    monkeypatch.setattr(agent_module, "AgentRuntime", DummyAgent)
     monkeypatch.setattr(agent_module, "should_launch_workbench", lambda *_args, **_kwargs: False)
 
     agent_module.main(args=make_args(auto=True, mode="chat"))
@@ -358,7 +358,7 @@ def test_main_single_turn_runs_headless_without_live_ui(monkeypatch):
     monkeypatch.setattr(agent_module, "get_ui", lambda: ui)
     monkeypatch.setattr(agent_module, "create_config_from_args", lambda _args: config)
     monkeypatch.setattr(agent_module, "setup_logging", lambda **_kwargs: None)
-    monkeypatch.setattr(agent_module, "SelfEvolvingAgent", DummyAgent)
+    monkeypatch.setattr(agent_module, "AgentRuntime", DummyAgent)
 
     agent_module.main(initial_prompt="probe", args=make_args(no_shell=True, single_turn=True, prompt="probe"))
 
@@ -389,7 +389,7 @@ def test_main_headless_startup_failure_writes_stderr(monkeypatch):
     monkeypatch.setattr(agent_module, "get_ui", lambda: ui)
     monkeypatch.setattr(agent_module, "create_config_from_args", lambda _args: config)
     monkeypatch.setattr(agent_module, "setup_logging", lambda **_kwargs: None)
-    monkeypatch.setattr(agent_module, "SelfEvolvingAgent", FailingAgent)
+    monkeypatch.setattr(agent_module, "AgentRuntime", FailingAgent)
     monkeypatch.setattr(agent_module.sys, "stderr", stderr)
 
     with pytest.raises(SystemExit) as exc:

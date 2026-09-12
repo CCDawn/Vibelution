@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import agent as agent_module
-from agent import SelfEvolvingAgent
+from agent import AgentRuntime
 from core.orchestration.agent_modes import AgentMode
 from core.orchestration.runtime_goal import RuntimeGoalPacket
 from core.llm.protocols import ModelProtocol, get_protocol_policy
@@ -119,7 +119,7 @@ def test_common_prompt_forbids_repeating_unchanged_validation() -> None:
 
 
 def test_agent_uses_unbound_client_when_protocol_disallows_tools() -> None:
-    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent = AgentRuntime.__new__(AgentRuntime)
     base = SimpleNamespace(
         capabilities=LLMCapabilities(supports_tool_calling=False),
         protocol_route=_route(ModelProtocol.BASIC_CHAT_NO_TOOLS),
@@ -138,8 +138,8 @@ def _basic_chat_fallback_route() -> SimpleNamespace:
     return route
 
 
-def _agent_with_base_llm(base: SimpleNamespace) -> SelfEvolvingAgent:
-    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+def _agent_with_base_llm(base: SimpleNamespace) -> AgentRuntime:
+    agent = AgentRuntime.__new__(AgentRuntime)
     agent._base_llm = base
     agent.llm_with_tools = object()
     agent._is_restart_focus_mode = lambda: False
@@ -199,7 +199,7 @@ def test_agent_explicit_basic_chat_route_keeps_unbound_client_without_raise() ->
 
 
 def test_agent_builds_v2_prompt_with_required_protocol_adapter() -> None:
-    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent = AgentRuntime.__new__(AgentRuntime)
     route = _route(ModelProtocol.BASIC_CHAT_NO_TOOLS)
     agent._base_llm = SimpleNamespace(
         protocol_route=route,
