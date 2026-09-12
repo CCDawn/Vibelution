@@ -2,6 +2,7 @@ import type { ConversationMessage, SessionTurnItem } from "../../api/types";
 import { assistantStatusTurnItems, assistantTurnIsStreaming } from "../../routes/chatTurnProtocol";
 
 import type { AgentMessageOperation, AgentMessageOperationGroups } from "./agentMessageOperations";
+import { activeTurnStageLabel } from "./conversationActiveTurnStatusPresentation";
 import { isInternalStreamingStatusStage } from "./conversationInternalStatus";
 import { isRunningOperationStatus } from "./conversationOperationState";
 
@@ -109,54 +110,10 @@ function statusEventText(event: ConversationFeedbackEvent) {
 }
 
 export function feedbackStatusPlaceholderLabel(event: ConversationFeedbackEvent, lang: "zh" | "en" | string) {
-  const zh = lang !== "en";
-  const stage = statusEventName(event).toLowerCase();
-  const combined = statusEventCombinedText(event).toLowerCase();
   if (feedbackStatusIsLongLoopProgress(event)) {
-    return zh ? "工具循环" : "Tool loop";
+    return lang !== "en" ? "工具循环" : "Tool loop";
   }
-  if (stage === "user_submit") {
-    return zh ? "已发送" : "Sent";
-  }
-  if (stage === "context_prepare") {
-    return zh ? "准备上下文" : "Preparing context";
-  }
-  if (stage === "queued") {
-    return zh ? "等待执行" : "Queued";
-  }
-  if (stage === "agent_prepare") {
-    return zh ? "准备 Agent" : "Preparing agent";
-  }
-  if (stage === "history_restore") {
-    return zh ? "恢复会话" : "Restoring session";
-  }
-  if (stage === "followup_prepare") {
-    return zh ? "准备下一步" : "Preparing next step";
-  }
-  if (
-    stage === "model_thinking"
-    || stage === "server_thinking"
-    || stage === "reasoning"
-    || combined.includes("model_thinking")
-    || combined.includes("server_thinking")
-    || combined.includes("正在思考")
-    || combined.includes("reasoning")
-  ) {
-    return zh ? "思考中" : "Thinking";
-  }
-  if (stage === "model_request" || combined.includes("model_request") || combined.includes("请求模型")) {
-    return zh ? "请求模型" : "Request model";
-  }
-  if (
-    stage === "model_retry"
-    || stage === "retrying"
-    || combined.includes("retrying")
-    || combined.includes("model_retry")
-    || combined.includes("模型连接正在重试")
-  ) {
-    return zh ? "请求重试" : "Request retry";
-  }
-  return zh ? "运行状态" : "Runtime status";
+  return activeTurnStageLabel(statusEventName(event), lang);
 }
 
 export function feedbackStatusIsLongLoopProgress(event: ConversationFeedbackEvent) {

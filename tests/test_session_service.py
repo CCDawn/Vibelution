@@ -807,11 +807,10 @@ def test_session_turn_progress_live_output_closes_previous_statuses(monkeypatch,
     assert live_state is not None
     progress_events = [event for event in live_state.feedback_events if event["kind"] == "status"]
     assert [event["name"] for event in progress_events] == [
-        "context_prepare",
-        "agent_prepare",
-        "model_request",
+        "working",
+        "thinking",
     ]
-    assert [event["status"] for event in progress_events] == ["done", "done", "running"]
+    assert [event["status"] for event in progress_events] == ["done", "running"]
 
 
 def test_session_turn_progress_live_output_does_not_block_on_durable_work_run(monkeypatch, tmp_path):
@@ -838,7 +837,7 @@ def test_session_turn_progress_live_output_does_not_block_on_durable_work_run(mo
         session_service._set_session_running("session-live", False, turn_id="turn-progress")
 
     assert live_state is not None
-    assert live_state.stage == "context_prepare"
+    assert live_state.stage == "working"
     assert durable_updates == []
 
 
