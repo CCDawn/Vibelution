@@ -415,6 +415,7 @@ type Copy = {
   reviewPriority: string;
   markingReason: string;
   noKnowledgeBases: string;
+  teamKnowledgeEmptyHint: string;
   knowledgeHint: string;
   platformPipeline: string;
   pipelineSource: string;
@@ -943,7 +944,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     stability: "稳定性",
     reviewPriority: "评审优先级",
     markingReason: "标记原因",
-    noKnowledgeBases: "无团队知识库",
+    noKnowledgeBases: "当前身份没有可见的知识库",
+    teamKnowledgeEmptyHint: "可在「团队」页面打开团队，通过「知识库」入口进入；也可在 Agent 管理 →「记忆设置」中为该身份配置知识库权限。",
     knowledgeHint: "来源、提案、审核、正式知识分层治理。",
     platformPipeline: "记忆平台流水线",
     pipelineSource: "来源登记",
@@ -1368,7 +1370,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     stability: "Stability",
     reviewPriority: "Review priority",
     markingReason: "Marking reason",
-    noKnowledgeBases: "No knowledge bases",
+    noKnowledgeBases: "No knowledge bases visible to the current identity",
+    teamKnowledgeEmptyHint: "Open a team from the Teams page and use its Knowledge entry; or grant this identity knowledge-base access in Agent management → Memory policy.",
     knowledgeHint: "Sources, proposals, review, and formal knowledge stay separated.",
     platformPipeline: "Memory platform pipeline",
     pipelineSource: "Source registration",
@@ -3776,6 +3779,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
         browseBack: copy.browseBack,
         browseSelectCard: copy.browseSelectTeam,
         browseEmptyCards: copy.noKnowledgeBases,
+        browseEmptyCardsHint: copy.teamKnowledgeEmptyHint,
         browseEmptyEntries: copy.noMatches,
         noContent: copy.noContent,
         searchPlaceholder: copy.searchTeam,
@@ -4258,9 +4262,11 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
   const viewStackClassName =
     forcedView === "graph"
       ? `${styles.viewStack} ${styles.graphViewStack}`
-      : isPersonalMemoryView(forcedView) || isTeamMemoryView(forcedView) || isLibraryMemoryView(forcedView)
-        ? `${styles.viewStack} ${styles.browseViewStack}`
-        : styles.viewStack;
+      : forcedView === "knowledge"
+        ? `${styles.viewStack} ${styles.knowledgeViewStack}`
+        : isPersonalMemoryView(forcedView) || isTeamMemoryView(forcedView) || isLibraryMemoryView(forcedView)
+          ? `${styles.viewStack} ${styles.browseViewStack}`
+          : styles.viewStack;
 
   return (
     <VDenseOpsPage
@@ -4305,15 +4311,17 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
             />
           )}
         >
-          {isPersonalMemoryView(forcedView)
-            ? createAgentMemoryPanel()
-            : isTeamMemoryView(forcedView)
-              ? createTeamBrowsePanel()
-              : isLibraryMemoryView(forcedView)
-                ? createLibraryBrowsePanel()
-                : forcedView === "graph"
-                  ? renderGraphView()
-                  : createOpsPanel()}
+          {forcedView === "knowledge"
+            ? renderKnowledgeView()
+            : isPersonalMemoryView(forcedView)
+              ? createAgentMemoryPanel()
+              : isTeamMemoryView(forcedView)
+                ? createTeamBrowsePanel()
+                : isLibraryMemoryView(forcedView)
+                  ? createLibraryBrowsePanel()
+                  : forcedView === "graph"
+                    ? renderGraphView()
+                    : createOpsPanel()}
         </Suspense>
       </div>
     </VDenseOpsPage>
