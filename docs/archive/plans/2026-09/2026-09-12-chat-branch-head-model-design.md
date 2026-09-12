@@ -6,6 +6,7 @@
 - 本次范围：只读测绘与设计落盘。实施拆为后端存储/回放、后端 API/SSE、前端 UI 三个后续任务，各自独立验证与合入。
 - 证据基线：本地 `main` 的 `674b1050c`（T1 journal 水位线、T2 前端权威截断、T4 停止快路、T5 回到底部锚点均已合入）；本文引用的行号来自该提交的只读测绘。
 - 用户裁决：采纳完整 branch/head 模型；先评审本设计，再决定存储契约与实施顺序。
+- 补调（2026-09-12）：§10 为仓外成熟方案对照（本地项目库 `langchain-ai__langgraph`、`langgenius__dify`），供评审参考；不改变第 3–8 节契约。
 
 ## 1. 现状测绘（实施约束）
 
@@ -214,3 +215,32 @@ return active
 3. 分支保留配额：每会话分支上限、超限时旧的被取代段是否压缩归档到 sidecar。
 4. 稳定 id 迁移节奏：`beforeNodeId` 与 `beforeMessageIndex` 并存多久。
 5. 是否需要「把分支导出为新会话」（跨会话 fork），如需要应作为独立后续设计。
+
+## 10. 仓外成熟方案对照（补调）
+
+调研范围：本地 GitHub 项目库 registry（`memory/github-projects/registry.json`，45 个 ready 项目）中与「会话分支 / 编辑重发 / 时间旅行」直接相关的候选为 `langchain-ai__langgraph` 与 `langgenius__dify`（head 见 10.3 表）。LibreChat、ChatGPT 的 mapping/current_node 等不在库内，不做无本地来源的引用，仅作概念对照。
+
+### 10.1 LangGraph：checkpoint 父链 + 从历史 checkpoint 分叉
+
+- checkpoint 显式携带父引用：`CheckpointTuple.parent_config`（`libs/checkpoint/langgraph/checkpoint/base/__init__.py:145`）；读取时按 `get_tuple` + `parent_config` 逐级回溯父链（同文件 :596-683）。
+- 版本号单调递增：`get_next_version`（同文件 :692）——与 T1 水位线「sequence 不回头」的设计一致。
+- 从历史 checkpoint 派生新分支：`update_state`（`libs/langgraph/langgraph/pregel/main.py:2515`）、`bulk_update_state`（同文件 :1590）以指定 checkpoint 为分叉点写入新状态；旧 checkpoint 保留（time travel / fork 语义）。
+- 映射到本文：`branch_rebase.parentEventId`（分叉点）≈ checkpoint 的 `parent_config` 父链；「旧事件不删、只追加分叉」≈「旧 checkpoint 不删」。未采纳：其「快照树 + 每 checkpoint 全量状态」会引入第二存储，违背 Journal 单文件 append-only 唯一权威（§3）。
+
+### 10.2 Dify：Message 父指针 + head→根 回溯取上下文
+
+- 消息父指针：`Message.parent_message_id`（`api/models/model.py:1578`）；新消息写入时设置父（`api/core/app/apps/message_based_app_generator.py:216`）；无父/首条场景使用 `UUID_NIL` 哨兵（`api/core/app/apps/agent_app/app_generator.py:204-207, 342`）。
+- 模型上下文 = 活跃路径：`extract_thread_messages`（`api/core/prompt/utils/extract_thread_messages.py:7-25`）从最新消息沿 `parent_message_id` 回溯，维护 `next_message` 指针，只有匹配父链的消息才入列，兄弟分支自动跳过；遇到无父指针消息（重新生成产生的新线程起点）即停止。结果即「head → 根」，与本文 §3.2 折叠目标同构。
+- 迁移代价（反面参照）：`parent_message_id` 为后补字段，需回填存量消息为 `uuid_nil()`（`api/migrations/versions/2024_09_11_1012-d57ba9ebb251_add_parent_message_id_to_messages.py`），其后另有 `d8e744d88ed6_fix_wrong_service_api_history` 修复历史错乱。本文因此选择「追加 rebase 事件、老会话零迁移」，不改既有消息写入方（§3、§7）。
+- 前端对照：`parent_message_id` 在 web 前端仅在类型层透传（`web/models/log.ts:84`；已检索 `web/service`、`web/models`、`web/app/components/chat`），未发现前端树计算，与本文 §6「前端不做树计算、只消费服务端快照」一致。
+
+### 10.3 结论与来源锚点
+
+- 两个成熟实现的共同点：会话历史是**追加式因果结构**（父链 / checkpoint 链），由**显式活跃叶（最新节点）**决定可见路径；都不用「物理截断旧内容」表达编辑重发。
+- 本文 §3 的 rebase 事件可同时表达两者语义：`fromEventId` ≈ LangGraph 父 checkpoint ≈ Dify `parent_message_id`；`head_select` ≈ 显式叶指针（ChatGPT `current_node` 式概念，仅概念对照，无本地来源）。
+- 未采纳项及理由：逐消息父指针（迁移与写入方改造成本，见 10.2）；checkpoint 快照树（第二存储，见 10.1）；`head_select` 必须由服务端 publish 全量快照（前端无树，见 §3.4）。
+
+| projectId | headSha | 引用位置（本地项目库） |
+| --- | --- | --- |
+| `langchain-ai__langgraph` | `38031739e551638e373fb553453256c23feeb41f` | `libs/checkpoint/langgraph/checkpoint/base/__init__.py`（parent_config:145、get_tuple 父链回溯 596-683、get_next_version:692）；`libs/langgraph/langgraph/pregel/main.py`（update_state:2515、bulk_update_state:1590） |
+| `langgenius__dify` | `fcb380044cd820c501aad70f157460d257e34dfd` | `api/models/model.py`（parent_message_id:1578）；`api/core/app/apps/message_based_app_generator.py`（:216）；`api/core/app/apps/agent_app/app_generator.py`（:204-207, 342）；`api/core/prompt/utils/extract_thread_messages.py`（:7-25）；`api/migrations/versions/2024_09_11_1012-d57ba9ebb251_add_parent_message_id_to_messages.py`；`web/models/log.ts`（:84） |
