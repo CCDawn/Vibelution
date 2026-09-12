@@ -52,7 +52,7 @@
 | 档案 | Agent 记录 / ToolPolicy / MemoryPolicy（唯一可写权威） | 实例 workspace `agents/agents.json`（SQLite `agents` 表是只读投影） |
 | 身份 | 三核心 `COMMON → SOUL → AGENTS`（fail-closed）+ 角色模板 → 会话快照冻结（稳定前缀利于 prompt cache） | `core/prompt_manager/core_prompt_sources.py`、`core/web/services/prompt_template_service.py` |
 | 能力 | 工具：候选 → 授权（deny-first）→ 物化；记忆注入；委派多层闸门（默认禁） | `tools/Key_Tools.py`、`core/authorization/`、`core/orchestration/context_engine.py` |
-| 上岗 | `get_agent` → 提示词快照 → `resolve_agent_llm`（解析不出即失败关闭）→ `SelfEvolvingAgent.__init__` | `session/worker.py`、`core/llm/agent_runtime.py`、`agent.py` |
+| 上岗 | `get_agent` → 提示词快照 → `resolve_agent_llm`（解析不出即失败关闭）→ `AgentRuntime.__init__` | `session/worker.py`、`core/llm/agent_runtime.py`、`agent.py` |
 
 要点：模型槽位六个（dialogue / mentalModel / summary / subagentPlanning / subagentExecution / vision）；禁止默认模型与默认窗口兜底。
 
