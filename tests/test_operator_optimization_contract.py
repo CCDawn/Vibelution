@@ -130,6 +130,11 @@ def test_round_plan_references_frozen_protocol_and_records_candidates():
         candidateRef=parent,
         objective="Compare the proposed candidate against the fixed parent",
         evaluation="Use the frozen paired latency and correctness protocol",
+        hypothesisRef={"artifactId": "hypothesis-1", "kind": "optimization_hypothesis", "sha256": "c" * 64},
+        knowledgeRef={"artifactId": "knowledge-1", "kind": "optimization_knowledge", "sha256": "d" * 64},
+        prediction="Lower paired latency", counterevidence="No improvement or incorrect output",
+        evidenceAssessment="The frozen observations motivate a discriminating experiment",
+        trialCount=1, trialTimeoutSeconds=60,
     )
     assert plan.protocolRef.kind == "operator_measurement_protocol"
     assert plan.parentCandidateRef.candidate == parent.candidate

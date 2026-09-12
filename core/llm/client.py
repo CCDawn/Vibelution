@@ -3129,6 +3129,7 @@ class LLMClient:
         invocation_scope: Any = None,
         replay_state: Any = None,
         output_schema: SemanticOutputSchema | None = None,
+        apply_budget_preflight: bool = True,
     ) -> Dict[str, Any]:
         wire_adapter = self._required_wire_adapter()
         max_output_tokens_override = _max_output_tokens_override_from_metadata(metadata)
@@ -3390,11 +3391,13 @@ class LLMClient:
             )
         else:
             raise AssertionError("registered wire adapter uses unsupported protocol")
-        final_payload = self._apply_invocation_budget_preflight(
-            built.payload,
-            metadata=metadata,
-            invocation_scope=invocation_scope,
-        )
+        final_payload = built.payload
+        if apply_budget_preflight:
+            final_payload = self._apply_invocation_budget_preflight(
+                final_payload,
+                metadata=metadata,
+                invocation_scope=invocation_scope,
+            )
         from .wire.chat_completions import ensure_chat_completions_reasoning_roundtrip
 
         final_payload = ensure_chat_completions_reasoning_roundtrip(
@@ -3613,7 +3616,14 @@ class LLMClient:
         if hasattr(binding_payload, "to_dict"):
             binding_payload = binding_payload.to_dict()
         binding: Any
-        if isinstance(binding_payload, Mapping):
+        if raw.get("operatorInvocationBinding") is not None:
+            from core.research.operator_optimization.discussion_contracts import OperatorInvocationBinding
+
+            operator_binding = OperatorInvocationBinding.model_validate(raw["operatorInvocationBinding"])
+            binding = operator_binding.model_dump(mode="json")
+            binding.update({"questionId": "OPERATOR-SOFTMAX", "questionRunId": binding["workflowRunId"],
+                "outcomeKinds": ["optimization_hypothesis"], "mappingPolicyId": "operator-discussion-v1"})
+        elif isinstance(binding_payload, Mapping):
             try:
                 from core.research.workflow.contracts.question_stage_binding import (
                     QuestionStageBinding,
@@ -3730,6 +3740,90 @@ class LLMClient:
             "expectedModelRef": expected_model_ref,
         }
 
+    @staticmethod
+    def _attempt_invocation_scope(invocation_scope: Any, attempt: int) -> Any:
+        """Give each provider attempt its own operator admission identity."""
+
+        raw = _MODEL_INVOCATION_RECEIPT_CONTEXT.get()
+        if (attempt <= 1 or invocation_scope is None or not isinstance(raw, Mapping)
+                or raw.get("operatorInvocationBinding") is None):
+            return invocation_scope
+        invocation_id = str(getattr(invocation_scope, "invocation_id", "") or "").strip()
+        if not invocation_id:
+            return invocation_scope
+        return replace(
+            invocation_scope,
+            invocation_id=f"{invocation_id}:attempt-{int(attempt)}",
+        )
+
+    @staticmethod
+    def _failed_attempt_outcome(invocation_scope: Any, error: BaseException) -> TurnOutcome:
+        from .types import CanonicalItemIdentity
+
+        identity = CanonicalItemIdentity(
+            session_id=str(getattr(invocation_scope, "session_id", "") or ""),
+            turn_id=str(getattr(invocation_scope, "turn_id", "") or ""),
+            invocation_id=str(getattr(invocation_scope, "invocation_id", "") or ""),
+            iteration=max(0, int(getattr(invocation_scope, "iteration", 0) or 0)),
+            item_id="provider-attempt",
+        )
+        return TurnOutcome(
+            kind="failed",
+            identity=identity,
+            error=str(error),
+            terminal_event_seen=True,
+        )
+
+    def _capture_operator_attempt_receipt(
+        self,
+        *,
+        error: BaseException,
+        metadata: Optional[Dict[str, Any]],
+        invocation_scope: Any,
+        request_payload: Mapping[str, Any],
+        started_at_ms: int,
+        finished_at_ms: int,
+        attempt: int,
+        retry_count: int,
+    ) -> None:
+        """Emit one failed operator attempt to the server-owned receipt sink."""
+
+        raw = _MODEL_INVOCATION_RECEIPT_CONTEXT.get()
+        if not isinstance(raw, Mapping) or raw.get("operatorInvocationBinding") is None:
+            return
+        attempt_scope = self._attempt_invocation_scope(invocation_scope, attempt)
+        category = str(getattr(error, "category", "failed") or "failed").strip().lower()
+        status = "timeout" if category == "timeout" else "failed"
+        failure = self._failed_attempt_outcome(attempt_scope, error)
+        captured = self._attach_model_invocation_receipt(
+            failure,
+            metadata=metadata,
+            invocation_scope=invocation_scope,
+            request_content=_canonical_receipt_request_summary(request_payload),
+            response_content={"status": status, "category": category, "error": str(error)},
+            started_at_ms=started_at_ms,
+            finished_at_ms=max(started_at_ms, finished_at_ms),
+            attempt=attempt,
+            retry_count=retry_count,
+            token_usage={},
+            receipt_status=status,
+        )
+        receipt = captured.model_invocation_receipt
+        callback = raw.get("operatorInvocationReceiptCallback")
+        if not callable(callback) or not isinstance(receipt, Mapping):
+            return
+        try:
+            callback(dict(receipt))
+        except Exception as exc:  # receipt delivery is part of operator admission
+            raise LLMError(
+                "receipt_authority_error",
+                "Operator invocation receipt callback failed.",
+                retryable=False,
+                provider=self.provider.kind,
+                model=self.profile.model,
+                details={"payloadValidationResult": "receipt_callback_failed"},
+            ) from exc
+
     def _apply_invocation_budget_preflight(
         self,
         payload: Dict[str, Any],
@@ -3746,6 +3840,15 @@ class LLMClient:
             else None
         )
         if not callable(callback):
+            if isinstance(raw, Mapping) and raw.get("operatorInvocationBinding") is not None:
+                raise LLMError(
+                    "budget_authority_error",
+                    "Operator invocation requires server-owned budget admission.",
+                    retryable=False,
+                    provider=self.provider.kind,
+                    model=self.profile.model,
+                    details={"payloadValidationResult": "blocked_before_provider"},
+                )
             return payload
         context = self._receipt_context(metadata, invocation_scope)
         if context is None:
@@ -3755,6 +3858,14 @@ class LLMClient:
                 retryable=False,
                 provider=self.provider.kind,
                 model=self.profile.model,
+                details={"payloadValidationResult": "blocked_before_provider"},
+            )
+        if (raw.get("operatorInvocationBinding") is not None and (
+                context["expectedProviderId"] != self.provider.provider_id
+                or context["expectedModelId"] != self.profile.model)):
+            raise LLMError(
+                "budget_authority_error", "Operator model route differs from its frozen budget binding.",
+                retryable=False, provider=self.provider.kind, model=self.profile.model,
                 details={"payloadValidationResult": "blocked_before_provider"},
             )
         output_key = (
@@ -3783,6 +3894,8 @@ class LLMClient:
             decision = callback(
                 estimated_input_tokens=estimated_input,
                 max_output_tokens=profile_limit,
+                **({"invocation_id": invocation_scope.invocation_id}
+                    if raw.get("operatorInvocationBinding") is not None else {}),
             )
         except Exception as exc:
             raise LLMError(
@@ -3849,6 +3962,7 @@ class LLMClient:
         attempt: int,
         retry_count: int,
         token_usage: Mapping[str, int] | None = None,
+        receipt_status: str | None = None,
     ) -> TurnOutcome:
         """Attach a bounded receipt only when the caller supplied full binding."""
 
@@ -3880,11 +3994,14 @@ class LLMClient:
             ModelInvocationStatus,
         )
 
-        status = (
-            ModelInvocationStatus.RETRIED
-            if retry_count > 0
-            else ModelInvocationStatus.SUCCEEDED
-        )
+        if receipt_status:
+            status = ModelInvocationStatus(str(receipt_status).strip().lower())
+        else:
+            status = (
+                ModelInvocationStatus.RETRIED
+                if retry_count > 0
+                else ModelInvocationStatus.SUCCEEDED
+            )
         try:
             provider_attempt = max(1, int(attempt))
             invocation_id = str(
@@ -3892,6 +4009,10 @@ class LLMClient:
             ).strip()
             if not invocation_id:
                 return outcome
+            if binding.get("workflowId") == "operator-optimization":
+                invocation_id = str(
+                    self._attempt_invocation_scope(invocation_scope, provider_attempt).invocation_id
+                )
             iteration = max(
                 0, int(getattr(invocation_scope, "iteration", 0) or 0)
             )
@@ -3945,6 +4066,11 @@ class LLMClient:
                 }
             )
             safe_metadata = {
+                **({"modelRef": expected_model_ref, "usageKnown": bool(token_usage and
+                    token_usage.get("inputTokens", 0) + token_usage.get("outputTokens", 0) > 0 and
+                    token_usage.get("totalTokens", 0) in (0,
+                        token_usage.get("inputTokens", 0) + token_usage.get("outputTokens", 0)))}
+                    if binding.get("workflowId") == "operator-optimization" else {}),
                 "captureSource": "llm_provider_boundary",
                 "questionStage": str(binding.get("questionStage") or ""),
                 "outcomeKinds": list(binding.get("outcomeKinds") or []),
@@ -3968,6 +4094,9 @@ class LLMClient:
                 run_id=context["receiptRunId"],
                 node_run_id=binding["formalNodeRunId"],
                 scope={
+                    **({key: str(binding[key]) for key in ("teamId", "researchProjectId",
+                        "optimizationCampaignId", "roundId", "participantId")}
+                        if binding.get("workflowId") == "operator-optimization" else {}),
                     "questionId": binding["questionId"],
                     "runId": context["receiptRunId"],
                     "taskId": binding["taskId"],
@@ -4107,6 +4236,7 @@ class LLMClient:
             message_count=len(messages or []),
             tool_count=tool_count,
             metadata=event_metadata,
+            invocation_scope=invocation_scope,
         )
         backend_finished_at_ms = int(time.time() * 1000)
         backend_attempt, backend_retry_count = _LLM_BACKEND_ATTEMPT_CONTEXT.get()
@@ -4366,11 +4496,16 @@ class LLMClient:
         message_count: int,
         tool_count: int,
         metadata: Optional[Dict[str, Any]] = None,
+        invocation_scope: Any = None,
     ) -> Any:
         max_attempts = _retry_policy_max_attempts(self.profile, role=self.role)
         last_error: LLMError | None = None
         route_key = _llm_route_concurrency_key(self.provider, self.profile, profile_id=self.profile_id)
         for attempt in range(1, max_attempts + 1):
+            attempt_scope = self._attempt_invocation_scope(invocation_scope, attempt)
+            attempt_started_at_ms = int(time.time() * 1000)
+            request_payload = dict(payload)
+            provider_started = False
             try:
                 _LLM_BACKEND_ATTEMPT_CONTEXT.set((attempt, max(0, attempt - 1)))
                 _raise_if_llm_cancelled()
@@ -4386,8 +4521,17 @@ class LLMClient:
                     tool_count=tool_count,
                 ):
                     _raise_if_llm_cancelled()
-                    request_payload, finish_cancel_watch = self._prepare_cancellable_non_stream_request(payload)
+                    if attempt_scope is not invocation_scope:
+                        request_payload = self._apply_invocation_budget_preflight(
+                            dict(payload),
+                            metadata=metadata,
+                            invocation_scope=attempt_scope,
+                        )
+                    request_payload, finish_cancel_watch = self._prepare_cancellable_non_stream_request(
+                        request_payload
+                    )
                     try:
+                        provider_started = True
                         with _llm_provider_proxy_env(self.config, request_payload.get("base_url")):
                             response = self._backend_for_payload(request_payload)(request_payload)
                         _raise_if_llm_cancelled()
@@ -4403,12 +4547,35 @@ class LLMClient:
                     finally:
                         finish_cancel_watch()
             except LLMCancelledError as exc:
-                raise _llm_cancelled_error(exc.reason) from exc
+                cancelled_error = _llm_cancelled_error(exc.reason)
+                if provider_started:
+                    self._capture_operator_attempt_receipt(
+                        error=cancelled_error,
+                        metadata=metadata,
+                        invocation_scope=invocation_scope,
+                        request_payload=request_payload,
+                        started_at_ms=attempt_started_at_ms,
+                        finished_at_ms=int(time.time() * 1000),
+                        attempt=attempt,
+                        retry_count=max(0, attempt - 1),
+                    )
+                raise cancelled_error from exc
             except Exception as exc:
                 classification = classify_error(exc)
                 llm_error = _with_retry_details(classification.error, attempt=attempt, max_attempts=max_attempts)
                 last_error = llm_error
                 error_category = llm_error.category
+                if provider_started:
+                    self._capture_operator_attempt_receipt(
+                        error=llm_error,
+                        metadata=metadata,
+                        invocation_scope=invocation_scope,
+                        request_payload=request_payload,
+                        started_at_ms=attempt_started_at_ms,
+                        finished_at_ms=int(time.time() * 1000),
+                        attempt=attempt,
+                        retry_count=max(0, attempt - 1),
+                    )
                 fields = _llm_retry_event_fields(
                     role=self.role,
                     profile_id=self.profile_id,
@@ -5073,6 +5240,7 @@ class LLMClient:
         stream_usage_options_downgraded = False
         route_key = _llm_route_concurrency_key(self.provider, self.profile, profile_id=self.profile_id)
         for attempt in range(1, max_attempts + 1):
+            attempt_scope = self._attempt_invocation_scope(invocation_scope, attempt)
             try:
                 _raise_if_llm_cancelled()
             except LLMCancelledError as exc:
@@ -5099,7 +5267,15 @@ class LLMClient:
             inter_chunk_count = 0
             usage_observation = UsageStats()
             generated_text_parts: list[str] = []
+            attempt_payload = payload
+            provider_started = False
             try:
+                if attempt_scope is not invocation_scope:
+                    attempt_payload = self._apply_invocation_budget_preflight(
+                        dict(payload),
+                        metadata=event_metadata,
+                        invocation_scope=attempt_scope,
+                    )
                 _record_llm_scene_event(
                     "stream",
                     "llm.stream.started",
@@ -5144,8 +5320,9 @@ class LLMClient:
                         tool_count=tool_count,
                     )
                     try:
+                        provider_started = True
                         events, emitted_fn, outcome_fn = self._stream_attempt(
-                            payload,
+                            attempt_payload,
                             message_count=message_count,
                             tool_count=tool_count,
                             metadata=metadata,
@@ -5438,6 +5615,17 @@ class LLMClient:
                 return canonical_outcome
             except LLMCancelledError as exc:
                 llm_error = _llm_cancelled_error(exc.reason)
+                if provider_started:
+                    self._capture_operator_attempt_receipt(
+                        error=llm_error,
+                        metadata=event_metadata,
+                        invocation_scope=invocation_scope,
+                        request_payload=attempt_payload,
+                        started_at_ms=int(start * 1000),
+                        finished_at_ms=int(time.time() * 1000),
+                        attempt=attempt,
+                        retry_count=max(0, attempt - 1),
+                    )
                 _record_llm_scene_event(
                     "stream",
                     "llm.stream.cancelled",
@@ -5470,6 +5658,17 @@ class LLMClient:
                 classification = classify_error(exc)
                 llm_error = _with_retry_details(classification.error, attempt=attempt, max_attempts=max_attempts)
                 last_error = llm_error
+                if provider_started:
+                    self._capture_operator_attempt_receipt(
+                        error=llm_error,
+                        metadata=event_metadata,
+                        invocation_scope=invocation_scope,
+                        request_payload=attempt_payload,
+                        started_at_ms=int(start * 1000),
+                        finished_at_ms=int(time.time() * 1000),
+                        attempt=attempt,
+                        retry_count=max(0, attempt - 1),
+                    )
                 if emitted:
                     _record_llm_scene_event(
                         "stream",

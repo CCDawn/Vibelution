@@ -41,7 +41,7 @@
 4. `_schedule_session_turn` 把 context 交给 session scheduler/executor。排队和出队状态也会发布 `session_detail`。
 5. `_run_session_turn` 准备 workspace，同步 LLM key 环境，解析 Agent 模型槽位，绑定 prompt-cache partition，构建 Agent context packet，从 `turn_journal` 组装历史，记录 `turn_context`，并创建 runtime chat agent。
 6. `_capture_session_ui_stream` 包装 UI hooks 和 event-bus callbacks：`stream_response`、`stream_thought`、mental state、tool start/result/error、LLM status。
-7. `_run_session_continuation_loop` 调用 `run_existing_agent_single_turn`，最终进入 `SelfEvolvingAgent.run_single_turn`。
+7. `_run_session_continuation_loop` 调用 `run_existing_agent_single_turn`，最终进入 `AgentRuntime.run_single_turn`。
 8. `agent.py::_invoke_llm` 能 stream 时经过 `core.llm.invocation.stream_llm`，否则经过 `invoke_llm`。stream chunk 会推到 `ui.stream_response` 与 `ui.stream_thought`。
 9. UI capture 层批处理文本，向 `turn_journal` 写入 `assistant_delta_committed`、`tool_call_started`、`tool_result`，更新 `SessionLiveOutputState`，并发布 `assistant_delta` SSE。
 10. `_persist_session_turn_result` 格式化最终可见回复，持久化 `assistant_message` 和 `turn_completed` / `turn_failed` / `turn_interrupted`，记录 work-run/runtime 证据，清理 live output，并发布最终 `session_detail`。

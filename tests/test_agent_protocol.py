@@ -14,7 +14,7 @@ from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 
 import agent as agent_module
 from agent import (
-    SelfEvolvingAgent,
+    AgentRuntime,
     compact_tool_output_for_diagnosis,
     extract_subagent_primary_goal,
     infer_result_from_tool_outputs,
@@ -57,7 +57,7 @@ def test_turn_tool_allowlist_rebinds_and_blocks_out_of_scope_execution(monkeypat
     context_tool = object()
     writeback_tool = object()
     unrelated_tool = object()
-    instance = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    instance = AgentRuntime.__new__(AgentRuntime)
     instance._base_llm = FakeLlm()
     instance.llm_with_tools = object()
     instance._bound_llm_cache = {}
@@ -107,7 +107,7 @@ def test_turn_failure_diagnostic_includes_prompt_free_turn_correlation(monkeypat
             (phase, code, kwargs.get("fields") or {})
         ),
     )
-    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent = AgentRuntime.__new__(AgentRuntime)
     agent.runtime_agent_binding = {}
     agent._last_llm_error_details = {}
     agent._last_llm_failure_attempts = 0
@@ -141,7 +141,7 @@ def test_context_budget_preflight_guard_records_structured_diagnostic(monkeypatc
         "get_ui",
         lambda: SimpleNamespace(add_log=lambda *args, **kwargs: None),
     )
-    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent = AgentRuntime.__new__(AgentRuntime)
     agent.runtime_agent_binding = {}
     agent._context_input_hard_limit = 1000
     agent._last_llm_error_details = {}
@@ -172,7 +172,7 @@ def test_context_budget_preflight_guard_records_structured_diagnostic(monkeypatc
 
 
 def test_session_turn_reuse_refreshes_turn_scoped_tool_authorization(monkeypatch):
-    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent = AgentRuntime.__new__(AgentRuntime)
     agent.key_tools = [SimpleNamespace(name="git_status")]
     agent._tool_authorization_decision_fingerprint = "prior-turn"
     agent._active_turn_messages = ["old"]
@@ -206,7 +206,7 @@ def test_session_turn_reuse_refreshes_turn_scoped_tool_authorization(monkeypatch
 
 
 def test_turn_interrupt_checker_rebinds_tool_executor_in_worker_context():
-    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent = AgentRuntime.__new__(AgentRuntime)
     agent.tool_executor = ToolExecutor()
     agent._turn_interrupt_checker = None
     tool_started = threading.Event()
@@ -232,7 +232,7 @@ def test_turn_interrupt_checker_rebinds_tool_executor_in_worker_context():
 
 
 def test_supervised_system_prompt_excludes_global_git_and_runtime_diagnostics():
-    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent = AgentRuntime.__new__(AgentRuntime)
     captured: dict[str, object] = {}
 
     class DummyPromptManager:
@@ -293,7 +293,7 @@ def test_system_prompt_reuse_follows_runtime_state_key_not_git():
 
 
 def test_runtime_state_memory_sync_is_dirty_flagged(monkeypatch):
-    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent = AgentRuntime.__new__(AgentRuntime)
     agent._runtime_state_memory_dirty = False
     agent._last_runtime_state_memory = ""
     agent._last_runtime_state_memory_key = ""
@@ -330,7 +330,7 @@ def test_runtime_state_memory_sync_is_dirty_flagged(monkeypatch):
 
 
 def test_direct_chat_prompt_build_excludes_global_runtime_log_index():
-    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent = AgentRuntime.__new__(AgentRuntime)
     build_calls: list[dict[str, object]] = []
     agent.prompt_manager = SimpleNamespace(
         build=lambda **kwargs: build_calls.append(dict(kwargs)) or "session system prompt"
@@ -346,7 +346,7 @@ def test_direct_chat_prompt_build_excludes_global_runtime_log_index():
 
 
 def test_session_core_snapshot_replaces_prompt_manager_core_without_duplicates():
-    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent = AgentRuntime.__new__(AgentRuntime)
     build_calls: list[dict[str, object]] = []
     agent.prompt_manager = SimpleNamespace(
         build=lambda **kwargs: build_calls.append(dict(kwargs)) or "session system prompt"
@@ -413,7 +413,7 @@ def test_chat_invocation_context_uses_active_status_turn_identity(monkeypatch):
         "VIBELUTION_TURN_RUN_KIND",
     ):
         monkeypatch.delenv(env_name, raising=False)
-    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent = AgentRuntime.__new__(AgentRuntime)
     agent.mode_policy = ModePolicy(
         mode=AgentMode.CHAT,
         orchestrator_kind="chat",
@@ -472,7 +472,7 @@ def test_supervised_judge_execution_uses_compact_nonstreaming_invocation(monkeyp
             return _canonical_agent_test_outcome(text="评分完成")
 
     monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
-    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent = AgentRuntime.__new__(AgentRuntime)
     llm = JudgeLLM()
     agent.llm_with_tools = llm
     agent._base_llm = llm
@@ -603,7 +603,7 @@ class TestToolMessageFlow:
     """工具消息协议测试"""
 
     def test_apply_active_components_request_is_diagnostic_only(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         class DummyPromptManager:
             def __init__(self):
                 self.override = None
@@ -727,7 +727,7 @@ class TestToolMessageFlow:
         assert "offset=120" not in messages[0].content
 
     def test_runtime_metadata_is_bound_to_its_tool_call_without_storing_navigation(self):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent._recent_tool_records = []
         agent._recent_tool_outputs = []
         first_call = {"id": "call-first", "name": "read_file_tool", "args": {"path": "first.py"}}
@@ -767,7 +767,7 @@ class TestToolMessageFlow:
             "_get_delegation_governor",
         )
 
-        assert all(not hasattr(SelfEvolvingAgent, entrypoint) for entrypoint in legacy_entrypoints)
+        assert all(not hasattr(AgentRuntime, entrypoint) for entrypoint in legacy_entrypoints)
 
     def test_handle_tool_result_decodes_binary_failure_result(self):
         messages = []
@@ -785,7 +785,7 @@ class TestToolMessageFlow:
         assert messages[0].tool_call_id == "call_binary"
 
     def test_seed_chat_history_keeps_reasoning_content_on_tool_call_assistant(self):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.mode_policy = ModePolicy(
             mode=AgentMode.CHAT,
             orchestrator_kind="chat",
@@ -839,7 +839,7 @@ class TestToolMessageFlow:
         assert not plain_assistants[0].additional_kwargs.get("reasoning_content")
 
     def test_seed_chat_history_restores_persisted_tool_results(self):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.mode_policy = ModePolicy(
             mode=AgentMode.CHAT,
             orchestrator_kind="chat",
@@ -896,7 +896,7 @@ class TestToolMessageFlow:
         assert "运行相关测试验证修改：" in assistant_messages[0].content
 
     def test_seed_chat_history_projects_canonical_tool_pair_to_semantic_history_without_duplicate_result(self):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.mode_policy = ModePolicy(
             mode=AgentMode.CHAT,
             orchestrator_kind="chat",
@@ -941,7 +941,7 @@ class TestToolMessageFlow:
         assert sum("完整 canonical 工具结果" in str(message.content) for message in restored) == 1
 
     def test_seed_chat_history_clears_previous_provider_continuation_before_new_user_turn(self):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.mode_policy = ModePolicy(
             mode=AgentMode.CHAT,
             orchestrator_kind="chat",
@@ -1027,7 +1027,7 @@ class TestToolMessageFlow:
 
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
 
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.llm_with_tools = DummyLLM()
 
         assistant_msg = AIMessage(
@@ -1064,7 +1064,7 @@ class TestToolMessageFlow:
                 super().__init__(captured=captured)
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
 
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.llm_with_tools = DummyLLM()
         system_message = {
             "role": "system",
@@ -1113,7 +1113,7 @@ class TestToolMessageFlow:
                 ))
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
 
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.llm_with_tools = DummyLLM()
         checks = {"count": 0, "inside_llm": False}
 
@@ -1235,7 +1235,7 @@ class TestToolMessageFlow:
             lambda phase, code, **kwargs: events.append((phase, code, kwargs.get("fields") or {})),
         )
 
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.llm_with_tools = PrimaryLLM()
         agent._base_llm = PrimaryLLM()
         agent.config = SimpleNamespace(
@@ -1342,7 +1342,7 @@ class TestToolMessageFlow:
             "_record_agent_scene_event",
             lambda phase, code, **kwargs: events.append((phase, code, kwargs.get("fields") or {})),
         )
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.llm_with_tools = primary
         agent._base_llm = primary
         agent.config = SimpleNamespace(
@@ -1434,7 +1434,7 @@ class TestToolMessageFlow:
             "_record_agent_scene_event",
             lambda phase, code, **kwargs: events.append((phase, code, kwargs.get("fields") or {})),
         )
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.llm_with_tools = primary
         agent._base_llm = primary
         agent.config = SimpleNamespace(
@@ -1534,7 +1534,7 @@ class TestToolMessageFlow:
             ),
         )
 
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.llm_with_tools = StreamFailingLLM()
         agent._base_llm = SimpleNamespace(profile_id="primary")
         agent.config = SimpleNamespace(
@@ -1605,7 +1605,7 @@ class TestToolMessageFlow:
             ),
         )
 
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.llm_with_tools = ExhaustedLLM()
         agent.config = SimpleNamespace(
             llm=SimpleNamespace(
@@ -1686,7 +1686,7 @@ class TestToolMessageFlow:
             ),
         )
 
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.llm_with_tools = CancelledLLM()
         agent._base_llm = SimpleNamespace(profile_id="primary")
         agent.config = SimpleNamespace(
@@ -1778,7 +1778,7 @@ class TestToolMessageFlow:
             ),
         )
 
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.llm_with_tools = ProjectionFailureLLM()
         agent.config = SimpleNamespace(
             llm=SimpleNamespace(
@@ -1853,7 +1853,7 @@ class TestToolMessageFlow:
             ),
         )
 
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.llm_with_tools = DummyLLM()
         agent._base_llm = DummyLLM()
         agent._bound_llm_cache = {}
@@ -1889,7 +1889,7 @@ class TestToolMessageFlow:
                 published.append((name, payload, source))
 
         monkeypatch.setattr(agent_module, "get_event_bus", lambda: DummyBus())
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent._last_llm_error_category = "network_error"
         agent._last_llm_recovery_action = "retry_with_backoff"
 
@@ -1941,7 +1941,7 @@ class TestToolMessageFlow:
                 )
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
 
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.config = SimpleNamespace(
             llm=SimpleNamespace(
                 get_profile=lambda role="primary": SimpleNamespace(streaming=True)
@@ -1999,7 +1999,7 @@ class TestToolMessageFlow:
                 )
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
 
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.config = SimpleNamespace(
             llm=SimpleNamespace(
                 get_profile=lambda role="primary": SimpleNamespace(streaming=True)
@@ -2059,7 +2059,7 @@ class TestToolMessageFlow:
                 )
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
 
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.config = SimpleNamespace(
             llm=SimpleNamespace(
                 get_profile=lambda role="primary": SimpleNamespace(streaming=True)
@@ -2127,7 +2127,7 @@ class TestToolMessageFlow:
                 )
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
 
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.config = SimpleNamespace(
             llm=SimpleNamespace(
                 get_profile=lambda role="primary": SimpleNamespace(streaming=True)
@@ -2200,7 +2200,7 @@ class TestToolMessageFlow:
                 )
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
 
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.config = SimpleNamespace(
             llm=SimpleNamespace(
                 get_profile=lambda role="primary": SimpleNamespace(streaming=True)
@@ -2230,7 +2230,7 @@ class TestToolMessageFlow:
         def make_tool(name):
             return SimpleNamespace(name=name)
 
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent._base_llm = DummyBaseLLM()
         agent.llm_with_tools = DummyBoundLLM([make_tool("run_test_for_tool")])
         agent._bound_llm_cache = {"default": agent.llm_with_tools}
@@ -2263,14 +2263,14 @@ class TestToolMessageFlow:
         ]]
 
     def test_restart_focus_state_memory_exposes_allowed_tools_only(self):
-        memory = build_restart_focus_state_memory(SelfEvolvingAgent._restart_allowed_tool_names())
+        memory = build_restart_focus_state_memory(AgentRuntime._restart_allowed_tool_names())
 
         assert "当前轮实际暴露给模型的工具只保留" in memory
         assert "`trigger_self_restart_tool`" in memory
         assert "`run_test_for_tool`" not in memory
 
     def test_restart_focus_mode_is_disabled_for_full_evolution_goal(self):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent._active_goal = (
             "执行一轮完整自进化闭环探针："
             "根据 lint 结果调用 close_evolution_transaction_tool 关账，"
@@ -2317,7 +2317,7 @@ class TestToolMessageFlow:
         assert parse_xml_tool_calls(content) == []
 
     def test_think_and_act_xml_tool_call_writes_tool_message(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.name = "xml-tester"
         agent.config = SimpleNamespace(
             llm=SimpleNamespace(
@@ -2631,7 +2631,7 @@ class TestToolMessageFlow:
         )
 
     def test_think_and_act_xml_tool_call_visibility_filter_blocks_unknown_tool(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.name = "xml-visibility-filter-tester"
         agent.config = SimpleNamespace(
             llm=SimpleNamespace(
@@ -2901,7 +2901,7 @@ class TestToolMessageFlow:
         )
 
     def test_think_and_act_xml_turn_complete_sets_pending_lifecycle_action(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.name = "xml-turn-complete-tester"
         agent.config = SimpleNamespace(
             llm=SimpleNamespace(
@@ -3969,7 +3969,7 @@ class TestToolMessageFlow:
 
     def test_run_single_turn_starts_and_ends_log_sessions(self, monkeypatch):
         events = []
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.name = "tester"
         agent.config = SimpleNamespace(
             llm=SimpleNamespace(model_name="demo"),
@@ -4041,7 +4041,7 @@ class TestToolMessageFlow:
 
     def test_run_single_turn_topic_preserves_numbered_confirmation_context(self, monkeypatch):
         events = []
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.name = "tester"
         agent.config = SimpleNamespace(
             llm=SimpleNamespace(model_name="demo"),
@@ -4102,7 +4102,7 @@ class TestToolMessageFlow:
                 events.append(("exit_cache", self.partition))
                 return False
 
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.name = "tester"
         agent.config = SimpleNamespace(
             llm=SimpleNamespace(model_name="demo"),
@@ -4146,7 +4146,7 @@ class TestToolMessageFlow:
         assert "SECRET" not in json.dumps(result, ensure_ascii=False)
 
     def test_run_single_turn_enriches_chat_result_contract_from_tool_trace(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.name = "tester"
         agent.config = SimpleNamespace(
             llm=SimpleNamespace(model_name="demo"),
@@ -4236,7 +4236,7 @@ class TestToolMessageFlow:
         assert result["no_change"] is False
 
     def test_host_seeded_runtime_context_skips_agent_runtime_context_reseed(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.mode_policy = ModePolicy(
             mode=AgentMode.CHAT,
             orchestrator_kind="chat",
@@ -4267,7 +4267,7 @@ class TestToolMessageFlow:
         assert agent._runtime_context_seeded_by_host is False
 
     def test_run_single_turn_surfaces_llm_error_when_no_visible_reply(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.name = "tester"
         agent.config = SimpleNamespace(
             llm=SimpleNamespace(model_name="demo"),
@@ -4319,7 +4319,7 @@ class TestToolMessageFlow:
 
     def test_run_single_turn_main_loop_timeout_does_not_complete_with_fragment(self, monkeypatch):
         """TimeoutExpired-style main-loop failure must not publish intermediate stream as completed."""
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.name = "tester"
         agent.config = SimpleNamespace(
             llm=SimpleNamespace(model_name="deepseek-v4-flash"),
@@ -4397,7 +4397,7 @@ class TestToolMessageFlow:
         assert result.get("llm_failure", {}).get("reason_code") == "agent_main_loop_exception"
 
     def test_run_single_turn_preserves_structured_chain_failure(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.name = "tester"
         agent.config = SimpleNamespace(
             llm=SimpleNamespace(model_name="demo"),
@@ -4458,7 +4458,7 @@ class TestToolMessageFlow:
         assert "secret prompt" not in str(result["llm_failure"])
 
     def _build_single_turn_agent(self):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.name = "tester"
         agent.config = SimpleNamespace(
             llm=SimpleNamespace(model_name="demo"),
@@ -4563,7 +4563,7 @@ class TestToolMessageFlow:
         assert result["llm_failure"]["category"] == "context_error"
 
     def test_run_single_turn_preserves_tool_progress_without_loop_guard_reply(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.name = "tester"
         agent.config = SimpleNamespace(
             llm=SimpleNamespace(model_name="demo"),
@@ -4624,7 +4624,7 @@ class TestToolMessageFlow:
         assert result["read_files"] == ["core/infrastructure/tool_executor.py"]
 
     def test_run_single_turn_does_not_infer_loop_guard_from_repeated_tools(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.name = "tester"
         agent.config = SimpleNamespace(
             llm=SimpleNamespace(model_name="demo"),
@@ -4690,7 +4690,7 @@ class TestToolMessageFlow:
         assert result["tool_call_count"] == 4
 
     def test_run_single_turn_ignores_legacy_tool_loop_guard_reason(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.name = "tester"
         agent.config = SimpleNamespace(
             llm=SimpleNamespace(model_name="demo"),
@@ -4744,7 +4744,7 @@ class TestToolMessageFlow:
         assert result["tool_call_count"] == 3
 
     def test_run_single_turn_keeps_full_visible_reply_text(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.name = "tester"
         agent.config = SimpleNamespace(
             llm=SimpleNamespace(model_name="demo"),
@@ -4833,7 +4833,7 @@ class TestToolMessageFlow:
         assert "attention snapshot" in captured["finish"][0][1]["thought"]
 
     def test_run_loop_exits_process_after_restart_action(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.name = "tester"
         agent.config = SimpleNamespace(
             llm=SimpleNamespace(model_name="demo"),
@@ -5499,13 +5499,13 @@ class TestLocalProviderBootstrap:
 
     def test_local_provider_without_api_key_can_bootstrap(self, monkeypatch):
         monkeypatch.setattr(agent_module.Key_Tools, "create_llm_facing_tools", lambda: [])
-        monkeypatch.setattr(SelfEvolvingAgent, "_init_model_discovery", lambda self: 16000)
-        monkeypatch.setattr(SelfEvolvingAgent, "_init_token_compressor", lambda self: None)
+        monkeypatch.setattr(AgentRuntime, "_init_model_discovery", lambda self: 16000)
+        monkeypatch.setattr(AgentRuntime, "_init_token_compressor", lambda self: None)
 
         def fake_init_llm(self):
             self.llm_with_tools = MagicMock()
 
-        monkeypatch.setattr(SelfEvolvingAgent, "_init_llm", fake_init_llm)
+        monkeypatch.setattr(AgentRuntime, "_init_llm", fake_init_llm)
         monkeypatch.setattr(agent_module, "get_prompt_manager", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_state_manager", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_event_bus", lambda: MagicMock())
@@ -5532,7 +5532,7 @@ class TestLocalProviderBootstrap:
                 "llm.providers.default.requires_api_key": False,
             },
         )
-        agent = SelfEvolvingAgent(config=config, mode="chat")
+        agent = AgentRuntime(config=config, mode="chat")
         provider = agent.config.llm.get_provider(role="primary")
 
         assert provider.kind == "local"
@@ -5545,8 +5545,8 @@ class TestLocalProviderBootstrap:
         monkeypatch.setenv("VIBELUTION_AGENT_WORKSPACE_PATH", "workspace/agents/agent-supervised-baseline")
         monkeypatch.setenv("VIBELUTION_SUPERVISED_ROLE", "baseline")
         monkeypatch.setattr(agent_module.Key_Tools, "create_llm_facing_tools", lambda: [])
-        monkeypatch.setattr(SelfEvolvingAgent, "_init_model_discovery", lambda self: 16000)
-        monkeypatch.setattr(SelfEvolvingAgent, "_init_token_compressor", lambda self: None)
+        monkeypatch.setattr(AgentRuntime, "_init_model_discovery", lambda self: 16000)
+        monkeypatch.setattr(AgentRuntime, "_init_token_compressor", lambda self: None)
         monkeypatch.setattr(agent_module, "get_prompt_manager", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_state_manager", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_event_bus", lambda: MagicMock())
@@ -5589,7 +5589,7 @@ class TestLocalProviderBootstrap:
         baseline_profile.profile_id = "supervised_baseline"
         baseline_profile.model = "baseline-model"
         original_config.llm.profiles["supervised_baseline"] = baseline_profile
-        agent = SelfEvolvingAgent(config=original_config, mode="chat")
+        agent = AgentRuntime(config=original_config, mode="chat")
 
         assert agent.runtime_agent_binding["agentId"] == "agent-supervised-baseline"
         assert agent.runtime_agent_binding["supervisedRole"] == "baseline"
@@ -5599,7 +5599,7 @@ class TestLocalProviderBootstrap:
     def test_agent_optional_llm_slots_drive_summary_and_mental_model_clients(self, monkeypatch):
         monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-slot-test")
         monkeypatch.setattr(agent_module.Key_Tools, "create_llm_facing_tools", lambda: [])
-        monkeypatch.setattr(SelfEvolvingAgent, "_init_model_discovery", lambda self: 16000)
+        monkeypatch.setattr(AgentRuntime, "_init_model_discovery", lambda self: 16000)
         monkeypatch.setattr(agent_module, "get_prompt_manager", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_state_manager", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_event_bus", lambda: MagicMock())
@@ -5677,7 +5677,7 @@ class TestLocalProviderBootstrap:
             ),
         )
 
-        agent = SelfEvolvingAgent(config=config, mode="chat")
+        agent = AgentRuntime(config=config, mode="chat")
 
         mental_model.set_shared_llm.assert_called_once()
         assert mental_model.set_shared_llm.call_args.args[0].model == "mental-model"
@@ -5688,8 +5688,8 @@ class TestLocalProviderBootstrap:
         monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-dialogue-default")
         monkeypatch.delenv("VIBELUTION_AGENT_LLM_SLOT", raising=False)
         monkeypatch.setattr(agent_module.Key_Tools, "create_llm_facing_tools", lambda: [SimpleNamespace(name="cli_tool")])
-        monkeypatch.setattr(SelfEvolvingAgent, "_init_model_discovery", lambda self: 16000)
-        monkeypatch.setattr(SelfEvolvingAgent, "_init_token_compressor", lambda self: None)
+        monkeypatch.setattr(AgentRuntime, "_init_model_discovery", lambda self: 16000)
+        monkeypatch.setattr(AgentRuntime, "_init_token_compressor", lambda self: None)
         monkeypatch.setattr(agent_module, "get_prompt_manager", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_state_manager", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_event_bus", lambda: MagicMock())
@@ -5776,7 +5776,7 @@ class TestLocalProviderBootstrap:
             ),
         )
 
-        agent = SelfEvolvingAgent(config=config, mode="chat")
+        agent = AgentRuntime(config=config, mode="chat")
         llm_for_turn = agent._get_llm_for_current_mode()
 
         assert agent.runtime_agent_binding["agentId"] == "agent-dialogue-default"
@@ -5795,8 +5795,8 @@ class TestLocalProviderBootstrap:
             self._context_window_limit = 1_000_000
             return 500_000
 
-        monkeypatch.setattr(SelfEvolvingAgent, "_init_model_discovery", fake_model_discovery)
-        monkeypatch.setattr(SelfEvolvingAgent, "_init_token_compressor", lambda self: None)
+        monkeypatch.setattr(AgentRuntime, "_init_model_discovery", fake_model_discovery)
+        monkeypatch.setattr(AgentRuntime, "_init_token_compressor", lambda self: None)
         monkeypatch.setattr(agent_module, "get_prompt_manager", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_state_manager", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_event_bus", lambda: MagicMock())
@@ -5845,7 +5845,7 @@ class TestLocalProviderBootstrap:
 
         monkeypatch.setattr(agent_module, "get_llm_client", lambda role=None, profile_id=None, config=None: DummyClient())
 
-        agent = SelfEvolvingAgent(
+        agent = AgentRuntime(
             config=config,
             mode="chat",
             runtime_agent_binding={
@@ -5868,7 +5868,7 @@ class TestLocalProviderBootstrap:
         assert strategy_config.extract_key_decisions is False
 
     def test_262144_auto_compression_boundary_triggers_only_above_standard_threshold(self):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent._effective_max_token_limit = 262_144
         agent.config = SimpleNamespace(
             context_compression=SimpleNamespace(
@@ -5897,7 +5897,7 @@ class TestLocalProviderBootstrap:
         assert binding["directSessionId"] == "session-luna-pressure"
 
     def test_think_and_act_auto_compresses_at_standard_context_threshold(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         prompt_build_calls = []
 
         def build_prompt():
@@ -6068,8 +6068,8 @@ class TestLocalProviderBootstrap:
         monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-subagent-slot")
         monkeypatch.setenv("VIBELUTION_AGENT_LLM_SLOT", "subagentExecution")
         monkeypatch.setattr(agent_module.Key_Tools, "create_llm_facing_tools", lambda: [])
-        monkeypatch.setattr(SelfEvolvingAgent, "_init_model_discovery", lambda self: 16000)
-        monkeypatch.setattr(SelfEvolvingAgent, "_init_token_compressor", lambda self: None)
+        monkeypatch.setattr(AgentRuntime, "_init_model_discovery", lambda self: 16000)
+        monkeypatch.setattr(AgentRuntime, "_init_token_compressor", lambda self: None)
         monkeypatch.setattr(agent_module, "get_prompt_manager", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_state_manager", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_event_bus", lambda: MagicMock())
@@ -6131,7 +6131,7 @@ class TestLocalProviderBootstrap:
             ),
         )
 
-        agent = SelfEvolvingAgent(config=config, mode="chat")
+        agent = AgentRuntime(config=config, mode="chat")
 
         assert agent.runtime_agent_binding["llmSlot"] == "subagentExecution"
         assert agent.config.llm.get_profile(profile_id="primary").model == "subagent-execution-model"
@@ -6147,8 +6147,8 @@ class TestLocalProviderBootstrap:
         )
         monkeypatch.setenv("VIBELUTION_SUPERVISED_ROLE", "baseline")
         monkeypatch.setattr(agent_module.Key_Tools, "create_llm_facing_tools", lambda: [])
-        monkeypatch.setattr(SelfEvolvingAgent, "_init_model_discovery", lambda self: 16000)
-        monkeypatch.setattr(SelfEvolvingAgent, "_init_token_compressor", lambda self: None)
+        monkeypatch.setattr(AgentRuntime, "_init_model_discovery", lambda self: 16000)
+        monkeypatch.setattr(AgentRuntime, "_init_token_compressor", lambda self: None)
         monkeypatch.setattr(agent_module, "get_prompt_manager", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_state_manager", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_event_bus", lambda: MagicMock())
@@ -6200,7 +6200,7 @@ class TestLocalProviderBootstrap:
             ),
         )
 
-        agent = SelfEvolvingAgent(config=config, mode="chat")
+        agent = AgentRuntime(config=config, mode="chat")
 
         assert agent.runtime_agent_binding["llmBindings"]["dialogue"]["modelId"] == "supervised-dialogue-model-id"
         assert agent.config.llm.get_profile(profile_id="primary").model == "supervised-dialogue-model"
@@ -6237,7 +6237,7 @@ class TestLocalProviderBootstrap:
         )
 
         with pytest.raises(agent_module.AgentLlmResolutionError, match="missing-model-id"):
-            SelfEvolvingAgent(config=config)
+            AgentRuntime(config=config)
 
     def test_runtime_agent_llm_slot_binding_does_not_fallback_to_dialogue(self, monkeypatch):
         monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-missing-subagent-slot")
@@ -6270,7 +6270,7 @@ class TestLocalProviderBootstrap:
         )
 
         with pytest.raises(agent_module.AgentLlmResolutionError, match="subagentExecution LLM binding is required"):
-            SelfEvolvingAgent(config=config)
+            AgentRuntime(config=config)
 
     def test_runtime_agent_binding_seeds_context_engine_packet_for_single_turn(self, monkeypatch):
         monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-supervised-baseline")
@@ -6278,8 +6278,8 @@ class TestLocalProviderBootstrap:
         monkeypatch.setenv("VIBELUTION_AGENT_DIRECT_SESSION_ID", "session-baseline")
         monkeypatch.setenv("VIBELUTION_SUPERVISED_ROLE", "baseline")
         monkeypatch.setattr(agent_module.Key_Tools, "create_llm_facing_tools", lambda: [])
-        monkeypatch.setattr(SelfEvolvingAgent, "_init_model_discovery", lambda self: 16000)
-        monkeypatch.setattr(SelfEvolvingAgent, "_init_token_compressor", lambda self: None)
+        monkeypatch.setattr(AgentRuntime, "_init_model_discovery", lambda self: 16000)
+        monkeypatch.setattr(AgentRuntime, "_init_token_compressor", lambda self: None)
         monkeypatch.setattr(agent_module, "get_state_manager", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_event_bus", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_tool_executor", lambda: MagicMock())
@@ -6331,7 +6331,7 @@ class TestLocalProviderBootstrap:
                 "llm.providers.default.requires_api_key": False,
             },
         )
-        agent = SelfEvolvingAgent(config=config, mode="chat")
+        agent = AgentRuntime(config=config, mode="chat")
         messages, resumed = TurnOutcomeController.prepare_turn_messages(
             system_prompt=(
                 "static",
@@ -6590,7 +6590,7 @@ class TestResolvedApiKeyUsage:
         }
 
         with pytest.raises(ValueError) as exc_info:
-            SelfEvolvingAgent(config=config, mode="chat")
+            AgentRuntime(config=config, mode="chat")
 
         message = str(exc_info.value)
         assert "modelId=relay_gpt_5_6_luna" in message
@@ -6613,8 +6613,8 @@ class TestResolvedApiKeyUsage:
         monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test-key")
 
         monkeypatch.setattr(agent_module.Key_Tools, "create_llm_facing_tools", lambda: [])
-        monkeypatch.setattr(SelfEvolvingAgent, "_init_model_discovery", lambda self: 16000)
-        monkeypatch.setattr(SelfEvolvingAgent, "_init_token_compressor", lambda self: None)
+        monkeypatch.setattr(AgentRuntime, "_init_model_discovery", lambda self: 16000)
+        monkeypatch.setattr(AgentRuntime, "_init_token_compressor", lambda self: None)
         monkeypatch.setattr(agent_module, "get_prompt_manager", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_state_manager", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_event_bus", lambda: MagicMock())
@@ -6656,7 +6656,7 @@ class TestResolvedApiKeyUsage:
         primary_provider = config.llm.get_provider(role="primary")
         primary_provider.api_key = ""
         primary_provider.api_key_env = "MINIMAX_API_KEY"
-        agent = SelfEvolvingAgent(config=config, mode="chat")
+        agent = AgentRuntime(config=config, mode="chat")
 
         assert agent.api_key == "minimax-test-key"
         assert agent.config.llm.api_key == "minimax-test-key"
@@ -6667,7 +6667,7 @@ class TestRuntimeStateMemoryFlow:
     """运行时状态记忆闭环测试"""
 
     def test_sync_runtime_state_memory_combines_carryover_and_runtime(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.prompt_manager = MagicMock()
         agent._last_runtime_state_memory = ""
         agent._carryover_state_memory = "## 延续约束\n- 先补观测，再继续推理。"
@@ -6686,7 +6686,7 @@ class TestRuntimeStateMemoryFlow:
         assert agent.prompt_manager.update_state_memory.call_args.kwargs["persist"] is False
 
     def test_sync_runtime_state_memory_keeps_incomplete_result_as_observation(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.prompt_manager = MagicMock()
         agent._last_runtime_state_memory = ""
         agent._carryover_state_memory = ""
@@ -6711,7 +6711,7 @@ class TestRuntimeStateMemoryFlow:
         session_file = tmp_path / "conversation_demo.jsonl"
         session_file.write_text("{}", encoding="utf-8")
 
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.prompt_manager = MagicMock()
         agent._last_runtime_state_memory = ""
         agent._carryover_state_memory = ""
@@ -6742,7 +6742,7 @@ class TestRuntimeStateMemoryFlow:
         assert agent.prompt_manager.update_state_memory.call_args_list[1].kwargs["persist"] is True
 
     def test_sync_runtime_state_memory_filters_runtime_language_constraints(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.prompt_manager = MagicMock()
         agent._last_runtime_state_memory = ""
         agent._last_runtime_state_memory_key = ""
@@ -6771,7 +6771,7 @@ class TestRuntimeStateMemoryFlow:
         monkeypatch,
         tmp_path,
     ):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.project_root = str(tmp_path)
         agent.prompt_manager = MagicMock()
         agent._last_compression_iteration = 0
@@ -6848,7 +6848,7 @@ class TestRuntimeStateMemoryFlow:
         monkeypatch,
         tmp_path,
     ):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.project_root = str(tmp_path)
         agent.prompt_manager = MagicMock()
         agent.runtime_agent_binding = {
@@ -6947,7 +6947,7 @@ class TestRuntimeStateMemoryFlow:
         }
 
     def test_chat_emergency_compression_continues_to_llm(self, monkeypatch, tmp_path):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.project_root = str(tmp_path)
         agent.prompt_manager = MagicMock()
         agent._last_compression_iteration = 0
@@ -7006,7 +7006,7 @@ class TestRuntimeStateMemoryFlow:
         monkeypatch,
         tmp_path,
     ):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.project_root = str(tmp_path)
         agent.prompt_manager = MagicMock()
         agent._last_compression_iteration = 0
@@ -7079,7 +7079,7 @@ class TestRuntimeStateMemoryFlow:
         agent.prompt_manager.update_state_memory.assert_not_called()
 
     def test_sync_runtime_state_memory_includes_restart_focus_guidance(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.prompt_manager = MagicMock()
         agent._last_runtime_state_memory = ""
         agent._last_runtime_state_memory_key = ""
@@ -7097,7 +7097,7 @@ class TestRuntimeStateMemoryFlow:
         assert agent.prompt_manager.update_state_memory.call_args.kwargs["persist"] is False
 
     def test_think_and_act_sets_goal_before_first_prompt_build(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
 
         captured = {}
 
@@ -7148,7 +7148,7 @@ class TestRuntimeStateMemoryFlow:
         assert scene_events[0][2]["fields"]["objectiveType"] == "self_improvement"
 
     def test_direct_session_chat_keeps_user_text_out_of_system_prompt_goal(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         captured = {}
 
         class DummyPromptManager:
@@ -7215,7 +7215,7 @@ class TestRuntimeStateMemoryFlow:
         assert raw_user_message not in captured["packet_seen_during_build"].render()
 
     def test_think_and_act_uses_goal_override_before_first_prompt_build(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
 
         captured = {}
 
@@ -7966,7 +7966,7 @@ class TestRuntimeStateMemoryFlow:
         )
 
     def test_chat_runtime_context_seed_is_omitted_from_model_messages(self):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent.mode_policy = ModePolicy(
             mode=AgentMode.CHAT,
             orchestrator_kind="chat",
@@ -8023,7 +8023,7 @@ class TestRuntimeStateMemoryFlow:
         assert "第二句" in messages[-1]["content"]
 
     def test_static_runtime_context_is_merged_into_cacheable_system_prefix(self):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent._pending_static_context_blocks = []
         agent._pending_runtime_context_blocks = []
 
@@ -8073,7 +8073,7 @@ class TestRuntimeStateMemoryFlow:
         assert "第二句" in messages[-1]["content"]
 
     def test_volatile_runtime_context_is_inserted_before_current_user_and_filtered_from_carryover(self):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent._pending_volatile_context_blocks = []
 
         agent.seed_volatile_runtime_context("## Slash Skill Context\nCommand: /brt\nSKILL.md:\nAsk one question.")
@@ -8188,7 +8188,7 @@ class TestRuntimeStateMemoryFlow:
             active_goal="inspect",
             turn_identity="turn-1",
         )
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent._active_turn_messages = carryover.messages
         agent._active_turn_goal = carryover.goal
         agent._active_turn_identity = carryover.turn_identity
@@ -8208,11 +8208,11 @@ class TestRuntimeStateMemoryFlow:
         ) == "terminal"
 
     def test_goal_override_normalization_is_scoped_to_single_turn(self):
-        assert "goal_override" not in SelfEvolvingAgent.run_loop.__code__.co_names
-        assert "effective_goal_override" in SelfEvolvingAgent.run_single_turn.__code__.co_varnames
+        assert "goal_override" not in AgentRuntime.run_loop.__code__.co_names
+        assert "effective_goal_override" in AgentRuntime.run_single_turn.__code__.co_varnames
 
     def test_agent_rejects_carryover_from_another_turn(self):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent._active_turn_identity = "turn-new"
         agent._active_turn_messages = None
         agent._active_turn_goal = ""
@@ -8232,7 +8232,7 @@ class TestRuntimeStateMemoryFlow:
         assert agent._active_turn_goal == ""
 
     def test_build_delegation_request_skips_broad_autonomous_goal_without_local_symptom(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         session = SimpleNamespace(
             get_attention_snapshot=lambda: {
                 "recent_blockers": [],
@@ -8255,7 +8255,7 @@ class TestRuntimeStateMemoryFlow:
         assert payload is None
 
     def test_build_delegation_request_narrows_broad_goal_to_local_blocker(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         session = SimpleNamespace(
             get_attention_snapshot=lambda: {
                 "recent_blockers": [
@@ -8285,7 +8285,7 @@ class TestRuntimeStateMemoryFlow:
         assert "log_info/conversation_20260510_135821.jsonl" in payload["goal"]
 
     def test_build_delegation_request_skips_broad_drift_without_concrete_anchor_even_if_modified_paths_exist(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         session = SimpleNamespace(
             get_attention_snapshot=lambda: {
                 "recent_blockers": [
@@ -8312,7 +8312,7 @@ class TestRuntimeStateMemoryFlow:
         assert payload is None
 
     def test_build_delegation_request_does_not_treat_pending_continuation_as_anchor(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         session = SimpleNamespace(
             get_attention_snapshot=lambda: {
                 "recent_blockers": [
@@ -8354,7 +8354,7 @@ class TestRuntimeStateMemoryFlow:
         assert "attention snapshot" in closed_text
 
     def test_build_delegation_request_skips_same_class_after_failed_timeout(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         failed_goal = "分析当前轮为什么出现：连续进行推理但没有新增观测，请先打印最小中间值或验证结果。"
         session = SimpleNamespace(
             get_attention_snapshot=lambda: {
@@ -8385,7 +8385,7 @@ class TestRuntimeStateMemoryFlow:
         assert payload is None
 
     def test_build_delegation_request_skips_fake_validation_failure_when_pytest_passed(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         session = SimpleNamespace(
             get_attention_snapshot=lambda: {
                 "recent_blockers": [
@@ -8413,7 +8413,7 @@ class TestRuntimeStateMemoryFlow:
         assert payload is None
 
     def test_build_delegation_request_skips_restart_focused_goal(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         session = SimpleNamespace(
             get_attention_snapshot=lambda: {
                 "recent_blockers": [{"kind": "diagnostic_drift", "summary": "连续进行推理但没有新增观测，请先打印最小中间值或验证结果。"}],
@@ -8438,7 +8438,7 @@ class TestRuntimeStateMemoryFlow:
         assert payload is None
 
     def test_build_delegation_request_allows_first_readonly_diagnosis_attempt(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         session = SimpleNamespace(
             get_attention_snapshot=lambda: {
                 "recent_blockers": [],
@@ -8464,7 +8464,7 @@ class TestRuntimeStateMemoryFlow:
         assert payload["task_type"] == "diagnose"
 
     def test_build_delegation_request_allows_summary_only_with_existing_evidence(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         session = SimpleNamespace(
             get_attention_snapshot=lambda: {
                 "recent_blockers": [
@@ -8496,7 +8496,7 @@ class TestRuntimeStateMemoryFlow:
         assert "低熵压缩" in payload["role_need"]["why_now"]
 
     def test_build_delegation_request_blocks_summary_without_enough_evidence(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         session = SimpleNamespace(
             get_attention_snapshot=lambda: {
                 "recent_blockers": [],
@@ -8522,7 +8522,7 @@ class TestRuntimeStateMemoryFlow:
         assert payload is None
 
     def test_build_delegation_request_blocks_summary_when_goal_includes_mutation(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         session = SimpleNamespace(
             get_attention_snapshot=lambda: {
                 "recent_blockers": [
@@ -8550,7 +8550,7 @@ class TestRuntimeStateMemoryFlow:
         assert payload is None
 
     def test_build_delegation_request_allows_explicit_inspect_with_reading_load(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         session = SimpleNamespace(
             get_attention_snapshot=lambda: {
                 "recent_blockers": [
@@ -8582,7 +8582,7 @@ class TestRuntimeStateMemoryFlow:
         assert payload["role_need"]["trigger_reason"] == "local_state_probe_needed"
 
     def test_build_delegation_request_blocks_low_value_inspect_without_reading_load(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         session = SimpleNamespace(
             get_attention_snapshot=lambda: {
                 "recent_blockers": [],
@@ -8608,7 +8608,7 @@ class TestRuntimeStateMemoryFlow:
         assert payload is None
 
     def test_build_delegation_request_keeps_failure_goal_on_diagnose_path(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         session = SimpleNamespace(
             get_attention_snapshot=lambda: {
                 "recent_blockers": [
@@ -8637,7 +8637,7 @@ class TestRuntimeStateMemoryFlow:
         assert payload["task_type"] == "diagnose"
 
     def test_build_delegation_request_cools_down_repeated_unhelpful_diagnose_for_autonomous_goal(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         session = SimpleNamespace(
             get_attention_snapshot=lambda: {
                 "recent_blockers": [
@@ -8672,7 +8672,7 @@ class TestRuntimeStateMemoryFlow:
         assert payload is None
 
     def test_build_delegation_request_does_not_cooldown_after_recent_helpful_diagnose(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         session = SimpleNamespace(
             get_attention_snapshot=lambda: {
                 "recent_blockers": [
@@ -8721,7 +8721,7 @@ class TestRuntimeStateMemoryFlow:
         assert payload["task_type"] == "diagnose"
 
     def test_build_delegation_request_cools_down_repeated_low_value_inspect(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         session = SimpleNamespace(
             get_attention_snapshot=lambda: {
                 "recent_blockers": [
@@ -8767,7 +8767,7 @@ class TestRuntimeStateMemoryFlow:
         assert payload is None
 
     def test_build_delegation_request_blocks_second_readonly_diagnosis_attempt_same_round(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         session = SimpleNamespace(
             get_attention_snapshot=lambda: {
                 "recent_blockers": [
@@ -9087,7 +9087,7 @@ class TestRuntimeStateMemoryFlow:
         assert events["finished"][0]["mode_hint"] == "快速日志诊断，未启动真实子 agent"
 
     def test_build_delegation_request_blocks_completed_same_goal_even_when_scope_changes(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         goal = "分析当前轮为什么出现：core/infrastructure/tool_executor.py 第 561-640 行本轮已读过。"
 
         class DummySession:
@@ -9274,7 +9274,7 @@ class TestRuntimeStateMemoryFlow:
         assert "unexpected_success" not in events
 
     def test_restart_focus_guard_blocks_unrelated_file_edits(self):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent = AgentRuntime.__new__(AgentRuntime)
         agent._active_goal = "制定重启任务，然后对重启任务打勾，然后运行 `trigger_self_restart_tool` 重启你自己。"
 
         blocked = agent._guard_tool_execution("apply_diff_edit_tool", {"file_path": "tools/agent_tools.py"})

@@ -4,7 +4,7 @@
 from types import SimpleNamespace
 
 import agent as agent_module
-from agent import SelfEvolvingAgent
+from agent import AgentRuntime
 from core.mental_model_flags import is_mental_model_enabled, mental_model_enabled_override
 from core.orchestration.agent_modes import AgentMode, is_mode_enabled, normalize_agent_mode, resolve_mode_policy
 
@@ -83,7 +83,7 @@ def test_resolve_mode_policy_survives_missing_agent_config():
 
 
 def test_chat_mode_does_not_keyword_route_evolution_mentions():
-    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent = AgentRuntime.__new__(AgentRuntime)
     agent.config = _make_config()
     agent.mode = AgentMode.CHAT
     agent.mode_policy = resolve_mode_policy("chat", agent.config)
@@ -107,7 +107,7 @@ def test_chat_mode_does_not_keyword_route_evolution_mentions():
 
 
 def test_seed_chat_history_seeds_mental_conversation_context():
-    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent = AgentRuntime.__new__(AgentRuntime)
     agent.config = _make_config()
     agent.mode = AgentMode.CHAT
     agent.mode_policy = resolve_mode_policy("chat", agent.config)
@@ -140,7 +140,7 @@ def test_seed_chat_history_seeds_mental_conversation_context():
 
 
 def test_seed_chat_history_skips_mental_context_when_turn_disables_mental_model():
-    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent = AgentRuntime.__new__(AgentRuntime)
     agent.config = _make_config()
     agent.mode = AgentMode.CHAT
     agent.mode_policy = resolve_mode_policy("chat", agent.config)
@@ -194,7 +194,7 @@ def test_supervised_mental_model_env_override_controls_runtime_default(monkeypat
 
 
 def test_seed_chat_history_drops_internal_tool_protocol_from_assistant():
-    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent = AgentRuntime.__new__(AgentRuntime)
     agent.config = _make_config()
     agent.mode = AgentMode.CHAT
     agent.mode_policy = resolve_mode_policy("chat", agent.config)
@@ -214,7 +214,7 @@ def test_seed_chat_history_drops_internal_tool_protocol_from_assistant():
 
 
 def test_xml_tool_visibility_guard_blocks_hidden_tool_without_executor():
-    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent = AgentRuntime.__new__(AgentRuntime)
     agent.key_tool_maps = {"agent_message_tool"}
     observed = []
     agent._remember_tool_output = lambda tool_call, result, action: observed.append((tool_call, result, action))
@@ -229,7 +229,7 @@ def test_xml_tool_visibility_guard_blocks_hidden_tool_without_executor():
 
 
 def test_seed_chat_history_clears_mental_context_outside_chat_mode():
-    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent = AgentRuntime.__new__(AgentRuntime)
     agent.config = _make_config()
     agent.mode = AgentMode.SELF_EVOLUTION
     agent.mode_policy = resolve_mode_policy("self_evolution", agent.config)
@@ -242,7 +242,7 @@ def test_seed_chat_history_clears_mental_context_outside_chat_mode():
 
 
 def test_supervised_case_reset_clears_short_term_context(monkeypatch):
-    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent = AgentRuntime.__new__(AgentRuntime)
     agent.config = _make_config()
     agent.mode = AgentMode.SUPERVISED_EVOLUTION
     agent.mode_policy = resolve_mode_policy("supervised_evolution", agent.config)

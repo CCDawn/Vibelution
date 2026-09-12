@@ -185,7 +185,7 @@ def run_agent_main(
     initialize_ui_for_run_fn(ui, test_mode=test_mode, headless_mode=headless_mode)
 
     if test_mode:
-        sys.__stdout__.write("=" * 60 + "\n  Self-Evolving Agent - Test Mode\n" + "=" * 60 + "\n")
+        sys.__stdout__.write("=" * 60 + "\n  AgentRuntime - Test Mode\n" + "=" * 60 + "\n")
         sys.__stdout__.flush()
 
     if not subagent_json_mode:

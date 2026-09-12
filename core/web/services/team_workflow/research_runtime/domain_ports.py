@@ -36,6 +36,10 @@ class AgentTaskHandle:
     root_status: str = "running"
     scoped_handles: tuple[ScopedAgentTaskHandle, ...] = ()
     observation_only: bool = False
+    # A meeting owns several native speaker Turns, never candidate fan-out.
+    meeting_room_id: str = ""
+    meeting_round_id: str = ""
+    meeting_participants: tuple[dict[str, str], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -57,6 +61,10 @@ class AgentTaskHandle:
             payload["scopedSessions"] = [item.to_dict() for item in self.scoped_handles]
         if self.observation_only:
             payload["observationOnly"] = True
+        if self.meeting_room_id:
+            payload["meeting"] = {"roomId": self.meeting_room_id,
+                "roundId": self.meeting_round_id,
+                "participants": [dict(item) for item in self.meeting_participants]}
         return payload
 
 

@@ -1,4 +1,4 @@
-# Self-Evolving Agent 依赖包
+# AgentRuntime 依赖包
 
 # 核心依赖
 requests>=2.28.0

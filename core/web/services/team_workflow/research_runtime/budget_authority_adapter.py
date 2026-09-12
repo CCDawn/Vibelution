@@ -945,6 +945,10 @@ def settle_budget_authority_in_uow(
             code="budget_settle_missing",
         )
     mapped = _row_mapping(row)
+    if "operatorModelBudget" in _payload(mapped.get("reserved_json"), label="reserved_json"):
+        from ..operator_optimization.model_budget import settle_model_budget_in_uow
+
+        return settle_model_budget_in_uow(uow, reservation=reservation, now_ms=resolved_now_ms)
     if expected_run_id and str(mapped.get("run_id") or "") != expected_run_id:
         raise BudgetAuthorityError(
             "budget receipt three-way binding mismatch",
@@ -1046,13 +1050,13 @@ def compensate_terminal_attempt_reservation_in_uow(
     reservation_id = f"reservation-{node_run_id}"
     resolved_now_ms = int(now_ms if now_ms is not None else time.time() * 1000)
     row = uow.repository.execute(
-        "SELECT receipt_id, run_id, node_run_id, settled_json, status "
+        "SELECT receipt_id, run_id, node_run_id, settled_json, status, reserved_json "
         "FROM budget_receipts WHERE reservation_id = ?",
         (reservation_id,),
     ).fetchone()
     if row is None:
         return "missing"
-    receipt_id, row_run_id, row_node_run_id, settled_raw, status = row
+    receipt_id, row_run_id, row_node_run_id, settled_raw, status, reserved_raw = row
     if (
         str(row_run_id or "") != run_id
         or str(row_node_run_id or "") != node_run_id
@@ -1062,6 +1066,11 @@ def compensate_terminal_attempt_reservation_in_uow(
     if status != "reserved":
         # Already settled/voided/released/failed: compensation is a no-op.
         return status
+    if "operatorModelBudget" in _payload(reserved_raw, label="reserved_json"):
+        from ..operator_optimization.model_budget import finish_model_budget_in_uow
+
+        return finish_model_budget_in_uow(uow, reservation={"reservationId": reservation_id,
+            "runId": run_id, "nodeRunId": node_run_id}, unused_status="voided", now_ms=resolved_now_ms)
     payload = _payload(settled_raw, label="settled_json")
     usage = dict(_usage_payload(payload))
     invocations = payload.get("invocations")
@@ -1180,6 +1189,14 @@ def finalize_cancelled_run_budget_receipts(
             mapped = _row_mapping(row)
             if str(mapped.get("status") or "") in _TERMINAL_BUDGET_STATUSES:
                 continue
+            if "operatorModelBudget" in _payload(mapped.get("reserved_json"), label="reserved_json"):
+                from ..operator_optimization.model_budget import finish_model_budget_in_uow
+
+                status = finish_model_budget_in_uow(uow,
+                    reservation={"reservationId": mapped["reservation_id"]},
+                    unused_status="released", now_ms=now_ms)
+                counts[status] = counts.get(status, 0) + 1
+                continue
             payload = _payload(mapped.get("settled_json"), label="settled_json")
             usage = payload.get("usage")
             invocations = payload.get("invocations")
@@ -1234,13 +1251,18 @@ def release_budget_reservation(
 
     def mutate(uow):
         row = uow.repository.execute(
-            "SELECT receipt_id, status, settled_json FROM budget_receipts "
+            "SELECT receipt_id, status, settled_json, reserved_json FROM budget_receipts "
             "WHERE reservation_id = ?",
             (reservation_id,),
         ).fetchone()
         if row is None:
             return
         if str(row[1] or "") in _TERMINAL_BUDGET_STATUSES:
+            return
+        if "operatorModelBudget" in _payload(row[3], label="reserved_json"):
+            from ..operator_optimization.model_budget import finish_model_budget_in_uow
+
+            finish_model_budget_in_uow(uow, reservation=reservation, unused_status="released", now_ms=now_ms)
             return
         payload = _payload(row[2], label="settled_json")
         payload.update(
@@ -1285,13 +1307,18 @@ def void_budget_reservation(
 
     def mutate(uow):
         row = uow.repository.execute(
-            "SELECT receipt_id, status, settled_json FROM budget_receipts "
+            "SELECT receipt_id, status, settled_json, reserved_json FROM budget_receipts "
             "WHERE reservation_id = ?",
             (reservation_id,),
         ).fetchone()
         if row is None:
             return
         if str(row[1] or "") in _TERMINAL_BUDGET_STATUSES:
+            return
+        if "operatorModelBudget" in _payload(row[3], label="reserved_json"):
+            from ..operator_optimization.model_budget import finish_model_budget_in_uow
+
+            finish_model_budget_in_uow(uow, reservation=reservation, unused_status="voided", now_ms=now_ms)
             return
         payload = _payload(row[2], label="settled_json")
         payload.update(

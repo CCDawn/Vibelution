@@ -378,6 +378,14 @@ class RealDomainPorts:
     def reserve_budget(
         self, *, action: PendingAction, estimate_tokens: int
     ) -> dict[str, Any]:
+        if action.node_id == "optimization_discussion":
+            from ..operator_optimization.discussion_authority import build_operator_meeting_authority
+            from ..operator_optimization.discussion_budget_runtime import reserve_discussion_budget
+
+            run = self._store.get_run(action.run_id)
+            authority = build_operator_meeting_authority(run.team_id, action.run_id,
+                node_run_id=action.node_run_id)
+            return reserve_discussion_budget(self._store, authority)
         from .budget_authority_adapter import (
             BudgetAuthorityError,
             reserve_budget_authority,
@@ -848,6 +856,13 @@ class RealDomainPorts:
         adapter_spec = resolve_agent_task_adapter(action.node_id)
         if adapter_spec is None:
             raise RuntimeError(f"agent node {action.node_id} has no task adapter")
+        if adapter_spec.family == "operator_discussion":
+            from ..operator_optimization.discussion_task import create_discussion_task
+
+            handle = create_discussion_task(self._store, action)
+            publish_agent_task_started_anchor(self._store, action=action,
+                binding=self.resolve_binding(action), handle=handle)
+            return handle
         snapshot = self._run_input_snapshot(action.run_id)
         if _bounded_agent_node_can_complete(
             action.node_id,
@@ -946,6 +961,11 @@ class RealDomainPorts:
         self, *, action: PendingAction, handle: AgentTaskHandle
     ) -> list[dict[str, str]] | AgentTurnResult:
         from .agent_turn_completion import complete_agent_turn_outputs
+
+        if action.node_id == "optimization_discussion":
+            from ..operator_optimization.discussion_task import execute_discussion_task
+
+            return execute_discussion_task(self._store, action, handle)
 
         if handle.observation_only:
             return AgentTurnResult(materialized_refs=(), handle=handle)
@@ -2212,6 +2232,9 @@ def _start_source_collection_agent_task(
     source_run_id = str(input_snapshot.get("sourceCollectionRunId") or "").strip()
     if not source_run_id:
         objective = input_snapshot.get("researchObjectiveContract") or {}
+        from .knowledge_request_snapshot import collection_request_scope
+
+        request_scope = collection_request_scope(input_snapshot)
         started_run = start_source_collection_run(
             team_id,
             {
@@ -2230,6 +2253,7 @@ def _start_source_collection_agent_task(
                 # prompt-cache model; SC still creates canonical Session/Task/Turn.
                 "promptCachePolicy": {"requirement": "disabled"},
                 "scope": {
+                    **request_scope,
                     "workflowRunId": action.run_id,
                     "researchProjectId": project_id,
                 },
@@ -2524,6 +2548,13 @@ def _execute_real_system_action(
     """
     node_id = str(action.node_id or "").strip()
     snapshot = dict(input_snapshot or {})
+    if node_id == "optimization_knowledge":
+        from ..operator_optimization.knowledge import publish_knowledge_snapshot
+        publish_knowledge_snapshot(snapshot["teamId"], action.run_id)
+        refs = _collect_system_artifact_refs(required_kinds=required_kinds,
+            team_id=snapshot["teamId"], workflow_run_id=action.run_id,
+            source_collection_run_id=action.run_id)
+        return refs, {"systemActionId": f"sys-{action.action_id}", "runnerId": "operator_knowledge_reuse_v1"}
     if node_id == "operator_baseline":
         from ..operator_optimization.dispatch import dispatch_baseline
         dispatch_baseline(action, snapshot)

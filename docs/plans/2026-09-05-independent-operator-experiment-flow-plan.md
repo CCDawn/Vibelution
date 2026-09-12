@@ -595,7 +595,7 @@ GPU 设备忙时释放尚未执行的预留；进程启动失败写入零用量�
 
 ### 仍阻塞全流程验收的工作
 
-1. `optimization_discussion` 和 `optimization_plan` 尚未接通正式 Agent 任务执行与完成回收；资料补齐、候选执行、数值评价、反馈和下一轮调度尚未全部接通。
+1. `optimization_discussion` 已接通正式会议任务与完成回收；`optimization_plan` 的规划 Agent 尚未接入。资料复用与计划冻结进度见第 20 节，付费搜集、候选执行、数值评价、反馈和下一轮调度尚未全部接通。
    原生 `meeting_receipt_authority` 的构建、发言回执及上下文仍限定 Challenge Cup，且默认聊天室结构化输出不是 `OptimizationHypothesis`。目前调用原生 authority 构建接口会在创建 Session 或调用模型之前明确报出不支持；必须补齐算子专属 authority 和结构化输出合同，不能手工伪造 authority 或冒用第一阶段 meeting type。
 2. 模型预算需要累计准入和费用结算；供应商估价与缺少币种的回执不能作为实际支出，`unsettled` 不得投影为已结算。
 3. 独立预览仍不能证明正式入口、团队画布、详情页共享生产 API/SSE 状态。前端接入验收须覆盖切换、回退和历史轮次查看。
@@ -608,7 +608,7 @@ GPU 设备忙时释放尚未执行的预留；进程启动失败写入零用量�
 
 已将恢复分支对齐本轮读取的最新主线。两处冲突分别保留主线的显式工作流定义选择语义和产物路径清洗，同时接回算子定义与产物类型；增加显式定义不得被默认定义替换的回归测试。对齐后独立入口、创建、基线分派、讨论拒绝边界及项目归属的聚焦测试通过。恢复代码与设备锁修复已经完成受管验证并合入本地 main；该结果不代表真实模型、设备或前端运行验收。
 
-当前边界：活动、轮次、冻结候选/协议、GPU 预算和基线桥已有代码及本地测试；`optimization_plan` 目前是数据合同，资料补齐、优化执行、评价反馈和下一轮尚未组成可执行闭环。团队画布、详情和展开工作区仍须接同一生产投影。真实模型、GPU 和性能收益均未验收。
+当前边界：活动、轮次、冻结候选/协议、GPU 预算、基线桥和单次讨论已有代码及本地测试；资料复用和计划冻结服务见第 20 节，付费搜集、规划 Agent、优化执行、评价反馈和下一轮尚未组成可执行闭环。团队画布、详情和展开工作区仍须接同一生产投影。真实模型、GPU 和性能收益均未验收。
 
 并行验证另复现了设备锁问题：Windows 原生锁争用抛出 `PermissionError`，原预算回收只识别 `BlockingIOError`，导致未启动执行也留下预留。修复仅在算子执行器的锁获取边界统一“尚未启动”的失败，不改变锁取得后的异常语义；以真实文件锁争用验证预留释放。模拟执行测试使用每个测试自己的临时设备锁，避免并行测试之间或与产品设备锁相互干扰。
 
@@ -719,7 +719,7 @@ Chat Room 的专属结构化输出应复用现有 `set_turn_structured_output_co
 
 本轮发布的假设已经包含 `evidenceGaps`，后续 knowledge owner 消费同一个 `hypothesisRef`，不再调用第一阶段假说生成：
 
-- 通过 `knowledge_sideflow_service.ensure_knowledge_invocation()` 建立/复用 invocation，以 parent run、`optimization_knowledge` 节点和实际 node attempt 关联。其 scope 和 requirements hash 纳入活动、轮次、假设引用、资料缺口、source policy 和允许的 managed source roots。
+- 通过 `knowledge_sideflow_service.ensure_knowledge_invocation()` 建立/复用 invocation，以 parent run、`optimization_knowledge` 节点和实际 node attempt 关联。第 20 节将来源语义指纹与本轮消费身份分开：来源 scope/requirements 约束团队、项目、根目录、主张和协议；consumer context 将活动、轮次、假设引用绑定进请求 hash，既允许同条件资料复用，也不混淆本轮归属。
 - 先查匹配的规范知识包，确有缺口才调用搜集；已有资料也要落可回读快照。`evidenceGaps=[]` 不等于可伪造“知识完成”，应产出明确的已有证据复用决定。
 - `ensure_knowledge_child_run()` 是复用候选入口；真正接入时必须验证其来源范围、模型回执、预算和 scope 是否支持 operator 身份，不能以创建 child run 成功代替整个搜集链验收。
 - 资料能支持、削弱或否定主假设。被否定时停止该计划并保留理由，不能将不支持的假设强行转成实验。
@@ -765,3 +765,73 @@ Chat Room 的专属结构化输出应复用现有 `set_turn_structured_output_co
 替换当前未接通的讨论解析路径后删除其原始文本 JSON 发布入口，避免出现两个最终结果来源。新增合同若改变已有开发数据结构，先检查是否存在正式活动记录；无正式数据则直接更新合同和 fixture，不搭建双版本运行分支。若发现真实历史需要迁移，暂停该写入并给出明确迁移方案，不删除研究证据。
 
 回退先停止本活动新派发并保存已有模型费用、讨论和产物，再撤回代码；不能通过删除回执、取消预留事实或重建同 ID 活动制造“从未执行”。只回退任务内修改，不推送、不发布或重启无关运行时。
+
+### 19.11 实施检查点（2026-09-12）
+
+第二阶段单次讨论已接入原生任务适配、Chat Room 与 Ledger，保持独立活动数据流。聊天室修改已由用户交给当前任务，旧占用已解除。最终合入由项目收口流程验证，不以本节记录代替合入结果。
+
+- 服务端冻结真实 attempt、证据输入、团队席位、最后汇总者、模型路由与显式价目；单席位结构化消息仅从 `operatorDiscussionPayload` 进入领域产物。删除旧保存入口、通用输出字段兼容读取及第二份聊天正文。
+- `RealDomainPorts` 为 `optimization_discussion` 预留专属模型预算，建立原生会议句柄与执行投影。原生完成依赖保存所有 speaker Turn，会议执行中等待，结束通知与迟到回执唤醒原 action，不重复开会或调用模型。房间锁内再次检查单轮约束。
+- invoke/stream 每次 transport 重试独立准入；失败、取消与未知消耗通过回执持久化入口记入同一 Ledger。普通调用不改变重试身份和准入次数。未知消耗在失败清理、取消和释放时仍保留预算，未发生调用的预留可以释放。
+- 费用按 provider token 用量乘冻结价目归集，来源产物引用预算 receipt 和结算状态；这不等于供应商实际账单。费用未明确时阻断节点推进。真实用量超出预估时仍保存费用事实与回执，阻止后续超额调用，不丢弃已发生消费。无可行假设时保留讨论来源并暂停活动。
+- 未接入的 `optimization_knowledge` 明确给出 readiness blocker。本批没有执行知识子流、实验规划、生产模型调用、GPU 实验或产品重启。
+
+新增 `tests/test_operator_discussion_native_integration.py` 使用真实 dispatcher、Ledger、来源冻结、Chat Room、LLMClient、receipt Outbox 和产物回读，控制 provider 返回及预建会话；已通过 selected/no_viable 两条 CPU 集成路径。它验证回执等待恢复不重复消费，且无需第一阶段输入。共享 LLM、适配器、完成依赖及讨论专项回归已通过；真实配置、真实模型和运行中的产品界面仍未验收。
+
+集成测试发现并修复的接口问题：旧聊天正文参数残留；重试调用编号重复拼接；失败回执缺少持久化回调；预留金额 Decimal 不能放入恢复 JSON；会议执行投影未推进 attempt 状态；产物引用缺少校验哈希。算子 round 不再填入旧 `MeetingRound` 的 `meetingRoundId`，避免错误进入第一阶段会议收尾逻辑。
+
+继续复用 RD-Agent 固定版本的假设/实验职责分离与失败反馈方式，调度、回执和会话仍由本项目原生设施负责。后续资料与计划交接进度见第 20 节；本批产物中的假设引用与 `evidenceGaps` 是其输入。
+
+## 20. 资料复用与计划冻结（2026-09-12）
+
+### 20.1 本批落地范围
+
+接通 `optimization_knowledge` 的**零调用复用路径**，以及独立的计划输入回读和计划冻结服务。尚不启动新知识 child run，不调用规划模型，不运行 GPU，也不修改正式前端。
+
+- `OperatorKnowledgeRequest` 冻结活动、轮次、假设引用、已有观测、具体资料缺口、来源策略版本和受管来源根；请求保存为 `optimization_knowledge_request`。活动或假设、缺口、根目录改变都会改变 invocation 指纹。该服务只准备请求，不会隐式启动搜集。
+- 无资料缺口时仍保存 `optimization_knowledge` 快照，显式记录 `existing_observations` 及可回读观测，不能用空成功占位。
+- 有缺口时先查本轮已绑定的接受包，否则按相同主张、观测、协议及允许来源寻找已有接受包。新增 `reuse_only` 准入复用原 sideflow 事务：匹配时为本轮创建独立 invocation 与交付事件，不匹配时在任何写入之前退出，绝不自动开 child。本轮 invocation 必须匹配完整消费请求 hash；新执行 child 的费用归属尚未完成，因此不会被当作本轮的零费用复用。
+- 读取知识快照时再次校验规范知识包；撤销接受或来源不可回读，会阻止计划读取。知识包入库不代表假设成立，原始 `evidenceGaps` 保留给规划判断。
+- 正式 system executor 已调用该复用服务并返回规范产物；readiness 对有缺口但无匹配知识包的情况返回明确的付费搜集预算阻断。
+- `OptimizationPlan` 升为 v2，必填 `hypothesisRef`、`knowledgeRef`、预测、反证、证据判断及试验数量/时限；`gapChecks` 必须逐项保留知识快照中的缺口并声明实验如何检查，不能仅靠自由文本将其抹去。旧的无来源 v1 合同不再接受。
+- `planning_input()` 回读假设、知识快照、来源内容、观测、固定协议与候选；`freeze_optimization_plan()` 检查引用一致、真实候选归属/代码 hash、非 holdout 协议和剩余调优预算，然后先保存规范产物再绑定本轮。它不预占 GPU；实际执行仍须重新准入。
+
+### 20.2 本次查明的限制与下一批顺序
+
+1. 知识 child 仅复制部分 parent 输入，当前没有完整继承算子货币预算；普通 reserve 缺配置时可能进入通用 token 默认值。下一批需冻结 source roles 的模型价目、逐次准入和失败回执，将费用归回同一活动后才能打开新搜集入口。
+2. 子流请求内容传递已按第 21 节补齐：完整消费请求进入 child 冻结快照与 collection scope，缺口进入查询词。算子专属费用身份及原生 source task 的回执接入仍未完成，不能因此开启付费搜集。
+3. 既有知识快照消费事件属于第一阶段 hypothesis fan-out。本批使用独立 `optimization_knowledge` 产物作为本轮消费关联，不伪造旧 selection 或第一阶段节点完成。
+4. 原 `experiment_api.create_experiment_plan()` 依赖旧 stage round/candidate 与阶段激活。本批复用底层合同/产物设施，不把独立算子流送入旧入口。
+5. 当前 runner 只接受受管的 `torch_softmax` / `triton_row_softmax` 与 warp 参数。计划不能将不存在的生成代码伪装成 `candidateRef`。规划 Agent 的生成、受管候选物化和完成回收尚未接入；readiness 对该节点明确阻断。
+
+顺序：先完成知识 child 的请求传递与货币预算桥 → 验收搜集、交付、恢复 → 接规划 Agent 与真实候选物化 → 接执行/评价/反馈。执行接入时必须重新回读 plan 绑定的知识快照并做来源有效性校验，不能仅凭旧 planRef 运行；冻结计划后来源撤销仍须阻断执行。不得用本批零调用测试证明付费子流或完整研究闭环已经可用。
+
+### 20.3 复用与验证证据
+
+已对照本地知识库 `microsoft/RD-Agent` 固定版本 `32b3d395e73d9db5eee3fe9063d69aec0fdc83bd` 的 `RDLoop`，借鉴 hypothesis conversion 与 experiment execution 的职责分离。仍使用本项目 invocation 指纹、已接受知识包回读、规范 artifact store 和原生 system executor，未复制外部调度器。
+
+专项测试 `tests/test_operator_knowledge_plan.py` 使用真实本地规范产物与 SQLite Ledger 的 invocation/交付事件；知识内容回读为受控 fixture。覆盖无缺口复用、有缺口阻断、发现旧接受包并真实创建本轮复用 invocation、不同请求隔离、未交付、来源撤销、新付费 child 不被零费用接收、计划来源/预算/缺口拒绝、重复冻结、原生 system dispatcher 完成回执、产物回读及 readiness。既有 sideflow 回归仍验证普通建 child 的原语义。该证据不包含生产模型、真实知识搜集、GPU 或产品页面验收。
+
+## 21. 新资料搜集输入与回执接入检查点（2026-09-12）
+
+### 21.1 已实现的请求传递
+
+此前 `ensure_knowledge_invocation()` 接收完整 scope、search envelope、requirements 和 consumer context，但调用建 child 时仅传来源根；child 快照因此只保留指纹。`RealDomainPorts` 又只用父课题标题启动 collection，使本轮缺口没有进入检索计划。这是本批修复的实际断点。
+
+现在 child 创建前校验完整请求与 invocation 四个指纹相符，然后将 `knowledgeRequest` 纳入 child 快照 hash。消费上下文中已有本轮假设引用与内容 hash；不从消息 metadata 重建请求。重放使用同一 child，创建新 child 缺少完整请求时明确拒绝，不为旧 hash-only 创建行为加兼容分支。
+
+原生 source adapter 将该内容传入现有 collection scope，复用现有 `searchEnvelope`、`requirements` 和 `seedQueries`：证据缺口与检索关键词进入实际查询词生成函数，各 source role 的 assignment scope 继承同一请求。请求仅作为研究输入，不能覆盖真实 workflowRunId、项目身份或模型准入权限。
+
+### 21.2 仍需接通的费用与恢复路径
+
+- `session.worker._model_invocation_receipt_context()` 会回读规范 source stage task，是四个 source role 的统一服务端回执入口。source task factory 当前不保留一般任务的 receipt seed；只在 `_formal_task_authorities()` 添加字段不足以接通真实调用。
+- 保留 child 的 `challenge-cup-knowledge-sideflow` 身份及真实 Session/Task/Turn。现有 discussion binding 硬编码 `operator-optimization` / `optimization_discussion`，不得拿它冒充 source child；需要独立的、经服务端谱系校验的算子费用归属合同。
+- 每个真实 child NodeRun 使用现有货币账本独立预留，同一 campaign 汇总。不能把所有 source 节点绑在父节点一个 reservation 上，导致首个 source 完成就提前结算全体费用。需明确冻结知识搜集限额、价目及授权，不能落入通用 token 默认值。
+- 同时接入 LLM 每次重试准入、失败/未知消耗回执、成功 stream capture、receipt persistence 的算子账本路由，费用未明确时不得推进下一付费节点。普通第一阶段 source 任务沿用现有合同。
+- 现有 knowledge result recheck 在父 attempt 仍活动时只追加 revision event；还需接原 action 的持久化完成依赖和交付唤醒，不能重新创建 child 代替恢复。人工知识接受仍走既有 handoff。
+
+### 21.3 本批验收边界
+
+`tests/test_knowledge_request_snapshot.py` 使用真实 SQLite child 创建与重放，并检验原生 source adapter 输出到现有查询词生成函数；覆盖内容冻结、指纹不符、缺失输入及原生 collection scope 传递。复用本地 `source_collection.facade` 的 scope 设计与 `residual` 查询词入口，没有引入新的搜集调度器。
+
+本批不开放算子付费 child，不修改 readiness 费用阻断；模型费用桥、原生 source 完整会话、人工交付唤醒及真实模型/GPU 验收仍未完成。

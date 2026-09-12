@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import pytest
 
-from agent import SelfEvolvingAgent
+from agent import AgentRuntime
 from core.agent_kernel import service as agent_kernel_service
 from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_MESSAGE,
@@ -2685,7 +2685,7 @@ def test_chat_room_real_agent_reaches_llm_with_bound_turn_identity(tmp_path, mon
         invocation_messages.append(messages)
         return None
 
-    monkeypatch.setattr(SelfEvolvingAgent, "_invoke_llm", fake_invoke_llm)
+    monkeypatch.setattr(AgentRuntime, "_invoke_llm", fake_invoke_llm)
 
     detail = chat_room_service.start_chat_room_round(room["roomId"], "检查群聊 turn identity")
 
