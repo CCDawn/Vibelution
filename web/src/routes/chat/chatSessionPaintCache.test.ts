@@ -38,10 +38,74 @@ function detail(id: string, messages: number, provisional = false): SessionDetai
   } as SessionDetail;
 }
 
+function windowedDetail(
+  id: string,
+  ledgerSeq: number,
+  messages: Array<{ index: number; role: "user" | "assistant"; content: string }>,
+  window: { total: number; oldest: number; newest: number },
+): SessionDetail {
+  return {
+    id,
+    title: id,
+    ledgerSeq,
+    messages: messages.map((message) => ({
+      id: `${id}-message-${message.index}`,
+      role: message.role,
+      content: message.content,
+    })),
+    messageWindow: {
+      mode: "window",
+      totalMessages: window.total,
+      returnedMessages: messages.length,
+      oldestMessageIndex: window.oldest,
+      newestMessageIndex: window.newest,
+      hasEarlier: window.oldest > 1,
+      hasLater: false,
+      nextBeforeMessageIndex: window.oldest > 1 ? window.oldest : null,
+      transcriptScope: "window",
+    },
+    defaultFileContext: "",
+    previewTabs: [],
+    activePreviewPath: "",
+    changedFiles: [],
+    readFiles: [],
+    stopRequested: false,
+    stopRequestedAt: "",
+    stopReason: "",
+  } as SessionDetail;
+}
+
 describe("chatSessionPaintCache", () => {
   beforeEach(() => {
     clearSessionDetailPaintCacheForTests();
     clearSessionTimelineScrollMemoryForTests();
+  });
+
+  it("does not resurrect messages a strictly newer authoritative window truncated", () => {
+    rememberSessionDetailPaint(
+      windowedDetail("s1", 40, [
+        { index: 1, role: "user", content: "第一问" },
+        { index: 2, role: "assistant", content: "第一答" },
+        { index: 3, role: "user", content: "第二问" },
+        { index: 4, role: "assistant", content: "本轮已按请求停止。" },
+      ], { total: 4, oldest: 1, newest: 4 }),
+    );
+
+    const paint = resolveStickySessionDetailPaint({
+      activeSessionId: "s1",
+      detail: windowedDetail("s1", 48, [
+        { index: 1, role: "user", content: "第一问" },
+        { index: 2, role: "assistant", content: "第一答" },
+        { index: 3, role: "user", content: "第二问（改写后重发）" },
+      ], { total: 3, oldest: 1, newest: 3 }),
+    });
+
+    expect(paint?.messages.map((message) => message.id)).toEqual([
+      "s1-message-1",
+      "s1-message-2",
+      "s1-message-3",
+    ]);
+    expect(paint?.messageWindow?.totalMessages).toBe(3);
   });
 
   it("remembers non-provisional detail and reuses it while a provisional shell is active", () => {
