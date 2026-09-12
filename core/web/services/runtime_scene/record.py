@@ -1035,6 +1035,39 @@ def _resolve_recent_completed_runtime_scene_dir(*, max_age_seconds: float = 180.
     return None
 
 
+def _resolve_pointer_runtime_scene_dir() -> Path | None:
+    """Resolve the Launcher-referenced scene even after it has been sealed.
+
+    The Launcher deliberately keeps ``active-runtime-scene.json`` pointing at the most
+    recent scene after shutdown (see ``_seal_active_runtime_scene`` in
+    ``scripts/vibelution_launcher.py``), while ``_resolve_current_runtime_scene_dir``
+    only accepts scenes whose manifest status is still active.  A backend process that
+    outlives a Workbench stop would therefore resolve ``None`` forever and silently
+    drop every observation event for the rest of its lifetime.  This last-resort
+    resolver reuses the referenced scene so those events land in their historical home
+    instead of disappearing.
+    """
+    s = _service()
+    for runtime_reference in (s._load_active_runtime_scene_reference(), s._load_launcher_state()):
+        raw_dir = str(runtime_reference.get("runtimeSceneDir") or "").strip()
+        if not raw_dir:
+            continue
+        scene_dir = Path(raw_dir).resolve()
+        try:
+            scene_dir.relative_to(s._runtime_scene_root())
+        except ValueError:
+            continue
+        try:
+            if not scene_dir.is_dir():
+                continue
+        except OSError:
+            continue
+        if not s._runtime_scene_project_matches(s._load_scene_manifest(scene_dir)):
+            continue
+        return scene_dir
+    return None
+
+
 def _resolve_scene_child(scene_dir: Path, relative_path: str) -> Path:
     s = _service()
     candidate = (scene_dir / relative_path).resolve()
@@ -2271,6 +2304,10 @@ def record_backend_api_event(payload: dict[str, Any]) -> dict[str, Any]:
 
     scene_dir = s._resolve_current_runtime_scene_dir()
     if scene_dir is None:
+        scene_dir = s._resolve_recent_completed_runtime_scene_dir()
+    if scene_dir is None:
+        scene_dir = s._resolve_pointer_runtime_scene_dir()
+    if scene_dir is None:
         return {
             "accepted": False,
             "reason": "no_runtime_scene",
@@ -2390,6 +2427,10 @@ def record_browser_telemetry(payload: dict[str, Any]) -> dict[str, Any]:
     s = _service()
 
     scene_dir = s._resolve_current_runtime_scene_dir()
+    if scene_dir is None:
+        scene_dir = s._resolve_recent_completed_runtime_scene_dir()
+    if scene_dir is None:
+        scene_dir = s._resolve_pointer_runtime_scene_dir()
     if scene_dir is None:
         return {
             "accepted": False,
@@ -2596,6 +2637,10 @@ def record_runtime_scene_conversation_event(
 
     scene_dir = s._resolve_current_runtime_scene_dir()
     if scene_dir is None:
+        scene_dir = s._resolve_recent_completed_runtime_scene_dir()
+    if scene_dir is None:
+        scene_dir = s._resolve_pointer_runtime_scene_dir()
+    if scene_dir is None:
         return {
             "accepted": False,
             "reason": "no_runtime_scene",
@@ -2787,6 +2832,8 @@ def _record_runtime_scene_event_impl(
     scene_dir = s._resolve_current_runtime_scene_dir()
     if scene_dir is None and allow_recent_completed:
         scene_dir = s._resolve_recent_completed_runtime_scene_dir()
+    if scene_dir is None:
+        scene_dir = s._resolve_pointer_runtime_scene_dir()
     if scene_dir is None:
         return {
             "accepted": False,
