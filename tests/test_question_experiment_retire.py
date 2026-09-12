@@ -202,6 +202,9 @@ def test_retire_removes_question_scoped_stores_and_keeps_approved_question(
     )
     keep_receipt = _seed_receipt(team_id, _KEEP, "run-keep")
     target_receipt = _seed_receipt(team_id, _TARGET, "run-target")
+    # The question's receipts are removed even when their run id is not part
+    # of the registered/formal run set collected for lineage scoping.
+    unregistered_receipt = _seed_receipt(team_id, _TARGET, "run-unregistered")
 
     preview = challenge_question_retire.preview_question_retire(team_id, _TARGET)
 
@@ -210,7 +213,7 @@ def test_retire_removes_question_scoped_stores_and_keeps_approved_question(
     assert preview["questionRuns"]["recordCount"] == 1
     assert preview["questionRuns"]["runIds"] == ["run-target"]
     assert preview["workflowArtifacts"]["removedCount"] == 1
-    assert preview["modelInvocationReceipts"]["removedCount"] == 1
+    assert preview["modelInvocationReceipts"]["removedCount"] == 2
     assert preview["project"]["found"] is True
 
     result = challenge_question_retire.retire_question_experiment(
@@ -222,7 +225,7 @@ def test_retire_removes_question_scoped_stores_and_keeps_approved_question(
     assert result["errors"] == []
     assert result["questionRuns"]["removedRunIds"] == ["run-target"]
     assert result["workflowArtifacts"]["removedCount"] == 1
-    assert result["modelInvocationReceipts"]["removedCount"] == 1
+    assert result["modelInvocationReceipts"]["removedCount"] == 2
     assert result["project"]["removed"] is True
 
     assert (
@@ -246,6 +249,7 @@ def test_retire_removes_question_scoped_stores_and_keeps_approved_question(
     )
     assert {row["workflowRunId"] for row in kept_artifacts} == {"run-keep"}
     assert not target_receipt.exists()
+    assert not unregistered_receipt.exists()
     assert keep_receipt.is_file()
     assert (
         research_projects.get_research_project_for_question(team_id, _TARGET) is None
