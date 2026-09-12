@@ -112,6 +112,24 @@ describe("conversationTurnErrorPresentation", () => {
     ]);
   });
 
+  it("renders the retry trail on the settled provider-failure card", () => {
+    const rows = buildCurrentTurnErrorRows({
+      reasonSummary: "upstream unavailable",
+      retryHistory: [
+        { attempt: 1, maxAttempts: 5, category: "server_error" },
+        { attempt: 2, maxAttempts: 5, category: "server_error" },
+        { attempt: 5, maxAttempts: 5, category: "server_error" },
+      ],
+    } as SessionTurnError, "zh");
+
+    expect(rows).toContainEqual({
+      label: "重试记录",
+      value: "第 1/5 次：server_error → 第 2/5 次：server_error → 第 5/5 次：server_error",
+    });
+    expect(buildCurrentTurnErrorRows({ reasonSummary: "upstream unavailable" } as SessionTurnError, "en"))
+      .not.toContainEqual(expect.objectContaining({ label: "Retries" }));
+  });
+
   it("builds bounded diagnostic rows directly from a canonical error cell summary", () => {
     expect(buildTurnErrorDiagnosticRows({
       httpStatus: 502,

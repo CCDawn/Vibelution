@@ -474,6 +474,13 @@ def _persist_session_turn_result(
             llm_failure=result.get("llm_failure") if isinstance(result.get("llm_failure"), dict) else None,
             llm_payload_trace=s._current_session_live_llm_payload_trace(session_id),
         )
+        failure_feedback_events = s._extract_chat_feedback_events(result, final_status="failed")
+        retry_history = s._build_session_turn_retry_history(
+            result,
+            feedback_events=failure_feedback_events,
+        )
+        if retry_history:
+            turn_error["retry_history"] = retry_history
         failure_message = str(turn_error.get("message") or "").strip()
         context_composition = s._normalize_session_context_composition(
             result.get("context_composition") if isinstance(result, dict) else None
@@ -487,7 +494,7 @@ def _persist_session_turn_result(
                 partial_reply,
                 s._extract_chat_tool_calls(result),
                 thought=s._extract_chat_thought(result, partial_reply),
-                feedback_events=s._extract_chat_feedback_events(result, final_status="failed"),
+                feedback_events=failure_feedback_events,
                 mental_snapshot=s._build_turn_mental_snapshot(
                     result,
                     lang,

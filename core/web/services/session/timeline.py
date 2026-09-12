@@ -470,6 +470,17 @@ def _normalize_persisted_feedback_events(value: Any) -> list[dict[str, Any]]:
         name = str(item.get("name") or item.get("label") or "").strip()
         if name:
             entry["name"] = name
+        # Retry status keeps its structured attempt identity so live progress and
+        # the settled turn-error trail can show "第 N/M 次" without re-parsing text.
+        attempt = s._coerce_nonnegative_int(item.get("attempt"))
+        if attempt > 0:
+            entry["attempt"] = attempt
+        max_attempts = s._coerce_nonnegative_int(item.get("maxAttempts") or item.get("max_attempts"))
+        if max_attempts > 0:
+            entry["maxAttempts"] = max_attempts
+        category = str(item.get("category") or "").strip()
+        if category:
+            entry["category"] = category
         call_id = str(item.get("callId") or item.get("toolCallId") or item.get("tool_call_id") or "").strip()
         if call_id:
             entry["callId"] = call_id
@@ -585,6 +596,9 @@ def _normalize_message_feedback_events(value: Any) -> list[dict[str, Any]]:
             "formattedOutput",
             "content",
             "text",
+            "attempt",
+            "maxAttempts",
+            "category",
         ):
             if key in item:
                 entry[key] = item[key]

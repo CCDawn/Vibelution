@@ -424,6 +424,10 @@ def _codex_transcript_cell_from_operation_source(
             "executionStartedAtEpochMs": s._coerce_tool_number(
                 source.get("executionStartedAtEpochMs") or source.get("execution_started_at_epoch_ms")
             ),
+            "attempt": s._coerce_nonnegative_int(source.get("attempt")) or None,
+            "maxAttempts": s._coerce_nonnegative_int(
+                source.get("maxAttempts") or source.get("max_attempts")
+            ) or None,
         }
     )
     if kind != "tool":
@@ -1315,6 +1319,10 @@ def _session_turn_item_from_codex_cell(
             "executionStartedAtEpochMs": s._coerce_tool_number(
                 cell.get("executionStartedAtEpochMs") or cell.get("execution_started_at_epoch_ms")
             ),
+            "attempt": s._coerce_nonnegative_int(cell.get("attempt")) or None,
+            "maxAttempts": s._coerce_nonnegative_int(
+                cell.get("maxAttempts") or cell.get("max_attempts")
+            ) or None,
             "turnId": turn_id,
             "messageId": message_id,
             "source": source,

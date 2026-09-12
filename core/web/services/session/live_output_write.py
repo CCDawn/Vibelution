@@ -634,6 +634,13 @@ def _set_session_llm_status_live_output(
         "failureClass": failure_class,
         "transportStatus": status_key if status_key.startswith("transport_") else "",
     }
+    # Structured retry identity: the live status note renders "第 N/M 次" from
+    # these fields, and the provider-failure persist builds the retry trail.
+    if status_key in {"retrying", "failed"} and attempt and max_attempts:
+        feedback_event["attempt"] = attempt
+        feedback_event["maxAttempts"] = max_attempts
+        if category:
+            feedback_event["category"] = category
     feedback_events = s._append_session_live_feedback_event(
         session_id,
         feedback_event,
