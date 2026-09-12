@@ -380,7 +380,7 @@ def submit_session_guidance(session_id: str, content: str, *, mode: str = "safe"
         )
 
     if normalized_mode == "interrupt" and running:
-        return s.request_stop_session_turn(conversation_id)
+        return s.request_stop_session_turn(conversation_id, fast_ack=True)
 
     s._publish_session_detail_snapshot(conversation_id)
     return s.get_session_detail(conversation_id) or detail

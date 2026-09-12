@@ -386,6 +386,9 @@ export function regenerateSessionMessage(
   );
 }
 
+// Running-turn stops answer with a control ack (id + stopping phase fields, no
+// transcript). mergeSessionDetailMessageWindow patches those fields without
+// replacing the cached message list; the worker publishes the full detail.
 export function stopSessionTurn(sessionId: string, turnId: string): Promise<SessionDetail> {
   return fetchJson<SessionDetail>(`/api/sessions/${encodeURIComponent(sessionId)}/stop`, {
     method: "POST",

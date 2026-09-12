@@ -18,15 +18,24 @@ def _service():
     return session_service
 
 
-def request_stop_session_turn(session_id: str, *, expected_turn_id: str = "") -> dict:
+def request_stop_session_turn(
+    session_id: str,
+    *,
+    expected_turn_id: str = "",
+    fast_ack: bool = False,
+) -> dict:
     """Interrupt the active web chat turn after optional identity validation.
 
     Interactive HTTP callers always provide ``expected_turn_id``. Trusted
     internal shutdown paths may omit it to retain explicit stop-current
     behavior.
 
-    Signal the controller before hydrating session detail. A running turn
-    must start stopping even when detail projection is congested.
+    Signal the controller before any hydration. With ``fast_ack`` the
+    running-turn stop is acknowledged without rebuilding session detail: the
+    worker owns the stopped snapshot and publishes it once it observes the
+    request (provider abort or the next cooperative checkpoint), so the HTTP
+    response no longer scales with transcript size or projection congestion.
+    Internal callers keep the hydrated-detail response by default.
     """
     s = _service()
 
@@ -94,6 +103,17 @@ def request_stop_session_turn(session_id: str, *, expected_turn_id: str = "") ->
         )
         s._set_session_running(conversation_id, False, turn_id=controller.turn_id)
         controller.mark_released_to_user()
+    else:
+        if fast_ack:
+            # The controller has the stop request; acknowledge before the
+            # worker persists and publishes the authoritative stopped snapshot.
+            return {
+                "id": conversation_id,
+                "currentPhase": "stopping",
+                "stopRequested": True,
+                "stopRequestedAt": str(stop_snapshot.get("stopRequestedAt") or ""),
+                "activeTurnId": str(stop_snapshot.get("turnId") or controller.turn_id),
+            }
     next_detail = s.get_session_detail(conversation_id)
     if next_detail is not None:
         s._publish_session_detail_snapshot(conversation_id, detail=next_detail)

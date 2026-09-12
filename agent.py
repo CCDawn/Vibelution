@@ -3335,9 +3335,10 @@ class SelfEvolvingAgent:
         self._last_llm_failure_max_attempts = MAX_CONSECUTIVE_FAILURES
 
         def _turn_llm_cancel_context(checker):
-            # Provider abort is a Challenge-only extension. Ordinary Agent
-            # turns still observe the stop checker, but must not allocate a
-            # LiteLLM HTTP watcher merely because the checker is callable.
+            # Session turns mark the checker to enable provider HTTP abort, so
+            # a user stop interrupts an in-flight Chat Completions stream
+            # instead of waiting for the next cooperative checkpoint. Checkers
+            # without the marker keep the prior behavior.
             return llm_cancel_context(
                 checker,
                 enable_chat_provider_abort=bool(

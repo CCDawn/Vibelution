@@ -1132,9 +1132,10 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
 
     # The LLM adapter receives a bound ``current_stop_reason`` method, so the
     # capability marker must live on the session-owned checker before the
-    # Agent wraps it. This keeps provider HTTP abort opt-in to Challenge turns
-    # while ordinary turns retain cooperative stop checks without a watcher.
-    interrupt_checker._vibelution_chat_provider_abort_enabled = bool(challenge_deadline_at_ms)
+    # Agent wraps it. Provider HTTP abort keeps a user stop responsive while a
+    # Chat Completions stream is still in flight; Challenge turns additionally
+    # abort on their deadline through the same checker.
+    interrupt_checker._vibelution_chat_provider_abort_enabled = True
     try:
         agent_prompt_snapshot = (
             s._ensure_session_agent_prompt_snapshot(
