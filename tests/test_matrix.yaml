@@ -213,8 +213,10 @@ rules:
       - "local-parallel"
     paths:
       - "core/chat/turn_journal.py"
+      - "core/chat/conversation_branches.py"
+      - "tests/test_conversation_branches.py"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_turn_journal.py tests/test_turn_journal_splice.py tests/test_turn_journal_perf.py tests/test_session_turn_journal.py tests/test_session_journal_bridge.py tests/test_conversation_invariant.py tests/test_conversation_ledger.py tests/test_model_messages.py tests/test_clear_chat_journal_state_script.py tests/test_session_detail_contract.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_turn_journal.py tests/test_turn_journal_splice.py tests/test_turn_journal_perf.py tests/test_session_turn_journal.py tests/test_session_journal_bridge.py tests/test_conversation_invariant.py tests/test_conversation_branches.py tests/test_conversation_ledger.py tests/test_model_messages.py tests/test_clear_chat_journal_state_script.py tests/test_session_detail_contract.py -q"
     notes:
       - "Owns the journal contract directly instead of falling back to the import frontier, which reached 23 files and pulled multi-minute unrelated batches."
       - "Covers the post-terminal write guard, splice/rewrite, sequence integrity, and the session transcript projection that consumes journal events."
@@ -249,6 +251,7 @@ rules:
       - "tests/helpers/web_chat_state.py"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_session_routes.py tests/test_chat_room_service.py tests/test_chat_room_routes.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_app.py -k \"branch_edit_reports_versions or regenerate_with_base_message_id\" -q"
     notes:
       - "Use the route/service subset first; widen to tests/test_web_app.py only when shared app fixtures or legacy route coverage changed."
 

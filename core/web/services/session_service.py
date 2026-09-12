@@ -48,6 +48,7 @@ from core.chat.chat_task_types import trim_lines
 from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_DELTA_COMMITTED,
     EVENT_ASSISTANT_MESSAGE,
+    EVENT_BRANCH_REBASE,
     EVENT_CLI_SESSION_LIFECYCLE,
     EVENT_CLI_TASK_RESULT,
     EVENT_CLI_TASK_SENT,
@@ -66,11 +67,17 @@ from core.chat.conversation_ledger import (
     conversation_ledger_workspace_root,
     conversation_visible_messages_from_events,
     conversation_turn_items_from_events,
+    fold_active_events,
     latest_ledger_sequence,
     latest_open_turn_id,
     load_conversation_events,
     load_conversation_preview_slice,
     rewrite_conversation_events,
+)
+from core.chat.conversation_branches import (
+    analyze_conversation_branches,
+    resolve_active_user_node_id,
+    visible_messages_with_branch_info,
 )
 from core.chat.turn_journal import EVENT_ASSISTANT_ITEM_COMMITTED
 from core.chat.context_assembler import assemble_conversation_context
@@ -200,10 +207,12 @@ from .session.live_output import (
     state_from_checkpoint_payload as _state_from_checkpoint_payload,
     write_session_live_output_checkpoint as _write_session_live_output_checkpoint_core,
 )
+from .session.branch_head import switch_session_head
 from .session import journal_bridge as _journal_bridge
 from .session.submit import (
     _accepted_session_turn_payload,
     _resolve_user_message_content,
+    _session_submit_admit_lock,
     edit_and_resubmit_session_message,
     regenerate_session_message,
     submit_session_guidance,
@@ -735,6 +744,7 @@ from core.web.services.session.runtime_glue import (
     _agent_needs_ai_search_team_marker,
     _agent_team_identity,
     _ai_search_team_id_for_repair,
+    _append_session_branch_rebase_event,
     _append_session_conversation_event,
     _append_session_runtime_notice,
     _archived_agent_for_direct_session,
@@ -902,7 +912,6 @@ from core.web.services.session.runtime_glue import (
     _task_goal_dedupe_key,
     _thought_duplicates_reply,
     _trim_tool_detail_text,
-    _truncate_session_ledger_before_message,
     _validate_user_message_not_encoding_replacement,
     active_session_has_write_leases,
     has_running_sessions,
@@ -959,6 +968,7 @@ from core.web.services.session.projection import (
     _session_agent_status_payload,
     _ledger_latest_preview_messages_for_session,
     _ledger_visible_messages_for_session,
+    _session_branch_metadata,
     _normalize_child_handoff_context,
     _normalize_child_result_card,
     _load_conversations,

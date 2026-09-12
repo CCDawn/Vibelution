@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import json
+import threading
+import time
 from pathlib import Path
 
 from core.web.services import runtime_scene_service
@@ -112,6 +114,73 @@ def test_scene_event_can_defer_periodic_summary_refresh(tmp_path, monkeypatch):
         if line.strip()
     ]
     assert rows[-1]["event_code"] == "command_queue.command_claimed"
+
+
+def test_active_scene_refresh_is_single_flight(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "_last_scene_package_refresh_at", 0.0)
+    scene_dir = _seed_active_scene(tmp_path)
+    calls: list[Path] = []
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_update(scene: Path, manifest: dict) -> None:
+        calls.append(scene)
+        started.set()
+        release.wait(timeout=10)
+
+    monkeypatch.setattr(
+        runtime_scene_service, "_update_runtime_scene_package_manifest", blocking_update
+    )
+    results: dict[str, bool] = {}
+
+    def first_refresh() -> None:
+        results["first"] = runtime_scene_record._refresh_active_scene_package_if_due(scene_dir)
+
+    worker = threading.Thread(target=first_refresh)
+    worker.start()
+    assert started.wait(timeout=10)
+
+    # A concurrent recorder that missed the claim (stale timestamp) must skip
+    # on the non-blocking package lock instead of queueing a second full
+    # refresh behind the in-flight one.
+    monkeypatch.setattr(runtime_scene_service, "_last_scene_package_refresh_at", 0.0)
+    started_at = time.monotonic()
+    second = runtime_scene_record._refresh_active_scene_package_if_due(scene_dir)
+    elapsed = time.monotonic() - started_at
+
+    release.set()
+    worker.join(timeout=10)
+
+    assert second is False
+    assert elapsed < 1.0
+    assert results.get("first") is True
+    assert calls == [scene_dir]
+
+
+def test_active_scene_refresh_computes_diagnosis_once(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "_last_scene_package_refresh_at", 0.0)
+    scene_dir = _seed_active_scene(tmp_path)
+    calls: list[str] = []
+    original = runtime_scene_service._runtime_scene_package_diagnosis_for_scene
+
+    def counting_diagnosis(*args, **kwargs):
+        calls.append(str(args[2]))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "_runtime_scene_package_diagnosis_for_scene",
+        counting_diagnosis,
+    )
+
+    refreshed = runtime_scene_record._refresh_active_scene_package_if_due(scene_dir)
+
+    assert refreshed is True
+    assert len(calls) == 1
+    summary = json.loads((scene_dir / "summary.json").read_text(encoding="utf-8"))
+    assert summary["diagnosis"]["issueState"] is not None
 
 
 def test_deferred_periodic_refresh_keeps_warning_projection_immediate(tmp_path, monkeypatch):

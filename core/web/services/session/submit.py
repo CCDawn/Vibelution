@@ -1098,8 +1098,9 @@ def edit_and_resubmit_session_message(
     turn_mode: str = "",
     write_intent: bool | None = None,
     trace_context_carrier: Mapping[str, Any] | None = None,
+    base_message_id: str = "",
 ) -> dict:
-    """Replace the latest user message, truncate later turns, and start a new turn."""
+    """Replace a user message, branch at its turn, and start a new turn."""
 
     return _resubmit_session_user_message(
         session_id,
@@ -1114,6 +1115,7 @@ def edit_and_resubmit_session_message(
         write_intent=write_intent,
         trace_context_carrier=trace_context_carrier,
         operation="edit",
+        base_message_id=base_message_id,
     )
 
 
@@ -1128,8 +1130,9 @@ def regenerate_session_message(
     turn_mode: str = "",
     write_intent: bool | None = None,
     trace_context_carrier: Mapping[str, Any] | None = None,
+    base_message_id: str = "",
 ) -> dict:
-    """Rerun the latest user message after truncating its assistant output."""
+    """Rerun a user message after branching at its turn."""
 
     return _resubmit_session_user_message(
         session_id,
@@ -1144,6 +1147,7 @@ def regenerate_session_message(
         write_intent=write_intent,
         trace_context_carrier=trace_context_carrier,
         operation="regenerate",
+        base_message_id=base_message_id,
     )
 
 
@@ -1161,6 +1165,7 @@ def _resubmit_session_user_message(
     write_intent: bool | None,
     trace_context_carrier: Mapping[str, Any] | None,
     operation: str,
+    base_message_id: str = "",
 ) -> dict:
     """Shared edit/regenerate body: truncate from the target user message and rerun it."""
 
@@ -1169,12 +1174,13 @@ def _resubmit_session_user_message(
     conversation_id = str(session_id or "").strip()
     normalized_trace_context_carrier = _normalize_trace_context_carrier(trace_context_carrier)
     target_message_id = str(message_id or "").strip()
+    normalized_base_message_id = str(base_message_id or "").strip()
     normalized_client_submission_id = str(client_submission_id or "").strip()
     is_regenerate = str(operation or "").strip() == "regenerate"
     message = "" if is_regenerate else _resolve_user_message_content(content, content_utf8_base64=content_utf8_base64)
     if not conversation_id:
         raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
-    if not target_message_id:
+    if not target_message_id and not normalized_base_message_id:
         raise s.SessionValidationError(
             s.text_for(lang, zh="请选择要重新生成的回答。", en="Choose an answer to regenerate.")
             if is_regenerate
@@ -1200,39 +1206,68 @@ def _resubmit_session_user_message(
         s._ensure_conversation_workspace_metadata(conversation)
 
         previous_messages = s._session_ledger_visible_messages(conversation_id)
-        target_index = s._find_user_message_index_by_api_id(conversation_id, previous_messages, target_message_id)
-        if target_index < 0:
-            raise s.SessionValidationError(
-                s.text_for(
-                    lang,
-                    zh="只能重新生成最新一条用户消息的回答。",
-                    en="Only the latest user message answer can be regenerated.",
+        if normalized_base_message_id:
+            events = s._load_session_conversation_events_cached(conversation_id)
+            branch_view = s.analyze_conversation_branches(events)
+            target_user_node_id = s.resolve_active_user_node_id(branch_view, normalized_base_message_id)
+            if not target_user_node_id:
+                raise s.SessionBusyError(
+                    s.text_for(
+                        lang,
+                        zh="该消息不在当前对话分支上，请刷新后重试。",
+                        en="That message is not on the active conversation branch; refresh and try again.",
+                    )
                 )
-                if is_regenerate
-                else s.text_for(lang, zh="只能重新编辑历史用户消息。", en="Only historical user messages can be edited and resent.")
-            )
-        latest_user_index = s._latest_user_message_index(previous_messages)
-        if target_index != latest_user_index:
-            latest_message_id = ""
-            if latest_user_index >= 0:
-                latest_message_id = str(previous_messages[latest_user_index].get("id") or "").strip()
-            s._record_session_message_edit_resubmit_rejected_event(
-                conversation_id,
-                target_message_id=target_message_id,
-                reason="not_latest_user_message",
-                latest_message_id=latest_message_id,
-                target_preview=previous_messages[target_index].get("content") or "",
-                operation=operation,
-            )
-            raise s.SessionValidationError(
-                s.text_for(
-                    lang,
-                    zh="只能重新生成最新一条用户消息的回答。",
-                    en="Only the latest user message answer can be regenerated.",
+            target_node = branch_view.nodes[target_user_node_id]
+            target_index = -1
+            for index, item in enumerate(previous_messages):
+                item_metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+                item_node_id = str(item.get("nodeId") or "").strip() or str(item_metadata.get("eventId") or "").strip()
+                if item_node_id in {target_user_node_id, target_node.event_id}:
+                    target_index = index
+                    break
+            if target_index < 0:
+                raise s.SessionValidationError(
+                    s.text_for(
+                        lang,
+                        zh="找不到要重新编辑的消息，请刷新后重试。",
+                        en="The message to edit was not found; refresh and try again.",
+                    )
                 )
-                if is_regenerate
-                else s.text_for(lang, zh="只能重新编辑最新一条用户消息。", en="Only the latest user message can be edited and resent.")
-            )
+        else:
+            target_index = s._find_user_message_index_by_api_id(conversation_id, previous_messages, target_message_id)
+            if target_index < 0:
+                raise s.SessionValidationError(
+                    s.text_for(
+                        lang,
+                        zh="只能重新生成最新一条用户消息的回答。",
+                        en="Only the latest user message answer can be regenerated.",
+                    )
+                    if is_regenerate
+                    else s.text_for(lang, zh="只能重新编辑历史用户消息。", en="Only historical user messages can be edited and resent.")
+                )
+            latest_user_index = s._latest_user_message_index(previous_messages)
+            if target_index != latest_user_index:
+                latest_message_id = ""
+                if latest_user_index >= 0:
+                    latest_message_id = str(previous_messages[latest_user_index].get("id") or "").strip()
+                s._record_session_message_edit_resubmit_rejected_event(
+                    conversation_id,
+                    target_message_id=target_message_id,
+                    reason="not_latest_user_message",
+                    latest_message_id=latest_message_id,
+                    target_preview=previous_messages[target_index].get("content") or "",
+                    operation=operation,
+                )
+                raise s.SessionValidationError(
+                    s.text_for(
+                        lang,
+                        zh="只能重新生成最新一条用户消息的回答。",
+                        en="Only the latest user message answer can be regenerated.",
+                    )
+                    if is_regenerate
+                    else s.text_for(lang, zh="只能重新编辑最新一条用户消息。", en="Only the latest user message can be edited and resent.")
+                )
 
         attachments: list[dict[str, Any]] = []
         session_references: list[dict[str, Any]] = []
@@ -1289,7 +1324,6 @@ def _resubmit_session_user_message(
         s._resolve_active_agent_for_turn(conversation_id, agent_id, lang=lang)
         original_entry = dict(previous_messages[target_index])
         history_before_target = previous_messages[:target_index]
-        s._truncate_session_ledger_before_message(conversation_id, original_entry)
         original_metadata = original_entry.get("metadata") if isinstance(original_entry.get("metadata"), dict) else {}
         original_was_slash_skill = isinstance(original_metadata.get("slashSkillCommand"), dict)
         superseded_turn_id = ""
@@ -1344,6 +1378,13 @@ def _resubmit_session_user_message(
             user_message=message,
             started_at=user_entry["timestamp"],
             updated_at=user_entry["timestamp"],
+        )
+        s._append_session_branch_rebase_event(
+            conversation_id,
+            original_entry,
+            operation=operation,
+            turn_id=turn_control.turn_id,
+            base_message_id=normalized_base_message_id or target_message_id,
         )
     finally:
         admit_lock.release()
