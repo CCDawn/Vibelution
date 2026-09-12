@@ -280,7 +280,7 @@ const styles: Record<string, string> = {
   auxiliaryPanel_mental: `vui-components-conversationview auxiliaryPanel_mental min-w-0 ${vuiGlassPanelClass} p-2`,
   auxiliaryPanel_thought: `vui-components-conversationview auxiliaryPanel_thought min-w-0 ${vuiGlassPanelClass} p-2`,
   backToBottomButton:
-    "vui-components-conversationview backToBottomButton absolute bottom-[calc(var(--vui-control-height-md)_+_18px)] left-1/2 z-20 min-w-0 -translate-x-1/2 !inline-flex min-h-[var(--vui-control-height-sm)] !w-fit max-w-[calc(100%_-_24px)] items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-control-muted)_92%,var(--vui-surface-panel))] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] shadow-[var(--vui-shadow-soft)] backdrop-blur-[6px] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:!inline-flex [&_[data-slot=vui-button-content]]:!w-fit [&_[data-slot=vui-button-content]]:items-center [&_[data-slot=vui-button-content]]:gap-1.5 [&_[data-slot=vui-button-label]]:!inline-flex [&_[data-slot=vui-button-label]]:!w-fit [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5",
+    "vui-components-conversationview backToBottomButton absolute bottom-2 left-1/2 z-20 min-w-0 -translate-x-1/2 !inline-flex min-h-[var(--vui-control-height-sm)] !w-fit max-w-[calc(100%_-_24px)] items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-control-muted)_92%,var(--vui-surface-panel))] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] shadow-[var(--vui-shadow-soft)] backdrop-blur-[6px] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:!inline-flex [&_[data-slot=vui-button-content]]:!w-fit [&_[data-slot=vui-button-content]]:items-center [&_[data-slot=vui-button-content]]:gap-1.5 [&_[data-slot=vui-button-label]]:!inline-flex [&_[data-slot=vui-button-label]]:!w-fit [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5",
   cliAgentLifecycleIcon:
     `vui-components-conversationview cliAgentLifecycleIcon min-w-0 shrink-0 text-[var(--fg-tertiary)] ${vuiStateCoolInfoClass}`,
   cliAgentLifecycleMeta:
@@ -1124,6 +1124,8 @@ const styles: Record<string, string> = {
     "vui-components-conversationview thoughtTextBlock min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   timeline:
     "vui-components-conversationview timeline flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden bg-[var(--vui-surface-chat)] px-[clamp(1rem,3vw,3rem)] py-4 [scrollbar-gutter:stable]",
+  timelineArea:
+    "vui-components-conversationview timelineArea relative flex min-h-0 min-w-0 flex-1 flex-col",
   timelineContent:
     "vui-components-conversationview timelineContent grid min-w-0 w-full content-start gap-[10px]",
   timelineVirtualSpacer:

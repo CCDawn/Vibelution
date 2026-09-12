@@ -283,10 +283,18 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.answerOnlyProcessPreview).not.toContain("[overflow-wrap:anywhere]");
   });
 
-  it("keeps the back-to-bottom control floating and content-sized", () => {
-    expect(styles.surface).toContain("relative");
+  it("anchors the back-to-bottom control to the timeline area above the composer", () => {
+    expect(styles.timelineArea).toContain("relative");
+    expect(styles.timelineArea).toContain("flex-1");
+    expect(styles.timelineArea).toContain("min-h-0");
+    const timelineAreaSource = conversationViewSource.slice(
+      conversationViewSource.indexOf("<div className={styles.timelineArea}>"),
+      conversationViewSource.indexOf("{toolApproval && !toolApprovalConsumedRef.current"),
+    );
+    expect(timelineAreaSource).toContain("styles.backToBottomButton");
     expect(styles.backToBottomButton).toContain("absolute");
-    expect(styles.backToBottomButton).toContain("bottom-[calc(var(--vui-control-height-md)_+_18px)]");
+    expect(styles.backToBottomButton).toContain("bottom-2");
+    expect(styles.backToBottomButton).not.toContain("--vui-control-height-md");
     expect(styles.backToBottomButton).toContain("left-1/2");
     expect(styles.backToBottomButton).toContain("-translate-x-1/2");
     expect(styles.backToBottomButton).toContain("z-20");
