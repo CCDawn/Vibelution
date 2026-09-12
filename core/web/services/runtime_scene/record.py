@@ -1435,7 +1435,13 @@ def _runtime_scene_package_index(scene_dir: Path, manifest: dict, scene_id: str)
     )
 
 
-def _runtime_scene_package_index_payload(scene_dir: Path, package_index: dict[str, Any]) -> dict[str, Any]:
+def _runtime_scene_package_index_payload(
+    scene_dir: Path,
+    package_index: dict[str, Any],
+    *,
+    timeline: list[dict] | None = None,
+    lifecycle: list[dict] | None = None,
+) -> dict[str, Any]:
     s = _service()
     return {
         "schema_version": 2,
@@ -1461,7 +1467,9 @@ def _runtime_scene_package_index_payload(scene_dir: Path, package_index: dict[st
         "agent_dir": s.AGENT_DIR,
         "artifacts_dir": s.ARTIFACTS_DIR,
         "research_dir": s.RESEARCH_DIR,
-        "snapshot_metadata": s._runtime_scene_snapshot_metadata(scene_dir),
+        "snapshot_metadata": s._runtime_scene_snapshot_metadata(
+            scene_dir, timeline=timeline, lifecycle=lifecycle
+        ),
     }
 
 
@@ -1604,10 +1612,19 @@ def _runtime_scene_safe_tool_calls(tool_calls: list[dict[str, Any]] | None) -> l
     return safe_items
 
 
-def _runtime_scene_snapshot_metadata(scene_dir: Path) -> dict[str, Any]:
+def _runtime_scene_snapshot_metadata(
+    scene_dir: Path,
+    *,
+    timeline: list[dict] | None = None,
+    lifecycle: list[dict] | None = None,
+) -> dict[str, Any]:
     s = _service()
-    timeline = s._read_scene_timeline(scene_dir)
-    lifecycle = s._read_scene_lifecycle(scene_dir, timeline)
+    timeline = timeline if timeline is not None else s._read_scene_timeline(scene_dir)
+    lifecycle = (
+        lifecycle
+        if lifecycle is not None
+        else s._read_scene_lifecycle(scene_dir, timeline)
+    )
     last_event_timestamp = ""
     for event in [*timeline, *lifecycle]:
         ts = str(event.get("ts") or event.get("timestamp") or event.get("recordedAt") or "")
@@ -1633,10 +1650,19 @@ def _runtime_scene_status(manifest: dict) -> str:
     return "running"
 
 
-def _runtime_scene_summary_counts(scene_dir: Path) -> dict[str, int]:
+def _runtime_scene_summary_counts(
+    scene_dir: Path,
+    *,
+    timeline: list[dict] | None = None,
+    lifecycle: list[dict] | None = None,
+) -> dict[str, int]:
     s = _service()
-    timeline = s._read_scene_timeline(scene_dir)
-    lifecycle = s._read_scene_lifecycle(scene_dir, timeline)
+    timeline = timeline if timeline is not None else s._read_scene_timeline(scene_dir)
+    lifecycle = (
+        lifecycle
+        if lifecycle is not None
+        else s._read_scene_lifecycle(scene_dir, timeline)
+    )
     raw_files = s._list_raw_files(scene_dir)
     conversation_logs = s._list_conversation_logs(scene_dir)
     agent_logs = s._list_agent_logs(scene_dir)
@@ -1670,10 +1696,21 @@ def _runtime_scene_summary_payload(
     scene_dir: Path,
     manifest: dict[str, Any],
     package_index: dict[str, Any],
+    *,
+    diagnosis: dict[str, Any] | None = None,
+    timeline: list[dict] | None = None,
+    lifecycle: list[dict] | None = None,
 ) -> dict[str, Any]:
     s = _service()
-    diagnosis = s._runtime_scene_package_diagnosis_for_scene(scene_dir, manifest, package_index["packageId"])
-    timeline = s._read_scene_timeline(scene_dir)
+    if not isinstance(diagnosis, dict):
+        diagnosis = s._runtime_scene_package_diagnosis_for_scene(
+            scene_dir,
+            manifest,
+            package_index["packageId"],
+            timeline=timeline,
+            lifecycle=lifecycle,
+        )
+    timeline = timeline if timeline is not None else s._read_scene_timeline(scene_dir)
     return {
         "schema_version": 2,
         "package_id": package_index["packageId"],
@@ -1689,8 +1726,12 @@ def _runtime_scene_summary_payload(
         "started_time": package_index["startedTime"],
         "ended_at": package_index["endedAt"],
         "duration_seconds": package_index["durationSeconds"],
-        "event_counts": s._runtime_scene_summary_counts(scene_dir),
-        "snapshot_metadata": s._runtime_scene_snapshot_metadata(scene_dir),
+        "event_counts": s._runtime_scene_summary_counts(
+            scene_dir, timeline=timeline, lifecycle=lifecycle
+        ),
+        "snapshot_metadata": s._runtime_scene_snapshot_metadata(
+            scene_dir, timeline=timeline, lifecycle=lifecycle
+        ),
         "operation_timings": s._runtime_scene_operation_timing_summary(timeline),
         "agent_brief": s._runtime_scene_agent_brief(diagnosis),
         "diagnosis": diagnosis,
@@ -1850,10 +1891,18 @@ def _save_runtime_scene_lightweight_package_index(scene_dir: Path, package_index
     index_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _save_runtime_scene_package_index(scene_dir: Path, package_index: dict[str, Any]) -> None:
+def _save_runtime_scene_package_index(
+    scene_dir: Path,
+    package_index: dict[str, Any],
+    *,
+    timeline: list[dict] | None = None,
+    lifecycle: list[dict] | None = None,
+) -> None:
     s = _service()
     index_path = scene_dir / s.PACKAGE_INDEX_PATH
-    payload = s._runtime_scene_package_index_payload(scene_dir, package_index)
+    payload = s._runtime_scene_package_index_payload(
+        scene_dir, package_index, timeline=timeline, lifecycle=lifecycle
+    )
     index_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -1870,10 +1919,25 @@ def _save_runtime_scene_research_summary(scene_dir: Path) -> None:
     )
 
 
-def _save_runtime_scene_summary(scene_dir: Path, manifest: dict[str, Any], package_index: dict[str, Any]) -> None:
+def _save_runtime_scene_summary(
+    scene_dir: Path,
+    manifest: dict[str, Any],
+    package_index: dict[str, Any],
+    *,
+    diagnosis: dict[str, Any] | None = None,
+    timeline: list[dict] | None = None,
+    lifecycle: list[dict] | None = None,
+) -> None:
     s = _service()
     summary_path = scene_dir / s.SUMMARY_PATH
-    payload = s._runtime_scene_summary_payload(scene_dir, manifest, package_index)
+    payload = s._runtime_scene_summary_payload(
+        scene_dir,
+        manifest,
+        package_index,
+        diagnosis=diagnosis,
+        timeline=timeline,
+        lifecycle=lifecycle,
+    )
     summary_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -2213,21 +2277,34 @@ def _refresh_active_scene_package_if_due(scene_dir: Path) -> bool:
 
     与 full_projection_refresh（特定事件立即刷新）互补：常规事件也按节流补齐
     summary.json / package_index.json / manifest 的 package 字段。
+
+    并发契约：写锁用非阻塞获取，节流时间戳在锁内二次确认后、昂贵工作开始前
+    立即写入。同一窗口内只有一个事件线程真正刷新，其余记录者直接跳过，不再
+    排队串行重复全量诊断（重复全量刷新曾在多周活跃场景上把后端钉在 100% CPU）。
     """
     s = _service()
     now = monotonic()
     last = float(getattr(s, "_last_scene_package_refresh_at", 0.0))
     if now - last < s.SCENE_PACKAGE_REFRESH_INTERVAL_SECONDS:
         return False
+    if not s.RUNTIME_SCENE_PACKAGE_WRITE_LOCK.acquire(blocking=False):
+        # Another refresh already owns this window and claimed the timestamp
+        # before starting its expensive work; do not pile up behind it.
+        return False
     try:
-        with s.RUNTIME_SCENE_PACKAGE_WRITE_LOCK:
-            manifest = s._load_scene_manifest(scene_dir)
-            s._update_runtime_scene_package_manifest(scene_dir, manifest)
+        now = monotonic()
+        last = float(getattr(s, "_last_scene_package_refresh_at", 0.0))
+        if now - last < s.SCENE_PACKAGE_REFRESH_INTERVAL_SECONDS:
+            return False
         s._last_scene_package_refresh_at = now
+        manifest = s._load_scene_manifest(scene_dir)
+        s._update_runtime_scene_package_manifest(scene_dir, manifest)
         return True
     except Exception as exc:
         _debug_logger.warning(f"Failed to refresh scene package manifest: {exc}")
         return False
+    finally:
+        s.RUNTIME_SCENE_PACKAGE_WRITE_LOCK.release()
 
 
 def _update_runtime_scene_package_manifest(scene_dir: Path, manifest: dict[str, Any]) -> None:
@@ -2236,13 +2313,38 @@ def _update_runtime_scene_package_manifest(scene_dir: Path, manifest: dict[str, 
     if not isinstance(package, dict):
         package = {}
     scene_id = s._scene_id(scene_dir, manifest)
-    package_index = s._runtime_scene_package_index(scene_dir, manifest, scene_id)
+    # Read the scene once and reuse it for diagnosis/package index/summary:
+    # every _read_scene_* call deep-copies the JSONL row cache, and the full
+    # refresh used to pay that cost five-plus times per pass. The diagnosis is
+    # computed exactly once and threaded into the summary payload (it used to
+    # be recomputed inside _runtime_scene_summary_payload).
+    timeline = s._read_scene_timeline(scene_dir)
+    lifecycle = s._read_scene_lifecycle(scene_dir, timeline)
+    diagnosis = s._runtime_scene_package_diagnosis_for_scene(
+        scene_dir,
+        manifest,
+        scene_id,
+        timeline=timeline,
+        lifecycle=lifecycle,
+    )
+    package_index = s._runtime_scene_package_index_from_diagnosis(
+        scene_dir, manifest, scene_id, diagnosis
+    )
     package.update({"schema_version": 2, **s._runtime_scene_manifest_package_index_values(package_index)})
     package["updated_at"] = s._now_utc()
     manifest["package"] = package
     s._save_runtime_scene_research_summary(scene_dir)
-    s._save_runtime_scene_package_index(scene_dir, package_index)
-    s._save_runtime_scene_summary(scene_dir, manifest, package_index)
+    s._save_runtime_scene_package_index(
+        scene_dir, package_index, timeline=timeline, lifecycle=lifecycle
+    )
+    s._save_runtime_scene_summary(
+        scene_dir,
+        manifest,
+        package_index,
+        diagnosis=diagnosis,
+        timeline=timeline,
+        lifecycle=lifecycle,
+    )
     s._save_scene_manifest(scene_dir, manifest)
 
 
