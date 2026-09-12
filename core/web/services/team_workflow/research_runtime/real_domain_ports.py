@@ -2544,6 +2544,13 @@ def _execute_real_system_action(
     """
     node_id = str(action.node_id or "").strip()
     snapshot = dict(input_snapshot or {})
+    if node_id == "optimization_knowledge":
+        from ..operator_optimization.knowledge import publish_knowledge_snapshot
+        publish_knowledge_snapshot(snapshot["teamId"], action.run_id)
+        refs = _collect_system_artifact_refs(required_kinds=required_kinds,
+            team_id=snapshot["teamId"], workflow_run_id=action.run_id,
+            source_collection_run_id=action.run_id)
+        return refs, {"systemActionId": f"sys-{action.action_id}", "runnerId": "operator_knowledge_reuse_v1"}
     if node_id == "operator_baseline":
         from ..operator_optimization.dispatch import dispatch_baseline
         dispatch_baseline(action, snapshot)
