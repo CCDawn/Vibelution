@@ -178,17 +178,16 @@ export function ChallengeQuestionReviewForm(props: {
       }),
     }),
     onSuccess: async (_data, _vars, context) => {
-      context?.telemetry?.succeeded({
-        formLocked: Object.values(decisions).some((decision) => decision !== "approved"),
-      });
+      // Every accepted submission locks the form immediately: an all-approved
+      // review only swaps to the summary after the detail refetch, and the gap
+      // between accept and refetch must not accept a second click.
+      context?.telemetry?.succeeded({ formLocked: true });
       try {
         globalThis.localStorage?.setItem(REVIEWER_STORAGE_KEY, reviewer.trim());
       } catch {
         // 记住审核人只是便利，存储不可用时静默降级
       }
-      if (Object.values(decisions).some((decision) => decision !== "approved")) {
-        setSubmittedReviewKey(reviewKey);
-      }
+      setSubmittedReviewKey(reviewKey);
       await queryClient.invalidateQueries({
         queryKey: queryKeys.challengeQuestionRunDetail(detail.teamId, detail.questionId),
       });

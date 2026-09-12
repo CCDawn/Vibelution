@@ -145,8 +145,10 @@ export function ChallengeQuestionDetailPanel({
 }: ChallengeQuestionDetailPanelProps) {
   const [reviseDialogOpen, setReviseDialogOpen] = useState(false);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
-  const [archiveExportState, setArchiveExportState] = useState<"idle" | "pending" | "error">("idle");
+  const [archiveExportState, setArchiveExportState] = useState<"idle" | "pending" | "error" | "success">("idle");
   const [archiveExportError, setArchiveExportError] = useState("");
+  const [archiveExportResult, setArchiveExportResult] = useState<{ filename: string; roundsAvailable: boolean } | null>(null);
+  const [archiveRepairOpen, setArchiveRepairOpen] = useState(false);
   const { lang } = useShellI18n();
   const isZh = lang === "zh";
   const detailAnchorGroups = isZh ? DETAIL_ANCHOR_GROUPS_ZH : DETAIL_ANCHOR_GROUPS_EN;
@@ -191,6 +193,7 @@ export function ChallengeQuestionDetailPanel({
     if (!detail || archiveExportState === "pending") return;
     setArchiveExportState("pending");
     setArchiveExportError("");
+    setArchiveExportResult(null);
     const exportTeamId = detail.teamId || teamId;
     void exportQuestionArchivePage({
       detail,
@@ -198,8 +201,9 @@ export function ChallengeQuestionDetailPanel({
       lang: isZh ? "zh" : "en",
       fetchRounds: fetchHypothesisRounds,
     })
-      .then(() => {
-        setArchiveExportState("idle");
+      .then((result) => {
+        setArchiveExportResult(result);
+        setArchiveExportState("success");
       })
       .catch((error: unknown) => {
         setArchiveExportState("error");
@@ -246,8 +250,18 @@ export function ChallengeQuestionDetailPanel({
       teamId={resetTargetTeamId}
       questionId={requestedQuestionId}
       onCompleted={(targetNodeId) => onNavigateToNode?.(targetNodeId)}
+      lang={lang}
     />
   ) : null;
+  // The archive stays read-only, but a failed program-evidence gate must not
+  // leave the operator without a way out: the banner below reveals the
+  // sanctioned repair actions on explicit request.
+  const archiveValidation = detail?.record?.validation;
+  const archiveRepairNeeded = Boolean(
+    archiveValidation
+    && (archiveValidation.citationValidation === "failed"
+      || archiveValidation.officialModelCall !== true),
+  );
 
   if (isLoading) {
     return (
@@ -398,6 +412,50 @@ export function ChallengeQuestionDetailPanel({
         </div>
       </header>
 
+      {readOnlyArchive && archiveRepairNeeded && detail ? (
+        <section
+          className={css.archiveRepair}
+          data-testid="question-archive-repair-banner"
+          aria-label={isZh ? "校验修复" : "Validation repair"}
+        >
+          <VErrorSummary
+            tone="warning"
+            label={isZh ? "本题校验未通过" : "Question validation failed"}
+            summary={[
+              archiveValidation?.citationValidation === "failed"
+                ? (isZh ? "引用校验未通过" : "citation validation failed")
+                : "",
+              archiveValidation?.officialModelCall !== true
+                ? (isZh ? "结果包登记未完成" : "result-package registration incomplete")
+                : "",
+            ].filter(Boolean).join(isZh ? "；" : "; ")
+              + (isZh
+                ? "。可展开修复操作处理，或返回当前任务继续流程。"
+                : ". Expand the repair actions below, or return to the current task.")}
+            openLabel={isZh ? "技术细节" : "Technical details"}
+            closeLabel={isZh ? "收起" : "Hide details"}
+          />
+          <div className={css.archiveRepairActions}>
+            <VButton
+              density="compact"
+              variant="secondary"
+              aria-expanded={archiveRepairOpen}
+              data-testid="question-archive-repair-toggle"
+              onPress={() => setArchiveRepairOpen((open) => !open)}
+            >
+              {archiveRepairOpen
+                ? (isZh ? "收起修复" : "Hide repair")
+                : (isZh ? "去修复" : "Repair")}
+            </VButton>
+          </div>
+          {archiveRepairOpen ? (
+            <div className={css.archiveRepairActions} data-testid="question-archive-repair-actions">
+              <ChallengeQuestionRepairActions detail={detail} lang={lang} />
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
       {archiveExportState === "error" ? (
         <div className={css.headerActions} data-testid="question-archive-export-error">
           <VErrorSummary
@@ -410,6 +468,18 @@ export function ChallengeQuestionDetailPanel({
             openLabel={isZh ? "技术细节" : "Technical details"}
             closeLabel={isZh ? "收起" : "Hide details"}
           />
+        </div>
+      ) : null}
+
+      {archiveExportState === "success" && archiveExportResult ? (
+        <div
+          className={css.exportSuccess}
+          data-testid="question-archive-export-success"
+          role="status"
+        >
+          {isZh
+            ? `已导出产物页：${archiveExportResult.filename}${archiveExportResult.roundsAvailable ? "" : "（评审轮次暂缺，已按可用数据导出）"}`
+            : `Artifact page exported: ${archiveExportResult.filename}${archiveExportResult.roundsAvailable ? "" : " (review rounds unavailable; exported available data)"}`}
         </div>
       ) : null}
 
