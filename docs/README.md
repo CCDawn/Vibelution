@@ -11,6 +11,7 @@
 | 需求 | 打开 |
 | --- | --- |
 | **Agent 开发路由（非用户手册）** | [guides/README.md](guides/README.md) · [route](guides/route.md) · [ownership](guides/ownership.md) · [loop](guides/loop.md) |
+| **项目速查地图（三主线）** | [guides/project-map.md](guides/project-map.md) |
 | 全局红线 / 路由 | [../AGENTS.md](../AGENTS.md) |
 | 开发标准全图 | [standards/README.md](standards/README.md) |
 | 开发标准正文 | [standards/development-standard.md](standards/development-standard.md) |
