@@ -130,6 +130,15 @@ const frontendPort = coercePort(
 );
 const workflowElkProbeBuild = process.env.VIBELUTION_PROBE_BUILD === "1";
 
+// vitest honors an inherited NODE_ENV; pin it before config resolution so a
+// caller environment with NODE_ENV=production cannot flip react to its
+// production build (missing development-only APIs such as `act`) or change
+// module interop behavior during transform. `test.env` below additionally
+// pins the test workers.
+if (process.env.VITEST) {
+  process.env.NODE_ENV = "test";
+}
+
 export default defineConfig({
   define: {
     __VIBELUTION_BUILD_ID__: JSON.stringify(buildStamp),
