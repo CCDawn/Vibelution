@@ -89,6 +89,8 @@ export type MemoryAgentMemoryPanelCopy = {
   memoryCount: string;
   groupHasMemory: string;
   groupNoMemory: string;
+  expandGroup: string;
+  collapseGroup: string;
   groupChat: string;
   groupResearch: string;
   groupSelfEvolution: string;
@@ -173,7 +175,10 @@ export function MemoryAgentMemoryPanel({
           noContent: copy.noContent,
           searchPlaceholder: copy.searchAgents,
           ungrouped: copy.groupOther,
+          expandGroup: copy.expandGroup,
+          collapseGroup: copy.collapseGroup,
         }}
+        collapsibleGroupTitles={[copy.groupNoMemory]}
         searchText={searchText}
         onSearchTextChange={onSearchTextChange}
         cards={[...agents]

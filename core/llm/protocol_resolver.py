@@ -251,17 +251,26 @@ def _wire_protocol_from_opencode(provider: ProviderConfig, effective_model: str)
     variant = _opencode_variant(provider)
     model = str(effective_model or "").strip().lower()
     if variant == "zen":
-        if "gpt" in model or "codex" in model or (len(model) > 1 and model[0] == "o" and model[1].isdigit()):
+        if (
+            "gpt" in model
+            or "codex" in model
+            or "grok" in model
+            or "muse-spark" in model
+            or (len(model) > 1 and model[0] == "o" and model[1].isdigit())
+        ):
             return WireProtocol.RESPONSES
         if any(name in model for name in ("claude", "opus", "sonnet", "haiku", "qwen")):
             return WireProtocol.ANTHROPIC_MESSAGES
         return WireProtocol.CHAT_COMPLETIONS
     if variant == "go":
-        if "gpt" in model:
+        if "gpt" in model or "grok" in model or "muse-spark" in model:
             return WireProtocol.RESPONSES
         if "minimax" in model or "qwen" in model:
             return WireProtocol.ANTHROPIC_MESSAGES
-        if any(name in model for name in ("glm", "kimi", "deepseek", "mimo")):
+        if any(
+            name in model
+            for name in ("glm", "kimi", "deepseek", "mimo", "longcat", "hy3", "hy4", "omen")
+        ):
             return WireProtocol.CHAT_COMPLETIONS
     return None
 

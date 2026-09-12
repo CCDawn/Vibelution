@@ -614,6 +614,77 @@ def test_v2_declared_opencode_go_routes_glm_models_to_chat() -> None:
     assert route.wire_source == "provider_declared_opencode"
 
 
+@pytest.mark.parametrize("model", ["grok-4.6", "muse-spark-1.3-contributor"])
+def test_v2_declared_opencode_go_routes_responses_models_to_responses(model: str) -> None:
+    provider = _v2_provider(
+        api="opencode-go",
+        protocols={"default": "chat_completions", "allowed": ["chat_completions", "responses"]},
+    )
+    profile = LLMProfile(profile_id="primary", provider_id="relay", model=model)
+
+    route = resolve_model_protocol(
+        profile,
+        provider,
+        model_entry={"model_ref": f"relay/{model}", "model": model},
+    )
+
+    assert route.wire_protocol == WireProtocol.RESPONSES
+    assert route.wire_source == "provider_declared_opencode"
+
+
+@pytest.mark.parametrize("model", ["longcat-2.0", "hy4-preview", "hy3", "omen-alpha"])
+def test_v2_declared_opencode_go_routes_remaining_chat_models_to_chat(model: str) -> None:
+    provider = _v2_provider(
+        api="opencode-go",
+        protocols={"default": "chat_completions", "allowed": ["chat_completions", "responses"]},
+    )
+    profile = LLMProfile(profile_id="primary", provider_id="relay", model=model)
+
+    route = resolve_model_protocol(
+        profile,
+        provider,
+        model_entry={"model_ref": f"relay/{model}", "model": model},
+    )
+
+    assert route.wire_protocol == WireProtocol.CHAT_COMPLETIONS
+    assert route.wire_source == "provider_declared_opencode"
+
+
+@pytest.mark.parametrize("model", ["grok-4.6", "muse-spark-1.3"])
+def test_v2_declared_opencode_zen_routes_responses_models_to_responses(model: str) -> None:
+    provider = _v2_provider(
+        api="opencode-zen",
+        protocols={"default": "chat_completions", "allowed": ["chat_completions", "responses"]},
+    )
+    profile = LLMProfile(profile_id="primary", provider_id="relay", model=model)
+
+    route = resolve_model_protocol(
+        profile,
+        provider,
+        model_entry={"model_ref": f"relay/{model}", "model": model},
+    )
+
+    assert route.wire_protocol == WireProtocol.RESPONSES
+    assert route.wire_source == "provider_declared_opencode"
+
+
+def test_v2_declared_opencode_zen_keeps_minimax_on_chat() -> None:
+    provider = _v2_provider(
+        api="opencode-zen",
+        protocols={"default": "chat_completions", "allowed": ["chat_completions", "responses"]},
+    )
+    profile = LLMProfile(profile_id="primary", provider_id="relay", model="minimax-m3")
+
+    route = resolve_model_protocol(
+        profile,
+        provider,
+        model_entry={"model_ref": "relay/minimax-m3", "model": "minimax-m3"},
+    )
+
+    assert route.wire_protocol == WireProtocol.CHAT_COMPLETIONS
+    assert route.wire_source == "provider_declared_opencode"
+
+
 def test_v2_declared_opencode_rule_respects_allowed_protocols() -> None:
     provider = _v2_provider(
         api="opencode-go",

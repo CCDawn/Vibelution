@@ -290,6 +290,17 @@ export function HypothesisSelectionList({
             !mutationAuthorized ||
             (checked && selectedIds.length <= HYPOTHESIS_SELECTION_MIN) ||
             (!checked && selectedIds.length >= HYPOTHESIS_SELECTION_MAX);
+          const checkDisabledReason = !checkDisabled || reviewClosed
+            ? ""
+            : recordMutation.isPending
+              ? (isZh ? "正在提交当前选择，请稍候。" : "Submitting the current selection; please wait.")
+              : !mutationAuthorized
+                ? (isZh ? "当前没有可提交的选择动作；请先处理该题阻塞项。" : "No executable selection action; resolve this question's blocker first.")
+                : !checked && selectedIds.length >= HYPOTHESIS_SELECTION_MAX
+                  ? (isZh
+                    ? `已达上限（${HYPOTHESIS_SELECTION_MAX} 条）：先取消一条，再勾选本条。`
+                    : `Maximum is ${HYPOTHESIS_SELECTION_MAX}: deselect one before selecting this one.`)
+                  : "";
           return (
             <article
               className={css.candidateCard}
@@ -334,6 +345,15 @@ export function HypothesisSelectionList({
                   </VButton>
                 ) : null}
               </div>
+              {checkDisabledReason ? (
+                <p
+                  className={css.candidateDisabledReason}
+                  data-testid={`hypothesis-selection-disabled-reason-${candidate.hypothesis_id}`}
+                  role="status"
+                >
+                  {checkDisabledReason}
+                </p>
+              ) : null}
               {candidateExpanded ? (
                 <div className={css.candidateDetail}>
                   {compact && candidate.mechanism ? <p>{candidate.mechanism}</p> : null}
