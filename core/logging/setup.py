@@ -82,7 +82,7 @@ def setup_logging(level: str = "INFO", log_format: Optional[str] = None) -> logg
     # 抑制 rich 库的详细日志
     logging.getLogger("rich").setLevel(logging.WARNING)
 
-    return logging.getLogger("SelfEvolvingAgent")
+    return logging.getLogger("AgentRuntime")
 
 
 __all__ = [

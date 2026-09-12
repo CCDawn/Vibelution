@@ -274,6 +274,10 @@ def workflow_run_stop_reason(authority: Mapping[str, Any] | None) -> str:
 
     if not isinstance(authority, Mapping):
         return ""
+    if authority.get("authorityKind") == "operator_discussion":
+        from ..operator_optimization.discussion_authority import operator_workflow_stop_reason
+
+        return operator_workflow_stop_reason(dict(authority))
     run_id = str(authority.get("workflowRunId") or "").strip()
     if not run_id:
         return "challenge_workflow_run_missing"
@@ -315,6 +319,10 @@ def build_speaker_receipt_context(
     authority = context.get("_modelInvocationReceiptAuthority")
     if not isinstance(authority, Mapping):
         return None
+    if authority.get("authorityKind") == "operator_discussion":
+        from ..operator_optimization.discussion_authority import speaker_receipt_context
+        return speaker_receipt_context(participant, context, session_id=session_id,
+            turn_identity=turn_identity, expected_model_route=expected_model_route)
     stage_mapping = {
         "hypothesis_candidate_generation": ("generation", "candidate"),
         "hypothesis_review": ("review", "review"),
@@ -570,6 +578,23 @@ def register_speaker_receipts(
         raise MeetingReceiptAuthorityError(
             "formal meeting model call completed without a verifiable invocation receipt"
         )
+    operator_receipts = [item for item in selected
+        if (item.get("scope") or {}).get("workflowId") == "operator-optimization"]
+    if operator_receipts:
+        from .formal_write_runtime import get_write_store
+        from .receipt_persistence import enqueue_question_model_invocation_receipt
+
+        if len(operator_receipts) != len(selected):
+            raise MeetingReceiptAuthorityError("meeting receipt workflows differ")
+        store = get_write_store()
+        for receipt in operator_receipts:
+            scope = receipt["scope"]
+            if (scope.get("teamId") != team_id or scope.get("sessionId") != session_id
+                    or scope.get("turnId") != turn_identity):
+                raise MeetingReceiptAuthorityError("operator receipt differs from its speaker")
+            enqueue_question_model_invocation_receipt(store, team_id=team_id,
+                question_id=question_id, workflow_run_id=workflow_run_id, receipt=receipt)
+        return
     refs = register_question_model_invocation_receipts(
         team_id,
         question_id=question_id,

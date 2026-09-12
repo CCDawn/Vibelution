@@ -5,7 +5,7 @@ import json
 import pytest
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 
-from agent import SelfEvolvingAgent, TurnStopRequested
+from agent import AgentRuntime, TurnStopRequested
 from core.infrastructure.llm_utils import MAX_CONSECUTIVE_FAILURES
 from core.infrastructure.runtime_input import build_chat_user_message
 from core.llm import LLMError
@@ -249,7 +249,7 @@ def test_agent_wrapper_writes_failure_diagnostics(monkeypatch):
     monkeypatch.setattr(agent_module.logger, "log_error", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(agent_module, "_record_agent_scene_event", lambda *_args, **_kwargs: None)
 
-    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent = AgentRuntime.__new__(AgentRuntime)
     agent.llm_with_tools = DummyLLM()
     agent._base_llm = DummyLLM()
     agent.config = SimpleNamespace(llm=SimpleNamespace(model_name="m", provider="relay", api_base="", api_timeout=30))
@@ -275,7 +275,7 @@ def test_agent_wrapper_clears_stale_diagnostics_before_stop(monkeypatch):
 
     monkeypatch.setattr(agent_module, "invoke_agent_llm_turn", stop_before_result)
 
-    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent = AgentRuntime.__new__(AgentRuntime)
     agent._last_llm_error_category = "server_error"
     agent._last_llm_error_retryable = True
     agent._last_llm_recovery_action = "retry_with_backoff"

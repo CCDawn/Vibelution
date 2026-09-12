@@ -160,7 +160,9 @@ def _outcome_kinds(receipt: ModelInvocationReceipt) -> tuple[str, ...]:
             if str(item or "").strip()
         )
     )
-    if not values or any(item not in ALLOWED_OUTCOME_KINDS for item in values):
+    allowed = (frozenset({"optimization_hypothesis"})
+        if receipt.scope.get("workflowId") == "operator-optimization" else ALLOWED_OUTCOME_KINDS)
+    if not values or any(item not in allowed for item in values):
         raise ValueError("model invocation receipt outcomeKinds are invalid")
     return values
 
@@ -181,7 +183,14 @@ def _validate_receipt(
     if not isinstance(value, Mapping):
         raise ValueError("model invocation receipt must be an object")
     receipt = ModelInvocationReceipt.from_dict(value)
-    if receipt.status not in {
+    operator = receipt.scope.get("workflowId") == "operator-optimization"
+    if operator:
+        from core.research.operator_optimization.discussion_contracts import OperatorInvocationBinding
+        fields = OperatorInvocationBinding.model_fields
+        binding = {key: receipt.scope[key] for key in fields if key in receipt.scope}
+        binding["formalNodeAttempt"] = int(binding.get("formalNodeAttempt", 0))
+        OperatorInvocationBinding.model_validate(binding)
+    if not operator and receipt.status not in {
         ModelInvocationStatus.SUCCEEDED,
         ModelInvocationStatus.RETRIED,
     }:

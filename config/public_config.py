@@ -57,7 +57,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = resolve_config_path()
 HEADER_LINES = [
     "# ============================================================",
-    "# Self-Evolving Agent 主配置",
+    "# AgentRuntime 主配置",
     "# ============================================================",
     "# 本文件是项目的完整主配置面。想知道项目当前如何运行，先看这里。",
     "# 模型默认值仅作为最低优先级兜底。",

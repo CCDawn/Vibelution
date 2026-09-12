@@ -117,7 +117,7 @@ def publish_llm_retry_status(
                 "recovery_action": act,
                 "source": "agent_outer_reconnect",
             },
-            source="SelfEvolvingAgent",
+            source="AgentRuntime",
         )
     except Exception:
         return

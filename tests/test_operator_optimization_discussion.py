@@ -9,6 +9,14 @@ from core.web.services.team_workflow.operator_optimization import discussion, ro
 from core.web.services.team_workflow.operator_optimization.store import read_campaign, CampaignConflict
 
 
+def _save_selected(team_id, run_id, payload, *, provenance):
+    from core.research.operator_optimization.contracts import ArtifactRef
+    result = discussion.save_discussion_result(team_id, run_id,
+        {"status": "selected", "reason": "Selected through structured discussion", "hypothesis": payload},
+        provenance=provenance)
+    return ArtifactRef.model_validate(result["hypothesisRef"])
+
+
 @pytest.fixture
 def discussion_case(activity, ready, monkeypatch):
     campaign, baseline_run, calls = ready
@@ -31,8 +39,8 @@ def test_discussion_reads_frozen_evidence_and_saves_one_hypothesis(activity, dis
     inputs = discussion.discussion_input(activity[0], run.run_id)
     assert inputs["evidence"][0]["sourceRunId"] == "run1"
     assert inputs["context"]["roundId"] == campaign.rounds[0].roundId
-    ref = discussion.save_discussion_hypothesis(activity[0], run.run_id, payload, provenance={})
-    assert discussion.save_discussion_hypothesis(activity[0], run.run_id, payload, provenance={}) == ref
+    ref = _save_selected(activity[0], run.run_id, payload, provenance={})
+    assert _save_selected(activity[0], run.run_id, payload, provenance={}) == ref
     assert read_campaign(*activity).rounds[0].hypothesisRef == ref
     assert ref.kind == "optimization_hypothesis"
 
@@ -41,7 +49,7 @@ def test_hypothesis_cannot_cite_unprovided_evidence(activity, discussion_case):
     campaign, run, payload = discussion_case
     payload["observationRefs"][0]["sha256"] = "f" * 64
     with pytest.raises(CampaignConflict, match="outside the discussion"):
-        discussion.save_discussion_hypothesis(activity[0], run.run_id, payload, provenance={})
+        _save_selected(activity[0], run.run_id, payload, provenance={})
     assert read_campaign(*activity).rounds[0].hypothesisRef is None
 
 
@@ -49,15 +57,15 @@ def test_hypothesis_cannot_cross_rounds(activity, discussion_case):
     _, run, payload = discussion_case
     payload["roundId"] = "other-round"
     with pytest.raises(CampaignConflict, match="frozen discussion"):
-        discussion.save_discussion_hypothesis(activity[0], run.run_id, payload, provenance={})
+        _save_selected(activity[0], run.run_id, payload, provenance={})
 
 
 def test_same_discussion_cannot_overwrite_hypothesis(activity, discussion_case):
     from core.web.services.team_workflow.research_runtime.workflow_artifact_store import WorkflowArtifactConflictError
     _, run, payload = discussion_case
-    discussion.save_discussion_hypothesis(activity[0], run.run_id, payload, provenance={})
+    _save_selected(activity[0], run.run_id, payload, provenance={})
     with pytest.raises(WorkflowArtifactConflictError):
-        discussion.save_discussion_hypothesis(activity[0], run.run_id, {**payload, "prediction": "different prediction"}, provenance={})
+        _save_selected(activity[0], run.run_id, {**payload, "prediction": "different prediction"}, provenance={})
 
 
 def test_discussion_summary_keeps_failures_without_copying_raw_timings():
@@ -86,8 +94,8 @@ def test_publication_keeps_provenance_before_attachment_and_recovers(activity, d
     with monkeypatch.context() as patch:
         patch.setattr(discussion.artifacts, "put_workflow_artifact", fail_once)
         with pytest.raises(OSError, match="interrupted"):
-            discussion.save_discussion_hypothesis(activity[0], run.run_id, payload, provenance={"messageRefs": []})
+            _save_selected(activity[0], run.run_id, payload, provenance={"messageRefs": []})
     assert written[0] == "optimization_discussion"
     assert read_campaign(*activity).rounds[0].hypothesisRef is None
-    ref = discussion.save_discussion_hypothesis(activity[0], run.run_id, payload, provenance={"messageRefs": []})
+    ref = _save_selected(activity[0], run.run_id, payload, provenance={"messageRefs": []})
     assert read_campaign(*activity).rounds[0].hypothesisRef == ref

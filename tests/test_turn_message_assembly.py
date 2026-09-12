@@ -1,6 +1,6 @@
 from langchain_core.messages import AIMessage, SystemMessage
 
-from agent import SelfEvolvingAgent
+from agent import AgentRuntime
 from core.infrastructure.llm_utils import (
     build_cacheable_system_prefix_message,
     build_dynamic_system_context_message,
@@ -62,8 +62,8 @@ def test_sanitize_seeded_chat_content_strips_internal_protocol_from_assistant_on
 
 def test_agent_wrappers_share_normalize_and_sanitize_path():
     raw = [{"id": "call-1", "name": "read_file_tool", "args": {"path": "a.py"}}]
-    assert SelfEvolvingAgent._normalize_seeded_tool_calls(raw) == normalize_seeded_tool_calls(raw)
-    assert SelfEvolvingAgent._sanitize_seeded_chat_content(
+    assert AgentRuntime._normalize_seeded_tool_calls(raw) == normalize_seeded_tool_calls(raw)
+    assert AgentRuntime._sanitize_seeded_chat_content(
         "assistant",
         "Tool failed: spawn_agent_tool",
     ) == sanitize_seeded_chat_content("assistant", "Tool failed: spawn_agent_tool")

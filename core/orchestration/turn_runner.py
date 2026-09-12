@@ -160,9 +160,9 @@ def default_agent_factory(
 ) -> Any:
     """Create the concrete runtime Agent lazily to keep imports one-way."""
 
-    from agent import SelfEvolvingAgent
+    from agent import AgentRuntime
 
-    return SelfEvolvingAgent(
+    return AgentRuntime(
         mode=mode,
         workspace_path=workspace_path,
         config=config,
