@@ -448,53 +448,43 @@ def _set_session_llm_payload_trace_live_output(
     s._set_session_live_output(session_id, turn_id=turn_id, llm_payload_trace=trace)
 
 
+# Internal pipeline stages collapse onto this small set of user-visible
+# progress states.  The original stage stays on lifecycle/trace events
+# (`progressStage`) for diagnostics, but the UI channel only carries the
+# coarse state so future internal stages never leak as extra status rows.
+_SESSION_USER_VISIBLE_PROGRESS_STAGES = {
+    "context_prepare": "working",
+    "agent_prepare": "working",
+    "history_restore": "working",
+    "followup_prepare": "working",
+    "model_request": "thinking",
+    "model_thinking": "thinking",
+    "queued": "queued",
+}
+
+
 def _set_session_turn_progress_live_output(session_id: str, stage: str, *, turn_id: str = "") -> None:
     s = _service()
     language = s.get_web_language()
     stage_key = str(stage or "").strip().lower()
-    labels = {
-        "context_prepare": s.text_for(
-            language,
-            zh="正在准备对话上下文...\n正在读取当前会话、绑定 Agent、工具权限和可恢复的上轮现场。",
-            en="Preparing the conversation context...\nReading the current session, bound Agent, tool policy, and any resumable turn state.",
-        ),
+    visible_stage = _SESSION_USER_VISIBLE_PROGRESS_STAGES.get(stage_key, "working")
+    content = {
         "queued": s.text_for(
             language,
-            zh="当前会话或 Agent 并发槽暂满，本轮已进入队列...\n会在同会话任务结束或 Agent 释放并发槽后继续执行。",
-            en="This session or Agent concurrency slot is busy. This turn is queued...\nIt will continue when the session finishes or the Agent releases a concurrency slot.",
+            zh="排队中，等待空闲槽位...",
+            en="Queued; waiting for a free slot...",
         ),
-        "agent_prepare": s.text_for(
+        "thinking": s.text_for(
             language,
-            zh="正在唤起对话 agent...\n正在绑定 Agent 实例、私有工作区、记忆根和工具工作区。",
-            en="Preparing the conversation agent...\nBinding the Agent instance, private workspace, memory root, and tool workspace.",
+            zh="等待模型响应...",
+            en="Waiting for the model...",
         ),
-        "history_restore": s.text_for(
-            language,
-            zh="正在恢复上一轮对话记忆...\n会把可继续的任务现场接回本轮上下文。",
-            en="Restoring the previous conversation memory...\nReattaching resumable task state to this turn context.",
-        ),
-        "model_request": s.text_for(
-            language,
-            zh="正在请求模型，等待首个响应片段...\n上下文已组装完成，正在进入 LLM 调用。",
-            en="Requesting the model and waiting for the first response chunk...\nThe context is assembled and the LLM call is starting.",
-        ),
-        "model_thinking": s.text_for(
-            language,
-            zh="正在思考中，等待模型输出...\n模型请求已发出，服务端可能正在推理，正文会在生成后显示。",
-            en="Thinking and waiting for model output...\nThe model request has been sent; server-side reasoning may be running and visible text will appear after generation.",
-        ),
-        "followup_prepare": s.text_for(
-            language,
-            zh="正在准备继续推进下一步...\n会沿用上一轮 active task 继续收口。",
-            en="Preparing the next continuation step...\nContinuing from the previous active task.",
-        ),
-    }
-    content = labels.get(
-        stage_key,
+    }.get(
+        visible_stage,
         s.text_for(
             language,
-            zh="正在等待模型响应...\n当前阶段还没有更细的前端状态说明。",
-            en="Waiting for the model response...\nNo more detailed frontend progress is available for this stage yet.",
+            zh="正在处理...",
+            en="Working...",
         ),
     )
     feedback_events = s._append_session_live_feedback_event(
@@ -502,7 +492,7 @@ def _set_session_turn_progress_live_output(session_id: str, stage: str, *, turn_
         {
             "kind": "status",
             "status": "running",
-            "name": stage_key or "waiting",
+            "name": visible_stage,
             "summary": s.trim_lines(content, max_lines=2),
             "resultPreview": content,
         },
@@ -510,12 +500,12 @@ def _set_session_turn_progress_live_output(session_id: str, stage: str, *, turn_
     )
     capture = s._active_session_turn_capture(session_id, turn_id)
     if capture is not None:
-        capture.note_status_event(stage_key or "waiting", content, status="running", name=stage_key or "waiting")
+        capture.note_status_event(visible_stage, content, status="running", name=visible_stage)
         feedback_events = list(capture.feedback_events)
     s._set_session_live_output(
         session_id,
         turn_id=turn_id,
-        stage=stage_key,
+        stage=visible_stage,
         feedback_events=feedback_events,
     )
     # Cosmetic progress is already checkpointed by the live-output channel.  Keep
@@ -527,6 +517,7 @@ def _set_session_turn_progress_live_output(session_id: str, stage: str, *, turn_
         outcome="running",
         fields={
             "progressStage": stage_key,
+            "visibleStage": visible_stage,
             "messageLength": len(content),
         },
     )
@@ -697,10 +688,14 @@ def _set_session_llm_status_live_output(
 def _set_session_model_thinking_live_output(session_id: str, *, turn_id: str = "", thought_chars: int = 0) -> None:
     s = _service()
     live_state = s._snapshot_session_live_output(session_id)
-    if live_state is not None and str(live_state.stage or "").strip() == "model_thinking":
-        return
-    s._set_session_turn_progress_live_output(session_id, "model_thinking", turn_id=turn_id)
+    thinking_visible = live_state is not None and str(live_state.stage or "").strip() == "thinking"
+    if not thinking_visible:
+        s._set_session_turn_progress_live_output(session_id, "model_thinking", turn_id=turn_id)
     event_status = "reasoning" if max(0, int(thought_chars or 0)) > 0 else "server_thinking"
+    if event_status == "reasoning" and thinking_visible:
+        # Thought deltas after the thinking stage is visible: keep the UI clean
+        # without spamming lifecycle events.
+        return
     s._record_session_turn_lifecycle_event(
         session_id,
         "llm_status_reasoning" if event_status == "reasoning" else "llm_status_server_thinking",

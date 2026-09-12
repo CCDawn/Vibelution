@@ -7,6 +7,7 @@ import {
   activeTurnStageLabel,
   buildActiveTurnStageBarItems,
   formatActiveTurnHeartbeatText,
+  planActiveTurnStageSwitch,
   resolveActiveTurnProgressStage,
 } from "./conversationActiveTurnStatusPresentation";
 
@@ -16,6 +17,9 @@ describe("conversationActiveTurnStatusPresentation", () => {
     expect(activeTurnStageLabel("model_thinking", "zh")).toBe("思考中");
     expect(activeTurnStageLabel("server_thinking", "en")).toBe("Thinking");
     expect(activeTurnStageLabel("model_request", "zh")).toBe("请求模型");
+    expect(activeTurnStageLabel("working", "zh")).toBe("处理中");
+    expect(activeTurnStageLabel("thinking", "en")).toBe("Thinking");
+    expect(activeTurnStageLabel("queued", "zh")).toBe("排队中");
     expect(activeTurnOptimisticStageSummary("user_submit", "zh")).toBe("已发送，正在连接");
     expect(activeTurnOptimisticStageSummary("model_thinking", "zh")).toBe("思考中，等待模型输出");
   });
@@ -51,5 +55,12 @@ describe("conversationActiveTurnStatusPresentation", () => {
       turnItems: [],
       status: "running",
     })).toBe("running");
+  });
+
+  it("holds a fresh stage for the minimum dwell before switching", () => {
+    expect(planActiveTurnStageSwitch("working", "working", 0)).toEqual({ stage: "working", delayMs: 0 });
+    expect(planActiveTurnStageSwitch("working", "thinking", 120)).toEqual({ stage: "working", delayMs: 580 });
+    expect(planActiveTurnStageSwitch("working", "thinking", 700)).toEqual({ stage: "thinking", delayMs: 0 });
+    expect(planActiveTurnStageSwitch("working", "thinking", 5000)).toEqual({ stage: "thinking", delayMs: 0 });
   });
 });
