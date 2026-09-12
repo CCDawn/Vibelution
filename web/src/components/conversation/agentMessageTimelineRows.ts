@@ -90,7 +90,14 @@ function baseTimelineRowKey(message: AgentMessage) {
   if (message.role === "assistant" && turnId) {
     return `assistant-turn:${turnId}`;
   }
-  return `${message.role}-message:${message.id}`;
+  // Positional conversation ids repeat across branches; branch metadata keeps
+  // two versions of the same slot from sharing one row key.
+  const branchId = message.branchId
+    || metadataText(message.metadata, "branchId")
+    || metadataText(message.source.metadata, "branchId");
+  return branchId
+    ? `${message.role}-message:${message.id}:branch:${branchId}`
+    : `${message.role}-message:${message.id}`;
 }
 
 function timelineRowIdentity(message: AgentMessage, rowKey: string): AgentMessageTimelineRowIdentity {

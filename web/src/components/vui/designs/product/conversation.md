@@ -55,6 +55,46 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 - 不替代 composer 编辑条或时间线用户气泡。
 - 禁止再做第二套排队条。
 
+## ConversationMessageVersionSwitcher
+
+### 功能
+活跃路径消息的版本切换器：`‹ n/m ›` 紧凑三件组，在同一点（同一 fork）的兄弟版本之间切换会话 head；切换本身只提交服务端，由返回快照替换时间线。
+
+### 适用范围
+- **适用**：`ConversationView` 消息行 `metaActions`（用户消息与助手消息同一交互），消息带 `branch.siblingCount > 1`。
+- **不适用**：单版本消息（不渲染）、运行中或切换中的会话（整组禁用）、分支枚举页。
+
+| 场景 | 选择 |
+| --- | --- |
+| 同一点存在多个版本 | 行内版本切换器 |
+| 切换后继续追问 | 服务端 head 快照，前端不做树计算 |
+| 单版本消息 | 不渲染 |
+
+### 使用方式
+```tsx
+// 生产：ConversationView metaActions 内联组合（不新增 primitive）
+<VActionGroup ariaLabel={t("branchVersionLabel")} className={styles.turnVersionSwitcher}>
+  <VButton isIconOnly icon={<ChevronLeft size={14} />} isDisabled={!previousSiblingNodeId} ... />
+  <span className={styles.turnVersionLabel}>{`${siblingIndex}/${siblingCount}`}</span>
+  <VButton isIconOnly icon={<ChevronRight size={14} />} isDisabled={!nextSiblingNodeId} ... />
+</VActionGroup>
+```
+
+### 非职责
+- 不做前端分支树、不本地裁剪后续消息。
+- 不新增第二套按钮；只组合 `VButton` + `VActionGroup`。
+
+### 视觉与状态
+- 与行内 copy / edit / regenerate 共用 `turnIconButton` 密度；到达边界的方向禁用。
+- 切换中（`branchVersionSwitchDisabled`）整组禁用，等服务端快照。
+
+### 实现落点
+- 源码：`web/src/components/conversation/ConversationView.tsx`（metaActions）
+- 样式：`ConversationView.styles.ts` 的 `turnVersionSwitcher` / `turnVersionLabel`
+
+### 反冗余
+- 不替代消息编辑或重新生成入口；不新增独立分支列表页。
+
 ## ChatComposerPlusMenu
 
 ### 功能

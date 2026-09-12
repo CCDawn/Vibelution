@@ -5,6 +5,7 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   CircleDot,
   Copy,
@@ -321,7 +322,7 @@ import {
   type CodexToolActivityPills,
 } from "./conversationToolPresentation";
 import { humanizeReasoningPreview } from "./conversationReasoningPreview";
-import { VButton, VNativeInput, VNativeTextarea } from "../vui";
+import { VActionGroup, VButton, VNativeInput, VNativeTextarea } from "../vui";
 import styles from "./ConversationView.styles";
 
 const DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT = 3;
@@ -514,6 +515,8 @@ export function ConversationView({
   onRemoveComposerReference,
   onEditUserMessage,
   onRegenerateAssistantMessage,
+  onSwitchMessageVersion,
+  branchVersionSwitchDisabled,
   regenerableAssistantMessageId,
   regenerateDisabled,
   regeneratePending,
@@ -4136,6 +4139,8 @@ export function ConversationView({
                 resolveTurnAvatar={resolveTurnAvatar}
                 onEditUserMessage={onEditUserMessage}
                 onRegenerateAssistantMessage={onRegenerateAssistantMessage}
+                onSwitchMessageVersion={onSwitchMessageVersion}
+                branchVersionSwitchDisabled={branchVersionSwitchDisabled}
                 regenerableAssistantMessageId={regenerableAssistantMessageId}
                 regenerateDisabled={regenerateDisabled}
                 regeneratePending={regeneratePending}
@@ -4256,7 +4261,31 @@ export function ConversationView({
               && !turnErrorMessage
               && !assistantTurnIsStreaming(message)
               && Boolean(onRegenerateAssistantMessage)
-              && message.id === regenerableAssistantMessageId;
+              // Any settled answer on a branch can regenerate; messages without
+              // a journal node id keep the legacy latest-only fallback.
+              && (Boolean(message.nodeId) || message.id === regenerableAssistantMessageId);
+            const branchInfo = message.branch;
+            const siblingNodeIds = Array.isArray(branchInfo?.siblingNodeIds)
+              ? branchInfo.siblingNodeIds.filter((value): value is string => Boolean(value))
+              : [];
+            const siblingCount = Math.max(
+              Number(branchInfo?.siblingCount ?? 0) || 0,
+              siblingNodeIds.length,
+            );
+            const siblingIndex = Number(branchInfo?.siblingIndex ?? 0) || 0;
+            const currentNodeId = String(message.nodeId || "").trim();
+            const showVersionSwitcher = Boolean(onSwitchMessageVersion)
+              && siblingCount > 1
+              && siblingNodeIds.length > 1
+              && siblingIndex >= 1
+              && siblingIndex <= siblingNodeIds.length
+              && Boolean(currentNodeId)
+              && siblingNodeIds.includes(currentNodeId);
+            const versionSwitchDisabled = Boolean(branchVersionSwitchDisabled);
+            const previousSiblingNodeId = siblingIndex > 1 ? siblingNodeIds[siblingIndex - 2] : "";
+            const nextSiblingNodeId = siblingIndex < siblingNodeIds.length
+              ? siblingNodeIds[siblingIndex]
+              : "";
             const showResponseSpinner = isResponseStreaming && !hasActiveProcess;
             const defaultResponseExpanded = assistantTurnIsStreaming(message) || defaultExpandedResponseIds.has(message.id);
             const responseExpanded = getExpansionState(message.id, "response", defaultResponseExpanded);
@@ -4413,6 +4442,34 @@ export function ConversationView({
                 metaActions={
                   <>
                     {message.timestamp ? <span>{formatTimestamp(message.timestamp)}</span> : null}
+                    {showVersionSwitcher ? (
+                      <VActionGroup
+                        ariaLabel={t("branchVersionLabel")}
+                        className={styles.turnVersionSwitcher}
+                      >
+                        <VButton
+                          type="button"
+                          className={styles.turnIconButton}
+                          onClick={() => onSwitchMessageVersion?.(message, previousSiblingNodeId)}
+                          isDisabled={versionSwitchDisabled || !previousSiblingNodeId}
+                          title={t("switchBranchVersionPrevious")}
+                          aria-label={t("switchBranchVersionPrevious")}
+                          isIconOnly
+                          icon={<ChevronLeft size={14}/>} />
+                        <span className={styles.turnVersionLabel} aria-live="polite">
+                          {`${siblingIndex}/${siblingCount}`}
+                        </span>
+                        <VButton
+                          type="button"
+                          className={styles.turnIconButton}
+                          onClick={() => onSwitchMessageVersion?.(message, nextSiblingNodeId)}
+                          isDisabled={versionSwitchDisabled || !nextSiblingNodeId}
+                          title={t("switchBranchVersionNext")}
+                          aria-label={t("switchBranchVersionNext")}
+                          isIconOnly
+                          icon={<ChevronRight size={14}/>} />
+                      </VActionGroup>
+                    ) : null}
                     {copyableAnswerText ? (
                       <VButton
                         type="button"
@@ -4435,7 +4492,7 @@ export function ConversationView({
                         isIconOnly
                         icon={<RefreshCw size={14}/>} />
                     ) : null}
-                    {userAuthoredMessage && !steerGuidanceMessage && message.id === latestUserMessageId && onEditUserMessage ? (
+                    {userAuthoredMessage && !steerGuidanceMessage && onEditUserMessage ? (
                       <VButton
                         type="button"
                         className={

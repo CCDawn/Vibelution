@@ -113,7 +113,7 @@ function liveOverlayMessage(id: string, turnId: string, timestamp: string): Conv
 }
 
 describe("chatSessionState", () => {
-  it("optimistically rewrites the edited user message and drops later turns", () => {
+  it("optimistically rewrites the edited user message and keeps later turns for the branch snapshot", () => {
     const detail = makeDetail({
       status: "completed",
       currentPhase: "completed",
@@ -166,7 +166,9 @@ describe("chatSessionState", () => {
 
     expect(next?.status).toBe("running");
     expect(next?.currentPhase).toBe("running");
-    expect(next?.messages).toHaveLength(1);
+    // Branch mode keeps the superseded tail visible until the authoritative
+    // snapshot arrives; the server drops it through the window reconcile.
+    expect(next?.messages).toHaveLength(4);
     expect(next?.messages[0]).toMatchObject({
       id: "session-live-message-1",
       role: "user",
@@ -177,11 +179,8 @@ describe("chatSessionState", () => {
         optimisticUserMessage: true,
       },
     });
-    expect(next?.messageWindow).toMatchObject({
-      returnedMessages: 1,
-      totalMessages: 1,
-      hasLater: false,
-    });
+    expect(next?.messages.slice(1)).toEqual(detail.messages.slice(1));
+    expect(next?.messageWindow).toBe(detail.messageWindow);
   });
 
   it("keeps running status when edit target is missing without wiping history", () => {

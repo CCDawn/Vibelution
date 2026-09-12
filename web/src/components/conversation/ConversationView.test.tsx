@@ -108,6 +108,7 @@ function renderConversation(
     processDisplayMode?: ConversationProcessDisplayMode;
     useDefaultProcessDisplayMode?: boolean;
     activeTurnMessage?: ConversationMessage;
+    onSwitchMessageVersion?: (message: ConversationMessage, targetNodeId: string) => void;
     slashCommandSuggestions?: Array<{
       directoryName: string;
       name?: string;
@@ -177,6 +178,7 @@ function renderConversation(
         onInterruptGuidance={options.onInterruptGuidance}
         onCancelComposerMode={options.onCancelComposerMode}
         onEditUserMessage={() => undefined}
+        onSwitchMessageVersion={options.onSwitchMessageVersion}
       />
     </QueryClientProvider>,
   );
@@ -1231,7 +1233,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain('aria-label="终止"');
   });
 
-  it("renders edit controls only for the latest user message", () => {
+  it("renders edit controls for every user message on the active path", () => {
     const html = renderConversation([
       {
         id: "message-user-1",
@@ -1253,9 +1255,61 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html.match(/aria-label="Edit and resend"/g)?.length).toBe(1);
+    expect(html.match(/aria-label="Edit and resend"/g)?.length).toBe(2);
     expect(html).toContain("Second prompt");
     expect(html).toContain("First prompt");
+  });
+
+  it("renders message version chevrons for a branch with siblings", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-user-2",
+          role: "user",
+          content: "Second prompt",
+          timestamp: "2026-05-22T00:02:00Z",
+          nodeId: "node-user-2",
+          branch: {
+            branchId: "branch-b",
+            parentNodeId: "node-root",
+            siblingCount: 2,
+            siblingIndex: 2,
+            siblingNodeIds: ["node-user-1", "node-user-2"],
+            active: true,
+          },
+        },
+      ],
+      { onSwitchMessageVersion: () => undefined },
+    );
+
+    expect(html).toContain('aria-label="上一版本"');
+    expect(html).toContain('aria-label="下一版本"');
+    expect(html).toContain(">2/2</span>");
+  });
+
+  it("hides message version chevrons for a single-version message", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-user-1",
+          role: "user",
+          content: "Only prompt",
+          timestamp: "2026-05-22T00:00:00Z",
+          nodeId: "node-user-1",
+          branch: {
+            branchId: "main",
+            parentNodeId: "",
+            siblingCount: 1,
+            siblingIndex: 1,
+            siblingNodeIds: ["node-user-1"],
+            active: true,
+          },
+        },
+      ],
+      { onSwitchMessageVersion: () => undefined },
+    );
+
+    expect(html).not.toContain('aria-label="上一版本"');
   });
 
   it("renders running-turn steer records without an edit control", () => {
