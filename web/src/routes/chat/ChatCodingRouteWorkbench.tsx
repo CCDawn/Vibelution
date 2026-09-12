@@ -936,12 +936,14 @@ export function ChatCodingRouteWorkbench() {
   const syncSessionDetail = useCallback(
     (detail: SessionDetail) => {
       let shouldSyncSummaries = true;
+      let mergedDetail: SessionDetail = detail;
       queryClient.setQueryData<SessionDetail>(queryKeys.session(detail.id), (previous) => {
         if (isStaleLedgerUpdate(previous?.ledgerSeq, detail.ledgerSeq)) {
           shouldSyncSummaries = false;
           return previous ?? detail;
         }
         const nextDetail = mergeSessionDetailMessageWindow(previous, detail);
+        mergedDetail = nextDetail;
         if (previous && sessionDetailSnapshotKey(previous) === sessionDetailSnapshotKey(nextDetail)) {
           shouldSyncSummaries = false;
           return previous;
@@ -951,18 +953,20 @@ export function ChatCodingRouteWorkbench() {
       if (!shouldSyncSummaries) {
         return;
       }
+      // Summary caches fold onto the merged detail so partial control acks
+      // cannot blank title / status / phase fields they did not carry.
       updateSessionSummaryCaches(queryClient, (sessions) =>
-        mergeSessionDetailIntoSummaries(sessions, detail),
+        mergeSessionDetailIntoSummaries(sessions, mergedDetail),
       );
-      reconcileAgentSessionDetailCache(queryClient, detail);
-      const detailRootSessionId = rootSessionIdFor(detail);
-      if (isChildSession(detail) && detailRootSessionId) {
+      reconcileAgentSessionDetailCache(queryClient, mergedDetail);
+      const detailRootSessionId = rootSessionIdFor(mergedDetail);
+      if (isChildSession(mergedDetail) && detailRootSessionId) {
         queryClient.setQueryData<SessionSummary[]>(queryKeys.sessionChildSessions(detailRootSessionId), (sessions) =>
-          mergeSessionDetailIntoSummaries(sessions, detail),
+          mergeSessionDetailIntoSummaries(sessions, mergedDetail),
         );
       }
       queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
-        mergeSessionDetailIntoConversations(conversations, detail),
+        mergeSessionDetailIntoConversations(conversations, mergedDetail),
       );
     },
     [queryClient],

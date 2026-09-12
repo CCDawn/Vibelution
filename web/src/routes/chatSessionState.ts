@@ -522,6 +522,20 @@ export function mergeSessionDetailMessageWindow(
   previous: SessionDetail | undefined,
   next: SessionDetail,
 ): SessionDetail {
+  if (!Array.isArray(next.messages)) {
+    if (!previous || previous.id !== next.id) {
+      return next;
+    }
+    // Control acks (stop / guidance interrupt) patch phase fields without
+    // carrying a transcript; never let them replace the known message list.
+    return {
+      ...previous,
+      ...next,
+      messages: previous.messages,
+      messageWindow: next.messageWindow ?? previous.messageWindow,
+      provisionalTranscript: previous.provisionalTranscript,
+    };
+  }
   // Light poll responses omit expensive secondary lists; keep prior values so
   // inbox / governance UI does not flash empty while SSE owns the transcript.
   const merged = withPreservedSecondaryLists(previous, next);
@@ -788,6 +802,42 @@ export function markSessionDetailRunning(detail: SessionDetail | undefined): Ses
     currentPhase: "running",
     lastTurnError: null,
     updatedAt: new Date().toISOString(),
+  };
+}
+
+export function markSessionDetailStopping(
+  detail: SessionDetail | undefined,
+  options: { requestedAt: string },
+): SessionDetail | undefined {
+  if (!detail) {
+    return detail;
+  }
+
+  return {
+    ...detail,
+    currentPhase: "stopping",
+    stopRequested: true,
+    stopRequestedAt: options.requestedAt,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function clearSessionDetailStopping(
+  detail: SessionDetail,
+  options: { requestedAt: string; previous?: SessionDetail },
+): SessionDetail {
+  // Only clear the optimistic patch, and only while it is still the newest
+  // stop state; a server-published snapshot always wins.
+  if (!options.requestedAt || detail.stopRequestedAt !== options.requestedAt) {
+    return detail;
+  }
+  // Only the fields the optimistic stop patch touched are restored; newer
+  // transcript or server-published phase changes stay authoritative.
+  return {
+    ...detail,
+    currentPhase: options.previous?.currentPhase ?? detail.currentPhase,
+    stopRequested: options.previous?.stopRequested ?? false,
+    stopRequestedAt: options.previous?.stopRequestedAt ?? "",
   };
 }
 
