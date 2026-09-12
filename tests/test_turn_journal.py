@@ -715,3 +715,64 @@ def test_latest_open_turn_id_ignores_superseded_open_turn():
     ]
 
     assert latest_open_turn_id(events) == ""
+
+
+def test_latest_open_turn_id_ignores_completed_turn_after_head_select():
+    events = [
+        _branch_event("event-ts1", "turn-1", 1, "turn_started", payload={}),
+        _branch_event(
+            "event-u1",
+            "turn-1",
+            2,
+            EVENT_USER_MESSAGE,
+            parent_event_id="event-ts1",
+            payload={"content": "原始需求"},
+        ),
+        _branch_event(
+            "event-a1",
+            "turn-1",
+            3,
+            EVENT_ASSISTANT_MESSAGE,
+            parent_event_id="event-u1",
+            payload={"content": "原始回答"},
+        ),
+        _branch_event(
+            "event-tc1",
+            "turn-1",
+            4,
+            EVENT_TURN_COMPLETED,
+            parent_event_id="event-a1",
+            payload={},
+        ),
+        _rebase_event(5, "event-u1", event_id="event-rebase-1"),
+        _branch_event(
+            "event-u2b",
+            "turn-new",
+            6,
+            EVENT_USER_MESSAGE,
+            parent_event_id="event-rebase-1",
+            payload={"content": "编辑后需求"},
+        ),
+        _branch_event(
+            "event-a2b",
+            "turn-new",
+            7,
+            EVENT_ASSISTANT_MESSAGE,
+            parent_event_id="event-u2b",
+            payload={"content": "编辑后回答"},
+        ),
+        _branch_event(
+            "event-tc2",
+            "turn-new",
+            8,
+            EVENT_TURN_COMPLETED,
+            parent_event_id="event-a2b",
+            payload={},
+        ),
+        _rebase_event(9, "event-a1", operation="head_select", event_id="event-rebase-2"),
+    ]
+
+    active = fold_active_events(events)
+
+    assert [event.event_id for event in active] == ["event-ts1", "event-u1", "event-a1"]
+    assert latest_open_turn_id(events) == ""

@@ -926,13 +926,13 @@ def fold_active_events(events: Iterable[TurnJournalEvent]) -> list[TurnJournalEv
 
 
 def latest_open_turn_id(events: Iterable[TurnJournalEvent]) -> str:
-    event_list = fold_active_events(events)
+    raw_events = list(events or [])
     terminal_turn_ids = {
         event.turn_id
-        for event in event_list
+        for event in raw_events
         if event.turn_id and event.event_type in TERMINAL_EVENTS
     }
-    for event in reversed(event_list):
+    for event in reversed(fold_active_events(raw_events)):
         if event.turn_id and event.event_type == EVENT_TURN_STARTED and event.turn_id not in terminal_turn_ids:
             return event.turn_id
     return ""

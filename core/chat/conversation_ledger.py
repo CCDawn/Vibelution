@@ -242,7 +242,8 @@ def project_conversation_ledger(
     include_model_messages: bool = True,
     include_visible_messages: bool = False,
 ) -> ConversationLedgerProjection:
-    event_list = fold_active_events(list(events or []))
+    raw_events = list(events or [])
+    event_list = fold_active_events(raw_events)
     model_event_list = apply_context_compression_checkpoints(event_list)
     latest = event_list[-1] if event_list else None
     return ConversationLedgerProjection(
@@ -251,7 +252,7 @@ def project_conversation_ledger(
         visible_messages=conversation_visible_messages_from_events(event_list) if include_visible_messages else [],
         latest_seq=int(getattr(latest, "sequence", 0) or 0) if latest is not None else 0,
         latest_event_id=str(getattr(latest, "event_id", "") or "") if latest is not None else "",
-        open_turn_id=latest_open_turn_id(event_list),
+        open_turn_id=latest_open_turn_id(raw_events),
     )
 
 
