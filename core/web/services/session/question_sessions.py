@@ -121,10 +121,43 @@ def remove_question_sessions_for_question(question_id: str) -> dict[str, Any]:
         for item in list_question_session_summaries(question_id)
         if str(item.get("sessionId") or "").strip()
     ]
-    return remove_question_sessions(session_ids)
+    return remove_question_sessions(session_ids, retire_ghost_rows=True)
 
 
-def remove_question_sessions(session_ids: list[str] | None) -> dict[str, Any]:
+def _retire_ghost_directory_rows(session_ids: list[str]) -> tuple[list[str], list[dict[str, str]]]:
+    """Archive directory-only ghost rows and tombstone their workspaces.
+
+    A question-bound row can survive the bulk delete as ``not_found`` when its
+    chat-state record is already gone but its workspace still holds recoverable
+    activity.  Selecting such a row would archive it; the question cleanup must
+    do the same so the residue does not stay visible in the session list.
+    """
+
+    from . import agent_sessions as session_module
+
+    service = session_module._service()
+    retired: list[str] = []
+    failed: list[dict[str, str]] = []
+    for session_id in session_ids:
+        try:
+            service._retire_unopenable_directory_session(
+                session_id, source="question_conversation_cleanup"
+            )
+            service._mark_session_workspace_intentionally_deleted(
+                session_id, reason="question_cleanup"
+            )
+        except Exception as exc:  # noqa: BLE001 - report per session and continue
+            failed.append({"sessionId": session_id, "reason": f"ghost:{type(exc).__name__}"})
+            continue
+        retired.append(session_id)
+    return retired, failed
+
+
+def remove_question_sessions(
+    session_ids: list[str] | None,
+    *,
+    retire_ghost_rows: bool = False,
+) -> dict[str, Any]:
     """Chunk the requested sessions through the shared bulk delete path."""
 
     from .session_bulk_delete import MAX_BULK_SESSION_IDS, bulk_delete_chat_sessions
@@ -148,12 +181,15 @@ def remove_question_sessions(session_ids: list[str] | None) -> dict[str, Any]:
             if session_id:
                 removed_session_ids.append(session_id)
         for item in list(result.get("skipped") or []):
-            skipped.append(
-                {
-                    "sessionId": str(item.get("sessionId") or "").strip(),
-                    "reason": str(item.get("reason") or "").strip(),
-                }
-            )
+            session_id = str(item.get("sessionId") or "").strip()
+            reason = str(item.get("reason") or "").strip()
+            if retire_ghost_rows and reason == "not_found" and session_id:
+                retired, ghost_failed = _retire_ghost_directory_rows([session_id])
+                removed_session_ids.extend(retired)
+                failed.extend(ghost_failed)
+                if retired:
+                    continue
+            skipped.append({"sessionId": session_id, "reason": reason})
         for item in list(result.get("failed") or []):
             failed.append(
                 {

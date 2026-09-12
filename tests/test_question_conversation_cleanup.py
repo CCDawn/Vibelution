@@ -150,6 +150,51 @@ def test_remove_question_sessions_chunks_through_shared_bulk_limit(
     assert len(result["removedSessionIds"]) == 50
 
 
+def test_remove_question_sessions_retires_not_found_ghost_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate(tmp_path, monkeypatch)
+    from core.web.services.session import agent_sessions as session_module
+
+    calls: list[tuple[str, str, str]] = []
+
+    class FakeSessionService:
+        def _retire_unopenable_directory_session(self, session_id, *, source):
+            calls.append(("retire", session_id, source))
+
+        def _mark_session_workspace_intentionally_deleted(self, session_id, *, reason):
+            calls.append(("tombstone", session_id, reason))
+
+    def fake_bulk_delete(session_ids: list[str]) -> dict:
+        return {
+            "success": [{"sessionId": session_ids[0], "deleted": True}],
+            "skipped": [
+                {"sessionId": session_ids[1], "reason": "not_found"},
+                {"sessionId": session_ids[2], "reason": "busy"},
+            ],
+            "failed": [],
+        }
+
+    monkeypatch.setattr(
+        session_bulk_delete, "bulk_delete_chat_sessions", fake_bulk_delete
+    )
+    monkeypatch.setattr(session_module, "_service", lambda: FakeSessionService())
+
+    result = question_sessions.remove_question_sessions(
+        ["session-live", "session-ghost", "session-busy"],
+        retire_ghost_rows=True,
+    )
+
+    assert calls == [
+        ("retire", "session-ghost", "question_conversation_cleanup"),
+        ("tombstone", "session-ghost", "question_cleanup"),
+    ]
+    assert result["removedSessionCount"] == 2
+    assert result["removedSessionIds"] == ["session-live", "session-ghost"]
+    assert result["skippedSessions"] == [{"sessionId": "session-busy", "reason": "busy"}]
+    assert result["failedSessions"] == []
+
+
 def test_remove_question_conversations_isolates_step_failures(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
