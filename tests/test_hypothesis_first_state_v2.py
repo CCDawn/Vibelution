@@ -3665,7 +3665,7 @@ def test_summarizing_generation_with_all_terminal_bound_rounds_exposes_summary_r
     ]
     assert state.currentPhase == "generation"
     assert state.generation.lifecycle == "failed"
-    assert commands == ["regenerate_summary"]
+    assert commands == ["regenerate_summary", "stop_discussion"]
     retry = next(
         action
         for action in state.allowedActions
@@ -4968,6 +4968,95 @@ def test_fresh_review_heartbeat_keeps_executing() -> None:
     assert "reopen_review" not in {
         action.command for action in state.allowedActions if action.kind == "command"
     }
+
+
+def _awaiting_approval_meeting_fixture(
+    *, bound_round_status: str | None = None
+) -> HypothesisFirstStateV2:
+    updated_at = _iso_minute_offset(5)
+    meeting: dict[str, object] = {
+        "meetingRoundId": "review-1",
+        "meetingType": "hypothesis_review",
+        "question": "SCI-001",
+        "selectionId": "selection-1",
+        "status": "awaiting_approval",
+        "digestDraft": {"summary": "候选甲纪要草稿"},
+        "linkedChatRoomId": "room-review",
+        "createdAt": _iso_minute_offset(10),
+        "updatedAt": updated_at,
+    }
+    snapshots: dict[str, dict[str, object]] = {}
+    if bound_round_status is not None:
+        meeting["chatRoomRoundIds"] = ["room-round-review"]
+        snapshots["room-round-review"] = {
+            "runId": "room-round-review",
+            "runKind": "chat_room_round",
+            "status": bound_round_status,
+            "updatedAt": updated_at,
+        }
+    return HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-001",
+                },
+                {
+                    "recordKind": "review_round_link",
+                    "linkId": "link-1",
+                    "selectionId": "selection-1",
+                    "candidateId": "candidate-1",
+                    "candidateOrder": 0,
+                    "roundIndex": 1,
+                    "meetingRoundId": "review-1",
+                    "questionId": "SCI-001",
+                },
+            ],
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-1"],
+                }
+            ],
+            meeting_records=[meeting],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            chat_room_round_snapshots=snapshots,
+        )
+    )
+
+
+def test_awaiting_approval_meeting_offers_confirmed_stop() -> None:
+    """等待人工确认的形态必须有明确的放弃出口（可执行的停止指令）。"""
+
+    state = _awaiting_approval_meeting_fixture()
+
+    stop = next(
+        action
+        for action in state.allowedActions
+        if action.kind == "command" and action.command == "stop_discussion"
+    )
+    assert stop.actionId == "stop-discussion:review-1"
+    assert stop.payload.meetingRoundId == "review-1"
+    assert stop.requiresConfirmation is True
+    assert (stop.confirmationText or "").strip()
+
+
+def test_awaiting_approval_meeting_skips_stop_while_bound_round_runs() -> None:
+    """绑定轮次仍在运行时停止会被服务拒绝，投影不得给出假 offer。"""
+
+    state = _awaiting_approval_meeting_fixture(bound_round_status="running")
+
+    commands = {
+        action.command for action in state.allowedActions if action.kind == "command"
+    }
+    assert "stop_discussion" not in commands
 
 
 def test_stale_review_dispatch_intent_offers_retry_dispatch() -> None:
@@ -8831,10 +8920,13 @@ def test_dead_state_sentinel_flags_generation_without_transition() -> None:
         for action in state["allowedActions"]
         if action.get("kind") == "command"
     ]
-    assert commands == []
-    # Only the dead-room navigation remains; it is not a transition.
-    assert state["allowedActions"]
-    assert all(action["kind"] == "navigation" for action in state["allowedActions"])
+    # The dead room also exposes the confirmed stop cleanup, so the operator
+    # can close the orphaned meeting instead of only reading the diagnosis.
+    # Stop is cleanup, not a transition, so the sentinel below still fires.
+    assert [action["command"] for action in commands] == ["stop_discussion"]
+    assert commands[0]["requiresConfirmation"] is True
+    assert commands[0]["actionId"] == "stop-discussion:hf-candgen-stopped"
+    assert any(action["kind"] == "navigation" for action in state["allowedActions"])
     codes = {problem["code"] for problem in state["generation"]["problems"]}
     assert "generation_no_transition" in codes
     overall_codes = {problem["code"] for problem in state["overall"]["problems"]}

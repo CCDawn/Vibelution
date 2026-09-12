@@ -174,6 +174,7 @@ import {
   scheduleTelemetryWithoutWaiting,
   type LauncherBootstrapResult
 } from "./process/launcherBootstrap.js";
+import { listActiveWorkRuns } from "./process/activeWorkGuard.js";
 import { assertTrustedIpcSender } from "./security/ipcSenderValidation.js";
 import { isLiveWorkbenchWindowUrl } from "./security/urlPolicy.js";
 import { executeApprovedDesktopShellShutdown, reapManagedRuntimeOnDesktopStart, DESKTOP_SHELL_EXIT_BUDGET_MS, DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS, withDesktopShellExitTimeout } from "./shutdown/desktopShellExit.js";
@@ -183,6 +184,7 @@ import {
   fetchLauncherActiveWorkStatus,
   resolveQuitActiveWorkStatus,
   type ActiveWorkProbeState,
+  type ActiveWorkStatus,
   type ShutdownDecision
 } from "./shutdown/shutdownCoordinator.js";
 import {
@@ -2238,6 +2240,26 @@ async function bestEffortStopIsolatedInstancesForShutdown(
   }
 }
 
+function localQuitActiveWorkStatus(): ActiveWorkStatus {
+  try {
+    const runs = listActiveWorkRuns(createDesktopPathsForApp().workspaceRoot);
+    if (runs.length === 0) {
+      return { state: "idle", message: "" };
+    }
+    return {
+      state: "active",
+      message: `${runs.length} active work item(s) block lifecycle commands.`,
+      count: runs.length,
+      items: runs.map((run) => ({ ...run }))
+    };
+  } catch (error: unknown) {
+    return {
+      state: "unknown",
+      message: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
 async function requestDesktopShellExit(
   closeReason: DesktopCloseReason = "desktop_shell_quit"
 ): Promise<ShutdownDecision> {
@@ -2266,7 +2288,12 @@ async function requestDesktopShellExit(
             probe: () => probeQuitActiveWork(false),
             recoverAndRetry: () => probeQuitActiveWork(true)
           });
-        }
+        },
+        // The launcher probe rides on the workbench backend. When that backend
+        // is dead or wedged the probe times out and quit used to fail with
+        // "无法确认是否有进行中的任务" forever; the same file-based scan the
+        // main-line stop command trusts keeps quit possible instead.
+        localActiveWorkStatus: () => localQuitActiveWorkStatus()
       }),
       onDenied: (decision) => {
         notifyDesktopTray("Vibelution", decision.message || "有进行中的任务，暂时无法退出。可先用托盘“退出壳并停止全部任务”。", "warning");

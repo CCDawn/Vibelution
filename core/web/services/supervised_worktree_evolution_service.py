@@ -2218,6 +2218,11 @@ def _build_reflection(
     baseline: dict[str, Any],
     baseline_judgment: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """监督闭环的"改进提示"：把 Judge 基线评分转成给原基线 Agent 的自改指令。
+
+    命名澄清：这不是自进化的有界反思记录——`core/evaluation/self_evolution_reflection.py`
+    的 `reflection.jsonl` 是另一回事（同名不同物）；这里是发给基线会话的 prompt 载荷。
+    """
     successes = int(baseline.get("successes") or 0)
     total = int(baseline.get("total") or 0)
     failures = max(0, total - successes)

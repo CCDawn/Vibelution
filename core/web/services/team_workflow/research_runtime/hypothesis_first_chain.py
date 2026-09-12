@@ -1119,27 +1119,51 @@ def _question_reset_snapshot(team_id: str, question_id: str) -> dict[str, Any]:
         # the projected archive count equals the cancel count up front.
         "archivedFormalRunCount": len(live_formal_runs or []),
     }
-    active_meetings = [
-        meeting_id
+    active_status_meetings = {
+        meeting_id: meeting
         for meeting_id, meeting in target_meetings.items()
         if str(meeting.get("status") or "").strip().lower() in _ACTIVE_MEETING_STATUSES
+    }
+    # Status alone cannot tell a live discussion from an executor that was
+    # interrupted mid-round: only a bound round whose heartbeat is still
+    # fresh proves live work.  Stale meetings stay listed for the reset to
+    # terminate, but they no longer block it.
+    active_meetings = [
+        meeting_id
+        for meeting_id, meeting in active_status_meetings.items()
+        if meeting_rounds.live_running_bound_round_ids(meeting)
     ]
-    active_requests = [
-        request_id
-        for request_id, request in _latest_records(
-            [
-                record
-                for record in target_chain_records
-                if str(record.get("recordKind") or "") == COLLECTION_REQUEST_KIND
-            ],
-            "requestId",
-        ).items()
+    stale_meeting_ids = sorted(
+        meeting_id
+        for meeting_id in active_status_meetings
+        if meeting_id not in set(active_meetings)
+    )
+    from core.web.services.team_workflow.source_collection import (
+        runs as source_collection_runs,
+    )
+
+    active_requests: list[str] = []
+    stale_collection_run_ids: list[str] = []
+    for request_id, request in _latest_records(
+        [
+            record
+            for record in target_chain_records
+            if str(record.get("recordKind") or "") == COLLECTION_REQUEST_KIND
+        ],
+        "requestId",
+    ).items():
         # A legacy pending request with no child run cannot represent work that
         # can still mutate data. Keep the guard for every linked active request,
         # while allowing that unlinked residue to be reset.
-        if str(request.get("status") or "").strip().lower() in _ACTIVE_COLLECTION_STATUSES
-        and str(request.get("collectionRunId") or "").strip()
-    ]
+        if str(request.get("status") or "").strip().lower() not in _ACTIVE_COLLECTION_STATUSES:
+            continue
+        run_id = str(request.get("collectionRunId") or "").strip()
+        if not run_id:
+            continue
+        if source_collection_runs.collection_run_is_active(team_id, run_id):
+            active_requests.append(request_id)
+        else:
+            stale_collection_run_ids.append(run_id)
     return {
         "questionId": normalized_question_id,
         "chainRecords": chain_records,
@@ -1157,6 +1181,8 @@ def _question_reset_snapshot(team_id: str, question_id: str) -> dict[str, Any]:
         "impact": impact,
         "activeMeetingIds": active_meetings,
         "activeRequestIds": active_requests,
+        "staleMeetingIds": stale_meeting_ids,
+        "staleCollectionRunIds": sorted(set(stale_collection_run_ids)),
     }
 
 
@@ -1299,6 +1325,79 @@ def reset_question_chain(
             raise HypothesisFirstChainError("本题仍有进行中的讨论，请先结束或停止讨论后再重置。")
         if snapshot["activeRequestIds"]:
             raise HypothesisFirstChainError("本题的资料搜集仍在进行，请等待结束或先停止任务。")
+
+        # Heartbeat-aware recovery: a status-active meeting or request whose
+        # executor died (interrupted run) must not lock this question out of
+        # resetting forever.  Terminate those stale records first; when the
+        # termination loses a race with a genuinely live executor the
+        # recheck below turns it back into a real block.
+        terminated_meeting_ids: list[str] = []
+        for meeting_id in list(snapshot["staleMeetingIds"]):
+            try:
+                meeting_rounds.stop_discussion_meeting(normalized_team_id, meeting_id)
+                terminated_meeting_ids.append(meeting_id)
+            except Exception as exc:  # noqa: BLE001 - fail closed only on live work
+                try:
+                    still_live = bool(
+                        meeting_rounds.live_running_bound_round_ids(
+                            meeting_rounds._load_meeting_round(
+                                normalized_team_id, meeting_id
+                            )
+                        )
+                    )
+                except Exception:  # noqa: BLE001 - unreadable meeting stays a block
+                    still_live = True
+                if still_live:
+                    raise HypothesisFirstChainError(
+                        "本题仍有进行中的讨论，请先结束或停止讨论后再重置。"
+                    ) from exc
+                _record_scene_event(
+                    "hypothesis_first.question_reset_meeting_terminate_skipped",
+                    outcome="skipped",
+                    level="warning",
+                    fields={
+                        "teamId": normalized_team_id,
+                        "questionId": normalized_question_id,
+                        "meetingRoundId": meeting_id,
+                    },
+                )
+        stopped_collection_run_ids: list[str] = []
+        for run_id in list(snapshot["staleCollectionRunIds"]):
+            try:
+                source_collection_runs.stop_source_collection_search(
+                    normalized_team_id,
+                    run_id,
+                    reason="hypothesis-first question reset cleared interrupted collection",
+                )
+                stopped_collection_run_ids.append(run_id)
+            except Exception as exc:  # noqa: BLE001 - fail closed only on live work
+                if source_collection_runs.collection_run_is_active(
+                    normalized_team_id, run_id
+                ):
+                    raise HypothesisFirstChainError(
+                        "本题的资料搜集仍在进行，请等待结束或先停止任务。"
+                    ) from exc
+                _record_scene_event(
+                    "hypothesis_first.question_reset_collection_stop_skipped",
+                    outcome="skipped",
+                    level="warning",
+                    fields={
+                        "teamId": normalized_team_id,
+                        "questionId": normalized_question_id,
+                        "runId": run_id,
+                    },
+                )
+        if terminated_meeting_ids or stopped_collection_run_ids:
+            _record_scene_event(
+                "hypothesis_first.question_reset_stale_work_terminated",
+                outcome="success",
+                fields={
+                    "teamId": normalized_team_id,
+                    "questionId": normalized_question_id,
+                    "meetingRoundIds": terminated_meeting_ids,
+                    "runIds": stopped_collection_run_ids,
+                },
+            )
 
         source_preview = source_collection_runs.preview_source_collection_runs_reset(
             normalized_team_id,
@@ -6981,6 +7080,53 @@ def backfill_feedback_iterations_from_round_chain(
     return summary
 
 
+_FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO: dict[str, tuple[str, float]] = {}
+_FEEDBACK_ITERATION_BACKFILL_BLOCKED_TTL_SECONDS = 30 * 60.0
+_FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO_MAX_ENTRIES = 256
+
+
+def _feedback_iteration_rounds_fingerprint(rounds: list[dict[str, Any]]) -> str:
+    """Stable identity of the evidence a backfill attempt would replay."""
+
+    canonical = json.dumps(rounds, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:20]
+
+
+def _feedback_iteration_backfill_recently_blocked(
+    run_id: str, fingerprint: str
+) -> bool:
+    """True when this run was blocked before on the same round evidence.
+
+    The recovery sweep ticks every second; a blocked backfill can only change
+    when the question's round chain changes (or a write succeeds elsewhere).
+    Re-attempting identical evidence only re-reads the ledger and re-logs the
+    same warning, so the memo bounds that churn and expires after a TTL in
+    case a future invalidation path is missed.
+    """
+
+    entry = _FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO.get(run_id)
+    if entry is None:
+        return False
+    blocked_fingerprint, blocked_at = entry
+    if blocked_fingerprint != fingerprint:
+        return False
+    if time.monotonic() - blocked_at > _FEEDBACK_ITERATION_BACKFILL_BLOCKED_TTL_SECONDS:
+        _FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO.pop(run_id, None)
+        return False
+    return True
+
+
+def _remember_feedback_iteration_backfill_blocked(
+    run_id: str, fingerprint: str
+) -> None:
+    if (
+        len(_FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO)
+        >= _FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO_MAX_ENTRIES
+    ):
+        _FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO.clear()
+    _FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO[run_id] = (fingerprint, time.monotonic())
+
+
 def auto_backfill_missing_feedback_iterations(
     team_id: str,
     *,
@@ -6999,7 +7145,10 @@ def auto_backfill_missing_feedback_iterations(
     the write goes through
     :func:`backfill_feedback_iterations_from_round_chain` (fail-closed,
     idempotent — a second pass replays byte-identical evidence and writes
-    nothing new).  Nothing here raises: one broken run is isolated and every
+    nothing new).  A blocked outcome is memoized per run against the round
+    chain fingerprint for a bounded TTL: the per-second recovery sweep must
+    not grind the ledger with identical failed attempts and warning spam.
+    Nothing here raises: one broken run is isolated and every
     non-trivial outcome lands as a
     ``hypothesis_first.auto_backfill_feedback_iterations`` scene event plus a
     ``logger.warning``.
@@ -7054,6 +7203,7 @@ def auto_backfill_missing_feedback_iterations(
         summary["reason"] = "rounds_unreadable"
         summary["error"] = str(exc)[:400]
         return summary
+    fingerprint = _feedback_iteration_rounds_fingerprint(rounds)
     store = runtime.store
     for run in target_runs:
         run_id = str(run.get("runId") or "").strip()
@@ -7065,6 +7215,18 @@ def auto_backfill_missing_feedback_iterations(
             "questionId": normalized_question_id,
             "runId": run_id,
         }
+        if _feedback_iteration_backfill_recently_blocked(run_id, fingerprint):
+            summary["skipped"] += 1
+            summary["runs"].append(
+                {
+                    "runId": run_id,
+                    "status": "skipped",
+                    "reason": "blocked_backfill_recently_attempted",
+                    "blockerCodes": [],
+                    "rounds": 0,
+                }
+            )
+            continue
         try:
             record = store.get_run(run_id)
             snapshot = json.loads(
@@ -7116,6 +7278,7 @@ def auto_backfill_missing_feedback_iterations(
         }
         summary["runs"].append(outcome)
         if result_status == "written":
+            _FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO.pop(run_id, None)
             summary["written"] += int(result.get("written") or 0)
             summary["status"] = "written"
             _record_scene_event(
@@ -7128,6 +7291,7 @@ def auto_backfill_missing_feedback_iterations(
                 },
             )
         elif result_status == "blocked":
+            _remember_feedback_iteration_backfill_blocked(run_id, fingerprint)
             summary["blocked"] += 1
             if summary["status"] != "written":
                 summary["status"] = "blocked"

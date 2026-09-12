@@ -22,22 +22,42 @@ const ACTIVE_WORK_STATUS_UNAVAILABLE_MESSAGE = "暂时无法确认是否有进�
 export async function decideShutdown(input: {
   ownershipMode: BootstrapOwnershipMode;
   activeWorkStatus: () => Promise<ActiveWorkStatus>;
+  /**
+   * File-based active-work scan used when the launcher probe itself is
+   * unavailable (backend hung/dead, probe timeout, invalid projection).
+   * Without it a dead backend made quit impossible: the probe timed out and
+   * the decision denied with "状态无法确认" even when nothing was running.
+   */
+  localActiveWorkStatus?: () => ActiveWorkStatus | Promise<ActiveWorkStatus>;
 }): Promise<ShutdownDecision> {
-  let activeWork: ActiveWorkStatus;
+  let activeWork: ActiveWorkStatus | null = null;
   try {
     activeWork = await input.activeWorkStatus();
   } catch {
-    return {
-      allowed: false,
-      reason: "active_work_status_unavailable",
-      message: ACTIVE_WORK_STATUS_UNAVAILABLE_MESSAGE
-    };
+    activeWork = null;
   }
-  if (activeWork.state === "unknown") {
+  if (activeWork === null || activeWork.state === "unknown") {
+    const local = await probeLocalActiveWorkStatus(input.localActiveWorkStatus);
+    if (local !== null && local.state === "idle") {
+      return {
+        allowed: true,
+        reason: "no_active_work",
+        stopPythonLauncher: true
+      };
+    }
+    if (local !== null && local.state === "active") {
+      return {
+        allowed: false,
+        reason: "active_work_running",
+        message: ACTIVE_WORK_BLOCK_MESSAGE
+      };
+    }
     return {
       allowed: false,
       reason: "active_work_status_unavailable",
-      message: activeWork.message || ACTIVE_WORK_STATUS_UNAVAILABLE_MESSAGE
+      message:
+        (activeWork !== null && activeWork.message) ||
+        ACTIVE_WORK_STATUS_UNAVAILABLE_MESSAGE
     };
   }
   if (activeWork.state === "active") {
@@ -54,6 +74,19 @@ export async function decideShutdown(input: {
     // every approved quit, including attached bootstraps that never spawned it.
     stopPythonLauncher: true
   };
+}
+
+async function probeLocalActiveWorkStatus(
+  local: (() => ActiveWorkStatus | Promise<ActiveWorkStatus>) | undefined
+): Promise<ActiveWorkStatus | null> {
+  if (local === undefined) {
+    return null;
+  }
+  try {
+    return await local();
+  } catch {
+    return null;
+  }
 }
 
 export async function executeShutdownAuthorizationBoundary(input: {
