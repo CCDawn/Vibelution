@@ -8,11 +8,18 @@ const previewRoot = dirname(fileURLToPath(import.meta.url));
 const vuiRoot = resolve(previewRoot, "../../components/vui");
 const indexPath = join(vuiRoot, "designs", "INDEX.md");
 
-// These named design sections document composition inside their owning product
-// surfaces; neither is an independently implemented VUI component to render.
+// These named design sections do not render as standalone previews: they either
+// document composition inside their owning product surfaces, or they are
+// product components bound to server queries (the research recovery panel and
+// entry fetch team failure state; the message version switcher lives inside
+// ConversationView row metaActions) whose meaningful state cannot be expressed
+// as a static preview.
 const previewExemptDesignSections = new Set([
   "ChallengeQuestionStageZones",
   "ResearchAnomalyInboxExtendCta",
+  "ResearchWorkflowRecoveryPanel",
+  "ResearchWorkflowRecoveryEntry",
+  "ConversationMessageVersionSwitcher",
 ]);
 
 function collectPreviewSources(directory: string): string {

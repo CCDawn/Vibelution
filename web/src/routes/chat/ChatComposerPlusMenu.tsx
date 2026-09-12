@@ -213,8 +213,8 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
         type="button"
         role="menuitem"
         data-plus-menu-item="true"
-        className={styles.menuItem}
         contentLayout="plain"
+        className={styles.menuItem}
         variant="ghost"
         isDisabled={options.disabled}
         disabledReason={options.disabled ? options.disabledReason : undefined}
@@ -244,8 +244,8 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
         aria-checked={options.checked}
         aria-label={`${options.label}：${stateLabel}`}
         data-plus-menu-item="true"
-        className={options.checked ? `${styles.menuItem} ${styles.menuItemChecked}` : styles.menuItem}
         contentLayout="plain"
+        className={options.checked ? `${styles.menuItem} ${styles.menuItemChecked}` : styles.menuItem}
         variant="ghost"
         isDisabled={options.disabled}
         onPress={() => options.onChange(!options.checked)}
