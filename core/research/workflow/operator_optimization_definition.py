@@ -34,6 +34,7 @@ OPERATOR_ARTIFACT_KINDS = frozenset({
     "operator_measurement_protocol",
     "operator_candidate",
     "optimization_discussion",
+    "optimization_knowledge_request",
     *(row[4] for row in OPERATOR_NODES),
 })
 

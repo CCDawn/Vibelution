@@ -12,7 +12,24 @@ def evaluate_operator_node(run, node, common, context) -> DomainVerdict:
         ),))
     failures = []
     if node.nodeId == "optimization_knowledge":
-        failures.append(("operator_knowledge_not_implemented", "资料补齐执行尚未接入", "domain"))
+        from ...operator_optimization.knowledge import (
+            build_knowledge_request,
+            knowledge_reuse_available,
+            load_knowledge_snapshot,
+        )
+        from ...operator_optimization.store import CampaignConflict
+        try:
+            request = build_knowledge_request(run.team_id, run.run_id)
+            active = next((r for r in state["campaign"].get("rounds", []) if r["runId"] == run.run_id), {})
+            if active.get("knowledgeRef"):
+                load_knowledge_snapshot(run.team_id, run.run_id)
+            elif request.evidenceGaps and not knowledge_reuse_available(run.team_id, run.run_id, request):
+                failures.append(("operator_knowledge_collection_budget_not_implemented",
+                    "缺少匹配的已接受知识包，付费资料搜集预算尚未接入", "budget"))
+        except (CampaignConflict, ValueError, FileNotFoundError):
+            failures.append(("operator_knowledge_source_unavailable", "无法回读本轮假设或知识来源", "domain"))
+    if node.nodeId == "optimization_plan":
+        failures.append(("operator_plan_task_not_implemented", "实验计划冻结已实现，规划 Agent 任务尚未接入", "domain"))
     campaign = state["campaign"]
     if campaign["researchProjectId"] != run.project_id or campaign["teamId"] != run.team_id:
         failures.append(("operator_scope_mismatch", "实验活动与运行归属不一致", "scope"))
@@ -27,9 +44,8 @@ def evaluate_operator_node(run, node, common, context) -> DomainVerdict:
             failures.append(("operator_protocol_missing", "尚未冻结工作负载和测量协议", "domain"))
         if state["budgetSummary"]["gpuTuningAvailableSeconds"] <= 0:
             failures.append(("operator_gpu_budget_empty", "GPU 时长预算不足", "budget"))
-    if node.nodeId in {"optimization_discussion", "optimization_plan", "optimization_knowledge"}:
-        if campaign["budget"]["modelCostLimit"] <= 0:
-            failures.append(("operator_model_budget_empty", "模型与检索预算不足", "budget"))
+    if node.nodeId in {"optimization_discussion", "optimization_plan"} and campaign["budget"]["modelCostLimit"] <= 0:
+        failures.append(("operator_model_budget_empty", "模型与检索预算不足", "budget"))
     if node.nodeId == "optimization_discussion" and not campaign["budget"].get("discussion"):
         failures.append(("operator_discussion_budget_missing", "尚未配置讨论调用次数、token 预算与模型价目", "budget"))
     if node.nodeId != "operator_baseline" and not campaign["baselineRef"]:

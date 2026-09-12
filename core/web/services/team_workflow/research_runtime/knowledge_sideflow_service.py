@@ -153,21 +153,25 @@ def compute_invocation_fingerprints(
     search_envelope: Mapping[str, Any] | None,
     requirements: Mapping[str, Any] | None,
     source_policy_version: str,
+    consumer_context: Mapping[str, Any] | None = None,
 ) -> dict[str, str]:
     scope_hash = sha256_hex(dict(scope or {}))
     envelope_hash = search_envelope_hash(search_envelope, source_policy_version)
     req_hash = requirements_hash(requirements, source_policy_version)
+    request_hash = knowledge_invocation_request_hash(
+        question_id=str(question_id or "").strip().upper(),
+        scope_hash=scope_hash,
+        search_envelope_hash=envelope_hash,
+        requirements_hash=req_hash,
+        source_policy_version=source_policy_version,
+    )
+    if consumer_context is not None:
+        request_hash = sha256_hex({"requestHash": request_hash, "consumerContext": dict(consumer_context)})
     return {
         "scopeHash": scope_hash,
         "searchEnvelopeHash": envelope_hash,
         "requirementsHash": req_hash,
-        "requestHash": knowledge_invocation_request_hash(
-            question_id=str(question_id or "").strip().upper(),
-            scope_hash=scope_hash,
-            search_envelope_hash=envelope_hash,
-            requirements_hash=req_hash,
-            source_policy_version=source_policy_version,
-        ),
+        "requestHash": request_hash,
     }
 
 
@@ -186,6 +190,8 @@ def ensure_knowledge_invocation(
     search_envelope: Mapping[str, Any] | None,
     requirements: Mapping[str, Any] | None,
     source_policy_version: str,
+    consumer_context: Mapping[str, Any] | None = None,
+    reuse_only: bool = False,
     parent_node_run_id: str = "",
     parent_attempt: int = 1,
     source_manifest_ref: str = "",
@@ -203,6 +209,10 @@ def ensure_knowledge_invocation(
     is fingerprinted through the scope hash and carried verbatim onto the
     child run's input snapshot so the child's source_finding collection run
     imports exactly those registered roots.
+
+    ``reuse_only`` never creates a child or a pending invocation. A missing
+    reusable package raises inside the transaction before any write.
+    ``consumer_context`` binds call identity without defeating semantic reuse.
     """
     now = now_provider or _default_now
     parent = store.get_run(parent_run_id)
@@ -229,6 +239,7 @@ def ensure_knowledge_invocation(
         search_envelope=search_envelope,
         requirements=requirements,
         source_policy_version=source_policy_version,
+        consumer_context=consumer_context,
     )
 
     outcome: dict[str, Any] = {}
@@ -238,6 +249,8 @@ def ensure_knowledge_invocation(
             parent_run_id, parent_node_id, fingerprints["requestHash"]
         )
         if existing is not None:
+            if reuse_only and (existing.knowledge_child_run_id or existing.status != "completed"):
+                raise KnowledgeSideflowError("Existing invocation requires collection", code="knowledge_reuse_unavailable")
             # Call idempotency: same requestHash replays the SAME invocation.
             # A request that gains root ids after its first submission keeps
             # replaying the original invocation (the requestHash did not move
@@ -309,6 +322,8 @@ def ensure_knowledge_invocation(
                 {"invocation": record, "replayed": False, "reused": True}
             )
             return
+        if reuse_only:
+            raise KnowledgeSideflowError("No reusable knowledge package", code="knowledge_reuse_unavailable")
         record = KnowledgeInvocationRecord(
             invocation_id=new_id("kinv"),
             parent_run_id=parent_run_id,
