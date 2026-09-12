@@ -47,6 +47,20 @@ def test_tool_registry_exposes_one_stable_secret_safe_descriptor_per_llm_tool(tm
     assert "argsSchema" not in grep_descriptor
 
 
+def test_long_tool_description_is_truncated_with_ellipsis(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+
+    payload = registry.get_tool_registry()
+    tools_by_name = {item["name"]: item for item in payload["tools"]}
+
+    assert all(
+        len(item["description"]) <= registry.MAX_DESCRIPTION_CHARS
+        for item in payload["tools"]
+    )
+    assert tools_by_name["cli_tool"]["description"].endswith("…")
+    assert not tools_by_name["agent_message_tool"]["description"].endswith("…")
+
+
 def test_exact_chat_room_context_tool_is_registered_but_requires_a_room_runtime_grant(
     tmp_path,
     monkeypatch,

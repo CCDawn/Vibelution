@@ -1819,7 +1819,9 @@ def _find_blocked_schema_keys(value: object) -> list[str]:
 
 def _description_for_tool(tool: object) -> str:
     description = str(getattr(tool, "description", "") or "").strip()
-    return description[:MAX_DESCRIPTION_CHARS]
+    if len(description) > MAX_DESCRIPTION_CHARS:
+        return description[: MAX_DESCRIPTION_CHARS - 1].rstrip() + "…"
+    return description
 
 
 def _args_schema_for_tool(tool: object) -> dict[str, Any]:
