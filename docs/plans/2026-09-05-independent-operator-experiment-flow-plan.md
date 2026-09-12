@@ -606,7 +606,7 @@ GPU 设备忙时释放尚未执行的预留；进程启动失败写入零用量�
 
 本轮只继续独立算子优化第二阶段，沿用既定方向、知识搜集与单次团队讨论，不扩展第一阶段功能。审查时主线干净，但尚未包含 `operator_optimization` 实现；前述开发成果仍在恢复分支，不能把已有提交等同于产品已可用。
 
-已将恢复分支对齐本轮读取的最新主线。两处冲突分别保留主线的显式工作流定义选择语义和产物路径清洗，同时接回算子定义与产物类型；增加显式定义不得被默认定义替换的回归测试。对齐后独立入口、创建、基线分派、讨论拒绝边界及项目归属的聚焦测试通过。最终集成状态由本次受管验证结果记录，本文不预先宣称合入成功。
+已将恢复分支对齐本轮读取的最新主线。两处冲突分别保留主线的显式工作流定义选择语义和产物路径清洗，同时接回算子定义与产物类型；增加显式定义不得被默认定义替换的回归测试。对齐后独立入口、创建、基线分派、讨论拒绝边界及项目归属的聚焦测试通过。恢复代码与设备锁修复已经完成受管验证并合入本地 main；该结果不代表真实模型、设备或前端运行验收。
 
 当前边界：活动、轮次、冻结候选/协议、GPU 预算和基线桥已有代码及本地测试；`optimization_plan` 目前是数据合同，资料补齐、优化执行、评价反馈和下一轮尚未组成可执行闭环。团队画布、详情和展开工作区仍须接同一生产投影。真实模型、GPU 和性能收益均未验收。
 
@@ -622,3 +622,146 @@ GPU 设备忙时释放尚未执行的预留；进程启动失败写入零用量�
 4. 接通团队画布、详情和展开工作区的同一活动投影；真实环境具备时依次验收基线、单轮与两轮反馈。
 
 第 1 项不能通过把算子节点映射到第一阶段 `hypothesis_design` 或冒用会议类型实现；原生 `meeting_receipt_authority` 的当前不支持行为已有回归证据，应在专属合同完成后再替换该拒绝行为。
+
+## 19. 下一步实施方案：单次优化讨论正式接入
+
+### 19.1 本轮交付与范围
+
+目标：一个已建立并验证基线的活动，能由原生 Workflow Ledger 派发一次团队讨论，产出一个有来源、有可测量预测的 `OptimizationHypothesis`，并留下下一步资料搜集所需的完整输入。用户不需要先执行第一阶段或选择 125 题。
+
+本节是待开发方案，不是已接通能力清单。本次规划只修改文档；下一开发批次完成“讨论节点”的真实代码路径、预算约束和本地集成测试。真实模型验收须具备实际路由与预算。知识搜集执行、实验计划冻结、CUDA 优化执行及前端界面属于随后批次，不因讨论函数存在而宣称整个第二阶段完成。
+
+成功路径：
+
+```text
+已验证基线 / 上一轮反馈
+  → 冻结本轮证据、参与席位、汇总席位、模型路由和预算
+  → 原生 Agent 节点派发 → 一个 Chat Room 讨论轮次
+  → 各参与者的原生 Session / Turn → 原生模型调用回执
+  → 汇总席位输出一个优化假设，服务端验证
+  → 讨论来源产物 → 假设产物 → 本轮 hypothesisRef
+  → 节点完成回执 → optimization_knowledge 的资料缺口输入
+```
+
+默认成功产物只包含一个主假设。各席位可比较备选做法，汇总必须说明选择理由，不自动扩大为多分支搜索。没有合理可检验方案时允许返回“无可行假设”，保留讨论和成本，暂停本活动；不编造假设，不反复重新开会。
+
+### 19.2 已查明的接入点与根因
+
+以下路径相对仓库根，均为本次读取的源码，而非从第一阶段名称推测的接口。
+
+| 接入点 | 当前约束 | 本轮处理 |
+| --- | --- | --- |
+| `research_runtime/task_adapter_registry.py` | 仅有资料搜集和研究项目任务族，未登记两个优化节点 | 为讨论增加有明确职责的会议任务适配；不将团队会议登记成单 Agent `hypothesis_design` |
+| `research_runtime/meeting_receipt_authority.py` | builder 限定 Challenge Cup；speaker context 使用 `QuestionStageBinding` 和第一阶段 meeting type | 添加算子专属服务端来源绑定分支，读取实际活动、run、node attempt 和冻结输入；保留既有 Challenge Cup 语义 |
+| `core/llm/client.py` | `_model_invocation_receipt_context` 解析第一阶段 binding/outcome，错误绑定可能返回空 context | 接受明确区分的算子 binding，沿用原生 receipt context、调用及写入通道；不能只修改上层 builder |
+| `core/web/services/chat_room_service.py` | 设置通用 `meeting_message_structured_output_contract()`，消息展示内容不等于算子结果 | 仅在已验证的算子 meeting scope 下选用专属输出合同和解析器 |
+| `research_runtime/completion_dependency.py` | 完成等待查询单个 handle 的 session/turn 与回执投递 | 按本次讨论冻结的参与者执行集合等待/核对，不能把房间已创建或一个参与者已完成当节点完成 |
+| `operator_optimization/discussion_runtime.py` | 直接读最终消息 JSON，成本写 `unsettled`，尚无正式任务回收入口 | 保留房间去重及来源发布顺序，改读服务端校验后的结构化结果，并接原生完成回收 |
+| `research_runtime/model_invocation_receipt_registry.py` | 当前正式结果索引只接收 succeeded/retried 回执，outcome 有白名单 | 成功证据索引与全部调用成本分开；不能用这个成功集合计算失败、超时和重试总成本 |
+
+`research_runtime/*` 与 `operator_optimization/*` 在表中分别指 `core/web/services/team_workflow/` 下的同名包。公共文件只添加算子专属分派入口，领域校验放回算子模块，不把算子逻辑散落到 Session 核心或修改第一阶段流程。
+
+### 19.3 复用裁决
+
+继续采用本项目的 Ledger / Outbox、`AgentActionAdapter`、`CompletionDependencyPending`、原生 Session / Chat Room、规范产物写入及 `update_campaign`。异步会议要接入现有任务句柄、完成等待和回收机制，不另建轮询调度器、运行状态表或聊天记录库。
+
+本地成熟项目对照：RD-Agent（MIT，已登记快照 `32b3d395e73d9db5eee3fe9063d69aec0fdc83bd`）的 `rdagent/components/workflow/rd_loop.py::RDLoop` 区分 hypothesis generator、hypothesis-to-experiment、coder、runner、feedback；`rdagent/core/proposal.py::ExperimentFeedback` 保留决策和执行异常。本项目借鉴“假设与实验计划分离、失败成为下一轮证据”，不复制它的执行框架或把异常当作优化成功。
+
+### 19.4 冻结输入与输出合同
+
+**输入权威**来自 `discussion_input()` 和 Ledger，不接受客户端声称某轮已完成、某产物已验证：
+
+- 活动/项目/run/业务 round 与实际 node attempt 的身份；初始 baseline、当前 parent candidate、测量协议、允许修改范围和 tuning 观察引用。
+- 参与者从本活动使用的团队研究席位及绑定中解析、去重、冻结；汇总席位由 `experiment_planner` 的实际绑定确定，显式排在最后。不再以团队成员数组的最后一项推定负责人；缺少已绑定汇总席位或少于两名参与者时在模型调用前阻止启动。
+- 模型路由、允许重试和每次调用上限在启动前冻结。一次讨论指一个逻辑 Chat Room round；原生有界重试仍计入调用数与成本，不视为免费调用。
+- 输入摘要可压缩原始计时，但保留可回读引用；不读取留出结果，外部材料作为数据隔离，不执行其中指令。
+
+**新增薄合同**建议放在 `core/research/operator_optimization/discussion_contracts.py`，不是新的通用会议框架：
+
+| 合同 | 必须表达的内容 |
+| --- | --- |
+| 算子调用 binding | team、project、campaign、round、workflow/run/version、父节点 attempt、参与者执行身份、session/turn、模型策略 hash；清楚区分父节点执行与发言执行，禁止相互冒充 |
+| 单席位输出 | 提议的改动、所据观察、机制、反对理由或风险、资料缺口；普通席位不发布最终假设 |
+| 最终讨论结果 | 明确 `selected` 或 `no_viable_hypothesis`；前者携带现有 `OptimizationHypothesis`，后者携带理由与阻断证据，不伪造空假设 |
+| 讨论来源 | 冻结输入 hash、房间/轮次、预期参与者及汇总席位、精确消息/Turn/模型回执引用、输出 hash、成本状态引用 |
+
+`OptimizationHypothesis` 的身份、parent candidate 与 observation refs 必须由服务端核对；输出至少说明改什么、为什么可能有效、在固定 workload 上如何测量、什么结果反驳它，以及 ROI 理由。`roi=high` 只是解释性判断，不是性能证据，也不触发自动晋升候选。无需为了给出收益预测强行编造数值。
+
+Chat Room 的专属结构化输出应复用现有 `set_turn_structured_output_contract` 能力。不得从通用消息的 `audit.rawModelOutput` 或 UI 展示文本恢复正式结果。模型不给出合法结果时保留原始回执引用和失败原因，不用宽松字符串修补成“成功”。
+
+### 19.5 调用、完成与中断语义
+
+1. **准备与准入**：确认 active campaign/run、冻结证据和席位、模型策略、预算；服务端构造 authority 后才可创建参与者会话和调用模型。
+2. **开始**：复用现有稳定 room identity 与锁。先持久化会议句柄/执行关联；“模型已启动但响应丢失”通过原生执行身份恢复，不能重新付费开会。
+3. **等待**：节点保持执行中或已有依赖等待状态。利用原生完成通知/Outbox 推进回收，等待每个预期参与者的终态及回执落盘；不把 `start_chat_room_round()` 返回视为完成。
+4. **收集**：检查汇总席位的专属结果、全部预期席位的对应 Turn、实际模型身份与 receipt hash。乱序消息不改变汇总席位，其他轮次或旧 attempt 回执不能补位。
+5. **发布**：保留已有顺序——来源产物先落盘，再写假设产物，最后附着 `hypothesisRef`。内容 hash 与稳定 identity 使任一步中断可重放；同一 identity 内容变化必须报冲突。
+6. **完成**：只有规范产物可回读且调用用量已归集或明确保留未结算责任，才通过原生节点完成口；账务未结算不得自动放行下一次付费操作。下一节点尚未实现时由现有 readiness 明确展示资料补齐待接入，不伪造知识快照或成功结束整个活动。
+7. **失败/暂停**：无可行假设、格式失败、预算不足或不可恢复调用失败保留讨论/费用证据，使用已有 Ledger blocker 与 campaign 暂停/阻断语义。取消后禁止新增调用，已执行的调用仍须回收；恢复优先消费现有结果，不默认重开讨论。原生重试只能在冻结范围和剩余额度内执行。
+
+首批不新增独立的 `/discussion/start`、`/discussion/poll` HTTP 控制系统。沿用活动/轮次创建和工作流启动/重试入口；若现有 projection 缺少 room/round/结果引用，补充现有节点锚点与快照 DTO。正式 VUI 的画布、详情和展开视图随后共同消费该投影。
+
+### 19.6 预算与证据的共同约束
+
+调用前必须同时满足活动总额、已消费、在途预留和本次调用上界；目前 `modelCostLimit > 0` 不足以构成准入。复用原生调用前预算钩子及 Ledger 预留/结算，活动只保存归属和查询关联，不维护第二套可独立修改的模型余额。
+
+当前 `build_operator_run_input()` 虽把活动预算放入 `budgetPolicy`，`reserve_budget_authority()` 实际只消费 token/tool-call/wall-clock/retry 限额，未消费 `modelCostLimit/currency`；缺少 token 合同时还会落入通用的 2,000,000 token 默认值。本轮必须显式生成算子讨论的 token/调用上界并接货币准入，不能让这个默认值代替活动授权。
+
+具体复用顺序：`budget_authority_adapter.reserve_budget_authority()` 为实际讨论 NodeRun 建立一次预留，沿用 `reservation-{node_run_id}` 身份；`receipt_persistence.enqueue_question_model_invocation_receipt()` 所在事务已能通过 `record_budget_usage_in_uow()` 按 invocation 去重累计 token；最终由 `settle_budget_authority_in_uow()` 幂等结算。扩展现有 `budget_receipts` 的 reserved/settled JSON 合同记录 amount、currency、价格/费用来源和状态，不新建算子费用表。参与者的发言执行身份与父 NodeRun 预算归属必须显式关联，否则多席位调用可能落到不存在的预留。
+
+`receipt_persistence` 当前主要归集 token，尚未把 receipt.cost 变成金额事实；该共享文件及预算权威适配器由主 Agent 单一写入，C worker 只交付算子金额规范化/准入计算模块和测试。活动余额从所属所有轮次/子任务的原生预算事实汇总，事务内判定新增预留，避免并发席位各自读到相同余额而超额。
+
+冻结费用单位/币种、价格版本和上界估算依据；token 限额与货币限额分开，不将 token 数当费用。所有尝试、失败、超时、检索调用均计入所属活动；用稳定 invocation/attempt/receipt 身份去重结算。模型返回内容中的自报费用不可作为实际账单。
+
+估算费用、供应商报告的费用、未知实际费用必须可区分。缺币种或只有估价时保留未结算责任，不记零费用或静默释放全部预留；需要消耗新预算的下一动作等待可审计的结算/上界处理。讨论结果是否有效与账务是否已结清是两个独立事实，不能为解决其中一个伪造另一个。
+
+### 19.7 与后续知识搜集、实验计划的交接
+
+本轮发布的假设已经包含 `evidenceGaps`，后续 knowledge owner 消费同一个 `hypothesisRef`，不再调用第一阶段假说生成：
+
+- 通过 `knowledge_sideflow_service.ensure_knowledge_invocation()` 建立/复用 invocation，以 parent run、`optimization_knowledge` 节点和实际 node attempt 关联。其 scope 和 requirements hash 纳入活动、轮次、假设引用、资料缺口、source policy 和允许的 managed source roots。
+- 先查匹配的规范知识包，确有缺口才调用搜集；已有资料也要落可回读快照。`evidenceGaps=[]` 不等于可伪造“知识完成”，应产出明确的已有证据复用决定。
+- `ensure_knowledge_child_run()` 是复用候选入口；真正接入时必须验证其来源范围、模型回执、预算和 scope 是否支持 operator 身份，不能以创建 child run 成功代替整个搜集链验收。
+- 资料能支持、削弱或否定主假设。被否定时停止该计划并保留理由，不能将不支持的假设强行转成实验。
+- 后续 `OptimizationPlan` 应补齐 `hypothesisRef`、`knowledgeRef`、主要预测/反证条件和试验预算绑定，同时保持已有 protocol、baseline/parent/candidate refs。当前只有文本 objective/evaluation 的合同不足以证明知识已进入规划；候选引用必须指向实际受管实现，不能在讨论阶段虚构。
+
+本轮保证上述输入能从讨论产物重建，并测试身份/hash 不丢失；下一批才执行知识子流和计划生成。无资料缺口时不强制外部检索，外部检索若发生则计入活动授权。
+
+### 19.8 开发任务与并行边界
+
+核心依赖：A →（B 与 C 在文件不重叠时并行）→ D → E。主 Agent 始终负责共享合同、热文件集成和最终验收；最多两个独立实现 worker，不为填满槽位拆分任务。
+
+| 任务 | 可观察产出与负责面 | 依赖/验证 |
+| --- | --- | --- |
+| A 来源与数据合同 | 主 Agent：`discussion_contracts.py`（拟新增）、算子来源构造器、现有 `contracts.py`；冻结 binding、结果、成本归属字段 | 先完成交叉项目/轮次、错误席位、非法来源与无可行假设的合同测试；之后才派 B/C |
+| B 单次会议输出 | Worker：`operator_optimization/discussion.py`、`discussion_runtime.py`、专属输出解析模块及对应测试 | 依赖 A；验证一轮会议、固定汇总席位、来源先发布、乱序/中断重放。不独自修改 `chat_room_service.py` 或 LLM client |
+| C 模型预算桥 | Worker：算子模型预算适配模块及对应测试；不改已有 GPU 预算语义 | 依赖 A；验证跨轮累计、并发准入、失败消耗、未知费用、结算去重。公共预算钩子由主 Agent 集成 |
+| D 正式节点接入 | 主 Agent：`task_adapter_registry.py`、`real_domain_ports.py`、必要的 `domain_adapters.py`、Chat Room/LLM receipt 入口、完成依赖与回收 | 依赖 B/C；统一实现 operator 分支，验证 native dispatcher → room → receipts → artifact → node complete，不能只 mock 整个 authority 或 dispatcher |
+| E 集成验收与交接 | 主 Agent复验；一个只读 reviewer核对来源/预算/异步失败边界 | D 完成后运行有针对性的端到端合同测试与既有共享模块回归；回写方案事实。真实调用单列验收，随后进入知识搜集批次 |
+
+这些任务涉及来源、公共合同和并发行为，使用先失败后修复的针对性行为测试；不为字段搬运或文档新增机械测试。共享 DTO、`core/llm/client.py`、`chat_room_service.py`、`tests/test_matrix.yaml` 均为主 Agent 单一 writer，worker 禁止继续派遣。若需要修改不在其合同内的文件，先回传主 Agent，避免两个 writer 修改同一事实源。
+
+### 19.9 验收用例与命令
+
+必须覆盖：无第一阶段数据也能进入讨论；模型调用前拒绝伪造 authority/预算不足；固定席位各有精确 Turn；一个逻辑 round；消息乱序与重复完成通知；结果与回执延迟落盘；发布中断；部分席位失败；真实锁下重复启动；无可行假设；暂停/取消；跨项目/历史轮次不串用；失败与重试计费；未知费用不放行新消费；假设和资料缺口可以作为下一节点输入回读。
+
+本地集成用原生 dispatcher、真实本地 Ledger/产物存储、Chat Room scope 和专属解析器，替换 provider transport 为可控返回；CPU 测试不得使用生产模型和生产 GPU 锁。至少有测试实际经过 `core/llm/client.py` 的 receipt context/写入链，不能用伪造成功回执替代所有模型边界测试。当前“真实 authority 拒绝 operator”用例，在新路径完成后替换成“合法算子来源可用、伪造来源仍拒绝”。
+
+已有测试入口（按改动选择，新增模块测试并入所属任务）：
+
+```powershell
+<PYTHON> -m pytest tests/test_operator_optimization_discussion.py tests/test_operator_optimization_discussion_runtime.py tests/test_operator_optimization_definition.py -q
+<PYTHON> -m pytest tests/test_meeting_receipt_authority.py tests/test_model_invocation_receipt.py tests/test_model_invocation_receipt_registry.py tests/test_completion_dependency_recovery.py tests/test_research_workflow_t51_task_adapters.py -q
+```
+
+`<PYTHON>` 使用项目共享环境经工具解析的解释器；现有及新增的 LLM receipt、预算回归由 selector 按实际文件选择。稳定实现批次跑聚焦验证，最终从根目录调用 `scripts/task_closeout.py` 一次完成必要验证与本地集成。不因改了文档跑全量产品测试；本次方案交付检查链接、源码落点、任务依赖与 diff。
+
+真实单次讨论验收需已验证 GPU 基线（或明确标注的开发 fixture，不能混称）、用户已授权的模型/搜索额度、可用模型路由；记录会议、Session/Turn、模型回执、主假设、来源及费用状态。真实输入为 fixture 时只能证明讨论接入，不能认定基于真实基线的科研阶段已通过。没有这些条件时完成代码和本地验证，保留真实验收未完成状态，不自动消费。
+
+### 19.10 保护与回退
+
+不修改第一阶段的审批/收敛、普通 Session admission/Journal 或 GPU 计时口径；仅扩展显式 operator 来源下的公共接入点。既有第一阶段回执继续由原合同验证，这是并存业务边界，不是给算子旧草稿建立兼容层。
+
+替换当前未接通的讨论解析路径后删除其原始文本 JSON 发布入口，避免出现两个最终结果来源。新增合同若改变已有开发数据结构，先检查是否存在正式活动记录；无正式数据则直接更新合同和 fixture，不搭建双版本运行分支。若发现真实历史需要迁移，暂停该写入并给出明确迁移方案，不删除研究证据。
+
+回退先停止本活动新派发并保存已有模型费用、讨论和产物，再撤回代码；不能通过删除回执、取消预留事实或重建同 ID 活动制造“从未执行”。只回退任务内修改，不推送、不发布或重启无关运行时。
