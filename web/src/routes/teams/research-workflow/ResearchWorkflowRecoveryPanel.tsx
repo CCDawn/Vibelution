@@ -423,7 +423,7 @@ export function ResearchWorkflowRecoveryPanel({
                       type="button"
                       variant="ghost"
                       density="compact"
-                      className="!h-6 !min-h-0 px-1.5 [font-size:var(--vui-font-xs)]"
+                      className={styles.detailsToggle}
                       icon={open
                         ? <ChevronUp size={12} aria-hidden="true" />
                         : <ChevronDown size={12} aria-hidden="true" />}

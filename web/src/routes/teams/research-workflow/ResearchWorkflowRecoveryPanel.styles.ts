@@ -13,6 +13,7 @@ export default {
   scope: "[font-size:var(--vui-font-xs)] font-[650] text-[var(--fg-primary)]",
   reasonLine: "flex min-w-0 flex-wrap items-center gap-1",
   reason: "min-w-0 truncate text-[var(--fg-secondary)] [font-size:var(--vui-font-xs)]",
+  detailsToggle: "!h-6 !min-h-0 px-1.5 [font-size:var(--vui-font-xs)]",
   detail: "m-0 flex flex-col gap-1 rounded border border-[var(--border-subtle)] p-2",
   detailLine: "m-0 flex gap-2",
   detailLabel: "w-[52px] shrink-0 text-[var(--fg-tertiary)] [font-size:var(--vui-font-2xs)]",
