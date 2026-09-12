@@ -1062,6 +1062,8 @@ def _resolve_pointer_runtime_scene_dir() -> Path | None:
                 continue
         except OSError:
             continue
+        if not s._runtime_scene_project_matches(s._load_scene_manifest(scene_dir)):
+            continue
         return scene_dir
     return None
 
