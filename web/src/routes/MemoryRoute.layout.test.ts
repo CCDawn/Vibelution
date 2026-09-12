@@ -1426,6 +1426,14 @@ describe("MemoryRoute layout contract", () => {
     expect(appShellSource).toContain('t("navMemory")');
   });
 
+  it("keeps the routed team knowledge workbench reachable from the knowledge view", () => {
+    expect(routerSource).toContain('path: "memory/knowledge", ...guardedLazyElement(<MemoryRoute forcedView="knowledge" />)');
+    expect(routeSource).toContain("renderKnowledgeView()");
+    expect(routeSource.indexOf("? renderKnowledgeView()")).toBeLessThan(routeSource.indexOf("? createTeamBrowsePanel()"));
+    expect(routeSource).toContain("styles.knowledgeViewStack");
+    expect(routeSource).toContain("browseEmptyCardsHint: copy.teamKnowledgeEmptyHint");
+  });
+
   it("keeps effective memory panels scrollable instead of clipping dense narrow content", () => {
     expect(routeSource).toContain('from "./MemoryEffectivePanel"');
     expect(routeSource).toContain("<MemoryEffectivePanel");

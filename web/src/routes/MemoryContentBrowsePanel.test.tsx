@@ -41,6 +41,15 @@ function renderPanel(overrides: Partial<React.ComponentProps<typeof MemoryConten
 }
 
 describe("MemoryContentBrowsePanel collapsible groups", () => {
+  it("renders the optional empty-cards hint with the empty state", () => {
+    const markup = renderPanel({
+      cards: [],
+      copy: { ...copy, browseEmptyCardsHint: "可在「团队」页面打开团队知识库" },
+    });
+    expect(markup).toContain("暂无卡片");
+    expect(markup).toContain("可在「团队」页面打开团队知识库");
+  });
+
   it("renders every group expanded when no collapsible titles are configured", () => {
     const markup = renderPanel();
     expect(markup).toContain("工作 Agent");
