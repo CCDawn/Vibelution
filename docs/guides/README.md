@@ -25,6 +25,7 @@
 
 | 文件 | 内容 | 约行数 | 何时跳过 |
 | --- | --- | --- | --- |
+| [project-map.md](project-map.md) | **项目地图**：三主线速查 + 数据布局 + 需求→文件 + 排障口诀 | ~140 | 已按 route/ownership 精确定位时 |
 | [route.md](route.md) | 任务类型 → READ / EDIT / TEST / 禁止 | ~78 | 续接且任务类型/触面未变 |
 | [ownership.md](ownership.md) | 路径 ownership | ~122 | 只读；或 owner 已由 route 唯一确定 |
 | [loop.md](loop.md) | 分级、命令、验证与合入；对用户汇报见根 `AGENTS.md` §5 | ~148 | 未到验证/收束；FAST_PATCH 只看 §1+§3 |
