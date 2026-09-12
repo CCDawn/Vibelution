@@ -10,8 +10,8 @@ import type { ComposerQueueItem } from "../../components/conversation/composerFo
 import type { TranslationKey } from "../../i18n/dictionary";
 import {
   latestUserMessageId as deriveLatestUserMessageId,
+  resolveActiveEditTarget,
   resolveComposerDraftValue,
-  resolveLatestEditTarget,
 } from "../chatComposerState";
 import type { ComposerImageAttachment } from "./chatComposerSubmitModel";
 import {
@@ -146,7 +146,10 @@ export function useChatComposerBridgeState({
           : `${activeImageInputModelLabel}'s image-input capability is not verified yet. Vibelution will try the request and retain diagnostics if it fails.`);
 
   const latestUserMessageId = useMemo(() => deriveLatestUserMessageId(detail?.messages), [detail?.messages]);
-  const resolvedEditTarget = resolveLatestEditTarget(activeEditTarget, latestUserMessageId);
+  const resolvedEditTarget = useMemo(
+    () => resolveActiveEditTarget(activeEditTarget, detail?.messages),
+    [activeEditTarget, detail?.messages],
+  );
   const activeDraftEffective = resolveComposerDraftValue(activeDraft, activeEditTarget, resolvedEditTarget);
 
   const submitMutationMatchesActiveSession =

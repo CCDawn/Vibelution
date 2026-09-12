@@ -237,9 +237,11 @@ export type OptimisticEditResubmitInput = {
 };
 
 /**
- * ChatGPT/Claude-style edit-resubmit: immediately rewrite the target user message
- * and drop every message after it so the timeline matches the operation before the
- * server round-trip. Callers should snapshot the previous detail for rollback.
+ * Branch-mode edit-resubmit: immediately rewrite the target user message and
+ * mark the session running, but keep the rest of the timeline in place. The
+ * server answers with a rebased snapshot whose authoritative window replaces
+ * the superseded tail, so the client never truncates locally. Callers should
+ * snapshot the previous detail for rollback.
  */
 export function applyOptimisticEditResubmit(
   detail: SessionDetail | undefined,
@@ -284,26 +286,12 @@ export function applyOptimisticEditResubmit(
     nextTarget.references = target.references;
   }
 
-  const nextMessages = [...messages.slice(0, targetIndex), nextTarget];
-  const truncatedCount = messages.length - nextMessages.length;
-  const previousWindow = detail.messageWindow;
-  const nextWindow = previousWindow
-    ? {
-        ...previousWindow,
-        returnedMessages: nextMessages.length,
-        totalMessages: Math.max(0, (previousWindow.totalMessages || messages.length) - truncatedCount),
-        newestMessageIndex: Math.max(
-          previousWindow.oldestMessageIndex || 0,
-          (previousWindow.newestMessageIndex || messages.length) - truncatedCount,
-        ),
-        hasLater: false,
-      }
-    : previousWindow;
+  const nextMessages = [...messages];
+  nextMessages[targetIndex] = nextTarget;
 
   return markSessionDetailRunning({
     ...detail,
     messages: nextMessages,
-    ...(nextWindow ? { messageWindow: nextWindow } : {}),
     updatedAt: new Date().toISOString(),
   });
 }
@@ -319,50 +307,16 @@ export type OptimisticRegenerateInput = {
 };
 
 /**
- * ChatGPT/Claude-style regenerate: keep the target user message and drop every
- * message after it so the timeline matches the operation before the server
- * round-trip. Callers should snapshot the previous detail for rollback.
+ * Branch-mode regenerate: mark the session running and keep the timeline.
+ * The superseded answer stays visible until the server snapshot swaps the
+ * active path; local truncation would drop the branch that the journal keeps.
+ * Callers should snapshot the previous detail for rollback.
  */
 export function applyOptimisticRegenerate(
   detail: SessionDetail | undefined,
-  input: OptimisticRegenerateInput,
+  _input: OptimisticRegenerateInput,
 ): SessionDetail | undefined {
-  if (!detail) {
-    return detail;
-  }
-
-  const messageId = String(input.messageId || "").trim();
-  const messages = detail.messages ?? [];
-  const targetIndex = messageId
-    ? messages.findIndex((message) => String(message.id || "").trim() === messageId)
-    : -1;
-
-  if (targetIndex < 0 || messages[targetIndex].role !== "user") {
-    return markSessionDetailRunning(detail);
-  }
-
-  const nextMessages = messages.slice(0, targetIndex + 1);
-  const truncatedCount = messages.length - nextMessages.length;
-  const previousWindow = detail.messageWindow;
-  const nextWindow = previousWindow
-    ? {
-        ...previousWindow,
-        returnedMessages: nextMessages.length,
-        totalMessages: Math.max(0, (previousWindow.totalMessages || messages.length) - truncatedCount),
-        newestMessageIndex: Math.max(
-          previousWindow.oldestMessageIndex || 0,
-          (previousWindow.newestMessageIndex || messages.length) - truncatedCount,
-        ),
-        hasLater: false,
-      }
-    : previousWindow;
-
-  return markSessionDetailRunning({
-    ...detail,
-    messages: nextMessages,
-    ...(nextWindow ? { messageWindow: nextWindow } : {}),
-    updatedAt: new Date().toISOString(),
-  });
+  return detail ? markSessionDetailRunning(detail) : detail;
 }
 
 function messageWindowIndex(message: ConversationMessage): number {
@@ -377,13 +331,13 @@ function messageLedgerSeq(detail: SessionDetail | undefined): number {
 }
 
 /**
- * Edit-resubmit and regenerate truncate the ledger and reissue the transcript
- * from the edit point, which shrinks the newest tail. When the incoming detail
- * carries a strictly newer ledger sequence and claims the newest tail
- * (`hasLater === false`), the server rebuilt the window: windowed messages it
- * no longer carries were removed and must not be resurrected from accumulated
- * client state. Equal or unknown sequences keep union semantics so stale or
- * out-of-order responses cannot delete live history.
+ * Branch rebase and head switch re-project the transcript from the fork point,
+ * which shortens the active tail. When the incoming detail carries a strictly
+ * newer ledger sequence and claims the newest tail (`hasLater === false`), the
+ * server rebuilt the window: windowed messages it no longer carries were
+ * superseded and must not be resurrected from accumulated client state. Equal
+ * or unknown sequences keep union semantics so stale or out-of-order responses
+ * cannot delete live history.
  */
 function authoritativeTruncationTail(previous: SessionDetail, next: SessionDetail): boolean {
   const nextWindow = next.messageWindow;

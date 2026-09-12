@@ -344,6 +344,7 @@ export function editResubmitSessionMessage(
   sessionId: string,
   payload: {
     messageId: string;
+    baseMessageId?: string;
     clientSubmissionId: string;
     content: string;
     contentUtf8Base64: string;
@@ -368,6 +369,7 @@ export function regenerateSessionMessage(
   sessionId: string,
   payload: {
     messageId: string;
+    baseMessageId?: string;
     clientSubmissionId: string;
     mentalModelEnabled?: boolean;
     runtimeStatusEnabled?: boolean;
@@ -376,6 +378,24 @@ export function regenerateSessionMessage(
 ): Promise<SessionDetail> {
   return fetchJson<SessionDetail>(
     `/api/sessions/${encodeURIComponent(sessionId)}/messages/regenerate`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+// The server re-projects the active path and publishes a full snapshot; the
+// client never computes branch trees, so this is a plain snapshot mutation.
+export function switchSessionHead(
+  sessionId: string,
+  payload: { nodeId: string },
+): Promise<SessionDetail> {
+  return fetchJson<SessionDetail>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/head`,
     {
       method: "POST",
       headers: {

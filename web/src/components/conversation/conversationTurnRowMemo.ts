@@ -52,6 +52,8 @@ export type ConversationTurnRowProps = {
   resolveTurnAvatar?: (message: ConversationMessage) => TurnAvatarResolution | undefined;
   onEditUserMessage?: (message: ConversationMessage) => void;
   onRegenerateAssistantMessage?: (message: ConversationMessage) => void;
+  onSwitchMessageVersion?: (message: ConversationMessage, targetNodeId: string) => void;
+  branchVersionSwitchDisabled?: boolean;
   regenerableAssistantMessageId?: string;
   regenerateDisabled?: boolean;
   regeneratePending?: boolean;
@@ -102,6 +104,8 @@ export function conversationTurnRowPropsAreEqual(
     && previous.resolveTurnAvatar === next.resolveTurnAvatar
     && previous.onEditUserMessage === next.onEditUserMessage
     && previous.onRegenerateAssistantMessage === next.onRegenerateAssistantMessage
+    && previous.onSwitchMessageVersion === next.onSwitchMessageVersion
+    && previous.branchVersionSwitchDisabled === next.branchVersionSwitchDisabled
     && previous.regenerableAssistantMessageId === next.regenerableAssistantMessageId
     && previous.regenerateDisabled === next.regenerateDisabled
     && previous.regeneratePending === next.regeneratePending

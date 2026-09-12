@@ -26,6 +26,8 @@ export type AgentMessage = {
   createdAt: string;
   streaming: boolean;
   turnId?: string;
+  /** Conversation branch id when the source message carries branch metadata. */
+  branchId?: string;
   source: AgentMessageSource;
   parts: AgentMessagePart[];
   metadata?: Record<string, unknown>;
