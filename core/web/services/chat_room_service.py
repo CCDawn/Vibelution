@@ -1502,6 +1502,15 @@ def start_chat_room_round(
         if isinstance(_model_invocation_receipt_authority, Mapping)
         else None
     )
+    operator_setup = (existing_room.get("config") or {}).get("operatorDiscussionAuthority")
+    if operator_setup is not None or (receipt_authority or {}).get("authorityKind") == "operator_discussion":
+        from core.web.services.team_workflow.operator_optimization.discussion_authority import validate_operator_authority
+
+        if not receipt_authority or receipt_authority != operator_setup:
+            raise ChatRoomValidationError("Operator room requires its frozen server authority")
+        validate_operator_authority(receipt_authority)
+        if existing_room.get("rounds"):
+            raise ChatRoomValidationError("Operator discussion already has its single logical round")
     if receipt_authority is None and _is_scoped_discussion_room(existing_room):
         # A workflow-scoped meeting room only exists for formal hypothesis
         # stages; its speaker turns must stay receipt-bound. Failing closed
@@ -1595,6 +1604,11 @@ def start_chat_room_round(
                 if background:
                     _release_chat_room_inflight()
                 raise
+            if operator_setup is not None and (
+                    room.get("rounds") or (room.get("config") or {}).get("operatorDiscussionAuthority") != receipt_authority):
+                if background:
+                    _release_chat_room_inflight()
+                raise ChatRoomValidationError("Operator discussion already has its single logical round or its authority changed")
             if list(room.get("participants") or []) != participant_seed:
                 if refresh_attempt == _CHAT_ROOM_PARTICIPANT_REFRESH_MAX_ATTEMPTS - 1:
                     if background:
@@ -2356,6 +2370,8 @@ def _execute_chat_room_round(
                 "_structuredChatRoomContext": room_context_snapshot is not None,
                 "_roomContextSnapshot": room_context_snapshot,
                 "_modelInvocationReceiptAuthority": receipt_authority,
+                "workflowRunId": str((receipt_authority or {}).get("workflowRunId") or ""),
+                "_operatorDiscussion": (receipt_authority or {}).get("authorityKind") == "operator_discussion",
                 "_speakerDeltaCapture": _speaker_delta_capture_enabled(
                     room,
                     round_payload,
@@ -3339,7 +3355,12 @@ def _prep_speaker_model_failure(
             prompt_build_ms=prompt_build_ms,
         )
     try:
-        _resolve_chat_room_agent_llm(agent)
+        if context.get("_operatorDiscussion"):
+            from core.web.services.team_workflow.research_runtime.meeting_model_route import resolve_meeting_speaker_llm
+
+            resolve_meeting_speaker_llm(agent, context, _resolve_chat_room_agent_llm)
+        else:
+            _resolve_chat_room_agent_llm(agent)
     except ChatRoomValidationError as exc:
         return _prep_speaker_failure_message(
             participant,
@@ -3920,6 +3941,9 @@ def _run_speaker_auto_continuations(
     """
 
     messages = [message]
+    if context.get("_operatorDiscussion"):
+        # One logical discussion has one native Turn per frozen seat.
+        return messages
     max_turns = _speaker_auto_continue_max_turns()
     if max_turns <= 0 or not _speaker_turn_needs_continue(message):
         # The knob is off (no continuation quota means no exhaustion concept)
@@ -4163,7 +4187,14 @@ def _run_one_speaker(
         structured_meeting_message = bool(context.get("_structuredMeetingMessage"))
         message_payload: dict[str, Any] | None = None
         context_payload: dict[str, Any] | None = None
-        if structured_meeting_message:
+        operator_payload = None
+        if context.get("_operatorDiscussion"):
+            from core.web.services.team_workflow.operator_optimization.discussion_output import validated_result
+
+            operator_message = validated_result(result)
+            operator_payload = operator_message.model_dump(mode="json")
+            content = operator_message.contribution
+        elif structured_meeting_message:
             raw_content = _result_full_visible_text(result)
             if not raw_content:
                 raw_content = _result_summary(result) or "No visible response."
@@ -4219,6 +4250,7 @@ def _run_one_speaker(
             "summary": summary,
             **({"messagePayload": message_payload} if message_payload is not None else {}),
             **({"contextPayload": context_payload} if context_payload is not None else {}),
+            **({"operatorDiscussionPayload": operator_payload} if operator_payload is not None else {}),
             **({"errorType": error_type} if error_type else {}),
             "timestamp": timestamp,
             **_case_message_metadata(context),
@@ -4730,6 +4762,8 @@ def promote_chat_room_formal_context(
 
 
 def _chat_room_stable_output_contract(context: Mapping[str, Any]) -> str:
+    if context.get("_operatorDiscussion"):
+        return "Return the bound operator discussion JSON object. Only the final experiment_planner may provide result; other participants set result to null."
     if not context.get("_structuredChatRoomContext"):
         return ""
     if context.get("_structuredMeetingMessage"):
@@ -4938,7 +4972,11 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
         ), session_service._session_tool_workspace_override(workspace):
             stage_started_at = _perf_counter()
             agent_runtime = session_service.create_chat_agent(workspace_path=workspace, config=agent_config)
-            if context.get("_structuredMeetingMessage"):
+            if context.get("_operatorDiscussion"):
+                from core.web.services.team_workflow.operator_optimization.discussion_output import output_contract
+
+                agent_runtime.set_turn_structured_output_contract(output_contract())
+            elif context.get("_structuredMeetingMessage"):
                 from core.web.services.team_workflow.meeting_message_payload import (
                     meeting_message_structured_output_contract,
                 )
@@ -5078,6 +5116,14 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
                     turn_identity=turn_identity,
                     receipts=meeting_receipts,
                 )
+                if context.get("_operatorDiscussion"):
+                    from core.web.services.team_workflow.operator_optimization.discussion_output import ingest_output
+
+                    finals = [outcome for outcome in meeting_outcomes if outcome.kind == "final_answer"]
+                    if len(finals) != 1:
+                        raise ValueError("Operator speaker must produce exactly one canonical final outcome")
+                    result = dict(result or {})
+                    result["operatorDiscussionPayload"] = ingest_output(finals[0].final_text)
     if agent_context is not None and agent_context.agent_id:
         stage_started_at = _perf_counter()
         record_agent_turn_result(
@@ -8108,6 +8154,15 @@ def _persist_chat_room_work_run(
         payload["kernel"] = kernel_trace
     active_run_id = round_id if normalized_status in RUNNING_ROUND_STATUSES else ""
     _work_run_store().persist_snapshot(RUN_KIND, payload, active_run_id=active_run_id)
+    authority = _safe_config(room.get("config")).get("operatorDiscussionAuthority")
+    if isinstance(authority, dict) and normalized_status not in RUNNING_ROUND_STATUSES:
+        from .team_workflow.research_runtime.completion_dependency import wake_meeting_completion
+        from .team_workflow.research_runtime.formal_write_runtime import get_write_store
+
+        get_write_store().submit(lambda uow: wake_meeting_completion(uow,
+            run_id=authority["workflowRunId"], node_run_id=authority["nodeRunId"],
+            room_id=payload["roomId"], round_id=round_id, now_ms=int(time.time() * 1000)),
+            force_flush=True).result(timeout=30)
 
 
 def _record_room_event(

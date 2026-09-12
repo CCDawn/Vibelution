@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 
-AdapterFamily = Literal["source_collection", "research_project"]
+AdapterFamily = Literal["source_collection", "research_project", "operator_discussion"]
 
 
 @dataclass(frozen=True)
@@ -44,6 +44,8 @@ PROJECT_NODE_TASKS: dict[str, str] = {
 
 
 def resolve_agent_task_adapter(node_id: str) -> AgentTaskAdapterSpec | None:
+    if node_id == "optimization_discussion":
+        return AgentTaskAdapterSpec(node_id, "operator_discussion", node_id, "experiment_planner")
     source = SOURCE_NODE_TASKS.get(node_id)
     if source is not None:
         stage_id, role_key = source
@@ -64,4 +66,4 @@ def resolve_agent_task_adapter(node_id: str) -> AgentTaskAdapterSpec | None:
 
 
 def all_agent_task_adapter_node_ids() -> tuple[str, ...]:
-    return tuple(sorted({*SOURCE_NODE_TASKS, *PROJECT_NODE_TASKS}))
+    return tuple(sorted({*SOURCE_NODE_TASKS, *PROJECT_NODE_TASKS, "optimization_discussion"}))

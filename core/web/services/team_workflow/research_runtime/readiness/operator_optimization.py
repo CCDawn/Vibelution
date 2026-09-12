@@ -11,6 +11,8 @@ def evaluate_operator_node(run, node, common, context) -> DomainVerdict:
             "operator_campaign_missing", "实验活动不可用", "无法回读本次运行所属的实验活动", category="scope",
         ),))
     failures = []
+    if node.nodeId == "optimization_knowledge":
+        failures.append(("operator_knowledge_not_implemented", "资料补齐执行尚未接入", "domain"))
     campaign = state["campaign"]
     if campaign["researchProjectId"] != run.project_id or campaign["teamId"] != run.team_id:
         failures.append(("operator_scope_mismatch", "实验活动与运行归属不一致", "scope"))
@@ -28,6 +30,8 @@ def evaluate_operator_node(run, node, common, context) -> DomainVerdict:
     if node.nodeId in {"optimization_discussion", "optimization_plan", "optimization_knowledge"}:
         if campaign["budget"]["modelCostLimit"] <= 0:
             failures.append(("operator_model_budget_empty", "模型与检索预算不足", "budget"))
+    if node.nodeId == "optimization_discussion" and not campaign["budget"].get("discussion"):
+        failures.append(("operator_discussion_budget_missing", "尚未配置讨论调用次数、token 预算与模型价目", "budget"))
     if node.nodeId != "operator_baseline" and not campaign["baselineRef"]:
         failures.append(("operator_baseline_missing", "优化轮次需要可回读的初始基线", "domain"))
     return DomainVerdict(

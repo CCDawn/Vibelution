@@ -378,6 +378,14 @@ class RealDomainPorts:
     def reserve_budget(
         self, *, action: PendingAction, estimate_tokens: int
     ) -> dict[str, Any]:
+        if action.node_id == "optimization_discussion":
+            from ..operator_optimization.discussion_authority import build_operator_meeting_authority
+            from ..operator_optimization.discussion_budget_runtime import reserve_discussion_budget
+
+            run = self._store.get_run(action.run_id)
+            authority = build_operator_meeting_authority(run.team_id, action.run_id,
+                node_run_id=action.node_run_id)
+            return reserve_discussion_budget(self._store, authority)
         from .budget_authority_adapter import (
             BudgetAuthorityError,
             reserve_budget_authority,
@@ -848,6 +856,13 @@ class RealDomainPorts:
         adapter_spec = resolve_agent_task_adapter(action.node_id)
         if adapter_spec is None:
             raise RuntimeError(f"agent node {action.node_id} has no task adapter")
+        if adapter_spec.family == "operator_discussion":
+            from ..operator_optimization.discussion_task import create_discussion_task
+
+            handle = create_discussion_task(self._store, action)
+            publish_agent_task_started_anchor(self._store, action=action,
+                binding=self.resolve_binding(action), handle=handle)
+            return handle
         snapshot = self._run_input_snapshot(action.run_id)
         if _bounded_agent_node_can_complete(
             action.node_id,
@@ -946,6 +961,11 @@ class RealDomainPorts:
         self, *, action: PendingAction, handle: AgentTaskHandle
     ) -> list[dict[str, str]] | AgentTurnResult:
         from .agent_turn_completion import complete_agent_turn_outputs
+
+        if action.node_id == "optimization_discussion":
+            from ..operator_optimization.discussion_task import execute_discussion_task
+
+            return execute_discussion_task(self._store, action, handle)
 
         if handle.observation_only:
             return AgentTurnResult(materialized_refs=(), handle=handle)

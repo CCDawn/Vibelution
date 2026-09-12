@@ -135,21 +135,23 @@ def enqueue_question_model_invocation_receipt(
         # commit together.  A failure in either rolls the whole transaction
         # back, so the next Agent iteration never observes an unreceipted
         # charge and a successful expensive call is never silently forgotten.
-        record_budget_usage_in_uow(
-            uow,
-            run_id=normalized_run,
-            node_run_id=node_run_id,
-            reservation_id=f"reservation-{node_run_id}",
-            invocation_id=invocation_id,
-            input_tokens=input_tokens,
-            cached_input_tokens=cached_input_tokens,
-            uncached_input_tokens=uncached_input_tokens,
-            output_tokens=output_tokens,
-            reasoning_tokens=reasoning_tokens,
-            tool_calls=1,
-            wall_clock_seconds=(latency_ms + 999) // 1000,
-            usage_estimated=False,
-        )
+        operator = (canonical_receipt.get("scope") or {}).get("workflowId") == "operator-optimization"
+        if operator:
+            from ..operator_optimization.model_budget import record_model_invocation_usage_in_uow
+
+            scope = canonical_receipt["scope"]
+            if scope.get("researchProjectId") != run.project_id or scope.get("teamId") != normalized_team:
+                raise ValueError("operator receipt project scope mismatch")
+            record_model_invocation_usage_in_uow(uow,
+                reservation={"reservationId": f"reservation-{node_run_id}",
+                    "runId": normalized_run, "nodeRunId": node_run_id},
+                invocation_id=invocation_id,
+                model_ref=(canonical_receipt.get("metadata") or {}).get("modelRef"),
+                input_tokens=input_tokens, output_tokens=output_tokens,
+                usage_known=(canonical_receipt.get("metadata") or {}).get("usageKnown") is True,
+                outcome=str(canonical_receipt["status"]), now_ms=timestamp)
+        else:
+            _record_token_usage(uow)
         existing = uow.repository.execute(
             "SELECT action_id, payload_json, status FROM outbox_actions "
             "WHERE idempotency_key = ?",
@@ -189,6 +191,22 @@ def enqueue_question_model_invocation_receipt(
         )
         return {"actionId": action_id, "status": "pending", "created": True}
 
+    def _record_token_usage(uow):
+        record_budget_usage_in_uow(
+            uow,
+            run_id=normalized_run,
+            node_run_id=node_run_id,
+            reservation_id=f"reservation-{node_run_id}",
+            invocation_id=invocation_id,
+            input_tokens=input_tokens,
+            cached_input_tokens=cached_input_tokens,
+            uncached_input_tokens=uncached_input_tokens,
+            output_tokens=output_tokens,
+            reasoning_tokens=reasoning_tokens,
+            tool_calls=1,
+            wall_clock_seconds=(latency_ms + 999) // 1000,
+            usage_estimated=False,
+        )
     return dict(store.submit(mutate, force_flush=True).result(timeout=30))
 
 

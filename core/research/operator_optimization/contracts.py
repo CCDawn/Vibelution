@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from .candidate import Contract, CudaCandidateRef, Digest, Identity, Text
+from .model_budget_contracts import OperatorDiscussionBudget
 
 
 class ArtifactRef(Contract):
@@ -44,6 +45,7 @@ class CampaignBudget(Contract):
     trialTimeoutSeconds: int = Field(300, ge=1, le=3600, strict=True)
     finalValidationFraction: float = Field(0.2, gt=0, lt=1)
     authorized: bool = False
+    discussion: OperatorDiscussionBudget | None = None
 
 
 class OptimizationHypothesis(Contract):
