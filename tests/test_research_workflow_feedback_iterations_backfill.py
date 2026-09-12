@@ -644,3 +644,76 @@ def test_sweep_skips_authority_owned_by_another_pipeline(monkeypatch) -> None:
         "feedback_iteration_authority_owned_elsewhere"
     ]
     assert len(store.rows) == 1
+
+
+def test_sweep_memoizes_blocked_attempt_until_round_evidence_changes(
+    monkeypatch,
+) -> None:
+    """The per-second sweep must not replay an identical blocked attempt."""
+
+    monkeypatch.setattr(chain, "_FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO", {})
+    store = _patch_store(monkeypatch)
+    rounds = _production_chain()
+    rounds[3] = _round_record(4, actual=False)
+    monkeypatch.setattr(
+        chain,
+        "_question_hypothesis_rounds",
+        lambda _team_id, _question: rounds,
+    )
+    from core.web.services.team_workflow.research_runtime import (
+        formal_read_runtime,
+        runtime_factory,
+    )
+
+    monkeypatch.setattr(
+        formal_read_runtime,
+        "get_query_service",
+        lambda: SimpleNamespace(
+            list_runs=lambda **_kwargs: {
+                "runs": [
+                    {
+                        "runId": _FORMAL_RUN_ID,
+                        "questionId": _QUESTION_ID,
+                        "status": "blocked",
+                    }
+                ]
+            }
+        ),
+    )
+    ledger_store = SimpleNamespace(
+        get_run=lambda run_id: SimpleNamespace(
+            input_snapshot_json=json.dumps({"sourceCollectionRunId": _AUTHORITY_ID})
+        ),
+        latest_attempt=lambda run_id, node_id: SimpleNamespace(
+            node_run_id=f"nr-{run_id}-{node_id}-a1"
+        ),
+    )
+    monkeypatch.setattr(
+        runtime_factory,
+        "production_workflow_runtime",
+        lambda: SimpleNamespace(store=ledger_store),
+    )
+
+    first = chain.auto_backfill_missing_feedback_iterations(
+        _TEAM_ID, question_id=_QUESTION_ID
+    )
+    assert first["status"] == "blocked"
+    assert first["blocked"] == 1
+
+    second = chain.auto_backfill_missing_feedback_iterations(
+        _TEAM_ID, question_id=_QUESTION_ID
+    )
+    assert second["status"] == "skipped"
+    assert second["blocked"] == 0
+    assert second["skipped"] == 1
+    assert second["runs"][0]["reason"] == "blocked_backfill_recently_attempted"
+    assert store.rows == []
+
+    # New round evidence invalidates the memo and the repair runs again.
+    rounds[3] = _round_record(4, actual=True)
+    third = chain.auto_backfill_missing_feedback_iterations(
+        _TEAM_ID, question_id=_QUESTION_ID
+    )
+    assert third["status"] == "written"
+    assert third["written"] == _CHAIN_LENGTH
+    assert len(store.rows) == _CHAIN_LENGTH

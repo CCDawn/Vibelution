@@ -6981,6 +6981,53 @@ def backfill_feedback_iterations_from_round_chain(
     return summary
 
 
+_FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO: dict[str, tuple[str, float]] = {}
+_FEEDBACK_ITERATION_BACKFILL_BLOCKED_TTL_SECONDS = 30 * 60.0
+_FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO_MAX_ENTRIES = 256
+
+
+def _feedback_iteration_rounds_fingerprint(rounds: list[dict[str, Any]]) -> str:
+    """Stable identity of the evidence a backfill attempt would replay."""
+
+    canonical = json.dumps(rounds, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:20]
+
+
+def _feedback_iteration_backfill_recently_blocked(
+    run_id: str, fingerprint: str
+) -> bool:
+    """True when this run was blocked before on the same round evidence.
+
+    The recovery sweep ticks every second; a blocked backfill can only change
+    when the question's round chain changes (or a write succeeds elsewhere).
+    Re-attempting identical evidence only re-reads the ledger and re-logs the
+    same warning, so the memo bounds that churn and expires after a TTL in
+    case a future invalidation path is missed.
+    """
+
+    entry = _FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO.get(run_id)
+    if entry is None:
+        return False
+    blocked_fingerprint, blocked_at = entry
+    if blocked_fingerprint != fingerprint:
+        return False
+    if time.monotonic() - blocked_at > _FEEDBACK_ITERATION_BACKFILL_BLOCKED_TTL_SECONDS:
+        _FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO.pop(run_id, None)
+        return False
+    return True
+
+
+def _remember_feedback_iteration_backfill_blocked(
+    run_id: str, fingerprint: str
+) -> None:
+    if (
+        len(_FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO)
+        >= _FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO_MAX_ENTRIES
+    ):
+        _FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO.clear()
+    _FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO[run_id] = (fingerprint, time.monotonic())
+
+
 def auto_backfill_missing_feedback_iterations(
     team_id: str,
     *,
@@ -6999,7 +7046,10 @@ def auto_backfill_missing_feedback_iterations(
     the write goes through
     :func:`backfill_feedback_iterations_from_round_chain` (fail-closed,
     idempotent — a second pass replays byte-identical evidence and writes
-    nothing new).  Nothing here raises: one broken run is isolated and every
+    nothing new).  A blocked outcome is memoized per run against the round
+    chain fingerprint for a bounded TTL: the per-second recovery sweep must
+    not grind the ledger with identical failed attempts and warning spam.
+    Nothing here raises: one broken run is isolated and every
     non-trivial outcome lands as a
     ``hypothesis_first.auto_backfill_feedback_iterations`` scene event plus a
     ``logger.warning``.
@@ -7054,6 +7104,7 @@ def auto_backfill_missing_feedback_iterations(
         summary["reason"] = "rounds_unreadable"
         summary["error"] = str(exc)[:400]
         return summary
+    fingerprint = _feedback_iteration_rounds_fingerprint(rounds)
     store = runtime.store
     for run in target_runs:
         run_id = str(run.get("runId") or "").strip()
@@ -7065,6 +7116,18 @@ def auto_backfill_missing_feedback_iterations(
             "questionId": normalized_question_id,
             "runId": run_id,
         }
+        if _feedback_iteration_backfill_recently_blocked(run_id, fingerprint):
+            summary["skipped"] += 1
+            summary["runs"].append(
+                {
+                    "runId": run_id,
+                    "status": "skipped",
+                    "reason": "blocked_backfill_recently_attempted",
+                    "blockerCodes": [],
+                    "rounds": 0,
+                }
+            )
+            continue
         try:
             record = store.get_run(run_id)
             snapshot = json.loads(
@@ -7116,6 +7179,7 @@ def auto_backfill_missing_feedback_iterations(
         }
         summary["runs"].append(outcome)
         if result_status == "written":
+            _FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO.pop(run_id, None)
             summary["written"] += int(result.get("written") or 0)
             summary["status"] = "written"
             _record_scene_event(
@@ -7128,6 +7192,7 @@ def auto_backfill_missing_feedback_iterations(
                 },
             )
         elif result_status == "blocked":
+            _remember_feedback_iteration_backfill_blocked(run_id, fingerprint)
             summary["blocked"] += 1
             if summary["status"] != "written":
                 summary["status"] = "blocked"
