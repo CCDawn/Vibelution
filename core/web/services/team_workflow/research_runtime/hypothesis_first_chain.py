@@ -2142,6 +2142,164 @@ def _auto_redispatch_superseded_reviews(
 
 
 # ---------------------------------------------------------------------------
+# manual round-failure recovery (human-authorized, async accept)
+#
+# The structured failure ledger (``hypothesis_round_failures``) is the one
+# place that knows which round generations still could not finish after the
+# bounded auto-advance retries.  The workspace recovery panel turns those open
+# traces into per-row one-click retries; the browser must not hold an HTTP
+# worker for the review-LLM minutes of a regeneration, so the route accepts
+# the confirmed request, marks the failure in flight, and lets a daemon worker
+# run the same command path the auto sweep uses (``regenerate_hypothesis_round``
+# plus the manual re-dispatch fallback).  Success resolves the open traces
+# through the existing command path; the panel just refetches the ledger.
+# ---------------------------------------------------------------------------
+
+_MANUAL_RECOVERY_INFLIGHT: dict[str, object] = {}
+
+
+def _manual_recovery_meeting_id(record: Mapping[str, Any]) -> str:
+    for item in list(record.get("meetingRoundIds") or []):
+        candidate = str(item or "").strip()
+        if candidate:
+            return candidate
+    return str(record.get("roundId") or "").strip()
+
+
+def request_round_failure_recovery(
+    team_id: str, failure_id: str, *, _worker: Any = None
+) -> dict[str, Any]:
+    """Accept one confirmed manual retry of an open round failure trace.
+
+    Returns ``accepted`` (a background worker owns the long review-LLM path),
+    ``in_flight`` (the same failure is already retrying), ``not_found``
+    (unknown or already resolved trace) or ``not_retryable`` (a pure fan-in
+    wait: closing the siblings advances it, so a button would mislead).
+    """
+
+    from core.web.services.team_workflow import hypothesis_rounds
+
+    normalized_failure_id = str(failure_id or "").strip()
+    if not normalized_failure_id:
+        return {"status": "not_found", "failureId": normalized_failure_id}
+    listing = hypothesis_rounds.list_hypothesis_round_failures(
+        team_id, unresolved_only=True
+    )
+    record = next(
+        (
+            item
+            for item in list(listing.get("failures") or [])
+            if isinstance(item, Mapping)
+            and str(item.get("failureId") or "") == normalized_failure_id
+        ),
+        None,
+    )
+    if record is None:
+        return {"status": "not_found", "failureId": normalized_failure_id}
+    if str(record.get("status") or "") == "blocked":
+        return {
+            "status": "not_retryable",
+            "failureId": normalized_failure_id,
+            "reasonCode": "fan_in_waiting",
+        }
+    meeting_id = _manual_recovery_meeting_id(record)
+    if not meeting_id:
+        return {
+            "status": "not_retryable",
+            "failureId": normalized_failure_id,
+            "reasonCode": "missing_meeting_round",
+        }
+    token = object()
+    if _MANUAL_RECOVERY_INFLIGHT.setdefault(normalized_failure_id, token) is not token:
+        return {
+            "status": "in_flight",
+            "failureId": normalized_failure_id,
+            "questionId": str(record.get("questionId") or ""),
+        }
+    worker = _worker or _run_round_failure_recovery
+    try:
+        thread = threading.Thread(
+            target=worker,
+            args=(team_id, dict(record), token),
+            name=f"round-failure-recovery:{normalized_failure_id}",
+            daemon=True,
+        )
+        thread.start()
+    except Exception:
+        if _MANUAL_RECOVERY_INFLIGHT.get(normalized_failure_id) is token:
+            _MANUAL_RECOVERY_INFLIGHT.pop(normalized_failure_id, None)
+        raise
+    return {
+        "status": "accepted",
+        "failureId": normalized_failure_id,
+        "questionId": str(record.get("questionId") or ""),
+        "meetingRoundId": meeting_id,
+    }
+
+
+def _run_round_failure_recovery(
+    team_id: str, record: Mapping[str, Any], token: object
+) -> None:
+    """Run one accepted manual recovery on the background worker.
+
+    Best-effort by contract: every outcome lands as one
+    ``hypothesis_first.manual_recovery`` scene event and the inflight marker is
+    always released; the ledger stays the single authority the panel refetches.
+    """
+
+    failure_id = str(record.get("failureId") or "")
+    meeting_id = _manual_recovery_meeting_id(record)
+    outcome = "failed"
+    reason = ""
+    try:
+        try:
+            result = regenerate_hypothesis_round(
+                team_id, meeting_id, trigger="manual_recovery"
+            )
+        except Exception as exc:  # noqa: BLE001 - worker never raises
+            reason = f"{type(exc).__name__}: {exc}"[:300]
+            result = {}
+        else:
+            status = str(result.get("status") or "")
+            superseded_ids = [
+                str(item or "").strip()
+                for item in list(result.get("supersededCandidateIds") or [])
+                if str(item or "").strip()
+            ]
+            if status == "waiting_for_sibling_reviews" and superseded_ids:
+                selection_id = str(
+                    result.get("selectionId") or record.get("selectionId") or ""
+                ).strip()
+                try:
+                    retry_review_dispatch(team_id, selection_id, superseded_ids)
+                except Exception as exc:  # noqa: BLE001 - worker never raises
+                    reason = f"{type(exc).__name__}: {exc}"[:300]
+                else:
+                    outcome = "redispatched"
+            elif status in {"created", "reused"}:
+                outcome = "resolved"
+            else:
+                outcome = "waiting"
+                reason = status or "not_ready"
+    finally:
+        if _MANUAL_RECOVERY_INFLIGHT.get(failure_id) is token:
+            _MANUAL_RECOVERY_INFLIGHT.pop(failure_id, None)
+        _record_scene_event(
+            "hypothesis_first.manual_recovery",
+            outcome=outcome,
+            level="warning" if outcome == "failed" else "info",
+            fields={
+                "teamId": str(team_id or ""),
+                "failureId": failure_id,
+                "questionId": str(record.get("questionId") or ""),
+                "meetingRoundId": meeting_id,
+                "status": outcome,
+                "reason": reason,
+            },
+        )
+
+
+# ---------------------------------------------------------------------------
 # claim belief hard gate (R2.2, fail-closed)
 #
 # The formal selection/convergence authorities of this chain consume the

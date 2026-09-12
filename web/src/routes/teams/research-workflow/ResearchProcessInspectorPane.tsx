@@ -43,6 +43,7 @@ import {
 } from "./knowledgeSideflowCanvasRegion";
 import { NodeKnowledgeCollectionSection } from "./NodeKnowledgeCollectionSection";
 import { KnowledgeChildNodeInspector, KnowledgeChildReadPanel } from "./KnowledgeChildNodeInspector";
+import { ResearchWorkflowRecoveryPanel } from "./ResearchWorkflowRecoveryPanel";
 import {
   shouldHideSourceFindingStart,
   type HypothesisFirstNextAction,
@@ -239,6 +240,7 @@ export function ResearchProcessInspectorPane(props: {
             ? { runId, questionId: questionId || scope.questionId, node: nodeId || null, panel: "node" }
             : { questionId: questionId || scope.questionId, panel: "question" })}
         />
+        <ResearchWorkflowRecoveryPanel teamId={scope.teamId} lang={lang} />
       </div>
     );
   }
