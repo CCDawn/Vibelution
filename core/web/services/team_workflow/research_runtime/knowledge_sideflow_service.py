@@ -773,6 +773,8 @@ def record_knowledge_sideflow_child_success(
         and invocation.package_content_hash
     ):
         # Crash replay: the terminal tx already committed once.
+        from ..operator_optimization.knowledge_wait import wake_knowledge_child
+        wake_knowledge_child(uow, invocation.invocation_id, now_ms)
         return None
 
     package_row = uow.repository.execute(
@@ -800,6 +802,8 @@ def record_knowledge_sideflow_child_success(
                 ensure_ascii=False,
             ),
         )
+        from ..operator_optimization.knowledge_wait import wake_knowledge_child
+        wake_knowledge_child(uow, invocation.invocation_id, now_ms)
         return None
 
     receipt_id = str(package_row[0])
@@ -1031,6 +1035,8 @@ def record_knowledge_sideflow_child_failure(
         ),
         error_json=json.dumps(error_payload, ensure_ascii=False),
     )
+    from ..operator_optimization.knowledge_wait import wake_knowledge_child
+    wake_knowledge_child(uow, invocation.invocation_id, now_ms)
     return invocation.invocation_id
 
 
@@ -1155,6 +1161,10 @@ def absorb_knowledge_result(
     if existing is not None:
         # Crash boundary ③: parent already absorbed; replay must not re-write.
         _record_absorb_replay(invocation_id, typed)
+        def wake_replay(uow) -> None:
+            from ..operator_optimization.knowledge_wait import wake_knowledge_child
+            wake_knowledge_child(uow, invocation_id, now())
+        store.submit(wake_replay, force_flush=True).result(timeout=30)
         return {"status": "already_absorbed", "dedupKey": typed.dedupKey}
 
     now_ms = now()
@@ -1190,6 +1200,8 @@ def absorb_knowledge_result(
                 occurred_at_ms=now_ms,
             )
         )
+        from ..operator_optimization.knowledge_wait import wake_knowledge_child
+        wake_knowledge_child(uow, invocation_id, now_ms)
 
     store.submit(mutate, force_flush=True).result(timeout=30)
     if notify_readiness is not None:
