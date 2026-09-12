@@ -26,6 +26,7 @@ from core.research.workflow.contracts import (
 from core.web.services import chat_room_service
 from core.web.services.team_service import TeamNotFoundError, TeamServiceError
 from core.web.services.team_workflow import (
+    challenge_question_retire,
     hypothesis_rounds,
     hypothesis_selection,
     meeting_rounds,
@@ -85,6 +86,9 @@ from .hypothesis_first_models import (
     MeetingSourceMessagesResponse,
     MeetingSummaryBeginPayload,
     MeetingSummaryDraftRequest,
+    QuestionExperimentRetirePayload,
+    QuestionExperimentRetirePreviewResponse,
+    QuestionExperimentRetireResponse,
     QuestionRunResetPayload,
     QuestionRunResetPreviewResponse,
     QuestionRunResetResponse,
@@ -227,6 +231,7 @@ _DOMAIN_ERRORS = (
     meeting_runtime.ResearchMeetingRuntimeError,
     hypothesis_rounds.ResearchHypothesisRoundError,
     hypothesis_first_chain.HypothesisFirstChainError,
+    challenge_question_retire.ChallengeQuestionRetireError,
     meeting_receipt_authority.MeetingReceiptAuthorityError,
 )
 
@@ -570,6 +575,50 @@ def team_workflow_hypothesis_question_reset(
         )
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.question_reset", team_id, exc)
+
+
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/hypothesis-first/questions/{question_id}/experiment-retire-preview",
+    response_model=QuestionExperimentRetirePreviewResponse,
+    response_model_exclude_unset=True,
+)
+def team_workflow_hypothesis_question_retire_preview(
+    team_id: str, question_id: str
+) -> dict:
+    """Read-only retire impact guard before removing an old experiment."""
+    try:
+        return challenge_question_retire.preview_question_retire(team_id, question_id)
+    except _DOMAIN_ERRORS as exc:
+        _map_domain_error("hypothesis_first.question_retire.preview", team_id, exc)
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/hypothesis-first/questions/{question_id}/experiment-retire",
+    response_model=QuestionExperimentRetireResponse,
+    response_model_exclude_unset=True,
+)
+def team_workflow_hypothesis_question_retire(
+    team_id: str,
+    question_id: str,
+    payload: QuestionExperimentRetirePayload,
+) -> dict:
+    """Retire one question's experiment across every question-owned store."""
+    try:
+        return challenge_question_retire.retire_question_experiment(
+            team_id,
+            question_id,
+            confirmation_question_id=payload.confirmationQuestionId,
+        )
+    except challenge_question_retire.ChallengeQuestionRetirePartialError as exc:
+        _raise_team_workflow_route_error(
+            "hypothesis_first.question_retire",
+            team_id,
+            exc,
+            status_code=500,
+            detail={"code": exc.code, "message": str(exc), "result": exc.result},
+        )
+    except _DOMAIN_ERRORS as exc:
+        _map_domain_error("hypothesis_first.question_retire", team_id, exc)
 
 
 # ---------------------------------------------------------------------------

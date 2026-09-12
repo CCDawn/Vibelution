@@ -1190,6 +1190,40 @@ def preview_question_reset(team_id: str, question_id: str) -> dict[str, Any]:
     }
 
 
+def question_reset_targets(team_id: str, question_id: str) -> dict[str, Any]:
+    """Read the run identities a question retire must widen the reset scope by.
+
+    The reset owns the working-artifact cleanup; a retire additionally removes
+    the question's registered runs, receipts and formal artifacts, so it must
+    know which run identities belong to the question before the reset rewrites
+    the ledgers.  Non-mutating.
+    """
+
+    from core.web.services.team_service import assert_team_exists
+
+    normalized_team_id = assert_team_exists(team_id)
+    snapshot = _question_reset_snapshot(normalized_team_id, question_id)
+    live_formal_runs = snapshot["liveFormalRuns"]
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "questionId": snapshot["questionId"],
+        "collectionRunIds": sorted(
+            str(value) for value in snapshot["collectionRunIds"] if str(value)
+        ),
+        "liveFormalRunIds": (
+            None
+            if live_formal_runs is None
+            else sorted(
+                str(run.get("runId") or "")
+                for run in live_formal_runs
+                if str(run.get("runId") or "")
+            )
+        ),
+        "formalRuntimeAvailable": live_formal_runs is not None,
+    }
+
+
 def reset_question_chain(
     team_id: str,
     question_id: str,

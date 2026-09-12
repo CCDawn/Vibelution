@@ -3360,6 +3360,114 @@ def repair_challenge_question_output_registration(
     }
 
 
+def required_deep_experiment_question_ids() -> set[str]:
+    """Public read of the frozen program's required deep-experiment questions."""
+
+    return _required_deep_experiment_question_ids()
+
+
+def list_challenge_question_run_records(
+    team_id: str, *, question_id: str
+) -> list[dict[str, Any]]:
+    """Read one question's immutable run index records for a retire preview."""
+
+    team_service.get_team(team_id)
+    normalized_question_id = str(question_id or "").strip().upper()
+    if not normalized_question_id:
+        raise ValueError("Question id is required.")
+    store = _load_store(team_id)
+    return [
+        deepcopy(item)
+        for item in store.get("records", [])
+        if isinstance(item, dict)
+        and str(item.get("questionId") or "").strip().upper() == normalized_question_id
+    ]
+
+
+def retire_challenge_question_runs(
+    team_id: str,
+    *,
+    question_id: str,
+    run_ids: set[str] | list[str],
+) -> dict[str, Any]:
+    """Remove one retired question's registered runs and their artifact files.
+
+    Only the explicitly listed run ids of this question are touched; a run
+    registered after the caller collected its targets is preserved.  Approved
+    runs are rejected so the caller cannot silently drop a submitted result.
+    """
+
+    team_service.get_team(team_id)
+    normalized_question_id = str(question_id or "").strip().upper()
+    target_run_ids = {
+        str(value or "").strip() for value in run_ids if str(value or "").strip()
+    }
+    if not normalized_question_id or not target_run_ids:
+        raise ValueError("Question id and run ids are required.")
+    removed_records: list[dict[str, Any]] = []
+    with _STORE_LOCK:
+        store = _load_store(team_id)
+        records = [item for item in store.get("records", []) if isinstance(item, dict)]
+        kept: list[dict[str, Any]] = []
+        for record in records:
+            question_matches = (
+                str(record.get("questionId") or "").strip().upper()
+                == normalized_question_id
+            )
+            run_matches = str(record.get("runId") or "").strip() in target_run_ids
+            if question_matches and run_matches:
+                if str(record.get("status") or "") == APPROVED_GATE_DECISION:
+                    raise ValueError(
+                        "已通过验收的正式运行不能退役；请先撤销该运行的人工验收记录。"
+                    )
+                removed_records.append(record)
+                continue
+            kept.append(record)
+        if not removed_records:
+            return {"removedRunIds": [], "removedFileCount": 0, "failedPaths": []}
+        store["records"] = kept
+        store["updatedAt"] = _utc_now()
+        _write_json(_store_path(team_id), store)
+    removed_run_ids: list[str] = []
+    failed_paths: list[str] = []
+    removed_file_count = 0
+    for record in removed_records:
+        question = str(record.get("questionId") or "").strip()
+        run_id = str(record.get("runId") or "").strip()
+        if not question or not run_id:
+            continue
+        removed_run_ids.append(run_id)
+        artifact = _artifact_path(team_id, question, run_id)
+        candidates = (
+            artifact,
+            _result_package_artifact_path(team_id, question, run_id),
+            artifact.with_name(f"{run_id}.citation-recheck.jsonl"),
+        )
+        for path in candidates:
+            try:
+                if path.is_file():
+                    path.unlink()
+                    removed_file_count += 1
+            except OSError:
+                failed_paths.append(str(path))
+    _prune_empty_question_run_directory(team_id, normalized_question_id)
+    return {
+        "removedRunIds": removed_run_ids,
+        "removedFileCount": removed_file_count,
+        "failedPaths": failed_paths,
+    }
+
+
+def _prune_empty_question_run_directory(team_id: str, question_id: str) -> None:
+    directory = _artifact_path(team_id, question_id, "probe").parent
+    try:
+        if not directory.is_dir() or any(directory.iterdir()):
+            return
+        directory.rmdir()
+    except OSError:
+        return
+
+
 def review_challenge_question_output(
     team_id: str,
     question_id: str,

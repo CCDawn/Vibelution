@@ -288,6 +288,63 @@ def list_workflow_artifacts(
     return scoped
 
 
+def remove_workflow_artifacts_for_runs(
+    team_id: str,
+    *,
+    workflow_run_ids: set[str] | list[str] = (),
+    source_collection_run_ids: set[str] | list[str] = (),
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Delete only artifacts whose run lineage matches a retired question.
+
+    Every store file is validated before the scoped rewrite (the same
+    fail-loud validation the reset staging path uses); rows outside the
+    retired run identities are preserved.  ``dry_run`` reports the exact same
+    counts without writing.
+    """
+
+    team = str(team_id or "").strip()
+    if not team:
+        raise ValueError("teamId is required")
+    wanted_workflow = {
+        str(value or "").strip() for value in workflow_run_ids if str(value or "").strip()
+    }
+    wanted_source = {
+        str(value or "").strip()
+        for value in source_collection_run_ids
+        if str(value or "").strip()
+    }
+    if not wanted_workflow and not wanted_source:
+        return {"removedCount": 0, "removedByKind": {}, "changedKinds": []}
+    removed_by_kind: dict[str, int] = {}
+    changed_kinds: list[str] = []
+    with _LOCK:
+        active_by_kind = _active_rows_by_kind(team)
+        for kind in sorted(active_by_kind):
+            kept: list[dict[str, Any]] = []
+            removed = 0
+            for row in active_by_kind[kind]:
+                workflow_run = str(row.get("workflowRunId") or "").strip()
+                source_run = str(row.get("sourceCollectionRunId") or "").strip()
+                if (workflow_run and workflow_run in wanted_workflow) or (
+                    source_run and source_run in wanted_source
+                ):
+                    removed += 1
+                    continue
+                kept.append(row)
+            if not removed:
+                continue
+            removed_by_kind[kind] = removed
+            changed_kinds.append(kind)
+            if not dry_run:
+                _write(_path(team, kind), kept)
+    return {
+        "removedCount": sum(removed_by_kind.values()),
+        "removedByKind": removed_by_kind,
+        "changedKinds": changed_kinds,
+    }
+
+
 def load_workflow_artifact_payload(
     kind: str,
     *,
