@@ -665,6 +665,7 @@ def get_chat_room_detail(
     room_id: str,
     *,
     reconcile: bool = True,
+    participant_index: bool = True,
 ) -> dict[str, Any] | None:
     """Return the full room detail payload.
 
@@ -673,6 +674,15 @@ def get_chat_room_detail(
     internal read-only chains (meeting-round bound rounds) use this so a
     sweep-driven read can neither write nor take the reconciliation cost.
     Interactive callers keep the default ``reconcile=True``.
+
+    ``participant_index=False`` (residual cost of defect 19) additionally
+    skips the participant refresh + repair pass.  That pass rebuilds session
+    summaries for every participant and deep-copies the index cache, which
+    under memory pressure costs tens of seconds per load and re-runs whenever
+    any chat state changed — the missing-digest sweep calls it twice per
+    meeting per pass.  Rounds-only readers (meeting-round bound rounds) need
+    neither the fresh summaries nor the repair, so they pass ``False`` and
+    keep the persisted participant entries in the payload.
     """
 
     started_at = _perf_counter()
@@ -704,23 +714,35 @@ def get_chat_room_detail(
         )
         return None
     stage_started_at = _perf_counter()
-    participant_indexes, participant_index_cache_hit, participant_index_timings = _participant_refresh_indexes(
-        participants=room.get("participants") if isinstance(room.get("participants"), list) else []
-    )
-    _append_chat_room_detail_timing(
-        phase_timings,
-        "participant_index.refresh",
-        stage_started_at,
-        cache_hit=participant_index_cache_hit,
-    )
-    phase_timings.extend(participant_index_timings)
+    if participant_index:
+        participant_indexes, participant_index_cache_hit, participant_index_timings = _participant_refresh_indexes(
+            participants=room.get("participants") if isinstance(room.get("participants"), list) else []
+        )
+        _append_chat_room_detail_timing(
+            phase_timings,
+            "participant_index.refresh",
+            stage_started_at,
+            cache_hit=participant_index_cache_hit,
+        )
+        phase_timings.extend(participant_index_timings)
+    else:
+        participant_index_cache_hit = False
+        _append_chat_room_detail_timing(
+            phase_timings,
+            "participant_index.skipped",
+            stage_started_at,
+        )
     stage_started_at = _perf_counter()
-    repaired = _repair_room_participants(
-        room,
-        session_summaries=participant_indexes["session_summaries"],
-        active_agents_by_id=participant_indexes["active_agents_by_id"],
-        active_agents_by_session_id=participant_indexes["active_agents_by_session_id"],
-        preserve_scoped_session_ids=_is_challenge_discussion_room(room),
+    repaired = (
+        _repair_room_participants(
+            room,
+            session_summaries=participant_indexes["session_summaries"],
+            active_agents_by_id=participant_indexes["active_agents_by_id"],
+            active_agents_by_session_id=participant_indexes["active_agents_by_session_id"],
+            preserve_scoped_session_ids=_is_challenge_discussion_room(room),
+        )
+        if participant_index
+        else False
     )
     _append_chat_room_detail_timing(phase_timings, "participant_repair", stage_started_at)
     if repaired:

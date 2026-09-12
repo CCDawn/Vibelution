@@ -153,8 +153,13 @@ REVIEW_DISPATCH_ATTEMPT_FAILURE_CAP = 8
 # is re-attempted automatically at most ``AUTO_REGENERATE_FAILURE_RETRY_
 # BUDGET`` times after its first failed trace; both then keep the structured
 # wait with the explicit operator command in ``retryHint`` instead of burning
-# one identical attempt (and one ledger row) per sweep pass.
+# one identical attempt (and one ledger row) per sweep pass.  The redispatch
+# budget counts every attempt that actually opened a meeting, not only the
+# superseded outcomes: a meeting that opened but still produced no closure
+# returns as another ``waiting_for_sibling_reviews`` pass, so only counting
+# failures let the same identity re-open forever.
 AUTO_REDISPATCH_SUPERSEDED_LIMIT = 2
+AUTO_REDISPATCH_CONSUMING_OUTCOMES = frozenset({"superseded", "succeeded"})
 AUTO_REGENERATE_FAILURE_RETRY_BUDGET = 1
 
 # Digest auto-approval (auto-advance, step zero): how long a digest may sit
@@ -2106,8 +2111,13 @@ def _auto_redispatch_superseded_reviews(
     eight days for a "last sibling close" that could never happen).  Bound:
     each (selection, candidate, current round) identity is re-dispatched
     automatically at most ``AUTO_REDISPATCH_SUPERSEDED_LIMIT`` times, counted
-    from the durable dispatch-attempt ledger; afterwards the structured wait
-    stays with the explicit operator hint.  Best-effort: nothing raises.
+    from the durable dispatch-attempt ledger.  Every attempt that actually
+    dispatched (``superseded`` or ``succeeded``) consumes budget: a meeting
+    that opened but produced no closure comes back through this sweep as
+    another ``waiting_for_sibling_reviews`` pass, so counting only
+    ``superseded`` outcomes let a chain re-open the same review meeting
+    forever (the SCI-117 loop).  Afterwards the structured wait stays with
+    the explicit operator hint.  Best-effort: nothing raises.
     """
 
     normalized_selection_id = str(selection_id or "").strip()
@@ -2131,7 +2141,7 @@ def _auto_redispatch_superseded_reviews(
         summary["error"] = str(exc)[:200]
         return summary
 
-    def superseded_attempt_count(candidate_id: str) -> int:
+    def auto_dispatch_attempt_count(candidate_id: str) -> int:
         identity = [
             item
             for item in _review_dispatch_attempts(
@@ -2153,12 +2163,12 @@ def _auto_redispatch_superseded_reviews(
             1
             for item in identity
             if int(item.get("roundIndex") or 1) == newest_round
-            and str(item.get("outcome") or "") == "superseded"
+            and str(item.get("outcome") or "") in AUTO_REDISPATCH_CONSUMING_OUTCOMES
         )
 
     eligible: list[str] = []
     for candidate_id in requested:
-        if superseded_attempt_count(candidate_id) >= AUTO_REDISPATCH_SUPERSEDED_LIMIT:
+        if auto_dispatch_attempt_count(candidate_id) >= AUTO_REDISPATCH_SUPERSEDED_LIMIT:
             summary["exhausted"] += 1
             continue
         eligible.append(candidate_id)

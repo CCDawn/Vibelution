@@ -7535,6 +7535,38 @@ def test_get_chat_room_detail_reconcile_false_skips_write_side_reconcile(tmp_pat
     assert len(reconcile_calls) == 1
 
 
+def test_get_chat_room_detail_participant_index_false_skips_refresh(tmp_path, monkeypatch):
+    """缺陷 19 残余成本：participant_index=False 的 rounds-only 读不重建
+    会话摘要索引、不修参与者；默认调用仍刷新一次。"""
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    room = chat_room_service.create_chat_room(title="参与者索引跳过群聊")
+
+    refresh_calls = []
+    original_refresh = chat_room_service._participant_refresh_indexes
+
+    def _counting_refresh(*, participants=None):
+        refresh_calls.append(participants)
+        return original_refresh(participants=participants)
+
+    monkeypatch.setattr(
+        chat_room_service, "_participant_refresh_indexes", _counting_refresh
+    )
+
+    detail = chat_room_service.get_chat_room_detail(
+        room["roomId"], reconcile=False, participant_index=False
+    )
+
+    assert refresh_calls == []
+    assert detail["roomId"] == room["roomId"]
+
+    chat_room_service.get_chat_room_detail(room["roomId"])
+
+    assert len(refresh_calls) == 1
+
+
 def test_chat_state_participant_index_signature_skips_journal_walk(tmp_path, monkeypatch):
     """缺陷 19：participant 索引签名不再逐会话触碰 turn journal（每会话一次
     跨进程文件锁）；签名取 conversation 展示字段——消息追加/updated_at 类
