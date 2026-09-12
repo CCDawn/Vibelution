@@ -4070,6 +4070,7 @@ export function ConversationView({
         </div>
       ) : null}
 
+      <div className={styles.timelineArea}>
       <div ref={timelineRef} className={styles.timeline}>
         {displayMessages.length === 0 && !activeTurnMessage ? (
           transcriptPending ? (
@@ -4637,6 +4638,7 @@ export function ConversationView({
           <span>{t("backToBottom")}</span>
         </VButton>
       ) : null}
+      </div>
 
       {toolApproval && !toolApprovalConsumedRef.current ? (
         <div className={styles.toolApprovalFallback} data-codex-tool-approval-fallback="true">
