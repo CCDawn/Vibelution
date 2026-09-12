@@ -2232,6 +2232,9 @@ def _start_source_collection_agent_task(
     source_run_id = str(input_snapshot.get("sourceCollectionRunId") or "").strip()
     if not source_run_id:
         objective = input_snapshot.get("researchObjectiveContract") or {}
+        from .knowledge_request_snapshot import collection_request_scope
+
+        request_scope = collection_request_scope(input_snapshot)
         started_run = start_source_collection_run(
             team_id,
             {
@@ -2250,6 +2253,7 @@ def _start_source_collection_agent_task(
                 # prompt-cache model; SC still creates canonical Session/Task/Turn.
                 "promptCachePolicy": {"requirement": "disabled"},
                 "scope": {
+                    **request_scope,
                     "workflowRunId": action.run_id,
                     "researchProjectId": project_id,
                 },

@@ -799,7 +799,7 @@ Chat Room 的专属结构化输出应复用现有 `set_turn_structured_output_co
 ### 20.2 本次查明的限制与下一批顺序
 
 1. 知识 child 仅复制部分 parent 输入，当前没有完整继承算子货币预算；普通 reserve 缺配置时可能进入通用 token 默认值。下一批需冻结 source roles 的模型价目、逐次准入和失败回执，将费用归回同一活动后才能打开新搜集入口。
-2. 通用 sideflow 主要保存检索与 requirements 的 hash；新算子请求还必须将可回读的请求引用传给子流，让实际 source tasks 消费本轮假设与缺口，不能只传 hash 后继续搜旧课题。
+2. 子流请求内容传递已按第 21 节补齐：完整消费请求进入 child 冻结快照与 collection scope，缺口进入查询词。算子专属费用身份及原生 source task 的回执接入仍未完成，不能因此开启付费搜集。
 3. 既有知识快照消费事件属于第一阶段 hypothesis fan-out。本批使用独立 `optimization_knowledge` 产物作为本轮消费关联，不伪造旧 selection 或第一阶段节点完成。
 4. 原 `experiment_api.create_experiment_plan()` 依赖旧 stage round/candidate 与阶段激活。本批复用底层合同/产物设施，不把独立算子流送入旧入口。
 5. 当前 runner 只接受受管的 `torch_softmax` / `triton_row_softmax` 与 warp 参数。计划不能将不存在的生成代码伪装成 `candidateRef`。规划 Agent 的生成、受管候选物化和完成回收尚未接入；readiness 对该节点明确阻断。
@@ -811,3 +811,27 @@ Chat Room 的专属结构化输出应复用现有 `set_turn_structured_output_co
 已对照本地知识库 `microsoft/RD-Agent` 固定版本 `32b3d395e73d9db5eee3fe9063d69aec0fdc83bd` 的 `RDLoop`，借鉴 hypothesis conversion 与 experiment execution 的职责分离。仍使用本项目 invocation 指纹、已接受知识包回读、规范 artifact store 和原生 system executor，未复制外部调度器。
 
 专项测试 `tests/test_operator_knowledge_plan.py` 使用真实本地规范产物与 SQLite Ledger 的 invocation/交付事件；知识内容回读为受控 fixture。覆盖无缺口复用、有缺口阻断、发现旧接受包并真实创建本轮复用 invocation、不同请求隔离、未交付、来源撤销、新付费 child 不被零费用接收、计划来源/预算/缺口拒绝、重复冻结、原生 system dispatcher 完成回执、产物回读及 readiness。既有 sideflow 回归仍验证普通建 child 的原语义。该证据不包含生产模型、真实知识搜集、GPU 或产品页面验收。
+
+## 21. 新资料搜集输入与回执接入检查点（2026-09-12）
+
+### 21.1 已实现的请求传递
+
+此前 `ensure_knowledge_invocation()` 接收完整 scope、search envelope、requirements 和 consumer context，但调用建 child 时仅传来源根；child 快照因此只保留指纹。`RealDomainPorts` 又只用父课题标题启动 collection，使本轮缺口没有进入检索计划。这是本批修复的实际断点。
+
+现在 child 创建前校验完整请求与 invocation 四个指纹相符，然后将 `knowledgeRequest` 纳入 child 快照 hash。消费上下文中已有本轮假设引用与内容 hash；不从消息 metadata 重建请求。重放使用同一 child，创建新 child 缺少完整请求时明确拒绝，不为旧 hash-only 创建行为加兼容分支。
+
+原生 source adapter 将该内容传入现有 collection scope，复用现有 `searchEnvelope`、`requirements` 和 `seedQueries`：证据缺口与检索关键词进入实际查询词生成函数，各 source role 的 assignment scope 继承同一请求。请求仅作为研究输入，不能覆盖真实 workflowRunId、项目身份或模型准入权限。
+
+### 21.2 仍需接通的费用与恢复路径
+
+- `session.worker._model_invocation_receipt_context()` 会回读规范 source stage task，是四个 source role 的统一服务端回执入口。source task factory 当前不保留一般任务的 receipt seed；只在 `_formal_task_authorities()` 添加字段不足以接通真实调用。
+- 保留 child 的 `challenge-cup-knowledge-sideflow` 身份及真实 Session/Task/Turn。现有 discussion binding 硬编码 `operator-optimization` / `optimization_discussion`，不得拿它冒充 source child；需要独立的、经服务端谱系校验的算子费用归属合同。
+- 每个真实 child NodeRun 使用现有货币账本独立预留，同一 campaign 汇总。不能把所有 source 节点绑在父节点一个 reservation 上，导致首个 source 完成就提前结算全体费用。需明确冻结知识搜集限额、价目及授权，不能落入通用 token 默认值。
+- 同时接入 LLM 每次重试准入、失败/未知消耗回执、成功 stream capture、receipt persistence 的算子账本路由，费用未明确时不得推进下一付费节点。普通第一阶段 source 任务沿用现有合同。
+- 现有 knowledge result recheck 在父 attempt 仍活动时只追加 revision event；还需接原 action 的持久化完成依赖和交付唤醒，不能重新创建 child 代替恢复。人工知识接受仍走既有 handoff。
+
+### 21.3 本批验收边界
+
+`tests/test_knowledge_request_snapshot.py` 使用真实 SQLite child 创建与重放，并检验原生 source adapter 输出到现有查询词生成函数；覆盖内容冻结、指纹不符、缺失输入及原生 collection scope 传递。复用本地 `source_collection.facade` 的 scope 设计与 `residual` 查询词入口，没有引入新的搜集调度器。
+
+本批不开放算子付费 child，不修改 readiness 费用阻断；模型费用桥、原生 source 完整会话、人工交付唤醒及真实模型/GPU 验收仍未完成。
