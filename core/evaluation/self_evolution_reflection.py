@@ -1,5 +1,13 @@
 # -*- coding: utf-8 -*-
-"""Bounded reflection records derived from self-evolution experiences."""
+"""Bounded reflection records derived from self-evolution experiences.
+
+命名澄清：本模块的 "reflection" 指**自进化的有界反思记录**
+（self_questioning / self_navigating / self_attributing，落盘
+`self_evolution/reflection/reflection.jsonl`，强制 candidate-only）。
+它**不是**监督进化 worktree 闭环里的 `_build_reflection`——那是把 Judge
+基线评分转成"改进提示"、发给原基线 Agent 会话的 prompt 载荷
+（见 `core/web/services/supervised_worktree_evolution_service.py`）。
+"""
 
 from __future__ import annotations
 
