@@ -194,6 +194,21 @@ SELF_EVOLUTION_AGENT_ROLES: tuple[dict[str, str], ...] = (
 )
 SELF_EVOLUTION_ROLE_KEYS = frozenset(str(item["role"]) for item in SELF_EVOLUTION_AGENT_ROLES)
 SELF_EVOLUTION_RETIRED_ROLE_KEYS = frozenset({"summarizer"})
+
+
+def self_evolution_role_direct_session_id(role_key: str) -> str:
+    """Stable direct-session domain for a fixed self-evolution role.
+
+    Fixed roles are background Agents: tool authorization requires a non-empty
+    sessionId (agent runtime -> approval context), and the id must stay stable
+    across repairs so the approval domain does not drift between runs. Mirrors
+    the knowledge-steward / code-delivery-audit direct-session pattern.
+    """
+
+    normalized = str(role_key or "").strip()
+    return f"agent-self-evolution-{normalized}-direct"
+
+
 _SELF_EVOLUTION_RISKY_WRITE_TEXT_MARKERS = (
     "修改",
     "修复",
@@ -852,6 +867,7 @@ def _ensure_self_evolution_role(role: dict[str, str]) -> dict[str, Any] | None:
     existing_llm_bindings = agent_directory_service.normalize_agent_llm_bindings(existing.get("llmBindings"))
     existing_dialogue_model_id = agent_directory_service.agent_dialogue_model_id({"llmBindings": existing_llm_bindings})
     desired_llm_bindings = existing_llm_bindings if existing_dialogue_model_id else seed_llm_bindings
+    desired_direct_session_id = self_evolution_role_direct_session_id(role_key)
     metadata = dict(existing.get("metadata") or {})
     expected_metadata = {
         "agentMode": "self_evolution",
@@ -871,11 +887,13 @@ def _ensure_self_evolution_role(role: dict[str, str]) -> dict[str, Any] | None:
         or str(existing.get("roleKey") or "").strip() != role_key
         or not existing_dialogue_model_id
         or str(existing.get("promptTemplateId") or "").strip() != prompt_template_id
+        or str(existing.get("directSessionId") or "").strip() != desired_direct_session_id
         or any(metadata.get(key) != value for key, value in expected_metadata.items())
     ):
         existing = agent_directory_service.update_agent_instance(
             str(existing.get("agentId") or ""),
             display_name=label,
+            direct_session_id=desired_direct_session_id,
             llm_bindings=desired_llm_bindings,
             primary_mode="self_evolution",
             role_key=role_key,
