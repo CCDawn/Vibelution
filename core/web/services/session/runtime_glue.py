@@ -2242,6 +2242,29 @@ def _session_turn_prepare_timing_log_fields(timings: dict[str, Any]) -> dict[str
     }
 
 
+def _session_turn_context_prepare_timings(
+    timings: dict[str, Any],
+    *,
+    history_assembly_ms: Any = None,
+    executor_wait_ms: Any = None,
+) -> dict[str, Any]:
+    """Durable per-turn pre-LLM timing record for the turn_context journal payload.
+
+    Chat turns cannot rely on runtime scenes or the CLI-written runtime snapshot,
+    so the journal payload is the authoritative place to explain pre-LLM latency.
+    """
+
+    s = _service()
+    payload = dict(s._session_turn_prepare_timing_log_fields(timings))
+    for key, value in (
+        ("historyAssemblyMs", history_assembly_ms),
+        ("executorWaitMs", executor_wait_ms),
+    ):
+        if isinstance(value, (bool, int, float)):
+            payload[key] = value
+    return payload
+
+
 def _session_workspace_relative_path(session_id: str) -> str:
     s = _service()
     return f"workspace/sessions/{s._safe_session_workspace_token(session_id)}"

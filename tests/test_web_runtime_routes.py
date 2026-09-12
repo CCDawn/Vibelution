@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 import shutil
 import sqlite3
 import threading
@@ -454,7 +455,7 @@ def test_runtime_summary_uses_light_active_session_summary(monkeypatch):
     monkeypatch.setattr(
         runtime_service,
         "get_active_session_summary",
-        lambda: {
+        lambda **_: {
             "id": "session-light",
             "title": "Light session",
             "agentId": "",
@@ -487,7 +488,7 @@ def test_runtime_summary_falls_back_when_agent_model_identity_fails(monkeypatch)
     monkeypatch.setattr(
         runtime_service,
         "get_active_session_summary",
-        lambda: {"agentId": "agent-model-broken", "currentPhase": "ready"},
+        lambda **_: {"agentId": "agent-model-broken", "currentPhase": "ready"},
     )
     monkeypatch.setattr(
         runtime_service,
@@ -555,7 +556,7 @@ def test_runtime_summary_ignores_unsafe_user_avatar_path(monkeypatch):
     assert payload["userProfile"]["avatarImageUrl"] == ""
 
 def test_runtime_summary_exposes_real_context_compression_snapshot(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
     monkeypatch.setattr(
         runtime_service,
         "_load_runtime_state",
@@ -624,7 +625,7 @@ def test_runtime_summary_prefers_ledger_context_compression_checkpoint(monkeypat
     monkeypatch.setattr(
         runtime_service,
         "get_active_session_summary",
-        lambda: {"id": "session-ledger-compression", "agentId": ""},
+        lambda **_: {"id": "session-ledger-compression", "agentId": ""},
     )
     loaded_session_ids: list[str] = []
 
@@ -659,7 +660,7 @@ def test_runtime_summary_prefers_ledger_context_compression_checkpoint(monkeypat
 
 
 def test_runtime_summary_uses_active_agent_context_compression_policy(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {"agentId": "agent-compression"})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {"agentId": "agent-compression"})
     monkeypatch.setattr(
         runtime_service,
         "_load_runtime_state",
@@ -729,7 +730,7 @@ def test_runtime_summary_uses_active_agent_context_compression_policy(monkeypatc
 
 
 def test_runtime_summary_keeps_applied_snapshot_but_marks_agent_policy_unmaterialized(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {"agentId": "agent-inherit"})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {"agentId": "agent-inherit"})
     monkeypatch.setattr(
         runtime_service,
         "_load_runtime_state",
@@ -784,7 +785,7 @@ def test_runtime_summary_prefers_current_phase_over_stale_task_progress(monkeypa
     monkeypatch.setattr(
         runtime_service,
         "get_active_session_summary",
-        lambda: {
+        lambda **_: {
             "title": "真实会话",
             "taskSummary": "继续前端开发",
             "currentPhase": "ready",
@@ -800,7 +801,7 @@ def test_runtime_summary_prefers_current_phase_over_stale_task_progress(monkeypa
 
 
 def test_runtime_summary_exposes_runtime_manager_workbench_state(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", dict)
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", dict)
     monkeypatch.setattr(
         runtime_service,
@@ -841,7 +842,7 @@ def test_runtime_summary_exposes_runtime_manager_workbench_state(monkeypatch):
 
 
 def test_runtime_summary_uses_light_runtime_manager_snapshot(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(
         runtime_service,
@@ -878,7 +879,7 @@ def test_runtime_summary_uses_light_runtime_manager_snapshot(monkeypatch):
 
 
 def test_runtime_summary_labels_launcher_control_surface_separately(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(standalone_launcher_service.desktop_session_store, "latest_active_workbench_projection", lambda: {})
     monkeypatch.setattr(
@@ -920,7 +921,7 @@ def test_runtime_summary_labels_launcher_control_surface_separately(monkeypatch)
 
 
 def test_runtime_summary_exposes_orphaned_browser_status(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(
         runtime_service,
@@ -960,7 +961,7 @@ def test_runtime_summary_exposes_orphaned_browser_status(monkeypatch):
 
 
 def test_runtime_summary_marks_missing_managed_window_as_partial(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(
         runtime_service,
@@ -1033,7 +1034,7 @@ def test_runtime_summary_uses_active_electron_workbench_session(tmp_path, monkey
         "DESKTOP_SESSION_DB_PATH",
         tmp_path / ".runtime" / "launcher" / "desktop_sessions.sqlite3",
     )
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", dict)
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", dict)
     monkeypatch.setattr(
         runtime_service,
@@ -1202,7 +1203,7 @@ def test_runtime_workbench_payload_reconciles_stale_closed_state_against_active_
 
 
 def test_runtime_lifecycle_proof_marks_ready_when_components_agree(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(
         runtime_service,
@@ -1260,7 +1261,7 @@ def test_runtime_lifecycle_proof_marks_ready_when_components_agree(monkeypatch):
 
 
 def test_runtime_lifecycle_proof_keeps_advisory_source_staleness_non_blocking(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(
         runtime_service,
@@ -1321,7 +1322,7 @@ def test_runtime_lifecycle_proof_keeps_advisory_source_staleness_non_blocking(mo
 
 
 def test_runtime_lifecycle_proof_does_not_mark_closed_with_active_work_runs(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(
         runtime_service,
@@ -1375,7 +1376,7 @@ def test_runtime_lifecycle_proof_does_not_mark_closed_with_active_work_runs(monk
 
 
 def test_runtime_lifecycle_proof_ignores_finished_needs_continue_work_run(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(runtime_service, "list_active_session_work_runs", lambda: [])
     finished_run = {
@@ -1506,7 +1507,7 @@ def test_autonomous_self_evolution_review_wait_does_not_block_launcher(monkeypat
 
 
 def test_runtime_lifecycle_proof_does_not_mark_closed_when_backend_port_is_still_owned(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(
         runtime_service,
@@ -1569,7 +1570,7 @@ def test_runtime_lifecycle_proof_does_not_mark_closed_when_backend_port_is_still
 
 
 def test_runtime_lifecycle_proof_does_not_mark_closed_with_residual_repo_processes(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(
         runtime_service,
@@ -1644,7 +1645,7 @@ def test_runtime_lifecycle_proof_does_not_mark_closed_with_residual_repo_process
 
 
 def test_runtime_lifecycle_proof_detects_unmanaged_frontend_dev_server(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(
         runtime_service,
@@ -1723,7 +1724,7 @@ def test_runtime_summary_exposes_tool_call_session_state(monkeypatch):
     monkeypatch.setattr(
         runtime_service,
         "get_active_session_summary",
-        lambda: {
+        lambda **_: {
             "title": "真实会话",
             "taskSummary": "继续前端开发",
             "currentPhase": "running",
@@ -1751,7 +1752,7 @@ def test_runtime_summary_exposes_thinking_session_state(monkeypatch):
     monkeypatch.setattr(
         runtime_service,
         "get_active_session_summary",
-        lambda: {
+        lambda **_: {
             "title": "真实会话",
             "taskSummary": "继续前端开发",
             "currentPhase": "running",
@@ -1778,7 +1779,7 @@ def test_runtime_summary_exposes_answering_session_state(monkeypatch):
     monkeypatch.setattr(
         runtime_service,
         "get_active_session_summary",
-        lambda: {
+        lambda **_: {
             "title": "真实会话",
             "taskSummary": "继续前端开发",
             "currentPhase": "running",
@@ -1805,7 +1806,7 @@ def test_runtime_summary_treats_stopping_session_as_active(monkeypatch):
     monkeypatch.setattr(
         runtime_service,
         "get_active_session_summary",
-        lambda: {
+        lambda **_: {
             "title": "真实会话",
             "taskSummary": "正在收束当前轮。",
             "currentPhase": "stopping",
@@ -1824,7 +1825,7 @@ def test_runtime_summary_marks_ready_session_as_needing_response(monkeypatch):
     monkeypatch.setattr(
         runtime_service,
         "get_active_session_summary",
-        lambda: {
+        lambda **_: {
             "title": "真实会话",
             "taskSummary": "继续前端开发",
             "currentPhase": "ready",
@@ -1843,7 +1844,7 @@ def test_runtime_summary_treats_needs_continue_as_ready_despite_stale_working_ru
     monkeypatch.setattr(
         runtime_service,
         "get_active_session_summary",
-        lambda: {
+        lambda **_: {
             "title": "GPT Pixel",
             "taskSummary": "已完成修复并通过验证；还可以继续提交。",
             "currentPhase": "needs_continue",
@@ -1876,7 +1877,7 @@ def test_runtime_summary_marks_failed_session_as_needing_response(monkeypatch):
     monkeypatch.setattr(
         runtime_service,
         "get_active_session_summary",
-        lambda: {
+        lambda **_: {
             "title": "真实会话",
             "taskSummary": "测试失败，需要你决定先修测试还是先回退。",
             "currentPhase": "failed",
@@ -1904,7 +1905,7 @@ def test_runtime_summary_ready_session_ignores_stale_runtime_error(monkeypatch):
     monkeypatch.setattr(
         runtime_service,
         "get_active_session_summary",
-        lambda: {
+        lambda **_: {
             "title": "真实会话",
             "taskSummary": "继续前端开发",
             "currentPhase": "ready",
@@ -1933,7 +1934,7 @@ def test_runtime_summary_exposes_latest_mental_state(monkeypatch):
     public_config["mental_model"] = {"enabled": True}
 
     monkeypatch.setattr(runtime_service, "load_public_config", lambda: copy.deepcopy(public_config))
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
 
     class DummyMentalModel:
@@ -1972,7 +1973,7 @@ def test_runtime_summary_reports_disabled_mental_model(monkeypatch):
     public_config["mental_model"] = {"enabled": False}
 
     monkeypatch.setattr(runtime_service, "load_public_config", lambda: copy.deepcopy(public_config))
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_manager_snapshot", lambda: {})
 
@@ -1987,7 +1988,7 @@ def test_runtime_summary_falls_back_to_mental_diagnosis_when_state_is_empty(monk
     public_config["mental_model"] = {"enabled": True}
 
     monkeypatch.setattr(runtime_service, "load_public_config", lambda: copy.deepcopy(public_config))
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
 
     class DummyMentalModel:
@@ -5306,3 +5307,143 @@ def test_spa_route_still_falls_back_to_index_html(tmp_path):
 
     assert response.status_code == 200
     assert "app shell" in response.text
+
+
+def test_summary_request_self_observation_marks_backend_open():
+    observed = runtime_service._observe_backend_from_summary_request(
+        {"desiredState": "open", "observedState": "open", "backendPortConflict": False}
+    )
+
+    assert observed["backendObserved"] is True
+    assert observed["backendAlive"] is True
+    assert observed["backendHealthy"] is True
+    assert observed["backendPortListening"] is True
+    assert observed["backendPid"] == os.getpid()
+    assert observed["backendPortOwnerPid"] == os.getpid()
+    assert observed["backendPortOwnerTrusted"] is True
+    assert observed["backendObservedSource"] == "summary_request"
+
+
+def test_summary_request_self_observation_keeps_closed_and_conflict_snapshots():
+    closed = runtime_service._observe_backend_from_summary_request(
+        {"desiredState": "closed", "backendObserved": False}
+    )
+    conflict = runtime_service._observe_backend_from_summary_request(
+        {"desiredState": "open", "backendPortConflict": True, "backendObserved": False}
+    )
+
+    assert closed.get("backendObserved") is False
+    assert "backendObservedSource" not in closed
+    assert conflict.get("backendObserved") is False
+    assert "backendObservedSource" not in conflict
+
+
+def test_lifecycle_proof_accepts_electron_managed_lifecycle_without_daemon():
+    proof = runtime_service._runtime_lifecycle_proof(
+        "zh",
+        {"daemonRunning": False, "managerPid": 0, "projectRoot": str(runtime_service.PROJECT_ROOT)},
+        {
+            "desiredState": "open",
+            "observedState": "open",
+            "windowProvider": "electron",
+            "windowManaged": True,
+            "browserWindowAlive": True,
+            "backendObserved": True,
+            "backendAlive": True,
+            "backendPid": 4242,
+        },
+        {"items": []},
+    )
+
+    manager_component = next(item for item in proof["components"] if item["id"] == "runtime_manager")
+    assert manager_component["state"] == "verified"
+    assert manager_component["ok"] is True
+    assert proof["overallState"] == "ready"
+
+
+def test_lifecycle_proof_still_requires_manager_for_non_electron_workbench():
+    proof = runtime_service._runtime_lifecycle_proof(
+        "zh",
+        {"daemonRunning": False, "managerPid": 0, "projectRoot": str(runtime_service.PROJECT_ROOT)},
+        {
+            "desiredState": "open",
+            "observedState": "open",
+            "browserWindowAlive": True,
+            "backendObserved": True,
+            "backendAlive": True,
+            "backendPid": 4242,
+        },
+        {"items": []},
+    )
+
+    manager_component = next(item for item in proof["components"] if item["id"] == "runtime_manager")
+    assert manager_component["state"] == "missing"
+    assert proof["overallState"] == "partial"
+
+
+def test_apply_fresh_session_metrics_prefers_live_session_projection():
+    stale_context = {"used": 21370, "limit": 262144, "source": "ui_runtime_state"}
+    stale_cache = {"source": "missing", "totalInputTokens": 160405663}
+    stale_usage = {"source": "provider_usage", "recordedAt": "2026-08-16T07:04:00Z"}
+    stale_last_cache = {"source": "provider_usage", "recordedAt": "2026-08-16T07:04:00Z"}
+
+    result = runtime_service._apply_fresh_session_metrics(
+        {
+            "contextUsage": {"used": 312, "limit": 262144, "messageCount": 4, "source": "conversation_ledger"},
+            "cacheUsage": {"source": "not_called", "updatedAt": "2026-09-12T00:53:03Z"},
+            "llmUsage": {"source": "not_called", "recordedAt": "2026-09-12T00:53:03Z"},
+            "lastContextComposition": {"turnId": "turn-1"},
+            "lastCacheComposition": {"turnId": "turn-1", "source": "not_called"},
+        },
+        context_usage=stale_context,
+        cache_usage=stale_cache,
+        last_llm_usage=stale_usage,
+        last_context_composition=None,
+        last_cache_composition=stale_last_cache,
+    )
+
+    assert result[0]["used"] == 312
+    assert result[0]["source"] == "conversation_ledger"
+    assert result[1]["source"] == "not_called"
+    assert result[2]["recordedAt"] == "2026-09-12T00:53:03Z"
+    assert result[3] == {"turnId": "turn-1"}
+    assert result[4]["turnId"] == "turn-1"
+
+
+def test_apply_fresh_session_metrics_keeps_snapshot_without_turn():
+    stale_context = {"used": 1}
+    stale_cache = {"source": "missing"}
+    stale_usage = {"source": "missing"}
+
+    result = runtime_service._apply_fresh_session_metrics(
+        {"contextUsage": {"used": 0, "messageCount": 0}, "cacheUsage": {}, "llmUsage": None},
+        context_usage=stale_context,
+        cache_usage=stale_cache,
+        last_llm_usage=stale_usage,
+        last_context_composition=None,
+        last_cache_composition=None,
+    )
+
+    assert result == (stale_context, stale_cache, stale_usage, None, None)
+
+
+def test_apply_fresh_session_metrics_passthrough_without_metrics():
+    stale_context = {"used": 5}
+    stale_cache = {"source": "missing"}
+    stale_usage = {"source": "missing"}
+    stale_last_cache = {"source": "missing"}
+
+    result = runtime_service._apply_fresh_session_metrics(
+        None,
+        context_usage=stale_context,
+        cache_usage=stale_cache,
+        last_llm_usage=stale_usage,
+        last_context_composition=None,
+        last_cache_composition=stale_last_cache,
+    )
+
+    assert result[0] is stale_context
+    assert result[1] is stale_cache
+    assert result[2] is stale_usage
+    assert result[3] is None
+    assert result[4] is stale_last_cache

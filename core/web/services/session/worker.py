@@ -2001,6 +2001,17 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                         "includedEventIds": list(context_assembly.included_event_ids),
                         "omittedEventCount": context_assembly.omitted_event_count,
                         "contextAssembly": context_assembly.to_composition_patch(),
+                        # Pre-LLM latency decomposition; the runtime summary and
+                        # conversation log can both go stale/missing for chat turns,
+                        # but the turn journal is the durable per-turn authority.
+                        "prepareTimings": s._session_turn_context_prepare_timings(
+                            prepare_timings,
+                            history_assembly_ms=history_assembly_ms,
+                            executor_wait_ms=s._elapsed_ms_between(
+                                context.get("_executor_submitted_at_monotonic"),
+                                prepare_started_at,
+                            ),
+                        ),
                     },
                     source="session_context_assembler",
                 )

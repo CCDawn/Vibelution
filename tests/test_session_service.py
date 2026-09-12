@@ -290,7 +290,7 @@ def test_active_session_summary_normalizes_only_the_active_conversation(tmp_path
     monkeypatch.setattr(
         session_service,
         "_build_session_summary",
-        lambda conversation, *, hydrate_agent: {"id": conversation["id"]},
+        lambda conversation, *, hydrate_agent, **__: {"id": conversation["id"]},
     )
 
     summary = session_service.get_active_session_summary()
@@ -988,6 +988,32 @@ def test_session_turn_prepare_timing_log_fields_are_bounded_and_non_sensitive():
         "llmKeyEnvAlreadyPresentCount": 2,
         "llmKeyEnvMissingCount": 3,
     }
+
+
+def test_session_turn_context_prepare_timings_extend_prepare_fields():
+    timings = session_service._session_turn_context_prepare_timings(
+        {
+            "totalPrepareMs": 12000,
+            "agentContextBuildMs": 61,
+            "agentContextBuild": {"nested": 1},
+            "syncedEnvNames": ["DO_NOT_LOG"],
+        },
+        history_assembly_ms=314,
+        executor_wait_ms=159,
+    )
+
+    assert timings == {
+        "totalPrepareMs": 12000,
+        "agentContextBuildMs": 61,
+        "historyAssemblyMs": 314,
+        "executorWaitMs": 159,
+    }
+
+    assert session_service._session_turn_context_prepare_timings(
+        {"totalPrepareMs": 1},
+        history_assembly_ms=None,
+        executor_wait_ms="not-a-number",
+    ) == {"totalPrepareMs": 1}
 
 
 def test_running_snapshot_throttle_skips_detail_hydration(monkeypatch):
