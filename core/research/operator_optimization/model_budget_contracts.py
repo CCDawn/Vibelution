@@ -1,4 +1,4 @@
-"""Explicit, currency-aware upper bounds for operator discussion admission."""
+"""Explicit, currency-aware upper bounds for operator model calls."""
 from typing import Literal
 
 from pydantic import Field
@@ -14,8 +14,12 @@ class OperatorModelPrice(Contract):
     outputPerMillion: float = Field(ge=0)
 
 
-class OperatorDiscussionBudget(Contract):
+class OperatorModelCallBudget(Contract):
     tokenLimit: int = Field(ge=1, strict=True)
     maxOutputTokensPerCall: int = Field(ge=1, strict=True)
-    maxCalls: int = Field(ge=2, strict=True)
+    maxCalls: int = Field(ge=1, strict=True)
     prices: tuple[OperatorModelPrice, ...] = Field(min_length=1)
+
+
+class OperatorDiscussionBudget(OperatorModelCallBudget):
+    maxCalls: int = Field(ge=2, strict=True)

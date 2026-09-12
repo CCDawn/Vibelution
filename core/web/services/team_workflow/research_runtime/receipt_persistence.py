@@ -135,7 +135,16 @@ def enqueue_question_model_invocation_receipt(
         # commit together.  A failure in either rolls the whole transaction
         # back, so the next Agent iteration never observes an unreceipted
         # charge and a successful expensive call is never silently forgotten.
-        operator = (canonical_receipt.get("scope") or {}).get("workflowId") == "operator-optimization"
+        scope = canonical_receipt.get("scope") or {}
+        knowledge = scope.get("accountingKind") == "operator_knowledge"
+        parent = uow.repository.get_run(run.parent_run_id) if run.parent_run_id else None
+        if (run.workflow_id == "challenge-cup-knowledge-sideflow" and parent is not None
+                and parent.workflow_id == "operator-optimization" and not knowledge):
+            raise ValueError("operator knowledge receipt accounting identity is missing")
+        operator = scope.get("workflowId") == "operator-optimization" or knowledge
+        if knowledge:
+            from ..operator_optimization.knowledge_budget_runtime import validate_knowledge_receipt_scope
+            validate_knowledge_receipt_scope(uow.repository, scope)
         if operator:
             from ..operator_optimization.model_budget import record_model_invocation_usage_in_uow
 
