@@ -479,6 +479,46 @@ class QuestionRunResetResponse(BaseModel):
     nextAction: dict[str, str] = Field(default_factory=dict)
 
 
+class QuestionExperimentRetirePayload(BaseModel):
+    """Typed confirmation for a destructive, question-scoped experiment retire."""
+
+    confirmationQuestionId: str = Field(..., min_length=1, max_length=200)
+
+
+class QuestionExperimentRetirePreviewResponse(BaseModel):
+    """Read-only preview of everything a retire would remove for one question."""
+
+    model_config = ConfigDict(extra="allow")
+
+    schemaVersion: int = 0
+    teamId: str = ""
+    questionId: str = ""
+    canRetire: bool = False
+    blockingReason: str = ""
+    chainReset: dict[str, Any] = Field(default_factory=dict)
+    project: dict[str, Any] = Field(default_factory=dict)
+    questionRuns: dict[str, Any] = Field(default_factory=dict)
+    formalRuns: dict[str, Any] = Field(default_factory=dict)
+    workflowArtifacts: dict[str, Any] = Field(default_factory=dict)
+    modelInvocationReceipts: dict[str, Any] = Field(default_factory=dict)
+
+
+class QuestionExperimentRetireResponse(BaseModel):
+    """Completed question-scoped experiment retire across every owner store."""
+
+    model_config = ConfigDict(extra="allow")
+
+    schemaVersion: int = 0
+    teamId: str = ""
+    questionId: str = ""
+    chainReset: dict[str, Any] = Field(default_factory=dict)
+    questionRuns: dict[str, Any] = Field(default_factory=dict)
+    workflowArtifacts: dict[str, Any] = Field(default_factory=dict)
+    modelInvocationReceipts: dict[str, Any] = Field(default_factory=dict)
+    project: dict[str, Any] = Field(default_factory=dict)
+    errors: list[str] = Field(default_factory=list)
+
+
 class AnomalyInboxResponse(BaseModel):
     """One anomaly-inbox projection (R4.3) for the operations console.
 

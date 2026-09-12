@@ -921,6 +921,51 @@ def test_question_run_reset_routes_preview_then_clear_one_question_chain(tmp_pat
     assert hypothesis_first_chain.list_hypothesis_candidates(team_id, question_id="SCI-096")["candidates"] == []
 
 
+def test_question_experiment_retire_routes_preview_then_retire(tmp_path, monkeypatch):
+    """The retire route wires the preview guard and the confirmed execution."""
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(hypothesis_first_chain, "PROJECT_ROOT", tmp_path)
+    client = _client()
+    team_id = client.post(
+        "/api/teams", json={"name": "Question retire route team"}
+    ).json()["teamId"]
+    hypothesis_first_chain._append_jsonl(
+        hypothesis_first_chain._storage_path(team_id),
+        {
+            "schemaVersion": 1,
+            "recordKind": hypothesis_first_chain.CANDIDATE_KIND,
+            "candidateId": "candidate-sci-097",
+            "questionId": "SCI-097",
+            "statement": "Stale candidate",
+        },
+    )
+
+    preview = client.get(
+        f"/api/teams/{team_id}/workflow-orchestration/hypothesis-first/questions/SCI-097/experiment-retire-preview",
+    )
+    protected = client.get(
+        f"/api/teams/{team_id}/workflow-orchestration/hypothesis-first/questions/SCI-096/experiment-retire-preview",
+    )
+    retire = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/hypothesis-first/questions/SCI-097/experiment-retire",
+        json={"confirmationQuestionId": "SCI-097"},
+    )
+
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["canRetire"] is True
+    assert preview.json()["questionRuns"]["recordCount"] == 0
+    assert protected.status_code == 200, protected.text
+    assert protected.json()["canRetire"] is False
+    assert "深度实验题" in protected.json()["blockingReason"]
+    assert retire.status_code == 200, retire.text
+    assert retire.json()["questionId"] == "SCI-097"
+    assert retire.json()["errors"] == []
+    assert hypothesis_first_chain.list_hypothesis_candidates(
+        team_id, question_id="SCI-097"
+    )["candidates"] == []
+
+
 def test_question_run_reset_allows_orphaned_pending_collection_request(tmp_path, monkeypatch):
     """A legacy request without a child run cannot be active work forever."""
 
