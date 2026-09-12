@@ -624,6 +624,19 @@ type ConversationMessageBase = {
   id: string;
   timestamp: string;
   metadata?: Record<string, unknown>;
+  /** Stable journal node id; unsafe to derive from the positional message id. */
+  nodeId?: string;
+  /** Branch metadata for the active path (sibling versions at this fork point). */
+  branch?: ConversationMessageBranchInfo;
+};
+
+export type ConversationMessageBranchInfo = {
+  branchId?: string;
+  parentNodeId?: string;
+  siblingCount?: number;
+  siblingIndex?: number;
+  siblingNodeIds?: string[];
+  active?: boolean;
 };
 
 export type UserConversationMessage = ConversationMessageBase & {
@@ -899,6 +912,10 @@ export type SessionMessageWindow = {
 export type SessionDetail = SessionSummary & {
   ledgerSeq?: number;
   activeTurnId?: string;
+  /** Active-path leaf node id; branch switching targets any node on a branch. */
+  activeLeafId?: string;
+  /** Branch id of the current active path. */
+  activeBranchId?: string;
   activeTask?: SessionActiveTask | null;
   defaultFileContext: string;
   previewTabs: string[];

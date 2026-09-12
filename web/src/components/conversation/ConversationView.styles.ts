@@ -1247,6 +1247,10 @@ const styles: Record<string, string> = {
     "vui-components-conversationview turnErrorType min-w-0 w-fit max-w-full rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--state-error)_10%,transparent)] px-1.5 py-0.5 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--state-error)]",
   turnIconButton: `vui-components-conversationview turnIconButton min-w-0 ${vuiOpaqueRowClass} p-2 inline-grid h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] place-items-center bg-[var(--vui-control-muted)] p-0 text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] shrink-0 text-[var(--fg-tertiary)]`,
   turnIconButtonActive: `vui-components-conversationview turnIconButtonActive min-w-0 ${vuiOpaqueRowClass} p-2 shrink-0 text-[var(--fg-tertiary)] ${vuiStateSelectedRowClass}`,
+  turnVersionSwitcher:
+    "vui-components-conversationview turnVersionSwitcher min-w-0 shrink-0 gap-1",
+  turnVersionLabel:
+    `vui-components-conversationview turnVersionLabel min-w-0 ${vuiOpaqueRowClass} p-2 inline-flex h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] items-center justify-center bg-[var(--vui-control-muted)] px-1.5 text-[var(--fg-secondary)] [font-size:var(--vui-font-xs)] font-medium tabular-nums leading-none`,
   turnMeta:
     "vui-components-conversationview turnMeta inline-flex min-w-0 items-center justify-start gap-2 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   turnMetaActions:

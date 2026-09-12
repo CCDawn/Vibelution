@@ -152,6 +152,8 @@ export type ConversationViewProps = {
   onRemoveComposerReference?: (referenceId: string) => void;
   onEditUserMessage?: (message: ConversationMessage) => void;
   onRegenerateAssistantMessage?: (message: ConversationMessage) => void;
+  onSwitchMessageVersion?: (message: ConversationMessage, targetNodeId: string) => void;
+  branchVersionSwitchDisabled?: boolean;
   regenerableAssistantMessageId?: string;
   regenerateDisabled?: boolean;
   regeneratePending?: boolean;
