@@ -1525,8 +1525,10 @@ def _seed_stored_round(round_id: str, *, meeting_ids: list[str]) -> dict[str, An
     return record
 
 
-def _seed_superseded_dispatch_attempt(candidate_id: str, attempt_number: int) -> None:
-    """Append one superseded review-dispatch attempt state for one identity."""
+def _seed_superseded_dispatch_attempt(
+    candidate_id: str, attempt_number: int, *, outcome: str = "superseded"
+) -> None:
+    """Append one review-dispatch attempt state for one identity."""
     path = chain._storage_path(_TEAM_ID)
     path.parent.mkdir(parents=True, exist_ok=True)
     chain._append_jsonl(
@@ -1539,8 +1541,8 @@ def _seed_superseded_dispatch_attempt(candidate_id: str, attempt_number: int) ->
             "selectionId": _REGEN_SELECTION_ID,
             "candidateId": candidate_id,
             "roundIndex": 2,
-            "lifecycle": "failed",
-            "outcome": "superseded",
+            "lifecycle": "failed" if outcome == "superseded" else "dispatched",
+            "outcome": outcome,
             "meetingRoundId": f"hf-review-dead-{attempt_number}",
             "updatedAt": _offset_iso(attempt_number),
             "createdAt": _offset_iso(attempt_number),
@@ -1903,6 +1905,36 @@ def test_auto_redispatch_superseded_reviews_stops_at_the_attempt_limit(
     _regen_env(tmp_path, monkeypatch)
     for attempt_number in (1, 2):
         _seed_superseded_dispatch_attempt(_REGEN_CANDIDATE_A, attempt_number)
+    calls: list[tuple[str, list[str]]] = []
+
+    monkeypatch.setattr(
+        chain,
+        "retry_review_dispatch",
+        lambda team_id, selection_id, candidate_ids: calls.append(
+            (selection_id, list(candidate_ids))
+        ),
+    )
+
+    result = chain._auto_redispatch_superseded_reviews(
+        _TEAM_ID,
+        selection_id=_REGEN_SELECTION_ID,
+        candidate_ids=[_REGEN_CANDIDATE_A],
+    )
+
+    assert result["exhausted"] == 1
+    assert result["redispatched"] == 0
+    assert calls == []
+
+
+def test_auto_redispatch_superseded_reviews_counts_successful_dispatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """已成功开会的 attempt 同样消耗重派发预算：会议开过但没闭合的身份
+    不许无限重开（SCI-117 循环）。"""
+    _regen_env(tmp_path, monkeypatch)
+    _seed_superseded_dispatch_attempt(_REGEN_CANDIDATE_A, 1)
+    _seed_superseded_dispatch_attempt(_REGEN_CANDIDATE_A, 2, outcome="succeeded")
     calls: list[tuple[str, list[str]]] = []
 
     monkeypatch.setattr(
