@@ -5,8 +5,8 @@ from typing import Literal
 
 from pydantic import Field
 
-from .candidate import CudaCandidateRef
-from .contracts import ArtifactRef, Contract, Identity, Text
+from .candidate import CudaCandidate, CudaCandidateRef
+from .contracts import ArtifactRef, Contract, Digest, Identity, Text
 from .measurement import MeasurementProtocolRef
 
 OPTIMIZATION_PLAN_ARTIFACT_KIND = "optimization_plan"
@@ -17,7 +17,28 @@ class EvidenceGapCheck(Contract):
     experimentCheck: Text
 
 
-class OptimizationPlan(Contract):
+class OptimizationPlanContent(Contract):
+    """Experiment decisions shared by model output and the frozen handoff."""
+
+    objective: Text
+    evaluation: Text
+    prediction: Text
+    counterevidence: Text
+    evidenceAssessment: Text
+    gapChecks: tuple[EvidenceGapCheck, ...] = Field(default=(), max_length=12)
+    trialCount: int = Field(ge=1, le=12, strict=True)
+    trialTimeoutSeconds: int = Field(ge=1, le=3600, strict=True)
+
+
+class OptimizationPlanProposal(OptimizationPlanContent):
+    """Untrusted decisions; artifact identities are assigned by the service."""
+
+    schemaVersion: Literal[1] = 1
+    inputHash: Digest
+    candidate: CudaCandidate
+
+
+class OptimizationPlan(OptimizationPlanContent):
     """The immutable execution handoff for one optimization round.
 
     ``protocolRef`` points to the frozen measurement protocol artifact.  The
@@ -35,14 +56,5 @@ class OptimizationPlan(Contract):
     baselineCandidateRef: CudaCandidateRef
     parentCandidateRef: CudaCandidateRef
     candidateRef: CudaCandidateRef
-    objective: Text
-    evaluation: Text
-    prediction: Text
-    counterevidence: Text
-    # A package can leave questions to be discriminated by the experiment.
-    evidenceAssessment: Text
-    gapChecks: tuple[EvidenceGapCheck, ...] = Field(default=(), max_length=12)
-    trialCount: int = Field(ge=1, le=12, strict=True)
-    trialTimeoutSeconds: int = Field(ge=1, le=3600, strict=True)
 
-__all__ = ["OPTIMIZATION_PLAN_ARTIFACT_KIND", "OptimizationPlan"]
+__all__ = ["OPTIMIZATION_PLAN_ARTIFACT_KIND", "OptimizationPlan", "OptimizationPlanProposal"]

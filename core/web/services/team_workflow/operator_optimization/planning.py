@@ -9,6 +9,7 @@ from core.research.operator_optimization.candidate import (
 from core.research.operator_optimization.contracts import ArtifactRef
 from core.research.operator_optimization.measurement import MeasurementProtocol
 from core.research.operator_optimization.plan import OptimizationPlan
+from core.research.operator_optimization.plan import OptimizationPlanContent
 
 from ..research_runtime.artifact_readback_registry import load_scoped_artifact_payload
 from .budget import budget_summary
@@ -65,43 +66,26 @@ def planning_input(team_id: str, run_id: str) -> dict:
     }
 
 
-def freeze_optimization_plan(
-    team_id: str, run_id: str, plan: OptimizationPlan
-) -> ArtifactRef:
-    """Publish only a fully reconstructible plan; no GPU or model is invoked."""
-    plan = OptimizationPlan.model_validate(plan)
-    inputs = planning_input(team_id, run_id)
-    campaign, record, _ = round_context(team_id, run_id)
-    if tuple(check.gap for check in plan.gapChecks) != tuple(
+def validate_plan_decisions(inputs: dict, decisions: OptimizationPlanContent) -> None:
+    """Check experiment decisions before any candidate is written."""
+    if tuple(check.gap for check in decisions.gapChecks) != tuple(
         inputs["knowledge"]["evidenceGaps"]
     ):
         raise CampaignConflict(
             "Plan must preserve every knowledge gap with an experiment check"
         )
-    for field in (
-        "optimizationCampaignId",
-        "roundId",
-        "hypothesisRef",
-        "knowledgeRef",
-        "protocolRef",
-        "baselineCandidateRef",
-        "parentCandidateRef",
-    ):
-        value = getattr(plan, field)
-        if hasattr(value, "model_dump"):
-            value = value.model_dump(mode="json")
-        if value != inputs[field]:
-            raise CampaignConflict(
-                f"Plan {field} differs from the frozen planning input"
-            )
+    budget = inputs["budget"]
     if (
-        plan.trialCount > campaign.budget.maxTrialsPerRound
-        or plan.trialTimeoutSeconds > campaign.budget.trialTimeoutSeconds
-        or plan.trialCount * plan.trialTimeoutSeconds
+        decisions.trialCount > budget["maxTrialsPerRound"]
+        or decisions.trialTimeoutSeconds > budget["trialTimeoutSeconds"]
+        or decisions.trialCount * decisions.trialTimeoutSeconds
         > inputs["remainingBudget"]["gpuTuningAvailableSeconds"]
     ):
         raise CampaignConflict("Plan exceeds the remaining trial budget")
-    for ref in (plan.baselineCandidateRef, plan.parentCandidateRef, plan.candidateRef):
+
+
+def validate_plan_candidates(team_id, run_id, campaign, record, refs) -> None:
+    for ref in refs:
         envelope = load_scoped_artifact_payload(
             "operator_candidate",
             team_id=team_id,
@@ -120,6 +104,34 @@ def freeze_optimization_plan(
         ):
             raise CampaignConflict("New plan candidate belongs to another round")
         ensure_current_source_hash(ref.candidate, ref.sourceHash)
+
+
+def freeze_optimization_plan(
+    team_id: str, run_id: str, plan: OptimizationPlan
+) -> ArtifactRef:
+    """Publish only a fully reconstructible plan; no GPU or model is invoked."""
+    plan = OptimizationPlan.model_validate(plan)
+    inputs = planning_input(team_id, run_id)
+    campaign, record, _ = round_context(team_id, run_id)
+    validate_plan_decisions(inputs, plan)
+    for field in (
+        "optimizationCampaignId",
+        "roundId",
+        "hypothesisRef",
+        "knowledgeRef",
+        "protocolRef",
+        "baselineCandidateRef",
+        "parentCandidateRef",
+    ):
+        value = getattr(plan, field)
+        if hasattr(value, "model_dump"):
+            value = value.model_dump(mode="json")
+        if value != inputs[field]:
+            raise CampaignConflict(
+                f"Plan {field} differs from the frozen planning input"
+            )
+    validate_plan_candidates(team_id, run_id, campaign, record,
+        (plan.baselineCandidateRef, plan.parentCandidateRef, plan.candidateRef))
     _, ref = _write_readback(
         team_id,
         run_id,

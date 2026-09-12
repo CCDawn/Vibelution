@@ -882,3 +882,25 @@ Chat Room 的专属结构化输出应复用现有 `set_turn_structured_output_co
 `test_operator_source_session.py` 使用隔离原生 source factory、canonical task、worker context、受控流式 provider 和真实 SQLite，覆盖模型冻结、一次收费、回执未交付阻断、同任务重放、错误身份和缺少 Ledger 时拒绝创建会话。`test_operator_knowledge_wait.py` 覆盖真实 SQLite 成功/失败/取消、重复 defer/wake、取消父流程、过期 attempt、未交付和先完成后等待的竞态。`test_operator_knowledge_plan.py` 验证正式 system executor 创建一个 child、相同请求重放及失败不另起 child，保留既有来源撤销和未授权预算拒绝测试。
 
 这些证据包含原生 finding 任务入口和分段交付恢复验证；没有调用生产模型、实际检索外部资料、操作人工接受界面、运行 GPU 或重启产品，不能称为一轮真实科研实验已跑通。下一步是接规划 Agent 的原生任务、受管候选物化与完成回收，再用显式预算验收完整搜集与实验迭代。
+
+## 24. 规划输出与受管候选物化（2026-09-13）
+
+本批完成规划任务的输出回收服务，尚未接通原生规划 Session。`optimization_plan` readiness 继续保持阻断；不能把本节的服务测试视为 Agent 已运行或流程节点已完成。
+
+### 24.1 输出和写入边界
+
+- `OptimizationPlanProposal` 只接收实验目标、评价方式、预测、反证、资料充分性判断、逐项缺口检查、试验次数/时限以及闭集 `CudaCandidate` 参数。模型不能提供活动/轮次身份、产物引用、源码路径或验证器配置。
+- `planning_task_input()` 回读已选假设、知识、固定测量协议、父候选与基线，提供绑定这些规范引用的 `inputHash`。可变剩余预算不参与来源指纹，但回收和冻结时重新校验。
+- `planning_output_contract()` 复用项目的 `SemanticOutputSchema`。`materialize_optimization_plan()` 校验结构化输出与来源指纹后，复用候选源码 hash、规范 artifact 写入/回读以及 `freeze_optimization_plan()`；不会把可见文本或模型自报引用升级为正式产物。
+- 新配置生成本轮所属的真实候选产物；与父候选或基线相同的配置直接复用原引用。当前执行范围仍为 `torch_softmax` / `triton_row_softmax` 与 warp 参数，不支持任意生成 kernel。
+- 轮次回收使用已有跨进程锁与不可变产物机制。重复或并发交付只绑定一份计划；候选保存后中断可重试。已冻结后改变判断或配置会拒绝，不覆盖原计划。
+
+### 24.2 复用与验收
+
+本次本地复用检查定位到 `planning.py`、`baseline.py`、`discussion_output.py` 和规范 artifact store；沿用前序 RD-Agent 调研中“假设转为实验、执行另行负责”的分工，不引入新编排框架。共享实验判断合同避免 proposal 与冻结计划字段各自演化。
+
+`tests/test_operator_planning.py` 使用隔离活动、SQLite Ledger 与真实候选/计划产物存储，覆盖规范回读、重复/并发交付、中断恢复、父候选复用、非法参数/引用、来源不可用与预算超限；相关 `test_operator_knowledge_plan.py` 回归通过。无生产模型调用、GPU 执行、页面运行验收或性能收益证据。
+
+### 24.3 原生任务接入仍需完成
+
+下一批须创建真实规划 Session/Task/Turn，增加显式 planning 模型预算与独立 invocation binding，并完成 receipt 的构造、持久交付、结算和同 action 恢复后，才调用本节服务并解除 readiness 阻断。检查发现 `core/llm/client.py` 与 receipt registry 当前把 operator workflow 默认视为讨论并要求 `participantId`，规划接入必须按真实单任务身份扩展，不能冒充会议 speaker。费用未知、回执未交付或来源已撤销时不得完成节点。受管候选物化服务本身不证明调用来源、支付授权或执行成功。
