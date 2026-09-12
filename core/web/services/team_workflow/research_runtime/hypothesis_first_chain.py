@@ -1119,27 +1119,51 @@ def _question_reset_snapshot(team_id: str, question_id: str) -> dict[str, Any]:
         # the projected archive count equals the cancel count up front.
         "archivedFormalRunCount": len(live_formal_runs or []),
     }
-    active_meetings = [
-        meeting_id
+    active_status_meetings = {
+        meeting_id: meeting
         for meeting_id, meeting in target_meetings.items()
         if str(meeting.get("status") or "").strip().lower() in _ACTIVE_MEETING_STATUSES
+    }
+    # Status alone cannot tell a live discussion from an executor that was
+    # interrupted mid-round: only a bound round whose heartbeat is still
+    # fresh proves live work.  Stale meetings stay listed for the reset to
+    # terminate, but they no longer block it.
+    active_meetings = [
+        meeting_id
+        for meeting_id, meeting in active_status_meetings.items()
+        if meeting_rounds.live_running_bound_round_ids(meeting)
     ]
-    active_requests = [
-        request_id
-        for request_id, request in _latest_records(
-            [
-                record
-                for record in target_chain_records
-                if str(record.get("recordKind") or "") == COLLECTION_REQUEST_KIND
-            ],
-            "requestId",
-        ).items()
+    stale_meeting_ids = sorted(
+        meeting_id
+        for meeting_id in active_status_meetings
+        if meeting_id not in set(active_meetings)
+    )
+    from core.web.services.team_workflow.source_collection import (
+        runs as source_collection_runs,
+    )
+
+    active_requests: list[str] = []
+    stale_collection_run_ids: list[str] = []
+    for request_id, request in _latest_records(
+        [
+            record
+            for record in target_chain_records
+            if str(record.get("recordKind") or "") == COLLECTION_REQUEST_KIND
+        ],
+        "requestId",
+    ).items():
         # A legacy pending request with no child run cannot represent work that
         # can still mutate data. Keep the guard for every linked active request,
         # while allowing that unlinked residue to be reset.
-        if str(request.get("status") or "").strip().lower() in _ACTIVE_COLLECTION_STATUSES
-        and str(request.get("collectionRunId") or "").strip()
-    ]
+        if str(request.get("status") or "").strip().lower() not in _ACTIVE_COLLECTION_STATUSES:
+            continue
+        run_id = str(request.get("collectionRunId") or "").strip()
+        if not run_id:
+            continue
+        if source_collection_runs.collection_run_is_active(team_id, run_id):
+            active_requests.append(request_id)
+        else:
+            stale_collection_run_ids.append(run_id)
     return {
         "questionId": normalized_question_id,
         "chainRecords": chain_records,
@@ -1157,6 +1181,8 @@ def _question_reset_snapshot(team_id: str, question_id: str) -> dict[str, Any]:
         "impact": impact,
         "activeMeetingIds": active_meetings,
         "activeRequestIds": active_requests,
+        "staleMeetingIds": stale_meeting_ids,
+        "staleCollectionRunIds": sorted(set(stale_collection_run_ids)),
     }
 
 
@@ -1299,6 +1325,79 @@ def reset_question_chain(
             raise HypothesisFirstChainError("本题仍有进行中的讨论，请先结束或停止讨论后再重置。")
         if snapshot["activeRequestIds"]:
             raise HypothesisFirstChainError("本题的资料搜集仍在进行，请等待结束或先停止任务。")
+
+        # Heartbeat-aware recovery: a status-active meeting or request whose
+        # executor died (interrupted run) must not lock this question out of
+        # resetting forever.  Terminate those stale records first; when the
+        # termination loses a race with a genuinely live executor the
+        # recheck below turns it back into a real block.
+        terminated_meeting_ids: list[str] = []
+        for meeting_id in list(snapshot["staleMeetingIds"]):
+            try:
+                meeting_rounds.stop_discussion_meeting(normalized_team_id, meeting_id)
+                terminated_meeting_ids.append(meeting_id)
+            except Exception as exc:  # noqa: BLE001 - fail closed only on live work
+                try:
+                    still_live = bool(
+                        meeting_rounds.live_running_bound_round_ids(
+                            meeting_rounds._load_meeting_round(
+                                normalized_team_id, meeting_id
+                            )
+                        )
+                    )
+                except Exception:  # noqa: BLE001 - unreadable meeting stays a block
+                    still_live = True
+                if still_live:
+                    raise HypothesisFirstChainError(
+                        "本题仍有进行中的讨论，请先结束或停止讨论后再重置。"
+                    ) from exc
+                _record_scene_event(
+                    "hypothesis_first.question_reset_meeting_terminate_skipped",
+                    outcome="skipped",
+                    level="warning",
+                    fields={
+                        "teamId": normalized_team_id,
+                        "questionId": normalized_question_id,
+                        "meetingRoundId": meeting_id,
+                    },
+                )
+        stopped_collection_run_ids: list[str] = []
+        for run_id in list(snapshot["staleCollectionRunIds"]):
+            try:
+                source_collection_runs.stop_source_collection_search(
+                    normalized_team_id,
+                    run_id,
+                    reason="hypothesis-first question reset cleared interrupted collection",
+                )
+                stopped_collection_run_ids.append(run_id)
+            except Exception as exc:  # noqa: BLE001 - fail closed only on live work
+                if source_collection_runs.collection_run_is_active(
+                    normalized_team_id, run_id
+                ):
+                    raise HypothesisFirstChainError(
+                        "本题的资料搜集仍在进行，请等待结束或先停止任务。"
+                    ) from exc
+                _record_scene_event(
+                    "hypothesis_first.question_reset_collection_stop_skipped",
+                    outcome="skipped",
+                    level="warning",
+                    fields={
+                        "teamId": normalized_team_id,
+                        "questionId": normalized_question_id,
+                        "runId": run_id,
+                    },
+                )
+        if terminated_meeting_ids or stopped_collection_run_ids:
+            _record_scene_event(
+                "hypothesis_first.question_reset_stale_work_terminated",
+                outcome="success",
+                fields={
+                    "teamId": normalized_team_id,
+                    "questionId": normalized_question_id,
+                    "meetingRoundIds": terminated_meeting_ids,
+                    "runIds": stopped_collection_run_ids,
+                },
+            )
 
         source_preview = source_collection_runs.preview_source_collection_runs_reset(
             normalized_team_id,
