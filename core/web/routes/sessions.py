@@ -33,6 +33,14 @@ from core.web.routes.session_turn_models import (
     SessionTurnCommandResponse,
 )
 from core.web.services.runtime_scene_service import record_runtime_scene_event
+from core.web.services import session_service
+from core.web.services.session.composer_example_commands import (
+    get_composer_example_command,
+)
+from core.web.services.session.prompt_suggestion import (
+    PromptSuggestionError,
+    generate_prompt_suggestion,
+)
 from core.web.services.session.tool_approvals import (
     ToolApprovalConflictError,
     ToolApprovalError,
@@ -229,6 +237,27 @@ class SessionToolApprovalDecisionPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     decision: Literal["accept", "acceptForSession", "acceptAlways", "decline", "cancel"]
+
+
+class SessionPromptSuggestionPayload(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    afterTurnId: str = ""
+
+
+class SessionPromptSuggestionResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    sessionId: str
+    turnId: str = ""
+    suggestion: str | None = None
+    reason: str = ""
+
+
+class SessionComposerExampleResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    command: str | None = None
 
 
 @router.get(
@@ -516,6 +545,35 @@ def session_image_artifact(
         raise HTTPException(status_code=404, detail="Session artifact not found") from exc
     filename = path.name if download else None
     return FileResponse(path, media_type=content_type, filename=filename)
+
+
+@router.post(
+    "/sessions/{session_id}/prompt-suggestion",
+    response_model=SessionPromptSuggestionResponse,
+    response_model_exclude_unset=True,
+)
+def session_prompt_suggestion(
+    session_id: str,
+    payload: SessionPromptSuggestionPayload,
+) -> dict:
+    try:
+        result = generate_prompt_suggestion(session_id, after_turn_id=payload.afterTurnId)
+    except PromptSuggestionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"sessionId": session_id, **result}
+
+
+@router.get(
+    "/sessions/{session_id}/composer-example",
+    response_model=SessionComposerExampleResponse,
+    response_model_exclude_unset=True,
+)
+def session_composer_example(session_id: str) -> dict:
+    try:
+        get_session_detail(session_id, message_limit=0, transcript_scope="none")
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"command": get_composer_example_command(session_service.PROJECT_ROOT)}
 
 
 @router.post(

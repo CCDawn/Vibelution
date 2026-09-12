@@ -239,6 +239,50 @@ export function fetchSessionLlmOptions(sessionId: string): Promise<SessionLlmOpt
   );
 }
 
+export type SessionPromptSuggestionResponse = {
+  sessionId: string;
+  turnId: string;
+  suggestion: string | null;
+  reason?: string;
+};
+
+/**
+ * Asks the backend for the AI "next prompt" suggestion of the latest turn.
+ * The backend reports the precise skip reason in `reason` instead of failing,
+ * so callers keep the composer silent on any non-`ok` outcome.
+ */
+export function fetchSessionPromptSuggestion(
+  sessionId: string,
+  options: { afterTurnId?: string; signal?: AbortSignal } = {},
+): Promise<SessionPromptSuggestionResponse> {
+  return fetchJson<SessionPromptSuggestionResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/prompt-suggestion`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ afterTurnId: options.afterTurnId ?? "" }),
+      signal: options.signal,
+    },
+  );
+}
+
+export type SessionComposerExampleResponse = {
+  command: string | null;
+};
+
+/** Deterministic starter prompt derived from the project's frequently edited files. */
+export function fetchSessionComposerExample(
+  sessionId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<SessionComposerExampleResponse> {
+  return fetchJson<SessionComposerExampleResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/composer-example`,
+    { signal: options.signal },
+  );
+}
+
 export function updateSessionReasoningEffort(
   sessionId: string,
   reasoningEffort: string,
