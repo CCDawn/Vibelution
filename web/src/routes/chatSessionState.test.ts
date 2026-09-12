@@ -435,6 +435,178 @@ describe("chatSessionState", () => {
     expect(merged.messages.map((message) => message.id)).toEqual(["session-live-message-live-turn-c"]);
   });
 
+  it("drops the committed tail that a strictly newer authoritative window truncated", () => {
+    const previous = makeDetail({
+      ledgerSeq: 40,
+      messages: [
+        {
+          id: "session-live-message-1",
+          role: "user",
+          content: "第一问",
+          timestamp: "2026-05-22T10:00:00Z",
+        },
+        {
+          id: "session-live-message-2",
+          role: "assistant",
+          content: "第一答",
+          timestamp: "2026-05-22T10:00:01Z",
+          metadata: { turnId: "turn-1" },
+        },
+        {
+          id: "session-live-message-3",
+          role: "user",
+          content: "第二问",
+          timestamp: "2026-05-22T10:00:02Z",
+        },
+        {
+          id: "session-live-message-4",
+          role: "assistant",
+          content: "本轮已按请求停止。",
+          status: "stopped",
+          timestamp: "2026-05-22T10:00:03Z",
+          metadata: { turnId: "turn-2" },
+        },
+      ],
+      messageWindow: makeWindow({
+        totalMessages: 4,
+        returnedMessages: 4,
+        oldestMessageIndex: 1,
+        newestMessageIndex: 4,
+      }),
+    });
+    const next = makeDetail({
+      ledgerSeq: 47,
+      messages: [
+        {
+          id: "session-live-message-1",
+          role: "user",
+          content: "第一问",
+          timestamp: "2026-05-22T10:00:00Z",
+        },
+        {
+          id: "session-live-message-2",
+          role: "assistant",
+          content: "第一答",
+          timestamp: "2026-05-22T10:00:01Z",
+          metadata: { turnId: "turn-1" },
+        },
+        {
+          id: "session-live-message-3",
+          role: "user",
+          content: "第二问（改写后重发）",
+          timestamp: "2026-05-22T10:00:04Z",
+        },
+      ],
+      messageWindow: makeWindow({
+        totalMessages: 3,
+        returnedMessages: 3,
+        oldestMessageIndex: 1,
+        newestMessageIndex: 3,
+      }),
+    });
+
+    const merged = mergeSessionDetailMessageWindow(previous, next);
+
+    expect(merged.messages.map((message) => message.id)).toEqual([
+      "session-live-message-1",
+      "session-live-message-2",
+      "session-live-message-3",
+    ]);
+    expect(merged.messageWindow).toMatchObject({
+      totalMessages: 3,
+      returnedMessages: 3,
+      oldestMessageIndex: 1,
+      newestMessageIndex: 3,
+      hasEarlier: false,
+      hasLater: false,
+    });
+  });
+
+  it("keeps the accumulated tail when a late snapshot carries an older ledger sequence", () => {
+    const previous = makeDetail({
+      ledgerSeq: 50,
+      messages: [1, 2, 3, 4].map((index) => ({
+        id: `session-live-message-${index}`,
+        role: index % 2 === 0 ? "assistant" : "user",
+        content: `message ${index}`,
+        timestamp: "2026-05-22T10:00:00Z",
+      })),
+      messageWindow: makeWindow({
+        totalMessages: 4,
+        returnedMessages: 4,
+        oldestMessageIndex: 1,
+        newestMessageIndex: 4,
+      }),
+    });
+    const late = makeDetail({
+      ledgerSeq: 42,
+      messages: [1, 2, 3].map((index) => ({
+        id: `session-live-message-${index}`,
+        role: index % 2 === 0 ? "assistant" : "user",
+        content: `message ${index}`,
+        timestamp: "2026-05-22T09:00:00Z",
+      })),
+      messageWindow: makeWindow({
+        totalMessages: 3,
+        returnedMessages: 3,
+        oldestMessageIndex: 1,
+        newestMessageIndex: 3,
+      }),
+    });
+
+    const merged = mergeSessionDetailMessageWindow(previous, late);
+
+    expect(merged.messages.map((message) => message.id)).toEqual([
+      "session-live-message-1",
+      "session-live-message-2",
+      "session-live-message-3",
+      "session-live-message-4",
+    ]);
+  });
+
+  it("drops a stale live overlay when a strictly newer authoritative window truncated its turn", () => {
+    const staleOverlay = liveOverlayMessage("session-live-message-live-turn-stopped", "turn-stopped", "2026-05-22T10:00:03Z");
+    const previous = makeDetail({
+      ledgerSeq: 40,
+      messages: [
+        {
+          id: "session-live-message-1",
+          role: "user",
+          content: "第二问",
+          timestamp: "2026-05-22T10:00:02Z",
+        },
+        staleOverlay,
+      ],
+      messageWindow: makeWindow({
+        totalMessages: 2,
+        returnedMessages: 2,
+        oldestMessageIndex: 1,
+        newestMessageIndex: 2,
+      }),
+    });
+    const next = makeDetail({
+      ledgerSeq: 47,
+      messages: [
+        {
+          id: "session-live-message-1",
+          role: "user",
+          content: "第二问（改写后重发）",
+          timestamp: "2026-05-22T10:00:04Z",
+        },
+      ],
+      messageWindow: makeWindow({
+        totalMessages: 1,
+        returnedMessages: 1,
+        oldestMessageIndex: 1,
+        newestMessageIndex: 1,
+      }),
+    });
+
+    const merged = mergeSessionDetailMessageWindow(previous, next);
+
+    expect(merged.messages.map((message) => message.id)).toEqual(["session-live-message-1"]);
+  });
+
   it("derives a sidebar-safe summary from active session detail", () => {
     expect(sessionSummaryFromDetail(makeDetail())).toEqual({
       id: "session-live",
