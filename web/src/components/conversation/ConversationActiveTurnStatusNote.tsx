@@ -1,10 +1,12 @@
 import { LoaderCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   activeTurnElapsedSeconds,
   formatActiveTurnHeartbeatText,
+  planActiveTurnStageSwitch,
   resolveActiveTurnProgressStage,
+  resolveActiveTurnRetryProgress,
   type ActiveTurnStatusMessageLike,
 } from "./conversationActiveTurnStatusPresentation";
 import styles from "./ConversationActiveTurnStatusNote.styles";
@@ -28,8 +30,30 @@ export function ConversationActiveTurnStatusNote({
   statusLabel,
   companionMode = false,
 }: ConversationActiveTurnStatusNoteProps) {
-  const stage = resolveActiveTurnProgressStage(message);
+  const resolvedStage = resolveActiveTurnProgressStage(message);
+  const [stage, setStage] = useState(resolvedStage);
+  const stageShownAtRef = useRef(Date.now());
   const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (companionMode) {
+      return undefined;
+    }
+    const plan = planActiveTurnStageSwitch(stage, resolvedStage, Date.now() - stageShownAtRef.current);
+    if (plan.stage !== stage) {
+      stageShownAtRef.current = Date.now();
+      setStage(plan.stage);
+      return undefined;
+    }
+    if (plan.delayMs <= 0) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      stageShownAtRef.current = Date.now();
+      setStage(resolvedStage);
+    }, plan.delayMs);
+    return () => window.clearTimeout(timer);
+  }, [resolvedStage, stage, companionMode]);
 
   useEffect(() => {
     if (companionMode) {
@@ -42,9 +66,12 @@ export function ConversationActiveTurnStatusNote({
   }, [companionMode]);
 
   const elapsedSeconds = activeTurnElapsedSeconds(message.timestamp, nowMs);
+  const retryProgress = stage === "model_retry" || stage === "retrying"
+    ? resolveActiveTurnRetryProgress(message)
+    : null;
   const heartbeatText = companionMode
     ? (lang === "en" ? "Typing…" : "正在输入…")
-    : formatActiveTurnHeartbeatText(stage, elapsedSeconds, lang);
+    : formatActiveTurnHeartbeatText(stage, elapsedSeconds, lang, retryProgress);
   const resolvedStatusLabel = statusLabel
     || (lang === "en" ? "Status" : "状态");
 

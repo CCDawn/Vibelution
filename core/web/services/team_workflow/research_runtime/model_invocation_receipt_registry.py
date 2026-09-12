@@ -160,7 +160,9 @@ def _outcome_kinds(receipt: ModelInvocationReceipt) -> tuple[str, ...]:
             if str(item or "").strip()
         )
     )
-    if not values or any(item not in ALLOWED_OUTCOME_KINDS for item in values):
+    allowed = (frozenset({"optimization_hypothesis"})
+        if receipt.scope.get("workflowId") == "operator-optimization" else ALLOWED_OUTCOME_KINDS)
+    if not values or any(item not in allowed for item in values):
         raise ValueError("model invocation receipt outcomeKinds are invalid")
     return values
 
@@ -181,7 +183,19 @@ def _validate_receipt(
     if not isinstance(value, Mapping):
         raise ValueError("model invocation receipt must be an object")
     receipt = ModelInvocationReceipt.from_dict(value)
-    if receipt.status not in {
+    knowledge = receipt.scope.get("accountingKind") == "operator_knowledge"
+    operator = receipt.scope.get("workflowId") == "operator-optimization" or knowledge
+    if operator:
+        from core.research.operator_optimization.discussion_contracts import OperatorInvocationBinding
+        from core.research.operator_optimization.knowledge_invocation import OperatorKnowledgeInvocationBinding
+        contract = OperatorKnowledgeInvocationBinding if knowledge else OperatorInvocationBinding
+        fields = contract.model_fields
+        binding = {key: receipt.scope[key] for key in fields if key in receipt.scope}
+        binding["formalNodeAttempt"] = int(binding.get("formalNodeAttempt", 0))
+        contract.model_validate(binding)
+        if knowledge and _outcome_kinds(receipt) != ("source_evidence",):
+            raise ValueError("operator knowledge receipt must describe source evidence")
+    if not operator and receipt.status not in {
         ModelInvocationStatus.SUCCEEDED,
         ModelInvocationStatus.RETRIED,
     }:
@@ -723,6 +737,131 @@ def _receipt_store_rows(
     return stores
 
 
+def _scan_question_receipt_files(
+    team_id: str,
+    question_id: str,
+    workflow_run_ids: set[str] | None,
+) -> list[dict[str, Any]]:
+    """Validate and list one question's receipt stores without mutating."""
+
+    normalized_team = _reset_receipt_text(team_id, field="teamId")
+    normalized_question = _reset_receipt_text(question_id, field="questionId").upper()
+    root = _receipt_store_root(normalized_team)
+    question_dir = root / _path_component(normalized_question, field_name="questionId")
+    if not question_dir.exists():
+        return []
+    if question_dir.is_symlink() or not question_dir.is_dir():
+        raise ReceiptResetPortError(
+            "question receipt store path is not a regular directory",
+            code="receipt_store_unsafe",
+        )
+    entries: list[dict[str, Any]] = []
+    for item in sorted(question_dir.iterdir(), key=lambda value: value.name.lower()):
+        if item.is_symlink():
+            raise ReceiptResetPortError(
+                "receipt store contains a symlink", code="receipt_store_unsafe"
+            )
+        if item.is_dir():
+            raise ReceiptResetPortError(
+                "receipt store contains an unexpected directory",
+                code="receipt_store_corrupt",
+            )
+        if item.name.endswith(".json.lock"):
+            continue
+        if item.suffix.lower() != ".json":
+            raise ReceiptResetPortError(
+                "receipt store contains an unsupported file",
+                code="receipt_store_corrupt",
+            )
+        try:
+            raw_bytes = _io_path(item).read_bytes()
+            payload = json.loads(raw_bytes.decode("utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ReceiptResetPortError(
+                "receipt store is unreadable or corrupt", code="receipt_store_corrupt"
+            ) from exc
+        if not isinstance(payload, Mapping):
+            raise ReceiptResetPortError(
+                "receipt store must be an object", code="receipt_store_corrupt"
+            )
+        payload_question = _reset_receipt_text(
+            payload.get("questionId"), field="questionId"
+        ).upper()
+        payload_team = _reset_receipt_text(payload.get("teamId"), field="teamId")
+        payload_run = _reset_receipt_text(
+            payload.get("workflowRunId"), field="workflowRunId"
+        )
+        if payload_team != normalized_team or payload_question != normalized_question:
+            raise ReceiptResetPortError(
+                "receipt store scope does not match the question",
+                code="receipt_scope_mismatch",
+            )
+        _receipt_path_matches(item, normalized_team, payload_question, payload_run)
+        if workflow_run_ids is not None and payload_run not in workflow_run_ids:
+            continue
+        entries.append({"path": item, "workflowRunId": payload_run})
+    return entries
+
+
+def preview_question_model_invocation_receipts(
+    team_id: str,
+    *,
+    question_id: str,
+    workflow_run_ids: set[str] | list[str] | None = None,
+) -> dict[str, Any]:
+    """Count the question's receipt stores without deleting anything."""
+
+    run_filter = (
+        None
+        if workflow_run_ids is None
+        else {
+            str(value or "").strip()
+            for value in workflow_run_ids
+            if str(value or "").strip()
+        }
+    )
+    entries = _scan_question_receipt_files(team_id, question_id, run_filter)
+    return {
+        "questionId": str(question_id or "").strip().upper(),
+        "receiptCount": len(entries),
+        "workflowRunIds": sorted({str(item["workflowRunId"]) for item in entries}),
+    }
+
+
+def retire_question_model_invocation_receipts(
+    team_id: str,
+    *,
+    question_id: str,
+    workflow_run_ids: set[str] | list[str] | None = None,
+) -> dict[str, Any]:
+    """Delete the question's receipt stores, scoped to explicit run ids."""
+
+    run_filter = (
+        None
+        if workflow_run_ids is None
+        else {
+            str(value or "").strip()
+            for value in workflow_run_ids
+            if str(value or "").strip()
+        }
+    )
+    entries = _scan_question_receipt_files(team_id, question_id, run_filter)
+    removed = 0
+    failed_files: list[str] = []
+    for entry in entries:
+        path = Path(entry["path"])
+        try:
+            _io_path(path).unlink(missing_ok=True)
+            removed += 1
+        except OSError:
+            failed_files.append(path.name)
+    return {
+        "questionId": str(question_id or "").strip().upper(),
+        "removedCount": removed,
+        "failedFiles": failed_files,
+    }
+
+
 def _receipt_store_record(store: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str, Any]:
     receipt_id = str(raw.get("receiptId") or "").strip()
     if not receipt_id:
@@ -1181,6 +1320,8 @@ __all__ = [
     "prepare_model_invocation_receipt_reset_stage",
     "purge_model_invocation_receipt_reset_stage",
     "restore_model_invocation_receipt_reset_stage",
+    "preview_question_model_invocation_receipts",
+    "retire_question_model_invocation_receipts",
     "list_receipts_for_team",
     "list_team_scoped_receipts",
     "prepare_receipt_reset_stage",

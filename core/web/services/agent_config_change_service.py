@@ -4,6 +4,14 @@
 stores no alternate live configuration: it records a bounded, secret-free
 snapshot of an editor's draft and the configuration revision that was actually
 published through the existing Agent mutation path.
+
+命名澄清：本模块的 "revision" 指 `config_changes.jsonl` 中的发布事件
+（eventType="revision_published"）。它**不是** SQLite 控制面的
+`agent_config_revisions` 表——后者是 compiled snapshot
+（revision_id = "<agent_id>:<config_hash>"，见
+`core/chat/conversation_store/schema.py`），承载会话外键引用的不可变版本。
+两侧共用 canonical payload（`agent_config_authority`），但职责不同：
+本模块记录编辑过程，SQLite 表承载被引用的配置版本。
 """
 
 from __future__ import annotations

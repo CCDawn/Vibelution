@@ -77,16 +77,6 @@ const styles = {
   lifecycleMenuDangerItem: `vui-app-appshell lifecycleMenuDangerItem min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateDangerSoftClass}`,
   lifecycleMenuItem: `vui-app-appshell lifecycleMenuItem min-w-0 ${vuiOpaqueRowClass} p-2`,
   lifecycleMenuPanel: `vui-app-appshell lifecycleMenuPanel min-w-0 ${vuiGlassPanelClass} p-2`,
-  lifecycleProofCard: `vui-app-appshell lifecycleProofCard min-w-0 ${vuiGlassPanelClass} p-2`,
-  lifecycleProofHeader:
-    "vui-app-appshell lifecycleProofHeader min-w-0 flex flex-wrap items-center gap-1.5",
-  lifecycleProofItem: `vui-app-appshell lifecycleProofItem min-w-0 ${vuiOpaqueRowClass} p-2`,
-  lifecycleProofList:
-    "vui-app-appshell lifecycleProofList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
-  lifecycleProofMeta:
-    "vui-app-appshell lifecycleProofMeta min-w-0 flex flex-wrap items-center gap-1.5",
-  lifecycleProofName:
-    "vui-app-appshell lifecycleProofName min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   mainArea:
     "vui-app-appshell mainArea min-w-0 w-full",
   mobileNav: `vui-app-appshell mobileNav hidden max-[639px]:flex min-w-0 items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] ${vuiToolbarFillClass} px-2 py-1`,
@@ -140,21 +130,6 @@ const styles = {
   // Fixed square + flex-none: no border/baseline so dots share the pill mid-line with text.
   statusDot:
     "vui-app-appshell statusDot block h-2 w-2 shrink-0 grow-0 self-center rounded-full border-0 bg-current p-0 leading-none",
-  statusGuideCard: `vui-app-appshell statusGuideCard min-w-0 ${vuiGlassPanelClass} p-2`,
-  statusGuideCardHeader:
-    "vui-app-appshell statusGuideCardHeader min-w-0 flex flex-wrap items-center gap-1.5 px-0.5 pb-1",
-  statusGuideGrid:
-    "vui-app-appshell statusGuideGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
-  statusGuideHeader:
-    "vui-app-appshell statusGuideHeader min-w-0 flex flex-wrap items-center gap-1.5",
-  statusGuideList:
-    "vui-app-appshell statusGuideList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
-  statusGuideListItem: `vui-app-appshell statusGuideListItem min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto ${vuiOpaqueRowClass} p-2`,
-  statusGuidePanel: `vui-app-appshell statusGuidePanel min-w-0 ${vuiGlassPanelClass} p-2`,
-  statusGuidePopoverContent:
-    "vui-app-appshell statusGuidePopoverContent z-[95] w-[min(640px,calc(100vw-40px))] max-w-[min(640px,calc(100vw-40px))] border-[var(--border-strong)] bg-[var(--shell-panel)] p-0 shadow-[var(--vui-shadow-soft)]",
-  statusGuideStateLabel:
-    "vui-app-appshell statusGuideStateLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   // Rigid pill geometry: fixed height, zero vertical padding, shared leading-none mid-line.
   statusSummaryChip:
     "vui-app-appshell statusSummaryChip min-w-0 " +

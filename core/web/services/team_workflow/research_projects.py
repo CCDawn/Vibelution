@@ -352,6 +352,124 @@ def ensure_challenge_question_project(
     return {"project": dict(project), **store}
 
 
+def remove_challenge_question_project(
+    team_id: str,
+    *,
+    question_id: str,
+    expected_project_id: str = "",
+) -> dict[str, Any]:
+    """Remove one retired question's canonical project identity and workspace.
+
+    ``legacy-default`` and every other question's project stay untouched; the
+    active pointer falls back to the legacy project only when it pointed at
+    the removed project.  The isolated workspace tree is then deleted with the
+    extended-length path discipline used by the challenge-cup reset staging
+    destroy, while leftover sibling entries are reported instead of guessed.
+    """
+
+    team_service.get_team(team_id)
+    normalized_question_id = str(question_id or "").strip().upper()[:32]
+    if not normalized_question_id:
+        raise ResearchProjectError("Challenge question identity is required.")
+    removed_project: dict[str, Any] = {}
+    with _STORE_LOCK:
+        store = _load_store(team_id)
+        matches = [
+            item
+            for item in store["projects"]
+            if str(item.get("challengeQuestionId") or "").strip().upper()
+            == normalized_question_id
+        ]
+        if len(matches) > 1:
+            raise ResearchProjectError(
+                "Multiple research projects are bound to the same Challenge Cup question."
+            )
+        if matches:
+            project = matches[0]
+            project_id = str(project.get("projectId") or "").strip()
+            if expected_project_id and project_id != str(expected_project_id).strip():
+                raise ResearchProjectError(
+                    "Research project identity changed since the retire preview."
+                )
+            if project_id == LEGACY_PROJECT_ID:
+                raise ResearchProjectError("The legacy research project cannot be retired.")
+            store["projects"] = [
+                item
+                for item in store["projects"]
+                if str(item.get("projectId") or "").strip() != project_id
+            ]
+            store["activations"] = {
+                key: value
+                for key, value in dict(store.get("activations") or {}).items()
+                if str(_question_for_theme(key) or "").strip().upper()
+                != normalized_question_id
+            }
+            if str(store.get("activeProjectId") or "").strip() == project_id:
+                store["activeProjectId"] = LEGACY_PROJECT_ID
+            _persist_store(team_id, store)
+            removed_project = dict(project)
+    workspace: dict[str, Any] = {"removed": False, "leftoverEntries": []}
+    if removed_project:
+        workspace = _remove_challenge_question_project_workspace(
+            team_id, str(removed_project.get("projectId") or "")
+        )
+        _record_project_event(
+            "research_project.challenge_question_retired",
+            team_id,
+            str(removed_project.get("projectId") or ""),
+        )
+    return {
+        "questionId": normalized_question_id,
+        "removed": bool(removed_project),
+        "removedProject": removed_project,
+        "workspace": workspace,
+    }
+
+
+def _remove_challenge_question_project_workspace(
+    team_id: str, project_id: str
+) -> dict[str, Any]:
+    """Delete only the retired project's isolated workspace directory."""
+
+    normalized_project_id = str(project_id or "").strip()
+    if not normalized_project_id or normalized_project_id == LEGACY_PROJECT_ID:
+        raise ResearchProjectError("Retired research project identity is required.")
+    projects_root = (formal_team_workspace_root(team_id) / "research_projects").resolve(
+        strict=False
+    )
+    project_root = (projects_root / normalized_project_id).resolve(strict=False)
+    if not project_root.is_relative_to(projects_root):
+        raise ResearchProjectError("Research project workspace path is unsafe")
+    if project_root.is_symlink():
+        raise ResearchProjectError("Research project workspace is a symlink")
+    workspace_root = project_root / "workspace"
+    removed = False
+    if workspace_root.exists() or workspace_root.is_symlink():
+        if workspace_root.is_symlink() or _challenge_cup_workspace_reset_path_is_reparse_point(
+            workspace_root
+        ):
+            raise ResearchProjectError("Research project workspace is a reparse point")
+        native = _challenge_cup_workspace_reset_native_path(workspace_root)
+        for attempt in range(2):
+            if not workspace_root.exists():
+                break
+            try:
+                shutil.rmtree(native)
+            except FileNotFoundError:
+                if attempt:
+                    raise
+        removed = not workspace_root.exists()
+    leftover_entries: list[str] = []
+    if project_root.is_dir():
+        leftover_entries = sorted(item.name for item in project_root.iterdir())
+        if not leftover_entries:
+            try:
+                project_root.rmdir()
+            except OSError:
+                pass
+    return {"removed": removed, "leftoverEntries": leftover_entries}
+
+
 def update_research_project(team_id: str, project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     team_service.get_team(team_id)
     with _STORE_LOCK:

@@ -26,6 +26,7 @@ from core.research.workflow.contracts import (
 from core.web.services import chat_room_service
 from core.web.services.team_service import TeamNotFoundError, TeamServiceError
 from core.web.services.team_workflow import (
+    challenge_question_retire,
     hypothesis_rounds,
     hypothesis_selection,
     meeting_rounds,
@@ -85,11 +86,15 @@ from .hypothesis_first_models import (
     MeetingSourceMessagesResponse,
     MeetingSummaryBeginPayload,
     MeetingSummaryDraftRequest,
+    QuestionExperimentRetirePayload,
+    QuestionExperimentRetirePreviewResponse,
+    QuestionExperimentRetireResponse,
     QuestionRunResetPayload,
     QuestionRunResetPreviewResponse,
     QuestionRunResetResponse,
     ReviewNextRoundResponse,
     ReviewRoundLinkListResponse,
+    RoundFailureRetryRequest,
     SelectionContextResponse,
 )
 from .hypothesis_first_state_models import (
@@ -226,6 +231,7 @@ _DOMAIN_ERRORS = (
     meeting_runtime.ResearchMeetingRuntimeError,
     hypothesis_rounds.ResearchHypothesisRoundError,
     hypothesis_first_chain.HypothesisFirstChainError,
+    challenge_question_retire.ChallengeQuestionRetireError,
     meeting_receipt_authority.MeetingReceiptAuthorityError,
 )
 
@@ -569,6 +575,50 @@ def team_workflow_hypothesis_question_reset(
         )
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.question_reset", team_id, exc)
+
+
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/hypothesis-first/questions/{question_id}/experiment-retire-preview",
+    response_model=QuestionExperimentRetirePreviewResponse,
+    response_model_exclude_unset=True,
+)
+def team_workflow_hypothesis_question_retire_preview(
+    team_id: str, question_id: str
+) -> dict:
+    """Read-only retire impact guard before removing an old experiment."""
+    try:
+        return challenge_question_retire.preview_question_retire(team_id, question_id)
+    except _DOMAIN_ERRORS as exc:
+        _map_domain_error("hypothesis_first.question_retire.preview", team_id, exc)
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/hypothesis-first/questions/{question_id}/experiment-retire",
+    response_model=QuestionExperimentRetireResponse,
+    response_model_exclude_unset=True,
+)
+def team_workflow_hypothesis_question_retire(
+    team_id: str,
+    question_id: str,
+    payload: QuestionExperimentRetirePayload,
+) -> dict:
+    """Retire one question's experiment across every question-owned store."""
+    try:
+        return challenge_question_retire.retire_question_experiment(
+            team_id,
+            question_id,
+            confirmation_question_id=payload.confirmationQuestionId,
+        )
+    except challenge_question_retire.ChallengeQuestionRetirePartialError as exc:
+        _raise_team_workflow_route_error(
+            "hypothesis_first.question_retire",
+            team_id,
+            exc,
+            status_code=500,
+            detail={"code": exc.code, "message": str(exc), "result": exc.result},
+        )
+    except _DOMAIN_ERRORS as exc:
+        _map_domain_error("hypothesis_first.question_retire", team_id, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -1184,6 +1234,90 @@ def team_workflow_hypothesis_first_anomaly_inbox(
     }
 
 
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/hypothesis-first/chain/round-failures",
+    response_model=dict[str, Any],
+    response_model_exclude_unset=True,
+)
+def team_workflow_hypothesis_first_round_failure_list(
+    team_id: str,
+    unresolved_only: bool = Query(True, alias="unresolvedOnly"),
+) -> dict:
+    """Open round-generation failure traces for the workspace recovery panel.
+
+    薄路由：直接返回 ``hypothesis_rounds`` 的失败账本（latest-per-failure），
+    默认只列 open（failed/blocked）；``blocked`` 是纯 fan-in 等待，面板据此
+    隐藏按钮。写路径不在本路由：人工重试走
+    ``round-failures/{failure_id}/retry``。
+    """
+
+    try:
+        return hypothesis_rounds.list_hypothesis_round_failures(
+            team_id, unresolved_only=unresolved_only
+        )
+    except _DOMAIN_ERRORS as exc:
+        _map_domain_error("hypothesis_first.chain.round_failures", team_id, exc)
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/hypothesis-first/chain/round-failures/{failure_id}/retry",
+    response_model=dict[str, Any],
+    response_model_exclude_unset=True,
+)
+def team_workflow_hypothesis_first_round_failure_retry(
+    team_id: str,
+    failure_id: str,
+    payload: RoundFailureRetryRequest,
+    http_request: Request,
+) -> dict:
+    """Accept one confirmed manual retry of an open round failure trace.
+
+    误触防护在服务端闭合：缺少 ``confirmed=true`` 直接 428 拒绝。重新生成轮
+    是分钟级 review-LLM 路径，端点只接受请求并立即返回 ``accepted``（或
+    同 trace 的 ``in_flight``），由后台 worker 复用自动推进同一条
+    ``regenerate_hypothesis_round`` 命令路径执行；成功后按既有语义 resolve
+    对应的 open 失败记录，面板重新拉取账本即可。``blocked``（纯等待，无
+    可执行重试）返回 409 ``not_retryable``；未知或已解决返回 404。
+    """
+
+    if not payload.confirmed:
+        raise HTTPException(
+            status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+            detail={
+                "code": "confirmation_required",
+                "message": "round failure retry requires confirmed=true",
+            },
+        )
+    try:
+        with server_operator_scope_from_http(http_request):
+            result = hypothesis_first_chain.request_round_failure_recovery(
+                team_id, failure_id
+            )
+    except _DOMAIN_ERRORS as exc:
+        _map_domain_error("hypothesis_first.chain.round_failure_retry", team_id, exc)
+    result_status = str((result or {}).get("status") or "")
+    if result_status == "not_found":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "round_failure_not_found",
+                "message": f"open round failure {failure_id} not found",
+            },
+        )
+    if result_status == "not_retryable":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": str((result or {}).get("reasonCode") or "not_retryable"),
+                "message": (
+                    "this failure is a structured fan-in wait; closing the "
+                    "pending sibling reviews advances it automatically"
+                ),
+            },
+        )
+    return result
+
+
 @router.post(
     "/teams/{team_id}/workflow-orchestration/hypothesis-first/chain/anomaly-inbox/actions/extend-budget",
     response_model=dict[str, Any],
@@ -1271,22 +1405,38 @@ def team_workflow_hypothesis_first_command(
     The command is re-authorized from the latest V2 ``allowedActions`` inside
     the owning orchestration lock.  Clients send only the action envelope and
     declaration input; labels and target metadata are never trusted.
+
+    SCI-049: the three long paths (open/retry generation, record selection,
+    approve summary) return an ``accepted`` envelope with a
+    ``commandAttemptId`` immediately and finish on a background worker; the
+    client polls ``GET .../chain/command-attempts/{attemptId}`` until the
+    attempt reaches a terminal status.  Every other command stays synchronous.
     """
 
     try:
         with server_operator_scope_from_http(http_request):
+            # ``_find_allowed_command`` re-authorizes by strict payload
+            # equality against the projected offer.  Wire models with
+            # defaulted fields (RecordSelectionPayload.previousSelectionId,
+            # OpenGenerationPayload.runId) inject those defaults into a plain
+            # dump, so a verbatim echo of a two-key offer would gain a third
+            # key and never re-authorize.  ``exclude_unset`` keeps the request
+            # wire-symmetric with the response side's
+            # ``response_model_exclude_unset``: only client-declared fields
+            # reach the command envelope.  The same envelope feeds the async
+            # gate below and the synchronous fallback.
+            command_request = payload.model_dump(exclude_unset=True)
+            accepted = hypothesis_first_chain.submit_v2_command_async(
+                team_id,
+                command_request,
+                question_id=question_id,
+                workflow_run_id=workflow_run_id,
+            )
+            if accepted is not None:
+                return accepted
             return hypothesis_first_chain.execute_v2_command(
                 team_id,
-                # ``_find_allowed_command`` re-authorizes by strict payload
-                # equality against the projected offer.  Wire models with
-                # defaulted fields (RecordSelectionPayload.previousSelectionId,
-                # OpenGenerationPayload.runId) inject those defaults into a
-                # plain dump, so a verbatim echo of a two-key offer would gain
-                # a third key and never re-authorize.  ``exclude_unset`` keeps
-                # the request wire-symmetric with the response side's
-                # ``response_model_exclude_unset``: only client-declared
-                # fields reach the command envelope.
-                payload.model_dump(exclude_unset=True),
+                command_request,
                 question_id=question_id,
                 workflow_run_id=workflow_run_id,
             )
@@ -1313,6 +1463,17 @@ def team_workflow_hypothesis_first_command(
                 "actualInputDigest": exc.actual_input_digest,
             },
         ) from exc
+    except hypothesis_first_chain.CommandAttemptInProgressError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": exc.code,
+                "message": str(exc),
+                "questionId": exc.question_id,
+                "runningCommand": exc.command,
+                "runningActionId": exc.action_id,
+            },
+        ) from exc
     except PermissionError as exc:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -1334,6 +1495,30 @@ def team_workflow_hypothesis_first_command(
         )
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.command", team_id, exc)
+
+
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/hypothesis-first/chain/command-attempts/{attempt_id}",
+    response_model=dict[str, Any],
+    response_model_exclude_unset=True,
+)
+def team_workflow_hypothesis_first_command_attempt(
+    team_id: str,
+    attempt_id: str,
+) -> dict:
+    """Read one async command attempt's delivery status (SCI-049 poll API).
+
+    Returns the attempt's ``status`` (``queued``/``running``/``succeeded``/
+    ``failed``); a succeeded attempt carries the exact response ``result`` the
+    synchronous execution would have returned, and a failed one carries a
+    structured ``error`` with the original domain code so the UI can render
+    the same messages as before.
+    """
+
+    try:
+        return hypothesis_first_chain.get_v2_command_attempt(team_id, attempt_id)
+    except _DOMAIN_ERRORS as exc:
+        _map_domain_error("hypothesis_first.command_attempt", team_id, exc)
 
 
 @router.get(

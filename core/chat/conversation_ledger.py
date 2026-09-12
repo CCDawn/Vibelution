@@ -22,6 +22,7 @@ from .turn_journal import (
     EVENT_ASSISTANT_DELTA_COMMITTED,
     EVENT_ASSISTANT_MESSAGE,
     EVENT_ASSISTANT_PARTIAL,
+    EVENT_BRANCH_REBASE,
     EVENT_CLI_SESSION_LIFECYCLE,
     EVENT_CLI_TASK_RESULT,
     EVENT_CLI_TASK_SENT,
@@ -44,6 +45,7 @@ from .turn_journal import (
     append_turn_event,
     event_has_model_projection,
     event_projection_category,
+    fold_active_events,
     latest_turn_sequence,
     latest_open_turn_id,
     load_latest_turn_events_for_preview,
@@ -215,7 +217,9 @@ def rewrite_conversation_events(
 def conversation_model_messages_from_events(
     events: Iterable[ConversationLedgerEvent],
 ) -> list[dict[str, Any]]:
-    return model_messages_from_events(apply_context_compression_checkpoints(events))
+    return model_messages_from_events(
+        apply_context_compression_checkpoints(fold_active_events(events))
+    )
 
 
 def conversation_visible_messages_from_events(
@@ -238,7 +242,8 @@ def project_conversation_ledger(
     include_model_messages: bool = True,
     include_visible_messages: bool = False,
 ) -> ConversationLedgerProjection:
-    event_list = list(events or [])
+    raw_events = list(events or [])
+    event_list = fold_active_events(raw_events)
     model_event_list = apply_context_compression_checkpoints(event_list)
     latest = event_list[-1] if event_list else None
     return ConversationLedgerProjection(
@@ -247,7 +252,7 @@ def project_conversation_ledger(
         visible_messages=conversation_visible_messages_from_events(event_list) if include_visible_messages else [],
         latest_seq=int(getattr(latest, "sequence", 0) or 0) if latest is not None else 0,
         latest_event_id=str(getattr(latest, "event_id", "") or "") if latest is not None else "",
-        open_turn_id=latest_open_turn_id(event_list),
+        open_turn_id=latest_open_turn_id(raw_events),
     )
 
 
@@ -280,6 +285,7 @@ __all__ = [
     "EVENT_ASSISTANT_DELTA_COMMITTED",
     "EVENT_ASSISTANT_MESSAGE",
     "EVENT_ASSISTANT_PARTIAL",
+    "EVENT_BRANCH_REBASE",
     "EVENT_CLI_SESSION_LIFECYCLE",
     "EVENT_CLI_TASK_RESULT",
     "EVENT_CLI_TASK_SENT",
@@ -309,6 +315,7 @@ __all__ = [
     "context_compression_projection",
     "event_has_model_projection",
     "event_projection_category",
+    "fold_active_events",
     "latest_ledger_sequence",
     "latest_context_compression_checkpoint",
     "load_conversation_events",

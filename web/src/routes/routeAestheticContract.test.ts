@@ -15,7 +15,6 @@ const MEMORY_STYLE_FILES = readdirSync(routeRoot)
 
 const WORKBENCH_BASE_STYLE_FILES = [
   resolve(appRoot, "AppShell.styles.ts"),
-  resolve(appRoot, "AppShellStatusGuidePanel.styles.ts"),
   resolve(appRoot, "AppShellUtilityMenu.styles.ts"),
   resolve(routeRoot, "ChatCodingRoute.styles.ts"),
   resolve(routeRoot, "MemoryRoute.styles.ts"),
@@ -66,7 +65,6 @@ const HEADER_CHROME_KEYS = [
   "panelEyebrow",
   "panelHeader",
   "ragPreviewHeader",
-  "statusGuideCardHeader",
   "utilityPanelHeader",
 ] as const;
 

@@ -435,6 +435,85 @@ def test_runtime_scene_event_can_target_recent_completed_package_when_allowed(tm
     assert summary["diagnosis"]["evidencePaths"][0] == "events/runtime_manager.jsonl"
 
 
+def test_runtime_scene_event_falls_back_to_launcher_pointer_after_retention(tmp_path, monkeypatch):
+    scene_id = "sealed-pointer-scene"
+    scene_dir = tmp_path / "logs" / "runtime_scenes" / f"20260524T111509Z__{scene_id}"
+    scene_dir.mkdir(parents=True, exist_ok=True)
+    ended_at = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    (scene_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "runtime_scene_id": scene_id,
+                "started_at": "2026-05-24T11:15:09Z",
+                "ended_at": ended_at,
+                "status": "stopped",
+                "trigger": "internal-start",
+                "session_mode": "managed",
+                "project_root": str(tmp_path),
+                "package": {
+                    "schema_version": 2,
+                    "timeline_path": "timeline.jsonl",
+                    "lifecycle_path": "lifecycle.jsonl",
+                    "raw_dir": "raw",
+                    "conversations_dir": "conversations",
+                    "agent_dir": "agent",
+                    "artifacts_dir": "artifacts",
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps({"runtimeSceneDir": str(scene_dir)}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+
+    accepted = runtime_scene_service.record_runtime_scene_event(
+        "runtime_manager",
+        "command",
+        "command.failed",
+        fields={"commandId": "cmd-open"},
+        level="error",
+        outcome="failed",
+        lifecycle=True,
+        allow_recent_completed=True,
+    )
+
+    assert accepted["accepted"] is True
+    assert accepted["runtimeSceneId"] == scene_id
+    timeline = (scene_dir / "timeline.jsonl").read_text(encoding="utf-8")
+    assert "command.failed" in timeline
+
+
+def test_runtime_scene_pointer_fallback_rejects_scene_outside_root(tmp_path, monkeypatch):
+    outside_dir = tmp_path / "outside-scene"
+    outside_dir.mkdir(parents=True)
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps({"runtimeSceneDir": str(outside_dir)}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+
+    blocked = runtime_scene_service.record_runtime_scene_event(
+        "runtime_manager",
+        "command",
+        "command.failed",
+        fields={"commandId": "cmd-open"},
+    )
+
+    assert blocked["accepted"] is False
+    assert blocked["reason"] == "no_runtime_scene"
+
+
 def test_runtime_scene_list_sorts_by_package_timestamp_when_started_at_missing(tmp_path, monkeypatch):
     root = tmp_path / "logs" / "runtime_scenes"
     old_dir = root / "20260524T104120Z__old-scene"

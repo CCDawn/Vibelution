@@ -553,6 +553,12 @@ export type ToolCallTurnItem = SessionTurnItemBase & {
   toolName: string;
   input?: string;
   output?: string;
+  /**
+   * Semantic outcome of a finished call (degraded/fallback/partial).
+   * Orthogonal to `status`: a degraded call still counts as completed, but the
+   * transcript surfaces the warning instead of a clean success.
+   */
+  semanticStatus?: string;
 };
 
 export type RetryTurnItem = SessionTurnItemBase & {
@@ -618,6 +624,19 @@ type ConversationMessageBase = {
   id: string;
   timestamp: string;
   metadata?: Record<string, unknown>;
+  /** Stable journal node id; unsafe to derive from the positional message id. */
+  nodeId?: string;
+  /** Branch metadata for the active path (sibling versions at this fork point). */
+  branch?: ConversationMessageBranchInfo;
+};
+
+export type ConversationMessageBranchInfo = {
+  branchId?: string;
+  parentNodeId?: string;
+  siblingCount?: number;
+  siblingIndex?: number;
+  siblingNodeIds?: string[];
+  active?: boolean;
 };
 
 export type UserConversationMessage = ConversationMessageBase & {
@@ -691,6 +710,12 @@ export type SessionBulkDeleteResponse = {
   durationMs?: number;
 };
 
+export type SessionTurnErrorRetry = {
+  attempt: number;
+  maxAttempts: number;
+  category?: string;
+};
+
 export type SessionTurnError = {
   message: string;
   errorType: string;
@@ -710,6 +735,7 @@ export type SessionTurnError = {
   recoverable: boolean;
   timestamp: string;
   turnId: string;
+  retryHistory?: SessionTurnErrorRetry[];
 };
 
 export type SessionRuntimeNotice = {
@@ -893,6 +919,10 @@ export type SessionMessageWindow = {
 export type SessionDetail = SessionSummary & {
   ledgerSeq?: number;
   activeTurnId?: string;
+  /** Active-path leaf node id; branch switching targets any node on a branch. */
+  activeLeafId?: string;
+  /** Branch id of the current active path. */
+  activeBranchId?: string;
   activeTask?: SessionActiveTask | null;
   defaultFileContext: string;
   previewTabs: string[];

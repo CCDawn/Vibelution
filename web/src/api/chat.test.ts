@@ -74,6 +74,16 @@ describe("Chat session tool approval API", () => {
     expect(mutationSource).not.toContain("/reasoning-effort");
   });
 
+  it("owns branch head and base-message transport outside the render layer", () => {
+    expect(apiSource).toContain("export function switchSessionHead");
+    expect(apiSource).toContain("/head");
+    expect(apiSource).toContain("baseMessageId?: string");
+    expect(composerSource).toContain("switchSessionHead");
+    expect(composerSource).toContain("baseMessageId");
+    expect(routeSource).toContain("switchHeadMutation");
+    expect(routeSource).toContain("onSwitchMessageVersion");
+  });
+
   it("owns review-candidate transport outside the chat lifecycle hook", () => {
     expect(apiSource).toContain("/chat-review-candidate");
     expect(apiSource).toContain('method: "POST"');

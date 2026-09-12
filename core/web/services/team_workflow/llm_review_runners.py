@@ -999,7 +999,10 @@ class ReviewLLMTimeoutError(LLMError):
     def __init__(self, *, purpose: str, timeout_seconds: float) -> None:
         super().__init__(
             "cancelled",
-            f"review step `{purpose}` did not return within {timeout_seconds:g}s",
+            f"review step `{purpose}` did not return within {timeout_seconds:g}s "
+            "(the governed per-call review budget); the provider call was "
+            "cancelled and the spent review stays recoverable through "
+            "regenerate_hypothesis_round instead of an in-meeting retry",
             retryable=False,
         )
         self.purpose = str(purpose)
@@ -2259,6 +2262,7 @@ _PARETO_SYSTEM_TAIL = """
 本步骤：Pareto 分类。你是科研假说评审员，基于五维评分把所有候选划分为 Pareto 前沿与被支配两类。
 
 要求：
+- 必须使用候选 payload 中给出的精确 candidateId 字符串作为集合元素；不得输出 c1/c2/c3 之类的简写、序号或任何自造占位 id。
 - paretoFrontCandidateIds 与 dominatedCandidateIds 的并集必须恰好覆盖全部候选 id，且两集合不相交。
 - 前沿集合不能为空；notes 用中文说明划分依据。
 

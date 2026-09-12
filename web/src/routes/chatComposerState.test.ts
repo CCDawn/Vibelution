@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   latestUserMessageId,
+  resolveActiveEditTarget,
   resolveComposerDraftValue,
-  resolveLatestEditTarget,
   type ChatEditTarget,
 } from "./chatComposerState";
 
@@ -12,17 +12,40 @@ describe("chat composer state", () => {
     expect(resolveComposerDraftValue("normal message", null, null)).toBe("normal message");
   });
 
-  it("keeps draft text for a valid latest-user edit target", () => {
+  it("keeps draft text for an edit target still on the active path", () => {
     const target: ChatEditTarget = { messageId: "message-user-2", original: "second prompt" };
-    const resolved = resolveLatestEditTarget(target, "message-user-2");
+    const resolved = resolveActiveEditTarget(target, [
+      { id: "message-user-1", role: "user" },
+      { id: "message-assistant-1", role: "assistant" },
+      { id: "message-user-2", role: "user" },
+    ]);
 
     expect(resolved).toEqual(target);
     expect(resolveComposerDraftValue("edited prompt", target, resolved)).toBe("edited prompt");
   });
 
-  it("hides draft text for a stale edit target until the route clears it", () => {
+  it("keeps an older branch-mode edit target that is no longer the latest message", () => {
+    const target: ChatEditTarget = {
+      messageId: "message-user-1",
+      nodeId: "session-live-node-1",
+      original: "first prompt",
+    };
+    const resolved = resolveActiveEditTarget(target, [
+      { id: "message-user-1", role: "user" },
+      { id: "message-assistant-1", role: "assistant" },
+      { id: "message-user-2", role: "user" },
+    ]);
+
+    expect(resolved).toEqual(target);
+    expect(resolveComposerDraftValue("edited first prompt", target, resolved)).toBe("edited first prompt");
+  });
+
+  it("hides draft text for an edit target that left the active path", () => {
     const target: ChatEditTarget = { messageId: "message-user-1", original: "first prompt" };
-    const resolved = resolveLatestEditTarget(target, "message-user-2");
+    const resolved = resolveActiveEditTarget(target, [
+      { id: "message-user-2", role: "user" },
+      { id: "message-assistant-2", role: "assistant" },
+    ]);
 
     expect(resolved).toBeNull();
     expect(resolveComposerDraftValue("stale edit draft", target, resolved)).toBe("");

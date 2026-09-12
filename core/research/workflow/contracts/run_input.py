@@ -142,9 +142,14 @@ class WorkflowRunInputSnapshot:
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> WorkflowRunInputSnapshot:
+        scope = payload.get("researchScopeEnvelope")
+        scope = scope if isinstance(scope, Mapping) else {}
+        operator_workflow = scope.get("workflow") in {
+            "operator-optimization", "operator-optimization-baseline",
+        }
         if (
             "researchScopeEnvelope" not in payload
-            or "catalogScope" not in payload
+            or (not operator_workflow and "catalogScope" not in payload)
         ):
             raise ContractValidationError(
                 "researchScopeEnvelope and catalogScope are required"
@@ -180,7 +185,7 @@ class WorkflowRunInputSnapshot:
             "modelRoutingPolicy": require_mapping(payload, "modelRoutingPolicy"),
             "evaluationContract": require_mapping(payload, "evaluationContract"),
             "agentBindingSnapshot": require_list(
-                payload, "agentBindingSnapshot", non_empty=True
+                payload, "agentBindingSnapshot", non_empty=scope.get("workflow") != "operator-optimization-baseline"
             ),
             "createdBy": require_text(payload, "createdBy"),
             "createdAt": require_text(payload, "createdAt"),
@@ -194,7 +199,28 @@ class WorkflowRunInputSnapshot:
             payload,
             question_id=canonical["questionId"],
         )
-        canonical["catalogScope"] = _normalize_catalog_scope(payload)
+        if operator_workflow:
+            from pydantic import ValidationError
+            from core.research.operator_optimization.contracts import OperatorRunContext
+
+            try:
+                context = OperatorRunContext.model_validate(canonical["researchObjectiveContract"])
+            except ValidationError as exc:
+                raise ContractValidationError("Invalid operator run context") from exc
+            if (
+                scope.get("program") != "operator-experiments"
+                or context.optimizationCampaignId != scope.get("campaign")
+                or context.researchProjectId != canonical["projectId"]
+                or scope.get("branch") != (context.roundId or context.baselineSetupId)
+                or bool(context.baselineSetupId) != (scope.get("workflow") == "operator-optimization-baseline")
+                or canonical["questionId"] != f"OPERATOR-{context.objective.operator.upper()}"
+            ):
+                raise ContractValidationError("Operator run context does not match its scope")
+            if payload.get("catalogScope"):
+                raise ContractValidationError("Operator runs must not claim a competition catalog scope")
+            canonical["catalogScope"] = {}
+        else:
+            canonical["catalogScope"] = _normalize_catalog_scope(payload)
         if "hypothesisSelection" in payload:
             canonical["hypothesisSelection"] = require_mapping(
                 payload,

@@ -385,6 +385,8 @@ class HypothesisRound:
             raise ContractValidationError(
                 "Pareto analysis references unknown candidates: "
                 + ", ".join(sorted(unknown))
+                + "; it must use the exact candidate ids: "
+                + ", ".join(sorted(candidate_ids))
             )
         if (
             meta_review.recommendationCandidateId

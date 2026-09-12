@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { SessionDetail, SessionSummary } from "../api/types";
+import { ConversationMessage, SessionDetail, SessionMessageWindow, SessionSummary } from "../api/types";
 import {
   appendOptimisticUserMessage,
   applyOptimisticEditResubmit,
+  clearSessionDetailStopping,
   deriveSessionDetailQueryErrorState,
   deriveSessionListQueryErrorState,
   markOptimisticUserMessageAccepted,
+  markSessionDetailStopping,
   markSessionSummaryRunning,
   markSessionDetailRunning,
   mergeSessionDetailMessageWindow,
@@ -57,8 +59,61 @@ function makeDetail(overrides: Partial<SessionDetail> = {}): SessionDetail {
   };
 }
 
+function makeWindow(overrides: Partial<SessionMessageWindow> = {}): SessionMessageWindow {
+  return {
+    mode: "window",
+    totalMessages: 2,
+    returnedMessages: 2,
+    oldestMessageIndex: 1,
+    newestMessageIndex: 2,
+    hasEarlier: false,
+    hasLater: false,
+    nextBeforeMessageIndex: null,
+    transcriptScope: "window",
+    ...overrides,
+  };
+}
+
+function assistantTerminalTurn(id: string, turnId: string, timestamp: string): ConversationMessage {
+  return {
+    id,
+    role: "assistant",
+    turnId,
+    status: "completed",
+    timestamp,
+    turnItems: [
+      {
+        id: `${turnId}-final`,
+        itemId: `${turnId}-final`,
+        version: 3,
+        sessionId: "session-live",
+        turnId,
+        type: "agent_message",
+        phase: "final_answer",
+        text: "终态回答",
+        status: "completed",
+        revision: 1,
+        sequence: 1,
+        terminal: true,
+      },
+    ],
+  };
+}
+
+function liveOverlayMessage(id: string, turnId: string, timestamp: string): ConversationMessage {
+  return {
+    id,
+    role: "assistant",
+    turnId,
+    status: "running",
+    timestamp,
+    turnItems: [],
+    metadata: { kind: "session_live_overlay" },
+  };
+}
+
 describe("chatSessionState", () => {
-  it("optimistically rewrites the edited user message and drops later turns", () => {
+  it("optimistically rewrites the edited user message and keeps later turns for the branch snapshot", () => {
     const detail = makeDetail({
       status: "completed",
       currentPhase: "completed",
@@ -111,7 +166,9 @@ describe("chatSessionState", () => {
 
     expect(next?.status).toBe("running");
     expect(next?.currentPhase).toBe("running");
-    expect(next?.messages).toHaveLength(1);
+    // Branch mode keeps the superseded tail visible until the authoritative
+    // snapshot arrives; the server drops it through the window reconcile.
+    expect(next?.messages).toHaveLength(4);
     expect(next?.messages[0]).toMatchObject({
       id: "session-live-message-1",
       role: "user",
@@ -122,11 +179,8 @@ describe("chatSessionState", () => {
         optimisticUserMessage: true,
       },
     });
-    expect(next?.messageWindow).toMatchObject({
-      returnedMessages: 1,
-      totalMessages: 1,
-      hasLater: false,
-    });
+    expect(next?.messages.slice(1)).toEqual(detail.messages.slice(1));
+    expect(next?.messageWindow).toBe(detail.messageWindow);
   });
 
   it("keeps running status when edit target is missing without wiping history", () => {
@@ -256,6 +310,302 @@ describe("chatSessionState", () => {
     expect(merged.nextStateSignals).toEqual([{ id: "sig-1" }]);
     expect(merged.groupContextEvents).toEqual([{ id: "grp-1" }]);
     expect(merged.currentPhase).toBe("running");
+  });
+
+  it("drops a transient live overlay that the newest authoritative window no longer carries", () => {
+    const user: ConversationMessage = {
+      id: "session-live-message-1",
+      role: "user",
+      content: "问题",
+      timestamp: "2026-05-22T10:00:00Z",
+    };
+    const answer = assistantTerminalTurn("session-live-message-2", "turn-a", "2026-05-22T10:00:10Z");
+    const overlay = liveOverlayMessage("session-live-message-live-turn-b", "turn-b", "2026-05-22T10:00:20Z");
+    const current = makeDetail({
+      messages: [user, answer, overlay],
+      messageWindow: makeWindow({ totalMessages: 2, returnedMessages: 3 }),
+    });
+    const next = makeDetail({
+      messages: [user, answer],
+      messageWindow: makeWindow({ totalMessages: 2, returnedMessages: 2 }),
+    });
+
+    const merged = mergeSessionDetailMessageWindow(current, next);
+
+    expect(merged.messages.map((message) => message.id)).toEqual([
+      "session-live-message-1",
+      "session-live-message-2",
+    ]);
+  });
+
+  it("keeps a live overlay when an earlier-page window arrives", () => {
+    const overlay = liveOverlayMessage("session-live-message-live-turn-b", "turn-b", "2026-05-22T10:00:20Z");
+    const current = makeDetail({
+      messages: [
+        {
+          id: "session-live-message-5",
+          role: "user",
+          content: "message 5",
+          timestamp: "2026-05-22T10:00:00Z",
+        },
+        assistantTerminalTurn("session-live-message-6", "turn-a", "2026-05-22T10:00:10Z"),
+        overlay,
+      ],
+      messageWindow: makeWindow({
+        totalMessages: 8,
+        returnedMessages: 3,
+        oldestMessageIndex: 5,
+        newestMessageIndex: 6,
+        hasEarlier: true,
+      }),
+    });
+    const earlierPage = makeDetail({
+      messages: [
+        {
+          id: "session-live-message-3",
+          role: "user",
+          content: "message 3",
+          timestamp: "2026-05-22T09:00:00Z",
+        },
+        {
+          id: "session-live-message-4",
+          role: "user",
+          content: "message 4",
+          timestamp: "2026-05-22T09:01:00Z",
+        },
+      ],
+      messageWindow: makeWindow({
+        totalMessages: 8,
+        returnedMessages: 2,
+        oldestMessageIndex: 3,
+        newestMessageIndex: 4,
+        hasEarlier: true,
+        hasLater: true,
+        nextBeforeMessageIndex: 3,
+      }),
+    });
+
+    const merged = mergeSessionDetailMessageWindow(current, earlierPage);
+
+    expect(merged.messages.map((message) => message.id)).toEqual([
+      "session-live-message-3",
+      "session-live-message-4",
+      "session-live-message-5",
+      "session-live-message-6",
+      "session-live-message-live-turn-b",
+    ]);
+  });
+
+  it("drops a live overlay whose turn already committed a terminal answer", () => {
+    const turnId = "turn-b";
+    const committed = assistantTerminalTurn("session-live-message-2", turnId, "2026-05-22T10:00:10Z");
+    const overlay = liveOverlayMessage(`session-live-message-live-${turnId}`, turnId, "2026-05-22T10:00:05Z");
+    const current = makeDetail({
+      messages: [overlay],
+      messageWindow: makeWindow({ totalMessages: 1, returnedMessages: 1, oldestMessageIndex: 1, newestMessageIndex: 1 }),
+    });
+    const next = makeDetail({
+      messages: [committed, overlay],
+      messageWindow: makeWindow({
+        totalMessages: 1,
+        returnedMessages: 2,
+        oldestMessageIndex: 1,
+        newestMessageIndex: 1,
+      }),
+    });
+
+    const merged = mergeSessionDetailMessageWindow(current, next);
+
+    expect(merged.messages.map((message) => message.id)).toEqual(["session-live-message-2"]);
+  });
+
+  it("keeps a live overlay while its turn is still running", () => {
+    const overlay = liveOverlayMessage("session-live-message-live-turn-c", "turn-c", "2026-05-22T10:00:05Z");
+    const updatedOverlay = liveOverlayMessage("session-live-message-live-turn-c", "turn-c", "2026-05-22T10:00:20Z");
+    const current = makeDetail({
+      messages: [overlay],
+      messageWindow: makeWindow({ totalMessages: 0, returnedMessages: 1, oldestMessageIndex: 0, newestMessageIndex: 0, hasEarlier: true }),
+    });
+    const next = makeDetail({
+      messages: [updatedOverlay],
+      messageWindow: makeWindow({ totalMessages: 0, returnedMessages: 1, oldestMessageIndex: 0, newestMessageIndex: 0, hasEarlier: true }),
+    });
+
+    const merged = mergeSessionDetailMessageWindow(current, next);
+
+    expect(merged.messages.map((message) => message.id)).toEqual(["session-live-message-live-turn-c"]);
+  });
+
+  it("drops the committed tail that a strictly newer authoritative window truncated", () => {
+    const previous = makeDetail({
+      ledgerSeq: 40,
+      messages: [
+        {
+          id: "session-live-message-1",
+          role: "user",
+          content: "第一问",
+          timestamp: "2026-05-22T10:00:00Z",
+        },
+        {
+          id: "session-live-message-2",
+          role: "assistant",
+          content: "第一答",
+          timestamp: "2026-05-22T10:00:01Z",
+          metadata: { turnId: "turn-1" },
+        },
+        {
+          id: "session-live-message-3",
+          role: "user",
+          content: "第二问",
+          timestamp: "2026-05-22T10:00:02Z",
+        },
+        {
+          id: "session-live-message-4",
+          role: "assistant",
+          content: "本轮已按请求停止。",
+          status: "stopped",
+          timestamp: "2026-05-22T10:00:03Z",
+          metadata: { turnId: "turn-2" },
+        },
+      ],
+      messageWindow: makeWindow({
+        totalMessages: 4,
+        returnedMessages: 4,
+        oldestMessageIndex: 1,
+        newestMessageIndex: 4,
+      }),
+    });
+    const next = makeDetail({
+      ledgerSeq: 47,
+      messages: [
+        {
+          id: "session-live-message-1",
+          role: "user",
+          content: "第一问",
+          timestamp: "2026-05-22T10:00:00Z",
+        },
+        {
+          id: "session-live-message-2",
+          role: "assistant",
+          content: "第一答",
+          timestamp: "2026-05-22T10:00:01Z",
+          metadata: { turnId: "turn-1" },
+        },
+        {
+          id: "session-live-message-3",
+          role: "user",
+          content: "第二问（改写后重发）",
+          timestamp: "2026-05-22T10:00:04Z",
+        },
+      ],
+      messageWindow: makeWindow({
+        totalMessages: 3,
+        returnedMessages: 3,
+        oldestMessageIndex: 1,
+        newestMessageIndex: 3,
+      }),
+    });
+
+    const merged = mergeSessionDetailMessageWindow(previous, next);
+
+    expect(merged.messages.map((message) => message.id)).toEqual([
+      "session-live-message-1",
+      "session-live-message-2",
+      "session-live-message-3",
+    ]);
+    expect(merged.messageWindow).toMatchObject({
+      totalMessages: 3,
+      returnedMessages: 3,
+      oldestMessageIndex: 1,
+      newestMessageIndex: 3,
+      hasEarlier: false,
+      hasLater: false,
+    });
+  });
+
+  it("keeps the accumulated tail when a late snapshot carries an older ledger sequence", () => {
+    const previous = makeDetail({
+      ledgerSeq: 50,
+      messages: [1, 2, 3, 4].map((index) => ({
+        id: `session-live-message-${index}`,
+        role: index % 2 === 0 ? "assistant" : "user",
+        content: `message ${index}`,
+        timestamp: "2026-05-22T10:00:00Z",
+      })),
+      messageWindow: makeWindow({
+        totalMessages: 4,
+        returnedMessages: 4,
+        oldestMessageIndex: 1,
+        newestMessageIndex: 4,
+      }),
+    });
+    const late = makeDetail({
+      ledgerSeq: 42,
+      messages: [1, 2, 3].map((index) => ({
+        id: `session-live-message-${index}`,
+        role: index % 2 === 0 ? "assistant" : "user",
+        content: `message ${index}`,
+        timestamp: "2026-05-22T09:00:00Z",
+      })),
+      messageWindow: makeWindow({
+        totalMessages: 3,
+        returnedMessages: 3,
+        oldestMessageIndex: 1,
+        newestMessageIndex: 3,
+      }),
+    });
+
+    const merged = mergeSessionDetailMessageWindow(previous, late);
+
+    expect(merged.messages.map((message) => message.id)).toEqual([
+      "session-live-message-1",
+      "session-live-message-2",
+      "session-live-message-3",
+      "session-live-message-4",
+    ]);
+  });
+
+  it("drops a stale live overlay when a strictly newer authoritative window truncated its turn", () => {
+    const staleOverlay = liveOverlayMessage("session-live-message-live-turn-stopped", "turn-stopped", "2026-05-22T10:00:03Z");
+    const previous = makeDetail({
+      ledgerSeq: 40,
+      messages: [
+        {
+          id: "session-live-message-1",
+          role: "user",
+          content: "第二问",
+          timestamp: "2026-05-22T10:00:02Z",
+        },
+        staleOverlay,
+      ],
+      messageWindow: makeWindow({
+        totalMessages: 2,
+        returnedMessages: 2,
+        oldestMessageIndex: 1,
+        newestMessageIndex: 2,
+      }),
+    });
+    const next = makeDetail({
+      ledgerSeq: 47,
+      messages: [
+        {
+          id: "session-live-message-1",
+          role: "user",
+          content: "第二问（改写后重发）",
+          timestamp: "2026-05-22T10:00:04Z",
+        },
+      ],
+      messageWindow: makeWindow({
+        totalMessages: 1,
+        returnedMessages: 1,
+        oldestMessageIndex: 1,
+        newestMessageIndex: 1,
+      }),
+    });
+
+    const merged = mergeSessionDetailMessageWindow(previous, next);
+
+    expect(merged.messages.map((message) => message.id)).toEqual(["session-live-message-1"]);
   });
 
   it("derives a sidebar-safe summary from active session detail", () => {
@@ -980,5 +1330,68 @@ describe("chatSessionState", () => {
         "session-live",
       ),
     ).toBe(false);
+  });
+
+  it("patches a stop control ack without dropping the transcript", () => {
+    const current = makeDetail({
+      messages: [assistantTerminalTurn("assistant-1", "turn-1", "2026-01-01T00:00:00Z")],
+      activeTurnId: "turn-2",
+    });
+    const ack = {
+      id: "session-live",
+      currentPhase: "stopping",
+      stopRequested: true,
+      stopRequestedAt: "2026-01-01T00:00:05Z",
+      activeTurnId: "turn-2",
+    } as unknown as SessionDetail;
+
+    const merged = mergeSessionDetailMessageWindow(current, ack);
+
+    expect(merged.messages).toEqual(current.messages);
+    expect(merged.currentPhase).toBe("stopping");
+    expect(merged.stopRequested).toBe(true);
+    expect(merged.stopRequestedAt).toBe("2026-01-01T00:00:05Z");
+  });
+
+  it("does not apply a foreign control ack onto the active detail", () => {
+    const current = makeDetail();
+    const ack = { id: "other-session", currentPhase: "stopping" } as unknown as SessionDetail;
+
+    expect(mergeSessionDetailMessageWindow(current, ack).id).toBe("other-session");
+  });
+
+  it("marks the detail as stopping optimistically and restores it after failure", () => {
+    const current = makeDetail({ activeTurnId: "turn-2" });
+
+    const stopping = markSessionDetailStopping(current, { requestedAt: "2026-01-01T00:00:05Z" });
+
+    expect(stopping?.currentPhase).toBe("stopping");
+    expect(stopping?.stopRequested).toBe(true);
+    expect(stopping?.stopRequestedAt).toBe("2026-01-01T00:00:05Z");
+    expect(stopping?.messages).toEqual(current.messages);
+
+    const restored = clearSessionDetailStopping(stopping as SessionDetail, {
+      requestedAt: "2026-01-01T00:00:05Z",
+      previous: current,
+    });
+    expect(restored.currentPhase).toBe("running");
+    expect(restored.stopRequested).toBe(false);
+    expect(restored.stopRequestedAt).toBe("");
+  });
+
+  it("keeps a newer server stop state when clearing an optimistic stop", () => {
+    const current = makeDetail();
+    const serverPublished = makeDetail({
+      currentPhase: "stopping",
+      stopRequested: true,
+      stopRequestedAt: "2026-01-01T00:00:06Z",
+    });
+
+    const cleared = clearSessionDetailStopping(serverPublished, {
+      requestedAt: "2026-01-01T00:00:05Z",
+      previous: current,
+    });
+
+    expect(cleared).toBe(serverPublished);
   });
 });

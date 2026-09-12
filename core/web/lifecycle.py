@@ -96,6 +96,21 @@ def _recover_challenge_meeting_drivers_on_startup() -> object:
     return recover_challenge_meeting_drivers()
 
 
+def _recover_hypothesis_command_attempts_on_startup() -> object:
+    """Fence long hypothesis commands interrupted by a restart (SCI-049).
+
+    The async command window leaves ``accepted`` attempts behind when the
+    backend dies mid-execution; this sweep marks those orphans ``failed`` so
+    the UI shows a retryable failure instead of a zombie accepted state.
+    """
+
+    from .services.team_workflow.research_runtime.hypothesis_command_attempts import (
+        recover_interrupted_command_attempts,
+    )
+
+    return recover_interrupted_command_attempts()
+
+
 def _validate_challenge_fence_config_on_startup() -> int | None:
     """Validate the operator per-call fence pin once at backend boot.
 
@@ -219,6 +234,9 @@ async def web_workbench_lifespan(app: FastAPI | None):
     startup_meeting_driver_recovery_task = asyncio.create_task(
         asyncio.to_thread(_recover_challenge_meeting_drivers_on_startup)
     )
+    startup_command_attempt_recovery_task = asyncio.create_task(
+        asyncio.to_thread(_recover_hypothesis_command_attempts_on_startup)
+    )
     startup_challenge_fence_validation_task = asyncio.create_task(
         asyncio.to_thread(_validate_challenge_fence_config_on_startup)
     )
@@ -275,6 +293,11 @@ async def web_workbench_lifespan(app: FastAPI | None):
             task, message="Challenge meeting driver recovery failed during startup."
         )
     )
+    startup_command_attempt_recovery_task.add_done_callback(
+        lambda task: consume_startup_task_result(
+            task, message="Hypothesis command attempt recovery failed during startup."
+        )
+    )
     startup_challenge_fence_validation_task.add_done_callback(
         lambda task: consume_startup_task_result(
             task,
@@ -325,6 +348,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
                         "session_catalog",
                         "agent_inbox_recovery",
                         "meeting_driver_recovery",
+                        "command_attempt_recovery",
                         "challenge_fence_config_validation",
                         "external_agent_task_reconcile",
                         "virtual_human_life",
@@ -347,6 +371,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
             startup_catalog_task,
             startup_agent_inbox_recovery_task,
             startup_meeting_driver_recovery_task,
+            startup_command_attempt_recovery_task,
             startup_challenge_fence_validation_task,
             startup_external_agent_reconcile_task,
             startup_code_fingerprint_task,

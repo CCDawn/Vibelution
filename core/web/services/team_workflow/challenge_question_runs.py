@@ -10,7 +10,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, unquote, urlparse
 from uuid import uuid4
 
@@ -41,6 +41,9 @@ from core.web.services.team_workflow.research_projects import (
     resolve_research_project_workspace_root,
     resolve_team_program_root,
 )
+
+if TYPE_CHECKING:
+    from core.web.services.team_workflow.citation_recheck import RetryPolicy
 
 STORE_SCHEMA_VERSION = 1
 STORE_KIND = "challenge_question_run_store"
@@ -3357,6 +3360,114 @@ def repair_challenge_question_output_registration(
     }
 
 
+def required_deep_experiment_question_ids() -> set[str]:
+    """Public read of the frozen program's required deep-experiment questions."""
+
+    return _required_deep_experiment_question_ids()
+
+
+def list_challenge_question_run_records(
+    team_id: str, *, question_id: str
+) -> list[dict[str, Any]]:
+    """Read one question's immutable run index records for a retire preview."""
+
+    team_service.get_team(team_id)
+    normalized_question_id = str(question_id or "").strip().upper()
+    if not normalized_question_id:
+        raise ValueError("Question id is required.")
+    store = _load_store(team_id)
+    return [
+        deepcopy(item)
+        for item in store.get("records", [])
+        if isinstance(item, dict)
+        and str(item.get("questionId") or "").strip().upper() == normalized_question_id
+    ]
+
+
+def retire_challenge_question_runs(
+    team_id: str,
+    *,
+    question_id: str,
+    run_ids: set[str] | list[str],
+) -> dict[str, Any]:
+    """Remove one retired question's registered runs and their artifact files.
+
+    Only the explicitly listed run ids of this question are touched; a run
+    registered after the caller collected its targets is preserved.  Approved
+    runs are rejected so the caller cannot silently drop a submitted result.
+    """
+
+    team_service.get_team(team_id)
+    normalized_question_id = str(question_id or "").strip().upper()
+    target_run_ids = {
+        str(value or "").strip() for value in run_ids if str(value or "").strip()
+    }
+    if not normalized_question_id or not target_run_ids:
+        raise ValueError("Question id and run ids are required.")
+    removed_records: list[dict[str, Any]] = []
+    with _STORE_LOCK:
+        store = _load_store(team_id)
+        records = [item for item in store.get("records", []) if isinstance(item, dict)]
+        kept: list[dict[str, Any]] = []
+        for record in records:
+            question_matches = (
+                str(record.get("questionId") or "").strip().upper()
+                == normalized_question_id
+            )
+            run_matches = str(record.get("runId") or "").strip() in target_run_ids
+            if question_matches and run_matches:
+                if str(record.get("status") or "") == APPROVED_GATE_DECISION:
+                    raise ValueError(
+                        "已通过验收的正式运行不能退役；请先撤销该运行的人工验收记录。"
+                    )
+                removed_records.append(record)
+                continue
+            kept.append(record)
+        if not removed_records:
+            return {"removedRunIds": [], "removedFileCount": 0, "failedPaths": []}
+        store["records"] = kept
+        store["updatedAt"] = _utc_now()
+        _write_json(_store_path(team_id), store)
+    removed_run_ids: list[str] = []
+    failed_paths: list[str] = []
+    removed_file_count = 0
+    for record in removed_records:
+        question = str(record.get("questionId") or "").strip()
+        run_id = str(record.get("runId") or "").strip()
+        if not question or not run_id:
+            continue
+        removed_run_ids.append(run_id)
+        artifact = _artifact_path(team_id, question, run_id)
+        candidates = (
+            artifact,
+            _result_package_artifact_path(team_id, question, run_id),
+            artifact.with_name(f"{run_id}.citation-recheck.jsonl"),
+        )
+        for path in candidates:
+            try:
+                if path.is_file():
+                    path.unlink()
+                    removed_file_count += 1
+            except OSError:
+                failed_paths.append(str(path))
+    _prune_empty_question_run_directory(team_id, normalized_question_id)
+    return {
+        "removedRunIds": removed_run_ids,
+        "removedFileCount": removed_file_count,
+        "failedPaths": failed_paths,
+    }
+
+
+def _prune_empty_question_run_directory(team_id: str, question_id: str) -> None:
+    directory = _artifact_path(team_id, question_id, "probe").parent
+    try:
+        if not directory.is_dir() or any(directory.iterdir()):
+            return
+        directory.rmdir()
+    except OSError:
+        return
+
+
 def review_challenge_question_output(
     team_id: str,
     question_id: str,
@@ -3493,6 +3604,9 @@ def reverify_citation_receipts(
     run_id: str,
     *,
     doi_verifier: Callable[[str], Mapping[str, Any] | None] | None = None,
+    force_full: bool = False,
+    retry_policy: RetryPolicy | None = None,
+    sleeper: Callable[[float], None] | None = None,
 ) -> dict[str, Any]:
     """Re-run failed citation receipts of one registered run via DOI metadata.
 
@@ -3517,13 +3631,27 @@ def reverify_citation_receipts(
     * the immutable ``sourceResultPackageHash`` binding and the evidence
       rows themselves are never modified.
 
+    SCI-049 progress/checkpoint contract (see
+    :mod:`core.web.services.team_workflow.citation_recheck` for the stable
+    heartbeat payload constants): after every evidence row the loop appends
+    a structured ``citation_recheck`` heartbeat to an append-only JSONL
+    ledger next to the run artifact (``<run>.citation-recheck.jsonl``), and
+    every verified URL is persisted immediately, so a re-trigger resumes
+    from the verified prefix instead of re-verifying the whole set (pass
+    ``force_full=True`` to deliberately re-verify everything).  Transient
+    per-URL failures retry with a Temporal-style RetryPolicy (initial 2s,
+    backoff x2.0, max 60s, 5 attempts, env-overridable); validation-class
+    rejections (no DOI authority, definitive 4xx) are non-retryable and
+    fail the URL immediately.  ``retry_policy``/``sleeper`` are test seams.
+
     ``doi_verifier`` injects the DOI metadata lookup (tests); the default
     performs the real bounded network calls.  Returns a report with the
     resulting status (``already_passed`` / ``reverified`` / ``still_failed``),
     the refreshed record and the citation validation summary.
     """
 
-    from .doi_metadata_verification import DEFAULT_MAX_VERIFICATIONS, verify_failed_receipt_dois
+    from .citation_recheck import read_resume_verified, verify_receipts_with_heartbeat
+    from .doi_metadata_verification import DEFAULT_MAX_VERIFICATIONS
     from .research_runtime.result_package_v2 import _citation_checks
 
     team_service.get_team(team_id)
@@ -3581,13 +3709,26 @@ def reverify_citation_receipts(
         # time, but a still-failed record persists nothing: every retry would
         # re-verify the same first N receipts and never reach the tail.  Lift
         # the cap to cover the whole evidence set (each lookup stays bounded
-        # by its own timeout) so one operator click can converge.
-        verification = verify_failed_receipt_dois(
+        # by its own timeout) so one operator click can converge.  The loop
+        # appends a structured citation_recheck heartbeat per evidence row
+        # and persists every verified URL immediately, so a re-trigger
+        # resumes from the ledger instead of re-verifying verified URLs.
+        ledger_path = artifact_path.with_name(f"{normalized_run_id}.citation-recheck.jsonl")
+        resume_verified = {} if force_full else read_resume_verified(ledger_path)
+        verification = verify_receipts_with_heartbeat(
             verification_input,
+            team_id=team_id,
+            question_id=normalized_question_id,
+            run_id=normalized_run_id,
+            ledger_path=ledger_path,
             verifier=doi_verifier,
             max_verifications=max(
                 DEFAULT_MAX_VERIFICATIONS, len(verification_input)
             ),
+            force_full=force_full,
+            resume_verified=resume_verified,
+            retry_policy=retry_policy,
+            sleeper=sleeper,
         )
         checks = _citation_checks(
             evidence,
@@ -3648,3 +3789,39 @@ def reverify_citation_receipts(
         "verification": verification,
         "summary": summary,
     }
+
+
+def read_citation_recheck_progress(
+    team_id: str,
+    question_id: str,
+    run_id: str,
+) -> dict[str, Any]:
+    """Read-only recheck heartbeat progress for one registered run.
+
+    Read surface for the structured ``citation_recheck`` heartbeats written
+    by :func:`reverify_citation_receipts` (payload contract in
+    :mod:`core.web.services.team_workflow.citation_recheck`).  Deliberately
+    never touches ``_STORE_LOCK`` or the run store: a progress poll must be
+    servable while a minutes-long recheck holds that lock.
+    """
+
+    from .citation_recheck import progress_report
+
+    team_service.get_team(team_id)
+    normalized_question_id = str(question_id or "").strip().upper()
+    normalized_run_id = str(run_id or "").strip()
+    if not normalized_question_id or not normalized_run_id:
+        raise ValueError("questionId and runId are required.")
+    ledger_path = (
+        _workflow_root(team_id)
+        / "challenge_program"
+        / "question_runs"
+        / normalized_question_id
+        / f"{normalized_run_id}.citation-recheck.jsonl"
+    )
+    return progress_report(
+        ledger_path,
+        team_id=team_id,
+        question_id=normalized_question_id,
+        run_id=normalized_run_id,
+    )

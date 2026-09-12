@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildComposerContextRingModel,
   formatCompactTokenCount,
+  resolveComposerCacheState,
   resolveComposerSegmentHitKind,
 } from "./composerContextModel";
 
@@ -45,6 +46,40 @@ describe("composerContextModel", () => {
     })).toBe("miss");
   });
 
+  it("marks unobserved segments as unknown instead of miss", () => {
+    expect(resolveComposerSegmentHitKind({
+      cachePolicy: "cacheable",
+      observedStatus: "not_observed",
+      status: "included",
+      observedCachedInputTokens: 0,
+      observedMissedInputTokens: 0,
+    })).toBe("unknown");
+    expect(resolveComposerSegmentHitKind({
+      cachePolicy: "",
+      observedStatus: "",
+      status: "included",
+      observedCachedInputTokens: 0,
+      observedMissedInputTokens: 0,
+    })).toBe("unknown");
+  });
+
+  it("resolves cache observation state from the provider source", () => {
+    expect(resolveComposerCacheState({
+      cacheSource: "provider_usage",
+      cacheUsageObserved: true,
+    })).toBe("observed");
+    expect(resolveComposerCacheState({
+      cacheSource: "provider_usage",
+      cacheUsageObserved: false,
+    })).toBe("missing");
+    expect(resolveComposerCacheState({
+      cacheSource: "provider_usage",
+      cachedInputTokens: 12,
+    })).toBe("observed");
+    expect(resolveComposerCacheState({ cacheSource: "not_called" })).toBe("not_called");
+    expect(resolveComposerCacheState({})).toBe("missing");
+  });
+
   it("builds ring model with usage and segment shares", () => {
     const model = buildComposerContextRingModel({
       usageUsed: 42000,
@@ -85,7 +120,46 @@ describe("composerContextModel", () => {
     expect(model.segments[0]?.hit).toBe("hit");
     expect(model.segments[1]?.hit).toBe("miss");
     expect(model.segments[2]?.hit).toBe("never");
+    expect(model.segments[0]?.pctLabel).toBe("20%");
+    expect(model.hitShares).toEqual({ hit: 20, miss: 30, never: 50, unknown: 0 });
+    expect(model.cacheState).toBe("missing");
     expect(model.segments.reduce((sum, segment) => sum + segment.pct, 0)).toBeCloseTo(100, 0);
+  });
+
+  it("keeps segment content previews and observed cache state", () => {
+    const model = buildComposerContextRingModel({
+      usageUsed: 100,
+      usageLimit: 1000,
+      hitPercent: 0,
+      detailAvailable: true,
+      lang: "zh",
+      cacheSource: "provider_usage",
+      cacheUsageObserved: true,
+      segments: [
+        {
+          key: "history",
+          label: "历史",
+          tokens: 90,
+          cachePolicy: "cacheable",
+          observedStatus: "observed_miss",
+          contentPreview: "prior messages",
+        },
+        {
+          key: "current_user",
+          label: "本轮输入",
+          tokens: 10,
+          cachePolicy: "never_cache",
+          observedStatus: "not_observed",
+        },
+      ] as never,
+    });
+    expect(model.cacheState).toBe("observed");
+    expect(model.segments[0]?.contentPreview).toBe("prior messages");
+    expect(model.segments[0]?.pctLabel).toBe("90%");
+    expect(model.segments[1]?.contentPreview).toBeUndefined();
+    expect(model.segments[1]?.hit).toBe("never");
+    expect(model.hitShares.miss).toBe(90);
+    expect(model.hitShares.never).toBe(10);
   });
 
   it("marks empty when no usage and no segments", () => {

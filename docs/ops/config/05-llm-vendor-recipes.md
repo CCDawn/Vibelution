@@ -65,6 +65,46 @@ mode = "automatic"
 
 ---
 
+## OpenCode 中转站（混合协议）
+
+第三方中转转售 OpenCode Go/Zen 时，同一端点下模型协议不同。声明 `api` 后按模型名分流；模型级 `wire_protocol` 仍然优先。
+
+```toml
+[llm.providers.custom_opencode_relay]
+label = "OpenCode 中转 / Relay"
+kind = "relay"
+vendor = "relay"
+driver = "openai"
+api = "opencode-go"            # 或 opencode-zen；用于按模型名分流
+base_url = "https://your-relay.example/v1"
+credential_ref = "env:VIBELUTION_LLM_MODEL_OPENCODE_RELAY_API_KEY"
+compat_mode = "openai"
+service_class = "relay"
+
+[llm.providers.custom_opencode_relay.protocols]
+default = "chat_completions"
+allowed = ["chat_completions", "responses"]
+
+[llm.providers.custom_opencode_relay.models."gpt-5.6-luna"]
+upstream_id = "gpt-5.6-luna"
+wire_protocol = "responses"     # 显式优先；缺省时由 api 规则分流
+
+[llm.providers.custom_opencode_relay.models."deepseek-v4-flash"]
+upstream_id = "deepseek-v4-flash"
+wire_protocol = "chat_completions"
+```
+
+| 检查 | 值 |
+| --- | --- |
+| 分流 | `api = "opencode-go"`：gpt/grok/muse-spark→responses，minimax/qwen→anthropic_messages，glm/kimi/deepseek/mimo/longcat/hy3/hy4/omen→chat_completions；`api = "opencode-zen"`：gpt/codex/grok/muse-spark→responses，claude 系/qwen→anthropic_messages，其余（含 minimax/glm/kimi/deepseek）→chat_completions |
+| 显式优先 | 模型 `wire_protocol` > `api` 规则 > provider `protocols.default`；规则命中但不在 `allowed` 时回退默认 |
+| 发现 | `discovery.adapter = "openai_compatible"`，发现的新模型按同一规则分流 |
+| 鉴权 | `/messages`（anthropic_messages）只认 `x-api-key`，Bearer 会 401；Vibelution 传输层已按此发送 |
+| 限制 | Zen 的 Gemini 走特殊路径 `zen/v1/models/{model-id}`（Google generateContent 形态），当前不支持；OpenAI 系模型可能受 Region 限制（403）；Muse Spark 仅部分区域可用 |
+| 注意 | 中转站模型名与官方不一致时以实际声明 `wire_protocol` 为准；规则按官方端点表（2026-09）维护，端点变更时同步更新 |
+
+---
+
 ## DeepSeek
 
 ```toml

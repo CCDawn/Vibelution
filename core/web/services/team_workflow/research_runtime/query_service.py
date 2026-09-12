@@ -174,6 +174,12 @@ class WorkflowQueryService:
             revise_checkpoint_id=self._resolve_revise_checkpoint_id(run),
             invocations=knowledge_invocations,
         )
+        # SCI-049 O-02: quote the sweep cadence on the knowledge badges so the
+        # UI can show "auto-accepted within ~Ns" instead of a silent wait.
+        # Function-local import keeps this read-only module off the runtime
+        # factory's import graph.
+        from .runtime_factory import auto_advance_sweep_interval_ms
+
         return build_research_workflow_snapshot(
             ProjectionInputs(
                 run=run,
@@ -193,6 +199,7 @@ class WorkflowQueryService:
                 execution_anchors=tuple(execution_anchors),
                 knowledge_invocations=tuple(knowledge_invocations),
                 knowledge_child_node_states=dict(knowledge_child_node_states),
+                auto_accept_interval_ms=auto_advance_sweep_interval_ms(),
                 latest_event_sequence=latest_seq,
                 generated_at=self._clock_iso(),
             )

@@ -103,6 +103,8 @@ export type ConversationViewProps = {
   composerValue: string;
   composerPlaceholder: string;
   composerDisabled: boolean;
+  /** Per-session AI "next prompt" suggestion (Tab to complete) for the idle composer. */
+  promptSuggestionEnabled?: boolean;
   /** Explicit one-shot request used by destructive route handoffs. */
   composerFocusSignal?: string;
   onComposerFocusRequestSettled?: (focusSignal: string) => void;
@@ -150,9 +152,14 @@ export type ConversationViewProps = {
   onRemoveComposerReference?: (referenceId: string) => void;
   onEditUserMessage?: (message: ConversationMessage) => void;
   onRegenerateAssistantMessage?: (message: ConversationMessage) => void;
+  onSwitchMessageVersion?: (message: ConversationMessage, targetNodeId: string) => void;
+  branchVersionSwitchDisabled?: boolean;
   regenerableAssistantMessageId?: string;
   regenerateDisabled?: boolean;
   regeneratePending?: boolean;
+  onRetryTurn?: () => void;
+  retryTurnDisabled?: boolean;
+  retryTurnPending?: boolean;
   onCancelComposerMode?: () => void;
   onLoadEarlierMessages?: () => void;
   onSubmit: () => void;

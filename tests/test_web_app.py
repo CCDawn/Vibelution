@@ -18,11 +18,13 @@ from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_DELTA_COMMITTED,
     EVENT_ASSISTANT_MESSAGE,
     EVENT_ASSISTANT_PARTIAL,
+    EVENT_BRANCH_REBASE,
     EVENT_TOOL_RESULT,
     EVENT_TURN_INTERRUPTED,
     EVENT_TURN_STARTED,
     EVENT_USER_MESSAGE,
     append_conversation_event,
+    fold_active_events,
     load_conversation_events,
 )
 from core.ui.chat_state import load_chat_state, save_chat_state
@@ -60,7 +62,7 @@ pytestmark = pytest.mark.serial
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
 
-CONTEXT_PREPARE_LIVE_MESSAGE = "正在准备对话上下文...\n正在读取当前会话、绑定 Agent、工具权限和可恢复的上轮现场。"
+CONTEXT_PREPARE_LIVE_MESSAGE = "正在处理..."
 
 
 _RETIRED_ASSISTANT_ENVELOPE_FIELDS = (
@@ -128,7 +130,7 @@ def _assert_context_prepare_overlay(message: dict) -> None:
     assert message["status"] == "running"
     assert any(
         item.get("type") == "status"
-        and item.get("code") == "context_prepare"
+        and item.get("code") == "working"
         and item.get("text") == CONTEXT_PREPARE_LIVE_MESSAGE
         for item in message["turnItems"]
     )
@@ -1303,7 +1305,7 @@ def test_session_detail_exposes_pre_model_progress_stage(tmp_path, monkeypatch):
     assert live_message["status"] == "running"
     assert any(
         item.get("type") == "status"
-        and item.get("code") == "context_prepare"
+        and item.get("code") == "working"
         and item.get("text") == CONTEXT_PREPARE_LIVE_MESSAGE
         for item in live_message["turnItems"]
     )
@@ -1399,9 +1401,8 @@ def test_session_detail_exposes_pre_model_progress_as_ordered_feedback_events(tm
     _assert_v3_assistant_message(live_message)
     status_items = _assistant_turn_items(live_message, "status")
     assert [item["code"] for item in status_items] == [
-        "context_prepare",
-        "agent_prepare",
-        "model_request",
+        "working",
+        "thinking",
     ]
     assert status_items[-1]["status"] == "running"
     work_run = session_service._WORK_RUN_STORE.load_snapshot("chat_turn", "turn-progress-events")
@@ -5074,6 +5075,32 @@ def test_edit_resubmit_session_message_truncates_following_history_and_starts_tu
     signals = _read_next_state_signals(tmp_path, session_id="session-live")
     assert any(item["kind"] == "assistant_output_edited" and item["turnId"] for item in signals)
 
+    raw_events = load_conversation_events(tmp_path, "session-live")
+    rebase_events = [event for event in raw_events if event.event_type == EVENT_BRANCH_REBASE]
+    assert len(rebase_events) == 1
+    rebase = rebase_events[0]
+    assert rebase.payload["operation"] == "edit"
+    assert rebase.payload["baseMessageId"] == "session-live-message-3"
+    assert rebase.payload["replacedTurnIds"] == ["edit-history-003", "edit-history-004"]
+    fork_index = next(
+        index for index, event in enumerate(raw_events) if event.event_id == rebase.payload["fromEventId"]
+    )
+    assert raw_events[fork_index].event_type == EVENT_ASSISTANT_MESSAGE
+    assert raw_events[fork_index].payload["content"] == "原始回答"
+    assert any(
+        event.event_type == EVENT_ASSISTANT_MESSAGE and event.payload.get("content") == "后续回答"
+        for event in raw_events
+    )
+    active_events = fold_active_events(raw_events)
+    assert not any(
+        event.event_type == EVENT_ASSISTANT_MESSAGE and event.payload.get("content") == "后续回答"
+        for event in active_events
+    )
+    assert any(
+        event.event_type == EVENT_USER_MESSAGE and event.payload.get("content") == "编辑后的需求"
+        for event in active_events
+    )
+
     session_service._set_session_running("session-live", False)
     session_service._clear_session_turn_control("session-live")
     session_service._clear_session_live_output("session-live")
@@ -5335,6 +5362,26 @@ def test_regenerate_session_message_reruns_latest_user_message_with_attachments(
     signals = _read_next_state_signals(tmp_path, session_id="session-live")
     assert any(item["kind"] == "assistant_output_edited" and item["turnId"] for item in signals)
 
+    raw_events = load_conversation_events(tmp_path, "session-live")
+    rebase = next(event for event in raw_events if event.event_type == EVENT_BRANCH_REBASE)
+    assert rebase.payload["operation"] == "regenerate"
+    assert rebase.payload["baseMessageId"] == "session-live-message-3"
+    assert rebase.payload["replacedTurnIds"] == ["regenerate-history-003", "regenerate-history-004"]
+    assert any(
+        event.event_type == EVENT_ASSISTANT_MESSAGE and event.payload.get("content") == "后续回答"
+        for event in raw_events
+    )
+    active_events = fold_active_events(raw_events)
+    assert not any(
+        event.event_type == EVENT_ASSISTANT_MESSAGE and event.payload.get("content") == "后续回答"
+        for event in active_events
+    )
+    assert [
+        event.payload.get("content")
+        for event in active_events
+        if event.event_type == EVENT_USER_MESSAGE
+    ] == ["原始需求", "后续追问"]
+
     session_service._set_session_running("session-live", False)
     session_service._clear_session_turn_control("session-live")
     session_service._clear_session_live_output("session-live")
@@ -5384,6 +5431,195 @@ def test_regenerate_session_message_requires_message_id(tmp_path, monkeypatch):
 
     assert response.status_code == 422
     assert response.json()["detail"]
+
+
+def test_branch_edit_reports_versions_and_head_switch_restores_branch(tmp_path, monkeypatch):
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "session-live",
+            "updated_at": "2026-05-18T12:03:00",
+            "conversations": [
+                {
+                    "conversation_id": "session-live",
+                    "title": "真实会话",
+                    "updated_at": "2026-05-18T12:03:00",
+                    "last_turn_status": "ready",
+                }
+            ],
+        },
+    )
+    _append_test_ledger_messages(
+        tmp_path,
+        "session-live",
+        [
+            {"role": "user", "content": "原始需求", "timestamp": "2026-05-18T12:00:00"},
+            {"role": "assistant", "content": "原始回答", "timestamp": "2026-05-18T12:01:00"},
+            {"role": "user", "content": "后续追问", "timestamp": "2026-05-18T12:02:00"},
+            {"role": "assistant", "content": "后续回答", "timestamp": "2026-05-18T12:03:00"},
+        ],
+        prefix="branch-head-history",
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+    published: list[str] = []
+    monkeypatch.setattr(
+        session_service,
+        "_publish_session_detail_snapshot",
+        lambda session_id, **kwargs: published.append(session_id),
+    )
+
+    pre_detail = session_service.get_session_detail("session-live")
+    pre_messages = pre_detail["messages"]
+    assert all(str(message.get("nodeId") or "").strip() for message in pre_messages)
+    assert all(message["branch"]["siblingCount"] == 1 for message in pre_messages)
+    assert pre_detail["activeBranchId"] == "main"
+    original_leaf = pre_detail["activeLeafId"]
+    assert original_leaf == pre_messages[-1]["nodeId"]
+
+    response = client.post(
+        "/api/sessions/session-live/messages/edit-resubmit",
+        json={
+            "messageId": "session-live-message-3",
+            "baseMessageId": pre_messages[2]["nodeId"],
+            "content": "编辑后的追问",
+        },
+    )
+
+    assert response.status_code == 202, response.json()
+    session_service._set_session_running("session-live", False)
+    session_service._clear_session_turn_control("session-live")
+    session_service._clear_session_live_output("session-live")
+
+    branched_detail = session_service.get_session_detail("session-live")
+    assert [_conversation_message_text(item) for item in branched_detail["messages"]] == [
+        "原始需求",
+        "原始回答",
+        "编辑后的追问",
+    ]
+    edited_user = branched_detail["messages"][2]
+    assert edited_user["branch"]["siblingCount"] == 2
+    assert edited_user["branch"]["siblingIndex"] == 2
+    assert edited_user["branch"]["siblingNodeIds"] == [
+        pre_messages[2]["nodeId"],
+        edited_user["nodeId"],
+    ]
+    assert branched_detail["activeLeafId"] == edited_user["nodeId"]
+    assert branched_detail["activeBranchId"] != pre_detail["activeBranchId"]
+
+    head = client.post("/api/sessions/session-live/head", json={"nodeId": original_leaf})
+
+    assert head.status_code == 202, head.json()
+    assert "session-live" in published
+    restored_detail = session_service.get_session_detail("session-live")
+    assert [_conversation_message_text(item) for item in restored_detail["messages"]] == [
+        "原始需求",
+        "原始回答",
+        "后续追问",
+        "后续回答",
+    ]
+    assert restored_detail["activeLeafId"] == original_leaf
+    restored_user = restored_detail["messages"][2]
+    assert restored_user["branch"]["siblingCount"] == 2
+    assert restored_user["branch"]["siblingIndex"] == 1
+
+    raw_events = load_conversation_events(tmp_path, "session-live")
+    head_events = [
+        event
+        for event in raw_events
+        if event.event_type == EVENT_BRANCH_REBASE and event.payload.get("operation") == "head_select"
+    ]
+    assert len(head_events) == 1
+    assert head_events[0].payload["fromEventId"] == original_leaf
+    assert head_events[0].payload["baseMessageId"] == original_leaf
+    assert head_events[0].visible_in_model is False
+
+    head_again = client.post("/api/sessions/session-live/head", json={"nodeId": original_leaf})
+
+    assert head_again.status_code == 202
+    assert len(load_conversation_events(tmp_path, "session-live")) == len(raw_events)
+
+    unknown = client.post("/api/sessions/session-live/head", json={"nodeId": "missing-node"})
+    assert unknown.status_code == 422
+
+    session_service._set_session_running("session-live", True, turn_id="turn-running")
+    busy = client.post("/api/sessions/session-live/head", json={"nodeId": original_leaf})
+    assert busy.status_code == 409
+    session_service._set_session_running("session-live", False, turn_id="turn-running")
+    session_service._clear_session_turn_control("session-live")
+
+
+def test_regenerate_with_base_message_id_branches_older_turn_and_rejects_off_path(tmp_path, monkeypatch):
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "session-live",
+            "updated_at": "2026-05-18T12:03:00",
+            "conversations": [
+                {
+                    "conversation_id": "session-live",
+                    "title": "真实会话",
+                    "updated_at": "2026-05-18T12:03:00",
+                    "last_turn_status": "ready",
+                }
+            ],
+        },
+    )
+    _append_test_ledger_messages(
+        tmp_path,
+        "session-live",
+        [
+            {"role": "user", "content": "原始需求", "timestamp": "2026-05-18T12:00:00"},
+            {"role": "assistant", "content": "原始回答", "timestamp": "2026-05-18T12:01:00"},
+            {"role": "user", "content": "后续追问", "timestamp": "2026-05-18T12:02:00"},
+            {"role": "assistant", "content": "后续回答", "timestamp": "2026-05-18T12:03:00"},
+        ],
+        prefix="base-message-history",
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+
+    pre_detail = session_service.get_session_detail("session-live")
+    pre_node_ids = [message["nodeId"] for message in pre_detail["messages"]]
+
+    response = client.post(
+        "/api/sessions/session-live/messages/regenerate",
+        json={"baseMessageId": pre_node_ids[1], "mentalModelEnabled": False},
+    )
+
+    assert response.status_code == 202, response.json()
+    session_service._set_session_running("session-live", False)
+    session_service._clear_session_turn_control("session-live")
+    session_service._clear_session_live_output("session-live")
+
+    branched_detail = session_service.get_session_detail("session-live")
+    assert [_conversation_message_text(item) for item in branched_detail["messages"]] == ["原始需求"]
+    remaining_leaf = branched_detail["messages"][-1]["nodeId"]
+    assert remaining_leaf == branched_detail["activeLeafId"]
+    assert remaining_leaf != pre_node_ids[0]
+    assert branched_detail["messages"][-1]["branch"]["active"] is True
+
+    raw_events = load_conversation_events(tmp_path, "session-live")
+    rebase = next(event for event in raw_events if event.event_type == EVENT_BRANCH_REBASE)
+    assert rebase.payload["operation"] == "regenerate"
+    assert rebase.payload["baseMessageId"] == pre_node_ids[1]
+    assert any(
+        event.event_type == EVENT_ASSISTANT_MESSAGE and event.payload.get("content") == "后续回答"
+        for event in raw_events
+    )
+
+    off_path = client.post(
+        "/api/sessions/session-live/messages/regenerate",
+        json={"baseMessageId": pre_node_ids[3]},
+    )
+
+    assert off_path.status_code == 409
 
 
 def test_chat_turn_registers_as_work_run_until_finished(tmp_path, monkeypatch):
@@ -5942,7 +6178,7 @@ def test_shutdown_stops_queued_same_agent_turn_before_it_starts(tmp_path, monkey
 def test_runtime_summary_exposes_parallel_chat_turn_active_items(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_manager_snapshot", lambda: {})
     alpha = session_service.create_chat_session(title="Alpha Agent")
@@ -6007,7 +6243,7 @@ def test_runtime_summary_exposes_queued_chat_turn_active_item(tmp_path, monkeypa
         "build_agent_context",
         lambda agent_id, **kwargs: SimpleNamespace(memory_policy={}, context_block="", timings={}),
     )
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_manager_snapshot", lambda: {})
     _install_session_turn_scheduler(monkeypatch, max_active_per_agent=1)
@@ -6355,7 +6591,7 @@ def test_run_session_turn_records_agent_started_scene_event(tmp_path, monkeypatc
 
 
 def test_runtime_summary_exposes_work_run_kinds(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     self_evolution_control_service.persist_manager_run_snapshot(
         "self",
@@ -6758,6 +6994,14 @@ def test_capture_session_ui_stream_surfaces_llm_retry_status(tmp_path, monkeypat
     assert live_state.stage == "model_retry"
     assert "模型连接正在重试" in live_state.content
     assert "2/5" in live_state.content
+    retry_event = next(
+        item
+        for item in live_state.feedback_events
+        if item.get("kind") == "status" and item.get("name") == "model_retry"
+    )
+    assert retry_event["attempt"] == 2
+    assert retry_event["maxAttempts"] == 5
+    assert retry_event["category"] == "network_error"
     # Retry progress is delivered through the lightweight assistant_delta
     # turnItems stream; it must not force a full session-detail snapshot.
     assert published == []
@@ -6835,12 +7079,12 @@ def test_capture_session_ui_stream_surfaces_live_thought_as_model_thinking(tmp_p
 
     live_state = session_service._snapshot_session_live_output("session-live-thought")
     assert live_state is not None
-    assert live_state.stage == "model_thinking"
+    assert live_state.stage == "thinking"
     assert live_state.content == ""
     assert any(
         item.get("kind") == "status"
-        and item.get("name") == "model_thinking"
-        and "正在思考" in str(item.get("resultPreview") or "")
+        and item.get("name") == "thinking"
+        and "等待模型响应" in str(item.get("resultPreview") or "")
         for item in live_state.feedback_events
     )
     assert live_state.thought == "先看最新日志，再判断是否真的卡住。"
@@ -6883,16 +7127,16 @@ def test_session_continuation_marks_server_side_model_wait_as_thinking(tmp_path,
 
     assert isinstance(result, dict)
     assert result["status"] == "completed"
-    assert observed_stages == ["model_thinking"]
+    assert observed_stages == ["thinking"]
     live_state = session_service._snapshot_session_live_output("session-server-thinking")
     assert live_state is not None
-    assert live_state.stage == "model_thinking"
+    assert live_state.stage == "thinking"
     assert live_state.content == ""
     assert live_state.thought == ""
     assert any(
         item.get("kind") == "status"
-        and item.get("name") == "model_thinking"
-        and "正在思考" in str(item.get("resultPreview") or "")
+        and item.get("name") == "thinking"
+        and "等待模型响应" in str(item.get("resultPreview") or "")
         for item in live_state.feedback_events
     )
 
@@ -7530,7 +7774,7 @@ def test_capture_session_ui_stream_preserves_ordered_feedback_events(tmp_path, m
     assert live_state is not None
     kinds = [item["kind"] for item in live_state.feedback_events]
     assert kinds == ["thought", "status", "tool", "thought", "tool"]
-    assert live_state.feedback_events[1]["name"] == "model_thinking"
+    assert live_state.feedback_events[1]["name"] == "thinking"
     assert live_state.feedback_events[2]["name"] == "read_log"
     assert live_state.feedback_events[2]["status"] == "done"
     assert live_state.feedback_events[2]["relatedThoughtSequence"] == live_state.feedback_events[0]["sequence"]

@@ -82,6 +82,33 @@ describe("canonical SessionTurnItem v3 rendering", () => {
     expect(codexTranscriptFromTurnItems([completed]).cells[0]?.id).toBe("tool");
   });
 
+  it("renders a completed tool with a degraded semantic status as a warning", () => {
+    const degraded: SessionTurnItem = {
+      ...base, id: "tool-r1", itemId: "tool", type: "tool_call", callId: "call-1",
+      toolName: "cli_tool", status: "completed", revision: 1, sequence: 1,
+      output: "partial output", semanticStatus: "degraded",
+    };
+    const healthy: SessionTurnItem = {
+      ...base, id: "tool-r1", itemId: "tool", type: "tool_call", callId: "call-1",
+      toolName: "cli_tool", status: "completed", revision: 1, sequence: 1,
+      output: "ok",
+    };
+    const failed: SessionTurnItem = {
+      ...degraded, id: "tool-r1", status: "failed", semanticStatus: "degraded",
+    };
+
+    expect(codexTranscriptFromTurnItems([degraded]).cells[0]).toMatchObject({
+      kind: "tool_call", status: "degraded", tone: "warning",
+    });
+    expect(codexTranscriptFromTurnItems([healthy]).cells[0]).toMatchObject({
+      kind: "tool_call", status: "completed", tone: "neutral",
+    });
+    // A semantic warning must never mask a real failure.
+    expect(codexTranscriptFromTurnItems([failed]).cells[0]).toMatchObject({
+      kind: "tool_call", status: "failed", tone: "error",
+    });
+  });
+
   it("uses the human compression marker title instead of its internal status code", () => {
     const marker: SessionTurnItem = {
       ...base,

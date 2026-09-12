@@ -22,11 +22,38 @@ const repairMock = vi.hoisted(() => vi.fn(async () => ({
   officialModelCall: true,
   record: {},
 })));
+const progressMock = vi.hoisted(() => vi.fn(async () => ({
+  schemaVersion: 1,
+  contract: "citation-recheck-heartbeat/v1",
+  stage: "citation_recheck",
+  teamId: "research-team",
+  questionId: "SCI-096",
+  runId: "stage1-sci-096-v3",
+  heartbeat: {
+    attemptId: "citrecheck-abc",
+    done: 12,
+    total: 46,
+    etaSeconds: 95,
+    at: "2026-01-01T00:00:00Z",
+  },
+  attempt: {
+    attemptId: "citrecheck-abc",
+    status: "running",
+    total: 46,
+    forceFull: false,
+    outcome: "",
+    at: "2026-01-01T00:00:00Z",
+  },
+  verifiedSourceUrls: [],
+  failedSourceUrls: [],
+  eventCount: 14,
+})));
 
 vi.mock("../../../api/challengeQuestionRuns", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   reverifyChallengeQuestionCitations: reverifyMock,
   repairChallengeQuestionRegistration: repairMock,
+  getChallengeQuestionReverifyProgress: progressMock,
 }));
 
 function repairDetail(validation: Record<string, unknown>): ChallengeQuestionRunDetailPayload {
@@ -72,6 +99,7 @@ describe("ChallengeQuestionRepairActions", () => {
   beforeEach(() => {
     reverifyMock.mockClear();
     repairMock.mockClear();
+    progressMock.mockClear();
   });
 
   it("offers both repairs for a record whose citation and official-call gates failed", async () => {
@@ -137,6 +165,44 @@ describe("ChallengeQuestionRepairActions", () => {
     expect(repairMock).toHaveBeenCalledTimes(1);
     expect(repairMock).toHaveBeenCalledWith("research-team", "SCI-096", "stage1-sci-096-v3");
     expect(reverifyMock).not.toHaveBeenCalled();
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: queryKeys.challengeQuestionRunDetail("research-team", "SCI-096"),
+    });
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("shows heartbeat done/total beside the pending recheck button (SCI-049)", async () => {
+    let resolveReverify: (value: unknown) => void = () => {};
+    reverifyMock.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        resolveReverify = resolve;
+      }),
+    );
+    const { container, root, invalidateSpy } = await renderActions(repairDetail({
+      citationValidation: "failed",
+      officialModelCall: true,
+    }));
+
+    const button = findButton(container, "challenge-question-reverify-citations");
+    await act(async () => {
+      button!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(container.textContent).toContain("重核中…（12/46）");
+      });
+    });
+    expect(progressMock).toHaveBeenCalledWith("research-team", "SCI-096", "stage1-sci-096-v3");
+
+    resolveReverify({ status: "reverified", record: {}, verification: {} });
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(container.textContent).not.toContain("重核中…");
+      });
+    });
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: queryKeys.challengeQuestionRunDetail("research-team", "SCI-096"),
     });

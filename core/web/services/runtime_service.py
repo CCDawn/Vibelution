@@ -223,7 +223,7 @@ def get_runtime_summary() -> dict:
     except Exception:
         pass
 
-    active_session = get_active_session_summary() or {}
+    active_session = get_active_session_summary(include_runtime_metrics=True) or {}
     model_identity = _safe_active_session_model_identity(active_session)
     if model_identity.get("model"):
         model_ref = str(model_identity.get("model") or "").strip()
@@ -244,10 +244,24 @@ def get_runtime_summary() -> dict:
         runtime_state,
         last_llm_usage=last_llm_usage,
     )
+    (
+        context_usage,
+        cache_usage,
+        last_llm_usage,
+        last_context_composition,
+        last_cache_composition,
+    ) = _apply_fresh_session_metrics(
+        active_session.get("runtimeMetrics"),
+        context_usage=context_usage,
+        cache_usage=cache_usage,
+        last_llm_usage=last_llm_usage,
+        last_context_composition=last_context_composition,
+        last_cache_composition=last_cache_composition,
+    )
     context_compression = _context_compression_summary(runtime_state, context_usage, active_session)
     runtime_manager = _load_runtime_manager_snapshot()
     work_runs = _work_run_summary()
-    workbench = _workbench_payload(lang, runtime_manager)
+    workbench = _observe_backend_from_summary_request(_workbench_payload(lang, runtime_manager))
     lifecycle_proof = _runtime_lifecycle_proof(lang, runtime_manager, workbench, work_runs)
     user_profile = _user_profile_payload(public_config)
     task_summary = (
@@ -1949,6 +1963,39 @@ def _workbench_payload(lang: str, runtime_manager: dict) -> dict[str, object]:
     return payload
 
 
+def _observe_backend_from_summary_request(workbench: dict) -> dict:
+    """Record first-hand backend evidence from the process answering this request.
+
+    The summary is served by the very backend it describes, so a probe miss
+    (daemon snapshot not refreshed, port helper failure, Electron-managed spawn)
+    must not downgrade the workbench to "backend missing" while it is visibly
+    answering. Only apply while the workbench is expected open and the port is
+    not owned by a conflicting process.
+    """
+
+    if str(workbench.get("desiredState") or "").strip() != "open":
+        return workbench
+    if bool(workbench.get("backendPortConflict")):
+        return workbench
+    if bool(workbench.get("backendObserved")) and bool(workbench.get("backendAlive")):
+        return workbench
+    own_pid = os.getpid()
+    observed = dict(workbench)
+    observed.update(
+        {
+            "backendObserved": True,
+            "backendAlive": True,
+            "backendHealthy": True,
+            "backendPortListening": True,
+            "backendPid": int(workbench.get("backendPid") or 0) or own_pid,
+            "backendPortOwnerPid": int(workbench.get("backendPortOwnerPid") or 0) or own_pid,
+            "backendPortOwnerTrusted": True,
+            "backendObservedSource": "summary_request",
+        }
+    )
+    return observed
+
+
 def _runtime_lifecycle_proof(lang: str, runtime_manager: dict, workbench: dict, work_runs: dict) -> dict[str, object]:
     verified_at = _utc_now_iso()
     desired_state = str(workbench.get("desiredState") or "closed").strip().lower() or "closed"
@@ -1956,6 +2003,10 @@ def _runtime_lifecycle_proof(lang: str, runtime_manager: dict, workbench: dict, 
     session_role = str(workbench.get("sessionRole") or "workbench").strip() or "workbench"
     phase = str(workbench.get("phase") or "steady").strip().lower() or "steady"
     failure_message = str(workbench.get("failureMessage") or "").strip()
+    window_provider = str(workbench.get("windowProvider") or "").strip()
+    # Electron main owns the lifecycle when it manages the workbench window; a
+    # standalone runtime-manager daemon is then optional, not required evidence.
+    electron_managed = window_provider == "electron" and bool(workbench.get("windowManaged"))
     manager_running = bool(runtime_manager.get("daemonRunning"))
     manager_pid = int(runtime_manager.get("managerPid") or 0)
     manager_project_root = str(runtime_manager.get("projectRoot") or "").strip()
@@ -2003,13 +2054,19 @@ def _runtime_lifecycle_proof(lang: str, runtime_manager: dict, workbench: dict, 
         {
             "id": "runtime_manager",
             "label": text_for(lang, zh="运行管理器", en="Runtime manager"),
-            "state": "verified" if manager_running else "missing",
-            "ok": manager_running,
+            "state": "verified" if manager_running or electron_managed else "missing",
+            "ok": manager_running or electron_managed,
             "requiredForOpen": True,
             "requiredForClosed": False,
             "detail": (
                 text_for(lang, zh=f"manager pid {manager_pid}", en=f"manager pid {manager_pid}")
                 if manager_running
+                else text_for(
+                    lang,
+                    zh="Electron 主进程代管工作台生命周期。",
+                    en="The Electron main process manages the workbench lifecycle.",
+                )
+                if electron_managed
                 else text_for(lang, zh="没有观测到运行管理器进程。", en="No runtime manager process was observed.")
             ),
             "pid": manager_pid,
@@ -2124,7 +2181,7 @@ def _runtime_lifecycle_proof(lang: str, runtime_manager: dict, workbench: dict, 
     elif desired_state == "open" and browser_missing:
         overall_state = "partial"
     elif desired_state == "open" and observed_state == "open":
-        open_components_ok = manager_running and backend_verified and project_root_matches
+        open_components_ok = (manager_running or electron_managed) and backend_verified and project_root_matches
         overall_state = "ready" if open_components_ok else "partial"
     elif desired_state == "open" and observed_state != "open":
         overall_state = "starting"
@@ -2590,6 +2647,64 @@ def _runtime_last_cache_composition(
             "calibratedSegments": [],
         }
     return dict(value)
+
+
+def _fresh_session_metrics_usable(metrics: dict) -> bool:
+    """Fresh session metrics only override the runtime snapshot once a turn exists."""
+
+    llm_usage = metrics.get("llmUsage")
+    if isinstance(llm_usage, dict) and str(llm_usage.get("source") or "").strip() in {
+        "provider_usage",
+        "not_called",
+    }:
+        return True
+    context_usage = metrics.get("contextUsage")
+    if isinstance(context_usage, dict) and int(context_usage.get("messageCount") or 0) > 0:
+        return True
+    return False
+
+
+def _apply_fresh_session_metrics(
+    metrics: dict | None,
+    *,
+    context_usage: dict,
+    cache_usage: dict,
+    last_llm_usage: dict | None,
+    last_context_composition: dict | None,
+    last_cache_composition: dict | None,
+) -> tuple[dict, dict, dict | None, dict | None, dict | None]:
+    """Prefer live session projections over the legacy ui_runtime_state snapshot.
+
+    ``ui_runtime_state.json`` is only written by the CLI shell, so the web path
+    would otherwise report usage/cache/context from the last CLI run (observed
+    stale since 2026-08-16) while the active session has fresher truth.
+    ``contextCompression`` has no per-turn source and keeps the snapshot value.
+    """
+
+    if not isinstance(metrics, dict) or not _fresh_session_metrics_usable(metrics):
+        return (
+            context_usage,
+            cache_usage,
+            last_llm_usage,
+            last_context_composition,
+            last_cache_composition,
+        )
+
+    def _prefer(fresh: object, fallback: dict | None) -> dict | None:
+        return dict(fresh) if isinstance(fresh, dict) and fresh else fallback
+
+    context_usage = _prefer(metrics.get("contextUsage"), context_usage) or context_usage
+    cache_usage = _prefer(metrics.get("cacheUsage"), cache_usage) or cache_usage
+    last_llm_usage = _prefer(metrics.get("llmUsage"), last_llm_usage)
+    last_context_composition = _prefer(metrics.get("lastContextComposition"), last_context_composition)
+    last_cache_composition = _prefer(metrics.get("lastCacheComposition"), last_cache_composition)
+    return (
+        context_usage,
+        cache_usage,
+        last_llm_usage,
+        last_context_composition,
+        last_cache_composition,
+    )
 
 
 def _runtime_cache_usage(runtime_state: dict) -> dict[str, object]:

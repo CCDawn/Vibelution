@@ -12,9 +12,6 @@ import useShellI18nSource from "../i18n/useShellI18n.ts?raw";
 import utilityMenuSource from "./AppShellUtilityMenu.tsx?raw";
 import utilityMenuStylesSource from "./AppShellUtilityMenu.styles.ts?raw";
 import utilityMenuStyles from "./AppShellUtilityMenu.styles";
-import statusGuideSource from "./AppShellStatusGuidePanel.tsx?raw";
-import statusGuideStylesSource from "./AppShellStatusGuidePanel.styles.ts?raw";
-import statusGuideStyles from "./AppShellStatusGuidePanel.styles";
 
 const shellStyles = readFileSync(fileURLToPath(new URL("../design/workbench-shell.css", import.meta.url)), "utf8");
 
@@ -66,7 +63,8 @@ describe("AppShell layout contract", () => {
       shellSource.indexOf('<div className={styles.topActions}'),
       shellSource.indexOf("</header>"),
     );
-    expect(systemActions.match(/variant="ghost"/g)).toHaveLength(6);
+    // The status summary is a quiet non-interactive chip, so it is not a ghost button.
+    expect(systemActions.match(/variant="ghost"/g)).toHaveLength(5);
     expect(shellStyles).toContain("@media (max-width: 1279px)");
   });
 
@@ -118,47 +116,19 @@ describe("AppShell layout contract", () => {
     expect(navLinkBlock).not.toContain("color: var(--fg-secondary)");
   });
 
-  it("renders one compact status summary chip while keeping the detailed guide panel", () => {
+  it("renders one quiet status summary chip without the diagnostic guide panel", () => {
     expect(shellSource).toContain("statusSummaryChip");
     expect(shellSource).not.toContain('t("brandSubtle")');
     expect(shellSource).not.toContain("<span className={styles.statusBadgeLabel}>Gate</span>");
     expect(shellSource).not.toContain("className={`${styles.statusCluster} ${styles.brandGate}`}");
-    expect(shellSource).toContain("LazyAppShellStatusGuidePanel");
-    expect(shellSource).toContain('data-vui="status-guide-popover"');
-    expect(shellSource).toContain("contentClassName={styles.statusGuidePopoverContent}");
-    expect(shellSource).toContain("open={statusGuideOpen}");
-    expect(shellSource).not.toContain("onMouseEnter={() => setStatusGuideOpen(true)}");
-    expect(shellSource).not.toContain("statusGuidePanel");
-    expect(statusGuideSource).toContain('from "./AppShellStatusGuidePanel.styles"');
-    expect(statusGuideSource).not.toContain("AppShell.styles");
-    expect(statusGuideSource).toContain("statusGuidePanel");
-    expect(statusGuideSource).toContain("lifecycleProofCard");
-    expect(statusGuideSource).toContain("lifecycleStateLabel");
-    expect(statusGuideSource).toContain("systemFrontendPossible_connected");
-    // Status guide is VUI product composition (not hand-rolled statusDot rows).
-    expect(statusGuideSource).toContain("VSurface");
-    expect(statusGuideSource).toContain("VPanelHeader");
-    expect(statusGuideSource).toContain("VStatusChip");
-    expect(statusGuideSource).toContain("VMetricChip");
-    expect(statusGuideSource).toContain("VStatusStrip");
-    expect(statusGuideSource).toContain("VTooltip");
-    expect(statusGuideSource).not.toContain("statusDot");
-    expect(statusGuideSource).toContain('<VTooltip content={item.note} width="wide">');
-    expect(statusGuideSource).toContain("data-current={state.label === item.value ? \"true\" : undefined}");
-    expect(statusGuideSource).toContain("content={state.detail}");
-    expect(statusGuideSource).toContain("content={component.detail}");
-    expect(statusGuideSource).toContain("tabIndex={0}");
-    // Native title dumps are banned; VPanelHeader `title=` product prop is allowed.
-    expect(statusGuideSource).not.toMatch(/\stitle=\{(item|state|component)\./);
-    expect(statusGuideSource).not.toContain("statusGuideNote");
-    expect(statusGuideStyles.statusGuidePanel).toBeTypeOf("string");
-    expect(statusGuideStyles.lifecycleProofCard).toBeTypeOf("string");
-    expect(statusGuideStyles.statusGuideGrid).toBeTypeOf("string");
-    expect(statusGuideStyles.lifecycleProofMeta).toBeTypeOf("string");
-    expect(statusGuideStyles.lifecycleProofList).toBeTypeOf("string");
-    expect(statusGuideStylesSource).toContain("statusGuideGrid");
-    expect(statusGuideStylesSource).toContain("lifecycleProofCard");
-    expect(statusGuideStylesSource).not.toContain("statusDot");
+    // The diagnostic guide popover is gone; the top bar keeps a bare tone dot + text.
+    expect(shellSource).not.toContain("LazyAppShellStatusGuidePanel");
+    expect(shellSource).not.toContain('data-vui="status-guide-popover"');
+    expect(shellSource).not.toContain("statusGuidePopoverContent");
+    expect(shellSource).not.toContain("statusGuideOpen");
+    expect(shellSource).toContain("systemToneToDotClass");
+    expect(shellSource).toContain("styles.statusSummaryDot");
+    expect(shellSource).toContain("styles.statusSummaryLabel");
     expect(shellSource).not.toContain("rightStatusCards.map((item) => (\n                <span key={item.id} className={styles.statusBadge}>");
   });
 
@@ -167,16 +137,6 @@ describe("AppShell layout contract", () => {
     expect(styles.statusSummaryDot).toBeTypeOf("string");
     expect(styles.statusSummaryLabel).toBeTypeOf("string");
     expect(styles.returnButton).toBeTypeOf("string");
-    expect(statusGuideStyles.statusGuideGrid).toBeTypeOf("string");
-    expect(statusGuideStyles.lifecycleProofMeta).toBeTypeOf("string");
-    expect(statusGuideStyles.lifecycleProofList).toBeTypeOf("string");
-    expect(shellStyles).toContain("width: min(640px, calc(100vw - 40px))");
-    expect(shellStyles).toContain("grid-template-columns: repeat(3, minmax(0, 1fr))");
-    expect(shellStyles).toContain(".statusGuideListItem[data-current=\"true\"]");
-    expect(shellStyles).toContain(":where(.vui-app-appshell).statusGuideCard");
-    expect(shellStyles).toContain("width: 100%");
-    expect(shellStyles).toContain("max-width: none");
-    expect(shellStyles).toContain(".vui-app-appshell.statusGuidePanel");
     expect(shellStyles).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
     expect(shellStyles).toContain("flex-wrap: nowrap");
     expect(styles.topActions).toContain("flex-nowrap");
@@ -189,7 +149,7 @@ describe("AppShell layout contract", () => {
     expect(styles.statusSummaryChip).not.toContain("vuiControlPillClass");
     expect(styles.statusSummaryChip).not.toContain("vuiStateSelectedRowClass");
     expect(styles.utilityTrigger).not.toContain("vuiControlQuietClass");
-    // Top bar summary is a bare tone dot + text; pill details live in the popover.
+    // Top bar summary is a bare tone dot + text; no diagnostic popover remains.
     expect(shellSource).toContain("VStatusChip");
     expect(shellSource).toContain("systemToneToStatus");
     expect(shellSource).toContain("systemToneToDotClass");
@@ -210,23 +170,15 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("width: 32px");
     expect(shellStyles).toContain("grid-template-columns: minmax(0, max-content) minmax(0, 1fr) max-content;");
     expect(shellStyles).toContain("max-width: 100%");
-    // Utility / status-guide panel size lives on VPopover content class (portaled).
+    // Utility panel size lives on VPopover content class (portaled).
     expect(styles.utilityPopoverContent).toContain("w-[min(520px,calc(100vw-40px))]");
     expect(styles.utilityPopoverContent).toContain("max-h-[min(78vh,760px)]");
-    expect(styles.statusGuidePopoverContent).toContain("w-[min(640px,calc(100vw-40px))]");
     // Utility git signal/count grids: 2×2 for readable Chinese labels in the popover.
     expect(shellStyles).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
     expect(shellStyles).toContain("grid-template-columns: repeat(4, minmax(0, 1fr))");
     expect(shellStyles).toContain("grid-template-columns: 36px minmax(0, 1fr)");
     expect(shellStyles).toContain("@media (max-width: 640px)");
-    expect(shellStyles).toContain("width: min(360px, calc(100vw - 20px))");
-    expect(shellStyles).toContain("left: 0");
-    expect(shellStyles).toContain("grid-template-columns: repeat(2, minmax(72px, max-content))");
-    expect(shellStyles).toContain("word-break: keep-all");
-    expect(shellStyles).toContain(":where(.vui-app-appshell).statusCluster:hover .statusSummaryChip");
-    expect(shellStyles).toContain(":where(.vui-app-appshell).statusCluster:focus-within .statusSummaryChip");
     expect(shellStyles).toContain("cursor: pointer");
-    expect(shellStyles).toContain("transition: background 140ms ease, color 140ms ease");
 
     const compactDesktopBlock = shellStyles.slice(
       shellStyles.indexOf("@media (max-width: 1279px)"),
@@ -250,10 +202,6 @@ describe("AppShell layout contract", () => {
     // The top bar stays on one row at every width; the nav band scrolls horizontally instead of wrapping.
     expect(narrowTopBarBlock).not.toContain("grid-template-areas");
     expect(narrowTopBarBlock).not.toContain("--shell-topbar-height");
-    expect(narrowTopBarBlock).toContain(".vui-app-appshell.statusGuidePanel");
-    expect(narrowTopBarBlock).toContain("position: fixed");
-    expect(narrowTopBarBlock).toContain("top: 60px");
-    expect(narrowTopBarBlock).toContain("max-height: calc(100dvh - 76px)");
   });
 
   it("keeps AppShell popover headers layout-only instead of card-like", () => {
@@ -264,8 +212,6 @@ describe("AppShell layout contract", () => {
     ];
     const headerStyles = [
       styles.activeWorkDetailHeader,
-      styles.statusGuideCardHeader,
-      statusGuideStyles.statusGuideCardHeader,
       styles.utilityPanelHeader,
       utilityMenuStyles.utilityPanelHeader,
     ];

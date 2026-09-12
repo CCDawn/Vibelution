@@ -7,7 +7,9 @@ import {
   activeTurnStageLabel,
   buildActiveTurnStageBarItems,
   formatActiveTurnHeartbeatText,
+  planActiveTurnStageSwitch,
   resolveActiveTurnProgressStage,
+  resolveActiveTurnRetryProgress,
 } from "./conversationActiveTurnStatusPresentation";
 
 describe("conversationActiveTurnStatusPresentation", () => {
@@ -16,6 +18,9 @@ describe("conversationActiveTurnStatusPresentation", () => {
     expect(activeTurnStageLabel("model_thinking", "zh")).toBe("思考中");
     expect(activeTurnStageLabel("server_thinking", "en")).toBe("Thinking");
     expect(activeTurnStageLabel("model_request", "zh")).toBe("请求模型");
+    expect(activeTurnStageLabel("working", "zh")).toBe("处理中");
+    expect(activeTurnStageLabel("thinking", "en")).toBe("Thinking");
+    expect(activeTurnStageLabel("queued", "zh")).toBe("排队中");
     expect(activeTurnOptimisticStageSummary("user_submit", "zh")).toBe("已发送，正在连接");
     expect(activeTurnOptimisticStageSummary("model_thinking", "zh")).toBe("思考中，等待模型输出");
   });
@@ -51,5 +56,71 @@ describe("conversationActiveTurnStatusPresentation", () => {
       turnItems: [],
       status: "running",
     })).toBe("running");
+  });
+
+  it("holds a fresh stage for the minimum dwell before switching", () => {
+    expect(planActiveTurnStageSwitch("working", "working", 0)).toEqual({ stage: "working", delayMs: 0 });
+    expect(planActiveTurnStageSwitch("working", "thinking", 120)).toEqual({ stage: "working", delayMs: 580 });
+    expect(planActiveTurnStageSwitch("working", "thinking", 700)).toEqual({ stage: "thinking", delayMs: 0 });
+    expect(planActiveTurnStageSwitch("working", "thinking", 5000)).toEqual({ stage: "thinking", delayMs: 0 });
+  });
+
+  it("resolves retry attempt progress from structured fields then text", () => {
+    expect(resolveActiveTurnRetryProgress({
+      turnItems: [{
+        id: "retry-1-r1",
+        itemId: "retry-1",
+        version: 3,
+        sessionId: "session-1",
+        turnId: "turn-1",
+        type: "retry",
+        status: "running",
+        revision: 1,
+        sequence: 1,
+        attempt: 2,
+        targetItemId: "request-1",
+        reason: "模型连接正在重试...\n第 2/5 次；原因：server_error。",
+        metadata: { maxAttempts: 5 },
+      }],
+    })).toEqual({ attempt: 2, maxAttempts: 5 });
+    expect(resolveActiveTurnRetryProgress({
+      turnItems: [{
+        id: "status-1-r1",
+        itemId: "status-1",
+        version: 3,
+        sessionId: "session-1",
+        turnId: "turn-1",
+        type: "status",
+        status: "running",
+        revision: 1,
+        sequence: 2,
+        code: "model_retry",
+        text: "模型连接正在重试...\n第 3/5 次；原因：server_error。",
+      }],
+    })).toEqual({ attempt: 3, maxAttempts: 5 });
+    expect(resolveActiveTurnRetryProgress({
+      turnItems: [{
+        id: "status-2-r1",
+        itemId: "status-2",
+        version: 3,
+        sessionId: "session-1",
+        turnId: "turn-1",
+        type: "status",
+        status: "running",
+        revision: 1,
+        sequence: 3,
+        code: "model_request",
+        text: "等待模型响应...",
+      }],
+    })).toBeNull();
+  });
+
+  it("formats retry heartbeat with attempt counts", () => {
+    expect(formatActiveTurnHeartbeatText("model_retry", 12, "zh", { attempt: 2, maxAttempts: 5 }))
+      .toBe("请求重试 2/5 · 12s");
+    expect(formatActiveTurnHeartbeatText("model_retry", null, "en", { attempt: 3, maxAttempts: 5 }))
+      .toBe("Retrying request 3/5");
+    expect(formatActiveTurnHeartbeatText("model_retry", 8, "zh"))
+      .toBe("请求重试 · 8s");
   });
 });

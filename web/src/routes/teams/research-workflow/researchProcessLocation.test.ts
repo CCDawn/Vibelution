@@ -50,6 +50,17 @@ describe("research process location", () => {
       .toMatchObject({ panel: "node", inspectorOpen: false });
   });
 
+  it("restores the selected question and run from URL search params", () => {
+    // Deep-link restore contract: after a restart lands on the app home, the
+    // user navigating to /teams?questionId=...&runId=... must bring the
+    // selection back from the URL alone (SCI-049 window pinning follow-up).
+    expect(
+      parseResearchProcessLocation(
+        new URLSearchParams("questionId=q-42&runId=run-9&panel=question"),
+      ),
+    ).toMatchObject({ questionId: "Q-42", runId: "run-9", panel: "question" });
+  });
+
   it("clears the close marker on explicit panel or node navigation", () => {
     const switchedPanel = patchResearchProcessSearch({
       current: new URLSearchParams("panel=node&inspector=closed"),

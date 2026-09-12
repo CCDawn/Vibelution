@@ -413,6 +413,84 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html.slice(commentaryStart, commentaryEnd)).not.toContain("思考");
   });
 
+  it("renders commentary in a clamped progress lane and drops the copy the answer repeats", () => {
+    const repeated = "我已经定位到问题并完成修复，接下来运行定向测试验证没有回归。";
+    const html = renderConversation([
+      {
+        id: "assistant-progress-lane",
+        role: "assistant",
+        timestamp: "2026-09-11T06:00:00Z",
+        turnId: "turn-progress-lane",
+        status: "completed",
+        turnItems: [
+          {
+            id: "reasoning-lane:0",
+            itemId: "reasoning-lane",
+            version: 3,
+            sessionId: "session-1",
+            turnId: "turn-progress-lane",
+            type: "reasoning",
+            status: "completed",
+            revision: 0,
+            sequence: 1,
+            terminal: true,
+            text: "这是内部推理，不占进展位置。",
+          },
+          {
+            id: "progress-lane:0",
+            itemId: "progress-lane",
+            version: 3,
+            sessionId: "session-1",
+            turnId: "turn-progress-lane",
+            type: "agent_message",
+            phase: "commentary",
+            status: "completed",
+            revision: 0,
+            sequence: 2,
+            terminal: true,
+            text: "先检查配置，再运行回归测试。",
+          },
+          {
+            id: "progress-dup:0",
+            itemId: "progress-dup",
+            version: 3,
+            sessionId: "session-1",
+            turnId: "turn-progress-lane",
+            type: "agent_message",
+            phase: "commentary",
+            status: "completed",
+            revision: 0,
+            sequence: 3,
+            terminal: true,
+            text: repeated,
+          },
+          {
+            id: "answer-progress:0",
+            itemId: "answer-progress",
+            version: 3,
+            sessionId: "session-1",
+            turnId: "turn-progress-lane",
+            type: "agent_message",
+            phase: "final_answer",
+            status: "completed",
+            revision: 0,
+            sequence: 4,
+            terminal: true,
+            text: repeated,
+          },
+        ],
+      },
+    ]);
+
+    expect(html).toContain('data-codex-progress-cell="true"');
+    expect(html).toContain("先检查配置，再运行回归测试。");
+    expect(html).toContain('data-codex-progress-clamped="true"');
+    expect(html).toContain("line-clamp-3");
+    // The progress copy that repeats the final answer must paint once.
+    expect(html.split(repeated).length - 1).toBe(1);
+    expect(html).toContain("思考");
+  });
+
   it("renders context compression outcomes in their canonical event order", () => {
     const marker = (
       turnId: string,
@@ -700,5 +778,162 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).toContain('data-patch-line-kind="add"');
     expect(html).toContain("const value = 1;");
     expect(html).toContain("const value = 2;");
+  });
+
+  it("suppresses the standalone turn error banner when the same turn rendered a final answer", () => {
+    const answeredMessage: ConversationMessage = {
+      id: "assistant-answered",
+      role: "assistant",
+      timestamp: "2026-05-22T00:01:00Z",
+      turnId: "turn-1",
+      status: "completed",
+      turnItems: [{
+        id: "answer-r1",
+        itemId: "answer-1",
+        version: 3,
+        sessionId: "session-1",
+        turnId: "turn-1",
+        type: "agent_message",
+        phase: "final_answer",
+        status: "completed",
+        revision: 1,
+        sequence: 1,
+        terminal: true,
+        text: "结论：无需修改。",
+      }],
+    };
+    const turnError = {
+      message: "模型服务上游暂时失败，本轮没有完成。",
+      errorType: "provider_upstream_error",
+      reasonCode: "upstream_unavailable",
+      turnId: "turn-1",
+    };
+
+    const supersededHtml = renderConversation([answeredMessage], "trace", false, { turnError });
+    expect(supersededHtml).toContain("无需修改。");
+    expect(supersededHtml).not.toContain("turnErrorText");
+
+    const unmatchedHtml = renderConversation([answeredMessage], "trace", false, {
+      turnError: { ...turnError, turnId: "turn-other" },
+    });
+    expect(unmatchedHtml).toContain("turnErrorText");
+  });
+
+  it("offers the failed-turn card one retry action and no per-attempt retry trail", () => {
+    const turnError = {
+      message: "模型服务上游暂时失败，本轮没有完成。",
+      errorType: "provider_upstream_error",
+      reasonSummary: "provider 上游服务不可用",
+      recoverable: true,
+      timestamp: "2026-09-13T01:00:00Z",
+      turnId: "turn-retry",
+      retryHistory: [
+        { attempt: 1, maxAttempts: 3, category: "server_error" },
+        { attempt: 3, maxAttempts: 3, category: "server_error" },
+      ],
+    } as React.ComponentProps<typeof ConversationView>["turnError"];
+    const userMessage = {
+      id: "user-retry",
+      role: "user",
+      timestamp: "2026-09-13T01:00:00Z",
+      turnId: "turn-retry",
+      status: "completed",
+      content: "请修复登录失败的问题。",
+    } as ConversationMessage;
+
+    const html = renderConversation([userMessage], "trace", false, {
+      turnError,
+      onRetryTurn: () => undefined,
+    });
+    expect(html).toContain("已重试 3 次");
+    expect(html).toContain('aria-label="重试这一轮"');
+    expect(html).not.toContain("第 1/3 次");
+
+    const withoutHandler = renderConversation([userMessage], "trace", false, { turnError });
+    expect(withoutHandler).not.toContain('aria-label="重试这一轮"');
+  });
+
+  it("renders a plan tool call as an inline step checklist", () => {
+    const planMessage: ConversationMessage = {
+      id: "assistant-plan",
+      role: "assistant",
+      timestamp: "2026-05-22T00:02:00Z",
+      turnId: "turn-plan",
+      status: "running",
+      turnItems: [{
+        id: "plan-call-r1",
+        itemId: "plan-call",
+        version: 3,
+        sessionId: "session-1",
+        turnId: "turn-plan",
+        type: "tool_call",
+        callId: "call-plan",
+        toolName: "plan_update_tool",
+        status: "completed",
+        revision: 1,
+        sequence: 1,
+        terminal: true,
+        input: JSON.stringify({
+          plan: [
+            { step: "审查工具契约", status: "completed" },
+            { step: "补齐回归测试", status: "in_progress" },
+            { step: "运行完整验证", status: "pending" },
+          ],
+          explanation: "同步当前对齐进度",
+        }),
+      }],
+    };
+
+    const html = renderConversation([planMessage], "trace");
+    expect(html).toContain('data-codex-tool-checklist="true"');
+    expect(html).toContain('data-codex-tool-checklist-tool="plan_update_tool"');
+    expect(html.match(/data-checklist-item-status="completed"/g)).toHaveLength(1);
+    expect(html.match(/data-checklist-item-status="in_progress"/g)).toHaveLength(1);
+    expect(html.match(/data-checklist-item-status="pending"/g)).toHaveLength(1);
+    expect(html).toContain("审查工具契约");
+    expect(html).toContain("补齐回归测试");
+    expect(html).toContain("运行完整验证");
+    expect(html).toContain("同步当前对齐进度");
+    expect(html).not.toContain('data-codex-tool-activity-item="true"');
+  });
+
+  it("renders a task creation tool call as a pending task checklist", () => {
+    const taskMessage: ConversationMessage = {
+      id: "assistant-task",
+      role: "assistant",
+      timestamp: "2026-05-22T00:03:00Z",
+      turnId: "turn-task",
+      status: "running",
+      turnItems: [{
+        id: "task-call-r1",
+        itemId: "task-call",
+        version: 3,
+        sessionId: "session-1",
+        turnId: "turn-task",
+        type: "tool_call",
+        callId: "call-task",
+        toolName: "task_create_tool",
+        status: "completed",
+        revision: 1,
+        sequence: 1,
+        terminal: true,
+        input: JSON.stringify({
+          task_list: [
+            { description: "复现缺陷" },
+            { description: "修复持久化判定" },
+          ],
+          goal: "修复错误卡常驻",
+        }),
+      }],
+    };
+
+    const html = renderConversation([taskMessage], "trace");
+    expect(html).toContain('data-codex-tool-checklist="true"');
+    expect(html).toContain('data-codex-tool-checklist-tool="task_create_tool"');
+    expect(html.match(/data-checklist-item-status="pending"/g)).toHaveLength(2);
+    expect(html).toContain("复现缺陷");
+    expect(html).toContain("修复持久化判定");
+    expect(html).toContain("修复错误卡常驻");
+    expect(html).not.toContain('data-codex-tool-activity-item="true"');
   });
 });

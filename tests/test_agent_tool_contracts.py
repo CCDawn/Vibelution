@@ -138,6 +138,21 @@ def test_team_evolution_and_memory_tools_have_current_registry_contract():
     }.issubset(set(bundles["operations"]["toolNames"]))
 
 
+def test_session_protocol_allowed_tools_are_registered():
+    canonical_names = {tool.name for tool in create_key_tools()}
+    llm_facing_names = {tool.name for tool in create_llm_facing_tools()}
+
+    assert set(agent_directory_service.SESSION_PROTOCOL_ALLOWED_TOOLS).issubset(canonical_names)
+    assert "user_action_telemetry_query_tool" in canonical_names
+    assert "user_action_telemetry_query_tool" in llm_facing_names
+
+
+def test_tool_descriptions_do_not_leak_internal_cancel_checker():
+    for tool in create_key_tools():
+        description = str(getattr(tool, "description", "") or "")
+        assert "_cancel_checker" not in description, tool.name
+
+
 def test_hypothesis_writeback_tool_description_exposes_complete_score_contract():
     tools_by_name = {tool.name: tool for tool in create_llm_facing_tools()}
     description = str(

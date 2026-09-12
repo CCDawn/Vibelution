@@ -67,6 +67,7 @@ function knowledgeBadgeInput(
     failed: badge.failedCount ?? 0,
     currentKnowledgeNodeId: badge.latest?.currentKnowledgeNodeId ?? null,
     knowledgeChildRunId: badge.latest?.knowledgeChildRunId ?? null,
+    autoAccept: badge.autoAccept ?? null,
   };
 }
 

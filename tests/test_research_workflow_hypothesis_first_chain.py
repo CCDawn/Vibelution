@@ -3894,6 +3894,9 @@ def test_question_reset_clears_only_the_target_questions_closed_hypothesis_chain
         "collectionRunCount": 0,
         "formalRunCount": 0,
         "archivedFormalRunCount": 0,
+        "conversationRoomCount": 0,
+        "conversationMessageCount": 0,
+        "conversationSessionCount": 0,
     }
 
     result = chain.reset_question_chain(
@@ -3922,8 +3925,11 @@ def test_question_reset_clears_only_the_target_questions_closed_hypothesis_chain
 def test_question_reset_refuses_active_discussion_and_mismatched_confirmation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from datetime import datetime, timezone
+
     team_id, _agents = _hf_env(tmp_path, monkeypatch)
     target = _seed_question_reset_artifacts(team_id, _QUESTION_ID)
+    live_round_id = f"round-live-{_QUESTION_ID.lower()}"
     meetings._append_jsonl(
         meetings._rounds_path(team_id),
         {
@@ -3932,7 +3938,26 @@ def test_question_reset_refuses_active_discussion_and_mismatched_confirmation(
             "question": _QUESTION_ID,
             "meetingType": "hypothesis_review",
             "status": "open",
+            "chatRoomRoundIds": [live_round_id],
         },
+    )
+    # Only a bound round whose executor heartbeat is still fresh proves live
+    # work; the reset stands down for that shape and does not stop anything.
+    monkeypatch.setattr(
+        meetings,
+        "_load_bound_room_rounds",
+        lambda _meeting: {
+            live_round_id: {
+                "status": "running",
+                "heartbeatAt": datetime.now(timezone.utc).isoformat(),
+            }
+        },
+    )
+    stopped_meeting_ids: list[str] = []
+    monkeypatch.setattr(
+        meetings,
+        "stop_discussion_meeting",
+        lambda _team_id, meeting_id, **_kwargs: stopped_meeting_ids.append(meeting_id) or {},
     )
 
     preview = chain.preview_question_reset(team_id, _QUESTION_ID)
@@ -3951,13 +3976,88 @@ def test_question_reset_refuses_active_discussion_and_mismatched_confirmation(
             _QUESTION_ID,
             confirmation_question_id="SCI-097",
         )
+    assert stopped_meeting_ids == []
     assert chain.list_hypothesis_candidates(team_id, question_id=_QUESTION_ID)["candidates"]
+
+
+def test_question_reset_terminates_stale_discussion_and_collection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Interrupted work no longer locks a question out of resetting.
+
+    A meeting whose bound round heartbeat stopped (zombie running round) and a
+    pending request whose child run is dead are both residue of an interrupted
+    executor: the reset terminates them instead of blocking forever.
+    """
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    target = _seed_question_reset_artifacts(team_id, _QUESTION_ID)
+    meetings._append_jsonl(
+        meetings._rounds_path(team_id),
+        {
+            "schemaVersion": 2,
+            "meetingRoundId": target["meetingId"],
+            "question": _QUESTION_ID,
+            "meetingType": "hypothesis_review",
+            "status": "open",
+            "chatRoomRoundIds": ["round-zombie"],
+        },
+    )
+    monkeypatch.setattr(
+        meetings,
+        "_load_bound_room_rounds",
+        lambda _meeting: {
+            "round-zombie": {
+                "status": "running",
+                "heartbeatAt": "2026-01-01T00:00:00Z",
+            }
+        },
+    )
+    chain._append_jsonl(
+        chain._storage_path(team_id),
+        {
+            "schemaVersion": 1,
+            "recordKind": chain.COLLECTION_REQUEST_KIND,
+            "requestId": "request-dead-child-run",
+            "questionId": _QUESTION_ID,
+            "status": "pending",
+            "collectionRunId": "source-run-dead-child",
+        },
+    )
+    stopped_meeting_ids: list[str] = []
+    monkeypatch.setattr(
+        meetings,
+        "stop_discussion_meeting",
+        lambda _team_id, meeting_id, **_kwargs: stopped_meeting_ids.append(meeting_id) or {},
+    )
+    stopped_run_ids: list[str] = []
+
+    def _track_stop(_team_id: str, run_id: str, **_kwargs: Any) -> dict[str, Any]:
+        stopped_run_ids.append(run_id)
+        return {}
+
+    monkeypatch.setattr(
+        collection_runs, "stop_source_collection_search", _track_stop
+    )
+
+    preview = chain.preview_question_reset(team_id, _QUESTION_ID)
+
+    assert preview["canReset"] is True
+    result = chain.reset_question_chain(
+        team_id,
+        _QUESTION_ID,
+        confirmation_question_id=_QUESTION_ID,
+    )
+
+    assert stopped_meeting_ids == [target["meetingId"]]
+    assert stopped_run_ids == ["source-run-dead-child"]
+    assert result["removed"] == preview["impact"]
+    assert chain.list_collection_requests(team_id, question_id=_QUESTION_ID)["requests"] == []
 
 
 def test_question_reset_refuses_pending_collection_request_with_child_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A pending request remains protected when it still identifies child work."""
+    """A pending request remains protected when its child run is still live."""
 
     team_id, _agents = _hf_env(tmp_path, monkeypatch)
     _seed_question_reset_artifacts(team_id, _QUESTION_ID)
@@ -3971,6 +4071,11 @@ def test_question_reset_refuses_pending_collection_request_with_child_run(
             "status": "pending",
             "collectionRunId": "source-run-live-child",
         },
+    )
+    monkeypatch.setattr(
+        collection_runs,
+        "collection_run_is_active",
+        lambda _team_id, _run_id: True,
     )
 
     preview = chain.preview_question_reset(team_id, _QUESTION_ID)
@@ -8073,6 +8178,77 @@ def test_waiting_fan_in_persists_blocked_trace(tmp_path, monkeypatch):
     assert trace["context"]["closedMeetingRoundIds"] == ["meeting-a"]
     # Waiting traces never fabricate a round record.
     assert hrounds.list_hypothesis_rounds("team-wait")["roundCount"] == 0
+
+
+def test_waiting_fan_in_trace_is_idempotent_with_accurate_recovery(
+    tmp_path, monkeypatch
+):
+    """Re-entered waits share one blocked row and name the real recovery.
+
+    The auto-advance sweep observes the same wait every tick; a superseded
+    digest-less candidate has no open meeting to close, so the historical
+    "close the pending sibling review meetings" hint was impossible advice
+    (SCI-117 retried it for eight days).
+    """
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(hrounds, "PROJECT_ROOT", tmp_path)
+    fan_in = {
+        "status": "waiting_for_sibling_reviews",
+        "selectionId": "selection-wait-1",
+        "roundIndex": 1,
+        "closed": False,
+        "missingCandidateIds": [],
+        "pendingMeetingRoundIds": [],
+        "supersededCandidateIds": ["candidate-dead-1"],
+        "supersededMeetingRoundIds": ["hf-review-dead-1"],
+        "closedMeetingRoundIds": ["meeting-a"],
+    }
+    monkeypatch.setattr(
+        chain, "_review_meeting_fan_in_group", lambda *_args, **_kwargs: dict(fan_in)
+    )
+    meeting = {"meetingRoundId": "meeting-a", "question": "SCI-096"}
+
+    first = chain._generate_hypothesis_round("team-wait", meeting)
+    second = chain._generate_hypothesis_round("team-wait", meeting)
+
+    assert first["failureRecordId"].startswith("hrfail-")
+    assert second["failureRecordId"] == first["failureRecordId"]
+    failures = hrounds.list_hypothesis_round_failures("team-wait")
+    assert failures["failureCount"] == 1
+    assert failures["openFailureCount"] == 1
+    trace = failures["failures"][0]
+    assert trace["status"] == "blocked"
+    assert "candidate-dead-1" in trace["retryHint"]
+    assert "re-dispatch" in trace["retryHint"]
+
+
+def test_fan_in_waiting_semantics_names_each_recovery() -> None:
+    """The wait taxonomy decides the reason and retry hint, not default text."""
+    reason, hint = chain._fan_in_waiting_semantics(
+        {"supersededCandidateIds": ["cand-a"]}
+    )
+    assert "re-dispatch" in hint and "cand-a" in hint
+    assert "re-dispatch" in reason
+
+    reason, hint = chain._fan_in_waiting_semantics(
+        {"missingCandidateIds": ["cand-b"]}
+    )
+    assert "open review meetings" in hint and "cand-b" in hint
+
+    reason, hint = chain._fan_in_waiting_semantics(
+        {"pendingMeetingRoundIds": ["hf-review-1"]}
+    )
+    assert "wait" in hint and "hf-review-1" in hint
+    assert "re-dispatch" not in hint
+
+    # Priority: a superseded candidate is recoverable even while others wait.
+    reason, hint = chain._fan_in_waiting_semantics(
+        {
+            "supersededCandidateIds": ["cand-a"],
+            "pendingMeetingRoundIds": ["hf-review-1"],
+        }
+    )
+    assert "re-dispatch" in hint and "cand-a" in hint
 
 
 def test_failed_generation_persists_classified_trace(tmp_path, monkeypatch):

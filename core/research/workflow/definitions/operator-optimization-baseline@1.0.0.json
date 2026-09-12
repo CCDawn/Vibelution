@@ -1,0 +1,41 @@
+{
+  "snapshotKind": "workflow_definition_snapshot",
+  "snapshotVersion": 1,
+  "workflowId": "operator-optimization-baseline",
+  "schemaVersion": "1.0.0",
+  "workflowVersionId": "wv-d77714cdd853",
+  "contentHash": "d77714cdd8533cb5539d914a9feb243f6838d62aab1d10b300a50bc487da7e63",
+  "definition": {
+    "workflowId": "operator-optimization-baseline",
+    "schemaVersion": "1.0.0",
+    "label": "算子基线",
+    "structureHash": "d77714cdd8533cb5539d914a9feb243f6838d62aab1d10b300a50bc487da7e63",
+    "stages": [
+      {
+        "stageId": "execution_iteration",
+        "index": 1,
+        "label": "基线准备",
+        "nodeIds": [
+          "operator_baseline"
+        ]
+      }
+    ],
+    "nodes": [
+      {
+        "nodeId": "operator_baseline",
+        "stageId": "execution_iteration",
+        "label": "基线准备与测量",
+        "actorKind": "system",
+        "primaryRoleKey": "",
+        "description": "",
+        "collaboratorRoleKeys": [],
+        "acceptsGateKinds": [],
+        "producesArtifactKinds": [
+          "operator_baseline"
+        ],
+        "sessionScopePolicy": "node_shared"
+      }
+    ],
+    "edges": []
+  }
+}

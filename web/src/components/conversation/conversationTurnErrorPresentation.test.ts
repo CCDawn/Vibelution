@@ -6,6 +6,7 @@ import {
   buildConversationTurnErrorReasonRows,
   buildCurrentTurnErrorRows,
   buildTurnErrorDiagnosticRows,
+  formatTurnErrorRetrySummary,
   resolveConversationTurnErrorType,
   summarizeCurrentTurnError,
 } from "./conversationTurnErrorPresentation";
@@ -21,6 +22,19 @@ describe("conversationTurnErrorPresentation", () => {
     expect(conversationViewSource).not.toContain("function turnErrorType(");
     expect(conversationViewSource).not.toContain("function turnErrorReasonRows(");
     expect(conversationViewSource).not.toContain("function turnErrorBannerRows(");
+  });
+
+  it("renders the turn-error block inside the timeline instead of pinning it above the composer", () => {
+    const pinnedSlot = conversationViewSource.slice(
+      conversationViewSource.indexOf("data-codex-tool-approval-fallback"),
+      conversationViewSource.indexOf("{showComposer ? ("),
+    );
+    expect(pinnedSlot).not.toContain("styles.turnError");
+
+    const virtualSpacerIndex = conversationViewSource.indexOf("timelineVirtualRange.bottomSpacerPx > 0");
+    const inlineTurnErrorIndex = conversationViewSource.indexOf("turnErrorSupersededByFinalAnswer ? (");
+    expect(virtualSpacerIndex).toBeGreaterThan(-1);
+    expect(inlineTurnErrorIndex).toBeGreaterThan(virtualSpacerIndex);
   });
 
   it("resolves trimmed turn-error type from camelCase or snake_case metadata", () => {
@@ -97,6 +111,27 @@ describe("conversationTurnErrorPresentation", () => {
       { label: "Code", value: "no_account" },
       { label: "Trace", value: "trace-runtime-2" },
     ]);
+  });
+
+  it("summarizes exhausted retries as one human count instead of a per-attempt trail", () => {
+    const turnError = {
+      reasonSummary: "upstream unavailable",
+      retryHistory: [
+        { attempt: 1, maxAttempts: 5, category: "server_error" },
+        { attempt: 2, maxAttempts: 5, category: "server_error" },
+        { attempt: 5, maxAttempts: 5, category: "server_error" },
+      ],
+    } as SessionTurnError;
+
+    expect(formatTurnErrorRetrySummary(turnError, "zh")).toBe("已重试 5 次");
+    expect(formatTurnErrorRetrySummary(turnError, "en")).toBe("Retried 5 times");
+    expect(summarizeCurrentTurnError(turnError, "zh")).toBe("upstream unavailable · 已重试 5 次");
+    // The settled card keeps one summary line; per-attempt retry rows are transient UI only.
+    expect(buildCurrentTurnErrorRows(turnError, "zh")).not.toContainEqual(
+      expect.objectContaining({ label: "重试记录" }),
+    );
+    expect(buildCurrentTurnErrorRows({ reasonSummary: "upstream unavailable" } as SessionTurnError, "en"))
+      .not.toContainEqual(expect.objectContaining({ label: "Retries" }));
   });
 
   it("builds bounded diagnostic rows directly from a canonical error cell summary", () => {

@@ -23,6 +23,7 @@ from ._validation import ContractValidationError
 class ModelInvocationStatus(str, Enum):
     NOT_CONFIGURED = "not_configured"
     TIMEOUT = "timeout"
+    FAILED = "failed"
     RETRIED = "retried"
     PARTIAL = "partial"
     SUCCEEDED = "succeeded"

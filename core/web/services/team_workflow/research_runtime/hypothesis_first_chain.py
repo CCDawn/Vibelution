@@ -146,6 +146,22 @@ REVIEW_DISPATCH_RETRY_BACKOFF_BASE_SECONDS = 300.0
 REVIEW_DISPATCH_RETRY_BACKOFF_MAX_SECONDS = 86_400.0
 REVIEW_DISPATCH_ATTEMPT_FAILURE_CAP = 8
 
+# Bounded automatic recovery for the two non-transient wait shapes the
+# auto-advance sweep used to re-enter forever (SCI-117/SCI-024): a
+# superseded digest-less review identity is re-dispatched automatically at
+# most ``AUTO_REDISPATCH_SUPERSEDED_LIMIT`` times, and a generation failure
+# is re-attempted automatically at most ``AUTO_REGENERATE_FAILURE_RETRY_
+# BUDGET`` times after its first failed trace; both then keep the structured
+# wait with the explicit operator command in ``retryHint`` instead of burning
+# one identical attempt (and one ledger row) per sweep pass.  The redispatch
+# budget counts every attempt that actually opened a meeting, not only the
+# superseded outcomes: a meeting that opened but still produced no closure
+# returns as another ``waiting_for_sibling_reviews`` pass, so only counting
+# failures let the same identity re-open forever.
+AUTO_REDISPATCH_SUPERSEDED_LIMIT = 2
+AUTO_REDISPATCH_CONSUMING_OUTCOMES = frozenset({"superseded", "succeeded"})
+AUTO_REGENERATE_FAILURE_RETRY_BUDGET = 1
+
 # Digest auto-approval (auto-advance, step zero): how long a digest may sit
 # in ``awaiting_approval`` before the maintenance sweep approves it.  Both
 # digest-carrying round types are covered: hypothesis-review rounds and
@@ -453,6 +469,27 @@ class IdempotencyConflictError(HypothesisFirstChainError):
         self.actual_input_digest = actual_input_digest
         self.expected = expected_input_digest
         self.actual = actual_input_digest
+
+
+class CommandAttemptInProgressError(HypothesisFirstChainError):
+    """Another long command is still executing in the background.
+
+    With the async command window, a second distinct command for the same
+    question can no longer queue behind a 60-150s mutation on the HTTP
+    thread; it is rejected immediately with a stable 409 code so the client
+    can wait for the running attempt (or its own poll) instead of hanging.
+    """
+
+    code = "command_attempt_in_progress"
+    status_code = 409
+
+    def __init__(self, *, question_id: str, command: str, action_id: str) -> None:
+        super().__init__(
+            "上一条命令仍在后台执行，请等待其完成后再提交新命令。"
+        )
+        self.question_id = str(question_id or "")
+        self.command = str(command or "")
+        self.action_id = str(action_id or "")
 
 
 class FormalCommandRejectedError(HypothesisFirstChainError):
@@ -1082,27 +1119,51 @@ def _question_reset_snapshot(team_id: str, question_id: str) -> dict[str, Any]:
         # the projected archive count equals the cancel count up front.
         "archivedFormalRunCount": len(live_formal_runs or []),
     }
-    active_meetings = [
-        meeting_id
+    active_status_meetings = {
+        meeting_id: meeting
         for meeting_id, meeting in target_meetings.items()
         if str(meeting.get("status") or "").strip().lower() in _ACTIVE_MEETING_STATUSES
+    }
+    # Status alone cannot tell a live discussion from an executor that was
+    # interrupted mid-round: only a bound round whose heartbeat is still
+    # fresh proves live work.  Stale meetings stay listed for the reset to
+    # terminate, but they no longer block it.
+    active_meetings = [
+        meeting_id
+        for meeting_id, meeting in active_status_meetings.items()
+        if meeting_rounds.live_running_bound_round_ids(meeting)
     ]
-    active_requests = [
-        request_id
-        for request_id, request in _latest_records(
-            [
-                record
-                for record in target_chain_records
-                if str(record.get("recordKind") or "") == COLLECTION_REQUEST_KIND
-            ],
-            "requestId",
-        ).items()
+    stale_meeting_ids = sorted(
+        meeting_id
+        for meeting_id in active_status_meetings
+        if meeting_id not in set(active_meetings)
+    )
+    from core.web.services.team_workflow.source_collection import (
+        runs as source_collection_runs,
+    )
+
+    active_requests: list[str] = []
+    stale_collection_run_ids: list[str] = []
+    for request_id, request in _latest_records(
+        [
+            record
+            for record in target_chain_records
+            if str(record.get("recordKind") or "") == COLLECTION_REQUEST_KIND
+        ],
+        "requestId",
+    ).items():
         # A legacy pending request with no child run cannot represent work that
         # can still mutate data. Keep the guard for every linked active request,
         # while allowing that unlinked residue to be reset.
-        if str(request.get("status") or "").strip().lower() in _ACTIVE_COLLECTION_STATUSES
-        and str(request.get("collectionRunId") or "").strip()
-    ]
+        if str(request.get("status") or "").strip().lower() not in _ACTIVE_COLLECTION_STATUSES:
+            continue
+        run_id = str(request.get("collectionRunId") or "").strip()
+        if not run_id:
+            continue
+        if source_collection_runs.collection_run_is_active(team_id, run_id):
+            active_requests.append(request_id)
+        else:
+            stale_collection_run_ids.append(run_id)
     return {
         "questionId": normalized_question_id,
         "chainRecords": chain_records,
@@ -1120,7 +1181,36 @@ def _question_reset_snapshot(team_id: str, question_id: str) -> dict[str, Any]:
         "impact": impact,
         "activeMeetingIds": active_meetings,
         "activeRequestIds": active_requests,
+        "staleMeetingIds": stale_meeting_ids,
+        "staleCollectionRunIds": sorted(set(stale_collection_run_ids)),
     }
+
+
+def _apply_question_conversation_impact(
+    team_id: str, snapshot: dict[str, Any]
+) -> None:
+    """Project one question's room/session residue into the impact counters.
+
+    Preview and reset must agree on the question-scoped conversation counts so
+    ``reset['removed']`` matches the confirmed preview exactly.
+    """
+
+    from core.web.services.team_workflow.research_runtime import (
+        question_conversation_cleanup,
+    )
+
+    conversation_preview = question_conversation_cleanup.preview_question_conversations(
+        team_id, snapshot["questionId"]
+    )
+    snapshot["impact"]["conversationRoomCount"] = int(
+        conversation_preview.get("roomCount") or 0
+    )
+    snapshot["impact"]["conversationMessageCount"] = int(
+        conversation_preview.get("messageCount") or 0
+    )
+    snapshot["impact"]["conversationSessionCount"] = int(
+        conversation_preview.get("sessionCount") or 0
+    )
 
 
 def preview_question_reset(team_id: str, question_id: str) -> dict[str, Any]:
@@ -1140,6 +1230,7 @@ def preview_question_reset(team_id: str, question_id: str) -> dict[str, Any]:
         set(snapshot["collectionRunIds"]),
     )
     snapshot["impact"]["collectionRunCount"] = int(collection_preview.get("runCount") or 0)
+    _apply_question_conversation_impact(normalized_team_id, snapshot)
     if active_meetings:
         blocking_reason = "本题仍有进行中的讨论，请先结束或停止讨论后再重置。"
     elif active_requests:
@@ -1155,6 +1246,40 @@ def preview_question_reset(team_id: str, question_id: str) -> dict[str, Any]:
         "canReset": not blocking_reason,
         "blockingReason": blocking_reason,
         "impact": snapshot["impact"],
+    }
+
+
+def question_reset_targets(team_id: str, question_id: str) -> dict[str, Any]:
+    """Read the run identities a question retire must widen the reset scope by.
+
+    The reset owns the working-artifact cleanup; a retire additionally removes
+    the question's registered runs, receipts and formal artifacts, so it must
+    know which run identities belong to the question before the reset rewrites
+    the ledgers.  Non-mutating.
+    """
+
+    from core.web.services.team_service import assert_team_exists
+
+    normalized_team_id = assert_team_exists(team_id)
+    snapshot = _question_reset_snapshot(normalized_team_id, question_id)
+    live_formal_runs = snapshot["liveFormalRuns"]
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "questionId": snapshot["questionId"],
+        "collectionRunIds": sorted(
+            str(value) for value in snapshot["collectionRunIds"] if str(value)
+        ),
+        "liveFormalRunIds": (
+            None
+            if live_formal_runs is None
+            else sorted(
+                str(run.get("runId") or "")
+                for run in live_formal_runs
+                if str(run.get("runId") or "")
+            )
+        ),
+        "formalRuntimeAvailable": live_formal_runs is not None,
     }
 
 
@@ -1201,6 +1326,79 @@ def reset_question_chain(
         if snapshot["activeRequestIds"]:
             raise HypothesisFirstChainError("本题的资料搜集仍在进行，请等待结束或先停止任务。")
 
+        # Heartbeat-aware recovery: a status-active meeting or request whose
+        # executor died (interrupted run) must not lock this question out of
+        # resetting forever.  Terminate those stale records first; when the
+        # termination loses a race with a genuinely live executor the
+        # recheck below turns it back into a real block.
+        terminated_meeting_ids: list[str] = []
+        for meeting_id in list(snapshot["staleMeetingIds"]):
+            try:
+                meeting_rounds.stop_discussion_meeting(normalized_team_id, meeting_id)
+                terminated_meeting_ids.append(meeting_id)
+            except Exception as exc:  # noqa: BLE001 - fail closed only on live work
+                try:
+                    still_live = bool(
+                        meeting_rounds.live_running_bound_round_ids(
+                            meeting_rounds._load_meeting_round(
+                                normalized_team_id, meeting_id
+                            )
+                        )
+                    )
+                except Exception:  # noqa: BLE001 - unreadable meeting stays a block
+                    still_live = True
+                if still_live:
+                    raise HypothesisFirstChainError(
+                        "本题仍有进行中的讨论，请先结束或停止讨论后再重置。"
+                    ) from exc
+                _record_scene_event(
+                    "hypothesis_first.question_reset_meeting_terminate_skipped",
+                    outcome="skipped",
+                    level="warning",
+                    fields={
+                        "teamId": normalized_team_id,
+                        "questionId": normalized_question_id,
+                        "meetingRoundId": meeting_id,
+                    },
+                )
+        stopped_collection_run_ids: list[str] = []
+        for run_id in list(snapshot["staleCollectionRunIds"]):
+            try:
+                source_collection_runs.stop_source_collection_search(
+                    normalized_team_id,
+                    run_id,
+                    reason="hypothesis-first question reset cleared interrupted collection",
+                )
+                stopped_collection_run_ids.append(run_id)
+            except Exception as exc:  # noqa: BLE001 - fail closed only on live work
+                if source_collection_runs.collection_run_is_active(
+                    normalized_team_id, run_id
+                ):
+                    raise HypothesisFirstChainError(
+                        "本题的资料搜集仍在进行，请等待结束或先停止任务。"
+                    ) from exc
+                _record_scene_event(
+                    "hypothesis_first.question_reset_collection_stop_skipped",
+                    outcome="skipped",
+                    level="warning",
+                    fields={
+                        "teamId": normalized_team_id,
+                        "questionId": normalized_question_id,
+                        "runId": run_id,
+                    },
+                )
+        if terminated_meeting_ids or stopped_collection_run_ids:
+            _record_scene_event(
+                "hypothesis_first.question_reset_stale_work_terminated",
+                outcome="success",
+                fields={
+                    "teamId": normalized_team_id,
+                    "questionId": normalized_question_id,
+                    "meetingRoundIds": terminated_meeting_ids,
+                    "runIds": stopped_collection_run_ids,
+                },
+            )
+
         source_preview = source_collection_runs.preview_source_collection_runs_reset(
             normalized_team_id,
             set(snapshot["collectionRunIds"]),
@@ -1210,6 +1408,7 @@ def reset_question_chain(
                 str(source_preview.get("blockingReason") or "本题资料运行暂不能重置。")
             )
         snapshot["impact"]["collectionRunCount"] = int(source_preview.get("runCount") or 0)
+        _apply_question_conversation_impact(normalized_team_id, snapshot)
         # Reconcile live formal runs before any destructive write: a surviving
         # non-terminal run would keep the create_stage_one_run offer gated
         # forever and leave the question in a dead state after the reset.
@@ -1341,11 +1540,32 @@ def reset_question_chain(
                     raise HypothesisFirstChainError("本题运行重置失败，原数据已尝试恢复。") from exc
                 raise
 
+    from core.web.services.team_workflow.research_runtime import (
+        question_conversation_cleanup,
+    )
+
+    conversation_cleanup: dict[str, Any]
+    try:
+        with hypothesis_first_scope_lock(normalized_team_id, normalized_question_id):
+            conversation_cleanup = (
+                question_conversation_cleanup.remove_question_conversations(
+                    normalized_team_id, normalized_question_id
+                )
+            )
+    except Exception as exc:  # noqa: BLE001 - the reset itself already committed
+        conversation_cleanup = {
+            "schemaVersion": 1,
+            "questionId": normalized_question_id,
+            "rooms": {},
+            "sessions": {},
+            "errors": [str(exc)],
+        }
     return {
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team_id,
         "questionId": normalized_question_id,
         "removed": dict(snapshot["impact"]),
+        "conversationCleanup": conversation_cleanup,
         "nextAction": {"targetNodeId": "hf_generation", "label": "创建第一阶段运行"},
     }
 
@@ -2024,6 +2244,252 @@ def retry_review_dispatch(
         round_index=round_index,
         background=True,
     )
+
+
+def _auto_redispatch_superseded_reviews(
+    team_id: str,
+    *,
+    selection_id: str,
+    candidate_ids: Sequence[str],
+) -> dict[str, Any]:
+    """Re-dispatch superseded digest-less review identities (bounded).
+
+    A superseded closing (``discussion_has_no_completed_messages``) has no
+    open meeting to close, so a fan-in that keeps waiting on it can only make
+    progress by dispatching the candidate's review again (SCI-117 waited
+    eight days for a "last sibling close" that could never happen).  Bound:
+    each (selection, candidate, current round) identity is re-dispatched
+    automatically at most ``AUTO_REDISPATCH_SUPERSEDED_LIMIT`` times, counted
+    from the durable dispatch-attempt ledger.  Every attempt that actually
+    dispatched (``superseded`` or ``succeeded``) consumes budget: a meeting
+    that opened but produced no closure comes back through this sweep as
+    another ``waiting_for_sibling_reviews`` pass, so counting only
+    ``superseded`` outcomes let a chain re-open the same review meeting
+    forever (the SCI-117 loop).  Afterwards the structured wait stays with
+    the explicit operator hint.  Best-effort: nothing raises.
+    """
+
+    normalized_selection_id = str(selection_id or "").strip()
+    requested = [
+        str(item or "").strip()
+        for item in candidate_ids
+        if str(item or "").strip()
+    ]
+    summary: dict[str, Any] = {
+        "requested": len(requested),
+        "redispatched": 0,
+        "exhausted": 0,
+        "failed": 0,
+    }
+    if not normalized_selection_id or not requested:
+        return summary
+    try:
+        records = _read_jsonl(_storage_path(team_id))
+    except Exception as exc:  # noqa: BLE001 - best-effort recovery
+        summary["failed"] = len(requested)
+        summary["error"] = str(exc)[:200]
+        return summary
+
+    def auto_dispatch_attempt_count(candidate_id: str) -> int:
+        identity = [
+            item
+            for item in _review_dispatch_attempts(
+                records, selection_id=normalized_selection_id
+            )
+            if str(item.get("candidateId") or "").strip() == candidate_id
+        ]
+        if not identity:
+            return 0
+        newest = max(
+            identity,
+            key=lambda item: (
+                int(item.get("attemptNumber") or 0),
+                str(item.get("updatedAt") or item.get("createdAt") or ""),
+            ),
+        )
+        newest_round = int(newest.get("roundIndex") or 1)
+        return sum(
+            1
+            for item in identity
+            if int(item.get("roundIndex") or 1) == newest_round
+            and str(item.get("outcome") or "") in AUTO_REDISPATCH_CONSUMING_OUTCOMES
+        )
+
+    eligible: list[str] = []
+    for candidate_id in requested:
+        if auto_dispatch_attempt_count(candidate_id) >= AUTO_REDISPATCH_SUPERSEDED_LIMIT:
+            summary["exhausted"] += 1
+            continue
+        eligible.append(candidate_id)
+    if not eligible:
+        return summary
+    try:
+        retry_review_dispatch(
+            team_id, normalized_selection_id, eligible
+        )
+        summary["redispatched"] = len(eligible)
+    except Exception as exc:  # noqa: BLE001 - best-effort recovery
+        summary["failed"] = len(eligible)
+        summary["error"] = f"{type(exc).__name__}: {exc}"[:300]
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# manual round-failure recovery (human-authorized, async accept)
+#
+# The structured failure ledger (``hypothesis_round_failures``) is the one
+# place that knows which round generations still could not finish after the
+# bounded auto-advance retries.  The workspace recovery panel turns those open
+# traces into per-row one-click retries; the browser must not hold an HTTP
+# worker for the review-LLM minutes of a regeneration, so the route accepts
+# the confirmed request, marks the failure in flight, and lets a daemon worker
+# run the same command path the auto sweep uses (``regenerate_hypothesis_round``
+# plus the manual re-dispatch fallback).  Success resolves the open traces
+# through the existing command path; the panel just refetches the ledger.
+# ---------------------------------------------------------------------------
+
+_MANUAL_RECOVERY_INFLIGHT: dict[str, object] = {}
+
+
+def _manual_recovery_meeting_id(record: Mapping[str, Any]) -> str:
+    for item in list(record.get("meetingRoundIds") or []):
+        candidate = str(item or "").strip()
+        if candidate:
+            return candidate
+    return str(record.get("roundId") or "").strip()
+
+
+def request_round_failure_recovery(
+    team_id: str, failure_id: str, *, _worker: Any = None
+) -> dict[str, Any]:
+    """Accept one confirmed manual retry of an open round failure trace.
+
+    Returns ``accepted`` (a background worker owns the long review-LLM path),
+    ``in_flight`` (the same failure is already retrying), ``not_found``
+    (unknown or already resolved trace) or ``not_retryable`` (a pure fan-in
+    wait: closing the siblings advances it, so a button would mislead).
+    """
+
+    from core.web.services.team_workflow import hypothesis_rounds
+
+    normalized_failure_id = str(failure_id or "").strip()
+    if not normalized_failure_id:
+        return {"status": "not_found", "failureId": normalized_failure_id}
+    listing = hypothesis_rounds.list_hypothesis_round_failures(
+        team_id, unresolved_only=True
+    )
+    record = next(
+        (
+            item
+            for item in list(listing.get("failures") or [])
+            if isinstance(item, Mapping)
+            and str(item.get("failureId") or "") == normalized_failure_id
+        ),
+        None,
+    )
+    if record is None:
+        return {"status": "not_found", "failureId": normalized_failure_id}
+    if str(record.get("status") or "") == "blocked":
+        return {
+            "status": "not_retryable",
+            "failureId": normalized_failure_id,
+            "reasonCode": "fan_in_waiting",
+        }
+    meeting_id = _manual_recovery_meeting_id(record)
+    if not meeting_id:
+        return {
+            "status": "not_retryable",
+            "failureId": normalized_failure_id,
+            "reasonCode": "missing_meeting_round",
+        }
+    token = object()
+    if _MANUAL_RECOVERY_INFLIGHT.setdefault(normalized_failure_id, token) is not token:
+        return {
+            "status": "in_flight",
+            "failureId": normalized_failure_id,
+            "questionId": str(record.get("questionId") or ""),
+        }
+    worker = _worker or _run_round_failure_recovery
+    try:
+        thread = threading.Thread(
+            target=worker,
+            args=(team_id, dict(record), token),
+            name=f"round-failure-recovery:{normalized_failure_id}",
+            daemon=True,
+        )
+        thread.start()
+    except Exception:
+        if _MANUAL_RECOVERY_INFLIGHT.get(normalized_failure_id) is token:
+            _MANUAL_RECOVERY_INFLIGHT.pop(normalized_failure_id, None)
+        raise
+    return {
+        "status": "accepted",
+        "failureId": normalized_failure_id,
+        "questionId": str(record.get("questionId") or ""),
+        "meetingRoundId": meeting_id,
+    }
+
+
+def _run_round_failure_recovery(
+    team_id: str, record: Mapping[str, Any], token: object
+) -> None:
+    """Run one accepted manual recovery on the background worker.
+
+    Best-effort by contract: every outcome lands as one
+    ``hypothesis_first.manual_recovery`` scene event and the inflight marker is
+    always released; the ledger stays the single authority the panel refetches.
+    """
+
+    failure_id = str(record.get("failureId") or "")
+    meeting_id = _manual_recovery_meeting_id(record)
+    outcome = "failed"
+    reason = ""
+    try:
+        try:
+            result = regenerate_hypothesis_round(
+                team_id, meeting_id, trigger="manual_recovery"
+            )
+        except Exception as exc:  # noqa: BLE001 - worker never raises
+            reason = f"{type(exc).__name__}: {exc}"[:300]
+            result = {}
+        else:
+            status = str(result.get("status") or "")
+            superseded_ids = [
+                str(item or "").strip()
+                for item in list(result.get("supersededCandidateIds") or [])
+                if str(item or "").strip()
+            ]
+            if status == "waiting_for_sibling_reviews" and superseded_ids:
+                selection_id = str(
+                    result.get("selectionId") or record.get("selectionId") or ""
+                ).strip()
+                try:
+                    retry_review_dispatch(team_id, selection_id, superseded_ids)
+                except Exception as exc:  # noqa: BLE001 - worker never raises
+                    reason = f"{type(exc).__name__}: {exc}"[:300]
+                else:
+                    outcome = "redispatched"
+            elif status in {"created", "reused"}:
+                outcome = "resolved"
+            else:
+                outcome = "waiting"
+                reason = status or "not_ready"
+    finally:
+        if _MANUAL_RECOVERY_INFLIGHT.get(failure_id) is token:
+            _MANUAL_RECOVERY_INFLIGHT.pop(failure_id, None)
+        _record_scene_event(
+            "hypothesis_first.manual_recovery",
+            outcome=outcome,
+            level="warning" if outcome == "failed" else "info",
+            fields={
+                "teamId": str(team_id or ""),
+                "failureId": failure_id,
+                "questionId": str(record.get("questionId") or ""),
+                "meetingRoundId": meeting_id,
+                "status": outcome,
+                "reason": reason,
+            },
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -5452,6 +5918,58 @@ def _missing_round_plans_for_question(
     return plans
 
 
+def _auto_regenerate_failure_budget_exhausted(
+    team_id: str,
+    *,
+    selection_id: str,
+    round_index: int | None,
+) -> bool:
+    """True when the automatic regeneration budget for one failure is spent.
+
+    The synchronous close-time generation and the auto-advance sweep share
+    one failing identity; without this bound the sweep re-attempted the same
+    deterministic failure every pass (SCI-024: 255 identical "requires a
+    non-empty claim" traces over 15 hours).  Failures recorded with
+    ``trigger=auto_advance`` count against ``AUTO_REGENERATE_FAILURE_RETRY_
+    BUDGET``; the operator command path never counts and always stays open.
+    Unreadable ledgers resolve to False: the sweep keeps its previous
+    behavior instead of losing recovery over a read hiccup.
+    """
+
+    normalized_selection_id = str(selection_id or "").strip()
+    if not normalized_selection_id:
+        return False
+    try:
+        from core.web.services.team_workflow import hypothesis_rounds
+
+        listing = hypothesis_rounds.list_hypothesis_round_failures(
+            team_id, unresolved_only=True
+        )
+    except Exception:  # noqa: BLE001 - a read hiccup never blocks recovery
+        return False
+    count = 0
+    for record in list(listing.get("failures") or []):
+        if not isinstance(record, Mapping):
+            continue
+        if str(record.get("status") or "") != "failed":
+            continue
+        if str(record.get("trigger") or "") != "auto_advance":
+            continue
+        if (
+            str(record.get("selectionId") or "").strip()
+            != normalized_selection_id
+        ):
+            continue
+        if round_index is not None and record.get("roundIndex") is not None:
+            try:
+                if int(record.get("roundIndex")) != int(round_index):
+                    continue
+            except (TypeError, ValueError):
+                continue
+        count += 1
+    return count >= AUTO_REGENERATE_FAILURE_RETRY_BUDGET
+
+
 def auto_regenerate_missing_hypothesis_round(
     team_id: str,
     *,
@@ -5475,7 +5993,8 @@ def auto_regenerate_missing_hypothesis_round(
 
     Result semantics: ``created`` (a round landed), ``skipped`` (guarded or
     domain-rejected; ``reason`` says which), ``failed`` (generation failed —
-    the next sweep pass retries naturally).  Best-effort like every
+    automatically re-attempted up to ``AUTO_REGENERATE_FAILURE_RETRY_BUDGET``
+    times, then left to the operator command).  Best-effort like every
     auto-advance helper: nothing raises and every outcome lands as a
     ``hypothesis_first.auto_regenerate_round`` scene event.  An in-process
     inflight marker keyed by ``(teamId, questionId)`` keeps a slow
@@ -5561,9 +6080,31 @@ def auto_regenerate_missing_hypothesis_round(
                 "meetingRoundId": trigger_meeting_id,
                 "meetingRoundIds": list(plan.get("meetingRoundIds") or []),
             }
+            if _auto_regenerate_failure_budget_exhausted(
+                normalized_team_id,
+                selection_id=str(plan.get("selectionId") or ""),
+                round_index=plan.get("roundIndex"),
+            ):
+                summary["skipped"] += 1
+                if decisive is None or decisive.get("status") == "skipped":
+                    decisive = {
+                        "status": "skipped",
+                        "reason": "auto_retry_budget_exhausted",
+                    }
+                _record_scene_event(
+                    "hypothesis_first.auto_regenerate_round",
+                    outcome="skipped",
+                    fields={
+                        **plan_fields,
+                        "reason": "auto_retry_budget_exhausted",
+                    },
+                )
+                continue
             try:
                 result = regenerate_hypothesis_round(
-                    normalized_team_id, trigger_meeting_id
+                    normalized_team_id,
+                    trigger_meeting_id,
+                    trigger="auto_advance",
                 )
             except HypothesisFirstChainError as exc:
                 # Domain rejection (the meeting moved, the closure state
@@ -5640,9 +6181,46 @@ def auto_regenerate_missing_hypothesis_round(
                     outcome="skipped",
                     fields={**plan_fields, "reason": result_status},
                 )
+                superseded_ids = list(result.get("supersededCandidateIds") or [])
+                if result_status == "waiting_for_sibling_reviews" and superseded_ids:
+                    # A superseded digest-less closing has no open meeting to
+                    # close: the wait can only end by dispatching the review
+                    # again, so recover it here (bounded) instead of waiting
+                    # for a sibling close that can never happen.
+                    redispatch = _auto_redispatch_superseded_reviews(
+                        normalized_team_id,
+                        selection_id=str(result.get("selectionId") or ""),
+                        candidate_ids=superseded_ids,
+                    )
+                    summary["autoRedispatch"] = redispatch
+                    _record_scene_event(
+                        "hypothesis_first.auto_redispatch_superseded",
+                        outcome=(
+                            "redispatched"
+                            if redispatch.get("redispatched")
+                            else (
+                                "failed"
+                                if redispatch.get("failed")
+                                else "exhausted"
+                            )
+                        ),
+                        level=(
+                            "warning"
+                            if redispatch.get("failed")
+                            else "info"
+                        ),
+                        fields={
+                            **plan_fields,
+                            "selectionId": str(result.get("selectionId") or ""),
+                            "supersededCandidateIds": superseded_ids,
+                            **redispatch,
+                        },
+                    )
             elif result_status == "failed":
                 # The generation failure trace is already durable (the
-                # hypothesis_round_failures ledger); the next sweep retries.
+                # hypothesis_round_failures ledger); the sweep re-attempts up
+                # to AUTO_REGENERATE_FAILURE_RETRY_BUDGET times (checked at
+                # the call site) and then keeps the operator hint.
                 summary["failed"] += 1
                 decisive = {
                     "status": "failed",
@@ -6502,6 +7080,53 @@ def backfill_feedback_iterations_from_round_chain(
     return summary
 
 
+_FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO: dict[str, tuple[str, float]] = {}
+_FEEDBACK_ITERATION_BACKFILL_BLOCKED_TTL_SECONDS = 30 * 60.0
+_FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO_MAX_ENTRIES = 256
+
+
+def _feedback_iteration_rounds_fingerprint(rounds: list[dict[str, Any]]) -> str:
+    """Stable identity of the evidence a backfill attempt would replay."""
+
+    canonical = json.dumps(rounds, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:20]
+
+
+def _feedback_iteration_backfill_recently_blocked(
+    run_id: str, fingerprint: str
+) -> bool:
+    """True when this run was blocked before on the same round evidence.
+
+    The recovery sweep ticks every second; a blocked backfill can only change
+    when the question's round chain changes (or a write succeeds elsewhere).
+    Re-attempting identical evidence only re-reads the ledger and re-logs the
+    same warning, so the memo bounds that churn and expires after a TTL in
+    case a future invalidation path is missed.
+    """
+
+    entry = _FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO.get(run_id)
+    if entry is None:
+        return False
+    blocked_fingerprint, blocked_at = entry
+    if blocked_fingerprint != fingerprint:
+        return False
+    if time.monotonic() - blocked_at > _FEEDBACK_ITERATION_BACKFILL_BLOCKED_TTL_SECONDS:
+        _FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO.pop(run_id, None)
+        return False
+    return True
+
+
+def _remember_feedback_iteration_backfill_blocked(
+    run_id: str, fingerprint: str
+) -> None:
+    if (
+        len(_FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO)
+        >= _FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO_MAX_ENTRIES
+    ):
+        _FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO.clear()
+    _FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO[run_id] = (fingerprint, time.monotonic())
+
+
 def auto_backfill_missing_feedback_iterations(
     team_id: str,
     *,
@@ -6520,7 +7145,10 @@ def auto_backfill_missing_feedback_iterations(
     the write goes through
     :func:`backfill_feedback_iterations_from_round_chain` (fail-closed,
     idempotent — a second pass replays byte-identical evidence and writes
-    nothing new).  Nothing here raises: one broken run is isolated and every
+    nothing new).  A blocked outcome is memoized per run against the round
+    chain fingerprint for a bounded TTL: the per-second recovery sweep must
+    not grind the ledger with identical failed attempts and warning spam.
+    Nothing here raises: one broken run is isolated and every
     non-trivial outcome lands as a
     ``hypothesis_first.auto_backfill_feedback_iterations`` scene event plus a
     ``logger.warning``.
@@ -6575,6 +7203,7 @@ def auto_backfill_missing_feedback_iterations(
         summary["reason"] = "rounds_unreadable"
         summary["error"] = str(exc)[:400]
         return summary
+    fingerprint = _feedback_iteration_rounds_fingerprint(rounds)
     store = runtime.store
     for run in target_runs:
         run_id = str(run.get("runId") or "").strip()
@@ -6586,6 +7215,18 @@ def auto_backfill_missing_feedback_iterations(
             "questionId": normalized_question_id,
             "runId": run_id,
         }
+        if _feedback_iteration_backfill_recently_blocked(run_id, fingerprint):
+            summary["skipped"] += 1
+            summary["runs"].append(
+                {
+                    "runId": run_id,
+                    "status": "skipped",
+                    "reason": "blocked_backfill_recently_attempted",
+                    "blockerCodes": [],
+                    "rounds": 0,
+                }
+            )
+            continue
         try:
             record = store.get_run(run_id)
             snapshot = json.loads(
@@ -6637,6 +7278,7 @@ def auto_backfill_missing_feedback_iterations(
         }
         summary["runs"].append(outcome)
         if result_status == "written":
+            _FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO.pop(run_id, None)
             summary["written"] += int(result.get("written") or 0)
             summary["status"] = "written"
             _record_scene_event(
@@ -6649,6 +7291,7 @@ def auto_backfill_missing_feedback_iterations(
                 },
             )
         elif result_status == "blocked":
+            _remember_feedback_iteration_backfill_blocked(run_id, fingerprint)
             summary["blocked"] += 1
             if summary["status"] != "written":
                 summary["status"] = "blocked"
@@ -8285,6 +8928,241 @@ def execute_v2_command(
     return result
 
 
+def submit_v2_command_async(
+    team_id: str,
+    request: Mapping[str, Any],
+    *,
+    question_id: str = "",
+    workflow_run_id: str = "",
+    _actor: str = _OPERATOR_AGENT_ID,
+) -> dict[str, Any] | None:
+    """Accept-and-queue one long V2 command; ``None`` means "not async".
+
+    SCI-049 contract: the three long paths (``open_generation`` /
+    ``retry_generation``, ``record_selection``, ``approve_summary``) used to
+    hold the HTTP worker for 60-150s.  This gate validates and authorizes the
+    command under the same per-question scope lock, persists a queued attempt,
+    and returns an ``accepted`` envelope carrying the ``commandAttemptId``
+    within milliseconds; the real command body is executed by
+    :func:`hypothesis_command_attempts.submit_execution`, which re-enters
+    :func:`_execute_v2_command_impl` (full scope-lock re-authorization + CAS +
+    idempotent owning mutation).  Anything else — including any command whose
+    actionId inference misses — returns ``None`` and the caller falls back to
+    the synchronous :func:`execute_v2_command`.
+
+    Duplicate submits of the same idempotency key are deduplicated against the
+    attempt ledger: live attempts replay the same ``accepted`` envelope,
+    succeeded attempts replay the stored response verbatim, and a failed
+    attempt mints a fresh attempt so the operator can retry with the same key
+    (the owning services stay the durable replay authority).
+    """
+
+    envelope = dict(request) if isinstance(request, Mapping) else {}
+    action_id = str(envelope.get("actionId") or "").strip()
+    idempotency_key = str(envelope.get("idempotencyKey") or "").strip()
+    if not action_id or not idempotency_key:
+        return None
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_command_attempts as attempts,
+    )
+
+    command = attempts.infer_async_command(action_id, str(envelope.get("command") or ""))
+    if not command:
+        return None
+    payload = envelope.get("payload")
+    payload = dict(payload) if isinstance(payload, Mapping) else {}
+    expected = str(envelope.get("expectedStateVersion") or "").strip()
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
+
+    from core.web.services.team_service import assert_team_exists
+
+    normalized_team_id = assert_team_exists(team_id)
+    normalized_question_id = _command_question_id(
+        normalized_team_id,
+        command,
+        payload,
+        question_id=question_id,
+    )
+    identity = attempts._attempt_identity(
+        team_id=normalized_team_id,
+        question_id=normalized_question_id,
+        action_id=action_id,
+        idempotency_key=idempotency_key,
+        workflow_run_id=normalized_workflow_run_id,
+    )
+
+    def _accepted(existing: Mapping[str, Any]) -> dict[str, Any]:
+        return attempts.accepted_envelope(
+            existing,
+            team_id=normalized_team_id,
+            question_id=normalized_question_id,
+            workflow_run_id=normalized_workflow_run_id,
+        )
+
+    # Cheap pre-lock dedup: the common double-click/retry replay must never
+    # queue behind the scope lock that the running attempt holds for minutes.
+    latest = attempts.find_latest_attempt(normalized_team_id, identity)
+    if latest is not None:
+        status = str(latest.get("status") or "")
+        if status == attempts.STATUS_SUCCEEDED:
+            return attempts.stored_response_envelope(latest)
+        if status in attempts._ACTIVE_STATUSES:
+            return _accepted(latest)
+    active_other = attempts.find_active_attempt_for_question(
+        normalized_team_id,
+        normalized_question_id,
+    )
+    if active_other is not None:
+        # A different live command owns this question's scope lock; rejecting
+        # immediately beats queueing the HTTP thread behind it for minutes.
+        raise CommandAttemptInProgressError(
+            question_id=normalized_question_id,
+            command=str(active_other.get("command") or ""),
+            action_id=str(active_other.get("actionId") or ""),
+        )
+
+    def _authorize_locked() -> dict[str, Any]:
+        """Re-authorize inside the scope lock; returns the queued attempt."""
+
+        nonlocal command
+        snapshot = assert_expected_state_version(
+            normalized_team_id,
+            normalized_question_id,
+            expected,
+            workflow_run_id=normalized_workflow_run_id,
+        )
+        if not command:
+            matching_actions = [
+                item
+                for item in list(snapshot.get("allowedActions") or [])
+                if isinstance(item, Mapping)
+                and item.get("kind") == "command"
+                and str(item.get("actionId") or "") == action_id
+                and dict(item.get("payload") or {}) == payload
+            ]
+            command = (
+                str(matching_actions[0].get("command") or "")
+                if matching_actions
+                else ""
+            )
+        if command not in attempts.ASYNC_COMMANDS:
+            # Inference drift: let the caller execute this short command
+            # synchronously instead of accepting an async envelope for it.
+            return {}
+        action = _find_allowed_command(
+            snapshot,
+            action_id=action_id,
+            command=command,
+            payload=payload,
+        )
+        if str(action.get("idempotencyKey") or "") != idempotency_key:
+            raise HypothesisFirstChainError(
+                "idempotencyKey does not match the server-authorized action"
+            )
+        # Authoritative dedup after the lock: a concurrent gate for the same
+        # key may have registered while this caller waited.
+        latest = attempts.find_latest_attempt(normalized_team_id, identity)
+        if latest is not None:
+            status = str(latest.get("status") or "")
+            if status == attempts.STATUS_SUCCEEDED:
+                return {"replay": attempts.stored_response_envelope(latest)}
+            if status in attempts._ACTIVE_STATUSES:
+                return {"accepted": _accepted(latest)}
+        active_other = attempts.find_active_attempt_for_question(
+            normalized_team_id,
+            normalized_question_id,
+        )
+        if active_other is not None:
+            raise CommandAttemptInProgressError(
+                question_id=normalized_question_id,
+                command=str(active_other.get("command") or ""),
+                action_id=str(active_other.get("actionId") or ""),
+            )
+        attempt = attempts.register_attempt(
+            identity,
+            command=command,
+            accepted_state_version=expected,
+        )
+        return {"attempt": attempt, "command": command}
+
+    with hypothesis_first_scope_lock(normalized_team_id, normalized_question_id):
+        outcome = _authorize_locked()
+    if not outcome:
+        return None
+    if "replay" in outcome:
+        return outcome["replay"]
+    if "accepted" in outcome:
+        return outcome["accepted"]
+
+    attempt = outcome["attempt"]
+    resolved_command = str(outcome.get("command") or command)
+
+    from .operator_authorization import (
+        current_server_operator,
+        server_operator_scope,
+    )
+
+    operator = current_server_operator()
+
+    def _run_command_body() -> dict[str, Any]:
+        # The worker thread has no ambient HTTP context; rebind the exact
+        # operator principal that authorized this command so downstream
+        # server-scope readers see the same identity the sync path had.
+        if operator is not None:
+            with server_operator_scope(
+                operator.operator_id,
+                display_name=operator.display_name,
+                roles=operator.roles,
+            ):
+                return _execute_v2_command_impl(
+                    normalized_team_id,
+                    envelope,
+                    question_id=question_id,
+                    workflow_run_id=normalized_workflow_run_id,
+                    _actor=_actor,
+                )
+        return _execute_v2_command_impl(
+            normalized_team_id,
+            envelope,
+            question_id=question_id,
+            workflow_run_id=normalized_workflow_run_id,
+            _actor=_actor,
+        )
+
+    attempts.submit_execution(attempt, run=_run_command_body)
+    _record_scene_event(
+        "command.async_accepted",
+        outcome="accepted",
+        fields={
+            **identity,
+            "command": resolved_command,
+            "commandAttemptId": str(attempt.get("attemptId") or ""),
+        },
+    )
+    return attempts.accepted_envelope(
+        attempt,
+        team_id=normalized_team_id,
+        question_id=normalized_question_id,
+        workflow_run_id=normalized_workflow_run_id,
+    )
+
+
+def get_v2_command_attempt(team_id: str, attempt_id: str) -> dict[str, Any]:
+    """Read-only attempt status for the async command polling contract."""
+
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_command_attempts as attempts,
+    )
+
+    normalized_team_id = str(team_id or "").strip()
+    attempt = attempts.get_attempt(normalized_team_id, attempt_id)
+    if attempt is None:
+        raise HypothesisFirstChainNotFoundError(
+            f"command attempt {attempt_id} not found"
+        )
+    return attempt
+
+
 def _execute_v2_command_impl(
     team_id: str,
     request: Mapping[str, Any],
@@ -9147,6 +10025,26 @@ def _append_review_dispatch_attempt_state(
             ),
             {},
         )
+        target_meeting_round_id = str(meeting_round_id or "") or str(
+            previous.get("meetingRoundId") or ""
+        )
+        if (
+            lifecycle != "queued"
+            and previous
+            and str(previous.get("lifecycle") or "") == lifecycle
+            and str(previous.get("outcome") or "none") == outcome
+            and str(previous.get("meetingRoundId") or "")
+            == target_meeting_round_id
+            and str(previous.get("error") or "") == str(error or "")
+            and str(previous.get("errorType") or "") == str(error_type or "")
+        ):
+            # Terminal-transition replay: the attempt already carries exactly
+            # this state, so re-observing it (projection/digest re-reads,
+            # closeout sweeps, meeting fences) must not append another
+            # identical row.  The historical ledger grew to thousands of
+            # duplicate "completed/succeeded" rows for a single attempt
+            # (SCI-056), which drowned the projection and the audit.
+            return previous
         record = {
             "schemaVersion": SCHEMA_VERSION,
             "recordKind": REVIEW_DISPATCH_ATTEMPT_KIND,
@@ -9163,8 +10061,7 @@ def _append_review_dispatch_attempt_state(
             "roundIndex": int(round_index),
             "lifecycle": lifecycle,
             "outcome": outcome,
-            "meetingRoundId": str(meeting_round_id or "")
-            or str(previous.get("meetingRoundId") or ""),
+            "meetingRoundId": target_meeting_round_id,
             "error": str(error or ""),
             "errorType": str(error_type or ""),
             "createdAt": str(previous.get("createdAt") or "") or now,
@@ -13018,37 +13915,66 @@ def _build_round_candidates(
             candidate_id = str(item.get("candidateId") or "").strip()
             if not candidate_id or candidate_id not in requested_candidate_ids:
                 continue
-            artifact_by_id.setdefault(
-                candidate_id,
-                {
-                    "hypothesis_id": candidate_id,
-                    "statement": str(
-                        item.get("statement") or item.get("claim") or ""
-                    ).strip(),
-                    "mechanism": str(item.get("rationale") or "").strip(),
-                    "novelty_basis": str(
-                        item.get("differenceFromAlternatives") or ""
-                    ).strip(),
-                    "candidateAuthority": str(
-                        item.get("candidateAuthority") or ""
-                    ).strip(),
-                    "lineageRefs": _normalized_str_list(item.get("lineageRefs")),
-                    "testablePrediction": str(
-                        item.get("testablePrediction") or ""
-                    ).strip(),
-                    "falsifier": str(item.get("falsifier") or "").strip(),
-                    "axisProfile": (
-                        dict(item.get("axisProfile"))
-                        if isinstance(item.get("axisProfile"), Mapping)
-                        else {}
-                    ),
-                },
-            )
+            ledger_entry = {
+                "hypothesis_id": candidate_id,
+                "statement": str(
+                    item.get("statement") or item.get("claim") or ""
+                ).strip(),
+                "mechanism": str(item.get("rationale") or "").strip(),
+                "novelty_basis": str(
+                    item.get("differenceFromAlternatives") or ""
+                ).strip(),
+                "candidateAuthority": str(
+                    item.get("candidateAuthority") or ""
+                ).strip(),
+                "lineageRefs": _normalized_str_list(item.get("lineageRefs")),
+                "testablePrediction": str(
+                    item.get("testablePrediction") or ""
+                ).strip(),
+                "falsifier": str(item.get("falsifier") or "").strip(),
+                "axisProfile": (
+                    dict(item.get("axisProfile"))
+                    if isinstance(item.get("axisProfile"), Mapping)
+                    else {}
+                ),
+            }
+            existing = artifact_by_id.get(candidate_id)
+            if existing is None:
+                artifact_by_id[candidate_id] = ledger_entry
+                continue
+            # Approved artifacts stay authoritative for every field they
+            # actually carry; the ledger only fills holes.  A rejected empty
+            # ``statement`` (SCI-024) came from an approved entry whose field
+            # was empty while the same ledger identity had content — keeping
+            # the empty field shadowed the content and the generation retried
+            # the same deterministic "requires a non-empty claim" forever.
+            merged = dict(existing)
+            for key, value in ledger_entry.items():
+                if key == "hypothesis_id":
+                    continue
+                current = merged.get(key)
+                if isinstance(value, list):
+                    if value and not _normalized_str_list(current):
+                        merged[key] = value
+                elif isinstance(value, Mapping):
+                    if value and not (
+                        isinstance(current, Mapping) and current
+                    ):
+                        merged[key] = value
+                elif str(value or "").strip() and not str(current or "").strip():
+                    merged[key] = value
+            artifact_by_id[candidate_id] = merged
+
+    def needs_ledger_fill(candidate_id: str) -> bool:
+        entry = artifact_by_id.get(candidate_id)
+        if entry is None:
+            return True
+        return not str(entry.get("statement") or entry.get("claim") or "").strip()
 
     missing_candidate_ids = [
         candidate_id
         for candidate_id in normalized_candidate_ids
-        if candidate_id not in artifact_by_id
+        if needs_ledger_fill(candidate_id)
     ]
     if detail is None or missing_candidate_ids:
         resolved_workflow_run_id = str(
@@ -13067,7 +13993,7 @@ def _build_round_candidates(
         # is absent from both the approved artifact and the run-scoped
         # generation ledger, recover only the requested identity from the
         # same question's legacy ledger.  Run-scoped and approved authorities
-        # keep precedence through setdefault.
+        # keep precedence for every non-empty field (see add_ledger_candidates).
         unresolved_candidate_ids = [
             candidate_id
             for candidate_id in normalized_candidate_ids
@@ -13085,7 +14011,9 @@ def _build_round_candidates(
         artifact = artifact_by_id.get(candidate_id) or {}
         candidate: dict[str, Any] = {
             "candidateId": candidate_id,
-            "claim": str(artifact.get("statement") or "").strip(),
+            "claim": str(
+                artifact.get("statement") or artifact.get("claim") or ""
+            ).strip(),
             "rationale": str(artifact.get("mechanism") or "").strip(),
             "candidateAuthority": str(artifact.get("candidateAuthority") or "").strip(),
             "lineageRefs": _normalized_str_list(artifact.get("lineageRefs")),
@@ -14421,6 +15349,58 @@ def _classify_round_failure(exc: BaseException) -> str:
     return "hypothesis_round_generation_error"
 
 
+def _fan_in_waiting_semantics(fan_in: Mapping[str, Any]) -> tuple[str, str]:
+    """Express a non-ready fan-in with the cause-accurate reason and recovery.
+
+    The historical wording ("close the pending sibling review meetings; the
+    last sibling close regenerates the round automatically") was wrong for
+    every wait that was not a pending sibling: superseded digest-less
+    closings have no open meeting to close, so the operator kept waiting for
+    an event that could never happen (SCI-117 retried for eight days).  The
+    wait taxonomy decides the recovery:
+
+    - superseded candidates -> re-dispatch their reviews;
+    - missing candidate links -> open the missing reviews;
+    - pending sibling meetings -> wait for the last close;
+    - anything else -> generic wait.
+    """
+
+    superseded_candidate_ids = list(fan_in.get("supersededCandidateIds") or [])
+    missing_candidate_ids = list(fan_in.get("missingCandidateIds") or [])
+    pending_meeting_ids = list(fan_in.get("pendingMeetingRoundIds") or [])
+    if superseded_candidate_ids:
+        listed = ", ".join(str(item) for item in superseded_candidate_ids)
+        return (
+            "review fan-in is waiting: the newest review attempt for "
+            f"{listed} closed without an authoritative digest and needs "
+            "re-dispatch before a HypothesisRound can be generated",
+            "re-dispatch the superseded candidate reviews "
+            f"(retry_review_dispatch): {listed}",
+        )
+    if missing_candidate_ids:
+        listed = ", ".join(str(item) for item in missing_candidate_ids)
+        return (
+            "review fan-in is waiting: selected candidates have no review "
+            f"meeting yet ({listed})",
+            f"open review meetings for the unlinked candidates: {listed}",
+        )
+    if pending_meeting_ids:
+        listed = ", ".join(str(item) for item in pending_meeting_ids)
+        return (
+            "review fan-in is not ready; the HypothesisRound is regenerated "
+            "automatically when every sibling review closes",
+            "wait for the pending sibling review meetings to close "
+            f"({listed}); the last sibling close regenerates the round "
+            "automatically",
+        )
+    return (
+        "review fan-in is not ready; the HypothesisRound is regenerated "
+        "automatically when every sibling review closes",
+        "close the pending sibling review meetings; the last sibling close "
+        "regenerates the round automatically",
+    )
+
+
 def _record_round_persistence_failure(
     team_id: str,
     meeting_round: Mapping[str, Any],
@@ -14436,6 +15416,7 @@ def _record_round_persistence_failure(
     meeting_round_ids: list[str] | None = None,
     retry_hint: str = "",
     context: Mapping[str, Any] | None = None,
+    trigger: str = "",
 ) -> dict[str, Any]:
     """Persist one failure trace for a round generation attempt (best-effort).
 
@@ -14490,6 +15471,7 @@ def _record_round_persistence_failure(
                 ).strip(),
                 "scopeHash": str(meeting_round.get("scopeHash") or "").strip(),
                 "retryHint": retry_hint,
+                "trigger": trigger,
                 "context": dict(context or {}),
             },
         )
@@ -14647,6 +15629,8 @@ def _generate_hypothesis_round(
     metareview_runner: Any = None,
     revision_runner: Any = None,
     replay_only: bool = False,
+    fan_in: Mapping[str, Any] | None = None,
+    trigger: str = "command",
 ) -> dict[str, Any]:
     """Best-effort selection-level HypothesisRound fan-in after closure.
 
@@ -14661,6 +15645,10 @@ def _generate_hypothesis_round(
     round, otherwise a structured ``replay_miss`` result is returned instead
     of running the review executor.
 
+    ``fan_in`` optionally carries an already-resolved fan-in group so the
+    retry command path can judge readiness before it resolves review runners
+    (a waiting fan-in never needs them).
+
     Every non-ready or failed attempt additionally appends a durable trace
     to the ``hypothesis_round_failures`` ledger (``blocked`` for a pending
     fan-in, ``failed`` with a classified ``failureCode`` otherwise) so the
@@ -14668,7 +15656,6 @@ def _generate_hypothesis_round(
     automatically when the last sibling review closes, and the other
     failure codes rerun through :func:`regenerate_hypothesis_round`.
     """
-    fan_in: dict[str, Any] = {}
     round_id = ""
     selection_id = ""
     round_index: int | None = None
@@ -14682,27 +15669,26 @@ def _generate_hypothesis_round(
             hypothesis_selection as selections,
         )
 
-        fan_in = _review_meeting_fan_in_group(team_id, meeting_round)
+        fan_in = (
+            dict(fan_in)
+            if fan_in is not None
+            else _review_meeting_fan_in_group(team_id, meeting_round)
+        )
         if fan_in.get("status") != "ready":
+            wait_reason, wait_hint = _fan_in_waiting_semantics(fan_in)
             failure_trace = _record_round_persistence_failure(
                 team_id,
                 meeting_round,
                 status="blocked",
                 failure_code="fan_in_waiting_for_sibling_reviews",
-                reason=(
-                    "review fan-in is not ready; the HypothesisRound is "
-                    "regenerated automatically when every sibling review closes"
-                ),
+                reason=wait_reason,
                 fan_in=fan_in,
                 round_index=(
                     int(fan_in.get("roundIndex") or 1)
                     if fan_in.get("roundIndex") is not None
                     else None
                 ),
-                retry_hint=(
-                    "close the pending sibling review meetings; the last "
-                    "sibling close regenerates the round automatically"
-                ),
+                retry_hint=wait_hint,
                 context={
                     "missingCandidateIds": list(fan_in.get("missingCandidateIds") or []),
                     "pendingMeetingRoundIds": list(
@@ -14718,6 +15704,7 @@ def _generate_hypothesis_round(
                         fan_in.get("closedMeetingRoundIds") or []
                     ),
                 },
+                trigger=trigger,
             )
             if failure_trace:
                 fan_in = {
@@ -15122,6 +16109,7 @@ def _generate_hypothesis_round(
                 "replaying close_review_meeting with the original closure "
                 "payload regenerates the round as well"
             ),
+            trigger=trigger,
         )
         reported: dict[str, Any] = {
             "status": "failed",
@@ -16529,6 +17517,7 @@ def regenerate_hypothesis_round(
     metareview_runner: Any = None,
     revision_runner: Any = None,
     replay_only: bool = False,
+    trigger: str = "command",
 ) -> dict[str, Any]:
     """Re-run selection-level HypothesisRound generation for a closed meeting.
 
@@ -16547,6 +17536,11 @@ def regenerate_hypothesis_round(
     reject a pure authority re-materialization) and a derived round id that
     misses the ledger surfaces as a structured ``replay_miss`` result
     instead of a fresh generation.
+
+    A not-ready fan-in short-circuits before runner resolution: the retry
+    path returns the structured wait (with the cause-accurate recovery), so
+    the auto-advance sweep never builds review runners for a wait that
+    cannot generate yet.
     """
     from core.web.services import team_service
     from core.web.services.team_workflow import meeting_rounds
@@ -16568,6 +17562,7 @@ def regenerate_hypothesis_round(
             f"Review meeting {normalized_round_id} is not closed; close it "
             "before regenerating the hypothesis round."
         )
+    resolved_fan_in: Mapping[str, Any] | None = None
     if replay_only:
         # The reuse dedup never invokes review runners, so a replay must not
         # depend on evaluator configuration: resolving real runners here
@@ -16582,6 +17577,29 @@ def regenerate_hypothesis_round(
             "revision_runner": None,
         }
     else:
+        # Readiness before spend: a fan-in that is still waiting (open
+        # siblings, superseded digest-less closings, missing links) can never
+        # generate, so the retry path must not resolve or build review
+        # runners for it.  The sweep re-enters this command every tick; the
+        # short-circuit keeps the wait cheap and side-effect free while the
+        # trace stays the single (idempotent) wait marker.
+        try:
+            resolved_fan_in = _review_meeting_fan_in_group(
+                normalized_team_id, meeting_round
+            )
+        except Exception:  # noqa: BLE001 - fall through to the exact failure
+            resolved_fan_in = None
+        if (
+            resolved_fan_in is not None
+            and str(resolved_fan_in.get("status") or "") != "ready"
+        ):
+            return _generate_hypothesis_round(
+                normalized_team_id,
+                meeting_round,
+                replay_only=False,
+                fan_in=resolved_fan_in,
+                trigger=trigger,
+            )
         resolved_runners = _resolve_review_runners(
             meeting_round,
             normalized_round_id,
@@ -16601,6 +17619,8 @@ def regenerate_hypothesis_round(
         metareview_runner=resolved_runners["metareview_runner"],
         revision_runner=resolved_runners["revision_runner"],
         replay_only=replay_only,
+        fan_in=resolved_fan_in,
+        trigger=trigger,
     )
 
 

@@ -322,8 +322,13 @@ def get_active_session_detail() -> dict | None:
     return s.get_session_detail(active_id)
 
 
-def get_active_session_summary() -> dict | None:
-    """Return the current active conversation summary for shell-level polling."""
+def get_active_session_summary(*, include_runtime_metrics: bool = False) -> dict | None:
+    """Return the current active conversation summary for shell-level polling.
+
+    ``include_runtime_metrics`` adds live usage/cache/context projections
+    (``runtimeMetrics``) for consumers that must not fall back to the legacy
+    CLI-written runtime snapshot when an active session exists.
+    """
     s = _service()
 
     agent_by_id = s._agent_lookup_for_conversations()
@@ -353,7 +358,65 @@ def get_active_session_summary() -> dict | None:
     if target is None:
         return None
     target = s._with_direct_session_agent_for_summary(target, agent_by_id=agent_by_id)
-    return s._build_session_summary(target, hydrate_agent=False)
+    return s._build_session_summary(
+        target,
+        hydrate_agent=False,
+        include_runtime_metrics=include_runtime_metrics,
+    )
+
+
+def _session_runtime_metrics(
+    conversation: dict[str, Any],
+    messages: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """Live usage/cache/context projections for one session conversation."""
+
+    s = _service()
+    usage_messages = list(messages or [])
+    context_usage = s._build_session_context_usage(conversation, usage_messages)
+    llm_usage = s._session_last_llm_usage(usage_messages)
+    stored_last_cache_composition = s._normalize_session_cache_composition(
+        conversation.get("lastCacheComposition") or conversation.get("last_cache_composition")
+    )
+    if (
+        llm_usage is None
+        and stored_last_cache_composition is not None
+        and str(stored_last_cache_composition.get("source") or "").strip() == "not_called"
+    ):
+        llm_usage = s._normalize_turn_llm_usage(
+            {
+                "source": "not_called",
+                "recordedAt": str(stored_last_cache_composition.get("updatedAt") or "").strip(),
+            }
+        )
+    cache_usage = s._build_session_cache_usage(llm_usage, usage_messages)
+    live_context_composition = s._current_session_live_context_composition(conversation["id"])
+    last_context_composition = live_context_composition or s._normalize_session_context_composition(
+        conversation.get("lastContextComposition") or conversation.get("last_context_composition")
+    )
+    last_cache_composition = (
+        s._build_session_cache_composition(
+            str(live_context_composition.get("turnId") or "").strip(),
+            llm_usage,
+            context_composition=last_context_composition,
+            average_cache=cache_usage,
+        )
+        if live_context_composition is not None
+        else s._session_last_cache_composition(
+            conversation,
+            llm_usage=llm_usage,
+            context_composition=last_context_composition,
+            average_cache=cache_usage,
+            normalized_last_cache_composition=stored_last_cache_composition,
+        )
+    )
+    return {
+        "contextUsage": context_usage,
+        "cacheUsage": cache_usage,
+        "llmUsage": llm_usage,
+        "lastContextComposition": last_context_composition,
+        "lastCacheComposition": last_cache_composition,
+    }
 
 
 def _build_session_detail(
@@ -434,45 +497,14 @@ def _build_session_detail_from_summary(
     if not detail_messages:
         detail_messages = s._normalize_messages(conversation["id"], conversation.get("messages") or [])
     usage_messages = stat_messages or detail_messages
-    context_usage = s._build_session_context_usage(conversation, usage_messages)
-    llm_usage = s._session_last_llm_usage(usage_messages)
-    stored_last_cache_composition = s._normalize_session_cache_composition(
-        conversation.get("lastCacheComposition") or conversation.get("last_cache_composition")
-    )
-    if (
-        llm_usage is None
-        and stored_last_cache_composition is not None
-        and str(stored_last_cache_composition.get("source") or "").strip() == "not_called"
-    ):
-        llm_usage = s._normalize_turn_llm_usage(
-            {
-                "source": "not_called",
-                "recordedAt": str(stored_last_cache_composition.get("updatedAt") or "").strip(),
-            }
-        )
-    cache_usage = s._build_session_cache_usage(llm_usage, usage_messages)
-    live_context_composition = s._current_session_live_context_composition(conversation["id"])
-    last_context_composition = live_context_composition or s._normalize_session_context_composition(
-        conversation.get("lastContextComposition") or conversation.get("last_context_composition")
-    )
+    runtime_metrics = s._session_runtime_metrics(conversation, usage_messages)
+    context_usage = runtime_metrics["contextUsage"]
+    cache_usage = runtime_metrics["cacheUsage"]
+    llm_usage = runtime_metrics["llmUsage"]
+    last_context_composition = runtime_metrics["lastContextComposition"]
+    last_cache_composition = runtime_metrics["lastCacheComposition"]
     last_llm_payload_trace = s._current_session_live_llm_payload_trace(conversation["id"]) or s._normalize_session_llm_payload_trace(
         conversation.get("lastLlmPayloadTrace") or conversation.get("last_llm_payload_trace")
-    )
-    last_cache_composition = (
-        s._build_session_cache_composition(
-            str(live_context_composition.get("turnId") or "").strip(),
-            llm_usage,
-            context_composition=last_context_composition,
-            average_cache=cache_usage,
-        )
-        if live_context_composition is not None
-        else s._session_last_cache_composition(
-            conversation,
-            llm_usage=llm_usage,
-            context_composition=last_context_composition,
-            average_cache=cache_usage,
-            normalized_last_cache_composition=stored_last_cache_composition,
-        )
     )
     agent_available = s._session_agent_is_available(summary)
     available_agent_id = summary.get("agentId") or "" if agent_available else ""
@@ -547,6 +579,9 @@ def _build_session_detail_from_summary(
     }
     if message_window is not None:
         detail["messageWindow"] = message_window
+    active_leaf_id, active_branch_id = s._session_branch_metadata(conversation["id"])
+    detail["activeLeafId"] = active_leaf_id
+    detail["activeBranchId"] = active_branch_id
     return detail
 
 
@@ -556,6 +591,7 @@ def _build_session_summary(
     hydrate_agent: bool = True,
     phase_timings: dict[str, int] | None = None,
     agent_inbox_pending_count_cache: dict[str, int] | None = None,
+    include_runtime_metrics: bool = False,
 ) -> dict[str, Any]:
     s = _service()
     status = s._conversation_phase(conversation["id"], conversation)
@@ -659,6 +695,11 @@ def _build_session_summary(
     session_source_ref = s._source_authority_ref("session", session_id)
     session_projection_edit = s._projection_edit_contract("session", session_id)
     agent_source_ref = s._source_authority_ref("agent", agent_id) if agent_id else None
+    runtime_metrics = (
+        s._session_runtime_metrics(conversation, normalized_summary_messages)
+        if include_runtime_metrics
+        else None
+    )
     return {
         "id": session_id,
         "title": display_title,
@@ -714,6 +755,7 @@ def _build_session_summary(
         "sourceRef": session_source_ref,
         "projectionEdit": session_projection_edit,
         "agentSourceRef": agent_source_ref,
+        **({"runtimeMetrics": runtime_metrics} if runtime_metrics is not None else {}),
     }
 
 
@@ -1445,6 +1487,12 @@ def _normalize_messages(
                 "turnItems": turn_items,
                 "metadata": dict(metadata) if isinstance(metadata, dict) else {},
             }
+        node_id = str(raw.get("nodeId") or "").strip()
+        if node_id:
+            entry["nodeId"] = node_id
+        branch = raw.get("branch")
+        if isinstance(branch, dict) and branch:
+            entry["branch"] = dict(branch)
         messages.append(entry)
     return _coalesce_assistant_messages_by_turn(s._dedupe_turn_error_messages(messages))
 
@@ -1871,6 +1919,7 @@ _SESSION_TURN_THINKING_STAGES = {
     "context_prepare",
     "prepare",
     "request",
+    "working",
 }
 
 
@@ -2632,11 +2681,18 @@ def _canonicalize_session_turn_items_for_protocol(
         if item_type not in {"agent_message", "reasoning", "tool_call", "retry", "status", "error"}:
             item_type = "status"
         raw_status = str(raw.get("status") or "").strip().lower()
+        raw_semantic_status = str(
+            raw.get("semanticStatus") or raw.get("semantic_status") or ""
+        ).strip().lower()
+        semantic_status = raw_semantic_status or ("degraded" if raw_status == "degraded" else "")
         status = {
             "in_progress": "running",
             "streaming": "running",
             "done": "completed",
-            "degraded": "failed",
+            # Degraded is a semantic warning on a finished call, not a failure;
+            # keep the four-value status algebra and carry the warning on
+            # semanticStatus so the transcript can show it as degraded.
+            "degraded": "completed",
             "error": "failed",
         }.get(raw_status, raw_status)
         if status not in {"pending", "running", "completed", "failed"}:
@@ -2658,7 +2714,7 @@ def _canonicalize_session_turn_items_for_protocol(
                 "sessionId", "turnId", "messageId", "channel", "phase", "protocol", "provisional",
                 "terminal", "callId", "toolName", "title", "summary", "text", "diagnosticSummary",
                 "source", "sourceCellId", "sourceCellKind", "sourceItemId", "metadata", "code",
-                "input", "output", "createdAt", "updatedAt",
+                "input", "output", "createdAt", "updatedAt", "semanticStatus",
             }
         }
         if raw_item_metadata:
@@ -2691,6 +2747,7 @@ def _canonicalize_session_turn_items_for_protocol(
             item["toolName"] = str(raw.get("toolName") or raw.get("title") or "tool").strip()
             item["input"] = str(raw.get("input") or "").strip() or None
             item["output"] = text or None
+            item["semanticStatus"] = semantic_status or None
         elif item_type == "retry":
             item["attempt"] = max(1, int(raw.get("attempt") or raw.get("iteration") or 1))
             item["targetItemId"] = str(raw.get("targetItemId") or raw.get("sourceItemId") or item_id).strip()
@@ -4363,7 +4420,22 @@ def _ledger_visible_messages_for_session(session_id: str) -> list[dict[str, Any]
     events = s._load_session_conversation_events_cached(normalized_session_id)
     if not events:
         return []
-    return s.conversation_visible_messages_from_events(events)
+    messages, _active_leaf_id, _active_branch_id = s.visible_messages_with_branch_info(events)
+    return messages
+
+
+def _session_branch_metadata(session_id: str) -> tuple[str, str]:
+    """Return ``(activeLeafId, activeBranchId)`` for the session branch head."""
+
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return "", ""
+    events = s._load_session_conversation_events_cached(normalized_session_id)
+    if not events:
+        return "", ""
+    view = s.analyze_conversation_branches(events)
+    return view.active_leaf_id, view.active_branch_id
 
 
 def _ledger_latest_preview_messages_for_session(

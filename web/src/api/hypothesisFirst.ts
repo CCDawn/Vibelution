@@ -29,6 +29,9 @@ import type {
   HypothesisFirstClaimGateEntry,
   HypothesisFirstClaimGateEvidenceGap,
   HypothesisFirstStateV2,
+  HypothesisRoundFailureRecord,
+  HypothesisRoundFailureRetryResponse,
+  HypothesisRoundFailuresResponse,
   HypothesisRoundGetResponse,
   HypothesisRoundListResponse,
   HypothesisSelectionContext,
@@ -71,11 +74,13 @@ function scopedQuery(input: {
   questionId?: string;
   runId?: string;
   includeSourceCursor?: boolean;
+  unresolvedOnly?: boolean;
 }): string {
   const parts: string[] = [];
   if (input.questionId) parts.push(`questionId=${encodeURIComponent(input.questionId)}`);
   if (input.runId) parts.push(`runId=${encodeURIComponent(input.runId)}`);
   if (input.includeSourceCursor) parts.push("includeSourceCursor=true");
+  if (input.unresolvedOnly) parts.push("unresolvedOnly=true");
   return parts.length ? `?${parts.join("&")}` : "";
 }
 
@@ -354,6 +359,37 @@ export type HypothesisFirstCommandExecutionResponse = {
   idempotencyKey: string;
   acceptedStateVersion: string;
   result: unknown;
+  /** SCI-049: present when the command was accepted for background execution. */
+  status?: "accepted" | "executed" | "reused";
+  /** SCI-049: poll target while `status === "accepted"`. */
+  commandAttemptId?: string;
+};
+
+export type HypothesisFirstCommandAttemptStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed";
+
+/** Read model of `GET .../chain/command-attempts/{attemptId}` (SCI-049). */
+export type HypothesisFirstCommandAttempt = {
+  schemaVersion: number;
+  contract: string;
+  teamId: string;
+  attemptId: string;
+  questionId: string;
+  workflowRunId?: string;
+  command: string;
+  actionId: string;
+  idempotencyKey: string;
+  acceptedStateVersion?: string;
+  status: HypothesisFirstCommandAttemptStatus;
+  createdAt: string;
+  updatedAt: string;
+  /** Present when `status === "succeeded"`: the original sync response body. */
+  result?: unknown;
+  /** Present when `status === "failed"`: the original domain error. */
+  error?: { code?: string; message?: string; statusCode?: number };
 };
 
 export function isHypothesisFirstCommandStateConflict(error: unknown): boolean {
@@ -381,6 +417,89 @@ export function executeHypothesisFirstCommand<C extends ActionCommand>(
       payload: action.payload,
       ...(input === undefined ? {} : { input }),
     },
+  ).then((response) => awaitAcceptedCommandCompletion(teamId, response));
+}
+
+// ---------------------------------------------------------------------------
+// Async command window (SCI-049)
+// ---------------------------------------------------------------------------
+
+const COMMAND_ATTEMPT_POLL_INTERVAL_MS = 1_500;
+// The backend command window is LLM-bounded (meeting close chains, digest
+// drafts) and routinely runs minutes; the poll cap only stops a wedged UI
+// from waiting forever — the attempt itself keeps running server-side.
+const COMMAND_ATTEMPT_POLL_TIMEOUT_MS = 10 * 60_000;
+
+/** Read one async command attempt's delivery status (SCI-049). */
+export function fetchHypothesisFirstCommandAttempt(
+  teamId: string,
+  attemptId: string,
+  options?: { signal?: AbortSignal },
+): Promise<HypothesisFirstCommandAttempt> {
+  return fetchJson<HypothesisFirstCommandAttempt>(
+    `${teamPrefix(teamId)}/hypothesis-first/chain/command-attempts/${encodeURIComponent(attemptId)}`,
+    { signal: options?.signal },
+  );
+}
+
+function isAcceptedCommandResponse(
+  response: HypothesisFirstCommandExecutionResponse,
+): boolean {
+  return response.status === "accepted" && Boolean(response.commandAttemptId);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Resolve an accepted command into its terminal envelope (Temporal-style
+ * start + poll behind the one call the components already make): succeeded
+ * attempts resolve with the exact `result` the synchronous execution used to
+ * return, failed attempts reject with the original domain error shape
+ * (status/code carried so `isFetchJsonHttpError` classifiers keep working).
+ */
+async function awaitAcceptedCommandCompletion(
+  teamId: string,
+  response: HypothesisFirstCommandExecutionResponse,
+): Promise<HypothesisFirstCommandExecutionResponse> {
+  if (!isAcceptedCommandResponse(response)) return response;
+  const attemptId = String(response.commandAttemptId);
+  const deadline = Date.now() + COMMAND_ATTEMPT_POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await sleep(COMMAND_ATTEMPT_POLL_INTERVAL_MS);
+    let attempt: HypothesisFirstCommandAttempt;
+    try {
+      attempt = await fetchHypothesisFirstCommandAttempt(teamId, attemptId);
+    } catch {
+      // A transient poll failure must not kill the command wait; the next
+      // tick retries. Only the deadline ends the loop.
+      if (Date.now() >= deadline) break;
+      continue;
+    }
+    if (attempt.status === "succeeded") {
+      return {
+        ...response,
+        status: "executed",
+        result: attempt.result ?? {},
+      };
+    }
+    if (attempt.status === "failed") {
+      const detail = attempt.error ?? {};
+      const message = detail.message || "后台命令执行失败";
+      const error = new Error(message) as Error & {
+        status?: number;
+        code?: string;
+        commandAttemptId?: string;
+      };
+      error.status = detail.statusCode && detail.statusCode > 0 ? detail.statusCode : 422;
+      error.code = detail.code || "command_attempt_failed";
+      error.commandAttemptId = attemptId;
+      throw error;
+    }
+  }
+  throw new Error(
+    `后台命令仍在执行，请稍后在面板中查看结果（${attemptId}）。`,
   );
 }
 
@@ -667,4 +786,90 @@ export function recoverCollectionRequest(
     `${teamPrefix(teamId)}/hypothesis-first/chain/collection-requests/${encodeURIComponent(requestId)}/recover`,
     "POST",
   );
+}
+
+/**
+ * Open round-generation failure traces for the workspace recovery panel.
+ * Malformed payloads fail closed here so the panel never guesses.
+ */
+export function fetchHypothesisRoundFailures(
+  teamId: string,
+  options?: { signal?: AbortSignal },
+): Promise<HypothesisRoundFailuresResponse> {
+  return fetchJson<unknown>(
+    `${teamPrefix(teamId)}/hypothesis-first/chain/round-failures${scopedQuery({ unresolvedOnly: true })}`,
+    { signal: options?.signal },
+  ).then((payload) => parseHypothesisRoundFailures(payload));
+}
+
+/**
+ * Accept one confirmed manual retry of an open round failure trace.  The
+ * server defers the minutes-long regeneration to a background worker; the
+ * panel refetches the ledger until the resolved trace disappears.
+ */
+export function executeHypothesisRoundFailureRetry(
+  teamId: string,
+  failureId: string,
+): Promise<HypothesisRoundFailureRetryResponse> {
+  return writeJson<HypothesisRoundFailureRetryResponse>(
+    `${teamPrefix(teamId)}/hypothesis-first/chain/round-failures/${encodeURIComponent(failureId)}/retry`,
+    "POST",
+    { confirmed: true },
+  );
+}
+
+function parseHypothesisRoundFailures(
+  payload: unknown,
+): HypothesisRoundFailuresResponse {
+  if (!isRecord(payload) || payload.schemaVersion !== 1) {
+    throw new Error("Invalid round failures response");
+  }
+  if (!Array.isArray(payload.failures) || typeof payload.teamId !== "string") {
+    throw new Error("Invalid round failures response");
+  }
+  const failures = payload.failures.map((item) => parseHypothesisRoundFailure(item));
+  return {
+    schemaVersion: 1,
+    teamId: payload.teamId,
+    failureCount:
+      typeof payload.failureCount === "number" ? payload.failureCount : failures.length,
+    openFailureCount:
+      typeof payload.openFailureCount === "number" ? payload.openFailureCount : 0,
+    failures,
+    storagePath: typeof payload.storagePath === "string" ? payload.storagePath : "",
+  };
+}
+
+function parseHypothesisRoundFailure(item: unknown): HypothesisRoundFailureRecord {
+  if (!isRecord(item) || typeof item.failureId !== "string") {
+    throw new Error("Invalid round failure record");
+  }
+  const roundIndex =
+    typeof item.roundIndex === "number" && Number.isFinite(item.roundIndex)
+      ? item.roundIndex
+      : null;
+  const meetingRoundIds = Array.isArray(item.meetingRoundIds)
+    ? item.meetingRoundIds.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  const stringField = (key: string): string =>
+    typeof item[key] === "string" ? (item[key] as string) : "";
+  return {
+    failureId: item.failureId,
+    status: stringField("status"),
+    failureCode: stringField("failureCode"),
+    reason: stringField("reason"),
+    errorType: stringField("errorType"),
+    roundId: stringField("roundId"),
+    meetingRoundIds,
+    selectionId: stringField("selectionId"),
+    roundIndex,
+    questionId: stringField("questionId"),
+    workflowRunId: stringField("workflowRunId"),
+    scopeHash: stringField("scopeHash"),
+    retryHint: stringField("retryHint"),
+    trigger: stringField("trigger"),
+    createdAt: stringField("createdAt"),
+    resolvedAt: stringField("resolvedAt"),
+    resolvedByRoundId: stringField("resolvedByRoundId"),
+  };
 }

@@ -637,11 +637,16 @@ def test_chain_commands_map_runtime_guard_rejection_to_409(monkeypatch) -> None:
 # OpenGenerationPayload.runId) materialize inside a verbatim offer echo.
 # Regression for the live 422 "command is no longer allowed" that killed every
 # plain record-selection/open_generation click after those defaults landed.
+#
+# SCI-049: the long commands (record_selection / open_generation /
+# retry_generation / approve_summary) enter through ``submit_v2_command_async``
+# (accepted envelope + background worker), so the wire round-trip now pins the
+# same verbatim passthrough on that seam.
 # ---------------------------------------------------------------------------
 
 
-def _captured_execute(capture: list[dict[str, object]]):
-    def fake_execute(team_id, payload, *, question_id="", workflow_run_id=""):
+def _captured_async_submit(capture: list[dict[str, object]]):
+    def fake_submit(team_id, payload, *, question_id="", workflow_run_id=""):
         capture.append(
             {
                 "teamId": team_id,
@@ -652,7 +657,7 @@ def _captured_execute(capture: list[dict[str, object]]):
         )
         return {"schemaVersion": 2, "status": "executed"}
 
-    return fake_execute
+    return fake_submit
 
 
 def test_chain_commands_round_trip_plain_record_selection_payload(
@@ -660,7 +665,9 @@ def test_chain_commands_round_trip_plain_record_selection_payload(
 ) -> None:
     capture: list[dict[str, object]] = []
     monkeypatch.setattr(
-        hypothesis_first_chain, "execute_v2_command", _captured_execute(capture)
+        hypothesis_first_chain,
+        "submit_v2_command_async",
+        _captured_async_submit(capture),
     )
     client = _client()
     response = client.post(
@@ -701,7 +708,9 @@ def test_chain_commands_round_trip_explicit_previous_selection_id(
 
     capture: list[dict[str, object]] = []
     monkeypatch.setattr(
-        hypothesis_first_chain, "execute_v2_command", _captured_execute(capture)
+        hypothesis_first_chain,
+        "submit_v2_command_async",
+        _captured_async_submit(capture),
     )
     client = _client()
     response = client.post(
@@ -728,7 +737,9 @@ def test_chain_commands_round_trip_plain_open_generation_payload(
 ) -> None:
     capture: list[dict[str, object]] = []
     monkeypatch.setattr(
-        hypothesis_first_chain, "execute_v2_command", _captured_execute(capture)
+        hypothesis_first_chain,
+        "submit_v2_command_async",
+        _captured_async_submit(capture),
     )
     client = _client()
     response = client.post(
@@ -746,6 +757,130 @@ def test_chain_commands_round_trip_plain_open_generation_payload(
     # The bare origin-level offer payload has no runId; injecting an empty
     # default would break re-authorization for non-stage-one questions.
     assert request["payload"] == {"questionId": "SCI-096"}
+
+
+# ---------------------------------------------------------------------------
+# SCI-049 async command window: long commands accept-and-queue through
+# ``submit_v2_command_async``; short commands keep the synchronous
+# ``execute_v2_command`` fallback; attempt status is a read-only GET.
+# ---------------------------------------------------------------------------
+
+
+def test_chain_commands_return_accepted_envelope_for_long_commands(
+    monkeypatch,
+) -> None:
+    accepted_envelope = {
+        "schemaVersion": 2,
+        "teamId": "research-team",
+        "questionId": "SCI-001",
+        "workflowRunId": "",
+        "command": "record_selection",
+        "actionId": "record-selection",
+        "idempotencyKey": "hf2:record-selection:3a3f495a8fe91f64",
+        "acceptedStateVersion": "hf2-action:x",
+        "status": "accepted",
+        "commandAttemptId": "hf2-attempt-abc123",
+    }
+
+    def fake_submit(team_id, payload, *, question_id="", workflow_run_id=""):
+        assert question_id == "SCI-001"
+        return dict(accepted_envelope)
+
+    sync_calls: list[dict[str, object]] = []
+
+    def fake_execute(*args, **kwargs):  # pragma: no cover - must not be reached
+        sync_calls.append({})
+        return {"schemaVersion": 2}
+
+    monkeypatch.setattr(hypothesis_first_chain, "submit_v2_command_async", fake_submit)
+    monkeypatch.setattr(hypothesis_first_chain, "execute_v2_command", fake_execute)
+    client = _client()
+    response = client.post(
+        "/api/teams/research-team/workflow-orchestration/hypothesis-first/chain/commands",
+        params={"questionId": "SCI-001"},
+        json={
+            "actionId": "record-selection",
+            "idempotencyKey": "hf2:record-selection:3a3f495a8fe91f64",
+            "expectedStateVersion": "hf2-action:x",
+            "payload": {
+                "questionId": "SCI-001",
+                "generationAttemptId": "hf-candgen-80e9711246ab2b0c-a2",
+            },
+            "input": {"candidateIds": ["sci-001-c2cf3fdbf", "sci-001-c36554759"]},
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "accepted"
+    assert body["commandAttemptId"] == "hf2-attempt-abc123"
+    assert not sync_calls
+
+
+def test_chain_commands_keep_sync_fallback_for_short_commands(monkeypatch) -> None:
+    # The real async gate returns ``None`` for a short command (no team probe
+    # happens before that decision), and the route falls back to the sync
+    # executor — the pre-SCI-049 contract for every short command.
+    def fake_execute(team_id, payload, *, question_id="", workflow_run_id=""):
+        return {
+            "schemaVersion": 2,
+            "command": "retry_formal_node",
+            "result": {"status": "submitted"},
+        }
+
+    monkeypatch.setattr(hypothesis_first_chain, "execute_v2_command", fake_execute)
+    client = _client()
+    response = client.post(
+        "/api/teams/research-team/workflow-orchestration/hypothesis-first/chain/commands",
+        params={"questionId": "SCI-003"},
+        json=_retry_command_body(),
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["result"] == {"status": "submitted"}
+
+
+def test_chain_commands_attempt_status_endpoint_round_trip(monkeypatch) -> None:
+    attempt_payload = {
+        "schemaVersion": 1,
+        "contract": "hypothesis-first-command-attempt/v1",
+        "teamId": "research-team",
+        "attemptId": "hf2-attempt-abc123",
+        "questionId": "SCI-001",
+        "workflowRunId": "",
+        "command": "record_selection",
+        "actionId": "record-selection",
+        "idempotencyKey": "hf2:record-selection:3a3f495a8fe91f64",
+        "acceptedStateVersion": "hf2-action:x",
+        "status": "succeeded",
+        "createdAt": "2026-09-11T00:00:00Z",
+        "updatedAt": "2026-09-11T00:01:00Z",
+        "result": {"schemaVersion": 2, "result": {"status": "created"}},
+    }
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "get_v2_command_attempt",
+        lambda team_id, attempt_id: dict(attempt_payload),
+    )
+    client = _client()
+    response = client.get(
+        "/api/teams/research-team/workflow-orchestration/hypothesis-first/chain/command-attempts/hf2-attempt-abc123",
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "succeeded"
+    assert body["result"]["result"] == {"status": "created"}
+
+    def fake_unknown(team_id, attempt_id):
+        raise hypothesis_first_chain.HypothesisFirstChainNotFoundError(
+            "command attempt missing"
+        )
+
+    monkeypatch.setattr(
+        hypothesis_first_chain, "get_v2_command_attempt", fake_unknown
+    )
+    missing = client.get(
+        "/api/teams/research-team/workflow-orchestration/hypothesis-first/chain/command-attempts/hf2-attempt-missing",
+    )
+    assert missing.status_code == 404, missing.text
 
 
 def test_selection_context_derives_scope_from_frozen_registry(monkeypatch) -> None:

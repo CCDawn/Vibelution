@@ -857,7 +857,12 @@ def test_run_session_turn_aborts_when_prepare_context_interrupted(monkeypatch):
 
     def fake_build(*args, **kwargs):
         calls.append("context")
-        assert callable(kwargs.get("interrupt_checker"))
+        checker = kwargs.get("interrupt_checker")
+        assert callable(checker)
+        # Provider HTTP abort stays enabled for ordinary session turns so a user
+        # stop interrupts an in-flight model stream instead of waiting for the
+        # next cooperative checkpoint.
+        assert getattr(checker, "_vibelution_chat_provider_abort_enabled", None) is True
         control.request_stop("operator requested stop")
         raise AgentContextInterrupted(
             "operator requested stop",

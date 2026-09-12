@@ -303,6 +303,59 @@ def test_persist_turn_result_provider_protocol_error_keeps_error_out_of_journal(
     assert stored.get("last_turn_error")
 
 
+def test_persist_turn_result_provider_failure_after_final_answer_keeps_turn_completed(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """A late provider error must not overwrite a turn that already answered."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_running_session(tmp_path, "session-a", "turn-a")
+    session_service._append_session_conversation_event(
+        "session-a",
+        "turn-a",
+        session_service.EVENT_ASSISTANT_ITEM_COMMITTED,
+        status="completed",
+        payload={
+            "kind": "assistant_message",
+            "channel": "answer",
+            "phase": "final_answer",
+            "text": "已完成排查，结论：无需修改。",
+        },
+        source="canonical_turn_outcome",
+    )
+
+    persist._persist_session_turn_result(
+        "session-a",
+        {
+            "status": "failed",
+            "summary": _PAYLOAD_PROTOCOL_ERROR,
+            "raw_output": _PAYLOAD_PROTOCOL_ERROR,
+            "error": _PAYLOAD_PROTOCOL_ERROR,
+        },
+        turn_id="turn-a",
+    )
+
+    events = session_service._load_session_conversation_events_cached("session-a")
+    terminal_types = [
+        event.event_type
+        for event in events
+        if event.event_type in {session_service.EVENT_TURN_FAILED, session_service.EVENT_TURN_COMPLETED}
+    ]
+    assert terminal_types == [session_service.EVENT_TURN_COMPLETED]
+    final_answers = [
+        item
+        for item in session_service.conversation_turn_items_from_events(events, turn_id="turn-a")
+        if item.get("phase") == "final_answer"
+    ]
+    assert final_answers and "无需修改" in str(final_answers[0].get("text") or "")
+
+    stored = load_session_chat_state(tmp_path, "session-a")
+    assert stored is not None
+    assert stored.get("last_turn_status") == "ready"
+    assert not stored.get("last_turn_error")
+
+
 def test_persist_turn_result_provider_failure_allows_next_turn_reconcile(
     tmp_path,
     monkeypatch,

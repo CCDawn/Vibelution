@@ -121,17 +121,6 @@ const LazyAppShellUtilityMenu = lazy(() =>
     }),
 );
 
-const LazyAppShellStatusGuidePanel = lazy(() =>
-  import("./AppShellStatusGuidePanel")
-    .then((module) => ({ default: module.AppShellStatusGuidePanel }))
-    .catch((error) => {
-      if (recoverFromDynamicImportFetchError(error, globalThis.window, postBrowserTelemetry)) {
-        return new Promise<{ default: typeof import("./AppShellStatusGuidePanel").AppShellStatusGuidePanel }>(() => undefined);
-      }
-      throw error;
-    }),
-);
-
 /** Prefix-active match for primary shell routes (/agents covers /agents/prompts). */
 export function isShellPrimaryNavActive(pathname: string, to: string): boolean {
   const path = String(pathname || "").trim() || "/";
@@ -695,7 +684,6 @@ export function AppShell() {
   const [lifecycleCommandId, setLifecycleCommandId] = useState("");
   const [lifecycleCancelPending, setLifecycleCancelPending] = useState(false);
   const [utilityOpen, setUtilityOpen] = useState(false);
-  const [statusGuideOpen, setStatusGuideOpen] = useState(false);
   const topBarMode = useShellStore((state) => state.topBarMode);
   const setTopBarMode = useShellStore((state) => state.setTopBarMode);
   const topBarHidden = topBarMode === "hidden";
@@ -828,7 +816,6 @@ export function AppShell() {
   }, [location, navigationType]);
 
   const workbench = runtimeQuery.data?.workbench;
-  const lifecycleProof = runtimeQuery.data?.lifecycleProof;
   const shutdownInFlight = workbench?.desiredState === "closed" && workbench?.observedState !== "closed";
   const chatEnabled = isWorkbenchDomainEnabled(configQuery.data, "chat");
   const supervisedEvolutionEnabled = isWorkbenchModeEnabled(configQuery.data, "supervised_evolution");
@@ -974,7 +961,6 @@ export function AppShell() {
       activeWorkIndicator.items[0]?.summary,
     ].filter(Boolean).join(" · ")
     : "";
-  const buildId = __VIBELUTION_BUILD_ID__;
   const clearRestartCompletionDismissTimer = useCallback(() => {
     if (restartCompletionDismissTimerRef.current === null) {
       return;
@@ -2493,51 +2479,20 @@ export function AppShell() {
             </VPopover>
           </div>
           <div className={styles.statusCluster} data-shell-group="status-guide">
-            <VPopover
-              open={statusGuideOpen}
-              onOpenChange={setStatusGuideOpen}
-              align="end"
-              side="bottom"
-              sideOffset={10}
-              aria-label={t("systemStatusGuide")}
-              contentClassName={styles.statusGuidePopoverContent}
-              data-vui="status-guide-popover"
-              trigger={(
-                <VButton
-                  type="button"
-                  variant="ghost"
-                  contentLayout="plain"
-                  className={styles.statusSummaryChip}
-                  title={statusSummaryTitle}
-                  aria-haspopup="dialog"
-                  aria-expanded={statusGuideOpen}
-                  aria-label={`${t("systemStatusGuide")}: ${effectivePrimaryStatusCard.label} ${effectivePrimaryStatusCard.value}`}
-                >
-                  <span
-                    aria-hidden="true"
-                    className={`${styles.statusSummaryDot} ${systemToneToDotClass(effectivePrimaryStatusCard.tone)}`}
-                  />
-                  <span className={styles.statusSummaryLabel}>
-                    {effectivePrimaryStatusCard.label} {effectivePrimaryStatusCard.value}
-                  </span>
-                </VButton>
-              )}
+            {/* Quiet status light only: diagnostic details live in runtime logs, not the top bar. */}
+            <span
+              className={styles.statusSummaryChip}
+              title={statusSummaryTitle}
+              aria-label={`${effectivePrimaryStatusCard.label} ${effectivePrimaryStatusCard.value}`}
             >
-              <Suspense fallback={null}>
-                <LazyAppShellStatusGuidePanel
-                  lang={lang}
-                  t={t}
-                  cards={rightStatusCards}
-                  frontendState={frontendState}
-                  backendState={backendState}
-                  runtimeControllerState={runtimeControllerState}
-                  lifecycleProof={lifecycleProof}
-                  workbench={workbench}
-                  buildId={buildId}
-                  codeFreshness={codeFreshnessQuery.data}
-                />
-              </Suspense>
-            </VPopover>
+              <span
+                aria-hidden="true"
+                className={`${styles.statusSummaryDot} ${systemToneToDotClass(effectivePrimaryStatusCard.tone)}`}
+              />
+              <span className={styles.statusSummaryLabel}>
+                {effectivePrimaryStatusCard.label} {effectivePrimaryStatusCard.value}
+              </span>
+            </span>
           </div>
           <div className={styles.toolCluster} data-shell-group="tool-actions">
             <VIconButton

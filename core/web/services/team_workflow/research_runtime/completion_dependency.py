@@ -36,9 +36,12 @@ def completion_resume(action: PendingAction) -> tuple[AgentTaskHandle, dict[str,
             or cursor.get("inputSnapshotHash") != action.input_snapshot_hash):
         raise ValueError("completion resume does not match the original action")
     handle = AgentTaskHandle(**cursor["handle"])
+    if handle.meeting_room_id:
+        _receipt_handles(handle)
+        return replace(handle, meeting_participants=tuple(handle.meeting_participants)), dict(cursor["reservation"])
     if not handle.session_id or not handle.turn_id or handle.scoped_handles:
         raise ValueError("completion resume requires one bound Session turn")
-    return replace(handle, scoped_handles=()), dict(cursor["reservation"])
+    return replace(handle, scoped_handles=(), meeting_participants=()), dict(cursor["reservation"])
 
 
 def bind_completion_resume(error: CompletionDependencyPending, action: PendingAction,
@@ -55,16 +58,36 @@ def bind_completion_resume(error: CompletionDependencyPending, action: PendingAc
     }
 
 
+def _receipt_handles(handle: AgentTaskHandle) -> tuple[dict[str, str], ...]:
+    if not handle.meeting_room_id:
+        return ({"sessionId": handle.session_id, "turnId": handle.turn_id, "taskId": handle.task_id},)
+    participants = tuple(handle.meeting_participants)
+    if (not handle.meeting_round_id or handle.scoped_handles or len(participants) < 2
+            or len({item.get("sessionId") for item in participants}) != len(participants)
+            or any(not all(item.get(key) for key in ("sessionId", "turnId", "taskId", "participantId"))
+                or item["turnId"] != f"chat-room:{handle.meeting_round_id}:{item['participantId']}"
+                for item in participants)):
+        raise ValueError("meeting completion requires its frozen native speaker Turns")
+    return participants
+
+
 def receipt_delivery_state(uow: Any, action: PendingAction, handle: AgentTaskHandle) -> tuple[set[str], list[list[Any]]]:
+    rows = []
+    for participant in _receipt_handles(handle):
+        rows.extend(_speaker_delivery_rows(uow, action, participant))
+    return {str(row[1]) for row in rows}, sorted([[row[0], row[2]] for row in rows if row[1] == "succeeded"])
+
+
+def _speaker_delivery_rows(uow: Any, action: PendingAction, participant: dict[str, str]) -> list:
     rows = uow.repository.execute(
         "SELECT action_id, status, updated_at_ms FROM outbox_actions WHERE run_id = ? AND action_kind = 'reconcile' "
         "AND json_extract(payload_json, '$.kind') = 'challenge_model_invocation_receipt_persist' "
         "AND json_extract(payload_json, '$.receipt.scope.formalNodeRunId') = ? "
         "AND json_extract(payload_json, '$.receipt.scope.sessionId') = ? "
         "AND json_extract(payload_json, '$.receipt.scope.turnId') = ? ORDER BY action_id",
-        (action.run_id, action.node_run_id, handle.session_id, handle.turn_id),
+        (action.run_id, action.node_run_id, participant["sessionId"], participant["turnId"]),
     ).fetchall()
-    return {str(row[1]) for row in rows}, [[row[0], row[2]] for row in rows if row[1] == "succeeded"]
+    return rows
 
 
 def defer_completion(store: Any, *, outbox: Any, action: PendingAction,
@@ -81,13 +104,13 @@ def defer_completion(store: Any, *, outbox: Any, action: PendingAction,
         # Delivery can commit between the Registry read and this transaction.
         # Allow one fresh read in that race; a permanently missing readback is
         # then exposed instead of polling an already-finished delivery forever.
-        pending = bool(statuses & {"pending", "leased"}) or (
+        pending = bool(handle.meeting_room_id and error.snapshot.get("meetingRunning")) or bool(statuses & {"pending", "leased"}) or (
             bool(delivered) and delivered != previous.get("deliveredReceipts")
         )
         problem = {
             "code": COMPLETION_PENDING,
             "detail": str(error),
-            "dependency": "model_invocation_receipt",
+            "dependency": "meeting" if error.snapshot.get("meetingRunning") else "model_invocation_receipt",
             "dependencyStatus": "pending" if pending else "unavailable",
             "deliveredReceipts": delivered,
             "executionStatus": str(error.snapshot.get("terminalStatus") or ""),
@@ -132,8 +155,18 @@ def defer_completion(store: Any, *, outbox: Any, action: PendingAction,
 
 def wake_receipt_completion(uow: Any, *, receipt: dict[str, Any], now_ms: int) -> None:
     """A matching delivery wakes only the original, still-current completion."""
-    scope = receipt["scope"]
-    run_id, node_run_id = receipt["runId"], receipt["nodeRunId"]
+    _wake_completion(uow, run_id=receipt["runId"], node_run_id=receipt["nodeRunId"],
+        scope=receipt["scope"], now_ms=now_ms)
+
+
+def wake_meeting_completion(uow: Any, *, run_id: str, node_run_id: str,
+                            room_id: str, round_id: str, now_ms: int) -> None:
+    _wake_completion(uow, run_id=run_id, node_run_id=node_run_id, scope={},
+        now_ms=now_ms, room_id=room_id, round_id=round_id)
+
+
+def _wake_completion(uow: Any, *, run_id: str, node_run_id: str, scope: dict,
+                     now_ms: int, room_id: str = "", round_id: str = "") -> None:
     attempt = uow.repository.get_attempt(node_run_id)
     run = uow.repository.get_run(run_id)
     if run is None or attempt is None or run.status not in {"running", "blocked"}:
@@ -151,10 +184,14 @@ def wake_receipt_completion(uow: Any, *, receipt: dict[str, Any], now_ms: int) -
         cursor = problem.get("completionResume") or {}
         handle = cursor.get("handle") or {}
         if (problem.get("code") != COMPLETION_PENDING
-                or cursor.get("nodeRunId") != node_run_id
-                or handle.get("session_id") != scope.get("sessionId")
-                or handle.get("turn_id") != scope.get("turnId")
-                or handle.get("task_id") != scope.get("taskId")):
+                or cursor.get("nodeRunId") != node_run_id):
+            continue
+        bound_turns = _receipt_handles(AgentTaskHandle(**handle)) if handle else ()
+        if room_id:
+            if handle.get("meeting_room_id") != room_id or handle.get("meeting_round_id") != round_id:
+                continue
+        elif not any(all(participant.get(key) == scope.get(key)
+                for key in ("sessionId", "turnId", "taskId")) for participant in bound_turns):
             continue
         if run.status == "blocked":
             run_problem = json.loads(run.blocked_problem_json or "{}")
@@ -179,7 +216,8 @@ def wake_receipt_completion(uow: Any, *, receipt: dict[str, Any], now_ms: int) -
                 actor_json=json.dumps({"actorType": "system", "actorId": "receipt-persistence-worker"}),
                 correlation_id=action_id, causation_id=None,
                 payload_json=json.dumps({"nodeRunId": node_run_id, "nodeId": attempt.node_id,
-                                         "sessionId": scope["sessionId"], "turnId": scope["turnId"]}),
+                                         "sessionId": scope.get("sessionId", ""), "turnId": scope.get("turnId", ""),
+                                         "roomId": room_id, "roundId": round_id}),
                 occurred_at_ms=now_ms,
             ))
 

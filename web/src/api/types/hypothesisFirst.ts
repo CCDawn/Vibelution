@@ -601,14 +601,14 @@ export type ActionCommand =
 export type ActionPayloadByCommand = {
   create_stage_one_run: { questionId: string };
   open_generation: { questionId: string };
-  retry_generation: { questionId: string; previousAttemptId: string };
+  retry_generation: { questionId: string; previousAttemptId: string; runId?: string };
   record_selection: { questionId: string; generationAttemptId: string; previousSelectionId?: string };
   retry_review_dispatch: { selectionId: string; candidateIds: string[] };
   reopen_review: { meetingRoundId: string };
   resume_discussion: { meetingRoundId: string };
   stop_discussion: { meetingRoundId: string };
   regenerate_summary: { meetingRoundId: string };
-  approve_summary: { meetingRoundId: string };
+  approve_summary: { meetingRoundId: string; candidateId?: string | null };
   retry_collection: { requestId: string; childRunId: string | null };
   continue_collection: { requestId: string; childRunId: string };
   stop_collection: { requestId: string; childRunId: string };
@@ -818,6 +818,13 @@ export type HypothesisFirstStateV2 = {
   collection: PhaseState & {
     aggregate: StateAggregate;
     requests: CollectionRequestState[];
+    /** Auto-accept policy facts for the residual knowledge-handoff gate
+     * (SCI-049 O-02); absent on legacy snapshots. */
+    autoAccept?: {
+      pending: boolean;
+      actor: string;
+      intervalMs: number;
+    } | null;
   };
   convergence: PhaseState & {
     latestHypothesisRoundId: string | null;
@@ -1094,4 +1101,40 @@ export type CollectionHandoffResponse = {
   request: CollectionRequestRecord;
   nextMeeting?: Record<string, unknown> | null;
   resume?: Record<string, unknown> | null;
+};
+
+export type HypothesisRoundFailureRecord = {
+  failureId: string;
+  status: string;
+  failureCode: string;
+  reason: string;
+  errorType: string;
+  roundId: string;
+  meetingRoundIds: string[];
+  selectionId: string;
+  roundIndex: number | null;
+  questionId: string;
+  workflowRunId: string;
+  scopeHash: string;
+  retryHint: string;
+  trigger: string;
+  createdAt: string;
+  resolvedAt: string;
+  resolvedByRoundId: string;
+};
+
+export type HypothesisRoundFailuresResponse = {
+  schemaVersion: number;
+  teamId: string;
+  failureCount: number;
+  openFailureCount: number;
+  failures: HypothesisRoundFailureRecord[];
+  storagePath: string;
+};
+
+export type HypothesisRoundFailureRetryResponse = {
+  status: string;
+  failureId: string;
+  questionId?: string;
+  meetingRoundId?: string;
 };

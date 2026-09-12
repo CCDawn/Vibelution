@@ -26,6 +26,12 @@ class Migration:
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+# 命名澄清：`agent_config_revisions` 是 SQLite 控制面的「编译快照」
+# （compiled snapshot，revision_id = "<agent_id>:<config_hash>"，不可变，
+# 供 sessions 外键引用）。它与 workspace/agents/{id}/events/config_changes.jsonl
+# 中的草稿/发布事件（agent_config_change_service，eventType="revision_published"）
+# 是两个不同概念——后者记录编辑过程，不是目录权威。
+# 注意：SQL 语句文本参与 checksum 校验，本澄清只写在 Python 注释层。
 _SCHEMA_V1_STATEMENTS = (
     """
     CREATE TABLE schema_migrations (

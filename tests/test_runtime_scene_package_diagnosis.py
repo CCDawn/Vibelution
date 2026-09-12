@@ -2295,3 +2295,108 @@ def test_runtime_scene_startup_trace_skips_optional_steps_for_running_electron(t
     assert startup["missingStepIds"] == []
     assert startup["summary"] == "启动流程 10/10，状态 running。"
     assert "startupTrace.missingStepIds" not in diagnosis["agentNextStep"]
+
+
+def _client_diagnosis_event(
+    index: int,
+    component: str,
+    phase: str,
+    event_code: str,
+    *,
+    level: str = "info",
+    outcome: str = "",
+    fields: dict | None = None,
+) -> dict:
+    return {
+        "ts": f"2026-05-18T12:00:{index:02d}.000Z",
+        "component": component,
+        "phase": phase,
+        "eventCode": event_code,
+        "level": level,
+        "outcome": outcome,
+        "message": f"event {index} {event_code}",
+        "fields": fields or {},
+        "rawRefs": [],
+    }
+
+
+def test_later_resolution_flags_match_pairwise_scan(tmp_path, monkeypatch):
+    """The O(N) reverse index must classify exactly like the pairwise scan."""
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    events = [
+        _client_diagnosis_event(
+            0, "backend", "api", "backend.api.warn", level="warning", fields={"runId": "run-1"}
+        ),
+        _client_diagnosis_event(1, "backend", "api", "backend.api.observe", outcome="observed"),
+        _client_diagnosis_event(
+            2, "backend", "api", "backend.api.recovered", outcome="recovered", fields={"runId": "run-1"}
+        ),
+        _client_diagnosis_event(3, "backend", "api", "backend.api.phase_warn", level="warning"),
+        _client_diagnosis_event(4, "backend", "api", "backend.api.phase_ok", outcome="succeeded"),
+        _client_diagnosis_event(
+            5, "backend", "api", "backend.api.session_warn", level="warning", fields={"sessionId": "s-9"}
+        ),
+        _client_diagnosis_event(
+            6, "backend", "api", "backend.api.session_error", level="error", fields={"sessionId": "s-9"}
+        ),
+        _client_diagnosis_event(
+            7, "backend", "other", "backend.api.other_recovered", outcome="recovered", fields={"runId": "run-2"}
+        ),
+        _client_diagnosis_event(
+            8, "backend", "api", "backend.api.unresolved", level="warning", fields={"runId": "run-2"}
+        ),
+        _client_diagnosis_event(
+            9, "agent_config", "model_binding", "agent_config.unresolved_model_reference", level="warning"
+        ),
+        _client_diagnosis_event(
+            10, "agent_config", "model_binding", "agent_config.model_references.resolved", outcome="resolved"
+        ),
+        _client_diagnosis_event(
+            11, "agent_config", "model_binding", "agent_config.unresolved_model_reference", level="warning"
+        ),
+        _client_diagnosis_event(
+            12, "browser_page", "page", "browser.session_stream.error", level="error", fields={"sessionId": "sess-1"}
+        ),
+        _client_diagnosis_event(
+            13, "browser_page", "page", "browser.session_stream.opened", outcome="succeeded", fields={"sessionId": "sess-1"}
+        ),
+        _client_diagnosis_event(
+            14, "backend", "api", "backend.api.old_warn", level="warning", fields={"runId": "run-old"}
+        ),
+        _client_diagnosis_event(
+            15, "backend", "api", "backend.api.old_recovered", outcome="recovered", fields={"runId": "run-old"}
+        ),
+        _client_diagnosis_event(16, "backend", "api2", "backend.api.phase2_warn", level="warning"),
+        _client_diagnosis_event(
+            17, "backend", "api", "backend.api.error_resolution", level="warning", fields={"runId": "run-3"}
+        ),
+        _client_diagnosis_event(
+            18, "backend", "api", "backend.api.recovered", level="error", outcome="recovered", fields={"runId": "run-3"}
+        ),
+    ]
+
+    flags = runtime_scene_service._runtime_scene_later_resolution_flags(events)
+
+    assert len(flags) == len(events)
+    for index, event in enumerate(events):
+        # issue_state only consults the resolution index for error/warning
+        # signals; the pairwise scan has no severity gate of its own.
+        if runtime_scene_service._runtime_scene_event_severity(event) not in {
+            "error",
+            "warning",
+        }:
+            continue
+        expected = runtime_scene_service._runtime_scene_signal_has_later_resolution(
+            events, {"index": index, "event": event}
+        )
+        assert flags[index] == expected, (index, event["eventCode"], flags[index], expected)
+
+    assert flags[0] is True  # identity-matching later recovery
+    assert flags[3] is True  # phase fallback when the signal has no identity
+    assert flags[5] is False  # only a same-identity error later, which is not a resolution
+    assert flags[8] is False  # resolution in another component does not count
+    assert flags[9] is True  # agent_config model-reference resolution route
+    assert flags[11] is False  # no later model_references.resolved
+    assert flags[12] is True  # browser session-stream recovery special case
+    assert flags[16] is False  # different phase, no identity match
+    assert flags[17] is False  # an error-severity candidate never resolves a signal

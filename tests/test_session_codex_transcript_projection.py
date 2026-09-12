@@ -135,6 +135,56 @@ def test_turn_item_protocol_normalizes_legacy_internal_kinds_without_serializing
         assert "provisional" not in item
 
 
+def test_turn_item_protocol_carries_degraded_semantic_status_without_flattening_it_into_failed():
+    items = session_service._canonicalize_session_turn_items_for_protocol(
+        [
+            {
+                "id": "tool-r1",
+                "itemId": "tool",
+                "type": "tool_call",
+                "kind": "tool_call",
+                "callId": "call-1",
+                "toolName": "cli_tool",
+                "status": "completed",
+                "semanticStatus": "degraded",
+                "output": "[跨平台警告] 在 Windows 上检测到 Unix shell 片段",
+            }
+        ],
+        session_id="session-1",
+        turn_id="turn-1",
+    )
+
+    tool_item = items[0]
+
+    assert tool_item["status"] == "completed"
+    assert tool_item["semanticStatus"] == "degraded"
+    assert "semanticStatus" not in (tool_item.get("metadata") or {})
+
+
+def test_turn_item_protocol_maps_a_raw_degraded_status_to_a_warning_not_a_failure():
+    items = session_service._canonicalize_session_turn_items_for_protocol(
+        [
+            {
+                "id": "tool-r1",
+                "itemId": "tool",
+                "type": "tool_call",
+                "kind": "tool_call",
+                "callId": "call-1",
+                "toolName": "cli_tool",
+                "status": "degraded",
+                "output": "partial output",
+            }
+        ],
+        session_id="session-1",
+        turn_id="turn-1",
+    )
+
+    tool_item = items[0]
+
+    assert tool_item["status"] == "completed"
+    assert tool_item["semanticStatus"] == "degraded"
+
+
 def test_terminal_error_is_a_failed_turn_item_instead_of_a_second_error_message_surface():
     messages = session_service._normalize_messages(
         "session-error",

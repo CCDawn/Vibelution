@@ -55,23 +55,73 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 - 不替代 composer 编辑条或时间线用户气泡。
 - 禁止再做第二套排队条。
 
+## ConversationMessageVersionSwitcher
+
+### 功能
+活跃路径消息的版本切换器：`‹ n/m ›` 紧凑三件组，在同一点（同一 fork）的兄弟版本之间切换会话 head；切换本身只提交服务端，由返回快照替换时间线。
+
+### 适用范围
+- **适用**：`ConversationView` 消息行 `metaActions`（用户消息与助手消息同一交互），消息带 `branch.siblingCount > 1`。
+- **不适用**：单版本消息（不渲染）、运行中或切换中的会话（整组禁用）、分支枚举页。
+
+| 场景 | 选择 |
+| --- | --- |
+| 同一点存在多个版本 | 行内版本切换器 |
+| 切换后继续追问 | 服务端 head 快照，前端不做树计算 |
+| 单版本消息 | 不渲染 |
+
+### 使用方式
+```tsx
+// 生产：ConversationView metaActions 内联组合（不新增 primitive）
+<VActionGroup ariaLabel={t("branchVersionLabel")} className={styles.turnVersionSwitcher}>
+  <VButton isIconOnly icon={<ChevronLeft size={14} />} isDisabled={!previousSiblingNodeId} ... />
+  <span className={styles.turnVersionLabel}>{`${siblingIndex}/${siblingCount}`}</span>
+  <VButton isIconOnly icon={<ChevronRight size={14} />} isDisabled={!nextSiblingNodeId} ... />
+</VActionGroup>
+```
+
+### 非职责
+- 不做前端分支树、不本地裁剪后续消息。
+- 不新增第二套按钮；只组合 `VButton` + `VActionGroup`。
+
+### 视觉与状态
+- 与行内 copy / edit / regenerate 共用 `turnIconButton` 密度；到达边界的方向禁用。
+- 切换中（`branchVersionSwitchDisabled`）整组禁用，等服务端快照。
+
+### 实现落点
+- 源码：`web/src/components/conversation/ConversationView.tsx`（metaActions）
+- 样式：`ConversationView.styles.ts` 的 `turnVersionSwitcher` / `turnVersionLabel`
+
+### 反冗余
+- 不替代消息编辑或重新生成入口；不新增独立分支列表页。
+
 ## ChatComposerPlusMenu
 
 ### 功能
-桌面端 Chat composer 的统一扩展入口。一级为紧凑纵向聚类列表，悬停或点击后只在右侧展开一个二级面板；不允许三级菜单。
+桌面端 Chat composer 的统一扩展入口。单栏纵向分组菜单：每个分组带小节标题，动作行单行紧凑，能力开关行以内联勾选态直接展示；不出现二级面板或第三级菜单。打开后焦点落在首个可用项，↑/↓/Home/End 在可用项间循环，Escape 关闭。
 
 ### 信息架构
-- `添加与引用`：图片附件、会话引用。
-- `对话能力`：心智模型、运行状态注入，以可切换状态直接展示。
-- `会话与陪伴`：直接会话、投喂、聊天、关怀。
-- `群聊与团队`：群聊管理、打开团队。
+- `添加与引用`：图片附件、会话引用；禁用行用 `disabledReason` 说明原因。
+- `对话能力`：心智模型、运行状态注入；行尾勾选标记表示 `开启`，无标记表示 `关闭`（`role="menuitemcheckbox"` + `aria-checked`）。
+- `会话与陪伴`：仅当存在直接会话绑定时出现，当前提供打开直接会话。
+- `群聊与团队`：管理群聊、打开团队（团队归属可用时）。
+- `引用工作区文件`、陪伴投喂/聊天/关怀只在设计预览中保留，生产数据通路未就绪前不渲染，避免给出无动作的入口。
 
 ### 边界
 - 斜杠指令仍由输入框内联建议负责，不进入加号菜单。
 - 模型、权限、上下文用量、发送/停止仍位于 composer 工具栏。
 - 缓存状态不在加号菜单或右栏展示；上下文详情仍由独立工具栏入口承载。
 - 仅定义桌面交互，不增加手机端变体。
-- 复用 `VPopover`、`VButton`、`VDialog`、`VNativeInput`，不新增第二套 primitive。
+- 复用 `VPopover`、`VButton`、`VDialog`、`VNativeInput`，不新增第二套 primitive；菜单容器只允许一个 `role="menu"`，分组用 `role="group"`。
+
+### 实现落点
+- 源码：`web/src/routes/chat/ChatComposerPlusMenu.tsx`
+- 样式：`web/src/routes/chat/ChatComposerPlusMenu.styles.ts`
+- 隔离预览：`web/src/design/chat-composer-plus-menu-preview.tsx`
+
+### 反冗余
+- 不重新引入悬停聚类 + 右侧二级面板或两栏等高外壳。
+- 不替代 composer 工具栏或斜杠内联建议。
 
 ## ChatGroupManagementDialog
 

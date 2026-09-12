@@ -649,6 +649,122 @@ def list_chat_rooms_compact() -> list[dict[str, Any]]:
     return rooms
 
 
+def _question_owned_rooms(
+    team_id: str, question_id: str
+) -> list[dict[str, Any]]:
+    """Return raw room payloads bound to one Challenge Cup question."""
+
+    normalized_team = str(team_id or "").strip()
+    normalized_question = str(question_id or "").strip().upper()
+    if not normalized_question:
+        return []
+    state = _store().load()
+    owned: list[dict[str, Any]] = []
+    for item in list(state.get("rooms") or []):
+        if not isinstance(item, dict):
+            continue
+        config = item.get("config")
+        if not isinstance(config, dict):
+            continue
+        if str(config.get("questionId") or "").strip().upper() != normalized_question:
+            continue
+        room_team = str(config.get("teamId") or "").strip()
+        if normalized_team and room_team and room_team != normalized_team:
+            continue
+        owned.append(item)
+    return owned
+
+
+def _room_round_message_counts(room: dict[str, Any]) -> tuple[int, int]:
+    rounds = [item for item in list(room.get("rounds") or []) if isinstance(item, dict)]
+    message_count = sum(
+        len([message for message in list(item.get("messages") or []) if isinstance(message, dict)])
+        for item in rounds
+    )
+    return len(rounds), message_count
+
+
+def list_chat_rooms_for_question(team_id: str, question_id: str) -> list[dict[str, Any]]:
+    """Return question-owned room references for reset/retire previews.
+
+    Read-only by contract: previews must not persist the round-state
+    reconciliation that the interactive list entries perform.
+    """
+
+    rooms = _question_owned_rooms(team_id, question_id)
+    references: list[dict[str, Any]] = []
+    for room in rooms:
+        round_count, message_count = _room_round_message_counts(room)
+        references.append(
+            {
+                "roomId": str(room.get("roomId") or "").strip(),
+                "title": str(room.get("title") or "").strip(),
+                "status": str(room.get("status") or "").strip(),
+                "roundCount": round_count,
+                "messageCount": message_count,
+                "updatedAt": str(room.get("updatedAt") or "").strip(),
+            }
+        )
+    references.sort(key=lambda item: str(item.get("updatedAt") or ""), reverse=True)
+    return references
+
+
+def remove_chat_rooms_for_question(team_id: str, question_id: str) -> dict[str, Any]:
+    """Delete every room owned by one question and its embedded transcripts.
+
+    Busy rooms and busy transcript sessions are skipped with a reason instead of
+    failing the whole cleanup; each successful delete keeps the room-store
+    delete semantics (remove from state, record the scene event) and then
+    removes the room's mirrored transcript events from participant sessions.
+    """
+
+    rooms = _question_owned_rooms(team_id, question_id)
+    removed_room_ids: list[str] = []
+    removed_round_count = 0
+    removed_message_count = 0
+    cleaned_session_count = 0
+    cleaned_transcript_count = 0
+    skipped: list[dict[str, str]] = []
+    failed: list[dict[str, str]] = []
+    for room in rooms:
+        room_id = str(room.get("roomId") or "").strip()
+        round_count, message_count = _room_round_message_counts(room)
+        try:
+            delete_chat_room(room_id)
+        except ChatRoomBusyError:
+            skipped.append({"roomId": room_id, "reason": "busy"})
+            continue
+        except ChatRoomNotFoundError:
+            continue
+        except Exception as exc:  # noqa: BLE001 - report per room and continue
+            failed.append({"roomId": room_id, "reason": type(exc).__name__})
+            continue
+        removed_room_ids.append(room_id)
+        removed_round_count += round_count
+        removed_message_count += message_count
+        try:
+            cleanup = _remove_group_room_transcripts_from_participant_sessions(
+                room, room_id
+            )
+        except Exception as exc:  # noqa: BLE001 - room already removed
+            failed.append(
+                {"roomId": room_id, "reason": f"transcripts:{type(exc).__name__}"}
+            )
+            continue
+        cleaned_session_count += int(cleanup.get("changedSessionCount") or 0)
+        cleaned_transcript_count += int(cleanup.get("removedMessageCount") or 0)
+    return {
+        "removedRoomIds": removed_room_ids,
+        "removedRoomCount": len(removed_room_ids),
+        "removedRoundCount": removed_round_count,
+        "removedMessageCount": removed_message_count,
+        "cleanedSessionCount": cleaned_session_count,
+        "cleanedTranscriptMessageCount": cleaned_transcript_count,
+        "skipped": skipped,
+        "failed": failed,
+    }
+
+
 def get_chat_room_compact(room_id: str) -> dict[str, Any] | None:
     """Return one room reference without session repair or full room hydration."""
 
@@ -665,6 +781,7 @@ def get_chat_room_detail(
     room_id: str,
     *,
     reconcile: bool = True,
+    participant_index: bool = True,
 ) -> dict[str, Any] | None:
     """Return the full room detail payload.
 
@@ -673,6 +790,15 @@ def get_chat_room_detail(
     internal read-only chains (meeting-round bound rounds) use this so a
     sweep-driven read can neither write nor take the reconciliation cost.
     Interactive callers keep the default ``reconcile=True``.
+
+    ``participant_index=False`` (residual cost of defect 19) additionally
+    skips the participant refresh + repair pass.  That pass rebuilds session
+    summaries for every participant and deep-copies the index cache, which
+    under memory pressure costs tens of seconds per load and re-runs whenever
+    any chat state changed — the missing-digest sweep calls it twice per
+    meeting per pass.  Rounds-only readers (meeting-round bound rounds) need
+    neither the fresh summaries nor the repair, so they pass ``False`` and
+    keep the persisted participant entries in the payload.
     """
 
     started_at = _perf_counter()
@@ -704,23 +830,35 @@ def get_chat_room_detail(
         )
         return None
     stage_started_at = _perf_counter()
-    participant_indexes, participant_index_cache_hit, participant_index_timings = _participant_refresh_indexes(
-        participants=room.get("participants") if isinstance(room.get("participants"), list) else []
-    )
-    _append_chat_room_detail_timing(
-        phase_timings,
-        "participant_index.refresh",
-        stage_started_at,
-        cache_hit=participant_index_cache_hit,
-    )
-    phase_timings.extend(participant_index_timings)
+    if participant_index:
+        participant_indexes, participant_index_cache_hit, participant_index_timings = _participant_refresh_indexes(
+            participants=room.get("participants") if isinstance(room.get("participants"), list) else []
+        )
+        _append_chat_room_detail_timing(
+            phase_timings,
+            "participant_index.refresh",
+            stage_started_at,
+            cache_hit=participant_index_cache_hit,
+        )
+        phase_timings.extend(participant_index_timings)
+    else:
+        participant_index_cache_hit = False
+        _append_chat_room_detail_timing(
+            phase_timings,
+            "participant_index.skipped",
+            stage_started_at,
+        )
     stage_started_at = _perf_counter()
-    repaired = _repair_room_participants(
-        room,
-        session_summaries=participant_indexes["session_summaries"],
-        active_agents_by_id=participant_indexes["active_agents_by_id"],
-        active_agents_by_session_id=participant_indexes["active_agents_by_session_id"],
-        preserve_scoped_session_ids=_is_challenge_discussion_room(room),
+    repaired = (
+        _repair_room_participants(
+            room,
+            session_summaries=participant_indexes["session_summaries"],
+            active_agents_by_id=participant_indexes["active_agents_by_id"],
+            active_agents_by_session_id=participant_indexes["active_agents_by_session_id"],
+            preserve_scoped_session_ids=_is_challenge_discussion_room(room),
+        )
+        if participant_index
+        else False
     )
     _append_chat_room_detail_timing(phase_timings, "participant_repair", stage_started_at)
     if repaired:
@@ -1364,6 +1502,15 @@ def start_chat_room_round(
         if isinstance(_model_invocation_receipt_authority, Mapping)
         else None
     )
+    operator_setup = (existing_room.get("config") or {}).get("operatorDiscussionAuthority")
+    if operator_setup is not None or (receipt_authority or {}).get("authorityKind") == "operator_discussion":
+        from core.web.services.team_workflow.operator_optimization.discussion_authority import validate_operator_authority
+
+        if not receipt_authority or receipt_authority != operator_setup:
+            raise ChatRoomValidationError("Operator room requires its frozen server authority")
+        validate_operator_authority(receipt_authority)
+        if existing_room.get("rounds"):
+            raise ChatRoomValidationError("Operator discussion already has its single logical round")
     if receipt_authority is None and _is_scoped_discussion_room(existing_room):
         # A workflow-scoped meeting room only exists for formal hypothesis
         # stages; its speaker turns must stay receipt-bound. Failing closed
@@ -1431,7 +1578,11 @@ def start_chat_room_round(
             preserve_scoped_session_ids=_is_challenge_discussion_room(room),
         )
         refreshed_participant_count = len(refreshed_participants)
-        participants = _dedupe_chat_room_participants(refreshed_participants)
+        participants = (
+            _dedupe_frozen_participants_by_agent(refreshed_participants)
+            if "participantAgentIds" in round_config
+            else _dedupe_chat_room_participants(refreshed_participants)
+        )
         submit_timings["participantDedupeRemoved"] = max(0, refreshed_participant_count - len(participants))
         submit_timings["participantRefreshMs"] = _elapsed_ms(stage_started_at)
 
@@ -1453,6 +1604,11 @@ def start_chat_room_round(
                 if background:
                     _release_chat_room_inflight()
                 raise
+            if operator_setup is not None and (
+                    room.get("rounds") or (room.get("config") or {}).get("operatorDiscussionAuthority") != receipt_authority):
+                if background:
+                    _release_chat_room_inflight()
+                raise ChatRoomValidationError("Operator discussion already has its single logical round or its authority changed")
             if list(room.get("participants") or []) != participant_seed:
                 if refresh_attempt == _CHAT_ROOM_PARTICIPANT_REFRESH_MAX_ATTEMPTS - 1:
                     if background:
@@ -1516,7 +1672,11 @@ def start_chat_room_round(
                 participants=round_participants,
                 case_state=case_state,
             )
-            speakers = _dedupe_chat_room_participants(speakers)
+            speakers = (
+                _dedupe_frozen_participants_by_agent(speakers)
+                if "participantAgentIds" in round_config
+                else _dedupe_chat_room_participants(speakers)
+            )
             try:
                 _require_exact_frozen_speaker_roster(speakers, round_config)
             except ChatRoomValidationError:
@@ -2210,6 +2370,8 @@ def _execute_chat_room_round(
                 "_structuredChatRoomContext": room_context_snapshot is not None,
                 "_roomContextSnapshot": room_context_snapshot,
                 "_modelInvocationReceiptAuthority": receipt_authority,
+                "workflowRunId": str((receipt_authority or {}).get("workflowRunId") or ""),
+                "_operatorDiscussion": (receipt_authority or {}).get("authorityKind") == "operator_discussion",
                 "_speakerDeltaCapture": _speaker_delta_capture_enabled(
                     room,
                     round_payload,
@@ -3193,7 +3355,12 @@ def _prep_speaker_model_failure(
             prompt_build_ms=prompt_build_ms,
         )
     try:
-        _resolve_chat_room_agent_llm(agent)
+        if context.get("_operatorDiscussion"):
+            from core.web.services.team_workflow.research_runtime.meeting_model_route import resolve_meeting_speaker_llm
+
+            resolve_meeting_speaker_llm(agent, context, _resolve_chat_room_agent_llm)
+        else:
+            _resolve_chat_room_agent_llm(agent)
     except ChatRoomValidationError as exc:
         return _prep_speaker_failure_message(
             participant,
@@ -3774,6 +3941,9 @@ def _run_speaker_auto_continuations(
     """
 
     messages = [message]
+    if context.get("_operatorDiscussion"):
+        # One logical discussion has one native Turn per frozen seat.
+        return messages
     max_turns = _speaker_auto_continue_max_turns()
     if max_turns <= 0 or not _speaker_turn_needs_continue(message):
         # The knob is off (no continuation quota means no exhaustion concept)
@@ -4017,7 +4187,14 @@ def _run_one_speaker(
         structured_meeting_message = bool(context.get("_structuredMeetingMessage"))
         message_payload: dict[str, Any] | None = None
         context_payload: dict[str, Any] | None = None
-        if structured_meeting_message:
+        operator_payload = None
+        if context.get("_operatorDiscussion"):
+            from core.web.services.team_workflow.operator_optimization.discussion_output import validated_result
+
+            operator_message = validated_result(result)
+            operator_payload = operator_message.model_dump(mode="json")
+            content = operator_message.contribution
+        elif structured_meeting_message:
             raw_content = _result_full_visible_text(result)
             if not raw_content:
                 raw_content = _result_summary(result) or "No visible response."
@@ -4073,6 +4250,7 @@ def _run_one_speaker(
             "summary": summary,
             **({"messagePayload": message_payload} if message_payload is not None else {}),
             **({"contextPayload": context_payload} if context_payload is not None else {}),
+            **({"operatorDiscussionPayload": operator_payload} if operator_payload is not None else {}),
             **({"errorType": error_type} if error_type else {}),
             "timestamp": timestamp,
             **_case_message_metadata(context),
@@ -4584,6 +4762,8 @@ def promote_chat_room_formal_context(
 
 
 def _chat_room_stable_output_contract(context: Mapping[str, Any]) -> str:
+    if context.get("_operatorDiscussion"):
+        return "Return the bound operator discussion JSON object. Only the final experiment_planner may provide result; other participants set result to null."
     if not context.get("_structuredChatRoomContext"):
         return ""
     if context.get("_structuredMeetingMessage"):
@@ -4792,7 +4972,11 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
         ), session_service._session_tool_workspace_override(workspace):
             stage_started_at = _perf_counter()
             agent_runtime = session_service.create_chat_agent(workspace_path=workspace, config=agent_config)
-            if context.get("_structuredMeetingMessage"):
+            if context.get("_operatorDiscussion"):
+                from core.web.services.team_workflow.operator_optimization.discussion_output import output_contract
+
+                agent_runtime.set_turn_structured_output_contract(output_contract())
+            elif context.get("_structuredMeetingMessage"):
                 from core.web.services.team_workflow.meeting_message_payload import (
                     meeting_message_structured_output_contract,
                 )
@@ -4932,6 +5116,14 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
                     turn_identity=turn_identity,
                     receipts=meeting_receipts,
                 )
+                if context.get("_operatorDiscussion"):
+                    from core.web.services.team_workflow.operator_optimization.discussion_output import ingest_output
+
+                    finals = [outcome for outcome in meeting_outcomes if outcome.kind == "final_answer"]
+                    if len(finals) != 1:
+                        raise ValueError("Operator speaker must produce exactly one canonical final outcome")
+                    result = dict(result or {})
+                    result["operatorDiscussionPayload"] = ingest_output(finals[0].final_text)
     if agent_context is not None and agent_context.agent_id:
         stage_started_at = _perf_counter()
         record_agent_turn_result(
@@ -5761,6 +5953,37 @@ def _dedupe_chat_room_participants(participants: list[dict[str, Any]]) -> list[d
         if not isinstance(participant, dict):
             continue
         keys = _chat_room_participant_identity_keys(participant)
+        if keys and any(key in seen for key in keys):
+            continue
+        deduped.append(participant)
+        seen.update(keys)
+    return deduped
+
+
+def _dedupe_frozen_participants_by_agent(
+    participants: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Dedupe a frozen roster by agent identity only.
+
+    Session-derived keys are refreshed metadata for a frozen roster: distinct
+    frozen agents can transiently present the same refreshed session id (one
+    agent's ``directSessionId`` equal to another agent's ``sessionId``), and a
+    session-scoped collapse silently drops a mandated speaker before
+    ``_require_exact_frozen_speaker_roster`` fails the round.  A frozen agent
+    may still not appear twice.
+    """
+
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for participant in list(participants or []):
+        if not isinstance(participant, dict):
+            continue
+        agent_id = str(participant.get("agentId") or "").strip()
+        keys = (
+            [f"agent:{agent_id}"]
+            if agent_id
+            else _chat_room_participant_identity_keys(participant)
+        )
         if keys and any(key in seen for key in keys):
             continue
         deduped.append(participant)
@@ -7931,6 +8154,15 @@ def _persist_chat_room_work_run(
         payload["kernel"] = kernel_trace
     active_run_id = round_id if normalized_status in RUNNING_ROUND_STATUSES else ""
     _work_run_store().persist_snapshot(RUN_KIND, payload, active_run_id=active_run_id)
+    authority = _safe_config(room.get("config")).get("operatorDiscussionAuthority")
+    if isinstance(authority, dict) and normalized_status not in RUNNING_ROUND_STATUSES:
+        from .team_workflow.research_runtime.completion_dependency import wake_meeting_completion
+        from .team_workflow.research_runtime.formal_write_runtime import get_write_store
+
+        get_write_store().submit(lambda uow: wake_meeting_completion(uow,
+            run_id=authority["workflowRunId"], node_run_id=authority["nodeRunId"],
+            room_id=payload["roomId"], round_id=round_id, now_ms=int(time.time() * 1000)),
+            force_flush=True).result(timeout=30)
 
 
 def _record_room_event(

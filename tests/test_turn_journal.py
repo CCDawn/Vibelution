@@ -13,15 +13,21 @@ from core.chat.conversation_invariant import check_conversation_payload_invarian
 from core.chat.turn_journal import (
     EVENT_ASSISTANT_MESSAGE,
     EVENT_ASSISTANT_ITEM_COMMITTED,
+    EVENT_BRANCH_REBASE,
     EVENT_TOOL_RESULT,
     EVENT_TURN_COMPLETED,
     EVENT_USER_MESSAGE,
     TurnJournalEvent,
     append_turn_event,
+    fold_active_events,
+    latest_open_turn_id,
+    latest_turn_sequence,
+    load_latest_turn_events_for_preview,
     load_turn_events,
     model_messages_from_events,
     model_visible_messages_from_events,
     rewrite_turn_events,
+    session_turn_items_from_events,
     turn_journal_path,
 )
 from tests.helpers.managed_processes import managed_processes
@@ -291,6 +297,64 @@ def test_rewrite_failure_preserves_original_parseable_journal(tmp_path, monkeypa
     assert list(path.parent.glob("turn_journal.jsonl.*.tmp")) == []
 
 
+def test_rewrite_preserves_monotonic_sequence_watermark(tmp_path):
+    events = [
+        append_turn_event(
+            tmp_path,
+            "session-watermark",
+            "turn-1",
+            EVENT_USER_MESSAGE,
+            payload={"content": f"message-{index}"},
+        )
+        for index in range(5)
+    ]
+    assert [event.sequence for event in events] == [1, 2, 3, 4, 5]
+    path = turn_journal_path(tmp_path, "session-watermark")
+
+    rewrite_turn_events(tmp_path, "session-watermark", events[:2])
+
+    # The rewrite dropped sequences 3..5; cursors already published must stay valid.
+    assert latest_turn_sequence(tmp_path, "session-watermark") == 5
+    turn_journal._forget_sequence(path)
+    assert latest_turn_sequence(tmp_path, "session-watermark") == 5
+
+    next_event = append_turn_event(
+        tmp_path,
+        "session-watermark",
+        "turn-2",
+        EVENT_USER_MESSAGE,
+        payload={"content": "edited"},
+    )
+    assert next_event.sequence == 6
+    assert [event.sequence for event in load_turn_events(tmp_path, "session-watermark")] == [1, 2, 6]
+
+
+def test_empty_rewrite_keeps_sequence_watermark(tmp_path):
+    events = [
+        append_turn_event(
+            tmp_path,
+            "session-watermark-empty",
+            "turn-1",
+            EVENT_USER_MESSAGE,
+            payload={"content": f"message-{index}"},
+        )
+        for index in range(3)
+    ]
+    assert events[-1].sequence == 3
+
+    rewrite_turn_events(tmp_path, "session-watermark-empty", [])
+
+    assert latest_turn_sequence(tmp_path, "session-watermark-empty") == 3
+    next_event = append_turn_event(
+        tmp_path,
+        "session-watermark-empty",
+        "turn-2",
+        EVENT_USER_MESSAGE,
+        payload={"content": "after-unlink"},
+    )
+    assert next_event.sequence == 4
+
+
 def test_loading_missing_journal_has_no_filesystem_side_effect(tmp_path):
     path = turn_journal_path(tmp_path, "session-missing")
 
@@ -391,3 +455,324 @@ def test_empty_unlinked_tool_result_event_is_still_dropped():
     assert "（空结果）工具已执行但未返回可见输出。" not in contents
     assert "已处理。" in contents
     assert [str(message.get("role") or "") for message in messages] == ["user", "assistant"]
+
+
+def _branch_event(
+    event_id: str,
+    turn_id: str,
+    sequence: int,
+    event_type: str,
+    *,
+    payload: dict | None = None,
+    parent_event_id: str = "",
+) -> TurnJournalEvent:
+    return TurnJournalEvent(
+        schema_version=2,
+        event_id=event_id,
+        session_id="session-branch",
+        turn_id=turn_id,
+        sequence=sequence,
+        event_type=event_type,
+        status="recorded",
+        timestamp=f"2026-09-12T00:00:{sequence:02d}",
+        source="test",
+        payload=dict(payload or {}),
+        parent_event_id=parent_event_id,
+    )
+
+
+def _rebase_event(
+    sequence: int,
+    from_event_id: str,
+    *,
+    operation: str = "edit",
+    event_id: str = "event-rebase",
+) -> TurnJournalEvent:
+    return _branch_event(
+        event_id,
+        "turn-new",
+        sequence,
+        EVENT_BRANCH_REBASE,
+        payload={
+            "operation": operation,
+            "branchId": "branch-1",
+            "fromEventId": from_event_id,
+            "replacedTurnIds": [],
+        },
+        parent_event_id=from_event_id,
+    )
+
+
+def _fold_fixture() -> list[TurnJournalEvent]:
+    return [
+        _branch_event("event-u1", "turn-1", 1, EVENT_USER_MESSAGE, payload={"content": "原始需求"}),
+        _branch_event("event-a1", "turn-1", 2, EVENT_ASSISTANT_MESSAGE, payload={"content": "原始回答"}),
+        _branch_event("event-u2", "turn-2", 3, EVENT_USER_MESSAGE, payload={"content": "后续追问"}),
+        _branch_event("event-a2", "turn-2", 4, EVENT_ASSISTANT_MESSAGE, payload={"content": "后续回答"}),
+    ]
+
+
+def test_unknown_event_type_stays_readable_and_invisible_to_replay(tmp_path):
+    append_turn_event(
+        tmp_path, "session-unknown", "turn-1", EVENT_USER_MESSAGE, status="recorded", payload={"content": "问题"}
+    )
+    append_turn_event(
+        tmp_path, "session-unknown", "turn-1", "future_schema_event", status="recorded", payload={"future": True}
+    )
+    append_turn_event(
+        tmp_path, "session-unknown", "turn-1", EVENT_ASSISTANT_MESSAGE, status="completed", payload={"content": "回答"}
+    )
+
+    events = load_turn_events(tmp_path, "session-unknown")
+
+    assert [event.event_type for event in events] == [
+        EVENT_USER_MESSAGE,
+        "future_schema_event",
+        EVENT_ASSISTANT_MESSAGE,
+    ]
+    visible = model_visible_messages_from_events(events)
+    assert [str(message.get("content") or "") for message in visible] == ["问题", "回答"]
+    model_messages = model_messages_from_events(events)
+    assert [str(message.get("content") or "") for message in model_messages] == ["问题", "回答"]
+
+
+def test_unknown_event_type_marks_preview_unsafe_for_canonical_fallback(tmp_path):
+    append_turn_event(
+        tmp_path, "session-preview", "turn-1", EVENT_USER_MESSAGE, status="recorded", payload={"content": "问题"}
+    )
+    append_turn_event(
+        tmp_path, "session-preview", "turn-1", "future_schema_event", status="recorded", payload={}
+    )
+    append_turn_event(
+        tmp_path, "session-preview", "turn-1", EVENT_ASSISTANT_MESSAGE, status="completed", payload={"content": "回答"}
+    )
+
+    events, _reached_start, safe = load_latest_turn_events_for_preview(tmp_path, "session-preview")
+
+    assert safe is False
+    assert not any(event.event_type == "future_schema_event" for event in events)
+
+
+def test_fold_active_events_is_identity_without_rebase():
+    events = _fold_fixture()
+
+    assert fold_active_events(events) == events
+
+
+def test_fold_active_events_cuts_superseded_segment_after_fork_point():
+    events = [
+        *_fold_fixture(),
+        _rebase_event(5, "event-a1"),
+        _branch_event("event-u2b", "turn-3", 6, EVENT_USER_MESSAGE, payload={"content": "编辑后的需求"}),
+    ]
+
+    active = fold_active_events(events)
+
+    assert [event.event_id for event in active] == ["event-u1", "event-a1", "event-u2b"]
+
+
+def test_fold_active_events_supports_nested_rebase():
+    events = [
+        *_fold_fixture(),
+        _rebase_event(5, "event-a1", event_id="event-rebase-1"),
+        _branch_event("event-u2b", "turn-3", 6, EVENT_USER_MESSAGE, payload={"content": "编辑后的需求"}),
+        _branch_event("event-a2b", "turn-3", 7, EVENT_ASSISTANT_MESSAGE, payload={"content": "新回答"}),
+        _rebase_event(8, "event-u1", event_id="event-rebase-2"),
+        _branch_event("event-u1c", "turn-4", 9, EVENT_USER_MESSAGE, payload={"content": "重开"}),
+    ]
+
+    active = fold_active_events(events)
+
+    assert [event.event_id for event in active] == ["event-u1", "event-u1c"]
+
+
+def test_fold_active_events_empty_fork_point_clears_history():
+    events = [
+        *_fold_fixture(),
+        _rebase_event(5, ""),
+        _branch_event("event-u1b", "turn-3", 6, EVENT_USER_MESSAGE, payload={"content": "从零开始"}),
+    ]
+
+    active = fold_active_events(events)
+
+    assert [event.event_id for event in active] == ["event-u1b"]
+
+
+def test_fold_active_events_keeps_path_when_fork_point_is_missing():
+    events = [
+        *_fold_fixture(),
+        _rebase_event(5, "event-missing"),
+    ]
+
+    active = fold_active_events(events)
+
+    assert [event.event_id for event in active] == [event.event_id for event in _fold_fixture()]
+
+
+def test_fold_active_events_head_select_restores_superseded_branch():
+    events = [
+        *_fold_fixture(),
+        _rebase_event(5, "event-a1", event_id="event-rebase-1"),
+        _branch_event("event-u2b", "turn-3", 6, EVENT_USER_MESSAGE, payload={"content": "编辑后的需求"}),
+        _branch_event("event-a2b", "turn-3", 7, EVENT_ASSISTANT_MESSAGE, payload={"content": "新回答"}),
+        _rebase_event(8, "event-a2", operation="head_select", event_id="event-rebase-2"),
+    ]
+
+    active = fold_active_events(events)
+
+    assert [event.event_id for event in active] == ["event-u1", "event-a1", "event-u2", "event-a2"]
+
+
+def test_fold_active_events_head_select_then_new_message_continues_from_target():
+    events = [
+        *_fold_fixture(),
+        _rebase_event(5, "event-a1", event_id="event-rebase-1"),
+        _branch_event("event-u2b", "turn-3", 6, EVENT_USER_MESSAGE, payload={"content": "编辑后的需求"}),
+        _branch_event("event-a2b", "turn-3", 7, EVENT_ASSISTANT_MESSAGE, payload={"content": "新回答"}),
+        _rebase_event(8, "event-a2", operation="head_select", event_id="event-rebase-2"),
+        _branch_event("event-u3", "turn-4", 9, EVENT_USER_MESSAGE, payload={"content": "沿旧分支继续"}),
+    ]
+
+    active = fold_active_events(events)
+
+    assert [event.event_id for event in active] == [
+        "event-u1",
+        "event-a1",
+        "event-u2",
+        "event-a2",
+        "event-u3",
+    ]
+
+
+def test_fold_active_events_head_select_to_active_tip_is_idempotent():
+    events = [
+        *_fold_fixture(),
+        _rebase_event(5, "event-a2", operation="head_select", event_id="event-rebase-1"),
+    ]
+
+    active = fold_active_events(events)
+
+    assert [event.event_id for event in active] == ["event-u1", "event-a1", "event-u2", "event-a2"]
+
+
+def test_fold_active_events_head_select_to_unknown_event_keeps_current_path():
+    events = [
+        *_fold_fixture(),
+        _rebase_event(5, "event-missing", operation="head_select", event_id="event-rebase-1"),
+    ]
+
+    active = fold_active_events(events)
+
+    assert [event.event_id for event in active] == [event.event_id for event in _fold_fixture()]
+
+
+def test_fold_active_events_ignores_unknown_rebase_operation():
+    events = [
+        *_fold_fixture(),
+        _rebase_event(5, "event-a1", operation="future_operation"),
+    ]
+
+    active = fold_active_events(events)
+
+    assert [event.event_id for event in active] == ["event-u1", "event-a1", "event-u2", "event-a2"]
+
+
+def test_turn_items_follow_the_active_branch():
+    events = [
+        _branch_event("event-u1", "turn-1", 1, EVENT_USER_MESSAGE, payload={"content": "原始需求"}),
+        _branch_event("event-a1", "turn-1", 2, EVENT_ASSISTANT_MESSAGE, payload={"content": "原始回答"}),
+        _branch_event("event-ts2", "turn-2", 3, "turn_started", payload={}),
+        _branch_event("event-u2", "turn-2", 4, EVENT_USER_MESSAGE, payload={"content": "后续追问"}),
+        _branch_event(
+            "event-item2",
+            "turn-2",
+            5,
+            EVENT_ASSISTANT_ITEM_COMMITTED,
+            payload={"kind": "assistant_message", "text": "后续回答", "itemId": "item-2", "revision": 1},
+        ),
+        _rebase_event(6, "event-a1", event_id="event-rebase"),
+        _branch_event("event-ts3", "turn-3", 7, "turn_started", payload={}),
+        _branch_event("event-u3", "turn-3", 8, EVENT_USER_MESSAGE, payload={"content": "编辑后的需求"}),
+        _branch_event(
+            "event-item3",
+            "turn-3",
+            9,
+            EVENT_ASSISTANT_ITEM_COMMITTED,
+            payload={"kind": "assistant_message", "text": "新回答", "itemId": "item-3", "revision": 1},
+        ),
+    ]
+
+    items = session_turn_items_from_events(events)
+
+    assert [item["text"] for item in items] == ["新回答"]
+
+
+def test_latest_open_turn_id_ignores_superseded_open_turn():
+    events = [
+        _branch_event("event-ts1", "turn-1", 1, "turn_started", payload={}),
+        _branch_event("event-u1", "turn-1", 2, EVENT_USER_MESSAGE, payload={"content": "原始需求"}),
+        _rebase_event(3, "", event_id="event-rebase"),
+    ]
+
+    assert latest_open_turn_id(events) == ""
+
+
+def test_latest_open_turn_id_ignores_completed_turn_after_head_select():
+    events = [
+        _branch_event("event-ts1", "turn-1", 1, "turn_started", payload={}),
+        _branch_event(
+            "event-u1",
+            "turn-1",
+            2,
+            EVENT_USER_MESSAGE,
+            parent_event_id="event-ts1",
+            payload={"content": "原始需求"},
+        ),
+        _branch_event(
+            "event-a1",
+            "turn-1",
+            3,
+            EVENT_ASSISTANT_MESSAGE,
+            parent_event_id="event-u1",
+            payload={"content": "原始回答"},
+        ),
+        _branch_event(
+            "event-tc1",
+            "turn-1",
+            4,
+            EVENT_TURN_COMPLETED,
+            parent_event_id="event-a1",
+            payload={},
+        ),
+        _rebase_event(5, "event-u1", event_id="event-rebase-1"),
+        _branch_event(
+            "event-u2b",
+            "turn-new",
+            6,
+            EVENT_USER_MESSAGE,
+            parent_event_id="event-rebase-1",
+            payload={"content": "编辑后需求"},
+        ),
+        _branch_event(
+            "event-a2b",
+            "turn-new",
+            7,
+            EVENT_ASSISTANT_MESSAGE,
+            parent_event_id="event-u2b",
+            payload={"content": "编辑后回答"},
+        ),
+        _branch_event(
+            "event-tc2",
+            "turn-new",
+            8,
+            EVENT_TURN_COMPLETED,
+            parent_event_id="event-a2b",
+            payload={},
+        ),
+        _rebase_event(9, "event-a1", operation="head_select", event_id="event-rebase-2"),
+    ]
+
+    active = fold_active_events(events)
+
+    assert [event.event_id for event in active] == ["event-ts1", "event-u1", "event-a1"]
+    assert latest_open_turn_id(events) == ""

@@ -2917,12 +2917,13 @@ def sweep_meetings_missing_digest(
     except Exception:  # noqa: BLE001 - the sweep must never break its host
         _record_digest_missing_sweep_event(summary)
         return summary
-    for team_id in team_ids:
-        summary["teams"] += 1
-        try:
-            _sweep_team_meetings_missing_digest(team_id, summary)
-        except Exception:  # noqa: BLE001 - one broken team cannot stop the sweep
-            summary["skipped"] += 1
+    with meeting_rounds.bound_room_round_read_cache():
+        for team_id in team_ids:
+            summary["teams"] += 1
+            try:
+                _sweep_team_meetings_missing_digest(team_id, summary)
+            except Exception:  # noqa: BLE001 - one broken team cannot stop the sweep
+                summary["skipped"] += 1
     _record_digest_missing_sweep_event(summary)
     return summary
 

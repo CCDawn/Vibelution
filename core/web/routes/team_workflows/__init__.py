@@ -8,6 +8,7 @@ from . import g12_calibration as _g12_calibration  # noqa: F401
 from . import hypothesis_first as _hypothesis_first  # noqa: F401
 from . import knowledge as _knowledge  # noqa: F401
 from . import orchestration as _orchestration  # noqa: F401
+from . import operator_optimization as _operator_optimization  # noqa: F401
 from . import research_ops as _research_ops  # noqa: F401
 from . import research_projects as _research_projects  # noqa: F401
 from . import research_runtime as _research_runtime  # noqa: F401

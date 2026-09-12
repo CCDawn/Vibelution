@@ -825,6 +825,30 @@ def _room_rounds_by_id(room_detail: Mapping[str, Any] | None) -> dict[str, dict[
     }
 
 
+_BOUND_ROOM_READ_STATE = threading.local()
+
+
+@contextmanager
+def bound_room_round_read_cache() -> Iterator[None]:
+    """Serve bound-room rounds from one read per room within the block.
+
+    The missing-digest sweep asks the same meeting several questions per pass
+    (running rounds, completed messages, source hash), and every question
+    re-loaded the full chat-room detail — the residual defect-19 cost that
+    kept the sweep pegging a core.  The block-scoped, thread-local cache
+    collapses those to a single round-store load per room per pass.  Cached
+    round dicts are shared read-only; callers must not mutate them, and no
+    caller outside the block sees the cache.
+    """
+
+    previous = getattr(_BOUND_ROOM_READ_STATE, "cache", None)
+    _BOUND_ROOM_READ_STATE.cache = {}
+    try:
+        yield
+    finally:
+        _BOUND_ROOM_READ_STATE.cache = previous
+
+
 def _load_bound_room_rounds(meeting_round: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     """Read the bound chat-room rounds (read-only) for one room-bound meeting."""
 
@@ -832,12 +856,26 @@ def _load_bound_room_rounds(meeting_round: Mapping[str, Any]) -> dict[str, dict[
     round_ids = _normalized_str_list(meeting_round.get("chatRoomRoundIds"))
     if not room_id or not round_ids:
         return {}
+    cache: dict[tuple[str, tuple[str, ...]], dict[str, dict[str, Any]]] | None = getattr(
+        _BOUND_ROOM_READ_STATE, "cache", None
+    )
+    cache_key = (room_id, tuple(round_ids))
+    if cache is not None:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return dict(cached)
     from core.web.services import chat_room_service
 
     # Read-only chain (defect 19): the bound-round read must not trigger the
     # chat room's write-side round-state reconciliation (it persists under
-    # the room lock); sweep reads stay zero-write by contract.
-    room_detail = chat_room_service.get_chat_room_detail(room_id, reconcile=False)
+    # the room lock) nor the participant refresh/repair pass (session-summary
+    # rebuild plus index deep-copy); sweep reads stay zero-write and
+    # rounds-only by contract.
+    room_detail = chat_room_service.get_chat_room_detail(
+        room_id,
+        reconcile=False,
+        participant_index=False,
+    )
     if room_detail is None:
         raise ResearchMeetingRoundError("Linked chat room not found for the meeting round.")
     rounds_by_id = _room_rounds_by_id(room_detail)
@@ -846,7 +884,10 @@ def _load_bound_room_rounds(meeting_round: Mapping[str, Any]) -> dict[str, dict[
         raise ResearchMeetingRoundError(
             f"Linked chat room is missing bound discussion round: {missing[0]}"
         )
-    return {round_id: rounds_by_id[round_id] for round_id in round_ids}
+    result = {round_id: rounds_by_id[round_id] for round_id in round_ids}
+    if cache is not None:
+        cache[cache_key] = result
+    return dict(result)
 
 
 def meeting_source_messages(meeting_round: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -1636,6 +1677,53 @@ def running_bound_round_ids(meeting_round: Mapping[str, Any]) -> list[str]:
         if str(room_round.get("status") or "").strip().lower()
         in chat_room_service.RUNNING_ROUND_STATUSES
     ]
+
+
+def live_running_bound_round_ids(meeting_round: Mapping[str, Any]) -> list[str]:
+    """Return bound running rounds whose executor heartbeat is still fresh.
+
+    A running-status room round renews ``heartbeatAt`` (and ``updatedAt``)
+    every ``_CHALLENGE_ROOM_HEARTBEAT_INTERVAL_SECONDS`` while a speaker call
+    runs, and the chat-room reconciler closes a running round as an orphan
+    once that renewal stops.  Only rounds still inside the heartbeat window
+    therefore prove live work that must keep blocking an explicit question
+    reset; a stale running round is a zombie the reconciler owns.
+    """
+
+    from core.web.services import chat_room_service
+
+    # Single source of truth for the liveness window: the chat-room service
+    # owns the renewal cadence and the orphan reconciler that enforces it.
+    window_seconds = float(
+        chat_room_service._CHAT_ROOM_WORK_RUN_HEARTBEAT_FRESH_SECONDS
+    )
+    now = datetime.now(timezone.utc)
+    live: list[str] = []
+    for round_id, room_round in _load_bound_room_rounds(meeting_round).items():
+        if (
+            str(room_round.get("status") or "").strip().lower()
+            not in chat_room_service.RUNNING_ROUND_STATUSES
+        ):
+            continue
+        heartbeat_at = str(
+            room_round.get("heartbeatAt") or room_round.get("updatedAt") or ""
+        ).strip()
+        if not heartbeat_at:
+            # No readable heartbeat: keep the conservative block instead of
+            # guessing death from an absent timestamp.
+            live.append(round_id)
+            continue
+        try:
+            parsed = datetime.fromisoformat(heartbeat_at.replace("Z", "+00:00"))
+        except ValueError:
+            live.append(round_id)
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        age_seconds = (now - parsed.astimezone(timezone.utc)).total_seconds()
+        if age_seconds < window_seconds:
+            live.append(round_id)
+    return live
 
 
 def record_meeting_summary_draft_error(

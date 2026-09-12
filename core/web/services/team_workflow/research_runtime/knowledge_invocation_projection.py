@@ -44,6 +44,48 @@ def current_knowledge_node_id(status: str | None) -> str | None:
     return None
 
 
+# Child-run attempt statuses that mean "this node is done"; anything else
+# (running / waiting_human / failed / blocked / pending) is the live position.
+_CHILD_TERMINAL_NODE_STATUSES = frozenset(
+    {"succeeded", "completed", "skipped", "cancelled"}
+)
+
+
+def current_knowledge_node_id_from_child_states(
+    child_node_states: Mapping[Any, Any] | None,
+    *,
+    fallback_status: str | None = None,
+) -> str | None:
+    """Resolve the live sideflow node from the child run's real node states.
+
+    The invocation-level status cannot see middle nodes (a running invocation
+    would read as the chain entry even when the child run already reached
+    ``knowledge_ingestion``), so the per-node attempt facts win when present;
+    the invocation-status derivation only degrades (SCI-049 O-03).  The walk
+    follows the fixed chain order and reports the first non-terminal node;
+    when every known node is terminal the last known node is the honest
+    terminal position.
+    """
+    states = {
+        str(key).strip(): str(value or "").strip().lower()
+        for key, value in dict(child_node_states or {}).items()
+        if str(key or "").strip()
+    }
+    for node_id in KNOWLEDGE_SIDEFLOW_NODE_IDS:
+        status = states.get(node_id)
+        if status is None or status in _CHILD_TERMINAL_NODE_STATUSES:
+            continue
+        return node_id
+    known = [
+        node_id
+        for node_id in KNOWLEDGE_SIDEFLOW_NODE_IDS
+        if node_id in states
+    ]
+    if known:
+        return known[-1]
+    return current_knowledge_node_id(fallback_status)
+
+
 def _record_field(record: Any, name: str) -> Any:
     if isinstance(record, Mapping):
         return record.get(name)
@@ -155,6 +197,7 @@ def project_knowledge_invocation_badges(
 
 __all__ = [
     "current_knowledge_node_id",
+    "current_knowledge_node_id_from_child_states",
     "invocation_summary",
     "project_knowledge_invocation_badges",
 ]

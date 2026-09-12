@@ -727,6 +727,166 @@ def test_stale_round_awaiting_candidate_keeps_approve_entry() -> None:
         (action.actionId, action.payload.meetingRoundId)
         for action in approve_actions
     ] == [("approve-summary:candidate-b", "meeting-r1-candidate-b")]
+    # SCI-049 D-03: the label names the candidate (no digest draft on this
+    # fixture, so the short id alone disambiguates) and the payload carries
+    # the candidateId so clients never parse the opaque actionId.
+    assert approve_actions[0].label == "确认候选纪要 · 候选 candidate-b"
+    assert approve_actions[0].payload.candidateId == "candidate-b"
+
+
+def test_approve_summary_label_carries_candidate_and_digest_summary() -> None:
+    """Sibling approve gates must be distinguishable on one panel (D-03).
+
+    A meeting sitting in ``awaiting_approval`` with a digest draft gets a
+    label of ``确认候选纪要 · 候选 <short-id>：<summary[:30]>…``; the digest
+    summary is truncated to keep the button scannable.
+    """
+    long_summary = "候选甲在增长假设上证据更充分，但成本假设与来源数据存在冲突，需要第二轮验证。"
+    state = HypothesisFirstStateV2.model_validate(project_state_from_records(
+        team_id="team-1",
+        question_id="SCI-001",
+        reset_boundary=None,
+        chain_records=[
+            {
+                "recordKind": "hypothesis_candidate",
+                "candidateId": "candidate-a",
+                "questionId": "SCI-001",
+                "createdAt": "2026-08-25T00:00:00Z",
+            },
+            {
+                "recordKind": "review_round_link",
+                "linkId": "link-r1-candidate-a",
+                "questionId": "SCI-001",
+                "selectionId": "selection-1",
+                "candidateId": "candidate-a",
+                "candidateOrder": 0,
+                "roundIndex": 1,
+                "meetingRoundId": "meeting-r1-candidate-a",
+                "createdAt": "2026-08-25T00:02:00Z",
+            },
+        ],
+        selection_records=[
+            {
+                "selectionId": "selection-1",
+                "questionId": "SCI-001",
+                "selectedCandidateIds": ["candidate-a"],
+                "createdAt": "2026-08-25T00:01:00Z",
+            }
+        ],
+        meeting_records=[
+            {
+                "meetingRoundId": "meeting-r1-candidate-a",
+                "meetingType": "hypothesis_review",
+                "question": "SCI-001",
+                "status": "awaiting_approval",
+                "digestDraft": {"summary": long_summary},
+                "createdAt": "2026-08-25T00:03:00Z",
+            }
+        ],
+        digest_records=[],
+        decision_records=[],
+        hypothesis_round_records=[],
+        return_to="/teams/team-1/research?question=SCI-001",
+    ))
+
+    approve_actions = [
+        action
+        for action in state.allowedActions
+        if action.kind == "command" and str(action.command) == "approve_summary"
+    ]
+    assert len(approve_actions) == 1
+    assert approve_actions[0].label == (
+        f"确认候选纪要 · 候选 candidate-a：{long_summary[:30]}…"
+    )
+    assert approve_actions[0].payload.candidateId == "candidate-a"
+    assert approve_actions[0].payload.meetingRoundId == "meeting-r1-candidate-a"
+
+
+def test_approve_summary_label_helper_defaults_and_generation_label() -> None:
+    """Unit contract of the label helper (D-03).
+
+    The generation-meeting gate keeps its historical label and stays
+    candidateId-free; a long candidate id collapses to its tail (the hash
+    part is the discriminator).
+    """
+    from core.web.services.team_workflow.research_runtime.hypothesis_first_state_v2 import (
+        _approve_summary_label,
+        _candidate_short_id,
+    )
+
+    assert _approve_summary_label(None, None) == "确认候选生成纪要"
+    assert _approve_summary_label(None, {"digestDraft": {"summary": "x"}}) == (
+        "确认候选生成纪要"
+    )
+    assert _approve_summary_label("candidate-b", None) == "确认候选纪要 · 候选 candidate-b"
+    assert _approve_summary_label("candidate-b", {}) == "确认候选纪要 · 候选 candidate-b"
+    assert _candidate_short_id("short-id") == "short-id"
+    # Long ids collapse to the tail, which carries the hash discriminator.
+    assert _candidate_short_id("sci-001-c1a2b3c4d5e6f7g8") == "…b3c4d5e6f7g8"
+
+
+def test_collection_auto_accept_quotes_sweep_cadence(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SCI-049 O-02: the collection section quotes the auto-advance sweep.
+
+    ``pending`` mirrors a handoff gate sitting in ``waiting_human``; the
+    interval comes from the sweep's env-governed cadence so the UI's
+    "auto-accepted within ~Ns" promise matches what the sweep actually does.
+    """
+    monkeypatch.setenv("VIBELUTION_AUTO_ADVANCE_SWEEP_INTERVAL_MS", "45000")
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                _collection_request_chain_record(
+                    "request-1",
+                    run_id="child-1",
+                    status="awaiting_handoff",
+                    collection_run_status="succeeded",
+                )
+            ],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+        )
+    )
+
+    assert state.collection.lifecycle == "waiting_human"
+    auto_accept = state.collection.autoAccept
+    assert auto_accept is not None
+    assert auto_accept.pending is True
+    assert auto_accept.actor == "auto_advance_sweep"
+    assert auto_accept.intervalMs == 45000
+
+
+def test_collection_auto_accept_pending_false_without_waiting_handoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("VIBELUTION_AUTO_ADVANCE_SWEEP_INTERVAL_MS", raising=False)
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                _collection_request_chain_record("request-1", run_id="child-1")
+            ],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+        )
+    )
+
+    assert state.collection.lifecycle != "waiting_human"
+    assert state.collection.autoAccept is not None
+    assert state.collection.autoAccept.pending is False
+    # Default cadence when the operator override is absent.
+    assert state.collection.autoAccept.intervalMs == 30_000
 
 
 def test_succeeded_formal_run_with_missing_delivery_stays_program_delivery_blocked() -> None:
@@ -2845,6 +3005,64 @@ def test_single_candidate_completed_attempt_offers_retry_not_selection() -> None
     assert retry.payload.previousAttemptId == "attempt-1"
 
 
+def test_retry_generation_offer_carries_its_active_run_id() -> None:
+    """The retry offer must ride the same run as the grounded R1 offer.
+
+    ``retry_generation`` without a run id resolves no stage-one launch and
+    opens the plain exploratory meeting, which the execution fence then closes
+    as ``legacy_orphan_closeout``.  The command handler already reads
+    ``payload.runId``; the offer must actually carry it whenever the question
+    has an active stage-one run.
+    """
+
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-105",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "generation_attempt",
+                    "attemptId": "attempt-1",
+                    "attemptNumber": 1,
+                    "questionId": "SCI-105",
+                    "meetingRoundId": "meeting-single",
+                    "lifecycle": "completed",
+                    "outcome": "succeeded",
+                    "queuedAt": "2026-08-25T00:00:00Z",
+                    "updatedAt": "2026-08-25T00:05:00Z",
+                },
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-105",
+                },
+            ],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            formal_runs=[
+                {
+                    "runId": "run-stage-one",
+                    "status": "running",
+                    "questionId": "SCI-105",
+                    "createdAt": "2026-08-25T00:00:00Z",
+                }
+            ],
+        )
+    )
+
+    retry = next(
+        action
+        for action in state.allowedActions
+        if action.kind == "command" and action.command == "retry_generation"
+    )
+    assert retry.payload.previousAttemptId == "attempt-1"
+    assert retry.payload.runId == "run-stage-one"
+
+
 def test_single_candidate_orphaned_generation_reports_dead_end_problem(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3447,7 +3665,7 @@ def test_summarizing_generation_with_all_terminal_bound_rounds_exposes_summary_r
     ]
     assert state.currentPhase == "generation"
     assert state.generation.lifecycle == "failed"
-    assert commands == ["regenerate_summary"]
+    assert commands == ["regenerate_summary", "stop_discussion"]
     retry = next(
         action
         for action in state.allowedActions
@@ -4750,6 +4968,95 @@ def test_fresh_review_heartbeat_keeps_executing() -> None:
     assert "reopen_review" not in {
         action.command for action in state.allowedActions if action.kind == "command"
     }
+
+
+def _awaiting_approval_meeting_fixture(
+    *, bound_round_status: str | None = None
+) -> HypothesisFirstStateV2:
+    updated_at = _iso_minute_offset(5)
+    meeting: dict[str, object] = {
+        "meetingRoundId": "review-1",
+        "meetingType": "hypothesis_review",
+        "question": "SCI-001",
+        "selectionId": "selection-1",
+        "status": "awaiting_approval",
+        "digestDraft": {"summary": "候选甲纪要草稿"},
+        "linkedChatRoomId": "room-review",
+        "createdAt": _iso_minute_offset(10),
+        "updatedAt": updated_at,
+    }
+    snapshots: dict[str, dict[str, object]] = {}
+    if bound_round_status is not None:
+        meeting["chatRoomRoundIds"] = ["room-round-review"]
+        snapshots["room-round-review"] = {
+            "runId": "room-round-review",
+            "runKind": "chat_room_round",
+            "status": bound_round_status,
+            "updatedAt": updated_at,
+        }
+    return HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-001",
+                },
+                {
+                    "recordKind": "review_round_link",
+                    "linkId": "link-1",
+                    "selectionId": "selection-1",
+                    "candidateId": "candidate-1",
+                    "candidateOrder": 0,
+                    "roundIndex": 1,
+                    "meetingRoundId": "review-1",
+                    "questionId": "SCI-001",
+                },
+            ],
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-1"],
+                }
+            ],
+            meeting_records=[meeting],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            chat_room_round_snapshots=snapshots,
+        )
+    )
+
+
+def test_awaiting_approval_meeting_offers_confirmed_stop() -> None:
+    """等待人工确认的形态必须有明确的放弃出口（可执行的停止指令）。"""
+
+    state = _awaiting_approval_meeting_fixture()
+
+    stop = next(
+        action
+        for action in state.allowedActions
+        if action.kind == "command" and action.command == "stop_discussion"
+    )
+    assert stop.actionId == "stop-discussion:review-1"
+    assert stop.payload.meetingRoundId == "review-1"
+    assert stop.requiresConfirmation is True
+    assert (stop.confirmationText or "").strip()
+
+
+def test_awaiting_approval_meeting_skips_stop_while_bound_round_runs() -> None:
+    """绑定轮次仍在运行时停止会被服务拒绝，投影不得给出假 offer。"""
+
+    state = _awaiting_approval_meeting_fixture(bound_round_status="running")
+
+    commands = {
+        action.command for action in state.allowedActions if action.kind == "command"
+    }
+    assert "stop_discussion" not in commands
 
 
 def test_stale_review_dispatch_intent_offers_retry_dispatch() -> None:
@@ -6474,6 +6781,13 @@ def test_v2_command_route_maps_idempotency_conflict_to_409(
         expected_input_digest="digest-a",
         actual_input_digest="digest-b",
     )
+    # SCI-049: record_selection enters through the async gate; both seams map
+    # the conflict through the same route except-clause.
+    monkeypatch.setattr(
+        hypothesis_first_routes.hypothesis_first_chain,
+        "submit_v2_command_async",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(conflict),
+    )
     monkeypatch.setattr(
         hypothesis_first_routes.hypothesis_first_chain,
         "execute_v2_command",
@@ -6623,6 +6937,13 @@ def test_v2_command_route_maps_stale_version_to_409(
         expected="hf2-action:stale:old",
         actual="hf2-action:actual:new",
         snapshot_path="/teams/team-1/workflow-orchestration/hypothesis-first/chain/state-v2?questionId=SCI-001",
+    )
+    # SCI-049: open_generation enters through the async gate; both seams map
+    # the conflict through the same route except-clause.
+    monkeypatch.setattr(
+        hypothesis_first_routes.hypothesis_first_chain,
+        "submit_v2_command_async",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(conflict),
     )
     monkeypatch.setattr(
         hypothesis_first_routes.hypothesis_first_chain,
@@ -8599,10 +8920,13 @@ def test_dead_state_sentinel_flags_generation_without_transition() -> None:
         for action in state["allowedActions"]
         if action.get("kind") == "command"
     ]
-    assert commands == []
-    # Only the dead-room navigation remains; it is not a transition.
-    assert state["allowedActions"]
-    assert all(action["kind"] == "navigation" for action in state["allowedActions"])
+    # The dead room also exposes the confirmed stop cleanup, so the operator
+    # can close the orphaned meeting instead of only reading the diagnosis.
+    # Stop is cleanup, not a transition, so the sentinel below still fires.
+    assert [action["command"] for action in commands] == ["stop_discussion"]
+    assert commands[0]["requiresConfirmation"] is True
+    assert commands[0]["actionId"] == "stop-discussion:hf-candgen-stopped"
+    assert any(action["kind"] == "navigation" for action in state["allowedActions"])
     codes = {problem["code"] for problem in state["generation"]["problems"]}
     assert "generation_no_transition" in codes
     overall_codes = {problem["code"] for problem in state["overall"]["problems"]}

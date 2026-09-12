@@ -31,6 +31,7 @@ export function conversationMessageToAgentMessage(message: ConversationMessage):
     createdAt: message.timestamp,
     streaming: message.role === "assistant" && message.status === "running",
     turnId: message.role === "assistant" ? message.turnId : messageTurnId(message),
+    branchId: message.branch?.branchId,
     source: {
       kind: "conversation-message",
       id: message.id,

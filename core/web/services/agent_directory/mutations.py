@@ -199,16 +199,11 @@ def update_agent_instance(
             )
             agent["memoryPolicy"] = updated_memory_policy
         if tool_policy is not None:
+            current_tool_policy = s._tool_policy_for_agent(dict(agent))
             policy_id = str(agent.get("toolPolicyId") or s.DEFAULT_TOOL_POLICY_ID).strip() or s.DEFAULT_TOOL_POLICY_ID
             if policy_id == s.DEFAULT_TOOL_POLICY_ID:
                 policy_id = f"tool-{agent['agentId']}"
                 agent["toolPolicyId"] = policy_id
-            current_tool_policy = s.normalize_tool_policy(
-                agent.get("toolPolicy")
-                if isinstance(agent.get("toolPolicy"), dict)
-                else s.default_tool_policy(policy_id),
-                policy_id,
-            )
             expected_policy_fingerprint = str(expected_tool_policy_fingerprint or "").strip()
             if expected_policy_fingerprint and s.tool_policy_fingerprint(current_tool_policy) != expected_policy_fingerprint:
                 raise s.AgentStateConflictError("ToolPolicy changed after this editor was opened. Refresh and retry.")

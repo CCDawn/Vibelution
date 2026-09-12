@@ -30,7 +30,9 @@ live outside the shell.
 | Response segment parse cache | `conversationResponseSegmentCache.ts` |
 | Operation icon kind classification | `conversationOperationIconModel.ts` |
 | Tool activity UI / registry | `ConversationToolActivity.tsx`, `conversationTool*`, `conversationToolRendererRegistry.tsx` |
+| Task/plan tool checklists | `conversationToolChecklistModel.ts`, `ConversationToolChecklist.tsx` |
 | Codex native transcript surface | `codexNativeTranscriptSurface.ts`, `codexTranscriptCells.ts`, `codexToolLifecycleModel.ts` |
+| Progress/commentary narration lane | `codexTranscriptCells.ts` (lane dedupe/rules), `ConversationView.tsx` (`renderCodexProgressCell`) |
 | Mental-state rows | `conversationMentalState.ts` |
 | Composer shortcuts / slash commands | `composerShortcuts.ts`, `conversationSlashCommandSuggestions.ts` |
 | Image artifacts / preview dialog | `ConversationImageArtifactView.tsx`, `ConversationImagePreviewDialog.tsx` |

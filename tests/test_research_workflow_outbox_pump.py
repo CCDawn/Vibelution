@@ -523,3 +523,74 @@ def test_slow_hypothesis_recovery_does_not_starve_maintenance():
     finally:
         runtime.release.set()
         pump.stop(timeout=10)
+
+
+def test_closed_ledger_stops_lanes_instead_of_retrying() -> None:
+    """A terminal ledger error must end every lane.
+
+    The old pool retried a closed ledger (or a writer whose flush timed out)
+    at 0.5-1s backoff forever: 30s-blocked force-flush submits, exception
+    churn and log spam that starved the HTTP thread. Lanes must exit instead.
+    """
+    from core.research.workflow.ledger.errors import WorkflowLedgerClosedError
+
+    class ClosedLedgerRuntime(_ClaimRuntime):
+        def __init__(self) -> None:
+            super().__init__([])
+            self.claim_attempts = 0
+            self.maintenance_attempts = 0
+            self.receipt_attempts = 0
+            self.recovery_attempts = 0
+
+        def claim_and_run_one(self) -> bool:
+            with self._lock:
+                self.claim_attempts += 1
+            raise WorkflowLedgerClosedError(
+                "workflow ledger flush timed out; mutation outcome unknown"
+            )
+
+        def run_maintenance_once(self, limit: int = 4) -> int:
+            with self._lock:
+                self.maintenance_attempts += 1
+            raise WorkflowLedgerClosedError("workflow ledger writer is closed")
+
+        def run_receipt_persistence_once(self, limit: int = 4) -> int:
+            with self._lock:
+                self.receipt_attempts += 1
+            raise WorkflowLedgerClosedError("workflow ledger writer is closed")
+
+        def run_hypothesis_recovery_once(self, limit: int = 4) -> int:
+            with self._lock:
+                self.recovery_attempts += 1
+            raise WorkflowLedgerClosedError("workflow ledger writer is closed")
+
+    runtime = ClosedLedgerRuntime()
+    pump = WorkflowOutboxPump(workers=2, idle_poll_s=0.05)
+    pump.attach(runtime)
+    try:
+        assert _wait_until(
+            lambda: all(not thread.is_alive() for thread in pump.threads),
+            timeout=5,
+        ), [thread.name for thread in pump.threads if thread.is_alive()]
+        assert pump.fatal is True
+        # At most one attempt per lane: no lane may hot-retry a terminal ledger.
+        assert runtime.claim_attempts <= 2
+        assert runtime.maintenance_attempts <= 1
+        assert runtime.receipt_attempts <= 1
+        assert runtime.recovery_attempts <= 1
+        settled = (
+            runtime.claim_attempts,
+            runtime.maintenance_attempts,
+            runtime.receipt_attempts,
+            runtime.recovery_attempts,
+        )
+        assert sum(settled) >= 1
+        time.sleep(0.3)
+        assert settled == (
+            runtime.claim_attempts,
+            runtime.maintenance_attempts,
+            runtime.receipt_attempts,
+            runtime.recovery_attempts,
+        ), "lanes kept retrying a terminal ledger"
+    finally:
+        pump.stop(timeout=5)

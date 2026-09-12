@@ -1,4 +1,5 @@
 import { ConversationMessage, SessionDetail, SessionMessageWindow, SessionReferenceAttachment, SessionStreamEvent, SessionSummary } from "../api/types";
+import { hasTerminalCanonicalTurnOutcome } from "./chatTurnProtocol";
 
 export type OptimisticUserMessageInput = {
   sessionId: string;
@@ -65,6 +66,78 @@ function removeSettledOptimisticUserMessages(messages: ConversationMessage[]): C
     }
     const clientSubmissionId = conversationMessageClientSubmissionId(message);
     return !clientSubmissionId || !committedSubmissionIds.has(clientSubmissionId);
+  });
+}
+
+const TRANSIENT_LIVE_OVERLAY_KIND = "session_live_overlay";
+
+type AssistantConversationTurnMessage = Extract<ConversationMessage, { role: "assistant" }>;
+
+/**
+ * Backend live overlays project an executing turn (`<sessionId>-message-live-<turnId>`).
+ * They are transient UI state, not durable transcript entries.
+ */
+function isTransientLiveOverlayMessage(message: ConversationMessage): message is AssistantConversationTurnMessage {
+  if (message.role !== "assistant") {
+    return false;
+  }
+  if (String(message.metadata?.kind ?? "").trim() === TRANSIENT_LIVE_OVERLAY_KIND) {
+    return true;
+  }
+  return /-message-live-/.test(String(message.id || ""));
+}
+
+function removeSupersededTransientLiveOverlays(
+  messages: ConversationMessage[],
+): ConversationMessage[] {
+  const terminalAssistantTurnIds = new Set(
+    messages
+      .filter((message): message is AssistantConversationTurnMessage => (
+        message.role === "assistant"
+        && !isTransientLiveOverlayMessage(message)
+        && hasTerminalCanonicalTurnOutcome(message)
+      ))
+      .map((message) => String(message.turnId ?? "").trim())
+      .filter(Boolean),
+  );
+  if (terminalAssistantTurnIds.size === 0) {
+    return messages;
+  }
+  return messages.filter((message) => {
+    if (!isTransientLiveOverlayMessage(message)) {
+      return true;
+    }
+    const turnId = String(message.turnId ?? "").trim();
+    return !turnId || !terminalAssistantTurnIds.has(turnId);
+  });
+}
+
+/**
+ * A newest-tail snapshot that no longer carries a live overlay proves the
+ * server removed it; earlier-page windows and older windows prove nothing.
+ * A strictly newer ledger sequence is authoritative even when the tail shrank,
+ * because edit-resubmit truncation shortens the transcript on purpose.
+ */
+function reconcileTransientLiveOverlays(
+  previous: SessionDetail,
+  next: SessionDetail,
+  messages: ConversationMessage[],
+  authoritativeTail = false,
+): ConversationMessage[] {
+  const nextMessageIds = new Set(
+    (next.messages ?? [])
+      .map((message) => String(message.id || "").trim())
+      .filter(Boolean),
+  );
+  const coversNewestTail = authoritativeTail
+    || (next.messageWindow?.hasLater === false
+      && (next.messageWindow?.newestMessageIndex ?? 0) >= (previous.messageWindow?.newestMessageIndex ?? 0));
+  return removeSupersededTransientLiveOverlays(messages).filter((message) => {
+    if (!isTransientLiveOverlayMessage(message)) {
+      return true;
+    }
+    const id = String(message.id || "").trim();
+    return !(coversNewestTail && id && !nextMessageIds.has(id));
   });
 }
 
@@ -164,9 +237,11 @@ export type OptimisticEditResubmitInput = {
 };
 
 /**
- * ChatGPT/Claude-style edit-resubmit: immediately rewrite the target user message
- * and drop every message after it so the timeline matches the operation before the
- * server round-trip. Callers should snapshot the previous detail for rollback.
+ * Branch-mode edit-resubmit: immediately rewrite the target user message and
+ * mark the session running, but keep the rest of the timeline in place. The
+ * server answers with a rebased snapshot whose authoritative window replaces
+ * the superseded tail, so the client never truncates locally. Callers should
+ * snapshot the previous detail for rollback.
  */
 export function applyOptimisticEditResubmit(
   detail: SessionDetail | undefined,
@@ -211,26 +286,12 @@ export function applyOptimisticEditResubmit(
     nextTarget.references = target.references;
   }
 
-  const nextMessages = [...messages.slice(0, targetIndex), nextTarget];
-  const truncatedCount = messages.length - nextMessages.length;
-  const previousWindow = detail.messageWindow;
-  const nextWindow = previousWindow
-    ? {
-        ...previousWindow,
-        returnedMessages: nextMessages.length,
-        totalMessages: Math.max(0, (previousWindow.totalMessages || messages.length) - truncatedCount),
-        newestMessageIndex: Math.max(
-          previousWindow.oldestMessageIndex || 0,
-          (previousWindow.newestMessageIndex || messages.length) - truncatedCount,
-        ),
-        hasLater: false,
-      }
-    : previousWindow;
+  const nextMessages = [...messages];
+  nextMessages[targetIndex] = nextTarget;
 
   return markSessionDetailRunning({
     ...detail,
     messages: nextMessages,
-    ...(nextWindow ? { messageWindow: nextWindow } : {}),
     updatedAt: new Date().toISOString(),
   });
 }
@@ -246,56 +307,78 @@ export type OptimisticRegenerateInput = {
 };
 
 /**
- * ChatGPT/Claude-style regenerate: keep the target user message and drop every
- * message after it so the timeline matches the operation before the server
- * round-trip. Callers should snapshot the previous detail for rollback.
+ * Branch-mode regenerate: mark the session running and keep the timeline.
+ * The superseded answer stays visible until the server snapshot swaps the
+ * active path; local truncation would drop the branch that the journal keeps.
+ * Callers should snapshot the previous detail for rollback.
  */
 export function applyOptimisticRegenerate(
   detail: SessionDetail | undefined,
-  input: OptimisticRegenerateInput,
+  _input: OptimisticRegenerateInput,
 ): SessionDetail | undefined {
-  if (!detail) {
-    return detail;
-  }
-
-  const messageId = String(input.messageId || "").trim();
-  const messages = detail.messages ?? [];
-  const targetIndex = messageId
-    ? messages.findIndex((message) => String(message.id || "").trim() === messageId)
-    : -1;
-
-  if (targetIndex < 0 || messages[targetIndex].role !== "user") {
-    return markSessionDetailRunning(detail);
-  }
-
-  const nextMessages = messages.slice(0, targetIndex + 1);
-  const truncatedCount = messages.length - nextMessages.length;
-  const previousWindow = detail.messageWindow;
-  const nextWindow = previousWindow
-    ? {
-        ...previousWindow,
-        returnedMessages: nextMessages.length,
-        totalMessages: Math.max(0, (previousWindow.totalMessages || messages.length) - truncatedCount),
-        newestMessageIndex: Math.max(
-          previousWindow.oldestMessageIndex || 0,
-          (previousWindow.newestMessageIndex || messages.length) - truncatedCount,
-        ),
-        hasLater: false,
-      }
-    : previousWindow;
-
-  return markSessionDetailRunning({
-    ...detail,
-    messages: nextMessages,
-    ...(nextWindow ? { messageWindow: nextWindow } : {}),
-    updatedAt: new Date().toISOString(),
-  });
+  return detail ? markSessionDetailRunning(detail) : detail;
 }
 
 function messageWindowIndex(message: ConversationMessage): number {
   const match = String(message.id || "").match(/-message-(\d+)$/);
   const index = match ? Number(match[1]) : 0;
   return Number.isFinite(index) && index > 0 ? index : Number.POSITIVE_INFINITY;
+}
+
+function messageLedgerSeq(detail: SessionDetail | undefined): number {
+  const value = Number(detail?.ledgerSeq ?? 0);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+/**
+ * Branch rebase and head switch re-project the transcript from the fork point,
+ * which shortens the active tail. When the incoming detail carries a strictly
+ * newer ledger sequence and claims the newest tail (`hasLater === false`), the
+ * server rebuilt the window: windowed messages it no longer carries were
+ * superseded and must not be resurrected from accumulated client state. Equal
+ * or unknown sequences keep union semantics so stale or out-of-order responses
+ * cannot delete live history.
+ */
+function authoritativeTruncationTail(previous: SessionDetail, next: SessionDetail): boolean {
+  const nextWindow = next.messageWindow;
+  if (!nextWindow || nextWindow.hasLater !== false) {
+    return false;
+  }
+  if (next.provisionalTranscript === true) {
+    return false;
+  }
+  if (!(Number(nextWindow.oldestMessageIndex ?? 0) > 0)) {
+    return false;
+  }
+  const previousSeq = messageLedgerSeq(previous);
+  const nextSeq = messageLedgerSeq(next);
+  return previousSeq > 0 && nextSeq > 0 && nextSeq > previousSeq;
+}
+
+function reconcileAuthoritativeTailMessages(
+  next: SessionDetail,
+  messages: ConversationMessage[],
+  authoritativeTail: boolean,
+): ConversationMessage[] {
+  if (!authoritativeTail) {
+    return messages;
+  }
+  const nextIds = new Set(
+    (next.messages ?? [])
+      .map((message) => String(message.id || "").trim())
+      .filter(Boolean),
+  );
+  const coveredFrom = Number(next.messageWindow?.oldestMessageIndex ?? 0);
+  return messages.filter((message) => {
+    const id = String(message.id || "").trim();
+    if (!id || nextIds.has(id)) {
+      return true;
+    }
+    const index = messageWindowIndex(message);
+    // Messages outside the covered range are older pages the snapshot never
+    // claimed; non-windowed entries (optimistic shells) settle elsewhere.
+    return !Number.isFinite(index) || index < coveredFrom;
+  });
 }
 
 function mergeConversationMessageWindows(
@@ -328,20 +411,27 @@ function mergedMessageWindow(
   previous: SessionMessageWindow,
   next: SessionMessageWindow,
   messages: ConversationMessage[],
+  options: { authoritativeTotal?: boolean } = {},
 ): SessionMessageWindow {
-  const totalMessages = Math.max(previous.totalMessages || 0, next.totalMessages || 0);
   const finiteIndexes = messages
     .map(messageWindowIndex)
     .filter((index) => Number.isFinite(index));
+  // A strictly newer authoritative tail owns the transcript length even when
+  // it shrank; otherwise keep the union floor so windowed GETs accumulate.
+  const totalMessages = options.authoritativeTotal
+    ? Math.max(next.totalMessages || 0, finiteIndexes.length ? Math.max(...finiteIndexes) : 0)
+    : Math.max(previous.totalMessages || 0, next.totalMessages || 0);
   const oldestCandidates = [
     ...finiteIndexes,
-    previous.oldestMessageIndex || 0,
-    next.oldestMessageIndex || 0,
+    ...(options.authoritativeTotal
+      ? [next.oldestMessageIndex || 0]
+      : [previous.oldestMessageIndex || 0, next.oldestMessageIndex || 0]),
   ].filter((index) => index > 0);
   const newestCandidates = [
     ...finiteIndexes,
-    previous.newestMessageIndex || 0,
-    next.newestMessageIndex || 0,
+    ...(options.authoritativeTotal
+      ? [next.newestMessageIndex || 0]
+      : [previous.newestMessageIndex || 0, next.newestMessageIndex || 0]),
   ].filter((index) => index > 0);
   const oldestMessageIndex = finiteIndexes.length
     ? Math.min(...oldestCandidates)
@@ -386,6 +476,20 @@ export function mergeSessionDetailMessageWindow(
   previous: SessionDetail | undefined,
   next: SessionDetail,
 ): SessionDetail {
+  if (!Array.isArray(next.messages)) {
+    if (!previous || previous.id !== next.id) {
+      return next;
+    }
+    // Control acks (stop / guidance interrupt) patch phase fields without
+    // carrying a transcript; never let them replace the known message list.
+    return {
+      ...previous,
+      ...next,
+      messages: previous.messages,
+      messageWindow: next.messageWindow ?? previous.messageWindow,
+      provisionalTranscript: previous.provisionalTranscript,
+    };
+  }
   // Light poll responses omit expensive secondary lists; keep prior values so
   // inbox / governance UI does not flash empty while SSE owns the transcript.
   const merged = withPreservedSecondaryLists(previous, next);
@@ -396,14 +500,26 @@ export function mergeSessionDetailMessageWindow(
       ? { ...merged, provisionalTranscript: true }
       : { ...merged, provisionalTranscript: undefined };
   }
-  const messages = mergeConversationMessageWindows(previous.messages ?? [], merged.messages ?? []);
+  const authoritativeTail = authoritativeTruncationTail(previous, merged);
+  const messages = reconcileTransientLiveOverlays(
+    previous,
+    merged,
+    reconcileAuthoritativeTailMessages(
+      merged,
+      mergeConversationMessageWindows(previous.messages ?? [], merged.messages ?? []),
+      authoritativeTail,
+    ),
+    authoritativeTail,
+  );
   const base = merged.messageWindow.hasLater ? previous : merged;
   return {
     ...base,
     ...merged,
     messages,
     provisionalTranscript,
-    messageWindow: mergedMessageWindow(previous.messageWindow, merged.messageWindow, messages),
+    messageWindow: mergedMessageWindow(previous.messageWindow, merged.messageWindow, messages, {
+      authoritativeTotal: authoritativeTail,
+    }),
   };
 }
 
@@ -640,6 +756,42 @@ export function markSessionDetailRunning(detail: SessionDetail | undefined): Ses
     currentPhase: "running",
     lastTurnError: null,
     updatedAt: new Date().toISOString(),
+  };
+}
+
+export function markSessionDetailStopping(
+  detail: SessionDetail | undefined,
+  options: { requestedAt: string },
+): SessionDetail | undefined {
+  if (!detail) {
+    return detail;
+  }
+
+  return {
+    ...detail,
+    currentPhase: "stopping",
+    stopRequested: true,
+    stopRequestedAt: options.requestedAt,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function clearSessionDetailStopping(
+  detail: SessionDetail,
+  options: { requestedAt: string; previous?: SessionDetail },
+): SessionDetail {
+  // Only clear the optimistic patch, and only while it is still the newest
+  // stop state; a server-published snapshot always wins.
+  if (!options.requestedAt || detail.stopRequestedAt !== options.requestedAt) {
+    return detail;
+  }
+  // Only the fields the optimistic stop patch touched are restored; newer
+  // transcript or server-published phase changes stay authoritative.
+  return {
+    ...detail,
+    currentPhase: options.previous?.currentPhase ?? detail.currentPhase,
+    stopRequested: options.previous?.stopRequested ?? false,
+    stopRequestedAt: options.previous?.stopRequestedAt ?? "",
   };
 }
 

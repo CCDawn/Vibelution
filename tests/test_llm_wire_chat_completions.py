@@ -22,6 +22,7 @@ from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, CanonicalTo
 from core.llm.wire.chat_completions import (
     OUTPUT_LENGTH_TRUNCATED,
     ChatCompletionsWireAdapter,
+    ensure_chat_completions_reasoning_roundtrip,
 )
 
 
@@ -697,3 +698,52 @@ def test_no_reasoning_placeholder_without_roundtrip_compat():
 
     assert "reasoning_content" not in payload["messages"][0]
     assert "reasoning_content" not in payload["messages"][1]
+
+
+def test_payload_reasoning_guard_patches_tool_call_assistant_without_reasoning():
+    payload = {
+        "messages": [
+            {"role": "user", "content": "go"},
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "call-1", "type": "function"}]},
+            {"role": "tool", "content": "42", "tool_call_id": "call-1"},
+        ]
+    }
+
+    patched = ensure_chat_completions_reasoning_roundtrip(payload, route=reasoning_roundtrip_route())
+
+    assert str(patched["messages"][1].get("reasoning_content") or "").strip()
+    assert "reasoning_content" not in patched["messages"][0]
+    assert "reasoning_content" not in patched["messages"][2]
+    assert "reasoning_content" not in payload["messages"][1]
+
+
+def test_payload_reasoning_guard_preserves_real_reasoning_and_patches_blank():
+    payload = {
+        "messages": [
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "call-1"}], "reasoning_content": "真实思考"},
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "call-2"}], "reasoning_content": "  "},
+            {"role": "assistant", "content": "纯文本回复"},
+        ]
+    }
+
+    patched = ensure_chat_completions_reasoning_roundtrip(payload, route=reasoning_roundtrip_route())
+
+    assert patched["messages"][0]["reasoning_content"] == "真实思考"
+    assert str(patched["messages"][1]["reasoning_content"] or "").strip()
+    assert "reasoning_content" not in patched["messages"][2]
+
+
+def test_payload_reasoning_guard_noop_without_roundtrip_compat():
+    payload = {
+        "messages": [
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "call-1"}]},
+        ]
+    }
+
+    assert ensure_chat_completions_reasoning_roundtrip(payload, route=route()) is payload
+
+
+def test_payload_reasoning_guard_noop_without_message_list():
+    payload = {"input": [{"role": "assistant", "tool_calls": [{"id": "call-1"}]}]}
+
+    assert ensure_chat_completions_reasoning_roundtrip(payload, route=reasoning_roundtrip_route()) is payload

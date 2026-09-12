@@ -2,13 +2,13 @@
 
 > 日期：2026-09-05
 >
-> 状态：USER-REQUESTED / PROPOSED FOR REVIEW
+> 状态：开发中；2026-09-08 正在并行修复和集成审查，尚未通过完整真实实验验收。
 >
 > 版本：V1.1（纳入接口、投影与执行链审查）
 >
 > 文档用途：对齐产品行为、实验方法、复用边界和实施顺序，供后续开发与验收使用。
 >
-> 当前完成范围：方案编写、成熟项目源码调研及本地接口审查修订；以下问题已进入开发与验收清单，尚未修复或实现新流程，未启动模型调用、知识写入或 GPU 实验。
+> 当前完成范围：方案已获准实施；独立活动、基线、轮次、测量和讨论桥已进入代码与本地测试阶段。当前实现与剩余缺口见第 17 节；未启动付费模型调用或真实 GPU 实验。
 >
 > 本地代码观察基线：初稿 `7a109dea3`；本次审查以 `ec9eb46a4` 为起点，核对至 `0101f9225`，修订时确认 `21b29e25a` 的相关差异未消除第 4.2 节六项发现。代码与隔离测试证据不等于真实运行验收；实施前核对届时版本。
 >
@@ -375,6 +375,30 @@ F1 先修复现有创建/执行 DTO 吞掉 `researchProjectId` 的问题，再�
 
 ### 10.4 界面与前端投影合同
 
+#### 10.4.1 团队画布、详情与展开工作区（2026-09-06 已对齐）
+
+用户已确认补充“团队画布中的活动入口 → 活动详情 → 展开实验工作区”的关系。独立指实验数据流与运行身份独立，不意味着脱离团队研究项目另建产品。现有隔离预览定位为活动展开后的工作区。
+
+| 展示位置 | 展示时机与职责 | 导航和状态要求 |
+| --- | --- | --- |
+| 团队画布的实验活动入口 | 活动创建后展示算子、当前轮次、活动状态、当前最佳与待处理事项；未创建时提供新建入口 | 团队成员仍表达协作关系，实验活动表达研究任务；不要把每次测量扩展成团队成员节点 |
+| 活动详情 | 用户点击已有活动时打开，优先展示当前轮次、最近结果与阻塞原因 | 保留团队画布上下文；提供“展开实验工作区”和关闭详情动作 |
+| 展开的实验工作区 | 用户需要规划、查看原始证据或比较多轮时主动展开；新建活动时可直接进入配置起点 | 显示团队、项目、活动归属；提供“收起到活动详情”和“返回团队画布” |
+
+三处消费同一个活动投影。展开、收起、返回与浏览器前进后退仅改变视图，不创建运行、不重新讨论、不扣费、不重置轮次。返回保留原画布选择与视口，重新展开保留已选轮次、节点与详情标签。运行自动推进时只更新摘要和当前状态，不强制把用户从历史轮次跳到下一轮；提供“查看当前轮次”动作。
+
+URL 可恢复团队、项目、活动、轮次、run 与展示模式；深链接缺少画布历史时，返回活动所属团队项目。跨项目切换先更换查询身份并丢弃旧请求响应，不能把前一项目活动短暂投影到新项目。活动暂停与内层 run 执行中可以同时存在，应分别说明；失败轮次保留原因和真实费用，无有效测量时不显示性能分数。
+
+新增验收：从画布打开详情、展开、选择历史轮次、收起、重新展开，选择保持一致；浏览器返回与刷新恢复相同活动；收到新轮次事件不抢走历史查看位置；空活动无完成记录；桌面详情与窄屏详情均可关闭和返回。
+
+#### 10.4.2 成熟项目依据与借鉴边界
+
+- [RD-Agent 的 PlaygroundPage](https://github.com/microsoft/RD-Agent/blob/32b3d395e73d9db5eee3fe9063d69aec0fdc83bd/web/src/views/PlaygroundPage.vue)提供轮次选择与 Process/Result 视图；同目录 Playground.vue 提供新运行和历史 trace 入口。借鉴运行、轮次、过程和结果的分层；其 Web UI 与数据科学 Streamlit 界面适用场景不同，不能混为一套已验证产品。
+- [AIDE 的 Web UI](https://github.com/WecoAI/aideml/blob/60b3978ddf65b71f86eb7c64506965048a1398cf/aide/webui/app.py)提供目标/指标配置和实验树、最佳代码视图。借鉴候选与结果追溯，不引入其 Streamlit 技术栈。
+- [AI Scientist-v2 的实验树模板](https://github.com/SakanaAI/AI-Scientist-v2/blob/96bd51617cfdbb494a9fc283af00fe090edfae48/ai_scientist/treesearch/utils/viz_templates/template.html)按阶段展示节点指标、分析、代码和图表，主要是研究运行的可视化产物。
+
+上述项目支持实验运行视图及谱系追溯，不能证明必须采用独立整页，也不直接提供本项目的团队画布关系。画布入口、详情及展开是结合 Vibelution 既有团队上下文作出的产品适配；继续复用本地 VUI、Ledger、投影和 SSE，不复制外部界面实现。以下技术合同同时适用于三种展示位置。
+
 独立入口展示目标算子、实验目标、设备和预算。运行页展示当前步骤、上一轮结论、当前最佳、累计成本及停止/恢复动作；轮次详情按“观测 → 假设 → 资料 → 计划 → 执行 → 结果”查看。
 
 用户应能看懂：当前为什么做这个实验，和哪个版本比较，获得了什么真实证据，下一轮为什么继续。源码哈希、内部 ID 等保留在详情或导出，不堆入主流程。
@@ -544,6 +568,295 @@ P2 提前解决真实执行不确定性，其环境、依赖安装和实际调�
 
 ## 16. 下一步对齐与实施入口
 
-本次先完成 V1.1 文档修订。后续获准开发时，以 P0 的身份合同、项目字段缺陷和活动对象映射为入口，再做 P1 的独立运行接入与最小投影；P2 提前验证真实基线。第 2 节尚未确认的主要指标、允许改动范围，以及活动自动推进/知识交接策略，在相关行为冻结前确定；设备、模型路由和可计量预算在实际调用前固定。已经对齐的独立数据流、单次讨论和实验反馈要求不重复确认。
+开发已获准，按 P0 的身份合同、项目字段缺陷和活动对象映射进入实现，再做 P1 的独立运行接入与最小投影；P2 提前验证真实基线。设备、模型路由和可计量预算在实际调用前固定。已经对齐的独立数据流、单次讨论和实验反馈要求不重复确认。
 
-本次任务的完成标志是六项发现均已进入方案的责任面、接口/产物合同、实施顺序和验收条件，且章节与引用一致。它不自动开启后续实现、安装依赖或真实实验，也不表示六项代码问题已修复。
+全流程完成仍要求真实产物贯通、前端操作验收和实际环境的受控实验；单模块测试通过不能替代这些条件。
+
+## 17. 2026-09-08 并行开发与集成检查
+
+### 本轮责任面
+
+- 实验契约：分开活动固定测量协议和每轮实验计划，保存可重建的受控候选实现及参数。
+- GPU 执行：设备繁忙、进程启动失败时解除或结算预留；执行状态未知时保留未结算事实。
+- 独立审查：核对讨论消息与原生 Turn、模型回执的对应关系，以及假设和来源的发布顺序。
+- 主集成：恢复到有效工作区，保留主线近期预算、租约和证据回读修复；验收公共接口和相关回归。
+
+### 已核验的集成连接
+
+独立基线图进入原生 SYSTEM 分派，成功测量后进入 `baseline_measured` 终态，不启动挑战杯成果交付流程。工作流定义、Agent 绑定读写、准备状态和产物回读按所选流程解析。实验 full-run 接口保留研究项目字段；执行期间切换项目时，终态仍写回原计划归属。这些已取得本地测试证据，尚无真实 GPU 运行证据。
+
+复用采用原生 Ledger、工作流产物存储、Session、Chat Room 和隐藏进程工具。对照本地登记的 RD-Agent 源码，借鉴其提案、实验、运行和反馈的职责划分，不引入第二套编排框架。
+
+本轮契约已把 `operator_measurement_protocol` 与 `optimization_plan` 分开；候选引用保存受控实现、参数、源码 hash 与所属运行，协议引用的 JSON 往返保留 `runId`。历史记录不因当前源码变化而无法读取，执行前必须确认当前实现与冻结源码一致。原始测量继续作为独立证据，不能代替候选代码身份。
+
+GPU 设备忙时释放尚未执行的预留；进程启动失败写入零用量失败回执；真正未知的执行仍保留预留等待核对。上述路径已通过主集成复验，未进行真实 CUDA 测量。
+
+讨论房配置和参与者 Session 携带原生讨论 scope，固定角色快照及最终汇总会话；收集按准确参与者 Turn 查询成功模型回执，不再取消息列表末项。来源在假设附着前持久化，来源或假设写入中断均可重放。回归测试包含原生房间 scope 识别及真实 authority 构建接口的拒绝行为，成功讨论测试仍使用模拟模型/房间端口。
+
+### 仍阻塞全流程验收的工作
+
+1. `optimization_discussion` 已接通正式会议任务与完成回收；`optimization_plan` 的规划 Agent 尚未接入。资料复用与计划冻结进度见第 20 节，付费搜集、候选执行、数值评价、反馈和下一轮调度尚未全部接通。
+   原生 `meeting_receipt_authority` 的构建、发言回执及上下文仍限定 Challenge Cup，且默认聊天室结构化输出不是 `OptimizationHypothesis`。目前调用原生 authority 构建接口会在创建 Session 或调用模型之前明确报出不支持；必须补齐算子专属 authority 和结构化输出合同，不能手工伪造 authority 或冒用第一阶段 meeting type。
+2. 模型预算需要累计准入和费用结算；供应商估价与缺少币种的回执不能作为实际支出，`unsettled` 不得投影为已结算。
+3. 独立预览仍不能证明正式入口、团队画布、详情页共享生产 API/SSE 状态。前端接入验收须覆盖切换、回退和历史轮次查看。
+4. 真实环境、正确性、配对计时、失败与取消、留出验证均需获得实际执行证据；当前本地契约测试不能支持性能提升结论。
+5. 当时原任务目录的 Git 管理信息缺失，代码恢复在 `codex/operator-recovery` 进行；2026-09-08 主线未跟踪文件阻止了合入。该阻塞是历史状态，继续开发须重新核对现场。
+
+## 18. 2026-09-12 第二阶段恢复审查
+
+本轮只继续独立算子优化第二阶段，沿用既定方向、知识搜集与单次团队讨论，不扩展第一阶段功能。审查时主线干净，但尚未包含 `operator_optimization` 实现；前述开发成果仍在恢复分支，不能把已有提交等同于产品已可用。
+
+已将恢复分支对齐本轮读取的最新主线。两处冲突分别保留主线的显式工作流定义选择语义和产物路径清洗，同时接回算子定义与产物类型；增加显式定义不得被默认定义替换的回归测试。对齐后独立入口、创建、基线分派、讨论拒绝边界及项目归属的聚焦测试通过。恢复代码与设备锁修复已经完成受管验证并合入本地 main；该结果不代表真实模型、设备或前端运行验收。
+
+当前边界：活动、轮次、冻结候选/协议、GPU 预算、基线桥和单次讨论已有代码及本地测试；资料复用和计划冻结服务见第 20 节，付费搜集、规划 Agent、优化执行、评价反馈和下一轮尚未组成可执行闭环。团队画布、详情和展开工作区仍须接同一生产投影。真实模型、GPU 和性能收益均未验收。
+
+并行验证另复现了设备锁问题：Windows 原生锁争用抛出 `PermissionError`，原预算回收只识别 `BlockingIOError`，导致未启动执行也留下预留。修复仅在算子执行器的锁获取边界统一“尚未启动”的失败，不改变锁取得后的异常语义；以真实文件锁争用验证预留释放。模拟执行测试使用每个测试自己的临时设备锁，避免并行测试之间或与产品设备锁相互干扰。
+
+本地复用复核了 RD-Agent 的 `rdagent/components/workflow/rd_loop.py::RDLoop`：提案、假设转实验、开发、执行与反馈各有职责。继续借鉴该分工，复用本项目 Ledger、Session、Chat Room 和来源存储，不移植外部调度引擎。
+
+后续开发顺序：
+
+1. 完成算子讨论的原生来源 authority、专属结构化输出与 Agent 节点执行/回收接入；参与者调用须绑定本轮精确 Turn，并接累计预算准入与结算。
+2. 将讨论中的资料缺口交给现有知识搜集流程，回读资料快照，再产出可执行的冻结实验计划。
+3. 将计划中的受控候选接入现有 runner，连通评价、失败反馈和下一轮输入；正负结果都形成证据。
+4. 接通团队画布、详情和展开工作区的同一活动投影；真实环境具备时依次验收基线、单轮与两轮反馈。
+
+第 1 项不能通过把算子节点映射到第一阶段 `hypothesis_design` 或冒用会议类型实现；原生 `meeting_receipt_authority` 的当前不支持行为已有回归证据，应在专属合同完成后再替换该拒绝行为。
+
+## 19. 下一步实施方案：单次优化讨论正式接入
+
+### 19.1 本轮交付与范围
+
+目标：一个已建立并验证基线的活动，能由原生 Workflow Ledger 派发一次团队讨论，产出一个有来源、有可测量预测的 `OptimizationHypothesis`，并留下下一步资料搜集所需的完整输入。用户不需要先执行第一阶段或选择 125 题。
+
+本节是待开发方案，不是已接通能力清单。本次规划只修改文档；下一开发批次完成“讨论节点”的真实代码路径、预算约束和本地集成测试。真实模型验收须具备实际路由与预算。知识搜集执行、实验计划冻结、CUDA 优化执行及前端界面属于随后批次，不因讨论函数存在而宣称整个第二阶段完成。
+
+成功路径：
+
+```text
+已验证基线 / 上一轮反馈
+  → 冻结本轮证据、参与席位、汇总席位、模型路由和预算
+  → 原生 Agent 节点派发 → 一个 Chat Room 讨论轮次
+  → 各参与者的原生 Session / Turn → 原生模型调用回执
+  → 汇总席位输出一个优化假设，服务端验证
+  → 讨论来源产物 → 假设产物 → 本轮 hypothesisRef
+  → 节点完成回执 → optimization_knowledge 的资料缺口输入
+```
+
+默认成功产物只包含一个主假设。各席位可比较备选做法，汇总必须说明选择理由，不自动扩大为多分支搜索。没有合理可检验方案时允许返回“无可行假设”，保留讨论和成本，暂停本活动；不编造假设，不反复重新开会。
+
+### 19.2 已查明的接入点与根因
+
+以下路径相对仓库根，均为本次读取的源码，而非从第一阶段名称推测的接口。
+
+| 接入点 | 当前约束 | 本轮处理 |
+| --- | --- | --- |
+| `research_runtime/task_adapter_registry.py` | 仅有资料搜集和研究项目任务族，未登记两个优化节点 | 为讨论增加有明确职责的会议任务适配；不将团队会议登记成单 Agent `hypothesis_design` |
+| `research_runtime/meeting_receipt_authority.py` | builder 限定 Challenge Cup；speaker context 使用 `QuestionStageBinding` 和第一阶段 meeting type | 添加算子专属服务端来源绑定分支，读取实际活动、run、node attempt 和冻结输入；保留既有 Challenge Cup 语义 |
+| `core/llm/client.py` | `_model_invocation_receipt_context` 解析第一阶段 binding/outcome，错误绑定可能返回空 context | 接受明确区分的算子 binding，沿用原生 receipt context、调用及写入通道；不能只修改上层 builder |
+| `core/web/services/chat_room_service.py` | 设置通用 `meeting_message_structured_output_contract()`，消息展示内容不等于算子结果 | 仅在已验证的算子 meeting scope 下选用专属输出合同和解析器 |
+| `research_runtime/completion_dependency.py` | 完成等待查询单个 handle 的 session/turn 与回执投递 | 按本次讨论冻结的参与者执行集合等待/核对，不能把房间已创建或一个参与者已完成当节点完成 |
+| `operator_optimization/discussion_runtime.py` | 直接读最终消息 JSON，成本写 `unsettled`，尚无正式任务回收入口 | 保留房间去重及来源发布顺序，改读服务端校验后的结构化结果，并接原生完成回收 |
+| `research_runtime/model_invocation_receipt_registry.py` | 当前正式结果索引只接收 succeeded/retried 回执，outcome 有白名单 | 成功证据索引与全部调用成本分开；不能用这个成功集合计算失败、超时和重试总成本 |
+
+`research_runtime/*` 与 `operator_optimization/*` 在表中分别指 `core/web/services/team_workflow/` 下的同名包。公共文件只添加算子专属分派入口，领域校验放回算子模块，不把算子逻辑散落到 Session 核心或修改第一阶段流程。
+
+### 19.3 复用裁决
+
+继续采用本项目的 Ledger / Outbox、`AgentActionAdapter`、`CompletionDependencyPending`、原生 Session / Chat Room、规范产物写入及 `update_campaign`。异步会议要接入现有任务句柄、完成等待和回收机制，不另建轮询调度器、运行状态表或聊天记录库。
+
+本地成熟项目对照：RD-Agent（MIT，已登记快照 `32b3d395e73d9db5eee3fe9063d69aec0fdc83bd`）的 `rdagent/components/workflow/rd_loop.py::RDLoop` 区分 hypothesis generator、hypothesis-to-experiment、coder、runner、feedback；`rdagent/core/proposal.py::ExperimentFeedback` 保留决策和执行异常。本项目借鉴“假设与实验计划分离、失败成为下一轮证据”，不复制它的执行框架或把异常当作优化成功。
+
+### 19.4 冻结输入与输出合同
+
+**输入权威**来自 `discussion_input()` 和 Ledger，不接受客户端声称某轮已完成、某产物已验证：
+
+- 活动/项目/run/业务 round 与实际 node attempt 的身份；初始 baseline、当前 parent candidate、测量协议、允许修改范围和 tuning 观察引用。
+- 参与者从本活动使用的团队研究席位及绑定中解析、去重、冻结；汇总席位由 `experiment_planner` 的实际绑定确定，显式排在最后。不再以团队成员数组的最后一项推定负责人；缺少已绑定汇总席位或少于两名参与者时在模型调用前阻止启动。
+- 模型路由、允许重试和每次调用上限在启动前冻结。一次讨论指一个逻辑 Chat Room round；原生有界重试仍计入调用数与成本，不视为免费调用。
+- 输入摘要可压缩原始计时，但保留可回读引用；不读取留出结果，外部材料作为数据隔离，不执行其中指令。
+
+**新增薄合同**建议放在 `core/research/operator_optimization/discussion_contracts.py`，不是新的通用会议框架：
+
+| 合同 | 必须表达的内容 |
+| --- | --- |
+| 算子调用 binding | team、project、campaign、round、workflow/run/version、父节点 attempt、参与者执行身份、session/turn、模型策略 hash；清楚区分父节点执行与发言执行，禁止相互冒充 |
+| 单席位输出 | 提议的改动、所据观察、机制、反对理由或风险、资料缺口；普通席位不发布最终假设 |
+| 最终讨论结果 | 明确 `selected` 或 `no_viable_hypothesis`；前者携带现有 `OptimizationHypothesis`，后者携带理由与阻断证据，不伪造空假设 |
+| 讨论来源 | 冻结输入 hash、房间/轮次、预期参与者及汇总席位、精确消息/Turn/模型回执引用、输出 hash、成本状态引用 |
+
+`OptimizationHypothesis` 的身份、parent candidate 与 observation refs 必须由服务端核对；输出至少说明改什么、为什么可能有效、在固定 workload 上如何测量、什么结果反驳它，以及 ROI 理由。`roi=high` 只是解释性判断，不是性能证据，也不触发自动晋升候选。无需为了给出收益预测强行编造数值。
+
+Chat Room 的专属结构化输出应复用现有 `set_turn_structured_output_contract` 能力。不得从通用消息的 `audit.rawModelOutput` 或 UI 展示文本恢复正式结果。模型不给出合法结果时保留原始回执引用和失败原因，不用宽松字符串修补成“成功”。
+
+### 19.5 调用、完成与中断语义
+
+1. **准备与准入**：确认 active campaign/run、冻结证据和席位、模型策略、预算；服务端构造 authority 后才可创建参与者会话和调用模型。
+2. **开始**：复用现有稳定 room identity 与锁。先持久化会议句柄/执行关联；“模型已启动但响应丢失”通过原生执行身份恢复，不能重新付费开会。
+3. **等待**：节点保持执行中或已有依赖等待状态。利用原生完成通知/Outbox 推进回收，等待每个预期参与者的终态及回执落盘；不把 `start_chat_room_round()` 返回视为完成。
+4. **收集**：检查汇总席位的专属结果、全部预期席位的对应 Turn、实际模型身份与 receipt hash。乱序消息不改变汇总席位，其他轮次或旧 attempt 回执不能补位。
+5. **发布**：保留已有顺序——来源产物先落盘，再写假设产物，最后附着 `hypothesisRef`。内容 hash 与稳定 identity 使任一步中断可重放；同一 identity 内容变化必须报冲突。
+6. **完成**：只有规范产物可回读且调用用量已归集或明确保留未结算责任，才通过原生节点完成口；账务未结算不得自动放行下一次付费操作。下一节点尚未实现时由现有 readiness 明确展示资料补齐待接入，不伪造知识快照或成功结束整个活动。
+7. **失败/暂停**：无可行假设、格式失败、预算不足或不可恢复调用失败保留讨论/费用证据，使用已有 Ledger blocker 与 campaign 暂停/阻断语义。取消后禁止新增调用，已执行的调用仍须回收；恢复优先消费现有结果，不默认重开讨论。原生重试只能在冻结范围和剩余额度内执行。
+
+首批不新增独立的 `/discussion/start`、`/discussion/poll` HTTP 控制系统。沿用活动/轮次创建和工作流启动/重试入口；若现有 projection 缺少 room/round/结果引用，补充现有节点锚点与快照 DTO。正式 VUI 的画布、详情和展开视图随后共同消费该投影。
+
+### 19.6 预算与证据的共同约束
+
+调用前必须同时满足活动总额、已消费、在途预留和本次调用上界；目前 `modelCostLimit > 0` 不足以构成准入。复用原生调用前预算钩子及 Ledger 预留/结算，活动只保存归属和查询关联，不维护第二套可独立修改的模型余额。
+
+当前 `build_operator_run_input()` 虽把活动预算放入 `budgetPolicy`，`reserve_budget_authority()` 实际只消费 token/tool-call/wall-clock/retry 限额，未消费 `modelCostLimit/currency`；缺少 token 合同时还会落入通用的 2,000,000 token 默认值。本轮必须显式生成算子讨论的 token/调用上界并接货币准入，不能让这个默认值代替活动授权。
+
+具体复用顺序：`budget_authority_adapter.reserve_budget_authority()` 为实际讨论 NodeRun 建立一次预留，沿用 `reservation-{node_run_id}` 身份；`receipt_persistence.enqueue_question_model_invocation_receipt()` 所在事务已能通过 `record_budget_usage_in_uow()` 按 invocation 去重累计 token；最终由 `settle_budget_authority_in_uow()` 幂等结算。扩展现有 `budget_receipts` 的 reserved/settled JSON 合同记录 amount、currency、价格/费用来源和状态，不新建算子费用表。参与者的发言执行身份与父 NodeRun 预算归属必须显式关联，否则多席位调用可能落到不存在的预留。
+
+`receipt_persistence` 当前主要归集 token，尚未把 receipt.cost 变成金额事实；该共享文件及预算权威适配器由主 Agent 单一写入，C worker 只交付算子金额规范化/准入计算模块和测试。活动余额从所属所有轮次/子任务的原生预算事实汇总，事务内判定新增预留，避免并发席位各自读到相同余额而超额。
+
+冻结费用单位/币种、价格版本和上界估算依据；token 限额与货币限额分开，不将 token 数当费用。所有尝试、失败、超时、检索调用均计入所属活动；用稳定 invocation/attempt/receipt 身份去重结算。模型返回内容中的自报费用不可作为实际账单。
+
+估算费用、供应商报告的费用、未知实际费用必须可区分。缺币种或只有估价时保留未结算责任，不记零费用或静默释放全部预留；需要消耗新预算的下一动作等待可审计的结算/上界处理。讨论结果是否有效与账务是否已结清是两个独立事实，不能为解决其中一个伪造另一个。
+
+### 19.7 与后续知识搜集、实验计划的交接
+
+本轮发布的假设已经包含 `evidenceGaps`，后续 knowledge owner 消费同一个 `hypothesisRef`，不再调用第一阶段假说生成：
+
+- 通过 `knowledge_sideflow_service.ensure_knowledge_invocation()` 建立/复用 invocation，以 parent run、`optimization_knowledge` 节点和实际 node attempt 关联。第 20 节将来源语义指纹与本轮消费身份分开：来源 scope/requirements 约束团队、项目、根目录、主张和协议；consumer context 将活动、轮次、假设引用绑定进请求 hash，既允许同条件资料复用，也不混淆本轮归属。
+- 先查匹配的规范知识包，确有缺口才调用搜集；已有资料也要落可回读快照。`evidenceGaps=[]` 不等于可伪造“知识完成”，应产出明确的已有证据复用决定。
+- `ensure_knowledge_child_run()` 是复用候选入口；真正接入时必须验证其来源范围、模型回执、预算和 scope 是否支持 operator 身份，不能以创建 child run 成功代替整个搜集链验收。
+- 资料能支持、削弱或否定主假设。被否定时停止该计划并保留理由，不能将不支持的假设强行转成实验。
+- 后续 `OptimizationPlan` 应补齐 `hypothesisRef`、`knowledgeRef`、主要预测/反证条件和试验预算绑定，同时保持已有 protocol、baseline/parent/candidate refs。当前只有文本 objective/evaluation 的合同不足以证明知识已进入规划；候选引用必须指向实际受管实现，不能在讨论阶段虚构。
+
+本轮保证上述输入能从讨论产物重建，并测试身份/hash 不丢失；下一批才执行知识子流和计划生成。无资料缺口时不强制外部检索，外部检索若发生则计入活动授权。
+
+### 19.8 开发任务与并行边界
+
+核心依赖：A →（B 与 C 在文件不重叠时并行）→ D → E。主 Agent 始终负责共享合同、热文件集成和最终验收；最多两个独立实现 worker，不为填满槽位拆分任务。
+
+| 任务 | 可观察产出与负责面 | 依赖/验证 |
+| --- | --- | --- |
+| A 来源与数据合同 | 主 Agent：`discussion_contracts.py`（拟新增）、算子来源构造器、现有 `contracts.py`；冻结 binding、结果、成本归属字段 | 先完成交叉项目/轮次、错误席位、非法来源与无可行假设的合同测试；之后才派 B/C |
+| B 单次会议输出 | Worker：`operator_optimization/discussion.py`、`discussion_runtime.py`、专属输出解析模块及对应测试 | 依赖 A；验证一轮会议、固定汇总席位、来源先发布、乱序/中断重放。不独自修改 `chat_room_service.py` 或 LLM client |
+| C 模型预算桥 | Worker：算子模型预算适配模块及对应测试；不改已有 GPU 预算语义 | 依赖 A；验证跨轮累计、并发准入、失败消耗、未知费用、结算去重。公共预算钩子由主 Agent 集成 |
+| D 正式节点接入 | 主 Agent：`task_adapter_registry.py`、`real_domain_ports.py`、必要的 `domain_adapters.py`、Chat Room/LLM receipt 入口、完成依赖与回收 | 依赖 B/C；统一实现 operator 分支，验证 native dispatcher → room → receipts → artifact → node complete，不能只 mock 整个 authority 或 dispatcher |
+| E 集成验收与交接 | 主 Agent复验；一个只读 reviewer核对来源/预算/异步失败边界 | D 完成后运行有针对性的端到端合同测试与既有共享模块回归；回写方案事实。真实调用单列验收，随后进入知识搜集批次 |
+
+这些任务涉及来源、公共合同和并发行为，使用先失败后修复的针对性行为测试；不为字段搬运或文档新增机械测试。共享 DTO、`core/llm/client.py`、`chat_room_service.py`、`tests/test_matrix.yaml` 均为主 Agent 单一 writer，worker 禁止继续派遣。若需要修改不在其合同内的文件，先回传主 Agent，避免两个 writer 修改同一事实源。
+
+### 19.9 验收用例与命令
+
+必须覆盖：无第一阶段数据也能进入讨论；模型调用前拒绝伪造 authority/预算不足；固定席位各有精确 Turn；一个逻辑 round；消息乱序与重复完成通知；结果与回执延迟落盘；发布中断；部分席位失败；真实锁下重复启动；无可行假设；暂停/取消；跨项目/历史轮次不串用；失败与重试计费；未知费用不放行新消费；假设和资料缺口可以作为下一节点输入回读。
+
+本地集成用原生 dispatcher、真实本地 Ledger/产物存储、Chat Room scope 和专属解析器，替换 provider transport 为可控返回；CPU 测试不得使用生产模型和生产 GPU 锁。至少有测试实际经过 `core/llm/client.py` 的 receipt context/写入链，不能用伪造成功回执替代所有模型边界测试。当前“真实 authority 拒绝 operator”用例，在新路径完成后替换成“合法算子来源可用、伪造来源仍拒绝”。
+
+已有测试入口（按改动选择，新增模块测试并入所属任务）：
+
+```powershell
+<PYTHON> -m pytest tests/test_operator_optimization_discussion.py tests/test_operator_optimization_discussion_runtime.py tests/test_operator_optimization_definition.py -q
+<PYTHON> -m pytest tests/test_meeting_receipt_authority.py tests/test_model_invocation_receipt.py tests/test_model_invocation_receipt_registry.py tests/test_completion_dependency_recovery.py tests/test_research_workflow_t51_task_adapters.py -q
+```
+
+`<PYTHON>` 使用项目共享环境经工具解析的解释器；现有及新增的 LLM receipt、预算回归由 selector 按实际文件选择。稳定实现批次跑聚焦验证，最终从根目录调用 `scripts/task_closeout.py` 一次完成必要验证与本地集成。不因改了文档跑全量产品测试；本次方案交付检查链接、源码落点、任务依赖与 diff。
+
+真实单次讨论验收需已验证 GPU 基线（或明确标注的开发 fixture，不能混称）、用户已授权的模型/搜索额度、可用模型路由；记录会议、Session/Turn、模型回执、主假设、来源及费用状态。真实输入为 fixture 时只能证明讨论接入，不能认定基于真实基线的科研阶段已通过。没有这些条件时完成代码和本地验证，保留真实验收未完成状态，不自动消费。
+
+### 19.10 保护与回退
+
+不修改第一阶段的审批/收敛、普通 Session admission/Journal 或 GPU 计时口径；仅扩展显式 operator 来源下的公共接入点。既有第一阶段回执继续由原合同验证，这是并存业务边界，不是给算子旧草稿建立兼容层。
+
+替换当前未接通的讨论解析路径后删除其原始文本 JSON 发布入口，避免出现两个最终结果来源。新增合同若改变已有开发数据结构，先检查是否存在正式活动记录；无正式数据则直接更新合同和 fixture，不搭建双版本运行分支。若发现真实历史需要迁移，暂停该写入并给出明确迁移方案，不删除研究证据。
+
+回退先停止本活动新派发并保存已有模型费用、讨论和产物，再撤回代码；不能通过删除回执、取消预留事实或重建同 ID 活动制造“从未执行”。只回退任务内修改，不推送、不发布或重启无关运行时。
+
+### 19.11 实施检查点（2026-09-12）
+
+第二阶段单次讨论已接入原生任务适配、Chat Room 与 Ledger，保持独立活动数据流。聊天室修改已由用户交给当前任务，旧占用已解除。最终合入由项目收口流程验证，不以本节记录代替合入结果。
+
+- 服务端冻结真实 attempt、证据输入、团队席位、最后汇总者、模型路由与显式价目；单席位结构化消息仅从 `operatorDiscussionPayload` 进入领域产物。删除旧保存入口、通用输出字段兼容读取及第二份聊天正文。
+- `RealDomainPorts` 为 `optimization_discussion` 预留专属模型预算，建立原生会议句柄与执行投影。原生完成依赖保存所有 speaker Turn，会议执行中等待，结束通知与迟到回执唤醒原 action，不重复开会或调用模型。房间锁内再次检查单轮约束。
+- invoke/stream 每次 transport 重试独立准入；失败、取消与未知消耗通过回执持久化入口记入同一 Ledger。普通调用不改变重试身份和准入次数。未知消耗在失败清理、取消和释放时仍保留预算，未发生调用的预留可以释放。
+- 费用按 provider token 用量乘冻结价目归集，来源产物引用预算 receipt 和结算状态；这不等于供应商实际账单。费用未明确时阻断节点推进。真实用量超出预估时仍保存费用事实与回执，阻止后续超额调用，不丢弃已发生消费。无可行假设时保留讨论来源并暂停活动。
+- 未接入的 `optimization_knowledge` 明确给出 readiness blocker。本批没有执行知识子流、实验规划、生产模型调用、GPU 实验或产品重启。
+
+新增 `tests/test_operator_discussion_native_integration.py` 使用真实 dispatcher、Ledger、来源冻结、Chat Room、LLMClient、receipt Outbox 和产物回读，控制 provider 返回及预建会话；已通过 selected/no_viable 两条 CPU 集成路径。它验证回执等待恢复不重复消费，且无需第一阶段输入。共享 LLM、适配器、完成依赖及讨论专项回归已通过；真实配置、真实模型和运行中的产品界面仍未验收。
+
+集成测试发现并修复的接口问题：旧聊天正文参数残留；重试调用编号重复拼接；失败回执缺少持久化回调；预留金额 Decimal 不能放入恢复 JSON；会议执行投影未推进 attempt 状态；产物引用缺少校验哈希。算子 round 不再填入旧 `MeetingRound` 的 `meetingRoundId`，避免错误进入第一阶段会议收尾逻辑。
+
+继续复用 RD-Agent 固定版本的假设/实验职责分离与失败反馈方式，调度、回执和会话仍由本项目原生设施负责。后续资料与计划交接进度见第 20 节；本批产物中的假设引用与 `evidenceGaps` 是其输入。
+
+## 20. 资料复用与计划冻结（2026-09-12）
+
+### 20.1 本批落地范围
+
+接通 `optimization_knowledge` 的**零调用复用路径**，以及独立的计划输入回读和计划冻结服务。尚不启动新知识 child run，不调用规划模型，不运行 GPU，也不修改正式前端。
+
+- `OperatorKnowledgeRequest` 冻结活动、轮次、假设引用、已有观测、具体资料缺口、来源策略版本和受管来源根；请求保存为 `optimization_knowledge_request`。活动或假设、缺口、根目录改变都会改变 invocation 指纹。该服务只准备请求，不会隐式启动搜集。
+- 无资料缺口时仍保存 `optimization_knowledge` 快照，显式记录 `existing_observations` 及可回读观测，不能用空成功占位。
+- 有缺口时先查本轮已绑定的接受包，否则按相同主张、观测、协议及允许来源寻找已有接受包。新增 `reuse_only` 准入复用原 sideflow 事务：匹配时为本轮创建独立 invocation 与交付事件，不匹配时在任何写入之前退出，绝不自动开 child。本轮 invocation 必须匹配完整消费请求 hash；新执行 child 的费用归属尚未完成，因此不会被当作本轮的零费用复用。
+- 读取知识快照时再次校验规范知识包；撤销接受或来源不可回读，会阻止计划读取。知识包入库不代表假设成立，原始 `evidenceGaps` 保留给规划判断。
+- 正式 system executor 已调用该复用服务并返回规范产物；readiness 对有缺口但无匹配知识包的情况返回明确的付费搜集预算阻断。
+- `OptimizationPlan` 升为 v2，必填 `hypothesisRef`、`knowledgeRef`、预测、反证、证据判断及试验数量/时限；`gapChecks` 必须逐项保留知识快照中的缺口并声明实验如何检查，不能仅靠自由文本将其抹去。旧的无来源 v1 合同不再接受。
+- `planning_input()` 回读假设、知识快照、来源内容、观测、固定协议与候选；`freeze_optimization_plan()` 检查引用一致、真实候选归属/代码 hash、非 holdout 协议和剩余调优预算，然后先保存规范产物再绑定本轮。它不预占 GPU；实际执行仍须重新准入。
+
+### 20.2 本次查明的限制与下一批顺序
+
+1. 第 22 节已为真实算子 child 接入独立知识预算预留、货币账本及 LLM 回执基础。原生 source task 的模型路由冻结、服务端回执上下文安装与父流程恢复尚未贯通；完成这些路径前仍不能打开新搜集入口。
+2. 子流请求内容传递已按第 21 节补齐：完整消费请求进入 child 冻结快照与 collection scope，缺口进入查询词。算子专属费用身份及原生 source task 的回执接入仍未完成，不能因此开启付费搜集。
+3. 既有知识快照消费事件属于第一阶段 hypothesis fan-out。本批使用独立 `optimization_knowledge` 产物作为本轮消费关联，不伪造旧 selection 或第一阶段节点完成。
+4. 原 `experiment_api.create_experiment_plan()` 依赖旧 stage round/candidate 与阶段激活。本批复用底层合同/产物设施，不把独立算子流送入旧入口。
+5. 当前 runner 只接受受管的 `torch_softmax` / `triton_row_softmax` 与 warp 参数。计划不能将不存在的生成代码伪装成 `candidateRef`。规划 Agent 的生成、受管候选物化和完成回收尚未接入；readiness 对该节点明确阻断。
+
+顺序：先完成知识 child 的请求传递与货币预算桥 → 验收搜集、交付、恢复 → 接规划 Agent 与真实候选物化 → 接执行/评价/反馈。执行接入时必须重新回读 plan 绑定的知识快照并做来源有效性校验，不能仅凭旧 planRef 运行；冻结计划后来源撤销仍须阻断执行。不得用本批零调用测试证明付费子流或完整研究闭环已经可用。
+
+### 20.3 复用与验证证据
+
+已对照本地知识库 `microsoft/RD-Agent` 固定版本 `32b3d395e73d9db5eee3fe9063d69aec0fdc83bd` 的 `RDLoop`，借鉴 hypothesis conversion 与 experiment execution 的职责分离。仍使用本项目 invocation 指纹、已接受知识包回读、规范 artifact store 和原生 system executor，未复制外部调度器。
+
+专项测试 `tests/test_operator_knowledge_plan.py` 使用真实本地规范产物与 SQLite Ledger 的 invocation/交付事件；知识内容回读为受控 fixture。覆盖无缺口复用、有缺口阻断、发现旧接受包并真实创建本轮复用 invocation、不同请求隔离、未交付、来源撤销、新付费 child 不被零费用接收、计划来源/预算/缺口拒绝、重复冻结、原生 system dispatcher 完成回执、产物回读及 readiness。既有 sideflow 回归仍验证普通建 child 的原语义。该证据不包含生产模型、真实知识搜集、GPU 或产品页面验收。
+
+## 21. 新资料搜集输入与回执接入检查点（2026-09-12）
+
+### 21.1 已实现的请求传递
+
+此前 `ensure_knowledge_invocation()` 接收完整 scope、search envelope、requirements 和 consumer context，但调用建 child 时仅传来源根；child 快照因此只保留指纹。`RealDomainPorts` 又只用父课题标题启动 collection，使本轮缺口没有进入检索计划。这是本批修复的实际断点。
+
+现在 child 创建前校验完整请求与 invocation 四个指纹相符，然后将 `knowledgeRequest` 纳入 child 快照 hash。消费上下文中已有本轮假设引用与内容 hash；不从消息 metadata 重建请求。重放使用同一 child，创建新 child 缺少完整请求时明确拒绝，不为旧 hash-only 创建行为加兼容分支。
+
+原生 source adapter 将该内容传入现有 collection scope，复用现有 `searchEnvelope`、`requirements` 和 `seedQueries`：证据缺口与检索关键词进入实际查询词生成函数，各 source role 的 assignment scope 继承同一请求。请求仅作为研究输入，不能覆盖真实 workflowRunId、项目身份或模型准入权限。
+
+### 21.2 仍需接通的费用与恢复路径
+
+- `session.worker._model_invocation_receipt_context()` 会回读规范 source stage task，是四个 source role 的统一服务端回执入口。source task factory 当前不保留一般任务的 receipt seed；只在 `_formal_task_authorities()` 添加字段不足以接通真实调用。
+- 保留 child 的 `challenge-cup-knowledge-sideflow` 身份及真实 Session/Task/Turn。现有 discussion binding 硬编码 `operator-optimization` / `optimization_discussion`，不得拿它冒充 source child；需要独立的、经服务端谱系校验的算子费用归属合同。
+- 每个真实 child NodeRun 使用现有货币账本独立预留，同一 campaign 汇总。不能把所有 source 节点绑在父节点一个 reservation 上，导致首个 source 完成就提前结算全体费用。需明确冻结知识搜集限额、价目及授权，不能落入通用 token 默认值。
+- 同时接入 LLM 每次重试准入、失败/未知消耗回执、成功 stream capture、receipt persistence 的算子账本路由，费用未明确时不得推进下一付费节点。普通第一阶段 source 任务沿用现有合同。
+- 现有 knowledge result recheck 在父 attempt 仍活动时只追加 revision event；还需接原 action 的持久化完成依赖和交付唤醒，不能重新创建 child 代替恢复。人工知识接受仍走既有 handoff。
+
+### 21.3 本批验收边界
+
+`tests/test_knowledge_request_snapshot.py` 使用真实 SQLite child 创建与重放，并检验原生 source adapter 输出到现有查询词生成函数；覆盖内容冻结、指纹不符、缺失输入及原生 collection scope 传递。复用本地 `source_collection.facade` 的 scope 设计与 `residual` 查询词入口，没有引入新的搜集调度器。
+
+本批不开放算子付费 child，不修改 readiness 费用阻断；模型费用桥、原生 source 完整会话、人工交付唤醒及真实模型/GPU 验收仍未完成。
+
+## 22. 知识搜集预算与真实子流程回执（2026-09-13）
+
+### 22.1 已实现
+
+- `CampaignBudget.knowledge` 显式声明每个 source NodeRun 的 token、调用次数、单次输出及价目；共用 `OperatorModelCallBudget`，允许一个调用。讨论仍使用至少两个调用的专属合同；知识搜集缺配置时不能借用讨论预算。
+- 复用 `model_budget` 的预留、逐次准入、结算与未知费用保留逻辑。同一活动的讨论和各知识子节点共同受 `modelCostLimit` 约束，账本记录 `budgetKind`，同一预留不可在讨论与搜集间切换。
+- `RealDomainPorts.reserve_budget()` 根据 Ledger 中真实 child→parent workflow 关系选择知识预算，校验本轮请求、invocation、父子 attempt、campaign 授权和假设引用。缺知识预算时明确拒绝，不进入通用 token 默认额度。
+- `OperatorKnowledgeInvocationBinding` 保留 `challenge-cup-knowledge-sideflow`、实际 source node、Session/Task/Turn 和父活动谱系；没有讨论 participant 或第一阶段 package-stage 身份。LLMClient 使用同一 operator transport 准入与失败回执机制，source 输出类型为 `source_evidence`。
+- `knowledge_receipt_context()` 提供服务端临时准入及失败回执回调。receipt persistence 在同一个 Ledger 事务内校验 child/invocation/request/campaign/reservation，写费用与 Outbox；去掉 source 回执的算子计费身份不会降级成通用 token 记账。成功回执重放及结算后的重放均不重复收费；失败用量未知时不释放未明确的消耗。
+
+### 22.2 接口验收与真实运行边界
+
+`tests/test_operator_knowledge_budget_contract.py` 验证合同与真实 SQLite 多 run 累计上限。`tests/test_operator_knowledge_model_receipts.py` 创建真实知识 child、NodeRun、invocation、预算行，使用受控 provider 验证 invoke/stream、失败重试、同事务费用和回执、错误活动/请求拒绝及原生 reserve 缺预算阻断。campaign 文件读取与 Session/Task/Turn 身份在该测试中受控，不能据此声称原生 source 会话已贯通。父 agent 独立检查修改并重跑相关回归；模型预算、讨论回执和普通 receipt 回归仍需随最终集成通过。
+
+本批复用项目现有预算账本、LLM transport 重试、source invocation 谱系及 receipt Outbox；没有增加第二份费用存储或外部调度器。未调用生产模型/GPU、未重启产品、未开启付费搜集。
+
+### 22.3 下一步必须一起完成的运行接线
+
+1. 原生 source task factory 需冻结真实 Agent/model route，并在 canonical stage task 保留知识计费 binding；`session.worker._model_invocation_receipt_context()` 回读任务后安装本批 context。当前 source 分支仅传 challenge task contract，不能仅修改通用 `_formal_task_authorities()` 就宣称接通。成功 stream capture 也需识别知识 binding 并走现有 receipt Outbox，不能只安装失败回调。
+2. 为父 system action 保存持久化 child 等待游标，含 invocationId、childRunId、parentNodeRunId 和原 actionId。接受知识后精确重挂原 action；既有 recheck 只在 live attempt 下记录 revision，不能代替唤醒。
+3. 现有失败 child 路径不发布成功的 `knowledge_result_available`，因此必须同时处理失败、取消、人工拒绝的父等待结果，避免永久挂起。不得制造成功包或重新起 child 来恢复。
+4. 子流程模型费用明确、人工 handoff 已接受并交付后，才允许 `verified_packages()` 消费新 child 产物并解除 `optimization_knowledge` 的付费阻断。零调用复用仍保持现有行为。
+
+下一段的验收必须包含：原生 source task→worker→LLM→成功/失败回执→人工交付→同一个父 action 恢复；断言不创建第二 child，不产生新 START_NODE，不在费用未知或人工拒绝时推进实验规划。

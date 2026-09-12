@@ -65,12 +65,12 @@ const composerFieldShell = cv("composerField", composerFieldBase);
 const composerFieldCodexShell = cv(
   "composerFieldCodex",
   composerFieldBase,
-  "grid min-h-[120px] min-w-0 grid-rows-[auto_minmax(56px,1fr)_auto] gap-1.5 px-3.5 py-3 max-[719px]:min-h-[112px] max-[719px]:px-3 max-[719px]:py-2.5 [@media(max-height:520px)]:min-h-[84px] [@media(max-height:520px)]:grid-rows-[auto_minmax(36px,1fr)_auto] [@media(max-height:520px)]:py-2",
+  "!flex !flex-col min-h-[104px] min-w-0 !gap-1.5 px-3.5 py-2.5 [&_textarea]:!min-h-[48px] max-[719px]:min-h-[96px] max-[719px]:px-3 max-[719px]:py-2.5 [@media(max-height:520px)]:min-h-[84px] [@media(max-height:520px)]:[&_textarea]:!min-h-[44px] [@media(max-height:520px)]:py-2",
 );
 const composerToolbarShell = cv("composerToolbar", "flex min-w-0 items-center gap-1 pt-0.5");
 const composerToolbarCodexShell = cv(
   "composerToolbarCodex",
-  "flex min-h-8 min-w-0 items-center justify-between gap-2 border-t border-[color-mix(in_srgb,var(--border-soft)_44%,transparent)] pt-1.5",
+  "flex min-h-8 min-w-0 items-center justify-between gap-2 border-t border-[color-mix(in_srgb,var(--border-soft)_28%,transparent)] pt-1.5",
 );
 const composerFieldDragActiveShell = cv(
   "composerFieldDragActive",
@@ -211,7 +211,7 @@ const styles: Record<string, string> = {
   companionTypingContent:
     "vui-components-conversationview companionTypingContent col-start-2 row-start-1 min-w-0 justify-self-start",
   attachButton:
-    cv("attachButton", "min-w-0 inline-grid", compactIconButtonSize, "place-items-center rounded-[var(--radius-control)] border p-0 [font-size:var(--vui-font-xs)] font-semibold leading-tight", composerIconOnlySlot, composerQuietActionState),
+    cv("attachButton", "min-w-0 inline-grid", compactIconButtonSize, "place-items-center !rounded-full !border-transparent !bg-transparent p-0 [font-size:var(--vui-font-xs)] font-semibold leading-tight", composerIconOnlySlot, composerQuietActionState, "hover:!bg-[var(--vui-control-muted)] active:!bg-[color-mix(in_srgb,var(--vui-control-muted-hover)_78%,transparent)] disabled:hover:!bg-transparent"),
   auxiliaryBlock:
     "vui-components-conversationview auxiliaryBlock min-w-0",
   auxiliaryBlock_active:
@@ -280,7 +280,7 @@ const styles: Record<string, string> = {
   auxiliaryPanel_mental: `vui-components-conversationview auxiliaryPanel_mental min-w-0 ${vuiGlassPanelClass} p-2`,
   auxiliaryPanel_thought: `vui-components-conversationview auxiliaryPanel_thought min-w-0 ${vuiGlassPanelClass} p-2`,
   backToBottomButton:
-    "vui-components-conversationview backToBottomButton absolute bottom-[calc(var(--vui-control-height-md)_+_18px)] left-1/2 z-20 min-w-0 -translate-x-1/2 !inline-flex min-h-[var(--vui-control-height-sm)] !w-fit max-w-[calc(100%_-_24px)] items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-control-muted)_92%,var(--vui-surface-panel))] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] shadow-[var(--vui-shadow-soft)] backdrop-blur-[6px] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:!inline-flex [&_[data-slot=vui-button-content]]:!w-fit [&_[data-slot=vui-button-content]]:items-center [&_[data-slot=vui-button-content]]:gap-1.5 [&_[data-slot=vui-button-label]]:!inline-flex [&_[data-slot=vui-button-label]]:!w-fit [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5",
+    "vui-components-conversationview backToBottomButton absolute bottom-2 left-1/2 z-20 min-w-0 -translate-x-1/2 !inline-flex min-h-[var(--vui-control-height-sm)] !w-fit max-w-[calc(100%_-_24px)] items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-control-muted)_92%,var(--vui-surface-panel))] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] shadow-[var(--vui-shadow-soft)] backdrop-blur-[6px] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:!inline-flex [&_[data-slot=vui-button-content]]:!w-fit [&_[data-slot=vui-button-content]]:items-center [&_[data-slot=vui-button-content]]:gap-1.5 [&_[data-slot=vui-button-label]]:!inline-flex [&_[data-slot=vui-button-label]]:!w-fit [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5",
   cliAgentLifecycleIcon:
     `vui-components-conversationview cliAgentLifecycleIcon min-w-0 shrink-0 text-[var(--fg-tertiary)] ${vuiStateCoolInfoClass}`,
   cliAgentLifecycleMeta:
@@ -423,6 +423,18 @@ const styles: Record<string, string> = {
     "vui-components-conversationview codexTranscriptReasoningTitleRow inline-flex min-w-0 max-w-full flex-nowrap items-center gap-x-2 overflow-hidden",
   codexTranscriptReasoningText:
     "vui-components-conversationview codexTranscriptReasoningText min-w-0 max-w-[min(100%,128ch)] whitespace-pre-wrap break-words [overflow-wrap:anywhere] border-0 bg-transparent p-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  // User-facing progress narration: a lighter lane than thinking (no box chrome),
+  // clamped while settled so long narration stays scannable.
+  codexTranscriptProgressCell:
+    "vui-components-conversationview codexTranscriptProgressCell min-w-0 grid min-h-0 content-start gap-1 border-0 bg-transparent py-0.5 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)]",
+  codexTranscriptProgressHeader:
+    "vui-components-conversationview codexTranscriptProgressHeader min-w-0 overflow-hidden !grid !h-auto !min-h-0 !w-full !max-w-full grid-cols-[20px_minmax(0,1fr)] !items-center !justify-start gap-x-2 gap-y-0 !border-0 !bg-transparent !p-0 !text-left !shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+  codexTranscriptProgressBody:
+    "vui-components-conversationview codexTranscriptProgressBody min-w-0 max-h-[min(24rem,50vh)] overflow-y-auto overflow-x-hidden overscroll-contain [scrollbar-gutter:stable] border-0 bg-transparent px-0 py-0",
+  codexTranscriptProgressClamped:
+    "vui-components-conversationview codexTranscriptProgressClamped min-w-0 max-w-[min(100%,128ch)] line-clamp-3 whitespace-pre-wrap break-words [overflow-wrap:anywhere] border-0 bg-transparent p-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  codexTranscriptProgressText:
+    "vui-components-conversationview codexTranscriptProgressText min-w-0 max-w-[min(100%,128ch)] whitespace-pre-wrap break-words [overflow-wrap:anywhere] border-0 bg-transparent p-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   /** Shared thought body: max ~8–10 lines, scroll inside the box when longer. */
   thoughtScrollBody:
     "vui-components-conversationview thoughtScrollBody min-w-0 max-h-[12rem] overflow-y-auto overflow-x-hidden overscroll-contain [scrollbar-gutter:stable] rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_55%,transparent)] px-2.5 py-2",
@@ -1059,7 +1071,7 @@ const styles: Record<string, string> = {
   composerToolbarStart: "vui-components-conversationview composerToolbarStart flex min-w-0 items-center gap-1.5",
   // End cluster: inference control may shrink; send/stop stays shrink-0 and fully visible.
   composerToolbarEnd: "vui-components-conversationview composerToolbarEnd ml-auto flex min-w-0 max-w-full items-center justify-end gap-1.5 [&_[data-testid=conversation-inference-control]]:min-w-0 [&_[data-testid=conversation-inference-control]]:max-w-full",
-  inputCodex: "vui-components-conversationview inputCodex min-h-[56px] max-h-[240px] w-full resize-none overflow-y-auto !border-0 !bg-transparent !p-0 [font-size:var(--vui-type-chat-size)] font-[var(--vui-weight-regular)] leading-[var(--vui-type-chat-line)] text-[var(--fg-primary)] !shadow-none placeholder:text-[var(--fg-tertiary)] focus:!ring-0",
+  inputCodex: "vui-components-conversationview inputCodex min-h-[48px] max-h-[240px] w-full flex-1 resize-none overflow-y-auto !border-0 !bg-transparent !p-0 [font-size:var(--vui-type-chat-size)] font-[var(--vui-weight-regular)] leading-[var(--vui-type-chat-line)] text-[var(--fg-primary)] !shadow-none placeholder:text-[var(--fg-tertiary)] focus:!ring-0",
   sessionMeta:
     "vui-components-conversationview sessionMeta min-w-0 flex flex-wrap items-center gap-1.5",
   statPill:
@@ -1112,6 +1124,8 @@ const styles: Record<string, string> = {
     "vui-components-conversationview thoughtTextBlock min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   timeline:
     "vui-components-conversationview timeline flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden bg-[var(--vui-surface-chat)] px-[clamp(1rem,3vw,3rem)] py-4 [scrollbar-gutter:stable]",
+  timelineArea:
+    "vui-components-conversationview timelineArea relative flex min-h-0 min-w-0 flex-1 flex-col",
   timelineContent:
     "vui-components-conversationview timelineContent grid min-w-0 w-full content-start gap-[10px]",
   timelineVirtualSpacer:
@@ -1225,6 +1239,10 @@ const styles: Record<string, string> = {
     "vui-components-conversationview turnErrorReasonList grid min-w-0 gap-1 border-t border-[color-mix(in_srgb,var(--state-error)_20%,transparent)] pt-1.5 [font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   turnErrorReasonRow:
     "vui-components-conversationview turnErrorReasonRow grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] items-start gap-x-2 gap-y-0.5 [&_dd]:m-0 [&_dd]:min-w-0 [&_dd]:whitespace-pre-wrap [&_dd]:break-words [&_dd]:[overflow-wrap:anywhere] [&_dt]:font-semibold [&_dt]:text-[var(--fg-tertiary)]",
+  turnErrorActions:
+    "vui-components-conversationview turnErrorActions flex min-w-0 flex-wrap items-center justify-end gap-1.5",
+  turnErrorRetryButton:
+    "vui-components-conversationview turnErrorRetryButton w-fit rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_28%,transparent)] px-2 py-0.5 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--state-error)] hover:bg-[color-mix(in_srgb,var(--state-error)_8%,transparent)]",
   turnErrorText:
     "vui-components-conversationview turnErrorText grid min-w-0 gap-1 whitespace-normal break-words [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
   turnErrorTurn:
@@ -1233,6 +1251,10 @@ const styles: Record<string, string> = {
     "vui-components-conversationview turnErrorType min-w-0 w-fit max-w-full rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--state-error)_10%,transparent)] px-1.5 py-0.5 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--state-error)]",
   turnIconButton: `vui-components-conversationview turnIconButton min-w-0 ${vuiOpaqueRowClass} p-2 inline-grid h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] place-items-center bg-[var(--vui-control-muted)] p-0 text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] shrink-0 text-[var(--fg-tertiary)]`,
   turnIconButtonActive: `vui-components-conversationview turnIconButtonActive min-w-0 ${vuiOpaqueRowClass} p-2 shrink-0 text-[var(--fg-tertiary)] ${vuiStateSelectedRowClass}`,
+  turnVersionSwitcher:
+    "vui-components-conversationview turnVersionSwitcher min-w-0 shrink-0 gap-1",
+  turnVersionLabel:
+    `vui-components-conversationview turnVersionLabel min-w-0 ${vuiOpaqueRowClass} p-2 inline-flex h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] items-center justify-center bg-[var(--vui-control-muted)] px-1.5 text-[var(--fg-secondary)] [font-size:var(--vui-font-xs)] font-medium tabular-nums leading-none`,
   turnMeta:
     "vui-components-conversationview turnMeta inline-flex min-w-0 items-center justify-start gap-2 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   turnMetaActions:

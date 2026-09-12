@@ -166,11 +166,54 @@ def _ensure_reasoning_roundtrip_messages(
         parts = tuple(message.parts)
         if message.role == "assistant" and parts:
             has_tool_call = any(isinstance(part, ToolCallPart) for part in parts)
-            has_reasoning = any(isinstance(part, ReasoningTextPart) for part in parts)
+            has_reasoning = any(
+                isinstance(part, ReasoningTextPart) and str(part.text or "").strip()
+                for part in parts
+            )
             if has_tool_call and not has_reasoning:
                 parts = (*parts, ReasoningTextPart(REASONING_ROUNDTRIP_PLACEHOLDER))
         patched.append(SemanticMessage(role=message.role, parts=parts))
     return patched
+
+
+def ensure_chat_completions_reasoning_roundtrip(
+    payload: dict[str, Any],
+    *,
+    route: Any,
+) -> dict[str, Any]:
+    """Re-assert non-empty ``reasoning_content`` on the built payload body.
+
+    ``_ensure_reasoning_roundtrip_messages`` already patches the projected
+    semantic messages, but any hop that drops or blanks the field between
+    projection and the provider call re-triggers DeepSeek's 400. This
+    last-mile guard rewrites only the outgoing payload dict, so the wire
+    contract cannot regress silently.
+    """
+
+    if not bool(getattr(getattr(route, "compat", None), "reasoning_roundtrip", False)):
+        return payload
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return payload
+    patched_messages: list[Any] | None = None
+    for index, message in enumerate(messages):
+        if not isinstance(message, dict):
+            continue
+        if str(message.get("role") or "").strip() != "assistant":
+            continue
+        if not message.get("tool_calls"):
+            continue
+        if str(message.get("reasoning_content") or "").strip():
+            continue
+        if patched_messages is None:
+            patched_messages = list(messages)
+        patched_messages[index] = {
+            **message,
+            "reasoning_content": REASONING_ROUNDTRIP_PLACEHOLDER,
+        }
+    if patched_messages is None:
+        return payload
+    return {**payload, "messages": patched_messages}
 
 
 class ChatCompletionsWireAdapter:

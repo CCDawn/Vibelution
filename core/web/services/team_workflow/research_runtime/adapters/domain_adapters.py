@@ -132,6 +132,16 @@ class AgentActionAdapter:
         )
 
     def verify(self, action: PendingAction, result: AdapterResult) -> VerifiedDomainResult:
+        if action.node_id == "optimization_discussion":
+            discussion_status = (result.usage or {}).get("discussionStatus")
+            cost_status = (result.usage or {}).get("costStatus")
+            if discussion_status == "no_viable_hypothesis" or cost_status != "settled":
+                return VerifiedDomainResult(action_id=action.action_id, outcome="blocked",
+                    artifact_receipts=(), anchor=result.anchor, budget_receipt=None,
+                    problem={"code": "operator_no_viable_hypothesis" if discussion_status == "no_viable_hypothesis"
+                        else "operator_model_cost_unsettled",
+                        "detail": "Discussion has no viable hypothesis" if discussion_status == "no_viable_hypothesis"
+                        else "Discussion provider usage is incomplete; budget remains reserved"})
         if result.observation_only:
             return VerifiedDomainResult(
                 action_id=action.action_id,
@@ -483,9 +493,12 @@ def register_default_adapters(registry: Any, ports: DomainPorts) -> Any:
     if not isinstance(registry, ActionRegistry):
         registry = ActionRegistry()
     registry.register(AgentActionAdapter(ports))
+    from core.research.workflow.operator_optimization_definition import build_operator_definition
     definitions = (
         build_challenge_cup_workflow_definition(),
         build_knowledge_sideflow_workflow_definition(),
+        build_operator_definition(),
+        build_operator_definition(baseline=True),
     )
     for definition in definitions:
         for node in definition.nodes:

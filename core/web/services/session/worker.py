@@ -1132,9 +1132,10 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
 
     # The LLM adapter receives a bound ``current_stop_reason`` method, so the
     # capability marker must live on the session-owned checker before the
-    # Agent wraps it. This keeps provider HTTP abort opt-in to Challenge turns
-    # while ordinary turns retain cooperative stop checks without a watcher.
-    interrupt_checker._vibelution_chat_provider_abort_enabled = bool(challenge_deadline_at_ms)
+    # Agent wraps it. Provider HTTP abort keeps a user stop responsive while a
+    # Chat Completions stream is still in flight; Challenge turns additionally
+    # abort on their deadline through the same checker.
+    interrupt_checker._vibelution_chat_provider_abort_enabled = True
     try:
         agent_prompt_snapshot = (
             s._ensure_session_agent_prompt_snapshot(
@@ -2001,6 +2002,17 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                         "includedEventIds": list(context_assembly.included_event_ids),
                         "omittedEventCount": context_assembly.omitted_event_count,
                         "contextAssembly": context_assembly.to_composition_patch(),
+                        # Pre-LLM latency decomposition; the runtime summary and
+                        # conversation log can both go stale/missing for chat turns,
+                        # but the turn journal is the durable per-turn authority.
+                        "prepareTimings": s._session_turn_context_prepare_timings(
+                            prepare_timings,
+                            history_assembly_ms=history_assembly_ms,
+                            executor_wait_ms=s._elapsed_ms_between(
+                                context.get("_executor_submitted_at_monotonic"),
+                                prepare_started_at,
+                            ),
+                        ),
                     },
                     source="session_context_assembler",
                 )
@@ -2449,10 +2461,12 @@ def _run_session_continuation_loop(
             turn_id=getattr(turn_control, "turn_id", ""),
         )
         from core.llm.client import model_invocation_receipt_context_scope
+        from core.llm.turn_request_capture import turn_request_capture_scope
 
+        suggestion_capture: dict[str, Any] = {}
         if turn_capture is not None:
             turn_capture.model_invocation_receipt_context = receipt_context
-        with model_invocation_receipt_context_scope(receipt_context):
+        with model_invocation_receipt_context_scope(receipt_context), turn_request_capture_scope(suggestion_capture):
             chat_history_ledger_fingerprint = ""
             iteration_chat_history = history_messages if turn_index == 1 else None
             if (
@@ -2505,6 +2519,21 @@ def _run_session_continuation_loop(
             prompt_cache_partition=prompt_cache_partition,
             llm_model_id=llm_model_id,
         )
+        try:
+            from core.web.services.session import prompt_suggestion as prompt_suggestion_service
+
+            if prompt_suggestion_service.is_user_authored_source(normalized_user_message_source):
+                prompt_suggestion_service.register_prompt_suggestion_capture(
+                    session_id=session_id,
+                    turn_id=canonical_turn_id,
+                    capture=suggestion_capture,
+                    reply=s._visible_reply_candidate(result) if isinstance(result, dict) else "",
+                )
+        except Exception as exc:
+            s._debug_logger.warning(
+                f"prompt suggestion capture registration failed: {type(exc).__name__}: {exc}",
+                tag="SUGGEST",
+            )
         llm_elapsed_ms = s._elapsed_ms(llm_started_at)
         return_stop_reason = s._get_turn_control_stop_reason(turn_control) or s._get_session_stop_reason(session_id)
         if return_stop_reason:

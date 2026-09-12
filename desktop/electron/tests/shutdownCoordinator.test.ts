@@ -155,6 +155,88 @@ describe("decideShutdown", () => {
       message: "status payload is incomplete"
     });
   });
+
+  it("allows quit through the local scan when the launcher probe is unavailable", async () => {
+    const fallbackCalls: string[] = [];
+    await expect(
+      decideShutdown({
+        ownershipMode: "started",
+        activeWorkStatus: async () => {
+          throw new Error("resolve launcher active work status for quit timed out after 20000ms");
+        },
+        localActiveWorkStatus: async () => {
+          fallbackCalls.push("local");
+          return { state: "idle", message: "" };
+        }
+      })
+    ).resolves.toEqual({
+      allowed: true,
+      reason: "no_active_work",
+      stopPythonLauncher: true
+    });
+    expect(fallbackCalls).toEqual(["local"]);
+  });
+
+  it("keeps the active-work block when the probe fails but the local scan finds runs", async () => {
+    await expect(
+      decideShutdown({
+        ownershipMode: "started",
+        activeWorkStatus: async () => ({
+          state: "unknown",
+          message: "launcher status did not contain a valid active-work projection"
+        }),
+        localActiveWorkStatus: () => ({
+          state: "active",
+          message: "1 active work item(s) block lifecycle commands.",
+          count: 1
+        })
+      })
+    ).resolves.toEqual({
+      allowed: false,
+      reason: "active_work_running",
+      message: "有进行中的任务，无法退出 Vibelution。请等待任务完成或先停止任务。"
+    });
+  });
+
+  it("fails closed when both the launcher probe and the local scan fail", async () => {
+    await expect(
+      decideShutdown({
+        ownershipMode: "started",
+        activeWorkStatus: async () => {
+          throw new Error("status unreachable");
+        },
+        localActiveWorkStatus: () => {
+          throw new Error("workspace root missing");
+        }
+      })
+    ).resolves.toEqual({
+      allowed: false,
+      reason: "active_work_status_unavailable",
+      message: "暂时无法确认是否有进行中的任务，已取消退出。请稍后重试。"
+    });
+  });
+
+  it("does not consult the local scan when the launcher probe reports active work", async () => {
+    const fallbackCalls: string[] = [];
+    await expect(
+      decideShutdown({
+        ownershipMode: "started",
+        activeWorkStatus: async () => ({
+          state: "active",
+          message: "1 active work item(s) block lifecycle commands."
+        }),
+        localActiveWorkStatus: () => {
+          fallbackCalls.push("local");
+          return { state: "idle", message: "" };
+        }
+      })
+    ).resolves.toEqual({
+      allowed: false,
+      reason: "active_work_running",
+      message: "有进行中的任务，无法退出 Vibelution。请等待任务完成或先停止任务。"
+    });
+    expect(fallbackCalls).toEqual([]);
+  });
 });
 
 describe("resolveQuitActiveWorkStatus", () => {

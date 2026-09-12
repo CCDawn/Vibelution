@@ -370,16 +370,114 @@ def _assert_project_source_search_not_active(team_id: str, run_ids: set[str]) ->
 
 def _delete_project_source_collection_runs(team_id: str, run_ids: set[str]) -> list[str]:
     s = _service()
+    from core.web.services.team_workflow.research_projects import (
+        ResearchProjectNotFoundError,
+    )
+
     removed_run_ids: list[str] = []
     for run_id in sorted(run_ids):
         s._source_collection_work_run_store().delete_snapshot(s.SOURCE_COLLECTION_WORK_RUN_KIND, run_id)
-        artifacts = s._source_collection_storage_artifact_paths(team_id, run_id)
-        run_directory = artifacts["runDirectory"]
-        if run_directory.exists():
+        try:
+            run_directory = s._source_collection_storage_artifact_paths(
+                team_id, run_id
+            )["runDirectory"]
+        except ResearchProjectNotFoundError:
+            # The run's owner project was already retired (question cleanup):
+            # its isolated workspace — and every run directory inside it — is
+            # gone.  The processing-run authority below is still removed so the
+            # question reset can finish instead of being stuck forever on
+            # orphaned lineage.
+            run_directory = None
+        if run_directory is not None and run_directory.exists():
             shutil.rmtree(run_directory)
         s.data_processing_service.delete_processing_run(run_id)
         removed_run_ids.append(run_id)
     return removed_run_ids
+
+
+def _source_collection_run_record_is_fresh(
+    run: dict[str, Any] | None, run_id: str
+) -> bool:
+    """Whether a snapshot-less run record was touched recently.
+
+    A run that was just prepared may not have persisted its background
+    snapshot yet, so its record recency is the only available starting-signal.
+    The same heartbeat window as the snapshot liveness tier bounds the wait: a
+    record untouched for longer is interrupted residue, not a starting run.
+    """
+
+    s = _service()
+    if not isinstance(run, dict):
+        try:
+            run = s.data_processing_service.get_processing_run(run_id)
+        except Exception:  # noqa: BLE001 - no probeable record means no live run
+            return False
+    updated_at = str(run.get("updatedAt") or run.get("createdAt") or "").strip()
+    age_ms = s._source_collection_snapshot_age_ms(updated_at)
+    if age_ms is None:
+        # No readable timestamp: keep blocking rather than guessing death.
+        return True
+    return age_ms <= s._source_collection_heartbeat_stale_ms()
+
+
+def _source_collection_run_snapshot_is_active(
+    team_id: str,
+    run_id: str,
+    run: dict[str, Any] | None = None,
+) -> bool:
+    """Whether a team-owned run still has a fresh active background snapshot.
+
+    A snapshot store that cannot be read fails closed (the reset keeps
+    blocking).  An absent snapshot with a recently touched run record is a
+    starting run and stays blocking; an absent snapshot on an old record is
+    interrupted residue and no longer blocks.  The existing two-tier staleness
+    gate stays the single source of truth for what an active snapshot means.
+    """
+
+    s = _service()
+    try:
+        snapshot = s._source_collection_work_run_store().load_snapshot(
+            s.SOURCE_COLLECTION_WORK_RUN_KIND,
+            run_id,
+        )
+        snapshot = s._decorate_source_collection_work_run_snapshot(snapshot)
+    except Exception:  # noqa: BLE001 - unreadable liveness must fail closed
+        return True
+    if not isinstance(snapshot, dict) or not snapshot:
+        return _source_collection_run_record_is_fresh(run, run_id)
+    return s._source_collection_background_snapshot_is_active(
+        snapshot, team_id, run_id
+    )
+
+
+def collection_run_is_active(team_id: str, run_id: str) -> bool:
+    """Public liveness probe for one team-owned collection run.
+
+    Separates a live background worker (must keep blocking a question reset)
+    from a run record left behind by an interrupted executor (safe to stop
+    and clear).  Only a run whose record is still ``collecting``/``processing``
+    and whose background snapshot is fresh — or whose record was just touched
+    while its snapshot is still absent — counts as active.
+    """
+
+    s = _service()
+    normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    normalized_run_id = s._trim_text(run_id, max_length=160)
+    if not normalized_run_id:
+        return False
+    try:
+        run = s.data_processing_service.get_processing_run(normalized_run_id)
+    except s.data_processing_service.DataProcessingNotFoundError:
+        # A prior partial reset may already have removed the physical run.
+        return False
+    if not s._source_collection_run_belongs_to_team(run, normalized_team_id):
+        return False
+    run_status = s._trim_text(run.get("status"), max_length=80).lower()
+    if run_status not in {"collecting", "processing"}:
+        return False
+    return _source_collection_run_snapshot_is_active(
+        normalized_team_id, normalized_run_id, run
+    )
 
 
 def _source_collection_reset_context(team_id: str, run_ids: set[str]) -> dict[str, Any]:
@@ -406,7 +504,12 @@ def _source_collection_reset_context(team_id: str, run_ids: set[str]) -> dict[st
                 "资料搜集运行不属于当前团队，不能随本题重置。"
             )
         run_status = s._trim_text(run.get("status"), max_length=80).lower()
-        if run_status in {"collecting", "processing"}:
+        if (
+            run_status in {"collecting", "processing"}
+            and _source_collection_run_snapshot_is_active(
+                normalized_team_id, run_id, run
+            )
+        ):
             raise s.TeamWorkflowOrchestrationError(
                 "本题的资料搜集仍在进行，请等待结束或先停止任务。"
             )

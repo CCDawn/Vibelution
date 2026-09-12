@@ -291,6 +291,7 @@ class ResearchProjectAgentTaskReconcileResponse(BaseModel):
 
 
 class ExperimentPlanCreatePayload(BaseModel):
+    researchProjectId: str = Field("", max_length=160)
     stageRoundId: str = Field("", max_length=128)
     title: str = Field("", max_length=240)
     createdByAgent: str = Field("", max_length=160)
@@ -392,6 +393,7 @@ class ExperimentSmokeRunPayload(BaseModel):
 
 
 class ExperimentFullRunResultPayload(BaseModel):
+    researchProjectId: str = Field("", max_length=160)
     evidenceKind: str = Field("", max_length=80)
     executionId: str = Field("", max_length=200)
     preparationId: str = Field("", max_length=200)
@@ -415,6 +417,7 @@ class ExperimentFullRunResultPayload(BaseModel):
 
 
 class ExperimentFullRunExecutionPayload(BaseModel):
+    researchProjectId: str = Field("", max_length=160)
     executionConfig: dict[str, Any] = Field(default_factory=dict)
     recordedByAgent: str = Field("", max_length=160)
 

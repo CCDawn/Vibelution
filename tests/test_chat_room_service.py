@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import pytest
 
-from agent import SelfEvolvingAgent
+from agent import AgentRuntime
 from core.agent_kernel import service as agent_kernel_service
 from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_MESSAGE,
@@ -2133,6 +2133,105 @@ def test_start_chat_room_round_filters_speakers_to_frozen_participant_agent_ids(
         )
 
 
+def test_frozen_roster_survives_session_key_overlap_after_participant_refresh(
+    tmp_path, monkeypatch
+):
+    """Session-key overlaps are refreshed metadata, not frozen roster identity.
+
+    The generic participant dedupe collapses entries that share a session id.
+    A frozen roster must dedupe by agent identity instead: distinct frozen
+    agents can transiently present the same refreshed session key (one agent's
+    ``directSessionId`` equal to another agent's ``sessionId``), and a
+    session-scoped collapse would silently drop a mandated speaker before
+    ``_require_exact_frozen_speaker_roster`` turns the round into a hard
+    generation-open failure.
+    """
+
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    sessions = [
+        session_service.create_chat_session(title=f"Participant {index}")
+        for index in range(4)
+    ]
+    frozen_agent_ids = [session["agentId"] for session in sessions]
+    room = chat_room_service.create_chat_room(
+        title="冻结名单会话键重叠",
+        participant_agent_ids=frozen_agent_ids,
+    )
+    refresh = chat_room_service._refresh_chat_room_round_participants
+
+    def refresh_with_session_key_overlap(
+        participants, *, preserve_scoped_session_ids=False
+    ):
+        refreshed = refresh(
+            participants,
+            preserve_scoped_session_ids=preserve_scoped_session_ids,
+        )
+        shared_session_id = str(
+            refreshed[0].get("sessionId") or sessions[0]["sessionId"]
+        )
+        refreshed[2]["directSessionId"] = shared_session_id
+        return refreshed
+
+    monkeypatch.setattr(
+        chat_room_service,
+        "_refresh_chat_room_round_participants",
+        refresh_with_session_key_overlap,
+    )
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "身份键重叠不能挤掉冻结讲者",
+        config={"participantAgentIds": frozen_agent_ids},
+        agent_runner=lambda participant, prompt, context: {
+            "status": "completed",
+            "raw_output": f"{participant['title']} 已发言",
+            "summary": "ok",
+        },
+    )
+
+    latest_round = detail["rounds"][-1]
+    assert [message["agentId"] for message in latest_round["messages"]] == frozen_agent_ids
+    assert [participant["agentId"] for participant in detail["participants"]] == frozen_agent_ids
+
+
+def test_frozen_roster_round_keeps_speakers_when_topic_quotes_triage_keywords(
+    tmp_path, monkeypatch
+):
+    """A formal meeting topic may cite triage keywords (e.g. 意识).
+
+    Case clarification narrowing is a user-facing chat affordance; it must not
+    collapse a frozen workflow roster into one speaker, which previously made
+    the opening round fail the exact-frozen-speaker-roster gate.
+    """
+
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    sessions = [
+        session_service.create_chat_session(title=f"Participant {index}")
+        for index in range(4)
+    ]
+    frozen_agent_ids = [session["agentId"] for session in sessions]
+    room = chat_room_service.create_chat_room(
+        title="冻结名单会议引用分诊关键词",
+        participant_agent_ids=frozen_agent_ids,
+    )
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "本范围显式排除了意识/意向性等不可判定分支",
+        config={"participantAgentIds": frozen_agent_ids},
+        agent_runner=lambda participant, prompt, context: {
+            "status": "completed",
+            "raw_output": f"{participant['title']} 已发言",
+            "summary": "ok",
+        },
+    )
+
+    latest_round = detail["rounds"][-1]
+    assert [message["agentId"] for message in latest_round["messages"]] == frozen_agent_ids
+    assert latest_round["caseState"]["nextAction"] == "discuss"
+    assert latest_round["caseState"]["riskFlags"] == []
+
+
 @pytest.mark.parametrize("failure_mode", ["disabled", "ambiguous"])
 def test_start_chat_room_round_rejects_unavailable_or_ambiguous_frozen_participant(
     tmp_path, monkeypatch, failure_mode
@@ -2586,7 +2685,7 @@ def test_chat_room_real_agent_reaches_llm_with_bound_turn_identity(tmp_path, mon
         invocation_messages.append(messages)
         return None
 
-    monkeypatch.setattr(SelfEvolvingAgent, "_invoke_llm", fake_invoke_llm)
+    monkeypatch.setattr(AgentRuntime, "_invoke_llm", fake_invoke_llm)
 
     detail = chat_room_service.start_chat_room_round(room["roomId"], "检查群聊 turn identity")
 
@@ -5223,6 +5322,49 @@ def test_delete_chat_room_removes_room(tmp_path, monkeypatch):
     assert chat_room_service.get_chat_room_detail(room["roomId"]) is None
 
 
+def test_question_scoped_room_cleanup_targets_only_owned_rooms(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    target = chat_room_service.create_chat_room(
+        title="SCI-010 假说评审",
+        participant_session_ids=["session-alpha"],
+        config={"teamId": "research-team", "questionId": "SCI-010"},
+    )
+    other = chat_room_service.create_chat_room(
+        title="SCI-011 假说评审",
+        participant_session_ids=["session-alpha"],
+        config={"teamId": "research-team", "questionId": "SCI-011"},
+    )
+    foreign_team = chat_room_service.create_chat_room(
+        title="其他团队群聊",
+        participant_session_ids=["session-alpha"],
+        config={"teamId": "other-team", "questionId": "SCI-010"},
+    )
+
+    references = chat_room_service.list_chat_rooms_for_question(
+        "research-team", "SCI-010"
+    )
+
+    assert [reference["roomId"] for reference in references] == [target["roomId"]]
+    assert references[0]["roundCount"] == 0
+    assert references[0]["messageCount"] == 0
+
+    result = chat_room_service.remove_chat_rooms_for_question(
+        "research-team", "SCI-010"
+    )
+
+    assert result["removedRoomIds"] == [target["roomId"]]
+    assert result["removedRoomCount"] == 1
+    assert result["removedRoundCount"] == 0
+    assert result["removedMessageCount"] == 0
+    assert result["skipped"] == []
+    assert result["failed"] == []
+    assert chat_room_service.get_chat_room_detail(target["roomId"]) is None
+    assert chat_room_service.get_chat_room_detail(other["roomId"]) is not None
+    assert chat_room_service.get_chat_room_detail(foreign_team["roomId"]) is not None
+
+
 def test_stopped_round_still_syncs_completed_messages_to_participant_sessions(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -7434,6 +7576,38 @@ def test_get_chat_room_detail_reconcile_false_skips_write_side_reconcile(tmp_pat
     chat_room_service.get_chat_room_detail(room["roomId"])
 
     assert len(reconcile_calls) == 1
+
+
+def test_get_chat_room_detail_participant_index_false_skips_refresh(tmp_path, monkeypatch):
+    """缺陷 19 残余成本：participant_index=False 的 rounds-only 读不重建
+    会话摘要索引、不修参与者；默认调用仍刷新一次。"""
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    room = chat_room_service.create_chat_room(title="参与者索引跳过群聊")
+
+    refresh_calls = []
+    original_refresh = chat_room_service._participant_refresh_indexes
+
+    def _counting_refresh(*, participants=None):
+        refresh_calls.append(participants)
+        return original_refresh(participants=participants)
+
+    monkeypatch.setattr(
+        chat_room_service, "_participant_refresh_indexes", _counting_refresh
+    )
+
+    detail = chat_room_service.get_chat_room_detail(
+        room["roomId"], reconcile=False, participant_index=False
+    )
+
+    assert refresh_calls == []
+    assert detail["roomId"] == room["roomId"]
+
+    chat_room_service.get_chat_room_detail(room["roomId"])
+
+    assert len(refresh_calls) == 1
 
 
 def test_chat_state_participant_index_signature_skips_journal_walk(tmp_path, monkeypatch):

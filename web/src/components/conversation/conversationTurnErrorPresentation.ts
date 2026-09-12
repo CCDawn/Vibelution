@@ -66,6 +66,22 @@ export function buildTurnErrorDiagnosticRows(
   ].filter(isTurnErrorDiagnosticRow);
 }
 
+export function formatTurnErrorRetrySummary(
+  turnError: SessionTurnError,
+  lang: ConversationLanguage,
+): string {
+  const history = Array.isArray(turnError.retryHistory) ? turnError.retryHistory : [];
+  const finalAttempt = history.reduce((max, entry) => Math.max(max, Number(entry?.attempt) || 0), 0);
+  if (finalAttempt <= 0) {
+    return "";
+  }
+  return turnErrorLabel(
+    lang,
+    `已重试 ${finalAttempt} 次`,
+    finalAttempt === 1 ? "Retried once" : `Retried ${finalAttempt} times`,
+  );
+}
+
 export function buildCurrentTurnErrorRows(
   turnError: SessionTurnError,
   lang: ConversationLanguage,
@@ -86,6 +102,15 @@ export function buildCurrentTurnErrorRows(
 }
 
 export function summarizeCurrentTurnError(
+  turnError: SessionTurnError,
+  lang: ConversationLanguage,
+) {
+  const retrySummary = formatTurnErrorRetrySummary(turnError, lang);
+  const summary = resolveTurnErrorSummaryText(turnError, lang);
+  return retrySummary ? `${summary} · ${retrySummary}` : summary;
+}
+
+function resolveTurnErrorSummaryText(
   turnError: SessionTurnError,
   lang: ConversationLanguage,
 ) {

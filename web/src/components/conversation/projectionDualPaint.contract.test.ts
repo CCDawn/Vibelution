@@ -78,7 +78,7 @@ describe("projection dual-paint contracts", () => {  it("does not stack compact 
     })).toBe(false);
   });
 
-  it("dedupes completed + running restream of the same thought text", () => {
+  it("prefers the user-facing commentary copy over its reasoning restream", () => {
     const deduped = dedupeThoughtLikeTranscriptCells([
       {
         id: "done",
@@ -98,7 +98,7 @@ describe("projection dual-paint contracts", () => {  it("does not stack compact 
         text: "短思考，继续展开。",
       },
     ]);
-    expect(deduped.map((cell) => cell.id)).toEqual(["run"]);
+    expect(deduped.map((cell) => cell.id)).toEqual(["done"]);
   });
 
   it("display dedupe collapses duplicate tool identities after thought dedupe", () => {
@@ -165,6 +165,6 @@ describe("projection dual-paint contracts", () => {  it("does not stack compact 
         },
       },
     ]);
-    expect(display.map((cell) => cell.id)).toEqual(["thought-b", "tool-b"]);
+    expect(display.map((cell) => cell.id)).toEqual(["thought-a", "tool-b"]);
   });
 });

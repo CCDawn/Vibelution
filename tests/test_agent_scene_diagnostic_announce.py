@@ -3,7 +3,7 @@ import types
 from pathlib import Path
 
 import agent as agent_module
-from agent import SelfEvolvingAgent
+from agent import AgentRuntime
 
 
 class _FakeUi:
@@ -17,7 +17,7 @@ class _FakeUi:
 def _bound_agent(scene_dir) -> tuple:
     fake = types.SimpleNamespace()
     fake._resolve_current_scene_dir_for_diagnostic = lambda: scene_dir
-    method = types.MethodType(SelfEvolvingAgent._announce_scene_diagnostic_package, fake)
+    method = types.MethodType(AgentRuntime._announce_scene_diagnostic_package, fake)
     return fake, method
 
 
@@ -43,7 +43,7 @@ def test_announce_skips_without_scene(tmp_path, monkeypatch):
 
     fake = types.SimpleNamespace()
     fake._resolve_current_scene_dir_for_diagnostic = lambda: None
-    method = types.MethodType(SelfEvolvingAgent._announce_scene_diagnostic_package, fake)
+    method = types.MethodType(AgentRuntime._announce_scene_diagnostic_package, fake)
     method()
 
     assert fake_ui.logs == []
@@ -58,7 +58,7 @@ def test_announce_swallows_resolution_failure(tmp_path, monkeypatch):
 
     fake = types.SimpleNamespace()
     fake._resolve_current_scene_dir_for_diagnostic = _boom
-    method = types.MethodType(SelfEvolvingAgent._announce_scene_diagnostic_package, fake)
+    method = types.MethodType(AgentRuntime._announce_scene_diagnostic_package, fake)
     method()
 
     assert fake_ui.logs == []

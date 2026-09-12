@@ -5,6 +5,7 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   CircleDot,
   Copy,
@@ -12,6 +13,7 @@ import {
   ImagePlus,
   Link2,
   LoaderCircle,
+  MessageSquareText,
   Pencil,
   RefreshCw,
   Square,
@@ -69,6 +71,11 @@ const AgentContextSectionsView = React.lazy(() =>
 );
 import { ConversationFollowupQueueBar } from "./ConversationFollowupQueueBar";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
+import {
+  resolveComposerPlaceholder,
+  shouldAcceptComposerGhost,
+} from "./composerPromptSuggestionModel";
+import { useComposerPromptSuggestion } from "./useComposerPromptSuggestion";
 import { resolveComposerQueuePrimaryKind } from "./composerFollowupQueueModel";
 import {
   filterSlashCommandSuggestions,
@@ -315,7 +322,7 @@ import {
   type CodexToolActivityPills,
 } from "./conversationToolPresentation";
 import { humanizeReasoningPreview } from "./conversationReasoningPreview";
-import { VButton, VNativeInput, VNativeTextarea } from "../vui";
+import { VActionGroup, VButton, VNativeInput, VNativeTextarea } from "../vui";
 import styles from "./ConversationView.styles";
 
 const DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT = 3;
@@ -353,6 +360,49 @@ function ThoughtScrollBody({
       data-thought-scroll-streaming={streaming ? "true" : undefined}
     >
       <pre className={styles.codexTranscriptReasoningText}>{text}</pre>
+    </div>
+  );
+}
+
+/**
+ * Progress narration body: clamped preview while settled, full scrollable text
+ * while live or expanded. No box chrome so it reads lighter than the thinking lane.
+ */
+function ProgressScrollBody({
+  text,
+  streaming,
+  clamped,
+}: {
+  text: string;
+  streaming: boolean;
+  clamped: boolean;
+}) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    if (!streaming || clamped) {
+      return;
+    }
+    const node = scrollRef.current;
+    if (!node) {
+      return;
+    }
+    node.scrollTop = node.scrollHeight;
+  }, [clamped, streaming, text]);
+  if (clamped) {
+    return (
+      <div className={styles.codexTranscriptProgressClamped} data-codex-progress-clamped="true">
+        {text}
+      </div>
+    );
+  }
+  return (
+    <div
+      ref={scrollRef}
+      className={styles.codexTranscriptProgressBody}
+      data-codex-progress-body="true"
+      data-codex-progress-streaming={streaming ? "true" : undefined}
+    >
+      <pre className={styles.codexTranscriptProgressText}>{text}</pre>
     </div>
   );
 }
@@ -422,6 +472,7 @@ export function ConversationView({
   composerValue,
   composerPlaceholder,
   composerDisabled,
+  promptSuggestionEnabled = false,
   composerFocusSignal = "",
   onComposerFocusRequestSettled,
   composerActionDisabled,
@@ -464,9 +515,14 @@ export function ConversationView({
   onRemoveComposerReference,
   onEditUserMessage,
   onRegenerateAssistantMessage,
+  onSwitchMessageVersion,
+  branchVersionSwitchDisabled,
   regenerableAssistantMessageId,
   regenerateDisabled,
   regeneratePending,
+  onRetryTurn,
+  retryTurnDisabled,
+  retryTurnPending,
   onCancelComposerMode,
   onLoadEarlierMessages,
   onSubmit,
@@ -527,6 +583,19 @@ export function ConversationView({
   const [copiedAnswerMessageId, setCopiedAnswerMessageId] = useState("");
   const copyAnswerFeedbackTimerRef = useRef<number | null>(null);
   const resolvedActionMode = resolveComposerActionMode(composerActionMode);
+  const composerPromptSuggestion = useComposerPromptSuggestion(
+    {
+      sessionId,
+      enabled: promptSuggestionEnabled && !composerDisabled && !editingMessageId,
+      busy: resolvedActionMode === "stop" || composerPending,
+      draft: composerValue,
+      hasConversation: messages.length > 0,
+    },
+    (suggestion) => {
+      onComposerChange(suggestion);
+      requestAnimationFrame(() => composerInputRef.current?.focus());
+    },
+  );
   const hasComposerAttachments = composerAttachments.length > 0;
   const hasComposerReferences = composerReferences.length > 0;
   const attachmentInputDisabled = composerAttachmentInputDisabled ?? composerDisabled;
@@ -591,11 +660,18 @@ export function ConversationView({
   const resolvedBusyPrimaryLabel = queuePrimaryIsImmediate
     ? resolvedImmediateSteerLabel
     : resolvedQueueFollowupLabel;
-  const resolvedComposerPlaceholder = composerPlaceholder.trim()
+  const baseComposerPlaceholder = composerPlaceholder.trim()
     ? composerPlaceholder
     : resolvedActionMode === "stop"
       ? (followupQueue.length ? t("sessionBusyQueuedPlaceholder") : t("sessionBusyPlaceholder"))
       : composerPlaceholder;
+  const resolvedComposerPlaceholder = resolveComposerPlaceholder({
+    ghost: composerPromptSuggestion.ghost,
+    exampleCommand: composerPromptSuggestion.exampleCommand,
+    hasConversation: messages.length > 0,
+    lang,
+    fallback: baseComposerPlaceholder,
+  });
   // Edit/rerun and running-turn queue/steer are labeled primary pills. Do not mix in
   // round icon-only geometry (composerRoundButtonPrimary forces a square slot).
   const primaryActionClassName = primaryActionIsEditSubmit || primaryActionIsQueueSubmit
@@ -744,6 +820,20 @@ export function ConversationView({
     () => displayMessages.some((message) => isTurnErrorMessage(message)),
     [displayMessages],
   );
+  // A persisted turnError can outlive the answer it belongs to (provider error
+  // raised after the canonical final_answer was committed). Never duplicate the
+  // failure banner under a turn that already rendered its final answer.
+  const turnErrorSupersededByFinalAnswer = useMemo(() => {
+    const errorTurnId = String(turnError?.turnId || "").trim();
+    if (!errorTurnId) {
+      return false;
+    }
+    return displayMessages.some((message) => (
+      message.role === "assistant"
+      && String(message.turnId || "").trim() === errorTurnId
+      && Boolean(assistantFinalAnswerText(message).trim())
+    ));
+  }, [displayMessages, turnError]);
   const visibleMessageCount = resolveVisibleMessageCount({
     displayMessageCount: displayMessages.length,
     visibleLimit: visibleMessageLimit,
@@ -2171,18 +2261,10 @@ export function ConversationView({
       if (!text || isNoFinalAnswerStatusContent(text) || isStreamingStatusPlaceholderContent(text)) {
         return null;
       }
-      // Commentary is user-visible progress; reasoning_summary remains the thinking lane.
+      // Commentary is user-facing progress narration: its own lighter lane,
+      // while reasoning_summary remains the collapsible thinking lane.
       if (cell.phase === "commentary") {
-        return renderCodexThoughtScrollCell(message.id, {
-          cellId: cell.id,
-          sectionId: reasoningExpansionSectionId(cell),
-          text,
-          status: cell.status,
-          tone: cell.tone,
-          title: lang === "zh" ? "进展" : "Progress",
-          phase: "commentary",
-          channel: cell.channel,
-        });
+        return renderCodexProgressCell(message.id, cell, text);
       }
       return (
         <section
@@ -2473,6 +2555,68 @@ export function ConversationView({
           </span>
         </VButton>
         {expanded ? <ThoughtScrollBody text={fullText} streaming={isLive} /> : null}
+      </section>
+    );
+  }
+
+  /**
+   * Progress narration lane (commentary): user-facing updates stay visible in
+   * chronological order. Live text streams open; settled text keeps a clamped
+   * preview with an expand toggle instead of collapsing into a one-line stub.
+   */
+  function renderCodexProgressCell(
+    messageId: string,
+    cell: CodexTranscriptCell,
+    text: string,
+  ) {
+    const sectionId = reasoningExpansionSectionId(cell);
+    const isLive = cell.status === "running" || cell.status === "pending";
+    const defaultExpanded = isLive;
+    const expanded = getExpansionState(messageId, sectionId, defaultExpanded);
+    const toneClassName = styles[`codexTranscriptCell_${cell.tone}` as keyof typeof styles] ?? "";
+    return (
+      <section
+        key={cell.id}
+        className={[
+          styles.codexTranscriptCell,
+          styles.codexTranscriptProgressCell,
+          toneClassName,
+        ].filter(Boolean).join(" ")}
+        data-codex-transcript-cell-kind={cell.kind}
+        data-codex-transcript-cell-status={cell.status}
+        data-codex-transcript-cell-tone={cell.tone}
+        data-codex-transcript-cell-channel={cell.channel || undefined}
+        data-codex-transcript-cell-phase={cell.phase ?? ""}
+        data-codex-progress-cell="true"
+        data-conversation-part-key={cell.id}
+        data-progress-section={sectionId}
+        data-progress-expanded={expanded ? "true" : "false"}
+        role={isLive ? "status" : undefined}
+        aria-live={isLive ? "polite" : undefined}
+      >
+        <VButton
+          type="button"
+          contentLayout="plain"
+          className={styles.codexTranscriptProgressHeader}
+          aria-expanded={expanded}
+          aria-label={expanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden")}
+          onClick={(event) => {
+            event.stopPropagation();
+            toggleSection(messageId, sectionId, defaultExpanded);
+          }}
+        >
+          <span className={styles.codexTranscriptCellIcon} aria-hidden="true">
+            {isLive
+              ? <LoaderCircle className={styles.statusSpinner} size={14} />
+              : <MessageSquareText size={14} />}
+          </span>
+          <span className={styles.codexTranscriptReasoningHeaderBody}>
+            <span className={styles.codexTranscriptReasoningTitleRow}>
+              <span className={styles.codexTranscriptCellTitle}>{lang === "zh" ? "进展" : "Progress"}</span>
+            </span>
+          </span>
+        </VButton>
+        <ProgressScrollBody text={text} streaming={isLive} clamped={!expanded} />
       </section>
     );
   }
@@ -3839,7 +3983,7 @@ export function ConversationView({
       ) : null}
       {runningGuidanceActionsEnabled ? (
         <VButton
-          className={`${styles.sendButton} ${styles.composerRoundButton} ${styles.stopButton}`}
+          className={`${styles.composerRoundButton} ${styles.stopButton}`}
           isIconOnly
           isDisabled={resolvedActionDisabled}
           type="button"
@@ -3932,6 +4076,7 @@ export function ConversationView({
         </div>
       ) : null}
 
+      <div className={styles.timelineArea}>
       <div ref={timelineRef} className={styles.timeline}>
         {displayMessages.length === 0 && !activeTurnMessage ? (
           transcriptPending ? (
@@ -3997,6 +4142,8 @@ export function ConversationView({
                 resolveTurnAvatar={resolveTurnAvatar}
                 onEditUserMessage={onEditUserMessage}
                 onRegenerateAssistantMessage={onRegenerateAssistantMessage}
+                onSwitchMessageVersion={onSwitchMessageVersion}
+                branchVersionSwitchDisabled={branchVersionSwitchDisabled}
                 regenerableAssistantMessageId={regenerableAssistantMessageId}
                 regenerateDisabled={regenerateDisabled}
                 regeneratePending={regeneratePending}
@@ -4117,7 +4264,31 @@ export function ConversationView({
               && !turnErrorMessage
               && !assistantTurnIsStreaming(message)
               && Boolean(onRegenerateAssistantMessage)
-              && message.id === regenerableAssistantMessageId;
+              // Any settled answer on a branch can regenerate; messages without
+              // a journal node id keep the legacy latest-only fallback.
+              && (Boolean(message.nodeId) || message.id === regenerableAssistantMessageId);
+            const branchInfo = message.branch;
+            const siblingNodeIds = Array.isArray(branchInfo?.siblingNodeIds)
+              ? branchInfo.siblingNodeIds.filter((value): value is string => Boolean(value))
+              : [];
+            const siblingCount = Math.max(
+              Number(branchInfo?.siblingCount ?? 0) || 0,
+              siblingNodeIds.length,
+            );
+            const siblingIndex = Number(branchInfo?.siblingIndex ?? 0) || 0;
+            const currentNodeId = String(message.nodeId || "").trim();
+            const showVersionSwitcher = Boolean(onSwitchMessageVersion)
+              && siblingCount > 1
+              && siblingNodeIds.length > 1
+              && siblingIndex >= 1
+              && siblingIndex <= siblingNodeIds.length
+              && Boolean(currentNodeId)
+              && siblingNodeIds.includes(currentNodeId);
+            const versionSwitchDisabled = Boolean(branchVersionSwitchDisabled);
+            const previousSiblingNodeId = siblingIndex > 1 ? siblingNodeIds[siblingIndex - 2] : "";
+            const nextSiblingNodeId = siblingIndex < siblingNodeIds.length
+              ? siblingNodeIds[siblingIndex]
+              : "";
             const showResponseSpinner = isResponseStreaming && !hasActiveProcess;
             const defaultResponseExpanded = assistantTurnIsStreaming(message) || defaultExpandedResponseIds.has(message.id);
             const responseExpanded = getExpansionState(message.id, "response", defaultResponseExpanded);
@@ -4274,6 +4445,34 @@ export function ConversationView({
                 metaActions={
                   <>
                     {message.timestamp ? <span>{formatTimestamp(message.timestamp)}</span> : null}
+                    {showVersionSwitcher ? (
+                      <VActionGroup
+                        ariaLabel={t("branchVersionLabel")}
+                        className={styles.turnVersionSwitcher}
+                      >
+                        <VButton
+                          type="button"
+                          className={styles.turnIconButton}
+                          onClick={() => onSwitchMessageVersion?.(message, previousSiblingNodeId)}
+                          isDisabled={versionSwitchDisabled || !previousSiblingNodeId}
+                          title={t("switchBranchVersionPrevious")}
+                          aria-label={t("switchBranchVersionPrevious")}
+                          isIconOnly
+                          icon={<ChevronLeft size={14}/>} />
+                        <span className={styles.turnVersionLabel} aria-live="polite">
+                          {`${siblingIndex}/${siblingCount}`}
+                        </span>
+                        <VButton
+                          type="button"
+                          className={styles.turnIconButton}
+                          onClick={() => onSwitchMessageVersion?.(message, nextSiblingNodeId)}
+                          isDisabled={versionSwitchDisabled || !nextSiblingNodeId}
+                          title={t("switchBranchVersionNext")}
+                          aria-label={t("switchBranchVersionNext")}
+                          isIconOnly
+                          icon={<ChevronRight size={14}/>} />
+                      </VActionGroup>
+                    ) : null}
                     {copyableAnswerText ? (
                       <VButton
                         type="button"
@@ -4296,7 +4495,7 @@ export function ConversationView({
                         isIconOnly
                         icon={<RefreshCw size={14}/>} />
                     ) : null}
-                    {userAuthoredMessage && !steerGuidanceMessage && message.id === latestUserMessageId && onEditUserMessage ? (
+                    {userAuthoredMessage && !steerGuidanceMessage && onEditUserMessage ? (
                       <VButton
                         type="button"
                         className={
@@ -4460,6 +4659,45 @@ export function ConversationView({
                 style={{ height: timelineVirtualRange.bottomSpacerPx }}
               />
             ) : null}
+            {turnError?.message && !hasVisibleTurnErrorMessage && !turnErrorSupersededByFinalAnswer ? (
+              <div className={styles.turnError} role="status" aria-live="polite">
+                <div className={styles.turnErrorText}>
+                  <span className={styles.turnErrorLabel}>{t("turnErrorLabel")}</span>
+                  <span>{summarizeCurrentTurnError(turnError, lang)}</span>
+                  <details className={styles.turnErrorDiagnostics}>
+                    <summary className={styles.turnErrorDiagnosticsSummary}>
+                      {lang === "zh" ? "诊断详情" : "Diagnostics"}
+                    </summary>
+                    <div className={styles.turnErrorDiagnosticsBody}>
+                      <span className={styles.turnErrorDetail}>{turnError.message}</span>
+                      {buildCurrentTurnErrorRows(turnError, lang).map((row) => (
+                        <span key={`${row.label}-${row.value}`} className={styles.turnErrorDetail}>
+                          {row.label}: {row.value}
+                        </span>
+                      ))}
+                    </div>
+                  </details>
+                </div>
+                <div className={styles.turnErrorActions}>
+                  {onRetryTurn ? (
+                    <VButton
+                      type="button"
+                      contentLayout="plain"
+                      className={styles.turnErrorRetryButton}
+                      onClick={onRetryTurn}
+                      isDisabled={retryTurnDisabled}
+                      isPending={retryTurnPending}
+                      title={lang === "zh" ? "重试这一轮" : "Retry this turn"}
+                      aria-label={lang === "zh" ? "重试这一轮" : "Retry this turn"}
+                    >
+                      <RefreshCw size={12}/>
+                      <span>{lang === "zh" ? "重试" : "Retry"}</span>
+                    </VButton>
+                  ) : null}
+                  {turnError.errorType ? <span className={styles.turnErrorType}>{turnError.errorType}</span> : null}
+                </div>
+              </div>
+            ) : null}
           </div>
         )}
       </div>
@@ -4477,33 +4715,11 @@ export function ConversationView({
           <span>{t("backToBottom")}</span>
         </VButton>
       ) : null}
+      </div>
 
       {toolApproval && !toolApprovalConsumedRef.current ? (
         <div className={styles.toolApprovalFallback} data-codex-tool-approval-fallback="true">
           {toolApproval.content}
-        </div>
-      ) : null}
-
-      {turnError?.message && !hasVisibleTurnErrorMessage ? (
-        <div className={styles.turnError} role="status" aria-live="polite">
-          <div className={styles.turnErrorText}>
-            <span className={styles.turnErrorLabel}>{t("turnErrorLabel")}</span>
-            <span>{summarizeCurrentTurnError(turnError, lang)}</span>
-            <details className={styles.turnErrorDiagnostics}>
-              <summary className={styles.turnErrorDiagnosticsSummary}>
-                {lang === "zh" ? "诊断详情" : "Diagnostics"}
-              </summary>
-              <div className={styles.turnErrorDiagnosticsBody}>
-                <span className={styles.turnErrorDetail}>{turnError.message}</span>
-                {buildCurrentTurnErrorRows(turnError, lang).map((row) => (
-                  <span key={`${row.label}-${row.value}`} className={styles.turnErrorDetail}>
-                    {row.label}: {row.value}
-                  </span>
-                ))}
-              </div>
-            </details>
-          </div>
-          {turnError.errorType ? <span className={styles.turnErrorType}>{turnError.errorType}</span> : null}
         </div>
       ) : null}
 
@@ -4664,6 +4880,7 @@ export function ConversationView({
             value={composerValue}
             disabled={composerDisabled && resolvedActionMode !== "stop"}
             placeholder={resolvedComposerPlaceholder}
+            data-composer-prompt-suggestion={composerPromptSuggestion.ghost ? "true" : undefined}
             aria-label={lang === "zh" ? "发送消息" : "Message"}
             aria-controls={showSlashSuggestions ? slashSuggestionListId : undefined}
             aria-expanded={showSlashSuggestions ? true : undefined}
@@ -4681,6 +4898,25 @@ export function ConversationView({
               onAddComposerAttachments(files);
             }}
             onKeyDown={(event) => {
+              if (
+                shouldAcceptComposerGhost({
+                  ghost: composerPromptSuggestion.ghost,
+                  key: event.key,
+                  shiftKey: event.shiftKey,
+                  ctrlKey: event.ctrlKey,
+                  metaKey: event.metaKey,
+                  altKey: event.altKey,
+                })
+              ) {
+                event.preventDefault();
+                composerPromptSuggestion.acceptGhost();
+                return;
+              }
+              if (composerPromptSuggestion.ghost && event.key === "Escape") {
+                event.preventDefault();
+                composerPromptSuggestion.dismissGhost();
+                return;
+              }
               if (
                 shouldSubmitComposerOnKeydown({
                   key: event.key,

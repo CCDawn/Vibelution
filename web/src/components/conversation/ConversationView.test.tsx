@@ -108,6 +108,7 @@ function renderConversation(
     processDisplayMode?: ConversationProcessDisplayMode;
     useDefaultProcessDisplayMode?: boolean;
     activeTurnMessage?: ConversationMessage;
+    onSwitchMessageVersion?: (message: ConversationMessage, targetNodeId: string) => void;
     slashCommandSuggestions?: Array<{
       directoryName: string;
       name?: string;
@@ -177,6 +178,7 @@ function renderConversation(
         onInterruptGuidance={options.onInterruptGuidance}
         onCancelComposerMode={options.onCancelComposerMode}
         onEditUserMessage={() => undefined}
+        onSwitchMessageVersion={options.onSwitchMessageVersion}
       />
     </QueryClientProvider>,
   );
@@ -283,10 +285,18 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.answerOnlyProcessPreview).not.toContain("[overflow-wrap:anywhere]");
   });
 
-  it("keeps the back-to-bottom control floating and content-sized", () => {
-    expect(styles.surface).toContain("relative");
+  it("anchors the back-to-bottom control to the timeline area above the composer", () => {
+    expect(styles.timelineArea).toContain("relative");
+    expect(styles.timelineArea).toContain("flex-1");
+    expect(styles.timelineArea).toContain("min-h-0");
+    const timelineAreaSource = conversationViewSource.slice(
+      conversationViewSource.indexOf("<div className={styles.timelineArea}>"),
+      conversationViewSource.indexOf("{toolApproval && !toolApprovalConsumedRef.current"),
+    );
+    expect(timelineAreaSource).toContain("styles.backToBottomButton");
     expect(styles.backToBottomButton).toContain("absolute");
-    expect(styles.backToBottomButton).toContain("bottom-[calc(var(--vui-control-height-md)_+_18px)]");
+    expect(styles.backToBottomButton).toContain("bottom-2");
+    expect(styles.backToBottomButton).not.toContain("--vui-control-height-md");
     expect(styles.backToBottomButton).toContain("left-1/2");
     expect(styles.backToBottomButton).toContain("-translate-x-1/2");
     expect(styles.backToBottomButton).toContain("z-20");
@@ -582,7 +592,10 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.composerAttachmentName).toContain("truncate");
     expect(styles.composerAttachmentRemoveButton).toContain("!w-6");
     expect(styles.composerFieldCodex).toContain("[@media(max-height:520px)]:min-h-[84px]");
-    expect(styles.composerFieldCodex).toContain("[@media(max-height:520px)]:[&_textarea]:min-h-[44px]");
+    expect(styles.composerFieldCodex).toContain("[@media(max-height:520px)]:[&_textarea]:!min-h-[44px]");
+    expect(styles.composerFieldCodex).toContain("!flex !flex-col");
+    expect(styles.composerFieldCodex).toContain("[&_textarea]:!min-h-[48px]");
+    expect(styles.composerFieldCodex).not.toContain("grid-rows-");
 
     const composerActionStackSource = conversationViewSource.slice(
       conversationViewSource.indexOf("const composerActions = ("),
@@ -1199,6 +1212,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain('aria-label="打断引导"');
     expect(html).toContain('aria-label="终止"');
     expect(html.match(/composerRoundButton/g)?.length).toBe(1);
+    expect(html).not.toContain("sendButton");
   });
 
   it("shows queued follow-ups above the composer and offers immediate steer when the draft is empty", () => {
@@ -1219,7 +1233,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain('aria-label="终止"');
   });
 
-  it("renders edit controls only for the latest user message", () => {
+  it("renders edit controls for every user message on the active path", () => {
     const html = renderConversation([
       {
         id: "message-user-1",
@@ -1241,9 +1255,61 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html.match(/aria-label="Edit and resend"/g)?.length).toBe(1);
+    expect(html.match(/aria-label="Edit and resend"/g)?.length).toBe(2);
     expect(html).toContain("Second prompt");
     expect(html).toContain("First prompt");
+  });
+
+  it("renders message version chevrons for a branch with siblings", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-user-2",
+          role: "user",
+          content: "Second prompt",
+          timestamp: "2026-05-22T00:02:00Z",
+          nodeId: "node-user-2",
+          branch: {
+            branchId: "branch-b",
+            parentNodeId: "node-root",
+            siblingCount: 2,
+            siblingIndex: 2,
+            siblingNodeIds: ["node-user-1", "node-user-2"],
+            active: true,
+          },
+        },
+      ],
+      { onSwitchMessageVersion: () => undefined },
+    );
+
+    expect(html).toContain('aria-label="上一版本"');
+    expect(html).toContain('aria-label="下一版本"');
+    expect(html).toContain(">2/2</span>");
+  });
+
+  it("hides message version chevrons for a single-version message", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-user-1",
+          role: "user",
+          content: "Only prompt",
+          timestamp: "2026-05-22T00:00:00Z",
+          nodeId: "node-user-1",
+          branch: {
+            branchId: "main",
+            parentNodeId: "",
+            siblingCount: 1,
+            siblingIndex: 1,
+            siblingNodeIds: ["node-user-1"],
+            active: true,
+          },
+        },
+      ],
+      { onSwitchMessageVersion: () => undefined },
+    );
+
+    expect(html).not.toContain('aria-label="上一版本"');
   });
 
   it("renders running-turn steer records without an edit control", () => {
@@ -1411,7 +1477,13 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("下轮启用心智模型");
     expect(html).not.toContain("发送选项");
   });it("renders current turn error provider diagnostics with HTTP status", () => {
-    const html = renderConversation([], {
+    const userMessage: ConversationMessage = {
+      id: "message-user",
+      role: "user",
+      content: "检查这条失败",
+      timestamp: "2026-05-22T00:00:00Z",
+    };
+    const html = renderConversation([userMessage], {
       turnError: {
         message: "模型服务上游暂时失败，本轮没有完成。",
         errorType: "provider_upstream_error",
@@ -1430,7 +1502,8 @@ describe("ConversationView edit resend affordance", () => {
       },
     });
 
-    expect(html).toContain("turnErrorText");
+    expect(html).toContain("检查这条失败");
+    expect(html.match(/turnErrorText/g)?.length).toBe(1);
     expect(html).toContain("诊断详情");
     expect(html).toContain("<details");
     expect(html).toContain("状态码: 503");
@@ -1453,7 +1526,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("最近控制信号");
   });
 
-  it("hides completed continue signals from the main conversation panel", () => {
+  it("hides continue signals from the main conversation panel", () => {
     const continueSignal: ChatNextStateSignalSummary = {
       signalId: "chat-signal-continue",
       sessionId: "session-1",
@@ -1469,7 +1542,7 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(shouldShowNextStateSignalInConversation(continueSignal, "ready")).toBe(false);
     expect(shouldShowNextStateSignalInConversation(continueSignal, "completed")).toBe(false);
-    expect(shouldShowNextStateSignalInConversation(continueSignal, "running")).toBe(true);
+    expect(shouldShowNextStateSignalInConversation(continueSignal, "running")).toBe(false);
 
     const html = renderConversation([], { nextStateSignals: [continueSignal] });
     expect(html).not.toContain("最近控制信号");

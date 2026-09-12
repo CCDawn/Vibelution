@@ -332,6 +332,34 @@ def _commit_session_turn_runtime_state(
         return True
 
 
+def _session_turn_canonical_final_answer_text(session_id: str, turn_id: str) -> str:
+    """Return a turn's committed canonical final-answer text, if any.
+
+    A committed ``final_answer`` assistant item is the turn's own completed
+    answer. A provider error raised later in the same turn must not overwrite
+    that verdict with a ``turn_error`` card.
+    """
+
+    s = _service()
+    normalized_turn_id = str(turn_id or "").strip()
+    if not normalized_turn_id:
+        return ""
+    canonical_turn_items = s.conversation_turn_items_from_events(
+        s._load_session_conversation_events_cached(session_id),
+        turn_id=normalized_turn_id,
+    )
+    for item in canonical_turn_items:
+        if (
+            item.get("kind") == "assistant_message"
+            and item.get("channel") == "answer"
+            and item.get("phase") == "final_answer"
+        ):
+            text = str(item.get("text") or "").strip()
+            if text:
+                return text
+    return ""
+
+
 def _persist_session_turn_result(
     session_id: str,
     result: Any,
@@ -425,7 +453,17 @@ def _persist_session_turn_result(
         result_stop_requested
         and stop_reason == _CHALLENGE_DEADLINE_PROBLEM_CODE
     )
-    if s._is_provider_failed_result(result):
+    provider_failure = s._is_provider_failed_result(result)
+    committed_final_answer_text = (
+        _session_turn_canonical_final_answer_text(session_id, turn_id)
+        if provider_failure
+        else ""
+    )
+    # A provider error raised after the turn already committed its canonical
+    # final answer is runtime noise: the user has the answer, so the error must
+    # not reopen the turn as failed or surface a stale turn_error card.
+    provider_failure_after_final_answer = bool(provider_failure and committed_final_answer_text)
+    if provider_failure and not provider_failure_after_final_answer:
         raw_error = s._provider_failure_raw_error(result)
         error_type = s._failure_error_type(raw_error)
         turn_error = s._make_session_turn_error(
@@ -436,6 +474,13 @@ def _persist_session_turn_result(
             llm_failure=result.get("llm_failure") if isinstance(result.get("llm_failure"), dict) else None,
             llm_payload_trace=s._current_session_live_llm_payload_trace(session_id),
         )
+        failure_feedback_events = s._extract_chat_feedback_events(result, final_status="failed")
+        retry_history = s._build_session_turn_retry_history(
+            result,
+            feedback_events=failure_feedback_events,
+        )
+        if retry_history:
+            turn_error["retry_history"] = retry_history
         failure_message = str(turn_error.get("message") or "").strip()
         context_composition = s._normalize_session_context_composition(
             result.get("context_composition") if isinstance(result, dict) else None
@@ -449,7 +494,7 @@ def _persist_session_turn_result(
                 partial_reply,
                 s._extract_chat_tool_calls(result),
                 thought=s._extract_chat_thought(result, partial_reply),
-                feedback_events=s._extract_chat_feedback_events(result, final_status="failed"),
+                feedback_events=failure_feedback_events,
                 mental_snapshot=s._build_turn_mental_snapshot(
                     result,
                     lang,
@@ -623,6 +668,31 @@ def _persist_session_turn_result(
             last_preview=str(turn_error.get("message") or ""),
         )
         return
+    if provider_failure_after_final_answer:
+        s._record_session_turn_lifecycle_event(
+            session_id,
+            "provider_failure_after_final_answer",
+            turn_id=turn_id,
+            level="warning",
+            outcome="ignored",
+            fields={
+                "errorType": s._failure_error_type(s._provider_failure_raw_error(result)),
+                "hasCommittedFinalAnswer": True,
+            },
+        )
+        result = {
+            **(result if isinstance(result, dict) else {}),
+            "status": "completed",
+            "outcome": "done",
+            "task_outcome": "done",
+            "error": "",
+            "raw_error": "",
+            "rawError": "",
+            "blocked_reason": "",
+            "llm_failure": None,
+            "raw_output": committed_final_answer_text,
+            "summary": committed_final_answer_text,
+        }
     assistant_text = (
         s.text_for(
             lang,
@@ -681,6 +751,10 @@ def _persist_session_turn_result(
     )
     cache_composition = s._build_session_cache_composition(turn_id, llm_usage)
     final_status = s._chat_turn_result_status(result_status, result, stop_requested=stop_requested)
+    if provider_failure_after_final_answer:
+        # The canonical answer is already committed; keep the turn completed
+        # instead of letting the late provider error flip the terminal verdict.
+        final_status = "completed"
     # Challenge logical-deadline cancellation is an adapter-owned terminal
     # outcome, not an operator stop.  Keep ordinary stop semantics unchanged,
     # but never project this bounded deadline outcome through ``ready``.
@@ -975,17 +1049,7 @@ def _persist_session_turn_result(
             done=True,
         )
     _append_missing_canonical_result_items(session_id, turn_id, assistant_entry)
-    canonical_turn_items = s.conversation_turn_items_from_events(
-        s._load_session_conversation_events_cached(session_id),
-        turn_id=turn_id,
-    )
-    has_canonical_final = any(
-        item.get("kind") == "assistant_message"
-        and item.get("channel") == "answer"
-        and item.get("phase") == "final_answer"
-        and str(item.get("text") or "").strip()
-        for item in canonical_turn_items
-    )
+    has_canonical_final = bool(_session_turn_canonical_final_answer_text(session_id, turn_id))
     if not has_canonical_final and not runtime_failed:
         s._append_session_conversation_event(
             session_id,

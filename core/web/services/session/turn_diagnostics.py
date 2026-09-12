@@ -1842,6 +1842,93 @@ def _append_session_workspace_log(
         )
 
 
+def _normalize_session_turn_retry_history(value: Any) -> list[dict[str, Any]]:
+    """Bounded, de-duplicated retry trail kept on the settled turn error."""
+
+    s = _service()
+    items: list[dict[str, Any]] = []
+    seen: set[tuple[int, str]] = set()
+    for raw in list(value or []):
+        if not isinstance(raw, dict):
+            continue
+        attempt = s._coerce_nonnegative_int(raw.get("attempt"))
+        if attempt <= 0:
+            continue
+        max_attempts = s._coerce_nonnegative_int(raw.get("maxAttempts") or raw.get("max_attempts"))
+        category = s.trim_lines(raw.get("category") or "", max_lines=1)
+        key = (attempt, category)
+        if key in seen:
+            continue
+        seen.add(key)
+        entry: dict[str, Any] = {
+            "attempt": attempt,
+            "maxAttempts": max(max_attempts, attempt),
+        }
+        if category:
+            entry["category"] = category
+        items.append(entry)
+    items.sort(key=lambda item: int(item.get("attempt") or 0))
+    return items[-8:]
+
+
+def _build_session_turn_retry_history(
+    result: Any,
+    *,
+    feedback_events: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Compact retry trail for the settled provider-failure surface.
+
+    Live retry statuses already travel through the UI; the settled failure
+    surface keeps only this bounded trail so an exhausted retry budget stays
+    explainable after the turn ends.
+    """
+
+    s = _service()
+    events = list(feedback_events or [])
+    if not events and isinstance(result, dict):
+        events = s._extract_chat_feedback_events(result, final_status="failed")
+    retries: list[dict[str, Any]] = []
+    for item in events:
+        if not isinstance(item, dict) or str(item.get("kind") or "").strip() != "status":
+            continue
+        name = str(item.get("name") or "").strip().lower()
+        if name not in {"model_retry", "retrying"}:
+            continue
+        attempt = s._coerce_nonnegative_int(item.get("attempt"))
+        if attempt <= 0:
+            continue
+        max_attempts = s._coerce_nonnegative_int(item.get("maxAttempts") or item.get("max_attempts"))
+        entry: dict[str, Any] = {
+            "attempt": attempt,
+            "maxAttempts": max(max_attempts, attempt),
+        }
+        category = s.trim_lines(item.get("category") or "", max_lines=1)
+        if category:
+            entry["category"] = category
+        retries.append(entry)
+    llm_failure = (
+        result.get("llm_failure")
+        if isinstance(result, dict) and isinstance(result.get("llm_failure"), dict)
+        else {}
+    )
+    final_attempt = s._coerce_nonnegative_int(llm_failure.get("attempts"))
+    if final_attempt > 1:
+        # The last attempt fails instead of retrying, so it has no "retrying"
+        # status event; append it so the trail covers the exhausted budget.
+        final_entry: dict[str, Any] = {
+            "attempt": final_attempt,
+            "maxAttempts": max(
+                s._coerce_nonnegative_int(llm_failure.get("max_attempts") or llm_failure.get("maxAttempts")),
+                final_attempt,
+            ),
+        }
+        final_category = s.trim_lines(llm_failure.get("category") or "", max_lines=1)
+        if final_category:
+            final_entry["category"] = final_category
+        retries.append(final_entry)
+    return _normalize_session_turn_retry_history(retries)
+
+
 def _normalize_session_turn_error(value: Any) -> dict[str, Any] | None:
     s = _service()
     if not isinstance(value, dict):
@@ -1872,6 +1959,9 @@ def _normalize_session_turn_error(value: Any) -> dict[str, Any] | None:
         # Additive classifier diagnostics (empty for legacy failures).
         "failureCategory": str(value.get("failureCategory") or value.get("failure_category") or "").strip(),
         "failureDisposition": str(value.get("failureDisposition") or value.get("failure_disposition") or "").strip(),
+        "retryHistory": _normalize_session_turn_retry_history(
+            value.get("retryHistory") or value.get("retry_history")
+        ),
     }
 
 

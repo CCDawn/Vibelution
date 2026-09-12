@@ -607,98 +607,43 @@ body {
 .plus-menu-preview-plus-menu {
   display: grid;
   gap: 0;
-  width: auto;
-  max-width: min(calc(100vw - 2rem), 44rem);
+  width: min(20rem, calc(100vw - 2rem));
   max-height: min(70vh, 560px);
-  overflow: visible;
+  overflow: hidden;
   overscroll-behavior: contain;
   padding: 0;
   border-radius: var(--radius-panel);
   border: 1px solid var(--vui-border-strong);
   background: color-mix(in srgb, var(--vui-surface-panel) 97%, var(--vui-surface-raised) 3%);
-  box-shadow:
-    var(--vui-elevation-overlay),
-    0 0 0 1px color-mix(in srgb, var(--accent-cool) 16%, transparent);
+  box-shadow: var(--vui-elevation-overlay);
 }
 
-.plus-menu-preview-plus-menu-shell {
-  position: relative;
-  display: flex;
-  align-items: stretch;
-  width: max-content;
-  min-width: 0;
-}
-
-.plus-menu-preview-plus-menu-primary,
-.plus-menu-preview-menu-submenu-flyout {
-  min-width: 12.5rem;
+.plus-menu-preview-menu-body {
+  display: grid;
+  align-content: start;
+  gap: 0;
+  width: 100%;
   max-height: min(70vh, 560px);
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 6px;
+  outline: none;
 }
 
-.plus-menu-preview-plus-menu-primary {
+.plus-menu-preview-menu-section {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  align-content: start;
-  width: 15rem;
-  flex: 0 0 15rem;
+  gap: 2px;
+  padding-top: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--vui-border-subtle) 88%, transparent);
 }
 
-.plus-menu-preview-menu-submenu-flyout {
-  width: 18rem;
-  flex: 0 0 18rem;
-  border-left: 1px solid color-mix(in srgb, var(--vui-border-subtle) 88%, transparent);
-  background: color-mix(in srgb, var(--vui-surface-panel) 98%, var(--vui-surface-raised) 2%);
+.plus-menu-preview-menu-section:first-child {
+  padding-top: 0;
+  border-top: 0;
 }
 
-.plus-menu-preview-menu-cluster-row {
-  display: flex !important;
-  width: 100%;
-  justify-content: flex-start !important;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: calc(var(--radius-control) - 2px);
-  background: transparent;
-  color: var(--fg-secondary);
-  text-align: left;
-  min-height: 44px;
-  white-space: nowrap;
-}
-
-.plus-menu-preview-menu-cluster-row [data-slot="cluster-icon"] {
-  display: inline-grid;
-  width: 28px;
-  height: 28px;
-  flex: 0 0 28px;
-  place-items: center;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--vui-surface-raised) 86%, transparent);
-  color: var(--fg-tertiary);
-}
-
-.plus-menu-preview-menu-cluster-row:hover,
-.plus-menu-preview-menu-cluster-row-active {
-  background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
-  color: var(--fg-primary);
-}
-
-.plus-menu-preview-menu-cluster-row:hover [data-slot="cluster-icon"],
-.plus-menu-preview-menu-cluster-row-active [data-slot="cluster-icon"] {
-  color: var(--accent-cool-2);
-}
-
-.plus-menu-preview-menu-cluster-chevron {
-  margin-left: auto;
-  flex: 0 0 auto;
-  color: var(--fg-tertiary);
-}
-
-.plus-menu-preview-menu-group-label {
-  padding: 8px 10px 4px;
+.plus-menu-preview-menu-section-title {
+  padding: 4px 10px 2px;
   font-size: var(--vui-font-2xs);
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -709,13 +654,13 @@ body {
   width: 100%;
   justify-content: flex-start !important;
   gap: 8px;
-  padding: 7px 10px;
+  padding: 6px 10px;
   border: 0;
   border-radius: calc(var(--radius-control) - 2px);
   background: transparent;
   color: var(--fg-secondary);
   text-align: left;
-  min-height: 34px;
+  min-height: 36px;
 }
 
 .plus-menu-preview-menu-item:hover {
@@ -739,25 +684,12 @@ body {
   color: var(--fg-tertiary);
 }
 
-.plus-menu-preview-menu-item-toggle {
+.plus-menu-preview-menu-check {
   flex: 0 0 auto;
   margin-left: auto;
-  font-size: var(--vui-font-2xs);
-  font-weight: 700;
-  color: var(--fg-tertiary);
-}
-
-.plus-menu-preview-menu-item-toggle-on {
+  display: inline-grid;
+  place-items: center;
   color: var(--accent-cool-2);
-}
-
-.plus-menu-preview-menu-item-danger {
-  color: var(--state-error);
-}
-
-.plus-menu-preview-menu-item-danger:hover {
-  background: color-mix(in srgb, var(--state-error) 12%, transparent);
-  color: var(--state-error);
 }
 
 .plus-menu-preview-group-dialog {

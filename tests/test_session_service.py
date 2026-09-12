@@ -7,6 +7,7 @@ import pytest
 
 from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_MESSAGE,
+    EVENT_BRANCH_REBASE,
     EVENT_TURN_COMPLETED,
     EVENT_TURN_FAILED,
     EVENT_TURN_INTERRUPTED,
@@ -290,7 +291,7 @@ def test_active_session_summary_normalizes_only_the_active_conversation(tmp_path
     monkeypatch.setattr(
         session_service,
         "_build_session_summary",
-        lambda conversation, *, hydrate_agent: {"id": conversation["id"]},
+        lambda conversation, *, hydrate_agent, **__: {"id": conversation["id"]},
     )
 
     summary = session_service.get_active_session_summary()
@@ -807,11 +808,10 @@ def test_session_turn_progress_live_output_closes_previous_statuses(monkeypatch,
     assert live_state is not None
     progress_events = [event for event in live_state.feedback_events if event["kind"] == "status"]
     assert [event["name"] for event in progress_events] == [
-        "context_prepare",
-        "agent_prepare",
-        "model_request",
+        "working",
+        "thinking",
     ]
-    assert [event["status"] for event in progress_events] == ["done", "done", "running"]
+    assert [event["status"] for event in progress_events] == ["done", "running"]
 
 
 def test_session_turn_progress_live_output_does_not_block_on_durable_work_run(monkeypatch, tmp_path):
@@ -838,7 +838,7 @@ def test_session_turn_progress_live_output_does_not_block_on_durable_work_run(mo
         session_service._set_session_running("session-live", False, turn_id="turn-progress")
 
     assert live_state is not None
-    assert live_state.stage == "context_prepare"
+    assert live_state.stage == "working"
     assert durable_updates == []
 
 
@@ -988,6 +988,32 @@ def test_session_turn_prepare_timing_log_fields_are_bounded_and_non_sensitive():
         "llmKeyEnvAlreadyPresentCount": 2,
         "llmKeyEnvMissingCount": 3,
     }
+
+
+def test_session_turn_context_prepare_timings_extend_prepare_fields():
+    timings = session_service._session_turn_context_prepare_timings(
+        {
+            "totalPrepareMs": 12000,
+            "agentContextBuildMs": 61,
+            "agentContextBuild": {"nested": 1},
+            "syncedEnvNames": ["DO_NOT_LOG"],
+        },
+        history_assembly_ms=314,
+        executor_wait_ms=159,
+    )
+
+    assert timings == {
+        "totalPrepareMs": 12000,
+        "agentContextBuildMs": 61,
+        "historyAssemblyMs": 314,
+        "executorWaitMs": 159,
+    }
+
+    assert session_service._session_turn_context_prepare_timings(
+        {"totalPrepareMs": 1},
+        history_assembly_ms=None,
+        executor_wait_ms="not-a-number",
+    ) == {"totalPrepareMs": 1}
 
 
 def test_running_snapshot_throttle_skips_detail_hydration(monkeypatch):
@@ -1313,6 +1339,82 @@ def test_reconcile_preserves_open_ledger_for_durable_active_work_run(monkeypatch
 
     assert [event.event_type for event in load_conversation_events(tmp_path, "session-live")] == [
         EVENT_TURN_STARTED,
+    ]
+
+
+def test_reconcile_does_not_interrupt_completed_turn_after_head_select(monkeypatch, tmp_path):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_active_chat_turn_work_run_for_session", lambda *_args, **_kwargs: None)
+
+    append_conversation_event(tmp_path, "session-live", "turn-1", EVENT_TURN_STARTED, status="running")
+    user = append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-1",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "第一版问题"},
+    )
+    assistant = append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-1",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "1"},
+    )
+    append_conversation_event(tmp_path, "session-live", "turn-1", EVENT_TURN_COMPLETED, status="completed")
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-2",
+        EVENT_BRANCH_REBASE,
+        status="recorded",
+        payload={"operation": "edit", "branchId": "branch-2", "fromEventId": user.event_id, "replacedTurnIds": []},
+        parent_event_id=user.event_id,
+    )
+    append_conversation_event(
+        tmp_path, "session-live", "turn-2", EVENT_USER_MESSAGE, status="recorded", payload={"content": "第二版问题"}
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-2",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "2"},
+    )
+    append_conversation_event(tmp_path, "session-live", "turn-2", EVENT_TURN_COMPLETED, status="completed")
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-1",
+        EVENT_BRANCH_REBASE,
+        status="recorded",
+        payload={
+            "operation": "head_select",
+            "branchId": "main",
+            "fromEventId": assistant.event_id,
+            "replacedTurnIds": [],
+        },
+        parent_event_id=assistant.event_id,
+    )
+
+    session_service._reconcile_stale_session_ledger(
+        "session-live",
+        reason="detail_loaded_after_restart",
+    )
+
+    assert [event.event_type for event in load_conversation_events(tmp_path, "session-live")] == [
+        EVENT_TURN_STARTED,
+        EVENT_USER_MESSAGE,
+        EVENT_ASSISTANT_MESSAGE,
+        EVENT_TURN_COMPLETED,
+        EVENT_BRANCH_REBASE,
+        EVENT_USER_MESSAGE,
+        EVENT_ASSISTANT_MESSAGE,
+        EVENT_TURN_COMPLETED,
+        EVENT_BRANCH_REBASE,
     ]
 
 

@@ -424,6 +424,10 @@ def _codex_transcript_cell_from_operation_source(
             "executionStartedAtEpochMs": s._coerce_tool_number(
                 source.get("executionStartedAtEpochMs") or source.get("execution_started_at_epoch_ms")
             ),
+            "attempt": s._coerce_nonnegative_int(source.get("attempt")) or None,
+            "maxAttempts": s._coerce_nonnegative_int(
+                source.get("maxAttempts") or source.get("max_attempts")
+            ) or None,
         }
     )
     if kind != "tool":
@@ -1315,6 +1319,10 @@ def _session_turn_item_from_codex_cell(
             "executionStartedAtEpochMs": s._coerce_tool_number(
                 cell.get("executionStartedAtEpochMs") or cell.get("execution_started_at_epoch_ms")
             ),
+            "attempt": s._coerce_nonnegative_int(cell.get("attempt")) or None,
+            "maxAttempts": s._coerce_nonnegative_int(
+                cell.get("maxAttempts") or cell.get("max_attempts")
+            ) or None,
             "turnId": turn_id,
             "messageId": message_id,
             "source": source,
@@ -1734,6 +1742,83 @@ def update_chat_session_title(session_id: str, title: str) -> dict:
                 tag="LOGS",
             )
     return detail
+
+
+def apply_generated_session_title(session_id: str, title: str, *, source: str = "auto") -> bool:
+    """Apply an auto-generated title only while the session still shows a placeholder.
+
+    This is the compare-and-swap guard for background title generation: a manual
+    rename wins permanently, and child sessions keep their ``task_title`` owner.
+    """
+
+    s = _service()
+    conversation_id = str(session_id or "").strip()
+    if not conversation_id:
+        return False
+
+    normalized_title = s.trim_lines(title or "", max_lines=1).strip()
+    if not normalized_title:
+        return False
+    if len(normalized_title) > 120:
+        normalized_title = normalized_title[:120].rstrip()
+
+    changed = False
+    session_kind = "main"
+    agent_id = ""
+    with s._CHAT_STATE_LOCK:
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, conversation_id)
+        if conversation is None:
+            return False
+        session_kind = str(
+            conversation.get("session_kind") or conversation.get("sessionKind") or "main"
+        ).strip().lower()
+        if session_kind == "child":
+            return False
+        agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
+        current_title = str(conversation.get("title") or "").strip()
+        if not s._is_default_empty_session_title(current_title):
+            return False
+        if current_title == normalized_title:
+            return False
+        s._ensure_session_mutable(conversation_id, conversation=conversation)
+        conversation["title"] = normalized_title
+        conversation["updated_at"] = s._now_timestamp()
+        s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
+        changed = True
+
+    if changed:
+        from . import directory_bridge
+
+        directory_bridge.touch_directory_session_safe(
+            conversation_id,
+            title=normalized_title,
+            wait=True,
+        )
+        s._invalidate_session_list_cache()
+        s._publish_session_detail_snapshot(conversation_id)
+        try:
+            s.record_runtime_scene_event(
+                "conversation",
+                "title",
+                "conversation.title.generated",
+                level="info",
+                outcome="generated",
+                message="Session title generated from the first user message.",
+                fields={
+                    "sessionId": conversation_id,
+                    "sessionKind": session_kind,
+                    "agentId": agent_id,
+                    "source": str(source or "auto").strip() or "auto",
+                    "titleChars": len(normalized_title),
+                },
+                lifecycle=True,
+            )
+        except Exception as exc:
+            s._debug_logger.warning(
+                f"runtime scene session title generation log skipped: {type(exc).__name__}: {exc}",
+                tag="LOGS",
+            )
+    return changed
 
 
 def update_session_reasoning_effort(

@@ -87,7 +87,6 @@ import {
 } from "../chatSessionState";
 import {
   reconcileAgentSessionDetailCache,
-  SESSION_INDEX_PAGE_SIZE,
   updateSessionSummaryCaches,
 } from "../chatSessionIndexQuery";
 import { isTempSessionId } from "../sessionOptimisticIds";
@@ -212,7 +211,7 @@ import { useChatSessionBulkSelection } from "./useChatSessionBulkSelection";
 import { useChatWorkbenchConfirmDialog } from "./useChatWorkbenchConfirmDialog";
 import { useChatVisibleSessionCatalog } from "./useChatVisibleSessionCatalog";
 import { useChatAgentSessionTabs } from "./useChatAgentSessionTabs";
-import { toSessionIndexProgressQuerySlice, useChatSessionIndexRailModel } from "./useChatSessionIndexRailModel";
+import { useChatSessionIndexRailModel } from "./useChatSessionIndexRailModel";
 import { useChatGroupRoomChromeModel } from "./useChatGroupRoomChromeModel";
 import { useChatAgentDirectoryMaps } from "./useChatAgentDirectoryMaps";
 import { useChatIndexDerivedState } from "./useChatIndexDerivedState";
@@ -282,8 +281,10 @@ import {
   clearSessionImageAttachments,
   clearSessionReferenceAttachments,
   readStoredMentalModelToggle,
+  readStoredPromptSuggestionToggle,
   readStoredRuntimeStatusToggle,
   startSessionReferenceDrag,
+  writeStoredPromptSuggestionToggle,
   type ComposerImageAttachment,
 } from "./chatComposerSubmitModel";
 import styles from "../ChatCodingRoute.styles";
@@ -612,6 +613,9 @@ export function ChatCodingRouteWorkbench() {
   const [runtimeStatusEnabledForNextTurn, setRuntimeStatusEnabledForNextTurn] = useState<boolean>(
     () => readStoredRuntimeStatusToggle() ?? true,
   );
+  // Per-session opt-in; the backend only holds the latest capture per session,
+  // so remember the operator choice per session instead of globally.
+  const [promptSuggestionEnabledBySession, setPromptSuggestionEnabledBySession] = useState<Record<string, boolean>>({});
   const [groupManageDialogOpen, setGroupManageDialogOpen] = useState(false);
   const {
     groupComposerOpen,
@@ -932,12 +936,14 @@ export function ChatCodingRouteWorkbench() {
   const syncSessionDetail = useCallback(
     (detail: SessionDetail) => {
       let shouldSyncSummaries = true;
+      let mergedDetail: SessionDetail = detail;
       queryClient.setQueryData<SessionDetail>(queryKeys.session(detail.id), (previous) => {
         if (isStaleLedgerUpdate(previous?.ledgerSeq, detail.ledgerSeq)) {
           shouldSyncSummaries = false;
           return previous ?? detail;
         }
         const nextDetail = mergeSessionDetailMessageWindow(previous, detail);
+        mergedDetail = nextDetail;
         if (previous && sessionDetailSnapshotKey(previous) === sessionDetailSnapshotKey(nextDetail)) {
           shouldSyncSummaries = false;
           return previous;
@@ -947,18 +953,20 @@ export function ChatCodingRouteWorkbench() {
       if (!shouldSyncSummaries) {
         return;
       }
+      // Summary caches fold onto the merged detail so partial control acks
+      // cannot blank title / status / phase fields they did not carry.
       updateSessionSummaryCaches(queryClient, (sessions) =>
-        mergeSessionDetailIntoSummaries(sessions, detail),
+        mergeSessionDetailIntoSummaries(sessions, mergedDetail),
       );
-      reconcileAgentSessionDetailCache(queryClient, detail);
-      const detailRootSessionId = rootSessionIdFor(detail);
-      if (isChildSession(detail) && detailRootSessionId) {
+      reconcileAgentSessionDetailCache(queryClient, mergedDetail);
+      const detailRootSessionId = rootSessionIdFor(mergedDetail);
+      if (isChildSession(mergedDetail) && detailRootSessionId) {
         queryClient.setQueryData<SessionSummary[]>(queryKeys.sessionChildSessions(detailRootSessionId), (sessions) =>
-          mergeSessionDetailIntoSummaries(sessions, detail),
+          mergeSessionDetailIntoSummaries(sessions, mergedDetail),
         );
       }
       queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
-        mergeSessionDetailIntoConversations(conversations, detail),
+        mergeSessionDetailIntoConversations(conversations, mergedDetail),
       );
     },
     [queryClient],
@@ -1287,6 +1295,7 @@ export function ChatCodingRouteWorkbench() {
     submitTurnMutation,
     editResubmitMutation,
     regenerateMutation,
+    switchHeadMutation,
     stopTurnMutation,
     sessionGuidanceMutation,
   } = useChatComposerTurnMutations({
@@ -2008,6 +2017,10 @@ export function ChatCodingRouteWorkbench() {
       detailAvailable: cacheDetailAvailable,
       segments: cachePromptCompositionSegments,
       lang,
+      cacheSource: lastCacheComposition?.source,
+      cacheUsageObserved: lastCacheComposition?.cacheUsageObserved,
+      cachedInputTokens: lastCacheComposition?.cachedInputTokens,
+      cacheCreationInputTokens: lastCacheComposition?.cacheCreationInputTokens,
     });
   }, [
     cacheCompositionPercent,
@@ -2016,6 +2029,10 @@ export function ChatCodingRouteWorkbench() {
     detail?.contextUsage?.limit,
     detail?.contextUsage?.used,
     lang,
+    lastCacheComposition?.cacheCreationInputTokens,
+    lastCacheComposition?.cacheUsageObserved,
+    lastCacheComposition?.cachedInputTokens,
+    lastCacheComposition?.source,
     lastContextComposition?.limitTokens,
     lastContextComposition?.totalTokens,
   ]);
@@ -2202,6 +2219,8 @@ export function ChatCodingRouteWorkbench() {
     handleEditUserMessage,
     handleCancelEditMessage,
     handleRegenerateAssistantMessage,
+    handleRetryFailedTurn,
+    handleSwitchMessageVersion,
     handleComposerChange,
     handleMentalModelEnabledChange,
     handleRuntimeStatusEnabledChange,
@@ -2216,6 +2235,7 @@ export function ChatCodingRouteWorkbench() {
     submitTurnMutation,
     editResubmitMutation,
     regenerateMutation,
+    switchHeadMutation,
     stopTurnMutation,
     sessionGuidanceMutation,
     setSessionDrafts,
@@ -2248,6 +2268,19 @@ export function ChatCodingRouteWorkbench() {
     setRuntimeStatusEnabledForNextTurn,
     companionAgentId: companionTransportAgentId,
   });
+  const activePromptSuggestionEnabled = activeSessionId
+    ? promptSuggestionEnabledBySession[activeSessionId] ?? readStoredPromptSuggestionToggle(activeSessionId)
+    : false;
+  const handlePromptSuggestionEnabledChange = useCallback((enabled: boolean) => {
+    if (!activeSessionId) {
+      return;
+    }
+    writeStoredPromptSuggestionToggle(activeSessionId, enabled);
+    setPromptSuggestionEnabledBySession((current) => ({
+      ...current,
+      [activeSessionId]: enabled,
+    }));
+  }, [activeSessionId]);
   const sessionLlmOptions = sessionLlmOptionsQuery.data;
   const sessionLlmControl = activeSessionId && sessionLlmOptions?.model ? {
     model: sessionLlmOptions.model,
@@ -2469,18 +2502,25 @@ export function ChatCodingRouteWorkbench() {
   const {
     groupedGroupConversations,
     groupedGroupConversationCount,
-    sessionIndexHasMore,
-    sessionIndexLoadMoreLabel,
-    sessionIndexFullyLoadedLabel,
-    sessionIndexProgressLabel,
-    sessionIndexProgressVisible,
   } = useChatSessionIndexRailModel({
     groupedConversations,
     directoryTeamIds,
-    rawSessionsQuery: toSessionIndexProgressQuerySlice(rawSessionsQuery),
-    lang,
-    numberFormatter,
   });
+  useEffect(() => {
+    if (
+      !rawSessionsQuery.hasMore
+      || rawSessionsQuery.isLoadingMore
+      || rawSessionsQuery.isFetchNextPageError
+    ) {
+      return;
+    }
+    void rawSessionsQuery.loadMore();
+  }, [
+    rawSessionsQuery.hasMore,
+    rawSessionsQuery.isLoadingMore,
+    rawSessionsQuery.isFetchNextPageError,
+    rawSessionsQuery.loadMore,
+  ]);
   const teamRoomsByTeamId = useMemo(() => {
     const roomsByTeamId = new Map<string, ConversationSummary[]>();
     for (const conversation of conversationsQuery.data ?? []) {
@@ -2814,24 +2854,6 @@ export function ChatCodingRouteWorkbench() {
             bulkSelectLabel={lang === "zh" ? "选择会话" : "Select session"}
             onToggleBulk={toggleBulkSession}
           />
-          {sessionIndexHasMore ? (
-            <VButton
-              type="button"
-              variant="ghost"
-              className={styles.sessionLoadMoreButton}
-              onClick={() => rawSessionsQuery.loadMore()}
-              isDisabled={rawSessionsQuery.isLoadingMore}
-              aria-label={sessionIndexLoadMoreLabel}
-            >
-              <span>{sessionIndexLoadMoreLabel}</span>
-              <span className={styles.sessionLoadMoreCount}>{sessionIndexProgressLabel}</span>
-            </VButton>
-          ) : sessionIndexProgressVisible ? (
-            <div className={styles.sessionLoadMoreStatus} role="status">
-              <span>{sessionIndexFullyLoadedLabel}</span>
-              <span className={styles.sessionLoadMoreCount}>{sessionIndexProgressLabel}</span>
-            </div>
-          ) : null}
           {sessionContextMenu && contextMenuSession ? (
             <Suspense fallback={null}>
               <SessionContextMenu
@@ -3075,9 +3097,11 @@ export function ChatCodingRouteWorkbench() {
                   sessionReferences={[]}
                   mentalModelEnabled={mentalModelEnabledForNextTurn}
                   runtimeStatusEnabled={runtimeStatusEnabledForNextTurn}
+                  promptSuggestionEnabled={activePromptSuggestionEnabled}
                   capabilityDisabled
                   onMentalModelEnabledChange={handleMentalModelEnabledChange}
                   onRuntimeStatusEnabledChange={handleRuntimeStatusEnabledChange}
+                  onPromptSuggestionEnabledChange={handlePromptSuggestionEnabledChange}
                   group={{
                     title: activeGroupRoom.title,
                     onManage: () => setGroupManageDialogOpen(true),
@@ -3155,6 +3179,7 @@ export function ChatCodingRouteWorkbench() {
                 companionMode: verifiedCompanionMode,
                 // Historical mental snapshots are conversation evidence; next-turn toggle only affects submit.
                 showMentalSnapshots: !verifiedCompanionMode,
+                promptSuggestionEnabled: activePromptSuggestionEnabled,
                 composerFocusSignal:
                   composerFocusRequest.sessionId === activeSessionId
                     ? composerFocusRequest.signal
@@ -3170,9 +3195,11 @@ export function ChatCodingRouteWorkbench() {
                     onAddSessionReference={handleAddComposerReference}
                     mentalModelEnabled={mentalModelEnabledForNextTurn}
                     runtimeStatusEnabled={runtimeStatusEnabledForNextTurn}
+                    promptSuggestionEnabled={activePromptSuggestionEnabled}
                     capabilityDisabled={!activeSessionId}
                     onMentalModelEnabledChange={handleMentalModelEnabledChange}
                     onRuntimeStatusEnabledChange={handleRuntimeStatusEnabledChange}
+                    onPromptSuggestionEnabledChange={handlePromptSuggestionEnabledChange}
                     directSession={agentDirectSessionMismatch && agentPrimaryDirectSessionId ? {
                       id: agentPrimaryDirectSessionId,
                       label: sessionBindingMismatchLine,
@@ -3240,9 +3267,21 @@ export function ChatCodingRouteWorkbench() {
                 onRemoveComposerReference: handleRemoveComposerReference,
                 onEditUserMessage: handleEditUserMessage,
                 onRegenerateAssistantMessage: handleRegenerateAssistantMessage,
+                onSwitchMessageVersion: handleSwitchMessageVersion,
+                branchVersionSwitchDisabled: (
+                  sessionBusy
+                  || (switchHeadMutation.isPending
+                    && switchHeadMutation.variables?.sessionId === activeSessionId)
+                ),
                 regenerableAssistantMessageId,
                 regenerateDisabled: sessionBusy || regenerateMutation.isPending,
                 regeneratePending: (
+                  regenerateMutation.isPending
+                  && regenerateMutation.variables?.sessionId === activeSessionId
+                ),
+                onRetryTurn: handleRetryFailedTurn,
+                retryTurnDisabled: sessionBusy || regenerateMutation.isPending,
+                retryTurnPending: (
                   regenerateMutation.isPending
                   && regenerateMutation.variables?.sessionId === activeSessionId
                 ),

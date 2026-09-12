@@ -158,6 +158,7 @@ from core.prompt_manager.core_prompt_sources import CORE_PROMPT_NAMES
 from core.prompt_manager.provider_adapters import (
     build_prompt_assembly_context,
     build_protocol_adapter_section,
+    runtime_goal_capabilities,
     client_supports_tool_calling,
 )
 from core.prompt_manager.task_analyzer import get_task_analyzer
@@ -292,15 +293,15 @@ class TurnStopRequested(Exception):
     """Raised when the active single turn received a web stop request."""
 
 # ============================================================================
-# Self-Evolving Agent 主类
+# Agent Runtime 主类
 # ============================================================================
 
-class SelfEvolvingAgent:
+class AgentRuntime:
     """
-    自我进化 Agent 主类
+    聊天、监督进化与自主进化共用的 Agent 运行时
 
-    基于 LangChain 框架构建，使用 ReAct 风格的 Agent 架构。
-    支持定时苏醒，主动思考优化方向。
+    使用 ReAct 风格的执行内核，由 ModePolicy 决定上下文与模式分派。
+    仅 self_evolution 模式允许 run() 连续自主运行。
     """
 
     def __init__(
@@ -1048,7 +1049,7 @@ class SelfEvolvingAgent:
         self._bound_llm_cache = {"default": self.llm_with_tools}
 
     def _resolve_tool_authorization(self, registered_tools: List[Any]) -> Any:
-        # Removal: keep while tests construct SelfEvolvingAgent and patch this method.
+        # Removal: keep while tests construct AgentRuntime and patch this method.
         del registered_tools
         return resolve_turn_authorization(
             runtime_agent_binding=getattr(self, "runtime_agent_binding", {}) or {},
@@ -1057,7 +1058,7 @@ class SelfEvolvingAgent:
 
     @staticmethod
     def _materialize_authorized_tools(registered_tools: List[Any], authorization_report: Any) -> List[Any]:
-        # Removal: keep while tests call SelfEvolvingAgent._materialize_authorized_tools.
+        # Removal: keep while tests call AgentRuntime._materialize_authorized_tools.
         return materialize_authorized_tools(registered_tools, authorization_report)
 
     def _is_tool_visible_to_current_agent(self, tool_name: str) -> bool:
@@ -2000,6 +2001,13 @@ class SelfEvolvingAgent:
 
         self._supervised_judge_execution_profile = bool(enabled)
 
+    def _runtime_goal_prompt_capabilities(self) -> tuple[str, ...]:
+        """Project the turn's runtime goal packet onto prompt capabilities."""
+
+        getter = getattr(self.prompt_manager, "get_runtime_goal_packet", None)
+        packet = getter() if callable(getter) else None
+        return runtime_goal_capabilities(packet)
+
     def _prompt_assembly_context_for_turn(self):
         client = getattr(self, "_base_llm", None)
         route = getattr(client, "protocol_route", None)
@@ -2031,6 +2039,7 @@ class SelfEvolvingAgent:
             enforce_core_floor=not bool(
                 getattr(self, "_core_prompt_snapshot_seeded_by_host", False)
             ),
+            extra_capabilities=self._runtime_goal_prompt_capabilities(),
         )
         section = build_protocol_adapter_section(route, capabilities)
         setter = getattr(self.prompt_manager, "set_protocol_adapter", None)
@@ -3323,7 +3332,7 @@ class SelfEvolvingAgent:
             pass
 
     def _invoke_llm(self, messages: list, *, replay_state: Any = None) -> Optional[Any]:
-        # Removal: keep while tests call SelfEvolvingAgent._invoke_llm and patch agent.* helpers.
+        # Removal: keep while tests call AgentRuntime._invoke_llm and patch agent.* helpers.
         # Reset before delegation so a stop/interrupt cannot leave diagnostics
         # from an earlier invocation attached to the active turn.
         self._last_llm_error_category = None
@@ -3335,9 +3344,10 @@ class SelfEvolvingAgent:
         self._last_llm_failure_max_attempts = MAX_CONSECUTIVE_FAILURES
 
         def _turn_llm_cancel_context(checker):
-            # Provider abort is a Challenge-only extension. Ordinary Agent
-            # turns still observe the stop checker, but must not allocate a
-            # LiteLLM HTTP watcher merely because the checker is callable.
+            # Session turns mark the checker to enable provider HTTP abort, so
+            # a user stop interrupts an in-flight Chat Completions stream
+            # instead of waiting for the next cooperative checkpoint. Checkers
+            # without the marker keep the prior behavior.
             return llm_cancel_context(
                 checker,
                 enable_chat_provider_abort=bool(
@@ -3797,7 +3807,7 @@ def main(initial_prompt: str = None, args=None):
         initial_prompt=initial_prompt,
         args=args,
         parse_args_fn=parse_args,
-        agent_cls=SelfEvolvingAgent,
+        agent_cls=AgentRuntime,
         workbench_cls=AgentWorkbenchShell,
         get_ui_fn=get_ui,
         ui_error_fn=ui_error,

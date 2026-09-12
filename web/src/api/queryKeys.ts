@@ -72,6 +72,8 @@ export const queryKeys = {
     ["teams", teamId, "challenge-program", "questions", questionId, runId] as const,
   challengeQuestionRunStatus: (teamId: string) =>
     ["teams", teamId, "challenge-program", "question-runs", "status"] as const,
+  challengeQuestionReverifyProgress: (teamId: string, questionId: string, runId: string) =>
+    ["teams", teamId, "challenge-program", "questions", questionId, runId, "reverify-citations", "progress"] as const,
   challengeSubmissionReadiness: (teamId: string) =>
     ["teams", teamId, "challenge-program", "submission-readiness"] as const,
   challengeCatalogReadiness: (teamId: string) =>
@@ -92,6 +94,8 @@ export const queryKeys = {
     ["teams", teamId, "hypothesis-first", "chain", "state-v2", questionId, runId] as const,
   hypothesisFirstChainAnomalyInbox: (teamId: string, questionId: string) =>
     ["teams", teamId, "hypothesis-first", "chain", "anomaly-inbox", questionId] as const,
+  hypothesisFirstChainRoundFailures: (teamId: string) =>
+    ["teams", teamId, "hypothesis-first", "chain", "round-failures"] as const,
   teamMeetingRounds: (teamId: string) =>
     ["teams", teamId, "meeting-rounds"] as const,
   teamMeetingRound: (teamId: string, meetingRoundId: string) =>
