@@ -500,11 +500,13 @@ def test_lightweight_session_preview_falls_back_when_tail_has_no_visible_boundar
 
 def test_session_stop_route_requires_exact_turn_id(monkeypatch):
     observed: list[tuple[str, str]] = []
+    observed_fast_ack: list[bool] = []
     monkeypatch.setattr(
         session_routes,
         "request_stop_session_turn",
-        lambda session_id, *, expected_turn_id="": (
+        lambda session_id, *, expected_turn_id="", fast_ack=False: (
             observed.append((session_id, expected_turn_id))
+            or observed_fast_ack.append(fast_ack)
             or {"id": session_id, "currentPhase": "stopping"}
         ),
     )
@@ -519,10 +521,16 @@ def test_session_stop_route_requires_exact_turn_id(monkeypatch):
     assert response.status_code == 202
     assert response.json()["currentPhase"] == "stopping"
     assert observed == [("session-active", "turn-active")]
+    assert observed_fast_ack == [True]
 
 
 def test_session_stop_route_rejects_stale_turn(monkeypatch):
-    def reject_stale_turn(_session_id: str, *, expected_turn_id: str = ""):
+    def reject_stale_turn(
+        _session_id: str,
+        *,
+        expected_turn_id: str = "",
+        fast_ack: bool = False,
+    ):
         raise session_service.SessionBusyError(f"turn mismatch: {expected_turn_id}")
 
     monkeypatch.setattr(session_routes, "request_stop_session_turn", reject_stale_turn)

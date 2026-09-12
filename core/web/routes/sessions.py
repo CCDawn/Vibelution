@@ -707,7 +707,11 @@ def session_regenerate_message(session_id: str, payload: SessionMessageRegenerat
 )
 def session_stop_turn(session_id: str, payload: SessionStopPayload) -> dict:
     try:
-        return request_stop_session_turn(session_id, expected_turn_id=payload.turnId)
+        return request_stop_session_turn(
+            session_id,
+            expected_turn_id=payload.turnId,
+            fast_ack=True,
+        )
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SessionBusyError as exc:

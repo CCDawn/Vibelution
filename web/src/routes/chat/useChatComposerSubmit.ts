@@ -36,9 +36,11 @@ import {
   appendOptimisticUserMessage,
   applyOptimisticEditResubmit,
   applyOptimisticRegenerate,
+  clearSessionDetailStopping,
   createClientSubmissionId,
   markOptimisticUserMessageAccepted,
   markSessionDetailRunning,
+  markSessionDetailStopping,
   markSessionSummaryRunning,
   removeOptimisticUserMessage,
 } from "../chatSessionState";
@@ -604,10 +606,17 @@ export function useChatComposerTurnMutations({
         turnId: variables.turnId,
       });
       // Abort congested in-flight queries without waiting for them: the stop
-      // POST must not queue behind a slow detail/list fetch, and onSuccess
-      // re-syncs the detail afterwards anyway.
+      // POST must not queue behind a slow detail/list fetch.
       void cancelCongestedQueriesForSessionStop(queryClient, variables.sessionId);
-      return { telemetry };
+      // Enter the stopping phase immediately; the POST only acknowledges the
+      // request and the worker publishes the authoritative stopped snapshot.
+      const previousDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(variables.sessionId));
+      const stoppingAt = new Date().toISOString();
+      const optimisticDetail = markSessionDetailStopping(previousDetail, { requestedAt: stoppingAt });
+      if (optimisticDetail) {
+        queryClient.setQueryData(queryKeys.session(variables.sessionId), optimisticDetail);
+      }
+      return { telemetry, previousDetail, stoppingAt };
     },
     onSuccess: (nextDetail, variables, context) => {
       context?.telemetry?.succeeded({
@@ -626,6 +635,18 @@ export function useChatComposerTurnMutations({
         sessionId: variables.sessionId,
         turnId: variables.turnId,
       });
+      // Clear the optimistic stopping patch only when nothing newer replaced it.
+      if (context?.stoppingAt) {
+        queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (current) => {
+          if (!current) {
+            return current;
+          }
+          return clearSessionDetailStopping(current, {
+            requestedAt: context.stoppingAt,
+            previous: context.previousDetail,
+          });
+        });
+      }
       setSessionComposerErrors((current) => ({
         ...current,
         [variables.sessionId]: describeError(error, t("stopFailed")),
