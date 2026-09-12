@@ -427,7 +427,7 @@ def _bind_stop_room(monkeypatch, round_id: str, messages: list[dict]) -> None:
     monkeypatch.setattr(
         chat_room_service,
         "get_chat_room_detail",
-        lambda room_id, *, reconcile=True: _room_detail(round_id, messages)
+        lambda room_id, *, reconcile=True, participant_index=True: _room_detail(round_id, messages)
         if room_id == "room-stop-1"
         else None,
     )
@@ -534,7 +534,9 @@ def _bind_multi_round_room(
     monkeypatch.setattr(
         chat_room_service,
         "get_chat_room_detail",
-        lambda room_id, *, reconcile=True: detail if room_id == "room-stop-1" else None,
+        lambda room_id, *, reconcile=True, participant_index=True: detail
+        if room_id == "room-stop-1"
+        else None,
     )
 
 
@@ -889,15 +891,17 @@ def test_scope_lock_command_keeps_meeting_round_readers_unblocked(tmp_path, monk
 
 
 def test_bound_room_rounds_read_uses_non_reconciling_detail_read(monkeypatch):
-    """MR 只读链路（_load_bound_room_rounds）必须以 reconcile=False 读群聊
-    detail：sweep 驱动的读不触发写侧 round-state 对账（零写纪律）。"""
+    """MR 只读链路（_load_bound_room_rounds）必须以 reconcile=False 且
+    participant_index=False 读群聊 detail：sweep 驱动的读不触发写侧
+    round-state 对账，也不重建会话摘要/修复参与者（零写且避重纪律）。"""
     from core.web.services import chat_room_service
 
     captured = {}
 
-    def _fake_detail(room_id, *, reconcile=True):
+    def _fake_detail(room_id, *, reconcile=True, participant_index=True):
         captured["roomId"] = room_id
         captured["reconcile"] = reconcile
+        captured["participant_index"] = participant_index
         return {
             "roomId": room_id,
             "rounds": [
@@ -914,5 +918,44 @@ def test_bound_room_rounds_read_uses_non_reconciling_detail_read(monkeypatch):
     }
     rounds = meetings._load_bound_room_rounds(meeting)
 
-    assert captured == {"roomId": "room-1", "reconcile": False}
+    assert captured == {
+        "roomId": "room-1",
+        "reconcile": False,
+        "participant_index": False,
+    }
     assert list(rounds) == ["room-round-1", "room-round-2"]
+
+
+def test_bound_room_round_read_cache_collapses_loads_within_block(monkeypatch):
+    """单次 sweep pass 内同一房间的 bound rounds 只读一次群聊 detail；
+    块外恢复原有逐次读取语义。"""
+    from core.web.services import chat_room_service
+
+    calls: list[str] = []
+
+    def _fake_detail(room_id, *, reconcile=True, participant_index=True):
+        calls.append(room_id)
+        return {
+            "roomId": room_id,
+            "rounds": [{"roundId": "room-round-1", "messages": []}],
+        }
+
+    monkeypatch.setattr(chat_room_service, "get_chat_room_detail", _fake_detail)
+
+    meeting = {
+        "linkedChatRoomId": "room-1",
+        "chatRoomRoundIds": ["room-round-1"],
+    }
+
+    first = meetings._load_bound_room_rounds(meeting)
+    second = meetings._load_bound_room_rounds(meeting)
+    assert calls == ["room-1", "room-1"]
+
+    with meetings.bound_room_round_read_cache():
+        third = meetings._load_bound_room_rounds(meeting)
+        fourth = meetings._load_bound_room_rounds(meeting)
+    assert calls == ["room-1", "room-1", "room-1"]
+
+    fifth = meetings._load_bound_room_rounds(meeting)
+    assert calls == ["room-1", "room-1", "room-1", "room-1"]
+    assert third == fourth == fifth == first == second
