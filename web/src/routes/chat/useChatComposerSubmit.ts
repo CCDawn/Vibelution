@@ -14,6 +14,7 @@ import {
   stopSessionTurn,
   submitSessionGuidance,
   submitSessionMessage,
+  switchSessionHead,
 } from "../../api/chat";
 import { submitVirtualHumanConversationMessage } from "../../api/virtualHumanLife";
 import { queryKeys } from "../../api/queryKeys";
@@ -45,6 +46,7 @@ import {
   removeOptimisticUserMessage,
 } from "../chatSessionState";
 import { updateSessionSummaryCaches } from "../chatSessionIndexQuery";
+import type { ChatEditTarget } from "../chatComposerState";
 import type { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import {
   chatStreamPerformanceNowMs,
@@ -81,7 +83,6 @@ import { postSubmitTelemetry } from "./chatSubmitTelemetry";
 import { startUserAction, type UserActionTracker } from "../../app/userActionTelemetry";
 import { resolveSessionStopTurnId, cancelCongestedQueriesForSessionStop } from "./chatStopTurnModel";
 
-type ChatEditTarget = { messageId: string; original: string };
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
 
 export type SubmitTurnVariables = {
@@ -109,6 +110,7 @@ type ChatSubmitMutationContext = {
 export type EditResubmitVariables = {
   sessionId: string;
   messageId: string;
+  baseMessageId?: string;
   clientSubmissionId: string;
   content: string;
   mentalModelEnabled: boolean;
@@ -120,6 +122,7 @@ export type EditResubmitVariables = {
 export type RegenerateVariables = {
   sessionId: string;
   messageId: string;
+  baseMessageId?: string;
   clientSubmissionId: string;
   content: string;
   mentalModelEnabled: boolean;
@@ -127,10 +130,16 @@ export type RegenerateVariables = {
   turnStatusTail?: ReturnType<typeof loadTurnStatusTailConfig>;
 };
 
+export type SwitchHeadVariables = {
+  sessionId: string;
+  nodeId: string;
+};
+
 export type ChatComposerTurnMutations = {
   submitTurnMutation: UseMutationResult<ChatSubmitAcceptedResponse, Error, SubmitTurnVariables, unknown>;
   editResubmitMutation: UseMutationResult<SessionDetail, Error, EditResubmitVariables, unknown>;
   regenerateMutation: UseMutationResult<SessionDetail, Error, RegenerateVariables, unknown>;
+  switchHeadMutation: UseMutationResult<SessionDetail, Error, SwitchHeadVariables, unknown>;
   stopTurnMutation: UseMutationResult<SessionDetail, Error, { sessionId: string; turnId: string }, unknown>;
   sessionGuidanceMutation: UseMutationResult<
     SessionDetail,
@@ -382,6 +391,7 @@ export function useChatComposerTurnMutations({
       {
         sessionId,
         messageId,
+        baseMessageId,
         clientSubmissionId,
         content,
         mentalModelEnabled,
@@ -391,6 +401,7 @@ export function useChatComposerTurnMutations({
     ) =>
       editResubmitSessionMessage(sessionId, {
         messageId,
+        ...(baseMessageId ? { baseMessageId } : {}),
         clientSubmissionId,
         content,
         contentUtf8Base64: encodeUtf8Base64(content),
@@ -500,6 +511,7 @@ export function useChatComposerTurnMutations({
       {
         sessionId,
         messageId,
+        baseMessageId,
         clientSubmissionId,
         mentalModelEnabled,
         runtimeStatusEnabled,
@@ -508,6 +520,7 @@ export function useChatComposerTurnMutations({
     ) =>
       regenerateSessionMessage(sessionId, {
         messageId,
+        ...(baseMessageId ? { baseMessageId } : {}),
         clientSubmissionId,
         mentalModelEnabled,
         runtimeStatusEnabled,
@@ -594,6 +607,51 @@ export function useChatComposerTurnMutations({
         [variables.sessionId]: describeError(error, t("regenerateFailed")),
       }));
       void chatWorkspaceCache.afterDirectTurnFailed(variables.sessionId);
+    },
+  });
+
+  const switchHeadMutation = useMutation({
+    mutationFn: async ({ sessionId, nodeId }: SwitchHeadVariables) =>
+      switchSessionHead(sessionId, { nodeId }),
+    onMutate: async (variables) => {
+      const telemetry = startUserAction("session_switch_head", {
+        sessionId: variables.sessionId,
+        nodeId: variables.nodeId,
+      });
+      const sessionKey = queryKeys.session(variables.sessionId);
+      await queryClient.cancelQueries({ queryKey: sessionKey, exact: true });
+      const previousDetail = queryClient.getQueryData<SessionDetail>(sessionKey);
+      return { previousDetail, telemetry };
+    },
+    onSuccess: (nextDetail, variables, context) => {
+      context?.telemetry?.succeeded({
+        sessionId: variables.sessionId,
+        nodeId: variables.nodeId,
+      });
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [variables.sessionId]: "",
+      }));
+      syncSessionDetail(nextDetail);
+      void chatWorkspaceCache.afterSessionChanged();
+    },
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, {
+        sessionId: variables.sessionId,
+        nodeId: variables.nodeId,
+      });
+      const previousDetail = context && typeof context === "object" && "previousDetail" in context
+        ? (context as { previousDetail?: SessionDetail }).previousDetail
+        : undefined;
+      if (previousDetail) {
+        queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), previousDetail);
+      } else {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.session(variables.sessionId), exact: true });
+      }
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [variables.sessionId]: describeError(error, t("switchBranchFailed")),
+      }));
     },
   });
 
@@ -708,6 +766,7 @@ export function useChatComposerTurnMutations({
     submitTurnMutation,
     editResubmitMutation,
     regenerateMutation,
+    switchHeadMutation,
     stopTurnMutation,
     sessionGuidanceMutation,
   };
@@ -765,6 +824,7 @@ export type UseChatComposerSubmitActionsResult = {
   handleEditUserMessage: (message: ConversationMessage) => void;
   handleCancelEditMessage: () => void;
   handleRegenerateAssistantMessage: (message: ConversationMessage) => void;
+  handleSwitchMessageVersion: (message: ConversationMessage, targetNodeId: string) => void;
 };
 
 /**
@@ -777,6 +837,7 @@ export function useChatComposerSubmitActions({
   submitTurnMutation,
   editResubmitMutation,
   regenerateMutation,
+  switchHeadMutation,
   stopTurnMutation,
   sessionGuidanceMutation,
   setSessionDrafts,
@@ -802,7 +863,6 @@ export function useChatComposerSubmitActions({
   activePhase,
   activeAgentImageInputUnsupported,
   activeImageInputModelId,
-  latestUserMessageId,
   activeTurnId,
   detail,
   setMentalModelEnabledForNextTurn,
@@ -1299,6 +1359,7 @@ export function useChatComposerSubmitActions({
       editResubmitMutation.mutate({
         sessionId: activeSessionId,
         messageId: resolvedEditTarget.messageId,
+        ...(resolvedEditTarget.nodeId ? { baseMessageId: resolvedEditTarget.nodeId } : {}),
         clientSubmissionId,
         content,
         mentalModelEnabled: mentalModelEnabledForNextTurn,
@@ -1348,13 +1409,11 @@ export function useChatComposerSubmitActions({
     if (!activeSessionId || sessionBusy) {
       return;
     }
-    if (message.id !== latestUserMessageId) {
-      return;
-    }
     setSessionEditTargets((current) => ({
       ...current,
       [activeSessionId]: {
         messageId: message.id,
+        ...(message.nodeId ? { nodeId: message.nodeId } : {}),
         original: message.content,
       },
     }));
@@ -1370,7 +1429,6 @@ export function useChatComposerSubmitActions({
     }));
   }, [
     activeSessionId,
-    latestUserMessageId,
     sessionBusy,
     setSessionComposerErrors,
     setSessionDrafts,
@@ -1380,7 +1438,13 @@ export function useChatComposerSubmitActions({
   ]);
 
   useEffect(() => {
-    if (!activeSessionId || !detail || !activeEditTarget || activeEditTarget.messageId === latestUserMessageId) {
+    if (!activeSessionId || !detail || !activeEditTarget) {
+      return;
+    }
+    const targetStillVisible = (detail.messages ?? []).some(
+      (message) => String(message.id || "").trim() === activeEditTarget.messageId,
+    );
+    if (targetStillVisible) {
       return;
     }
     setSessionEditTargets((current) => {
@@ -1391,7 +1455,7 @@ export function useChatComposerSubmitActions({
       ...current,
       [activeSessionId]: "",
     }));
-  }, [activeEditTarget, activeSessionId, detail, latestUserMessageId, setSessionDrafts, setSessionEditTargets]);
+  }, [activeEditTarget, activeSessionId, detail, setSessionDrafts, setSessionEditTargets]);
 
   const handleCancelEditMessage = useCallback(() => {
     if (!activeSessionId) {
@@ -1436,9 +1500,13 @@ export function useChatComposerSubmitActions({
     if (!userMessage || userMessage.role !== "user") {
       return;
     }
+    // Branch from the clicked assistant answer when it carries a node id;
+    // otherwise fall back to the legacy latest-only regenerate.
+    const baseMessageId = String(message.nodeId || userMessage.nodeId || "").trim();
     regenerateMutation.mutate({
       sessionId: activeSessionId,
       messageId: userMessage.id,
+      ...(baseMessageId ? { baseMessageId } : {}),
       clientSubmissionId: createClientSubmissionId(activeSessionId),
       content: String(userMessage.content || ""),
       mentalModelEnabled: mentalModelEnabledForNextTurn,
@@ -1453,6 +1521,19 @@ export function useChatComposerSubmitActions({
     runtimeStatusEnabledForNextTurn,
     sessionBusy,
   ]);
+
+  // Head switching is a server-projected snapshot change: no local tree work,
+  // the timeline is replaced by the returned detail.
+  const handleSwitchMessageVersion = useCallback((message: ConversationMessage, targetNodeId: string) => {
+    if (!activeSessionId || sessionBusy) {
+      return;
+    }
+    const nodeId = String(targetNodeId || "").trim();
+    if (!nodeId || nodeId === String(message.nodeId || "").trim()) {
+      return;
+    }
+    switchHeadMutation.mutate({ sessionId: activeSessionId, nodeId });
+  }, [activeSessionId, sessionBusy, switchHeadMutation]);
 
   const handleFollowupQueueUpdate = useCallback((id: string, text: string) => {
     if (!activeSessionId) {
@@ -1632,5 +1713,6 @@ export function useChatComposerSubmitActions({
     handleEditUserMessage,
     handleCancelEditMessage,
     handleRegenerateAssistantMessage,
+    handleSwitchMessageVersion,
   };
 }

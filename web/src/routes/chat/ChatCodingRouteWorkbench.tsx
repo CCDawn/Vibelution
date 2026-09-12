@@ -1295,6 +1295,7 @@ export function ChatCodingRouteWorkbench() {
     submitTurnMutation,
     editResubmitMutation,
     regenerateMutation,
+    switchHeadMutation,
     stopTurnMutation,
     sessionGuidanceMutation,
   } = useChatComposerTurnMutations({
@@ -2218,6 +2219,7 @@ export function ChatCodingRouteWorkbench() {
     handleEditUserMessage,
     handleCancelEditMessage,
     handleRegenerateAssistantMessage,
+    handleSwitchMessageVersion,
     handleComposerChange,
     handleMentalModelEnabledChange,
     handleRuntimeStatusEnabledChange,
@@ -2232,6 +2234,7 @@ export function ChatCodingRouteWorkbench() {
     submitTurnMutation,
     editResubmitMutation,
     regenerateMutation,
+    switchHeadMutation,
     stopTurnMutation,
     sessionGuidanceMutation,
     setSessionDrafts,
@@ -3263,6 +3266,12 @@ export function ChatCodingRouteWorkbench() {
                 onRemoveComposerReference: handleRemoveComposerReference,
                 onEditUserMessage: handleEditUserMessage,
                 onRegenerateAssistantMessage: handleRegenerateAssistantMessage,
+                onSwitchMessageVersion: handleSwitchMessageVersion,
+                branchVersionSwitchDisabled: (
+                  sessionBusy
+                  || (switchHeadMutation.isPending
+                    && switchHeadMutation.variables?.sessionId === activeSessionId)
+                ),
                 regenerableAssistantMessageId,
                 regenerateDisabled: sessionBusy || regenerateMutation.isPending,
                 regeneratePending: (

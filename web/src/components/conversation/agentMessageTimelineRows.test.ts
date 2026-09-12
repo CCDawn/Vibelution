@@ -163,6 +163,18 @@ describe("AgentMessage timeline rows", () => {
     ]);
   });
 
+  it("separates positional user message rows by branch id", () => {
+    const branchA = userMessage("session-1-message-3", { branchId: "branch-a" });
+    const branchB = userMessage("session-1-message-3", { branchId: "branch-b" });
+
+    const [rowA] = buildAgentMessageTimelineRowIdentities([branchA]);
+    const [rowB] = buildAgentMessageTimelineRowIdentities([branchB]);
+
+    expect(rowA.rowKey).toBe("user-message:session-1-message-3:branch:branch-a");
+    expect(rowB.rowKey).toBe("user-message:session-1-message-3:branch:branch-b");
+    expect(rowB.rowKey).not.toBe(rowA.rowKey);
+  });
+
   it("derives stable child keys for timeline items under the process part", () => {
     const [row] = buildAgentMessageTimelineRowIdentities([
       assistantMessage("message-with-timeline", { turnId: "turn-timeline" }),

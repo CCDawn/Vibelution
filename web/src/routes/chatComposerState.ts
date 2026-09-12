@@ -2,6 +2,8 @@ import { isSteerGuidanceMessage } from "../components/conversation/conversationM
 
 export type ChatEditTarget = {
   messageId: string;
+  /** Journal node id the edit should branch from; empty for legacy rows. */
+  nodeId?: string;
   original: string;
 };
 
@@ -26,14 +28,22 @@ export function latestUserMessageId(messages: MessageIdentity[] | null | undefin
   return "";
 }
 
-export function resolveLatestEditTarget(
+/**
+ * An edit target stays valid while its message is still on the active path.
+ * Branch mode edits any visible message, not just the latest one, so presence
+ * (not recency) is what decides whether the composer keeps editing mode.
+ */
+export function resolveActiveEditTarget(
   editTarget: ChatEditTarget | null | undefined,
-  latestMessageId: string,
+  messages: MessageIdentity[] | null | undefined,
 ): ChatEditTarget | null {
-  if (!editTarget || !latestMessageId) {
+  if (!editTarget) {
     return null;
   }
-  return editTarget.messageId === latestMessageId ? editTarget : null;
+  const present = (messages ?? []).some(
+    (message) => String(message?.id ?? "").trim() === editTarget.messageId,
+  );
+  return present ? editTarget : null;
 }
 
 export function resolveComposerDraftValue(
