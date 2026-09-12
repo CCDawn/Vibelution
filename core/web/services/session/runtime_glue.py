@@ -20,6 +20,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
+from uuid import uuid4
 
 
 def _service():
@@ -325,6 +326,7 @@ def _append_session_conversation_event(
     tool_call_id: str = "",
     correlation_id: str = "",
     source_kind: str = "",
+    parent_event_id: str = "",
 ) -> Any | None:
     s = _service()
     return s._journal_bridge.append_session_conversation_event(
@@ -339,6 +341,7 @@ def _append_session_conversation_event(
         tool_call_id=tool_call_id,
         correlation_id=correlation_id,
         source_kind=source_kind,
+        parent_event_id=parent_event_id,
         project_root=s.PROJECT_ROOT,
     )
 
@@ -2561,31 +2564,69 @@ def _trim_tool_detail_text(value: Any, *, max_chars: int = 1200, max_lines: int 
     return text
 
 
-def _truncate_session_ledger_before_message(session_id: str, message: dict[str, Any]) -> None:
+def _append_session_branch_rebase_event(
+    session_id: str,
+    message: dict[str, Any],
+    *,
+    operation: str,
+    turn_id: str,
+    base_message_id: str = "",
+) -> str:
+    """Append an append-only rebase marker that supersedes the target turn.
+
+    The old branch stays in the journal for audit; replay folds it out through
+    ``fold_active_events``. Returns the fork-point event id.
+    """
+
     s = _service()
     metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
-    event_id = str(metadata.get("eventId") or "").strip()
-    if not event_id:
-        return
+    target_event_id = str(metadata.get("eventId") or "").strip()
+    if not target_event_id:
+        return ""
     events = s._load_session_conversation_events_cached(session_id)
+    if not events:
+        return ""
+    active = s.fold_active_events(events)
     target_index = -1
-    target_turn_id = ""
-    for index, event in enumerate(events):
-        if str(getattr(event, "event_id", "") or "").strip() != event_id:
-            continue
-        target_index = index
-        target_turn_id = str(getattr(event, "turn_id", "") or "").strip()
-        break
+    for index, event in enumerate(active):
+        if str(getattr(event, "event_id", "") or "").strip() == target_event_id:
+            target_index = index
+            break
     if target_index < 0:
-        return
-    truncate_index = target_index
+        return ""
+    target_turn_id = str(getattr(active[target_index], "turn_id", "") or "").strip()
+    cut_index = target_index
     if target_turn_id:
-        for index, event in enumerate(events):
+        for index, event in enumerate(active):
             if str(getattr(event, "turn_id", "") or "").strip() == target_turn_id:
-                truncate_index = index
+                cut_index = index
                 break
-    s.rewrite_conversation_events(s.PROJECT_ROOT, session_id, events[:truncate_index])
-    s._invalidate_session_conversation_events_cache(session_id)
+    from_event_id = ""
+    if cut_index > 0:
+        from_event_id = str(getattr(active[cut_index - 1], "event_id", "") or "").strip()
+    replaced_turn_ids: list[str] = []
+    for event in active[cut_index:]:
+        replaced_turn_id = str(getattr(event, "turn_id", "") or "").strip()
+        if replaced_turn_id and replaced_turn_id not in replaced_turn_ids:
+            replaced_turn_ids.append(replaced_turn_id)
+    s._append_session_conversation_event(
+        session_id,
+        turn_id,
+        s.EVENT_BRANCH_REBASE,
+        status="recorded",
+        payload={
+            "operation": str(operation or "").strip() or "edit",
+            "branchId": uuid4().hex,
+            "fromEventId": from_event_id,
+            "replacedTurnIds": replaced_turn_ids,
+            "baseMessageId": str(base_message_id or "").strip() or target_event_id,
+        },
+        source="session_branch_rebase",
+        visible_in_model=False,
+        projection_kind="session_branch_rebase",
+        parent_event_id=from_event_id,
+    )
+    return from_event_id
 
 
 def _validate_user_message_not_encoding_replacement(message: str, *, lang: str) -> None:
