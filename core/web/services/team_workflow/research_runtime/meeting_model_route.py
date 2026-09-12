@@ -16,6 +16,9 @@ def resolve_meeting_speaker_llm(
     authority = context.get("_modelInvocationReceiptAuthority")
     if not isinstance(authority, Mapping):
         return resolver(agent)
+    if authority.get("authorityKind") == "operator_discussion":
+        from ..operator_optimization.discussion_authority import resolve_speaker_llm
+        return resolve_speaker_llm(agent, context, resolver)
     from .formal_write_runtime import get_write_store
 
     run = get_write_store().get_run(str(authority.get("workflowRunId") or ""))
