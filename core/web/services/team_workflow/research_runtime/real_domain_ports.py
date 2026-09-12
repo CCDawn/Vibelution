@@ -1005,13 +1005,31 @@ class RealDomainPorts:
                 handle=handle,
                 snapshot=snapshot,
             )
-        return complete_agent_turn_outputs(
+        completed = complete_agent_turn_outputs(
             action=action,
             handle=handle,
             input_snapshot=snapshot,
             required_kinds=self.required_artifact_kinds(action),
             return_result=True,
         )
+        from ..operator_optimization.knowledge_budget_runtime import is_operator_knowledge_run
+        if is_operator_knowledge_run(self._store, action.run_id):
+            from ..operator_optimization.model_budget import settle_model_budget
+            from .completion_dependency import CompletionDependencyPending, receipt_delivery_state
+
+            statuses, _ = self._store.submit(
+                lambda uow: receipt_delivery_state(uow, action, completed.handle), force_flush=True
+            ).result(timeout=30)
+            if statuses != {"succeeded"}:
+                raise CompletionDependencyPending("Operator source receipt delivery is pending",
+                    snapshot={"receiptDeliveryPending": True}, handle=completed.handle)
+
+            budget = settle_model_budget(self._store,
+                reservation={"reservationId": "reservation-" + action.node_run_id})
+            if budget.get("costStatus") != "settled" or not budget.get("callsUsed"):
+                raise CompletionDependencyPending("Operator source usage is incomplete",
+                    snapshot={"costStatus": budget.get("costStatus")}, handle=completed.handle)
+        return completed
 
     def _create_hypothesis_fan_out(
         self,
@@ -2095,18 +2113,25 @@ def _create_real_agent_task(
     if not team_id:
         raise RuntimeError("input snapshot has no teamId")
     idempotency_key = f"agent-task:{action.node_run_id}"
-    challenge_task_contract, model_invocation_receipt_binding = (
-        _formal_task_authorities(
-            action=action,
-            input_snapshot=input_snapshot,
-            agent_id=binding.agent_id,
-            workflow_id=str(
-                getattr(store.get_run(action.run_id), "workflow_id", "")
-                if store is not None
-                else ""
-            ).strip(),
+    from ..operator_optimization.knowledge_budget_runtime import is_operator_knowledge_run
+    operator_source_authority = None
+    if store is not None and is_operator_knowledge_run(store, action.run_id):
+        from ..operator_optimization.source_authority import build_operator_source_authority
+        operator_source_authority = build_operator_source_authority(store, action, agent_id=binding.agent_id)
+        challenge_task_contract, model_invocation_receipt_binding = {}, {}
+    else:
+        challenge_task_contract, model_invocation_receipt_binding = (
+            _formal_task_authorities(
+                action=action,
+                input_snapshot=input_snapshot,
+                agent_id=binding.agent_id,
+                workflow_id=str(
+                    getattr(store.get_run(action.run_id), "workflow_id", "")
+                    if store is not None
+                    else ""
+                ).strip(),
+            )
         )
-    )
     source_collection_run_id = ""
     if spec.family != "source_collection" and action.node_id == "problem_understanding":
         if not project_id:
@@ -2140,6 +2165,7 @@ def _create_real_agent_task(
             idempotency_key=idempotency_key,
             store=store,
             challenge_task_contract=challenge_task_contract,
+            operator_source_authority=operator_source_authority,
         )
     else:
         from core.web.services.team_workflow.research_project_agent_tasks import (
@@ -2225,6 +2251,7 @@ def _start_source_collection_agent_task(
     idempotency_key: str,
     store: WorkflowLedgerStore | None = None,
     challenge_task_contract: Mapping[str, Any] | None = None,
+    operator_source_authority: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     from core.web.services.team_workflow.source_collection.runs import (
         start_source_collection_run,
@@ -2247,7 +2274,7 @@ def _start_source_collection_agent_task(
                 "topic": str(objective.get("question") or ""),
                 "inputRefs": list(input_snapshot.get("datasetRefs") or []),
                 "researchProjectId": project_id,
-                "questionId": str(input_snapshot.get("questionId") or ""),
+                "questionId": "" if operator_source_authority is not None else str(input_snapshot.get("questionId") or ""),
                 "requiredModelPolicy": dict(
                     (input_snapshot.get("modelRoutingPolicy") or {}).get("requiredModelPolicy") or {}
                 ),
@@ -2258,6 +2285,7 @@ def _start_source_collection_agent_task(
                 "promptCachePolicy": {"requirement": "disabled"},
                 "scope": {
                     **request_scope,
+                    **({"modelAccountingKind": "operator_knowledge"} if operator_source_authority is not None else {}),
                     "workflowRunId": action.run_id,
                     "researchProjectId": project_id,
                 },
@@ -2306,6 +2334,10 @@ def _start_source_collection_agent_task(
             "formalRetry": False,
             "evidenceRemediationContract": evidence_remediation_contract,
     }
+    if operator_source_authority is not None:
+        return start_source_collection_stage_session_task(
+            team_id, source_run_id, stage_task_payload,
+            _operator_source_authority=operator_source_authority)
     if isinstance(challenge_task_contract, Mapping):
         return start_source_collection_stage_session_task(
             team_id,

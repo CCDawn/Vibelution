@@ -484,6 +484,10 @@ class AdapterDispatchWorker:
         try:
             result = self._execute_with_lease_heartbeat(adapter, action, outbox)
         except Exception as exc:
+            from ..operator_optimization.knowledge_wait import (
+                KnowledgeChildPending,
+                defer_knowledge_child,
+            )
             from .agent_turn_completion import (
                 SourceExtractionContractViolation,
                 TurnNotReadyError,
@@ -493,6 +497,16 @@ class AdapterDispatchWorker:
             from .task_adapter_registry import SOURCE_NODE_TASKS
 
             if isinstance(exc, _OutboxLeaseLost):
+                return
+            if isinstance(exc, KnowledgeChildPending):
+                defer_knowledge_child(
+                    self._store,
+                    outbox=outbox,
+                    action=action,
+                    error=exc,
+                    owner=self._owner,
+                    now_ms=self._now(),
+                )
                 return
             if isinstance(exc, CompletionDependencyPending):
                 defer_completion(self._store, outbox=outbox, action=action, error=exc,

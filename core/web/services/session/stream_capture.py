@@ -1129,7 +1129,7 @@ def _persist_challenge_model_invocation_receipt(
             "challenge_model_invocation_receipt_missing"
         )
         return False
-    binding = context.get("questionStageBinding")
+    binding = context.get("operatorInvocationBinding") or context.get("questionStageBinding")
     if not isinstance(binding, Mapping):
         capture.challenge_receipt_failure_code = "challenge_receipt_context_invalid"
         return False

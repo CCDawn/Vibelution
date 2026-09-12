@@ -1,8 +1,4 @@
-"""Freeze targeted requests and consume existing accepted evidence without calls.
-
-This owner does not start knowledge child runs. Their currency budget bridge
-must exist before the paid collection entry can be enabled.
-"""
+"""Freeze targeted requests, reuse accepted evidence or wait for native collection."""
 
 from __future__ import annotations
 
@@ -166,9 +162,7 @@ def verified_packages(team_id: str, run_id: str, request: OperatorKnowledgeReque
         and inv.request_hash == fingerprints["requestHash"]
         and inv.scope_hash == fingerprints["scopeHash"]
         and inv.source_policy_version == request.sourcePolicyVersion
-        # This batch only consumes zero-call reuse. A newly executed child
-        # needs the campaign currency bridge before it can be consumed here.
-        and not inv.knowledge_child_run_id
+        and child_costs_settled(store, inv.knowledge_child_run_id)
     }
     return [
         package
@@ -177,6 +171,37 @@ def verified_packages(team_id: str, run_id: str, request: OperatorKnowledgeReque
         )
         if package["invocationId"] in matching
     ]
+
+
+def child_costs_settled(store, child_run_id):
+    return store.read(lambda repo: child_costs_settled_in_repo(repo, child_run_id))
+
+
+def child_costs_settled_in_repo(repo, child_run_id):
+    if not child_run_id:
+        return True
+    from .knowledge_budget_runtime import SOURCE_NODES
+
+    child = repo.get_run(child_run_id)
+    if child is None or child.status != "succeeded":
+        return False
+    parent = repo.get_run(child.parent_run_id) if child.parent_run_id else None
+    if parent is None:
+        return False
+    if parent.workflow_id != "operator-optimization":
+        return True
+    rows = repo.execute("SELECT node_run_id, status, settled_json FROM budget_receipts WHERE run_id = ?",
+                        (child_run_id,)).fetchall()
+    by_node = {row[0]: row for row in rows}
+    for node_id in SOURCE_NODES:
+        attempt = repo.latest_attempt(child_run_id, node_id)
+        row = by_node.get(attempt.node_run_id) if attempt else None
+        metadata = json.loads(row[2] or "{}").get("operatorModelBudget", {}) if row else {}
+        if (attempt is None or attempt.status != "succeeded" or row is None or row[1] != "settled"
+                or metadata.get("budgetKind") != "knowledge" or not metadata.get("callsUsed")
+                or metadata.get("costStatus") != "settled"):
+            return False
+    return all(row[1] in {"settled", "released", "voided"} for row in rows)
 
 
 def reusable_package(team_id: str, run_id: str, request: OperatorKnowledgeRequest):
@@ -195,7 +220,7 @@ def reusable_package(team_id: str, run_id: str, request: OperatorKnowledgeReques
             source_policy_version=request.sourcePolicyVersion,
         )
     )
-    if source is None or source.parent_run_id == run_id:
+    if source is None or source.parent_run_id == run_id or not child_costs_settled(store, source.knowledge_child_run_id):
         return None
     return next(
         (
@@ -241,6 +266,39 @@ def attach_reused_package(team_id: str, run_id: str, request: OperatorKnowledgeR
             request, question_id=store.get_run(run_id).question_id
         ),
     )
+
+
+def collect_or_wait(team_id: str, run_id: str, request: OperatorKnowledgeRequest):
+    from .knowledge_wait import KnowledgeChildPending
+
+    store = get_write_store()
+    campaign, _, _ = round_context(team_id, run_id)
+    if not campaign.authorizedBy or not campaign.budget.authorized or campaign.budget.knowledge is None:
+        raise CampaignConflict("Knowledge collection requires its explicit authorized budget")
+    attempt = store.latest_attempt(run_id, "optimization_knowledge")
+    if attempt is None or attempt.status not in {"starting", "dispatching", "running"}:
+        raise CampaignConflict("Knowledge collection requires its actual active node attempt")
+    result = ensure_knowledge_invocation(store, parent_run_id=run_id,
+        parent_node_id="optimization_knowledge", parent_node_run_id=attempt.node_run_id,
+        parent_attempt=attempt.attempt, managed_source_root_ids=request.managedSourceRootIds,
+        **knowledge_invocation_arguments(request, question_id=store.get_run(run_id).question_id))
+    invocation = store.read(lambda repo: repo.get_knowledge_invocation(result["invocation"].invocation_id))
+    if invocation.parent_node_run_id != attempt.node_run_id:
+        raise CampaignConflict("Knowledge invocation belongs to a previous parent attempt")
+    if invocation.status in {"failed", "cancelled"}:
+        raise CampaignConflict("Knowledge collection failed; inspect the child run before a new experiment")
+    if invocation.status == "completed" and invocation.handoff_state == "accepted":
+        from ..research_runtime.knowledge_sideflow_service import knowledge_result_event_id
+
+        if invocation.knowledge_child_run_id and store.get_event_by_id(
+                knowledge_result_event_id(invocation.invocation_id, invocation.package_content_hash)) is None:
+            raise KnowledgeChildPending(invocation.invocation_id, invocation.knowledge_child_run_id)
+        if not child_costs_settled(store, invocation.knowledge_child_run_id):
+            raise CampaignConflict("Knowledge collection costs are not settled")
+        return
+    if not invocation.knowledge_child_run_id:
+        raise CampaignConflict("Knowledge collection has no canonical child run")
+    raise KnowledgeChildPending(invocation.invocation_id, invocation.knowledge_child_run_id)
 
 
 def attach_round_ref(
@@ -290,11 +348,14 @@ def publish_knowledge_snapshot(team_id: str, run_id: str) -> ArtifactRef:
         verified_packages(team_id, run_id, request) if request.evidenceGaps else []
     )
     if request.evidenceGaps and not packages:
-        attach_reused_package(team_id, run_id, request)
+        if reusable_package(team_id, run_id, request) is not None:
+            attach_reused_package(team_id, run_id, request)
+        else:
+            collect_or_wait(team_id, run_id, request)
         packages = verified_packages(team_id, run_id, request)
     if request.evidenceGaps and not packages:
         raise CampaignConflict(
-            "Knowledge gaps require a matching accepted package; paid collection is not connected"
+            "Knowledge gaps require a delivered accepted package"
         )
     snapshot = OperatorKnowledgeSnapshot(
         optimizationCampaignId=campaign.optimizationCampaignId,
