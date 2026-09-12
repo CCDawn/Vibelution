@@ -58,6 +58,7 @@
 
 | 草案 | 说明 |
 | --- | --- |
+| [plans/2026-09-12-session-ledger-archival-constraints.md](plans/2026-09-12-session-ledger-archival-constraints.md) | PROPOSED（未实施）：账本归档设计约束清单 + 2026-09-12 体检基线（854 个 / 98.1MB）；配套只读工具 `scripts/report_session_ledgers.py` |
 | [plans/2026-09-11-command-code-headless-transport-poc.md](plans/2026-09-11-command-code-headless-transport-poc.md) | USER-REQUESTED：Command Code headless CLI 传输探针；已实测调起/流式/会话与 G2/G3（G2 未通过、收益远小于原假设），G1 未测出，无 GO/NO-GO 结论 |
 | [plans/2026-09-05-independent-operator-experiment-flow-plan.md](plans/2026-09-05-independent-operator-experiment-flow-plan.md) | USER-REQUESTED / PROPOSED：独立算子优化实验流搭建方案，含成熟项目源码调研、团队讨论与知识复用、真实实验闭环、数据隔离及验收；未实施 |
 | [plans/2026-09-02-challenge-cup-10-parallel-concurrency-plan.md](plans/2026-09-02-challenge-cup-10-parallel-concurrency-plan.md) | USER-REQUESTED：10 并发链路改造任务清单（搜索 circuit/fan-in P0、dispatch 并行化、串线丢写修复、并发验收） |
