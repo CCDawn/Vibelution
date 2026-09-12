@@ -22,6 +22,11 @@ review LLM calls cannot starve delivery, reconciliation or receipt persistence.
 The pump threads are the only places that run LangGraph / adapters.
 ``wake()`` only releases a semaphore token, so the Ledger writer / HTTP thread
 never invokes the graph.
+
+A closed or unavailable ledger is terminal for every lane: the pump sets one
+``_fatal`` event and the lanes exit instead of hot-retrying a store that can
+never commit again (a timed-out writer used to spin the pool at 0.5-1s
+backoff while the HTTP thread starved).
 """
 
 from __future__ import annotations
@@ -31,9 +36,16 @@ import threading
 import time
 from typing import Any
 
+from core.research.workflow.ledger.errors import (
+    WorkflowLedgerClosedError,
+    WorkflowLedgerUnavailableError,
+)
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_WORKERS = 4
+
+_LEDGER_FATAL_ERRORS = (WorkflowLedgerClosedError, WorkflowLedgerUnavailableError)
 
 
 class WorkflowOutboxPump:
@@ -56,6 +68,7 @@ class WorkflowOutboxPump:
         # releasing tokens so a burst of commits keeps the pool saturated.
         self._wake = threading.Semaphore(0)
         self._stop = threading.Event()
+        self._fatal = threading.Event()
         self._threads: list[threading.Thread] = []
         self._lock = threading.Lock()
 
@@ -63,6 +76,11 @@ class WorkflowOutboxPump:
     def worker_count(self) -> int:
         """Configured dispatch workers (maintenance/receipt/recovery lanes are extra)."""
         return self._workers
+
+    @property
+    def fatal(self) -> bool:
+        """True once a lane saw a closed/unavailable ledger and the pool stopped."""
+        return self._fatal.is_set()
 
     @property
     def threads(self) -> tuple[threading.Thread, ...]:
@@ -79,6 +97,7 @@ class WorkflowOutboxPump:
                 self.wake()
                 return
             self._stop.clear()
+            self._fatal.clear()
             self._threads = [
                 threading.Thread(
                     target=self._worker_loop,
@@ -140,12 +159,19 @@ class WorkflowOutboxPump:
             self._runtime = None
             self._threads = []
 
+    def _degrade(self, message: str) -> None:
+        """Mark the ledger terminal and let every lane exit on its next check."""
+        if self._fatal.is_set():
+            return
+        self._fatal.set()
+        logger.warning(message)
+
     def _worker_loop(self) -> None:
         logger.info("research workflow outbox pump worker started")
         try:
-            while not self._stop.is_set():
+            while not self._stop.is_set() and not self._fatal.is_set():
                 self._wake.acquire(timeout=self._idle_poll_s)
-                if self._stop.is_set():
+                if self._stop.is_set() or self._fatal.is_set():
                     break
                 self._drain_until_idle()
         finally:
@@ -156,11 +182,16 @@ class WorkflowOutboxPump:
         if runtime is None:
             return
         try:
-            while not self._stop.is_set():
+            while not self._stop.is_set() and not self._fatal.is_set():
                 # Claim-as-you-run: lease exactly ONE action, execute it,
                 # only then claim the next. No prefetch, no hoarding.
                 if not runtime.claim_and_run_one():
                     break
+        except _LEDGER_FATAL_ERRORS as error:
+            self._degrade(
+                "research workflow outbox pump lane stopped: the workflow "
+                f"ledger is closed or unavailable ({error})"
+            )
         except Exception:
             logger.exception("research workflow outbox pump iteration failed")
             self._stop.wait(timeout=0.5)
@@ -168,12 +199,18 @@ class WorkflowOutboxPump:
     def _maintenance_loop(self) -> None:
         logger.info("research workflow outbox maintenance started")
         try:
-            while not self._stop.is_set():
+            while not self._stop.is_set() and not self._fatal.is_set():
                 runtime = self._runtime
                 maintenance = getattr(runtime, "run_maintenance_once", None)
                 if maintenance is not None:
                     try:
                         maintenance(limit=self._batch_limit)
+                    except _LEDGER_FATAL_ERRORS as error:
+                        self._degrade(
+                            "research workflow outbox maintenance stopped: the "
+                            f"workflow ledger is closed or unavailable ({error})"
+                        )
+                        return
                     except Exception:
                         logger.exception(
                             "research workflow outbox maintenance iteration failed"
@@ -193,6 +230,12 @@ class WorkflowOutboxPump:
                 if persist is not None:
                     try:
                         persist(limit=self._batch_limit)
+                    except _LEDGER_FATAL_ERRORS as error:
+                        self._degrade(
+                            "research workflow receipt persistence stopped: the "
+                            f"workflow ledger is closed or unavailable ({error})"
+                        )
+                        return
                     except Exception:
                         logger.exception(
                             "research workflow receipt persistence iteration failed"
@@ -204,11 +247,17 @@ class WorkflowOutboxPump:
 
     def _hypothesis_recovery_loop(self) -> None:
         """One recovery lane replays the existing durable meeting authority."""
-        while not self._stop.is_set():
+        while not self._stop.is_set() and not self._fatal.is_set():
             recover = getattr(self._runtime, "run_hypothesis_recovery_once", None)
             if recover is not None:
                 try:
                     recover(limit=self._batch_limit)
+                except _LEDGER_FATAL_ERRORS as error:
+                    self._degrade(
+                        "hypothesis recovery stopped: the workflow ledger is "
+                        f"closed or unavailable ({error})"
+                    )
+                    return
                 except Exception:
                     logger.exception("hypothesis recovery iteration failed")
             self._stop.wait(timeout=self._idle_poll_s)
