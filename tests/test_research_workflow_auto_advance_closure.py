@@ -1525,6 +1525,29 @@ def _seed_stored_round(round_id: str, *, meeting_ids: list[str]) -> dict[str, An
     return record
 
 
+def _seed_superseded_dispatch_attempt(candidate_id: str, attempt_number: int) -> None:
+    """Append one superseded review-dispatch attempt state for one identity."""
+    path = chain._storage_path(_TEAM_ID)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    chain._append_jsonl(
+        path,
+        {
+            "schemaVersion": 1,
+            "recordKind": chain.REVIEW_DISPATCH_ATTEMPT_KIND,
+            "attemptId": f"attempt-{candidate_id}-{attempt_number}",
+            "attemptNumber": attempt_number,
+            "selectionId": _REGEN_SELECTION_ID,
+            "candidateId": candidate_id,
+            "roundIndex": 2,
+            "lifecycle": "failed",
+            "outcome": "superseded",
+            "meetingRoundId": f"hf-review-dead-{attempt_number}",
+            "updatedAt": _offset_iso(attempt_number),
+            "createdAt": _offset_iso(attempt_number),
+        },
+    )
+
+
 def _seed_regen_chain(
     *, second_round_status: str = "closed", closed_at: str = ""
 ) -> None:
@@ -1782,6 +1805,123 @@ def test_auto_regenerate_maps_sibling_rejection_to_skipped(
 
     assert summary["status"] == "skipped"
     assert summary["reason"] == "waiting_for_sibling_reviews"
+
+
+def test_auto_regenerate_respects_the_failure_retry_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """一次 auto-advance 失败已记账后，下一 sweep 不再自动重撞同一确定性失败
+    （SCI-024 式的 255 次盲重试），只保留 operator 提示。"""
+    events = _regen_env(tmp_path, monkeypatch)
+    _seed_regen_chain()
+    hrounds.record_hypothesis_round_failure(
+        _TEAM_ID,
+        {
+            "status": "failed",
+            "failureCode": "hypothesis_round_generation_error",
+            "reason": "review step did not return within 800s",
+            "meetingRoundIds": [_REGEN_R2_MEETING_B],
+            "selectionId": _REGEN_SELECTION_ID,
+            "roundIndex": 2,
+            "trigger": "auto_advance",
+        },
+    )
+    calls: list[str] = []
+
+    def _regenerate(team_id, meeting_round_id, **_kwargs):
+        calls.append(meeting_round_id)
+        return {"status": "created", "round": {}}
+
+    monkeypatch.setattr(chain, "regenerate_hypothesis_round", _regenerate)
+
+    summary = chain.auto_regenerate_missing_hypothesis_round(
+        _TEAM_ID, question_id=_QUESTION_ID, now_ms=_offset_ms(600)
+    )
+
+    assert summary["status"] == "skipped"
+    assert summary["reason"] == "auto_retry_budget_exhausted"
+    assert calls == []
+    budget_events = [
+        item
+        for item in events
+        if item["code"] == "hypothesis_first.auto_regenerate_round"
+        and item["fields"].get("reason") == "auto_retry_budget_exhausted"
+    ]
+    assert budget_events and budget_events[-1]["outcome"] == "skipped"
+
+
+def test_auto_regenerate_redispatches_superseded_reviews(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """superseded digest-less 候选没有可关闭的会议：sweep 自动重派发其评审，
+    而不是继续等待不可能发生的 sibling close。"""
+    events = _regen_env(tmp_path, monkeypatch)
+    _seed_regen_chain()
+    redispatch_calls: list[tuple[str, list[str]]] = []
+
+    def _retry(team_id, selection_id, candidate_ids):
+        redispatch_calls.append((selection_id, list(candidate_ids)))
+        return {"status": "opened"}
+
+    monkeypatch.setattr(chain, "retry_review_dispatch", _retry)
+
+    def _regenerate(team_id, meeting_round_id, **_kwargs):
+        return {
+            "status": "waiting_for_sibling_reviews",
+            "selectionId": _REGEN_SELECTION_ID,
+            "roundIndex": 2,
+            "missingCandidateIds": [],
+            "pendingMeetingRoundIds": [],
+            "supersededCandidateIds": [_REGEN_CANDIDATE_A],
+            "supersededMeetingRoundIds": ["hf-review-dead"],
+        }
+
+    monkeypatch.setattr(chain, "regenerate_hypothesis_round", _regenerate)
+
+    summary = chain.auto_regenerate_missing_hypothesis_round(
+        _TEAM_ID, question_id=_QUESTION_ID, now_ms=_offset_ms(600)
+    )
+
+    assert summary["reason"] == "waiting_for_sibling_reviews"
+    assert redispatch_calls == [(_REGEN_SELECTION_ID, [_REGEN_CANDIDATE_A])]
+    assert summary["autoRedispatch"]["redispatched"] == 1
+    redispatch_events = [
+        item
+        for item in events
+        if item["code"] == "hypothesis_first.auto_redispatch_superseded"
+    ]
+    assert redispatch_events and redispatch_events[-1]["outcome"] == "redispatched"
+
+
+def test_auto_redispatch_superseded_reviews_stops_at_the_attempt_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """每个 dispatch identity 的自动重派发有上限：达到上限后保留 operator 路径。"""
+    _regen_env(tmp_path, monkeypatch)
+    for attempt_number in (1, 2):
+        _seed_superseded_dispatch_attempt(_REGEN_CANDIDATE_A, attempt_number)
+    calls: list[tuple[str, list[str]]] = []
+
+    monkeypatch.setattr(
+        chain,
+        "retry_review_dispatch",
+        lambda team_id, selection_id, candidate_ids: calls.append(
+            (selection_id, list(candidate_ids))
+        ),
+    )
+
+    result = chain._auto_redispatch_superseded_reviews(
+        _TEAM_ID,
+        selection_id=_REGEN_SELECTION_ID,
+        candidate_ids=[_REGEN_CANDIDATE_A],
+    )
+
+    assert result["exhausted"] == 1
+    assert result["redispatched"] == 0
+    assert calls == []
 
 
 def test_auto_regenerate_is_inflight_guarded_per_question(

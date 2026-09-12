@@ -8075,6 +8075,77 @@ def test_waiting_fan_in_persists_blocked_trace(tmp_path, monkeypatch):
     assert hrounds.list_hypothesis_rounds("team-wait")["roundCount"] == 0
 
 
+def test_waiting_fan_in_trace_is_idempotent_with_accurate_recovery(
+    tmp_path, monkeypatch
+):
+    """Re-entered waits share one blocked row and name the real recovery.
+
+    The auto-advance sweep observes the same wait every tick; a superseded
+    digest-less candidate has no open meeting to close, so the historical
+    "close the pending sibling review meetings" hint was impossible advice
+    (SCI-117 retried it for eight days).
+    """
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(hrounds, "PROJECT_ROOT", tmp_path)
+    fan_in = {
+        "status": "waiting_for_sibling_reviews",
+        "selectionId": "selection-wait-1",
+        "roundIndex": 1,
+        "closed": False,
+        "missingCandidateIds": [],
+        "pendingMeetingRoundIds": [],
+        "supersededCandidateIds": ["candidate-dead-1"],
+        "supersededMeetingRoundIds": ["hf-review-dead-1"],
+        "closedMeetingRoundIds": ["meeting-a"],
+    }
+    monkeypatch.setattr(
+        chain, "_review_meeting_fan_in_group", lambda *_args, **_kwargs: dict(fan_in)
+    )
+    meeting = {"meetingRoundId": "meeting-a", "question": "SCI-096"}
+
+    first = chain._generate_hypothesis_round("team-wait", meeting)
+    second = chain._generate_hypothesis_round("team-wait", meeting)
+
+    assert first["failureRecordId"].startswith("hrfail-")
+    assert second["failureRecordId"] == first["failureRecordId"]
+    failures = hrounds.list_hypothesis_round_failures("team-wait")
+    assert failures["failureCount"] == 1
+    assert failures["openFailureCount"] == 1
+    trace = failures["failures"][0]
+    assert trace["status"] == "blocked"
+    assert "candidate-dead-1" in trace["retryHint"]
+    assert "re-dispatch" in trace["retryHint"]
+
+
+def test_fan_in_waiting_semantics_names_each_recovery() -> None:
+    """The wait taxonomy decides the reason and retry hint, not default text."""
+    reason, hint = chain._fan_in_waiting_semantics(
+        {"supersededCandidateIds": ["cand-a"]}
+    )
+    assert "re-dispatch" in hint and "cand-a" in hint
+    assert "re-dispatch" in reason
+
+    reason, hint = chain._fan_in_waiting_semantics(
+        {"missingCandidateIds": ["cand-b"]}
+    )
+    assert "open review meetings" in hint and "cand-b" in hint
+
+    reason, hint = chain._fan_in_waiting_semantics(
+        {"pendingMeetingRoundIds": ["hf-review-1"]}
+    )
+    assert "wait" in hint and "hf-review-1" in hint
+    assert "re-dispatch" not in hint
+
+    # Priority: a superseded candidate is recoverable even while others wait.
+    reason, hint = chain._fan_in_waiting_semantics(
+        {
+            "supersededCandidateIds": ["cand-a"],
+            "pendingMeetingRoundIds": ["hf-review-1"],
+        }
+    )
+    assert "re-dispatch" in hint and "cand-a" in hint
+
+
 def test_failed_generation_persists_classified_trace(tmp_path, monkeypatch):
     """Generation failures persist a classified trace; trace failures degrade visibly."""
     monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)

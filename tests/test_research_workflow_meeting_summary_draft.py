@@ -645,6 +645,60 @@ def test_build_round_candidates_fail_closed_without_claim(
         assert generated["status"] == "failed"
 
 
+def test_build_round_candidates_fills_empty_approved_statement_from_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """空批准工件字段不得遮蔽 ledger 内容：statement 空洞由同一身份补齐。
+
+    SCI-024 的确定性失败根因：批准工件里该候选的 ``statement`` 为空，而
+    ledger 行有内容；旧的 setdefault 遮蔽让 claim 永远为空并逐 sweep
+    重撞 "requires a non-empty claim"。
+    """
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    with server_operator_scope("u-1", roles=("operator",)):
+        fake_meeting = {"meetingRoundId": "mr-gen-filled", "question": _QUESTION_ID}
+        appended = chain._append_generation_candidates(
+            team_id,
+            fake_meeting,
+            [
+                {
+                    "statement": "阻断腺苷 A2A 受体可恢复记忆巩固窗口",
+                    "rationale": "受体机制",
+                    "proposedBy": "operator",
+                }
+            ],
+        )
+        candidate_id = appended[0]["candidateId"]
+        # The approved artifact carries the identity with an empty statement
+        # and no mechanism; the ledger row above has the recoverable content.
+        monkeypatch.setattr(
+            question_launch,
+            "_approved_details",
+            lambda _team_id: {
+                _QUESTION_ID: {
+                    "output": {
+                        "hypotheses": [
+                            {
+                                "hypothesis_id": candidate_id,
+                                "statement": "",
+                                "mechanism": "",
+                            }
+                        ]
+                    }
+                }
+            },
+        )
+        review_meeting = {
+            "question": _QUESTION_ID,
+            "discussionItemRefs": [f"hypothesis_candidate:{candidate_id}"],
+        }
+
+        built = chain._build_round_candidates(team_id, review_meeting)
+
+        assert built[0]["claim"] == "阻断腺苷 A2A 受体可恢复记忆巩固窗口"
+        assert built[0]["rationale"] == "受体机制"
+
+
 def test_auto_draft_runs_only_after_all_bound_rounds_finish(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
