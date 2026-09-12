@@ -1,4 +1,11 @@
-"""Canonical Agent configuration identity and permission presets."""
+"""Canonical Agent configuration identity and permission presets.
+
+两侧 "config revision" 共用本模块的 canonical payload，但含义不同：
+- SQLite `agent_config_revisions`：compiled snapshot，供 sessions 外键引用
+  （见 core/chat/conversation_store/schema.py）；
+- `config_changes.jsonl` 的 `revision_published` 事件：编辑过程的发布记录
+  （见 agent_config_change_service）。
+"""
 
 from __future__ import annotations
 

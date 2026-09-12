@@ -98,9 +98,9 @@
 
 | 项 | 状态 |
 | --- | --- |
-| 账本无物理归档（长会话文件只增，逻辑压缩只影响模型视野） | 待做 |
-| 仓库内遗留 `workspace\` 旧文件未清（迁移已完成） | 待做 |
-| "config revision" 两处同名（SQLite 表 vs JSONL 事件） | 待澄清 |
+| 账本无物理归档（长会话文件只增，逻辑压缩只影响模型视野） | 已体检（2026-09）：只读工具 `scripts/report_session_ledgers.py` + 约束文档；机制化留待数据量/运维需求逼近 |
+| 仓库内遗留 `workspace\` 旧文件未清（迁移已完成） | 已完成（2026-09-12）：清理 142 文件 / 36.3MB |
+| "config revision" 两处同名（SQLite 表 vs JSONL 事件） | 已澄清（2026-09）：两侧 docstring 互指，compiled snapshot vs 发布事件 |
 | 前端一批 `act` 测试在当前依赖下失败（react@19.2.6 缺 `act` 导出） | 待修（独立环境问题） |
 | 会话过程状态过细碎（6 条工程阶段） | 已收口：粗粒度 `working / thinking / queued` + 700ms 防抖 |
 | 提示词链路 5 个僵尸机制 + 能力过滤双源 | 已清理：单一权威（capability_requirements + resolver） |
