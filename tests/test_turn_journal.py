@@ -609,15 +609,61 @@ def test_fold_active_events_keeps_path_when_fork_point_is_missing():
     assert [event.event_id for event in active] == [event.event_id for event in _fold_fixture()]
 
 
-def test_fold_active_events_ignores_head_select_until_head_pointer_exists():
+def test_fold_active_events_head_select_restores_superseded_branch():
     events = [
         *_fold_fixture(),
-        _rebase_event(5, "event-a2", operation="head_select"),
+        _rebase_event(5, "event-a1", event_id="event-rebase-1"),
+        _branch_event("event-u2b", "turn-3", 6, EVENT_USER_MESSAGE, payload={"content": "编辑后的需求"}),
+        _branch_event("event-a2b", "turn-3", 7, EVENT_ASSISTANT_MESSAGE, payload={"content": "新回答"}),
+        _rebase_event(8, "event-a2", operation="head_select", event_id="event-rebase-2"),
     ]
 
     active = fold_active_events(events)
 
     assert [event.event_id for event in active] == ["event-u1", "event-a1", "event-u2", "event-a2"]
+
+
+def test_fold_active_events_head_select_then_new_message_continues_from_target():
+    events = [
+        *_fold_fixture(),
+        _rebase_event(5, "event-a1", event_id="event-rebase-1"),
+        _branch_event("event-u2b", "turn-3", 6, EVENT_USER_MESSAGE, payload={"content": "编辑后的需求"}),
+        _branch_event("event-a2b", "turn-3", 7, EVENT_ASSISTANT_MESSAGE, payload={"content": "新回答"}),
+        _rebase_event(8, "event-a2", operation="head_select", event_id="event-rebase-2"),
+        _branch_event("event-u3", "turn-4", 9, EVENT_USER_MESSAGE, payload={"content": "沿旧分支继续"}),
+    ]
+
+    active = fold_active_events(events)
+
+    assert [event.event_id for event in active] == [
+        "event-u1",
+        "event-a1",
+        "event-u2",
+        "event-a2",
+        "event-u3",
+    ]
+
+
+def test_fold_active_events_head_select_to_active_tip_is_idempotent():
+    events = [
+        *_fold_fixture(),
+        _rebase_event(5, "event-a2", operation="head_select", event_id="event-rebase-1"),
+    ]
+
+    active = fold_active_events(events)
+
+    assert [event.event_id for event in active] == ["event-u1", "event-a1", "event-u2", "event-a2"]
+
+
+def test_fold_active_events_head_select_to_unknown_event_keeps_current_path():
+    events = [
+        *_fold_fixture(),
+        _rebase_event(5, "event-missing", operation="head_select", event_id="event-rebase-1"),
+    ]
+
+    active = fold_active_events(events)
+
+    assert [event.event_id for event in active] == [event.event_id for event in _fold_fixture()]
 
 
 def test_fold_active_events_ignores_unknown_rebase_operation():
