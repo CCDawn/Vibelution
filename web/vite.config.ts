@@ -147,6 +147,12 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // Pin NODE_ENV for test workers: vitest honors an inherited NODE_ENV, so a
+    // caller environment with NODE_ENV=production makes `react` resolve to its
+    // production build, where development-only APIs such as `act` are absent.
+    env: {
+      NODE_ENV: "test",
+    },
     include: ["src/**/*.test.ts", "src/**/*.test.tsx", "*.test.ts"],
     // File-level parallelism: contract/layout suites are independent modules.
     // Forks isolate process-global state better than threads on Windows.
