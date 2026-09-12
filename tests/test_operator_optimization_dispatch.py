@@ -14,6 +14,11 @@ from core.web.services.team_workflow.operator_optimization.store import (
 )
 
 
+@pytest.fixture(autouse=True)
+def isolated_device_lease(tmp_path, monkeypatch):
+    monkeypatch.setattr(executor.tempfile, "gettempdir", lambda: str(tmp_path))
+
+
 @pytest.fixture
 def trial(activity, monkeypatch):
     request = CudaTrialRequest(protocol={"protocolId": "p1", "split": "tuning", "cases": [
@@ -126,6 +131,17 @@ def test_worker_start_failure_is_recorded_and_settled_without_gpu_cost(activity,
     assert reservation.consumedSeconds == 0
     assert reservation.outcome == "failed"
     assert dispatch.dispatch_trial(*activity[:2], request, device_name="Fixture") == ref
+
+
+def test_real_device_lock_contention_releases_unstarted_reservation(activity, trial, tmp_path, monkeypatch):
+    request, _ = trial
+    monkeypatch.setattr(dispatch, "execute_cuda_trial", executor.execute_cuda_trial)
+    monkeypatch.setattr(executor.subprocess, "Popen", lambda *a, **k: pytest.fail("must not spawn"))
+    lease = tmp_path / "vibelution-operator-cuda" / "device-0"
+    with executor.inter_process_lock(lease):
+        with pytest.raises(BlockingIOError, match="worker was not started"):
+            dispatch.dispatch_trial(*activity[:2], request, device_name="Fixture")
+    assert read_campaign(*activity).gpuReservations == ()
 
 
 def test_trial_identity_rejects_changed_input(activity, trial):

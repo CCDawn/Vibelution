@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from contextlib import ExitStack
 from pathlib import Path
 
 from core.infrastructure.codex_sandbox.process import (
@@ -26,7 +27,14 @@ from core.web.services.team_workflow.storage_durability import inter_process_loc
 def execute_cuda_trial(request: CudaTrialRequest, *, device_name: str) -> OperatorMeasurement:
     # Host-wide, independent of project/worktree. Worker currently owns device 0.
     lease = Path(tempfile.gettempdir()) / "vibelution-operator-cuda" / "device-0"
-    with inter_process_lock(lease, timeout_s=0):
+    with ExitStack() as device_lease:
+        try:
+            device_lease.enter_context(inter_process_lock(lease, timeout_s=0))
+        except OSError as exc:
+            # Windows lock contention raises PermissionError, POSIX raises
+            # BlockingIOError. Only acquisition failures prove no worker ran;
+            # errors after acquisition must retain their original meaning.
+            raise BlockingIOError("CUDA device lease is unavailable; worker was not started") from exc
         started = time.monotonic()
         expected = {
             "measurementId": request.measurement_id,

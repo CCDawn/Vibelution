@@ -7,6 +7,11 @@ from core.research.operator_optimization.cuda_worker import CudaTrialRequest
 from core.web.services.team_workflow.operator_optimization import executor
 
 
+@pytest.fixture(autouse=True)
+def isolated_device_lease(tmp_path, monkeypatch):
+    monkeypatch.setattr(executor.tempfile, "gettempdir", lambda: str(tmp_path))
+
+
 @pytest.fixture
 def request_data():
     return CudaTrialRequest(protocol={"protocolId": "p1", "split": "tuning", "cases": [
