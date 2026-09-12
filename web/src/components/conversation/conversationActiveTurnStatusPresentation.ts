@@ -2,6 +2,9 @@ import type { SessionTurnItem } from "../../api/types";
 
 /** Compact active-turn stage labels + heartbeat copy. Pure helpers only. */
 
+/** Keep a stage label on screen at least this long before switching (anti-flicker). */
+export const ACTIVE_TURN_STAGE_MIN_DWELL_MS = 700;
+
 export type ActiveTurnStageBarPhase = "sent" | "prepare" | "request" | "thinking";
 
 export const ACTIVE_TURN_STAGE_BAR_PHASES: readonly ActiveTurnStageBarPhase[] = [
@@ -63,6 +66,7 @@ export function activeTurnStageBarPhase(stage: string): ActiveTurnStageBarPhase 
     case "agent_prepare":
     case "history_restore":
     case "followup_prepare":
+    case "working":
       return "prepare";
     case "model_request":
     case "model_retry":
@@ -71,6 +75,7 @@ export function activeTurnStageBarPhase(stage: string): ActiveTurnStageBarPhase 
     case "model_thinking":
     case "server_thinking":
     case "reasoning":
+    case "thinking":
       return "thinking";
     default:
       return "other";
@@ -104,7 +109,7 @@ export function activeTurnStageLabel(stage: string, lang: "zh" | "en" | string) 
     case "context_prepare":
       return zh ? "准备上下文" : "Preparing context";
     case "queued":
-      return zh ? "等待执行" : "Queued";
+      return zh ? "排队中" : "Queued";
     case "agent_prepare":
       return zh ? "准备 Agent" : "Preparing agent";
     case "history_restore":
@@ -119,7 +124,10 @@ export function activeTurnStageLabel(stage: string, lang: "zh" | "en" | string) 
     case "model_thinking":
     case "server_thinking":
     case "reasoning":
+    case "thinking":
       return zh ? "思考中" : "Thinking";
+    case "working":
+      return zh ? "处理中" : "Working";
     case "tool_running":
     case "tooling":
       return zh ? "执行工具" : "Running tools";
@@ -165,6 +173,26 @@ export function activeTurnElapsedSeconds(startedAt: string | undefined | null, n
     return null;
   }
   return Math.max(0, Math.floor((nowMs - startedMs) / 1000));
+}
+
+/**
+ * Anti-flicker plan for switching the displayed stage.  A stage that just
+ * appeared stays visible until the minimum dwell elapses; only then may the
+ * next stage replace it.
+ */
+export function planActiveTurnStageSwitch(
+  currentStage: string,
+  incomingStage: string,
+  shownForMs: number,
+  minDwellMs: number = ACTIVE_TURN_STAGE_MIN_DWELL_MS,
+) {
+  if (incomingStage === currentStage) {
+    return { stage: currentStage, delayMs: 0 };
+  }
+  if (shownForMs >= minDwellMs) {
+    return { stage: incomingStage, delayMs: 0 };
+  }
+  return { stage: currentStage, delayMs: minDwellMs - shownForMs };
 }
 
 export function formatActiveTurnHeartbeatText(

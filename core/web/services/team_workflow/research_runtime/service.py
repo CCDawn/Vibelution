@@ -470,10 +470,16 @@ def _definition_meta_from(
     identity: Any = None,
 ) -> tuple[Any, Any]:
     """Validate the workflowId and return its canonical creation identity."""
-    if workflow_id != CHALLENGE_CUP_WORKFLOW_ID:
+    from core.research.workflow.operator_optimization_definition import (
+        OPERATOR_WORKFLOW_ID, OPERATOR_BASELINE_WORKFLOW_ID, build_operator_definition,
+    )
+    if workflow_id not in {CHALLENGE_CUP_WORKFLOW_ID, OPERATOR_WORKFLOW_ID, OPERATOR_BASELINE_WORKFLOW_ID}:
         raise ResearchWorkflowError(f"Unknown workflowId: {workflow_id}", code="unknown_workflow")
     if definition is None:
-        definition = build_challenge_cup_workflow_definition()
+        definition = (
+            build_challenge_cup_workflow_definition() if workflow_id == CHALLENGE_CUP_WORKFLOW_ID
+            else build_operator_definition(baseline=workflow_id == OPERATOR_BASELINE_WORKFLOW_ID)
+        )
     if identity is None:
         identity = register_or_resolve(definition)
     return definition, identity
@@ -612,7 +618,7 @@ class ResearchWorkflowRuntimeService:
     ) -> dict[str, Any]:
         """Current-configuration view per agent node (never touches run history)."""
         meta = self.get_definition(workflow_id)
-        definition = build_challenge_cup_workflow_definition()
+        definition, _ = _definition_meta_from(workflow_id)
         layers = self._effective_binding_layers(workflow_id, team_id)
         names = _agent_display_name_map()
         bindings = []
@@ -649,13 +655,12 @@ class ResearchWorkflowRuntimeService:
         their persisted values. Validated against the workflow definition
         before persisting (unknown role/stage/node rejected).
         """
-        if workflow_id != CHALLENGE_CUP_WORKFLOW_ID:
-            raise ResearchWorkflowError(f"Unknown workflowId: {workflow_id}", code="unknown_workflow")
+        _definition_meta_from(workflow_id)
         current = self._binding_config.load(workflow_id, team_id)
         team_scoped = bool(str(team_id or "").strip())
         try:
             if not isinstance(payload, dict):
-                self._binding_config.validate_payload(payload)
+                self._binding_config.validate_payload(payload, workflow_id=workflow_id)
             raw_update = {
                 "workflowDefaults": (
                     payload.get("workflowDefaults") or {}
@@ -673,7 +678,7 @@ class ResearchWorkflowRuntimeService:
                     else current.nodeOverrides
                 ),
             }
-            self._binding_config.validate_payload(raw_update)
+            self._binding_config.validate_payload(raw_update, workflow_id=workflow_id)
         except BindingConfigValidationError as exc:
             raise ResearchWorkflowError(str(exc), code=exc.code) from exc
         # Replace-whole-layer semantics: a layer present in the payload fully

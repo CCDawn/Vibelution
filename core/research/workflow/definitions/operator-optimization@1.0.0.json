@@ -1,0 +1,172 @@
+{
+  "snapshotKind": "workflow_definition_snapshot",
+  "snapshotVersion": 1,
+  "workflowId": "operator-optimization",
+  "schemaVersion": "1.0.0",
+  "workflowVersionId": "wv-aa7cb4f2d3cc",
+  "contentHash": "aa7cb4f2d3cc703938ad170a86d0c6fa74f64fa58d0d263e966978a5ba3eb4f9",
+  "definition": {
+    "workflowId": "operator-optimization",
+    "schemaVersion": "1.0.0",
+    "label": "算子优化实验",
+    "structureHash": "aa7cb4f2d3cc703938ad170a86d0c6fa74f64fa58d0d263e966978a5ba3eb4f9",
+    "stages": [
+      {
+        "stageId": "execution_iteration",
+        "index": 1,
+        "label": "优化实验",
+        "nodeIds": [
+          "optimization_discussion",
+          "optimization_knowledge",
+          "optimization_plan",
+          "operator_execution",
+          "operator_evaluation",
+          "optimization_feedback"
+        ]
+      }
+    ],
+    "nodes": [
+      {
+        "nodeId": "optimization_discussion",
+        "stageId": "execution_iteration",
+        "label": "优化讨论",
+        "actorKind": "agent",
+        "primaryRoleKey": "experiment_planner",
+        "description": "",
+        "collaboratorRoleKeys": [],
+        "acceptsGateKinds": [],
+        "producesArtifactKinds": [
+          "optimization_hypothesis"
+        ],
+        "sessionScopePolicy": "node_shared"
+      },
+      {
+        "nodeId": "optimization_knowledge",
+        "stageId": "execution_iteration",
+        "label": "资料补齐",
+        "actorKind": "system",
+        "primaryRoleKey": "",
+        "description": "",
+        "collaboratorRoleKeys": [],
+        "acceptsGateKinds": [],
+        "producesArtifactKinds": [
+          "optimization_knowledge"
+        ],
+        "sessionScopePolicy": "node_shared"
+      },
+      {
+        "nodeId": "optimization_plan",
+        "stageId": "execution_iteration",
+        "label": "实验规划",
+        "actorKind": "agent",
+        "primaryRoleKey": "experiment_planner",
+        "description": "",
+        "collaboratorRoleKeys": [],
+        "acceptsGateKinds": [],
+        "producesArtifactKinds": [
+          "optimization_plan"
+        ],
+        "sessionScopePolicy": "node_shared"
+      },
+      {
+        "nodeId": "operator_execution",
+        "stageId": "execution_iteration",
+        "label": "算子实验",
+        "actorKind": "system",
+        "primaryRoleKey": "",
+        "description": "",
+        "collaboratorRoleKeys": [],
+        "acceptsGateKinds": [],
+        "producesArtifactKinds": [
+          "operator_measurement"
+        ],
+        "sessionScopePolicy": "node_shared"
+      },
+      {
+        "nodeId": "operator_evaluation",
+        "stageId": "execution_iteration",
+        "label": "数值评价",
+        "actorKind": "system",
+        "primaryRoleKey": "",
+        "description": "",
+        "collaboratorRoleKeys": [],
+        "acceptsGateKinds": [],
+        "producesArtifactKinds": [
+          "operator_evaluation"
+        ],
+        "sessionScopePolicy": "node_shared"
+      },
+      {
+        "nodeId": "optimization_feedback",
+        "stageId": "execution_iteration",
+        "label": "反馈与下一轮",
+        "actorKind": "system",
+        "primaryRoleKey": "",
+        "description": "",
+        "collaboratorRoleKeys": [],
+        "acceptsGateKinds": [],
+        "producesArtifactKinds": [
+          "optimization_feedback"
+        ],
+        "sessionScopePolicy": "node_shared"
+      }
+    ],
+    "edges": [
+      {
+        "edgeId": "optimization_discussion->optimization_knowledge",
+        "fromNodeId": "optimization_discussion",
+        "toNodeId": "optimization_knowledge",
+        "label": "优化讨论",
+        "gateKind": "auto",
+        "requiredArtifactKinds": [
+          "optimization_hypothesis"
+        ],
+        "requiresHumanAccept": false
+      },
+      {
+        "edgeId": "optimization_knowledge->optimization_plan",
+        "fromNodeId": "optimization_knowledge",
+        "toNodeId": "optimization_plan",
+        "label": "资料补齐",
+        "gateKind": "auto",
+        "requiredArtifactKinds": [
+          "optimization_knowledge"
+        ],
+        "requiresHumanAccept": false
+      },
+      {
+        "edgeId": "optimization_plan->operator_execution",
+        "fromNodeId": "optimization_plan",
+        "toNodeId": "operator_execution",
+        "label": "实验规划",
+        "gateKind": "auto",
+        "requiredArtifactKinds": [
+          "optimization_plan"
+        ],
+        "requiresHumanAccept": false
+      },
+      {
+        "edgeId": "operator_execution->operator_evaluation",
+        "fromNodeId": "operator_execution",
+        "toNodeId": "operator_evaluation",
+        "label": "算子实验",
+        "gateKind": "auto",
+        "requiredArtifactKinds": [
+          "operator_measurement"
+        ],
+        "requiresHumanAccept": false
+      },
+      {
+        "edgeId": "operator_evaluation->optimization_feedback",
+        "fromNodeId": "operator_evaluation",
+        "toNodeId": "optimization_feedback",
+        "label": "数值评价",
+        "gateKind": "auto",
+        "requiredArtifactKinds": [
+          "operator_evaluation"
+        ],
+        "requiresHumanAccept": false
+      }
+    ]
+  }
+}

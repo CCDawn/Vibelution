@@ -62,7 +62,7 @@ pytestmark = pytest.mark.serial
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
 
-CONTEXT_PREPARE_LIVE_MESSAGE = "正在准备对话上下文...\n正在读取当前会话、绑定 Agent、工具权限和可恢复的上轮现场。"
+CONTEXT_PREPARE_LIVE_MESSAGE = "正在处理..."
 
 
 _RETIRED_ASSISTANT_ENVELOPE_FIELDS = (
@@ -1305,7 +1305,7 @@ def test_session_detail_exposes_pre_model_progress_stage(tmp_path, monkeypatch):
     assert live_message["status"] == "running"
     assert any(
         item.get("type") == "status"
-        and item.get("code") == "context_prepare"
+        and item.get("code") == "working"
         and item.get("text") == CONTEXT_PREPARE_LIVE_MESSAGE
         for item in live_message["turnItems"]
     )
@@ -1401,9 +1401,8 @@ def test_session_detail_exposes_pre_model_progress_as_ordered_feedback_events(tm
     _assert_v3_assistant_message(live_message)
     status_items = _assistant_turn_items(live_message, "status")
     assert [item["code"] for item in status_items] == [
-        "context_prepare",
-        "agent_prepare",
-        "model_request",
+        "working",
+        "thinking",
     ]
     assert status_items[-1]["status"] == "running"
     work_run = session_service._WORK_RUN_STORE.load_snapshot("chat_turn", "turn-progress-events")
@@ -7072,12 +7071,12 @@ def test_capture_session_ui_stream_surfaces_live_thought_as_model_thinking(tmp_p
 
     live_state = session_service._snapshot_session_live_output("session-live-thought")
     assert live_state is not None
-    assert live_state.stage == "model_thinking"
+    assert live_state.stage == "thinking"
     assert live_state.content == ""
     assert any(
         item.get("kind") == "status"
-        and item.get("name") == "model_thinking"
-        and "正在思考" in str(item.get("resultPreview") or "")
+        and item.get("name") == "thinking"
+        and "等待模型响应" in str(item.get("resultPreview") or "")
         for item in live_state.feedback_events
     )
     assert live_state.thought == "先看最新日志，再判断是否真的卡住。"
@@ -7120,16 +7119,16 @@ def test_session_continuation_marks_server_side_model_wait_as_thinking(tmp_path,
 
     assert isinstance(result, dict)
     assert result["status"] == "completed"
-    assert observed_stages == ["model_thinking"]
+    assert observed_stages == ["thinking"]
     live_state = session_service._snapshot_session_live_output("session-server-thinking")
     assert live_state is not None
-    assert live_state.stage == "model_thinking"
+    assert live_state.stage == "thinking"
     assert live_state.content == ""
     assert live_state.thought == ""
     assert any(
         item.get("kind") == "status"
-        and item.get("name") == "model_thinking"
-        and "正在思考" in str(item.get("resultPreview") or "")
+        and item.get("name") == "thinking"
+        and "等待模型响应" in str(item.get("resultPreview") or "")
         for item in live_state.feedback_events
     )
 
@@ -7767,7 +7766,7 @@ def test_capture_session_ui_stream_preserves_ordered_feedback_events(tmp_path, m
     assert live_state is not None
     kinds = [item["kind"] for item in live_state.feedback_events]
     assert kinds == ["thought", "status", "tool", "thought", "tool"]
-    assert live_state.feedback_events[1]["name"] == "model_thinking"
+    assert live_state.feedback_events[1]["name"] == "thinking"
     assert live_state.feedback_events[2]["name"] == "read_log"
     assert live_state.feedback_events[2]["status"] == "done"
     assert live_state.feedback_events[2]["relatedThoughtSequence"] == live_state.feedback_events[0]["sequence"]

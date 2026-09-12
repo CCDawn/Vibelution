@@ -20,6 +20,8 @@ from core.research.workflow.knowledge_sideflow_definition import (
     build_knowledge_sideflow_workflow_definition,
 )
 from core.research.workflow.models import WorkflowNodeSpec
+from core.research.workflow.operator_optimization_definition import build_operator_definition, OPERATOR_NODES
+from .operator_optimization import evaluate_operator_node
 
 from .common import (
     CommonReadinessResult,
@@ -77,6 +79,8 @@ class NodeReadinessService:
                 build_challenge_cup_workflow_definition(),
                 build_stage_one_workflow_definition(),
                 build_knowledge_sideflow_workflow_definition(),
+                build_operator_definition(),
+                build_operator_definition(baseline=True),
             )
         )
         self._node_by_id: dict[str, WorkflowNodeSpec] = {
@@ -242,6 +246,8 @@ def _cache_key(
 
 def _build_registry() -> dict[str, EvaluatorFn]:
     return {
+        **{row[0]: evaluate_operator_node for row in OPERATOR_NODES},
+        "operator_baseline": evaluate_operator_node,
         "problem_understanding": evaluate_problem_understanding,
         "source_finding": evaluate_source_finding,
         "source_extraction": evaluate_source_extraction,

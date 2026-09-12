@@ -649,6 +649,122 @@ def list_chat_rooms_compact() -> list[dict[str, Any]]:
     return rooms
 
 
+def _question_owned_rooms(
+    team_id: str, question_id: str
+) -> list[dict[str, Any]]:
+    """Return raw room payloads bound to one Challenge Cup question."""
+
+    normalized_team = str(team_id or "").strip()
+    normalized_question = str(question_id or "").strip().upper()
+    if not normalized_question:
+        return []
+    state = _store().load()
+    owned: list[dict[str, Any]] = []
+    for item in list(state.get("rooms") or []):
+        if not isinstance(item, dict):
+            continue
+        config = item.get("config")
+        if not isinstance(config, dict):
+            continue
+        if str(config.get("questionId") or "").strip().upper() != normalized_question:
+            continue
+        room_team = str(config.get("teamId") or "").strip()
+        if normalized_team and room_team and room_team != normalized_team:
+            continue
+        owned.append(item)
+    return owned
+
+
+def _room_round_message_counts(room: dict[str, Any]) -> tuple[int, int]:
+    rounds = [item for item in list(room.get("rounds") or []) if isinstance(item, dict)]
+    message_count = sum(
+        len([message for message in list(item.get("messages") or []) if isinstance(message, dict)])
+        for item in rounds
+    )
+    return len(rounds), message_count
+
+
+def list_chat_rooms_for_question(team_id: str, question_id: str) -> list[dict[str, Any]]:
+    """Return question-owned room references for reset/retire previews.
+
+    Read-only by contract: previews must not persist the round-state
+    reconciliation that the interactive list entries perform.
+    """
+
+    rooms = _question_owned_rooms(team_id, question_id)
+    references: list[dict[str, Any]] = []
+    for room in rooms:
+        round_count, message_count = _room_round_message_counts(room)
+        references.append(
+            {
+                "roomId": str(room.get("roomId") or "").strip(),
+                "title": str(room.get("title") or "").strip(),
+                "status": str(room.get("status") or "").strip(),
+                "roundCount": round_count,
+                "messageCount": message_count,
+                "updatedAt": str(room.get("updatedAt") or "").strip(),
+            }
+        )
+    references.sort(key=lambda item: str(item.get("updatedAt") or ""), reverse=True)
+    return references
+
+
+def remove_chat_rooms_for_question(team_id: str, question_id: str) -> dict[str, Any]:
+    """Delete every room owned by one question and its embedded transcripts.
+
+    Busy rooms and busy transcript sessions are skipped with a reason instead of
+    failing the whole cleanup; each successful delete keeps the room-store
+    delete semantics (remove from state, record the scene event) and then
+    removes the room's mirrored transcript events from participant sessions.
+    """
+
+    rooms = _question_owned_rooms(team_id, question_id)
+    removed_room_ids: list[str] = []
+    removed_round_count = 0
+    removed_message_count = 0
+    cleaned_session_count = 0
+    cleaned_transcript_count = 0
+    skipped: list[dict[str, str]] = []
+    failed: list[dict[str, str]] = []
+    for room in rooms:
+        room_id = str(room.get("roomId") or "").strip()
+        round_count, message_count = _room_round_message_counts(room)
+        try:
+            delete_chat_room(room_id)
+        except ChatRoomBusyError:
+            skipped.append({"roomId": room_id, "reason": "busy"})
+            continue
+        except ChatRoomNotFoundError:
+            continue
+        except Exception as exc:  # noqa: BLE001 - report per room and continue
+            failed.append({"roomId": room_id, "reason": type(exc).__name__})
+            continue
+        removed_room_ids.append(room_id)
+        removed_round_count += round_count
+        removed_message_count += message_count
+        try:
+            cleanup = _remove_group_room_transcripts_from_participant_sessions(
+                room, room_id
+            )
+        except Exception as exc:  # noqa: BLE001 - room already removed
+            failed.append(
+                {"roomId": room_id, "reason": f"transcripts:{type(exc).__name__}"}
+            )
+            continue
+        cleaned_session_count += int(cleanup.get("changedSessionCount") or 0)
+        cleaned_transcript_count += int(cleanup.get("removedMessageCount") or 0)
+    return {
+        "removedRoomIds": removed_room_ids,
+        "removedRoomCount": len(removed_room_ids),
+        "removedRoundCount": removed_round_count,
+        "removedMessageCount": removed_message_count,
+        "cleanedSessionCount": cleaned_session_count,
+        "cleanedTranscriptMessageCount": cleaned_transcript_count,
+        "skipped": skipped,
+        "failed": failed,
+    }
+
+
 def get_chat_room_compact(room_id: str) -> dict[str, Any] | None:
     """Return one room reference without session repair or full room hydration."""
 

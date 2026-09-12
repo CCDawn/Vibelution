@@ -233,6 +233,9 @@ def _status_title(name: str, *, lang: str) -> str:
             "agent_prepare": "绑定 Agent",
             "model_request": "请求模型",
             "model_thinking": "模型思考",
+            "working": "处理中",
+            "thinking": "思考中",
+            "queued": "排队中",
             "tool_call": "工具调用",
             "model_response": "生成回答",
         }
