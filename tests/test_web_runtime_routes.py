@@ -4426,7 +4426,7 @@ def test_runtime_scene_lifecycle_fallback_indexes_operational_phases(tmp_path, m
     assert "browser.route.changed" in lifecycle_codes
     assert "browser.focus.changed" not in lifecycle_codes
 
-def test_runtime_scene_event_helper_rejects_stopped_launcher_scene(tmp_path, monkeypatch):
+def test_runtime_scene_event_helper_uses_launcher_pointer_for_stopped_scene(tmp_path, monkeypatch):
     scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-event-stopped", status="stopped")
     launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
     launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -4448,8 +4448,9 @@ def test_runtime_scene_event_helper_rejects_stopped_launcher_scene(tmp_path, mon
         "work_run.snapshot.persisted",
     )
 
-    assert response == {"accepted": False, "reason": "no_runtime_scene"}
-    assert not (scene_dir / "events" / "work_run.jsonl").exists()
+    assert response["accepted"] is True
+    assert response["runtimeSceneId"] == "scene-event-stopped"
+    assert (scene_dir / "events" / "work_run.jsonl").exists()
 
 def test_runtime_scene_event_helper_rejects_foreign_project_scene(tmp_path, monkeypatch):
     scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-event-foreign", status="running")
