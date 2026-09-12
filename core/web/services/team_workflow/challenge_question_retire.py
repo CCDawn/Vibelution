@@ -160,7 +160,6 @@ def preview_question_retire(team_id: str, question_id: str) -> dict[str, Any]:
     receipt_preview = receipt_registry.preview_question_model_invocation_receipts(
         normalized_team,
         question_id=normalized_question,
-        workflow_run_ids=targets["receiptRunIds"] or None,
     )
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -266,7 +265,6 @@ def retire_question_experiment(
             receipt_registry.retire_question_model_invocation_receipts(
                 normalized_team,
                 question_id=normalized_question,
-                workflow_run_ids=targets["receiptRunIds"] or None,
             )
         )
     except Exception as exc:  # noqa: BLE001 - continue and report per step
