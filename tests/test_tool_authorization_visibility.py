@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 import agent as agent_module
-from agent import SelfEvolvingAgent
+from agent import AgentRuntime
 from core.authorization.tool_authorization_service import (
     ToolAuthorizationContextError,
     resolve_enforced_authorization,
@@ -135,7 +135,7 @@ def test_authorized_surface_materializes_only_canonical_visible_tools():
         )
     )
 
-    visible = SelfEvolvingAgent._materialize_authorized_tools(
+    visible = AgentRuntime._materialize_authorized_tools(
         [_tool("read_file_tool"), _tool("write_file_tool")],
         report,
     )
@@ -144,7 +144,7 @@ def test_authorized_surface_materializes_only_canonical_visible_tools():
 
 
 def test_authorized_surface_fails_closed_without_decision():
-    assert SelfEvolvingAgent._materialize_authorized_tools([_tool("read_file_tool")], None) == []
+    assert AgentRuntime._materialize_authorized_tools([_tool("read_file_tool")], None) == []
 
 
 def test_authorization_resolution_failure_records_diagnostic_and_returns_no_report(monkeypatch):
@@ -169,7 +169,7 @@ def test_authorization_resolution_failure_records_diagnostic_and_returns_no_repo
         lambda **kwargs: failures.append(kwargs),
     )
 
-    instance = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    instance = AgentRuntime.__new__(AgentRuntime)
     instance.runtime_agent_binding = {"agentId": "agent-a"}
     report = instance._resolve_tool_authorization([_tool("read_file_tool")])
 
@@ -179,7 +179,7 @@ def test_authorization_resolution_failure_records_diagnostic_and_returns_no_repo
 
 
 def test_invocation_context_carries_authorization_decision_fingerprint(monkeypatch):
-    instance = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    instance = AgentRuntime.__new__(AgentRuntime)
     instance.runtime_agent_binding = {"agentId": "agent-a", "directSessionId": "session-a"}
     instance._tool_authorization_decision_fingerprint = "decision-1"
     instance._get_mode_policy = lambda: SimpleNamespace(

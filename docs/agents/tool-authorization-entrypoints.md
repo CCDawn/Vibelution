@@ -21,8 +21,8 @@ The machine-readable baseline is `tests/fixtures/tool_authorization/agent_policy
 
 | Entry | Run kinds | Current authority | Target authority |
 |---|---|---|---|
-| `SelfEvolvingAgent._init_llm` | session, room, team, research, evolution | current-Agent filter | `AuthorizationDecision.visibleTools` |
-| `SelfEvolvingAgent._get_llm_for_current_mode` | all Agent modes | mode and Agent filters | `AuthorizationDecision.visibleTools` |
+| `AgentRuntime._init_llm` | session, room, team, research, evolution | current-Agent filter | `AuthorizationDecision.visibleTools` |
+| `AgentRuntime._get_llm_for_current_mode` | all Agent modes | mode and Agent filters | `AuthorizationDecision.visibleTools` |
 | `run_existing_agent_single_turn` | direct session, chat room | Agent-bound surface | host `TurnToolGrant` plus decision |
 | Responses wire projection | all LLM turns, replay, parallel | bound semantic tools | protocol projection of the same decision |
 | Chat Completions wire projection | all LLM turns, replay, parallel | bound semantic tools | protocol projection of the same decision |

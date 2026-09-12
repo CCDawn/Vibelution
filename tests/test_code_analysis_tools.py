@@ -977,7 +977,7 @@ class TestCodeAnalysisIntegration:
             entities = get_file_entities(agent_file)
             assert isinstance(entities, dict)
             
-            # 3. 提取特定实体（如 SelfEvolvingAgent 类）
+            # 3. 提取特定实体（如 AgentRuntime 类）
             if entities.get('class'):
                 first_class = entities['class'][0]['name']
                 entity_code = get_code_entity(

@@ -60,7 +60,7 @@ def test_publish_llm_retry_status_skips_empty_and_publishes_reconnect_payload():
     assert len(bus.events) == 1
     name, payload, source = bus.events[0]
     assert name == "llm:status"
-    assert source == "SelfEvolvingAgent"
+    assert source == "AgentRuntime"
     assert payload["status"] == "retrying"
     assert payload["attempt"] == 2
     assert payload["max_attempts"] == 5

@@ -172,7 +172,7 @@ class MentalModel:
     """
     元认知引擎
 
-    单例模式，在 SelfEvolvingAgent 初始化时创建，通过 EventBus 全局订阅
+    单例模式，在 AgentRuntime 初始化时创建，通过 EventBus 全局订阅
     自动采集信号，在每个 prompt 构建周期提供诊断和干预。
 
     用法:

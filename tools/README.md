@@ -12,7 +12,7 @@ Registry 元数据：`core/web/services/tool_catalog.py`（`TOOL_CATALOG`）· �
 
 ```text
 Model 可见性
-  → SelfEvolvingAgent._init_llm / _get_llm_for_current_mode
+  → AgentRuntime._init_llm / _get_llm_for_current_mode
   → ToolPolicy v2（agent_directory · agent_role_tool_profile_service）
   → create_key_tools() / create_llm_facing_tools() 过滤
 
