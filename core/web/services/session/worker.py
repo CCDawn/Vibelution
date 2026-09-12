@@ -2449,10 +2449,12 @@ def _run_session_continuation_loop(
             turn_id=getattr(turn_control, "turn_id", ""),
         )
         from core.llm.client import model_invocation_receipt_context_scope
+        from core.llm.turn_request_capture import turn_request_capture_scope
 
+        suggestion_capture: dict[str, Any] = {}
         if turn_capture is not None:
             turn_capture.model_invocation_receipt_context = receipt_context
-        with model_invocation_receipt_context_scope(receipt_context):
+        with model_invocation_receipt_context_scope(receipt_context), turn_request_capture_scope(suggestion_capture):
             chat_history_ledger_fingerprint = ""
             iteration_chat_history = history_messages if turn_index == 1 else None
             if (
@@ -2505,6 +2507,21 @@ def _run_session_continuation_loop(
             prompt_cache_partition=prompt_cache_partition,
             llm_model_id=llm_model_id,
         )
+        try:
+            from core.web.services.session import prompt_suggestion as prompt_suggestion_service
+
+            if prompt_suggestion_service.is_user_authored_source(normalized_user_message_source):
+                prompt_suggestion_service.register_prompt_suggestion_capture(
+                    session_id=session_id,
+                    turn_id=canonical_turn_id,
+                    capture=suggestion_capture,
+                    reply=s._visible_reply_candidate(result) if isinstance(result, dict) else "",
+                )
+        except Exception as exc:
+            s._debug_logger.warning(
+                f"prompt suggestion capture registration failed: {type(exc).__name__}: {exc}",
+                tag="SUGGEST",
+            )
         llm_elapsed_ms = s._elapsed_ms(llm_started_at)
         return_stop_reason = s._get_turn_control_stop_reason(turn_control) or s._get_session_stop_reason(session_id)
         if return_stop_reason:

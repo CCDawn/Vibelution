@@ -57,6 +57,10 @@ from .ttft_breakdown import (
 from .streaming import ResponsesStreamNormalizer, extract_message_tool_calls, extract_text_content
 from .semantic_messages import SemanticGenerationSettings, SemanticOutputSchema
 from .semantic_projector import SemanticProjectionError, SemanticProjectionInput, project_semantic_request
+from .turn_request_capture import (
+    PROMPT_CACHE_INHERITED_COUNT_METADATA_KEY,
+    capture_turn_provider_message_count,
+)
 from .types import LLMCapabilities, LLMError, LLMOutputTruncatedError, LLMProtocolEvent, LLMRouteGateTimeoutError, LLMStreamIdleDeadlineError, LLMStreamTotalDeadlineError, StreamChunk, ToolCall, TurnOutcome, UsageStats
 from .usage import read_usage_int as _read_provider_usage_int
 from .usage import cache_usage_observation_from_payload, usage_stats_from_payload, usage_to_dict
@@ -3301,6 +3305,17 @@ class LLMClient:
             )
             if strict_blank_messages is not None:
                 provider_messages = strict_blank_messages
+        raw_inherited_messages = (metadata or {}).get(
+            PROMPT_CACHE_INHERITED_COUNT_METADATA_KEY
+        )
+        inherited_prompt_cache_messages = (
+            raw_inherited_messages
+            if isinstance(raw_inherited_messages, int)
+            and not isinstance(raw_inherited_messages, bool)
+            and raw_inherited_messages > 0
+            else 0
+        )
+        capture_turn_provider_message_count(len(provider_messages))
         build_input = PayloadBuildInput(
             messages=provider_messages,
             tools=selected_tools,
@@ -3314,6 +3329,7 @@ class LLMClient:
             profile_id=self.profile_id,
             config=self.config,
             max_output_tokens_override=max_output_tokens_override,
+            prompt_cache_inherited_message_count=inherited_prompt_cache_messages,
         )
         # Chat-shaped wires (incl. LiteLLM-backed anthropic/gemini) share encode path.
         if self.protocol_route.wire_protocol in {

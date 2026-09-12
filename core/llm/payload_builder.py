@@ -74,6 +74,11 @@ class PayloadBuildInput:
     # None keeps ``profile.max_output_tokens``. Positive int only; the
     # invocation budget preflight stays authoritative on top of this.
     max_output_tokens_override: int | None = None
+    # Forked "composer suggestion" calls inherit the parent turn's provider
+    # message prefix. When > 0, explicit cache markers may only be placed
+    # inside the first N provider messages (the inherited prefix) so the fork
+    # reads the parent cache instead of writing a new tail entry.
+    prompt_cache_inherited_message_count: int = 0
 
 
 def _effective_max_output_tokens(build_input: PayloadBuildInput) -> Any:
@@ -755,7 +760,15 @@ def _message_accepts_qwen_prompt_cache_marker(message: Dict[str, Any]) -> bool:
     return _append_cache_control_to_content(content) is not content
 
 
-def _select_qwen_prompt_cache_marker_index(messages: List[Dict[str, Any]]) -> int:
+def _select_qwen_prompt_cache_marker_index(
+    messages: List[Dict[str, Any]],
+    *,
+    candidate_end: int = 0,
+) -> int:
+    if candidate_end > 0:
+        # Inherited-prefix fork: reproduce the parent's marker position exactly
+        # by selecting inside the inherited provider messages only.
+        messages = messages[: min(int(candidate_end), len(messages))]
     if not messages:
         return -1
     current_user_index = -1
@@ -854,6 +867,7 @@ def _apply_qwen_explicit_prompt_cache_markers(
     actions: PayloadPolicyActions,
     *,
     marker_limit: int = 4,
+    candidate_end: int = 0,
 ) -> List[Dict[str, Any]]:
     if actions.prompt_cache_provider_strategy != "qwen_explicit_cache_control":
         return [dict(item) for item in messages]
@@ -861,7 +875,7 @@ def _apply_qwen_explicit_prompt_cache_markers(
     marker_count = sum(_message_cache_marker_count(item) for item in normalized)
     if marker_count >= marker_limit:
         return normalized
-    index = _select_qwen_prompt_cache_marker_index(normalized)
+    index = _select_qwen_prompt_cache_marker_index(normalized, candidate_end=candidate_end)
     if index < 0:
         return normalized
     message = normalized[index]
@@ -891,11 +905,15 @@ def _apply_anthropic_explicit_prompt_cache_markers(
     actions: PayloadPolicyActions,
     *,
     marker_limit: int = 4,
+    candidate_end: int = 0,
 ) -> List[Dict[str, Any]]:
     """Place ephemeral cache_control breakpoints per Anthropic prompt-caching docs.
 
     Prefers the first system message (stable instructions), then the last
-    cacheable history text block before the current user turn.
+    cacheable history text block before the current user turn. When
+    ``candidate_end`` is positive (inherited-prefix fork) both selections are
+    reproduced inside the inherited provider messages only, so the fork reads
+    the parent cache instead of writing a new tail breakpoint.
     """
     if actions.prompt_cache_provider_strategy != "anthropic_explicit_cache_control":
         return [dict(item) for item in messages]
@@ -903,19 +921,26 @@ def _apply_anthropic_explicit_prompt_cache_markers(
     marker_count = sum(_message_cache_marker_count(item) for item in normalized)
     if marker_count >= marker_limit:
         return normalized
+    prefix_limit = (
+        min(int(candidate_end), len(normalized))
+        if int(candidate_end or 0) > 0
+        else len(normalized)
+    )
+    if prefix_limit <= 0:
+        return normalized
 
     indices: list[int] = []
-    for index, message in enumerate(normalized):
+    for index, message in enumerate(normalized[:prefix_limit]):
         if str(message.get("role") or "").strip().lower() == "system" and _message_accepts_anthropic_prompt_cache_marker(message):
             indices.append(index)
             break
     # Also mark last stable history text (before final user) so multi-turn can grow.
     current_user_index = -1
-    for index in range(len(normalized) - 1, -1, -1):
+    for index in range(prefix_limit - 1, -1, -1):
         if str(normalized[index].get("role") or "").strip().lower() == "user":
             current_user_index = index
             break
-    history_end = current_user_index - 1 if current_user_index >= 0 else len(normalized) - 1
+    history_end = current_user_index - 1 if current_user_index >= 0 else prefix_limit - 1
     for index in range(history_end, -1, -1):
         if index in indices:
             continue
@@ -943,6 +968,7 @@ def _apply_explicit_prompt_cache_markers(
     *,
     marker_limit: int = 4,
     merge_tool_messages: bool = True,
+    candidate_end: int = 0,
 ) -> List[Dict[str, Any]]:
     strategy = str(actions.prompt_cache_provider_strategy or "").strip().lower()
     if strategy == "qwen_explicit_cache_control":
@@ -951,9 +977,19 @@ def _apply_explicit_prompt_cache_markers(
             actions,
             apply_merge=merge_tool_messages,
         )
-        return _apply_qwen_explicit_prompt_cache_markers(merged, actions, marker_limit=marker_limit)
+        return _apply_qwen_explicit_prompt_cache_markers(
+            merged,
+            actions,
+            marker_limit=marker_limit,
+            candidate_end=candidate_end,
+        )
     if strategy == "anthropic_explicit_cache_control":
-        return _apply_anthropic_explicit_prompt_cache_markers(messages, actions, marker_limit=marker_limit)
+        return _apply_anthropic_explicit_prompt_cache_markers(
+            messages,
+            actions,
+            marker_limit=marker_limit,
+            candidate_end=candidate_end,
+        )
     return [dict(item) for item in messages]
 
 
@@ -1072,6 +1108,7 @@ def build_llm_payload(
             # only; the Responses input projection still requires per-item
             # call_id at top level, so never merge on that transport.
             merge_tool_messages=transport != "responses",
+            candidate_end=build_input.prompt_cache_inherited_message_count,
         )
 
     if transport == "responses":
@@ -1241,6 +1278,7 @@ def compose_runtime_wire_payload(
                 normalized_messages,
                 actions,
                 marker_limit=4,
+                candidate_end=build_input.prompt_cache_inherited_message_count,
             )
         payload["messages"] = normalized_messages
     payload["model"] = (
