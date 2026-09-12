@@ -361,6 +361,12 @@ def ensure_knowledge_invocation(
             child_run_id = ensure_knowledge_child_run(
                 store,
                 invocation,
+                request={
+                    "scope": dict(scope or {}),
+                    "searchEnvelope": dict(search_envelope or {}),
+                    "requirements": dict(requirements or {}),
+                    "consumerContext": dict(consumer_context) if consumer_context is not None else None,
+                },
                 source_manifest_ref=source_manifest_ref,
                 managed_source_root_ids=normalized_root_ids,
                 wake_worker=wake_worker,
@@ -406,6 +412,7 @@ def ensure_knowledge_child_run(
     store: Any,
     invocation: KnowledgeInvocationRecord,
     *,
+    request: dict[str, Any] | None = None,
     source_manifest_ref: str = "",
     managed_source_root_ids: Sequence[str] | None = None,
     wake_worker: Callable[[], None] | None = None,
@@ -435,6 +442,13 @@ def ensure_knowledge_child_run(
             store, invocation, child_run_id, now_provider=now
         )
         return child_run_id
+    from .knowledge_request_snapshot import validate_child_request
+
+    if request is None:
+        raise KnowledgeSideflowError(
+            "New child requires its complete knowledge request", code="knowledge_request_missing"
+        )
+    frozen_request = validate_child_request(invocation, request)
     child_run_id = knowledge_sideflow_child_run_id(str(invocation.invocation_id))
     _link_invocation_to_child(store, invocation, child_run_id, now_provider=now)
 
@@ -493,6 +507,7 @@ def ensure_knowledge_child_run(
         "requestHash": invocation.request_hash,
         "searchEnvelopeHash": invocation.search_envelope_hash,
         "requirementsHash": invocation.requirements_hash,
+        "knowledgeRequest": frozen_request,
         "sourcePolicyVersion": invocation.source_policy_version,
         "sourceManifestRef": str(source_manifest_ref or ""),
         "managedSourceRootIds": _normalize_root_id_sequence(
