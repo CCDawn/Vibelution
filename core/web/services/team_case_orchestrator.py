@@ -34,9 +34,17 @@ def build_team_case_state(
 
     normalized_topic = trim_lines(topic or "", max_lines=6).strip()
     room_config = {**_safe_dict(room.get("config")), **_safe_dict(config)}
+    # Emergency triage flags are a user-facing chat affordance.  A formal
+    # meeting keeps a frozen, ordered roster, and its topic may legitimately
+    # quote a triage keyword (the SCI-125 problem understanding excludes
+    # 意识/意向性); such a quote must not flip the round into a single-speaker
+    # clarification that trips the exact-frozen-roster gate.
+    frozen_roster = bool(_string_list(room_config.get("participantAgentIds")))
     intent = _infer_intent(topic=normalized_topic, purpose=purpose, config=room_config)
     missing_facts = _missing_facts_for_intent(intent, normalized_topic)
-    risk_flags = _risk_flags_for_topic(normalized_topic)
+    risk_flags = (
+        [] if frozen_roster else _risk_flags_for_topic(normalized_topic)
+    )
     information_sufficiency = _information_sufficiency(intent, missing_facts, risk_flags)
     next_action = _next_action(intent, information_sufficiency, missing_facts, risk_flags)
     user_facing_mode = _user_facing_mode(intent, next_action)
