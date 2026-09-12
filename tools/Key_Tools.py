@@ -394,7 +394,7 @@ def _build_key_tools() -> List[BaseTool]:
         在项目中快速搜索代码，支持正则表达式。主引擎为 ripgrep (rg) 子进程，
         带可杀超时与取消检查；rg 不可用时回退纯 Python 扫描。超时/取消时
         返回已收集的部分结果与显式截断提示。普通 Chat/Coding Agent 默认用
-        cli_tool + rg；该工具保留给需要结构化搜索结果的专用 Agent 使用。
+        cli_tool + rg；需要结构化搜索结果（路径/行号/匹配片段）时用本工具。
 
         Args:
             regex_pattern: 正则表达式模式
@@ -402,7 +402,6 @@ def _build_key_tools() -> List[BaseTool]:
             search_dir: 搜索目录，默认当前工作区根目录
             case_sensitive: 是否区分大小写，默认 True
             max_results: 最大返回结果数；默认从配置读取，最高 50
-            _cancel_checker: 系统注入的取消检查器，无需手动填写
 
         Returns:
             格式化的搜索结果，包含文件路径、行号和匹配内容
@@ -1440,8 +1439,8 @@ def _build_key_tools() -> List[BaseTool]:
         """
         【读取文件】读取本地文件的全部或部分内容。
 
-        支持编码自动检测、行号显示、分页读取。普通 Chat/Coding Agent 默认用 cli_tool 读取；
-        该工具保留给需要结构化文件读取结果的专用 Agent 使用。
+        支持编码自动检测、行号显示、分页读取。Agent 会话已禁用此工具；
+        读取文件请改用 cli_tool（可配合 rg、Get-Content 等）。
 
         Args:
             file_path: 文件路径（相对或绝对）
@@ -1484,7 +1483,6 @@ def _build_key_tools() -> List[BaseTool]:
         Args:
             pattern: Glob 模式（如 "*.py", "**/*.py"）
             search_dir: 搜索起始目录，默认当前目录
-            _cancel_checker: 工具执行器注入的取消检查器（内部参数，请勿传入）
 
         Returns:
             人类可读文本：首行计数 + 相对路径列表（每行一个）；异常路径均有显式说明。
@@ -1718,6 +1716,16 @@ def _build_key_tools() -> List[BaseTool]:
         updates_json 使用 PATCH /api/agents/{id} 的 camelCase 字段，例如
         {"displayName":"Reviewer","promptTemplateId":"prompt-review"}。
         status 不被接受；未出现的字段不会被清空。
+
+        Args:
+            agent_id: 目标 Agent ID
+            updates_json: PATCH 兼容字段 JSON 对象字符串
+            expected_updated_at: 可选乐观锁；传入读取时的 updatedAt，防止覆盖并发更新
+            expected_config_revision: 可选配置修订号乐观锁；-1 表示不校验
+            source_draft_id: 可选来源草稿 ID，用于审计追踪
+
+        Returns:
+            JSON，含 ok/status/agentId/agent
         """
         return _agent_update_impl(
             agent_id=agent_id,
@@ -1840,7 +1848,17 @@ def _build_key_tools() -> List[BaseTool]:
 
     @tool
     def agent_inbox_list_tool(agent_id: str = "", status: str = "pending", limit: int = 20) -> str:
-        """【Agent 收件箱读取】读取指定或当前 Agent 的有界消息列表。"""
+        """
+        【Agent 收件箱读取】读取指定或当前 Agent 的有界消息列表。
+
+        Args:
+            agent_id: 目标 Agent ID；留空时使用当前 Agent runtime
+            status: 消息状态过滤，默认 pending；空字符串表示不过滤
+            limit: 最多返回条数，1-100，默认 20
+
+        Returns:
+            JSON，含 ok/status/agentId/messageCount/messages
+        """
         return _agent_inbox_list_impl(agent_id=agent_id, status=status, limit=limit)
 
     @tool
@@ -1850,7 +1868,18 @@ def _build_key_tools() -> List[BaseTool]:
         consumed_by_session_id: str = "",
         consumed_by_turn_id: str = "",
     ) -> str:
-        """【单条消息消费】把一条 Agent inbox 消息标记为 consumed。"""
+        """
+        【单条消息消费】把一条 Agent inbox 消息标记为 consumed。
+
+        Args:
+            message_id: 要消费的消息 ID（必填）
+            agent_id: 目标 Agent ID；留空时使用当前 Agent runtime
+            consumed_by_session_id: 可选消费方 Session ID，用于审计
+            consumed_by_turn_id: 可选消费方 Turn ID，用于审计
+
+        Returns:
+            JSON，含 ok/status/agentId/messageId/inboxMessage
+        """
         return _agent_message_consume_impl(
             message_id=message_id,
             agent_id=agent_id,
@@ -1864,7 +1893,17 @@ def _build_key_tools() -> List[BaseTool]:
         consumed_by_session_id: str = "",
         consumed_by_turn_id: str = "",
     ) -> str:
-        """【全部消息消费】把一个 Agent inbox 的所有未消费消息标记为 consumed。"""
+        """
+        【全部消息消费】把一个 Agent inbox 的所有未消费消息标记为 consumed。
+
+        Args:
+            agent_id: 目标 Agent ID；留空时使用当前 Agent runtime
+            consumed_by_session_id: 可选消费方 Session ID，用于审计
+            consumed_by_turn_id: 可选消费方 Turn ID，用于审计
+
+        Returns:
+            JSON，含 ok/status/agentId/consumeResult
+        """
         return _agent_messages_consume_all_impl(
             agent_id=agent_id,
             consumed_by_session_id=consumed_by_session_id,
@@ -1880,8 +1919,15 @@ def _build_key_tools() -> List[BaseTool]:
         """
         【知识库 ACL 授权】由当前 owner/reviewer Agent 为目标 active Agent 授予显式权限。
 
-        actor 身份只取当前 Agent runtime，不能通过参数伪造；permissions_json 仅允许
-        read、propose、review，不支持 wildcard。
+        actor 身份只取当前 Agent runtime，不能通过参数伪造。
+
+        Args:
+            knowledge_base_id: 目标团队知识库 ID
+            target_agent_id: 被授权的目标 active Agent ID
+            permissions_json: JSON 数组，仅允许 read、propose、review，不支持 wildcard
+
+        Returns:
+            JSON，含 ok/status/knowledgeBaseId/targetAgentId/actorAgentId/grantResult
         """
         return _knowledge_base_acl_grant_impl(
             knowledge_base_id=knowledge_base_id,
@@ -3096,6 +3142,7 @@ def _build_key_tools() -> List[BaseTool]:
         close_evolution_transaction_tool,
         get_evolution_fitness_tool,
         conversation_log_inspect_tool,
+        user_action_telemetry_query_tool,
         history_search_tool,
         history_fetch_tool,
         history_timeline_tool,
