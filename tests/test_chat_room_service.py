@@ -5322,6 +5322,49 @@ def test_delete_chat_room_removes_room(tmp_path, monkeypatch):
     assert chat_room_service.get_chat_room_detail(room["roomId"]) is None
 
 
+def test_question_scoped_room_cleanup_targets_only_owned_rooms(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    target = chat_room_service.create_chat_room(
+        title="SCI-010 假说评审",
+        participant_session_ids=["session-alpha"],
+        config={"teamId": "research-team", "questionId": "SCI-010"},
+    )
+    other = chat_room_service.create_chat_room(
+        title="SCI-011 假说评审",
+        participant_session_ids=["session-alpha"],
+        config={"teamId": "research-team", "questionId": "SCI-011"},
+    )
+    foreign_team = chat_room_service.create_chat_room(
+        title="其他团队群聊",
+        participant_session_ids=["session-alpha"],
+        config={"teamId": "other-team", "questionId": "SCI-010"},
+    )
+
+    references = chat_room_service.list_chat_rooms_for_question(
+        "research-team", "SCI-010"
+    )
+
+    assert [reference["roomId"] for reference in references] == [target["roomId"]]
+    assert references[0]["roundCount"] == 0
+    assert references[0]["messageCount"] == 0
+
+    result = chat_room_service.remove_chat_rooms_for_question(
+        "research-team", "SCI-010"
+    )
+
+    assert result["removedRoomIds"] == [target["roomId"]]
+    assert result["removedRoomCount"] == 1
+    assert result["removedRoundCount"] == 0
+    assert result["removedMessageCount"] == 0
+    assert result["skipped"] == []
+    assert result["failed"] == []
+    assert chat_room_service.get_chat_room_detail(target["roomId"]) is None
+    assert chat_room_service.get_chat_room_detail(other["roomId"]) is not None
+    assert chat_room_service.get_chat_room_detail(foreign_team["roomId"]) is not None
+
+
 def test_stopped_round_still_syncs_completed_messages_to_participant_sessions(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

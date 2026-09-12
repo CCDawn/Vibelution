@@ -161,6 +161,13 @@ def preview_question_retire(team_id: str, question_id: str) -> dict[str, Any]:
         normalized_team,
         question_id=normalized_question,
     )
+    from core.web.services.team_workflow.research_runtime import (
+        question_conversation_cleanup,
+    )
+
+    conversation_preview = question_conversation_cleanup.preview_question_conversations(
+        normalized_team, normalized_question
+    )
     return {
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team,
@@ -168,6 +175,7 @@ def preview_question_retire(team_id: str, question_id: str) -> dict[str, Any]:
         "canRetire": not blocking_reason,
         "blockingReason": blocking_reason,
         "chainReset": reset_preview,
+        "conversations": conversation_preview,
         "project": {
             "found": bool(targets["project"]),
             "projectId": str(targets["project"].get("projectId") or ""),
@@ -229,6 +237,7 @@ def retire_question_experiment(
         "teamId": normalized_team,
         "questionId": normalized_question,
         "chainReset": reset_result,
+        "conversations": dict(reset_result.get("conversationCleanup") or {}),
         "questionRuns": {
             "removedRunIds": [],
             "removedFileCount": 0,
@@ -239,6 +248,8 @@ def retire_question_experiment(
         "project": {},
         "errors": [],
     }
+    for error in list(result["conversations"].get("errors") or []):
+        result["errors"].append(f"conversations: {error}")
     if targets["questionRunIds"]:
         try:
             result["questionRuns"] = (
@@ -294,6 +305,15 @@ def retire_question_experiment(
             ),
             "removedReceiptCount": int(
                 result["modelInvocationReceipts"].get("removedCount") or 0
+            ),
+            "removedRoomCount": int(
+                (result["conversations"].get("rooms") or {}).get("removedRoomCount") or 0
+            ),
+            "removedSessionCount": int(
+                (result["conversations"].get("sessions") or {}).get(
+                    "removedSessionCount"
+                )
+                or 0
             ),
         },
     )

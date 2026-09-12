@@ -1160,6 +1160,33 @@ def _question_reset_snapshot(team_id: str, question_id: str) -> dict[str, Any]:
     }
 
 
+def _apply_question_conversation_impact(
+    team_id: str, snapshot: dict[str, Any]
+) -> None:
+    """Project one question's room/session residue into the impact counters.
+
+    Preview and reset must agree on the question-scoped conversation counts so
+    ``reset['removed']`` matches the confirmed preview exactly.
+    """
+
+    from core.web.services.team_workflow.research_runtime import (
+        question_conversation_cleanup,
+    )
+
+    conversation_preview = question_conversation_cleanup.preview_question_conversations(
+        team_id, snapshot["questionId"]
+    )
+    snapshot["impact"]["conversationRoomCount"] = int(
+        conversation_preview.get("roomCount") or 0
+    )
+    snapshot["impact"]["conversationMessageCount"] = int(
+        conversation_preview.get("messageCount") or 0
+    )
+    snapshot["impact"]["conversationSessionCount"] = int(
+        conversation_preview.get("sessionCount") or 0
+    )
+
+
 def preview_question_reset(team_id: str, question_id: str) -> dict[str, Any]:
     """Return a non-mutating, question-scoped reset preview for the confirm UI."""
     from core.web.services.team_service import assert_team_exists
@@ -1177,6 +1204,7 @@ def preview_question_reset(team_id: str, question_id: str) -> dict[str, Any]:
         set(snapshot["collectionRunIds"]),
     )
     snapshot["impact"]["collectionRunCount"] = int(collection_preview.get("runCount") or 0)
+    _apply_question_conversation_impact(normalized_team_id, snapshot)
     if active_meetings:
         blocking_reason = "本题仍有进行中的讨论，请先结束或停止讨论后再重置。"
     elif active_requests:
@@ -1281,6 +1309,7 @@ def reset_question_chain(
                 str(source_preview.get("blockingReason") or "本题资料运行暂不能重置。")
             )
         snapshot["impact"]["collectionRunCount"] = int(source_preview.get("runCount") or 0)
+        _apply_question_conversation_impact(normalized_team_id, snapshot)
         # Reconcile live formal runs before any destructive write: a surviving
         # non-terminal run would keep the create_stage_one_run offer gated
         # forever and leave the question in a dead state after the reset.
@@ -1412,11 +1441,32 @@ def reset_question_chain(
                     raise HypothesisFirstChainError("本题运行重置失败，原数据已尝试恢复。") from exc
                 raise
 
+    from core.web.services.team_workflow.research_runtime import (
+        question_conversation_cleanup,
+    )
+
+    conversation_cleanup: dict[str, Any]
+    try:
+        with hypothesis_first_scope_lock(normalized_team_id, normalized_question_id):
+            conversation_cleanup = (
+                question_conversation_cleanup.remove_question_conversations(
+                    normalized_team_id, normalized_question_id
+                )
+            )
+    except Exception as exc:  # noqa: BLE001 - the reset itself already committed
+        conversation_cleanup = {
+            "schemaVersion": 1,
+            "questionId": normalized_question_id,
+            "rooms": {},
+            "sessions": {},
+            "errors": [str(exc)],
+        }
     return {
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team_id,
         "questionId": normalized_question_id,
         "removed": dict(snapshot["impact"]),
+        "conversationCleanup": conversation_cleanup,
         "nextAction": {"targetNodeId": "hf_generation", "label": "创建第一阶段运行"},
     }
 
