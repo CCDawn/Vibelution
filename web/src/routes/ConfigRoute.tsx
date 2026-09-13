@@ -1174,9 +1174,6 @@ function configEditorFieldKind(meta: ConfigEditorMeta | undefined): ConfigEditor
 }
 
 function isDenseConfigSection(section: ConfigEditorSection): boolean {
-  if (section.id === "llm-discovery") {
-    return false;
-  }
   return Number(section.fieldCount || 0) >= 12;
 }
 
@@ -1203,7 +1200,6 @@ function ConfigSectionEditor({
   const sectionClassName = [
     styles.sectionSurface,
     styles.configEditorSection,
-    section.id === "llm-discovery" && !presentation ? styles.configDiscoverySection : "",
     isDenseConfigSection(section) && !presentation ? styles.configDenseSection : "",
   ].filter(Boolean).join(" ");
   const [uploadingImagePath, setUploadingImagePath] = useState("");

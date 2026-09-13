@@ -22,7 +22,6 @@ const sections: ConfigSummary["sections"] = [
   { id: "avatar", title: "终端形象", summary: "终端形象" },
   { id: "pet", title: "宠物", summary: "陪伴体" },
   { id: "models", title: "模型库", summary: "模型连接" },
-  { id: "llm-discovery", title: "模型发现", summary: "模型发现" },
   { id: "context-compression", title: "上下文压缩", summary: "上下文压缩" },
   { id: "analysis", title: "分析", summary: "分析" },
   { id: "security", title: "安全", summary: "权限设置" },

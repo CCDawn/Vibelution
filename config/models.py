@@ -510,39 +510,6 @@ class LLMProfile(BaseModel):
         return _validate_model_reasoning_contract(self)
 
 
-class LLMDiscoveryConfig(BaseModel):
-    """LLM 动态发现配置"""
-    model_config = ConfigDict(extra="ignore")
-
-    enabled: bool = Field(
-        default=True,
-        description="是否启用运行时模型发现"
-    )
-    timeout: int = Field(
-        default=30,
-        gt=0,
-        description="发现请求超时（秒）"
-    )
-    fallback_max_tokens: Optional[int] = Field(
-        default=None,
-        description="发现失败时使用的 max_tokens"
-    )
-    fallback_max_token_limit: Optional[int] = Field(
-        default=None,
-        description="发现失败时使用的 max_token_limit"
-    )
-    auto_adjust: bool = Field(
-        default=True,
-        description="是否自动调整压缩阈值"
-    )
-    output_reserve_ratio: float = Field(
-        default=0.125,
-        ge=0.1,
-        le=0.5,
-        description="预留输出 tokens 比例"
-    )
-
-
 DEFAULT_ROLE_PROFILE_IDS = (
     "primary",
     "mental_model",
@@ -583,7 +550,7 @@ DEFAULT_LLM_STREAM_IDLE_CHUNK_DEADLINE_SECONDS = 300.0
 
 
 class LLMConfig(BaseModel):
-    """新的 LLM 根配置：providers / profiles / discovery。"""
+    """新的 LLM 根配置：providers / profiles / model_library。"""
     model_config = ConfigDict(extra="ignore")
 
     schema_version: int | None = Field(default=None, ge=2, le=2)
@@ -591,7 +558,6 @@ class LLMConfig(BaseModel):
     profiles: Dict[str, LLMProfile] = Field(default_factory=dict)
     model_library: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     model_aliases: Dict[str, str] = Field(default_factory=dict)
-    discovery: LLMDiscoveryConfig = Field(default_factory=LLMDiscoveryConfig)
     route_concurrency: int = Field(
         default=DEFAULT_LLM_ROUTE_CONCURRENCY,
         description="单条 LLM 路由（provider|base_url|model|profile）的最大并发请求数",
@@ -1016,10 +982,6 @@ class CompressionPreservationConfig(BaseModel):
         ge=0,
         description="保留最近 AI 消息数"
     )
-    keep_tool_results: bool = Field(
-        default=True,
-        description="保留工具调用结果"
-    )
     preserve_errors: bool = Field(
         default=True,
         description="保留错误信息"
@@ -1182,16 +1144,6 @@ class ToolsFileConfig(BaseModel):
     syntax_check_enabled: bool = Field(
         default=True,
         description="是否启用语法检查"
-    )
-    max_read_lines: int = Field(
-        default=0,
-        ge=0,
-        description="单次读取最大行数（0 表示无限制）"
-    )
-    max_read_chars: int = Field(
-        default=0,
-        ge=0,
-        description="单次读取最大字符数（0 表示无限制）"
     )
     encoding_priority: List[str] = Field(
         default_factory=lambda: ["utf-8", "utf-8-sig", "gbk", "gb2312", "latin-1"],
@@ -1976,10 +1928,6 @@ class UIConfig(BaseModel):
         default="zh",
         description="界面语言（zh 或 en）"
     )
-    theme: str = Field(
-        default="lobster",
-        description="主题名称"
-    )
     max_log_entries: int = Field(
         default=100,
         gt=0,
@@ -2042,14 +1990,6 @@ class DebugConfig(BaseModel):
     verbose: bool = Field(
         default=False,
         description="是否打印详细日志"
-    )
-    trace_llm: bool = Field(
-        default=False,
-        description="是否跟踪 LLM 调用"
-    )
-    trace_tools: bool = Field(
-        default=False,
-        description="是否跟踪工具调用"
     )
     track_token_usage: bool = Field(
         default=True,
@@ -2581,7 +2521,6 @@ class AppConfig(BaseModel):
 __all__ = [
     # LLM 配置
     "LLMConfig",
-    "LLMDiscoveryConfig",
     "ProviderConfig",
     "LLMProfile",
     "RetryPolicyConfig",

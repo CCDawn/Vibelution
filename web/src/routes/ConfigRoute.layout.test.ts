@@ -566,7 +566,6 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("onProbeImageInput={(modelRef) =>");
     expect(providerPanelSource).toContain('data-model-capability-action="image_input"');
     expect(routeSource).toContain("styles.configEditorSection");
-    expect(routeSource).toContain('section.id === "llm-discovery" && !presentation ? styles.configDiscoverySection : ""');
     expect(routeSource).toContain("styles.notice");
     expect(providerPanelSource).toContain("styles.tableScroll");
     expect(providerPanelSource).toContain("styles.modelIdentity");
@@ -574,7 +573,6 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelStylesSource).toContain("registryWorkspace:");
     expect(providerPanelStylesSource).toContain("tableScroll:");
     expect(stylesSource).toContain("configEditorSection:");
-    expect(stylesSource).toContain("configDiscoverySection:");
   });
 
   it("converges the provider registry into a compact VUI workbench contract", () => {
@@ -932,11 +930,8 @@ describe("ConfigRoute layout contract", () => {
 
   it("uses a compact layout for large config sections with many fields", () => {
     expect(routeSource).toContain("function isDenseConfigSection");
-    expect(routeSource).toContain('section.id === "llm-discovery"');
-    expect(routeSource).toContain("return false");
     expect(routeSource).toContain("Number(section.fieldCount || 0) >= 12");
     expect(routeSource).toContain("styles.configDenseSection");
-    expect(routeSource).toContain('section.id === "llm-discovery" && !presentation ? styles.configDiscoverySection : ""');
     expect(routeSource).toContain("styles.treeGrid");
     expect(routeSource).toContain("styles.treeFieldCardView");
     expect(routeSource).toContain("styles.treeFieldCardEdit");
@@ -957,7 +952,6 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.treeGrid).toContain("grid-cols-1");
     expect(styles.configDenseSection).toContain("[&>_.treeGrid]:[grid-template-columns:repeat(3,minmax(220px,1fr))]");
     expect(styles.configDenseSection).not.toContain("repeat(auto-fit");
-    expect(styles.configDiscoverySection).toContain("[&>_.treeGrid]:[grid-template-columns:repeat(3,minmax(220px,1fr))]");
     expect(styles.treeFieldValue).toContain("text-vui-fg-secondary");
     expect(healthDiagnosticsPanelStylesSource).toContain("vuiSurfaceRecipes");
     expect(healthDiagnosticsPanelStyles.sectionSurface).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);

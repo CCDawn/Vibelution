@@ -65,7 +65,6 @@ const PAGE_DEFINITIONS: Record<ConfigSettingsGroupId, readonly PageDefinition[]>
   ],
   "models-profiles": [
     { id: "model-connection", zh: "模型连接", en: "Connections", members: ["models"] },
-    { id: "model-discovery", zh: "模型发现", en: "Discovery", members: ["llm-discovery"] },
   ],
   "runtime-context": [
     { id: "runtime-context", zh: "上下文与分析", en: "Context & analysis", members: ["context-compression", "analysis"] },

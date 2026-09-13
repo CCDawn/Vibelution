@@ -8,7 +8,7 @@ LLM 模型预设注册表
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -654,74 +654,6 @@ def resolve_model_alias(model_id: str) -> str:
 
 
 # ============================================================================
-# 模型动态发现
-# ============================================================================
-
-def init_model_discovery(
-    config: Any,
-    debug_logger: Optional[Any] = None,
-) -> Tuple[int, Optional[Any]]:
-    """
-    执行模型动态发现，返回 effective_max_token_limit。
-
-    Args:
-        config: AppConfig 实例，主要读取 llm.providers / llm.profiles /
-                llm.discovery / context_compression 配置
-        debug_logger: 可选的 debug logger 对象，拥有 .success() 和 .warning() 方法。
-                      若为 None，则静默执行。
-
-    Returns:
-        (effective_max_token_limit, model_info)
-    """
-    # 避免循环导入
-    from core.infrastructure.model_discovery import discover_model_sync, DiscoveryStatus
-
-    model_info = None
-
-    profile = config.llm.get_profile(role="primary")
-    provider = config.llm.get_provider(profile.provider_id)
-    api_base = provider.base_url or ''
-    api_key = config.get_api_key_for_profile(profile_id=profile.profile_id) or ''
-    discovery_enabled = bool(config.llm.discovery.enabled and profile.discovery_enabled and api_base)
-
-    if not discovery_enabled:
-        return getattr(config.context_compression, 'max_token_limit', 16000), None
-
-    try:
-        model_info = discover_model_sync(
-            api_base=api_base,
-            model_name=profile.model,
-            api_key=api_key,
-            fallback_max_tokens=profile.max_output_tokens,
-            fallback_max_token_limit=getattr(config.context_compression, 'max_token_limit', 16000),
-            timeout=config.llm.discovery.timeout,
-            enabled=True,
-        )
-
-        if model_info.status == DiscoveryStatus.SUCCESS:
-            if debug_logger:
-                debug_logger.success(
-                    f"模型发现成功: {model_info.model_name}\n"
-                    f"  context_window: {model_info.max_model_len}\n"
-                    f"  建议 max_tokens: {model_info.suggested_max_tokens}\n"
-                    f"  压缩阈值 max_token_limit: {model_info.compression_thresholds.max_token_limit}",
-                    tag="MODEL_DISCOVERY",
-                )
-            return model_info.compression_thresholds.max_token_limit, model_info
-        else:
-            if debug_logger:
-                debug_logger.warning(
-                    f"模型发现失败: {model_info.error_message or '未知错误'}，使用配置文件的值",
-                    tag="MODEL_DISCOVERY",
-                )
-    except Exception as e:
-        if debug_logger:
-            debug_logger.warning(f"模型发现异常: {e}，使用配置文件的值", tag="MODEL_DISCOVERY")
-
-    return getattr(config.context_compression, 'max_token_limit', 16000), model_info
-
-
-# ============================================================================
 # 导出
 # ============================================================================
 
@@ -737,5 +669,4 @@ __all__ = [
     "get_provider_models",
     "show_model_info",
     "resolve_model_alias",
-    "init_model_discovery",
 ]

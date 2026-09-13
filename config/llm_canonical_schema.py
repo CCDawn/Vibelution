@@ -9,7 +9,6 @@ from pydantic import ValidationError
 
 from .models import (
     LLMConfig,
-    LLMDiscoveryConfig,
     LLMProfile,
     PinnedModelConfig,
     PinnedModelDefaults,
@@ -107,7 +106,6 @@ def _validate_known_shape(payload: Mapping[str, Any]) -> list[CanonicalLLMSchema
     if isinstance(profiles, Mapping):
         for profile_id, raw_profile in profiles.items():
             issues.extend(_unknown_fields(raw_profile, LLMProfile, f"profiles.{profile_id}"))
-    issues.extend(_unknown_fields(payload.get("discovery", {}), LLMDiscoveryConfig, "discovery"))
     return issues
 
 

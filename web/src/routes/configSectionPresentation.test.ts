@@ -83,14 +83,12 @@ const contextCompressionPaths = [
   "context_compression.summary_chars.emergency",
   "context_compression.preservation",
   "context_compression.preservation.keep_ai_messages",
-  "context_compression.preservation.keep_tool_results",
   "context_compression.preservation.preserve_errors",
   "context_compression.preservation.extract_key_decisions",
 ];
 
 const operatorSurfacePaths = [
   "ui.language",
-  "ui.theme",
   "ui.max_log_entries",
   "ui.refresh_rate",
   "ui.show_ascii_art",
@@ -131,8 +129,6 @@ const operatorSurfacePaths = [
   "log.third_party.rich",
   "debug.enabled",
   "debug.verbose",
-  "debug.trace_llm",
-  "debug.trace_tools",
   "debug.track_token_usage",
 ];
 
@@ -194,9 +190,9 @@ describe("progressive config section presentation", () => {
     });
     expect(configSectionPresentation("ui", "zh")).toMatchObject({
       sectionTitle: "界面外观",
-      sectionSummary: "先调整配色和工作台背景；终端显示与刷新参数按需展开。",
+      sectionSummary: "先调整工作台背景；终端显示与刷新参数按需展开。",
       layout: "compact_paths",
-      commonPaths: ["ui.theme", "ui.workbench_theme"],
+      commonPaths: ["ui.workbench_theme"],
       commonFieldCount: 3,
       commonTitle: "外观快速设置",
       advancedTitle: "终端显示与刷新（高级）",
@@ -223,22 +219,11 @@ describe("progressive config section presentation", () => {
     ]);
     expect(configSectionPresentation("parser", "zh")).toBeNull();
 
-    expect(configSectionPresentation("llm-discovery", "zh")).toMatchObject({
-      sectionTitle: "模型发现",
-      sectionSummary: "控制工作台如何发现模型，以及无法读取模型限制时使用的回退值。",
-      commonPaths: [
-        "llm.discovery.enabled",
-        "llm.discovery.timeout",
-        "llm.discovery.auto_adjust",
-      ],
-    });
-
-    expect(configSectionTierCounts("ui", 7)).toEqual({ common: 3, advanced: 4 });
+    expect(configSectionTierCounts("ui", 6)).toEqual({ common: 3, advanced: 3 });
     expect(configSectionTierCounts("security", 5)).toEqual({ common: 1, advanced: 4 });
     expect(configSectionTierCounts("network", 7)).toEqual({ common: 3, advanced: 4 });
     expect(configSectionTierCounts("log", 16)).toEqual({ common: 4, advanced: 12 });
     expect(configSectionTierCounts("debug", 5)).toEqual({ common: 2, advanced: 3 });
-    expect(configSectionTierCounts("llm-discovery", 6)).toEqual({ common: 3, advanced: 3 });
   });
 
   it("keeps the Git model visible and the prompt template collapsed by default", () => {
@@ -306,11 +291,6 @@ describe("progressive config section presentation", () => {
     expect(configSectionFieldCopy("network.proxy_url", "zh")?.label).toBe("代理地址");
     expect(configSectionFieldCopy("log.third_party.openai", "zh")?.label).toBe("OpenAI 日志级别");
     expect(configSectionFieldCopy("debug.track_token_usage", "zh")?.label).toBe("记录 Token 用量");
-    expect(configSectionFieldCopy("llm.discovery.enabled", "zh")).toEqual({
-      label: "启用自动发现",
-      hint: "连接服务商后自动读取可用模型列表。",
-    });
-    expect(configSectionFieldCopy("llm.discovery.fallback_max_token_limit", "zh")?.label).toBe("默认上下文上限");
     expect(configSectionFieldCopy("analysis.data_dir", "zh")).toEqual({
       label: "分析数据目录",
       hint: "保存分析结果和统计数据的工作区目录。",
@@ -321,13 +301,8 @@ describe("progressive config section presentation", () => {
 
   it("keeps an English presentation and leaves unrelated fields untouched", () => {
     expect(configSectionPresentation("pet", "en")?.advancedTitle).toBe("Behavior, memory, and appearance (advanced)");
-    expect(configSectionPresentation("llm-discovery", "en")?.commonPaths).toEqual([
-      "llm.discovery.enabled",
-      "llm.discovery.timeout",
-      "llm.discovery.auto_adjust",
-    ]);
     expect(configSectionFieldCopy("pet.save_interval", "en")?.label).toBe("Save interval");
-    expect(configSectionFieldCopy("llm.discovery.output_reserve_ratio", "en")?.label).toBe("Output reserve ratio");
+    expect(configSectionFieldCopy("network.proxy_url", "en")?.label).toBe("Proxy URL");
     expect(configSectionFieldCopy("analysis.pattern_library_path", "en")?.label).toBe("Pattern library file");
     expect(configSectionFieldCopy("git.commit_message_model_ref", "en")?.label).toBe("Commit message model");
     expect(configSectionPresentation("analysis", "en")).toMatchObject({

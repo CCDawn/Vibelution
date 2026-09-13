@@ -782,7 +782,6 @@ def test_label_localization_prefers_exact_and_fallback_rules():
     assert localize_section_label("llm.profiles", "profiles", "en") == "Legacy Model Config"
     assert localize_section_label("prompt", "prompt", "zh") == "系统提示词"
     assert localize_section_label("git.commit_message_prompt", "commit_message_prompt", "zh") == "Git 提交提示词"
-    assert localize_section_label("llm.discovery", "discovery", "zh") == "模型发现"
     assert localize_section_label("network", "network", "en") == "Network"
 
 
