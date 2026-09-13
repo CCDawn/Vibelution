@@ -50,7 +50,6 @@ export function StructureCatalog() {
               { id: "queue-2", text: "补充实验对照组说明" },
             ]}
             lang="zh"
-            queueLabel="待发送"
             editLabel="编辑"
             withdrawLabel="撤回"
             onUpdate={() => undefined}
