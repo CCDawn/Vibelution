@@ -7,7 +7,12 @@ from pydantic import ValidationError
 
 from core.research.operator_optimization.candidate import CudaCandidate, ensure_current_source_hash
 from core.research.operator_optimization.plan import OptimizationPlan, OptimizationPlanProposal
-from core.web.services.team_workflow.operator_optimization import knowledge, planning, planning_output
+from core.web.services.team_workflow.operator_optimization import (
+    knowledge,
+    planning,
+    planning_output,
+    planning_task,
+)
 from core.web.services.team_workflow.operator_optimization.store import CampaignConflict, read_campaign
 from core.web.services.team_workflow.research_runtime.workflow_artifact_store import list_workflow_artifacts
 from tests import test_operator_knowledge_plan as fixtures
@@ -103,6 +108,14 @@ def test_provider_contract_validates_structured_payload(proposal):
         planning_output.parse_planning_output("The experiment plan is ready")
     with pytest.raises(ValidationError):
         planning_output.parse_planning_output(output.model_copy(update={"trialCount": 0}))
+
+
+def test_planner_prompt_requires_verbatim_ordered_knowledge_gaps(activity, proposal):
+    run_id, _ = proposal
+    inputs = planning_output.planning_task_input(activity[0], run_id)
+    prompt = planning_task._planning_prompt(inputs)
+    assert "第 i 项的 gap 必须逐字复制 knowledge.evidenceGaps[i]" in prompt
+    assert "禁止合并、拆分、摘要或改写 gap" in prompt
 
 
 def test_crash_after_candidate_write_recovers_without_duplicate(activity, proposal, monkeypatch):
