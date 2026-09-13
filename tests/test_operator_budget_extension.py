@@ -140,3 +140,49 @@ def test_first_receipt_rejects_unauthorized_limit(activity, setup):
     with pytest.raises(model_budget.ModelBudgetError, match="authorization"):
         model_budget.reserve_model_budget(ledger, **_reserve_kwargs(run_id="run1", node_run_id="first", campaign_id=activity[2], cost_limit="500"))
     assert ledger.read(lambda repo: repo.execute("SELECT count(*) FROM budget_receipts").fetchone()[0]) == 0
+
+
+def test_increase_call_limit_preserves_frozen_budget(activity, setup):
+    c, _ = setup
+    new = extend(activity, c, call_limits={"discussion": 12})
+    assert new.budget.discussion.maxCalls == 12
+    assert new.modelBudgetRevisions[-1].previousBudget.discussion.maxCalls == 3
+    with pytest.raises(ValueError):
+        extend(activity, new, call_limits={"discussion": 2}, command_key="lower")
+
+
+def test_waiting_parent_can_extend_only_when_exact_child_is_stopped(activity, setup):
+    from tests._support.workflow_ledger_helpers import build_outbox_record
+    c, ledger = setup
+    _seed(ledger, "waiter", 1)
+    def seed(uow):
+        uow.repository.execute("UPDATE node_attempts SET node_id='optimization_knowledge' WHERE node_run_id='waiter'")
+        problem = {"code": "operator_knowledge_child_pending", "child": {"childRunId": "child"}}
+        uow.repository.execute("UPDATE workflow_runs SET active_node_id='optimization_knowledge', blocked_problem_json=? WHERE run_id='run1'", (json.dumps(problem),))
+        child = replace(build_run_record(run_id="child", team_id=activity[0], workflow_id="challenge-cup-knowledge-sideflow", status="running", parent_run_id="run1"), project_id=activity[1])
+        uow.repository.insert_run(child)
+        uow.repository.insert_outbox(replace(build_outbox_record(run_id="run1", command_id="waiter", action_kind="adapter_dispatch"), node_run_id="waiter"))
+    ledger.submit(seed, force_flush=True).result()
+    with pytest.raises(CampaignConflict, match="child"):
+        extend(activity, c)
+    ledger.submit(lambda uow: uow.repository.update_run_status("child", activity[0], "blocked", 20), force_flush=True).result()
+    with pytest.raises(CampaignConflict, match="invocation"):
+        extend(activity, c)
+    from core.research.workflow.ledger.records import KnowledgeInvocationRecord
+    invocation = KnowledgeInvocationRecord(
+        invocation_id="kinv", parent_run_id="run1", parent_node_id="optimization_knowledge",
+        parent_node_run_id="waiter", parent_attempt=1, question_id="q", scope_hash="scope",
+        request_hash="request", search_envelope_hash="search", requirements_hash="requirements",
+        source_policy_version="v1", knowledge_child_run_id="child", status="running",
+        knowledge_package_ref=None, package_content_hash=None, handoff_state="pending",
+        error_json=None, created_at_ms=1, updated_at_ms=1)
+    ledger.submit(lambda uow: uow.repository.insert_knowledge_invocation(invocation), force_flush=True).result()
+    with pytest.raises(CampaignConflict, match="pending dispatch"):
+        extend(activity, c)
+    ledger.submit(lambda uow: uow.repository.execute("UPDATE outbox_actions SET status='failed' WHERE run_id='run1'"), force_flush=True).result()
+    for field, value in (("parent_node_run_id", "other"), ("parent_attempt", 2), ("parent_node_id", "other")):
+        ledger.submit(lambda uow: uow.repository.execute(f"UPDATE knowledge_invocations SET {field}=?", (value,)), force_flush=True).result()
+        with pytest.raises(CampaignConflict, match="invocation"):
+            extend(activity, c)
+        ledger.submit(lambda uow: uow.repository.execute(f"UPDATE knowledge_invocations SET {field}=?", (getattr(invocation, field),)), force_flush=True).result()
+    assert extend(activity, c).budget.modelCostLimit == 50

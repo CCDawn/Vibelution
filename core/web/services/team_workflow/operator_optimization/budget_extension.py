@@ -1,6 +1,7 @@
 """Explicit model-budget increases; frozen invocations keep their old limits."""
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 
 from core.research.operator_optimization.contracts import ModelBudgetRevision
@@ -10,13 +11,14 @@ from .store import CampaignConflict, _service, update_campaign
 
 
 def extend_model_budget(team_id, project_id, campaign_id, *, expected_version,
-                        command_key, model_cost_limit, token_limits):
+                        command_key, model_cost_limit, token_limits, call_limits=None):
     operator = require_privileged_server_operator(command="extend_budget")
     amount = Decimal(str(model_cost_limit))
     if not amount.is_finite() or amount <= 0:
         raise ValueError("A finite positive model cost limit is required")
-    if set(token_limits) - {"discussion", "knowledge", "planning"}:
-        raise ValueError("Only model stage token limits can be increased")
+    call_limits = dict(call_limits or {})
+    if (set(token_limits) | set(call_limits)) - {"discussion", "knowledge", "planning"}:
+        raise ValueError("Only model stage token and call limits can be increased")
 
     def increase(campaign):
         if not campaign.budget.authorized or not campaign.authorizedBy or campaign.status != "running":
@@ -27,20 +29,50 @@ def extend_model_budget(team_id, project_id, campaign_id, *, expected_version,
             if (run is None or run.team_id != team_id or run.project_id != project_id
                     or run.workflow_id != "operator-optimization" or run.status != "blocked"):
                 raise CampaignConflict("Model budget can only increase while the active run is blocked")
-            if any(a.finished_at_ms is None for a in repo.list_attempts(run.run_id)):
+            unfinished = [a for a in repo.list_attempts(run.run_id) if a.finished_at_ms is None]
+            problem = json.loads(run.blocked_problem_json or "{}")
+            if (problem.get("code") == "operator_knowledge_child_pending"
+                    and run.active_node_id == "optimization_knowledge" and len(unfinished) == 1
+                    and unfinished[0].node_id == "optimization_knowledge"):
+                child = repo.get_run((problem.get("child") or {}).get("childRunId", ""))
+                if (child is None or child.parent_run_id != run.run_id
+                        or child.team_id != team_id or child.project_id != project_id
+                        or child.workflow_id != "challenge-cup-knowledge-sideflow"
+                        or child.status != "blocked"
+                        or any(a.finished_at_ms is None for a in repo.list_attempts(child.run_id))
+                        or repo.execute("SELECT 1 FROM outbox_actions WHERE run_id=? AND status IN ('pending','leased') LIMIT 1", (child.run_id,)).fetchone()):
+                    raise CampaignConflict("Knowledge child must be blocked with no active work before budget increase")
+                invocation = repo.find_knowledge_invocation_by_child_run(child.run_id)
+                waiter = unfinished[0]
+                if (invocation is None or invocation.parent_run_id != run.run_id
+                        or invocation.parent_node_id != waiter.node_id
+                        or invocation.parent_node_run_id != waiter.node_run_id
+                        or invocation.parent_attempt != waiter.attempt
+                        or invocation.knowledge_child_run_id != child.run_id):
+                    raise CampaignConflict("Knowledge child invocation differs from the waiting attempt")
+            elif unfinished:
                 raise CampaignConflict("An unfinished node attempt still owns the model budget")
-            if repo.execute("SELECT 1 FROM outbox_actions WHERE run_id=? AND status IN ('pending','leased') LIMIT 1", (run.run_id,)).fetchone():
+            pending = repo.execute("SELECT action_kind,node_run_id FROM outbox_actions WHERE run_id=? AND status IN ('pending','leased')", (run.run_id,)).fetchall()
+            if pending:
                 raise CampaignConflict("A pending dispatch still owns the model budget")
         ledger.read(check_idle)
         old = campaign.budget
         if amount < Decimal(str(old.modelCostLimit)):
             raise ValueError("Model cost limit cannot be lowered")
         updates = {"modelCostLimit": float(amount)}
-        for stage, tokens in token_limits.items():
+        for stage in set(token_limits) | set(call_limits):
             policy = getattr(old, stage)
-            if policy is None or type(tokens) is not int or tokens < policy.tokenLimit:
-                raise ValueError("An existing stage token limit can only be increased")
-            updates[stage] = policy.model_copy(update={"tokenLimit": tokens})
+            if policy is None:
+                raise ValueError("Only an existing model stage budget can be increased")
+            changes = {}
+            for field, values in (("tokenLimit", token_limits), ("maxCalls", call_limits)):
+                if stage not in values:
+                    continue
+                value = values[stage]
+                if type(value) is not int or value < getattr(policy, field):
+                    raise ValueError("An existing stage limit can only be increased")
+                changes[field] = value
+            updates[stage] = policy.model_copy(update=changes)
         budget = old.model_copy(update=updates)
         if budget == old:
             raise ValueError("Budget increase must change a limit")
@@ -52,7 +84,8 @@ def extend_model_budget(team_id, project_id, campaign_id, *, expected_version,
 
     return update_campaign(team_id, project_id, campaign_id, expected_version=expected_version,
         command_key=command_key, command={"action": "extend_model_budget", "operatorId": operator.operator_id,
-            "modelCostLimit": str(amount), "tokenLimits": token_limits}, transform=increase)
+            "modelCostLimit": str(amount), "tokenLimits": token_limits,
+            **({"callLimits": call_limits} if call_limits else {})}, transform=increase)
 
 
 def authorized_model_limits(repo, *, run_id, campaign_id, currency):
