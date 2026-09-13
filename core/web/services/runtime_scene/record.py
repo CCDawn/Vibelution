@@ -8,7 +8,6 @@ Late-bound facade keeps monkeypatches stable.
 
 from __future__ import annotations
 
-import copy
 import json
 import shutil
 from datetime import datetime, timezone
@@ -207,11 +206,6 @@ def _coerce_int(value: object, *, default: int = 0) -> int:
         return default
 
 
-def _copy_jsonl_rows(rows: list[dict]) -> list[dict]:
-    s = _service()
-    return copy.deepcopy(rows)
-
-
 def _count_runtime_scene_files(scene_dir: Path, relative_path: str) -> int:
     s = _service()
     target = scene_dir / relative_path
@@ -278,10 +272,18 @@ def _file_timestamp(path: Path) -> str:
 
 
 def _get_jsonl_file_cache(signature: tuple[str, bool, int, int]) -> list[dict] | None:
+    """Return a cached read-only snapshot for an exact file signature.
+
+    The cache keeps one snapshot per file path (latest signature wins), so a
+    growing scene file can no longer accumulate one full row copy per version.
+    Callers must not mutate the shared rows; they build their own structures.
+    """
     s = _service()
     with s._JSONL_FILE_CACHE_LOCK:
-        rows = s._JSONL_FILE_CACHE.get(signature)
-    return s._copy_jsonl_rows(rows) if rows is not None else None
+        entry = s._JSONL_FILE_CACHE.get(signature[0])
+    if entry is None or entry[0] != signature:
+        return None
+    return list(entry[1])
 
 
 def _humanize_runtime_token(value: str) -> str:
@@ -883,6 +885,13 @@ def _parse_directory_timestamp_token(value: str) -> datetime | None:
 
 
 def _read_jsonl_file(path: Path) -> list[dict]:
+    """Read a JSONL file through a bounded, path-keyed snapshot cache.
+
+    Only one parsed snapshot per path is retained. The previous
+    signature-keyed cache stored a full copy per file version and, on
+    multi-week scenes whose timeline grows on every event, retained many GB.
+    Returned rows share the cached objects and must be treated as read-only.
+    """
     s = _service()
     signature = s._jsonl_file_signature(path)
     if not signature[1]:
@@ -906,7 +915,7 @@ def _read_jsonl_file(path: Path) -> list[dict]:
         if isinstance(payload, dict):
             rows.append(payload)
     s._remember_jsonl_file_cache(signature, rows)
-    return s._copy_jsonl_rows(rows)
+    return list(rows)
 
 
 def _read_last_scene_event_seq(event_path: Path) -> int:
@@ -976,11 +985,12 @@ def _read_scene_timeline(scene_dir: Path) -> list[dict]:
 
 
 def _remember_jsonl_file_cache(signature: tuple[str, bool, int, int], rows: list[dict]) -> None:
+    """Keep one shared read-only snapshot per file path."""
     s = _service()
     with s._JSONL_FILE_CACHE_LOCK:
         if len(s._JSONL_FILE_CACHE) > s.JSONL_FILE_CACHE_LIMIT:
             s._JSONL_FILE_CACHE.clear()
-        s._JSONL_FILE_CACHE[signature] = s._copy_jsonl_rows(rows)
+        s._JSONL_FILE_CACHE[signature[0]] = (signature, rows)
 
 
 def _remember_scene_event_seq(event_path: Path, seq: int) -> None:
@@ -2275,7 +2285,7 @@ def _update_ignored_browser_telemetry_manifest(
 def _refresh_active_scene_package_if_due(scene_dir: Path) -> bool:
     """节流刷新活跃场景的 summary/package_index（默认 30s 一次），保证诊断入口新鲜。
 
-    与 full_projection_refresh（特定事件立即刷新）互补：常规事件也按节流补齐
+    与 full_projection_refresh（warning/error 立即刷新）互补：常规事件也按节流补齐
     summary.json / package_index.json / manifest 的 package 字段。
 
     并发契约：写锁用非阻塞获取，节流时间戳在锁内二次确认后、昂贵工作开始前
@@ -3014,24 +3024,31 @@ def _record_runtime_scene_event_impl(
     if requires_projection_lock:
         # Full diagnosis generation is intentionally isolated from the append
         # lock. A slow warning projection must not queue ordinary Agent events
-        # ahead of the provider request.
+        # ahead of the provider request. The acquire is non-blocking: when a
+        # projection is already running, queueing a second warning pass behind
+        # it turned warning bursts into a serial storm.
         with s.pipeline_metrics.measure("projection", priority="high"):
-            with s.RUNTIME_SCENE_PACKAGE_WRITE_LOCK:
-                manifest = s._load_scene_manifest(scene_dir)
-                reconciliation_closed = s._maybe_close_runtime_scene_from_reconciliation(
-                    scene_dir,
-                    manifest,
-                    event_name,
-                    normalized_fields,
-                    timestamp,
-                )
-                full_projection_refresh = s._runtime_scene_event_requires_full_projection_refresh(
-                    level=level_name,
-                    reconciliation_closed=reconciliation_closed,
-                )
-                if full_projection_refresh:
-                    s._update_runtime_scene_package_manifest(scene_dir, manifest)
-                    projection_refresh = "full"
+            if not s.RUNTIME_SCENE_PACKAGE_WRITE_LOCK.acquire(blocking=False):
+                projection_refresh = "deferred"
+            else:
+                try:
+                    manifest = s._load_scene_manifest(scene_dir)
+                    reconciliation_closed = s._maybe_close_runtime_scene_from_reconciliation(
+                        scene_dir,
+                        manifest,
+                        event_name,
+                        normalized_fields,
+                        timestamp,
+                    )
+                    full_projection_refresh = s._runtime_scene_event_requires_full_projection_refresh(
+                        level=level_name,
+                        reconciliation_closed=reconciliation_closed,
+                    )
+                    if full_projection_refresh:
+                        s._update_runtime_scene_package_manifest(scene_dir, manifest)
+                        projection_refresh = "full"
+                finally:
+                    s.RUNTIME_SCENE_PACKAGE_WRITE_LOCK.release()
 
     return {
         "accepted": True,

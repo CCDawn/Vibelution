@@ -191,6 +191,42 @@ def test_warning_runtime_event_appends_before_full_projection(tmp_path, monkeypa
     assert projection_calls == ["agent_directory.list_agents.slow"]
 
 
+def test_warning_runtime_event_defers_when_projection_already_running(tmp_path, monkeypatch) -> None:
+    _point_runtime_scene_at(tmp_path, monkeypatch, scene_id="scene-warning-storm")
+
+    class BusyPackageLock:
+        def acquire(self, blocking: bool = True) -> bool:
+            return False
+
+        def release(self) -> None:
+            raise AssertionError("a skipped warning projection must not release the lock")
+
+        def __enter__(self):
+            raise AssertionError("the warning path must not block on the package projection lock")
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+    monkeypatch.setattr(runtime_scene_service, "RUNTIME_SCENE_PACKAGE_WRITE_LOCK", BusyPackageLock())
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "_update_runtime_scene_package_manifest",
+        lambda scene, manifest: (_ for _ in ()).throw(
+            AssertionError("a queued warning must not rebuild the package projection")
+        ),
+    )
+
+    result = runtime_scene_service.record_runtime_scene_event(
+        "agent_directory",
+        "agent",
+        "agent_directory.list_agents.slow",
+        level="warning",
+        fields={"elapsedMs": 9000},
+    )
+
+    assert result["projectionRefresh"] == "deferred"
+
+
 def test_warning_runtime_event_records_append_and_projection_pipeline_durations(tmp_path, monkeypatch) -> None:
     _point_runtime_scene_at(tmp_path, monkeypatch, scene_id="scene-projection-metrics")
     metrics = _RecordingPipelineMetrics()

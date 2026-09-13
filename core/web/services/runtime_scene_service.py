@@ -25,7 +25,6 @@ from .runtime_scene.record import (
     _camel_to_snake,
     _coerce_float,
     _coerce_int,
-    _copy_jsonl_rows,
     _count_runtime_scene_files,
     _display_name_status_label,
     _display_name_time_label,
@@ -392,7 +391,9 @@ SENSITIVE_FIELD_KEYWORDS = (
     "bearer",
 )
 _JSONL_FILE_CACHE_LOCK = Lock()
-_JSONL_FILE_CACHE: dict[tuple[str, bool, int, int], list[dict[str, Any]]] = {}
+_JSONL_FILE_CACHE: dict[
+    str, tuple[tuple[str, bool, int, int], list[dict[str, Any]]]
+] = {}
 _SCENE_EVENT_SEQ_CACHE_LOCK = Lock()
 _SCENE_EVENT_SEQ_CACHE: dict[str, tuple[int, int, int]] = {}
 NON_PROBLEM_NEXT_STATE_KINDS = {
