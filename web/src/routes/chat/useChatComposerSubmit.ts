@@ -1192,9 +1192,6 @@ export function useChatComposerSubmitActions({
       return;
     }
     if (sessionBusy && !resolvedEditTarget) {
-      if (sessionStopping) {
-        return;
-      }
       if (activeImageAttachments.length || activeReferenceAttachments.length) {
         setSessionComposerErrors((current) => ({
           ...current,
@@ -1749,9 +1746,6 @@ export function useChatComposerSubmitActions({
     }
     if (stoppedTurn?.sessionId === activeSessionId) {
       stoppedTurnAutoFlushRef.current = null;
-      if (!activeTurnId || activeTurnId === stoppedTurn.turnId) {
-        return;
-      }
     }
     if (sessionStopping) {
       return;

@@ -22,6 +22,7 @@ type HarnessProps = {
   sessionId?: string;
   companionAgentId?: string;
   busy: boolean;
+  stopping?: boolean;
   draft: string;
   queues: Record<string, ComposerQueueItem[]>;
   imageAttachments?: ComposerImageAttachment[];
@@ -49,6 +50,7 @@ function Harness({
   sessionId = "session-1",
   companionAgentId,
   busy,
+  stopping,
   draft,
   queues,
   imageAttachments = [],
@@ -110,7 +112,7 @@ function Harness({
     activeEditTarget: null,
     composerDisabled: false,
     sessionBusy: busy,
-    sessionStopping: false,
+    sessionStopping: stopping ?? false,
     activePhase: busy ? "running" : "ready",
     activeAgentImageInputUnsupported: false,
     activeImageInputModelId: "model-1",
@@ -368,10 +370,13 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
     expect(queues["session-1"]?.map((item) => item.text)).toEqual(["登录失败用中文提示"]);
   });
 
-  it("keeps the queue after stop and does not auto-send", async () => {
+  it("sends the first queued item after a stop settles", async () => {
     const { mutations, submitTurn, stopTurn } = createMutations();
     let queues: Record<string, ComposerQueueItem[]> = {
-      "session-1": [{ id: "q-1", text: "先不要改测试" }],
+      "session-1": [
+        { id: "q-1", text: "先不要改测试" },
+        { id: "q-2", text: "登录失败用中文提示" },
+      ],
     };
     await mount({
       busy: true,
@@ -390,6 +395,7 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
       sessionId: "session-1",
       turnId: "turn-session-1",
     });
+    expect(submitTurn).not.toHaveBeenCalled();
 
     await act(async () => {
       root?.render(
@@ -408,8 +414,34 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
       await Promise.resolve();
     });
 
+    expect(submitTurn).toHaveBeenCalledTimes(1);
+    expect(submitTurn.mock.calls[0]?.[0]).toMatchObject({
+      sessionId: "session-1",
+      content: "先不要改测试",
+    });
+    expect(queues["session-1"]?.map((item) => item.text)).toEqual(["登录失败用中文提示"]);
+  });
+
+  it("queues a new message while the stop is still being confirmed", async () => {
+    const { mutations, submitTurn } = createMutations();
+    let queues: Record<string, ComposerQueueItem[]> = {};
+    await mount({
+      busy: true,
+      stopping: true,
+      draft: "停止确认前先排队",
+      queues,
+      mutations,
+      onQueues: (next) => {
+        queues = next;
+      },
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
+    });
+
+    expect(queues["session-1"]?.map((item) => item.text)).toEqual(["停止确认前先排队"]);
     expect(submitTurn).not.toHaveBeenCalled();
-    expect(queues["session-1"]?.map((item) => item.text)).toEqual(["先不要改测试"]);
   });
 
   it("preserves concurrently appended items when immediate steer partially fails", async () => {

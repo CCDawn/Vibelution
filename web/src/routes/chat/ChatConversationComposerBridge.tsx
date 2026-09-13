@@ -109,7 +109,13 @@ export function buildConversationComposerBridgeState(
 ): ChatConversationComposerBridgeState {
   const hasSession = Boolean(input.sessionId);
   const isEditingMessage = Boolean(input.editTargetMessageId);
-  const actionMode = input.sessionBusy || input.submitPending ? "stop" : "send";
+  // A requested stop ends the turn for the composer immediately: the user can
+  // queue the next message while the worker is still confirming the stop.
+  const actionMode = input.sessionStopping
+    ? "send"
+    : input.sessionBusy || input.submitPending
+      ? "stop"
+      : "send";
   const pending = actionMode === "stop"
     ? input.stopPending || input.sessionStopping
     : input.submitPending;
@@ -125,7 +131,7 @@ export function buildConversationComposerBridgeState(
   );
   const placeholder = !hasSession
     ? input.labels.loadingSession
-    : input.sessionStopping || input.sessionBusy
+    : input.sessionBusy && !input.sessionStopping
       ? ""
       : isEditingMessage
         ? input.labels.editMessagePlaceholder

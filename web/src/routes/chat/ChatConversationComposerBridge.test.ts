@@ -134,7 +134,7 @@ describe("ChatConversationComposerBridge", () => {
     expect(state.placeholder).toBe("message");
   });
 
-  it("disables stop only after the server has accepted the stopping phase", () => {
+  it("returns to send as soon as a stop is requested so the next message can be queued", () => {
     const pendingState = buildConversationComposerBridgeState({
       ...emptyStateInput(),
       sessionBusy: true,
@@ -153,7 +153,19 @@ describe("ChatConversationComposerBridge", () => {
       sessionStopping: true,
       value: "hello",
     });
-    expect(stoppingState.actionDisabled).toBe(true);
+    expect(stoppingState.actionMode).toBe("send");
+    expect(stoppingState.pending).toBe(false);
+    expect(stoppingState.actionDisabled).toBe(false);
+    expect(stoppingState.placeholder).toBe("message");
+
+    const stoppingEmptyState = buildConversationComposerBridgeState({
+      ...emptyStateInput(),
+      sessionBusy: true,
+      sessionStopping: true,
+      value: "",
+    });
+    expect(stoppingEmptyState.actionMode).toBe("send");
+    expect(stoppingEmptyState.actionDisabled).toBe(true);
   });
 
   it("disables the composer while submit is pending during a busy session", () => {
