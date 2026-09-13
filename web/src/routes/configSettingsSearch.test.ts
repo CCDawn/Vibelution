@@ -14,7 +14,6 @@ const sections = [
   { id: "avatar", title: "终端形象", summary: "终端形象" },
   { id: "pet", title: "宠物", summary: "陪伴体" },
   { id: "models", title: "模型库", summary: "模型连接" },
-  { id: "llm-discovery", title: "模型发现", summary: "模型发现" },
   { id: "context-compression", title: "上下文压缩", summary: "上下文压缩" },
   { id: "analysis", title: "分析", summary: "分析" },
   { id: "security", title: "安全", summary: "权限设置" },
@@ -43,19 +42,19 @@ const editorSections: ConfigEditorSection[] = [
 ];
 
 describe("configSettingsSearch", () => {
-  it("jumps API Key and theme queries to the owning settings page", () => {
+  it("jumps API Key and background queries to the owning settings page", () => {
     const groups = buildConfigSettingsGroups(sections, groupCopy, "zh");
     const documents = buildConfigSettingsSearchIndex({
       groups,
       editorSections,
       editorMeta: {
-        "ui.theme": { path: "ui.theme", label: "颜色主题", hint: "工作台外观", kind: "select", badge: "Option", options: [] },
+        "ui.workbench_theme": { path: "ui.workbench_theme", label: "工作台主题", hint: "工作台外观", kind: "select", badge: "Option", options: [] },
         "pet.name": { path: "pet.name", label: "陪伴体名称", hint: "显示名", kind: "text", badge: "Text", options: [] },
       },
     });
 
     expect(searchConfigSettings(documents, "主题")[0]).toEqual(
-      expect.objectContaining({ groupId: "workbench-interface", pageId: "workbench-interface", title: "颜色主题" }),
+      expect.objectContaining({ groupId: "workbench-interface", pageId: "workbench-interface", title: "工作台主题" }),
     );
     expect(searchConfigSettings(documents, "模型")[0]).toEqual(
       expect.objectContaining({ groupId: "models-profiles" }),

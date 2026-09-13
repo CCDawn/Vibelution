@@ -92,7 +92,6 @@ def _enforce_safe_local_security(config: "AppConfig") -> None:
     provider.api_key = ""
     provider.api_key_env = ""
     primary.discovery_enabled = False
-    config.llm.discovery.enabled = False
 
 
 def _safe_local_security_snapshot(config: "AppConfig") -> dict[str, Any]:
@@ -106,7 +105,6 @@ def _safe_local_security_snapshot(config: "AppConfig") -> dict[str, Any]:
         "llm.providers.<primary>.api_key": provider.api_key,
         "llm.providers.<primary>.api_key_env": provider.api_key_env,
         "llm.profiles.primary.discovery_enabled": primary.discovery_enabled,
-        "llm.discovery.enabled": config.llm.discovery.enabled,
     }
 
 
@@ -184,7 +182,7 @@ def apply_runtime_profile(config: "AppConfig") -> "AppConfig":
         primary.temperature = max(primary.temperature, 0.1)
         primary.timeout = max(primary.timeout, 120)
         primary.connect_timeout = min(primary.connect_timeout, 20)
-        config.llm.discovery.enabled = True
+        primary.discovery_enabled = True
         config.agent.max_iterations = min(config.agent.max_iterations, 200)
         config.agent.awake_interval = min(config.agent.awake_interval, 60)
         config.context_compression.enabled = True
@@ -195,8 +193,6 @@ def apply_runtime_profile(config: "AppConfig") -> "AppConfig":
     if profile == "debug":
         config.debug.enabled = True
         config.debug.verbose = True
-        config.debug.trace_llm = True
-        config.debug.trace_tools = True
         config.log.level = "DEBUG"
         config.agent.max_iterations = min(config.agent.max_iterations, 20)
         config.agent.awake_interval = min(config.agent.awake_interval, 15)
@@ -206,12 +202,10 @@ def apply_runtime_profile(config: "AppConfig") -> "AppConfig":
     if profile == "ci":
         config.debug.enabled = False
         config.debug.verbose = False
-        config.debug.trace_llm = False
-        config.debug.trace_tools = False
         config.log.level = "WARNING"
         primary = config.llm.get_profile(role="primary")
         primary.temperature = max(primary.temperature, 0.1)
-        config.llm.discovery.enabled = False
+        primary.discovery_enabled = False
         config.agent.max_iterations = min(config.agent.max_iterations, 5)
         config.agent.awake_interval = min(config.agent.awake_interval, 5)
         config.agent.auto_backup = False

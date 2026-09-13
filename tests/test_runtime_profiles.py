@@ -41,7 +41,7 @@ def test_safe_local_profile_applies_local_guardrails():
     assert primary.temperature == 0.1
     assert primary.timeout == 45
     assert primary.connect_timeout == 5
-    assert config.llm.discovery.enabled is False
+    assert primary.discovery_enabled is False
     assert config.agent.max_iterations == 40
     assert config.agent.awake_interval == 30
     assert config.runtime.preflight_doctor is True
@@ -85,7 +85,7 @@ def test_safe_remote_profile_applies_remote_guardrails():
     assert provider.kind == "minimax"
     assert primary.timeout == 120
     assert primary.connect_timeout == 20
-    assert config.llm.discovery.enabled is True
+    assert primary.discovery_enabled is True
     assert config.agent.max_iterations == 200
 
 
@@ -101,8 +101,6 @@ def test_debug_profile_enables_debug_tracing():
 
     assert config.debug.enabled is True
     assert config.debug.verbose is True
-    assert config.debug.trace_llm is True
-    assert config.debug.trace_tools is True
     assert config.log.level == "DEBUG"
     assert config.runtime.preflight_doctor is True
 
@@ -126,7 +124,7 @@ def test_ci_profile_disables_heavy_runtime_features():
     config = make_config(runtime__profile="ci")
 
     assert config.runtime.profile == "ci"
-    assert config.llm.discovery.enabled is False
+    assert config.llm.get_profile(role="primary").discovery_enabled is False
     assert config.context_compression.enabled is False
     assert config.agent.auto_backup is False
     assert config.agent.max_iterations == 5
@@ -186,7 +184,7 @@ def test_safe_local_security_clamps_survive_explicit_override():
     assert provider.kind == "local"
     assert provider.base_url == "http://localhost:11434/v1"
     assert provider.requires_api_key is False
-    assert config.llm.discovery.enabled is False
+    assert primary.discovery_enabled is False
     event_fields = {event["field"] for event in events}
     assert "llm.providers.<primary>.base_url" in event_fields
     assert events[0]["before"] == "https://api.example.com/v1"

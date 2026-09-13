@@ -28,9 +28,6 @@ window_size = "auto"
 # 必须显式声明 schema_version = 1，与 tests/fixtures/config/llm_schema_v1_inline.toml 一致。
 schema_version = 1
 
-[llm.discovery]
-timeout = 12
-
 [llm.model_library.relay_gpt_5_6_luna]
 model = "gpt-5.6-luna"
 label = "Relay GPT-5.6 Luna"
@@ -138,7 +135,6 @@ def test_sample_config_exposes_all_public_model_blocks(tmp_path):
     raw = _load_toml(_write_sample_public_config(tmp_path))
     assert "providers" not in raw["llm"]
     assert "profiles" in raw["llm"]
-    assert "discovery" in raw["llm"]
     assert "model_library" in raw["llm"]
     assert "primary" in raw["llm"]["profiles"]
     assert "model_ref" in raw["llm"]["profiles"]["primary"]
@@ -160,7 +156,6 @@ def test_config_loader_normalizes_nested_public_blocks(tmp_path):
     expected_primary_model = raw["llm"]["model_library"][primary_model_ref]["model"]
     assert config.llm.get_profile("primary").model == expected_primary_model
     assert config.llm.get_profile(role="compression").profile_id == "primary"
-    assert config.llm.discovery.timeout == raw["llm"]["discovery"]["timeout"]
     assert config.pet_gene.inherit_from_model == raw["pet"]["gene"]["inherit_from_model"]
     assert len(config.prompt.sections) == len(raw["prompt"]["sections"])
     assert config.workbench.backend_port == raw["workbench"]["backend_port"]

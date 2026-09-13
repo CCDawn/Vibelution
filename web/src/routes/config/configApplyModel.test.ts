@@ -15,7 +15,7 @@ describe("configApplyModel", () => {
 
   it("immediately applies appearance paths and leaves tooling for explicit save", () => {
     expect(shouldImmediateApplyConfigPath("ui")).toBe(true);
-    expect(shouldImmediateApplyConfigPath("ui.theme")).toBe(true);
+    expect(shouldImmediateApplyConfigPath("ui.workbench_theme")).toBe(true);
     expect(shouldImmediateApplyConfigPath("pet.name")).toBe(true);
     expect(shouldImmediateApplyConfigPath("security")).toBe(false);
     expect(shouldImmediateApplyConfigPath("context_compression")).toBe(false);

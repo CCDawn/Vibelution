@@ -47,7 +47,6 @@ class CompressionConfig:
     level: CompressionLevel
     summary_max_chars: int
     keep_ai_messages: int
-    keep_tool_results: bool = True
     extract_key_decisions: bool = True
     preserve_errors: bool = True
     preserve_system_prompt: bool = True
@@ -145,7 +144,6 @@ class CompressionStrategy:
             level=level,
             summary_max_chars=self._summary_chars.get(level, 1000),
             keep_ai_messages=self._keep_ai_messages.get(level, 3),
-            keep_tool_results=True,
             extract_key_decisions=self._extract_key_decisions and level in (CompressionLevel.STANDARD, CompressionLevel.DEEP),
             preserve_errors=self._preserve_errors,
             preserve_system_prompt=True,

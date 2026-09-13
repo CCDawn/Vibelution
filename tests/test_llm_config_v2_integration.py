@@ -101,6 +101,9 @@ def test_alias_is_read_only_and_new_writes_are_canonical() -> None:
 def test_v1_fixture_is_not_runtime_readable_and_migration_preview_is_write_free(tmp_path) -> None:
     source = _fixture("llm_schema_v1_inline.toml")
     before = copy.deepcopy(source)
+    # conftest 的 runtime-manager 隔离 fixture 会在 tmp_path 预建
+    # .runtime/runtime-manager，因此以调用前快照为基线断言 preview 不新增条目。
+    baseline_entries = sorted(str(path) for path in tmp_path.rglob("*"))
     with pytest.raises(ValueError, match="schema v2"):
         config_settings.normalize_public_config_dict(source)
     preview = preview_v1_to_v2(source, project_root=tmp_path)
@@ -108,7 +111,7 @@ def test_v1_fixture_is_not_runtime_readable_and_migration_preview_is_write_free(
     assert preview.proposed_public_config["llm"]["schema_version"] == 2
     assert preview.model_ref_map["relay_text"].endswith("/gpt-5.6-luna")
     assert source == before
-    assert list(tmp_path.rglob("*")) == []
+    assert sorted(str(path) for path in tmp_path.rglob("*")) == baseline_entries
     effective = build_effective_config(source)
     assert source == before
     assert effective.llm.schema_version == 2

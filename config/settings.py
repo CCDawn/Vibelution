@@ -690,7 +690,7 @@ def normalize_public_config_dict(config: Dict[str, Any]) -> Dict[str, Any]:
             raise ValueError(
                 "Legacy [llm] config keys are no longer supported: "
                 + ", ".join(found_legacy)
-                + ". Use [llm.profiles.<id>.provider] / [llm.model_library.<id>.provider] / [llm.discovery]."
+                + ". Use [llm.profiles.<id>.provider] / [llm.model_library.<id>.provider] / per-provider [llm.providers.<id>.discovery]."
             )
         if "role_bindings" in llm_section:
             raise ValueError("llm.role_bindings is not a runtime field; upgrade persisted config first")
@@ -698,6 +698,8 @@ def normalize_public_config_dict(config: Dict[str, Any]) -> Dict[str, Any]:
             "schema_version",
             "providers",
             "profiles",
+            # 旧版全局 [llm.discovery] 段已移除，仅保留容忍以免旧配置启动失败；
+            # 真实发现开关是 per-provider [llm.providers.<id>.discovery] 与 profile.discovery_enabled。
             "discovery",
             "model_library",
             "model_aliases",
@@ -707,7 +709,7 @@ def normalize_public_config_dict(config: Dict[str, Any]) -> Dict[str, Any]:
             raise ValueError(
                 "Unsupported [llm] config keys: "
                 + ", ".join(unknown_llm_keys)
-                + ". Use [llm.profiles.<id>] / [llm.model_library.<id>] / [llm.discovery]."
+                + ". Use [llm.profiles.<id>] / [llm.model_library.<id>] / per-provider [llm.providers.<id>.discovery]."
             )
         schema_version = int(llm_section.get("schema_version") or 2)
         if schema_version != 2:
@@ -1028,7 +1030,6 @@ class ConfigLoader:
 
             # === 压缩保留策略 ===
             f"{prefix}COMPRESSION_KEEP_AI_MESSAGES": "context_compression.preservation.keep_ai_messages",
-            f"{prefix}COMPRESSION_KEEP_TOOL_RESULTS": "context_compression.preservation.keep_tool_results",
             f"{prefix}COMPRESSION_PRESERVE_ERRORS": "context_compression.preservation.preserve_errors",
             f"{prefix}COMPRESSION_EXTRACT_KEY_DECISIONS": "context_compression.preservation.extract_key_decisions",
 
@@ -1036,8 +1037,6 @@ class ConfigLoader:
             f"{prefix}TOOLS_FILE_EDIT_ENABLED": "tools.file.edit_enabled",
             f"{prefix}TOOLS_FILE_CREATE_ENABLED": "tools.file.create_enabled",
             f"{prefix}TOOLS_FILE_SYNTAX_CHECK_ENABLED": "tools.file.syntax_check_enabled",
-            f"{prefix}TOOLS_FILE_MAX_READ_LINES": "tools.file.max_read_lines",
-            f"{prefix}TOOLS_FILE_MAX_READ_CHARS": "tools.file.max_read_chars",
 
             # === Shell 工具配置 ===
             f"{prefix}TOOLS_SHELL_ENABLED": "tools.shell.enabled",
@@ -1121,7 +1120,6 @@ class ConfigLoader:
 
             # === UI 配置 ===
             f"{prefix}UI_LANGUAGE": "ui.language",
-            f"{prefix}UI_THEME": "ui.theme",
             f"{prefix}UI_MAX_LOG_ENTRIES": "ui.max_log_entries",
             f"{prefix}UI_REFRESH_RATE": "ui.refresh_rate",
             f"{prefix}UI_SHOW_ASCII_ART": "ui.show_ascii_art",
@@ -1130,18 +1128,15 @@ class ConfigLoader:
             # === 调试配置 ===
             f"{prefix}DEBUG_ENABLED": "debug.enabled",
             f"{prefix}DEBUG_VERBOSE": "debug.verbose",
-            f"{prefix}DEBUG_TRACE_LLM": "debug.trace_llm",
-            f"{prefix}DEBUG_TRACE_TOOLS": "debug.trace_tools",
             f"{prefix}DEBUG_TRACK_TOKEN_USAGE": "debug.track_token_usage",
 
         }
 
         # 布尔类型配置项
         bool_keys = {
-            "llm.discovery.enabled", "llm.discovery.auto_adjust",
             "agent.auto_backup", "agent.exploration_mode",
             "agent.modes.chat_enabled", "agent.modes.self_evolution_enabled", "agent.modes.supervised_evolution_enabled",
-            "context_compression.enabled", "context_compression.preservation.keep_tool_results",
+            "context_compression.enabled",
             "context_compression.preservation.preserve_errors", "context_compression.preservation.extract_key_decisions",
             "tools.file.edit_enabled", "tools.file.create_enabled", "tools.file.syntax_check_enabled",
             "tools.shell.enabled", "tools.shell.safety_check", "tools.shell.dangerous_pattern_check",
@@ -1155,12 +1150,11 @@ class ConfigLoader:
             "evolution.chat_dataset.exclude_pure_chitchat",
             "strategy.learning_enabled",
             "ui.show_ascii_art", "ui.show_welcome",
-            "debug.enabled", "debug.verbose", "debug.trace_llm", "debug.trace_tools", "debug.track_token_usage",
+            "debug.enabled", "debug.verbose", "debug.track_token_usage",
         }
 
         # 浮点类型配置项
         float_keys = {
-            "llm.discovery.output_reserve_ratio",
             "context_compression.compression_temperature", "context_compression.effectiveness_threshold",
             "context_compression.levels.light", "context_compression.levels.standard",
             "context_compression.levels.deep", "context_compression.levels.emergency",
@@ -1178,8 +1172,8 @@ class ConfigLoader:
             "min_turns", "max_turns",
             "max_retries", "max_token_limit",
             "keep_recent_steps", "summary_max_chars",
-            "max_compressions_per_session", "max_read_lines",
-            "max_read_chars", "default_timeout", "max_output_length",
+            "max_compressions_per_session",
+            "default_timeout", "max_output_length",
             "max_file_size", "max_matches_per_file", "max_results",
             "context_lines", "max_search_results", "search_timeout",
             "backup_count", "max_entries",

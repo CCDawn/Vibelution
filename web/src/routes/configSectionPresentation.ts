@@ -37,7 +37,6 @@ const CONTEXT_COMPRESSION_COMMON_PATHS = [
 ] as const;
 
 const UI_COMMON_PATHS = [
-  "ui.theme",
   "ui.workbench_theme",
 ] as const;
 
@@ -61,12 +60,6 @@ const LOG_COMMON_PATHS = [
 const DEBUG_COMMON_PATHS = [
   "debug.enabled",
   "debug.track_token_usage",
-] as const;
-
-const LLM_DISCOVERY_COMMON_PATHS = [
-  "llm.discovery.enabled",
-  "llm.discovery.timeout",
-  "llm.discovery.auto_adjust",
 ] as const;
 
 const ANALYSIS_COMMON_PATHS = [
@@ -136,12 +129,12 @@ const SECTION_PRESENTATION: Record<
     },
     ui: {
       sectionTitle: "界面外观",
-      sectionSummary: "先调整配色和工作台背景；终端显示与刷新参数按需展开。",
+      sectionSummary: "先调整工作台背景；终端显示与刷新参数按需展开。",
       layout: "compact_paths",
       commonPaths: UI_COMMON_PATHS,
       commonFieldCount: 3,
       commonTitle: "外观快速设置",
-      commonHint: "设置配色和工作台背景；语言与启动设置由 Launcher 维护。",
+      commonHint: "设置工作台背景；语言与启动设置由 Launcher 维护。",
       advancedTitle: "终端显示与刷新（高级）",
       advancedHint: "ASCII、欢迎内容、刷新频率和日志容量通常保持默认。",
       advancedCountLabel: (count) => `${count} 项`,
@@ -180,16 +173,6 @@ const SECTION_PRESENTATION: Record<
       commonHint: "调试总开关与 Token 用量记录是最常用的两项。",
       advancedTitle: "高级设置",
       advancedHint: "详细输出、LLM 和工具追踪会增加日志量，按需开启。",
-      advancedCountLabel: (count) => `${count} 项`,
-    },
-    "llm-discovery": {
-      sectionTitle: "模型发现",
-      sectionSummary: "控制工作台如何发现模型，以及无法读取模型限制时使用的回退值。",
-      commonPaths: LLM_DISCOVERY_COMMON_PATHS,
-      commonTitle: "常用设置",
-      commonHint: "日常只需决定是否启用、等待多久以及是否自动适配模型限制。",
-      advancedTitle: "回退参数",
-      advancedHint: "只有发现结果不准确时，才需要调整令牌上限和输出预留比例。",
       advancedCountLabel: (count) => `${count} 项`,
     },
     analysis: {
@@ -269,12 +252,12 @@ const SECTION_PRESENTATION: Record<
     },
     ui: {
       sectionTitle: "Interface appearance",
-      sectionSummary: "Adjust colors and the workbench background first; expand terminal display and refresh behavior only when needed.",
+      sectionSummary: "Adjust the workbench background first; expand terminal display and refresh behavior only when needed.",
       layout: "compact_paths",
       commonPaths: UI_COMMON_PATHS,
       commonFieldCount: 3,
       commonTitle: "Appearance quick setup",
-      commonHint: "Set colors and the workbench background. Language and startup settings stay in Launcher.",
+      commonHint: "Set the workbench background. Language and startup settings stay in Launcher.",
       advancedTitle: "Terminal display and refresh (advanced)",
       advancedHint: "ASCII, welcome content, refresh cadence, and log capacity usually keep their defaults.",
       advancedCountLabel: (count) => `${count} fields`,
@@ -315,16 +298,6 @@ const SECTION_PRESENTATION: Record<
       advancedHint: "Verbose, LLM, and tool tracing increase log volume and should be enabled only when needed.",
       advancedCountLabel: (count) => `${count} fields`,
     },
-    "llm-discovery": {
-      sectionTitle: "Model discovery",
-      sectionSummary: "Control model discovery and the fallback limits used when a provider cannot report them.",
-      commonPaths: LLM_DISCOVERY_COMMON_PATHS,
-      commonTitle: "Common settings",
-      commonHint: "Choose whether to discover models, how long to wait, and whether limits adjust automatically.",
-      advancedTitle: "Fallback parameters",
-      advancedHint: "Adjust token limits and output reserve only when discovery results are incomplete.",
-      advancedCountLabel: (count) => `${count} fields`,
-    },
     analysis: {
       sectionTitle: "Analysis data paths (advanced)",
       sectionSummary: "Change these only when customizing the workspace storage layout; the defaults are ready to use.",
@@ -362,7 +335,6 @@ const SECTION_PRESENTATION: Record<
 
 const ZH_FIELD_COPY: Record<string, ConfigFieldPresentationCopy> = {
   "ui.language": { label: "界面语言", hint: "切换工作台界面使用的语言。" },
-  "ui.theme": { label: "配色主题", hint: "选择工作台的基础配色方案。" },
   "ui.max_log_entries": { label: "界面日志保留条数", hint: "限制工作台内存中保留的日志条目数量。" },
   "ui.refresh_rate": { label: "界面刷新频率", hint: "控制终端工作台刷新状态的频率。" },
   "ui.show_ascii_art": { label: "显示 ASCII 图案", hint: "在支持的终端界面显示启动图案。" },
@@ -403,15 +375,7 @@ const ZH_FIELD_COPY: Record<string, ConfigFieldPresentationCopy> = {
   "log.third_party.rich": { label: "Rich 日志级别" },
   "debug.enabled": { label: "启用调试模式", hint: "开启额外的调试信息记录。" },
   "debug.verbose": { label: "输出详细调试信息", hint: "记录更详细的调试过程，会增加日志量。" },
-  "debug.trace_llm": { label: "追踪 LLM 调用", hint: "记录模型调用阶段与结果状态，不记录密钥。" },
-  "debug.trace_tools": { label: "追踪工具调用", hint: "记录工具执行阶段与结果状态。" },
   "debug.track_token_usage": { label: "记录 Token 用量", hint: "统计模型调用消耗的 Token 数量。" },
-  "llm.discovery.enabled": { label: "启用自动发现", hint: "连接服务商后自动读取可用模型列表。" },
-  "llm.discovery.timeout": { label: "发现等待时间（秒）", hint: "服务商响应超过该时间后停止本次发现。" },
-  "llm.discovery.auto_adjust": { label: "自动适配模型限制", hint: "发现模型能力后自动校正上下文与输出上限。" },
-  "llm.discovery.fallback_max_tokens": { label: "默认输出上限", hint: "无法读取模型输出上限时使用的保守值。" },
-  "llm.discovery.fallback_max_token_limit": { label: "默认上下文上限", hint: "无法读取模型上下文窗口时使用的保守值。" },
-  "llm.discovery.output_reserve_ratio": { label: "输出预留比例", hint: "从上下文窗口中为模型回复预留的比例。" },
   "analysis.data_dir": { label: "分析数据目录", hint: "保存分析结果和统计数据的工作区目录。" },
   "analysis.feedback_dir": { label: "反馈数据目录", hint: "保存人工反馈与评估反馈的工作区目录。" },
   "analysis.knowledge_graph_path": { label: "知识图谱文件", hint: "分析流程读取和更新知识图谱的文件路径。" },
@@ -489,14 +453,12 @@ const ZH_FIELD_COPY: Record<string, ConfigFieldPresentationCopy> = {
   "context_compression.summary_chars.emergency": { label: "紧急摘要字符数", hint: "紧急压缩生成的目标摘要长度。" },
   "context_compression.preservation": { label: "内容保留策略", hint: "指定压缩时必须保留的消息与关键信息。" },
   "context_compression.preservation.keep_ai_messages": { label: "保留 AI 消息数", hint: "压缩后仍完整保留的最近 AI 消息数量。" },
-  "context_compression.preservation.keep_tool_results": { label: "保留工具结果", hint: "压缩时保留工具调用结果。" },
   "context_compression.preservation.preserve_errors": { label: "保留错误信息", hint: "压缩时保留错误与失败上下文。" },
   "context_compression.preservation.extract_key_decisions": { label: "提取关键决策", hint: "把重要决策提取到压缩摘要中。" },
 };
 
 const EN_FIELD_COPY: Record<string, ConfigFieldPresentationCopy> = {
   "ui.language": { label: "Interface language" },
-  "ui.theme": { label: "Color theme" },
   "ui.show_ascii_art": { label: "Show ASCII artwork" },
   "ui.show_welcome": { label: "Show welcome panel" },
   "security.enabled": { label: "Enable security limits" },
@@ -509,12 +471,6 @@ const EN_FIELD_COPY: Record<string, ConfigFieldPresentationCopy> = {
   "log.detailed_traceback": { label: "Detailed traceback" },
   "debug.enabled": { label: "Enable debug mode" },
   "debug.track_token_usage": { label: "Track token usage" },
-  "llm.discovery.enabled": { label: "Enable automatic discovery", hint: "Load available models after connecting a provider." },
-  "llm.discovery.timeout": { label: "Discovery timeout", hint: "Stop the discovery request after this many seconds." },
-  "llm.discovery.auto_adjust": { label: "Adjust model limits automatically", hint: "Update context and output limits from discovered capabilities." },
-  "llm.discovery.fallback_max_tokens": { label: "Default output limit", hint: "Used when the provider does not report an output limit." },
-  "llm.discovery.fallback_max_token_limit": { label: "Default context limit", hint: "Used when the provider does not report a context window." },
-  "llm.discovery.output_reserve_ratio": { label: "Output reserve ratio", hint: "Reserve this share of the context window for the model response." },
   "analysis.data_dir": { label: "Analysis data directory", hint: "Workspace directory for analysis results and statistics." },
   "analysis.feedback_dir": { label: "Feedback data directory", hint: "Workspace directory for human and evaluation feedback." },
   "analysis.knowledge_graph_path": { label: "Knowledge graph file", hint: "File read and updated by the analysis knowledge graph flow." },
