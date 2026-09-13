@@ -3622,9 +3622,10 @@ class LLMClient:
             operator_binding = parse_operator_invocation_binding(raw["operatorInvocationBinding"])
             binding = operator_binding.model_dump(mode="json")
             knowledge = binding.get("accountingKind") == "operator_knowledge"
+            planning = binding.get("accountingKind") == "operator_planning"
             binding.update({"questionId": "OPERATOR-SOFTMAX", "questionRunId": binding["workflowRunId"],
-                "outcomeKinds": ["source_evidence" if knowledge else "optimization_hypothesis"],
-                "mappingPolicyId": "operator-knowledge-v1" if knowledge else "operator-discussion-v1"})
+                "outcomeKinds": ["source_evidence" if knowledge else "optimization_plan" if planning else "optimization_hypothesis"],
+                "mappingPolicyId": "operator-knowledge-v1" if knowledge else "operator-planning-v1" if planning else "operator-discussion-v1"})
         elif isinstance(binding_payload, Mapping):
             try:
                 from core.research.workflow.contracts.question_stage_binding import (
@@ -4100,9 +4101,12 @@ class LLMClient:
                         "researchProjectId", "optimizationCampaignId", "roundId", "parentRunId",
                         "parentNodeRunId", "knowledgeInvocationId", "requestHash")}
                         if binding.get("accountingKind") == "operator_knowledge" else {}),
+                    **({key: str(binding[key]) for key in ("accountingKind", "teamId", "researchProjectId",
+                        "optimizationCampaignId", "roundId", "inputHash")}
+                        if binding.get("accountingKind") == "operator_planning" else {}),
                     **({key: str(binding[key]) for key in ("teamId", "researchProjectId",
                         "optimizationCampaignId", "roundId", "participantId")}
-                        if binding.get("workflowId") == "operator-optimization" else {}),
+                        if binding.get("workflowId") == "operator-optimization" and binding.get("accountingKind") != "operator_planning" else {}),
                     "questionId": binding["questionId"],
                     "runId": context["receiptRunId"],
                     "taskId": binding["taskId"],

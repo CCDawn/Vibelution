@@ -378,6 +378,11 @@ class RealDomainPorts:
     def reserve_budget(
         self, *, action: PendingAction, estimate_tokens: int
     ) -> dict[str, Any]:
+        if action.node_id == "optimization_plan":
+            from ..operator_optimization.planning_authority import prepare_planning_task, reserve_planning_budget
+
+            task = prepare_planning_task(self._store, action, self.resolve_binding(action).agent_id)
+            return reserve_planning_budget(self._store, task)
         if action.node_id == "optimization_discussion":
             from ..operator_optimization.discussion_authority import build_operator_meeting_authority
             from ..operator_optimization.discussion_budget_runtime import reserve_discussion_budget
@@ -860,6 +865,13 @@ class RealDomainPorts:
         adapter_spec = resolve_agent_task_adapter(action.node_id)
         if adapter_spec is None:
             raise RuntimeError(f"agent node {action.node_id} has no task adapter")
+        if adapter_spec.family == "operator_planning":
+            from ..operator_optimization.planning_task import create_planning_task
+
+            binding = self.resolve_binding(action)
+            handle = create_planning_task(self._store, action, binding.agent_id)
+            publish_agent_task_started_anchor(self._store, action=action, binding=binding, handle=handle)
+            return handle
         if adapter_spec.family == "operator_discussion":
             from ..operator_optimization.discussion_task import create_discussion_task
 
@@ -966,6 +978,10 @@ class RealDomainPorts:
     ) -> list[dict[str, str]] | AgentTurnResult:
         from .agent_turn_completion import complete_agent_turn_outputs
 
+        if action.node_id == "optimization_plan":
+            from ..operator_optimization.planning_task import execute_planning_task
+
+            return execute_planning_task(self._store, action, handle)
         if action.node_id == "optimization_discussion":
             from ..operator_optimization.discussion_task import execute_discussion_task
 

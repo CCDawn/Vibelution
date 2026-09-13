@@ -295,14 +295,14 @@ def _spec(
 
     if budget_kind is None:
         budget_kind = "knowledge" if knowledge_budget is not None else "discussion"
-    if budget_kind not in {"discussion", "knowledge"}:
+    if budget_kind not in {"discussion", "knowledge", "planning"}:
         raise ModelBudgetError("operator model budget kind is invalid", code="operator_model_budget_invalid")
 
     if campaign_budget is not None:
         if budget_kind == "knowledge":
             if knowledge_budget is None:
                 knowledge_budget = _campaign_value(campaign_budget, "knowledge")
-        elif discussion_budget is None:
+        elif budget_kind == "discussion" and discussion_budget is None:
             discussion_budget = _campaign_value(campaign_budget, "discussion")
         if model_cost_limit is None:
             model_cost_limit = _campaign_value(campaign_budget, "modelCostLimit")
@@ -313,7 +313,11 @@ def _spec(
             if raw_authorized is not None:
                 authorized = bool(raw_authorized)
 
-    if budget_kind == "knowledge":
+    if budget_kind == "planning":
+        if discussion_budget is not None or knowledge_budget is not None:
+            raise ModelBudgetError("planning requires its own campaign call budget", code="operator_model_budget_contract_conflict")
+        budget = _call_budget(_campaign_value(campaign_budget, "planning") if campaign_budget is not None else None, kind="planning")
+    elif budget_kind == "knowledge":
         if discussion_budget is not None:
             raise ModelBudgetError("knowledge budget cannot use discussion budget", code="operator_model_budget_contract_conflict")
         budget = _call_budget(knowledge_budget, kind="knowledge")

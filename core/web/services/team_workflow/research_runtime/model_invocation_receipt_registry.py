@@ -160,7 +160,7 @@ def _outcome_kinds(receipt: ModelInvocationReceipt) -> tuple[str, ...]:
             if str(item or "").strip()
         )
     )
-    allowed = (frozenset({"optimization_hypothesis"})
+    allowed = (frozenset({"optimization_plan"}) if receipt.scope.get("accountingKind") == "operator_planning" else frozenset({"optimization_hypothesis"})
         if receipt.scope.get("workflowId") == "operator-optimization" else ALLOWED_OUTCOME_KINDS)
     if not values or any(item not in allowed for item in values):
         raise ValueError("model invocation receipt outcomeKinds are invalid")
@@ -188,7 +188,9 @@ def _validate_receipt(
     if operator:
         from core.research.operator_optimization.discussion_contracts import OperatorInvocationBinding
         from core.research.operator_optimization.knowledge_invocation import OperatorKnowledgeInvocationBinding
-        contract = OperatorKnowledgeInvocationBinding if knowledge else OperatorInvocationBinding
+        from core.research.operator_optimization.planning_invocation import OperatorPlanningInvocationBinding
+        contract = (OperatorKnowledgeInvocationBinding if knowledge else
+            OperatorPlanningInvocationBinding if receipt.scope.get("accountingKind") == "operator_planning" else OperatorInvocationBinding)
         fields = contract.model_fields
         binding = {key: receipt.scope[key] for key in fields if key in receipt.scope}
         binding["formalNodeAttempt"] = int(binding.get("formalNodeAttempt", 0))

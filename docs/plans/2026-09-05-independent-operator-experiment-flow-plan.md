@@ -904,3 +904,26 @@ Chat Room 的专属结构化输出应复用现有 `set_turn_structured_output_co
 ### 24.3 原生任务接入仍需完成
 
 下一批须创建真实规划 Session/Task/Turn，增加显式 planning 模型预算与独立 invocation binding，并完成 receipt 的构造、持久交付、结算和同 action 恢复后，才调用本节服务并解除 readiness 阻断。检查发现 `core/llm/client.py` 与 receipt registry 当前把 operator workflow 默认视为讨论并要求 `participantId`，规划接入必须按真实单任务身份扩展，不能冒充会议 speaker。费用未知、回执未交付或来源已撤销时不得完成节点。受管候选物化服务本身不证明调用来源、支付授权或执行成功。
+
+## 25. 原生规划 Agent 与回执闭合（2026-09-13）
+
+本批接通第 24 节的原生任务入口；第 24 节所述未接入状态是上一批历史。当前支持从已选假设和补齐资料创建规划 Session，再回收受管候选与冻结计划；仍不代表生产模型或 GPU 科研闭环已经验收。
+
+### 25.1 身份、预算与恢复
+
+- `planning_authority.py` 将任务绑定保存在真实 Ledger run 的 `operatorPlanningTasks` 中，校验冻结 Agent、真实节点 attempt、活动授权、来源指纹、模型路由和价格。`CampaignBudget.planning` 是独立调用预算，复用现有预算预留与结算，不借用讨论或知识搜集额度。
+- `planning_task.py` 复用原生项目会话 resolver 和 Session submit。Task ID 作为提交标识，Turn ID 由原生 Session 生成；提交成功但尚未绑定 Turn 时，从 Journal 中核对提交标识与 prompt hash 找回原 Turn，避免重复调用。
+- 正式重试要求前任 Session 终态，创建关联前任的新 Session。普通断点恢复继续原任务，不能把重试和恢复混为一谈。
+- 规划 worker 只根据已提供的来源输入输出规范 JSON，关闭工具执行；候选物化、协议验证和 GPU 执行仍由各自服务负责。专属模型调用身份不包含讨论 speaker 的 participantId，普通搜集和讨论保持原计费契约。
+
+### 25.2 完成判定与复用
+
+原生 Turn 仍在运行时复用 `TurnNotReadyError`；Turn 成功结束但回执未交付时复用 `CompletionDependencyPending` 和既有完成恢复机制。只有 Journal 成功终态、回执成功交付、费用已知且结算，以及规范输出 hash 与真实模型回执匹配后，才调用第 24 节物化服务。来源撤销、费用未知或输出被替换均不得冻结计划。
+
+Readiness 删除固定的“未实现”阻断，改为显式 planning 预算与规范来源输入检查，保留原有活动授权等条件。本地复用评估采用现有 Session Journal、项目会话 resolver、model_budget、receipt persistence、completion dependency 和 planning_output；沿用既有 RD-Agent 职责分离调研，不增加编排框架或第二份会话账本。
+
+### 25.3 验收与下一步
+
+`tests/test_operator_native_plan.py` 使用真实 Session 提交、Journal、SQLite Ledger、受控 LLMClient provider 与回执交付 worker，覆盖中断恢复、提交竞态、正式重试、独立预算、错误身份与被替换输出拒绝。真实 `AgentActionAdapter` / `RealDomainPorts` 测试验证执行等待、完成回执等待、恢复不创建新任务以及规范产物回读。相关知识搜集和讨论预算/回执测试验证共享调用面的回归。
+
+未调用生产模型、真实外部检索或 GPU，也未进行产品页面闭环验收。下一步继续受管候选执行、评价、反馈与下一轮衔接，随后在显式实验预算下验收一轮真实实验。由于修改 Session worker 和 LLM 调用链，真实产品验收前需要受管刷新运行时；本批不启动或重启产品，不涉及发布版本变更。
