@@ -21,6 +21,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from ..agent_config_authority import (
+    AGENT_CONFIG_SCHEMA_VERSION,
+    materialize_agent_config_identity,
+)
+
 # _workspace_path / load_state 进程内缓存：
 # - _workspace_path 以 (路由根, parts, intent, seed) 为 key，以
 #   developer_sandbox.workspace_routing_fingerprint（配置/活跃沙箱/环境变量签名）
@@ -1135,8 +1140,12 @@ def _migrate_agent_llm_bindings_to_new_design(agent: dict[str, Any]) -> dict[str
     before = s.normalize_agent_llm_bindings(agent.get("llmBindings"))
     after = dict(before)
     migrated = False
-    if not str(after.get(s.DEFAULT_AGENT_LLM_SLOT, {}).get("modelId") or "").strip():
-        model_id = s._profile_id_to_model_id(old_profile_id or old_template_id)
+    legacy_source_id = old_profile_id or old_template_id
+    if (
+        legacy_source_id
+        and not str(after.get(s.DEFAULT_AGENT_LLM_SLOT, {}).get("modelId") or "").strip()
+    ):
+        model_id = s._profile_id_to_model_id(legacy_source_id)
         if model_id:
             after[s.DEFAULT_AGENT_LLM_SLOT] = {"modelId": model_id}
             migrated = True
@@ -1943,6 +1952,25 @@ def load_state() -> dict[str, Any]:
         return state
 
 
+def _has_established_config_identity(agent: dict[str, Any]) -> bool:
+    """Whether the Agent already carries a materialized config identity.
+
+    Legacy Agents (revision 0 before the v2 schema) intentionally keep their
+    revision-zero snapshot until the first canonical write migrates them, so
+    persistence and repair must not materialize identity for them.
+    """
+
+    try:
+        revision = int(agent.get("configRevision") or 0)
+    except (TypeError, ValueError):
+        revision = 0
+    try:
+        schema_version = int(agent.get("configSchemaVersion") or 0)
+    except (TypeError, ValueError):
+        schema_version = 0
+    return revision > 0 or schema_version >= AGENT_CONFIG_SCHEMA_VERSION
+
+
 def repair_agent_directory() -> dict[str, Any]:
     s = _service()
     with s._STATE_LOCK:
@@ -1967,6 +1995,7 @@ def repair_agent_directory() -> dict[str, Any]:
         profile_repaired_agents: list[dict[str, Any]] = []
         tool_policy_repaired_agents: list[tuple[dict[str, Any], dict[str, Any]]] = []
         retired_self_evolution_agents: list[dict[str, Any]] = []
+        identity_repaired_agents: list[dict[str, Any]] = []
         model_library_ids = s._configured_model_library_ids()
         used_agent_codes: set[str] = set()
         policies = s._memory_policies(state)
@@ -1980,6 +2009,9 @@ def repair_agent_directory() -> dict[str, Any]:
                 protected_code = s._normalize_agent_code(agent.get("agentCode"))
                 if protected_code:
                     used_agent_codes.add(protected_code)
+                if _has_established_config_identity(agent) and materialize_agent_config_identity(agent):
+                    identity_repaired_agents.append(dict(agent))
+                    changed = True
                 continue
             llm_migration = s._migrate_agent_llm_bindings_to_new_design(agent)
             if llm_migration.get("changed"):
@@ -2160,6 +2192,9 @@ def repair_agent_directory() -> dict[str, Any]:
                 normalized_tool_policies=normalized_tool_policies,
                 normalized_memory_policies=policies,
             )
+            if _has_established_config_identity(agent) and materialize_agent_config_identity(agent):
+                identity_repaired_agents.append(dict(agent))
+                changed = True
         state["memoryPolicies"] = policies
         if changed and s._agent_directory_storage_signature(state) != state_signature:
             s.save_state(state)
@@ -2183,12 +2218,37 @@ def repair_agent_directory() -> dict[str, Any]:
                 s._record_agent_territory_event("agent_territory.resolved", repaired_agent, outcome="repaired")
             for retired_agent in retired_self_evolution_agents:
                 s._record_agent_event("agent.self_evolution_retired_role.archived", retired_agent, lifecycle=True)
+            for repaired_agent in identity_repaired_agents:
+                s._record_agent_event("agent.config_identity_repaired", repaired_agent)
         return state
 
 
 def save_state(state: dict[str, Any]) -> dict[str, Any]:
+    """Persist the Agent registry through the canonical identity gate.
+
+    Every Agent dict with an established identity is normalized to its storage
+    shape and stamped via ``materialize_agent_config_identity`` before
+    serialization (schema version, canonical permission preset, recomputed
+    config hash). This is the single persistence choke point, so a writer that
+    bypasses the update helpers still cannot store a stale
+    configHash/configRevision pair. The gate never advances ``configRevision``
+    on its own: revision lineage belongs to the canonical write APIs, and
+    read-repair normalization must not invalidate a client CAS snapshot.
+    Legacy revision-zero Agents are left untouched so their first canonical
+    write keeps owning the migration.
+    """
+
     s = _service()
     with s._STATE_LOCK:
+        for agent in state.get("agents") or []:
+            if not isinstance(agent, dict):
+                continue
+            normalized = s._normalize_agent_record_for_storage(agent)
+            agent.clear()
+            agent.update(normalized)
+            if not _has_established_config_identity(agent):
+                continue
+            materialize_agent_config_identity(agent)
         payload = s._build_agent_registry_payload_for_storage(state)
         s._guard_against_suspicious_registry_shrink(payload)
         s._atomic_write_json(s.registry_path(), payload)

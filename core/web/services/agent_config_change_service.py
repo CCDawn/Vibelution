@@ -20,63 +20,28 @@ import copy
 from typing import Any
 
 from . import agent_directory_service
-from .agent_config_authority import normalize_permission_preset
+from .agent_config_authority import (
+    canonical_agent_config_payload,
+    normalize_permission_preset,
+)
 
 
 CHANGE_EVENT_FILE = "config_changes.jsonl"
 SCHEMA_VERSION = 2
 MAX_SUMMARY_LINES = 4
 MAX_SUMMARY_CHARS = 480
-ALLOWED_REASONING_EFFORTS = {"low", "medium", "high"}
 
 
 def config_snapshot_from_agent(agent: dict[str, Any] | None) -> dict[str, Any]:
-    """Return the non-secret fields edited by the Agent core-config surface."""
+    """Return the canonical non-secret config payload for one Agent.
 
-    payload = dict(agent or {})
-    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
-    return {
-        "displayName": str(payload.get("displayName") or "").strip(),
-        "llmBindings": agent_directory_service.normalize_agent_llm_bindings(
-            payload.get("llmBindings") if isinstance(payload.get("llmBindings"), dict) else {},
-        ),
-        "reasoningEffortBySlot": _normalize_reasoning_effort(
-            metadata.get("llmReasoningEffort") if isinstance(metadata, dict) else {},
-        ),
-        "promptTemplateId": str(payload.get("promptTemplateId") or "").strip(),
-        "toolPolicyId": str(payload.get("toolPolicyId") or "").strip(),
-        "toolPolicy": agent_directory_service.normalize_tool_policy(
-            payload.get("toolPolicy")
-            if isinstance(payload.get("toolPolicy"), dict)
-            else {},
-            str(payload.get("toolPolicyId") or "").strip(),
-        ),
-        "memoryPolicyId": str(payload.get("memoryPolicyId") or "").strip(),
-        "memoryPolicy": agent_directory_service.normalize_memory_policy(
-            payload.get("memoryPolicy")
-            if isinstance(payload.get("memoryPolicy"), dict)
-            else {},
-            str(payload.get("memoryPolicyId") or "").strip(),
-            str(payload.get("workspacePath") or "").strip(),
-        ),
-        "contextCompressionPolicy": agent_directory_service.normalize_agent_context_compression_policy(
-            payload.get("contextCompressionPolicy") if isinstance(payload.get("contextCompressionPolicy"), dict) else {},
-        ),
-        "delegationPolicy": agent_directory_service.normalize_delegation_policy(
-            metadata.get("delegationPolicy")
-            if isinstance(metadata.get("delegationPolicy"), dict)
-            else {},
-        ),
-        "supervisionPolicy": agent_directory_service.normalize_supervision_policy(
-            metadata.get("supervisionPolicy")
-            if isinstance(metadata.get("supervisionPolicy"), dict)
-            else {},
-        ),
-        "permissionPreset": normalize_permission_preset(
-            payload.get("permissionPreset"),
-        ),
-        "status": str(payload.get("status") or "active").strip() or "active",
-    }
+    Uses the single canonical definition in ``agent_config_authority`` so the
+    change channel and the compiled registry snapshot can never drift in field
+    coverage (persona/task profiles included) and the published-revision
+    comparison sees every canonical field.
+    """
+
+    return canonical_agent_config_payload(agent)
 
 
 def save_agent_config_draft(
@@ -130,7 +95,7 @@ def save_agent_config_draft(
             "snapshot": _normalize_snapshot(snapshot, fallback=agent),
         }
         draft["changedFields"] = _changed_fields(
-            config_snapshot_from_agent(agent),
+            _canonical_change_snapshot(agent),
             draft["snapshot"],
         )
         agent_directory_service._append_jsonl(path, draft)
@@ -175,8 +140,8 @@ def record_agent_config_revision(
     """Append one published revision after the canonical Agent write succeeds."""
 
     normalized_agent_id = _required_agent_id(agent_id)
-    before_snapshot = config_snapshot_from_agent(before)
-    after_snapshot = config_snapshot_from_agent(after)
+    before_snapshot = _canonical_change_snapshot(before)
+    after_snapshot = _canonical_change_snapshot(after)
     changed_fields = _changed_fields(before_snapshot, after_snapshot)
     if not changed_fields:
         return None
@@ -259,6 +224,17 @@ def _required_agent_id(agent_id: str) -> str:
     return normalized
 
 
+def _canonical_change_snapshot(agent: dict[str, Any] | None) -> dict[str, Any]:
+    """Canonical snapshot shape used for draft diffs and revision events.
+
+    Built from the single canonical payload definition (field coverage) and
+    passed through the change-domain normalizers so comparing a stored Agent
+    against a normalized candidate never reports untouched fields as changes.
+    """
+
+    return _normalize_snapshot({}, fallback=agent if isinstance(agent, dict) else {})
+
+
 def _normalize_snapshot(snapshot: dict[str, Any], *, fallback: dict[str, Any]) -> dict[str, Any]:
     candidate = snapshot if isinstance(snapshot, dict) else {}
     base = config_snapshot_from_agent(fallback)
@@ -303,6 +279,16 @@ def _normalize_snapshot(snapshot: dict[str, Any], *, fallback: dict[str, Any]) -
             if isinstance(candidate.get("supervisionPolicy"), dict)
             else base["supervisionPolicy"],
         ),
+        "personaProfile": agent_directory_service.normalize_persona_profile(
+            candidate.get("personaProfile")
+            if isinstance(candidate.get("personaProfile"), dict)
+            else base["personaProfile"],
+        ),
+        "taskProfile": agent_directory_service.normalize_task_profile(
+            candidate.get("taskProfile")
+            if isinstance(candidate.get("taskProfile"), dict)
+            else base["taskProfile"],
+        ),
         "permissionPreset": normalize_permission_preset(
             candidate.get("permissionPreset", base["permissionPreset"]),
         ),
@@ -316,7 +302,7 @@ def _normalize_reasoning_effort(value: Any) -> dict[str, str]:
     return {
         str(slot).strip()[:80]: str(effort).strip()
         for slot, effort in value.items()
-        if str(slot).strip() and str(effort).strip() in ALLOWED_REASONING_EFFORTS
+        if str(slot).strip() and str(effort).strip()
     }
 
 
@@ -340,7 +326,9 @@ def _normalize_source(value: str) -> str:
 
 
 def _changed_fields(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
-    return [key for key in before if before.get(key) != after.get(key)]
+    keys = list(before)
+    keys.extend(key for key in after if key not in before)
+    return [key for key in keys if before.get(key) != after.get(key)]
 
 
 def _fold_change_events(events: list[dict[str, Any]]) -> dict[str, Any]:
