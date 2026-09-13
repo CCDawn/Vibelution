@@ -143,7 +143,10 @@ def test_adapter_fails_route_without_switching_profiles_on_retryable_error():
             details={"attempt": 5, "max_attempts": 5, "retry_budget_exhausted": True},
         )
 
-    def plan_recovery(_error, **_kwargs):
+    seen_recovery_kwargs = []
+
+    def plan_recovery(_error, **kwargs):
+        seen_recovery_kwargs.append(set(kwargs))
         return SimpleNamespace(
             category="server_error",
             retryable=True,
@@ -192,6 +195,7 @@ def test_adapter_fails_route_without_switching_profiles_on_retryable_error():
     )
     result = invoke_agent_llm_turn(messages=[AIMessage(content="hello")], hooks=hooks)
     assert calls == ["primary"]
+    assert seen_recovery_kwargs == [{"attempt", "max_attempts"}]
     assert result.payload is None
     assert result.last_error_category == "server_error"
     assert result.last_failure_attempts == 5

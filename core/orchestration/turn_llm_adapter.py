@@ -520,13 +520,6 @@ def invoke_agent_llm_turn(
                 e,
                 attempt=reported_attempt,
                 max_attempts=reported_max_attempts,
-                config=hooks.config,
-                role="primary",
-                current_profile_id=getattr(
-                    llm_for_turn,
-                    "profile_id",
-                    getattr(hooks.base_llm, "profile_id", None),
-                ),
             )
             category = _coerce_text(recovery.category).strip()
             is_retryable = _coerce_bool(recovery.retryable, False)
