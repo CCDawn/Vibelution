@@ -608,7 +608,7 @@ def _maybe_wire_theme_campaign_activation(team_id: str, project: dict[str, Any])
 
 
 def get_research_project(team_id: str, project_id: str) -> dict[str, Any]:
-    team_service.get_team(team_id)
+    team_service.assert_team_exists(team_id)
     with _STORE_LOCK:
         store = _load_store(team_id)
         return dict(_project_payload(store, str(project_id or "").strip()))
