@@ -11,6 +11,7 @@ from .model_budget import admit_model_invocation, reserve_model_budget
 from .store import CampaignConflict, read_campaign
 
 SOURCE_NODES = {"source_finding", "source_extraction", "evidence_relations", "knowledge_ingestion"}
+ACTIVE_INVOCATION_STATUSES = {"pending", "child_created", "running", "awaiting_handoff"}
 
 
 def is_operator_knowledge_run(store, run_id):
@@ -52,12 +53,28 @@ def knowledge_lineage(repo, run_id, node_run_id):
     return run, parent, attempt, invocation, request
 
 
+def _parent_attempt_owns_active_child(repo, parent, invocation):
+    """The exact parent attempt may be finished while it waits on its child.
+
+    ``operator_knowledge_child_pending`` is a retryable parent-node outcome, so
+    the Ledger closes that attempt before the child sideflow finishes.  Child
+    retries remain part of the same invocation until a newer parent attempt
+    supersedes it.
+    """
+    latest_parent_attempt = repo.latest_attempt(parent.run_id, "optimization_knowledge")
+    return (
+        invocation is not None
+        and latest_parent_attempt is not None
+        and latest_parent_attempt.node_run_id == invocation.parent_node_run_id
+        and latest_parent_attempt.attempt == invocation.parent_attempt
+        and invocation.status in ACTIVE_INVOCATION_STATUSES
+    )
+
+
 def reserve_knowledge_budget(store, *, run_id, node_run_id):
     run, parent, attempt, invocation, request = store.read(lambda repo: knowledge_lineage(repo, run_id, node_run_id))
-    parent_attempt = store.read(lambda repo: repo.get_attempt(invocation.parent_node_run_id))
-    if (attempt.finished_at_ms is not None or parent_attempt is None
-            or parent_attempt.run_id != parent.run_id or parent_attempt.node_id != "optimization_knowledge"
-            or parent_attempt.attempt != invocation.parent_attempt or parent_attempt.finished_at_ms is not None
+    parent_owns_child = store.read(lambda repo: _parent_attempt_owns_active_child(repo, parent, invocation))
+    if (attempt.finished_at_ms is not None or not parent_owns_child
             or run.status in {"failed", "cancelled", "archived", "succeeded"}
             or parent.status in {"failed", "cancelled", "archived", "succeeded"}):
         raise CampaignConflict("Knowledge budget requires active parent and source attempts")
@@ -105,12 +122,11 @@ def knowledge_receipt_context(store, binding, *, expected_model_route):
             run = repo.get_run(binding.workflowRunId)
             parent = repo.get_run(binding.parentRunId)
             attempt = repo.get_attempt(binding.formalNodeRunId)
-            parent_attempt = repo.latest_attempt(binding.parentRunId, "optimization_knowledge")
+            invocation = repo.get_knowledge_invocation(binding.knowledgeInvocationId)
             latest = repo.latest_attempt(binding.workflowRunId, binding.formalNodeId)
             if (attempt.finished_at_ms is not None or run.status in {"failed", "cancelled", "archived", "succeeded"}
                     or latest is None or latest.node_run_id != binding.formalNodeRunId
-                    or parent_attempt is None or parent_attempt.node_run_id != binding.parentNodeRunId
-                    or parent_attempt.finished_at_ms is not None
+                    or not _parent_attempt_owns_active_child(repo, parent, invocation)
                     or parent.status in {"failed", "cancelled", "archived", "succeeded"}):
                 raise CampaignConflict("Knowledge source attempt is no longer active")
             return current

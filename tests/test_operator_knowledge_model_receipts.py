@@ -41,6 +41,7 @@ def child_case(tmp_path, monkeypatch):
     def seed(u):
         u.repository.insert_run(replace(build_run_record(run_id="parent1"), team_id="team1", project_id="project1",
             question_id="OPERATOR-SOFTMAX", workflow_id="operator-optimization", status="running",
+            active_node_id="optimization_knowledge",
             input_snapshot_json=json.dumps({"researchObjectiveContract": {"optimizationCampaignId": "campaign1", "roundId": "round1"}})))
         u.repository.insert_command(build_command_record(command_id="cmd1", run_id="parent1"))
         u.repository.insert_attempt(build_attempt_record("parent-node", run_id="parent1",
@@ -163,6 +164,60 @@ def test_real_domain_routes_child_to_campaign_reservation(child_case):
     assert first["optimizationCampaignId"] == "campaign1"
     assert first["tokenLimit"] == 2000
     assert second["idempotent"] is True
+
+
+def test_child_retry_keeps_budget_authority_after_parent_wait_attempt_finishes(child_case):
+    store, binding, _ = child_case
+
+    def seed_retry(uow):
+        uow.repository.update_attempt_status("parent-node", "failed", 20, finished_at_ms=20)
+        retry = build_attempt_record(
+            "child-source-retry",
+            run_id=binding.workflowRunId,
+            node_id="source_extraction",
+            attempt=1,
+            status="running",
+            command_id="cmd1",
+        )
+        uow.repository.insert_attempt(retry)
+
+    store.submit(seed_retry, force_flush=True).result()
+    retry_binding = binding.model_copy(update={
+        "formalNodeId": "source_extraction",
+        "formalNodeRunId": "child-source-retry",
+        "formalNodeAttempt": 1,
+    })
+
+    receipt, calls = invoke(context_for(store, retry_binding))
+
+    assert len(calls) == 1
+    assert receipt["scope"]["formalNodeRunId"] == "child-source-retry"
+
+
+def test_child_retry_loses_budget_authority_after_new_parent_attempt(child_case):
+    store, binding, _ = child_case
+
+    def seed_superseded_parent(uow):
+        parent = uow.repository.get_attempt("parent-node")
+        uow.repository.update_attempt_status("parent-node", "failed", 20, finished_at_ms=20)
+        uow.repository.insert_attempt(replace(parent, node_run_id="parent-retry", attempt=2))
+        uow.repository.insert_attempt(build_attempt_record(
+            "child-source-retry",
+            run_id=binding.workflowRunId,
+            node_id="source_extraction",
+            attempt=1,
+            status="running",
+            command_id="cmd1",
+        ))
+
+    store.submit(seed_superseded_parent, force_flush=True).result()
+
+    with pytest.raises(runtime.CampaignConflict, match="active parent"):
+        runtime.reserve_knowledge_budget(
+            store,
+            run_id=binding.workflowRunId,
+            node_run_id="child-source-retry",
+        )
 
 
 def test_operator_child_receipt_cannot_fall_back_to_generic_tokens(child_case):
