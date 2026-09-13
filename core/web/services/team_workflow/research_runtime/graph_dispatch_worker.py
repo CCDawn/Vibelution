@@ -2569,6 +2569,8 @@ def _terminal_facts_for_close(
     """
     if _is_sideflow_run(run):
         return "knowledge_sideflow", "knowledge_package_accepted"
+    if run.workflow_id == "operator-optimization":
+        return "operator_round_completed", "optimization_feedback_verified"
     return terminal_facts_for_run(run)
 
 
@@ -2586,6 +2588,8 @@ def _run_terminal_close_applies(
     """
     if _is_sideflow_run(run):
         return True
+    if run.workflow_id == "operator-optimization":
+        return str(node_id or "") == "optimization_feedback"
     return str(node_id or "") == "result_package"
 
 

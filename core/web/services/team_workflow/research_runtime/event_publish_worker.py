@@ -49,6 +49,9 @@ class EventPublishWorker:
     def _deliver_payload(self, payload: dict) -> dict:
         if self._deliver is not None:
             return self._deliver(payload)
+        if payload.get("eventType") == "operator_round_completed":
+            from ..operator_optimization.iteration import advance_iteration
+            return advance_iteration(self._store, payload, now_ms=self._now())
         from .knowledge_sideflow_service import absorb_knowledge_result
 
         return absorb_knowledge_result(

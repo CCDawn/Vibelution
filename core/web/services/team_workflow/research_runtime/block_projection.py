@@ -286,7 +286,10 @@ def sync_run_succeeded(
     # run close and worker pickup can never lose the orchestration.
     from .delivery_orchestration import enqueue_delivery_orchestration
 
-    if run.workflow_id != "operator-optimization-baseline":
+    if run.workflow_id == "operator-optimization":
+        from ..operator_optimization.iteration import enqueue_iteration
+        enqueue_iteration(uow, run=run, now_ms=now_ms)
+    elif run.workflow_id != "operator-optimization-baseline":
         enqueue_delivery_orchestration(uow, run=run, now_ms=now_ms)
     sequence = uow.repository.advance_last_sequence(run_id, 1, now_ms)
     if sequence is None:

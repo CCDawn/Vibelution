@@ -930,7 +930,9 @@ class AdapterDispatchWorker:
                 and action.node_id == "operator_baseline"
                 and not successors
             )
-            if successors or action.node_id == "result_package" or operator_baseline_terminal:
+            operator_round_terminal = (run.workflow_id == "operator-optimization"
+                and action.node_id == "optimization_feedback" and not successors)
+            if successors or action.node_id == "result_package" or operator_baseline_terminal or operator_round_terminal:
                 state_update = {"branch_decision": branch} if branch else {}
                 uow.repository.insert_outbox(
                     _resume_dispatch_record(
@@ -943,10 +945,11 @@ class AdapterDispatchWorker:
                         state_update=state_update or None,
                     )
                 )
-            if action.node_id == "result_package" or operator_baseline_terminal:
+            if action.node_id == "result_package" or operator_baseline_terminal or operator_round_terminal:
                 completion_kind, terminal_reason = (
                     ("baseline_measured", "baseline_measurement_verified")
-                    if operator_baseline_terminal else terminal_facts_for_run(run)
+                    if operator_baseline_terminal else ("operator_round_completed", "optimization_feedback_verified")
+                    if operator_round_terminal else terminal_facts_for_run(run)
                 )
                 sync_run_succeeded(
                     uow,
