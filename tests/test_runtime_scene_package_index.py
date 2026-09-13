@@ -14,6 +14,8 @@ def test_runtime_scene_jsonl_reader_reuses_cache_until_file_signature_changes(tm
         json.dumps({"event_code": "alpha", "fields": {"count": 1}}, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+    with runtime_scene_service._JSONL_FILE_CACHE_LOCK:
+        runtime_scene_service._JSONL_FILE_CACHE.clear()
     read_count = 0
     original_read_text = runtime_scene_service.Path.read_text
 
@@ -26,21 +28,24 @@ def test_runtime_scene_jsonl_reader_reuses_cache_until_file_signature_changes(tm
     monkeypatch.setattr(runtime_scene_service.Path, "read_text", counting_read_text)
 
     first = runtime_scene_service._read_jsonl_file(path)
-    first[0]["fields"]["count"] = 999
     second = runtime_scene_service._read_jsonl_file(path)
 
     assert read_count == 1
-    assert second[0]["event_code"] == "alpha"
-    assert second[0]["fields"]["count"] == 1
+    assert [row["event_code"] for row in second] == ["alpha"]
+    # One shared read-only snapshot per path: repeated reads reuse it instead of
+    # retaining a full row copy per file version.
+    assert len(runtime_scene_service._JSONL_FILE_CACHE) == 1
 
-    path.write_text(
-        json.dumps({"event_code": "beta", "fields": {"count": 2}}, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps({"event_code": "beta", "fields": {"count": 2}}, ensure_ascii=False) + "\n"
+        )
     third = runtime_scene_service._read_jsonl_file(path)
 
     assert read_count == 2
-    assert third[0]["event_code"] == "beta"
+    assert [row["event_code"] for row in third] == ["alpha", "beta"]
+    assert len(runtime_scene_service._JSONL_FILE_CACHE) == 1
+    assert [row["event_code"] for row in first] == ["alpha"]
 
 
 def test_runtime_scene_uses_active_launcher_reference_when_state_is_runtime_projection(tmp_path, monkeypatch):
