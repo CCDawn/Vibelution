@@ -186,3 +186,14 @@ def test_waiting_parent_can_extend_only_when_exact_child_is_stopped(activity, se
             extend(activity, c)
         ledger.submit(lambda uow: uow.repository.execute(f"UPDATE knowledge_invocations SET {field}=?", (getattr(invocation, field),)), force_flush=True).result()
     assert extend(activity, c).budget.modelCostLimit == 50
+
+
+def test_output_budget_increase_is_monotone_and_keeps_old_reservations(activity, setup):
+    c, _ = setup
+    old_limit = c.budget.discussion.maxOutputTokensPerCall
+    new = extend(activity, c, output_limits={"discussion": 16384})
+    assert new.budget.discussion.maxOutputTokensPerCall == 16384
+    assert new.modelBudgetRevisions[-1].previousBudget.discussion.maxOutputTokensPerCall == old_limit
+    assert extend(activity, c, output_limits={"discussion": 16384}) == new
+    with pytest.raises(ValueError):
+        extend(activity, new, output_limits={"discussion": old_limit}, command_key="lower-output")

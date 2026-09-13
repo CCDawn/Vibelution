@@ -11,13 +11,14 @@ from .store import CampaignConflict, _service, update_campaign
 
 
 def extend_model_budget(team_id, project_id, campaign_id, *, expected_version,
-                        command_key, model_cost_limit, token_limits, call_limits=None):
+                        command_key, model_cost_limit, token_limits, call_limits=None, output_limits=None):
     operator = require_privileged_server_operator(command="extend_budget")
     amount = Decimal(str(model_cost_limit))
     if not amount.is_finite() or amount <= 0:
         raise ValueError("A finite positive model cost limit is required")
     call_limits = dict(call_limits or {})
-    if (set(token_limits) | set(call_limits)) - {"discussion", "knowledge", "planning"}:
+    output_limits = dict(output_limits or {})
+    if (set(token_limits) | set(call_limits) | set(output_limits)) - {"discussion", "knowledge", "planning"}:
         raise ValueError("Only model stage token and call limits can be increased")
 
     def increase(campaign):
@@ -60,12 +61,12 @@ def extend_model_budget(team_id, project_id, campaign_id, *, expected_version,
         if amount < Decimal(str(old.modelCostLimit)):
             raise ValueError("Model cost limit cannot be lowered")
         updates = {"modelCostLimit": float(amount)}
-        for stage in set(token_limits) | set(call_limits):
+        for stage in set(token_limits) | set(call_limits) | set(output_limits):
             policy = getattr(old, stage)
             if policy is None:
                 raise ValueError("Only an existing model stage budget can be increased")
             changes = {}
-            for field, values in (("tokenLimit", token_limits), ("maxCalls", call_limits)):
+            for field, values in (("tokenLimit", token_limits), ("maxCalls", call_limits), ("maxOutputTokensPerCall", output_limits)):
                 if stage not in values:
                     continue
                 value = values[stage]
@@ -85,7 +86,8 @@ def extend_model_budget(team_id, project_id, campaign_id, *, expected_version,
     return update_campaign(team_id, project_id, campaign_id, expected_version=expected_version,
         command_key=command_key, command={"action": "extend_model_budget", "operatorId": operator.operator_id,
             "modelCostLimit": str(amount), "tokenLimits": token_limits,
-            **({"callLimits": call_limits} if call_limits else {})}, transform=increase)
+            **({"callLimits": call_limits} if call_limits else {}),
+            **({"outputLimits": output_limits} if output_limits else {})}, transform=increase)
 
 
 def authorized_model_limits(repo, *, run_id, campaign_id, currency):

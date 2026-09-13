@@ -46,6 +46,7 @@ class ModelBudgetExtendRequest(CampaignCommandRequest):
     modelCostLimit: float = Field(gt=0, allow_inf_nan=False)
     tokenLimits: dict[str, int] = Field(default_factory=dict)
     callLimits: dict[str, int] = Field(default_factory=dict)
+    outputLimits: dict[str, int] = Field(default_factory=dict)
 
 
 class CampaignListResponse(Contract):
@@ -161,6 +162,6 @@ def operator_model_budget_extend(team_id: str, project_id: str, campaign_id: str
         with server_operator_scope_from_http(request):
             return _invoke(extend_model_budget, team_id, project_id, campaign_id,
                 expected_version=payload.expectedCampaignVersion, command_key=payload.idempotencyKey,
-                model_cost_limit=payload.modelCostLimit, token_limits=payload.tokenLimits, call_limits=payload.callLimits)
+                model_cost_limit=payload.modelCostLimit, token_limits=payload.tokenLimits, call_limits=payload.callLimits, output_limits=payload.outputLimits)
     except PermissionError as exc:
         raise HTTPException(403, detail={"code": "command_forbidden"}) from exc

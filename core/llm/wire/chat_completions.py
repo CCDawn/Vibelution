@@ -513,7 +513,7 @@ class _ChatTurnAssembler:
             kind="incomplete",
             tool_calls=(),
             pending_tool_call_ids=(),
-            error=TOOL_ARGUMENTS_UNPARSABLE,
+            error=(OUTPUT_LENGTH_TRUNCATED if self._outcome.error == OUTPUT_LENGTH_TRUNCATED else TOOL_ARGUMENTS_UNPARSABLE),
         )
 
     def _delta(self, choice_index: int, delta: Mapping[str, Any]) -> list[LLMProtocolEvent]:
@@ -615,8 +615,8 @@ class _ChatTurnAssembler:
             emitted.extend(
                 self._terminal(
                     "incomplete",
-                    provider_event_type=TOOL_ARGUMENTS_UNPARSABLE,
-                    error=TOOL_ARGUMENTS_UNPARSABLE,
+                    provider_event_type=("chat.finish.length" if finish_reason == "length" else TOOL_ARGUMENTS_UNPARSABLE),
+                    error=(OUTPUT_LENGTH_TRUNCATED if finish_reason == "length" else TOOL_ARGUMENTS_UNPARSABLE),
                 )
             )
             return emitted

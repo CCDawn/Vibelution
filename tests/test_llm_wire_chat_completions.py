@@ -298,7 +298,7 @@ def test_chat_finish_length_with_truncated_call_stays_incomplete():
     tuple(decoded)
 
     assert decoded.outcome.kind == "incomplete"
-    assert decoded.outcome.error == "chat.finish.tool_arguments_unparsable"
+    assert decoded.outcome.error == OUTPUT_LENGTH_TRUNCATED
     assert decoded.outcome.tool_calls == ()
 
 
