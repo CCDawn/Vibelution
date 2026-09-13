@@ -321,24 +321,34 @@ const styles: Record<string, string> = {
     "vui-components-conversationview composerEditModePreview min-w-0 max-w-full truncate [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   composerEditModeWarning:
     "vui-components-conversationview composerEditModeWarning min-w-0 whitespace-normal break-words [font-size:var(--vui-font-xs)] font-semibold leading-[1.45] text-[var(--state-warning)] [overflow-wrap:anywhere]",
-  followupQueueStack:
-    "vui-components-conversationview followupQueueStack mb-2 grid min-w-0 w-full gap-2",
-  followupQueueBar:
-    "vui-components-conversationview followupQueueBar grid min-w-0 min-h-9 w-full max-w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_55%,transparent)] px-2 py-1.5 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)]",
-  followupQueueBarEditing:
-    "vui-components-conversationview followupQueueBarEditing border-[color-mix(in_srgb,var(--accent-cool)_34%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_7%,var(--vui-surface-panel))]",
-  followupQueueHandle:
-    "vui-components-conversationview followupQueueHandle shrink-0 cursor-grab text-[var(--fg-tertiary)] select-none",
-  followupQueueCopy:
-    "vui-components-conversationview followupQueueCopy grid min-w-0 items-center gap-0.5",
-  followupQueueLabel:
-    "vui-components-conversationview followupQueueLabel min-w-0 truncate font-semibold text-[var(--fg-secondary)]",
-  followupQueueText:
-    "vui-components-conversationview followupQueueText min-w-0 truncate text-[var(--fg-primary)]",
-  followupQueueEditor:
-    "vui-components-conversationview followupQueueEditor min-h-9 w-full resize-y border-0 bg-transparent p-0 text-[var(--fg-primary)] shadow-none",
-  followupQueueActions:
-    "vui-components-conversationview followupQueueActions flex shrink-0 items-center gap-1",
+  followupQueueTray:
+    "vui-components-conversationview followupQueueTray mb-1 grid min-w-0 gap-0.5",
+  followupQueueTrayBleed:
+    "vui-components-conversationview followupQueueTrayBleed -mx-3.5 -mt-2.5 rounded-t-[20px] border-b border-[color-mix(in_srgb,var(--border-hairline)_75%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_42%,transparent)] px-3.5 pb-1 pt-1.5",
+  followupQueueTrayInset:
+    "vui-components-conversationview followupQueueTrayInset rounded-[10px] border border-[color-mix(in_srgb,var(--vui-border-subtle)_75%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_42%,transparent)] px-2 pb-1 pt-1.5",
+  followupQueueHeader:
+    "vui-components-conversationview followupQueueHeader px-1.5 pb-0.5 pt-0.5 [font-size:var(--vui-font-2xs)] leading-tight text-[var(--fg-tertiary)]",
+  followupQueueRows:
+    "vui-components-conversationview followupQueueRows grid min-w-0 [&>*+*]:border-t [&>*+*]:border-[color-mix(in_srgb,var(--border-hairline)_55%,transparent)]",
+  followupQueueRow:
+    "vui-components-conversationview followupQueueRow group grid min-h-7 min-w-0 grid-cols-[14px_1.4ch_minmax(0,1fr)_auto] items-center gap-2 rounded-[6px] px-1.5 py-0.5 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] transition-colors duration-150 hover:bg-[var(--vui-row-hover-bg)] focus-within:bg-[var(--vui-row-hover-bg)]",
+  followupQueueRowEditing:
+    "vui-components-conversationview followupQueueRowEditing bg-[color-mix(in_srgb,var(--accent-cool)_6%,transparent)]",
+  followupQueueDrag:
+    "vui-components-conversationview followupQueueDrag grid shrink-0 cursor-grab place-items-center text-[var(--fg-tertiary)] opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100",
+  followupQueueIndex:
+    "vui-components-conversationview followupQueueIndex min-w-0 [font-size:var(--vui-font-2xs)] tabular-nums text-[var(--fg-tertiary)]",
+  followupQueueRowText:
+    "vui-components-conversationview followupQueueRowText min-w-0 truncate text-[var(--fg-secondary)] group-hover:text-[var(--fg-primary)] group-focus-within:text-[var(--fg-primary)]",
+  followupQueueRowActions:
+    "vui-components-conversationview followupQueueRowActions flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100",
+  followupQueueRowActionsEditing:
+    "vui-components-conversationview followupQueueRowActionsEditing opacity-100",
+  followupQueueEditInput:
+    "vui-components-conversationview followupQueueEditInput !h-6 !min-h-6 !rounded-none !border-0 !bg-transparent !px-0 !py-0 !shadow-none focus-visible:!ring-0 ![font-size:var(--vui-font-xs)]",
+  followupQueueMore:
+    "vui-components-conversationview followupQueueMore w-fit justify-self-start rounded-[6px] !min-h-0 !h-auto !bg-transparent !px-1.5 !py-0.5 text-left [font-size:var(--vui-font-2xs)] leading-tight !text-[var(--fg-tertiary)] hover:!bg-transparent hover:!text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)]",
   // Text + icon primary for edit/rerun — never compose with square composerRoundButton* slots.
   composerEditSubmitButton:
     "vui-components-conversationview composerEditSubmitButton !inline-flex !h-[var(--vui-control-height-sm)] !min-h-[var(--vui-control-height-sm)] !w-fit !min-w-0 max-w-[min(100%,12.5rem)] shrink-0 items-center justify-center gap-1.5 !rounded-full !border !border-[var(--fg-primary)] !bg-[var(--fg-primary)] !px-3 !py-0 [font-size:var(--vui-font-xs)] font-semibold leading-none !text-[var(--vui-surface-workspace)] shadow-none transition-colors duration-150 hover:!border-[color-mix(in_srgb,var(--fg-primary)_82%,var(--accent-cool))] hover:!bg-[color-mix(in_srgb,var(--fg-primary)_82%,var(--accent-cool))] hover:!text-[var(--vui-surface-workspace)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--vui-surface-panel)] active:!bg-[color-mix(in_srgb,var(--fg-primary)_72%,var(--accent-cool))] disabled:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] disabled:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] disabled:!text-[var(--fg-tertiary)] disabled:hover:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] disabled:hover:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] disabled:hover:!text-[var(--fg-tertiary)] [&_[data-slot=vui-button-content]]:!inline-flex [&_[data-slot=vui-button-content]]:!w-auto [&_[data-slot=vui-button-content]]:!max-w-full [&_[data-slot=vui-button-content]]:items-center [&_[data-slot=vui-button-content]]:gap-1.5 [&_[data-slot=vui-button-label]]:truncate [&_svg]:shrink-0",

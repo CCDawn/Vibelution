@@ -4747,7 +4747,7 @@ export function ConversationView({
             <ConversationFollowupQueueBar
               items={followupQueue}
               lang={lang}
-              queueLabel={t("followupQueueLabel")}
+              variant={composerVariant}
               editLabel={t("editFollowupQueue")}
               withdrawLabel={t("withdrawFollowupQueue")}
               onUpdate={onFollowupQueueUpdate ?? (() => undefined)}

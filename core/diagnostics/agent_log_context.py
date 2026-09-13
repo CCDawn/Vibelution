@@ -28,7 +28,7 @@ SCENE_RAW_TO_LAUNCHER = {
 }
 
 USAGE_GUIDANCE = [
-    "Always start with agent_log_context before grep, read_file, or raw log expansion.",
+    "When diagnosing runtime issues or needing log evidence, start with agent_log_context before grep, read_file, or raw log expansion.",
     "Read summary.json agent_brief and follow resolvedEvidenceRefs.absolutePath before opening timeline or stdout logs.",
     "Use conversation_log_inspect_tool or agent_log_context with log_path only for a narrow deep read.",
     "Resolve paths from activePaths; never assume logs live under the git checkout root after migration.",
