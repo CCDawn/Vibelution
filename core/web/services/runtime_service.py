@@ -34,6 +34,7 @@ from core.chat.conversation_ledger import (
     conversation_event_read_snapshot,
     context_compression_projection,
 )
+from core.orchestration.agent_modes import AgentMode
 from core.orchestration.cache_diagnostics import normalize_runtime_llm_usage
 
 from .i18n import get_web_language, text_for
@@ -200,11 +201,7 @@ def get_runtime_summary() -> dict:
         "defaultMode": "chat",
         "defaultRoute": "/chat",
         "intakeMode": "manual_review",
-        "modeAvailability": {
-            "chat": True,
-            "self_evolution": True,
-            "supervised_evolution": True,
-        },
+        "modeAvailability": {mode.value: True for mode in AgentMode},
         "domainAvailability": {
             "chat": True,
             "evolution": True,

@@ -56,6 +56,7 @@ PROVIDER_API_KEY_ENV_ALIASES: Dict[str, List[str]] = {
 }
 
 VALID_AGENT_MODES = ("chat", "self_evolution", "supervised_evolution")
+DEFAULT_MAX_OUTPUT_TOKENS = 4096
 
 
 def get_provider_api_key_env(provider: str) -> Optional[str]:
@@ -264,7 +265,7 @@ class PinnedModelDefaults(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    max_output_tokens: int = Field(default=4096, gt=0)
+    max_output_tokens: int = Field(default=DEFAULT_MAX_OUTPUT_TOKENS, gt=0)
     timeout: int = Field(default=60, gt=0)
     connect_timeout: int = Field(default=30, gt=0)
     streaming: bool = True
@@ -420,7 +421,7 @@ class LLMProfile(BaseModel):
     reasoning_state_field: str = Field(default="")
     strict_compatibility: bool = Field(default=True)
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    max_output_tokens: int = Field(default=4096, gt=0)
+    max_output_tokens: int = Field(default=DEFAULT_MAX_OUTPUT_TOKENS, gt=0)
     timeout: int = Field(default=60, gt=0)
     connect_timeout: int = Field(default=30, gt=0)
     streaming: bool = Field(default=True)
@@ -596,7 +597,7 @@ class LLMConfig(BaseModel):
                 profile_id="primary",
                 provider_id=next(iter(self.providers.keys())),
                 model="qwen-plus",
-                max_output_tokens=4096,
+                max_output_tokens=DEFAULT_MAX_OUTPUT_TOKENS,
             )
         for provider_id, provider in self.providers.items():
             if not provider.provider_id:

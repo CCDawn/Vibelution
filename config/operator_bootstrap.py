@@ -21,6 +21,7 @@ from config.llm_identity import (
     provider_identity_fingerprint,
     validate_provider_id,
 )
+from config.models import DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_ROLE_PROFILE_IDS
 from config.toml_writer import dumps_public_config
 
 EnvReader = Callable[[str], str | None]
@@ -84,16 +85,16 @@ _NON_DIALOGUE_UPSTREAM_MARKERS = (
     "sora",
 )
 
-_PROFILE_IDS = (
-    "primary",
-    "mental_model",
-    "runtime_status",
-    "subagent_worker",
-    "supervised_baseline",
-    "supervised_candidate",
-    "research_broad",
-    "research_deep",
-    "research_review",
+# 新用户 bootstrap 只物化基础角色集合；subagent_explorer / research_themes /
+# research_card / compression 由各自运行路径按需创建，不预先写入 operator config。
+_BOOTSTRAP_EXCLUDED_PROFILE_IDS = frozenset(
+    {"subagent_explorer", "research_themes", "research_card", "compression"}
+)
+
+_PROFILE_IDS = tuple(
+    profile_id
+    for profile_id in DEFAULT_ROLE_PROFILE_IDS
+    if profile_id not in _BOOTSTRAP_EXCLUDED_PROFILE_IDS
 )
 
 
@@ -172,7 +173,7 @@ def _local_provider() -> dict[str, Any]:
                 "enabled": True,
                 "defaults": {
                     "temperature": 0.3,
-                    "max_output_tokens": 4096,
+                    "max_output_tokens": DEFAULT_MAX_OUTPUT_TOKENS,
                     "timeout": 45,
                     "connect_timeout": 5,
                     "streaming": True,

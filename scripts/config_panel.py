@@ -24,6 +24,15 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from config.editor_schema_data import (  # noqa: E402
+    AGENT_MODE_OPTIONS,
+    AVATAR_PRESET_OPTIONS,
+    FIELD_HINTS as _SHARED_FIELD_HINTS,
+    FIELD_LABELS as _SHARED_FIELD_LABELS,
+    RUNTIME_PROFILE_OPTIONS,
+    SECTION_LABELS as _SHARED_SECTION_LABELS,
+    SEGMENTATION_STRATEGY_OPTIONS,
+)
 from config.public_config import (  # noqa: E402
     CONFIG_PATH,
     HEADER_LINES,
@@ -67,9 +76,6 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
         return None
 
 
-RUNTIME_PROFILE_OPTIONS = ["safe_local", "safe_remote", "debug", "ci"]
-AGENT_MODE_OPTIONS = ["chat", "self_evolution", "supervised_evolution"]
-SEGMENTATION_STRATEGY_OPTIONS = ["task_contiguous"]
 LLM_PROVIDER_OPTIONS = [
     "aliyun",
     "openai",
@@ -85,7 +91,6 @@ LLM_PROVIDER_OPTIONS = [
 ]
 LLM_PROVIDER_COMPAT_OPTIONS = ["openai", "native"]
 LLM_PROVIDER_EDIT_FIELDS = tuple(field for field in PUBLIC_INLINE_PROVIDER_FIELDS if field != "api_key")
-AVATAR_PRESET_OPTIONS = ["lobster", "shrimp", "crab", "cat", "chick", "bunny", "slime", "penguin", "moose"]
 
 I18N = {
     "zh": {
@@ -252,7 +257,7 @@ I18N = {
     },
 }
 
-SECTION_LABELS = {
+_PANEL_SECTION_LABELS = {
     "zh": {
         "runtime": "运行时",
         "avatar": "形象",
@@ -343,7 +348,7 @@ SECTION_LABELS = {
     },
 }
 
-FIELD_LABELS = {
+_PANEL_FIELD_LABELS = {
     "zh": {
         "runtime.profile": "运行档位",
         "runtime.preflight_doctor": "启动前自检",
@@ -546,7 +551,7 @@ FIELD_LABELS = {
     },
 }
 
-FIELD_HINTS = {
+_PANEL_FIELD_HINTS = {
     "zh": {
         "runtime.profile": "决定默认运行策略，通常先从 safe_local 或 debug 开始。",
         "runtime.preflight_doctor": "启动前先做自检，适合排查环境漂移。",
@@ -612,6 +617,17 @@ FIELD_HINTS = {
         "network.proxy_url": "HTTP/HTTPS proxy URL, for example http://127.0.0.1:7890.",
     },
 }
+
+SECTION_LABELS = {
+    lang: {**_PANEL_SECTION_LABELS[lang], **_SHARED_SECTION_LABELS[lang]} for lang in ("zh", "en")
+}
+FIELD_LABELS = {
+    lang: {**_PANEL_FIELD_LABELS[lang], **_SHARED_FIELD_LABELS[lang]} for lang in ("zh", "en")
+}
+FIELD_HINTS = {
+    lang: {**_PANEL_FIELD_HINTS[lang], **_SHARED_FIELD_HINTS[lang]} for lang in ("zh", "en")
+}
+
 
 TOKEN_LABELS = {
     "zh": {
