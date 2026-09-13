@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from .errors import classify_exception
 from .types import LLMError
@@ -21,7 +20,6 @@ class LLMRecoveryDecision:
     disable_streaming: bool = False
     disable_tools: bool = False
     request_context_compression: bool = False
-    fallback_profile_id: Optional[str] = None
 
 
 def plan_recovery(
@@ -36,8 +34,8 @@ def plan_recovery(
     return LLMRecoveryDecision(
         category=error.category,
         # protocol_error is deterministic on the same adapter path, so same-path
-        # transport retries stay off; mark the decision retryable so the turn
-        # survives one route switch (retry_without_streaming) instead of dying.
+        # transport retries stay off; the decision stays retryable so the route
+        # failure is reported as recoverable instead of an immediate hard stop.
         retryable=error.retryable or error.category == "protocol_error",
         action=action,
         user_message=str(error),

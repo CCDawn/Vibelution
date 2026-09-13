@@ -4,17 +4,7 @@ from __future__ import annotations
 
 from core.llm.errors import LLMError, classify_exception
 from core.llm.recovery import plan_recovery
-from core.llm.routing import attach_recovery_fallback
-from tests.helpers.isolated_config import isolated_settings_config
 
-
-def make_config(**kwargs):
-    kwargs.setdefault("llm.providers.default.kind", "minimax")
-    kwargs.setdefault("llm.providers.default.api_key", "test-key")
-    kwargs.setdefault("llm.providers.default.base_url", "https://api.minimaxi.com/v1")
-    kwargs.setdefault("llm.profiles.primary.provider_id", "default")
-    kwargs.setdefault("llm.profiles.primary.model", "MiniMax-M2.7")
-    return isolated_settings_config(**kwargs)
 
 
 def test_recovery_policy_retries_protocol_error_without_streaming():
@@ -32,35 +22,9 @@ def test_recovery_policy_retries_protocol_error_without_streaming():
     # wait_seconds stays 0 like empty_content_error.
     assert decision.wait_seconds == 0
     assert decision.stop_current_turn is False
-    # Marked retryable so the turn survives one fallback route switch.
+    # Marked retryable so the route failure is reported as recoverable.
     assert decision.retryable is True
 
-
-def test_recovery_policy_attaches_non_streaming_fallback_for_protocol_error():
-    config = make_config(
-        **{
-            "llm.providers.backup.kind": "local",
-            "llm.providers.backup.requires_api_key": False,
-            "llm.providers.backup.base_url": "http://localhost:8000/v1",
-            "llm.profiles.fallback_backup.provider_id": "backup",
-            "llm.profiles.fallback_backup.model": "qwen-32b-awq",
-            "llm.profiles.fallback_backup.streaming": False,
-        }
-    )
-    decision = plan_recovery(
-        LLMError("protocol_error", "Anthropic Messages SSE contains invalid JSON", retryable=False),
-        attempt=1,
-        max_attempts=5,
-    )
-
-    enriched = attach_recovery_fallback(
-        decision,
-        config=config,
-        current_profile_id="primary",
-    )
-
-    assert enriched.action == "retry_without_streaming"
-    assert enriched.fallback_profile_id == "fallback_backup"
 
 
 def test_recovery_policy_keeps_provider_protocol_error_fail_fast():

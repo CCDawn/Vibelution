@@ -20,7 +20,6 @@ from langchain_core.messages import SystemMessage
 from core.context.volatility import is_volatile_context_text
 from core.llm.errors import classify_for_legacy
 from core.llm.recovery import LLMRecoveryDecision, plan_recovery
-from core.llm.routing import attach_recovery_fallback
 from core.prompt_manager import to_string, split_sys_prompt_prefix
 
 MAX_CONSECUTIVE_FAILURES = 5
@@ -43,18 +42,9 @@ def plan_llm_recovery(
     *,
     attempt: int = 1,
     max_attempts: int = MAX_CONSECUTIVE_FAILURES,
-    config: Any = None,
-    role: str = "primary",
-    current_profile_id: str | None = None,
 ) -> LLMRecoveryDecision:
     """Return the normalized recovery decision for an LLM exception."""
-    decision = plan_recovery(e, attempt=attempt, max_attempts=max_attempts)
-    return attach_recovery_fallback(
-        decision,
-        config=config,
-        role=role,
-        current_profile_id=current_profile_id,
-    )
+    return plan_recovery(e, attempt=attempt, max_attempts=max_attempts)
 
 
 _INT_LIKE_PATTERN = re.compile(r"^-?(0|[1-9]\d*)$")
