@@ -7448,6 +7448,36 @@ def test_source_collection_stage_task_waits_for_all_required_tools_across_contin
     assert "source_collection_stage_writeback_tool" in prompts[1]
 
 
+@pytest.mark.parametrize("missing_writeback", [False, True])
+def test_required_tool_progress_reads_live_turn_capture(tmp_path, monkeypatch, missing_writeback):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+    names = ["source_collection_context_tool", "source_collection_stage_writeback_tool"]
+    capture = session_service.SessionTurnCapture(session_id="session-captured-tools", turn_id="")
+    calls = []
+
+    def run_turn(agent, **kwargs):
+        calls.append(kwargs)
+        observed = names[:1] if missing_writeback and len(calls) == 1 else names
+        capture.tool_calls = [{"name": name, "status": "done"} for name in observed]
+        return {"status": "completed", "raw_output": "Stage work completed.", "outcome": "done"}
+
+    monkeypatch.setattr(session_service, "run_existing_agent_single_turn", run_turn)
+    control = session_service._create_session_turn_control(capture.session_id)
+    capture.turn_id = control.turn_id
+    try:
+        result = session_service._run_session_continuation_loop(
+            object(), context={}, session_id=capture.session_id, turn_control=control,
+            turn_capture=capture, initial_prompt="Complete source collection", history_messages=[],
+            allow_internal_auto_continue=True, max_internal_auto_continue_turns=2,
+            require_tool_progress=True, required_tool_names=names,
+        )
+    finally:
+        session_service._clear_session_turn_control(capture.session_id, turn_id=control.turn_id)
+    assert len(calls) == (2 if missing_writeback else 1)
+    assert result["status"] == "completed"
+
+
 def test_session_continuation_pauses_after_bounded_no_progress_streak(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)

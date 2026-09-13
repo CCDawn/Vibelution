@@ -2593,6 +2593,14 @@ def _run_session_continuation_loop(
             for name in s._result_tool_names(result)
             if name in normalized_required_tool_names
         )
+        # Live tool events precede result attachment, which happens only after
+        # this continuation loop exits. Include their names in the same gate.
+        if turn_capture is not None:
+            observed_required_tool_names.update(
+                name
+                for name in s._result_tool_names({"tool_trace": turn_capture.tool_calls})
+                if name in normalized_required_tool_names
+            )
         required_tool_progress_missing = s._required_tool_progress_missing(
             result,
             require_tool_progress=bool(require_tool_progress),
