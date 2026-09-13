@@ -27,7 +27,10 @@ from scripts.config_panel import (
     _assert_base_hash_matches,
     _submitted_base_hash,
     _delete_user_env_var,
+    _normalize_draft_meta,
+    _resolve_pending_api_key,
     _set_user_env_var,
+    _with_pending_api_key,
     add_llm_model,
     apply_llm_model_preset,
     build_effective_config,
@@ -744,7 +747,142 @@ def test_apply_with_matching_base_hash_persists_config_file(tmp_path, monkeypatc
 
     assert response.status == 200
     assert result["ok"] is True
+    # ui.language is launcher/workbench-owned: the panel preserves the stored
+    # value even when the payload and the panel display language disagree.
+    assert load_public_config(config_path)["ui"]["language"] == public_config["ui"]["language"]
+
+
+def test_apply_ignores_panel_language_and_keeps_stored_ui_language(tmp_path, monkeypatch):
+    public_config = _load_schema_v1_inline_public_config()
+    public_config.setdefault("ui", {})
+    public_config["ui"]["language"] = "en"
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(dumps_public_config(public_config, HEADER_LINES), encoding="utf-8")
+    payload = load_public_config(config_path)
+    payload["ui"]["language"] = "zh"
+    base_hash = public_config_hash(load_public_config(config_path))
+    server, thread, base_url = _start_test_config_panel(monkeypatch, config_path)
+
+    try:
+        response = _post_form(
+            base_url,
+            "/save",
+            {
+                "payload": json.dumps(payload, ensure_ascii=False),
+                "draft_meta": json.dumps({}, ensure_ascii=False),
+                "base_hash": base_hash,
+                "lang": "zh",
+            },
+        )
+        result = json.loads(response.read().decode("utf-8"))
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert response.status == 200
+    assert result["ok"] is True
     assert load_public_config(config_path)["ui"]["language"] == "en"
+
+
+def test_render_panel_html_exposes_ui_language_as_read_only():
+    html = render_panel_html(_load_schema_v1_inline_public_config(), lang="zh")
+
+    assert 'data-path="ui.language"' not in html
+    assert "由工作台/启动器管理" in html
+
+
+def test_pending_api_key_draft_meta_stores_token_not_raw_secret():
+    env_name = "VIBELUTION_LLM_MODEL_PANEL_SECRET_API_KEY"
+    draft_meta = _with_pending_api_key({}, env_name, "raw-panel-secret")
+
+    token = draft_meta["pending_api_keys"][env_name]
+    assert token.startswith("pending-secret:")
+    assert "raw-panel-secret" not in json.dumps(draft_meta, ensure_ascii=False)
+    assert _resolve_pending_api_key(env_name, token) == "raw-panel-secret"
+
+    forged = _normalize_draft_meta({"pending_api_keys": {env_name: "forged-secret"}})
+    assert forged["pending_api_keys"] == {}
+    assert _resolve_pending_api_key(env_name, "pending-secret:unknown") is None
+
+
+def test_save_applies_pending_token_secret_without_persisting_secret(tmp_path, monkeypatch):
+    public_config = _load_schema_v1_inline_public_config()
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(dumps_public_config(public_config, HEADER_LINES), encoding="utf-8")
+    env_name = "VIBELUTION_LLM_MODEL_PANEL_SECRET_API_KEY"
+    draft_meta = _with_pending_api_key({}, env_name, "raw-panel-secret")
+    token = draft_meta["pending_api_keys"][env_name]
+    written_env: dict[str, str] = {}
+    monkeypatch.setattr(
+        "scripts.config_panel._set_user_env_var",
+        lambda name, value: written_env.__setitem__(str(name), str(value)),
+    )
+    base_hash = public_config_hash(load_public_config(config_path))
+    server, thread, base_url = _start_test_config_panel(monkeypatch, config_path)
+
+    try:
+        response = _post_form(
+            base_url,
+            "/save",
+            {
+                "payload": json.dumps(load_public_config(config_path), ensure_ascii=False),
+                "draft_meta": json.dumps(draft_meta, ensure_ascii=False),
+                "base_hash": base_hash,
+                "lang": "zh",
+            },
+        )
+        result = json.loads(response.read().decode("utf-8"))
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert response.status == 200
+    assert result["ok"] is True
+    assert written_env[env_name] == "raw-panel-secret"
+    assert _resolve_pending_api_key(env_name, token) is None
+    persisted_text = config_path.read_text(encoding="utf-8")
+    assert "raw-panel-secret" not in persisted_text
+    assert "pending-secret:" not in persisted_text
+
+
+def test_save_ignores_forged_raw_draft_secret(tmp_path, monkeypatch):
+    public_config = _load_schema_v1_inline_public_config()
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(dumps_public_config(public_config, HEADER_LINES), encoding="utf-8")
+    env_name = "VIBELUTION_LLM_MODEL_PANEL_SECRET_API_KEY"
+    written_env: dict[str, str] = {}
+    monkeypatch.setattr(
+        "scripts.config_panel._set_user_env_var",
+        lambda name, value: written_env.__setitem__(str(name), str(value)),
+    )
+    base_hash = public_config_hash(load_public_config(config_path))
+    server, thread, base_url = _start_test_config_panel(monkeypatch, config_path)
+
+    try:
+        response = _post_form(
+            base_url,
+            "/save",
+            {
+                "payload": json.dumps(load_public_config(config_path), ensure_ascii=False),
+                "draft_meta": json.dumps(
+                    {"pending_api_keys": {env_name: "forged-secret"}, "pending_cleared_api_keys": []},
+                    ensure_ascii=False,
+                ),
+                "base_hash": base_hash,
+                "lang": "zh",
+            },
+        )
+        result = json.loads(response.read().decode("utf-8"))
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert response.status == 200
+    assert result["ok"] is True
+    assert written_env == {}
 
 
 def test_render_panel_html_supports_english():

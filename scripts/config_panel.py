@@ -10,6 +10,7 @@ import copy
 import html
 import json
 import os
+import secrets
 import sys
 import threading
 import urllib.error
@@ -572,6 +573,7 @@ FIELD_HINTS = {
         "tools.image2.default_model_ref": "image2_generate_tool 默认使用的模型库条目；留空时回退到 VIBELUTION_IMAGE2_MODEL 或内置模型名。",
         "evolution.chat_dataset.source_modes": "哪些 agent mode 产生的对话可以被静默采样进入审核队列。",
         "evolution.chat_dataset.segmentation_strategy": "chat 采样如何切分连续多轮上下文。",
+        "ui.language": "由工作台/启动器管理，配置面板只读，不写入该字段。",
         "ui.refresh_rate": "终端工作台刷新频率。",
         "ui.max_log_entries": "UI 内部保留的日志条目数。",
         "network.proxy_enabled": "启用后，科研调研等真实公网请求会通过下方代理地址访问。",
@@ -603,6 +605,7 @@ FIELD_HINTS = {
         "tools.image2.default_model_ref": "Model library entry used by image2_generate_tool. Empty falls back to VIBELUTION_IMAGE2_MODEL or the built-in model name.",
         "evolution.chat_dataset.source_modes": "Which agent modes may silently contribute conversation samples to the review queue.",
         "evolution.chat_dataset.segmentation_strategy": "How chat capture segments contiguous multi-turn context.",
+        "ui.language": "Managed by the workbench/launcher; this panel only displays it.",
         "ui.refresh_rate": "Refresh cadence for the terminal workbench.",
         "ui.max_log_entries": "How many UI log entries are retained.",
         "network.proxy_enabled": "When enabled, real public research requests use the proxy URL below.",
@@ -1009,6 +1012,49 @@ def _model_library_detail_summary(transport: str, contract: str, details: dict, 
     return " / ".join(parts)
 
 
+_PENDING_SECRET_PREFIX = "pending-secret:"
+_PENDING_API_KEY_SECRETS: dict[str, tuple[str, str]] = {}
+
+
+def _register_pending_api_key(api_key_env: str, api_key: str) -> str:
+    env_name = validate_llm_api_key_env(api_key_env, required=True, context="api_key_env")
+    token = f"{_PENDING_SECRET_PREFIX}{secrets.token_urlsafe(24)}"
+    _PENDING_API_KEY_SECRETS[token] = (env_name, str(api_key))
+    return token
+
+
+def _resolve_pending_api_key(env_name: str, token: object) -> str | None:
+    env_name = validate_llm_api_key_env(env_name, required=True, context="api_key_env")
+    value = str(token or "").strip()
+    if not value.startswith(_PENDING_SECRET_PREFIX):
+        return None
+    stored = _PENDING_API_KEY_SECRETS.get(value)
+    if not stored:
+        return None
+    stored_env, secret = stored
+    if stored_env != env_name:
+        return None
+    return secret
+
+
+def _drop_pending_api_key_token(token: object) -> None:
+    value = str(token or "").strip()
+    if value.startswith(_PENDING_SECRET_PREFIX):
+        _PENDING_API_KEY_SECRETS.pop(value, None)
+
+
+def _move_pending_api_key_token(token: object, old_env: str, new_env: str) -> None:
+    value = str(token or "").strip()
+    if not value.startswith(_PENDING_SECRET_PREFIX):
+        return
+    stored = _PENDING_API_KEY_SECRETS.get(value)
+    if not stored:
+        return
+    stored_env, secret = stored
+    if stored_env == old_env:
+        _PENDING_API_KEY_SECRETS[value] = (new_env, secret)
+
+
 def _empty_draft_meta() -> dict[str, object]:
     return {
         "pending_api_keys": {},
@@ -1022,11 +1068,19 @@ def _normalize_draft_meta(meta: dict | None) -> dict[str, object]:
         return payload
     pending = meta.get("pending_api_keys", {})
     if isinstance(pending, dict):
-        payload["pending_api_keys"] = {
-            str(key).strip(): str(value)
-            for key, value in pending.items()
-            if str(key).strip() and str(value) != ""
-        }
+        normalized_pending: dict[str, str] = {}
+        for key, value in pending.items():
+            env_name = str(key).strip()
+            if not env_name or str(value) == "":
+                continue
+            try:
+                validate_llm_api_key_env(env_name, required=True, context="api_key_env")
+            except ValueError:
+                continue
+            if _resolve_pending_api_key(env_name, value) is None:
+                continue
+            normalized_pending[env_name] = str(value)
+        payload["pending_api_keys"] = normalized_pending
     cleared = meta.get("pending_cleared_api_keys", [])
     if isinstance(cleared, list):
         payload["pending_cleared_api_keys"] = [
@@ -1046,9 +1100,11 @@ def _move_pending_api_key_env(meta: dict[str, object], old_env: str, new_env: st
     pending = payload["pending_api_keys"]
     cleared = payload["pending_cleared_api_keys"]
     if isinstance(pending, dict) and old_env in pending and new_env:
-        pending[new_env] = pending.pop(old_env)
+        token = pending.pop(old_env)
+        _move_pending_api_key_token(token, old_env, new_env)
+        pending[new_env] = token
     elif isinstance(pending, dict):
-        pending.pop(old_env, None)
+        _drop_pending_api_key_token(pending.pop(old_env, None))
     if isinstance(cleared, list):
         payload["pending_cleared_api_keys"] = [
             new_env if item == old_env and new_env else item
@@ -1267,6 +1323,7 @@ def _badge_text(text: str, lang: str) -> str:
             "地址": "URL",
             "路径": "Path",
             "文本": "Text",
+            "只读": "Read-only",
             "秒": "Seconds",
         }
         return mapping.get(text, text)
@@ -1305,13 +1362,14 @@ def _render_select(path: str, current: str, options: list[str], label: str, lang
 
 def _render_input(path: str, value, label: str, lang: str) -> str:
     if path == "ui.language":
+        resolved = resolve_lang(str(value))
         control_html = (
-            f'<select data-path="{path}"{_original_value_attr(str(value))} onchange="syncLanguageControls(this.value, \'body\')">'
-            f'<option value="zh" {"selected" if resolve_lang(str(value)) == "zh" else ""}>{html.escape(I18N[lang]["lang_zh"])}</option>'
-            f'<option value="en" {"selected" if resolve_lang(str(value)) == "en" else ""}>{html.escape(I18N[lang]["lang_en"])}</option>'
+            f'<select disabled aria-readonly="true">'
+            f'<option value="zh" {"selected" if resolved == "zh" else ""}>{html.escape(I18N[lang]["lang_zh"])}</option>'
+            f'<option value="en" {"selected" if resolved == "en" else ""}>{html.escape(I18N[lang]["lang_en"])}</option>'
             f"</select>"
         )
-        return _render_field_shell(path, label, lang, control_html, kind="select", badge="选项", hint=_field_hint(path, lang), value=value)
+        return _render_field_shell(path, label, lang, control_html, kind="select", badge="只读", hint=_field_hint(path, lang), value=value)
     if path == "runtime.profile":
         return _render_select(path, str(value), RUNTIME_PROFILE_OPTIONS, label, lang)
     if path == "avatar.preset":
@@ -1747,6 +1805,14 @@ def _with_config_language(public_config: dict, lang: str) -> dict:
     return display_config
 
 
+def _stored_ui_language(public_config: dict) -> str | None:
+    ui = public_config.get("ui") if isinstance(public_config, dict) else None
+    if not isinstance(ui, dict):
+        return None
+    value = str(ui.get("language") or "").strip()
+    return value or None
+
+
 def _generic_public_config(display_config: dict) -> dict:
     generic_config = copy.deepcopy(display_config)
     if isinstance(generic_config.get("llm"), dict):
@@ -1856,7 +1922,7 @@ def render_panel_html(
     draft_meta = _normalize_draft_meta(draft_meta)
     resolved_base_hash = str(base_hash or public_config_hash(public_config)).strip()
     display_config = _with_config_language(public_config, lang)
-    display_json = json.dumps(display_config, ensure_ascii=False)
+    display_json = json.dumps(public_config, ensure_ascii=False)
     draft_meta_json = json.dumps(draft_meta, ensure_ascii=False)
     base_hash_json = json.dumps(resolved_base_hash, ensure_ascii=False)
     preset_json = json.dumps({item["preset_id"]: item for item in list_llm_model_preset_options()}, ensure_ascii=False)
@@ -2291,10 +2357,6 @@ def render_panel_html(
       const lang = document.getElementById("lang-switch").value;
       const cardPath = card.dataset.cardPath || "";
       applyCardValuesToDraft(card);
-      if (!draftPublicConfig.ui) {{
-        draftPublicConfig.ui = {{}};
-      }}
-      draftPublicConfig.ui.language = lang;
       const response = await fetch("/preview-config-card", {{
         method: "POST",
         headers: {{ "Content-Type": "application/x-www-form-urlencoded" }},
@@ -2420,12 +2482,8 @@ def render_panel_html(
 
     function syncLanguageControls(lang, source) {{
       const toolbar = document.getElementById("lang-switch");
-      const bodyField = document.querySelector('[data-path="ui.language"]');
       if (toolbar && source !== "toolbar") {{
         toolbar.value = lang;
-      }}
-      if (bodyField && source !== "body") {{
-        bodyField.value = lang;
       }}
     }}
 
@@ -2875,10 +2933,6 @@ def render_panel_html(
     }}
 
     function switchLang(lang) {{
-      if (!draftPublicConfig.ui) {{
-        draftPublicConfig.ui = {{}};
-      }}
-      draftPublicConfig.ui.language = lang;
       previewDraft(draftPublicConfig, lang);
     }}
 
@@ -2886,10 +2940,6 @@ def render_panel_html(
       const payload = collectPayload();
       document.getElementById("payload").value = JSON.stringify(payload);
       const lang = document.getElementById("lang-switch").value;
-      if (!payload.ui) {{
-        payload.ui = {{}};
-      }}
-      payload.ui.language = lang;
       const response = await postConfig(payload, lang);
       const result = await response.json();
       if (!result.ok) {{
@@ -2951,7 +3001,8 @@ def _with_pending_api_key(meta: dict[str, object], api_key_env: str, api_key: st
     pending = payload["pending_api_keys"]
     cleared = payload["pending_cleared_api_keys"]
     if isinstance(pending, dict):
-        pending[env_name] = api_key
+        _drop_pending_api_key_token(pending.get(env_name))
+        pending[env_name] = _register_pending_api_key(env_name, api_key)
     if isinstance(cleared, list):
         payload["pending_cleared_api_keys"] = [item for item in cleared if item != env_name]
     return payload
@@ -2965,7 +3016,7 @@ def _with_cleared_api_key(meta: dict[str, object], api_key_env: str) -> dict[str
     pending = payload["pending_api_keys"]
     cleared = payload["pending_cleared_api_keys"]
     if isinstance(pending, dict):
-        pending.pop(env_name, None)
+        _drop_pending_api_key_token(pending.pop(env_name, None))
     if isinstance(cleared, list) and env_name not in cleared:
         cleared.append(env_name)
     return payload
@@ -2979,7 +3030,7 @@ def _drop_api_key_state(meta: dict[str, object], api_key_env: str) -> dict[str, 
     pending = payload["pending_api_keys"]
     cleared = payload["pending_cleared_api_keys"]
     if isinstance(pending, dict):
-        pending.pop(env_name, None)
+        _drop_pending_api_key_token(pending.pop(env_name, None))
     if isinstance(cleared, list):
         payload["pending_cleared_api_keys"] = [item for item in cleared if item != env_name]
     return payload
@@ -3003,7 +3054,7 @@ def _render_preview_state_payload(
     base_hash: str,
 ) -> dict[str, object]:
     normalized_draft_meta = _normalize_draft_meta(draft_meta)
-    updated_public_config = _with_config_language(public_config, lang)
+    updated_public_config = copy.deepcopy(public_config)
     resolved_base_hash = str(base_hash or public_config_hash(public_config)).strip()
     return {
         "ok": True,
@@ -3089,9 +3140,6 @@ class ConfigPanelHandler(BaseHTTPRequestHandler):
             current_base_hash = public_config_hash(old_public)
             if self.path == "/preview":
                 submitted = _submitted_public_config(form, old_public)
-                submitted.setdefault("ui", {})
-                if isinstance(submitted["ui"], dict):
-                    submitted["ui"]["language"] = lang
                 draft_meta = _submitted_draft_meta(form)
                 message = form.get("message", [""])[0]
                 self._send_html(
@@ -3282,9 +3330,11 @@ class ConfigPanelHandler(BaseHTTPRequestHandler):
                 return
 
             submitted = _submitted_public_config(form, old_public)
-            submitted.setdefault("ui", {})
-            if isinstance(submitted["ui"], dict):
-                submitted["ui"]["language"] = lang
+            stored_language = _stored_ui_language(old_public)
+            if stored_language is not None:
+                submitted.setdefault("ui", {})
+                if isinstance(submitted.get("ui"), dict):
+                    submitted["ui"]["language"] = stored_language
             draft_meta = _submitted_draft_meta(form)
             _assert_base_hash_matches(submitted_base_hash, old_public, lang)
             validate_llm_public_config(submitted)
@@ -3292,8 +3342,12 @@ class ConfigPanelHandler(BaseHTTPRequestHandler):
             save_public_config(submitted)
             for env_name in draft_meta.get("pending_cleared_api_keys", []):
                 _delete_user_env_var(str(env_name))
-            for env_name, api_key in draft_meta.get("pending_api_keys", {}).items():
-                _set_user_env_var(str(env_name), str(api_key))
+            for env_name, token in draft_meta.get("pending_api_keys", {}).items():
+                secret = _resolve_pending_api_key(str(env_name), token)
+                if secret is None:
+                    continue
+                _set_user_env_var(str(env_name), secret)
+                _drop_pending_api_key_token(token)
             self._send_json({"ok": True, "message": I18N[lang]["save_success"]})
         except Exception as exc:
             html_preview_paths = {
@@ -3313,9 +3367,6 @@ class ConfigPanelHandler(BaseHTTPRequestHandler):
                     submitted = _submitted_public_config(form, old_public)
                 except Exception:
                     submitted = copy.deepcopy(old_public)
-                submitted.setdefault("ui", {})
-                if isinstance(submitted["ui"], dict):
-                    submitted["ui"]["language"] = lang
                 draft_meta = _submitted_draft_meta(form)
                 message = f'{I18N[lang]["save_failed"]}: {exc}'
                 self._send_html(
