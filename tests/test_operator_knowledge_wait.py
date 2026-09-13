@@ -162,7 +162,7 @@ def test_real_sqlite_park_then_terminal_wake_preserves_original_cursor(
 
         def seed(uow):
             uow.repository.execute(
-                "UPDATE workflow_runs SET workflow_id='operator-optimization', status='running', active_node_id='optimization_knowledge' WHERE run_id='parent'"
+                "UPDATE workflow_runs SET workflow_id='operator-optimization', project_id='p', question_id='q', status='running', active_node_id='optimization_knowledge' WHERE run_id='parent'"
             )
             uow.repository.insert_run(child)
             uow.repository.insert_command(
@@ -239,6 +239,20 @@ def test_real_sqlite_park_then_terminal_wake_preserves_original_cursor(
         assert problem["action"]["actionId"] == action.action_id
         assert problem["action"]["inputSnapshotHash"] == action.input_snapshot_hash
         if not early:
+            from core.web.services.team_workflow.research_runtime.command_service import _apply_ledger_reconcile_for_run
+            def reconcile(uow):
+                return _apply_ledger_reconcile_for_run(uow, run=uow.repository.get_run("parent"),
+                    node_order=("optimization_knowledge",), now_ms=15)
+            plan, revived, _ = store.submit(reconcile, force_flush=True).result(timeout=10)
+            assert plan.landing_problem["code"] == "operator_knowledge_child_pending"
+            assert revived == 0
+            assert store.latest_attempt("parent", "optimization_knowledge").finished_at_ms is None
+            # Recover precisely the historical zombie-finalization corruption.
+            store.submit(lambda uow: uow.repository.update_attempt_status(action.node_run_id,
+                "failed", 16, problem_json=parked.last_problem_json, finished_at_ms=16), force_flush=True).result()
+            store.submit(reconcile, force_flush=True).result(timeout=10)
+            restored = store.latest_attempt("parent", "optimization_knowledge")
+            assert restored.status == "running" and restored.finished_at_ms is None
             store.submit(settle, force_flush=True).result(timeout=10)
 
         def invalidate(uow):

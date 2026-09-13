@@ -484,6 +484,12 @@ def _apply_ledger_reconcile_for_run(
     """
     from .completion_dependency import COMPLETION_PENDING
 
+    from ..operator_optimization.knowledge_wait import reconcile_knowledge_wait
+
+    wait_plan = reconcile_knowledge_wait(uow, run, now_ms)
+    if wait_plan is not None:
+        return wait_plan, 0, []
+
     # -- (1) zombie active attempts: finalize BEFORE the plan is computed. --
     zombie_rows = uow.repository.execute(
         """
