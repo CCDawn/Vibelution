@@ -19,6 +19,27 @@ export function resolveSessionStopTurnId(
   return clean(detail?.activeTurnId) || latestUserTurnId(detail);
 }
 
+export type StopTurnOptimisticContext = {
+  previousDetail?: SessionDetail;
+  stoppingAt?: string;
+};
+
+export type DeferredStopIntent = StopTurnOptimisticContext & {
+  sessionId: string;
+};
+
+export function resolveStopOptimisticTarget(
+  deferredStop: StopTurnOptimisticContext | undefined,
+  cachedDetail: SessionDetail | undefined,
+  now: string,
+): { previousDetail: SessionDetail | undefined; stoppingAt: string } {
+  const deferredStoppingAt = clean(deferredStop?.stoppingAt);
+  if (deferredStoppingAt) {
+    return { previousDetail: deferredStop?.previousDetail, stoppingAt: deferredStoppingAt };
+  }
+  return { previousDetail: cachedDetail, stoppingAt: now };
+}
+
 export function sessionStopRequestBody(turnId: string) {
   const normalizedTurnId = clean(turnId);
   if (!normalizedTurnId) {

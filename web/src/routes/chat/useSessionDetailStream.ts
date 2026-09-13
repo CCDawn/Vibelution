@@ -16,6 +16,7 @@ import {
   type SessionStreamProtocolTrace,
 } from "../chatSessionStreamProtocol";
 import {
+  normalizeSessionStreamApplyStats,
   planAppliedAssistantDeltaDrain,
   planAppliedSessionDetail,
   planQueuedSessionDetail,
@@ -85,6 +86,7 @@ export function useSessionDetailStream({
   const sessionStreamErrorRefreshAtRef = useRef<Record<string, number>>({});
   const sessionStreamPayloadErrorLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamApplyStatsRef = useRef<Record<string, SessionStreamApplyStats>>({});
+  const sessionStreamStopFrozenLoggedRef = useRef<Record<string, boolean>>({});
   const sessionTitleForNotificationsRef = useRef(sessionTitleForNotifications);
   sessionTitleForNotificationsRef.current = sessionTitleForNotifications;
   const viewedSessionIdRef = useRef(viewedSessionId || activeSessionId || "");
@@ -198,6 +200,26 @@ export function useSessionDetailStream({
     const stream = createSessionEventStream(streamSessionId);
     activeStreamRef.current = { stream, sessionId: streamSessionId };
     let closeTelemetryFired = false;
+
+    const sessionStopIntentActive = () =>
+      Boolean(queryClient.getQueryData<SessionDetail>(queryKeys.session(streamSessionId))?.stopRequested);
+
+    const logStopFrozenDeltas = (droppedCount: number) => {
+      if (sessionStreamStopFrozenLoggedRef.current[streamSessionId]) {
+        return;
+      }
+      sessionStreamStopFrozenLoggedRef.current[streamSessionId] = true;
+      postBrowserTelemetry({
+        phase: "session_stream",
+        eventCode: "browser.session_stream.stop_intent_frozen_delta",
+        message: "Session assistant deltas were dropped while a stop intent is active.",
+        level: "info",
+        fields: {
+          sessionId: streamSessionId,
+          droppedCount,
+        },
+      });
+    };
 
     const forceCloseStream = () => {
       if (closeTelemetryFired || disposed) {
@@ -347,6 +369,21 @@ export function useSessionDetailStream({
       if (assistantDeltaScheduler.pendingCount === 0 || disposed) {
         return;
       }
+      if (sessionStopIntentActive()) {
+        if (assistantDeltaApplyFrame !== null) {
+          window.cancelAnimationFrame(assistantDeltaApplyFrame);
+          assistantDeltaApplyFrame = null;
+        }
+        const frozenCount = assistantDeltaScheduler.pendingCount;
+        assistantDeltaScheduler.cancel();
+        const frozenStats = normalizeSessionStreamApplyStats(
+          sessionStreamApplyStatsRef.current[streamSessionId],
+        );
+        frozenStats.dropped += frozenCount;
+        sessionStreamApplyStatsRef.current[streamSessionId] = frozenStats;
+        logStopFrozenDeltas(frozenCount);
+        return;
+      }
       const applyStartedAtMs = chatStreamPerformanceNowMs();
       if (assistantDeltaApplyFrame !== null) {
         window.cancelAnimationFrame(assistantDeltaApplyFrame);
@@ -415,6 +452,12 @@ export function useSessionDetailStream({
       const stats = sessionStreamApplyStatsRef.current[streamSessionId] ?? { received: 0, applied: 0, dropped: 0 };
       stats.received += 1;
       sessionStreamApplyStatsRef.current[streamSessionId] = stats;
+      if (sessionStopIntentActive()) {
+        stats.dropped += 1;
+        logStopFrozenDeltas(1);
+        return;
+      }
+      sessionStreamStopFrozenLoggedRef.current[streamSessionId] = false;
       const queued = assistantDeltaScheduler.enqueue(payload, trace.payloadLength, trace);
       if (payload.done) {
         applyPendingAssistantDeltas("final");

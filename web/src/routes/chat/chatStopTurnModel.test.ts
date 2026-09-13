@@ -5,6 +5,7 @@ import { queryKeys } from "../../api/queryKeys";
 import {
   congestedQueryKeysForSessionStop,
   resolveSessionStopTurnId,
+  resolveStopOptimisticTarget,
   sessionStopRequestBody,
 } from "./chatStopTurnModel";
 
@@ -94,5 +95,33 @@ describe("chat stop turn model", () => {
       queryKeys.gitStatus(),
       queryKeys.agents(),
     ]);
+  });
+
+  it("restores the deferred pre-stop detail when the stop POST fails", () => {
+    const running = detail({ activeTurnId: "turn-2" });
+    const deferredStopping = detail({
+      activeTurnId: "turn-2",
+      currentPhase: "stopping",
+      stopRequested: true,
+      stopRequestedAt: "2026-01-01T00:00:05Z",
+    });
+
+    const target = resolveStopOptimisticTarget(
+      { previousDetail: running, stoppingAt: "2026-01-01T00:00:05Z" },
+      deferredStopping,
+      "2026-01-01T00:00:09Z",
+    );
+
+    expect(target.previousDetail).toBe(running);
+    expect(target.stoppingAt).toBe("2026-01-01T00:00:05Z");
+  });
+
+  it("falls back to the cached detail when the stop was not deferred", () => {
+    const running = detail({ activeTurnId: "turn-2" });
+
+    const target = resolveStopOptimisticTarget(undefined, running, "2026-01-01T00:00:09Z");
+
+    expect(target.previousDetail).toBe(running);
+    expect(target.stoppingAt).toBe("2026-01-01T00:00:09Z");
   });
 });

@@ -81,7 +81,13 @@ import {
 } from "../../components/conversation/composerFollowupQueueModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
 import { startUserAction, type UserActionTracker } from "../../app/userActionTelemetry";
-import { resolveSessionStopTurnId, cancelCongestedQueriesForSessionStop } from "./chatStopTurnModel";
+import {
+  resolveSessionStopTurnId,
+  resolveStopOptimisticTarget,
+  cancelCongestedQueriesForSessionStop,
+  type DeferredStopIntent,
+  type StopTurnOptimisticContext,
+} from "./chatStopTurnModel";
 
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
 
@@ -135,12 +141,18 @@ export type SwitchHeadVariables = {
   nodeId: string;
 };
 
+export type StopTurnVariables = {
+  sessionId: string;
+  turnId: string;
+  deferredStop?: StopTurnOptimisticContext;
+};
+
 export type ChatComposerTurnMutations = {
   submitTurnMutation: UseMutationResult<ChatSubmitAcceptedResponse, Error, SubmitTurnVariables, unknown>;
   editResubmitMutation: UseMutationResult<SessionDetail, Error, EditResubmitVariables, unknown>;
   regenerateMutation: UseMutationResult<SessionDetail, Error, RegenerateVariables, unknown>;
   switchHeadMutation: UseMutationResult<SessionDetail, Error, SwitchHeadVariables, unknown>;
-  stopTurnMutation: UseMutationResult<SessionDetail, Error, { sessionId: string; turnId: string }, unknown>;
+  stopTurnMutation: UseMutationResult<SessionDetail, Error, StopTurnVariables, unknown>;
   sessionGuidanceMutation: UseMutationResult<
     SessionDetail,
     Error,
@@ -656,9 +668,9 @@ export function useChatComposerTurnMutations({
   });
 
   const stopTurnMutation = useMutation({
-    mutationFn: async ({ sessionId, turnId }: { sessionId: string; turnId: string }) =>
+    mutationFn: async ({ sessionId, turnId }: StopTurnVariables) =>
       stopSessionTurn(sessionId, turnId),
-    onMutate: async (variables) => {
+    onMutate: async (variables: StopTurnVariables) => {
       const telemetry = startUserAction("session_turn_stop", {
         sessionId: variables.sessionId,
         turnId: variables.turnId,
@@ -668,8 +680,15 @@ export function useChatComposerTurnMutations({
       void cancelCongestedQueriesForSessionStop(queryClient, variables.sessionId);
       // Enter the stopping phase immediately; the POST only acknowledges the
       // request and the worker publishes the authoritative stopped snapshot.
-      const previousDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(variables.sessionId));
-      const stoppingAt = new Date().toISOString();
+      // A deferred stop already patched the UI at click time, so it re-applies
+      // the same intent while restoring the real pre-stop detail on failure.
+      const target = resolveStopOptimisticTarget(
+        variables.deferredStop,
+        queryClient.getQueryData<SessionDetail>(queryKeys.session(variables.sessionId)),
+        new Date().toISOString(),
+      );
+      const previousDetail = target.previousDetail;
+      const stoppingAt = target.stoppingAt;
       const optimisticDetail = markSessionDetailStopping(previousDetail, { requestedAt: stoppingAt });
       if (optimisticDetail) {
         queryClient.setQueryData(queryKeys.session(variables.sessionId), optimisticDetail);
@@ -871,7 +890,7 @@ export function useChatComposerSubmitActions({
   companionAgentId,
 }: UseChatComposerSubmitActionsOptions): UseChatComposerSubmitActionsResult {
   const stoppedTurnAutoFlushRef = useRef<{ sessionId: string; turnId: string } | null>(null);
-  const pendingStopAfterAcceptRef = useRef("");
+  const pendingStopAfterAcceptRef = useRef<DeferredStopIntent | null>(null);
   const previousBusyRef = useRef(sessionBusy);
   const previousSessionRef = useRef(activeSessionId);
 
@@ -1617,10 +1636,17 @@ export function useChatComposerSubmitActions({
     void cancelCongestedQueriesForSessionStop(queryClient, activeSessionId);
     const turnId = resolveSessionStopTurnId(detail, activeTurnId);
     if (!turnId) {
-      pendingStopAfterAcceptRef.current = activeSessionId;
+      const sessionKey = queryKeys.session(activeSessionId);
+      const previousDetail = queryClient.getQueryData<SessionDetail>(sessionKey);
+      const stoppingAt = new Date().toISOString();
+      const optimisticDetail = markSessionDetailStopping(previousDetail, { requestedAt: stoppingAt });
+      if (optimisticDetail) {
+        queryClient.setQueryData(sessionKey, optimisticDetail);
+      }
+      pendingStopAfterAcceptRef.current = { sessionId: activeSessionId, previousDetail, stoppingAt };
       return;
     }
-    pendingStopAfterAcceptRef.current = "";
+    pendingStopAfterAcceptRef.current = null;
     stoppedTurnAutoFlushRef.current = { sessionId: activeSessionId, turnId };
     stopTurnMutation.mutate({
       sessionId: activeSessionId,
@@ -1641,21 +1667,46 @@ export function useChatComposerSubmitActions({
   ]);
 
   useEffect(() => {
-    const pendingSessionId = pendingStopAfterAcceptRef.current;
-    if (!activeSessionId || pendingSessionId !== activeSessionId || sessionStopping) {
+    const pendingStop = pendingStopAfterAcceptRef.current;
+    if (!activeSessionId || pendingStop?.sessionId !== activeSessionId) {
+      return;
+    }
+    const submitPending = Boolean(
+      (submitTurnMutation.isPending && submitTurnMutation.variables?.sessionId === activeSessionId)
+      || (editResubmitMutation.isPending && editResubmitMutation.variables?.sessionId === activeSessionId)
+    );
+    if (!sessionBusy && !submitPending) {
+      pendingStopAfterAcceptRef.current = null;
+      return;
+    }
+    if (stopTurnMutation.isPending && stopTurnMutation.variables?.sessionId === activeSessionId) {
       return;
     }
     const turnId = resolveSessionStopTurnId(detail, activeTurnId);
     if (!turnId) {
       return;
     }
-    pendingStopAfterAcceptRef.current = "";
+    pendingStopAfterAcceptRef.current = null;
     stoppedTurnAutoFlushRef.current = { sessionId: activeSessionId, turnId };
     stopTurnMutation.mutate({
       sessionId: activeSessionId,
       turnId,
+      deferredStop: {
+        previousDetail: pendingStop.previousDetail,
+        stoppingAt: pendingStop.stoppingAt,
+      },
     });
-  }, [activeSessionId, activeTurnId, detail, sessionStopping, stopTurnMutation]);
+  }, [
+    activeSessionId,
+    activeTurnId,
+    detail,
+    editResubmitMutation.isPending,
+    editResubmitMutation.variables?.sessionId,
+    sessionBusy,
+    stopTurnMutation,
+    submitTurnMutation.isPending,
+    submitTurnMutation.variables?.sessionId,
+  ]);
 
   const handleSubmitGuidance = useCallback((mode: SessionGuidanceMode) => {
     if (!activeSessionId || !sessionBusy || sessionStopping) {
@@ -1678,7 +1729,7 @@ export function useChatComposerSubmitActions({
     previousBusyRef.current = sessionBusy;
     previousSessionRef.current = activeSessionId;
     if (previousSession !== activeSessionId) {
-      pendingStopAfterAcceptRef.current = "";
+      pendingStopAfterAcceptRef.current = null;
     }
     const stoppedTurn = stoppedTurnAutoFlushRef.current;
     if (

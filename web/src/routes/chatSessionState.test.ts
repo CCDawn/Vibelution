@@ -1442,4 +1442,61 @@ describe("chatSessionState", () => {
 
     expect(cleared).toBe(serverPublished);
   });
+
+  it("keeps the optimistic stopping phase while running snapshots keep arriving", () => {
+    const message = assistantTerminalTurn("assistant-1", "turn-1", "2026-01-01T00:00:00Z");
+    const stopping = markSessionDetailStopping(
+      makeDetail({ messages: [message], messageWindow: makeWindow(), activeTurnId: "turn-2" }),
+      { requestedAt: "2026-01-01T00:00:05Z" },
+    ) as SessionDetail;
+    const runningSnapshot = makeDetail({
+      messages: [message],
+      messageWindow: makeWindow(),
+      activeTurnId: "turn-2",
+      updatedAt: "2026-05-22T10:02:00Z",
+    });
+
+    const merged = mergeSessionDetailMessageWindow(stopping, runningSnapshot);
+
+    expect(merged.currentPhase).toBe("stopping");
+    expect(merged.stopRequested).toBe(true);
+    expect(merged.stopRequestedAt).toBe("2026-01-01T00:00:05Z");
+    expect(merged.updatedAt).toBe("2026-05-22T10:02:00Z");
+  });
+
+  it("keeps the stopping intent across a running control ack without a transcript", () => {
+    const stopping = markSessionDetailStopping(makeDetail({ activeTurnId: "turn-2" }), {
+      requestedAt: "2026-01-01T00:00:05Z",
+    }) as SessionDetail;
+    const runningAck = {
+      id: "session-live",
+      currentPhase: "running",
+      activeTurnId: "turn-2",
+    } as unknown as SessionDetail;
+
+    const merged = mergeSessionDetailMessageWindow(stopping, runningAck);
+
+    expect(merged.currentPhase).toBe("stopping");
+    expect(merged.stopRequested).toBe(true);
+    expect(merged.stopRequestedAt).toBe("2026-01-01T00:00:05Z");
+    expect(merged.messages).toEqual(stopping.messages);
+  });
+
+  it("lets a terminal snapshot end the stopping intent", () => {
+    const stopping = markSessionDetailStopping(makeDetail({ activeTurnId: "turn-2" }), {
+      requestedAt: "2026-01-01T00:00:05Z",
+    }) as SessionDetail;
+    const stopped = makeDetail({
+      currentPhase: "completed",
+      stopRequested: false,
+      stopRequestedAt: "",
+      updatedAt: "2026-05-22T10:03:00Z",
+    });
+
+    const merged = mergeSessionDetailMessageWindow(stopping, stopped);
+
+    expect(merged.currentPhase).toBe("completed");
+    expect(merged.stopRequested).toBe(false);
+    expect(merged.stopRequestedAt).toBe("");
+  });
 });

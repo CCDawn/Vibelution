@@ -443,3 +443,69 @@ describe("useSessionDetailStream stream lifecycle stability", () => {
     unmount(root);
   });
 });
+
+describe("useSessionDetailStream stop intent freeze", () => {
+  beforeEach(() => {
+    FakeEventSource.reset();
+    hookResults = [];
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  function seedStopIntent(queryClient: QueryClient, stopRequested: boolean) {
+    queryClient.setQueryData(queryKeys.session("s1"), {
+      id: "s1",
+      currentPhase: stopRequested ? "stopping" : "running",
+      stopRequested,
+      stopRequestedAt: stopRequested ? "2026-01-01T00:00:05Z" : "",
+      messages: [],
+    });
+  }
+
+  it("drops assistant deltas while the session stop intent is active", () => {
+    vi.useFakeTimers();
+    const { options, queryClient } = baseOptions({});
+    seedStopIntent(queryClient, true);
+    const setActiveTurnLayersBySessionSpy = options.setActiveTurnLayersBySession as ReturnType<typeof vi.fn>;
+    const root = mount(options);
+    act(() => {
+      FakeEventSource.instances[0].open();
+    });
+
+    act(() => {
+      FakeEventSource.instances[0].emit("assistant_delta", assistantDeltaEvent({ ledgerSeq: 1 }));
+      vi.advanceTimersByTime(64);
+    });
+
+    expect(setActiveTurnLayersBySessionSpy).not.toHaveBeenCalled();
+    unmount(root);
+  });
+
+  it("applies assistant deltas again after the stop intent clears", () => {
+    vi.useFakeTimers();
+    const { options, queryClient } = baseOptions({});
+    seedStopIntent(queryClient, true);
+    const setActiveTurnLayersBySessionSpy = options.setActiveTurnLayersBySession as ReturnType<typeof vi.fn>;
+    const root = mount(options);
+    act(() => {
+      FakeEventSource.instances[0].open();
+    });
+
+    act(() => {
+      FakeEventSource.instances[0].emit("assistant_delta", assistantDeltaEvent({ ledgerSeq: 1 }));
+      vi.advanceTimersByTime(64);
+    });
+    expect(setActiveTurnLayersBySessionSpy).not.toHaveBeenCalled();
+
+    seedStopIntent(queryClient, false);
+    act(() => {
+      FakeEventSource.instances[0].emit("assistant_delta", assistantDeltaEvent({ ledgerSeq: 2 }));
+      vi.advanceTimersByTime(64);
+    });
+    expect(setActiveTurnLayersBySessionSpy).toHaveBeenCalledTimes(1);
+    unmount(root);
+  });
+});

@@ -1,4 +1,5 @@
 import { ConversationMessage, SessionDetail, SessionMessageWindow, SessionReferenceAttachment, SessionStreamEvent, SessionSummary } from "../api/types";
+import { isRunningPhase } from "./chat/chatCodingRouteViewModel";
 import { hasTerminalCanonicalTurnOutcome } from "./chatTurnProtocol";
 
 export type OptimisticUserMessageInput = {
@@ -473,6 +474,40 @@ function withPreservedSecondaryLists(
 }
 
 export function mergeSessionDetailMessageWindow(
+  previous: SessionDetail | undefined,
+  next: SessionDetail,
+): SessionDetail {
+  return preserveSessionDetailStopIntent(
+    previous,
+    mergeSessionDetailMessageWindowInner(previous, next),
+  );
+}
+
+/**
+ * A requested stop is a client-owned intent until the worker publishes a
+ * terminal snapshot. Running snapshots emitted before the worker observes the
+ * request must not flip the UI back out of "stopping".
+ */
+function preserveSessionDetailStopIntent(
+  previous: SessionDetail | undefined,
+  next: SessionDetail,
+): SessionDetail {
+  if (!previous || previous.id !== next.id || !previous.stopRequested) {
+    return next;
+  }
+  const phase = String(next.currentPhase || next.status || "").trim().toLowerCase();
+  if (!isRunningPhase(phase)) {
+    return next;
+  }
+  return {
+    ...next,
+    currentPhase: "stopping",
+    stopRequested: true,
+    stopRequestedAt: previous.stopRequestedAt || next.stopRequestedAt,
+  };
+}
+
+function mergeSessionDetailMessageWindowInner(
   previous: SessionDetail | undefined,
   next: SessionDetail,
 ): SessionDetail {
