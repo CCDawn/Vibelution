@@ -6636,6 +6636,36 @@ def test_long_qwen_explicit_cache_stream_refreshes_same_payload_prefix(monkeypat
     assert "stream_options" not in probe
 
 
+def test_operator_invocation_does_not_start_unbudgeted_cache_keepalive(monkeypatch):
+    from core.llm.client import model_invocation_receipt_context_scope
+
+    monkeypatch.setattr(
+        "core.llm.client._QWEN_INFLIGHT_CACHE_KEEPALIVE_INTERVAL_LIMIT", 0.01,
+    )
+    probe_seen = threading.Event()
+
+    def backend(payload):
+        probe_seen.set()
+        return {"choices": [], "usage": {"prompt_tokens": 12000}}
+
+    client = LLMClient(config=_qwen_keepalive_config(), backend=backend)
+    # The binding is supplied by server-owned invocation admission. The
+    # optional helper must not create provider I/O outside that admission.
+    with model_invocation_receipt_context_scope({"operatorInvocationBinding": {}}):
+        stop = client._start_qwen_inflight_cache_keepalive(
+            {"messages": _qwen_keepalive_messages(), "stream": True},
+            metadata={"invocationId": "operator-budgeted-call"},
+            protocol_summary={"promptCacheProviderStrategy": "qwen_explicit_cache_control"},
+            payload_summary={"promptCachePayload": {"cacheControlBlockCount": 1}},
+            message_count=2,
+            tool_count=0,
+        )
+        try:
+            assert not probe_seen.wait(0.1), "cache probe bypassed the operator budget"
+        finally:
+            stop()
+
+
 def test_qwen_inflight_cache_keepalive_requires_strategy_marker_and_spare_route_slot(
     monkeypatch,
 ):

@@ -4719,6 +4719,12 @@ class LLMClient:
     ) -> Callable[[], None]:
         """Refresh one active Qwen request prefix until its stream finishes."""
 
+        receipt_scope = _MODEL_INVOCATION_RECEIPT_CONTEXT.get()
+        if isinstance(receipt_scope, Mapping) and receipt_scope.get("operatorInvocationBinding") is not None:
+            # This helper calls the backend directly on a separate thread;
+            # its requests have no operator admission or settlement receipt.
+            # Optional cache refresh cannot spend outside the frozen budget.
+            return lambda: None
         route_concurrency = _resolve_llm_route_concurrency_limit(self.config)
         if not _qwen_inflight_cache_keepalive_enabled(
             protocol_summary=protocol_summary,
