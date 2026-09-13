@@ -665,7 +665,8 @@ def invoke_agent_llm_turn(
                     outcome="failed",
                 )
                 hooks.request_compression(
-                    f"LLM provider reported context limit: {category}"
+                    f"LLM provider reported context limit: {category}",
+                    source="provider_limit",
                 )
                 return result
 

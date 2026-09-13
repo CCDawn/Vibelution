@@ -408,12 +408,15 @@ def test_adapter_stops_for_context_compression_without_fallback():
                 user_message="too long",
                 request_context_compression=True,
             ),
-            request_compression=lambda reason: compress_calls.append(reason),
+            request_compression=lambda reason, *, source="manual": compress_calls.append(
+                (reason, source)
+            ),
         ),
     )
     assert result.payload is None
     assert llm_calls == ["primary"]
     assert compress_calls
+    assert compress_calls[0][1] == "provider_limit"
     assert result.last_error_category == "context_length_error"
     assert result.last_recovery_action == "compress_context"
 

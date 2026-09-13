@@ -1265,13 +1265,15 @@ def format_compression_report(compressor: Any) -> str:
 # 模块级标志：工具设置，agent 主循环检查并执行
 _compression_requested: bool = False
 _compression_reason: str = ""
+_compression_source: str = ""
 
 
-def request_compression(reason: str = "主动压缩") -> str:
+def request_compression(reason: str = "主动压缩", *, source: str = "manual") -> str:
     """请求上下文检查点或压缩 fallback（由 compress_context_tool 调用）"""
-    global _compression_requested, _compression_reason
+    global _compression_requested, _compression_reason, _compression_source
     _compression_requested = True
     _compression_reason = reason
+    _compression_source = str(source or "manual").strip() or "manual"
     return f"已请求上下文检查点/压缩 fallback: {reason}。原始会话历史不会被删除或改写。"
 
 
@@ -1280,12 +1282,18 @@ def is_compression_requested() -> bool:
     return _compression_requested
 
 
+def compression_request_source() -> str:
+    """返回当前压缩请求的来源（provider_limit / manual），未请求时为空。"""
+    return _compression_source
+
+
 def consume_compression_request() -> str:
     """消费压缩请求并返回原因（由 agent 主循环调用）"""
-    global _compression_requested, _compression_reason
+    global _compression_requested, _compression_reason, _compression_source
     reason = _compression_reason
     _compression_requested = False
     _compression_reason = ""
+    _compression_source = ""
     return reason
 
 

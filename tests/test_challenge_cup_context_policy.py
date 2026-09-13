@@ -793,6 +793,73 @@ def test_effective_policy_unversioned_trigger_never_exceeds_effective_limit():
     )
 
 
+def test_unversioned_policy_unreachable_trigger_derives_frozen_window_budget():
+    """An unversioned policy whose trigger sits at the hard limit (the live
+    262,144/262,144 residue) must derive the v3 fail-safe budget instead of
+    letting the provider reject the call before automatic compression fires.
+    """
+
+    effective = agent_directory_service.effective_agent_context_compression_policy(
+        {
+            "contextCompressionPolicy": {
+                "mode": "custom",
+                "enabled": True,
+                "maxTokenLimit": 262_144,
+                "compressionTriggerTokenLimit": 262_144,
+            }
+        },
+        None,
+        context_window_limit=262_144,
+        reserved_max_output_tokens=32_768,
+    )
+
+    assert int(effective["effectiveTokenLimit"]) == 262_144
+    assert int(effective["compressionTriggerTokenLimit"]) == 204_800
+    assert int(effective["postCompressionTargetTokenLimit"]) == 147_456
+    assert int(effective["compressionTriggerTokenLimit"]) < int(
+        effective["effectiveTokenLimit"]
+    )
+
+
+def test_unversioned_policy_missing_trigger_derives_positive_budget():
+    effective = agent_directory_service.effective_agent_context_compression_policy(
+        {
+            "contextCompressionPolicy": {
+                "mode": "custom",
+                "enabled": True,
+                "maxTokenLimit": 262_144,
+            }
+        },
+        None,
+        context_window_limit=262_144,
+    )
+
+    trigger = int(effective["compressionTriggerTokenLimit"])
+    target = int(effective["postCompressionTargetTokenLimit"])
+    assert 0 < trigger < int(effective["effectiveTokenLimit"])
+    assert 0 < target < trigger
+
+
+def test_unversioned_policy_keeps_deliberately_lower_trigger_and_target():
+    effective = agent_directory_service.effective_agent_context_compression_policy(
+        {
+            "contextCompressionPolicy": {
+                "mode": "custom",
+                "enabled": True,
+                "maxTokenLimit": 200_000,
+                "compressionTriggerTokenLimit": 100_000,
+                "postCompressionTargetTokenLimit": 60_000,
+            }
+        },
+        None,
+        context_window_limit=262_144,
+    )
+
+    assert int(effective["effectiveTokenLimit"]) == 200_000
+    assert int(effective["compressionTriggerTokenLimit"]) == 100_000
+    assert int(effective["postCompressionTargetTokenLimit"]) == 60_000
+
+
 # ---------------------------------------------------------------------------
 # 6) Bootstrap hook: fail-soft, version-gated one-time migration
 # ---------------------------------------------------------------------------

@@ -186,6 +186,23 @@ def test_successful_compression_updates_count_and_marks_applied():
     assert compressor.calls[0]["use_llm_summary"] is False
 
 
+def test_explicit_trigger_source_overrides_reason_guessing():
+    original = [AIMessage(content="a" * 40), AIMessage(content="b" * 40)]
+    extras = {}
+
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor([AIMessage(content="short")], summary="ok"),
+        config=_feature_config(),
+        extra=extras,
+        iteration=6,
+        trigger_source="provider_limit",
+    )
+
+    assert result[2] is True
+    assert extras["ui"].events[-1]["trigger_source"] == "provider_limit"
+
+
 def test_ineffective_compression_still_returns_compressor_output_and_consumes_slot():
     original = [AIMessage(content="same-size-message")]
     compressor = _FakeCompressor(original, summary="")

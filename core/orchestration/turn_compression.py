@@ -263,6 +263,7 @@ def compress_turn_messages(
     context_input_hard_limit: int = 0,
     post_compression_target_tokens: int = 0,
     retention_contract: Optional[Mapping[str, Any]] = None,
+    trigger_source: str = "",
 ) -> Tuple[List[Any], bool, bool, int, int]:
     """Execute message compression.
 
@@ -359,6 +360,10 @@ def compress_turn_messages(
 
     # 执行压缩
     combined_reason = reason or f"Level: {level.value}"
+    resolved_trigger_source = (
+        _coerce_text(trigger_source).strip()
+        or _context_compression_trigger_source(combined_reason)
+    )
     use_llm = level in (CompressionLevel.DEEP, CompressionLevel.EMERGENCY)
     messages_for_compression = messages
     tool_result_replacement_state: Dict[str, Any] = {"replacements": []}
@@ -572,7 +577,7 @@ def compress_turn_messages(
                         before_tokens=current_tokens,
                         after_tokens=after_tokens,
                         iteration=iteration,
-                        trigger_source=_context_compression_trigger_source(combined_reason),
+                        trigger_source=resolved_trigger_source,
                         effectiveness_threshold=effectiveness_threshold,
                         effectiveness_ratio=effectiveness_ratio,
                         effective=True,
@@ -590,7 +595,7 @@ def compress_turn_messages(
                         reason=combined_reason,
                         before_tokens=current_tokens,
                         after_tokens=after_tokens,
-                        trigger_source=_context_compression_trigger_source(combined_reason),
+                        trigger_source=resolved_trigger_source,
                         effectiveness_threshold=effectiveness_threshold,
                         effectiveness_ratio=effectiveness_ratio,
                     )
@@ -626,7 +631,7 @@ def compress_turn_messages(
                         reason=combined_reason,
                         before_tokens=current_tokens,
                         after_tokens=current_tokens,
-                        trigger_source=_context_compression_trigger_source(combined_reason),
+                        trigger_source=resolved_trigger_source,
                         effectiveness_threshold=effectiveness_threshold,
                         effectiveness_ratio=effectiveness_ratio,
                         error_type=type(exc).__name__,
@@ -669,7 +674,7 @@ def compress_turn_messages(
             saved_tokens=token_saved,
             iteration=iteration,
             summary_written=summary_written,
-            trigger_source=_context_compression_trigger_source(combined_reason),
+            trigger_source=resolved_trigger_source,
         )
     except Exception:
         pass

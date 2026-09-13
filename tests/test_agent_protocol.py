@@ -5650,8 +5650,8 @@ class TestLocalProviderBootstrap:
         llm_message_counts = []
         scene_events = []
 
-        def fake_compress(messages, iteration, reason=""):
-            compress_calls.append((iteration, reason, len(messages)))
+        def fake_compress(messages, iteration, reason="", trigger_source=""):
+            compress_calls.append((iteration, reason, len(messages), trigger_source))
             # Match real compress path: only then does the main loop append a runtime notice.
             agent._last_context_compression_applied = True
             return list(messages[:2]), False
@@ -5743,6 +5743,176 @@ class TestLocalProviderBootstrap:
         } <= fields.keys()
         assert "prompt" not in fields
         assert "content" not in fields
+
+    def _provider_context_retry_agent(self, monkeypatch, *, max_retries, invoke, compress_calls, ui_logs):
+        agent = AgentRuntime.__new__(AgentRuntime)
+        agent.name = "provider-context-retry-tester"
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(get_profile=lambda role="primary": SimpleNamespace(model="demo-model")),
+            agent=SimpleNamespace(max_iterations=1),
+            context_compression=SimpleNamespace(
+                enabled=True,
+                max_compressions_per_session=3,
+                levels=SimpleNamespace(standard=0.8),
+            ),
+        )
+        agent.prompt_manager = SimpleNamespace(
+            update_current_goal=lambda _goal: None,
+            set_runtime_goal_packet=lambda _packet: None,
+            clear_state_memory=lambda persist=True: None,
+            build=lambda: "stable system prompt",
+        )
+        agent.git_memory = SimpleNamespace(
+            refresh_git_memory=lambda force=False: SimpleNamespace(
+                available=True,
+                head_rev="abc",
+                indexed_head_rev="abc",
+                dirty=False,
+                error=None,
+            )
+        )
+        agent._active_turn_messages = []
+        agent._active_turn_goal = None
+        agent._pending_lifecycle_action = None
+        agent._system_prompt_written = False
+        agent._cached_system_prompt = ""
+        agent._context_window_limit = 1000
+        agent._effective_max_token_limit = 1000
+        agent._pending_static_context_blocks = []
+        agent._pending_runtime_context_blocks = []
+        agent._last_turn_metadata = {}
+        agent._last_turn_failed = False
+        agent._single_turn_mode_active = False
+        agent._active_goal = None
+        agent._last_runtime_state_memory = ""
+        agent._last_runtime_state_memory_key = ""
+        agent._force_disable_tools_for_turn = True
+        agent._compression_min_iteration_gap = 0
+        agent._runtime_state_memory_dirty = False
+        agent._context_compression_retry_used = False
+        agent._provider_context_compression_retries = 0
+        agent._last_context_compression_applied = False
+        agent._sync_runtime_state_memory = lambda force=False: None
+        agent._seed_runtime_agent_context_for_turn = lambda run_id=None: None
+        agent._refresh_retrospective_state_memory = lambda: None
+        agent._current_turn_stop_reason = lambda: None
+        agent._raise_if_turn_stop_requested = lambda: None
+        agent._get_mode_policy = lambda: ModePolicy(
+            mode=AgentMode.CHAT,
+            orchestrator_kind="chat",
+            keep_multi_turn_context=True,
+            allow_auto_loop=False,
+            capture_chat_dataset_candidates=False,
+            reset_context_before_turn=False,
+            reset_context_between_cases=False,
+            allow_direct_supervised_payload=False,
+            finish_after_direct_response=False,
+            runtime_input_builder=build_chat_user_message,
+        )
+        agent._create_round_state = lambda: RoundStateController(max_iterations=max_retries)
+        agent.is_mental_model_enabled_for_turn = lambda: False
+        agent._reconcile_chat_conversation_before_llm = lambda msgs: (msgs, True)
+
+        def fake_compress(messages, iteration, reason="", trigger_source=""):
+            compress_calls.append({"reason": reason, "triggerSource": trigger_source})
+            agent._last_context_compression_applied = True
+            return list(messages[:2]), False
+
+        agent._compress_messages = fake_compress
+        agent._invoke_llm = invoke
+
+        class DummyUI:
+            def note_context_window(self, *_args, **_kwargs):
+                pass
+
+            def update_status(self, *_args, **_kwargs):
+                pass
+
+            def add_log(self, message, *_args, **_kwargs):
+                ui_logs.append(str(message))
+
+            def note_turn_start(self, *_args, **_kwargs):
+                pass
+
+            def note_turn_result(self, *_args, **_kwargs):
+                pass
+
+        class DummyLogger:
+            _turn_count = 1
+
+            def log_action(self, *_args, **_kwargs):
+                pass
+
+            def write_system_prompt(self, *_args, **_kwargs):
+                pass
+
+            def log_external_request(self, *_args, **_kwargs):
+                pass
+
+            def start_turn(self, *_args, **_kwargs):
+                pass
+
+            def log_llm_request(self, *_args, **_kwargs):
+                pass
+
+            def log_turn_end(self, *_args, **_kwargs):
+                pass
+
+        monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
+        monkeypatch.setattr(agent_module, "logger", DummyLogger())
+        monkeypatch.setattr(agent_module._debug_logger, "turn_end", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(agent_module, "estimate_messages_tokens", lambda messages, *a, **k: 500)
+        monkeypatch.setattr(agent_module, "estimate_messages_tokens_for_threshold", lambda messages, *a, **k: 500)
+        monkeypatch.setattr(agent_module, "get_session_state", lambda: SimpleNamespace(
+            set_runtime_goal_packet=lambda _packet: None,
+            reset_runtime_constraints=lambda: None,
+            get_attention_snapshot=lambda: {},
+            get_active_evolution_txn=lambda: None,
+        ))
+        monkeypatch.setattr(
+            agent_module,
+            "_record_agent_scene_event",
+            lambda *args, **kwargs: None,
+        )
+        return agent
+
+    def test_provider_context_length_error_compresses_then_retries_once(self, monkeypatch):
+        from tools.token_manager import consume_compression_request, is_compression_requested
+
+        consume_compression_request()
+        invoke_calls = []
+        compress_calls = []
+        ui_logs = []
+
+        def fake_invoke(messages, replay_state=None):
+            invoke_calls.append(len(messages))
+            agent._last_llm_error_category = "context_length_error"
+            agent._last_llm_error_retryable = False
+            agent._last_llm_error_message = "context_length_error: model refused"
+            agent._last_llm_error_details = {}
+            agent._last_llm_failure_attempts = 1
+            agent._last_llm_failure_max_attempts = 5
+            return None
+
+        agent = self._provider_context_retry_agent(
+            monkeypatch,
+            max_retries=4,
+            invoke=fake_invoke,
+            compress_calls=compress_calls,
+            ui_logs=ui_logs,
+        )
+
+        agent._run_orchestrated_turn(user_prompt="触发 provider 上下文超限")
+
+        assert len(invoke_calls) == 2
+        assert compress_calls
+        assert compress_calls[0]["triggerSource"] == "provider_limit"
+        assert "context limit" in compress_calls[0]["reason"]
+        assert agent._provider_context_compression_retries == 1
+        assert agent._context_compression_retry_used is True
+        assert is_compression_requested() is False
+        assert any("上下文超限" in message and "新会话" in message for message in ui_logs)
+        consume_compression_request()
 
     def test_runtime_agent_llm_slot_binding_maps_subagent_execution_to_primary(self, monkeypatch):
         monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-subagent-slot")

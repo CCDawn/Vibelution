@@ -130,9 +130,12 @@ from tools.token_manager import (
     estimate_messages_tokens_for_threshold,
     estimate_tokens_precise,
     is_compression_requested,
+    compression_request_source,
     consume_compression_request,
     request_compression,
 )
+# Provider context-limit recovery: one retry per turn, bounded per session.
+_MAX_PROVIDER_CONTEXT_COMPRESSION_RETRIES = 2
 from tools.compression_strategy import (
     CompressionLevel,
     CompressionStrategy,
@@ -379,6 +382,11 @@ class AgentRuntime:
         self._compression_count_this_turn = 0
         self._last_compression_iteration = 0
         self._compression_min_iteration_gap = 2
+        # Provider context-limit recovery: one compression retry per turn,
+        # bounded across the session so a provider that keeps rejecting the
+        # compressed context cannot replay forever.
+        self._context_compression_retry_used = False
+        self._provider_context_compression_retries = 0
 
         # 网络退避追踪
         self._last_turn_failed = False
@@ -833,6 +841,9 @@ class AgentRuntime:
                 agent,
                 self.config.context_compression,
                 context_window_limit=int(getattr(self, "_context_window_limit", 0) or 0),
+                reserved_max_output_tokens=int(
+                    getattr(getattr(self, "model_info", None), "max_output_tokens", 0) or 0
+                ),
             )
         except Exception as exc:
             _record_agent_scene_event(
@@ -1446,7 +1457,7 @@ class AgentRuntime:
         except Exception:
             pass
 
-    def _compress_messages(self, messages: list, iteration: int, reason: str = ""):
+    def _compress_messages(self, messages: list, iteration: int, reason: str = "", trigger_source: str = ""):
         """执行消息压缩。返回 (messages, should_break)。"""
         (
             compressed,
@@ -1478,6 +1489,7 @@ class AgentRuntime:
             context_input_hard_limit=int(getattr(self, "_context_input_hard_limit", 0) or 0),
             post_compression_target_tokens=int(getattr(self, "_post_compression_target_tokens", 0) or 0),
             retention_contract=self._context_budget_retention_contract(),
+            trigger_source=trigger_source,
         )
         self._last_context_compression_applied = applied
         return compressed, should_break
@@ -2487,6 +2499,7 @@ class AgentRuntime:
         logger.log_llm_request(messages, model=model_name)
         self._compression_count_this_turn = 0
         self._last_compression_iteration = 0
+        self._context_compression_retry_used = False
         round_state = self._create_round_state()
         lifecycle_action: Optional[str] = None
         turn_tool_names: List[str] = []
@@ -2567,11 +2580,24 @@ class AgentRuntime:
                 delegation_ms = 0
                 self._raise_if_turn_stop_requested()
 
-                # 硬限制：超出最大上下文时强制压缩
+                # 硬限制：超出最大上下文时强制压缩；provider/工具请求的压缩
+                # 在同一个模型调用前闸口消费，避免标志无人消费就失败收口。
                 compression_triggered = self._should_automatically_compress(current_tokens)
+                compression_trigger_source = "auto" if compression_triggered else ""
+                compression_reason = "达到配置的上下文压缩阈值" if compression_triggered else ""
+                if not compression_triggered and is_compression_requested():
+                    requested_source = compression_request_source() or "manual"
+                    compression_reason = consume_compression_request() or "provider context limit"
+                    compression_trigger_source = (
+                        "provider_limit" if requested_source == "provider_limit" else "manual"
+                    )
+                    compression_triggered = True
                 if compression_triggered:
                     messages, should_break = self._compress_messages(
-                        messages, iteration, reason="达到配置的上下文压缩阈值"
+                        messages,
+                        iteration,
+                        reason=compression_reason,
+                        trigger_source=compression_trigger_source,
                     )
                     # Re-estimate only after messages actually changed.
                     after_tokens = estimate_messages_tokens(messages)
@@ -2653,6 +2679,31 @@ class AgentRuntime:
                         )
                         invocation_result = self._invoke_llm(messages, replay_state=provider_replay_state)
                 if invocation_result is None:
+                    provider_context_error = (
+                        str(getattr(self, "_last_llm_error_category", "") or "").strip()
+                        == "context_length_error"
+                    )
+                    if provider_context_error:
+                        can_retry = (
+                            not self._context_compression_retry_used
+                            and self._provider_context_compression_retries
+                            < _MAX_PROVIDER_CONTEXT_COMPRESSION_RETRIES
+                        )
+                        if can_retry:
+                            self._context_compression_retry_used = True
+                            self._provider_context_compression_retries += 1
+                            if not is_compression_requested():
+                                request_compression(
+                                    "LLM provider reported context limit: context_length_error",
+                                    source="provider_limit",
+                                )
+                            ui.add_log("模型报告上下文超限：已请求压缩，本轮回退重试一次。", "WARN")
+                            continue
+                        ui.add_log(
+                            "模型报告上下文超限，压缩未释放足够空间；本轮结束，"
+                            "请开启新会话或减少输入后重试。",
+                            "ERROR",
+                        )
                     consecutive_failures = round_state.note_llm_failure()
                     self._last_turn_failed = True
                     ui.update_status(
@@ -2721,6 +2772,7 @@ class AgentRuntime:
                     )
                     turn_outcome = canonical_outcome_from_message(response, scope=compatibility_scope)
                 provider_replay_state = turn_outcome.replay_state
+                self._provider_context_compression_retries = 0
                 if responses_continuation_disabled and provider_replay_state is not None:
                     provider_replay_state = provider_replay_state.without_response_id()
                 if policy.mode == AgentMode.CHAT:
@@ -2978,9 +3030,15 @@ class AgentRuntime:
 
                 # 检查压缩请求（compress_context_tool 设置的标志）
                 if is_compression_requested():
+                    requested_source = compression_request_source() or "manual"
                     reason = consume_compression_request()
                     _debug_logger.info(f"[压缩] 感知层请求压缩: {reason}", tag="STATE")
-                    messages, _ = self._compress_messages(messages, iteration, reason=reason)
+                    messages, _ = self._compress_messages(
+                        messages,
+                        iteration,
+                        reason=reason,
+                        trigger_source=requested_source,
+                    )
                     self._mark_runtime_state_memory_dirty()
                     self._raise_if_turn_stop_requested()
 

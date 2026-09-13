@@ -1089,6 +1089,7 @@ def effective_agent_context_compression_policy(
     base_policy: Any = None,
     *,
     context_window_limit: int = 0,
+    reserved_max_output_tokens: int = 0,
 ) -> dict[str, Any]:
     """Merge an Agent-owned compression policy with the runtime window limit.
 
@@ -1096,6 +1097,10 @@ def effective_agent_context_compression_policy(
     ``context_window_limit``, and the trigger/target contract is re-derived so
     both always stay strictly below that window-derived hard limit (clamping
     only lowers values, never raises a deliberately smaller operator value).
+    Unversioned custom policies without a reachable trigger additionally derive
+    a fail-safe trigger/target from the shared versioned budget formula so
+    automatic compression fires before the provider rejects the call for
+    exceeding its own input cap.
     """
     s = _service()
     raw_agent_policy = s.normalize_agent_context_compression_policy(
@@ -1198,8 +1203,37 @@ def effective_agent_context_compression_policy(
             if clamped_target > 0:
                 clamped_target = min(clamped_target, int(effective_limit * POST_COMPRESSION_TARGET_RATIO))
         else:
-            # Unversioned custom policies: deadlock invariant only — trigger
-            # never above the hard limit, target never at/above the trigger.
+            # Unversioned custom policies: derive a fail-safe trigger/target
+            # from the shared versioned budget formula whenever the stored
+            # trigger is missing or unreachable (at/above the effective hard
+            # limit, which means automatic compression could never fire before
+            # the provider's own input cap rejects the call). The derived
+            # values reuse the v3 reserved-output / safety-reserve contract.
+            from core.web.services.team.challenge_cup_context_policy import (
+                challenge_cup_context_budget,
+            )
+
+            try:
+                derived = challenge_cup_context_budget(
+                    context_window=effective_limit,
+                    reserved_max_output_tokens=(
+                        int(reserved_max_output_tokens)
+                        if int(reserved_max_output_tokens or 0) > 0
+                        else None
+                    ),
+                )
+            except ValueError:
+                derived = {}
+            derived_trigger = int(derived.get("compressionTriggerTokenLimit") or 0)
+            derived_target = int(derived.get("postCompressionTargetTokenLimit") or 0)
+            if derived_trigger > 0 and (
+                clamped_trigger <= 0 or clamped_trigger >= effective_limit
+            ):
+                clamped_trigger = derived_trigger
+            if derived_target > 0 and (
+                clamped_target <= 0 or clamped_target >= clamped_trigger
+            ):
+                clamped_target = derived_target
             clamped_trigger = min(clamped_trigger, effective_limit)
             if clamped_trigger > 1 and clamped_target > 0:
                 clamped_target = min(clamped_target, clamped_trigger - 1)
