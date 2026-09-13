@@ -119,8 +119,7 @@ def test_adapter_routes_network_calls_through_injected_invocation():
     assert result.payload[1].content == "ok"
     assert calls and calls[0][0].profile_id == "primary"
 
-
-def test_adapter_uses_injected_recovery_for_fallback_profile():
+def test_adapter_fails_route_without_switching_profiles_on_retryable_error():
     calls = []
 
     class PrimaryLLM:
@@ -135,30 +134,16 @@ def test_adapter_uses_injected_recovery_for_fallback_profile():
         def project_outcome_message(self, outcome):
             return AIMessage(content=outcome.final_text)
 
-    class FallbackLLM:
-        profile_id = "fallback_backup"
-
-        def effective_route_identity(self):
-            return ("local", "fallback")
-
-        def effective_route_id(self):
-            return "fallback-route"
-
-        def project_outcome_message(self, outcome):
-            return AIMessage(content=outcome.final_text)
-
     def invoke_outcome(client, _messages, **_kwargs):
         calls.append(client.profile_id)
-        if client.profile_id == "primary":
-            raise LLMError(
-                "server_error",
-                "provider 服务异常",
-                retryable=True,
-                details={"attempt": 5, "max_attempts": 5, "retry_budget_exhausted": True},
-            )
-        return TurnOutcome.final_answer(identity=_identity(), text="fallback ok")
+        raise LLMError(
+            "server_error",
+            "provider 服务异常",
+            retryable=True,
+            details={"attempt": 5, "max_attempts": 5, "retry_budget_exhausted": True},
+        )
 
-    def plan_recovery(_error, *, current_profile_id=None, **_kwargs):
+    def plan_recovery(_error, **_kwargs):
         return SimpleNamespace(
             category="server_error",
             retryable=True,
@@ -169,7 +154,6 @@ def test_adapter_uses_injected_recovery_for_fallback_profile():
             disable_streaming=False,
             disable_tools=False,
             request_context_compression=False,
-            fallback_profile_id="fallback_backup" if current_profile_id == "primary" else None,
         )
 
     hooks = AgentLlmTurnHooks(
@@ -177,9 +161,7 @@ def test_adapter_uses_injected_recovery_for_fallback_profile():
         llm_cancel_context=lambda _checker: _DummyContext(),
         raise_if_stop=lambda: None,
         current_stop_reason=lambda: "",
-        get_llm_for_mode=lambda **kwargs: (
-            FallbackLLM() if kwargs.get("profile_id") == "fallback_backup" else PrimaryLLM()
-        ),
+        get_llm_for_mode=lambda **_kwargs: PrimaryLLM(),
         should_stream=lambda *_args, **_kwargs: False,
         build_invocation_context=lambda **_kwargs: SimpleNamespace(
             to_metadata=lambda client=None: {
@@ -199,7 +181,7 @@ def test_adapter_uses_injected_recovery_for_fallback_profile():
         record_scene_event=lambda *_args, **_kwargs: None,
         record_route_success=lambda **_kwargs: None,
         request_compression=lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("fallback success must not compress")
+            AssertionError("route failure must not compress")
         ),
         debug_logger=SimpleNamespace(error=lambda *_args, **_kwargs: None),
         error_logger=SimpleNamespace(log_error=lambda *_args, **_kwargs: None),
@@ -209,9 +191,12 @@ def test_adapter_uses_injected_recovery_for_fallback_profile():
         base_llm=PrimaryLLM(),
     )
     result = invoke_agent_llm_turn(messages=[AIMessage(content="hello")], hooks=hooks)
-    assert calls == ["primary", "fallback_backup"]
-    assert result.payload[1].content == "fallback ok"
+    assert calls == ["primary"]
+    assert result.payload is None
     assert result.last_error_category == "server_error"
+    assert result.last_failure_attempts == 5
+
+
 
 
 def test_agent_wrapper_writes_failure_diagnostics(monkeypatch):
@@ -243,7 +228,6 @@ def test_agent_wrapper_writes_failure_diagnostics(monkeypatch):
             disable_streaming=False,
             disable_tools=False,
             request_context_compression=False,
-            fallback_profile_id=None,
         ),
     )
     monkeypatch.setattr(agent_module.logger, "log_error", lambda *_args, **_kwargs: None)
@@ -307,7 +291,6 @@ def _recovery(**overrides):
         disable_streaming=False,
         disable_tools=False,
         request_context_compression=False,
-        fallback_profile_id=None,
     )
     payload.update(overrides)
     return SimpleNamespace(**payload)
@@ -396,7 +379,6 @@ def test_adapter_stops_for_context_compression_without_fallback():
     compress_calls = []
 
     primary = _route_llm("primary", identity=("relay", "primary"))
-    fallback = _route_llm("fallback_backup", identity=("local", "fallback"))
 
     def invoke_outcome(client, *_args, **_kwargs):
         llm_calls.append(client.profile_id)
@@ -407,9 +389,7 @@ def test_adapter_stops_for_context_compression_without_fallback():
             details={"attempt": 1, "max_attempts": 1},
         )
 
-    def get_llm_for_mode(**kwargs):
-        if kwargs.get("profile_id") == "fallback_backup":
-            return fallback
+    def get_llm_for_mode(**_kwargs):
         return primary
 
     result = invoke_agent_llm_turn(
@@ -423,7 +403,6 @@ def test_adapter_stops_for_context_compression_without_fallback():
                 action="compress_context",
                 user_message="too long",
                 request_context_compression=True,
-                fallback_profile_id="fallback_backup",
             ),
             request_compression=lambda reason: compress_calls.append(reason),
         ),
@@ -484,6 +463,49 @@ def test_adapter_forwards_and_validates_strict_structured_output():
     assert received == [contract]
     assert result.payload[0].kind == "final_answer"
 
+def test_adapter_coerces_false_flags_and_json_error_details():
+    llm_calls = []
+    seen_disable = []
+
+    primary = _route_llm("primary", identity=("relay", "primary"))
+
+    def invoke_outcome(client, *_args, **_kwargs):
+        llm_calls.append(client.profile_id)
+        raise LLMError(
+            "server_error",
+            "boom",
+            retryable=True,
+            details='{"attempt":"1","max_attempts":"5","retry_budget_exhausted":"false"}',
+        )
+
+    def get_llm_for_mode(**kwargs):
+        seen_disable.append(kwargs.get("disable_tools"))
+        return primary
+
+    result = invoke_agent_llm_turn(
+        messages=[AIMessage(content="hello")],
+        hooks=_adapter_hooks(
+            get_llm_for_mode=get_llm_for_mode,
+            invoke_outcome=invoke_outcome,
+            force_disable_tools="false",
+            plan_recovery=lambda *_args, **_kwargs: _recovery(
+                category="server_error",
+                retryable="true",
+                action="retry_with_backoff",
+                user_message="boom",
+                stop_current_turn="false",
+                request_context_compression="false",
+            ),
+        ),
+    )
+    assert llm_calls == ["primary"]
+    assert result.payload is None
+    assert result.last_failure_attempts == 1
+    assert result.last_failure_max_attempts == 5
+    assert result.last_error_details["provider_stream_retry_exhausted"] is False
+    assert seen_disable == [False]
+
+
 
 def test_adapter_fails_closed_when_structured_output_is_invalid():
     contract = SemanticOutputSchema(
@@ -524,67 +546,16 @@ def test_sanitize_llm_turn_messages_rejects_character_split_and_decodes_system_r
     assert bytes_role[0]["content"] == "plain"
 
 
-def test_adapter_coerces_false_flags_json_details_and_bytes_fallback():
-    llm_calls = []
-    seen_disable = []
-
-    primary = _route_llm("primary", identity=("relay", "primary"))
-    fallback = _route_llm("fallback_backup", identity=("local", "fallback"))
-
-    def invoke_outcome(client, *_args, **_kwargs):
-        llm_calls.append(client.profile_id)
-        if client.profile_id == "primary":
-            raise LLMError(
-                "server_error",
-                "boom",
-                retryable=True,
-                details='{"attempt":"1","max_attempts":"5","retry_budget_exhausted":"false"}',
-            )
-        return TurnOutcome.final_answer(identity=_identity(), text="fallback ok")
-
-    def get_llm_for_mode(**kwargs):
-        seen_disable.append(kwargs.get("disable_tools"))
-        if kwargs.get("profile_id") == "fallback_backup":
-            return fallback
-        return primary
-
-    result = invoke_agent_llm_turn(
-        messages=[AIMessage(content="hello")],
-        hooks=_adapter_hooks(
-            get_llm_for_mode=get_llm_for_mode,
-            invoke_outcome=invoke_outcome,
-            force_disable_tools="false",
-            plan_recovery=lambda *_args, **_kwargs: _recovery(
-                category="server_error",
-                retryable="true",
-                action="retry_with_backoff",
-                user_message="boom",
-                stop_current_turn="false",
-                request_context_compression="false",
-                fallback_profile_id=b"fallback_backup",
-            ),
-        ),
-    )
-    assert llm_calls == ["primary", "fallback_backup"]
-    assert result.payload[1].content == "fallback ok"
-    assert result.last_failure_attempts == 1
-    assert result.last_failure_max_attempts == 5
-    assert result.last_error_details["provider_stream_retry_exhausted"] is False
-    assert seen_disable == [False, False]
-
 
 def test_adapter_does_not_fallback_when_retryable_is_false_string():
     llm_calls = []
     primary = _route_llm("primary", identity=("relay", "primary"))
-    fallback = _route_llm("fallback_backup", identity=("local", "fallback"))
 
     def invoke_outcome(client, *_args, **_kwargs):
         llm_calls.append(client.profile_id)
         raise LLMError("server_error", "boom", retryable=False, details={"attempt": 1, "max_attempts": 1})
 
-    def get_llm_for_mode(**kwargs):
-        if kwargs.get("profile_id") == "fallback_backup":
-            return fallback
+    def get_llm_for_mode(**_kwargs):
         return primary
 
     result = invoke_agent_llm_turn(
@@ -594,7 +565,6 @@ def test_adapter_does_not_fallback_when_retryable_is_false_string():
             invoke_outcome=invoke_outcome,
             plan_recovery=lambda *_args, **_kwargs: _recovery(
                 retryable="false",
-                fallback_profile_id="fallback_backup",
             ),
         ),
     )

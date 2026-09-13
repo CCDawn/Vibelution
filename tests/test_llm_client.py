@@ -38,7 +38,6 @@ from core.llm.semantic_messages import InvocationScope, SemanticOutputSchema
 from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, LLMError, LLMRouteGateTimeoutError, LLMStreamIdleDeadlineError, LLMStreamTotalDeadlineError, TurnOutcome
 from core.llm.wire.responses import ResponsesWireAdapter
 from core.llm.recovery import plan_recovery
-from core.llm.routing import attach_recovery_fallback, select_recovery_profile
 from tests.helpers.isolated_config import isolated_settings_config
 
 
@@ -5911,32 +5910,6 @@ def test_recovery_policy_requests_context_compression():
     assert decision.stop_current_turn is False
 
 
-def test_recovery_routing_prefers_no_tool_non_streaming_profile():
-    config = make_config(
-        **{
-            "llm.providers.default.kind": "minimax",
-            "llm.providers.default.api_key": "test-key",
-            "llm.providers.default.base_url": "https://api.minimaxi.com/v1",
-            "llm.providers.plain.kind": "local",
-            "llm.providers.plain.requires_api_key": False,
-            "llm.providers.plain.base_url": "http://localhost:8000/v1",
-            "llm.profiles.primary.provider_id": "default",
-            "llm.profiles.primary.model": "MiniMax-M2.7",
-            "llm.profiles.fallback_plain.provider_id": "plain",
-            "llm.profiles.fallback_plain.model": "qwen-32b-awq",
-            "llm.profiles.fallback_plain.streaming": False,
-            "llm.profiles.fallback_plain.tool_calling_mode": "disabled",
-        }
-    )
-
-    fallback = select_recovery_profile(
-        config,
-        current_profile_id="primary",
-        action="disable_tools_and_retry_without_streaming",
-    )
-
-    assert fallback == "fallback_plain"
-
 
 def test_effective_route_identity_distinguishes_profiles_without_secrets():
     config = make_config(
@@ -5950,110 +5923,22 @@ def test_effective_route_identity_distinguishes_profiles_without_secrets():
             "llm.profiles.primary.provider_id": "default",
             "llm.profiles.primary.model": "gpt-5.6-luna",
             "llm.profiles.primary.transport": "responses",
-            "llm.profiles.fallback_backup.provider_id": "backup",
-            "llm.profiles.fallback_backup.model": "qwen-32b-awq",
-            "llm.profiles.fallback_backup.transport": "chat_completions",
+            "llm.profiles.backup.provider_id": "backup",
+            "llm.profiles.backup.model": "qwen-32b-awq",
+            "llm.profiles.backup.transport": "chat_completions",
         }
     )
     primary = LLMClient(config=config, profile_id="primary", backend=lambda payload: payload)
-    fallback = LLMClient(config=config, profile_id="fallback_backup", backend=lambda payload: payload)
+    backup = LLMClient(config=config, profile_id="backup", backend=lambda payload: payload)
 
     assert primary.effective_route_identity() == primary.effective_route_identity()
-    assert primary.effective_route_identity() != fallback.effective_route_identity()
-    assert primary.effective_route_id() != fallback.effective_route_id()
+    assert primary.effective_route_identity() != backup.effective_route_identity()
+    assert primary.effective_route_id() != backup.effective_route_id()
     assert "primary-secret" not in repr(primary.effective_route_identity())
     assert "primary-secret" not in primary.effective_route_id()
 
 
-def test_recovery_decision_attaches_fallback_profile():
-    config = make_config(
-        **{
-            "llm.providers.default.kind": "minimax",
-            "llm.providers.default.api_key": "test-key",
-            "llm.providers.default.base_url": "https://api.minimaxi.com/v1",
-            "llm.providers.backup.kind": "local",
-            "llm.providers.backup.requires_api_key": False,
-            "llm.providers.backup.base_url": "http://localhost:8000/v1",
-            "llm.profiles.primary.provider_id": "default",
-            "llm.profiles.primary.model": "MiniMax-M2.7",
-            "llm.profiles.fallback_backup.provider_id": "backup",
-            "llm.profiles.fallback_backup.model": "qwen-32b-awq",
-            "llm.profiles.fallback_backup.streaming": False,
-            "llm.profiles.fallback_backup.tool_calling_mode": "disabled",
-        }
-    )
-    decision = plan_recovery(
-        Exception("invalid params, duplicate tool_call id: call_1"),
-        attempt=1,
-        max_attempts=5,
-    )
 
-    enriched = attach_recovery_fallback(
-        decision,
-        config=config,
-        current_profile_id="primary",
-    )
-
-    assert enriched.fallback_profile_id == "fallback_backup"
-
-
-def test_capability_error_recovery_does_not_attach_fallback_profile():
-    config = make_config(
-        **{
-            "llm.providers.default.kind": "minimax",
-            "llm.providers.default.api_key": "test-key",
-            "llm.providers.default.base_url": "https://api.minimaxi.com/v1",
-            "llm.providers.backup.kind": "local",
-            "llm.providers.backup.requires_api_key": False,
-            "llm.providers.backup.base_url": "http://localhost:8000/v1",
-            "llm.profiles.primary.provider_id": "default",
-            "llm.profiles.primary.model": "MiniMax-M2.7",
-            "llm.profiles.fallback_backup.provider_id": "backup",
-            "llm.profiles.fallback_backup.model": "qwen-32b-awq",
-            "llm.profiles.fallback_backup.streaming": False,
-            "llm.profiles.fallback_backup.tool_calling_mode": "disabled",
-        }
-    )
-    decision = plan_recovery(
-        LLMError("capability_error", "profile `primary` 不支持 tool calling", retryable=False),
-        attempt=1,
-        max_attempts=5,
-    )
-
-    enriched = attach_recovery_fallback(
-        decision,
-        config=config,
-        current_profile_id="primary",
-    )
-
-    assert enriched.action == "fail_fast"
-    assert enriched.fallback_profile_id is None
-
-
-def test_provider_retry_does_not_use_compression_profile_as_fallback():
-    config = make_config(
-        **{
-            "llm.providers.default.kind": "relay",
-            "llm.providers.default.api_key": "test-key",
-            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
-            "llm.providers.remote_main.kind": "relay",
-            "llm.providers.remote_main.api_key": "test-key",
-            "llm.providers.remote_main.base_url": "https://pixel.try-chatapi.com/v1",
-            "llm.profiles.primary.provider_id": "default",
-            "llm.profiles.primary.model": "gpt-5.5",
-            "llm.profiles.compression.provider_id": "remote_main",
-            "llm.profiles.compression.model": "gpt-5.5",
-            "llm.profiles.compression.streaming": False,
-        }
-    )
-
-    fallback = select_recovery_profile(
-        config,
-        current_profile_id="primary",
-        action="retry_with_backoff",
-    )
-
-    assert fallback is None
 
 
 def test_responses_websocket_states_publish_turn_visible_transport_statuses(monkeypatch):
@@ -6149,33 +6034,6 @@ def test_deepseek_usage_object_preserves_prompt_cache_hit_and_miss_tokens():
     assert usage.provider_raw_usage["prompt_cache_hit_tokens"] == 64
     assert usage.provider_raw_usage["prompt_cache_miss_tokens"] == 36
 
-
-def test_context_recovery_uses_larger_context_profile_only():
-    config = make_config(
-        **{
-            "llm.providers.default.kind": "local",
-            "llm.providers.default.requires_api_key": False,
-            "llm.providers.default.context_window": 32768,
-            "llm.providers.large.kind": "local",
-            "llm.providers.large.requires_api_key": False,
-            "llm.providers.large.context_window": 131072,
-            "llm.profiles.primary.provider_id": "default",
-            "llm.profiles.primary.model": "qwen-32b-awq",
-            "llm.profiles.long_context.provider_id": "large",
-            "llm.profiles.long_context.model": "qwen-plus",
-        }
-    )
-
-    fallback = select_recovery_profile(
-        config,
-        current_profile_id="primary",
-        action="compress_context",
-    )
-
-    current_window = config.llm.get_provider(config.llm.get_profile("primary").provider_id).context_window
-    selected_window = config.llm.get_provider(config.llm.get_profile(fallback).provider_id).context_window
-    assert fallback is not None
-    assert selected_window > current_window
 
 
 def _chain_history_with_call_id(call_id: str) -> list:

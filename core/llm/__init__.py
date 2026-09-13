@@ -22,7 +22,6 @@ from .agent_runtime import (
 from .discovery import assert_llm_compatibility, discover_model, doctor_llm_profile
 from .errors import classify_exception
 from .recovery import LLMRecoveryDecision, plan_recovery
-from .routing import attach_recovery_fallback, select_recovery_profile
 from .types import (
     DiagnosticReport,
     LLMCapabilities,
@@ -63,8 +62,6 @@ __all__ = [
     "list_profiles",
     "plan_recovery",
     "stream_llm",
-    "attach_recovery_fallback",
-    "select_recovery_profile",
     "resolve_agent_llm",
     "dialogue_chain_mode_for_protocol",
     "prompt_purpose_cache_partition",

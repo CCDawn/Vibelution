@@ -89,20 +89,6 @@ def test_graph_reports_dangling_and_cyclic_aliases_as_typed_issues() -> None:
     assert {"dangling_model_alias", "cyclic_model_alias"}.issubset(codes)
 
 
-def test_fallback_must_not_resolve_to_same_effective_route() -> None:
-    config = _config()
-    config.profiles["fallback"] = config.profiles["primary"].model_copy(
-        update={"profile_id": "fallback"}
-    )
-    try:
-        EffectiveLLMGraphBuilder().build(
-            config, fallback_profile_ids={"primary": "fallback"}
-        )
-    except LLMGraphError as exc:
-        assert "fallback_same_effective_identity" in {issue.code for issue in exc.issues}
-    else:
-        raise AssertionError("same effective fallback must fail closed")
-
 
 def test_wire_adapter_backend_and_endpoint_change_route_fingerprint() -> None:
     config = _config()

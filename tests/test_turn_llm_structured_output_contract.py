@@ -113,7 +113,6 @@ def _hooks(**overrides) -> AgentLlmTurnHooks:
             disable_streaming=False,
             disable_tools=False,
             request_context_compression=False,
-            fallback_profile_id=None,
         ),
         record_scene_event=lambda *_args, **_kwargs: None,
         record_route_success=lambda **_kwargs: None,
