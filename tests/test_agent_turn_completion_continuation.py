@@ -146,6 +146,7 @@ def test_completed_turn_with_actionable_stage_remediation_continues_same_session
     import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
 
     messages: list[str] = []
+    submitted_metadata: list[dict] = []
     remediation_pending = {"value": True}
 
     def _wait(session_id, turn_id, **_kwargs):
@@ -153,6 +154,7 @@ def test_completed_turn_with_actionable_stage_remediation_continues_same_session
 
     def _submit(session_id, message, **_kwargs):
         messages.append(message)
+        submitted_metadata.append(dict(_kwargs.get("message_metadata") or {}))
         remediation_pending["value"] = False
         return {"turnId": "turn-remediation-1"}
 
@@ -183,6 +185,9 @@ def test_completed_turn_with_actionable_stage_remediation_continues_same_session
     assert snapshot["terminalStatus"] == "completed"
     assert final_turn_id == "turn-remediation-1"
     assert messages == ["copy exact quote blocks"]
+    assert submitted_metadata[0]["kind"] == "source_collection_stage_session_task"
+    assert submitted_metadata[0]["sourceCollectionStageTaskId"] == "task-1"
+    assert submitted_metadata[0]["continuationOfTurnId"] == "turn-main"
     assert len(used) == 1
     assert used[0]["pausedStatus"] == "stage_task_needs_review"
 

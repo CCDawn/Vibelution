@@ -49,7 +49,9 @@ _FAILURE_TERMINAL_STATUSES = frozenset(
 
 # Project tasks reconcile every terminal execution against their task-bound
 # artifacts. A provider failure after writeback must not erase business work.
-_PROJECT_TASK_RECONCILABLE_TURN_STATUSES = _FAILURE_TERMINAL_STATUSES | frozenset({"timed_out"})
+_PROJECT_TASK_RECONCILABLE_TURN_STATUSES = _FAILURE_TERMINAL_STATUSES | frozenset(
+    {"needs_continue", "timed_out"}
+)
 
 # Canonical resumable terminal turn statuses per the session protocol: a turn
 # that stops here is parked awaiting an explicit continue request, not broken
@@ -721,17 +723,16 @@ def _submit_agent_turn_continuation(
     from_turn_id: str,
     paused_status: str,
     continuation_message: str = "继续",
+    source_collection_scope: bool = False,
 ) -> str:
     """First-class protocol step: continue the parked turn on the same session.
 
     The canonical continue request reuses the session resume channel
     (persist.py resumeAllowed).  Source-collection stage sessions inherit
     their stage-task continuation contract from the previous messages in the
-    submit layer, and the parked model keeps its full history.  The metadata
-    deliberately carries no ``kind`` key: that keeps the stage-task
-    continuation inheritance working and keeps project-task strict output
-    bindings (which pin exactly one stored turn id) from being hijacked by
-    the continuation turn.
+    submit layer, and the parked model keeps its full history. Source-collection
+    continuations also carry their canonical task locator explicitly because
+    remediation messages are not necessarily literal ``继续`` requests.
     """
     from core.web.services.session.submit import submit_session_message
 
@@ -758,6 +759,14 @@ def _submit_agent_turn_continuation(
         write_intent=False,
         message_source="agent_inbox",
         message_metadata={
+            **(
+                {
+                    "kind": "source_collection_stage_session_task",
+                    "sourceCollectionStageTaskId": str(handle.task_id or ""),
+                }
+                if source_collection_scope
+                else {}
+            ),
             "sourceSurface": "team_workflow_agent_turn_continuation",
             "teamId": str(input_snapshot.get("teamId") or "").strip(),
             "workflowRunId": str(action.run_id or ""),
@@ -1147,6 +1156,7 @@ def _wait_with_bounded_turn_continuation(
             from_turn_id=turn_id,
             paused_status=paused_status,
             continuation_message=stage_task_remediation or "继续",
+            source_collection_scope=source_collection_scope,
         )
         if remediation_continuable:
             stage_task_remediation_continuations += 1

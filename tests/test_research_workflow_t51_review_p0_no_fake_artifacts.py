@@ -507,7 +507,8 @@ def test_source_collection_needs_continue_turn_is_continued(
     assert metadata["continuationOfTurnId"] == "turn-sc-park"
     assert metadata["continuationPausedStatus"] == "needs_continue"
     assert metadata["workflowRunId"] == "run-sc-cont"
-    assert "kind" not in metadata
+    assert metadata["kind"] == "source_collection_stage_session_task"
+    assert metadata["sourceCollectionStageTaskId"] == "task-sc-cont"
     assert len(reconciles) == 1
     assert reconciles[0]["turn_id"] == "turn-sc-continued"
     # Every continuation is an auditable protocol step: requested + submitted
@@ -731,8 +732,13 @@ def test_completed_project_agent_task_is_closed_before_successor_dispatch(
     calls: list[object] = []
 
     def wait_for_project_turn(*_args, **kwargs):
-        assert kwargs["reconcilable_terminal_statuses"] == frozenset(
-            {"needs_continue"}
+        from core.web.services.team_workflow.research_runtime.agent_turn_completion import (
+            _PROJECT_TASK_RECONCILABLE_TURN_STATUSES,
+        )
+
+        assert (
+            kwargs["reconcilable_terminal_statuses"]
+            == _PROJECT_TASK_RECONCILABLE_TURN_STATUSES
         )
         return {"terminal": True, "terminalStatus": "needs_continue"}
 
