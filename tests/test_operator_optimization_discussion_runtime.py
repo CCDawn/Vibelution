@@ -77,6 +77,25 @@ def test_discussion_uses_scoped_sessions_and_one_native_round(activity, native_p
     assert authority["workflowId"] == "operator-optimization"
 
 
+def test_discussion_retry_uses_new_room_without_overwriting_prior_attempt(activity, native_ports):
+    from copy import deepcopy
+
+    campaign, run, calls, rooms, authority = native_ports
+    first = runtime.open_discussion(activity[0], run.run_id, node_run_id="node-run-1")
+    rooms[first["roomId"]]["rounds"][0]["status"] = "stopped"
+    previous = deepcopy(rooms[first["roomId"]])
+    authority.update(nodeRunId="node-run-2", nodeAttempt=2)
+    retried = runtime.open_discussion(activity[0], run.run_id, node_run_id="node-run-2")
+    replay = runtime.open_discussion(activity[0], run.run_id, node_run_id="node-run-2")
+
+    assert retried["roomId"] != first["roomId"]
+    assert replay["roomId"] == retried["roomId"] and replay["reused"]
+    assert rooms[first["roomId"]] == previous
+    assert rooms[retried["roomId"]]["config"]["nodeRunId"] == "node-run-2"
+    assert len(campaign.rounds) == 1
+    assert sum(kind == "start" for kind, _ in calls) == 2
+
+
 def test_discussion_does_not_reuse_room_from_other_run(activity, native_ports):
     campaign, run, calls, rooms, authority = native_ports
     result = runtime.open_discussion(activity[0], run.run_id, node_run_id="node-run-1")
@@ -113,18 +132,18 @@ def test_completed_discussion_collects_hypothesis_with_provenance(activity, nati
     monkeypatch.setattr(registry, "question_model_invocation_receipts", lambda *a, **k: receipts)
     # Retrieval order must not select a different final speaker.
     room["rounds"][0]["messages"].reverse()
-    collected = runtime.collect_discussion(activity[0], run.run_id)
+    collected = runtime.collect_discussion(activity[0], run.run_id, node_run_id="node-run-1")
     assert collected["hypothesisRef"]["kind"] == "optimization_hypothesis"
     assert len(collected["discussion"]["provenance"]["messageRefs"]) == 2
     assert collected["discussion"]["provenance"]["costStatus"] == "unsettled"
     assert {row["status"] for row in collected["discussion"]["provenance"]["modelReceiptRefs"]} == {"retried", "succeeded"}
-    assert runtime.collect_discussion(activity[0], run.run_id) == collected
+    assert runtime.collect_discussion(activity[0], run.run_id, node_run_id="node-run-1") == collected
     receipts[-1]["scope"]["turnId"] = "other-turn"
     with pytest.raises(CampaignConflict, match="exact participant Turn"):
-        runtime.collect_discussion(activity[0], run.run_id)
+        runtime.collect_discussion(activity[0], run.run_id, node_run_id="node-run-1")
     receipts.pop()
     with pytest.raises(CampaignConflict, match="provider receipts"):
-        runtime.collect_discussion(activity[0], run.run_id)
+        runtime.collect_discussion(activity[0], run.run_id, node_run_id="node-run-1")
 
 
 def test_native_authority_blocks_operator_before_sessions_or_model_start(activity, native_ports, monkeypatch):
@@ -174,7 +193,7 @@ def test_no_viable_discussion_persists_source_and_pauses_without_hypothesis(acti
     ]
     monkeypatch.setattr(registry, "question_model_invocation_receipts", lambda *a, **k: receipts)
 
-    collected = runtime.collect_discussion(activity[0], run.run_id)
+    collected = runtime.collect_discussion(activity[0], run.run_id, node_run_id="node-run-1")
 
     assert collected["status"] == "no_viable_hypothesis"
     assert collected["hypothesisRef"] is None

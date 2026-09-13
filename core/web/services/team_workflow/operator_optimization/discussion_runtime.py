@@ -108,6 +108,15 @@ def _room_participants_by_agent(room: Mapping[str, Any]) -> dict[str, dict[str, 
     return result
 
 
+def _discussion_room_id(team_id: str, run_id: str, node_run_id: str) -> str:
+    attempt_id = str(node_run_id or "").strip()
+    if not attempt_id:
+        raise CampaignConflict("node_run_id is required for operator discussion")
+    return "room-operator-" + sha256_hex({
+        "team": team_id, "run": run_id, "nodeRunId": attempt_id,
+    })[:24]
+
+
 def open_discussion(
     team_id: str,
     run_id: str,
@@ -145,7 +154,7 @@ def open_discussion(
         node_run_id=normalized_node_run_id,
         inputs=inputs,
     )
-    room_id = "room-operator-" + sha256_hex({"team": team_id, "run": run_id})[:24]
+    room_id = _discussion_room_id(team_id, run_id, normalized_node_run_id)
     input_hash = sha256_hex(inputs)
     lock = campaign_root(team_id, project_id) / "discussion" / room_id
     with inter_process_lock(lock):
@@ -308,7 +317,7 @@ def collect_discussion(
     team_id: str,
     run_id: str,
     *,
-    node_run_id: str = "",
+    node_run_id: str,
     budget_receipt: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Collect exact speaker receipts and publish the validated final result."""
@@ -324,7 +333,7 @@ def collect_discussion(
             return existing
         raise
     input_hash = sha256_hex(inputs)
-    room_id = "room-operator-" + sha256_hex({"team": team_id, "run": run_id})[:24]
+    room_id = _discussion_room_id(team_id, run_id, node_run_id)
     room = chat_room_service.get_chat_room_detail(room_id)
     config = room.get("config") if isinstance(room, Mapping) and isinstance(room.get("config"), Mapping) else {}
     if room is None or config.get("inputHash") != input_hash:
