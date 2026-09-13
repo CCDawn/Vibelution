@@ -463,3 +463,44 @@ def test_new_child_consumption_requires_every_source_cost_settled(native_source)
     assert not child_costs_settled(store, action.run_id)
     settle_model_budget(store, reservation=last_reservation)
     assert child_costs_settled(store, action.run_id)
+
+
+@pytest.mark.parametrize("obsolete_status", ["failed", "stale"])
+def test_old_failed_attempt_reservation_still_blocks_until_compensated(obsolete_status):
+    from core.web.services.team_workflow.operator_optimization.knowledge import (
+        child_costs_settled_in_repo,
+    )
+    parent = build_run_record("parent", workflow_id="operator-optimization")
+    child = replace(
+        build_run_record("child", workflow_id="challenge-cup-knowledge-sideflow", status="succeeded"),
+        parent_run_id="parent",
+    )
+    attempts = []
+    rows = []
+    for node_id in sorted(budget_runtime.SOURCE_NODES):
+        latest = build_attempt_record(
+            f"latest-{node_id}", run_id="child", node_id=node_id,
+            attempt=2 if node_id == "source_finding" else 1, status="succeeded",
+        )
+        attempts.append(latest)
+        rows.append((latest.node_run_id, "settled", json.dumps({"operatorModelBudget": {
+            "budgetKind": "knowledge", "callsUsed": 1, "costStatus": "settled"
+        }})))
+    obsolete = build_attempt_record(
+        "obsolete-source-finding", run_id="child", node_id="source_finding",
+        attempt=1, status=obsolete_status,
+    )
+    attempts.append(obsolete)
+    rows.append((obsolete.node_run_id, "reserved", json.dumps({"operatorModelBudget": {
+        "budgetKind": "knowledge"
+    }})))
+    latest_by_node = {item.node_id: item for item in attempts if item.status == "succeeded"}
+    repo = SimpleNamespace(
+        get_run=lambda run_id: {"parent": parent, "child": child}.get(run_id),
+        list_attempts=lambda run_id: [item for item in attempts if item.run_id == run_id],
+        latest_attempt=lambda run_id, node_id: latest_by_node.get(node_id),
+        execute=lambda *_args: SimpleNamespace(fetchall=lambda: rows),
+    )
+    assert not child_costs_settled_in_repo(repo, "child")
+    rows[-1] = (rows[-1][0], "voided", rows[-1][2])
+    assert child_costs_settled_in_repo(repo, "child")

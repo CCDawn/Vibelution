@@ -171,6 +171,59 @@ def test_native_budget_cleanup_preserves_unknown_operator_cost(tmp_path, consume
         store.close()
 
 
+def test_voided_zero_use_reservation_releases_campaign_capacity(tmp_path: Path):
+    from core.web.services.team_workflow.research_runtime.budget_authority_adapter import (
+        void_budget_reservation,
+    )
+
+    store = open_ledger_store(tmp_path / "voided-capacity.sqlite")
+    try:
+        _seed_parent(store, run_id="run-1", node_run_id="node-1")
+        _seed_parent(store, run_id="run-2", node_run_id="node-2")
+        first = reserve_model_budget(
+            store,
+            **_reserve_kwargs(
+                run_id="run-1", node_run_id="node-1", cost_limit="0.002"
+            ),
+        )
+        void_budget_reservation(store, first)
+        second = reserve_model_budget(
+            store,
+            **_reserve_kwargs(
+                run_id="run-2", node_run_id="node-2", round_id="round-2", cost_limit="0.002"
+            ),
+        )
+        assert second["status"] == "reserved"
+    finally:
+        store.close()
+
+
+def test_unknown_use_reservation_still_consumes_campaign_capacity(tmp_path: Path):
+    from core.web.services.team_workflow.research_runtime.budget_authority_adapter import (
+        void_budget_reservation,
+    )
+
+    store = open_ledger_store(tmp_path / "unknown-capacity.sqlite")
+    try:
+        _seed_parent(store, run_id="run-1", node_run_id="node-1")
+        _seed_parent(store, run_id="run-2", node_run_id="node-2")
+        first = reserve_model_budget(
+            store, **_reserve_kwargs(run_id="run-1", node_run_id="node-1", cost_limit="0.002")
+        )
+        admit_model_invocation(
+            store, reservation=first, invocation_id="unknown-call", model_ref="qwen/operator",
+            input_tokens=20, output_tokens=50,
+        )
+        void_budget_reservation(store, first)
+        with pytest.raises(ModelBudgetError) as exc_info:
+            reserve_model_budget(
+                store, **_reserve_kwargs(run_id="run-2", node_run_id="node-2", round_id="round-2", cost_limit="0.002")
+            )
+        assert exc_info.value.code == "operator_model_budget_limit_reached"
+    finally:
+        store.close()
+
+
 def test_cost_uses_frozen_model_price_and_separate_input_output_rates():
     amount = calculate_model_cost(
         _discussion_budget(),

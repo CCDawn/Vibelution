@@ -707,7 +707,7 @@ def _campaign_committed_amounts(
                     "operator campaign budget limit differs from its authorized history",
                     code="operator_model_budget_contract_conflict",
                 )
-        if str(row.get("status") or "") == "released":
+        if str(row.get("status") or "") in {"released", "voided"}:
             continue
         settled = _json_object(row.get("settled_json"), "settled_json")
         settled_metadata = _operator_metadata(settled, required=False)

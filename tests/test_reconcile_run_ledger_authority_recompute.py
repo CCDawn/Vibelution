@@ -38,6 +38,7 @@ import pytest
 from core.research.workflow.contracts import WorkflowCommandKind
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.research.workflow.definition_registry import register_or_resolve
+from core.research.workflow.operator_optimization_definition import build_operator_definition
 from core.research.workflow.ledger.records import KnowledgeInvocationRecord
 
 _PINNED_WORKFLOW_VERSION_ID = register_or_resolve(
@@ -1215,6 +1216,112 @@ def _attempt_problem(commands: CommandHarness, node_run_id: str) -> dict[str, An
         force_flush=True,
     ).result(timeout=10)[0]
     return json.loads(str(raw or "") or "{}")
+
+
+@pytest.mark.parametrize("unknown_usage", [False, True])
+def test_reconcile_compensates_superseded_knowledge_receipt(
+    tmp_path: Path, unknown_usage: bool,
+) -> None:
+    """Parent reconcile settles known old usage and keeps unknown usage reserved."""
+    commands = CommandHarness(tmp_path / f"ledger-{unknown_usage}.sqlite3")
+    try:
+        parent_id = "operator-parent"
+        child_id = "knowledge-child"
+        commands.seed_run(
+            parent_id,
+            workflow_definition=build_operator_definition(),
+            status="reconciliation_required",
+            run_version=3,
+        )
+        store = commands.store
+        old_id = f"nr-{child_id}-source_finding-a1"
+        latest_ids = {
+            node_id: f"nr-{child_id}-{node_id}-a2"
+            for node_id in {"source_finding", "source_extraction", "evidence_relations", "knowledge_ingestion"}
+        }
+
+        def seed(uow):
+            uow.repository.insert_run(
+                replace(build_run_record(child_id, status="succeeded"), parent_run_id=parent_id)
+            )
+            uow.repository.insert_command(
+                build_command_record("cmd-knowledge", run_id=child_id, node_id="source_finding")
+            )
+            uow.repository.insert_knowledge_invocation(
+                KnowledgeInvocationRecord(
+                    invocation_id="ki-superseded",
+                    parent_run_id=parent_id,
+                    parent_node_id="optimization_knowledge",
+                    parent_node_run_id="nr-operator-knowledge-a1",
+                    parent_attempt=1,
+                    question_id="OPERATOR-SOFTMAX",
+                    scope_hash="scope", request_hash="request",
+                    search_envelope_hash="envelope", requirements_hash="requirements",
+                    source_policy_version="v1", knowledge_child_run_id=child_id,
+                    status="completed", knowledge_package_ref="package",
+                    package_content_hash="hash", handoff_state="accepted",
+                    error_json=None, created_at_ms=FIXED_NOW_MS, updated_at_ms=FIXED_NOW_MS,
+                )
+            )
+            for node_id, node_run_id in latest_ids.items():
+                uow.repository.insert_attempt(
+                    _attempt(node_id, run_id=child_id, command_id="cmd-knowledge", attempt=2, status="succeeded")
+                )
+                metadata = {
+                    "schemaVersion": 1, "kind": "operator_model_budget", "budgetKind": "knowledge",
+                    "callsUsed": 1, "costStatus": "settled", "invocations": {},
+                }
+                uow.repository.insert_budget_receipt(
+                    receipt_id=f"receipt-{node_id}", run_id=child_id, node_run_id=node_run_id,
+                    reservation_id=f"reservation-{node_run_id}", stage_id="knowledge_collection",
+                    policy_hash="policy", reserved_json=json.dumps({"operatorModelBudget": metadata}),
+                    created_at_ms=FIXED_NOW_MS,
+                )
+                uow.repository.update_budget_receipt(
+                    f"receipt-{node_id}", status="settled", now_ms=FIXED_NOW_MS,
+                    settled_json=json.dumps({"operatorModelBudget": metadata}),
+                )
+            uow.repository.insert_attempt(
+                _attempt("source_finding", run_id=child_id, command_id="cmd-knowledge", status="failed")
+            )
+            old_metadata = {
+                "schemaVersion": 1, "kind": "operator_model_budget", "budgetKind": "knowledge",
+                "reservedAmount": "10", "prices": [],
+                "invocations": {"i1": {
+                    "inputTokens": 1, "outputTokens": 1, "tokensKnown": True,
+                    "amount": "1", "costStatus": "unsettled" if unknown_usage else "settled",
+                }},
+            }
+            uow.repository.insert_budget_receipt(
+                receipt_id="receipt-old", run_id=child_id, node_run_id=old_id,
+                reservation_id=f"reservation-{old_id}", stage_id="knowledge_collection",
+                policy_hash="policy", reserved_json=json.dumps({"operatorModelBudget": old_metadata}),
+                created_at_ms=FIXED_NOW_MS,
+            )
+            uow.repository.update_budget_receipt(
+                "receipt-old", status="reserved", now_ms=FIXED_NOW_MS,
+                settled_json=json.dumps({"operatorModelBudget": old_metadata}),
+            )
+
+        store.submit(seed, force_flush=True).result(timeout=10)
+        commands.service.submit(commands.request(
+            command=WorkflowCommandKind.RECONCILE_RUN, run_id=parent_id,
+            node_id=None, expected_run_version=3, idempotency_key="reconcile-superseded",
+        ))
+        status, settled_json = store.submit(
+            lambda u: u.repository.execute(
+                "SELECT status, settled_json FROM budget_receipts WHERE receipt_id='receipt-old'"
+            ).fetchone(), force_flush=True,
+        ).result(timeout=10)
+        assert status == ("reserved" if unknown_usage else "settled")
+        if not unknown_usage:
+            assert json.loads(settled_json)["operatorModelBudget"]["actualAmount"] == "1"
+        assert store.submit(
+            lambda u: __import__("core.web.services.team_workflow.operator_optimization.knowledge", fromlist=["child_costs_settled_in_repo"]).child_costs_settled_in_repo(u.repository, child_id),
+            force_flush=True,
+        ).result(timeout=10) is (not unknown_usage)
+    finally:
+        commands.close()
 
 
 def test_reconcile_cascades_ledger_replan_to_stuck_knowledge_child_run(

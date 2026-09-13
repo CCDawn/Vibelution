@@ -338,6 +338,61 @@ def _compensate_completion_pending_reservations(
     return compensated
 
 
+def _compensate_superseded_knowledge_reservations(
+    uow,
+    *,
+    run_id: str,
+    correlation_id: str,
+    now_ms: int,
+) -> list[dict]:
+    """Close reservations of obsolete knowledge attempts during reconcile.
+
+    A source retry can leave a failed/stale attempt behind after a later
+    attempt succeeds.  Reconcile owns that supersession, so it must run the
+    existing compensation helper before knowledge reuse reads the child:
+    known usage is settled, an unused reservation is voided, and unresolved
+    usage remains reserved and therefore fail-closed.
+    """
+    from .budget_authority_adapter import compensate_terminal_attempt_reservation_in_uow
+
+    rows = uow.repository.execute(
+        """
+        SELECT old.node_run_id
+        FROM node_attempts old
+        WHERE old.run_id = ?
+          AND old.status IN ('failed', 'stale')
+          AND EXISTS (
+            SELECT 1 FROM node_attempts newer
+            WHERE newer.run_id = old.run_id
+              AND newer.node_id = old.node_id
+              AND newer.attempt > old.attempt
+              AND newer.status = 'succeeded'
+          )
+          AND EXISTS (
+            SELECT 1 FROM budget_receipts br
+            WHERE br.run_id = old.run_id
+              AND br.node_run_id = old.node_run_id
+              AND br.reservation_id = 'reservation-' || old.node_run_id
+              AND br.status = 'reserved'
+          )
+        ORDER BY old.attempt, old.node_run_id
+        """,
+        (run_id,),
+    ).fetchall()
+    compensated: list[dict] = []
+    for (node_run_id,) in rows:
+        result = compensate_terminal_attempt_reservation_in_uow(
+            uow,
+            run_id=run_id,
+            node_run_id=node_run_id,
+            reason="reconcile_superseded_knowledge_compensation",
+            correlation_id=correlation_id,
+            now_ms=now_ms,
+        )
+        compensated.append({"runId": run_id, "nodeRunId": node_run_id, "result": result})
+    return compensated
+
+
 # Sentinel problem carried by a zombie active attempt that reconcile
 # finalizes without any terminal dispatch problem to copy (defect ⑭ layer 2).
 _RECONCILE_ZOMBIE_ATTEMPT_PROBLEM = {
@@ -1888,6 +1943,16 @@ class WorkflowCommandService:
                     now_ms=now_ms,
                 )
             )
+            child = uow.repository.get_run(child_run_id)
+            if child is not None and child.status == RunStatus.SUCCEEDED.value:
+                compensated.extend(
+                    _compensate_superseded_knowledge_reservations(
+                        uow,
+                        run_id=child_run_id,
+                        correlation_id=str(request.idempotency_key),
+                        now_ms=now_ms,
+                    )
+                )
         has_active_work = revived > 0 or _run_has_active_work(
             uow, run_id=request.run_id
         )
