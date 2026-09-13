@@ -142,6 +142,9 @@ def enqueue_question_model_invocation_receipt(
                 and parent.workflow_id == "operator-optimization" and not knowledge):
             raise ValueError("operator knowledge receipt accounting identity is missing")
         operator = scope.get("workflowId") == "operator-optimization" or knowledge
+        if scope.get("accountingKind") == "operator_planning":
+            from ..operator_optimization.planning_authority import validate_planning_receipt_scope
+            validate_planning_receipt_scope(uow.repository, scope)
         if knowledge:
             from ..operator_optimization.knowledge_budget_runtime import validate_knowledge_receipt_scope
             validate_knowledge_receipt_scope(uow.repository, scope)

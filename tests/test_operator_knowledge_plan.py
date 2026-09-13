@@ -380,7 +380,7 @@ def test_system_executor_and_readiness_only_enable_verified_reuse(
         planning_verdict = evaluate_operator_node(
             store.get_run(run.run_id), nodes[2], None, context
         )
-        assert "operator_plan_task_not_implemented" in {
+        assert "operator_planning_budget_missing" in {
             b.code for b in planning_verdict.blockers
         }
 

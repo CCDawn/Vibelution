@@ -31,7 +31,15 @@ def evaluate_operator_node(run, node, common, context) -> DomainVerdict:
         except (CampaignConflict, ValueError, FileNotFoundError):
             failures.append(("operator_knowledge_source_unavailable", "无法回读本轮假设或知识来源", "domain"))
     if node.nodeId == "optimization_plan":
-        failures.append(("operator_plan_task_not_implemented", "实验计划冻结已实现，规划 Agent 任务尚未接入", "domain"))
+        from ...operator_optimization.planning_output import planning_task_input
+        from ...operator_optimization.store import CampaignConflict
+
+        if not state["campaign"]["budget"].get("planning"):
+            failures.append(("operator_planning_budget_missing", "尚未配置实验规划调用次数、token 预算与模型价目", "budget"))
+        try:
+            planning_task_input(run.team_id, run.run_id)
+        except (CampaignConflict, ValueError, FileNotFoundError):
+            failures.append(("operator_planning_input_unavailable", "无法回读已选假设、资料或冻结协议", "domain"))
     campaign = state["campaign"]
     if campaign["researchProjectId"] != run.project_id or campaign["teamId"] != run.team_id:
         failures.append(("operator_scope_mismatch", "实验活动与运行归属不一致", "scope"))

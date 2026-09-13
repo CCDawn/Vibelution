@@ -47,6 +47,7 @@ class CampaignBudget(Contract):
     authorized: bool = False
     discussion: OperatorDiscussionBudget | None = None
     knowledge: OperatorModelCallBudget | None = None
+    planning: OperatorModelCallBudget | None = None
 
 
 class OptimizationHypothesis(Contract):
