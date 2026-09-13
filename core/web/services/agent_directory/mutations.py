@@ -596,6 +596,7 @@ def replace_agent_llm_bindings_if_current(
         if str(agent.get("updatedAt") or "").strip() != expected_revision:
             raise s.AgentStateConflictError("Agent changed during model promotion.")
         agent["llmBindings"] = s.normalize_agent_llm_bindings(llm_bindings)
+        materialize_agent_config_identity(agent, increment_if_changed=True)
         s._ensure_agent_default_avatar(agent)
         agent["updatedAt"] = s.utc_now_iso()
         # Project before persisting so a projection failure cannot leave a write
