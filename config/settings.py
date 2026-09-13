@@ -1256,7 +1256,9 @@ class ConfigLoader:
         """
         加载完整配置
 
-        优先级：命令行参数(kwargs) > 环境变量 > TOML > 默认值
+        优先级：命令行参数(kwargs) > 环境变量 > profile 基线 > TOML > 默认值。
+        runtime.profile 只提供运行基线，显式 env/kwargs 可覆盖普通字段；
+        safe_local 的本地 provider 安全钳位在显式覆盖之后重施加并记录审计事件。
 
         Args:
             **kwargs: 直接指定的配置项，如
@@ -1279,7 +1281,7 @@ class ConfigLoader:
         if toml_config:
             config = self._apply_dict(config, toml_config, allow_schema_transition=True)
 
-        # 3. 从环境变量加载（较高优先级，会覆盖 TOML）
+        # 3. 从环境变量加载（较高优先级，会覆盖 TOML；同时参与 runtime.profile 选择）
         env_config = self._load_from_env()
         if env_config:
             config = self._apply_dict(config, env_config)
@@ -1296,25 +1298,33 @@ class ConfigLoader:
                 kwargs_were_v1 = False
             config = self._apply_dict(config, kwargs_config)
 
-        from .profiles import apply_runtime_profile
+        # 5. profile 提供运行基线；显式覆盖在基线上重放，普通字段可覆盖基线
+        from .profiles import (
+            apply_runtime_profile,
+            apply_runtime_profile_security_clamps,
+        )
         config = apply_runtime_profile(config)
 
-        # 5. profile 提供运行基线，显式 kwargs 仍保持最高优先级
+        def _strip_profile_selection(section: Dict[str, Any]) -> None:
+            runtime_section = section.get("runtime")
+            if isinstance(runtime_section, dict):
+                runtime_section.pop("profile", None)
+
+        if env_config:
+            replay_env = copy.deepcopy(env_config)
+            _strip_profile_selection(replay_env)
+            if replay_env:
+                config = self._apply_dict(config, replay_env)
         if kwargs_config:
             replay = copy.deepcopy(kwargs_config)
             if kwargs_were_v1 and isinstance(replay.get("llm"), dict):
                 replay.pop("llm", None)
+            _strip_profile_selection(replay)
             if replay:
                 config = self._apply_dict(config, replay)
-                if config.runtime.profile:
-                    runtime_overrides = {
-                        key: value
-                        for key, value in replay.get("runtime", {}).items()
-                        if key != "profile"
-                    }
-                    config = apply_runtime_profile(config)
-                    if runtime_overrides:
-                        config = self._apply_dict(config, {"runtime": runtime_overrides})
+
+        # 6. 安全钳位在显式覆盖之后重施加，防止 env/kwargs 绕过 safe_local 边界
+        apply_runtime_profile_security_clamps(config)
         return config
 
     def _flatten_kwargs(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:

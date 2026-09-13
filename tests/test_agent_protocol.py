@@ -5576,6 +5576,29 @@ class TestLocalProviderBootstrap:
         assert binding["llmSlot"] == "dialogue"
         assert binding["directSessionId"] == "session-luna-pressure"
 
+    def test_model_discovery_keeps_derived_compression_limit_out_of_config(self, monkeypatch):
+        agent = AgentRuntime.__new__(AgentRuntime)
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(get_role_profile_id=lambda role="primary": "primary"),
+            context_compression=SimpleNamespace(max_token_limit=16000),
+        )
+        monkeypatch.setattr(
+            agent_module,
+            "doctor_llm_profile",
+            lambda config, profile_id: SimpleNamespace(warnings=[], errors=[]),
+        )
+        monkeypatch.setattr(
+            agent_module,
+            "discover_model",
+            lambda config, profile_id: SimpleNamespace(context_window=262144, max_output_tokens=32768),
+        )
+
+        derived = agent._init_model_discovery()
+
+        assert derived == 131072
+        assert agent._effective_max_token_limit == 131072
+        assert agent.config.context_compression.max_token_limit == 16000
+
     def test_think_and_act_auto_compresses_at_standard_context_threshold(self, monkeypatch):
         agent = AgentRuntime.__new__(AgentRuntime)
         prompt_build_calls = []

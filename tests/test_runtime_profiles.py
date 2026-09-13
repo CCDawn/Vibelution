@@ -3,8 +3,15 @@
 稳定运行档案测试
 """
 
-from config.profiles import apply_runtime_profile
+import json
+
+from config.profiles import (
+    apply_runtime_profile,
+    apply_runtime_profile_security_clamps,
+    set_security_clamp_audit_sink,
+)
 from tests.helpers.isolated_config import isolated_settings_config
+
 
 def make_config(**kwargs):
     return isolated_settings_config(**kwargs)
@@ -148,3 +155,51 @@ def test_unknown_profile_raises_clear_error():
         assert "未知 runtime profile" in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_env_override_can_win_over_profile_baseline(monkeypatch):
+    monkeypatch.setenv("AGENT_AGENT_MAX_ITERATIONS", "500")
+
+    config = make_config(runtime__profile="safe_remote")
+
+    assert config.runtime.profile == "safe_remote"
+    assert config.agent.max_iterations == 500
+
+
+def test_safe_local_security_clamps_survive_explicit_override():
+    events = []
+    set_security_clamp_audit_sink(events.extend)
+    try:
+        config = make_config(
+            **{
+                "llm.schema_version": 2,
+                "llm.providers.default.base_url": "https://api.example.com/v1",
+                "runtime.profile": "safe_local",
+            }
+        )
+    finally:
+        set_security_clamp_audit_sink(None)
+
+    primary = config.llm.get_profile(role="primary")
+    provider = config.llm.get_provider(primary.provider_id)
+
+    assert provider.kind == "local"
+    assert provider.base_url == "http://localhost:11434/v1"
+    assert provider.requires_api_key is False
+    assert config.llm.discovery.enabled is False
+    event_fields = {event["field"] for event in events}
+    assert "llm.providers.<primary>.base_url" in event_fields
+    assert events[0]["before"] == "https://api.example.com/v1"
+
+
+def test_security_clamp_events_redact_credentials():
+    config = make_config(runtime__profile="safe_local")
+    provider = config.llm.get_provider(role="primary")
+    provider.api_key = "sk-secret-value"
+
+    events = apply_runtime_profile_security_clamps(config)
+
+    assert provider.api_key == ""
+    api_events = [event for event in events if event["field"].endswith("api_key")]
+    assert api_events and api_events[0]["before"] == "***"
+    assert "sk-secret-value" not in json.dumps(events)

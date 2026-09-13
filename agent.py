@@ -816,8 +816,10 @@ class AgentRuntime:
             raise RuntimeError(message)
         self._context_window_limit = context_window
         # Compression threshold is derived from the known window; never invent the window itself.
+        # The derivation stays in this runtime attribute and is never written back into
+        # ``self.config.context_compression``: the loaded config is operator-owned state
+        # shared with other readers, and silent in-place rewrites lose the TOML provenance.
         self._effective_max_token_limit = max(1, int(context_window * 0.5))
-        self.config.context_compression.max_token_limit = self._effective_max_token_limit
         try:
             from core.pet_system import get_pet_system
             get_pet_system().update_context_window(self._context_window_limit)
