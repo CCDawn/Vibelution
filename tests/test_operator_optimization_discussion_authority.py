@@ -44,6 +44,18 @@ def test_server_setup_freezes_routes_planner_and_actual_attempt(activity, setup)
             authority.validate_operator_authority({**result, key: "other"})
 
 
+def test_retry_freezes_new_authority_and_rejects_previous_attempt(activity, setup):
+    run, attempt = setup
+    first = authority.build_operator_meeting_authority(activity[0], run.run_id, node_run_id="node1")
+    attempt.node_run_id, attempt.attempt = "node2", 2
+    second = authority.build_operator_meeting_authority(activity[0], run.run_id, node_run_id="node2")
+    assert second["nodeRunId"] == "node2" and second["nodeAttempt"] == 2
+    assert authority.validate_operator_authority(second) == second
+    assert authority.build_operator_meeting_authority(activity[0], run.run_id, node_run_id="node2") == second
+    with pytest.raises(CampaignConflict, match="active node"):
+        authority.validate_operator_authority(first)
+
+
 def test_stopped_attempt_cannot_mint_speaker_authority(activity, setup):
     run, attempt = setup
     attempt.finished_at_ms = 1

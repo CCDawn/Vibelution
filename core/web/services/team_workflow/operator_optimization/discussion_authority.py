@@ -18,6 +18,12 @@ from .store import CampaignConflict, read_campaign
 AUTHORITY_KIND = "operator_discussion"
 
 
+def _setup_identity(round_id: str, node_run_id: str) -> str:
+    return "discussion-setup:" + sha256_hex({
+        "roundId": round_id, "nodeRunId": node_run_id,
+    })[:24]
+
+
 def _active_run(team_id, run_id, node_run_id):
     store = get_write_store()
     run = store.get_run(run_id)
@@ -38,7 +44,7 @@ def build_operator_meeting_authority(team_id: str, run_id: str, *, node_run_id: 
     if (not campaign.budget.authorized or not campaign.authorizedBy
             or campaign.budget.modelCostLimit <= 0 or campaign.budget.discussion is None):
         raise CampaignConflict("Discussion requires explicit authorized model budget and prices")
-    identity = "discussion-setup:" + context["roundId"]
+    identity = _setup_identity(context["roundId"], node_run_id)
     with inter_process_lock(artifacts._path(team_id, "optimization_discussion")):
         saved = load_scoped_artifact_payload("optimization_discussion", team_id=team_id,
             workflow_run_id=run_id, authority_run_id=run_id, record_id=identity)
@@ -89,7 +95,7 @@ def validate_operator_authority(authority: dict) -> dict:
     run, _ = _active_run(authority["teamId"], authority["workflowRunId"], authority["nodeRunId"])
     saved = load_scoped_artifact_payload("optimization_discussion", team_id=run.team_id,
         workflow_run_id=run.run_id, authority_run_id=run.run_id,
-        record_id="discussion-setup:" + authority["roundId"])
+        record_id=_setup_identity(authority["roundId"], authority["nodeRunId"]))
     if saved is None or saved["payload"] != authority or run.project_id != authority["researchProjectId"]:
         raise CampaignConflict("Operator authority differs from server-frozen setup")
     discussion_input(run.team_id, run.run_id)
