@@ -2600,6 +2600,15 @@ def _execute_real_system_action(
     """
     node_id = str(action.node_id or "").strip()
     snapshot = dict(input_snapshot or {})
+    if node_id in {"operator_evaluation", "optimization_feedback"}:
+        from ..operator_optimization.evaluation import publish_evaluation
+        from ..operator_optimization.feedback import publish_feedback
+        ref = (publish_evaluation if node_id == "operator_evaluation" else publish_feedback)(action, snapshot)
+        from .artifact_readback_registry import build_canonical_ref
+        return [{"kind": ref.kind, "sha256": ref.sha256,
+            "canonicalRef": build_canonical_ref(kind=ref.kind, team_id=snapshot["teamId"],
+                authority_run_id=action.run_id, content_hash=ref.sha256)}], {
+            "systemActionId": f"sys-{action.action_id}", "runnerId": "operator_numerical_feedback_v1"}
     if node_id == "operator_execution":
         from ..operator_optimization.execution import execute_plan
         refs = execute_plan(action, snapshot)

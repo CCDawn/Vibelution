@@ -19,10 +19,10 @@ from .planning import planning_input, validate_plan_candidates
 from .store import CampaignConflict
 
 
-def execute_plan(action, snapshot: dict) -> list[dict[str, str]]:
+def require_active_node(action, snapshot: dict, node_id: str):
     store = get_write_store()
     run = store.get_run(action.run_id)
-    attempt = store.latest_attempt(action.run_id, "operator_execution")
+    attempt = store.latest_attempt(action.run_id, node_id)
     if (
         run is None
         or run.workflow_id != "operator-optimization"
@@ -30,15 +30,20 @@ def execute_plan(action, snapshot: dict) -> list[dict[str, str]]:
         or attempt is None
         or attempt.node_run_id != action.node_run_id
         or attempt.finished_at_ms is not None
-        or action.node_id != "operator_execution"
+        or action.node_id != node_id
     ):
         raise CampaignConflict("Execution requires the active operator NodeRun")
-    frozen = json.loads(run.input_snapshot_json)
     if (snapshot.get("teamId"), snapshot.get("projectId")) != (
         run.team_id,
         run.project_id,
     ):
         raise CampaignConflict("Execution locator differs from its Ledger run")
+    return run
+
+
+def load_frozen_plan(run):
+    """One source check shared by execution and numerical evaluation."""
+    frozen = json.loads(run.input_snapshot_json)
     campaign, record, _ = round_context(run.team_id, run.run_id)
     if not campaign.budget.authorized or not campaign.authorizedBy:
         raise CampaignConflict("Execution budget is not authorized")
@@ -69,11 +74,6 @@ def execute_plan(action, snapshot: dict) -> list[dict[str, str]]:
         record,
         (plan.baselineCandidateRef, plan.parentCandidateRef, plan.candidateRef),
     )
-    if (
-        plan.trialCount > campaign.budget.maxTrialsPerRound
-        or plan.trialTimeoutSeconds > campaign.budget.trialTimeoutSeconds
-    ):
-        raise CampaignConflict("Frozen plan exceeds the authorized trial limits")
     environment = load_scoped_artifact_payload(
         "operator_environment",
         team_id=run.team_id,
@@ -83,6 +83,24 @@ def execute_plan(action, snapshot: dict) -> list[dict[str, str]]:
     )
     if environment is None:
         raise CampaignConflict("Execution environment cannot be read back")
+    return campaign, record, plan, inputs, environment["payload"]
+
+
+def trial_measurement_id(run_id: str, plan_hash: str, index: int) -> str:
+    return (
+        "trial-"
+        + sha256_hex({"runId": run_id, "planHash": plan_hash, "index": index})[:24]
+    )
+
+
+def execute_plan(action, snapshot: dict) -> list[dict[str, str]]:
+    run = require_active_node(action, snapshot, "operator_execution")
+    campaign, record, plan, inputs, environment = load_frozen_plan(run)
+    if (
+        plan.trialCount > campaign.budget.maxTrialsPerRound
+        or plan.trialTimeoutSeconds > campaign.budget.trialTimeoutSeconds
+    ):
+        raise CampaignConflict("Frozen plan exceeds the authorized trial limits")
     refs = []
     for index in range(plan.trialCount):
         # Stable across node retries: dispatch_trial owns durable admission,
@@ -94,18 +112,17 @@ def execute_plan(action, snapshot: dict) -> list[dict[str, str]]:
             candidate=plan.candidateRef.candidate,
             campaign_id=campaign.optimizationCampaignId,
             run_id=run.run_id,
-            measurement_id="trial-"
-            + sha256_hex(
-                {"runId": run.run_id, "planHash": record.planRef.sha256, "index": index}
-            )[:24],
-            expected_environment_hash=sha256_hex(environment["payload"]),
+            measurement_id=trial_measurement_id(
+                run.run_id, record.planRef.sha256, index
+            ),
+            expected_environment_hash=sha256_hex(environment),
             max_seconds=plan.trialTimeoutSeconds,
         )
         ref = dispatch_trial(
             run.team_id,
             run.project_id,
             request,
-            device_name=environment["payload"]["deviceName"],
+            device_name=environment["deviceName"],
         )
         refs.append(
             {
