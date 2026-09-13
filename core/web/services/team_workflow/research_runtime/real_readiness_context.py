@@ -523,6 +523,9 @@ class RealDomainReadinessContext:
         from core.research.workflow.knowledge_sideflow_definition import (
             build_knowledge_sideflow_workflow_definition,
         )
+        from core.research.workflow.operator_optimization_definition import (
+            build_operator_definition,
+        )
 
         node = next(
             (
@@ -530,6 +533,8 @@ class RealDomainReadinessContext:
                 for definition in (
                     build_challenge_cup_workflow_definition(),
                     build_knowledge_sideflow_workflow_definition(),
+                    build_operator_definition(),
+                    build_operator_definition(baseline=True),
                 )
                 for node in definition.nodes
                 if node.nodeId == node_id

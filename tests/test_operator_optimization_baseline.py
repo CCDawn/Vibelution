@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from core.research.operator_optimization.measurement import MeasurementProtocol
 from core.web.services import team_service, team_workflow_orchestration_service as service
 from core.web.services.team_workflow.operator_optimization import baseline
@@ -11,6 +13,25 @@ from core.web.services.team_workflow.research_runtime.operator_authorization imp
 from core.web.services.team_workflow.research_runtime import workflow_artifact_store as artifacts
 from tests._support.team_workflow.cases_experiment import _use_tmp_project_root
 from tests._support.workflow_ledger_helpers import open_ledger_store
+
+
+@pytest.mark.parametrize("baseline_only", [True, False])
+def test_operator_readiness_resolves_registered_node_adapters(tmp_path, baseline_only):
+    from core.research.workflow.operator_optimization_definition import build_operator_definition
+    from core.web.services.team_workflow.research_runtime.action_registry import ActionRegistry
+    from core.web.services.team_workflow.research_runtime.adapters.domain_adapters import register_default_adapters
+
+    ledger = open_ledger_store(tmp_path / "registry.sqlite")
+    try:
+        registry = register_default_adapters(ActionRegistry(), None)
+        context = RealDomainReadinessContext(ledger, adapter_registry=registry)
+        empty_context = RealDomainReadinessContext(ledger, adapter_registry=ActionRegistry())
+        for node in build_operator_definition(baseline=baseline_only).nodes:
+            assert context.adapter_registered(node.nodeId), node.nodeId
+            assert not empty_context.adapter_registered(node.nodeId), node.nodeId
+        assert not context.adapter_registered("unknown_operator_node")
+    finally:
+        ledger.close()
 
 
 def test_baseline_setup_creates_scoped_ledger_with_verified_artifacts_once(tmp_path, monkeypatch):
