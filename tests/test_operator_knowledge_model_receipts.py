@@ -174,7 +174,7 @@ def test_operator_child_receipt_cannot_fall_back_to_generic_tokens(child_case):
             workflow_run_id=binding.workflowRunId, receipt=receipt)
 
 
-def test_new_parent_retry_gets_distinct_child_but_replays_itself(child_case):
+def test_new_parent_retry_gets_distinct_child_but_replays_itself(child_case, monkeypatch):
     store, binding, _ = child_case
     old = store.read(lambda repo: repo.get_knowledge_invocation(binding.knowledgeInvocationId))
     old_child = store.get_run(binding.workflowRunId)
@@ -203,3 +203,10 @@ def test_new_parent_retry_gets_distinct_child_but_replays_itself(child_case):
     with pytest.raises(KnowledgeSideflowError, match="retry differs"):
         validate_child_request(invocation, {**child_request, "invocationAttempt": 3})
     assert store.get_run(old_child.run_id) == old_child
+
+    from core.web.services.team_workflow.operator_optimization import knowledge
+    monkeypatch.setattr(knowledge, "get_write_store", lambda: store)
+    monkeypatch.setattr(knowledge, "child_costs_settled", lambda *a: True)
+    package = {"invocationId": invocation.invocation_id}
+    monkeypatch.setattr(knowledge, "load_accepted_knowledge_packages_from_invocations", lambda *a, **kw: [package])
+    assert knowledge.verified_packages("team1", "parent1", request) == [package]

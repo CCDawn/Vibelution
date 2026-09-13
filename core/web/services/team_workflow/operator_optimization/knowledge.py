@@ -159,7 +159,10 @@ def verified_packages(team_id: str, run_id: str, request: OperatorKnowledgeReque
         for inv in invocations
         if inv.parent_run_id == run_id
         and inv.parent_node_id == "optimization_knowledge"
-        and inv.request_hash == fingerprints["requestHash"]
+        and inv.request_hash == compute_invocation_fingerprints(
+            **knowledge_invocation_arguments(request, question_id=run.question_id),
+            invocation_attempt=inv.parent_attempt,
+        )["requestHash"]
         and inv.scope_hash == fingerprints["scopeHash"]
         and inv.source_policy_version == request.sourcePolicyVersion
         and child_costs_settled(store, inv.knowledge_child_run_id)
