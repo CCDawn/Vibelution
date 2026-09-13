@@ -4991,7 +4991,10 @@ def test_source_collection_stage_turn_completion_reconciles_post_writeback_check
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
-    agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    agent = agent_directory_service.create_agent_instance(
+        display_name="资料提炼",
+        llm_bindings={"dialogue": {"modelId": "houmo_qwen35_9b_agent"}},
+    )
     direct_session = session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
         name="挑战杯科研团队",
@@ -5075,7 +5078,10 @@ def test_source_collection_stage_turn_completion_reconciles_feedback_event_check
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
-    agent = agent_directory_service.create_agent_instance(display_name="资料入库")
+    agent = agent_directory_service.create_agent_instance(
+        display_name="资料入库",
+        llm_bindings={"dialogue": {"modelId": "houmo_qwen35_9b_agent"}},
+    )
     direct_session = session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料入库")
     coordinator = agent_directory_service.create_agent_instance(display_name="科研协调")
     team = team_service.create_team(
@@ -5194,7 +5200,10 @@ def test_source_collection_ingestion_reconciles_nested_approve_all_decision_afte
         "_source_collection_work_run_store",
         lambda: source_work_runs,
     )
-    ingestor = agent_directory_service.create_agent_instance(display_name="资料入库")
+    ingestor = agent_directory_service.create_agent_instance(
+        display_name="资料入库",
+        llm_bindings={"dialogue": {"modelId": "houmo_qwen35_9b_agent"}},
+    )
     team = team_service.create_team(
         name="挑战杯科研团队",
         members=[{"agentId": ingestor["agentId"], "role": "source_ingestor", "agentName": "资料入库"}],

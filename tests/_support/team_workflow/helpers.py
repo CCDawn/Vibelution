@@ -69,6 +69,7 @@ def _fake_local_research_public_config(*, prompt_cache_mode="explicit_cache_cont
                 "houmo_qwen35_9b_agent": {
                     "model": "qwen3.5-9b",
                     "provider": "local",
+                    "context_window": 32768,
                     "prompt_cache": {"mode": prompt_cache_mode},
                 }
             },
@@ -329,6 +330,14 @@ def _stub_source_collection_search_background(monkeypatch):
     return calls
 
 def _use_fake_local_research_config(monkeypatch):
+    model_library = {
+        "houmo_qwen35_9b_agent": {
+            "model": "qwen3.5-9b",
+            "provider": "local",
+            "context_window": 32768,
+            "prompt_cache": {"mode": "explicit_cache_control"},
+        }
+    }
     monkeypatch.setattr(
         team_workflow_orchestration_service,
         "load_public_config",
@@ -336,17 +345,16 @@ def _use_fake_local_research_config(monkeypatch):
             "llm": {
                 "schema_version": 1,
                 "profiles": {},
-                "model_library": {
-                    "houmo_qwen35_9b_agent": {
-                        "model": "qwen3.5-9b",
-                        "provider": "local",
-                        "prompt_cache": {"mode": "explicit_cache_control"},
-                    }
-                },
+                "model_library": model_library,
             }
         },
     )
     monkeypatch.setattr(team_workflow_orchestration_service, "build_effective_config", lambda public_config: public_config)
+    monkeypatch.setattr(
+        session_service,
+        "get_config",
+        lambda: SimpleNamespace(llm=SimpleNamespace(model_library=model_library)),
+    )
 
 def _steward_pack_output(*, candidate_ids=None, confidence=0.61):
     normalized_candidate_ids = list(candidate_ids or ["hypothesis-1", "review-1"])

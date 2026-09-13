@@ -17,6 +17,7 @@ from core.web.services import (
 )
 from core.web.services import team_workflow_orchestration_service as service
 from core.web.services.team_workflow.operator_optimization import (
+    budget_extension,
     knowledge_budget_runtime as budget_runtime,
 )
 from core.web.services.team_workflow.operator_optimization.knowledge import (
@@ -109,6 +110,11 @@ def native_source(tmp_path, monkeypatch):
         ],
     )
     monkeypatch.setattr(budget_runtime, "read_campaign", lambda *args: campaign)
+    monkeypatch.setattr(
+        budget_extension,
+        "authorized_model_limits",
+        lambda *args, **kwargs: {campaign.budget.modelCostLimit},
+    )
 
     def seed(u):
         u.repository.insert_run(
