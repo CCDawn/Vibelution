@@ -31,6 +31,10 @@ import {
   resolveLauncherRuntimeDir,
   resolveRuntimeManagerDir
 } from "../lifecycle/projectStoragePaths.js";
+import {
+  resolveWorkbenchPortOwner,
+  type WorkbenchPortOwnerResolution
+} from "./resolveWorkbenchPortOwner.js";
 import { knownPidIsAlive, observeMainLineWorkbench, probeTcpConnect } from "../lifecycle/mainLine/observation.js";
 import {
   BACKEND_HEALTH_HTTP_TIMEOUT_MS,
@@ -173,6 +177,12 @@ export type ExecuteMainLineWorkbenchInput = {
     workspaceRoot: string;
     pid: number;
   }) => Promise<PythonProcessIdentity | null>;
+  /** Inventory-based port owner resolution for a wedged backend that owns the port. */
+  resolvePortOwner?: (input: {
+    pythonPath: string;
+    workspaceRoot: string;
+    port: number;
+  }) => Promise<WorkbenchPortOwnerResolution | null>;
 };
 
 function isoNow(now?: () => string): string {
@@ -550,7 +560,16 @@ export function preferredWorkbenchPort(input: {
 
 export type WorkbenchPortOccupant =
   | { kind: "free" }
-  | { kind: "same-project-backend"; pid: number }
+  | {
+      kind: "same-project-backend";
+      pid: number;
+      /**
+       * False when the pid was proven by the process inventory instead of a
+       * live /api/health response. A health-unverified occupant may only be
+       * retired through identity capture plus the owned-tree terminator.
+       */
+      healthVerified?: boolean;
+    }
   | { kind: "same-project-legacy-backend" }
   | { kind: "other-project-backend"; workspaceRoot: string }
   | { kind: "unknown" };
@@ -609,6 +628,11 @@ export async function classifyWorkbenchPortOccupant(input: {
   signal?: AbortSignal;
   connect?: (port: number, host: string) => Promise<boolean>;
   fetchHealth?: (url: string) => Promise<WorkbenchHealthResponse>;
+  /**
+   * Inventory-based port owner resolution for a wedged backend that still
+   * holds the port but no longer answers /api/health.
+   */
+  resolvePortOwner?: (port: number) => Promise<WorkbenchPortOwnerResolution | null>;
 }): Promise<WorkbenchPortOccupant> {
   const host = input.host?.trim() || DEFAULT_WORKBENCH_HOST;
   const port = Math.trunc(input.port);
@@ -648,6 +672,28 @@ export async function classifyWorkbenchPortOccupant(input: {
     || typeof body.routesReady !== "boolean"
     || typeof body.workspaceRoot !== "string"
   ) {
+    // A wedged backend can keep the listening socket and its process identity
+    // while never answering /api/health again. When the project inventory can
+    // still prove this pid is the managed workbench backend of this workspace,
+    // surface it as a health-unverified same-project occupant so the retire
+    // path can capture its identity and terminate it through the owned-tree
+    // verifier. Any other outcome stays fail-closed as "unknown".
+    if (input.resolvePortOwner) {
+      let owner: WorkbenchPortOwnerResolution | null = null;
+      try {
+        owner = await input.resolvePortOwner(port);
+      } catch {
+        owner = null;
+      }
+      if (
+        owner
+        && owner.pid > 0
+        && owner.alive
+        && owner.kind === "managed_workbench_backend"
+      ) {
+        return { kind: "same-project-backend", pid: owner.pid, healthVerified: false };
+      }
+    }
     return { kind: "unknown" };
   }
   if (!sameProjectRoot(String(body.workspaceRoot), input.workspaceRoot)) {
@@ -678,6 +724,8 @@ export async function reclaimStaleWorkbenchBackend(input: {
    * backend whose original launcher parent has already exited.
    */
   captureProcessIdentity?: (pid: number) => Promise<PythonProcessIdentity | null>;
+  /** Inventory-based port owner resolution; see classifyWorkbenchPortOccupant. */
+  resolvePortOwner?: (port: number) => Promise<WorkbenchPortOwnerResolution | null>;
   controlToken?: string;
   gracefulShutdown?: typeof requestGracefulWorkbenchShutdown;
   /** Only an explicitly authorized force-stop may bypass an HTTP 409 active-work refusal. */
@@ -804,8 +852,21 @@ export async function reclaimStaleWorkbenchBackend(input: {
   }
   let gracefulCompleted = false;
   let graceful: GracefulWorkbenchShutdownResult | undefined;
+  if (occupant.healthVerified === false && !input.captureProcessIdentity) {
+    // An inventory-adopted occupant has no live health proof, so the only
+    // acceptable retirement evidence is the identity-checked owned-tree
+    // terminator. Without an identity capture hook this must fail closed.
+    return {
+      reclaimed: false,
+      reason: `stale backend pid ${occupant.pid} has no verified health and no identity capture is available`,
+      verifiedPid: occupant.pid
+    };
+  }
   if (pidAlive(occupant.pid)) {
-    if (input.gracefulShutdown) {
+    // A graceful HTTP shutdown needs the backend to answer; an inventory-adopted
+    // occupant already stopped answering /api/health, so skip the request and go
+    // straight to identity capture plus the owned-tree terminator.
+    if (input.gracefulShutdown && occupant.healthVerified !== false) {
       graceful = await input.gracefulShutdown({
         port,
         host: input.host,
@@ -833,10 +894,10 @@ export async function reclaimStaleWorkbenchBackend(input: {
       };
     }
     if (!gracefulCompleted) {
-      // The persisted state may identify the detached Python parent while
-      // /api/health reports the still-listening child. Capture the child only
-      // after health has matched its workspace, then let the existing
-      // identity-checked, kind-checked tree terminator make the final call.
+      // The occupant was identified either by a live health response or by the
+      // project process inventory (wedged backend that stopped answering).
+      // Capture its own identity before letting the existing identity-checked,
+      // kind-checked tree terminator make the final call.
       if (!expectedIdentities[String(occupant.pid)] && input.captureProcessIdentity) {
         const captured = await input.captureProcessIdentity(occupant.pid);
         if (
@@ -936,6 +997,8 @@ export async function resolveBindableWorkbenchPort(input: {
   terminateProcessTree?: (pid: number, expectedIdentity?: PythonProcessIdentity) => boolean | Promise<boolean>;
   expectedIdentities?: Readonly<Record<string, PythonProcessIdentity>>;
   captureProcessIdentity?: (pid: number) => Promise<PythonProcessIdentity | null>;
+  /** Inventory-based port owner resolution for a wedged backend. */
+  resolvePortOwner?: (port: number) => Promise<WorkbenchPortOwnerResolution | null>;
   controlToken?: string;
   gracefulShutdown?: typeof requestGracefulWorkbenchShutdown;
   /** Only an explicitly authorized force-stop may bypass an HTTP 409 active-work refusal. */
@@ -1456,6 +1519,16 @@ export async function executeMainLineWorkbench(
       pid
     });
   };
+  const resolveIdentityForPort = input.resolvePortOwner
+    ?? ((ownerInput: { pythonPath: string; workspaceRoot: string; port: number }) =>
+      resolveWorkbenchPortOwner(ownerInput));
+  const resolveCurrentPortOwner = async (port: number): Promise<WorkbenchPortOwnerResolution | null> => {
+    return await resolveIdentityForPort({
+      pythonPath: input.pythonPath,
+      workspaceRoot: input.workspaceRoot,
+      port
+    });
+  };
 
   if (operation === "stop" || operation === "force-stop" || operation === "shutdown") {
     if (operation === "stop" || operation === "shutdown") {
@@ -1542,6 +1615,7 @@ export async function executeMainLineWorkbench(
         terminateProcessTree,
         expectedIdentities,
         captureProcessIdentity: captureCurrentBackendIdentity,
+        resolvePortOwner: resolveCurrentPortOwner,
         controlToken: input.controlToken,
         gracefulShutdown,
         forceRetireOnActiveWorkRefusal: operation === "force-stop",
@@ -1601,6 +1675,7 @@ export async function executeMainLineWorkbench(
           terminateProcessTree,
           expectedIdentities,
           captureProcessIdentity: captureCurrentBackendIdentity,
+          resolvePortOwner: resolveCurrentPortOwner,
           controlToken: input.controlToken,
           gracefulShutdown,
           forceRetireOnActiveWorkRefusal: operation === "force-stop",
@@ -1643,6 +1718,7 @@ export async function executeMainLineWorkbench(
         terminateProcessTree,
         expectedIdentities,
         captureProcessIdentity: captureCurrentBackendIdentity,
+        resolvePortOwner: resolveCurrentPortOwner,
         controlToken: input.controlToken,
         forceRetireOnActiveWorkRefusal: operation === "force-stop",
         registeredPids: retainedBackendTreePids,
@@ -1855,6 +1931,7 @@ export async function executeMainLineWorkbench(
       terminateProcessTree,
       expectedIdentities,
       captureProcessIdentity: captureCurrentBackendIdentity,
+      resolvePortOwner: resolveCurrentPortOwner,
       gracefulShutdown,
       forceRetireOnActiveWorkRefusal: false
     });

@@ -697,6 +697,181 @@ def test_launch_desktop_shell_action_dispatches_to_desktop_shell(monkeypatch, ca
     assert payload["lifecycleSettlement"]["observed"] == "queue_settlement"
 
 
+def test_resolve_workbench_port_owner_reports_inventory_trusted_backend(monkeypatch, capsys):
+    from core.runtime_manager import state_store, workbench_controller
+
+    monkeypatch.setattr(state_store, "load_state", lambda: {"workbench": {"backendPid": 0}})
+    monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 4321)
+    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: True)
+    monkeypatch.setattr(
+        workbench_controller, "_repo_workbench_backend_kind", lambda pid: "managed_workbench_backend"
+    )
+    monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: True)
+
+    result = desktop_entry.main(
+        [
+            "--action",
+            "resolve-workbench-port-owner",
+            "--output",
+            "json",
+            "--workspace",
+            ".",
+            "--port",
+            "8123",
+        ]
+    )
+    assert result == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["port"] == 8123
+    assert payload["pid"] == 4321
+    assert payload["kind"] == "managed_workbench_backend"
+    assert payload["trusted"] is True
+    assert payload["listening"] is True
+    assert payload["residual"] is False
+    assert payload["conflict"] is False
+
+
+def test_resolve_workbench_port_owner_flags_unmanaged_occupant_as_residual(monkeypatch, capsys):
+    from core.runtime_manager import state_store, workbench_controller
+
+    monkeypatch.setattr(state_store, "load_state", lambda: {"workbench": {"backendPid": 0}})
+    monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 4321)
+    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: True)
+    monkeypatch.setattr(workbench_controller, "_repo_workbench_backend_kind", lambda pid: "unmanaged_workbench")
+    monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: True)
+
+    result = desktop_entry.main(
+        [
+            "--action",
+            "resolve-workbench-port-owner",
+            "--output",
+            "json",
+            "--workspace",
+            ".",
+            "--port",
+            "8123",
+        ]
+    )
+    assert result == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["trusted"] is False
+    assert payload["residual"] is True
+    assert payload["conflict"] is False
+
+
+def test_launch_desktop_shell_retries_once_when_intent_not_consumed(monkeypatch, capsys, tmp_path):
+    launches: list[dict[str, object]] = []
+    wait_kwargs: list[dict[str, object]] = []
+
+    def fake_launch(*, project_root, then_lifecycle, open_workbench):
+        launches.append({"then_lifecycle": then_lifecycle})
+        return {
+            "schemaVersion": 1,
+            "kind": "unpackaged",
+            "pid": 100 + len(launches),
+            "thenLifecycle": then_lifecycle,
+            "openWorkbench": open_workbench,
+        }
+
+    def fake_wait(workspace_root, operation, *, baseline_command_id="", **kwargs):
+        wait_kwargs.append(dict(kwargs))
+        if len(wait_kwargs) == 1:
+            return {
+                "operation": operation,
+                "observed": "intent_not_consumed",
+                "settled": False,
+                "accepted": False,
+                "ok": False,
+                "commandId": "",
+                "code": "",
+                "message": "Launcher 生命周期命令 restart 未被消费。",
+                "resultsPath": "",
+            }
+        return {
+            "operation": operation,
+            "observed": "queue_settlement",
+            "settled": True,
+            "accepted": True,
+            "ok": True,
+            "commandId": "cmd_retry_settled",
+            "code": "",
+            "message": "Main-line lifecycle command settled successfully.",
+            "resultsPath": "",
+        }
+
+    monkeypatch.setattr("core.launcher.desktop_shell.launch_desktop_shell", fake_launch)
+    monkeypatch.setattr(desktop_entry, "wait_for_lifecycle_settlement", fake_wait)
+
+    result = desktop_entry.main(
+        [
+            "--action",
+            "launch-desktop-shell",
+            "--output",
+            "json",
+            "--then-lifecycle",
+            "restart",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    assert result == 0
+    assert len(launches) == 2
+    assert wait_kwargs[1]["timeout_seconds"] == desktop_entry.LAUNCH_SETTLEMENT_RETRY_TIMEOUT_SECONDS
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["settlementAttempts"] == 2
+    assert payload["pid"] == 102
+    assert payload["lifecycleSettlement"]["observed"] == "queue_settlement"
+    assert payload["lifecycleSettlement"]["accepted"] is True
+
+
+def test_launch_desktop_shell_does_not_retry_an_unsettled_intent(monkeypatch, capsys, tmp_path):
+    launches: list[dict[str, object]] = []
+
+    def fake_launch(*, project_root, then_lifecycle, open_workbench):
+        launches.append({"then_lifecycle": then_lifecycle})
+        return {
+            "schemaVersion": 1,
+            "kind": "unpackaged",
+            "pid": 200,
+            "thenLifecycle": then_lifecycle,
+            "openWorkbench": open_workbench,
+        }
+
+    def fake_wait(workspace_root, operation, *, baseline_command_id="", **kwargs):
+        return {
+            "operation": operation,
+            "observed": "intent_unsettled",
+            "settled": False,
+            "accepted": False,
+            "ok": False,
+            "commandId": "cmd_still_running",
+            "code": "",
+            "message": "Launcher 生命周期命令 restart 在 90s 内未结算。",
+            "resultsPath": "",
+        }
+
+    monkeypatch.setattr("core.launcher.desktop_shell.launch_desktop_shell", fake_launch)
+    monkeypatch.setattr(desktop_entry, "wait_for_lifecycle_settlement", fake_wait)
+
+    result = desktop_entry.main(
+        [
+            "--action",
+            "launch-desktop-shell",
+            "--output",
+            "json",
+            "--then-lifecycle",
+            "restart",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    assert result == desktop_entry._LIFECYCLE_SETTLE_EXIT_FAILED
+    assert len(launches) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert "settlementAttempts" not in payload
+    assert payload["lifecycleSettlement"]["observed"] == "intent_unsettled"
+
+
 _ACTIVE_WORK_RESTART_BLOCK_MESSAGE = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
 
 

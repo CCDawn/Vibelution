@@ -67,7 +67,7 @@ export type RunWorkbenchLifecycleInput = {
   commandDeadlineMs?: number;
 } & Pick<
   ExecuteMainLineWorkbenchInput,
-  "fileExists" | "readState" | "writeState" | "listActiveWork" | "ensureFrontend" | "connect" | "fetchHealth" | "pidAlive" | "killPid" | "captureProcessIdentity"
+  "fileExists" | "readState" | "writeState" | "listActiveWork" | "ensureFrontend" | "connect" | "fetchHealth" | "pidAlive" | "killPid" | "captureProcessIdentity" | "resolvePortOwner"
 >;
 
 /** Slowest bounded step (frontend build bridge) is 600s; 15min covers the sum. */
@@ -155,7 +155,8 @@ export async function runWorkbenchLifecycle(input: RunWorkbenchLifecycleInput): 
           fetchHealth: input.fetchHealth,
           pidAlive: input.pidAlive,
           killPid: input.killPid,
-          captureProcessIdentity: input.captureProcessIdentity
+          captureProcessIdentity: input.captureProcessIdentity,
+          resolvePortOwner: input.resolvePortOwner
         });
         void recordMainLineCommandSettlement({
           workspaceRoot: input.workspaceRoot,
