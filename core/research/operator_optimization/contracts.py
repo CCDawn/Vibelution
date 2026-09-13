@@ -70,6 +70,7 @@ class OptimizationHypothesis(Contract):
 class OptimizationRound(Contract):
     roundId: Identity
     runId: Identity
+    previousRunIds: tuple[Identity, ...] = ()
     ordinal: int = Field(ge=1, strict=True)
     baselineCandidateRef: CudaCandidateRef
     parentCandidateRef: CudaCandidateRef

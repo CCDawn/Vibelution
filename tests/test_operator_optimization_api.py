@@ -49,3 +49,31 @@ def test_budget_authorization_requires_server_role_and_replays_once(tmp_path, mo
         authorized = authorize_campaign(*args, **kwargs)
         assert authorized.budget.authorized and authorized.authorizedBy == "owner"
         assert authorize_campaign(*args, **kwargs) == authorized
+
+
+def test_recovery_api_requires_control_auth_and_forwards_scope(tmp_path, monkeypatch):
+    from core.web.services.team_workflow.operator_optimization import recovery
+    from core.web.services.team_workflow.research_runtime.operator_authorization import current_server_operator
+
+    team, project = setup_team(tmp_path, monkeypatch)
+    campaign = create_campaign(team, project, {"title": "Recovery", "idempotencyKey": "one"})
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+    path = f"/teams/{team}/workflow-orchestration/research-projects/{project}/operator-experiments/{campaign.optimizationCampaignId}/rounds/round-one/recover"
+    payload = {"expectedCampaignVersion": 1, "idempotencyKey": "recover"}
+    monkeypatch.setattr("core.web.control.validate_control_request", lambda request: "missing")
+    assert client.post(path, json=payload).status_code == 403
+    calls = []
+
+    def recover(*args, **kwargs):
+        assert current_server_operator() is not None
+        calls.append((args, kwargs))
+        return campaign
+
+    monkeypatch.setattr("core.web.control.validate_control_request", lambda request: None)
+    monkeypatch.setattr(recovery, "recover_round", recover)
+    assert client.post(path, json=payload).status_code == 200
+    assert calls == [((team, project, campaign.optimizationCampaignId, "round-one"),
+        {"expected_version": 1, "command_key": "recover"})]
+    assert client.post(path, json={**payload, "expectedCampaignVersion": 0}).status_code == 422

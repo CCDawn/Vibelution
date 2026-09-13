@@ -9,6 +9,8 @@ from core.research.workflow.contracts import CommandOffer, WorkflowCommandKind
 from core.research.workflow.ledger.records import NodeAttemptRecord, RunRecord
 from core.research.workflow.models import ActorKind, WorkflowDefinition
 
+from ..readiness.common import TERMINAL_RUN_STATUSES
+
 
 _RETRYABLE_ATTEMPT_STATUSES = frozenset({"failed", "blocked", "cancelled"})
 
@@ -95,9 +97,9 @@ def build_retry_node_offers(
         rerun_available = succeeded_node_rerun_available(
             node_id=node.nodeId, latest=latest, run=run
         )
-        available = bool(
+        available = run.status not in TERMINAL_RUN_STATUSES and (bool(
             latest and latest.status in _RETRYABLE_ATTEMPT_STATUSES
-        ) or rerun_available
+        ) or rerun_available)
         if node.actorKind == ActorKind.HUMAN and not available:
             # A healthy human gate is operated through resolve_human_task.
             # Only surface retry when readiness previously blocked or the

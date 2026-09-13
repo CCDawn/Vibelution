@@ -132,7 +132,7 @@ def test_round_creates_real_ledger_on_discussion_node(activity, ready, tmp_path,
     monkeypatch.setattr(rounds.run_creation, "get_write_store", lambda: Store())
     monkeypatch.setattr(rounds.run_creation, "create_run", actual_create_run)
     monkeypatch.setattr(rounds.run_creation, "research_workflow_data_root", lambda: tmp_path)
-    monkeypatch.setattr(rounds.run_creation, "effective_binding_layers", lambda *a:
+    monkeypatch.setattr(rounds.run_creation, "effective_binding_layers", lambda *a, **k:
         AgentBindingLayers(workflowDefaults={"experiment_planner": "planner-fixture"}))
     try:
         created = rounds.prepare_round(*activity, expected_version=campaign.revision, command_key="round-real")

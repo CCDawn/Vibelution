@@ -43,7 +43,7 @@ def test_baseline_setup_creates_scoped_ledger_with_verified_artifacts_once(tmp_p
     ledger = open_ledger_store(tmp_path / "ledger.sqlite")
     monkeypatch.setattr(run_creation, "get_write_store", lambda: ledger)
     monkeypatch.setattr(run_creation, "research_workflow_data_root", lambda: tmp_path)
-    monkeypatch.setattr(run_creation, "effective_binding_layers", lambda team, layers: layers)
+    monkeypatch.setattr(run_creation, "effective_binding_layers", lambda team, layers, **kwargs: layers)
     campaign = create_campaign(team, project, {"title": "Softmax", "idempotencyKey": "one", "budget": {"gpuSecondsLimit": 60}})
     cid = campaign.optimizationCampaignId
     protocol = MeasurementProtocol(protocolId="p1", split="tuning",

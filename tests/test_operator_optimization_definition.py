@@ -77,7 +77,7 @@ def test_baseline_input_has_no_catalog_and_pins_canonical_ledger(tmp_path, monke
     ledger = open_ledger_store(tmp_path / "ledger.sqlite")
     monkeypatch.setattr(run_creation, "get_write_store", lambda: ledger)
     monkeypatch.setattr(run_creation, "research_workflow_data_root", lambda: tmp_path)
-    monkeypatch.setattr(run_creation, "effective_binding_layers", lambda team, layers: layers)
+    monkeypatch.setattr(run_creation, "effective_binding_layers", lambda team, layers, **kwargs: layers)
     try:
         result = run_creation.create_run("operator-optimization-baseline", run_input=data, idempotency_key="baseline-1")
         saved = ledger.get_run(result["runId"])

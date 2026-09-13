@@ -70,7 +70,7 @@ def completed(activity, prepared, baseline_ready, tmp_path, monkeypatch):
     monkeypatch.setattr(
         rounds.run_creation,
         "effective_binding_layers",
-        lambda *a: AgentBindingLayers(
+        lambda *a, **k: AgentBindingLayers(
             workflowDefaults={"experiment_planner": "planner-fixture"}
         ),
     )

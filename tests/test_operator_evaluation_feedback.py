@@ -243,7 +243,7 @@ def test_next_round_inherits_selected_candidate_and_failure_evidence(
     monkeypatch.setattr(
         rounds.run_creation,
         "effective_binding_layers",
-        lambda *a: AgentBindingLayers(
+        lambda *a, **k: AgentBindingLayers(
             workflowDefaults={"experiment_planner": "planner-fixture"}
         ),
     )

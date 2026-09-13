@@ -39,6 +39,20 @@ from tests._support.workflow_ledger_helpers import (
 FIXED_GENERATED_AT = "2026-08-12T14:00:00.000Z"
 
 
+@pytest.mark.parametrize("status", ["succeeded", "failed", "cancelled", "archived", "blocked"])
+def test_retry_offer_respects_terminal_run_authority(status):
+    from tests._support.workflow_ledger_helpers import build_run_record
+    from core.web.services.team_workflow.research_runtime.command_offers.retry_node import build_retry_node_offers
+
+    run = build_run_record(run_id="retry-terminal", status=status)
+    definition = build_challenge_cup_workflow_definition()
+    node_id = definition.nodes[0].nodeId
+    attempt = build_attempt_record("retry-attempt", run_id=run.run_id, node_id=node_id, status="cancelled")
+    offers = build_retry_node_offers(run=run, definition=definition, attempts=[attempt])
+    offer = next(item for item in offers if item.node_id == node_id)
+    assert offer.available is (status == "blocked")
+
+
 def _query(harness: CommandHarness) -> WorkflowQueryService:
     return WorkflowQueryService(
         store=harness.store,

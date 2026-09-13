@@ -132,3 +132,16 @@ def operator_round_prepare(team_id: str, project_id: str, campaign_id: str, payl
     )
     return _invoke(prepare_round, team_id, project_id, campaign_id,
         expected_version=payload.expectedCampaignVersion, command_key=payload.idempotencyKey)
+
+
+@router.post(_PATH + "/{campaign_id}/rounds/{round_id}/recover", response_model=OptimizationCampaign)
+def operator_round_recover(team_id: str, project_id: str, campaign_id: str, round_id: str,
+                           payload: CampaignCommandRequest, request: Request):
+    from core.web.services.team_workflow.operator_optimization.recovery import recover_round
+
+    try:
+        with server_operator_scope_from_http(request):
+            return _invoke(recover_round, team_id, project_id, campaign_id, round_id,
+                expected_version=payload.expectedCampaignVersion, command_key=payload.idempotencyKey)
+    except PermissionError as exc:
+        raise HTTPException(403, detail={"code": "command_forbidden"}) from exc
