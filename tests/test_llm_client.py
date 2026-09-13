@@ -5504,6 +5504,31 @@ def test_stream_events_expose_tool_calls_only_after_finalization():
     assert events[1].tool_calls[0].arguments == {"path": "agent.py"}
 
 
+@pytest.mark.parametrize("protocol", ["qwen_openai_compat", "qwen_thinking_no_prefill"])
+def test_qwen_reasoning_is_delivered_before_provider_answer(protocol):
+    config = _qwen_keepalive_config()
+    config.llm.profiles["primary"].protocol = protocol
+    consumed = []
+
+    def backend(_payload):
+        def chunks():
+            consumed.append("reasoning")
+            yield {"choices": [{"index": 0, "delta": {"reasoning_content": "thinking"}}]}
+            consumed.append("answer")
+            yield {"choices": [{"index": 0, "delta": {"content": "answer"}, "finish_reason": "stop"}]}
+        return chunks()
+
+    client = LLMClient(config=config, backend=backend)
+    events = client.stream_events([{"role": "user", "content": "local fixture"}])
+    try:
+        first = next(events)
+        assert first.type == "reasoning_delta"
+        assert consumed == ["reasoning"], "reasoning was withheld until the provider answer"
+        assert [event.type for event in events] == ["text_delta", "done"]
+    finally:
+        events.close()
+
+
 def test_stream_exposes_reasoning_deltas_without_polluting_content():
     config = make_config(
         **{

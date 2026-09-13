@@ -4945,6 +4945,13 @@ class LLMClient:
             iterator: Any = None
             normalized_iterator: Any = None
             pending_reasoning: list[StreamChunk] = []
+            # Only incomplete DeepSeek/Responses attempts can discard their
+            # reasoning and retry. Other protocols must deliver live reasoning
+            # immediately, including to the idle-progress watchdog.
+            buffer_reasoning_for_retry = (
+                self.protocol_route.protocol == ModelProtocol.DEEPSEEK_REASONING
+                or self.protocol_route.wire_protocol == WireProtocol.RESPONSES
+            )
 
             def flush_pending_reasoning() -> Iterator[StreamChunk]:
                 nonlocal emitted
@@ -5050,7 +5057,7 @@ class LLMClient:
                                         ),
                                     }
                                 )
-                            if projected is not None and projected.type == "reasoning_delta":
+                            if projected is not None and projected.type == "reasoning_delta" and buffer_reasoning_for_retry:
                                 pending_reasoning.append(projected)
                             elif projected is not None:
                                 yield from flush_pending_reasoning()
