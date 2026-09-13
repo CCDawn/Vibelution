@@ -154,6 +154,7 @@ def compute_invocation_fingerprints(
     requirements: Mapping[str, Any] | None,
     source_policy_version: str,
     consumer_context: Mapping[str, Any] | None = None,
+    invocation_attempt: int = 1,
 ) -> dict[str, str]:
     scope_hash = sha256_hex(dict(scope or {}))
     envelope_hash = search_envelope_hash(search_envelope, source_policy_version)
@@ -167,6 +168,9 @@ def compute_invocation_fingerprints(
     )
     if consumer_context is not None:
         request_hash = sha256_hex({"requestHash": request_hash, "consumerContext": dict(consumer_context)})
+    # Execution retries differ without invalidating semantic package reuse.
+    if invocation_attempt > 1:
+        request_hash = sha256_hex({"requestHash": request_hash, "invocationAttempt": invocation_attempt})
     return {
         "scopeHash": scope_hash,
         "searchEnvelopeHash": envelope_hash,
@@ -233,6 +237,7 @@ def ensure_knowledge_invocation(
         if managed_source_root_ids is not None
         else (scope or {}).get("managedSourceRootIds")
     )
+    invocation_attempt = int(parent_attempt or 1) if parent.workflow_id == "operator-optimization" else 1
     fingerprints = compute_invocation_fingerprints(
         question_id=normalized_question,
         scope=scope,
@@ -240,6 +245,7 @@ def ensure_knowledge_invocation(
         requirements=requirements,
         source_policy_version=source_policy_version,
         consumer_context=consumer_context,
+        invocation_attempt=invocation_attempt,
     )
 
     outcome: dict[str, Any] = {}
@@ -371,6 +377,7 @@ def ensure_knowledge_invocation(
                     "searchEnvelope": dict(search_envelope or {}),
                     "requirements": dict(requirements or {}),
                     "consumerContext": dict(consumer_context) if consumer_context is not None else None,
+                    **({"invocationAttempt": invocation_attempt} if invocation_attempt > 1 else {}),
                 },
                 source_manifest_ref=source_manifest_ref,
                 managed_source_root_ids=normalized_root_ids,

@@ -10,6 +10,9 @@ def validate_child_request(invocation, request: dict) -> dict:
     )
 
     frozen = deepcopy(request)
+    invocation_attempt = frozen.get("invocationAttempt", 1)
+    if invocation_attempt != 1 and invocation_attempt != invocation.parent_attempt:
+        raise KnowledgeSideflowError("Child retry differs from parent attempt", code="knowledge_request_mismatch")
     actual = compute_invocation_fingerprints(
         question_id=invocation.question_id,
         scope=frozen["scope"],
@@ -17,6 +20,7 @@ def validate_child_request(invocation, request: dict) -> dict:
         requirements=frozen["requirements"],
         source_policy_version=invocation.source_policy_version,
         consumer_context=frozen["consumerContext"],
+        invocation_attempt=invocation_attempt,
     )
     expected = {
         "scopeHash": invocation.scope_hash,

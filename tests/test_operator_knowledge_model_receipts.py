@@ -34,6 +34,10 @@ def child_case(tmp_path, monkeypatch):
     campaign = SimpleNamespace(authorizedBy="operator", budget=budget,
         rounds=[SimpleNamespace(runId="parent1", roundId="round1", hypothesisRef=request.hypothesisRef)])
     monkeypatch.setattr(runtime, "read_campaign", lambda *args: campaign)
+    from decimal import Decimal
+    from core.web.services.team_workflow.operator_optimization import budget_extension
+    # Controlled Ledger/provider fixture; persisted authorization has its own tests.
+    monkeypatch.setattr(budget_extension, "authorized_model_limits", lambda *a, **kw: {Decimal("1")})
     def seed(u):
         u.repository.insert_run(replace(build_run_record(run_id="parent1"), team_id="team1", project_id="project1",
             question_id="OPERATOR-SOFTMAX", workflow_id="operator-optimization", status="running",
@@ -168,3 +172,34 @@ def test_operator_child_receipt_cannot_fall_back_to_generic_tokens(child_case):
     with pytest.raises(ValueError, match="accounting identity is missing"):
         enqueue_question_model_invocation_receipt(store, team_id="team1", question_id="OPERATOR-SOFTMAX",
             workflow_run_id=binding.workflowRunId, receipt=receipt)
+
+
+def test_new_parent_retry_gets_distinct_child_but_replays_itself(child_case):
+    store, binding, _ = child_case
+    old = store.read(lambda repo: repo.get_knowledge_invocation(binding.knowledgeInvocationId))
+    old_child = store.get_run(binding.workflowRunId)
+    frozen = json.loads(old_child.input_snapshot_json)["knowledgeRequest"]
+    request = OperatorKnowledgeRequest.model_validate(frozen["consumerContext"])
+    def advance(uow):
+        parent = uow.repository.get_attempt("parent-node")
+        uow.repository.update_attempt_status("parent-node", "failed", 20, finished_at_ms=20)
+        uow.repository.insert_attempt(replace(parent, node_run_id="parent-retry", attempt=2))
+        uow.repository.update_knowledge_invocation(old.invocation_id, 20, status="failed")
+    store.submit(advance, force_flush=True).result()
+    kwargs = dict(parent_run_id="parent1", parent_node_id="optimization_knowledge",
+        parent_node_run_id="parent-retry", parent_attempt=2,
+        **knowledge_invocation_arguments(request, question_id="OPERATOR-SOFTMAX"))
+    new = ensure_knowledge_invocation(store, **kwargs)
+    replay = ensure_knowledge_invocation(store, **kwargs)
+    assert new["childRunId"] != old_child.run_id
+    assert replay["childRunId"] == new["childRunId"] and replay["replayed"]
+    invocation = new["invocation"]
+    assert (invocation.scope_hash, invocation.search_envelope_hash, invocation.requirements_hash) == (
+        old.scope_hash, old.search_envelope_hash, old.requirements_hash)
+    from core.web.services.team_workflow.research_runtime.knowledge_request_snapshot import validate_child_request
+    child_request = json.loads(store.get_run(new["childRunId"]).input_snapshot_json)["knowledgeRequest"]
+    assert validate_child_request(invocation, child_request)["invocationAttempt"] == 2
+    from core.web.services.team_workflow.research_runtime.knowledge_sideflow_service import KnowledgeSideflowError
+    with pytest.raises(KnowledgeSideflowError, match="retry differs"):
+        validate_child_request(invocation, {**child_request, "invocationAttempt": 3})
+    assert store.get_run(old_child.run_id) == old_child
