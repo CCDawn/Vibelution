@@ -2742,9 +2742,74 @@ def test_load_runtime_snapshot_clears_orphaned_message_when_consistent(monkeypat
     monkeypatch.setattr(daemon, "is_daemon_running", lambda: True)
     monkeypatch.setattr(daemon, "load_pid", lambda: 6476)
     monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: None)
+    # The reconciliation materializes managerPid/daemonRunning/failureMessage,
+    # so load_runtime_snapshot persists. Keep the write in-test exactly like the
+    # sibling snapshot tests; the conftest isolation pins the path as well.
+    monkeypatch.setattr(daemon, "save_state", lambda state: state)
 
     snapshot = daemon.load_runtime_snapshot()
     assert snapshot["workbench"]["failureMessage"] == ""
+
+
+def test_load_runtime_snapshot_never_writes_the_live_state_path(monkeypatch, tmp_path):
+    """Regression: a synthetic load_state fixture once overwrote the operator's
+    live runtime-manager state.json through the real save_state side effect."""
+    from core.runtime_manager import constants, state_store
+
+    assert state_store.STATE_PATH != constants.STATE_PATH
+    assert str(tmp_path) in str(state_store.STATE_PATH)
+
+    monkeypatch.setattr(daemon, "load_state", lambda: {
+        "runtimeState": "running",
+        "command": {"activeCommandId": ""},
+        "workbench": {
+            "desiredState": "closed",
+            "observedState": "closed",
+            "phase": "steady",
+            "frontendOrphaned": False,
+            "failureMessage": "Workbench frontend window is still open, but no backend service is reachable. "
+            "browserWindowPid=29004 backendPid=0 backendPort=8000",
+        },
+        "lastError": {"scope": "workbench", "message": "sticky unrelated lifecycle error", "at": "now"},
+    })
+    monkeypatch.setattr(
+        daemon,
+        "observe_workbench",
+        lambda: {
+            "observedState": "closed",
+            "backendPid": 0,
+            "browserLaunchPid": 0,
+            "browserWindowPid": 0,
+            "backendAlive": False,
+            "backendHealthy": False,
+            "backendObserved": False,
+            "backendPort": 8000,
+            "backendPortListening": False,
+            "backendPortOwnerPid": 0,
+            "backendPortOwnerTrusted": False,
+            "backendPortConflict": False,
+            "browserWindowAlive": False,
+            "browserManaged": True,
+            "backendMissing": False,
+            "frontendOrphaned": False,
+            "lifecycleConsistency": "consistent",
+            "sessionId": "",
+            "url": "http://127.0.0.1:8000",
+        },
+    )
+    monkeypatch.setattr(daemon, "residual_process_payload", lambda **kwargs: {"count": 0, "items": []})
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "is_daemon_running", lambda: True)
+    monkeypatch.setattr(daemon, "load_pid", lambda: 6476)
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: None)
+
+    snapshot = daemon.load_runtime_snapshot()
+    assert snapshot["workbench"]["failureMessage"] == ""
+
+    persisted = json.loads(state_store.STATE_PATH.read_text(encoding="utf-8"))
+    assert persisted["managerPid"] == 6476
+    assert persisted["daemonRunning"] is True
+    assert persisted["workbench"]["failureMessage"] == ""
 
 
 def test_reconcile_observation_cleans_closed_residual_processes(monkeypatch):

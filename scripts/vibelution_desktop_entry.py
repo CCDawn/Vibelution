@@ -1423,6 +1423,9 @@ _LIFECYCLE_SETTLEMENT_OPERATION_VARIANTS = {
     "rebuild-and-start": ("rebuild-and-start", "restart"),
 }
 DEFAULT_LIFECYCLE_SETTLE_TIMEOUT_SECONDS = 90.0
+# A second-instance signal can be dropped while the primary shell is stalled;
+# one bounded re-forward keeps the total inside the native bridge deadline.
+LAUNCH_SETTLEMENT_RETRY_TIMEOUT_SECONDS = 30.0
 _LIFECYCLE_REUSE_GRACE_SECONDS = 12.0
 _LIFECYCLE_SETTLE_POLL_SECONDS = 0.5
 _LIFECYCLE_SETTLE_EXIT_FAILED = 3
@@ -1633,6 +1636,7 @@ def _await_launch_lifecycle_settlement(
     payload: dict[str, object],
     *,
     not_before_epoch: float = 0.0,
+    timeout_seconds: float | None = None,
 ) -> dict[str, object]:
     lifecycle = str(payload.get("thenLifecycle") or "").strip().lower()
     if lifecycle not in LIFECYCLE_SETTLEMENT_OPERATIONS:
@@ -1646,7 +1650,9 @@ def _await_launch_lifecycle_settlement(
         baseline_command_id=str(baseline.get("commandId") or ""),
         not_before_epoch=not_before_epoch,
         timeout_seconds=float(
-            getattr(args, "lifecycle_settle_timeout", 0.0) or DEFAULT_LIFECYCLE_SETTLE_TIMEOUT_SECONDS
+            timeout_seconds
+            if timeout_seconds is not None
+            else getattr(args, "lifecycle_settle_timeout", 0.0) or DEFAULT_LIFECYCLE_SETTLE_TIMEOUT_SECONDS
         ),
     )
     payload["lifecycleSettlement"] = settlement
@@ -1811,6 +1817,53 @@ def _resolve_workbench_bridge(_args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _resolve_workbench_port_owner_bridge(args: argparse.Namespace) -> dict[str, object]:
+    """Resolve the listening port owner so retirement can adopt a verified
+    backend even when its control port stops answering /api/health.
+
+    Read-only: this reuses the observation classifiers without loading or
+    persisting the reconciled runtime-manager snapshot.
+    """
+    from core.runtime_manager import state_store, workbench_controller
+
+    port = int(getattr(args, "port", 0) or 0) or _workbench_port()
+    state = state_store.load_state()
+    workbench = state.get("workbench") if isinstance(state.get("workbench"), dict) else {}
+    state_backend_pid = int(workbench.get("backendPid") or 0)
+    owner_pid = int(workbench_controller._listening_pid_for_port(port) or 0)
+    kind = workbench_controller._repo_workbench_backend_kind(owner_pid) if owner_pid > 0 else ""
+    alive = bool(owner_pid > 0 and workbench_controller._is_process_alive(owner_pid))
+    trusted = bool(
+        owner_pid > 0
+        and (
+            (state_backend_pid > 0 and owner_pid == state_backend_pid)
+            or kind == "managed_workbench_backend"
+        )
+    )
+    residual = bool(owner_pid > 0 and not trusted and kind == "unmanaged_workbench")
+    conflict = bool(owner_pid > 0 and not trusted and not residual)
+    payload: dict[str, object] = {
+        "schemaVersion": 1,
+        "ok": True,
+        "port": port,
+        "listening": bool(owner_pid > 0 or workbench_controller._port_is_listening_socket(port)),
+        "pid": owner_pid,
+        "kind": kind,
+        "alive": alive,
+        "trusted": trusted,
+        "residual": residual,
+        "conflict": conflict,
+    }
+    _append_log(
+        "desktop_entry_python.resolve_workbench_port_owner.succeeded",
+        port=port,
+        pid=owner_pid,
+        kind=kind,
+        trusted=trusted,
+    )
+    return payload
+
+
 def _workspace_root(args: argparse.Namespace) -> Path:
     requested = str(getattr(args, "workspace", "") or "").strip()
     return Path(requested or PROJECT_ROOT).resolve()
@@ -1882,6 +1935,47 @@ def _launch_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]:
         open_workbench=bool(payload.get("openWorkbench")),
     )
     payload = _await_launch_lifecycle_settlement(args, payload, not_before_epoch=not_before_epoch)
+    settlement = payload.get("lifecycleSettlement")
+    if isinstance(settlement, dict) and str(settlement.get("observed") or "") == "intent_not_consumed":
+        # The forwarded second-instance signal never reached the main-line
+        # queue. A dropped signal is retryable (unlike an unsettled intent that
+        # was already accepted into the queue), so re-forward once with a short
+        # bounded window; the native bridge deadline covers both attempts.
+        _append_log(
+            "desktop_entry_python.desktop_shell.launch_retry",
+            level="warning",
+            operation=str(settlement.get("operation") or ""),
+            timeout_seconds=LAUNCH_SETTLEMENT_RETRY_TIMEOUT_SECONDS,
+        )
+        retry_not_before_epoch = time.time()
+        try:
+            retry_payload = launch_desktop_shell(
+                project_root=_workspace_root(args),
+                then_lifecycle=str(args.then_lifecycle or ""),
+                open_workbench=bool(getattr(args, "open_workbench", False)),
+            )
+        except Exception as exc:  # noqa: BLE001 - keep the first visible failure
+            _append_log(
+                "desktop_entry_python.desktop_shell.launch_retry_failed",
+                level="error",
+                error=str(exc),
+            )
+            return payload
+        _append_log(
+            "desktop_entry_python.desktop_shell.launched",
+            kind=str(retry_payload.get("kind") or ""),
+            pid=int(retry_payload.get("pid") or 0),
+            then_lifecycle=str(retry_payload.get("thenLifecycle") or ""),
+            open_workbench=bool(retry_payload.get("openWorkbench")),
+            retry=True,
+        )
+        payload = _await_launch_lifecycle_settlement(
+            args,
+            retry_payload,
+            not_before_epoch=retry_not_before_epoch,
+            timeout_seconds=LAUNCH_SETTLEMENT_RETRY_TIMEOUT_SECONDS,
+        )
+        payload["settlementAttempts"] = 2
     return payload
 
 
@@ -1951,6 +2045,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--launcher-api-path", default="")
     parser.add_argument("--launcher-api-method", default="GET")
     parser.add_argument("--launcher-api-body", default="")
+    parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--wait-pid", type=int, default=0)
     parser.add_argument("--then-lifecycle", default="")
     parser.add_argument(
@@ -1996,6 +2091,7 @@ def main(argv: list[str] | None = None) -> int:
         "branch-instance",
         "launcher-api",
         "resolve-workbench",
+        "resolve-workbench-port-owner",
         "desktop-shell-status",
         "schedule-desktop-shell-refresh",
         "refresh-desktop-shell",
@@ -2056,6 +2152,14 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
             else:
                 print(f"Workbench {payload.get('workbenchUrl')}")
+        elif action == "resolve-workbench-port-owner":
+            payload = _resolve_workbench_port_owner_bridge(args)
+            if args.output == "json":
+                print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            else:
+                print(
+                    f"Workbench port owner pid={payload.get('pid')} kind={payload.get('kind') or 'none'}"
+                )
         elif action == "desktop-shell-status":
             payload = _desktop_shell_status_bridge(args)
             if args.output == "json":

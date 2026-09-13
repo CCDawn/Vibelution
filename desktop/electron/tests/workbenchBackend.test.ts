@@ -528,6 +528,48 @@ describe("classifyWorkbenchPortOccupant", () => {
     ).resolves.toEqual({ kind: "unknown" });
     expect(fetchHealth).toHaveBeenCalledTimes(3);
   });
+
+  it("adopts an inventory-verified backend when health never answers", async () => {
+    const resolvePortOwner = vi.fn(async () => ({
+      pid: 4242,
+      kind: "managed_workbench_backend",
+      alive: true,
+      trusted: true,
+      residual: false,
+      conflict: false
+    }));
+    await expect(
+      classifyWorkbenchPortOccupant({
+        port: 8012,
+        workspaceRoot: "C:/repo",
+        connect: async () => true,
+        fetchHealth: async () => {
+          throw new Error("health timeout");
+        },
+        resolvePortOwner
+      })
+    ).resolves.toEqual({ kind: "same-project-backend", pid: 4242, healthVerified: false });
+    expect(resolvePortOwner).toHaveBeenCalledWith(8012);
+  });
+
+  it("keeps an unresponsive occupant unknown when inventory cannot prove it", async () => {
+    await expect(
+      classifyWorkbenchPortOccupant({
+        port: 8012,
+        workspaceRoot: "C:/repo",
+        connect: async () => true,
+        fetchHealth: async () => ({ status: 404 }),
+        resolvePortOwner: async () => ({
+          pid: 4242,
+          kind: "unmanaged_workbench",
+          alive: true,
+          trusted: false,
+          residual: true,
+          conflict: false
+        })
+      })
+    ).resolves.toEqual({ kind: "unknown" });
+  });
 });
 
 describe("reclaimStaleWorkbenchBackend", () => {
@@ -832,6 +874,69 @@ describe("reclaimStaleWorkbenchBackend", () => {
         headers: { "X-Vibelution-Control-Token": "backend-control-token" }
       })
     );
+  });
+
+  it("retires an inventory-adopted occupant with captured identity and no graceful request", async () => {
+    const alive = new Set([4242]);
+    const identity = { pid: 4242, createTime: 1, executable: "C:/Python/pythonw.exe" };
+    const terminateProcessTree = vi.fn(async (pid: number, expectedIdentity?: typeof identity) => {
+      expect(expectedIdentity).toEqual(identity);
+      alive.delete(pid);
+      return true;
+    });
+    const captureProcessIdentity = vi.fn(async () => identity);
+    const gracefulShutdown = vi.fn();
+
+    const result = await reclaimStaleWorkbenchBackend({
+      port: 8012,
+      workspaceRoot: "C:/repo",
+      connect: async () => alive.has(4242),
+      fetchHealth: async () => {
+        throw new Error("health timeout");
+      },
+      resolvePortOwner: async () => ({
+        pid: 4242,
+        kind: "managed_workbench_backend",
+        alive: true,
+        trusted: true,
+        residual: false,
+        conflict: false
+      }),
+      pidAlive: (pid) => alive.has(pid),
+      terminateProcessTree,
+      captureProcessIdentity,
+      gracefulShutdown,
+      delay: async () => undefined
+    });
+
+    expect(result).toMatchObject({ reclaimed: true, verifiedPid: 4242 });
+    expect(gracefulShutdown).not.toHaveBeenCalled();
+    expect(captureProcessIdentity).toHaveBeenCalledWith(4242);
+    expect(terminateProcessTree).toHaveBeenCalledWith(4242, identity);
+  });
+
+  it("fails closed for an inventory-adopted occupant without identity capture", async () => {
+    const result = await reclaimStaleWorkbenchBackend({
+      port: 8012,
+      workspaceRoot: "C:/repo",
+      connect: async () => true,
+      fetchHealth: async () => {
+        throw new Error("health timeout");
+      },
+      resolvePortOwner: async () => ({
+        pid: 4242,
+        kind: "managed_workbench_backend",
+        alive: true,
+        trusted: true,
+        residual: false,
+        conflict: false
+      }),
+      pidAlive: () => true,
+      terminateProcessTree: async () => true
+    });
+
+    expect(result).toMatchObject({ reclaimed: false, verifiedPid: 4242 });
+    expect(result.reason).toContain("no identity capture");
   });
 });
 

@@ -1191,7 +1191,9 @@ internal static class VibelutionLauncher
 
     private static void LaunchCurrentElectronMain(string projectDir, string thenLifecycle, bool openWorkbench)
     {
-        RunPythonBridge(projectDir, "launch-desktop-shell", true, true, thenLifecycle, openWorkbench, 120000);
+        // 90s first settlement window + one 30s retry window (dropped
+        // second-instance signal) plus spawn/overhead must fit the deadline.
+        RunPythonBridge(projectDir, "launch-desktop-shell", true, true, thenLifecycle, openWorkbench, 240000);
     }
 
     private static bool HasArgument(List<string> args, params string[] accepted)

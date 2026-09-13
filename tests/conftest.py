@@ -493,6 +493,54 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch, request):
             _reset_agent_directory_caches(agent_directory_service)
 
 
+@pytest.fixture(autouse=True)
+def isolate_runtime_manager_state_paths(tmp_path, monkeypatch, request):
+    """Keep runtime-manager state/pid writes inside the test temp dir.
+
+    ``daemon.load_runtime_snapshot()`` persists a reconciled snapshot through
+    ``state_store.save_state`` whenever the reconciliation materializes
+    (manager pid, daemonRunning, workbench phase/message ...).  Without pinning
+    the module globals, any test that stubs ``load_state`` with a synthetic
+    payload writes that payload over the operator's live
+    ``runtime-manager/state.json``; Electron main-line retire handles are read
+    from launcher state, but the runtime-manager state is still the projection
+    the status CLI and UI trust."""
+    path_value = str(getattr(request.node, "path", "") or getattr(request.node, "fspath", "") or "")
+    if not _test_file_needs_runtime_manager_isolation(path_value):
+        yield
+        return
+
+    from core.runtime_manager import state_store
+
+    runtime_manager_dir = tmp_path / ".runtime" / "runtime-manager"
+    runtime_manager_dir.mkdir(parents=True, exist_ok=True)
+    state_path = runtime_manager_dir / "state.json"
+    pid_path = runtime_manager_dir / "daemon.pid"
+    identity_path = runtime_manager_dir / "daemon.identity.json"
+    monkeypatch.setattr(state_store, "STATE_PATH", state_path)
+    monkeypatch.setattr(state_store, "PID_PATH", pid_path)
+    monkeypatch.setattr(state_store, "DAEMON_IDENTITY_PATH", identity_path)
+    monkeypatch.setattr(
+        state_store,
+        "ensure_runtime_manager_dirs",
+        lambda: runtime_manager_dir.mkdir(parents=True, exist_ok=True),
+    )
+
+    try:
+        from core.runtime_manager import daemon as runtime_daemon
+    except Exception:  # noqa: BLE001 - isolation must never fail collection
+        runtime_daemon = None
+    if runtime_daemon is not None:
+        for name, value in (
+            ("STATE_PATH", state_path),
+            ("PID_PATH", pid_path),
+            ("DAEMON_IDENTITY_PATH", identity_path),
+        ):
+            if hasattr(runtime_daemon, name):
+                monkeypatch.setattr(runtime_daemon, name, value)
+    yield
+
+
 # ============================================================================
 # 隔离工作空间
 # ============================================================================
