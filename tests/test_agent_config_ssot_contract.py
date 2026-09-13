@@ -147,6 +147,19 @@ def test_read_repair_does_not_inject_a_default_llm_binding(tmp_path, monkeypatch
     assert int(after["configRevision"]) == int(before["configRevision"])
 
 
+def test_ensure_agent_for_session_materializes_default_dialogue_binding(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    agent = agent_directory_service.ensure_agent_for_session(
+        "session-ensure-default",
+        display_name="Ensure default binding agent",
+    )
+
+    stored = _stored_agent(agent["agentId"])
+    model_id = str((stored.get("llmBindings") or {}).get("dialogue", {}).get("modelId") or "").strip()
+    assert model_id
+
+
 def test_change_snapshot_uses_canonical_payload_keys(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="Snapshot parity agent")

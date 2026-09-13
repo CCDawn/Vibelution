@@ -1260,6 +1260,11 @@ def ensure_agent_for_session(
         state = s.repair_agent_directory()
         now = s.utc_now_iso()
         normalized_llm_bindings = s.normalize_agent_llm_bindings(llm_bindings)
+        creation_llm_bindings = dict(normalized_llm_bindings)
+        if not s.agent_dialogue_model_id({"llmBindings": creation_llm_bindings}):
+            default_model_id = s._profile_id_to_model_id("primary")
+            if default_model_id:
+                creation_llm_bindings[s.DEFAULT_AGENT_LLM_SLOT] = {"modelId": default_model_id}
         agent = s._find_agent(state, existing_agent_id)
         if agent is None:
             agent = s._find_agent_by_direct_session(state, normalized_session_id)
@@ -1278,7 +1283,7 @@ def ensure_agent_for_session(
                 metadata_payload.setdefault("conversationIndexVisibility", s.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE)
             created = s.create_agent_instance(
                 display_name=display_name or normalized_session_id,
-                llm_bindings=normalized_llm_bindings,
+                llm_bindings=creation_llm_bindings,
                 primary_mode=primary_mode,
                 role_key=role_key,
                 prompt_template_id=prompt_template_id,

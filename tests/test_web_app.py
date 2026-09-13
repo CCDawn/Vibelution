@@ -2421,6 +2421,7 @@ def test_session_worker_uses_unbounded_history_seed_for_direct_chat(tmp_path, mo
     session_agent = agent_directory_service.create_agent_instance(
         display_name="Full History Seed Agent",
         primary_mode="chat",
+        llm_bindings=session_service.default_session_llm_bindings(),
     )
     _bind_seeded_session_agent(tmp_path, session_agent)
     captured_limits: list[object] = []
@@ -2460,6 +2461,7 @@ def test_session_submit_message_routes_slash_skill_into_scheduled_context(tmp_pa
     session_agent = agent_directory_service.create_agent_instance(
         display_name="Slash Skill Agent",
         primary_mode="chat",
+        llm_bindings=session_service.default_session_llm_bindings(),
     )
     _bind_seeded_session_agent(tmp_path, session_agent)
     skill_root = tmp_path / "skills"
@@ -2512,6 +2514,7 @@ def test_session_worker_seeds_slash_skill_runtime_context(tmp_path, monkeypatch)
     session_agent = agent_directory_service.create_agent_instance(
         display_name="Slash Skill Runtime Agent",
         primary_mode="chat",
+        llm_bindings=session_service.default_session_llm_bindings(),
     )
     _bind_seeded_session_agent(tmp_path, session_agent)
     skill_root = tmp_path / "skills"
@@ -2645,6 +2648,7 @@ def test_session_worker_seeds_active_skill_contract_on_later_turn(tmp_path, monk
     session_agent = agent_directory_service.create_agent_instance(
         display_name="Active Skill Runtime Agent",
         primary_mode="chat",
+        llm_bindings=session_service.default_session_llm_bindings(),
     )
     _bind_seeded_session_agent(tmp_path, session_agent)
     skill_root = tmp_path / "skills"
