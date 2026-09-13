@@ -421,3 +421,16 @@ def test_tool_arguments_keep_bounded_patch_text_for_diff_rendering() -> None:
     arguments = transcript["toolCalls"][0]["arguments"]
     assert arguments["patch_text"] == patch_text
     assert "api_key" not in arguments
+
+
+def test_successful_tool_records_progress_before_live_projection(monkeypatch):
+    capture = stream_capture.SessionTurnCapture(session_id="progress-s", turn_id="progress-t")
+    order = []
+    monkeypatch.setattr(session_service, "_append_session_conversation_event", lambda *a, **kw: None)
+    monkeypatch.setattr(session_service, "_touch_chat_turn_work_run", lambda **kw: order.append(("progress", kw)))
+    monkeypatch.setattr(session_service, "_set_session_live_output", lambda *a, **kw: order.append(("projection", kw)))
+    with stream_capture._capture_session_ui_stream("progress-s", capture):
+        get_event_bus().publish(EventNames.TOOL_SUCCESS, {"name": "batch_web_search_tool",
+            "callId": "progress-call", "sessionId": "progress-s", "turnId": "progress-t", "result": "found"})
+    assert [item[0] for item in order][:2] == ["progress", "projection"]
+    assert order[0][1] == {"session_id": "progress-s", "turn_id": "progress-t", "stage": "tool_result"}

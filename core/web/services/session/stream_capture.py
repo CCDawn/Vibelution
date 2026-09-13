@@ -1369,6 +1369,11 @@ def _capture_session_ui_stream(
             tool_call_id=call_id,
             correlation_id=call_id,
         )
+        if event.name == s.EventNames.TOOL_SUCCESS:
+            # Record actual progress before publishing a snapshot can run stale recovery.
+            s._touch_chat_turn_work_run(
+                session_id=session_id, turn_id=capture.turn_id, stage="tool_result",
+            )
         s._set_session_live_output(
             session_id,
             turn_id=capture.turn_id,

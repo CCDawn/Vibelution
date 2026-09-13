@@ -869,7 +869,8 @@ def _chat_turn_work_run_hang_reason(
 
     # Worker still claims the turn but tool timeout hang left no progress.
     if _chat_turn_last_tool_error_timed_out(payload) and tool_error_at is not None:
-        if (now - tool_error_at).total_seconds() >= _CHAT_TURN_TOOL_TIMEOUT_HANG_SECONDS:
+        progress_anchor = max(tool_error_at, updated) if updated is not None else tool_error_at
+        if (now - progress_anchor).total_seconds() >= _CHAT_TURN_TOOL_TIMEOUT_HANG_SECONDS:
             return "tool_timeout_hang"
 
     # Absolute ceiling for any running chat_turn (defensive).

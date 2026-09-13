@@ -77,7 +77,7 @@ def test_chat_turn_hang_reason_tool_timeout(monkeypatch):
         "runId": "turn-1",
         "sessionId": "session-a",
         "status": "running",
-        "updatedAt": _iso(now - timedelta(seconds=30)),
+        "updatedAt": _iso(now - timedelta(seconds=200)),
         "startedAt": _iso(now - timedelta(minutes=5)),
         "finishedAt": "",
         "lastToolError": {
@@ -96,6 +96,11 @@ def test_chat_turn_hang_reason_tool_timeout(monkeypatch):
         )
         == "tool_timeout_hang"
     )
+    # A real completed tool/assistant response after the timeout is progress.
+    payload["updatedAt"] = _iso(now - timedelta(seconds=30))
+    assert turn_diagnostics._chat_turn_work_run_hang_reason(
+        payload, now=now, worker_owns_turn=True) == ""
+    payload["updatedAt"] = _iso(now - timedelta(seconds=200))
     # Fresh tool timeout must not settle while agent may still continue.
     payload["lastToolError"]["updatedAt"] = _iso(now - timedelta(seconds=20))
     assert (
@@ -128,7 +133,7 @@ def test_reconcile_settles_tool_timeout_hang(tmp_path, monkeypatch):
             "status": "running",
             "currentPhase": "running",
             "startedAt": _iso(now - timedelta(minutes=10)),
-            "updatedAt": _iso(now - timedelta(seconds=30)),
+            "updatedAt": _iso(now - timedelta(seconds=200)),
             "finishedAt": "",
             "summary": "工具失败：write_stdin",
             "lastToolError": {
