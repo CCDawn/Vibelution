@@ -356,6 +356,22 @@ def test_source_route_is_frozen_and_wrong_agent_rejected(native_source, monkeypa
         build_operator_source_authority(store, action, agent_id="other")
 
 
+def test_source_retry_keeps_authority_after_parent_wait_attempt_finishes(native_source):
+    store, action, binding, _ = native_source
+    store.submit(
+        lambda uow: uow.repository.update_attempt_status(
+            "parent-node", "failed", 20, finished_at_ms=20
+        ),
+        force_flush=True,
+    ).result()
+
+    authority = build_operator_source_authority(
+        store, action, agent_id=binding.agent_id
+    )
+
+    assert authority["parentNodeRunId"] == "parent-node"
+
+
 def test_operator_task_rejects_public_start_and_forged_task_locator(
     native_source, monkeypatch
 ):

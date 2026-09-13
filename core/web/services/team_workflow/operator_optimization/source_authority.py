@@ -11,6 +11,7 @@ from core.research.workflow.contracts._canonical import sha256_hex
 from core.web.services import agent_directory_service, chat_room_service
 
 from .knowledge_budget_runtime import (
+    _parent_attempt_owns_active_child,
     knowledge_lineage,
     knowledge_receipt_context,
     validate_knowledge_receipt_scope,
@@ -22,14 +23,11 @@ def _active(repo, run_id, node_run_id):
     lineage = knowledge_lineage(repo, run_id, node_run_id)
     run, parent, attempt, invocation, _ = lineage
     latest = repo.latest_attempt(run_id, attempt.node_id)
-    parent_latest = repo.latest_attempt(parent.run_id, "optimization_knowledge")
     if (
         latest is None
         or latest.node_run_id != node_run_id
         or attempt.finished_at_ms is not None
-        or parent_latest is None
-        or parent_latest.node_run_id != invocation.parent_node_run_id
-        or parent_latest.finished_at_ms is not None
+        or not _parent_attempt_owns_active_child(repo, parent, invocation)
         or run.status in {"failed", "cancelled", "archived", "succeeded"}
         or parent.status in {"failed", "cancelled", "archived", "succeeded"}
     ):
