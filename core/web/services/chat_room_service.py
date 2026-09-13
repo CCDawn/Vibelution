@@ -4763,7 +4763,9 @@ def promote_chat_room_formal_context(
 
 def _chat_room_stable_output_contract(context: Mapping[str, Any]) -> str:
     if context.get("_operatorDiscussion"):
-        return "Return the bound operator discussion JSON object. Only the final experiment_planner may provide result; other participants set result to null."
+        if context.get("_operatorFinalSpeaker"):
+            return "You are the final experiment_planner for this discussion. Return the bound JSON object with your contribution and one non-null result."
+        return "You are a contributing participant for this discussion. Return the bound JSON object with your contribution and result set to null. Only the server-designated final speaker publishes the result."
     if not context.get("_structuredChatRoomContext"):
         return ""
     if context.get("_structuredMeetingMessage"):
@@ -4791,6 +4793,9 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
     _sync_agent_directory_project_root()
     timings["agentDirectorySyncMs"] = _elapsed_ms(stage_started_at)
     agent_id = str(participant.get("agentId") or "").strip()
+    if context.get("_operatorDiscussion"):
+        authority = context["_modelInvocationReceiptAuthority"]
+        context = {**context, "_operatorFinalSpeaker": agent_id == authority["finalAgentId"]}
     round_id = str(context.get("roundId") or "").strip()
     participant_id = str(participant.get("participantId") or agent_id or session_id).strip()
     turn_identity = f"chat-room:{round_id}:{participant_id}"
@@ -4975,7 +4980,8 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
             if context.get("_operatorDiscussion"):
                 from core.web.services.team_workflow.operator_optimization.discussion_output import output_contract
 
-                agent_runtime.set_turn_structured_output_contract(output_contract())
+                agent_runtime.set_turn_structured_output_contract(
+                    output_contract(final_speaker=context["_operatorFinalSpeaker"]))
             elif context.get("_structuredMeetingMessage"):
                 from core.web.services.team_workflow.meeting_message_payload import (
                     meeting_message_structured_output_contract,

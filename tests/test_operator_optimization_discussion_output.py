@@ -79,3 +79,18 @@ def test_validated_result_returns_domain_message():
 def test_generic_message_fields_cannot_supply_operator_result(key):
     with pytest.raises(OperatorDiscussionOutputError):
         validated_result({key: _message()})
+
+
+@pytest.mark.parametrize("final", [False, True])
+def test_seat_schema_and_validator_agree_about_result_authority(final):
+    contract = output_contract(final_speaker=final)
+    result = {"status": "no_viable_hypothesis", "reason": "Need more evidence", "hypothesis": None}
+    accepted = _message(result=result if final else None)
+    assert contract.validator(accepted) == accepted
+    assert "result" in contract.schema["required"]
+    if final:
+        assert contract.schema["properties"]["result"] == {"$ref": "#/$defs/OperatorDiscussionResult"}
+    else:
+        assert contract.schema["properties"]["result"] == {"type": "null"}
+    with pytest.raises(OperatorDiscussionOutputError):
+        contract.validator(_message(result=None if final else result))

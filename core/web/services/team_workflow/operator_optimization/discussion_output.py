@@ -46,14 +46,32 @@ def _schema() -> dict[str, Any]:
     return schema
 
 
-def output_contract() -> SemanticOutputSchema:
-    """Build the provider-neutral strict contract for one discussion turn."""
+def output_contract(*, final_speaker: bool | None = None) -> SemanticOutputSchema:
+    """Bind a seat's publishing authority before model I/O.
 
-    return SemanticOutputSchema(
-        name=OUTPUT_SCHEMA_NAME,
-        schema=_schema(),
-        validator=_validate_payload,
-    )
+    The unbound schema describes the persisted room message union. Runtime
+    speakers always bind either a contribution or the final planner result.
+    """
+    schema = _schema()
+    name = OUTPUT_SCHEMA_NAME
+    if final_speaker is not None:
+        schema["properties"]["result"] = (
+            {"$ref": "#/$defs/OperatorDiscussionResult"} if final_speaker else {"type": "null"})
+        schema["required"] = list(dict.fromkeys([*schema.get("required", []), "result"]))
+        schema["description"] = (
+            "You are the final experiment_planner. Summarize the discussion and provide result."
+            if final_speaker else
+            "You are a contributing participant, not the final planner. Provide contribution and set result to null.")
+        name = "operator_discussion_final_v1" if final_speaker else "operator_discussion_contribution_v1"
+
+    def validate(payload):
+        normalized = _validate_payload(payload)
+        if final_speaker is not None and (normalized["result"] is not None) != final_speaker:
+            raise OperatorDiscussionOutputError("operator_discussion_seat_result_invalid",
+                "Discussion result must match the server-bound final speaker identity")
+        return normalized
+
+    return SemanticOutputSchema(name=name, schema=schema, validator=validate)
 
 
 def _strip_json_code_fence(value: str) -> str:
