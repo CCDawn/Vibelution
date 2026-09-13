@@ -433,3 +433,13 @@ def test_settlement_uses_frozen_tokens_and_currency_and_is_idempotent(tmp_path: 
         assert json.loads(row[1])["operatorModelBudget"]["currency"] == "USD"
     finally:
         store.close()
+
+
+@pytest.fixture(autouse=True)
+def isolated_campaign_authority(monkeypatch):
+    # These are Ledger accounting unit tests. Campaign authorization itself
+    # is exercised against persisted activities in test_operator_budget_extension.
+    from decimal import Decimal
+    from core.web.services.team_workflow.operator_optimization import budget_extension
+    monkeypatch.setattr(budget_extension, "authorized_model_limits",
+        lambda *a, **kw: {Decimal(v) for v in ("0.01", "0.002",)})

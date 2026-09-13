@@ -101,6 +101,14 @@ class GpuReservation(Contract):
         return self
 
 
+class ModelBudgetRevision(Contract):
+    previousBudget: CampaignBudget
+    budget: CampaignBudget
+    authorizedBy: Text
+    authorizedAt: Text
+    campaignVersion: int = Field(ge=1, strict=True)
+
+
 class OptimizationCampaign(Contract):
     schemaVersion: Literal[1] = 1
     optimizationCampaignId: Identity
@@ -111,6 +119,7 @@ class OptimizationCampaign(Contract):
     objective: OperatorObjective
     budget: CampaignBudget
     authorizedBy: str = ""
+    modelBudgetRevisions: tuple[ModelBudgetRevision, ...] = ()
     gpuReservations: tuple[GpuReservation, ...] = ()
     status: Literal["draft", "running", "paused", "completed", "cancelled", "blocked"] = "draft"
     baselineSetupId: Identity

@@ -680,6 +680,7 @@ def _campaign_committed_amounts(
         "updated_at_ms FROM budget_receipts"
     ).fetchall()
     committed = MONEY_ZERO
+    authorized_limits = None
     for raw_row in rows:
         row = _row_mapping(raw_row)
         reserved = _json_object(row.get("reserved_json"), "reserved_json")
@@ -691,11 +692,21 @@ def _campaign_committed_amounts(
                 "operator campaign contains receipts in multiple currencies",
                 code="operator_model_currency_mismatch",
             )
-        if _money(metadata.get("modelCostLimit"), "operatorModelBudget.modelCostLimit", positive=True) != model_cost_limit:
-            raise ModelBudgetError(
-                "operator campaign budget limit differs from its frozen receipt",
-                code="operator_model_budget_contract_conflict",
-            )
+        receipt_limit = _money(metadata.get("modelCostLimit"), "operatorModelBudget.modelCostLimit", positive=True)
+        if receipt_limit != model_cost_limit:
+            if authorized_limits is None:
+                from .budget_extension import authorized_model_limits
+                try:
+                    authorized_limits = authorized_model_limits(uow.repository,
+                        run_id=row["run_id"], campaign_id=campaign_id, currency=currency)
+                except (ValueError, FileNotFoundError) as exc:
+                    raise ModelBudgetError("Campaign budget increase is not authorized",
+                        code="operator_model_budget_contract_conflict") from exc
+            if receipt_limit not in authorized_limits or model_cost_limit not in authorized_limits:
+                raise ModelBudgetError(
+                    "operator campaign budget limit differs from its authorized history",
+                    code="operator_model_budget_contract_conflict",
+                )
         if str(row.get("status") or "") == "released":
             continue
         settled = _json_object(row.get("settled_json"), "settled_json")
@@ -782,6 +793,16 @@ def reserve_model_budget_in_uow(
         )
         return _summary(existing, settled_metadata or existing_metadata, idempotent=True)
 
+    from .budget_extension import authorized_model_limits
+    try:
+        limits = authorized_model_limits(uow.repository, run_id=run_id,
+            campaign_id=campaign_id, currency=spec.currency)
+    except (ValueError, FileNotFoundError) as exc:
+        raise ModelBudgetError("Campaign model budget is not authorized",
+            code="operator_model_budget_contract_conflict") from exc
+    if spec.model_cost_limit not in limits:
+        raise ModelBudgetError("Reservation limit has no campaign authorization",
+            code="operator_model_budget_contract_conflict")
     committed = _campaign_committed_amounts(
         uow,
         campaign_id=campaign_id,

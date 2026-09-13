@@ -42,6 +42,11 @@ class CampaignCommandRequest(Contract):
     idempotencyKey: str = Field(min_length=1, max_length=200)
 
 
+class ModelBudgetExtendRequest(CampaignCommandRequest):
+    modelCostLimit: float = Field(gt=0, allow_inf_nan=False)
+    tokenLimits: dict[str, int] = Field(default_factory=dict)
+
+
 class CampaignListResponse(Contract):
     campaigns: tuple[OptimizationCampaign, ...]
 
@@ -143,5 +148,18 @@ def operator_round_recover(team_id: str, project_id: str, campaign_id: str, roun
         with server_operator_scope_from_http(request):
             return _invoke(recover_round, team_id, project_id, campaign_id, round_id,
                 expected_version=payload.expectedCampaignVersion, command_key=payload.idempotencyKey)
+    except PermissionError as exc:
+        raise HTTPException(403, detail={"code": "command_forbidden"}) from exc
+
+
+@router.post(_PATH + "/{campaign_id}/budget/extend", response_model=OptimizationCampaign)
+def operator_model_budget_extend(team_id: str, project_id: str, campaign_id: str,
+                                 payload: ModelBudgetExtendRequest, request: Request):
+    from core.web.services.team_workflow.operator_optimization.budget_extension import extend_model_budget
+    try:
+        with server_operator_scope_from_http(request):
+            return _invoke(extend_model_budget, team_id, project_id, campaign_id,
+                expected_version=payload.expectedCampaignVersion, command_key=payload.idempotencyKey,
+                model_cost_limit=payload.modelCostLimit, token_limits=payload.tokenLimits)
     except PermissionError as exc:
         raise HTTPException(403, detail={"code": "command_forbidden"}) from exc

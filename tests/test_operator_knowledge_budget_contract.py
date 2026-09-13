@@ -137,3 +137,13 @@ def test_reservation_replay_cannot_switch_budget_kind(tmp_path):
         assert exc_info.value.code == "operator_model_binding_mismatch"
     finally:
         store.close()
+
+
+@pytest.fixture(autouse=True)
+def isolated_campaign_authority(monkeypatch):
+    # These are Ledger accounting unit tests. Campaign authorization itself
+    # is exercised against persisted activities in test_operator_budget_extension.
+    from decimal import Decimal
+    from core.web.services.team_workflow.operator_optimization import budget_extension
+    monkeypatch.setattr(budget_extension, "authorized_model_limits",
+        lambda *a, **kw: {Decimal(v) for v in ("0.0002",)})

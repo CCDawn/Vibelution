@@ -57,3 +57,13 @@ def test_native_receipt_cost_and_delivery_commit_once_in_same_ledger(tmp_path, m
         assert not enqueue_question_model_invocation_receipt(store, **args)["created"]
     finally:
         store.close()
+
+
+@pytest.fixture(autouse=True)
+def isolated_campaign_authority(monkeypatch):
+    # These are Ledger accounting unit tests. Campaign authorization itself
+    # is exercised against persisted activities in test_operator_budget_extension.
+    from decimal import Decimal
+    from core.web.services.team_workflow.operator_optimization import budget_extension
+    monkeypatch.setattr(budget_extension, "authorized_model_limits",
+        lambda *a, **kw: {Decimal(v) for v in ("1",)})
