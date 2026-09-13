@@ -927,3 +927,13 @@ Readiness 删除固定的“未实现”阻断，改为显式 planning 预算与
 `tests/test_operator_native_plan.py` 使用真实 Session 提交、Journal、SQLite Ledger、受控 LLMClient provider 与回执交付 worker，覆盖中断恢复、提交竞态、正式重试、独立预算、错误身份与被替换输出拒绝。真实 `AgentActionAdapter` / `RealDomainPorts` 测试验证执行等待、完成回执等待、恢复不创建新任务以及规范产物回读。相关知识搜集和讨论预算/回执测试验证共享调用面的回归。
 
 未调用生产模型、真实外部检索或 GPU，也未进行产品页面闭环验收。下一步继续受管候选执行、评价、反馈与下一轮衔接，随后在显式实验预算下验收一轮真实实验。由于修改 Session worker 和 LLM 调用链，真实产品验收前需要受管刷新运行时；本批不启动或重启产品，不涉及发布版本变更。
+
+## 26. 冻结计划到受管试验（2026-09-13）
+
+本批接通 `operator_execution` System 节点。此前只有基线节点调用 `dispatch_trial`，优化节点在生产 dispatch 中仍报缺少 executor；现在由 `execution.py` 从真实 Ledger 和活动回读冻结计划、资料、协议、环境及三份候选引用，校验活跃 attempt、授权和来源后执行计划中的试验。
+
+每项试验以 run、计划 hash 和序号生成稳定身份，不随 action 重投或节点重试变化。复用已有 `dispatch_trial` 的 GPU 预留、设备锁、超时、终态回执和费用结算；部分试验已完成时只执行剩余项。已有预留但无终态回执仍需核对，不能自动再启动 GPU。没有新增进程执行器、计费存储或兼容路径。
+
+系统节点返回计划内每份测量的精确规范引用，不使用按 kind 查找的最后一份产物代替全部重复试验。失败测量作为已执行事实保留并交给后续评价，节点交付完成不等于算子正确或性能提高。数值评价、反馈和下一轮生产节点衔接仍是下一批工作。
+
+本地复用检查定位到 `dispatch.py`、`executor.py`、`planning.py`、规范 artifact readback 与 `SystemActionAdapter`，沿用前序研究中规划与执行分工，不引入外部编排依赖。`tests/test_operator_plan_execution.py` 使用真实 SQLite、活动和测量存储、受控执行返回，验证多试验回收、费用结算、部分中断恢复、过期 attempt/错误归属/环境缺失拒绝，以及原生 SystemActionAdapter 核验。没有启动 GPU 进程或生产模型，不构成真实设备或页面验收；产品验收前仍需受管刷新运行时，本批不重启、不 push，不涉及发布版本变更。

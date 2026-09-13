@@ -2600,6 +2600,10 @@ def _execute_real_system_action(
     """
     node_id = str(action.node_id or "").strip()
     snapshot = dict(input_snapshot or {})
+    if node_id == "operator_execution":
+        from ..operator_optimization.execution import execute_plan
+        refs = execute_plan(action, snapshot)
+        return refs, {"systemActionId": f"sys-{action.action_id}", "runnerId": "operator_cuda_v1"}
     if node_id == "optimization_knowledge":
         from ..operator_optimization.knowledge import publish_knowledge_snapshot
         publish_knowledge_snapshot(snapshot["teamId"], action.run_id)
