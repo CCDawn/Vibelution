@@ -50,6 +50,7 @@ import {
 import {
   mergeSessionDetailIntoSummaries,
   mergeSessionDetailMessageWindow,
+  pickOptimisticNextActiveSessionId,
   renameSessionDetail,
   renameSessionInSummaries,
   sessionSummaryFromDetail,
@@ -68,6 +69,9 @@ import { clearSessionDeleteTombstone, markSessionDeleteTombstone } from "../sess
 import { createTempSessionId } from "../sessionOptimisticIds";
 import {
   chatAgentSessionStorage,
+  forgetAgentLastSession,
+  lastSessionForAgent,
+  readAgentLastSessionMap,
   rememberAgentLastSession,
 } from "./chatAgentSessionMemory";
 import { defaultNewSessionTitle, isDefaultNewSessionTitle } from "./useChatSessionRenameMenu";
@@ -82,31 +86,21 @@ type ChatRouteLifecycleActions = {
   replaceIfStillViewing: (expected: ChatRouteSelection, next: ChatRouteSelection) => boolean;
 };
 
-function pickOptimisticNextActiveSessionId(
-  remainingSessions: SessionSummary[] | undefined,
-  deletedSessionId: string,
-  previousActiveSessionId: string,
-  deletedAgentId: string = "",
-): string {
-  const deletedId = String(deletedSessionId || "").trim();
-  const previousActiveId = String(previousActiveSessionId || "").trim();
-  // Deleting a background tab must not steal focus from the current active session.
-  if (previousActiveId && previousActiveId !== deletedId) {
-    return previousActiveId;
+/**
+ * Drop the deleted session from its Agent's last-viewed pointer.
+ * Background-tab deletes leave the pointer alone unless it names the deleted id.
+ */
+function forgetAgentLastSessionForDeletedSession(sessionId: string, agentId: string): void {
+  const deletedSessionId = String(sessionId || "").trim();
+  const deletedAgentId = String(agentId || "").trim();
+  if (!deletedSessionId || !deletedAgentId) {
+    return;
   }
-  const remaining = (Array.isArray(remainingSessions) ? remainingSessions : [])
-    .filter((session) => session.id !== deletedId);
-  const preferredAgentId = String(deletedAgentId || "").trim();
-  if (preferredAgentId) {
-    const sameAgent = remaining.find(
-      (session) => String(session.agentId || "").trim() === preferredAgentId,
-    );
-    if (sameAgent?.id) {
-      return String(sameAgent.id).trim();
-    }
+  const storage = chatAgentSessionStorage();
+  if (lastSessionForAgent(deletedAgentId, readAgentLastSessionMap(storage)) !== deletedSessionId) {
+    return;
   }
-  // Prefer the first remaining tab (list is usually recency-ordered by backend).
-  return String(remaining[0]?.id || "").trim();
+  forgetAgentLastSession(deletedAgentId, storage);
 }
 
 export type { AgentDirectSessionResetResponse };
@@ -196,6 +190,7 @@ export type UseChatWorkspaceLifecycleResult = {
       previousAgentSessionCaches: ReturnType<typeof captureAgentSessionCacheSnapshots>;
       previousConversations: ConversationSummary[] | undefined;
       previousAgents: AgentInstance[] | undefined;
+      deletedAgentId: string;
     }
   >;
   bulkDeleteSessionsMutation: UseMutationResult<
@@ -894,6 +889,7 @@ export function useChatWorkspaceLifecycle({
         previousAgents,
         previousRouteSessionId,
         optimisticNextActiveSessionId,
+        deletedAgentId,
         telemetry,
       };
     },
@@ -918,6 +914,10 @@ export function useChatWorkspaceLifecycle({
           [nextActiveSessionId]: "",
         }));
       }
+      forgetAgentLastSessionForDeletedSession(
+        variables.sessionId,
+        String(context?.deletedAgentId || "").trim(),
+      );
       context?.telemetry?.succeeded({
         sessionId: variables.sessionId,
         previousRouteSessionId: String(context?.previousRouteSessionId || "").trim(),
@@ -1076,6 +1076,16 @@ export function useChatWorkspaceLifecycle({
         }
       }
 
+      const deletedAgentIdBySessionId = new Map(
+        (context?.previousSessions ?? []).map((session) => [
+          String(session.id || "").trim(),
+          String(session.agentId || "").trim(),
+        ]),
+      );
+      deletedSessionIds.forEach((sessionId) => {
+        forgetAgentLastSessionForDeletedSession(sessionId, deletedAgentIdBySessionId.get(sessionId) || "");
+      });
+
       context?.telemetry?.succeeded({
         deletedCount: deleteResult.summary?.successCount ?? deletedSessionIds.length,
         skippedCount: deleteResult.summary?.skippedCount ?? 0,
@@ -1174,6 +1184,19 @@ export function useChatWorkspaceLifecycle({
         { kind: "session", sessionId: previousDirectSessionId },
         { kind: "session", sessionId: replacementDirectSessionId },
       );
+      // Clearing is a delete+replace: point the Agent at the new direct session
+      // instead of letting the old id linger as a stale last-viewed pointer.
+      const lastSessionStorage = chatAgentSessionStorage();
+      if (
+        previousDirectSessionId
+        && replacementDirectSessionId
+        && lastSessionForAgent(
+          variables.agentId,
+          readAgentLastSessionMap(lastSessionStorage),
+        ) === previousDirectSessionId
+      ) {
+        rememberAgentLastSession(variables.agentId, replacementDirectSessionId, lastSessionStorage);
+      }
       context?.telemetry?.succeeded({
         sessionId: variables.sessionId,
         agentId: variables.agentId,

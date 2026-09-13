@@ -3414,6 +3414,26 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationViewSource).not.toContain("onComposerFocusRequestSettled?.(focusSignal);\n        return;\n      }\n      if (!shouldApplyComposerFocusRequest");
   });
 
+  it("clears stale per-Agent last-session pointers when their session disappears", () => {
+    const deleteMutationSource = routeAndLifecycleSource.slice(
+      routeAndLifecycleSource.indexOf("const deleteSessionMutation"),
+      routeAndLifecycleSource.indexOf("const bulkDeleteSessionsMutation"),
+    );
+    expect(deleteMutationSource).toContain("forgetAgentLastSessionForDeletedSession");
+    const bulkDeleteMutationSource = routeAndLifecycleSource.slice(
+      routeAndLifecycleSource.indexOf("const bulkDeleteSessionsMutation"),
+      routeAndLifecycleSource.indexOf("const clearSessionHistoryMutation"),
+    );
+    expect(bulkDeleteMutationSource).toContain("forgetAgentLastSessionForDeletedSession");
+    const clearMutationSource = routeAndLifecycleSource.slice(
+      routeAndLifecycleSource.indexOf("const clearSessionHistoryMutation"),
+      routeAndLifecycleSource.indexOf("const renameSessionMutation"),
+    );
+    expect(clearMutationSource).toContain("rememberAgentLastSession");
+    expect(clearMutationSource).toContain("replacementDirectSessionId");
+    expect(chatWorkspaceLifecycleSource).toContain("pickOptimisticNextActiveSessionId");
+  });
+
   it("keeps the active direct session selected when the list is temporarily stale", () => {
     const selectionEffectSource = routeAndSelectionSource.slice(
       routeAndSelectionSource.indexOf("const normalizedSessionId = String(routeSessionId || \"\").trim()"),

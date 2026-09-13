@@ -650,6 +650,39 @@ export function removeDeletedSessionFromSummaries(
   );
 }
 
+/**
+ * Delete-fallback policy for the active session tab.
+ *
+ * Deleting a background tab keeps the current focus. When the deleted tab was
+ * focused, the next active session must come from the same Agent; otherwise the
+ * caller opens the bare Agent surface. A delete must never steal a session from
+ * another Agent just because it sits first in the recency-ordered list.
+ */
+export function pickOptimisticNextActiveSessionId(
+  remainingSessions: SessionSummary[] | undefined,
+  deletedSessionId: string,
+  previousActiveSessionId: string,
+  deletedAgentId: string = "",
+): string {
+  const deletedId = String(deletedSessionId || "").trim();
+  const previousActiveId = String(previousActiveSessionId || "").trim();
+  if (previousActiveId && previousActiveId !== deletedId) {
+    return previousActiveId;
+  }
+  const remaining = (Array.isArray(remainingSessions) ? remainingSessions : [])
+    .filter((session) => session.id !== deletedId);
+  const preferredAgentId = String(deletedAgentId || "").trim();
+  if (preferredAgentId) {
+    const sameAgent = remaining.find(
+      (session) => String(session.agentId || "").trim() === preferredAgentId,
+    );
+    return String(sameAgent?.id || "").trim();
+  }
+  // No Agent context (e.g. the row was already missing from caches): fall back
+  // to the first remaining tab, which is usually recency-ordered by backend.
+  return String(remaining[0]?.id || "").trim();
+}
+
 export function renameSessionInSummaries(
   sessions: SessionSummary[] | undefined,
   sessionId: string,

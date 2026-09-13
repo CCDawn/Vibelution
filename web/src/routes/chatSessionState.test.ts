@@ -13,6 +13,7 @@ import {
   markSessionDetailRunning,
   mergeSessionDetailMessageWindow,
   mergeSessionDetailIntoSummaries,
+  pickOptimisticNextActiveSessionId,
   renameSessionDetail,
   renameSessionInSummaries,
   removeDeletedSessionFromSummaries,
@@ -827,6 +828,53 @@ describe("chatSessionState", () => {
       title: "下一个会话",
       taskSummary: "已切换",
     });
+  });
+
+  it("keeps the deleted session's Agent and never steals another Agent's session", () => {
+    const sessions = [
+      makeSummary({ id: "other-agent-session", agentId: "agent-b", status: "ready", currentPhase: "ready" }),
+      makeSummary({ id: "same-agent-older", agentId: "agent-a", status: "ready", currentPhase: "ready" }),
+    ];
+
+    expect(pickOptimisticNextActiveSessionId(
+      sessions,
+      "deleted-session",
+      "deleted-session",
+      "agent-a",
+    )).toBe("same-agent-older");
+    expect(pickOptimisticNextActiveSessionId(
+      sessions,
+      "deleted-session",
+      "deleted-session",
+      "agent-c",
+    )).toBe("");
+  });
+
+  it("keeps focus when a background tab is deleted", () => {
+    const sessions = [
+      makeSummary({ id: "background-deleted", agentId: "agent-a" }),
+    ];
+
+    expect(pickOptimisticNextActiveSessionId(
+      sessions,
+      "background-deleted",
+      "session-live",
+      "agent-a",
+    )).toBe("session-live");
+  });
+
+  it("falls back to the first remaining tab only when the deleted Agent is unknown", () => {
+    const sessions = [
+      makeSummary({ id: "first-remaining", agentId: "agent-b", status: "ready", currentPhase: "ready" }),
+      makeSummary({ id: "deleted-session", agentId: "", status: "ready", currentPhase: "ready" }),
+    ];
+
+    expect(pickOptimisticNextActiveSessionId(
+      sessions,
+      "deleted-session",
+      "deleted-session",
+      "",
+    )).toBe("first-remaining");
   });
 
   it("only marks the requested session summary as running", () => {

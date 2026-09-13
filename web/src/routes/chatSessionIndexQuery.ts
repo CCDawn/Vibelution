@@ -13,6 +13,7 @@ import type {
 import { mergeSessionDetailIntoSummaries } from "./chatSessionState";
 import { mergePreservedCreatedSessions, unpinSessionCreatePreserve } from "./sessionCreatePreserve";
 import { filterOutTombstonedSessions, markSessionDeleteTombstone } from "./sessionDeleteTombstone";
+import { chatAgentSessionStorage, forgetAgentLastSessionBySessionId } from "./chat/chatAgentSessionMemory";
 
 export const SESSION_INDEX_PAGE_SIZE = 50;
 
@@ -158,6 +159,9 @@ export function evictUnopenableSessionFromCaches(queryClient: QueryClient, sessi
     return;
   }
   markSessionDeleteTombstone(normalizedSessionId);
+  // A 404 proves the session is gone: stale per-Agent last-viewed pointers must
+  // not keep reopening it on the next Agent-directory click.
+  forgetAgentLastSessionBySessionId(normalizedSessionId, chatAgentSessionStorage());
   unpinSessionCreatePreserve(normalizedSessionId);
   updateSessionSummaryCaches(queryClient, (sessions) =>
     sessions?.filter((session) => session.id !== normalizedSessionId),
