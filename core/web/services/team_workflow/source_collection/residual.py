@@ -3997,7 +3997,8 @@ def _source_collection_task_store_search_roots(team_id: str) -> list[Path]:
     """
 
     s = _service()
-    roots: list[Path] = [s._team_workflow_root(team_id) / "source_collection_runs"]
+    roots: list[Path] = [s._team_workflow_root(team_id) / "source_collection_runs",
+        s.developer_sandbox.seeded_sandbox_workspace_path(s._project_root(), "data_processing", "runs")]
     try:
         from core.web.services.team_workflow.research_projects import (
             formal_team_workspace_root,
@@ -4032,7 +4033,19 @@ def _source_collection_storage_artifact_paths(team_id: str, run_id: str) -> dict
         "runs",
         normalized_run_id,
     )
+    identity = s.data_processing_service.get_processing_run_scope(normalized_run_id)
+    scope = identity.get("scope") or {}
+    task_store = run_directory / "stage_session_tasks.json"
+    if scope.get("modelAccountingKind") == "operator_knowledge":
+        if scope.get("teamId") != team_id:
+            raise s.TeamWorkflowOrchestrationError("Operator source run belongs to a different team")
+        # Keep the operator stage ledger beside its existing native run.json.
+        # Source evidence paths remain unchanged; no historical files are moved.
+        task_store = data_processing_directory / "stage_session_tasks.json"
+        if len((str(task_store) + ".lock").encode("utf-16-le")) // 2 > 240:
+            raise s.TeamWorkflowOrchestrationError("Operator source task path exceeds 240 UTF-16 units; use a shorter workspace root")
     return {
+        "stageTaskStorePath": task_store,
         "runDirectory": run_directory,
         "artifactsDirectory": run_directory / "artifacts",
         "searchPlanPath": run_directory / "search_plan.json",

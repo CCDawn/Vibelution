@@ -147,7 +147,8 @@ def _attach_source_collection_stage_card_projections(team_id: str, rounds: list[
 
 def _source_collection_stage_session_task_store_path(team_id: str, run_id: str) -> Path:
     s = _service()
-    return s._source_collection_storage_artifact_paths(team_id, run_id)["runDirectory"] / "stage_session_tasks.json"
+    paths = s._source_collection_storage_artifact_paths(team_id, run_id)
+    return paths.get("stageTaskStorePath", paths["runDirectory"] / "stage_session_tasks.json")
 
 
 def _find_source_collection_context_message(session_id: str, context_key: str) -> dict[str, Any] | None:
@@ -406,6 +407,8 @@ def _reconcile_source_collection_stage_session_tasks(team_id: str) -> bool:
         if not runs_root.exists():
             continue
         for task_store_path in runs_root.glob("*/stage_session_tasks.json"):
+            if s._read_json(task_store_path).get("teamId") != team_id:
+                continue
             run_id = task_store_path.parent.name
             changed = s._reconcile_source_collection_stage_session_tasks_for_run(team_id, run_id) or changed
     return changed
@@ -2061,6 +2064,8 @@ def _find_source_collection_stage_session_task_by_id(team_id: str, task_id: str)
         for path in runs_root.glob("*/stage_session_tasks.json"):
             run_id = path.parent.name
             store = s._read_json(path)
+            if store.get("teamId") != team_id:
+                continue
             for item in list(store.get("tasks") or []):
                 if isinstance(item, dict) and s._trim_text(item.get("taskId"), max_length=160) == normalized_task_id:
                     return item, run_id
