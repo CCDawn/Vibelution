@@ -1826,7 +1826,9 @@ class WorkflowCommandService:
                 record_knowledge_sideflow_child_failure(
                     uow, run_id=child.run_id, outcome=child.status, now_ms=now_ms,
                 )
-            elif child.status == RunStatus.BLOCKED.value:
+            elif child.status == RunStatus.BLOCKED.value and run.workflow_id != "operator-optimization":
+                # Operator children have a formal retry_node route: a failed
+                # agent turn is recoverable and must not terminalize its invocation.
                 # 死 turn 开口子（fail-closed）：blocked 故意不是终态，但当
                 # blocked_problem_json 已证明阻塞原因是 failure-terminal 的
                 # agent turn（interrupted/failed；turn journal 落定的 durable

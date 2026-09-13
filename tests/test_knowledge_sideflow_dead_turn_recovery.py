@@ -833,3 +833,25 @@ def test_maintenance_sweep_keeps_budget_block_children_untouched(
         assert len(invocations) == 1
     finally:
         runtime.close()
+
+
+def test_operator_child_turn_failure_retains_retryable_invocation(tmp_path, monkeypatch):
+    from core.web.services.team_workflow.research_runtime import command_service
+    from core.research.workflow.operator_optimization_definition import build_operator_definition
+
+    pinned = register_or_resolve(build_operator_definition())
+    store = open_ledger_store(tmp_path / "operator.sqlite3")
+    try:
+        _seed_sideflow_family(store, run_id="operator-parent", child_run_id="operator-child",
+            child_status="blocked", child_problem=_DEAD_TURN_PROBLEM, invocation_status="running")
+        store.submit(lambda uow: uow.repository.execute(
+            "UPDATE workflow_runs SET workflow_id=?, workflow_version_id=?, structure_hash=? "
+            "WHERE run_id='operator-parent'",
+            (pinned.workflowId, pinned.workflowVersionId, pinned.structureHash)),
+            force_flush=True).result()
+        monkeypatch.setattr(command_service, "formal_node_order", lambda run: ("hypothesis_design",))
+        _submit_reconcile(store, _build_command_service(store), "operator-parent")
+        assert _invocation_row(store, "ki-operator-child").status == "running"
+        assert store.get_run("operator-child").status == "blocked"
+    finally:
+        store.close()
