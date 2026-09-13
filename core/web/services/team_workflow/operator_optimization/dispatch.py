@@ -14,7 +14,7 @@ from core.research.workflow.contracts._canonical import sha256_hex
 from ..research_runtime import workflow_artifact_store as artifacts
 from ..research_runtime.artifact_readback_registry import load_scoped_artifact_payload
 from ..research_runtime.atomic_fs import atomic_write_text
-from ..storage_durability import inter_process_lock
+from ..storage_durability import _windows_extended_length_path, inter_process_lock
 from .budget import release_gpu_reservation, reserve_gpu_time, settle_gpu_usage
 from .executor import execute_cuda_trial
 from .store import CampaignConflict, campaign_root, read_campaign, update_campaign
@@ -25,7 +25,9 @@ def dispatch_trial(team_id: str, project_id: str, request: CudaTrialRequest, *,
     campaign_id = request.campaign_id
     kind = "operator_baseline" if baseline else "operator_measurement"
     identity = "operator-trial:" + request.measurement_id
-    intent = campaign_root(team_id, project_id) / "trials" / (sha256_hex(identity) + ".json")
+    intent = _windows_extended_length_path(
+        campaign_root(team_id, project_id) / "trials" / (sha256_hex(identity) + ".json")
+    )
     fingerprint = sha256_hex({"request": request.model_dump(mode="json"), "kind": kind, "device": device_name})
     with inter_process_lock(intent):
         campaign = read_campaign(team_id, project_id, campaign_id)

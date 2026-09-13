@@ -1,3 +1,4 @@
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -47,6 +48,17 @@ def test_failed_trial_persists_settles_and_replays_without_execution(activity, t
     assert reservation.consumedSeconds == 3
     assert reservation.outcome == "failed"
     assert reservation.measurementRef == first
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows MAX_PATH regression")
+def test_trial_intent_supports_deep_windows_project_path(activity, trial, tmp_path, monkeypatch):
+    root = tmp_path / ("project-" + "a" * 70) / ("workspace-" + "b" * 70)
+    monkeypatch.setattr(dispatch, "campaign_root", lambda *_: root)
+    request, calls = trial
+    first = dispatch.dispatch_trial(*activity[:2], request, device_name="Fixture")
+    assert dispatch.dispatch_trial(*activity[:2], request, device_name="Fixture") == first
+    assert len(calls) == 1
+    assert read_campaign(*activity).gpuReservations[0].measurementRef == first
 
 
 def test_retry_after_settlement_interruption_uses_saved_receipt(activity, trial, monkeypatch):
