@@ -1226,7 +1226,8 @@ describe("ConversationView edit resend affordance", () => {
     });
 
     expect(html).toContain("先不要改测试，只汇报改了哪些文件。");
-    expect(html).toContain("followupQueueBar");
+    expect(html).toContain("followupQueueTray");
+    expect(html).toContain("排队中 · 1 条");
     expect(html).toContain('aria-label="立刻引导"');
     expect(html).toContain(">立刻引导</");
     expect(html).toContain("再输入则追加；空输入再 Enter 立刻引导");

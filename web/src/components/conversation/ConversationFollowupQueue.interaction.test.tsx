@@ -17,8 +17,8 @@ vi.mock("./LazyConversationMarkdownRenderer", async () => {
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-function setNativeValue(element: HTMLTextAreaElement, value: string) {
-  const proto = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value");
+function setNativeValue(element: HTMLInputElement, value: string) {
+  const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
   proto?.set?.call(element, value);
   element.dispatchEvent(new Event("input", { bubbles: true }));
 }
@@ -53,7 +53,6 @@ describe("ConversationFollowupQueueBar", () => {
             { id: "q-2", text: "登录失败用中文提示" },
           ]}
           lang="zh"
-          queueLabel="排队"
           editLabel="修改这条排队"
           withdrawLabel="撤回这条排队"
           onUpdate={onUpdate}
@@ -71,7 +70,7 @@ describe("ConversationFollowupQueueBar", () => {
     await act(async () => {
       container?.querySelector<HTMLButtonElement>('button[aria-label="修改这条排队"]')?.click();
     });
-    const editor = container?.querySelector<HTMLTextAreaElement>('textarea[aria-label="修改这条排队 1"]');
+    const editor = container?.querySelector<HTMLInputElement>('input[aria-label="修改这条排队 1"]');
     expect(editor).toBeTruthy();
     await act(async () => {
       setNativeValue(editor!, "先不要改测试，只汇报改了哪些文件。");
@@ -79,6 +78,43 @@ describe("ConversationFollowupQueueBar", () => {
       save?.click();
     });
     expect(onUpdate).toHaveBeenCalledWith("q-1", "先不要改测试，只汇报改了哪些文件。");
+  });
+
+  it("collapses long queues behind an expand toggle", async () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <ConversationFollowupQueueBar
+          items={[
+            { id: "q-1", text: "第一条" },
+            { id: "q-2", text: "第二条" },
+            { id: "q-3", text: "第三条" },
+            { id: "q-4", text: "第四条" },
+            { id: "q-5", text: "第五条" },
+          ]}
+          lang="zh"
+          editLabel="修改这条排队"
+          withdrawLabel="撤回这条排队"
+          onUpdate={() => undefined}
+          onRemove={() => undefined}
+          onMove={() => undefined}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("排队中 · 5 条");
+    expect(container.textContent).not.toContain("第五条");
+
+    await act(async () => {
+      Array.from(container.querySelectorAll("button"))
+        .find((button) => button.textContent === "另有 1 条 · 展开")
+        ?.click();
+    });
+
+    expect(container.textContent).toContain("第五条");
+    expect(container.textContent).toContain("收起");
   });
 });
 
@@ -155,7 +191,7 @@ describe("ConversationView follow-up queue actions", () => {
       followupQueue: [{ id: "q-1", text: "先不要改测试" }],
       onSubmit,
     });
-    expect(container?.textContent).toContain("排队 1");
+    expect(container?.textContent).toContain("排队中 · 1 条");
     await act(async () => {
       container?.querySelector<HTMLButtonElement>('button[aria-label="立刻引导"]')?.click();
     });
@@ -203,7 +239,6 @@ describe("ConversationView follow-up queue state harness", () => {
           <ConversationFollowupQueueBar
             items={queue}
             lang="zh"
-            queueLabel="排队"
             editLabel="修改这条排队"
             withdrawLabel="撤回这条排队"
             onUpdate={(id, text) => {
