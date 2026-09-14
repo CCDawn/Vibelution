@@ -1714,9 +1714,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain(
       "shouldShowNextStateSignalInConversation(signal, phase, detail?.messages ?? [])",
     );
-    expect(routeSource).toContain("const latestControlSignalKindLabel = (() =>");
+    expect(routeSource).toContain("chatControlSignalLabel(latestControlSignal, lang)");
     expect(routeSource).toContain("const latestControlSignalLine = latestControlSignal");
-    expect(routeSource).toContain("return lang === \"zh\" ? \"工具失败\" : \"Tool failed\"");
+    expect(routeAndSessionSurfaceSource).toContain("export function chatControlSignalLabel(");
+    expect(routeAndSessionSurfaceSource).toContain("export function chatControlSignalMessage(");
+    expect(routeSource).toContain("chatControlSignalMessage(latestControlSignal, lang, latestControlSignalLine)");
     expect(routeSource).toContain("latestControlSignalTitle");
     expect(routeAndSessionSurfaceSource).toContain("label: t(\"nextStateSignalsLabel\")");
     expect(routeAndSessionSurfaceSource).toContain("value: latestControlSignalLine");

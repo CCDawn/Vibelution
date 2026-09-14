@@ -10,7 +10,7 @@ def _finding_writeback_budget_line() -> str:
         )
 
         envelope = finding_resolved_search_envelope()
-    except Exception:  # pragma: no cover - contract lines must never break prompts
+    except Exception:  # noqa: BLE001  # pragma: no cover - prompts must remain buildable
         envelope = {
             "totalAcceptedLeadBudget": 8,
             "maxWritebackBatches": 4,
@@ -64,6 +64,7 @@ def stage_writeback_prompt_lines(stage_id: str) -> list[str]:
         ]
     if stage_id == "relations":
         return [
+            "- `result_json` 使用根级结构化集合，不要用数字写集合摘要。最小合法形状：`{\"themeNodes\":[{\"themeId\":\"theme-x\",\"label\":\"主题 X\"}],\"candidateRelations\":[{\"sourceCandidateId\":\"candidate-a\",\"targetCandidateId\":\"candidate-b\",\"relation\":\"constrains\",\"evidenceRefs\":[\"ce-support\"]}],\"sourceThemeEdges\":[],\"topicRelations\":[],\"missingLinks\":[],\"evidenceGaps\":[{\"id\":\"gap-x\",\"description\":\"缺少跨设备验证\",\"neededEvidence\":\"多设备基准\",\"blocksConclusion\":true}],\"counterEvidenceRefs\":[{\"evidenceRef\":\"ce-limit\",\"claim\":\"该结论受设备与负载边界限制\",\"disposition\":\"limit_scope\"}]}`。如果提交 `candidateGraph`，其中 `nodes`、`edges` 等集合也必须是对象数组，禁止写 `\"edges\":5` 之类计数。",
             "- 证据关系阶段必须在 `evidenceGaps[]` 逐条写出证据缺口；每项包含稳定 `id`、`description`、`neededEvidence` 和 `blocksConclusion`。`missingLinks[]` 只用于图结构缺失端点，不能替代 evidenceGaps。",
             "- 必须显式写 `counterEvidenceRefs[]`：只登记真实限制、反例或否定性证据，每项包含 `evidenceRef`、`claim` 和处置 `disposition`；支持性背景关系不得冒充反证。",
             "- 如果没有真实反证或限制性证据，`counterEvidenceRefs=[]` 并回写 `status=blocked` 和真实原因；不得为了通过门禁伪造反证引用。",

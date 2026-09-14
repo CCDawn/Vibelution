@@ -1,4 +1,5 @@
 import type { ChatNextStateSignalSummary, ConversationMessage, ToolCallTurnItem } from "../../api/types";
+import { isBusyPhase } from "../../routes/chat/chatCodingRouteViewModel";
 import { assistantToolCallTurnItems } from "../../routes/chatTurnProtocol";
 
 function isBusyConversationPhase(phase: string) {
@@ -81,6 +82,11 @@ export function shouldShowNextStateSignalInConversation(
   messages: ConversationMessage[] = [],
 ) {
   if (signal.kind === "user_continues") {
+    return false;
+  }
+  // This is a transient regeneration marker. Once the turn settles, the
+  // assistant output itself is authoritative and the marker must disappear.
+  if (signal.kind === "assistant_output_edited" && !isBusyPhase(phase)) {
     return false;
   }
   if (signalPrecedesLatestUserTurn(signal, messages)) {
