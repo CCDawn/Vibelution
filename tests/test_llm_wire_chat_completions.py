@@ -698,6 +698,40 @@ def test_no_reasoning_placeholder_without_roundtrip_compat():
 
     assert "reasoning_content" not in payload["messages"][0]
     assert "reasoning_content" not in payload["messages"][1]
+    assert "reasoning_content" not in payload["messages"][2]
+
+
+def test_reasoning_roundtrip_route_patches_trailing_plain_assistant_after_tools():
+    call = CanonicalToolCall(
+        identity=identity("call-item"),
+        call_id="call-12",
+        name="lookup",
+        arguments={"query": "stars"},
+    )
+    result = CanonicalToolResult(
+        identity=identity("result-item"),
+        call_id="call-12",
+        tool_name="lookup",
+        output="42",
+    )
+    request = SemanticModelRequest(
+        scope=scope(),
+        messages=(
+            SemanticMessage(
+                role="assistant",
+                parts=(ToolCallPart(call), ReasoningTextPart("真实的思考内容")),
+            ),
+            SemanticMessage(role="tool", parts=(ToolResultPart(result),)),
+            SemanticMessage(role="assistant", parts=(TextPart("工具前的说明文字"),)),
+        ),
+        tools=(),
+        settings=SemanticGenerationSettings(max_output_tokens=32, stream=False),
+    )
+
+    payload = ChatCompletionsWireAdapter().encode_request(request, route=reasoning_roundtrip_route()).body
+
+    assert payload["messages"][0]["reasoning_content"] == "真实的思考内容"
+    assert str(payload["messages"][2].get("reasoning_content") or "").strip()
 
 
 def test_payload_reasoning_guard_patches_tool_call_assistant_without_reasoning():
@@ -717,6 +751,31 @@ def test_payload_reasoning_guard_patches_tool_call_assistant_without_reasoning()
     assert "reasoning_content" not in payload["messages"][1]
 
 
+def test_payload_reasoning_guard_patches_trailing_plain_assistant_after_tools():
+    payload = {
+        "messages": [
+            {"role": "user", "content": "go"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "call-1", "type": "function"}],
+                "reasoning_content": "真实的思考内容",
+            },
+            {"role": "tool", "content": "42", "tool_call_id": "call-1"},
+            {"role": "assistant", "content": "工具前的说明文字"},
+        ]
+    }
+
+    patched = ensure_chat_completions_reasoning_roundtrip(payload, route=reasoning_roundtrip_route())
+
+    assert patched["messages"][1]["reasoning_content"] == "真实的思考内容"
+    assert str(patched["messages"][3].get("reasoning_content") or "").strip()
+    assert "reasoning_content" not in payload["messages"][3]
+
+    untouched = ensure_chat_completions_reasoning_roundtrip(payload, route=route())
+    assert untouched is payload
+
+
 def test_payload_reasoning_guard_preserves_real_reasoning_and_patches_blank():
     payload = {
         "messages": [
@@ -730,7 +789,7 @@ def test_payload_reasoning_guard_preserves_real_reasoning_and_patches_blank():
 
     assert patched["messages"][0]["reasoning_content"] == "真实思考"
     assert str(patched["messages"][1]["reasoning_content"] or "").strip()
-    assert "reasoning_content" not in patched["messages"][2]
+    assert str(patched["messages"][2].get("reasoning_content") or "").strip()
 
 
 def test_payload_reasoning_guard_noop_without_roundtrip_compat():

@@ -148,14 +148,17 @@ def _ensure_reasoning_roundtrip_messages(
     *,
     route: Any,
 ) -> list[SemanticMessage]:
-    """Guarantee non-empty ``reasoning_content`` on tool-call assistants.
+    """Guarantee non-empty ``reasoning_content`` on assistant messages.
 
-    DeepSeek thinking-mode relays reject the whole request when any historical
-    assistant that carries ``tool_calls`` lacks ``reasoning_content``. The
-    upstream chain (stream outcome projection, agent restore, ledger replay)
-    is supposed to round-trip real reasoning, but a single missed hop bricks
-    the turn. This wire-boundary backstop appends a clearly-marked placeholder
-    only when the real text is absent, and only for routes that declared
+    DeepSeek thinking-mode relays reject the whole request when a historical
+    assistant message lacks ``reasoning_content`` while tools are declared —
+    not only the tool-call envelopes: a committed plain-text assistant item
+    from the same response (for example the commentary that precedes a tool
+    call) is also rejected when it is the trailing message. The upstream chain
+    (stream outcome projection, agent restore, ledger replay) is supposed to
+    round-trip real reasoning, but a single missed hop bricks the turn. This
+    wire-boundary backstop appends a clearly-marked placeholder only when the
+    real text is absent, and only for routes that declared
     ``compat.reasoning_roundtrip``.
     """
 
@@ -165,12 +168,11 @@ def _ensure_reasoning_roundtrip_messages(
     for message in messages:
         parts = tuple(message.parts)
         if message.role == "assistant" and parts:
-            has_tool_call = any(isinstance(part, ToolCallPart) for part in parts)
             has_reasoning = any(
                 isinstance(part, ReasoningTextPart) and str(part.text or "").strip()
                 for part in parts
             )
-            if has_tool_call and not has_reasoning:
+            if not has_reasoning:
                 parts = (*parts, ReasoningTextPart(REASONING_ROUNDTRIP_PLACEHOLDER))
         patched.append(SemanticMessage(role=message.role, parts=parts))
     return patched
@@ -200,8 +202,6 @@ def ensure_chat_completions_reasoning_roundtrip(
         if not isinstance(message, dict):
             continue
         if str(message.get("role") or "").strip() != "assistant":
-            continue
-        if not message.get("tool_calls"):
             continue
         if str(message.get("reasoning_content") or "").strip():
             continue
