@@ -3,15 +3,17 @@
 Contract under test (probed directly against the Command Code DeepSeek V4.1
 Flash thinking endpoint): the upstream *returns* reasoning in
 ``reasoning``/``reasoning_details`` but *requires* every historical assistant
-message carrying ``tool_calls`` to pass a non-empty ``reasoning_content`` back,
-otherwise the next chat/completions call fails with 400 "The
+message to pass a non-empty ``reasoning_content`` back — not only the ones
+carrying ``tool_calls``. A trailing plain-text assistant (the commentary
+committed alongside a tool call) 400s the next request with "The
 `reasoning_content` in the thinking mode must be passed back to the API".
 
 The journal stores thinking as ``assistant_item_committed`` events with
 ``payload.kind == "reasoning"`` (``visible_in_model=False``, double-written by
 ``session_ui_capture_llm_response`` and ``persist_session_turn_result``). The
-replay must re-attach that reasoning to tool-call assistant messages without
-touching fingerprints, invariants, or messages without tool calls.
+replay re-attaches that reasoning to whichever assistant output consumed the
+segment — tool-call envelopes, plain-text envelopes, and final answers — without
+touching fingerprints, invariants, or turns that journaled no reasoning.
 """
 
 from __future__ import annotations
@@ -171,8 +173,9 @@ def test_reasoning_roundtrip_keeps_invariant_and_fingerprint_unchanged():
     assert conversation_layer_fingerprint(layer) == conversation_layer_fingerprint(_strip(layer))
 
 
-def test_reasoning_not_attached_to_assistant_without_tool_calls():
-    # Final-answer branch (assistant_item_committed) carries no tool_calls.
+def test_reasoning_attaches_to_every_assistant_output_that_consumed_it():
+    # Final-answer branch (assistant_item_committed) carries no tool_calls but
+    # the upstream still requires its own reasoning segment on replay.
     events = _fault_time_turn_events()
     events.extend(_reasoning_pair(20, REASONING_ROUND2))
     events.append(
@@ -189,9 +192,13 @@ def test_reasoning_not_attached_to_assistant_without_tool_calls():
         )
     )
 
-    for message in model_messages_from_events(events):
-        if not (message.get("tool_calls") or message.get("toolCalls")):
-            assert "reasoning_content" not in message, message
+    final_assistants = [
+        message
+        for message in model_messages_from_events(events)
+        if message.get("role") == "assistant" and not (message.get("tool_calls") or message.get("toolCalls"))
+    ]
+    assert final_assistants, "final answer must survive the projection"
+    assert final_assistants[-1].get("reasoning_content") == REASONING_ROUND2
 
     # Plain-text assistant envelope (assistant_message without toolCalls).
     plain_events = [
@@ -199,8 +206,13 @@ def test_reasoning_not_attached_to_assistant_without_tool_calls():
         *_reasoning_pair(2, REASONING_ROUND1),
         _event(4, EVENT_ASSISTANT_MESSAGE, {"content": "直接回答，不用工具。"}),
     ]
-    for message in model_messages_from_events(plain_events):
-        assert "reasoning_content" not in message, message
+    plain_assistants = [
+        message
+        for message in model_messages_from_events(plain_events)
+        if message.get("role") == "assistant"
+    ]
+    assert plain_assistants
+    assert plain_assistants[-1].get("reasoning_content") == REASONING_ROUND1
 
 
 def test_no_reasoning_fabricated_without_journal_entries():
@@ -373,8 +385,8 @@ def test_completed_turn_canonical_seed_keeps_reasoning_on_tool_call_assistants()
         for message in seed
         if message.get("role") == "assistant" and not message.get("tool_calls")
     ]
-    for message in final_assistants:
-        assert "reasoning_content" not in message, message
+    assert final_assistants
+    assert final_assistants[-1].get("reasoning_content") == REASONING_ROUND2, final_assistants[-1]
 
 
 def test_completed_turn_canonical_seed_reasoning_reaches_provider_payload():

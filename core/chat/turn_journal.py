@@ -1449,8 +1449,9 @@ def _reasoning_content_by_assistant_event(
     events with ``kind == "reasoning"``. Those events are not model-visible, so the
     main replay loop never sees them; DeepSeek-class thinking endpoints nevertheless
     require a non-empty ``reasoning_content`` on every replayed assistant message
-    that carries ``tool_calls`` ("The `reasoning_content` in the thinking mode must
-    be passed back to the API").
+    ("The `reasoning_content` in the thinking mode must be passed back to the API"),
+    including trailing plain-text/commentary outputs and final answers — not only
+    the tool-call envelopes.
 
     Reasoning entries belong to the next assistant output of the same turn: events
     arrive in sequence order and thinking precedes its output. When the turn has a
@@ -1504,13 +1505,18 @@ def _attach_replay_reasoning_content(
     message: dict[str, Any],
     reasoning_text: str,
 ) -> dict[str, Any]:
-    """Attach the segment's reasoning to a replayed tool-call assistant message.
+    """Attach the journaled reasoning segment to a replayed assistant message.
 
-    Only messages that actually carry tool calls get the non-empty reasoning
-    text; nothing else on the message is touched.
+    DeepSeek-class thinking endpoints require a non-empty ``reasoning_content``
+    on *every* replayed assistant message, not only the ones carrying tool
+    calls: a trailing plain-text assistant (commentary committed alongside a
+    tool call) also 400s the next request when the field is missing. The
+    projection therefore hands the consumed segment to whatever assistant
+    output the journal attributes it to; non-assistant messages and turns
+    without reasoning entries stay untouched.
     """
 
-    if reasoning_text and (message.get("toolCalls") or message.get("tool_calls")):
+    if reasoning_text and str(message.get("role") or "").strip() == "assistant":
         message["reasoning_content"] = reasoning_text
     return message
 
@@ -1591,19 +1597,22 @@ def _model_visible_messages_from_events(event_list: list[TurnJournalEvent]) -> l
                 content = str(payload.get("text") or "").strip()
                 if content:
                     messages.append(
-                        {
-                            "role": "assistant",
-                            "content": content,
-                            "timestamp": event.timestamp,
-                            "metadata": {
-                                "kind": EVENT_ASSISTANT_ITEM_COMMITTED,
-                                "turnId": turn_id,
-                                "eventId": event.event_id,
-                                "invocationId": str(payload.get("invocationId") or ""),
-                                "itemId": str(payload.get("itemId") or ""),
-                                "revision": int(payload.get("revision") or 0),
+                        _attach_replay_reasoning_content(
+                            {
+                                "role": "assistant",
+                                "content": content,
+                                "timestamp": event.timestamp,
+                                "metadata": {
+                                    "kind": EVENT_ASSISTANT_ITEM_COMMITTED,
+                                    "turnId": turn_id,
+                                    "eventId": event.event_id,
+                                    "invocationId": str(payload.get("invocationId") or ""),
+                                    "itemId": str(payload.get("itemId") or ""),
+                                    "revision": int(payload.get("revision") or 0),
+                                },
                             },
-                        }
+                            reasoning_content_by_event.get(event.event_id, ""),
+                        )
                     )
                     final_turn_ids.add(turn_id)
                     assistant_message_index_by_turn[turn_id] = len(messages) - 1
