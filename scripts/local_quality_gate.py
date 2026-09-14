@@ -422,6 +422,28 @@ def summarize_failure(completed: subprocess.CompletedProcess[str], subject: str)
     return bounded_failure_summary(f"{subject}: {raw}")
 
 
+def validation_environment() -> dict[str, str] | None:
+    """Redirect pytest's basetemp away from the deep Windows instance-cache temp.
+
+Pytest fixture repos created under ``%LOCALAPPDATA%\\...\\instances\\...\\cache``
+    temp roots make git fail with "Filename too long" on path-length sensitive    fixtures (rebase/init). Setting ``PYTEST_ADDOPTS=--basetemp=<short root>``
+    keeps the validated commands unchanged while pinning the temp root short.
+    """
+
+    if os.name != "nt":
+        return None
+    if os.environ.get("PYTEST_ADDOPTS", "").strip():
+        return None
+    root = Path(os.environ.get("VIBELUTION_VALIDATION_TEMP", r"C:\vtmp")) / "vt-validation"
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    env = os.environ.copy()
+    env["PYTEST_ADDOPTS"] = f"--basetemp={root}"
+    return env
+
+
 def measured(
     kind: str,
     argv: Sequence[str],
@@ -433,9 +455,8 @@ def measured(
 ) -> ProcessResult:
     started = time.monotonic()
     if env is None:
-        completed = run_process(argv, cwd, input_text=input_text)
-    else:
-        completed = run_process(argv, cwd, input_text=input_text, env=env)
+        env = validation_environment()
+    completed = run_process(argv, cwd, input_text=input_text, env=env)
     duration_ms = round((time.monotonic() - started) * 1000)
     return ProcessResult(
         kind=kind,
