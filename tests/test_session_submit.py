@@ -656,3 +656,63 @@ def test_get_session_detail_does_not_assemble_full_document(tmp_path: Path, monk
     finally:
         for session_id in session_ids:
             _reset_seeded_session_runtime(session_id)
+
+
+def test_submit_records_persist_segment_timing(tmp_path: Path, monkeypatch) -> None:
+    session_id = "session-persist-timing"
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_chat_state(tmp_path)
+    _bind_seeded_submittable_agent(tmp_path, session_id=session_id)
+    scheduled_contexts: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: scheduled_contexts.append(dict(context)),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_session_context_limit_payload",
+        lambda conversation: {"limit": 128000},
+    )
+    persisted_work_runs: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_persist_chat_turn_work_run",
+        lambda **kwargs: persisted_work_runs.append(kwargs),
+    )
+    accepted_timings: list[dict] = []
+
+    def capture_accepted(context, timing_fields):
+        accepted_timings.append(dict(timing_fields))
+
+    monkeypatch.setattr(session_service, "_record_session_turn_accepted_event", capture_accepted)
+
+    try:
+        result = submit.submit_session_message_lightweight(
+            session_id,
+            "persist timing",
+            mental_model_enabled=False,
+        )
+        assert result["accepted"] is True
+    finally:
+        _reset_seeded_session_runtime(session_id)
+
+    assert len(accepted_timings) == 1
+    timings = accepted_timings[0]
+    for key in (
+        "chatStateLockWaitMs",
+        "persistResolveMs",
+        "persistMessageBuildMs",
+        "chatStateSaveMs",
+        "setSessionRunningMs",
+        "workRunPersistMs",
+        "chatStateLockedMs",
+    ):
+        assert key in timings, key
+        assert isinstance(timings[key], int), key
+        assert timings[key] >= 0, key
+    # The resolve segment is the first slice of the locked window, so the total
+    # must never be smaller than it.
+    assert timings["chatStateLockedMs"] >= timings["persistResolveMs"]
+    assert len(persisted_work_runs) == 1
+    assert persisted_work_runs[0]["session_id"] == session_id
