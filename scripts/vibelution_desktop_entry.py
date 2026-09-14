@@ -1463,15 +1463,31 @@ def _read_main_line_settlement(runtime_manager_dir: Path, command_id: str) -> di
 
 
 def _workbench_health_ok(workspace_root: Path) -> bool:
-    """Probe the managed workbench backend health (used for start-reuse only)."""
+    """Reuse only a ready backend belonging to the requested checkout."""
     state = _read_json_object(
         resolve_active_project_storage_paths(workspace_root).runtime / "launcher" / "state.json"
     )
-    port = int(state.get("backendPort") or state.get("port") or 0) or _workbench_port()
+    port = int(state.get("backendPort") or state.get("port") or 0)
+    if not port:
+        # Isolated backends are registered by Electron, not the main-line queue.
+        from core.runtime_manager.instances_registry import find_instance_by_project_root
+
+        entry = find_instance_by_project_root(workspace_root)
+        port = int(entry.get("port") or 0)
+    if not port:
+        return False
     url = f"http://{DEFAULT_HOST}:{int(port)}/api/health"
     try:
         with urllib.request.urlopen(url, timeout=2.0) as response:  # noqa: S310 - loopback probe
-            return int(getattr(response, "status", 0) or 0) == 200
+            if int(getattr(response, "status", 0) or 0) != 200:
+                return False
+            health = json.loads(response.read())
+        if not isinstance(health, dict) or health.get("routesReady") is not True:
+            return False
+        serving_root = str(health.get("workspaceRoot") or "").strip()
+        return bool(serving_root) and os.path.normcase(str(Path(serving_root).resolve())) == os.path.normcase(
+            str(workspace_root.resolve())
+        )
     except (OSError, ValueError):
         return False
 

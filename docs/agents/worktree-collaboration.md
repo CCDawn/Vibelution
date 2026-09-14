@@ -57,6 +57,12 @@ Workers must stop and report if they discover their write scope overlaps a hot f
 
 ## Agent Responsibilities
 
+### Branch Runtime Acceptance
+
+Internal and external Agents follow the same [branch runtime development contract](../guides/launcher-branch-development.md). When a change needs live runtime acceptance, start the task's own checked-out worktree through Launcher and verify its health `workspaceRoot`, backend version and frontend build provenance before testing. A healthy `main`, a successful CLI exit, or a green unit test is not evidence that the task instance ran the change. Keep the instance identity and observed acceptance result with the task's validation evidence before local integration.
+
+Restart and stop only the task instance. Long-running experimental work belongs in a separately retained worktree; task cleanup must not remove it or refresh the shared desktop shell. Pure documentation and changes whose acceptance is adequately covered by focused tests do not require starting a workbench.
+
 Inside its own worktree, an Agent should:
 
 - keep the task scope narrow;

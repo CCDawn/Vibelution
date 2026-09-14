@@ -921,6 +921,60 @@ def _advance_clock(clock):
     return _sleep
 
 
+@pytest.mark.parametrize("matching_root,routes_ready,expected", [(True, True, True), (False, True, False), (True, False, False)])
+def test_start_reuse_health_requires_requested_workspace(monkeypatch, tmp_path, matching_root, routes_ready, expected):
+    root = tmp_path / "task"
+    monkeypatch.setattr(desktop_entry, "resolve_active_project_storage_paths", lambda _: types.SimpleNamespace(runtime=tmp_path))
+    monkeypatch.setattr(desktop_entry, "_read_json_object", lambda _: {"backendPort": 8123})
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps({"workspaceRoot": str(root if matching_root else tmp_path / "main"), "routesReady": routes_ready}).encode()
+
+    monkeypatch.setattr(desktop_entry.urllib.request, "urlopen", lambda *_args, **_kwargs: Response())
+    assert desktop_entry._workbench_health_ok(root) is expected
+
+
+def test_start_reuse_without_instance_port_does_not_probe_main(monkeypatch, tmp_path):
+    monkeypatch.setattr(desktop_entry, "resolve_active_project_storage_paths", lambda _: types.SimpleNamespace(runtime=tmp_path))
+    monkeypatch.setattr(desktop_entry, "_read_json_object", lambda _: {})
+    monkeypatch.setattr("core.runtime_manager.instances_registry.find_instance_by_project_root", lambda _: {})
+    monkeypatch.setattr(desktop_entry, "_workbench_port", lambda: pytest.fail("must not fall back to main port"))
+    monkeypatch.setattr(desktop_entry.urllib.request, "urlopen", lambda *_args, **_kwargs: pytest.fail("no instance port to probe"))
+    assert desktop_entry._workbench_health_ok(tmp_path) is False
+
+
+def test_start_reuse_health_reads_isolated_registry_port(monkeypatch, tmp_path):
+    monkeypatch.setattr(desktop_entry, "resolve_active_project_storage_paths", lambda _: types.SimpleNamespace(runtime=tmp_path))
+    monkeypatch.setattr(desktop_entry, "_read_json_object", lambda _: {})
+    monkeypatch.setattr("core.runtime_manager.instances_registry.find_instance_by_project_root", lambda _: {"port": 8124})
+    urls = []
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps({"workspaceRoot": str(tmp_path), "routesReady": True}).encode()
+
+    monkeypatch.setattr(desktop_entry.urllib.request, "urlopen", lambda url, **_: urls.append(url) or Response())
+    assert desktop_entry._workbench_health_ok(tmp_path) is True
+    assert urls == ["http://127.0.0.1:8124/api/health"]
+
+
 def test_wait_for_lifecycle_settlement_reports_accepted_queue_settlement(monkeypatch, tmp_path):
     runtime_manager_dir = _make_settlement_runtime(monkeypatch, tmp_path)
     _write_intent(runtime_manager_dir, operation="start", command_id="cmd_settled_ok")
