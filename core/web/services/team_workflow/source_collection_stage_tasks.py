@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import urllib.parse
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from .source_collection_common import (
     normalize_source_collection_agent_role,
     normalize_source_collection_stage_id,
-    source_collection_count,
     trim_text,
 )
-
 
 SOURCE_COLLECTION_STAGE_SESSION_TASK_STATUSES = {
     "queued",
@@ -70,6 +69,42 @@ def _source_collection_relations_result_contract(
             "topicRelations",
             "missingLinks",
         ],
+        "collectionFieldTypes": {
+            "candidateGraph.nodes": "object[]",
+            "candidateGraph.edges": "object[]",
+            "candidateRelations": "object[]",
+            "themeNodes": "object[]",
+            "sourceThemeEdges": "object[]",
+            "topicRelations": "object[]",
+            "missingLinks": "object[]",
+            "evidenceGaps": "object[]",
+            "counterEvidenceRefs": "object[]",
+        },
+        "minimumExample": {
+            "candidateRelations": [
+                {
+                    "sourceCandidateId": "candidate-a",
+                    "targetCandidateId": "candidate-b",
+                    "relation": "constrains",
+                    "evidenceRefs": ["ce-support"],
+                }
+            ],
+            "evidenceGaps": [
+                {
+                    "id": "gap-x",
+                    "description": "缺少跨设备验证",
+                    "neededEvidence": "多设备基准",
+                    "blocksConclusion": True,
+                }
+            ],
+            "counterEvidenceRefs": [
+                {
+                    "evidenceRef": "ce-limit",
+                    "claim": "该结论受设备与负载边界限制",
+                    "disposition": "limit_scope",
+                }
+            ],
+        },
         "edgeIdentityFields": ["sourceCandidateId", "targetCandidateId", "relation"],
         "endpointPolicy": {
             # LlamaIndex SchemaLLMPathExtractor 式闭集：优先只输出注册表中的
