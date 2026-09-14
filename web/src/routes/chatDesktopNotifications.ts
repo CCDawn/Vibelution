@@ -44,6 +44,7 @@ export type SessionCompletionSummary = {
   status?: string;
   currentPhase?: string;
   lastTurnStatus?: string;
+  terminalReason?: string;
   updatedAt?: string;
   lastActive?: string;
   companionAgentId?: string;
@@ -58,7 +59,7 @@ export type DesktopConversationNotifier = {
     context?: NotificationContext,
   ): void;
   handleSessionDetail(detail: SessionDetail, context?: NotificationContext): void;
-  handleSessionSummaries(sessions: SessionCompletionSummary[], context?: NotificationContext): void;
+  handleSessionSummaries(sessions: SessionCompletionSummary[], context?: NotificationContext): string[];
 };
 
 const BUSY_PHASES = new Set([
@@ -279,6 +280,8 @@ export function createDesktopConversationNotifier(
   const seenKeySet = new Set<string>();
   const maxSeenKeys = Math.max(1, Math.round(options.maxSeenKeys ?? 200));
   const lastBusyBySession = new Map<string, boolean>();
+  const pendingStreamTurnBySession = new Map<string, string>();
+  const pendingSummaryTerminalBySession = new Set<string>();
   const lastCompanionCompletionBySession = new Map<string, string>();
 
   function remember(key: string): boolean {
@@ -349,7 +352,7 @@ export function createDesktopConversationNotifier(
     });
     emit({
       schemaVersion: 1,
-      notificationKey: `${input.sessionId}:${input.turnId}:${input.terminalStatus}`,
+      notificationKey: `${input.sessionId}:${input.turnId}`,
       sessionId: input.sessionId,
       turnId: input.turnId,
       title: copy.title,
@@ -388,18 +391,14 @@ export function createDesktopConversationNotifier(
       if (!sessionId || !turnId) {
         return;
       }
-      const sessionLabel = sessionLabelFromContext(sessionId, context);
-      emitSessionCompletion({
-        sessionId,
-        turnId,
-        terminalStatus: "completed",
-        completedAt: normalizeNotificationText(payload.updatedAt) || undefined,
-        sessionLabel,
-        suppressWhenFocused: shouldSuppressWhenFocused(sessionId, context),
-      });
-      // Stream owns the viewed session. Mark idle so the index poll cannot
-      // emit a second native notification with a recency-based key.
-      lastBusyBySession.set(sessionId, false);
+      // `done` only closes the assistant delta stream. The authoritative
+      // session detail carries terminalReason and the settled turn message;
+      // waiting for it prevents needs_continue/failed turns from being shown
+      // as successful completions.
+      if (pendingStreamTurnBySession.get(sessionId) !== turnId) {
+        pendingStreamTurnBySession.set(sessionId, turnId);
+        lastBusyBySession.set(sessionId, true);
+      }
     },
 
     handleSessionDetail(detail, context) {
@@ -410,7 +409,11 @@ export function createDesktopConversationNotifier(
 
       const phase = normalizeNotificationText(detail.currentPhase || detail.status);
       const busy = isBusyPhase(phase);
-      const terminalPhase = terminalPhaseForValue(detail.currentPhase, detail.status);
+      const terminalPhase = terminalPhaseForValue(
+        detail.terminalReason,
+        detail.currentPhase,
+        detail.status,
+      );
       observeSessionPhase(sessionId, busy, terminalPhase, () => {
         const latest = latestAssistantTurnMessage(detail);
         const turnId = detailTurnId(detail, latest);
@@ -425,10 +428,28 @@ export function createDesktopConversationNotifier(
           sessionLabel: sessionLabelFromContext(sessionId, context, detail.title, detail.agentDisplayName),
           suppressWhenFocused: shouldSuppressWhenFocused(sessionId, context),
         });
+        pendingStreamTurnBySession.delete(sessionId);
+        pendingSummaryTerminalBySession.delete(sessionId);
       });
+      if (terminalPhase && !busy && pendingSummaryTerminalBySession.has(sessionId)) {
+        const latest = latestAssistantTurnMessage(detail);
+        const turnId = detailTurnId(detail, latest);
+        if (turnId) {
+          emitSessionCompletion({
+            sessionId,
+            turnId,
+            terminalStatus: notificationStatusForTerminalPhase(terminalPhase),
+            completedAt: normalizeNotificationText(latest?.timestamp) || undefined,
+            sessionLabel: sessionLabelFromContext(sessionId, context, detail.title, detail.agentDisplayName),
+            suppressWhenFocused: shouldSuppressWhenFocused(sessionId, context),
+          });
+          pendingSummaryTerminalBySession.delete(sessionId);
+        }
+      }
     },
 
     handleSessionSummaries(sessions, context) {
+      const detailSessionIds: string[] = [];
       for (const session of sessions) {
         const sessionId = normalizeNotificationText(session.id);
         if (!sessionId) {
@@ -439,7 +460,12 @@ export function createDesktopConversationNotifier(
           continue;
         }
         const busy = isBusyPhase(session.currentPhase || session.status);
-        const terminalPhase = terminalPhaseForValue(session.currentPhase, session.status, session.lastTurnStatus);
+        const terminalPhase = terminalPhaseForValue(
+          session.terminalReason,
+          session.currentPhase,
+          session.status,
+          session.lastTurnStatus,
+        );
         const completionIdentity = normalizeNotificationText(session.completionIdentity);
         const suppressWhenFocused = companionAgentId
           ? normalizeNotificationText(context?.viewedSessionId) === sessionId
@@ -461,23 +487,16 @@ export function createDesktopConversationNotifier(
             continue;
           }
         }
+        // Ordinary summaries do not carry a stable turn id. Observing their
+        // busy/terminal transition is still useful state, but emitting here
+        // would make updatedAt a fake turn identity and repeat on recency
+        // refreshes. Ordinary completion is emitted from authoritative detail.
         observeSessionPhase(sessionId, busy, terminalPhase, () => {
-          const turnId = (
-            normalizeNotificationText(session.updatedAt)
-            || normalizeNotificationText(session.lastActive)
-            || "index"
-          );
-          emitSessionCompletion({
-            sessionId,
-            turnId,
-            terminalStatus: notificationStatusForTerminalPhase(terminalPhase),
-            completedAt: normalizeNotificationText(session.updatedAt || session.lastActive) || undefined,
-            sessionLabel: sessionLabelFromContext(sessionId, context, session.title, session.agentDisplayName),
-            suppressWhenFocused,
-            ...(companionAgentId ? { companionAgentId } : {}),
-          });
+          pendingSummaryTerminalBySession.add(sessionId);
+          detailSessionIds.push(sessionId);
         });
       }
+      return detailSessionIds;
     },
   };
 }

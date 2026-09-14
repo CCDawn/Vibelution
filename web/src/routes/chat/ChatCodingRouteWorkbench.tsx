@@ -2637,6 +2637,7 @@ export function ChatCodingRouteWorkbench() {
 
   useDesktopConversationAttention({
     sessions: allVisibleSessions,
+    queryClient,
     viewedSessionId: activeSessionId || "",
     notifierRef: desktopConversationNotifierRef,
     onOpenSession: handleOpenDirectSession,
