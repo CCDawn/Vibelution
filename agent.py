@@ -76,6 +76,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, SystemMessage, To
 from core.infrastructure.runtime_input import (
     build_chat_user_message,
     build_chat_user_multimodal_message,
+    build_chat_guidance_message,
     build_external_request_message,
     build_runtime_notice_message,
 )
@@ -476,6 +477,7 @@ class AgentRuntime:
         self._single_turn_mode_active: bool = False
         self._last_turn_metadata: Dict[str, Any] = {}
         self._turn_interrupt_checker = None
+        self._turn_guidance_provider = None
         self._mental_model_enabled_override: Optional[bool] = None
         self._runtime_status_enabled_override: Optional[bool] = None
         if self._mental_model_enabled_override is not None:
@@ -1978,6 +1980,7 @@ class AgentRuntime:
         self._recent_tool_records = []
         self._pending_lifecycle_action = None
         self._turn_interrupt_checker = None
+        self._turn_guidance_provider = None
         # Tool authorization is scoped to one turn.  A cached chat Agent keeps
         # its model transport and tool surface, but must never keep the prior
         # turn's execution decision or every tool call will fail closed with a
@@ -2517,6 +2520,9 @@ class AgentRuntime:
             responses_continuation_disabled = False
             for _ in range(round_state.max_iterations):
                 self._raise_if_turn_stop_requested()
+                # Mid-turn steer: guidance submitted while this turn runs lands
+                # before the next model request instead of the next prompt build.
+                messages = self._apply_turn_guidance_messages(messages)
                 iteration = round_state.next_iteration()
                 pre_llm_started = time.perf_counter()
                 ui.update_status(
@@ -3523,6 +3529,46 @@ class AgentRuntime:
                 owner=self,
             )
 
+    def set_turn_guidance_provider(self, provider=None) -> None:
+        """Bind the host callback that drains new operator guidance for this turn.
+
+        The provider is polled at agent iteration boundaries so a mid-turn steer
+        reaches the next model request of the running turn (Codex-style steer)
+        instead of waiting for the next prompt assembly.
+        """
+        self._turn_guidance_provider = provider
+
+    def _drain_turn_guidance_texts(self) -> List[str]:
+        provider = getattr(self, "_turn_guidance_provider", None)
+        if not callable(provider):
+            return []
+        try:
+            items = provider()
+        except Exception:
+            return []
+        texts: List[str] = []
+        for item in list(items or []):
+            text = str(item or "").strip()
+            if text:
+                texts.append(text)
+        return texts
+
+    def _apply_turn_guidance_messages(self, messages: List[Any]) -> List[Any]:
+        texts = self._drain_turn_guidance_texts()
+        if not texts:
+            return messages
+        _record_agent_scene_event(
+            "prompt",
+            "agent.turn.guidance_injected",
+            message="Operator guidance was injected into the running turn at the next iteration boundary.",
+            fields={
+                "guidanceCount": len(texts),
+                "guidanceChars": sum(len(text) for text in texts),
+                "turnIdentity": str(getattr(self, "_active_turn_identity", "") or "").strip(),
+            },
+        )
+        return [*list(messages), *(build_chat_guidance_message(text) for text in texts)]
+
     def _current_turn_stop_reason(self) -> str:
         checker = getattr(self, "_turn_interrupt_checker", None)
         if not callable(checker):
@@ -3847,6 +3893,7 @@ class AgentRuntime:
             self._turn_allowed_tool_names = previous_turn_allowed_tool_names
             self._pending_supervised_case_id = None
             self._turn_interrupt_checker = None
+            self._turn_guidance_provider = None
             set_cancel_checker = getattr(getattr(self, "tool_executor", None), "set_cancel_checker", None)
             if callable(set_cancel_checker):
                 set_cancel_checker(None, owner=self)
