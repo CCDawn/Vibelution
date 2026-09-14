@@ -100,10 +100,23 @@ def analyze_conversation_branches(events: Iterable[TurnJournalEvent]) -> Convers
     message_event_id_set = set(message_event_ids)
     chain_event_id_set = set(tree.chain_ids)
 
+    def resolve_logical_id(event_id: str) -> str:
+        """Follow the alias chain to the original message event (multi-hop safe)."""
+
+        cursor = str(event_id or "").strip()
+        seen: set[str] = set()
+        while cursor and cursor not in seen:
+            seen.add(cursor)
+            aliased = tree.alias_by_id.get(cursor)
+            if not aliased:
+                return cursor
+            cursor = aliased
+        return cursor
+
     logical_aliases: dict[str, list[str]] = {}
     logical_order: list[str] = []
     for event_id in message_event_ids:
-        logical_id = tree.alias_by_id.get(event_id, event_id)
+        logical_id = resolve_logical_id(event_id)
         if logical_id not in logical_aliases:
             logical_aliases[logical_id] = []
             logical_order.append(logical_id)
@@ -133,9 +146,7 @@ def analyze_conversation_branches(events: Iterable[TurnJournalEvent]) -> Convers
         message = message_by_event[event_id]
         metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
         parent_event_id = parent_message_event_id(event_id)
-        parent_node_id = (
-            tree.alias_by_id.get(parent_event_id, parent_event_id) if parent_event_id else ""
-        )
+        parent_node_id = resolve_logical_id(parent_event_id) if parent_event_id else ""
         node = BranchNode(
             node_id=logical_id,
             event_id=event_id,
@@ -156,7 +167,7 @@ def analyze_conversation_branches(events: Iterable[TurnJournalEvent]) -> Convers
     for event_id in tree.chain_ids:
         if event_id not in message_event_id_set:
             continue
-        logical_id = tree.alias_by_id.get(event_id, event_id)
+        logical_id = resolve_logical_id(event_id)
         if logical_id in provisional and logical_id not in active_node_ids:
             active_node_ids.append(logical_id)
             active_leaf_id = logical_id

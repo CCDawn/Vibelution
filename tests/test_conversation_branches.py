@@ -96,6 +96,32 @@ def _regenerate_branch_fixture() -> list[TurnJournalEvent]:
     ]
 
 
+def _double_regenerate_fixture() -> list[TurnJournalEvent]:
+    return [
+        *_main_fixture(),
+        _rebase(
+            "event-rebase-1",
+            5,
+            "event-a1",
+            operation="regenerate",
+            branch_id="branch-regen-1",
+            turn_id="turn-3",
+        ),
+        _event("event-u2b", "turn-3", 6, EVENT_USER_MESSAGE, payload={"content": "后续追问"}),
+        _event("event-a2b", "turn-3", 7, EVENT_ASSISTANT_MESSAGE, payload={"content": "重答-1"}),
+        _rebase(
+            "event-rebase-2",
+            8,
+            "event-a1",
+            operation="regenerate",
+            branch_id="branch-regen-2",
+            turn_id="turn-4",
+        ),
+        _event("event-u2c", "turn-4", 9, EVENT_USER_MESSAGE, payload={"content": "后续追问"}),
+        _event("event-a2c", "turn-4", 10, EVENT_ASSISTANT_MESSAGE, payload={"content": "重答-2"}),
+    ]
+
+
 def test_branch_view_marks_active_path_and_leaf():
     events = _main_fixture()
 
@@ -142,6 +168,26 @@ def test_regenerate_alias_groups_assistant_siblings_under_one_user_node():
     assert view.nodes["event-a2b"].active is True
     assert view.default_leaf_ids["event-u2"] == "event-a2b"
     assert view.default_leaf_ids["event-a2"] == "event-a2"
+
+
+def test_double_regenerate_collapses_alias_chain_into_one_user_node():
+    events = _double_regenerate_fixture()
+
+    view = analyze_conversation_branches(events)
+    messages, active_leaf_id, active_branch_id = visible_messages_with_branch_info(events)
+
+    assert view.node_id_by_event["event-u2b"] == "event-u2"
+    assert view.node_id_by_event["event-u2c"] == "event-u2"
+    assert view.active_node_ids == ("event-u1", "event-a1", "event-u2", "event-a2c")
+    assert active_leaf_id == "event-a2c"
+    assert active_branch_id == "branch-regen-2"
+    assert sibling_node_ids(view, "event-a2c") == ("event-a2", "event-a2b", "event-a2c")
+
+    user_node_id = [message["nodeId"] for message in messages if message["role"] == "user"][-1]
+    assert user_node_id == "event-u2"
+    assert resolve_active_user_node_id(view, user_node_id) == user_node_id
+    assert resolve_active_user_node_id(view, "event-u2b") == "event-u2"
+    assert resolve_active_user_node_id(view, "event-a2c") == "event-u2"
 
 
 def test_head_select_switches_active_path_back_to_superseded_branch():
