@@ -1171,6 +1171,29 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
             turn_id=turn_id,
         )
 
+    consumed_guidance_texts: list[str] = []
+
+    def guidance_provider() -> list[str]:
+        """Drain new operator steer guidance for the running turn.
+
+        Polled by the agent at iteration boundaries so a mid-turn steer reaches
+        the next model request of the same turn (Codex-style steer).
+        """
+        guidance_turn_id = str(getattr(turn_control, "turn_id", "") or turn_id).strip()
+        if not guidance_turn_id:
+            return []
+        try:
+            texts = s._recent_session_steer_guidance_texts(
+                session_id,
+                turn_id=guidance_turn_id,
+                limit=8,
+            )
+        except Exception:
+            return []
+        pending = [text for text in texts if text not in consumed_guidance_texts]
+        consumed_guidance_texts.extend(pending)
+        return pending
+
     # The LLM adapter receives a bound ``current_stop_reason`` method, so the
     # capability marker must live on the session-owned checker before the
     # Agent wraps it. Provider HTTP abort keeps a user stop responsive while a
@@ -2151,6 +2174,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                                 )
                                 if str(part or "").strip()
                             ),
+                            guidance_provider=guidance_provider,
                         )
                     finally:
                         _wait_for_tool_execution_quiescence(tool_scope)
@@ -2365,6 +2389,7 @@ def _run_session_continuation_loop(
     allowed_tool_names: list[str] | None = None,
     static_runtime_context_block: str = "",
     volatile_runtime_context_block: str = "",
+    guidance_provider: Any = None,
 ) -> Any:
     s = _service()
     prompt = str(initial_prompt or "").strip()
@@ -2550,6 +2575,11 @@ def _run_session_continuation_loop(
                     s._load_session_conversation_events_cached(session_id),
                     turn_id=canonical_turn_id,
                 )
+            guidance_configurer = getattr(agent, "set_turn_guidance_provider", None)
+            if callable(guidance_configurer):
+                # Rebinding per iteration: run_single_turn clears turn-local
+                # callbacks in its finally block after every agent call.
+                guidance_configurer(guidance_provider if callable(guidance_provider) else None)
             result = s.run_existing_agent_single_turn(
                 agent,
                 initial_prompt=prompt,

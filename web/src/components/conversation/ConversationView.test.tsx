@@ -565,8 +565,9 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewStylesModuleSource).toContain("composerField: composerFieldShell");
     expect(conversationViewStylesModuleSource).toContain("composerFieldDragActive: composerFieldDragActiveShell");
     expect(styles.composer).toContain("grid-cols-[minmax(0,1fr)_auto]");
-    expect(styles.composerActionStack).toContain("grid-cols-1");
-    expect(styles.composerActionStack).toContain("content-end");
+    expect(styles.composerActionStack).toContain("flex");
+    expect(styles.composerActionStack).toContain("items-center");
+    expect(styles.composerActionStack).not.toContain("grid-cols-1");
     expect(styles.composerActionStack).toContain("gap-1");
     expect(conversationViewStylesModuleSource).toContain("composerRoundButton: composerRoundActionButton");
     expect(conversationViewStylesModuleSource).toContain("composerRoundButtonPrimary: composerPrimaryActionButton");

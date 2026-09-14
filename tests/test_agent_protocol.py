@@ -189,6 +189,7 @@ def test_session_turn_reuse_refreshes_turn_scoped_tool_authorization(monkeypatch
     agent._recent_tool_records = [{"old": True}]
     agent._pending_lifecycle_action = "old"
     agent._turn_interrupt_checker = lambda: "old"
+    agent._turn_guidance_provider = lambda: ["old"]
     resolved_with = []
 
     def resolve_authorization(tools):
@@ -203,6 +204,7 @@ def test_session_turn_reuse_refreshes_turn_scoped_tool_authorization(monkeypatch
     assert agent._tool_authorization_decision_fingerprint == "current-turn"
     assert agent._active_turn_messages is None
     assert agent._pending_runtime_context_blocks == []
+    assert agent._turn_guidance_provider is None
 
 
 def test_turn_interrupt_checker_rebinds_tool_executor_in_worker_context():
@@ -229,6 +231,47 @@ def test_turn_interrupt_checker_rebinds_tool_executor_in_worker_context():
     assert not worker.is_alive()
     assert not tool_started.is_set()
     assert "[取消] cancel_probe 已因停止请求跳过执行：operator stop" in outcome["result"]
+
+
+def test_turn_guidance_provider_injects_user_message_once():
+    agent = AgentRuntime.__new__(AgentRuntime)
+    agent._active_turn_identity = "turn-guidance"
+    drains: list[int] = []
+
+    def provider():
+        drains.append(1)
+        return ["不要动 Windows 启动路径"] if len(drains) == 1 else []
+
+    agent.set_turn_guidance_provider(provider)
+    messages = [{"role": "user", "content": "先继续实现"}]
+
+    updated = agent._apply_turn_guidance_messages(messages)
+
+    assert len(updated) == 2
+    assert updated[0] == messages[0]
+    assert updated[1]["role"] == "user"
+    assert updated[1]["content"].startswith("## 运行中引导")
+    assert "不要动 Windows 启动路径" in updated[1]["content"]
+    # Consumed guidance must not be injected again on the next iteration.
+    assert agent._apply_turn_guidance_messages(updated) is updated
+    assert len(drains) == 2
+
+
+def test_turn_guidance_provider_failures_stay_noop():
+    agent = AgentRuntime.__new__(AgentRuntime)
+    messages = [{"role": "user", "content": "先继续实现"}]
+
+    # No provider bound: the message list is untouched.
+    assert agent._apply_turn_guidance_messages(messages) is messages
+
+    def broken_provider():
+        raise RuntimeError("guidance journal unavailable")
+
+    agent.set_turn_guidance_provider(broken_provider)
+    assert agent._apply_turn_guidance_messages(messages) is messages
+
+    agent.set_turn_guidance_provider(None)
+    assert agent._apply_turn_guidance_messages(messages) is messages
 
 
 def test_supervised_system_prompt_excludes_global_git_and_runtime_diagnostics():
