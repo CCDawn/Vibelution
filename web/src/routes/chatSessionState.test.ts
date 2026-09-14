@@ -113,6 +113,32 @@ function liveOverlayMessage(id: string, turnId: string, timestamp: string): Conv
   };
 }
 
+function assistantToolOnlyTurn(id: string, turnId: string, timestamp: string): ConversationMessage {
+  return {
+    id,
+    role: "assistant",
+    turnId,
+    status: "completed",
+    timestamp,
+    turnItems: [
+      {
+        id: `${turnId}-tool:1`,
+        itemId: `${turnId}-tool`,
+        version: 3,
+        sessionId: "session-live",
+        turnId,
+        type: "tool_call",
+        callId: "call-1",
+        toolName: "cli_tool",
+        status: "completed",
+        revision: 1,
+        sequence: 1,
+        terminal: true,
+      },
+    ],
+  };
+}
+
 describe("chatSessionState", () => {
   it("optimistically rewrites the edited user message and keeps later turns for the branch snapshot", () => {
     const detail = makeDetail({
@@ -418,6 +444,31 @@ describe("chatSessionState", () => {
     const merged = mergeSessionDetailMessageWindow(current, next);
 
     expect(merged.messages.map((message) => message.id)).toEqual(["session-live-message-2"]);
+  });
+
+  it("keeps a live overlay while its same-turn segment only has terminal tool items", () => {
+    const turnId = "turn-tools";
+    const segment = assistantToolOnlyTurn("session-live-message-segment", turnId, "2026-05-22T10:00:10Z");
+    const overlay = liveOverlayMessage(`session-live-message-live-${turnId}`, turnId, "2026-05-22T10:00:05Z");
+    const current = makeDetail({
+      messages: [overlay],
+      messageWindow: makeWindow({ totalMessages: 1, returnedMessages: 1, oldestMessageIndex: 1, newestMessageIndex: 1 }),
+    });
+    const next = makeDetail({
+      messages: [segment, overlay],
+      messageWindow: makeWindow({
+        totalMessages: 1,
+        returnedMessages: 2,
+        oldestMessageIndex: 1,
+        newestMessageIndex: 1,
+      }),
+    });
+
+    const merged = mergeSessionDetailMessageWindow(current, next);
+
+    expect(merged.messages.map((message) => message.id).sort()).toEqual(
+      ["session-live-message-live-turn-tools", "session-live-message-segment"].sort(),
+    );
   });
 
   it("keeps a live overlay while its turn is still running", () => {

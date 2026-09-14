@@ -545,5 +545,44 @@ describe("chat active turn layer", () => {
 
     expect(isActiveTurnSettledByDetail(active, detail)).toBe(false);
   });
+
+  it("does not settle the active layer for a same-turn completed packet with only terminal tool items", () => {
+    const active = mergeAssistantDeltaIntoActiveTurnLayer(
+      undefined,
+      assistantDelta({
+        turnId: "turn-tools",
+        updatedAt: "2026-09-14T15:21:00Z",
+        stage: "tool_running",
+      }),
+    );
+    const detail = {
+      id: "session-1",
+      messages: [{
+        id: "assistant-mid-turn",
+        role: "assistant",
+        status: "completed",
+        turnId: "turn-tools",
+        timestamp: "2026-09-14T15:22:00Z",
+        turnItems: [{
+          id: "tool-call:1",
+          itemId: "tool-call",
+          version: 3,
+          sessionId: "session-1",
+          turnId: "turn-tools",
+          type: "tool_call",
+          callId: "call-1",
+          toolName: "cli_tool",
+          status: "completed",
+          revision: 1,
+          sequence: 1,
+          terminal: true,
+          createdAt: "2026-09-14T15:22:00Z",
+          updatedAt: "2026-09-14T15:22:00Z",
+        }],
+      }],
+    } as SessionDetail;
+
+    expect(isActiveTurnSettledByDetail(active, detail)).toBe(false);
+  });
 });
 import * as canonicalActiveTurn from "./chatActiveTurnLayer";
