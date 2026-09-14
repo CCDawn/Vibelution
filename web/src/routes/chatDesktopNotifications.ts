@@ -93,6 +93,9 @@ const TERMINAL_PHASES = new Set([
   "stopped",
   "stopped_by_user",
   "needs_continue",
+  "paused_limit",
+  "aborted",
+  "superseded",
 ]);
 
 export function normalizeNotificationText(value: unknown): string {
@@ -197,7 +200,7 @@ function messageTurnId(message: ConversationMessage | undefined): string {
 }
 
 function detailTurnId(detail: SessionDetail, latest: ConversationMessage | undefined): string {
-  return messageTurnId(latest) || normalizeNotificationText(latest?.id) || normalizeNotificationText(detail.lastTurnError?.turnId);
+  return normalizeNotificationText(detail.lastTurnError?.turnId) || messageTurnId(latest);
 }
 
 export function parseConversationNotificationOpenPayload(raw: unknown): ConversationNotificationOpenPayload | null {
@@ -395,7 +398,7 @@ export function createDesktopConversationNotifier(
       // session detail carries terminalReason and the settled turn message;
       // waiting for it prevents needs_continue/failed turns from being shown
       // as successful completions.
-      if (pendingStreamTurnBySession.get(sessionId) !== turnId) {
+      if (!seenKeySet.has(`${sessionId}:${turnId}`) && pendingStreamTurnBySession.get(sessionId) !== turnId) {
         pendingStreamTurnBySession.set(sessionId, turnId);
         lastBusyBySession.set(sessionId, true);
       }
@@ -414,38 +417,27 @@ export function createDesktopConversationNotifier(
         detail.currentPhase,
         detail.status,
       );
-      observeSessionPhase(sessionId, busy, terminalPhase, () => {
-        const latest = latestAssistantTurnMessage(detail);
-        const turnId = detailTurnId(detail, latest);
-        if (!turnId) {
-          return;
-        }
-        emitSessionCompletion({
-          sessionId,
-          turnId,
-          terminalStatus: notificationStatusForTerminalPhase(terminalPhase),
-          completedAt: normalizeNotificationText(latest?.timestamp) || undefined,
-          sessionLabel: sessionLabelFromContext(sessionId, context, detail.title, detail.agentDisplayName),
-          suppressWhenFocused: shouldSuppressWhenFocused(sessionId, context),
-        });
-        pendingStreamTurnBySession.delete(sessionId);
-        pendingSummaryTerminalBySession.delete(sessionId);
-      });
-      if (terminalPhase && !busy && pendingSummaryTerminalBySession.has(sessionId)) {
-        const latest = latestAssistantTurnMessage(detail);
-        const turnId = detailTurnId(detail, latest);
-        if (turnId) {
-          emitSessionCompletion({
-            sessionId,
-            turnId,
-            terminalStatus: notificationStatusForTerminalPhase(terminalPhase),
-            completedAt: normalizeNotificationText(latest?.timestamp) || undefined,
-            sessionLabel: sessionLabelFromContext(sessionId, context, detail.title, detail.agentDisplayName),
-            suppressWhenFocused: shouldSuppressWhenFocused(sessionId, context),
-          });
-          pendingSummaryTerminalBySession.delete(sessionId);
-        }
+      const wasBusy = lastBusyBySession.get(sessionId) ?? false;
+      lastBusyBySession.set(sessionId, busy);
+      const pendingTurnId = pendingStreamTurnBySession.get(sessionId);
+      if (busy || !terminalPhase || !(wasBusy || pendingTurnId || pendingSummaryTerminalBySession.has(sessionId))) {
+        return;
       }
+      const latest = latestAssistantTurnMessage(detail);
+      const turnId = detailTurnId(detail, latest);
+      if (!turnId || (pendingTurnId && pendingTurnId !== turnId)) {
+        return;
+      }
+      emitSessionCompletion({
+        sessionId,
+        turnId,
+        terminalStatus: notificationStatusForTerminalPhase(terminalPhase),
+        completedAt: normalizeNotificationText(latest?.timestamp) || undefined,
+        sessionLabel: sessionLabelFromContext(sessionId, context, detail.title, detail.agentDisplayName),
+        suppressWhenFocused: shouldSuppressWhenFocused(sessionId, context),
+      });
+      pendingStreamTurnBySession.delete(sessionId);
+      pendingSummaryTerminalBySession.delete(sessionId);
     },
 
     handleSessionSummaries(sessions, context) {
@@ -492,6 +484,19 @@ export function createDesktopConversationNotifier(
         // would make updatedAt a fake turn identity and repeat on recency
         // refreshes. Ordinary completion is emitted from authoritative detail.
         observeSessionPhase(sessionId, busy, terminalPhase, () => {
+          if (companionAgentId) {
+            if (completionIdentity) {
+              emitSessionCompletion({
+                sessionId,
+                turnId: completionIdentity,
+                terminalStatus: notificationStatusForTerminalPhase(terminalPhase),
+                sessionLabel: sessionLabelFromContext(sessionId, context, session.title, session.agentDisplayName),
+                suppressWhenFocused,
+                companionAgentId,
+              });
+            }
+            return;
+          }
           pendingSummaryTerminalBySession.add(sessionId);
           detailSessionIds.push(sessionId);
         });

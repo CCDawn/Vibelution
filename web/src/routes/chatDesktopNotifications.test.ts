@@ -219,6 +219,7 @@ describe("desktop conversation notifier", () => {
     const maliciousTitle = "sk-live-secret from C:\\Users\\17533\\Desktop\\prompt.txt";
 
     notifier.handleAssistantDelta(assistantDelta(), { sessionTitle: maliciousTitle });
+    notifier.handleSessionDetail(detail({ title: maliciousTitle }));
 
     const notifyPayload = notify.mock.calls[0]?.[0];
     const telemetryPayload = telemetry.mock.calls[0]?.[0];
@@ -423,6 +424,34 @@ describe("desktop conversation notifier", () => {
       companionAgentId: "agent-nora",
       suppressWhenFocused: false,
     }));
+  });
+
+  it.each(["paused_limit", "aborted", "superseded"])("does not report %s as success", (terminalReason) => {
+    const notify = vi.fn();
+    const notifier = createDesktopConversationNotifier({ bridge: { notifyConversationCompleted: notify }, postTelemetry: vi.fn() });
+    notifier.handleAssistantDelta(assistantDelta());
+    notifier.handleSessionDetail(detail({ terminalReason }));
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: "对话已结束", terminalStatus: terminalReason }));
+  });
+
+  it("waits for the matching settled turn rather than using an older detail", () => {
+    const notify = vi.fn();
+    const notifier = createDesktopConversationNotifier({ bridge: { notifyConversationCompleted: notify }, postTelemetry: vi.fn() });
+    notifier.handleAssistantDelta(assistantDelta({ turnId: "turn-2" }));
+    notifier.handleSessionDetail(detail());
+    expect(notify).not.toHaveBeenCalled();
+    const settled = detail();
+    settled.messages[0].turnId = "turn-2";
+    notifier.handleSessionDetail(settled);
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ turnId: "turn-2" }));
+  });
+
+  it("uses the failed turn id even when an older assistant reply exists", () => {
+    const notify = vi.fn();
+    const notifier = createDesktopConversationNotifier({ bridge: { notifyConversationCompleted: notify }, postTelemetry: vi.fn() });
+    notifier.handleAssistantDelta(assistantDelta({ turnId: "turn-2" }));
+    notifier.handleSessionDetail(detail({ terminalReason: "failed_runtime", lastTurnError: { turnId: "turn-2" } as SessionDetail["lastTurnError"] }));
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ turnId: "turn-2", terminalStatus: "failed_runtime" }));
   });
 
   it("returns no bridge when the launcher API is unavailable", () => {
