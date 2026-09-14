@@ -285,7 +285,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.answerOnlyProcessPreview).not.toContain("[overflow-wrap:anywhere]");
   });
 
-  it("anchors the back-to-bottom control to the timeline area above the composer", () => {
+it("anchors the back-to-bottom control to the timeline area corner as a floating icon button", () => {
     expect(styles.timelineArea).toContain("relative");
     expect(styles.timelineArea).toContain("flex-1");
     expect(styles.timelineArea).toContain("min-h-0");
@@ -294,20 +294,25 @@ describe("ConversationView edit resend affordance", () => {
       conversationViewSource.indexOf("{toolApproval && !toolApprovalConsumedRef.current"),
     );
     expect(timelineAreaSource).toContain("styles.backToBottomButton");
+    expect(timelineAreaSource).toContain("<ArrowDown size={16} />");
+    // Icon-only control: the visible label moved to title/aria-label so the
+    // button stays a corner circle instead of a pill riding on the last line.
+    expect(timelineAreaSource).not.toContain('<span>{t("backToBottom")}</span>');
     expect(styles.backToBottomButton).toContain("absolute");
-    expect(styles.backToBottomButton).toContain("bottom-2");
+    expect(styles.backToBottomButton).toContain("bottom-3");
+    expect(styles.backToBottomButton).toContain("right-3");
     expect(styles.backToBottomButton).not.toContain("--vui-control-height-md");
-    expect(styles.backToBottomButton).toContain("left-1/2");
-    expect(styles.backToBottomButton).toContain("-translate-x-1/2");
+    expect(styles.backToBottomButton).not.toContain("left-1/2");
+    expect(styles.backToBottomButton).not.toContain("-translate-x-1/2");
     expect(styles.backToBottomButton).toContain("z-20");
     expect(styles.backToBottomButton).toContain("!inline-flex");
-    expect(styles.backToBottomButton).toContain("!w-fit");
-    expect(styles.backToBottomButton).toContain("max-w-[calc(100%_-_24px)]");
+    expect(styles.backToBottomButton).toContain("rounded-full");
+    expect(styles.backToBottomButton).toContain("size-8");
+    expect(styles.backToBottomButton).toContain("backdrop-blur-[10px]");
     expect(styles.backToBottomButton).toContain("[&_[data-slot=vui-button-content]]:!inline-flex");
-    expect(styles.backToBottomButton).toContain("[&_[data-slot=vui-button-label]]:!inline-flex");
+    expect(styles.backToBottomButton).not.toContain("[&_[data-slot=vui-button-label]]:!inline-flex");
     expect(styles.backToBottomButton).not.toContain("!w-full");
   });
-
   it("keeps conversation timeline previews wrapped and button slots flat", () => {
     expect(styles.timeline).toContain("overflow-y-auto");
     expect(styles.timeline).toContain("overflow-x-hidden");

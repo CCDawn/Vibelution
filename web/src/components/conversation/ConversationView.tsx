@@ -4702,20 +4702,18 @@ export function ConversationView({
         )}
       </div>
 
-      {!isAtBottom ? (
+{!isAtBottom ? (
         <VButton
           type="button"
-        contentLayout="plain"
+          contentLayout="plain"
           className={styles.backToBottomButton}
           onClick={scrollToBottom}
           title={t("backToBottom")}
           aria-label={t("backToBottom")}
         >
           <ArrowDown size={16} />
-          <span>{t("backToBottom")}</span>
         </VButton>
-      ) : null}
-      </div>
+      ) : null}      </div>
 
       {toolApproval && !toolApprovalConsumedRef.current ? (
         <div className={styles.toolApprovalFallback} data-codex-tool-approval-fallback="true">
