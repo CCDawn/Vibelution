@@ -29,6 +29,16 @@ MAX_SELECTED_PYTEST_WORKERS = 6
 # batch and extra workers mostly pay per-process import overhead.  This is
 # deliberately below the broad LOCAL_PARALLEL_COMMAND sweep suggestion.
 MAX_IMPORT_FALLBACK_TEST_FILES = 12
+# Serial-marked suites validated for per-test xdist distribution.  A module
+# pytestmark keeps these files out of generic loadfile batches, but one heavy
+# file cannot be balanced by file-level workers, so the fallback may distribute
+# its tests directly instead of running it as one serial batch.
+# Measured on this machine: tests/test_web_app.py ran 155.8s serial and 87.3s /
+# 87.7s under ``-n 2 --dist load``; ``-n 4`` flaked two queue-timing tests, so
+# the per-file worker cap stays at 2.
+LOAD_DIST_SERIAL_SAFE_TEST_FILES: dict[str, int] = {
+    "tests/test_web_app.py": 2,
+}
 LOCAL_PARALLEL_COMMAND = (
     '.\\.venv\\Scripts\\python.exe -m pytest tests/ -n 8 --dist loadfile -m "not serial" -q --maxfail=0'
 )
@@ -602,8 +612,19 @@ def _python_fallback_selection(
             layers.append("focused")
             if len(parallel_changed_tests) > 1:
                 layers.append("local-parallel")
-        if serial_changed_tests:
-            commands.append(_pytest_command(serial_changed_tests))
+        load_dist_changed_tests, plain_serial_changed_tests = (
+            _split_load_dist_serial_tests(serial_changed_tests)
+        )
+        if load_dist_changed_tests:
+            commands.append(
+                _parallelize_load_dist_serial_command(
+                    _pytest_command(load_dist_changed_tests),
+                    workers=_load_dist_workers(load_dist_changed_tests),
+                )
+            )
+            layers.extend(["focused", "local-serial"])
+        if plain_serial_changed_tests:
+            commands.append(_pytest_command(plain_serial_changed_tests))
             layers.extend(["focused", "local-serial"])
         covered.update(scheduled_changed_tests)
 
@@ -710,8 +731,19 @@ def _python_fallback_selection(
             layers.append("focused")
             if len(parallel_tests) > 1:
                 layers.append("local-parallel")
-        if serial_selected_tests:
-            commands.append(_pytest_command(serial_selected_tests))
+        load_dist_selected_tests, plain_serial_selected_tests = (
+            _split_load_dist_serial_tests(serial_selected_tests)
+        )
+        if load_dist_selected_tests:
+            commands.append(
+                _parallelize_load_dist_serial_command(
+                    _pytest_command(load_dist_selected_tests),
+                    workers=_load_dist_workers(load_dist_selected_tests),
+                )
+            )
+            layers.extend(["focused", "local-serial"])
+        if plain_serial_selected_tests:
+            commands.append(_pytest_command(plain_serial_selected_tests))
             layers.extend(["focused", "local-serial"])
 
     if coverage_gaps:
@@ -818,6 +850,41 @@ def _pytest_full_coverage_test_files(command: str) -> set[str]:
         if normalized.startswith("tests/") and normalized.lower().endswith(".py"):
             files.add(normalized)
     return files
+
+
+def _split_load_dist_serial_tests(test_files: list[str]) -> tuple[list[str], list[str]]:
+    """Split serial-marked files into load-dist safe and plain-serial batches."""
+
+    load_dist = [
+        path for path in test_files if path in LOAD_DIST_SERIAL_SAFE_TEST_FILES
+    ]
+    plain_serial = [
+        path for path in test_files if path not in LOAD_DIST_SERIAL_SAFE_TEST_FILES
+    ]
+    return load_dist, plain_serial
+
+
+def _load_dist_workers(test_files: list[str]) -> int:
+    return min(
+        MAX_SELECTED_PYTEST_WORKERS,
+        sum(LOAD_DIST_SERIAL_SAFE_TEST_FILES[path] for path in test_files),
+    )
+
+
+def _parallelize_load_dist_serial_command(command: str, *, workers: int) -> str:
+    """Distribute a measured serial-safe suite per test instead of per file.
+
+    Only full-coverage batches are eligible: filtered commands stay verbatim so
+    a small ``-k`` subset never pays xdist startup for one or two tests.
+    """
+
+    if " -m pytest " not in command:
+        return command
+    if re.search(r"(?:^|\s)(?:-n|--numprocesses)(?:\s|=)", command):
+        return command
+    if not _pytest_full_coverage_test_files(command):
+        return command
+    return f"{command} -n {workers} --dist load"
 
 
 def _rule_commands(rule: dict[str, Any]) -> list[str]:

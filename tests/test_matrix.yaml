@@ -283,10 +283,11 @@ rules:
       - "tests/test_chat_room_routes.py"
       - "tests/helpers/web_chat_state.py"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_session_routes.py tests/test_chat_room_service.py tests/test_chat_room_routes.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_session_routes.py tests/test_chat_room_service.py tests/test_chat_room_routes.py -n 3 --dist load -q"
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_app.py -k \"branch_edit_reports_versions or regenerate_with_base_message_id\" -q"
     notes:
       - "Use the route/service subset first; widen to tests/test_web_app.py only when shared app fixtures or legacy route coverage changed."
+      - "The route/service batch is serial-marked but measured safe for per-test distribution: 176.7s serial -> 83.0s at -n 3 --dist load; keep the explicit override rather than loadfile."
 
   - id: web-session-chat-ui
     description: "Chat route and conversation UI focused validation."

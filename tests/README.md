@@ -96,7 +96,7 @@ HTTP routes 现位于 `core/web/routes/team_workflows/` 包（不再是单文件
 
 `pytest.ini` 为临时定位默认配置了 `-x`。全量回归命令必须显式追加 `--maxfail=0`；selector 输出的 pytest 命令和 `test_runner.py` 启动的实际 pytest 子进程也遵守同一约束，避免健康审计在首个失败处提前截断。
 
-1. 先跑 selector 输出的 focused 命令；所有 pytest 命令都会显式带 `--maxfail=0`。纯 `local-parallel` 规则中包含至少两个测试文件的 pytest 命令还会自动带 `--dist loadfile -m "not serial"`，worker 数不超过文件数且最多为 6；单文件命令保持串行。小改动不要因为迭代次数多而重复跑无关重量测试。
+1. 先跑 selector 输出的 focused 命令；所有 pytest 命令都会显式带 `--maxfail=0`。纯 `local-parallel` 规则中包含至少两个测试文件的 pytest 命令还会自动带 `--dist loadfile -m "not serial"`，worker 数不超过文件数且最多为 6；单文件命令保持串行。例外是已实测可安全按测试分发的 serial 套件（`tests/test_web_app.py` 回退批次、web-session-chat 路由/服务批次），它们带 `-n 2/3 --dist load` 且不排除 serial 标记（见 §3.4）。小改动不要因为迭代次数多而重复跑无关重量测试。
 2. 如果输出 `local-parallel` 且需要扩大到 Python 全量回归，再跑本地 `pytest-xdist` 的完整 `not serial` 并发层。
 3. 如果输出 `local-serial`，必须在本机串行补跑对应 Launcher、端口、真实进程、Git、config 或共享 workspace 测试。
 4. 如果输出 `remote-distributed`，可以用服务器/Docker 分片加速 Python `not serial` 回归，但它不是完整 gate。
@@ -181,6 +181,7 @@ Vibelution 支持通过 `pytest-xdist` 做进程级并行。直接运行 pytest 
 并行策略：
 
 - 优先使用 `--dist loadfile`，按测试文件分发，降低同一文件内共享 fixture/全局状态的交叉风险。
+- 已实测可安全按测试分发的 serial 套件是显式例外：`tests/test_web_app.py` 从 155.8s 降到 87.3s/87.7s（`-n 2 --dist load`，三次通过；`-n 4` 会挂两个队列时序测试，故上限 2）；web-session-chat 三文件路由/服务批次从 176.7s 降到 78.5s/83.0s（`-n 3 --dist load`）。这类文件仍保留模块级 `serial` 标记（不进入通用 `not serial` 批次），只在矩阵规则或回退批次里用显式 `--dist load` 覆盖。
 - 在并行模式下排除 `serial` 标记；涉及真实进程、端口、共享全局状态、真实 workspace、外部 config 或 Launcher/runtime 生命周期的测试应标记为 `serial`。
 - 需要完整验证时优先使用 `--hybrid`：先并行运行 `not serial`，再串行运行 `serial`，避免把并行子集误判为全量通过。
 - 不把 `-n auto` 作为默认；本地开发建议先用 `--workers 2` 或 `--workers 4`，再根据耗时和稳定性调整。
@@ -192,7 +193,7 @@ Vibelution 支持通过 `pytest-xdist` 做进程级并行。直接运行 pytest 
 
 ### 3.5 使用影响面测试选择器
 
-`tests/test_matrix.yaml` 记录高频改动范围到验证命令的映射，`tests/select_tests.py` 根据变更文件输出建议测试命令。它不直接执行命令；对只含 `local-parallel`、不含 `local-serial` 的规则，以及多个未被矩阵认领且未标记 `serial` 的 changed test files，会输出最多 6-worker 的 `loadfile` 并行命令；显式 `serial` 文件拆到独立串行命令。单文件、非 pytest 命令和已有 xdist 参数保持不变。对已测得文件内明显不均衡的矩阵批次，保留明确的 `--dist load` 覆盖。
+`tests/test_matrix.yaml` 记录高频改动范围到验证命令的映射，`tests/select_tests.py` 根据变更文件输出建议测试命令。它不直接执行命令；对只含 `local-parallel`、不含 `local-serial` 的规则，以及多个未被矩阵认领且未标记 `serial` 的 changed test files，会输出最多 6-worker 的 `loadfile` 并行命令；显式 `serial` 文件拆到独立串行命令。单文件、非 pytest 命令和已有 xdist 参数保持不变。对已测得文件内明显不均衡的矩阵批次，保留明确的 `--dist load` 覆盖；对已实测可安全按测试分发的 serial 套件（`tests/test_web_app.py` 回退批次、web-session-chat 路由/服务批次），selector 会拆出独立命令并追加 `-n 2/3 --dist load`，不再排除 serial 标记，其余 serial 文件仍走串行命令。
 
 选择器的三层默认语义如下：`always` 只有 `git diff --check`；无专项规则命中时的 `default` 只有轻量 `test_runner.py` smoke，不做全树 `collect-only`；`frontend-workbench`（UI）和 `frontend-non-ui`（API/types/i18n）都是逐文件 fallback，只有存在未被 Chat/Teams 等专项规则覆盖的 Web 文件时才保留。未映射的 Python 产品文件会用标准库 AST 沿产品 import 的反向路径寻找最近的“测试直接 import”边界；每条路径到达该边界即停止，因此不会膨胀为完整反向闭包。动态 import 或没有静态链路时仍输出 coverage gap，不把 smoke 当覆盖。专项可见 UI 规则仍必须保留 focused Vitest、两个 VUI contract 和增量 `tsc -b`；非 UI 前端只跑 changed Vitest 与增量 typecheck。选择器输出的 Vitest 命令从仓库根执行并固定追加 `--root web`，TypeScript 则固定为 `node web/node_modules/typescript/bin/tsc -b web/tsconfig.json --pretty false`，因此不会误扫 `.worktrees` 或 `.runtime`。
 
