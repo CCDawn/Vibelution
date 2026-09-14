@@ -7244,6 +7244,43 @@ def test_source_collection_stage_task_enables_bounded_internal_auto_continue(tmp
     assert captured["max_internal_auto_continue_turns"] == session_service.SOURCE_COLLECTION_STAGE_TASK_AUTO_CONTINUE_MAX_TURNS
 
 
+def test_session_turn_passes_draining_guidance_provider_to_continuation_loop(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path)
+    _bind_seeded_submittable_agent(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_EXECUTOR",
+        SimpleNamespace(submit=lambda fn, context: fn(context)),
+    )
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **_kwargs: object())
+    guidance_text = "运行中不要改 Windows 启动路径"
+    monkeypatch.setattr(
+        session_service,
+        "_recent_session_steer_guidance_texts",
+        lambda _session_id, turn_id="", limit=3: [guidance_text],
+    )
+    captured: dict[str, object] = {}
+
+    def fake_run_session_continuation_loop(agent, **kwargs):
+        captured.update(kwargs)
+        return {
+            "status": "completed",
+            "summary": "已按引导收口。",
+            "raw_output": "已按引导收口。",
+            "outcome": "done",
+        }
+
+    monkeypatch.setattr(session_worker, "_run_session_continuation_loop", fake_run_session_continuation_loop)
+
+    session_service.submit_session_message("session-live", "开始长任务")
+
+    provider = captured["guidance_provider"]
+    assert callable(provider)
+    assert provider() == [guidance_text]
+    assert provider() == []
+
+
 def test_source_collection_stage_task_continue_inherits_contract_and_tool_gate(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
     _bind_seeded_submittable_agent(tmp_path)

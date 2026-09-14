@@ -8,6 +8,7 @@ Architecture:
     - RuntimeInput: 不可变数据结构
     - build_external_request_message: 外部请求消息
     - build_chat_user_message: 对话用户输入
+    - build_chat_guidance_message: 运行中引导输入
     - build_supervised_evolution_request_message: 监督进化请求
     - build_runtime_notice_message: 运行时通知消息
     - build_delegation_evidence_message: 委派证据消息
@@ -27,6 +28,7 @@ class RuntimeInputKind(str, Enum):
     """运行时输入类型枚举。"""
     EXTERNAL_REQUEST = "external_request"
     CHAT_USER_MESSAGE = "chat_user_message"
+    CHAT_GUIDANCE_MESSAGE = "chat_guidance_message"
     SUPERVISED_EVOLUTION_REQUEST = "supervised_evolution_request"
     RUNTIME_NOTICE = "runtime_notice"
     DELEGATION_EVIDENCE = "delegation_evidence"
@@ -43,6 +45,7 @@ class RuntimeInput:
 _TITLES = {
     RuntimeInputKind.EXTERNAL_REQUEST: "外部任务输入",
     RuntimeInputKind.CHAT_USER_MESSAGE: "对话用户输入",
+    RuntimeInputKind.CHAT_GUIDANCE_MESSAGE: "运行中引导",
     RuntimeInputKind.SUPERVISED_EVOLUTION_REQUEST: "监督进化请求",
     RuntimeInputKind.RUNTIME_NOTICE: "运行时提示",
     RuntimeInputKind.DELEGATION_EVIDENCE: "委派证据",
@@ -85,6 +88,16 @@ def build_chat_user_multimodal_message(content: str, image_urls: list[str]) -> D
         if url:
             blocks.append({"type": "image_url", "image_url": {"url": url}})
     return {"role": "user", "content": blocks or [{"type": "text", "text": text}]}
+
+
+def build_chat_guidance_message(content: str) -> Dict[str, Any]:
+    """构建运行中引导消息。
+
+    操作者在 agent 运行中提交的引导必须以 provider user role 到达模型；
+    注入点由宿主在 agent 迭代边界决定，这里只负责消息形状。
+    """
+    title = _TITLES[RuntimeInputKind.CHAT_GUIDANCE_MESSAGE]
+    return {"role": "user", "content": f"## {title}\n{content.strip()}"}
 
 
 def build_supervised_evolution_request_message(content: str) -> Dict[str, Any]:
