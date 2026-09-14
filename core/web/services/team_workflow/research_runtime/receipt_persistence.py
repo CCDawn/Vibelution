@@ -145,6 +145,10 @@ def enqueue_question_model_invocation_receipt(
         if scope.get("accountingKind") == "operator_planning":
             from ..operator_optimization.planning_authority import validate_planning_receipt_scope
             validate_planning_receipt_scope(uow.repository, scope)
+        if scope.get("accountingKind") == "operator_decision":
+            from ..operator_optimization.decision_authority import validate_decision_receipt_scope
+
+            validate_decision_receipt_scope(uow.repository, scope)
         if knowledge:
             from ..operator_optimization.knowledge_budget_runtime import validate_knowledge_receipt_scope
             validate_knowledge_receipt_scope(uow.repository, scope)

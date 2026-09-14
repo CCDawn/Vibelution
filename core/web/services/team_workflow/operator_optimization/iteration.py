@@ -7,7 +7,9 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 from core.research.operator_optimization.decision import (
+    OPTIMIZATION_DECISION_ARTIFACT_KIND,
     OperatorIterationDecision,
+    OperatorIterationDecisionArtifact,
     decision_id_for,
 )
 from core.research.workflow.contracts import (
@@ -19,8 +21,12 @@ from core.research.workflow.contracts._canonical import sha256_hex
 from core.research.workflow.ledger import OutboxRecord
 
 from ..research_runtime.formal_write_runtime import get_command_service
+from ..research_runtime.operator_terminal_policy import (
+    operator_round_terminal_policy,
+)
 from ..storage_durability import inter_process_lock
 from .budget import budget_summary
+from .decision_output import decision_task_input
 from .knowledge import read_ref
 from .model_budget import _campaign_committed_amounts, calculate_max_reserved_cost
 from .rounds import prepare_round
@@ -35,9 +41,14 @@ def enqueue_iteration(uow, *, run, now_ms):
         "SELECT action_id FROM outbox_actions WHERE idempotency_key=?", (key,)
     ).fetchone():
         return
-    attempt = uow.repository.latest_attempt(run.run_id, "optimization_feedback")
+    policy = operator_round_terminal_policy(run)
+    if policy is None:
+        raise CampaignConflict("Iteration requires an operator workflow run")
+    attempt = uow.repository.latest_attempt(run.run_id, policy.node_id)
     if attempt is None or not attempt.command_id:
-        raise CampaignConflict("Iteration requires the native feedback command")
+        raise CampaignConflict(
+            f"Iteration requires the native {policy.node_id} command"
+        )
     uow.repository.insert_outbox(
         OutboxRecord(
             action_id="act-" + sha256_hex(key)[:24],
@@ -313,3 +324,42 @@ def apply_iteration_decision(store, payload, decision, *, now_ms):
             run.run_id,
             {**state, "status": "started", "commandId": receipt.command_id},
         )
+
+
+def apply_persisted_iteration_decision(store, payload, *, now_ms):
+    """Apply the single decision artifact already verified by the graph node."""
+
+    run = store.get_run(payload.get("runId", ""))
+    if run is None:
+        raise CampaignConflict("Decision artifact run is unavailable")
+    from ..research_runtime.workflow_artifact_store import list_workflow_artifacts
+
+    rows = list_workflow_artifacts(
+        run.team_id,
+        kind=OPTIMIZATION_DECISION_ARTIFACT_KIND,
+        workflow_run_id=run.run_id,
+    )
+    if len(rows) != 1:
+        raise CampaignConflict("Completed round requires exactly one decision artifact")
+    artifact = OperatorIterationDecisionArtifact.model_validate(rows[0]["payload"])
+    inputs = decision_task_input(run.team_id, run.run_id)
+    if (
+        artifact.runId != run.run_id
+        or artifact.optimizationCampaignId != inputs["optimizationCampaignId"]
+        or artifact.roundId != inputs["roundId"]
+        or artifact.inputHash != inputs["inputHash"]
+        or artifact.feedbackRef.model_dump(mode="json") != inputs["feedbackRef"]
+        or artifact.evaluationRef.model_dump(mode="json") != inputs["evaluationRef"]
+        or artifact.decision.decisionId
+        != decision_id_for(run.run_id, inputs["feedbackRef"])
+    ):
+        raise CampaignConflict("Decision artifact differs from the current round evidence")
+    state = advance_iteration(store, payload, now_ms=now_ms)
+    if state.get("status") != "requested" and not state.get("decision"):
+        return state
+    return apply_iteration_decision(
+        store,
+        payload,
+        artifact.decision.model_dump(mode="json"),
+        now_ms=now_ms,
+    )

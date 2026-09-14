@@ -29,7 +29,14 @@ OPERATOR_NODES = (
     ("optimization_plan", "实验规划", ActorKind.AGENT, "experiment_planner", "optimization_plan"),
     ("operator_execution", "算子实验", ActorKind.SYSTEM, "", "operator_measurement"),
     ("operator_evaluation", "数值评价", ActorKind.SYSTEM, "", "operator_evaluation"),
-    ("optimization_feedback", "反馈与下一轮", ActorKind.SYSTEM, "", "optimization_feedback"),
+    ("optimization_feedback", "反馈整理", ActorKind.SYSTEM, "", "optimization_feedback"),
+    (
+        "optimization_decision",
+        "迭代决策",
+        ActorKind.AGENT,
+        "iteration_planner",
+        OPTIMIZATION_DECISION_ARTIFACT_KIND,
+    ),
 )
 
 OPERATOR_ARTIFACT_KINDS = frozenset({
@@ -61,7 +68,8 @@ def build_operator_definition(*, baseline: bool = False) -> WorkflowDefinition:
     ) for left, right in pairwise(nodes))
     definition = WorkflowDefinition(
         workflowId=OPERATOR_BASELINE_WORKFLOW_ID if baseline else OPERATOR_WORKFLOW_ID,
-        schemaVersion="1.0.0", label="算子基线" if baseline else "算子优化实验",
+        schemaVersion="1.0.0" if baseline else "1.1.0",
+        label="算子基线" if baseline else "算子优化实验",
         stages=(WorkflowStageSpec(stage, 1, "基线准备" if baseline else "优化实验", tuple(n.nodeId for n in nodes)),),
         nodes=nodes, edges=edges,
     )

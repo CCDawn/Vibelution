@@ -62,7 +62,12 @@ def native(activity, handoff, proposal, monkeypatch):
     run_id, output = proposal
     store = handoff[2]
     monkeypatch.setattr(formal_write_runtime, "_STORE", store)
-    agent = agent_directory_service.create_agent_instance(display_name="Native planner")
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Native planner",
+        llm_bindings={
+            "dialogue": {"modelId": "houmo_qwen35_9b_agent"}
+        },
+    )
     agent_id = agent["agentId"]
     budget = OperatorModelCallBudget(
         tokenLimit=20000,

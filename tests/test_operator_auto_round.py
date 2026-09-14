@@ -52,6 +52,7 @@ def completed(activity, prepared, baseline_ready, tmp_path, monkeypatch):
     feedback.publish_feedback(
         fixtures.node(prepared, "optimization_feedback"), prepared[1]
     )
+    decision_node = fixtures.node(prepared, "optimization_decision")
     base = baseline_ready[1]
     ledger = prepared[3]
 
@@ -124,8 +125,8 @@ def completed(activity, prepared, baseline_ready, tmp_path, monkeypatch):
             run_id=run_id,
             now_ms=1000,
             completion_kind="operator_round_completed",
-            terminal_reason="optimization_feedback_verified",
-            node_id="optimization_feedback",
+            terminal_reason="optimization_decision_verified",
+            node_id=decision_node.node_id,
         )
 
     store.submit(close, force_flush=True).result()
@@ -140,6 +141,14 @@ def completed(activity, prepared, baseline_ready, tmp_path, monkeypatch):
 def test_terminal_transaction_enqueues_one_research_decision_without_starting_round(
     activity, completed
 ):
+    from core.research.operator_optimization.decision import (
+        OperatorIterationDecisionProposal,
+    )
+    from core.web.services.team_workflow.operator_optimization.decision_output import (
+        decision_task_input,
+        materialize_iteration_decision,
+    )
+
     store, run_id, payload, close = completed
     assert store.submit(close, force_flush=True).result() is False
     rows = store.read(
@@ -148,11 +157,23 @@ def test_terminal_transaction_enqueues_one_research_decision_without_starting_ro
         ).fetchall()
     )
     assert rows == [("event_publish",)]
+    inputs = decision_task_input(activity[0], run_id)
+    materialize_iteration_decision(
+        activity[0],
+        run_id,
+        OperatorIterationDecisionProposal(
+            inputHash=inputs["inputHash"],
+            kind="stop",
+            reason="the bounded test has enough evidence to stop",
+        ),
+        decided_by="fixture-decision-agent",
+    )
     worker = EventPublishWorker(store=store, now_provider=lambda: 2000)
     assert worker.run_once() == 1
     state = json.loads(store.get_run(run_id).input_snapshot_json)["operatorDecision"]
-    assert state["status"] == "requested"
+    assert state["status"] == "stopped"
     assert state["decisionId"].startswith("decision-")
+    assert state["decision"]["decidedBy"] == "fixture-decision-agent"
     assert len(read_campaign(*activity).rounds) == 1
     assert iteration.advance_iteration(store, payload, now_ms=3000) == state
     assert worker.run_once() == 0
@@ -341,9 +362,18 @@ def test_recovers_after_creation_or_start_before_progress_write(
     )
 
 
-def test_feedback_adapter_closes_run_and_never_enqueues_challenge_delivery(tmp_path):
-    from core.research.workflow.operator_optimization_definition import (
-        build_operator_definition,
+@pytest.mark.parametrize(
+    ("workflow_version_id", "expected_status", "expects_event"),
+    [
+        ("wv-aa7cb4f2d3cc", "succeeded", True),
+        ("wv-1c26116e7323", "running", False),
+    ],
+)
+def test_feedback_adapter_closes_only_when_pinned_definition_ends_at_feedback(
+    tmp_path, monkeypatch, workflow_version_id, expected_status, expects_event
+):
+    from core.research.workflow.definition_registry import (
+        resolve_definition_by_version_id,
     )
     from core.web.services.team_workflow.research_runtime.action_registry import (
         ActionRegistry,
@@ -362,7 +392,8 @@ def test_feedback_adapter_closes_run_and_never_enqueues_challenge_delivery(tmp_p
     harness = CommandHarness(tmp_path / "terminal.sqlite")
     try:
         harness.seed_run(
-            workflow_definition=build_operator_definition(), status="running"
+            workflow_definition=resolve_definition_by_version_id(workflow_version_id),
+            status="running",
         )
         action = replace(
             _action(),
@@ -384,15 +415,42 @@ def test_feedback_adapter_closes_run_and_never_enqueues_challenge_delivery(tmp_p
         )
         worker.run_once()
         run = harness.store.get_run("run-test")
-        assert (
-            run.status == "succeeded"
-            and run.completion_kind == "operator_round_completed"
+        assert run.status == expected_status
+        assert run.completion_kind == (
+            "operator_round_completed" if expects_event else None
+        )
+        assert run.terminal_reason == (
+            "optimization_feedback_verified" if expects_event else None
         )
         rows = harness.store.read(
             lambda r: r.execute("SELECT action_kind FROM outbox_actions").fetchall()
         )
-        assert ("event_publish",) in rows
+        assert (("event_publish",) in rows) is expects_event
         assert ("delivery_orchestration",) not in rows
+        if expects_event:
+            from core.web.services.team_workflow.operator_optimization import (
+                iteration as iteration_service,
+            )
+
+            delivered = []
+            monkeypatch.setattr(
+                iteration_service,
+                "advance_iteration",
+                lambda store, payload, *, now_ms: delivered.append(payload)
+                or {"status": "requested"},
+            )
+            publisher = EventPublishWorker(
+                store=harness.store,
+                now_provider=lambda: FIXED_NOW_MS + 2000,
+            )
+            assert publisher.run_once() == 1
+            assert delivered == [
+                {
+                    "eventType": "operator_round_completed",
+                    "runId": "run-test",
+                    "teamId": "research-team",
+                }
+            ]
     finally:
         harness.close()
 
@@ -453,17 +511,33 @@ def test_reserved_model_usage_prevents_next_round(activity, completed):
     assert len(read_campaign(*activity).rounds) == 1
 
 
-def test_only_feedback_is_operator_round_terminal():
+def test_operator_round_terminal_follows_pinned_workflow_version():
     from core.web.services.team_workflow.research_runtime.graph_dispatch_worker import (
         _run_terminal_close_applies,
         _terminal_facts_for_close,
     )
 
-    run = SimpleNamespace(workflow_id="operator-optimization")
-    assert _run_terminal_close_applies(run, "optimization_feedback")
-    assert not _run_terminal_close_applies(run, "operator_execution")
-    assert not _run_terminal_close_applies(run, "operator_evaluation")
-    assert _terminal_facts_for_close(run)[0] == "operator_round_completed"
+    legacy_run = SimpleNamespace(
+        workflow_id="operator-optimization",
+        workflow_version_id="wv-aa7cb4f2d3cc",
+    )
+    current_run = SimpleNamespace(
+        workflow_id="operator-optimization",
+        workflow_version_id="wv-1c26116e7323",
+    )
+
+    assert _run_terminal_close_applies(legacy_run, "optimization_feedback")
+    assert not _run_terminal_close_applies(legacy_run, "optimization_decision")
+    assert not _run_terminal_close_applies(current_run, "optimization_feedback")
+    assert _run_terminal_close_applies(current_run, "optimization_decision")
+    assert _terminal_facts_for_close(legacy_run) == (
+        "operator_round_completed",
+        "optimization_feedback_verified",
+    )
+    assert _terminal_facts_for_close(current_run) == (
+        "operator_round_completed",
+        "optimization_decision_verified",
+    )
 
 
 def test_budget_must_cover_decision_discussion_and_planning(activity, completed):

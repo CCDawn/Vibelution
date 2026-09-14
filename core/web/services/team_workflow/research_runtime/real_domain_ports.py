@@ -378,6 +378,16 @@ class RealDomainPorts:
     def reserve_budget(
         self, *, action: PendingAction, estimate_tokens: int
     ) -> dict[str, Any]:
+        if action.node_id == "optimization_decision":
+            from ..operator_optimization.decision_authority import (
+                prepare_decision_task,
+                reserve_decision_budget,
+            )
+
+            task = prepare_decision_task(
+                self._store, action, self.resolve_binding(action).agent_id
+            )
+            return reserve_decision_budget(self._store, task)
         if action.node_id == "optimization_plan":
             from ..operator_optimization.planning_authority import prepare_planning_task, reserve_planning_budget
 
@@ -872,6 +882,15 @@ class RealDomainPorts:
             handle = create_planning_task(self._store, action, binding.agent_id)
             publish_agent_task_started_anchor(self._store, action=action, binding=binding, handle=handle)
             return handle
+        if adapter_spec.family == "operator_decision":
+            from ..operator_optimization.decision_task import create_decision_task
+
+            binding = self.resolve_binding(action)
+            handle = create_decision_task(self._store, action, binding.agent_id)
+            publish_agent_task_started_anchor(
+                self._store, action=action, binding=binding, handle=handle
+            )
+            return handle
         if adapter_spec.family == "operator_discussion":
             from ..operator_optimization.discussion_task import create_discussion_task
 
@@ -982,6 +1001,10 @@ class RealDomainPorts:
             from ..operator_optimization.planning_task import execute_planning_task
 
             return execute_planning_task(self._store, action, handle)
+        if action.node_id == "optimization_decision":
+            from ..operator_optimization.decision_task import execute_decision_task
+
+            return execute_decision_task(self._store, action, handle)
         if action.node_id == "optimization_discussion":
             from ..operator_optimization.discussion_task import execute_discussion_task
 

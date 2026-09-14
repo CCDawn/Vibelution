@@ -17,6 +17,16 @@ def test_optimization_definition_and_bindings_do_not_reuse_challenge_nodes():
     assert {s.nodeId for s in snapshots} <= ids
     plan_node = next(n for n in definition.nodes if n.nodeId == "optimization_plan")
     assert plan_node.producesArtifactKinds == ("optimization_plan",)
+    assert [n.nodeId for n in definition.nodes][-2:] == [
+        "optimization_feedback",
+        "optimization_decision",
+    ]
+    decision_node = definition.nodes[-1]
+    assert decision_node.primaryRoleKey == "iteration_planner"
+    assert decision_node.producesArtifactKinds == (
+        "optimization_iteration_decision",
+    )
+    assert definition.schemaVersion == "1.1.0"
 
 
 def test_baseline_definition_has_no_hypothesis_prerequisite():

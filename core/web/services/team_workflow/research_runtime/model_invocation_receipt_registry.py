@@ -160,8 +160,16 @@ def _outcome_kinds(receipt: ModelInvocationReceipt) -> tuple[str, ...]:
             if str(item or "").strip()
         )
     )
-    allowed = (frozenset({"optimization_plan"}) if receipt.scope.get("accountingKind") == "operator_planning" else frozenset({"optimization_hypothesis"})
-        if receipt.scope.get("workflowId") == "operator-optimization" else ALLOWED_OUTCOME_KINDS)
+    accounting_kind = receipt.scope.get("accountingKind")
+    allowed = (
+        frozenset({"optimization_plan"})
+        if accounting_kind == "operator_planning"
+        else frozenset({"optimization_iteration_decision"})
+        if accounting_kind == "operator_decision"
+        else frozenset({"optimization_hypothesis"})
+        if receipt.scope.get("workflowId") == "operator-optimization"
+        else ALLOWED_OUTCOME_KINDS
+    )
     if not values or any(item not in allowed for item in values):
         raise ValueError("model invocation receipt outcomeKinds are invalid")
     return values
@@ -187,10 +195,19 @@ def _validate_receipt(
     operator = receipt.scope.get("workflowId") == "operator-optimization" or knowledge
     if operator:
         from core.research.operator_optimization.discussion_contracts import OperatorInvocationBinding
+        from core.research.operator_optimization.decision_invocation import OperatorDecisionInvocationBinding
         from core.research.operator_optimization.knowledge_invocation import OperatorKnowledgeInvocationBinding
         from core.research.operator_optimization.planning_invocation import OperatorPlanningInvocationBinding
-        contract = (OperatorKnowledgeInvocationBinding if knowledge else
-            OperatorPlanningInvocationBinding if receipt.scope.get("accountingKind") == "operator_planning" else OperatorInvocationBinding)
+        accounting_kind = receipt.scope.get("accountingKind")
+        contract = (
+            OperatorKnowledgeInvocationBinding
+            if knowledge
+            else OperatorPlanningInvocationBinding
+            if accounting_kind == "operator_planning"
+            else OperatorDecisionInvocationBinding
+            if accounting_kind == "operator_decision"
+            else OperatorInvocationBinding
+        )
         fields = contract.model_fields
         binding = {key: receipt.scope[key] for key in fields if key in receipt.scope}
         binding["formalNodeAttempt"] = int(binding.get("formalNodeAttempt", 0))

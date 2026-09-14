@@ -251,6 +251,13 @@ def _research_task_structured_output_contract(
 
         task_for_turn(get_write_store(), metadata, session_id, turn_id)
         return planning_output_contract()
+    if metadata.get("kind") == "operator_decision_task":
+        from core.web.services.team_workflow.operator_optimization.decision_authority import task_for_turn
+        from core.web.services.team_workflow.operator_optimization.decision_output import decision_output_contract
+        from core.web.services.team_workflow.research_runtime.formal_write_runtime import get_write_store
+
+        task_for_turn(get_write_store(), metadata, session_id, turn_id)
+        return decision_output_contract()
     if str(metadata.get("kind") or "").strip() != "research_project_agent_task":
         return None
     requested_task_kind = str(metadata.get("taskKind") or "").strip()
@@ -322,6 +329,14 @@ def _model_invocation_receipt_context(
 
         store = get_write_store()
         return planning_receipt_context(store, task_for_turn(store, metadata, session_id, turn_id))
+    if metadata.get("kind") == "operator_decision_task":
+        from core.web.services.team_workflow.operator_optimization.decision_authority import decision_receipt_context, task_for_turn
+        from core.web.services.team_workflow.research_runtime.formal_write_runtime import get_write_store
+
+        store = get_write_store()
+        return decision_receipt_context(
+            store, task_for_turn(store, metadata, session_id, turn_id)
+        )
     # Metadata is only a locator. The binding itself must be read back from
     # the server-owned project task record; a client-supplied metadata object
     # must never become receipt authority.
@@ -1196,8 +1211,15 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
         # The operator planner receives its complete frozen evidence and emits
         # decisions only. Candidate materialization/execution belongs to the
         # operator services, not arbitrary tools inside the planning turn.
-        operator_planning_turn = (context.get("message_metadata") or {}).get("kind") == "operator_planning_task"
-        effective_disable_tools = lightweight_chat_payload or supervised_judge_execution or operator_planning_turn
+        operator_control_turn = (context.get("message_metadata") or {}).get("kind") in {
+            "operator_planning_task",
+            "operator_decision_task",
+        }
+        effective_disable_tools = (
+            lightweight_chat_payload
+            or supervised_judge_execution
+            or operator_control_turn
+        )
         prepare_timings["lightweightChatDecisionMs"] = s._elapsed_ms(stage_started_at)
         prepare_timings["lightweightChatPayload"] = lightweight_chat_payload
         prepare_timings["lightweightChatPayloadReason"] = lightweight_chat_payload_reason

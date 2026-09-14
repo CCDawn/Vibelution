@@ -3623,9 +3623,25 @@ class LLMClient:
             binding = operator_binding.model_dump(mode="json")
             knowledge = binding.get("accountingKind") == "operator_knowledge"
             planning = binding.get("accountingKind") == "operator_planning"
+            decision = binding.get("accountingKind") == "operator_decision"
             binding.update({"questionId": "OPERATOR-SOFTMAX", "questionRunId": binding["workflowRunId"],
-                "outcomeKinds": ["source_evidence" if knowledge else "optimization_plan" if planning else "optimization_hypothesis"],
-                "mappingPolicyId": "operator-knowledge-v1" if knowledge else "operator-planning-v1" if planning else "operator-discussion-v1"})
+                "outcomeKinds": [
+                    "source_evidence"
+                    if knowledge
+                    else "optimization_plan"
+                    if planning
+                    else "optimization_iteration_decision"
+                    if decision
+                    else "optimization_hypothesis"
+                ],
+                "mappingPolicyId":
+                    "operator-knowledge-v1"
+                    if knowledge
+                    else "operator-planning-v1"
+                    if planning
+                    else "operator-decision-v1"
+                    if decision
+                    else "operator-discussion-v1"})
         elif isinstance(binding_payload, Mapping):
             try:
                 from core.research.workflow.contracts.question_stage_binding import (
@@ -4103,10 +4119,18 @@ class LLMClient:
                         if binding.get("accountingKind") == "operator_knowledge" else {}),
                     **({key: str(binding[key]) for key in ("accountingKind", "teamId", "researchProjectId",
                         "optimizationCampaignId", "roundId", "inputHash")}
-                        if binding.get("accountingKind") == "operator_planning" else {}),
+                        if binding.get("accountingKind") in {
+                            "operator_planning",
+                            "operator_decision",
+                        } else {}),
                     **({key: str(binding[key]) for key in ("teamId", "researchProjectId",
                         "optimizationCampaignId", "roundId", "participantId")}
-                        if binding.get("workflowId") == "operator-optimization" and binding.get("accountingKind") != "operator_planning" else {}),
+                        if binding.get("workflowId") == "operator-optimization"
+                        and binding.get("accountingKind") not in {
+                            "operator_planning",
+                            "operator_decision",
+                        }
+                        else {}),
                     "questionId": binding["questionId"],
                     "runId": context["receiptRunId"],
                     "taskId": binding["taskId"],
