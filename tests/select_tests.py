@@ -33,11 +33,11 @@ MAX_IMPORT_FALLBACK_TEST_FILES = 12
 # pytestmark keeps these files out of generic loadfile batches, but one heavy
 # file cannot be balanced by file-level workers, so the fallback may distribute
 # its tests directly instead of running it as one serial batch.
-# Measured on this machine: tests/test_web_app.py ran 155.8s serial and 87.3s /
-# 87.7s under ``-n 2 --dist load``; ``-n 4`` flaked two queue-timing tests, so
-# the per-file worker cap stays at 2.
+# Measured on this machine: tests/test_web_app.py ran 155.8s serial, 87.3s /
+# 87.7s at ``-n 2``, and 55.8s / 55.9s / 59.5s at ``-n 4`` after the queue
+# tests widened their event waits to 10s.
 LOAD_DIST_SERIAL_SAFE_TEST_FILES: dict[str, int] = {
-    "tests/test_web_app.py": 2,
+    "tests/test_web_app.py": 4,
 }
 LOCAL_PARALLEL_COMMAND = (
     '.\\.venv\\Scripts\\python.exe -m pytest tests/ -n 8 --dist loadfile -m "not serial" -q --maxfail=0'

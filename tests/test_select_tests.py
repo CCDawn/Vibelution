@@ -1414,7 +1414,7 @@ def test_selector_load_dist_parallelizes_measured_serial_safe_changed_test(tmp_p
 
     assert result["commands"] == [
         ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_app.py "
-        "-q -n 2 --dist load --maxfail=0"
+        "-q -n 4 --dist load --maxfail=0"
     ]
     assert '-m "not serial"' not in result["commands"][0]
     assert result["validationLayers"] == ["focused", "local-serial"]
@@ -1440,7 +1440,7 @@ def test_selector_load_dist_parallelizes_measured_serial_safe_import_frontier(
 
     assert result["commands"] == [
         ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_app.py "
-        "-q -n 2 --dist load --maxfail=0"
+        "-q -n 4 --dist load --maxfail=0"
     ]
     assert result["validationLayers"] == ["focused", "local-serial"]
 
@@ -1465,7 +1465,7 @@ def test_selector_keeps_plain_serial_files_beside_load_dist_batch(tmp_path: Path
 
     assert result["commands"] == [
         ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_app.py "
-        "-q -n 2 --dist load --maxfail=0",
+        "-q -n 4 --dist load --maxfail=0",
         ".\\.venv\\Scripts\\python.exe -m pytest tests/test_serial.py -q --maxfail=0",
     ]
     assert result["validationLayers"] == ["focused", "local-serial"]
@@ -1483,7 +1483,7 @@ def test_selector_real_matrix_load_dist_override_for_serial_route_batch():
         if "tests/test_chat_room_service.py" in command
     )
     assert route_batch.endswith(
-        "tests/test_chat_room_routes.py -n 3 --dist load -q --maxfail=0"
+        "tests/test_chat_room_routes.py -n 4 --dist load -q --maxfail=0"
     )
     assert '-m "not serial"' not in route_batch
     filtered_subset = next(

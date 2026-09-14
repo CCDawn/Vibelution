@@ -5825,7 +5825,7 @@ def test_different_agent_sessions_run_chat_turns_concurrently(tmp_path, monkeypa
                 started_sessions.add(session_id)
                 if started_sessions == {alpha["id"], beta["id"]}:
                     both_started.set()
-            assert release.wait(2.0)
+            assert release.wait(10.0)
             return {
                 "status": "completed",
                 "summary": f"{session_id} done",
@@ -5843,7 +5843,7 @@ def test_different_agent_sessions_run_chat_turns_concurrently(tmp_path, monkeypa
 
         assert first["currentPhase"] == "running"
         assert second["currentPhase"] == "running"
-        assert both_started.wait(1.0), "expected different agents to overlap"
+        assert both_started.wait(10.0), "expected different agents to overlap"
     finally:
         release.set()
         executor.shutdown(wait=True, cancel_futures=True)
@@ -5891,7 +5891,7 @@ def test_same_agent_different_sessions_run_chat_turns_concurrently(tmp_path, mon
                 started_sessions.add(session_id)
                 if started_sessions == {alpha["id"], beta["id"]}:
                     both_started.set()
-            assert release.wait(2.0)
+            assert release.wait(10.0)
             return {
                 "status": "completed",
                 "summary": f"{session_id} done",
@@ -5909,7 +5909,7 @@ def test_same_agent_different_sessions_run_chat_turns_concurrently(tmp_path, mon
         second = session_service.submit_session_message(beta["id"], "beta 并行任务")
         assert second["currentPhase"] == "running"
 
-        assert both_started.wait(1.0), "expected same-agent different sessions to overlap"
+        assert both_started.wait(10.0), "expected same-agent different sessions to overlap"
     finally:
         release.set()
         executor.shutdown(wait=True, cancel_futures=True)
@@ -5959,7 +5959,7 @@ def test_same_agent_sessions_queue_when_agent_concurrency_limit_is_reached(tmp_p
             prompts.append(prompt)
             if "alpha" in prompt:
                 first_started.set()
-                assert release_first.wait(2.0)
+                assert release_first.wait(10.0)
                 return {
                     "status": "completed",
                     "summary": "alpha done",
@@ -5969,7 +5969,7 @@ def test_same_agent_sessions_queue_when_agent_concurrency_limit_is_reached(tmp_p
                     "tool_trace": [],
                 }
             second_started.set()
-            assert release_second.wait(2.0)
+            assert release_second.wait(10.0)
             return {
                 "status": "completed",
                 "summary": "beta done",
@@ -5984,7 +5984,7 @@ def test_same_agent_sessions_queue_when_agent_concurrency_limit_is_reached(tmp_p
     try:
         first = session_service.submit_session_message(alpha["id"], "alpha 串行任务")
         assert first["currentPhase"] == "running"
-        assert first_started.wait(1.0)
+        assert first_started.wait(10.0)
 
         second = session_service.submit_session_message(beta["id"], "beta 串行任务")
         assert second["currentPhase"] == "queued"
@@ -5996,7 +5996,7 @@ def test_same_agent_sessions_queue_when_agent_concurrency_limit_is_reached(tmp_p
         assert not second_started.is_set()
 
         release_first.set()
-        assert second_started.wait(3.0), "expected queued turn to start after first turn"
+        assert second_started.wait(10.0), "expected queued turn to start after first turn"
     finally:
         release_first.set()
         release_second.set()
@@ -6042,7 +6042,7 @@ def test_stopping_queued_same_agent_turn_prevents_later_start(tmp_path, monkeypa
             prompts.append(prompt)
             if "alpha" in prompt:
                 first_started.set()
-                assert release_first.wait(2.0)
+                assert release_first.wait(10.0)
                 return {
                     "status": "completed",
                     "summary": "alpha done",
@@ -6052,7 +6052,7 @@ def test_stopping_queued_same_agent_turn_prevents_later_start(tmp_path, monkeypa
                     "tool_trace": [],
                 }
             second_started.set()
-            assert release_second.wait(2.0)
+            assert release_second.wait(10.0)
             return {
                 "status": "completed",
                 "summary": "beta done",
@@ -6067,7 +6067,7 @@ def test_stopping_queued_same_agent_turn_prevents_later_start(tmp_path, monkeypa
     try:
         first = session_service.submit_session_message(alpha["id"], "alpha 串行任务")
         assert first["currentPhase"] == "running"
-        assert first_started.wait(1.0)
+        assert first_started.wait(10.0)
 
         second = session_service.submit_session_message(beta["id"], "beta 串行任务")
         assert second["currentPhase"] == "queued"
@@ -6131,7 +6131,7 @@ def test_shutdown_stops_queued_same_agent_turn_before_it_starts(tmp_path, monkey
             prompts.append(prompt)
             if "alpha" in prompt:
                 first_started.set()
-                assert release_first.wait(2.0)
+                assert release_first.wait(10.0)
                 return {
                     "status": "completed",
                     "summary": "alpha done",
@@ -6141,7 +6141,7 @@ def test_shutdown_stops_queued_same_agent_turn_before_it_starts(tmp_path, monkey
                     "tool_trace": [],
                 }
             second_started.set()
-            assert release_second.wait(2.0)
+            assert release_second.wait(10.0)
             return {
                 "status": "completed",
                 "summary": "beta done",
@@ -6155,7 +6155,7 @@ def test_shutdown_stops_queued_same_agent_turn_before_it_starts(tmp_path, monkey
 
     try:
         session_service.submit_session_message(alpha["id"], "alpha 关闭前任务")
-        assert first_started.wait(1.0)
+        assert first_started.wait(10.0)
         queued = session_service.submit_session_message(beta["id"], "beta 关闭前任务")
         assert queued["currentPhase"] == "queued"
         queued_event = wait_for_lifecycle_phase("scheduler_queued", fields={"agentId": alpha["agentId"]})
@@ -6203,7 +6203,7 @@ def test_runtime_summary_exposes_parallel_chat_turn_active_items(tmp_path, monke
                 started_sessions.add(session_id)
                 if started_sessions == {alpha["id"], beta["id"]}:
                     both_started.set()
-            assert release.wait(2.0)
+            assert release.wait(10.0)
             return {
                 "status": "completed",
                 "summary": f"{session_id} done",
@@ -6272,7 +6272,7 @@ def test_runtime_summary_exposes_queued_chat_turn_active_item(tmp_path, monkeypa
             prompt = str(initial_prompt or "")
             if "alpha" in prompt:
                 first_started.set()
-                assert release_first.wait(2.0)
+                assert release_first.wait(10.0)
                 return {
                     "status": "completed",
                     "summary": "alpha done",
@@ -6282,7 +6282,7 @@ def test_runtime_summary_exposes_queued_chat_turn_active_item(tmp_path, monkeypa
                     "tool_trace": [],
                 }
             second_started.set()
-            assert release_second.wait(2.0)
+            assert release_second.wait(10.0)
             return {
                 "status": "completed",
                 "summary": "beta done",
@@ -6296,7 +6296,7 @@ def test_runtime_summary_exposes_queued_chat_turn_active_item(tmp_path, monkeypa
 
     try:
         session_service.submit_session_message(alpha["id"], "alpha 串行任务")
-        assert first_started.wait(1.0)
+        assert first_started.wait(10.0)
         session_service.submit_session_message(beta["id"], "beta 串行任务")
         queued_event = wait_for_lifecycle_phase("scheduler_queued", fields={"agentId": alpha["agentId"]})
         assert queued_event is not None
@@ -8504,7 +8504,7 @@ def test_stop_turn_stays_stopping_until_registered_tool_is_physically_quiescent(
             json={"content": "执行一个需要停止的阻塞工具"},
         )
         assert response.status_code == 202
-        assert started.wait(1.0)
+        assert started.wait(10.0)
         active_control = session_service._get_session_turn_control("session-live")
         assert active_control is not None
 
@@ -8521,7 +8521,7 @@ def test_stop_turn_stays_stopping_until_registered_tool_is_physically_quiescent(
         assert worker_finished.wait(0.05) is False
 
         pending_tool.set_result("physically complete")
-        assert worker_finished.wait(2.0)
+        assert worker_finished.wait(10.0)
 
         detail_response = client.get("/api/sessions/session-live")
         assert detail_response.status_code == 200
