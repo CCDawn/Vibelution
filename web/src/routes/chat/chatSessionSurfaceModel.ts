@@ -25,19 +25,6 @@ export function chatControlSignalLabel(
   return summary || String(signal.kind || "").trim();
 }
 
-export function chatControlSignalMessage(
-  signal: ChatNextStateSignalSummary,
-  lang: "zh" | "en",
-  prefix = "",
-): string {
-  const label = chatControlSignalLabel(signal, lang);
-  const summary = String(signal.summary || "").trim();
-  const prefixIncludesSummary = Boolean(prefix) && (prefix === summary || prefix.startsWith(`${summary} `));
-  return (prefixIncludesSummary ? [prefix] : [prefix, label, summary])
-    .filter((value, index, values) => Boolean(value) && values.indexOf(value) === index)
-    .join(" · ");
-}
-
 export type ActiveSkillContract = {
   status?: string;
   scope?: string;

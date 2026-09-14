@@ -237,7 +237,6 @@ import {
 } from "./chatRuntimeWorkRuns";
 import {
   chatControlSignalLabel,
-  chatControlSignalMessage,
   buildChatSessionStateViewModel,
 } from "./chatSessionSurfaceModel";
 import {
@@ -2175,26 +2174,6 @@ export function ChatCodingRouteWorkbench() {
       latestControlSignal.summary,
     ].filter(Boolean).join(" · ")
     : "";
-  // The control signal used to render only in the retired status rail, so without
-  // this it has no visible host at all. `warning` is the highest severity that
-  // still renders as a compact row rather than an alert block.
-  const sessionNotices = useMemo<SessionRuntimeNotice[]>(() => {
-    if (!latestControlSignal || !latestControlSignalLine) {
-      return activeRuntimeNotices;
-    }
-    return [
-      ...activeRuntimeNotices,
-      {
-        id: `control-signal-${latestControlSignal.turnId || latestControlSignal.createdAt || latestControlSignal.kind || "latest"}`,
-        kind: "next_state_signal",
-        level: "warning",
-        message: chatControlSignalMessage(latestControlSignal, lang, latestControlSignalLine),
-        timestamp: String(latestControlSignal.createdAt ?? ""),
-        source: String(latestControlSignal.source || latestControlSignal.kind || ""),
-        turnId: latestControlSignal.turnId,
-      },
-    ];
-  }, [activeRuntimeNotices, latestControlSignal, latestControlSignalLine, lang]);
 
   const {
     handleSubmitTurn,
@@ -3297,7 +3276,7 @@ export function ChatCodingRouteWorkbench() {
               lang={lang}
               loadingSessionLabel={t("loadingSession")}
               noSessionsLabel={t("noSessionsYet")}
-              notices={sessionNotices}
+              notices={activeRuntimeNotices}
               sessionsPending={sessionsQuery.isPending}
               toolApproval={toolApproval}
               transientErrorMessage={sessionDetailErrorMessage}
