@@ -7,11 +7,17 @@ from config import editor_schema_data
 from config.models import (
     DEFAULT_MAX_OUTPUT_TOKENS,
     DEFAULT_ROLE_PROFILE_IDS,
+    IMPLICIT_DEFAULT_PROVIDER_CONTEXT_WINDOW,
+    PROFILE_LABELS,
+    UNCONFIGURED_PROVIDER_CONTEXT_WINDOW,
     VALID_AGENT_MODES,
+    LLMConfig,
     LLMProfile,
     PinnedModelDefaults,
 )
 from config.operator_bootstrap import _BOOTSTRAP_EXCLUDED_PROFILE_IDS, _PROFILE_IDS
+from config.settings import _unconfigured_profile_stub
+from core.web.services import config_service
 from scripts import config_panel
 
 
@@ -49,3 +55,22 @@ def test_bootstrap_profile_ids_derive_from_default_role_profile_ids() -> None:
 def test_default_max_output_tokens_has_single_constant() -> None:
     assert LLMProfile.model_fields["max_output_tokens"].default == DEFAULT_MAX_OUTPUT_TOKENS
     assert PinnedModelDefaults.model_fields["max_output_tokens"].default == DEFAULT_MAX_OUTPUT_TOKENS
+
+
+def test_profile_labels_have_single_source() -> None:
+    assert config_service.PROFILE_LABELS is PROFILE_LABELS
+    assert set(PROFILE_LABELS) == set(DEFAULT_ROLE_PROFILE_IDS)
+    for lang in ("zh", "en"):
+        panel_table = config_panel.IDENTIFIER_LABELS[lang]["profile_id"]
+        for profile_id, labels in PROFILE_LABELS.items():
+            assert panel_table[profile_id] == labels[lang], f"profile_id.{profile_id}.{lang}"
+
+
+def test_context_window_seed_defaults_have_single_constants() -> None:
+    seeded = LLMConfig()
+    assert (
+        seeded.providers["default"].context_window
+        == IMPLICIT_DEFAULT_PROVIDER_CONTEXT_WINDOW
+    )
+    stub_provider = _unconfigured_profile_stub()["provider"]
+    assert stub_provider["context_window"] == UNCONFIGURED_PROVIDER_CONTEXT_WINDOW

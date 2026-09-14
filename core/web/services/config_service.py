@@ -21,7 +21,12 @@ import httpx
 
 import config.public_config as public_config_module
 from config import LLMConfig, LLMProfile, ProviderConfig
-from config.models import PROVIDER_API_KEY_ENV_ALIASES, _read_env_var, get_provider_api_key_env
+from config.models import (
+    PROFILE_LABELS,
+    PROVIDER_API_KEY_ENV_ALIASES,
+    _read_env_var,
+    get_provider_api_key_env,
+)
 from config.runtime_capabilities import (
     apply_model_capability_overrides,
     record_model_image_input_capability,
@@ -112,20 +117,6 @@ _SENSITIVE_CATALOG_CAPABILITY_FIELD_PARTS = (
 )
 
 
-PROFILE_LABELS = {
-    "primary": {"zh": "主智能体", "en": "Primary"},
-    "mental_model": {"zh": "心智模型", "en": "Mental Model"},
-    "subagent_worker": {"zh": "子代理执行", "en": "Subagent Worker"},
-    "subagent_explorer": {"zh": "子代理探索", "en": "Subagent Explorer"},
-    "supervised_baseline": {"zh": "监督基线", "en": "Supervised Baseline"},
-    "supervised_candidate": {"zh": "监督候选", "en": "Supervised Candidate"},
-    "research_broad": {"zh": "科研广搜", "en": "Research Broad Search"},
-    "research_deep": {"zh": "科研深搜", "en": "Research Deep Search"},
-    "research_review": {"zh": "科研审查", "en": "Research Review"},
-    "research_themes": {"zh": "科研主题生成", "en": "Research Theme Generation"},
-    "research_card": {"zh": "科研主题卡", "en": "Research Theme Card"},
-    "compression": {"zh": "上下文压缩", "en": "Compression"},
-}
 _PENDING_SECRET_PREFIX = "pending-secret:"
 _PENDING_API_KEY_SECRETS: dict[str, tuple[str, str]] = {}
 _PENDING_CLEAR_ENVS: set[str] = set()
