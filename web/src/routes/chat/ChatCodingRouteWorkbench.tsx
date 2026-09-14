@@ -236,6 +236,8 @@ import {
   runtimeHasChatTurnForSession,
 } from "./chatRuntimeWorkRuns";
 import {
+  chatControlSignalLabel,
+  chatControlSignalMessage,
   buildChatSessionStateViewModel,
 } from "./chatSessionSurfaceModel";
 import {
@@ -2154,24 +2156,9 @@ export function ChatCodingRouteWorkbench() {
     }
     return "";
   }, [detail?.messages]);
-  const latestControlSignalSummary = latestControlSignal?.summary?.trim() ?? "";
-  const latestControlSignalKindLabel = (() => {
-    if (!latestControlSignal) {
-      return "";
-    }
-    const lowerSummary = latestControlSignalSummary.toLowerCase();
-    const lowerKind = String(latestControlSignal.kind ?? "").toLowerCase();
-    if (lowerSummary.includes("tool failed") || lowerKind.includes("tool")) {
-      return lang === "zh" ? "工具失败" : "Tool failed";
-    }
-    if (lowerSummary.includes("provider") || lowerKind.includes("provider")) {
-      return lang === "zh" ? "模型通道" : "Provider";
-    }
-    if (lowerSummary.includes("interrupt") || lowerKind.includes("interrupt")) {
-      return lang === "zh" ? "已中断" : "Interrupted";
-    }
-    return latestControlSignalSummary || latestControlSignal.kind || "";
-  })();
+  const latestControlSignalKindLabel = latestControlSignal
+    ? chatControlSignalLabel(latestControlSignal, lang)
+    : "";
   const latestControlSignalLine = latestControlSignal
     ? activeControlSignals.length > 1
       ? `${latestControlSignalKindLabel} ${numberFormatter.format(activeControlSignals.length)}`
@@ -2201,13 +2188,13 @@ export function ChatCodingRouteWorkbench() {
         id: `control-signal-${latestControlSignal.turnId || latestControlSignal.createdAt || latestControlSignal.kind || "latest"}`,
         kind: "next_state_signal",
         level: "warning",
-        message: [latestControlSignalLine, latestControlSignalSummary].filter(Boolean).join(" · "),
+        message: chatControlSignalMessage(latestControlSignal, lang, latestControlSignalLine),
         timestamp: String(latestControlSignal.createdAt ?? ""),
         source: String(latestControlSignal.source || latestControlSignal.kind || ""),
         turnId: latestControlSignal.turnId,
       },
     ];
-  }, [activeRuntimeNotices, latestControlSignal, latestControlSignalLine, latestControlSignalSummary]);
+  }, [activeRuntimeNotices, latestControlSignal, latestControlSignalLine, lang]);
 
   const {
     handleSubmitTurn,

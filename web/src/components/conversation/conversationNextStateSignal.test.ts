@@ -21,6 +21,16 @@ function nextStateSignal(kind: ChatNextStateSignalSummary["kind"]): ChatNextStat
 }
 
 describe("shouldShowNextStateSignalInConversation", () => {
+  it("shows assistant output edits only while the turn is busy", () => {
+    const signal = nextStateSignal("assistant_output_edited");
+    expect(shouldShowNextStateSignalInConversation(signal, "running")).toBe(true);
+    expect(shouldShowNextStateSignalInConversation(signal, "tooling")).toBe(true);
+    expect(shouldShowNextStateSignalInConversation(signal, "ready")).toBe(false);
+    expect(shouldShowNextStateSignalInConversation(signal, "completed")).toBe(false);
+    expect(shouldShowNextStateSignalInConversation(signal, "needs_continue")).toBe(false);
+    expect(shouldShowNextStateSignalInConversation(signal, "failed")).toBe(false);
+    expect(shouldShowNextStateSignalInConversation(signal, "paused")).toBe(false);
+  });
   it("hides user continue signals in every phase", () => {
     const signal = nextStateSignal("user_continues");
 
