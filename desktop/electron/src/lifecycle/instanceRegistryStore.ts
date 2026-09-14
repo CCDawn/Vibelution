@@ -487,6 +487,7 @@ export async function applyClaimStart(
     deadlineAt: input.deadlineAt,
     inFlightDeadlineAt: input.deadlineAt,
     failureMessage: "",
+    portLeaseStatus: "held",
     spawnPid: 0,
     windowPid: 0,
     ownerPid: Math.trunc(input.ownerPid),

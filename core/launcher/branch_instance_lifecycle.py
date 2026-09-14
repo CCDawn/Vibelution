@@ -136,6 +136,13 @@ def _attach_instance_runtime(
 ) -> None:
     runtime = _instance_runtime_projection(item, entry=entry, current_bundle=current_bundle)
     item["runtime"] = runtime
+    backend = runtime.get("backend") if isinstance(runtime.get("backend"), dict) else {}
+    if backend.get("alive") and backend.get("healthy") and backend.get("listening"):
+        item["alive"] = True
+        item["observedState"] = "open"
+        pids = dict(item.get("pids")) if isinstance(item.get("pids"), dict) else {}
+        pids["backend"] = _positive_int(backend.get("pid"))
+        item["pids"] = pids
     lease = str((entry or {}).get("portLeaseStatus") or "").strip()
     if lease:
         item["portLeaseStatus"] = lease
@@ -155,15 +162,28 @@ def _instance_runtime_projection(
     bundle_backend = bundle.get("backend") if isinstance(bundle.get("backend"), dict) else {}
     bundle_frontend = bundle.get("frontend") if isinstance(bundle.get("frontend"), dict) else {}
     bundle_browser = bundle.get("browser") if isinstance(bundle.get("browser"), dict) else {}
+    registered_backend = _registered_isolated_backend_observation(item, entry) if not bundle else {}
 
     pids = item.get("pids") if isinstance(item.get("pids"), dict) else {}
-    backend_pid = _positive_int(bundle_backend.get("pid")) or _positive_int(pids.get("backend"))
-    backend_alive = bool(bundle_backend.get("alive")) if bundle_backend else bool(item.get("alive"))
-    backend_healthy = bool(bundle_backend.get("healthy")) if bundle_backend else bool(workbench.get("backendHealthy"))
+    backend_pid = (
+        _positive_int(bundle_backend.get("pid"))
+        or _positive_int(registered_backend.get("pid"))
+        or _positive_int(pids.get("backend"))
+    )
+    backend_alive = (
+        bool(bundle_backend.get("alive"))
+        if bundle_backend
+        else bool(registered_backend.get("alive")) or bool(item.get("alive"))
+    )
+    backend_healthy = (
+        bool(bundle_backend.get("healthy"))
+        if bundle_backend
+        else bool(registered_backend.get("healthy")) or bool(workbench.get("backendHealthy"))
+    )
     backend_listening = (
         bool(bundle_backend.get("portListening"))
         if bundle_backend
-        else bool(workbench.get("backendPortListening"))
+        else bool(registered_backend.get("listening")) or bool(workbench.get("backendPortListening"))
     )
     backend_conflict = (
         bool(bundle_backend.get("portConflict"))
@@ -191,7 +211,12 @@ def _instance_runtime_projection(
     else:
         frontend_ready = bool(workbench.get("frontendReady"))
 
-    observed_state = str(bundle.get("observedState") or item.get("observedState") or "closed").strip().lower()
+    observed_state = str(
+        bundle.get("observedState")
+        or ("open" if registered_backend.get("alive") else "")
+        or item.get("observedState")
+        or "closed"
+    ).strip().lower()
     workbench_phase = str(workbench.get("phase") or "steady").strip().lower()
     workbench_desired = str(workbench.get("desiredState") or "closed").strip().lower()
     workbench_failure = str(workbench.get("failureMessage") or "").strip()
@@ -861,6 +886,79 @@ def _loopback_http_ready(port: int, *, timeout_seconds: float = 0.4) -> bool:
                 connection.close()
             except OSError:
                 pass
+
+
+def _loopback_workspace_health(
+    port: int,
+    project_root: str | Path,
+    *,
+    timeout_seconds: float = 0.4,
+) -> dict[str, Any]:
+    """Observe one ready backend and prove that it serves this checkout."""
+
+    normalized_port = _positive_int(port)
+    expected_root = _norm_path(project_root)
+    if normalized_port <= 0 or not expected_root:
+        return {}
+    connection: http.client.HTTPConnection | None = None
+    try:
+        connection = http.client.HTTPConnection("127.0.0.1", normalized_port, timeout=timeout_seconds)
+        connection.request("GET", "/api/health", headers={"Accept": "application/json"})
+        response = connection.getresponse()
+        if int(response.status or 0) != 200:
+            response.read()
+            return {}
+        payload = json.loads(response.read())
+        if not isinstance(payload, dict) or payload.get("routesReady") is not True:
+            return {}
+        if _norm_path(payload.get("workspaceRoot")) != expected_root:
+            return {}
+        return {
+            "alive": True,
+            "healthy": True,
+            "listening": True,
+            "pid": _positive_int(payload.get("pid")),
+        }
+    except (OSError, TimeoutError, ValueError, json.JSONDecodeError, http.client.HTTPException):
+        return {}
+    finally:
+        if connection is not None:
+            try:
+                connection.close()
+            except OSError:
+                pass
+
+
+def _registered_isolated_backend_observation(
+    item: dict[str, Any],
+    entry: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Read live isolated runtime truth from its identity-bound registry handle."""
+
+    if not isinstance(entry, dict) or not entry:
+        return {}
+    project_root = str(item.get("path") or "").strip()
+    if not project_root or _norm_path(entry.get("projectRoot")) != _norm_path(project_root):
+        return {}
+    spawn_pid = _positive_int(entry.get("spawnPid"))
+    if spawn_pid <= 0:
+        return {}
+    identity = registry.inspect_process_identity(
+        {
+            "pid": spawn_pid,
+            "createTime": entry.get("spawnCreateTime"),
+            "executable": entry.get("spawnExecutable"),
+        }
+    )
+    if str(identity.get("status") or "").strip().lower() != "match":
+        return {}
+    observation = _loopback_workspace_health(
+        _positive_int(entry.get("port")) or _positive_int(item.get("port")),
+        project_root,
+    )
+    if observation and _positive_int(observation.get("pid")) <= 0:
+        observation["pid"] = spawn_pid
+    return observation
 
 
 def _positive_int(value: Any) -> int:

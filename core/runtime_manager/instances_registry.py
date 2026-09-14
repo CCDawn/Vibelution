@@ -301,6 +301,7 @@ def apply_claim_start(
             "deadlineAt": str(deadline_at),
             "inFlightDeadlineAt": str(deadline_at),
             "failureMessage": "",
+            "portLeaseStatus": "held",
             "spawnPid": 0,
             "windowPid": 0,
             "ownerPid": owner,
@@ -437,16 +438,7 @@ def apply_reclaim_stale_in_flight_start(
     if expected > 0 and int(entry.get("generation") or 0) != expected:
         return False, dict(entry)
     if is_stale_in_flight_stop(entry, now=now):
-        entry["status"] = "closed"
-        entry["phase"] = "steady"
-        entry["desiredState"] = "closed"
-        entry["failureMessage"] = ""
-        entry["spawnPid"] = 0
-        entry["windowPid"] = 0
-        entry["portLeaseStatus"] = "reclaimable"
-        entry.pop("ownerLease", None)
-        _touch_entry(entry, now=now)
-        return True, dict(entry)
+        return False, dict(entry)
     if not is_stale_in_flight_start(
         entry,
         now=now,
@@ -454,6 +446,8 @@ def apply_reclaim_stale_in_flight_start(
         backend_listening=backend_listening,
         window_open=window_open,
     ):
+        return False, dict(entry)
+    if int(entry.get("spawnPid") or 0) > 0 or int(entry.get("windowPid") or 0) > 0:
         return False, dict(entry)
     entry["status"] = "failed"
     entry["phase"] = "failed"

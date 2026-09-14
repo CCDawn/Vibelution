@@ -237,6 +237,53 @@ describe("instanceRegistryStore shared fixture", () => {
     assertExpected(last, item.expected);
   });
 
+  it("holds the allocated ports while a new backend is still starting", async () => {
+    const payload = cloneRegistry({
+      schemaVersion: 3,
+      instances: {
+        "worktree:first": {
+          status: "closed",
+          desiredState: "closed",
+          phase: "steady",
+          generation: 1,
+          portLeaseStatus: "reclaimable"
+        }
+      }
+    });
+    const first = await applyClaimStart(payload, {
+      instanceId: "worktree:first",
+      projectRoot: "C:/repo/.worktrees/first",
+      operation: "start",
+      commandId: "start-first",
+      deadlineAt: "2026-09-15T00:03:00Z",
+      ownerPid: 100,
+      preferredBackend: 8000,
+      preferredControl: 8765,
+      portIsFree: () => true
+    });
+    const second = await applyClaimStart(payload, {
+      instanceId: "worktree:second",
+      projectRoot: "C:/repo/.worktrees/second",
+      operation: "start",
+      commandId: "start-second",
+      deadlineAt: "2026-09-15T00:03:00Z",
+      ownerPid: 101,
+      preferredBackend: 8000,
+      preferredControl: 8765,
+      portIsFree: () => true
+    });
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    if (!first.ok || !second.ok) {
+      throw new Error("start claims unexpectedly failed");
+    }
+    expect(first.entry.portLeaseStatus).toBe("held");
+    expect(second.entry.portLeaseStatus).toBe("held");
+    expect(second.entry.port).not.toBe(first.entry.port);
+    expect(second.entry.controlPort).not.toBe(first.entry.controlPort);
+  });
+
   it("discards a lock-wrapped spawnPid write after claimStop", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vibelution-registry-cas-"));
     tempDirs.push(dir);

@@ -811,6 +811,83 @@ def test_overlay_promotes_starting_to_partial_when_isolated_backend_http_ready(
     assert "error" not in runtime
 
 
+def test_overlay_uses_healthy_registry_runtime_when_isolated_state_file_is_missing(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "task"
+    path.mkdir()
+    _prepare_bundled_frontend(path)
+    spawn_pid = 424242
+    backend_pid = 424243
+
+    monkeypatch.setattr(lifecycle, "_slot_fields_for_path", lambda _path: {})
+    monkeypatch.setattr(
+        lifecycle.registry,
+        "inspect_process_identity",
+        lambda expected: {
+            "status": "match" if int(expected.get("pid") or 0) == spawn_pid else "mismatch"
+        },
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "_loopback_workspace_health",
+        lambda port, project_root, **_: (
+            {
+                "alive": True,
+                "healthy": True,
+                "listening": True,
+                "pid": backend_pid,
+            }
+            if int(port) == 8007 and Path(project_root) == path
+            else {}
+        ),
+    )
+    monkeypatch.setattr(
+        lifecycle.registry,
+        "list_instances",
+        lambda: [
+            {
+                "instanceId": "worktree:feature",
+                "projectRoot": str(path),
+                "status": "steady",
+                "desiredState": "open",
+                "phase": "steady",
+                "generation": 3,
+                "port": 8007,
+                "spawnPid": spawn_pid,
+                "spawnCreateTime": 123.5,
+                "spawnExecutable": "C:/Python/pythonw.exe",
+            }
+        ],
+    )
+
+    payload = lifecycle.overlay_instance_ports(
+        {"items": [_item(path)]},
+        launcher_state={},
+    )
+
+    item = payload["items"][0]
+    runtime = item["runtime"]
+    assert item["alive"] is True
+    assert item["observedState"] == "open"
+    assert item["pids"]["backend"] == backend_pid
+    assert item["startable"] is False
+    assert runtime["lifecycleState"] == "partial"
+    assert runtime["desiredState"] == "open"
+    assert runtime["observedState"] == "open"
+    assert runtime["generation"] == 3
+    assert runtime["registryStatus"] == "steady"
+    assert runtime["backend"] == {
+        "alive": True,
+        "healthy": True,
+        "listening": True,
+        "port": 8007,
+        "portReserved": False,
+        "portConflict": False,
+        "pid": backend_pid,
+    }
+
+
 def test_overlay_keeps_starting_when_alive_backend_http_is_not_ready(tmp_path, monkeypatch):
     path = tmp_path / "task"
     path.mkdir()

@@ -38,6 +38,7 @@
         "desiredState": "open",
         "port": 8001,
         "controlPort": 8766,
+        "portLeaseStatus": "held",
         "spawnPid": 0,
         "commandId": "cmd-1",
         "failureMessage": "",
@@ -72,6 +73,7 @@
         "desiredState": "open",
         "port": 8001,
         "controlPort": 8766,
+        "portLeaseStatus": "held",
         "spawnPid": 0,
         "commandId": "cmd-restart"
       }
