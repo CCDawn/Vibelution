@@ -309,6 +309,8 @@ def run_process(
     input_text: str | None = None,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    if env is None and any("pytest" in str(item) for item in argv):
+        env = validation_environment()
     return subprocess.run(
         git_argv(argv),
         cwd=cwd,
@@ -432,15 +434,14 @@ Pytest fixture repos created under ``%LOCALAPPDATA%\\...\\instances\\...\\cache`
 
     if os.name != "nt":
         return None
-    if os.environ.get("PYTEST_ADDOPTS", "").strip():
-        return None
     root = Path(os.environ.get("VIBELUTION_VALIDATION_TEMP", r"C:\vtmp")) / f"vt-validation-{os.getpid()}"
     try:
         root.mkdir(parents=True, exist_ok=True)
     except OSError:
         return None
     env = os.environ.copy()
-    env["PYTEST_ADDOPTS"] = f"--basetemp={root.as_posix()}"
+    existing = os.environ.get("PYTEST_ADDOPTS", "").strip()
+    env["PYTEST_ADDOPTS"] = f"{existing} --basetemp={root.as_posix()}".strip()
     return env
 
 
@@ -454,8 +455,6 @@ def measured(
     subject: str,
 ) -> ProcessResult:
     started = time.monotonic()
-    if env is None:
-        env = validation_environment()
     if env is None:
         completed = run_process(argv, cwd, input_text=input_text)
     else:
