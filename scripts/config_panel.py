@@ -60,6 +60,7 @@ from config.llm_security import (  # noqa: E402
     validate_llm_public_config,
 )
 from config.settings import PUBLIC_INLINE_PROVIDER_FIELDS  # noqa: E402
+from config.models import PROFILE_LABELS
 from config.toml_writer import dumps_public_config  # noqa: E402
 
 
@@ -837,13 +838,7 @@ IDENTIFIER_LABELS = {
             "minimax_main": "MiniMax 主服务",
         },
         "profile_id": {
-            "primary": "主智能体",
-            "mental_model": "心智模型",
-            "subagent_worker": "执行子智能体",
-            "subagent_explorer": "探索子智能体",
-            "supervised_baseline": "监督基线",
-            "supervised_candidate": "监督候选",
-            "compression": "压缩模型",
+            profile_id: labels["zh"] for profile_id, labels in PROFILE_LABELS.items()
         },
         "provider_kind": {
             "local": "本地",
@@ -869,13 +864,7 @@ IDENTIFIER_LABELS = {
             "minimax_main": "MiniMax Main",
         },
         "profile_id": {
-            "primary": "Primary Agent",
-            "mental_model": "Mental Model",
-            "subagent_worker": "Subagent Worker",
-            "subagent_explorer": "Subagent Explorer",
-            "supervised_baseline": "Supervised Baseline",
-            "supervised_candidate": "Supervised Candidate",
-            "compression": "Compression Model",
+            profile_id: labels["en"] for profile_id, labels in PROFILE_LABELS.items()
         },
         "provider_kind": {
             "local": "Local",

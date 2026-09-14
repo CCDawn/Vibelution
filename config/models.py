@@ -58,6 +58,13 @@ PROVIDER_API_KEY_ENV_ALIASES: Dict[str, List[str]] = {
 VALID_AGENT_MODES = ("chat", "self_evolution", "supervised_evolution")
 DEFAULT_MAX_OUTPUT_TOKENS = 4096
 
+# Context windows for seeded placeholder routes.  Runtime window authority is the
+# model_library entry, then the provider, then discovery; a missing window stays
+# missing (fail closed) and these values only cover config-less seeds.
+# See docs/ops/config/02-llm-provider.md ("不要瞎填假窗口").
+IMPLICIT_DEFAULT_PROVIDER_CONTEXT_WINDOW = 131072
+UNCONFIGURED_PROVIDER_CONTEXT_WINDOW = 65536
+
 
 def get_provider_api_key_env(provider: str) -> Optional[str]:
     """返回 provider 对应的 API Key 环境变量名。"""
@@ -527,6 +534,24 @@ DEFAULT_ROLE_PROFILE_IDS = (
     "compression",
 )
 
+# Display labels for role profile ids, shared by the config panel and the web
+# Agent Center so both surfaces cannot drift apart.
+PROFILE_LABELS: Dict[str, Dict[str, str]] = {
+    "primary": {"zh": "主智能体", "en": "Primary"},
+    "mental_model": {"zh": "心智模型", "en": "Mental Model"},
+    "runtime_status": {"zh": "运行时状态", "en": "Runtime Status"},
+    "subagent_worker": {"zh": "子代理执行", "en": "Subagent Worker"},
+    "subagent_explorer": {"zh": "子代理探索", "en": "Subagent Explorer"},
+    "supervised_baseline": {"zh": "监督基线", "en": "Supervised Baseline"},
+    "supervised_candidate": {"zh": "监督候选", "en": "Supervised Candidate"},
+    "research_broad": {"zh": "科研广搜", "en": "Research Broad Search"},
+    "research_deep": {"zh": "科研深搜", "en": "Research Deep Search"},
+    "research_review": {"zh": "科研审查", "en": "Research Review"},
+    "research_themes": {"zh": "科研主题生成", "en": "Research Theme Generation"},
+    "research_card": {"zh": "科研主题卡", "en": "Research Theme Card"},
+    "compression": {"zh": "上下文压缩", "en": "Compression"},
+}
+
 
 DEFAULT_LLM_ROUTE_CONCURRENCY = 4
 
@@ -590,7 +615,7 @@ class LLMConfig(BaseModel):
                 base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
                 compat_mode="openai",
                 requires_api_key=True,
-                context_window=131072,
+                context_window=IMPLICIT_DEFAULT_PROVIDER_CONTEXT_WINDOW,
             )
         if not self.profiles:
             self.profiles["primary"] = LLMProfile(

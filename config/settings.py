@@ -8,14 +8,13 @@
 from __future__ import annotations
 
 import copy
-import hashlib
-import json
 import os
 from pathlib import Path
 from typing import Optional, Dict, Any
 from .models import (
     AppConfig,
     LLMConfig,
+    UNCONFIGURED_PROVIDER_CONTEXT_WINDOW,
     AgentConfig,
     WebChatConfig,
     ContextCompressionConfig,
@@ -42,7 +41,6 @@ NetworkConfig,
     SkinConfig,
     SoundConfig,
     PromptConfig,)
-from .llm_security import is_llm_local_network_base_url
 from .paths import ensure_global_config_initialized, resolve_config_path
 from .providers import (
     MODEL_PRESETS,
@@ -144,31 +142,6 @@ def _default_model_api_key_env(model_id: str) -> str:
     return f"VIBELUTION_LLM_MODEL_{token}_API_KEY" if token else "VIBELUTION_LLM_MODEL_API_KEY"
 
 
-def _canonical_model_api_key_env(model_id: str) -> str:
-    return _default_model_api_key_env(model_id)
-
-
-def _profile_model_ref(profile: Dict[str, Any]) -> str:
-    if not isinstance(profile, dict):
-        return ""
-    return str(profile.get("model_ref") or "").strip()
-
-
-def _provider_kind(provider: Dict[str, Any]) -> str:
-    return str(provider.get("kind") or provider.get("api") or "openai").strip() or "openai"
-
-
-def _provider_fingerprint(provider: Dict[str, Any]) -> str:
-    payload = json.dumps(_public_inline_provider_payload(provider), ensure_ascii=False, sort_keys=True)
-    return hashlib.sha1(payload.encode("utf-8")).hexdigest()
-
-
-def _generated_model_id(provider: Dict[str, Any], model: str) -> str:
-    fingerprint = _provider_fingerprint(provider)
-    raw = f"generated-{_provider_kind(provider).lower()}-{str(model or '').strip().lower()}-{fingerprint[:12]}"
-    return "".join(char if char.isalnum() else "_" for char in raw).strip("_") or "generated_model"
-
-
 def _flatten_model_library_entries(node: Any, prefix: str = "") -> Dict[str, Dict[str, Any]]:
     flattened: Dict[str, Dict[str, Any]] = {}
     if not isinstance(node, dict):
@@ -252,200 +225,6 @@ def _coerce_model_library_detail(key: str, value: Any) -> Any:
             return value
         return str(value).strip().lower() in {"1", "true", "yes", "on"}
     return str(value).strip()
-
-
-def _model_library_details(item: Dict[str, Any]) -> Dict[str, Any]:
-    details: Dict[str, Any] = {}
-    for key in MODEL_LIBRARY_DETAIL_FIELDS:
-        if key not in item:
-            continue
-        value = _coerce_model_library_detail(key, item.get(key))
-        if value is not None:
-            details[key] = value
-    return details
-
-
-def _model_library_entry(
-    provider: Dict[str, Any],
-    model: str,
-    label: str,
-    details: Dict[str, Any] | None = None,
-) -> Dict[str, Any]:
-    entry: Dict[str, Any] = {
-        "provider": _public_inline_provider_payload(provider),
-        "model": model,
-        "label": label or model,
-    }
-    entry.update(_model_library_details(details or {}))
-    return entry
-
-
-def _truthy_prompt_cache_capability(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "on", "supported", "explicit", "automatic"}
-    return False
-
-
-def _declares_prompt_cache_support(details: Dict[str, Any]) -> bool:
-    for key in ("supports_prompt_cache", "supportsPromptCache", "promptCache"):
-        if key in details and _truthy_prompt_cache_capability(details.get(key)):
-            return True
-    capabilities = details.get("capabilities") if isinstance(details.get("capabilities"), dict) else {}
-    for key in ("supports_prompt_cache", "supportsPromptCache", "promptCache"):
-        if key in capabilities and _truthy_prompt_cache_capability(capabilities.get(key)):
-            return True
-    return False
-
-
-def _is_qwen_prompt_cache_route(
-    *,
-    provider_kind: str,
-    provider_api: str,
-    model: str,
-    protocol: str,
-    host: str,
-) -> bool:
-    return (
-        "qwen" in model
-        or protocol.startswith("qwen_")
-        or provider_api in {"qwen", "qwen-openai-compatible"}
-        or (provider_kind == "aliyun" and "dashscope.aliyuncs.com" in host)
-    )
-
-
-def _recommended_prompt_cache_mode(provider: Dict[str, Any], details: Dict[str, Any] | None = None) -> str:
-    provider = _public_inline_provider_payload(provider)
-    details = details if isinstance(details, dict) else {}
-    provider_kind = str(provider.get("kind", "") or "").strip().lower()
-    provider_api = str(provider.get("api", "") or "").strip().lower().replace("_", "-")
-    compat_mode = str(provider.get("compat_mode", "") or "").strip().lower().replace("-", "_")
-    transport = str(details.get("transport", "") or "").strip().lower()
-    model = str(details.get("model", "") or "").strip().lower()
-    protocol = str(details.get("protocol", "") or "").strip().lower()
-    base_url = str(provider.get("base_url", "") or "").strip()
-    host = base_url.lower()
-    is_qwen = _is_qwen_prompt_cache_route(
-        provider_kind=provider_kind,
-        provider_api=provider_api,
-        model=model,
-        protocol=protocol,
-        host=host,
-    )
-
-    if provider_kind in {"local", "ollama", "llamacpp"} or is_llm_local_network_base_url(base_url):
-        if is_qwen and _declares_prompt_cache_support(details):
-            return "explicit_cache_control"
-        return ""
-
-    is_dashscope_qwen = (
-        provider_kind == "aliyun"
-        and is_qwen
-    )
-    if provider_kind == "anthropic" and compat_mode not in {"openai", "openai_compatible"}:
-        return "explicit_cache_control"
-    if is_dashscope_qwen:
-        return "explicit_cache_control"
-    # DeepSeek Context Caching is automatic server-side; declare capability only.
-    if provider_kind == "deepseek" or "api.deepseek.com" in host:
-        return "automatic"
-    if (
-        provider_kind in {"openai", "relay"}
-        or (provider_kind == "openai_compatible" and compat_mode in {"openai", "openai_compatible"})
-        or (
-            provider_kind in {"openai", "relay", "openai_compatible"}
-            and (provider_api in {"openai-responses", "responses"} or transport == "responses")
-        )
-    ):
-        return "automatic"
-    return ""
-
-
-def _ensure_model_library_prompt_cache_defaults(public_config: Dict[str, Any]) -> Dict[str, Any]:
-    updated = copy.deepcopy(public_config)
-    llm = updated.get("llm", {})
-    if not isinstance(llm, dict):
-        return updated
-    model_library = llm.get("model_library", {})
-    if not isinstance(model_library, dict):
-        return updated
-    for item in model_library.values():
-        if not isinstance(item, dict) or "prompt_cache" in item:
-            continue
-        provider = _inline_provider_payload(item.get("provider"))
-        if not provider:
-            continue
-        mode = _recommended_prompt_cache_mode(provider, item)
-        if mode:
-            item["prompt_cache"] = {"mode": mode}
-    return updated
-
-
-def _unique_model_library_id(model_library: Dict[str, Any], model_id: str) -> str:
-    base = (model_id or "model").strip("_") or "model"
-    if base not in model_library:
-        return base
-    index = 2
-    while f"{base}_{index}" in model_library:
-        index += 1
-    return f"{base}_{index}"
-
-
-def _ensure_profile_model_library_entries(public_config: Dict[str, Any]) -> Dict[str, Any]:
-    updated = copy.deepcopy(public_config)
-    llm = updated.get("llm", {})
-    if not isinstance(llm, dict):
-        return updated
-    profiles = llm.get("profiles", {})
-    model_library = llm.setdefault("model_library", {})
-    if not isinstance(profiles, dict) or not isinstance(model_library, dict):
-        return updated
-
-    route_model_ids: Dict[tuple[str, str], str] = {}
-    for existing_model_id, item in model_library.items():
-        if not isinstance(item, dict):
-            continue
-        provider = _inline_provider_payload(item.get("provider"))
-        model = str(item.get("model", "") or "").strip()
-        if provider and model:
-            route_model_ids.setdefault((_provider_fingerprint(provider), model), str(existing_model_id))
-
-    for profile in profiles.values():
-        if not isinstance(profile, dict) or _profile_model_ref(profile):
-            continue
-        provider = _inline_provider_payload(profile.get("provider"))
-        model = str(profile.get("model", "") or "").strip()
-        if not provider or not model:
-            continue
-        route_key = (_provider_fingerprint(provider), model)
-        model_id = route_model_ids.get(route_key, "")
-        if not model_id:
-            model_id = _unique_model_library_id(model_library, _generated_model_id(provider, model))
-            entry = _model_library_entry(provider, model, str(profile.get("label") or model).strip(), _model_library_details(profile))
-            entry["api_key_env"] = _canonical_model_api_key_env(model_id)
-            model_library[model_id] = entry
-            route_model_ids[route_key] = model_id
-        profile.clear()
-        profile["model_ref"] = model_id
-        profile["overrides"] = {}
-    return updated
-
-
-def _canonicalize_model_library_api_key_envs(public_config: Dict[str, Any]) -> Dict[str, Any]:
-    updated = copy.deepcopy(public_config)
-    llm = updated.get("llm", {})
-    if not isinstance(llm, dict):
-        return updated
-    model_library = llm.get("model_library", {})
-    if not isinstance(model_library, dict):
-        return updated
-    for model_id, item in model_library.items():
-        if isinstance(item, dict):
-            item["api_key_env"] = _canonical_model_api_key_env(str(model_id))
-    return updated
 
 
 def _canonicalize_runtime_public_config(public_config: Dict[str, Any]) -> Dict[str, Any]:
@@ -541,7 +320,7 @@ def _unconfigured_profile_stub() -> Dict[str, Any]:
             "base_url": "http://localhost:11434/v1",
             "compat_mode": "openai",
             "requires_api_key": False,
-            "context_window": 65536,
+            "context_window": UNCONFIGURED_PROVIDER_CONTEXT_WINDOW,
         },
         "model": "",
         "transport": "chat_completions",
@@ -1525,6 +1304,11 @@ def _normalize_v1_kwargs_runtime_dict(data: Dict[str, Any]) -> Dict[str, Any]:
         llm["schema_version"] = 1
         if "role_bindings" in llm:
             _materialize_role_bound_profiles(llm)
+    from .public_config import (
+        _ensure_model_library_prompt_cache_defaults,
+        _ensure_profile_model_library_entries,
+    )
+
     repaired = _repair_legacy_model_library_shape(payload)
     with_profile_models = _ensure_profile_model_library_entries(repaired)
     result = _ensure_model_library_prompt_cache_defaults(with_profile_models)

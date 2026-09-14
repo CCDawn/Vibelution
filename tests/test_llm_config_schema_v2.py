@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+
 import pytest
 
 from config.models import AppConfig
@@ -128,6 +130,46 @@ def test_v1_normalization_is_no_longer_a_runtime_path() -> None:
     normalized = normalize_public_config_dict(proposed)
     assert normalized["llm"]["schema_version"] == 2
     assert normalized["llm"]["profiles"]["primary"]["model"] == "gpt-5.6-luna"
+
+
+def test_v1_kwargs_runtime_path_reuses_public_config_canonicalization() -> None:
+    """Both v1 entry points must share one model-library canonicalizer."""
+    legacy = {
+        "llm": {
+            "schema_version": 1,
+            "profiles": {
+                "primary": {
+                    "provider": {
+                        "kind": "deepseek",
+                        "base_url": "https://api.deepseek.com/v1",
+                        "api_key_env": "DEEPSEEK_API_KEY",
+                    },
+                    "model": "deepseek-chat",
+                }
+            },
+        }
+    }
+    from config.public_config import _canonicalize_public_config
+    from config.settings import _normalize_v1_kwargs_runtime_dict
+
+    kwargs_normalized = _normalize_v1_kwargs_runtime_dict(copy.deepcopy(legacy))
+    file_canonical = _canonicalize_public_config(copy.deepcopy(legacy), allow_legacy_v1=True)
+
+    kwargs_library = kwargs_normalized["llm"]["model_library"]
+    file_library = file_canonical["llm"]["model_library"]
+    assert set(kwargs_library) == set(file_library)
+    assert kwargs_library
+
+    def _comparable(entry: dict) -> dict:
+        return {
+            key: value
+            for key, value in entry.items()
+            if key not in {"provider", "provider_id"}
+        }
+
+    for model_id, kwargs_entry in kwargs_library.items():
+        assert _comparable(kwargs_entry) == _comparable(file_library[model_id])
+        assert kwargs_entry["prompt_cache"] == {"mode": "automatic"}
 
 
 def test_v2_projection_uses_cycle_safe_runtime_alias_resolver() -> None:
