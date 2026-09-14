@@ -1,9 +1,16 @@
 import json
+import sys
 import time
+from types import SimpleNamespace
 
 import httpx
 
-from tools import research_search_backends, research_search_quality, research_search_tools, web_search_tool
+from tools import (
+    research_search_backends,
+    research_search_quality,
+    research_search_tools,
+    web_search_tool,
+)
 
 
 class FakeClient:
@@ -350,6 +357,79 @@ def test_research_search_quality_rejects_low_quality_admissions_noise():
 
     assert gate["accepted"] is False
     assert "low_quality_context_terms" in gate["reasons"]
+
+
+def test_research_search_quality_rejects_unexpected_explicit_spam():
+    gate = research_search_quality.evaluate_search_result(
+        "GPU benchmark median timing falsification evidence",
+        {
+            "title": "Unrelated monthly ranking",
+            "url": "https://spam.example/ranking",
+            "snippet": "成人色情视频与口交内容，夹带 benchmark median 关键词。",
+        },
+    )
+
+    assert gate["accepted"] is False
+    assert "unsafe_context_terms" in gate["reasons"]
+
+
+def test_research_search_quality_keeps_in_scope_health_research():
+    gate = research_search_quality.evaluate_search_result(
+        "成人性健康研究",
+        {
+            "title": "成人性健康研究综述",
+            "url": "https://example.test/health-review",
+            "snippet": "讨论成人性健康研究的临床证据。",
+        },
+    )
+
+    assert gate["accepted"] is True
+
+
+def test_research_search_quality_keeps_explicit_term_when_query_requests_it():
+    gate = research_search_quality.evaluate_search_result(
+        "口交传播风险临床研究",
+        {
+            "title": "口交传播风险临床研究",
+            "url": "https://example.test/clinical-review",
+            "snippet": "总结口交传播风险的临床证据。",
+        },
+    )
+
+    assert gate["accepted"] is True
+
+
+def test_ddgs_search_enables_strict_safesearch(monkeypatch):
+    calls = []
+
+    class FakeDDGS:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def text(self, query, **kwargs):
+            calls.append(("text", query, kwargs))
+            return []
+
+        def news(self, query, **kwargs):
+            calls.append(("news", query, kwargs))
+            return []
+
+    monkeypatch.setitem(sys.modules, "ddgs", SimpleNamespace(DDGS=FakeDDGS))
+
+    results, event = research_search_backends.ddgs_search("GPU benchmark", max_results=3)
+    news_results, news_event = research_search_backends.ddgs_search("GPU benchmark", max_results=2, kind="news")
+
+    assert results == []
+    assert news_results == []
+    assert event["status"] == "ok"
+    assert news_event["status"] == "ok"
+    assert calls == [
+        ("text", "GPU benchmark", {"max_results": 3, "safesearch": "on"}),
+        ("news", "GPU benchmark", {"max_results": 2, "safesearch": "on"}),
+    ]
 
 
 def test_search_summarize_sources_dedupes_markdown_and_bare_urls():

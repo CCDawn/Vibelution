@@ -12,7 +12,6 @@ import httpx
 
 from tools.research_search_quality import filter_search_results
 
-
 _HTTP_TIMEOUT_SECONDS = 10.0
 _USER_AGENT = "Vibelution-ResearchSearch/1.0 no-key metadata search"
 _OPENALEX_URL = "https://api.openalex.org/works"
@@ -196,9 +195,9 @@ def ddgs_search(query: str, *, max_results: int, kind: str = "text") -> tuple[li
     try:
         with DDGS() as searcher:
             if kind == "news" and hasattr(searcher, "news"):
-                raw_items = list(searcher.news(query, max_results=max_results))
+                raw_items = list(searcher.news(query, max_results=max_results, safesearch="on"))
             else:
-                raw_items = list(searcher.text(query, max_results=max_results))
+                raw_items = list(searcher.text(query, max_results=max_results, safesearch="on"))
     except Exception as exc:
         return [], _provider_event("ddgs", "failed", error=f"{type(exc).__name__}: {exc}")
     results = [
