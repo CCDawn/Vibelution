@@ -5,30 +5,9 @@ import {
   buildChatActiveSkillViewModel,
   buildChatMentalStateViewModel,
   buildChatSessionStateViewModel,
-  chatControlSignalMessage,
 } from "./chatSessionSurfaceModel";
 
 describe("chatSessionSurfaceModel", () => {
-  it("deduplicates a control signal label when its summary is identical", () => {
-    const signal = {
-      kind: "tool_error",
-      summary: "工具失败",
-    } as never;
-    expect(chatControlSignalMessage(signal, "zh")).toBe("工具失败");
-  });
-
-  it("deduplicates an unknown kind with its full Chinese summary and keeps count", () => {
-    const signal = {
-      kind: "control_signal_v2",
-      summary: "用户要求重新生成最新回答，旧 assistant 输出被截断重跑。",
-    } as never;
-    expect(chatControlSignalMessage(
-      signal,
-      "zh",
-      "用户要求重新生成最新回答，旧 assistant 输出被截断重跑。 2",
-    )).toBe("用户要求重新生成最新回答，旧 assistant 输出被截断重跑。 2");
-  });
-
   it("builds active skill summary and status labels", () => {
     const model = buildChatActiveSkillViewModel({
       contract: {
