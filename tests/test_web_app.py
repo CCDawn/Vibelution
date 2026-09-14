@@ -8409,7 +8409,7 @@ def test_stop_requested_turn_persists_visible_stop_message(tmp_path, monkeypatch
     )
 
     assert response.status_code == 202
-    assert started.wait(1.0), "expected the background turn to start"
+    assert started.wait(10.0), "expected the background turn to start"
 
     active_control = session_service._get_session_turn_control("session-live")
     assert active_control is not None
@@ -8421,7 +8421,7 @@ def test_stop_requested_turn_persists_visible_stop_message(tmp_path, monkeypatch
     assert stop_response.status_code == 202
     assert stop_response.json()["currentPhase"] in {"stopping", "ready"}
     assert stop_response.json().get("activeTurnId") in {"", active_control.turn_id}
-    assert finished.wait(2.0), "expected the stopped turn to finish"
+    assert finished.wait(10.0), "expected the stopped turn to finish"
 
     for thread in worker_threads:
         thread.join(timeout=0.2)

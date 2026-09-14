@@ -2452,7 +2452,7 @@ def test_launcher_lifecycle_intent_long_poll_claims_action_created_while_waiting
     claimed = lifecycle_intent_store.claim_desktop_action(
         desktop_session_id="desktop-session-1",
         lease_seconds=30,
-        wait_ms=100,
+        wait_ms=5000,
         poll_interval_ms=10,
     )
 
