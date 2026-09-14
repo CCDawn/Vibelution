@@ -282,6 +282,26 @@ def parse_allowed_command(command: str, root: Path) -> CommandSpec:
     raise UnsupportedValidationCommand(command)
 
 
+def git_argv(argv: Sequence[str]) -> list[str]:
+    """Return one git argv that stays valid beyond the Windows MAX_PATH limit.
+
+    Pytest temp roots live deep under the project instance cache, so a plain
+    ``git diff <a>...<b>`` can fail with ``Filename too long`` even though both
+    revisions exist. ``core.longpaths=true`` makes Git use long-path aware Win32
+    calls for its own path handling; it is a no-op outside Windows.
+    """
+
+    args = list(argv)
+    if not args:
+        return args
+    if Path(args[0]).name.lower() not in {"git", "git.exe"}:
+        return args
+    if len(args) > 1 and args[1] == "-c":
+        return args
+    args[1:1] = ["-c", "core.longpaths=true"]
+    return args
+
+
 def run_process(
     argv: Sequence[str],
     cwd: Path,
@@ -290,7 +310,7 @@ def run_process(
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        list(argv),
+        git_argv(argv),
         cwd=cwd,
         input=input_text,
         capture_output=True,
@@ -343,7 +363,7 @@ def git_lines(root: Path, *args: str) -> list[str]:
 
 def git_paths(root: Path, *args: str) -> list[str]:
     completed = subprocess.run(
-        ["git", *args],
+        git_argv(["git", *args]),
         cwd=root,
         capture_output=True,
         check=False,
