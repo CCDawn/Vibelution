@@ -51,6 +51,7 @@ from .domain_ports import DomainPorts
 from .failure_projection import apply_node_run_failure
 from .ids import new_id
 from .iteration_route import branch_decision_from_run, routed_successors
+from .operator_terminal_policy import operator_round_terminal_policy
 
 # Adapter execution may synchronously wait for a canonical Agent turn.  The
 # lease must outlive that bounded wait so another Workbench process cannot
@@ -930,8 +931,12 @@ class AdapterDispatchWorker:
                 and action.node_id == "operator_baseline"
                 and not successors
             )
-            operator_round_terminal = (run.workflow_id == "operator-optimization"
-                and action.node_id == "optimization_feedback" and not successors)
+            operator_policy = operator_round_terminal_policy(run)
+            operator_round_terminal = bool(
+                operator_policy is not None
+                and action.node_id == operator_policy.node_id
+                and not successors
+            )
             if successors or action.node_id == "result_package" or operator_baseline_terminal or operator_round_terminal:
                 state_update = {"branch_decision": branch} if branch else {}
                 uow.repository.insert_outbox(
@@ -945,12 +950,23 @@ class AdapterDispatchWorker:
                         state_update=state_update or None,
                     )
                 )
-            if action.node_id == "result_package" or operator_baseline_terminal or operator_round_terminal:
-                completion_kind, terminal_reason = (
-                    ("baseline_measured", "baseline_measurement_verified")
-                    if operator_baseline_terminal else ("operator_round_completed", "optimization_feedback_verified")
-                    if operator_round_terminal else terminal_facts_for_run(run)
-                )
+            if (
+                action.node_id == "result_package"
+                or operator_baseline_terminal
+                or operator_round_terminal
+            ):
+                if operator_baseline_terminal:
+                    completion_kind, terminal_reason = (
+                        "baseline_measured",
+                        "baseline_measurement_verified",
+                    )
+                elif operator_round_terminal and operator_policy is not None:
+                    completion_kind, terminal_reason = (
+                        operator_policy.completion_kind,
+                        operator_policy.terminal_reason,
+                    )
+                else:
+                    completion_kind, terminal_reason = terminal_facts_for_run(run)
                 sync_run_succeeded(
                     uow,
                     run_id=action.run_id,

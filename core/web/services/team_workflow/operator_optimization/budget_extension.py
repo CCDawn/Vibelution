@@ -5,6 +5,7 @@ import json
 from decimal import Decimal
 
 from core.research.operator_optimization.contracts import ModelBudgetRevision
+
 from ..research_runtime.formal_write_runtime import get_write_store
 from ..research_runtime.operator_authorization import require_privileged_server_operator
 from .store import CampaignConflict, _service, update_campaign
@@ -18,7 +19,7 @@ def extend_model_budget(team_id, project_id, campaign_id, *, expected_version,
         raise ValueError("A finite positive model cost limit is required")
     call_limits = dict(call_limits or {})
     output_limits = dict(output_limits or {})
-    if (set(token_limits) | set(call_limits) | set(output_limits)) - {"discussion", "knowledge", "planning"}:
+    if (set(token_limits) | set(call_limits) | set(output_limits)) - {"discussion", "knowledge", "planning", "decision"}:
         raise ValueError("Only model stage token and call limits can be increased")
 
     def increase(campaign):
@@ -93,6 +94,7 @@ def extend_model_budget(team_id, project_id, campaign_id, *, expected_version,
 def authorized_model_limits(repo, *, run_id, campaign_id, currency):
     """Resolve history from persisted campaign identity, never a caller cap list."""
     from core.research.operator_optimization.contracts import OptimizationCampaign
+
     from .store import _load
     run = repo.get_run(run_id)
     if run is None:

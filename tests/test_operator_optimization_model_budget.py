@@ -16,14 +16,15 @@ import pytest
 
 from core.research.operator_optimization.model_budget_contracts import (
     OperatorDiscussionBudget,
+    OperatorModelCallBudget,
 )
 from core.web.services.team_workflow.operator_optimization.model_budget import (
     ModelBudgetError,
     admit_model_invocation,
     calculate_model_cost,
+    record_model_invocation_usage,
     reserve_model_budget,
     settle_model_budget,
-    record_model_invocation_usage,
 )
 from tests._support.workflow_ledger_helpers import (
     build_attempt_record,
@@ -79,8 +80,54 @@ def _multi_model_budget() -> OperatorDiscussionBudget:
     )
 
 
+def test_decision_budget_has_its_own_accounting_kind(tmp_path: Path, monkeypatch):
+    from core.web.services.team_workflow.operator_optimization import budget_extension
+
+    monkeypatch.setattr(
+        budget_extension, "authorized_model_limits", lambda *args, **kwargs: {Decimal(1)}
+    )
+    store = open_ledger_store(tmp_path / "decision-budget.sqlite")
+    try:
+        _seed_parent(store, run_id="run-decision", node_run_id="node-decision")
+        decision = OperatorModelCallBudget.model_validate(
+            {
+                **_discussion_budget().model_dump(mode="json"),
+                "maxCalls": 1,
+            }
+        )
+        reservation = reserve_model_budget(
+            store,
+            run_id="run-decision",
+            node_run_id="node-decision",
+            optimization_campaign_id="campaign-decision",
+            round_id="round-decision",
+            campaign_budget={
+                "authorized": True,
+                "currency": "USD",
+                "modelCostLimit": 1,
+                "decision": decision.model_dump(mode="json"),
+            },
+            budget_kind="decision",
+            policy_hash="decision-policy-v1",
+        )
+        reserved = store.read(
+            lambda repo: repo.execute(
+                "SELECT reserved_json FROM budget_receipts WHERE reservation_id=?",
+                (reservation["reservationId"],),
+            ).fetchone()[0]
+        )
+        metadata = json.loads(reserved)["operatorModelBudget"]
+        assert metadata["budgetKind"] == "decision"
+        assert metadata["maxCalls"] == 1
+    finally:
+        store.close()
+
+
 def _seed_parent(store, *, run_id: str, node_run_id: str) -> None:
-    from tests._support.workflow_ledger_helpers import build_event_record, build_run_record
+    from tests._support.workflow_ledger_helpers import (
+        build_event_record,
+        build_run_record,
+    )
 
     def mutate(uow):
         if uow.repository.get_run(run_id) is None:
@@ -148,8 +195,9 @@ def test_missing_discussion_budget_is_rejected_without_a_default():
 @pytest.mark.parametrize("operation", ["void", "release", "compensate"])
 def test_native_budget_cleanup_preserves_unknown_operator_cost(tmp_path, consumed, operation):
     from core.web.services.team_workflow.research_runtime.budget_authority_adapter import (
-        void_budget_reservation, release_budget_reservation,
         compensate_terminal_attempt_reservation_in_uow,
+        release_budget_reservation,
+        void_budget_reservation,
     )
     store = open_ledger_store(tmp_path / "cleanup.sqlite")
     try:
@@ -493,6 +541,7 @@ def isolated_campaign_authority(monkeypatch):
     # These are Ledger accounting unit tests. Campaign authorization itself
     # is exercised against persisted activities in test_operator_budget_extension.
     from decimal import Decimal
+
     from core.web.services.team_workflow.operator_optimization import budget_extension
     monkeypatch.setattr(budget_extension, "authorized_model_limits",
         lambda *a, **kw: {Decimal(v) for v in ("0.01", "0.002",)})

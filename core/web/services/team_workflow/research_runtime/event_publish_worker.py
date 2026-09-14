@@ -50,8 +50,19 @@ class EventPublishWorker:
         if self._deliver is not None:
             return self._deliver(payload)
         if payload.get("eventType") == "operator_round_completed":
-            from ..operator_optimization.iteration import advance_iteration
-            return advance_iteration(self._store, payload, now_ms=self._now())
+            from ..operator_optimization.iteration import (
+                advance_iteration,
+                apply_persisted_iteration_decision,
+            )
+            from .operator_terminal_policy import operator_round_terminal_policy
+
+            run = self._store.get_run(str(payload.get("runId") or ""))
+            policy = operator_round_terminal_policy(run)
+            if policy is not None and policy.node_id == "optimization_feedback":
+                return advance_iteration(self._store, payload, now_ms=self._now())
+            return apply_persisted_iteration_decision(
+                self._store, payload, now_ms=self._now()
+            )
         from .knowledge_sideflow_service import absorb_knowledge_result
 
         return absorb_knowledge_result(

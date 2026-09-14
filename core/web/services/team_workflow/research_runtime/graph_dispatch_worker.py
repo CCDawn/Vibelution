@@ -49,6 +49,7 @@ from .block_projection import (
 from .blocked_reason import format_blocked_reason, problem_from_graph_error
 from .ids import new_id
 from .iteration_route import branch_decision_from_run, routed_successors
+from .operator_terminal_policy import operator_round_terminal_policy
 
 # A run is created before START_NODE is accepted so the request can be made
 # idempotent.  That window must nevertheless be bounded: after this deadline
@@ -2569,8 +2570,9 @@ def _terminal_facts_for_close(
     """
     if _is_sideflow_run(run):
         return "knowledge_sideflow", "knowledge_package_accepted"
-    if run.workflow_id == "operator-optimization":
-        return "operator_round_completed", "optimization_feedback_verified"
+    operator_policy = operator_round_terminal_policy(run)
+    if operator_policy is not None:
+        return operator_policy.completion_kind, operator_policy.terminal_reason
     return terminal_facts_for_run(run)
 
 
@@ -2588,8 +2590,9 @@ def _run_terminal_close_applies(
     """
     if _is_sideflow_run(run):
         return True
-    if run.workflow_id == "operator-optimization":
-        return str(node_id or "") == "optimization_feedback"
+    operator_policy = operator_round_terminal_policy(run)
+    if operator_policy is not None:
+        return str(node_id or "") == operator_policy.node_id
     return str(node_id or "") == "result_package"
 
 

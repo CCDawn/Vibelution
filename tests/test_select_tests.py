@@ -1398,6 +1398,100 @@ def test_selector_separates_serial_changed_python_tests(tmp_path: Path):
     assert result["validationLayers"] == ["focused", "local-parallel", "local-serial"]
 
 
+def test_selector_load_dist_parallelizes_measured_serial_safe_changed_test(tmp_path: Path):
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_web_app.py").write_text(
+        "import pytest\npytestmark = pytest.mark.serial\n",
+        encoding="utf-8",
+    )
+
+    result = select_tests.select_tests(
+        ["tests/test_web_app.py"],
+        {"rules": []},
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    assert result["commands"] == [
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_app.py "
+        "-q -n 4 --dist load --maxfail=0"
+    ]
+    assert '-m "not serial"' not in result["commands"][0]
+    assert result["validationLayers"] == ["focused", "local-serial"]
+
+
+def test_selector_load_dist_parallelizes_measured_serial_safe_import_frontier(
+    tmp_path: Path,
+):
+    (tmp_path / "core").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "core" / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (tmp_path / "tests" / "test_web_app.py").write_text(
+        "import core.module\nimport pytest\npytestmark = pytest.mark.serial\n",
+        encoding="utf-8",
+    )
+
+    result = select_tests.select_tests(
+        ["core/module.py"],
+        {"rules": []},
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    assert result["commands"] == [
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_app.py "
+        "-q -n 4 --dist load --maxfail=0"
+    ]
+    assert result["validationLayers"] == ["focused", "local-serial"]
+
+
+def test_selector_keeps_plain_serial_files_beside_load_dist_batch(tmp_path: Path):
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_web_app.py").write_text(
+        "import pytest\npytestmark = pytest.mark.serial\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "tests" / "test_serial.py").write_text(
+        "import pytest\npytestmark = pytest.mark.serial\n",
+        encoding="utf-8",
+    )
+
+    result = select_tests.select_tests(
+        ["tests/test_web_app.py", "tests/test_serial.py"],
+        {"rules": []},
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    assert result["commands"] == [
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_app.py "
+        "-q -n 4 --dist load --maxfail=0",
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_serial.py -q --maxfail=0",
+    ]
+    assert result["validationLayers"] == ["focused", "local-serial"]
+
+
+def test_selector_real_matrix_load_dist_override_for_serial_route_batch():
+    result = select_tests.select_tests(
+        ["core/web/services/session_service.py"],
+        select_tests.load_matrix(),
+    )
+
+    route_batch = next(
+        command
+        for command in result["commands"]
+        if "tests/test_chat_room_service.py" in command
+    )
+    assert route_batch.endswith(
+        "tests/test_chat_room_routes.py -n 4 --dist load -q --maxfail=0"
+    )
+    assert '-m "not serial"' not in route_batch
+    filtered_subset = next(
+        command for command in result["commands"] if " -k " in command
+    )
+    assert " -n " not in filtered_subset
+
+
 def test_selector_ignores_serial_marker_text_below_module_scope(tmp_path: Path):
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests" / "test_alpha.py").write_text(

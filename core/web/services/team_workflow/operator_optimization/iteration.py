@@ -6,19 +6,29 @@ import json
 from decimal import Decimal
 from types import SimpleNamespace
 
+from core.research.operator_optimization.decision import (
+    OPTIMIZATION_DECISION_ARTIFACT_KIND,
+    OperatorIterationDecision,
+    OperatorIterationDecisionArtifact,
+    decision_id_for,
+)
 from core.research.workflow.contracts import (
     ActorRef,
     CommandRequest,
     WorkflowCommandKind,
 )
-from core.research.workflow.ledger import OutboxRecord
 from core.research.workflow.contracts._canonical import sha256_hex
+from core.research.workflow.ledger import OutboxRecord
 
 from ..research_runtime.formal_write_runtime import get_command_service
+from ..research_runtime.operator_terminal_policy import (
+    operator_round_terminal_policy,
+)
 from ..storage_durability import inter_process_lock
 from .budget import budget_summary
-from .model_budget import _campaign_committed_amounts, calculate_max_reserved_cost
+from .decision_output import decision_task_input
 from .knowledge import read_ref
+from .model_budget import _campaign_committed_amounts, calculate_max_reserved_cost
 from .rounds import prepare_round
 from .store import CampaignConflict, campaign_root, read_campaign
 
@@ -31,9 +41,14 @@ def enqueue_iteration(uow, *, run, now_ms):
         "SELECT action_id FROM outbox_actions WHERE idempotency_key=?", (key,)
     ).fetchone():
         return
-    attempt = uow.repository.latest_attempt(run.run_id, "optimization_feedback")
+    policy = operator_round_terminal_policy(run)
+    if policy is None:
+        raise CampaignConflict("Iteration requires an operator workflow run")
+    attempt = uow.repository.latest_attempt(run.run_id, policy.node_id)
     if attempt is None or not attempt.command_id:
-        raise CampaignConflict("Iteration requires the native feedback command")
+        raise CampaignConflict(
+            f"Iteration requires the native {policy.node_id} command"
+        )
     uow.repository.insert_outbox(
         OutboxRecord(
             action_id="act-" + sha256_hex(key)[:24],
@@ -61,7 +76,7 @@ def _save(store, run_id, state):
     def mutate(uow):
         run = uow.repository.get_run(run_id)
         snapshot = json.loads(run.input_snapshot_json)
-        snapshot["operatorIteration"] = state
+        snapshot["operatorDecision"] = state
         uow.repository.execute(
             "UPDATE workflow_runs SET input_snapshot_json=? WHERE run_id=?",
             (json.dumps(snapshot, ensure_ascii=False), run_id),
@@ -75,7 +90,11 @@ def _budget_stop(store, campaign):
     if budget_summary(campaign)["gpuTuningAvailableSeconds"] < 1:
         return "gpu_budget_exhausted"
     budget = campaign.budget
-    if budget.discussion is None or budget.planning is None:
+    if (
+        budget.discussion is None
+        or budget.planning is None
+        or budget.decision is None
+    ):
         return "model_budget_missing"
     limit = Decimal(str(budget.modelCostLimit))
     if limit <= 0:
@@ -91,13 +110,22 @@ def _budget_stop(store, campaign):
     )
     required = calculate_max_reserved_cost(
         budget.discussion
-    ) + calculate_max_reserved_cost(budget.planning)
+    ) + calculate_max_reserved_cost(budget.planning) + calculate_max_reserved_cost(
+        budget.decision
+    )
     if committed + required > limit:
         return "model_budget_exhausted"
     return ""
 
 
 def advance_iteration(store, payload, *, now_ms):
+    """Materialize the one durable decision request for a completed round.
+
+    This event consumer deliberately has no authority to choose the next
+    research action.  Replays return the persisted request, while a separate
+    decision-agent completion applies one structured decision through
+    :func:`apply_iteration_decision`.
+    """
     run = store.get_run(payload.get("runId", ""))
     if (
         run is None
@@ -110,8 +138,8 @@ def advance_iteration(store, payload, *, now_ms):
     with inter_process_lock(root / ("iteration-" + sha256_hex(run.run_id))):
         run = store.get_run(run.run_id)
         snapshot = json.loads(run.input_snapshot_json)
-        state = snapshot.get("operatorIteration", {})
-        if state.get("status") in {"started", "stopped", "blocked"}:
+        state = snapshot.get("operatorDecision", {})
+        if state:
             return state
 
         def stop(reason):
@@ -143,9 +171,83 @@ def advance_iteration(store, payload, *, now_ms):
             != record.evaluationRef.model_dump(mode="json")
         ):
             raise CampaignConflict("Iteration feedback differs from its round")
+        if campaign.activeRunId != run.run_id:
+            return stop("superseded")
+        if len(campaign.rounds) >= campaign.budget.maxRounds:
+            return stop("max_rounds_reached")
+        reason = _budget_stop(store, campaign)
+        if reason:
+            return stop(reason)
+        return _save(
+            store,
+            run.run_id,
+            {
+                "status": "requested",
+                "decisionId": decision_id_for(run.run_id, record.feedbackRef),
+                "campaignVersion": campaign.revision,
+                "feedbackRef": record.feedbackRef.model_dump(mode="json"),
+                "evaluationRef": record.evaluationRef.model_dump(mode="json"),
+                "requestedAtMs": now_ms,
+            },
+        )
+
+
+def apply_iteration_decision(store, payload, decision, *, now_ms):
+    """Apply one persisted research decision and execute only its chosen action."""
+    run = store.get_run(payload.get("runId", ""))
+    if (
+        run is None
+        or run.workflow_id != "operator-optimization"
+        or run.team_id != payload.get("teamId")
+        or payload.get("eventType") != EVENT
+    ):
+        raise CampaignConflict("Iteration event does not identify an operator run")
+    root = campaign_root(run.team_id, run.project_id)
+    with inter_process_lock(root / ("iteration-" + sha256_hex(run.run_id))):
+        run = store.get_run(run.run_id)
+        snapshot = json.loads(run.input_snapshot_json)
+        state = snapshot.get("operatorDecision", {})
         if not state:
+            raise CampaignConflict("Completed round has no research decision request")
+        try:
+            normalized = OperatorIterationDecision.model_validate(decision).model_dump(
+                mode="json"
+            )
+        except Exception as exc:
+            raise CampaignConflict(f"Research decision is invalid: {exc}") from exc
+        if normalized["decisionId"] != state.get("decisionId"):
+            raise CampaignConflict("Research decision does not match the pending request")
+        existing = state.get("decision")
+        if existing is not None:
+            if existing != normalized:
+                raise CampaignConflict("Research decision is immutable")
+            if state.get("status") in {"started", "stopped", "blocked"}:
+                return state
+        elif state.get("status") != "requested":
+            raise CampaignConflict("Research decision request is not pending")
+
+        def stop(reason):
+            return _save(
+                store,
+                run.run_id,
+                {**state, "decision": normalized, "status": "stopped", "reason": reason},
+            )
+
+        cid = snapshot["researchObjectiveContract"]["optimizationCampaignId"]
+        campaign = read_campaign(run.team_id, run.project_id, cid)
+        if normalized["kind"] == "stop":
+            return stop(normalized["reason"])
+        if (
+            campaign.status != "running"
+            or not campaign.budget.authorized
+            or not campaign.authorizedBy
+        ):
+            return stop("campaign_not_authorized_or_running")
+        if existing is None:
             if campaign.activeRunId != run.run_id:
                 return stop("superseded")
+            if campaign.revision != state.get("campaignVersion"):
+                return stop("campaign_changed_after_decision_request")
             if len(campaign.rounds) >= campaign.budget.maxRounds:
                 return stop("max_rounds_reached")
             reason = _budget_stop(store, campaign)
@@ -155,9 +257,10 @@ def advance_iteration(store, payload, *, now_ms):
                 store,
                 run.run_id,
                 {
+                    **state,
+                    "decision": normalized,
                     "status": "preparing",
-                    "campaignVersion": campaign.revision,
-                    "commandKey": "auto-round:" + run.run_id,
+                    "commandKey": "decision-round:" + normalized["decisionId"],
                 },
             )
         if not state.get("nextRunId"):
@@ -176,7 +279,7 @@ def advance_iteration(store, payload, *, now_ms):
                     **state,
                     "nextRunId": next_run.run_id,
                     "startRunVersion": next_run.run_version,
-                    "requestedAtMs": now_ms,
+                    "actionRequestedAtMs": now_ms,
                 },
             )
         campaign = read_campaign(run.team_id, run.project_id, cid)
@@ -207,7 +310,7 @@ def advance_iteration(store, payload, *, now_ms):
                     idempotency_key=start_key,
                     payload={},
                     requested_by=ActorRef("system", "operator-iteration"),
-                    requested_at_ms=state["requestedAtMs"],
+                    requested_at_ms=state["actionRequestedAtMs"],
                 )
             )
         except NodeNotReadyError as exc:
@@ -221,3 +324,42 @@ def advance_iteration(store, payload, *, now_ms):
             run.run_id,
             {**state, "status": "started", "commandId": receipt.command_id},
         )
+
+
+def apply_persisted_iteration_decision(store, payload, *, now_ms):
+    """Apply the single decision artifact already verified by the graph node."""
+
+    run = store.get_run(payload.get("runId", ""))
+    if run is None:
+        raise CampaignConflict("Decision artifact run is unavailable")
+    from ..research_runtime.workflow_artifact_store import list_workflow_artifacts
+
+    rows = list_workflow_artifacts(
+        run.team_id,
+        kind=OPTIMIZATION_DECISION_ARTIFACT_KIND,
+        workflow_run_id=run.run_id,
+    )
+    if len(rows) != 1:
+        raise CampaignConflict("Completed round requires exactly one decision artifact")
+    artifact = OperatorIterationDecisionArtifact.model_validate(rows[0]["payload"])
+    inputs = decision_task_input(run.team_id, run.run_id)
+    if (
+        artifact.runId != run.run_id
+        or artifact.optimizationCampaignId != inputs["optimizationCampaignId"]
+        or artifact.roundId != inputs["roundId"]
+        or artifact.inputHash != inputs["inputHash"]
+        or artifact.feedbackRef.model_dump(mode="json") != inputs["feedbackRef"]
+        or artifact.evaluationRef.model_dump(mode="json") != inputs["evaluationRef"]
+        or artifact.decision.decisionId
+        != decision_id_for(run.run_id, inputs["feedbackRef"])
+    ):
+        raise CampaignConflict("Decision artifact differs from the current round evidence")
+    state = advance_iteration(store, payload, now_ms=now_ms)
+    if state.get("status") != "requested" and not state.get("decision"):
+        return state
+    return apply_iteration_decision(
+        store,
+        payload,
+        artifact.decision.model_dump(mode="json"),
+        now_ms=now_ms,
+    )

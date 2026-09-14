@@ -48,6 +48,17 @@ def test_task_adapter_registry_covers_every_agent_node() -> None:
     assert missing == [], f"Agent nodes missing task adapters: {missing}"
 
 
+def test_operator_decision_uses_its_dedicated_adapter() -> None:
+    from core.web.services.team_workflow.research_runtime.task_adapter_registry import (
+        resolve_agent_task_adapter,
+    )
+
+    adapter = resolve_agent_task_adapter("optimization_decision")
+    assert adapter is not None
+    assert adapter.family == "operator_decision"
+    assert adapter.role_key == "iteration_planner"
+
+
 def test_real_domain_ports_task_kind_covers_source_finding() -> None:
     # Legacy helper must not reject the production first node.
     assert _task_kind_for("source_finding") is not None

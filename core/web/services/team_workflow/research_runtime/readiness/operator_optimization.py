@@ -40,6 +40,24 @@ def evaluate_operator_node(run, node, common, context) -> DomainVerdict:
             planning_task_input(run.team_id, run.run_id)
         except (CampaignConflict, ValueError, FileNotFoundError):
             failures.append(("operator_planning_input_unavailable", "无法回读已选假设、资料或冻结协议", "domain"))
+    if node.nodeId == "optimization_decision":
+        from ...operator_optimization.decision_output import decision_task_input
+        from ...operator_optimization.store import CampaignConflict
+
+        if not state["campaign"]["budget"].get("decision"):
+            failures.append((
+                "operator_decision_budget_missing",
+                "尚未配置迭代决策调用次数、token 预算与模型价目",
+                "budget",
+            ))
+        try:
+            decision_task_input(run.team_id, run.run_id)
+        except (CampaignConflict, ValueError, FileNotFoundError):
+            failures.append((
+                "operator_decision_input_unavailable",
+                "无法回读本轮反馈与数值评价",
+                "domain",
+            ))
     campaign = state["campaign"]
     if campaign["researchProjectId"] != run.project_id or campaign["teamId"] != run.team_id:
         failures.append(("operator_scope_mismatch", "实验活动与运行归属不一致", "scope"))
@@ -54,7 +72,11 @@ def evaluate_operator_node(run, node, common, context) -> DomainVerdict:
             failures.append(("operator_protocol_missing", "尚未冻结工作负载和测量协议", "domain"))
         if state["budgetSummary"]["gpuTuningAvailableSeconds"] <= 0:
             failures.append(("operator_gpu_budget_empty", "GPU 时长预算不足", "budget"))
-    if node.nodeId in {"optimization_discussion", "optimization_plan"} and campaign["budget"]["modelCostLimit"] <= 0:
+    if node.nodeId in {
+        "optimization_discussion",
+        "optimization_plan",
+        "optimization_decision",
+    } and campaign["budget"]["modelCostLimit"] <= 0:
         failures.append(("operator_model_budget_empty", "模型与检索预算不足", "budget"))
     if node.nodeId == "optimization_discussion" and not campaign["budget"].get("discussion"):
         failures.append(("operator_discussion_budget_missing", "尚未配置讨论调用次数、token 预算与模型价目", "budget"))

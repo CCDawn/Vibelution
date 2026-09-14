@@ -31,6 +31,10 @@ class OperatorKnowledgeInvocationBinding(Contract):
 
 
 def parse_operator_invocation_binding(payload):
+    if payload.get("formalNodeId") == "optimization_decision":
+        from .decision_invocation import OperatorDecisionInvocationBinding
+
+        return OperatorDecisionInvocationBinding.model_validate(payload)
     if payload.get("formalNodeId") == "optimization_plan":
         from .planning_invocation import OperatorPlanningInvocationBinding
 

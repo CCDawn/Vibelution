@@ -25,9 +25,8 @@ from core.research.workflow.ledger import WorkflowLedgerStore
 from ..research_runtime.budget_authority_adapter import record_budget_usage_in_uow
 from ..research_runtime.ids import new_id
 
-
-MONEY_ZERO = Decimal("0")
-TOKENS_PER_MILLION = Decimal("1000000")
+MONEY_ZERO = Decimal(0)
+TOKENS_PER_MILLION = Decimal(1000000)
 OPERATOR_MODEL_BUDGET_SCHEMA_VERSION = 1
 OPERATOR_MODEL_BUDGET_KIND = "operator_model_budget"
 _BUDGET_RECEIPT_COLUMNS = (
@@ -295,7 +294,7 @@ def _spec(
 
     if budget_kind is None:
         budget_kind = "knowledge" if knowledge_budget is not None else "discussion"
-    if budget_kind not in {"discussion", "knowledge", "planning"}:
+    if budget_kind not in {"discussion", "knowledge", "planning", "decision"}:
         raise ModelBudgetError("operator model budget kind is invalid", code="operator_model_budget_invalid")
 
     if campaign_budget is not None:
@@ -313,10 +312,15 @@ def _spec(
             if raw_authorized is not None:
                 authorized = bool(raw_authorized)
 
-    if budget_kind == "planning":
+    if budget_kind in {"planning", "decision"}:
         if discussion_budget is not None or knowledge_budget is not None:
-            raise ModelBudgetError("planning requires its own campaign call budget", code="operator_model_budget_contract_conflict")
-        budget = _call_budget(_campaign_value(campaign_budget, "planning") if campaign_budget is not None else None, kind="planning")
+            raise ModelBudgetError(f"{budget_kind} requires its own campaign call budget", code="operator_model_budget_contract_conflict")
+        budget = _call_budget(
+            _campaign_value(campaign_budget, budget_kind)
+            if campaign_budget is not None
+            else None,
+            kind=budget_kind,
+        )
     elif budget_kind == "knowledge":
         if discussion_budget is not None:
             raise ModelBudgetError("knowledge budget cannot use discussion budget", code="operator_model_budget_contract_conflict")
@@ -1373,10 +1377,10 @@ def finish_model_budget_in_uow(uow: Any, *, reservation: Mapping[str, Any],
 
 
 __all__ = [
-    "ModelBudgetError",
-    "OperatorBudgetSpec",
     "OPERATOR_MODEL_BUDGET_KIND",
     "OPERATOR_MODEL_BUDGET_SCHEMA_VERSION",
+    "ModelBudgetError",
+    "OperatorBudgetSpec",
     "admit_model_invocation",
     "admit_model_invocation_in_uow",
     "build_operator_budget_policy",

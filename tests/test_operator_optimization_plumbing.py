@@ -19,7 +19,7 @@ def test_runtime_binding_view_uses_operator_graph(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "_agent_display_name_map", lambda: {})
     result = runtime.get_effective_agent_bindings("operator-optimization")
     assert {row["nodeId"] for row in result["bindings"]} == {
-        "optimization_discussion", "optimization_plan",
+        "optimization_discussion", "optimization_plan", "optimization_decision",
     }
     assert runtime.get_effective_agent_bindings("operator-optimization-baseline")["bindings"] == []
 

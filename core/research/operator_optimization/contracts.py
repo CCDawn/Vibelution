@@ -48,6 +48,7 @@ class CampaignBudget(Contract):
     discussion: OperatorDiscussionBudget | None = None
     knowledge: OperatorModelCallBudget | None = None
     planning: OperatorModelCallBudget | None = None
+    decision: OperatorModelCallBudget | None = None
 
 
 class OptimizationHypothesis(Contract):
