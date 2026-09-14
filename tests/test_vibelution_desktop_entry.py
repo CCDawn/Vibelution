@@ -648,8 +648,10 @@ def test_parse_args_accepts_launch_desktop_shell_flags():
 
 def test_launch_desktop_shell_action_dispatches_to_desktop_shell(monkeypatch, capsys, tmp_path):
     captured: dict[str, object] = {}
+    order: list[str] = []
 
     def fake_launch(*, project_root, then_lifecycle, open_workbench):
+        order.append("launch")
         captured["project_root"] = project_root
         captured["then_lifecycle"] = then_lifecycle
         captured["open_workbench"] = open_workbench
@@ -658,6 +660,7 @@ def test_launch_desktop_shell_action_dispatches_to_desktop_shell(monkeypatch, ca
     def fake_wait(workspace_root, operation, *, baseline_command_id="", **_kwargs):
         captured["settle_workspace"] = str(workspace_root)
         captured["settle_operation"] = operation
+        captured["settle_baseline_command_id"] = baseline_command_id
         return {
             "operation": operation,
             "observed": "queue_settlement",
@@ -671,6 +674,11 @@ def test_launch_desktop_shell_action_dispatches_to_desktop_shell(monkeypatch, ca
         }
 
     monkeypatch.setattr("core.launcher.desktop_shell.launch_desktop_shell", fake_launch)
+    monkeypatch.setattr(
+        desktop_entry,
+        "_capture_lifecycle_settlement_baseline",
+        lambda _root: order.append("baseline") or {"kind": "main_line", "commandId": "cmd_before_launch"},
+    )
     monkeypatch.setattr(desktop_entry, "wait_for_lifecycle_settlement", fake_wait)
     result = desktop_entry.main(
         [
@@ -690,6 +698,8 @@ def test_launch_desktop_shell_action_dispatches_to_desktop_shell(monkeypatch, ca
     assert captured["open_workbench"] is True
     assert captured["settle_operation"] == "start"
     assert captured["settle_workspace"] == str(tmp_path)
+    assert captured["settle_baseline_command_id"] == "cmd_before_launch"
+    assert order == ["baseline", "launch"]
     payload = json.loads(capsys.readouterr().out)
     assert payload["kind"] == "unpackaged"
     assert payload["pid"] == 9
@@ -975,6 +985,24 @@ def test_start_reuse_health_reads_isolated_registry_port(monkeypatch, tmp_path):
     assert urls == ["http://127.0.0.1:8124/api/health"]
 
 
+def test_capture_lifecycle_settlement_baseline_uses_branch_registry_for_a_worktree(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "core.launcher.desktop_shell.resolve_desktop_shell_launch_roots",
+        lambda _root: (tmp_path / "main", tmp_path),
+    )
+    monkeypatch.setattr(
+        desktop_entry,
+        "_read_branch_instance_snapshot",
+        lambda _root: {"generation": 12, "commandId": "cmd_branch"},
+    )
+
+    assert desktop_entry._capture_lifecycle_settlement_baseline(tmp_path) == {
+        "kind": "branch_instance",
+        "generation": 12,
+        "commandId": "cmd_branch",
+    }
+
+
 def test_wait_for_lifecycle_settlement_reports_accepted_queue_settlement(monkeypatch, tmp_path):
     runtime_manager_dir = _make_settlement_runtime(monkeypatch, tmp_path)
     _write_intent(runtime_manager_dir, operation="start", command_id="cmd_settled_ok")
@@ -1135,6 +1163,160 @@ def test_wait_for_lifecycle_settlement_ignores_stale_intent_and_matches_fresh_on
 
     assert settlement["commandId"] == "cmd_fresh"
     assert settlement["accepted"] is True
+
+
+def test_wait_for_branch_instance_settlement_requires_a_fresh_ready_generation(monkeypatch, tmp_path):
+    snapshots = [
+        {
+            "generation": 4,
+            "commandId": "cmd_old",
+            "desiredState": "open",
+            "status": "steady",
+            "spawnPid": 100,
+        },
+        {
+            "generation": 5,
+            "commandId": "cmd_new",
+            "desiredState": "open",
+            "status": "steady",
+            "spawnPid": 200,
+        },
+    ]
+    reads = []
+
+    def read_snapshot(_root):
+        reads.append(True)
+        return snapshots[min(len(reads) - 1, len(snapshots) - 1)]
+
+    clock = [0.0]
+    monkeypatch.setattr(desktop_entry, "_read_branch_instance_snapshot", read_snapshot)
+    settlement = desktop_entry.wait_for_branch_instance_settlement(
+        tmp_path,
+        "start",
+        baseline_generation=4,
+        baseline_command_id="cmd_old",
+        timeout_seconds=5.0,
+        reuse_grace_seconds=5.0,
+        sleep=_advance_clock(clock),
+        monotonic=lambda: clock[0],
+        health_probe=lambda: True,
+    )
+
+    assert len(reads) == 2
+    assert settlement["observed"] == "instance_registry_settlement"
+    assert settlement["settled"] is True
+    assert settlement["accepted"] is True
+    assert settlement["commandId"] == "cmd_new"
+
+
+def test_wait_for_branch_instance_settlement_requires_closed_state_and_cleared_runtime_pids(
+    monkeypatch, tmp_path
+):
+    snapshots = [
+        {
+            "generation": 8,
+            "commandId": "cmd_stop",
+            "desiredState": "closed",
+            "status": "closed",
+            "spawnPid": 321,
+        },
+        {
+            "generation": 8,
+            "commandId": "cmd_stop",
+            "desiredState": "closed",
+            "status": "closed",
+            "spawnPid": 0,
+            "backendPid": 0,
+            "controlPid": 0,
+        },
+    ]
+    reads = []
+
+    def read_snapshot(_root):
+        reads.append(True)
+        return snapshots[min(len(reads) - 1, len(snapshots) - 1)]
+
+    clock = [0.0]
+    monkeypatch.setattr(desktop_entry, "_read_branch_instance_snapshot", read_snapshot)
+    settlement = desktop_entry.wait_for_branch_instance_settlement(
+        tmp_path,
+        "stop",
+        baseline_generation=7,
+        timeout_seconds=5.0,
+        sleep=_advance_clock(clock),
+        monotonic=lambda: clock[0],
+    )
+
+    assert len(reads) == 2
+    assert settlement["observed"] == "instance_registry_settlement"
+    assert settlement["accepted"] is True
+    assert settlement["commandId"] == "cmd_stop"
+
+
+def test_wait_for_branch_instance_settlement_surfaces_fresh_failure(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        desktop_entry,
+        "_read_branch_instance_snapshot",
+        lambda _root: {
+            "generation": 3,
+            "commandId": "cmd_failed",
+            "desiredState": "open",
+            "status": "failed",
+            "failureMessage": "backend exited before readiness",
+        },
+    )
+    settlement = desktop_entry.wait_for_branch_instance_settlement(
+        tmp_path,
+        "restart",
+        baseline_generation=2,
+        timeout_seconds=5.0,
+        sleep=lambda _seconds: None,
+        monotonic=time.monotonic,
+        health_probe=lambda: pytest.fail("failed state must not probe health"),
+    )
+
+    assert settlement["observed"] == "instance_registry_settlement"
+    assert settlement["settled"] is True
+    assert settlement["accepted"] is False
+    assert settlement["code"] == "branch_instance_failed"
+    assert settlement["message"] == "backend exited before readiness"
+
+
+def test_await_launch_lifecycle_settlement_routes_worktrees_to_instance_registry(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_branch_wait(workspace_root, operation, **kwargs):
+        captured.update({"workspaceRoot": workspace_root, "operation": operation, **kwargs})
+        return {
+            "operation": operation,
+            "observed": "instance_registry_settlement",
+            "settled": True,
+            "accepted": True,
+            "ok": True,
+            "commandId": "cmd_branch_new",
+            "code": "",
+            "message": "ready",
+            "resultsPath": "",
+        }
+
+    monkeypatch.setattr(desktop_entry, "wait_for_branch_instance_settlement", fake_branch_wait)
+    monkeypatch.setattr(
+        desktop_entry,
+        "wait_for_lifecycle_settlement",
+        lambda *_args, **_kwargs: pytest.fail("worktree lifecycle must not use the main-line queue"),
+    )
+    payload = desktop_entry._await_launch_lifecycle_settlement(
+        argparse.Namespace(workspace=str(tmp_path), lifecycle_settle_timeout=7.0),
+        {"thenLifecycle": "start"},
+        baseline={"kind": "branch_instance", "generation": 9, "commandId": "cmd_branch_old"},
+    )
+
+    assert payload["ok"] is True
+    assert captured["workspaceRoot"] == tmp_path.resolve()
+    assert captured["operation"] == "start"
+    assert captured["baseline_generation"] == 9
+    assert captured["baseline_command_id"] == "cmd_branch_old"
+    assert captured["timeout_seconds"] == 7.0
 
 
 def test_launch_desktop_shell_waits_for_settlement_and_reports_visible_failure(monkeypatch, capsys, tmp_path):

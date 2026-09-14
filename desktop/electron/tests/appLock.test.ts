@@ -4,6 +4,7 @@ import {
   createSingleInstanceEnvelope,
   pinSharedDesktopShellUserData,
   resolveDesktopShellUserDataRoot,
+  resolveSingleInstanceCliIntent,
   resolveSingleInstanceProvenance,
   resolveSecondInstanceIntent,
   shouldPinSharedDesktopShellUserData,
@@ -58,6 +59,8 @@ describe("single-instance lifecycle envelope", () => {
     expect(envelope).toEqual({
       schemaVersion: 1,
       kind: "vibelution-single-instance",
+      projectRoot: "",
+      openWorkbench: false,
       lifecycle: {
         command: "stop",
         provenance: "forwarded",
@@ -74,12 +77,33 @@ describe("single-instance lifecycle envelope", () => {
     expect(envelope).toEqual({
       schemaVersion: 1,
       kind: "vibelution-single-instance",
+      projectRoot: "",
+      openWorkbench: false,
       lifecycle: {
         command: "stop",
         provenance: "operator"
       }
     });
     expect(resolveSingleInstanceProvenance(envelope)).toBe("operator");
+  });
+
+  it("round-trips project lifecycle intent without relying on second-instance argv order", () => {
+    const envelope = createSingleInstanceEnvelope({
+      projectRoot: " C:/repo/.worktrees/task ",
+      openWorkbench: true,
+      lifecycleCommand: "START"
+    });
+
+    expect(resolveSingleInstanceCliIntent(envelope)).toEqual({
+      projectRoot: "C:/repo/.worktrees/task",
+      openWorkbench: true,
+      lifecycleCommand: "start"
+    });
+    expect(resolveSingleInstanceCliIntent({ schemaVersion: 1, kind: "other" })).toEqual({
+      projectRoot: "",
+      openWorkbench: false,
+      lifecycleCommand: ""
+    });
   });
 });
 

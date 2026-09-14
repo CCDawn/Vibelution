@@ -9,6 +9,8 @@ export type SingleInstanceLifecycleProvenance = "operator" | "forwarded";
 export type SingleInstanceLifecycleEnvelope = {
   schemaVersion: 1;
   kind: "vibelution-single-instance";
+  projectRoot: string;
+  openWorkbench: boolean;
   lifecycle: {
     command: string;
     provenance: SingleInstanceLifecycleProvenance;
@@ -19,6 +21,8 @@ export type SingleInstanceLifecycleEnvelope = {
 };
 
 export type SingleInstanceLifecycleEnvelopeInput = {
+  projectRoot?: string;
+  openWorkbench?: boolean;
   lifecycleCommand?: string;
   lifecycleSource?: string;
   lifecycleReason?: string;
@@ -32,6 +36,12 @@ export type SecondInstanceIntent =
   | { action: "lifecycle"; command: string }
   | { action: "open_workbench" }
   | { action: "focus_existing_shell" };
+
+export type SingleInstanceCliIntent = {
+  projectRoot: string;
+  openWorkbench: boolean;
+  lifecycleCommand: string;
+};
 
 export type PinSharedDesktopShellUserDataResult = {
   pinned: boolean;
@@ -64,6 +74,8 @@ export function createSingleInstanceEnvelope(
   return {
     schemaVersion: 1,
     kind: "vibelution-single-instance",
+    projectRoot: String(input.projectRoot || "").trim(),
+    openWorkbench: input.openWorkbench === true,
     lifecycle: {
       command,
       provenance: explicitlyForwarded ? "forwarded" : "operator",
@@ -77,18 +89,30 @@ export function createSingleInstanceEnvelope(
 }
 
 /**
+ * Recover the CLI intent from Electron's structured single-instance payload.
+ * Windows may reorder unknown argv switches before emitting second-instance,
+ * so argv is not authoritative for project-scoped lifecycle commands.
+ */
+export function resolveSingleInstanceCliIntent(value: unknown): SingleInstanceCliIntent {
+  if (!isSingleInstanceEnvelope(value)) {
+    return { projectRoot: "", openWorkbench: false, lifecycleCommand: "" };
+  }
+  return {
+    projectRoot: typeof value.projectRoot === "string" ? value.projectRoot.trim() : "",
+    openWorkbench: value.openWorkbench === true,
+    lifecycleCommand: value.lifecycle.command.trim().toLowerCase()
+  };
+}
+
+/**
  * Decode only our versioned envelope. Older Electron processes and unrelated
  * additionalData values deliberately fall back to operator semantics.
  */
 export function resolveSingleInstanceProvenance(value: unknown): SingleInstanceLifecycleProvenance {
-  if (!isObjectRecord(value) || value.schemaVersion !== 1 || value.kind !== "vibelution-single-instance") {
+  if (!isSingleInstanceEnvelope(value)) {
     return "operator";
   }
-  const lifecycle = value.lifecycle;
-  if (!isObjectRecord(lifecycle) || typeof lifecycle.command !== "string") {
-    return "operator";
-  }
-  return lifecycle.provenance === "forwarded" ? "forwarded" : "operator";
+  return value.lifecycle.provenance === "forwarded" ? "forwarded" : "operator";
 }
 
 export function shouldRunDesktopWhenReadyHandlers(input: {
@@ -168,4 +192,11 @@ function normalizeSingleInstanceText(value: unknown): string {
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isSingleInstanceEnvelope(value: unknown): value is SingleInstanceLifecycleEnvelope {
+  if (!isObjectRecord(value) || value.schemaVersion !== 1 || value.kind !== "vibelution-single-instance") {
+    return false;
+  }
+  return isObjectRecord(value.lifecycle) && typeof value.lifecycle.command === "string";
 }

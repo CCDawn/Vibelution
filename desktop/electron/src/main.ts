@@ -7,6 +7,7 @@ import { deflateSync } from "node:zlib";
 import {
   createSingleInstanceEnvelope,
   pinSharedDesktopShellUserData,
+  resolveSingleInstanceCliIntent,
   resolveSingleInstanceProvenance,
   resolveSecondInstanceIntent,
   shouldRunDesktopWhenReadyHandlers,
@@ -353,6 +354,8 @@ const desktopLaunchArgv = process.argv.slice(1);
 const desktopCliArgs = parseDesktopCliArgs(desktopLaunchArgv);
 const desktopLifecycleLaunchMetadata = parseDesktopLifecycleLaunchMetadata(desktopLaunchArgv, process.env);
 const singleInstanceEnvelope = createSingleInstanceEnvelope({
+  projectRoot: desktopCliArgs.projectRoot,
+  openWorkbench: desktopCliArgs.openWorkbench,
   lifecycleCommand: desktopLifecycleLaunchMetadata.command,
   lifecycleSource: desktopLifecycleLaunchMetadata.source,
   lifecycleReason: desktopLifecycleLaunchMetadata.reason,
@@ -4687,7 +4690,7 @@ app.whenReady()
 
 app.on("second-instance", (_event, argv, _workingDirectory, additionalData) => {
   const secondInstanceProvenance = resolveSingleInstanceProvenance(additionalData);
-  const secondCli = parseDesktopCliArgs(argv);
+  const secondCli = resolveSingleInstanceCliIntent(additionalData);
   const intent = resolveSecondInstanceIntent({
     deepLinkUrl: findVibelutionDeepLinkArg(argv) ?? "",
     projectRoot: secondCli.projectRoot,

@@ -1505,7 +1505,11 @@ def _settlement_payload(
     return {
         "operation": operation,
         "observed": observed,
-        "settled": observed in {"queue_settlement", "reuse_backend_healthy"},
+        "settled": observed in {
+            "queue_settlement",
+            "instance_registry_settlement",
+            "reuse_backend_healthy",
+        },
         "accepted": bool(accepted),
         "ok": bool(accepted),
         "commandId": str(command_id),
@@ -1513,6 +1517,143 @@ def _settlement_payload(
         "message": str(message),
         "resultsPath": str(results_path or ""),
     }
+
+
+def _read_branch_instance_snapshot(workspace_root: Path) -> dict[str, object]:
+    from core.runtime_manager.instances_registry import find_instance_by_project_root
+
+    return dict(find_instance_by_project_root(workspace_root))
+
+
+def _capture_lifecycle_settlement_baseline(workspace_root: Path) -> dict[str, object]:
+    """Read the correct lifecycle authority before Electron can mutate it."""
+    from core.launcher.desktop_shell import resolve_desktop_shell_launch_roots
+
+    _shell_root, slot_root = resolve_desktop_shell_launch_roots(workspace_root)
+    if slot_root is not None:
+        entry = _read_branch_instance_snapshot(workspace_root)
+        return {
+            "kind": "branch_instance",
+            "generation": int(entry.get("generation") or 0),
+            "commandId": str(entry.get("commandId") or "").strip(),
+        }
+    intent = _read_main_line_intent_snapshot(_runtime_manager_dir_for(workspace_root))
+    return {
+        "kind": "main_line",
+        "commandId": str(intent.get("commandId") or "").strip(),
+    }
+
+
+def _branch_instance_runtime_pids_clear(entry: dict[str, object]) -> bool:
+    return all(int(entry.get(field) or 0) <= 0 for field in ("spawnPid", "backendPid", "controlPid"))
+
+
+def wait_for_branch_instance_settlement(
+    workspace_root: Path,
+    operation: str,
+    *,
+    baseline_generation: int = 0,
+    baseline_command_id: str = "",
+    timeout_seconds: float = DEFAULT_LIFECYCLE_SETTLE_TIMEOUT_SECONDS,
+    reuse_grace_seconds: float = _LIFECYCLE_REUSE_GRACE_SECONDS,
+    sleep=time.sleep,
+    monotonic=time.monotonic,
+    health_probe=None,
+) -> dict[str, object]:
+    """Wait for one isolated instance generation to reach its requested state."""
+
+    operation = str(operation or "").strip().lower()
+    wants_open = operation in {"start", "restart", "rebuild-and-start"}
+    probe_health = health_probe or (lambda: _workbench_health_ok(workspace_root))
+    started_at = monotonic()
+    deadline = started_at + max(1.0, float(timeout_seconds))
+    reuse_deadline = started_at + max(0.0, float(reuse_grace_seconds)) if operation == "start" else 0.0
+    reuse_checked = False
+    observed_fresh_generation = False
+    last_entry: dict[str, object] = {}
+
+    while True:
+        entry = _read_branch_instance_snapshot(workspace_root)
+        if entry:
+            last_entry = entry
+        generation = int(entry.get("generation") or 0)
+        command_id = str(entry.get("commandId") or "").strip()
+        desired_state = str(entry.get("desiredState") or "").strip().lower()
+        status = str(entry.get("status") or "").strip().lower()
+        failure_message = str(entry.get("failureMessage") or "").strip()
+        fresh_generation = generation > int(baseline_generation or 0)
+        if fresh_generation:
+            observed_fresh_generation = True
+            if status in {"failed", "error"}:
+                return _settlement_payload(
+                    operation=operation,
+                    observed="instance_registry_settlement",
+                    accepted=False,
+                    code="branch_instance_failed",
+                    message=failure_message or "分支实例生命周期命令执行失败。",
+                    command_id=command_id,
+                )
+            if wants_open and desired_state == "open" and status in {"steady", "running"} and probe_health():
+                return _settlement_payload(
+                    operation=operation,
+                    observed="instance_registry_settlement",
+                    accepted=True,
+                    message="分支实例已启动并通过工作区健康检查。",
+                    command_id=command_id,
+                )
+            if (
+                not wants_open
+                and desired_state == "closed"
+                and status == "closed"
+                and _branch_instance_runtime_pids_clear(entry)
+            ):
+                return _settlement_payload(
+                    operation=operation,
+                    observed="instance_registry_settlement",
+                    accepted=True,
+                    message="分支实例已停止，登记的运行进程已清零。",
+                    command_id=command_id,
+                )
+
+        if reuse_deadline and not reuse_checked and monotonic() >= reuse_deadline:
+            reuse_checked = True
+            if (
+                not fresh_generation
+                and entry
+                and desired_state == "open"
+                and status in {"steady", "running"}
+                and probe_health()
+            ):
+                return _settlement_payload(
+                    operation=operation,
+                    observed="reuse_backend_healthy",
+                    accepted=True,
+                    message="分支实例已在运行，命令通过复用路径结算。",
+                    command_id=command_id or baseline_command_id,
+                )
+
+        if monotonic() >= deadline:
+            if observed_fresh_generation:
+                return _settlement_payload(
+                    operation=operation,
+                    observed="instance_registry_unsettled",
+                    accepted=False,
+                    message=(
+                        f"分支实例生命周期命令 {operation} 已进入 generation "
+                        f"{int(last_entry.get('generation') or 0)}，但在 {int(timeout_seconds)}s 内未完成。"
+                    ),
+                    command_id=str(last_entry.get("commandId") or "").strip(),
+                )
+            return _settlement_payload(
+                operation=operation,
+                observed="intent_not_consumed",
+                accepted=False,
+                message=(
+                    f"分支实例生命周期命令 {operation} 未被消费：等待 {int(timeout_seconds)}s "
+                    "内目标实例 generation 未前进。"
+                ),
+            )
+        sleep(_LIFECYCLE_SETTLE_POLL_SECONDS)
 
 
 def _intent_updated_at_epoch(intent: dict[str, object]) -> float:
@@ -1651,6 +1792,7 @@ def _await_launch_lifecycle_settlement(
     args: argparse.Namespace,
     payload: dict[str, object],
     *,
+    baseline: dict[str, object] | None = None,
     not_before_epoch: float = 0.0,
     timeout_seconds: float | None = None,
 ) -> dict[str, object]:
@@ -1658,19 +1800,28 @@ def _await_launch_lifecycle_settlement(
     if lifecycle not in LIFECYCLE_SETTLEMENT_OPERATIONS:
         return payload
     workspace_root = _workspace_root(args)
-    runtime_manager_dir = _runtime_manager_dir_for(workspace_root)
-    baseline = _read_main_line_intent_snapshot(runtime_manager_dir)
-    settlement = wait_for_lifecycle_settlement(
-        workspace_root,
-        lifecycle,
-        baseline_command_id=str(baseline.get("commandId") or ""),
-        not_before_epoch=not_before_epoch,
-        timeout_seconds=float(
-            timeout_seconds
-            if timeout_seconds is not None
-            else getattr(args, "lifecycle_settle_timeout", 0.0) or DEFAULT_LIFECYCLE_SETTLE_TIMEOUT_SECONDS
-        ),
+    captured = baseline or _capture_lifecycle_settlement_baseline(workspace_root)
+    settle_timeout = float(
+        timeout_seconds
+        if timeout_seconds is not None
+        else getattr(args, "lifecycle_settle_timeout", 0.0) or DEFAULT_LIFECYCLE_SETTLE_TIMEOUT_SECONDS
     )
+    if str(captured.get("kind") or "") == "branch_instance":
+        settlement = wait_for_branch_instance_settlement(
+            workspace_root,
+            lifecycle,
+            baseline_generation=int(captured.get("generation") or 0),
+            baseline_command_id=str(captured.get("commandId") or ""),
+            timeout_seconds=settle_timeout,
+        )
+    else:
+        settlement = wait_for_lifecycle_settlement(
+            workspace_root,
+            lifecycle,
+            baseline_command_id=str(captured.get("commandId") or ""),
+            not_before_epoch=not_before_epoch,
+            timeout_seconds=settle_timeout,
+        )
     payload["lifecycleSettlement"] = settlement
     payload["ok"] = bool(settlement.get("accepted"))
     _append_log(
@@ -1935,11 +2086,13 @@ def _refresh_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]
 def _launch_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]:
     from core.launcher.desktop_shell import launch_desktop_shell
 
-    # Capture the freshness floor before spawning Electron so an intent written
-    # by this launch can never be confused with a stranded historical one.
+    workspace_root = _workspace_root(args)
+    # Capture both main-line and branch-instance freshness before spawning
+    # Electron so a fast claim cannot race ahead of our baseline read.
     not_before_epoch = time.time()
+    baseline = _capture_lifecycle_settlement_baseline(workspace_root)
     payload = launch_desktop_shell(
-        project_root=_workspace_root(args),
+        project_root=workspace_root,
         then_lifecycle=str(args.then_lifecycle or ""),
         open_workbench=bool(getattr(args, "open_workbench", False)),
     )
@@ -1950,7 +2103,12 @@ def _launch_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]:
         then_lifecycle=str(payload.get("thenLifecycle") or ""),
         open_workbench=bool(payload.get("openWorkbench")),
     )
-    payload = _await_launch_lifecycle_settlement(args, payload, not_before_epoch=not_before_epoch)
+    payload = _await_launch_lifecycle_settlement(
+        args,
+        payload,
+        baseline=baseline,
+        not_before_epoch=not_before_epoch,
+    )
     settlement = payload.get("lifecycleSettlement")
     if isinstance(settlement, dict) and str(settlement.get("observed") or "") == "intent_not_consumed":
         # The forwarded second-instance signal never reached the main-line
@@ -1964,9 +2122,10 @@ def _launch_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]:
             timeout_seconds=LAUNCH_SETTLEMENT_RETRY_TIMEOUT_SECONDS,
         )
         retry_not_before_epoch = time.time()
+        retry_baseline = _capture_lifecycle_settlement_baseline(workspace_root)
         try:
             retry_payload = launch_desktop_shell(
-                project_root=_workspace_root(args),
+                project_root=workspace_root,
                 then_lifecycle=str(args.then_lifecycle or ""),
                 open_workbench=bool(getattr(args, "open_workbench", False)),
             )
@@ -1988,6 +2147,7 @@ def _launch_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]:
         payload = _await_launch_lifecycle_settlement(
             args,
             retry_payload,
+            baseline=retry_baseline,
             not_before_epoch=retry_not_before_epoch,
             timeout_seconds=LAUNCH_SETTLEMENT_RETRY_TIMEOUT_SECONDS,
         )

@@ -19,12 +19,14 @@ describe("Electron main public deep-link consumption", () => {
     const source = readFileSync(mainSourcePath, "utf8");
 
     expect(source).toContain("let pendingOpenWorkbenchRequest = desktopCliArgs.openWorkbench");
-    expect(source).toContain("const secondCli = parseDesktopCliArgs(argv)");
+    expect(source).toContain("const secondCli = resolveSingleInstanceCliIntent(additionalData)");
     expect(source).toContain("resolveSecondInstanceIntent({");
     expect(source).toContain("applyPendingProjectSlot(intent.projectRoot, intent.lifecycleCommand, secondInstanceProvenance)");
     expect(source).toContain("lifecycleCommand: secondCli.lifecycleCommand");
     expect(source).not.toContain('if (secondCli.lifecycleCommand && secondCli.lifecycleCommand !== "open")');
     expect(source).toContain("secondCli.openWorkbench");
+    expect(source).toContain("projectRoot: desktopCliArgs.projectRoot");
+    expect(source).toContain("openWorkbench: desktopCliArgs.openWorkbench");
     expect(source).toContain("await startOrFocusWorkbenchFromProductEntryOnShell()");
     expect(source).not.toContain("await windowProvider.openOrFocusWorkbench()");
     expect(source).toContain("windowProvider?.openLauncher()");
