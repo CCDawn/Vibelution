@@ -17,15 +17,15 @@ def test_runtime_scene_jsonl_reader_reuses_cache_until_file_signature_changes(tm
     with runtime_scene_service._JSONL_FILE_CACHE_LOCK:
         runtime_scene_service._JSONL_FILE_CACHE.clear()
     read_count = 0
-    original_read_text = runtime_scene_service.Path.read_text
+    original_read_bytes = runtime_scene_service.Path.read_bytes
 
-    def counting_read_text(self, *args, **kwargs):
+    def counting_read_bytes(self, *args, **kwargs):
         nonlocal read_count
         if self == path:
             read_count += 1
-        return original_read_text(self, *args, **kwargs)
+        return original_read_bytes(self, *args, **kwargs)
 
-    monkeypatch.setattr(runtime_scene_service.Path, "read_text", counting_read_text)
+    monkeypatch.setattr(runtime_scene_service.Path, "read_bytes", counting_read_bytes)
 
     first = runtime_scene_service._read_jsonl_file(path)
     second = runtime_scene_service._read_jsonl_file(path)
@@ -42,7 +42,9 @@ def test_runtime_scene_jsonl_reader_reuses_cache_until_file_signature_changes(tm
         )
     third = runtime_scene_service._read_jsonl_file(path)
 
-    assert read_count == 2
+    # Appends reuse the cached rows and parse only the new suffix; the whole
+    # file must not be re-read per refresh.
+    assert read_count == 1
     assert [row["event_code"] for row in third] == ["alpha", "beta"]
     assert len(runtime_scene_service._JSONL_FILE_CACHE) == 1
     assert [row["event_code"] for row in first] == ["alpha"]
@@ -139,6 +141,9 @@ def test_runtime_scene_event_writes_standalone_package_index(tmp_path, monkeypat
         fields={"runId": "run-1"},
         lifecycle=True,
     )
+    # 逐个事件模拟刷新窗口过期，让 package 内容随各事件刷新；窗口内的合并刷新
+    # 契约由 test_warning_storm_uses_single_full_refresh_window 覆盖。
+    runtime_scene_service._last_scene_package_refresh_at = 0.0
     runtime_scene_service.record_runtime_scene_event(
         "llm",
         "invoke",
@@ -149,6 +154,7 @@ def test_runtime_scene_event_writes_standalone_package_index(tmp_path, monkeypat
         fields={"errorType": "RuntimeError"},
         lifecycle=True,
     )
+    runtime_scene_service._last_scene_package_refresh_at = 0.0
     runtime_scene_service.record_runtime_scene_event(
         "browser_page",
         "console",
@@ -418,6 +424,9 @@ def test_runtime_scene_event_can_target_recent_completed_package_when_allowed(tm
         "command.failed",
         fields={"commandId": "cmd-open"},
     )
+    # 模拟刷新窗口过期，使本次 error 事件立即写入 package（窗口内合并刷新契约
+    # 由 test_warning_storm_uses_single_full_refresh_window 覆盖）。
+    runtime_scene_service._last_scene_package_refresh_at = 0.0
     accepted = runtime_scene_service.record_runtime_scene_event(
         "runtime_manager",
         "command",
