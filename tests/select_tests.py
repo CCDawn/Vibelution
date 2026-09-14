@@ -540,18 +540,23 @@ def _python_fallback_selection(
     changed_files: list[str],
     explicitly_owned_files: set[str],
     project_root: Path,
+    *,
+    covered_test_files: set[str] | None = None,
 ) -> dict[str, Any]:
     """Return fallback validation for Python paths left out of the matrix.
 
     The matrix remains the authority for known high-risk surfaces.  This
     fallback handles only the uncovered remainder and never claims that the
-    generic runner smoke validates a product file.
+    generic runner smoke validates a product file.  Test files already
+    scheduled by an earlier command without a selection filter are recorded as
+    ``overlappedTests`` instead of being scheduled a second time.
     """
     fallback_rules: list[dict[str, Any]] = []
     commands: list[str] = []
     layers: list[str] = []
     notes: list[str] = []
     coverage_gaps: list[dict[str, str]] = []
+    covered = set(covered_test_files or ())
 
     changed_test_files = sorted(
         path
@@ -563,21 +568,32 @@ def _python_fallback_selection(
         )
     )
     if changed_test_files:
-        fallback_rules.append(
-            {
-                "id": "changed-python-test-fallback",
-                "description": "Run changed Python test files not owned by a matrix rule.",
-                "matchedFiles": changed_test_files,
-                "selectedTests": changed_test_files,
-            }
-        )
+        scheduled_changed_tests = [
+            path for path in changed_test_files if path not in covered
+        ]
+        overlapped_changed_tests = [
+            path for path in changed_test_files if path in covered
+        ]
+        changed_test_rule: dict[str, Any] = {
+            "id": "changed-python-test-fallback",
+            "description": "Run changed Python test files not owned by a matrix rule.",
+            "matchedFiles": changed_test_files,
+            "selectedTests": scheduled_changed_tests,
+        }
+        if overlapped_changed_tests:
+            changed_test_rule["overlappedTests"] = overlapped_changed_tests
+            notes.append(
+                f"{len(overlapped_changed_tests)} changed Python test file(s) were already "
+                "scheduled by earlier selected commands; see overlappedTests."
+            )
+        fallback_rules.append(changed_test_rule)
         serial_changed_tests = [
             path
-            for path in changed_test_files
+            for path in scheduled_changed_tests
             if _changed_test_is_serial(project_root, path)
         ]
         parallel_changed_tests = [
-            path for path in changed_test_files if path not in serial_changed_tests
+            path for path in scheduled_changed_tests if path not in serial_changed_tests
         ]
         if parallel_changed_tests:
             commands.append(
@@ -589,6 +605,7 @@ def _python_fallback_selection(
         if serial_changed_tests:
             commands.append(_pytest_command(serial_changed_tests))
             layers.extend(["focused", "local-serial"])
+        covered.update(scheduled_changed_tests)
 
     uncovered_sources = sorted(
         path
@@ -642,6 +659,8 @@ def _python_fallback_selection(
         selected_tests = sorted(
             {test_path for tests in source_tests.values() for test_path in tests}
         )
+        overlapped_tests = sorted(path for path in selected_tests if path in covered)
+        selected_tests = [path for path in selected_tests if path not in covered]
         truncated_from = len(selected_tests)
         if truncated_from > MAX_IMPORT_FALLBACK_TEST_FILES:
             frontier_distances = _frontier_test_distances(
@@ -679,6 +698,12 @@ def _python_fallback_selection(
         if dropped_tests:
             fallback_rule["truncatedFrom"] = truncated_from
             fallback_rule["droppedTests"] = dropped_tests
+        if overlapped_tests:
+            fallback_rule["overlappedTests"] = overlapped_tests
+            notes.append(
+                f"{len(overlapped_tests)} import-frontier test file(s) were already "
+                "scheduled by earlier selected commands; see overlappedTests."
+            )
         fallback_rules.append(fallback_rule)
         if parallel_tests:
             commands.append(_parallelize_pytest_command(_pytest_command(parallel_tests)))
@@ -766,6 +791,33 @@ def _parallelize_pytest_command(command: str) -> str:
     if workers < 2:
         return command
     return f'{command} -n {workers} --dist loadfile -m "not serial"'
+
+
+def _pytest_full_coverage_test_files(command: str) -> set[str]:
+    """Return the test files a pytest command runs without narrowing coverage.
+
+    A command only counts as full coverage when it applies no ``-k`` /
+    ``--deselect`` filter and its only ``-m`` marker expression is the
+    selector's own ``not serial`` xdist guard.  Filtered batches keep their
+    partial-overlap status so a later fallback run still covers the remaining
+    tests in the same file.
+    """
+    if " -m pytest " not in command:
+        return set()
+    pytest_arguments = command.split(" -m pytest ", 1)[1]
+    if re.search(r"(?:^|\s)(?:-k|--deselect)(?:\s|=)", pytest_arguments):
+        return set()
+    marker = re.search(r"(?:^|\s)-m(?:\s+|=)(\"[^\"]*\"|'[^']*'|\S+)", pytest_arguments)
+    if marker:
+        expression = " ".join(marker.group(1).strip("\"'").split())
+        if expression != "not serial":
+            return set()
+    files: set[str] = set()
+    for token in pytest_arguments.split():
+        normalized = token.strip("'\"").replace("\\", "/")
+        if normalized.startswith("tests/") and normalized.lower().endswith(".py"):
+            files.add(normalized)
+    return files
 
 
 def _rule_commands(rule: dict[str, Any]) -> list[str]:
@@ -910,10 +962,15 @@ def select_tests(
         notes.extend(str(note) for note in rule.get("notes", []))
         validation_layers.extend(_execution_layers(rule, ["focused"]))
 
+    covered_test_files: set[str] = set()
+    for command in commands:
+        covered_test_files.update(_pytest_full_coverage_test_files(command))
+
     python_fallback = _python_fallback_selection(
         normalized_files,
         explicitly_owned_files,
         project_root,
+        covered_test_files=covered_test_files,
     )
     matched_rules.extend(python_fallback["matchedRules"])
     commands.extend(python_fallback["commands"])
