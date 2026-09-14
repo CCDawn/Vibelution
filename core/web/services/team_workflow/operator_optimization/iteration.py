@@ -6,7 +6,10 @@ import json
 from decimal import Decimal
 from types import SimpleNamespace
 
-from core.research.operator_optimization.decision import OperatorIterationDecision
+from core.research.operator_optimization.decision import (
+    OperatorIterationDecision,
+    decision_id_for,
+)
 from core.research.workflow.contracts import (
     ActorRef,
     CommandRequest,
@@ -76,7 +79,11 @@ def _budget_stop(store, campaign):
     if budget_summary(campaign)["gpuTuningAvailableSeconds"] < 1:
         return "gpu_budget_exhausted"
     budget = campaign.budget
-    if budget.discussion is None or budget.planning is None:
+    if (
+        budget.discussion is None
+        or budget.planning is None
+        or budget.decision is None
+    ):
         return "model_budget_missing"
     limit = Decimal(str(budget.modelCostLimit))
     if limit <= 0:
@@ -92,7 +99,9 @@ def _budget_stop(store, campaign):
     )
     required = calculate_max_reserved_cost(
         budget.discussion
-    ) + calculate_max_reserved_cost(budget.planning)
+    ) + calculate_max_reserved_cost(budget.planning) + calculate_max_reserved_cost(
+        budget.decision
+    )
     if committed + required > limit:
         return "model_budget_exhausted"
     return ""
@@ -158,18 +167,12 @@ def advance_iteration(store, payload, *, now_ms):
         reason = _budget_stop(store, campaign)
         if reason:
             return stop(reason)
-        feedback_identity = json.dumps(
-            record.feedbackRef.model_dump(mode="json"),
-            ensure_ascii=False,
-            sort_keys=True,
-        )
         return _save(
             store,
             run.run_id,
             {
                 "status": "requested",
-                "decisionId": "decision-"
-                + sha256_hex(run.run_id + ":" + feedback_identity)[:24],
+                "decisionId": decision_id_for(run.run_id, record.feedbackRef),
                 "campaignVersion": campaign.revision,
                 "feedbackRef": record.feedbackRef.model_dump(mode="json"),
                 "evaluationRef": record.evaluationRef.model_dump(mode="json"),

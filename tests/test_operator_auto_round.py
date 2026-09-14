@@ -110,6 +110,7 @@ def completed(activity, prepared, baseline_ready, tmp_path, monkeypatch):
                     update={
                         "discussion": OperatorDiscussionBudget(**budget),
                         "planning": OperatorModelCallBudget(**budget),
+                        "decision": OperatorModelCallBudget(**budget),
                     }
                 )
             }
@@ -226,6 +227,45 @@ def test_decision_replay_is_idempotent_and_conflicting_rewrite_is_rejected(
             now_ms=2300,
         )
     assert len(read_campaign(*activity).rounds) == 1
+
+
+def test_decision_output_is_bound_to_exact_feedback_and_replays(activity, completed):
+    from core.research.operator_optimization.decision import (
+        OperatorIterationDecisionArtifact,
+        OperatorIterationDecisionProposal,
+    )
+    from core.web.services.team_workflow.operator_optimization.decision_output import (
+        decision_task_input,
+        materialize_iteration_decision,
+    )
+    from core.web.services.team_workflow.operator_optimization.knowledge import read_ref
+
+    store, run_id, payload, _ = completed
+    requested = iteration.advance_iteration(store, payload, now_ms=2000)
+    inputs = decision_task_input(activity[0], run_id)
+    proposal = OperatorIterationDecisionProposal(
+        inputHash=inputs["inputHash"],
+        kind="stop",
+        reason="measured candidate is slower than the accepted baseline",
+    )
+    first = materialize_iteration_decision(
+        activity[0], run_id, proposal, decided_by="decision-agent"
+    )
+    assert materialize_iteration_decision(
+        activity[0], run_id, proposal, decided_by="decision-agent"
+    ) == first
+    artifact = OperatorIterationDecisionArtifact.model_validate(
+        read_ref(activity[0], run_id, first)
+    )
+    assert artifact.decision.decisionId == requested["decisionId"]
+    assert artifact.feedbackRef.model_dump(mode="json") == requested["feedbackRef"]
+    with pytest.raises(CampaignConflict, match="different feedback"):
+        materialize_iteration_decision(
+            activity[0],
+            run_id,
+            proposal.model_copy(update={"inputHash": "f" * 64}),
+            decided_by="decision-agent",
+        )
 
 
 @pytest.mark.parametrize(
@@ -426,10 +466,10 @@ def test_only_feedback_is_operator_round_terminal():
     assert _terminal_facts_for_close(run)[0] == "operator_round_completed"
 
 
-def test_budget_must_cover_discussion_and_planning(activity, completed):
+def test_budget_must_cover_decision_discussion_and_planning(activity, completed):
     store, _, payload, _ = completed
     current = read_campaign(*activity)
-    # Each required phase costs at most 0.001, so this funds only one.
+    # Each required phase costs at most 0.001, so this cannot fund all three.
     update_campaign(
         *activity,
         expected_version=current.revision,

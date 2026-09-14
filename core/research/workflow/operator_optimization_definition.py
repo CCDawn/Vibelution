@@ -4,6 +4,10 @@ from __future__ import annotations
 from dataclasses import replace
 from itertools import pairwise
 
+from core.research.operator_optimization.decision import (
+    OPTIMIZATION_DECISION_ARTIFACT_KIND,
+)
+
 from .definition import definition_structure_hash
 from .models import (
     ActorKind,
@@ -35,6 +39,7 @@ OPERATOR_ARTIFACT_KINDS = frozenset({
     "operator_candidate",
     "optimization_discussion",
     "optimization_knowledge_request",
+    OPTIMIZATION_DECISION_ARTIFACT_KIND,
     *(row[4] for row in OPERATOR_NODES),
 })
 
