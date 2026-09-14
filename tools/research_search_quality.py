@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from urllib.parse import urlparse
 
-
 GENERIC_SEARCH_TERMS = {
     "paper",
     "papers",
@@ -42,6 +41,25 @@ LOW_QUALITY_TERMS = {
     "adjective",
     "noun",
     "quiz",
+}
+
+# Public search engines can return keyword-stuffed explicit pages for unrelated
+# research queries. Keep this list phrase-based so ordinary health terminology
+# (for example, "成人性健康") is not rejected. A phrase is allowed when the
+# caller explicitly included that same topic in the query.
+UNSAFE_CONTEXT_TERMS = {
+    "色情",
+    "成人视频",
+    "成人影片",
+    "成人网站",
+    "口交",
+    "裸聊",
+    "援交",
+    "pornography",
+    "pornographic",
+    "porn video",
+    "blowjob",
+    "hentai",
 }
 
 CJK_TERM_TRANSLATIONS = {
@@ -105,14 +123,25 @@ def query_terms(query: str) -> set[str]:
 
 def evaluate_search_result(query: str, result: dict[str, str]) -> dict[str, object]:
     terms = query_terms(query)
+    normalized_query = str(query or "").lower()
     haystack = " ".join(
         str(result.get(key) or "")
         for key in ("title", "snippet", "summary", "url", "source", "published")
     ).lower()
     blocking_terms = sorted(term for term in LOW_QUALITY_TERMS if term.lower() in haystack)
+    unsafe_context_terms = sorted(
+        term
+        for term in UNSAFE_CONTEXT_TERMS
+        if term.lower() in haystack and term.lower() not in normalized_query
+    )
     matched_terms = sorted(term for term in terms if term.lower() in haystack)
     required_matches = 1 if len(terms) <= 1 else 2
-    accepted = bool(terms) and len(matched_terms) >= required_matches and not blocking_terms
+    accepted = (
+        bool(terms)
+        and len(matched_terms) >= required_matches
+        and not blocking_terms
+        and not unsafe_context_terms
+    )
     reasons: list[str] = []
     if not terms:
         reasons.append("query_has_no_quality_terms")
@@ -120,10 +149,13 @@ def evaluate_search_result(query: str, result: dict[str, str]) -> dict[str, obje
         reasons.append("insufficient_query_overlap")
     if blocking_terms:
         reasons.append("low_quality_context_terms")
+    if unsafe_context_terms:
+        reasons.append("unsafe_context_terms")
     return {
         "accepted": accepted,
         "matchedTerms": matched_terms[:12],
-        "blockingTerms": blocking_terms[:12],
+        "blockingTerms": sorted({*blocking_terms, *unsafe_context_terms})[:12],
+        "unsafeContextTerms": unsafe_context_terms[:12],
         "requiredMatchCount": required_matches,
         "queryTermCount": len(terms),
         "reasons": reasons,
