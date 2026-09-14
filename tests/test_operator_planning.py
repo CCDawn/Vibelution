@@ -118,6 +118,27 @@ def test_planner_prompt_requires_verbatim_ordered_knowledge_gaps(activity, propo
     assert "禁止合并、拆分、摘要或改写 gap" in prompt
 
 
+def test_planner_prompt_binds_trial_decisions_to_current_budget(activity, proposal):
+    run_id, _ = proposal
+    inputs = planning_output.planning_task_input(activity[0], run_id)
+    inputs["budget"] = {
+        **inputs["budget"],
+        "maxTrialsPerRound": 3,
+        "trialTimeoutSeconds": 120,
+    }
+    inputs["remainingBudget"] = {
+        **inputs["remainingBudget"],
+        "gpuTuningAvailableSeconds": 300,
+    }
+
+    prompt = planning_task._planning_prompt(inputs)
+
+    assert "trialCount 必须是 1 到 3 的整数" in prompt
+    assert "trialTimeoutSeconds 不得超过 120" in prompt
+    assert "剩余 GPU 调优时长 300 秒" in prompt
+    assert "选择能够区分假设的最少 trialCount" in prompt
+
+
 def test_crash_after_candidate_write_recovers_without_duplicate(activity, proposal, monkeypatch):
     run_id, output = proposal
     freeze = planning.freeze_optimization_plan
