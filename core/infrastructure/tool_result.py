@@ -240,7 +240,8 @@ def extract_tool_result_semantics(result: Any) -> dict[str, Any]:
         semantics["semanticStatus"] = "failed"
         semantics["failureClass"] = "process_exit"
 
-    if text.startswith(("[超时]", "[TIMEOUT]")) or "timed out" in lowered:
+    first_line = lowered.splitlines()[0] if lowered else ""
+    if text.startswith(("[超时]", "[TIMEOUT]")) or "timed out" in first_line:
         semantics["semanticStatus"] = "timeout"
         semantics["timedOut"] = True
         semantics["failureClass"] = "timeout"

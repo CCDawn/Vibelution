@@ -962,5 +962,28 @@ class TestInferToolBusinessSuccess:
         assert semantics["failureClass"] == "missing_mapped_test"
 
 
+class TestTimeoutTextDetection:
+    """超时文本只允许在输出首行命中，避免正文短语把成功调用判成超时。"""
+
+    def test_body_mentioning_timed_out_is_not_timeout(self):
+        result = (
+            "def schedule(self, agent_id: str) -> None:\n"
+            "    raise RuntimeError(f\"Timed out waiting for agent execution slot: {agent_id}\")\n"
+        )
+
+        semantics = extract_tool_result_semantics(result)
+
+        assert semantics["semanticStatus"] == "succeeded"
+        assert semantics["timedOut"] is False
+        assert semantics["failureClass"] == ""
+
+    def test_leading_timed_out_text_is_still_timeout(self):
+        semantics = extract_tool_result_semantics("Read timed out.")
+
+        assert semantics["semanticStatus"] == "timeout"
+        assert semantics["timedOut"] is True
+        assert semantics["failureClass"] == "timeout"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

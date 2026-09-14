@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from core.infrastructure import codex_cli_sandbox
 from tools import shell_tools
@@ -172,6 +175,7 @@ def test_unix_execute_uses_native_codex_sandbox_without_host_shell(monkeypatch, 
         "ls",
     ]
     assert recorded["kwargs"]["shell"] is False
+    assert recorded["kwargs"]["errors"] == "surrogateescape"
     assert recorded["kwargs"]["cwd"] == str(tmp_path)
     assert recorded["kwargs"]["env"]["TMP"].startswith(
         str(tmp_path / ".runtime" / "codex-cli")
@@ -1025,3 +1029,23 @@ def test_platform_probe_does_not_depend_on_mutated_os_name():
 
     assert host_platform() in {"windows", "linux", "darwin"}
     assert os.name in {"nt", "posix"}  # real global value; never rewritten
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="mbcs codec is Windows-only")
+def test_recover_terminal_text_decodes_windows_ansi_error_output():
+    mojibake = "错误：无法找到路径".encode("gbk").decode("utf-8", errors="surrogateescape")
+
+    assert codex_cli_sandbox._recover_terminal_text(mojibake) == "错误：无法找到路径"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="mbcs codec is Windows-only")
+def test_recover_terminal_text_recovers_mixed_lines_without_touching_utf8():
+    mojibake = "路径错误".encode("gbk").decode("utf-8", errors="surrogateescape")
+
+    assert codex_cli_sandbox._recover_terminal_text("正常输出\n" + mojibake + "\n") == "正常输出\n路径错误\n"
+
+
+def test_recover_terminal_text_is_noop_for_plain_text():
+    text = "plain ascii output\n"
+
+    assert codex_cli_sandbox._recover_terminal_text(text) is text

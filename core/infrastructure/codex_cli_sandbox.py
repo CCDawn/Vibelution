@@ -223,7 +223,37 @@ def _collect_output(process: subprocess.Popen[str]) -> tuple[str, str]:
     return str(stdout or ""), str(stderr or "")
 
 
+def _recover_terminal_text(text: str) -> str:
+    """Recover native Windows ANSI/OEM bytes that UTF-8 decoding left as surrogates."""
+
+    if not text or not any("\udc80" <= character <= "\udcff" for character in text):
+        return text
+    try:
+        raw = text.encode("utf-8", "surrogateescape")
+    except UnicodeEncodeError:
+        return text
+    fallbacks = [encoding for encoding in ("mbcs", locale.getpreferredencoding(False)) if encoding]
+    recovered: list[str] = []
+    for line in raw.splitlines(keepends=True):
+        try:
+            recovered.append(line.decode("utf-8"))
+            continue
+        except UnicodeDecodeError:
+            pass
+        decoded = ""
+        for fallback in fallbacks:
+            try:
+                decoded = line.decode(fallback)
+                break
+            except (UnicodeDecodeError, LookupError):
+                continue
+        recovered.append(decoded or line.decode("utf-8", errors="replace"))
+    return "".join(recovered)
+
+
 def _format_output(stdout: str, stderr: str, returncode: int | None) -> str:
+    stdout = _recover_terminal_text(stdout)
+    stderr = _recover_terminal_text(stderr)
     parts = []
     if stdout:
         parts.append(stdout.strip())
@@ -367,8 +397,8 @@ class _SandboxTerminalSession:
 
     def _drain_output(self, *, max_output_chars: int) -> tuple[str, str, bool, int]:
         with self._lock:
-            stdout = self._stdout_pending
-            stderr = self._stderr_pending
+            stdout = _recover_terminal_text(self._stdout_pending)
+            stderr = _recover_terminal_text(self._stderr_pending)
             self._stdout_pending = ""
             self._stderr_pending = ""
             self._output_ready.clear()
@@ -577,8 +607,8 @@ def start_codex_sandbox_terminal_session(
     )
     sandbox_temp: Path | None = None
     try:
-        # Prefer UTF-8 so agent-facing tool text is stable; Windows host tools may
-        # still emit GBK — errors=replace keeps the session alive.
+        # Prefer UTF-8 so agent-facing tool text is stable; native Windows tools
+        # may still emit ANSI/OEM bytes — surrogateescape keeps them recoverable.
         encoding = "utf-8"
         environment, sandbox_temp = _sandbox_process_environment(
             workdir,
@@ -613,7 +643,7 @@ def start_codex_sandbox_terminal_session(
             stderr=subprocess.PIPE,
             text=True,
             encoding=encoding,
-            errors="replace",
+            errors="surrogateescape",
             **_sandbox_popen_kwargs(platform=_host_platform()),
         )
     except (FileNotFoundError, PermissionError) as exc:
@@ -820,7 +850,7 @@ def execute_codex_sandbox_command(
             stderr=subprocess.PIPE,
             text=True,
             encoding=encoding,
-            errors="replace",
+            errors="surrogateescape",
             **_sandbox_popen_kwargs(platform=_host_platform()),
         )
         deadline = started_at + timeout_seconds

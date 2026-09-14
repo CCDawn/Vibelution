@@ -2104,7 +2104,11 @@ def _tool_status_from_event(event: TurnJournalEvent, tool_call: dict[str, Any]) 
         if normalized in {"failed", "timeout", "blocked", "cancelled", "no_result", "interrupted"}:
             return normalized
     timed_out = tool_call.get("timedOut", tool_call.get("timed_out"))
-    if timed_out is True or str(timed_out).strip().lower() in {"1", "true", "yes", "y", "on"}:
+    semantic_succeeded = _normalize_terminal_tool_status(semantic_status) == "done"
+    if (
+        not semantic_succeeded
+        and (timed_out is True or str(timed_out).strip().lower() in {"1", "true", "yes", "y", "on"})
+    ):
         return "timeout"
     for candidate in (semantic_status, tool_status, event_status):
         normalized = _normalize_terminal_tool_status(candidate)
