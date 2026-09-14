@@ -125,14 +125,19 @@ export const assistantTurnItemsForMessage = (message: ConversationMessage): Sess
   message.role === "assistant" ? consolidateSessionTurnItemsV2(message.turnItems) : []
 );
 
-const assistantTurnHasTerminalItemOutcome = (message: ConversationMessage): boolean => (
-  assistantTurnItemsForMessage(message).some((item) => (
+/** Real turn outcomes only: committed final answer or failed error item. */
+export const hasTerminalTurnOutcomeItems = (items: readonly SessionTurnItem[]) => (
+  items.some((item) => (
     item.terminal === true
     && (
       (isFinalAnswerTurnItem(item) && (item.status === "completed" || item.status === "failed"))
       || (item.type === "error" && item.status === "failed")
     )
   ))
+);
+
+const assistantTurnHasTerminalItemOutcome = (message: ConversationMessage): boolean => (
+  hasTerminalTurnOutcomeItems(assistantTurnItemsForMessage(message))
 );
 
 /** Token-streaming behaviors: answer text is actively revising. */
@@ -284,12 +289,15 @@ export function hasCommittedAssistantProtocolAnswer(message: ConversationMessage
   ));
 }
 
+/**
+ * True only when the message carries a real terminal turn outcome (committed
+ * final answer or failed error). Terminal tool/reasoning items belong to
+ * intermediate segments of a still-running turn and must not settle live UI.
+ */
 export const hasTerminalCanonicalTurnOutcome = (message: ConversationMessage): boolean => (
   message.role === "assistant"
   && (message.status === "completed" || message.status === "failed")
-  && consolidateSessionTurnItemsV2(message.turnItems).some((item) => (
-    item.terminal === true && (item.status === "completed" || item.status === "failed")
-  ))
+  && assistantTurnHasTerminalItemOutcome(message)
 );
 
 /**
