@@ -1069,6 +1069,200 @@ def test_selector_skips_deleted_unmapped_python_test_file(tmp_path: Path):
     assert result["coverageGaps"] == []
 
 
+def test_selector_does_not_rerun_fallback_tests_already_selected_by_a_rule(tmp_path: Path):
+    (tmp_path / "core").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "core" / "shared.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (tmp_path / "core" / "leaf.py").write_text("VALUE = 2\n", encoding="utf-8")
+    (tmp_path / "tests" / "test_shared.py").write_text(
+        "import core.leaf\nimport core.shared\n",
+        encoding="utf-8",
+    )
+    matrix = {
+        "rules": [
+            {
+                "id": "shared-rule",
+                "paths": ["core/shared.py"],
+                "commands": [
+                    ".\\.venv\\Scripts\\python.exe -m pytest tests/test_shared.py -q"
+                ],
+            }
+        ]
+    }
+
+    result = select_tests.select_tests(
+        ["core/shared.py", "core/leaf.py"],
+        matrix,
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    assert result["commands"] == [
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_shared.py -q --maxfail=0"
+    ]
+    fallback = next(
+        rule
+        for rule in result["matchedRules"]
+        if rule["id"] == "python-import-fallback"
+    )
+    assert fallback["selectedTests"] == []
+    assert fallback["overlappedTests"] == ["tests/test_shared.py"]
+    assert any("overlappedTests" in note for note in result["notes"])
+    assert result["coverageGaps"] == []
+
+
+def test_selector_keeps_full_fallback_run_when_rule_command_is_filtered(tmp_path: Path):
+    (tmp_path / "core").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "core" / "shared.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (tmp_path / "core" / "leaf.py").write_text("VALUE = 2\n", encoding="utf-8")
+    (tmp_path / "tests" / "test_shared.py").write_text(
+        "import core.leaf\nimport core.shared\n",
+        encoding="utf-8",
+    )
+    matrix = {
+        "rules": [
+            {
+                "id": "shared-rule",
+                "paths": ["core/shared.py"],
+                "commands": [
+                    '.\\.venv\\Scripts\\python.exe -m pytest tests/test_shared.py -k "one" -q'
+                ],
+            }
+        ]
+    }
+
+    result = select_tests.select_tests(
+        ["core/shared.py", "core/leaf.py"],
+        matrix,
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    assert result["commands"] == [
+        '.\\.venv\\Scripts\\python.exe -m pytest tests/test_shared.py -k "one" -q --maxfail=0',
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_shared.py -q --maxfail=0",
+    ]
+
+
+def test_selector_keeps_full_fallback_run_when_rule_command_uses_a_marker_filter(
+    tmp_path: Path,
+):
+    (tmp_path / "core").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "core" / "shared.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (tmp_path / "core" / "leaf.py").write_text("VALUE = 2\n", encoding="utf-8")
+    (tmp_path / "tests" / "test_shared.py").write_text(
+        "import core.leaf\nimport core.shared\n",
+        encoding="utf-8",
+    )
+    matrix = {
+        "rules": [
+            {
+                "id": "shared-rule",
+                "paths": ["core/shared.py"],
+                "commands": [
+                    '.\\.venv\\Scripts\\python.exe -m pytest tests/test_shared.py -m "slow" -q'
+                ],
+            }
+        ]
+    }
+
+    result = select_tests.select_tests(
+        ["core/shared.py", "core/leaf.py"],
+        matrix,
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    assert result["commands"] == [
+        '.\\.venv\\Scripts\\python.exe -m pytest tests/test_shared.py -m "slow" -q --maxfail=0',
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_shared.py -q --maxfail=0",
+    ]
+
+
+def test_selector_treats_xdist_not_serial_guard_as_full_rule_coverage(tmp_path: Path):
+    (tmp_path / "core").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "core" / "shared.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (tmp_path / "core" / "leaf.py").write_text("VALUE = 2\n", encoding="utf-8")
+    (tmp_path / "tests" / "test_shared.py").write_text(
+        "import core.leaf\nimport core.shared\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "tests" / "test_other.py").write_text(
+        "def test_value():\n    assert True\n",
+        encoding="utf-8",
+    )
+    xdist_command = (
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_shared.py "
+        'tests/test_other.py -q -n 2 --dist loadfile -m "not serial"'
+    )
+    matrix = {
+        "rules": [
+            {
+                "id": "shared-rule",
+                "paths": ["core/shared.py"],
+                "commands": [xdist_command],
+            }
+        ]
+    }
+
+    result = select_tests.select_tests(
+        ["core/shared.py", "core/leaf.py"],
+        matrix,
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    assert result["commands"] == [f"{xdist_command} --maxfail=0"]
+    fallback = next(
+        rule
+        for rule in result["matchedRules"]
+        if rule["id"] == "python-import-fallback"
+    )
+    assert fallback["overlappedTests"] == ["tests/test_shared.py"]
+
+
+def test_selector_skips_changed_test_file_already_covered_by_a_rule_command(tmp_path: Path):
+    (tmp_path / "core").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "core" / "feature.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (tmp_path / "tests" / "test_value.py").write_text(
+        "def test_value():\n    assert True\n",
+        encoding="utf-8",
+    )
+    matrix = {
+        "rules": [
+            {
+                "id": "bundle-rule",
+                "paths": ["core/feature.py"],
+                "commands": [
+                    ".\\.venv\\Scripts\\python.exe -m pytest tests/test_value.py -q"
+                ],
+            }
+        ]
+    }
+
+    result = select_tests.select_tests(
+        ["core/feature.py", "tests/test_value.py"],
+        matrix,
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    assert result["commands"] == [
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_value.py -q --maxfail=0"
+    ]
+    changed_fallback = next(
+        rule
+        for rule in result["matchedRules"]
+        if rule["id"] == "changed-python-test-fallback"
+    )
+    assert changed_fallback["selectedTests"] == []
+    assert changed_fallback["overlappedTests"] == ["tests/test_value.py"]
+
+
 def test_selector_keeps_missing_matrix_tests_visible_to_the_gate(tmp_path: Path):
     (tmp_path / "core").mkdir()
     (tmp_path / "tests").mkdir()
