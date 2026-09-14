@@ -434,7 +434,7 @@ Pytest fixture repos created under ``%LOCALAPPDATA%\\...\\instances\\...\\cache`
         return None
     if os.environ.get("PYTEST_ADDOPTS", "").strip():
         return None
-    root = Path(os.environ.get("VIBELUTION_VALIDATION_TEMP", r"C:\vtmp")) / "vt-validation"
+    root = Path(os.environ.get("VIBELUTION_VALIDATION_TEMP", r"C:\vtmp")) / f"vt-validation-{os.getpid()}"
     try:
         root.mkdir(parents=True, exist_ok=True)
     except OSError:
