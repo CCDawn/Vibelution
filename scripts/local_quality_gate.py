@@ -440,7 +440,7 @@ Pytest fixture repos created under ``%LOCALAPPDATA%\\...\\instances\\...\\cache`
     except OSError:
         return None
     env = os.environ.copy()
-    env["PYTEST_ADDOPTS"] = f"--basetemp={root}"
+    env["PYTEST_ADDOPTS"] = f"--basetemp={root.as_posix()}"
     return env
 
 
