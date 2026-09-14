@@ -150,6 +150,34 @@ def test_root_run_revise_offer_uses_latest_thread_checkpoint(tmp_path: Path) -> 
         harness.close()
 
 
+def test_fork_offer_hides_operator_execution_iteration_nodes() -> None:
+    from dataclasses import replace
+
+    from core.research.workflow.operator_optimization_definition import (
+        build_operator_definition,
+    )
+    from core.web.services.team_workflow.research_runtime.command_offers.fork_revision import (
+        build_fork_revision_offers,
+    )
+    from tests._support.workflow_ledger_helpers import build_run_record
+
+    run = replace(
+        build_run_record(workflow_id="operator-optimization"),
+        active_node_id="optimization_discussion",
+    )
+    offer = build_fork_revision_offers(
+        run=run,
+        definition=build_operator_definition(),
+        revise_checkpoint_id="ckpt-operator-1",
+    )[0]
+
+    assert offer.available is False
+    assert offer.node_id is None
+    assert offer.payload["fromNodeId"] == ""
+    assert offer.reason_code == "fork_source_unavailable"
+    assert offer.blocker_ids == ("fork_source_unavailable",)
+
+
 def test_revise_checkpoint_resolver_failure_fails_soft(tmp_path: Path) -> None:
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
