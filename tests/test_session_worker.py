@@ -1034,6 +1034,59 @@ def test_continuation_loop_stops_when_token_budget_exhausted(tmp_path, monkeypat
     )
 
 
+def test_continuation_loop_binds_turn_guidance_provider_before_agent_turn(tmp_path, monkeypatch) -> None:
+    """Each agent turn in the loop must receive the host guidance provider."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+    bound: list[object] = []
+    observed: dict[str, object] = {}
+
+    class FakeAgent:
+        def set_turn_guidance_provider(self, provider=None):
+            bound.append(provider)
+
+    def provider_source():
+        return ["运行中引导"]
+
+    def fake_run_existing_agent_single_turn(_agent, **_kwargs):
+        observed["boundIsProvider"] = bool(bound) and bound[-1] is provider_source
+        return {
+            "status": "completed",
+            "summary": "已按引导收口。",
+            "raw_output": "已按引导收口。",
+            "outcome": "done",
+            "tool_call_count": 0,
+            "tool_trace": [],
+        }
+
+    monkeypatch.setattr(
+        session_service,
+        "run_existing_agent_single_turn",
+        fake_run_existing_agent_single_turn,
+    )
+
+    turn_control = session_service._create_session_turn_control("session-guidance-provider")
+    try:
+        result = worker._run_session_continuation_loop(
+            FakeAgent(),
+            context={},
+            session_id="session-guidance-provider",
+            turn_control=turn_control,
+            initial_prompt="开始长任务",
+            history_messages=[],
+            guidance_provider=provider_source,
+        )
+    finally:
+        session_service._clear_session_turn_control(
+            "session-guidance-provider",
+            turn_id=turn_control.turn_id,
+        )
+
+    assert result["status"] == "completed"
+    assert observed["boundIsProvider"] is True
+
+
 def test_source_stage_required_tools_narrow_each_model_turn(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)

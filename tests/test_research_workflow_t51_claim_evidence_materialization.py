@@ -235,6 +235,66 @@ def test_materializes_canonical_key_findings_without_requiring_parallel_claims(
     }
 
 
+def test_materializes_key_finding_quote_with_fetched_source_url_locator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_url = "https://example.org/kernel-launch"
+    quote = "Stable launches measured about 2.6 microseconds on this device."
+    task = {
+        "taskId": "task-extract-url-anchored-key-finding",
+        "teamId": "team-a",
+        "runId": "sc-run-a",
+        "stageId": "extraction",
+        "agentId": "agent-a",
+        "result": {
+            "candidateExtractions": [{
+                "candidateId": "candidate-url-anchored",
+                "decision": "keep",
+                "evidenceStatus": "evidence_ready",
+                **_v2_source_fields(
+                    title="Kernel launch measurements",
+                    source_url=source_url,
+                    fact="Stable kernel launch overhead is measurable.",
+                    verification_status="full_text_checked",
+                ),
+                "keyFindings": [{
+                    "fact": "Stable kernel launch overhead is measurable.",
+                    "quote": quote,
+                    "sourceRef": source_url,
+                }],
+            }],
+        },
+    }
+
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    task["teamId"] = team_id
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer.task_fetched_text",
+        lambda _task: {
+            source_url: {
+                "locator": source_url,
+                "resolvedUrl": source_url,
+                "text": quote,
+            }
+        },
+    )
+
+    created = materialize_claim_evidence_from_task(
+        project_root=tmp_path,
+        team_id=team_id,
+        workflow_run_id="wf-run-a",
+        source_collection_run_id="sc-run-a",
+        task=task,
+        model_ref="provider/model-a",
+        question_scope=scope,
+    )
+
+    assert len(created) == 1
+    assert created[0]["locator"] == {"kind": "url", "url": source_url}
+    assert created[0]["quote"] == quote
+
+
 def test_materializes_flat_extractions_with_evidence_ref_quotes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -1,6 +1,7 @@
 import type { ConversationMessage, SessionTurnItemStatus } from "../../api/types";
 import {
   consolidateSessionTurnItemsV2,
+  hasTerminalTurnOutcomeItems,
   projectConversationMessageFromTurnItemsV2,
 } from "../../routes/chatTurnProtocol";
 import { chronologicalConversationMessages } from "./conversationMessageOrder";
@@ -10,6 +11,10 @@ function terminalStatusRank(status: SessionTurnItemStatus) {
   if (status === "completed") return 2;
   if (status === "running") return 1;
   return 0;
+}
+
+function isLiveTurnStatus(status: SessionTurnItemStatus) {
+  return status === "running" || status === "pending";
 }
 
 function projectedIds(...messages: ConversationMessage[]) {
@@ -25,10 +30,18 @@ function mergeSameAssistantTurn(
 ): Extract<ConversationMessage, { role: "assistant" }> {
   const previousRank = terminalStatusRank(previous.status);
   const nextRank = terminalStatusRank(next.status);
-  const winner = nextRank >= previousRank ? next : previous;
+  const turnItems = consolidateSessionTurnItemsV2(previous.turnItems, next.turnItems);
+  // A mid-turn durable segment can already report `completed` while its turn
+  // keeps executing and only terminal tool/reasoning items exist. Only a real
+  // final-answer/failed outcome may outrank the still-running revision.
+  const settled = hasTerminalTurnOutcomeItems(turnItems);
+  const live = settled
+    ? undefined
+    : [previous, next].find((message) => isLiveTurnStatus(message.status));
+  const winner = live ?? (nextRank >= previousRank ? next : previous);
   return {
     ...winner,
-    turnItems: consolidateSessionTurnItemsV2(previous.turnItems, next.turnItems),
+    turnItems,
     metadata: {
       ...(previous.metadata ?? {}),
       ...(next.metadata ?? {}),

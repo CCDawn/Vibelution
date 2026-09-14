@@ -54,16 +54,19 @@ function normalizeRuntimeStatusText(text: unknown) {
   return String(text ?? "").replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-function isStreamingRuntimeStatusCarrier(message: ConversationMessage) {
+export function isLiveOverlayMessage(message: Pick<ConversationMessage, "metadata">) {
   const kind = String(message.metadata?.kind ?? "").trim();
+  return kind === "session_live_overlay" || kind === "session_active_turn_layer";
+}
+
+function isStreamingRuntimeStatusCarrier(message: ConversationMessage) {
   const stage = assistantStatusTurnItems(message)
     .map((item) => item.type === "status" ? item.code : item.type)
     .at(-1)
     ?.trim()
     .toLowerCase();
-  return assistantTurnIsStreaming(message)
-    || kind === "session_live_overlay"
-    || kind === "session_active_turn_layer"
+  return isLiveOverlayMessage(message)
+    || assistantTurnIsStreaming(message)
     || stage === "model_thinking"
     || stage === "model_request"
     || stage === "thinking";

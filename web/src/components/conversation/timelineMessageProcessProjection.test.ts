@@ -267,4 +267,57 @@ describe("timeline message process projection", () => {
         text: "已检查：工作树干净。",
       }),
     ]);
-  });});
+  });
+
+  it("keeps the running revision when a same-turn durable segment only has terminal tool items", () => {
+    const turnId = "turn-running-tools";
+    const projected = projectTimelineProcessMessages([
+      {
+        id: "message-segment",
+        role: "assistant",
+        content: "",
+        status: "completed",
+        timestamp: "2026-09-14T15:22:00Z",
+        turnItems: [{
+          id: "tool:1",
+          itemId: "tool",
+          version: 3,
+          sessionId: "session-1",
+          turnId,
+          type: "tool_call",
+          callId: "call-1",
+          toolName: "cli_tool",
+          status: "completed",
+          revision: 1,
+          sequence: 1,
+          terminal: true,
+        }],
+      },
+      {
+        id: "message-live-overlay",
+        role: "assistant",
+        content: "",
+        status: "running",
+        timestamp: "2026-09-14T15:21:00Z",
+        metadata: { kind: "session_live_overlay" },
+        turnItems: [{
+          id: "reasoning:1",
+          itemId: "reasoning",
+          version: 3,
+          sessionId: "session-1",
+          turnId,
+          type: "reasoning",
+          text: "正在执行",
+          status: "running",
+          revision: 1,
+          sequence: 2,
+          terminal: false,
+        }],
+      },
+    ]);
+
+    expect(projected).toHaveLength(1);
+    expect(projected[0].id).toBe("message-live-overlay");
+    expect(projected[0].status).toBe("running");
+  });
+});

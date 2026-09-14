@@ -479,6 +479,19 @@ def test_persist_turn_result_completed_still_journals_assistant_message(
     assert "已完成资料搜集。" in str(assistant_events[0].payload.get("content") or "")
 
 
+def test_persist_needs_continue_preserves_directory_terminal_status(tmp_path, monkeypatch):
+    from core.web.services.session import directory_bridge
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_running_session(tmp_path, "session-a", "turn-a")
+    writes = []
+    monkeypatch.setattr(directory_bridge, "touch_directory_session_safe", lambda *args, **kwargs: writes.append(kwargs))
+    persist._persist_session_turn_result(
+        "session-a", {"status": "needs_continue", "summary": "", "raw_output": ""}, turn_id="turn-a",
+    )
+    assert writes[-1]["status"] == "needs_continue"
+
+
 def test_persist_challenge_deadline_cancel_is_not_ready_or_success(
     tmp_path,
     monkeypatch,

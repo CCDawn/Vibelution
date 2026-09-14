@@ -123,6 +123,34 @@ def test_directory_runtime_migrates_legacy_sessions_without_importing_journals(
     assert "legacy-session" in _session_ids()
 
 
+def test_reading_detail_preserves_directory_recency_and_terminal_status(
+    isolated_directory_runtime: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    from core.chat.conversation_store import repository
+    from core.ui.chat_state import save_session_chat_state
+
+    project_root = isolated_directory_runtime
+    _write_agents_registry(agent_directory_service.registry_path())
+    directory_runtime.initialize_session_directory_runtime(project_root=project_root)
+    created = session_service.create_chat_session(title="Read only", agent_id="agent-alpha")
+    session_id = created["id"]
+    save_session_chat_state(project_root, session_id, {
+        "conversation_id": session_id, "agent_id": "agent-alpha", "title": "Read only",
+        "last_turn_status": "needs_continue", "updated_at": "2026-09-14T07:14:50+00:00",
+    })
+    store = directory_runtime.get_open_directory_store()
+    store.repository.touch_directory_session(session_id=session_id, status="needs_continue").result(timeout=5)
+    before = store.repository.get_session(session_id)
+    monkeypatch.setattr(repository, "_now_ms", lambda: before["recencyAtMs"] + 60_000)
+
+    session_service.get_session_detail(session_id, include_secondary=False)
+    session_service.get_session_detail(session_id, include_secondary=False)
+
+    after = store.repository.get_session(session_id)
+    assert after["recencyAtMs"] == before["recencyAtMs"]
+    assert after["status"] == "needs_continue"
+
+
 def test_directory_runtime_second_initialize_keeps_new_sessions(
     isolated_directory_runtime: Path,
 ):

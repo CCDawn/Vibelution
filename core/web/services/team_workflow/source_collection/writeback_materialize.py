@@ -20,8 +20,10 @@ from typing import Any
 
 from ..research_runtime.evidence_graph_gaps import evidence_graph_gap_counts
 from ..source_collection_common import project_source_version_families
-from .relation_endpoints import build_relation_endpoint_registry, resolve_relation_endpoint
-
+from .relation_endpoints import (
+    build_relation_endpoint_registry,
+    resolve_relation_endpoint,
+)
 
 # finding 阶段写回批次硬上限（finding 闭合化第一步，O5）：滚动写回仍然成立，
 # 但每批 candidateLeads[] 有界、每任务总批次有上限；超过即拒绝该批并返回结构化
@@ -2336,6 +2338,47 @@ def _source_collection_stage_writeback_agent_graph_payload(result: dict[str, Any
     explicit_graph = result.get("candidateGraph") if isinstance(result.get("candidateGraph"), dict) else {}
     if not explicit_graph and isinstance(result.get("candidate_graph"), dict):
         explicit_graph = result["candidate_graph"]
+
+    def _require_object_array(container: dict[str, Any], key: str, *, path: str) -> None:
+        if key not in container or container.get(key) is None:
+            return
+        value = container.get(key)
+        if not isinstance(value, list):
+            raise s.TeamWorkflowOrchestrationError(
+                "evidence_relation_graph_invalid: "
+                f"result_json.{path} must be an array of objects; "
+                f"received {type(value).__name__}. Do not write summary counts into graph collections."
+            )
+        if any(not isinstance(item, dict) for item in value):
+            raise s.TeamWorkflowOrchestrationError(
+                "evidence_relation_graph_invalid: "
+                f"every result_json.{path} item must be an object"
+            )
+
+    graph_collection_keys = (
+        "nodes",
+        "edges",
+        "missingLinks",
+        "unreviewedNodes",
+        "evidenceGaps",
+        "counterEvidenceRefs",
+    )
+    for collection_key in graph_collection_keys:
+        _require_object_array(
+            explicit_graph,
+            collection_key,
+            path=f"candidateGraph.{collection_key}",
+        )
+    for collection_key in (
+        "candidateRelations",
+        "themeNodes",
+        "sourceThemeEdges",
+        "topicRelations",
+        "missingLinks",
+        "evidenceGaps",
+        "counterEvidenceRefs",
+    ):
+        _require_object_array(result, collection_key, path=collection_key)
     # 根级 missingLinks 与 candidateGraph.missingLinks 是 Agent 自报缺口的两种
     # 写回形状（缺陷 A01）：显式图存在时根级条目并入显式图，隐式图路径继续
     # 直接携带；合并去重由 merger 的缺口身份归一完成。

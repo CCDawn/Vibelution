@@ -166,6 +166,7 @@ def test_ordinary_runtime_event_records_append_pipeline_duration(tmp_path, monke
 
 def test_warning_runtime_event_appends_before_full_projection(tmp_path, monkeypatch) -> None:
     _point_runtime_scene_at(tmp_path, monkeypatch, scene_id="scene-warning-projection")
+    monkeypatch.setattr(runtime_scene_service, "_last_scene_package_refresh_at", 0.0)
     projection_calls: list[str] = []
 
     def record_projection(scene, manifest) -> None:
@@ -229,6 +230,7 @@ def test_warning_runtime_event_defers_when_projection_already_running(tmp_path, 
 
 def test_warning_runtime_event_records_append_and_projection_pipeline_durations(tmp_path, monkeypatch) -> None:
     _point_runtime_scene_at(tmp_path, monkeypatch, scene_id="scene-projection-metrics")
+    monkeypatch.setattr(runtime_scene_service, "_last_scene_package_refresh_at", 0.0)
     metrics = _RecordingPipelineMetrics()
     monkeypatch.setattr(runtime_scene_service, "pipeline_metrics", metrics)
     monkeypatch.setattr(runtime_scene_service, "_update_runtime_scene_package_manifest", lambda scene, manifest: None)

@@ -32,6 +32,7 @@ from .runtime_scene.record import (
     _event_payload_to_client_item,
     _file_timestamp,
     _get_jsonl_file_cache,
+    _get_jsonl_file_cache_entry,
     _humanize_runtime_token,
     _is_current_runtime_scene_manifest,
     _is_dev_browser_telemetry_surface,
@@ -46,7 +47,9 @@ from .runtime_scene.record import (
     _iter_runtime_scene_descendants,
     _join_index_key_parts,
     _join_search_text,
+    _jsonl_checkpoint_digest,
     _jsonl_file_signature,
+    _jsonl_region_digest,
     _list_agent_logs,
     _list_artifacts,
     _list_conversation_logs,
@@ -70,12 +73,17 @@ from .runtime_scene.record import (
     _normalize_structured_telemetry_value,
     _normalize_telemetry_fields,
     _normalize_telemetry_value,
+    _note_scene_package_refresh_duration,
+    _note_scene_package_refresh_started,
     _now_utc,
     _package_index_status_token,
     _package_index_trigger_token,
     _parse_datetime,
     _parse_directory_timestamp_token,
+    _parse_jsonl_bytes,
     _read_jsonl_file,
+    _read_jsonl_file_full,
+    _read_jsonl_file_incremental,
     _read_last_scene_event_seq,
     _read_scene_lifecycle,
     _read_scene_timeline,
@@ -128,6 +136,8 @@ from .runtime_scene.record import (
     _scene_duration_seconds,
     _scene_event_file_signature,
     _scene_id,
+    _scene_package_refresh_min_interval_seconds,
+    _scene_package_refresh_window_open,
     _seconds_between_iso,
     _should_index_browser_memory_sample,
     _should_index_browser_telemetry_event,
@@ -311,6 +321,11 @@ MAX_TEXT_CHARS = 200_000
 MAX_PACKAGE_INDEX_SEARCH_TEXT_CHARS = 6_000
 JSONL_FILE_CACHE_LIMIT = 256
 SCENE_PACKAGE_REFRESH_INTERVAL_SECONDS = 30.0
+# A full package refresh over a huge active scene is O(scene size). Keep its CPU
+# duty cycle bounded by scaling the next refresh window with the duration of the
+# last refresh: a 5s refresh keeps the 30s base cadence, a 20s refresh defers the
+# next window to 80s instead of pinning a core continuously.
+SCENE_PACKAGE_REFRESH_DURATION_BACKOFF = 4.0
 RUNTIME_SCENE_PROMPT_INDEX_CACHE_TTL_SECONDS = 5.0
 BROWSER_TELEMETRY_RAW_PATH = "raw/browser.telemetry.log"
 BROWSER_TELEMETRY_COMPONENT = "browser_page"
@@ -391,9 +406,15 @@ SENSITIVE_FIELD_KEYWORDS = (
     "bearer",
 )
 _JSONL_FILE_CACHE_LOCK = Lock()
+# Entry: (signature, parsed rows, consumed byte offset, boundary digest). The
+# offset plus digest let an append-only file re-read only the new suffix
+# instead of reparsing the whole file on every scene package refresh
+# (multi-week scenes are >100MB JSONL); a rewritten file fails the digest check
+# and falls back to a full reparse.
 _JSONL_FILE_CACHE: dict[
-    str, tuple[tuple[str, bool, int, int], list[dict[str, Any]]]
+    str, tuple[tuple[str, bool, int, int], list[dict[str, Any]], int, str]
 ] = {}
+JSONL_FILE_CHECKPOINT_BYTES = 256
 _SCENE_EVENT_SEQ_CACHE_LOCK = Lock()
 _SCENE_EVENT_SEQ_CACHE: dict[str, tuple[int, int, int]] = {}
 NON_PROBLEM_NEXT_STATE_KINDS = {

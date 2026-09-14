@@ -236,6 +236,7 @@ import {
   runtimeHasChatTurnForSession,
 } from "./chatRuntimeWorkRuns";
 import {
+  chatControlSignalLabel,
   buildChatSessionStateViewModel,
 } from "./chatSessionSurfaceModel";
 import {
@@ -2154,24 +2155,9 @@ export function ChatCodingRouteWorkbench() {
     }
     return "";
   }, [detail?.messages]);
-  const latestControlSignalSummary = latestControlSignal?.summary?.trim() ?? "";
-  const latestControlSignalKindLabel = (() => {
-    if (!latestControlSignal) {
-      return "";
-    }
-    const lowerSummary = latestControlSignalSummary.toLowerCase();
-    const lowerKind = String(latestControlSignal.kind ?? "").toLowerCase();
-    if (lowerSummary.includes("tool failed") || lowerKind.includes("tool")) {
-      return lang === "zh" ? "工具失败" : "Tool failed";
-    }
-    if (lowerSummary.includes("provider") || lowerKind.includes("provider")) {
-      return lang === "zh" ? "模型通道" : "Provider";
-    }
-    if (lowerSummary.includes("interrupt") || lowerKind.includes("interrupt")) {
-      return lang === "zh" ? "已中断" : "Interrupted";
-    }
-    return latestControlSignalSummary || latestControlSignal.kind || "";
-  })();
+  const latestControlSignalKindLabel = latestControlSignal
+    ? chatControlSignalLabel(latestControlSignal, lang)
+    : "";
   const latestControlSignalLine = latestControlSignal
     ? activeControlSignals.length > 1
       ? `${latestControlSignalKindLabel} ${numberFormatter.format(activeControlSignals.length)}`
@@ -2188,26 +2174,6 @@ export function ChatCodingRouteWorkbench() {
       latestControlSignal.summary,
     ].filter(Boolean).join(" · ")
     : "";
-  // The control signal used to render only in the retired status rail, so without
-  // this it has no visible host at all. `warning` is the highest severity that
-  // still renders as a compact row rather than an alert block.
-  const sessionNotices = useMemo<SessionRuntimeNotice[]>(() => {
-    if (!latestControlSignal || !latestControlSignalLine) {
-      return activeRuntimeNotices;
-    }
-    return [
-      ...activeRuntimeNotices,
-      {
-        id: `control-signal-${latestControlSignal.turnId || latestControlSignal.createdAt || latestControlSignal.kind || "latest"}`,
-        kind: "next_state_signal",
-        level: "warning",
-        message: [latestControlSignalLine, latestControlSignalSummary].filter(Boolean).join(" · "),
-        timestamp: String(latestControlSignal.createdAt ?? ""),
-        source: String(latestControlSignal.source || latestControlSignal.kind || ""),
-        turnId: latestControlSignal.turnId,
-      },
-    ];
-  }, [activeRuntimeNotices, latestControlSignal, latestControlSignalLine, latestControlSignalSummary]);
 
   const {
     handleSubmitTurn,
@@ -2637,6 +2603,7 @@ export function ChatCodingRouteWorkbench() {
 
   useDesktopConversationAttention({
     sessions: allVisibleSessions,
+    queryClient,
     viewedSessionId: activeSessionId || "",
     notifierRef: desktopConversationNotifierRef,
     onOpenSession: handleOpenDirectSession,
@@ -3309,7 +3276,7 @@ export function ChatCodingRouteWorkbench() {
               lang={lang}
               loadingSessionLabel={t("loadingSession")}
               noSessionsLabel={t("noSessionsYet")}
-              notices={sessionNotices}
+              notices={activeRuntimeNotices}
               sessionsPending={sessionsQuery.isPending}
               toolApproval={toolApproval}
               transientErrorMessage={sessionDetailErrorMessage}

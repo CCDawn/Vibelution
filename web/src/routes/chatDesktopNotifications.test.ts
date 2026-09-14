@@ -58,11 +58,11 @@ function detail(patch: Partial<SessionDetail> = {}): SessionDetail {
 }
 
 describe("desktop conversation notifier", () => {
-  it("emits once for a completed assistant delta and names the session", () => {
+  it("emits once after authoritative detail settles a completed assistant delta", () => {
     const notify = vi.fn(async () => ({
       schemaVersion: 1,
       status: "notified",
-      notificationKey: "session-1:turn-1:completed",
+      notificationKey: "session-1:turn-1",
       unreadCount: 1,
       focused: false,
     }));
@@ -76,7 +76,11 @@ describe("desktop conversation notifier", () => {
       sessionTitle: "测试会话",
       viewedSessionId: "session-1",
     });
-    notifier.handleAssistantDelta(assistantDelta(), {
+    notifier.handleSessionDetail(detail({ currentPhase: "running", status: "running" }), {
+      sessionTitle: "测试会话",
+      viewedSessionId: "session-1",
+    });
+    notifier.handleSessionDetail(detail({ currentPhase: "ready", status: "ready", terminalReason: "success" }), {
       sessionTitle: "测试会话",
       viewedSessionId: "session-1",
     });
@@ -85,7 +89,7 @@ describe("desktop conversation notifier", () => {
     expect(notify).toHaveBeenCalledWith(
       expect.objectContaining({
         schemaVersion: 1,
-        notificationKey: "session-1:turn-1:completed",
+        notificationKey: "session-1:turn-1",
         sessionId: "session-1",
         turnId: "turn-1",
         title: "对话已完成",
@@ -145,7 +149,7 @@ describe("desktop conversation notifier", () => {
     expect(notify).toHaveBeenCalledTimes(1);
     expect(notify).toHaveBeenCalledWith(
       expect.objectContaining({
-        notificationKey: "session-1:turn-error-1:failed",
+        notificationKey: "session-1:turn-error-1",
         turnId: "turn-error-1",
         terminalStatus: "failed",
         title: "对话已结束",
@@ -166,6 +170,8 @@ describe("desktop conversation notifier", () => {
     });
 
     notifier.handleAssistantDelta(assistantDelta(), { sessionTitle: "测试会话" });
+    notifier.handleSessionDetail(detail({ currentPhase: "running", status: "running" }), { sessionTitle: "测试会话" });
+    notifier.handleSessionDetail(detail({ currentPhase: "ready", status: "ready", terminalReason: "success" }), { sessionTitle: "测试会话" });
 
     expect(telemetry).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -189,6 +195,8 @@ describe("desktop conversation notifier", () => {
       }),
       { sessionTitle: "测试会话" },
     );
+    notifier.handleSessionDetail(detail({ currentPhase: "running", status: "running" }), { sessionTitle: "测试会话" });
+    notifier.handleSessionDetail(detail({ currentPhase: "ready", status: "ready", terminalReason: "success" }), { sessionTitle: "测试会话" });
 
     const notifyPayload = notify.mock.calls[0]?.[0];
     const telemetryPayload = telemetry.mock.calls[0]?.[0];
@@ -211,6 +219,7 @@ describe("desktop conversation notifier", () => {
     const maliciousTitle = "sk-live-secret from C:\\Users\\17533\\Desktop\\prompt.txt";
 
     notifier.handleAssistantDelta(assistantDelta(), { sessionTitle: maliciousTitle });
+    notifier.handleSessionDetail(detail({ title: maliciousTitle }));
 
     const notifyPayload = notify.mock.calls[0]?.[0];
     const telemetryPayload = telemetry.mock.calls[0]?.[0];
@@ -226,7 +235,7 @@ describe("desktop conversation notifier", () => {
     expect(JSON.stringify(telemetryPayload)).not.toContain("C:\\Users\\17533\\Desktop\\prompt.txt");
   });
 
-  it("notifies background session index busy-to-idle without duplicating the live stream", () => {
+  it("does not notify from background index timestamps without a stable turn id", () => {
     const notify = vi.fn();
     const notifier = createDesktopConversationNotifier({
       bridge: { notifyConversationCompleted: notify },
@@ -261,20 +270,12 @@ describe("desktop conversation notifier", () => {
       { viewedSessionId: "session-1" },
     );
 
-    expect(notify).toHaveBeenCalledTimes(2);
+    expect(notify).toHaveBeenCalledTimes(1);
     expect(notify).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        sessionId: "session-bg",
-        body: "「后台会话」已完成一轮回复。",
-        suppressWhenFocused: false,
-      }),
-    );
-    expect(notify).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
         sessionId: "session-1",
-        notificationKey: "session-1:turn-1:completed",
+        notificationKey: "session-1:turn-1",
         suppressWhenFocused: true,
       }),
     );
@@ -295,18 +296,82 @@ describe("desktop conversation notifier", () => {
       viewedSessionId: "session-1",
       sessionTitle: "当前会话",
     });
-    notifier.handleSessionSummaries(
-      [{ id: "session-1", title: "当前会话", status: "ready", currentPhase: "ready", updatedAt: "t2" }],
-      { viewedSessionId: "session-1", sessionTitle: "当前会话" },
-    );
+    notifier.handleSessionDetail(detail({ currentPhase: "running", status: "running" }), {
+      viewedSessionId: "session-1",
+      sessionTitle: "当前会话",
+    });
+    notifier.handleSessionDetail(detail({ currentPhase: "ready", status: "ready", terminalReason: "success" }), {
+      viewedSessionId: "session-1",
+      sessionTitle: "当前会话",
+    });
 
     expect(notify).toHaveBeenCalledTimes(1);
     expect(notify).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: "session-1",
-        notificationKey: "session-1:turn-1:completed",
+        notificationKey: "session-1:turn-1",
       }),
     );
+  });
+
+  it("does not treat done as success before authoritative detail", () => {
+    const notify = vi.fn();
+    const notifier = createDesktopConversationNotifier({
+      bridge: { notifyConversationCompleted: notify },
+      postTelemetry: vi.fn(),
+    });
+
+    notifier.handleAssistantDelta(assistantDelta(), { sessionTitle: "测试会话" });
+
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("reports needs_continue as ended and never as completed", () => {
+    const notify = vi.fn();
+    const notifier = createDesktopConversationNotifier({
+      bridge: { notifyConversationCompleted: notify },
+      postTelemetry: vi.fn(),
+    });
+
+    notifier.handleSessionDetail(detail({ currentPhase: "running", status: "running" }), {
+      sessionTitle: "测试会话",
+      viewedSessionId: "session-other",
+    });
+    notifier.handleSessionDetail(detail({
+      currentPhase: "ready",
+      status: "ready",
+      terminalReason: "needs_continue",
+    }), {
+      sessionTitle: "测试会话",
+      viewedSessionId: "session-other",
+    });
+
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({
+      terminalStatus: "needs_continue",
+      title: "对话已结束",
+      body: "「测试会话」对话已结束。",
+    }));
+  });
+
+  it("does not emit ordinary summary completion without a stable turn identity", () => {
+    const notify = vi.fn();
+    const notifier = createDesktopConversationNotifier({
+      bridge: { notifyConversationCompleted: notify },
+      postTelemetry: vi.fn(),
+    });
+
+    notifier.handleSessionSummaries([
+      { id: "session-bg", title: "后台会话", status: "running", currentPhase: "running", updatedAt: "t1" },
+    ]);
+    notifier.handleSessionSummaries([
+      { id: "session-bg", title: "后台会话", status: "ready", currentPhase: "ready", updatedAt: "t2" },
+    ]);
+    notifier.handleSessionSummaries([
+      { id: "session-bg", title: "后台会话", status: "ready", currentPhase: "ready", updatedAt: "t3" },
+    ]);
+
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it("does not notify idle sessions observed for the first time", () => {
@@ -354,11 +419,39 @@ describe("desktop conversation notifier", () => {
 
     expect(notify).toHaveBeenCalledTimes(1);
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({
-      notificationKey: "session-nora:completion-2:completed",
+      notificationKey: "session-nora:completion-2",
       sessionId: "session-nora",
       companionAgentId: "agent-nora",
       suppressWhenFocused: false,
     }));
+  });
+
+  it.each(["paused_limit", "aborted", "superseded"])("does not report %s as success", (terminalReason) => {
+    const notify = vi.fn();
+    const notifier = createDesktopConversationNotifier({ bridge: { notifyConversationCompleted: notify }, postTelemetry: vi.fn() });
+    notifier.handleAssistantDelta(assistantDelta());
+    notifier.handleSessionDetail(detail({ terminalReason }));
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: "对话已结束", terminalStatus: terminalReason }));
+  });
+
+  it("waits for the matching settled turn rather than using an older detail", () => {
+    const notify = vi.fn();
+    const notifier = createDesktopConversationNotifier({ bridge: { notifyConversationCompleted: notify }, postTelemetry: vi.fn() });
+    notifier.handleAssistantDelta(assistantDelta({ turnId: "turn-2" }));
+    notifier.handleSessionDetail(detail());
+    expect(notify).not.toHaveBeenCalled();
+    const settled = detail();
+    settled.messages[0].turnId = "turn-2";
+    notifier.handleSessionDetail(settled);
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ turnId: "turn-2" }));
+  });
+
+  it("uses the failed turn id even when an older assistant reply exists", () => {
+    const notify = vi.fn();
+    const notifier = createDesktopConversationNotifier({ bridge: { notifyConversationCompleted: notify }, postTelemetry: vi.fn() });
+    notifier.handleAssistantDelta(assistantDelta({ turnId: "turn-2" }));
+    notifier.handleSessionDetail(detail({ terminalReason: "failed_runtime", lastTurnError: { turnId: "turn-2" } as SessionDetail["lastTurnError"] }));
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ turnId: "turn-2", terminalStatus: "failed_runtime" }));
   });
 
   it("returns no bridge when the launcher API is unavailable", () => {
@@ -445,7 +538,6 @@ describe("desktop conversation notifier", () => {
     });
   });
 });
-
 describe("session notification copy", () => {
   it("falls back to a short session id when the title sanitizes away", () => {
     expect(sanitizeSessionLabel("C:\\Users\\17533\\secret.txt", "session-abcd1234")).toBe("会话 abcd1234");

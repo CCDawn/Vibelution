@@ -208,3 +208,60 @@ def test_deferred_periodic_refresh_keeps_warning_projection_immediate(tmp_path, 
     assert result.get("accepted") is True
     assert result.get("projectionRefresh") == "full"
     assert full_projection_calls == [scene_dir]
+
+
+def test_warning_storm_uses_single_full_refresh_window(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "_last_scene_package_refresh_at", 0.0)
+    monkeypatch.setattr(runtime_scene_service, "_last_scene_package_refresh_duration_s", 0.0, raising=False)
+    scene_dir = _seed_active_scene(tmp_path)
+    full_projection_calls: list[Path] = []
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "_update_runtime_scene_package_manifest",
+        lambda scene, manifest: full_projection_calls.append(scene),
+    )
+
+    first = runtime_scene_service.record_runtime_scene_event(
+        "runtime_manager",
+        "consistency",
+        "workbench.consistency.orphaned_browser_detected",
+        message="orphaned browser detected",
+        level="warning",
+        outcome="observed",
+        lifecycle=True,
+        refresh_package_if_due=False,
+    )
+    second = runtime_scene_service.record_runtime_scene_event(
+        "runtime_manager",
+        "consistency",
+        "workbench.consistency.orphaned_browser_detected",
+        message="orphaned browser detected",
+        level="warning",
+        outcome="observed",
+        lifecycle=True,
+        refresh_package_if_due=False,
+    )
+
+    # 同一窗口内的第二次 warning 不再重复全量诊断。
+    assert first.get("projectionRefresh") == "full"
+    assert second.get("projectionRefresh") == "deferred"
+    assert full_projection_calls == [scene_dir]
+
+
+def test_package_refresh_window_scales_with_last_refresh_duration(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        runtime_scene_service, "_last_scene_package_refresh_duration_s", 12.0, raising=False
+    )
+    monkeypatch.setattr(
+        runtime_scene_service, "_last_scene_package_refresh_at", time.monotonic() - 34.0
+    )
+    scene_dir = _seed_active_scene(tmp_path)
+
+    # 34s 超过基础 30s，但 12s * 4 = 48s 的自适应窗口还没到。
+    refreshed = runtime_scene_record._refresh_active_scene_package_if_due(scene_dir)
+
+    assert runtime_scene_record._scene_package_refresh_min_interval_seconds() == 48.0
+    assert refreshed is False
+    assert not (scene_dir / "summary.json").exists()

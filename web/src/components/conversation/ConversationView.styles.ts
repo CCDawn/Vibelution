@@ -300,8 +300,11 @@ backToBottomButton:
     "vui-components-conversationview composerAttachmentThumb block h-5 max-h-5 w-5 max-w-5 shrink-0 rounded-[var(--radius-control)] object-cover",
   composerAttachmentTray:
     "vui-components-conversationview composerAttachmentTray min-w-0 max-w-full overflow-hidden flex flex-wrap items-center gap-1.5",
+  // Busy composer keeps the queue/steer action and the stop button on one row
+  // (Codex keeps steer/stop in a single compact cluster; stacking them made the
+  // toolbar end look cluttered next to the model picker and context ring).
   composerActionStack:
-    "vui-components-conversationview composerActionStack grid min-w-0 w-fit grid-cols-1 content-end items-end gap-1 self-end justify-self-end",
+    "vui-components-conversationview composerActionStack flex min-w-0 w-fit items-center justify-end gap-1",
   composerError:
     `vui-components-conversationview composerError min-w-0 ${vuiStateDangerSoftClass}`,
   composerEditModeDescription:

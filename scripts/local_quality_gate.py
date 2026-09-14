@@ -282,6 +282,26 @@ def parse_allowed_command(command: str, root: Path) -> CommandSpec:
     raise UnsupportedValidationCommand(command)
 
 
+def git_argv(argv: Sequence[str]) -> list[str]:
+    """Return one git argv that stays valid beyond the Windows MAX_PATH limit.
+
+    Pytest temp roots live deep under the project instance cache, so a plain
+    ``git diff <a>...<b>`` can fail with ``Filename too long`` even though both
+    revisions exist. ``core.longpaths=true`` makes Git use long-path aware Win32
+    calls for its own path handling; it is a no-op outside Windows.
+    """
+
+    args = list(argv)
+    if not args:
+        return args
+    if Path(args[0]).name.lower() not in {"git", "git.exe"}:
+        return args
+    if len(args) > 1 and args[1] == "-c":
+        return args
+    args[1:1] = ["-c", "core.longpaths=true"]
+    return args
+
+
 def run_process(
     argv: Sequence[str],
     cwd: Path,
@@ -289,8 +309,10 @@ def run_process(
     input_text: str | None = None,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    if env is None and any("pytest" in str(item) for item in argv):
+        env = validation_environment()
     return subprocess.run(
-        list(argv),
+        git_argv(argv),
         cwd=cwd,
         input=input_text,
         capture_output=True,
@@ -343,7 +365,7 @@ def git_lines(root: Path, *args: str) -> list[str]:
 
 def git_paths(root: Path, *args: str) -> list[str]:
     completed = subprocess.run(
-        ["git", *args],
+        git_argv(["git", *args]),
         cwd=root,
         capture_output=True,
         check=False,
@@ -400,6 +422,27 @@ def summarize_failure(completed: subprocess.CompletedProcess[str], subject: str)
     else:
         raw = (completed.stderr or "").strip() or (completed.stdout or "").strip() or "command failed"
     return bounded_failure_summary(f"{subject}: {raw}")
+
+
+def validation_environment() -> dict[str, str] | None:
+    """Redirect pytest's basetemp away from the deep Windows instance-cache temp.
+
+Pytest fixture repos created under ``%LOCALAPPDATA%\\...\\instances\\...\\cache``
+    temp roots make git fail with "Filename too long" on path-length sensitive    fixtures (rebase/init). Setting ``PYTEST_ADDOPTS=--basetemp=<short root>``
+    keeps the validated commands unchanged while pinning the temp root short.
+    """
+
+    if os.name != "nt":
+        return None
+    root = Path(os.environ.get("VIBELUTION_VALIDATION_TEMP", r"C:\vtmp")) / f"vt-validation-{os.getpid()}"
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    env = os.environ.copy()
+    existing = os.environ.get("PYTEST_ADDOPTS", "").strip()
+    env["PYTEST_ADDOPTS"] = f"{existing} --basetemp={root.as_posix()}".strip()
+    return env
 
 
 def measured(

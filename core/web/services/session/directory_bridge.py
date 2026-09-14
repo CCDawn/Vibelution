@@ -315,7 +315,9 @@ def sync_conversation_record(
                 conversation.get("parent_session_id") or conversation.get("parentSessionId") or ""
             ).strip()
             or None,
-            status=str(status or conversation.get("status") or "ready").strip() or "ready",
+            status=str(
+                status or conversation.get("last_turn_status") or conversation.get("status") or "ready"
+            ).strip() or "ready",
             session_kind=str(
                 conversation.get("session_kind") or conversation.get("sessionKind") or "main"
             ).strip()

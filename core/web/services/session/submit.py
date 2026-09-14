@@ -453,7 +453,9 @@ def submit_session_message(
     # Ledger I/O is per-session. Holding _CHAT_STATE_LOCK across it serializes
     # every other session's 202 accept (measured 6-way wait ~20s).
     admit_lock = _session_submit_admit_lock(conversation_id)
+    admit_lock_wait_started_at = s._perf_counter()
     admit_lock.acquire()
+    submit_timing_fields["chatStateLockWaitMs"] = s._elapsed_ms(admit_lock_wait_started_at)
     prepared_agent: dict[str, Any] | None = None
     prepared_agent_id = ""
     prepared_context_limit_ok = False
@@ -496,7 +498,6 @@ def submit_session_message(
         raise
 
     persist_started_at = s._perf_counter()
-    submit_timing_fields["chatStateLockWaitMs"] = 0
     try:
         if conversation is None:
             raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
@@ -614,6 +615,11 @@ def submit_session_message(
                 conversation.get("agent_id") or conversation.get("agentId") or prepared_agent_id
             ).strip() or prepared_agent_id
             agent = prepared_agent
+        persist_resolve_finished_at = s._perf_counter()
+        submit_timing_fields["persistResolveMs"] = s._elapsed_ms_between(
+            persist_started_at,
+            persist_resolve_finished_at,
+        )
         skill_command = s.parse_skill_slash_command(message)
         skill_invocation = s._skill_invocation_payload(skill_command) if skill_command is not None else None
         reserved_turn_id = str(
@@ -694,8 +700,18 @@ def submit_session_message(
         conversation.pop("lastTurnError", None)
         conversation["last_turn_status"] = "running"
         conversation["updated_at"] = user_entry["timestamp"]
+        persist_message_build_finished_at = s._perf_counter()
+        submit_timing_fields["persistMessageBuildMs"] = s._elapsed_ms_between(
+            persist_resolve_finished_at,
+            persist_message_build_finished_at,
+        )
+        chat_state_save_started_at = s._perf_counter()
         s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
+        submit_timing_fields["chatStateSaveMs"] = s._elapsed_ms(chat_state_save_started_at)
+        set_running_started_at = s._perf_counter()
         s._set_session_running(conversation_id, True, turn_id=turn_control.turn_id, leases=requested_leases)
+        submit_timing_fields["setSessionRunningMs"] = s._elapsed_ms(set_running_started_at)
+        work_run_persist_started_at = s._perf_counter()
         s._persist_chat_turn_work_run(
             session_id=conversation_id,
             turn_id=turn_control.turn_id,
@@ -706,6 +722,7 @@ def submit_session_message(
             started_at=user_entry["timestamp"],
             updated_at=user_entry["timestamp"],
         )
+        submit_timing_fields["workRunPersistMs"] = s._elapsed_ms(work_run_persist_started_at)
         submit_timing_fields["chatStateLockedMs"] = s._elapsed_ms_between(persist_started_at)
     finally:
         admit_lock.release()

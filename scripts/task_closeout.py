@@ -9,7 +9,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal, Sequence
+from typing import Any, Literal, Sequence
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -650,6 +650,67 @@ def run_cleanup_only(
     )
 
 
+def _manifest_field(manifest_path: Path | str | None, field: str) -> Any:
+    """Best-effort read of one manifest field for stale-main classification."""
+
+    if manifest_path is None:
+        return None
+    try:
+        payload = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload.get(field)
+
+
+def classify_stale_main_recovery(
+    context: CloseoutContext,
+    *,
+    base: str,
+    manifest_path: Path | str | None = None,
+) -> tuple[str, str]:
+    """Name the one mechanical next step behind a ``stale_main`` outcome.
+
+    ``stale_main`` covers three different situations. Naming the right one keeps
+    the caller from guessing, and avoids handing back a one-use retry token that
+    the caller's own recovery step would invalidate:
+
+    - the task branch does not contain current ``main`` yet -> merge ``main`` in;
+    - ``main`` advanced over paths this task validated -> re-run validation;
+    - ``main`` advanced elsewhere only -> reuse the manifest under a token.
+    """
+
+    try:
+        task_head = gate.rev_parse(context.task_root, "HEAD")
+        current_main = gate.main_revision_sha(context.task_root, base)
+    except (OSError, RuntimeError, ValueError) as error:
+        return "rerun_validation", _bounded_error(error)
+    if not gate.is_ancestor(context.task_root, current_main, task_head):
+        return (
+            "merge_main_into_task_branch",
+            f"task branch does not contain {base} at {current_main[:12]}",
+        )
+    validated_main_sha = str(_manifest_field(manifest_path, "validatedMainSha") or "")
+    files = [
+        item
+        for item in (_manifest_field(manifest_path, "changedFiles") or [])
+        if isinstance(item, str)
+    ]
+    if (
+        validated_main_sha
+        and files
+        and gate.main_advance_skips_files(
+            context.task_root,
+            base,
+            validated_main_sha,
+            files,
+        )
+    ):
+        return "sync_main_then_reserve_with_token", ""
+    return "rerun_validation", f"{base} advanced over paths this task validated"
+
+
 def run_managed_closeout(
     task_worktree: Path | str,
     *,
@@ -670,9 +731,13 @@ def run_managed_closeout(
         )
         validate_development_claim(context, claim_id=claim_id, agent_id=agent_id)
     except (OSError, RuntimeError, ValueError) as error:
+        code = getattr(error, "code", "")
+        expired_claim = code == "invalid_development_claim"
         return ManagedCloseoutResult(
             status="failed",
             exit_code=1,
+            retryable=expired_claim,
+            next_action="refresh_development_claim" if expired_claim else "",
             errors=[_bounded_error(error)],
         )
 
@@ -768,19 +833,27 @@ def run_managed_closeout(
             validation_result.errors == ["stale_main"]
             and resolved_manifest is not None
         ):
-            try:
-                retry_token = issue_stale_retry_token(
-                    resolved_manifest,
-                    context,
-                    agent_id=agent_id,
-                )
-                validation_result.retry_token_path = str(retry_token)
-                validation_result.retryable = True
-                validation_result.next_action = "sync_main_then_reserve_with_token"
-            except OSError as error:
-                validation_result.errors.append(
-                    f"stale_retry_token_pending: {_bounded_error(error)}"
-                )
+            stale_action, stale_detail = classify_stale_main_recovery(
+                context,
+                base=base,
+                manifest_path=resolved_manifest,
+            )
+            validation_result.retryable = True
+            validation_result.next_action = stale_action
+            if stale_detail:
+                validation_result.errors.append(stale_detail)
+            if stale_action == "sync_main_then_reserve_with_token":
+                try:
+                    retry_token = issue_stale_retry_token(
+                        resolved_manifest,
+                        context,
+                        agent_id=agent_id,
+                    )
+                    validation_result.retry_token_path = str(retry_token)
+                except OSError as error:
+                    validation_result.errors.append(
+                        f"stale_retry_token_pending: {_bounded_error(error)}"
+                    )
         if validation_result.errors == ["head_moved"]:
             # The validated task content changed after the run. Nothing in the
             # manifest can be reused, so the only correct next step is a fresh
@@ -848,14 +921,19 @@ def run_managed_closeout(
             retryable = False
             next_action = ""
             if verified.outcome == "stale_main":
-                retry_token = issue_stale_retry_token(
-                    resolved_manifest,
+                next_action, _stale_detail = classify_stale_main_recovery(
                     context,
-                    agent_id=agent_id,
+                    base=base,
+                    manifest_path=resolved_manifest,
                 )
-                retry_token_path = str(retry_token)
                 retryable = True
-                next_action = "sync_main_then_reserve_with_token"
+                if next_action == "sync_main_then_reserve_with_token":
+                    retry_token = issue_stale_retry_token(
+                        resolved_manifest,
+                        context,
+                        agent_id=agent_id,
+                    )
+                    retry_token_path = str(retry_token)
             elif verified.outcome == "head_moved":
                 retryable = True
                 next_action = "rerun_closeout_for_current_head"

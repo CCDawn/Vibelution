@@ -10,14 +10,14 @@ from core.web.services.team_workflow.source_collection.relation_endpoints import
 from core.web.services.team_workflow.source_collection.stage_writeback_prompt_contracts import (
     stage_writeback_prompt_lines,
 )
-from core.web.services.team_workflow.source_collection_stage_tasks import (
-    MAX_RELATION_ENDPOINT_ENUM_IDS,
-    source_collection_stage_task_writeback_contract,
-)
 from core.web.services.team_workflow.source_collection.writeback_materialize import (
     _enforce_source_collection_finding_writeback_batch_limits,
     _merge_source_collection_stage_writeback_agent_graph,
     _source_collection_stage_writeback_agent_graph_payload,
+)
+from core.web.services.team_workflow.source_collection_stage_tasks import (
+    MAX_RELATION_ENDPOINT_ENUM_IDS,
+    source_collection_stage_task_writeback_contract,
 )
 
 
@@ -286,6 +286,51 @@ def test_relation_prompt_binds_candidate_relations_endpoints_to_real_nodes() -> 
     assert "阻塞下游 knowledge_ingestion" in prompt
     assert "themeNodes[]" in prompt
     assert "语义端点" in prompt
+
+
+def test_relation_prompt_and_contract_expose_executable_array_shapes() -> None:
+    prompt = "\n".join(stage_writeback_prompt_lines("relations"))
+
+    assert "最小合法形状" in prompt
+    assert '禁止写 `"edges":5`' in prompt
+    assert '"counterEvidenceRefs"' in prompt
+    contract = source_collection_stage_task_writeback_contract(
+        "team-a",
+        "run-a",
+        "task-a",
+        stage_id="relations",
+        agent_id="agent-a",
+        agent_role="source_relation_mapper",
+        schema_version=1,
+        allowed_relation_endpoint_ids=["candidate-a", "candidate-b"],
+    )
+    result_contract = contract["resultContract"]
+    assert result_contract["collectionFieldTypes"]["candidateGraph.edges"] == "object[]"
+    assert result_contract["collectionFieldTypes"]["counterEvidenceRefs"] == "object[]"
+    assert result_contract["minimumExample"]["counterEvidenceRefs"] == [
+        {
+            "evidenceRef": "ce-limit",
+            "claim": "该结论受设备与负载边界限制",
+            "disposition": "limit_scope",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("payload", "field_path", "received_type"),
+    [
+        ({"candidateGraph": {"edges": 5}}, "candidateGraph.edges", "int"),
+        ({"counterEvidenceRefs": 3}, "counterEvidenceRefs", "int"),
+    ],
+)
+def test_relation_payload_rejects_non_array_collections_with_field_feedback(
+    payload: dict, field_path: str, received_type: str
+) -> None:
+    with pytest.raises(
+        Exception,
+        match=rf"result_json\.{field_path} must be an array of objects; received {received_type}",
+    ):
+        _source_collection_stage_writeback_agent_graph_payload(payload)
 
 
 def test_merge_counts_dangling_edges_without_counting_contract_missing_links() -> None:

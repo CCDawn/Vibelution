@@ -1,10 +1,29 @@
-import type { RuntimeSummary, SessionDetail, SessionSummary } from "../../api/types";
+import type { ChatNextStateSignalSummary, RuntimeSummary, SessionDetail, SessionSummary } from "../../api/types";
 import type { TranslationKey } from "../../i18n/dictionary";
 import {
   buildVisiblePanelRows,
   type CompactPanelRow,
 } from "../chatCompactPanel";
 import { formatRelativeTime } from "../chatShellFormat";
+
+export function chatControlSignalLabel(
+  signal: ChatNextStateSignalSummary,
+  lang: "zh" | "en",
+): string {
+  const summary = String(signal.summary || "").trim();
+  const kind = String(signal.kind || "").trim().toLowerCase();
+  const lowerSummary = summary.toLowerCase();
+  if (lowerSummary.includes("tool failed") || kind.includes("tool")) {
+    return lang === "zh" ? "工具失败" : "Tool failed";
+  }
+  if (lowerSummary.includes("provider") || kind.includes("provider")) {
+    return lang === "zh" ? "模型通道" : "Provider";
+  }
+  if (lowerSummary.includes("interrupt") || kind.includes("interrupt")) {
+    return lang === "zh" ? "已中断" : "Interrupted";
+  }
+  return summary || String(signal.kind || "").trim();
+}
 
 export type ActiveSkillContract = {
   status?: string;

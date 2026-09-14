@@ -64,6 +64,10 @@ def _source_finding_receipt_binding_keys(value: Any) -> set[str]:
     if identity_value != raw:
         keys.add(identity_value)
 
+    normalized_url = s._source_collection_normalized_url(identity_value)
+    if normalized_url:
+        keys.add(f"url:{normalized_url}")
+
     arxiv_id = s._source_collection_qwen_url_arxiv_id(identity_value)
     if arxiv_id:
         keys.add(f"arxiv:{arxiv_id.lower()}")

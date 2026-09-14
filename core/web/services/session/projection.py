@@ -255,7 +255,7 @@ def get_session_detail(
 
     from . import directory_bridge
 
-    directory_bridge.sync_conversation_record(conversation)
+    directory_bridge.sync_conversation_record(conversation, touch_recency=False)
 
     with s._RUNNING_SESSIONS_LOCK:
         active_turn_id = str(s._SESSION_ACTIVE_TURN_IDS.get(normalized_session_id) or "").strip()
