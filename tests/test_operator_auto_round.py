@@ -10,25 +10,26 @@ from core.research.operator_optimization.model_budget_contracts import (
     OperatorDiscussionBudget,
     OperatorModelCallBudget,
 )
-from core.research.workflow.models import AgentBindingLayers, ActorKind
+from core.research.workflow.models import ActorKind, AgentBindingLayers
 from core.web.services.team_workflow.operator_optimization import (
+    evaluation,
+    feedback,
     iteration,
     rounds,
-    feedback,
-    evaluation,
 )
 from core.web.services.team_workflow.operator_optimization.store import (
+    CampaignConflict,
     read_campaign,
     update_campaign,
 )
 from core.web.services.team_workflow.research_runtime.block_projection import (
     sync_run_succeeded,
 )
-from core.web.services.team_workflow.research_runtime.event_publish_worker import (
-    EventPublishWorker,
-)
 from core.web.services.team_workflow.research_runtime.command_service import (
     WorkflowCommandService,
+)
+from core.web.services.team_workflow.research_runtime.event_publish_worker import (
+    EventPublishWorker,
 )
 from tests import test_operator_evaluation_feedback as fixtures
 from tests.test_operator_optimization_rounds import actual_create_run
@@ -135,7 +136,7 @@ def completed(activity, prepared, baseline_ready, tmp_path, monkeypatch):
     )
 
 
-def test_terminal_transaction_enqueues_once_and_worker_starts_one_round(
+def test_terminal_transaction_enqueues_one_research_decision_without_starting_round(
     activity, completed
 ):
     store, run_id, payload, close = completed
@@ -148,15 +149,83 @@ def test_terminal_transaction_enqueues_once_and_worker_starts_one_round(
     assert rows == [("event_publish",)]
     worker = EventPublishWorker(store=store, now_provider=lambda: 2000)
     assert worker.run_once() == 1
-    state = json.loads(store.get_run(run_id).input_snapshot_json)["operatorIteration"]
-    assert state["status"] == "started"
-    assert len(read_campaign(*activity).rounds) == 2
-    assert (
-        store.latest_attempt(state["nextRunId"], "optimization_discussion").attempt == 1
-    )
+    state = json.loads(store.get_run(run_id).input_snapshot_json)["operatorDecision"]
+    assert state["status"] == "requested"
+    assert state["decisionId"].startswith("decision-")
+    assert len(read_campaign(*activity).rounds) == 1
     assert iteration.advance_iteration(store, payload, now_ms=3000) == state
     assert worker.run_once() == 0
+    assert len(read_campaign(*activity).rounds) == 1
+
+
+def test_continue_decision_is_the_only_path_that_starts_next_round(
+    activity, completed
+):
+    store, _, payload, _ = completed
+    requested = iteration.advance_iteration(store, payload, now_ms=2000)
+    result = iteration.apply_iteration_decision(
+        store,
+        payload,
+        {
+            "decisionId": requested["decisionId"],
+            "kind": "continue",
+            "reason": "new evidence supports another bounded experiment",
+            "decidedBy": "fixture-decision-agent",
+        },
+        now_ms=2100,
+    )
+    assert result["status"] == "started"
     assert len(read_campaign(*activity).rounds) == 2
+    assert (
+        store.latest_attempt(result["nextRunId"], "optimization_discussion").attempt
+        == 1
+    )
+
+
+def test_stop_decision_does_not_create_or_start_next_round(activity, completed):
+    store, _, payload, _ = completed
+    requested = iteration.advance_iteration(store, payload, now_ms=2000)
+    result = iteration.apply_iteration_decision(
+        store,
+        payload,
+        {
+            "decisionId": requested["decisionId"],
+            "kind": "stop",
+            "reason": "expected ROI is below the experiment threshold",
+            "decidedBy": "fixture-decision-agent",
+        },
+        now_ms=2100,
+    )
+    assert result["status"] == "stopped"
+    assert result["reason"] == "expected ROI is below the experiment threshold"
+    assert len(read_campaign(*activity).rounds) == 1
+
+
+def test_decision_replay_is_idempotent_and_conflicting_rewrite_is_rejected(
+    activity, completed
+):
+    store, _, payload, _ = completed
+    requested = iteration.advance_iteration(store, payload, now_ms=2000)
+    decision = {
+        "decisionId": requested["decisionId"],
+        "kind": "stop",
+        "reason": "current evidence is sufficient",
+        "decidedBy": "fixture-decision-agent",
+    }
+    first = iteration.apply_iteration_decision(
+        store, payload, decision, now_ms=2100
+    )
+    assert iteration.apply_iteration_decision(
+        store, payload, decision, now_ms=2200
+    ) == first
+    with pytest.raises(CampaignConflict, match="immutable"):
+        iteration.apply_iteration_decision(
+            store,
+            payload,
+            {**decision, "reason": "rewrite the accepted reason"},
+            now_ms=2300,
+        )
+    assert len(read_campaign(*activity).rounds) == 1
 
 
 @pytest.mark.parametrize(
@@ -195,6 +264,13 @@ def test_recovers_after_creation_or_start_before_progress_write(
     activity, completed, monkeypatch, checkpoint
 ):
     store, _, payload, _ = completed
+    requested = iteration.advance_iteration(store, payload, now_ms=1900)
+    decision = {
+        "decisionId": requested["decisionId"],
+        "kind": "continue",
+        "reason": "continue bounded optimization",
+        "decidedBy": "fixture-decision-agent",
+    }
     save = iteration._save
     crashed = []
 
@@ -211,8 +287,12 @@ def test_recovers_after_creation_or_start_before_progress_write(
 
     monkeypatch.setattr(iteration, "_save", interrupt)
     with pytest.raises(RuntimeError, match="crash"):
-        iteration.advance_iteration(store, payload, now_ms=2000)
-    result = iteration.advance_iteration(store, payload, now_ms=3000)
+        iteration.apply_iteration_decision(
+            store, payload, decision, now_ms=2000
+        )
+    result = iteration.apply_iteration_decision(
+        store, payload, decision, now_ms=3000
+    )
     assert result["status"] == "started"
     assert len(read_campaign(*activity).rounds) == 2
     assert (
@@ -222,22 +302,22 @@ def test_recovers_after_creation_or_start_before_progress_write(
 
 
 def test_feedback_adapter_closes_run_and_never_enqueues_challenge_delivery(tmp_path):
-    from tests._support.command_helpers import CommandHarness
-    from tests._support.adapter_fakes import FakeDomainPorts
-    from tests.test_research_workflow_adapter_idempotency import _action, _seed
     from core.research.workflow.operator_optimization_definition import (
         build_operator_definition,
     )
     from core.web.services.team_workflow.research_runtime.action_registry import (
         ActionRegistry,
     )
-    from core.web.services.team_workflow.research_runtime.adapters.domain_adapters import (
-        SystemActionAdapter,
-    )
     from core.web.services.team_workflow.research_runtime.adapter_dispatch_worker import (
         AdapterDispatchWorker,
     )
+    from core.web.services.team_workflow.research_runtime.adapters.domain_adapters import (
+        SystemActionAdapter,
+    )
+    from tests._support.adapter_fakes import FakeDomainPorts
+    from tests._support.command_helpers import CommandHarness
     from tests._support.workflow_ledger_helpers import FIXED_NOW_MS
+    from tests.test_research_workflow_adapter_idempotency import _action, _seed
 
     harness = CommandHarness(tmp_path / "terminal.sqlite")
     try:
@@ -289,7 +369,18 @@ def test_native_readiness_refusal_does_not_create_attempt(
         ),
     )
     monkeypatch.setattr(iteration, "get_command_service", lambda: service)
-    result = iteration.advance_iteration(store, payload, now_ms=2000)
+    requested = iteration.advance_iteration(store, payload, now_ms=1900)
+    result = iteration.apply_iteration_decision(
+        store,
+        payload,
+        {
+            "decisionId": requested["decisionId"],
+            "kind": "continue",
+            "reason": "continue bounded optimization",
+            "decidedBy": "fixture-decision-agent",
+        },
+        now_ms=2000,
+    )
     assert result["status"] == "blocked"
     assert store.latest_attempt(result["nextRunId"], "optimization_discussion") is None
 
