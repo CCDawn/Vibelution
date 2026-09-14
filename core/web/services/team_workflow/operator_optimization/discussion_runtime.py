@@ -5,6 +5,8 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from core.research.operator_optimization.contracts import OperatorRunContext
+from core.research.operator_optimization.discussion_contracts import OperatorDiscussionResult
 from core.research.workflow.contracts._canonical import sha256_hex
 from core.research.workflow.contracts.discussion_scope import parse_discussion_scope
 from core.web.services import chat_room_service
@@ -30,6 +32,37 @@ from .store import CampaignConflict, campaign_root, read_campaign
 # this module never constructs a receipt binding itself.
 build_operator_meeting_authority = discussion_authority.build_operator_meeting_authority
 validate_operator_authority = discussion_authority.validate_operator_authority
+
+
+def _bind_final_result_to_frozen_context(
+    result: OperatorDiscussionResult,
+    *,
+    inputs: Mapping[str, Any],
+) -> OperatorDiscussionResult:
+    """Assign immutable round identity after validating the model's semantics.
+
+    The final speaker proposes the change and selects its evidence, but cannot
+    assign the campaign, round, or parent candidate.  Those values belong to
+    the frozen operator run and are attached here before persistence.
+    """
+
+    hypothesis = result.hypothesis
+    if hypothesis is None:
+        return result
+    context = OperatorRunContext.model_validate(inputs["context"])
+    if context.parentCandidateRef is None:
+        raise CampaignConflict("Discussion context has no frozen parent candidate")
+    return result.model_copy(
+        update={
+            "hypothesis": hypothesis.model_copy(
+                update={
+                    "optimizationCampaignId": context.optimizationCampaignId,
+                    "roundId": context.roundId,
+                    "parentCandidateRef": context.parentCandidateRef,
+                }
+            )
+        }
+    )
 
 
 def _authority_for_open(
@@ -470,6 +503,7 @@ def collect_discussion(
 
     if final_message is None or final_result is None:
         raise CampaignConflict("Final experiment_planner output is unavailable")
+    final_result = _bind_final_result_to_frozen_context(final_result, inputs=inputs)
     provenance = {
         "roomId": room_id,
         "chatRoundId": record["roundId"],

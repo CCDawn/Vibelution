@@ -8,6 +8,7 @@ Late-bound facade keeps monkeypatches stable.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 from datetime import datetime, timezone
@@ -284,6 +285,24 @@ def _get_jsonl_file_cache(signature: tuple[str, bool, int, int]) -> list[dict] |
     if entry is None or entry[0] != signature:
         return None
     return list(entry[1])
+
+
+def _get_jsonl_file_cache_entry(
+    path_key: str,
+) -> tuple[tuple[str, bool, int, int], list[dict], int, str] | None:
+    """Return the raw cache entry (signature, rows, consumed bytes, digest).
+
+    Used by the append-only fast path: the consumed byte offset marks how much
+    of the file the cached rows already cover, so a grown file only needs its
+    new suffix parsed. The digest covers the boundary region ending at that
+    offset and proves the file was appended to rather than rewritten.
+    """
+    s = _service()
+    with s._JSONL_FILE_CACHE_LOCK:
+        entry = s._JSONL_FILE_CACHE.get(path_key)
+    if entry is None or len(entry) != 4:
+        return None
+    return entry
 
 
 def _humanize_runtime_token(value: str) -> str:
@@ -884,6 +903,128 @@ def _parse_directory_timestamp_token(value: str) -> datetime | None:
     return None
 
 
+def _parse_jsonl_bytes(data: bytes, *, bom: bool = False) -> list[dict]:
+    """Parse decoded JSONL bytes into object rows, skipping bad lines."""
+    text = data.decode("utf-8-sig" if bom else "utf-8")
+    rows: list[dict] = []
+    for line in text.splitlines():
+        stripped = str(line or "").strip()
+        if not stripped:
+            continue
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            rows.append(payload)
+    return rows
+
+
+def _jsonl_region_digest(data: bytes) -> str:
+    return hashlib.blake2b(data, digest_size=16).hexdigest()
+
+
+def _jsonl_checkpoint_digest(path: Path, end_offset: int) -> str:
+    """Digest of the cached boundary region ending at ``end_offset``.
+
+    A later read recomputes this over the same byte range; a mismatch means the
+    file was rewritten (or truncated and regrown) rather than appended to, so
+    the cached rows must not be reused.
+    """
+    s = _service()
+    start = max(0, end_offset - s.JSONL_FILE_CHECKPOINT_BYTES)
+    try:
+        with path.open("rb") as handle:
+            handle.seek(start)
+            region = handle.read(end_offset - start)
+    except OSError:
+        return ""
+    return s._jsonl_region_digest(region)
+
+
+def _read_jsonl_file_full(path: Path) -> tuple[list[dict], int, str]:
+    """Read the whole file once, reporting the safe append restart state.
+
+    All rows are parsed, including a trailing line without a newline (legacy
+    readers did too, and seeded/imported files often omit it). The offset is
+    only advanced to the end when the file ends with a newline; otherwise a
+    later read must reparse the whole file so a partial or completed trailing
+    line can never be skipped or duplicated.
+    """
+    s = _service()
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return [], 0, ""
+    rows = s._parse_jsonl_bytes(data, bom=True)
+    if not data.endswith(b"\n"):
+        return rows, 0, ""
+    consumed = len(data)
+    digest = s._jsonl_region_digest(data[max(0, consumed - s.JSONL_FILE_CHECKPOINT_BYTES) :])
+    return rows, consumed, digest
+
+
+def _read_jsonl_file_incremental(
+    path: Path,
+    signature: tuple[str, bool, int, int],
+    base_entry: tuple[tuple[str, bool, int, int], list[dict], int, str],
+) -> list[dict] | None:
+    """Parse only the appended suffix for an append-only file.
+
+    The cached rows already cover ``consumed`` bytes, so re-parsing the whole
+    file on every refresh would repeat work proportional to the full (often
+    >100MB) scene file. The boundary digest proves the covered prefix is still
+    intact; a rewrite or truncation returns ``None`` so the caller reparses the
+    whole file. Only complete appended lines are consumed; an in-flight
+    trailing line is left for the next read.
+    """
+    s = _service()
+    with s._JSONL_FILE_CACHE_LOCK:
+        current = s._JSONL_FILE_CACHE.get(signature[0])
+        if current is not None and current[0] == signature:
+            return list(current[1])
+        base = base_entry
+        if (
+            current is not None
+            and len(current) == 4
+            and current[0][1]
+            and signature[3] > current[2] > 0
+        ):
+            base = current
+        rows = list(base[1])
+        consumed = base[2]
+        digest = base[3]
+    if not digest or s._jsonl_checkpoint_digest(path, consumed) != digest:
+        return None
+    try:
+        with path.open("rb") as handle:
+            handle.seek(consumed)
+            chunk = handle.read()
+    except OSError:
+        return rows
+    if chunk:
+        last_newline = chunk.rfind(b"\n")
+        if last_newline >= 0:
+            rows.extend(s._parse_jsonl_bytes(chunk[: last_newline + 1]))
+            consumed += last_newline + 1
+    fresh = s._jsonl_file_signature(path)
+    stored = fresh if fresh[1] and fresh[3] >= consumed else signature
+    stored_digest = s._jsonl_checkpoint_digest(path, consumed) if consumed > 0 else ""
+    with s._JSONL_FILE_CACHE_LOCK:
+        existing = s._JSONL_FILE_CACHE.get(signature[0])
+        if (
+            existing is not None
+            and len(existing) == 4
+            and existing[0][1]
+            and existing[0][2] >= stored[2]
+            and existing[0][3] >= stored[3]
+            and existing[2] >= consumed
+        ):
+            return list(existing[1])
+        s._JSONL_FILE_CACHE[signature[0]] = (stored, rows, consumed, stored_digest)
+    return list(rows)
+
+
 def _read_jsonl_file(path: Path) -> list[dict]:
     """Read a JSONL file through a bounded, path-keyed snapshot cache.
 
@@ -891,6 +1032,10 @@ def _read_jsonl_file(path: Path) -> list[dict]:
     signature-keyed cache stored a full copy per file version and, on
     multi-week scenes whose timeline grows on every event, retained many GB.
     Returned rows share the cached objects and must be treated as read-only.
+
+    A grown, append-only file reuses the cached rows and parses only the new
+    suffix, so repeated scene package refreshes stay proportional to the new
+    events instead of the whole file.
     """
     s = _service()
     signature = s._jsonl_file_signature(path)
@@ -899,22 +1044,18 @@ def _read_jsonl_file(path: Path) -> list[dict]:
     cached = s._get_jsonl_file_cache(signature)
     if cached is not None:
         return cached
-    rows: list[dict] = []
-    try:
-        lines = path.read_text(encoding="utf-8-sig").splitlines()
-    except OSError:
-        return rows
-    for line in lines:
-        text = str(line or "").strip()
-        if not text:
-            continue
-        try:
-            payload = json.loads(text)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, dict):
-            rows.append(payload)
-    s._remember_jsonl_file_cache(signature, rows)
+    previous = s._get_jsonl_file_cache_entry(signature[0])
+    if (
+        previous is not None
+        and previous[0][1]
+        and previous[2] > 0
+        and signature[3] > previous[2]
+    ):
+        incremental = s._read_jsonl_file_incremental(path, signature, previous)
+        if incremental is not None:
+            return incremental
+    rows, consumed, digest = s._read_jsonl_file_full(path)
+    s._remember_jsonl_file_cache(signature, rows, consumed, digest)
     return list(rows)
 
 
@@ -984,13 +1125,28 @@ def _read_scene_timeline(scene_dir: Path) -> list[dict]:
     return s._fold_repeated_work_run_snapshots(timeline)
 
 
-def _remember_jsonl_file_cache(signature: tuple[str, bool, int, int], rows: list[dict]) -> None:
+def _remember_jsonl_file_cache(
+    signature: tuple[str, bool, int, int],
+    rows: list[dict],
+    consumed_bytes: int = 0,
+    digest: str = "",
+) -> None:
     """Keep one shared read-only snapshot per file path."""
     s = _service()
     with s._JSONL_FILE_CACHE_LOCK:
         if len(s._JSONL_FILE_CACHE) > s.JSONL_FILE_CACHE_LIMIT:
             s._JSONL_FILE_CACHE.clear()
-        s._JSONL_FILE_CACHE[signature[0]] = (signature, rows)
+        existing = s._JSONL_FILE_CACHE.get(signature[0])
+        if (
+            existing is not None
+            and len(existing) == 4
+            and existing[0][1]
+            and existing[0][2] >= signature[2]
+            and existing[0][3] >= signature[3]
+            and existing[2] >= consumed_bytes
+        ):
+            return
+        s._JSONL_FILE_CACHE[signature[0]] = (signature, rows, consumed_bytes, digest)
 
 
 def _remember_scene_event_seq(event_path: Path, seq: int) -> None:
@@ -2282,20 +2438,48 @@ def _update_ignored_browser_telemetry_manifest(
     s._save_scene_manifest(scene_dir, manifest)
 
 
+def _scene_package_refresh_min_interval_seconds() -> float:
+    """最小全量刷新间隔：基础 30s，并按上次刷新耗时放大，保持 CPU 占空比有界。"""
+    s = _service()
+    base = float(getattr(s, "SCENE_PACKAGE_REFRESH_INTERVAL_SECONDS", 30.0))
+    backoff = float(getattr(s, "SCENE_PACKAGE_REFRESH_DURATION_BACKOFF", 4.0))
+    duration = float(getattr(s, "_last_scene_package_refresh_duration_s", 0.0))
+    return max(base, duration * backoff)
+
+
+def _scene_package_refresh_window_open(now: float) -> bool:
+    """调用方持有 RUNTIME_SCENE_PACKAGE_WRITE_LOCK 时判断当前窗口是否允许全量刷新。"""
+    s = _service()
+    last = float(getattr(s, "_last_scene_package_refresh_at", 0.0))
+    return now - last >= s._scene_package_refresh_min_interval_seconds()
+
+
+def _note_scene_package_refresh_started(now: float) -> None:
+    """在昂贵工作开始前占用窗口，warning 即时刷新与节流刷新共享同一时间戳。"""
+    s = _service()
+    s._last_scene_package_refresh_at = now
+
+
+def _note_scene_package_refresh_duration(started_at: float) -> None:
+    s = _service()
+    s._last_scene_package_refresh_duration_s = max(0.0, monotonic() - started_at)
+
+
 def _refresh_active_scene_package_if_due(scene_dir: Path) -> bool:
-    """节流刷新活跃场景的 summary/package_index（默认 30s 一次），保证诊断入口新鲜。
+    """节流刷新活跃场景的 summary/package_index（基础 30s，按上次耗时自适应）。
 
     与 full_projection_refresh（warning/error 立即刷新）互补：常规事件也按节流补齐
     summary.json / package_index.json / manifest 的 package 字段。
 
-    并发契约：写锁用非阻塞获取，节流时间戳在锁内二次确认后、昂贵工作开始前
-    立即写入。同一窗口内只有一个事件线程真正刷新，其余记录者直接跳过，不再
-    排队串行重复全量诊断（重复全量刷新曾在多周活跃场景上把后端钉在 100% CPU）。
+    并发契约：写锁用非阻塞获取；统一窗口（与 warning/error 即时全量刷新共享同一
+    时间戳）在锁内确认后、昂贵工作开始前立即写入。同一窗口内只有一个事件线程真正
+    刷新，warning 风暴也不能在每次事件上各触发一次全量诊断；刷新耗时再按
+    SCENE_PACKAGE_REFRESH_DURATION_BACKOFF 放大下一个窗口，避免多周活跃场景把后端
+    长时间钉在 100% CPU。
     """
     s = _service()
     now = monotonic()
-    last = float(getattr(s, "_last_scene_package_refresh_at", 0.0))
-    if now - last < s.SCENE_PACKAGE_REFRESH_INTERVAL_SECONDS:
+    if not s._scene_package_refresh_window_open(now):
         return False
     if not s.RUNTIME_SCENE_PACKAGE_WRITE_LOCK.acquire(blocking=False):
         # Another refresh already owns this window and claimed the timestamp
@@ -2303,12 +2487,15 @@ def _refresh_active_scene_package_if_due(scene_dir: Path) -> bool:
         return False
     try:
         now = monotonic()
-        last = float(getattr(s, "_last_scene_package_refresh_at", 0.0))
-        if now - last < s.SCENE_PACKAGE_REFRESH_INTERVAL_SECONDS:
+        if not s._scene_package_refresh_window_open(now):
             return False
-        s._last_scene_package_refresh_at = now
-        manifest = s._load_scene_manifest(scene_dir)
-        s._update_runtime_scene_package_manifest(scene_dir, manifest)
+        s._note_scene_package_refresh_started(now)
+        started_at = monotonic()
+        try:
+            manifest = s._load_scene_manifest(scene_dir)
+            s._update_runtime_scene_package_manifest(scene_dir, manifest)
+        finally:
+            s._note_scene_package_refresh_duration(started_at)
         return True
     except Exception as exc:
         _debug_logger.warning(f"Failed to refresh scene package manifest: {exc}")
@@ -3011,9 +3198,10 @@ def _record_runtime_scene_event_impl(
 
     # 节流刷新活跃场景的 summary/package_index，保证诊断入口始终新鲜（常规事件也补齐）。
     # Launcher / Runtime Manager 生命周期热路径可以只追加持久事件；明确的
-    # warning/error 仍会在下方走即时完整投影。
+    # warning/error 仍会在下方走即时完整投影，并与本刷新共享同一窗口，避免叠加。
+    periodic_refresh_ran = False
     if refresh_package_if_due:
-        s._refresh_active_scene_package_if_due(scene_dir)
+        periodic_refresh_ran = s._refresh_active_scene_package_if_due(scene_dir)
 
     projection_refresh = "deferred"
     requires_projection_lock = s._runtime_scene_event_requires_immediate_projection(
@@ -3045,8 +3233,23 @@ def _record_runtime_scene_event_impl(
                         reconciliation_closed=reconciliation_closed,
                     )
                     if full_projection_refresh:
-                        s._update_runtime_scene_package_manifest(scene_dir, manifest)
-                        projection_refresh = "full"
+                        # 场景关闭（reconciliation）是稀有且必须立即持久化的状态转换，
+                        # 不受刷新窗口约束；其余 warning/error 与常规节流刷新共享同一
+                        # 窗口，storm 时每个窗口最多一次全量诊断（summary 最迟在下一
+                        # 个窗口，按上次耗时自适应，补齐）。
+                        must_refresh_now = periodic_refresh_ran or reconciliation_closed
+                        now = monotonic()
+                        if must_refresh_now or s._scene_package_refresh_window_open(now):
+                            if not periodic_refresh_ran:
+                                s._note_scene_package_refresh_started(now)
+                                started_at = monotonic()
+                                try:
+                                    s._update_runtime_scene_package_manifest(scene_dir, manifest)
+                                finally:
+                                    s._note_scene_package_refresh_duration(started_at)
+                            projection_refresh = "full"
+                        else:
+                            projection_refresh = "deferred"
                 finally:
                     s.RUNTIME_SCENE_PACKAGE_WRITE_LOCK.release()
 

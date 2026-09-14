@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 
 import pytest
 
@@ -144,6 +145,90 @@ def test_completed_discussion_collects_hypothesis_with_provenance(activity, nati
     receipts.pop()
     with pytest.raises(CampaignConflict, match="provider receipts"):
         runtime.collect_discussion(activity[0], run.run_id, node_run_id="node-run-1")
+
+
+def test_completed_discussion_binds_model_identity_to_frozen_round(
+    activity, native_ports, discussion_case, monkeypatch
+):
+    from core.research.operator_optimization.contracts import ArtifactRef
+    from core.web.services.team_workflow.operator_optimization.knowledge import read_ref
+    from core.web.services.team_workflow.research_runtime import (
+        model_invocation_receipt_registry as registry,
+    )
+
+    campaign, run, _, rooms, _ = native_ports
+    proposed = deepcopy(discussion_case[2])
+    proposed.update(
+        optimizationCampaignId="other-campaign",
+        roundId="round-next",
+        parentCandidateRef={
+            **proposed["parentCandidateRef"],
+            "sourceHash": "c" * 64,
+        },
+    )
+    opened = runtime.open_discussion(activity[0], run.run_id, node_run_id="node-run-1")
+    room = rooms[opened["roomId"]]
+    room["participants"] = [
+        {"sessionId": "session-reviewer", "participantId": "p2", "agentId": "reviewer"},
+        {"sessionId": "session-planner", "participantId": "p1", "agentId": "planner"},
+    ]
+    room["rounds"][0].update(
+        status="completed",
+        messages=[
+            {
+                "messageId": "m2",
+                "sessionId": "session-reviewer",
+                "participantId": "p2",
+                "agentId": "reviewer",
+                "status": "completed",
+                "operatorDiscussionPayload": {
+                    "schemaVersion": 1,
+                    "contribution": "核对候选的回归风险。",
+                    "result": None,
+                },
+            },
+            {
+                "messageId": "m1",
+                "sessionId": "session-planner",
+                "participantId": "p1",
+                "agentId": "planner",
+                "status": "completed",
+                "operatorDiscussionPayload": {
+                    "schemaVersion": 1,
+                    "contribution": "选择一个可证伪候选。",
+                    "result": {
+                        "status": "selected",
+                        "reason": "计划已形成。",
+                        "hypothesis": proposed,
+                    },
+                },
+            },
+        ],
+    )
+    receipts = [
+        {
+            "receiptId": "r1",
+            "status": "succeeded",
+            "scope": {"sessionId": "session-reviewer", "turnId": "chat-room:chat-round1:p2"},
+        },
+        {
+            "receiptId": "r2",
+            "status": "succeeded",
+            "scope": {"sessionId": "session-planner", "turnId": "chat-room:chat-round1:p1"},
+        },
+    ]
+    monkeypatch.setattr(registry, "question_model_invocation_receipts", lambda *a, **k: receipts)
+
+    collected = runtime.collect_discussion(activity[0], run.run_id, node_run_id="node-run-1")
+    persisted = read_ref(
+        activity[0],
+        run.run_id,
+        ArtifactRef.model_validate(collected["hypothesisRef"]),
+    )
+    assert persisted["optimizationCampaignId"] == activity[2]
+    assert persisted["roundId"] == campaign.rounds[0].roundId
+    assert persisted["parentCandidateRef"] == campaign.rounds[0].parentCandidateRef.model_dump(mode="json")
+    assert persisted["observationRefs"] == proposed["observationRefs"]
 
 
 def test_native_authority_blocks_operator_before_sessions_or_model_start(activity, native_ports, monkeypatch):
