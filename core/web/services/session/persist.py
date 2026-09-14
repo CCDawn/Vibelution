@@ -1094,11 +1094,7 @@ def _persist_session_turn_result(
 
     directory_bridge.touch_directory_session_safe(
         session_id,
-        status=(
-            "failed"
-            if final_status in {"failed_provider", "failed_runtime", "failed"}
-            else ("stopped" if challenge_deadline_cancelled else "ready")
-        ),
+        status="stopped" if challenge_deadline_cancelled else conversation["last_turn_status"],
         last_preview=visible_assistant_text,
     )
     s._reconcile_source_collection_stage_task_after_turn(
