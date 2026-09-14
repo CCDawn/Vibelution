@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { instanceWorkbenchUrl, planProjectSlot } from "../src/protocol/applyProjectSlot.js";
+import {
+  instanceWorkbenchUrl,
+  planProjectSlot,
+  projectSlotWindowAction
+} from "../src/protocol/applyProjectSlot.js";
 import { parseBranchInstanceRecords } from "../src/protocol/launcherControlClient.js";
 
 const listed = {
@@ -104,5 +108,28 @@ describe("planProjectSlot", () => {
 
   it("builds a loopback workbench URL from the reserved port", () => {
     expect(instanceWorkbenchUrl({ url: "", port: 8002 })).toBe("http://127.0.0.1:8002/");
+  });
+
+  it("leaves start-like branch windows to the readiness supervisor", () => {
+    const plan = planProjectSlot({
+      items,
+      projectRoot: "C:/repo/.worktrees/task",
+      lifecycleCommand: "restart"
+    });
+    expect(projectSlotWindowAction(plan)).toBe("none");
+  });
+
+  it("routes an already-running branch to its instance window", () => {
+    const liveItems = parseBranchInstanceRecords({
+      items: listed.items.map((item) =>
+        item.id === "worktree:task" ? { ...item, alive: true } : item
+      )
+    });
+    const plan = planProjectSlot({
+      items: liveItems,
+      projectRoot: "C:/repo/.worktrees/task",
+      lifecycleCommand: "status"
+    });
+    expect(projectSlotWindowAction(plan)).toBe("instance");
   });
 });

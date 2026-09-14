@@ -65,7 +65,7 @@ import {
 } from "./notifications/conversationNotifications.js";
 import { createDesktopPaths, resolveDesktopEntryCatalogPath, type DesktopPaths } from "./paths.js";
 import { fetchLauncherControlToken, runDesktopActionOnce } from "./protocol/desktopActionClient.js";
-import { planProjectSlot } from "./protocol/applyProjectSlot.js";
+import { planProjectSlot, projectSlotWindowAction } from "./protocol/applyProjectSlot.js";
 import {
   classifyTrayBranchInstances,
   fetchLauncherBranchInstances,
@@ -4461,7 +4461,11 @@ async function applyPendingProjectSlot(
         });
       }
     }
-    if (plan.operation === "stop" || plan.operation === "force-stop") {
+    const windowAction = projectSlotWindowAction(plan);
+    if (windowAction === "none") {
+      // The isolated-start supervisor opens the instance-scoped window only
+      // after that generation passes HTTP readiness. Opening the shared
+      // Workbench window here leaves an unowned ghost window after stop.
       return;
     }
     let url = plan.url;
@@ -4477,6 +4481,10 @@ async function applyPendingProjectSlot(
     }
     if (!url) {
       throw new Error(`工作区已匹配但没有可打开的地址：${plan.instanceId}`);
+    }
+    if (windowAction === "instance") {
+      await provider.openOrFocusInstanceWorkbench({ instanceId: plan.instanceId, url });
+      return;
     }
     currentWorkbenchUrl = url;
     markWorkbenchOpenRequested();

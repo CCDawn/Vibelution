@@ -21,6 +21,21 @@ export type ProjectSlotPlan = {
   operation: "" | "start" | "stop" | "force-stop" | "restart" | "rebuild-and-start";
 };
 
+export type ProjectSlotWindowAction = "none" | "main" | "instance";
+
+export function projectSlotWindowAction(plan: ProjectSlotPlan): ProjectSlotWindowAction {
+  if (plan.operation === "stop" || plan.operation === "force-stop") {
+    return "none";
+  }
+  if (
+    !plan.isMain
+    && ["start", "restart", "rebuild-and-start"].includes(plan.operation)
+  ) {
+    return "none";
+  }
+  return plan.isMain ? "main" : "instance";
+}
+
 export function instanceWorkbenchUrl(item: Pick<BranchInstanceRecord, "url" | "port">): string {
   const url = String(item.url || "").trim();
   if (url) {
