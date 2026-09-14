@@ -166,6 +166,35 @@ def test_real_domain_routes_child_to_campaign_reservation(child_case):
     assert second["idempotent"] is True
 
 
+@pytest.mark.parametrize(
+    ("parent_node_id", "parent_node_run_id"),
+    [
+        ("optimization_discussion", ""),
+        ("optimization_knowledge", "generic-parent-node"),
+    ],
+)
+def test_generic_collection_is_not_operator_native_child(
+    child_case, parent_node_id, parent_node_run_id
+):
+    store, binding, _ = child_case
+
+    generic = ensure_knowledge_invocation(
+        store,
+        parent_run_id="parent1",
+        parent_node_id=parent_node_id,
+        parent_node_run_id=parent_node_run_id,
+        parent_attempt=1,
+        question_id="OPERATOR-SOFTMAX",
+        scope={"questionId": "OPERATOR-SOFTMAX", "projectId": "project1"},
+        search_envelope={"keywords": ["softmax"]},
+        requirements={},
+        source_policy_version="2",
+    )
+
+    assert runtime.is_operator_knowledge_run(store, binding.workflowRunId)
+    assert not runtime.is_operator_knowledge_run(store, generic["childRunId"])
+
+
 def test_child_retry_keeps_budget_authority_after_parent_wait_attempt_finishes(child_case):
     store, binding, _ = child_case
 

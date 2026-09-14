@@ -12,14 +12,43 @@ from .store import CampaignConflict, read_campaign
 
 SOURCE_NODES = {"source_finding", "source_extraction", "evidence_relations", "knowledge_ingestion"}
 ACTIVE_INVOCATION_STATUSES = {"pending", "child_created", "running", "awaiting_handoff"}
+_OPERATOR_KNOWLEDGE_PARENT_NODE = "optimization_knowledge"
 
 
 def is_operator_knowledge_run(store, run_id):
-    run = store.get_run(run_id)
-    if run is None or run.workflow_id != "challenge-cup-knowledge-sideflow":
-        return False
-    parent = store.get_run(run.parent_run_id) if run.parent_run_id else None
-    return parent is not None and parent.workflow_id == "operator-optimization"
+    """Recognize only the dedicated, hypothesis-scoped operator child flow.
+
+    A live operator run may also request the generic knowledge sideflow from
+    ``optimization_discussion`` to gather material before a retry.  That
+    request has no ``OperatorKnowledgeRequest`` and must retain the generic
+    source budget/task authority.  The native operator flow is created only
+    by ``optimization_knowledge`` with its frozen consumer context.
+    """
+    def matches(repo):
+        run = repo.get_run(run_id)
+        if run is None or run.workflow_id != "challenge-cup-knowledge-sideflow":
+            return False
+        parent = repo.get_run(run.parent_run_id) if run.parent_run_id else None
+        if parent is None or parent.workflow_id != "operator-optimization":
+            return False
+        try:
+            snapshot = json.loads(run.input_snapshot_json)
+            if not isinstance(snapshot, dict):
+                return False
+            request = snapshot.get("knowledgeRequest") or {}
+            invocation = repo.get_knowledge_invocation(snapshot.get("invocationId"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return False
+        context = request.get("consumerContext") if isinstance(request, dict) else None
+        return (
+            invocation is not None
+            and invocation.knowledge_child_run_id == run.run_id
+            and invocation.parent_run_id == parent.run_id
+            and invocation.parent_node_id == _OPERATOR_KNOWLEDGE_PARENT_NODE
+            and isinstance(context, dict)
+        )
+
+    return store.read(matches)
 
 
 def knowledge_lineage(repo, run_id, node_run_id):
@@ -36,7 +65,7 @@ def knowledge_lineage(repo, run_id, node_run_id):
     snapshot = json.loads(run.input_snapshot_json)
     invocation = repo.get_knowledge_invocation(snapshot["invocationId"])
     if (invocation is None or invocation.knowledge_child_run_id != run_id
-            or invocation.parent_run_id != parent.run_id or invocation.parent_node_id != "optimization_knowledge"
+            or invocation.parent_run_id != parent.run_id or invocation.parent_node_id != _OPERATOR_KNOWLEDGE_PARENT_NODE
             or snapshot["parentNodeRunId"] != invocation.parent_node_run_id
             or snapshot["parentAttempt"] != invocation.parent_attempt
             or snapshot["parentRunId"] != parent.run_id):
@@ -61,7 +90,7 @@ def _parent_attempt_owns_active_child(repo, parent, invocation):
     retries remain part of the same invocation until a newer parent attempt
     supersedes it.
     """
-    latest_parent_attempt = repo.latest_attempt(parent.run_id, "optimization_knowledge")
+    latest_parent_attempt = repo.latest_attempt(parent.run_id, _OPERATOR_KNOWLEDGE_PARENT_NODE)
     return (
         invocation is not None
         and latest_parent_attempt is not None
