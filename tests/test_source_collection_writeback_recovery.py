@@ -104,3 +104,24 @@ def test_search_projection_keeps_single_locator_receipts_alongside_grouped_resul
     groups = search_execution._source_finding_trace_receipt_ref_sets(trace)
     assert search_execution._source_finding_candidate_receipt_is_bound({"sourceUrl": f"https://doi.org/{old_doi}"}, groups)
     assert search_execution._source_finding_candidate_receipt_is_bound({"sourceUrl": f"https://doi.org/{new_doi}"}, groups)
+
+
+def test_search_receipt_binding_normalizes_cosmetic_url_trailing_slash():
+    url = "https://eunomia.dev/research/gpu-kernel-launch-latency"
+    groups = search_execution._source_finding_trace_receipt_ref_sets([{
+        "status": "found",
+        "eventIds": ["event"],
+        "receiptRefSets": [[
+            f"{url}/",
+            f"identity:url:{url}",
+        ]],
+    }])
+
+    assert search_execution._source_finding_candidate_receipt_is_bound(
+        {"sourceUrl": url},
+        groups,
+    )
+    assert not search_execution._source_finding_candidate_receipt_is_bound(
+        {"sourceUrl": url, "doi": "10.48550/arxiv.2607.04454"},
+        groups,
+    )

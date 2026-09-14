@@ -137,6 +137,14 @@ def _claim_locator(
             ref_id = _evidence_ref_id(raw_ref)
             if ref_id:
                 return {"kind": "evidence_ref", "anchor": ref_id, **({"url": source_ref} if source_ref else {})}
+    # The extraction remediation contract explicitly permits a nested
+    # ``keyFindings[]``/``claims[]`` item with a verbatim quote.  When that
+    # item also names the fetched source URL, the URL is the source locator
+    # and the quote is the bounded in-page anchor.  Requiring a second,
+    # synthetic evidenceRef here made compliant production writebacks pass the
+    # quote audit but silently materialize zero claims.
+    if source_ref and claim_quote:
+        return {"kind": "url", "url": source_ref}
     return None
 
 
@@ -646,6 +654,11 @@ def materialize_claim_evidence_from_task(
         )
         locator = _claim_locator(claim, extraction)
         if not all((candidate_id, claim_text, quote, source_ref, locator)):
+            continue
+        if (
+            locator.get("kind") == "url"
+            and challenge_evidence["verification_status"] != "full_text_checked"
+        ):
             continue
         if not extractor_agent_id or not normalized_model_ref:
             raise EvidenceMaterializationError(
