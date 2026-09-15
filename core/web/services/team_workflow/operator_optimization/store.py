@@ -112,10 +112,48 @@ def update_campaign(
         for key in ("optimizationCampaignId", "teamId", "researchProjectId", "objective", "baselineSetupId", "createdAt"):
             if getattr(current, key) != getattr(changed, key):
                 raise CampaignConflict(f"Immutable campaign field changed: {key}")
-        if current.baselineRef is not None and changed.baselineRef != current.baselineRef:
-            raise CampaignConflict("The initial baseline is immutable")
-        if current.baselineCandidateRef is not None and changed.baselineCandidateRef != current.baselineCandidateRef:
-            raise CampaignConflict("The initial baseline candidate is immutable")
+        old_versions = {item.baselineVersionId: item for item in current.baselineVersions}
+        new_versions = {item.baselineVersionId: item for item in changed.baselineVersions}
+        if not set(old_versions).issubset(new_versions):
+            raise CampaignConflict("Baseline history is append-only")
+        for version_id, old in old_versions.items():
+            new = new_versions[version_id]
+            if old.model_copy(update={"status": new.status, "baselineRef": new.baselineRef}) != new:
+                raise CampaignConflict("Baseline version evidence is immutable")
+            allowed = {
+                "prepared": {"prepared", "active", "failed"},
+                "active": {"active", "superseded"},
+                "superseded": {"superseded"},
+                "failed": {"failed"},
+            }[old.status]
+            if new.status not in allowed:
+                raise CampaignConflict("Invalid baseline version transition")
+        if changed.activeBaselineVersionId:
+            active = new_versions.get(changed.activeBaselineVersionId)
+            if active is None or active.status != "active" or active.baselineRef is None:
+                raise CampaignConflict("Active baseline version is incomplete")
+            if (
+                changed.baselineRunId != active.runId
+                or changed.baselineRef != active.baselineRef
+                or changed.baselineCandidateRef != active.baselineCandidateRef
+            ):
+                raise CampaignConflict("Baseline projection differs from the active version")
+        baseline_switched = (
+            bool(current.activeBaselineVersionId)
+            and changed.activeBaselineVersionId != current.activeBaselineVersionId
+        )
+        if (
+            current.baselineCandidateRef is not None
+            and changed.baselineCandidateRef != current.baselineCandidateRef
+            and not baseline_switched
+        ):
+            raise CampaignConflict("The baseline candidate is immutable within a version")
+        if (
+            current.baselineRef is not None
+            and changed.baselineRef != current.baselineRef
+            and not baseline_switched
+        ):
+            raise CampaignConflict("The baseline measurement is immutable within a version")
         result = OptimizationCampaign.model_validate({
             **changed.model_dump(mode="json"), "revision": current.revision + 1, "updatedAt": s.utc_now_iso(),
         })

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException, Request
 from pydantic import Field
+from typing import Literal
 
 from core.research.operator_optimization.contracts import (
     CampaignBudget,
@@ -60,6 +61,11 @@ class BaselinePrepareRequest(CampaignCommandRequest):
 class BaselineStartRequest(Contract):
     idempotencyKey: str = Field(min_length=1, max_length=200)
     expectedRunVersion: int = Field(ge=1, strict=True)
+
+
+class Stage2MigrationRequest(CampaignCommandRequest):
+    sourceRunId: str = Field(min_length=1, max_length=160)
+    initialAction: Literal["discuss", "collect_knowledge", "plan_candidate", "retest"]
 
 
 _PATH = "/teams/{team_id}/workflow-orchestration/research-projects/{project_id}/operator-experiments"
@@ -122,11 +128,15 @@ def operator_baseline_start(team_id: str, project_id: str, campaign_id: str, pay
 
     from .research_runtime import _submit_workflow_command
     campaign = _invoke(store.read_campaign, team_id, project_id, campaign_id)
-    if not campaign.baselineRunId:
+    pending = [item for item in campaign.baselineVersions if item.status == "prepared"]
+    baseline_run_id = pending[-1].runId if pending else (
+        campaign.baselineRunId if not campaign.baselineVersions else ""
+    )
+    if not baseline_run_id:
         raise HTTPException(409, detail={"code": "baseline_not_prepared"})
     # Run version/idempotency and fresh readiness are owned by the canonical
     # command service. Campaign version must not mask a command replay.
-    return _submit_workflow_command(run_id=campaign.baselineRunId, team_id=team_id,
+    return _submit_workflow_command(run_id=baseline_run_id, team_id=team_id,
         kind=WorkflowCommandKind.START_NODE, node_id="operator_baseline",
         expected_run_version=payload.expectedRunVersion, idempotency_key=payload.idempotencyKey,
         payload={}, request=request)
@@ -139,6 +149,34 @@ def operator_round_prepare(team_id: str, project_id: str, campaign_id: str, payl
     )
     return _invoke(prepare_round, team_id, project_id, campaign_id,
         expected_version=payload.expectedCampaignVersion, command_key=payload.idempotencyKey)
+
+
+@router.post(_PATH + "/{campaign_id}/stage2-migrations", response_model=OptimizationCampaign)
+def operator_stage2_migrate(
+    team_id: str,
+    project_id: str,
+    campaign_id: str,
+    payload: Stage2MigrationRequest,
+    request: Request,
+):
+    from core.web.services.team_workflow.operator_optimization.migration import (
+        migrate_stage2_run_to_stage3,
+    )
+
+    try:
+        with server_operator_scope_from_http(request):
+            return _invoke(
+                migrate_stage2_run_to_stage3,
+                team_id,
+                project_id,
+                campaign_id,
+                source_run_id=payload.sourceRunId,
+                initial_action=payload.initialAction,
+                expected_version=payload.expectedCampaignVersion,
+                command_key=payload.idempotencyKey,
+            )
+    except PermissionError as exc:
+        raise HTTPException(403, detail={"code": "command_forbidden"}) from exc
 
 
 @router.post(_PATH + "/{campaign_id}/rounds/{round_id}/recover", response_model=OptimizationCampaign)
