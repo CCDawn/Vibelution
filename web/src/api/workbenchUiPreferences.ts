@@ -9,7 +9,6 @@ export type WorkbenchUiPreferences = {
       leftPanelWidth?: number;
       rightPanelWidth?: number;
     };
-    topBarMode?: "full" | "hidden";
     leftRailCollapsed?: boolean;
     rightPaneCollapsed?: boolean;
   };

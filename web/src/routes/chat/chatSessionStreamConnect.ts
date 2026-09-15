@@ -76,11 +76,20 @@ export function resolveSessionStreamShouldConnect(options: {
   routeTargetMatches: boolean;
   chatPollingVisible: boolean;
   routeSwitchGraceActive: boolean;
+  /**
+   * A hidden window with a busy turn keeps the guarded stream open: closing it
+   * drops live deltas and forces a cold reconnect on focus.
+   */
+  directSessionBackgroundSyncActive?: boolean;
 }): boolean {
   return Boolean(
     options.activeSessionId
     && options.routeTargetMatches
-    && (options.chatPollingVisible || options.routeSwitchGraceActive),
+    && (
+      options.chatPollingVisible
+      || options.routeSwitchGraceActive
+      || options.directSessionBackgroundSyncActive
+    ),
   );
 }
 

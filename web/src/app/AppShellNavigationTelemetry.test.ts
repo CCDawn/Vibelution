@@ -234,6 +234,8 @@ describe("AppShell navigation telemetry", () => {
     expect(utilityMenuSource).not.toContain("renderUtilityFileTree");
     expect(utilityMenuSource).not.toContain("utility-file-navigator");
     expect(utilityMenuSource).not.toContain('to="/chat"');
+    expect(utilityMenuSource).toContain('serializeChatRouteSelection("", { kind: "project_bus" })');
+    expect(utilityMenuSource).toContain('chatRoute.openProjectBus({ telemetrySource: "shell_settings" })');
     expect(utilityMenuSource).not.toContain("{t(\"files\")}");
   });
 

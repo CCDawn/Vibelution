@@ -903,6 +903,7 @@ export function ChatCodingRouteWorkbench() {
     routeTargetMatches: sessionStreamRouteTargetMatches && !isTempSessionId(activeSessionId),
     chatPollingVisible,
     routeSwitchGraceActive: sessionStreamRouteSwitchGraceActive,
+    directSessionBackgroundSyncActive,
   });
   sessionStreamDecisionSnapshotRef.current = {
     sessionId: activeSessionId || "",
@@ -1300,6 +1301,36 @@ export function ChatCodingRouteWorkbench() {
     directSessionPanelActive,
     sessionDetailQuery.data?.currentPhase,
   ]);
+  // A hidden window can miss frames or a stream restart; refocusing must not
+  // trust the cached transcript, so force one authoritative resync for the
+  // active session and the indexes that feed badges and notification titles.
+  const previousPageVisibleRef = useRef(pageVisible);
+  const refetchSessionDetailRef = useRef(sessionDetailQuery.refetch);
+  refetchSessionDetailRef.current = sessionDetailQuery.refetch;
+  const focusResyncSessionIdRef = useRef(activeSessionId || "");
+  focusResyncSessionIdRef.current = activeSessionId || "";
+  useEffect(() => {
+    const previousPageVisible = previousPageVisibleRef.current;
+    previousPageVisibleRef.current = pageVisible;
+    const resyncSessionId = focusResyncSessionIdRef.current;
+    if (!pageVisible || previousPageVisible || !resyncSessionId) {
+      return;
+    }
+    void refetchSessionDetailRef.current();
+    void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
+    postBrowserTelemetry({
+      phase: "session_stream",
+      eventCode: "browser.session_stream.focus_resync",
+      message: "Focus after a hidden period forced an authoritative session resync.",
+      level: "info",
+      fields: {
+        sessionId: resyncSessionId,
+        streamShouldConnect: sessionStreamDecisionSnapshotRef.current.shouldConnect,
+        visibilityState: typeof document === "undefined" ? "unknown" : document.visibilityState,
+      },
+    });
+  }, [pageVisible, queryClient]);
 
   const {
     submitTurnMutation,
@@ -2550,7 +2581,6 @@ export function ChatCodingRouteWorkbench() {
   });
   const {
     handleCreateSession,
-    handleOpenProjectAgentBus,
     handleOpenDirectSession,
     handlePrefetchDirectSession,
     handleOpenAgent,
@@ -3364,7 +3394,6 @@ export function ChatCodingRouteWorkbench() {
         lang={lang}
         locale={locale}
         t={t}
-        currentSessionLabel={t("currentSession")}
         standardGroupRoomActive={standardGroupRoomActive}
         rightIndexPanel={rightIndexPanel}
         setRightIndexPanel={setRightIndexPanel}
@@ -3408,8 +3437,6 @@ export function ChatCodingRouteWorkbench() {
         groupSelectedAgentIds={groupSelectedAgentIds}
         onToggleGroupAgent={handleToggleGroupAgent}
         onCreateGroupRoom={handleCreateGroupRoom}
-        projectBusActive={projectBusActive}
-        onOpenProjectAgentBus={handleOpenProjectAgentBus}
         onOpenDirectSession={handleOpenDirectSession}
         onPrefetchDirectSession={handlePrefetchDirectSession}
         resolveModelLabel={resolveModelLabel}

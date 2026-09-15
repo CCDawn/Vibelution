@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Activity, ExternalLink, GitBranch, ScrollText } from "lucide-react";
+import { Activity, BellRing, ExternalLink, GitBranch, ScrollText } from "lucide-react";
 import { useLocation } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -14,6 +14,8 @@ import {
 import type { Language, ShellTranslationKey } from "../i18n/shellDictionary";
 import { resolvePollingInterval } from "./pollingPolicy";
 import type { SystemStatusTone } from "./systemStatus";
+import { serializeChatRouteSelection } from "../routes/chat/chatSelectionProjection";
+import { useChatRouteSelection } from "../routes/chat/useChatRouteSelection";
 import styles from "./AppShellUtilityMenu.styles";
 
 function gitToneToStatus(tone: SystemStatusTone): VStatusTone {
@@ -37,6 +39,7 @@ function utilityNavClass(pathname: string, to: string) {
 
 export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppShellUtilityMenuProps) {
   const location = useLocation();
+  const chatRoute = useChatRouteSelection();
   const gitRefetchInterval = resolvePollingInterval(frontendVisible, 6_000, { backgroundMs: 60_000 });
   const gitStatusQuery = useQuery({
     queryKey: queryKeys.gitStatusSummary(),
@@ -100,15 +103,6 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
       role="region"
       aria-label={t("topUtilityMenu")}
     >
-      <VTooltip content={t("topUtilityMenuHint")} width="wide">
-        <div
-          className={styles.utilityPanelHeader}
-          tabIndex={0}
-          aria-label={`${t("topUtilityMenu")}: ${t("topUtilityMenuHint")}`}
-        >
-          <strong>{t("topUtilityMenu")}</strong>
-        </div>
-      </VTooltip>
       <div className={styles.utilityButtonGrid}>
         {/* External control surface: native anchor (not SPA Link) per VRouteLinkButton design boundary. */}
         <a href="/launcher" target="_blank" rel="noreferrer" className={styles.utilityButton} onClick={onClose}>
@@ -140,6 +134,20 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
           icon={<GitBranch size={16} aria-hidden="true" />}
         >
           {t("navGit")}
+        </VRouteLinkButton>
+        <VRouteLinkButton
+          to={{ pathname: "/chat", search: serializeChatRouteSelection("", { kind: "project_bus" }) }}
+          variant="ghost"
+          className={styles.utilityButton}
+          onClick={(event) => {
+            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            chatRoute.openProjectBus({ telemetrySource: "shell_settings" });
+            onClose();
+          }}
+          icon={<BellRing size={16} aria-hidden="true" />}
+        >
+          {lang === "zh" ? "助手通知流" : "Agent notice stream"}
         </VRouteLinkButton>
       </div>
       {gitTooltip ? (

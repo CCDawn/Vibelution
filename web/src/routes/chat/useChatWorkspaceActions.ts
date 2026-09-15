@@ -97,7 +97,6 @@ export type UseChatWorkspaceActionsOptions = {
 
 export type UseChatWorkspaceActionsResult = {
   handleCreateSession: () => void;
-  handleOpenProjectAgentBus: () => void;
   handleOpenDirectSession: (sessionId: string, options?: { telemetrySource?: string }) => void;
   handlePrefetchDirectSession: (sessionId: string) => void;
   handleOpenAgent: (agent: AgentInstance) => boolean;
@@ -191,23 +190,6 @@ export function useChatWorkspaceActions({
     selectedChatAgentId,
     setRightIndexPanel,
     setSessionComposerErrors,
-  ]);
-
-  const handleOpenProjectAgentBus = useCallback(() => {
-    setSessionContextMenu(null);
-    // Explicit project bus route — the URL is the single authority.
-    chatRoute.openProjectBus();
-    setRightIndexPanel("conversations");
-    setRightPaneCollapsed(false);
-    setGroupRoomActionError("");
-    void chatWorkspaceCache.afterProjectBusFailed();
-  }, [
-    chatRoute,
-    chatWorkspaceCache,
-    setGroupRoomActionError,
-    setRightIndexPanel,
-    setRightPaneCollapsed,
-    setSessionContextMenu,
   ]);
 
   const handlePrefetchDirectSession = useCallback((sessionId: string) => {
@@ -598,7 +580,6 @@ export function useChatWorkspaceActions({
 
   return {
     handleCreateSession,
-    handleOpenProjectAgentBus,
     handleOpenDirectSession,
     handlePrefetchDirectSession,
     handleOpenAgent,

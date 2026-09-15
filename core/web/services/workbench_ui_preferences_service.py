@@ -43,11 +43,11 @@ def _write_payload_unlocked(payload: dict[str, Any]) -> None:
     tmp_path.replace(PREFERENCES_PATH)
 
 
-def _shell_has_leftover_chat_widths(raw: object) -> bool:
+def _shell_has_obsolete_fields(raw: object) -> bool:
     if not isinstance(raw, dict):
         return False
     shell = raw.get("shell")
-    return isinstance(shell, dict) and "chatPanelWidths" in shell
+    return isinstance(shell, dict) and any(key in shell for key in ("chatPanelWidths", "topBarMode"))
 
 
 def _coerce_pane_layouts(value: object) -> dict[str, dict[str, int]]:
@@ -89,9 +89,6 @@ def _coerce_shell(value: object) -> dict[str, Any]:
                 widths[field] = numeric
         if widths:
             shell["chatPanelWidths"] = widths
-    top_bar = str(value.get("topBarMode") or "").strip().lower()
-    if top_bar in {"full", "hidden"}:
-        shell["topBarMode"] = top_bar
     for flag in ("leftRailCollapsed", "rightPaneCollapsed"):
         if flag in value:
             shell[flag] = bool(value.get(flag))
@@ -142,7 +139,7 @@ def load_workbench_ui_preferences() -> dict[str, Any]:
         except (OSError, json.JSONDecodeError):
             return _empty_payload()
         normalized = _normalize_payload(payload)
-        if _shell_has_leftover_chat_widths(payload):
+        if _shell_has_obsolete_fields(payload):
             normalized["schemaVersion"] = SCHEMA_VERSION
             normalized["updatedAt"] = _utc_now()
             _write_payload_unlocked(normalized)
