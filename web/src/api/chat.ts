@@ -14,6 +14,7 @@ import type {
   SessionGuidanceMode,
   SessionLlmOptions,
   SessionQueryResponse,
+  SessionQueuedTurn,
   SessionSummary,
   SessionToolApprovalRequest,
   SessionTurnAcceptedResponse,
@@ -325,6 +326,8 @@ export function submitSessionMessage(
     mentalModelEnabled?: boolean;
     runtimeStatusEnabled?: boolean;
     turnStatusTail?: unknown;
+    /** Opt in to the server queue when a turn is already running. */
+    queueIfBusy?: boolean;
   },
 ): Promise<SessionTurnAcceptedResponse> {
   return fetchJson<SessionTurnAcceptedResponse>(
@@ -338,6 +341,45 @@ export function submitSessionMessage(
       body: JSON.stringify(payload),
     },
   );
+}
+
+function readQueuedTurnsResponse(payload: { queuedTurns?: SessionQueuedTurn[] }): SessionQueuedTurn[] {
+  return Array.isArray(payload?.queuedTurns) ? payload.queuedTurns : [];
+}
+
+export function listSessionQueuedTurns(sessionId: string): Promise<SessionQueuedTurn[]> {
+  return fetchJson<{ queuedTurns?: SessionQueuedTurn[] }>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/queued-turns`,
+  ).then(readQueuedTurnsResponse);
+}
+
+export function updateSessionQueuedTurn(
+  sessionId: string,
+  queuedTurnId: string,
+  payload: { content?: string; position?: number },
+): Promise<SessionQueuedTurn[]> {
+  return fetchJson<{ queuedTurns?: SessionQueuedTurn[] }>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/queued-turns/${encodeURIComponent(queuedTurnId)}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  ).then(readQueuedTurnsResponse);
+}
+
+export function removeSessionQueuedTurn(
+  sessionId: string,
+  queuedTurnId: string,
+): Promise<SessionQueuedTurn[]> {
+  return fetchJson<{ queuedTurns?: SessionQueuedTurn[] }>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/queued-turns/${encodeURIComponent(queuedTurnId)}`,
+    {
+      method: "DELETE",
+    },
+  ).then(readQueuedTurnsResponse);
 }
 
 export function editResubmitSessionMessage(

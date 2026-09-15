@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { GripVertical, Pencil, X } from "lucide-react";
+import { ArrowRight, GripVertical, Image as ImageIcon, Pencil, X } from "lucide-react";
 
 import { VButton, VNativeInput } from "../vui";
 import styles from "./ConversationView.styles";
@@ -15,9 +15,11 @@ export type ConversationFollowupQueueBarProps = {
   variant?: "codex" | "compact";
   editLabel: string;
   withdrawLabel: string;
+  steerLabel?: string;
   onUpdate: (id: string, text: string) => void;
   onRemove: (id: string) => void;
   onMove: (fromIndex: number, toIndex: number) => void;
+  onSteer?: (id: string) => void;
 };
 
 export function ConversationFollowupQueueBar({
@@ -26,9 +28,11 @@ export function ConversationFollowupQueueBar({
   variant = "compact",
   editLabel,
   withdrawLabel,
+  steerLabel,
   onUpdate,
   onRemove,
   onMove,
+  onSteer,
 }: ConversationFollowupQueueBarProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
@@ -97,7 +101,30 @@ export function ConversationFollowupQueueBar({
                   }}
                 />
               ) : (
-                <span className={styles.followupQueueRowText} title={item.text}>{item.text}</span>
+                <span className={styles.followupQueueRowMain}>
+                  <span className={styles.followupQueueRowText} title={item.text}>{item.text}</span>
+                  {item.attachmentCount ? (
+                    <span
+                      className={styles.followupQueueChip}
+                      title={
+                        lang === "zh"
+                          ? `${item.attachmentCount} 张图片`
+                          : `${item.attachmentCount} image attachment(s)`
+                      }
+                    >
+                      <ImageIcon size={11} />
+                      {item.attachmentCount}
+                    </span>
+                  ) : null}
+                  {item.status === "blocked" ? (
+                    <span
+                      className={styles.followupQueueChipBlocked}
+                      title={item.lastError || (lang === "zh" ? "上一条发送失败，编辑后可重试" : "The last attempt failed; edit to retry.")}
+                    >
+                      {lang === "zh" ? "发送失败" : "Failed"}
+                    </span>
+                  ) : null}
+                </span>
               )}
               <div
                 className={
@@ -124,6 +151,17 @@ export function ConversationFollowupQueueBar({
                   </>
                 ) : (
                   <>
+                    {onSteer ? (
+                      <VButton
+                        density="compact"
+                        variant="ghost"
+                        isIconOnly
+                        isDisabled={item.canSteer === false}
+                        aria-label={steerLabel ?? (lang === "zh" ? "立即引导" : "Steer now")}
+                        icon={<ArrowRight size={13} />}
+                        onPress={() => onSteer(item.id)}
+                      />
+                    ) : null}
                     <VButton
                       density="compact"
                       variant="ghost"

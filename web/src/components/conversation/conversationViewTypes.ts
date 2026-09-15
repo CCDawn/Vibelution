@@ -11,6 +11,7 @@ import type {
 } from "../../api/types";
 import type { TurnAvatarResolution } from "./conversationTurnAvatar";
 import type { ConversationStreamingFramePaintMetrics } from "./conversationStreamingMetrics";
+import type { ComposerQueueItem } from "./composerFollowupQueueModel";
 import type { ComposerContextRingModel } from "../../routes/chat/composerContextModel";
 
 export type ConversationProcessDisplayMode = "answer" | "trace";
@@ -115,7 +116,7 @@ export type ConversationViewProps = {
   composerInterruptGuidancePending?: boolean;
   composerError?: string;
   composerGuidance?: string;
-  followupQueue?: Array<{ id: string; text: string }>;
+  followupQueue?: ComposerQueueItem[];
   composerAttachments?: ConversationComposerAttachment[];
   composerReferences?: SessionReferenceAttachment[];
   slashCommandSuggestions?: SkillLibraryItem[];
@@ -169,4 +170,7 @@ export type ConversationViewProps = {
   onFollowupQueueUpdate?: (id: string, text: string) => void;
   onFollowupQueueRemove?: (id: string) => void;
   onFollowupQueueMove?: (fromIndex: number, toIndex: number) => void;
+  /** Steer the running turn with one queued item instead of waiting for drain. */
+  onFollowupQueueSteer?: (id: string) => void;
+  followupQueueSteerLabel?: string;
 };

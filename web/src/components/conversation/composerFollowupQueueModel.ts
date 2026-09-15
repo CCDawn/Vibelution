@@ -1,6 +1,12 @@
 export type ComposerQueueItem = {
   id: string;
   text: string;
+  /** Server-owned queue metadata; absent for the local design-preview queue. */
+  status?: string;
+  position?: number;
+  attachmentCount?: number;
+  lastError?: string;
+  canSteer?: boolean;
 };
 
 export type ComposerQueueEnterAction =
