@@ -3027,6 +3027,9 @@ def reset_agent_direct_session_lightweight(
                 replacement_session_id,
                 title=normalized_title,
                 timestamp=created_at,
+                # A replacement direct session is a fresh empty chat: its display
+                # title stays a placeholder for first-turn generation.
+                title_source="placeholder",
             )
             s._ensure_conversation_workspace_metadata(replacement_conversation)
             replacement_conversation["agent_id"] = normalized_agent_id

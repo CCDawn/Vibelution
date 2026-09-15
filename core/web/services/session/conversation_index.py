@@ -1230,6 +1230,7 @@ def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
 def create_chat_session(
     *,
     title: str = "",
+    title_source: str = "",
     agent_id: str = "",
     llm_bindings: dict[str, Any] | None = None,
     created_by: str = "user",
@@ -1355,6 +1356,7 @@ def create_chat_session(
         bound_agent = s.get_agent(normalized_agent_id, include_archived=False)
         if not bound_agent:
             raise s.SessionValidationError(s._session_agent_unavailable_message("missing_agent", lang=lang))
+    explicit_title = s.trim_lines(title or "", max_lines=1).strip()
     fallback_title = s.text_for(lang, zh="新会话", en="New session")
     if bound_agent is not None:
         agent_name = str(
@@ -1365,7 +1367,10 @@ def create_chat_session(
         ).strip()
         if agent_name:
             fallback_title = s.trim_lines(agent_name, max_lines=1).strip()[:120] or fallback_title
-    normalized_title = s.trim_lines(title or "", max_lines=1).strip() or fallback_title
+    normalized_title = explicit_title or fallback_title
+    declared_title_source = str(title_source or "").strip().lower()
+    if declared_title_source not in {"placeholder", "auto", "manual"}:
+        declared_title_source = "manual" if explicit_title else "placeholder"
     with s._CHAT_STATE_LOCK:
         existing_ids = set(s.list_session_runtime_ids(s.PROJECT_ROOT))
         now = s._now_timestamp()
@@ -1375,6 +1380,9 @@ def create_chat_session(
             title=normalized_title,
             timestamp=now,
             conversation_index_kind=conversation_index_kind,
+            # An Agent display-name fallback is still a create placeholder: the
+            # first user turn may replace it with a generated title.
+            title_source=declared_title_source,
         )
         if normalized_session_metadata:
             conversation["metadata"] = normalized_session_metadata
@@ -1505,12 +1513,13 @@ def ensure_agent_direct_session(
             "title": str(title or agent.get("displayName") or "").strip(),
         }
     lang = s.get_web_language()
+    explicit_title = s.trim_lines(title or "", max_lines=1).strip()
     with s._CHAT_STATE_LOCK:
         existing_ids = set(s.list_session_runtime_ids(s.PROJECT_ROOT))
         now = s._now_timestamp()
         session_id = s._new_conversation_id(existing_ids)
         display_title = (
-            s.trim_lines(title or "", max_lines=1).strip()
+            explicit_title
             or str(agent.get("displayName") or "").strip()
             or s.text_for(lang, zh="Agent 私聊", en="Agent chat")
         )
@@ -1519,6 +1528,9 @@ def ensure_agent_direct_session(
             title=display_title,
             timestamp=now,
             conversation_index_kind=conversation_index_kind,
+            # Repair/auto-created direct sessions start from the Agent display
+            # name as a placeholder, so first-turn generation still runs.
+            title_source="placeholder",
         )
         conversation["created_by"] = str(created_by or "agent_direct_session_repair").strip() or "agent_direct_session_repair"
         conversation["createdBy"] = conversation["created_by"]
@@ -2327,6 +2339,9 @@ def _agent_directory_conversation_record(agent: dict[str, Any], *, session_id: s
         title=display_name,
         timestamp=timestamp,
         conversation_index_kind=str(classification.get("kind") or ""),
+        # The Agent display name is a display fallback, not an operator title:
+        # first-turn generation may replace it.
+        title_source="placeholder",
     )
     conversation["agent_id"] = str(agent.get("agentId") or "").strip()
     conversation["agentId"] = str(agent.get("agentId") or "").strip()
@@ -2546,18 +2561,28 @@ def _make_empty_conversation(
     title: str,
     timestamp: str,
     conversation_index_kind: str = agent_directory_service.CONVERSATION_INDEX_KIND_USER_CHAT,
+    title_source: str = "",
 ) -> dict[str, Any]:
     s = _service()
     normalized_index_kind = s.agent_directory_service.normalize_conversation_index_kind(conversation_index_kind)
     if not normalized_index_kind:
         normalized_index_kind = s.agent_directory_service.CONVERSATION_INDEX_KIND_INVALID
     normalized_index_visibility = s._conversation_index_visibility_for_kind(normalized_index_kind)
+    normalized_title = str(title or "").strip()
+    declared_source = str(title_source or "").strip().lower()
+    if declared_source not in {"placeholder", "auto", "manual"}:
+        # Fallback inference for callers that do not declare intent: a create
+        # placeholder (or a bare title) stays replaceable by first-turn title
+        # generation; any other pre-set title is treated as an operator title.
+        declared_source = (
+            "placeholder"
+            if not normalized_title or s._is_default_empty_session_title(normalized_title)
+            else "manual"
+        )
     conversation = {
         "conversation_id": str(session_id or "").strip(),
-        "title": str(title or "").strip() or s.DEFAULT_CHAT_CONVERSATION_TITLE,
-        # Explicit source: an operator-supplied title is manual, a bare create is
-        # a placeholder that first-turn title generation may replace.
-        "title_source": "manual" if str(title or "").strip() else "placeholder",
+        "title": normalized_title or s.DEFAULT_CHAT_CONVERSATION_TITLE,
+        "title_source": declared_source,
         "workspace_path": s._session_workspace_relative_path(session_id),
         "updated_at": str(timestamp or "").strip() or s._now_timestamp(),
         "last_turn_status": "ready",
