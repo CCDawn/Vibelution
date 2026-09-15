@@ -2581,7 +2581,6 @@ export function ChatCodingRouteWorkbench() {
   });
   const {
     handleCreateSession,
-    handleOpenProjectAgentBus,
     handleOpenDirectSession,
     handlePrefetchDirectSession,
     handleOpenAgent,
@@ -3395,7 +3394,6 @@ export function ChatCodingRouteWorkbench() {
         lang={lang}
         locale={locale}
         t={t}
-        currentSessionLabel={t("currentSession")}
         standardGroupRoomActive={standardGroupRoomActive}
         rightIndexPanel={rightIndexPanel}
         setRightIndexPanel={setRightIndexPanel}
@@ -3439,8 +3437,6 @@ export function ChatCodingRouteWorkbench() {
         groupSelectedAgentIds={groupSelectedAgentIds}
         onToggleGroupAgent={handleToggleGroupAgent}
         onCreateGroupRoom={handleCreateGroupRoom}
-        projectBusActive={projectBusActive}
-        onOpenProjectAgentBus={handleOpenProjectAgentBus}
         onOpenDirectSession={handleOpenDirectSession}
         onPrefetchDirectSession={handlePrefetchDirectSession}
         resolveModelLabel={resolveModelLabel}
