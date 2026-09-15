@@ -2307,8 +2307,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("sessionStreamRouteTargetMatches");
     expect(routeSource).toContain("const chatStartupWarmupActive = useStartupWarmup(chatStartupDataReady)");
     expect(routeSource).toContain("const chatPollingVisible = pageVisible || chatStartupWarmupActive");
-    expect(routeAndStreamSource).toContain("chatPollingVisible || options.routeSwitchGraceActive");
+    expect(routeAndStreamSource).toContain("options.chatPollingVisible");
+    expect(routeAndStreamSource).toContain("|| options.routeSwitchGraceActive");
+    expect(routeAndStreamSource).toContain("|| options.directSessionBackgroundSyncActive");
     expect(routeSource).not.toContain("pageVisible || directSessionBackgroundSyncActive || sessionStreamRouteSwitchGraceActive");
+    expect(routeSource).toContain("directSessionBackgroundSyncActive,");
+    expect(routeSource).toContain("browser.session_stream.focus_resync");
+    expect(routeSource).toContain("refetchSessionDetailRef.current()");
     expect(routeSource).toContain("&& (chatPollingVisible || groupBackgroundSyncActive)");
     expect(routeAndStreamSource).toContain("const shouldConnect = sessionStreamDecisionSnapshotRef.current.shouldConnect");
     expect(routeAndStreamSource).toContain("if (!shouldConnect)");
