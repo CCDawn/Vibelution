@@ -7,10 +7,14 @@ emergency vs chat early-exit contract using injected fakes.
 
 from types import SimpleNamespace
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from core.orchestration.agent_modes import AgentMode
-from core.orchestration.turn_compression import compress_turn_messages
+from core.orchestration.turn_compression import (
+    ABORTED_TOOL_RESULT_CONTENT,
+    compress_turn_messages,
+    normalize_tool_call_pairing,
+)
 from tools.compression_strategy import CompressionConfig, CompressionLevel
 
 
@@ -409,6 +413,115 @@ def test_ledger_checkpoint_failure_records_tokens_without_summary_body(monkeypat
         item for item in extras["events"] if item["args"][1] == "session.context_compression.ledger_failed"
     ] == []
     assert result[2] is True
+
+
+def test_normalize_tool_call_pairing_drops_orphans_and_synthesizes_aborted():
+    messages = [
+        AIMessage(content="", tool_calls=[{"name": "web_search_tool", "args": {}, "id": "call-1"}]),
+        ToolMessage(content="orphan result without call", tool_call_id="call-gone"),
+        AIMessage(content="", tool_calls=[{"name": "fetch_tool", "args": {}, "id": "call-2"}]),
+    ]
+
+    normalized, stats = normalize_tool_call_pairing(messages)
+
+    assert stats == {"droppedOrphanResults": 1, "synthesizedAbortedResults": 2}
+    assert [getattr(item, "tool_call_id", None) for item in normalized] == [
+        None,
+        "call-1",
+        None,
+        "call-2",
+    ]
+    assert isinstance(normalized[1], ToolMessage)
+    assert normalized[1].content == ABORTED_TOOL_RESULT_CONTENT
+    assert normalized[1].name == "web_search_tool"
+    assert normalized[3].content == ABORTED_TOOL_RESULT_CONTENT
+
+
+def test_normalize_tool_call_pairing_handles_provider_dict_messages():
+    messages = [
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "d1", "function": {"name": "shell"}}]},
+        {"role": "tool", "content": "stale", "tool_call_id": "d9"},
+    ]
+
+    normalized, stats = normalize_tool_call_pairing(messages)
+
+    assert stats == {"droppedOrphanResults": 1, "synthesizedAbortedResults": 1}
+    assert normalized[0]["tool_calls"][0]["id"] == "d1"
+    repaired = normalized[1]
+    assert repaired["role"] == "tool"
+    assert repaired["tool_call_id"] == "d1"
+    assert repaired["content"] == ABORTED_TOOL_RESULT_CONTENT
+    assert repaired["metadata"]["kind"] == "interrupted_tool_result"
+    assert repaired["metadata"]["status"] == "aborted"
+    assert repaired["metadata"]["toolName"] == "shell"
+
+
+def test_compressor_unresolved_call_is_normalized_and_audited():
+    original = [AIMessage(content="long-context-message")]
+    broken = [AIMessage(content="", tool_calls=[{"name": "fetch_tool", "args": {}, "id": "call-new"}])]
+    extras = {}
+
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor(broken, summary="broken summary"),
+        config=_feature_config(),
+        extra=extras,
+        iteration=6,
+    )
+
+    assert result[1] is False
+    assert isinstance(result[0][-1], ToolMessage)
+    assert result[0][-1].tool_call_id == "call-new"
+    assert result[0][-1].content == ABORTED_TOOL_RESULT_CONTENT
+    normalized = [
+        item
+        for item in extras["events"]
+        if item["args"][1] == "agent.context_compression.tool_chain_normalized"
+    ]
+    assert normalized
+    fields = normalized[0]["kwargs"]["fields"]
+    assert fields["synthesizedAbortedResults"] == 1
+    assert fields["droppedOrphanResults"] == 0
+    assert not [
+        item
+        for item in extras["events"]
+        if item["args"][1] == "agent.context_budget_exhausted"
+    ]
+
+
+def test_compressor_orphan_result_is_dropped_before_the_gate():
+    original = [
+        AIMessage(content="", tool_calls=[{"name": "t", "args": {}, "id": "c1"}]),
+        ToolMessage(content="r1", tool_call_id="c1"),
+    ]
+    broken = [
+        AIMessage(content="summary note"),
+        ToolMessage(content="late result", tool_call_id="c-gone"),
+    ]
+    extras = {}
+
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor(broken, summary="broken summary"),
+        config=_feature_config(),
+        extra=extras,
+        iteration=6,
+    )
+
+    assert result[1] is False
+    assert all(getattr(item, "tool_call_id", None) != "c-gone" for item in result[0])
+    normalized = [
+        item
+        for item in extras["events"]
+        if item["args"][1] == "agent.context_compression.tool_chain_normalized"
+    ]
+    assert normalized
+    assert normalized[0]["kwargs"]["fields"]["droppedOrphanResults"] == 1
+    assert not [
+        item
+        for item in extras["events"]
+        if item["args"][1] == "agent.context_budget_exhausted"
+    ]
 
 
 def test_ledger_fallback_failure_records_session_ledger_failed(monkeypatch, tmp_path):
