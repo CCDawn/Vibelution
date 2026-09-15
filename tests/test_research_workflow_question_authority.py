@@ -1048,6 +1048,33 @@ def test_attach_question_run_checkpoints_keeps_prior_success() -> None:
     assert regressed["completedCount"] > 1
 
 
+def test_attach_question_run_checkpoints_hides_archived_run_from_launch() -> None:
+    """Archived history must not be offered as an operational checkpoint."""
+    attached = question_launch.attach_question_run_checkpoints(
+        [{"questionId": "SCI-003"}],
+        [
+            {
+                **_current_workflow_identity(),
+                "runId": "run-succeeded",
+                "questionId": "SCI-003",
+                "status": "succeeded",
+                "runtimeCurrentNodeIds": ["result_package"],
+                "updatedAtMs": 1,
+            },
+            {
+                **_current_workflow_identity(),
+                "runId": "run-archived",
+                "questionId": "SCI-003",
+                "status": "archived",
+                "runtimeCurrentNodeIds": ["hypothesis_design"],
+                "updatedAtMs": 2,
+            },
+        ],
+    )
+
+    assert attached[0]["checkpoint"] is None
+
+
 def test_attach_question_run_checkpoints_ignores_retired_definition_runs() -> None:
     current = _current_workflow_identity()
     attached = question_launch.attach_question_run_checkpoints(

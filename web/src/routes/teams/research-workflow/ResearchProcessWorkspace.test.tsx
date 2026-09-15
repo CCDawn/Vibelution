@@ -75,7 +75,8 @@ const harness = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("./useResearchWorkflowWorkspace", () => ({
+vi.mock("./useResearchWorkflowWorkspace", async () => ({
+  ...(await vi.importActual<typeof import("./useResearchWorkflowWorkspace")>("./useResearchWorkflowWorkspace")),
   useResearchWorkflowWorkspace: () => harness.location,
 }));
 vi.mock("./useResearchWorkflowRun", () => ({
@@ -470,6 +471,52 @@ describe("ResearchProcessWorkspace", () => {
     root = rendered.root;
     expect(rendered.container.textContent).toContain("无法读取研究状态");
     expect(rendered.container.textContent).not.toContain("先选择研究题目");
+  });
+
+  it("returns a reset question from an archived run URL to hypothesis generation", async () => {
+    harness.location.panel = "node";
+    harness.location.runId = "run-archived";
+    harness.location.questionId = "SCI-009";
+    harness.location.selectedNodeId = "hf_generation";
+    harness.chain.questionId = "SCI-009";
+    harness.chain.stateV2 = stateV2({
+      questionId: "SCI-009",
+      resetBoundary: {
+        resetId: "hf-reset-test",
+        resetAt: "2026-09-12T10:12:36Z",
+        source: "question_reset_audit",
+      },
+    }) as never;
+    harness.runState.run = {
+      ...currentRun,
+      runId: "run-archived",
+      questionId: "SCI-009",
+      status: "archived",
+      runtimeCurrentNodeIds: ["hypothesis_design"],
+    } as WorkflowRunRecord;
+    harness.runState.snapshot = {
+      run: harness.runState.run,
+      currentTask: null,
+      commandOffers: [],
+      progress: null,
+      latestEventSequence: 1,
+    } as never;
+    harness.runState.projection = {
+      definition: { nodes: [], edges: [], stages: [] },
+      run: {
+        ...harness.runState.run,
+        nodeRuns: {},
+      },
+    } as never;
+
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+
+    expect(harness.location.replaceParams).toHaveBeenCalledWith({
+      runId: null,
+      node: "hf_generation",
+      panel: "node",
+    });
   });
 
   it("opens the guarded reset dialog from selected-experiment actions", async () => {
