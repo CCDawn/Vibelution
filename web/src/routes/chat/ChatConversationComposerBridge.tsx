@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import type { SessionReferenceAttachment } from "../../api/types";
 import { LazyConversationView } from "../../components/conversation/LazyConversationView";
+import type { ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
 import type {
   ConversationComposerAttachment,
   ConversationViewProps,
@@ -33,7 +34,7 @@ export type ChatConversationComposerBridgeInput = {
   interruptGuidancePending: boolean;
   labels: ChatConversationComposerBridgeLabels;
   references: readonly SessionReferenceAttachment[];
-  followupQueue?: Array<{ id: string; text: string }>;
+  followupQueue?: ComposerQueueItem[];
   safeGuidancePending: boolean;
   sessionBusy: boolean;
   sessionId?: string | null;
@@ -52,7 +53,7 @@ export type ChatConversationComposerBridgeState = {
   editUserMessageDisabled: boolean;
   editingMessageId?: string;
   error: string;
-  followupQueue: Array<{ id: string; text: string }>;
+  followupQueue: ComposerQueueItem[];
   guidance: string;
   interruptGuidancePending: boolean;
   modeNotice: string;
@@ -106,7 +107,7 @@ export function mapChatComposerImageAttachments(
 
 export function buildComposerImageInputGuidance(input: {
   attachmentCount: number;
-  heldUntilTurnEnds: boolean;
+  queuedUntilTurnEnds: boolean;
   imageInputSupport: boolean | null;
   modelLabel: string;
   lang: "zh" | "en";
@@ -115,10 +116,10 @@ export function buildComposerImageInputGuidance(input: {
     return "";
   }
   const modelLabel = input.modelLabel || (input.lang === "zh" ? "当前模型" : "the current model");
-  if (input.heldUntilTurnEnds) {
+  if (input.queuedUntilTurnEnds) {
     return input.lang === "zh"
-      ? "当前轮运行中：图片会保留在输入框，本轮结束后随下一条消息发送。"
-      : "This turn is still running: the image stays in the composer and sends with your next message after the turn ends.";
+      ? "当前轮运行中：图片会随这条消息一起排队，本轮结束后自动发送。"
+      : "This turn is still running: the image queues with this message and sends automatically when the turn ends.";
   }
   if (input.imageInputSupport === true) {
     return input.lang === "zh"

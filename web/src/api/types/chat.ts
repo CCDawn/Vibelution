@@ -667,6 +667,28 @@ export type ConversationAttachment = {
   status: string;
 };
 
+/** Server-owned follow-up turn stored while the session is already running. */
+export type SessionQueuedTurn = {
+  id: string;
+  position: number;
+  /** `queued` waits for the running turn to settle; `blocked` needs an edit to retry. */
+  status: string;
+  content: string;
+  attachments?: Array<{
+    id?: string;
+    artifactId?: string;
+    contentType?: string;
+    filename?: string;
+    imageUrl?: string;
+    sizeBytes?: number;
+  }>;
+  references?: unknown[];
+  lastError?: string;
+  clientSubmissionId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 export type SessionTurnAcceptedResponse = {
   accepted: boolean;
   sessionId: string;
@@ -674,6 +696,9 @@ export type SessionTurnAcceptedResponse = {
   clientSubmissionId: string;
   status: string;
   acceptedAt: string;
+  /** Set when the turn was accepted into the server queue instead of running now. */
+  queuedTurnId?: string;
+  queuePosition?: number;
 };
 
 export type SessionGuidanceMode = "safe" | "interrupt";
@@ -939,6 +964,8 @@ export type SessionDetail = SessionSummary & {
   /** False when GET used includeSecondary=false (light poll). */
   secondaryHydrated?: boolean;
   runtimeNotices?: SessionRuntimeNotice[];
+  /** Server queue of follow-up turns waiting behind the running turn. */
+  queuedTurns?: SessionQueuedTurn[];
   contextUsage?: {
     used: number;
     limit: number;

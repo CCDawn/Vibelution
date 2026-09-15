@@ -46,6 +46,7 @@ import { fetchFileContent } from "../../api/files";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import type { AgentArchiveResponse } from "../agentWorkspaceCache";
 import { prefetchConversationView } from "../../components/conversation/prefetchConversationView";
+import type { ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
 import { queryKeys } from "../../api/queryKeys";
 import {
   AgentInstance,
@@ -560,7 +561,6 @@ export function ChatCodingRouteWorkbench() {
   const [sessionFilter, setSessionFilter] = useState("");
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
   const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>({});
-  const [sessionFollowupQueues, setSessionFollowupQueues] = useState<Record<string, Array<{ id: string; text: string }>>>({});
   const [sessionComposerErrors, setSessionComposerErrors] = useState<Record<string, string>>({});
   const composerFocusSequenceRef = useRef(0);
   const [composerFocusRequest, setComposerFocusRequest] = useState({ sessionId: "", signal: "" });
@@ -1711,6 +1711,26 @@ export function ChatCodingRouteWorkbench() {
     activeSessionId,
     detail: rawSessionDetail,
   });
+  // The server queue is the single writer: the composer bar mirrors
+  // detail.queuedTurns instead of holding a local follow-up list.
+  const sessionFollowupQueues = useMemo<Record<string, ComposerQueueItem[]>>(() => {
+    const sessionId = String(detail?.id || "").trim();
+    const rows = detail?.queuedTurns ?? [];
+    if (!sessionId || !rows.length) {
+      return {};
+    }
+    return {
+      [sessionId]: rows.map((row) => ({
+        id: String(row.id || ""),
+        text: String(row.content || ""),
+        status: String(row.status || "queued"),
+        position: Number(row.position || 0),
+        attachmentCount: Array.isArray(row.attachments) ? row.attachments.length : 0,
+        lastError: String(row.lastError || ""),
+        canSteer: !(row.attachments?.length) && !(row.references?.length),
+      })),
+    };
+  }, [detail?.id, detail?.queuedTurns]);
   const sessionToolApprovalRuntimeActive = runtimeHasChatTurnForSession(runtime, activeSessionId);
   const sessionToolApprovalsQuery = useSessionToolApprovalsQuery({
     sessionId: activeSessionId,
@@ -2182,6 +2202,7 @@ export function ChatCodingRouteWorkbench() {
     handleFollowupQueueUpdate,
     handleFollowupQueueRemove,
     handleFollowupQueueMove,
+    handleFollowupQueueSteer,
     handleEditUserMessage,
     handleCancelEditMessage,
     handleRegenerateAssistantMessage,
@@ -2206,7 +2227,6 @@ export function ChatCodingRouteWorkbench() {
     sessionGuidanceMutation,
     setSessionDrafts,
     sessionFollowupQueues,
-    setSessionFollowupQueues,
     setSessionComposerErrors,
     setSessionImageAttachments,
     setSessionReferenceAttachments,
@@ -3261,6 +3281,8 @@ export function ChatCodingRouteWorkbench() {
                 onFollowupQueueUpdate: handleFollowupQueueUpdate,
                 onFollowupQueueRemove: handleFollowupQueueRemove,
                 onFollowupQueueMove: handleFollowupQueueMove,
+                onFollowupQueueSteer: handleFollowupQueueSteer,
+                followupQueueSteerLabel: t("immediateSteer"),
               } : null}
               conversationFocused={statusRailCollapsed}
               filePreview={{

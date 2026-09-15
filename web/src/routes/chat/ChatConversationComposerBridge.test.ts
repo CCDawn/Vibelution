@@ -181,31 +181,31 @@ describe("ChatConversationComposerBridge", () => {
     expect(state.actionMode).toBe("stop");
   });
 
-  it("explains that a waiting image is held until the running turn ends", () => {
+  it("explains that a waiting image queues with the message until the running turn ends", () => {
     expect(buildComposerImageInputGuidance({
       attachmentCount: 0,
-      heldUntilTurnEnds: true,
+      queuedUntilTurnEnds: true,
       imageInputSupport: null,
       modelLabel: "model-x",
       lang: "zh",
     })).toBe("");
     expect(buildComposerImageInputGuidance({
       attachmentCount: 1,
-      heldUntilTurnEnds: true,
+      queuedUntilTurnEnds: true,
       imageInputSupport: null,
       modelLabel: "model-x",
       lang: "zh",
-    })).toBe("当前轮运行中：图片会保留在输入框，本轮结束后随下一条消息发送。");
+    })).toBe("当前轮运行中：图片会随这条消息一起排队，本轮结束后自动发送。");
     expect(buildComposerImageInputGuidance({
       attachmentCount: 1,
-      heldUntilTurnEnds: true,
+      queuedUntilTurnEnds: true,
       imageInputSupport: true,
       modelLabel: "model-x",
       lang: "en",
-    })).toBe("This turn is still running: the image stays in the composer and sends with your next message after the turn ends.");
+    })).toBe("This turn is still running: the image queues with this message and sends automatically when the turn ends.");
     expect(buildComposerImageInputGuidance({
       attachmentCount: 1,
-      heldUntilTurnEnds: false,
+      queuedUntilTurnEnds: false,
       imageInputSupport: null,
       modelLabel: "model-x",
       lang: "zh",

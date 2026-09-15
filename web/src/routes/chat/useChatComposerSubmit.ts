@@ -10,11 +10,14 @@ import {
 
 import {
   editResubmitSessionMessage,
+  listSessionQueuedTurns,
   regenerateSessionMessage,
+  removeSessionQueuedTurn,
   stopSessionTurn,
   submitSessionGuidance,
   submitSessionMessage,
   switchSessionHead,
+  updateSessionQueuedTurn,
 } from "../../api/chat";
 import { submitVirtualHumanConversationMessage } from "../../api/virtualHumanLife";
 import { queryKeys } from "../../api/queryKeys";
@@ -22,6 +25,7 @@ import type {
   ConversationMessage,
   SessionDetail,
   SessionGuidanceMode,
+  SessionQueuedTurn,
   SessionReferenceAttachment,
   SessionTurnAcceptedResponse,
 } from "../../api/types";
@@ -71,14 +75,7 @@ import {
   type ComposerImageAttachment,
 } from "./chatComposerSubmitModel";
 import { loadTurnStatusTailConfig } from "./turnStatusTailModel";
-import {
-  appendComposerQueueItem,
-  moveComposerQueueItem,
-  removeComposerQueueItem,
-  resolveComposerQueueEnter,
-  updateComposerQueueItem,
-  type ComposerQueueItem,
-} from "../../components/conversation/composerFollowupQueueModel";
+import { type ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
 import { startUserAction, type UserActionTracker } from "../../app/userActionTelemetry";
 import {
@@ -210,6 +207,7 @@ export function useChatComposerTurnMutations({
         turnStatusTail,
         attachmentIds,
         references,
+        queuedBehindActiveTurn,
       }: SubmitTurnVariables,
     ) => {
       const resolvedTail = turnStatusTail ?? loadTurnStatusTailConfig(sessionId);
@@ -241,6 +239,7 @@ export function useChatComposerTurnMutations({
       }
       return submitSessionMessage(sessionId, {
         ...payload,
+        queueIfBusy: Boolean(queuedBehindActiveTurn),
       });
     },
     onMutate: async (variables) => {
@@ -279,7 +278,9 @@ export function useChatComposerTurnMutations({
         );
       }
       queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detailState) =>
-        markSessionDetailRunning(appendOptimisticUserMessage(detailState, variables)),
+        variables.queuedBehindActiveTurn
+          ? detailState
+          : markSessionDetailRunning(appendOptimisticUserMessage(detailState, variables)),
       );
       updateSessionSummaryCaches(queryClient, (sessions) =>
         markSessionSummaryRunning(sessions, variables.sessionId),
@@ -359,6 +360,15 @@ export function useChatComposerTurnMutations({
       // The optimistic detail/index updates above already expose the accepted turn.
       // SSE owns authoritative reconciliation when available; the existing polling
       // fallback does the same without competing with the first model request.
+      if (acceptedTurn.queuedTurnId) {
+        void listSessionQueuedTurns(variables.sessionId)
+          .then((rows) => {
+            queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detailState) =>
+              detailState ? { ...detailState, queuedTurns: rows } : detailState,
+            );
+          })
+          .catch(() => undefined);
+      }
     },
     onError: (error, variables, context) => {
       context?.telemetry?.failed(error, {
@@ -801,7 +811,6 @@ export type UseChatComposerSubmitActionsOptions = ChatComposerTurnMutations & {
   describeError: (error: unknown, fallback: string) => string;
   setSessionDrafts: Dispatch<SetStateAction<Record<string, string>>>;
   sessionFollowupQueues: Record<string, ComposerQueueItem[]>;
-  setSessionFollowupQueues: Dispatch<SetStateAction<Record<string, ComposerQueueItem[]>>>;
   setSessionComposerErrors: Dispatch<SetStateAction<Record<string, string>>>;
   setSessionImageAttachments: Dispatch<SetStateAction<Record<string, ComposerImageAttachment[]>>>;
   setSessionReferenceAttachments: Dispatch<SetStateAction<Record<string, SessionReferenceAttachment[]>>>;
@@ -844,6 +853,7 @@ export type UseChatComposerSubmitActionsResult = {
   handleFollowupQueueUpdate: (id: string, text: string) => void;
   handleFollowupQueueRemove: (id: string) => void;
   handleFollowupQueueMove: (fromIndex: number, toIndex: number) => void;
+  handleFollowupQueueSteer: (id: string) => void;
   handleEditUserMessage: (message: ConversationMessage) => void;
   handleCancelEditMessage: () => void;
   handleRegenerateAssistantMessage: (message: ConversationMessage) => void;
@@ -866,7 +876,6 @@ export function useChatComposerSubmitActions({
   sessionGuidanceMutation,
   setSessionDrafts,
   sessionFollowupQueues,
-  setSessionFollowupQueues,
   setSessionComposerErrors,
   setSessionImageAttachments,
   setSessionReferenceAttachments,
@@ -893,9 +902,7 @@ export function useChatComposerSubmitActions({
   setRuntimeStatusEnabledForNextTurn,
   companionAgentId,
 }: UseChatComposerSubmitActionsOptions): UseChatComposerSubmitActionsResult {
-  const stoppedTurnAutoFlushRef = useRef<{ sessionId: string; turnId: string } | null>(null);
   const pendingStopAfterAcceptRef = useRef<DeferredStopIntent | null>(null);
-  const previousBusyRef = useRef(sessionBusy);
   const previousSessionRef = useRef(activeSessionId);
 
   const handleComposerChange = useCallback((value: string) => {
@@ -1088,7 +1095,7 @@ export function useChatComposerSubmitActions({
       ...current,
       [sessionId]: "",
     }));
-    if (content || references.length) {
+    if (!queuedBehindActiveTurn && (content || references.length)) {
       queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
         markSessionDetailRunning(appendOptimisticUserMessage(detailState, { sessionId, content, references, clientSubmissionId })),
       );
@@ -1192,6 +1199,104 @@ export function useChatComposerSubmitActions({
     submitTurnMutation,
   ]);
 
+  const syncQueuedTurnsIntoDetail = useCallback((sessionId: string, rows: SessionQueuedTurn[]) => {
+    queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+      detailState ? { ...detailState, queuedTurns: rows } : detailState,
+    );
+  }, [queryClient]);
+
+  const reportQueuedTurnError = useCallback((sessionId: string, error: unknown, fallback: string) => {
+    setSessionComposerErrors((current) => ({
+      ...current,
+      [sessionId]: describeError(error, fallback),
+    }));
+  }, [describeError, setSessionComposerErrors]);
+
+  const handleFollowupQueueUpdate = useCallback((id: string, text: string) => {
+    const sessionId = activeSessionId;
+    const content = text.trim();
+    if (!sessionId || !content) {
+      return;
+    }
+    void updateSessionQueuedTurn(sessionId, id, { content })
+      .then((rows) => syncQueuedTurnsIntoDetail(sessionId, rows))
+      .catch((error) => reportQueuedTurnError(
+        sessionId,
+        error,
+        lang === "zh" ? "修改排队消息失败" : "Failed to update the queued message",
+      ));
+  }, [activeSessionId, lang, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
+
+  const handleFollowupQueueRemove = useCallback((id: string) => {
+    const sessionId = activeSessionId;
+    if (!sessionId) {
+      return;
+    }
+    void removeSessionQueuedTurn(sessionId, id)
+      .then((rows) => syncQueuedTurnsIntoDetail(sessionId, rows))
+      .catch((error) => reportQueuedTurnError(
+        sessionId,
+        error,
+        lang === "zh" ? "撤回排队消息失败" : "Failed to withdraw the queued message",
+      ));
+  }, [activeSessionId, lang, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
+
+  // Steering sends one queued item into the running turn as safe guidance and
+  // then withdraws it from the server queue; items carrying attachments or
+  // references stay queued because guidance cannot carry them.
+  const handleFollowupQueueSteer = useCallback((id: string) => {
+    const sessionId = activeSessionId;
+    if (!sessionId) {
+      return;
+    }
+    const item = (sessionFollowupQueues[sessionId] ?? []).find((entry) => entry.id === id);
+    if (!item) {
+      return;
+    }
+    if (item.canSteer === false) {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [sessionId]: lang === "zh"
+          ? "这条排队消息带图片或会话引用，无法立即引导；本轮结束后会自动发送。"
+          : "This queued message carries images or session references, so it cannot steer the running turn. It sends automatically after the turn ends.",
+      }));
+      return;
+    }
+    void (async () => {
+      try {
+        await sessionGuidanceMutation.mutateAsync({ sessionId, content: item.text, mode: "safe" });
+        const rows = await removeSessionQueuedTurn(sessionId, id);
+        syncQueuedTurnsIntoDetail(sessionId, rows);
+      } catch {
+        // The item stays queued; the guidance mutation already surfaced its error.
+      }
+    })();
+  }, [
+    activeSessionId,
+    lang,
+    sessionFollowupQueues,
+    sessionGuidanceMutation,
+    setSessionComposerErrors,
+    syncQueuedTurnsIntoDetail,
+  ]);
+
+  const handleFollowupQueueMove = useCallback((fromIndex: number, toIndex: number) => {
+    const sessionId = activeSessionId;
+    const rows = detail?.queuedTurns ?? [];
+    const from = rows[fromIndex];
+    const target = rows[toIndex];
+    if (!sessionId || fromIndex === toIndex || !from || !target) {
+      return;
+    }
+    void updateSessionQueuedTurn(sessionId, from.id, { position: target.position })
+      .then((next) => syncQueuedTurnsIntoDetail(sessionId, next))
+      .catch((error) => reportQueuedTurnError(
+        sessionId,
+        error,
+        lang === "zh" ? "调整排队顺序失败" : "Failed to reorder the queue",
+      ));
+  }, [activeSessionId, detail?.queuedTurns, lang, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
+
   const handleSubmitTurn = useCallback(() => {
     if (!activeSessionId) {
       return;
@@ -1207,79 +1312,37 @@ export function useChatComposerSubmitActions({
       return;
     }
     if (sessionBusy && !resolvedEditTarget) {
-      if (activeImageAttachments.length || activeReferenceAttachments.length) {
+      const content = activeDraftEffective.trim();
+      if (!content) {
+        // Codex-style steer: an empty submit on a running turn pushes the first
+        // queued item into the active turn instead of waiting for the drain.
+        const first = (sessionFollowupQueues[activeSessionId] ?? [])[0];
+        if (first) {
+          handleFollowupQueueSteer(first.id);
+        }
+        return;
+      }
+      if (companionAgentId && (activeImageAttachments.length || activeReferenceAttachments.length)) {
         setSessionComposerErrors((current) => ({
           ...current,
           [activeSessionId]: lang === "zh"
-            ? "运行中的排队消息仅支持文本，请先移除图片和会话引用。"
-            : "Queued follow-ups are text-only while a turn is running. Remove images and session references first.",
+            ? "人物正在回复时只能继续发送文字；附件和会话引用请等当前回复结束后再发送。"
+            : "While the companion is replying, only text can be queued. Send attachments or session references after the current reply finishes.",
         }));
         return;
       }
-      if (companionAgentId) {
-        const content = activeDraftEffective.trim();
-        if (!content) {
-          return;
-        }
-        if (activeImageAttachments.length > 0 || activeReferenceAttachments.length > 0) {
-          setSessionComposerErrors((current) => ({
-            ...current,
-            [activeSessionId]: lang === "zh"
-              ? "人物正在回复时只能继续发送文字；附件和会话引用请等当前回复结束后再发送。"
-              : "While the companion is replying, only text can be queued. Send attachments or session references after the current reply finishes.",
-          }));
-          return;
-        }
-        void submitTurnWithAttachments(
-          activeSessionId,
-          content,
-          [],
-          [],
-          mentalModelEnabledForNextTurn,
-          runtimeStatusEnabledForNextTurn,
-          createClientSubmissionId(activeSessionId),
-          true,
-        );
-        return;
-      }
-      const queue = sessionFollowupQueues[activeSessionId] ?? [];
-      const action = resolveComposerQueueEnter({
-        sessionBusy: true,
-        draft: activeDraftEffective,
-        queue,
-      });
-      if (action.type === "enqueue") {
-        setSessionFollowupQueues((current) => ({
-          ...current,
-          [activeSessionId]: appendComposerQueueItem(current[activeSessionId] ?? [], action.text),
-        }));
-        setSessionDrafts((current) => ({
-          ...current,
-          [activeSessionId]: "",
-        }));
-        return;
-      }
-      if (action.type === "immediate") {
-        void (async () => {
-          try {
-            for (const item of action.items) {
-              await sessionGuidanceMutation.mutateAsync({
-                sessionId: activeSessionId,
-                content: item.text,
-                mode: "safe",
-              });
-              setSessionFollowupQueues((current) => ({
-                ...current,
-                [activeSessionId]: removeComposerQueueItem(current[activeSessionId] ?? [], item.id),
-              }));
-            }
-          } catch {
-            // Successful items were removed one by one. The failed item, later
-            // snapshot items, and anything appended concurrently remain queued.
-          }
-        })();
-        return;
-      }
+      // The backend owns the queue: this POST lands in the server queue when the
+      // requested turn is still running and drains after the turn settles.
+      void submitTurnWithAttachments(
+        activeSessionId,
+        content,
+        companionAgentId ? [] : activeImageAttachments,
+        companionAgentId ? [] : activeReferenceAttachments,
+        mentalModelEnabledForNextTurn,
+        runtimeStatusEnabledForNextTurn,
+        createClientSubmissionId(activeSessionId),
+        true,
+      );
       return;
     }
     const content = activeDraftEffective.trim();
@@ -1466,8 +1529,8 @@ export function useChatComposerSubmitActions({
     sessionStopping,
     setSessionComposerErrors,
     setSessionDrafts,
-    setSessionFollowupQueues,
     setSessionImageUploadPending,
+    handleFollowupQueueSteer,
     submitTurnWithAttachments,
   ]);
 
@@ -1641,36 +1704,6 @@ export function useChatComposerSubmitActions({
     switchHeadMutation.mutate({ sessionId: activeSessionId, nodeId });
   }, [activeSessionId, sessionBusy, switchHeadMutation]);
 
-  const handleFollowupQueueUpdate = useCallback((id: string, text: string) => {
-    if (!activeSessionId) {
-      return;
-    }
-    setSessionFollowupQueues((current) => ({
-      ...current,
-      [activeSessionId]: updateComposerQueueItem(current[activeSessionId] ?? [], id, text),
-    }));
-  }, [activeSessionId, setSessionFollowupQueues]);
-
-  const handleFollowupQueueRemove = useCallback((id: string) => {
-    if (!activeSessionId) {
-      return;
-    }
-    setSessionFollowupQueues((current) => ({
-      ...current,
-      [activeSessionId]: removeComposerQueueItem(current[activeSessionId] ?? [], id),
-    }));
-  }, [activeSessionId, setSessionFollowupQueues]);
-
-  const handleFollowupQueueMove = useCallback((fromIndex: number, toIndex: number) => {
-    if (!activeSessionId) {
-      return;
-    }
-    setSessionFollowupQueues((current) => ({
-      ...current,
-      [activeSessionId]: moveComposerQueueItem(current[activeSessionId] ?? [], fromIndex, toIndex),
-    }));
-  }, [activeSessionId, setSessionFollowupQueues]);
-
   const handleStopTurn = useCallback(() => {
     if (!activeSessionId || sessionStopping) {
       return;
@@ -1696,7 +1729,6 @@ export function useChatComposerSubmitActions({
       return;
     }
     pendingStopAfterAcceptRef.current = null;
-    stoppedTurnAutoFlushRef.current = { sessionId: activeSessionId, turnId };
     stopTurnMutation.mutate({
       sessionId: activeSessionId,
       turnId,
@@ -1736,7 +1768,6 @@ export function useChatComposerSubmitActions({
       return;
     }
     pendingStopAfterAcceptRef.current = null;
-    stoppedTurnAutoFlushRef.current = { sessionId: activeSessionId, turnId };
     stopTurnMutation.mutate({
       sessionId: activeSessionId,
       turnId,
@@ -1772,64 +1803,15 @@ export function useChatComposerSubmitActions({
     });
   }, [activeDraftEffective, activeSessionId, sessionBusy, sessionGuidanceMutation, sessionStopping]);
 
+  // The server drains the queue when a turn settles, so the composer only keeps
+  // the deferred-stop intent scoped to the active session.
   useEffect(() => {
-    const wasBusy = previousBusyRef.current;
-    const previousSession = previousSessionRef.current;
-    previousBusyRef.current = sessionBusy;
+    if (previousSessionRef.current === activeSessionId) {
+      return;
+    }
     previousSessionRef.current = activeSessionId;
-    if (previousSession !== activeSessionId) {
-      pendingStopAfterAcceptRef.current = null;
-    }
-    const stoppedTurn = stoppedTurnAutoFlushRef.current;
-    if (
-      sessionBusy
-      && stoppedTurn
-      && stoppedTurn.sessionId === activeSessionId
-      && activeTurnId
-      && activeTurnId !== stoppedTurn.turnId
-    ) {
-      stoppedTurnAutoFlushRef.current = null;
-    }
-    if (!activeSessionId || previousSession !== activeSessionId) {
-      return;
-    }
-    if (!(wasBusy && !sessionBusy)) {
-      return;
-    }
-    if (stoppedTurn?.sessionId === activeSessionId) {
-      stoppedTurnAutoFlushRef.current = null;
-    }
-    if (sessionStopping) {
-      return;
-    }
-    const first = (sessionFollowupQueues[activeSessionId] ?? [])[0];
-    if (!first) {
-      return;
-    }
-    setSessionFollowupQueues((current) => ({
-      ...current,
-      [activeSessionId]: removeComposerQueueItem(current[activeSessionId] ?? [], first.id),
-    }));
-    void submitTurnWithAttachments(
-      activeSessionId,
-      first.text,
-      [],
-      [],
-      mentalModelEnabledForNextTurn,
-      runtimeStatusEnabledForNextTurn,
-      createClientSubmissionId(activeSessionId),
-    );
-  }, [
-    activeSessionId,
-    activeTurnId,
-    mentalModelEnabledForNextTurn,
-    runtimeStatusEnabledForNextTurn,
-    sessionBusy,
-    sessionFollowupQueues,
-    sessionStopping,
-    setSessionFollowupQueues,
-    submitTurnWithAttachments,
-  ]);
+    pendingStopAfterAcceptRef.current = null;
+  }, [activeSessionId]);
 
   return {
     handleComposerChange,
@@ -1845,6 +1827,7 @@ export function useChatComposerSubmitActions({
     handleFollowupQueueUpdate,
     handleFollowupQueueRemove,
     handleFollowupQueueMove,
+    handleFollowupQueueSteer,
     handleEditUserMessage,
     handleCancelEditMessage,
     handleRegenerateAssistantMessage,

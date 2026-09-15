@@ -545,6 +545,8 @@ export function ConversationView({
   onFollowupQueueUpdate,
   onFollowupQueueRemove,
   onFollowupQueueMove,
+  onFollowupQueueSteer,
+  followupQueueSteerLabel,
 }: ConversationViewProps) {
   void interruptGuidanceLabel;
   void interruptGuidancePendingLabel;
@@ -4761,9 +4763,11 @@ export function ConversationView({
               variant={composerVariant}
               editLabel={t("editFollowupQueue")}
               withdrawLabel={t("withdrawFollowupQueue")}
+              steerLabel={followupQueueSteerLabel ?? t("immediateSteer")}
               onUpdate={onFollowupQueueUpdate ?? (() => undefined)}
               onRemove={onFollowupQueueRemove ?? (() => undefined)}
               onMove={onFollowupQueueMove ?? (() => undefined)}
+              onSteer={onFollowupQueueSteer}
             />
           ) : null}
           {composerModeNotice ? (

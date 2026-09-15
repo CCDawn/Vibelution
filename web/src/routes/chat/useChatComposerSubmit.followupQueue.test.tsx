@@ -6,6 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionDetail } from "../../api/types";
 import {
+  removeSessionQueuedTurn,
+  updateSessionQueuedTurn,
+} from "../../api/chat";
+import {
   useChatComposerSubmitActions,
   type ChatComposerTurnMutations,
 } from "./useChatComposerSubmit";
@@ -15,6 +19,17 @@ import type { ComposerImageAttachment } from "./chatComposerSubmitModel";
 vi.mock("./chatSubmitTelemetry", () => ({
   postSubmitTelemetry: vi.fn(),
 }));
+
+vi.mock("../../api/chat", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../api/chat")>();
+  return {
+    ...actual,
+    listSessionQueuedTurns: vi.fn(async () => []),
+    removeSessionQueuedTurn: vi.fn(async () => []),
+    updateSessionQueuedTurn: vi.fn(async () => []),
+    uploadSessionImageAttachment: vi.fn(async () => ({ artifactId: "artifact-1" })),
+  };
+});
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -27,8 +42,6 @@ type HarnessProps = {
   queues: Record<string, ComposerQueueItem[]>;
   imageAttachments?: ComposerImageAttachment[];
   mutations: ChatComposerTurnMutations;
-  onQueues: (queues: Record<string, ComposerQueueItem[]>) => void;
-  onDrafts?: (drafts: Record<string, string>) => void;
   onErrors?: (errors: Record<string, string>) => void;
 };
 
@@ -55,8 +68,6 @@ function Harness({
   queues,
   imageAttachments = [],
   mutations,
-  onQueues,
-  onDrafts,
   onErrors,
 }: HarnessProps) {
   const queryClient = useRef(new QueryClient({
@@ -65,7 +76,7 @@ function Harness({
   const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>({
     [sessionId]: draft,
   });
-  const [sessionFollowupQueues, setSessionFollowupQueues] = useState(queues);
+  const [sessionFollowupQueues] = useState(queues);
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
   const actions = useChatComposerSubmitActions({
     queryClient,
@@ -76,20 +87,8 @@ function Harness({
     regenerateMutation: mutations.regenerateMutation,
     stopTurnMutation: mutations.stopTurnMutation,
     sessionGuidanceMutation: mutations.sessionGuidanceMutation,
-    setSessionDrafts: (value) => {
-      setSessionDrafts(value);
-      if (typeof value !== "function") {
-        onDrafts?.(value);
-      }
-    },
+    setSessionDrafts,
     sessionFollowupQueues,
-    setSessionFollowupQueues: (value) => {
-      setSessionFollowupQueues((current) => {
-        const next = typeof value === "function" ? value(current) : value;
-        onQueues(next);
-        return next;
-      });
-    },
     setSessionComposerErrors: (value) => {
       if (typeof value === "function") {
         onErrors?.(value({}));
@@ -118,7 +117,11 @@ function Harness({
     activeImageInputModelId: "model-1",
     latestUserMessageId: "user-1",
     activeTurnId: `turn-${sessionId}`,
-    detail: { id: sessionId, activeTurnId: `turn-${sessionId}` } as SessionDetail,
+    detail: {
+      id: sessionId,
+      activeTurnId: `turn-${sessionId}`,
+      queuedTurns: queues[sessionId] ?? [],
+    } as SessionDetail,
     setMentalModelEnabledForNextTurn: () => undefined,
     setRuntimeStatusEnabledForNextTurn: () => undefined,
     companionAgentId,
@@ -127,27 +130,28 @@ function Harness({
   return (
     <div>
       <output data-testid="draft">{sessionDrafts[sessionId] ?? ""}</output>
-      <output data-testid="queue">{JSON.stringify(sessionFollowupQueues[sessionId] ?? [])}</output>
       <button type="button" data-testid="submit" onClick={() => actions.handleSubmitTurn()}>submit</button>
       <button type="button" data-testid="stop" onClick={() => actions.handleStopTurn()}>stop</button>
       <button
         type="button"
-        data-testid="append-queue"
-        onClick={() => {
-          setSessionFollowupQueues((current) => {
-            const next = {
-              ...current,
-              [sessionId]: [
-                ...(current[sessionId] ?? []),
-                { id: `q-new-${sessionId}`, text: `new-${sessionId}` },
-              ],
-            };
-            onQueues(next);
-            return next;
-          });
-        }}
+        data-testid="update-queue"
+        onClick={() => actions.handleFollowupQueueUpdate("q-1", "改后的排队文本")}
       >
-        append
+        update
+      </button>
+      <button
+        type="button"
+        data-testid="remove-queue"
+        onClick={() => actions.handleFollowupQueueRemove("q-1")}
+      >
+        remove
+      </button>
+      <button
+        type="button"
+        data-testid="move-queue"
+        onClick={() => actions.handleFollowupQueueMove(0, 1)}
+      >
+        move
       </button>
     </div>
   );
@@ -166,6 +170,7 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
     container?.remove();
     root = null;
     container = null;
+    vi.clearAllMocks();
   });
 
   function createMutations() {
@@ -189,77 +194,44 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
     };
   }
 
-  async function mount(props: Omit<HarnessProps, "onQueues"> & { onQueues?: HarnessProps["onQueues"] }) {
+  async function mount(props: HarnessProps) {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
-    const onQueues = props.onQueues ?? vi.fn();
     await act(async () => {
-      root?.render(<Harness {...props} onQueues={onQueues} />);
+      root?.render(<Harness {...props} />);
     });
-    return { onQueues };
   }
 
-  it("enqueues typed follow-ups while the turn is running", async () => {
+  it("queues the typed follow-up on the server while the turn is running", async () => {
     const { mutations, submitTurn, guidance } = createMutations();
-    let queues: Record<string, ComposerQueueItem[]> = {};
     await mount({
       busy: true,
       draft: "先不要改测试，只汇报改了哪些文件。",
       queues: {},
       mutations,
-      onQueues: (next) => {
-        queues = next;
-      },
     });
 
     await act(async () => {
       container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
     });
 
-    expect(queues["session-1"]?.map((item) => item.text)).toEqual([
-      "先不要改测试，只汇报改了哪些文件。",
-    ]);
-    expect(submitTurn).not.toHaveBeenCalled();
-    expect(guidance).not.toHaveBeenCalled();
-  });
-
-  it("submits busy Companion text to the plugin mailbox without changing the ordinary follow-up queue", async () => {
-    const { mutations, submitTurn, guidance } = createMutations();
-    let queues: Record<string, ComposerQueueItem[]> = {};
-    await mount({
-      companionAgentId: "agent-companion",
-      busy: true,
-      draft: "你先忙，我也可以继续发消息。",
-      queues: {},
-      mutations,
-      onQueues: (next) => {
-        queues = next;
-      },
-    });
-
-    await act(async () => {
-      container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
-    });
-
-    expect(queues["session-1"]).toBeUndefined();
     expect(submitTurn).toHaveBeenCalledTimes(1);
-    expect(submitTurn).toHaveBeenCalledWith(expect.objectContaining({
+    expect(submitTurn.mock.calls[0]?.[0]).toMatchObject({
       sessionId: "session-1",
-      content: "你先忙，我也可以继续发消息。",
+      content: "先不要改测试，只汇报改了哪些文件。",
       queuedBehindActiveTurn: true,
-    }));
+    });
     expect(guidance).not.toHaveBeenCalled();
   });
 
-  it("rejects text-only queueing while an image attachment is present", async () => {
-    const { mutations, submitTurn, guidance } = createMutations();
-    let queues: Record<string, ComposerQueueItem[]> = {};
+  it("queues images and references with the follow-up instead of rejecting them", async () => {
+    const { mutations, submitTurn } = createMutations();
     let errors: Record<string, string> = {};
     await mount({
       busy: true,
       draft: "describe this image",
-      queues,
+      queues: {},
       imageAttachments: [{
         id: "image-1",
         file: new File(["image"], "image.png", { type: "image/png" }),
@@ -269,9 +241,69 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
         contentType: "image/png",
       }],
       mutations,
-      onQueues: (next) => {
-        queues = next;
+      onErrors: (next) => {
+        errors = next;
       },
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(submitTurn).toHaveBeenCalledTimes(1);
+    expect(submitTurn.mock.calls[0]?.[0]).toMatchObject({
+      sessionId: "session-1",
+      content: "describe this image",
+      queuedBehindActiveTurn: true,
+      attachmentIds: ["artifact-1"],
+    });
+    expect(errors["session-1"] ?? "").not.toContain("仅支持文本");
+  });
+
+  it("submits busy Companion text to the plugin mailbox without changing the ordinary follow-up queue", async () => {
+    const { mutations, submitTurn, guidance } = createMutations();
+    await mount({
+      companionAgentId: "agent-companion",
+      busy: true,
+      draft: "你先忙，我也可以继续发消息。",
+      queues: {},
+      mutations,
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
+    });
+
+    expect(submitTurn).toHaveBeenCalledTimes(1);
+    expect(submitTurn).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: "session-1",
+      content: "你先忙，我也可以继续发消息。",
+      queuedBehindActiveTurn: true,
+    }));
+    expect(guidance).not.toHaveBeenCalled();
+  });
+
+  it("keeps the busy Companion path text-only", async () => {
+    const { mutations, submitTurn } = createMutations();
+    let errors: Record<string, string> = {};
+    await mount({
+      companionAgentId: "agent-companion",
+      busy: true,
+      draft: "带图你也先处理着",
+      queues: {},
+      imageAttachments: [{
+        id: "image-1",
+        file: new File(["image"], "image.png", { type: "image/png" }),
+        filename: "image.png",
+        previewUrl: "blob:image-1",
+        sizeBytes: 5,
+        contentType: "image/png",
+      }],
+      mutations,
       onErrors: (next) => {
         errors = next;
       },
@@ -281,158 +313,54 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
       container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
     });
 
-    expect(queues["session-1"]).toBeUndefined();
-    expect(errors["session-1"]).toContain("仅支持文本");
+    expect(errors["session-1"]).toContain("只能继续发送文字");
     expect(submitTurn).not.toHaveBeenCalled();
-    expect(guidance).not.toHaveBeenCalled();
   });
 
-  it("sends each queued item as safe guidance on immediate steer", async () => {
+  it("steers the first queued item on an empty submit", async () => {
     const { mutations, guidance } = createMutations();
-    let queues: Record<string, ComposerQueueItem[]> = {
-      "session-1": [
-        { id: "q-1", text: "先不要改测试" },
-        { id: "q-2", text: "登录失败用中文提示" },
-      ],
-    };
     await mount({
       busy: true,
       draft: "",
-      queues,
-      mutations,
-      onQueues: (next) => {
-        queues = next;
+      queues: {
+        "session-1": [
+          { id: "q-1", text: "先不要改测试" },
+          { id: "q-2", text: "登录失败用中文提示" },
+        ],
       },
+      mutations,
     });
 
     await act(async () => {
       container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
+      await Promise.resolve();
     });
     await act(async () => {
       await Promise.resolve();
     });
 
-    expect(guidance).toHaveBeenCalledTimes(2);
-    expect(guidance).toHaveBeenNthCalledWith(1, {
+    expect(guidance).toHaveBeenCalledTimes(1);
+    expect(guidance).toHaveBeenCalledWith({
       sessionId: "session-1",
       content: "先不要改测试",
       mode: "safe",
     });
-    expect(guidance).toHaveBeenNthCalledWith(2, {
-      sessionId: "session-1",
-      content: "登录失败用中文提示",
-      mode: "safe",
-    });
-    expect(queues["session-1"]).toEqual([]);
+    expect(removeSessionQueuedTurn).toHaveBeenCalledWith("session-1", "q-1");
     expect(mutations.submitTurnMutation.mutate).not.toHaveBeenCalled();
   });
 
-  it("auto-sends only the first queued item when the current turn ends", async () => {
-    const { mutations, submitTurn } = createMutations();
-    let queues: Record<string, ComposerQueueItem[]> = {
-      "session-1": [
-        { id: "q-1", text: "先不要改测试" },
-        { id: "q-2", text: "登录失败用中文提示" },
-      ],
-    };
+  it("refuses to steer a queued item that carries attachments", async () => {
+    const { mutations, guidance } = createMutations();
+    let errors: Record<string, string> = {};
     await mount({
       busy: true,
       draft: "",
-      queues,
-      mutations,
-      onQueues: (next) => {
-        queues = next;
+      queues: {
+        "session-1": [{ id: "q-1", text: "带图的排队消息", canSteer: false }],
       },
-    });
-
-    await act(async () => {
-      root?.render(
-        <Harness
-          busy={false}
-          draft=""
-          queues={queues}
-          mutations={mutations}
-          onQueues={(next) => {
-            queues = next;
-          }}
-        />,
-      );
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    expect(submitTurn).toHaveBeenCalledTimes(1);
-    expect(submitTurn.mock.calls[0]?.[0]).toMatchObject({
-      sessionId: "session-1",
-      content: "先不要改测试",
-    });
-    expect(queues["session-1"]?.map((item) => item.text)).toEqual(["登录失败用中文提示"]);
-  });
-
-  it("sends the first queued item after a stop settles", async () => {
-    const { mutations, submitTurn, stopTurn } = createMutations();
-    let queues: Record<string, ComposerQueueItem[]> = {
-      "session-1": [
-        { id: "q-1", text: "先不要改测试" },
-        { id: "q-2", text: "登录失败用中文提示" },
-      ],
-    };
-    await mount({
-      busy: true,
-      draft: "",
-      queues,
       mutations,
-      onQueues: (next) => {
-        queues = next;
-      },
-    });
-
-    await act(async () => {
-      container?.querySelector<HTMLButtonElement>('[data-testid="stop"]')?.click();
-    });
-    expect(stopTurn).toHaveBeenCalledWith({
-      sessionId: "session-1",
-      turnId: "turn-session-1",
-    });
-    expect(submitTurn).not.toHaveBeenCalled();
-
-    await act(async () => {
-      root?.render(
-        <Harness
-          busy={false}
-          draft=""
-          queues={queues}
-          mutations={mutations}
-          onQueues={(next) => {
-            queues = next;
-          }}
-        />,
-      );
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    expect(submitTurn).toHaveBeenCalledTimes(1);
-    expect(submitTurn.mock.calls[0]?.[0]).toMatchObject({
-      sessionId: "session-1",
-      content: "先不要改测试",
-    });
-    expect(queues["session-1"]?.map((item) => item.text)).toEqual(["登录失败用中文提示"]);
-  });
-
-  it("queues a new message while the stop is still being confirmed", async () => {
-    const { mutations, submitTurn } = createMutations();
-    let queues: Record<string, ComposerQueueItem[]> = {};
-    await mount({
-      busy: true,
-      stopping: true,
-      draft: "停止确认前先排队",
-      queues,
-      mutations,
-      onQueues: (next) => {
-        queues = next;
+      onErrors: (next) => {
+        errors = next;
       },
     });
 
@@ -440,123 +368,61 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
       container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
     });
 
-    expect(queues["session-1"]?.map((item) => item.text)).toEqual(["停止确认前先排队"]);
-    expect(submitTurn).not.toHaveBeenCalled();
+    expect(errors["session-1"]).toContain("无法立即引导");
+    expect(guidance).not.toHaveBeenCalled();
+    expect(removeSessionQueuedTurn).not.toHaveBeenCalled();
   });
 
-  it("preserves concurrently appended items when immediate steer partially fails", async () => {
-    const guidance = vi.fn();
-    let rejectSecond: ((reason?: unknown) => void) | undefined;
-    let callCount = 0;
-    const mutations = {
-      submitTurnMutation: mutationStub(vi.fn()),
-      editResubmitMutation: mutationStub(vi.fn()),
-      regenerateMutation: mutationStub(vi.fn()),
-      stopTurnMutation: mutationStub(vi.fn()),
-      sessionGuidanceMutation: mutationStub(guidance, async (variables) => {
-        guidance(variables);
-        callCount += 1;
-        if (callCount === 2) {
-          await new Promise<never>((_resolve, reject) => {
-            rejectSecond = reject;
-          });
-        }
-        return {};
-      }),
-    } as ChatComposerTurnMutations;
-    let queues: Record<string, ComposerQueueItem[]> = {
-      "session-1": [
-        { id: "q-1", text: "first" },
-        { id: "q-2", text: "second" },
-      ],
-    };
+  it("updates, withdraws and reorders queued turns through the server", async () => {
+    const { mutations } = createMutations();
     await mount({
       busy: true,
       draft: "",
-      queues,
-      mutations,
-      onQueues: (next) => {
-        queues = next;
+      queues: {
+        "session-1": [
+          { id: "q-1", text: "第一条", position: 1 },
+          { id: "q-2", text: "第二条", position: 2 },
+        ],
       },
+      mutations,
     });
 
     await act(async () => {
-      container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
-      await Promise.resolve();
-    });
-    expect(guidance).toHaveBeenCalledTimes(2);
-
-    await act(async () => {
-      container?.querySelector<HTMLButtonElement>('[data-testid="append-queue"]')?.click();
-    });
-    await act(async () => {
-      rejectSecond?.(new Error("guidance failed"));
-      await Promise.resolve();
+      container?.querySelector<HTMLButtonElement>('[data-testid="update-queue"]')?.click();
+      container?.querySelector<HTMLButtonElement>('[data-testid="remove-queue"]')?.click();
+      container?.querySelector<HTMLButtonElement>('[data-testid="move-queue"]')?.click();
     });
 
-    expect(queues["session-1"]?.map((item) => item.id)).toEqual([
-      "q-2",
-      "q-new-session-1",
-    ]);
+    expect(updateSessionQueuedTurn).toHaveBeenCalledWith("session-1", "q-1", { content: "改后的排队文本" });
+    expect(removeSessionQueuedTurn).toHaveBeenCalledWith("session-1", "q-1");
+    expect(updateSessionQueuedTurn).toHaveBeenCalledWith("session-1", "q-1", { position: 2 });
   });
 
-  it("does not apply one session stop suppression to another session", async () => {
-    const { mutations, submitTurn, stopTurn } = createMutations();
-    let queues: Record<string, ComposerQueueItem[]> = {
-      "session-1": [{ id: "q-1", text: "keep after stop" }],
-      "session-2": [{ id: "q-2", text: "send after completion" }],
-    };
+  it("no longer flushes the queue locally when the turn ends", async () => {
+    const { mutations, submitTurn } = createMutations();
     await mount({
-      sessionId: "session-1",
       busy: true,
       draft: "",
-      queues,
-      mutations,
-      onQueues: (next) => {
-        queues = next;
+      queues: {
+        "session-1": [{ id: "q-1", text: "先不要改测试" }],
       },
+      mutations,
     });
-
-    await act(async () => {
-      container?.querySelector<HTMLButtonElement>('[data-testid="stop"]')?.click();
-    });
-    expect(stopTurn).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       root?.render(
         <Harness
-          sessionId="session-2"
-          busy
-          draft=""
-          queues={queues}
-          mutations={mutations}
-          onQueues={(next) => {
-            queues = next;
-          }}
-        />,
-      );
-    });
-    await act(async () => {
-      root?.render(
-        <Harness
-          sessionId="session-2"
           busy={false}
           draft=""
-          queues={queues}
+          queues={{ "session-1": [{ id: "q-1", text: "先不要改测试" }] }}
           mutations={mutations}
-          onQueues={(next) => {
-            queues = next;
-          }}
         />,
       );
+    });
+    await act(async () => {
       await Promise.resolve();
     });
 
-    expect(submitTurn).toHaveBeenCalledTimes(1);
-    expect(submitTurn.mock.calls[0]?.[0]).toMatchObject({
-      sessionId: "session-2",
-      content: "send after completion",
-    });
-    expect(queues["session-1"]?.map((item) => item.id)).toEqual(["q-1"]);
+    expect(submitTurn).not.toHaveBeenCalled();
   });
 });
