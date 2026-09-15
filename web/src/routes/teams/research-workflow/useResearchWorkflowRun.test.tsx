@@ -327,12 +327,12 @@ describe("useResearchWorkflowRun behavior", () => {
     vi.useRealTimers();
   });
 
-  it("stops the fallback poll once the run reaches a terminal status", async () => {
+  it("stops the fallback poll once the run is archived", async () => {
     vi.useFakeTimers();
     const settled = makeSnapshot("run-a", 3);
     api.fetchResearchWorkflowSnapshot.mockResolvedValue({
       ...settled,
-      run: { ...settled.run, status: "succeeded" },
+      run: { ...settled.run, status: "archived" },
     });
     await renderWith("run-a");
     const callsAfterSettle = api.fetchResearchWorkflowSnapshot.mock.calls.length;
