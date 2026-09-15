@@ -61,6 +61,7 @@ def _control_content_stream(text, *, actual_tool=False, provider="opencode_go", 
 
 @pytest.mark.parametrize("text", [
     "<budget:token_budget>200000</budget:token_budget>",
+    "<budget:token_budget>200000",
     "<ds_safety>internal classification</ds_safety>Safe",
     "@@RECALL\ninternal recall text",
     '<｜｜tool▁calls▁begin｜｜><｜｜tool▁call▁begin｜｜>lookup<｜｜tool▁sep｜｜>{"query":"test"}<｜｜tool▁call▁end｜｜><｜｜tool▁calls▁end｜｜>',
@@ -90,6 +91,7 @@ def test_provider_control_prefix_preserves_following_visible_answer():
 
 @pytest.mark.parametrize("text", [
     "代码中的 @@RECALL 只是示例。",
+    "<budget",
     "```xml\n<ds_safety>example</ds_safety>Safe\n```",
     "`<budget:token_budget>200000</budget:token_budget>`",
     "<budget:token_budget>not a number</budget:token_budget>",
