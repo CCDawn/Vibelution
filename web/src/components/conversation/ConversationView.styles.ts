@@ -290,16 +290,24 @@ backToBottomButton:
     `vui-components-conversationview cliAgentLifecycleTime min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] ${vuiStateCoolInfoClass}`,
   cliAgentLifecycleTurn: `vui-components-conversationview cliAgentLifecycleTurn min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateCoolInfoClass} !bg-[var(--vui-surface-panel)]`,
   composer: conversationComposerShell,
+  // Pending image cards: a previewable thumbnail, filename/size copy, and a
+  // quiet remove affordance — a pill with a 20px thumb read as a broken icon.
   composerAttachmentChip:
-    "vui-components-conversationview composerAttachmentChip min-w-0 inline-flex min-h-7 w-fit max-w-full items-center justify-start gap-1.5 overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-1.5 pr-1 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    "vui-components-conversationview composerAttachmentChip group inline-flex min-w-0 w-fit max-w-full items-center gap-2 overflow-hidden rounded-[12px] border border-[color-mix(in_srgb,var(--vui-border-subtle)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] p-1 pr-1.5 transition-colors duration-150 hover:border-[color-mix(in_srgb,var(--border-strong)_72%,transparent)] hover:bg-[var(--vui-control-muted-hover)]",
+  composerAttachmentCopy:
+    "vui-components-conversationview composerAttachmentCopy grid min-w-0 gap-0.5 pr-0.5",
+  composerAttachmentMeta:
+    "vui-components-conversationview composerAttachmentMeta min-w-0 [font-size:var(--vui-font-2xs)] leading-none tabular-nums text-[var(--fg-tertiary)]",
   composerAttachmentName:
-    "vui-components-conversationview composerAttachmentName min-w-0 max-w-[14rem] truncate",
+    "vui-components-conversationview composerAttachmentName min-w-0 max-w-[14rem] truncate [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] group-hover:text-[var(--fg-primary)]",
+  composerAttachmentPreview:
+    "vui-components-conversationview composerAttachmentPreview shrink-0 !h-9 !min-h-9 !w-9 !min-w-9 !rounded-[9px] !bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,var(--vui-control-muted))] !p-0 shadow-none hover:!bg-[var(--vui-control-muted-hover)] hover:!shadow-none focus-visible:!ring-offset-0 [&_[data-slot=vui-button-content]]:!size-full [&_[data-slot=vui-button-content]]:!max-w-none [&_[data-slot=vui-button-label]]:!block [&_[data-slot=vui-button-label]]:!size-full",
   composerAttachmentRemoveButton:
-    "vui-components-conversationview composerAttachmentRemoveButton !h-6 !min-h-6 !w-6 !min-w-6 shrink-0 !rounded-full !p-0",
+    "vui-components-conversationview composerAttachmentRemoveButton !h-6 !min-h-6 !w-6 !min-w-6 shrink-0 !rounded-full !p-0 text-[var(--fg-tertiary)] hover:!bg-[color-mix(in_srgb,var(--state-error)_12%,var(--vui-control-muted-hover))] hover:!text-[var(--state-error)]",
   composerAttachmentThumb:
-    "vui-components-conversationview composerAttachmentThumb block h-5 max-h-5 w-5 max-w-5 shrink-0 rounded-[var(--radius-control)] object-cover",
+    "vui-components-conversationview composerAttachmentThumb block size-full shrink-0 object-cover",
   composerAttachmentTray:
-    "vui-components-conversationview composerAttachmentTray min-w-0 max-w-full overflow-hidden flex flex-wrap items-center gap-1.5",
+    "vui-components-conversationview composerAttachmentTray min-w-0 max-w-full overflow-hidden flex flex-wrap items-center gap-2",
   // Busy composer keeps the queue/steer action and the stop button on one row
   // (Codex keeps steer/stop in a single compact cluster; stacking them made the
   // toolbar end look cluttered next to the model picker and context ring).

@@ -409,6 +409,7 @@ export function useChatComposerTurnMutations({
         mentalModelEnabled,
         runtimeStatusEnabled,
         turnStatusTail,
+        attachmentIds,
       }: EditResubmitVariables,
     ) =>
       editResubmitSessionMessage(sessionId, {
@@ -417,6 +418,7 @@ export function useChatComposerTurnMutations({
         clientSubmissionId,
         content,
         contentUtf8Base64: encodeUtf8Base64(content),
+        attachmentIds: attachmentIds ?? [],
         mentalModelEnabled,
         runtimeStatusEnabled,
         turnStatusTail: turnStatusTail ?? loadTurnStatusTailConfig(sessionId),
@@ -471,6 +473,8 @@ export function useChatComposerTurnMutations({
         ...current,
         [variables.sessionId]: "",
       }));
+      setSessionImageAttachments((current) => clearSessionImageAttachments(current, variables.sessionId));
+      setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, variables.sessionId));
       setSessionEditTargets((current) => {
         const { [variables.sessionId]: _removed, ...remaining } = current;
         return remaining;
@@ -986,6 +990,15 @@ export function useChatComposerSubmitActions({
       }));
       return;
     }
+    if (activeEditTarget || resolvedEditTarget) {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [activeSessionId]: lang === "zh"
+          ? "编辑重发暂不支持会话引用，请取消编辑后再添加。"
+          : "Session references are not supported while editing a message. Cancel the edit first.",
+      }));
+      return;
+    }
     const referenceId = sessionReferenceId(reference);
     if (!referenceId) {
       setSessionComposerErrors((current) => ({
@@ -1009,8 +1022,10 @@ export function useChatComposerSubmitActions({
       [activeSessionId]: "",
     }));
   }, [
+    activeEditTarget,
     activeSessionId,
     lang,
+    resolvedEditTarget,
     sessionBusy,
     setSessionComposerErrors,
     setSessionReferenceAttachments,
@@ -1373,16 +1388,50 @@ export function useChatComposerSubmitActions({
           clientSubmissionId,
         },
       );
-      editResubmitMutation.mutate({
-        sessionId: activeSessionId,
-        messageId: resolvedEditTarget.messageId,
-        ...(resolvedEditTarget.nodeId ? { baseMessageId: resolvedEditTarget.nodeId } : {}),
-        clientSubmissionId,
-        content,
-        mentalModelEnabled: mentalModelEnabledForNextTurn,
-        runtimeStatusEnabled: runtimeStatusEnabledForNextTurn,
-        turnStatusTail: loadTurnStatusTailConfig(activeSessionId),
-      });
+      const editTarget = resolvedEditTarget;
+      const editAttachments = activeImageAttachments;
+      void (async () => {
+        if (editAttachments.length && imageUploadInFlightRef.current[activeSessionId]) {
+          return;
+        }
+        let attachmentIds: string[] = [];
+        if (editAttachments.length) {
+          imageUploadInFlightRef.current[activeSessionId] = true;
+          setSessionImageUploadPending((current) => ({
+            ...current,
+            [activeSessionId]: true,
+          }));
+          try {
+            const uploaded = await Promise.all(
+              editAttachments.map((attachment) => uploadSessionImageAttachment(activeSessionId, attachment)),
+            );
+            attachmentIds = uploaded.map((attachment) => attachment.artifactId).filter(Boolean);
+          } catch (error) {
+            setSessionComposerErrors((current) => ({
+              ...current,
+              [activeSessionId]: describeError(error, lang === "zh" ? "图片上传失败" : "Image upload failed"),
+            }));
+            return;
+          } finally {
+            imageUploadInFlightRef.current[activeSessionId] = false;
+            setSessionImageUploadPending((current) => ({
+              ...current,
+              [activeSessionId]: false,
+            }));
+          }
+        }
+        editResubmitMutation.mutate({
+          sessionId: activeSessionId,
+          messageId: editTarget.messageId,
+          ...(editTarget.nodeId ? { baseMessageId: editTarget.nodeId } : {}),
+          clientSubmissionId,
+          content,
+          attachmentIds,
+          mentalModelEnabled: mentalModelEnabledForNextTurn,
+          runtimeStatusEnabled: runtimeStatusEnabledForNextTurn,
+          turnStatusTail: loadTurnStatusTailConfig(activeSessionId),
+        });
+      })();
       return;
     }
     void submitTurnWithAttachments(
@@ -1404,7 +1453,9 @@ export function useChatComposerSubmitActions({
     activeSessionId,
     composerDisabled,
     companionAgentId,
+    describeError,
     editResubmitMutation,
+    imageUploadInFlightRef,
     lang,
     mentalModelEnabledForNextTurn,
     runtimeStatusEnabledForNextTurn,
@@ -1416,6 +1467,7 @@ export function useChatComposerSubmitActions({
     setSessionComposerErrors,
     setSessionDrafts,
     setSessionFollowupQueues,
+    setSessionImageUploadPending,
     submitTurnWithAttachments,
   ]);
 

@@ -15,6 +15,7 @@ import {
 } from "../chatComposerState";
 import type { ComposerImageAttachment } from "./chatComposerSubmitModel";
 import {
+  buildComposerImageInputGuidance,
   buildConversationComposerBridgeState,
   type ChatConversationComposerBridgeState,
 } from "./ChatConversationComposerBridge";
@@ -131,19 +132,6 @@ export function useChatComposerBridgeState({
   const activeAgentImageInputSupported = modelImageInputSupport(modelImageInputSupportById, activeImageInputModelId);
   const activeAgentImageInputUnsupported = activeAgentImageInputSupported === false;
   const activeImageInputModelLabel = activeImageInputModelId || (lang === "zh" ? "当前模型" : "the current model");
-  const activeImageInputGuidance = !activeImageAttachments.length
-    ? ""
-    : activeAgentImageInputSupported === true
-      ? (lang === "zh"
-        ? `图片将发送给已验证支持图像输入的 ${activeImageInputModelLabel}。`
-        : `The image will be sent to ${activeImageInputModelLabel}, which has verified image-input support.`)
-      : activeAgentImageInputSupported === false
-        ? (lang === "zh"
-          ? `${activeImageInputModelLabel} 明确不支持图像输入，无法发送图片。`
-          : `${activeImageInputModelLabel} explicitly does not support image input, so the image cannot be sent.`)
-        : (lang === "zh"
-          ? `${activeImageInputModelLabel} 的图像输入能力尚未验证；将尝试发送，失败时会保留诊断。`
-          : `${activeImageInputModelLabel}'s image-input capability is not verified yet. Vibelution will try the request and retain diagnostics if it fails.`);
 
   const latestUserMessageId = useMemo(() => deriveLatestUserMessageId(detail?.messages), [detail?.messages]);
   const resolvedEditTarget = useMemo(
@@ -198,6 +186,13 @@ export function useChatComposerBridgeState({
     && !activeTurnSettledByDetail;
   const sessionBusy = isBusyPhase(detail?.currentPhase)
     && !(lastTurnTerminal && !liveActiveTurnOpen && !sessionStopping);
+  const activeImageInputGuidance = buildComposerImageInputGuidance({
+    attachmentCount: activeImageAttachments.length,
+    heldUntilTurnEnds: sessionBusy && !resolvedEditTarget,
+    imageInputSupport: activeAgentImageInputSupported,
+    modelLabel: activeImageInputModelLabel,
+    lang,
+  });
   const composerStopPending = (stopTurnMutation.isPending && stopMutationMatchesActiveSession) || sessionStopping;
   const composerSafeGuidancePending =
     sessionGuidanceMutation.isPending

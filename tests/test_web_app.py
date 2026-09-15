@@ -5110,6 +5110,138 @@ def test_edit_resubmit_session_message_truncates_following_history_and_starts_tu
     session_service._clear_session_live_output("session-live")
 
 
+def test_edit_resubmit_session_message_carries_uploaded_image_attachment(tmp_path, monkeypatch):
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "session-live",
+            "updated_at": "2026-05-18T12:03:00",
+            "conversations": [
+                {
+                    "conversation_id": "session-live",
+                    "title": "真实会话",
+                    "updated_at": "2026-05-18T12:03:00",
+                    "last_turn_status": "ready",
+                }
+            ],
+        },
+    )
+    _append_test_ledger_messages(
+        tmp_path,
+        "session-live",
+        [
+            {"role": "user", "content": "原始需求", "timestamp": "2026-05-18T12:00:00"},
+            {"role": "assistant", "content": "原始回答", "timestamp": "2026-05-18T12:01:00"},
+        ],
+        prefix="edit-attachment",
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    base_config = session_service.get_config().model_copy(deep=True)
+    base_config.llm.profiles["primary"].supports_image_input = True
+    primary_profile = base_config.llm.get_profile(role="primary")
+    primary_model_id, primary_model_entry = base_config.llm.get_model_library_entry_for_profile(primary_profile)
+    provider_id = str((primary_model_entry or {}).get("provider_id") or primary_profile.provider_id)
+    vision_model_id = primary_model_id or "vision-edit-test-model"
+    base_config.llm.model_library[vision_model_id] = {
+        **dict(primary_model_entry or {}),
+        "provider_id": provider_id,
+        "model": str((primary_model_entry or {}).get("model") or "vision-edit-test"),
+        "label": str((primary_model_entry or {}).get("label") or "vision-edit-test"),
+        "supports_image_input": True,
+    }
+    monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    _bind_live_session_agent(
+        tmp_path,
+        llm_bindings={
+            "dialogue": {"modelId": vision_model_id},
+            "vision": {"modelId": vision_model_id},
+        },
+    )
+    seen: dict[str, object] = {}
+
+    class DummyAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None, attachments=None):
+            seen["initial_prompt"] = initial_prompt
+            seen["attachments"] = list(attachments or [])
+            return {
+                "status": "completed",
+                "summary": "我已经看到了编辑后的图片。",
+                "raw_output": "我已经看到了编辑后的图片。",
+                "outcome": "done",
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **_kwargs: DummyAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_EXECUTOR",
+        SimpleNamespace(submit=lambda fn, context: fn(context)),
+    )
+
+    upload_response = client.post(
+        "/api/sessions/session-live/attachments",
+        content=(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+            b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4"
+            b"\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05"
+            b"\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        ),
+        headers={"Content-Type": "image/png", "X-Vibelution-Filename": "sketch.png"},
+    )
+    assert upload_response.status_code == 201
+    attachment = upload_response.json()
+
+    response = client.post(
+        "/api/sessions/session-live/messages/edit-resubmit",
+        json={
+            "messageId": "session-live-message-1",
+            "content": "编辑后并带图",
+            "attachmentIds": [attachment["artifactId"]],
+            "mentalModelEnabled": False,
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    edited_user_message = payload["messages"][-2]
+    assert edited_user_message["content"] == "编辑后并带图"
+    assert edited_user_message["attachments"][0]["artifactId"] == attachment["artifactId"]
+    assert edited_user_message["attachments"][0]["filename"] == "sketch.png"
+    assert seen["initial_prompt"] == "编辑后并带图"
+    seen_attachment = seen["attachments"][0]
+    assert seen_attachment["artifactId"] == attachment["artifactId"]
+    assert seen_attachment["dataUrl"].startswith("data:image/png;base64,")
+
+    stored_user = session_service.get_session_detail("session-live")["messages"][-2]
+    assert stored_user["content"] == "编辑后并带图"
+    assert stored_user["attachments"][0]["artifactId"] == attachment["artifactId"]
+    assert "dataUrl" not in stored_user["attachments"][0]
+
+    session_service._set_session_running("session-live", False)
+    session_service._clear_session_turn_control("session-live")
+    session_service._clear_session_live_output("session-live")
+
+
+def test_edit_resubmit_session_message_requires_content_or_image(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+
+    response = client.post(
+        "/api/sessions/session-live/messages/edit-resubmit",
+        json={"messageId": "session-live-message-1", "content": ""},
+    )
+
+    assert response.status_code == 422
+    assert "图片" in str(response.json().get("detail") or "")
+
+
 def test_edit_resubmit_session_message_allows_latest_user_message(tmp_path, monkeypatch):
     save_chat_state(
         tmp_path,
@@ -11414,3 +11546,219 @@ def test_submit_session_message_restores_prior_mental_snapshot_for_agent(tmp_pat
     assert response.status_code == 202
     assert captured["history"][1]["mental_snapshot"]["mood"] == "沉思"
     assert captured["history"][0]["content"] == "你能感知到你的心智模型吗"
+
+
+def _seed_queued_turn_session(tmp_path, monkeypatch, *, prefix: str):
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "session-live",
+            "updated_at": "2026-05-18T12:03:00",
+            "conversations": [
+                {
+                    "conversation_id": "session-live",
+                    "title": "真实会话",
+                    "updated_at": "2026-05-18T12:03:00",
+                    "last_turn_status": "ready",
+                }
+            ],
+        },
+    )
+    _append_test_ledger_messages(
+        tmp_path,
+        "session-live",
+        [
+            {"role": "user", "content": "原始需求", "timestamp": "2026-05-18T12:00:00"},
+            {"role": "assistant", "content": "原始回答", "timestamp": "2026-05-18T12:01:00"},
+        ],
+        prefix=prefix,
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    base_config = session_service.get_config().model_copy(deep=True)
+    base_config.llm.profiles["primary"].supports_image_input = True
+    primary_profile = base_config.llm.get_profile(role="primary")
+    primary_model_id, primary_model_entry = base_config.llm.get_model_library_entry_for_profile(primary_profile)
+    provider_id = str((primary_model_entry or {}).get("provider_id") or primary_profile.provider_id)
+    vision_model_id = primary_model_id or "vision-queued-turn-model"
+    base_config.llm.model_library[vision_model_id] = {
+        **dict(primary_model_entry or {}),
+        "provider_id": provider_id,
+        "model": str((primary_model_entry or {}).get("model") or "vision-queued-turn"),
+        "label": str((primary_model_entry or {}).get("label") or "vision-queued-turn"),
+        "supports_image_input": True,
+    }
+    monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    _bind_live_session_agent(
+        tmp_path,
+        llm_bindings={
+            "dialogue": {"modelId": vision_model_id},
+            "vision": {"modelId": vision_model_id},
+        },
+    )
+
+
+def _upload_test_png():
+    response = client.post(
+        "/api/sessions/session-live/attachments",
+        content=(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+            b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4"
+            b"\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05"
+            b"\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        ),
+        headers={"Content-Type": "image/png", "X-Vibelution-Filename": "queued.png"},
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
+def test_submit_while_running_queues_turn_and_drains_after_settle(tmp_path, monkeypatch):
+    _seed_queued_turn_session(tmp_path, monkeypatch, prefix="queued-turn")
+    scheduled_contexts: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: scheduled_contexts.append(dict(context)),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_EXECUTOR",
+        SimpleNamespace(submit=lambda fn, session_id: fn(session_id)),
+    )
+
+    first = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "第一轮", "mentalModelEnabled": False},
+    )
+    assert first.status_code == 202
+    active_turn_id = str(session_service._SESSION_ACTIVE_TURN_IDS.get("session-live") or "")
+    assert active_turn_id
+    assert len(scheduled_contexts) == 1
+
+    attachment = _upload_test_png()
+
+    queued = client.post(
+        "/api/sessions/session-live/messages",
+        json={
+            "content": "第二轮带图",
+            "attachmentIds": [attachment["artifactId"]],
+            "queueIfBusy": True,
+            "mentalModelEnabled": False,
+        },
+    )
+
+    assert queued.status_code == 202
+    queued_payload = queued.json()
+    assert queued_payload["status"] == "queued"
+    assert queued_payload["queuedTurnId"]
+    assert queued_payload["queuePosition"] == 1
+    assert len(scheduled_contexts) == 1
+
+    detail = session_service.get_session_detail("session-live")
+    assert [row["content"] for row in detail["queuedTurns"]] == ["第二轮带图"]
+    assert detail["queuedTurns"][0]["status"] == "queued"
+    assert detail["queuedTurns"][0]["attachments"][0]["artifactId"] == attachment["artifactId"]
+    assert "path" not in detail["queuedTurns"][0]["attachments"][0]
+
+    listed = client.get("/api/sessions/session-live/queued-turns")
+    assert listed.status_code == 200
+    assert [row["id"] for row in listed.json()["queuedTurns"]] == [queued_payload["queuedTurnId"]]
+
+    blocked = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "第三轮", "mentalModelEnabled": False},
+    )
+    assert blocked.status_code == 409
+
+    edited = client.patch(
+        f"/api/sessions/session-live/queued-turns/{queued_payload['queuedTurnId']}",
+        json={"content": "第二轮改过"},
+    )
+    assert edited.status_code == 200
+    assert edited.json()["queuedTurns"][0]["content"] == "第二轮改过"
+
+    session_service._set_session_running("session-live", False, turn_id=active_turn_id)
+    session_service._clear_session_turn_control("session-live")
+
+    assert session_service.get_session_detail("session-live")["queuedTurns"] == []
+    assert len(scheduled_contexts) == 2
+    assert scheduled_contexts[1]["user_message"] == "第二轮改过"
+    started_user_messages = [
+        message
+        for message in session_service.get_session_detail("session-live")["messages"]
+        if message.get("role") == "user" and message.get("content") == "第二轮改过"
+    ]
+    assert started_user_messages
+    assert started_user_messages[0]["attachments"][0]["artifactId"] == attachment["artifactId"]
+
+    session_service._set_session_running("session-live", False)
+    session_service._clear_session_turn_control("session-live")
+    session_service._clear_session_live_output("session-live")
+
+
+def test_queued_turn_withdraw_and_drain_failure_stays_visible(tmp_path, monkeypatch):
+    _seed_queued_turn_session(tmp_path, monkeypatch, prefix="queued-turn-failure")
+    scheduled_contexts: list[dict] = []
+    fail_next_schedule = {"value": False}
+
+    def _schedule(context):
+        if fail_next_schedule["value"]:
+            raise RuntimeError("provider unavailable")
+        scheduled_contexts.append(dict(context))
+
+    monkeypatch.setattr(session_service, "_schedule_session_turn", _schedule)
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_EXECUTOR",
+        SimpleNamespace(submit=lambda fn, session_id: fn(session_id)),
+    )
+
+    first = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "第一轮", "mentalModelEnabled": False},
+    )
+    assert first.status_code == 202
+    active_turn_id = str(session_service._SESSION_ACTIVE_TURN_IDS.get("session-live") or "")
+    assert active_turn_id
+
+    queued = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "会失败的排队消息", "queueIfBusy": True, "mentalModelEnabled": False},
+    )
+    assert queued.status_code == 202
+    queued_turn_id = queued.json()["queuedTurnId"]
+
+    withdrawn = client.delete(f"/api/sessions/session-live/queued-turns/{queued_turn_id}")
+    assert withdrawn.status_code == 200
+    assert withdrawn.json()["queuedTurns"] == []
+
+    requeued = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "会失败的排队消息", "queueIfBusy": True, "mentalModelEnabled": False},
+    )
+    assert requeued.status_code == 202
+    requeued_turn_id = requeued.json()["queuedTurnId"]
+
+    fail_next_schedule["value"] = True
+    session_service._set_session_running("session-live", False, turn_id=active_turn_id)
+    session_service._clear_session_turn_control("session-live")
+
+    rows = session_service.get_session_detail("session-live")["queuedTurns"]
+    assert [row["id"] for row in rows] == [requeued_turn_id]
+    assert rows[0]["status"] == "blocked"
+    assert "provider unavailable" in rows[0]["lastError"]
+
+    # Editing a blocked turn is an explicit retry and makes it drainable again.
+    fail_next_schedule["value"] = False
+    retried = client.patch(
+        f"/api/sessions/session-live/queued-turns/{requeued_turn_id}",
+        json={"content": "重试的排队消息"},
+    )
+    assert retried.status_code == 200
+    assert [row["id"] for row in session_service.get_session_detail("session-live")["queuedTurns"]] == []
+
+    session_service._set_session_running("session-live", False)
+    session_service._clear_session_turn_control("session-live")
+    session_service._clear_session_live_output("session-live")

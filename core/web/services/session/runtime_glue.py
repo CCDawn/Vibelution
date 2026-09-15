@@ -2309,15 +2309,20 @@ def _set_session_running(
             if leases is not None:
                 s._SESSION_ACTIVE_TURN_LEASES[session_id] = list(leases)
         else:
-            if not turn_id:
+            if not turn_id or s._SESSION_ACTIVE_TURN_IDS.get(session_id) == turn_id:
                 s._RUNNING_SESSION_IDS.discard(session_id)
                 s._SESSION_ACTIVE_TURN_IDS.pop(session_id, None)
                 s._SESSION_ACTIVE_TURN_LEASES.pop(session_id, None)
-                return
-            if s._SESSION_ACTIVE_TURN_IDS.get(session_id) == turn_id:
-                s._RUNNING_SESSION_IDS.discard(session_id)
-                s._SESSION_ACTIVE_TURN_IDS.pop(session_id, None)
-                s._SESSION_ACTIVE_TURN_LEASES.pop(session_id, None)
+    # Only a turn-scoped settle may release the queue: unconditional cleanup
+    # calls can fire while the owning worker is still alive.
+    if is_running or not turn_id:
+        return
+    with s._RUNNING_SESSIONS_LOCK:
+        still_running = session_id in s._RUNNING_SESSION_IDS
+    if still_running:
+        return
+    # A settled turn releases the next queued user turn (Codex thread/queue parity).
+    s._schedule_session_queued_turn_drain(session_id)
 
 
 def _set_session_waiting_live_output(session_id: str, *, turn_id: str = "") -> None:

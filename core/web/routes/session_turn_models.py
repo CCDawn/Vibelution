@@ -29,6 +29,8 @@ class SessionTurnCommandResponse(BaseModel):
     clientSubmissionId: str = ""
     status: str = ""
     acceptedAt: str = ""
+    queuedTurnId: str = ""
+    queuePosition: int = 0
 
 
 class SessionAttachmentResponse(BaseModel):

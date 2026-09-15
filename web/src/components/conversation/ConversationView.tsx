@@ -331,6 +331,19 @@ const RESPONSE_PARSE_CACHE_LIMIT = 80;
 const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
 const EMPTY_SECTION_EXPANSION: Record<string, boolean> = {};
 
+/** Compact human-readable size for pending composer images (e.g. 820 KB, 2.4 MB). */
+function composerAttachmentSizeLabel(sizeBytes: number): string {
+  const bytes = Number(sizeBytes);
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "";
+  }
+  const megabytes = bytes / (1024 * 1024);
+  if (megabytes >= 1) {
+    return `${megabytes >= 10 ? Math.round(megabytes) : megabytes.toFixed(1)} MB`;
+  }
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
 /** Height-capped thought body; sticks to bottom while streaming. */
 function ThoughtScrollBody({
   text,
@@ -4786,24 +4799,49 @@ export function ConversationView({
               role="list"
               aria-label={lang === "zh" ? "待发送图片" : "Images to send"}
             >
-              {composerAttachments.map((attachment) => (
-                <div key={attachment.id} className={styles.composerAttachmentChip} role="listitem">
-                  <img className={styles.composerAttachmentThumb} src={attachment.previewUrl} alt={attachment.filename} />
-                  <span className={styles.composerAttachmentName} title={attachment.filename}>{attachment.filename}</span>
-                  {onRemoveComposerAttachment ? (
+              {composerAttachments.map((attachment) => {
+                const previewLabel = lang === "zh"
+                  ? `预览图片 ${attachment.filename}`
+                  : `Preview image ${attachment.filename}`;
+                const sizeLabel = composerAttachmentSizeLabel(attachment.sizeBytes);
+                return (
+                  <div key={attachment.id} className={styles.composerAttachmentChip} role="listitem">
                     <VButton
-                      className={styles.composerAttachmentRemoveButton}
-                      isIconOnly
+                      className={styles.composerAttachmentPreview}
+                      variant="ghost"
                       type="button"
-                      onClick={() => onRemoveComposerAttachment(attachment.id)}
-                      title={lang === "zh" ? "移除图片" : "Remove image"}
-                      aria-label={lang === "zh" ? "移除图片" : "Remove image"}
+                      onClick={() => openImagePreview({
+                        src: attachment.previewUrl,
+                        alt: attachment.filename,
+                        downloadUrl: attachment.previewUrl,
+                        downloadName: attachment.filename,
+                      })}
+                      title={previewLabel}
+                      aria-label={previewLabel}
                     >
-                      <X size={13} aria-hidden="true" />
+                      <img className={styles.composerAttachmentThumb} src={attachment.previewUrl} alt="" />
                     </VButton>
-                  ) : null}
-                </div>
-              ))}
+                    <span className={styles.composerAttachmentCopy}>
+                      <span className={styles.composerAttachmentName} title={attachment.filename}>{attachment.filename}</span>
+                      {sizeLabel ? (
+                        <span className={styles.composerAttachmentMeta}>{sizeLabel}</span>
+                      ) : null}
+                    </span>
+                    {onRemoveComposerAttachment ? (
+                      <VButton
+                        className={styles.composerAttachmentRemoveButton}
+                        isIconOnly
+                        type="button"
+                        onClick={() => onRemoveComposerAttachment(attachment.id)}
+                        title={lang === "zh" ? "移除图片" : "Remove image"}
+                        aria-label={lang === "zh" ? "移除图片" : "Remove image"}
+                      >
+                        <X size={13} aria-hidden="true" />
+                      </VButton>
+                    ) : null}
+                  </div>
+                );
+              })}
             </div>
           ) : null}
           {composerReferences.length ? (
