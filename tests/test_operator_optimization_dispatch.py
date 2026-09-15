@@ -6,7 +6,8 @@ import pytest
 pytest_plugins = ("tests.test_operator_optimization_budget",)
 
 from core.research.operator_optimization.cuda_worker import CudaTrialRequest
-from core.research.operator_optimization.measurement import OperatorMeasurement
+from core.research.operator_optimization.measurement import OperatorMeasurement, MeasurementProtocolRef
+from core.research.operator_optimization.contracts import BaselineVersion
 from core.research.workflow.contracts._canonical import sha256_hex
 from core.web.services.team_workflow.operator_optimization import dispatch, executor
 from core.web.services.team_workflow.operator_optimization.store import (
@@ -224,17 +225,36 @@ def test_baseline_bridge_verifies_frozen_inputs_and_preserves_failed_receipt(act
     candidate_ref = candidate_ref_from_artifact(candidate_envelope, artifact_id=candidate.candidateId, run_id="run1")
     update_campaign(*activity, expected_version=None, command_key="baseline-candidate-fixture",
         command={"fixture": True}, transform=lambda c: c.model_copy(update={"baselineCandidateRef": candidate_ref}))
+    protocol_artifact_hash = put("operator_measurement_protocol", protocol)
+    environment_ref = put("operator_environment", {"deviceName": "Fixture"})
+    version_id = "baseline-version-fixture"
+    current = read_campaign(*activity)
+    update_campaign(*activity, expected_version=current.revision, command_key="baseline-version-fixture",
+        command={"fixture": True}, transform=lambda c: c.model_copy(update={"baselineVersions": (
+            BaselineVersion(baselineVersionId=version_id, ordinal=1, setupId=c.baselineSetupId,
+                runId="run1", environmentRef=environment_ref,
+                protocolRef=MeasurementProtocolRef(artifactId="protocol-fixture", runId="run1",
+                    sha256=protocol_artifact_hash), baselineCandidateRef=candidate_ref),)}))
     snapshot = {"teamId": activity[0], "projectId": activity[1],
-        "researchObjectiveContract": {"optimizationCampaignId": activity[2], "baselineCandidateRef": candidate_ref.model_dump(mode="json")},
-        "evaluationContract": {"protocolArtifactHash": put("operator_measurement_protocol", protocol), "protocolHash": sha256_hex(protocol)},
-        "environmentSnapshotRef": put("operator_environment", {"deviceName": "Fixture"})}
+        "researchObjectiveContract": {"optimizationCampaignId": activity[2], "baselineVersionId": version_id,
+            "baselineCandidateRef": candidate_ref.model_dump(mode="json")},
+        "evaluationContract": {"protocolArtifactHash": protocol_artifact_hash, "protocolHash": sha256_hex(protocol)},
+        "environmentSnapshotRef": environment_ref}
     for _ in range(2):
         if successful:
             ref = dispatch.dispatch_baseline(SimpleNamespace(run_id="run1"), snapshot)
-            assert read_campaign(*activity).baselineRef == ref
+            activated = read_campaign(*activity)
+            assert activated.baselineRef == ref
+            assert activated.activeBaselineVersionId == version_id
+            assert activated.baselineVersions[0].status == "active"
+            assert activated.baselineVersions[0].baselineRef == ref
+            assert activated.bestCandidateRef == candidate_ref
         else:
             with pytest.raises(RuntimeError, match="Baseline measurement did not succeed"):
                 dispatch.dispatch_baseline(SimpleNamespace(run_id="run1"), snapshot)
+            unchanged = read_campaign(*activity)
+            assert unchanged.activeBaselineVersionId == ""
+            assert unchanged.baselineVersions[0].status == "failed"
     assert len(calls) == 1
     assert read_campaign(*activity).gpuReservations[0].consumedSeconds == 3
     with monkeypatch.context() as patch:

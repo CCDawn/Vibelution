@@ -48,6 +48,7 @@ OPERATOR_ARTIFACT_KINDS = frozenset({
     "optimization_discussion",
     "optimization_knowledge_request",
     STAGE2_SEED_ARTIFACT_KIND,
+    "operator_stage2_migration_receipt",
     OPTIMIZATION_DECISION_ARTIFACT_KIND,
     *(row[4] for row in OPERATOR_NODES),
 })

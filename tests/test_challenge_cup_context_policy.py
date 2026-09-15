@@ -588,7 +588,7 @@ def _unresolved_pair_messages() -> list:
     ]
 
 
-def test_unresolved_tool_call_pairs_are_preserved_pairwise():
+def test_unresolved_tool_call_is_normalized_before_the_retention_gate():
     messages = _unresolved_pair_messages()
     (compressed, should_break, _applied, _count, _last_iter), events, _ui = _run_compress(
         messages=messages,
@@ -600,15 +600,31 @@ def test_unresolved_tool_call_pairs_are_preserved_pairwise():
     before = turn_compression._tool_call_pairing_snapshot(messages)
     after = turn_compression._tool_call_pairing_snapshot(compressed)
     assert before["unresolvedCallIds"] == ["call-open"]
-    # The still-unresolved call survives verbatim; no new broken chain appears.
-    assert after["unresolvedCallIds"] == before["unresolvedCallIds"]
+    # Codex parity: the unresolved call is repaired with a synthesized aborted
+    # result instead of being sent as an unresolved call or blocking the turn.
+    assert after["unresolvedCallIds"] == []
     assert after["orphanResultCount"] == 0
+    repaired = [
+        message
+        for message in compressed
+        if getattr(message, "tool_call_id", None) == "call-open"
+    ]
+    assert repaired
+    assert str(repaired[-1].content) == turn_compression.ABORTED_TOOL_RESULT_CONTENT
     assert not any(
         event["action"] == "agent.context_budget_exhausted" for event in events
     )
+    normalized = [
+        event
+        for event in events
+        if event["action"] == "agent.context_compression.tool_chain_normalized"
+    ]
+    assert normalized, "pairing repair must stay auditable in the runtime scene"
+    assert normalized[0]["fields"].get("synthesizedAbortedResults") == 1
+    assert normalized[0]["fields"].get("droppedOrphanResults") == 0
 
 
-def test_compression_fails_closed_when_chain_breaks():
+def test_broken_chain_from_compressor_is_normalized_instead_of_failing_closed():
     messages = _unresolved_pair_messages()
     (compressed, should_break, _applied, _count, _last_iter), events, _ui = _run_compress(
         messages=messages,
@@ -616,16 +632,22 @@ def test_compression_fails_closed_when_chain_breaks():
         context_input_hard_limit=HARD_LIMIT,
         post_compression_target_tokens=POST_TARGET,
     )
-    assert should_break is True
-    exhausted = [
+    # Codex parity: normalize before the gate, so a compressor that retires one
+    # side of a pair no longer blocks the turn; the repair is recorded.
+    assert should_break is False
+    after = turn_compression._tool_call_pairing_snapshot(compressed)
+    assert after["unresolvedCallIds"] == []
+    assert after["orphanResultCount"] == 0
+    assert not any(
+        event["action"] == "agent.context_budget_exhausted" for event in events
+    )
+    normalized = [
         event
         for event in events
-        if event["action"] == "agent.context_budget_exhausted"
+        if event["action"] == "agent.context_compression.tool_chain_normalized"
     ]
-    assert exhausted, "broken retention chain must fail closed"
-    assert exhausted[0]["fields"].get("guardReason") == "retention_missing"
-    # Fail-closed returns the original messages; the model must not see them.
-    assert compressed == messages
+    assert normalized, "pairing repair must stay auditable in the runtime scene"
+    assert normalized[0]["fields"].get("synthesizedAbortedResults") == 1
 
 
 def test_compression_fails_closed_when_still_over_hard_limit():

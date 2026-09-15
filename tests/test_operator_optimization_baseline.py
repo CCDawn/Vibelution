@@ -62,6 +62,10 @@ def test_baseline_setup_creates_scoped_ledger_with_verified_artifacts_once(tmp_p
         assert prepared.baselineCandidateRef is not None
         assert prepared.baselineCandidateRef.kind == "operator_candidate"
         assert prepared.baselineCandidateRef.candidate.implementation == "torch_softmax"
+        assert len(prepared.baselineVersions) == 1
+        assert prepared.baselineVersions[0].runId == prepared.baselineRunId
+        assert prepared.baselineVersions[0].status == "prepared"
+        assert prepared.activeBaselineVersionId == ""
         assert not json.loads(run.input_snapshot_json)["catalogScope"]
         state = RealDomainReadinessContext(ledger).operator_campaign_state(team, prepared.baselineRunId)
         assert state["environmentVerified"] and state["protocolFrozen"]

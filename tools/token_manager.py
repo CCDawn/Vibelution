@@ -412,6 +412,71 @@ def _message_tool_calls(message: Any) -> list[dict[str, Any]]:
     return [item for item in list(raw or []) if isinstance(item, dict)]
 
 
+def _message_tool_call_id(message: Any) -> str:
+    if isinstance(message, dict):
+        value = message.get("tool_call_id") or message.get("toolCallId")
+    else:
+        value = getattr(message, "tool_call_id", None)
+    return str(value or "").strip()
+
+
+_ERROR_KEYWORDS = (
+    "error",
+    "exception",
+    "traceback",
+    "failed",
+    "错误",
+    "异常",
+    "失败",
+    "超时",
+    "权限",
+)
+
+
+def _message_contains_error_marker(message: Any) -> bool:
+    content = _message_content_text(message)
+    if not isinstance(content, str):
+        return False
+    lowered = content.lower()
+    return any(keyword in lowered for keyword in _ERROR_KEYWORDS)
+
+
+def _pair_preserving_groups(messages: list) -> list[list]:
+    """Group an assistant tool call with its immediately following tool results.
+
+    Error-preserving cuts must move whole groups so a preserved tool result
+    always travels with the assistant tool call that produced it; keeping one
+    side of a pair would leave an orphan tool result or an unresolved call in
+    the provider payload (codex keeps call/result as one unit).
+    """
+    groups: list[list] = []
+    index = 0
+    while index < len(messages):
+        message = messages[index]
+        call_ids = [
+            str(item.get("id") or "").strip()
+            for item in _message_tool_calls(message)
+            if str(item.get("id") or "").strip()
+        ]
+        if call_ids:
+            group = [message]
+            index += 1
+            remaining = set(call_ids)
+            while index < len(messages):
+                candidate = messages[index]
+                result_id = _message_tool_call_id(candidate)
+                if not result_id or result_id not in remaining:
+                    break
+                group.append(candidate)
+                remaining.discard(result_id)
+                index += 1
+            groups.append(group)
+        else:
+            groups.append([message])
+            index += 1
+    return groups
+
+
 def _is_provider_user_message(message: Any) -> bool:
     return _message_role(message) == "user"
 
@@ -847,17 +912,18 @@ class EnhancedTokenCompressor:
             kept_msgs = list(other_msgs[cutoff_idx:])
             old_msgs = list(other_msgs[:cutoff_idx])
 
-        # 错误消息强制保留
+        # 错误消息强制保留：按「tool call + 其 tool 结果」整组保留，避免只把错误
+        # tool 结果插回保留区、配对的 tool_call 已进摘要，形成孤儿结果或未决调用。
         if preserve_errors:
-            ERROR_KEYWORDS = ['error', 'exception', 'traceback', 'failed',
-                            '错误', '异常', '失败', '超时', '权限']
-            still_old = []
-            for msg in old_msgs:
-                content = _message_content_text(msg)
-                if isinstance(content, str) and any(kw in content.lower() for kw in ERROR_KEYWORDS):
-                    kept_msgs.insert(0, msg)
+            preserved: list = []
+            still_old: list = []
+            for group in _pair_preserving_groups(old_msgs):
+                if any(_message_contains_error_marker(msg) for msg in group):
+                    preserved.extend(group)
                 else:
-                    still_old.append(msg)
+                    still_old.extend(group)
+            if preserved:
+                kept_msgs = preserved + kept_msgs
             old_msgs = still_old
 
         summary = ""

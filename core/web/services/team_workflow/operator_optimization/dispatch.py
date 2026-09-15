@@ -71,7 +71,16 @@ def dispatch_baseline(action, snapshot: dict) -> ArtifactRef:
     team_id, project_id = snapshot["teamId"], snapshot["projectId"]
     campaign_id = snapshot["researchObjectiveContract"]["optimizationCampaignId"]
     campaign = read_campaign(team_id, project_id, campaign_id)
-    if campaign.baselineRunId != action.run_id:
+    baseline_version_id = snapshot["researchObjectiveContract"].get("baselineVersionId", "")
+    version = next(
+        (
+            item
+            for item in campaign.baselineVersions
+            if item.baselineVersionId == baseline_version_id and item.runId == action.run_id
+        ),
+        None,
+    )
+    if version is None or version.status not in {"prepared", "active", "failed"}:
         raise CampaignConflict("Baseline run does not belong to this campaign")
     def frozen(kind, digest):
         if not digest:
@@ -86,7 +95,7 @@ def dispatch_baseline(action, snapshot: dict) -> ArtifactRef:
     if sha256_hex(protocol) != snapshot["evaluationContract"]["protocolHash"]:
         raise CampaignConflict("Frozen protocol payload hash differs")
     candidate_ref = CudaCandidateRef.model_validate(snapshot["researchObjectiveContract"]["baselineCandidateRef"])
-    if candidate_ref != campaign.baselineCandidateRef or candidate_ref.runId != action.run_id:
+    if candidate_ref != version.baselineCandidateRef or candidate_ref.runId != action.run_id:
         raise CampaignConflict("Frozen baseline candidate identity differs")
     candidate_envelope = load_scoped_artifact_payload("operator_candidate", team_id=team_id,
         workflow_run_id=action.run_id, authority_run_id=action.run_id,
@@ -105,6 +114,24 @@ def dispatch_baseline(action, snapshot: dict) -> ArtifactRef:
     envelope = load_scoped_artifact_payload(ref.kind, team_id=team_id, workflow_run_id=action.run_id,
         authority_run_id=action.run_id, record_id=ref.artifactId, content_hash=ref.sha256)
     if envelope is None or envelope["payload"]["status"] != "succeeded":
+        def fail(c):
+            versions = tuple(
+                item.model_copy(update={"status": "failed"})
+                if item.baselineVersionId == baseline_version_id
+                else item
+                for item in c.baselineVersions
+            )
+            return c.model_copy(update={"baselineVersions": versions})
+
+        update_campaign(
+            team_id,
+            project_id,
+            campaign_id,
+            expected_version=None,
+            command_key="baseline-failed:" + action.run_id,
+            command={"action": "baseline_failed", "measurementRef": ref.model_dump(mode="json")},
+            transform=fail,
+        )
         raise RuntimeError("Baseline measurement did not succeed; terminal receipt and incurred cost are preserved")
     measurement = OperatorMeasurement.model_validate(envelope["payload"])
     if ({row.caseId for row in measurement.cases} != {case.caseId for case in request.protocol.cases}
@@ -112,9 +139,28 @@ def dispatch_baseline(action, snapshot: dict) -> ArtifactRef:
             or len(row.timings) != request.protocol.pairs for row in measurement.cases)):
         raise RuntimeError("Baseline measurement lacks complete correctness and paired timing evidence")
     def bind(c):
-        if c.baselineRunId != action.run_id or (c.baselineRef is not None and c.baselineRef != ref):
-            raise CampaignConflict("Immutable baseline identity differs")
-        return c.model_copy(update={"baselineRef": ref})
+        current = next(
+            (item for item in c.baselineVersions if item.baselineVersionId == baseline_version_id),
+            None,
+        )
+        if current is None or current.runId != action.run_id or current.status not in {"prepared", "active"}:
+            raise CampaignConflict("Prepared baseline identity differs")
+        versions = tuple(
+            item.model_copy(update={"baselineRef": ref, "status": "active"})
+            if item.baselineVersionId == baseline_version_id
+            else item.model_copy(update={"status": "superseded"})
+            if item.status == "active"
+            else item
+            for item in c.baselineVersions
+        )
+        return c.model_copy(update={
+            "baselineRunId": action.run_id,
+            "baselineRef": ref,
+            "baselineCandidateRef": current.baselineCandidateRef,
+            "bestCandidateRef": current.baselineCandidateRef,
+            "activeBaselineVersionId": baseline_version_id,
+            "baselineVersions": versions,
+        })
     update_campaign(team_id, project_id, campaign_id, expected_version=None,
         command_key="baseline-measured:" + action.run_id,
         command={"action": "baseline_measured", "measurementRef": ref.model_dump(mode="json")}, transform=bind)

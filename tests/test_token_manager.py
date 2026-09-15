@@ -595,6 +595,39 @@ class TestEnhancedTokenCompressor:
         assert any("目标 H9" in c for c in contents)
         assert any("A9" in c for c in contents[-4:])
 
+    def test_preserve_errors_moves_tool_call_pairs_whole(self):
+        """错误保留按 call+result 整组搬移，压缩结果不产生孤儿 tool 结果。"""
+        from langchain_core.messages import AIMessage, ToolMessage
+        from core.orchestration.turn_compression import _tool_call_pairing_snapshot
+
+        messages = [
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "run_tests", "args": {}, "id": "call-err"}],
+            ),
+            ToolMessage(content="pytest failed: 3 errors", tool_call_id="call-err"),
+        ]
+        messages.extend(
+            AIMessage(content=f"step {i} " + ("x" * 400)) for i in range(6)
+        )
+
+        compressor = EnhancedTokenCompressor(token_budget=1000, max_history_pairs=1)
+        compressed, _ = compressor.compress(
+            messages,
+            keep_count=0,
+            preserve_errors=True,
+            use_llm_summary=False,
+        )
+
+        snapshot = _tool_call_pairing_snapshot(compressed)
+        assert snapshot["orphanResultCount"] == 0
+        call_index = next(
+            index
+            for index, message in enumerate(compressed)
+            if getattr(message, "tool_calls", None)
+        )
+        assert getattr(compressed[call_index + 1], "tool_call_id", None) == "call-err"
+
     def test_compression_does_not_create_human_message_for_external_request(self):
         """压缩真实运行时消息时不生成 HumanMessage。"""
         from langchain_core.messages import AIMessage, HumanMessage, SystemMessage

@@ -149,9 +149,74 @@ def test_openai_compatible_adapter_normalizes_models_and_reconciles_pins(monkeyp
     provider = _config("openai_compatible")["llm"]["providers"]["lab"]
     assert state["providers"]["lab"]["providerFingerprint"] == provider_discovery_fingerprint(provider)
     assert state["providers"]["lab"]["models"]["pinned-gone"]["availability"] == "missing_remote"
-    assert state["providers"]["lab"]["models"]["gpt-a"]["capabilities"]["vision"]["source"] == (
-        "provider_endpoint"
+    image_input = state["providers"]["lab"]["models"]["gpt-a"]["capabilities"]["image_input"]
+    assert image_input["value"] == "supported"
+    assert image_input["source"] == "provider_endpoint"
+
+
+@pytest.mark.parametrize(
+    ("raw_model", "expected"),
+    [
+        ({"id": "openrouter-list", "architecture": {"input_modalities": ["text", "image"]}}, "supported"),
+        ({"id": "text-only-list", "architecture": {"input_modalities": ["text"]}}, "unsupported"),
+        ({"id": "modality-string", "architecture": {"modality": "text+image->text"}}, "supported"),
+        ({"id": "output-only-modality", "architecture": {"modality": "text->image"}}, "unknown"),
+        ({"id": "flat-bool", "supports_image_input": True}, "supported"),
+        ({"id": "nested-flag", "model_info": {"supports_vision": False}}, "unsupported"),
+        ({"id": "underscore-flag", "input_modalities": ["text", "image"]}, "supported"),
+        ({"id": "no-declaration"}, "unknown"),
+    ],
+)
+def test_provider_image_input_modality_dialects_are_normalized(
+    monkeypatch,
+    tmp_path,
+    raw_model: dict,
+    expected: str,
+) -> None:
+    monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_LAB_API_KEY", "secret")
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(200, json={"data": [raw_model]}),
     )
+    path = tmp_path / "model-catalog-state.json"
+
+    discover_provider_models(
+        _config("openai_compatible"),
+        "lab",
+        catalog_path=path,
+        transport=transport,
+    )
+
+    models = load_model_catalog_state(path)["providers"]["lab"]["models"]
+    record = next(
+        model["capabilities"].get("image_input", {})
+        for model in models.values()
+        if model.get("upstreamId") == raw_model["id"]
+    )
+    assert record.get("value", "unknown") == expected
+    if expected != "unknown":
+        assert record["source"] == "provider_endpoint"
+
+
+def test_provider_legacy_vision_alias_is_folded_into_image_input(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_LAB_API_KEY", "secret")
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={"data": [{"id": "legacy-vision", "capabilities": {"vision": True}}]},
+        ),
+    )
+    path = tmp_path / "model-catalog-state.json"
+
+    discover_provider_models(
+        _config("openai_compatible"),
+        "lab",
+        catalog_path=path,
+        transport=transport,
+    )
+
+    capabilities = load_model_catalog_state(path)["providers"]["lab"]["models"]["legacy-vision"]["capabilities"]
+    assert "vision" not in capabilities
+    assert capabilities["image_input"]["value"] == "supported"
 
 
 def test_openai_compatible_adapter_uses_llamacpp_runtime_context_from_details(monkeypatch, tmp_path) -> None:
