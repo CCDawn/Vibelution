@@ -16,11 +16,10 @@ from .budget import budget_summary
 from .discussion import _write_readback, discussion_input
 from .knowledge import (
     attach_round_ref,
-    build_knowledge_request,
     load_knowledge_snapshot,
+    planning_knowledge_evidence,
     read_ref,
     round_context,
-    verified_packages,
 )
 from .store import CampaignConflict
 
@@ -42,15 +41,9 @@ def planning_input(team_id: str, run_id: str) -> dict:
         "hypothesis": hypothesis.model_dump(mode="json"),
         "knowledge": knowledge.model_dump(mode="json"),
         "observations": discussion_input(team_id, run_id)["evidence"],
-        "knowledgeEvidence": [
-            p
-            for p in verified_packages(
-                team_id, run_id, build_knowledge_request(team_id, run_id)
-            )
-            if p["invocationId"] in {ref.invocationId for ref in knowledge.packages}
-        ]
-        if knowledge.packages
-        else [],
+        "knowledgeEvidence": planning_knowledge_evidence(
+            team_id, run_id, record, knowledge
+        ),
         "protocolRef": record.protocolRef.model_dump(mode="json"),
         "protocol": protocol.model_dump(mode="json"),
         "baselineCandidateRef": record.baselineCandidateRef.model_dump(mode="json"),
@@ -85,6 +78,13 @@ def validate_plan_decisions(inputs: dict, decisions: OptimizationPlanContent) ->
 
 
 def validate_plan_candidates(team_id, run_id, campaign, record, refs) -> None:
+    seed_candidates = ()
+    if record.stage2SeedRef is not None:
+        from .rounds import read_stage2_seed
+
+        seed_candidates = read_stage2_seed(
+            team_id, record.stage2SeedRef
+        ).attemptedCandidateRefs
     for ref in refs:
         envelope = load_scoped_artifact_payload(
             "operator_candidate",
@@ -99,7 +99,11 @@ def validate_plan_candidates(team_id, run_id, campaign, record, refs) -> None:
         payload = envelope["payload"]
         if payload["optimizationCampaignId"] != campaign.optimizationCampaignId:
             raise CampaignConflict("Plan candidate belongs to another campaign")
-        if ref not in (record.baselineCandidateRef, record.parentCandidateRef) and (
+        if ref not in (
+            record.baselineCandidateRef,
+            record.parentCandidateRef,
+            *seed_candidates,
+        ) and (
             ref.runId != run_id or payload.get("roundId") != record.roundId
         ):
             raise CampaignConflict("New plan candidate belongs to another round")

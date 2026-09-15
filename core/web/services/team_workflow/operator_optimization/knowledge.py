@@ -6,6 +6,7 @@ import json
 
 from core.research.operator_optimization.contracts import (
     ArtifactRef,
+    OperatorRunContext,
     OptimizationHypothesis,
 )
 from core.research.operator_optimization.knowledge import (
@@ -51,13 +52,20 @@ def round_context(team_id: str, run_id: str):
     hypothesis = OptimizationHypothesis.model_validate(
         read_ref(team_id, run_id, record.hypothesisRef)
     )
+    source_round_id = record.roundId
+    if record.stage2SeedRef is not None and record.hypothesisRef is not None:
+        from .rounds import read_stage2_seed
+
+        seed = read_stage2_seed(team_id, record.stage2SeedRef)
+        if record.hypothesisRef == seed.hypothesisRef:
+            source_round_id = seed.hypothesisRoundId
     if (
         hypothesis.optimizationCampaignId,
         hypothesis.roundId,
         hypothesis.parentCandidateRef,
     ) != (
         campaign.optimizationCampaignId,
-        record.roundId,
+        source_round_id,
         record.parentCandidateRef,
     ) or any(
         ref.model_dump(mode="json") not in context["observationRefs"]
@@ -77,8 +85,80 @@ def read_ref(team_id: str, run_id: str, ref: ArtifactRef) -> dict:
         content_hash=ref.sha256,
     )
     if envelope is None:
+        run = get_write_store().get_run(run_id)
+        try:
+            context = OperatorRunContext.model_validate(
+                json.loads(run.input_snapshot_json)["researchObjectiveContract"]
+            )
+        except (AttributeError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            context = None
+        if context is not None and context.stage2SeedRef is not None:
+            from .rounds import read_stage2_seed
+
+            seed = read_stage2_seed(team_id, context.stage2SeedRef)
+            direct_refs = {
+                candidate: owner
+                for candidate, owner in (
+                    (seed.hypothesisRef, seed.hypothesisRunId),
+                    (seed.knowledgeRef, seed.knowledgeRunId),
+                    (seed.planRef, seed.planRunId),
+                    (seed.evaluationRef, seed.sourceRunId),
+                    (seed.feedbackRef, seed.sourceRunId),
+                )
+                if candidate is not None and owner
+            }
+            owner = direct_refs.get(ref)
+            if owner:
+                envelope = load_scoped_artifact_payload(
+                    ref.kind,
+                    team_id=team_id,
+                    workflow_run_id=owner,
+                    authority_run_id=owner,
+                    record_id=ref.artifactId,
+                    content_hash=ref.sha256,
+                )
+    if envelope is None:
         raise CampaignConflict("Operator handoff source cannot be read back")
     return envelope["payload"]
+
+
+def _seed_for_record(team_id: str, record):
+    if record.stage2SeedRef is None:
+        return None
+    from .rounds import read_stage2_seed
+
+    return read_stage2_seed(team_id, record.stage2SeedRef)
+
+
+def _read_seed_nested_ref(team_id: str, seed, ref: ArtifactRef) -> dict:
+    envelope = load_scoped_artifact_payload(
+        ref.kind,
+        team_id=team_id,
+        workflow_run_id=seed.knowledgeRunId,
+        authority_run_id=seed.knowledgeRunId,
+        record_id=ref.artifactId,
+        content_hash=ref.sha256,
+    )
+    if envelope is None:
+        raise CampaignConflict("Stage 2 nested knowledge source cannot be read back")
+    return envelope["payload"]
+
+
+def _verified_seed_packages(team_id: str, seed, snapshot: OperatorKnowledgeSnapshot):
+    available = load_accepted_knowledge_packages_from_invocations(
+        get_write_store(), team_id=team_id, parent_run_id=seed.knowledgeRunId
+    )
+    by_identity = {
+        (p["invocationId"], p["knowledgePackageRef"], p["packageContentHash"]): p
+        for p in available
+        if child_costs_settled(get_write_store(), p.get("producerRunId", ""))
+    }
+    wanted = [
+        (p.invocationId, p.canonicalRef, p.sha256) for p in snapshot.packages
+    ]
+    if any(identity not in by_identity for identity in wanted):
+        raise CampaignConflict("Stage 2 accepted knowledge is no longer verifiable")
+    return [by_identity[identity] for identity in wanted]
 
 
 def build_knowledge_request(team_id: str, run_id: str) -> OperatorKnowledgeRequest:
@@ -399,6 +479,33 @@ def load_knowledge_snapshot(team_id: str, run_id: str) -> OperatorKnowledgeSnaps
     snapshot = OperatorKnowledgeSnapshot.model_validate(
         read_ref(team_id, run_id, record.knowledgeRef)
     )
+    seed = _seed_for_record(team_id, record)
+    if seed is not None and record.knowledgeRef == seed.knowledgeRef:
+        if (
+            snapshot.runId,
+            snapshot.optimizationCampaignId,
+            snapshot.hypothesisRef,
+        ) != (
+            seed.knowledgeRunId,
+            campaign.optimizationCampaignId,
+            seed.hypothesisRef,
+        ):
+            raise CampaignConflict("Stage 2 knowledge differs from its frozen seed")
+        request = OperatorKnowledgeRequest.model_validate(
+            _read_seed_nested_ref(team_id, seed, snapshot.requestRef)
+        )
+        if (
+            request.runId,
+            request.optimizationCampaignId,
+            request.hypothesisRef,
+        ) != (
+            seed.knowledgeRunId,
+            campaign.optimizationCampaignId,
+            seed.hypothesisRef,
+        ):
+            raise CampaignConflict("Stage 2 knowledge request differs from its seed")
+        _verified_seed_packages(team_id, seed, snapshot)
+        return snapshot
     expected = build_knowledge_request(team_id, run_id)
     if snapshot.requestRef.kind != "optimization_knowledge_request" or (
         OperatorKnowledgeRequest.model_validate(
@@ -436,3 +543,18 @@ def load_knowledge_snapshot(team_id: str, run_id: str) -> OperatorKnowledgeSnaps
                 "Accepted knowledge source is no longer readable or accepted"
             )
     return snapshot
+
+
+def planning_knowledge_evidence(team_id: str, run_id: str, record, snapshot):
+    seed = _seed_for_record(team_id, record)
+    if seed is not None and record.knowledgeRef == seed.knowledgeRef:
+        return _verified_seed_packages(team_id, seed, snapshot)
+    if not snapshot.packages:
+        return []
+    return [
+        package
+        for package in verified_packages(
+            team_id, run_id, build_knowledge_request(team_id, run_id)
+        )
+        if package["invocationId"] in {ref.invocationId for ref in snapshot.packages}
+    ]

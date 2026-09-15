@@ -2,7 +2,7 @@
 
 > 日期：2026-09-14
 >
-> Status：产品方向与 LangGraph 动态决策改造路线已获用户确认；2026-09-14 已接通轮间单一决策边界、真实决策 Agent Session、独立预算与回执，并将算子图终点移到决策节点。2026-09-15 已完成第二阶段的真实资料与 GPU 闭环；第三阶段现进入独立实验迭代数据流的详细设计，轮内多动作动态路由仍待实现。
+> Status：产品方向与 LangGraph 动态决策改造路线已获用户确认；2026-09-14 已接通轮间单一决策边界、真实决策 Agent Session、独立预算与回执，并将算子图终点移到决策节点。2026-09-15 已完成第二阶段的真实资料与 GPU 闭环；第三阶段已实现首个服务端闭环切片：显式 Seed、v2 多动作决定和 discuss / collect_knowledge / plan_candidate / retest / stop 路由已接通，repair_baseline 在基础版本修订流实现前明确拒绝。
 >
 > 评估修订：2026-09-14 已纳入可行性审查的五项实施缺口、改造要求与效果验证方法；用户已要求继续按评估建议完善方案。
 >
@@ -266,8 +266,8 @@ Windows 环境优先延续已有本机 PyTorch/CUDA 路径，不因旧方案默�
 ### 9.1 已落地的首个切片（2026-09-14）
 
 - `operator_round_completed` 事件只生成一个与反馈、评价引用绑定的持久化决策请求，不再直接创建下一轮。
-- 决策使用 `OperatorIterationDecision` 结构化契约；同一请求只能接受一个不可改写的 `continue` 或 `stop` 结果。
-- `stop` 不创建轮次或启动节点；`continue` 才复用现有 `prepare_round` 和 `START_NODE`。创建或启动后的恢复复用同一决定、轮次键和命令键。
+- `operator-optimization@1.1.0` 的历史决策使用二值 `continue / stop` 契约；同一请求只能接受一个不可改写的结果。
+- 旧版 `stop` 不创建轮次，`continue` 固定复用 `prepare_round` 并启动讨论。该语义只用于解释历史记录，不进入第三阶段 v2 动作路由。
 - 首个切片先建立服务层决策接纳边界，解决旧自动续轮与新主控并存的问题；后续 §9.2 已在该边界上接入真实决策任务。轮内“讨论、检索、规划、实验、回退”多动作条件路由仍未完成，因此不能据此宣称动态科研流程整体完成。
 - 第二个底层切片增加独立 `decision` 模型调用预算，以及绑定完整反馈、评价正文和引用的 `optimization_iteration_decision` 结构化产物。决策模型输出不能自行指定活动、轮次、证据引用、决策者或产物 ID；这些身份由服务端按冻结输入生成。
 
@@ -423,3 +423,20 @@ flowchart LR
 - Sakana AI Scientist 的 perform_experiments.py 以既有 baseline、有限 run 次数、顺序执行和结果反馈收束实验。只借鉴“基线不重复跑、每轮有上限、以结果决定下一步”，不采用其模型直接写代码并执行 shell 的模式。
 
 本项目采用“受限候选 + 不可变实验产物 + 服务端接纳的决策路由”。这能减少固定会议链中的无效动作，同时保留可复现、可审计的实验边界。
+
+### 10.7 第一批实现状态（2026-09-15）
+
+`operator-optimization@1.2.0` 与 `operator_iteration_decision_proposal_v2` 已建立。服务端为下一轮写入 `operator_stage2_seed`，Seed 绑定来源 Run、基础版本、协议、假设、资料、计划、评价、反馈和已尝试候选；新 Run 的 `experimentStage=experiment_iteration` 只保存 Seed 引用。
+
+当前动作行为如下：
+
+| 动作 | 当前行为 |
+| --- | --- |
+| discuss | 创建新轮次并只启动 `optimization_discussion` |
+| collect_knowledge | 复用 Seed 中按 hash 回读的原假设，只启动 `optimization_knowledge` |
+| plan_candidate | 复用原假设与已验收资料正文，只启动 `optimization_plan`；拒绝再次规划 Seed 中已尝试的候选配置 |
+| retest | 将 Seed 中的冻结计划绑定为新轮次复测计划，只启动 `operator_execution`；不重新调用规划 Agent |
+| stop | 保存原因，不创建轮次 |
+| repair_baseline | 当前明确返回 `baseline_repair_flow_not_connected`，不创建轮次；待新基础版本及排行隔离完成后开放 |
+
+预算检查已按实际动作收窄：decision task 在调用前独立预留并结算自己的预算；终点事件不重复预留 decision，讨论、资料和规划分别检查自己的后继预算，retest 不再被无关模型预算阻塞。恢复仍复用同一 decision、round key 和 start command key。

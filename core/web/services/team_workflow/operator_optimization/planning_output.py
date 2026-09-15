@@ -73,6 +73,17 @@ def materialize_optimization_plan(team_id: str, run_id: str, output):
         planning.validate_plan_decisions(inputs, proposal)
         planning.validate_plan_candidates(team_id, run_id, campaign, record,
             (record.baselineCandidateRef, record.parentCandidateRef))
+        if record.stage2SeedRef is not None:
+            from .rounds import read_stage2_seed
+
+            seed = read_stage2_seed(team_id, record.stage2SeedRef)
+            if any(
+                ref.candidate == proposal.candidate
+                for ref in seed.attemptedCandidateRefs
+            ):
+                raise CampaignConflict(
+                    "Planning candidate was already attempted in the frozen Stage 2 seed"
+                )
         decisions = {key: getattr(proposal, key) for key in OptimizationPlanContent.model_fields}
         bindings = {key: inputs[key] for key in _INPUT_FIELDS if key != "runId"}
         plan_id = "operator-plan:" + record.roundId

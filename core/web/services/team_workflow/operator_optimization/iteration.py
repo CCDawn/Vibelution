@@ -11,6 +11,8 @@ from core.research.operator_optimization.decision import (
     OperatorIterationDecision,
     OperatorIterationDecisionArtifact,
     decision_id_for,
+    is_stage3_operator_run,
+    iteration_route_for_action,
 )
 from core.research.workflow.contracts import (
     ActorRef,
@@ -33,6 +35,36 @@ from .rounds import prepare_round
 from .store import CampaignConflict, campaign_root, read_campaign
 
 EVENT = "operator_round_completed"
+
+
+def _iteration_action_blocker(campaign, action: str) -> str:
+    """Reject actions whose cross-round handoff has not been connected yet."""
+
+    prior = campaign.rounds[-1] if campaign.rounds else None
+    target_parent = campaign.bestCandidateRef or campaign.baselineCandidateRef
+    if action == "discuss":
+        return ""
+    if action == "collect_knowledge":
+        if prior is None or prior.hypothesisRef is None:
+            return "collect_knowledge_requires_hypothesis"
+        if prior.parentCandidateRef != target_parent:
+            return "iteration_parent_candidate_changed"
+        return ""
+    if action == "plan_candidate":
+        if prior is None or prior.hypothesisRef is None or prior.knowledgeRef is None:
+            return "plan_candidate_requires_hypothesis_and_knowledge"
+        if prior.parentCandidateRef != target_parent:
+            return "iteration_parent_candidate_changed"
+        return ""
+    if action == "retest":
+        if prior is None or prior.planRef is None:
+            return "retest_requires_plan"
+        if prior.parentCandidateRef != target_parent:
+            return "iteration_parent_candidate_changed"
+        return ""
+    if action == "repair_baseline":
+        return "baseline_repair_flow_not_connected"
+    return "unknown_iteration_action"
 
 
 def enqueue_iteration(uow, *, run, now_ms):
@@ -86,20 +118,19 @@ def _save(store, run_id, state):
     return state
 
 
-def _budget_stop(store, campaign):
+def _budget_stop(store, campaign, *, required_phases=("decision",)):
     if budget_summary(campaign)["gpuTuningAvailableSeconds"] < 1:
         return "gpu_budget_exhausted"
     budget = campaign.budget
-    if (
-        budget.discussion is None
-        or budget.planning is None
-        or budget.decision is None
-    ):
+    phase_budgets = [getattr(budget, phase, None) for phase in required_phases]
+    if any(phase is None for phase in phase_budgets):
         return "model_budget_missing"
+    if not phase_budgets:
+        return ""
     limit = Decimal(str(budget.modelCostLimit))
     if limit <= 0:
         return "model_budget_exhausted"
-    currency = budget.discussion.prices[0].currency
+    currency = phase_budgets[0].prices[0].currency
     committed = store.read(
         lambda repo: _campaign_committed_amounts(
             SimpleNamespace(repository=repo),
@@ -108,10 +139,9 @@ def _budget_stop(store, campaign):
             model_cost_limit=limit,
         )
     )
-    required = calculate_max_reserved_cost(
-        budget.discussion
-    ) + calculate_max_reserved_cost(budget.planning) + calculate_max_reserved_cost(
-        budget.decision
+    required = sum(
+        (calculate_max_reserved_cost(phase) for phase in phase_budgets),
+        Decimal("0"),
     )
     if committed + required > limit:
         return "model_budget_exhausted"
@@ -134,6 +164,8 @@ def advance_iteration(store, payload, *, now_ms):
         or payload.get("eventType") != EVENT
     ):
         raise CampaignConflict("Iteration event does not identify an operator run")
+    if not is_stage3_operator_run(run):
+        raise CampaignConflict("Historical operator workflow is read-only")
     root = campaign_root(run.team_id, run.project_id)
     with inter_process_lock(root / ("iteration-" + sha256_hex(run.run_id))):
         run = store.get_run(run.run_id)
@@ -154,12 +186,6 @@ def advance_iteration(store, payload, *, now_ms):
             return stop("round_not_completed")
         cid = snapshot["researchObjectiveContract"]["optimizationCampaignId"]
         campaign = read_campaign(run.team_id, run.project_id, cid)
-        if (
-            campaign.status != "running"
-            or not campaign.budget.authorized
-            or not campaign.authorizedBy
-        ):
-            return stop("campaign_not_authorized_or_running")
         record = next(r for r in campaign.rounds if r.runId == run.run_id)
         if record.feedbackRef is None or record.evaluationRef is None:
             raise CampaignConflict("Completed round has no canonical feedback")
@@ -171,13 +197,6 @@ def advance_iteration(store, payload, *, now_ms):
             != record.evaluationRef.model_dump(mode="json")
         ):
             raise CampaignConflict("Iteration feedback differs from its round")
-        if campaign.activeRunId != run.run_id:
-            return stop("superseded")
-        if len(campaign.rounds) >= campaign.budget.maxRounds:
-            return stop("max_rounds_reached")
-        reason = _budget_stop(store, campaign)
-        if reason:
-            return stop(reason)
         return _save(
             store,
             run.run_id,
@@ -202,6 +221,8 @@ def apply_iteration_decision(store, payload, decision, *, now_ms):
         or payload.get("eventType") != EVENT
     ):
         raise CampaignConflict("Iteration event does not identify an operator run")
+    if not is_stage3_operator_run(run):
+        raise CampaignConflict("Historical operator workflow is read-only")
     root = campaign_root(run.team_id, run.project_id)
     with inter_process_lock(root / ("iteration-" + sha256_hex(run.run_id))):
         run = store.get_run(run.run_id)
@@ -243,6 +264,13 @@ def apply_iteration_decision(store, payload, decision, *, now_ms):
             or not campaign.authorizedBy
         ):
             return stop("campaign_not_authorized_or_running")
+        required_phases = {
+            "discuss": ("discussion",),
+            "collect_knowledge": ("knowledge",),
+            "plan_candidate": ("planning",),
+            "retest": (),
+            "repair_baseline": (),
+        }[normalized["kind"]]
         if existing is None:
             if campaign.activeRunId != run.run_id:
                 return stop("superseded")
@@ -250,9 +278,23 @@ def apply_iteration_decision(store, payload, decision, *, now_ms):
                 return stop("campaign_changed_after_decision_request")
             if len(campaign.rounds) >= campaign.budget.maxRounds:
                 return stop("max_rounds_reached")
-            reason = _budget_stop(store, campaign)
+            reason = _budget_stop(
+                store, campaign, required_phases=required_phases
+            )
             if reason:
                 return stop(reason)
+            action_blocker = _iteration_action_blocker(campaign, normalized["kind"])
+            if action_blocker:
+                return _save(
+                    store,
+                    run.run_id,
+                    {
+                        **state,
+                        "decision": normalized,
+                        "status": "blocked",
+                        "reason": action_blocker,
+                    },
+                )
             state = _save(
                 store,
                 run.run_id,
@@ -264,13 +306,21 @@ def apply_iteration_decision(store, payload, decision, *, now_ms):
                 },
             )
         if not state.get("nextRunId"):
-            created = prepare_round(
-                run.team_id,
-                run.project_id,
-                cid,
-                expected_version=state["campaignVersion"],
-                command_key=state["commandKey"],
-            )
+            try:
+                created = prepare_round(
+                    run.team_id,
+                    run.project_id,
+                    cid,
+                    expected_version=state["campaignVersion"],
+                    command_key=state["commandKey"],
+                    iteration_action=normalized["kind"],
+                )
+            except CampaignConflict as exc:
+                return _save(
+                    store,
+                    run.run_id,
+                    {**state, "status": "blocked", "reason": str(exc)[:500]},
+                )
             next_run = store.get_run(created.activeRunId)
             state = _save(
                 store,
@@ -289,7 +339,9 @@ def apply_iteration_decision(store, payload, decision, *, now_ms):
             or not campaign.budget.authorized
         ):
             return stop("next_round_no_longer_active")
-        reason = _budget_stop(store, campaign)
+        reason = _budget_stop(
+            store, campaign, required_phases=required_phases
+        )
         # An already accepted start must be recovered even if its reservation
         # now consumes the remaining budget; it must never be submitted twice.
         start_key = "auto-start:" + run.run_id
@@ -305,7 +357,7 @@ def apply_iteration_decision(store, payload, decision, *, now_ms):
                     run_id=state["nextRunId"],
                     team_id=run.team_id,
                     command=WorkflowCommandKind.START_NODE,
-                    node_id="optimization_discussion",
+                    node_id=iteration_route_for_action(normalized["kind"]),
                     expected_run_version=state["startRunVersion"],
                     idempotency_key=start_key,
                     payload={},

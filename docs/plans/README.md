@@ -9,7 +9,7 @@
 | --- | --- | --- |
 | [2026-09-12-session-ledger-archival-constraints.md](2026-09-12-session-ledger-archival-constraints.md) | PROPOSED（未实施） | 账本归档设计约束（9 条必处理 + 8 风险点）+ 2026-09-12 体检基线（854 个 / 98.1MB）；配套只读工具 `scripts/report_session_ledgers.py` |
 | [2026-09-11-command-code-headless-transport-poc.md](2026-09-11-command-code-headless-transport-poc.md) | USER-REQUESTED / PROPOSED FOR REVIEW（P0–P4b 与 G2/G3 已执行） | Command Code headless CLI 传输探针：调起路径、流式保真、会话连续性通过（附落盘缺陷）；**G2 未通过**（首字 2.18 倍）、G3 收益远小于原假设（CLI 自带 ~16k tokens/请求固定上下文）、G1 轮询未测出；无 GO/NO-GO 结论；未改产品路径 |
-| [research-flow-v2.md](research-flow-v2.md) | USER-APPROVED DIRECTION AND ARCHITECTURE / NOT IMPLEMENTED | 三阶段职责、决策 Agent 驱动 LangGraph 动态路由、现有账本记录真实进展；含官方/源码调研、轻量知识流程、改造顺序与验收，V2 改造未实施 |
+| [research-flow-v2.md](research-flow-v2.md) | USER-APPROVED / STAGE 3 CORE ROUTES IMPLEMENTED | 三阶段职责、决策 Agent 动态路由与现有账本权威；第三阶段 Seed、讨论/资料/规划/复测/停止已实现，基础版本修订仍待实现 |
 | [2026-09-05-independent-operator-experiment-flow-plan.md](2026-09-05-independent-operator-experiment-flow-plan.md) | TECHNICAL REFERENCE / FLOW PARTIALLY SUPERSEDED | 保留独立算子实现、成熟项目调研及历史证据；后续产品流程以 research-flow-v2.md 为讨论入口，旧状态不代表当前完成情况 |
 | [2026-09-02-challenge-cup-10-parallel-concurrency-plan.md](2026-09-02-challenge-cup-10-parallel-concurrency-plan.md) | USER-REQUESTED / ACTIVE PLAN | 10 并发链路改造与并发缺陷修复任务清单：搜索 circuit/fan-in 双花 P0、dispatch 并行化关键路径（B1–B5）、串线与丢写批次（C1–C7）、并发测试与 10 并发验收（D1–D2） |
 | [2026-08-30-challenge-cup-automatic-chain-reliability-plan.md](2026-08-30-challenge-cup-automatic-chain-reliability-plan.md) | USER-REQUESTED / ACTIVE PLAN | 挑战杯群聊、摘要、LangGraph/Ledger 调度的 deadline、durable recovery、run 隔离、上下文与自动推进完整修复任务图 |

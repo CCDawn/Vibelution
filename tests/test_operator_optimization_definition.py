@@ -26,7 +26,7 @@ def test_optimization_definition_and_bindings_do_not_reuse_challenge_nodes():
     assert decision_node.producesArtifactKinds == (
         "optimization_iteration_decision",
     )
-    assert definition.schemaVersion == "1.1.0"
+    assert definition.schemaVersion == "1.2.0"
 
 
 def test_baseline_definition_has_no_hypothesis_prerequisite():
@@ -62,6 +62,7 @@ def test_operator_artifacts_keep_protocol_candidate_and_plan_kinds_distinct():
     assert "operator_measurement_protocol" in OPERATOR_ARTIFACT_KINDS
     assert "operator_candidate" in OPERATOR_ARTIFACT_KINDS
     assert "optimization_plan" in OPERATOR_ARTIFACT_KINDS
+    assert "operator_stage2_seed" in OPERATOR_ARTIFACT_KINDS
     assert "optimization_protocol" not in OPERATOR_ARTIFACT_KINDS
 
 

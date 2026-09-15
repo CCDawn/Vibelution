@@ -162,9 +162,16 @@ def native_decision(activity, prepared, monkeypatch):
         lambda **kwargs: None,
     )
     inputs = decision_output.decision_task_input(activity[0], run_id)
+    assert inputs["actionPolicy"]["availableActions"] == [
+        "discuss",
+        "collect_knowledge",
+        "plan_candidate",
+        "retest",
+        "stop",
+    ]
     output = OperatorIterationDecisionProposal(
         inputHash=inputs["inputHash"],
-        kind="continue",
+        kind="discuss",
         reason="The failed first trial and faster retry justify one bounded iteration",
     )
     action = SimpleNamespace(
@@ -193,7 +200,7 @@ def _complete_model_turn(native_decision, handle, *, usage=True):
         session_id=handle.session_id,
         turn_id=handle.turn_id,
     )
-    assert schema.name == "operator_iteration_decision_proposal_v1"
+    assert schema.name == "operator_iteration_decision_proposal_v2"
     text = output.model_dump_json()
     outcomes = []
 
@@ -275,6 +282,8 @@ def test_native_decision_is_receipted_once_and_materializes_server_identity(
     assert len(rows) == 1
     payload = rows[0]["payload"]
     artifact = OperatorIterationDecisionArtifact.model_validate(payload)
+    assert artifact.schemaVersion == 2
+    assert artifact.decision.schemaVersion == 2
     assert artifact.decision.decidedBy == agent_id
     assert len(scheduled) == 1
 

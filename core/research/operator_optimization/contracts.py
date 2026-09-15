@@ -15,6 +15,16 @@ class ArtifactRef(Contract):
     sha256: Digest
 
 
+STAGE2_SEED_ARTIFACT_KIND = "operator_stage2_seed"
+
+
+class Stage2SeedRef(ArtifactRef):
+    """Reference to the immutable handoff that starts experiment iteration."""
+
+    kind: Literal["operator_stage2_seed"] = STAGE2_SEED_ARTIFACT_KIND
+    runId: Identity
+
+
 MEASUREMENT_PROTOCOL_ARTIFACT_KIND = "operator_measurement_protocol"
 
 
@@ -82,6 +92,50 @@ class OptimizationRound(Contract):
     experimentCampaignId: str = ""
     evaluationRef: ArtifactRef | None = None
     feedbackRef: ArtifactRef | None = None
+    experimentStage: Literal["foundation_experiment", "experiment_iteration"] = (
+        "foundation_experiment"
+    )
+    stage2SeedRef: Stage2SeedRef | None = None
+
+
+class OperatorStage2Seed(Contract):
+    """Exact, immutable evidence handoff from a completed foundation round."""
+
+    schemaVersion: Literal[1] = 1
+    optimizationCampaignId: Identity
+    sourceRoundId: Identity
+    sourceRunId: Identity
+    baselineRunId: Identity
+    baselineRef: ArtifactRef
+    protocolRef: MeasurementProtocolRef
+    hypothesisRef: ArtifactRef | None = None
+    hypothesisRunId: str = ""
+    hypothesisRoundId: str = ""
+    knowledgeRef: ArtifactRef | None = None
+    knowledgeRunId: str = ""
+    planRef: ArtifactRef | None = None
+    planRunId: str = ""
+    evaluationRef: ArtifactRef
+    feedbackRef: ArtifactRef
+    attemptedCandidateRefs: tuple[CudaCandidateRef, ...] = ()
+
+    @model_validator(mode="after")
+    def referenced_sources_have_owners(self):
+        if (
+            self.hypothesisRef is None
+            and (self.hypothesisRunId or self.hypothesisRoundId)
+        ) or (
+            self.hypothesisRef is not None
+            and (not self.hypothesisRunId or not self.hypothesisRoundId)
+        ):
+            raise ValueError("Stage 2 hypothesis reference requires its run and round")
+        for ref, owner, label in (
+            (self.knowledgeRef, self.knowledgeRunId, "knowledge"),
+            (self.planRef, self.planRunId, "plan"),
+        ):
+            if (ref is None) != (not owner):
+                raise ValueError(f"Stage 2 {label} reference requires its owning run")
+        return self
 
 
 class GpuReservation(Contract):
@@ -145,6 +199,10 @@ class OperatorRunContext(Contract):
     parentCandidateRef: CudaCandidateRef | None = None
     baselineRef: ArtifactRef | None = None
     observationRefs: tuple[ArtifactRef, ...] = Field(default=(), max_length=24)
+    experimentStage: Literal[
+        "baseline", "foundation_experiment", "experiment_iteration"
+    ] = "foundation_experiment"
+    stage2SeedRef: Stage2SeedRef | None = None
 
     @model_validator(mode="after")
     def require_one_work_identity(self):
@@ -154,4 +212,12 @@ class OperatorRunContext(Contract):
             raise ValueError("An optimization round requires its fixed parent candidate")
         if self.baselineCandidateRef is None:
             raise ValueError("An operator run requires its fixed baseline candidate")
+        if self.baselineSetupId and self.experimentStage != "baseline":
+            raise ValueError("A baseline setup must use the baseline experiment stage")
+        if self.roundId and self.experimentStage == "baseline":
+            raise ValueError("An optimization round cannot use the baseline experiment stage")
+        if (self.experimentStage == "experiment_iteration") != (
+            self.stage2SeedRef is not None
+        ):
+            raise ValueError("Experiment iteration requires exactly one Stage 2 seed")
         return self

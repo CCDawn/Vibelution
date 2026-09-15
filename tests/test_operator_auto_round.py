@@ -14,7 +14,9 @@ from core.research.workflow.models import ActorKind, AgentBindingLayers
 from core.web.services.team_workflow.operator_optimization import (
     evaluation,
     feedback,
+    discussion,
     iteration,
+    knowledge,
     rounds,
 )
 from core.web.services.team_workflow.operator_optimization.store import (
@@ -65,6 +67,8 @@ def completed(activity, prepared, baseline_ready, tmp_path, monkeypatch):
 
     store = Store()
     monkeypatch.setattr(rounds.run_creation, "get_write_store", lambda: store)
+    monkeypatch.setattr(discussion, "get_write_store", lambda: store)
+    monkeypatch.setattr(knowledge, "get_write_store", lambda: store)
     monkeypatch.setattr(rounds.run_creation, "create_run", actual_create_run)
     monkeypatch.setattr(
         rounds.run_creation, "research_workflow_data_root", lambda: tmp_path
@@ -110,6 +114,7 @@ def completed(activity, prepared, baseline_ready, tmp_path, monkeypatch):
                 "budget": c.budget.model_copy(
                     update={
                         "discussion": OperatorDiscussionBudget(**budget),
+                        "knowledge": OperatorModelCallBudget(**budget),
                         "planning": OperatorModelCallBudget(**budget),
                         "decision": OperatorModelCallBudget(**budget),
                     }
@@ -180,7 +185,7 @@ def test_terminal_transaction_enqueues_one_research_decision_without_starting_ro
     assert len(read_campaign(*activity).rounds) == 1
 
 
-def test_continue_decision_is_the_only_path_that_starts_next_round(
+def test_discuss_decision_starts_stage_three_at_discussion_with_frozen_seed(
     activity, completed
 ):
     store, _, payload, _ = completed
@@ -190,7 +195,7 @@ def test_continue_decision_is_the_only_path_that_starts_next_round(
         payload,
         {
             "decisionId": requested["decisionId"],
-            "kind": "continue",
+            "kind": "discuss",
             "reason": "new evidence supports another bounded experiment",
             "decidedBy": "fixture-decision-agent",
         },
@@ -202,6 +207,262 @@ def test_continue_decision_is_the_only_path_that_starts_next_round(
         store.latest_attempt(result["nextRunId"], "optimization_discussion").attempt
         == 1
     )
+    next_run = store.get_run(result["nextRunId"])
+    snapshot = json.loads(next_run.input_snapshot_json)
+    context = snapshot["researchObjectiveContract"]
+    assert context["experimentStage"] == "experiment_iteration"
+    assert context["stage2SeedRef"]["kind"] == "operator_stage2_seed"
+    seed = rounds.read_stage2_seed(activity[0], context["stage2SeedRef"])
+    assert seed.sourceRunId == payload["runId"]
+    assert seed.evaluationRef.sha256
+    assert seed.feedbackRef.sha256
+
+
+@pytest.mark.parametrize(
+    ("kind", "node_id"),
+    [
+        ("discuss", "optimization_discussion"),
+        ("collect_knowledge", "optimization_knowledge"),
+        ("plan_candidate", "optimization_plan"),
+        ("retest", "operator_execution"),
+        ("repair_baseline", "operator_baseline"),
+        ("stop", None),
+    ],
+)
+def test_stage_three_actions_have_one_canonical_route(kind, node_id):
+    assert iteration.iteration_route_for_action(kind) == node_id
+
+
+def test_legacy_continue_is_not_a_stage_three_action(activity, completed):
+    store, _, payload, _ = completed
+    requested = iteration.advance_iteration(store, payload, now_ms=2000)
+    with pytest.raises(CampaignConflict, match="Research decision is invalid"):
+        iteration.apply_iteration_decision(
+            store,
+            payload,
+            {
+                "decisionId": requested["decisionId"],
+                "kind": "continue",
+                "reason": "legacy binary action",
+                "decidedBy": "fixture-decision-agent",
+            },
+            now_ms=2100,
+        )
+    assert len(read_campaign(*activity).rounds) == 1
+
+
+def test_collect_knowledge_reuses_exact_hypothesis_and_starts_only_knowledge(
+    activity, completed
+):
+    from core.web.services.team_workflow.operator_optimization.knowledge import (
+        build_knowledge_request,
+    )
+
+    store, _, payload, _ = completed
+    source = read_campaign(*activity).rounds[-1]
+    requested = iteration.advance_iteration(store, payload, now_ms=2000)
+    result = iteration.apply_iteration_decision(
+        store,
+        payload,
+        {
+            "decisionId": requested["decisionId"],
+            "kind": "collect_knowledge",
+            "reason": "the selected mechanism still has a targeted evidence gap",
+            "decidedBy": "fixture-decision-agent",
+        },
+        now_ms=2100,
+    )
+    assert result["status"] == "started"
+    assert store.latest_attempt(result["nextRunId"], "optimization_discussion") is None
+    assert store.latest_attempt(result["nextRunId"], "optimization_knowledge") is not None
+    current = read_campaign(*activity).rounds[-1]
+    assert current.hypothesisRef == source.hypothesisRef
+    next_run = store.get_run(current.runId)
+    next_context = json.loads(next_run.input_snapshot_json)["researchObjectiveContract"]
+    assert next_context["roundId"] == current.roundId
+    assert next_run.project_id == activity[1]
+    request = build_knowledge_request(activity[0], current.runId)
+    assert request.hypothesisRef == source.hypothesisRef
+    assert request.roundId == current.roundId
+
+
+def test_plan_candidate_reuses_verified_handoff_and_starts_only_planning(
+    activity, completed
+):
+    from core.web.services.team_workflow.operator_optimization.planning_output import (
+        planning_task_input,
+    )
+
+    store, _, payload, _ = completed
+    source = read_campaign(*activity).rounds[-1]
+    requested = iteration.advance_iteration(store, payload, now_ms=2000)
+    result = iteration.apply_iteration_decision(
+        store,
+        payload,
+        {
+            "decisionId": requested["decisionId"],
+            "kind": "plan_candidate",
+            "reason": "the existing evidence can discriminate a new managed candidate",
+            "decidedBy": "fixture-decision-agent",
+        },
+        now_ms=2100,
+    )
+    assert result["status"] == "started"
+    assert store.latest_attempt(result["nextRunId"], "optimization_discussion") is None
+    assert store.latest_attempt(result["nextRunId"], "optimization_knowledge") is None
+    assert store.latest_attempt(result["nextRunId"], "optimization_plan") is not None
+    current = read_campaign(*activity).rounds[-1]
+    assert current.hypothesisRef == source.hypothesisRef
+    assert current.knowledgeRef == source.knowledgeRef
+    inputs = planning_task_input(activity[0], current.runId)
+    assert inputs["roundId"] == current.roundId
+    assert inputs["hypothesisRef"] == source.hypothesisRef.model_dump(mode="json")
+
+
+def test_retest_binds_source_plan_to_new_round_and_starts_only_execution(
+    activity, completed
+):
+    from core.research.operator_optimization.plan import OptimizationPlan
+    from core.web.services.team_workflow.operator_optimization.knowledge import read_ref
+
+    store, _, payload, _ = completed
+    source = read_campaign(*activity).rounds[-1]
+    requested = iteration.advance_iteration(store, payload, now_ms=2000)
+    result = iteration.apply_iteration_decision(
+        store,
+        payload,
+        {
+            "decisionId": requested["decisionId"],
+            "kind": "retest",
+            "reason": "repeat the frozen candidate to distinguish measurement noise",
+            "decidedBy": "fixture-decision-agent",
+        },
+        now_ms=2100,
+    )
+    assert result["status"] == "started"
+    assert store.latest_attempt(result["nextRunId"], "optimization_plan") is None
+    assert store.latest_attempt(result["nextRunId"], "operator_execution") is not None
+    current = read_campaign(*activity).rounds[-1]
+    plan = OptimizationPlan.model_validate(
+        read_ref(activity[0], current.runId, current.planRef)
+    )
+    source_plan = OptimizationPlan.model_validate(
+        read_ref(activity[0], source.runId, source.planRef)
+    )
+    assert plan.roundId == current.roundId
+    assert plan.candidateRef == source_plan.candidateRef
+    assert plan.protocolRef == current.protocolRef
+
+
+def test_unconnected_baseline_repair_fails_closed_without_creating_round(
+    activity, completed
+):
+    store, _, payload, _ = completed
+    requested = iteration.advance_iteration(store, payload, now_ms=2000)
+    result = iteration.apply_iteration_decision(
+        store,
+        payload,
+        {
+            "decisionId": requested["decisionId"],
+            "kind": "repair_baseline",
+            "reason": "the measurement baseline is invalid",
+            "decidedBy": "fixture-decision-agent",
+        },
+        now_ms=2100,
+    )
+    assert result["status"] == "blocked"
+    assert result["reason"] == "baseline_repair_flow_not_connected"
+    assert len(read_campaign(*activity).rounds) == 1
+
+
+def test_plan_candidate_rejects_configuration_already_attempted_in_seed(
+    activity, completed
+):
+    from core.research.operator_optimization.plan import (
+        OptimizationPlan,
+        OptimizationPlanContent,
+        OptimizationPlanProposal,
+    )
+    from core.web.services.team_workflow.operator_optimization import planning_output
+    from core.web.services.team_workflow.operator_optimization.knowledge import read_ref
+
+    store, _, payload, _ = completed
+    source = read_campaign(*activity).rounds[-1]
+    source_plan = OptimizationPlan.model_validate(
+        read_ref(activity[0], source.runId, source.planRef)
+    )
+    requested = iteration.advance_iteration(store, payload, now_ms=2000)
+    result = iteration.apply_iteration_decision(
+        store,
+        payload,
+        {
+            "decisionId": requested["decisionId"],
+            "kind": "plan_candidate",
+            "reason": "plan a discriminating managed candidate",
+            "decidedBy": "fixture-decision-agent",
+        },
+        now_ms=2100,
+    )
+    inputs = planning_output.planning_task_input(activity[0], result["nextRunId"])
+    content = {
+        field: getattr(source_plan, field)
+        for field in OptimizationPlanContent.model_fields
+    }
+    proposal = OptimizationPlanProposal(
+        inputHash=inputs["inputHash"],
+        candidate=source_plan.candidateRef.candidate,
+        **content,
+    )
+    with pytest.raises(CampaignConflict, match="already attempted"):
+        planning_output.materialize_optimization_plan(
+            activity[0], result["nextRunId"], proposal
+        )
+
+
+def test_promoted_parent_disables_reuse_actions_and_requires_new_discussion(
+    activity, completed
+):
+    from core.research.operator_optimization.plan import OptimizationPlan
+    from core.web.services.team_workflow.operator_optimization.decision_output import (
+        decision_task_input,
+    )
+    from core.web.services.team_workflow.operator_optimization.knowledge import read_ref
+
+    store, _, payload, _ = completed
+    current = read_campaign(*activity)
+    source = current.rounds[-1]
+    plan = OptimizationPlan.model_validate(
+        read_ref(activity[0], source.runId, source.planRef)
+    )
+    update_campaign(
+        *activity,
+        expected_version=current.revision,
+        command_key="promote-parent-for-routing",
+        command={},
+        transform=lambda campaign: campaign.model_copy(
+            update={"bestCandidateRef": plan.candidateRef}
+        ),
+    )
+    inputs = decision_task_input(activity[0], source.runId)
+    assert inputs["actionPolicy"]["availableActions"] == ["discuss", "stop"]
+    assert inputs["actionPolicy"]["blockedActions"]["retest"] == (
+        "parent candidate changed"
+    )
+    requested = iteration.advance_iteration(store, payload, now_ms=2000)
+    result = iteration.apply_iteration_decision(
+        store,
+        payload,
+        {
+            "decisionId": requested["decisionId"],
+            "kind": "retest",
+            "reason": "attempt to reuse a stale parent plan",
+            "decidedBy": "fixture-decision-agent",
+        },
+        now_ms=2100,
+    )
+    assert result["status"] == "blocked"
+    assert result["reason"] == "iteration_parent_candidate_changed"
+    assert len(read_campaign(*activity).rounds) == 1
 
 
 def test_stop_decision_does_not_create_or_start_next_round(activity, completed):
@@ -303,7 +564,7 @@ def test_stops_before_creating_a_round(activity, completed, condition):
             "rounds": {"maxRounds": 1},
             "gpu": {"gpuSecondsLimit": 1},
             "model": {"modelCostLimit": 0.00001},
-            "missing": {"planning": None},
+            "missing": {"discussion": None},
         }[condition]
         return c.model_copy(update={"budget": c.budget.model_copy(update=fields)})
 
@@ -314,7 +575,18 @@ def test_stops_before_creating_a_round(activity, completed, condition):
         command={},
         transform=change,
     )
-    result = iteration.advance_iteration(store, payload, now_ms=2000)
+    requested = iteration.advance_iteration(store, payload, now_ms=2000)
+    result = iteration.apply_iteration_decision(
+        store,
+        payload,
+        {
+            "decisionId": requested["decisionId"],
+            "kind": "discuss",
+            "reason": "attempt another bounded discussion",
+            "decidedBy": "fixture-decision-agent",
+        },
+        now_ms=2100,
+    )
     assert result["status"] == "stopped"
     assert result["reason"]
     assert len(read_campaign(*activity).rounds) == 1
@@ -328,7 +600,7 @@ def test_recovers_after_creation_or_start_before_progress_write(
     requested = iteration.advance_iteration(store, payload, now_ms=1900)
     decision = {
         "decisionId": requested["decisionId"],
-        "kind": "continue",
+        "kind": "discuss",
         "reason": "continue bounded optimization",
         "decidedBy": "fixture-decision-agent",
     }
@@ -473,7 +745,7 @@ def test_native_readiness_refusal_does_not_create_attempt(
         payload,
         {
             "decisionId": requested["decisionId"],
-            "kind": "continue",
+            "kind": "discuss",
             "reason": "continue bounded optimization",
             "decidedBy": "fixture-decision-agent",
         },
@@ -506,12 +778,28 @@ def test_reserved_model_usage_prevents_next_round(activity, completed):
         campaign_budget=budget,
         budget_kind="discussion",
     )
-    result = iteration.advance_iteration(store, payload, now_ms=2000)
+    requested = iteration.advance_iteration(store, payload, now_ms=2000)
+    result = iteration.apply_iteration_decision(
+        store,
+        payload,
+        {
+            "decisionId": requested["decisionId"],
+            "kind": "discuss",
+            "reason": "attempt another bounded discussion",
+            "decidedBy": "fixture-decision-agent",
+        },
+        now_ms=2100,
+    )
     assert result["reason"] == "model_budget_exhausted"
     assert len(read_campaign(*activity).rounds) == 1
 
 
 def test_operator_round_terminal_follows_pinned_workflow_version():
+    from core.research.operator_optimization.decision import is_stage3_operator_run
+    from core.research.workflow.definition_registry import definition_identity
+    from core.research.workflow.operator_optimization_definition import (
+        build_operator_definition,
+    )
     from core.web.services.team_workflow.research_runtime.graph_dispatch_worker import (
         _run_terminal_close_applies,
         _terminal_facts_for_close,
@@ -538,21 +826,42 @@ def test_operator_round_terminal_follows_pinned_workflow_version():
         "operator_round_completed",
         "optimization_decision_verified",
     )
+    assert not is_stage3_operator_run(legacy_run)
+    assert not is_stage3_operator_run(current_run)
+    stage3 = definition_identity(build_operator_definition())
+    assert is_stage3_operator_run(
+        SimpleNamespace(workflow_version_id=stage3.workflowVersionId)
+    )
 
 
-def test_budget_must_cover_decision_discussion_and_planning(activity, completed):
+def test_persisted_stop_is_applied_after_decision_budget_is_exhausted(
+    activity, completed
+):
     store, _, payload, _ = completed
     current = read_campaign(*activity)
-    # Each required phase costs at most 0.001, so this cannot fund all three.
+    # The decision has already happened when the terminal event is consumed.
     update_campaign(
         *activity,
         expected_version=current.revision,
         command_key="partial-budget",
         command={},
         transform=lambda c: c.model_copy(
-            update={"budget": c.budget.model_copy(update={"modelCostLimit": 0.0015})}
+            update={"budget": c.budget.model_copy(update={"modelCostLimit": 0.0005})}
         ),
     )
-    result = iteration.advance_iteration(store, payload, now_ms=2000)
-    assert result["reason"] == "model_budget_exhausted"
+    requested = iteration.advance_iteration(store, payload, now_ms=2000)
+    assert requested["status"] == "requested"
+    result = iteration.apply_iteration_decision(
+        store,
+        payload,
+        {
+            "decisionId": requested["decisionId"],
+            "kind": "stop",
+            "reason": "the completed evidence is sufficient",
+            "decidedBy": "fixture-decision-agent",
+        },
+        now_ms=2100,
+    )
+    assert result["status"] == "stopped"
+    assert result["reason"] == "the completed evidence is sufficient"
     assert len(read_campaign(*activity).rounds) == 1

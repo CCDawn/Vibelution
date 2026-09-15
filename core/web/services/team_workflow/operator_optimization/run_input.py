@@ -57,6 +57,10 @@ def build_operator_run_input(campaign: OptimizationCampaign, round_record: Optim
         baselineCandidateRef=baseline_candidate,
         parentCandidateRef=None if baseline else round_record.parentCandidateRef,
         baselineRef=campaign.baselineRef, observationRefs=observation_refs,
+        experimentStage=(
+            "baseline" if baseline else round_record.experimentStage
+        ),
+        stage2SeedRef=None if baseline else round_record.stage2SeedRef,
     )
     budget = campaign.budget.model_dump(mode="json")
     return {

@@ -7,6 +7,7 @@ from itertools import pairwise
 from core.research.operator_optimization.decision import (
     OPTIMIZATION_DECISION_ARTIFACT_KIND,
 )
+from core.research.operator_optimization.contracts import STAGE2_SEED_ARTIFACT_KIND
 
 from .definition import definition_structure_hash
 from .models import (
@@ -46,6 +47,7 @@ OPERATOR_ARTIFACT_KINDS = frozenset({
     "operator_candidate",
     "optimization_discussion",
     "optimization_knowledge_request",
+    STAGE2_SEED_ARTIFACT_KIND,
     OPTIMIZATION_DECISION_ARTIFACT_KIND,
     *(row[4] for row in OPERATOR_NODES),
 })
@@ -68,7 +70,7 @@ def build_operator_definition(*, baseline: bool = False) -> WorkflowDefinition:
     ) for left, right in pairwise(nodes))
     definition = WorkflowDefinition(
         workflowId=OPERATOR_BASELINE_WORKFLOW_ID if baseline else OPERATOR_WORKFLOW_ID,
-        schemaVersion="1.0.0" if baseline else "1.1.0",
+        schemaVersion="1.0.0" if baseline else "1.2.0",
         label="算子基线" if baseline else "算子优化实验",
         stages=(WorkflowStageSpec(stage, 1, "基线准备" if baseline else "优化实验", tuple(n.nodeId for n in nodes)),),
         nodes=nodes, edges=edges,

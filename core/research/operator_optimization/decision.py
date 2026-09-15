@@ -11,6 +11,48 @@ from .contracts import ArtifactRef, Contract, Digest, Identity, Text
 
 OPTIMIZATION_DECISION_ARTIFACT_KIND = "optimization_iteration_decision"
 
+IterationAction = Literal[
+    "discuss",
+    "collect_knowledge",
+    "plan_candidate",
+    "retest",
+    "repair_baseline",
+    "stop",
+]
+
+ITERATION_ACTION_ROUTES: dict[str, str | None] = {
+    "discuss": "optimization_discussion",
+    "collect_knowledge": "optimization_knowledge",
+    "plan_candidate": "optimization_plan",
+    "retest": "operator_execution",
+    "repair_baseline": "operator_baseline",
+    "stop": None,
+}
+
+
+def iteration_route_for_action(action: IterationAction) -> str | None:
+    """Return the single server-owned successor for an accepted action."""
+
+    return ITERATION_ACTION_ROUTES[action]
+
+
+def is_stage3_operator_run(run) -> bool:
+    """True only for runs pinned to the v2 multi-action workflow contract."""
+
+    from core.research.workflow.definition_registry import (
+        WorkflowDefinitionRegistryError,
+        resolve_definition_by_version_id,
+    )
+
+    try:
+        definition = resolve_definition_by_version_id(run.workflow_version_id)
+    except (AttributeError, WorkflowDefinitionRegistryError):
+        return False
+    return (
+        definition.workflowId == "operator-optimization"
+        and definition.schemaVersion == "1.2.0"
+    )
+
 
 def decision_id_for(run_id: str, feedback_ref: ArtifactRef | Mapping) -> str:
     payload = (
@@ -24,18 +66,18 @@ def decision_id_for(run_id: str, feedback_ref: ArtifactRef | Mapping) -> str:
 class OperatorIterationDecisionProposal(Contract):
     """Untrusted model output; the service assigns evidence identity."""
 
-    schemaVersion: Literal[1] = 1
+    schemaVersion: Literal[2] = 2
     inputHash: Digest
-    kind: Literal["continue", "stop"]
+    kind: IterationAction
     reason: Text
 
 
 class OperatorIterationDecision(Contract):
     """One immutable decision bound to one durable feedback request."""
 
-    schemaVersion: Literal[1] = 1
+    schemaVersion: Literal[2] = 2
     decisionId: Identity
-    kind: Literal["continue", "stop"]
+    kind: IterationAction
     reason: Text
     decidedBy: Identity
 
@@ -43,7 +85,7 @@ class OperatorIterationDecision(Contract):
 class OperatorIterationDecisionArtifact(Contract):
     """Canonical decision plus the exact evidence snapshot it consumed."""
 
-    schemaVersion: Literal[1] = 1
+    schemaVersion: Literal[2] = 2
     optimizationCampaignId: Identity
     roundId: Identity
     runId: Identity
@@ -59,4 +101,6 @@ __all__ = [
     "OperatorIterationDecisionArtifact",
     "OperatorIterationDecisionProposal",
     "decision_id_for",
+    "iteration_route_for_action",
+    "is_stage3_operator_run",
 ]

@@ -60,7 +60,7 @@
 | --- | --- |
 | [plans/2026-09-12-session-ledger-archival-constraints.md](plans/2026-09-12-session-ledger-archival-constraints.md) | PROPOSED（未实施）：账本归档设计约束清单 + 2026-09-12 体检基线（854 个 / 98.1MB）；配套只读工具 `scripts/report_session_ledgers.py` |
 | [plans/2026-09-11-command-code-headless-transport-poc.md](plans/2026-09-11-command-code-headless-transport-poc.md) | USER-REQUESTED：Command Code headless CLI 传输探针；已实测调起/流式/会话与 G2/G3（G2 未通过、收益远小于原假设），G1 未测出，无 GO/NO-GO 结论 |
-| [plans/research-flow-v2.md](plans/research-flow-v2.md) | 产品方向与改造架构已确认：决策 Agent 驱动 LangGraph 动态路由、现有账本保存真实进展；含三阶段职责、知识流程、调研与验收；V2 改造未实施 |
+| [plans/research-flow-v2.md](plans/research-flow-v2.md) | 三阶段科研流权威方案：第二阶段基础实验已闭环；第三阶段已接通 Seed、v2 多动作决策及讨论/资料/规划/复测/停止路由，基础版本修订仍待实现 |
 | [plans/2026-09-05-independent-operator-experiment-flow-plan.md](plans/2026-09-05-independent-operator-experiment-flow-plan.md) | 技术实施参考：成熟项目调研、独立算子实验基础与历史证据；流程部分由 research-flow-v2.md 替代，旧状态不作为当前完成情况 |
 | [plans/2026-09-02-challenge-cup-10-parallel-concurrency-plan.md](plans/2026-09-02-challenge-cup-10-parallel-concurrency-plan.md) | USER-REQUESTED：10 并发链路改造任务清单（搜索 circuit/fan-in P0、dispatch 并行化、串线丢写修复、并发验收） |
 | [plans/2026-08-30-challenge-cup-automatic-chain-reliability-plan.md](plans/2026-08-30-challenge-cup-automatic-chain-reliability-plan.md) | USER-REQUESTED：挑战杯群聊、摘要、LangGraph/Ledger 自动运行链路的 deadline、durable recovery、run 隔离、上下文与自动推进修复计划 |

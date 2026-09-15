@@ -7,7 +7,10 @@ from core.research.operator_optimization.candidate import (
     CudaCandidateArtifact,
     CudaCandidateRef,
 )
-from core.research.operator_optimization.contracts import ArtifactRef, OptimizationRound
+from core.research.operator_optimization.contracts import (
+    ArtifactRef,
+    OptimizationRound,
+)
 from core.research.operator_optimization.measurement import (
     MEASUREMENT_PROTOCOL_ARTIFACT_KIND,
     MeasurementProtocolRef,
@@ -21,10 +24,24 @@ from ..research_runtime.artifact_readback_registry import load_scoped_artifact_p
 from ..storage_durability import inter_process_lock
 from .budget import budget_summary
 from .run_input import build_operator_run_input
+from .stage3_seed import (
+    bind_retest_plan,
+    inherit_iteration_evidence,
+    read_stage2_seed,
+    write_stage2_seed,
+)
 from .store import CampaignConflict, update_campaign
 
 
-def prepare_round(team_id: str, project_id: str, campaign_id: str, *, expected_version: int, command_key: str):
+def prepare_round(
+    team_id: str,
+    project_id: str,
+    campaign_id: str,
+    *,
+    expected_version: int,
+    command_key: str,
+    iteration_action: str | None = None,
+):
     def prepare(campaign):
         if campaign.status != "running" or not campaign.budget.authorized or not campaign.authorizedBy:
             raise CampaignConflict("Campaign is not admitting optimization rounds")
@@ -56,6 +73,7 @@ def prepare_round(team_id: str, project_id: str, campaign_id: str, *, expected_v
             if envelope is None:
                 raise CampaignConflict("Round source evidence cannot be verified")
             return envelope["payload"]
+
         measured = read(campaign.baselineRef, campaign.baselineRunId)
         if measured.get("status") != "succeeded" or measured.get("optimizationCampaignId") != campaign_id:
             raise CampaignConflict("Initial baseline is not a successful measurement for this activity")
@@ -113,6 +131,16 @@ def prepare_round(team_id: str, project_id: str, campaign_id: str, *, expected_v
                     break
             if not parent_measured:
                 raise CampaignConflict("Parent candidate lacks a successful measurement receipt")
+        inherited_hypothesis = inherit_iteration_evidence(
+            team_id=team_id,
+            campaign=campaign,
+            campaign_id=campaign_id,
+            prior=prior,
+            parent=parent,
+            iteration_action=iteration_action,
+            observations=observations,
+            read=read,
+        )
         round_id = "round-" + sha256_hex({"campaign": campaign_id, "ordinal": len(campaign.rounds) + 1})[:24]
         run_id = run_creation.run_id_for_create(OPERATOR_WORKFLOW_ID, round_id)
         frozen = json.loads(baseline_run.input_snapshot_json)
@@ -142,6 +170,45 @@ def prepare_round(team_id: str, project_id: str, campaign_id: str, *, expected_v
             frozen["evaluationContract"]["protocolArtifactHash"])
         if not isinstance(protocol_ref, MeasurementProtocolRef):
             raise CampaignConflict("Frozen measurement protocol reference is invalid")
+        stage2_seed_ref = None
+        if iteration_action is not None:
+            stage2_seed_ref = write_stage2_seed(
+                team_id=team_id,
+                campaign=campaign,
+                campaign_id=campaign_id,
+                prior=prior,
+                inherited_hypothesis=inherited_hypothesis,
+                round_id=round_id,
+                run_id=run_id,
+                read=read,
+                read_candidate=read_candidate,
+            )
+        inherited_hypothesis_ref = (
+            prior.hypothesisRef
+            if iteration_action in {"collect_knowledge", "plan_candidate", "retest"}
+            and prior is not None
+            else None
+        )
+        inherited_knowledge = (
+            prior.knowledgeRef
+            if iteration_action in {"plan_candidate", "retest"}
+            and prior is not None
+            else None
+        )
+        retest_plan_ref = None
+        if iteration_action == "retest":
+            retest_plan_ref = bind_retest_plan(
+                team_id=team_id,
+                prior=prior,
+                baseline_candidate=baseline_candidate,
+                parent=parent,
+                inherited_hypothesis_ref=inherited_hypothesis_ref,
+                inherited_knowledge_ref=inherited_knowledge,
+                protocol_ref=protocol_ref,
+                round_id=round_id,
+                run_id=run_id,
+                read=read,
+            )
         record = OptimizationRound(
             roundId=round_id,
             runId=run_id,
@@ -149,6 +216,15 @@ def prepare_round(team_id: str, project_id: str, campaign_id: str, *, expected_v
             baselineCandidateRef=baseline_candidate,
             parentCandidateRef=parent,
             protocolRef=protocol_ref,
+            experimentStage=(
+                "experiment_iteration"
+                if iteration_action is not None
+                else "foundation_experiment"
+            ),
+            stage2SeedRef=stage2_seed_ref,
+            hypothesisRef=inherited_hypothesis_ref,
+            knowledgeRef=inherited_knowledge,
+            planRef=retest_plan_ref,
         )
         run_input = build_operator_run_input(campaign, record, environment_ref=environment_hash,
             protocol_artifact_id=protocol_ref.artifactId,
@@ -159,4 +235,7 @@ def prepare_round(team_id: str, project_id: str, campaign_id: str, *, expected_v
         run_creation.create_run(OPERATOR_WORKFLOW_ID, run_input=run_input, idempotency_key=round_id)
         return campaign.model_copy(update={"rounds": (*campaign.rounds, record), "activeRunId": run_id})
     return update_campaign(team_id, project_id, campaign_id, expected_version=expected_version,
-        command_key=command_key, command={"action": "prepare_round"}, transform=prepare)
+        command_key=command_key,
+        command={"action": "prepare_round", "iterationAction": iteration_action},
+        transform=prepare,
+    )
