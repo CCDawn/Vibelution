@@ -65,6 +65,8 @@ const styles = {
   activeWorkToneChip:
     "vui-app-appshell activeWorkToneChip !min-h-5 max-w-[6.5rem] shrink-0 truncate !px-1.5 !text-[10px]",
   activeWorkSummary: `vui-app-appshell activeWorkSummary min-w-0 ${vuiGlassPanelClass} p-2 ${vuiStateSelectedRowClass}`,
+  activeWorkSlot:
+    "vui-app-appshell activeWorkSlot min-w-0 shrink-0 flex items-center justify-end",
   brandBlock:
     "vui-app-appshell brandBlock min-w-0",
   brandGate:

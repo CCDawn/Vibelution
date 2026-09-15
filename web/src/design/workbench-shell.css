@@ -152,6 +152,7 @@
 .vui-app-appshell.topBar .topActions,
 .vui-app-appshell.topBar .returnButton,
 .vui-app-appshell.topBar .activeWorkChip,
+.vui-app-appshell.topBar .activeWorkSlot,
 .vui-app-appshell.topBar .utilityCluster,
 .vui-app-appshell.topBar .statusCluster,
 .vui-app-appshell.topBar .toolCluster,
@@ -376,6 +377,24 @@
 :where(.vui-app-appshell).activeWorkChip {
   max-width: min(66vw, 620px);
   transition: border-color 140ms ease, background 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+/*
+ * The active-work indicator lives at the right edge of the top bar inside a
+ * reserved slot: its width never changes, so navigation and tool buttons keep
+ * their positions when running work appears or finishes.
+ */
+:where(.vui-app-appshell).activeWorkSlot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: min(12rem, 30vw);
+  min-width: min(12rem, 30vw);
+  max-width: min(12rem, 30vw);
+}
+
+:where(.vui-app-appshell).activeWorkSlot .activeWorkChip {
+  max-width: 100%;
 }
 
 :where(.vui-app-appshell).activeWorkInlineDetails {

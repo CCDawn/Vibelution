@@ -2189,87 +2189,6 @@ export function AppShell() {
               icon={<ArrowLeft size={16} />}
             />
           ) : null}
-          {activeWorkIndicator ? (
-            <VPopover
-              align="start"
-              side="bottom"
-              sideOffset={8}
-              aria-label={t("activeWorkDetails")}
-              contentClassName={styles.activeWorkPopoverContent}
-              data-vui="active-work-popover"
-              trigger={(
-                <VButton
-                  type="button"
-                  variant="secondary"
-                  contentLayout="plain"
-                  className={styles.activeWorkChip}
-                  aria-haspopup="dialog"
-                  aria-label={activeWorkChipAriaLabel}
-                >
-                  <VStatusChip
-                    tone={systemToneToStatus(activeWorkIndicator.tone)}
-                    className={styles.activeWorkToneChip}
-                  >
-                    {activeWorkIndicator.tone === "running"
-                      ? t("activeWorkNow")
-                      : statusLabel(activeWorkIndicator.status)}
-                  </VStatusChip>
-                  <strong>{activeWorkIndicator.label}</strong>
-                  <span className={styles.activeWorkInlineDetails} aria-hidden="true">
-                    {activeWorkIndicator.items.slice(0, 2).map((item) => (
-                      <span key={`${item.kind}-${item.runId || item.status}-inline`} className={styles.activeWorkInlineItem}>
-                        <span>{item.summary}</span>
-                      </span>
-                    ))}
-                  </span>
-                  {activeWorkIndicator.overflowCount > 0 ? (
-                    <span className={styles.activeWorkMore}>
-                      {t("activeWorkMorePrefix")}
-                      {activeWorkIndicator.overflowCount}
-                    </span>
-                  ) : null}
-                </VButton>
-              )}
-            >
-              <div className={styles.activeWorkDetailPanel} role="note">
-                <div className={styles.activeWorkDetailHeader}>
-                  <strong>{t("activeWorkDetails")}</strong>
-                  <span>
-                    {activeWorkIndicator.count} {t("activeWorkCountSuffix")}
-                  </span>
-                </div>
-                <ul className={styles.activeWorkDetailList}>
-                  {activeWorkIndicator.items.map((item) => {
-                    const runIdDisplay = formatActiveWorkRunId(item.runId);
-                    const detailAria = [item.label, statusLabel(item.status), item.summary].filter(Boolean).join(" · ");
-                    const detailCopy = (
-                      <div className={styles.activeWorkDetailCopy}>
-                        <div className={styles.activeWorkDetailTitle}>
-                          <strong>{item.label}</strong>
-                        </div>
-                        {item.fullSummary ? <p>{item.fullSummary}</p> : null}
-                        {runIdDisplay ? (
-                          <code title={item.runId || undefined}>{runIdDisplay}</code>
-                        ) : null}
-                      </div>
-                    );
-                    return (
-                      <li key={`${item.kind}-${item.runId || item.status}`} className={styles.activeWorkDetailItem}>
-                        <VStatusChip tone={systemToneToStatus(item.tone)} className={styles.activeWorkItemToneChip}>
-                          {statusLabel(item.status)}
-                        </VStatusChip>
-                        {item.href ? (
-                          <Link className={styles.activeWorkDetailLink} to={item.href} aria-label={detailAria}>
-                            {detailCopy}
-                          </Link>
-                        ) : detailCopy}
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            </VPopover>
-          ) : null}
         </div>
 
         <nav className={styles.nav} data-shell-group="navigation" aria-label={lang === "en" ? "Primary navigation" : "主导航"}>
@@ -2383,6 +2302,93 @@ export function AppShell() {
         </div>
 
         <div className={styles.topActions} data-shell-group="system-actions">
+          <div
+            className={styles.activeWorkSlot}
+            data-shell-group="active-work"
+            data-active-work-slot={activeWorkIndicator ? "active" : "empty"}
+          >
+            {activeWorkIndicator ? (
+              <VPopover
+                align="end"
+                side="bottom"
+                sideOffset={8}
+                aria-label={t("activeWorkDetails")}
+                contentClassName={styles.activeWorkPopoverContent}
+                data-vui="active-work-popover"
+                trigger={(
+                  <VButton
+                    type="button"
+                    variant="secondary"
+                    contentLayout="plain"
+                    className={styles.activeWorkChip}
+                    aria-haspopup="dialog"
+                    aria-label={activeWorkChipAriaLabel}
+                  >
+                    <VStatusChip
+                      tone={systemToneToStatus(activeWorkIndicator.tone)}
+                      className={styles.activeWorkToneChip}
+                    >
+                      {activeWorkIndicator.tone === "running"
+                        ? t("activeWorkNow")
+                        : statusLabel(activeWorkIndicator.status)}
+                    </VStatusChip>
+                    <strong>{activeWorkIndicator.label}</strong>
+                    <span className={styles.activeWorkInlineDetails} aria-hidden="true">
+                      {activeWorkIndicator.items.slice(0, 2).map((item) => (
+                        <span key={`${item.kind}-${item.runId || item.status}-inline`} className={styles.activeWorkInlineItem}>
+                          <span>{item.summary}</span>
+                        </span>
+                      ))}
+                    </span>
+                    {activeWorkIndicator.overflowCount > 0 ? (
+                      <span className={styles.activeWorkMore}>
+                        {t("activeWorkMorePrefix")}
+                        {activeWorkIndicator.overflowCount}
+                      </span>
+                    ) : null}
+                  </VButton>
+                )}
+              >
+                <div className={styles.activeWorkDetailPanel} role="note">
+                  <div className={styles.activeWorkDetailHeader}>
+                    <strong>{t("activeWorkDetails")}</strong>
+                    <span>
+                      {activeWorkIndicator.count} {t("activeWorkCountSuffix")}
+                    </span>
+                  </div>
+                  <ul className={styles.activeWorkDetailList}>
+                    {activeWorkIndicator.items.map((item) => {
+                      const runIdDisplay = formatActiveWorkRunId(item.runId);
+                      const detailAria = [item.label, statusLabel(item.status), item.summary].filter(Boolean).join(" · ");
+                      const detailCopy = (
+                        <div className={styles.activeWorkDetailCopy}>
+                          <div className={styles.activeWorkDetailTitle}>
+                            <strong>{item.label}</strong>
+                          </div>
+                          {item.fullSummary ? <p>{item.fullSummary}</p> : null}
+                          {runIdDisplay ? (
+                            <code title={item.runId || undefined}>{runIdDisplay}</code>
+                          ) : null}
+                        </div>
+                      );
+                      return (
+                        <li key={`${item.kind}-${item.runId || item.status}`} className={styles.activeWorkDetailItem}>
+                          <VStatusChip tone={systemToneToStatus(item.tone)} className={styles.activeWorkItemToneChip}>
+                            {statusLabel(item.status)}
+                          </VStatusChip>
+                          {item.href ? (
+                            <Link className={styles.activeWorkDetailLink} to={item.href} aria-label={detailAria}>
+                              {detailCopy}
+                            </Link>
+                          ) : detailCopy}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              </VPopover>
+            ) : null}
+          </div>
           <div
             className={
               utilityOpen

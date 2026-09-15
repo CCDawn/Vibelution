@@ -509,6 +509,21 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("overflow: visible");
   });
 
+  it("keeps the active work indicator in a reserved right-side slot", () => {
+    // The chip must sit in system-actions (right side) inside a fixed-width
+    // slot, so navigation and tool buttons never move when work appears.
+    const systemActionsIndex = shellSource.indexOf('data-shell-group="system-actions"');
+    const slotIndex = shellSource.indexOf("data-active-work-slot");
+    expect(systemActionsIndex).toBeGreaterThan(-1);
+    expect(slotIndex).toBeGreaterThan(systemActionsIndex);
+    expect(shellSource).toContain("styles.activeWorkSlot");
+    expect(styles.activeWorkSlot).toContain("justify-end");
+
+    expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkSlot");
+    expect(shellStyles).toContain("min-width: min(12rem, 30vw)");
+    expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkSlot .activeWorkChip");
+  });
+
   it("keeps the active work popover compact without nested cards or horizontal overflow", () => {
     expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkDetailPanel");
     expect(shellStyles).toContain("width: min(420px, calc(100vw - 24px))");
