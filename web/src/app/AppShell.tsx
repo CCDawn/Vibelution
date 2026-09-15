@@ -2333,13 +2333,6 @@ export function AppShell() {
                         : statusLabel(activeWorkIndicator.status)}
                     </VStatusChip>
                     <strong>{activeWorkIndicator.label}</strong>
-                    <span className={styles.activeWorkInlineDetails} aria-hidden="true">
-                      {activeWorkIndicator.items.slice(0, 2).map((item) => (
-                        <span key={`${item.kind}-${item.runId || item.status}-inline`} className={styles.activeWorkInlineItem}>
-                          <span>{item.summary}</span>
-                        </span>
-                      ))}
-                    </span>
                     {activeWorkIndicator.overflowCount > 0 ? (
                       <span className={styles.activeWorkMore}>
                         {t("activeWorkMorePrefix")}
@@ -2365,7 +2358,9 @@ export function AppShell() {
                           <div className={styles.activeWorkDetailTitle}>
                             <strong>{item.label}</strong>
                           </div>
-                          {item.fullSummary ? <p>{item.fullSummary}</p> : null}
+                          {item.summary ? (
+                            <p title={item.fullSummary || item.summary}>{item.summary}</p>
+                          ) : null}
                           {runIdDisplay ? (
                             <code title={item.runId || undefined}>{runIdDisplay}</code>
                           ) : null}

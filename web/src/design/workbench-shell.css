@@ -382,7 +382,8 @@
 /*
  * The active-work indicator lives at the right edge of the top bar inside a
  * reserved slot: its width never changes, so navigation and tool buttons keep
- * their positions when running work appears or finishes.
+ * their positions when running work appears or finishes. The chip itself stays
+ * compact (status + label + count); details live in the popover only.
  */
 :where(.vui-app-appshell).activeWorkSlot {
   display: flex;
@@ -397,50 +398,16 @@
   max-width: 100%;
 }
 
-:where(.vui-app-appshell).activeWorkInlineDetails {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 1 auto;
-  max-width: 0;
-  min-width: 0;
-  overflow: hidden;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateX(-4px);
-  transition: max-width 180ms ease, opacity 140ms ease, transform 140ms ease;
-}
-
-:where(.vui-app-appshell).activeWorkChip:hover .activeWorkInlineDetails,
-:where(.vui-app-appshell).activeWorkChip:focus-within .activeWorkInlineDetails {
-  max-width: min(38vw, 360px);
-  opacity: 1;
-  transform: translateX(0);
-}
-
-:where(.vui-app-appshell).activeWorkInlineItem {
-  display: inline-flex;
-  align-items: center;
-  min-width: 0;
-  max-width: 100%;
-  padding-left: 8px;
-  border-left: 1px solid color-mix(in srgb, var(--accent-cool) 24%, transparent);
-  color: var(--fg-secondary);
-}
-
-:where(.vui-app-appshell).activeWorkInlineItem span {
-  max-width: min(34vw, 320px);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 :where(.vui-app-appshell).activeWorkDetailPanel {
   width: min(420px, calc(100vw - 24px));
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 8px;
   padding: 10px;
-  overflow-x: hidden;
+  /* Radix exposes the free space below the trigger; the popover must scroll
+     inside that budget instead of being clipped by the window edge. */
+  max-height: min(70vh, var(--radix-popper-available-height, 70vh));
+  overflow: hidden;
   border-color: color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
   background:
     var(--vui-gradient-route-soft),
@@ -479,8 +446,8 @@
 :where(.vui-app-appshell).activeWorkDetailList {
   display: grid;
   gap: 6px;
-  max-height: min(42vh, 260px);
   min-width: 0;
+  min-height: 0;
   margin: 0;
   padding: 0;
   overflow-x: hidden;
@@ -1192,7 +1159,7 @@
 @media (max-width: 640px) {
   :where(.vui-app-appshell).activeWorkDetailPanel {
     width: min(340px, calc(100vw - 20px));
-    max-height: min(70vh, 520px);
+    max-height: min(70vh, var(--radix-popper-available-height, 70vh));
     padding: 9px;
   }
 }

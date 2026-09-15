@@ -577,13 +577,17 @@ function buildActiveWorkCandidate(
 
   const label = activeWorkKindLabel(kind, lang);
   const fullSummary = activeWorkSummary(kind, run, runtime, lang, options);
+  // Chat turns and room rounds surface raw diagnostic text; compact them so the
+  // chip and the popover read like sentences instead of log dumps. The full
+  // text stays on the item for tooltips and the linked surface.
   const summary = kind === "chat_room"
     ? compactActiveWorkSummary(fullSummary)
-    : fullSummary;
+    : kind === "chat"
+      ? compactActiveWorkSummary(fullSummary, 96)
+      : fullSummary;
   const runId = textValue(run.runId);
   const href = activeWorkHref(kind, run);
-  // Keep raw ids out of user-facing copy. The chip uses the compact summary;
-  // the popover reads fullSummary so long room topics stay available on demand.
+  // Keep raw ids out of user-facing copy.
   const detailParts = [label, summary].filter(Boolean);
 
   return {
@@ -601,7 +605,9 @@ function buildActiveWorkCandidate(
 
 function compactActiveWorkSummary(value: string, maxLength = 72): string {
   const normalized = value.replace(/\s+/g, " ").trim();
-  const boundary = normalized.search(/[：:。；;！？!?]/);
+  // Skip an early label separator (e.g. "工具失败：") so the first sentence
+  // boundary after the leading label wins instead of the whole dump.
+  const boundary = normalized.slice(6).search(/[：:。；;！？!?]/) + 6;
   if (boundary >= 6 && boundary < maxLength) {
     return normalized.slice(0, boundary).trim();
   }

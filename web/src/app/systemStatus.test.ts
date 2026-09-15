@@ -719,6 +719,23 @@ describe("systemStatus", () => {
     expect(indicator?.runId).toContain("session-20260805");
   });
 
+  it("compacts raw chat failure dumps into a short summary", () => {
+    const rawFailure = "工具失败：cli_tool! [EXEC FAILURE | Exit Code: 1] RUN v5.0.0 C:/Users/Administrator/Desktop/Vibelution/.worktrees/queue-image-attachments";
+    const indicator = deriveActiveWorkIndicator(
+      runtimeWithActiveWork({
+        chat_turn: {
+          runId: "session-20260915-000000-000000",
+          runKind: "chat_turn",
+          status: "running",
+          summary: rawFailure,
+        },
+      }),
+    );
+    expect(indicator?.summary).toBe("工具失败：cli_tool");
+    expect(indicator?.fullSummary).toBe(rawFailure);
+    expect(indicator?.detail).toBe("对话 · 工具失败：cli_tool");
+  });
+
   it("prioritizes supervised evolution over self-evolution and chat work", () => {
     const indicator = deriveActiveWorkIndicator(
       runtimeWithActiveWork({
@@ -952,7 +969,7 @@ describe("systemStatus", () => {
 
     expect(indicator).toMatchObject({
       kind: "chat",
-      summary: "source_collection_stage_writeback_tool 失败：执行超时 (30秒)",
+      summary: "source_collection_stage_writeback_tool 失败",
       status: "running",
     });
     expect(indicator?.detail).toContain("source_collection_stage_writeback_tool");

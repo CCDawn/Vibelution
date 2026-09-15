@@ -493,20 +493,22 @@ describe("AppShell layout contract", () => {
     expect(styles.activeWorkDetailLink).toContain("focus-visible:ring-2");
   });
 
-  it("expands the active work chip itself on hover and focus", () => {
-    expect(shellSource).toContain("activeWorkInlineDetails");
-    expect(shellSource).toContain("activeWorkInlineItem");
-    expect(shellSource).toContain("activeWorkIndicator.items.slice(0, 2).map");
-    expect(shellSource).toContain("{item.summary}");
+  it("keeps the active work chip compact and bounds the popover to the free space", () => {
+    // The chip is status + label + count only; raw summaries previously
+    // expanded on hover and compressed into unreadable fragments in the slot.
+    expect(shellSource).not.toContain("activeWorkInlineDetails");
+    expect(shellSource).not.toContain("activeWorkInlineItem");
+    expect(shellSource).toContain("activeWorkIndicator.overflowCount");
 
-    expect(styles.activeWorkInlineDetails).toBeTypeOf("string");
-    expect(styles.activeWorkInlineItem).toBeTypeOf("string");
-    expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkChip:hover .activeWorkInlineDetails");
-    expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkChip:focus-within .activeWorkInlineDetails");
-    expect(shellStyles).toContain("max-width: min(38vw, 360px)");
-    expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkInlineItem");
-    expect(shellStyles).toContain(":where(.vui-app-appshell).brandBlock {\n  display: flex;");
-    expect(shellStyles).toContain("overflow: visible");
+    // The popover must scroll inside the space Radix reports instead of being
+    // clipped by the window edge, and summaries clamp to two lines.
+    expect(shellStyles).toContain("var(--radix-popper-available-height");
+    expect(shellStyles).toContain("grid-template-rows: auto minmax(0, 1fr)");
+    expect(styles.activeWorkDetailCopy).toContain("[&_p]:line-clamp-2");
+    expect(styles.activeWorkDetailList).not.toContain("max-h-");
+    expect(styles.activeWorkDetailPanel).toContain("overflow-hidden");
+    expect(shellStyles).not.toContain("activeWorkChip:hover .activeWorkInlineDetails");
+    expect(shellStyles).not.toContain("activeWorkInlineItem");
   });
 
   it("keeps the active work indicator in a reserved right-side slot", () => {

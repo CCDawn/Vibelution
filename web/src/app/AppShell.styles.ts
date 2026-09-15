@@ -35,23 +35,19 @@ const styles = {
     "whitespace-nowrap leading-none text-[var(--fg-secondary)] [&>*]:!self-center " +
     "[&_strong]:text-[var(--fg-primary)] [&_strong]:font-semibold [&_strong]:leading-none",
   activeWorkDetailCopy:
-    "vui-app-appshell activeWorkDetailCopy min-w-0 grid gap-1 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [&_p]:m-0 [&_p]:min-w-0 [&_p]:[overflow-wrap:anywhere] [&_code]:block [&_code]:min-w-0 [&_code]:truncate [&_code]:rounded-[var(--radius-control)] [&_code]:bg-[color-mix(in_srgb,var(--vui-control-muted)_88%,transparent)] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:[font-size:var(--vui-font-xs)] [&_code]:text-[var(--fg-tertiary)]",
+    "vui-app-appshell activeWorkDetailCopy min-w-0 grid gap-1 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [&_p]:m-0 [&_p]:min-w-0 [&_p]:line-clamp-2 [&_p]:[overflow-wrap:anywhere] [&_code]:block [&_code]:min-w-0 [&_code]:truncate [&_code]:rounded-[var(--radius-control)] [&_code]:bg-[color-mix(in_srgb,var(--vui-control-muted)_88%,transparent)] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:[font-size:var(--vui-font-xs)] [&_code]:text-[var(--fg-tertiary)]",
   activeWorkDetailHeader:
     "vui-app-appshell activeWorkDetailHeader min-w-0 flex flex-wrap items-center justify-between gap-1.5 border-b border-[color-mix(in_srgb,var(--accent-cool)_22%,transparent)] px-0.5 pb-1.5 text-[var(--accent-cool)] [&_strong]:[font-size:var(--vui-font-sm)] [&_strong]:font-semibold [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)]",
   activeWorkDetailItem:
     "vui-app-appshell activeWorkDetailItem min-w-0 grid grid-cols-[max-content_minmax(0,1fr)] items-start gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] bg-[var(--vui-surface-row)] px-2.5 py-2",
   activeWorkDetailList:
-    "vui-app-appshell activeWorkDetailList m-0 grid min-h-0 max-h-[260px] list-none content-start gap-1.5 overflow-y-auto p-0",
+    "vui-app-appshell activeWorkDetailList m-0 grid min-h-0 list-none content-start gap-1.5 overflow-y-auto p-0",
   activeWorkDetailLink:
     "vui-app-appshell activeWorkDetailLink block min-w-0 rounded-[var(--radius-control)] text-inherit no-underline outline-none transition-colors hover:text-[var(--fg-primary)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_45%,transparent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--vui-surface-panel)]",
   activeWorkDetailPanel:
-    "vui-app-appshell activeWorkDetailPanel min-w-0 grid gap-2 p-2.5",
+    "vui-app-appshell activeWorkDetailPanel min-w-0 grid grid-rows-[auto_minmax(0,1fr)] gap-2 overflow-hidden p-2.5",
   activeWorkDetailTitle:
     "vui-app-appshell activeWorkDetailTitle min-w-0 [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)]",
-  activeWorkInlineDetails:
-    "vui-app-appshell activeWorkInlineDetails min-w-0",
-  activeWorkInlineItem:
-    "vui-app-appshell activeWorkInlineItem min-w-0",
   activeWorkItemToneChip:
     "vui-app-appshell activeWorkItemToneChip !min-h-5 max-w-[7rem] shrink-0 truncate !px-1.5 !text-[10px]",
   activeWorkKicker:
