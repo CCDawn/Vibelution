@@ -3062,6 +3062,57 @@ def _build_session_cache_composition(
     ) or {}
 
 
+def _context_window_usage_tokens(usage: dict[str, Any] | None) -> tuple[int, str]:
+    """Tokens occupying the context window in the latest model request.
+
+    Codex parity (``codex-rs/tui/src/token_usage.rs``): the window indicator is
+    based on the last request's token usage, not on the accumulated session
+    transcript, so a compaction immediately lowers it.
+    """
+
+    if not isinstance(usage, dict):
+        return 0, ""
+    if str(usage.get("source") or "").strip() != "provider_usage":
+        return 0, ""
+    total = int(usage.get("totalTokens") or 0)
+    if total <= 0:
+        total = int(usage.get("inputTokens") or 0) + int(usage.get("outputTokens") or 0)
+    return max(0, total), str(usage.get("recordedAt") or "").strip()
+
+
+def _session_compaction_tokens(s: Any, conversation: dict[str, Any] | None) -> tuple[int, str]:
+    """Latest compaction checkpoint size for the session (compacted context)."""
+
+    session_id = str((conversation or {}).get("id") or "").strip()
+    if not session_id:
+        return 0, ""
+    try:
+        from core.chat.context_compression_ledger import context_compression_projection
+
+        events = s.load_session_conversation_events_snapshot(session_id)
+        payload = context_compression_projection(events).get("lastCompression") or {}
+    except Exception:
+        return 0, ""
+    if not isinstance(payload, dict):
+        return 0, ""
+    return max(0, int(payload.get("afterTokens") or 0)), str(payload.get("timestamp") or "").strip()
+
+
+def _compaction_supersedes_usage(compaction_at: str, usage_at: str) -> bool:
+    """Codex parity: a compaction clears the older window indicator.
+
+    ``set_token_info`` hides the context indicator on compaction and only the
+    next usage update re-establishes it, so a checkpoint newer than the last
+    usage (or an untimestamped usage) is the authoritative window size.
+    """
+
+    if not compaction_at:
+        return False
+    if not usage_at:
+        return True
+    return _timestamp_sort_key(compaction_at) >= _timestamp_sort_key(usage_at)
+
+
 def _build_session_context_usage(conversation: dict[str, Any], messages: list[dict[str, Any]]) -> dict[str, Any]:
     s = _service()
     user_count = 0
@@ -3090,6 +3141,19 @@ def _build_session_context_usage(conversation: dict[str, Any], messages: list[di
     limit_payload = s._session_context_limit_payload(conversation)
     limit = s._coerce_nonnegative_int(limit_payload.get("limit") or 0)
     used = min(estimated_tokens, limit) if limit > 0 else estimated_tokens
+    source = "conversation_ledger"
+    # The visible transcript keeps every retired event, so its estimate cannot
+    # show a compaction. Prefer the model-facing size: the compaction checkpoint
+    # once it supersedes the last usage, then the newest provider-reported
+    # request window, and only fall back to the transcript estimate.
+    usage_tokens, usage_at = _context_window_usage_tokens(s._session_last_llm_usage(list(messages or [])))
+    compaction_tokens, compaction_at = _session_compaction_tokens(s, conversation)
+    if compaction_tokens > 0 and _compaction_supersedes_usage(compaction_at, usage_at):
+        used = min(compaction_tokens, limit) if limit > 0 else compaction_tokens
+        source = "conversation_ledger_compacted_context"
+    elif usage_tokens > 0:
+        used = min(usage_tokens, limit) if limit > 0 else usage_tokens
+        source = "provider_usage_context_window"
     payload = {
         "used": used,
         "limit": limit,
@@ -3102,7 +3166,7 @@ def _build_session_context_usage(conversation: dict[str, Any], messages: list[di
         "userMessageCount": user_count,
         "assistantMessageCount": assistant_count,
         "toolCallCount": tool_call_count,
-        "source": "conversation_ledger",
+        "source": source,
     }
     return payload
 
