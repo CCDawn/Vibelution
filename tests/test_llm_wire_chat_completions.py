@@ -42,6 +42,71 @@ def scope() -> InvocationScope:
     return InvocationScope(session_id="session-1", turn_id="turn-1", invocation_id="invocation-1", iteration=0)
 
 
+def _control_content_stream(text, *, actual_tool=False, provider="opencode_go", model="deepseek-v4.1-flash"):
+    selected_route = route()
+    selected_route.provider_id = provider
+    selected_route.provider_kind = "opencode"
+    selected_route.effective_model = model
+    chunks = [{"choices": [{"index": 0, "delta": {"content": char}}]} for char in text]
+    if actual_tool:
+        chunks.append({"choices": [{"index": 0, "delta": {"tool_calls": [{
+            "index": 0, "id": "call-real", "type": "function",
+            "function": {"name": "lookup", "arguments": '{"query":"test"}'},
+        }]}}]})
+    chunks.append({"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls" if actual_tool else "stop"}]})
+    decoded = ChatCompletionsWireAdapter().decode_stream(chunks, route=selected_route, scope=scope())
+    events = tuple(decoded)
+    return events, decoded.outcome
+
+
+@pytest.mark.parametrize("text", [
+    "<budget:token_budget>200000</budget:token_budget>",
+    "<ds_safety>internal classification</ds_safety>Safe",
+    "@@RECALL\ninternal recall text",
+    '<｜｜tool▁calls▁begin｜｜><｜｜tool▁call▁begin｜｜>lookup<｜｜tool▁sep｜｜>{"query":"test"}<｜｜tool▁call▁end｜｜><｜｜tool▁calls▁end｜｜>',
+])
+def test_provider_control_only_content_is_not_a_successful_answer(text):
+    events, outcome = _control_content_stream(text)
+    assert outcome.kind == "incomplete"
+    assert outcome.error == "chat.finish.provider_control_leak"
+    assert outcome.final_text == ""
+    assert outcome.tool_calls == ()
+    assert not [event for event in events if event.text]
+
+
+def test_provider_control_commentary_does_not_block_real_structured_tools():
+    events, outcome = _control_content_stream("<budget:token_budget>200000</budget:token_budget>", actual_tool=True)
+    assert outcome.kind == "tool_calls"
+    assert [call.call_id for call in outcome.tool_calls] == ["call-real"]
+    assert not [event for event in events if event.text]
+    assert any(event.diagnostic_summary.get("providerControlContent") for event in events)
+
+
+def test_provider_control_prefix_preserves_following_visible_answer():
+    events, outcome = _control_content_stream("<budget:token_budget>200000</budget:token_budget>已完成检查。")
+    assert outcome.final_text == "已完成检查。"
+    assert "budget" not in "".join(event.text for event in events)
+
+
+@pytest.mark.parametrize("text", [
+    "代码中的 @@RECALL 只是示例。",
+    "```xml\n<ds_safety>example</ds_safety>Safe\n```",
+    "`<budget:token_budget>200000</budget:token_budget>`",
+    "<budget:token_budget>not a number</budget:token_budget>",
+])
+def test_provider_control_detection_preserves_ordinary_examples(text):
+    _, outcome = _control_content_stream(text)
+    assert outcome.kind == "final_answer"
+    assert outcome.final_text == text
+
+
+@pytest.mark.parametrize("provider,model", [("other", "deepseek-v4.1-flash"), ("opencode_go", "other-model")])
+def test_provider_control_detection_does_not_change_unrelated_routes(provider, model):
+    text = "<budget:token_budget>200000</budget:token_budget>"
+    _, outcome = _control_content_stream(text, provider=provider, model=model)
+    assert outcome.final_text == text
+
+
 def identity(item_id: str) -> CanonicalItemIdentity:
     current = scope()
     return CanonicalItemIdentity(

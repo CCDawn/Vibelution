@@ -67,6 +67,7 @@ from .usage import cache_usage_observation_from_payload, usage_stats_from_payloa
 from .wire.registry import build_default_wire_adapter_registry
 from .wire.chat_completions import STREAM_EXHAUSTED_WITHOUT_FINISH_REASON
 from .wire.chat_completions import OUTPUT_LENGTH_TRUNCATED, TOOL_ARGUMENTS_UNPARSABLE
+from .wire.provider_control_content import PROVIDER_CONTROL_LEAK
 from .wire.responses import STREAM_EXHAUSTED_WITHOUT_TERMINAL
 
 
@@ -493,6 +494,18 @@ def _is_retryable_stream_exhaustion(outcome: TurnOutcome, *, allow_chat: bool = 
     if outcome.error == TOOL_ARGUMENTS_UNPARSABLE:
         return True
     return allow_chat and outcome.error == STREAM_EXHAUSTED_WITHOUT_FINISH_REASON
+
+
+def _raise_if_provider_control_leak(outcome: TurnOutcome, *, provider: str, model: str, phase: str) -> None:
+    if outcome.kind == "incomplete" and outcome.error == PROVIDER_CONTROL_LEAK:
+        raise LLMError(
+            "provider_protocol_error",
+            "The provider returned internal control content instead of an answer or structured tool call.",
+            retryable=False,
+            provider=provider,
+            model=model,
+            details={"phase": phase, "terminal_reason": outcome.error},
+        )
 
 
 def _raise_if_output_truncated(outcome: TurnOutcome, *, provider: str, model: str, phase: str) -> None:
@@ -4366,6 +4379,9 @@ class LLMClient:
             },
         )
         self._record_canonical_outcome(turn_outcome, phase="invoke")
+        _raise_if_provider_control_leak(
+            turn_outcome, provider=self.provider.kind, model=self.profile.model, phase="invoke",
+        )
         _raise_if_output_truncated(
             turn_outcome,
             provider=self.provider.kind,
@@ -5629,6 +5645,9 @@ class LLMClient:
                         model=self.profile.model,
                     )
                 self._record_canonical_outcome(canonical_outcome, phase="stream")
+                _raise_if_provider_control_leak(
+                    canonical_outcome, provider=self.provider.kind, model=self.profile.model, phase="stream",
+                )
                 _raise_if_output_truncated(
                     canonical_outcome,
                     provider=self.provider.kind,
