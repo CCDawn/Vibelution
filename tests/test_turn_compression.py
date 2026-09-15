@@ -99,7 +99,7 @@ def _run(*, messages, compressor, config, extra=None, **kwargs):
         compression_count_this_turn=kwargs.pop("compression_count_this_turn", 0),
         compression_strategy=kwargs.pop("compression_strategy", _FakeStrategy()),
         prompt_manager=None,
-        turn_runtime_fn=lambda: {"sessionId": "s1", "runId": "t1"},
+        turn_runtime_fn=kwargs.pop("turn_runtime_fn", lambda: {"sessionId": "s1", "runId": "t1"}),
         estimate_tokens_fn=_estimate,
         get_ui_fn=lambda: ui,
         get_state_manager_fn=lambda: SimpleNamespace(set_state=lambda *a, **k: None),
@@ -110,6 +110,149 @@ def _run(*, messages, compressor, config, extra=None, **kwargs):
         extra["ui"] = ui
         extra["events"] = events
     return result
+
+
+def test_compression_uses_current_session_for_checkpoint_and_tool_references(monkeypatch, tmp_path):
+    from core.chat import conversation_ledger, tool_result_replacement
+    from core.web.services import agent_directory_service
+
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {
+            "agentId": "a1",
+            "sessionId": "workspace-session",
+            "turnId": "workspace-turn",
+        },
+    )
+    checkpoints = []
+    references = []
+    monkeypatch.setattr(
+        conversation_ledger,
+        "append_context_compression_checkpoint",
+        lambda root, session_id, **kw: checkpoints.append((session_id, kw)) or object(),
+    )
+    monkeypatch.setattr(
+        tool_result_replacement,
+        "replace_large_tool_results_for_compression",
+        lambda messages, **kw: (
+            references.append(kw["session_id"]) or messages,
+            {"replacements": []},
+        ),
+    )
+    extras = {}
+    _run(
+        messages=[AIMessage(content="long-context-message")],
+        compressor=_FakeCompressor([AIMessage(content="x")]),
+        config=_feature_config(),
+        project_root=str(tmp_path),
+        turn_runtime_fn=dict,
+        extra=extras,
+        retention_contract={"sessionId": "s1", "agentId": "a1"},
+    )
+
+    assert checkpoints[0][0] == "workspace-session"
+    assert checkpoints[0][1]["turn_id"] == "workspace-turn"
+    assert "sessionId=workspace-session" in checkpoints[0][1]["summary"]
+    assert "sessionId=s1" not in checkpoints[0][1]["summary"]
+    assert references == ["workspace-session"]
+    assert extras["events"][0]["kwargs"]["fields"]["sessionId"] == "workspace-session"
+
+
+def test_parallel_compression_keeps_shared_agent_sessions_separate(
+    monkeypatch, tmp_path
+):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    from core.chat import conversation_ledger
+    from core.web.services import agent_directory_service
+
+    current = agent_directory_service._CURRENT_AGENT_RUNTIME
+    barrier = Barrier(2)
+    checkpoints = []
+    monkeypatch.setattr(
+        conversation_ledger,
+        "append_context_compression_checkpoint",
+        lambda root, session_id, **kw: (
+            checkpoints.append((session_id, kw["turn_id"])) or object()
+        ),
+    )
+
+    def compress(session_id):
+        token = current.set(
+            {"agentId": "a1", "sessionId": session_id, "turnId": f"{session_id}-turn"}
+        )
+        try:
+            barrier.wait(timeout=5)
+            return _run(
+                messages=[AIMessage(content="long-context-message")],
+                compressor=_FakeCompressor([AIMessage(content="x")]),
+                config=_feature_config(),
+                project_root=str(tmp_path),
+                turn_runtime_fn=dict,
+            )
+        finally:
+            current.reset(token)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(compress, ["workspace-a", "workspace-b"]))
+    assert all(result[2] for result in results)
+    assert sorted(checkpoints) == [
+        ("workspace-a", "workspace-a-turn"),
+        ("workspace-b", "workspace-b-turn"),
+    ]
+
+
+def test_next_turn_replays_compression_from_its_own_ledger(monkeypatch, tmp_path):
+    from core.chat import conversation_ledger as ledger
+    from core.chat import turn_journal
+    from core.web.services import agent_directory_service
+
+    monkeypatch.setattr(
+        turn_journal, "turn_journal_workspace_root", lambda root: tmp_path / "workspace"
+    )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {
+            "agentId": "a1",
+            "sessionId": "workspace-session",
+            "turnId": "current-turn",
+        },
+    )
+    for session_id in ("s1", "workspace-session"):
+        ledger.append_conversation_event(
+            tmp_path,
+            session_id,
+            "old-turn",
+            ledger.EVENT_USER_MESSAGE,
+            payload={"content": f"original history of {session_id}"},
+        )
+    _run(
+        messages=[AIMessage(content="long-context-message")],
+        compressor=_FakeCompressor(
+            [AIMessage(content="x")], summary="retained task summary"
+        ),
+        config=_feature_config(),
+        project_root=str(tmp_path),
+        turn_runtime_fn=dict,
+    )
+
+    events = ledger.load_conversation_events(tmp_path, "workspace-session")
+    checkpoints = [
+        event
+        for event in events
+        if event.event_type == ledger.EVENT_COMPACTION_CHECKPOINT
+    ]
+    assert len(checkpoints) == 1
+    assert checkpoints[0].payload["coveredEventIds"] == [events[0].event_id]
+    replay = ledger.conversation_model_messages_from_events(events)
+    assert "retained task summary" in str(replay)
+    assert "original history of workspace-session" not in str(replay)
+    other_events = ledger.load_conversation_events(tmp_path, "s1")
+    assert len(other_events) == 1
+    assert "original history of s1" in str(ledger.conversation_model_messages_from_events(other_events))
 
 
 def test_disabled_feature_or_missing_compressor_skips_without_counting():
