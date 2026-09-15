@@ -225,4 +225,16 @@ describe("resolveSecondInstanceIntent", () => {
       command: "start"
     });
   });
+
+  it("keeps an explicit lifecycle command when the launcher also requests a Workbench window", () => {
+    expect(
+      resolveSecondInstanceIntent({
+        lifecycleCommand: "restart",
+        openWorkbench: true
+      })
+    ).toEqual({
+      action: "lifecycle",
+      command: "restart"
+    });
+  });
 });

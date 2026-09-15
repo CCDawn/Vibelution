@@ -177,11 +177,14 @@ export function resolveSecondInstanceIntent(input: {
       lifecycleCommand: lifecycleCommand === "open" ? "" : lifecycleCommand
     };
   }
-  if (lifecycleCommand === "open" || input.openWorkbench) {
+  if (lifecycleCommand === "open") {
     return { action: "open_workbench" };
   }
   if (lifecycleCommand) {
     return { action: "lifecycle", command: lifecycleCommand };
+  }
+  if (input.openWorkbench) {
+    return { action: "open_workbench" };
   }
   return { action: "focus_existing_shell" };
 }
