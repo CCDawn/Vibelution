@@ -951,15 +951,6 @@ export function useChatComposerSubmitActions({
     if (!activeSessionId) {
       return;
     }
-    if (sessionBusy) {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [activeSessionId]: lang === "zh"
-          ? "运行中的排队消息暂不支持图片，请等待当前轮次结束后发送。"
-          : "Queued follow-ups do not support images while a turn is running. Send it after the turn ends.",
-      }));
-      return;
-    }
     if (activeAgentImageInputUnsupported) {
       setSessionComposerErrors((current) => ({
         ...current,
@@ -1004,15 +995,6 @@ export function useChatComposerSubmitActions({
 
   const handleAddComposerReference = useCallback((reference: SessionReferenceAttachment) => {
     if (!activeSessionId) {
-      return;
-    }
-    if (sessionBusy) {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [activeSessionId]: lang === "zh"
-          ? "运行中的排队消息暂不支持会话引用，请等待当前轮次结束后发送。"
-          : "Queued follow-ups do not support session references while a turn is running. Send it after the turn ends.",
-      }));
       return;
     }
     if (activeEditTarget || resolvedEditTarget) {
