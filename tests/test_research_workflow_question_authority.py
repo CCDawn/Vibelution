@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -33,9 +34,7 @@ from core.web.services.team_workflow import research_projects
 from core.web.services.team_workflow.research_runtime import (
     model_routing,
     question_launch,
-)
-from core.web.services.team_workflow.research_runtime import (
-    service as runtime_service_module,
+    run_creation,
 )
 from core.web.services.team_workflow.research_runtime.runtime_factory import (
     build_workflow_runtime,
@@ -1269,7 +1268,7 @@ def test_create_endpoint_forbids_client_authored_contract_fields(
     _publish_phase_one_knowledge_package(tmp_path, monkeypatch)
     _patch_team_exists(monkeypatch)
     monkeypatch.setattr(
-        runtime_service_module,
+        run_creation,
         "build_question_run_input",
         lambda team_id, **kwargs: canonical_input(
             team_id,
@@ -1317,6 +1316,68 @@ def test_create_endpoint_forbids_client_authored_contract_fields(
     assert body["projectId"] == "challenge-sci-096"
     assert body["questionId"] == "SCI-096"
     assert "researchBriefHash" not in body
+
+    def _server_input_with(
+        *,
+        hypothesis_first: bool,
+        scope_workflow: str,
+    ) -> dict[str, Any]:
+        run_input = canonical_input(
+            "research-team",
+            question_id="SCI-096",
+            safety_limits=_safety_limits(),
+        )
+        return {
+            **run_input,
+            "researchScopeEnvelope": {
+                **run_input["researchScopeEnvelope"],
+                "workflow": scope_workflow,
+            },
+            "researchObjectiveContract": {
+                **run_input["researchObjectiveContract"],
+                "hypothesisFirst": hypothesis_first,
+            },
+        }
+
+    monkeypatch.setattr(
+        run_creation,
+        "build_question_run_input",
+        lambda _team_id, **_kwargs: _server_input_with(
+            hypothesis_first=True,
+            scope_workflow=CHALLENGE_CUP_WORKFLOW_ID,
+        ),
+    )
+    hypothesis_scope_mismatch = client.post(
+        f"/api/research/workflows/{CHALLENGE_CUP_WORKFLOW_ID}/runs",
+        json={
+            "teamId": "research-team",
+            "questionId": "SCI-096",
+            "safetyLimits": _safety_limits(),
+            "idempotencyKey": "question-authority-hypothesis-scope-mismatch",
+        },
+    )
+
+    monkeypatch.setattr(
+        run_creation,
+        "build_question_run_input",
+        lambda _team_id, **_kwargs: _server_input_with(
+            hypothesis_first=False,
+            scope_workflow="hypothesis_first",
+        ),
+    )
+    formal_scope_mismatch = client.post(
+        f"/api/research/workflows/{CHALLENGE_CUP_WORKFLOW_ID}/runs",
+        json={
+            "teamId": "research-team",
+            "questionId": "SCI-096",
+            "safetyLimits": _safety_limits(),
+            "idempotencyKey": "question-authority-formal-scope-mismatch",
+        },
+    )
+
+    for response in (hypothesis_scope_mismatch, formal_scope_mismatch):
+        assert response.status_code == 422
+        assert response.json()["detail"]["code"] == "invalid_run_input"
 
 
 def _isolate_research_projects_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
