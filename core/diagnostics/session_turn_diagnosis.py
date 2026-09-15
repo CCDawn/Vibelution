@@ -531,12 +531,19 @@ def _journal_terminal_status(
         else {}
     )
     event_type = str(terminal.get("eventType") or terminal.get("event_type") or "")
-    terminal_status = str(
-        terminal.get("payload", {}).get("finalStatus")
-        or terminal.get("payload", {}).get("resultStatus")
-        or terminal.get("status")
-        or ""
-    ).strip().lower()
+    payload = terminal.get("payload") if isinstance(terminal.get("payload"), dict) else {}
+    final_status = str(payload.get("finalStatus") or "").strip().lower()
+    event_status = str(terminal.get("status") or "").strip().lower()
+    result_status = str(payload.get("resultStatus") or "").strip().lower()
+    # ``needs_continue`` is a semantic downgrade that must survive legacy
+    # writers which duplicated ``completed`` in one of the other fields.
+    terminal_status = (
+        final_status
+        or ("needs_continue" if event_status == "needs_continue" else "")
+        or ("needs_continue" if result_status == "needs_continue" else "")
+        or event_status
+        or result_status
+    )
     if event_type == EVENT_TURN_COMPLETED:
         if terminal_status in {"needs_continue", "incomplete"}:
             return "needs_continue"
