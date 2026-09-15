@@ -359,3 +359,43 @@ def test_diagnosis_routes_canonical_incomplete_outcome_to_protocol_adapter(tmp_p
     assert diagnosis["failureStage"] == "outcome_evaluation"
     assert diagnosis["terminalConsistency"]["consistent"] is True
     assert diagnosis["nextMinimalAction"] == "inspect_protocol_adapter"
+
+
+def test_diagnosis_does_not_treat_needs_continue_terminal_event_as_completed(tmp_path):
+    module = load_module()
+    turn_id = "turn-needs-continue"
+    append_turn_event(tmp_path, "session-1", turn_id, EVENT_TURN_STARTED, status="running")
+    append_turn_event(
+        tmp_path,
+        "session-1",
+        turn_id,
+        EVENT_TURN_COMPLETED,
+        status="completed",
+        payload={"resultStatus": "completed", "finalStatus": "needs_continue"},
+    )
+
+    diagnosis = module.build_session_turn_diagnosis(tmp_path, "session-1", turn_id)["diagnosis"]
+
+    assert diagnosis["status"] == "incomplete"
+    assert diagnosis["terminalConsistency"]["journal"] == "needs_continue"
+    assert diagnosis["nextMinimalAction"] != "no_action_needed"
+
+
+def test_diagnosis_without_turn_id_selects_latest_running_turn(tmp_path):
+    module = load_module()
+    append_turn_event(tmp_path, "session-1", "turn-old", EVENT_TURN_STARTED, status="running")
+    append_turn_event(tmp_path, "session-1", "turn-old", EVENT_TURN_COMPLETED, status="completed")
+    append_turn_event(tmp_path, "session-1", "turn-new", EVENT_TURN_STARTED, status="running")
+    _write_runtime_events(
+        tmp_path,
+        [
+            _runtime_event("llm_route_attempt_succeeded", turn_id="turn-old"),
+            _runtime_event("llm_route_attempt_started", turn_id="turn-new"),
+        ],
+    )
+
+    report = module.build_session_turn_diagnosis(tmp_path, "session-1")
+
+    assert report["turnId"] == "turn-new"
+    assert report["journal"]["eventTypes"] == [EVENT_TURN_STARTED]
+    assert report["diagnosis"]["status"] == "running"
