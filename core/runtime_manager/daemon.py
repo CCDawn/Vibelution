@@ -2624,12 +2624,14 @@ class RuntimeManagerDaemon:
 
                 if not should_run_workbench_idle_reconcile():
                     self._process_self_evolution_restart_intent()
+                    self._process_deferred_restart_intent()
                     time.sleep(DAEMON_LOOP_INTERVAL_SECONDS)
                     continue
 
                 probe = self._take_idle_reconcile_probe()
                 if probe is not None:
                     self._process_self_evolution_restart_intent()
+                    self._process_deferred_restart_intent()
                     state = self._reconcile_observation(
                         load_state(),
                         observation=probe["observation"],
@@ -3460,6 +3462,64 @@ class RuntimeManagerDaemon:
         state["evolution"] = build_evolution_summary()
         state["residualProcesses"] = residual_processes
         return state
+
+    def _process_deferred_restart_intent(self) -> None:
+        intent = claim_next_restart_intent(target="workbench_restart")
+        if not intent:
+            return
+        intent_id = str(intent.get("intentId") or "").strip()
+        payload = intent.get("payload") if isinstance(intent.get("payload"), dict) else {}
+        if str(payload.get("action") or "") != "restart_workbench":
+            complete_restart_intent(
+                intent_id,
+                status="failed",
+                message="Unsupported workbench restart intent action.",
+            )
+            return
+        reason = str(intent.get("reason") or "").strip()
+        try:
+            result = self._handle_command(
+                {
+                    "commandId": f"cmd_deferred_{intent_id}",
+                    "type": "restart_workbench",
+                    "requestedBy": str(intent.get("requestedBy") or "deferred_restart").strip()
+                    or "deferred_restart",
+                    "args": {
+                        "reason": reason,
+                        "deferredIntentId": intent_id,
+                        "sourceCommandId": str(intent.get("sourceCommandId") or "").strip(),
+                    },
+                }
+            )
+            if bool(result.get("ok")):
+                complete_restart_intent(
+                    intent_id,
+                    status="completed",
+                    message=str(result.get("message") or "Deferred workbench restart fulfilled."),
+                )
+                _append_event(
+                    "workbench.restart_fulfilled_from_intent",
+                    {
+"intentId": intent_id,
+                        "commandId": f"cmd_deferred_{intent_id}",
+                        "reason": str(reason)[:240],                    },
+                )
+            else:
+                complete_restart_intent(
+                    intent_id,
+                    status="failed",
+                    message=str(result.get("reason") or result.get("message") or "restart hand-off failed"),
+                )
+        except Exception as exc:  # noqa: BLE001 - intent fulfilment must not kill the daemon loop
+            if intent_id:
+                complete_restart_intent(intent_id, status="failed", message=f"{type(exc).__name__}: {exc}")
+            _append_event(
+                "workbench.restart_intent_failed",
+                {
+"intentId": intent_id,
+                    "errorType": type(exc).__name__,
+                    "message": str(exc)[:240],                },
+            )
 
     def _process_self_evolution_restart_intent(self) -> None:
         intent = claim_next_restart_intent(target="self_evolution_run")

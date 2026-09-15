@@ -484,6 +484,37 @@ export function mergeSessionDetailMessageWindow(
 }
 
 /**
+ * Fold a select handoff (``selectedLightweight``) into the cache.
+ *
+ * The handoff carries summary/control fields with an empty ``messages`` list by
+ * design, so it must never replace a cached transcript: keep the known messages
+ * and message window, and let the windowed GET/SSE hydrate them. Without cached
+ * messages the handoff paints as a pending transcript shell instead of the
+ * empty-session copy.
+ */
+export function mergeSessionDetailHandoff(
+  previous: SessionDetail | undefined,
+  handoff: SessionDetail,
+): SessionDetail {
+  if (!previous || previous.id !== handoff.id) {
+    return {
+      ...handoff,
+      provisionalTranscript: true,
+    };
+  }
+  const {
+    messages: _handoffMessages,
+    messageWindow: _handoffMessageWindow,
+    provisionalTranscript: _handoffProvisional,
+    ...handoffFields
+  } = handoff;
+  return preserveSessionDetailStopIntent(previous, {
+    ...previous,
+    ...handoffFields,
+  });
+}
+
+/**
  * A requested stop is a client-owned intent until the worker publishes a
  * terminal snapshot. Running snapshots emitted before the worker observes the
  * request must not flip the UI back out of "stopping".

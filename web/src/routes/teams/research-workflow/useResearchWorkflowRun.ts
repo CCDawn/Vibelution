@@ -32,7 +32,7 @@ import { useResearchWorkflowSnapshot } from "./useResearchWorkflowSnapshot";
  */
 const SNAPSHOT_FALLBACK_POLL_MS = 30_000;
 /** Backend WorkflowRunStatus values after which nothing new can happen. */
-const TERMINAL_RUN_STATUSES = new Set(["succeeded", "failed", "cancelled", "superseded"]);
+const TERMINAL_RUN_STATUSES = new Set(["succeeded", "failed", "cancelled", "archived", "superseded"]);
 
 export type UseResearchWorkflowRunResult = {
   projection: WorkflowCanvasProjection | null;

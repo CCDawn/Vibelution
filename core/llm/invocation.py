@@ -77,6 +77,23 @@ def invocation_scope_from_metadata(metadata: Any = None):
     return InvocationScope.for_synthetic(invocation_id=invocation_id, purpose=purpose)
 
 
+def _record_image_input_feedback_quietly(
+    client: Any,
+    messages: Any,
+    *,
+    ok: bool,
+    error: Any = None,
+) -> None:
+    """Learn image-input capability from a real invoke without ever breaking it."""
+
+    try:
+        from .image_input_feedback import record_image_input_turn_feedback
+
+        record_image_input_turn_feedback(client, messages, ok=ok, error=error)
+    except Exception:  # noqa: BLE001 - capability learning must never break a real invoke
+        return
+
+
 def invoke_llm(
     client: Any,
     messages: list[Any],
@@ -96,7 +113,13 @@ def invoke_llm(
         kwargs = {"tools": tools, "metadata": effective_metadata}
         if output_schema is not None:
             kwargs["output_schema"] = output_schema
-        return client.invoke(messages, **kwargs)
+        try:
+            result = client.invoke(messages, **kwargs)
+        except Exception as exc:
+            _record_image_input_feedback_quietly(client, messages, ok=False, error=exc)
+            raise
+        _record_image_input_feedback_quietly(client, messages, ok=True)
+        return result
 
 
 def invoke_llm_outcome(
@@ -122,7 +145,12 @@ def invoke_llm_outcome(
         }
         if output_schema is not None:
             kwargs["output_schema"] = output_schema
-        outcome = client.invoke_outcome(messages, **kwargs)
+        try:
+            outcome = client.invoke_outcome(messages, **kwargs)
+        except Exception as exc:
+            _record_image_input_feedback_quietly(client, messages, ok=False, error=exc)
+            raise
+        _record_image_input_feedback_quietly(client, messages, ok=True)
     if not isinstance(outcome, TurnOutcome):
         raise TypeError("LLM client did not return canonical TurnOutcome")
     return outcome
@@ -147,7 +175,12 @@ def stream_llm(
         kwargs = {"tools": tools, "metadata": effective_metadata}
         if output_schema is not None:
             kwargs["output_schema"] = output_schema
-        yield from client.stream(messages, **kwargs)
+        try:
+            yield from client.stream(messages, **kwargs)
+        except Exception as exc:
+            _record_image_input_feedback_quietly(client, messages, ok=False, error=exc)
+            raise
+        _record_image_input_feedback_quietly(client, messages, ok=True)
 
 
 def run_streaming_llm_outcome(
@@ -175,15 +208,20 @@ def run_streaming_llm_outcome(
         }
         if output_schema is not None:
             kwargs["output_schema"] = output_schema
-        iterator = iter(
-            client.stream_events(messages, **kwargs)
-        )
-        while True:
-            try:
-                next(iterator)
-            except StopIteration as stop:
-                outcome = stop.value
-                break
+        try:
+            iterator = iter(
+                client.stream_events(messages, **kwargs)
+            )
+            while True:
+                try:
+                    next(iterator)
+                except StopIteration as stop:
+                    outcome = stop.value
+                    break
+        except Exception as exc:
+            _record_image_input_feedback_quietly(client, messages, ok=False, error=exc)
+            raise
+        _record_image_input_feedback_quietly(client, messages, ok=True)
     if not isinstance(outcome, TurnOutcome):
         raise TypeError("LLM stream did not return canonical TurnOutcome")
     if not outcome.terminal_event_seen:

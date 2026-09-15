@@ -1238,6 +1238,77 @@ def test_session_detail_projects_context_compression_markers_in_event_order(tmp_
     assert applied_turn["turnItems"][1]["text"] == "压缩后继续生成回答。"
 
 
+def _seed_compaction_checkpoint(tmp_path, session_id: str, *, after_tokens: int = 101_395) -> None:
+    append_context_compression_checkpoint(
+        tmp_path,
+        session_id,
+        turn_id="turn-compaction",
+        current_turn_id="turn-current",
+        summary="旧阶段已压缩为摘要。",
+        level="standard",
+        reason="context_pressure",
+        before_tokens=229_526,
+        after_tokens=after_tokens,
+        trigger_source="auto",
+    )
+
+
+def _provider_usage_message(recorded_at: str, *, total_tokens: int = 200_500) -> dict:
+    return {
+        "role": "assistant",
+        "content": "回答" * 200,
+        "metadata": {
+            "llmUsage": {
+                "source": "provider_usage",
+                "inputTokens": total_tokens - 500,
+                "outputTokens": 500,
+                "totalTokens": total_tokens,
+                "recordedAt": recorded_at,
+            }
+        },
+    }
+
+
+def test_session_context_usage_uses_compaction_size_when_checkpoint_is_newest(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    session_id = "session-usage-compacted"
+    _seed_compaction_checkpoint(tmp_path, session_id)
+    messages = [_provider_usage_message("2026-09-15T07:00:00+00:00")]
+
+    payload = session_service._build_session_context_usage({"id": session_id}, messages)
+
+    assert payload["source"] == "conversation_ledger_compacted_context"
+    expected = 101_395
+    assert payload["used"] == (min(expected, payload["limit"]) if payload["limit"] > 0 else expected)
+
+
+def test_session_context_usage_prefers_fresher_provider_usage_over_compaction(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    session_id = "session-usage-fresh"
+    _seed_compaction_checkpoint(tmp_path, session_id)
+    messages = [_provider_usage_message("2030-01-01T00:00:00+00:00")]
+
+    payload = session_service._build_session_context_usage({"id": session_id}, messages)
+
+    assert payload["source"] == "provider_usage_context_window"
+    expected = 200_500
+    assert payload["used"] == (min(expected, payload["limit"]) if payload["limit"] > 0 else expected)
+
+
+def test_session_context_usage_falls_back_to_transcript_estimate_without_usage(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    messages = [
+        {"role": "user", "content": "上下文估算用户输入" * 40},
+        {"role": "assistant", "content": "上下文估算助手输出" * 40},
+    ]
+
+    payload = session_service._build_session_context_usage({"id": "session-usage-estimate"}, messages)
+
+    assert payload["source"] == "conversation_ledger"
+    assert payload["used"] == payload["estimatedTokens"]
+    assert payload["used"] > 0
+
+
 def test_session_detail_live_overlay_replaces_open_ledger_partial(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     append_conversation_event(

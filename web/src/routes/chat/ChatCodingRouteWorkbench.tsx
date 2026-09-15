@@ -83,6 +83,7 @@ import { useChatWorkbenchStore } from "../../store/chatWorkbenchStore";
 import {
   deriveSessionDetailQueryErrorState,
   deriveSessionListQueryErrorState,
+  mergeSessionDetailHandoff,
   mergeSessionDetailMessageWindow,
   mergeSessionDetailIntoSummaries,
 } from "../chatSessionState";
@@ -935,7 +936,13 @@ export function ChatCodingRouteWorkbench() {
     syncChatRoomDetail,
   });
   const syncSessionDetail = useCallback(
-    (detail: SessionDetail) => {
+    (
+      detail: SessionDetail,
+      options?: {
+        /** ``preserve`` folds a transcript-free select handoff into the cache. */
+        transcript?: "merge" | "preserve";
+      },
+    ) => {
       let shouldSyncSummaries = true;
       let mergedDetail: SessionDetail = detail;
       queryClient.setQueryData<SessionDetail>(queryKeys.session(detail.id), (previous) => {
@@ -943,7 +950,9 @@ export function ChatCodingRouteWorkbench() {
           shouldSyncSummaries = false;
           return previous ?? detail;
         }
-        const nextDetail = mergeSessionDetailMessageWindow(previous, detail);
+        const nextDetail = options?.transcript === "preserve"
+          ? mergeSessionDetailHandoff(previous, detail)
+          : mergeSessionDetailMessageWindow(previous, detail);
         mergedDetail = nextDetail;
         if (previous && sessionDetailSnapshotKey(previous) === sessionDetailSnapshotKey(nextDetail)) {
           shouldSyncSummaries = false;

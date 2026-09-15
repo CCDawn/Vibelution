@@ -18,6 +18,7 @@ from core.research.workflow.definition import (
     build_challenge_cup_workflow_definition,
 )
 from core.research.workflow.definition_registry import register_or_resolve
+from core.research.workflow.stage_one_definition import STAGE_ONE_SCHEMA_VERSION
 from core.research.workflow.ledger import EventRecord, RunRecord
 from core.research.workflow.models import ActorKind, WorkflowDefinition
 
@@ -592,7 +593,17 @@ def create_run(
     if definition.workflowId != workflow_id:
         raise ResearchWorkflowError("Workflow definition identity mismatch", code="invalid_run_input")
     scope = run_input.get("researchScopeEnvelope") or {}
-    if scope.get("workflow") != workflow_id:
+    objective = run_input.get("researchObjectiveContract") or {}
+    expected_scope_workflow = (
+        "hypothesis_first"
+        if (
+            definition.schemaVersion == STAGE_ONE_SCHEMA_VERSION
+            and isinstance(objective, Mapping)
+            and objective.get("hypothesisFirst") is True
+        )
+        else workflow_id
+    )
+    if scope.get("workflow") != expected_scope_workflow:
         raise ResearchWorkflowError("Run scope workflow identity mismatch", code="invalid_run_input")
     workflow_version_id = identity.workflowVersionId
     fingerprints = _create_request_fingerprints(run_input)
