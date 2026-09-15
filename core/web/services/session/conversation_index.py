@@ -2555,6 +2555,9 @@ def _make_empty_conversation(
     conversation = {
         "conversation_id": str(session_id or "").strip(),
         "title": str(title or "").strip() or s.DEFAULT_CHAT_CONVERSATION_TITLE,
+        # Explicit source: an operator-supplied title is manual, a bare create is
+        # a placeholder that first-turn title generation may replace.
+        "title_source": "manual" if str(title or "").strip() else "placeholder",
         "workspace_path": s._session_workspace_relative_path(session_id),
         "updated_at": str(timestamp or "").strip() or s._now_timestamp(),
         "last_turn_status": "ready",
