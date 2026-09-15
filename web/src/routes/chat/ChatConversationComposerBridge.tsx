@@ -121,19 +121,15 @@ export function buildComposerImageInputGuidance(input: {
       ? "当前轮运行中：图片会随这条消息一起排队，本轮结束后自动发送。"
       : "This turn is still running: the image queues with this message and sends automatically when the turn ends.";
   }
-  if (input.imageInputSupport === true) {
-    return input.lang === "zh"
-      ? `图片将发送给已验证支持图像输入的 ${modelLabel}。`
-      : `The image will be sent to ${modelLabel}, which has verified image-input support.`;
-  }
   if (input.imageInputSupport === false) {
     return input.lang === "zh"
       ? `${modelLabel} 明确不支持图像输入，无法发送图片。`
       : `${modelLabel} explicitly does not support image input, so the image cannot be sent.`;
   }
-  return input.lang === "zh"
-    ? `${modelLabel} 的图像输入能力尚未验证；将尝试发送，失败时会保留诊断。`
-    : `${modelLabel}'s image-input capability is not verified yet. Vibelution will try the request and retain diagnostics if it fails.`;
+  // Verified support and unverified capability stay quiet: the attachment sends
+  // either way and a failed request already surfaces its own diagnostic. Only a
+  // blocked case (explicitly unsupported) still needs a visible reason here.
+  return "";
 }
 
 export function buildConversationComposerBridgeState(
