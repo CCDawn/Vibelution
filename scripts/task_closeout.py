@@ -49,6 +49,17 @@ class CloseoutContext:
     branch: str
 
 
+@dataclass(frozen=True)
+class FailureDetail:
+    """One failed validation command, surfaced at the closeout result top level."""
+
+    code: str
+    command_kind: str
+    argv0: str
+    exit_code: int
+    summary: str
+
+
 @dataclass
 class ManagedCloseoutResult:
     status: CloseoutStatus
@@ -60,12 +71,43 @@ class ManagedCloseoutResult:
     retryable: bool = False
     next_action: str = ""
     errors: list[str] = field(default_factory=list)
+    failures: list[FailureDetail] = field(default_factory=list)
 
 
 class ManagedCloseoutError(RuntimeError):
     def __init__(self, code: str, message: str = "") -> None:
         super().__init__(message or code)
         self.code = code
+
+
+def command_failure_details(code: str, commands: Sequence[Any]) -> list[FailureDetail]:
+    """Return structured details for every failed command in one gate result.
+
+    ``errors`` stays a human-readable string list for compatibility, but it only
+    carries the coarse outcome (``failed``). Callers that need to know which
+    command failed and why should read ``failures`` instead of opening the
+    manifest and guessing the field name.
+    """
+
+    details: list[FailureDetail] = []
+    for command in commands or ():
+        status = str(getattr(command, "status", "") or "")
+        if status == "passed":
+            continue
+        argv = list(getattr(command, "argv", None) or ())
+        exit_code = int(getattr(command, "exit_code", 0) or 0)
+        details.append(
+            FailureDetail(
+                code=code,
+                command_kind=str(getattr(command, "kind", "") or ""),
+                argv0=str(argv[0]) if argv else "",
+                exit_code=exit_code,
+                summary=gate.bounded_failure_summary(
+                    str(getattr(command, "failure_summary", "") or "")
+                ),
+            )
+        )
+    return details
 
 
 def _bounded_error(error: BaseException | str) -> str:
@@ -809,6 +851,7 @@ def run_managed_closeout(
                     exit_code=1,
                     manifest_path=manifest_path_text,
                     errors=[str(closeout.outcome)],
+                    failures=command_failure_details(closeout.outcome, closeout.commands),
                 )
 
         if validation_result is None and not manifest_preverified:
@@ -819,6 +862,7 @@ def run_managed_closeout(
                     exit_code=1,
                     manifest_path=manifest_path_text,
                     errors=[str(verified.outcome)],
+                    failures=command_failure_details(verified.outcome, verified.commands),
                 )
     except (OSError, RuntimeError, ValueError) as error:
         validation_result = ManagedCloseoutResult(

@@ -860,8 +860,11 @@ def test_run_process_uses_utf8_and_failure_summary_tolerates_missing_streams(
 
     assert captured["encoding"] == "utf-8"
     assert captured["errors"] == "replace"
-    assert gate.summarize_failure(completed, "tool") == "tool: command failed"
-
+# Without a diagnostic line the summary stays bounded, but it must still
+    # carry the exit code and argv[0] so the caller can locate the command.
+    summary = gate.summarize_failure(completed, "tool")
+    assert summary.startswith("tool: exit 1 | tool |")
+    assert summary.endswith("command failed")
 
 def test_failure_summary_reports_failed_node_and_cause_not_session_banner() -> None:
     completed = subprocess.CompletedProcess(

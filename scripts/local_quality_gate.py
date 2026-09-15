@@ -420,7 +420,14 @@ def summarize_failure(completed: subprocess.CompletedProcess[str], subject: str)
     if evidence:
         raw = " | ".join(evidence)
     else:
-        raw = (completed.stderr or "").strip() or (completed.stdout or "").strip() or "command failed"
+        # Keep the caller able to locate the command even when the tool printed
+        # no diagnostic line at all: exit code plus argv[0] plus a bounded tail.
+        tail = (completed.stderr or "").strip() or (completed.stdout or "").strip()
+        args = completed.args if isinstance(completed.args, (list, tuple)) else ()
+        argv0 = str(args[0]) if args else ""
+        raw = f"exit {completed.returncode} | {argv0} | {tail}" if tail else (
+            f"exit {completed.returncode} | {argv0} | command failed"
+        )
     return bounded_failure_summary(f"{subject}: {raw}")
 
 
