@@ -18,10 +18,12 @@ import {
   ensureFrontendRelease,
   ensureFrontendBuild,
   FRONTEND_BUILD_TIMEOUT_MS,
+  launcherLifecycleBlockedResultPath,
   mainLineBackendIsReachable,
   mainLineBackendIsReusable,
   mainLineRunningCodeIsCurrent,
   readRunningCodeFingerprint,
+  recordBlockedLifecycleDiagnostic,
   resolveBindableWorkbenchPort,
   reclaimStaleWorkbenchBackend,
   resolveNoConsolePython,
@@ -75,6 +77,36 @@ function frontendBuildChild(): {
     error: (error) => errorListener?.(error)
   };
 }
+
+describe("blocked lifecycle diagnostics", () => {
+  it("persists the blocked reason so an operator can see why a restart was refused", () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "vibelution-blocked-"));
+    try {
+      recordBlockedLifecycleDiagnostic(workspaceRoot, {
+        operation: "restart",
+        commandId: "cmd-1",
+        code: "active_work_blocked",
+        message: ACTIVE_WORK_BLOCK_MESSAGE_STOP,
+        activeWorkRuns: [
+          { kind: "chat_turn", runId: "run-1", status: "running", sessionId: "session-1" }
+        ]
+      });
+
+      const target = launcherLifecycleBlockedResultPath(workspaceRoot);
+      expect(existsSync(target)).toBe(true);
+      const payload = JSON.parse(readFileSync(target, "utf-8")) as Record<string, unknown>;
+      expect(payload.code).toBe("active_work_blocked");
+      expect(payload.operation).toBe("restart");
+      expect(payload.activeWorkCount).toBe(1);
+      expect(payload.retryMode).toBe("after_active_work");
+      const runs = payload.activeWorkRuns as Array<Record<string, unknown>>;
+      expect(runs[0].kind).toBe("chat_turn");
+      expect(runs[0].sessionId).toBe("session-1");
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("workbenchBackendHealth", () => {
   it("skips HTTP when the TCP connect gate fails", async () => {

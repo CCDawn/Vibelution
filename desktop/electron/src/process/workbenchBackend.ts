@@ -292,6 +292,50 @@ export function runtimeManagerDaemonIdentityPath(workspaceRoot: string): string 
   return join(resolveRuntimeManagerDir(workspaceRoot), "daemon.identity.json");
 }
 
+export function launcherLifecycleBlockedResultPath(workspaceRoot: string): string {
+  return join(resolveRuntimeManagerDir(workspaceRoot), "launcher-lifecycle-blocked.json");
+}
+
+export function recordBlockedLifecycleDiagnostic(
+  workspaceRoot: string,
+  payload: {
+    operation: string;
+    commandId: string;
+    code: string;
+    message: string;
+    activeWorkRuns: readonly ActiveWorkRun[];
+  }
+): void {
+  // A blocked lifecycle command otherwise surfaces as a bare nonzero exit code
+  // with no output, so "why was my restart refused" has no answer. Persist the
+  // same structured reason the tray shows, without changing the decision.
+  try {
+    const target = launcherLifecycleBlockedResultPath(workspaceRoot);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(
+      target,
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          operation: payload.operation,
+          commandId: payload.commandId,
+          code: payload.code,
+          message: payload.message,
+          activeWorkCount: payload.activeWorkRuns.length,
+          activeWorkRuns: payload.activeWorkRuns.slice(0, 8),
+          retryMode: "after_active_work",
+          recordedAt: new Date().toISOString()
+        },
+        null,
+        2
+      ),
+      "utf-8"
+    );
+  } catch {
+    // Diagnostics must never change the lifecycle decision itself.
+  }
+}
+
 export function readDaemonPid(workspaceRoot: string): number {
   try {
     const raw = readFileSync(runtimeManagerDaemonPidPath(workspaceRoot), "utf8").trim();
