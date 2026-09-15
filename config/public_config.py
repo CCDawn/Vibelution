@@ -652,6 +652,55 @@ LLM_MODEL_PRESETS = {
     },
 }
 
+# Preset capability keys that map onto the canonical catalog field names used by
+# ``config.model_catalog.CAPABILITY_SOURCE_PRIORITY``.
+_CURATED_CAPABILITY_FIELD_ALIASES = {
+    "image_input": "image_input",
+    "imageinput": "image_input",
+    "supports_image_input": "image_input",
+    "supportsimageinput": "image_input",
+    "supports_vision": "image_input",
+    "supportsvision": "image_input",
+    "vision": "image_input",
+}
+
+
+def curated_catalog_capabilities(model_name: str) -> dict[str, Any]:
+    """Built-in preset capability claims for an upstream model name.
+
+    Presets are the curated-snapshot layer of the capability priority ladder
+    (``driver_default`` < ``curated_snapshot`` < ``provider_endpoint`` <
+    ``runtime_probe`` < ``operator_override``). They beat driver defaults but
+    never override provider discovery or an operator declaration, and an
+    unknown model name stays unknown -- a preset never guesses.
+    """
+
+    wanted = str(model_name or "").strip().lower()
+    if not wanted:
+        return {}
+    for preset in LLM_MODEL_PRESETS.values():
+        if not isinstance(preset, dict):
+            continue
+        entry = preset.get("model") if isinstance(preset.get("model"), dict) else {}
+        declared_name = str(entry.get("model") or "").strip().lower()
+        if not declared_name or declared_name != wanted:
+            continue
+        claims: dict[str, Any] = {}
+        nested = entry.get("capabilities")
+        if isinstance(nested, dict):
+            for key, value in nested.items():
+                field = _CURATED_CAPABILITY_FIELD_ALIASES.get(
+                    str(key).strip().lower().replace("-", "_")
+                )
+                if field and isinstance(value, bool):
+                    claims[field] = value
+        legacy = entry.get("supports_image_input")
+        if isinstance(legacy, bool) and "image_input" not in claims:
+            claims["image_input"] = legacy
+        return claims
+    return {}
+
+
 LLM_PROVIDER_VENDOR_LABELS = {
     "aliyun": "阿里云 DashScope",
     "anthropic": "Anthropic",

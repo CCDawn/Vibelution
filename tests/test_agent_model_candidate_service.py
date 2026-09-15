@@ -134,6 +134,72 @@ def test_image_and_audio_candidates_remain_visible_with_disabled_reason():
         assert by_upstream[upstream_id]["capabilitySource"] == "operator_override"
 
 
+def _single_model_public_config(upstream_id: str) -> dict:
+    public_config = _public_config()
+    public_config["llm"]["providers"]["ai-pixel"]["models"] = {
+        "primary": {"upstream_id": upstream_id, "label": upstream_id, "enabled": True}
+    }
+    return public_config
+
+
+def test_curated_preset_image_capability_reaches_slot_projection() -> None:
+    # ``deepseek-v4-flash`` is a built-in preset that declares image input as
+    # unsupported, so the curated snapshot layer must surface that verdict
+    # instead of leaving the vision slot at "unknown".
+    payload = agent_model_candidate_service.project_agent_model_candidates(
+        _single_model_public_config("deepseek-v4-flash"),
+        _catalog_state(),
+    )
+    candidate = next(item for item in payload if item["upstreamId"] == "deepseek-v4-flash")
+
+    assert candidate["supportsImageInput"] is False
+    assert candidate["slotCompatibility"]["vision"] == {
+        "allowed": False,
+        "reasonCode": "image_input_unsupported",
+    }
+    assert candidate["capabilities"]["image_input"]["source"] == "curated_snapshot"
+
+
+def test_unlisted_gateway_model_keeps_image_capability_unknown() -> None:
+    payload = agent_model_candidate_service.project_agent_model_candidates(
+        _single_model_public_config("mystery-gateway-model-9000"),
+        _catalog_state(),
+    )
+    candidate = next(
+        item for item in payload if item["upstreamId"] == "mystery-gateway-model-9000"
+    )
+
+    assert candidate["supportsImageInput"] is None
+    assert candidate["slotCompatibility"]["vision"] == {
+        "allowed": False,
+        "reasonCode": "image_input_unknown",
+    }
+
+
+def test_provider_endpoint_declaration_outranks_curated_preset() -> None:
+    catalog = _catalog_state()
+    catalog["providers"]["ai-pixel"]["models"] = {
+        "primary": {
+            "upstreamId": "deepseek-v4-flash",
+            "label": "DeepSeek V4 Flash",
+            "availability": "observed",
+            "capabilities": {
+                "image_input": {"value": "supported", "source": "provider_endpoint"}
+            },
+        }
+    }
+
+    payload = agent_model_candidate_service.project_agent_model_candidates(
+        _single_model_public_config("deepseek-v4-flash"),
+        catalog,
+    )
+    candidate = next(item for item in payload if item["upstreamId"] == "deepseek-v4-flash")
+
+    assert candidate["supportsImageInput"] is True
+    assert candidate["slotCompatibility"]["vision"]["allowed"] is True
+    assert candidate["capabilities"]["image_input"]["source"] == "provider_endpoint"
+
+
 def test_numbered_image_alias_is_disabled_without_matching_image_understanding_models():
     public_config = _public_config()
     public_config["llm"]["providers"]["ai-pixel"]["models"]["image2"]["upstream_id"] = "image2"
