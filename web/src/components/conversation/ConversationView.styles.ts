@@ -1134,9 +1134,8 @@ backToBottomButton:
     "vui-components-conversationview thoughtText min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   thoughtTextBlock:
     "vui-components-conversationview thoughtTextBlock min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
-  timeline:
-    "vui-components-conversationview timeline flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden bg-[var(--vui-surface-chat)] px-[clamp(1rem,3vw,3rem)] py-4 [scrollbar-gutter:stable]",
-  timelineArea:
+timeline:
+    "vui-components-conversationview timeline flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden bg-[var(--vui-surface-chat)] pl-[clamp(1rem,3vw,3rem)] pr-[clamp(3rem,3vw,3.5rem)] py-4 [scrollbar-gutter:stable]",  timelineArea:
     "vui-components-conversationview timelineArea relative flex min-h-0 min-w-0 flex-1 flex-col",
   timelineContent:
     "vui-components-conversationview timelineContent grid min-w-0 w-full content-start gap-[10px]",
