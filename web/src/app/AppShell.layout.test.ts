@@ -134,8 +134,8 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("--shell-topbar-height: 40px");
     expect(shellStyles).toContain("--shell-settings-dock-height: 56px");
     expect(shellStyles).toContain("env(titlebar-area-width");
-    expect(styles.settingsPopoverContent).toContain("w-[min(316px,calc(100vw-20px))]");
-    expect(styles.settingsPopoverContent).toContain("max-h-[min(560px,calc(100dvh-96px))]");
+    expect(styles.settingsPopoverContent).toContain("w-[min(292px,calc(100vw-20px))]");
+    expect(styles.settingsPopoverContent).toContain("max-h-[min(520px,calc(100dvh-96px))]");
     expect(styles.settingsTrigger).toContain("!h-full");
     expect(styles.settingsTrigger).toContain("!w-full");
     expect(shellSource).toContain("VStatusChip");
@@ -191,8 +191,6 @@ describe("AppShell layout contract", () => {
     ];
     const headerStyles = [
       styles.activeWorkDetailHeader,
-      styles.utilityPanelHeader,
-      utilityMenuStyles.utilityPanelHeader,
     ];
 
     for (const value of headerStyles) {
@@ -395,7 +393,7 @@ describe("AppShell layout contract", () => {
     expect(utilityMenuSource).toContain('to="/usage"');
     expect(utilityMenuSource).toContain('t("navUsage")');
     expect(utilityMenuSource).toContain('<VTooltip content={t("usageUtilityTitle")}>');
-    expect(utilityMenuSource).toContain('<VTooltip content={t("topUtilityMenuHint")} width="wide">');
+    expect(utilityMenuSource).not.toContain('className={styles.utilityPanelHeader}');
     expect(utilityMenuSource).toContain("gitHeroLabel");
     expect(utilityMenuSource).toContain("gitSummaryRow");
     expect(utilityMenuSource).not.toContain('to="/chat"');
@@ -441,6 +439,8 @@ describe("AppShell layout contract", () => {
     expect(utilityMenuStyles.gitSummaryRow).toBeTypeOf("string");
     expect(utilityMenuStyles.gitSummaryBranch).toBeTypeOf("string");
     expect(shellStyles).toContain(".settingsPopoverBody .utilityButtonGrid");
+    expect(shellStyles).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
+    expect(shellStyles).toContain(".settingsPopoverBody .utilityPanel");
     expect(shellStyles).toContain("grid-template-columns: minmax(0, 1fr)");
     expect(shellStyles).not.toContain("minmax(5.5rem, 1fr)");
     expect(utilityMenuStylesSource).toContain("gitSummaryRow");
@@ -646,9 +646,9 @@ describe("AppShell layout contract", () => {
   it("keeps the global shell usable on narrow screens", () => {
     expect(styles.settingsTriggerLabel).toBeTypeOf("string");
     expect(styles.statusBadgeLabel).toBeTypeOf("string");
-    expect(styles.nav).toContain("max-[639px]:hidden");
-    expect(styles.mobileNav).toContain("max-[639px]:flex");
-    expect(styles.mobileRouteMenu).toContain("max-[639px]:grid");
+    expect(styles.nav).not.toContain("max-[639px]");
+    expect(styles.mobileNav).not.toContain("max-[639px]");
+    expect(styles.mobileRouteMenu).not.toContain("max-[639px]");
     expect(shellSource).toContain("activePrimaryRouteLabel");
     expect(shellSource).toContain('data-shell-group="mobile-navigation"');
     expect(shellSource).toContain('id="shell-mobile-route-menu"');
@@ -659,6 +659,13 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("@media (max-width: 700px)");
     expect(shellStyles).toContain("padding-bottom: var(--shell-settings-dock-height)");
     expect(shellStyles).toContain("width: 100vw");
+    const mobileShellBlock = shellStyles.slice(shellStyles.indexOf("@media (max-width: 639px)"));
+    expect(mobileShellBlock).toContain(":where(.vui-app-appshell).topBar .nav");
+    expect(mobileShellBlock).toContain(":where(.vui-app-appshell).topBar .mobileNav");
+    expect(mobileShellBlock).toContain(":where(.vui-app-appshell).settingsPopoverBody .mobileRouteMenu");
+    expect(mobileShellBlock).toMatch(/\.topBar \.nav\s*\{\s*display: none;/);
+    expect(mobileShellBlock).toMatch(/\.topBar \.mobileNav\s*\{\s*display: flex;/);
+    expect(mobileShellBlock).toMatch(/\.settingsPopoverBody \.mobileRouteMenu\s*\{\s*display: grid;/);
   });
 
   it("themes the managed app window chrome to match the light-first shell", () => {

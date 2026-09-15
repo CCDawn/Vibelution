@@ -57,7 +57,7 @@ const styles = {
   lifecycleMenuPanel: `vui-app-appshell lifecycleMenuPanel min-w-0 ${vuiGlassPanelClass} p-2`,
   mainArea:
     "vui-app-appshell mainArea min-w-0 w-full",
-  mobileNav: `vui-app-appshell mobileNav hidden max-[639px]:flex min-w-0 items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] ${vuiToolbarFillClass} px-2 py-1`,
+  mobileNav: `vui-app-appshell mobileNav hidden min-w-0 items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] ${vuiToolbarFillClass} px-2 py-1`,
   mobileNavLabel:
     "vui-app-appshell mobileNavLabel min-w-0 truncate [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-primary)]",
   mobileRouteLink:
@@ -65,8 +65,8 @@ const styles = {
   mobileRouteLinkActive:
     `vui-app-appshell mobileRouteLinkActive ${vuiStateSelectedRowClass}`,
   mobileRouteMenu:
-    "vui-app-appshell mobileRouteMenu hidden max-[639px]:grid min-w-0 w-full gap-1 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
-  nav: `vui-app-appshell nav min-w-0 max-[639px]:hidden`,
+    "vui-app-appshell mobileRouteMenu hidden min-w-0 w-full gap-1 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
+  nav: "vui-app-appshell nav min-w-0",
   navLink:
     "vui-app-appshell navLink relative z-[2] inline-flex min-h-[30px] min-w-0 cursor-pointer items-center justify-center rounded-[var(--radius-control)] px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-primary)] no-underline select-none",
   navLinkActive:
@@ -76,27 +76,27 @@ const styles = {
   returnButton:
     `vui-app-appshell returnButton min-w-0 ${vuiControlQuietClass}`,
   settingsActionButton:
-    `vui-app-appshell settingsActionButton min-w-0 !h-8 !min-h-8 !w-full !justify-start !border-0 !px-2 !shadow-none ${vuiControlQuietChromeClass}`,
+    `vui-app-appshell settingsActionButton min-w-0 !h-7 !min-h-7 !w-full !justify-start !border-0 !px-2 !text-xs !shadow-none ${vuiControlQuietChromeClass}`,
   settingsActionList:
-    "vui-app-appshell settingsActionList grid min-w-0 gap-1 border-t border-[var(--vui-border-subtle)] py-1",
+    "vui-app-appshell settingsActionList grid min-w-0 grid-cols-2 gap-1 border-t border-[var(--vui-border-subtle)] py-1",
   settingsActiveWork:
     "vui-app-appshell settingsActiveWork grid min-w-0 gap-2 border-t border-[var(--vui-border-subtle)] px-2 pt-2",
   settingsChevron:
     "vui-app-appshell settingsChevron ml-auto shrink-0 text-[var(--fg-secondary)] transition-transform",
   settingsChoiceButton:
-    `vui-app-appshell settingsChoiceButton min-w-0 !h-8 !min-h-8 !border-0 !px-2 !text-xs !shadow-none ${vuiControlQuietChromeClass}`,
+    `vui-app-appshell settingsChoiceButton min-w-0 !h-7 !min-h-7 !border-0 !px-2 !text-xs !shadow-none ${vuiControlQuietChromeClass}`,
   settingsChoiceButtonActive:
     `vui-app-appshell settingsChoiceButtonActive ${vuiStateSelectedRowClass}`,
   settingsDock:
     "vui-app-appshell settingsDock min-w-0",
   settingsPopoverBody:
-    "vui-app-appshell settingsPopoverBody grid min-w-0 gap-2 p-2",
+    "vui-app-appshell settingsPopoverBody grid min-w-0 gap-1 p-1.5",
   settingsPopoverContent:
-    "vui-app-appshell settingsPopoverContent z-[95] w-[min(316px,calc(100vw-20px))] max-h-[min(560px,calc(100dvh-96px))] overflow-y-auto border-[var(--border-strong)] bg-[var(--shell-panel)] p-0 shadow-[var(--vui-shadow-soft)]",
+    "vui-app-appshell settingsPopoverContent z-[95] w-[min(292px,calc(100vw-20px))] max-h-[min(520px,calc(100dvh-96px))] overflow-y-auto border-[var(--border-strong)] bg-[var(--shell-panel)] p-0 shadow-[var(--vui-shadow-soft)]",
   settingsPopoverHeader:
-    "vui-app-appshell settingsPopoverHeader grid min-w-0 gap-2 border-b border-[var(--vui-border-subtle)] px-2 pb-3 pt-1 [&_strong]:text-sm [&_strong]:font-semibold",
+    "vui-app-appshell settingsPopoverHeader flex min-w-0 items-center justify-between gap-2 border-b border-[var(--vui-border-subtle)] px-2 py-1.5 [&_strong]:text-sm [&_strong]:font-semibold",
   settingsSection:
-    "vui-app-appshell settingsSection flex min-w-0 items-center justify-between gap-3 px-2 py-1",
+    "vui-app-appshell settingsSection flex min-w-0 items-center justify-between gap-2 px-2 py-0.5",
   settingsSectionLabel:
     "vui-app-appshell settingsSectionLabel min-w-0 text-[13px] text-[var(--fg-secondary)]",
   settingsStatus:
@@ -229,8 +229,6 @@ const styles = {
   utilityFileTree:
     "vui-app-appshell utilityFileTree min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   utilityPanel: `vui-app-appshell utilityPanel min-w-0 ${vuiGlassPanelClass} p-2`,
-  utilityPanelHeader:
-    "vui-app-appshell utilityPanelHeader min-w-0 flex flex-wrap items-center gap-1.5 px-0.5 pb-1",
 } as const;
 
 export default styles;

@@ -305,14 +305,23 @@
 }
 
 :where(.vui-app-appshell).settingsPopoverBody .utilityButtonGrid {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px;
+}
+
+:where(.vui-app-appshell).settingsPopoverBody .utilityPanel {
+  gap: 5px;
+  padding: 4px 0 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 :where(.vui-app-appshell).settingsPopoverBody .utilityButton {
   justify-content: flex-start;
-  min-height: 32px;
-  padding: 6px 8px;
+  min-height: 30px;
+  padding: 4px 7px;
 }
 
 :where(.vui-app-appshell).settingsActiveWork .activeWorkDetailList {
@@ -1100,5 +1109,19 @@
   :where(.vui-app-appshell).settingsDock {
     width: 100vw;
     border-right: 0;
+  }
+}
+
+@media (max-width: 639px) {
+  :where(.vui-app-appshell).topBar .nav {
+    display: none;
+  }
+
+  :where(.vui-app-appshell).topBar .mobileNav {
+    display: flex;
+  }
+
+  :where(.vui-app-appshell).settingsPopoverBody .mobileRouteMenu {
+    display: grid;
   }
 }

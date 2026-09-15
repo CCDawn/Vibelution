@@ -100,15 +100,6 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
       role="region"
       aria-label={t("topUtilityMenu")}
     >
-      <VTooltip content={t("topUtilityMenuHint")} width="wide">
-        <div
-          className={styles.utilityPanelHeader}
-          tabIndex={0}
-          aria-label={`${t("topUtilityMenu")}: ${t("topUtilityMenuHint")}`}
-        >
-          <strong>{t("topUtilityMenu")}</strong>
-        </div>
-      </VTooltip>
       <div className={styles.utilityButtonGrid}>
         {/* External control surface: native anchor (not SPA Link) per VRouteLinkButton design boundary. */}
         <a href="/launcher" target="_blank" rel="noreferrer" className={styles.utilityButton} onClick={onClose}>
