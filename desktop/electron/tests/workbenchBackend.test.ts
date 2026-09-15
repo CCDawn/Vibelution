@@ -12,6 +12,7 @@ import {
   waitForPortRelease
 } from "../src/process/workbenchBackendRetire.js";
 import {
+  queueDeferredRestartIntent,
   classifyWorkbenchPortOccupant,
   clearWorkbenchLauncherRuntimeState,
   executeMainLineWorkbench,
@@ -2460,5 +2461,28 @@ describe("running code fingerprint governed read paths", () => {
       expect(runningCodeFingerprintReadPaths(dir)).toEqual([]);
       expect(readRunningCodeFingerprint(dir)).toBeNull();
     });
+  });
+});
+
+
+describe("queueDeferredRestartIntent", () => {
+  it("persists a pending runtime-manager restart intent for blocked restarts", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vibelution-deferred-restart-"));
+    try {
+      const queued = queueDeferredRestartIntent(dir, {
+        reason: "1 active work item(s) block lifecycle commands.",
+        sourceCommandId: "cmd-42"
+      });
+      expect(queued).not.toBeNull();
+      const target = queued?.path ?? "";
+      expect(existsSync(target)).toBe(true);
+      const payload = JSON.parse(readFileSync(target, "utf-8")) as Record<string, unknown>;
+      expect(payload.target).toBe("workbench_restart");
+      expect(payload.status).toBe("pending");
+      expect(payload.sourceCommandId).toBe("cmd-42");
+      expect(payload.payload).toEqual({ action: "restart_workbench" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
