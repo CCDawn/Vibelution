@@ -2009,7 +2009,6 @@ def _patch_supervised_session_model_choice(monkeypatch, *, provider_id: str) -> 
                 "model": "model-a",
                 "label": "Supervised test model",
                 "context_window": 200000,
-                "context_window": 200000,
                 "reasoningEffortValues": [],
                 "reasoningEffortOptions": [],
                 "defaultReasoningEffort": "",
@@ -2027,7 +2026,6 @@ def test_supervised_agent_session_is_hidden_and_preserves_prompt_with_mental_ove
         "provider_id": primary_profile.provider_id,
         "model": "model-a",
         "label": "Supervised test model",
-        "context_window": 200000,
         "context_window": 200000,
     }
     monkeypatch.setattr(session_service, "get_config", lambda: cfg)
@@ -2196,7 +2194,6 @@ def test_supervised_session_workspace_override_routes_tool_workspace_to_candidat
         "provider_id": primary_profile.provider_id,
         "model": "model-a",
         "label": "Supervised test model",
-        "context_window": 200000,
         "context_window": 200000,
     }
     monkeypatch.setattr(session_service, "get_config", lambda: cfg)
