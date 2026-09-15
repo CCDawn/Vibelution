@@ -83,6 +83,7 @@ class OptimizationRound(Contract):
     runId: Identity
     previousRunIds: tuple[Identity, ...] = ()
     ordinal: int = Field(ge=1, strict=True)
+    baselineVersionId: str = ""
     baselineCandidateRef: CudaCandidateRef
     parentCandidateRef: CudaCandidateRef
     protocolRef: MeasurementProtocolRef
@@ -106,6 +107,7 @@ class OperatorStage2Seed(Contract):
     sourceRoundId: Identity
     sourceRunId: Identity
     baselineRunId: Identity
+    baselineVersionId: str = ""
     baselineRef: ArtifactRef
     protocolRef: MeasurementProtocolRef
     hypothesisRef: ArtifactRef | None = None
@@ -164,6 +166,22 @@ class ModelBudgetRevision(Contract):
     campaignVersion: int = Field(ge=1, strict=True)
 
 
+class BaselineVersion(Contract):
+    """One immutable measurement lineage used by later ranking decisions."""
+
+    baselineVersionId: Identity
+    ordinal: int = Field(ge=1, strict=True)
+    setupId: Identity
+    runId: Identity
+    environmentRef: Digest
+    protocolRef: MeasurementProtocolRef
+    baselineCandidateRef: CudaCandidateRef
+    baselineRef: ArtifactRef | None = None
+    repairEvidenceRefs: tuple[ArtifactRef, ...] = Field(default=(), max_length=8)
+    createdFromRunId: str = ""
+    status: Literal["prepared", "active", "superseded", "failed"] = "prepared"
+
+
 class OptimizationCampaign(Contract):
     schemaVersion: Literal[1] = 1
     optimizationCampaignId: Identity
@@ -182,10 +200,26 @@ class OptimizationCampaign(Contract):
     baselineRef: ArtifactRef | None = None
     baselineCandidateRef: CudaCandidateRef | None = None
     bestCandidateRef: CudaCandidateRef | None = None
+    baselineVersions: tuple[BaselineVersion, ...] = ()
+    activeBaselineVersionId: str = ""
     rounds: tuple[OptimizationRound, ...] = ()
     activeRunId: str = ""
     createdAt: Text
     updatedAt: Text
+
+    @model_validator(mode="after")
+    def baseline_version_history_is_unambiguous(self):
+        ids = [item.baselineVersionId for item in self.baselineVersions]
+        ordinals = [item.ordinal for item in self.baselineVersions]
+        if len(ids) != len(set(ids)) or len(ordinals) != len(set(ordinals)):
+            raise ValueError("Baseline version identities must be unique")
+        active = [item for item in self.baselineVersions if item.status == "active"]
+        if self.activeBaselineVersionId:
+            if len(active) != 1 or active[0].baselineVersionId != self.activeBaselineVersionId:
+                raise ValueError("activeBaselineVersionId must identify the only active version")
+        elif active:
+            raise ValueError("An active baseline version requires activeBaselineVersionId")
+        return self
 
 
 class OperatorRunContext(Contract):
@@ -193,6 +227,7 @@ class OperatorRunContext(Contract):
     optimizationCampaignId: Identity
     researchProjectId: Identity
     objective: OperatorObjective
+    baselineVersionId: str = ""
     baselineSetupId: str = ""
     roundId: str = ""
     baselineCandidateRef: CudaCandidateRef | None = None

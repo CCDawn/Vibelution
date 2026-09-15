@@ -139,6 +139,7 @@ def write_stage2_seed(
         sourceRoundId=prior.roundId,
         sourceRunId=prior.runId,
         baselineRunId=campaign.baselineRunId,
+        baselineVersionId=campaign.activeBaselineVersionId,
         baselineRef=campaign.baselineRef,
         protocolRef=prior.protocolRef,
         hypothesisRef=prior.hypothesisRef,

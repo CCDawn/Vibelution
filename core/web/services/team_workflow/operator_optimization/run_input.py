@@ -27,10 +27,11 @@ def build_operator_run_input(campaign: OptimizationCampaign, round_record: Optim
     environment_ref: str = "operator-environment:unverified", protocol_artifact_hash: str = "",
     protocol_hash: str = "", protocol_artifact_id: str = "", protocol_run_id: str = "",
     baseline_candidate_ref: CudaCandidateRef | None = None,
-    workload_ref: str = "", observation_refs: tuple = ()) -> dict:
+    workload_ref: str = "", observation_refs: tuple = (), baseline_setup_id: str = "",
+    baseline_version_id: str = "") -> dict:
     baseline = round_record is None
     workflow_id = OPERATOR_BASELINE_WORKFLOW_ID if baseline else OPERATOR_WORKFLOW_ID
-    branch = campaign.baselineSetupId if baseline else round_record.roundId
+    branch = (baseline_setup_id or campaign.baselineSetupId) if baseline else round_record.roundId
     baseline_candidate = baseline_candidate_ref or campaign.baselineCandidateRef
     if baseline_candidate is None:
         raise ValueError("An operator run requires a recoverable baseline candidate reference")
@@ -52,6 +53,7 @@ def build_operator_run_input(campaign: OptimizationCampaign, round_record: Optim
         **scope_locators_for(**{key: value for key, value in identity.items() if key not in {"workflow", "mode"}}, scope_hash=scope_hash)}
     context = OperatorRunContext(
         optimizationCampaignId=campaign.optimizationCampaignId, researchProjectId=campaign.researchProjectId,
+        baselineVersionId=(baseline_version_id if baseline else round_record.baselineVersionId),
         objective=campaign.objective, baselineSetupId=branch if baseline else "",
         roundId="" if baseline else branch,
         baselineCandidateRef=baseline_candidate,
