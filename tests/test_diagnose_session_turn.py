@@ -9,6 +9,7 @@ import pytest
 
 from core.chat.turn_journal import (
     EVENT_ASSISTANT_MESSAGE,
+    EVENT_COMPACTION_CHECKPOINT,
     EVENT_TURN_COMPLETED,
     EVENT_TURN_FAILED,
     EVENT_TURN_STARTED,
@@ -399,6 +400,8 @@ def test_diagnosis_without_turn_id_selects_latest_running_turn(tmp_path):
     append_turn_event(tmp_path, session_id, "turn-old", EVENT_TURN_STARTED, status="running")
     append_turn_event(tmp_path, session_id, "turn-old", EVENT_TURN_COMPLETED, status="completed")
     append_turn_event(tmp_path, session_id, "turn-new", EVENT_TURN_STARTED, status="running")
+    # A delayed checkpoint from an earlier turn must not select that turn again.
+    append_turn_event(tmp_path, session_id, "turn-foreign", EVENT_COMPACTION_CHECKPOINT, status="checkpointed")
     _write_runtime_events(
         tmp_path,
         [

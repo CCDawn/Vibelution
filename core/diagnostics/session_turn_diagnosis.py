@@ -8,6 +8,7 @@ from core.chat.turn_journal import (
     EVENT_TURN_COMPLETED,
     EVENT_TURN_FAILED,
     EVENT_TURN_INTERRUPTED,
+    EVENT_TURN_STARTED,
     TurnJournalEvent,
     turn_journal_path,
 )
@@ -107,9 +108,18 @@ def _summarize_journal(path: Path, turn_id: str) -> dict[str, Any]:
     selected_turn_id = str(turn_id or "").strip()
     if not selected_turn_id:
         selected_turn_id = next(
-            (event.turn_id for event in reversed(events) if event.turn_id),
+            (
+                event.turn_id
+                for event in reversed(events)
+                if event.event_type == EVENT_TURN_STARTED and event.turn_id
+            ),
             "",
         )
+        if not selected_turn_id:
+            selected_turn_id = next(
+                (event.turn_id for event in reversed(events) if event.turn_id),
+                "",
+            )
         if selected_turn_id:
             events = [event for event in events if event.turn_id == selected_turn_id]
     terminal_events = [event for event in events if event.event_type in TERMINAL_EVENT_TYPES]
