@@ -24,7 +24,7 @@ def test_workbench_ui_preferences_round_trip(tmp_path, monkeypatch):
         }
     )
     assert saved["paneLayouts"]["chat"]["left"] == 360
-    assert saved["shell"]["topBarMode"] == "hidden"
+    assert "topBarMode" not in saved["shell"]
     assert "chatPanelWidths" not in saved["shell"]
     assert path.is_file()
 
@@ -53,10 +53,11 @@ def test_workbench_ui_preferences_migrates_leftover_shell_chat_widths(tmp_path, 
     loaded = prefs.load_workbench_ui_preferences()
     assert loaded["paneLayouts"]["chat"] == {"left": 412, "right": 268}
     assert "chatPanelWidths" not in loaded["shell"]
-    assert loaded["shell"]["topBarMode"] == "full"
+    assert "topBarMode" not in loaded["shell"]
     persisted = json.loads(path.read_text(encoding="utf-8"))
     assert persisted["paneLayouts"]["chat"] == {"left": 412, "right": 268}
     assert "chatPanelWidths" not in persisted["shell"]
+    assert "topBarMode" not in persisted["shell"]
 
 
 def test_workbench_ui_preferences_drops_damaged_leftover_chat_widths(tmp_path, monkeypatch):
@@ -76,7 +77,7 @@ def test_workbench_ui_preferences_drops_damaged_leftover_chat_widths(tmp_path, m
     loaded = prefs.load_workbench_ui_preferences()
     assert "chat" not in loaded["paneLayouts"]
     assert "chatPanelWidths" not in loaded["shell"]
-    assert loaded["shell"]["topBarMode"] == "full"
+    assert "topBarMode" not in loaded["shell"]
 
 
 def test_workbench_ui_preferences_does_not_clobber_canonical_chat_layout(tmp_path, monkeypatch):

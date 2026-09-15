@@ -29,9 +29,8 @@ let readyToSave = false;
 function shellFingerprint(state: {
   leftPanelWidth: number;
   rightPanelWidth: number;
-  topBarMode: string;
 }): string {
-  return `${state.leftPanelWidth}|${state.rightPanelWidth}|${state.topBarMode}`;
+  return `${state.leftPanelWidth}|${state.rightPanelWidth}`;
 }
 
 function applyServerPreferences(prefs: WorkbenchUiPreferences): void {
@@ -61,16 +60,13 @@ function applyServerPreferences(prefs: WorkbenchUiPreferences): void {
     leftPanelWidth: stored.left || current.leftPanelWidth,
     rightPanelWidth: stored.right || current.rightPanelWidth,
   };
-  const nextTopBar = shell.topBarMode === "full" || shell.topBarMode === "hidden" ? shell.topBarMode : undefined;
   useShellStore.setState({
     chatPanelWidths: nextWidths,
-    ...(nextTopBar ? { topBarMode: nextTopBar } : {}),
   });
 
   lastShellFingerprint = shellFingerprint({
     leftPanelWidth: useShellStore.getState().chatPanelWidths.leftPanelWidth,
     rightPanelWidth: useShellStore.getState().chatPanelWidths.rightPanelWidth,
-    topBarMode: useShellStore.getState().topBarMode,
   });
 }
 
@@ -95,7 +91,6 @@ export async function flushWorkbenchUiPreferencesToServer(): Promise<void> {
   const fingerprint = shellFingerprint({
     leftPanelWidth: state.chatPanelWidths.leftPanelWidth,
     rightPanelWidth: state.chatPanelWidths.rightPanelWidth,
-    topBarMode: state.topBarMode,
   });
   if (fingerprint === lastShellFingerprint) {
     // Still push full pane-layouts map when local storage has more layouts.
@@ -106,9 +101,6 @@ export async function flushWorkbenchUiPreferencesToServer(): Promise<void> {
   try {
     await saveWorkbenchUiPreferences({
       paneLayouts,
-      shell: {
-        topBarMode: state.topBarMode,
-      },
     });
   } catch {
     // Offline / early boot — localStorage still holds the session copy.
@@ -147,8 +139,7 @@ export function startWorkbenchUiPreferencesSync(): () => void {
     const widthsChanged =
       state.chatPanelWidths.leftPanelWidth !== prev.chatPanelWidths.leftPanelWidth
       || state.chatPanelWidths.rightPanelWidth !== prev.chatPanelWidths.rightPanelWidth;
-    const topBarChanged = state.topBarMode !== prev.topBarMode;
-    if (widthsChanged || topBarChanged) {
+    if (widthsChanged) {
       scheduleServerSave();
     }
   });

@@ -15,7 +15,11 @@ export function createWorkbenchWindow(
     title: options?.title?.trim() || instanceWindowTitle("workbench"),
     icon: resolveWorkspaceIconPath(paths),
     backgroundColor: "#f7fafc",
-    titleBarStyle: "default",
+    titleBarStyle: "hidden",
+    titleBarOverlay: {
+      color: "#00000000",
+      height: 40
+    },
     autoHideMenuBar: true,
     webPreferences: {
       preload: resolvePreloadPath(paths),

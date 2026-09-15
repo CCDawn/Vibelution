@@ -33,22 +33,27 @@ describe("shellStore", () => {
         leftPanelWidth: 300,
         rightPanelWidth: 220,
       },
-      topBarMode: "full",
     });
   });
 
-  it("keeps the app shell top bar visible by default", () => {
-    expect(useShellStore.getState().topBarMode).toBe("full");
-  });
+  it("drops the obsolete top-bar visibility preference", async () => {
+    localStorage.setItem(
+      "vibelution-shell-store",
+      JSON.stringify({
+        state: {
+          evolutionTrack: "supervised",
+          evolutionView: "live",
+          topBarMode: "hidden",
+        },
+        version: 0,
+      }),
+    );
 
-  it("stores the app shell top bar visibility mode in the existing shell state", () => {
-    useShellStore.getState().setTopBarMode("hidden");
+    await useShellStore.persist.rehydrate();
 
-    expect(useShellStore.getState().topBarMode).toBe("hidden");
-
-    useShellStore.getState().setTopBarMode("full");
-
-    expect(useShellStore.getState().topBarMode).toBe("full");
+    expect(useShellStore.getState()).not.toHaveProperty("topBarMode");
+    useShellStore.getState().setEvolutionView("overview");
+    expect(localStorage.getItem("vibelution-shell-store")).not.toContain("topBarMode");
   });
 
   it("defaults Chat to a wider left conversation column and narrower right status rail", () => {
@@ -69,7 +74,6 @@ describe("shellStore", () => {
             leftPanelWidth: 260,
             rightPanelWidth: 340,
           },
-          topBarMode: "full",
         },
         version: 0,
       }),
@@ -113,7 +117,6 @@ describe("shellStore", () => {
             leftPanelWidth: 280,
             rightPanelWidth: 210,
           },
-          topBarMode: "full",
         },
         version: 0,
       }),
@@ -146,7 +149,6 @@ describe("shellStore", () => {
             leftPanelWidth: 280,
             rightPanelWidth: 210,
           },
-          topBarMode: "full",
         },
         version: 0,
       }),

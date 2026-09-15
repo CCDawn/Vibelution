@@ -1,5 +1,7 @@
 :where(.vui-app-appshell).shell {
-  --shell-topbar-height: 52px;
+  --shell-topbar-height: 40px;
+  --shell-settings-dock-height: 56px;
+  --shell-settings-dock-width: 300px;
   --shell-window-control-inset: 0px;
   --shell-surface: var(--vui-surface-rail);
   --shell-surface-muted: var(--vui-surface-row);
@@ -97,12 +99,10 @@
   opacity: 0.18;
 }
 
-:where(.vui-app-appshell).shell[data-topbar-mode="hidden"] {
-  --shell-topbar-height: 0px;
-}
-
-:where(.vui-app-appshell).shell[data-topbar-mode="hidden"] .topBar {
-  display: none;
+:where(.vui-app-appshell).shell[data-desktop-shell="electron"] {
+  /* Three Windows caption buttons. titlebar-area-* replaces this fallback
+     when Chromium exposes the Window Controls Overlay geometry. */
+  --shell-window-control-inset: 138px;
 }
 
 :where(.vui-app-appshell).topBar {
@@ -112,12 +112,15 @@
   right: 0;
   /* Stay above route content / responsive overlays (chat backdrop is z-30 inside main). */
   z-index: 60;
-  display: grid;
-  grid-template-columns: minmax(0, max-content) minmax(0, 1fr) max-content;
+  display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 4px;
+  height: var(--shell-topbar-height);
   min-height: var(--shell-topbar-height);
-  padding: 7px calc(16px + var(--shell-window-control-inset)) 7px 16px;
+  padding: 0 max(
+    var(--shell-window-control-inset),
+    calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - var(--shell-window-control-inset))))
+  ) 0 8px;
   /*
    * Interactive-first chrome: never mark the whole bar as a window-drag region.
    * Electron's -webkit-app-region: drag on a large ancestor routinely swallows
@@ -149,14 +152,7 @@
 .vui-app-appshell.topBar .nav,
 .vui-app-appshell.topBar .navLink,
 .vui-app-appshell.topBar .mobileNav,
-.vui-app-appshell.topBar .topActions,
-.vui-app-appshell.topBar .returnButton,
-.vui-app-appshell.topBar .activeWorkChip,
-.vui-app-appshell.topBar .activeWorkSlot,
-.vui-app-appshell.topBar .utilityCluster,
-.vui-app-appshell.topBar .statusCluster,
-.vui-app-appshell.topBar .toolCluster,
-.vui-app-appshell.topBar .statusSummaryChip {
+.vui-app-appshell.topBar .returnButton {
   position: relative;
   z-index: 2;
   pointer-events: auto !important;
@@ -164,11 +160,16 @@
 }
 
 /*
- * Intentionally no drag regions on topBar chrome. The Electron workbench window
- * keeps the native title bar (titleBarStyle: default), so window controls never
- * overlap the web content; extra -webkit-app-region: drag strips under the nav
- * band only swallow primary navigation clicks on Windows.
+ * The top bar is interactive by default. Only its explicit blank spacer is a
+ * drag region, so navigation remains clickable beside native caption buttons.
  */
+
+:where(.vui-app-appshell).windowDragRegion {
+  min-width: 24px;
+  align-self: stretch;
+  pointer-events: auto;
+  -webkit-app-region: drag;
+}
 
 :where(.vui-app-appshell).topBar::before {
   content: "";
@@ -196,7 +197,6 @@
 }
 
 :where(.vui-app-appshell).brandBlock,
-:where(.vui-app-appshell).topActions,
 :where(.vui-app-appshell).nav {
   min-width: 0;
 }
@@ -280,32 +280,43 @@
   -webkit-app-region: no-drag !important;
 }
 
-:where(.vui-app-appshell).topActions {
-  display: flex;
-  justify-self: end;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: nowrap;
-  gap: 14px;
-  max-width: 100%;
-}
-
-:where(.vui-app-appshell).toolCluster {
-  display: flex;
-  align-items: center;
-  flex-wrap: nowrap;
-  gap: 6px;
-  max-width: 100%;
-}
-
-:where(.vui-app-appshell).topBarRestoreButton {
+:where(.vui-app-appshell).settingsDock {
   position: fixed;
-  top: 10px;
-  right: 10px;
-  z-index: 22;
-  max-width: min(176px, calc(100vw - 20px));
-  box-shadow: var(--vui-shadow-soft);
-  backdrop-filter: blur(14px);
+  left: 0;
+  bottom: 0;
+  z-index: 55;
+  display: flex;
+  align-items: stretch;
+  width: min(var(--shell-settings-dock-width), 100vw);
+  height: var(--shell-settings-dock-height);
+  border-top: 1px solid var(--border-hairline);
+  border-right: 1px solid var(--border-hairline);
+  background: var(--shell-surface);
+  box-shadow: var(--vui-shadow-hairline);
+  -webkit-app-region: no-drag;
+}
+
+:where(.vui-app-appshell).settingsDock > * {
+  width: 100%;
+}
+
+:where(.vui-app-appshell).settingsTriggerOpen .settingsChevron {
+  transform: rotate(180deg);
+}
+
+:where(.vui-app-appshell).settingsPopoverBody .utilityButtonGrid {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+}
+
+:where(.vui-app-appshell).settingsPopoverBody .utilityButton {
+  justify-content: flex-start;
+  min-height: 32px;
+  padding: 6px 8px;
+}
+
+:where(.vui-app-appshell).settingsActiveWork .activeWorkDetailList {
+  max-height: min(210px, 30vh);
 }
 
 :where(.vui-app-appshell).shutdownOverlay,
@@ -349,14 +360,12 @@
   color: var(--fg-primary);
 }
 
-:where(.vui-app-appshell).utilityCluster,
 :where(.vui-app-appshell).lifecycleMenuCluster,
 :where(.vui-app-appshell).statusCluster {
   position: relative;
   outline: none;
 }
 
-:where(.vui-app-appshell).utilityCluster,
 :where(.vui-app-appshell).lifecycleMenuCluster {
   display: flex;
 }
@@ -372,48 +381,6 @@
 :where(.vui-app-appshell).utilityChevron {
   color: var(--fg-tertiary);
   transition: transform 150ms ease;
-}
-
-:where(.vui-app-appshell).activeWorkChip {
-  max-width: min(66vw, 620px);
-  transition: border-color 140ms ease, background 140ms ease, color 140ms ease, box-shadow 140ms ease;
-}
-
-/*
- * The active-work indicator lives at the right edge of the top bar inside a
- * reserved slot: its width never changes, so navigation and tool buttons keep
- * their positions when running work appears or finishes. The chip itself stays
- * compact (status + label + count); details live in the popover only.
- */
-:where(.vui-app-appshell).activeWorkSlot {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  width: min(12rem, 30vw);
-  min-width: min(12rem, 30vw);
-  max-width: min(12rem, 30vw);
-}
-
-:where(.vui-app-appshell).activeWorkSlot .activeWorkChip {
-  max-width: 100%;
-}
-
-:where(.vui-app-appshell).activeWorkDetailPanel {
-  width: min(420px, calc(100vw - 24px));
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 8px;
-  padding: 10px;
-  /* Radix exposes the free space below the trigger; the popover must scroll
-     inside that budget instead of being clipped by the window edge. */
-  max-height: min(70vh, var(--radix-popper-available-height, 70vh));
-  overflow: hidden;
-  border-color: color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
-  background:
-    var(--vui-gradient-route-soft),
-    var(--shell-panel);
-  color: var(--fg-primary);
-  box-shadow: var(--vui-shadow-soft);
 }
 
 :where(.vui-app-appshell).activeWorkDetailHeader {
@@ -545,12 +512,6 @@
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-:where(.vui-app-appshell).utilityCluster:hover .utilityChevron,
-:where(.vui-app-appshell).utilityCluster:focus-within .utilityChevron,
-:where(.vui-app-appshell).utilityClusterOpen .utilityChevron {
-  transform: rotate(180deg);
 }
 
 /* Utility panel lives inside Radix VPopover content (not absolute under the cluster). */
@@ -817,8 +778,7 @@
 }
 
 :where(.vui-app-appshell).gitChip,
-:where(.vui-app-appshell).statusBadge,
-:where(.vui-app-appshell).statusSummaryChip {
+:where(.vui-app-appshell).statusBadge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1001,15 +961,6 @@
   padding: 7px 11px;
 }
 
-:where(.vui-app-appshell).statusSummaryChip {
-  max-width: 210px;
-  height: 32px;
-  max-height: 32px;
-  /* Vertical centering comes from fixed height + align-items; avoid asymmetric padding. */
-  padding: 0 10px;
-  line-height: 1;
-}
-
 :where(.vui-app-appshell).statusBadgeLabel {
   flex: 0 0 auto;
   align-self: center;
@@ -1040,15 +991,6 @@
   border: 0;
   border-radius: 999px;
   background: currentColor;
-}
-
-:where(.vui-app-appshell).statusSummaryLabel {
-  flex: 0 0 auto;
-  align-self: center;
-  color: var(--fg-primary);
-  font-size: var(--vui-font-xs);
-  font-weight: 650;
-  line-height: 1;
 }
 
 :where(.vui-app-appshell).statusDot {
@@ -1117,22 +1059,17 @@
 }
 
 @media (max-width: 1279px) {
-  :where(.vui-app-appshell).utilityTriggerLabel,
-  :where(.vui-app-appshell).statusBadgeLabel,
-  :where(.vui-app-appshell).statusSummaryLabel {
+  :where(.vui-app-appshell).statusBadgeLabel {
     display: none;
   }
 
   :where(.vui-app-appshell).topBar {
-    gap: 8px;
-    padding-inline: 12px;
+    gap: 4px;
   }
 }
 
 @media (max-width: 1180px) {
-  :where(.vui-app-appshell).utilityTriggerLabel,
-  :where(.vui-app-appshell).statusBadgeLabel,
-  :where(.vui-app-appshell).statusSummaryLabel {
+  :where(.vui-app-appshell).statusBadgeLabel {
     display: none;
   }
 
@@ -1144,22 +1081,24 @@
 
 @media (max-width: 980px) {
   :where(.vui-app-appshell).topBar {
-    gap: 8px 10px;
-    padding: 8px 12px;
+    gap: 4px;
   }
 }
 
 @media (max-width: 520px) {
   :where(.vui-app-appshell).topBar {
-    gap: 6px 7px;
-    padding: 6px 8px;
+    gap: 3px;
+    padding-left: 4px;
   }
 }
 
-@media (max-width: 640px) {
-  :where(.vui-app-appshell).activeWorkDetailPanel {
-    width: min(340px, calc(100vw - 20px));
-    max-height: min(70vh, var(--radix-popper-available-height, 70vh));
-    padding: 9px;
+@media (max-width: 700px) {
+  :where(.vui-app-appshell).mainArea {
+    padding-bottom: var(--shell-settings-dock-height);
+  }
+
+  :where(.vui-app-appshell).settingsDock {
+    width: 100vw;
+    border-right: 0;
   }
 }

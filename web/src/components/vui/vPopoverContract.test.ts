@@ -21,22 +21,22 @@ describe("VPopover contract", () => {
     expect(feedback).toContain("## VPopover");
   });
 
-  it("AppShell utility panel uses VPopover instead of hover cluster listeners", () => {
+  it("AppShell settings panel uses VPopover instead of hover cluster listeners", () => {
     const shell = readFileSync(resolve(vuiRoot, "../../app/AppShell.tsx"), "utf8");
     expect(shell).toContain("VPopover");
-    expect(shell).toContain("contentClassName={styles.utilityPopoverContent}");
+    expect(shell).toContain("contentClassName={styles.settingsPopoverContent}");
     expect(shell).toContain("LazyAppShellUtilityMenu");
     expect(shell).not.toContain("utilityMenuRef");
     expect(shell).not.toContain("onMouseEnter={() => setUtilityOpen(true)}");
   });
 
-  it("AppShell active-work details use VPopover instead of CSS hover panel", () => {
+  it("AppShell active-work details stay inside the settings VPopover", () => {
     const shell = readFileSync(resolve(vuiRoot, "../../app/AppShell.tsx"), "utf8");
     const styles = readFileSync(resolve(vuiRoot, "../../app/AppShell.styles.ts"), "utf8");
-    expect(shell).toContain('data-vui="active-work-popover"');
-    expect(shell).toContain("contentClassName={styles.activeWorkPopoverContent}");
-    expect(shell).toContain("activeWorkDetailPanel");
-    expect(styles).toContain("activeWorkPopoverContent");
+    expect(shell).not.toContain('data-vui="active-work-popover"');
+    expect(shell).toContain("className={styles.settingsActiveWork}");
+    expect(shell).toContain("activeWorkIndicator.items.map");
+    expect(styles).toContain("settingsActiveWork");
     expect(styles).not.toContain("[&:hover_.activeWorkDetailPanel]:visible");
   });
 
@@ -61,15 +61,15 @@ describe("VPopover contract", () => {
     expect(contextRing).not.toContain("createPortal(");
   });
 
-  it("AppShell keeps a quiet status chip instead of a hover/popover diagnostic panel", () => {
+  it("AppShell keeps a quiet status row inside settings instead of a diagnostic popover", () => {
     const shell = readFileSync(resolve(vuiRoot, "../../app/AppShell.tsx"), "utf8");
     const styles = readFileSync(resolve(vuiRoot, "../../app/AppShell.styles.ts"), "utf8");
     expect(shell).not.toContain('data-vui="status-guide-popover"');
     expect(shell).not.toContain("LazyAppShellStatusGuidePanel");
     expect(shell).not.toContain("statusGuidePopoverContent");
     expect(shell).not.toContain("onMouseEnter={() => setStatusGuideOpen(true)}");
-    expect(shell).toContain("styles.statusSummaryChip");
+    expect(shell).toContain("styles.settingsStatus");
     expect(styles).not.toContain("statusGuidePopoverContent");
-    expect(styles).toContain("statusSummaryChip");
+    expect(styles).toContain("settingsStatus");
   });
 });
