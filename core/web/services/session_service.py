@@ -584,6 +584,15 @@ from core.web.services.session.image_attachments import (
     _record_session_attachment_event,
     _safe_attachment_log_summary,
 )
+from core.web.services.session.queued_turns import (
+    enqueue_session_queued_turn,
+    list_session_queued_turns,
+    remove_session_queued_turn,
+    update_session_queued_turn,
+    session_queued_turn_rows as _session_queued_turn_rows,
+    drain_session_queued_turns as _drain_session_queued_turns,
+    schedule_session_queued_turn_drain as _schedule_session_queued_turn_drain,
+)
 from core.web.services.session.events import (
     _record_session_cycle_message,
     _record_session_delete_event,

@@ -66,7 +66,10 @@ from core.web.services.session_service import (
     get_session_llm_options,
     list_child_sessions,
     list_sessions,
+    list_session_queued_turns,
     query_sessions,
+    remove_session_queued_turn,
+    update_session_queued_turn,
     regenerate_session_message,
     request_stop_session_turn,
     resolve_session_image_artifact,
@@ -173,6 +176,7 @@ class SessionMessagePayload(BaseModel):
     turnStatusTail: dict | None = None
     turnMode: str = ""
     writeIntent: bool | None = None
+    queueIfBusy: bool = False
 
 
 class SessionMessageEditPayload(SessionMessagePayload):
@@ -630,6 +634,7 @@ def session_submit_message(session_id: str, payload: SessionMessagePayload, requ
                 turn_status_tail=payload.turnStatusTail if isinstance(payload.turnStatusTail, dict) else None,
                 turn_mode=payload.turnMode,
                 write_intent=payload.writeIntent,
+                queue_if_busy=payload.queueIfBusy,
             )
         return submit_session_message(
             session_id,
@@ -643,6 +648,7 @@ def session_submit_message(session_id: str, payload: SessionMessagePayload, requ
             turn_status_tail=payload.turnStatusTail if isinstance(payload.turnStatusTail, dict) else None,
             turn_mode=payload.turnMode,
             write_intent=payload.writeIntent,
+            queue_if_busy=payload.queueIfBusy,
         )
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -650,6 +656,49 @@ def session_submit_message(session_id: str, payload: SessionMessagePayload, requ
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except SessionValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+class SessionQueuedTurnUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content: str | None = None
+    position: int | None = Field(default=None, ge=1)
+
+
+@router.get("/sessions/{session_id}/queued-turns")
+def session_list_queued_turns(session_id: str) -> dict:
+    return {"queuedTurns": list_session_queued_turns(session_id)}
+
+
+@router.patch("/sessions/{session_id}/queued-turns/{queued_turn_id}")
+def session_update_queued_turn(
+    session_id: str,
+    queued_turn_id: str,
+    payload: SessionQueuedTurnUpdatePayload,
+) -> dict:
+    try:
+        rows = update_session_queued_turn(
+            session_id,
+            queued_turn_id,
+            content=payload.content,
+            position=payload.position,
+        )
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"queuedTurns": rows}
+
+
+@router.delete("/sessions/{session_id}/queued-turns/{queued_turn_id}")
+def session_remove_queued_turn(session_id: str, queued_turn_id: str) -> dict:
+    try:
+        rows = remove_session_queued_turn(session_id, queued_turn_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"queuedTurns": rows}
 
 
 @router.post(

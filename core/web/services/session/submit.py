@@ -138,6 +138,95 @@ def _session_still_running_error(service: Any, lang: str) -> Any:
     )
 
 
+class _SessionTurnQueued(Exception):
+    """Internal signal: the turn was queued instead of started."""
+
+    def __init__(self, payload: dict[str, Any]) -> None:
+        super().__init__("queued")
+        self.payload = dict(payload or {})
+
+
+def _enqueue_busy_session_turn(
+    service: Any,
+    session_id: str,
+    *,
+    message: str,
+    attachment_ids: list[str] | None,
+    references: list[dict[str, Any]] | None,
+    resolved_attachments: list[dict[str, Any]] | None,
+    resolved_references: list[dict[str, Any]] | None,
+    mental_model_enabled: bool | None,
+    runtime_status_enabled: bool | None,
+    turn_mode: str,
+    write_intent: bool | None,
+    client_submission_id: str,
+    lang: str,
+) -> dict[str, Any]:
+    """Accept a user turn that arrived while the session still had an active turn."""
+
+    conversation = service.load_session_chat_state(service.PROJECT_ROOT, session_id)
+    if conversation is None:
+        raise service.SessionNotFoundError(
+            service.text_for(lang, zh="未找到当前会话。", en="Session not found.")
+        )
+    attachments = (
+        list(resolved_attachments)
+        if resolved_attachments is not None
+        else service._resolve_session_image_attachments(
+            session_id,
+            attachment_ids or [],
+            conversation=conversation,
+        )
+    )
+    session_references = (
+        list(resolved_references)
+        if resolved_references is not None
+        else service._resolve_session_references(
+            session_id,
+            references or [],
+            conversations=_session_reference_conversation_rows(
+                service,
+                session_id,
+                conversation,
+                references or [],
+            ),
+            lang=lang,
+        )
+    )
+    if not message and not attachments and not session_references:
+        raise service.SessionValidationError(
+            service.text_for(
+                lang,
+                zh="请输入本轮消息、添加图片或引用会话后再发送。",
+                en="Enter a message, attach an image, or reference a session before sending.",
+            )
+        )
+    queued_row = service.enqueue_session_queued_turn(
+        session_id,
+        content=message,
+        attachments=attachments,
+        references=session_references,
+        mental_model_enabled=mental_model_enabled,
+        runtime_status_enabled=runtime_status_enabled,
+        turn_mode=turn_mode,
+        write_intent=write_intent,
+        client_submission_id=client_submission_id,
+        lang=lang,
+    )
+    payload = _accepted_session_turn_payload(
+        session_id,
+        "",
+        status="queued",
+        client_submission_id=client_submission_id,
+    )
+    payload["queuedTurnId"] = str(queued_row.get("id") or "")
+    try:
+        payload["queuePosition"] = int(queued_row.get("position") or 0)
+    except (TypeError, ValueError):
+        payload["queuePosition"] = 0
+    return payload
+
+
 def _session_reference_conversation_rows(
     service: Any,
     conversation_id: str,
@@ -402,9 +491,16 @@ def submit_session_message(
     message_source: str = "raw",
     include_started_turn_id: bool = False,
     lightweight_response: bool = False,
+    queue_if_busy: bool = False,
     trace_context_carrier: Mapping[str, Any] | None = None,
 ) -> dict:
-    """Persist a user message and start a single web chat turn."""
+    """Persist a user message and start a single web chat turn.
+
+    ``queue_if_busy`` accepts the turn into the session queue instead of
+    rejecting it when another turn of the same session is still running
+    (Codex ``thread/queue`` parity). The queued turn starts once the active
+    turn settles.
+    """
 
     s = _service()
     submit_started_at = s._perf_counter()
@@ -448,6 +544,22 @@ def submit_session_message(
         raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
     s._validate_user_message_not_encoding_replacement(message, lang=lang)
     if s._is_session_running(conversation_id):
+        if queue_if_busy:
+            return _enqueue_busy_session_turn(
+                s,
+                conversation_id,
+                message=message,
+                attachment_ids=attachment_ids,
+                references=references,
+                resolved_attachments=None,
+                resolved_references=None,
+                mental_model_enabled=mental_model_enabled,
+                runtime_status_enabled=runtime_status_enabled,
+                turn_mode=turn_mode,
+                write_intent=write_intent,
+                client_submission_id=normalized_client_submission_id,
+                lang=lang,
+            )
         raise _session_still_running_error(s, lang)
 
     # Ledger I/O is per-session. Holding _CHAT_STATE_LOCK across it serializes
@@ -461,6 +573,24 @@ def submit_session_message(
     prepared_context_limit_ok = False
     try:
         if s._is_session_running(conversation_id):
+            if queue_if_busy:
+                raise _SessionTurnQueued(
+                    _enqueue_busy_session_turn(
+                        s,
+                        conversation_id,
+                        message=message,
+                        attachment_ids=attachment_ids,
+                        references=references,
+                        resolved_attachments=None,
+                        resolved_references=None,
+                        mental_model_enabled=mental_model_enabled,
+                        runtime_status_enabled=runtime_status_enabled,
+                        turn_mode=turn_mode,
+                        write_intent=write_intent,
+                        client_submission_id=normalized_client_submission_id,
+                        lang=lang,
+                    )
+                )
             raise _session_still_running_error(s, lang)
         ledger_started_at = s._perf_counter()
         s._reconcile_stale_session_ledger(conversation_id, reason="new_turn_submitted")
@@ -493,6 +623,9 @@ def submit_session_message(
                     lang=lang,
                 )
         submit_timing_fields["submitPrepareMs"] = s._elapsed_ms(prepare_started_at)
+    except _SessionTurnQueued as queued:
+        admit_lock.release()
+        return queued.payload
     except BaseException:
         admit_lock.release()
         raise
@@ -576,6 +709,22 @@ def submit_session_message(
             )
 
         if s._is_session_running(conversation_id):
+            if queue_if_busy:
+                return _enqueue_busy_session_turn(
+                    s,
+                    conversation_id,
+                    message=message,
+                    attachment_ids=attachment_ids,
+                    references=references,
+                    resolved_attachments=attachments,
+                    resolved_references=session_references,
+                    mental_model_enabled=mental_model_enabled,
+                    runtime_status_enabled=runtime_status_enabled,
+                    turn_mode=turn_mode,
+                    write_intent=write_intent,
+                    client_submission_id=normalized_client_submission_id,
+                    lang=lang,
+                )
             raise _session_still_running_error(s, lang)
 
         if normalized_message_source == "supervised_evolution":
@@ -1080,6 +1229,7 @@ def submit_session_message_lightweight(
     references: list[dict[str, Any]] | None = None,
     turn_mode: str = "",
     write_intent: bool | None = None,
+    queue_if_busy: bool = False,
     trace_context_carrier: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Submit a user message and return the smallest accepted-turn payload."""
@@ -1096,6 +1246,7 @@ def submit_session_message_lightweight(
         references=references,
         turn_mode=turn_mode,
         write_intent=write_intent,
+        queue_if_busy=queue_if_busy,
         trace_context_carrier=trace_context_carrier,
         include_started_turn_id=True,
         lightweight_response=True,

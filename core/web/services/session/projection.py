@@ -719,6 +719,7 @@ def _build_session_summary(
             conversation.get("experimentBinding") or conversation.get("experiment_binding")
         ),
         "agentInboxPendingCount": agent_inbox_pending_count,
+        "queuedTurns": s.list_session_queued_turns(conversation["id"]),
         "agentMissingId": agent_missing_id,
         "agentDirectSessionMismatch": agent_direct_session_mismatch,
         "agentPrimaryDirectSessionId": agent_primary_direct_session_id,
@@ -1043,6 +1044,7 @@ def _normalize_conversation(
         "_messagesPreview": bool(lightweight),
         "_hasLedgerMessages": has_ledger_messages,
         "runtimeNotices": visible_runtime_notices,
+        "queuedTurns": s._session_queued_turn_rows(raw),
         "lastTurnStatus": last_turn_status,
         "terminalReason": s._terminal_reason_from_conversation(raw),
         "lastTurnError": last_turn_error,
