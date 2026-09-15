@@ -5,8 +5,11 @@ import json
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
+
 from core.chat.turn_journal import (
     EVENT_ASSISTANT_MESSAGE,
+    EVENT_COMPACTION_CHECKPOINT,
     EVENT_TURN_COMPLETED,
     EVENT_TURN_FAILED,
     EVENT_TURN_STARTED,
@@ -141,14 +144,14 @@ def _write_runtime_events(tmp_path: Path, events: list[dict]) -> None:
     )
 
 
-def _runtime_event(event_code: str, *, turn_id: str, **fields) -> dict:
+def _runtime_event(event_code: str, *, turn_id: str, session_id: str = "session-1", **fields) -> dict:
     return {
         "ts": "2026-07-27T00:00:00Z",
         "event_code": event_code,
         "level": "info",
         "outcome": "observed",
         "fields": {
-            "sessionId": "session-1",
+            "sessionId": session_id,
             "turnId": turn_id,
             "invocationId": "invocation-1",
             "routeAttempt": 1,
@@ -359,3 +362,56 @@ def test_diagnosis_routes_canonical_incomplete_outcome_to_protocol_adapter(tmp_p
     assert diagnosis["failureStage"] == "outcome_evaluation"
     assert diagnosis["terminalConsistency"]["consistent"] is True
     assert diagnosis["nextMinimalAction"] == "inspect_protocol_adapter"
+
+
+@pytest.mark.parametrize(
+    ("event_status", "payload"),
+    [
+        ("completed", {"resultStatus": "completed", "finalStatus": "needs_continue"}),
+        ("needs_continue", {"resultStatus": "completed"}),
+        ("completed", {"resultStatus": "needs_continue"}),
+    ],
+)
+def test_diagnosis_does_not_treat_needs_continue_terminal_event_as_completed(
+    tmp_path, event_status, payload
+):
+    module = load_module()
+    turn_id = "turn-needs-continue"
+    append_turn_event(tmp_path, "session-1", turn_id, EVENT_TURN_STARTED, status="running")
+    append_turn_event(
+        tmp_path,
+        "session-1",
+        turn_id,
+        EVENT_TURN_COMPLETED,
+        status=event_status,
+        payload=payload,
+    )
+
+    diagnosis = module.build_session_turn_diagnosis(tmp_path, "session-1", turn_id)["diagnosis"]
+
+    assert diagnosis["status"] == "incomplete"
+    assert diagnosis["terminalConsistency"]["journal"] == "needs_continue"
+    assert diagnosis["nextMinimalAction"] != "no_action_needed"
+
+
+def test_diagnosis_without_turn_id_selects_latest_running_turn(tmp_path):
+    module = load_module()
+    session_id = f"session-latest-{uuid4().hex}"
+    append_turn_event(tmp_path, session_id, "turn-old", EVENT_TURN_STARTED, status="running")
+    append_turn_event(tmp_path, session_id, "turn-old", EVENT_TURN_COMPLETED, status="completed")
+    append_turn_event(tmp_path, session_id, "turn-new", EVENT_TURN_STARTED, status="running")
+    # A delayed checkpoint from an earlier turn must not select that turn again.
+    append_turn_event(tmp_path, session_id, "turn-foreign", EVENT_COMPACTION_CHECKPOINT, status="checkpointed")
+    _write_runtime_events(
+        tmp_path,
+        [
+            _runtime_event("llm_route_attempt_succeeded", turn_id="turn-old", session_id=session_id),
+            _runtime_event("llm_route_attempt_started", turn_id="turn-new", session_id=session_id),
+        ],
+    )
+
+    report = module.build_session_turn_diagnosis(tmp_path, session_id)
+
+    assert report["turnId"] == "turn-new"
+    assert report["journal"]["eventTypes"] == [EVENT_TURN_STARTED]
+    assert report["diagnosis"]["status"] == "running"
