@@ -653,6 +653,16 @@ def test_session_events_runs_only_initial_projection_on_dedicated_executor(monke
 def test_session_detail_exists(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    # Detail rendering reports the resolved context window; declare it on the
+    # primary profile model instead of binding an Agent (which would add another
+    # direct session to the list and change its order).
+    cfg = session_service.get_config().model_copy(deep=True)
+    primary_profile = cfg.llm.get_profile(role="primary")
+    primary_model_id, _entry = cfg.llm.get_model_library_entry_for_profile(primary_profile)
+    entry = cfg.llm.model_library.get(str(primary_model_id or "").strip())
+    if isinstance(entry, dict) and not entry.get("context_window"):
+        entry["context_window"] = 200000
+    monkeypatch.setattr(session_service, "get_config", lambda: cfg)
 
     sessions_response = client.get("/api/sessions")
     assert sessions_response.status_code == 200
@@ -1998,6 +2008,8 @@ def _patch_supervised_session_model_choice(monkeypatch, *, provider_id: str) -> 
                 "provider": provider_id,
                 "model": "model-a",
                 "label": "Supervised test model",
+                "context_window": 200000,
+                "context_window": 200000,
                 "reasoningEffortValues": [],
                 "reasoningEffortOptions": [],
                 "defaultReasoningEffort": "",
@@ -2015,6 +2027,8 @@ def test_supervised_agent_session_is_hidden_and_preserves_prompt_with_mental_ove
         "provider_id": primary_profile.provider_id,
         "model": "model-a",
         "label": "Supervised test model",
+        "context_window": 200000,
+        "context_window": 200000,
     }
     monkeypatch.setattr(session_service, "get_config", lambda: cfg)
     _patch_supervised_session_model_choice(monkeypatch, provider_id=primary_profile.provider_id)
@@ -2182,6 +2196,8 @@ def test_supervised_session_workspace_override_routes_tool_workspace_to_candidat
         "provider_id": primary_profile.provider_id,
         "model": "model-a",
         "label": "Supervised test model",
+        "context_window": 200000,
+        "context_window": 200000,
     }
     monkeypatch.setattr(session_service, "get_config", lambda: cfg)
     _patch_supervised_session_model_choice(monkeypatch, provider_id=primary_profile.provider_id)
@@ -2321,6 +2337,7 @@ def test_self_observation_message_source_disables_tools(tmp_path, monkeypatch):
         "provider_id": primary_profile.provider_id,
         "model": "model-a",
         "label": "Observation test model",
+        "context_window": 200000,
     }
     monkeypatch.setattr(session_service, "get_config", lambda: cfg)
     _patch_supervised_session_model_choice(monkeypatch, provider_id=primary_profile.provider_id)
@@ -2427,6 +2444,7 @@ def test_self_observation_message_source_does_not_route_recent_image_reference(t
         "provider_id": primary_profile.provider_id,
         "model": "model-a",
         "label": "Observation test model",
+        "context_window": 200000,
     }
     monkeypatch.setattr(session_service, "get_config", lambda: cfg)
     _patch_supervised_session_model_choice(monkeypatch, provider_id=primary_profile.provider_id)
