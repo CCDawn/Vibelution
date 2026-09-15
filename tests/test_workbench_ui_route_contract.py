@@ -66,5 +66,5 @@ def test_workbench_ui_preferences_http_round_trip(tmp_path, monkeypatch) -> None
     payload = saved.json()
     assert payload["ok"] is True
     assert payload["preferences"]["paneLayouts"]["chat"]["left"] == 360
-    assert payload["preferences"]["shell"]["topBarMode"] == "hidden"
+    assert "topBarMode" not in payload["preferences"]["shell"]
     assert payload["preferences"]["updatedAt"]

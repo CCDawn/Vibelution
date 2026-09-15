@@ -53,7 +53,7 @@ describe("Electron desktop window icons", () => {
     expect(loadedUrls).toEqual(["http://127.0.0.1:8765/launcher"]);
   });
 
-  it("uses native Windows chrome for the Workbench window", () => {
+  it("overlays native Windows controls on the Workbench navigation bar", () => {
     createWorkbenchWindow("http://127.0.0.1:8000", desktopPaths);
 
     expect(browserWindowOptions[0]).toMatchObject({
@@ -61,10 +61,13 @@ describe("Electron desktop window icons", () => {
       icon: resolveWorkspaceIconPath(desktopPaths),
       backgroundColor: "#f7fafc",
       show: false,
-      titleBarStyle: "default",
+      titleBarStyle: "hidden",
+      titleBarOverlay: {
+        color: "#00000000",
+        height: 40
+      },
       autoHideMenuBar: true
     });
-    expect(browserWindowOptions[0]).not.toHaveProperty("titleBarOverlay");
     expect(loadedUrls).toEqual([]);
   });
 

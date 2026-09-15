@@ -1,5 +1,4 @@
 import {
-  BellRing,
   Bot,
   ChevronRight,
   MessageSquarePlus,
@@ -85,10 +84,8 @@ export type ChatConversationIndexRailProps = {
   onCreateGroupRoom: () => void;
   onOpenDirectSession: (sessionId: string) => void;
   onPrefetchDirectSession?: (sessionId: string) => void;
-  onOpenProjectAgentBus: () => void;
   onToggleGroupAgent: (agentId: string) => void;
   onToggleGroupComposer: () => void;
-  projectBusActive: boolean;
   readyChatRoomModes: ChatRoomMode[];
   renderAgentAvatar: (className: string, imageUrl: string | undefined, fallback: string) => ReactNode;
   avatarInitials: (agentCode?: string, name?: string, fallback?: string) => string;
@@ -129,7 +126,6 @@ export type ChatConversationIndexRailProps = {
   setRightIndexPanel: Dispatch<SetStateAction<ConversationIndexPanelKey>>;
   standardGroupRoomActive: boolean;
   t: (key: TranslationKey) => string;
-  currentSessionLabel: string;
 };
 
 export function ChatConversationIndexRail(props: ChatConversationIndexRailProps) {
@@ -171,10 +167,8 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
     onCreateGroupRoom,
     onOpenDirectSession,
     onPrefetchDirectSession,
-    onOpenProjectAgentBus,
     onToggleGroupAgent,
     onToggleGroupComposer,
-    projectBusActive,
     readyChatRoomModes,
     renderAgentAvatar,
     avatarInitials,
@@ -195,7 +189,6 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
     setRightIndexPanel,
     standardGroupRoomActive,
     t,
-    currentSessionLabel,
   } = props;
 
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
@@ -670,33 +663,6 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
               </section>
             ) : null}
             </div>
-            <section className={styles.systemEntryGroup} aria-label={lang === "zh" ? "系统入口" : "System entries"}>
-              <VButton
-                type="button"
-                contentLayout="plain"
-                variant="ghost"
-                aria-current={projectBusActive ? "true" : undefined}
-                className={
-                  projectBusActive
-                    ? `${styles.systemEntryButton} ${styles.systemEntryButtonActive}`
-                    : styles.systemEntryButton
-                }
-                onClick={onOpenProjectAgentBus}
-              >
-                <span className={styles.systemEntryIcon} aria-hidden="true">
-                  <BellRing size={16} />
-                </span>
-                <span className={styles.systemEntryCopy}>
-                  <span className={styles.systemEntryTitleRow}>
-                    <span className={styles.systemEntryTitle}>{lang === "zh" ? "助手通知流" : "Agent notice stream"}</span>
-                    {projectBusActive ? <span className={styles.sessionCurrentBadge}>{currentSessionLabel}</span> : null}
-                  </span>
-                  <span className={styles.systemEntryMeta}>
-                    {lang === "zh" ? "全局广播 · 私信投递记录" : "Global broadcast · private delivery log"}
-                  </span>
-                </span>
-              </VButton>
-            </section>
             </div>
           )}
           </div>

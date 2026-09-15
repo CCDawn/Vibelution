@@ -3,15 +3,13 @@ import { lazy, Suspense, type CSSProperties, type MouseEvent as ReactMouseEvent,
 import { Link, Outlet, useLocation, useNavigate, useNavigationType } from "react-router-dom";
 import {
   ArrowLeft,
-  ChevronDown,
+  ChevronUp,
   LoaderCircle,
   Moon,
-  PanelTopClose,
-  PanelTopOpen,
   RefreshCw,
   Settings,
+  SlidersHorizontal,
   Sun,
-  Wrench,
 } from "lucide-react";
 
 import { fetchJson, setFetchJsonFailureReporter, type FetchJsonFailureReport } from "../api/client";
@@ -65,7 +63,6 @@ import {
   shellNavAnchorFromEventTarget,
 } from "./shellPrimaryNavClick";
 import {
-  nextWorkbenchTheme,
   readStoredWorkbenchTheme,
   writeStoredWorkbenchTheme,
   type WorkbenchTheme,
@@ -289,6 +286,7 @@ type ConfigSummaryWithThemeBackground = ConfigSummary & {
 
 type WorkbenchShellStyle = CSSProperties & {
   "--workbench-theme-background-image"?: string;
+  "--shell-settings-dock-width"?: string;
 };
 
 type ThemeBackgroundReadability = "soft" | "standard" | "strong";
@@ -684,9 +682,7 @@ export function AppShell() {
   const [lifecycleCommandId, setLifecycleCommandId] = useState("");
   const [lifecycleCancelPending, setLifecycleCancelPending] = useState(false);
   const [utilityOpen, setUtilityOpen] = useState(false);
-  const topBarMode = useShellStore((state) => state.topBarMode);
-  const setTopBarMode = useShellStore((state) => state.setTopBarMode);
-  const topBarHidden = topBarMode === "hidden";
+  const chatLeftPanelWidth = useShellStore((state) => state.chatPanelWidths.leftPanelWidth);
   const desktopShell = useMemo(() => isElectronDesktopShell(), []);
   const [theme, setTheme] = useState(() => readStoredWorkbenchTheme());
   const [frontendVisible, setFrontendVisible] = useState(
@@ -729,13 +725,13 @@ export function AppShell() {
     Boolean(themeBackgroundImageUrl),
   );
   const shellStyle = useMemo<WorkbenchShellStyle | undefined>(
-    () =>
-      themeBackgroundImageUrl
-        ? {
-            "--workbench-theme-background-image": `url(${JSON.stringify(themeBackgroundImageUrl)})`,
-          }
-        : undefined,
-    [themeBackgroundImageUrl],
+    () => ({
+      "--shell-settings-dock-width": `${chatLeftPanelWidth}px`,
+      ...(themeBackgroundImageUrl
+        ? { "--workbench-theme-background-image": `url(${JSON.stringify(themeBackgroundImageUrl)})` }
+        : {}),
+    }),
+    [chatLeftPanelWidth, themeBackgroundImageUrl],
   );
   const shellStartupWarmupActive = useStartupWarmup(shellStartupDataReady);
   const shellPollingVisible = frontendVisible || shellStartupWarmupActive;
@@ -821,12 +817,14 @@ export function AppShell() {
   const supervisedEvolutionEnabled = isWorkbenchModeEnabled(configQuery.data, "supervised_evolution");
   const selfEvolutionEnabled = isWorkbenchModeEnabled(configQuery.data, "self_evolution");
   const refreshFrontendLabel = lang === "en" ? "Refresh frontend" : "刷新前端";
-  const hideTopBarLabel = lang === "en" ? "Hide top bar" : "隐藏顶部栏";
-  const showTopBarLabel = lang === "en" ? "Show top bar" : "显示顶部栏";
+  const settingsLabel = lang === "en" ? "Settings" : "设置";
+  const settingsAndToolsLabel = lang === "en" ? "Settings and tools" : "设置与工具";
+  const appearanceLabel = lang === "en" ? "Appearance" : "外观";
+  const lightThemeLabel = lang === "en" ? "Light" : "浅色";
+  const darkThemeLabel = lang === "en" ? "Dark" : "深色";
   const cancelShutdownLabel = lang === "en" ? "Cancel close" : "取消关闭";
   const cancelRestartLabel = lang === "en" ? "Cancel restart" : "取消重启";
   const cancellingLifecycleLabel = lang === "en" ? "Cancelling..." : "正在取消...";
-  const themeToggleLabel = theme === "dark" ? t("switchToLightTheme") : t("switchToDarkTheme");
   const returnNavigationTarget = useMemo(
     () => resolveReturnTarget(routeLocationFromRouter(location), returnNavigationStack),
     [location, returnNavigationStack],
@@ -950,17 +948,6 @@ export function AppShell() {
   const activeWorkIndicator = deriveActiveWorkIndicator(runtimeQuery.data, lang);
   // Human-readable only (no raw session ids). Used for shutdown/restart copy and aria, not native title.
   const activeWorkDetailsTitle = activeWorkIndicator?.items.map((item) => item.detail).join(" · ") ?? "";
-  const activeWorkChipAriaLabel = activeWorkIndicator
-    ? [
-      t("activeWorkNow"),
-      activeWorkIndicator.label,
-      statusLabel(activeWorkIndicator.status),
-      activeWorkIndicator.count > 1
-        ? `${activeWorkIndicator.count} ${t("activeWorkCountSuffix")}`
-        : "",
-      activeWorkIndicator.items[0]?.summary,
-    ].filter(Boolean).join(" · ")
-    : "";
   const clearRestartCompletionDismissTimer = useCallback(() => {
     if (restartCompletionDismissTimerRef.current === null) {
       return;
@@ -1606,12 +1593,9 @@ export function AppShell() {
     return () => window.removeEventListener("keydown", handleReloadShortcut);
   }, []);
 
-  const toggleTheme = useCallback(() => {
-    setTheme((current) => {
-      const next = nextWorkbenchTheme(current);
-      writeStoredWorkbenchTheme(next);
-      return next;
-    });
+  const selectTheme = useCallback((next: WorkbenchTheme) => {
+    writeStoredWorkbenchTheme(next);
+    setTheme(next);
   }, []);
 
   useEffect(() => {
@@ -2110,7 +2094,6 @@ export function AppShell() {
       data-vui-app="workbench"
       data-theme-background={themeBackgroundImageUrl ? "custom" : "default"}
       data-theme-background-readability={themeBackgroundImageUrl ? themeBackgroundReadability : undefined}
-      data-topbar-mode={topBarMode}
       data-shell="workbench"
       data-browser-role="workbench"
       style={shellStyle}
@@ -2162,19 +2145,6 @@ export function AppShell() {
             </div>
           </div>
         </div>
-      ) : null}
-      {topBarHidden ? (
-        <VButton
-          type="button"
-          variant="secondary"
-          className={styles.topBarRestoreButton}
-          aria-label={showTopBarLabel}
-          title={showTopBarLabel}
-          onPress={() => setTopBarMode("full")}
-          icon={<PanelTopOpen size={15} />}
-        >
-          <span>{showTopBarLabel}</span>
-        </VButton>
       ) : null}
       <header className={styles.topBar}>
         <div className={styles.brandBlock} data-shell-group="brand">
@@ -2301,248 +2271,185 @@ export function AppShell() {
           <span className={styles.mobileNavLabel}>{activePrimaryRouteLabel}</span>
         </div>
 
-        <div className={styles.topActions} data-shell-group="system-actions">
-          <div
-            className={styles.activeWorkSlot}
-            data-shell-group="active-work"
-            data-active-work-slot={activeWorkIndicator ? "active" : "empty"}
-          >
-            {activeWorkIndicator ? (
-              <VPopover
-                align="end"
-                side="bottom"
-                sideOffset={8}
-                aria-label={t("activeWorkDetails")}
-                contentClassName={styles.activeWorkPopoverContent}
-                data-vui="active-work-popover"
-                trigger={(
-                  <VButton
-                    type="button"
-                    variant="secondary"
-                    contentLayout="plain"
-                    className={styles.activeWorkChip}
-                    aria-haspopup="dialog"
-                    aria-label={activeWorkChipAriaLabel}
-                  >
-                    <VStatusChip
-                      tone={systemToneToStatus(activeWorkIndicator.tone)}
-                      className={styles.activeWorkToneChip}
-                    >
-                      {activeWorkIndicator.tone === "running"
-                        ? t("activeWorkNow")
-                        : statusLabel(activeWorkIndicator.status)}
-                    </VStatusChip>
-                    <strong>{activeWorkIndicator.label}</strong>
-                    {activeWorkIndicator.overflowCount > 0 ? (
-                      <span className={styles.activeWorkMore}>
-                        {t("activeWorkMorePrefix")}
-                        {activeWorkIndicator.overflowCount}
-                      </span>
-                    ) : null}
-                  </VButton>
-                )}
-              >
-                <div className={styles.activeWorkDetailPanel} role="note">
-                  <div className={styles.activeWorkDetailHeader}>
-                    <strong>{t("activeWorkDetails")}</strong>
-                    <span>
-                      {activeWorkIndicator.count} {t("activeWorkCountSuffix")}
-                    </span>
-                  </div>
-                  <ul className={styles.activeWorkDetailList}>
-                    {activeWorkIndicator.items.map((item) => {
-                      const runIdDisplay = formatActiveWorkRunId(item.runId);
-                      const detailAria = [item.label, statusLabel(item.status), item.summary].filter(Boolean).join(" · ");
-                      const detailCopy = (
-                        <div className={styles.activeWorkDetailCopy}>
-                          <div className={styles.activeWorkDetailTitle}>
-                            <strong>{item.label}</strong>
-                          </div>
-                          {item.summary ? (
-                            <p title={item.fullSummary || item.summary}>{item.summary}</p>
-                          ) : null}
-                          {runIdDisplay ? (
-                            <code title={item.runId || undefined}>{runIdDisplay}</code>
-                          ) : null}
-                        </div>
-                      );
-                      return (
-                        <li key={`${item.kind}-${item.runId || item.status}`} className={styles.activeWorkDetailItem}>
-                          <VStatusChip tone={systemToneToStatus(item.tone)} className={styles.activeWorkItemToneChip}>
-                            {statusLabel(item.status)}
-                          </VStatusChip>
-                          {item.href ? (
-                            <Link className={styles.activeWorkDetailLink} to={item.href} aria-label={detailAria}>
-                              {detailCopy}
-                            </Link>
-                          ) : detailCopy}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              </VPopover>
-            ) : null}
-          </div>
-          <div
-            className={
-              utilityOpen
-                ? `${styles.utilityCluster} ${styles.utilityClusterOpen}`
-                : styles.utilityCluster
-            }
-            aria-label={t("topUtilityMenu")}
-            title={t("topUtilityMenu")}
-          >
-            <VPopover
-              open={utilityOpen}
-              onOpenChange={setUtilityOpen}
-              align="end"
-              side="bottom"
-              sideOffset={8}
-              aria-label={t("topUtilityMenu")}
-              contentClassName={styles.utilityPopoverContent}
-              trigger={(
-                <VButton
-                  type="button"
-                  variant="ghost"
-                  className={styles.utilityTrigger}
-                  aria-haspopup="dialog"
-                  aria-expanded={utilityOpen}
-                  aria-label={t("topUtilityMenu")}
-                  title={t("topUtilityMenu")}
-                  icon={<Wrench size={15} />}
-                  trailingIcon={<ChevronDown size={13} className={styles.utilityChevron} />}
-                >
-                  <span className={styles.utilityTriggerLabel}>{t("topUtilityMenuShort")}</span>
-                </VButton>
-              )}
-            >
-              <div className={styles.utilityPopoverBody}>
-                <nav id="shell-mobile-route-menu" className={styles.mobileRouteMenu} aria-label={lang === "en" ? "Primary navigation" : "主导航"}>
-                  {chatEnabled ? (
-                    <VRouteLinkButton
-                      chrome="shell-nav"
-                      to="/chat"
-                      className={shellMobileNavClass(location.pathname, "/chat")}
-                      aria-current={isShellPrimaryNavActive(location.pathname, "/chat") ? "page" : undefined}
-                      onClick={() => {
-                        preloadChatRouteForNav("click");
-                        closeUtilityMenu();
-                      }}
-                    >
-                      {t("navChat")}
-                    </VRouteLinkButton>
-                  ) : <span className={styles.mobileRouteLink} aria-disabled="true">{t("navChat")}</span>}
-                  {supervisedEvolutionEnabled ? (
-                    <VRouteLinkButton
-                      chrome="shell-nav"
-                      to="/supervised-evolution"
-                      className={shellMobileNavClass(location.pathname, "/supervised-evolution")}
-                      aria-current={isShellPrimaryNavActive(location.pathname, "/supervised-evolution") ? "page" : undefined}
-                      onClick={closeUtilityMenu}
-                    >
-                      {t("navSupervisedEvolution")}
-                    </VRouteLinkButton>
-                  ) : <span className={styles.mobileRouteLink} aria-disabled="true">{t("navSupervisedEvolution")}</span>}
-                  {selfEvolutionEnabled ? (
-                    <VRouteLinkButton
-                      chrome="shell-nav"
-                      to="/self-evolution"
-                      className={shellMobileNavClass(location.pathname, "/self-evolution")}
-                      aria-current={isShellPrimaryNavActive(location.pathname, "/self-evolution") ? "page" : undefined}
-                      onClick={closeUtilityMenu}
-                    >
-                      {t("navSelfEvolution")}
-                    </VRouteLinkButton>
-                  ) : <span className={styles.mobileRouteLink} aria-disabled="true">{t("navSelfEvolution")}</span>}
-                  <VRouteLinkButton chrome="shell-nav" to="/teams" className={shellMobileNavClass(location.pathname, "/teams")} aria-current={isShellPrimaryNavActive(location.pathname, "/teams") ? "page" : undefined} onClick={closeUtilityMenu}>
-                    {t("navTeams")}
-                  </VRouteLinkButton>
-                  <VRouteLinkButton chrome="shell-nav" to="/kernel" className={shellMobileNavClass(location.pathname, "/kernel")} aria-current={isShellPrimaryNavActive(location.pathname, "/kernel") ? "page" : undefined} onClick={closeUtilityMenu}>
-                    Kernel
-                  </VRouteLinkButton>
-                  <VRouteLinkButton chrome="shell-nav" to="/memory" className={shellMobileNavClass(location.pathname, "/memory")} aria-current={isShellPrimaryNavActive(location.pathname, "/memory") ? "page" : undefined} onClick={closeUtilityMenu}>
-                    {t("navMemory")}
-                  </VRouteLinkButton>
-                  <VRouteLinkButton chrome="shell-nav" to="/agents" className={shellMobileNavClass(location.pathname, "/agents")} aria-current={isShellPrimaryNavActive(location.pathname, "/agents") ? "page" : undefined} onClick={closeUtilityMenu}>
-                    {t("navAgents")}
-                  </VRouteLinkButton>
-                </nav>
-                <Suspense fallback={null}>
-                  <LazyAppShellUtilityMenu
-                    lang={lang}
-                    t={t}
-                    frontendVisible={frontendVisible}
-                    onClose={closeUtilityMenu}
-                  />
-                </Suspense>
-              </div>
-            </VPopover>
-          </div>
-          <div className={styles.statusCluster} data-shell-group="status-guide">
-            {/* Quiet status light only: diagnostic details live in runtime logs, not the top bar. */}
-            <span
-              className={styles.statusSummaryChip}
-              title={statusSummaryTitle}
-              aria-label={`${effectivePrimaryStatusCard.label} ${effectivePrimaryStatusCard.value}`}
-            >
-              <span
-                aria-hidden="true"
-                className={`${styles.statusSummaryDot} ${systemToneToDotClass(effectivePrimaryStatusCard.tone)}`}
-              />
-              <span className={styles.statusSummaryLabel}>
-                {effectivePrimaryStatusCard.label} {effectivePrimaryStatusCard.value}
-              </span>
-            </span>
-          </div>
-          <div className={styles.toolCluster} data-shell-group="tool-actions">
-            <VIconButton
-              type="button"
-              variant="ghost"
-              className={styles.actionIconButton}
-              label={themeToggleLabel}
-              tooltip={themeToggleLabel}
-              title={themeToggleLabel}
-              icon={theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
-              onPress={toggleTheme}
-            />
-            <VIconButton
-              type="button"
-              variant="ghost"
-              className={styles.actionIconButton}
-              label={refreshFrontendLabel}
-              tooltip={refreshFrontendLabel}
-              title={refreshFrontendLabel}
-              icon={<RefreshCw size={16} />}
-              onPress={refreshFrontend}
-              isDisabled={restartRequested || shutdownRequested || (shutdownInFlight && !shutdownSettled)}
-            />
-            <VIconButton
-              type="button"
-              variant="ghost"
-              className={styles.actionIconButton}
-              label={hideTopBarLabel}
-              tooltip={hideTopBarLabel}
-              title={hideTopBarLabel}
-              icon={<PanelTopClose size={16} />}
-              onPress={() => setTopBarMode("hidden")}
-            />
-            <VRouteLinkButton
-              to="/config"
-              variant="ghost"
-              className={styles.actionIconButton}
-              aria-label={t("navConfig")}
-              title={t("navConfig")}
-              icon={<Settings size={16} aria-hidden="true" />}
-            />
-          </div>
-        </div>
+        <div className={styles.windowDragRegion} data-shell-group="window-drag-region" aria-hidden="true" />
       </header>
 
       <main className={styles.mainArea}>
         <CompanionDesktopAttention />
         <Outlet />
       </main>
+
+      <div className={styles.settingsDock} data-shell-group="settings-dock">
+        <VPopover
+          open={utilityOpen}
+          onOpenChange={setUtilityOpen}
+          align="start"
+          side="top"
+          sideOffset={10}
+          aria-label={settingsAndToolsLabel}
+          contentClassName={styles.settingsPopoverContent}
+          trigger={(
+            <VButton
+              type="button"
+              variant="ghost"
+              contentLayout="plain"
+              className={utilityOpen ? `${styles.settingsTrigger} ${styles.settingsTriggerOpen}` : styles.settingsTrigger}
+              aria-haspopup="dialog"
+              aria-expanded={utilityOpen}
+              aria-label={settingsLabel}
+              title={settingsLabel}
+            >
+              <span className={styles.settingsTriggerContent}>
+                <span className={styles.settingsTriggerIcon} aria-hidden="true">
+                  <Settings size={13} />
+                </span>
+                <span className={styles.settingsTriggerLabel}>{settingsLabel}</span>
+                <ChevronUp size={16} className={styles.settingsChevron} aria-hidden="true" />
+              </span>
+            </VButton>
+          )}
+        >
+          <div className={styles.settingsPopoverBody}>
+            <header className={styles.settingsPopoverHeader}>
+              <strong>{settingsAndToolsLabel}</strong>
+              <span
+                className={styles.settingsStatus}
+                title={statusSummaryTitle}
+                aria-label={`${effectivePrimaryStatusCard.label} ${effectivePrimaryStatusCard.value}`}
+              >
+                <span
+                  aria-hidden="true"
+                  className={`${styles.statusSummaryDot} ${systemToneToDotClass(effectivePrimaryStatusCard.tone)}`}
+                />
+                <span>{effectivePrimaryStatusCard.label} {effectivePrimaryStatusCard.value}</span>
+              </span>
+            </header>
+
+            <nav id="shell-mobile-route-menu" className={styles.mobileRouteMenu} aria-label={lang === "en" ? "Primary navigation" : "主导航"}>
+              {chatEnabled ? (
+                <VRouteLinkButton
+                  chrome="shell-nav"
+                  to="/chat"
+                  className={shellMobileNavClass(location.pathname, "/chat")}
+                  aria-current={isShellPrimaryNavActive(location.pathname, "/chat") ? "page" : undefined}
+                  onClick={() => {
+                    preloadChatRouteForNav("click");
+                    closeUtilityMenu();
+                  }}
+                >
+                  {t("navChat")}
+                </VRouteLinkButton>
+              ) : <span className={styles.mobileRouteLink} aria-disabled="true">{t("navChat")}</span>}
+              {chatEnabled ? (
+                <VRouteLinkButton chrome="shell-nav" to="/companions" className={shellMobileNavClass(location.pathname, "/companions")} aria-current={isShellPrimaryNavActive(location.pathname, "/companions") ? "page" : undefined} onClick={closeUtilityMenu}>
+                  {t("navCompanions")}
+                </VRouteLinkButton>
+              ) : <span className={styles.mobileRouteLink} aria-disabled="true">{t("navCompanions")}</span>}
+              {supervisedEvolutionEnabled ? (
+                <VRouteLinkButton chrome="shell-nav" to="/supervised-evolution" className={shellMobileNavClass(location.pathname, "/supervised-evolution")} aria-current={isShellPrimaryNavActive(location.pathname, "/supervised-evolution") ? "page" : undefined} onClick={closeUtilityMenu}>
+                  {t("navSupervisedEvolution")}
+                </VRouteLinkButton>
+              ) : <span className={styles.mobileRouteLink} aria-disabled="true">{t("navSupervisedEvolution")}</span>}
+              {selfEvolutionEnabled ? (
+                <VRouteLinkButton chrome="shell-nav" to="/self-evolution" className={shellMobileNavClass(location.pathname, "/self-evolution")} aria-current={isShellPrimaryNavActive(location.pathname, "/self-evolution") ? "page" : undefined} onClick={closeUtilityMenu}>
+                  {t("navSelfEvolution")}
+                </VRouteLinkButton>
+              ) : <span className={styles.mobileRouteLink} aria-disabled="true">{t("navSelfEvolution")}</span>}
+              <VRouteLinkButton chrome="shell-nav" to="/teams" className={shellMobileNavClass(location.pathname, "/teams")} aria-current={isShellPrimaryNavActive(location.pathname, "/teams") ? "page" : undefined} onClick={closeUtilityMenu}>{t("navTeams")}</VRouteLinkButton>
+              <VRouteLinkButton chrome="shell-nav" to="/kernel" className={shellMobileNavClass(location.pathname, "/kernel")} aria-current={isShellPrimaryNavActive(location.pathname, "/kernel") ? "page" : undefined} onClick={closeUtilityMenu}>Kernel</VRouteLinkButton>
+              <VRouteLinkButton chrome="shell-nav" to="/memory" className={shellMobileNavClass(location.pathname, "/memory")} aria-current={isShellPrimaryNavActive(location.pathname, "/memory") ? "page" : undefined} onClick={closeUtilityMenu}>{t("navMemory")}</VRouteLinkButton>
+              <VRouteLinkButton chrome="shell-nav" to="/agents" className={shellMobileNavClass(location.pathname, "/agents")} aria-current={isShellPrimaryNavActive(location.pathname, "/agents") ? "page" : undefined} onClick={closeUtilityMenu}>{t("navAgents")}</VRouteLinkButton>
+            </nav>
+
+            <section className={styles.settingsSection} aria-label={appearanceLabel}>
+              <span className={styles.settingsSectionLabel}>{appearanceLabel}</span>
+              <div className={styles.settingsThemeChoices}>
+                <VButton
+                  type="button"
+                  variant="ghost"
+                  className={theme === "light" ? `${styles.settingsChoiceButton} ${styles.settingsChoiceButtonActive}` : styles.settingsChoiceButton}
+                  aria-pressed={theme === "light"}
+                  icon={<Sun size={13} aria-hidden="true" />}
+                  onPress={() => selectTheme("light")}
+                >
+                  {lightThemeLabel}
+                </VButton>
+                <VButton
+                  type="button"
+                  variant="ghost"
+                  className={theme === "dark" ? `${styles.settingsChoiceButton} ${styles.settingsChoiceButtonActive}` : styles.settingsChoiceButton}
+                  aria-pressed={theme === "dark"}
+                  icon={<Moon size={13} aria-hidden="true" />}
+                  onPress={() => selectTheme("dark")}
+                >
+                  {darkThemeLabel}
+                </VButton>
+              </div>
+            </section>
+
+            <div className={styles.settingsActionList}>
+              <VRouteLinkButton
+                to="/config"
+                variant="ghost"
+                className={styles.settingsActionButton}
+                onClick={closeUtilityMenu}
+                icon={<SlidersHorizontal size={15} aria-hidden="true" />}
+              >
+                {lang === "en" ? "Workbench settings" : "工作台设置"}
+              </VRouteLinkButton>
+              <VButton
+                type="button"
+                variant="ghost"
+                className={styles.settingsActionButton}
+                icon={<RefreshCw size={15} aria-hidden="true" />}
+                onPress={refreshFrontend}
+                isDisabled={restartRequested || shutdownRequested || (shutdownInFlight && !shutdownSettled)}
+              >
+                {refreshFrontendLabel}
+              </VButton>
+            </div>
+
+            {activeWorkIndicator ? (
+              <section className={styles.settingsActiveWork} aria-label={t("activeWorkDetails")}>
+                <div className={styles.activeWorkDetailHeader}>
+                  <strong>{t("activeWorkDetails")}</strong>
+                  <span>{activeWorkIndicator.count} {t("activeWorkCountSuffix")}</span>
+                </div>
+                <ul className={styles.activeWorkDetailList}>
+                  {activeWorkIndicator.items.map((item) => {
+                    const runIdDisplay = formatActiveWorkRunId(item.runId);
+                    const detailAria = [item.label, statusLabel(item.status), item.summary].filter(Boolean).join(" · ");
+                    const detailCopy = (
+                      <div className={styles.activeWorkDetailCopy}>
+                        <div className={styles.activeWorkDetailTitle}><strong>{item.label}</strong></div>
+                        {item.summary ? <p title={item.fullSummary || item.summary}>{item.summary}</p> : null}
+                        {runIdDisplay ? <code title={item.runId || undefined}>{runIdDisplay}</code> : null}
+                      </div>
+                    );
+                    return (
+                      <li key={`${item.kind}-${item.runId || item.status}`} className={styles.activeWorkDetailItem}>
+                        <VStatusChip tone={systemToneToStatus(item.tone)} className={styles.activeWorkItemToneChip}>
+                          {statusLabel(item.status)}
+                        </VStatusChip>
+                        {item.href ? <Link className={styles.activeWorkDetailLink} to={item.href} aria-label={detailAria} onClick={closeUtilityMenu}>{detailCopy}</Link> : detailCopy}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            ) : null}
+
+            <Suspense fallback={null}>
+              <LazyAppShellUtilityMenu
+                lang={lang}
+                t={t}
+                frontendVisible={frontendVisible}
+                onClose={closeUtilityMenu}
+              />
+            </Suspense>
+          </div>
+        </VPopover>
+      </div>
     </div>
   );
 }

@@ -140,9 +140,9 @@ describe("VUI overlay alignment gate", () => {
 
   it("locks shell floating panels on VPopover", () => {
     const shell = read("app/AppShell.tsx");
-    expect(shell).toContain('data-vui="active-work-popover"');
+    expect(shell).not.toContain('data-vui="active-work-popover"');
     expect(shell).not.toContain('data-vui="status-guide-popover"');
-    expect(shell).toContain("contentClassName={styles.utilityPopoverContent}");
+    expect(shell).toContain("contentClassName={styles.settingsPopoverContent}");
     expect(shell).toContain("<VPopover");
     expect(read("components/conversation/ConversationInferenceControl.tsx")).toContain("<VPopover");
     expect(read("components/vui/product/agent-management/AgentPermissionPresetControl.tsx")).toContain("<VPopover");
