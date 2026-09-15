@@ -780,6 +780,56 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).toContain("const value = 2;");
   });
 
+  it("summarizes an edit on its collapsed row before the patch is expanded", () => {
+    const patchMessage: ConversationMessage = {
+      id: "assistant-apply-patch-summary",
+      role: "assistant",
+      timestamp: "2026-09-11T06:00:00Z",
+      turnId: "turn-apply-patch-summary",
+      status: "completed",
+      turnItems: [{
+        id: "apply-patch-summary-r1",
+        itemId: "apply-patch-summary",
+        version: 3,
+        sessionId: "session-1",
+        turnId: "turn-apply-patch-summary",
+        type: "tool_call",
+        callId: "call-apply-patch-summary",
+        toolName: "apply_patch_tool",
+        status: "completed",
+        revision: 1,
+        sequence: 1,
+        terminal: true,
+        input: JSON.stringify({
+          patch_text: [
+            "*** Begin Patch",
+            "*** Update File: web/src/app.ts",
+            "@@",
+            "-const value = 1;",
+            "+const value = 2;",
+            "*** Update File: web/src/other.ts",
+            "@@",
+            "+export const added = true;",
+            "*** End Patch",
+          ].join("\n"),
+        }),
+      }],
+    };
+
+    const html = renderConversation([patchMessage], "trace");
+
+    // The row must name the file and its edit size without expanding the diff.
+    const subjectAt = html.indexOf('data-codex-tool-subject="true"');
+    const statAt = html.indexOf('data-codex-tool-diff-stat="true"');
+    const diffAt = html.indexOf('data-codex-patch-diff="true"');
+    expect(subjectAt).toBeGreaterThan(-1);
+    expect(statAt).toBeGreaterThan(subjectAt);
+    expect(diffAt).toBeGreaterThan(statAt);
+    // Basename, not the full path, plus the count of further files.
+    expect(html).toContain("app.ts 等 2 个文件");
+    expect(html).toContain("+2 −1");
+  });
+
   it("suppresses the standalone turn error banner when the same turn rendered a final answer", () => {
     const answeredMessage: ConversationMessage = {
       id: "assistant-answered",
