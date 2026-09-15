@@ -961,6 +961,12 @@ export type SessionDetail = SessionSummary & {
    * Never set by the API; cleared when a real detail/select payload arrives.
    */
   provisionalTranscript?: boolean;
+  /**
+   * Select handoff (``Prefer: respond-async``): summary/control fields only,
+   * empty ``messages``. The windowed GET/SSE stays the transcript authority,
+   * so this response must never replace a cached transcript.
+   */
+  selectedLightweight?: boolean;
   /** False when GET used includeSecondary=false (light poll). */
   secondaryHydrated?: boolean;
   runtimeNotices?: SessionRuntimeNotice[];

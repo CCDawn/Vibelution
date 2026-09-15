@@ -376,9 +376,42 @@ def _assistant_projection_text_key(value: Any) -> str:
 
 
 def _build_lightweight_session_detail(conversation: dict[str, Any]) -> dict[str, Any]:
+    """Transcript-free handoff for select (UI ``Prefer: respond-async``).
+
+    The chat shell paints from this summary handoff and hydrates the transcript
+    from the windowed GET/SSE. Projecting messages here rebuilt the full history
+    on every tab click (0.8-2.2MB per select), so the handoff deliberately ships
+    no transcript; callers that need history must use the windowed detail read.
+    """
+
     s = _service()
     summary = s._build_session_summary(conversation, hydrate_agent=False)
-    return s._build_session_detail_from_summary(conversation, summary, hydrate_agent=False)
+    turn_control = s._get_session_turn_control(conversation["id"])
+    turn_snapshot = turn_control.snapshot() if turn_control is not None else {
+        "stopRequested": False,
+        "stopRequestedAt": "",
+        "stopReason": "",
+    }
+    released_to_user = bool(turn_snapshot.get("releasedToUser"))
+    return {
+        **summary,
+        "ledgerSeq": s._session_ledger_sequence(conversation["id"]),
+        "defaultFileContext": "",
+        "previewTabs": [],
+        "activePreviewPath": "",
+        "changedFiles": [],
+        "readFiles": [],
+        "messages": [],
+        "activeTurnId": s._current_session_turn_id(conversation["id"])
+        or (
+            str(turn_snapshot.get("turnId") or "").strip()
+            if not released_to_user
+            else ""
+        ),
+        "stopRequested": bool(turn_snapshot["stopRequested"]) and not released_to_user,
+        "stopRequestedAt": "" if released_to_user else str(turn_snapshot["stopRequestedAt"] or "").strip(),
+        "stopReason": "" if released_to_user else str(turn_snapshot["stopReason"] or "").strip(),
+    }
 
 
 def _chat_contract_blocks_unexecuted_validation(contract: dict[str, Any]) -> bool:

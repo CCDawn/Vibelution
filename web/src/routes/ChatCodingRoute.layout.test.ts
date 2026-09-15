@@ -686,7 +686,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("resolveStickySessionDetailPaint");
     expect(routeSource).toContain("transcriptPending: sessionTranscriptPending");
     expect(routeSource).not.toContain("isForeignSessionDetailQueryKey(query.queryKey, activeId)");
-    expect(routeAndSelectionSource).toContain("syncSessionDetail(nextDetail)");
+    // Transcript-free select handoffs preserve cached window messages.
+    expect(routeAndSelectionSource).toContain("syncSessionDetail(nextDetail, {");
+    expect(routeAndSelectionSource).toContain('transcript: nextDetail.selectedLightweight ? "preserve" : "merge"');
     expect(routeAndSelectionSource).toContain("chatWorkspaceCache.afterSessionSelected()");
     expect(routeAndSelectionSource).not.toContain("afterSessionChanged({\n        sessionId: nextDetail.id");
     // Late /select responses must never chase a newer pointer back.
@@ -2100,7 +2102,9 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("coalesces high-frequency direct session stream snapshots before updating UI cache", () => {
     expect(routeAndStreamSource).toContain("const SESSION_STREAM_MIN_APPLY_INTERVAL_MS = 350");
-    expect(routeSource).toContain("const nextDetail = mergeSessionDetailMessageWindow(previous, detail)");
+    expect(routeSource).toContain('const nextDetail = options?.transcript === "preserve"');
+    expect(routeSource).toContain("? mergeSessionDetailHandoff(previous, detail)");
+    expect(routeSource).toContain(": mergeSessionDetailMessageWindow(previous, detail);");
     expect(routeSource).toContain("sessionDetailSnapshotKey(previous) === sessionDetailSnapshotKey(nextDetail)");
     // snapshot helper lives in chatSessionDetailHelpers
     expect(routeAndStreamSource).toContain("setActiveTurnLayerForSession(current, streamSessionId, undefined)");
@@ -3269,7 +3273,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("structuralSharing: sessionDetailStructuralSharing");
     expect(routeSource).toContain("export function sessionDetailStructuralSharing(");
     expect(routeAndDetailMutationsSource).toContain("mergeSessionDetailMessageWindow(current, page)");
-    expect(routeSource).toContain("const nextDetail = mergeSessionDetailMessageWindow(previous, detail)");
+    expect(routeSource).toContain('const nextDetail = options?.transcript === "preserve"');
+    expect(routeSource).toContain("? mergeSessionDetailHandoff(previous, detail)");
+    expect(routeSource).toContain(": mergeSessionDetailMessageWindow(previous, detail);");
     expect(routeSource).toContain("hasEarlierMessages: Boolean(detail.messageWindow?.hasEarlier)");
     expect(routeSource).toContain("earlierMessagesLoading: loadEarlierSessionMessagesMutation.isPending");
     expect(routeSource).toContain("onLoadEarlierMessages: handleLoadEarlierSessionMessages");

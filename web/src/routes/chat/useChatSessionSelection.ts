@@ -20,7 +20,10 @@ export type UseChatSessionSelectionOptions = {
   chatWorkspaceCache: ChatWorkspaceCache;
   lang: "zh" | "en";
   describeError: (error: unknown, fallback: string) => string;
-  syncSessionDetail: (detail: SessionDetail) => void;
+  syncSessionDetail: (
+    detail: SessionDetail,
+    options?: { transcript?: "merge" | "preserve" },
+  ) => void;
   setSessionComposerErrors: Dispatch<SetStateAction<Record<string, string>>>;
   /** Committed-route session target ("" while a room/bus/bare route is active). */
   routeSessionId: string;
@@ -76,8 +79,12 @@ export function useChatSessionSelection({
         [nextDetail.id]: "",
         __sessions__: "",
       }));
-      // Windowed select payload seeds the session query; GET may still refine it.
-      syncSessionDetail(nextDetail);
+      // A lightweight select handoff has no transcript: fold summary/control
+      // fields into the cache and let the windowed GET/SSE hydrate messages.
+      // Full select payloads (older/non-web callers) keep the window merge.
+      syncSessionDetail(nextDetail, {
+        transcript: nextDetail.selectedLightweight ? "preserve" : "merge",
+      });
       void chatWorkspaceCache.afterSessionSelected();
     },
     onError: (error, variables) => {
