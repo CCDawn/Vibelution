@@ -5110,6 +5110,138 @@ def test_edit_resubmit_session_message_truncates_following_history_and_starts_tu
     session_service._clear_session_live_output("session-live")
 
 
+def test_edit_resubmit_session_message_carries_uploaded_image_attachment(tmp_path, monkeypatch):
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "session-live",
+            "updated_at": "2026-05-18T12:03:00",
+            "conversations": [
+                {
+                    "conversation_id": "session-live",
+                    "title": "真实会话",
+                    "updated_at": "2026-05-18T12:03:00",
+                    "last_turn_status": "ready",
+                }
+            ],
+        },
+    )
+    _append_test_ledger_messages(
+        tmp_path,
+        "session-live",
+        [
+            {"role": "user", "content": "原始需求", "timestamp": "2026-05-18T12:00:00"},
+            {"role": "assistant", "content": "原始回答", "timestamp": "2026-05-18T12:01:00"},
+        ],
+        prefix="edit-attachment",
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    base_config = session_service.get_config().model_copy(deep=True)
+    base_config.llm.profiles["primary"].supports_image_input = True
+    primary_profile = base_config.llm.get_profile(role="primary")
+    primary_model_id, primary_model_entry = base_config.llm.get_model_library_entry_for_profile(primary_profile)
+    provider_id = str((primary_model_entry or {}).get("provider_id") or primary_profile.provider_id)
+    vision_model_id = primary_model_id or "vision-edit-test-model"
+    base_config.llm.model_library[vision_model_id] = {
+        **dict(primary_model_entry or {}),
+        "provider_id": provider_id,
+        "model": str((primary_model_entry or {}).get("model") or "vision-edit-test"),
+        "label": str((primary_model_entry or {}).get("label") or "vision-edit-test"),
+        "supports_image_input": True,
+    }
+    monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    _bind_live_session_agent(
+        tmp_path,
+        llm_bindings={
+            "dialogue": {"modelId": vision_model_id},
+            "vision": {"modelId": vision_model_id},
+        },
+    )
+    seen: dict[str, object] = {}
+
+    class DummyAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None, attachments=None):
+            seen["initial_prompt"] = initial_prompt
+            seen["attachments"] = list(attachments or [])
+            return {
+                "status": "completed",
+                "summary": "我已经看到了编辑后的图片。",
+                "raw_output": "我已经看到了编辑后的图片。",
+                "outcome": "done",
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **_kwargs: DummyAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_EXECUTOR",
+        SimpleNamespace(submit=lambda fn, context: fn(context)),
+    )
+
+    upload_response = client.post(
+        "/api/sessions/session-live/attachments",
+        content=(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+            b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4"
+            b"\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05"
+            b"\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        ),
+        headers={"Content-Type": "image/png", "X-Vibelution-Filename": "sketch.png"},
+    )
+    assert upload_response.status_code == 201
+    attachment = upload_response.json()
+
+    response = client.post(
+        "/api/sessions/session-live/messages/edit-resubmit",
+        json={
+            "messageId": "session-live-message-1",
+            "content": "编辑后并带图",
+            "attachmentIds": [attachment["artifactId"]],
+            "mentalModelEnabled": False,
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    edited_user_message = payload["messages"][-2]
+    assert edited_user_message["content"] == "编辑后并带图"
+    assert edited_user_message["attachments"][0]["artifactId"] == attachment["artifactId"]
+    assert edited_user_message["attachments"][0]["filename"] == "sketch.png"
+    assert seen["initial_prompt"] == "编辑后并带图"
+    seen_attachment = seen["attachments"][0]
+    assert seen_attachment["artifactId"] == attachment["artifactId"]
+    assert seen_attachment["dataUrl"].startswith("data:image/png;base64,")
+
+    stored_user = session_service.get_session_detail("session-live")["messages"][-2]
+    assert stored_user["content"] == "编辑后并带图"
+    assert stored_user["attachments"][0]["artifactId"] == attachment["artifactId"]
+    assert "dataUrl" not in stored_user["attachments"][0]
+
+    session_service._set_session_running("session-live", False)
+    session_service._clear_session_turn_control("session-live")
+    session_service._clear_session_live_output("session-live")
+
+
+def test_edit_resubmit_session_message_requires_content_or_image(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+
+    response = client.post(
+        "/api/sessions/session-live/messages/edit-resubmit",
+        json={"messageId": "session-live-message-1", "content": ""},
+    )
+
+    assert response.status_code == 422
+    assert "图片" in str(response.json().get("detail") or "")
+
+
 def test_edit_resubmit_session_message_allows_latest_user_message(tmp_path, monkeypatch):
     save_chat_state(
         tmp_path,

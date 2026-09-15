@@ -673,6 +673,7 @@ def session_edit_resubmit_message(session_id: str, payload: SessionMessageEditPa
             turn_mode=payload.turnMode,
             write_intent=payload.writeIntent,
             base_message_id=payload.baseMessageId,
+            attachment_ids=payload.attachmentIds,
         )
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

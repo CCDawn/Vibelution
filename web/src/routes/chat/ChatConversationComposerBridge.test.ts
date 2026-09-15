@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildComposerImageInputGuidance,
   buildConversationComposerBridgeState,
   mapChatComposerImageAttachments,
   type ChatConversationComposerBridgeLabels,
@@ -178,6 +179,37 @@ describe("ChatConversationComposerBridge", () => {
 
     expect(state.disabled).toBe(true);
     expect(state.actionMode).toBe("stop");
+  });
+
+  it("explains that a waiting image is held until the running turn ends", () => {
+    expect(buildComposerImageInputGuidance({
+      attachmentCount: 0,
+      heldUntilTurnEnds: true,
+      imageInputSupport: null,
+      modelLabel: "model-x",
+      lang: "zh",
+    })).toBe("");
+    expect(buildComposerImageInputGuidance({
+      attachmentCount: 1,
+      heldUntilTurnEnds: true,
+      imageInputSupport: null,
+      modelLabel: "model-x",
+      lang: "zh",
+    })).toBe("当前轮运行中：图片会保留在输入框，本轮结束后随下一条消息发送。");
+    expect(buildComposerImageInputGuidance({
+      attachmentCount: 1,
+      heldUntilTurnEnds: true,
+      imageInputSupport: true,
+      modelLabel: "model-x",
+      lang: "en",
+    })).toBe("This turn is still running: the image stays in the composer and sends with your next message after the turn ends.");
+    expect(buildComposerImageInputGuidance({
+      attachmentCount: 1,
+      heldUntilTurnEnds: false,
+      imageInputSupport: null,
+      modelLabel: "model-x",
+      lang: "zh",
+    })).toBe("model-x 的图像输入能力尚未验证；将尝试发送，失败时会保留诊断。");
   });
 
   it("marks the primary Chat composer as the Codex variant", () => {

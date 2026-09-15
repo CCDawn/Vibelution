@@ -1116,6 +1116,7 @@ def edit_and_resubmit_session_message(
     write_intent: bool | None = None,
     trace_context_carrier: Mapping[str, Any] | None = None,
     base_message_id: str = "",
+    attachment_ids: list[str] | None = None,
 ) -> dict:
     """Replace a user message, branch at its turn, and start a new turn."""
 
@@ -1133,6 +1134,7 @@ def edit_and_resubmit_session_message(
         trace_context_carrier=trace_context_carrier,
         operation="edit",
         base_message_id=base_message_id,
+        attachment_ids=attachment_ids,
     )
 
 
@@ -1183,6 +1185,7 @@ def _resubmit_session_user_message(
     trace_context_carrier: Mapping[str, Any] | None,
     operation: str,
     base_message_id: str = "",
+    attachment_ids: list[str] | None = None,
 ) -> dict:
     """Shared edit/regenerate body: truncate from the target user message and rerun it."""
 
@@ -1203,9 +1206,9 @@ def _resubmit_session_user_message(
             if is_regenerate
             else s.text_for(lang, zh="请选择要重新编辑的消息。", en="Choose a message to edit.")
         )
-    if not is_regenerate and not message:
+    if not is_regenerate and not message and not any(str(item or "").strip() for item in (attachment_ids or [])):
         raise s.SessionValidationError(
-            s.text_for(lang, zh="请输入重新发送的消息。", en="Enter the edited message before sending.")
+            s.text_for(lang, zh="请输入重新发送的消息或图片。", en="Enter the edited message or attach an image before sending.")
         )
     if not is_regenerate:
         s._validate_user_message_not_encoding_replacement(message, lang=lang)
@@ -1305,6 +1308,20 @@ def _resubmit_session_user_message(
                     )
                 )
             s._validate_user_message_not_encoding_replacement(message, lang=lang)
+        else:
+            attachments = s._resolve_session_image_attachments(
+                conversation_id,
+                attachment_ids or [],
+                conversation=conversation,
+            )
+            if not message and not attachments:
+                raise s.SessionValidationError(
+                    s.text_for(
+                        lang,
+                        zh="请输入重新发送的消息或图片。",
+                        en="Enter the edited message or attach an image before sending.",
+                    )
+                )
         skill_command = s.parse_skill_slash_command(message)
         skill_invocation = s._skill_invocation_payload(skill_command) if skill_command is not None else None
 

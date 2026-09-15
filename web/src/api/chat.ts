@@ -348,6 +348,7 @@ export function editResubmitSessionMessage(
     clientSubmissionId: string;
     content: string;
     contentUtf8Base64: string;
+    attachmentIds?: string[];
     mentalModelEnabled?: boolean;
     runtimeStatusEnabled?: boolean;
     turnStatusTail?: unknown;
