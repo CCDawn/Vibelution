@@ -377,6 +377,33 @@ def _persist_session_turn_result(
     source_collection_stage_task_metadata: dict[str, str] = {}
     runtime_stop_requested = s._is_session_stop_requested(session_id)
     if turn_id and not s._is_session_turn_current(session_id, turn_id):
+        # The worker's turn was superseded before its result could land.
+        # Silent discards here used to surface later as a misleading
+        # `turn_persistence_failed` from the terminal fallback; mirror the
+        # `turn_result_dropped` telemetry with boundary metadata only (never
+        # the result body) so the drop is observable.
+        try:
+            s.record_runtime_scene_event(
+                "conversation",
+                "turn_result_dropped_not_current",
+                "conversation.turn_result.dropped_not_current",
+                level="warning",
+                outcome="discarded",
+                message="Turn result was dropped because the turn is no longer the session's current turn.",
+                fields={
+                    "sessionId": session_id,
+                    "turnId": turn_id,
+                    "resultStatus": str(result.get("status") or "").strip()
+                    if isinstance(result, dict)
+                    else "",
+                    "resultSummaryLength": len(str(result.get("summary") or "").strip())
+                    if isinstance(result, dict)
+                    else 0,
+                    "runtimeStopRequested": runtime_stop_requested,
+                },
+            )
+        except Exception:
+            pass
         return
     if turn_id and turn_has_terminal_event(s.PROJECT_ROOT, session_id, turn_id):
         # Another authority already closed this turn while the worker was still

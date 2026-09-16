@@ -27,6 +27,9 @@ from core.orchestration.context_engine import AgentContextInterrupted
 from core.web.services.session.research_thinking_budget import (
     build_research_thinking_budget_segment,
 )
+from core.web.services.session.turn_diagnostics import (
+    _heartbeat_chat_turn_work_run,
+)
 
 _STRICT_RESEARCH_TASK_KINDS = frozenset(
     {"hypothesis_design", "protocol_review", "result_evaluation"}
@@ -1071,6 +1074,14 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                 "reason": "turn_id_not_current",
             },
         )
+        # Superseded before the main try/finally: still release this turn's
+        # worker bookkeeping (terminal fallback, running flags, snapshot),
+        # mirroring the proactive fence branch above.  `_finish_session_turn_worker`
+        # is turn-scoped and idempotent, so it cannot disturb a newer turn.
+        stale_turn_control = context.get("turn_control")
+        if not isinstance(stale_turn_control, s.SessionTurnControl):
+            stale_turn_control = s._get_session_turn_control(session_id)
+        _finish_session_turn_worker(session_id, turn_id, stale_turn_control)
         return
     turn_control = context.get("turn_control")
     if not isinstance(turn_control, s.SessionTurnControl):
@@ -2485,6 +2496,16 @@ def _run_session_continuation_loop(
             )
             return s._build_stopped_turn_result(stop_reason)
 
+        # Work-run heartbeat at the continuation-loop boundary (throttled
+        # inside the helper): proves worker liveness so the stale sweep's
+        # ``absolute_stale`` ceiling measures time since the last worker sign
+        # of life instead of the last durable progress write.
+        _heartbeat_chat_turn_work_run(
+            session_id=session_id,
+            turn_id=canonical_turn_id,
+            stage="worker_loop",
+        )
+
         s._record_session_turn_lifecycle_event(
             session_id,
             "agent_turn_started",
@@ -2595,6 +2616,14 @@ def _run_session_continuation_loop(
             # its fail-closed marker into the normal worker exception path
             # before any continuation or success persist.
             _raise_for_challenge_receipt_failure(turn_capture)
+        # LLM-attempt boundary heartbeat (throttled inside the helper): a long
+        # think/stream stretch otherwise leaves the work-run updatedAt frozen
+        # at the previous boundary.
+        _heartbeat_chat_turn_work_run(
+            session_id=session_id,
+            turn_id=canonical_turn_id,
+            stage="worker_loop",
+        )
         result = s._attach_session_prompt_cache_metadata(
             result,
             prompt_cache_scope=prompt_cache_scope,

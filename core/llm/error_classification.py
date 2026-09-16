@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .errors import classify_exception
+from .errors import CHINESE_RATE_LIMIT_PHRASES, classify_exception
 from .types import LLMError
 
 __all__ = [
@@ -109,6 +109,13 @@ def _has_rate_limit_phrase(exc: Exception) -> bool:
     return "rate limit" in str(exc or "").lower()
 
 
+def _has_chinese_rate_limit_phrase(exc: Exception) -> bool:
+    # errors.CHINESE_RATE_LIMIT_PHRASES 命中的中文限流文案本身就是真限流
+    # 证据：与 "rate limit"/独立 429 token 同级，不被下面的降级门误伤。
+    message = str(exc or "").lower()
+    return any(phrase in message for phrase in CHINESE_RATE_LIMIT_PHRASES)
+
+
 def _has_rate_limit_type_token(exc: Exception) -> bool:
     # 类名（litellm.RateLimitError → "ratelimiterror"）与消息里的无空格
     # 形式都算类型证据；带空格的 "rate limit" 由关键词表与上面的短语检查
@@ -128,8 +135,9 @@ def classify_error(exc: Exception) -> ErrorClassification:
       时处理，与 ``timeout`` 同族可重试。
     - HTTP 429 收紧：关键词表用 ``"429" in message`` 子串判定，"1429" 这类
       无关数字会被误报成 ``rate_limit``；要求 429 是独立 token（或消息里有
-      "rate limit" 短语）才成立，否则降级回 ``provider_protocol_error``
-      fail-closed——review 冷却、client 退避都不应被无关数字触发。
+      "rate limit" 短语或中文限流文案）才成立，否则降级回
+      ``provider_protocol_error`` fail-closed——review 冷却、client 退避都
+      不应被无关数字触发。
     - HTTP 429 补漏：``litellm.RateLimitError`` 等类型异常消息不带
       "429"/"rate limit" 关键词时同样被误归不可重试的
       ``provider_protocol_error``（生产通道走 litellm）；类型证据把它提升
@@ -155,10 +163,14 @@ def classify_error(exc: Exception) -> ErrorClassification:
             ),
         )
     if not isinstance(exc, LLMError) and error.category == "rate_limit":
-        # 关键词路径命中的 rate_limit 必须有真 429 证据：独立 token 的 429
-        # 或 "rate limit" 短语。纯子串命中（如 "HTTP 1429"）降级回
-        # provider_protocol_error，绝不放宽也绝不触发限流冷却。
-        if not _has_rate_limit_phrase(exc) and not _has_independent_429_token(exc):
+        # 关键词路径命中的 rate_limit 必须有真 429 证据：独立 token 的 429、
+        # "rate limit" 短语或中文限流文案。纯子串命中（如 "HTTP 1429"）降级
+        # 回 provider_protocol_error，绝不放宽也绝不触发限流冷却。
+        if (
+            not _has_rate_limit_phrase(exc)
+            and not _has_independent_429_token(exc)
+            and not _has_chinese_rate_limit_phrase(exc)
+        ):
             message = str(exc or "")
             return ErrorClassification(
                 category="provider_protocol_error",

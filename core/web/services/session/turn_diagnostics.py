@@ -13,6 +13,7 @@ import hashlib
 import json
 import re
 import threading
+import time
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -842,6 +843,7 @@ def _chat_turn_work_run_hang_reason(
     *,
     now: datetime,
     worker_owns_turn: bool,
+    queued_owner: bool = False,
 ) -> str:
     """Return a non-empty reason code when a chat_turn work-run should be force-settled."""
     status = str(payload.get("status") or payload.get("currentPhase") or "").strip().lower()
@@ -873,7 +875,19 @@ def _chat_turn_work_run_hang_reason(
         if (now - progress_anchor).total_seconds() >= _CHAT_TURN_TOOL_TIMEOUT_HANG_SECONDS:
             return "tool_timeout_hang"
 
-    # Absolute ceiling for any running chat_turn (defensive).
+    # Queued turns are parked by the scheduler before any worker starts, so
+    # their updatedAt freezes at enqueue time: wall-clock age measures queue
+    # wait, not a hung turn.  Queue wait is not the turn's fault and the queue
+    # owns this lifecycle, so absolute_stale must not fire; the tool-timeout
+    # check above still applies to real payloads.
+    if queued_owner:
+        return ""
+
+    # Absolute ceiling for any running chat_turn (defensive).  With the
+    # worker-layer heartbeat refreshing updatedAt (see
+    # `_heartbeat_chat_turn_work_run`), a live worker stays under this ceiling
+    # while a genuinely wedged worker is still killed 30 minutes after its
+    # last sign of life.
     anchor = updated or started
     if anchor is not None and (now - anchor).total_seconds() >= _CHAT_TURN_ABSOLUTE_STALE_SECONDS:
         return "absolute_stale"
@@ -983,6 +997,20 @@ def _settle_stale_chat_turn_work_run(
     except Exception:
         pass
     try:
+        # Close the journal's still-open turn in the same pass instead of
+        # waiting for the lagging `_reconcile_stale_session_ledger` to backfill
+        # an interruption later.  Reuses control.py's
+        # `_append_stale_turn_interruption_if_session_inactive` (via the
+        # facade): it is a serialized no-op whenever the session turned active
+        # again, so a newer live turn can never be terminated here.
+        s._append_stale_turn_interruption_if_session_inactive(
+            session_id,
+            run_id,
+            reason=f"stale_work_run_{reason}",
+        )
+    except Exception:
+        pass
+    try:
         with s._CHAT_STATE_LOCK:
             conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
             if conversation is not None:
@@ -1086,11 +1114,12 @@ def reconcile_stale_chat_turn_work_runs(*, now: datetime | None = None) -> list[
             if not run_id or run_id in seen_run_ids:
                 continue
             seen_run_ids.add(run_id)
+            run_is_queued = bool(session_id) and (session_id, run_id) in queued_scheduler_turns
             worker_owns_turn = (
                 bool(session_id)
                 and session_id in running_session_ids
                 and str(active_turn_ids.get(session_id) or "").strip() == run_id
-            ) or (bool(session_id) and (session_id, run_id) in queued_scheduler_turns)
+            ) or run_is_queued
             if not worker_owns_turn and _revive_registration_from_turn_control(
                 payload,
                 run_id=run_id,
@@ -1103,6 +1132,7 @@ def reconcile_stale_chat_turn_work_runs(*, now: datetime | None = None) -> list[
                 payload,
                 now=clock,
                 worker_owns_turn=worker_owns_turn,
+                queued_owner=run_is_queued,
             )
             if not reason:
                 continue
@@ -2479,6 +2509,58 @@ def _touch_chat_turn_work_run(
         updated_at=s._now_timestamp(),
         last_tool_error=last_tool_error,
     )
+
+
+# Worker-layer liveness heartbeat for the chat_turn work-run.  Durable work-run
+# writes stay reserved for retry/failure/tool-error and terminal transitions
+# (see live_output_write progress comments), so a worker that only thinks or
+# streams for a long stretch otherwise looks dead to the stale sweep's
+# ``absolute_stale`` ceiling.  Heartbeats refresh ``updatedAt`` at loop, tool,
+# and LLM-attempt boundaries with a per-(session, turn) throttle so per-token
+# stream events cost at most one durable write per interval.
+_CHAT_TURN_WORK_RUN_HEARTBEAT_MIN_INTERVAL_SECONDS = 30.0
+_CHAT_TURN_WORK_RUN_HEARTBEAT_RETENTION_SECONDS = 3600.0
+_CHAT_TURN_WORK_RUN_HEARTBEAT_STATE: dict[tuple[str, str], float] = {}
+_CHAT_TURN_WORK_RUN_HEARTBEAT_STATE_LOCK = threading.Lock()
+
+
+def _heartbeat_chat_turn_work_run(
+    *,
+    session_id: str,
+    turn_id: str,
+    stage: str,
+) -> bool:
+    """Throttled proof-of-life write for a live worker's chat_turn work-run.
+
+    Returns True when a heartbeat write actually fired.  Never raises: this is
+    called from hot worker/stream paths and must never break a turn.
+    """
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    normalized_turn_id = str(turn_id or "").strip()
+    if not normalized_session_id or not normalized_turn_id:
+        return False
+    now_monotonic = time.monotonic()
+    with _CHAT_TURN_WORK_RUN_HEARTBEAT_STATE_LOCK:
+        for key, last_touch in list(_CHAT_TURN_WORK_RUN_HEARTBEAT_STATE.items()):
+            if now_monotonic - last_touch > _CHAT_TURN_WORK_RUN_HEARTBEAT_RETENTION_SECONDS:
+                _CHAT_TURN_WORK_RUN_HEARTBEAT_STATE.pop(key, None)
+        last = _CHAT_TURN_WORK_RUN_HEARTBEAT_STATE.get((normalized_session_id, normalized_turn_id))
+        if last is not None and (now_monotonic - last) < _CHAT_TURN_WORK_RUN_HEARTBEAT_MIN_INTERVAL_SECONDS:
+            return False
+        _CHAT_TURN_WORK_RUN_HEARTBEAT_STATE[(normalized_session_id, normalized_turn_id)] = now_monotonic
+    try:
+        s._touch_chat_turn_work_run(
+            session_id=normalized_session_id,
+            turn_id=normalized_turn_id,
+            stage=stage,
+        )
+        return True
+    except Exception:
+        # Release the throttle slot so a transient failure retries sooner.
+        with _CHAT_TURN_WORK_RUN_HEARTBEAT_STATE_LOCK:
+            _CHAT_TURN_WORK_RUN_HEARTBEAT_STATE.pop((normalized_session_id, normalized_turn_id), None)
+        return False
 
 
 def _record_session_chat_review_candidate_event(

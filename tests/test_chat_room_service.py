@@ -163,6 +163,7 @@ def _install_chat_room_test_llm_config(monkeypatch, model_id: str = "chat-room-t
         "model": "chat-room-test-model",
         "streaming": False,
         "tool_calling_mode": "disabled",
+        "context_window": 200000,
     }
     monkeypatch.setattr(session_service, "get_config", lambda: base_config)
     monkeypatch.setattr(
@@ -176,6 +177,7 @@ def _install_chat_room_test_llm_config(monkeypatch, model_id: str = "chat-room-t
                 "provider": provider_id,
                 "model": "chat-room-test-model",
                 "label": "Chat room test model",
+                "context_window": 200000,
                 "reasoningEffortValues": [],
                 "reasoningEffortOptions": [],
                 "defaultReasoningEffort": "",

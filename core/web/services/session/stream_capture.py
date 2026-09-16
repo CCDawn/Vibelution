@@ -21,6 +21,9 @@ from typing import Any
 
 from core.chat.chat_task_types import trim_lines
 from core.chat.turn_journal import TurnJournalPostTerminalWriteError
+from core.web.services.session.turn_diagnostics import (
+    _heartbeat_chat_turn_work_run,
+)
 
 
 def _service():
@@ -1601,6 +1604,14 @@ def _ensure_session_ui_capture_hooks(ui: Any) -> None:
                 return
             cleaned = s._sanitize_thought_delta_text(text)
             if cleaned:
+                # Worker liveness heartbeat (throttled inside the helper): a
+                # long thinking stream otherwise leaves the work-run updatedAt
+                # frozen at the last tool result and can trip the stale sweep.
+                _heartbeat_chat_turn_work_run(
+                    session_id=session_id,
+                    turn_id=capture.turn_id,
+                    stage="worker_stream",
+                )
                 batcher = context.get("textBatcher")
                 capture.note_thought(cleaned)
                 if not done:
@@ -1659,6 +1670,14 @@ def _ensure_session_ui_capture_hooks(ui: Any) -> None:
                 return
             cleaned = s._sanitize_message_content("assistant", text)
             if cleaned:
+                # Worker liveness heartbeat (throttled inside the helper): a
+                # long response stream otherwise leaves the work-run updatedAt
+                # frozen at the last tool result and can trip the stale sweep.
+                _heartbeat_chat_turn_work_run(
+                    session_id=session_id,
+                    turn_id=capture.turn_id,
+                    stage="worker_stream",
+                )
                 capture.close_latest_thought_boundary()
                 previous = str(capture.content or "")
                 if done:

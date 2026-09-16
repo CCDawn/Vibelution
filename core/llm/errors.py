@@ -7,7 +7,47 @@ from typing import Tuple
 
 from .types import LLMError, LLMOutputTruncatedError
 
-__all__ = ["LLMError", "LLMOutputTruncatedError", "classify_exception"]
+__all__ = [
+    "CHINESE_RATE_LIMIT_PHRASES",
+    "GATEWAY_TRANSIENT_400_PHRASES",
+    "LLMError",
+    "LLMOutputTruncatedError",
+    "classify_exception",
+]
+
+# one-api/new-api 系聚合网关把上游路由失败包成 HTTP 400（"Error code: 400 -
+# 当前分组 default 下对于模型 xxx 无可用渠道"）：渠道耗尽、分组负载是网关侧
+# 调度状态，等调度器恢复后同体重放即可成功，不是客户端参数错误。模式保持
+# 高特异性（渠道/分组调度词汇），"invalid params"/schema 类真参数错误仍由
+# 下方 bad_request 分支 fail-closed。
+GATEWAY_TRANSIENT_400_PHRASES: Tuple[str, ...] = (
+    "无可用渠道",
+    "no available channel",
+    "当前分组",
+)
+# "渠道被禁用 / 渠道已被禁用 / 渠道被管理员禁用 / 渠道已停用" 等变体：要求
+# "渠道" 与禁用/停用词同时出现才命中，避免裸 "渠道" 误伤。
+_GATEWAY_CHANNEL_DISABLED_TOKENS: Tuple[str, ...] = ("禁用", "停用")
+
+# 中文限流文案（不含 "429"/"rate limit" 字样）：one-api/new-api 系中转的
+# "当前令牌每分钟最多请求 X 次" / "请求过于频繁" / "令牌额度已耗尽" 等。
+# 列表保守列举；error_classification 的 429 证据门引用 CHINESE_RATE_LIMIT_
+# PHRASES 把这些短语视为真限流证据，不被降级回 permanent。
+CHINESE_RATE_LIMIT_PHRASES: Tuple[str, ...] = (
+    "令牌每分钟",
+    "每分钟最多",
+    "每分钟只能",
+    "过于频繁",
+    "频率超限",
+    "额度已耗尽",
+    "额度已用尽",
+)
+
+
+def _is_gateway_transient_400(message: str) -> bool:
+    if any(phrase in message for phrase in GATEWAY_TRANSIENT_400_PHRASES):
+        return True
+    return "渠道" in message and any(token in message for token in _GATEWAY_CHANNEL_DISABLED_TOKENS)
 
 
 def classify_exception(exc: Exception) -> LLMError:
@@ -33,6 +73,25 @@ def classify_exception(exc: Exception) -> LLMError:
             exc_msg or "provider 思考模式回传校验瞬时拒绝",
             retryable=True,
             details={"httpStatus": 400, "reasoningRoundtripRejection": True},
+        )
+    # 聚合网关瞬态 400：渠道耗尽/被禁用/分组调度失败（见上方 pattern 注释）。
+    # 必须在下方 bad_request 分支之前判定——网关文案通常携带 "Error code: 400"
+    # 前缀，先到 bad_request 就会被确定性判死。
+    if _is_gateway_transient_400(lower):
+        return LLMError(
+            "server_error",
+            exc_msg or "聚合网关渠道调度瞬态拒绝",
+            retryable=True,
+            details={"httpStatus": 400, "gatewayChannelTransient": True},
+        )
+    # 中文限流文案：不含 "429"/"rate limit" 关键词的网关限流（见上方 pattern
+    # 注释），按限流同族可重试。
+    if any(phrase in lower for phrase in CHINESE_RATE_LIMIT_PHRASES):
+        return LLMError(
+            "rate_limit",
+            exc_msg or "provider 限流（网关中文文案）",
+            retryable=True,
+            details={"chineseRateLimitPhrase": True},
         )
     if "context_length" in lower or "context length" in lower or "maximum context" in lower or "too many tokens" in lower:
         return LLMError("context_length_error", "上下文长度超过模型限制", retryable=False)
@@ -84,12 +143,6 @@ def classify_exception(exc: Exception) -> LLMError:
         or "api_error" in lower
     ):
         return LLMError("server_error", exc_msg or "provider 服务异常", retryable=True)
-    if "bad_request" in lower or "bad request" in lower or "invalid params" in lower or "400" in lower:
-        return LLMError("provider_protocol_error", exc_msg or "provider 请求参数错误", retryable=False)
-    if "duplicate tool_call id" in lower or ("tool" in lower and "schema" in lower):
-        return LLMError("tool_protocol_error", exc_msg or "tool calling 协议错误", retryable=False)
-    if "chat content is empty" in lower or "content is empty" in lower:
-        return LLMError("empty_content_error", "provider 拒绝空消息内容", retryable=False)
     if "bad_request" in lower or "bad request" in lower or "invalid params" in lower or "400" in lower:
         return LLMError("provider_protocol_error", exc_msg or "provider 请求参数错误", retryable=False)
     if "auth" in lower or "401" in lower or "403" in lower:
