@@ -143,3 +143,62 @@
 ### 12.4 配置默认值
 
 轮询间隔 60s；并发度 1；重试 3 次；draft=等 ready；分支过滤 `codex/*`。均可用环境变量/配置覆盖。
+
+## 13. 方向修订（2026-09-17）：本地集成权威 + GitHub 发布镜像
+
+用户拍板：git 管理全部本地完成，GitHub 仅作发布存储站。本节取代 §4 的"单一集成权威=GitHub"与 §12.1 的 gh 轮询触发；SHIP/SHOW/ASK 分级（§4）、门禁分层（§8）、审查规范（§9）、队列设计（§12.2）全部保留，仅换宿主。
+
+### 13.1 本地合并请求（Local Merge Request, LMR）
+
+PR 的本地等价物是一份登记记录，存 `.git` common-dir 下的 ledger（进程工件，不进仓库树）：
+
+- 字段：branch、HEAD SHA、base、标题/任务包引用、证据 manifest 路径、分级（show/ask）、状态机 `pending_review → in_review →（rework → pending_review）* → approved → merging → merged / rejected`、审查记录（verdict + findings + Evidence 段）、时间戳。
+- 生命周期：Worker 本地门禁跑完 → 登记 LMR → watcher 自动入队审查 → APPROVE → 集成收口（stale_main 合并 + 快门复跑 + ff-only 合入本地 `main`，即现行 task_closeout 机制原封不动）→ 清理 → 进入待发布队列；REWORK → 返工信封回 Worker。
+
+### 13.2 组件映射（GitHub PR → 本地）
+
+| GitHub PR 概念 | 本地等价 |
+|---|---|
+| PR 对象 | LMR ledger 记录 |
+| push 新 commit | branch SHA 变化 → 顶替任务 + 作废旧 verdict |
+| review / 行评论 | findings（file+行号+severity+category+confidence）写入 LMR |
+| required checks | closeout 门禁 + 证据 manifest（机器可验） |
+| approve 撤销 | 新 SHA 自动作废旧 verdict（§12.2） |
+| merge button | task_closeout ff-only 合入本地 `main`（现状机制） |
+| 平台可见性 | 本地状态/汇总命令；发布后 GitHub 即镜像 |
+| branch protection | 不需要（合入权在本地集成 agent + 审查门） |
+
+### 13.3 发布（GitHub = 存储站）
+
+- 集成完成后 `main` 进入待发布队列；发布 = `git push origin main`（策略待拍板：每任务即推 / 定量定时批推 / 手动指令）。
+- 无双权威分叉：本地 `main` 唯一权威，`origin/main` 为镜像；远端默认不留任务分支。
+
+### 13.4 剩余待拍板 / 待建
+
+- 待拍板：①发布策略（建议：定量批推 + 手动即推并存）；②FAST_PATCH 是否豁免 LMR（建议豁免，维持本地直合）。
+- 待建（三角色流水线，互相独立可并行）：①LMR ledger 与生命周期脚本（登记/查询/状态流转/作废旧 verdict）；②`pr_review_watch.py` 改监听本地 ledger（零网络，其余 §12 设计不变）；③审查 verdict 写入 LMR + 状态汇总命令；④发布队列脚本（批推 + 推送卫生检查）。
+
+## 14. 并发安全与防饿死设计（2026-09-17，用户拍板后定稿）
+
+已拍板：发布策略=定量批推 + 手动即推并存；FAST_PATCH 豁免 LMR（维持本地直合）。首要目标=效率与稳定兼顾；硬约束=**多 agent 并发提交时不得互相锁死、不得无限等待饿死**。
+
+### 14.1 原则
+
+锁只加在"必须串行的瞬间"，且**每把锁必有超时与接管**；一切等待有界、有退避、超限升级为可见状态（escalated），绝不静默无限循环。
+
+### 14.2 各环节机制
+
+1. **LMR 登记/状态写**：记录独立文件 + 原子写（temp + `os.replace`），无全局长锁——登记永不互相阻塞。
+2. **审查队列**（唯一长任务串行点）：单飞锁=锁文件（PID+心跳，30s 刷新）；后来者发现心跳 >90s 判死安全接管。队列 FIFO + **aging**（等待每超 15min 优先级提升，防长审查连续压队）。单任务审查超时 30min → `review_timeout`，重试 ≤2 次，仍失败 → `escalated`（可见，等用户/主会话处理）。
+3. **集成合入**：复用既有 main-ref permit（60s TTL）串行化合入瞬间；permit 到期未完成自动重取（ff 合入正常秒级）。stale_main 重试 ≤3 次带退避，超限 → `escalated`。
+4. **claim 冲突**（两 agent 改同一热文件）：第二方立即收到 `claim_conflict` 而非等待——派发层重新调度，等待有超时+可见。
+5. **发布队列**：推失败按退避重试，**不阻塞本地集成**（发布与集成本解耦，推不上去只影响镜像新鲜度）。
+6. **全局可见性**：`lmr status` 一命令看全队列（pending/in_review/escalated/pending_publish）——可见性是防饿死的第一道闸。
+
+### 14.3 效率保留
+
+登记与机械预检（证据 manifest 校验）并行，仅语义审查串行；APPROVE 后合入只前置快门复跑；FAST_PATCH 零额外开销。
+
+### 14.4 分阶段启用
+
+Phase 1（本次）：LMR 核心（ledger+watcher+队列+verdict 写回+汇总）+ 发布队列 + 规范增补；reviewer 执行器先留**可插拔接口 + 显式未配置降级**（`reviewer_executor_unconfigured` → escalated 可见），真实 reviewer agent 接线为 Phase 2。
