@@ -2873,6 +2873,21 @@ def _run_session_continuation_loop(
                 "stuckRepeatCount": stuck_verdict.repeat_count,
                 "stuckEvidence": trim_lines(stuck_verdict.evidence, max_lines=3),
             }
+            # Durable authority: stuck-loop detection lands in the Session
+            # Journal (llm_resilience/stuck_detected) so the verdict survives
+            # process restarts; the scene event below stays diagnostics-only.
+            try:
+                from core.chat.llm_resilience_journal import record_llm_resilience_event
+
+                record_llm_resilience_event(
+                    s.PROJECT_ROOT,
+                    session_id,
+                    str(getattr(turn_control, "turn_id", "") or "").strip(),
+                    stage="stuck_detected",
+                    fields=stuck_fields,
+                )
+            except Exception:
+                pass
             s._record_session_turn_lifecycle_event(
                 session_id,
                 "followup_prompt_blocked",

@@ -40,6 +40,10 @@ EVENT_TURN_FAILED = "turn_failed"
 EVENT_TURN_INTERRUPTED = "turn_interrupted"
 EVENT_COMPACTION_CHECKPOINT = "compaction_checkpoint"
 EVENT_COMPRESSION_ATTEMPT = "context_compression_attempt"
+# Durable authority for LLM resilience decisions (route fallback switch,
+# degraded retry, stuck-loop detection, answer-channel leak). Written by
+# core.chat.llm_resilience_journal; never model-visible, never audit-only.
+EVENT_LLM_RESILIENCE = "llm_resilience"
 EVENT_BRANCH_REBASE = "branch_rebase"
 
 TERMINAL_EVENTS = {
@@ -117,6 +121,10 @@ _LATEST_PREVIEW_TOOL_EVENT_TYPES = {
 _LATEST_PREVIEW_IGNORED_EVENT_TYPES = {
     EVENT_TURN_STARTED,
     EVENT_TURN_CONTEXT,
+    # Diagnostics-only markers: they never contribute preview text, and
+    # treating them as unknown would force every preview read onto the
+    # canonical full replay.
+    EVENT_LLM_RESILIENCE,
 }
 _LATEST_PREVIEW_KNOWN_EVENT_TYPES = (
     _LATEST_PREVIEW_PARSED_EVENT_TYPES
