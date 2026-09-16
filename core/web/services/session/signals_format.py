@@ -250,15 +250,23 @@ def _current_session_live_llm_payload_trace(session_id: str) -> dict[str, Any] |
 def _current_session_route_fallback(session_id: str, turn_id: str = "") -> dict[str, str] | None:
     """Turn detail DTO visibility field for an explicit LLM fallback switch.
 
-    Returns the strict ``{from, to}`` payload recorded by the turn adapter when
-    the declared fallback profile was engaged for the turn; ``None`` means no
+    Reads the durable Session Journal authority: ``llm_resilience`` events
+    with stage ``fallback_switch`` (see ``core.chat.llm_resilience_journal``).
+    The switch therefore survives process restarts instead of living in an
+    in-memory registry. Returns the strict ``{from, to}`` payload when the
+    declared fallback profile was engaged for the turn; ``None`` means no
     switch happened. Exact turn matches win; without a turn id the session's
-    latest recorded switch is returned so a completed turn stays visible after
-    the active turn id is released.
+    latest recorded switch is returned so a completed turn stays visible
+    after the active turn id is released.
     """
-    from core.llm.route_fallback_registry import get_route_fallback
+    from core.chat.llm_resilience_journal import latest_route_fallback_from_events
 
-    return get_route_fallback(session_id, turn_id)
+    s = _service()
+    try:
+        events = s._load_session_conversation_events_cached(session_id)
+    except Exception:
+        return None
+    return latest_route_fallback_from_events(events, turn_id=turn_id)
 
 
 def _dedupe_turn_error_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -512,6 +512,25 @@ def _record_agent_scene_event(
         )
     except Exception as exc:
         _debug_logger.warning(f"Failed to record agent scene event ({phase}/{event_code}): {exc}")
+    # LLM resilience decisions (route fallback switch, degraded retry,
+    # answer-channel leak) are durable Session Journal facts. The adapter
+    # never touches the journal; the mirror happens here at the binding
+    # layer, synchronously at decision time, and never disturbs the scene
+    # event above. Non-journal surfaces (CLI/meeting) stay scene-only.
+    _maybe_record_llm_resilience_journal_event(event_code, fields=fields)
+
+
+def _maybe_record_llm_resilience_journal_event(
+    event_code: str,
+    *,
+    fields: Dict[str, Any] | None = None,
+) -> None:
+    try:
+        from core.chat.llm_resilience_journal import record_llm_resilience_from_scene_event
+
+        record_llm_resilience_from_scene_event(event_code, fields=fields)
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to journal LLM resilience event ({event_code}): {exc}")
 
 
 def _can_reuse_system_prompt(
