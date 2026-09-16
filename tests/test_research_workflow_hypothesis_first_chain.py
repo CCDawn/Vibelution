@@ -4197,13 +4197,14 @@ def _install_question_reset_formal_fakes(
     team_id: str,
     *,
     run_id: str = "run-hf4-reset-blocked",
+    status: str = "blocked",
     submit_error: Exception | None = None,
     archive_error: Exception | None = None,
 ) -> _FakeResetCommandService:
     """Patch the formal read/write access points the reset reconciliation uses."""
     store = _FakeResetStore()
     store.runs[run_id] = SimpleNamespace(
-        run_id=run_id, team_id=team_id, run_version=3, status="blocked"
+        run_id=run_id, team_id=team_id, run_version=3, status=status
     )
     command_service = _FakeResetCommandService(
         store, error=submit_error, archive_error=archive_error
@@ -4212,7 +4213,7 @@ def _install_question_reset_formal_fakes(
     monkeypatch.setattr(
         "core.web.services.team_workflow.research_runtime.formal_read_runtime.get_query_service",
         lambda: _FakeResetQueryService(
-            [{"runId": run_id, "questionId": _QUESTION_ID, "status": "blocked"}]
+            [{"runId": run_id, "questionId": _QUESTION_ID, "status": status}]
         ),
     )
     monkeypatch.setattr(
@@ -4275,6 +4276,55 @@ def test_question_reset_cancels_and_archives_live_formal_run_before_clearing(
     ]
     assert audit_records[-1]["cancelledFormalRunIds"] == [blocked_run_id]
     assert audit_records[-1]["archivedFormalRunIds"] == [blocked_run_id]
+
+
+def test_question_reset_archives_succeeded_formal_run_before_clearing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reset must retire a completed run too, even when delivery was incomplete.
+
+    Otherwise the terminal run remains the current formal leaf, its
+    program-delivery repair becomes phase-authoritative, and a freshly reset
+    question cannot offer ``create_stage_one_run``.
+    """
+
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    _seed_question_reset_artifacts(team_id, _QUESTION_ID)
+    completed_run_id = "run-hf4-reset-succeeded"
+    command_service = _install_question_reset_formal_fakes(
+        monkeypatch,
+        team_id,
+        run_id=completed_run_id,
+        status="succeeded",
+    )
+
+    preview = chain.preview_question_reset(team_id, _QUESTION_ID)
+    assert preview["impact"]["formalRunCount"] == 1
+    assert preview["impact"]["archivedFormalRunCount"] == 1
+
+    result = chain.reset_question_chain(
+        team_id,
+        _QUESTION_ID,
+        confirmation_question_id=_QUESTION_ID,
+    )
+
+    assert result["removed"]["formalRunCount"] == 1
+    assert result["removed"]["archivedFormalRunCount"] == 1
+    assert [request.command for request in command_service.requests] == [
+        WorkflowCommandKind.ARCHIVE_RUN
+    ]
+    archive_request = command_service.requests[0]
+    assert archive_request.run_id == completed_run_id
+    assert archive_request.expected_run_version == 3
+    assert archive_request.idempotency_key == f"hf2:reset-archive-run:{completed_run_id}"
+    assert archive_request.payload == {"reason": "question run reset"}
+    audit_records = [
+        record
+        for record in chain._records(team_id)
+        if record.get("recordKind") == chain.QUESTION_RESET_AUDIT_KIND
+    ]
+    assert audit_records[-1]["cancelledFormalRunIds"] == []
+    assert audit_records[-1]["archivedFormalRunIds"] == [completed_run_id]
 
 
 def test_question_reset_aborts_before_destructive_writes_when_archive_fails(
