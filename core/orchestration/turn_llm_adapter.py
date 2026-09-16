@@ -15,6 +15,7 @@ from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 
 from core.infrastructure.llm_utils import MAX_CONSECUTIVE_FAILURES
 from core.llm import LLMError
+from core.llm.recovery import DEGRADED_RETRY_ACTIONS, degraded_retry_overrides
 from core.llm.route_fallback_registry import record_route_fallback
 from core.llm.turn_request_capture import (
     capture_turn_request,
@@ -207,6 +208,10 @@ class AgentLlmAttemptResult:
     last_failure_attempts: int = 0
     last_failure_max_attempts: int = MAX_CONSECUTIVE_FAILURES
     route_fallback: Dict[str, str] = field(default_factory=dict)
+    # Degradation actions dispatched this turn (attempt-level capability
+    # reductions from core/llm/recovery.py). In-memory telemetry only; a
+    # successful degraded retry still closes the turn as a normal success.
+    degraded_actions: list[str] = field(default_factory=list)
 
 
 def _resolve_explicit_fallback_profile_id(client: Any) -> str:
@@ -353,11 +358,16 @@ def invoke_agent_llm_turn(
     the Agent composition root binds to ``core.llm.invocation``. Recovery
     planning stays with ``plan_llm_recovery``.
 
+    Per-failure handling order: first the recovery decision's attempt-level
+    degradation action (same profile, streaming and/or tools dropped, each
+    action at most once per turn — see ``core/llm/recovery.py``); only then an
+    explicit fallback profile switch; only then the turn is terminal.
+
     Route attempts count across profiles: attempt 1 is the configured route;
-    attempt 2 exists only when the operator declared ``fallback`` on that
-    profile and the primary exhausted its retryable transport budget on a
-    recoverable gateway-level failure. The fallback target is never switched
-    again (single hop).
+    later attempts exist through degraded retries and/or the operator-declared
+    ``fallback`` profile after the primary exhausted its retryable transport
+    budget on a recoverable gateway-level failure. The fallback target is
+    never switched again (single hop).
     """
     result = AgentLlmAttemptResult()
     ui = hooks.get_ui()
@@ -384,11 +394,25 @@ def invoke_agent_llm_turn(
         invocation_context = None
         trace_fields: Dict[str, Any] = {}
         llm_for_turn = None
+        degraded_actions_used: set[str] = set()
+        # One-shot capability overrides for the next attempt only; consumed at
+        # the top of each iteration so a later failure (e.g. after a fallback
+        # switch) is judged on its own merits.
+        pending_disable_streaming = False
+        pending_disable_tools = False
         while True:
+            # Consume the pending one-shot degradation overrides: they apply to
+            # exactly this attempt, then expire.
+            attempt_disable_streaming = pending_disable_streaming
+            attempt_disable_tools = pending_disable_tools
+            pending_disable_streaming = False
+            pending_disable_tools = False
             try:
                 hooks.raise_if_stop()
                 llm_for_turn = hooks.get_llm_for_mode(
-                    disable_tools=_coerce_bool(hooks.force_disable_tools, False),
+                    disable_tools=(
+                        _coerce_bool(hooks.force_disable_tools, False) or attempt_disable_tools
+                    ),
                     profile_id=pending_fallback_profile_id or None,
                 )
                 route_id = _llm_effective_route_id(llm_for_turn)
@@ -410,7 +434,13 @@ def invoke_agent_llm_turn(
                     message="LLM effective route attempt started.",
                     fields=trace_fields,
                 )
-                if hooks.should_stream(llm_for_turn) and hasattr(llm_for_turn, "stream"):
+                # A degraded attempt is pinned to the non-streaming path even
+                # if the operator's streaming preference would allow it.
+                if (
+                    not attempt_disable_streaming
+                    and hooks.should_stream(llm_for_turn)
+                    and hasattr(llm_for_turn, "stream")
+                ):
                     def on_protocol_event(event: Any) -> None:
                         hooks.raise_if_stop()
                         if event.kind == "reasoning_delta" and event.text:
@@ -520,7 +550,8 @@ def invoke_agent_llm_turn(
                     raise hooks.stop_error_cls(stop_reason)
                 try:
                     streaming_enabled_for_failed_attempt = bool(
-                        hooks.should_stream(llm_for_turn)
+                        (not attempt_disable_streaming)
+                        and hooks.should_stream(llm_for_turn)
                         and hasattr(llm_for_turn, "stream")
                     )
                 except Exception:
@@ -571,6 +602,11 @@ def invoke_agent_llm_turn(
                     "streaming_enabled": streaming_enabled_for_failed_attempt,
                     "message_count": len(clean_messages),
                 }
+                if attempt_disable_streaming or attempt_disable_tools:
+                    error_details["degraded_retry"] = {
+                        "disable_streaming": attempt_disable_streaming,
+                        "disable_tools": attempt_disable_tools,
+                    }
                 if switched_fallback:
                     error_details["route_fallback"] = dict(switched_fallback)
                 try:
@@ -645,6 +681,65 @@ def invoke_agent_llm_turn(
                         source="provider_limit",
                     )
                     return result
+
+                # Attempt-level capability degradation, driven by the action
+                # vocabulary in core/llm/recovery.py (single source of truth —
+                # no category mapping is re-declared here). Ordered BEFORE the
+                # explicit fallback switch: a same-profile degraded retry keeps
+                # the provider prompt-cache prefix and the tool/AI message
+                # context that a profile switch would discard, and the degrade
+                # categories (empty_content_error / tool_protocol_error /
+                # protocol_error) are disjoint from the gateway-level
+                # _FALLBACK_SWITCH_CATEGORIES, so this ordering never competes
+                # within a single failure — a degraded retry that later fails
+                # on a transport category still reaches the fallback branch
+                # below in its own iteration. Each action fires at most once
+                # per turn (no degradation loops), and the skipped case where
+                # the degraded shape would equal the failed shape (already
+                # non-streaming and already tool-less) falls through instead
+                # of burning a no-op request.
+                degraded_action = _coerce_text(recovery.action).strip()
+                if (
+                    degraded_action in DEGRADED_RETRY_ACTIONS
+                    and degraded_action not in degraded_actions_used
+                ):
+                    degrade_streaming, degrade_tools = degraded_retry_overrides(degraded_action)
+                    force_tools_off = _coerce_bool(hooks.force_disable_tools, False)
+                    streaming_would_change = degrade_streaming and streaming_enabled_for_failed_attempt
+                    tools_would_change = degrade_tools and not (
+                        force_tools_off or attempt_disable_tools
+                    )
+                    if streaming_would_change or tools_would_change:
+                        degraded_actions_used.add(degraded_action)
+                        result.degraded_actions.append(degraded_action)
+                        pending_disable_streaming = degrade_streaming
+                        pending_disable_tools = degrade_tools
+                        hooks.record_scene_event(
+                            "llm_route",
+                            "llm_route_degraded_retry",
+                            message=(
+                                "LLM route failed with a degradation-eligible "
+                                f"category; retrying once on the same profile "
+                                f"with action `{degraded_action}`."
+                            ),
+                            fields={
+                                **trace_fields,
+                                "routeAttempt": route_attempt,
+                                "attempt": route_attempt + 1,
+                                "routeId": failed_route_id,
+                                "profileId": failed_profile_id,
+                                "action": degraded_action,
+                                "fromCategory": category,
+                                "errorCategory": category,
+                                "retryable": is_retryable,
+                                "streamingDisabled": degrade_streaming,
+                                "toolsDisabled": degrade_tools,
+                            },
+                            level="warning",
+                            outcome="degraded",
+                        )
+                        route_attempt += 1
+                        continue
 
                 # Explicit fallback switch: only on the primary route (single
                 # hop), only for recoverable gateway-level categories, and only

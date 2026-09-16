@@ -5941,6 +5941,36 @@ def test_recovery_policy_requests_context_compression():
     assert decision.stop_current_turn is False
 
 
+def test_recovery_policy_flags_stay_derived_from_the_action_mapping():
+    """Decision flags and _action_for_category share one source of truth."""
+    empty_content = plan_recovery(Exception("chat content is empty"))
+    assert empty_content.category == "empty_content_error"
+    assert empty_content.action == "retry_without_streaming"
+    assert empty_content.disable_streaming is True
+    assert empty_content.disable_tools is False
+
+    protocol = plan_recovery(LLMError("protocol_error", "stream protocol broke", retryable=False))
+    assert protocol.category == "protocol_error"
+    assert protocol.action == "retry_without_streaming"
+    assert protocol.disable_streaming is True
+    assert protocol.disable_tools is False
+
+    assert plan_recovery(Exception("timeout")).disable_streaming is False
+    assert plan_recovery(Exception("timeout")).disable_tools is False
+
+
+def test_degraded_retry_actions_vocabulary_and_overrides():
+    from core.llm.recovery import DEGRADED_RETRY_ACTIONS, degraded_retry_overrides
+
+    assert DEGRADED_RETRY_ACTIONS == frozenset(
+        {"retry_without_streaming", "disable_tools_and_retry_without_streaming"}
+    )
+    assert degraded_retry_overrides("retry_without_streaming") == (True, False)
+    assert degraded_retry_overrides("disable_tools_and_retry_without_streaming") == (True, True)
+    assert degraded_retry_overrides("retry_with_backoff") == (False, False)
+    assert degraded_retry_overrides("fail_fast") == (False, False)
+
+
 
 def test_effective_route_identity_distinguishes_profiles_without_secrets():
     config = make_config(
