@@ -17,6 +17,8 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from typing import Any
 
+from core.chat.turn_journal import TurnJournalPostTerminalWriteError
+
 from .admission import (
     DevelopmentSubmissionAdmissionConfigurationError,
     get_development_submission_admission_runtime,
@@ -447,32 +449,154 @@ def submit_session_guidance(session_id: str, content: str, *, mode: str = "safe"
 
     guidance_kind = "user_interrupt_guidance" if normalized_mode == "interrupt" else "user_guidance"
     if active_turn_id:
-        s._append_session_conversation_event(
-            conversation_id,
-            active_turn_id,
-            s.EVENT_USER_MESSAGE,
-            status="recorded",
-            payload={
-                "content": guidance_text,
-                "attachments": [],
-                "references": [],
-                "metadata": {
-                    "kind": guidance_kind,
+        try:
+            s._append_session_conversation_event(
+                conversation_id,
+                active_turn_id,
+                s.EVENT_USER_MESSAGE,
+                status="recorded",
+                payload={
+                    "content": guidance_text,
+                    "attachments": [],
+                    "references": [],
+                    "metadata": {
+                        "kind": guidance_kind,
+                        "source": "steer",
+                        "guidanceMode": normalized_mode,
+                        "turnId": active_turn_id,
+                    },
                     "source": "steer",
-                    "guidanceMode": normalized_mode,
-                    "turnId": active_turn_id,
                 },
-                "source": "steer",
-            },
-            source="submit_session_guidance",
-            visible_in_model=True,
-        )
+                source="submit_session_guidance",
+                visible_in_model=True,
+            )
+        except TurnJournalPostTerminalWriteError:
+            # The turn settled (stop request / restart reconciliation) while the
+            # guidance was being journaled. That arrival is a race, not a caller
+            # bug: drop the late write and keep the guidance response graceful
+            # (same contract as the capture late-write drop in stream_capture).
+            try:
+                s.record_runtime_scene_event(
+                    "conversation",
+                    "guidance_write_dropped",
+                    "chat.guidance.write_dropped",
+                    level="warning",
+                    outcome="discarded",
+                    message="Guidance write arrived after the turn terminal event and was dropped.",
+                    fields={
+                        "reason": "post_terminal_write",
+                        "sessionId": conversation_id,
+                        "turnId": active_turn_id,
+                        "eventType": s.EVENT_USER_MESSAGE,
+                        "guidanceMode": normalized_mode,
+                        "source": "submit_session_guidance",
+                    },
+                )
+            except Exception:
+                pass
 
     if normalized_mode == "interrupt" and running:
         return s.request_stop_session_turn(conversation_id, fast_ack=True)
 
     s._publish_session_detail_snapshot(conversation_id)
     return s.get_session_detail(conversation_id) or detail
+
+
+def _settle_session_submit_admission_failure(
+    *,
+    session_id: str,
+    turn_id: str,
+    leases: list[str],
+    user_message: str,
+    exc: Exception,
+    stage: str,
+) -> None:
+    """Settle a turn that failed inside the submit acceptance window.
+
+    The window opens once the turn is flagged running and closes when the
+    worker is scheduled. A failure there (journal lock timeout, disk I/O, ...)
+    must run the same settlement sequence as the schedule-failure handler in
+    ``submit_session_message``; otherwise the running flag is never cleared and
+    the session looks stuck until the stale-turn sweeper reaps it. The failure
+    persist must run while the turn is still current, because both clearing the
+    turn control and flagging the session not-running drop the active-turn
+    identity the runtime-state commit gate requires. Every settlement step is
+    defensive: a step that raises (the journal may still be locked) is
+    swallowed and reported, so running is always cleared and the original
+    submission error reaches the caller.
+    """
+
+    s = _service()
+
+    def _record_settlement_step_failure(step: str, settle_exc: Exception) -> None:
+        try:
+            s.record_runtime_scene_event(
+                "conversation",
+                "submit_admission_settle_failed",
+                "conversation.submit.admission_settle_step_failed",
+                level="warning",
+                outcome="failed",
+                message="Turn settlement step raised during admission failure handling; continuing with the remaining steps.",
+                fields={
+                    "sessionId": session_id,
+                    "turnId": turn_id,
+                    "settlementStep": step,
+                    "failedStage": stage,
+                    "errorType": type(settle_exc).__name__,
+                    "errorPreview": str(settle_exc)[:200],
+                },
+            )
+        except Exception:
+            pass
+
+    def _settlement_step(step: str, action) -> None:
+        try:
+            action()
+        except Exception as settle_exc:
+            _record_settlement_step_failure(step, settle_exc)
+
+    try:
+        s.record_runtime_scene_event(
+            "conversation",
+            "submit_admission_failed",
+            "conversation.submit.admission_window_failed",
+            level="error",
+            outcome="failed",
+            message="Turn submission failed after running was set but before the worker was scheduled; settling the turn as failed.",
+            fields={
+                "sessionId": session_id,
+                "turnId": turn_id,
+                "failedStage": stage,
+                "errorType": type(exc).__name__,
+                "errorPreview": str(exc)[:200],
+            },
+        )
+    except Exception:
+        pass
+    _settlement_step(
+        "persist_work_run_failed",
+        lambda: s._persist_chat_turn_work_run(
+            session_id=session_id,
+            turn_id=turn_id,
+            status="failed",
+            leases=leases,
+            user_message=user_message,
+            summary=f"{type(exc).__name__}: {exc}",
+        ),
+    )
+    # Persist while this turn is still current: both clearing the turn
+    # control and flagging the session not-running drop the active-turn
+    # identity the runtime-state commit gate requires.
+    _settlement_step(
+        "persist_turn_failure",
+        # The acceptance window can fail before the submit context exists, so
+        # the failure persist only needs the current turn identity.
+        lambda: s._persist_session_turn_failure(session_id, {"turn_id": turn_id}, exc),
+    )
+    _settlement_step("clear_running", lambda: s._set_session_running(session_id, False))
+    _settlement_step("clear_turn_control", lambda: s._clear_session_turn_control(session_id))
+    _settlement_step("publish_snapshot", lambda: s._publish_session_detail_snapshot(session_id))
+
 
 def submit_session_message(
     session_id: str,
@@ -875,280 +999,302 @@ def submit_session_message(
         submit_timing_fields["chatStateLockedMs"] = s._elapsed_ms_between(persist_started_at)
     finally:
         admit_lock.release()
-    from . import directory_bridge
-
-    directory_bridge.sync_conversation_record(
-        conversation,
-        last_preview=message,
-        status="running",
-        wait=False,
-    )
-    stage_started_at = s._perf_counter()
-    journal_receipt = _append_initial_session_journal_markers(
-        session_id=conversation_id,
-        turn_id=turn_control.turn_id,
-        client_submission_id=normalized_client_submission_id,
-        agent=dict(agent) if isinstance(agent, dict) else {"agentId": agent_id},
-        conversation=dict(conversation) if isinstance(conversation, dict) else {},
-        source=normalized_message_source,
-        leases=requested_leases,
-        user_payload={
-            "content": message,
-            "attachments": s._normalize_message_attachments(attachments),
-            "references": s._normalize_session_references(session_references),
-            "metadata": persisted_message_metadata,
-            "source": normalized_message_source,
-        },
-    )
-    admitted_turn_id = str(journal_receipt.get("turnId") or "").strip()
-    if admitted_turn_id and admitted_turn_id != turn_control.turn_id:
-        raise RuntimeError("Submission admission turn identity changed during journal append.")
-    submit_timing_fields["initialJournalMarkersMs"] = s._elapsed_ms(stage_started_at)
-    submit_timing_fields.setdefault("turnStartedJournalMs", 0)
-    submit_timing_fields.setdefault("userMessageJournalMs", 0)
-    for journal_timing_field in ("turnStartedJournalMs", "userMessageJournalMs"):
-        if journal_timing_field in journal_receipt:
-            submit_timing_fields[journal_timing_field] = journal_receipt[journal_timing_field]
-    submit_timing_fields["sessionAdmissionDisposition"] = str(
-        journal_receipt.get("admissionDisposition") or "disabled"
-    )
+    # Acceptance window: the turn is already flagged running here, so any
+    # failure before the worker is scheduled (journal lock timeout, disk I/O,
+    # ...) must settle the turn exactly like a schedule failure below;
+    # otherwise running is never cleared and the session looks stuck until the
+    # stale-turn sweeper reaps it.
+    acceptance_stage = "directory_sync"
     try:
-        from . import title_generation
+        from . import directory_bridge
 
-        title_generation.maybe_schedule_session_title_generation(
-            conversation_id,
-            message=message,
-            message_source=normalized_message_source,
-            had_previous_user_message=s._latest_user_message_index(previous_messages) >= 0,
+        directory_bridge.sync_conversation_record(
+            conversation,
+            last_preview=message,
+            status="running",
+            wait=False,
         )
-    except Exception as exc:
-        s._debug_logger.warning(
-            f"session title scheduling skipped: {type(exc).__name__}: {exc}",
-            tag="LOGS",
-        )
-    live_publish_started_at = s._perf_counter()
-    s._set_session_waiting_live_output(conversation_id, turn_id=turn_control.turn_id)
-    submit_timing_fields["initialLiveDeltaPublishMs"] = s._elapsed_ms(live_publish_started_at)
-    submit_timing_fields["initialLivePublishMode"] = "assistant_delta"
-    stage_started_at = s._perf_counter()
-    s._submit_session_cycle_message_projection(
-        conversation_id,
-        user_entry,
-        event="user_message",
-        status="running",
-        turn_id=turn_control.turn_id,
-    )
-    submit_timing_fields["cycleMessageDispatchMs"] = s._elapsed_ms(stage_started_at)
-    submit_timing_fields["cycleMessageProjectionMode"] = "background_ordered"
-    stage_started_at = s._perf_counter()
-    s._record_session_turn_started_event(
-        conversation_id,
-        turn_id=turn_control.turn_id,
-        leases=requested_leases,
-        user_message=message,
-        raw_user_message=message,
-        user_message_source=normalized_message_source,
-        attachments=attachments,
-        trace_context_carrier=normalized_trace_context_carrier,
-    )
-    submit_timing_fields["turnStartedSceneLogMs"] = s._elapsed_ms(stage_started_at)
-    if session_references:
-        s._record_session_turn_lifecycle_event(
-            conversation_id,
-            "session_references_attached",
+        acceptance_stage = "initial_journal_markers"
+        stage_started_at = s._perf_counter()
+        journal_receipt = _append_initial_session_journal_markers(
+            session_id=conversation_id,
             turn_id=turn_control.turn_id,
-            outcome="recorded",
-            fields={
-                "referenceCount": len(session_references),
-                "targetSessionIds": [str(item.get("sessionId") or "").strip() for item in session_references],
-                "queryAllowed": True,
-                "sendRequiresExplicitUserIntent": True,
-            },
-        )
-    if recent_image_reference_missing and normalized_message_source != "agent_inbox":
-        visible = s._recent_image_attachment_missing_message(lang)
-        s._finish_image_attachment_preflight_turn(
-            conversation_id,
-            turn_control.turn_id,
-            {
-                "status": "completed",
-                "summary": visible,
-                "raw_output": visible,
-                "outcome": "needs_input",
-                "metadata": {
-                    "imageAttachmentPreflight": "missing_recent_image",
-                },
-            },
-            decision="blocked",
-            reason="missing_recent_image",
-            agent_id=agent_id,
-            attachments=[],
+            client_submission_id=normalized_client_submission_id,
+            agent=dict(agent) if isinstance(agent, dict) else {"agentId": agent_id},
+            conversation=dict(conversation) if isinstance(conversation, dict) else {},
+            source=normalized_message_source,
             leases=requested_leases,
-            raw_user_message=message,
-            fields={
-                "recentImageReference": True,
-                "resolvedRecentImageReference": False,
+            user_payload={
+                "content": message,
+                "attachments": s._normalize_message_attachments(attachments),
+                "references": s._normalize_session_references(session_references),
+                "metadata": persisted_message_metadata,
+                "source": normalized_message_source,
             },
-            outcome="needs_input",
         )
-        detail = s.get_session_detail(conversation_id) or {}
-        if include_started_turn_id:
-            detail["startedTurnId"] = turn_control.turn_id
-        return detail
-    if attachments and normalized_message_source != "agent_inbox":
-        image_capability = s._resolve_image_attachment_capability(agent_instance=agent)
-        image_capability_log_fields = {
-            "supportsImageInput": image_capability.get("supports_image_input"),
-            "llmSlot": s.SESSION_LLM_SLOT_DIALOGUE,
-            "llmModelId": str(image_capability.get("model_id") or "").strip(),
-            "dialogueModelId": s.agent_dialogue_model_id(agent),
-            "visionModelId": s.agent_llm_model_id(agent, s.SESSION_LLM_SLOT_VISION),
-            "modelName": image_capability.get("model_name") or "",
-            "recentImageReference": bool(recent_image_reference_requested),
-            "resolvedRecentImageReference": bool(recent_image_reference_requested and not recent_image_reference_missing),
-            "recentImageReferenceSource": "explicit" if explicit_recent_image_reference else "contextual_retry" if recent_image_reference_requested else "",
-        }
-        if image_capability["supports_image_input"] is False:
-            visible = s._image_input_unsupported_message(
-                lang,
-                model_name=str(image_capability.get("model_name") or "").strip(),
+        admitted_turn_id = str(journal_receipt.get("turnId") or "").strip()
+        if admitted_turn_id and admitted_turn_id != turn_control.turn_id:
+            raise RuntimeError("Submission admission turn identity changed during journal append.")
+        submit_timing_fields["initialJournalMarkersMs"] = s._elapsed_ms(stage_started_at)
+        submit_timing_fields.setdefault("turnStartedJournalMs", 0)
+        submit_timing_fields.setdefault("userMessageJournalMs", 0)
+        for journal_timing_field in ("turnStartedJournalMs", "userMessageJournalMs"):
+            if journal_timing_field in journal_receipt:
+                submit_timing_fields[journal_timing_field] = journal_receipt[journal_timing_field]
+        submit_timing_fields["sessionAdmissionDisposition"] = str(
+            journal_receipt.get("admissionDisposition") or "disabled"
+        )
+        try:
+            from . import title_generation
+
+            title_generation.maybe_schedule_session_title_generation(
+                conversation_id,
+                message=message,
+                message_source=normalized_message_source,
+                had_previous_user_message=s._latest_user_message_index(previous_messages) >= 0,
             )
+        except Exception as exc:
+            s._debug_logger.warning(
+                f"session title scheduling skipped: {type(exc).__name__}: {exc}",
+                tag="LOGS",
+            )
+        acceptance_stage = "turn_start_projection"
+        live_publish_started_at = s._perf_counter()
+        s._set_session_waiting_live_output(conversation_id, turn_id=turn_control.turn_id)
+        submit_timing_fields["initialLiveDeltaPublishMs"] = s._elapsed_ms(live_publish_started_at)
+        submit_timing_fields["initialLivePublishMode"] = "assistant_delta"
+        stage_started_at = s._perf_counter()
+        s._submit_session_cycle_message_projection(
+            conversation_id,
+            user_entry,
+            event="user_message",
+            status="running",
+            turn_id=turn_control.turn_id,
+        )
+        submit_timing_fields["cycleMessageDispatchMs"] = s._elapsed_ms(stage_started_at)
+        submit_timing_fields["cycleMessageProjectionMode"] = "background_ordered"
+        stage_started_at = s._perf_counter()
+        s._record_session_turn_started_event(
+            conversation_id,
+            turn_id=turn_control.turn_id,
+            leases=requested_leases,
+            user_message=message,
+            raw_user_message=message,
+            user_message_source=normalized_message_source,
+            attachments=attachments,
+            trace_context_carrier=normalized_trace_context_carrier,
+        )
+        submit_timing_fields["turnStartedSceneLogMs"] = s._elapsed_ms(stage_started_at)
+        if session_references:
+            s._record_session_turn_lifecycle_event(
+                conversation_id,
+                "session_references_attached",
+                turn_id=turn_control.turn_id,
+                outcome="recorded",
+                fields={
+                    "referenceCount": len(session_references),
+                    "targetSessionIds": [str(item.get("sessionId") or "").strip() for item in session_references],
+                    "queryAllowed": True,
+                    "sendRequiresExplicitUserIntent": True,
+                },
+            )
+        if recent_image_reference_missing and normalized_message_source != "agent_inbox":
+            visible = s._recent_image_attachment_missing_message(lang)
             s._finish_image_attachment_preflight_turn(
                 conversation_id,
                 turn_control.turn_id,
                 {
-                    "status": "failed_runtime",
+                    "status": "completed",
                     "summary": visible,
                     "raw_output": visible,
-                    "error": visible,
-                    "outcome": "blocked",
+                    "outcome": "needs_input",
                     "metadata": {
-                        "imageAttachmentPreflight": "unsupported_image_input",
-                        "supportsImageInput": False,
+                        "imageAttachmentPreflight": "missing_recent_image",
                     },
                 },
                 decision="blocked",
-                reason="unsupported_image_input",
+                reason="missing_recent_image",
                 agent_id=agent_id,
-                attachments=attachments,
+                attachments=[],
                 leases=requested_leases,
                 raw_user_message=message,
-                fields=image_capability_log_fields,
-                outcome="blocked",
-                level="warning",
+                fields={
+                    "recentImageReference": True,
+                    "resolvedRecentImageReference": False,
+                },
+                outcome="needs_input",
             )
             detail = s.get_session_detail(conversation_id) or {}
             if include_started_turn_id:
                 detail["startedTurnId"] = turn_control.turn_id
             return detail
-        s._record_image_attachment_capability_event(
-            conversation_id,
-            turn_id=turn_control.turn_id,
-            decision="forwarded",
-            reason="supported" if image_capability["supports_image_input"] is True else "unknown_fail_open",
-            outcome="scheduled",
-            agent_id=agent_id,
-            attachments=attachments,
-            fields=image_capability_log_fields,
-        )
+        if attachments and normalized_message_source != "agent_inbox":
+            image_capability = s._resolve_image_attachment_capability(agent_instance=agent)
+            image_capability_log_fields = {
+                "supportsImageInput": image_capability.get("supports_image_input"),
+                "llmSlot": s.SESSION_LLM_SLOT_DIALOGUE,
+                "llmModelId": str(image_capability.get("model_id") or "").strip(),
+                "dialogueModelId": s.agent_dialogue_model_id(agent),
+                "visionModelId": s.agent_llm_model_id(agent, s.SESSION_LLM_SLOT_VISION),
+                "modelName": image_capability.get("model_name") or "",
+                "recentImageReference": bool(recent_image_reference_requested),
+                "resolvedRecentImageReference": bool(recent_image_reference_requested and not recent_image_reference_missing),
+                "recentImageReferenceSource": "explicit" if explicit_recent_image_reference else "contextual_retry" if recent_image_reference_requested else "",
+            }
+            if image_capability["supports_image_input"] is False:
+                visible = s._image_input_unsupported_message(
+                    lang,
+                    model_name=str(image_capability.get("model_name") or "").strip(),
+                )
+                s._finish_image_attachment_preflight_turn(
+                    conversation_id,
+                    turn_control.turn_id,
+                    {
+                        "status": "failed_runtime",
+                        "summary": visible,
+                        "raw_output": visible,
+                        "error": visible,
+                        "outcome": "blocked",
+                        "metadata": {
+                            "imageAttachmentPreflight": "unsupported_image_input",
+                            "supportsImageInput": False,
+                        },
+                    },
+                    decision="blocked",
+                    reason="unsupported_image_input",
+                    agent_id=agent_id,
+                    attachments=attachments,
+                    leases=requested_leases,
+                    raw_user_message=message,
+                    fields=image_capability_log_fields,
+                    outcome="blocked",
+                    level="warning",
+                )
+                detail = s.get_session_detail(conversation_id) or {}
+                if include_started_turn_id:
+                    detail["startedTurnId"] = turn_control.turn_id
+                return detail
+            s._record_image_attachment_capability_event(
+                conversation_id,
+                turn_id=turn_control.turn_id,
+                decision="forwarded",
+                reason="supported" if image_capability["supports_image_input"] is True else "unknown_fail_open",
+                outcome="scheduled",
+                agent_id=agent_id,
+                attachments=attachments,
+                fields=image_capability_log_fields,
+            )
 
-    prompt_resolve_started_at = s._perf_counter()
-    if normalized_message_source == "agent_inbox":
-        effective_user_message, user_message_source = message, normalized_message_source
-    elif attachments:
-        effective_user_message = recent_image_reference_prompt or message
-        user_message_source = "raw_with_attachments" if message else "attachments_only"
-    elif normalized_message_source == "supervised_evolution":
-        effective_user_message, user_message_source = message, normalized_message_source
-    else:
-        effective_user_message, user_message_source = s._resolve_session_user_prompt(
-            conversation_id,
-            message,
-            previous_messages,
-            existing_task=active_task,
-        )
-        if effective_user_message == message and normalized_message_source != "raw":
-            user_message_source = normalized_message_source
-    stage_task_continuation_prompt = s._source_collection_stage_task_continuation_prompt(persisted_message_metadata)
-    if stage_task_continuation_prompt:
-        effective_user_message = stage_task_continuation_prompt
-        user_message_source = "source_collection_stage_task_continue"
-    reference_prompt_block = s._session_reference_prompt_block(session_references)
-    if reference_prompt_block:
-        effective_user_message = "\n\n".join(part for part in [effective_user_message or message, reference_prompt_block] if part).strip()
-        if not user_message_source or user_message_source == "raw":
-            user_message_source = "raw_with_session_references" if message else "session_references_only"
-    if effective_user_message != message:
-        s._record_session_user_message_filtered_event(
-            conversation_id,
-            turn_id=turn_control.turn_id,
-            reason="non_meaningful_user_message",
-            message=message,
-            source=user_message_source,
-        )
-    submit_timing_fields["userPromptResolveMs"] = s._elapsed_ms(prompt_resolve_started_at)
-    if s._is_continue_request(message):
-        s._record_chat_next_state_signal(
+        acceptance_stage = "prompt_resolve"
+        prompt_resolve_started_at = s._perf_counter()
+        if normalized_message_source == "agent_inbox":
+            effective_user_message, user_message_source = message, normalized_message_source
+        elif attachments:
+            effective_user_message = recent_image_reference_prompt or message
+            user_message_source = "raw_with_attachments" if message else "attachments_only"
+        elif normalized_message_source == "supervised_evolution":
+            effective_user_message, user_message_source = message, normalized_message_source
+        else:
+            effective_user_message, user_message_source = s._resolve_session_user_prompt(
+                conversation_id,
+                message,
+                previous_messages,
+                existing_task=active_task,
+            )
+            if effective_user_message == message and normalized_message_source != "raw":
+                user_message_source = normalized_message_source
+        stage_task_continuation_prompt = s._source_collection_stage_task_continuation_prompt(persisted_message_metadata)
+        if stage_task_continuation_prompt:
+            effective_user_message = stage_task_continuation_prompt
+            user_message_source = "source_collection_stage_task_continue"
+        reference_prompt_block = s._session_reference_prompt_block(session_references)
+        if reference_prompt_block:
+            effective_user_message = "\n\n".join(part for part in [effective_user_message or message, reference_prompt_block] if part).strip()
+            if not user_message_source or user_message_source == "raw":
+                user_message_source = "raw_with_session_references" if message else "session_references_only"
+        if effective_user_message != message:
+            s._record_session_user_message_filtered_event(
+                conversation_id,
+                turn_id=turn_control.turn_id,
+                reason="non_meaningful_user_message",
+                message=message,
+                source=user_message_source,
+            )
+        submit_timing_fields["userPromptResolveMs"] = s._elapsed_ms(prompt_resolve_started_at)
+        if s._is_continue_request(message):
+            s._record_chat_next_state_signal(
+                session_id=conversation_id,
+                turn_id=turn_control.turn_id,
+                source="user",
+                kind="user_continues",
+                polarity="neutral",
+                mode="directive",
+                related_event_code="conversation.user_continue_requested",
+                summary=s.text_for(
+                    lang,
+                    zh="用户请求继续上一轮未完成任务。",
+                    en="The user requested continuation of the unfinished task.",
+                ),
+                metadata={
+                    "userMessageSource": user_message_source,
+                    "effectivePromptLength": len(effective_user_message),
+                },
+            )
+
+        acceptance_stage = "context_assembly"
+        context = {
+            "session_id": conversation_id,
+            "turn_id": turn_control.turn_id,
+            "turn_control": turn_control,
+            "user_message": effective_user_message,
+            "raw_user_message": message,
+            "user_message_source": user_message_source,
+            "attachments": attachments,
+            "session_references": session_references,
+            "history_messages": previous_messages,
+            "mental_model_enabled": mental_model_enabled,
+            "runtime_status_enabled": runtime_status_enabled,
+            "turn_status_tail": dict(turn_status_tail) if isinstance(turn_status_tail, dict) else None,
+            "active_task": active_task,
+            "agent_id": agent_id,
+            "agent_snapshot": dict(agent) if isinstance(agent, dict) else {},
+            "agent_prompt_snapshot": dict(conversation.get("agentPromptSnapshot") or {})
+            if isinstance(conversation.get("agentPromptSnapshot"), dict)
+            else {},
+            "leases": requested_leases,
+            "message_metadata": dict(persisted_message_metadata),
+            "client_submission_id": normalized_client_submission_id,
+            "supervised_context": dict(conversation.get("supervised_context") or {})
+            if isinstance(conversation.get("supervised_context"), dict)
+            else {},
+            "skill_invocation": skill_invocation,
+            "active_skill_contract": active_skill_contract,
+            "llm_slot": s.SESSION_LLM_SLOT_DIALOGUE,
+            "trace_context_carrier": dict(normalized_trace_context_carrier),
+            "submit_timing_fields": dict(submit_timing_fields),
+            "submit_started_at_monotonic": submit_started_at,
+        }
+        # ContextVars do not cross SESSION_EXECUTOR threads.  Carry the Ledger
+        # deadline only as an ephemeral scheduler field for workflow-scoped
+        # Challenge turns; it must never enter message metadata, the turn journal,
+        # or chat state. Continuation metadata intentionally has no ``kind``.
+        deadline_at_ms = _challenge_deadline_at_ms_for_submit(persisted_message_metadata)
+        if deadline_at_ms is not None:
+            context["_challenge_task_deadline_at_ms"] = deadline_at_ms
+        acceptance_stage = "scheduling_prepare"
+        stage_started_at = s._perf_counter()
+        s._record_session_turn_scheduled_event(context)
+        submit_timing_fields["scheduledSceneLogMs"] = s._elapsed_ms(stage_started_at)
+    except Exception as exc:
+        _settle_session_submit_admission_failure(
             session_id=conversation_id,
             turn_id=turn_control.turn_id,
-            source="user",
-            kind="user_continues",
-            polarity="neutral",
-            mode="directive",
-            related_event_code="conversation.user_continue_requested",
-            summary=s.text_for(
-                lang,
-                zh="用户请求继续上一轮未完成任务。",
-                en="The user requested continuation of the unfinished task.",
-            ),
-            metadata={
-                "userMessageSource": user_message_source,
-                "effectivePromptLength": len(effective_user_message),
-            },
+            leases=requested_leases,
+            user_message=message,
+            exc=exc,
+            stage=acceptance_stage,
         )
-
-    context = {
-        "session_id": conversation_id,
-        "turn_id": turn_control.turn_id,
-        "turn_control": turn_control,
-        "user_message": effective_user_message,
-        "raw_user_message": message,
-        "user_message_source": user_message_source,
-        "attachments": attachments,
-        "session_references": session_references,
-        "history_messages": previous_messages,
-        "mental_model_enabled": mental_model_enabled,
-        "runtime_status_enabled": runtime_status_enabled,
-        "turn_status_tail": dict(turn_status_tail) if isinstance(turn_status_tail, dict) else None,
-        "active_task": active_task,
-        "agent_id": agent_id,
-        "agent_snapshot": dict(agent) if isinstance(agent, dict) else {},
-        "agent_prompt_snapshot": dict(conversation.get("agentPromptSnapshot") or {})
-        if isinstance(conversation.get("agentPromptSnapshot"), dict)
-        else {},
-        "leases": requested_leases,
-        "message_metadata": dict(persisted_message_metadata),
-        "client_submission_id": normalized_client_submission_id,
-        "supervised_context": dict(conversation.get("supervised_context") or {})
-        if isinstance(conversation.get("supervised_context"), dict)
-        else {},
-        "skill_invocation": skill_invocation,
-        "active_skill_contract": active_skill_contract,
-        "llm_slot": s.SESSION_LLM_SLOT_DIALOGUE,
-        "trace_context_carrier": dict(normalized_trace_context_carrier),
-        "submit_timing_fields": dict(submit_timing_fields),
-        "submit_started_at_monotonic": submit_started_at,
-    }
-    # ContextVars do not cross SESSION_EXECUTOR threads.  Carry the Ledger
-    # deadline only as an ephemeral scheduler field for workflow-scoped
-    # Challenge turns; it must never enter message metadata, the turn journal,
-    # or chat state. Continuation metadata intentionally has no ``kind``.
-    deadline_at_ms = _challenge_deadline_at_ms_for_submit(persisted_message_metadata)
-    if deadline_at_ms is not None:
-        context["_challenge_task_deadline_at_ms"] = deadline_at_ms
-    stage_started_at = s._perf_counter()
-    s._record_session_turn_scheduled_event(context)
-    submit_timing_fields["scheduledSceneLogMs"] = s._elapsed_ms(stage_started_at)
+        raise
     try:
         schedule_started_at = s._perf_counter()
         s._schedule_session_turn(context)
