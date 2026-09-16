@@ -1,9 +1,11 @@
 import copy
+import logging
 from types import SimpleNamespace
 
 from langchain_core.messages import AIMessage, ToolMessage
 import pytest
 
+from config.llm_security import validate_llm_provider_target
 from core.llm.client import LLMClient
 from core.llm.invocation import (
     invoke_llm,
@@ -893,3 +895,91 @@ def test_invocation_wrappers_bind_session_identity_for_header_templates(wrapper)
     runner()
 
     assert fake.captured == [{"x-opencode-session": "sess-wrapper"}]
+
+
+def test_extra_header_template_tolerates_whitespace_around_placeholder():
+    # config 层（llm_security）对占位符提取后 strip 归一，运行时必须同语义：
+    # 花括号内的空白不得导致字面量外发或静默差异。
+    headers = {"x-a": "{session_id }", "x-b": "{ session_id}", "x-c": "agent:{ agent_id }"}
+
+    with invocation_header_identity_scope(session_id="sess-ws", agent_id="ag-ws"):
+        resolved = resolve_extra_header_identity_templates(headers)
+
+    assert resolved == {"x-a": "sess-ws", "x-b": "sess-ws", "x-c": "agent:ag-ws"}
+
+
+@pytest.mark.parametrize("value", ["{{session_id}}", "{session_id}}", "{{session_id}"])
+def test_extra_header_template_dropped_for_residual_braces_after_resolution(value):
+    # 解析完成后仍残留花括号的值绝不外发（含字面量 {session_id} 形态）。
+    with invocation_header_identity_scope(session_id="sess-brace"):
+        resolved = resolve_extra_header_identity_templates({"x-opencode-session": value})
+
+    assert resolved == {}
+
+
+_TWO_LAYER_TEMPLATE_CASES = [
+    # (value, config_accepts, runtime_resolved_or_None)
+    ("{session_id }", True, "sess-2l"),
+    ("{ session_id}", True, "sess-2l"),
+    ("{{session_id}}", True, None),
+    ("{session_id}}", True, None),
+    ("{{session_id}", True, None),
+    ("{sessionId}", False, None),
+]
+
+
+@pytest.mark.parametrize(
+    ("value", "config_accepts", "runtime_resolved"),
+    _TWO_LAYER_TEMPLATE_CASES,
+)
+def test_header_template_two_layer_contract(value, config_accepts, runtime_resolved):
+    # config 层（llm_security）与运行时（payload_builder）必须对同一值给出
+    # 对应行为：要么都拒，要么 config 收 + 运行时正确解析/fail-safe 丢弃；
+    # 绝不允许 config 收下后运行时把字面量模板原样外发。
+    provider = {
+        "service_class": "self_hosted",
+        "vendor": "custom",
+        "base_url": "https://models.example/v1",
+        "credential_ref": "env:VIBELUTION_LLM_PROVIDER_LAB_API_KEY",
+        "extra_headers": {"x-opencode-session": value},
+    }
+    if config_accepts:
+        validate_llm_provider_target(provider)
+    else:
+        with pytest.raises(ValueError):
+            validate_llm_provider_target(provider)
+
+    with invocation_header_identity_scope(session_id="sess-2l"):
+        resolved_headers = resolve_extra_header_identity_templates({"x-opencode-session": value})
+
+    if runtime_resolved is None:
+        assert resolved_headers == {}
+    else:
+        assert resolved_headers == {"x-opencode-session": runtime_resolved}
+    assert resolved_headers.get("x-opencode-session") != value
+
+
+def test_header_template_drop_logs_once_without_header_value(caplog):
+    from core.llm import payload_builder as payload_builder_module
+
+    payload_builder_module._HEADER_TEMPLATE_DROP_LOGGED.clear()
+    headers = {"x-opencode-session": "{session_id}", "x-static": "keep"}
+
+    with caplog.at_level(logging.WARNING, logger="core.llm.payload_builder"):
+        with invocation_header_identity_scope(session_id=""):
+            first = resolve_extra_header_identity_templates(headers)
+            second = resolve_extra_header_identity_templates(headers)
+
+    assert first == {"x-static": "keep"}
+    assert second == {"x-static": "keep"}
+    drop_records = [
+        record
+        for record in caplog.records
+        if "identity template header dropped" in record.getMessage()
+    ]
+    assert len(drop_records) == 1
+    message = drop_records[0].getMessage()
+    assert "x-opencode-session" in message
+    assert "identity_missing" in message
+    # 绝不记录 header 值（extra_headers 可能包含敏感头内容）。
+    assert "{session_id}" not in message

@@ -6,7 +6,9 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import logging
 import re
+import threading
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterator, List
@@ -149,7 +151,9 @@ def prompt_cache_partition_scope(value: str) -> Iterator[None]:
 
 
 _HEADER_IDENTITY_TEMPLATE_PLACEHOLDERS = frozenset({"session_id", "agent_id"})
-_HEADER_TEMPLATE_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+# 与 config/llm_security.py 同款提取语义：任何 {...} 形式都必须命中白名单
+# （提取后 strip 归一），两层对同一配置值的收/拒判定保持一致。
+_HEADER_TEMPLATE_BRACE_RE = re.compile(r"\{([^{}]*)\}")
 
 # 由上层 invocation 包装器在拥有 session/agent 身份时设置，让 provider
 # extra_headers 中的 {session_id} / {agent_id} 占位符在请求构建时按当前
@@ -159,6 +163,25 @@ _HEADER_TEMPLATE_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 _invocation_header_identity: ContextVar[Dict[str, str]] = ContextVar(
     "vibelution_invocation_header_identity", default={}
 )
+
+_logger = logging.getLogger(__name__)
+# 每进程每 (header, reason) 只警告一次，防止 compression 等无会话链路刷屏。
+_HEADER_TEMPLATE_DROP_LOGGED: set = set()
+_HEADER_TEMPLATE_DROP_LOG_LOCK = threading.Lock()
+
+
+def _log_header_template_drop_once(name: str, reason: str) -> None:
+    key = (name.lower(), str(reason))
+    with _HEADER_TEMPLATE_DROP_LOG_LOCK:
+        if key in _HEADER_TEMPLATE_DROP_LOGGED:
+            return
+        _HEADER_TEMPLATE_DROP_LOGGED.add(key)
+    # 绝不记录 header 值：extra_headers 可能包含敏感头内容。
+    _logger.warning(
+        "llm.extra_headers identity template header dropped: header=%s reason=%s",
+        name,
+        reason,
+    )
 
 
 def set_invocation_header_identity(*, session_id: str = "", agent_id: str = ""):
@@ -186,34 +209,49 @@ def invocation_header_identity_scope(*, session_id: str = "", agent_id: str = ""
         reset_invocation_header_identity(token)
 
 
-def _resolve_header_template_value(value: str, identity: Dict[str, str]) -> str | None:
-    """解析单个 header 值中的身份占位符；无法安全解析时返回 None（该 header 丢弃）。"""
-    matches = _HEADER_TEMPLATE_PLACEHOLDER_RE.findall(value)
+def _resolve_header_template_value(value: str, identity: Dict[str, str]) -> tuple:
+    """解析单个 header 值中的身份占位符。
+
+    返回 ``(resolved, "")``；无法安全解析时返回 ``(None, drop_reason)``，
+    reason 取 unknown_placeholder / identity_missing / unsafe_resolved 之一。
+    """
+    matches = _HEADER_TEMPLATE_BRACE_RE.findall(value)
     if not matches:
-        return value
-    if any(name not in _HEADER_IDENTITY_TEMPLATE_PLACEHOLDERS for name in matches):
-        return None
-    resolved_parts: Dict[str, str] = {}
-    for name in matches:
+        # 值不含 {...} 占位符形式（含孤立/未闭合花括号）→ 存量值原样透传。
+        return value, ""
+    parts: Dict[str, str] = {}
+    for raw in matches:
+        name = raw.strip()
+        if name not in _HEADER_IDENTITY_TEMPLATE_PLACEHOLDERS:
+            return None, "unknown_placeholder"
         part = str(identity.get(name, "") or "").strip()
         if not part:
-            return None
-        resolved_parts[name] = part
-    try:
-        resolved = value.format_map(resolved_parts)
-    except (KeyError, IndexError, ValueError):
-        return None
-    if not resolved or len(resolved) > 512 or "\r" in resolved or "\n" in resolved or "\x00" in resolved:
-        return None
-    return resolved
+            return None, "identity_missing"
+        parts[raw] = part
+    resolved = _HEADER_TEMPLATE_BRACE_RE.sub(lambda match: parts[match.group(1)], value)
+    if (
+        not resolved
+        or len(resolved) > 512
+        or "{" in resolved
+        or "}" in resolved
+        or "\r" in resolved
+        or "\n" in resolved
+        or "\x00" in resolved
+    ):
+        # 解析完成后仍残留花括号（如 {{session_id}}、{session_id}}）或含
+        # 非法字符：宁可丢弃也绝不外发字面量模板。
+        return None, "unsafe_resolved"
+    return resolved, ""
 
 
 def resolve_extra_header_identity_templates(headers: Any) -> Dict[str, str]:
     """按当前调用身份解析 extra_headers 值中的 {session_id}/{agent_id} 占位符。
 
     - 值不含占位符 → 原样透传（存量配置零差异）；
-    - 值含占位符且身份字段非空 → 解析替换（解析后仍保持 ≤512 字符且无换行）；
-    - 未知占位符、身份字段为空或解析结果非法 → 整个 header 丢弃（fail-safe）。
+    - 值含占位符且身份字段非空 → 解析替换（解析后不得残留花括号、保持
+      ≤512 字符且无换行）；
+    - 未知占位符、身份字段为空或解析结果非法 → 整个 header 丢弃（fail-safe，
+      每进程每 (header, reason) 记一次 warning，不含 header 值）。
     """
     source = dict(headers or {})
     if not source:
@@ -223,8 +261,9 @@ def resolve_extra_header_identity_templates(headers: Any) -> Dict[str, str]:
     identity = dict(_invocation_header_identity.get() or {})
     resolved: Dict[str, str] = {}
     for name, raw_value in source.items():
-        value = _resolve_header_template_value(str(raw_value), identity)
+        value, drop_reason = _resolve_header_template_value(str(raw_value), identity)
         if value is None:
+            _log_header_template_drop_once(str(name), drop_reason)
             continue
         resolved[name] = value
     return resolved
