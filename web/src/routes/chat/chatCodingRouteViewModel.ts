@@ -1,3 +1,6 @@
+import { isFetchJsonHttpError } from "../../api/client";
+import type { TranslationKey } from "../../i18n/dictionary";
+
 export type ResizableSide = "left" | "right";
 
 const RESIZE_HANDLE_WIDTH = 10;
@@ -79,6 +82,72 @@ export function describeChatRouteError(error: unknown, fallback: string) {
     return `${fallback}: ${error.message}`;
   }
   return fallback;
+}
+
+export type ChatSubmitErrorKind =
+  | "turn_in_progress"
+  | "auth_failed"
+  | "rate_limited"
+  | "upstream_unavailable"
+  | "network"
+  | "request_rejected";
+
+/** Chat dictionary keys for each submit failure category. */
+export const CHAT_SUBMIT_ERROR_KIND_KEYS: Record<ChatSubmitErrorKind, TranslationKey> = {
+  turn_in_progress: "composerErrorTurnInProgress",
+  auth_failed: "composerErrorAuthFailed",
+  rate_limited: "composerErrorRateLimited",
+  upstream_unavailable: "composerErrorUpstreamUnavailable",
+  network: "composerErrorNetwork",
+  request_rejected: "composerErrorRequestRejected",
+};
+
+/**
+ * Classify a direct turn-submit failure by HTTP status / transport kind so
+ * the composer shows one human "what happened / what next" line instead of
+ * the raw error message. Unknown errors return "" (caller keeps its human
+ * fallback; the raw error stays in telemetry/runtime logs).
+ */
+export function classifyChatSubmitErrorKind(error: unknown): ChatSubmitErrorKind | "" {
+  if (isFetchJsonHttpError(error)) {
+    const status = Number(error.status) || 0;
+    if (status === 409) {
+      return "turn_in_progress";
+    }
+    if (status === 401 || status === 403) {
+      return "auth_failed";
+    }
+    if (status === 429) {
+      return "rate_limited";
+    }
+    if (status >= 500) {
+      return "upstream_unavailable";
+    }
+    if (status >= 400) {
+      return "request_rejected";
+    }
+    return "";
+  }
+  // A failed fetch surfaces as TypeError("Failed to fetch") / network wording.
+  if (error instanceof TypeError) {
+    return "network";
+  }
+  return "";
+}
+
+/**
+ * Human composer text for a submit failure: classified category copy when
+ * the error is recognizable, otherwise the caller's localized fallback. The
+ * raw error is never concatenated — it is already reported to telemetry and
+ * runtime logs by the submit mutation's error path.
+ */
+export function describeChatSubmitError(
+  error: unknown,
+  t: (key: TranslationKey) => string,
+  fallback: string,
+) {
+  const kind = classifyChatSubmitErrorKind(error);
+  return kind ? t(CHAT_SUBMIT_ERROR_KIND_KEYS[kind]) : fallback;
 }
 
 function comparableErrorText(value: unknown) {

@@ -1,7 +1,36 @@
 import type { ConversationMessage, SessionTurnError } from "../../api/types";
+import type { TranslationKey } from "../../i18n/dictionary";
 
 export type TurnErrorDiagnosticRow = { label: string; value: string };
 export type ConversationLanguage = "zh" | "en";
+export type TurnErrorRecoveryAction = "compress_context";
+
+/**
+ * errorType -> Chat dictionary key for the human-readable chip label. The
+ * table covers every errorType the backend writes into turn-error messages
+ * (signals_format._failure_error_type plus explicit call-site types);
+ * unmapped values (e.g. raw exception class names) fall back to the runtime
+ * label and keep the raw code reachable via the chip tooltip.
+ */
+export const CONVERSATION_TURN_ERROR_TYPE_LABEL_KEYS: Record<string, TranslationKey> = {
+  provider_protocol_error: "turnErrorTypeProviderProtocolError",
+  provider_upstream_error: "turnErrorTypeProviderUpstreamError",
+  provider_error: "turnErrorTypeProviderError",
+  runtime_error: "turnErrorTypeRuntimeError",
+  prompt_cache_unsupported: "turnErrorTypePromptCacheUnsupported",
+  resource_lease_conflict: "turnErrorTypeResourceLeaseConflict",
+  agent_llm_resolution_failed: "turnErrorTypeAgentLlmResolutionFailed",
+  turn_persistence_failed: "turnErrorTypeTurnPersistenceFailed",
+  StaleChatTurnSettled: "turnErrorTypeStaleChatTurnSettled",
+};
+
+/** Budget-family failure evidence: recovery is compression / limit adjustment. */
+const TURN_ERROR_BUDGET_REASON_CODES = new Set([
+  "context_budget_exhausted",
+  "budget_exhausted",
+  "token_budget_exhausted",
+  "context_limit",
+]);
 
 function metadataText(metadata: Record<string, unknown> | undefined, key: string) {
   const value = metadata?.[key];
@@ -25,6 +54,48 @@ function isTurnErrorDiagnosticRow(row: TurnErrorDiagnosticRow | null): row is Tu
 export function resolveConversationTurnErrorType(message: ConversationMessage) {
   const raw = message.metadata?.errorType ?? message.metadata?.error_type;
   return typeof raw === "string" ? raw.trim() : "";
+}
+
+/**
+ * Human-readable label key for a raw turn errorType; "" when no type is set.
+ * Unknown codes fall back to the runtime label (the raw code stays reachable
+ * in the diagnostics surface via the caller's tooltip).
+ */
+export function resolveTurnErrorTypeLabelKey(rawErrorType: string): TranslationKey | "" {
+  const normalized = String(rawErrorType || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  return CONVERSATION_TURN_ERROR_TYPE_LABEL_KEYS[normalized] ?? "turnErrorTypeRuntimeError";
+}
+
+function budgetFailureEvidence(fields: Record<string, unknown>) {
+  const text = (key: string) => String(fields[key] ?? "").trim().toLowerCase();
+  if (text("failureDisposition") === "budget_or_context") {
+    return true;
+  }
+  if (TURN_ERROR_BUDGET_REASON_CODES.has(text("reasonCode")) || TURN_ERROR_BUDGET_REASON_CODES.has(text("reason_code"))) {
+    return true;
+  }
+  return text("failureCategory").includes("budget");
+}
+
+/**
+ * Directed recovery action for a persisted failed turn; budget-family
+ * failures point at context compression instead of a plain retry.
+ */
+export function resolveConversationTurnErrorRecoveryAction(
+  message: ConversationMessage,
+): TurnErrorRecoveryAction | "" {
+  const fields = (message.metadata ?? {}) as Record<string, unknown>;
+  return budgetFailureEvidence(fields) ? "compress_context" : "";
+}
+
+/** Same detection for the live SessionTurnError banner. */
+export function resolveSessionTurnErrorRecoveryAction(
+  turnError: Record<string, unknown>,
+): TurnErrorRecoveryAction | "" {
+  return budgetFailureEvidence(turnError) ? "compress_context" : "";
 }
 
 export function buildConversationTurnErrorReasonRows(
