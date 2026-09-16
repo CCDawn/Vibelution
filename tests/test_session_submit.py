@@ -892,3 +892,156 @@ def test_steer_guidance_after_turn_terminal_is_dropped_gracefully(tmp_path: Path
     assert dropped_events[0]["fields"]["reason"] == "post_terminal_write"
     assert dropped_events[0]["fields"]["turnId"] == "turn-already-settled"
     assert dropped_events[0]["fields"]["sessionId"] == session_id
+
+
+
+def test_resubmit_acceptance_window_failure_settles_running_turn(tmp_path: Path, monkeypatch) -> None:
+    """A journal failure after running is set must settle the resubmit turn.
+
+    Regression guard for the shared edit/regenerate acceptance window between
+    ``_set_session_running`` and ``_schedule_session_turn``: a failure there
+    (here: the user message journal append) has to run the same settlement
+    sequence as a schedule failure (work run failed -> turn failure persisted
+    while still current -> running cleared -> turn control cleared -> snapshot
+    published) and re-raise the original error.
+    """
+
+    from core.web.services import agent_directory_service
+
+    session_id = "session-resubmit-window-failure"
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _seed_submittable_sessions(tmp_path, [session_id])
+
+    original_append = session_service._append_session_conversation_event
+
+    def raise_journal_lock_timeout(*args, **kwargs):
+        if str(kwargs.get("source") or "") == "regenerate_session_message":
+            raise TimeoutError("journal file lock timed out")
+        return original_append(*args, **kwargs)
+
+    monkeypatch.setattr(session_service, "_append_session_conversation_event", raise_journal_lock_timeout)
+    work_run_calls: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_persist_chat_turn_work_run",
+        lambda **kwargs: work_run_calls.append(dict(kwargs)),
+    )
+    turn_failure_calls: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_persist_session_turn_failure",
+        lambda target, context, exc: turn_failure_calls.append(
+            {"session_id": target, "context": dict(context), "exc": exc}
+        ),
+    )
+    published_sessions: list[str] = []
+    monkeypatch.setattr(
+        session_service,
+        "_publish_session_detail_snapshot",
+        lambda target: published_sessions.append(target),
+    )
+    scene_events: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda component, phase, event_code, **kwargs: scene_events.append(
+            {"component": component, "phase": phase, "event_code": event_code, **kwargs}
+        ),
+    )
+
+    try:
+        with pytest.raises(TimeoutError, match="journal file lock timed out"):
+            submit.regenerate_session_message(
+                session_id,
+                f"{session_id}-message-1",
+                mental_model_enabled=False,
+            )
+
+        failed_calls = [call for call in work_run_calls if str(call.get("status")) == "failed"]
+        assert failed_calls, "expected the resubmit turn work run to be settled as failed"
+        settle_call = failed_calls[-1]
+        assert settle_call.get("session_id") == session_id
+        assert settle_call.get("user_message") == "seed"
+        assert str(settle_call.get("summary", "")).startswith("TimeoutError:")
+        turn_id = str(settle_call.get("turn_id") or "")
+        assert turn_id
+        # The failure persist ran with the still-current turn identity.
+        assert turn_failure_calls, "expected the turn failure to be persisted while still current"
+        assert turn_failure_calls[-1]["session_id"] == session_id
+        assert turn_failure_calls[-1]["context"] == {"turn_id": turn_id}
+        assert isinstance(turn_failure_calls[-1]["exc"], TimeoutError)
+        assert session_service._is_session_running(session_id) is False
+        assert session_service._get_session_turn_control(session_id) is None
+        assert published_sessions == [session_id]
+        admission_failure_events = [
+            event for event in scene_events if event["event_code"] == "conversation.submit.admission_window_failed"
+        ]
+        assert len(admission_failure_events) == 1
+        assert admission_failure_events[0]["fields"]["failedStage"] == "user_message_journal"
+        assert admission_failure_events[0]["fields"]["errorType"] == "TimeoutError"
+        assert not [
+            event
+            for event in scene_events
+            if event["event_code"] == "conversation.submit.admission_settle_step_failed"
+        ], "expected a clean settlement with no step failures"
+    finally:
+        _reset_seeded_session_runtime(session_id)
+
+
+def test_resubmit_acceptance_window_failure_survives_settlement_step_errors(tmp_path: Path, monkeypatch) -> None:
+    """A settlement step that raises must not mask the original resubmit error."""
+
+    from core.web.services import agent_directory_service
+
+    session_id = "session-resubmit-settle-failure"
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _seed_submittable_sessions(tmp_path, [session_id])
+
+    original_append = session_service._append_session_conversation_event
+
+    def raise_journal_lock_timeout(*args, **kwargs):
+        if str(kwargs.get("source") or "") == "regenerate_session_message":
+            raise TimeoutError("journal file lock timed out")
+        return original_append(*args, **kwargs)
+
+    monkeypatch.setattr(session_service, "_append_session_conversation_event", raise_journal_lock_timeout)
+
+    def raise_still_locked(**kwargs):
+        if str(kwargs.get("status")) != "failed":
+            return
+        raise TimeoutError("journal still locked")
+
+    # The failed-status settlement persist itself fails; the remaining steps
+    # must still clear running/turn control and the original error must win.
+    monkeypatch.setattr(session_service, "_persist_chat_turn_work_run", raise_still_locked)
+    settle_step_events: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda component, phase, event_code, **kwargs: settle_step_events.append(
+            {"component": component, "phase": phase, "event_code": event_code, **kwargs}
+        ),
+    )
+
+    try:
+        with pytest.raises(TimeoutError, match="journal file lock timed out"):
+            submit.regenerate_session_message(
+                session_id,
+                f"{session_id}-message-1",
+                mental_model_enabled=False,
+            )
+
+        assert session_service._is_session_running(session_id) is False
+        assert session_service._get_session_turn_control(session_id) is None
+        settle_step_failures = [
+            event
+            for event in settle_step_events
+            if event["event_code"] == "conversation.submit.admission_settle_step_failed"
+        ]
+        assert settle_step_failures, "expected the failing settlement step to be reported"
+        assert settle_step_failures[0]["fields"]["settlementStep"] == "persist_work_run_failed"
+        assert settle_step_failures[0]["fields"]["failedStage"] == "user_message_journal"
+    finally:
+        _reset_seeded_session_runtime(session_id)
