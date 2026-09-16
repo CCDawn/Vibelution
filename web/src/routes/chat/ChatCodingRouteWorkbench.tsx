@@ -3395,6 +3395,7 @@ export function ChatCodingRouteWorkbench() {
                 llmControl: verifiedCompanionMode ? undefined : sessionLlmControl,
                 composerContextRing: verifiedCompanionMode ? null : composerContextRing,
                 onOpenComposerContextDetail: !verifiedCompanionMode && cacheDetailAvailable ? openCacheDetail : undefined,
+                onCreateSession: !verifiedCompanionMode && selectedChatAgent ? () => handleCreateAgentSession(selectedChatAgent) : undefined,
                 slashCommandSuggestions: verifiedCompanionMode ? [] : slashCommandSuggestions,
                 cancelComposerModeLabel: t("cancelEditMessage"),
                 turnError: detail.lastTurnError,

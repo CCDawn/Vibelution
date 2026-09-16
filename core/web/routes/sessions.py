@@ -36,7 +36,7 @@ from core.web.services.runtime_scene_service import record_runtime_scene_event
 from core.web.services import session_service
 from core.web.services.session import document_attachments as session_document_attachments
 from core.web.services.session.composer_example_commands import (
-    get_composer_example_command,
+    get_composer_starter_commands,
 )
 from core.web.services.session.prompt_suggestion import (
     PromptSuggestionError,
@@ -268,10 +268,18 @@ class SessionPromptSuggestionResponse(BaseModel):
     reason: str = ""
 
 
+class SessionComposerStarterItem(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    heading: str
+    command: str
+
+
 class SessionComposerExampleResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     command: str | None = None
+    starters: list[SessionComposerStarterItem] = []
 
 
 @router.get(
@@ -595,7 +603,11 @@ def session_composer_example(session_id: str) -> dict:
         get_session_detail(session_id, message_limit=0, transcript_scope="none")
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return {"command": get_composer_example_command(session_service.PROJECT_ROOT)}
+    starters = get_composer_starter_commands(session_service.PROJECT_ROOT)
+    return {
+        "command": starters[0]["command"] if starters else None,
+        "starters": starters,
+    }
 
 
 @router.post(

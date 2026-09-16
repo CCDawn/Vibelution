@@ -22,6 +22,8 @@
 | `ResearchWorkflowRecoveryPanel` | [product/research-recovery-panel.md](./product/research-recovery-panel.md#researchworkflowrecoverypanel) |
 | `ResearchWorkflowRecoveryEntry` | [product/research-recovery-panel.md](./product/research-recovery-panel.md#researchworkflowrecoveryentry) |
 | `VCommandPalette` | [product/command-palette.md](./product/command-palette.md#vcommandpalette) |
+| 会话起点卡 | [product/conversation-starter-cards.md](./product/conversation-starter-cards.md#会话起点卡) |
+| 内置斜杠命令 | [product/conversation-starter-cards.md](./product/conversation-starter-cards.md#内置斜杠命令) |
 
 ## Primitives
 

@@ -6,13 +6,18 @@ import {
   isFetchAbortError,
 } from "../../api/chat";
 import {
+  resolveComposerStarters,
   shouldLoadComposerExample,
   shouldRequestComposerPromptSuggestion,
+  type ComposerStarter,
 } from "./composerPromptSuggestionModel";
 
 export type ComposerPromptSuggestionInput = {
   sessionId: string;
-  enabled: boolean;
+  /** Per-session AI ghost suggestion toggle; deterministic starters ignore it. */
+  suggestionEnabled: boolean;
+  /** Starters only need a usable composer, not the AI suggestion opt-in. */
+  starterEnabled: boolean;
   busy: boolean;
   draft: string;
   hasConversation: boolean;
@@ -21,6 +26,7 @@ export type ComposerPromptSuggestionInput = {
 export type ComposerPromptSuggestionState = {
   ghost: string;
   exampleCommand: string;
+  starters: ComposerStarter[];
   acceptGhost: () => void;
   dismissGhost: () => void;
 };
@@ -35,10 +41,11 @@ export function useComposerPromptSuggestion(
   input: ComposerPromptSuggestionInput,
   onAccept: (suggestion: string) => void,
 ): ComposerPromptSuggestionState {
-  const { sessionId, enabled, busy, draft, hasConversation } = input;
+  const { sessionId, suggestionEnabled, starterEnabled, busy, draft, hasConversation } = input;
   const [suggestion, setSuggestion] = useState("");
   const [dismissed, setDismissed] = useState(false);
   const [exampleCommand, setExampleCommand] = useState("");
+  const [starters, setStarters] = useState<ComposerStarter[]>([]);
   const issuedRef = useRef(false);
 
   useEffect(() => {
@@ -46,6 +53,7 @@ export function useComposerPromptSuggestion(
     setSuggestion("");
     setDismissed(false);
     setExampleCommand("");
+    setStarters([]);
   }, [sessionId]);
 
   useEffect(() => {
@@ -61,7 +69,7 @@ export function useComposerPromptSuggestion(
       return;
     }
     if (!shouldRequestComposerPromptSuggestion({
-      enabled,
+      suggestionEnabled,
       sessionId,
       busy,
       draft,
@@ -82,25 +90,29 @@ export function useComposerPromptSuggestion(
         }
       });
     return () => controller.abort();
-  }, [busy, draft, enabled, hasConversation, sessionId]);
+  }, [busy, draft, hasConversation, sessionId, suggestionEnabled]);
 
   useEffect(() => {
-    if (!shouldLoadComposerExample({ enabled, sessionId, hasConversation })) {
+    if (!shouldLoadComposerExample({ enabled: starterEnabled, sessionId, hasConversation })) {
       setExampleCommand("");
+      setStarters([]);
       return;
     }
     const controller = new AbortController();
     fetchSessionComposerExample(sessionId, { signal: controller.signal })
       .then((response) => {
-        setExampleCommand(String(response?.command ?? "").trim());
+        const resolved = resolveComposerStarters(response ?? {});
+        setStarters(resolved);
+        setExampleCommand(resolved[0]?.command ?? "");
       })
       .catch((error) => {
         if (!isFetchAbortError(error)) {
           setExampleCommand("");
+          setStarters([]);
         }
       });
     return () => controller.abort();
-  }, [enabled, hasConversation, sessionId]);
+  }, [hasConversation, sessionId, starterEnabled]);
 
   const acceptGhost = useCallback(() => {
     if (!suggestion || dismissed) {
@@ -116,5 +128,5 @@ export function useComposerPromptSuggestion(
   }, []);
 
   const ghost = dismissed || draft !== "" || busy ? "" : suggestion.trim();
-  return { ghost, exampleCommand, acceptGhost, dismissGhost };
+  return { ghost, exampleCommand, starters, acceptGhost, dismissGhost };
 }

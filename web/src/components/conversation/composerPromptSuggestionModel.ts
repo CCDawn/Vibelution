@@ -1,5 +1,5 @@
 export type ComposerPromptSuggestionRequestInput = {
-  enabled: boolean;
+  suggestionEnabled: boolean;
   sessionId: string;
   busy: boolean;
   draft: string;
@@ -14,7 +14,7 @@ export type ComposerPromptSuggestionRequestInput = {
 export function shouldRequestComposerPromptSuggestion(
   input: ComposerPromptSuggestionRequestInput,
 ): boolean {
-  return input.enabled
+  return input.suggestionEnabled
     && Boolean(input.sessionId)
     && !input.busy
     && input.draft === ""
@@ -31,6 +31,59 @@ export type ComposerExampleRequestInput = {
 /** Starter prompts only matter for a thread that has no user turn yet. */
 export function shouldLoadComposerExample(input: ComposerExampleRequestInput): boolean {
   return input.enabled && Boolean(input.sessionId) && !input.hasConversation;
+}
+
+export type ComposerStarter = {
+  heading: string;
+  command: string;
+};
+
+export type ComposerStarterSource = {
+  command?: string | null;
+  starters?: Array<{ heading?: unknown; command?: unknown } | unknown> | null;
+};
+
+export const MAX_COMPOSER_STARTERS = 3;
+
+function normalizeStarter(value: unknown): ComposerStarter | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const record = value as { heading?: unknown; command?: unknown };
+  const command = String(record.command ?? "").trim();
+  if (!command) {
+    return null;
+  }
+  return { heading: String(record.heading ?? "").trim(), command };
+}
+
+/**
+ * Backend starters win; a bare `command` (legacy single-string response) is
+ * promoted so the placeholder and the cards never disagree.
+ */
+export function resolveComposerStarters(
+  source: ComposerStarterSource,
+  limit: number = MAX_COMPOSER_STARTERS,
+): ComposerStarter[] {
+  const starters = Array.isArray(source?.starters) ? source.starters : [];
+  const resolved: ComposerStarter[] = [];
+  const seen = new Set<string>();
+  for (const candidate of starters) {
+    const starter = normalizeStarter(candidate);
+    if (!starter || seen.has(starter.command)) {
+      continue;
+    }
+    seen.add(starter.command);
+    resolved.push(starter);
+    if (resolved.length >= limit) {
+      return resolved;
+    }
+  }
+  const legacy = String(source?.command ?? "").trim();
+  if (legacy && !seen.has(legacy)) {
+    resolved.push({ heading: "", command: legacy });
+  }
+  return resolved.slice(0, Math.max(0, limit));
 }
 
 export type ComposerGhostInput = {

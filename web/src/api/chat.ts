@@ -269,8 +269,14 @@ export function fetchSessionPromptSuggestion(
   );
 }
 
+export type SessionComposerStarter = {
+  heading: string;
+  command: string;
+};
+
 export type SessionComposerExampleResponse = {
   command: string | null;
+  starters?: SessionComposerStarter[];
 };
 
 /** Deterministic starter prompt derived from the project's frequently edited files. */
