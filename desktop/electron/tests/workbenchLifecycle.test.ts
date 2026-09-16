@@ -164,6 +164,10 @@ describe("runWorkbenchLifecycle command settlement evidence", () => {
       const settled = JSON.parse(readFileSync(intentPath, "utf8"));
       expect(settled.status).toBe("superseded");
       expect(String(settled.message || "")).toContain("stop");
+      // The settlement evidence write is fire-and-forget; let it land before
+      // the temp workspace is removed or Windows fails the recursive delete.
+      const resultPath = mainLineCommandResultPath(runtimeManagerDir, result.commandId || "");
+      await vi.waitFor(() => expect(existsSync(resultPath)).toBe(true));
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
