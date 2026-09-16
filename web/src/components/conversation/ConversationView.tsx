@@ -15,6 +15,7 @@ import {
   ExternalLink,
   FileText,
   Gauge,
+  GitFork,
   ImagePlus,
   Link2,
   LoaderCircle,
@@ -40,6 +41,7 @@ import { VStateSurface } from "../../components/vui";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { ConversationImageArtifactView } from "./ConversationImageArtifactView";
 import type { ConversationImagePreviewRequest } from "./ConversationImagePreviewDialog";
+import { ConversationForkSessionDialog } from "./ConversationForkSessionDialog";
 import { ConversationStreamingResponseContent } from "./ConversationStreamingResponseContent";
 import { ConversationTranscriptLoadingState } from "./ConversationTranscriptLoadingState";
 import { ConversationTurnAvatarContent } from "./ConversationTurnAvatarContent";
@@ -303,7 +305,10 @@ import {
   userAvatarSymbol,
   type TurnAvatarResolution,
 } from "./conversationTurnAvatar";
-import type { ConversationViewProps } from "./conversationViewTypes";
+import type {
+  ConversationForkScope,
+  ConversationViewProps,
+} from "./conversationViewTypes";
 import { AgentPermissionPresetControl } from "../vui/product/agent-management";
 import {
   buildComputerUseStateForMessage,
@@ -575,6 +580,7 @@ export function ConversationView({
   onRegenerateAssistantMessage,
   onSwitchMessageVersion,
   branchVersionSwitchDisabled,
+  onForkSessionFromNode,
   regenerableAssistantMessageId,
   regenerateDisabled,
   regeneratePending,
@@ -642,6 +648,10 @@ export function ConversationView({
   const [computerUseSessionPending, setComputerUseSessionPending] = useState<Record<string, "confirm" | "cancel" | undefined>>({});
   const [copiedAnswerMessageId, setCopiedAnswerMessageId] = useState("");
   const copyAnswerFeedbackTimerRef = useRef<number | null>(null);
+  /** Branch fork exit: dialog target message + copy scope (route executes the API call). */
+  const [forkDialogMessage, setForkDialogMessage] = useState<ConversationMessage | null>(null);
+  const [forkScope, setForkScope] = useState<ConversationForkScope>("visible_path");
+  const [forkPending, setForkPending] = useState(false);
   const resolvedActionMode = resolveComposerActionMode(composerActionMode);
   const composerPromptSuggestion = useComposerPromptSuggestion(
     {
@@ -4617,6 +4627,14 @@ export function ConversationView({
             );
             const siblingIndex = Number(branchInfo?.siblingIndex ?? 0) || 0;
             const currentNodeId = String(message.nodeId || "").trim();
+            // Fork exit: any settled journal node (user or assistant) can seed a
+            // new session; companion/private/group surfaces stay out of scope.
+            const canForkSessionFromMessage = Boolean(onForkSessionFromNode)
+              && !companionMode
+              && !agentInboxMessage
+              && !groupTranscriptMessage
+              && !assistantTurnIsStreaming(message)
+              && Boolean(currentNodeId);
             const showVersionSwitcher = Boolean(onSwitchMessageVersion)
               && siblingCount > 1
               && siblingNodeIds.length > 1
@@ -4838,6 +4856,20 @@ export function ConversationView({
                         aria-label={t("copyAnswer")}
                         isIconOnly
                         icon={copiedAnswerMessageId === message.id ? <Check size={14}/> : <Copy size={14}/>} />
+                    ) : null}
+                    {canForkSessionFromMessage ? (
+                      <VButton
+                        type="button"
+                        className={styles.turnIconButton}
+                        onClick={() => {
+                          setForkScope("visible_path");
+                          setForkDialogMessage(message);
+                        }}
+                        isDisabled={versionSwitchDisabled}
+                        title={t("forkSessionFromMessage")}
+                        aria-label={t("forkSessionFromMessage")}
+                        isIconOnly
+                        icon={<GitFork size={14}/>} />
                     ) : null}
                     {canRegenerateAnswer ? (
                       <VButton
@@ -5598,6 +5630,34 @@ export function ConversationView({
           <ConversationImagePreviewDialog image={previewImage} lang={lang} onClose={closeImagePreview} />
         </React.Suspense>
       ) : null}
+      <ConversationForkSessionDialog
+        open={Boolean(forkDialogMessage)}
+        scope={forkScope}
+        pending={forkPending}
+        labels={{
+          title: t("forkSessionDialogTitle"),
+          description: t("forkSessionDialogDescription"),
+          scopeLabel: t("forkSessionScopeLabel"),
+          scopeVisiblePath: t("forkSessionScopeVisiblePath"),
+          scopeWithBranches: t("forkSessionScopeWithBranches"),
+          confirm: t("forkSessionConfirm"),
+          pending: t("forkSessionPending"),
+          cancel: t("forkSessionCancel"),
+        }}
+        onScopeChange={setForkScope}
+        onConfirm={() => {
+          const message = forkDialogMessage;
+          if (!message || !onForkSessionFromNode || forkPending) {
+            return;
+          }
+          setForkPending(true);
+          void Promise.resolve(onForkSessionFromNode(message, forkScope))
+            .then(() => setForkDialogMessage(null))
+            .catch(() => undefined)
+            .finally(() => setForkPending(false));
+        }}
+        onCancel={() => setForkDialogMessage(null)}
+      />
     </div>
   );
 }

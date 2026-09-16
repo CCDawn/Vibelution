@@ -507,6 +507,25 @@ export function stopSessionTurn(sessionId: string, turnId: string): Promise<Sess
   });
 }
 
+// Branch feature fork exit: the server copies the journal path ending at the
+// node into a brand-new session and returns the new session detail. The source
+// session is never modified; a running source turn answers with 409.
+export function forkSessionFromNode(
+  sessionId: string,
+  payload: { nodeId: string; scope?: "visible_path" | "with_branches" },
+): Promise<SessionDetail> {
+  return fetchJson<SessionDetail>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/fork`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ nodeId: payload.nodeId, scope: payload.scope ?? "visible_path" }),
+    },
+  );
+}
+
 export function submitSessionGuidance(
   sessionId: string,
   payload: { content: string; mode: SessionGuidanceMode },

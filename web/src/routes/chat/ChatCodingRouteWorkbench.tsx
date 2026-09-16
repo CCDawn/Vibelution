@@ -36,7 +36,7 @@ import {
 } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
-import { listSessionChildSessions, fetchSessionLlmOptions, listPendingSessionToolApprovals } from "../../api/chat";
+import { forkSessionFromNode, listSessionChildSessions, fetchSessionLlmOptions, listPendingSessionToolApprovals } from "../../api/chat";
 import { archiveAgent, updateAgent } from "../../api/agents";
 import {
   listVirtualHumanCompanionActivity,
@@ -71,6 +71,7 @@ import {
   VirtualHumanCompanion,
 } from "../../api/types";
 import type { ConversationStreamingFramePaintMetrics } from "../../components/conversation/conversationStreamingMetrics";
+import type { ConversationForkScope } from "../../components/conversation/conversationViewTypes";
 import { shouldShowNextStateSignalInConversation } from "../../components/conversation/conversationNextStateSignal";
 import { VButton, VIconButton, VContextualHint, VInput, VNativeInput, VStateSurface, VTooltip, type VButtonProps } from "../../components/vui";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../../app/browserTelemetry";
@@ -2369,6 +2370,40 @@ export function ChatCodingRouteWorkbench() {
     setSessionImageAttachments((current) => clearSessionImageAttachments(current, activeSessionId));
   }, [activeAgentImageInputUnsupported, activeImageAttachments.length, activeSessionId]);
 
+  // Branch feature fork exit: ConversationView owns the scope dialog; this
+  // handler executes the fork, caches the returned detail, and navigates to
+  // the new session. Errors surface on the source session composer and keep
+  // the dialog open for retry.
+  const handleForkSessionFromNode = useCallback(
+    async (message: ConversationMessage, scope: ConversationForkScope) => {
+      const sourceSessionId = activeSessionId;
+      const nodeId = String(message.nodeId || "").trim();
+      if (!sourceSessionId || !nodeId) {
+        return;
+      }
+      try {
+        const nextDetail = await forkSessionFromNode(sourceSessionId, { nodeId, scope });
+        const nextId = String(nextDetail.id || "").trim();
+        if (!nextId) {
+          return;
+        }
+        queryClient.setQueryData(queryKeys.session(nextId), nextDetail);
+        updateSessionSummaryCaches(queryClient, (sessions) =>
+          mergeSessionDetailIntoSummaries(sessions, nextDetail),
+        );
+        syncSessionDetail(nextDetail);
+        openSession(nextId);
+      } catch (exc) {
+        setSessionComposerErrors((current) => ({
+          ...current,
+          [sourceSessionId]: `${t("forkSessionFailed")}: ${describeError(exc, lang === "zh" ? "分叉会话失败" : "Failed to fork session")}`,
+        }));
+        throw exc;
+      }
+    },
+    [activeSessionId, describeError, lang, openSession, queryClient, setSessionComposerErrors, syncSessionDetail, t],
+  );
+
 
   const {
     activeSurfaceTitle,
@@ -3415,6 +3450,7 @@ export function ChatCodingRouteWorkbench() {
                 onEditUserMessage: handleEditUserMessage,
                 onRegenerateAssistantMessage: handleRegenerateAssistantMessage,
                 onSwitchMessageVersion: handleSwitchMessageVersion,
+                onForkSessionFromNode: verifiedCompanionMode ? undefined : handleForkSessionFromNode,
                 branchVersionSwitchDisabled: (
                   sessionBusy
                   || (switchHeadMutation.isPending

@@ -302,3 +302,59 @@ composer 正文任意位置输入 `@` 时弹出的引用候选 listbox：按 `@`
 ### 反冗余
 - 不替代 `ConversationProcessDisclosure` 或 `ConversationFollowupQueueBar`。
 - 禁止再做第二套群聊卡片列表。
+
+## ConversationForkSessionDialog
+
+### 功能
+分支能力的 fork 出口：把一条消息及之前的活跃路径复制成一个新会话。确认弹窗承载范围选择（仅活跃路径 / 含沿途兄弟分支）与后果说明，确认后由路由层调用 fork API 并导航到新会话。
+
+### 适用范围
+适用：普通直连 Chat 会话时间线里任何带 `nodeId` 的已落库消息（用户消息或助手消息）。
+不适用：Companion 私聊、Agent inbox、群聊 transcript、流式中的消息（入口直接隐藏）；没有 journal 节点 id 的历史消息不可分叉。
+
+### 使用方式
+弹窗由 `ConversationView` 持有（组合，不新增导出组件）；路由经 `onForkSessionFromNode(message, scope)` 接管执行与导航。
+
+```tsx
+<VConfirmDialog
+  open
+  title={t("forkSessionDialogTitle")}
+  description={t("forkSessionDialogDescription")}
+  confirmLabel={t("forkSessionConfirm")}
+  onConfirm={() => onForkSessionFromNode(message, forkScope)}
+>
+  <VSelect
+    selectedKey={forkScope}
+    onSelectionChange={(key) => setForkScope(...)}
+    options={[
+      { id: "visible_path", label: t("forkSessionScopeVisiblePath") },
+      { id: "with_branches", label: t("forkSessionScopeWithBranches") },
+    ]}
+  />
+</VConfirmDialog>
+```
+
+| 槽位 | 说明 | 设计注意 |
+| --- | --- | --- |
+| 入口 | 消息 metaActions 里的 `GitFork` 图标按钮 | 与复制/重新生成同级，`turnIconButton` 样式；流式或版本切换禁用时禁用 |
+| 说明文案 | `forkSessionDialogDescription` | 必须写明「原会话保持不变」 |
+| 范围选择 | `VSelect` 两档 | 默认 `visible_path`；档位与后端 scope 一一对应 |
+| 确认/取消 | `VConfirmDialog` footer | 请求进行中显示 `forkSessionPending` 并禁用关闭；失败弹窗保持打开，错误落到源会话 composer |
+
+### 非职责
+- 不做 fork 后的会话树可视化、不内嵌新会话预览。
+- 不承担 API 调用与缓存更新（路由层职责）。
+- 不引入第二套确认弹窗壳（禁手写 fixed overlay）。
+
+### 视觉与状态
+- neutral tone `VConfirmDialog`；pending 时确认键文案切换为「分叉中」并禁用取消。
+- 失败静默留在弹窗内，源会话 composer 显示 `forkSessionFailed` 前缀错误。
+
+### 实现落点
+- 弹窗与入口：`web/src/components/conversation/ConversationView.tsx`（metaActions + 根部 `VConfirmDialog`）
+- 路由执行：`web/src/routes/chat/ChatCodingRouteWorkbench.tsx` `handleForkSessionFromNode`
+- API：`web/src/api/chat.ts` `forkSessionFromNode`
+
+### 反冗余
+- 复用 `VConfirmDialog` + `VSelect`，不新建 `V*` 导出组件。
+- 危险确认走 `VConfirmDialog` danger tone；本弹窗非破坏性（源会话只读），保持 neutral。

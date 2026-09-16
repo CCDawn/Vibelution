@@ -62,6 +62,7 @@ from core.web.services.session_service import (
     delete_chat_session,
     MAX_BULK_SESSION_IDS,
     edit_and_resubmit_session_message,
+    fork_session_from_node,
     get_active_session_summary,
     get_session_detail,
     get_session_llm_options,
@@ -202,6 +203,13 @@ class SessionHeadPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     nodeId: str = Field(min_length=1, max_length=200)
+
+
+class SessionForkPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    nodeId: str = Field(min_length=1, max_length=200)
+    scope: str = Field(default="visible_path", max_length=40)
 
 
 class SessionStopPayload(BaseModel):
@@ -802,6 +810,23 @@ def session_regenerate_message(session_id: str, payload: SessionMessageRegenerat
 def session_switch_head(session_id: str, payload: SessionHeadPayload) -> dict:
     try:
         return switch_session_head(session_id, payload.nodeId)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post(
+    "/sessions/{session_id}/fork",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SessionCatalogItem,
+    response_model_exclude_unset=True,
+)
+def session_fork_from_node(session_id: str, payload: SessionForkPayload) -> dict:
+    try:
+        return fork_session_from_node(session_id, payload.nodeId, scope=payload.scope)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SessionBusyError as exc:

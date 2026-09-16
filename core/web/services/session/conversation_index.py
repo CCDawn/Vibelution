@@ -1296,6 +1296,22 @@ def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
     return detail
 
 
+def _normalize_forked_from_metadata(raw: Any) -> dict[str, str] | None:
+    """Bound the session fork provenance record (no prompts, no free text)."""
+
+    if not isinstance(raw, dict):
+        return None
+    normalized = {
+        "sessionId": str(raw.get("sessionId") or "").strip()[:160],
+        "nodeId": str(raw.get("nodeId") or "").strip()[:200],
+        "scope": str(raw.get("scope") or "").strip()[:40],
+        "forkedAt": str(raw.get("forkedAt") or "").strip()[:40],
+    }
+    if not normalized["sessionId"] or not normalized["nodeId"]:
+        return None
+    return normalized
+
+
 def create_chat_session(
     *,
     title: str = "",
@@ -1306,6 +1322,7 @@ def create_chat_session(
     conversation_index_kind: str = agent_directory_service.CONVERSATION_INDEX_KIND_USER_CHAT,
     experiment_binding: dict[str, Any] | None = None,
     session_metadata: dict[str, Any] | None = None,
+    forked_from: dict[str, Any] | None = None,
     lightweight: bool = False,
     activate: bool = True,
 ) -> dict:
@@ -1455,6 +1472,9 @@ def create_chat_session(
         )
         if normalized_session_metadata:
             conversation["metadata"] = normalized_session_metadata
+        normalized_forked_from = _normalize_forked_from_metadata(forked_from)
+        if normalized_forked_from:
+            conversation["forkedFrom"] = normalized_forked_from
         if bound_agent is not None:
             conversation.update(
                 {

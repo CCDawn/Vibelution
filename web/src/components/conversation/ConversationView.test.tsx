@@ -110,6 +110,10 @@ function renderConversation(
     useDefaultProcessDisplayMode?: boolean;
     activeTurnMessage?: ConversationMessage;
     onSwitchMessageVersion?: (message: ConversationMessage, targetNodeId: string) => void;
+    onForkSessionFromNode?: (
+      message: ConversationMessage,
+      scope: "visible_path" | "with_branches",
+    ) => Promise<void> | void;
     onRegenerateAssistantMessage?: (message: ConversationMessage) => void;
     regenerateDisabled?: boolean;
     regeneratePending?: boolean;
@@ -184,6 +188,7 @@ function renderConversation(
         onCancelComposerMode={options.onCancelComposerMode}
         onEditUserMessage={() => undefined}
         onSwitchMessageVersion={options.onSwitchMessageVersion}
+        onForkSessionFromNode={options.onForkSessionFromNode}
         onRegenerateAssistantMessage={options.onRegenerateAssistantMessage}
         regenerateDisabled={options.regenerateDisabled}
         regeneratePending={options.regeneratePending}
@@ -1413,6 +1418,49 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     );
 
     expect(html).not.toContain('aria-label="上一版本"');
+  });
+
+  it("renders the fork-session entry for journal-backed messages when the route provides the handler", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-user-1",
+          role: "user",
+          content: "First prompt",
+          timestamp: "2026-05-22T00:00:00Z",
+          nodeId: "node-user-1",
+        },
+      ],
+      { onForkSessionFromNode: () => undefined },
+    );
+
+    expect(html).toContain('aria-label="从此轮分叉新会话"');
+  });
+
+  it("hides the fork-session entry without a route handler or journal node id", () => {
+    const withNodeButNoHandler = renderConversation([
+      {
+        id: "message-user-1",
+        role: "user",
+        content: "First prompt",
+        timestamp: "2026-05-22T00:00:00Z",
+        nodeId: "node-user-1",
+      },
+    ]);
+    expect(withNodeButNoHandler).not.toContain('aria-label="从此轮分叉新会话"');
+
+    const withHandlerButNoNode = renderConversation(
+      [
+        {
+          id: "message-user-1",
+          role: "user",
+          content: "First prompt",
+          timestamp: "2026-05-22T00:00:00Z",
+        },
+      ],
+      { onForkSessionFromNode: () => undefined },
+    );
+    expect(withHandlerButNoNode).not.toContain('aria-label="从此轮分叉新会话"');
   });
 
   it("renders running-turn steer records without an edit control", () => {

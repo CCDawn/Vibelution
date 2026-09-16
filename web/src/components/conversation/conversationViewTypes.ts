@@ -17,6 +17,9 @@ import type { ComposerContextRingModel } from "../../routes/chat/composerContext
 
 export type ConversationProcessDisplayMode = "answer" | "trace";
 
+import type { ConversationForkScope } from "./ConversationForkSessionDialog";
+export type { ConversationForkScope };
+
 export type ConversationComposerAttachment = {
   id: string;
   filename: string;
@@ -164,6 +167,15 @@ export type ConversationViewProps = {
   onRegenerateAssistantMessage?: (message: ConversationMessage) => void;
   onSwitchMessageVersion?: (message: ConversationMessage, targetNodeId: string) => void;
   branchVersionSwitchDisabled?: boolean;
+  /**
+   * Branch feature fork exit: opens the route-owned fork flow for one journal
+   * node. ConversationView owns the scope dialog; the route executes the API
+   * call and navigates to the new session.
+   */
+  onForkSessionFromNode?: (
+    message: ConversationMessage,
+    scope: ConversationForkScope,
+  ) => Promise<void> | void;
   regenerableAssistantMessageId?: string;
   regenerateDisabled?: boolean;
   regeneratePending?: boolean;

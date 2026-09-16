@@ -32,6 +32,7 @@ FORBIDDEN_UI_TOOL_CALLS_ERROR = "ui_tool_calls_field"
 LEDGER_REWRITE_EXCEPTION_OWNERS = (
     "chat_room_service group transcript cleanup",
     "maintenance_reset._execute_chat_history",
+    "session_fork one-time journal seed of a new session",
 )
 
 
