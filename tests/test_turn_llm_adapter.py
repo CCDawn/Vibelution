@@ -82,7 +82,7 @@ def test_adapter_routes_network_calls_through_injected_invocation():
         def effective_route_id(self):
             return "primary-route"
 
-        def project_outcome_message(self, outcome):
+        def project_outcome_message(self, outcome, **_kwargs):
             return AIMessage(content=outcome.final_text)
 
         def invoke_outcome(self, *_args, **_kwargs):
@@ -137,7 +137,7 @@ def test_adapter_fails_route_without_switching_profiles_on_retryable_error():
         def effective_route_id(self):
             return "primary-route"
 
-        def project_outcome_message(self, outcome):
+        def project_outcome_message(self, outcome, **_kwargs):
             return AIMessage(content=outcome.final_text)
 
     def invoke_outcome(client, _messages, **_kwargs):
@@ -318,7 +318,7 @@ def _route_llm(profile_id: str, *, identity=None, route_id=None, fallback: str =
         def effective_route_id(self):
             return route_id or f"{profile_id}-route"
 
-        def project_outcome_message(self, outcome):
+        def project_outcome_message(self, outcome, **_kwargs):
             return AIMessage(content=outcome.final_text)
 
     return RouteLLM()
