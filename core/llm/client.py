@@ -1066,7 +1066,10 @@ def _trace_metadata_with_context(
 
 def _retry_policy_max_attempts(profile: Any, *, role: str = "") -> int:
     if str(role or "").strip().lower() == "compression":
-        return 1
+        # 压缩是 context_length_error 的唯一恢复路径（agent 侧发起压缩）：
+        # 一次瞬态网络/网关错误就放弃会让主路由本已超限的回合必败。仍保持
+        # 有界快速失败（3 < 普通角色的 5 上限），只容忍瞬态抖动。
+        return 3
     retry_policy = getattr(profile, "retry_policy", None)
     try:
         return max(1, min(5, int(getattr(retry_policy, "max_attempts", 5) or 5)))
