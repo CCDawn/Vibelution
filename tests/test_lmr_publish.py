@@ -308,6 +308,61 @@ def test_dry_run_previews_without_pushing(
     assert _read_record(repo, "lmr-preview")["publishState"] == "pending_publish"
 
 
+def test_core_ledger_timestamp_aliases_drive_threshold(
+    publish_repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Core ledger writes ``created``/``updated``; aging must honor them.
+
+    Regression: with these aliases missing, a single fresh core-format record
+    read as ageless and triggered an immediate publish instead of waiting for
+    the batch/age thresholds.
+    """
+
+    repo = publish_repo
+    origin = repo.parent / "origin.git"
+    before = _origin_tip(origin)
+
+    def write_core_record(record_id: str, created: datetime) -> str:
+        sha = _commit_file(repo, f"{record_id}.txt", "data\n", record_id)
+        payload = {
+            "id": record_id,
+            "branch": f"codex/{record_id}",
+            "state": "merged",
+            "publishState": "pending_publish",
+            "headSha": sha,
+            "created": _iso(created),
+            "updated": _iso(created),
+        }
+        path = _ledger_dir(repo) / f"{record_id}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+        return sha
+
+    write_core_record("lmr-core-fresh", datetime.now(timezone.utc))
+
+    exit_code, payload, _ = _run(repo, capsys)
+
+    assert exit_code == 0
+    assert payload["action"] == "skip"
+    assert payload["trigger"] == "below_threshold"
+    assert _origin_tip(origin) == before
+    assert _read_record(repo, "lmr-core-fresh")["publishState"] == "pending_publish"
+
+    old_sha = write_core_record(
+        "lmr-core-old", datetime.now(timezone.utc) - timedelta(minutes=31)
+    )
+
+    exit_code, payload, _ = _run(repo, capsys)
+
+    assert exit_code == 0
+    assert payload["action"] == "publish"
+    assert payload["trigger"] == "oldest_age"
+    assert _origin_tip(origin) == old_sha
+    assert _read_record(repo, "lmr-core-fresh")["publishState"] == "published"
+    assert _read_record(repo, "lmr-core-old")["publishState"] == "published"
+
+
 def test_malformed_and_headless_records_are_tolerated(
     publish_repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

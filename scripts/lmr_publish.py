@@ -33,7 +33,10 @@ Design authority: ``docs/agents/pr-integration-workflow.md`` §13.3 / §14.2-5.
     ``createdAt``); unknown fields are preserved on rewrite;
   * tolerant aliases are accepted for the critical fields (``status`` ~
     ``state``, ``publish_state`` ~ ``publishState``, ``head_sha`` / ``sha``
-    / ``head`` ~ ``headSha``) so either spelling integrates;
+    / ``head`` ~ ``headSha``, timestamps: ``merged_at`` ~ ``mergedAt``,
+    ``updated_at`` / ``updated`` ~ ``updatedAt``, ``created_at`` /
+    ``created`` ~ ``createdAt`` — the core ledger writes ``created`` /
+    ``updated``) so either spelling integrates;
   * scans are fault tolerant: a missing directory or malformed files are
     skipped and reported, never fatal (§14.2-1: per-record files, atomic
     temp + ``os.replace`` writes, no global lock).
@@ -82,8 +85,8 @@ HEAD_SHA_KEYS = ("headSha", "head_sha", "sha", "head")
 BRANCH_KEYS = ("branch",)
 ID_KEYS = ("id", "lmrId", "lmr_id")
 MERGED_AT_KEYS = ("mergedAt", "merged_at")
-UPDATED_AT_KEYS = ("updatedAt", "updated_at")
-CREATED_AT_KEYS = ("createdAt", "created_at")
+UPDATED_AT_KEYS = ("updatedAt", "updated_at", "updated")
+CREATED_AT_KEYS = ("createdAt", "created_at", "created")
 
 ENV_BATCH_THRESHOLD = "LMR_PUBLISH_BATCH_THRESHOLD"
 ENV_AGE_THRESHOLD_MINUTES = "LMR_PUBLISH_AGE_THRESHOLD_MINUTES"
@@ -231,9 +234,10 @@ def parse_utc(value: object) -> datetime | None:
 
 def _first_timestamp(payload: Mapping[str, object]) -> datetime | None:
     for keys in (MERGED_AT_KEYS, UPDATED_AT_KEYS, CREATED_AT_KEYS):
-        moment = parse_utc(payload.get(keys[0]))
-        if moment is not None:
-            return moment
+        for key in keys:
+            moment = parse_utc(payload.get(key))
+            if moment is not None:
+                return moment
     return None
 
 
