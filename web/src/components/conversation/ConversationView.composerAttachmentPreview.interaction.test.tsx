@@ -90,7 +90,13 @@ describe("composer image attachment preview", () => {
     await act(async () => {
       thumbnail?.click();
     });
-    await flush();
+    // The dialog module is loaded lazily; poll instead of assuming a fixed
+    // number of macrotask ticks so a cold transform cache cannot flake this.
+    let dialogOpened = false;
+    for (let attempt = 0; attempt < 40 && !dialogOpened; attempt += 1) {
+      await flush();
+      dialogOpened = document.body.textContent?.includes("下载图片") ?? false;
+    }
 
     expect(document.body.textContent).toContain("下载图片");
   });
