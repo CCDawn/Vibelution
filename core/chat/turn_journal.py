@@ -1031,6 +1031,12 @@ def _canonical_item_payload(protocol_event: Any, *, outcome: Any) -> dict[str, A
         "toolName": tool_name,
         "diagnosticSummary": diagnostic_summary,
     }
+    input_text = str(getattr(protocol_event, "input", "") or "").strip()
+    if input_text:
+        payload["input"] = input_text
+    output_text = str(getattr(protocol_event, "output", "") or "").strip()
+    if output_text:
+        payload["output"] = output_text
     # Provider receipts are audit/business evidence, not conversation state.
     # Challenge-scoped callers persist them through the existing receipt
     # registry before this canonical conversation item is appended.  Legacy
