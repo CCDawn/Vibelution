@@ -137,26 +137,16 @@ export function buildTurnErrorDiagnosticRows(
   ].filter(isTurnErrorDiagnosticRow);
 }
 
-export function formatTurnErrorRetrySummary(
-  turnError: SessionTurnError,
-  lang: ConversationLanguage,
-): string {
+function turnErrorRetryAttempts(turnError: SessionTurnError): number {
   const history = Array.isArray(turnError.retryHistory) ? turnError.retryHistory : [];
-  const finalAttempt = history.reduce((max, entry) => Math.max(max, Number(entry?.attempt) || 0), 0);
-  if (finalAttempt <= 0) {
-    return "";
-  }
-  return turnErrorLabel(
-    lang,
-    `已重试 ${finalAttempt} 次`,
-    finalAttempt === 1 ? "Retried once" : `Retried ${finalAttempt} times`,
-  );
+  return history.reduce((max, entry) => Math.max(max, Number(entry?.attempt) || 0), 0);
 }
 
 export function buildCurrentTurnErrorRows(
   turnError: SessionTurnError,
   lang: ConversationLanguage,
 ): TurnErrorDiagnosticRow[] {
+  const retryAttempts = turnErrorRetryAttempts(turnError);
   return [
     turnError.httpStatus ? { label: turnErrorLabel(lang, "状态码", "Status"), value: String(turnError.httpStatus) } : null,
     turnError.reasonSummary ? { label: turnErrorLabel(lang, "原因", "Reason"), value: turnError.reasonSummary } : null,
@@ -168,6 +158,7 @@ export function buildCurrentTurnErrorRows(
     turnError.provider || turnError.providerHost ? { label: turnErrorLabel(lang, "通道", "Provider"), value: [turnError.provider, turnError.providerHost].filter(Boolean).join(" · ") } : null,
     turnError.model ? { label: turnErrorLabel(lang, "模型", "Model"), value: turnError.model } : null,
     turnError.reasonCode ? { label: turnErrorLabel(lang, "代码", "Code"), value: turnError.reasonCode } : null,
+    retryAttempts > 0 ? { label: turnErrorLabel(lang, "重试", "Retries"), value: turnErrorLabel(lang, `${retryAttempts} 次`, String(retryAttempts)) } : null,
     turnError.traceId ? { label: "Trace", value: turnError.traceId } : null,
   ].filter(isTurnErrorDiagnosticRow);
 }
@@ -176,9 +167,9 @@ export function summarizeCurrentTurnError(
   turnError: SessionTurnError,
   lang: ConversationLanguage,
 ) {
-  const retrySummary = formatTurnErrorRetrySummary(turnError, lang);
-  const summary = resolveTurnErrorSummaryText(turnError, lang);
-  return retrySummary ? `${summary} · ${retrySummary}` : summary;
+  // Codex keeps the settled failure to one plain line. The retry count lives
+  // in the collapsed diagnostics instead of the summary.
+  return resolveTurnErrorSummaryText(turnError, lang);
 }
 
 function resolveTurnErrorSummaryText(

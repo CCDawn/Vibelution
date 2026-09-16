@@ -19,6 +19,8 @@ import {
   ComposerContextRing,
   ComposerContextRingPanel,
 } from "../../../components/conversation/ComposerContextRing";
+import { ConversationActiveTurnStatusNote } from "../../../components/conversation/ConversationActiveTurnStatusNote";
+import type { ActiveTurnStatusMessageLike } from "../../../components/conversation/conversationActiveTurnStatusPresentation";
 import type { ComposerContextRingModel } from "../../../routes/chat/composerContextModel";
 import { VuiPreviewCard } from "../VuiPreviewCard";
 import { VuiPreviewSection } from "../VuiPreviewSection";
@@ -80,6 +82,28 @@ const composerContextRingPreviewModel: ComposerContextRingModel = {
   detailAvailable: true,
 };
 
+const activeTurnRetryPreviewMessage: ActiveTurnStatusMessageLike & { timestamp: string } = {
+  timestamp: new Date(Date.now() - 5_000).toISOString(),
+  status: "running",
+  turnItems: [
+    {
+      id: "retry-preview-1",
+      itemId: "request-preview-1",
+      version: 3,
+      sessionId: "preview-session",
+      turnId: "preview-turn",
+      type: "retry",
+      status: "running",
+      revision: 1,
+      sequence: 1,
+      attempt: 2,
+      targetItemId: "request-preview-1",
+      reason: "模型连接正在重试…\n第 2/5 次；原因：server_error。",
+      metadata: { maxAttempts: 5 },
+    },
+  ],
+};
+
 export function StructureCatalog() {
   return (
     <VuiPreviewSection title="Structure">
@@ -131,6 +155,11 @@ export function StructureCatalog() {
           <div className="w-full max-w-[324px] rounded-[12px] border border-vui-border-subtle bg-vui-surface-row p-3">
             <ComposerContextRingPanel model={composerContextRingPreviewModel} lang="zh" />
           </div>
+        </div>
+      </VuiPreviewCard>
+      <VuiPreviewCard name="ConversationActiveTurnStatusNote" className="col-span-full min-h-0">
+        <div className="w-full max-w-[520px] rounded-[12px] border border-vui-border-subtle bg-vui-surface-panel p-3">
+          <ConversationActiveTurnStatusNote lang="zh" message={activeTurnRetryPreviewMessage} />
         </div>
       </VuiPreviewCard>
       <VuiPreviewCard name="VEntityList" className="min-h-0">

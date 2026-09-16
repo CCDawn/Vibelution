@@ -14,13 +14,12 @@ import os
 import re
 import shutil
 import stat
-import tempfile
 import threading
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from core.infrastructure.atomic_io import atomic_write_json
 from ..agent_config_authority import (
     AGENT_CONFIG_SCHEMA_VERSION,
     materialize_agent_config_identity,
@@ -141,38 +140,34 @@ def _agent_workspace_relative_path(agent_id: str) -> str:
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     s = _service()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_path = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    attempts = {"count": 0}
+
+    def _on_retry(attempt: int, _error_type: str) -> None:
+        attempts["count"] = attempt
+
     try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
-        deadline = time.monotonic() + s.WRITE_RETRY_TIMEOUT_SECONDS
-        attempt = 0
-        while True:
-            try:
-                os.replace(temp_path, path)
-                if attempt:
-                    s._record_state_write_event(
-                        "agent_directory.state_write_retried",
-                        level="warning",
-                        outcome="recovered",
-                        fields={"attempts": attempt, "pathName": path.name},
-                    )
-                return
-            except PermissionError as exc:
-                attempt += 1
-                if time.monotonic() >= deadline:
-                    s._record_state_write_event(
-                        "agent_directory.state_write_failed",
-                        level="error",
-                        outcome="failed",
-                        fields={"attempts": attempt, "pathName": path.name, "errorType": type(exc).__name__},
-                    )
-                    raise
-                time.sleep(min(0.05 * attempt, 0.25))
-    finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+        atomic_write_json(
+            path,
+            payload,
+            retry_timeout_seconds=s.WRITE_RETRY_TIMEOUT_SECONDS,
+            on_retry=_on_retry,
+            strict_replace=True,
+        )
+    except OSError as exc:
+        s._record_state_write_event(
+            "agent_directory.state_write_failed",
+            level="error",
+            outcome="failed",
+            fields={"attempts": max(1, attempts["count"]), "pathName": path.name, "errorType": type(exc).__name__},
+        )
+        raise
+    if attempts["count"]:
+        s._record_state_write_event(
+            "agent_directory.state_write_retried",
+            level="warning",
+            outcome="recovered",
+            fields={"attempts": attempts["count"], "pathName": path.name},
+        )
 
 
 def _build_agent_registry_payload_for_storage(state: dict[str, Any]) -> dict[str, Any]:

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from core.infrastructure.atomic_io import atomic_write_json
 
 
 CHAT_ROOM_STATE_VERSION = 1
@@ -149,33 +149,30 @@ def _record_store_event(event_code: str, *, fields: dict[str, Any], level: str) 
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_path = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    attempts = {"count": 0}
+
+    def _on_retry(attempt: int, _error_type: str) -> None:
+        attempts["count"] = attempt
+
     try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
-        deadline = time.monotonic() + WRITE_RETRY_TIMEOUT_SECONDS
-        attempt = 0
-        while True:
-            try:
-                os.replace(temp_path, path)
-                break
-            except PermissionError:
-                attempt += 1
-                if time.monotonic() >= deadline:
-                    # Never drop a terminal state silently: surface the
-                    # failure so callers (e.g. round finalizers) keep their
-                    # in-memory control records and can retry.
-                    _record_store_event(
-                        "chat_room.store.write_failed",
-                        fields={
-                            "path": str(path),
-                            "attempts": attempt,
-                            "retryTimeoutSeconds": WRITE_RETRY_TIMEOUT_SECONDS,
-                        },
-                        level="warning",
-                    )
-                    raise
-                time.sleep(min(0.05 * attempt, 0.25))
-    finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+        atomic_write_json(
+            path,
+            payload,
+            retry_timeout_seconds=WRITE_RETRY_TIMEOUT_SECONDS,
+            on_retry=_on_retry,
+            strict_replace=True,
+        )
+    except OSError:
+        # Never drop a terminal state silently: surface the
+        # failure so callers (e.g. round finalizers) keep their
+        # in-memory control records and can retry.
+        _record_store_event(
+            "chat_room.store.write_failed",
+            fields={
+                "path": str(path),
+                "attempts": max(1, attempts["count"]),
+                "retryTimeoutSeconds": WRITE_RETRY_TIMEOUT_SECONDS,
+            },
+            level="warning",
+        )
+        raise

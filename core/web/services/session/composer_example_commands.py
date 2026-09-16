@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Deterministic starter example for the empty composer.
+"""Deterministic starter examples for the empty composer.
 
 Port of Claude Code's ``exampleCommands.ts``: pick up to five frequently
 modified core files from git history (preferring the operator's own commits),
-cache them per project for a week, and sample one short starter command. The
-helper never opens a console window: all git access goes through the shared
-no-console git runner.
+cache them per project for a week, and sample short starter commands for the
+empty-composer cards. The helper never opens a console window: all git access
+goes through the shared no-console git runner.
 """
 
 from __future__ import annotations
@@ -54,19 +54,23 @@ NON_CORE_PATTERNS = (
     ),
 )
 
-_EXAMPLE_TEMPLATES = (
-    "修复 lint 报错",
-    "修复类型检查报错",
-    "{file} 是怎么工作的？",
-    "重构 {file}",
-    "怎么记录错误日志？",
-    "改一下 {file}，让它……",
-    "给 {file} 写个测试",
-    "创建一个工具函数，用于……",
+# (heading, template) pairs: the heading labels the starter card, the template
+# renders the command prefilled into the composer.
+_EXAMPLE_STARTERS: tuple[tuple[str, str], ...] = (
+    ("修复问题", "修复 lint 报错"),
+    ("修复问题", "修复类型检查报错"),
+    ("理解代码", "{file} 是怎么工作的？"),
+    ("重构改进", "重构 {file}"),
+    ("工程实践", "怎么记录错误日志？"),
+    ("迭代开发", "改一下 {file}，让它……"),
+    ("编写测试", "给 {file} 写个测试"),
+    ("从头创建", "创建一个工具函数，用于……"),
 )
 
+_DEFAULT_STARTER_COUNT = 3
+
 _CACHE_LOCK = threading.RLock()
-_CACHE: dict[str, tuple[float, str]] = {}
+_CACHE: dict[str, tuple[float, list[dict[str, str]]]] = {}
 
 
 def _is_core_file(path: str) -> bool:
@@ -147,37 +151,105 @@ def frequently_modified_core_files(project_root: Path) -> list[str]:
     return pick_diverse_core_files(sorted_paths, _MAX_EXAMPLE_FILES)
 
 
+def _render_starter_command(template: str, file_name: str) -> str:
+    if "{file}" not in template:
+        return template
+    if not file_name:
+        return "修复 lint 报错"
+    return template.format(file=file_name)
+
+
 def build_example_command(files: list[str]) -> str:
-    template = random.choice(_EXAMPLE_TEMPLATES)
+    _heading, template = random.choice(_EXAMPLE_STARTERS)
     file_name = random.choice(files) if files else ""
-    if "{file}" in template:
-        if not file_name:
-            return "修复 lint 报错"
-        return template.format(file=file_name)
-    return template
+    return _render_starter_command(template, file_name)
 
 
-def get_composer_example_command(project_root: Path | str | None = None) -> str | None:
-    """Return one cached starter command for the project, or None when unavailable."""
+def build_example_starters(
+    files: list[str],
+    want: int = _DEFAULT_STARTER_COUNT,
+) -> list[dict[str, str]]:
+    """Build up to ``want`` distinct heading+command starter cards.
+
+    Spreads headings first (no two cards with the same label while fresh ones
+    remain) and never reuses a file or an identical command across cards.
+    """
+
+    if want <= 0:
+        return []
+    templates = list(_EXAMPLE_STARTERS)
+    random.shuffle(templates)
+    file_pool = [name for name in (str(item or "").strip() for item in files) if name]
+    random.shuffle(file_pool)
+    starters: list[dict[str, str]] = []
+    used_files: set[str] = set()
+    used_commands: set[str] = set()
+    # Pass 1 prefers unique headings; pass 2 relaxes the cap so ``want`` is met.
+    for heading_cap in (1, max(1, want)):
+        if len(starters) >= want:
+            break
+        heading_tally: dict[str, int] = {}
+        file_index = 0
+        for heading, template in templates:
+            if len(starters) >= want:
+                break
+            if heading_tally.get(heading, 0) >= heading_cap:
+                continue
+            file_name = ""
+            if "{file}" in template:
+                while file_index < len(file_pool):
+                    candidate = file_pool[file_index]
+                    file_index += 1
+                    if candidate not in used_files:
+                        file_name = candidate
+                        break
+                if not file_name:
+                    # No fresh file left for a file-backed template; skip it so
+                    # cards never repeat the same filler command.
+                    continue
+            command = _render_starter_command(template, file_name)
+            if command in used_commands:
+                continue
+            starters.append({"heading": heading, "command": command})
+            used_commands.add(command)
+            if file_name:
+                used_files.add(file_name)
+            heading_tally[heading] = heading_tally.get(heading, 0) + 1
+    return starters
+
+
+def get_composer_starter_commands(
+    project_root: Path | str | None = None,
+    want: int = _DEFAULT_STARTER_COUNT,
+) -> list[dict[str, str]]:
+    """Return cached starter cards for the project (may be empty)."""
 
     root = Path(project_root).resolve() if project_root else None
     if root is None:
-        return None
+        return []
     cache_key = str(root)
     now = time.time()
     with _CACHE_LOCK:
         cached = _CACHE.get(cache_key)
         if cached is not None:
-            computed_at, command = cached
-            ttl = _EXAMPLE_TTL_SECONDS if command else _FAILURE_TTL_SECONDS
+            computed_at, starters = cached
+            ttl = _EXAMPLE_TTL_SECONDS if starters else _FAILURE_TTL_SECONDS
             if now - computed_at <= ttl:
-                return command or None
-    command = ""
+                return starters[: max(0, want)]
+    starters: list[dict[str, str]] = []
     if root.is_dir():
         files = frequently_modified_core_files(root)
-        command = build_example_command(files)
+        starters = build_example_starters(files)
     with _CACHE_LOCK:
-        _CACHE[cache_key] = (now, command)
+        _CACHE[cache_key] = (now, starters)
+    return starters[: max(0, want)]
+
+
+def get_composer_example_command(project_root: Path | str | None = None) -> str | None:
+    """Return one cached starter command for the project, or None when unavailable."""
+
+    starters = get_composer_starter_commands(project_root, want=1)
+    command = starters[0]["command"] if starters else ""
     return command or None
 
 
@@ -188,8 +260,10 @@ def reset_composer_example_cache() -> None:
 
 __all__ = [
     "build_example_command",
+    "build_example_starters",
     "frequently_modified_core_files",
     "get_composer_example_command",
+    "get_composer_starter_commands",
     "pick_diverse_core_files",
     "reset_composer_example_cache",
 ]

@@ -5,17 +5,21 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-import threading
 import time
+from collections.abc import Callable
 from os import PathLike
 from pathlib import Path
 from typing import Any
+
+from core.infrastructure.file_lock import (
+    DEFAULT_LOCK_TIMEOUT_SECONDS,
+    cross_process_file_lock,
+)
 
 
 DEFAULT_RETRY_TIMEOUT_SECONDS = 5.0
 DEFAULT_FALLBACK_TIMEOUT_SECONDS = 5.0
 _DEFAULT_RETRY_DELAY_BASE_SECONDS = 0.05
-_WRITE_LOCK = threading.Lock()
 
 
 def atomic_write_text(
@@ -24,23 +28,37 @@ def atomic_write_text(
     *,
     retry_timeout_seconds: float = DEFAULT_RETRY_TIMEOUT_SECONDS,
     fallback_timeout_seconds: float = DEFAULT_FALLBACK_TIMEOUT_SECONDS,
+    lock_timeout_seconds: float | None = DEFAULT_LOCK_TIMEOUT_SECONDS,
     ensure_parent_dir: bool = True,
     ensure_fsync: bool = True,
+    on_retry: Callable[[int, str], None] | None = None,
+    strict_replace: bool = False,
 ) -> None:
     """Write text via temp-file replace, with Windows-friendly lock retries.
 
+    Writers are serialized per target file across threads and processes via a
+    ``<target>.lock`` sidecar; the lock granularity is exactly one file, so
+    unrelated writes never contend. Within that lock, a blocked replacement is
+    retried for ``retry_timeout_seconds`` (readers that opened the target
+    before the write do not take the lock, so ``PermissionError`` can still
+    surface transiently on Windows).
+
     If temp-file creation or final replacement stays blocked, this falls back to
-    an in-place write. That fallback is intentionally narrow: it prevents data
-    loss during local disk or antivirus races, while callers that need strict
-    all-or-nothing semantics should keep their own stricter helper.
+    an in-place write unless ``strict_replace`` is set. That fallback is
+    intentionally narrow: it prevents data loss during local disk or antivirus
+    races, while callers that need strict all-or-nothing semantics (for example
+    terminal room state) should keep ``strict_replace=True`` so a blocked
+    replace surfaces as an error instead of a truncated in-place write.
     """
 
     target = Path(path)
     if ensure_parent_dir:
         target.parent.mkdir(parents=True, exist_ok=True)
-    with _WRITE_LOCK:
+    with cross_process_file_lock(target, timeout=lock_timeout_seconds):
         temp_path = _write_temp_file(target, text, ensure_fsync=ensure_fsync)
         if temp_path is None:
+            if strict_replace:
+                raise OSError(f"Unable to write temp file for {target}")
             _retry_in_place_write(target, text, timeout_seconds=fallback_timeout_seconds)
             return
         try:
@@ -49,8 +67,11 @@ def atomic_write_text(
                     target,
                     temp_path,
                     timeout_seconds=retry_timeout_seconds,
+                    on_retry=on_retry,
                 )
             except OSError:
+                if strict_replace:
+                    raise
                 _retry_in_place_write(target, text, timeout_seconds=fallback_timeout_seconds)
             if ensure_fsync:
                 _fsync_parent_dir(target.parent)
@@ -106,7 +127,13 @@ def _write_temp_file(target: Path, text: str, *, ensure_fsync: bool) -> Path | N
         return None
 
 
-def _replace_with_retry(target: Path, temp_path: Path, *, timeout_seconds: float) -> None:
+def _replace_with_retry(
+    target: Path,
+    temp_path: Path,
+    *,
+    timeout_seconds: float,
+    on_retry: Callable[[int, str], None] | None = None,
+) -> None:
     deadline = time.monotonic() + max(0.0, timeout_seconds)
     attempt = 0
     last_error: PermissionError | None = None
@@ -117,6 +144,11 @@ def _replace_with_retry(target: Path, temp_path: Path, *, timeout_seconds: float
         except PermissionError as exc:
             last_error = exc
             attempt += 1
+            if on_retry is not None:
+                try:
+                    on_retry(attempt, type(exc).__name__)
+                except Exception:
+                    pass
             if time.monotonic() >= deadline:
                 break
             time.sleep(_retry_delay(attempt))
