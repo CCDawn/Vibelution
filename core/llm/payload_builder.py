@@ -148,6 +148,88 @@ def prompt_cache_partition_scope(value: str) -> Iterator[None]:
         reset_prompt_cache_partition(token)
 
 
+_HEADER_IDENTITY_TEMPLATE_PLACEHOLDERS = frozenset({"session_id", "agent_id"})
+_HEADER_TEMPLATE_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+# 由上层 invocation 包装器在拥有 session/agent 身份时设置，让 provider
+# extra_headers 中的 {session_id} / {agent_id} 占位符在请求构建时按当前
+# 会话身份解析（同一会话多次调用得到同一值）。未设置或身份为空时，含
+# 占位符的 header 整体丢弃：绝不外发字面量占位符，也绝不回退到 per-request
+# 漂移值（如 invocation_id）。
+_invocation_header_identity: ContextVar[Dict[str, str]] = ContextVar(
+    "vibelution_invocation_header_identity", default={}
+)
+
+
+def set_invocation_header_identity(*, session_id: str = "", agent_id: str = ""):
+    """设置当前上下文的 header 身份字段，返回 Token 供 reset。"""
+    return _invocation_header_identity.set(
+        {
+            "session_id": str(session_id or "").strip(),
+            "agent_id": str(agent_id or "").strip(),
+        }
+    )
+
+
+def reset_invocation_header_identity(token) -> None:
+    """重置 header 身份上下文到 set_invocation_header_identity 返回的快照。"""
+    _invocation_header_identity.reset(token)
+
+
+@contextlib.contextmanager
+def invocation_header_identity_scope(*, session_id: str = "", agent_id: str = "") -> Iterator[None]:
+    """ContextManager 包装 header 身份上下文；空值也显式设置，避免嵌套调用泄漏外层身份。"""
+    token = set_invocation_header_identity(session_id=session_id, agent_id=agent_id)
+    try:
+        yield
+    finally:
+        reset_invocation_header_identity(token)
+
+
+def _resolve_header_template_value(value: str, identity: Dict[str, str]) -> str | None:
+    """解析单个 header 值中的身份占位符；无法安全解析时返回 None（该 header 丢弃）。"""
+    matches = _HEADER_TEMPLATE_PLACEHOLDER_RE.findall(value)
+    if not matches:
+        return value
+    if any(name not in _HEADER_IDENTITY_TEMPLATE_PLACEHOLDERS for name in matches):
+        return None
+    resolved_parts: Dict[str, str] = {}
+    for name in matches:
+        part = str(identity.get(name, "") or "").strip()
+        if not part:
+            return None
+        resolved_parts[name] = part
+    try:
+        resolved = value.format_map(resolved_parts)
+    except (KeyError, IndexError, ValueError):
+        return None
+    if not resolved or len(resolved) > 512 or "\r" in resolved or "\n" in resolved or "\x00" in resolved:
+        return None
+    return resolved
+
+
+def resolve_extra_header_identity_templates(headers: Any) -> Dict[str, str]:
+    """按当前调用身份解析 extra_headers 值中的 {session_id}/{agent_id} 占位符。
+
+    - 值不含占位符 → 原样透传（存量配置零差异）；
+    - 值含占位符且身份字段非空 → 解析替换（解析后仍保持 ≤512 字符且无换行）；
+    - 未知占位符、身份字段为空或解析结果非法 → 整个 header 丢弃（fail-safe）。
+    """
+    source = dict(headers or {})
+    if not source:
+        return {}
+    if not any("{" in str(value) for value in source.values()):
+        return source
+    identity = dict(_invocation_header_identity.get() or {})
+    resolved: Dict[str, str] = {}
+    for name, raw_value in source.items():
+        value = _resolve_header_template_value(str(raw_value), identity)
+        if value is None:
+            continue
+        resolved[name] = value
+    return resolved
+
+
 def _default_prompt_cache_key(build_input: PayloadBuildInput) -> str:
     provider_kind = str(getattr(build_input.provider, "kind", "") or "provider").strip().lower()
     profile_id = str(build_input.profile_id or "profile").strip().lower()
@@ -1169,7 +1251,7 @@ def build_llm_payload(
             payload["prompt_cache_retention"] = prompt_cache_retention
     if build_input.stream and adapter.supports_stream_usage_options() and route.compat.stream_usage_options:
         payload["stream_options"] = {"include_usage": True}
-    headers = build_input.provider.extra_headers or {}
+    headers = resolve_extra_header_identity_templates(build_input.provider.extra_headers)
     if headers:
         payload["extra_headers"] = headers
     if selected_tools:
@@ -1324,7 +1406,7 @@ def compose_runtime_wire_payload(
     if build_input.stream and adapter.supports_stream_usage_options() and route.compat.stream_usage_options:
         payload["stream_options"] = {"include_usage": True}
     headers = dict(wire_payload.headers)
-    headers.update(build_input.provider.extra_headers or {})
+    headers.update(resolve_extra_header_identity_templates(build_input.provider.extra_headers))
     if headers:
         payload["extra_headers"] = headers
 
@@ -1355,7 +1437,11 @@ __all__ = [
     "build_llm_payload",
     "compose_runtime_wire_payload",
     "current_prompt_cache_partition",
+    "invocation_header_identity_scope",
     "prompt_cache_partition_scope",
+    "reset_invocation_header_identity",
     "reset_prompt_cache_partition",
+    "resolve_extra_header_identity_templates",
+    "set_invocation_header_identity",
     "set_prompt_cache_partition",
 ]

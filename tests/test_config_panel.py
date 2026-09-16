@@ -279,6 +279,30 @@ def test_v2_provider_target_rejects_bounded_invalid_extra_headers(headers: dict[
         validate_llm_provider_target(_v2_provider(extra_headers=headers))
 
 
+def test_v2_provider_target_accepts_whitelisted_identity_placeholders() -> None:
+    validate_llm_provider_target(
+        _v2_provider(
+            extra_headers={
+                "x-opencode-session": "{session_id}",
+                "x-opencode-agent": "agent:{agent_id}",
+            }
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "{conversation_id}",
+        "vibelution-{sessionId}",
+        "{session_id}/{unknown_placeholder}",
+    ],
+)
+def test_v2_provider_target_rejects_unsupported_header_placeholders(value: str) -> None:
+    with pytest.raises(ValueError, match="unsupported placeholder"):
+        validate_llm_provider_target(_v2_provider(extra_headers={"x-opencode-session": value}))
+
+
 def _start_test_config_panel(monkeypatch: pytest.MonkeyPatch, config_path: Path):
     from config.public_config import load_public_config as load_public_config_from_path
     from config.public_config import save_public_config as save_public_config_to_path

@@ -10,7 +10,23 @@ from typing import Any, Callable
 from .types import LLMProtocolEvent, TurnOutcome
 
 from .invocation_context import LLMInvocationContext, prompt_purpose_cache_partition
-from .payload_builder import current_prompt_cache_partition, prompt_cache_partition_scope
+from .payload_builder import (
+    current_prompt_cache_partition,
+    invocation_header_identity_scope,
+    prompt_cache_partition_scope,
+)
+
+
+def _header_identity_scope(context: LLMInvocationContext):
+    """Bind the invocation's session/agent identity for extra_headers templates.
+
+    空值也显式进入 scope：无会话上下文的调用（如 compression）在嵌套时不得
+    泄漏外层会话身份，含占位符的 header 会走 fail-safe 丢弃分支。
+    """
+    return invocation_header_identity_scope(
+        session_id=str(context.session_id or "").strip(),
+        agent_id=str(context.agent_id or "").strip(),
+    )
 
 
 def _developer_sandbox_module():
@@ -109,7 +125,7 @@ def invoke_llm(
     effective_metadata = _merged_metadata(effective_context, client, metadata)
     partition = str(effective_context.cache_partition or "").strip()
     scope = prompt_cache_partition_scope(partition) if partition else nullcontext()
-    with scope:
+    with scope, _header_identity_scope(effective_context):
         kwargs = {"tools": tools, "metadata": effective_metadata}
         if output_schema is not None:
             kwargs["output_schema"] = output_schema
@@ -137,7 +153,7 @@ def invoke_llm_outcome(
     effective_metadata = _merged_metadata(effective_context, client, metadata)
     partition = str(effective_context.cache_partition or "").strip()
     scope = prompt_cache_partition_scope(partition) if partition else nullcontext()
-    with scope:
+    with scope, _header_identity_scope(effective_context):
         kwargs = {
             "tools": tools,
             "metadata": effective_metadata,
@@ -171,7 +187,7 @@ def stream_llm(
     effective_metadata = _merged_metadata(effective_context, client, metadata)
     partition = str(effective_context.cache_partition or "").strip()
     scope = prompt_cache_partition_scope(partition) if partition else nullcontext()
-    with scope:
+    with scope, _header_identity_scope(effective_context):
         kwargs = {"tools": tools, "metadata": effective_metadata}
         if output_schema is not None:
             kwargs["output_schema"] = output_schema
@@ -199,7 +215,7 @@ def run_streaming_llm_outcome(
     effective_metadata = _merged_metadata(effective_context, client, metadata)
     partition = str(effective_context.cache_partition or "").strip()
     scope = prompt_cache_partition_scope(partition) if partition else nullcontext()
-    with scope:
+    with scope, _header_identity_scope(effective_context):
         kwargs = {
             "tools": tools,
             "metadata": effective_metadata,

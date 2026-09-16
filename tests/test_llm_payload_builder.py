@@ -5,8 +5,18 @@ from langchain_core.messages import AIMessage, ToolMessage
 import pytest
 
 from core.llm.client import LLMClient
+from core.llm.invocation import (
+    invoke_llm,
+    invoke_llm_outcome,
+    run_streaming_llm_outcome,
+    stream_llm,
+)
+from core.llm.payload_builder import (
+    invocation_header_identity_scope,
+    resolve_extra_header_identity_templates,
+)
 from core.llm.reasoning_effort import resolve_reasoning_effort_request
-from core.llm.types import LLMError
+from core.llm.types import CanonicalItemIdentity, LLMError, TurnOutcome
 from tests.helpers.isolated_config import isolated_settings_config
 
 
@@ -724,3 +734,162 @@ def test_speaker_payload_keeps_profile_default_without_cap_injection():
             messages, metadata={MAX_OUTPUT_TOKENS_OVERRIDE_METADATA_KEY: 4096}
         )
     assert clamped["max_tokens"] == 4096
+
+
+# ---------------------------------------------------------------------------
+# extra_headers 身份占位符：{session_id} / {agent_id} 在请求构建时解析
+# ---------------------------------------------------------------------------
+
+
+def _header_template_config(extra_headers):
+    return make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-test",
+            "llm.providers.default.extra_headers": extra_headers,
+        }
+    )
+
+
+def test_extra_headers_without_placeholders_pass_through_unchanged():
+    # 未闭合/非占位符形式的花括号不属于模板语法，按存量值原样透传。
+    headers = {"X-Static": "keep-me", "X-Brace-Literal": "not-a-{token-pattern"}
+
+    assert resolve_extra_header_identity_templates(headers) == headers
+
+
+def test_extra_header_templates_resolve_session_and_agent_identity():
+    headers = {
+        "x-opencode-session": "{session_id}",
+        "x-opencode-agent": "agent:{agent_id}",
+        "X-Static": "keep-me",
+    }
+
+    with invocation_header_identity_scope(session_id="sess-42", agent_id="reviewer"):
+        resolved = resolve_extra_header_identity_templates(headers)
+        again = resolve_extra_header_identity_templates(headers)
+
+    assert resolved == {
+        "x-opencode-session": "sess-42",
+        "x-opencode-agent": "agent:reviewer",
+        "X-Static": "keep-me",
+    }
+    # 同一会话多次调用必须得到同一值（路由/缓存亲和的前提）。
+    assert again == resolved
+
+
+def test_extra_header_templates_dropped_without_session_identity():
+    headers = {"x-opencode-session": "{session_id}", "X-Static": "keep-me"}
+
+    # 无身份上下文（如 compression 等辅助调用）：含占位符 header 整体丢弃，
+    # 静态 header 保持原样，绝不外发字面量 `{session_id}`。
+    assert resolve_extra_header_identity_templates(headers) == {"X-Static": "keep-me"}
+
+
+def test_extra_header_templates_dropped_for_unknown_placeholder():
+    headers = {"x-custom": "{session_id}/{conversation_id}"}
+
+    with invocation_header_identity_scope(session_id="sess-42", agent_id="reviewer"):
+        assert resolve_extra_header_identity_templates(headers) == {}
+
+
+def test_extra_header_template_dropped_when_identity_value_is_not_header_safe():
+    headers = {"x-opencode-session": "{session_id}"}
+
+    with invocation_header_identity_scope(session_id="bad\nsession"):
+        assert resolve_extra_header_identity_templates(headers) == {}
+
+
+def test_llm_client_resolves_header_templates_at_request_build_time():
+    config = _header_template_config(
+        {
+            "x-opencode-session": "{session_id}",
+            "X-Static": "keep-me",
+        }
+    )
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    messages = [{"role": "user", "content": "ping"}]
+
+    with invocation_header_identity_scope(session_id="sess-e2e"):
+        payload = client._build_payload(messages)
+
+    assert payload["extra_headers"] == {
+        "x-opencode-session": "sess-e2e",
+        "X-Static": "keep-me",
+    }
+
+
+def test_llm_client_drops_template_headers_without_identity_context():
+    config = _header_template_config({"x-opencode-session": "{session_id}"})
+    client = LLMClient(config=config, backend=lambda payload: payload)
+
+    payload = client._build_payload([{"role": "user", "content": "ping"}])
+
+    assert "extra_headers" not in payload
+
+
+class _HeaderIdentityCaptureClient:
+    """Fake LLM client that records header-template resolution per wrapper."""
+
+    def __init__(self):
+        self.captured = []
+
+    def _capture(self):
+        self.captured.append(
+            resolve_extra_header_identity_templates({"x-opencode-session": "{session_id}"})
+        )
+
+    def invoke(self, messages, **kwargs):
+        self._capture()
+        return {"id": "compat"}
+
+    def invoke_outcome(self, messages, **kwargs):
+        self._capture()
+        return TurnOutcome.final_answer(identity=_capture_identity(), text="ok")
+
+    def stream(self, messages, **kwargs):
+        self._capture()
+        yield "chunk"
+
+    def stream_events(self, messages, **kwargs):
+        self._capture()
+        outcome = TurnOutcome.final_answer(identity=_capture_identity(), text="ok")
+        yield "chunk"
+        return outcome
+
+
+def _capture_identity():
+    return CanonicalItemIdentity(
+        session_id="sess-wrapper",
+        turn_id="turn-wrapper",
+        invocation_id="invocation-wrapper",
+        iteration=0,
+        item_id="item-wrapper",
+    )
+
+
+@pytest.mark.parametrize("wrapper", ["invoke", "invoke_outcome", "stream", "stream_events"])
+def test_invocation_wrappers_bind_session_identity_for_header_templates(wrapper):
+    from core.llm.invocation import LLMInvocationContext
+
+    fake = _HeaderIdentityCaptureClient()
+    context = LLMInvocationContext(
+        surface="test",
+        session_id="sess-wrapper",
+        agent_id="agent-wrapper",
+    )
+    runner = {
+        "invoke": lambda: invoke_llm(fake, [], context=context),
+        "invoke_outcome": lambda: invoke_llm_outcome(fake, [], context=context),
+        "stream": lambda: list(stream_llm(fake, [], context=context)),
+        "stream_events": lambda: run_streaming_llm_outcome(
+            fake, [], context=context, on_event=lambda event: None
+        ),
+    }[wrapper]
+
+    runner()
+
+    assert fake.captured == [{"x-opencode-session": "sess-wrapper"}]
