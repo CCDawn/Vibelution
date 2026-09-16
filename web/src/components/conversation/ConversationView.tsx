@@ -92,6 +92,13 @@ import {
   type BuiltinSlashCommandId,
   type SlashCommandSuggestion,
 } from "./conversationSlashCommandSuggestions";
+import {
+  detectReferenceToken,
+  filterReferenceTypeaheadOptions,
+  removeReferenceToken,
+  type ReferenceTypeaheadOption,
+  type ReferenceTypeaheadToken,
+} from "./conversationReferenceTypeahead";
 import { buildAgentMessageRenderState, type AgentMessageRenderState } from "./agentMessageRenderState";
 import {
   resolveAssistantDisplayPlan,
@@ -532,6 +539,7 @@ export function ConversationView({
   composerAttachments = [],
   composerReferences = [],
   slashCommandSuggestions = [],
+  composerReferenceOptions = [],
   composerAttachmentInputDisabled,
   composerLeadingControl,
   permissionControl,
@@ -778,6 +786,7 @@ export function ConversationView({
   const [modelMenuOpenSignal, setModelMenuOpenSignal] = useState("");
   useEffect(() => {
     setSlashActiveIndex(-1);
+    setReferenceActiveIndex(-1);
   }, [composerValue]);
   const showSlashSuggestions = !composerDisabled
     && slashDismissedAtValue !== composerValue
@@ -786,6 +795,64 @@ export function ConversationView({
     ? (slashActiveIndex >= 0 && slashActiveIndex < slashSuggestions.length ? slashActiveIndex : 0)
     : -1;
   const slashSuggestionListId = `conversation-${sessionId}-slash-suggestions`;
+  // "@" reference type-ahead: caret-aware token detection over the same draft.
+  // The composer never inserts reference markup; selecting a candidate registers
+  // the same structured reference chip as the plus-menu picker and removes the
+  // "@fragment" from the draft.
+  const [composerReferenceCaret, setComposerReferenceCaret] = useState(0);
+  const [composerComposing, setComposerComposing] = useState(false);
+  const [referenceDismissedAtValue, setReferenceDismissedAtValue] = useState<string | null>(null);
+  const [referenceActiveIndex, setReferenceActiveIndex] = useState(-1);
+  const activeReferenceToken: ReferenceTypeaheadToken | null = useMemo(
+    () => (
+      composerComposing || composerDisabled || editingMessageId || !onAddComposerReference
+        ? null
+        : detectReferenceToken(composerValue, composerReferenceCaret)
+    ),
+    [composerComposing, composerDisabled, composerReferenceCaret, composerValue, editingMessageId, onAddComposerReference],
+  );
+  const referenceSuggestions = useMemo(
+    () => (activeReferenceToken
+      ? filterReferenceTypeaheadOptions(composerReferenceOptions, activeReferenceToken.query)
+      : []),
+    [activeReferenceToken, composerReferenceOptions],
+  );
+  const showReferenceSuggestions = !composerDisabled
+    && composerReferenceOptions.length > 0
+    && referenceDismissedAtValue !== composerValue
+    && referenceSuggestions.length > 0;
+  const activeReferenceIndex = showReferenceSuggestions
+    ? (referenceActiveIndex >= 0 && referenceActiveIndex < referenceSuggestions.length ? referenceActiveIndex : 0)
+    : -1;
+  const referenceSuggestionListId = `conversation-${sessionId}-reference-suggestions`;
+  function syncComposerReferenceCaret(element: HTMLTextAreaElement | null) {
+    setComposerReferenceCaret(element ? element.selectionStart ?? element.value.length : 0);
+  }
+  function handleReferenceTypeaheadSelect(option: ReferenceTypeaheadOption) {
+    if (!activeReferenceToken) {
+      return;
+    }
+    const token = activeReferenceToken;
+    // Same structured-reference path as the plus-menu knowledge/file picker.
+    onAddComposerReference?.(option.reference);
+    const removed = removeReferenceToken(composerValue, token);
+    onComposerChange(removed.text);
+    setReferenceActiveIndex(-1);
+    setReferenceDismissedAtValue(null);
+    requestAnimationFrame(() => {
+      const input = composerInputRef.current;
+      if (!input) {
+        return;
+      }
+      input.focus();
+      input.setSelectionRange(removed.caretIndex, removed.caretIndex);
+      setComposerReferenceCaret(removed.caretIndex);
+    });
+  }
+  function handleReferenceTypeaheadDismiss() {
+    setReferenceDismissedAtValue(composerValue);
+    setReferenceActiveIndex(-1);
+  }
   const answerOnlyProcessMode = processDisplayMode === "answer";
   const timestampFormatter = useMemo(
     () =>
@@ -5260,6 +5327,56 @@ export function ConversationView({
               ))}
             </div>
           ) : null}
+          {showReferenceSuggestions ? (
+            <div
+              id={referenceSuggestionListId}
+              role="listbox"
+              aria-label={t("composerReferenceTypeaheadListLabel")}
+              className={styles.slashCommandSuggestions}
+            >
+              {referenceSuggestions.map((option, index) => (
+                <div
+                  id={`${referenceSuggestionListId}-option-${index}`}
+                  key={option.id}
+                  role="option"
+                  aria-selected={index === activeReferenceIndex}
+                  aria-label={option.title}
+                  className={styles.slashCommandSuggestionOption}
+                  data-active={index === activeReferenceIndex ? "true" : "false"}
+                >
+                  <VButton
+                    type="button"
+                    className={
+                      index === activeReferenceIndex
+                        ? `${styles.slashCommandSuggestionButton} ${styles.slashCommandSuggestionButtonActive}`
+                        : styles.slashCommandSuggestionButton
+                    }
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => handleReferenceTypeaheadSelect(option)}
+                  >
+                    <span className={styles.slashCommandSuggestionIcon} aria-hidden="true">
+                      {option.reference.kind === "file" ? (
+                        <FileText size={13} />
+                      ) : option.reference.kind === "session" ? (
+                        <MessageSquareText size={13} />
+                      ) : (
+                        <BookOpen size={13} />
+                      )}
+                    </span>
+                    <strong className={styles.slashCommandSuggestionCode}>
+                      {option.title}
+                    </strong>
+                    {option.meta ? (
+                      <span className={styles.slashCommandSuggestionDescription}>{option.meta}</span>
+                    ) : null}
+                    <span className={styles.slashCommandBuiltinBadge} data-vui="reference-typeahead-badge">
+                      {t("composerReferenceTypeaheadBadge")}
+                    </span>
+                  </VButton>
+                </div>
+              ))}
+            </div>
+          ) : null}
           <VNativeTextarea
             ref={composerInputRef}
             className={composerVariant === "codex" ? styles.inputCodex : styles.input}
@@ -5268,15 +5385,35 @@ export function ConversationView({
             placeholder={resolvedComposerPlaceholder}
             data-composer-prompt-suggestion={composerPromptSuggestion.ghost ? "true" : undefined}
             aria-label={lang === "zh" ? "发送消息" : "Message"}
-            aria-controls={showSlashSuggestions ? slashSuggestionListId : undefined}
-            aria-expanded={showSlashSuggestions ? true : undefined}
-            aria-autocomplete={showSlashSuggestions ? "list" : undefined}
+            aria-controls={
+              showSlashSuggestions
+                ? slashSuggestionListId
+                : showReferenceSuggestions
+                  ? referenceSuggestionListId
+                  : undefined
+            }
+            aria-expanded={showSlashSuggestions || showReferenceSuggestions ? true : undefined}
+            aria-autocomplete={showSlashSuggestions || showReferenceSuggestions ? "list" : undefined}
             aria-activedescendant={
               showSlashSuggestions && activeSlashIndex >= 0
                 ? `${slashSuggestionListId}-option-${activeSlashIndex}`
-                : undefined
+                : showReferenceSuggestions && activeReferenceIndex >= 0
+                  ? `${referenceSuggestionListId}-option-${activeReferenceIndex}`
+                  : undefined
             }
-            onChange={(event) => onComposerChange(event.target.value)}
+            onChange={(event) => {
+              onComposerChange(event.target.value);
+              syncComposerReferenceCaret(event.currentTarget);
+            }}
+            onCompositionStart={() => setComposerComposing(true)}
+            onCompositionEnd={(event) => {
+              // IME text was just committed: re-evaluate the token with the
+              // post-composition caret so CJK "@引用" arms only after commit.
+              setComposerComposing(false);
+              syncComposerReferenceCaret(event.currentTarget);
+            }}
+            onSelect={() => syncComposerReferenceCaret(composerInputRef.current)}
+            onKeyUp={() => syncComposerReferenceCaret(composerInputRef.current)}
             onPaste={(event) => {
               if (!onAddComposerAttachments || attachmentInputDisabled) {
                 return;
@@ -5328,6 +5465,29 @@ export function ConversationView({
                 if (event.key === "Escape") {
                   event.preventDefault();
                   handleSlashCommandDismiss();
+                  return;
+                }
+              }
+              if (showReferenceSuggestions && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setReferenceActiveIndex((current) => moveSlashCommandActiveIndex(
+                    current,
+                    event.key === "ArrowDown" ? 1 : -1,
+                    referenceSuggestions.length,
+                  ));
+                  return;
+                }
+                if (event.key === "Tab" || (event.key === "Enter" && !event.nativeEvent.isComposing)) {
+                  event.preventDefault();
+                  if (activeReferenceIndex >= 0) {
+                    handleReferenceTypeaheadSelect(referenceSuggestions[activeReferenceIndex]);
+                  }
+                  return;
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  handleReferenceTypeaheadDismiss();
                   return;
                 }
               }

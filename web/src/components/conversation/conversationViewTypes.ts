@@ -10,6 +10,7 @@ import type {
   AgentPermissionPreset,
 } from "../../api/types";
 import type { TurnAvatarResolution } from "./conversationTurnAvatar";
+import type { ReferenceTypeaheadOption } from "./conversationReferenceTypeahead";
 import type { ConversationStreamingFramePaintMetrics } from "./conversationStreamingMetrics";
 import type { ComposerQueueItem } from "./composerFollowupQueueModel";
 import type { ComposerContextRingModel } from "../../routes/chat/composerContextModel";
@@ -121,6 +122,11 @@ export type ConversationViewProps = {
   composerAttachments?: ConversationComposerAttachment[];
   composerReferences?: SessionReferenceAttachment[];
   slashCommandSuggestions?: SkillLibraryItem[];
+  /**
+   * Candidate rows for the composer "@" reference type-ahead (knowledge bases,
+   * knowledge items, session files — same source as the plus-menu picker).
+   */
+  composerReferenceOptions?: ReferenceTypeaheadOption[];
   composerAttachmentInputDisabled?: boolean;
   /** Route-owned leading composer control, such as the formal Chat plus menu. */
   composerLeadingControl?: ReactNode;
