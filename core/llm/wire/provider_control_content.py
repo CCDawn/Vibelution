@@ -11,6 +11,7 @@ _ENVELOPES = {
     "<budget:token_budget>": "</budget:token_budget>",
     "<ds_safety>": "</ds_safety>Safe",
     "<｜｜tool▁calls▁begin｜｜>": "<｜｜tool▁calls▁end｜｜>",
+    "｜DSML｜ calls>": "</｜DSML｜ calls>",
 }
 _RECALL = "@@RECALL\n"
 

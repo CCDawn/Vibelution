@@ -65,6 +65,7 @@ def _control_content_stream(text, *, actual_tool=False, provider="opencode_go", 
     "<ds_safety>internal classification</ds_safety>Safe",
     "@@RECALL\ninternal recall text",
     '<｜｜tool▁calls▁begin｜｜><｜｜tool▁call▁begin｜｜>lookup<｜｜tool▁sep｜｜>{"query":"test"}<｜｜tool▁call▁end｜｜><｜｜tool▁calls▁end｜｜>',
+    '｜DSML｜ calls>\n<｜DSML｜ invoke name="cli_tool">\n<｜DSML｜ parameter name="command" string="true">git branch -a -v</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>',
 ])
 def test_provider_control_only_content_is_not_a_successful_answer(text):
     events, outcome = _control_content_stream(text)
@@ -89,11 +90,34 @@ def test_provider_control_prefix_preserves_following_visible_answer():
     assert "budget" not in "".join(event.text for event in events)
 
 
+def test_dsml_control_prefix_preserves_following_visible_answer():
+    dsml = '｜DSML｜ calls>\n<｜DSML｜ invoke name="cli_tool">\n</｜DSML｜ invoke>\n</｜DSML｜ calls>'
+    events, outcome = _control_content_stream(dsml + "已完成检查。")
+    assert outcome.final_text == "已完成检查。"
+    assert not any("DSML" in event.text for event in events)
+
+
+def test_dsml_provider_control_does_not_block_real_structured_tools():
+    dsml = '｜DSML｜ calls>\n<｜DSML｜ invoke name="cli_tool">\n</｜DSML｜ invoke>\n</｜DSML｜ calls>'
+    events, outcome = _control_content_stream(dsml, actual_tool=True)
+    assert outcome.kind == "tool_calls"
+    assert [call.call_id for call in outcome.tool_calls] == ["call-real"]
+    assert not [event for event in events if event.text]
+
+
+def test_unclosed_dsml_control_prefix_is_incomplete():
+    _, outcome = _control_content_stream('｜DSML｜ calls>\n<｜DSML｜ invoke name="cli_tool">')
+    assert outcome.kind == "incomplete"
+    assert outcome.error == "chat.finish.provider_control_leak"
+    assert outcome.final_text == ""
+
+
 @pytest.mark.parametrize("text", [
     "代码中的 @@RECALL 只是示例。",
     "<budget",
     "```xml\n<ds_safety>example</ds_safety>Safe\n```",
     "`<budget:token_budget>200000</budget:token_budget>`",
+    '"｜DSML｜ calls>\n<｜DSML｜ invoke name=\"cli_tool\">\n</｜DSML｜ invoke>\n</｜DSML｜ calls>"',
     "<budget:token_budget>not a number</budget:token_budget>",
 ])
 def test_provider_control_detection_preserves_ordinary_examples(text):
