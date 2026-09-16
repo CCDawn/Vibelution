@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  AUTO_COMPACT_VISIBLE_REMAINING_PERCENT,
   buildComposerContextRingModel,
+  formatTokensPerSecondValue,
   resolveComposerCacheState,
 } from "./composerContextModel";
 const base = {
@@ -103,5 +105,90 @@ describe("composerContextModel", () => {
     expect(model.groups[0].name).toBe("Other content");
     expect(model.segments[0].contentPreview).toBe("Example");
     expect(model.segments).toHaveLength(1);
+  });
+  it("surfaces the auto-compact countdown only below the 40% remaining boundary", () => {
+    // 1M window, threshold 620K (light level): remaining = (threshold - used) / limit.
+    const cases: Array<[number, number | null]> = [
+      [230_000, 39], // remaining 39% → visible
+      [220_000, null], // remaining 40% → hidden (strictly below 40)
+      [210_000, null], // remaining 41% → hidden
+      [100_000, null], // plenty of room → hidden
+    ];
+    for (const [used, expectedRemaining] of cases) {
+      const model = buildComposerContextRingModel({
+        ...base,
+        usageUsed: used,
+        autoCompactThresholdTokens: 620_000,
+      });
+      expect(model.autoCompact?.remainingPercent ?? null).toBe(
+        expectedRemaining,
+      );
+    }
+    expect(AUTO_COMPACT_VISIBLE_REMAINING_PERCENT).toBe(40);
+  });
+  it("keeps the auto-compact countdown fail-open and includes absolute tokens", () => {
+    // Unknown capacity, disabled compression, or missing threshold: no indicator.
+    expect(
+      buildComposerContextRingModel({
+        ...base,
+        usageLimit: 0,
+        autoCompactThresholdTokens: 620_000,
+      }).autoCompact,
+    ).toBeNull();
+    expect(
+      buildComposerContextRingModel({
+        ...base,
+        autoCompactEnabled: false,
+        autoCompactThresholdTokens: 620_000,
+      }).autoCompact,
+    ).toBeNull();
+    expect(
+      buildComposerContextRingModel({ ...base }).autoCompact,
+    ).toBeNull();
+    // Percent + absolute tokens are both present when visible.
+    const visible = buildComposerContextRingModel({
+      ...base,
+      usageUsed: 560_000,
+      autoCompactThresholdTokens: 620_000,
+    });
+    expect(visible.autoCompact).toEqual({
+      remainingPercent: 6,
+      remainingTokens: 60_000,
+      remainingTokensLabel: "60K",
+      thresholdPercent: 62,
+      thresholdTokens: 620_000,
+    });
+  });
+  it("degrades generation speed to no-data and formats observed values", () => {
+    expect(
+      buildComposerContextRingModel({ ...base }).generationTokensPerSecond,
+    ).toBeNull();
+    expect(
+      buildComposerContextRingModel({
+        ...base,
+        tokensPerSecond: 0,
+      }).generationTokensPerSecond,
+    ).toBeNull();
+    expect(
+      buildComposerContextRingModel({
+        ...base,
+        tokensPerSecond: 38.44,
+      }).generationTokensPerSecond,
+    ).toBe(38.44);
+    expect(formatTokensPerSecondValue(38.44)).toBe("38.4");
+    expect(formatTokensPerSecondValue(45)).toBe("45");
+  });
+  it("exposes cached tokens only for observed provider cache state", () => {
+    const observed = buildComposerContextRingModel({
+      ...base,
+      cacheSource: "provider_usage",
+      cacheUsageObserved: true,
+      cachedInputTokens: 55600,
+      hitPercent: 63,
+    });
+    expect(observed.cachedTokensLabel).toBe("56K");
+    expect(
+      buildComposerContextRingModel({ ...base }).cachedTokensLabel,
+    ).toBe("");
   });
 });

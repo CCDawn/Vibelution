@@ -172,6 +172,98 @@ def extract_think_tag_reasoning(text: str) -> str:
     return ""
 
 
+# Analysis-family envelopes (``<analysis>`` / ``<summary>``): internal复盘
+# structures some relays/models leak into the answer channel. They are handled
+# exactly like the think family — envelope body routed to the reasoning
+# channel, envelope markup removed from visible text — but with conservative
+# preconditions for the *unclosed* (output-truncated) form, because unlike
+# ``<think>`` these tag names can legitimately appear inside prose.
+ANALYSIS_FAMILY_TAGS = ("analysis", "summary")
+
+_ANALYSIS_FAMILY_BLOCK_RE = re.compile(
+    r"<(analysis|summary)\b[^>]*>([\s\S]*?)</\1\s*>",
+    flags=re.IGNORECASE,
+)
+_OPEN_ANALYSIS_FAMILY_BLOCK_RE = re.compile(
+    r"<(analysis|summary)\b[^>]*>([\s\S]*)$",
+    flags=re.IGNORECASE,
+)
+_ANALYSIS_FAMILY_TAG_RE = re.compile(
+    r"</?(?:analysis|summary)\b[^>]*>",
+    flags=re.IGNORECASE,
+)
+
+# Unclosed-envelope recovery preconditions: a genuine leaked复盘 body is long
+# and starts at the front of the answer (the relay truncation form). Short or
+# mid-text unclosed tags are treated as prose, not envelopes.
+UNCLOSED_ENVELOPE_MAX_OPEN_RATIO = 0.2
+UNCLOSED_ENVELOPE_MIN_BODY_CHARS = 200
+
+
+def extract_analysis_envelope_reasoning(
+    text: str,
+    *,
+    unclosed_max_open_ratio: float = UNCLOSED_ENVELOPE_MAX_OPEN_RATIO,
+    unclosed_min_body_chars: int = UNCLOSED_ENVELOPE_MIN_BODY_CHARS,
+) -> ReasoningExtraction:
+    """Extract leaked analysis/summary envelope bodies as reasoning text.
+
+    Complete ``<analysis>...</analysis>`` / ``<summary>...</summary>`` envelopes
+    are always recovered. An unclosed envelope (relay truncated the output
+    budget mid-envelope) is only recovered when its opening sits in the front
+    ``unclosed_max_open_ratio`` of the text AND the body after it is at least
+    ``unclosed_min_body_chars`` long — otherwise the tag is more likely prose.
+    """
+    if not text:
+        return ReasoningExtraction("")
+    parts = [match[1].strip() for match in _ANALYSIS_FAMILY_BLOCK_RE.findall(text) if match[1].strip()]
+    # Search for an unclosed envelope only after complete envelopes are gone,
+    # otherwise a complete envelope's opening tag would masquerade as unclosed.
+    without_complete = _ANALYSIS_FAMILY_BLOCK_RE.sub("", text)
+    open_match = _OPEN_ANALYSIS_FAMILY_BLOCK_RE.search(without_complete)
+    if open_match:
+        open_position = open_match.start()
+        body = open_match.group(2).strip()
+        if (
+            body
+            and len(body) >= unclosed_min_body_chars
+            and open_position <= len(text) * unclosed_max_open_ratio
+        ):
+            parts.append(body)
+    joined = "\n".join(part for part in parts if part).strip()
+    if joined:
+        return ReasoningExtraction(joined, "analysis_envelope")
+    return ReasoningExtraction("")
+
+
+def strip_analysis_envelopes(
+    text: str,
+    *,
+    unclosed_max_open_ratio: float = UNCLOSED_ENVELOPE_MAX_OPEN_RATIO,
+    unclosed_min_body_chars: int = UNCLOSED_ENVELOPE_MIN_BODY_CHARS,
+) -> str:
+    """Return visible text with analysis/summary envelopes and stray tags removed.
+
+    Applies the same preconditions as :func:`extract_analysis_envelope_reasoning`
+    so recovery and extraction never disagree about what was an envelope.
+    """
+    if not text:
+        return ""
+    cleaned = _ANALYSIS_FAMILY_BLOCK_RE.sub("", text)
+    open_match = _OPEN_ANALYSIS_FAMILY_BLOCK_RE.search(cleaned)
+    if open_match:
+        open_position = open_match.start()
+        body = open_match.group(2).strip()
+        if (
+            body
+            and len(body) >= unclosed_min_body_chars
+            and open_position <= len(cleaned) * unclosed_max_open_ratio
+        ):
+            cleaned = cleaned[:open_position]
+    cleaned = _ANALYSIS_FAMILY_TAG_RE.sub("", cleaned)
+    return cleaned
+
+
 class ThinkTagStreamParser:
     """Statefully split streamed think/thinking tags from visible content."""
 
@@ -310,14 +402,17 @@ def _as_dict(value: Any) -> dict[str, Any] | None:
 
 
 __all__ = [
+    "ANALYSIS_FAMILY_TAGS",
     "REASONING_DELTA_FIELD_CANDIDATES",
     "REASONING_FIELD_CANDIDATES",
     "ReasoningExtraction",
     "ThinkTagStreamParser",
     "ThinkTagStreamResult",
+    "extract_analysis_envelope_reasoning",
     "extract_reasoning_details_text",
     "extract_reasoning_text",
     "extract_think_tag_reasoning",
     "extract_thinking_blocks_text",
+    "strip_analysis_envelopes",
     "strip_think_tag_reasoning",
 ]

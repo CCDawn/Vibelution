@@ -429,7 +429,7 @@ def test_invoke_agent_llm_turn_records_message_digest_event():
         def effective_route_id(self):
             return "primary-route"
 
-        def project_outcome_message(self, outcome):
+        def project_outcome_message(self, outcome, **_kwargs):
             return AIMessage(content=outcome.final_text)
 
     from core.llm.types import CanonicalItemIdentity, TurnOutcome

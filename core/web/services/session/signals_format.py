@@ -310,6 +310,30 @@ def _ensure_assistant_visible_text(content: Any, *, result: Any = None, lang: st
     )
 
 
+def _append_answer_channel_leak_notice(assistant_text: Any, *, result: Any = None, lang: str | None = None) -> str:
+    """Append the user-visible leak notice after a same-turn degraded retry.
+
+    Mirrors the ``_looks_like_provider_error_text``/``_user_visible_failure_summary``
+    precedent: the notice rides on the persisted assistant text instead of a
+    second UI channel. Shown only when the answer-channel leak guard actually
+    spent its one-shot retry for this turn (``answer_channel_leak.leakRetried``);
+    pure stage-1 recovery stays telemetry-only.
+    """
+    s = _service()
+    text = str(assistant_text or "")
+    leak = result.get("answer_channel_leak") if isinstance(result, dict) else None
+    if not isinstance(leak, dict) or not bool(leak.get("leakRetried")):
+        return text
+    notice = s.text_for(
+        lang or s.get_web_language(),
+        zh="（提示：检测到模型把内部格式泄漏为答复，已自动重试一次。）",
+        en="(Note: the model leaked internal formatting into the reply; one automatic retry was used.)",
+    )
+    if not notice or notice in text:
+        return text
+    return f"{text}\n\n{notice}".strip() if text.strip() else notice
+
+
 def _extract_chat_thought(result: Any, assistant_text: str) -> str:
     s = _service()
     if not isinstance(result, dict):

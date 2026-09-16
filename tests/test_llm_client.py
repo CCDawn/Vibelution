@@ -6041,10 +6041,15 @@ def test_degraded_retry_actions_vocabulary_and_overrides():
     from core.llm.recovery import DEGRADED_RETRY_ACTIONS, degraded_retry_overrides
 
     assert DEGRADED_RETRY_ACTIONS == frozenset(
-        {"retry_without_streaming", "disable_tools_and_retry_without_streaming"}
+        {
+            "retry_without_streaming",
+            "disable_tools_and_retry_without_streaming",
+            "retry_answer_without_tools",
+        }
     )
     assert degraded_retry_overrides("retry_without_streaming") == (True, False)
     assert degraded_retry_overrides("disable_tools_and_retry_without_streaming") == (True, True)
+    assert degraded_retry_overrides("retry_answer_without_tools") == (True, True)
     assert degraded_retry_overrides("retry_with_backoff") == (False, False)
     assert degraded_retry_overrides("fail_fast") == (False, False)
 

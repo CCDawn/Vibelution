@@ -665,6 +665,7 @@ from core.web.services.session.session_ops import (
 from core.web.services.session.signals_format import (
     _active_task_content_preview,
     _annotate_continuation_result,
+    _append_answer_channel_leak_notice,
     _attach_session_prompt_cache_metadata,
     _build_followup_prompt,
     _build_message_timeline_items,
@@ -971,6 +972,7 @@ from core.web.services.session.projection import (
     _normalize_session_llm_payload_trace,
     _normalize_session_runtime_notices,
     _normalize_turn_llm_usage,
+    _assistant_usage_stats_payload,
     _session_detail_agent_snapshot,
     _active_task_to_api,
     _active_task_with_live_work_run,

@@ -50,10 +50,21 @@ upstream_id = "deepseek-v4-flash"
 | `compat_mode` | 建议 | `native` / `openai` / `openai_compatible` |
 | `service_class` | | `official_api` `aggregator` `relay` `self_hosted` `local_runtime` |
 | `context_window` | 可选 | 正整数；**不要**瞎填假窗口 |
-| `extra_headers` | 可选 | 中转额外头 |
+| `extra_headers` | 可选 | 中转额外头；值支持 `{session_id}` / `{agent_id}` 占位符（见下） |
 | `legacy_inference_allowed` | 内部 | schema v2 严格模式会限制推断 |
 
 \* schema v2 有钉选模型时走完整校验。
+
+### `extra_headers` 身份占位符
+
+值里可写 `{session_id}` 或 `{agent_id}`，发请求时按当前 LLM 调用的会话身份解析（同一会话每次调用同值，适合 OpenCode 等要求 per-conversation 稳定头的网关）：
+
+```toml
+[llm.providers.opencode_go.extra_headers]
+x-opencode-session = "{session_id}"
+```
+
+Fail-safe 语义：无会话身份的调用（如后台压缩）会**丢弃**该 header，绝不外发字面量 `{session_id}`；`{...}` 形式只允许这两个占位符，其它写法在配置校验时报错。
 
 ## `protocols` 子表
 

@@ -457,11 +457,13 @@ def invoke_agent_llm_turn(
                     }
                     if hooks.structured_output_contract is not None:
                         stream_kwargs["output_schema"] = hooks.structured_output_contract
+                    generation_started_at = time.monotonic()
                     outcome = hooks.run_streaming_outcome(
                         llm_for_turn,
                         clean_messages,
                         **stream_kwargs,
                     )
+                    generation_elapsed_ms = int((time.monotonic() - generation_started_at) * 1000)
                     outcome = hooks.canonicalize(outcome)
                     record_turn_request_outcome(outcome)
                     _validate_structured_output_outcome(
@@ -474,7 +476,7 @@ def invoke_agent_llm_turn(
                             duration_ms=int((time.monotonic() - route_started_at) * 1000),
                             streamed=True,
                         )
-                    result.payload = (outcome, llm_for_turn.project_outcome_message(outcome))
+                    result.payload = (outcome, llm_for_turn.project_outcome_message(outcome, latency_ms=generation_elapsed_ms))
                     result.route_fallback = dict(switched_fallback)
                     return result
                 hooks.raise_if_stop()
@@ -484,11 +486,13 @@ def invoke_agent_llm_turn(
                 }
                 if hooks.structured_output_contract is not None:
                     invoke_kwargs["output_schema"] = hooks.structured_output_contract
+                generation_started_at = time.monotonic()
                 outcome = hooks.invoke_outcome(
                     llm_for_turn,
                     clean_messages,
                     **invoke_kwargs,
                 )
+                generation_elapsed_ms = int((time.monotonic() - generation_started_at) * 1000)
                 outcome = hooks.canonicalize(outcome)
                 record_turn_request_outcome(outcome)
                 _validate_structured_output_outcome(
@@ -501,7 +505,7 @@ def invoke_agent_llm_turn(
                         duration_ms=int((time.monotonic() - route_started_at) * 1000),
                         streamed=False,
                     )
-                result.payload = (outcome, llm_for_turn.project_outcome_message(outcome))
+                result.payload = (outcome, llm_for_turn.project_outcome_message(outcome, latency_ms=generation_elapsed_ms))
                 result.route_fallback = dict(switched_fallback)
                 return result
             except hooks.stop_error_cls:

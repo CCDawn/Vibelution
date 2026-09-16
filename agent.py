@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from uuid import uuid4
+from collections.abc import Mapping
 # 添加项目根目录到 Python 路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -105,6 +106,7 @@ from core.llm.client import (
     current_llm_status_context,
     llm_cancel_context,
 )
+from core.llm.answer_channel_guard import build_answer_channel_guard
 from core.llm.invocation import invoke_llm_outcome, run_streaming_llm_outcome
 from core.llm.legacy_xml_tool_decoder import canonical_outcome_from_message, canonicalize_legacy_xml_outcome
 from core.llm.semantic_messages import InvocationScope
@@ -2905,6 +2907,25 @@ class AgentRuntime:
                         **dict(getattr(self, "_last_turn_metadata", {}) or {}),
                         "reasoning_content": reasoning_content,
                     }
+                # Answer-channel leak guard telemetry (marker names/booleans
+                # only). Flows into the session result so persist can show the
+                # user-visible "leak retried" notice.
+                outcome_leak_metadata = (
+                    getattr(turn_outcome, "metadata", None)
+                    if isinstance(getattr(turn_outcome, "metadata", None), Mapping)
+                    else None
+                )
+                if outcome_leak_metadata and (
+                    "leakMarkers" in outcome_leak_metadata or "leakRetried" in outcome_leak_metadata
+                ):
+                    self._last_turn_metadata = {
+                        **dict(getattr(self, "_last_turn_metadata", {}) or {}),
+                        "answer_channel_leak": {
+                            "leakMarkers": list(outcome_leak_metadata.get("leakMarkers") or ()),
+                            "leakRecovered": bool(outcome_leak_metadata.get("leakRecovered")),
+                            "leakRetried": bool(outcome_leak_metadata.get("leakRetried")),
+                        },
+                    }
                 if processed.state_info:
                     self._last_turn_metadata = {
                         **dict(getattr(self, "_last_turn_metadata", {}) or {}),
@@ -3203,6 +3224,14 @@ class AgentRuntime:
         }
         return llm_usage
 
+    def _resolve_answer_channel_leak_route(self) -> tuple[str, str]:
+        """(gateway, model) identity for answer-channel leak counters."""
+        llm_config = getattr(getattr(self, "config", None), "llm", None)
+        return (
+            str(getattr(llm_config, "api_base", "") or ""),
+            str(getattr(llm_config, "model_name", "") or ""),
+        )
+
     def _build_llm_invocation_context(
         self,
         *,
@@ -3438,7 +3467,11 @@ class AgentRuntime:
                 build_invocation_context=self._build_llm_invocation_context,
                 invoke_outcome=invoke_llm_outcome,
                 run_streaming_outcome=run_streaming_llm_outcome,
-                canonicalize=canonicalize_legacy_xml_outcome,
+                canonicalize=build_answer_channel_guard(
+                    canonicalize_legacy_xml_outcome,
+                    record_event=_record_agent_scene_event,
+                    resolve_route=self._resolve_answer_channel_leak_route,
+                ),
                 plan_recovery=plan_llm_recovery,
                 record_scene_event=_record_agent_scene_event,
                 record_route_success=_record_llm_route_success,

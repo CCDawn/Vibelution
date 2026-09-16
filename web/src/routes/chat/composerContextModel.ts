@@ -15,6 +15,14 @@ export type ComposerContextGroup = {
   segments: ComposerContextSegment[];
 };
 export type ComposerContextCacheState = "observed" | "missing" | "not_called";
+/** Claude Code-paradigm indicator: shown only when little room remains before auto-compression. */
+export type ComposerContextAutoCompact = {
+  remainingPercent: number;
+  remainingTokens: number;
+  remainingTokensLabel: string;
+  thresholdPercent: number;
+  thresholdTokens: number;
+};
 export type ComposerContextRingModel = {
   usagePercent: number;
   usageLabel: string;
@@ -24,10 +32,19 @@ export type ComposerContextRingModel = {
   usedLabel: string;
   empty: boolean;
   cacheState: ComposerContextCacheState;
+  /** Compact absolute cached-token label for the observed cache state (e.g. "83K"). */
+  cachedTokensLabel: string;
+  /** Provider-derived generation speed for the last call; null when unmeasurable. */
+  generationTokensPerSecond: number | null;
+  /** Non-null only when remaining room before auto-compression drops below 40%. */
+  autoCompact: ComposerContextAutoCompact | null;
   segments: ComposerContextSegment[];
   groups: ComposerContextGroup[];
   detailAvailable: boolean;
 };
+
+/** Only surface the auto-compression countdown once little room is left (Claude Code paradigm). */
+export const AUTO_COMPACT_VISIBLE_REMAINING_PERCENT = 40;
 
 export function formatCompactTokenCount(value: number): string {
   const n = Math.max(0, Math.round(value));
@@ -40,6 +57,12 @@ export function formatCompactTokenCount(value: number): string {
     return `${scaled >= 10 ? scaled.toFixed(0) : scaled.toFixed(1).replace(/\.0$/, "")}K`;
   }
   return String(n);
+}
+
+/** Compact one-decimal tok/s label (45 → "45", 45.34 → "45.3"). */
+export function formatTokensPerSecondValue(value: number): string {
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
 export function resolveComposerCacheState(options: {
@@ -94,6 +117,11 @@ export function buildComposerContextRingModel(options: {
   cacheUsageObserved?: boolean;
   cachedInputTokens?: number;
   cacheCreationInputTokens?: number;
+  /** Backend-owned first auto-compression level threshold in tokens (read-only). */
+  autoCompactThresholdTokens?: number;
+  autoCompactEnabled?: boolean;
+  /** Provider-derived generation speed for the last call; null when unmeasurable. */
+  tokensPerSecond?: number | null;
 }): ComposerContextRingModel {
   const used = Math.max(0, options.usageUsed);
   const limit = Math.max(0, options.usageLimit);
@@ -144,6 +172,17 @@ export function buildComposerContextRingModel(options: {
       : [];
   });
   const cacheState = resolveComposerCacheState(options);
+  const cachedTokensLabel =
+    cacheState === "observed"
+      ? formatCompactTokenCount(Math.max(0, options.cachedInputTokens ?? 0))
+      : "";
+  const autoCompact = resolveAutoCompact({
+    used,
+    limit,
+    capacityKnown,
+    autoCompactEnabled: options.autoCompactEnabled,
+    autoCompactThresholdTokens: options.autoCompactThresholdTokens,
+  });
   return {
     usagePercent,
     usageLabel: capacityKnown ? percentLabel(usagePercent) : "—",
@@ -156,8 +195,50 @@ export function buildComposerContextRingModel(options: {
     usedLabel: `${formatCompactTokenCount(used)} / ${capacityKnown ? formatCompactTokenCount(limit) : "—"}`,
     empty: used === 0 && !segments.length && !capacityKnown,
     cacheState,
+    cachedTokensLabel,
+    generationTokensPerSecond:
+      typeof options.tokensPerSecond === "number"
+        && Number.isFinite(options.tokensPerSecond)
+        && options.tokensPerSecond > 0
+        ? options.tokensPerSecond
+        : null,
+    autoCompact,
     segments,
     groups,
     detailAvailable: options.detailAvailable,
+  };
+}
+
+function resolveAutoCompact(options: {
+  used: number;
+  limit: number;
+  capacityKnown: boolean;
+  autoCompactEnabled?: boolean;
+  autoCompactThresholdTokens?: number;
+}): ComposerContextAutoCompact | null {
+  if (options.autoCompactEnabled === false || !options.capacityKnown) {
+    return null;
+  }
+  const thresholdTokens = Math.max(0, Math.round(options.autoCompactThresholdTokens ?? 0));
+  if (thresholdTokens <= 0) {
+    return null;
+  }
+  const remainingTokens = Math.max(0, thresholdTokens - Math.max(0, options.used));
+  const remainingPercent = Math.max(
+    0,
+    Math.min(100, (remainingTokens / Math.max(1, options.limit)) * 100),
+  );
+  // Claude Code paradigm: avoid permanent noise; only appear below 40%.
+  if (remainingPercent >= AUTO_COMPACT_VISIBLE_REMAINING_PERCENT) {
+    return null;
+  }
+  return {
+    remainingPercent: Math.round(remainingPercent),
+    remainingTokens,
+    remainingTokensLabel: formatCompactTokenCount(remainingTokens),
+    thresholdPercent: Math.round(
+      Math.min(100, (thresholdTokens / Math.max(1, options.limit)) * 100),
+    ),
+    thresholdTokens,
   };
 }
