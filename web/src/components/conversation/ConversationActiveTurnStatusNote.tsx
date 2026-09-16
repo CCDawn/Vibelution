@@ -1,14 +1,20 @@
 import { LoaderCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { VStatusChip } from "../vui";
+import { dictionaryChat } from "../../i18n/domains/dictionaryChat";
 import {
   activeTurnElapsedSeconds,
   formatActiveTurnHeartbeatText,
   planActiveTurnStageSwitch,
+  resolveActiveTurnDisconnectSeconds,
   resolveActiveTurnProgressStage,
   resolveActiveTurnRetryProgress,
+  resolveActiveTurnRouteFallback,
+  resolveActiveTurnStallSeconds,
   type ActiveTurnStatusMessageLike,
 } from "./conversationActiveTurnStatusPresentation";
+import { useActiveTurnStreamState } from "./activeTurnStreamState";
 import styles from "./ConversationActiveTurnStatusNote.styles";
 
 export type ConversationActiveTurnStatusNoteProps = {
@@ -23,6 +29,8 @@ export type ConversationActiveTurnStatusNoteProps = {
 
 /**
  * Compact active-turn status: one heartbeat line without a redundant stage-dot track.
+ * Stream-connectivity advisories (disconnected / stalled / route fallback) are
+ * projected from the guarded stream state through ActiveTurnStreamStateContext.
  */
 export function ConversationActiveTurnStatusNote({
   message,
@@ -34,6 +42,7 @@ export function ConversationActiveTurnStatusNote({
   const [stage, setStage] = useState(resolvedStage);
   const stageShownAtRef = useRef(Date.now());
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const streamState = useActiveTurnStreamState();
 
   useEffect(() => {
     if (companionMode) {
@@ -65,6 +74,7 @@ export function ConversationActiveTurnStatusNote({
     return () => window.clearInterval(timer);
   }, [companionMode]);
 
+  const langKey = lang === "en" ? "en" : "zh";
   const elapsedSeconds = activeTurnElapsedSeconds(message.timestamp, nowMs);
   const retryProgress = stage === "model_retry" || stage === "retrying"
     ? resolveActiveTurnRetryProgress(message)
@@ -75,6 +85,24 @@ export function ConversationActiveTurnStatusNote({
   const resolvedStatusLabel = statusLabel
     || (lang === "en" ? "Status" : "状态");
 
+  // Connectivity advisories stay out of companion mode: it collapses all
+  // in-flight detail into the single typing affordance by design.
+  const disconnectSeconds = companionMode
+    ? null
+    : resolveActiveTurnDisconnectSeconds({
+      streamConnected: streamState.streamConnected,
+      streamDisconnectedSinceMs: streamState.streamDisconnectedSinceMs,
+      nowMs,
+    });
+  const stallSeconds = companionMode
+    ? null
+    : resolveActiveTurnStallSeconds({
+      lastAssistantDeltaAtMs: streamState.lastAssistantDeltaAtMs,
+      turnStartedAt: message.timestamp,
+      nowMs,
+    });
+  const routeFallback = companionMode ? null : resolveActiveTurnRouteFallback(message);
+
   return (
     <div
       className={styles.note}
@@ -83,6 +111,9 @@ export function ConversationActiveTurnStatusNote({
       aria-label={companionMode ? undefined : [resolvedStatusLabel, heartbeatText].filter(Boolean).join(" · ")}
       data-active-turn-stage={stage}
       data-active-turn-elapsed-seconds={elapsedSeconds ?? ""}
+      data-active-turn-disconnected={disconnectSeconds !== null ? "true" : undefined}
+      data-active-turn-stalled={stallSeconds !== null ? "true" : undefined}
+      data-active-turn-route-fallback={routeFallback ? "true" : undefined}
       data-companion-typing-status={companionMode ? "true" : undefined}
     >
       {!companionMode ? <span className={styles.label}>{resolvedStatusLabel}</span> : null}
@@ -91,6 +122,36 @@ export function ConversationActiveTurnStatusNote({
           <LoaderCircle className={styles.spinner} size={14} aria-hidden="true" />
           <span className={styles.text}>{heartbeatText}</span>
         </span>
+        {disconnectSeconds !== null ? (
+          <VStatusChip
+            tone="warning"
+            className={styles.advisory}
+            data-testid="active-turn-disconnected"
+          >
+            {`${dictionaryChat[langKey].chatStreamDisconnectedReconnecting}${disconnectSeconds > 0 ? ` · ${disconnectSeconds}s` : ""}`}
+          </VStatusChip>
+        ) : null}
+        {stallSeconds !== null ? (
+          <VStatusChip
+            tone="warning"
+            className={styles.advisory}
+            data-testid="active-turn-stalled"
+          >
+            {`${dictionaryChat[langKey].chatStreamNoOutputStalled} · ${stallSeconds}s`}
+          </VStatusChip>
+        ) : null}
+        {routeFallback ? (
+          <VStatusChip
+            tone="accent"
+            className={styles.advisory}
+            data-testid="active-turn-route-fallback"
+          >
+            {dictionaryChat[langKey]
+              .chatRouteFallbackSwitched
+              .replace("{from}", routeFallback.from)
+              .replace("{to}", routeFallback.to)}
+          </VStatusChip>
+        ) : null}
       </div>
     </div>
   );

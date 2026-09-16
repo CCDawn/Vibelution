@@ -5,6 +5,10 @@ import type {
   SessionRuntimeNotice,
 } from "../../api/types";
 import { VStateSurface } from "../../components/vui";
+import {
+  ActiveTurnStreamStateContext,
+  type ActiveTurnStreamState,
+} from "../../components/conversation/activeTurnStreamState";
 import { ChatConversationComposerBridge } from "./ChatConversationComposerBridge";
 import { ConversationWorkspaceLoadingShell } from "./ChatLoadingShell";
 import { ChatRuntimeNoticeStack } from "./ChatRuntimeNoticeStack";
@@ -22,6 +26,8 @@ type ChatSessionWorkspacePanelProps = {
   activeCliAgentRunAvailable: boolean;
   activeCliAgentRunId: string;
   activeSessionId: string | null | undefined;
+  /** Guarded-stream transport state projected into the active-turn status note. */
+  activeTurnStreamState?: ActiveTurnStreamState;
   blockingErrorMessage: string;
   cliAgentRunEmptyLabel: string;
   conversation: ConversationBridgeProps | null;
@@ -64,6 +70,7 @@ export function ChatSessionWorkspacePanel({
   activeCliAgentRunAvailable,
   activeCliAgentRunId,
   activeSessionId,
+  activeTurnStreamState,
   blockingErrorMessage,
   cliAgentRunEmptyLabel,
   conversation,
@@ -162,12 +169,14 @@ export function ChatSessionWorkspacePanel({
               className={styles.conversationKeepAlivePane}
               data-session-conversation={conversation.sessionId}
             >
-              <ChatConversationComposerBridge
-                {...conversation}
-                toolApproval={approvalSurface}
-                composer={conversation.composer}
-                fallback={conversationLoadingFallback}
-              />
+              <ActiveTurnStreamStateContext.Provider value={activeTurnStreamState ?? {}}>
+                <ChatConversationComposerBridge
+                  {...conversation}
+                  toolApproval={approvalSurface}
+                  composer={conversation.composer}
+                  fallback={conversationLoadingFallback}
+                />
+              </ActiveTurnStreamStateContext.Provider>
             </div>
           </div>
         </div>

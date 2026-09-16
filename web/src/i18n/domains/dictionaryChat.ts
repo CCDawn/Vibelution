@@ -94,6 +94,9 @@ export const dictionaryChat = {
     sessionStateThinking: "思考中",
     sessionStateTooling: "调用工具中",
     sessionStateAnswering: "回答中",
+    chatStreamDisconnectedReconnecting: "连接已断开，正在重连…",
+    chatStreamNoOutputStalled: "长时间无输出，可停止",
+    chatRouteFallbackSwitched: "已切换备用模型路由（{from} → {to}）继续生成",
   },
   en: {
     navChat: "Chat",
@@ -189,5 +192,8 @@ export const dictionaryChat = {
     sessionStateThinking: "thinking",
     sessionStateTooling: "calling tools",
     sessionStateAnswering: "answering",
+    chatStreamDisconnectedReconnecting: "Connection lost. Reconnecting…",
+    chatStreamNoOutputStalled: "No output for a while. You can stop the turn",
+    chatRouteFallbackSwitched: "Switched to fallback model route ({from} → {to}); generation continues",
   },
 } as const;

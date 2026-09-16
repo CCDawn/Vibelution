@@ -20,7 +20,24 @@ export type ActiveTurnStatusMessageLike = {
   metadata?: {
     processStage?: unknown;
   } | null;
+  /**
+   * Optional backend contract field naming the model route this turn fell back
+   * to. Absent on every current payload; rendered only when both ends exist.
+   */
+  routeFallback?: ActiveTurnRouteFallback | null;
 };
+
+/** Optional backend contract: the turn switched from one model route to another. */
+export type ActiveTurnRouteFallback = { from: string; to: string };
+
+/**
+ * A running turn whose last applied assistant delta is this old gets an
+ * explicit "no output — you can stop" upgrade. 90s comfortably covers long
+ * tool runs and thinking phases that legitimately stream nothing; the backend
+ * journal keeps generating through silence, so the honest UI move past this
+ * point is to surface the stall instead of an endlessly counting heartbeat.
+ */
+export const ACTIVE_TURN_NO_DELTA_STALL_AFTER_MS = 90_000;
 
 function compactText(value: unknown) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
@@ -306,4 +323,72 @@ export function buildActiveTurnStageBarItems(
     current: currentIndex >= 0 && index === currentIndex,
     reached: currentIndex >= 0 && index <= currentIndex,
   }));
+}
+
+/**
+ * Normalized route-fallback notice for the active turn, or null when the
+ * optional backend field is missing/incomplete (must render nothing).
+ */
+export function resolveActiveTurnRouteFallback(
+  message: Pick<ActiveTurnStatusMessageLike, "routeFallback">,
+): ActiveTurnRouteFallback | null {
+  const from = compactText(message.routeFallback?.from);
+  const to = compactText(message.routeFallback?.to);
+  return from && to ? { from, to } : null;
+}
+
+/**
+ * Seconds since the guarded stream dropped, while it is reconnecting.
+ * `streamConnected !== false` (healthy or unknown) renders nothing; a missing
+ * timestamp still yields 0s so the "reconnecting" copy can show immediately.
+ */
+export function resolveActiveTurnDisconnectSeconds(input: {
+  streamConnected?: boolean;
+  streamDisconnectedSinceMs?: number | null;
+  nowMs: number;
+}): number | null {
+  if (input.streamConnected !== false) {
+    return null;
+  }
+  const sinceMs = Number(input.streamDisconnectedSinceMs);
+  if (!Number.isFinite(sinceMs) || sinceMs <= 0) {
+    return 0;
+  }
+  return Math.max(0, Math.floor((input.nowMs - sinceMs) / 1000));
+}
+
+/**
+ * Seconds the running turn has produced no assistant delta, once past the
+ * stall threshold; null while output is fresh (or before the threshold).
+ * The baseline is the fresher of the last applied delta and the turn start,
+ * so a turn that never streamed a delta still escalates off its start time.
+ */
+export function resolveActiveTurnStallSeconds(input: {
+  lastAssistantDeltaAtMs?: number | null;
+  turnStartedAt?: string | null;
+  nowMs: number;
+  stallAfterMs?: number;
+}): number | null {
+  const candidates: number[] = [];
+  const deltaAtMs = Number(input.lastAssistantDeltaAtMs);
+  if (Number.isFinite(deltaAtMs) && deltaAtMs > 0) {
+    candidates.push(deltaAtMs);
+  }
+  const startedRaw = compactText(input.turnStartedAt);
+  if (startedRaw) {
+    const startedMs = Date.parse(startedRaw);
+    if (Number.isFinite(startedMs)) {
+      candidates.push(startedMs);
+    }
+  }
+  if (candidates.length === 0) {
+    return null;
+  }
+  const lastActivityMs = Math.max(...candidates);
+  const stalledForMs = input.nowMs - lastActivityMs;
+  const thresholdMs = input.stallAfterMs ?? ACTIVE_TURN_NO_DELTA_STALL_AFTER_MS;
+  if (stalledForMs <= thresholdMs) {
+    return null;
+  }
+  return Math.max(0, Math.floor(stalledForMs / 1000));
 }

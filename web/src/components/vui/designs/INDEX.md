@@ -113,6 +113,7 @@
 
 | 组件 | 设计说明 |
 | --- | --- |
+| `ConversationActiveTurnStatusNote` | [product/conversation.md](./product/conversation.md#conversationactiveturnstatusnote) |
 | `ConversationFollowupQueueBar` | [product/conversation.md](./product/conversation.md#conversationfollowupqueuebar) |
 | `ConversationMessageVersionSwitcher` | [product/conversation.md](./product/conversation.md#conversationmessageversionswitcher) |
 
