@@ -1,12 +1,24 @@
 import copy
+import logging
 from types import SimpleNamespace
 
 from langchain_core.messages import AIMessage, ToolMessage
 import pytest
 
+from config.llm_security import validate_llm_provider_target
 from core.llm.client import LLMClient
+from core.llm.invocation import (
+    invoke_llm,
+    invoke_llm_outcome,
+    run_streaming_llm_outcome,
+    stream_llm,
+)
+from core.llm.payload_builder import (
+    invocation_header_identity_scope,
+    resolve_extra_header_identity_templates,
+)
 from core.llm.reasoning_effort import resolve_reasoning_effort_request
-from core.llm.types import LLMError
+from core.llm.types import CanonicalItemIdentity, LLMError, TurnOutcome
 from tests.helpers.isolated_config import isolated_settings_config
 
 
@@ -724,3 +736,250 @@ def test_speaker_payload_keeps_profile_default_without_cap_injection():
             messages, metadata={MAX_OUTPUT_TOKENS_OVERRIDE_METADATA_KEY: 4096}
         )
     assert clamped["max_tokens"] == 4096
+
+
+# ---------------------------------------------------------------------------
+# extra_headers 身份占位符：{session_id} / {agent_id} 在请求构建时解析
+# ---------------------------------------------------------------------------
+
+
+def _header_template_config(extra_headers):
+    return make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-test",
+            "llm.providers.default.extra_headers": extra_headers,
+        }
+    )
+
+
+def test_extra_headers_without_placeholders_pass_through_unchanged():
+    # 未闭合/非占位符形式的花括号不属于模板语法，按存量值原样透传。
+    headers = {"X-Static": "keep-me", "X-Brace-Literal": "not-a-{token-pattern"}
+
+    assert resolve_extra_header_identity_templates(headers) == headers
+
+
+def test_extra_header_templates_resolve_session_and_agent_identity():
+    headers = {
+        "x-opencode-session": "{session_id}",
+        "x-opencode-agent": "agent:{agent_id}",
+        "X-Static": "keep-me",
+    }
+
+    with invocation_header_identity_scope(session_id="sess-42", agent_id="reviewer"):
+        resolved = resolve_extra_header_identity_templates(headers)
+        again = resolve_extra_header_identity_templates(headers)
+
+    assert resolved == {
+        "x-opencode-session": "sess-42",
+        "x-opencode-agent": "agent:reviewer",
+        "X-Static": "keep-me",
+    }
+    # 同一会话多次调用必须得到同一值（路由/缓存亲和的前提）。
+    assert again == resolved
+
+
+def test_extra_header_templates_dropped_without_session_identity():
+    headers = {"x-opencode-session": "{session_id}", "X-Static": "keep-me"}
+
+    # 无身份上下文（如 compression 等辅助调用）：含占位符 header 整体丢弃，
+    # 静态 header 保持原样，绝不外发字面量 `{session_id}`。
+    assert resolve_extra_header_identity_templates(headers) == {"X-Static": "keep-me"}
+
+
+def test_extra_header_templates_dropped_for_unknown_placeholder():
+    headers = {"x-custom": "{session_id}/{conversation_id}"}
+
+    with invocation_header_identity_scope(session_id="sess-42", agent_id="reviewer"):
+        assert resolve_extra_header_identity_templates(headers) == {}
+
+
+def test_extra_header_template_dropped_when_identity_value_is_not_header_safe():
+    headers = {"x-opencode-session": "{session_id}"}
+
+    with invocation_header_identity_scope(session_id="bad\nsession"):
+        assert resolve_extra_header_identity_templates(headers) == {}
+
+
+def test_llm_client_resolves_header_templates_at_request_build_time():
+    config = _header_template_config(
+        {
+            "x-opencode-session": "{session_id}",
+            "X-Static": "keep-me",
+        }
+    )
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    messages = [{"role": "user", "content": "ping"}]
+
+    with invocation_header_identity_scope(session_id="sess-e2e"):
+        payload = client._build_payload(messages)
+
+    assert payload["extra_headers"] == {
+        "x-opencode-session": "sess-e2e",
+        "X-Static": "keep-me",
+    }
+
+
+def test_llm_client_drops_template_headers_without_identity_context():
+    config = _header_template_config({"x-opencode-session": "{session_id}"})
+    client = LLMClient(config=config, backend=lambda payload: payload)
+
+    payload = client._build_payload([{"role": "user", "content": "ping"}])
+
+    assert "extra_headers" not in payload
+
+
+class _HeaderIdentityCaptureClient:
+    """Fake LLM client that records header-template resolution per wrapper."""
+
+    def __init__(self):
+        self.captured = []
+
+    def _capture(self):
+        self.captured.append(
+            resolve_extra_header_identity_templates({"x-opencode-session": "{session_id}"})
+        )
+
+    def invoke(self, messages, **kwargs):
+        self._capture()
+        return {"id": "compat"}
+
+    def invoke_outcome(self, messages, **kwargs):
+        self._capture()
+        return TurnOutcome.final_answer(identity=_capture_identity(), text="ok")
+
+    def stream(self, messages, **kwargs):
+        self._capture()
+        yield "chunk"
+
+    def stream_events(self, messages, **kwargs):
+        self._capture()
+        outcome = TurnOutcome.final_answer(identity=_capture_identity(), text="ok")
+        yield "chunk"
+        return outcome
+
+
+def _capture_identity():
+    return CanonicalItemIdentity(
+        session_id="sess-wrapper",
+        turn_id="turn-wrapper",
+        invocation_id="invocation-wrapper",
+        iteration=0,
+        item_id="item-wrapper",
+    )
+
+
+@pytest.mark.parametrize("wrapper", ["invoke", "invoke_outcome", "stream", "stream_events"])
+def test_invocation_wrappers_bind_session_identity_for_header_templates(wrapper):
+    from core.llm.invocation import LLMInvocationContext
+
+    fake = _HeaderIdentityCaptureClient()
+    context = LLMInvocationContext(
+        surface="test",
+        session_id="sess-wrapper",
+        agent_id="agent-wrapper",
+    )
+    runner = {
+        "invoke": lambda: invoke_llm(fake, [], context=context),
+        "invoke_outcome": lambda: invoke_llm_outcome(fake, [], context=context),
+        "stream": lambda: list(stream_llm(fake, [], context=context)),
+        "stream_events": lambda: run_streaming_llm_outcome(
+            fake, [], context=context, on_event=lambda event: None
+        ),
+    }[wrapper]
+
+    runner()
+
+    assert fake.captured == [{"x-opencode-session": "sess-wrapper"}]
+
+
+def test_extra_header_template_tolerates_whitespace_around_placeholder():
+    # config 层（llm_security）对占位符提取后 strip 归一，运行时必须同语义：
+    # 花括号内的空白不得导致字面量外发或静默差异。
+    headers = {"x-a": "{session_id }", "x-b": "{ session_id}", "x-c": "agent:{ agent_id }"}
+
+    with invocation_header_identity_scope(session_id="sess-ws", agent_id="ag-ws"):
+        resolved = resolve_extra_header_identity_templates(headers)
+
+    assert resolved == {"x-a": "sess-ws", "x-b": "sess-ws", "x-c": "agent:ag-ws"}
+
+
+@pytest.mark.parametrize("value", ["{{session_id}}", "{session_id}}", "{{session_id}"])
+def test_extra_header_template_dropped_for_residual_braces_after_resolution(value):
+    # 解析完成后仍残留花括号的值绝不外发（含字面量 {session_id} 形态）。
+    with invocation_header_identity_scope(session_id="sess-brace"):
+        resolved = resolve_extra_header_identity_templates({"x-opencode-session": value})
+
+    assert resolved == {}
+
+
+_TWO_LAYER_TEMPLATE_CASES = [
+    # (value, config_accepts, runtime_resolved_or_None)
+    ("{session_id }", True, "sess-2l"),
+    ("{ session_id}", True, "sess-2l"),
+    ("{{session_id}}", True, None),
+    ("{session_id}}", True, None),
+    ("{{session_id}", True, None),
+    ("{sessionId}", False, None),
+]
+
+
+@pytest.mark.parametrize(
+    ("value", "config_accepts", "runtime_resolved"),
+    _TWO_LAYER_TEMPLATE_CASES,
+)
+def test_header_template_two_layer_contract(value, config_accepts, runtime_resolved):
+    # config 层（llm_security）与运行时（payload_builder）必须对同一值给出
+    # 对应行为：要么都拒，要么 config 收 + 运行时正确解析/fail-safe 丢弃；
+    # 绝不允许 config 收下后运行时把字面量模板原样外发。
+    provider = {
+        "service_class": "self_hosted",
+        "vendor": "custom",
+        "base_url": "https://models.example/v1",
+        "credential_ref": "env:VIBELUTION_LLM_PROVIDER_LAB_API_KEY",
+        "extra_headers": {"x-opencode-session": value},
+    }
+    if config_accepts:
+        validate_llm_provider_target(provider)
+    else:
+        with pytest.raises(ValueError):
+            validate_llm_provider_target(provider)
+
+    with invocation_header_identity_scope(session_id="sess-2l"):
+        resolved_headers = resolve_extra_header_identity_templates({"x-opencode-session": value})
+
+    if runtime_resolved is None:
+        assert resolved_headers == {}
+    else:
+        assert resolved_headers == {"x-opencode-session": runtime_resolved}
+    assert resolved_headers.get("x-opencode-session") != value
+
+
+def test_header_template_drop_logs_once_without_header_value(caplog):
+    from core.llm import payload_builder as payload_builder_module
+
+    payload_builder_module._HEADER_TEMPLATE_DROP_LOGGED.clear()
+    headers = {"x-opencode-session": "{session_id}", "x-static": "keep"}
+
+    with caplog.at_level(logging.WARNING, logger="core.llm.payload_builder"):
+        with invocation_header_identity_scope(session_id=""):
+            first = resolve_extra_header_identity_templates(headers)
+            second = resolve_extra_header_identity_templates(headers)
+
+    assert first == {"x-static": "keep"}
+    assert second == {"x-static": "keep"}
+    drop_records = [
+        record
+        for record in caplog.records
+        if "identity template header dropped" in record.getMessage()
+    ]
+    assert len(drop_records) == 1
+    message = drop_records[0].getMessage()
+    assert "x-opencode-session" in message
+    assert "identity_missing" in message
+    # 绝不记录 header 值（extra_headers 可能包含敏感头内容）。
+    assert "{session_id}" not in message

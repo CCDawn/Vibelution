@@ -64,6 +64,10 @@ _LOCAL_PROVIDER_KINDS = {"local", "ollama", "llamacpp"}
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 _HEADER_TOKEN_PATTERN = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 _CREDENTIAL_HEADER_NAMES = {"authorization", "proxy-authorization", "x-api-key", "api-key"}
+# extra_headers 值支持的身份占位符白名单；任何 {...} 形式都必须命中白名单，
+# 防止 typo 被当作字面量外发。运行时解析见 core/llm/payload_builder.py。
+_HEADER_IDENTITY_TEMPLATE_PLACEHOLDERS = frozenset({"session_id", "agent_id"})
+_HEADER_TEMPLATE_BRACE_RE = re.compile(r"\{([^{}]*)\}")
 _REMOTE_PROVIDER_HOSTS = {
     "aliyun": {"dashscope.aliyuncs.com"},
     "anthropic": {"api.anthropic.com", "www.atpify.cn"},
@@ -146,6 +150,12 @@ def _validate_v2_provider_security_fields(provider: Any, *, context: str) -> Non
             raise ValueError(f"{context}.extra_headers must not contain credential-bearing names")
         if len(value) > 512:
             raise ValueError(f"{context}.extra_headers contains a value longer than 512 characters")
+        for placeholder in _HEADER_TEMPLATE_BRACE_RE.findall(value):
+            if placeholder.strip() not in _HEADER_IDENTITY_TEMPLATE_PLACEHOLDERS:
+                raise ValueError(
+                    f"{context}.extra_headers value for '{name}' uses unsupported placeholder "
+                    f"{{{placeholder}}}; supported placeholders are session_id and agent_id"
+                )
 
 
 def _is_ip_address(host: str) -> bool:
