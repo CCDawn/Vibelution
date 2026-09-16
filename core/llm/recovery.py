@@ -22,6 +22,33 @@ class LLMRecoveryDecision:
     request_context_compression: bool = False
 
 
+# Attempt-level capability-degradation actions. ``turn_llm_adapter`` executes
+# each of these at most once per turn, on the route that just failed, before
+# any declared fallback switch. Keeping the vocabulary next to
+# ``_action_for_category`` makes this module the single source of truth for
+# what a category's action means; the adapter must not re-declare the mapping.
+DEGRADED_RETRY_ACTIONS = frozenset(
+    {"retry_without_streaming", "disable_tools_and_retry_without_streaming"}
+)
+
+
+def degraded_retry_overrides(action: str) -> tuple[bool, bool]:
+    """Capability overrides a degraded retry attempt runs with.
+
+    Returns ``(disable_streaming, disable_tools)`` for an action. Both
+    degradation actions drop streaming: empty replies and tool-protocol
+    breakage are observed on the streamed path, and transport retries only
+    apply before the first streamed token anyway. Only the tool-protocol
+    action also drops tools, degrading that attempt to a plain text
+    completion the turn can still close on.
+    """
+    if action == "disable_tools_and_retry_without_streaming":
+        return True, True
+    if action == "retry_without_streaming":
+        return True, False
+    return False, False
+
+
 def plan_recovery(
     exc: Exception,
     *,
@@ -31,18 +58,22 @@ def plan_recovery(
     error = classify_exception(exc)
     action = _action_for_category(error.category)
     wait_seconds = _retry_wait_seconds(error, attempt, max_attempts)
+    disable_streaming, disable_tools = degraded_retry_overrides(action)
     return LLMRecoveryDecision(
         category=error.category,
         # protocol_error is deterministic on the same adapter path, so same-path
         # transport retries stay off; the decision stays retryable so the route
         # failure is reported as recoverable instead of an immediate hard stop.
+        # Its designed escape hatch is the adapter-level degraded
+        # ``retry_without_streaming`` below: a request-shape change (streaming
+        # off) capped at once per turn by the adapter, not a blind replay.
         retryable=error.retryable or error.category == "protocol_error",
         action=action,
         user_message=str(error),
         wait_seconds=wait_seconds,
         stop_current_turn=_should_stop_current_turn(error, attempt, max_attempts),
-        disable_streaming=error.category in {"empty_content_error", "tool_protocol_error"},
-        disable_tools=error.category == "tool_protocol_error",
+        disable_streaming=disable_streaming,
+        disable_tools=disable_tools,
         request_context_compression=error.category == "context_length_error",
     )
 
@@ -88,4 +119,9 @@ def _should_stop_current_turn(error: LLMError, attempt: int, max_attempts: int) 
     return attempt >= max_attempts
 
 
-__all__ = ["LLMRecoveryDecision", "plan_recovery"]
+__all__ = [
+    "DEGRADED_RETRY_ACTIONS",
+    "LLMRecoveryDecision",
+    "degraded_retry_overrides",
+    "plan_recovery",
+]

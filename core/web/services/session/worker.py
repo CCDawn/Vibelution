@@ -30,6 +30,7 @@ from core.web.services.session.research_thinking_budget import (
 from core.web.services.session.turn_diagnostics import (
     _heartbeat_chat_turn_work_run,
 )
+from core.web.services.session import turn_stuck_analyzer
 
 _STRICT_RESEARCH_TASK_KINDS = frozenset(
     {"hypothesis_design", "protocol_review", "result_evaluation"}
@@ -156,6 +157,29 @@ def _continuation_tool_observations(result: Any) -> list[tuple[str, bool]]:
         ).encode("utf-8")
         observations.append((hashlib.sha256(encoded).hexdigest(), not failed))
     return observations
+
+
+def _evaluate_turn_stuck(result: Any, accumulated_records: list) -> Any:
+    """Turn-scoped stuck-loop verdict for the continuation loop.
+
+    Appends this round's tool-call records to ``accumulated_records`` (per
+    turn only — the list is created fresh inside
+    ``_run_session_continuation_loop``) and analyzes the trailing window.
+    Fail-open by contract: with the switch off, on malformed results, or if
+    the analyzer raises, the loop continues untouched (returns ``None``).
+    """
+
+    try:
+        if not turn_stuck_analyzer.is_turn_stuck_detection_enabled():
+            return None
+        turn_stuck_analyzer.append_tool_call_records(result, accumulated_records)
+        verdict = turn_stuck_analyzer.analyze_tool_call_records(accumulated_records)
+        # Only a positive verdict pauses the loop; "not stuck" returns None.
+        if verdict is not None and verdict.stuck:
+            return verdict
+        return None
+    except Exception:
+        return None
 
 
 def _min_invocation_output_tokens() -> int:
@@ -2472,6 +2496,7 @@ def _run_session_continuation_loop(
     last_visible_result: dict[str, Any] | None = None
     observed_required_tool_names: set[str] = set()
     observed_tool_signatures: set[str] = set()
+    turn_stuck_records: list = []
     consecutive_no_progress_turns = 0
     continuation_progress_advanced = False
     if not history_messages:
@@ -2807,6 +2832,68 @@ def _run_session_continuation_loop(
         observed_tool_signatures.update(
             signature for signature, _succeeded in tool_observations
         )
+        stuck_verdict = _evaluate_turn_stuck(result, turn_stuck_records)
+        if stuck_verdict is not None:
+            user_notice = (
+                f"检测到重复动作（工具 {stuck_verdict.tool_name} 重复 "
+                f"{stuck_verdict.repeat_count} 次），已停止；可调整指令后重试。"
+            )
+            paused_result = s._build_auto_continue_paused_result(
+                result,
+                last_visible_result,
+                turn_index,
+                pause_reason=turn_stuck_analyzer.STUCK_LOOP_PAUSE_REASON,
+                status="paused_limit",
+                fallback_visible=user_notice,
+                internal_auto_continue_blocked=False,
+                reached_limit=True,
+            )
+            if isinstance(paused_result, dict):
+                existing_visible = str(paused_result.get("summary") or "").strip()
+                combined_visible = (
+                    f"{user_notice}\n\n{existing_visible}"
+                    if existing_visible and existing_visible != user_notice
+                    else user_notice
+                )
+                paused_result["summary"] = combined_visible
+                paused_result["raw_output"] = combined_visible
+                stuck_metadata = (
+                    dict(paused_result.get("metadata"))
+                    if isinstance(paused_result.get("metadata"), dict)
+                    else {}
+                )
+                stuck_metadata["turn_stuck_pattern"] = stuck_verdict.pattern
+                stuck_metadata["turn_stuck_evidence"] = stuck_verdict.evidence
+                paused_result["metadata"] = stuck_metadata
+            stuck_fields = {
+                "turnIndex": turn_index,
+                "reason": turn_stuck_analyzer.STUCK_LOOP_PAUSE_REASON,
+                "stuckPattern": stuck_verdict.pattern,
+                "stuckTool": stuck_verdict.tool_name,
+                "stuckRepeatCount": stuck_verdict.repeat_count,
+                "stuckEvidence": trim_lines(stuck_verdict.evidence, max_lines=3),
+            }
+            s._record_session_turn_lifecycle_event(
+                session_id,
+                "followup_prompt_blocked",
+                turn_id=getattr(turn_control, "turn_id", ""),
+                outcome="paused_limit",
+                fields=stuck_fields,
+            )
+            try:
+                s.record_runtime_scene_event(
+                    "conversation",
+                    "session_turn",
+                    "conversation.turn.stuck_loop_detected",
+                    level="warning",
+                    outcome="paused_limit",
+                    message="Turn stuck loop detected; continuation paused.",
+                    fields=stuck_fields,
+                    lifecycle=True,
+                )
+            except Exception:
+                pass
+            return paused_result
         if canonical_progress_advanced:
             continuation_progress_advanced = True
             consecutive_no_progress_turns = 0

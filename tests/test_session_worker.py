@@ -1332,7 +1332,7 @@ def test_continuation_no_progress_limit_resets_after_new_successful_tool(
     assert "continuation_limit_reached" not in result["metadata"]
 
 
-def test_continuation_pauses_only_after_consecutive_repeated_tool_error(
+def test_continuation_pauses_with_stuck_reason_on_identical_repeated_tool_error(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -1356,6 +1356,48 @@ def test_continuation_pauses_only_after_consecutive_repeated_tool_error(
         tmp_path,
         monkeypatch,
         [repeated_error, repeated_error, repeated_error],
+        no_progress_limit=3,
+    )
+
+    # The turn-scoped stuck analyzer now preempts the generic no-progress
+    # fuse with a more precise pause reason at the same round count.
+    assert len(calls) == 3
+    assert result["status"] == "paused_limit"
+    assert result["metadata"]["continuation_pause_reason"] == "stuck_loop_detected"
+    assert result["metadata"]["turn_stuck_pattern"] == "repeated_action_error"
+    assert result["metadata"]["continuation_limit_reached"] is True
+    assert "检测到重复动作" in result["summary"]
+    assert "source_writeback_tool" in result["summary"]
+
+
+def test_continuation_pauses_only_after_consecutive_varied_failures_hit_runaway_limit(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    def varying_failure(batch: int) -> dict:
+        return {
+            "status": "completed",
+            "summary": f"参数错误，准备重试（{batch}）。",
+            "raw_output": f"参数错误，准备重试（{batch}）。",
+            "outcome": "progress",
+            "tool_call_count": 1,
+            "tool_trace": [
+                {
+                    "name": "source_writeback_tool",
+                    "status": "failed",
+                    "args": {"payload_json": {"batch": batch}},
+                    "errorCode": f"unexpected_argument_{batch}",
+                    "error": f"unexpected argument: payload_json batch={batch}",
+                }
+            ],
+        }
+
+    # Distinct actions and distinct error texts per round: no stuck pattern
+    # fires, so the generic runaway no-progress fuse stays the owner.
+    calls, result = _run_scripted_continuation_results(
+        tmp_path,
+        monkeypatch,
+        [varying_failure(2), varying_failure(3), varying_failure(4)],
         no_progress_limit=3,
     )
 

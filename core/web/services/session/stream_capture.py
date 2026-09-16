@@ -370,6 +370,71 @@ class SessionTurnCapture:
         self.content = ""
         self._committed_content_length = 0
 
+    def reset_stream_restart_boundary(self) -> None:
+        """Drop in-progress stream state when the LLM stream restarts a retry.
+
+        LLM client 在 partial emission 后重试会整段重生成；capture 的追加语义
+        若不重置边界，会把新 attempt 的内容拼在失败 attempt 的残段之后（转写
+        与 UI 出现重复断裂内容，对齐消费端按边界去重的成熟实践）。只清未提交
+        的进行中边界：已提交的 journal 历史、已完成/已失败的工具调用与对应
+        journal 事件保持不变，最终 persist 的仍是成功 attempt 的完整结果。
+        """
+
+        s = _service()
+        with self._lock:
+            latest_thought_sequence = self._latest_thought_sequence
+            if (
+                latest_thought_sequence > 0
+                and latest_thought_sequence > self._last_committed_thought_sequence
+            ):
+                self.feedback_events = [
+                    event
+                    for event in self.feedback_events
+                    if not (
+                        event.get("kind") == "thought"
+                        and s._coerce_nonnegative_int(event.get("sequence")) == latest_thought_sequence
+                    )
+                ]
+            self._latest_thought_sequence = 0
+            self._latest_thought_text = ""
+            self._pending_related_thought_sequence = 0
+            if (
+                latest_thought_sequence > 0
+                and self._last_recorded_thought_sequence == latest_thought_sequence
+            ):
+                # 去重记忆仍指向被移除的进行中 thought：不清掉会把重试 attempt
+                # 重生成的相似推理误判为重复而整个丢弃（内容丢失）。
+                self._last_recorded_thought_sequence = 0
+                self._last_recorded_thought_text = ""
+            self.thought = ""
+            # 与 clear_content 同语义：新 attempt 从零累积。
+            self.content = ""
+            self._committed_content_length = 0
+            # 失败 attempt 发出的仍处于 running 的工具调用不可能再被执行（工具
+            # 执行发生在两次 invocation 之间，不跨同一 invocation 的 attempt），
+            # 从 live 边界摘除；新 attempt 的工具调用事件会重新进入。
+            stale_running_call_ids = {
+                str(entry.get("callId") or "").strip()
+                for entry in self.tool_calls
+                if s._normalize_tool_call_status(entry.get("status"), default="running") == "running"
+                and str(entry.get("callId") or "").strip()
+            }
+            if stale_running_call_ids:
+                self.tool_calls = [
+                    entry
+                    for entry in self.tool_calls
+                    if s._normalize_tool_call_status(entry.get("status"), default="running") != "running"
+                ]
+                self.feedback_events = [
+                    event
+                    for event in self.feedback_events
+                    if not (
+                        event.get("kind") == "tool"
+                        and str(event.get("callId") or "").strip() in stale_running_call_ids
+                        and s._normalize_tool_call_status(event.get("status"), default="running") == "running"
+                    )
+                ]
+
     def note_mental_state(self, *, mood: str = "", feeling: str = "", whisper: str = "") -> None:
         s = _service()
         self.mental_state = {
@@ -1463,6 +1528,15 @@ def _capture_session_ui_stream(
         target_session_id = event_session_id or expected_session_id
         if not target_session_id:
             return
+        if s._coerce_nonnegative_int(data.get("streamRestart")) > 0:
+            # LLM client 在 partial emission 后重试的内部边界标记（复用既有
+            # LLM_STATUS 通道新增的 streamRestart 字段，不改任何 SSE 事件名）：
+            # 先清失败 attempt 的进行中边界，再继续常规状态处理。处理绝不抛
+            # 错：重置失败最多重复显示，不得中断流。
+            try:
+                _reset_capture_stream_restart_boundary(s, target_session_id, context, capture)
+            except Exception:
+                pass
         status = str(data.get("status") or "").strip()
         if not status:
             return
@@ -1569,6 +1643,30 @@ def _capture_session_ui_stream(
             _SESSION_UI_CAPTURE_CONTEXT.reset(token)
             for callback_id in callback_ids:
                 event_bus.unsubscribe_by_id(callback_id)
+
+
+def _reset_capture_stream_restart_boundary(
+    s: Any,
+    session_id: str,
+    context: Any,
+    capture: SessionTurnCapture,
+) -> None:
+    """Reset the live capture boundary for an LLM stream restart marker.
+
+    清空失败 attempt 的进行中 thought 边界、partial content 与残留 running
+    工具条目，并同步 text batcher / live output，让重试 attempt 的内容从干净
+    边界开始写入。调用方（llm_status_event_proxy）负责兜底 try/except。
+    """
+
+    batcher = context.get("textBatcher") if isinstance(context, dict) else None
+    capture.reset_stream_restart_boundary()
+    if isinstance(batcher, _SessionUiCaptureTextBatcher):
+        batcher.clear_thought()
+        batcher.clear_response()
+    else:
+        s._set_session_live_output(session_id, turn_id=capture.turn_id, thought="")
+        s._set_session_live_output(session_id, turn_id=capture.turn_id, content="")
+
 
 def _ensure_session_ui_capture_hooks(ui: Any) -> None:
     s = _service()
