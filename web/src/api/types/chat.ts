@@ -654,11 +654,28 @@ export type UserConversationMessage = ConversationMessageBase & {
   references?: SessionReferenceAttachment[];
 };
 
+/**
+ * Provider-observed usage for one completed turn. Present only when the
+ * provider reported usage; the UI must fail-open to "no data" otherwise.
+ */
+export type SessionTurnUsageStats = {
+  inputTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  cachedInputTokens: number;
+  /** Measured final LLM call duration in milliseconds; 0 when unknown. */
+  elapsedMs: number;
+  /** `completionTokens / (elapsedMs / 1000)`; null when not measurable. */
+  tokensPerSecond?: number | null;
+  recordedAt?: string;
+};
+
 export type AssistantConversationTurn = ConversationMessageBase & {
   role: "assistant";
   turnId: string;
   status: SessionTurnItemStatus;
   turnItems: SessionTurnItem[];
+  usageStats?: SessionTurnUsageStats;
 };
 
 export type ConversationMessage = UserConversationMessage | AssistantConversationTurn;
@@ -1045,6 +1062,10 @@ export type SessionLlmUsage = {
   cacheCreationInputTokens: number;
   uncachedInputTokens: number;
   cacheHitRate: number;
+  /** Measured final-call duration in ms; 0 when the client did not report it. */
+  latencyMs?: number;
+  /** Output tokens per second derived from provider usage; null when unmeasurable. */
+  tokensPerSecond?: number | null;
   cacheUsageObserved?: boolean;
   cacheUsageMissingReason?: string;
   provider: string;

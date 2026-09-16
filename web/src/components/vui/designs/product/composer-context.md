@@ -16,11 +16,13 @@
 
 - 主条分母为模型窗口上限，不是已用内容总量；未知上限不显示 0%。容量与分项统一读取 lastContextComposition，禁止将缓存 calibratedSegments 混入上下文来源；分段独立估算可能与总量略有差异。
 - 提示、运行规范和项目规则合并为一组，历史单列，其余来源保留在其他内容中。明细仍保留每个来源的名称、数量、比例和可用预览。
-- 缓存只有 `provider_usage` 且已观测时展示命中比例；`computed_hit` 等本地估算不参与该比例。供应商未返回时明确显示无数据。
+- 缓存只有 `provider_usage` 且已观测时展示命中比例，并同时给出绝对 cached tokens（如 `63% · 55.6K tokens`）；`computed_hit` 等本地估算不参与该比例。供应商未返回缓存数据时显示 `—`（fail-open），不猜测。
+- 自动压缩指示器（Claude Code 范式）：阈值只读自后端 `contextCompression.strategy.levels` 最低档 `thresholdTokens`，禁止前端硬编码；仅在「距自动压缩剩余 <40%」时出现，同时给出剩余百分比与绝对 tokens（如 `38%（≈38K tokens）`），并注明「基于上次调用估算」与压缩行为说明（摘要保留要点、完整历史仍在）。剩余充足或压缩关闭时不渲染，避免常驻噪音。
+- 生成速度：优先展示后端投递的 `llmUsage.tokensPerSecond`（厂商 usage + 最终调用耗时推导），悬停注明口径为上次调用；后端未能量测（provider 未回 usage）时显示 `—`，不再回落到前端文本估算冒充实测。
 - 完整缓存诊断沿用原回调，从第二层打开。组明细比例以列出内容为分母，不能解读为容量比例。
 - 浮层约 324px，受视口限制；明细可滚动，深浅色使用共享语义 token，键盘、Escape、点击外部由 VPopover 负责。
 
 ### 实现落点与验证
 
 `components/conversation/ComposerContextRing.tsx` 与 `routes/chat/composerContextModel.ts`。
-回归覆盖真实 0、未知容量、估算缓存不冒充实测、来源展开及切换会话收起。
+回归覆盖真实 0、未知容量、估算缓存不冒充实测、来源展开及切换会话收起；新增覆盖剩余 39%/40%/41% 阈值边界、`usageStats`/`tokensPerSecond` 缺失降级为 `—`、observed 缓存绝对 tokens。

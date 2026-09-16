@@ -1620,6 +1620,11 @@ def _normalize_messages(
                 )
                 else "completed"
             )
+            usage_stats = _assistant_usage_stats_payload(
+                metadata.get("llmUsage") or metadata.get("llm_usage")
+                if isinstance(metadata, dict)
+                else None
+            )
             entry = {
                 "id": entry["id"],
                 "role": "assistant",
@@ -1628,6 +1633,7 @@ def _normalize_messages(
                 "status": assistant_status,
                 "turnItems": turn_items,
                 "metadata": dict(metadata) if isinstance(metadata, dict) else {},
+                **({"usageStats": usage_stats} if usage_stats else {}),
             }
         node_id = str(raw.get("nodeId") or "").strip()
         if node_id:
@@ -4225,6 +4231,20 @@ def _normalize_turn_llm_usage(value: Any) -> dict[str, Any] | None:
         uncached_input_tokens = max(0, input_tokens - cached_input_tokens)
     else:
         uncached_input_tokens = 0
+    latency_ms = s._coerce_nonnegative_int(value.get("latency_ms") or value.get("latencyMs") or 0)
+    raw_tokens_per_second = value.get("tokensPerSecond")
+    if raw_tokens_per_second is None:
+        raw_tokens_per_second = value.get("tokens_per_second")
+    try:
+        tokens_per_second = (
+            round(float(raw_tokens_per_second), 1)
+            if raw_tokens_per_second is not None and not isinstance(raw_tokens_per_second, bool)
+            else None
+        )
+    except (TypeError, ValueError):
+        tokens_per_second = None
+    if tokens_per_second is None and latency_ms > 0 and output_tokens > 0:
+        tokens_per_second = round((output_tokens * 1000) / latency_ms, 1)
     return {
         "source": source,
         "inputTokens": input_tokens,
@@ -4235,6 +4255,8 @@ def _normalize_turn_llm_usage(value: Any) -> dict[str, Any] | None:
         "cacheCreationInputTokens": cache_creation_input_tokens,
         "uncachedInputTokens": uncached_input_tokens,
         "cacheHitRate": (cached_input_tokens / input_tokens) if input_tokens > 0 else 0.0,
+        "latencyMs": latency_ms,
+        "tokensPerSecond": tokens_per_second,
         "cacheUsageObserved": cache_usage_observed,
         "cacheUsageMissingReason": cache_usage_missing_reason if not cache_usage_observed else "",
         "provider": s.compact_repeated_metadata_text(value.get("provider") or ""),
@@ -4245,6 +4267,27 @@ def _normalize_turn_llm_usage(value: Any) -> dict[str, Any] | None:
         ).strip(),
         "llmModelId": str(value.get("llm_model_id") or value.get("llmModelId") or "").strip(),
         "recordedAt": str(value.get("recorded_at") or value.get("recordedAt") or "").strip(),
+    }
+
+
+def _assistant_usage_stats_payload(value: Any) -> dict[str, Any] | None:
+    """Public per-turn usage contract for the assistant turn DTO.
+
+    Projected only from provider-observed usage so the UI can fail-open to
+    "no data" instead of guessing from local estimates.
+    """
+    s = _service()
+    usage = s._normalize_turn_llm_usage(value)
+    if usage is None or str(usage.get("source") or "").strip() != "provider_usage":
+        return None
+    return {
+        "inputTokens": max(0, int(usage.get("inputTokens") or 0)),
+        "completionTokens": max(0, int(usage.get("outputTokens") or 0)),
+        "totalTokens": max(0, int(usage.get("totalTokens") or 0)),
+        "cachedInputTokens": max(0, int(usage.get("cachedInputTokens") or 0)),
+        "elapsedMs": max(0, int(usage.get("latencyMs") or 0)),
+        "tokensPerSecond": usage.get("tokensPerSecond"),
+        "recordedAt": str(usage.get("recordedAt") or "").strip(),
     }
 
 

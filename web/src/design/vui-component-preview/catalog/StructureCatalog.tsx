@@ -32,6 +32,15 @@ const composerContextRingPreviewModel: ComposerContextRingModel = {
   usedLabel: "88.2K",
   empty: false,
   cacheState: "observed",
+  cachedTokensLabel: "55.6K",
+  generationTokensPerSecond: 38.4,
+  autoCompact: {
+    remainingPercent: 38,
+    remainingTokens: 38000,
+    remainingTokensLabel: "38K",
+    thresholdPercent: 62,
+    thresholdTokens: 126000,
+  },
   segments: [
     { key: "prompt", name: "提示与规范", tokens: 21000, tokensLabel: "21K", pctLabel: "24%" },
     { key: "history", name: "对话历史", tokens: 12000, tokensLabel: "12K", pctLabel: "14%" },

@@ -2087,6 +2087,8 @@ export function ChatCodingRouteWorkbench() {
   const composerContextRing = useMemo(() => {
     const usageUsed = lastContextComposition?.totalTokens ?? detail?.contextUsage?.used ?? 0;
     const usageLimit = lastContextComposition?.limitTokens ?? detail?.contextUsage?.limit ?? 0;
+    const runtimeCompression = runtime?.contextCompression;
+    const compressionLevels = runtimeCompression?.strategy?.levels ?? [];
     return buildComposerContextRingModel({
       usageUsed,
       usageLimit,
@@ -2102,12 +2104,19 @@ export function ChatCodingRouteWorkbench() {
       cacheUsageObserved: lastCacheComposition?.cacheUsageObserved,
       cachedInputTokens: lastCacheComposition?.cachedInputTokens,
       cacheCreationInputTokens: lastCacheComposition?.cacheCreationInputTokens,
+      // Backend-owned auto-compression trigger (lowest configured level); read-only.
+      autoCompactThresholdTokens: compressionLevels.length
+        ? Math.min(...compressionLevels.map(level => level.thresholdTokens))
+        : undefined,
+      autoCompactEnabled: runtimeCompression?.enabled,
+      tokensPerSecond: detail?.llmUsage?.tokensPerSecond ?? null,
     });
   }, [
     cacheCompositionPercent,
     cacheDetailAvailable,
     detail?.contextUsage?.limit,
     detail?.contextUsage?.used,
+    detail?.llmUsage?.tokensPerSecond,
     lang,
     lastCacheComposition?.cacheCreationInputTokens,
     lastCacheComposition?.cacheUsageObserved,
@@ -2116,6 +2125,7 @@ export function ChatCodingRouteWorkbench() {
     lastContextComposition?.limitTokens,
     lastContextComposition?.totalTokens,
     lastContextComposition?.segments,
+    runtime?.contextCompression,
     t,
   ]);
   const {

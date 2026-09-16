@@ -29,8 +29,15 @@ const styles = {
     "mb-2 mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-[var(--vui-control-muted)] p-2 text-[10px] leading-relaxed",
   cache:
     "mt-3 flex items-center justify-between gap-3 border-t border-[var(--vui-border-subtle)] pb-2 pt-3 text-[11px]",
+  cacheNext:
+    "flex items-center justify-between gap-3 border-t border-[var(--vui-border-subtle)] pb-2 pt-3 text-[11px]",
   muted: "text-[var(--fg-tertiary)]",
   observed: "text-[var(--accent-cool)] tabular-nums",
+  autoCompact:
+    "mt-3 rounded-md border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-2.5 text-[11px]",
+  autoCompactTitle:
+    "flex items-center justify-between gap-2 font-medium text-[var(--accent-warm)] tabular-nums",
+  autoCompactNote: "mt-1 text-[10px] leading-relaxed text-[var(--fg-tertiary)]",
   detailNote: "mb-2 text-[10px] leading-relaxed text-[var(--fg-tertiary)]",
   detailLink: `${quietButton} !flex !h-[30px] !w-full !items-center !justify-between !gap-2 !p-0 !text-[11px] !text-[var(--accent-cool)] hover:underline`,
 };
