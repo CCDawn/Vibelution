@@ -8,7 +8,6 @@ import {
   buildConversationTurnErrorReasonRows,
   buildCurrentTurnErrorRows,
   buildTurnErrorDiagnosticRows,
-  formatTurnErrorRetrySummary,
   resolveConversationTurnErrorRecoveryAction,
   resolveConversationTurnErrorType,
   resolveSessionTurnErrorRecoveryAction,
@@ -171,7 +170,7 @@ describe("conversationTurnErrorPresentation", () => {
     ]);
   });
 
-  it("summarizes exhausted retries as one human count instead of a per-attempt trail", () => {
+  it("keeps the settled failure to one plain line and files the retry count under diagnostics", () => {
     const turnError = {
       reasonSummary: "upstream unavailable",
       retryHistory: [
@@ -181,10 +180,14 @@ describe("conversationTurnErrorPresentation", () => {
       ],
     } as SessionTurnError;
 
-    expect(formatTurnErrorRetrySummary(turnError, "zh")).toBe("已重试 5 次");
-    expect(formatTurnErrorRetrySummary(turnError, "en")).toBe("Retried 5 times");
-    expect(summarizeCurrentTurnError(turnError, "zh")).toBe("upstream unavailable · 已重试 5 次");
-    // The settled card keeps one summary line; per-attempt retry rows are transient UI only.
+    // Codex parity: the summary line never carries a retry trail.
+    expect(summarizeCurrentTurnError(turnError, "zh")).toBe("upstream unavailable");
+    expect(summarizeCurrentTurnError({ ...turnError, reasonSummary: "" } as SessionTurnError, "zh"))
+      .not.toContain("已重试");
+    const retryRow = { label: "重试", value: "5 次" };
+    expect(buildCurrentTurnErrorRows(turnError, "zh")).toContainEqual(retryRow);
+    expect(buildCurrentTurnErrorRows(turnError, "en")).toContainEqual({ label: "Retries", value: "5" });
+    // Per-attempt retry rows stay out of diagnostics.
     expect(buildCurrentTurnErrorRows(turnError, "zh")).not.toContainEqual(
       expect.objectContaining({ label: "重试记录" }),
     );

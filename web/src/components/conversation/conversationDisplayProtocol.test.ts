@@ -6,19 +6,20 @@ import {
 } from "./conversationDisplayProtocol";
 
 describe("conversationDisplayProtocol", () => {
-  it("hides internal pipeline statuses but keeps model retries visible in the process stream", () => {
+  it("hides internal pipeline statuses and keeps model retries out of the settled stream", () => {
     expect(shouldDisplayRuntimeStatus({
       kind: "status",
       name: "context_prepare",
       status: "done",
       summary: "正在准备对话上下文...",
     })).toBe(false);
+    // Codex parity: a retry heartbeat is live status-note UI, never a row.
     expect(shouldDisplayRuntimeStatus({
       kind: "status",
       name: "retrying",
       status: "done",
       summary: "第 1/5 次；原因：server_error。",
-    })).toBe(true);
+    })).toBe(false);
   });
 
   it("keeps failed internal runtime statuses visible as temporary error information", () => {
@@ -113,7 +114,17 @@ describe("conversationDisplayProtocol", () => {
       tone: "warning",
       title: "retrying",
       summary: "第 1/5 次；原因：server_error。",
-    })).toBe(true);
+    })).toBe(false);
+    expect(shouldDisplayTranscriptCell({
+      id: "retry-turn-item",
+      kind: "status",
+      messageId: "message-1",
+      status: "running",
+      tone: "warning",
+      title: "模型重试",
+      summary: "重试中",
+      originType: "retry",
+    })).toBe(false);
     expect(shouldDisplayTranscriptCell({
       id: "tool-call",
       kind: "tool_call",

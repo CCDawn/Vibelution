@@ -1247,19 +1247,19 @@ timeline:
   toolApprovalFallback:
     "toolApprovalFallback z-[6] min-w-0 w-full max-w-[min(44rem,100%)] shrink-0 justify-self-center px-2 pb-1.5 pt-0.5",
   turnError:
-    "vui-components-conversationview turnError mx-auto grid w-[min(100%,760px)] min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_28%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_5%,var(--vui-surface-row))] px-3 py-2.5 text-[var(--state-error)] shadow-none",
+    "vui-components-conversationview turnError mx-auto flex w-[min(100%,760px)] min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 px-0 py-1 text-[var(--fg-secondary)] shadow-none",
   turnErrorDiagnostics:
     "vui-components-conversationview turnErrorDiagnostics min-w-0 [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)]",
   turnErrorDiagnosticsBody:
-    "vui-components-conversationview turnErrorDiagnosticsBody mt-1.5 grid min-w-0 gap-1 border-t border-[color-mix(in_srgb,var(--state-error)_18%,transparent)] pt-1.5",
+    "vui-components-conversationview turnErrorDiagnosticsBody mt-1.5 grid min-w-0 gap-1 border-t border-[var(--vui-border-subtle)] pt-1.5",
   turnErrorDiagnosticsSummary:
     "vui-components-conversationview turnErrorDiagnosticsSummary w-fit cursor-pointer select-none font-medium text-[var(--fg-tertiary)] hover:text-[var(--fg-secondary)]",
   turnErrorDetail:
     "vui-components-conversationview turnErrorDetail min-w-0 whitespace-pre-wrap break-words [font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--fg-tertiary)] [overflow-wrap:anywhere]",
   turnErrorLabel:
-    "vui-components-conversationview turnErrorLabel min-w-0 w-fit [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--state-error)]",
+    "vui-components-conversationview turnErrorLabel sr-only",
   turnErrorNotice:
-    "vui-components-conversationview turnErrorNotice block w-[min(100%,920px)] max-w-full min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2.5 py-2 text-[var(--fg-secondary)] shadow-none",
+    "vui-components-conversationview turnErrorNotice block w-[min(100%,760px)] max-w-full min-w-0 px-0 py-1 text-[var(--fg-secondary)] shadow-none",
   turnErrorNoticeBody:
     "vui-components-conversationview turnErrorNoticeBody block min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   turnErrorNoticeIcon:
@@ -1267,21 +1267,21 @@ timeline:
   turnErrorNoticeMeta:
     "vui-components-conversationview turnErrorNoticeMeta sr-only",
   turnErrorNoticeText:
-    "vui-components-conversationview turnErrorNoticeText m-0 min-w-0 whitespace-normal break-words font-mono [font-size:var(--vui-font-sm)] leading-[1.55] text-[var(--fg-secondary)] [overflow-wrap:anywhere] [&_.markdownBody]:max-w-[min(100%,128ch)] [&_.markdownBody]:whitespace-normal [&_.markdownBody]:break-words [&_.markdownBody]:[overflow-wrap:anywhere] [&_.markdownBody_p]:m-0",
+    "vui-components-conversationview turnErrorNoticeText m-0 min-w-0 whitespace-normal break-words font-mono [font-size:var(--vui-font-sm)] leading-[1.55] text-[var(--fg-secondary)] [overflow-wrap:anywhere] before:mr-1 before:select-none before:text-[var(--state-error)] before:content-['■'] [&_.markdownBody]:max-w-[min(100%,128ch)] [&_.markdownBody]:whitespace-normal [&_.markdownBody]:break-words [&_.markdownBody]:[overflow-wrap:anywhere] [&_.markdownBody_p]:m-0",
   turnErrorReasonList:
-    "vui-components-conversationview turnErrorReasonList grid min-w-0 gap-1 border-t border-[color-mix(in_srgb,var(--state-error)_20%,transparent)] pt-1.5 [font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    "vui-components-conversationview turnErrorReasonList grid min-w-0 gap-1 border-t border-[var(--vui-border-subtle)] pt-1.5 [font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   turnErrorReasonRow:
     "vui-components-conversationview turnErrorReasonRow grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] items-start gap-x-2 gap-y-0.5 [&_dd]:m-0 [&_dd]:min-w-0 [&_dd]:whitespace-pre-wrap [&_dd]:break-words [&_dd]:[overflow-wrap:anywhere] [&_dt]:font-semibold [&_dt]:text-[var(--fg-tertiary)]",
   turnErrorActions:
     "vui-components-conversationview turnErrorActions flex min-w-0 flex-wrap items-center justify-end gap-1.5",
   turnErrorRetryButton:
-    "vui-components-conversationview turnErrorRetryButton w-fit rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_28%,transparent)] px-2 py-0.5 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--state-error)] hover:bg-[color-mix(in_srgb,var(--state-error)_8%,transparent)]",
+    "vui-components-conversationview turnErrorRetryButton w-fit rounded-[var(--radius-control)] border-0 bg-transparent px-1.5 py-0.5 [font-size:var(--vui-font-xs)] font-medium leading-tight text-[var(--fg-secondary)] hover:bg-[var(--vui-control-muted)] hover:text-[var(--fg-primary)]",
   turnErrorText:
-    "vui-components-conversationview turnErrorText grid min-w-0 gap-1 whitespace-normal break-words [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
+    "vui-components-conversationview turnErrorText flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 whitespace-normal break-words [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere] before:mr-1 before:select-none before:text-[var(--state-error)] before:content-['■']",
   turnErrorTurn:
     "vui-components-conversationview turnErrorTurn min-w-0 [&_.turnContent]:gap-1",
   turnErrorType:
-    "vui-components-conversationview turnErrorType min-w-0 w-fit max-w-full rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--state-error)_10%,transparent)] px-1.5 py-0.5 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--state-error)]",
+    "vui-components-conversationview turnErrorType min-w-0 w-fit max-w-full [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   turnIconButton: `vui-components-conversationview turnIconButton min-w-0 ${vuiOpaqueRowClass} p-2 inline-grid h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] place-items-center bg-[var(--vui-control-muted)] p-0 text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] shrink-0 text-[var(--fg-tertiary)]`,
   turnIconButtonActive: `vui-components-conversationview turnIconButtonActive min-w-0 ${vuiOpaqueRowClass} p-2 shrink-0 text-[var(--fg-tertiary)] ${vuiStateSelectedRowClass}`,
   turnVersionSwitcher:
