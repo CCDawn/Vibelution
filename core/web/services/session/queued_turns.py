@@ -14,11 +14,23 @@ from __future__ import annotations
 
 import threading
 import uuid
+from datetime import datetime, timezone
 from typing import Any
+
+from core.web.services.session.timebase import parse_timestamp_utc
 
 QUEUED_TURN_STATE_KEY = "queued_turns"
 MAX_QUEUED_TURNS_PER_SESSION = 20
 DRAINED_TURN_MESSAGE_SOURCE = "queued_turn"
+
+# A claim normally settles within seconds: the submit either accepts the turn,
+# keeps the row queued on a busy race, or fails it into "blocked". Only a
+# process crash between claim and settle leaves a row in "starting" forever,
+# and selection only takes "queued" rows, so such a row would never drain
+# again. Ten minutes is far above any legitimate claim->settle window, so a
+# reset at that age cannot race a live claim, while the zombie row is
+# recovered on the next drain instead of blocking the queue permanently.
+STARTING_CLAIM_STALE_SECONDS = 600
 
 _DRAIN_LOCK = threading.Lock()
 _DRAINING_SESSIONS: set[str] = set()
@@ -263,6 +275,29 @@ def remove_session_queued_turn(
     return normalized_rows
 
 
+def _reset_stale_starting_rows(s: Any, rows: list[dict[str, Any]]) -> bool:
+    """Reset rows stuck in "starting" beyond ``STARTING_CLAIM_STALE_SECONDS``.
+
+    Returns True when at least one row was reset back to "queued" (with a
+    refreshed ``updatedAt``). Rows whose ``updatedAt`` is missing or
+    unparseable are treated as stale: the claim path always writes a fresh
+    timestamp, so an unreadable one cannot belong to a live claim. The caller
+    owns locking and persistence; this helper only mutates ``rows``.
+    """
+
+    now = datetime.now(timezone.utc)
+    changed = False
+    for index, row in enumerate(rows):
+        if row["status"] != "starting":
+            continue
+        updated = parse_timestamp_utc(row.get("updatedAt"))
+        if updated is not None and (now - updated).total_seconds() < STARTING_CLAIM_STALE_SECONDS:
+            continue
+        rows[index] = {**row, "status": "queued", "updatedAt": s._now_timestamp()}
+        changed = True
+    return changed
+
+
 def _claim_next_queued_turn(session_id: str) -> dict[str, Any] | None:
     """Mark the first drainable queued turn as starting; None when nothing may start.
 
@@ -271,6 +306,8 @@ def _claim_next_queued_turn(session_id: str) -> dict[str, Any] | None:
     """
 
     s = _service()
+    reset_stale = False
+    item: dict[str, Any] | None = None
     with s._CHAT_STATE_LOCK:
         if s._is_session_running(session_id):
             return None
@@ -278,13 +315,18 @@ def _claim_next_queued_turn(session_id: str) -> dict[str, Any] | None:
         if conversation is None:
             return None
         rows = session_queued_turn_rows(conversation)
+        # Recover rows abandoned in "starting" by a crash between claim and
+        # settle before selecting; otherwise they would never drain again.
+        reset_stale = _reset_stale_starting_rows(s, rows)
+        if reset_stale:
+            _write_queued_turn_rows(s, session_id, conversation, rows)
         index = next((i for i, row in enumerate(rows) if row["status"] == "queued"), -1)
-        if index < 0:
-            return None
-        item = rows[index]
-        rows[index] = {**item, "status": "starting", "updatedAt": s._now_timestamp()}
-        _write_queued_turn_rows(s, session_id, conversation, rows)
-    s._publish_session_detail_snapshot(session_id)
+        if index >= 0:
+            item = rows[index]
+            rows[index] = {**item, "status": "starting", "updatedAt": s._now_timestamp()}
+            _write_queued_turn_rows(s, session_id, conversation, rows)
+    if item is not None or reset_stale:
+        s._publish_session_detail_snapshot(session_id)
     return item
 
 

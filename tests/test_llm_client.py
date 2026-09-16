@@ -126,11 +126,17 @@ def test_strict_output_reaches_supported_provider_payload():
     assert len(client._last_payload_protocol_summary["outputSchemaSha256"]) == 64
 
 
-def test_compression_role_disables_provider_retry_amplification() -> None:
+def test_compression_role_uses_bounded_retry_budget() -> None:
+    # 压缩是 context_length_error 的唯一恢复路径：1 次重试预算会让一次瞬态
+    # 网络/网关错误直接杀死整个回合；3 次有界预算容忍抖动且仍小于普通角色
+    # 的 5 上限（快速失败语义不丢）。
     profile = SimpleNamespace(retry_policy=SimpleNamespace(max_attempts=5))
 
     assert _retry_policy_max_attempts(profile) == 5
-    assert _retry_policy_max_attempts(profile, role="compression") == 1
+    assert _retry_policy_max_attempts(profile, role="primary") == 5
+    assert _retry_policy_max_attempts(profile, role="compression") == 3
+    assert _retry_policy_max_attempts(profile, role="COMPRESSION") == 3
+    assert _retry_policy_max_attempts(profile, role="review") == 5
 
 
 def test_connection_category_backoff_is_capped_short() -> None:

@@ -53,6 +53,51 @@ _CLASSIFICATION_TABLE = [
         "server_error",
         TRANSIENT_RETRYABLE,
     ),
+    # one-api/new-api 系聚合网关瞬态 400：渠道耗尽/被禁用/分组调度失败是
+    # 网关侧状态，同体重放可恢复，按 server_error 可重试（pattern 见
+    # errors.GATEWAY_TRANSIENT_400_PHRASES）。
+    (
+        "Error code: 400 - [{'error': {'message': '当前分组 default 下对于模型 gpt-4o 无可用渠道', 'type': 'one_api_error'}}]",
+        "server_error",
+        TRANSIENT_RETRYABLE,
+    ),
+    (
+        "Error code: 400 - 无可用渠道 (request id: 2026091609001234567890)",
+        "server_error",
+        TRANSIENT_RETRYABLE,
+    ),
+    (
+        "litellm.BadRequestError: Error code: 400 - no available channel for model gpt-4o",
+        "server_error",
+        TRANSIENT_RETRYABLE,
+    ),
+    (
+        "Error code: 400 - 该渠道已被禁用，请更换分组后重试",
+        "server_error",
+        TRANSIENT_RETRYABLE,
+    ),
+    # 中文限流文案（无 "429"/"rate limit" 字样）：经集中分类器中文证据门
+    # 不降级，按 rate_limit 可重试（pattern 见 errors.CHINESE_RATE_LIMIT_PHRASES）。
+    (
+        "当前令牌每分钟最多请求 3 次",
+        "rate_limit",
+        TRANSIENT_RETRYABLE,
+    ),
+    (
+        "Error code: 429 - 当前令牌每分钟最多请求 3 次，请稍后再试",
+        "rate_limit",
+        TRANSIENT_RETRYABLE,
+    ),
+    (
+        "请求过于频繁，请稍后再试",
+        "rate_limit",
+        TRANSIENT_RETRYABLE,
+    ),
+    (
+        "令牌额度已耗尽",
+        "rate_limit",
+        TRANSIENT_RETRYABLE,
+    ),
     # --- 预算/上下文族 → budget_or_context --------------------------------
     ("maximum context length exceeded", "context_length_error", BUDGET_OR_CONTEXT),
     ("insufficient_quota: billing limit reached", "quota_error", BUDGET_OR_CONTEXT),
@@ -63,6 +108,23 @@ _CLASSIFICATION_TABLE = [
     ("bad request: 400", "provider_protocol_error", PERMANENT),
     ("profile `primary` 不支持 tool support", "capability_error", PERMANENT),
     ("missing profile for role", "configuration_error", PERMANENT),
+    # 回归红线：网关瞬态 400 pattern 放宽后，真参数错误（schema/参数族 400、
+    # 无渠道/分组调度词汇）仍 fail-closed 判死。
+    (
+        "Error code: 400 - invalid params: messages[0].content must be a string",
+        "provider_protocol_error",
+        PERMANENT,
+    ),
+    (
+        "Error code: 400 - {'error': {'message': \"Invalid type for 'input[1]': expected string\"}}",
+        "provider_protocol_error",
+        PERMANENT,
+    ),
+    (
+        "400 bad_request unknown parameter: stream_options.include_usage",
+        "provider_protocol_error",
+        PERMANENT,
+    ),
     # --- 未知错误 fail-closed：保持不可重试，绝不放宽 ----------------------
     ("something completely unknown happened", "provider_protocol_error", PERMANENT),
 ]
@@ -189,6 +251,96 @@ def test_thinking_roundtrip_rule_requires_full_phrase_conjunction():
     classification = classify_error(
         Exception("Error code: 400 - reasoning_content missing in thinking mode")
     )
+    assert classification.category == "provider_protocol_error"
+    assert classification.disposition == PERMANENT
+
+
+# ---------------------------------------------------------------------------
+# 聚合网关瞬态 400 / 中文限流文案（one-api/new-api 系）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Error code: 400 - [{'error': {'message': '当前分组 default 下对于模型 gpt-4o 无可用渠道'}}]",
+        "Error code: 400 - 无可用渠道 (request id: 2026091609001234567890)",
+        "Error code: 400 - 模型 gpt-4o 无可用渠道",
+        "no available channel for model gpt-4o (400)",
+        "Error code: 400 - 渠道被禁用",
+        "Error code: 400 - 该渠道已被禁用",
+        "Error code: 400 - 渠道被管理员禁用，请稍后重试",
+        "Error code: 400 - 渠道已停用",
+    ],
+)
+def test_gateway_transient_400_channel_messages_are_retryable_server_error(message):
+    # 网关渠道调度文案（即便带 "Error code: 400" 前缀）按服务端瞬态处理，
+    # 进入 client 重试环而非确定性判死。
+    bare = classify_exception(Exception(message))
+    assert bare.category == "server_error", message
+    assert bare.retryable is True, message
+    assert bare.details.get("httpStatus") == 400, message
+    assert bare.details.get("gatewayChannelTransient") is True, message
+
+    classification = classify_error(Exception(message))
+    assert classification.category == "server_error", message
+    assert classification.disposition == TRANSIENT_RETRYABLE, message
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "当前令牌每分钟最多请求 3 次",
+        "Error code: 429 - 当前令牌每分钟最多请求 3 次，请稍后再试",
+        "每分钟只能请求 60 次",
+        "请求过于频繁，请稍后再试",
+        "请求频率超限，请稍后重试",
+        "令牌额度已耗尽",
+        "Error code: 403 - 令牌额度已用尽",
+    ],
+)
+def test_chinese_rate_limit_messages_are_rate_limit_and_survive_evidence_gate(message):
+    # 关键：中文文案不含 "429"/"rate limit"，集中分类器的 429 证据门必须把
+    # errors.CHINESE_RATE_LIMIT_PHRASES 视为真限流证据，不得降级回 permanent。
+    bare = classify_exception(Exception(message))
+    assert bare.category == "rate_limit", message
+    assert bare.retryable is True, message
+
+    classification = classify_error(Exception(message))
+    assert classification.category == "rate_limit", message
+    assert classification.disposition == TRANSIENT_RETRYABLE, message
+    assert classification.retryable is True, message
+
+
+def test_gateway_400_patterns_stay_specific_to_real_param_errors():
+    # 回归红线：pattern 放宽绝不吞掉真参数错误——"invalid params"/schema 类
+    # 400（无渠道/分组调度词汇）仍 fail-closed（含既有 tool 协议优先级）。
+    cases = [
+        (
+            "Error code: 400 - invalid params: messages[0].content must be a string",
+            "provider_protocol_error",
+        ),
+        (
+            "Error code: 400 - {'error': {'message': \"Invalid type for 'input[1]': expected string\"}}",
+            "provider_protocol_error",
+        ),
+        (
+            "400 bad_request unknown parameter: stream_options.include_usage",
+            "provider_protocol_error",
+        ),
+        # 既有优先级不变：tool 协议错误先于 bad_request 关键词判定。
+        ("invalid params, duplicate tool_call id: call_1", "tool_protocol_error"),
+    ]
+    for message, expected_category in cases:
+        classification = classify_error(Exception(message))
+        assert classification.category == expected_category, message
+        assert classification.disposition == PERMANENT, message
+        assert classification.retryable is False, message
+
+
+def test_chinese_rate_limit_gate_does_not_relax_digit_substring_demotion():
+    # "HTTP 1429" 这类无关数字子串仍被降级：中文短语证据门不放宽该判例。
+    classification = classify_error(Exception("HTTP 1429 trace-id=1"))
     assert classification.category == "provider_protocol_error"
     assert classification.disposition == PERMANENT
 
