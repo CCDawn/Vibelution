@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 from core.web.services import session_service
-from core.web.services.session import directory_bridge
+from core.web.services.session import read_health
 from core.web.services.session.turn_diagnostics import list_active_session_work_runs
 
 
@@ -76,7 +76,7 @@ def test_list_active_session_work_runs_reports_degraded_reads(
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_SESSION_TURN_SCHEDULER", _RaisingTurnScheduler())
     monkeypatch.setattr(session_service, "_WORK_RUN_STORE", _RaisingWorkRunStore())
-    monkeypatch.setattr(directory_bridge, "_directory_unavailable_log_monotonic", 0.0)
+    read_health.reset_session_read_degradation_state()
 
     with session_service._RUNNING_SESSIONS_LOCK:
         session_service._RUNNING_SESSION_IDS.add("session-live")
