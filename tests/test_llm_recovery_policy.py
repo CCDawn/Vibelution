@@ -65,3 +65,33 @@ def test_recovery_policy_stops_turn_after_thinking_roundtrip_retry_budget():
 
     assert decision.retryable is True
     assert decision.stop_current_turn is True
+
+
+def test_recovery_policy_retries_answer_channel_leak_with_tools_off():
+    error = LLMError(
+        "answer_channel_leak",
+        "model leaked internal formatting into the final answer channel",
+        retryable=True,
+    )
+
+    decision = plan_recovery(error, attempt=1, max_attempts=5)
+
+    assert decision.category == "answer_channel_leak"
+    assert decision.action == "retry_answer_without_tools"
+    # Same-shape replay would reproduce the leak; the degraded retry must
+    # drop both streaming and tools.
+    assert decision.disable_streaming is True
+    assert decision.disable_tools is True
+    assert decision.retryable is True
+    assert decision.stop_current_turn is False
+    assert decision.action in {
+        name
+        for name in ("retry_answer_without_tools",)
+    }
+
+
+def test_degraded_retry_actions_include_answer_channel_leak_action():
+    from core.llm.recovery import DEGRADED_RETRY_ACTIONS, degraded_retry_overrides
+
+    assert "retry_answer_without_tools" in DEGRADED_RETRY_ACTIONS
+    assert degraded_retry_overrides("retry_answer_without_tools") == (True, True)

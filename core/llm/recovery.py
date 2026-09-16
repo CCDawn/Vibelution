@@ -28,7 +28,11 @@ class LLMRecoveryDecision:
 # ``_action_for_category`` makes this module the single source of truth for
 # what a category's action means; the adapter must not re-declare the mapping.
 DEGRADED_RETRY_ACTIONS = frozenset(
-    {"retry_without_streaming", "disable_tools_and_retry_without_streaming"}
+    {
+        "retry_without_streaming",
+        "disable_tools_and_retry_without_streaming",
+        "retry_answer_without_tools",
+    }
 )
 
 
@@ -42,7 +46,10 @@ def degraded_retry_overrides(action: str) -> tuple[bool, bool]:
     action also drops tools, degrading that attempt to a plain text
     completion the turn can still close on.
     """
-    if action == "disable_tools_and_retry_without_streaming":
+    if action in {
+        "disable_tools_and_retry_without_streaming",
+        "retry_answer_without_tools",
+    }:
         return True, True
     if action == "retry_without_streaming":
         return True, False
@@ -88,6 +95,13 @@ def _action_for_category(category: str) -> str:
         "tool_protocol_error": "disable_tools_and_retry_without_streaming",
         "empty_content_error": "retry_without_streaming",
         "protocol_error": "retry_without_streaming",
+        # Answer-channel leak: the model emitted internal formatting (analysis
+        # / summary envelopes, legacy tool-call XML, DSML fragments) as the
+        # final answer. Same-shape replay would reproduce it, so the one-shot
+        # degraded retry changes the request shape: streaming off (the leak was
+        # observed on the streamed path) and tools off (legacy-XML tool
+        # syntax is the observed inducer). See core/llm/answer_channel_guard.py.
+        "answer_channel_leak": "retry_answer_without_tools",
         "capability_error": "fail_fast",
         "quota_error": "fail_fast",
         "auth_error": "fail_fast",
@@ -112,7 +126,7 @@ def _should_stop_current_turn(error: LLMError, attempt: int, max_attempts: int) 
         return True
     if error.category == "capability_error":
         return True
-    if error.category in {"context_length_error", "tool_protocol_error", "empty_content_error", "protocol_error"}:
+    if error.category in {"context_length_error", "tool_protocol_error", "empty_content_error", "protocol_error", "answer_channel_leak"}:
         return False
     if not error.retryable:
         return True

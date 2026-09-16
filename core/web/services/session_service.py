@@ -665,6 +665,7 @@ from core.web.services.session.session_ops import (
 from core.web.services.session.signals_format import (
     _active_task_content_preview,
     _annotate_continuation_result,
+    _append_answer_channel_leak_notice,
     _attach_session_prompt_cache_metadata,
     _build_followup_prompt,
     _build_message_timeline_items,

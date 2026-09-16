@@ -268,6 +268,10 @@ class TurnOutcome:
     # boundary. It is optional for ordinary chat turns; official question
     # flows only accept it when an explicit stage binding is present.
     model_invocation_receipt: Mapping[str, Any] | None = None
+    # Bounded, JSON-safe outcome annotations (e.g. answer-channel leak guard
+    # telemetry: marker names and booleans only — never response content).
+    # Optional; projections surface it as diagnostic metadata, not dialogue.
+    metadata: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in TURN_OUTCOME_KINDS:
@@ -276,6 +280,10 @@ class TurnOutcome:
         object.__setattr__(self, "tool_calls", tuple(self.tool_calls))
         object.__setattr__(self, "tool_results", tuple(self.tool_results))
         object.__setattr__(self, "pending_tool_call_ids", tuple(self.pending_tool_call_ids))
+        if self.metadata is not None:
+            if not isinstance(self.metadata, Mapping):
+                raise ValueError("turn outcome metadata must be a mapping")
+            object.__setattr__(self, "metadata", _freeze_json_value(dict(self.metadata)))
         if self.model_invocation_receipt is not None:
             if not isinstance(self.model_invocation_receipt, Mapping):
                 raise ValueError("model invocation receipt must be a mapping")

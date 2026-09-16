@@ -730,6 +730,7 @@ def _persist_session_turn_result(
         else s._format_visible_reply(result)
     )
     assistant_text = s._ensure_assistant_visible_text(assistant_text, result=result, lang=lang)
+    assistant_text = s._append_answer_channel_leak_notice(assistant_text, result=result, lang=lang)
     phantom_image_success = s._is_phantom_image_generation_success(
         assistant_text,
         result,
