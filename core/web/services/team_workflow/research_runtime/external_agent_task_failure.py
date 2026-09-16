@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
@@ -19,9 +20,46 @@ RECOVERABLE_EXTERNAL_RECONCILIATION_FAILURES = frozenset(
         "external_task_completion_invalid",
         "agent_usage_missing",
         "agent_usage_invalid",
+        "project_agent_task_not_reconciled",
     }
 )
 _RECOVERY_VERSION = "v2"
+
+
+def is_project_agent_task_reconciliation_lag(value: object) -> bool:
+    """Whether an error is the exact post-turn project-task writeback window."""
+    if isinstance(value, dict):
+        detail = value
+    else:
+        try:
+            detail = json.loads(str(value or ""))
+        except (TypeError, ValueError):
+            return False
+    return (
+        isinstance(detail, dict)
+        and str(detail.get("code") or "").strip()
+        == "project_agent_task_not_reconciled"
+    )
+
+
+def _is_legacy_project_task_reconciliation_lag(node_run: dict[str, Any]) -> bool:
+    """Recognize only the historical generic wrapper produced by this defect."""
+    if (
+        node_run.get("status") != "failed"
+        or node_run.get("failureCode") != "adapter_execution_exception"
+    ):
+        return False
+    summary = node_run.get("failureSummary")
+    if is_project_agent_task_reconciliation_lag(summary):
+        return True
+    try:
+        wrapped = json.loads(str(summary or ""))
+    except (TypeError, ValueError):
+        return False
+    return (
+        isinstance(wrapped, dict)
+        and is_project_agent_task_reconciliation_lag(wrapped.get("detail"))
+    )
 
 
 def is_recoverable_external_reconciliation_failure(
@@ -32,6 +70,9 @@ def is_recoverable_external_reconciliation_failure(
         and bool(node_run.get("taskId"))
         and node_run.get("failureCode")
         in RECOVERABLE_EXTERNAL_RECONCILIATION_FAILURES
+    ) or (
+        bool(node_run.get("taskId"))
+        and _is_legacy_project_task_reconciliation_lag(node_run)
     )
 
 
@@ -86,6 +127,7 @@ def reopen_external_agent_reconciliation_failure(
         if has_partial_completion:
             return current
 
+        previous_status = str(current_node_run.get("status") or "")
         current_node_run.update(
             {
                 "status": "running",
@@ -137,7 +179,7 @@ def reopen_external_agent_reconciliation_failure(
             attempt=current_node_run["attempt"],
             type="ExternalAgentTaskReconciliationRetried",
             summary={
-                "from": "blocked",
+                "from": previous_status,
                 "to": "running",
                 "recoveryVersion": _RECOVERY_VERSION,
             },

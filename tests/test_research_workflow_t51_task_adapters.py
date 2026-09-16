@@ -299,6 +299,62 @@ def test_session_busy_execute_requeues_instead_of_failing(tmp_path: Path) -> Non
         harness.close()
 
 
+def test_project_task_reconciliation_lag_blocks_for_external_recovery(
+    tmp_path: Path,
+) -> None:
+    """A completed turn's task projection lag must not become an execution failure."""
+    harness = CommandHarness(tmp_path / "ledger-project-task-lag.sqlite3")
+    try:
+        action = PendingAction(
+            action_id="act-project-task-lag",
+            run_id="run-project-task-lag",
+            node_run_id="nr-run-project-task-lag-problem_understanding-a1",
+            node_id="problem_understanding",
+            attempt=1,
+            actor_kind=ActorKind.AGENT,
+            action_kind="start_agent_task",
+            input_snapshot_hash="a" * 64,
+            input_artifact_refs=(),
+            binding_snapshot_id=None,
+            budget_policy_hash="p-1",
+        )
+        _seed_dispatching(harness, action)
+
+        class LaggingPorts(FakeDomainPorts):
+            def execute_agent_turn(self, *, action, handle):  # type: ignore[override]
+                self.calls.append("execute_agent_turn")
+                raise RuntimeError(
+                    json.dumps(
+                        {
+                            "code": "project_agent_task_not_reconciled",
+                            "taskId": "research-agent-task-lag",
+                            "status": "running",
+                        }
+                    )
+                )
+
+        ports = LaggingPorts()
+        registry = ActionRegistry()
+        registry.register(AgentActionAdapter(ports))
+        worker = AdapterDispatchWorker(
+            store=harness.store,
+            registry=registry,
+            ports=ports,
+            successor_fn=lambda _node: (),
+        )
+        worker.run_once()
+
+        status, problem = _outbox_row(harness, action.action_id)
+        assert status == "failed"
+        assert problem is not None
+        assert json.loads(problem)["code"] == "project_agent_task_not_reconciled"
+        attempt = harness.store.latest_attempt(action.run_id, action.node_id)
+        assert attempt is not None and attempt.status == "blocked"
+        assert ports.calls.count("execute_agent_turn") == 1
+    finally:
+        harness.close()
+
+
 def test_source_context_budget_failure_requeues_for_new_session_replay(
     tmp_path: Path,
 ) -> None:
