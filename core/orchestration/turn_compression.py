@@ -405,11 +405,21 @@ def compress_turn_messages(
     runtime_binding = _as_mapping(runtime_agent_binding)
     runtime_getter = turn_runtime_fn or _turn_runtime_from_env
     turn_runtime = _as_mapping(runtime_getter())
+    from core.web.services import agent_directory_service
+
+    # In-process chat turns bind their identity through the runtime ContextVar,
+    # not process environment variables. Resolve it before the Agent's default
+    # session so every compression artifact belongs to the turn being run.
+    current_runtime = _as_mapping(agent_directory_service.current_agent_runtime())
     session_id = _coerce_text(
         _mapping_get(turn_runtime, "sessionId", "session_id")
+        or _mapping_get(current_runtime, "sessionId", "session_id")
         or _mapping_get(runtime_binding, "directSessionId", "direct_session_id")
     ).strip()
-    turn_id = _coerce_text(_mapping_get(turn_runtime, "runId", "run_id")).strip()
+    turn_id = _coerce_text(
+        _mapping_get(turn_runtime, "runId", "run_id")
+        or _mapping_get(current_runtime, "turnId", "turn_id")
+    ).strip()
     recorder = scene_recorder_fn or _record_agent_scene_event
     agent_id = _coerce_text(_mapping_get(runtime_binding, "agentId", "agent_id")).strip()
 
@@ -479,9 +489,6 @@ def compress_turn_messages(
     try:
         from core.chat.tool_result_replacement import replace_large_tool_results_for_compression
 
-        tool_session_id = _coerce_text(
-            _mapping_get(runtime_binding, "directSessionId", "direct_session_id") or session_id
-        ).strip()
         replacement_limit = max(
             4_000,
             _coerce_nonnegative_int(comp_config.summary_max_chars, default=1_000) * 4,
@@ -489,7 +496,7 @@ def compress_turn_messages(
         messages_for_compression, tool_result_replacement_state = replace_large_tool_results_for_compression(
             messages,
             char_limit=replacement_limit,
-            session_id=tool_session_id,
+            session_id=session_id,
         )
     except Exception:
         messages_for_compression = messages
@@ -621,7 +628,7 @@ def compress_turn_messages(
         summary = apply_retention_contract_summary(
             summary,
             build_retention_contract_summary_header(
-                retention_contract=retention_contract,
+                retention_contract={**_as_mapping(retention_contract), "sessionId": session_id},
                 iteration=iteration,
                 compression_generation=compression_count_this_turn + 1,
                 before_tokens=current_tokens,
@@ -686,18 +693,6 @@ def compress_turn_messages(
     summary_written = False
     ledger_checkpoint_written = False
     if summary:
-        try:
-            from core.web.services import agent_directory_service
-
-            current_runtime = agent_directory_service.current_agent_runtime()
-            session_id = _coerce_text(
-                session_id or _mapping_get(_as_mapping(current_runtime), "sessionId", "session_id")
-            ).strip()
-            turn_id = _coerce_text(
-                turn_id or _mapping_get(_as_mapping(current_runtime), "turnId", "turn_id")
-            ).strip()
-        except Exception:
-            pass
         if session_id and mode_text == AgentMode.CHAT and project_root:
             try:
                 from core.chat.conversation_ledger import (

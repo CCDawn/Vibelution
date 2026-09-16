@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildConversationPatchDiff,
+  conversationPatchRowSummary,
   conversationToolPatchText,
+  patchTextFromArguments,
 } from "./conversationPatchModel";
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
 
@@ -125,5 +127,45 @@ describe("conversationToolPatchText", () => {
 
   it("returns an empty string when no patch payload exists", () => {
     expect(conversationToolPatchText(cellWithArguments({ path: "a.ts" }))).toBe("");
+  });
+});
+
+describe("patchTextFromArguments", () => {
+  it("prefers the earliest known patch key and ignores non-patch bags", () => {
+    expect(patchTextFromArguments({ path: "a.ts" })).toBe("");
+    expect(patchTextFromArguments(undefined)).toBe("");
+    expect(patchTextFromArguments({ patch: "P1", patch_text: "P2" })).toBe("P2");
+  });
+});
+
+describe("conversationPatchRowSummary", () => {
+  const twoFilePatch = [
+    "*** Begin Patch",
+    "*** Update File: web/src/app.ts",
+    "@@",
+    "-const value = 1;",
+    "+const value = 2;",
+    "*** Update File: web/src/other.ts",
+    "@@",
+    "+export const added = true;",
+    "*** End Patch",
+  ].join("\n");
+
+  it("names the first file by basename and totals the edit", () => {
+    const summary = conversationPatchRowSummary(twoFilePatch, "zh");
+    expect(summary).toEqual({ subject: "app.ts 等 2 个文件", statLabel: "+2 −1" });
+    expect(conversationPatchRowSummary(twoFilePatch, "en")?.subject).toBe("app.ts +1 more");
+  });
+
+  it("omits counts while the payload is still truncated", () => {
+    // A partially streamed patch must not report a partial total as final.
+    const summary = conversationPatchRowSummary(`${twoFilePatch}\n+const partial = 1;…`, "zh");
+    expect(summary?.subject).toBe("app.ts 等 2 个文件");
+    expect(summary?.statLabel).toBe("");
+  });
+
+  it("returns null when the patch names no file", () => {
+    expect(conversationPatchRowSummary("", "zh")).toBeNull();
+    expect(conversationPatchRowSummary("@@\n+orphan line", "zh")).toBeNull();
   });
 });

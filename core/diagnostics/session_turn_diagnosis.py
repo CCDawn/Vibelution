@@ -8,6 +8,7 @@ from core.chat.turn_journal import (
     EVENT_TURN_COMPLETED,
     EVENT_TURN_FAILED,
     EVENT_TURN_INTERRUPTED,
+    EVENT_TURN_STARTED,
     TurnJournalEvent,
     turn_journal_path,
 )
@@ -34,17 +35,18 @@ def build_session_turn_diagnosis(
     live_output_path = journal_path.with_name("live_output.json")
 
     journal = _summarize_journal(journal_path, normalized_turn_id)
-    live_output = _summarize_live_output(live_output_path, normalized_turn_id)
+    effective_turn_id = normalized_turn_id or str(journal.get("turnId") or "").strip()
+    live_output = _summarize_live_output(live_output_path, effective_turn_id)
     runtime_evidence = _find_runtime_evidence(
         root,
         normalized_session_id,
-        normalized_turn_id,
+        effective_turn_id,
         max_matches=max_runtime_matches,
     )
 
     return {
         "sessionId": normalized_session_id,
-        "turnId": normalized_turn_id,
+        "turnId": effective_turn_id,
         "paths": {
             "journal": str(journal_path),
             "liveOutput": str(live_output_path),
@@ -54,7 +56,7 @@ def build_session_turn_diagnosis(
         "liveOutput": live_output,
         "runtimeEvidence": runtime_evidence,
         "diagnosis": _build_agent_diagnosis(
-            normalized_turn_id,
+            effective_turn_id,
             journal,
             live_output,
             runtime_evidence,
@@ -70,6 +72,7 @@ def _summarize_journal(path: Path, turn_id: str) -> dict[str, Any]:
     if not path.exists():
         return {
             "exists": False,
+            "turnId": str(turn_id or "").strip(),
             "eventCount": 0,
             "latestSequence": 0,
             "terminalEvent": None,
@@ -102,11 +105,29 @@ def _summarize_journal(path: Path, turn_id: str) -> dict[str, Any]:
         decode_errors.append({"line": 0, "error": str(exc), "position": 0})
 
     events.sort(key=lambda item: (item.sequence, item.timestamp, item.event_id))
+    selected_turn_id = str(turn_id or "").strip()
+    if not selected_turn_id:
+        selected_turn_id = next(
+            (
+                event.turn_id
+                for event in reversed(events)
+                if event.event_type == EVENT_TURN_STARTED and event.turn_id
+            ),
+            "",
+        )
+        if not selected_turn_id:
+            selected_turn_id = next(
+                (event.turn_id for event in reversed(events) if event.turn_id),
+                "",
+            )
+        if selected_turn_id:
+            events = [event for event in events if event.turn_id == selected_turn_id]
     terminal_events = [event for event in events if event.event_type in TERMINAL_EVENT_TYPES]
     terminal_event = terminal_events[-1].to_dict() if terminal_events else None
 
     return {
         "exists": True,
+        "turnId": selected_turn_id,
         "eventCount": len(events),
         "latestSequence": max((event.sequence for event in events), default=0),
         "terminalEvent": terminal_event,
@@ -461,6 +482,8 @@ def _build_agent_diagnosis(
         status = "telemetry_gap"
     elif journal_status in {"completed", "failed", "interrupted"}:
         status = journal_status
+    elif journal_status == "needs_continue":
+        status = "incomplete"
     elif route_status in {"succeeded", "failed"}:
         status = "incomplete"
     else:
@@ -518,7 +541,22 @@ def _journal_terminal_status(
         else {}
     )
     event_type = str(terminal.get("eventType") or terminal.get("event_type") or "")
+    payload = terminal.get("payload") if isinstance(terminal.get("payload"), dict) else {}
+    final_status = str(payload.get("finalStatus") or "").strip().lower()
+    event_status = str(terminal.get("status") or "").strip().lower()
+    result_status = str(payload.get("resultStatus") or "").strip().lower()
+    # ``needs_continue`` is a semantic downgrade that must survive legacy
+    # writers which duplicated ``completed`` in one of the other fields.
+    terminal_status = (
+        final_status
+        or ("needs_continue" if event_status == "needs_continue" else "")
+        or ("needs_continue" if result_status == "needs_continue" else "")
+        or event_status
+        or result_status
+    )
     if event_type == EVENT_TURN_COMPLETED:
+        if terminal_status in {"needs_continue", "incomplete"}:
+            return "needs_continue"
         return "completed"
     if event_type == EVENT_TURN_FAILED:
         return "failed"

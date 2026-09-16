@@ -902,6 +902,7 @@ def query_sessions(
     from . import directory_bridge
 
     directory_payload = None
+    directory_error_type = ""
     try:
         directory_payload = directory_bridge.query_session_summaries(
             limit=normalized_limit,
@@ -913,8 +914,15 @@ def query_sessions(
             sort=normalized_sort,
             agent_by_id=agent_by_id,
         )
-    except Exception:
+    except Exception as exc:
+        # A raising directory read used to vanish into the canonical fallback
+        # with no signal; the warning and event fields below keep it visible.
         directory_payload = None
+        directory_error_type = type(exc).__name__
+        directory_bridge.note_session_read_degraded(
+            source="session query",
+            error_type=directory_error_type,
+        )
     if directory_payload is not None:
         page_items = list(directory_payload.get("items") or [])
         total = max(0, int(directory_payload.get("totalEstimate") or 0))
@@ -936,6 +944,8 @@ def query_sessions(
             has_kind_filter=bool(normalized_session_kind),
             has_state_filter=bool(normalized_state),
             sort=normalized_sort,
+            source="directory_store",
+            directory_error_type=directory_error_type,
         )
         return payload
     if catalog_mode == "read_preferred" and not agent_direct_hidden_from_index:
@@ -979,6 +989,9 @@ def query_sessions(
                 has_kind_filter=bool(normalized_session_kind),
                 has_state_filter=bool(normalized_state),
                 sort=normalized_sort,
+                source="catalog",
+                directory_error_type=directory_error_type,
+                catalog_status=catalog_status or "healthy",
             )
             s._record_session_catalog_read_event(
                 source="catalog",
@@ -1050,6 +1063,9 @@ def query_sessions(
         has_kind_filter=bool(normalized_session_kind),
         has_state_filter=bool(normalized_state),
         sort=normalized_sort,
+        source="canonical_projection",
+        directory_error_type=directory_error_type,
+        catalog_status=catalog_status,
     )
     payload = {
         "items": page_items,
@@ -1173,6 +1189,7 @@ def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
         )
     missing_after_lock = False
     selected_conversation: dict[str, Any] | None = None
+    metadata_changed = False
     with s._CHAT_STATE_LOCK:
         conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
         changed = False
@@ -1194,6 +1211,7 @@ def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
                     activate=need_activate,
                 )
             selected_conversation = dict(conversation)
+            metadata_changed = changed
     if missing_after_lock or selected_conversation is None:
         s._retire_unopenable_directory_session(
             normalized_session_id,
@@ -1205,7 +1223,10 @@ def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
     # Viewing a session is not session activity: the directory list must keep
     # ordering by last activity, so a select must not touch recency.
     directory_bridge.sync_conversation_record(selected_conversation, touch_recency=False)
-    s._invalidate_session_list_cache()
+    if metadata_changed:
+        # Plain view switches keep the index signature stable; invalidating on
+        # every select forced the next poll to rebuild the whole projection.
+        s._invalidate_session_list_cache()
     if lightweight:
         normalized = s._normalize_conversation(selected_conversation) or selected_conversation
         detail = s._build_lightweight_session_detail(normalized)

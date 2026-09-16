@@ -137,11 +137,11 @@ export type UseChatWorkspaceLifecycleOptions = {
   setGroupManagePurposeDraft: Dispatch<SetStateAction<string>>;
   setProjectBusDraft: Dispatch<SetStateAction<string>>;
   editingSessionIdRef: MutableRefObject<string | null>;
-  /** Live rename draft while create remaps temp → real id. */
+  /** Live rename draft; only set while the operator is editing a tab title. */
   editingSessionTitleRef: MutableRefObject<string>;
   setEditingSessionId: Dispatch<SetStateAction<string | null>>;
   setEditingSessionTitle: Dispatch<SetStateAction<string>>;
-  /** Ignore rename blur for a short window after optimistic create remounts the tab. */
+  /** Ignore rename blur for a short window while a temp→real remap remounts an open editor. */
   suppressRenameBlurUntilRef: MutableRefObject<number>;
 };
 
@@ -288,8 +288,6 @@ export function useChatWorkspaceLifecycle({
       const agentDisplayName = String(agentRow?.displayName || agentRow?.agentCode || "").trim();
       // Match backend: prefer Agent display name so tabs are identifiable immediately.
       const title = agentDisplayName || defaultNewSessionTitle(lang);
-      // Remount during temp→real would blur the title input and auto-finish rename; suppress that.
-      suppressRenameBlurUntilRef.current = Date.now() + 2500;
       const optimisticDetail: SessionDetail = {
         id: tempSessionId,
         title,
@@ -353,10 +351,6 @@ export function useChatWorkspaceLifecycle({
         );
       }
       setSessionFilter("");
-      editingSessionIdRef.current = tempSessionId;
-      editingSessionTitleRef.current = title;
-      setEditingSessionId(tempSessionId);
-      setEditingSessionTitle(title);
       syncSessionDetail(optimisticDetail);
       return { tempSessionId, agentId: normalizedAgentId, telemetry };
     },
@@ -379,8 +373,14 @@ export function useChatWorkspaceLifecycle({
         || "",
       ).trim();
       const fallbackTitle = serverTitle || agentLabel || defaultNewSessionTitle(lang);
-      // Keep the operator's in-progress rename draft across temp→real remount.
-      const liveDraft = String(editingSessionTitleRef.current || "").trim();
+      // Create no longer enters rename: the draft only counts when the operator
+      // opened the temp tab's editor while the POST was in flight.
+      const editingTempTitle = Boolean(
+        tempSessionId && editingSessionIdRef.current === tempSessionId,
+      );
+      const liveDraft = editingTempTitle
+        ? String(editingSessionTitleRef.current || "").trim()
+        : "";
       const keepDraft = Boolean(
         liveDraft
         && liveDraft !== fallbackTitle
@@ -413,13 +413,16 @@ export function useChatWorkspaceLifecycle({
           )
         : false;
       const keepFocusOnCreated = !tempSessionId || stillOnTemp;
-      if (keepFocusOnCreated) {
-        // Extend blur suppress through remount so rename field stays open for typing.
+      if (keepFocusOnCreated && editingTempTitle) {
+        // Extend blur suppress through remount so the operator's open rename
+        // field stays editable while the temp id is replaced by the real id.
         suppressRenameBlurUntilRef.current = Date.now() + 2500;
         editingSessionIdRef.current = nextId;
         editingSessionTitleRef.current = title;
         setEditingSessionId(nextId);
         setEditingSessionTitle(title);
+      }
+      if (keepFocusOnCreated) {
         syncSessionDetail(seededDetail);
       }
       // Drop temp shell after real id is active/cached.
