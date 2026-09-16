@@ -1,6 +1,6 @@
-# PR 集成工作流提案（草案，未生效）
+# PR 集成工作流提案（已拍板，分阶段启用）
 
-> **状态**：提案。在用户拍板 §6 两项授权决定之前，本文件不改变任何现行流程；现行权威仍是 [development-standard.md](../standards/development-standard.md) 与 [worktree-collaboration.md](worktree-collaboration.md)。生效后本文件收缩为其 PR 模式扩展节并回写规范。
+> **状态**：已拍板，分阶段启用：Phase 1（LMR 核心/发布队列/规范）建设中；已拍板决定=本地集成权威+GitHub 发布镜像（§13）、批推+手动即推、FAST_PATCH 豁免（§14）。Phase 1 上线前，本文件不改变任何现行流程；现行权威仍是 [development-standard.md](../standards/development-standard.md) 与 [worktree-collaboration.md](worktree-collaboration.md)。
 >
 > 2026-09-16 可行性审查定稿；门禁与审查 agent 优化两节为进行中的讨论（§8/§9），调研结论待补。
 

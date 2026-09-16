@@ -150,6 +150,52 @@ python "<codex-skill-root>\briefbound-project-memory\scripts\agent_coordination.
 - 三角色会话与 peer 会话并存时，协调一律走 [Shared Files](#shared-files) 的 Git common-dir coordination registry；不得把 inbox/thread 消息当权威状态。
 - 角色变更（换人、并角色、退出）只影响授权窗口内的任务，不回溯已合入内容。
 
+## LMR 本地合并请求模式（Phase 1）
+
+本节把 [pr-integration-workflow.md](pr-integration-workflow.md)（下称「LMR 提案」）已拍板的 LMR（Local Merge Request）设计固化为可执行规则。LMR 是 GitHub PR 的本地等价物：一条登记在 Git common-dir ledger 的记录，生命周期为 `pending_review → in_review →（rework → pending_review）* → approved → merging → merged / rejected`。分阶段启用：Phase 1（LMR 核心、发布队列、本节规范）建设中；脚本落地前按现行流程执行，不提前改变任何门。
+
+### 适用范围
+
+- `STANDARD_TASK`（show）与 `HIGH_RISK`（ask）走 LMR：本地门禁跑完后登记，等独立审查通过再集成。
+- `FAST_PATCH` 豁免 LMR：维持现行 Worker 自审 + 本地直合流程，零额外开销（LMR 提案 §14）。
+
+### Worker：登记与等待
+
+- 本地门禁（与现行任务同额的验证与证据要求）全部通过后执行登记：
+
+```powershell
+python scripts/lmr.py register
+```
+
+  登记内容：branch、HEAD SHA、grade（show/ask）、title/任务包引用、证据 manifest 路径。
+- 登记后停在等审查状态，不自行合入、不执行 merge/cleanup；合入权归集成环节。
+- 收到 REWORK 信封（问题+实测证据+建议修法+危害说明）按返工流程处理，完成后重新登记：新 SHA 记录顶替旧记录，旧 verdict 自动作废（LMR 提案 §12.2/§13.2）。
+
+### 审查：watcher 自动入队
+
+- `scripts/lmr_watch.py` 常驻 watcher 监听 ledger：新登记或新 SHA 自动入队，无需人工派发；同 SHA 重复触发合并为一个任务，新 push 顶替旧任务。
+- 审查单飞串行（并发度默认 1）；超时、重试与 `escalated` 语义以 LMR 提案 §14 为准（审查超时 → 重试 ≤2 → 仍失败转 `escalated` 可见状态）。
+- 裁决三档 `approve` / `rework` / `comment`；findings 用 Conventional Comments 格式并带 file+行号+severity+category，approve 必附 Evidence 段（LMR 提案 §9）。
+- reviewer 执行器未配置时显式降级（`reviewer_executor_unconfigured` → `escalated` 可见），不伪造审查结论（LMR 提案 §14.4）。
+
+### 集成：现行 task_closeout
+
+- 集成环节（集成 agent / 现行主集成会话）只对 `approved` 的 LMR 收口：按现行 `task_closeout` 执行，含 stale_main 合并重试 ≤3、超限 `escalated` 的升级语义（LMR 提案 §14.2）。
+- 合入本地 `main` 后把该 LMR 记入发布队列，再按 [Cleanup](#cleanup) 清理任务资源。
+
+### 发布：GitHub 仅作镜像
+
+- `scripts/lmr_publish.py` 定量批推（`git push origin main`）+ 手动 `--now` 即推并存；发布与集成本解耦，推失败按退避重试，不阻塞本地集成，只影响镜像新鲜度。
+
+### 红线
+
+- 审查与集成分离：集成环节不得兼任 reviewer（LMR 提案 §5）。
+- `escalated` 状态必须人工/主会话处置；禁止静默重试循环与无界等待。
+- 本地 `main` 唯一集成权威，`origin/main` 仅为发布镜像；远端默认不留任务分支（LMR 提案 §13）。
+- LMR ledger 是进程工件，写 Git common-dir 任务专属目录，不进仓库树、不写 checkout 根目录。
+
+> `scripts/lmr.py`、`scripts/lmr_watch.py`、`scripts/lmr_publish.py` 由并行任务（lmr-core / lmr-publish）实现中；本节按上述 CLI 名书写，最终 CLI 名如有出入由收口会话统一校正。
+
 ## Cleanup
 
 All review, testing, quality gates, mergeability checks, and acceptance evidence belong before merge. The moment `git merge --ff-only <task-branch>` succeeds, the task is absorbed by local `main` and cleanup must start immediately; do not retain task resources while waiting for post-merge validation.
