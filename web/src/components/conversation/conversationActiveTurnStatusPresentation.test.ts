@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ACTIVE_TURN_NO_DELTA_STALL_AFTER_MS,
   activeTurnElapsedSeconds,
   activeTurnOptimisticStageSummary,
   activeTurnStageBarPhase,
@@ -8,8 +9,11 @@ import {
   buildActiveTurnStageBarItems,
   formatActiveTurnHeartbeatText,
   planActiveTurnStageSwitch,
+  resolveActiveTurnDisconnectSeconds,
   resolveActiveTurnProgressStage,
   resolveActiveTurnRetryProgress,
+  resolveActiveTurnRouteFallback,
+  resolveActiveTurnStallSeconds,
 } from "./conversationActiveTurnStatusPresentation";
 
 describe("conversationActiveTurnStatusPresentation", () => {
@@ -122,5 +126,62 @@ describe("conversationActiveTurnStatusPresentation", () => {
       .toBe("Retrying request 3/5");
     expect(formatActiveTurnHeartbeatText("model_retry", 8, "zh"))
       .toBe("请求重试 · 8s");
+  });
+
+  it("resolves disconnect seconds only while the stream is reconnecting", () => {
+    const nowMs = 1_000_000;
+    expect(resolveActiveTurnDisconnectSeconds({ streamConnected: true, nowMs })).toBeNull();
+    expect(resolveActiveTurnDisconnectSeconds({ nowMs })).toBeNull();
+    expect(resolveActiveTurnDisconnectSeconds({
+      streamConnected: false,
+      streamDisconnectedSinceMs: nowMs - 65_000,
+      nowMs,
+    })).toBe(65);
+    // Missing timestamp still yields 0s so the reconnecting copy can show immediately.
+    expect(resolveActiveTurnDisconnectSeconds({ streamConnected: false, nowMs })).toBe(0);
+    // Duration never goes negative on clock skew.
+    expect(resolveActiveTurnDisconnectSeconds({
+      streamConnected: false,
+      streamDisconnectedSinceMs: nowMs + 5_000,
+      nowMs,
+    })).toBe(0);
+  });
+
+  it("escalates the stall hint only past the no-delta threshold", () => {
+    const turnStart = "2026-09-16T10:00:00.000Z";
+    const nowMs = Date.parse(turnStart) + 120_000;
+    expect(ACTIVE_TURN_NO_DELTA_STALL_AFTER_MS).toBe(90_000);
+    // Fresh output: no hint.
+    expect(resolveActiveTurnStallSeconds({
+      lastAssistantDeltaAtMs: nowMs - 10_000,
+      turnStartedAt: turnStart,
+      nowMs,
+    })).toBeNull();
+    // Exactly at threshold: no hint yet.
+    expect(resolveActiveTurnStallSeconds({
+      lastAssistantDeltaAtMs: nowMs - 90_000,
+      turnStartedAt: turnStart,
+      nowMs,
+    })).toBeNull();
+    // Stale delta past threshold.
+    expect(resolveActiveTurnStallSeconds({
+      lastAssistantDeltaAtMs: nowMs - 95_000,
+      nowMs,
+    })).toBe(95);
+    // Never streamed a delta: escalate off the turn start.
+    expect(resolveActiveTurnStallSeconds({
+      turnStartedAt: turnStart,
+      nowMs,
+    })).toBe(120);
+    // No baseline at all: nothing to show.
+    expect(resolveActiveTurnStallSeconds({ nowMs })).toBeNull();
+  });
+
+  it("normalizes the optional route fallback field", () => {
+    expect(resolveActiveTurnRouteFallback({})).toBeNull();
+    expect(resolveActiveTurnRouteFallback({ routeFallback: null })).toBeNull();
+    expect(resolveActiveTurnRouteFallback({ routeFallback: { from: "gpt-x", to: "" } })).toBeNull();
+    expect(resolveActiveTurnRouteFallback({ routeFallback: { from: " gpt-x ", to: " gpt-y " } }))
+      .toEqual({ from: "gpt-x", to: "gpt-y" });
   });
 });

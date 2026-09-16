@@ -46,6 +46,7 @@ import { fetchFileContent } from "../../api/files";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import type { AgentArchiveResponse } from "../agentWorkspaceCache";
 import { prefetchConversationView } from "../../components/conversation/prefetchConversationView";
+import type { ActiveTurnStreamState } from "../../components/conversation/activeTurnStreamState";
 import type { ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
 import { queryKeys } from "../../api/queryKeys";
 import {
@@ -991,7 +992,7 @@ export function ChatCodingRouteWorkbench() {
     || activeSessionId
     || ""
   );
-  const { sessionStreamConnected } = useSessionDetailStream({
+  const { sessionStreamConnected, streamDisconnectedSinceMs } = useSessionDetailStream({
     activeSessionId,
     sessionStreamShouldConnect,
     queryClient,
@@ -1004,6 +1005,17 @@ export function ChatCodingRouteWorkbench() {
     sessionTitleForNotifications,
     viewedSessionId: activeSessionId || "",
   });
+  // Transport visibility for the active-turn status note. `streamConnected`
+  // stays tri-state: only a real reconnect loop reports false; route-settling
+  // teardowns keep it undefined so the note never flashes a false drop.
+  const activeTurnStreamState = useMemo<ActiveTurnStreamState>(
+    () => ({
+      streamConnected: streamDisconnectedSinceMs != null ? false : undefined,
+      streamDisconnectedSinceMs,
+      lastAssistantDeltaAtMs: lastAssistantDeltaAppliedAtRef.current[String(activeSessionId || "")],
+    }),
+    [streamDisconnectedSinceMs, activeSessionId, lastAssistantDeltaAppliedAtRef],
+  );
   const chatLiveQueryPolicyInput = {
     chatPollingVisible,
     chatStartupWarmupActive,
@@ -3183,6 +3195,7 @@ export function ChatCodingRouteWorkbench() {
               activeCliAgentRunAvailable={Boolean(activeCliAgentRun)}
               activeCliAgentRunId={activeCliAgentRunId}
               activeSessionId={activeSessionId}
+              activeTurnStreamState={activeTurnStreamState}
               blockingErrorMessage={sessionDetailErrorMessage}
               cliAgentRunEmptyLabel={lang === "zh" ? "这个 CLI 工具页还没有可显示的运行记录。" : "This CLI tool page has no run to display."}
               conversation={detail ? {

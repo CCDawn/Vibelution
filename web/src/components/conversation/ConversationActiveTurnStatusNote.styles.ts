@@ -17,6 +17,7 @@ const styles = {
     "min-w-0 max-w-[min(100%,48ch)] truncate [font-size:var(--vui-font-sm)] text-[var(--fg-secondary)]",
   ),
   label: cv("label", "sr-only"),
+  advisory: cv("advisory", "shrink-0"),
 } as const;
 
 export default styles;

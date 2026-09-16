@@ -2457,10 +2457,6 @@ def _journal_file_lock(path: Path, *, timeout: float = _JOURNAL_LOCK_TIMEOUT_SEC
     lock_path = path.with_name(f"{path.name}.lock")
     _ensure_journal_parent(lock_path)
     with lock_path.open("a+b") as handle:
-        handle.seek(0, os.SEEK_END)
-        if handle.tell() == 0:
-            handle.write(b"\0")
-            handle.flush()
         deadline = time.monotonic() + max(0.0, float(timeout))
         while True:
             if _try_lock_handle(handle):
@@ -2469,6 +2465,16 @@ def _journal_file_lock(path: Path, *, timeout: float = _JOURNAL_LOCK_TIMEOUT_SEC
                 raise TimeoutError(f"Timed out acquiring turn journal lock: {lock_path}")
             time.sleep(0.01)
         try:
+            # Seed the first byte only while holding the lock. Two processes can
+            # both observe an empty lock file, and a pre-lock write can land in
+            # the byte range another process already locked (Windows maps that
+            # lock violation to PermissionError). msvcrt.locking can lock a
+            # byte range at/beyond EOF, so deferring the seed is safe and the
+            # lock owner is the only writer.
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                handle.write(b"\0")
+                handle.flush()
             yield
         finally:
             _unlock_handle(handle)

@@ -1700,148 +1700,187 @@ def _resubmit_session_user_message(
         conversation["updated_at"] = user_entry["timestamp"]
         s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
         s._set_session_running(conversation_id, True, turn_id=turn_control.turn_id, leases=requested_leases)
-        s._persist_chat_turn_work_run(
-            session_id=conversation_id,
-            turn_id=turn_control.turn_id,
-            status="running",
-            agent_id=agent_id,
-            leases=requested_leases,
-            user_message=message,
-            started_at=user_entry["timestamp"],
-            updated_at=user_entry["timestamp"],
-        )
-        s._append_session_branch_rebase_event(
-            conversation_id,
-            original_entry,
-            operation=operation,
-            turn_id=turn_control.turn_id,
-            base_message_id=normalized_base_message_id or target_message_id,
-        )
+        # Acceptance window (resubmit): the turn is already flagged running
+        # here, so any failure before the worker is scheduled (journal lock
+        # timeout, disk I/O, ...) must settle the turn exactly like the
+        # schedule-failure handler below; otherwise running is never cleared
+        # and the session looks stuck until the stale-turn sweeper reaps it.
+        acceptance_stage = "work_run_running"
+        try:
+            s._persist_chat_turn_work_run(
+                session_id=conversation_id,
+                turn_id=turn_control.turn_id,
+                status="running",
+                agent_id=agent_id,
+                leases=requested_leases,
+                user_message=message,
+                started_at=user_entry["timestamp"],
+                updated_at=user_entry["timestamp"],
+            )
+            acceptance_stage = "branch_rebase_event"
+            s._append_session_branch_rebase_event(
+                conversation_id,
+                original_entry,
+                operation=operation,
+                turn_id=turn_control.turn_id,
+                base_message_id=normalized_base_message_id or target_message_id,
+            )
+        except Exception as exc:
+            _settle_session_submit_admission_failure(
+                session_id=conversation_id,
+                turn_id=turn_control.turn_id,
+                leases=requested_leases,
+                user_message=message,
+                exc=exc,
+                stage=acceptance_stage,
+            )
+            raise
     finally:
         admit_lock.release()
-    user_payload: dict[str, Any] = {
-        "content": message,
-        "source": "regenerated_user_message" if is_regenerate else "edited_user_message",
-        "metadata": user_entry.get("metadata") if isinstance(user_entry.get("metadata"), dict) else user_metadata,
-    }
-    if attachments:
-        user_payload["attachments"] = attachments
-    if session_references:
-        user_payload["references"] = session_references
-    s._append_session_conversation_event(
-        conversation_id,
-        turn_control.turn_id,
-        s.EVENT_USER_MESSAGE,
-        status="recorded",
-        payload=user_payload,
-        source="regenerate_session_message" if is_regenerate else "edit_and_resubmit_session_message",
-    )
+    # Acceptance window (resubmit): running is already set, so any failure
+    # before the worker is scheduled (journal lock timeout, disk I/O, ...)
+    # must settle the turn exactly like the schedule-failure handler below;
+    # otherwise running is never cleared and the session looks stuck until
+    # the stale-turn sweeper reaps it.
+    acceptance_stage = "user_message_journal"
+    try:
+        user_payload: dict[str, Any] = {
+            "content": message,
+            "source": "regenerated_user_message" if is_regenerate else "edited_user_message",
+            "metadata": user_entry.get("metadata") if isinstance(user_entry.get("metadata"), dict) else user_metadata,
+        }
+        if attachments:
+            user_payload["attachments"] = attachments
+        if session_references:
+            user_payload["references"] = session_references
+        s._append_session_conversation_event(
+            conversation_id,
+            turn_control.turn_id,
+            s.EVENT_USER_MESSAGE,
+            status="recorded",
+            payload=user_payload,
+            source="regenerate_session_message" if is_regenerate else "edit_and_resubmit_session_message",
+        )
 
-    s._set_session_waiting_live_output(conversation_id, turn_id=turn_control.turn_id)
-    if is_regenerate:
-        s._record_session_message_regenerate_event(
-            conversation_id,
-            target_message_id=target_message_id,
-            turn_id=turn_control.turn_id,
-            truncated_count=max(0, len(previous_messages) - target_index - 1),
-            attachment_count=len(attachments),
-        )
-    else:
-        s._record_session_message_edit_resubmit_event(
-            conversation_id,
-            target_message_id=target_message_id,
-            turn_id=turn_control.turn_id,
-            truncated_count=max(0, len(previous_messages) - target_index - 1),
-            original_content=original_entry.get("content") or "",
-            edited_content=message,
-        )
-    s._record_chat_next_state_signal(
-        session_id=conversation_id,
-        turn_id=turn_control.turn_id,
-        source="user",
-        kind="assistant_output_edited",
-        polarity="neutral",
-        mode="directive",
-        related_event_code=(
-            "conversation.message_regenerated" if is_regenerate else "conversation.message_edited_resubmitted"
-        ),
-        summary=(
-            s.text_for(
-                lang,
-                zh="用户要求重新生成最新回答，旧 assistant 输出被截断重跑。",
-                en="The user asked to regenerate the latest answer, truncating the previous assistant output.",
+        acceptance_stage = "turn_start_projection"
+        s._set_session_waiting_live_output(conversation_id, turn_id=turn_control.turn_id)
+        if is_regenerate:
+            s._record_session_message_regenerate_event(
+                conversation_id,
+                target_message_id=target_message_id,
+                turn_id=turn_control.turn_id,
+                truncated_count=max(0, len(previous_messages) - target_index - 1),
+                attachment_count=len(attachments),
             )
-            if is_regenerate
-            else s.text_for(
-                lang,
-                zh="用户编辑最新消息并重新提交，后续 assistant 输出被截断重跑。",
-                en="The user edited the latest message and resubmitted, truncating later assistant output.",
+        else:
+            s._record_session_message_edit_resubmit_event(
+                conversation_id,
+                target_message_id=target_message_id,
+                turn_id=turn_control.turn_id,
+                truncated_count=max(0, len(previous_messages) - target_index - 1),
+                original_content=original_entry.get("content") or "",
+                edited_content=message,
             )
-        ),
-        metadata={
-            "messageId": target_message_id,
-            "truncatedMessageCount": max(0, len(previous_messages) - target_index - 1),
-            "originalLength": len(str(original_entry.get("content") or "")),
-            "editedLength": len(message),
-            "supersededTurnId": superseded_turn_id,
-            "regenerated": is_regenerate,
-            "preservedAttachmentCount": len(attachments),
-        },
-    )
-    s._record_session_cycle_message(
-        conversation_id,
-        user_entry,
-        event="user_message_regenerated" if is_regenerate else "user_message_edited_resubmitted",
-        status="running",
-    )
-    s._record_session_turn_started_event(
-        conversation_id,
-        turn_id=turn_control.turn_id,
-        leases=requested_leases,
-        user_message=message,
-        raw_user_message=message,
-        user_message_source="raw",
-        attachments=attachments,
-        trace_context_carrier=normalized_trace_context_carrier,
-    )
-    s._publish_session_detail_snapshot(conversation_id)
-
-    effective_user_message, user_message_source = s._resolve_session_user_prompt(
-        conversation_id,
-        message,
-        history_before_target,
-        existing_task=active_task,
-    )
-    if effective_user_message != message:
-        s._record_session_user_message_filtered_event(
+        s._record_chat_next_state_signal(
+            session_id=conversation_id,
+            turn_id=turn_control.turn_id,
+            source="user",
+            kind="assistant_output_edited",
+            polarity="neutral",
+            mode="directive",
+            related_event_code=(
+                "conversation.message_regenerated" if is_regenerate else "conversation.message_edited_resubmitted"
+            ),
+            summary=(
+                s.text_for(
+                    lang,
+                    zh="用户要求重新生成最新回答，旧 assistant 输出被截断重跑。",
+                    en="The user asked to regenerate the latest answer, truncating the previous assistant output.",
+                )
+                if is_regenerate
+                else s.text_for(
+                    lang,
+                    zh="用户编辑最新消息并重新提交，后续 assistant 输出被截断重跑。",
+                    en="The user edited the latest message and resubmitted, truncating later assistant output.",
+                )
+            ),
+            metadata={
+                "messageId": target_message_id,
+                "truncatedMessageCount": max(0, len(previous_messages) - target_index - 1),
+                "originalLength": len(str(original_entry.get("content") or "")),
+                "editedLength": len(message),
+                "supersededTurnId": superseded_turn_id,
+                "regenerated": is_regenerate,
+                "preservedAttachmentCount": len(attachments),
+            },
+        )
+        s._record_session_cycle_message(
+            conversation_id,
+            user_entry,
+            event="user_message_regenerated" if is_regenerate else "user_message_edited_resubmitted",
+            status="running",
+        )
+        s._record_session_turn_started_event(
             conversation_id,
             turn_id=turn_control.turn_id,
-            reason="non_meaningful_user_message",
-            message=message,
-            source=user_message_source,
+            leases=requested_leases,
+            user_message=message,
+            raw_user_message=message,
+            user_message_source="raw",
+            attachments=attachments,
+            trace_context_carrier=normalized_trace_context_carrier,
         )
+        s._publish_session_detail_snapshot(conversation_id)
 
-    context = {
-        "session_id": conversation_id,
-        "turn_id": turn_control.turn_id,
-        "turn_control": turn_control,
-        "user_message": effective_user_message,
-        "raw_user_message": message,
-        "user_message_source": user_message_source,
-        "attachments": attachments,
-        "session_references": session_references,
-        "history_messages": history_before_target,
-        "mental_model_enabled": mental_model_enabled,
-        "runtime_status_enabled": runtime_status_enabled,
-        "turn_status_tail": dict(turn_status_tail) if isinstance(turn_status_tail, dict) else None,
-        "active_task": active_task,
-        "agent_id": agent_id,
-        "skill_invocation": skill_invocation,
-        "active_skill_contract": active_skill_contract,
-        "llm_slot": s.SESSION_LLM_SLOT_DIALOGUE,
-        "trace_context_carrier": dict(normalized_trace_context_carrier),
-    }
-    s._record_session_turn_scheduled_event(context)
+        acceptance_stage = "prompt_resolve"
+        effective_user_message, user_message_source = s._resolve_session_user_prompt(
+            conversation_id,
+            message,
+            history_before_target,
+            existing_task=active_task,
+        )
+        if effective_user_message != message:
+            s._record_session_user_message_filtered_event(
+                conversation_id,
+                turn_id=turn_control.turn_id,
+                reason="non_meaningful_user_message",
+                message=message,
+                source=user_message_source,
+            )
+
+        acceptance_stage = "context_assembly"
+        context = {
+            "session_id": conversation_id,
+            "turn_id": turn_control.turn_id,
+            "turn_control": turn_control,
+            "user_message": effective_user_message,
+            "raw_user_message": message,
+            "user_message_source": user_message_source,
+            "attachments": attachments,
+            "session_references": session_references,
+            "history_messages": history_before_target,
+            "mental_model_enabled": mental_model_enabled,
+            "runtime_status_enabled": runtime_status_enabled,
+            "turn_status_tail": dict(turn_status_tail) if isinstance(turn_status_tail, dict) else None,
+            "active_task": active_task,
+            "agent_id": agent_id,
+            "skill_invocation": skill_invocation,
+            "active_skill_contract": active_skill_contract,
+            "llm_slot": s.SESSION_LLM_SLOT_DIALOGUE,
+            "trace_context_carrier": dict(normalized_trace_context_carrier),
+        }
+        acceptance_stage = "scheduling_prepare"
+        s._record_session_turn_scheduled_event(context)
+    except Exception as exc:
+        _settle_session_submit_admission_failure(
+            session_id=conversation_id,
+            turn_id=turn_control.turn_id,
+            leases=requested_leases,
+            user_message=message,
+            exc=exc,
+            stage=acceptance_stage,
+        )
+        raise
     try:
         s._schedule_session_turn(context)
     except Exception as exc:
