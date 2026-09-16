@@ -3,6 +3,54 @@
 > 对话工作台组合层：只服务 Chat composer / 时间线。
 > **禁止**在此重新实现按钮/输入；必须组合 VUI primitives。
 
+## ConversationActiveTurnStatusNote
+
+### 功能
+运行中回合的紧凑状态行：一条心跳文案（阶段 + 秒数/重试进度），并叠加流连通性提示——连接断开重连、长时间无输出可停止、备用模型路由切换。让 SSE 断流与输出停滞从"无限累加的秒数"升级为可读的轻量提示。
+
+### 适用范围
+- **适用**：直连会话活跃回合的状态占位（`ConversationView` 时间线内）；需要流连通性可见性的位置。
+- **不适用**：陪伴模式（`companionMode` 收敛为单一 typing 提示，不渲染提示条）；群聊房间（走 `ChatGroupMessageStream` 自身的断线文案）。
+
+| 场景 | 选择 |
+| --- | --- |
+| 运行中回合 + 流断开重连 | 断连提示条（`VStatusChip tone=warning`）+ 断开持续秒数 |
+| 运行中回合 + 已连接但超 90s 无 assistant delta | 停滞提示条（可停止），与断连正交叠加 |
+| 消息带 `routeFallback {from,to}` | 备用路由提示条（`tone=accent`）；字段缺失不渲染 |
+| 陪伴模式 | 仅 typing 提示 |
+
+### 使用方式
+```tsx
+// 生产：ConversationView 时间线的活跃回合占位。
+// 连通性经 ActiveTurnStreamStateContext 投影（ChatSessionWorkspacePanel 提供），
+// ConversationView 不感知该状态。
+<ConversationActiveTurnStatusNote message={activeTurnMessage} lang={lang} statusLabel="状态" />
+```
+
+| Prop / 槽位 | 说明 | 设计注意 |
+| --- | --- | --- |
+| message | 活跃回合消息（turnItems/timestamp/可选 routeFallback） | routeFallback 缺字段则整条不渲染 |
+| lang | 语言 | 新文案一律走 `dictionaryChat`，禁止内联三目 |
+| streamState（context） | `streamConnected` 三态 + 断连起点 + 最近 delta 时间 | 不是第二套状态通道，只是 `useSessionDetailStream` 状态的跨层投影 |
+
+### 非职责
+- 不判定生成是否失败（journal 是事实源，断连不取消生成）。
+- 不做模态阻断或 toast；不提供重试按钮（重连自动进行）。
+
+### 视觉与状态
+- 提示条用 `VStatusChip`（warning=断连/停滞，accent=路由回退），紧跟心跳行，非模态。
+- 停滞阈值 `ACTIVE_TURN_NO_DELTA_STALL_AFTER_MS = 90s`（模块常量，覆盖长工具/思考静默）。
+- 重连成功提示条自动消失；断连与停滞可同时显示。
+
+### 实现落点
+- 源码：`web/src/components/conversation/ConversationActiveTurnStatusNote.tsx`
+- 纯 helper：`conversationActiveTurnStatusPresentation.ts`（`resolveActiveTurnDisconnectSeconds` / `resolveActiveTurnStallSeconds` / `resolveActiveTurnRouteFallback`）
+- 状态投影：`web/src/components/conversation/activeTurnStreamState.ts`
+
+### 反冗余
+- 不新增第二套断线横幅；群聊横幅与主聊天提示条各归其位。
+- 禁止绕过 context 直接在 `ConversationView` 加第二份连接状态 prop。
+
 ## ConversationFollowupQueueBar
 
 ### 功能

@@ -79,8 +79,16 @@ export function useSessionDetailStream({
   createSessionEventStream = createDefaultSessionEventStream,
   sessionTitleForNotifications,
   viewedSessionId,
-}: UseSessionDetailStreamOptions): { sessionStreamConnected: boolean } {
+}: UseSessionDetailStreamOptions): {
+  sessionStreamConnected: boolean;
+  streamDisconnectedSinceMs: number | null;
+} {
   const [sessionStreamConnected, setSessionStreamConnected] = useState(false);
+  // Sticky start of the current reconnect loop: set on the first transport
+  // error, cleared by the next successful open or a fresh stream effect. The
+  // active-turn status note reads it to show "disconnected · Ns"; it is not
+  // set for route-settling teardowns, which are not real drops.
+  const [streamDisconnectedSinceMs, setStreamDisconnectedSinceMs] = useState<number | null>(null);
   const [streamReconnectTick, setStreamReconnectTick] = useState(0);
   const sessionStreamErrorLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamErrorRefreshAtRef = useRef<Record<string, number>>({});
@@ -131,6 +139,9 @@ export function useSessionDetailStream({
 
   useEffect(() => {
     const shouldConnect = sessionStreamDecisionSnapshotRef.current.shouldConnect;
+    // A new stream effect owns the advisory clock; stale disconnect timing
+    // from a previous session must not leak into the next one.
+    setStreamDisconnectedSinceMs(null);
     if (!shouldConnect) {
       const decisionSnapshot = sessionStreamDecisionSnapshotRef.current;
       setSessionStreamConnected(false);
@@ -159,6 +170,10 @@ export function useSessionDetailStream({
     }
 
     let disposed = false;
+    const markStreamConnected = () => {
+      setSessionStreamConnected(true);
+      setStreamDisconnectedSinceMs(null);
+    };
     const streamSessionId = String(activeSessionId || "");
     if (!streamSessionId) {
       setSessionStreamConnected(false);
@@ -494,7 +509,7 @@ export function useSessionDetailStream({
 
     stream.onopen = () => {
       if (!disposed) {
-        setSessionStreamConnected(true);
+        markStreamConnected();
         sessionStreamErrorLoggedRef.current[streamSessionId] = false;
         postBrowserTelemetry({
           phase: "session_stream",
@@ -511,6 +526,9 @@ export function useSessionDetailStream({
     stream.onerror = () => {
       if (!disposed) {
         setSessionStreamConnected(false);
+        // onerror fires on every failed reconnect attempt; keep the first
+        // timestamp so the duration counter measures the whole outage.
+        setStreamDisconnectedSinceMs((current) => current ?? Date.now());
         const pendingAssistantDeltaCount = assistantDeltaScheduler.pendingCount;
         applyPendingAssistantDeltas("close");
         // The stream reports an error on every reconnect attempt while it keeps
@@ -567,7 +585,7 @@ export function useSessionDetailStream({
         logRejectedSessionStreamRoute(routed.trace, "Session detail stream payload could not be parsed.");
         return;
       }
-      setSessionStreamConnected(true);
+      markStreamConnected();
       queueSessionDetail(routed.payload.detail, routed.trace);
     }
 
@@ -584,7 +602,7 @@ export function useSessionDetailStream({
         logRejectedSessionStreamRoute(routed.trace, "Session initial stream payload could not be parsed.");
         return;
       }
-      setSessionStreamConnected(true);
+      markStreamConnected();
       postBrowserTelemetry({
         phase: "session_stream",
         eventCode: "browser.session_stream.initial_received",
@@ -617,7 +635,7 @@ export function useSessionDetailStream({
         logRejectedSessionStreamRoute(routed.trace, "Session assistant delta stream payload could not be parsed.");
         return;
       }
-      setSessionStreamConnected(true);
+      markStreamConnected();
       desktopConversationNotifierRef.current.handleAssistantDelta(routed.payload, {
         sessionTitle: sessionTitleForNotificationsRef.current || streamSessionId,
         viewedSessionId: viewedSessionIdRef.current,
@@ -679,5 +697,5 @@ export function useSessionDetailStream({
     streamReconnectTick,
   ]);
 
-  return { sessionStreamConnected };
+  return { sessionStreamConnected, streamDisconnectedSinceMs };
 }

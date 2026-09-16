@@ -4387,6 +4387,18 @@ export function ConversationView({
               // Any settled answer on a branch can regenerate; messages without
               // a journal node id keep the legacy latest-only fallback.
               && (Boolean(message.nodeId) || message.id === regenerableAssistantMessageId);
+            // A settled failed turn offers in-place recovery: retry reruns the
+            // turn's original user message through the same branch-aware
+            // regenerate pipeline as the regenerate action. Without a journal
+            // node id only the legacy latest-turn fallback remains, so the
+            // entry is hidden for older untargetable failures.
+            const canRetryFailedTurnMessage = message.role === "assistant"
+              && turnErrorMessage
+              && !assistantTurnIsStreaming(message)
+              && !agentInboxMessage
+              && !groupTranscriptMessage
+              && Boolean(onRegenerateAssistantMessage)
+              && (Boolean(message.nodeId) || message.id === regenerableAssistantMessageId);
             const branchInfo = message.branch;
             const siblingNodeIds = Array.isArray(branchInfo?.siblingNodeIds)
               ? branchInfo.siblingNodeIds.filter((value): value is string => Boolean(value))
@@ -4718,6 +4730,23 @@ export function ConversationView({
                               ))}
                             </dl>
                           </details>
+                        ) : null}
+                        {canRetryFailedTurnMessage ? (
+                          <div className={styles.turnErrorActions}>
+                            <VButton
+                              type="button"
+                              contentLayout="plain"
+                              className={styles.turnErrorRetryButton}
+                              onClick={() => onRegenerateAssistantMessage?.(message)}
+                              isDisabled={regenerateDisabled}
+                              isPending={regeneratePending}
+                              title={regeneratePending ? t("retryFailedTurnPending") : t("retryFailedTurn")}
+                              aria-label={regeneratePending ? t("retryFailedTurnPending") : t("retryFailedTurn")}
+                            >
+                              <RefreshCw size={12}/>
+                              <span>{t("retryFailedTurn")}</span>
+                            </VButton>
+                          </div>
                         ) : null}
                       </div>
                     </div>

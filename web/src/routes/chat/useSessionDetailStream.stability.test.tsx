@@ -68,7 +68,10 @@ class FakeEventSource {
   }
 }
 
-let hookResults: { sessionStreamConnected: boolean }[] = [];
+let hookResults: {
+  sessionStreamConnected: boolean;
+  streamDisconnectedSinceMs: number | null;
+}[] = [];
 
 function Host({ props }: { props: UseSessionDetailStreamOptions }) {
   hookResults.push(useSessionDetailStream(props));
@@ -325,6 +328,43 @@ describe("useSessionDetailStream stream lifecycle stability", () => {
       FakeEventSource.instances[0].fail();
     });
     expect(invalidateSpy).toHaveBeenCalledTimes(2);
+    unmount(root);
+    vi.useRealTimers();
+  });
+
+  it("tracks the reconnect-loop start across repeated errors and clears on open", () => {
+    vi.useFakeTimers();
+    const { options } = baseOptions({ activeSessionId: "s1" });
+    const root = mount(options);
+    expect(hookResults.at(-1)?.streamDisconnectedSinceMs).toBeNull();
+    act(() => {
+      FakeEventSource.instances[0].open();
+    });
+    expect(hookResults.at(-1)?.sessionStreamConnected).toBe(true);
+    expect(hookResults.at(-1)?.streamDisconnectedSinceMs).toBeNull();
+
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      FakeEventSource.instances[0].fail();
+    });
+    const firstDropAt = hookResults.at(-1)?.streamDisconnectedSinceMs;
+    expect(hookResults.at(-1)?.sessionStreamConnected).toBe(false);
+    expect(firstDropAt).toBeTypeOf("number");
+
+    // Every failed reconnect attempt re-fires onerror; the outage start stays sticky.
+    act(() => {
+      vi.advanceTimersByTime(3_000);
+      FakeEventSource.instances[0].fail();
+    });
+    expect(hookResults.at(-1)?.streamDisconnectedSinceMs).toBe(firstDropAt);
+
+    // A recovered stream clears the advisory clock.
+    act(() => {
+      vi.advanceTimersByTime(3_000);
+      FakeEventSource.instances[0].emit("session_detail", sessionDetailEvent({ ledgerSeq: 1 }));
+    });
+    expect(hookResults.at(-1)?.sessionStreamConnected).toBe(true);
+    expect(hookResults.at(-1)?.streamDisconnectedSinceMs).toBeNull();
     unmount(root);
     vi.useRealTimers();
   });
