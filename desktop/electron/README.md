@@ -21,6 +21,7 @@
 | 隔离实例监督 / `ownerLease` | `src/process/isolatedInstanceSupervisor.ts` + `__fixtures__/instanceOwnerLease.cases.json` | observe 再 spawn Python bridge；HTTP 等待另开 180s；hang 回收仍要求 spawnPid 已死；改 D3 语义先改计划 I3 |
 | 生命周期准入 / 冷却 | `src/lifecycle/instanceAdmissionControl.ts` + `instanceAdmissionStore.ts` + `__fixtures__/instanceAdmission.cases.json` | 把冷却写入 `instances.json`；挡 stop/force-stop；在 `main.ts` 再写一套限流；改 burst/冷却先改计划 I4a |
 | main 行 open/close/restart 队列 | `src/lifecycle/mainLine/` + `src/process/workbenchLifecycle.ts` | 在 `main.ts` 再写第二套 join；把准入控制（I4a）塞进队列模块；改 join 语义先改计划 I4b |
+| 延迟重启 intent 兑现 | `src/lifecycle/deferredRestartIntents.ts` + `src/process/workbenchLifecycle.ts` + `src/main.ts` | 让 Electron main 轮询 `restart-intents/` 并在空闲时走 main-line restart（Python daemon 已不在产品路径）；直接调用工作台后端绕过 main-line 队列或控制台可见子进程；改 intent 状态语义先改本模块测试 |
 | workbench backend spawn / 健康等待 / 端口释放 | `src/process/workbenchBackend.ts` + `workbenchBackendHealth.ts` + `workbenchBackendRetire.ts` | 产品路径再 spawn `--action lifecycle` / `vibelution_launcher.py`；用 `python.exe`+`detached` 闪控制台；用 `taskkill.exe`；自行加扫描式杀树 / Job Object（需单独评审） |
 | 托盘 / 单实例 / 退出 | `src/tray/desktopTray.ts` · `src/main.ts` | 与 WinForms 同时显示 NotifyIcon；用 `taskkill` 清 Electron；托盘「Launcher 代码版本」去打工作台 HTTP `/api/launcher/freshness` |
 | `--project` 槽位 | `src/protocol/applyProjectSlot.ts` · `src/appLock.ts` · `src/main.ts` | 把 worktree 当成第二套 DesktopShell；未登记路径静默 start 当前 main |
