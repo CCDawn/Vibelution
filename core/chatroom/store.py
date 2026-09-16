@@ -160,6 +160,7 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
             payload,
             retry_timeout_seconds=WRITE_RETRY_TIMEOUT_SECONDS,
             on_retry=_on_retry,
+            strict_replace=True,
         )
     except OSError:
         # Never drop a terminal state silently: surface the

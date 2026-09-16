@@ -32,6 +32,7 @@ def atomic_write_text(
     ensure_parent_dir: bool = True,
     ensure_fsync: bool = True,
     on_retry: Callable[[int, str], None] | None = None,
+    strict_replace: bool = False,
 ) -> None:
     """Write text via temp-file replace, with Windows-friendly lock retries.
 
@@ -43,9 +44,11 @@ def atomic_write_text(
     surface transiently on Windows).
 
     If temp-file creation or final replacement stays blocked, this falls back to
-    an in-place write. That fallback is intentionally narrow: it prevents data
-    loss during local disk or antivirus races, while callers that need strict
-    all-or-nothing semantics should keep their own stricter helper.
+    an in-place write unless ``strict_replace`` is set. That fallback is
+    intentionally narrow: it prevents data loss during local disk or antivirus
+    races, while callers that need strict all-or-nothing semantics (for example
+    terminal room state) should keep ``strict_replace=True`` so a blocked
+    replace surfaces as an error instead of a truncated in-place write.
     """
 
     target = Path(path)
@@ -54,6 +57,8 @@ def atomic_write_text(
     with cross_process_file_lock(target, timeout=lock_timeout_seconds):
         temp_path = _write_temp_file(target, text, ensure_fsync=ensure_fsync)
         if temp_path is None:
+            if strict_replace:
+                raise OSError(f"Unable to write temp file for {target}")
             _retry_in_place_write(target, text, timeout_seconds=fallback_timeout_seconds)
             return
         try:
@@ -65,6 +70,8 @@ def atomic_write_text(
                     on_retry=on_retry,
                 )
             except OSError:
+                if strict_replace:
+                    raise
                 _retry_in_place_write(target, text, timeout_seconds=fallback_timeout_seconds)
             if ensure_fsync:
                 _fsync_parent_dir(target.parent)

@@ -53,8 +53,9 @@ def _default_state_path(project_root: Path) -> Path:
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     # The shared helper locks the target across processes and bounds
     # PermissionError retries; the previous bare os.replace could fail on a
-    # concurrent reader/writer of the managed-agent state file.
-    atomic_write_json(path, payload, sort_keys=True, indent=2)
+    # concurrent reader/writer of the managed-agent state file. Strict replace
+    # keeps the original all-or-nothing contract (no in-place fallback).
+    atomic_write_json(path, payload, sort_keys=True, indent=2, strict_replace=True)
     try:
         os.chmod(path, 0o600)
     except OSError:

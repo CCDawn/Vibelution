@@ -151,6 +151,7 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
             payload,
             retry_timeout_seconds=s.WRITE_RETRY_TIMEOUT_SECONDS,
             on_retry=_on_retry,
+            strict_replace=True,
         )
     except OSError as exc:
         s._record_state_write_event(

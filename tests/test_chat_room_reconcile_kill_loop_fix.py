@@ -370,17 +370,21 @@ def test_chat_room_store_read_retries_transient_lock_then_succeeds(tmp_path):
 def test_chat_room_store_save_raises_when_replace_locked_throughout(tmp_path, monkeypatch):
     monkeypatch.setattr(chat_room_store, "WRITE_RETRY_TIMEOUT_SECONDS", 0.05)
     store = chat_room_store.ChatRoomStore(root=tmp_path)
-    real_replace = chat_room_store.os.replace
+    # The strict atomic write now lives in core.infrastructure.atomic_io; the
+    # always-locked replace is injected at that module's os.replace seam.
+    from core.infrastructure import atomic_io
+
+    real_replace = atomic_io.os.replace
 
     def always_locked_replace(source, target):
         raise PermissionError("target locked")
 
-    monkeypatch.setattr(chat_room_store.os, "replace", always_locked_replace)
+    monkeypatch.setattr(atomic_io.os, "replace", always_locked_replace)
     try:
         with pytest.raises(PermissionError):
             store.save({"rooms": [{"roomId": "room-a"}]})
     finally:
-        monkeypatch.setattr(chat_room_store.os, "replace", real_replace)
+        monkeypatch.setattr(atomic_io.os, "replace", real_replace)
     # The failed save must not have left a truncated state file behind.
     assert not store.state_path.exists()
 
