@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -13,6 +14,9 @@ from core.research.workflow.models import ActorKind, WorkflowNodeSpec, WorkflowS
 from core.web.services.team_workflow.research_runtime.agent_node_execution import (
     AgentNodeExecutionError,
     start_agent_node_execution,
+)
+from core.web.services.team_workflow.research_runtime.external_agent_task_failure import (
+    is_recoverable_external_reconciliation_failure,
 )
 from core.web.services.team_workflow.research_runtime.external_agent_task_reconciliation import (
     reconcile_external_agent_tasks,
@@ -92,6 +96,89 @@ def _node_run() -> dict:
         "inputSnapshotHash": "a" * 64,
         "artifactRefs": ["artifact-question"],
     }
+
+
+def test_legacy_project_task_lag_reopens_only_for_the_exact_completed_task(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Repair the one historical generic wrapper without retrying its Agent turn."""
+    store = WorkflowRunStore(tmp_path)
+    record = _record()
+    record["nodeRuns"][0].update(
+        {
+            "nodeId": "problem_understanding",
+            "status": "failed",
+            "taskId": "task-problem-understanding",
+            "sessionId": "session-problem-understanding",
+            "failureCode": "adapter_execution_exception",
+            "failureSummary": json.dumps(
+                {
+                    "code": "adapter_execution_exception",
+                    "detail": json.dumps(
+                        {
+                            "code": "project_agent_task_not_reconciled",
+                            "taskId": "task-problem-understanding",
+                            "status": "running",
+                        }
+                    ),
+                }
+            ),
+        }
+    )
+    record["taskLeases"] = [
+        {
+            "nodeRunId": "node-run-1",
+            "status": "failed",
+        }
+    ]
+    store.create_run(record)
+    node_run = store.get_run("run-1")["nodeRuns"][0]
+
+    assert is_recoverable_external_reconciliation_failure(node_run) is True
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.external_agent_task_reconciliation.load_external_agent_task",
+        lambda _record, _node_run: {
+            "taskId": "task-problem-understanding",
+            "sessionId": "session-problem-understanding",
+            "status": "completed",
+        },
+    )
+    reconciliation_calls: list[dict] = []
+
+    def reconcile_reopened(_store, *, checkpoint_path, record, node_run):
+        reconciliation_calls.append(
+            {
+                "checkpointPath": checkpoint_path,
+                "status": node_run["status"],
+                "taskId": node_run["taskId"],
+            }
+        )
+        return record
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.external_agent_task_reconciliation._reconcile_one",
+        reconcile_reopened,
+    )
+    reopened = reconcile_external_agent_tasks(
+        store,
+        checkpoint_path=str(tmp_path / "checkpoints.sqlite"),
+        record=store.get_run("run-1"),
+    )
+
+    assert reopened["status"] == "running"
+    assert reopened["nodeRuns"][0]["status"] == "running"
+    assert reopened["taskLeases"][0]["status"] == "running"
+    assert reopened["commandReceipts"][-1]["command"] == (
+        "retry_external_agent_reconciliation"
+    )
+    assert reconciliation_calls == [
+        {
+            "checkpointPath": str(tmp_path / "checkpoints.sqlite"),
+            "status": "running",
+            "taskId": "task-problem-understanding",
+        }
+    ]
 
 
 def _route() -> dict:

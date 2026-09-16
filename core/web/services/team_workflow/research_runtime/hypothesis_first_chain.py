@@ -885,17 +885,20 @@ def _latest_records(records: list[dict[str, Any]], field: str) -> dict[str, dict
     return latest
 
 
-def _question_live_formal_runs(
+def _question_resettable_formal_runs(
     team_id: str, question_id: str
 ) -> list[dict[str, Any]] | None:
-    """The question's formal runs that have not reached a terminal status.
+    """Every non-archived formal run owned by a question.
 
-    Terminal means the same set the v2 ``_active_stage_one_run`` offer accepts
-    (succeeded / failed / cancelled / archived); anything else keeps the
-    create-stage-one offer gated, so a question reset must reconcile these
-    runs first.  ``None`` means the formal read runtime is unavailable — the
-    caller skips the reconciliation (the established ``None -> skip``
-    precedent) instead of failing the whole reset.
+    A reset starts a fresh question epoch.  Leaving any completed leaf behind
+    makes its formal delivery phase authoritative in the V2 projection, so a
+    previously succeeded run with an incomplete Program handoff can hide the
+    new stage-one entry.  Archive every non-archived run; non-terminal runs
+    are cancelled first, while terminal runs are archived directly.
+
+    ``None`` means the formal read runtime is unavailable — the caller skips
+    the reconciliation (the established ``None -> skip`` precedent) instead
+    of failing the whole reset.
     """
     from .formal_read_runtime import get_query_service
 
@@ -915,32 +918,26 @@ def _question_live_formal_runs(
         and str(run.get("questionId") or "").strip().upper()
         == normalized_question_id
         and str(run.get("status") or "").strip().lower()
-        not in _TERMINAL_RUN_STATUSES
+        != "archived"
     ]
 
 
-def _cancel_live_formal_runs_for_reset(
+def _archive_formal_runs_for_reset(
     team_id: str,
     runs: Sequence[Mapping[str, Any]],
 ) -> tuple[list[str], list[str]]:
-    """Cancel then archive every live formal run before a destructive reset.
+    """Archive every resettable formal run before a destructive reset.
 
-    Fail-loud reconciliation: the cancellation reuses the existing
-    ``cancel_run`` command channel (the same SSOT the operator's stop button
-    uses) under a server-bound system operator scope, with one deterministic
-    idempotency key per run.  The key intentionally carries no reset id — a
-    repeated reset replays the first cancel command and CANCELLED ->
-    CANCELLED is a legal same-state transition.
+    Fail-loud reconciliation uses the existing command service and one
+    deterministic idempotency key per run.  A live run is cancelled before it
+    is archived; an already terminal run is archived directly.  This keeps
+    the reset from creating an unnecessary state transition for an already
+    completed result while ensuring it cannot become the next epoch's formal
+    leaf.
 
-    A CANCELLED run is terminal but unarchived, so it still stays a leaf in
-    the formal-run lineage projection and would make the next
-    create_stage_one_run offer report a lineage conflict.  Every successful
-    cancel is therefore chained into an ``archive_run`` command for the same
-    run — same submit pattern, fresh run_version read, deterministic
-    ``hf2:reset-archive-run`` key — so the stale leaf leaves the lineage.
-    Any submit failure (stale version, operator refusal, conflict) aborts
-    the reset before a single destructive write happens; only an
-    unreadable/foreign run is skipped.
+    Any submit failure (stale version, operator refusal, conflict) aborts the
+    reset before its question-owned working-artifact writes; only an
+    unreadable or foreign run is skipped.
     """
     from core.research.workflow.contracts import (
         ActorRef,
@@ -973,24 +970,25 @@ def _cancel_live_formal_runs_for_reset(
                 display_name="Question run reset",
                 roles=("operator",),
             ):
-                runtime.command_service.submit(
-                    CommandRequest(
-                        command_id=new_id("cmd"),
-                        run_id=run_id,
-                        team_id=team_id,
-                        command=WorkflowCommandKind.CANCEL_RUN,
-                        node_id=None,
-                        expected_run_version=int(run.run_version),
-                        idempotency_key=f"hf2:reset-cancel-run:{run_id}",
-                        payload={"reason": "question run reset"},
-                        requested_by=ActorRef("system", QUESTION_RESET_RUN_ACTOR_ID),
-                        requested_at_ms=int(time.time() * 1000),
+                current_status = str(getattr(run, "status", "") or "").strip().lower()
+                if current_status not in _TERMINAL_RUN_STATUSES:
+                    runtime.command_service.submit(
+                        CommandRequest(
+                            command_id=new_id("cmd"),
+                            run_id=run_id,
+                            team_id=team_id,
+                            command=WorkflowCommandKind.CANCEL_RUN,
+                            node_id=None,
+                            expected_run_version=int(run.run_version),
+                            idempotency_key=f"hf2:reset-cancel-run:{run_id}",
+                            payload={"reason": "question run reset"},
+                            requested_by=ActorRef("system", QUESTION_RESET_RUN_ACTOR_ID),
+                            requested_at_ms=int(time.time() * 1000),
+                        )
                     )
-                )
-                # Fresh version read per command: the cancel above bumped the
-                # stored run version and ARCHIVE_RUN CAS-checks the current
-                # one.  Cancelling alone would leave a CANCELLED leaf in the
-                # formal-run lineage and block the question's next run.
+                    cancelled_run_ids.append(run_id)
+                # Re-read after CANCEL_RUN because it bumps the version;
+                # ARCHIVE_RUN CAS-checks the current run version.
                 run = runtime.store.get_run(run_id)
                 runtime.command_service.submit(
                     CommandRequest(
@@ -1010,7 +1008,6 @@ def _cancel_live_formal_runs_for_reset(
             raise HypothesisFirstChainError(
                 f"本题正式运行收口失败（{run_id}）：{exc}"
             ) from exc
-        cancelled_run_ids.append(run_id)
         archived_run_ids.append(run_id)
     return cancelled_run_ids, archived_run_ids
 
@@ -1106,7 +1103,9 @@ def _question_reset_snapshot(team_id: str, question_id: str) -> dict[str, Any]:
         for record in target_collection_requests
         if str(record.get("collectionRunId") or "").strip()
     }
-    live_formal_runs = _question_live_formal_runs(team_id, normalized_question_id)
+    resettable_formal_runs = _question_resettable_formal_runs(
+        team_id, normalized_question_id
+    )
     impact = {
         "candidateCount": len(candidate_ids),
         "selectionCount": len(target_selection_ids),
@@ -1114,10 +1113,10 @@ def _question_reset_snapshot(team_id: str, question_id: str) -> dict[str, Any]:
         "hypothesisRoundCount": len(target_rounds),
         "collectionRequestCount": len(request_ids),
         "collectionRunCount": 0,
-        "formalRunCount": len(live_formal_runs or []),
-        # Every live run the reset cancels is immediately archived too, so
-        # the projected archive count equals the cancel count up front.
-        "archivedFormalRunCount": len(live_formal_runs or []),
+        "formalRunCount": len(resettable_formal_runs or []),
+        # Every resettable run is archived, whether it needs a preceding
+        # cancellation or is already terminal.
+        "archivedFormalRunCount": len(resettable_formal_runs or []),
     }
     active_status_meetings = {
         meeting_id: meeting
@@ -1175,9 +1174,9 @@ def _question_reset_snapshot(team_id: str, question_id: str) -> dict[str, Any]:
         "targetMeetingIds": target_meeting_ids,
         "targetRoundIds": set(target_rounds),
         "collectionRunIds": collection_run_ids,
-        # None keeps "formal read runtime unavailable" distinct from "no live
-        # formal runs"; the reset only skips the reconciliation on None.
-        "liveFormalRuns": live_formal_runs,
+        # None keeps "formal read runtime unavailable" distinct from "no
+        # resettable formal runs"; the reset only skips reconciliation on None.
+        "liveFormalRuns": resettable_formal_runs,
         "impact": impact,
         "activeMeetingIds": active_meetings,
         "activeRequestIds": active_requests,
@@ -1409,9 +1408,9 @@ def reset_question_chain(
             )
         snapshot["impact"]["collectionRunCount"] = int(source_preview.get("runCount") or 0)
         _apply_question_conversation_impact(normalized_team_id, snapshot)
-        # Reconcile live formal runs before any destructive write: a surviving
-        # non-terminal run would keep the create_stage_one_run offer gated
-        # forever and leave the question in a dead state after the reset.
+        # Retire every prior formal run before clearing question artifacts.
+        # Completed runs with incomplete program delivery otherwise become the
+        # V2 current phase and hide the fresh stage-one entry after a reset.
         live_formal_runs = snapshot["liveFormalRuns"]
         cancelled_formal_run_ids: list[str] = []
         archived_formal_run_ids: list[str] = []
@@ -1427,7 +1426,7 @@ def reset_question_chain(
             )
         elif live_formal_runs:
             cancelled_formal_run_ids, archived_formal_run_ids = (
-                _cancel_live_formal_runs_for_reset(
+                _archive_formal_runs_for_reset(
                     normalized_team_id, live_formal_runs
                 )
             )

@@ -39,6 +39,8 @@ type ConversationToolActivityProps = {
   activity: CodexTranscriptToolActivity;
   language: ConversationToolPresentationLanguage;
   renderToolDetails: (cell: CodexTranscriptCell, detailsId: string) => ReactNode;
+  /** True when the cell has no expandable detail: render the row without a toggle. */
+  toolDetailIsEmpty?: (cell: CodexTranscriptCell) => boolean;
   /** Codex-style approval card rendered under the matching tool call. */
   approvalSlot?: ReactNode;
 };
@@ -212,10 +214,12 @@ function ToolActivityItem({
   cell,
   language,
   renderToolDetails,
+  toolDetailIsEmpty,
 }: {
   cell: CodexTranscriptCell;
   language: ConversationToolPresentationLanguage;
   renderToolDetails: ConversationToolActivityProps["renderToolDetails"];
+  toolDetailIsEmpty?: ConversationToolActivityProps["toolDetailIsEmpty"];
 }) {
   const noMatch = conversationToolActivityIsNoMatchTerminalExit(cell);
   const pills = buildToolActivityPills(cell, language, { noMatch });
@@ -234,6 +238,24 @@ function ToolActivityItem({
     />
   );
   const emptyDetail = language === "zh" ? "无更多详情" : "No further details";
+
+  // Codex/opencode rule: a row with nothing to expand never shows a toggle.
+  if (toolDetailIsEmpty?.(cell)) {
+    return (
+      <div
+        className={styles.item}
+        data-codex-tool-activity-item="true"
+        data-codex-tool-detail="none"
+        data-codex-transcript-cell-kind={cell.kind}
+        data-codex-transcript-cell-tone={cell.tone}
+        data-codex-transcript-cell-status={cell.status}
+        data-codex-transcript-cell-phase={cell.phase ?? "tool_call"}
+        data-conversation-part-key={cell.id}
+      >
+        {content}
+      </div>
+    );
+  }
 
   return (
     <details
@@ -271,10 +293,12 @@ function ToolActivityBatch({
   item,
   language,
   renderToolDetails,
+  toolDetailIsEmpty,
 }: {
   item: Extract<ConversationToolActivityPresentationItem, { kind: "batch" }>;
   language: ConversationToolPresentationLanguage;
   renderToolDetails: ConversationToolActivityProps["renderToolDetails"];
+  toolDetailIsEmpty?: ConversationToolActivityProps["toolDetailIsEmpty"];
 }) {
   const staggeredDetails = useStaggeredDetails(false);
   const descriptor = conversationToolActivityRendererForCell(item.cells[0], language);
@@ -310,7 +334,12 @@ function ToolActivityBatch({
         <div className={styles.batchDetailsInner}>
           {item.cells.map((cell, index) => (
             <div key={cell.id} className={styles.batchRow} style={staggeredRowStyle(index, item.cells.length)}>
-              <ToolActivityItem cell={cell} language={language} renderToolDetails={renderToolDetails} />
+              <ToolActivityItem
+                cell={cell}
+                language={language}
+                renderToolDetails={renderToolDetails}
+                toolDetailIsEmpty={toolDetailIsEmpty}
+              />
             </div>
           ))}
         </div>
@@ -334,10 +363,12 @@ function ToolActivityRows({
   items,
   language,
   renderToolDetails,
+  toolDetailIsEmpty,
 }: {
   items: ConversationToolActivityPresentationItem[];
   language: ConversationToolPresentationLanguage;
   renderToolDetails: ConversationToolActivityProps["renderToolDetails"];
+  toolDetailIsEmpty?: ConversationToolActivityProps["toolDetailIsEmpty"];
 }) {
   return (
     <>
@@ -350,9 +381,19 @@ function ToolActivityRows({
             {checklist ? (
               <ConversationToolChecklist model={checklist} language={language} />
             ) : item.kind === "batch" ? (
-              <ToolActivityBatch item={item} language={language} renderToolDetails={renderToolDetails} />
+              <ToolActivityBatch
+                item={item}
+                language={language}
+                renderToolDetails={renderToolDetails}
+                toolDetailIsEmpty={toolDetailIsEmpty}
+              />
             ) : (
-              <ToolActivityItem cell={item.cell} language={language} renderToolDetails={renderToolDetails} />
+              <ToolActivityItem
+                cell={item.cell}
+                language={language}
+                renderToolDetails={renderToolDetails}
+                toolDetailIsEmpty={toolDetailIsEmpty}
+              />
             )}
           </div>
         );
@@ -365,6 +406,7 @@ export function ConversationToolActivity({
   activity,
   language,
   renderToolDetails,
+  toolDetailIsEmpty,
   approvalSlot = null,
 }: ConversationToolActivityProps) {
   const items = buildConversationToolActivityPresentation(activity.cells, language);
@@ -395,7 +437,12 @@ export function ConversationToolActivity({
       data-codex-tool-activity-attention-count={digest.attentionCount || undefined}
       data-codex-tool-approval-attached={approvalSlot ? "true" : undefined}
     >
-      <ToolActivityRows items={items} language={language} renderToolDetails={renderToolDetails} />
+      <ToolActivityRows
+        items={items}
+        language={language}
+        renderToolDetails={renderToolDetails}
+        toolDetailIsEmpty={toolDetailIsEmpty}
+      />
       {approvalSlot ? (
         <div className={styles.approvalSlot} data-codex-tool-approval-inline="true">
           {approvalSlot}

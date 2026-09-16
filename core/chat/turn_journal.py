@@ -1178,6 +1178,7 @@ def session_turn_items_from_events(
     tool_outcomes: dict[str, str] = {}
     tool_semantic_statuses: dict[str, str] = {}
     tool_summaries: dict[str, str] = {}
+    tool_inputs: dict[str, str] = {}
     for event in event_list:
         if event.event_type not in {EVENT_TOOL_RESULT, EVENT_CLI_TASK_RESULT}:
             continue
@@ -1207,6 +1208,10 @@ def session_turn_items_from_events(
         ).strip()
         if summary:
             tool_summaries[call_id] = summary[:500]
+        if call_id not in tool_inputs:
+            arguments = tool_call.get("arguments")
+            if isinstance(arguments, dict) and arguments:
+                tool_inputs[call_id] = _bounded_tool_input_text(arguments)
 
     items: list[dict[str, Any]] = []
     for event in event_list:
@@ -1257,6 +1262,11 @@ def session_turn_items_from_events(
             item["metadata"] = dict(item_metadata)
         if str(payload.get("input") or ""):
             item["input"] = str(payload.get("input"))
+        elif call_id and tool_inputs.get(call_id):
+            # The canonical writer does not persist tool arguments; fall back to
+            # the bound input collected from the tool result event so replay can
+            # still name the command/arguments (Codex-style tool detail).
+            item["input"] = tool_inputs[call_id]
         if str(payload.get("output") or ""):
             item["output"] = str(payload.get("output"))
         if call_id and tool_summaries.get(call_id) and not str(item.get("summary") or "").strip():
@@ -1269,6 +1279,19 @@ def session_turn_items_from_events(
             item["protocolSequence"] = protocol_sequence
         items.append(item)
     return items
+
+
+def _bounded_tool_input_text(arguments: dict[str, Any], *, max_chars: int = 4000) -> str:
+    """Bound persisted tool arguments so replay keeps the command, not a blob."""
+
+    try:
+        text = json.dumps(arguments, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return ""
+    normalized = str(text or "").strip()
+    if not normalized or normalized == "{}":
+        return ""
+    return normalized if len(normalized) <= max_chars else normalized[:max_chars]
 
 
 def _ui_tool_status_from_journal(status: str) -> str:

@@ -35,11 +35,11 @@ class ConversationStore:
         self.repository = ConversationRepository(self.database, self.writer)
         self._open = False
 
-    def open(self) -> dict[str, object]:
+    def open(self, *, writer_timeout: float = 30.0) -> dict[str, object]:
         if self._open:
             return self.database.metadata()
         metadata = self.database.initialize()
-        self.writer.start()
+        self.writer.start(timeout=writer_timeout)
         self._open = True
         return metadata
 

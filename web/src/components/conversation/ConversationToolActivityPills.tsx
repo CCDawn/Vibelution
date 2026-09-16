@@ -22,6 +22,7 @@ export function toolActivityAriaTitle(pills: CodexToolActivityPills) {
     parts.push(pills.statusLabel);
   }
   if (pills.subject) parts.push(pills.subject);
+  if (pills.diffStatLabel) parts.push(pills.diffStatLabel);
   if (pills.durationLabel) parts.push(pills.durationLabel);
   return parts.join(" ");
 }
@@ -70,6 +71,12 @@ export function ConversationToolActivityPills({
         {pills.subject ? (
           <span className={styles.itemPreview} title={pills.subject} data-codex-tool-subject="true">
             {pills.subject}
+          </span>
+        ) : null}
+        {pills.diffStatLabel ? (
+          // Kept out of the truncating subject so an edit's size survives a long path.
+          <span className={styles.diffStatLabel} data-codex-tool-diff-stat="true">
+            {pills.diffStatLabel}
           </span>
         ) : null}
         {pills.durationLabel ? (

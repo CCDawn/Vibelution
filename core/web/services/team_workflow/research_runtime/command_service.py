@@ -855,6 +855,19 @@ class WorkflowCommandService:
             )
         except KnowledgeAcceptanceArtifactError as exc:
             raise WorkflowCommandError(str(exc)) from exc
+        completed_project_task_recovery = None
+        if request.command is WorkflowCommandKind.RECONCILE_RUN:
+            # The project task store is an external authority.  Read and
+            # validate its completed result before opening the Ledger writer
+            # transaction; the handler repeats every Ledger-local predicate.
+            from .completed_project_task_recovery import (
+                find_completed_project_task_recovery,
+            )
+
+            completed_project_task_recovery = find_completed_project_task_recovery(
+                self._store,
+                run=run,
+            )
 
         if request.command in _ATTEMPT_CREATING_COMMANDS:
             if not request.node_id:
@@ -896,6 +909,7 @@ class WorkflowCommandService:
                     request,
                     request_hash,
                     prepared_artifact,
+                    completed_project_task_recovery,
                 ),
                 force_flush=True,
             )
@@ -1855,6 +1869,7 @@ class WorkflowCommandService:
         request: CommandRequest,
         request_hash: str,
         prepared_artifact: PreparedHumanAcceptanceArtifact | None = None,
+        completed_project_task_recovery: Any | None = None,
     ) -> CommandReceipt:
         now_ms = self._clock()
         run = uow.repository.get_run(request.run_id)
@@ -1900,8 +1915,22 @@ class WorkflowCommandService:
                         now_ms=now_ms,
                         dead_turn_detail=dead_turn,
                     )
+        from .completed_project_task_recovery import (
+            reopen_completed_project_task_recovery,
+        )
+
+        recovered_project_task = reopen_completed_project_task_recovery(
+            uow,
+            candidate=completed_project_task_recovery,
+            now_ms=now_ms,
+        )
         command_id = new_id("cmd")
-        bumped = _bump(uow, request, event_count=1, now_ms=now_ms)
+        bumped = _bump(
+            uow,
+            request,
+            event_count=2 if recovered_project_task is not None else 1,
+            now_ms=now_ms,
+        )
         accepted_version, sequence = bumped
         uow.repository.insert_command(
             _command_record(
@@ -1953,8 +1982,12 @@ class WorkflowCommandService:
                         now_ms=now_ms,
                     )
                 )
-        has_active_work = revived > 0 or _run_has_active_work(
-            uow, run_id=request.run_id
+        has_active_work = (
+            recovered_project_task is not None
+            or revived > 0
+            or _run_has_active_work(
+                uow, run_id=request.run_id
+            )
         )
         zero_work_problem = {
             "code": "reconcile_no_active_work",
@@ -2139,8 +2172,34 @@ class WorkflowCommandService:
                 )
             )
             child_revived_total += revived_child
-        if revived > 0 or child_revived_total > 0:
+        if (
+            recovered_project_task is not None
+            or revived > 0
+            or child_revived_total > 0
+        ):
             uow.after_commit(self._wake_worker)
+        if recovered_project_task is not None:
+            uow.repository.insert_event(
+                _event_record(
+                    run_id=request.run_id,
+                    sequence=sequence - 1,
+                    event_id=new_id("evt"),
+                    run_version=accepted_version,
+                    event_type="completed_project_task_recovered",
+                    correlation_id=request.idempotency_key,
+                    payload={
+                        "nodeRunId": recovered_project_task.node_run_id,
+                        "nodeId": recovered_project_task.node_id,
+                        "taskId": recovered_project_task.task_id,
+                        "sessionId": recovered_project_task.session_id,
+                        "turnId": recovered_project_task.turn_id,
+                        "adapterOutboxActionId": recovered_project_task.outbox_action_id,
+                        "restoredVoidedUsage": recovered_project_task.restore_voided_usage,
+                        "reusedExecution": True,
+                    },
+                    now_ms=now_ms,
+                )
+            )
         # 父 run 事件在 child cascade 之后写入：childAutoAcceptedHandoffIds
         # 需要 cascade 的补接受结果（缺陷 ⑳-b）。sequence/run_version 在
         # cascade 前已预留，事件序与键均与旧实现一致。
@@ -2164,6 +2223,11 @@ class WorkflowCommandService:
                         set(child_unaudited_handoff_ids)
                     ),
                     "compensatedReservations": compensated,
+                    "recoveredCompletedProjectTaskNodeRunIds": (
+                        [recovered_project_task.node_run_id]
+                        if recovered_project_task is not None
+                        else []
+                    ),
                     "recomputedActiveNodeId": plan.active_node_id,
                     "landingProblemCode": (
                         str(landing_problem.get("code") or "")

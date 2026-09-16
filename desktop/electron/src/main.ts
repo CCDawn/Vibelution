@@ -55,6 +55,7 @@ import {
   shouldNotifyForceStopControlFailure
 } from "./lifecycle/workbenchCloseFailOpen.js";
 import { appendSupervisorEventFallback } from "./lifecycle/supervisorEventFallback.js";
+import { fulfillDeferredRestartIntentOnce } from "./lifecycle/deferredRestartIntents.js";
 import { waitForWorkbenchBackendSettledForWindowClose } from "./lifecycle/workbenchBackendCloseReadiness.js";
 import { readRuntimeManagerLauncherStatusSummary } from "./lifecycle/runtimeManagerStatusSnapshot.js";
 import {
@@ -122,7 +123,7 @@ import {
   type ServingProcessIdentity
 } from "./process/servingVersion.js";
 import { recordAdmissionOutcome } from "./lifecycle/instanceAdmissionStore.js";
-import { resolveConfigHome, resolveDataHomeForProject } from "./lifecycle/projectStoragePaths.js";
+import { resolveConfigHome, resolveDataHomeForProject, resolveRuntimeManagerDir } from "./lifecycle/projectStoragePaths.js";
 import {
   claimStopIfGeneration,
   instancesRegistryPath,
@@ -293,6 +294,8 @@ let launcherStateWatchers: FSWatcher[] = [];
 let launcherActiveReleaseWatcher: LauncherActiveReleaseWatcherHandle | null = null;
 let launcherStateHintTimer: ReturnType<typeof setTimeout> | null = null;
 let launcherStateStatTimer: ReturnType<typeof setInterval> | null = null;
+let deferredRestartFulfillmentTimer: ReturnType<typeof setInterval> | null = null;
+let deferredRestartFulfillmentInFlight = false;
 const launcherStateStatSignatures = new Map<string, string>();
 const inProcessDesktopSessionStore = new InProcessDesktopSessionStore();
 const mainWorkbenchCloseStore = new MainWorkbenchCloseTransactionStore();
@@ -4221,6 +4224,54 @@ function scheduleLauncherStatusCliRefresh(): void {
     });
 }
 
+/**
+ * The Python runtime-manager daemon that used to fulfil deferred restart
+ * intents is not started on the Electron-owned product path (ADR 0009 I6).
+ * Electron main now polls the durable intents and executes the agreed
+ * "restart when the active work ends" request through the same main-line
+ * lifecycle entry the tray uses, so the promise made when the restart was
+ * refused keeps holding.
+ */
+const DEFERRED_RESTART_FULFILLMENT_INTERVAL_MS = 10_000;
+
+async function runDeferredRestartFulfillmentOnce(): Promise<void> {
+  if (deferredRestartFulfillmentInFlight || launcherBootstrap === null) {
+    return;
+  }
+  const paths = createDesktopPathsForApp();
+  deferredRestartFulfillmentInFlight = true;
+  try {
+    await fulfillDeferredRestartIntentOnce({
+      workspaceRoot: paths.workspaceRoot,
+      runtimeManagerDir: resolveRuntimeManagerDir(paths.workspaceRoot),
+      listActiveWork: () => listActiveWorkRuns(paths.workspaceRoot),
+      submitRestart: async () =>
+        await orchestrateLauncherLifecycle("restart", { schemaVersion: 1, path: "restart" }, "forwarded")
+    });
+  } catch (error: unknown) {
+    console.warn(error instanceof Error ? error.message : String(error));
+  } finally {
+    deferredRestartFulfillmentInFlight = false;
+  }
+}
+
+function startDeferredRestartFulfillment(): void {
+  if (deferredRestartFulfillmentTimer !== null) {
+    return;
+  }
+  deferredRestartFulfillmentTimer = setInterval(() => {
+    void runDeferredRestartFulfillmentOnce();
+  }, DEFERRED_RESTART_FULFILLMENT_INTERVAL_MS);
+  deferredRestartFulfillmentTimer.unref?.();
+}
+
+function stopDeferredRestartFulfillment(): void {
+  if (deferredRestartFulfillmentTimer !== null) {
+    clearInterval(deferredRestartFulfillmentTimer);
+    deferredRestartFulfillmentTimer = null;
+  }
+}
+
 function launcherStateStatSignature(path: string): string {
   try {
     const stat = statSync(path);
@@ -4543,6 +4594,7 @@ app.whenReady()
     resolveLauncherControlPlaneReady = null;
     updateLauncherWindowTruth();
     startLauncherStateFileHints(paths);
+    startDeferredRestartFulfillment();
     if (!app.isPackaged) {
       // Follow active.json switches while the shell stays resident so an
       // already-open launcher window reloads onto the fresh release; the
@@ -4794,6 +4846,7 @@ app.on("before-quit", (event) => {
   if (shutdownApproved) {
     releaseElectronDesktopShellOwner(createDesktopPathsForApp().workspaceRoot);
     stopLauncherStateFileHints();
+    stopDeferredRestartFulfillment();
     desktopTray?.destroy();
     desktopTray = null;
     stopDesktopActionLoop();
@@ -4811,4 +4864,5 @@ app.on("window-all-closed", () => {
 
 app.on("will-quit", () => {
   stopLauncherStateFileHints();
+  stopDeferredRestartFulfillment();
 });

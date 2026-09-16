@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 from pathlib import Path
@@ -667,3 +668,155 @@ def test_agent_direct_session_available_does_not_load_detail(
         {"directSessionId": ""},
         session_service=session_service,
     )
+
+
+def test_bootstrap_agent_import_failure_degrades_without_closing_store(
+    isolated_directory_runtime: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A slow/failed bootstrap step must not take the directory read path down."""
+    project_root = isolated_directory_runtime
+    _write_agents_registry(agent_directory_service.registry_path())
+
+    def fail_import(*_args, **_kwargs):
+        raise TimeoutError("agent import timed out")
+
+    monkeypatch.setattr(directory_runtime, "_import_agent_snapshots", fail_import)
+
+    status = directory_runtime.initialize_session_directory_runtime(project_root=project_root)
+
+    assert status.status == "degraded"
+    assert status.degraded_reasons == ("agent_import:TimeoutError",)
+    assert directory_runtime.is_directory_store_open() is True
+    store = directory_runtime.get_open_directory_store()
+    assert store is not None
+    assert directory_runtime.wait_for_directory_startup(timeout=0.1) == "degraded"
+
+
+def test_list_sessions_serves_stale_snapshot_without_rebuilding(
+    isolated_directory_runtime: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A signature miss must serve the last-good page, not re-run the projection."""
+    from core.web.services.session import directory_bridge, list_cache
+
+    project_root = isolated_directory_runtime
+    _write_agents_registry(agent_directory_service.registry_path())
+    directory_runtime.initialize_session_directory_runtime(project_root=project_root)
+
+    seeded = [{"id": "session-cached", "title": "Cached page"}]
+    signature = (session_service._session_list_source_signature(), False)
+    list_cache.set_session_list_cache(
+        seeded,
+        now=session_service._perf_counter(),
+        signature=signature,
+        conversation_count=1,
+        agent_count=1,
+    )
+    # Signature churn (a registry/inbox write) must not force a sync rebuild.
+    registry_path = agent_directory_service.registry_path()
+    registry_path.write_text(registry_path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+
+    build_gate = threading.Event()
+
+    def block_heavy_build(*_args, **_kwargs):
+        build_gate.wait(timeout=5.0)
+        raise AssertionError("stale serve must not re-enter the heavy projection")
+
+    monkeypatch.setattr(session_service, "_load_conversations", block_heavy_build)
+    monkeypatch.setattr(directory_bridge, "list_session_summaries", lambda **_kwargs: None)
+
+    sessions = session_service.list_sessions()
+    assert [str(item.get("id") or "") for item in sessions] == ["session-cached"]
+
+    assert list_cache.is_session_list_refresh_reserved(signature=signature) is True
+    # Let the background worker drain, then drop its reservation so the next
+    # test starts from a clean cache.
+    build_gate.set()
+    with list_cache._SESSION_LIST_CACHE_CONDITION:
+        inflight_builds = list_cache._SESSION_LIST_CACHE.get("inflight_builds")
+        if isinstance(inflight_builds, dict):
+            inflight_builds.clear()
+
+
+def test_list_build_reports_directory_read_failure_before_legacy_fallback(
+    isolated_directory_runtime: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    """A raising directory read must be visible, not a silent heavy rebuild."""
+    from core.web.services.session import projection
+
+    def fail_list(**_kwargs):
+        raise RuntimeError("directory page read failed")
+
+    monkeypatch.setattr(directory_bridge, "list_session_summaries", fail_list)
+    monkeypatch.setattr(session_service, "_load_conversations", lambda *_args, **_kwargs: ({}, []))
+    monkeypatch.setattr(
+        session_service,
+        "_append_agent_directory_conversations",
+        lambda conversations, **_kwargs: list(conversations),
+    )
+    monkeypatch.setattr(directory_bridge, "_directory_unavailable_log_monotonic", 0.0)
+
+    with caplog.at_level(logging.WARNING):
+        result = projection._build_session_list_data(
+            session_service,
+            include_hidden_internal=False,
+        )
+
+    assert result.source == "legacy_projection"
+    assert result.sessions == []
+    assert "Session read degraded" in caplog.text
+    assert "RuntimeError" in caplog.text
+
+
+def test_runtime_status_snapshot_reports_work_run_read_failure(
+    isolated_directory_runtime: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    """Rows must not silently render as idle when the work-run read fails."""
+
+    def fail_active(**_kwargs):
+        raise RuntimeError("work run read failed")
+
+    monkeypatch.setattr(session_service, "list_active_session_work_runs", fail_active)
+    monkeypatch.setattr(directory_bridge, "_directory_unavailable_log_monotonic", 0.0)
+
+    with caplog.at_level(logging.WARNING):
+        assert directory_bridge._session_runtime_status_snapshot() is None
+
+    assert "session runtime status" in caplog.text
+    assert "RuntimeError" in caplog.text
+
+
+def test_agent_directory_stub_merge_reports_failure_and_keeps_summaries(
+    isolated_directory_runtime: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    """Dropped Agent direct-session stubs must leave a visible signal."""
+    seeded = [{"id": "session-visible"}]
+
+    def fail_append(*_args, **_kwargs):
+        raise RuntimeError("stub merge failed")
+
+    monkeypatch.setattr(session_service, "_append_agent_directory_conversations", fail_append)
+    monkeypatch.setattr(directory_bridge, "_directory_unavailable_log_monotonic", 0.0)
+
+    with caplog.at_level(logging.WARNING):
+        merged = directory_bridge._merge_agent_directory_stub_summaries(
+            seeded,
+            agent_by_id={
+                "agent-alpha": {
+                    "agentId": "agent-alpha",
+                    "directSessionId": "legacy-session",
+                }
+            },
+            include_hidden=False,
+        )
+
+    assert merged == seeded
+    assert "agent direct session stubs" in caplog.text
+    assert "RuntimeError" in caplog.text

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
+
 from core.web.services import session_service
+from core.web.services.session import directory_bridge
 from core.web.services.session.turn_diagnostics import list_active_session_work_runs
 
 
@@ -41,3 +44,52 @@ def test_list_active_session_work_runs_does_not_read_chat_state(monkeypatch, tmp
             status="completed",
             finished_at="2026-08-15T00:00:10",
         )
+
+
+class _RaisingTurnScheduler:
+    def queued_session_turn_ids(self):
+        raise RuntimeError("queue read failed")
+
+    def clear(self):
+        return None
+
+
+class _RaisingWorkRunStore:
+    def load_snapshot(self, run_kind, run_id):
+        return None
+
+    def load_active_snapshot(self, run_kind):
+        raise RuntimeError("snapshot read failed")
+
+    def list_snapshots(self, run_kind, limit=None):
+        raise RuntimeError("snapshot list failed")
+
+
+def test_list_active_session_work_runs_reports_degraded_reads(
+    monkeypatch,
+    tmp_path,
+    caplog,
+) -> None:
+    """Unreadable queue/snapshot sources must stay visible instead of silently
+    demoting queued turns or hiding persisted queued snapshots."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_SESSION_TURN_SCHEDULER", _RaisingTurnScheduler())
+    monkeypatch.setattr(session_service, "_WORK_RUN_STORE", _RaisingWorkRunStore())
+    monkeypatch.setattr(directory_bridge, "_directory_unavailable_log_monotonic", 0.0)
+
+    with session_service._RUNNING_SESSIONS_LOCK:
+        session_service._RUNNING_SESSION_IDS.add("session-live")
+        session_service._SESSION_ACTIVE_TURN_IDS["session-live"] = "turn-1"
+    try:
+        with caplog.at_level(logging.WARNING):
+            runs = list_active_session_work_runs(reconcile=False)
+    finally:
+        with session_service._RUNNING_SESSIONS_LOCK:
+            session_service._RUNNING_SESSION_IDS.discard("session-live")
+            session_service._SESSION_ACTIVE_TURN_IDS.pop("session-live", None)
+
+    assert [item["sessionId"] for item in runs] == ["session-live"]
+    assert runs[0]["status"] == "running"
+    assert "Session read degraded" in caplog.text
+    assert "RuntimeError" in caplog.text

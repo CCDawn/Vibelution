@@ -103,7 +103,7 @@ def test_generate_session_title_now_applies_candidate(monkeypatch):
     monkeypatch.setattr(
         title_generation,
         "_generate_title_candidate",
-        lambda message, model_id: "Alpha",
+        lambda session_id, message, model_id: "Alpha",
     )
     applied: dict[str, str] = {}
     monkeypatch.setattr(
@@ -122,7 +122,7 @@ def test_generate_session_title_now_skips_without_model(monkeypatch):
     monkeypatch.setattr(
         title_generation,
         "_generate_title_candidate",
-        lambda message, model_id: called.append(message) or "Alpha",
+        lambda session_id, message, model_id: called.append(message) or "Alpha",
     )
 
     assert title_generation.generate_session_title_now("session-a", "hi") == ""
@@ -131,7 +131,7 @@ def test_generate_session_title_now_skips_without_model(monkeypatch):
 
 def test_generate_session_title_now_returns_empty_when_cas_rejects(monkeypatch):
     monkeypatch.setattr(title_generation, "_resolve_title_model_id", lambda _session_id: "model-a")
-    monkeypatch.setattr(title_generation, "_generate_title_candidate", lambda message, model_id: "Alpha")
+    monkeypatch.setattr(title_generation, "_generate_title_candidate", lambda session_id, message, model_id: "Alpha")
     monkeypatch.setattr(session_service, "apply_generated_session_title", lambda *_args, **_kwargs: False)
 
     assert title_generation.generate_session_title_now("session-a", "hi") == ""
@@ -247,3 +247,133 @@ def test_submit_first_raw_message_schedules_title_generation(tmp_path, monkeypat
         ]
     finally:
         _reset_seeded_session_runtime(session_id)
+
+
+def _v2_llm_payload():
+    return {
+        "llm": {
+            "schema_version": 2,
+            "providers": {
+                "openai_main": {
+                    "label": "OpenAI Main",
+                    "driver": "openai",
+                    "vendor": "openai",
+                    "service_class": "official_api",
+                    "base_url": "https://api.example.test/v1",
+                    "auth_kind": "none",
+                    "credential_ref": "none",
+                    "requires_credential": False,
+                    "protocols": {"default": "chat_completions", "allowed": ["chat_completions"]},
+                    "models": {
+                        "gpt-5.6-luna": {
+                            "upstream_id": "gpt-5.6-luna",
+                            "label": "Luna",
+                            "enabled": True,
+                        },
+                    },
+                },
+            },
+            "profiles": {"default": {"model_ref": "openai_main/gpt-5.6-luna"}},
+        }
+    }
+
+
+class _StubService:
+    def __init__(self, config):
+        self._config = config
+
+    def get_config(self):
+        return self._config
+
+
+def _v2_effective_config(*, alias: str = ""):
+    from config.public_config import build_effective_config
+
+    payload = _v2_llm_payload()
+    if alias:
+        payload["llm"]["model_aliases"] = {alias: "openai_main/gpt-5.6-luna"}
+    return build_effective_config(payload)
+
+
+def test_title_runtime_config_binds_schema_v2_model():
+    config = _v2_effective_config()
+
+    bound = title_generation._title_runtime_config(_StubService(config), "openai_main/gpt-5.6-luna")
+
+    profile = bound.llm.profiles[title_generation.SESSION_TITLE_PROFILE_ID]
+    assert profile.model_ref == "openai_main/gpt-5.6-luna"
+    assert profile.provider_id == "openai_main"
+    assert profile.model == "gpt-5.6-luna"
+    assert title_generation.SESSION_TITLE_PROFILE_ID not in config.llm.profiles
+
+
+def test_title_runtime_config_resolves_model_alias():
+    config = _v2_effective_config(alias="fast-luna")
+
+    bound = title_generation._title_runtime_config(_StubService(config), "fast-luna")
+
+    assert (
+        bound.llm.profiles[title_generation.SESSION_TITLE_PROFILE_ID].model_ref
+        == "openai_main/gpt-5.6-luna"
+    )
+
+
+def test_title_runtime_config_rejects_unknown_model():
+    from core.llm.agent_runtime import AgentLlmResolutionError
+
+    config = _v2_effective_config()
+
+    with pytest.raises(AgentLlmResolutionError):
+        title_generation._title_runtime_config(_StubService(config), "openai_main/missing")
+
+
+def test_generate_title_candidate_uses_bound_runtime_profile(monkeypatch):
+    sentinel_config = object()
+    captured: dict = {}
+
+    def _bind(_service_obj, model_id):
+        captured["model"] = model_id
+        return sentinel_config
+
+    monkeypatch.setattr(title_generation, "_title_runtime_config", _bind)
+    monkeypatch.setattr(
+        title_generation,
+        "get_llm_client",
+        lambda *, profile_id=None, config=None: captured.update(profile_id=profile_id, config=config) or object(),
+    )
+    monkeypatch.setattr(
+        title_generation,
+        "invoke_llm",
+        lambda client, messages, context=None, metadata=None: type("R", (), {"content": "标题：修复登录 bug"})(),
+    )
+
+    assert title_generation._generate_title_candidate("session-a", "hi", "model-a") == "修复登录 bug"
+    assert captured["model"] == "model-a"
+    assert captured["profile_id"] == title_generation.SESSION_TITLE_PROFILE_ID
+    assert captured["config"] is sentinel_config
+
+
+def test_run_title_generation_records_failure_event(monkeypatch):
+    events: list[dict] = []
+
+    def _boom(*_args, **_kwargs):
+        raise ValueError("unknown session title model: model-x")
+
+    monkeypatch.setattr(title_generation, "generate_session_title_now", _boom)
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda component, phase, event_code, **kwargs: events.append(
+            {"component": component, "phase": phase, "eventCode": event_code, **kwargs}
+        )
+        or {"accepted": True},
+    )
+
+    title_generation._run_title_generation("session-a", "hi")
+
+    assert len(events) == 1
+    assert events[0]["component"] == "conversation"
+    assert events[0]["eventCode"] == "conversation.title.generation_failed"
+    assert events[0]["level"] == "warning"
+    assert events[0]["fields"]["sessionId"] == "session-a"
+    assert events[0]["fields"]["errorType"] == "ValueError"

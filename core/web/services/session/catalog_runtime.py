@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -107,12 +108,14 @@ class _CatalogRuntimeSupervisor:
             self._running = True
 
         should_retry = False
+        reconcile_started_at = time.perf_counter()
         try:
             result = self._reconciler.reconcile(
                 owner=f"web-incremental-{os.getpid()}",
                 now=_utcnow(),
                 lease_expires_at=_utcnow(offset_seconds=60),
             )
+            reconcile_ms = int((time.perf_counter() - reconcile_started_at) * 1000)
             fresh = (
                 result.status == "complete"
                 and not self._store.untrusted_sentinel_path.exists()
@@ -122,7 +125,10 @@ class _CatalogRuntimeSupervisor:
                 self._record(
                     "session_catalog.incremental.complete",
                     outcome="complete",
-                    fields={"sessionCount": result.session_count},
+                    fields={
+                        "sessionCount": result.session_count,
+                        "elapsedMs": reconcile_ms,
+                    },
                 )
             else:
                 should_retry = True
@@ -134,6 +140,7 @@ class _CatalogRuntimeSupervisor:
                         "status": result.status,
                         "sessionCount": result.session_count,
                         "dirtyCount": self._dirty_count(),
+                        "elapsedMs": reconcile_ms,
                     },
                 )
         except Exception as exc:
@@ -143,7 +150,10 @@ class _CatalogRuntimeSupervisor:
                 "session_catalog.incremental.failed",
                 outcome="failed",
                 level="warning",
-                fields={"errorType": type(exc).__name__},
+                fields={
+                    "errorType": type(exc).__name__,
+                    "elapsedMs": int((time.perf_counter() - reconcile_started_at) * 1000),
+                },
             )
         finally:
             with self._lock:
@@ -357,6 +367,7 @@ def _journal_inventory(
     summaries: Sequence[Mapping[str, Any]],
 ) -> dict[str, dict[str, Any]]:
     inventory: dict[str, dict[str, Any]] = {}
+    workspace_resolved = workspace_root.resolve()
     for summary in summaries:
         session_id = str(summary.get("id") or summary.get("sessionId") or "").strip()
         if not session_id or session_id in inventory:
@@ -367,8 +378,8 @@ def _journal_inventory(
         except OSError:
             continue
         try:
-            journal_path = path.resolve().relative_to(workspace_root.resolve()).as_posix()
-        except ValueError:
+            journal_path = path.resolve().relative_to(workspace_resolved).as_posix()
+        except (OSError, ValueError):
             journal_path = ""
         inventory[session_id] = {
             "journal_rel_path": journal_path,

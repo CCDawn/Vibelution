@@ -246,6 +246,7 @@ import {
   chatRoomPurposeLabel,
   contextCompositionSegmentClass,
   contextCompositionSegmentLabel,
+  promptSegmentDisplayLabel,
   cacheCompositionSegmentLabel,
   agentRoleClass,
   avatarInitials,
@@ -2048,7 +2049,6 @@ export function ChatCodingRouteWorkbench() {
     upperBoundCacheCompositionPercent,
     cachePromptCompositionTotalTokens,
     cachePromptDonutSegments,
-    cachePromptCompositionSegments,
     cacheCompositionPercent,
     averageCacheObservedTurnCount,
     cacheCompositionAverageValue,
@@ -2076,7 +2076,11 @@ export function ChatCodingRouteWorkbench() {
       usageLimit,
       hitPercent: cacheCompositionPercent,
       detailAvailable: cacheDetailAvailable,
-      segments: cachePromptCompositionSegments,
+      segments: (lastContextComposition?.segments ?? []).map(segment => ({
+        ...segment,
+        label: promptSegmentDisplayLabel(segment, lang, t),
+        contentPreview: segment.description,
+      })),
       lang,
       cacheSource: lastCacheComposition?.source,
       cacheUsageObserved: lastCacheComposition?.cacheUsageObserved,
@@ -2086,7 +2090,6 @@ export function ChatCodingRouteWorkbench() {
   }, [
     cacheCompositionPercent,
     cacheDetailAvailable,
-    cachePromptCompositionSegments,
     detail?.contextUsage?.limit,
     detail?.contextUsage?.used,
     lang,
@@ -2096,6 +2099,8 @@ export function ChatCodingRouteWorkbench() {
     lastCacheComposition?.source,
     lastContextComposition?.limitTokens,
     lastContextComposition?.totalTokens,
+    lastContextComposition?.segments,
+    t,
   ]);
   const {
     sessionIdsNeedingApproval,

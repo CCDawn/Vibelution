@@ -6,6 +6,7 @@ import {
   type CloseBackoffCoalescedInfo,
   type MainLineCommandQueue
 } from "../lifecycle/mainLine/commandQueue.js";
+import { supersedePendingDeferredRestartIntents } from "../lifecycle/deferredRestartIntents.js";
 import { recordMainLineCommandSettlement } from "../lifecycle/mainLine/commandEvidence.js";
 import { writeMainLineIntent } from "../lifecycle/mainLine/commandIntent.js";
 import { writeMainLineQueueOwnerMarker } from "../lifecycle/mainLine/ownerMarker.js";
@@ -158,6 +159,16 @@ export async function runWorkbenchLifecycle(input: RunWorkbenchLifecycleInput): 
           captureProcessIdentity: input.captureProcessIdentity,
           resolvePortOwner: input.resolvePortOwner
         });
+        // An executed lifecycle command fulfils or obsoletes every queued
+        // restart request; only a re-queued restart (active work returned)
+        // keeps its intent pending for the Electron fulfilment pass.
+        if (input.operation !== "start" && result.accepted && result.code !== "restart_queued") {
+          supersedePendingDeferredRestartIntents({
+            workspaceRoot: input.workspaceRoot,
+            runtimeManagerDir,
+            reason: `Superseded by accepted ${input.operation} command.`
+          });
+        }
         void recordMainLineCommandSettlement({
           workspaceRoot: input.workspaceRoot,
           runtimeManagerDir,
