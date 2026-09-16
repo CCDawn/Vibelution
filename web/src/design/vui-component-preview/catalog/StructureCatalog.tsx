@@ -15,8 +15,61 @@ import {
 } from "../../../components/vui";
 import { ConversationFollowupQueueBar } from "../../../components/conversation/ConversationFollowupQueueBar";
 import { ConversationTranscriptLoadingState } from "../../../components/conversation/ConversationTranscriptLoadingState";
+import {
+  ComposerContextRing,
+  ComposerContextRingPanel,
+} from "../../../components/conversation/ComposerContextRing";
+import type { ComposerContextRingModel } from "../../../routes/chat/composerContextModel";
 import { VuiPreviewCard } from "../VuiPreviewCard";
 import { VuiPreviewSection } from "../VuiPreviewSection";
+
+const composerContextRingPreviewModel: ComposerContextRingModel = {
+  usagePercent: 42,
+  usageLabel: "42%",
+  remainingLabel: "116K",
+  capacityKnown: true,
+  hitPercent: 63,
+  usedLabel: "88.2K",
+  empty: false,
+  cacheState: "observed",
+  segments: [
+    { key: "prompt", name: "提示与规范", tokens: 21000, tokensLabel: "21K", pctLabel: "24%" },
+    { key: "history", name: "对话历史", tokens: 12000, tokensLabel: "12K", pctLabel: "14%" },
+  ],
+  groups: [
+    {
+      key: "instructions",
+      name: "提示与规范",
+      tokensLabel: "21K",
+      segments: [
+        {
+          key: "prompt",
+          name: "提示与规范",
+          tokens: 21000,
+          tokensLabel: "21K",
+          pctLabel: "24%",
+          contentPreview: "系统提示与项目规范摘要",
+        },
+      ],
+    },
+    {
+      key: "history",
+      name: "对话历史",
+      tokensLabel: "12K",
+      segments: [
+        {
+          key: "history",
+          name: "对话历史",
+          tokens: 12000,
+          tokensLabel: "12K",
+          pctLabel: "14%",
+          contentPreview: "最近会话消息摘要",
+        },
+      ],
+    },
+  ],
+  detailAvailable: true,
+};
 
 export function StructureCatalog() {
   return (
@@ -61,6 +114,14 @@ export function StructureCatalog() {
       <VuiPreviewCard name="ConversationTranscriptLoadingState" className="col-span-full min-h-0">
         <div className="h-[360px] w-full overflow-hidden rounded-[12px] border border-vui-border-subtle bg-vui-surface-panel">
           <ConversationTranscriptLoadingState label="正在加载会话消息" />
+        </div>
+      </VuiPreviewCard>
+      <VuiPreviewCard name="ComposerContextRing" className="col-span-full min-h-0">
+        <div className="grid w-full justify-items-start gap-3 rounded-[12px] border border-vui-border-subtle bg-vui-surface-panel p-3">
+          <ComposerContextRing model={composerContextRingPreviewModel} lang="zh" sessionId="preview-session" />
+          <div className="w-full max-w-[324px] rounded-[12px] border border-vui-border-subtle bg-vui-surface-row p-3">
+            <ComposerContextRingPanel model={composerContextRingPreviewModel} lang="zh" />
+          </div>
         </div>
       </VuiPreviewCard>
       <VuiPreviewCard name="VEntityList" className="min-h-0">

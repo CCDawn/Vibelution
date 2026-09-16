@@ -621,17 +621,16 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     expect(conversationViewSource).toContain("className={styles.attachButton}");
     expect(conversationViewSource).toContain("<ConversationInferenceControl {...llmControl} />");
     expect(conversationViewSource).toContain("<ComposerContextRing");
-    expect(ringSource).toContain('data-chrome="bare"');
+    // Ring internals are owned by ComposerContextRing.test.tsx; keep only the
+    // regressions that would silently slip back in at this call site.
+    expect(ringSource).toContain('role="progressbar"');
+    expect(ringSource).toContain("data-composer-context-composition");
     expect(ringSource).toContain("isIconOnly");
     expect(ringSource).not.toContain("ContourArcs");
-    expect(ringSource).not.toContain('r="12.2"');
-    expect(ringSource).not.toContain("strokeDasharray={`0 ${start}");
-    expect(ringSource).toContain('stroke="color-mix(in srgb, var(--accent-cool) 18%, transparent)"');
     expect(ringSource).not.toContain("var(--vui-border-subtle) 90%");
-    expect(ringStyles.trigger).toContain("!overflow-hidden");
-    expect(ringStyles.trigger).toContain("!rounded-full");
-    expect(ringStyles.trigger).toContain("!border-0");
-    expect(ringStyles.ring).toContain("overflow-visible");
+    expect(ringStyles.trigger).toContain("!rounded-md");
+    expect(ringStyles.trigger).toContain("tabular-nums");
+    expect(ringStyles.ring).toContain("size-5");
     expect(ringStyles.ring).not.toContain("overflow-hidden");
     expect(ringStyles.ring.split(/\s+/)).not.toContain("ring");
     expect(conversationViewSource).toContain("composerContextRing");
