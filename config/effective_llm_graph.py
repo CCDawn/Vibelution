@@ -62,7 +62,7 @@ class EffectiveLLMGraph:
 
 
 class EffectiveLLMGraphBuilder:
-    def build(self, config: LLMConfig) -> EffectiveLLMGraph:
+    def build(self, config: LLMConfig, *, fallback_profile_ids: Mapping[str, str] | None = None) -> EffectiveLLMGraph:
         issues: list[LLMGraphIssue] = []
         aliases: dict[str, str] = {}
 
@@ -96,6 +96,15 @@ class EffectiveLLMGraphBuilder:
             route = self._resolve_profile(profile_id, profile, config, aliases, issues)
             if route is not None:
                 routes.append(route)
+
+        by_profile = {route.profile_id: route for route in routes}
+        for primary, fallback in sorted((fallback_profile_ids or {}).items()):
+            primary_route = by_profile.get(primary)
+            fallback_route = by_profile.get(fallback)
+            if primary_route is None or fallback_route is None:
+                issues.append(LLMGraphIssue("fallback_profile_not_found", primary, "fallback references an unresolved profile"))
+            elif primary_route.effective_identity == fallback_route.effective_identity:
+                issues.append(LLMGraphIssue("fallback_same_effective_identity", primary, "fallback resolves to the same provider/model/wire/backend endpoint"))
 
         if issues:
             raise LLMGraphError(tuple(sorted(issues, key=lambda item: (item.code, item.subject_ref))))

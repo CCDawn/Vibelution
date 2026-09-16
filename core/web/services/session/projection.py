@@ -19,6 +19,7 @@ from typing import Any, Mapping
 from core.research.workflow.contracts.discussion_scope import (
     PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND,
 )
+from core.web.services.session.signals_format import _current_session_route_fallback
 from core.web.services.session.timebase import parse_timestamp_utc
 
 
@@ -640,6 +641,15 @@ def _build_session_detail_from_summary(
     last_llm_payload_trace = s._current_session_live_llm_payload_trace(conversation["id"]) or s._normalize_session_llm_payload_trace(
         conversation.get("lastLlmPayloadTrace") or conversation.get("last_llm_payload_trace")
     )
+    detail_turn_id = (
+        s._current_session_turn_id(conversation["id"])
+        or (
+            str(turn_snapshot.get("turnId") or "").strip()
+            if not bool(turn_snapshot.get("releasedToUser"))
+            else ""
+        )
+    )
+    route_fallback = _current_session_route_fallback(conversation["id"], detail_turn_id)
     agent_available = s._session_agent_is_available(summary)
     available_agent_id = summary.get("agentId") or "" if agent_available else ""
     available_agent = s._session_detail_agent_snapshot(
@@ -697,12 +707,8 @@ def _build_session_detail_from_summary(
         else [],
         "toolPolicy": (available_agent or {}).get("toolPolicy") if available_agent_id else None,
         "memoryPolicy": (available_agent or {}).get("memoryPolicy") if available_agent_id else None,
-        "activeTurnId": s._current_session_turn_id(conversation["id"])
-        or (
-            str(turn_snapshot.get("turnId") or "").strip()
-            if not bool(turn_snapshot.get("releasedToUser"))
-            else ""
-        ),
+        "activeTurnId": detail_turn_id,
+        "routeFallback": route_fallback,
         "stopRequested": bool(turn_snapshot["stopRequested"]) and not bool(turn_snapshot.get("releasedToUser")),
         "stopRequestedAt": ""
         if bool(turn_snapshot.get("releasedToUser"))

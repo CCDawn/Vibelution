@@ -247,6 +247,20 @@ def _current_session_live_llm_payload_trace(session_id: str) -> dict[str, Any] |
         return s._normalize_session_llm_payload_trace(state.llm_payload_trace)
 
 
+def _current_session_route_fallback(session_id: str, turn_id: str = "") -> dict[str, str] | None:
+    """Turn detail DTO visibility field for an explicit LLM fallback switch.
+
+    Returns the strict ``{from, to}`` payload recorded by the turn adapter when
+    the declared fallback profile was engaged for the turn; ``None`` means no
+    switch happened. Exact turn matches win; without a turn id the session's
+    latest recorded switch is returned so a completed turn stays visible after
+    the active turn id is released.
+    """
+    from core.llm.route_fallback_registry import get_route_fallback
+
+    return get_route_fallback(session_id, turn_id)
+
+
 def _dedupe_turn_error_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     s = _service()
     seen_turn_errors: set[str] = set()

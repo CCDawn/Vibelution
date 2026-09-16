@@ -15,6 +15,7 @@ from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 
 from core.infrastructure.llm_utils import MAX_CONSECUTIVE_FAILURES
 from core.llm import LLMError
+from core.llm.route_fallback_registry import record_route_fallback
 from core.llm.turn_request_capture import (
     capture_turn_request,
     record_turn_request_outcome,
@@ -24,6 +25,13 @@ from core.orchestration.agent_runtime_bindings import (
     _llm_route_trace_fields,
     _safe_llm_error_diagnostic_details,
 )
+
+# Explicit fallback switching triggers only when the primary route's transport
+# retry budget is exhausted on a gateway-level recoverable failure (the same
+# error classes LiteLLM's general ``fallbacks`` bucket covers). Permanent
+# categories (auth/parameter/capability) never switch, and the fallback target
+# itself is never switched again (single hop, no chained fallbacks).
+_FALLBACK_SWITCH_CATEGORIES = frozenset({"network_error", "timeout", "server_error", "rate_limit"})
 
 
 def _coerce_text(value: Any) -> str:
@@ -198,6 +206,21 @@ class AgentLlmAttemptResult:
     last_error_details: Dict[str, Any] = field(default_factory=dict)
     last_failure_attempts: int = 0
     last_failure_max_attempts: int = MAX_CONSECUTIVE_FAILURES
+    route_fallback: Dict[str, str] = field(default_factory=dict)
+
+
+def _resolve_explicit_fallback_profile_id(client: Any) -> str:
+    """Read the operator-declared fallback profile off the failed route client.
+
+    Empty (the default) means the operator declared nothing for this route, so
+    the adapter keeps today's fail-fast behaviour.
+    """
+    profile = getattr(client, "profile", None)
+    target = str(getattr(profile, "fallback", "") or "").strip()
+    current = str(getattr(client, "profile_id", "") or "").strip()
+    if not target or target == current:
+        return ""
+    return target
 
 
 def sanitize_llm_turn_messages(messages: list) -> list:
@@ -324,11 +347,17 @@ def invoke_agent_llm_turn(
     replay_state: Any = None,
     hooks: AgentLlmTurnHooks,
 ) -> AgentLlmAttemptResult:
-    """Run the Agent-side LLM route attempt.
+    """Run the Agent-side LLM route attempts.
 
     Every provider call must go through the injected invocation helpers, which
     the Agent composition root binds to ``core.llm.invocation``. Recovery
     planning stays with ``plan_llm_recovery``.
+
+    Route attempts count across profiles: attempt 1 is the configured route;
+    attempt 2 exists only when the operator declared ``fallback`` on that
+    profile and the primary exhausted its retryable transport budget on a
+    recoverable gateway-level failure. The fallback target is never switched
+    again (single hop).
     """
     result = AgentLlmAttemptResult()
     ui = hooks.get_ui()
@@ -350,55 +379,85 @@ def invoke_agent_llm_turn(
 
     with ui.thinking("?? 思考中..."), hooks.llm_cancel_context(hooks.current_stop_reason):
         route_attempt = 1
+        pending_fallback_profile_id = ""
+        switched_fallback: Dict[str, str] = {}
         invocation_context = None
         trace_fields: Dict[str, Any] = {}
         llm_for_turn = None
-        try:
-            hooks.raise_if_stop()
-            llm_for_turn = hooks.get_llm_for_mode(
-                disable_tools=_coerce_bool(hooks.force_disable_tools, False),
-                profile_id=None,
-            )
-            route_id = _llm_effective_route_id(llm_for_turn)
-            invocation_context = hooks.build_invocation_context(
-                prompt_purpose="main_reply",
-                route_attempt=route_attempt,
-            )
-            capture_turn_request(llm_for_turn, clean_messages, invocation_context)
-            route_started_at = time.monotonic()
-            trace_fields = _llm_route_trace_fields(
-                invocation_context,
-                llm_for_turn,
-                route_attempt=route_attempt,
-                route_id=route_id,
-            )
-            hooks.record_scene_event(
-                "llm_route",
-                "llm_route_attempt_started",
-                message="LLM effective route attempt started.",
-                fields=trace_fields,
-            )
-            if hooks.should_stream(llm_for_turn) and hasattr(llm_for_turn, "stream"):
-                def on_protocol_event(event: Any) -> None:
-                    hooks.raise_if_stop()
-                    if event.kind == "reasoning_delta" and event.text:
-                        ui.stream_thought(event.text, done=False)
-                    elif event.kind in {"commentary_delta", "answer_delta"} and event.text:
-                        stream_response = getattr(ui, "stream_response", None)
-                        if callable(stream_response):
-                            stream_response(event.text, done=False)
+        while True:
+            try:
+                hooks.raise_if_stop()
+                llm_for_turn = hooks.get_llm_for_mode(
+                    disable_tools=_coerce_bool(hooks.force_disable_tools, False),
+                    profile_id=pending_fallback_profile_id or None,
+                )
+                route_id = _llm_effective_route_id(llm_for_turn)
+                invocation_context = hooks.build_invocation_context(
+                    prompt_purpose="main_reply",
+                    route_attempt=route_attempt,
+                )
+                capture_turn_request(llm_for_turn, clean_messages, invocation_context)
+                route_started_at = time.monotonic()
+                trace_fields = _llm_route_trace_fields(
+                    invocation_context,
+                    llm_for_turn,
+                    route_attempt=route_attempt,
+                    route_id=route_id,
+                )
+                hooks.record_scene_event(
+                    "llm_route",
+                    "llm_route_attempt_started",
+                    message="LLM effective route attempt started.",
+                    fields=trace_fields,
+                )
+                if hooks.should_stream(llm_for_turn) and hasattr(llm_for_turn, "stream"):
+                    def on_protocol_event(event: Any) -> None:
+                        hooks.raise_if_stop()
+                        if event.kind == "reasoning_delta" and event.text:
+                            ui.stream_thought(event.text, done=False)
+                        elif event.kind in {"commentary_delta", "answer_delta"} and event.text:
+                            stream_response = getattr(ui, "stream_response", None)
+                            if callable(stream_response):
+                                stream_response(event.text, done=False)
 
-                stream_kwargs = {
+                    stream_kwargs = {
+                        "context": invocation_context,
+                        "on_event": on_protocol_event,
+                        "replay_state": replay_state,
+                    }
+                    if hooks.structured_output_contract is not None:
+                        stream_kwargs["output_schema"] = hooks.structured_output_contract
+                    outcome = hooks.run_streaming_outcome(
+                        llm_for_turn,
+                        clean_messages,
+                        **stream_kwargs,
+                    )
+                    outcome = hooks.canonicalize(outcome)
+                    record_turn_request_outcome(outcome)
+                    _validate_structured_output_outcome(
+                        outcome,
+                        hooks.structured_output_contract,
+                    )
+                    if outcome.kind in {"tool_calls", "final_answer"}:
+                        hooks.record_route_success(
+                            trace_fields=trace_fields,
+                            duration_ms=int((time.monotonic() - route_started_at) * 1000),
+                            streamed=True,
+                        )
+                    result.payload = (outcome, llm_for_turn.project_outcome_message(outcome))
+                    result.route_fallback = dict(switched_fallback)
+                    return result
+                hooks.raise_if_stop()
+                invoke_kwargs = {
                     "context": invocation_context,
-                    "on_event": on_protocol_event,
                     "replay_state": replay_state,
                 }
                 if hooks.structured_output_contract is not None:
-                    stream_kwargs["output_schema"] = hooks.structured_output_contract
-                outcome = hooks.run_streaming_outcome(
+                    invoke_kwargs["output_schema"] = hooks.structured_output_contract
+                outcome = hooks.invoke_outcome(
                     llm_for_turn,
                     clean_messages,
-                    **stream_kwargs,
+                    **invoke_kwargs,
                 )
                 outcome = hooks.canonicalize(outcome)
                 record_turn_request_outcome(outcome)
@@ -410,227 +469,256 @@ def invoke_agent_llm_turn(
                     hooks.record_route_success(
                         trace_fields=trace_fields,
                         duration_ms=int((time.monotonic() - route_started_at) * 1000),
-                        streamed=True,
+                        streamed=False,
                     )
                 result.payload = (outcome, llm_for_turn.project_outcome_message(outcome))
+                result.route_fallback = dict(switched_fallback)
                 return result
-            hooks.raise_if_stop()
-            invoke_kwargs = {
-                "context": invocation_context,
-                "replay_state": replay_state,
-            }
-            if hooks.structured_output_contract is not None:
-                invoke_kwargs["output_schema"] = hooks.structured_output_contract
-            outcome = hooks.invoke_outcome(
-                llm_for_turn,
-                clean_messages,
-                **invoke_kwargs,
-            )
-            outcome = hooks.canonicalize(outcome)
-            record_turn_request_outcome(outcome)
-            _validate_structured_output_outcome(
-                outcome,
-                hooks.structured_output_contract,
-            )
-            if outcome.kind in {"tool_calls", "final_answer"}:
-                hooks.record_route_success(
-                    trace_fields=trace_fields,
-                    duration_ms=int((time.monotonic() - route_started_at) * 1000),
-                    streamed=False,
+            except hooks.stop_error_cls:
+                raise
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                llm_error_details = _llm_error_details(e)
+                safe_projection_details = _safe_llm_error_diagnostic_details(llm_error_details)
+                reported_attempt = _coerce_positive_int(
+                    _mapping_get(llm_error_details, "attempt", "attemptIndex"),
+                    default=1,
                 )
-            result.payload = (outcome, llm_for_turn.project_outcome_message(outcome))
-            return result
-        except hooks.stop_error_cls:
-            raise
-        except KeyboardInterrupt:
-            raise
-        except Exception as e:
-            llm_error_details = _llm_error_details(e)
-            safe_projection_details = _safe_llm_error_diagnostic_details(llm_error_details)
-            reported_attempt = _coerce_positive_int(
-                _mapping_get(llm_error_details, "attempt", "attemptIndex"),
-                default=1,
-            )
-            reported_max_attempts = _coerce_positive_int(
-                _mapping_get(llm_error_details, "max_attempts", "maxAttempts"),
-                default=reported_attempt,
-            )
-            recovery = hooks.plan_recovery(
-                e,
-                attempt=reported_attempt,
-                max_attempts=reported_max_attempts,
-            )
-            category = _coerce_text(recovery.category).strip()
-            is_retryable = _coerce_bool(recovery.retryable, False)
-            user_msg = _coerce_text(recovery.user_message)
-            stop_reason = (
-                hooks.current_stop_reason()
-                or _coerce_text(
-                    _mapping_get(llm_error_details, "stop_reason", "stopReason")
-                ).strip()
-            )
-            if category == "cancelled" and stop_reason:
-                hooks.record_scene_event(
-                    "llm_route",
-                    "llm_route_cancelled",
-                    message="LLM route cancelled by the active turn stop request.",
-                    fields={
-                        **trace_fields,
-                        "routeAttempt": route_attempt,
-                        "routeId": _llm_effective_route_id(llm_for_turn),
-                        "reasonCode": "turn_stop_requested",
-                    },
-                    level="info",
-                    outcome="cancelled",
+                reported_max_attempts = _coerce_positive_int(
+                    _mapping_get(llm_error_details, "max_attempts", "maxAttempts"),
+                    default=reported_attempt,
                 )
-                raise hooks.stop_error_cls(stop_reason)
-            try:
-                streaming_enabled_for_failed_attempt = bool(
-                    hooks.should_stream(llm_for_turn)
-                    and hasattr(llm_for_turn, "stream")
+                recovery = hooks.plan_recovery(
+                    e,
+                    attempt=reported_attempt,
+                    max_attempts=reported_max_attempts,
                 )
-            except Exception:
-                streaming_enabled_for_failed_attempt = False
-            provider_stream_retry_exhausted = _coerce_bool(
-                _mapping_get(
-                    llm_error_details, "retry_budget_exhausted", "retryBudgetExhausted"
-                ),
-                False,
-            ) or (
-                reported_attempt > 0 and reported_attempt >= reported_max_attempts
-            )
-            result.last_error_category = category
-            result.last_error_retryable = is_retryable
-            result.last_recovery_action = recovery.action
-            result.last_error_message = f"{category}: {user_msg}".strip(": ")
-            result.last_failure_attempts = reported_attempt
-            result.last_failure_max_attempts = reported_max_attempts
-            exception_type = type(e).__name__
-            exception_message = str(e)
-            llm_error_traceback = traceback.format_exc()
-            error_details = {
-                **safe_projection_details,
-                "exception_type": exception_type,
-                "exception_message": exception_message[:4000],
-                "retryable": is_retryable,
-                "recovery_action": recovery.action,
-                "stop_current_turn": _coerce_bool(recovery.stop_current_turn, False),
-                "request_context_compression": _coerce_bool(
-                    recovery.request_context_compression, False
-                ),
-                "provider_stream_retry_exhausted": provider_stream_retry_exhausted,
-                "attempt": reported_attempt,
-                "max_attempts": reported_max_attempts,
-                "route_attempt": route_attempt,
-                "route_id": _llm_effective_route_id(llm_for_turn),
-                "invocation_id": _coerce_text(
+                category = _coerce_text(recovery.category).strip()
+                is_retryable = _coerce_bool(recovery.retryable, False)
+                user_msg = _coerce_text(recovery.user_message)
+                stop_reason = (
+                    hooks.current_stop_reason()
+                    or _coerce_text(
+                        _mapping_get(llm_error_details, "stop_reason", "stopReason")
+                    ).strip()
+                )
+                if category == "cancelled" and stop_reason:
+                    hooks.record_scene_event(
+                        "llm_route",
+                        "llm_route_cancelled",
+                        message="LLM route cancelled by the active turn stop request.",
+                        fields={
+                            **trace_fields,
+                            "routeAttempt": route_attempt,
+                            "routeId": _llm_effective_route_id(llm_for_turn),
+                            "reasonCode": "turn_stop_requested",
+                        },
+                        level="info",
+                        outcome="cancelled",
+                    )
+                    raise hooks.stop_error_cls(stop_reason)
+                try:
+                    streaming_enabled_for_failed_attempt = bool(
+                        hooks.should_stream(llm_for_turn)
+                        and hasattr(llm_for_turn, "stream")
+                    )
+                except Exception:
+                    streaming_enabled_for_failed_attempt = False
+                provider_stream_retry_exhausted = _coerce_bool(
+                    _mapping_get(
+                        llm_error_details, "retry_budget_exhausted", "retryBudgetExhausted"
+                    ),
+                    False,
+                ) or (
+                    reported_attempt > 0 and reported_attempt >= reported_max_attempts
+                )
+                result.last_error_category = category
+                result.last_error_retryable = is_retryable
+                result.last_recovery_action = recovery.action
+                result.last_error_message = f"{category}: {user_msg}".strip(": ")
+                result.last_failure_attempts = reported_attempt
+                result.last_failure_max_attempts = reported_max_attempts
+                exception_type = type(e).__name__
+                exception_message = str(e)
+                llm_error_traceback = traceback.format_exc()
+                error_details = {
+                    **safe_projection_details,
+                    "exception_type": exception_type,
+                    "exception_message": exception_message[:4000],
+                    "retryable": is_retryable,
+                    "recovery_action": recovery.action,
+                    "stop_current_turn": _coerce_bool(recovery.stop_current_turn, False),
+                    "request_context_compression": _coerce_bool(
+                        recovery.request_context_compression, False
+                    ),
+                    "provider_stream_retry_exhausted": provider_stream_retry_exhausted,
+                    "attempt": reported_attempt,
+                    "max_attempts": reported_max_attempts,
+                    "route_attempt": route_attempt,
+                    "route_id": _llm_effective_route_id(llm_for_turn),
+                    "invocation_id": _coerce_text(
+                        _mapping_get(
+                            _invocation_metadata(invocation_context),
+                            "invocationId",
+                            "invocation_id",
+                        )
+                    ),
+                    "model": getattr(getattr(hooks.config, "llm", None), "model_name", ""),
+                    "provider": getattr(getattr(hooks.config, "llm", None), "provider", ""),
+                    "api_base": getattr(getattr(hooks.config, "llm", None), "api_base", ""),
+                    "api_timeout": getattr(getattr(hooks.config, "llm", None), "api_timeout", None),
+                    "streaming_enabled": streaming_enabled_for_failed_attempt,
+                    "message_count": len(clean_messages),
+                }
+                if switched_fallback:
+                    error_details["route_fallback"] = dict(switched_fallback)
+                try:
+                    from tools.token_manager import estimate_messages_tokens
+
+                    error_details["estimated_input_tokens"] = max(
+                        0, int(estimate_messages_tokens(clean_messages) or 0)
+                    )
+                except Exception:
+                    error_details["estimated_input_tokens"] = 0
+                result.last_error_details = dict(error_details)
+
+                hooks.debug_logger.error(
+                    f"LLM 路由调用失败 [{route_attempt}] "
+                    f"{category}: {user_msg} | action={recovery.action} | "
+                    f"{exception_type}: {exception_message[:300]}",
+                    tag="LLM",
+                )
+                hooks.error_logger.log_error(
+                    "llm_error",
+                    f"{category}: {user_msg}",
+                    traceback=llm_error_traceback,
+                    details=error_details,
+                )
+                failed_route = llm_for_turn
+                failed_route_id = _llm_effective_route_id(failed_route)
+                failed_profile_id = _coerce_text(getattr(failed_route, "profile_id", "")).strip()
+                failed_invocation_id = _coerce_text(
                     _mapping_get(
                         _invocation_metadata(invocation_context),
                         "invocationId",
                         "invocation_id",
                     )
-                ),
-                "model": getattr(getattr(hooks.config, "llm", None), "model_name", ""),
-                "provider": getattr(getattr(hooks.config, "llm", None), "provider", ""),
-                "api_base": getattr(getattr(hooks.config, "llm", None), "api_base", ""),
-                "api_timeout": getattr(getattr(hooks.config, "llm", None), "api_timeout", None),
-                "streaming_enabled": streaming_enabled_for_failed_attempt,
-                "message_count": len(clean_messages),
-            }
-            try:
-                from tools.token_manager import estimate_messages_tokens
-
-                error_details["estimated_input_tokens"] = max(
-                    0, int(estimate_messages_tokens(clean_messages) or 0)
                 )
-            except Exception:
-                error_details["estimated_input_tokens"] = 0
-            result.last_error_details = dict(error_details)
-
-            hooks.debug_logger.error(
-                f"LLM 路由调用失败 [{route_attempt}] "
-                f"{category}: {user_msg} | action={recovery.action} | "
-                f"{exception_type}: {exception_message[:300]}",
-                tag="LLM",
-            )
-            hooks.error_logger.log_error(
-                "llm_error",
-                f"{category}: {user_msg}",
-                traceback=llm_error_traceback,
-                details=error_details,
-            )
-            failed_route = llm_for_turn
-            failed_route_id = _llm_effective_route_id(failed_route)
-            failed_invocation_id = _coerce_text(
-                _mapping_get(
-                    _invocation_metadata(invocation_context),
-                    "invocationId",
-                    "invocation_id",
-                )
-            )
-            hooks.record_scene_event(
-                "llm_route",
-                "llm_route_attempt_exhausted",
-                message="LLM effective route attempt exhausted.",
-                fields={
-                    **trace_fields,
-                    "routeAttempt": route_attempt,
-                    "routeId": failed_route_id,
-                    "invocationId": failed_invocation_id,
-                    "profileId": _coerce_text(getattr(failed_route, "profile_id", "")).strip(),
-                    "transportAttempt": reported_attempt,
-                    "maxTransportAttempts": reported_max_attempts,
-                    "errorCategory": category,
-                    "retryable": is_retryable,
-                    **safe_projection_details,
-                },
-                level="warning" if is_retryable else "error",
-                outcome="failed",
-            )
-
-            if _coerce_bool(recovery.request_context_compression, False):
                 hooks.record_scene_event(
                     "llm_route",
-                    "llm_turn_terminal",
-                    message="LLM turn stopped for context compression.",
+                    "llm_route_attempt_exhausted",
+                    message="LLM effective route attempt exhausted.",
                     fields={
                         **trace_fields,
-                        "routeAttempts": route_attempt,
+                        "routeAttempt": route_attempt,
                         "routeId": failed_route_id,
+                        "invocationId": failed_invocation_id,
+                        "profileId": failed_profile_id,
+                        "transportAttempt": reported_attempt,
+                        "maxTransportAttempts": reported_max_attempts,
                         "errorCategory": category,
-                        "reasonCode": "context_compression_required",
+                        "retryable": is_retryable,
+                        **safe_projection_details,
                     },
-                    level="warning",
+                    level="warning" if is_retryable else "error",
                     outcome="failed",
                 )
-                hooks.request_compression(
-                    f"LLM provider reported context limit: {category}",
-                    source="provider_limit",
-                )
-                return result
 
-            hooks.record_scene_event(
-                "llm_route",
-                "llm_turn_terminal",
-                message="LLM turn exhausted all permitted routes.",
-                fields={
+                if _coerce_bool(recovery.request_context_compression, False):
+                    hooks.record_scene_event(
+                        "llm_route",
+                        "llm_turn_terminal",
+                        message="LLM turn stopped for context compression.",
+                        fields={
+                            **trace_fields,
+                            "routeAttempts": route_attempt,
+                            "routeId": failed_route_id,
+                            "errorCategory": category,
+                            "reasonCode": "context_compression_required",
+                        },
+                        level="warning",
+                        outcome="failed",
+                    )
+                    hooks.request_compression(
+                        f"LLM provider reported context limit: {category}",
+                        source="provider_limit",
+                    )
+                    return result
+
+                # Explicit fallback switch: only on the primary route (single
+                # hop), only for recoverable gateway-level categories, and only
+                # once the route's own transport retry budget is exhausted.
+                fallback_profile_id = (
+                    "" if pending_fallback_profile_id else _resolve_explicit_fallback_profile_id(failed_route)
+                )
+                if (
+                    fallback_profile_id
+                    and is_retryable
+                    and provider_stream_retry_exhausted
+                    and category in _FALLBACK_SWITCH_CATEGORIES
+                ):
+                    invocation_metadata = _invocation_metadata(invocation_context)
+                    hooks.record_scene_event(
+                        "llm_route",
+                        "llm_route_fallback_switched",
+                        message=(
+                            "Primary LLM route exhausted its retry budget on a "
+                            "recoverable failure; switching once to the declared "
+                            f"fallback profile `{fallback_profile_id}`."
+                        ),
+                        fields={
+                            **trace_fields,
+                            "routeAttempt": route_attempt,
+                            "routeId": failed_route_id,
+                            "from": failed_profile_id,
+                            "to": fallback_profile_id,
+                            "fromRouteId": failed_route_id,
+                            "reason": category,
+                            "attempt": route_attempt,
+                            "transportAttempt": reported_attempt,
+                            "maxTransportAttempts": reported_max_attempts,
+                            "errorCategory": category,
+                            "retryable": is_retryable,
+                        },
+                        level="warning",
+                        outcome="switched",
+                    )
+                    fallback_session_id = _coerce_text(
+                        _mapping_get(invocation_metadata, "sessionId", "session_id")
+                    )
+                    fallback_turn_id = _coerce_text(
+                        _mapping_get(invocation_metadata, "turnId", "turn_id")
+                    )
+                    if fallback_session_id:
+                        record_route_fallback(
+                            fallback_session_id,
+                            fallback_turn_id,
+                            from_profile_id=failed_profile_id,
+                            to_profile_id=fallback_profile_id,
+                            reason=category,
+                        )
+                    switched_fallback = {"from": failed_profile_id, "to": fallback_profile_id}
+                    result.route_fallback = dict(switched_fallback)
+                    pending_fallback_profile_id = fallback_profile_id
+                    route_attempt += 1
+                    continue
+
+                terminal_fields = {
                     **trace_fields,
                     "routeAttempts": route_attempt,
                     "routeId": failed_route_id,
                     "errorCategory": category,
                     "reasonCode": "route_failed",
-                    **safe_projection_details,
-                },
-                level="error",
-                outcome="failed",
-            )
-            return result
-
-        hooks.debug_logger.error(
-            f"LLM 连续 {MAX_CONSECUTIVE_FAILURES} 次调用失败", tag="LLM"
-        )
-        ui.add_log(
-            f"LLM 连续 {MAX_CONSECUTIVE_FAILURES} 次调用失败，请检查网络和 API 配置。",
-            "ERROR",
-        )
-        return result
+                }
+                if switched_fallback:
+                    terminal_fields["routeFallback"] = dict(switched_fallback)
+                hooks.record_scene_event(
+                    "llm_route",
+                    "llm_turn_terminal",
+                    message="LLM turn exhausted all permitted routes.",
+                    fields={**terminal_fields, **safe_projection_details},
+                    level="error",
+                    outcome="failed",
+                )
+                return result

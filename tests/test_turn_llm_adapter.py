@@ -9,6 +9,11 @@ from agent import AgentRuntime, TurnStopRequested
 from core.infrastructure.llm_utils import MAX_CONSECUTIVE_FAILURES
 from core.infrastructure.runtime_input import build_chat_user_message
 from core.llm import LLMError
+from core.llm.route_fallback_registry import (
+    clear_route_fallbacks,
+    get_route_fallback,
+    record_route_fallback,
+)
 from core.llm.semantic_messages import SemanticOutputSchema
 from core.llm.types import CanonicalItemIdentity, TurnOutcome
 from core.orchestration.turn_llm_adapter import (
@@ -300,10 +305,11 @@ def _recovery(**overrides):
     return SimpleNamespace(**payload)
 
 
-def _route_llm(profile_id: str, *, identity=None, route_id=None):
+def _route_llm(profile_id: str, *, identity=None, route_id=None, fallback: str = ""):
     class RouteLLM:
         def __init__(self):
             self.profile_id = profile_id
+            self.profile = SimpleNamespace(fallback=fallback)
 
         def effective_route_identity(self):
             return identity if identity is not None else (profile_id,)
@@ -554,16 +560,202 @@ def test_sanitize_llm_turn_messages_rejects_character_split_and_decodes_system_r
 
 
 
-def test_adapter_does_not_fallback_when_retryable_is_false_string():
+def test_adapter_keeps_fail_fast_when_no_fallback_is_declared():
+    """Explicit-switch contract: no declaration means today's fail-fast path."""
+
     llm_calls = []
+    events = []
     primary = _route_llm("primary", identity=("relay", "primary"))
 
     def invoke_outcome(client, *_args, **_kwargs):
         llm_calls.append(client.profile_id)
-        raise LLMError("server_error", "boom", retryable=False, details={"attempt": 1, "max_attempts": 1})
+        raise LLMError(
+            "server_error", "boom", retryable=True, details={"attempt": 5, "max_attempts": 5}
+        )
 
-    def get_llm_for_mode(**_kwargs):
-        return primary
+    result = invoke_agent_llm_turn(
+        messages=[AIMessage(content="hello")],
+        hooks=_adapter_hooks(
+            get_llm_for_mode=lambda **_kwargs: primary,
+            invoke_outcome=invoke_outcome,
+            plan_recovery=lambda *_args, **_kwargs: _recovery(
+                category="server_error",
+                retryable=True,
+                action="retry_with_backoff",
+                stop_current_turn=True,
+                user_message="boom",
+            ),
+            record_scene_event=lambda _module, event, **kwargs: events.append(
+                (event, kwargs.get("fields") or {})
+            ),
+        ),
+    )
+    assert llm_calls == ["primary"]
+    assert result.payload is None
+    assert result.route_fallback == {}
+    assert result.last_error_retryable is True
+    assert not any(event == "llm_route_fallback_switched" for event, _fields in events)
+    assert any(event == "llm_turn_terminal" for event, _fields in events)
+
+
+def test_adapter_does_not_switch_on_permanent_failure_even_when_declared():
+    llm_calls = []
+    events = []
+    primary = _route_llm("primary", identity=("relay", "primary"), fallback="backup_qwen")
+
+    def invoke_outcome(client, *_args, **_kwargs):
+        llm_calls.append(client.profile_id)
+        raise LLMError(
+            "auth_error", "bad key", retryable=False, details={"attempt": 1, "max_attempts": 1}
+        )
+
+    result = invoke_agent_llm_turn(
+        messages=[AIMessage(content="hello")],
+        hooks=_adapter_hooks(
+            get_llm_for_mode=lambda **_kwargs: primary,
+            invoke_outcome=invoke_outcome,
+            plan_recovery=lambda *_args, **_kwargs: _recovery(
+                category="auth_error",
+                retryable="false",
+                action="fail_fast",
+                stop_current_turn=True,
+                user_message="bad key",
+            ),
+            record_scene_event=lambda _module, event, **kwargs: events.append(
+                (event, kwargs.get("fields") or {})
+            ),
+        ),
+    )
+    assert llm_calls == ["primary"]
+    assert result.payload is None
+    assert result.last_error_category == "auth_error"
+    assert result.last_error_retryable is False
+    assert result.route_fallback == {}
+    assert not any(event == "llm_route_fallback_switched" for event, _fields in events)
+
+
+def test_adapter_does_not_switch_before_retry_budget_is_exhausted():
+    llm_calls = []
+    events = []
+    primary = _route_llm("primary", identity=("relay", "primary"), fallback="backup_qwen")
+
+    def invoke_outcome(client, *_args, **_kwargs):
+        llm_calls.append(client.profile_id)
+        raise LLMError(
+            "server_error", "boom", retryable=True, details={"attempt": 2, "max_attempts": 5}
+        )
+
+    result = invoke_agent_llm_turn(
+        messages=[AIMessage(content="hello")],
+        hooks=_adapter_hooks(
+            get_llm_for_mode=lambda **_kwargs: primary,
+            invoke_outcome=invoke_outcome,
+            plan_recovery=lambda *_args, **_kwargs: _recovery(
+                category="server_error",
+                retryable=True,
+                action="retry_with_backoff",
+                stop_current_turn=False,
+                user_message="boom",
+            ),
+            record_scene_event=lambda _module, event, **kwargs: events.append(
+                (event, kwargs.get("fields") or {})
+            ),
+        ),
+    )
+    assert llm_calls == ["primary"]
+    assert result.payload is None
+    assert result.last_error_details["provider_stream_retry_exhausted"] is False
+    assert not any(event == "llm_route_fallback_switched" for event, _fields in events)
+
+
+def test_adapter_switches_once_to_declared_fallback_and_emits_event():
+    clear_route_fallbacks()
+    llm_calls = []
+    profile_requests = []
+    route_attempts = []
+    success_traces = []
+    events = []
+    primary = _route_llm("primary", identity=("relay", "primary"), fallback="backup_qwen")
+    backup = _route_llm("backup_qwen", identity=("dashscope", "backup_qwen"))
+
+    def get_llm_for_mode(**kwargs):
+        profile_requests.append(kwargs.get("profile_id"))
+        return primary if len(profile_requests) == 1 else backup
+
+    def invoke_outcome(client, *_args, **_kwargs):
+        llm_calls.append(client.profile_id)
+        if client.profile_id == "primary":
+            raise LLMError(
+                "server_error",
+                "gateway down",
+                retryable=True,
+                details={"attempt": 5, "max_attempts": 5},
+            )
+        return TurnOutcome.final_answer(identity=_identity(), text="rescued")
+
+    def build_invocation_context(**kwargs):
+        route_attempts.append(kwargs.get("route_attempt"))
+        metadata = {
+            "sessionId": "sess-1",
+            "turnId": "turn-9",
+            "invocationId": f"inv-{kwargs.get('route_attempt')}",
+        }
+        return SimpleNamespace(
+            metadata=metadata,
+            to_metadata=lambda client=None: dict(metadata),
+        )
+
+    result = invoke_agent_llm_turn(
+        messages=[AIMessage(content="hello")],
+        hooks=_adapter_hooks(
+            get_llm_for_mode=get_llm_for_mode,
+            invoke_outcome=invoke_outcome,
+            build_invocation_context=build_invocation_context,
+            plan_recovery=lambda *_args, **_kwargs: _recovery(
+                category="server_error",
+                retryable=True,
+                action="retry_with_backoff",
+                stop_current_turn=True,
+                user_message="gateway down",
+            ),
+            record_scene_event=lambda _module, event, **kwargs: events.append(
+                (event, kwargs.get("fields") or {})
+            ),
+            record_route_success=lambda **kwargs: success_traces.append(kwargs),
+        ),
+    )
+    assert llm_calls == ["primary", "backup_qwen"]
+    assert profile_requests == [None, "backup_qwen"]
+    assert route_attempts == [1, 2]
+    assert result.payload is not None
+    assert result.payload[1].content == "rescued"
+    assert result.route_fallback == {"from": "primary", "to": "backup_qwen"}
+    switched = [fields for event, fields in events if event == "llm_route_fallback_switched"]
+    assert len(switched) == 1
+    assert switched[0]["from"] == "primary"
+    assert switched[0]["to"] == "backup_qwen"
+    assert switched[0]["reason"] == "server_error"
+    assert switched[0]["attempt"] == 1
+    assert success_traces and success_traces[0]["trace_fields"]["routeAttempt"] == 2
+    assert get_route_fallback("sess-1", "turn-9") == {"from": "primary", "to": "backup_qwen"}
+
+
+def test_adapter_single_hop_caps_the_fallback_chain():
+    llm_calls = []
+    events = []
+    profile_requests = []
+    primary = _route_llm("primary", identity=("relay", "primary"), fallback="backup_qwen")
+    backup = _route_llm("backup_qwen", identity=("dashscope", "backup_qwen"), fallback="primary")
+
+    def get_llm_for_mode(**kwargs):
+        profile_requests.append(kwargs.get("profile_id"))
+        return primary if len(profile_requests) == 1 else backup
+
+    def invoke_outcome(client, *_args, **_kwargs):
+        llm_calls.append(client.profile_id)
+        raise LLMError(
+            "server_error", "boom", retryable=True, details={"attempt": 5, "max_attempts": 5}
+        )
 
     result = invoke_agent_llm_turn(
         messages=[AIMessage(content="hello")],
@@ -571,13 +763,36 @@ def test_adapter_does_not_fallback_when_retryable_is_false_string():
             get_llm_for_mode=get_llm_for_mode,
             invoke_outcome=invoke_outcome,
             plan_recovery=lambda *_args, **_kwargs: _recovery(
-                retryable="false",
+                category="server_error",
+                retryable=True,
+                action="retry_with_backoff",
+                stop_current_turn=True,
+                user_message="boom",
+            ),
+            record_scene_event=lambda _module, event, **kwargs: events.append(
+                (event, kwargs.get("fields") or {})
             ),
         ),
     )
-    assert llm_calls == ["primary"]
+    assert llm_calls == ["primary", "backup_qwen"]
     assert result.payload is None
-    assert result.last_error_retryable is False
+    assert len([1 for event, _f in events if event == "llm_route_fallback_switched"]) == 1
+    terminal = [fields for event, fields in events if event == "llm_turn_terminal"]
+    assert terminal and terminal[0]["routeAttempts"] == 2
+    assert terminal[0]["routeFallback"] == {"from": "primary", "to": "backup_qwen"}
+
+
+def test_route_fallback_registry_does_not_mislabel_other_turns():
+    clear_route_fallbacks()
+    assert record_route_fallback(
+        "sess-1", "turn-1", from_profile_id="primary", to_profile_id="backup_qwen", reason="server_error"
+    ) == {"from": "primary", "to": "backup_qwen"}
+    assert get_route_fallback("sess-1", "turn-1") == {"from": "primary", "to": "backup_qwen"}
+    assert get_route_fallback("sess-1", "turn-2") is None
+    assert get_route_fallback("sess-1") == {"from": "primary", "to": "backup_qwen"}
+    assert get_route_fallback("sess-2") is None
+    assert record_route_fallback("sess-1", "turn-3", from_profile_id="x", to_profile_id="x") is None
+    clear_route_fallbacks()
 
 
 def test_sanitize_llm_turn_messages_unwraps_history_envelope():

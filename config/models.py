@@ -414,6 +414,15 @@ class LLMProfile(BaseModel):
     model_ref: str = Field(default="")
     provider_id: str = Field(default="default")
     model: str = Field(default="qwen-plus")
+    fallback: str = Field(
+        default="",
+        description=(
+            "Optional profile_id this route explicitly falls back to after its "
+            "retryable retry budget (network/timeout/server_error/rate_limit) "
+            "is exhausted. Empty keeps fail-fast behaviour for the route. "
+            "Single hop: a fallback target is never switched again."
+        ),
+    )
     api_key_env: str = Field(default="")
     transport: str = Field(default="chat_completions")
     contract: str = Field(default="tool_chat")
@@ -657,6 +666,19 @@ class LLMConfig(BaseModel):
         if provider is None:
             raise ValueError(f"missing provider: {resolved_provider_id}")
         return provider
+
+    def declared_fallback_profile_ids(self) -> Dict[str, str]:
+        """Return the operator-declared profile fallbacks, empty when none are set.
+
+        Profiles without a declaration are absent, so consumers keep fail-fast
+        behaviour for every route the operator has not spoken about.
+        """
+        declared: Dict[str, str] = {}
+        for profile_id, profile in self.profiles.items():
+            target = str(getattr(profile, "fallback", "") or "").strip()
+            if target:
+                declared[str(profile_id)] = target
+        return declared
 
     def resolve_model_ref(self, model_ref: str) -> str:
         requested = str(model_ref or "").strip()
