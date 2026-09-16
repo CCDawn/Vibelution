@@ -54,4 +54,11 @@ describe("ChatComposerPlusMenu contract", () => {
     expect(source).toContain("<VButton");
     expect(source).toContain("<VNativeInput");
   });
+  it("offers file attachments and a knowledge/file reference picker", () => {
+    expect(source).toContain('id: "reference-knowledge"');
+    expect(source).toContain("composerAttachmentAcceptAttribute()");
+    expect(source).toContain("knowledgeReferenceOptions");
+    expect(source).toContain("onAddKnowledgeReference");
+    expect(source).not.toContain('accept="image/png,image/jpeg,image/webp"');
+  });
 });

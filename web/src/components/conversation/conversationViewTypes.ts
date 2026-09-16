@@ -22,6 +22,7 @@ export type ConversationComposerAttachment = {
   previewUrl: string;
   sizeBytes: number;
   contentType: string;
+  kind?: "image" | "document";
 };
 
 export type ConversationLlmControl = {

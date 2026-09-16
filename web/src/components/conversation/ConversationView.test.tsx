@@ -1021,7 +1021,7 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
 
     expect(html).toContain("顾云舒上下文");
     expect(html).toContain("顾云舒");
-    expect(html).toContain('aria-label="待发送会话引用"');
+    expect(html).toContain('aria-label="待发送引用"');
     expect(html).toContain('role="list"');
     expect(html).toContain('role="listitem"');
   });
@@ -1409,12 +1409,65 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     expect(html).toContain("composerAttachmentName");
     expect(html).toContain("composerAttachmentMeta");
     expect(html).toContain("1 KB");
-    expect(html).toContain('aria-label="预览图片 pending.png"');
+    expect(html).toContain('aria-label="预览附件 pending.png"');
     expect(html).toContain("composerAttachmentRemoveButton");
-    expect(html).toContain('aria-label="待发送图片"');
+    expect(html).toContain('aria-label="待发送附件"');
     expect(html).toContain('role="list"');
     expect(html).toContain('role="listitem"');
     expect(conversationViewSource).toContain("<X size={13} aria-hidden=\"true\" />");
+  });
+
+  it("renders pending document attachments as file badges without image previews", () => {
+    const html = renderConversation([], {
+      composerAttachments: [
+        {
+          id: "pending-doc",
+          filename: "experiment.csv",
+          previewUrl: "blob:pending-doc",
+          sizeBytes: 4096,
+          contentType: "text/csv",
+          kind: "document",
+        },
+        {
+          id: "pending-legacy-doc",
+          filename: "notes.md",
+          previewUrl: "blob:pending-legacy-doc",
+          sizeBytes: 512,
+          contentType: "",
+        },
+      ],
+      onRemoveComposerAttachment: () => undefined,
+    });
+    expect(html).toContain("experiment.csv");
+    expect(html).toContain("notes.md");
+    expect(html).toContain("composerAttachmentFileBadge");
+    expect(html).not.toContain("blob:pending-doc\" alt");
+    expect(html).not.toContain("预览附件 notes.md");
+    expect(html).toContain("aria-label=\"移除附件\"");
+  });
+
+  it("renders knowledge and file reference chips with kind labels", () => {
+    const html = renderConversation([], {
+      composerReferences: [
+        {
+          referenceId: "knowledge-base:kb-1",
+          kind: "knowledge_base",
+          knowledgeBaseId: "kb-1",
+          title: "实验知识库",
+        },
+        {
+          referenceId: "file:user-doc-1.csv",
+          kind: "file",
+          artifactId: "user-doc-1.csv",
+          title: "run-01.csv",
+        },
+      ],
+    });
+    expect(html).toContain("实验知识库");
+    expect(html).toContain("run-01.csv");
+    expect(html).toContain("知识库引用");
+    expect(html).toContain("文件引用");
+    expect(html).toContain('aria-label="待发送引用"');
   });it("renders markdown in user messages with the same safe renderer", () => {
     const html = renderConversation([
       {

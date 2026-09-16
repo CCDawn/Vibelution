@@ -14,6 +14,7 @@ export type ChatComposerImageAttachment = {
   previewUrl: string;
   sizeBytes: number;
   contentType: string;
+  kind?: "image" | "document";
 };
 
 export type ChatConversationComposerBridgeLabels = {
@@ -102,6 +103,7 @@ export function mapChatComposerImageAttachments(
     previewUrl: attachment.previewUrl,
     sizeBytes: attachment.sizeBytes,
     contentType: attachment.contentType,
+    kind: attachment.kind,
   }));
 }
 

@@ -59,13 +59,14 @@ import {
   isBusyPhase,
 } from "./chatCodingRouteViewModel";
 import {
+  MAX_COMPOSER_DOCUMENT_ATTACHMENTS,
   MAX_COMPOSER_IMAGE_ATTACHMENTS,
-  classifyComposerImageFiles,
+  classifyComposerFiles,
   clearSessionDraftForSubmittedTurn,
   clearSessionImageAttachments,
   clearSessionReferenceAttachments,
   encodeUtf8Base64,
-  mergeComposerImageAttachments,
+  mergeComposerAttachments,
   optimisticTurnIdForSubmission,
   removeSessionImageAttachment,
   resolveComposerSubmitGuard,
@@ -951,30 +952,40 @@ export function useChatComposerSubmitActions({
     if (!activeSessionId) {
       return;
     }
-    if (activeAgentImageInputUnsupported) {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [activeSessionId]: lang === "zh" ? "当前 Agent 模型不支持图片输入。" : "The current Agent model does not support image input.",
-      }));
+    const { accepted: classifiedAccepted, rejected } = classifyComposerFiles(files);
+    if (!classifiedAccepted.length && !rejected.length) {
       return;
     }
-    const { accepted, rejected } = classifyComposerImageFiles(files);
-    if (!accepted.length && !rejected.length) {
-      return;
-    }
+    // Document attachments do not depend on the model's image input support;
+    // only image attachments are dropped when the dialogue model lacks vision.
+    const accepted = activeAgentImageInputUnsupported
+      ? classifiedAccepted.filter((attachment) => attachment.kind !== "image")
+      : classifiedAccepted;
+    const effectiveRejected = activeAgentImageInputUnsupported
+      ? [
+          ...rejected,
+          ...classifiedAccepted
+            .filter((attachment) => attachment.kind === "image")
+            .map((attachment) => attachment.filename),
+        ]
+      : rejected;
     if (accepted.length) {
       setSessionImageAttachments((current) => {
         const existing = current[activeSessionId] ?? [];
         return {
           ...current,
-          [activeSessionId]: mergeComposerImageAttachments(existing, accepted, MAX_COMPOSER_IMAGE_ATTACHMENTS),
+          [activeSessionId]: mergeComposerAttachments(existing, accepted, {
+            maxTotal: MAX_COMPOSER_IMAGE_ATTACHMENTS + MAX_COMPOSER_DOCUMENT_ATTACHMENTS,
+            maxImages: MAX_COMPOSER_IMAGE_ATTACHMENTS,
+            maxDocuments: MAX_COMPOSER_DOCUMENT_ATTACHMENTS,
+          }),
         };
       });
     }
     setSessionComposerErrors((current) => ({
       ...current,
-      [activeSessionId]: rejected.length
-        ? (lang === "zh" ? "部分图片格式或大小不支持。" : "Some images were rejected by type or size.")
+      [activeSessionId]: effectiveRejected.length
+        ? (lang === "zh" ? "部分附件格式或大小不支持。" : "Some attachments were rejected by type or size.")
         : "",
     }));
   }, [

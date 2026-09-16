@@ -1012,7 +1012,7 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps actions in the composer plus menu and keeps the retired status rail out", () => {
-    expect(routeSource).toContain('import { ChatComposerPlusMenu } from "./ChatComposerPlusMenu"');
+    expect(routeSource).toContain('import { ChatComposerPlusMenu, type ChatComposerSessionReferenceOption } from "./ChatComposerPlusMenu"');
     expect(routeSource).toContain("composerLeadingControl: verifiedCompanionMode ? undefined : (");
     expect(routeSource).toContain("<ChatComposerPlusMenu");
     expect(chatComposerPlusMenuSource).toContain('label: lang === "zh" ? "添加与引用" : "Add and reference"');

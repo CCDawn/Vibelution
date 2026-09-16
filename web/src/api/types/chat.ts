@@ -610,14 +610,22 @@ export type MentalStateSnapshot = {
 
 export type SessionReferenceAttachment = {
   referenceId?: string;
-  kind: "session" | string;
-  sessionId: string;
+  /** `session` is the legacy kind; knowledge/file kinds resolve at submit time. */
+  kind: "session" | "knowledge_item" | "knowledge_base" | "file" | string;
+  sessionId?: string;
   title?: string;
   agentId?: string;
   agentCode?: string;
   agentDisplayName?: string;
   summary?: string;
   createdAt?: string;
+  /** knowledge_item references */
+  knowledgeItemId?: string;
+  /** knowledge_item / knowledge_base references */
+  knowledgeBaseId?: string;
+  /** file references point at a previously uploaded session artifact */
+  artifactId?: string;
+  filename?: string;
 };
 
 type ConversationMessageBase = {

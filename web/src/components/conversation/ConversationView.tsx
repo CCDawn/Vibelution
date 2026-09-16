@@ -1,6 +1,7 @@
 import {
   ArrowDown,
   ArrowUp,
+  BookOpen,
   BrainCircuit,
   Check,
   CheckCircle2,
@@ -10,6 +11,7 @@ import {
   CircleDot,
   Copy,
   ExternalLink,
+  FileText,
   ImagePlus,
   Link2,
   LoaderCircle,
@@ -249,6 +251,10 @@ import {
   hasComposerImageDragPayload,
   hasComposerSessionReferenceDragPayload,
 } from "./conversationComposerDropPayload";
+import {
+  composerAttachmentAcceptAttribute,
+  isComposerAttachableFile,
+} from "./conversationConstants";
 import {
   buildConversationTurnErrorReasonRows,
   buildTurnErrorDiagnosticRows,
@@ -4935,35 +4941,42 @@ export function ConversationView({
             <div
               className={styles.composerAttachmentTray}
               role="list"
-              aria-label={lang === "zh" ? "待发送图片" : "Images to send"}
+              aria-label={t("composerAttachmentTrayLabel")}
             >
               {composerAttachments.map((attachment) => {
-                const previewLabel = lang === "zh"
-                  ? `预览图片 ${attachment.filename}`
-                  : `Preview image ${attachment.filename}`;
+                const isImageAttachment = attachment.kind
+                  ? attachment.kind === "image"
+                  : Boolean(attachment.contentType && attachment.contentType.startsWith("image/"));
+                const previewLabel = t("composerAttachmentPreviewLabel").replace("{filename}", attachment.filename);
                 const sizeLabel = composerAttachmentSizeLabel(attachment.sizeBytes);
                 return (
                   <div key={attachment.id} className={styles.composerAttachmentChip} role="listitem">
-                    <VButton
-                      className={styles.composerAttachmentPreview}
-                      variant="ghost"
-                      type="button"
-                      onClick={() => openImagePreview({
-                        src: attachment.previewUrl,
-                        alt: attachment.filename,
-                        downloadUrl: attachment.previewUrl,
-                        downloadName: attachment.filename,
-                      })}
-                      title={previewLabel}
-                      aria-label={previewLabel}
-                    >
-                      <span className={styles.composerAttachmentThumbFrame}>
-                        <img className={styles.composerAttachmentThumb} src={attachment.previewUrl} alt="" />
-                        <span className={styles.composerAttachmentThumbHint} aria-hidden="true">
-                          {lang === "zh" ? "看大图" : "Zoom"}
+                    {isImageAttachment ? (
+                      <VButton
+                        className={styles.composerAttachmentPreview}
+                        variant="ghost"
+                        type="button"
+                        onClick={() => openImagePreview({
+                          src: attachment.previewUrl,
+                          alt: attachment.filename,
+                          downloadUrl: attachment.previewUrl,
+                          downloadName: attachment.filename,
+                        })}
+                        title={previewLabel}
+                        aria-label={previewLabel}
+                      >
+                        <span className={styles.composerAttachmentThumbFrame}>
+                          <img className={styles.composerAttachmentThumb} src={attachment.previewUrl} alt="" />
+                          <span className={styles.composerAttachmentThumbHint} aria-hidden="true">
+                            {lang === "zh" ? "看大图" : "Zoom"}
+                          </span>
                         </span>
+                      </VButton>
+                    ) : (
+                      <span className={styles.composerAttachmentFileBadge} aria-hidden="true">
+                        <FileText size={15} />
                       </span>
-                    </VButton>
+                    )}
                     <span className={styles.composerAttachmentCopy}>
                       <span className={styles.composerAttachmentName} title={attachment.filename}>{attachment.filename}</span>
                       {sizeLabel ? (
@@ -4976,8 +4989,8 @@ export function ConversationView({
                         isIconOnly
                         type="button"
                         onClick={() => onRemoveComposerAttachment(attachment.id)}
-                        title={lang === "zh" ? "移除图片" : "Remove image"}
-                        aria-label={lang === "zh" ? "移除图片" : "Remove image"}
+                        title={t("composerAttachmentRemove")}
+                        aria-label={t("composerAttachmentRemove")}
                       >
                         <X size={13} aria-hidden="true" />
                       </VButton>
@@ -4991,27 +5004,35 @@ export function ConversationView({
             <div
               className={styles.composerReferenceTray}
               role="list"
-              aria-label={lang === "zh" ? "待发送会话引用" : "Session references to send"}
+              aria-label={t("composerReferenceTrayLabel")}
             >
               {composerReferences.map((reference) => {
-                const referenceId = reference.referenceId || reference.sessionId;
-                const title = reference.title || reference.sessionId;
+                const referenceId = reference.referenceId || reference.sessionId || reference.artifactId || "";
+                const title = reference.title || reference.sessionId || reference.artifactId || "";
                 const agentLabel = reference.agentDisplayName || reference.agentCode || reference.agentId || "";
+                const kind = String(reference.kind || "session");
+                const kindLabel = kind === "knowledge_base"
+                  ? t("composerReferenceKindKnowledgeBase")
+                  : kind === "knowledge_item"
+                    ? t("composerReferenceKindKnowledgeItem")
+                    : kind === "file"
+                      ? t("composerReferenceKindFile")
+                      : t("composerReferenceKindSession");
                 return (
-                  <div key={referenceId} className={styles.composerReferenceChip} role="listitem">
+                  <div key={`${kind}:${referenceId}`} className={styles.composerReferenceChip} role="listitem">
                     <span className={styles.composerReferenceIcon} aria-hidden="true">
-                      <Link2 size={13} />
+                      {kind === "knowledge_base" || kind === "knowledge_item" ? <BookOpen size={13} /> : kind === "file" ? <FileText size={13} /> : <Link2 size={13} />}
                     </span>
                     <span className={styles.composerReferenceCopy}>
                       <strong title={title}>{title}</strong>
-                      {agentLabel ? <small title={agentLabel}>{agentLabel}</small> : null}
+                      <small title={agentLabel || kindLabel}>{agentLabel || kindLabel}</small>
                     </span>
                     {onRemoveComposerReference ? (
                       <VButton
                         type="button"
                         onClick={() => onRemoveComposerReference(referenceId)}
-                        title={lang === "zh" ? "移除会话引用" : "Remove session reference"}
-                        aria-label={lang === "zh" ? "移除会话引用" : "Remove session reference"}
+                        title={t("composerReferenceRemove")}
+                        aria-label={t("composerReferenceRemove")}
                         isIconOnly
                         icon={<X size={13} aria-hidden="true"/>} />
                     ) : null}
@@ -5069,7 +5090,7 @@ export function ConversationView({
               if (!onAddComposerAttachments || attachmentInputDisabled) {
                 return;
               }
-              const files = Array.from(event.clipboardData.files || []).filter((file) => file.type.startsWith("image/"));
+              const files = Array.from(event.clipboardData.files || []).filter((file) => isComposerAttachableFile(file));
               if (!files.length) {
                 return;
               }
@@ -5131,8 +5152,8 @@ export function ConversationView({
                   isDisabled={attachmentInputDisabled || !onAddComposerAttachments}
                   type="button"
                   onClick={() => attachmentInputRef.current?.click()}
-                  title={lang === "zh" ? "添加图片" : "Attach image"}
-                  aria-label={lang === "zh" ? "添加图片" : "Attach image"}
+                  title={t("composerAttachTooltip")}
+                  aria-label={t("composerAttachTooltip")}
                 >
                   <ImagePlus size={16} />
                 </VButton>
@@ -5163,7 +5184,7 @@ export function ConversationView({
           ref={attachmentInputRef}
           className={styles.hiddenAttachmentInput}
           type="file"
-          accept="image/png,image/jpeg,image/webp"
+          accept={composerAttachmentAcceptAttribute()}
           multiple
           disabled={attachmentInputDisabled}
           onChange={(event) => {

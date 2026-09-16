@@ -312,6 +312,8 @@ backToBottomButton:
     "vui-components-conversationview composerAttachmentThumb block size-full shrink-0 object-cover transition-transform duration-150 ease-out group-hover:scale-[1.05]",
   composerAttachmentThumbHint:
     "vui-components-conversationview composerAttachmentThumbHint pointer-events-none absolute inset-0 grid place-items-center bg-[color-mix(in_srgb,var(--vui-surface-panel)_58%,transparent)] text-[var(--fg-primary)] [font-size:var(--vui-font-2xs)] font-semibold opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100",
+  composerAttachmentFileBadge:
+    "vui-components-conversationview composerAttachmentFileBadge inline-grid size-14 shrink-0 place-items-center rounded-[10px] bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,var(--vui-control-muted))] text-[var(--fg-tertiary)]",
   composerAttachmentTray:
     "vui-components-conversationview composerAttachmentTray min-w-0 max-w-full overflow-hidden flex flex-wrap items-center gap-2",
   // Busy composer keeps the queue/steer action and the stop button on one row

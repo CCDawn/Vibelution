@@ -1,6 +1,7 @@
 import {
   Activity,
   ArrowUpRight,
+  BookOpen,
   BrainCircuit,
   Check,
   ImagePlus,
@@ -15,6 +16,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNod
 
 import type { SessionReferenceAttachment } from "../../api/types";
 import { VButton, VDialog, VNativeInput, VPopover } from "../../components/vui";
+import { composerAttachmentAcceptAttribute } from "./chatComposerSubmitModel";
 import styles from "./ChatComposerPlusMenu.styles";
 
 export type ChatComposerSessionReferenceOption = {
@@ -24,14 +26,27 @@ export type ChatComposerSessionReferenceOption = {
   reference: SessionReferenceAttachment;
 };
 
+export type ChatComposerPlusMenuLabels = {
+  composerAttachFiles: string;
+  composerReferenceKnowledgeFiles: string;
+  composerReferenceKnowledgeUnavailable: string;
+  composerReferenceKnowledgeTitle: string;
+  composerReferenceKnowledgeDescription: string;
+  composerReferenceKnowledgeSearch: string;
+  composerReferenceKnowledgeEmpty: string;
+};
+
 export type ChatComposerPlusMenuProps = {
   lang: "zh" | "en";
+  labels?: ChatComposerPlusMenuLabels;
   showAddReference?: boolean;
   showCapabilities?: boolean;
   attachmentDisabled: boolean;
   onAddAttachments?: (files: FileList | File[]) => void;
   sessionReferences: ChatComposerSessionReferenceOption[];
   onAddSessionReference?: (reference: SessionReferenceAttachment) => void;
+  knowledgeReferenceOptions?: ChatComposerSessionReferenceOption[];
+  onAddKnowledgeReference?: (reference: SessionReferenceAttachment) => void;
   mentalModelEnabled: boolean;
   runtimeStatusEnabled: boolean;
   promptSuggestionEnabled: boolean;
@@ -73,12 +88,15 @@ function ItemIcon({ children }: { children: ReactNode }) {
 export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
   const {
     lang,
+    labels,
     showAddReference = true,
     showCapabilities = true,
     attachmentDisabled,
     onAddAttachments,
     sessionReferences,
     onAddSessionReference,
+    knowledgeReferenceOptions,
+    onAddKnowledgeReference,
     mentalModelEnabled,
     runtimeStatusEnabled,
     promptSuggestionEnabled,
@@ -94,6 +112,8 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
   const [open, setOpen] = useState(false);
   const [referenceDialogOpen, setReferenceDialogOpen] = useState(false);
   const [referenceQuery, setReferenceQuery] = useState("");
+  const [knowledgeDialogOpen, setKnowledgeDialogOpen] = useState(false);
+  const [knowledgeQuery, setKnowledgeQuery] = useState("");
 
   const addReferenceSection = useMemo<SectionDescriptor>(() => ({
     id: "add-reference",
@@ -119,6 +139,15 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
     }
     return sessionReferences.filter((option) => `${option.title} ${option.meta ?? ""}`.toLocaleLowerCase().includes(query));
   }, [referenceQuery, sessionReferences]);
+
+  const filteredKnowledgeReferences = useMemo(() => {
+    const query = knowledgeQuery.trim().toLocaleLowerCase();
+    const options = knowledgeReferenceOptions ?? [];
+    if (!query) {
+      return options;
+    }
+    return options.filter((option) => `${option.title} ${option.meta ?? ""}`.toLocaleLowerCase().includes(query));
+  }, [knowledgeQuery, knowledgeReferenceOptions]);
 
   useEffect(() => {
     if (!open) {
@@ -262,8 +291,30 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
     );
   }
 
-  const attachmentUnavailableReason = lang === "zh" ? "当前会话暂不可添加图片" : "Image attachment is unavailable in this session";
+  const defaultLabels: ChatComposerPlusMenuLabels = lang === "zh"
+    ? {
+        composerAttachFiles: "添加附件",
+        composerReferenceKnowledgeFiles: "引用知识/文件",
+        composerReferenceKnowledgeUnavailable: "当前没有可引用的知识或文件",
+        composerReferenceKnowledgeTitle: "引用知识与文件",
+        composerReferenceKnowledgeDescription: "把知识库、知识条目或本会话文件作为本轮上下文引用。",
+        composerReferenceKnowledgeSearch: "搜索知识与文件",
+        composerReferenceKnowledgeEmpty: "没有匹配的知识或文件。",
+      }
+    : {
+        composerAttachFiles: "Attach files",
+        composerReferenceKnowledgeFiles: "Reference knowledge or files",
+        composerReferenceKnowledgeUnavailable: "No knowledge or files are available to reference",
+        composerReferenceKnowledgeTitle: "Reference knowledge and files",
+        composerReferenceKnowledgeDescription: "Attach knowledge bases, entries, or session files as context for this turn.",
+        composerReferenceKnowledgeSearch: "Search knowledge and files",
+        composerReferenceKnowledgeEmpty: "No matching knowledge or files.",
+      };
+  const resolvedLabels = { ...defaultLabels, ...labels };
+  const t = (key: keyof ChatComposerPlusMenuLabels) => resolvedLabels[key];
+  const attachmentUnavailableReason = lang === "zh" ? "当前会话暂不可添加附件" : "Attachments are unavailable in this session";
   const referenceUnavailableReason = lang === "zh" ? "没有可引用的历史会话" : "No previous session is available to reference";
+  const knowledgeUnavailableReason = t("composerReferenceKnowledgeUnavailable");
 
   return (
     <>
@@ -298,7 +349,7 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
             <>
               {renderAction({
                 id: "attach-image",
-                label: lang === "zh" ? "图片附件" : "Image attachment",
+                label: t("composerAttachFiles"),
                 icon: <ImagePlus size={16} />,
                 disabled: attachmentDisabled || !onAddAttachments,
                 disabledReason: attachmentUnavailableReason,
@@ -313,6 +364,17 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
                 onSelect: () => {
                   setReferenceQuery("");
                   setReferenceDialogOpen(true);
+                },
+              })}
+              {renderAction({
+                id: "reference-knowledge",
+                label: t("composerReferenceKnowledgeFiles"),
+                icon: <BookOpen size={16} />,
+                disabled: !onAddKnowledgeReference || (knowledgeReferenceOptions ?? []).length === 0,
+                disabledReason: knowledgeUnavailableReason,
+                onSelect: () => {
+                  setKnowledgeQuery("");
+                  setKnowledgeDialogOpen(true);
                 },
               })}
             </>
@@ -381,10 +443,10 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
         ref={attachmentInputRef}
         className={styles.hiddenInput}
         type="file"
-        accept="image/png,image/jpeg,image/webp"
+        accept={composerAttachmentAcceptAttribute()}
         multiple
         disabled={attachmentDisabled}
-        aria-label={lang === "zh" ? "选择图片附件" : "Choose image attachments"}
+        aria-label={lang === "zh" ? "选择附件" : "Choose attachments"}
         onChange={(event) => {
           if (event.currentTarget.files && onAddAttachments) {
             onAddAttachments(event.currentTarget.files);
@@ -433,6 +495,56 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
             {filteredReferences.length === 0 ? (
               <p className={styles.referenceEmpty}>
                 {lang === "zh" ? "没有匹配的会话。" : "No matching sessions."}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </VDialog>
+
+      <VDialog
+        open={knowledgeDialogOpen}
+        onOpenChange={(nextOpen) => {
+          setKnowledgeDialogOpen(nextOpen);
+          if (!nextOpen) {
+            setKnowledgeQuery("");
+          }
+        }}
+        title={t("composerReferenceKnowledgeTitle")}
+        description={t("composerReferenceKnowledgeDescription")}
+        size="md"
+      >
+        <div className={styles.referenceBody}>
+          <VNativeInput
+            value={knowledgeQuery}
+            onChange={(event) => setKnowledgeQuery(event.target.value)}
+            placeholder={t("composerReferenceKnowledgeSearch")}
+            aria-label={t("composerReferenceKnowledgeSearch")}
+          />
+          <div
+            className={styles.referenceList}
+            role="listbox"
+            aria-label={t("composerReferenceKnowledgeTitle")}
+          >
+            {filteredKnowledgeReferences.map((option) => (
+              <VButton
+                key={option.id}
+                type="button"
+                role="option"
+                className={styles.referenceOption}
+                variant="ghost"
+                onPress={() => {
+                  onAddKnowledgeReference?.(option.reference);
+                  setKnowledgeDialogOpen(false);
+                  setKnowledgeQuery("");
+                }}
+              >
+                <strong className={styles.referenceTitle}>{option.title}</strong>
+                {option.meta ? <small className={styles.referenceMeta}>{option.meta}</small> : null}
+              </VButton>
+            ))}
+            {filteredKnowledgeReferences.length === 0 ? (
+              <p className={styles.referenceEmpty}>
+                {t("composerReferenceKnowledgeEmpty")}
               </p>
             ) : null}
           </div>

@@ -42,6 +42,7 @@ import {
   listVirtualHumanCompanionActivity,
   listVirtualHumanCompanions,
 } from "../../api/agentPlugins";
+import { listAgentKnowledgeBases, searchKnowledgeItems } from "../../api/knowledge";
 import { fetchFileContent } from "../../api/files";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import type { AgentArchiveResponse } from "../agentWorkspaceCache";
@@ -147,7 +148,7 @@ import { useChatComposerBridgeState } from "./useChatComposerBridgeState";
 import { useChatGroupRoomViewModel } from "./useChatGroupRoomViewModel";
 import { ChatSessionWorkspacePanel } from "./ChatSessionWorkspacePanel";
 import { ChatConversationIndexRail } from "./ChatConversationIndexRail";
-import { ChatComposerPlusMenu } from "./ChatComposerPlusMenu";
+import { ChatComposerPlusMenu, type ChatComposerSessionReferenceOption } from "./ChatComposerPlusMenu";
 import { ChatGroupManagementDialog } from "./ChatGroupManagementDialog";
 import {
   chatStreamPerformanceNowMs,
@@ -282,6 +283,9 @@ import {
 } from "./cliAgentRunModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
 import {
+  buildFileReferencePayload,
+  buildKnowledgeBaseReferencePayload,
+  buildKnowledgeItemReferencePayload,
   buildSessionReferencePayload,
   clearSessionImageAttachments,
   clearSessionReferenceAttachments,
@@ -2494,6 +2498,82 @@ export function ChatCodingRouteWorkbench() {
   const selectedChatAgentId = selectedAgentId || activeSessionAgentId || visibleChatAgents[0]?.agentId || "";
   const selectedChatAgent = selectedChatAgentId ? agentsById.get(selectedChatAgentId) : undefined;
 
+  const composerKnowledgeAgentId = activeSessionAgentId || selectedChatAgentId || "";
+  const agentKnowledgeBasesQuery = useQuery({
+    queryKey: ["knowledge", "agent-bases", composerKnowledgeAgentId],
+    queryFn: () => listAgentKnowledgeBases<{ knowledgeBases?: Array<{ knowledgeBaseId?: string; name?: string; description?: string }> }>(
+      composerKnowledgeAgentId,
+      { actorAgentId: composerKnowledgeAgentId },
+    ),
+    enabled: Boolean(composerKnowledgeAgentId),
+    staleTime: 60_000,
+  });
+  const agentKnowledgeItemsQuery = useQuery({
+    queryKey: queryKeys.knowledgeSearch("", composerKnowledgeAgentId, "", "", "keyword"),
+    queryFn: () => searchKnowledgeItems<{ results?: Array<{
+      knowledgeItemId?: string;
+      knowledgeBaseId?: string;
+      title?: string;
+      knowledgeBaseName?: string;
+    }> }>({ agentId: composerKnowledgeAgentId, limit: 20 }),
+    enabled: Boolean(composerKnowledgeAgentId),
+    staleTime: 60_000,
+  });
+  const composerKnowledgeReferenceOptions = useMemo<ChatComposerSessionReferenceOption[]>(() => {
+    const options: ChatComposerSessionReferenceOption[] = [];
+    for (const base of agentKnowledgeBasesQuery.data?.knowledgeBases ?? []) {
+      const baseId = String(base.knowledgeBaseId || "").trim();
+      if (!baseId) {
+        continue;
+      }
+      const title = String(base.name || baseId).trim();
+      options.push({
+        id: `knowledge-base:${baseId}`,
+        title,
+        meta: t("composerReferenceKindKnowledgeBase"),
+        reference: buildKnowledgeBaseReferencePayload(baseId, title),
+      });
+    }
+    for (const item of agentKnowledgeItemsQuery.data?.results ?? []) {
+      const itemId = String(item.knowledgeItemId || "").trim();
+      const itemBaseId = String(item.knowledgeBaseId || "").trim();
+      if (!itemId || !itemBaseId) {
+        continue;
+      }
+      const title = String(item.title || itemId).trim();
+      options.push({
+        id: `knowledge-item:${itemId}`,
+        title,
+        meta: String(item.knowledgeBaseName || itemBaseId).trim(),
+        reference: buildKnowledgeItemReferencePayload(itemBaseId, itemId, title),
+      });
+    }
+    const seenSessionFiles = new Set<string>();
+    for (const message of detail?.messages ?? []) {
+      if (message.role !== "user") {
+        continue;
+      }
+      for (const attachment of message.attachments ?? []) {
+        const artifactId = String(attachment.artifactId || "").trim();
+        if (!artifactId || seenSessionFiles.has(artifactId)) {
+          continue;
+        }
+        if (attachment.kind && attachment.kind !== "user_document") {
+          continue;
+        }
+        seenSessionFiles.add(artifactId);
+        const filename = String(attachment.filename || artifactId).trim();
+        options.push({
+          id: `file:${artifactId}`,
+          title: filename,
+          meta: t("composerReferenceKindFile"),
+          reference: buildFileReferencePayload(artifactId, filename),
+        });
+      }
+    }
+    return options;
+  }, [agentKnowledgeBasesQuery.data, agentKnowledgeItemsQuery.data, detail, t]);
+
   const {
     rightIndexSessions,
     agentSessionTabs,
@@ -3237,6 +3317,17 @@ export function ChatCodingRouteWorkbench() {
                     onAddAttachments={handleAddComposerAttachments}
                     sessionReferences={composerSessionReferenceOptions}
                     onAddSessionReference={handleAddComposerReference}
+                    knowledgeReferenceOptions={composerKnowledgeReferenceOptions}
+                    onAddKnowledgeReference={handleAddComposerReference}
+                    labels={{
+                      composerAttachFiles: t("composerAttachFiles"),
+                      composerReferenceKnowledgeFiles: t("composerReferenceKnowledgeFiles"),
+                      composerReferenceKnowledgeUnavailable: t("composerReferenceKnowledgeUnavailable"),
+                      composerReferenceKnowledgeTitle: t("composerReferenceKnowledgeTitle"),
+                      composerReferenceKnowledgeDescription: t("composerReferenceKnowledgeDescription"),
+                      composerReferenceKnowledgeSearch: t("composerReferenceKnowledgeSearch"),
+                      composerReferenceKnowledgeEmpty: t("composerReferenceKnowledgeEmpty"),
+                    }}
                     mentalModelEnabled={mentalModelEnabledForNextTurn}
                     runtimeStatusEnabled={runtimeStatusEnabledForNextTurn}
                     promptSuggestionEnabled={activePromptSuggestionEnabled}

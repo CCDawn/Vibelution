@@ -84,7 +84,7 @@ describe("composer image attachment preview", () => {
     });
     await flush();
 
-    const thumbnail = container.querySelector<HTMLButtonElement>('[aria-label="预览图片 pending.png"]');
+    const thumbnail = container.querySelector<HTMLButtonElement>('[aria-label="预览附件 pending.png"]');
     expect(thumbnail).not.toBeNull();
 
     await act(async () => {
