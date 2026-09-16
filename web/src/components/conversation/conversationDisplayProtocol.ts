@@ -23,6 +23,7 @@ export type RuntimeStatusDisplayInput = {
 export type TranscriptCellDisplayInput = RuntimeStatusDisplayInput & {
   id?: unknown;
   messageId?: unknown;
+  originType?: unknown;
 };
 
 export type RuntimeStatusDisplayContext = {
@@ -30,8 +31,9 @@ export type RuntimeStatusDisplayContext = {
 };
 
 /**
- * Model retries are part of the visible process trail, but remain an internal
- * runtime status so their explanatory text never becomes the assistant answer.
+ * Model retries stay an internal runtime status so their explanatory text
+ * never becomes the assistant answer, and the settled transcript keeps no
+ * retry rows (Codex shows them only as a live "Reconnecting..." status line).
  * Keep the recognition bounded to the canonical stage names and safe labels
  * emitted by the backend rather than exposing arbitrary provider errors.
  */
@@ -65,7 +67,7 @@ export function shouldDisplayRuntimeStatus(
     return true;
   }
   if (isRetryRuntimeStatus(input)) {
-    return true;
+    return false;
   }
   if (isModelTransportStatus(input)) {
     return context.surface === "active" && isActiveTransportDegradation(input);
@@ -77,6 +79,10 @@ export function shouldDisplayRuntimeStatus(
 }
 
 export function shouldDisplayTranscriptCell(cell: TranscriptCellDisplayInput) {
+  // Retry turn items are live recovery heartbeats, not transcript rows.
+  if (normalizedText(cell.originType) === "retry") {
+    return false;
+  }
   const kind = normalizedText(cell.kind);
   if (kind === "assistant_markdown" && hasNonAnswerTranscriptText(cell)) {
     return false;

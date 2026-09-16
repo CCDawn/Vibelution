@@ -131,6 +131,8 @@ export type ConversationViewProps = {
   /** Compact context composition ring (left of send). */
   composerContextRing?: ComposerContextRingModel | null;
   onOpenComposerContextDetail?: () => void;
+  /** Client-side /新会话 builtin: create a session and navigate to it. */
+  onCreateSession?: () => void;
   turnError?: SessionTurnError | null;
   nextStateSignals?: ChatNextStateSignalSummary[];
   submitLabel?: string;

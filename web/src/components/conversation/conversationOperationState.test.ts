@@ -126,14 +126,17 @@ describe("conversation operation state helpers", () => {
     expect(shouldShowTimelineOperation(internalStatus)).toBe(false);
     expect(shouldShowTimelineOperation({ ...internalStatus, error: "failed to prepare" })).toBe(true);
     expect(shouldShowTimelineOperation(longLoopStatus)).toBe(true);
-    expect(shouldShowTimelineOperation(operation({
+    const retryStatus = operation({
       id: "retry",
       kind: "status",
       rawLabel: "model_retry",
       label: "Request retry",
       status: "running",
       summary: "attempt 1/5; reason: server_error",
-    }))).toBe(true);
+    });
+    // Codex parity: a retry heartbeat is live status-note UI, never a row.
+    expect(shouldShowTimelineOperation(retryStatus)).toBe(false);
+    expect(shouldShowTimelineOperation({ ...retryStatus, error: "server_error" })).toBe(true);
   });
 
   it("deduplicates visible long-loop progress while preserving ordinary operations", () => {

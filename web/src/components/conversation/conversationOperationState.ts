@@ -495,7 +495,9 @@ export function isRetryOperation(operation: AgentMessageOperation) {
 
 export function shouldShowTimelineOperation(operation: AgentMessageOperation) {
   if (operation.kind === "status") {
-    return isRetryOperation(operation) || isLongLoopProgressOperation(operation) || Boolean(operation.error?.trim());
+    // Retry heartbeats stay live status-note UI; only a failed retry status
+    // (with an explicit error) is worth persisting in the operation trail.
+    return isLongLoopProgressOperation(operation) || Boolean(operation.error?.trim());
   }
   return !isInternalPipelineOperation(operation) || Boolean(operation.error?.trim());
 }
