@@ -100,6 +100,7 @@ function renderConversation(
     composerModeTargetPreview?: string;
     cancelComposerModeLabel?: string;
     turnError?: SessionTurnError | null;
+    onOpenComposerContextDetail?: () => void;
     onSafeGuidance?: () => void;
     onInterruptGuidance?: () => void;
     onCancelComposerMode?: () => void;
@@ -159,6 +160,7 @@ function renderConversation(
         composerModeTargetPreview={options.composerModeTargetPreview}
         cancelComposerModeLabel={options.cancelComposerModeLabel}
         turnError={options.turnError}
+        onOpenComposerContextDetail={options.onOpenComposerContextDetail}
         composerAttachments={options.composerAttachments}
         onRemoveComposerAttachment={options.onRemoveComposerAttachment}
         composerReferences={options.composerReferences}
@@ -211,6 +213,87 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
     expect(conversationViewSource).toContain("buildCodexTranscriptCells(");
     expect(conversationViewSource).toContain("agentCodexSurfacesByMessageId");
     expect(conversationViewSource).toContain("data-codex-transcript-cell-count");
+  });
+});
+
+describe("ConversationView failed-turn error presentation", () => {
+  function failedTurnMessageFixture(metadata: Record<string, unknown>) {
+    return {
+      id: "assistant-error-1",
+      role: "assistant",
+      content: "网页工作台这一轮执行失败，本轮没有正常完成；完整错误已写入运行日志，可以稍后重试或先检查配置。",
+      timestamp: "2026-05-22T00:01:00Z",
+      turnId: "turn-1",
+      status: "failed",
+      turnItems: [
+        {
+          id: "assistant-error-1-item-status",
+          itemId: "assistant-error-1-item-status",
+          sessionId: "session-1",
+          turnId: "turn-1",
+          version: 3,
+          revision: 1,
+          sequence: 1,
+          type: "status",
+          code: "turn_attempt",
+          title: "turn_attempt",
+          text: "本轮未产出回答。",
+          status: "completed",
+          terminal: true,
+        },
+      ],
+      metadata: { kind: "turn_error", ...metadata },
+    } as unknown as ConversationMessage;
+  }
+
+  it("renders a human errorType chip instead of the raw code", () => {
+    const html = renderConversation([
+      failedTurnMessageFixture({ errorType: "provider_protocol_error" }),
+    ]);
+    expect(html).toContain("上游协议错误");
+    expect(html).not.toContain(">provider_protocol_error<");
+  });
+
+  it("keeps the raw errorType reachable through the chip tooltip", () => {
+    const html = renderConversation([
+      failedTurnMessageFixture({ errorType: "provider_protocol_error" }),
+    ]);
+    expect(html).toContain('title="provider_protocol_error"');
+  });
+
+  it("offers the compress-context recovery action for budget-family failed turns", () => {
+    const html = renderConversation([
+      failedTurnMessageFixture({ errorType: "runtime_error", failureDisposition: "budget_or_context" }),
+    ], { onOpenComposerContextDetail: () => undefined });
+    expect(html).toContain("压缩上下文");
+  });
+
+  it("hides the compress-context action for non-budget failures", () => {
+    const html = renderConversation([
+      failedTurnMessageFixture({ errorType: "provider_protocol_error" }),
+    ], { onOpenComposerContextDetail: () => undefined });
+    expect(html).not.toContain("压缩上下文");
+  });
+
+  it("localizes the current-turn banner errorType chip too", () => {
+    const html = renderConversation([
+      {
+        id: "message-user-1",
+        role: "user",
+        content: "帮我跑一次构建",
+        timestamp: "2026-05-22T00:00:00Z",
+      },
+    ], {
+      turnError: {
+        message: "模型服务上游暂时失败，本轮没有完成。",
+        errorType: "provider_upstream_error",
+        recoverable: true,
+        timestamp: "2026-05-22T00:01:00Z",
+        turnId: "turn-1",
+      } as SessionTurnError,
+    });
+    expect(html).toContain("上游服务暂不可用");
+    expect(html).toContain('title="provider_upstream_error"');
   });
 });
 

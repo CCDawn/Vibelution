@@ -16,7 +16,6 @@ from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from core.infrastructure.llm_utils import MAX_CONSECUTIVE_FAILURES
 from core.llm import LLMError
 from core.llm.recovery import DEGRADED_RETRY_ACTIONS, degraded_retry_overrides
-from core.llm.route_fallback_registry import record_route_fallback
 from core.llm.turn_request_capture import (
     capture_turn_request,
     record_turn_request_outcome,
@@ -757,7 +756,6 @@ def invoke_agent_llm_turn(
                     and provider_stream_retry_exhausted
                     and category in _FALLBACK_SWITCH_CATEGORIES
                 ):
-                    invocation_metadata = _invocation_metadata(invocation_context)
                     hooks.record_scene_event(
                         "llm_route",
                         "llm_route_fallback_switched",
@@ -783,20 +781,11 @@ def invoke_agent_llm_turn(
                         level="warning",
                         outcome="switched",
                     )
-                    fallback_session_id = _coerce_text(
-                        _mapping_get(invocation_metadata, "sessionId", "session_id")
-                    )
-                    fallback_turn_id = _coerce_text(
-                        _mapping_get(invocation_metadata, "turnId", "turn_id")
-                    )
-                    if fallback_session_id:
-                        record_route_fallback(
-                            fallback_session_id,
-                            fallback_turn_id,
-                            from_profile_id=failed_profile_id,
-                            to_profile_id=fallback_profile_id,
-                            reason=category,
-                        )
+                    # Persistence is owned by the Session Journal, not this
+                    # adapter: the scene-event binding layer mirrors the event
+                    # above into core.chat.llm_resilience_journal (durable,
+                    # restart-safe). The old in-memory route_fallback_registry
+                    # is gone; do not reintroduce a volatile second authority.
                     switched_fallback = {"from": failed_profile_id, "to": fallback_profile_id}
                     result.route_fallback = dict(switched_fallback)
                     pending_fallback_profile_id = fallback_profile_id

@@ -12,6 +12,7 @@ import {
   Copy,
   ExternalLink,
   FileText,
+  Gauge,
   ImagePlus,
   Link2,
   LoaderCircle,
@@ -261,6 +262,9 @@ import {
   buildCurrentTurnErrorRows,
   summarizeCurrentTurnError,
   resolveConversationTurnErrorType,
+  resolveConversationTurnErrorRecoveryAction,
+  resolveSessionTurnErrorRecoveryAction,
+  resolveTurnErrorTypeLabelKey,
 } from "./conversationTurnErrorPresentation";
 import {
   buildConversationToolActivityDetailRows,
@@ -4350,6 +4354,14 @@ export function ConversationView({
             const shouldRenderLegacyTurnError = Boolean(
               turnErrorMessage && !displayPlanSeed.suppressProjectedError,
             );
+            // Failure-turn presentation: human-readable errorType chip and a
+            // budget-directed recovery action instead of raw codes.
+            const turnErrorTypeLabelKey = shouldRenderLegacyTurnError
+              ? resolveTurnErrorTypeLabelKey(resolveConversationTurnErrorType(message))
+              : "";
+            const turnErrorRecoveryAction = shouldRenderLegacyTurnError
+              ? resolveConversationTurnErrorRecoveryAction(message)
+              : "";
             const timelineOptions = {
               lang,
               // The assistant body always comes from the canonical cell surface.
@@ -4719,7 +4731,9 @@ export function ConversationView({
                       <div className={styles.turnErrorNoticeBody}>
                         <div className={styles.turnErrorNoticeMeta}>
                           <span>{lang === "zh" ? "运行提示" : "Runtime notice"}</span>
-                          {resolveConversationTurnErrorType(message) ? <span>{resolveConversationTurnErrorType(message)}</span> : null}
+                          {turnErrorTypeLabelKey ? (
+                            <span title={resolveConversationTurnErrorType(message)}>{t(turnErrorTypeLabelKey)}</span>
+                          ) : null}
                         </div>
                         <div className={styles.turnErrorNoticeText}>{renderResponseText(assistantFinalAnswerText(message))}</div>
                         {buildConversationTurnErrorReasonRows(message, lang).length > 0 ? (
@@ -4736,6 +4750,21 @@ export function ConversationView({
                               ))}
                             </dl>
                           </details>
+                        ) : null}
+                        {turnErrorRecoveryAction === "compress_context" && onOpenComposerContextDetail ? (
+                          <div className={styles.turnErrorActions}>
+                            <VButton
+                              type="button"
+                              contentLayout="plain"
+                              className={styles.turnErrorRetryButton}
+                              onClick={onOpenComposerContextDetail}
+                              title={t("turnErrorActionCompressContextTitle")}
+                              aria-label={t("turnErrorActionCompressContext")}
+                            >
+                              <Gauge size={12}/>
+                              <span>{t("turnErrorActionCompressContext")}</span>
+                            </VButton>
+                          </div>
                         ) : null}
                         {canRetryFailedTurnMessage ? (
                           <div className={styles.turnErrorActions}>
@@ -4834,6 +4863,19 @@ export function ConversationView({
                   </details>
                 </div>
                 <div className={styles.turnErrorActions}>
+                  {turnError && resolveSessionTurnErrorRecoveryAction(turnError) === "compress_context" && onOpenComposerContextDetail ? (
+                    <VButton
+                      type="button"
+                      contentLayout="plain"
+                      className={styles.turnErrorRetryButton}
+                      onClick={onOpenComposerContextDetail}
+                      title={t("turnErrorActionCompressContextTitle")}
+                      aria-label={t("turnErrorActionCompressContext")}
+                    >
+                      <Gauge size={12}/>
+                      <span>{t("turnErrorActionCompressContext")}</span>
+                    </VButton>
+                  ) : null}
                   {onRetryTurn ? (
                     <VButton
                       type="button"
@@ -4849,7 +4891,12 @@ export function ConversationView({
                       <span>{lang === "zh" ? "重试" : "Retry"}</span>
                     </VButton>
                   ) : null}
-                  {turnError.errorType ? <span className={styles.turnErrorType}>{turnError.errorType}</span> : null}
+                  {(() => {
+                    const turnErrorTypeLabelKey = turnError ? resolveTurnErrorTypeLabelKey(turnError.errorType) : "";
+                    return turnErrorTypeLabelKey ? (
+                      <span className={styles.turnErrorType} title={turnError?.errorType}>{t(turnErrorTypeLabelKey)}</span>
+                    ) : null;
+                  })()}
                 </div>
               </div>
             ) : null}

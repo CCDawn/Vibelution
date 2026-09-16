@@ -10,13 +10,13 @@ from collections.abc import Mapping
 from concurrent.futures import Future
 from datetime import datetime
 import logging
-import time
 from typing import Any
 
 from core.chat.conversation_store import parse_directory_cursor
 from core.web.services.agent_config_authority import canonical_agent_config_payload
 
 from . import directory_runtime
+from .read_health import note_session_read_degraded
 
 
 logger = logging.getLogger(__name__)
@@ -24,37 +24,6 @@ logger = logging.getLogger(__name__)
 _DIRECTORY_LIST_PAGE = 200
 _SYNC_TIMEOUT_SECONDS = 5.0
 _QUERY_VISIBLE_PAGE_ATTEMPTS = 8
-_DIRECTORY_UNAVAILABLE_LOG_INTERVAL_SECONDS = 60.0
-
-_directory_unavailable_log_monotonic = 0.0
-
-
-def note_session_read_degraded(*, source: str, error_type: str = "") -> None:
-    """Throttled visibility for a degraded session read.
-
-    A missing store or a raising read used to be invisible: list/query simply
-    fell back to the discarded JSON projection and rebuilt for tens of seconds.
-    Callers still get their fallback, but operators get a throttled warning
-    naming the runtime status and error type.
-    """
-
-    global _directory_unavailable_log_monotonic
-    now = time.monotonic()
-    if now - _directory_unavailable_log_monotonic < _DIRECTORY_UNAVAILABLE_LOG_INTERVAL_SECONDS:
-        return
-    _directory_unavailable_log_monotonic = now
-    runtime_status = directory_runtime.current_directory_runtime_status()
-    logger.warning(
-        "Session read degraded (status=%s error=%s detail=%s); %s reads fall back.",
-        str(getattr(runtime_status, "status", "") or "idle"),
-        str(getattr(runtime_status, "error_type", "") or "none"),
-        str(error_type or "none"),
-        source,
-    )
-
-
-def _note_directory_store_unavailable(*, source: str) -> None:
-    note_session_read_degraded(source=source)
 
 
 def _service():
@@ -88,7 +57,7 @@ def query_session_summaries(
         return _empty_query_payload()
     store = directory_runtime.get_open_directory_store()
     if store is None:
-        _note_directory_store_unavailable(source="session query")
+        note_session_read_degraded(source="session query")
         return None
     s = _service()
     normalized_limit = s._coerce_session_query_limit(limit)
@@ -234,7 +203,7 @@ def list_session_summaries(*, include_hidden: bool = False) -> list[dict[str, An
         return []
     store = directory_runtime.get_open_directory_store()
     if store is None:
-        _note_directory_store_unavailable(source="session list")
+        note_session_read_degraded(source="session list")
         return None
     s = _service()
     agent_by_id = s._agent_lookup_for_conversations()
@@ -293,7 +262,7 @@ def list_child_session_summaries(session_id: str) -> dict[str, Any] | None:
         return {"rootSessionId": normalized_session_id, "items": []}
     store = directory_runtime.get_open_directory_store()
     if store is None:
-        _note_directory_store_unavailable(source="child session list")
+        note_session_read_degraded(source="child session list")
         return None
 
     root_session_id = normalized_session_id

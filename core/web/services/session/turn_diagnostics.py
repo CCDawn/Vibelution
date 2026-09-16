@@ -1352,14 +1352,14 @@ def _active_chat_turn_work_run_for_session(
 def list_active_session_work_runs(*, reconcile: bool = True) -> list[dict[str, Any]]:
     """Return active web chat turns as lightweight WorkRun lease snapshots."""
     s = _service()
-    from .directory_bridge import note_session_read_degraded
+    from . import read_health
 
     if reconcile:
         try:
             reconcile_stale_chat_turn_work_runs()
         except Exception as exc:
             # Stale rows stay unrepaired and would render as running forever.
-            note_session_read_degraded(
+            read_health.note_session_read_degraded(
                 source="stale turn reconcile",
                 error_type=type(exc).__name__,
             )
@@ -1372,7 +1372,7 @@ def list_active_session_work_runs(*, reconcile: bool = True) -> list[dict[str, A
         queued_scheduler_turns = s._SESSION_TURN_SCHEDULER.queued_session_turn_ids()
     except Exception as exc:
         # An unreadable queue silently demotes queued turns to running.
-        note_session_read_degraded(
+        read_health.note_session_read_degraded(
             source="queued turn list",
             error_type=type(exc).__name__,
         )
@@ -1419,7 +1419,7 @@ def list_active_session_work_runs(*, reconcile: bool = True) -> list[dict[str, A
         recent_snapshots = s._WORK_RUN_STORE.list_snapshots("chat_turn", limit=40)
     except Exception as exc:
         # A failed snapshot read hides persisted queued turns from the UI.
-        note_session_read_degraded(
+        read_health.note_session_read_degraded(
             source="queued turn snapshots",
             error_type=type(exc).__name__,
         )
@@ -1472,12 +1472,12 @@ def _active_session_work_run_statuses(session_ids: list[str]) -> dict[str, str]:
 
 def load_chat_turn_work_run_summary() -> dict[str, Any]:
     s = _service()
-    from .directory_bridge import note_session_read_degraded
+    from . import read_health
 
     try:
         reconcile_stale_chat_turn_work_runs()
     except Exception as exc:
-        note_session_read_degraded(
+        read_health.note_session_read_degraded(
             source="stale turn reconcile",
             error_type=type(exc).__name__,
         )
@@ -2470,17 +2470,16 @@ def _user_visible_failure_summary(
             zh=f"模型服务上游暂时失败，本轮没有完成。{reason_line}{detail_line}完整 provider 错误已写入运行日志；可以稍后直接重试或发送“继续”。",
             en=f'The model provider failed upstream, so this turn did not complete. {reason_line}{detail_line} The full provider error was written to runtime logs; retry later or send "continue".',
         )
-    reason = s.trim_lines(text, max_lines=2)
-    summary = s.text_for(
+    # Human summary only (what happened / impact / what next). The raw error
+    # text stays out of the chat body on purpose: it is already captured in
+    # runtime logs, runtime-scene rawErrorPreview, and the structured
+    # reason_summary/reason_detail fields that feed the frontend diagnostics
+    # disclosure, so the turn body never dumps technical/stack text.
+    return s.text_for(
         language,
-        zh="网页工作台这一轮执行失败，请检查配置或稍后重试。",
-        en="This web workbench turn failed. Check configuration and try again.",
+        zh="网页工作台这一轮执行失败，本轮没有正常完成；完整错误已写入运行日志，可以稍后重试或先检查配置。",
+        en="This web workbench turn failed and did not complete. The full error was written to runtime logs; retry later or check the configuration first.",
     )
-    if reason:
-        return f"{summary}\n{reason}"
-    if exc is not None:
-        return f"{summary}\n{type(exc).__name__}"
-    return summary
 
 
 def _touch_chat_turn_work_run(

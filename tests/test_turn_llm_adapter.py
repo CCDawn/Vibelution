@@ -10,11 +10,6 @@ from core.infrastructure.llm_utils import MAX_CONSECUTIVE_FAILURES
 from core.infrastructure.runtime_input import build_chat_user_message
 from core.llm import LLMError
 from core.llm.recovery import plan_recovery
-from core.llm.route_fallback_registry import (
-    clear_route_fallbacks,
-    get_route_fallback,
-    record_route_fallback,
-)
 from core.llm.semantic_messages import SemanticOutputSchema
 from core.llm.types import CanonicalItemIdentity, TurnOutcome
 from core.orchestration.turn_llm_adapter import (
@@ -670,7 +665,6 @@ def test_adapter_does_not_switch_before_retry_budget_is_exhausted():
 
 
 def test_adapter_switches_once_to_declared_fallback_and_emits_event():
-    clear_route_fallbacks()
     llm_calls = []
     profile_requests = []
     route_attempts = []
@@ -738,7 +732,13 @@ def test_adapter_switches_once_to_declared_fallback_and_emits_event():
     assert switched[0]["reason"] == "server_error"
     assert switched[0]["attempt"] == 1
     assert success_traces and success_traces[0]["trace_fields"]["routeAttempt"] == 2
-    assert get_route_fallback("sess-1", "turn-9") == {"from": "primary", "to": "backup_qwen"}
+    # Persistence is no longer an adapter concern: the durable llm_resilience
+    # journal write happens in the scene-event binding layer and is covered by
+    # tests/test_llm_resilience_journal.py. The in-memory route fallback
+    # registry was removed; only the scene event contract remains here.
+    switched_fields = switched[0]
+    assert switched_fields["sessionId"] == "sess-1"
+    assert switched_fields["turnId"] == "turn-9"
 
 
 def test_adapter_single_hop_caps_the_fallback_chain():
@@ -781,19 +781,6 @@ def test_adapter_single_hop_caps_the_fallback_chain():
     terminal = [fields for event, fields in events if event == "llm_turn_terminal"]
     assert terminal and terminal[0]["routeAttempts"] == 2
     assert terminal[0]["routeFallback"] == {"from": "primary", "to": "backup_qwen"}
-
-
-def test_route_fallback_registry_does_not_mislabel_other_turns():
-    clear_route_fallbacks()
-    assert record_route_fallback(
-        "sess-1", "turn-1", from_profile_id="primary", to_profile_id="backup_qwen", reason="server_error"
-    ) == {"from": "primary", "to": "backup_qwen"}
-    assert get_route_fallback("sess-1", "turn-1") == {"from": "primary", "to": "backup_qwen"}
-    assert get_route_fallback("sess-1", "turn-2") is None
-    assert get_route_fallback("sess-1") == {"from": "primary", "to": "backup_qwen"}
-    assert get_route_fallback("sess-2") is None
-    assert record_route_fallback("sess-1", "turn-3", from_profile_id="x", to_profile_id="x") is None
-    clear_route_fallbacks()
 
 
 def test_sanitize_llm_turn_messages_unwraps_history_envelope():
@@ -993,7 +980,6 @@ def test_adapter_degraded_retry_does_not_loop():
 
 def test_adapter_degrades_before_declared_fallback_switch():
     """(d) priority: same-profile degraded retry first, declared fallback only after."""
-    clear_route_fallbacks()
     streaming_calls = []
     invoke_calls = []
     llm_requests = []
@@ -1066,11 +1052,11 @@ def test_adapter_degrades_before_declared_fallback_switch():
     )
     switched = [fields for event, fields in events if event == "llm_route_fallback_switched"]
     assert switched and switched[0]["reason"] == "server_error"
-    assert get_route_fallback("sess-degrade", "turn-1") == {
-        "from": "primary",
-        "to": "backup_qwen",
-    }
-    clear_route_fallbacks()
+    # Durable persistence is the scene-event binding layer's job (covered by
+    # tests/test_llm_resilience_journal.py); the adapter only owes the scene
+    # event fields that the mirror consumes.
+    assert switched[0]["sessionId"] == "sess-degrade"
+    assert switched[0]["turnId"] == "turn-1"
 
 
 def test_adapter_skips_noop_degrade_when_attempt_was_already_non_streaming():
