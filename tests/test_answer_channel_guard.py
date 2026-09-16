@@ -464,7 +464,7 @@ def _adapter_hooks(invoke_outcome, *, record_scene_event, plan_recovery_hook=Non
         def effective_route_id(self):
             return "primary-route"
 
-        def project_outcome_message(self, outcome):
+        def project_outcome_message(self, outcome, *, latency_ms: int = 0):
             from langchain_core.messages import AIMessage
 
             return AIMessage(content=outcome.final_text)
