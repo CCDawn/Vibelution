@@ -431,7 +431,7 @@ def summarize_failure(completed: subprocess.CompletedProcess[str], subject: str)
     return bounded_failure_summary(f"{subject}: {raw}")
 
 
-def validation_environment() -> dict[str, str] | None:
+def validation_environment() -> dict[str, str]:
     """Redirect pytest's basetemp away from the deep Windows instance-cache temp.
 
 Pytest fixture repos created under ``%LOCALAPPDATA%\\...\\instances\\...\\cache``
@@ -439,14 +439,14 @@ Pytest fixture repos created under ``%LOCALAPPDATA%\\...\\instances\\...\\cache`
     keeps the validated commands unchanged while pinning the temp root short.
     """
 
+    env = git_hook_isolated_environment()
     if os.name != "nt":
-        return None
+        return env
     root = Path(os.environ.get("VIBELUTION_VALIDATION_TEMP", r"C:\vtmp")) / f"vt-validation-{os.getpid()}"
     try:
         root.mkdir(parents=True, exist_ok=True)
     except OSError:
-        return None
-    env = os.environ.copy()
+        return env
     existing = os.environ.get("PYTEST_ADDOPTS", "").strip()
     env["PYTEST_ADDOPTS"] = f"{existing} --basetemp={root.as_posix()}".strip()
     return env

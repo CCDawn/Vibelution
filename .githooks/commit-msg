@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+# These tool identities were found in this repository's commit history.
+# Reject attribution rather than silently rewriting the submitted message.
+if grep -Eiq '^[[:space:]]*Co-authored-by:[[:space:]].*<(cursoragent@cursor\.com|noreply@commandcode\.ai)>[[:space:]]*$' "$1"; then
+  echo "[commit-msg] AI co-author attribution is disabled for this repository; remove the AI Co-authored-by trailer." >&2
+  exit 1
+fi
