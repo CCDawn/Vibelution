@@ -58,6 +58,7 @@
 3. worktree-collaboration.md 三角色规范增补 PR 模式节（reviewer 产出物从 coordination checkpoint 迁至 `gh pr review`，checkpoint 可双写过渡）。
 4. pre-push 推送卫生检查固定动作（secrets/路径扫描；PR 描述不贴内部坐标：claim id、本机路径）。
 5. CI 自动化缓步：先"本地证据门"，稳定后再评估是否开 push/PR 触发。
+6. **PR 审查自动激活与队列**（详见 §12）：`pr_review_watch.py` 常驻 watcher + 单飞队列 + 临时审查 worktree。
 
 ## 8. 门禁优化方向（讨论中）
 
@@ -109,3 +110,36 @@
 **门禁与合入队列**：[SHIP/SHOW/ASK](https://martinfowler.com/articles/ship-show-ask.html) · [GitHub merge queue](https://docs.github.com/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue) · [bors-ng](https://github.com/bors-ng/bors-ng) · [Mergify merge queues](https://mergify.com/blog/the-origin-story-of-merge-queues) · [Zuul gating](https://zuul-ci.org/docs/zuul/latest/gating.html) · [Chromium CQ design](https://www.chromium.org/developers/testing/commit-queue/design/) · [commit statuses API](https://docs.github.com/rest/commits/statuses) · [self-hosted runner 安全](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners) · [jvns：rebase 的坑](https://jvns.ca/blog/2023/11/06/rebasing-what-can-go-wrong/)
 
 **AI code review**：[Qodo PR-Agent](https://github.com/The-PR-Agent/pr-agent)（[reviewer prompts 全公开](https://github.com/Codium-ai/pr-agent/blob/main/pr_agent/settings/pr_reviewer_prompts.toml)）· [CodeRabbit findings 四轴](https://docs.coderabbit.ai/change-stack/findings) · [Copilot code review](https://docs.github.com/en/copilot/using-github-copilot/code-review/using-copilot-code-review)（Comment-only 默认+approve 撤销）· [claude-code-action](https://github.com/anthropics/claude-code-action)（allowed_tools 可执行验证）· [reviewdog](https://github.com/reviewdog/reviewdog)（filter-mode/fail-level 评论与阻断解耦）· [Conventional Comments](https://conventionalcomments.org/) · [Google eng-practices](https://google.github.io/eng-practices/review/reviewer/standard.html) · [Graphite](https://graphite.com/docs)（小 PR/can_be_split）
+
+## 12. PR 审查自动激活与审查队列（2026-09-17 增补）
+
+需求：PR 一创建/更新即自动触发独立审查，无需人工派发；审查串行排队，防止多个 reviewer 并发争抢本机资源与 LLM 通道。
+
+### 12.1 触发机制选型
+
+| 方案 | 结论 |
+|---|---|
+| GitHub webhook → 本地端点 | 需内网穿透/暴露端口，安全面大，否决 |
+| GitHub Actions `pull_request` 事件 | 费 Actions 分钟；云端无本地门禁上下文，语义审查仍要回到本地，否决 |
+| **本地轮询 watcher（选定）** | `pythonw` 常驻、无可见控制台（遵守无控制台红线），60s 级轮询 `gh pr list --state open`，事件语义由状态差分得出 |
+
+状态差分事件：`opened`（新 PR 出现）、`synchronize`（HEAD SHA 变化=新 push）、`ready_for_review`（draft 转正）、`closed/merged`（移除队列项）。去重键 = `(PR number, HEAD SHA)`——同 SHA 的重复触发合并为一个任务；新 push 顶替同 PR 的旧任务。
+
+### 12.2 队列设计（防并发）
+
+- **单飞锁**：锁文件（PID+心跳）保证同一时刻只有一个 review 在跑；并发度默认 1、可配（审查是 LLM 重载任务，本机串行最稳）。
+- **任务即文件**：队列目录下一个任务一个 JSON 文件（入队时间/pr/sha/重试计数/状态）；崩溃后重启按文件恢复，锁心跳超时视为死锁可安全接管。
+- **失效重审**：新 push 时自动 dismiss 该 PR 上针对旧 SHA 的 review（Copilot approve 撤销语义），重入队新 SHA。
+- **重试与死信**：审查进程失败重试 N 次（指数退避），超限进 dead-letter 并在队列状态中可见。
+- **全程留痕**：enqueued / started / verdict / completed / failed 每步一行结构化日志（不含 secret）。
+
+### 12.3 审查执行隔离
+
+- 每个任务在临时 worktree `.worktrees/pr-review-<pr>` 检出到目标 SHA 执行，结束清理；绝不碰根 `main`。
+- 过滤：只认本流程的 PR（`codex/*` 分支前缀或 `show:`/`ask:` 标题前缀）；draft 默认等到 ready 再审（可配为也审）。
+- watcher 保持"哑"：只做轮询、队列、机械检查（diff 统计、`ci/local-verify` status 是否已打）与结果发布；**语义审查交给 reviewer agent 子进程**（常设 rubric + Evidence 段，产出 Approve/Comment/Request Changes + Conventional Comments）。reviewer 智能来源二选一（落地时定）：headless CLI agent 子进程，或 Vibelution 产品自身 agent 会话 API。
+- 与门禁协同：`ci/local-verify` 缺失时审查照跑，但意见中标注"缺本地验证证据"；merge 由 branch protection 的 required check 挡，不靠 reviewer 自觉。
+
+### 12.4 配置默认值
+
+轮询间隔 60s；并发度 1；重试 3 次；draft=等 ready；分支过滤 `codex/*`。均可用环境变量/配置覆盖。
