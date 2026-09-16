@@ -1,4 +1,5 @@
 import { AlertTriangle } from "lucide-react";
+import { useState } from "react";
 
 import {
   VActionGroup,
@@ -8,12 +9,16 @@ import {
   VErrorSummary,
   VPanelHeader,
   VSection,
+  VSessionSearchDialog,
+  type VSessionSearchDialogItem,
   VStateSurface,
   VStatusStrip,
   VTabs,
   VToolbar,
 } from "../../../components/vui";
 import { ConversationFollowupQueueBar } from "../../../components/conversation/ConversationFollowupQueueBar";
+import { ConversationTodoChecklist } from "../../../components/conversation/ConversationTodoChecklist";
+import type { TodoChecklistSnapshot } from "../../../components/conversation/conversationTodoChecklistModel";
 import { ConversationTranscriptLoadingState } from "../../../components/conversation/ConversationTranscriptLoadingState";
 import {
   ComposerContextRing,
@@ -104,7 +109,39 @@ const activeTurnRetryPreviewMessage: ActiveTurnStatusMessageLike & { timestamp: 
   ],
 };
 
+const conversationTodoChecklistPreviewSnapshot: TodoChecklistSnapshot = {
+  items: [
+    { content: "梳理迁移清单", activeForm: "正在梳理迁移清单", status: "completed" },
+    { content: "补齐回归测试", activeForm: "正在补齐回归测试", status: "in_progress" },
+    { content: "更新契约文档", activeForm: "正在更新契约文档", status: "pending" },
+  ],
+  completedCount: 1,
+  total: 3,
+  hasUnfinished: true,
+};
+
+const sessionSearchPreviewItems: VSessionSearchDialogItem[] = [
+  {
+    id: "session-preview-1",
+    title: "会话搜索面联调",
+    detail: "服务端分页查询与键盘导航验证",
+    meta: "Agent · 运行中 · 2 分钟前",
+    highlight: "会话",
+    onOpen: () => undefined,
+  },
+  {
+    id: "session-preview-2",
+    title: "清理 workspace 迁移会话",
+    detail: "把任务 worktree 迁到 .worktrees 目录",
+    meta: "Agent · 已结束 · 1 小时前",
+    highlight: "会话",
+    onOpen: () => undefined,
+  },
+];
+
 export function StructureCatalog() {
+  const [sessionSearchDialogOpen, setSessionSearchDialogOpen] = useState(false);
+
   return (
     <VuiPreviewSection title="Structure">
       <VuiPreviewCard name="VPanelHeader" className="min-h-0">
@@ -161,6 +198,36 @@ export function StructureCatalog() {
         <div className="w-full max-w-[520px] rounded-[12px] border border-vui-border-subtle bg-vui-surface-panel p-3">
           <ConversationActiveTurnStatusNote lang="zh" message={activeTurnRetryPreviewMessage} />
         </div>
+      </VuiPreviewCard>
+      <VuiPreviewCard name="ConversationTodoChecklist" className="col-span-full min-h-0">
+        <div className="w-full max-w-[520px] rounded-[12px] border border-vui-border-subtle bg-vui-surface-panel p-3">
+          <ConversationTodoChecklist
+            snapshot={conversationTodoChecklistPreviewSnapshot}
+            lang="zh"
+            turnSettled={false}
+          />
+        </div>
+      </VuiPreviewCard>
+      <VuiPreviewCard name="VSessionSearchDialog" className="min-h-0">
+        <VButton variant="secondary" onPress={() => setSessionSearchDialogOpen(true)}>打开会话搜索</VButton>
+        <VSessionSearchDialog
+          open={sessionSearchDialogOpen}
+          onOpenChange={setSessionSearchDialogOpen}
+          query="会话"
+          onQueryChange={() => undefined}
+          items={sessionSearchPreviewItems}
+          hasMore
+          totalEstimate={12}
+          labels={{
+            searchPlaceholder: "搜索标题、摘要或会话编号",
+            emptyTitle: "没有匹配的会话",
+            emptyHint: "换个关键词，或清空过滤条件",
+            loadMore: "加载更多",
+            loadingMore: "加载中…",
+            resultSummary: (loaded, total) => `已加载 ${loaded} / ${total} 个会话`,
+            hint: "↑↓ 选择 · Enter 打开 · Esc 关闭",
+          }}
+        />
       </VuiPreviewCard>
       <VuiPreviewCard name="VEntityList" className="min-h-0">
         <VEntityList ariaLabel="成员" items={[{ id: "evidence", label: "证据 Agent", meta: "运行中" }]} renderItem={(item) => <span>{item.label}</span>} />

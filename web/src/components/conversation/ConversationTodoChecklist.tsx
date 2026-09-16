@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronRight, Circle, CircleCheck, LoaderCircle, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 
+import { VNativeButton } from "../vui";
 import { dictionaryChat } from "../../i18n/domains/dictionaryChat";
 import type { TodoChecklistSnapshot } from "./conversationTodoChecklistModel";
 import styles from "./ConversationTodoChecklist.styles";
@@ -30,7 +31,7 @@ export function ConversationTodoChecklist({
   const counter = `${snapshot.completedCount}/${snapshot.total}`;
   const showWarning = turnSettled && snapshot.hasUnfinished;
   const header = (
-    <button
+    <VNativeButton
       type="button"
       className={styles.header}
       onClick={() => setExpanded((current) => !current)}
@@ -44,7 +45,7 @@ export function ConversationTodoChecklist({
       )}
       <span className={styles.title}>{copy.todoChecklistTitle}</span>
       <span className={styles.counter} data-testid="todo-checklist-counter">{counter}</span>
-    </button>
+    </VNativeButton>
   );
   return (
     <div
