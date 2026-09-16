@@ -4364,6 +4364,13 @@ def _messages_with_live_output(
         # restart or late failure cannot reopen a terminal turn in the UI.
         return detail_messages
     detail_messages = s._without_live_turn_ledger_partials(detail_messages, live_message)
+    if live_turn_id:
+        # Exact-turn match only: a switch recorded for an earlier turn must
+        # never relabel a fresh live message. Copy-on-write keeps any cached
+        # live-message structure untouched.
+        live_route_fallback = _current_session_route_fallback(session_id, live_turn_id)
+        if live_route_fallback:
+            live_message = {**live_message, "routeFallback": live_route_fallback}
     return detail_messages + [live_message]
 
 
