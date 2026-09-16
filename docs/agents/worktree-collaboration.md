@@ -101,6 +101,55 @@ When a branch cannot merge cleanly, leave the task in its own worktree and mark 
 
 Small conflicts contained entirely inside the owning Agent's claimed files should normally be fixed by that Agent in its task worktree, followed by a fresh commit, validation, and local self-merge attempt. Main integration waits for or takes over only when the conflict is large, cross-lane, active-claim blocked, semantically ambiguous, release-sensitive, or explicitly assigned by the user.
 
+## 常驻三角色流水线（规划/开发/审查）
+
+本节定义用户明确授权下的三角色协作叠加层：规划（Planner）、开发（Worker）、审查（Reviewer）。它是现有协议的叠加，不是第二套系统；[development-standard.md §17](../standards/development-standard.md#17-delegation-and-multi-agent-work) 的默认 peer 模式继续权威。
+
+### 激活条件
+
+- 仅当用户对当前任务明确授权「规划/开发/审查」多角色并行工作流时生效；授权范围外不得套用。
+- 未授权时默认 peer 协议不变，任何会话不得自动把任务升级成三角色流水线。
+- 激活后三角色仍共用同一套 worktree、claim、热文件与合入机制；不新增状态系统或第二套 registry。
+
+### 规划 agent（Planner）
+
+- Planner 只读产品代码：负责拆解与派发；写入仅限派发 Prompt 与任务记录，不改产品代码、测试与规则文件。
+- 产出物复用 [Dispatch Packet](#dispatch-packet) 模板，逐项写清：目标/背景、ownership（精确文件边界）、forbidden scope、验收标准、验证命令、热文件唯一 owner。
+- 派发前按 [development-standard.md §2](../standards/development-standard.md#2-task-intake-and-briefbound-router-gate) 给每个子任务定级 `FAST_PATCH` / `STANDARD_TASK` / `HIGH_RISK`，并写进 Packet。
+- 任务边界按模块/职责切分，写域互不重叠；涉及 [Shared Files](#shared-files) 热文件时在 Packet 中显式指定唯一 owner 与串行顺序。
+- Planner 不注册 development claim，不实现、不验收、不持有合入权。
+
+### 开发 agent（Worker）
+
+- Worker 完全沿用现有 worker 协议，无新增规则：一个 worktree 一个 `codex/<task-slug>` 分支与一个 development claim（[development-standard.md §6](../standards/development-standard.md#6-worktree-and-scope-discipline)）；写域互不相交；热文件唯一 owner（[development-standard.md §7](../standards/development-standard.md#7-shared-hot-files)）；发现写域重叠即停手报告，不回写他人改动。
+- Worker 按 [Agent Responsibilities](#agent-responsibilities) 与 [Handoff Report](#handoff-report) 完成实现、验证、自审与汇报；三角色流水线不降低其验证与证据要求。
+
+### 审查 agent（Reviewer）
+
+- Reviewer 必须独立于被审任务的 Worker：不得审查自己实现的改动，不得代写修复；返工以 REWORK 连原因清单退回原 Worker。
+- 验收输入固定三件：任务 diff、测试/验证证据、closeout manifest。
+- 裁决二值：`APPROVE` / `REWORK`；`REWORK` 必须附逐条可执行的原因清单。
+- `APPROVE` 用 `agent_coordination.py` 写成该任务的 checkpoint，作为可检索证据：
+
+```powershell
+python "<codex-skill-root>\briefbound-project-memory\scripts\agent_coordination.py" "<project-root>" update --agent-id "<reviewer-agent-id>" --state reviewing --task "<task title>" --last-checkpoint "APPROVE <branch>@<head-sha>" --json
+```
+
+- `STANDARD_TASK` 及以上必须有 Reviewer `APPROVE` 证据才允许 closeout 合入；`FAST_PATCH` 维持 Worker 自审，不强制独立 Reviewer。
+- Reviewer 只裁决，不做生命周期操作：不执行 merge 与 cleanup，不释放他人 claim。
+
+### 合入与串行
+
+- integration/main 租约、ff-only 与 closeout permit 机制不变（[Main Integration Responsibilities](#main-integration-responsibilities)）；三角色不得绕过或并行抢占租约。
+- Planner 不持合入权；合入仍由任务 owner 会话自合，或按现有规则交给主集成会话。
+- Reviewer `APPROVE` 是合入前置门之一，不替代 mergeability、验证与 manifest 检查。
+
+### 与 peer 模式的关系
+
+- 三角色是授权叠加层，不是新默认架构；未加入流水线的会话仍按 peer 协议注册、claim 与合并。
+- 三角色会话与 peer 会话并存时，协调一律走 [Shared Files](#shared-files) 的 Git common-dir coordination registry；不得把 inbox/thread 消息当权威状态。
+- 角色变更（换人、并角色、退出）只影响授权窗口内的任务，不回溯已合入内容。
+
 ## Cleanup
 
 All review, testing, quality gates, mergeability checks, and acceptance evidence belong before merge. The moment `git merge --ff-only <task-branch>` succeeds, the task is absorbed by local `main` and cleanup must start immediately; do not retain task resources while waiting for post-merge validation.
