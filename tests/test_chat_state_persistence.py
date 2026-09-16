@@ -1,6 +1,7 @@
 import json
 import multiprocessing
 import os
+import queue
 import threading
 import time
 from contextlib import contextmanager
@@ -155,6 +156,12 @@ def _create_session_in_competing_process(
     result_queue,
 ) -> None:
     """Create one session after a shared start gate so both writers overlap."""
+    # A child that is still alive when the parent's join budget expires is the
+    # one ambiguity this test must never leave behind: dump its stack (and
+    # exit) so a saturation stall is distinguishable from a lost child.
+    import faulthandler
+
+    faulthandler.dump_traceback_later(90.0, exit=True)
     os.environ["VIBELUTION_DATA_HOME"] = data_home
     from core.infrastructure import developer_sandbox as child_developer_sandbox
     from core.web.services import session_service as child_session_service
@@ -169,6 +176,10 @@ def _create_session_in_competing_process(
             agent_id=agent_id,
             activate=True,
             conversation_index_kind="team_agent",
+            # Lightweight keeps the competing writers focused on the shared
+            # chat-index upsert instead of full projection, which only widens
+            # the per-child runtime under loaded selector lanes.
+            lightweight=True,
         )
         result_queue.put({"role": role, "sessionId": str(created.get("id") or "")})
     except BaseException as exc:  # pragma: no cover - surfaced in the parent assertion
@@ -209,18 +220,37 @@ def test_cross_process_session_creates_do_not_overwrite_chat_index(tmp_path, mon
     second.start()
     start_gate.set()
     try:
-        first.join(timeout=15.0)
-        second.join(timeout=15.0)
-        assert first.exitcode == 0
-        assert second.exitcode == 0
-        results = [result_queue.get(timeout=3.0), result_queue.get(timeout=3.0)]
+        # Children can legitimately slow down on a loaded selector lane (spawn
+        # imports plus bounded store budgets); the budgets below only convert
+        # true hangs into recognizable failures while staying inside the
+        # 300s per-test pytest-timeout cap.
+        first.join(timeout=120.0)
+        second.join(timeout=120.0)
+        assert first.exitcode == 0, f"first competing writer crashed: exitcode={first.exitcode}"
+        assert second.exitcode == 0, f"second competing writer crashed: exitcode={second.exitcode}"
+        results = []
+        for role in ("first", "second"):
+            try:
+                results.append(result_queue.get(timeout=60.0))
+            except queue.Empty as exc:
+                raise AssertionError(
+                    f"{role} competing writer produced no result "
+                    f"(exitcodes: first={first.exitcode}, second={second.exitcode})"
+                ) from exc
     finally:
         for process in (first, second):
             if process.is_alive():
                 process.terminate()
                 process.join(timeout=5.0)
 
-    assert not [result for result in results if result.get("error")]
+    # Cross-process writes serialize on a per-target file lock and retry
+    # bounded. A surfaced PermissionError/TimeoutError means that budget was
+    # exhausted, which is a recognizable regression instead of a flake gray zone.
+    child_errors = [str(result.get("error") or "") for result in results if result.get("error")]
+    assert not child_errors, (
+        "competing session creates surfaced unrecoverable file contention "
+        f"after bounded retry: {child_errors}"
+    )
     created_ids = {str(result.get("sessionId") or "") for result in results}
     assert all(created_ids)
     monkeypatch.setattr(
@@ -235,6 +265,64 @@ def test_cross_process_session_creates_do_not_overwrite_chat_index(tmp_path, mon
         if isinstance(item, dict)
     }
     assert created_ids <= indexed_ids
+
+
+def _hammer_shared_atomic_target(
+    data_home: str,
+    target_path: str,
+    start_gate,
+    result_queue,
+    worker: int,
+) -> None:
+    """Hammer one shared target file from a dedicated process after the gate."""
+    os.environ["VIBELUTION_DATA_HOME"] = data_home
+    from core.infrastructure.atomic_io import atomic_write_json
+
+    start_gate.wait(timeout=10.0)
+    try:
+        for round_index in range(20):
+            atomic_write_json(Path(target_path), {"worker": worker, "round": round_index})
+        result_queue.put({"worker": worker, "error": ""})
+    except BaseException as exc:  # pragma: no cover - surfaced in the parent assertion
+        result_queue.put({"worker": worker, "error": f"{type(exc).__name__}: {exc}"})
+
+
+def test_cross_process_atomic_writes_converge_without_permission_error(tmp_path):
+    """Concurrent writers of one target file must converge via the per-file lock."""
+    data_home = tmp_path / "operator-data"
+    target = tmp_path / "shared" / "hammer.json"
+    context = multiprocessing.get_context("spawn")
+    start_gate = context.Event()
+    result_queue = context.Queue()
+    processes = []
+    for worker in range(2):
+        process = context.Process(
+            target=_hammer_shared_atomic_target,
+            args=(str(data_home), str(target), start_gate, result_queue, worker),
+        )
+        processes.append(process)
+        process.start()
+    start_gate.set()
+    try:
+        for process in processes:
+            process.join(timeout=60.0)
+        assert all(process.exitcode == 0 for process in processes), (
+            f"hammer writers crashed: {[process.exitcode for process in processes]}"
+        )
+        errors = []
+        for _ in processes:
+            result = result_queue.get(timeout=10.0)
+            if result.get("error"):
+                errors.append(str(result["error"]))
+    finally:
+        for process in processes:
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=5.0)
+
+    assert not errors, f"atomic write hammer surfaced cross-process contention: {errors}"
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert set(payload) == {"worker", "round"}
 
 
 def test_create_chat_session_upserts_one_row_without_full_replace(tmp_path, monkeypatch):
