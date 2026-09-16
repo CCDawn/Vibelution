@@ -10,6 +10,13 @@ from core.web.services import session_service
 from core.web.services.session import turn_diagnostics
 
 
+@pytest.fixture(autouse=True)
+def _reset_work_run_heartbeat_state():
+    turn_diagnostics._CHAT_TURN_WORK_RUN_HEARTBEAT_STATE.clear()
+    yield
+    turn_diagnostics._CHAT_TURN_WORK_RUN_HEARTBEAT_STATE.clear()
+
+
 def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat()
 
@@ -321,3 +328,185 @@ def test_reconcile_stop_requested_control_does_not_revive_young_orphan(tmp_path,
         session_service._set_session_running(session_id, False)
         with session_service._SESSION_TURN_CONTROLS_LOCK:
             session_service._SESSION_TURN_CONTROLS.pop(session_id, None)
+
+
+def test_chat_turn_hang_reason_queued_owner_not_absolute_stale():
+    """Queue wait must not be read as a hung turn.
+
+    A queued snapshot's updatedAt freezes at enqueue time, so wall-clock age
+    measures the scheduler backlog, not turn progress: absolute_stale must not
+    fire for a turn the queue still owns.
+    """
+    now = datetime(2026, 8, 5, 12, 0, tzinfo=timezone.utc)
+    payload = {
+        "runId": "turn-queued",
+        "sessionId": "session-queued",
+        "status": "queued",
+        "startedAt": _iso(now - timedelta(hours=2)),
+        "updatedAt": _iso(now - timedelta(hours=2)),
+        "finishedAt": "",
+    }
+    assert (
+        turn_diagnostics._chat_turn_work_run_hang_reason(
+            payload,
+            now=now,
+            worker_owns_turn=True,
+            queued_owner=True,
+        )
+        == ""
+    )
+    # The same aged snapshot without the queued signal still settles.
+    assert (
+        turn_diagnostics._chat_turn_work_run_hang_reason(
+            payload,
+            now=now,
+            worker_owns_turn=True,
+        )
+        == "absolute_stale"
+    )
+
+
+def test_reconcile_spares_queued_scheduler_turn_from_absolute_stale(tmp_path, monkeypatch):
+    """A queued snapshot still owned by the live scheduler is never settled."""
+
+    _install_tmp_work_run_store(tmp_path, monkeypatch)
+    now = datetime.now(timezone.utc)
+    turn_id = "session-queued-turn"
+    session_id = "session-queued"
+    _persist_running_turn(
+        turn_id,
+        session_id,
+        started_at=now - timedelta(hours=2),
+        updated_at=now - timedelta(hours=2),
+    )
+    session_service._set_session_running(session_id, False)
+
+    class _QueuedSchedulerStub:
+        def queued_session_turn_ids(self):
+            return {(session_id, turn_id)}
+
+        def clear(self):
+            # conftest teardown calls clear() on the facade scheduler; the
+            # stub may still be installed when that teardown runs.
+            return None
+
+    monkeypatch.setattr(session_service, "_SESSION_TURN_SCHEDULER", _QueuedSchedulerStub())
+
+    settled = turn_diagnostics.reconcile_stale_chat_turn_work_runs(now=now)
+    assert settled == []
+    latest = session_service._WORK_RUN_STORE.load_snapshot("chat_turn", turn_id)
+    assert latest is not None
+    assert latest["status"] == "running"
+    assert not str(latest.get("finishedAt") or "").strip()
+
+
+def test_heartbeat_refreshes_updated_at_and_blocks_absolute_stale(tmp_path, monkeypatch):
+    """Live worker heartbeats keep absolute_stale from killing a working turn.
+
+    With a frozen updatedAt the aged running snapshot classifies as
+    absolute_stale; after the worker heartbeat refreshes it the same snapshot
+    is spared, while a wedged worker (no heartbeat for 30 minutes) is still
+    killed by the unchanged ceiling.
+    """
+
+    _install_tmp_work_run_store(tmp_path, monkeypatch)
+    now = datetime.now(timezone.utc)
+    turn_id = "session-heartbeat-turn"
+    session_id = "session-heartbeat"
+    _persist_running_turn(
+        turn_id,
+        session_id,
+        started_at=now - timedelta(minutes=40),
+        updated_at=now - timedelta(minutes=31),
+    )
+    session_service._set_session_running(session_id, True, turn_id=turn_id)
+    try:
+        payload = session_service._WORK_RUN_STORE.load_snapshot("chat_turn", turn_id)
+        assert turn_diagnostics._chat_turn_work_run_hang_reason(
+            payload,
+            now=now,
+            worker_owns_turn=True,
+        ) == "absolute_stale"
+
+        assert turn_diagnostics._heartbeat_chat_turn_work_run(
+            session_id=session_id,
+            turn_id=turn_id,
+            stage="worker_loop",
+        ) is True
+        heartbeat_at = datetime.now(timezone.utc)
+        payload = session_service._WORK_RUN_STORE.load_snapshot("chat_turn", turn_id)
+        refreshed = turn_diagnostics._parse_work_run_timestamp(payload.get("updatedAt") or "")
+        assert refreshed is not None
+        assert (heartbeat_at - refreshed).total_seconds() < 60
+        assert turn_diagnostics._chat_turn_work_run_hang_reason(
+            payload,
+            now=heartbeat_at,
+            worker_owns_turn=True,
+        ) == ""
+
+        stale_payload = dict(payload)
+        stale_payload["updatedAt"] = _iso(heartbeat_at - timedelta(minutes=31))
+        assert turn_diagnostics._chat_turn_work_run_hang_reason(
+            stale_payload,
+            now=heartbeat_at + timedelta(minutes=31),
+            worker_owns_turn=True,
+        ) == "absolute_stale"
+    finally:
+        session_service._set_session_running(session_id, False)
+
+
+def test_heartbeat_throttles_repeat_writes(tmp_path, monkeypatch):
+    """Repeat heartbeats inside the interval cost no durable write."""
+
+    _install_tmp_work_run_store(tmp_path, monkeypatch)
+    now = datetime.now(timezone.utc)
+    turn_id = "session-throttle-turn"
+    session_id = "session-throttle"
+    _persist_running_turn(turn_id, session_id, started_at=now, updated_at=now)
+    touches = {"count": 0}
+    original_touch = session_service._touch_chat_turn_work_run
+
+    def counting_touch(**kwargs):
+        touches["count"] += 1
+        return original_touch(**kwargs)
+
+    monkeypatch.setattr(session_service, "_touch_chat_turn_work_run", counting_touch)
+
+    first = turn_diagnostics._heartbeat_chat_turn_work_run(
+        session_id=session_id, turn_id=turn_id, stage="worker_loop"
+    )
+    repeat = turn_diagnostics._heartbeat_chat_turn_work_run(
+        session_id=session_id, turn_id=turn_id, stage="worker_loop"
+    )
+
+    assert first is True
+    assert repeat is False
+    assert touches["count"] == 1
+
+
+def test_reconcile_settle_appends_journal_interruption(tmp_path, monkeypatch):
+    """Forced settlement closes the journal's open turn in the same pass."""
+
+    _install_tmp_work_run_store(tmp_path, monkeypatch)
+    now = datetime.now(timezone.utc)
+    turn_id = "session-journal-turn"
+    session_id = "session-journal"
+    _persist_running_turn(
+        turn_id,
+        session_id,
+        started_at=now - timedelta(minutes=30),
+        updated_at=now - timedelta(minutes=20),
+    )
+    session_service._set_session_running(session_id, False)
+
+    settled = turn_diagnostics.reconcile_stale_chat_turn_work_runs(now=now)
+    assert any(item.get("runId") == turn_id for item in settled)
+
+    events = session_service.load_conversation_events(session_service.PROJECT_ROOT, session_id)
+    interrupted = [
+        event
+        for event in events
+        if event.turn_id == turn_id and event.event_type == session_service.EVENT_TURN_INTERRUPTED
+    ]
+    assert interrupted
+    assert (interrupted[-1].payload or {}).get("reason") == "stale_work_run_worker_gone"
