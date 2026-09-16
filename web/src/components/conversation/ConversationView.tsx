@@ -4928,7 +4928,12 @@ export function ConversationView({
                       title={previewLabel}
                       aria-label={previewLabel}
                     >
-                      <img className={styles.composerAttachmentThumb} src={attachment.previewUrl} alt="" />
+                      <span className={styles.composerAttachmentThumbFrame}>
+                        <img className={styles.composerAttachmentThumb} src={attachment.previewUrl} alt="" />
+                        <span className={styles.composerAttachmentThumbHint} aria-hidden="true">
+                          {lang === "zh" ? "看大图" : "Zoom"}
+                        </span>
+                      </span>
                     </VButton>
                     <span className={styles.composerAttachmentCopy}>
                       <span className={styles.composerAttachmentName} title={attachment.filename}>{attachment.filename}</span>

@@ -15,7 +15,6 @@ const styles = {
   utilityButtonActive: `vui-app-appshell utilityButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
   utilityButtonGrid: "vui-app-appshell utilityButtonGrid min-w-0",
   utilityPanel: "vui-app-appshell utilityPanel min-w-0",
-  utilityPanelHeader: "vui-app-appshell utilityPanelHeader min-w-0 flex flex-wrap items-center gap-1.5 px-0.5 pb-1",
 } as const;
 
 export default styles;

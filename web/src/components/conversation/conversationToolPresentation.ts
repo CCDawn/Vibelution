@@ -1,3 +1,9 @@
+import {
+  conversationPatchRowSummary,
+  patchTextFromArguments,
+  type ConversationPatchRowSummary,
+} from "./conversationPatchModel";
+
 export type ConversationToolPresentationLanguage = "zh" | "en";
 
 interface CompletedToolPresentationSummaryInput {
@@ -633,6 +639,8 @@ export type CodexToolActivityPills = {
   statusKind: CodexToolActivityPillStatusKind;
   subject: string;
   durationLabel: string;
+  /** `+A −D` for an edit tool's patch; empty for every other tool. */
+  diffStatLabel?: string;
 };
 
 /**
@@ -748,6 +756,46 @@ export function subjectFromToolArguments(options: {
  * icon carries those states (see ConversationToolActivityPills).
  */
 export function buildCodexToolActivityPills(options: {
+  toolName: string;
+  status?: string;
+  language: ConversationToolPresentationLanguage;
+  durationSeconds?: number | null;
+  durationLabel?: string;
+  toolSummary?: string;
+  cellSummary?: string;
+  resultPreview?: string;
+  displayCommand?: string;
+  filePath?: string;
+  toolArguments?: Record<string, unknown> | null;
+  timedOut?: boolean;
+  noMatch?: boolean;
+  nonzeroExit?: boolean;
+}): CodexToolActivityPills {
+  const pills = buildToolActivityPillsForStatus(options);
+  // The patch summary is orthogonal to status, so it is attached here rather
+  // than repeated in each status branch below. It only fills the subject when
+  // no result-derived summary named the target, and it adds the edit size that
+  // a collapsed row otherwise hides behind an expand.
+  const patch = patchSummaryForArguments(options.toolArguments, options.language);
+  if (!patch) {
+    return pills;
+  }
+  return {
+    ...pills,
+    subject: pills.subject || patch.subject,
+    diffStatLabel: patch.statLabel,
+  };
+}
+
+function patchSummaryForArguments(
+  toolArguments: Record<string, unknown> | null | undefined,
+  language: ConversationToolPresentationLanguage,
+): ConversationPatchRowSummary | null {
+  const patchText = patchTextFromArguments(toolArguments);
+  return patchText ? conversationPatchRowSummary(patchText, language) : null;
+}
+
+function buildToolActivityPillsForStatus(options: {
   toolName: string;
   status?: string;
   language: ConversationToolPresentationLanguage;

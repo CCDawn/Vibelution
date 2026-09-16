@@ -354,10 +354,18 @@ def test_retest_binds_source_plan_to_new_round_and_starts_only_execution(
     assert plan.protocolRef == current.protocolRef
 
 
-def test_unconnected_baseline_repair_fails_closed_without_creating_round(
-    activity, completed
+def test_baseline_repair_creates_new_version_without_reusing_old_measurements(
+    activity, completed, monkeypatch
 ):
+    from core.web.services.team_workflow.operator_optimization import baseline
+
     store, _, payload, _ = completed
+    monkeypatch.setattr(
+        baseline,
+        "inspect_cuda_environment",
+        lambda: {"deviceKind": "cuda", "deviceName": "fixture"},
+    )
+    before = read_campaign(*activity)
     requested = iteration.advance_iteration(store, payload, now_ms=2000)
     result = iteration.apply_iteration_decision(
         store,
@@ -370,9 +378,64 @@ def test_unconnected_baseline_repair_fails_closed_without_creating_round(
         },
         now_ms=2100,
     )
-    assert result["status"] == "blocked"
-    assert result["reason"] == "baseline_repair_flow_not_connected"
+    assert result["status"] == "started"
     assert len(read_campaign(*activity).rounds) == 1
+    repaired = read_campaign(*activity)
+    assert len(repaired.baselineVersions) == 2
+    assert repaired.baselineVersions[-1].status == "prepared"
+    assert repaired.baselineVersions[-1].repairEvidenceRefs == (
+        before.rounds[-1].evaluationRef,
+        before.rounds[-1].feedbackRef,
+    )
+    assert repaired.activeBaselineVersionId == repaired.baselineVersions[0].baselineVersionId
+    assert repaired.baselineRef == before.baselineRef
+    assert repaired.bestCandidateRef == before.bestCandidateRef
+
+
+def test_explicit_legacy_migration_creates_v2_run_and_preserves_source(
+    activity, completed
+):
+    from core.research.workflow.definition_registry import registered_definitions, definition_identity
+    from core.web.services.team_workflow.operator_optimization.migration import (
+        migrate_stage2_run_to_stage3,
+    )
+
+    store, run_id, _, _ = completed
+    legacy = next(
+        definition_identity(item)
+        for item in registered_definitions()
+        if item.workflowId == "operator-optimization" and item.schemaVersion == "1.1.0"
+    )
+    store.submit(
+        lambda u: u.repository.execute(
+            "UPDATE workflow_runs SET workflow_version_id=? WHERE run_id=?",
+            (legacy.workflowVersionId, run_id),
+        ),
+        force_flush=True,
+    ).result()
+    source_before = store.get_run(run_id)
+    campaign = read_campaign(*activity)
+    migrated = migrate_stage2_run_to_stage3(
+        *activity,
+        source_run_id=run_id,
+        initial_action="discuss",
+        expected_version=campaign.revision,
+        command_key="migrate-stage2",
+    )
+    replay = migrate_stage2_run_to_stage3(
+        *activity,
+        source_run_id=run_id,
+        initial_action="discuss",
+        expected_version=campaign.revision,
+        command_key="migrate-stage2",
+    )
+    assert replay == migrated
+    assert len(migrated.rounds) == len(campaign.rounds) + 1
+    next_run = store.get_run(migrated.activeRunId)
+    assert next_run.workflow_version_id != source_before.workflow_version_id
+    seed = rounds.read_stage2_seed(activity[0], migrated.rounds[-1].stage2SeedRef)
+    assert seed.sourceRunId == run_id
+    assert store.get_run(run_id) == source_before
 
 
 def test_plan_candidate_rejects_configuration_already_attempted_in_seed(

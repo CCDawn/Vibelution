@@ -63,7 +63,9 @@ def _iteration_action_blocker(campaign, action: str) -> str:
             return "iteration_parent_candidate_changed"
         return ""
     if action == "repair_baseline":
-        return "baseline_repair_flow_not_connected"
+        if prior is None or prior.evaluationRef is None or prior.feedbackRef is None:
+            return "baseline_repair_requires_evaluation_and_feedback"
+        return ""
     return "unknown_iteration_action"
 
 
@@ -307,14 +309,26 @@ def apply_iteration_decision(store, payload, decision, *, now_ms):
             )
         if not state.get("nextRunId"):
             try:
-                created = prepare_round(
-                    run.team_id,
-                    run.project_id,
-                    cid,
-                    expected_version=state["campaignVersion"],
-                    command_key=state["commandKey"],
-                    iteration_action=normalized["kind"],
-                )
+                if normalized["kind"] == "repair_baseline":
+                    from .baseline import prepare_baseline_repair
+
+                    created = prepare_baseline_repair(
+                        run.team_id,
+                        run.project_id,
+                        cid,
+                        expected_version=state["campaignVersion"],
+                        command_key=state["commandKey"],
+                        source_run_id=run.run_id,
+                    )
+                else:
+                    created = prepare_round(
+                        run.team_id,
+                        run.project_id,
+                        cid,
+                        expected_version=state["campaignVersion"],
+                        command_key=state["commandKey"],
+                        iteration_action=normalized["kind"],
+                    )
             except CampaignConflict as exc:
                 return _save(
                     store,

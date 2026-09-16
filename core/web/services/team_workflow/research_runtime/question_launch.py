@@ -34,6 +34,7 @@ from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 from core.research.workflow.definition_registry import (
     resolve_definition_by_version_id, WorkflowDefinitionRegistryError,
 )
+from core.research.workflow.transitions import RunStatus
 from core.web.services.team_workflow.challenge_phase_boundary import (
     ChallengePhaseBoundaryError,
 )
@@ -59,7 +60,14 @@ _MAX_TOOL_CALLS = 600
 _MAX_WALL_CLOCK_SECONDS = 12 * 60 * 60
 _MAX_RETRIES = 5
 _CATALOG_SEED_REVIEW_RUN_ID = "catalog-seed"
-_TERMINAL_RUN_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
+_TERMINAL_RUN_STATUSES = frozenset(
+    {
+        RunStatus.SUCCEEDED.value,
+        RunStatus.FAILED.value,
+        RunStatus.CANCELLED.value,
+        RunStatus.ARCHIVED.value,
+    }
+)
 
 
 class QuestionLaunchError(ValueError):
@@ -556,7 +564,13 @@ def attach_question_run_checkpoints(
     questions: Sequence[Mapping[str, Any]],
     runs: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Attach the latest workflow checkpoint for each catalog question."""
+    """Attach the latest operational workflow checkpoint for each question.
+
+    An archived run remains available through the historical run surfaces, but
+    it must never hold the launch picker on a stale checkpoint.  Archiving is
+    the formal-runtime terminal transition that makes a new hypothesis-first
+    attempt eligible after a question reset.
+    """
 
     definitions: dict[str, Any] = {}
     latest_by_question: dict[str, Mapping[str, Any]] = {}
@@ -604,7 +618,11 @@ def attach_question_run_checkpoints(
             record["checkpoint"] = None
             attached.append(record)
             continue
-        status = _text(run.get("status")) or "queued"
+        status = _text(run.get("status")).lower() or "queued"
+        if status == RunStatus.ARCHIVED.value:
+            record["checkpoint"] = None
+            attached.append(record)
+            continue
         # A finished retry must not erase a previous success: once any run
         # succeeded the question keeps its succeeded checkpoint (artifacts
         # remain usable), while an in-flight newer run still shows as running.
@@ -612,7 +630,7 @@ def attach_question_run_checkpoints(
         progress_key = (question_id, _text(run.get("structureHash")))
         if status in _TERMINAL_RUN_STATUSES and status != "succeeded":
             status_run = succeeded_by_question.get(progress_key) or run
-            status = _text(status_run.get("status")) or status
+            status = _text(status_run.get("status")).lower() or status
         node_id = _run_current_node_id(status_run)
         definition = definitions[_text(status_run.get("runId"))]
         labels = {node.nodeId: node.label for node in definition.nodes}
@@ -624,7 +642,7 @@ def attach_question_run_checkpoints(
             "currentNodeLabel": labels.get(node_id, ""),
             "completedCount": max_completed_by_question.get(progress_key, 0),
             "totalSteps": total_steps,
-            "resumable": _text(run.get("status")) not in _TERMINAL_RUN_STATUSES,
+            "resumable": _text(run.get("status")).lower() not in _TERMINAL_RUN_STATUSES,
         }
         attached.append(record)
     return attached

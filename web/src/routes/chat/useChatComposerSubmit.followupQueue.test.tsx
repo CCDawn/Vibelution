@@ -134,6 +134,20 @@ function Harness({
       <button type="button" data-testid="stop" onClick={() => actions.handleStopTurn()}>stop</button>
       <button
         type="button"
+        data-testid="add-image"
+        onClick={() => actions.handleAddComposerAttachments([new File(["image"], "image.png", { type: "image/png" })])}
+      >
+        add-image
+      </button>
+      <button
+        type="button"
+        data-testid="add-reference"
+        onClick={() => actions.handleAddComposerReference({ kind: "session", sessionId: "session-ref-1" })}
+      >
+        add-reference
+      </button>
+      <button
+        type="button"
         data-testid="update-queue"
         onClick={() => actions.handleFollowupQueueUpdate("q-1", "改后的排队文本")}
       >
@@ -262,6 +276,46 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
       attachmentIds: ["artifact-1"],
     });
     expect(errors["session-1"] ?? "").not.toContain("仅支持文本");
+  });
+
+  it("accepts images added while the turn is still running", async () => {
+    const { mutations } = createMutations();
+    let errors: Record<string, string> = {};
+    await mount({
+      busy: true,
+      draft: "",
+      queues: {},
+      mutations,
+      onErrors: (next) => {
+        errors = next;
+      },
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="add-image"]')?.click();
+    });
+
+    expect(errors["session-1"] ?? "").toBe("");
+  });
+
+  it("accepts references added while the turn is still running", async () => {
+    const { mutations } = createMutations();
+    let errors: Record<string, string> = {};
+    await mount({
+      busy: true,
+      draft: "",
+      queues: {},
+      mutations,
+      onErrors: (next) => {
+        errors = next;
+      },
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="add-reference"]')?.click();
+    });
+
+    expect(errors["session-1"] ?? "").toBe("");
   });
 
   it("submits busy Companion text to the plugin mailbox without changing the ordinary follow-up queue", async () => {

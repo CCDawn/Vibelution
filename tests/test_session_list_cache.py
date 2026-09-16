@@ -150,6 +150,159 @@ def test_session_list_cache_bounds_distinct_signature_snapshots() -> None:
     list_cache.invalidate_session_list_cache()
 
 
+def test_session_list_cache_serves_last_good_snapshot_on_signature_churn() -> None:
+    project_root = "C:/project-root"
+    seeded_signature = (
+        (
+            project_root,
+            ("store.sqlite3", 1, 10),
+            ("store.sqlite3-wal", 1, 10),
+            ("agents.json", 1, 10),
+        ),
+        False,
+    )
+    churned_signature = (
+        (
+            project_root,
+            ("store.sqlite3", 1, 11),
+            ("store.sqlite3-wal", 1, 12),
+            ("agents.json", 1, 13),
+        ),
+        False,
+    )
+    list_cache.invalidate_session_list_cache()
+    list_cache.set_session_list_cache(
+        [{"id": "s1", "title": "alpha"}],
+        now=500.0,
+        signature=seeded_signature,
+        conversation_count=1,
+        agent_count=2,
+    )
+
+    # Signature churn (SQLite/WAL/registry writes) misses the exact entry but
+    # keeps the stale snapshot for the same source.
+    assert list_cache.get_session_list_cache(now=501.0, signature=churned_signature) is None
+    stale = list_cache.get_last_good_session_list_snapshot(
+        now=530.0,
+        signature=churned_signature,
+    )
+    assert stale is not None
+    sessions, age_ms, conversation_count, agent_count = stale
+    assert sessions[0]["id"] == "s1"
+    assert age_ms == 30000
+    assert conversation_count == 1
+    assert agent_count == 2
+
+    # A different source must not inherit the snapshot.
+    assert (
+        list_cache.get_last_good_session_list_snapshot(
+            now=530.0,
+            signature=((("C:/other-root", ("store", 1, 1)), False)),
+        )
+        is None
+    )
+    expired = list_cache.get_last_good_session_list_snapshot(
+        now=500.0 + list_cache.SESSION_LIST_STALE_SERVE_MAX_SECONDS + 1.0,
+        signature=churned_signature,
+    )
+    assert expired is None
+
+    # Explicit mutations purge the stale slot so the next read rebuilds.
+    list_cache.invalidate_session_list_cache()
+    assert (
+        list_cache.get_last_good_session_list_snapshot(
+            now=531.0,
+            signature=churned_signature,
+        )
+        is None
+    )
+    with list_cache._SESSION_LIST_CACHE_LOCK:
+        list_cache._SESSION_LIST_CACHE.clear()
+
+
+def test_reserve_session_list_refresh_coalesces_and_releases() -> None:
+    signature = ("refresh-signature", False)
+    with list_cache._SESSION_LIST_CACHE_LOCK:
+        list_cache._SESSION_LIST_CACHE.clear()
+
+    first = list_cache.reserve_session_list_refresh(now=700.0, signature=signature)
+    assert first == 700.0
+    assert list_cache.is_session_list_refresh_reserved(signature=signature) is True
+    # Second caller coalesces into the running refresh.
+    assert list_cache.reserve_session_list_refresh(now=701.0, signature=signature) is None
+    # A different source has its own refresh worker.
+    assert (
+        list_cache.reserve_session_list_refresh(now=701.0, signature=("other", True))
+        == 701.0
+    )
+
+    list_cache.release_session_list_refresh(started_at=first, signature=signature)
+    assert list_cache.is_session_list_refresh_reserved(signature=signature) is False
+    assert (
+        list_cache.reserve_session_list_refresh(now=702.0, signature=signature) == 702.0
+    )
+    list_cache.release_session_list_refresh(started_at=702.0, signature=signature)
+    with list_cache._SESSION_LIST_CACHE_LOCK:
+        list_cache._SESSION_LIST_CACHE.clear()
+
+
+def test_begin_reserves_under_caller_timestamp_after_waiting(monkeypatch) -> None:
+    signature = ("waited-owner-signature", False)
+    with list_cache._SESSION_LIST_CACHE_LOCK:
+        list_cache._SESSION_LIST_CACHE.clear()
+    cached, should_build, waited = list_cache.begin_session_list_cache_build(
+        now=10.0,
+        signature=signature,
+    )
+    assert (cached, should_build, waited) == (None, True, False)
+
+    waiter_entered = threading.Event()
+    original_wait = list_cache._SESSION_LIST_CACHE_CONDITION.wait
+
+    def observed_wait(timeout=None):
+        waiter_entered.set()
+        return original_wait(timeout)
+
+    monkeypatch.setattr(
+        list_cache._SESSION_LIST_CACHE_CONDITION,
+        "wait",
+        observed_wait,
+    )
+    monkeypatch.setattr(list_cache, "_perf_counter", lambda: 10.25)
+
+    results: list[tuple[object, bool, bool]] = []
+    waiter = threading.Thread(
+        target=lambda: results.append(
+            list_cache.begin_session_list_cache_build(
+                now=10.2,
+                signature=signature,
+            )
+        )
+    )
+    waiter.start()
+    assert waiter_entered.wait(timeout=1.0)
+
+    # The original owner abandons the slot without publishing.
+    list_cache.finish_session_list_cache_build(signature=signature)
+    waiter.join(timeout=1.0)
+    assert not waiter.is_alive()
+    assert results == [(None, True, True)]
+
+    # The waiter now owns the slot under its own request timestamp.
+    list_cache.finish_session_list_cache_build(
+        signature=signature,
+        sessions=[{"id": "waited-built", "title": "complete"}],
+        started_at=10.2,
+        conversation_count=1,
+        agent_count=1,
+    )
+    published = list_cache.get_session_list_cache(now=10.3, signature=signature)
+    assert published is not None
+    assert published[0][0]["id"] == "waited-built"
+    with list_cache._SESSION_LIST_CACHE_LOCK:
+        list_cache._SESSION_LIST_CACHE.clear()
+
+
 def test_session_list_cache_keeps_slow_live_builder_as_single_owner(monkeypatch) -> None:
     signature = ("slow-inflight-signature", False)
     list_cache.invalidate_session_list_cache()

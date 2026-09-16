@@ -156,6 +156,12 @@
 | `TeamCandidateCard` | [product/team-management.md](./product/team-management.md#teamcandidatecard) |
 | `TeamCanvasNodeCard` | [product/team-management.md](./product/team-management.md#teamcanvasnodecard) |
 
+## 会话用量
+
+| 组件 | 设计说明 |
+| --- | --- |
+| `ComposerContextRing` | [product/composer-context.md](./product/composer-context.md#composercontextring) |
+
 ## Provider
 
 | 组件 | 设计说明 |

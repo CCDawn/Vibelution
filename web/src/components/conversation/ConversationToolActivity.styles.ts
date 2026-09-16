@@ -105,6 +105,10 @@ const styles = {
     "itemDuration",
     "ml-auto shrink-0 font-normal tabular-nums text-[color-mix(in_srgb,var(--fg-tertiary)_72%,transparent)]",
   ),
+  diffStatLabel: cx(
+    "diffStatLabel",
+    "shrink-0 font-normal tabular-nums text-[color-mix(in_srgb,var(--fg-tertiary)_78%,transparent)]",
+  ),
   itemDetailsBody: cx(
     "itemDetailsBody",
     "min-w-0 max-h-48 overflow-auto py-1 pl-1 text-[var(--fg-tertiary)] [font-size:var(--vui-font-xs)] leading-[1.45] [&_pre]:max-h-48 [&_pre]:overflow-auto [&_pre]:text-[var(--fg-tertiary)]",

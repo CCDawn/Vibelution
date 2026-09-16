@@ -292,6 +292,95 @@ export function runtimeManagerDaemonIdentityPath(workspaceRoot: string): string 
   return join(resolveRuntimeManagerDir(workspaceRoot), "daemon.identity.json");
 }
 
+export function launcherLifecycleBlockedResultPath(workspaceRoot: string): string {
+  return join(resolveRuntimeManagerDir(workspaceRoot), "launcher-lifecycle-blocked.json");
+}
+
+
+export function deferredRestartIntentPath(workspaceRoot: string, intentId: string): string {
+  return join(resolveRuntimeManagerDir(workspaceRoot), "restart-intents", `${intentId}.json`);
+}
+
+
+export function queueDeferredRestartIntent(
+  workspaceRoot: string,
+  payload: {
+    reason: string;
+    sourceCommandId: string;
+    requestedBy?: string;
+  }
+): { intentId: string; path: string } | null {
+  // Active work blocks restart with no output, so the operator can only retry
+  // by hand. Persist a runtime-manager restart intent instead: the daemon
+  // fulfils it from its idle branch, which is the same boundary the guard
+  // wants, and the operator gets a durable answer for "when will it restart".
+  try {
+    const intentId = `intent_ts_${Date.now().toString(36)}_${randomUUID().slice(0, 8)}`;
+    const target = deferredRestartIntentPath(workspaceRoot, intentId);
+    mkdirSync(dirname(target), { recursive: true });
+    const now = new Date().toISOString();
+    const intent = {
+      intentId,
+      target: "workbench_restart",
+      reason: String(payload.reason || "").trim(),
+      requestedBy: String(payload.requestedBy || "electron_main").trim() || "electron_main",
+      sourceCommandId: String(payload.sourceCommandId || "").trim(),
+      status: "pending",
+      createdAt: now,
+      updatedAt: now,
+      attempts: 0,
+      failureCount: 0,
+      lastError: "",
+      nextAllowedAt: "",
+      payload: { action: "restart_workbench" }
+    };
+    writeFileSync(target, JSON.stringify(intent, null, 2), "utf8");
+    return { intentId, path: target };
+  } catch {
+    return null;
+  }
+}
+
+export function recordBlockedLifecycleDiagnostic(
+  workspaceRoot: string,
+  payload: {
+    operation: string;
+    commandId: string;
+    code: string;
+    message: string;
+    activeWorkRuns: readonly ActiveWorkRun[];
+  }
+): void {
+  // A blocked lifecycle command otherwise surfaces as a bare nonzero exit code
+  // with no output, so "why was my restart refused" has no answer. Persist the
+  // same structured reason the tray shows, without changing the decision.
+  try {
+    const target = launcherLifecycleBlockedResultPath(workspaceRoot);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(
+      target,
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          operation: payload.operation,
+          commandId: payload.commandId,
+          code: payload.code,
+          message: payload.message,
+          activeWorkCount: payload.activeWorkRuns.length,
+          activeWorkRuns: payload.activeWorkRuns.slice(0, 8),
+          retryMode: "after_active_work",
+          recordedAt: new Date().toISOString()
+        },
+        null,
+        2
+      ),
+      "utf-8"
+    );
+  } catch {
+    // Diagnostics must never change the lifecycle decision itself.
+  }
+}
+
 export function readDaemonPid(workspaceRoot: string): number {
   try {
     const raw = readFileSync(runtimeManagerDaemonPidPath(workspaceRoot), "utf8").trim();
@@ -1800,14 +1889,22 @@ export async function executeMainLineWorkbench(
       (input.listActiveWork ?? (() => listActiveWorkRuns(input.workspaceRoot)))()
     );
     if (blocked) {
+      const intent = queueDeferredRestartIntent(input.workspaceRoot, {
+        reason: blocked.message,
+        sourceCommandId: commandId,
+        requestedBy: "electron_main"
+      });
       return {
         schemaVersion: 1,
-        accepted: false,
+        accepted: true,
         operation,
         commandId,
-        code: blocked.code,
-        message: blocked.message,
-        activeWorkRuns: blocked.activeWorkRuns
+        code: "restart_queued",
+        message: intent
+          ? "有进行中的任务，已登记预约重启：任务结束后自动执行。"
+          : blocked.message,
+        activeWorkRuns: blocked.activeWorkRuns,
+        ...(intent ? { restartIntentId: intent.intentId } : {})
       };
     }
   }

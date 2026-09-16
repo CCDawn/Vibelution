@@ -35,6 +35,11 @@ from ..types import (
     LLMProtocolEvent,
     TurnOutcome,
 )
+from .provider_control_content import (
+    PROVIDER_CONTROL_LEAK,
+    ProviderControlContent,
+    uses_provider_control_content,
+)
 from .types import BuiltPayload
 
 
@@ -361,6 +366,7 @@ class _ChatTurnAssembler:
         self.tool_call_ids_by_position: dict[tuple[int, int], str] = {}
         self.started_call_ids: set[str] = set()
         self.think_parsers: dict[int, ThinkTagStreamParser] = {}
+        self.control_parsers: dict[int, ProviderControlContent] = {}
         self.tool_calls: list[CanonicalToolCall] = []
         self._terminal_seen = False
         self._late_tool_deltas_seen = False
@@ -519,9 +525,10 @@ class _ChatTurnAssembler:
                     diagnostic_summary={"reasoningSource": "think_tag"},
                 )
             )
-        if split.visible_text:
+        visible_text = self._decode_content(choice_index, split.visible_text)
+        if visible_text:
             item_id = self._text_item_id(choice_index)
-            self.text_by_choice[choice_index] = self.text_by_choice.get(choice_index, "") + split.visible_text
+            self.text_by_choice[choice_index] = self.text_by_choice.get(choice_index, "") + visible_text
             allow_tools = bool(getattr(getattr(self.route, "policy", None), "allow_tools", False))
             emitted.append(
                 self._emit(
@@ -529,7 +536,7 @@ class _ChatTurnAssembler:
                     item_id=item_id,
                     channel="interim" if allow_tools else "answer",
                     phase="interim" if allow_tools else "final_answer",
-                    text=split.visible_text,
+                    text=visible_text,
                     provisional=allow_tools,
                     provider_event_type="chat.delta.content",
                 )
@@ -632,6 +639,11 @@ class _ChatTurnAssembler:
             )
         text = self.text_by_choice.get(choice_index, "")
         item_id = self._text_item_id(choice_index)
+        control_parser = self.control_parsers.get(choice_index)
+        if control_parser and control_parser.detected and not text.strip() and not self.tool_calls:
+            emitted.extend(self._terminal("incomplete", provider_event_type=PROVIDER_CONTROL_LEAK,
+                                          error=PROVIDER_CONTROL_LEAK))
+            return emitted
         if finish_reason == "tool_calls" and not self.tool_calls:
             emitted.extend(
                 self._terminal(
@@ -704,20 +716,27 @@ class _ChatTurnAssembler:
                     diagnostic_summary={"reasoningSource": "think_tag"},
                 )
             )
-        if flushed.visible_text:
-            self.text_by_choice[choice_index] = self.text_by_choice.get(choice_index, "") + flushed.visible_text
+        visible_text = self._decode_content(choice_index, flushed.visible_text, final=True)
+        if visible_text:
+            self.text_by_choice[choice_index] = self.text_by_choice.get(choice_index, "") + visible_text
             emitted.append(
                 self._emit(
                     "interim_text_delta",
                     item_id=self._text_item_id(choice_index),
                     channel="interim",
                     phase="interim",
-                    text=flushed.visible_text,
+                    text=visible_text,
                     provisional=True,
                     provider_event_type="chat.finish.visible_text",
                 )
             )
         return emitted
+
+    def _decode_content(self, choice_index: int, text: str, *, final: bool = False) -> str:
+        if not uses_provider_control_content(self.route):
+            return text
+        parser = self.control_parsers.setdefault(choice_index, ProviderControlContent())
+        return parser.feed(text, final=final)
 
     def _terminal(self, kind: str, *, provider_event_type: str, error: str = "") -> list[LLMProtocolEvent]:
         if self._terminal_seen:
@@ -734,6 +753,8 @@ class _ChatTurnAssembler:
             status=kind,
             terminal=True,
             provider_event_type=provider_event_type,
+            diagnostic_summary={"providerControlContent": True}
+            if any(parser.detected for parser in self.control_parsers.values()) else {},
         )
         self._terminal_seen = True
         text = "".join(self.text_by_choice.values()) if kind == "final_answer" else ""

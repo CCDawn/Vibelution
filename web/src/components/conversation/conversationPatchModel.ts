@@ -182,15 +182,70 @@ export function conversationToolPatchText(cell: CodexTranscriptCell): string {
   }
   candidates.push(cell.toolArguments);
   for (const argumentsRecord of candidates) {
-    if (!argumentsRecord) {
-      continue;
-    }
-    for (const key of PATCH_ARGUMENT_KEYS) {
-      const value = argumentsRecord[key];
-      if (typeof value === "string" && value.trim()) {
-        return value;
-      }
+    const patchText = patchTextFromArguments(argumentsRecord);
+    if (patchText) {
+      return patchText;
     }
   }
   return "";
+}
+
+/** Reads a patch payload straight out of a tool argument bag. */
+export function patchTextFromArguments(args?: Record<string, unknown> | null): string {
+  if (!args) {
+    return "";
+  }
+  for (const key of PATCH_ARGUMENT_KEYS) {
+    const value = args[key];
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+  return "";
+}
+
+/** Last path segment, so a collapsed row names the file without its full path. */
+export function patchPathBasename(value: string): string {
+  const normalized = String(value || "").replace(/\\/g, "/").trim();
+  if (!normalized) {
+    return "";
+  }
+  const parts = normalized.split("/").filter(Boolean);
+  return parts.at(-1) || normalized;
+}
+
+export type ConversationPatchRowSummary = {
+  /** First patched file (basename) and, for multi-file payloads, how many more. */
+  subject: string;
+  /** `+A −D` across the whole patch. */
+  statLabel: string;
+};
+
+/**
+ * Summarizes an edit tool's patch for its collapsed row.
+ *
+ * A collapsed row otherwise shows only the action label ("修改文件"), so the
+ * reader cannot tell which file changed or how much without expanding it. The
+ * counts are omitted while the payload is still truncated: a partially streamed
+ * patch would report a partial total as if it were final.
+ */
+export function conversationPatchRowSummary(
+  patchText: string,
+  language: "zh" | "en",
+): ConversationPatchRowSummary | null {
+  const diff = buildConversationPatchDiff(patchText);
+  const named = diff.files.filter((file) => file.path);
+  const primary = named[0];
+  if (!primary) {
+    return null;
+  }
+  const base = patchPathBasename(primary.path);
+  const extraFiles = named.length - 1;
+  const subject = extraFiles > 0
+    ? `${base} ${language === "zh" ? `等 ${named.length} 个文件` : `+${extraFiles} more`}`
+    : base;
+  if (diff.truncated) {
+    return { subject, statLabel: "" };
+  }
+  return { subject, statLabel: `+${diff.additions} −${diff.deletions}` };
 }

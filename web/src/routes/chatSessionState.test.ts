@@ -11,6 +11,7 @@ import {
   markSessionDetailStopping,
   markSessionSummaryRunning,
   markSessionDetailRunning,
+  mergeSessionDetailHandoff,
   mergeSessionDetailMessageWindow,
   mergeSessionDetailIntoSummaries,
   pickOptimisticNextActiveSessionId,
@@ -1549,5 +1550,61 @@ describe("chatSessionState", () => {
     expect(merged.currentPhase).toBe("completed");
     expect(merged.stopRequested).toBe(false);
     expect(merged.stopRequestedAt).toBe("");
+  });
+});
+
+describe("mergeSessionDetailHandoff", () => {
+  it("never replaces a cached transcript with the empty handoff", () => {
+    const cachedMessage = assistantTerminalTurn("assistant-1", "turn-1", "2026-01-01T00:00:00Z");
+    const cached = makeDetail({
+      messages: [cachedMessage],
+      messageWindow: makeWindow(),
+      title: "旧标题",
+    });
+    const handoff = makeDetail({
+      messages: [],
+      title: "新标题",
+      status: "completed",
+      currentPhase: "completed",
+      selectedLightweight: true,
+    } as Partial<SessionDetail>);
+
+    const merged = mergeSessionDetailHandoff(cached, handoff);
+
+    expect(merged.messages).toEqual([cachedMessage]);
+    expect(merged.messageWindow).toEqual(cached.messageWindow);
+    expect(merged.title).toBe("新标题");
+    expect(merged.currentPhase).toBe("completed");
+  });
+
+  it("paints an uncached handoff as a pending transcript shell", () => {
+    const handoff = makeDetail({
+      messages: [],
+      provisionalTranscript: undefined,
+      selectedLightweight: true,
+    } as Partial<SessionDetail>);
+
+    const merged = mergeSessionDetailHandoff(undefined, handoff);
+
+    expect(merged.id).toBe("session-live");
+    expect(merged.messages).toEqual([]);
+    expect(merged.provisionalTranscript).toBe(true);
+  });
+
+  it("keeps the stopping intent when a handoff arrives mid-stop", () => {
+    const stopping = markSessionDetailStopping(makeDetail({ activeTurnId: "turn-2" }), {
+      requestedAt: "2026-01-01T00:00:05Z",
+    }) as SessionDetail;
+    const handoff = makeDetail({
+      messages: [],
+      currentPhase: "running",
+      stopRequested: false,
+      selectedLightweight: true,
+    } as Partial<SessionDetail>);
+
+    const merged = mergeSessionDetailHandoff(stopping, handoff);
+
+    expect(merged.stopRequested).toBe(true);
+    expect(merged.stopRequestedAt).toBe("2026-01-01T00:00:05Z");
   });
 });

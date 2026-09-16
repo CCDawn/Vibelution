@@ -18,6 +18,7 @@ from core.ui.chat_state import (
     save_session_chat_state,
 )
 from core.web.services import session_service
+from core.web.services.session import session_ops
 from core.web.services.session.live_output import SessionLiveOutputState
 
 
@@ -613,6 +614,50 @@ def test_stale_running_repair_audited_after_work_run_grace_expiry(tmp_path, monk
     assert audit[0]["fields"]["newStatus"] == "ready"
     assert release_calls and release_calls[0]["session_id"] == "session-a"
     assert load_session_chat_state(tmp_path, "session-a")["last_turn_status"] == "ready"
+
+
+class _RaisingTurnScheduler:
+    """Queue read failure stand-in: owner evidence must stay unknown, not empty."""
+
+    def queued_session_turn_ids(self):
+        raise RuntimeError("scheduler read failed")
+
+    def clear(self):
+        return None
+
+
+class _RaisingWorkRunStore:
+    """Snapshot read failure stand-in for the cross-process evidence source."""
+
+    def load_active_snapshot(self, run_kind):
+        raise RuntimeError("snapshot read failed")
+
+
+def test_stale_running_repair_skipped_when_owner_evidence_unreadable(tmp_path, monkeypatch):
+    """An unreadable owner-evidence source must not be treated as "no owner":
+    repair stays hands-off instead of flipping a possibly-live turn to ready."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_single_runtime_row(tmp_path, status="running")
+    monkeypatch.setattr(session_service, "_is_session_running", lambda _session_id: False)
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+
+    monkeypatch.setattr(session_service, "_SESSION_TURN_SCHEDULER", _RaisingTurnScheduler())
+    monkeypatch.setattr(session_service, "_WORK_RUN_STORE", _StubWorkRunStore(None))
+    assert session_ops._stale_running_live_owner_reason("session-a") == "scheduler_queue_unreadable"
+    conversation = load_session_chat_state(tmp_path, "session-a")
+    assert session_service._repair_stale_running_conversation(conversation) is False
+    assert conversation["last_turn_status"] == "running"
+    assert full_saves == []
+    assert session_saves == []
+    assert load_session_chat_state(tmp_path, "session-a")["last_turn_status"] == "running"
+
+    monkeypatch.setattr(session_service, "_SESSION_TURN_SCHEDULER", _StubTurnScheduler())
+    monkeypatch.setattr(session_service, "_WORK_RUN_STORE", _RaisingWorkRunStore())
+    assert session_ops._stale_running_live_owner_reason("session-a") == "work_run_snapshot_unreadable"
+    assert session_service._repair_stale_running_conversation(conversation) is False
+    assert conversation["last_turn_status"] == "running"
+    assert load_session_chat_state(tmp_path, "session-a")["last_turn_status"] == "running"
 
 
 def test_stale_running_repair_grace_env_zero_disables_freshness_gate(tmp_path, monkeypatch):

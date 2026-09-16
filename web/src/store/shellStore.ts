@@ -10,7 +10,6 @@ import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 
 type EvolutionTrack = "supervised" | "self";
 type EvolutionView = "live" | "runs" | "library" | "overview";
-export type ShellTopBarMode = "full" | "hidden";
 
 type ChatPanelWidths = {
   leftPanelWidth: number;
@@ -21,11 +20,9 @@ type ShellState = {
   evolutionTrack: EvolutionTrack;
   evolutionView: EvolutionView;
   chatPanelWidths: ChatPanelWidths;
-  topBarMode: ShellTopBarMode;
   setEvolutionTrack: (track: EvolutionTrack) => void;
   setEvolutionView: (view: EvolutionView) => void;
   setChatPanelWidths: (widths: Partial<ChatPanelWidths>) => void;
-  setTopBarMode: (mode: ShellTopBarMode) => void;
 };
 
 /** Shared permanent memory under vibelution.pane-layouts.v1["chat"]. */
@@ -164,7 +161,6 @@ export const useShellStore = create<ShellState>()(
       evolutionTrack: "supervised",
       evolutionView: "live",
       chatPanelWidths: DEFAULT_CHAT_PANEL_WIDTHS,
-      topBarMode: "full",
       setEvolutionTrack: (evolutionTrack) => set({ evolutionTrack }),
       setEvolutionView: (evolutionView) => set({ evolutionView }),
       setChatPanelWidths: (widths) =>
@@ -176,7 +172,6 @@ export const useShellStore = create<ShellState>()(
           persistChatPaneLayouts(next);
           return { chatPanelWidths: next };
         }),
-      setTopBarMode: (topBarMode) => set({ topBarMode }),
     }),
     {
       name: "vibelution-shell-store",
@@ -184,14 +179,17 @@ export const useShellStore = create<ShellState>()(
       partialize: (state) => ({
         evolutionTrack: state.evolutionTrack,
         evolutionView: state.evolutionView,
-        topBarMode: state.topBarMode,
       }),
       merge: (persistedState, currentState) => {
         const persistedShellState =
-          persistedState && typeof persistedState === "object" ? persistedState as Partial<ShellState> : {};
+          persistedState && typeof persistedState === "object"
+            ? persistedState as Partial<ShellState> & { topBarMode?: unknown }
+            : {};
+        const supportedPersistedState = { ...persistedShellState };
+        delete supportedPersistedState.topBarMode;
         return {
           ...currentState,
-          ...persistedShellState,
+          ...supportedPersistedState,
           chatPanelWidths: normalizePersistedChatPanelWidths(persistedShellState.chatPanelWidths),
         };
       },

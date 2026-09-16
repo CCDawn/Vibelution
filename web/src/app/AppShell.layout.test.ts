@@ -34,11 +34,13 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("structuralSharing: shareRuntimeSummaryIfOnlyVolatileChanged");
   });
 
-  it("embeds system actions directly in the desktop top-bar background", () => {
+  it("keeps the desktop title bar focused on navigation and moves utilities into settings", () => {
     expect(shellSource).toContain('data-shell-group="brand"');
     expect(shellSource).toContain('data-shell-group="navigation"');
-    expect(shellSource).toContain('data-shell-group="system-actions"');
-    expect(shellSource).toContain('data-shell-group="tool-actions"');
+    expect(shellSource).toContain('data-shell-group="window-drag-region"');
+    expect(shellSource).toContain('data-shell-group="settings-dock"');
+    expect(shellSource).not.toContain('data-shell-group="system-actions"');
+    expect(shellSource).not.toContain('data-shell-group="tool-actions"');
     // 方案A: the nav container is flattened — only the active tab keeps a pill.
     expect(styles.nav).not.toContain("rounded-[var(--vui-radius-panel-soft)]");
     expect(styles.nav).not.toMatch(/bg-vui-surface-toolbar|bg-\[var\(--vui-surface-toolbar\)\]/);
@@ -48,24 +50,16 @@ describe("AppShell layout contract", () => {
       shellStyles.indexOf(":where(.vui-app-appshell).nav::-webkit-scrollbar"),
     );
     expect(navLayoutBlock).toContain("justify-self: start");
-    expect(shellStyles).toContain(":where(.vui-app-appshell).toolCluster {");
-    expect(shellStyles).toContain("gap: 14px;");
-    expect(styles.topActions).not.toContain("rounded-[var(--vui-radius-panel-soft)]");
-    expect(styles.topActions).not.toMatch(/bg-vui-surface-toolbar|bg-\[var\(--vui-surface-toolbar\)\]/);
-    expect(styles.topActions).not.toContain("border");
-    expect(styles.topActions).not.toContain("shadow-");
-    expect(styles.actionIconButton).toContain("h-[var(--vui-control-height-sm)]");
-    expect(styles.actionIconButton).toContain("w-[var(--vui-control-height-sm)]");
-    expect(styles.actionIconButton).toContain("!border-0");
-    expect(styles.statusSummaryChip).toContain("!border-0");
-    expect(styles.utilityTrigger).toContain("!border-0");
-    const systemActions = shellSource.slice(
-      shellSource.indexOf('<div className={styles.topActions}'),
+    const titleBar = shellSource.slice(
+      shellSource.indexOf('<header className={styles.topBar}>'),
       shellSource.indexOf("</header>"),
     );
-    // The status summary is a quiet non-interactive chip, so it is not a ghost button.
-    expect(systemActions.match(/variant="ghost"/g)).toHaveLength(5);
-    expect(shellStyles).toContain("@media (max-width: 1279px)");
+    expect(titleBar).not.toContain("RefreshCw");
+    expect(titleBar).not.toContain("Settings");
+    expect(titleBar).not.toContain("statusSummaryChip");
+    expect(titleBar).toContain("windowDragRegion");
+    expect(styles.settingsTrigger).toContain("!w-full");
+    expect(styles.settingsTrigger).toContain("!rounded-none");
   });
 
   it("keeps desktop primary navigation labels at their intrinsic readable width", () => {
@@ -86,7 +80,7 @@ describe("AppShell layout contract", () => {
     );
     expect(topBarBlock).toContain("pointer-events: auto");
     expect(topBarBlock).toMatch(/(?:^|\n)\s*-webkit-app-region:\s*no-drag\s*;/);
-    // Whole-bar drag is forbidden; only brand chrome may opt in later.
+    // Whole-bar drag is forbidden; only the blank spacer owns dragging.
     expect(topBarBlock).not.toMatch(/(?:^|\n)\s*-webkit-app-region:\s*drag\s*;/);
 
     // Real specificity on interactive descendants (not only :where).
@@ -95,10 +89,12 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain(".vui-app-appshell.topBar .navLink");
     expect(shellStyles).toContain("-webkit-app-region: no-drag !important");
 
-    // No extra Electron drag strips under the nav band (native title bar owns window chrome).
-    expect(shellStyles).not.toContain(
-      ':where(.vui-app-appshell).shell[data-desktop-shell="electron"] .topBar .brandCopy',
+    const dragBlock = shellStyles.slice(
+      shellStyles.indexOf(":where(.vui-app-appshell).windowDragRegion"),
+      shellStyles.indexOf(":where(.vui-app-appshell).topBar::before"),
     );
+    expect(dragBlock).toContain("-webkit-app-region: drag");
+    expect(dragBlock).toContain("min-width: 24px");
 
     const navBlock = shellStyles.slice(
       shellStyles.indexOf(":where(.vui-app-appshell).nav {"),
@@ -116,51 +112,40 @@ describe("AppShell layout contract", () => {
     expect(navLinkBlock).not.toContain("color: var(--fg-secondary)");
   });
 
-  it("renders one quiet status summary chip without the diagnostic guide panel", () => {
-    expect(shellSource).toContain("statusSummaryChip");
+  it("renders the status summary inside settings without restoring the diagnostic guide panel", () => {
+    expect(shellSource).toContain("settingsStatus");
     expect(shellSource).not.toContain('t("brandSubtle")');
     expect(shellSource).not.toContain("<span className={styles.statusBadgeLabel}>Gate</span>");
     expect(shellSource).not.toContain("className={`${styles.statusCluster} ${styles.brandGate}`}");
-    // The diagnostic guide popover is gone; the top bar keeps a bare tone dot + text.
+    // The diagnostic guide popover stays gone; settings keeps a bare tone dot + text.
     expect(shellSource).not.toContain("LazyAppShellStatusGuidePanel");
     expect(shellSource).not.toContain('data-vui="status-guide-popover"');
     expect(shellSource).not.toContain("statusGuidePopoverContent");
     expect(shellSource).not.toContain("statusGuideOpen");
     expect(shellSource).toContain("systemToneToDotClass");
     expect(shellSource).toContain("styles.statusSummaryDot");
-    expect(shellSource).toContain("styles.statusSummaryLabel");
+    expect(shellSource).not.toContain('data-shell-group="status-guide"');
     expect(shellSource).not.toContain("rightStatusCards.map((item) => (\n                <span key={item.id} className={styles.statusBadge}>");
   });
 
-  it("keeps the global shell top bar compact", () => {
-    expect(styles.statusSummaryChip).toBeTypeOf("string");
+  it("keeps the global shell top bar and settings dock compact", () => {
     expect(styles.statusSummaryDot).toBeTypeOf("string");
-    expect(styles.statusSummaryLabel).toBeTypeOf("string");
     expect(styles.returnButton).toBeTypeOf("string");
-    expect(shellStyles).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
-    expect(shellStyles).toContain("flex-wrap: nowrap");
-    expect(styles.topActions).toContain("flex-nowrap");
-    expect(styles.utilityTrigger).toContain("h-[var(--vui-control-height-sm)]");
-    expect(styles.utilityTrigger).not.toContain("h-8");
-    expect(styles.utilityTrigger).toContain("[&_[data-slot=vui-button-content]]:whitespace-nowrap");
-    expect(styles.statusSummaryChip).toContain("whitespace-nowrap");
-    expect(styles.statusSummaryChip).toContain("!items-center");
-    expect(styles.statusSummaryChip).toContain("!py-0");
-    expect(styles.statusSummaryChip).not.toContain("vuiControlPillClass");
-    expect(styles.statusSummaryChip).not.toContain("vuiStateSelectedRowClass");
-    expect(styles.utilityTrigger).not.toContain("vuiControlQuietClass");
-    // Top bar summary is a bare tone dot + text; no diagnostic popover remains.
+    expect(shellStyles).toContain("--shell-topbar-height: 40px");
+    expect(shellStyles).toContain("--shell-settings-dock-height: 56px");
+    expect(shellStyles).toContain("env(titlebar-area-width");
+    expect(styles.settingsPopoverContent).toContain("w-[min(292px,calc(100vw-20px))]");
+    expect(styles.settingsPopoverContent).toContain("max-h-[min(520px,calc(100dvh-96px))]");
+    expect(styles.settingsTrigger).toContain("!h-full");
+    expect(styles.settingsTrigger).toContain("!w-full");
     expect(shellSource).toContain("VStatusChip");
     expect(shellSource).toContain("systemToneToStatus");
     expect(shellSource).toContain("systemToneToDotClass");
     expect(shellSource).toContain("styles.statusSummaryDot");
-    expect(shellSource).toContain("styles.statusSummaryLabel");
     expect(shellSource).not.toContain("statusSummaryCount");
     expect(shellSource).not.toContain("styles.statusDot");
-    expect(styles.activeWorkToneChip).toBeTypeOf("string");
     expect(styles.statusBadgeValue).toContain("leading-none");
     expect(styles.statusBadgeValue).toContain("[font-size:var(--vui-font-xs)]");
-    expect(shellStyles).toContain("align-self: center");
     expect(shellStyles).toContain("@media (max-width: 1279px)");
     expect(shellStyles).toContain("@media (max-width: 1180px)");
     expect(shellStyles).not.toContain(".topClock");
@@ -168,23 +153,17 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("overscroll-behavior-x: contain");
     expect(shellStyles).toContain(".returnButton");
     expect(shellStyles).toContain("width: 32px");
-    expect(shellStyles).toContain("grid-template-columns: minmax(0, max-content) minmax(0, 1fr) max-content;");
     expect(shellStyles).toContain("max-width: 100%");
-    // Utility panel size lives on VPopover content class (portaled).
-    expect(styles.utilityPopoverContent).toContain("w-[min(520px,calc(100vw-40px))]");
-    expect(styles.utilityPopoverContent).toContain("max-h-[min(78vh,760px)]");
-    // Utility git signal/count grids: 2×2 for readable Chinese labels in the popover.
     expect(shellStyles).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
-    expect(shellStyles).toContain("grid-template-columns: repeat(4, minmax(0, 1fr))");
     expect(shellStyles).toContain("grid-template-columns: 36px minmax(0, 1fr)");
-    expect(shellStyles).toContain("@media (max-width: 640px)");
+    expect(shellStyles).toContain("@media (max-width: 700px)");
     expect(shellStyles).toContain("cursor: pointer");
 
     const compactDesktopBlock = shellStyles.slice(
       shellStyles.indexOf("@media (max-width: 1279px)"),
       shellStyles.indexOf("@media (max-width: 1180px)"),
     );
-    expect(compactDesktopBlock).toContain(":where(.vui-app-appshell).statusSummaryLabel");
+    expect(compactDesktopBlock).not.toContain(":where(.vui-app-appshell).settingsStatus");
     expect(compactDesktopBlock).not.toContain(":where(.vui-app-appshell).statusBadgeValue");
     expect(compactDesktopBlock).toContain("display: none");
 
@@ -192,7 +171,7 @@ describe("AppShell layout contract", () => {
       shellStyles.indexOf("@media (max-width: 1180px)"),
       shellStyles.indexOf("@media (max-width: 980px)"),
     );
-    expect(narrowDesktopBlock).toContain(":where(.vui-app-appshell).statusSummaryLabel");
+    expect(narrowDesktopBlock).not.toContain(":where(.vui-app-appshell).settingsStatus");
     expect(narrowDesktopBlock).not.toContain(":where(.vui-app-appshell).statusBadgeValue");
 
     const narrowTopBarBlock = shellStyles.slice(
@@ -212,8 +191,6 @@ describe("AppShell layout contract", () => {
     ];
     const headerStyles = [
       styles.activeWorkDetailHeader,
-      styles.utilityPanelHeader,
-      utilityMenuStyles.utilityPanelHeader,
     ];
 
     for (const value of headerStyles) {
@@ -234,7 +211,7 @@ describe("AppShell layout contract", () => {
       styles.actionButton,
       styles.returnButton,
       styles.shutdownCancelButton,
-      styles.topBarRestoreButton,
+      styles.settingsChoiceButton,
       styles.utilityButton,
       styles.utilityFileButton,
       utilityMenuStyles.utilityButton,
@@ -247,8 +224,7 @@ describe("AppShell layout contract", () => {
       expect(value).toContain("hover:bg-[var(--vui-control-hover-bg)]");
       expect(value).toContain("hover:text-[var(--vui-control-hover-fg)]");
     }
-    expect(styles.utilityTrigger).not.toContain("hover:border-");
-    expect(styles.utilityTrigger).not.toContain("hover:bg-");
+    expect(styles.settingsTrigger).not.toContain("hover:border-");
   });
 
   it("keeps the light shell top bar on light surfaces without brand text stacks", () => {
@@ -276,21 +252,18 @@ describe("AppShell layout contract", () => {
     expect(launcherShellSource).toContain("}, [lang, theme, launcherWindowTitle])");
   });
 
-  it("can hide the web top bar while keeping a restore control", () => {
+  it("keeps the unified title bar visible and exposes settings across the full left dock row", () => {
     expect(shellSource).toContain("useShellStore");
-    expect(shellSource).toContain("topBarMode");
-    expect(shellSource).toContain('const topBarHidden = topBarMode === "hidden"');
-    expect(shellSource).toContain("setTopBarMode(\"hidden\")");
-    expect(shellSource).toContain("setTopBarMode(\"full\")");
-    expect(shellSource).toContain('data-topbar-mode={topBarMode}');
-    expect(shellSource).toContain("topBarRestoreButton");
-    expect(shellSource).toContain("hideTopBarLabel");
-    expect(shellSource).toContain("showTopBarLabel");
-    expect(shellStyles).toContain('.shell[data-topbar-mode="hidden"]');
-    expect(shellStyles).toContain("--shell-topbar-height: 0px");
-    expect(shellStyles).toContain('.shell[data-topbar-mode="hidden"] .topBar');
-    expect(shellStyles).toContain("display: none");
-    expect(styles.topBarRestoreButton).toBeTypeOf("string");
+    expect(shellSource).not.toContain("topBarMode");
+    expect(shellSource).not.toContain("setTopBarMode");
+    expect(shellSource).not.toContain("topBarRestoreButton");
+    expect(shellStyles).not.toContain("data-topbar-mode");
+    expect(shellSource).toContain('"--shell-settings-dock-width": `${chatLeftPanelWidth}px`');
+    expect(shellSource).toContain('side="top"');
+    expect(shellSource).toContain('align="start"');
+    expect(styles.settingsTrigger).toContain("!w-full");
+    expect(styles.settingsTrigger).toContain("!rounded-none");
+    expect(shellStyles).toContain("width: min(var(--shell-settings-dock-width), 100vw)");
   });
 
   it("exposes a shell-level semantic return action without visible helper copy", () => {
@@ -343,7 +316,7 @@ describe("AppShell layout contract", () => {
     expect(shellSource).not.toContain('t("brandSubtle")');
     expect(styles).not.toHaveProperty("brandCopy");
     expect(styles).not.toHaveProperty("versionPill");
-    expect(shellStyles).toContain("--shell-topbar-height: 52px");
+    expect(shellStyles).toContain("--shell-topbar-height: 40px");
   });
 
   it("uses the lightweight shell dictionary instead of the full route dictionary", () => {
@@ -371,7 +344,7 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain('t("navMemory")');
   });
 
-  it("collapses usage logs and git behind one click utility popover", () => {
+  it("groups appearance, configuration, usage, logs and git in the bottom settings popover", () => {
     const primaryNav = shellSource.slice(
       shellSource.indexOf("<nav className={styles.nav}>"),
       shellSource.indexOf("</nav>"),
@@ -382,11 +355,15 @@ describe("AppShell layout contract", () => {
     expect(primaryNav).not.toContain('to="/tools"');
     expect(primaryNav).not.toContain('to="/agents/tools"');
     expect(primaryNav).not.toContain('to="/git"');
-    expect(shellSource).toContain("utilityCluster");
-    expect(shellSource).toContain("utilityClusterOpen");
+    expect(shellSource).toContain("settingsDock");
+    expect(shellSource).toContain("settingsTriggerOpen");
     expect(shellSource).toContain("aria-expanded={utilityOpen}");
     expect(shellSource).toContain("<VPopover");
-    expect(shellSource).toContain("contentClassName={styles.utilityPopoverContent}");
+    expect(shellSource).toContain("contentClassName={styles.settingsPopoverContent}");
+    expect(shellSource).toContain('side="top"');
+    expect(shellSource).toContain('align="start"');
+    expect(shellSource).toContain("selectTheme(\"light\")");
+    expect(shellSource).toContain("selectTheme(\"dark\")");
     expect(shellSource).toContain("LazyAppShellUtilityMenu");
     expect(shellSource).not.toContain("utilityMenuRef");
     expect(shellSource).not.toContain("queryKeys.gitStatus()");
@@ -416,7 +393,7 @@ describe("AppShell layout contract", () => {
     expect(utilityMenuSource).toContain('to="/usage"');
     expect(utilityMenuSource).toContain('t("navUsage")');
     expect(utilityMenuSource).toContain('<VTooltip content={t("usageUtilityTitle")}>');
-    expect(utilityMenuSource).toContain('<VTooltip content={t("topUtilityMenuHint")} width="wide">');
+    expect(utilityMenuSource).not.toContain('className={styles.utilityPanelHeader}');
     expect(utilityMenuSource).toContain("gitHeroLabel");
     expect(utilityMenuSource).toContain("gitSummaryRow");
     expect(utilityMenuSource).not.toContain('to="/chat"');
@@ -430,7 +407,7 @@ describe("AppShell layout contract", () => {
     expect(utilityMenuSource).toContain('to="/logs"');
     expect(shellSource).not.toContain('to="/agents/tools"');
     expect(shellSource).not.toContain('to="/tools"');
-    expect(shellSource).toContain("Wrench");
+    expect(shellSource).toContain("SlidersHorizontal");
     expect(utilityMenuSource).toContain('to="/git"');
     expect(utilityMenuSource).toContain('href="/launcher"');
     expect(utilityMenuSource).toContain('target="_blank"');
@@ -442,7 +419,7 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("isShellPrimaryNavActive");
     expect(shellSource).not.toContain("<NavLink");
     expect(shellSource).toContain('to="/config"');
-    expect(shellSource).toContain("icon={<Settings size={16}");
+    expect(shellSource).toContain("<Settings size={13}");
     expect(utilityMenuSource).toContain("requiresAttention");
     expect(utilityMenuSource).toContain("gitStatusLevel");
     expect(utilityMenuSource).not.toContain("gitSignalGrid");
@@ -454,14 +431,17 @@ describe("AppShell layout contract", () => {
     expect(utilityMenuSource).not.toContain("gitDetails");
     expect(utilityMenuSource).not.toContain("gitPendingWorktrees");
     expect(shellSource).toContain('data-browser-role="workbench"');
-    expect(styles.utilityTrigger).toBeTypeOf("string");
-    expect(styles.utilityClusterOpen).toBeTypeOf("string");
-    expect(styles.utilityPopoverContent).toBeTypeOf("string");
+    expect(styles.settingsTrigger).toBeTypeOf("string");
+    expect(styles.settingsTriggerOpen).toBeTypeOf("string");
+    expect(styles.settingsPopoverContent).toBeTypeOf("string");
     expect(utilityMenuStyles.utilityPanel).toBeTypeOf("string");
     expect(utilityMenuStyles.utilityButtonGrid).toBeTypeOf("string");
     expect(utilityMenuStyles.gitSummaryRow).toBeTypeOf("string");
     expect(utilityMenuStyles.gitSummaryBranch).toBeTypeOf("string");
-    expect(shellStyles).toContain("repeat(4, minmax(0, 1fr))");
+    expect(shellStyles).toContain(".settingsPopoverBody .utilityButtonGrid");
+    expect(shellStyles).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
+    expect(shellStyles).toContain(".settingsPopoverBody .utilityPanel");
+    expect(shellStyles).toContain("grid-template-columns: minmax(0, 1fr)");
     expect(shellStyles).not.toContain("minmax(5.5rem, 1fr)");
     expect(utilityMenuStylesSource).toContain("gitSummaryRow");
     expect(utilityMenuStylesSource).not.toContain("utilityFileButton");
@@ -469,49 +449,49 @@ describe("AppShell layout contract", () => {
     expect(utilityMenuStylesSource).not.toContain("gitSignalGrid");
   });
 
-  it("keeps active work details in a click VPopover off the primary chip", () => {
-    expect(shellSource).toContain("activeWorkDetailPanel");
+  it("keeps active work details inside the settings panel", () => {
+    expect(shellSource).toContain("settingsActiveWork");
     expect(shellSource).toContain("activeWorkIndicator.items.map");
     expect(shellSource).toContain("<Link className={styles.activeWorkDetailLink} to={item.href}");
-    expect(shellSource).toContain("contentClassName={styles.activeWorkPopoverContent}");
-    expect(shellSource).toContain('data-vui="active-work-popover"');
+    expect(shellSource).not.toContain("contentClassName={styles.activeWorkPopoverContent}");
+    expect(shellSource).not.toContain('data-vui="active-work-popover"');
     expect(shellSource).not.toContain("className={styles.activeWorkSummary}");
     expect(shellSource).not.toContain("[&:hover_.activeWorkDetailPanel]:visible");
-    // Native title dumps raw session ids; details live in the popover + aria-label.
+    // Native title stays human-readable; task details live in settings.
     expect(shellSource).not.toContain("title={activeWorkDetailsTitle}");
     expect(shellSource).toContain("formatActiveWorkRunId");
-    expect(shellSource).toContain("activeWorkChipAriaLabel");
+    expect(shellSource).not.toContain("activeWorkChipAriaLabel");
 
-    expect(styles.activeWorkDetailPanel).toBeTypeOf("string");
-    expect(styles.activeWorkPopoverContent).toContain("w-[min(420px");
-    expect(styles.activeWorkChip).toContain("h-8");
-    expect(styles.activeWorkChip).not.toContain("[&:hover_.activeWorkDetailPanel]:visible");
-    expect(styles.activeWorkDetailPanel).not.toContain("absolute");
-    expect(styles.activeWorkDetailPanel).not.toContain("invisible");
+    expect(styles.settingsActiveWork).toBeTypeOf("string");
     expect(styles.activeWorkDetailItem).toBeTypeOf("string");
     expect(styles.activeWorkDetailLink).toContain("block");
     expect(styles.activeWorkDetailLink).toContain("focus-visible:ring-2");
   });
 
-  it("expands the active work chip itself on hover and focus", () => {
-    expect(shellSource).toContain("activeWorkInlineDetails");
-    expect(shellSource).toContain("activeWorkInlineItem");
-    expect(shellSource).toContain("activeWorkIndicator.items.slice(0, 2).map");
-    expect(shellSource).toContain("{item.summary}");
-
-    expect(styles.activeWorkInlineDetails).toBeTypeOf("string");
-    expect(styles.activeWorkInlineItem).toBeTypeOf("string");
-    expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkChip:hover .activeWorkInlineDetails");
-    expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkChip:focus-within .activeWorkInlineDetails");
-    expect(shellStyles).toContain("max-width: min(38vw, 360px)");
-    expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkInlineItem");
-    expect(shellStyles).toContain(":where(.vui-app-appshell).brandBlock {\n  display: flex;");
-    expect(shellStyles).toContain("overflow: visible");
+  it("bounds active work details inside the settings popover", () => {
+    expect(shellSource).not.toContain("activeWorkInlineDetails");
+    expect(shellSource).not.toContain("activeWorkInlineItem");
+    expect(styles.settingsPopoverContent).toContain("overflow-y-auto");
+    expect(shellStyles).toContain(".settingsActiveWork .activeWorkDetailList");
+    expect(shellStyles).toContain("max-height: min(210px, 30vh)");
+    expect(styles.activeWorkDetailCopy).toContain("[&_p]:line-clamp-2");
+    expect(styles.activeWorkDetailList).not.toContain("max-h-");
+    expect(shellStyles).not.toContain("activeWorkChip:hover .activeWorkInlineDetails");
+    expect(shellStyles).not.toContain("activeWorkInlineItem");
   });
 
-  it("keeps the active work popover compact without nested cards or horizontal overflow", () => {
-    expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkDetailPanel");
-    expect(shellStyles).toContain("width: min(420px, calc(100vw - 24px))");
+  it("keeps active work out of the unified title bar", () => {
+    const titleBar = shellSource.slice(
+      shellSource.indexOf('<header className={styles.topBar}>'),
+      shellSource.indexOf("</header>"),
+    );
+    expect(titleBar).not.toContain("activeWorkIndicator");
+    expect(titleBar).not.toContain("activeWorkSlot");
+    expect(shellSource).not.toContain('data-active-work-slot');
+  });
+
+  it("keeps active work compact without nested cards or horizontal overflow", () => {
+    expect(shellSource).toContain("className={styles.settingsActiveWork}");
     expect(shellStyles).toContain("overflow-x: hidden");
     expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkDetailHeader");
     expect(shellStyles).toContain("padding: 0 2px 2px");
@@ -524,9 +504,7 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkDetailCopy code");
     expect(shellStyles).toContain("text-overflow: ellipsis");
 
-    const narrowBlock = shellStyles.slice(shellStyles.indexOf("@media (max-width: 640px)"));
-    expect(narrowBlock).toContain(".activeWorkDetailPanel");
-    expect(narrowBlock).toContain("width: min(340px, calc(100vw - 20px))");
+    expect(styles.settingsPopoverContent).toContain("calc(100dvh-96px)");
   });
 
   it("uses one shared page instance id and stops periodic memory sampling while hidden", () => {
@@ -576,9 +554,9 @@ describe("AppShell layout contract", () => {
   });
 
   it("keeps frontend refresh in the shell while Launcher exclusively owns lifecycle controls", () => {
-    expect(shellSource).toContain("VIconButton");
-    expect(shellSource).toContain("label={refreshFrontendLabel}");
-    expect(shellSource).not.toContain("<button\n            type=\"button\"\n            className={styles.actionIconButton}");
+    expect(shellSource).toContain("className={styles.settingsActionButton}");
+    expect(shellSource).toContain("{refreshFrontendLabel}");
+    expect(shellSource).not.toContain("className={styles.actionIconButton}");
     expect(shellSource).toContain("RefreshCw");
     expect(shellSource).toContain("refreshFrontendLabel");
     expect(shellSource).toContain("browser.user_action.frontend_refresh_requested");
@@ -666,17 +644,28 @@ describe("AppShell layout contract", () => {
   });
 
   it("keeps the global shell usable on narrow screens", () => {
-    expect(styles.utilityTriggerLabel).toBeTypeOf("string");
+    expect(styles.settingsTriggerLabel).toBeTypeOf("string");
     expect(styles.statusBadgeLabel).toBeTypeOf("string");
-    expect(styles.nav).toContain("max-[639px]:hidden");
-    expect(styles.mobileNav).toContain("max-[639px]:flex");
-    expect(styles.mobileRouteMenu).toContain("max-[639px]:grid");
+    expect(styles.nav).not.toContain("max-[639px]");
+    expect(styles.mobileNav).not.toContain("max-[639px]");
+    expect(styles.mobileRouteMenu).not.toContain("max-[639px]");
     expect(shellSource).toContain("activePrimaryRouteLabel");
     expect(shellSource).toContain('data-shell-group="mobile-navigation"');
     expect(shellSource).toContain('id="shell-mobile-route-menu"');
     expect(shellSource).toContain('aria-haspopup="dialog"');
     expect(shellSource).toContain("shellMobileNavClass");
     expect(shellSource).toContain("closeUtilityMenu");
+    expect(shellSource).toContain('to="/companions"');
+    expect(shellStyles).toContain("@media (max-width: 700px)");
+    expect(shellStyles).toContain("padding-bottom: var(--shell-settings-dock-height)");
+    expect(shellStyles).toContain("width: 100vw");
+    const mobileShellBlock = shellStyles.slice(shellStyles.indexOf("@media (max-width: 639px)"));
+    expect(mobileShellBlock).toContain(":where(.vui-app-appshell).topBar .nav");
+    expect(mobileShellBlock).toContain(":where(.vui-app-appshell).topBar .mobileNav");
+    expect(mobileShellBlock).toContain(":where(.vui-app-appshell).settingsPopoverBody .mobileRouteMenu");
+    expect(mobileShellBlock).toMatch(/\.topBar \.nav\s*\{\s*display: none;/);
+    expect(mobileShellBlock).toMatch(/\.topBar \.mobileNav\s*\{\s*display: flex;/);
+    expect(mobileShellBlock).toMatch(/\.settingsPopoverBody \.mobileRouteMenu\s*\{\s*display: grid;/);
   });
 
   it("themes the managed app window chrome to match the light-first shell", () => {
@@ -721,10 +710,12 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("syncWorkbenchThemeRoot(theme)");
     expect(shellSource).toContain("isElectronDesktopShell()");
     expect(shellSource).toContain('data-desktop-shell={desktopShell ? "electron" : "browser"}');
-    // Native title bar (titleBarStyle: default) owns window controls; the top bar
-    // must not reserve an Electron inset band that pushes the right cluster inward.
-    expect(shellStyles).not.toContain('.shell[data-desktop-shell="electron"] .topBar');
-    expect(shellStyles).not.toContain("136px");
+    // Native caption controls overlay the web title bar, so navigation reserves
+    // the reported Window Controls Overlay area with a Windows fallback.
+    expect(shellStyles).toContain('.shell[data-desktop-shell="electron"]');
+    expect(shellStyles).toContain("--shell-window-control-inset: 138px");
+    expect(shellStyles).toContain("env(titlebar-area-x, 0px)");
+    expect(shellStyles).toContain("env(titlebar-area-width");
     expect(shellStyles).toContain("--shell-window-control-inset: 0px");
     expect(shellStyles).not.toMatch(/font-size:\s*0\.(?:[0-6]\d?|7(?:0|1)?)rem/);
   });

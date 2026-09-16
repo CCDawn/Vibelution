@@ -29,42 +29,20 @@ const styles = {
     `vui-app-appshell actionButton min-w-0 flex flex-wrap items-center gap-1.5 ${vuiControlQuietChromeClass}`,
   actionIconButton:
     `vui-app-appshell actionIconButton !border-0 ${vuiControlIconSmClass}`,
-  activeWorkChip:
-    `vui-app-appshell activeWorkChip min-w-0 ${vuiControlPillClass} ${vuiStateCoolSoftClass} ` +
-    "!inline-flex !h-8 !min-h-8 !max-h-8 max-w-[min(66vw,620px)] flex-nowrap !items-center !gap-1.5 !px-2.5 !py-0 " +
-    "whitespace-nowrap leading-none text-[var(--fg-secondary)] [&>*]:!self-center " +
-    "[&_strong]:text-[var(--fg-primary)] [&_strong]:font-semibold [&_strong]:leading-none",
   activeWorkDetailCopy:
-    "vui-app-appshell activeWorkDetailCopy min-w-0 grid gap-1 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [&_p]:m-0 [&_p]:min-w-0 [&_p]:[overflow-wrap:anywhere] [&_code]:block [&_code]:min-w-0 [&_code]:truncate [&_code]:rounded-[var(--radius-control)] [&_code]:bg-[color-mix(in_srgb,var(--vui-control-muted)_88%,transparent)] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:[font-size:var(--vui-font-xs)] [&_code]:text-[var(--fg-tertiary)]",
+    "vui-app-appshell activeWorkDetailCopy min-w-0 grid gap-1 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [&_p]:m-0 [&_p]:min-w-0 [&_p]:line-clamp-2 [&_p]:[overflow-wrap:anywhere] [&_code]:block [&_code]:min-w-0 [&_code]:truncate [&_code]:rounded-[var(--radius-control)] [&_code]:bg-[color-mix(in_srgb,var(--vui-control-muted)_88%,transparent)] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:[font-size:var(--vui-font-xs)] [&_code]:text-[var(--fg-tertiary)]",
   activeWorkDetailHeader:
     "vui-app-appshell activeWorkDetailHeader min-w-0 flex flex-wrap items-center justify-between gap-1.5 border-b border-[color-mix(in_srgb,var(--accent-cool)_22%,transparent)] px-0.5 pb-1.5 text-[var(--accent-cool)] [&_strong]:[font-size:var(--vui-font-sm)] [&_strong]:font-semibold [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)]",
   activeWorkDetailItem:
     "vui-app-appshell activeWorkDetailItem min-w-0 grid grid-cols-[max-content_minmax(0,1fr)] items-start gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] bg-[var(--vui-surface-row)] px-2.5 py-2",
   activeWorkDetailList:
-    "vui-app-appshell activeWorkDetailList m-0 grid min-h-0 max-h-[260px] list-none content-start gap-1.5 overflow-y-auto p-0",
+    "vui-app-appshell activeWorkDetailList m-0 grid min-h-0 list-none content-start gap-1.5 overflow-y-auto p-0",
   activeWorkDetailLink:
     "vui-app-appshell activeWorkDetailLink block min-w-0 rounded-[var(--radius-control)] text-inherit no-underline outline-none transition-colors hover:text-[var(--fg-primary)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_45%,transparent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--vui-surface-panel)]",
-  activeWorkDetailPanel:
-    "vui-app-appshell activeWorkDetailPanel min-w-0 grid gap-2 p-2.5",
   activeWorkDetailTitle:
     "vui-app-appshell activeWorkDetailTitle min-w-0 [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)]",
-  activeWorkInlineDetails:
-    "vui-app-appshell activeWorkInlineDetails min-w-0",
-  activeWorkInlineItem:
-    "vui-app-appshell activeWorkInlineItem min-w-0",
   activeWorkItemToneChip:
     "vui-app-appshell activeWorkItemToneChip !min-h-5 max-w-[7rem] shrink-0 truncate !px-1.5 !text-[10px]",
-  activeWorkKicker:
-    "vui-app-appshell activeWorkKicker min-w-0 shrink-0 [font-size:var(--vui-font-xs)] font-medium text-[var(--fg-tertiary)]",
-  activeWorkMore:
-    "vui-app-appshell activeWorkMore min-w-0 shrink-0 [font-size:var(--vui-font-xs)] font-semibold text-[var(--accent-cool)]",
-  activeWorkPopoverContent:
-    "vui-app-appshell activeWorkPopoverContent z-[95] w-[min(420px,calc(100vw-2rem))] max-w-[min(420px,calc(100vw-2rem))] border-[color-mix(in_srgb,var(--accent-cool)_22%,var(--border-strong))] bg-[var(--shell-panel)] p-0 shadow-[var(--vui-shadow-soft)]",
-  activeWorkStatus:
-    "vui-app-appshell activeWorkStatus min-w-0 shrink-0 rounded-full border border-[color-mix(in_srgb,var(--state-warning)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] px-1.5 py-0.5 [font-size:var(--vui-font-xs)] font-medium text-[var(--state-warning)]",
-  activeWorkToneChip:
-    "vui-app-appshell activeWorkToneChip !min-h-5 max-w-[6.5rem] shrink-0 truncate !px-1.5 !text-[10px]",
-  activeWorkSummary: `vui-app-appshell activeWorkSummary min-w-0 ${vuiGlassPanelClass} p-2 ${vuiStateSelectedRowClass}`,
   brandBlock:
     "vui-app-appshell brandBlock min-w-0",
   brandGate:
@@ -79,7 +57,7 @@ const styles = {
   lifecycleMenuPanel: `vui-app-appshell lifecycleMenuPanel min-w-0 ${vuiGlassPanelClass} p-2`,
   mainArea:
     "vui-app-appshell mainArea min-w-0 w-full",
-  mobileNav: `vui-app-appshell mobileNav hidden max-[639px]:flex min-w-0 items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] ${vuiToolbarFillClass} px-2 py-1`,
+  mobileNav: `vui-app-appshell mobileNav hidden min-w-0 items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] ${vuiToolbarFillClass} px-2 py-1`,
   mobileNavLabel:
     "vui-app-appshell mobileNavLabel min-w-0 truncate [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-primary)]",
   mobileRouteLink:
@@ -87,8 +65,8 @@ const styles = {
   mobileRouteLinkActive:
     `vui-app-appshell mobileRouteLinkActive ${vuiStateSelectedRowClass}`,
   mobileRouteMenu:
-    "vui-app-appshell mobileRouteMenu hidden max-[639px]:grid min-w-0 w-full gap-1 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
-  nav: `vui-app-appshell nav min-w-0 max-[639px]:hidden`,
+    "vui-app-appshell mobileRouteMenu hidden min-w-0 w-full gap-1 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
+  nav: "vui-app-appshell nav min-w-0",
   navLink:
     "vui-app-appshell navLink relative z-[2] inline-flex min-h-[30px] min-w-0 cursor-pointer items-center justify-center rounded-[var(--radius-control)] px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-primary)] no-underline select-none",
   navLinkActive:
@@ -97,6 +75,44 @@ const styles = {
     "vui-app-appshell navLinkDisabled relative inline-flex min-h-[30px] min-w-0 cursor-not-allowed items-center justify-center rounded-[var(--radius-control)] px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-tertiary)] opacity-55 select-none pointer-events-none",
   returnButton:
     `vui-app-appshell returnButton min-w-0 ${vuiControlQuietClass}`,
+  settingsActionButton:
+    `vui-app-appshell settingsActionButton min-w-0 !h-7 !min-h-7 !w-full !justify-start !border-0 !px-2 !text-xs !shadow-none ${vuiControlQuietChromeClass}`,
+  settingsActionList:
+    "vui-app-appshell settingsActionList grid min-w-0 grid-cols-2 gap-1 border-t border-[var(--vui-border-subtle)] py-1",
+  settingsActiveWork:
+    "vui-app-appshell settingsActiveWork grid min-w-0 gap-2 border-t border-[var(--vui-border-subtle)] px-2 pt-2",
+  settingsChevron:
+    "vui-app-appshell settingsChevron ml-auto shrink-0 text-[var(--fg-secondary)] transition-transform",
+  settingsChoiceButton:
+    `vui-app-appshell settingsChoiceButton min-w-0 !h-7 !min-h-7 !border-0 !px-2 !text-xs !shadow-none ${vuiControlQuietChromeClass}`,
+  settingsChoiceButtonActive:
+    `vui-app-appshell settingsChoiceButtonActive ${vuiStateSelectedRowClass}`,
+  settingsDock:
+    "vui-app-appshell settingsDock min-w-0",
+  settingsPopoverBody:
+    "vui-app-appshell settingsPopoverBody grid min-w-0 gap-1 p-1.5",
+  settingsPopoverContent:
+    "vui-app-appshell settingsPopoverContent z-[95] w-[min(292px,calc(100vw-20px))] max-h-[min(520px,calc(100dvh-96px))] overflow-y-auto border-[var(--border-strong)] bg-[var(--shell-panel)] p-0 shadow-[var(--vui-shadow-soft)]",
+  settingsPopoverHeader:
+    "vui-app-appshell settingsPopoverHeader flex min-w-0 items-center justify-between gap-2 border-b border-[var(--vui-border-subtle)] px-2 py-1.5 [&_strong]:text-sm [&_strong]:font-semibold",
+  settingsSection:
+    "vui-app-appshell settingsSection flex min-w-0 items-center justify-between gap-2 px-2 py-0.5",
+  settingsSectionLabel:
+    "vui-app-appshell settingsSectionLabel min-w-0 text-[13px] text-[var(--fg-secondary)]",
+  settingsStatus:
+    "vui-app-appshell settingsStatus flex min-w-0 items-center gap-1.5 text-xs text-[var(--fg-tertiary)]",
+  settingsThemeChoices:
+    "vui-app-appshell settingsThemeChoices flex min-w-0 shrink-0 gap-1",
+  settingsTrigger:
+    "vui-app-appshell settingsTrigger !h-full !min-h-0 !max-h-none !w-full !justify-start !rounded-none !border-0 !bg-transparent !px-4 !py-0 !shadow-none hover:!bg-[var(--bg-active)]",
+  settingsTriggerContent:
+    "vui-app-appshell settingsTriggerContent flex w-full min-w-0 items-center gap-3",
+  settingsTriggerIcon:
+    "vui-app-appshell settingsTriggerIcon flex size-6 shrink-0 items-center justify-center rounded-full bg-[var(--accent-warm)] text-white",
+  settingsTriggerLabel:
+    "vui-app-appshell settingsTriggerLabel min-w-0 truncate text-[15px] font-normal text-[var(--fg-primary)]",
+  settingsTriggerOpen:
+    "vui-app-appshell settingsTriggerOpen !bg-[var(--bg-active)]",
   shell: `vui-app-appshell shell min-w-0 grid h-full min-h-0 content-start overflow-hidden ${vuiWorkspaceFillClass} text-[var(--fg-primary)]`,
   shutdownCancelButton:
     `vui-app-appshell shutdownCancelButton min-w-0 ${vuiControlQuietClass}`,
@@ -131,14 +147,8 @@ const styles = {
   statusDot:
     "vui-app-appshell statusDot block h-2 w-2 shrink-0 grow-0 self-center rounded-full border-0 bg-current p-0 leading-none",
   // Rigid pill geometry: fixed height, zero vertical padding, shared leading-none mid-line.
-  statusSummaryChip:
-    "vui-app-appshell statusSummaryChip min-w-0 " +
-    "!inline-flex !h-8 !min-h-8 !max-h-8 !border-0 flex-nowrap !items-center !justify-center !gap-1.5 !px-2.5 !py-0 " +
-    "whitespace-nowrap leading-none [&>*]:!self-center [&>*]:leading-none",
   statusSummaryDot:
     "vui-app-appshell statusSummaryDot block h-1.5 w-1.5 shrink-0 grow-0 self-center rounded-full border-0 bg-current p-0 leading-none",
-  statusSummaryLabel:
-    "vui-app-appshell statusSummaryLabel min-w-0 max-w-[12rem] truncate [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-primary)] whitespace-nowrap",
   status_active:
     `vui-app-appshell status_active min-w-0 ${vuiStateSelectedRowClass}`,
   status_blocked:
@@ -183,15 +193,12 @@ const styles = {
     "vui-app-appshell status_warn min-w-0",
   status_warning:
     "vui-app-appshell status_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
-  toolCluster:
-    "vui-app-appshell toolCluster min-w-0 shrink-0 flex flex-nowrap items-center gap-1.5",
-  topActions: "vui-app-appshell topActions min-w-0 flex flex-nowrap items-center gap-3.5",
   // Display/layout + Electron drag policy for topBar live in workbench-shell.css.
   // Do not add Tailwind flex/grid or pointer-events here — they fight the fixed 3-column grid / hit targets.
   topBar:
     "vui-app-appshell topBar min-w-0",
-  topBarRestoreButton:
-    "vui-app-appshell topBarRestoreButton min-w-0 flex flex-wrap items-center gap-1.5 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full justify-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+  windowDragRegion:
+    "vui-app-appshell windowDragRegion min-w-6 flex-1 self-stretch",
   utilityButton:
     `vui-app-appshell utilityButton min-w-0 w-full max-w-full ${vuiControlQuietChromeClass} hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)]`,
   utilityButtonActive:
@@ -200,10 +207,6 @@ const styles = {
     "vui-app-appshell utilityButtonGrid min-w-0",
   utilityChevron:
     "vui-app-appshell utilityChevron min-w-0",
-  utilityCluster:
-    "vui-app-appshell utilityCluster relative min-w-0 shrink-0",
-  utilityClusterOpen:
-    "vui-app-appshell utilityClusterOpen min-w-0",
   utilityPopoverContent:
     "vui-app-appshell utilityPopoverContent z-[95] w-[min(520px,calc(100vw-40px))] max-h-[min(78vh,760px)] overflow-auto border-[var(--border-strong)] bg-[var(--shell-panel)] p-0 shadow-[var(--vui-shadow-soft)]",
   utilityPopoverBody:
@@ -226,12 +229,6 @@ const styles = {
   utilityFileTree:
     "vui-app-appshell utilityFileTree min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   utilityPanel: `vui-app-appshell utilityPanel min-w-0 ${vuiGlassPanelClass} p-2`,
-  utilityPanelHeader:
-    "vui-app-appshell utilityPanelHeader min-w-0 flex flex-wrap items-center gap-1.5 px-0.5 pb-1",
-  utilityTrigger:
-    "vui-app-appshell utilityTrigger min-w-0 h-[var(--vui-control-height-sm)] !border-0 flex-nowrap [&_[data-slot=vui-button-content]]:flex-nowrap [&_[data-slot=vui-button-content]]:whitespace-nowrap [&_[data-slot=vui-button-icon]]:shrink-0 [&_[data-slot=vui-button-label]]:inline-flex [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5 [&_[data-slot=vui-button-label]]:whitespace-nowrap [&_[data-slot=vui-button-trailing-icon]]:shrink-0",
-  utilityTriggerLabel:
-    "vui-app-appshell utilityTriggerLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] whitespace-nowrap",
 } as const;
 
 export default styles;

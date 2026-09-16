@@ -686,7 +686,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("resolveStickySessionDetailPaint");
     expect(routeSource).toContain("transcriptPending: sessionTranscriptPending");
     expect(routeSource).not.toContain("isForeignSessionDetailQueryKey(query.queryKey, activeId)");
-    expect(routeAndSelectionSource).toContain("syncSessionDetail(nextDetail)");
+    // Transcript-free select handoffs preserve cached window messages.
+    expect(routeAndSelectionSource).toContain("syncSessionDetail(nextDetail, {");
+    expect(routeAndSelectionSource).toContain('transcript: nextDetail.selectedLightweight ? "preserve" : "merge"');
     expect(routeAndSelectionSource).toContain("chatWorkspaceCache.afterSessionSelected()");
     expect(routeAndSelectionSource).not.toContain("afterSessionChanged({\n        sessionId: nextDetail.id");
     // Late /select responses must never chase a newer pointer back.
@@ -848,9 +850,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndLayoutSource).toContain("statusRailEnabled && responsiveLayout.rightVisible");
     expect(routeAndLayoutSource).toContain("const statusRailCollapsed = !statusRailDocked");
     expect(conversationIndexRailSource.indexOf("{conversationIndexPanel}")).toBeGreaterThan(-1);
-    expect(conversationIndexRailSource.indexOf("styles.systemEntryGroup")).toBeGreaterThan(
-      conversationIndexRailSource.indexOf('id="chat-conversation-index-pane"'),
-    );
+    expect(conversationIndexRailSource).not.toContain("styles.systemEntryGroup");
     expect(routeSource).not.toContain("<ChatStatusRail");
     expect(routeSource).not.toContain("TokenCoreStatusPanel");
   });
@@ -1819,16 +1819,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndIndexRailSource).toContain("styles.groupComposerPanel");
     expect(routeAndIndexRailSource).toContain("styles.groupAgentPicker");
     expect(routeAndIndexRailSource).toContain("styles.createGroupButton");
-    expect(routeAndIndexRailSource).toContain("styles.systemEntryGroup");
-    expect(routeAndIndexRailSource).toContain("styles.systemEntryButton");
 
     expect(routeAndIndexRailSource).toContain('id: "new-group"');
     expect(routeAndIndexRailSource).toContain("onSelect: onToggleGroupComposer");
     expect(routeStyles.railTop).toBeTypeOf("string");
     expect(routeStyles.railActionButton).toBeTypeOf("string");
-    expect(routeStyles.systemEntryGroup).toBeTypeOf("string");
-    expect(routeStyles.systemEntryButton).toBeTypeOf("string");
-    expect(routeStyles.systemEntryIcon).toBeTypeOf("string");
     expect(routeStyles.groupComposerPanel).toBeTypeOf("string");
     expect(routeStyles.groupAgentOption).toBeTypeOf("string");
     expect(routeStyles.createGroupButton).toBeTypeOf("string");
@@ -2004,8 +1999,6 @@ describe("ChatCodingRoute layout contract", () => {
       expect(className).toContain(gridTemplate);
     }
 
-    expect(routeStyles.systemEntryTitleRow).toContain("!flex");
-    expect(routeStyles.systemEntryTitleRow).not.toContain("grid-cols-");
   });
 
   it("keeps team group chat panels readable after the style-map bake", () => {
@@ -2054,8 +2047,6 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("uses the group surface as a project Agent bus observation and @ guidance entry", () => {
-    expect(routeSource).toContain("handleOpenProjectAgentBus");
-    expect(routeAndActionsSource).toContain("chatRoute.openProjectBus()");
     expect(routeAndActionsSource).not.toContain("setActiveGroupRoomId");
     expect(routeSource).toContain("queryKeys.projectAgentBus()");
     expect(routeSource).toContain("queryFn: ({ signal }) => listProjectAgentBusTimeline(undefined, { signal })");
@@ -2100,7 +2091,9 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("coalesces high-frequency direct session stream snapshots before updating UI cache", () => {
     expect(routeAndStreamSource).toContain("const SESSION_STREAM_MIN_APPLY_INTERVAL_MS = 350");
-    expect(routeSource).toContain("const nextDetail = mergeSessionDetailMessageWindow(previous, detail)");
+    expect(routeSource).toContain('const nextDetail = options?.transcript === "preserve"');
+    expect(routeSource).toContain("? mergeSessionDetailHandoff(previous, detail)");
+    expect(routeSource).toContain(": mergeSessionDetailMessageWindow(previous, detail);");
     expect(routeSource).toContain("sessionDetailSnapshotKey(previous) === sessionDetailSnapshotKey(nextDetail)");
     // snapshot helper lives in chatSessionDetailHelpers
     expect(routeAndStreamSource).toContain("setActiveTurnLayerForSession(current, streamSessionId, undefined)");
@@ -2303,8 +2296,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("sessionStreamRouteTargetMatches");
     expect(routeSource).toContain("const chatStartupWarmupActive = useStartupWarmup(chatStartupDataReady)");
     expect(routeSource).toContain("const chatPollingVisible = pageVisible || chatStartupWarmupActive");
-    expect(routeAndStreamSource).toContain("chatPollingVisible || options.routeSwitchGraceActive");
+    expect(routeAndStreamSource).toContain("options.chatPollingVisible");
+    expect(routeAndStreamSource).toContain("|| options.routeSwitchGraceActive");
+    expect(routeAndStreamSource).toContain("|| options.directSessionBackgroundSyncActive");
     expect(routeSource).not.toContain("pageVisible || directSessionBackgroundSyncActive || sessionStreamRouteSwitchGraceActive");
+    expect(routeSource).toContain("directSessionBackgroundSyncActive,");
+    expect(routeSource).toContain("browser.session_stream.focus_resync");
+    expect(routeSource).toContain("refetchSessionDetailRef.current()");
     expect(routeSource).toContain("&& (chatPollingVisible || groupBackgroundSyncActive)");
     expect(routeAndStreamSource).toContain("const shouldConnect = sessionStreamDecisionSnapshotRef.current.shouldConnect");
     expect(routeAndStreamSource).toContain("if (!shouldConnect)");
@@ -2425,7 +2423,6 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.directSessionItem).toBeTypeOf("string");
     expect(routeStyles.groupSessionItem).toBeTypeOf("string");
     expect(routeStyles.sessionStatusCluster).toBeTypeOf("string");
-    expect(routeStyles.sessionCurrentBadge).toBeTypeOf("string");
     expect(routeStyles.sessionRunningBadge).toBeTypeOf("string");
     expect(routeStyles.sessionUnreadBadge).toBeTypeOf("string");
     expect(routeStyles.conversationKindBadge).toBeTypeOf("string");
@@ -3085,9 +3082,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("defaultConversationGroupCollapsed(groupKey)");
     expect(routeSource).toContain("ConversationIndexTree");
     expect(routeSource).toContain("<ConversationIndexTree");
-    expect(routeAndIndexRailSource.indexOf("<ConversationIndexTree")).toBeLessThan(
-      routeAndIndexRailSource.indexOf("styles.systemEntryGroup"),
-    );
+
     expect(conversationIndexTreeSource).toContain("ConversationIndexSection");
     expect(conversationIndexTreeSource).toContain("defaultConversationGroupCollapsed(group.groupKey, group.groupKind)");
     expect(conversationIndexTreeSource).toContain("expanded={!collapsed}");
@@ -3148,22 +3143,19 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.conversationIndexPanelBody).toContain("!overflow-hidden");
     expect(routeStyles.conversationIndexPanelBody).toContain("!pr-0");
     expect(routeStyles.conversationIndexPanelBody).toContain("![scrollbar-gutter:auto]");
-    expect(routeStyles.conversationIndexLayout).toContain("grid-rows-[minmax(0,1fr)_auto]");
+    expect(routeStyles.conversationIndexLayout).toContain("grid-rows-[minmax(0,1fr)]");
+    expect(routeStyles.conversationIndexPanelBody).toContain("!pb-[var(--shell-settings-dock-height)]");
+    expect(conversationIndexRailSource).not.toContain("systemEntryGroup");
     expect(routeStyles.conversationIndexScrollRegion).toContain("overflow-y-auto");
     expect(routeAndIndexRailSource).toContain("styles.conversationIndexPanelBody");
     expect(routeAndIndexRailSource).toContain("styles.conversationIndexLayout");
     expect(routeAndIndexRailSource).toContain("styles.conversationIndexScrollRegion");
-    expect(routeStyles.systemEntryGroup).toContain("border-t");
-    expect(routeStyles.systemEntryGroup).toContain("content-start");
     expect(railTopSource).toContain("onCollapseConversationIndex");
     expect(railTopSource).toContain("PanelLeftClose");
     expect(routeStyles.railOverlay).toContain("!h-auto !bottom-0");
     expect(conversationIndexRailSource).not.toContain("<strong>1</strong>");
     expect(routeSource).toContain("<PaneResizeHandle");
     expect(routeSource).toContain("conversationIndexControl={!verifiedCompanionMode");
-    expect(routeStyles.systemEntryButton).toContain("grid-cols-[28px_minmax(0,1fr)]");
-    expect(routeStyles.systemEntryButton).toContain("border-transparent");
-    expect(routeStyles.systemEntryButtonActive).toContain("before:absolute");
   });
 
   it("uses one lightweight Tailwind grammar for conversation index sections and rows", () => {
@@ -3269,7 +3261,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("structuralSharing: sessionDetailStructuralSharing");
     expect(routeSource).toContain("export function sessionDetailStructuralSharing(");
     expect(routeAndDetailMutationsSource).toContain("mergeSessionDetailMessageWindow(current, page)");
-    expect(routeSource).toContain("const nextDetail = mergeSessionDetailMessageWindow(previous, detail)");
+    expect(routeSource).toContain('const nextDetail = options?.transcript === "preserve"');
+    expect(routeSource).toContain("? mergeSessionDetailHandoff(previous, detail)");
+    expect(routeSource).toContain(": mergeSessionDetailMessageWindow(previous, detail);");
     expect(routeSource).toContain("hasEarlierMessages: Boolean(detail.messageWindow?.hasEarlier)");
     expect(routeSource).toContain("earlierMessagesLoading: loadEarlierSessionMessagesMutation.isPending");
     expect(routeSource).toContain("onLoadEarlierMessages: handleLoadEarlierSessionMessages");

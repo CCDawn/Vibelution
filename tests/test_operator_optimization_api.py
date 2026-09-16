@@ -77,3 +77,48 @@ def test_recovery_api_requires_control_auth_and_forwards_scope(tmp_path, monkeyp
     assert calls == [((team, project, campaign.optimizationCampaignId, "round-one"),
         {"expected_version": 1, "command_key": "recover"})]
     assert client.post(path, json={**payload, "expectedCampaignVersion": 0}).status_code == 422
+
+
+def test_stage2_migration_api_requires_explicit_v2_action(tmp_path, monkeypatch):
+    from core.web.services.team_workflow.operator_optimization import migration
+
+    team, project = setup_team(tmp_path, monkeypatch)
+    campaign = create_campaign(
+        team,
+        project,
+        {"title": "Migration", "idempotencyKey": "one"},
+    )
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+    path = (
+        f"/teams/{team}/workflow-orchestration/research-projects/{project}"
+        f"/operator-experiments/{campaign.optimizationCampaignId}/stage2-migrations"
+    )
+    payload = {
+        "expectedCampaignVersion": 1,
+        "idempotencyKey": "migrate",
+        "sourceRunId": "run-stage2",
+        "initialAction": "discuss",
+    }
+    monkeypatch.setattr("core.web.control.validate_control_request", lambda request: None)
+    calls = []
+
+    def migrate(*args, **kwargs):
+        calls.append((args, kwargs))
+        return campaign
+
+    monkeypatch.setattr(migration, "migrate_stage2_run_to_stage3", migrate)
+    assert client.post(path, json=payload).status_code == 200
+    assert calls == [
+        (
+            (team, project, campaign.optimizationCampaignId),
+            {
+                "source_run_id": "run-stage2",
+                "initial_action": "discuss",
+                "expected_version": 1,
+                "command_key": "migrate",
+            },
+        )
+    ]
+    assert client.post(path, json={**payload, "initialAction": "continue"}).status_code == 422

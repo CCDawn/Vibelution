@@ -88,6 +88,38 @@ describe("chatSessionStreamConnect", () => {
     })).toBe(false);
   });
 
+  it("keeps the stream open for a hidden window that still syncs a busy turn", () => {
+    expect(resolveSessionStreamShouldConnect({
+      activeSessionId: "s1",
+      routeTargetMatches: true,
+      chatPollingVisible: false,
+      routeSwitchGraceActive: false,
+      directSessionBackgroundSyncActive: true,
+    })).toBe(true);
+    expect(resolveSessionStreamShouldConnect({
+      activeSessionId: "s1",
+      routeTargetMatches: true,
+      chatPollingVisible: false,
+      routeSwitchGraceActive: false,
+      directSessionBackgroundSyncActive: false,
+    })).toBe(false);
+    // Background sync must never bypass an unsettled route target.
+    expect(resolveSessionStreamShouldConnect({
+      activeSessionId: "s1",
+      routeTargetMatches: false,
+      chatPollingVisible: false,
+      routeSwitchGraceActive: false,
+      directSessionBackgroundSyncActive: true,
+    })).toBe(false);
+    expect(resolveSessionStreamShouldConnect({
+      activeSessionId: "",
+      routeTargetMatches: true,
+      chatPollingVisible: false,
+      routeSwitchGraceActive: false,
+      directSessionBackgroundSyncActive: true,
+    })).toBe(false);
+  });
+
   it("evaluates grace active window", () => {
     expect(resolveSessionStreamRouteSwitchGraceActive({
       activeSessionId: "s1",

@@ -135,6 +135,44 @@ describe("runWorkbenchLifecycle command settlement evidence", () => {
     }
   });
 
+  it("supersedes pending deferred restart intents after an accepted lifecycle command", async () => {
+    const { root, runtimeManagerDir } = makeWorkspace();
+    const intentsDir = join(runtimeManagerDir, "restart-intents");
+    mkdirSync(intentsDir, { recursive: true });
+    const intentPath = join(intentsDir, "intent_20260916T015900Z_aaaaaaaa.json");
+    writeFileSync(
+      intentPath,
+      JSON.stringify({
+        intentId: "intent_20260916T015900Z_aaaaaaaa",
+        target: "workbench_restart",
+        requestedBy: "electron_main",
+        status: "pending",
+        createdAt: new Date(Date.now() - 60_000).toISOString(),
+        updatedAt: new Date(Date.now() - 60_000).toISOString(),
+        attempts: 0,
+        payload: { action: "restart_workbench" }
+      }),
+      "utf8"
+    );
+    try {
+      const result = await runWorkbenchLifecycle({
+        ...baseInput(root),
+        operation: "stop",
+        queue: createMainLineCommandQueue()
+      });
+      expect(result).toMatchObject({ accepted: true, operation: "stop" });
+      const settled = JSON.parse(readFileSync(intentPath, "utf8"));
+      expect(settled.status).toBe("superseded");
+      expect(String(settled.message || "")).toContain("stop");
+      // The settlement evidence write is fire-and-forget; let it land before
+      // the temp workspace is removed or Windows fails the recursive delete.
+      const resultPath = mainLineCommandResultPath(runtimeManagerDir, result.commandId || "");
+      await vi.waitFor(() => expect(existsSync(resultPath)).toBe(true));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("defaults the command deadline to 15 minutes", () => {
     expect(MAIN_LINE_COMMAND_DEADLINE_MS).toBe(900_000);
   });

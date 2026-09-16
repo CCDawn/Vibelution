@@ -2989,16 +2989,8 @@ def reset_agent_direct_session_lightweight(
     fallback_title = s.text_for(lang, zh="新会话", en="New session")
     try:
         s._sync_agent_directory_project_root()
-        agent_row = s.get_agent(normalized_agent_id, include_archived=False)
-        if isinstance(agent_row, dict):
-            agent_name = str(
-                agent_row.get("displayName")
-                or agent_row.get("agentCode")
-                or agent_row.get("name")
-                or ""
-            ).strip()
-            if agent_name:
-                fallback_title = s.trim_lines(agent_name, max_lines=1).strip()[:120] or fallback_title
+        # Keep the create placeholder: the Agent display name lives in the Agent
+        # directory and must not pre-empt first-turn title generation.
     except Exception:
         pass
     normalized_title = s.trim_lines(title or "", max_lines=1).strip() or fallback_title
@@ -3035,6 +3027,9 @@ def reset_agent_direct_session_lightweight(
                 replacement_session_id,
                 title=normalized_title,
                 timestamp=created_at,
+                # A replacement direct session is a fresh empty chat: its display
+                # title stays a placeholder for first-turn generation.
+                title_source="placeholder",
             )
             s._ensure_conversation_workspace_metadata(replacement_conversation)
             replacement_conversation["agent_id"] = normalized_agent_id

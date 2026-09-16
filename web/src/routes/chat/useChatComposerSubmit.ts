@@ -29,7 +29,9 @@ import type {
   SessionReferenceAttachment,
   SessionTurnAcceptedResponse,
 } from "../../api/types";
+import type { RuntimeSummary } from "../../api/types/runtime";
 import type { TranslationKey } from "../../i18n/dictionary";
+import { removeChatTurnFromRuntimeSummary } from "./chatActiveWorkCache";
 import {
   createOptimisticActiveTurnLayer,
   latestUserTurnId,
@@ -707,7 +709,20 @@ export function useChatComposerTurnMutations({
       if (optimisticDetail) {
         queryClient.setQueryData(queryKeys.session(variables.sessionId), optimisticDetail);
       }
-      return { telemetry, previousDetail, stoppingAt };
+      // The shell active-work indicator is driven by the runtime summary poll;
+      // patch it now so a stopped turn leaves the list at click time.
+      const runtimeKey = queryKeys.runtimeSummary();
+      const previousRuntime = queryClient.getQueryData<RuntimeSummary>(runtimeKey);
+      if (previousRuntime) {
+        const nextRuntime = removeChatTurnFromRuntimeSummary(previousRuntime, {
+          sessionId: variables.sessionId,
+          turnId: variables.turnId,
+        });
+        if (nextRuntime && nextRuntime !== previousRuntime) {
+          queryClient.setQueryData(runtimeKey, nextRuntime);
+        }
+      }
+      return { telemetry, previousDetail, stoppingAt, previousRuntime };
     },
     onSuccess: (nextDetail, variables, context) => {
       context?.telemetry?.succeeded({
@@ -742,6 +757,9 @@ export function useChatComposerTurnMutations({
         ...current,
         [variables.sessionId]: describeError(error, t("stopFailed")),
       }));
+      if (context?.previousRuntime) {
+        queryClient.setQueryData(queryKeys.runtimeSummary(), context.previousRuntime);
+      }
       void chatWorkspaceCache.afterDirectTurnFailed(variables.sessionId);
     },
   });
@@ -933,15 +951,6 @@ export function useChatComposerSubmitActions({
     if (!activeSessionId) {
       return;
     }
-    if (sessionBusy) {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [activeSessionId]: lang === "zh"
-          ? "运行中的排队消息暂不支持图片，请等待当前轮次结束后发送。"
-          : "Queued follow-ups do not support images while a turn is running. Send it after the turn ends.",
-      }));
-      return;
-    }
     if (activeAgentImageInputUnsupported) {
       setSessionComposerErrors((current) => ({
         ...current,
@@ -986,15 +995,6 @@ export function useChatComposerSubmitActions({
 
   const handleAddComposerReference = useCallback((reference: SessionReferenceAttachment) => {
     if (!activeSessionId) {
-      return;
-    }
-    if (sessionBusy) {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [activeSessionId]: lang === "zh"
-          ? "运行中的排队消息暂不支持会话引用，请等待当前轮次结束后发送。"
-          : "Queued follow-ups do not support session references while a turn is running. Send it after the turn ends.",
-      }));
       return;
     }
     if (activeEditTarget || resolvedEditTarget) {

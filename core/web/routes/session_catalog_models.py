@@ -4,6 +4,12 @@ Create/select/update still return a full session document; extras pass through
 until the S3 detail contract. Do not strip unknown fields. Catalog routes must
 use response_model_exclude_unset=True so missing optional fields stay absent
 instead of being filled with empty defaults.
+
+``POST /sessions/{id}/select`` keeps that full-document passthrough, but callers
+that send ``Prefer: respond-async`` receive the transcript-free handoff built by
+``_build_lightweight_session_detail``: summary/control fields plus an empty
+``messages`` list. The windowed detail read (GET) stays the transcript authority
+so a tab switch never rebuilds the full history.
 """
 
 from __future__ import annotations

@@ -845,6 +845,29 @@ def test_select_chat_session_returns_windowed_detail_contract(tmp_path, monkeypa
     assert all("codexTranscript" not in message for message in payload["messages"])
 
 
+def test_lightweight_select_returns_transcript_free_handoff(tmp_path, monkeypatch):
+    """UI select (Prefer: respond-async) ships a handoff, never a transcript."""
+
+    _seed_chat_state(tmp_path, task_status="done")
+    for turn_number in range(1, 4):
+        _append_window_test_turn(tmp_path, "session-live", turn_number)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    response = client.post(
+        "/api/sessions/session-live/select",
+        headers={"Prefer": "respond-async"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == "session-live"
+    assert payload["selectedLightweight"] is True
+    assert payload["messages"] == []
+    assert "messageWindow" not in payload
+    # The handoff must not carry any transcript payload in another field.
+    assert "窗口回答" not in json.dumps(payload)
+
+
 def test_session_detail_snapshot_publish_uses_windowed_detail_by_default(monkeypatch):
     subscriber: queue.Queue[dict[str, object]] = queue.Queue()
     captured_calls: list[dict[str, object]] = []

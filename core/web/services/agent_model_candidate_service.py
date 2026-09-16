@@ -8,7 +8,11 @@ from typing import Any
 from config.llm_credentials import resolve_credential_ref
 from config.llm_identity import make_model_ref, provider_discovery_fingerprint
 from config.model_catalog import load_model_catalog_state, resolve_model_capabilities
-from config.public_config import load_public_config, public_config_hash
+from config.public_config import (
+    curated_catalog_capabilities,
+    load_public_config,
+    public_config_hash,
+)
 from core.llm.reasoning_effort import normalize_reasoning_effort
 
 
@@ -191,6 +195,7 @@ def _resolved_slot_capability(
     pinned: dict[str, Any],
     observed: dict[str, Any],
     field: str,
+    curated: dict[str, Any] | None = None,
 ) -> str:
     pinned_capabilities = pinned.get("capabilities") if isinstance(pinned.get("capabilities"), dict) else {}
     if field in pinned_capabilities:
@@ -198,7 +203,9 @@ def _resolved_slot_capability(
     observed_capabilities = (
         observed.get("capabilities") if isinstance(observed.get("capabilities"), dict) else {}
     )
-    return _capability_value(observed_capabilities, field)
+    if field in observed_capabilities:
+        return _capability_value(observed_capabilities, field)
+    return _capability_value(curated if isinstance(curated, dict) else {}, field)
 
 
 def _is_non_dialogue_model(
@@ -231,11 +238,13 @@ def project_slot_compatibility(
     upstream_id: str,
     pinned: dict[str, Any],
     observed: dict[str, Any],
+    *,
+    curated: dict[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Project stable slot decisions without promoting catalog observations."""
 
     non_dialogue = _is_non_dialogue_model(upstream_id, pinned, observed)
-    image_input = _resolved_slot_capability(pinned, observed, "image_input")
+    image_input = _resolved_slot_capability(pinned, observed, "image_input", curated)
     result: dict[str, dict[str, Any]] = {}
     for slot in _AGENT_LLM_SLOTS:
         if non_dialogue:
@@ -293,11 +302,12 @@ def _candidate(
     has_pinned = bool(pinned)
     has_observed = bool(observed)
     upstream_id = str(pinned.get("upstream_id") or observed.get("upstreamId") or model_key).strip()
+    curated_capabilities = curated_catalog_capabilities(upstream_id)
     capabilities = resolve_model_capabilities(
         operator=pinned.get("capabilities", {}),
         runtime_probe={},
         provider_metadata=observed.get("capabilities", {}),
-        curated_snapshot={},
+        curated_snapshot=curated_capabilities,
         driver_default={},
     )
     image_input = capabilities.get("image_input") if isinstance(capabilities.get("image_input"), dict) else {}
@@ -361,7 +371,12 @@ def _candidate(
             if image_input.get("value") == "unsupported"
             else None
         ),
-        "slotCompatibility": project_slot_compatibility(upstream_id, pinned, observed),
+        "slotCompatibility": project_slot_compatibility(
+            upstream_id,
+            pinned,
+            observed,
+            curated=curated_capabilities,
+        ),
         **credential_compatibility,
         **reasoning,
     }

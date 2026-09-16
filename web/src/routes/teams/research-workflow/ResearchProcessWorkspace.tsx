@@ -74,7 +74,10 @@ import { useResearchWorkflowCommand } from "./useResearchWorkflowCommand";
 import { useResearchWorkflowCommands } from "./useResearchWorkflowCommands";
 import { useResearchWorkflowInsights } from "./useResearchWorkflowInsights";
 import { useResearchWorkflowRun } from "./useResearchWorkflowRun";
-import { useResearchWorkflowWorkspace } from "./useResearchWorkflowWorkspace";
+import {
+  useArchivedRunResetRedirect,
+  useResearchWorkflowWorkspace,
+} from "./useResearchWorkflowWorkspace";
 
 export type ResearchProcessWorkspaceProps = {
   teamId: string;
@@ -91,6 +94,10 @@ const EMPTY_RUNTIME_NODE_IDS: string[] = [];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isArchivedFormalRun(value: unknown): boolean {
+  return String(value ?? "").trim().toLowerCase() === "archived";
 }
 
 /**
@@ -199,6 +206,16 @@ export function ResearchProcessWorkspace({
     refresh: runState.refresh,
     replaceParams: location.replaceParams,
   });
+  const selectedRunIsArchived = isArchivedFormalRun(
+    runState.run?.status ?? runState.snapshot?.run?.status,
+  );
+  useArchivedRunResetRedirect({
+    runId: location.runId,
+    isArchivedRun: selectedRunIsArchived,
+    resetSource: hypothesisFirstChain.stateV2?.resetBoundary.source,
+    currentPhase: hypothesisFirstChain.stateV2?.currentPhase,
+    replaceParams: location.replaceParams,
+  });
 
   const graph = useMemo(() => {
     if (!runState.projection) return null;
@@ -208,7 +225,7 @@ export function ResearchProcessWorkspace({
         .map((binding) => [binding.nodeId, binding.agentId]),
     );
     const invocationBadges = runState.snapshot?.invocationBadges;
-    const base = location.runId
+    const base = location.runId && !selectedRunIsArchived
       ? projectionToCanvasGraph(runState.projection, {
           primaryAgentIdByNode,
           invocationBadges,
@@ -240,6 +257,7 @@ export function ResearchProcessWorkspace({
   }, [
     catalog.effectiveBindings,
     location.runId,
+    selectedRunIsArchived,
     selectedKsfNodeId,
     runState.projection,
     runState.snapshot,
@@ -288,7 +306,7 @@ export function ResearchProcessWorkspace({
 
 
   const formalRuntimeActive = Boolean(
-    runState.snapshot?.run?.runId === location.runId && location.runId
+    runState.snapshot?.run?.runId === location.runId && location.runId && !selectedRunIsArchived
   ) || Boolean(
     hypothesisFirstChain.stateV2?.formalRuntime.runId
     || hypothesisFirstChain.stateV2?.convergence.accepted

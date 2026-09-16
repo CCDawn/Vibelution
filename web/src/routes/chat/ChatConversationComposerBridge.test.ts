@@ -181,7 +181,7 @@ describe("ChatConversationComposerBridge", () => {
     expect(state.actionMode).toBe("stop");
   });
 
-  it("explains that a waiting image queues with the message until the running turn ends", () => {
+  it("keeps image capability guidance quiet unless the model is explicitly unsupported", () => {
     expect(buildComposerImageInputGuidance({
       attachmentCount: 0,
       queuedUntilTurnEnds: true,
@@ -209,7 +209,21 @@ describe("ChatConversationComposerBridge", () => {
       imageInputSupport: null,
       modelLabel: "model-x",
       lang: "zh",
-    })).toBe("model-x 的图像输入能力尚未验证；将尝试发送，失败时会保留诊断。");
+    })).toBe("");
+    expect(buildComposerImageInputGuidance({
+      attachmentCount: 1,
+      queuedUntilTurnEnds: false,
+      imageInputSupport: true,
+      modelLabel: "model-x",
+      lang: "en",
+    })).toBe("");
+    expect(buildComposerImageInputGuidance({
+      attachmentCount: 1,
+      queuedUntilTurnEnds: false,
+      imageInputSupport: false,
+      modelLabel: "model-x",
+      lang: "zh",
+    })).toBe("model-x 明确不支持图像输入，无法发送图片。");
   });
 
   it("marks the primary Chat composer as the Codex variant", () => {

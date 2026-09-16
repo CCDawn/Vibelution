@@ -141,6 +141,127 @@ def _validate_models(models: list[DiscoveredProviderModel]) -> tuple[DiscoveredP
     return tuple(normalized)
 
 
+# Provider payloads spell image-input capability in several vendor dialects.
+# Only explicit declarations are recorded; capability is never inferred from a
+# model name, because a wrong "supported" sends an unreadable image to the
+# provider and a wrong "unsupported" hides a working feature.
+_IMAGE_INPUT_TRUE_VALUES = {"1", "enabled", "image", "multimodal", "supported", "supports", "true", "yes"}
+_IMAGE_INPUT_FALSE_VALUES = {"0", "disabled", "false", "no", "not_supported", "only_text", "text_only", "unsupported"}
+# Inside a ``capabilities`` object the legacy ``vision`` key is a known alias.
+# Outside it, a bare ``vision`` key is ambiguous (image output vs image input),
+# so only the unambiguous ``*_image_input``/``supports_vision`` aliases count.
+_CAPABILITY_OBJECT_IMAGE_INPUT_ALIASES = (
+    "image_input",
+    "imageinput",
+    "supports_image_input",
+    "supportsimageinput",
+    "supports_vision",
+    "supportsvision",
+    "vision",
+)
+_SCOPED_IMAGE_INPUT_ALIASES = (
+    "image_input",
+    "supports_image_input",
+    "supports_vision",
+    "supportsimageinput",
+    "supportsvision",
+)
+# Modality lists are authoritative: a non-empty list without "image" is a real
+# negative declaration. Free-form modality strings only ever confirm support.
+_MODALITY_LIST_FIELDS = ("input_modalities", "inputModalities", "modalities", "input_modality")
+_MODALITY_TEXT_FIELDS = ("modality", "inputModality")
+_NESTED_PROVIDER_SCOPES = ("architecture", "model_info", "modelInfo", "specs", "capabilities")
+
+
+def _coerce_image_input_flag(value: Any) -> str | None:
+    if isinstance(value, bool):
+        return "supported" if value else "unsupported"
+    if isinstance(value, (int, float)):
+        if value == 1:
+            return "supported"
+        if value == 0:
+            return "unsupported"
+        return None
+    text = str(value or "").strip().lower()
+    if not text:
+        return None
+    if text in _IMAGE_INPUT_TRUE_VALUES:
+        return "supported"
+    if text in _IMAGE_INPUT_FALSE_VALUES:
+        return "unsupported"
+    return None
+
+
+def _image_input_from_modality_list(value: Any) -> str | None:
+    """Read an explicit input-modality list; a list without image means no."""
+    items: list[str] = []
+    if isinstance(value, str):
+        head = value.split("->", 1)[0]
+        items = [part.strip() for part in re.split(r"[+,|]", head) if part.strip()]
+    elif isinstance(value, (list, tuple)):
+        items = [str(item).strip() for item in value if str(item).strip()]
+    if not items:
+        return None
+    return "supported" if any("image" in item.lower() for item in items) else "unsupported"
+
+
+def _image_input_from_modality_text(value: Any) -> str | None:
+    """Free-form ``"text+image->text"`` style strings confirm support only."""
+    if not isinstance(value, str):
+        return None
+    head = value.split("->", 1)[0].lower()
+    return "supported" if "image" in head else None
+
+
+def _declared_image_input(raw: dict[str, Any]) -> str | None:
+    """Return the provider's explicit image-input declaration, else ``None``."""
+    capabilities = raw.get("capabilities")
+    if isinstance(capabilities, dict):
+        for key, value in capabilities.items():
+            normalized_key = str(key).strip().lower().replace("-", "_")
+            if normalized_key not in _CAPABILITY_OBJECT_IMAGE_INPUT_ALIASES:
+                continue
+            flag = _coerce_image_input_flag(value.get("value") if isinstance(value, dict) else value)
+            if flag:
+                return flag
+    scopes: list[Any] = [raw]
+    scopes.extend(raw.get(nested) for nested in _NESTED_PROVIDER_SCOPES)
+    for scope in scopes:
+        if not isinstance(scope, dict):
+            continue
+        for key in _MODALITY_LIST_FIELDS:
+            if key in scope:
+                flag = _image_input_from_modality_list(scope.get(key))
+                if flag:
+                    return flag
+        for key in _MODALITY_TEXT_FIELDS:
+            if key in scope:
+                flag = _image_input_from_modality_text(scope.get(key))
+                if flag:
+                    return flag
+        for key in _SCOPED_IMAGE_INPUT_ALIASES:
+            if key in scope:
+                flag = _coerce_image_input_flag(scope.get(key))
+                if flag:
+                    return flag
+    return None
+
+
+def _normalized_capabilities(raw: dict[str, Any]) -> dict[str, Any]:
+    """Merge provider capability dialects into the canonical ``image_input`` key."""
+    raw_capabilities = raw.get("capabilities")
+    capabilities = copy.deepcopy(raw_capabilities) if isinstance(raw_capabilities, dict) else {}
+    declared = _declared_image_input(raw)
+    if declared is None:
+        return capabilities
+    for key in list(capabilities):
+        normalized_key = str(key).strip().lower().replace("-", "_")
+        if normalized_key in _CAPABILITY_OBJECT_IMAGE_INPUT_ALIASES:
+            capabilities.pop(key, None)
+    capabilities["image_input"] = declared
+    return capabilities
+
+
 def _model(raw: Any, *, id_field: str = "id", strip_prefix: str = "") -> DiscoveredProviderModel | None:
     if not isinstance(raw, dict):
         return None
@@ -150,7 +271,7 @@ def _model(raw: Any, *, id_field: str = "id", strip_prefix: str = "") -> Discove
     if not upstream_id:
         return None
     limits = _extract_context_limits(raw)
-    capabilities = copy.deepcopy(raw.get("capabilities")) if isinstance(raw.get("capabilities"), dict) else {}
+    capabilities = _normalized_capabilities(raw)
     return DiscoveredProviderModel(
         upstream_id=upstream_id,
         label=str(raw.get("display_name") or raw.get("label") or upstream_id),

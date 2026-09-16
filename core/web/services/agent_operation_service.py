@@ -90,6 +90,9 @@ def create_agent_from_catalog_request(
 
     session = session_service.create_chat_session(
         title=normalized_display_name,
+        # The Agent display name is a chat display default, not an operator title:
+        # the first user turn may replace it with a generated title.
+        title_source="placeholder",
         llm_bindings=normalized_llm_bindings,
         created_by=source,
         conversation_index_kind=CONVERSATION_INDEX_KIND_PERSONAL_AGENT,

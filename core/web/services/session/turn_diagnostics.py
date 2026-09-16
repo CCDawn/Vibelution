@@ -1322,11 +1322,17 @@ def _active_chat_turn_work_run_for_session(
 def list_active_session_work_runs(*, reconcile: bool = True) -> list[dict[str, Any]]:
     """Return active web chat turns as lightweight WorkRun lease snapshots."""
     s = _service()
+    from .directory_bridge import note_session_read_degraded
+
     if reconcile:
         try:
             reconcile_stale_chat_turn_work_runs()
-        except Exception:
-            pass
+        except Exception as exc:
+            # Stale rows stay unrepaired and would render as running forever.
+            note_session_read_degraded(
+                source="stale turn reconcile",
+                error_type=type(exc).__name__,
+            )
 
     with s._RUNNING_SESSIONS_LOCK:
         session_ids = sorted(s._RUNNING_SESSION_IDS)
@@ -1334,7 +1340,12 @@ def list_active_session_work_runs(*, reconcile: bool = True) -> list[dict[str, A
         active_leases = {key: list(value) for key, value in s._SESSION_ACTIVE_TURN_LEASES.items()}
     try:
         queued_scheduler_turns = s._SESSION_TURN_SCHEDULER.queued_session_turn_ids()
-    except Exception:
+    except Exception as exc:
+        # An unreadable queue silently demotes queued turns to running.
+        note_session_read_degraded(
+            source="queued turn list",
+            error_type=type(exc).__name__,
+        )
         queued_scheduler_turns = set()
     active_statuses = s._active_session_work_run_statuses(session_ids)
     items: list[dict[str, Any]] = []
@@ -1376,7 +1387,12 @@ def list_active_session_work_runs(*, reconcile: bool = True) -> list[dict[str, A
     seen_run_ids = {str(item.get("runId") or "") for item in items}
     try:
         recent_snapshots = s._WORK_RUN_STORE.list_snapshots("chat_turn", limit=40)
-    except Exception:
+    except Exception as exc:
+        # A failed snapshot read hides persisted queued turns from the UI.
+        note_session_read_degraded(
+            source="queued turn snapshots",
+            error_type=type(exc).__name__,
+        )
         recent_snapshots = []
     for queued_snapshot in recent_snapshots:
         if not isinstance(queued_snapshot, dict):
@@ -1426,10 +1442,15 @@ def _active_session_work_run_statuses(session_ids: list[str]) -> dict[str, str]:
 
 def load_chat_turn_work_run_summary() -> dict[str, Any]:
     s = _service()
+    from .directory_bridge import note_session_read_degraded
+
     try:
         reconcile_stale_chat_turn_work_runs()
-    except Exception:
-        pass
+    except Exception as exc:
+        note_session_read_degraded(
+            source="stale turn reconcile",
+            error_type=type(exc).__name__,
+        )
     active_items = list_active_session_work_runs(reconcile=False)
     active = s._WORK_RUN_STORE.load_active_snapshot("chat_turn")
     if not active and active_items:

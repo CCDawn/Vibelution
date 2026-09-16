@@ -2,7 +2,7 @@
 
 > 日期：2026-09-14
 >
-> Status：产品方向与 LangGraph 动态决策改造路线已获用户确认；2026-09-14 已接通轮间单一决策边界、真实决策 Agent Session、独立预算与回执，并将算子图终点移到决策节点。2026-09-15 已完成第二阶段的真实资料与 GPU 闭环；第三阶段已实现首个服务端闭环切片：显式 Seed、v2 多动作决定和 discuss / collect_knowledge / plan_candidate / retest / stop 路由已接通，repair_baseline 在基础版本修订流实现前明确拒绝。
+> Status：产品方向与 LangGraph 动态决策改造路线已获用户确认；2026-09-14 已接通轮间单一决策边界、真实决策 Agent Session、独立预算与回执，并将算子图终点移到决策节点。2026-09-15 已完成第二阶段的真实资料与 GPU 闭环；第三阶段已接通显式 Seed、v2 多动作决定、历史 1.1.0 显式迁移入口和版本化 `repair_baseline`。真实 Windows CUDA 第三阶段迭代仍需单独运行验收。
 >
 > 评估修订：2026-09-14 已纳入可行性审查的五项实施缺口、改造要求与效果验证方法；用户已要求继续按评估建议完善方案。
 >
@@ -198,7 +198,7 @@ LangGraph、Open Deep Research、AIDE 的仓库 LICENSE 已核实为 MIT。本�
 | --- | --- | --- |
 | 动态选路、按需讨论和检索 | 已有 LangGraph、命令和账本基础，改造量中等 | 有望减少固定步骤；图与跨轮调度都需要改造 |
 | 知识正文消费、相关资料复用 | 已有存储检索能力，需要补消费和回存路径 | 改善决策依据、减少重复搜索；只传 ID/哈希达不到目标 |
-| 自动跨阶段与回退修复 | 可行，但当前初始基线模型不直接支持版本切换 | 降低人工介入；需先明确基线重跑与修订语义 |
+| 自动跨阶段与回退修复 | 已实现显式历史迁移与基线版本切换；真实 CUDA 重跑待验收 | 降低人工介入；旧测量保留审计但退出新版本排行 |
 | 自主搭建实验、修改算子实现 | 当前受管候选能力较窄，需要独立补齐 | 决定是否能超出预置实现与少量参数；不能用调参验收替代代码改造能力 |
 | 优化效果及运行效率 | 架构本身不能保证 | 决策增加的成本需与省下的步骤比较，不能预先承诺加速倍数或节省比例 |
 
@@ -227,7 +227,7 @@ LangGraph、Open Deep Research、AIDE 的仓库 LICENSE 已核实为 MIT。本�
 - 删除新流程内“结束即自动开下一轮讨论”的旧决策规则；保留可复用的轮次创建、命令与回执机制。
 - 同一结果重复到达不得产生第二轮创建；决定停止后，旧事件不能额外开会或启动实验。图路由与 worker 后继解析、跨轮入口需一起验证。
 
-**四、回退修复必须处理基线版本。** [prepare_baseline](../../core/web/services/team_workflow/operator_optimization/baseline.py) 当前只允许初始创建；[OptimizationCampaign](../../core/research/operator_optimization/contracts.py) 当前只有一组基线引用。阶段切换不足以表达基线修订。
+**四、回退修复必须处理基线版本。** [prepare_baseline](../../core/web/services/team_workflow/operator_optimization/baseline.py) 与 `prepare_baseline_repair` 现在分别创建初始版本和修复版本；[OptimizationCampaign](../../core/research/operator_optimization/contracts.py) 以 `baselineVersions + activeBaselineVersionId` 保存版本历史，并将原有单值引用约束为 active version 的投影。
 
 - 同一实现、同一协议下的暂时执行失败：保留基础版本，创建新的执行尝试，记录真实环境；是否可比较仍按环境与测量条件判断。
 - 基线实现或评价程序纠错：保留旧版本与旧结果，形成新基础版本并重新测量；当前最佳方案和后续比较绑定到新版本，不能直接沿用旧排行。
@@ -437,6 +437,8 @@ flowchart LR
 | plan_candidate | 复用原假设与已验收资料正文，只启动 `optimization_plan`；拒绝再次规划 Seed 中已尝试的候选配置 |
 | retest | 将 Seed 中的冻结计划绑定为新轮次复测计划，只启动 `operator_execution`；不重新调用规划 Agent |
 | stop | 保存原因，不创建轮次 |
-| repair_baseline | 当前明确返回 `baseline_repair_flow_not_connected`，不创建轮次；待新基础版本及排行隔离完成后开放 |
+| repair_baseline | 要求来源轮次同时具备评价与反馈；创建新的 baseline Run 和 prepared 版本，成功测量后原子切换 active version，旧版本转为 superseded；旧测量保留但不进入新版本轮次的观察、评价或晋升 |
 
 预算检查已按实际动作收窄：decision task 在调用前独立预留并结算自己的预算；终点事件不重复预留 decision，讨论、资料和规划分别检查自己的后继预算，retest 不再被无关模型预算阻塞。恢复仍复用同一 decision、round key 和 start command key。
+
+历史迁移与基线修复都使用原有 Campaign CAS、Run 创建幂等键和 Artifact readback，不建立第二套账本。`operator-optimization@1.1.0` 只允许通过 `/stage2-migrations` 显式提供来源 Run、CAS 版本、幂等键和新的 v2 初始动作；旧 `continue` 只作为来源证据，不能自动解释为 `discuss`。迁移会创建新 `1.2.0` Run、Seed 与 `operator_stage2_migration_receipt`，并保持来源 Run 不变。基线修复在新测量成功前不替换 active version；切换后新轮次绑定新的 `baselineVersionId`，旧 hypothesis、knowledge、plan 和 measurement 不会被当作新版本的可比输入。

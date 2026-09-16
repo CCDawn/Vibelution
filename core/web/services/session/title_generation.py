@@ -10,13 +10,12 @@ No transcript, journal, worker, or projection authority changes here.
 from __future__ import annotations
 
 import contextlib
-import copy
 import re
 import threading
 from typing import Any
 
-from config.public_config import build_effective_config, load_public_config
 from core.llm import LLMInvocationContext, get_llm_client, invoke_llm
+from core.llm.agent_runtime import config_for_agent_llm_model
 
 
 SESSION_TITLE_PROFILE_ID = "__session_title__"
@@ -84,29 +83,27 @@ def _resolve_title_model_id(session_id: str) -> str:
     return str(choice.get("modelRef") or choice.get("modelId") or "").strip()
 
 
-def _pin_title_model(public_config: dict[str, Any], model_id: str) -> dict[str, Any]:
-    normalized_model_id = str(model_id or "").strip()
-    payload = copy.deepcopy(public_config) if isinstance(public_config, dict) else {}
-    llm = payload.setdefault("llm", {})
-    if not isinstance(llm, dict):
-        raise ValueError("llm must be an object")
-    model_library = llm.get("model_library", {})
-    if not isinstance(model_library, dict) or normalized_model_id not in model_library:
-        raise ValueError(f"unknown session title model: {normalized_model_id}")
-    profiles = llm.setdefault("profiles", {})
-    if not isinstance(profiles, dict):
-        raise ValueError("llm.profiles must be an object")
-    profiles[SESSION_TITLE_PROFILE_ID] = {
-        "label": "Session Title",
-        "model_ref": normalized_model_id,
-    }
-    return payload
+def _title_runtime_config(s: Any, model_id: str) -> Any:
+    """Bind the resolved model to a dedicated runtime profile for the title call.
+
+    Reuses the same binding mechanics as the dialogue path: the model's runtime
+    entry in the effective config supplies transport, protocol, and defaults.
+    Public-config profile pinning is not used because schema v2 payloads do not
+    expose ``model_library`` (it only exists after runtime projection).
+    """
+
+    return config_for_agent_llm_model(
+        s.get_config(),
+        model_id=model_id,
+        runtime_profile_id=SESSION_TITLE_PROFILE_ID,
+        slot="dialogue",
+    )
 
 
-def _generate_title_candidate(message: str, model_id: str) -> str:
-    public_config = load_public_config()
-    effective_config = build_effective_config(_pin_title_model(public_config, model_id))
-    client = get_llm_client(profile_id=SESSION_TITLE_PROFILE_ID, config=effective_config)
+def _generate_title_candidate(session_id: str, message: str, model_id: str) -> str:
+    s = _service()
+    runtime_config = _title_runtime_config(s, model_id)
+    client = get_llm_client(profile_id=SESSION_TITLE_PROFILE_ID, config=runtime_config)
     response = invoke_llm(
         client,
         [
@@ -142,7 +139,7 @@ def generate_session_title_now(session_id: str, message: str) -> str:
     model_id = _resolve_title_model_id(session_id)
     if not model_id:
         return ""
-    candidate = _generate_title_candidate(normalized_message, model_id)
+    candidate = _generate_title_candidate(session_id, normalized_message, model_id)
     if not candidate:
         return ""
     if not s.apply_generated_session_title(session_id, candidate, source="auto"):
@@ -160,6 +157,33 @@ def _run_title_generation(session_id: str, message: str) -> None:
                 f"session title generation skipped: {type(exc).__name__}: {exc}",
                 tag="LOGS",
             )
+        _record_title_generation_failure(s, session_id, exc)
+
+
+def _record_title_generation_failure(s: Any, session_id: str, exc: BaseException) -> None:
+    """Persist one durable scene event so background failures are diagnosable.
+
+    The debug logger channel used above is dropped for background threads, which
+    previously made title failures invisible in the operator logs.
+    """
+
+    try:
+        s.record_runtime_scene_event(
+            "conversation",
+            "title",
+            "conversation.title.generation_failed",
+            level="warning",
+            outcome="failed",
+            message="Session title generation failed.",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "errorType": type(exc).__name__,
+                "errorMessage": str(exc)[:200],
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
 
 
 def maybe_schedule_session_title_generation(

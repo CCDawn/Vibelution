@@ -156,7 +156,22 @@ describe("useChatSessionSelection committed-route preference sync", () => {
     mount("session-a");
     await flushDebounce();
     expect(fetchJsonMock).toHaveBeenCalledTimes(1);
-    expect(syncSessionDetail).toHaveBeenCalledWith(expect.objectContaining({ id: "session-a" }));
+    expect(syncSessionDetail).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "session-a" }),
+      { transcript: "merge" },
+    );
+  });
+
+  it("preserves the cached transcript when /select answers with a lightweight handoff", async () => {
+    fetchJsonMock.mockImplementation(() =>
+      Promise.resolve({ ...detailFor("session-a"), selectedLightweight: true, messages: [] }),
+    );
+    mount("session-a");
+    await flushDebounce();
+    expect(syncSessionDetail).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "session-a", selectedLightweight: true }),
+      { transcript: "preserve" },
+    );
   });
 
   it("collapses rapid A→B→A route thrash into one POST for the final target", async () => {
@@ -171,7 +186,10 @@ describe("useChatSessionSelection committed-route preference sync", () => {
     await flushDebounce();
     expect(fetchJsonMock).toHaveBeenCalledTimes(1);
     expect(fetchJsonMock.mock.calls[0][0]).toContain("/api/sessions/session-a/select");
-    expect(syncSessionDetail).toHaveBeenCalledWith(expect.objectContaining({ id: "session-a" }));
+    expect(syncSessionDetail).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "session-a" }),
+      { transcript: "merge" },
+    );
   });
 
   it("drops a late /select response for A while the user already views B", async () => {
@@ -209,8 +227,12 @@ describe("useChatSessionSelection committed-route preference sync", () => {
     const calls = fetchJsonMock.mock.calls.map((args) => String(args[0]));
     expect(calls).toHaveLength(2);
     expect(syncSessionDetail).toHaveBeenCalledTimes(1);
-    expect(syncSessionDetail).toHaveBeenCalledWith(expect.objectContaining({ id: "session-b" }));
-    expect(syncSessionDetail).not.toHaveBeenCalledWith(expect.objectContaining({ id: "session-a" }));
+    expect(syncSessionDetail).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "session-b" }),
+      { transcript: "merge" },
+    );
+    const syncedIds = syncSessionDetail.mock.calls.map((args) => (args[0] as SessionDetail).id);
+    expect(syncedIds).not.toContain("session-a");
     expect(queryClient.getQueryData(queryKeys.session("session-a"))).toBeUndefined();
   });
 

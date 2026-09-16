@@ -493,8 +493,14 @@ class AdapterDispatchWorker:
                 SourceExtractionContractViolation,
                 TurnNotReadyError,
             )
+            from .completion_dependency import (
+                CompletionDependencyPending,
+                defer_completion,
+            )
+            from .external_agent_task_failure import (
+                is_project_agent_task_reconciliation_lag,
+            )
             from .formal_hypothesis_fanout import HypothesisAuthorityUnavailable
-            from .completion_dependency import CompletionDependencyPending, defer_completion
             from .task_adapter_registry import SOURCE_NODE_TASKS
 
             if isinstance(exc, _OutboxLeaseLost):
@@ -553,6 +559,18 @@ class AdapterDispatchWorker:
                 # guard is correct; a short backoff lets it clear instead of
                 # turning a recoverable race into a failed node.
                 self._requeue_or_fail(outbox, action, f"session_busy:{exc}")
+                return
+            if is_project_agent_task_reconciliation_lag(exc):
+                # A terminal turn has already written its governed result, but
+                # its project-task projection has not observed turn_completed
+                # yet. Preserve the original task and let the external-task
+                # reconciler finish this node after that projection settles.
+                self._block_attempt(
+                    outbox,
+                    action,
+                    "project_agent_task_not_reconciled",
+                    str(exc),
+                )
                 return
             if (
                 str(action.node_id or "") in SOURCE_NODE_TASKS

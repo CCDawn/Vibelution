@@ -888,6 +888,10 @@ def _repair_child_root_agent_direct_session_bindings(
         if not direct_session_id or direct_session_id not in s._raw_conversation_child_session_ids(conversation):
             continue
         title = str(conversation.get("title") or s.DEFAULT_CHAT_CONVERSATION_TITLE).strip() or s.DEFAULT_CHAT_CONVERSATION_TITLE
+        if _session_title_source_of(conversation) == SESSION_TITLE_SOURCE_PLACEHOLDER:
+            # A placeholder title is not an Agent name: never write it back into
+            # the Agent directory display name.
+            title = ""
         session_workspace = str(conversation.get("workspace_path") or s._session_workspace_relative_path(conversation_id))
         repaired_agent = s.ensure_agent_for_session(
             conversation_id,
@@ -970,7 +974,9 @@ def _stale_running_live_owner_reason(session_id: str) -> str:
     try:
         queued_pairs = s._SESSION_TURN_SCHEDULER.queued_session_turn_ids()
     except Exception:
-        queued_pairs = set()
+        # An unreadable queue is not evidence of "nothing queued": reporting the
+        # reason keeps repair hands-off (fail-safe) and visible to the operator.
+        return "scheduler_queue_unreadable"
     for queued_session_id, _queued_turn_id in queued_pairs or ():
         if str(queued_session_id or "").strip() == session_id:
             return "scheduler_queued_turn"
@@ -978,7 +984,9 @@ def _stale_running_live_owner_reason(session_id: str) -> str:
     try:
         active = s._WORK_RUN_STORE.load_active_snapshot("chat_turn")
     except Exception:
-        active = None
+        # Same rationale as the queue read: without cross-process evidence the
+        # repair must not assume the turn is dead.
+        return "work_run_snapshot_unreadable"
     if not isinstance(active, dict):
         return ""
     active_session_id = str(active.get("sessionId") or "").strip()
@@ -1686,17 +1694,20 @@ def update_chat_session_title(session_id: str, title: str) -> dict:
                 conversation["task_title"] = normalized_title
                 conversation["taskTitle"] = normalized_title
                 conversation["title"] = normalized_title
+                conversation["title_source"] = SESSION_TITLE_SOURCE_MANUAL
                 conversation["updated_at"] = s._now_timestamp()
                 s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
                 changed = True
         elif agent_id:
             if str(conversation.get("title") or "").strip() != normalized_title:
                 conversation["title"] = normalized_title
+                conversation["title_source"] = SESSION_TITLE_SOURCE_MANUAL
                 conversation["updated_at"] = s._now_timestamp()
                 s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
                 changed = True
         elif str(conversation.get("title") or "").strip() != normalized_title:
             conversation["title"] = normalized_title
+            conversation["title_source"] = SESSION_TITLE_SOURCE_MANUAL
             conversation["updated_at"] = s._now_timestamp()
             s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
             changed = True
@@ -1744,6 +1755,24 @@ def update_chat_session_title(session_id: str, title: str) -> dict:
     return detail
 
 
+SESSION_TITLE_SOURCE_PLACEHOLDER = "placeholder"
+SESSION_TITLE_SOURCE_AUTO = "auto"
+SESSION_TITLE_SOURCE_MANUAL = "manual"
+
+
+def _session_title_source_of(conversation: dict[str, Any]) -> str:
+    """Return the declared title source, or ``""`` for records that predate it.
+
+    The explicit source decouples "may an auto title replace this?" from the
+    literal title text, so renaming a placeholder in one place cannot silently
+    disable generation. Missing fields fall back to the legacy text whitelist.
+    """
+
+    raw = conversation.get("title_source") or conversation.get("titleSource") or ""
+    value = str(raw or "").strip().lower()
+    return value if value in {SESSION_TITLE_SOURCE_PLACEHOLDER, SESSION_TITLE_SOURCE_AUTO, SESSION_TITLE_SOURCE_MANUAL} else ""
+
+
 def apply_generated_session_title(session_id: str, title: str, *, source: str = "auto") -> bool:
     """Apply an auto-generated title only while the session still shows a placeholder.
 
@@ -1776,12 +1805,19 @@ def apply_generated_session_title(session_id: str, title: str, *, source: str = 
             return False
         agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
         current_title = str(conversation.get("title") or "").strip()
-        if not s._is_default_empty_session_title(current_title):
+        declared_source = _session_title_source_of(conversation)
+        replaceable = (
+            declared_source == SESSION_TITLE_SOURCE_PLACEHOLDER
+            if declared_source
+            else s._is_default_empty_session_title(current_title)
+        )
+        if not replaceable:
             return False
         if current_title == normalized_title:
             return False
         s._ensure_session_mutable(conversation_id, conversation=conversation)
         conversation["title"] = normalized_title
+        conversation["title_source"] = SESSION_TITLE_SOURCE_AUTO
         conversation["updated_at"] = s._now_timestamp()
         s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
         changed = True

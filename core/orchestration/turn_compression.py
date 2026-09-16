@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 
 from core.infrastructure.feature_gate import resolve_feature_decision
 from core.infrastructure.state import AgentState, get_state_manager
@@ -159,6 +159,115 @@ def _retention_violation_reason(before: Mapping[str, Any], after: Mapping[str, A
     return ""
 
 
+ABORTED_TOOL_RESULT_CONTENT = "aborted"
+
+
+def _pairing_tool_call_names(message: Any) -> Dict[str, str]:
+    raw = getattr(message, "tool_calls", None)
+    if raw is None and isinstance(message, Mapping):
+        raw = message.get("tool_calls")
+    names: Dict[str, str] = {}
+    for item in list(raw or []):
+        if isinstance(item, Mapping):
+            call_id = str(item.get("id") or "").strip()
+            function = item.get("function")
+            function_name = function.get("name") if isinstance(function, Mapping) else None
+            name = str(item.get("name") or function_name or "").strip()
+        else:
+            call_id = str(getattr(item, "id", "") or "").strip()
+            name = str(getattr(item, "name", "") or "").strip()
+        if call_id:
+            names[call_id] = name
+    return names
+
+
+def _aborted_tool_result_message(call_id: str, tool_name: str, *, as_mapping: bool) -> Any:
+    name = tool_name or "unknown_tool"
+    if as_mapping:
+        return {
+            "role": "tool",
+            "content": ABORTED_TOOL_RESULT_CONTENT,
+            "tool_call_id": call_id,
+            "metadata": {
+                "kind": "interrupted_tool_result",
+                "status": "aborted",
+                "toolName": name,
+            },
+        }
+    return ToolMessage(
+        content=ABORTED_TOOL_RESULT_CONTENT,
+        tool_call_id=call_id,
+        name=name,
+    )
+
+
+def normalize_tool_call_pairing(messages: Any) -> Tuple[list, Dict[str, int]]:
+    """Repair assistant tool-call / tool-result pairing before the provider call.
+
+    Codex parity (``codex-rs/core/src/context_manager/normalize.rs``): every
+    assistant tool call gets exactly one result — unanswered calls receive a
+    synthesized ``aborted`` output — and orphan tool results without a matching
+    call are removed. Compression output may lose one side of a pair when a
+    summary or an error-preserving cut retires it; normalizing keeps the chain
+    a valid provider payload without silently dropping the call contract.
+    """
+
+    materialized = _coerce_message_list(messages)
+    normalized: List[Any] = []
+    pending: List[Tuple[str, str, bool]] = []
+    dropped_orphan_results = 0
+    synthesized_aborted_results = 0
+    changed = False
+
+    def flush_pending() -> None:
+        nonlocal changed, synthesized_aborted_results
+        while pending:
+            call_id, tool_name, as_mapping = pending.pop(0)
+            normalized.append(
+                _aborted_tool_result_message(call_id, tool_name, as_mapping=as_mapping)
+            )
+            synthesized_aborted_results += 1
+            changed = True
+
+    for message in materialized:
+        role = _pairing_role(message)
+        if role in {"ai", "assistant"}:
+            flush_pending()
+            normalized.append(message)
+            names = _pairing_tool_call_names(message)
+            as_mapping = isinstance(message, Mapping)
+            for call_id in _pairing_tool_call_ids(message):
+                pending.append((call_id, names.get(call_id, ""), as_mapping))
+            continue
+        result_id = _pairing_tool_result_id(message)
+        if role == "tool" or (result_id and role not in {"system", "user", "human"}):
+            matched = False
+            if result_id:
+                for index, (call_id, _name, _as_mapping) in enumerate(pending):
+                    if call_id == result_id:
+                        normalized.append(message)
+                        del pending[index]
+                        matched = True
+                        break
+            if not matched:
+                dropped_orphan_results += 1
+                changed = True
+            continue
+        flush_pending()
+        normalized.append(message)
+    flush_pending()
+    if changed or not isinstance(messages, list):
+        repaired_messages = normalized
+    else:
+        # Untouched chains keep their list identity so callers can detect
+        # "compression changed nothing" without a deep comparison.
+        repaired_messages = messages
+    return repaired_messages, {
+        "droppedOrphanResults": dropped_orphan_results,
+        "synthesizedAbortedResults": synthesized_aborted_results,
+    }
+
+
 def build_retention_contract_summary_header(
     *,
     retention_contract: Any,
@@ -296,11 +405,21 @@ def compress_turn_messages(
     runtime_binding = _as_mapping(runtime_agent_binding)
     runtime_getter = turn_runtime_fn or _turn_runtime_from_env
     turn_runtime = _as_mapping(runtime_getter())
+    from core.web.services import agent_directory_service
+
+    # In-process chat turns bind their identity through the runtime ContextVar,
+    # not process environment variables. Resolve it before the Agent's default
+    # session so every compression artifact belongs to the turn being run.
+    current_runtime = _as_mapping(agent_directory_service.current_agent_runtime())
     session_id = _coerce_text(
         _mapping_get(turn_runtime, "sessionId", "session_id")
+        or _mapping_get(current_runtime, "sessionId", "session_id")
         or _mapping_get(runtime_binding, "directSessionId", "direct_session_id")
     ).strip()
-    turn_id = _coerce_text(_mapping_get(turn_runtime, "runId", "run_id")).strip()
+    turn_id = _coerce_text(
+        _mapping_get(turn_runtime, "runId", "run_id")
+        or _mapping_get(current_runtime, "turnId", "turn_id")
+    ).strip()
     recorder = scene_recorder_fn or _record_agent_scene_event
     agent_id = _coerce_text(_mapping_get(runtime_binding, "agentId", "agent_id")).strip()
 
@@ -370,9 +489,6 @@ def compress_turn_messages(
     try:
         from core.chat.tool_result_replacement import replace_large_tool_results_for_compression
 
-        tool_session_id = _coerce_text(
-            _mapping_get(runtime_binding, "directSessionId", "direct_session_id") or session_id
-        ).strip()
         replacement_limit = max(
             4_000,
             _coerce_nonnegative_int(comp_config.summary_max_chars, default=1_000) * 4,
@@ -380,7 +496,7 @@ def compress_turn_messages(
         messages_for_compression, tool_result_replacement_state = replace_large_tool_results_for_compression(
             messages,
             char_limit=replacement_limit,
-            session_id=tool_session_id,
+            session_id=session_id,
         )
     except Exception:
         messages_for_compression = messages
@@ -409,6 +525,37 @@ def compress_turn_messages(
     replacement_summary = _format_tool_result_replacement_summary(tool_result_replacement_state)
     if replacement_summary:
         summary = f"{summary}\n\n{replacement_summary}".strip() if summary else replacement_summary
+
+    # Provider-chain normalization (codex parity): synthesize aborted results
+    # for unresolved calls and drop orphan tool results before the retention
+    # gate. A compression cut that retires one side of a pair must not block the
+    # turn; the repair stays auditable in the runtime scene.
+    compressed, pairing_repair = normalize_tool_call_pairing(compressed)
+    if pairing_repair["droppedOrphanResults"] or pairing_repair["synthesizedAbortedResults"]:
+        recorder(
+            "runtime",
+            "agent.context_compression.tool_chain_normalized",
+            message="Compressed history tool call/result pairing was normalized before the retention gate.",
+            outcome="repaired",
+            fields={
+                "agentId": agent_id,
+                "sessionId": session_id,
+                "turnId": turn_id,
+                "iteration": iteration,
+                "droppedOrphanResults": pairing_repair["droppedOrphanResults"],
+                "synthesizedAbortedResults": pairing_repair["synthesizedAbortedResults"],
+                "messageCount": len(compressed),
+            },
+        )
+        try:
+            ui.add_log(
+                "[压缩] 工具链配对修复："
+                f"孤儿结果 -{pairing_repair['droppedOrphanResults']} / "
+                f"合成 aborted +{pairing_repair['synthesizedAbortedResults']}",
+                "WARN",
+            )
+        except Exception:
+            pass
 
     # 日志
     after_tokens = _coerce_nonnegative_int(estimator(compressed))
@@ -481,7 +628,7 @@ def compress_turn_messages(
         summary = apply_retention_contract_summary(
             summary,
             build_retention_contract_summary_header(
-                retention_contract=retention_contract,
+                retention_contract={**_as_mapping(retention_contract), "sessionId": session_id},
                 iteration=iteration,
                 compression_generation=compression_count_this_turn + 1,
                 before_tokens=current_tokens,
@@ -546,18 +693,6 @@ def compress_turn_messages(
     summary_written = False
     ledger_checkpoint_written = False
     if summary:
-        try:
-            from core.web.services import agent_directory_service
-
-            current_runtime = agent_directory_service.current_agent_runtime()
-            session_id = _coerce_text(
-                session_id or _mapping_get(_as_mapping(current_runtime), "sessionId", "session_id")
-            ).strip()
-            turn_id = _coerce_text(
-                turn_id or _mapping_get(_as_mapping(current_runtime), "turnId", "turn_id")
-            ).strip()
-        except Exception:
-            pass
         if session_id and mode_text == AgentMode.CHAT and project_root:
             try:
                 from core.chat.conversation_ledger import (

@@ -23,6 +23,7 @@ from ..research_runtime import workflow_artifact_store as artifacts
 from ..research_runtime.artifact_readback_registry import load_scoped_artifact_payload
 from ..storage_durability import inter_process_lock
 from .budget import budget_summary
+from .baseline_versioning import ensure_active_baseline_version
 from .run_input import build_operator_run_input
 from .stage3_seed import (
     bind_retest_plan,
@@ -41,6 +42,7 @@ def prepare_round(
     expected_version: int,
     command_key: str,
     iteration_action: str | None = None,
+    stage2_source_run_id: str = "",
 ):
     def prepare(campaign):
         if campaign.status != "running" or not campaign.budget.authorized or not campaign.authorizedBy:
@@ -54,9 +56,37 @@ def prepare_round(
         if campaign.budget.modelCostLimit <= 0 or budget_summary(campaign)["gpuTuningAvailableSeconds"] <= 0:
             raise CampaignConflict("Optimization budget is unavailable")
         ledger = run_creation.get_write_store()
+        campaign, _ = ensure_active_baseline_version(campaign, ledger)
         baseline_run = ledger.get_run(campaign.baselineRunId)
-        prior = campaign.rounds[-1] if campaign.rounds else None
+        if stage2_source_run_id:
+            prior = next((r for r in reversed(campaign.rounds) if r.runId == stage2_source_run_id), None)
+            if prior is None or campaign.activeRunId != stage2_source_run_id:
+                raise CampaignConflict("Stage 2 migration source is not the active completed round")
+            from core.research.workflow.definition_registry import (
+                WorkflowDefinitionRegistryError,
+                resolve_definition_by_version_id,
+            )
+        else:
+            prior = next(
+                (
+                    r for r in reversed(campaign.rounds)
+                    if r.baselineVersionId == campaign.activeBaselineVersionId
+                ),
+                None,
+            )
         previous_run = ledger.get_run(prior.runId if prior else campaign.baselineRunId)
+        if stage2_source_run_id:
+            if previous_run is None:
+                raise CampaignConflict("Stage 2 migration source run is unavailable")
+            try:
+                source_definition = resolve_definition_by_version_id(previous_run.workflow_version_id)
+            except WorkflowDefinitionRegistryError as exc:
+                raise CampaignConflict("Stage 2 migration source definition is unavailable") from exc
+            if (
+                source_definition.workflowId != OPERATOR_WORKFLOW_ID
+                or source_definition.schemaVersion != "1.1.0"
+            ):
+                raise CampaignConflict("Stage 2 migration requires operator-optimization@1.1.0")
         if baseline_run is None or baseline_run.status != "succeeded":
             raise CampaignConflict("Baseline Ledger run has not completed")
         if previous_run is None or previous_run.status not in {"succeeded", "failed"}:
@@ -213,6 +243,7 @@ def prepare_round(
             roundId=round_id,
             runId=run_id,
             ordinal=len(campaign.rounds) + 1,
+            baselineVersionId=campaign.activeBaselineVersionId,
             baselineCandidateRef=baseline_candidate,
             parentCandidateRef=parent,
             protocolRef=protocol_ref,
@@ -236,6 +267,7 @@ def prepare_round(
         return campaign.model_copy(update={"rounds": (*campaign.rounds, record), "activeRunId": run_id})
     return update_campaign(team_id, project_id, campaign_id, expected_version=expected_version,
         command_key=command_key,
-        command={"action": "prepare_round", "iterationAction": iteration_action},
+        command={"action": "prepare_round", "iterationAction": iteration_action,
+            "stage2SourceRunId": stage2_source_run_id},
         transform=prepare,
     )

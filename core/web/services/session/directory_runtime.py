@@ -29,6 +29,11 @@ STARTING_WAIT_SECONDS = 30.0
 # List/query must not block HTTP on startup; an empty page is preferable to a
 # 30s hang, and callers must not fall back to discarded JSON.
 LIST_QUERY_STARTUP_WAIT_SECONDS = 0.0
+# Boot-time store bootstrap runs alongside route-module imports; the previous
+# 5s writer/import timeouts turned that contention into a dead directory store
+# (observed as ``Session directory store failed to start (TimeoutError)``).
+DIRECTORY_BOOTSTRAP_TIMEOUT_SECONDS = 30.0
+DIRECTORY_BUSY_TIMEOUT_MS = 5000
 
 
 @dataclass(frozen=True)
@@ -43,6 +48,7 @@ class SessionDirectoryRuntimeStatus:
     migrated_legacy: bool = False
     migrated_session_count: int = 0
     migration_backup_created: bool = False
+    degraded_reasons: tuple[str, ...] = ()
     error_type: str = ""
 
 
@@ -128,6 +134,12 @@ def initialize_session_directory_runtime(
 
     Tests must pass an isolated ``project_root``. This function does not fall
     back to the operator Documents tree when the caller omits a root.
+
+    Bootstrap order matters: the store is published as soon as ``open``
+    succeeds, and the agent import / legacy migration / direct-session restore
+    steps run afterwards as bounded best effort. A slow or failing bootstrap
+    step degrades the runtime status instead of taking the directory read path
+    down with it.
     """
 
     global _STORE, _PROJECT_ROOT, _STATUS
@@ -136,57 +148,16 @@ def initialize_session_directory_runtime(
     root = Path(project_root).resolve()
     begin_directory_startup()
     shutdown_session_directory_runtime(mark_stopped=False)
-    store = ConversationStore(conversation_store_path(root))
-    migrated_legacy = False
-    migrated_session_count = 0
-    migration_backup_created = False
-    imported_agent_count = 0
+    store = ConversationStore(
+        conversation_store_path(root),
+        busy_timeout_ms=DIRECTORY_BUSY_TIMEOUT_MS,
+    )
     try:
-        metadata = store.open()
-        imported_agent_count = _import_agent_snapshots(store, root)
-        if migrate_legacy_chat_state:
-            (
-                migrated_legacy,
-                migrated_session_count,
-                migration_backup_created,
-            ) = _migrate_legacy_chat_state_once(
-                store,
-                root,
-            )
-        # Publish the opened store before restore helpers call the compatibility
-        # load/save API. The status remains ``starting`` until every bootstrap
-        # step has completed.
-        with _RUNTIME_LOCK:
-            _STORE = store
-            _PROJECT_ROOT = root
-        _restore_missing_personal_direct_sessions(root)
-        status = SessionDirectoryRuntimeStatus(
-            status="ready",
-            schema_version=int(metadata.get("schemaVersion") or 0),
-            imported_agent_count=imported_agent_count,
-            migrated_legacy=migrated_legacy,
-            migrated_session_count=migrated_session_count,
-            migration_backup_created=migration_backup_created,
-        )
-        _record(
-            "session_directory.runtime.ready",
-            outcome="started",
-            fields={
-                "schemaVersion": status.schema_version,
-                "importedAgentCount": imported_agent_count,
-                "migratedLegacy": migrated_legacy,
-                "migratedSessionCount": migrated_session_count,
-                "migrationBackupCreated": migration_backup_created,
-            },
-        )
+        metadata = store.open(writer_timeout=DIRECTORY_BOOTSTRAP_TIMEOUT_SECONDS)
     except Exception as exc:  # noqa: BLE001 - startup failure becomes bounded runtime status
         store.close()
         status = SessionDirectoryRuntimeStatus(
             status="failed",
-            imported_agent_count=imported_agent_count,
-            migrated_legacy=migrated_legacy,
-            migrated_session_count=migrated_session_count,
-            migration_backup_created=migration_backup_created,
             error_type=type(exc).__name__,
         )
         logger.warning(
@@ -206,6 +177,81 @@ def initialize_session_directory_runtime(
             _READY.set()
         return status
 
+    # Publish the usable store before best-effort bootstrap steps so list and
+    # query reads never queue behind agent import or legacy migration.
+    with _RUNTIME_LOCK:
+        _STORE = store
+        _PROJECT_ROOT = root
+
+    imported_agent_count = 0
+    migrated_legacy = False
+    migrated_session_count = 0
+    migration_backup_created = False
+    degraded_reasons: list[str] = []
+    try:
+        imported_agent_count = _import_agent_snapshots(store, root)
+    except Exception as exc:  # noqa: BLE001 - degrade, never fail the read path
+        degraded_reasons.append(f"agent_import:{type(exc).__name__}")
+        logger.warning(
+            "Session directory agent import degraded (%s).",
+            type(exc).__name__,
+        )
+    if migrate_legacy_chat_state:
+        try:
+            (
+                migrated_legacy,
+                migrated_session_count,
+                migration_backup_created,
+            ) = _migrate_legacy_chat_state_once(store, root)
+        except Exception as exc:  # noqa: BLE001 - degrade, never fail the read path
+            degraded_reasons.append(f"legacy_migration:{type(exc).__name__}")
+            logger.warning(
+                "Session directory legacy migration degraded (%s).",
+                type(exc).__name__,
+            )
+    try:
+        _restore_missing_personal_direct_sessions(root)
+    except Exception as exc:  # noqa: BLE001 - degrade, never fail the read path
+        degraded_reasons.append(f"direct_restore:{type(exc).__name__}")
+        logger.warning(
+            "Session directory direct-session restore degraded (%s).",
+            type(exc).__name__,
+        )
+
+    status = SessionDirectoryRuntimeStatus(
+        status="degraded" if degraded_reasons else "ready",
+        schema_version=int(metadata.get("schemaVersion") or 0),
+        imported_agent_count=imported_agent_count,
+        migrated_legacy=migrated_legacy,
+        migrated_session_count=migrated_session_count,
+        migration_backup_created=migration_backup_created,
+        degraded_reasons=tuple(degraded_reasons),
+    )
+    if degraded_reasons:
+        _record(
+            "session_directory.runtime.degraded",
+            outcome="degraded",
+            level="warning",
+            fields={
+                "schemaVersion": status.schema_version,
+                "importedAgentCount": imported_agent_count,
+                "migratedLegacy": migrated_legacy,
+                "migratedSessionCount": migrated_session_count,
+                "degradedReasons": list(degraded_reasons),
+            },
+        )
+    else:
+        _record(
+            "session_directory.runtime.ready",
+            outcome="started",
+            fields={
+                "schemaVersion": status.schema_version,
+                "importedAgentCount": imported_agent_count,
+                "migratedLegacy": migrated_legacy,
+                "migratedSessionCount": migrated_session_count,
+                "migrationBackupCreated": migration_backup_created,
+            },
+        )
     with _RUNTIME_LOCK:
         _STORE = store
         _PROJECT_ROOT = root
@@ -237,7 +283,10 @@ def _import_agent_snapshots(store: ConversationStore, project_root: Path) -> int
     registry_path = agent_directory_service.registry_path()
     if not registry_path.exists():
         return 0
-    result = LegacyAgentConfigImporter(store.repository).import_file(registry_path)
+    result = LegacyAgentConfigImporter(store.repository).import_file(
+        registry_path,
+        timeout=DIRECTORY_BOOTSTRAP_TIMEOUT_SECONDS,
+    )
     return int(result.get("created") or 0) + int(result.get("revised") or 0) + int(
         result.get("reused") or 0
     )
@@ -275,7 +324,7 @@ def _migrate_legacy_chat_state_once(
                     "updated_at": "",
                     "conversations": [],
                 }
-            ).result(timeout=5)
+            ).result(timeout=DIRECTORY_BOOTSTRAP_TIMEOUT_SECONDS)
             count = int(result.get("conversationCount") or 0)
             backup_created = False
         _record(

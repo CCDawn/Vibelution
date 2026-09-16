@@ -902,6 +902,7 @@ def query_sessions(
     from . import directory_bridge
 
     directory_payload = None
+    directory_error_type = ""
     try:
         directory_payload = directory_bridge.query_session_summaries(
             limit=normalized_limit,
@@ -913,8 +914,15 @@ def query_sessions(
             sort=normalized_sort,
             agent_by_id=agent_by_id,
         )
-    except Exception:
+    except Exception as exc:
+        # A raising directory read used to vanish into the canonical fallback
+        # with no signal; the warning and event fields below keep it visible.
         directory_payload = None
+        directory_error_type = type(exc).__name__
+        directory_bridge.note_session_read_degraded(
+            source="session query",
+            error_type=directory_error_type,
+        )
     if directory_payload is not None:
         page_items = list(directory_payload.get("items") or [])
         total = max(0, int(directory_payload.get("totalEstimate") or 0))
@@ -936,6 +944,8 @@ def query_sessions(
             has_kind_filter=bool(normalized_session_kind),
             has_state_filter=bool(normalized_state),
             sort=normalized_sort,
+            source="directory_store",
+            directory_error_type=directory_error_type,
         )
         return payload
     if catalog_mode == "read_preferred" and not agent_direct_hidden_from_index:
@@ -979,6 +989,9 @@ def query_sessions(
                 has_kind_filter=bool(normalized_session_kind),
                 has_state_filter=bool(normalized_state),
                 sort=normalized_sort,
+                source="catalog",
+                directory_error_type=directory_error_type,
+                catalog_status=catalog_status or "healthy",
             )
             s._record_session_catalog_read_event(
                 source="catalog",
@@ -1050,6 +1063,9 @@ def query_sessions(
         has_kind_filter=bool(normalized_session_kind),
         has_state_filter=bool(normalized_state),
         sort=normalized_sort,
+        source="canonical_projection",
+        directory_error_type=directory_error_type,
+        catalog_status=catalog_status,
     )
     payload = {
         "items": page_items,
@@ -1173,6 +1189,7 @@ def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
         )
     missing_after_lock = False
     selected_conversation: dict[str, Any] | None = None
+    metadata_changed = False
     with s._CHAT_STATE_LOCK:
         conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
         changed = False
@@ -1194,6 +1211,7 @@ def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
                     activate=need_activate,
                 )
             selected_conversation = dict(conversation)
+            metadata_changed = changed
     if missing_after_lock or selected_conversation is None:
         s._retire_unopenable_directory_session(
             normalized_session_id,
@@ -1205,7 +1223,10 @@ def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
     # Viewing a session is not session activity: the directory list must keep
     # ordering by last activity, so a select must not touch recency.
     directory_bridge.sync_conversation_record(selected_conversation, touch_recency=False)
-    s._invalidate_session_list_cache()
+    if metadata_changed:
+        # Plain view switches keep the index signature stable; invalidating on
+        # every select forced the next poll to rebuild the whole projection.
+        s._invalidate_session_list_cache()
     if lightweight:
         normalized = s._normalize_conversation(selected_conversation) or selected_conversation
         detail = s._build_lightweight_session_detail(normalized)
@@ -1230,6 +1251,7 @@ def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
 def create_chat_session(
     *,
     title: str = "",
+    title_source: str = "",
     agent_id: str = "",
     llm_bindings: dict[str, Any] | None = None,
     created_by: str = "user",
@@ -1355,6 +1377,7 @@ def create_chat_session(
         bound_agent = s.get_agent(normalized_agent_id, include_archived=False)
         if not bound_agent:
             raise s.SessionValidationError(s._session_agent_unavailable_message("missing_agent", lang=lang))
+    explicit_title = s.trim_lines(title or "", max_lines=1).strip()
     fallback_title = s.text_for(lang, zh="新会话", en="New session")
     if bound_agent is not None:
         agent_name = str(
@@ -1365,7 +1388,10 @@ def create_chat_session(
         ).strip()
         if agent_name:
             fallback_title = s.trim_lines(agent_name, max_lines=1).strip()[:120] or fallback_title
-    normalized_title = s.trim_lines(title or "", max_lines=1).strip() or fallback_title
+    normalized_title = explicit_title or fallback_title
+    declared_title_source = str(title_source or "").strip().lower()
+    if declared_title_source not in {"placeholder", "auto", "manual"}:
+        declared_title_source = "manual" if explicit_title else "placeholder"
     with s._CHAT_STATE_LOCK:
         existing_ids = set(s.list_session_runtime_ids(s.PROJECT_ROOT))
         now = s._now_timestamp()
@@ -1375,6 +1401,9 @@ def create_chat_session(
             title=normalized_title,
             timestamp=now,
             conversation_index_kind=conversation_index_kind,
+            # An Agent display-name fallback is still a create placeholder: the
+            # first user turn may replace it with a generated title.
+            title_source=declared_title_source,
         )
         if normalized_session_metadata:
             conversation["metadata"] = normalized_session_metadata
@@ -1505,12 +1534,13 @@ def ensure_agent_direct_session(
             "title": str(title or agent.get("displayName") or "").strip(),
         }
     lang = s.get_web_language()
+    explicit_title = s.trim_lines(title or "", max_lines=1).strip()
     with s._CHAT_STATE_LOCK:
         existing_ids = set(s.list_session_runtime_ids(s.PROJECT_ROOT))
         now = s._now_timestamp()
         session_id = s._new_conversation_id(existing_ids)
         display_title = (
-            s.trim_lines(title or "", max_lines=1).strip()
+            explicit_title
             or str(agent.get("displayName") or "").strip()
             or s.text_for(lang, zh="Agent 私聊", en="Agent chat")
         )
@@ -1519,6 +1549,9 @@ def ensure_agent_direct_session(
             title=display_title,
             timestamp=now,
             conversation_index_kind=conversation_index_kind,
+            # Repair/auto-created direct sessions start from the Agent display
+            # name as a placeholder, so first-turn generation still runs.
+            title_source="placeholder",
         )
         conversation["created_by"] = str(created_by or "agent_direct_session_repair").strip() or "agent_direct_session_repair"
         conversation["createdBy"] = conversation["created_by"]
@@ -2327,6 +2360,9 @@ def _agent_directory_conversation_record(agent: dict[str, Any], *, session_id: s
         title=display_name,
         timestamp=timestamp,
         conversation_index_kind=str(classification.get("kind") or ""),
+        # The Agent display name is a display fallback, not an operator title:
+        # first-turn generation may replace it.
+        title_source="placeholder",
     )
     conversation["agent_id"] = str(agent.get("agentId") or "").strip()
     conversation["agentId"] = str(agent.get("agentId") or "").strip()
@@ -2546,15 +2582,28 @@ def _make_empty_conversation(
     title: str,
     timestamp: str,
     conversation_index_kind: str = agent_directory_service.CONVERSATION_INDEX_KIND_USER_CHAT,
+    title_source: str = "",
 ) -> dict[str, Any]:
     s = _service()
     normalized_index_kind = s.agent_directory_service.normalize_conversation_index_kind(conversation_index_kind)
     if not normalized_index_kind:
         normalized_index_kind = s.agent_directory_service.CONVERSATION_INDEX_KIND_INVALID
     normalized_index_visibility = s._conversation_index_visibility_for_kind(normalized_index_kind)
+    normalized_title = str(title or "").strip()
+    declared_source = str(title_source or "").strip().lower()
+    if declared_source not in {"placeholder", "auto", "manual"}:
+        # Fallback inference for callers that do not declare intent: a create
+        # placeholder (or a bare title) stays replaceable by first-turn title
+        # generation; any other pre-set title is treated as an operator title.
+        declared_source = (
+            "placeholder"
+            if not normalized_title or s._is_default_empty_session_title(normalized_title)
+            else "manual"
+        )
     conversation = {
         "conversation_id": str(session_id or "").strip(),
-        "title": str(title or "").strip() or s.DEFAULT_CHAT_CONVERSATION_TITLE,
+        "title": normalized_title or s.DEFAULT_CHAT_CONVERSATION_TITLE,
+        "title_source": declared_source,
         "workspace_path": s._session_workspace_relative_path(session_id),
         "updated_at": str(timestamp or "").strip() or s._now_timestamp(),
         "last_turn_status": "ready",

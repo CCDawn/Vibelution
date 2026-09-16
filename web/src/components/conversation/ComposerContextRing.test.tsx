@@ -1,101 +1,121 @@
-import React from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
-
+/** @vitest-environment happy-dom */
+import React, { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildComposerContextRingModel } from "../../routes/chat/composerContextModel";
-import { ComposerContextRingPanel } from "./ComposerContextRing";
-
-function buildModel(options: {
-  lang?: "zh" | "en";
-  cacheSource?: string;
-  cacheUsageObserved?: boolean;
-} = {}) {
-  return buildComposerContextRingModel({
-    usageUsed: 110,
-    usageLimit: 220,
-    hitPercent: 40,
-    detailAvailable: true,
-    lang: options.lang ?? "zh",
-    cacheSource: options.cacheSource ?? "provider_usage",
-    cacheUsageObserved: options.cacheUsageObserved ?? true,
-    segments: [
-      {
-        key: "history",
-        label: "历史",
-        tokens: 80,
-        cachePolicy: "cacheable",
-        observedStatus: "observed_miss",
-        contentPreview: "之前的消息",
-      },
-      {
-        key: "current_user",
-        label: "本轮输入",
-        tokens: 10,
-        cachePolicy: "never_cache",
-        observedStatus: "not_observed",
-      },
-      {
-        key: "agent_context",
-        label: "Agent 上下文",
-        tokens: 10,
-        cachePolicy: "cacheable",
-        observedStatus: "not_observed",
-      },
-    ] as never,
-  });
+import {
+  ComposerContextRing,
+  ComposerContextRingPanel,
+} from "./ComposerContextRing";
+(
+  globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
+let root: Root;
+afterEach(async () => {
+  if (root) await act(() => root.unmount());
+  document.body.innerHTML = "";
+});
+async function render(element: React.ReactNode) {
+  const host = document.createElement("div");
+  document.body.append(host);
+  root = createRoot(host);
+  await act(() => root.render(element));
 }
-
-describe("ComposerContextRingPanel", () => {
-  it("separates composition from cache and names every state", () => {
-    const html = renderToStaticMarkup(
-      <ComposerContextRingPanel model={buildModel()} lang="zh" />,
-    );
-    expect(html).toContain('data-composer-context-composition="true"');
-    expect(html).toContain('data-composer-context-cache="true"');
-    expect(html).toContain('data-cache-state="observed"');
-    expect(html).toContain("上轮真实命中 40%");
-    expect(html).toContain("未命中 80%");
-    expect(html).toContain("不可缓存 10%");
-    expect(html).toContain("未观测 10%");
-    expect(html).not.toContain('data-cache-kind="hit"');
-    expect(html).toContain('data-context-badge="miss"');
-    expect(html).toContain('data-context-badge="never"');
-    expect(html).toContain('data-context-badge="unknown"');
-    expect(html).toContain('data-context-pct="true"');
-    expect(html).toContain("80%");
+async function click(text: string) {
+  const button = [...document.querySelectorAll("button")].find((item) =>
+    item.textContent?.includes(text),
+  );
+  expect(button).toBeTruthy();
+  await act(() => button!.click());
+}
+const model = buildComposerContextRingModel({
+  usageUsed: 85000,
+  usageLimit: 1000000,
+  hitPercent: 99.9,
+  lang: "zh",
+  detailAvailable: true,
+  segments: [
+    {
+      key: "history",
+      label: "历史",
+      tokens: 82000,
+      status: "computed_hit",
+      contentPreview: "历史内容预览",
+    },
+    { key: "agent_runtime", label: "规范", tokens: 388 },
+  ],
+});
+describe("ComposerContextRing", () => {
+  it("shows capacity and no inferred cache rate", async () => {
+    await render(<ComposerContextRingPanel model={model} lang="zh" />);
+    expect(
+      document
+        .querySelector('[role="progressbar"]')
+        ?.getAttribute("aria-valuenow"),
+    ).toBe("8.5");
+    expect(document.body.textContent).toContain("暂无上游数据");
+    expect(document.body.textContent).not.toContain("99.9%");
+    expect(document.body.textContent).not.toContain("历史内容预览");
+    expect(document.body.textContent).toContain("对话历史");
   });
-
-  it("keeps content previews collapsed and expandable per row", () => {
-    const html = renderToStaticMarkup(
-      <ComposerContextRingPanel model={buildModel()} lang="zh" />,
-    );
-    expect(html).toContain('data-context-row="history"');
-    expect(html).toContain('aria-expanded="false"');
-    expect(html).not.toContain("data-context-preview");
-    expect(html).not.toContain("之前的消息");
-  });
-
-  it("does not paint an unobserved cache as a miss", () => {
-    const html = renderToStaticMarkup(
+  it("opens source details and existing cache diagnostics", async () => {
+    const onOpenDetail = vi.fn();
+    await render(
       <ComposerContextRingPanel
-        model={buildModel({ cacheUsageObserved: false })}
+        model={model}
         lang="zh"
+        onOpenDetail={onOpenDetail}
       />,
     );
-    expect(html).toContain('data-cache-state="missing"');
-    expect(html).toContain("上游未返回缓存命中");
-    expect(html).not.toContain("上轮真实命中");
+    await click("查看完整明细");
+    await click("对话历史");
+    expect(document.body.textContent).toContain("历史内容预览");
+    await click("查看缓存诊断");
+    expect(onOpenDetail).toHaveBeenCalledOnce();
+    await click("上下文明细");
+    expect(document.body.textContent).not.toContain("历史内容预览");
   });
-
-  it("renders english state names without chinese leakage", () => {
-    const html = renderToStaticMarkup(
-      <ComposerContextRingPanel
-        model={buildModel({ lang: "en", cacheUsageObserved: false })}
-        lang="en"
-      />,
+  it("closes and resets when switching sessions", async () => {
+    await render(
+      <ComposerContextRing model={model} lang="zh" sessionId="one" />,
     );
-    expect(html).toContain("upstream cache usage missing");
-    expect(html).toContain("unobserved");
-    expect(html).not.toContain("未观测");
+    await act(() =>
+      document
+        .querySelector<HTMLButtonElement>('button[data-session="one"]')!
+        .click(),
+    );
+    await click("查看完整明细");
+    await click("对话历史");
+    await act(() =>
+      root.render(
+        <ComposerContextRing model={model} lang="zh" sessionId="two" />,
+      ),
+    );
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    await act(() =>
+      document
+        .querySelector<HTMLButtonElement>('button[data-session="two"]')!
+        .click(),
+    );
+    expect(document.body.textContent).toContain("主要占用");
+    expect(document.body.textContent).not.toContain("历史内容预览");
+  });
+  it("keeps an unknown capacity distinct from zero in English", async () => {
+    const english = buildComposerContextRingModel({
+      usageUsed: 85,
+      usageLimit: 0,
+      hitPercent: 0,
+      lang: "en",
+      detailAvailable: false,
+      segments: [],
+    });
+    await render(<ComposerContextRingPanel model={english} lang="en" />);
+    expect(document.body.textContent).toContain("Window limit unknown");
+    expect(
+      document
+        .querySelector('[role="progressbar"]')
+        ?.hasAttribute("aria-valuenow"),
+    ).toBe(false);
+    expect(document.body.textContent).not.toContain("0%");
   });
 });

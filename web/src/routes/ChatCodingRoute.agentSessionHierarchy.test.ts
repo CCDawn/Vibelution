@@ -36,11 +36,15 @@ describe("ChatCodingRoute Agent-session hierarchy", () => {
     expect(tabStripSource).toContain("在当前 Agent 下新建会话");
     expect(routeSource).toContain("onCreateSession={handleCreateSession}");
     expect(routeSource).not.toContain("<span>{lang === \"zh\" ? \"新建会话\" : \"New session\"}</span>");
-    expect(lifecycleSource).toContain("setEditingSessionId(nextId)");
     expect(lifecycleSource).toContain("setEditingSessionTitle(");
-    expect(lifecycleSource).toContain("editingSessionIdRef.current = nextId");
     expect(lifecycleSource).toContain("editingSessionIdRef.current === variables.sessionId");
-    // Create must keep placeholder rename open; blur during temp→real remap is suppressed.
+    // Create shows the new session directly: the create flow never opens the
+    // rename editor, so no temp-id editor is entered and no draft is trusted.
+    expect(lifecycleSource).not.toContain("setEditingSessionId(tempSessionId)");
+    expect(lifecycleSource).not.toContain("editingSessionIdRef.current = tempSessionId");
+    expect(lifecycleSource).toContain("const editingTempTitle = Boolean(");
+    // Only an operator-opened rename on the temp tab survives the remap.
+    expect(lifecycleSource).toContain("if (keepFocusOnCreated && editingTempTitle) {");
     expect(lifecycleSource).toContain("suppressRenameBlurUntilRef.current = Date.now() + 2500");
     // New sessions default to the Agent display name (backend + optimistic shell).
     expect(lifecycleSource).toContain("agentDisplayName || defaultNewSessionTitle(lang)");

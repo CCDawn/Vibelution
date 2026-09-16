@@ -292,20 +292,26 @@ backToBottomButton:
   composer: conversationComposerShell,
   // Pending image cards: a previewable thumbnail, filename/size copy, and a
   // quiet remove affordance — a pill with a 20px thumb read as a broken icon.
+  // The thumbnail stays the primary click target: it opens the shared image
+  // preview dialog, so it keeps a real tap area (56px) and a hover/focus hint.
   composerAttachmentChip:
-    "vui-components-conversationview composerAttachmentChip group inline-flex min-w-0 w-fit max-w-full items-center gap-2 overflow-hidden rounded-[12px] border border-[color-mix(in_srgb,var(--vui-border-subtle)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] p-1 pr-1.5 transition-colors duration-150 hover:border-[color-mix(in_srgb,var(--border-strong)_72%,transparent)] hover:bg-[var(--vui-control-muted-hover)]",
+    "vui-components-conversationview composerAttachmentChip group inline-flex min-w-0 w-fit max-w-full items-center gap-2.5 overflow-hidden rounded-[14px] border border-[color-mix(in_srgb,var(--vui-border-subtle)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] p-1.5 pr-2 transition-colors duration-150 hover:border-[color-mix(in_srgb,var(--border-strong)_72%,transparent)] hover:bg-[var(--vui-control-muted-hover)] focus-within:border-[var(--accent-cool)]",
   composerAttachmentCopy:
-    "vui-components-conversationview composerAttachmentCopy grid min-w-0 gap-0.5 pr-0.5",
+    "vui-components-conversationview composerAttachmentCopy grid min-w-0 gap-1 pr-1",
   composerAttachmentMeta:
     "vui-components-conversationview composerAttachmentMeta min-w-0 [font-size:var(--vui-font-2xs)] leading-none tabular-nums text-[var(--fg-tertiary)]",
   composerAttachmentName:
-    "vui-components-conversationview composerAttachmentName min-w-0 max-w-[14rem] truncate [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] group-hover:text-[var(--fg-primary)]",
+    "vui-components-conversationview composerAttachmentName min-w-0 max-w-[16rem] truncate [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-secondary)] group-hover:text-[var(--fg-primary)]",
   composerAttachmentPreview:
-    "vui-components-conversationview composerAttachmentPreview shrink-0 !h-9 !min-h-9 !w-9 !min-w-9 !rounded-[9px] !bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,var(--vui-control-muted))] !p-0 shadow-none hover:!bg-[var(--vui-control-muted-hover)] hover:!shadow-none focus-visible:!ring-offset-0 [&_[data-slot=vui-button-content]]:!size-full [&_[data-slot=vui-button-content]]:!max-w-none [&_[data-slot=vui-button-label]]:!block [&_[data-slot=vui-button-label]]:!size-full",
+    "vui-components-conversationview composerAttachmentPreview shrink-0 cursor-zoom-in !h-14 !min-h-14 !w-14 !min-w-14 !overflow-hidden !rounded-[10px] !bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,var(--vui-control-muted))] !p-0 shadow-none hover:!bg-[var(--vui-control-muted-hover)] hover:!shadow-none focus-visible:!ring-offset-0 [&_[data-slot=vui-button-content]]:!size-full [&_[data-slot=vui-button-content]]:!max-w-none [&_[data-slot=vui-button-label]]:!block [&_[data-slot=vui-button-label]]:!size-full",
   composerAttachmentRemoveButton:
     "vui-components-conversationview composerAttachmentRemoveButton !h-6 !min-h-6 !w-6 !min-w-6 shrink-0 !rounded-full !p-0 text-[var(--fg-tertiary)] hover:!bg-[color-mix(in_srgb,var(--state-error)_12%,var(--vui-control-muted-hover))] hover:!text-[var(--state-error)]",
+  composerAttachmentThumbFrame:
+    "vui-components-conversationview composerAttachmentThumbFrame relative block size-full overflow-hidden rounded-[10px]",
   composerAttachmentThumb:
-    "vui-components-conversationview composerAttachmentThumb block size-full shrink-0 object-cover",
+    "vui-components-conversationview composerAttachmentThumb block size-full shrink-0 object-cover transition-transform duration-150 ease-out group-hover:scale-[1.05]",
+  composerAttachmentThumbHint:
+    "vui-components-conversationview composerAttachmentThumbHint pointer-events-none absolute inset-0 grid place-items-center bg-[color-mix(in_srgb,var(--vui-surface-panel)_58%,transparent)] text-[var(--fg-primary)] [font-size:var(--vui-font-2xs)] font-semibold opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100",
   composerAttachmentTray:
     "vui-components-conversationview composerAttachmentTray min-w-0 max-w-full overflow-hidden flex flex-wrap items-center gap-2",
   // Busy composer keeps the queue/steer action and the stop button on one row

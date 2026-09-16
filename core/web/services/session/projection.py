@@ -10,6 +10,9 @@ their own packs. Late-bound facade keeps monkeypatches stable.
 from __future__ import annotations
 
 import json
+import logging
+import threading
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -18,6 +21,8 @@ from core.research.workflow.contracts.discussion_scope import (
 )
 from core.web.services.session.timebase import parse_timestamp_utc
 
+
+logger = logging.getLogger(__name__)
 
 _SESSION_SUMMARY_MESSAGE_SCAN_LIMIT = 12
 _SESSION_SUMMARY_EVENT_SCAN_LIMIT = 64
@@ -29,6 +34,19 @@ def _service():
     return session_service
 
 
+@dataclass(frozen=True)
+class _SessionListBuildResult:
+    """One completed session-index build; shape stays projection-internal."""
+
+    sessions: list[dict[str, Any]]
+    conversation_count: int
+    agent_count: int
+    source: str
+    phase_timings: Mapping[str, Any] = field(default_factory=dict)
+    summary_projection_ms: int | None = None
+    published_signature: tuple[Any, ...] | None = None
+
+
 def list_sessions(
     *,
     include_hidden_internal: bool = False,
@@ -38,7 +56,7 @@ def list_sessions(
     s = _service()
 
     started_at = s._perf_counter()
-    from . import directory_bridge, directory_runtime
+    from . import directory_runtime
 
     if directory_runtime.wait_for_directory_startup(
         timeout=directory_runtime.LIST_QUERY_STARTUP_WAIT_SECONDS,
@@ -64,133 +82,249 @@ def list_sessions(
             cache_age_ms=cache_age_ms,
             cache_ttl_ms=int(round(s._SESSION_LIST_CACHE_TTL_SECONDS * 1000)),
             waited_for_inflight=waited_for_inflight,
+            source="exact_cache",
         )
         return sessions
+
+    stale = s._get_last_good_session_list_snapshot(now=started_at, signature=signature)
+    if stale is not None:
+        # Serve-and-refresh: a signature miss must never re-enter the heavy
+        # (multi-second to multi-minute) projection on the request thread.
+        stale_sessions, stale_age_ms, stale_conversation_count, stale_agent_count = stale
+        s._finish_session_list_cache_build(signature=signature, started_at=started_at)
+        refresh_token = s._reserve_session_list_refresh(now=started_at, signature=signature)
+        if refresh_token is not None:
+            _start_session_list_cache_refresh(
+                signature=signature,
+                include_hidden_internal=bool(include_hidden_internal),
+                refresh_token=refresh_token,
+            )
+        s._record_session_list_loaded_event(
+            session_count=len(stale_sessions),
+            conversation_count=stale_conversation_count,
+            agent_count=stale_agent_count,
+            elapsed_ms=s._elapsed_ms(started_at),
+            cache_hit=False,
+            cache_age_ms=stale_age_ms,
+            cache_ttl_ms=int(round(s._SESSION_LIST_CACHE_TTL_SECONDS * 1000)),
+            waited_for_inflight=waited_for_inflight,
+            source="stale_last_good",
+            stale_serve=True,
+            refresh_scheduled=refresh_token is not None,
+        )
+        return stale_sessions
+
     if not should_build:
         return []
+
+    try:
+        result = _build_session_list_data(
+            s,
+            include_hidden_internal=bool(include_hidden_internal),
+        )
+        s._finish_session_list_cache_build(
+            signature=signature,
+            sessions=result.sessions,
+            started_at=started_at,
+            conversation_count=result.conversation_count,
+            agent_count=result.agent_count,
+        )
+        if result.published_signature is not None and result.published_signature != signature:
+            # A standalone SQLite compatibility read may create/retire its WAL
+            # after the initial signature was captured. Keep the original key
+            # for waiters already sharing this build, and also publish under
+            # the post-read key for the immediately following request.
+            s._set_session_list_cache(
+                result.sessions,
+                now=started_at,
+                signature=result.published_signature,
+                conversation_count=result.conversation_count,
+                agent_count=result.agent_count,
+            )
+        s._record_session_list_loaded_event(
+            session_count=len(result.sessions),
+            conversation_count=result.conversation_count,
+            agent_count=result.agent_count,
+            elapsed_ms=s._elapsed_ms(started_at),
+            cache_hit=False,
+            cache_age_ms=0,
+            cache_ttl_ms=int(round(s._SESSION_LIST_CACHE_TTL_SECONDS * 1000)),
+            waited_for_inflight=waited_for_inflight,
+            source=result.source,
+            chat_state_wait_ms=result.phase_timings.get("chatStateWaitMs"),
+            chat_state_read_ms=result.phase_timings.get("chatStateReadMs"),
+            conversation_normalize_ms=result.phase_timings.get("conversationNormalizeMs"),
+            summary_projection_ms=result.summary_projection_ms,
+            ledger_tail_ms=result.phase_timings.get("ledgerTailMs"),
+            agent_inbox_ms=result.phase_timings.get("agentInboxMs"),
+            agent_directory_ms=result.phase_timings.get("agentDirectoryMs"),
+        )
+        return result.sessions
+    except Exception:
+        s._finish_session_list_cache_build(signature=signature, started_at=started_at)
+        raise
+
+
+def _start_session_list_cache_refresh(
+    *,
+    signature: tuple[Any, ...],
+    include_hidden_internal: bool,
+    refresh_token: float,
+) -> None:
+    """Run the serve-and-refresh rebuild off the request thread."""
+
+    thread = threading.Thread(
+        target=_run_session_list_cache_refresh,
+        kwargs={
+            "signature": signature,
+            "include_hidden_internal": include_hidden_internal,
+            "refresh_token": refresh_token,
+        },
+        name="session-list-cache-refresh",
+        daemon=True,
+    )
+    thread.start()
+
+
+def _run_session_list_cache_refresh(
+    *,
+    signature: tuple[Any, ...],
+    include_hidden_internal: bool,
+    refresh_token: float,
+) -> None:
+    s = _service()
+    try:
+        result = _build_session_list_data(
+            s,
+            include_hidden_internal=include_hidden_internal,
+        )
+        published_at = s._perf_counter()
+        s._set_session_list_cache(
+            result.sessions,
+            now=published_at,
+            signature=signature,
+            conversation_count=result.conversation_count,
+            agent_count=result.agent_count,
+        )
+        if result.published_signature is not None and result.published_signature != signature:
+            s._set_session_list_cache(
+                result.sessions,
+                now=published_at,
+                signature=result.published_signature,
+                conversation_count=result.conversation_count,
+                agent_count=result.agent_count,
+            )
+        s._record_session_list_loaded_event(
+            session_count=len(result.sessions),
+            conversation_count=result.conversation_count,
+            agent_count=result.agent_count,
+            elapsed_ms=s._elapsed_ms(refresh_token),
+            cache_hit=False,
+            cache_age_ms=0,
+            cache_ttl_ms=int(round(s._SESSION_LIST_CACHE_TTL_SECONDS * 1000)),
+            source=f"background_refresh:{result.source}",
+            refresh_scheduled=False,
+        )
+    except Exception as exc:  # noqa: BLE001 - a failed refresh only delays freshness
+        logger.warning(
+            "Session list background refresh failed (%s).",
+            type(exc).__name__,
+        )
+    finally:
+        s._release_session_list_refresh(started_at=refresh_token, signature=signature)
+
+
+def _build_session_list_data(
+    s: Any,
+    *,
+    include_hidden_internal: bool,
+) -> _SessionListBuildResult:
+    """Build one session-index snapshot from the directory store or projection."""
+
+    from . import directory_bridge
 
     directory_sessions = None
     try:
         directory_sessions = directory_bridge.list_session_summaries(
             include_hidden=include_hidden_internal,
         )
-    except Exception:
+    except Exception as exc:
+        # A raising directory read must not disappear into the legacy rebuild:
+        # that silent fallback is the slow path this module exists to avoid.
         directory_sessions = None
+        directory_bridge.note_session_read_degraded(
+            source="session list build",
+            error_type=type(exc).__name__,
+        )
     if directory_sessions is not None:
-        s._finish_session_list_cache_build(
-            signature=signature,
+        return _SessionListBuildResult(
             sessions=directory_sessions,
-            started_at=started_at,
             conversation_count=len(directory_sessions),
             agent_count=0,
+            source="directory_store",
         )
-        s._record_session_list_loaded_event(
-            session_count=len(directory_sessions),
-            conversation_count=len(directory_sessions),
-            agent_count=0,
-            elapsed_ms=s._elapsed_ms(started_at),
-            cache_hit=False,
-            cache_age_ms=0,
-            cache_ttl_ms=int(round(s._SESSION_LIST_CACHE_TTL_SECONDS * 1000)),
-            waited_for_inflight=waited_for_inflight,
-        )
-        return directory_sessions
 
-    try:
-        agent_directory_started_at = s._perf_counter()
-        agent_by_id = s._agent_lookup_for_conversations()
-        hidden_team_member_agent_ids = s._agent_directory_stub_hidden_team_member_ids()
-        load_phase_timings: dict[str, int] = {
-            "agentDirectoryMs": s._elapsed_ms(agent_directory_started_at),
-        }
-        _, conversations = s._load_conversations(
-            repair=False,
-            agent_by_id=agent_by_id,
-            hidden_team_member_agent_ids=hidden_team_member_agent_ids,
-            lightweight=True,
-            defer_hidden_previews=not include_hidden_internal,
+    agent_directory_started_at = s._perf_counter()
+    agent_by_id = s._agent_lookup_for_conversations()
+    hidden_team_member_agent_ids = s._agent_directory_stub_hidden_team_member_ids()
+    load_phase_timings: dict[str, int] = {
+        "agentDirectoryMs": s._elapsed_ms(agent_directory_started_at),
+    }
+    _, conversations = s._load_conversations(
+        repair=False,
+        agent_by_id=agent_by_id,
+        hidden_team_member_agent_ids=hidden_team_member_agent_ids,
+        lightweight=True,
+        defer_hidden_previews=not include_hidden_internal,
+        phase_timings=load_phase_timings,
+    )
+    summary_projection_started_at = s._perf_counter()
+    conversations = s._append_agent_directory_conversations(
+        conversations,
+        agent_by_id=agent_by_id,
+        hidden_team_member_agent_ids=hidden_team_member_agent_ids,
+    )
+    sessions = []
+    hidden_summaries = []
+    agent_inbox_pending_count_cache: dict[str, int] = {}
+    for item in conversations:
+        summary = s._build_session_summary(
+            item,
+            hydrate_agent=False,
             phase_timings=load_phase_timings,
+            agent_inbox_pending_count_cache=agent_inbox_pending_count_cache,
         )
-        summary_projection_started_at = s._perf_counter()
-        conversations = s._append_agent_directory_conversations(
-            conversations,
-            agent_by_id=agent_by_id,
-            hidden_team_member_agent_ids=hidden_team_member_agent_ids,
+        hidden_internal = not include_hidden_internal and s._empty_direct_agent_session_hidden_from_index(
+            item,
+            hidden_team_member_agent_ids,
         )
-        sessions = []
-        hidden_summaries = []
-        agent_inbox_pending_count_cache: dict[str, int] = {}
-        for item in conversations:
-            summary = s._build_session_summary(
-                item,
-                hydrate_agent=False,
-                phase_timings=load_phase_timings,
-                agent_inbox_pending_count_cache=agent_inbox_pending_count_cache,
-            )
-            hidden_internal = not include_hidden_internal and s._empty_direct_agent_session_hidden_from_index(
-                item,
-                hidden_team_member_agent_ids,
-            )
-            if include_hidden_internal:
-                sessions.append(summary)
-            elif s._session_agent_visible_in_indexes(summary) and not hidden_internal:
-                sessions.append(summary)
-            else:
-                hidden_summaries.append(summary)
-        s._record_session_agent_missing_index_batch_event(hidden_summaries, source="list_sessions")
-        sessions.sort(
-            key=lambda item: (
-                -s._timestamp_sort_key(item.get("updatedAt") or item.get("lastActive") or ""),
-                # Same-second timestamps must not depend on input order (view
-                # switching reshuffles the source rows); fall back to a stable id key.
-                str(item.get("id") or ""),
-            )
+        if include_hidden_internal:
+            sessions.append(summary)
+        elif s._session_agent_visible_in_indexes(summary) and not hidden_internal:
+            sessions.append(summary)
+        else:
+            hidden_summaries.append(summary)
+    s._record_session_agent_missing_index_batch_event(hidden_summaries, source="list_sessions")
+    sessions.sort(
+        key=lambda item: (
+            -s._timestamp_sort_key(item.get("updatedAt") or item.get("lastActive") or ""),
+            # Same-second timestamps must not depend on input order (view
+            # switching reshuffles the source rows); fall back to a stable id key.
+            str(item.get("id") or ""),
         )
-        summary_projection_ms = s._elapsed_ms(summary_projection_started_at)
-        published_signature = (
+    )
+    return _SessionListBuildResult(
+        sessions=sessions,
+        conversation_count=len(conversations),
+        agent_count=len(agent_by_id),
+        source="legacy_projection",
+        phase_timings=load_phase_timings,
+        summary_projection_ms=s._elapsed_ms(summary_projection_started_at),
+        published_signature=(
             s._session_list_source_signature(),
             bool(include_hidden_internal),
-        )
-        s._finish_session_list_cache_build(
-            signature=signature,
-            sessions=sessions,
-            started_at=started_at,
-            conversation_count=len(conversations),
-            agent_count=len(agent_by_id),
-        )
-        if published_signature != signature:
-            # A standalone SQLite compatibility read may create/retire its WAL
-            # after the initial signature was captured. Keep the original key
-            # for waiters already sharing this build, and also publish under
-            # the post-read key for the immediately following request.
-            s._set_session_list_cache(
-                sessions,
-                now=started_at,
-                signature=published_signature,
-                conversation_count=len(conversations),
-                agent_count=len(agent_by_id),
-            )
-        s._record_session_list_loaded_event(
-            session_count=len(sessions),
-            conversation_count=len(conversations),
-            agent_count=len(agent_by_id),
-            elapsed_ms=s._elapsed_ms(started_at),
-            cache_hit=False,
-            cache_age_ms=0,
-            cache_ttl_ms=int(round(s._SESSION_LIST_CACHE_TTL_SECONDS * 1000)),
-            waited_for_inflight=waited_for_inflight,
-            chat_state_wait_ms=load_phase_timings.get("chatStateWaitMs"),
-            chat_state_read_ms=load_phase_timings.get("chatStateReadMs"),
-            conversation_normalize_ms=load_phase_timings.get("conversationNormalizeMs"),
-            summary_projection_ms=summary_projection_ms,
-            ledger_tail_ms=load_phase_timings.get("ledgerTailMs"),
-            agent_inbox_ms=load_phase_timings.get("agentInboxMs"),
-            agent_directory_ms=load_phase_timings.get("agentDirectoryMs"),
-        )
-        return sessions
-    except Exception:
-        s._finish_session_list_cache_build(signature=signature, started_at=started_at)
-        raise
+        ),
+    )
 
 
 def get_session_detail(
@@ -3062,6 +3196,57 @@ def _build_session_cache_composition(
     ) or {}
 
 
+def _context_window_usage_tokens(usage: dict[str, Any] | None) -> tuple[int, str]:
+    """Tokens occupying the context window in the latest model request.
+
+    Codex parity (``codex-rs/tui/src/token_usage.rs``): the window indicator is
+    based on the last request's token usage, not on the accumulated session
+    transcript, so a compaction immediately lowers it.
+    """
+
+    if not isinstance(usage, dict):
+        return 0, ""
+    if str(usage.get("source") or "").strip() != "provider_usage":
+        return 0, ""
+    total = int(usage.get("totalTokens") or 0)
+    if total <= 0:
+        total = int(usage.get("inputTokens") or 0) + int(usage.get("outputTokens") or 0)
+    return max(0, total), str(usage.get("recordedAt") or "").strip()
+
+
+def _session_compaction_tokens(s: Any, conversation: dict[str, Any] | None) -> tuple[int, str]:
+    """Latest compaction checkpoint size for the session (compacted context)."""
+
+    session_id = str((conversation or {}).get("id") or "").strip()
+    if not session_id:
+        return 0, ""
+    try:
+        from core.chat.context_compression_ledger import context_compression_projection
+
+        events = s.load_session_conversation_events_snapshot(session_id)
+        payload = context_compression_projection(events).get("lastCompression") or {}
+    except Exception:
+        return 0, ""
+    if not isinstance(payload, dict):
+        return 0, ""
+    return max(0, int(payload.get("afterTokens") or 0)), str(payload.get("timestamp") or "").strip()
+
+
+def _compaction_supersedes_usage(compaction_at: str, usage_at: str) -> bool:
+    """Codex parity: a compaction clears the older window indicator.
+
+    ``set_token_info`` hides the context indicator on compaction and only the
+    next usage update re-establishes it, so a checkpoint newer than the last
+    usage (or an untimestamped usage) is the authoritative window size.
+    """
+
+    if not compaction_at:
+        return False
+    if not usage_at:
+        return True
+    return _timestamp_sort_key(compaction_at) >= _timestamp_sort_key(usage_at)
+
+
 def _build_session_context_usage(conversation: dict[str, Any], messages: list[dict[str, Any]]) -> dict[str, Any]:
     s = _service()
     user_count = 0
@@ -3090,6 +3275,19 @@ def _build_session_context_usage(conversation: dict[str, Any], messages: list[di
     limit_payload = s._session_context_limit_payload(conversation)
     limit = s._coerce_nonnegative_int(limit_payload.get("limit") or 0)
     used = min(estimated_tokens, limit) if limit > 0 else estimated_tokens
+    source = "conversation_ledger"
+    # The visible transcript keeps every retired event, so its estimate cannot
+    # show a compaction. Prefer the model-facing size: the compaction checkpoint
+    # once it supersedes the last usage, then the newest provider-reported
+    # request window, and only fall back to the transcript estimate.
+    usage_tokens, usage_at = _context_window_usage_tokens(s._session_last_llm_usage(list(messages or [])))
+    compaction_tokens, compaction_at = _session_compaction_tokens(s, conversation)
+    if compaction_tokens > 0 and _compaction_supersedes_usage(compaction_at, usage_at):
+        used = min(compaction_tokens, limit) if limit > 0 else compaction_tokens
+        source = "conversation_ledger_compacted_context"
+    elif usage_tokens > 0:
+        used = min(usage_tokens, limit) if limit > 0 else usage_tokens
+        source = "provider_usage_context_window"
     payload = {
         "used": used,
         "limit": limit,
@@ -3102,7 +3300,7 @@ def _build_session_context_usage(conversation: dict[str, Any], messages: list[di
         "userMessageCount": user_count,
         "assistantMessageCount": assistant_count,
         "toolCallCount": tool_call_count,
-        "source": "conversation_ledger",
+        "source": source,
     }
     return payload
 

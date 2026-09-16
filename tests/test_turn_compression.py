@@ -7,10 +7,14 @@ emergency vs chat early-exit contract using injected fakes.
 
 from types import SimpleNamespace
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from core.orchestration.agent_modes import AgentMode
-from core.orchestration.turn_compression import compress_turn_messages
+from core.orchestration.turn_compression import (
+    ABORTED_TOOL_RESULT_CONTENT,
+    compress_turn_messages,
+    normalize_tool_call_pairing,
+)
 from tools.compression_strategy import CompressionConfig, CompressionLevel
 
 
@@ -95,7 +99,7 @@ def _run(*, messages, compressor, config, extra=None, **kwargs):
         compression_count_this_turn=kwargs.pop("compression_count_this_turn", 0),
         compression_strategy=kwargs.pop("compression_strategy", _FakeStrategy()),
         prompt_manager=None,
-        turn_runtime_fn=lambda: {"sessionId": "s1", "runId": "t1"},
+        turn_runtime_fn=kwargs.pop("turn_runtime_fn", lambda: {"sessionId": "s1", "runId": "t1"}),
         estimate_tokens_fn=_estimate,
         get_ui_fn=lambda: ui,
         get_state_manager_fn=lambda: SimpleNamespace(set_state=lambda *a, **k: None),
@@ -106,6 +110,149 @@ def _run(*, messages, compressor, config, extra=None, **kwargs):
         extra["ui"] = ui
         extra["events"] = events
     return result
+
+
+def test_compression_uses_current_session_for_checkpoint_and_tool_references(monkeypatch, tmp_path):
+    from core.chat import conversation_ledger, tool_result_replacement
+    from core.web.services import agent_directory_service
+
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {
+            "agentId": "a1",
+            "sessionId": "workspace-session",
+            "turnId": "workspace-turn",
+        },
+    )
+    checkpoints = []
+    references = []
+    monkeypatch.setattr(
+        conversation_ledger,
+        "append_context_compression_checkpoint",
+        lambda root, session_id, **kw: checkpoints.append((session_id, kw)) or object(),
+    )
+    monkeypatch.setattr(
+        tool_result_replacement,
+        "replace_large_tool_results_for_compression",
+        lambda messages, **kw: (
+            references.append(kw["session_id"]) or messages,
+            {"replacements": []},
+        ),
+    )
+    extras = {}
+    _run(
+        messages=[AIMessage(content="long-context-message")],
+        compressor=_FakeCompressor([AIMessage(content="x")]),
+        config=_feature_config(),
+        project_root=str(tmp_path),
+        turn_runtime_fn=dict,
+        extra=extras,
+        retention_contract={"sessionId": "s1", "agentId": "a1"},
+    )
+
+    assert checkpoints[0][0] == "workspace-session"
+    assert checkpoints[0][1]["turn_id"] == "workspace-turn"
+    assert "sessionId=workspace-session" in checkpoints[0][1]["summary"]
+    assert "sessionId=s1" not in checkpoints[0][1]["summary"]
+    assert references == ["workspace-session"]
+    assert extras["events"][0]["kwargs"]["fields"]["sessionId"] == "workspace-session"
+
+
+def test_parallel_compression_keeps_shared_agent_sessions_separate(
+    monkeypatch, tmp_path
+):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    from core.chat import conversation_ledger
+    from core.web.services import agent_directory_service
+
+    current = agent_directory_service._CURRENT_AGENT_RUNTIME
+    barrier = Barrier(2)
+    checkpoints = []
+    monkeypatch.setattr(
+        conversation_ledger,
+        "append_context_compression_checkpoint",
+        lambda root, session_id, **kw: (
+            checkpoints.append((session_id, kw["turn_id"])) or object()
+        ),
+    )
+
+    def compress(session_id):
+        token = current.set(
+            {"agentId": "a1", "sessionId": session_id, "turnId": f"{session_id}-turn"}
+        )
+        try:
+            barrier.wait(timeout=5)
+            return _run(
+                messages=[AIMessage(content="long-context-message")],
+                compressor=_FakeCompressor([AIMessage(content="x")]),
+                config=_feature_config(),
+                project_root=str(tmp_path),
+                turn_runtime_fn=dict,
+            )
+        finally:
+            current.reset(token)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(compress, ["workspace-a", "workspace-b"]))
+    assert all(result[2] for result in results)
+    assert sorted(checkpoints) == [
+        ("workspace-a", "workspace-a-turn"),
+        ("workspace-b", "workspace-b-turn"),
+    ]
+
+
+def test_next_turn_replays_compression_from_its_own_ledger(monkeypatch, tmp_path):
+    from core.chat import conversation_ledger as ledger
+    from core.chat import turn_journal
+    from core.web.services import agent_directory_service
+
+    monkeypatch.setattr(
+        turn_journal, "turn_journal_workspace_root", lambda root: tmp_path / "workspace"
+    )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {
+            "agentId": "a1",
+            "sessionId": "workspace-session",
+            "turnId": "current-turn",
+        },
+    )
+    for session_id in ("s1", "workspace-session"):
+        ledger.append_conversation_event(
+            tmp_path,
+            session_id,
+            "old-turn",
+            ledger.EVENT_USER_MESSAGE,
+            payload={"content": f"original history of {session_id}"},
+        )
+    _run(
+        messages=[AIMessage(content="long-context-message")],
+        compressor=_FakeCompressor(
+            [AIMessage(content="x")], summary="retained task summary"
+        ),
+        config=_feature_config(),
+        project_root=str(tmp_path),
+        turn_runtime_fn=dict,
+    )
+
+    events = ledger.load_conversation_events(tmp_path, "workspace-session")
+    checkpoints = [
+        event
+        for event in events
+        if event.event_type == ledger.EVENT_COMPACTION_CHECKPOINT
+    ]
+    assert len(checkpoints) == 1
+    assert checkpoints[0].payload["coveredEventIds"] == [events[0].event_id]
+    replay = ledger.conversation_model_messages_from_events(events)
+    assert "retained task summary" in str(replay)
+    assert "original history of workspace-session" not in str(replay)
+    other_events = ledger.load_conversation_events(tmp_path, "s1")
+    assert len(other_events) == 1
+    assert "original history of s1" in str(ledger.conversation_model_messages_from_events(other_events))
 
 
 def test_disabled_feature_or_missing_compressor_skips_without_counting():
@@ -409,6 +556,115 @@ def test_ledger_checkpoint_failure_records_tokens_without_summary_body(monkeypat
         item for item in extras["events"] if item["args"][1] == "session.context_compression.ledger_failed"
     ] == []
     assert result[2] is True
+
+
+def test_normalize_tool_call_pairing_drops_orphans_and_synthesizes_aborted():
+    messages = [
+        AIMessage(content="", tool_calls=[{"name": "web_search_tool", "args": {}, "id": "call-1"}]),
+        ToolMessage(content="orphan result without call", tool_call_id="call-gone"),
+        AIMessage(content="", tool_calls=[{"name": "fetch_tool", "args": {}, "id": "call-2"}]),
+    ]
+
+    normalized, stats = normalize_tool_call_pairing(messages)
+
+    assert stats == {"droppedOrphanResults": 1, "synthesizedAbortedResults": 2}
+    assert [getattr(item, "tool_call_id", None) for item in normalized] == [
+        None,
+        "call-1",
+        None,
+        "call-2",
+    ]
+    assert isinstance(normalized[1], ToolMessage)
+    assert normalized[1].content == ABORTED_TOOL_RESULT_CONTENT
+    assert normalized[1].name == "web_search_tool"
+    assert normalized[3].content == ABORTED_TOOL_RESULT_CONTENT
+
+
+def test_normalize_tool_call_pairing_handles_provider_dict_messages():
+    messages = [
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "d1", "function": {"name": "shell"}}]},
+        {"role": "tool", "content": "stale", "tool_call_id": "d9"},
+    ]
+
+    normalized, stats = normalize_tool_call_pairing(messages)
+
+    assert stats == {"droppedOrphanResults": 1, "synthesizedAbortedResults": 1}
+    assert normalized[0]["tool_calls"][0]["id"] == "d1"
+    repaired = normalized[1]
+    assert repaired["role"] == "tool"
+    assert repaired["tool_call_id"] == "d1"
+    assert repaired["content"] == ABORTED_TOOL_RESULT_CONTENT
+    assert repaired["metadata"]["kind"] == "interrupted_tool_result"
+    assert repaired["metadata"]["status"] == "aborted"
+    assert repaired["metadata"]["toolName"] == "shell"
+
+
+def test_compressor_unresolved_call_is_normalized_and_audited():
+    original = [AIMessage(content="long-context-message")]
+    broken = [AIMessage(content="", tool_calls=[{"name": "fetch_tool", "args": {}, "id": "call-new"}])]
+    extras = {}
+
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor(broken, summary="broken summary"),
+        config=_feature_config(),
+        extra=extras,
+        iteration=6,
+    )
+
+    assert result[1] is False
+    assert isinstance(result[0][-1], ToolMessage)
+    assert result[0][-1].tool_call_id == "call-new"
+    assert result[0][-1].content == ABORTED_TOOL_RESULT_CONTENT
+    normalized = [
+        item
+        for item in extras["events"]
+        if item["args"][1] == "agent.context_compression.tool_chain_normalized"
+    ]
+    assert normalized
+    fields = normalized[0]["kwargs"]["fields"]
+    assert fields["synthesizedAbortedResults"] == 1
+    assert fields["droppedOrphanResults"] == 0
+    assert not [
+        item
+        for item in extras["events"]
+        if item["args"][1] == "agent.context_budget_exhausted"
+    ]
+
+
+def test_compressor_orphan_result_is_dropped_before_the_gate():
+    original = [
+        AIMessage(content="", tool_calls=[{"name": "t", "args": {}, "id": "c1"}]),
+        ToolMessage(content="r1", tool_call_id="c1"),
+    ]
+    broken = [
+        AIMessage(content="summary note"),
+        ToolMessage(content="late result", tool_call_id="c-gone"),
+    ]
+    extras = {}
+
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor(broken, summary="broken summary"),
+        config=_feature_config(),
+        extra=extras,
+        iteration=6,
+    )
+
+    assert result[1] is False
+    assert all(getattr(item, "tool_call_id", None) != "c-gone" for item in result[0])
+    normalized = [
+        item
+        for item in extras["events"]
+        if item["args"][1] == "agent.context_compression.tool_chain_normalized"
+    ]
+    assert normalized
+    assert normalized[0]["kwargs"]["fields"]["droppedOrphanResults"] == 1
+    assert not [
+        item
+        for item in extras["events"]
+        if item["args"][1] == "agent.context_budget_exhausted"
+    ]
 
 
 def test_ledger_fallback_failure_records_session_ledger_failed(monkeypatch, tmp_path):

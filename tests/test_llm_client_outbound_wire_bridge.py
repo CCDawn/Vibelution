@@ -44,6 +44,37 @@ def _metadata():
     }
 
 
+@pytest.mark.parametrize("streaming", [False, True])
+def test_provider_control_only_reply_raises_without_retry_or_visible_text(streaming):
+    leaked = "<ds_safety>internal classification</ds_safety>Safe"
+    calls = []
+
+    def backend(payload):
+        calls.append(payload)
+        if streaming:
+            return iter([
+                {"choices": [{"index": 0, "delta": {"content": leaked}}]},
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+            ])
+        return {"choices": [{"index": 0, "message": {"content": leaked}, "finish_reason": "stop"}]}
+
+    client = LLMClient(config=_config(transport="chat_completions"), backend=backend)
+    client.protocol_route = replace(client.protocol_route, provider_id="opencode_go",
+                                    provider_kind="opencode", effective_model="deepseek-v4.1-flash")
+    events = []
+    with pytest.raises(LLMError) as caught:
+        if streaming:
+            for event in client.stream_events([{"role": "user", "content": "inspect"}], metadata=_metadata()):
+                events.append(event)  # noqa: PERF402 - retain events emitted before the protocol error
+        else:
+            client.invoke_outcome([{"role": "user", "content": "inspect"}], metadata=_metadata())
+    assert caught.value.category == "provider_protocol_error"
+    assert caught.value.retryable is False
+    assert len(calls) == 1
+    assert "internal classification" not in str(caught.value)
+    assert not [event for event in events if event.text]
+
+
 def test_unavailable_wire_adapter_fails_before_provider_io():
     # 0d6767317 起 anthropic_messages/gemini_generate_content 已注册 compat 适配器；
     # 本测试锁定剩余契约：未注册的 adapter_id 仍在 provider IO 前被拒绝。

@@ -9,6 +9,45 @@ import {
   shouldApplyCanvasNodeSelection,
   type ResearchProcessPanel,
 } from "./researchProcessPanelSelection";
+import { HYPOTHESIS_FIRST_GENERATION_NODE_ID } from "./hypothesisFirstCanvasRegion";
+
+type ReplaceParams = (patch: Record<string, string | null | undefined>) => void;
+
+type ArchivedRunResetRedirectInput = {
+  runId: string;
+  isArchivedRun: boolean;
+  resetSource: string | undefined;
+  currentPhase: string | undefined;
+  replaceParams: ReplaceParams;
+};
+
+/**
+ * A reset invalidates an archived formal run as an operational URL target.
+ * Keep this routing consequence with the workspace URL adapter so the page
+ * remains a composition of state readers and navigation owners.
+ */
+export function useArchivedRunResetRedirect({
+  runId,
+  isArchivedRun,
+  resetSource,
+  currentPhase,
+  replaceParams,
+}: ArchivedRunResetRedirectInput): void {
+  const archivedRunSupersededByReset = Boolean(
+    runId
+    && isArchivedRun
+    && resetSource === "question_reset_audit"
+    && currentPhase !== "formal_runtime",
+  );
+  useEffect(() => {
+    if (!archivedRunSupersededByReset) return;
+    replaceParams({
+      runId: null,
+      node: HYPOTHESIS_FIRST_GENERATION_NODE_ID,
+      panel: "node",
+    });
+  }, [archivedRunSupersededByReset, replaceParams]);
+}
 
 export function useResearchWorkflowWorkspace(teamId: string) {
   const [searchParams, setSearchParams] = useSearchParams();
