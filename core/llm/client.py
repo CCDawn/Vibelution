@@ -4399,6 +4399,7 @@ class LLMClient:
         *,
         metadata: Optional[Dict[str, Any]] = None,
         include_outcome: bool = False,
+        latency_ms: int = 0,
     ) -> AIMessage:
         """Project canonical facts into a one-way LangChain compatibility message."""
         additional_kwargs: Dict[str, Any] = {}
@@ -4452,6 +4453,9 @@ class LLMClient:
                 "cache_usage_missing_reason": str(
                     usage_summary.get("cacheUsageMissingReason") or ""
                 ),
+                # Measured final-call duration (ms) supplied by the caller so
+                # usage consumers can derive generation speed; 0 when unknown.
+                "latency_ms": max(0, int(latency_ms or 0)),
             }
             response_metadata["usage_observation"] = usage_observation
             response_metadata["usage"] = {

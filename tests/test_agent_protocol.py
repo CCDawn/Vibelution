@@ -629,7 +629,7 @@ class _CanonicalAgentTestLLM:
         if False:
             yield None
 
-    def project_outcome_message(self, outcome):
+    def project_outcome_message(self, outcome, **_kwargs):
         reasoning = "".join(
             event.text
             for event in outcome.events
@@ -1065,7 +1065,7 @@ class TestToolMessageFlow:
                     text="",
                 )
 
-            def project_outcome_message(self, outcome):
+            def project_outcome_message(self, outcome, **_kwargs):
                 return AIMessage(content=outcome.final_text)
 
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())

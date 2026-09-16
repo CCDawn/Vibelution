@@ -250,6 +250,8 @@ Outcome 必须结合 mode 解释，每个组合只对应一个恢复动作：
 | `commit/closeout/verify-manifest` | `validation_toolchain_missing` | 修复 integration worktree 的 `.venv`，然后重跑；不要在任务 worktree 建链接 |
 | `commit/closeout/verify-manifest` | `validation_toolchain_requirements_missing` | 恢复当前或 integration worktree 的 `requirements.txt` 后重跑 |
 | `commit/closeout/verify-manifest` | `validation_toolchain_unhealthy` | 修复 integration `.venv` 的解释器健康状态后重跑 |
+| `closeout` | `validation_node_modules_source_missing` | 在 root local `main` 安装缺失工程的依赖（例如 `npm --prefix web ci`），然后重跑 closeout |
+| `closeout` | `validation_node_modules_link_failed` | 按 detail 手工创建 junction（PowerShell `New-Item -ItemType Junction`），然后重跑 closeout |
 | `verify-manifest` | `passed` | manifest 与当前 task branch/worktree/HEAD/changed files 一致，main 仍新鲜且是 task HEAD 祖先，claim、clean 状态、checks 与 commands 仍有效，可进入 merge gate |
 | `verify-manifest` | `failed` | manifest 不可读，或 schema/`outcome`/branch/worktree/HEAD/changed files/checks/commands 被篡改或不匹配；生成或选择正确 manifest，必要时重跑 closeout |
 | `verify-manifest` | `stale_main` | 当前本地 main 已变化或不再是 task HEAD 祖先；回任务 worktree 同步最新 main，并重跑 closeout 生成新 manifest |
@@ -257,6 +259,8 @@ Outcome 必须结合 mode 解释，每个组合只对应一个恢复动作：
 | `verify-manifest` | `dirty_worktree` | task worktree 在 closeout 后出现改动；提交或撤回本任务内容，使 worktree clean 后重跑 closeout |
 
 质量门只生成或复核合入前证据，不执行 merge、claim release、junction/worktree/branch 删除。冲突和 `stale_main` 都回 task worktree 处理；root local `main` 仅在 clean 且 SHA 仍匹配、所有验证已闭合时执行 `git merge --ff-only <task-branch>`。merge 成功后不等待 post-merge verification，立即清理可证明属于本任务的临时内容、claim、历史遗留 task-owned junction、干净 worktree 和已合并本地 branch；共享 integration `.venv` 永远不属于任务清理范围。
+
+任务 worktree 缺少 selector 需要的 npm 工程依赖时，closeout 会在验证前自动为实际进入的工程（当前是 `web/node_modules` 与 `desktop/electron/node_modules`）创建指向 root local `main` 同名目录的 junction，并把链接源与创建时间记录进 manifest 的 `nodeModulesLinks`；这是上表「不得创建 Junction」条款（只约束 Python toolchain `.venv`）的唯一认可例外，不要当违规手工清理。源缺失时报 `validation_node_modules_source_missing`，链接已存在时是 no-op，清理端按既有 task-owned 链接生命周期删除（`scripts/task_closeout.py` 的 `TASK_OWNED_EPHEMERAL_PATHS`）。
 
 ### 3.7 使用服务器分布式测试
 

@@ -73,7 +73,7 @@ def _route_llm(*, with_stream: bool = False):
         def effective_route_id(self):
             return "primary-route"
 
-        def project_outcome_message(self, outcome):
+        def project_outcome_message(self, outcome, **_kwargs):
             return AIMessage(content=outcome.final_text)
 
     client = RouteLLM()

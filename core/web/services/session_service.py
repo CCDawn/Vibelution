@@ -972,6 +972,7 @@ from core.web.services.session.projection import (
     _normalize_session_llm_payload_trace,
     _normalize_session_runtime_notices,
     _normalize_turn_llm_usage,
+    _assistant_usage_stats_payload,
     _session_detail_agent_snapshot,
     _active_task_to_api,
     _active_task_with_live_work_run,

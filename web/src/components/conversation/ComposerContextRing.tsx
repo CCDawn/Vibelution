@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ArrowLeft, ChevronDown, ChevronRight, X } from "lucide-react";
 import { VButton, VPopover } from "../vui";
 import type { ComposerContextRingModel } from "../../routes/chat/composerContextModel";
+import { formatTokensPerSecondValue } from "../../routes/chat/composerContextModel";
 import styles from "./ComposerContextRing.styles";
 
 export type ComposerContextRingProps = {
@@ -27,15 +28,17 @@ export function ComposerContextRingPanel({
   const cacheLabel =
     model.cacheState === "observed"
       ? zh
-        ? `已复用 ${model.hitPercent}% 输入`
-        : `${model.hitPercent}% of input reused`
+        ? `已复用 ${model.hitPercent}% · ${model.cachedTokensLabel} tokens`
+        : `${model.hitPercent}% · ${model.cachedTokensLabel} tokens reused`
       : model.cacheState === "not_called"
         ? zh
           ? "尚未调用模型"
           : "Model not called yet"
-        : zh
-          ? "暂无上游数据"
-          : "Not reported by provider";
+        : "—";
+  const speedLabel =
+    model.generationTokensPerSecond != null
+      ? `${formatTokensPerSecondValue(model.generationTokensPerSecond)} tok/s`
+      : "—";
   const note = model.empty
     ? zh
       ? "模型调用后显示用量。"
@@ -119,6 +122,28 @@ export function ComposerContextRingPanel({
         />
       </div>
       <p className={styles.note}>{note}</p>
+      {model.autoCompact && (
+        <div
+          className={styles.autoCompact}
+          data-composer-context-auto-compact="true"
+        >
+          <div className={styles.autoCompactTitle}>
+            <span>
+              {zh ? "距自动压缩还剩" : "Left before auto-compression"}
+            </span>
+            <span className="tabular-nums">
+              {zh
+                ? `${model.autoCompact.remainingPercent}%（≈${model.autoCompact.remainingTokensLabel} tokens）`
+                : `${model.autoCompact.remainingPercent}% (≈${model.autoCompact.remainingTokensLabel} tokens)`}
+            </span>
+          </div>
+          <p className={styles.autoCompactNote}>
+            {zh
+              ? "压缩时会摘要保留要点，完整历史仍在 · 基于上次调用估算"
+              : "Compression keeps a summary of key points; full history remains · Based on the last call estimate"}
+          </p>
+        </div>
+      )}
       {model.groups.length > 0 && (
         <section data-composer-context-composition="true">
           <h2 className={styles.sectionTitle}>
@@ -199,6 +224,31 @@ export function ComposerContextRingPanel({
           }
         >
           {cacheLabel}
+        </span>
+      </div>
+      <div
+        className={styles.cacheNext}
+        data-composer-context-speed="true"
+        data-speed-state={
+          model.generationTokensPerSecond != null ? "observed" : "missing"
+        }
+      >
+        <span>{zh ? "生成速度" : "Generation speed"}</span>
+        <span
+          className={
+            model.generationTokensPerSecond != null
+              ? styles.observed
+              : styles.muted
+          }
+          title={
+            model.generationTokensPerSecond != null
+              ? zh
+                ? "基于上次调用（厂商 usage + 耗时）估算"
+                : "Estimated from the last call (provider usage + duration)"
+              : undefined
+          }
+        >
+          {speedLabel}
         </span>
       </div>
       {detail && (

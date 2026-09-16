@@ -21,6 +21,13 @@ async function render(element: React.ReactNode) {
   root = createRoot(host);
   await act(() => root.render(element));
 }
+/** Each render appends a fresh host; scope queries to the newest one. */
+function latestHost(): HTMLElement {
+  return document.body.lastElementChild as HTMLElement;
+}
+function queryInLatestHost(selector: string): Element | null {
+  return latestHost().querySelector(selector);
+}
 async function click(text: string) {
   const button = [...document.querySelectorAll("button")].find((item) =>
     item.textContent?.includes(text),
@@ -28,11 +35,11 @@ async function click(text: string) {
   expect(button).toBeTruthy();
   await act(() => button!.click());
 }
-const model = buildComposerContextRingModel({
+const modelFixtureOptions = {
   usageUsed: 85000,
   usageLimit: 1000000,
   hitPercent: 99.9,
-  lang: "zh",
+  lang: "zh" as const,
   detailAvailable: true,
   segments: [
     {
@@ -44,7 +51,8 @@ const model = buildComposerContextRingModel({
     },
     { key: "agent_runtime", label: "规范", tokens: 388 },
   ],
-});
+};
+const model = buildComposerContextRingModel(modelFixtureOptions);
 describe("ComposerContextRing", () => {
   it("shows capacity and no inferred cache rate", async () => {
     await render(<ComposerContextRingPanel model={model} lang="zh" />);
@@ -53,10 +61,76 @@ describe("ComposerContextRing", () => {
         .querySelector('[role="progressbar"]')
         ?.getAttribute("aria-valuenow"),
     ).toBe("8.5");
-    expect(document.body.textContent).toContain("暂无上游数据");
+    // Provider did not report cache usage: fail-open to an em-dash.
+    expect(document.body.textContent).not.toContain("暂无上游数据");
+    expect(
+      document.querySelector('[data-composer-context-cache="true"]')
+        ?.getAttribute("data-cache-state"),
+    ).toBe("missing");
+    expect(document.body.textContent).toContain("—");
     expect(document.body.textContent).not.toContain("99.9%");
     expect(document.body.textContent).not.toContain("历史内容预览");
     expect(document.body.textContent).toContain("对话历史");
+  });
+  it("marks generation speed as observed or missing", async () => {
+    await render(<ComposerContextRingPanel model={model} lang="zh" />);
+    const speedRow = queryInLatestHost('[data-composer-context-speed="true"]');
+    expect(speedRow?.getAttribute("data-speed-state")).toBe("missing");
+    expect(speedRow?.textContent).toContain("—");
+    expect(latestHost().textContent).toContain("生成速度");
+    const withSpeed = buildComposerContextRingModel({
+      ...modelFixtureOptions,
+      tokensPerSecond: 38.44,
+    });
+    await render(<ComposerContextRingPanel model={withSpeed} lang="zh" />);
+    expect(
+      queryInLatestHost('[data-composer-context-speed="true"]')
+        ?.getAttribute("data-speed-state"),
+    ).toBe("observed");
+    expect(latestHost().textContent).toContain("38.4 tok/s");
+  });
+  it("renders the auto-compact countdown only when remaining drops below 40%", async () => {
+    // usage 96% of a 1M window; threshold 620K leaves ~0 remaining → visible.
+    const tight = buildComposerContextRingModel({
+      ...modelFixtureOptions,
+      usageUsed: 850000,
+      autoCompactThresholdTokens: 620000,
+    });
+    await render(<ComposerContextRingPanel model={tight} lang="zh" />);
+    expect(
+      queryInLatestHost('[data-composer-context-auto-compact="true"]'),
+    ).toBeTruthy();
+    expect(latestHost().textContent).toContain("距自动压缩还剩");
+    expect(latestHost().textContent).toContain("完整历史仍在");
+    expect(latestHost().textContent).toContain("基于上次调用估算");
+    // Plenty of room: the countdown must stay hidden (no resident noise).
+    const relaxed = buildComposerContextRingModel({
+      ...modelFixtureOptions,
+      usageUsed: 85000,
+      autoCompactThresholdTokens: 620000,
+    });
+    await render(<ComposerContextRingPanel model={relaxed} lang="zh" />);
+    expect(
+      queryInLatestHost('[data-composer-context-auto-compact="true"]'),
+    ).toBeNull();
+    // Threshold unknown (backend has none): never render a local guess.
+    await render(<ComposerContextRingPanel model={model} lang="zh" />);
+    expect(
+      queryInLatestHost('[data-composer-context-auto-compact="true"]'),
+    ).toBeNull();
+  });
+  it("shows observed cache reuse with absolute cached tokens", async () => {
+    const observed = buildComposerContextRingModel({
+      ...modelFixtureOptions,
+      cacheSource: "provider_usage",
+      cacheUsageObserved: true,
+      cachedInputTokens: 55600,
+      hitPercent: 63,
+    });
+    await render(<ComposerContextRingPanel model={observed} lang="zh" />);
+    const cacheRow = queryInLatestHost('[data-composer-context-cache="true"]');
+    expect(cacheRow?.getAttribute("data-cache-state")).toBe("observed");
+    expect(cacheRow?.textContent).toContain("已复用 63% · 56K tokens");
   });
   it("opens source details and existing cache diagnostics", async () => {
     const onOpenDetail = vi.fn();

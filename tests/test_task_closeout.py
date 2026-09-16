@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -989,3 +990,138 @@ def test_reuse_research_failure_names_its_recovery_step(
     assert result.retryable is True
     assert result.retry_token_path == ""
     assert result.next_action == expected_action
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected_action"),
+    [
+        (
+            "validation_node_modules_source_missing",
+            "install_node_modules_in_main_checkout",
+        ),
+        (
+            "validation_node_modules_link_failed",
+            "create_node_modules_link_manually",
+        ),
+    ],
+)
+def test_node_modules_preflight_failure_names_its_recovery_step(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: str,
+    expected_action: str,
+) -> None:
+    """A failed link preflight is one mechanical fix, then re-run closeout.
+
+    The outcome code alone cannot say *which* tree is missing or why creation
+    failed, so the gate's bounded detail must survive into ``errors`` next to
+    the code instead of replacing it.
+    """
+
+    detail = "web/node_modules: no node_modules to link"
+    monkeypatch.setattr(closeout, "resolve_context", lambda *_args, **_kwargs: context(tmp_path))
+    monkeypatch.setattr(
+        gate,
+        "run_closeout",
+        lambda *_args, **_kwargs: gate.GateResult(
+            outcome=outcome,
+            exit_code=1,
+            detail=detail,
+        ),
+    )
+    monkeypatch.setattr(
+        closeout,
+        "merge_ff_only",
+        lambda *_args, **_kwargs: pytest.fail("a failed validation must not merge"),
+    )
+
+    result = closeout.run_managed_closeout(
+        tmp_path / "task",
+        claim_id="claim-dev",
+        agent_id="agent-test",
+        integration_wait_seconds=0,
+    )
+
+    assert result.status == "validation_failed"
+    assert result.merged is False
+    assert result.retryable is True
+    assert result.retry_token_path == ""
+    assert result.next_action == expected_action
+    assert result.errors[0] == outcome
+    assert detail in result.errors
+
+
+def test_task_owned_ephemeral_paths_cover_every_linked_node_modules() -> None:
+    """The preflight creates exactly the links this cleanup tuple unlinks.
+
+    A node_modules link that cleanup does not know about would make the final
+    worktree removal descend into the shared main checkout's real install.
+    """
+
+    assert set(closeout.TASK_OWNED_EPHEMERAL_PATHS) == {
+        Path(".venv"),
+        Path("node_modules"),
+        Path("web") / "node_modules",
+        Path("desktop") / "electron" / "node_modules",
+        Path("挑战杯"),
+    }
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction lifecycle")
+def test_cleanup_unlinks_every_task_owned_ephemeral_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    main_root = tmp_path / "main"
+    task_root = main_root / ".worktrees" / "test-task"
+    task_root.mkdir(parents=True)
+    ctx = closeout.CloseoutContext(
+        main_root=main_root,
+        task_root=task_root,
+        branch="codex/test-task",
+    )
+    link_source = tmp_path / "shared-install"
+    link_source.mkdir()
+    for relative in closeout.TASK_OWNED_EPHEMERAL_PATHS:
+        link = task_root / relative
+        link.parent.mkdir(parents=True, exist_ok=True)
+        gate.create_directory_link(link_source, link)
+    monkeypatch.setattr(closeout, "ensure_cleanup_unowned", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(gate, "git_lines", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(gate, "rev_parse", lambda root, *_args: "head-sha")
+    monkeypatch.setattr(gate, "is_ancestor", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(closeout, "_branch_exists", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(closeout, "invocation_cwd_is_inside_task", lambda *_args: False)
+    monkeypatch.setattr(closeout, "_remove_leftover_worktree_dir", lambda *_args: None)
+    removed: list[list[bool]] = []
+
+    def fake_remove_worktree(context):
+        removed.append(
+            [
+                not (context.task_root / relative).exists()
+                for relative in closeout.TASK_OWNED_EPHEMERAL_PATHS
+            ]
+        )
+        return subprocess.CompletedProcess(["git", "worktree", "remove"], 0)
+
+    monkeypatch.setattr(closeout, "_remove_worktree_with_retry", fake_remove_worktree)
+
+    def process(argv, _cwd):
+        if argv[:3] == ["git", "worktree", "list"]:
+            # The directory is still a registered worktree, so cleanup takes
+            # the unlink-first path instead of treating it as residue.
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=f"worktree {ctx.main_root}\nworktree {ctx.task_root}\n",
+                stderr="",
+            )
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(gate, "run_process", process)
+
+    closeout.cleanup_task_resources(ctx, agent_id="agent-test")
+
+    assert removed == [[True] * len(closeout.TASK_OWNED_EPHEMERAL_PATHS)]
+    for relative in closeout.TASK_OWNED_EPHEMERAL_PATHS:
+        assert not (task_root / relative).exists()

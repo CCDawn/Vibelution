@@ -96,6 +96,18 @@ def _coerce_optional_bool(value: Any) -> bool | None:
     return None
 
 
+def _coerce_optional_float(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    value = _decode_binary(value)
+    if isinstance(value, (int, float)):
+        return max(0.0, float(value))
+    try:
+        return max(0.0, float(str(value).strip()))
+    except (TypeError, ValueError):
+        return None
+
+
 def _coerce_message_list(value: Any) -> list[Any]:
     value = _maybe_json(value)
     if value is None:
@@ -463,6 +475,17 @@ def build_llm_usage_from_observation(
     uncached_tokens = _coerce_nonnegative_int(_usage_get(token_usage, "uncached_input_tokens", "uncachedInputTokens"))
     if input_tokens and not uncached_tokens:
         uncached_tokens = max(0, input_tokens - cached_tokens)
+    latency_ms = _coerce_nonnegative_int(_usage_get(token_usage, "latency_ms", "latencyMs"))
+    if not latency_ms:
+        usage_observation = _as_mapping(response_metadata.get("usage_observation") or response_metadata.get("usageObservation"))
+        latency_ms = _coerce_nonnegative_int(usage_observation.get("latency_ms") or usage_observation.get("latencyMs"))
+    # Generation speed derives from provider-observed output tokens and the
+    # measured final-call duration; fail-open to None when either is absent.
+    tokens_per_second = (
+        round((output_tokens * 1000) / latency_ms, 1)
+        if observed and latency_ms > 0 and output_tokens > 0
+        else None
+    )
     return {
         "source": "provider_usage" if observed else "missing",
         "inputTokens": input_tokens,
@@ -477,6 +500,8 @@ def build_llm_usage_from_observation(
         "cacheCreationInputTokens": cache_creation_tokens,
         "uncachedInputTokens": uncached_tokens if observed else 0,
         "cacheHitRate": (cached_tokens / input_tokens) if observed and input_tokens > 0 else 0.0,
+        "latencyMs": latency_ms,
+        "tokensPerSecond": tokens_per_second,
         "provider": compact_repeated_metadata_text(response_metadata.get("provider") or runtime_metadata.get("provider") or ""),
         "model": compact_repeated_metadata_text(response_metadata.get("model") or runtime_metadata.get("model") or ""),
         "llmModelId": _coerce_text(
@@ -545,6 +570,13 @@ def normalize_runtime_llm_usage(value: Any) -> dict[str, Any] | None:
         uncached_tokens = max(0, input_tokens - cached_tokens)
     if not cache_usage_observed:
         uncached_tokens = 0
+    latency_ms = _coerce_nonnegative_int(value.get("latencyMs") or value.get("latency_ms") or 0)
+    raw_tokens_per_second = value.get("tokensPerSecond")
+    if raw_tokens_per_second is None:
+        raw_tokens_per_second = value.get("tokens_per_second")
+    tokens_per_second = _coerce_optional_float(raw_tokens_per_second)
+    if tokens_per_second is None and latency_ms > 0 and output_tokens > 0:
+        tokens_per_second = round((output_tokens * 1000) / latency_ms, 1)
     source = str(value.get("source") or "").strip() or ("provider_usage" if input_tokens else "missing")
     return {
         "source": source,
@@ -556,6 +588,8 @@ def normalize_runtime_llm_usage(value: Any) -> dict[str, Any] | None:
         "cacheCreationInputTokens": cache_creation_tokens,
         "uncachedInputTokens": uncached_tokens,
         "cacheHitRate": (cached_tokens / input_tokens) if cache_usage_observed and input_tokens > 0 else 0.0,
+        "latencyMs": latency_ms,
+        "tokensPerSecond": tokens_per_second,
         "cacheUsageObserved": cache_usage_observed,
         "cacheUsageMissingReason": cache_usage_missing_reason,
         "provider": compact_repeated_metadata_text(value.get("provider") or ""),
