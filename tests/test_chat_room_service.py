@@ -5777,28 +5777,39 @@ def test_reconcile_gate_reruns_after_store_change_or_inflight_release(tmp_path, 
         title="去抖门可重开",
         participant_session_ids=["session-alpha"],
     )
-    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_LAST_RUN_AT", None)
-    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_INFLIGHT", False)
-    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_LAST_STORE_TOKEN", None)
+    # Neighbor tests leak executors shut down with wait=False and background
+    # session machinery keeps firing chat-room reads; those calls run
+    # _reconcile_chat_room_round_state, which mutates the module-level gate
+    # globals under the shared gate lock.  Swap in a private reentrant lock and
+    # hold it across the resets and assertions so concurrent readers serialize
+    # behind this scenario instead of flipping INFLIGHT/LAST_RUN_AT between
+    # them.  Reentrancy keeps the production acquire/release helpers working
+    # on this thread while the swapped lock is installed.
+    test_gate_lock = threading.RLock()
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_GATE_LOCK", test_gate_lock)
+    with test_gate_lock:
+        monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_LAST_RUN_AT", None)
+        monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_INFLIGHT", False)
+        monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_LAST_STORE_TOKEN", None)
 
-    # Cold gate: a run is granted and released.
-    assert chat_room_service._acquire_chat_room_reconcile_run() is True
-    chat_room_service._release_chat_room_reconcile_run()
-    # Unchanged store + inside TTL: skipped.
-    assert chat_room_service._acquire_chat_room_reconcile_run() is False
-    # An inflight marker blocks a rerun even on a cold timestamp.
-    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_LAST_RUN_AT", None)
-    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_INFLIGHT", True)
-    assert chat_room_service._acquire_chat_room_reconcile_run() is False
-    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_INFLIGHT", False)
-    assert chat_room_service._acquire_chat_room_reconcile_run() is True
-    chat_room_service._release_chat_room_reconcile_run()
-    # A store write (mtime change) reopens the gate.
-    state = chat_room_service._store().load()
-    chat_room_service._store().save(state)
-    assert chat_room_service._acquire_chat_room_reconcile_run() is True
-    chat_room_service._release_chat_room_reconcile_run()
-    assert next(item for item in state["rooms"] if item["roomId"]) is not None
+        # Cold gate: a run is granted and released.
+        assert chat_room_service._acquire_chat_room_reconcile_run() is True
+        chat_room_service._release_chat_room_reconcile_run()
+        # Unchanged store + inside TTL: skipped.
+        assert chat_room_service._acquire_chat_room_reconcile_run() is False
+        # An inflight marker blocks a rerun even on a cold timestamp.
+        monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_LAST_RUN_AT", None)
+        monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_INFLIGHT", True)
+        assert chat_room_service._acquire_chat_room_reconcile_run() is False
+        monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_INFLIGHT", False)
+        assert chat_room_service._acquire_chat_room_reconcile_run() is True
+        chat_room_service._release_chat_room_reconcile_run()
+        # A store write (mtime change) reopens the gate.
+        state = chat_room_service._store().load()
+        chat_room_service._store().save(state)
+        assert chat_room_service._acquire_chat_room_reconcile_run() is True
+        chat_room_service._release_chat_room_reconcile_run()
+        assert next(item for item in state["rooms"] if item["roomId"]) is not None
 
 
 # ---------------------------------------------------------------------------
