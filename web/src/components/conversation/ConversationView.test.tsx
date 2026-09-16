@@ -109,6 +109,9 @@ function renderConversation(
     useDefaultProcessDisplayMode?: boolean;
     activeTurnMessage?: ConversationMessage;
     onSwitchMessageVersion?: (message: ConversationMessage, targetNodeId: string) => void;
+    onRegenerateAssistantMessage?: (message: ConversationMessage) => void;
+    regenerateDisabled?: boolean;
+    regeneratePending?: boolean;
     slashCommandSuggestions?: Array<{
       directoryName: string;
       name?: string;
@@ -179,6 +182,9 @@ function renderConversation(
         onCancelComposerMode={options.onCancelComposerMode}
         onEditUserMessage={() => undefined}
         onSwitchMessageVersion={options.onSwitchMessageVersion}
+        onRegenerateAssistantMessage={options.onRegenerateAssistantMessage}
+        regenerateDisabled={options.regenerateDisabled}
+        regeneratePending={options.regeneratePending}
       />
     </QueryClientProvider>,
   );
@@ -1771,3 +1777,141 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     expect(html).not.toContain("tracking state");
     expect(html.match(/statusSpinner/g)?.length).toBeUndefined();
   });});
+
+describe("ConversationView historical failed turn retry", () => {
+  function historicalTurnMessages() {
+    const userMessage: ConversationMessage = {
+      id: "message-user-1",
+      role: "user",
+      content: "帮我跑一次构建",
+      timestamp: "2026-05-22T00:00:00Z",
+      turnId: "turn-1",
+    };
+    const failedAssistant: ConversationMessage = {
+      id: "message-assistant-1",
+      role: "assistant",
+      content: "模型服务上游暂时失败，本轮没有完成。",
+      timestamp: "2026-05-22T00:01:00Z",
+      turnId: "turn-1",
+      status: "failed",
+      nodeId: "node-assistant-1",
+      turnItems: [
+        {
+          id: "message-assistant-1-item-status",
+          itemId: "message-assistant-1-item-status",
+          sessionId: "session-1",
+          turnId: "turn-1",
+          version: 3,
+          revision: 1,
+          sequence: 1,
+          type: "status",
+          code: "turn_attempt",
+          title: "turn_attempt",
+          text: "本轮未产出回答。",
+          status: "completed",
+          terminal: true,
+        },
+      ],
+      metadata: { kind: "turn_error" },
+    } as ConversationMessage;
+    return { userMessage, failedAssistant };
+  }
+
+  function settledAssistantTurnItem(
+    id: string,
+    turnId: string,
+    text: string,
+  ) {
+    return {
+      id: `${id}-item-answer`,
+      itemId: `${id}-item-answer`,
+      sessionId: "session-1",
+      turnId,
+      version: 3,
+      revision: 1,
+      sequence: 1,
+      type: "agent_message",
+      phase: "final_answer",
+      text,
+      status: "completed",
+      terminal: true,
+    };
+  }
+
+  it("shows the retry action inside the historical failed turn error block", () => {
+    const { userMessage, failedAssistant } = historicalTurnMessages();
+    const html = renderConversation([userMessage, failedAssistant], {
+      onRegenerateAssistantMessage: () => undefined,
+    });
+
+    expect(html).toContain("运行提示");
+    expect(html).toContain("turnErrorNotice");
+    expect(html).toContain("turnErrorRetryButton");
+    expect(html).toContain("重试此轮");
+    expect(html).toContain('aria-label="重试此轮"');
+  });
+
+  it("keeps the retry action wired to the regenerate handler with the busy/pending gates", () => {
+    expect(conversationViewSource).toContain("const canRetryFailedTurnMessage = message.role === \"assistant\"");
+    expect(conversationViewSource).toContain(
+      "onClick={() => onRegenerateAssistantMessage?.(message)}",
+    );
+    expect(conversationViewSource).toContain("isDisabled={regenerateDisabled}\n                              isPending={regeneratePending}");
+    expect(conversationViewSource).not.toContain("isDisabled={regenerateDisabled}\n                              isPending={regeneratePending}\n                              title={t(\"regenerateAnswer\")}");
+  });
+
+  it("does not show the retry action on successful or streaming turns", () => {
+    const { userMessage, failedAssistant } = historicalTurnMessages();
+    const successAssistant: ConversationMessage = {
+      id: "message-assistant-2",
+      role: "assistant",
+      content: "构建完成。",
+      timestamp: "2026-05-22T00:02:00Z",
+      turnId: "turn-2",
+      status: "completed",
+      nodeId: "node-assistant-2",
+      turnItems: [settledAssistantTurnItem("message-assistant-2", "turn-2", "构建完成。")],
+    };
+    const html = renderConversation(
+      [userMessage, failedAssistant, successAssistant],
+      { onRegenerateAssistantMessage: () => undefined },
+    );
+
+    expect(html).toContain("构建完成。");
+    expect(html.match(/turnErrorRetryButton/g)?.length).toBe(1);
+    expect(html.match(/aria-label="重试此轮"/g)?.length).toBe(1);
+  });
+
+  it("hides the retry action when no regenerate handler is available", () => {
+    const { userMessage, failedAssistant } = historicalTurnMessages();
+    const html = renderConversation([userMessage, failedAssistant]);
+
+    expect(html).toContain("运行提示");
+    expect(html).not.toContain("重试此轮");
+  });
+
+  it("does not render a retry entry for the success-only transcript", () => {
+    const successAssistant: ConversationMessage = {
+      id: "message-assistant-2",
+      role: "assistant",
+      content: "构建完成。",
+      timestamp: "2026-05-22T00:02:00Z",
+      turnId: "turn-2",
+      status: "completed",
+      nodeId: "node-assistant-2",
+      turnItems: [settledAssistantTurnItem("message-assistant-2", "turn-2", "构建完成。")],
+    };
+    const html = renderConversation(
+      [{
+        id: "message-user-2",
+        role: "user",
+        content: "再跑一次",
+        timestamp: "2026-05-22T00:01:30Z",
+        turnId: "turn-2",
+      }, successAssistant],
+      { onRegenerateAssistantMessage: () => undefined },
+    );
+
+    expect(html).not.toContain("重试此轮");
+  });
+});

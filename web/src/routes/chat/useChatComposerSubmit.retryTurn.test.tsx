@@ -43,10 +43,12 @@ function Harness({
   busy = false,
   messages,
   regenerate,
+  regenerateTarget,
 }: {
   busy?: boolean;
   messages: ConversationMessage[];
   regenerate: (variables: unknown) => void;
+  regenerateTarget?: ConversationMessage;
 }) {
   const queryClient = useRef(new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -94,9 +96,22 @@ function Harness({
   });
 
   return (
-    <button type="button" data-testid="retry" onClick={() => actions.handleRetryFailedTurn()}>
-      retry
-    </button>
+    <>
+      <button type="button" data-testid="retry" onClick={() => actions.handleRetryFailedTurn()}>
+        retry
+      </button>
+      <button
+        type="button"
+        data-testid="regenerate-message"
+        onClick={() => {
+          if (regenerateTarget) {
+            actions.handleRegenerateAssistantMessage(regenerateTarget);
+          }
+        }}
+      >
+        regenerate
+      </button>
+    </>
   );
 }
 
@@ -162,6 +177,111 @@ describe("useChatComposerSubmitActions failed-turn retry", () => {
     await mount({ messages: [], regenerate });
 
     await clickRetry();
+
+    expect(regenerate).not.toHaveBeenCalled();
+  });
+});
+
+describe("useChatComposerSubmitActions historical failed turn regenerate", () => {
+  let root: Root | null = null;
+  let container: HTMLDivElement | null = null;
+
+  afterEach(async () => {
+    if (root) {
+      await act(async () => {
+        root?.unmount();
+      });
+    }
+    container?.remove();
+    root = null;
+    container = null;
+  });
+
+  function failedAssistantMessage(overrides: Partial<ConversationMessage> = {}): ConversationMessage {
+    return {
+      id: "assistant-1",
+      role: "assistant",
+      timestamp: "2026-09-13T01:01:00Z",
+      turnId: "turn-1",
+      status: "completed",
+      content: "模型服务上游暂时失败，本轮没有完成。",
+      nodeId: "node-assistant-1",
+      metadata: { kind: "turn_error" },
+      ...overrides,
+    } as ConversationMessage;
+  }
+
+  async function mountRegenerate(props: {
+    busy?: boolean;
+    messages: ConversationMessage[];
+    regenerate: (variables: unknown) => void;
+    regenerateTarget?: ConversationMessage;
+  }) {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(<Harness {...props} />);
+    });
+  }
+
+  async function clickRegenerateMessage() {
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="regenerate-message"]')?.click();
+    });
+  }
+
+  it("replays the original user message of a historical failed turn", async () => {
+    const regenerate = vi.fn();
+    const failed = failedAssistantMessage();
+    await mountRegenerate({
+      messages: [userMessage(), failed],
+      regenerate,
+      regenerateTarget: failed,
+    });
+
+    await clickRegenerateMessage();
+
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(regenerate).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: "session-1",
+      messageId: "user-1",
+      baseMessageId: "node-assistant-1",
+      content: "请修复登录失败的问题。",
+      mentalModelEnabled: true,
+      runtimeStatusEnabled: false,
+    }));
+    expect(typeof (regenerate.mock.calls[0]?.[0] as { clientSubmissionId?: unknown }).clientSubmissionId).toBe("string");
+  });
+
+  it("falls back to the user node id when the failed answer has no node id", async () => {
+    const regenerate = vi.fn();
+    const failed = failedAssistantMessage({ nodeId: undefined });
+    await mountRegenerate({
+      messages: [userMessage(), failed],
+      regenerate,
+      regenerateTarget: failed,
+    });
+
+    await clickRegenerateMessage();
+
+    expect(regenerate).toHaveBeenCalledWith(expect.objectContaining({
+      messageId: "user-1",
+      baseMessageId: "node-user-1",
+    }));
+  });
+
+  it("does not regenerate while the session is busy", async () => {
+    const regenerate = vi.fn();
+    const failed = failedAssistantMessage();
+    await mountRegenerate({
+      busy: true,
+      messages: [userMessage(), failed],
+      regenerate,
+      regenerateTarget: failed,
+    });
+
+    await clickRegenerateMessage();
 
     expect(regenerate).not.toHaveBeenCalled();
   });
