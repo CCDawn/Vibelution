@@ -26,11 +26,15 @@
 
 | 分级 | 通道 | 门禁 | 审查 |
 |---|---|---|---|
-| FAST_PATCH | 本地快速路（现行流程，不变） | 现行最小门 | 自审或跳过（现行规则） |
-| STANDARD_TASK | PR | 本地完整门禁证据贴附 PR | 独立 reviewer 在 PR 上 APPROVE |
-| HIGH_RISK | PR | 本地完整门禁 + 运行时证据 | 独立 reviewer + 用户可见暂停点 |
+| FAST_PATCH（=Ship） | 本地快速路（现行流程，不变）；直合本地 `main` 后由集成 agent 直推 origin（身份入 branch protection bypass 名单） | 现行最小门 | 自审或跳过（现行规则） |
+| STANDARD_TASK（=Show） | PR | 快门（本地 focused selector）+ commit status `ci/local-verify` 绿章 | 独立 reviewer 在 PR 上 review； blocking 意见>0 才 Request Changes |
+| HIGH_RISK（=Ask） | PR | 全门（完整 selector 证据 + 合入前 rebase 最新 main 复跑快门）+ 运行时证据 | 独立 reviewer APPROVE 作 required review；用户可见暂停点 |
 
-流程：worktree → 本地门禁（task_closeout 同款 selector）→ push 分支 → 开 PR（结构化证据贴附）→ 独立 reviewer `gh pr review` → 集成 agent **rebase-merge**（锁死方式，保线性历史）→ 回拉同步本地 `main` → 清理。
+分级术语对齐业界 [SHIP/SHOW/ASK](https://martinfowler.com/articles/ship-show-ask.html)。
+
+流程：worktree → 本地门禁（task_closeout 同款 selector）→ push 分支 → 开 PR（结构化证据贴附）→ 本地验证结果打 commit status（`gh api POST /repos/CCDawn/Vibelution/statuses/<sha>`，context `ci/local-verify`，零 Actions 分钟）→ 独立 reviewer `gh pr review` → 集成 agent **rebase-merge**（branch protection 锁死 allowed merge methods + Require linear history）→ 回拉同步本地 `main` → 清理。
+
+**单一集成权威（修订，关键）**：本地 ff-only 合入与 GitHub rebase-merge 产出不同 SHA——两边同时当集成点会使本地 `main` 与 `origin/main` 永久分叉。定 GitHub 为唯一集成权威：STANDARD/HIGH 只经 PR 合入，本地只验证与回拉；FAST_PATCH 本地直合后由集成 agent（bypass 名单内）直推 `origin/main`。branch protection 不要把 "require branches up to date" 与线性历史叠加成贡献者 rebase+force-push 循环（agent 流程恒本地 rebase，无碍，但设置时注意）。
 
 **降级路径**：GitHub 不可达时退回现行本地 closeout；网络不得成为开发单点。
 
@@ -45,6 +49,7 @@
 
 1. **常设授权范围**（建议：push 任务分支、建 PR、rebase-merge 合 PR、回拉同步本地 main 免请示；force push、删远端分支、发布 release 仍逐次确认）。
 2. **FAST_PATCH 是否豁免 PR**（建议豁免）。
+3. **单一集成权威定为 GitHub**（建议照此；FAST_PATCH 直推通道依赖 bypass 名单）。
 
 ## 7. 落地任务清单（拍板后按三角色流水线执行）
 
@@ -58,12 +63,12 @@
 
 现状痛点：证据只在本地（不持久不可见）、selector 完整性依赖 agent 自述、门禁只在 closeout 跑一次、并行会话 stale_main 重试是手工模式。
 
-候选方向（调研结论待补，见 §11）：
+调研定稿（2026-09-17，来源见 §11）：
 
-1. **证据机器可验证**：closeout manifest（JSON）结构化贴 PR，合入工具校验 schema，杜绝"口头全绿"。
-2. **快门/全门分层**：pre-merge 快门（ruff fatal + focused selector）+ 周期全量门（现有 CI 手动/定时触发）。
-3. **合入串行化**：当前 2-3 并发规模用"rebase + 快门复跑"（stale_main 的自动化）即可；merge queue（GitHub 原生/bors）在并发上去后再评估，其依赖 per-dequeue required checks 的 Actions 成本。
-4. **分级门禁清单机器化**：FAST/STANDARD/HIGH_RISK 各自的必跑命令与证据类型固化为模板，而非每次派发时手写。
+1. **机器门 = 本地证据 + commit status + required review 双门**：本地跑完验证给 SHA 打 `ci/local-verify` 绿章设 required check，配合独立 APPROVE 作 required review。**不用 self-hosted runner**（公共仓库 fork PR 任意代码执行，官方红线；agent 本就在开发者机器上跑，本机验证+打 status 等价且更简单）。
+2. **快门=准入证、全门=准出证**（trunk-based 共识，Chromium CQ/Meta Sandcastle 可缩放版）：pre-merge 只跑 ruff fatal + focused selector（分钟级）；全量 selector 保持 workflow_dispatch 手动触发作准出门——HIGH_RISK 每次合入后必跑，STANDARD 抽样/nightly。
+3. **当前规模不上 merge queue**（2-3 并发；queue 每次 merge_group 出队重跑 required checks 费分钟，min/max 组大小与等待时间是成本旋钮）。用"合入前 rebase 最新 main + 快门复跑"（stale_main 流程的自动化）作廉价同构；并发 >5 或快门 >10min 再评估 GitHub 原生 queue。
+4. **分级门禁清单机器化**：FAST/STANDARD/HIGH_RISK 各自的必跑命令与证据类型固化为模板（可加 <10s 的 PR title/checklist 校验轻 action 作结构门），而非每次派发时手写。
 
 ## 9. 审查 agent 工具与提示词优化方向（讨论中）
 
@@ -77,6 +82,16 @@
 6. **PR 时代的工具升级**：行级评论锚定（gh pr review --request-changes + line comments）、审查记录平台持久化。
 7. **防橡皮图章**：reviewer 与合入权分离（§5）；每论断必须带实测或 file:line 锚点。
 
+调研定稿（2026-09-17，业界对照见 §11）：
+
+8. **裁决三档映射**：`safe_to_merge / merge_with_caution / changes_required` ↔ PR 的 Approve / Comment / Request Changes（PR-Agent 语义）；reviewer 平时 Comment-only，仅 changes_required 升 Request Changes，合入权威归门禁与集成 agent。
+9. **finding 双轴结构化**：每条 `{file, start_line-end_line, severity(blocker/should-fix/nit), category(security/logic/contract/test), confidence}`——severity 定裁决、category 定返工分工、低 confidence 强制标注"未验证假设"且不触发 REWORK（CodeRabbit 四轴思想：nit 可以是 security，critical 可以不值得修）。
+10. **行级锚定与建议块**：行评论只锚 `+` 行，可修的给 ```` ```suggestion ```` 一键采纳块；nit 一律 `(non-blocking)` 装饰（Conventional Comments），REWORK 清单由机器解析 blocking 标签生成——评论与阻断解耦（reviewdog fail-level 思想：只有 blocker>0 才改裁决）。
+11. **APPROVE 必附验证证据段**：固定 Evidence 段（跑过的命令+退出码+关键输出摘录；对抗性边界实验进这里），缺证据=无效审查（claude-code-action allowed_tools 白名单模式）。
+12. **prompt 硬规则抄 PR-Agent**：只审本 PR 引入的问题、每条问题附具体触发场景、"prefer not reporting over guessing"、禁寒暄禁夸大。
+13. **防橡皮图章用验证轨迹而非问题数量**：业界无强制"至少 N 条问题"（只会造噪音）；改为对 diff 最高风险点复述行为/做边界实验留轨迹，审查绑定具体 commit SHA，新 push 自动失效重审（Copilot approve 撤销机制）。
+14. **大 diff 降维**：超阈值先输出 `can_be_split` 拆分建议（Graphite 小 PR 哲学），或非关键文件降 Lite 档只查明显 bug/安全。
+
 ## 10. 风险与对策
 
 | 风险 | 对策 |
@@ -86,9 +101,11 @@
 | 公共仓库发布面 | pre-push 卫生检查；不贴内部坐标；secrets 禁令沿用 |
 | 审查橡皮图章化 | 独立性 + 对抗性验证强制（§9.3/§9.7） |
 | 双平面权威混乱 | 明确：PR 合入后以远端为准回拉同步；合入前本地 main 为工作镜像 |
-| merge 方式破坏线性历史 | branch protection 锁 rebase-merge（§7.1） |
+| merge 方式破坏线性历史 | branch protection 锁 rebase-merge + Require linear history（§7.1） |
+| 双集成权威 SHA 分叉 | 单一权威=GitHub；FAST_PATCH 走 bypass 直推（§4） |
 
-## 11. 调研附录（待补）
+## 11. 调研附录（2026-09-17 两路定稿）
 
-- AI code review 成熟方案（Qodo PR-Agent / CodeRabbit / Copilot review / reviewdog / danger 等）的 rubric、工具接口、裁决语义、防橡皮图章机制 → 对 §9 的可抄清单。
-- 门禁与 merge queue 方案（GitHub merge queue / bors / Mergify / 分层 CI / SHIP-SHOW-ASK 等）→ 对 §8 的机制选型。
+**门禁与合入队列**：[SHIP/SHOW/ASK](https://martinfowler.com/articles/ship-show-ask.html) · [GitHub merge queue](https://docs.github.com/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue) · [bors-ng](https://github.com/bors-ng/bors-ng) · [Mergify merge queues](https://mergify.com/blog/the-origin-story-of-merge-queues) · [Zuul gating](https://zuul-ci.org/docs/zuul/latest/gating.html) · [Chromium CQ design](https://www.chromium.org/developers/testing/commit-queue/design/) · [commit statuses API](https://docs.github.com/rest/commits/statuses) · [self-hosted runner 安全](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners) · [jvns：rebase 的坑](https://jvns.ca/blog/2023/11/06/rebasing-what-can-go-wrong/)
+
+**AI code review**：[Qodo PR-Agent](https://github.com/The-PR-Agent/pr-agent)（[reviewer prompts 全公开](https://github.com/Codium-ai/pr-agent/blob/main/pr_agent/settings/pr_reviewer_prompts.toml)）· [CodeRabbit findings 四轴](https://docs.coderabbit.ai/change-stack/findings) · [Copilot code review](https://docs.github.com/en/copilot/using-github-copilot/code-review/using-copilot-code-review)（Comment-only 默认+approve 撤销）· [claude-code-action](https://github.com/anthropics/claude-code-action)（allowed_tools 可执行验证）· [reviewdog](https://github.com/reviewdog/reviewdog)（filter-mode/fail-level 评论与阻断解耦）· [Conventional Comments](https://conventionalcomments.org/) · [Google eng-practices](https://google.github.io/eng-practices/review/reviewer/standard.html) · [Graphite](https://graphite.com/docs)（小 PR/can_be_split）
