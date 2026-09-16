@@ -12,7 +12,7 @@ from core.chat.turn_journal import turn_journal_path
 from core.infrastructure import developer_sandbox
 from core.ui.chat_state import chat_state_path, load_chat_state, save_chat_state
 from core.web.services import agent_directory_service, session_service
-from core.web.services.session import directory_bridge, directory_runtime
+from core.web.services.session import directory_bridge, directory_runtime, read_health
 
 
 @pytest.fixture
@@ -757,7 +757,7 @@ def test_list_build_reports_directory_read_failure_before_legacy_fallback(
         "_append_agent_directory_conversations",
         lambda conversations, **_kwargs: list(conversations),
     )
-    monkeypatch.setattr(directory_bridge, "_directory_unavailable_log_monotonic", 0.0)
+    read_health.reset_session_read_degradation_state()
 
     with caplog.at_level(logging.WARNING):
         result = projection._build_session_list_data(
@@ -782,7 +782,7 @@ def test_runtime_status_snapshot_reports_work_run_read_failure(
         raise RuntimeError("work run read failed")
 
     monkeypatch.setattr(session_service, "list_active_session_work_runs", fail_active)
-    monkeypatch.setattr(directory_bridge, "_directory_unavailable_log_monotonic", 0.0)
+    read_health.reset_session_read_degradation_state()
 
     with caplog.at_level(logging.WARNING):
         assert directory_bridge._session_runtime_status_snapshot() is None
@@ -803,7 +803,7 @@ def test_agent_directory_stub_merge_reports_failure_and_keeps_summaries(
         raise RuntimeError("stub merge failed")
 
     monkeypatch.setattr(session_service, "_append_agent_directory_conversations", fail_append)
-    monkeypatch.setattr(directory_bridge, "_directory_unavailable_log_monotonic", 0.0)
+    read_health.reset_session_read_degradation_state()
 
     with caplog.at_level(logging.WARNING):
         merged = directory_bridge._merge_agent_directory_stub_summaries(

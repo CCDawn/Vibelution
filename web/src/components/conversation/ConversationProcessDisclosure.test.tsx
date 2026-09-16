@@ -117,18 +117,23 @@ describe("ConversationProcessDisclosure", () => {
     expect(html).toContain("处理中");
   });
 
-  it("adds the retry state to the same process summary", () => {
+  it("keeps retry heartbeats out of the same process summary", () => {
     expect(processLabel([
       processCell("completed"),
       retryCell("running"),
-    ], "zh", undefined, true)).toContain("模型重试中（2/5）");
+    ], "zh", undefined, true)).not.toContain("模型重试");
+    expect(processLabel([
+      processCell("completed"),
+      processCell("completed"),
+      retryCell("completed"),
+    ], "zh")).not.toContain("含模型重试");
 
     const html = renderToStaticMarkup(
       <ConversationProcessDisclosure cells={[processCell("completed"), retryCell("running")]} language="zh" turnStreaming>
         <span>工具步骤与重试</span>
       </ConversationProcessDisclosure>,
     );
-    expect(html).toContain("模型重试中（2/5）");
+    expect(html).not.toContain("模型重试");
     expect(html).toContain("工具步骤与重试");
   });
 

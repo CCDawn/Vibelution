@@ -243,6 +243,7 @@ def _build_session_list_data(
     """Build one session-index snapshot from the directory store or projection."""
 
     from . import directory_bridge
+    from . import read_health
 
     directory_sessions = None
     try:
@@ -253,7 +254,7 @@ def _build_session_list_data(
         # A raising directory read must not disappear into the legacy rebuild:
         # that silent fallback is the slow path this module exists to avoid.
         directory_sessions = None
-        directory_bridge.note_session_read_degraded(
+        read_health.note_session_read_degraded(
             source="session list build",
             error_type=type(exc).__name__,
         )

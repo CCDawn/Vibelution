@@ -1,4 +1,4 @@
-import { isFetchJsonHttpError } from "../../api/client";
+import { isFetchJsonHttpError } from "../../api/chat";
 import type { TranslationKey } from "../../i18n/dictionary";
 
 export type ResizableSide = "left" | "right";

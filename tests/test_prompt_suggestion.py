@@ -396,14 +396,21 @@ def test_composer_example_route_uses_current_project_root(tmp_path, monkeypatch)
 
     monkeypatch.setattr(session_routes, "get_session_detail", lambda *args, **kwargs: {})
     seen: list = []
+    starters = [
+        {"heading": "修复问题", "command": "帮我修一下 {file}"},
+        {"heading": "理解代码", "command": "agent.py 是怎么工作的？"},
+    ]
     monkeypatch.setattr(
         session_routes,
-        "get_composer_example_command",
-        lambda root: seen.append(root) or "帮我修一下 {file}",
+        "get_composer_starter_commands",
+        lambda root: seen.append(root) or starters,
     )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 
-    assert session_routes.session_composer_example("session-1") == {"command": "帮我修一下 {file}"}
+    assert session_routes.session_composer_example("session-1") == {
+        "command": "帮我修一下 {file}",
+        "starters": starters,
+    }
     assert seen == [tmp_path]
 
     def missing_session(*args, **kwargs):
@@ -413,3 +420,53 @@ def test_composer_example_route_uses_current_project_root(tmp_path, monkeypatch)
     with pytest.raises(HTTPException) as exc_info:
         session_routes.session_composer_example("missing")
     assert exc_info.value.status_code == 404
+
+
+def test_build_example_starters_are_distinct_and_capped():
+    files = ["agent.py", "chat.py", "workbench.tsx"]
+    for _ in range(20):
+        starters = composer_example_commands.build_example_starters(files, 3)
+        assert len(starters) == 3
+        commands = [starter["command"] for starter in starters]
+        headings = [starter["heading"] for starter in starters]
+        assert len(set(commands)) == 3
+        assert len(set(headings)) == 3
+        for command in commands:
+            assert command
+            assert "{file}" not in command
+        # Every referenced file is a real core file from the pool.
+        for command in commands:
+            for file_name in files:
+                if file_name in command:
+                    break
+
+
+def test_build_example_starters_without_files_still_fills_quota():
+    for _ in range(20):
+        starters = composer_example_commands.build_example_starters([], 3)
+        assert len(starters) == 3
+        assert len({starter["command"] for starter in starters}) == 3
+        assert all("{file}" not in starter["command"] for starter in starters)
+
+
+def test_get_composer_starter_commands_caches_and_slices(tmp_path, monkeypatch):
+    calls = {"count": 0}
+
+    def fake_frequently_modified(_root):
+        calls["count"] += 1
+        return ["agent.py", "chat.py", "workbench.tsx"]
+
+    monkeypatch.setattr(
+        composer_example_commands,
+        "frequently_modified_core_files",
+        fake_frequently_modified,
+    )
+    composer_example_commands.reset_composer_example_cache()
+    first = composer_example_commands.get_composer_starter_commands(tmp_path, 3)
+    second = composer_example_commands.get_composer_starter_commands(tmp_path, 2)
+    assert len(first) == 3
+    assert second == first[:2]
+    assert calls["count"] == 1
+    assert composer_example_commands.get_composer_example_command(tmp_path) == first[0]["command"]
+    assert calls["count"] == 1
+    composer_example_commands.reset_composer_example_cache()

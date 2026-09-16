@@ -4,16 +4,15 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
-import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, BinaryIO, Callable
+from typing import Any, Callable
 
 from core.infrastructure import developer_sandbox
+from core.infrastructure.file_lock import cross_process_file_lock
 from core.chat.session_catalog import (
     CATALOG_GLOBAL_DIRTY_SESSION_ID,
     notify_session_catalog_dirty,
@@ -28,8 +27,12 @@ from core.orchestration.output_boundary import (
 CHAT_STATE_VERSION = 1
 DEFAULT_CHAT_CONVERSATION_ID = "default"
 DEFAULT_CHAT_CONVERSATION_TITLE = "默认对话"
-_CHAT_STATE_THREAD_LOCK = threading.RLock()
-_CHAT_STATE_LOCK_STATE = threading.local()
+# The transaction body legitimately holds the lock across bounded store
+# budgets (a 5s writer result plus a 5s store close) that stretch on a loaded
+# machine, and the pre-helper implementation blocked without any bound. 180s
+# keeps the old patience for slow-but-alive holders while a truly hung holder
+# still surfaces as TimeoutError (pytest's 300s per-test cap backstops tests).
+_CHAT_STATE_LOCK_TIMEOUT_SECONDS = 180.0
 
 
 def chat_state_path(project_root: Path) -> Path:
@@ -46,76 +49,21 @@ def chat_state_lock_path(project_root: Path) -> Path:
 
 @contextmanager
 def chat_state_transaction(project_root: Path):
-    """Serialize chat-state load/mutate/save sequences across threads and processes."""
+    """Serialize chat-state load/mutate/save sequences across threads and processes.
 
-    lock_path = chat_state_lock_path(project_root)
-    lock_key = _path_key(lock_path)
-    counts: dict[str, int] = getattr(_CHAT_STATE_LOCK_STATE, "counts", {})
-    if not hasattr(_CHAT_STATE_LOCK_STATE, "counts"):
-        _CHAT_STATE_LOCK_STATE.counts = counts
-    if counts.get(lock_key, 0) > 0:
-        counts[lock_key] += 1
-        try:
-            yield
-        finally:
-            counts[lock_key] -= 1
-            if counts[lock_key] <= 0:
-                counts.pop(lock_key, None)
-        return
+    The shared helper keeps the historical ``.chat_state.lock`` sidecar and adds
+    a bounded wait plus the seed-after-lock discipline: seeding the lock byte
+    before taking the OS lock let two first-time writers race a write into the
+    byte range the other process had already locked, which Windows surfaces as
+    ``PermissionError``.
+    """
 
-    _CHAT_STATE_THREAD_LOCK.acquire()
-    handle: BinaryIO | None = None
-    try:
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        handle = lock_path.open("a+b")
-        _ensure_lock_byte(handle)
-        _lock_file(handle)
-        counts[lock_key] = 1
+    with cross_process_file_lock(
+        chat_state_path(project_root),
+        lock_path=chat_state_lock_path(project_root),
+        timeout=_CHAT_STATE_LOCK_TIMEOUT_SECONDS,
+    ):
         yield
-    finally:
-        counts.pop(lock_key, None)
-        if handle is not None:
-            try:
-                _unlock_file(handle)
-            finally:
-                handle.close()
-        _CHAT_STATE_THREAD_LOCK.release()
-
-
-def _path_key(path: Path) -> str:
-    raw = str(path.resolve())
-    return raw.lower() if os.name == "nt" else raw
-
-
-def _ensure_lock_byte(handle: BinaryIO) -> None:
-    handle.seek(0, os.SEEK_END)
-    if handle.tell() == 0:
-        handle.write(b"\0")
-        handle.flush()
-    handle.seek(0)
-
-
-def _lock_file(handle: BinaryIO) -> None:
-    if os.name == "nt":
-        import msvcrt
-
-        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
-        return
-    import fcntl
-
-    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-
-
-def _unlock_file(handle: BinaryIO) -> None:
-    handle.seek(0)
-    if os.name == "nt":
-        import msvcrt
-
-        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-        return
-    import fcntl
-
-    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def normalize_chat_tool_calls(value: Any) -> list[str | dict[str, Any]]:

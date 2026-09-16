@@ -636,7 +636,7 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(settled).toContain(styles.timelineThoughtInlinePreview);
   });
 
-  it("labels a retry row in human copy instead of the model_retry protocol code", () => {
+  it("keeps a retry turn item out of the settled transcript", () => {
     const html = renderConversation([
       {
         id: "assistant-retry-row",
@@ -662,9 +662,11 @@ describe("ConversationView native Codex transcript surface", () => {
       },
     ]);
 
-    expect(html).toContain('data-codex-transcript-cell-kind="status"');
-    expect(html).toContain("请求重试");
+    // Codex shows retries only as a live status heartbeat; no retry row,
+    // human label or protocol code survives into the transcript.
+    expect(html).not.toContain("请求重试");
     expect(html).not.toContain(">model_retry<");
+    expect(html).not.toContain("第 1/3 次");
   });
 
   it("offers a copy action on a settled assistant answer", () => {
@@ -957,7 +959,9 @@ describe("ConversationView native Codex transcript surface", () => {
       turnError,
       onRetryTurn: () => undefined,
     });
-    expect(html).toContain("已重试 3 次");
+    // Codex parity: one plain line, and the retry count stays in diagnostics.
+    expect(html).not.toContain("已重试 3 次");
+    expect(html).toContain("重试: 3 次");
     expect(html).toContain('aria-label="重试这一轮"');
     expect(html).not.toContain("第 1/3 次");
 

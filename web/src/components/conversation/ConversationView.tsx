@@ -9,7 +9,9 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDot,
+  CirclePlus,
   Copy,
+  Cpu,
   ExternalLink,
   FileText,
   Gauge,
@@ -28,7 +30,7 @@ import {
 } from "lucide-react";
 import React, { DragEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import type { ConversationMessage, SkillLibraryItem } from "../../api/types";
+import type { ConversationMessage } from "../../api/types";
 import type {
   AgentMessage,
   AgentMentalPart,
@@ -75,15 +77,28 @@ const AgentContextSectionsView = React.lazy(() =>
 import { ConversationFollowupQueueBar } from "./ConversationFollowupQueueBar";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
 import {
+  MAX_COMPOSER_STARTERS,
   resolveComposerPlaceholder,
   shouldAcceptComposerGhost,
+  type ComposerStarter,
 } from "./composerPromptSuggestionModel";
 import { useComposerPromptSuggestion } from "./useComposerPromptSuggestion";
 import { resolveComposerQueuePrimaryKind } from "./composerFollowupQueueModel";
 import {
-  filterSlashCommandSuggestions,
   insertSlashCommandSuggestion,
+  mergeSlashCommandSuggestions,
+  moveSlashCommandActiveIndex,
+  type BuiltinSlashCommand,
+  type BuiltinSlashCommandId,
+  type SlashCommandSuggestion,
 } from "./conversationSlashCommandSuggestions";
+import {
+  detectReferenceToken,
+  filterReferenceTypeaheadOptions,
+  removeReferenceToken,
+  type ReferenceTypeaheadOption,
+  type ReferenceTypeaheadToken,
+} from "./conversationReferenceTypeahead";
 import { buildAgentMessageRenderState, type AgentMessageRenderState } from "./agentMessageRenderState";
 import {
   resolveAssistantDisplayPlan,
@@ -146,7 +161,6 @@ import {
   type CodexTranscriptCell,
 } from "./codexTranscriptCells";
 import { resolveCodexTranscriptSurface, type CodexTranscriptSurface } from "./codexNativeTranscriptSurface";
-import { activeTurnStageLabel } from "./conversationActiveTurnStatusPresentation";
 import {
   buildCodexTranscriptTimelineNodes,
   codexTranscriptToolDurationSeconds,
@@ -525,6 +539,7 @@ export function ConversationView({
   composerAttachments = [],
   composerReferences = [],
   slashCommandSuggestions = [],
+  composerReferenceOptions = [],
   composerAttachmentInputDisabled,
   composerLeadingControl,
   permissionControl,
@@ -532,6 +547,7 @@ export function ConversationView({
   llmControl,
   composerContextRing = null,
   onOpenComposerContextDetail,
+  onCreateSession,
   turnError,
   submitLabel,
   submitPendingLabel,
@@ -627,7 +643,8 @@ export function ConversationView({
   const composerPromptSuggestion = useComposerPromptSuggestion(
     {
       sessionId,
-      enabled: promptSuggestionEnabled && !composerDisabled && !editingMessageId,
+      suggestionEnabled: promptSuggestionEnabled && !composerDisabled && !editingMessageId,
+      starterEnabled: !composerDisabled && !editingMessageId,
       busy: resolvedActionMode === "stop" || composerPending,
       draft: composerValue,
       hasConversation: messages.length > 0,
@@ -637,6 +654,16 @@ export function ConversationView({
       requestAnimationFrame(() => composerInputRef.current?.focus());
     },
   );
+  const fallbackComposerStarters = useMemo<ComposerStarter[]>(() => [
+    { heading: t("sessionStarterOrganizeHeading"), command: t("sessionStarterOrganizeCommand") },
+    { heading: t("sessionStarterResearchHeading"), command: t("sessionStarterResearchCommand") },
+    { heading: t("sessionStarterDraftHeading"), command: t("sessionStarterDraftCommand") },
+  ], [t]);
+  // Backend starters win; without them the dictionary keeps generic research
+  // starters so the empty session still offers a clickable first step.
+  const composerStarters = composerPromptSuggestion.starters.length > 0
+    ? composerPromptSuggestion.starters.slice(0, MAX_COMPOSER_STARTERS)
+    : fallbackComposerStarters;
   const hasComposerAttachments = composerAttachments.length > 0;
   const hasComposerReferences = composerReferences.length > 0;
   const attachmentInputDisabled = composerAttachmentInputDisabled ?? composerDisabled;
@@ -720,12 +747,112 @@ export function ConversationView({
     : `${styles.sendButton} ${styles.composerRoundButton} ${styles.composerRoundButtonPrimary}`;
   const composerCanAcceptImageDrop = Boolean(onAddComposerAttachments) && !attachmentInputDisabled;
   const composerCanAcceptReferenceDrop = Boolean(onAddComposerReference) && !composerDisabled;
-  const slashSuggestions = useMemo(
-    () => filterSlashCommandSuggestions(slashCommandSuggestions, composerValue),
-    [slashCommandSuggestions, composerValue],
+  // Recomputed per render on purpose: `t` is not a stable identity and the list
+  // is tiny; keyboard state is keyed on composerValue, not on these arrays.
+  const builtinSlashCommands: BuiltinSlashCommand[] = [];
+  if (onCreateSession) {
+    builtinSlashCommands.push({
+      id: "new_session",
+      command: t("slashBuiltinNewSessionCommand"),
+      aliases: String(t("slashBuiltinNewSessionAliases")).split(/\s+/).filter(Boolean),
+      description: t("slashBuiltinNewSessionDescription"),
+    });
+  }
+  if (llmControl) {
+    builtinSlashCommands.push({
+      id: "model",
+      command: t("slashBuiltinModelCommand"),
+      aliases: String(t("slashBuiltinModelAliases")).split(/\s+/).filter(Boolean),
+      description: t("slashBuiltinModelDescription"),
+    });
+  }
+  if (onOpenComposerContextDetail) {
+    builtinSlashCommands.push({
+      id: "compress_context",
+      command: t("slashBuiltinCompressCommand"),
+      aliases: String(t("slashBuiltinCompressAliases")).split(/\s+/).filter(Boolean),
+      description: t("slashBuiltinCompressDescription"),
+    });
+  }
+  const slashSuggestions = mergeSlashCommandSuggestions(
+    builtinSlashCommands,
+    slashCommandSuggestions,
+    composerValue,
   );
-  const showSlashSuggestions = !composerDisabled && slashSuggestions.length > 0;
+  // Escape dismisses the list for the exact draft that produced it; any edit
+  // (including the builtin clearing the draft) re-arms suggestions.
+  const [slashDismissedAtValue, setSlashDismissedAtValue] = useState<string | null>(null);
+  const [slashActiveIndex, setSlashActiveIndex] = useState(-1);
+  const [modelMenuOpenSignal, setModelMenuOpenSignal] = useState("");
+  useEffect(() => {
+    setSlashActiveIndex(-1);
+    setReferenceActiveIndex(-1);
+  }, [composerValue]);
+  const showSlashSuggestions = !composerDisabled
+    && slashDismissedAtValue !== composerValue
+    && slashSuggestions.length > 0;
+  const activeSlashIndex = showSlashSuggestions
+    ? (slashActiveIndex >= 0 && slashActiveIndex < slashSuggestions.length ? slashActiveIndex : 0)
+    : -1;
   const slashSuggestionListId = `conversation-${sessionId}-slash-suggestions`;
+  // "@" reference type-ahead: caret-aware token detection over the same draft.
+  // The composer never inserts reference markup; selecting a candidate registers
+  // the same structured reference chip as the plus-menu picker and removes the
+  // "@fragment" from the draft.
+  const [composerReferenceCaret, setComposerReferenceCaret] = useState(0);
+  const [composerComposing, setComposerComposing] = useState(false);
+  const [referenceDismissedAtValue, setReferenceDismissedAtValue] = useState<string | null>(null);
+  const [referenceActiveIndex, setReferenceActiveIndex] = useState(-1);
+  const activeReferenceToken: ReferenceTypeaheadToken | null = useMemo(
+    () => (
+      composerComposing || composerDisabled || editingMessageId || !onAddComposerReference
+        ? null
+        : detectReferenceToken(composerValue, composerReferenceCaret)
+    ),
+    [composerComposing, composerDisabled, composerReferenceCaret, composerValue, editingMessageId, onAddComposerReference],
+  );
+  const referenceSuggestions = useMemo(
+    () => (activeReferenceToken
+      ? filterReferenceTypeaheadOptions(composerReferenceOptions, activeReferenceToken.query)
+      : []),
+    [activeReferenceToken, composerReferenceOptions],
+  );
+  const showReferenceSuggestions = !composerDisabled
+    && composerReferenceOptions.length > 0
+    && referenceDismissedAtValue !== composerValue
+    && referenceSuggestions.length > 0;
+  const activeReferenceIndex = showReferenceSuggestions
+    ? (referenceActiveIndex >= 0 && referenceActiveIndex < referenceSuggestions.length ? referenceActiveIndex : 0)
+    : -1;
+  const referenceSuggestionListId = `conversation-${sessionId}-reference-suggestions`;
+  function syncComposerReferenceCaret(element: HTMLTextAreaElement | null) {
+    setComposerReferenceCaret(element ? element.selectionStart ?? element.value.length : 0);
+  }
+  function handleReferenceTypeaheadSelect(option: ReferenceTypeaheadOption) {
+    if (!activeReferenceToken) {
+      return;
+    }
+    const token = activeReferenceToken;
+    // Same structured-reference path as the plus-menu knowledge/file picker.
+    onAddComposerReference?.(option.reference);
+    const removed = removeReferenceToken(composerValue, token);
+    onComposerChange(removed.text);
+    setReferenceActiveIndex(-1);
+    setReferenceDismissedAtValue(null);
+    requestAnimationFrame(() => {
+      const input = composerInputRef.current;
+      if (!input) {
+        return;
+      }
+      input.focus();
+      input.setSelectionRange(removed.caretIndex, removed.caretIndex);
+      setComposerReferenceCaret(removed.caretIndex);
+    });
+  }
+  function handleReferenceTypeaheadDismiss() {
+    setReferenceDismissedAtValue(composerValue);
+    setReferenceActiveIndex(-1);
+  }
   const answerOnlyProcessMode = processDisplayMode === "answer";
   const timestampFormatter = useMemo(
     () =>
@@ -745,8 +872,44 @@ export function ConversationView({
     }
   }, [composerCanAcceptImageDrop, composerCanAcceptReferenceDrop, composerDragActive]);
 
-  function handleSlashCommandSuggestion(skill: SkillLibraryItem) {
-    onComposerChange(insertSlashCommandSuggestion(composerValue, skill.command));
+  function handleSlashCommandSuggestion(suggestion: SlashCommandSuggestion) {
+    if (suggestion.builtin) {
+      // Builtin commands execute immediately: clear the draft so the listbox
+      // gate (no leading slash token) closes it, then run the action.
+      onComposerChange("");
+      setSlashDismissedAtValue("");
+      setSlashActiveIndex(-1);
+      executeBuiltinSlashCommand(suggestion.builtinId);
+      return;
+    }
+    if (suggestion.skill) {
+      onComposerChange(insertSlashCommandSuggestion(composerValue, suggestion.skill.command));
+      requestAnimationFrame(() => composerInputRef.current?.focus());
+    }
+  }
+
+  function executeBuiltinSlashCommand(builtinId?: BuiltinSlashCommandId) {
+    switch (builtinId) {
+      case "new_session":
+        onCreateSession?.();
+        break;
+      case "model":
+        setModelMenuOpenSignal(`model-${Date.now()}`);
+        break;
+      case "compress_context":
+        onOpenComposerContextDetail?.();
+        break;
+    }
+  }
+
+  function handleSlashCommandDismiss() {
+    setSlashDismissedAtValue(composerValue);
+    setSlashActiveIndex(-1);
+  }
+
+  function handleStarterCardActivate(starter: ComposerStarter) {
+    // Fill the composer for editing; the starter is never auto-submitted.
+    onComposerChange(starter.command);
     requestAnimationFrame(() => composerInputRef.current?.focus());
   }
 
@@ -2734,9 +2897,6 @@ export function ConversationView({
     if (cell.status === "running" || cell.status === "pending") {
       return <LoaderCircle className={styles.statusSpinner} size={14} />;
     }
-    if (cell.originType === "retry") {
-      return <RefreshCw size={14} />;
-    }
     if (cell.kind === "reasoning_summary") {
       return <BrainCircuit size={14} />;
     }
@@ -2750,9 +2910,6 @@ export function ConversationView({
   }
 
   function codexTranscriptCellTitle(cell: CodexTranscriptCell) {
-    if (cell.originType === "retry") {
-      return activeTurnStageLabel("model_retry", lang);
-    }
     if (cell.kind === "tool_call") {
       const rawToolName = cell.toolLifecycleModel?.toolCalls?.[0]?.rawToolName?.trim();
       const rawTitle = cell.title?.trim();
@@ -4219,6 +4376,36 @@ export function ConversationView({
                 skeletonLines={false}
                 title={t("sessionNoMessages")}
               />
+              {messages.length === 0 && !composerDisabled && composerStarters.length > 0 ? (
+                <div
+                  className={styles.emptyStateStarters}
+                  role="group"
+                  aria-label={t("sessionStarterHeading")}
+                  data-vui="conversation-starter-cards"
+                >
+                  <p className={styles.emptyStateStartersHeading}>
+                    <Sparkles size={13} aria-hidden="true" />
+                    <span>{t("sessionStarterHeading")}</span>
+                  </p>
+                  <div className={styles.emptyStateStarterGrid}>
+                    {composerStarters.map((starter) => (
+                      <VButton
+                        key={starter.command}
+                        type="button"
+                        contentLayout="plain"
+                        className={styles.emptyStateStarterCard}
+                        data-vui="conversation-starter-card"
+                        onPress={() => handleStarterCardActivate(starter)}
+                      >
+                        {starter.heading ? (
+                          <span className={styles.emptyStateStarterCardHeading}>{starter.heading}</span>
+                        ) : null}
+                        <span className={styles.emptyStateStarterCardCommand}>{starter.command}</span>
+                      </VButton>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           )
         ) : (
@@ -5095,30 +5282,99 @@ export function ConversationView({
               aria-label={lang === "zh" ? "斜杠指令" : "Slash commands"}
               className={styles.slashCommandSuggestions}
             >
-              {slashSuggestions.map((skill, index) => {
-                const description = skill.description?.trim() || skill.name || skill.directoryName;
-                return (
-                  <div
-                    id={`${slashSuggestionListId}-option-${index}`}
-                    key={skill.command}
-                    role="option"
-                    aria-selected={false}
-                    className={styles.slashCommandSuggestionOption}
+              {slashSuggestions.map((suggestion, index) => (
+                <div
+                  id={`${slashSuggestionListId}-option-${index}`}
+                  key={suggestion.key}
+                  role="option"
+                  aria-selected={index === activeSlashIndex}
+                  aria-label={suggestion.command}
+                  className={styles.slashCommandSuggestionOption}
+                  data-active={index === activeSlashIndex ? "true" : "false"}
+                >
+                  <VButton
+                    type="button"
+                    className={
+                      index === activeSlashIndex
+                        ? `${styles.slashCommandSuggestionButton} ${styles.slashCommandSuggestionButtonActive}`
+                        : styles.slashCommandSuggestionButton
+                    }
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => handleSlashCommandSuggestion(suggestion)}
                   >
-                    <VButton
-                      type="button"
-                      className={styles.slashCommandSuggestionButton}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => handleSlashCommandSuggestion(skill)}
-                    >
-                      <code className={styles.slashCommandSuggestionCode}>
-                        {skill.command}
-                      </code>
-                      <span className={styles.slashCommandSuggestionDescription}>{description}</span>
-                    </VButton>
-                  </div>
-                );
-              })}
+                    {suggestion.builtin ? (
+                      <span className={styles.slashCommandSuggestionIcon} aria-hidden="true">
+                        {suggestion.builtinId === "new_session" ? (
+                          <CirclePlus size={13} />
+                        ) : suggestion.builtinId === "model" ? (
+                          <Cpu size={13} />
+                        ) : (
+                          <Gauge size={13} />
+                        )}
+                      </span>
+                    ) : null}
+                    <code className={styles.slashCommandSuggestionCode}>
+                      {suggestion.command}
+                    </code>
+                    <span className={styles.slashCommandSuggestionDescription}>{suggestion.description}</span>
+                    {suggestion.builtin ? (
+                      <span className={styles.slashCommandBuiltinBadge} data-vui="slash-builtin-badge">
+                        {t("slashBuiltinBadge")}
+                      </span>
+                    ) : null}
+                  </VButton>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {showReferenceSuggestions ? (
+            <div
+              id={referenceSuggestionListId}
+              role="listbox"
+              aria-label={t("composerReferenceTypeaheadListLabel")}
+              className={styles.slashCommandSuggestions}
+            >
+              {referenceSuggestions.map((option, index) => (
+                <div
+                  id={`${referenceSuggestionListId}-option-${index}`}
+                  key={option.id}
+                  role="option"
+                  aria-selected={index === activeReferenceIndex}
+                  aria-label={option.title}
+                  className={styles.slashCommandSuggestionOption}
+                  data-active={index === activeReferenceIndex ? "true" : "false"}
+                >
+                  <VButton
+                    type="button"
+                    className={
+                      index === activeReferenceIndex
+                        ? `${styles.slashCommandSuggestionButton} ${styles.slashCommandSuggestionButtonActive}`
+                        : styles.slashCommandSuggestionButton
+                    }
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => handleReferenceTypeaheadSelect(option)}
+                  >
+                    <span className={styles.slashCommandSuggestionIcon} aria-hidden="true">
+                      {option.reference.kind === "file" ? (
+                        <FileText size={13} />
+                      ) : option.reference.kind === "session" ? (
+                        <MessageSquareText size={13} />
+                      ) : (
+                        <BookOpen size={13} />
+                      )}
+                    </span>
+                    <strong className={styles.slashCommandSuggestionCode}>
+                      {option.title}
+                    </strong>
+                    {option.meta ? (
+                      <span className={styles.slashCommandSuggestionDescription}>{option.meta}</span>
+                    ) : null}
+                    <span className={styles.slashCommandBuiltinBadge} data-vui="reference-typeahead-badge">
+                      {t("composerReferenceTypeaheadBadge")}
+                    </span>
+                  </VButton>
+                </div>
+              ))}
             </div>
           ) : null}
           <VNativeTextarea
@@ -5129,10 +5385,35 @@ export function ConversationView({
             placeholder={resolvedComposerPlaceholder}
             data-composer-prompt-suggestion={composerPromptSuggestion.ghost ? "true" : undefined}
             aria-label={lang === "zh" ? "发送消息" : "Message"}
-            aria-controls={showSlashSuggestions ? slashSuggestionListId : undefined}
-            aria-expanded={showSlashSuggestions ? true : undefined}
-            aria-autocomplete={showSlashSuggestions ? "list" : undefined}
-            onChange={(event) => onComposerChange(event.target.value)}
+            aria-controls={
+              showSlashSuggestions
+                ? slashSuggestionListId
+                : showReferenceSuggestions
+                  ? referenceSuggestionListId
+                  : undefined
+            }
+            aria-expanded={showSlashSuggestions || showReferenceSuggestions ? true : undefined}
+            aria-autocomplete={showSlashSuggestions || showReferenceSuggestions ? "list" : undefined}
+            aria-activedescendant={
+              showSlashSuggestions && activeSlashIndex >= 0
+                ? `${slashSuggestionListId}-option-${activeSlashIndex}`
+                : showReferenceSuggestions && activeReferenceIndex >= 0
+                  ? `${referenceSuggestionListId}-option-${activeReferenceIndex}`
+                  : undefined
+            }
+            onChange={(event) => {
+              onComposerChange(event.target.value);
+              syncComposerReferenceCaret(event.currentTarget);
+            }}
+            onCompositionStart={() => setComposerComposing(true)}
+            onCompositionEnd={(event) => {
+              // IME text was just committed: re-evaluate the token with the
+              // post-composition caret so CJK "@引用" arms only after commit.
+              setComposerComposing(false);
+              syncComposerReferenceCaret(event.currentTarget);
+            }}
+            onSelect={() => syncComposerReferenceCaret(composerInputRef.current)}
+            onKeyUp={() => syncComposerReferenceCaret(composerInputRef.current)}
             onPaste={(event) => {
               if (!onAddComposerAttachments || attachmentInputDisabled) {
                 return;
@@ -5163,6 +5444,52 @@ export function ConversationView({
                 event.preventDefault();
                 composerPromptSuggestion.dismissGhost();
                 return;
+              }
+              if (showSlashSuggestions && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setSlashActiveIndex((current) => moveSlashCommandActiveIndex(
+                    current,
+                    event.key === "ArrowDown" ? 1 : -1,
+                    slashSuggestions.length,
+                  ));
+                  return;
+                }
+                if (event.key === "Tab" || (event.key === "Enter" && !event.nativeEvent.isComposing)) {
+                  event.preventDefault();
+                  if (activeSlashIndex >= 0) {
+                    handleSlashCommandSuggestion(slashSuggestions[activeSlashIndex]);
+                  }
+                  return;
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  handleSlashCommandDismiss();
+                  return;
+                }
+              }
+              if (showReferenceSuggestions && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setReferenceActiveIndex((current) => moveSlashCommandActiveIndex(
+                    current,
+                    event.key === "ArrowDown" ? 1 : -1,
+                    referenceSuggestions.length,
+                  ));
+                  return;
+                }
+                if (event.key === "Tab" || (event.key === "Enter" && !event.nativeEvent.isComposing)) {
+                  event.preventDefault();
+                  if (activeReferenceIndex >= 0) {
+                    handleReferenceTypeaheadSelect(referenceSuggestions[activeReferenceIndex]);
+                  }
+                  return;
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  handleReferenceTypeaheadDismiss();
+                  return;
+                }
               }
               if (
                 shouldSubmitComposerOnKeydown({
@@ -5214,7 +5541,7 @@ export function ConversationView({
               ) : null}
             </div>
             <div className={styles.composerToolbarEnd}>
-              {llmControl ? <ConversationInferenceControl {...llmControl} /> : null}
+              {llmControl ? <ConversationInferenceControl {...llmControl} openSignal={modelMenuOpenSignal} /> : null}
               {composerContextRing ? (
                 <ComposerContextRing
                   model={composerContextRing}
