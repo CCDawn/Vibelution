@@ -53,6 +53,86 @@ function renderConversation(
 }
 
 describe("ConversationView native Codex transcript surface", () => {
+  it("renders the derived todo checklist card above the process trail", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-todo",
+        role: "assistant",
+        timestamp: "2026-09-16T10:00:00Z",
+        turnId: "turn-todo",
+        status: "running",
+        turnItems: [
+          {
+            id: "tool-todo-r1",
+            itemId: "tool-todo",
+            version: 3,
+            sessionId: "session-1",
+            turnId: "turn-todo",
+            type: "tool_call",
+            status: "completed",
+            revision: 1,
+            sequence: 1,
+            callId: "call-todo-1",
+            toolName: "todo_write",
+            input: JSON.stringify({
+              todos: [
+                { content: "审查契约", activeForm: "正在审查契约", status: "completed" },
+                { content: "补齐回归测试", activeForm: "正在补齐回归测试", status: "in_progress" },
+              ],
+            }),
+          },
+          {
+            id: "answer-r1",
+            itemId: "answer",
+            version: 3,
+            sessionId: "session-1",
+            turnId: "turn-todo",
+            type: "agent_message",
+            phase: "final_answer",
+            status: "running",
+            revision: 1,
+            sequence: 2,
+            text: "正在推进。",
+          },
+        ],
+      },
+    ]);
+
+    expect(html).toContain("任务清单");
+    expect(html).toContain("正在补齐回归测试");
+    expect(html).toContain("animate-spin");
+    expect(html).toContain(">1/2<");
+    expect(html).not.toContain('data-testid="todo-checklist-warning"');
+  });
+
+  it("does not render a todo checklist card when the turn has no todo_write call", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-no-todo",
+        role: "assistant",
+        timestamp: "2026-09-16T10:00:00Z",
+        turnId: "turn-no-todo",
+        status: "running",
+        turnItems: [{
+          id: "answer-no-todo",
+          itemId: "answer-no-todo",
+          version: 3,
+          sessionId: "session-1",
+          turnId: "turn-no-todo",
+          type: "agent_message",
+          phase: "final_answer",
+          status: "running",
+          revision: 1,
+          sequence: 1,
+          text: "普通回答。",
+        }],
+      },
+    ]);
+
+    expect(html).not.toContain("任务清单");
+    expect(html).not.toContain("todo-checklist-counter");
+  });
+
   it("collapses an in-flight companion turn to one 微信式 typing status", () => {
     const html = renderConversation([
       {

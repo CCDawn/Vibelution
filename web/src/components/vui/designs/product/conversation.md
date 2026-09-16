@@ -3,6 +3,54 @@
 > 对话工作台组合层：只服务 Chat composer / 时间线。
 > **禁止**在此重新实现按钮/输入；必须组合 VUI primitives。
 
+## ConversationTodoChecklist
+
+### 功能
+回合级 todo 进度卡（Claude Code TodoWrite 范式）：把 agent 通过 `todo_write` 工具写入的最新清单快照渲染为常驻 checklist——完成项勾选、进行中项展示 activeForm + spinner、待办空心圈，头部带「已完成/总数」计数；回合结束仍有未完成项时给一行可见警示（仅呈现，不阻断）。
+
+### 适用范围
+- **适用**：直连会话时间线内的 assistant 回合（活跃轮实时、历史轮只读回放），快照从 journal 回放的 turnItems 派生。
+- **不适用**：陪伴模式（`companionMode` 不渲染）；agent 私信/群聊转录行；无 `todo_write` 调用的回合（不渲染空卡）。任务管理（tasks.json 持久任务）用 task_* 工具面，不在此卡。
+
+| 场景 | 选择 |
+| --- | --- |
+| 活跃轮 + 最新快照有 in_progress | 展开态：当前项 activeForm + spinner，其余按状态渲染 |
+| 历史轮（turn 已有终态） | 默认折叠，可展开；只读，无交互承诺 |
+| 回合结束 + 快照仍有 pending/in_progress | 头部下方一行警示文案（`todoChecklistUnfinishedWarning`） |
+
+### 使用方式
+```tsx
+// 生产：ConversationView 回合渲染区（清单先于 process trail）。
+// 快照派生：deriveLatestTodoChecklist(message.turnItems)，多调用取最后一个有效快照。
+<ConversationTodoChecklist snapshot={snapshot} lang={lang} turnSettled={hasTerminalCanonicalTurnOutcome(message)} />
+```
+
+| Prop / 槽位 | 说明 | 设计注意 |
+| --- | --- | --- |
+| snapshot | 最新有效清单快照（items/completedCount/total/hasUnfinished） | 由 `conversationTodoChecklistModel.ts` 派生，组件不自取数据 |
+| lang | 语言 | 文案一律走 `dictionaryChat`（todoChecklist*） |
+| turnSettled | 回合是否已有终态 | 决定折叠默认值与警示行；不改变回合状态判定 |
+
+### 非职责
+- 不落盘、不回写清单状态；journal 是唯一事实源，卡片只消费 turnItems。
+- 不阻断或重试回合；警示行是呈现层，不是行为门。
+- 不渲染 plan_update_tool / task_* 的数据（各自的计划与任务面独立）。
+
+### 视觉与状态
+- 状态图标：completed `CircleCheck`（accent-cool）、in_progress `LoaderCircle` animate-spin、pending 空心 `Circle`（弱化）。
+- 进行中行用 `--fg-primary` 提高对比；完成行用 `--fg-tertiary` 弱化。
+- 计数徽标 `3/6` tabular-nums；警示行用 `--accent-warm` 非模态。
+
+### 实现落点
+- 源码：`web/src/components/conversation/ConversationTodoChecklist.tsx`
+- 纯派生：`web/src/components/conversation/conversationTodoChecklistModel.ts`（`deriveLatestTodoChecklist`）
+- 样式：`web/src/components/conversation/ConversationTodoChecklist.styles.ts`
+- 协议来源：`todo_write` 工具（`tools/todo_tools.py`）的 journaled tool-call arguments
+
+### 反冗余
+- 不新建通用 checklist primitive；本卡是 conversation product 组合，行渲染用 icon + 文本而非 VCheckbox（只读展示，无表单语义）。
+- 禁止为清单另开第二数据通道（新 SSE 事件或服务端清单存储）。
+
 ## ConversationActiveTurnStatusNote
 
 ### 功能

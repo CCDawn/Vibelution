@@ -475,6 +475,9 @@ DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = tuple(
         *PROJECT_OPERATION_TOOL_NAMES,
         "github_project_library_search_tool",
         "github_project_library_clone_tool",
+        # Presentation-only checklist snapshot; journaled with the turn and
+        # derived client-side by the conversation checklist card.
+        "todo_write",
     ]
 )
 _DEFAULT_SESSION_AGENT_PREFERRED_BASE = tuple(

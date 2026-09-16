@@ -117,6 +117,7 @@
 | 组件 | 设计说明 |
 | --- | --- |
 | `ConversationActiveTurnStatusNote` | [product/conversation.md](./product/conversation.md#conversationactiveturnstatusnote) |
+| `ConversationTodoChecklist` | [product/conversation.md](./product/conversation.md#conversationtodochecklist) |
 | `ConversationFollowupQueueBar` | [product/conversation.md](./product/conversation.md#conversationfollowupqueuebar) |
 | `ConversationMessageVersionSwitcher` | [product/conversation.md](./product/conversation.md#conversationmessageversionswitcher) |
 | Composer 引用候选（@ type-ahead） | [product/conversation.md](./product/conversation.md#composer-引用候选-type-ahead) |

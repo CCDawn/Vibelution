@@ -485,6 +485,12 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["task_state_write"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
+    "todo_write": {
+        "category": "task_runtime",
+        "capabilityTags": ["todo_checklist", "turn_progress", "read_only"],
+        "riskTags": [],
+        "permissionTier": LOW_PERMISSION_TIER,
+    },
     "task_start_tool": {
         "category": "task_runtime",
         "capabilityTags": ["background_task", "command"],

@@ -116,6 +116,7 @@ from tools.python_intelligence_tools import (
     python_lint_tool as _python_lint_impl,
 )
 from tools.plan_tools import plan_update_tool as _plan_update_impl
+from tools.todo_tools import todo_write as _todo_write_impl
 from tools.conversation_log_tools import conversation_log_inspect_tool as _conversation_log_inspect_impl
 from tools.user_action_telemetry_tools import user_action_telemetry_query_tool as _user_action_telemetry_query_impl
 from tools.conversation_history_tools import (
@@ -1582,6 +1583,31 @@ def _build_key_tools() -> List[BaseTool]:
             JSON 格式的计划更新结果。
         """
         return _plan_update_impl(plan=plan, explanation=explanation, plan_id=plan_id)
+
+    @tool
+    def todo_write(todos: List[Dict]) -> str:
+        """
+        【任务清单】用完整快照替换当前回合的 todo 清单，供用户侧渲染进度卡片。
+
+        使用纪律（务必遵守）：
+        1. 每次调用都发送完整清单（全量替换，不是增量）；清单条目顺序即执行顺序。
+        2. 只创建 1-2 个回合内能完成的高层条目，不要写细化到单个文件/单次调用的步骤。
+        3. 任意时刻恰好一个 in_progress：开始前先把当前项标 completed，再开始下一项。
+        4. 完成一项立即重新调用本工具标记；只有真正完成且验证通过才能标 completed；
+           失败或受阻的条目保持 in_progress 并在正文向用户说明，或拆条重列。
+        5. 回合收尾前清账：全部条目应为 completed；若有遗留，最后一次快照要如实反映剩余状态。
+        6. 不要在回复正文里复述清单内容——清单卡片已向用户展示，正文只写结果与下一步。
+
+        Args:
+            todos: 完整清单快照，每项包含：
+                - content: 祈使句描述（例如 "补齐回归测试"）
+                - activeForm: 进行时描述，执行中展示（例如 "正在补齐回归测试"）
+                - status: pending | in_progress | completed
+
+        Returns:
+            JSON 格式的确认回显（清单不落盘，进度卡片直接从本轮工具调用派生）。
+        """
+        return _todo_write_impl(todos=todos)
 
     @tool
     def create_child_session_tool(
@@ -3163,6 +3189,7 @@ def _build_key_tools() -> List[BaseTool]:
         task_update_tool,
         task_list_tool,
         plan_update_tool,
+        todo_write,
         create_child_session_tool,
         list_child_sessions_tool,
         agent_create_tool,

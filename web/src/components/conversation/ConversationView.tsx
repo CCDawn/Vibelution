@@ -107,7 +107,10 @@ import {
   assistantFinalAnswerText,
   assistantTurnIsInFlight,
   assistantTurnIsStreaming,
+  hasTerminalCanonicalTurnOutcome,
 } from "../../routes/chatTurnProtocol";
+import { deriveLatestTodoChecklist } from "./conversationTodoChecklistModel";
+import { ConversationTodoChecklist } from "./ConversationTodoChecklist";
 import {
   compactStreamingStatusPlaceholder,
   isInternalStreamingStatusStage,
@@ -4639,6 +4642,22 @@ export function ConversationView({
             )
               ? renderCodexTranscriptCells(message, codexTranscriptCells, rowIdentity, companionMode)
               : null;
+            // Todo checklist card: client-derived from the latest journaled
+            // todo_write call in this turn (no extra SSE event). Companion and
+            // private-message surfaces stay minimal by contract.
+            const todoChecklistSnapshot = message.role === "assistant"
+              && !companionMode
+              && !agentInboxMessage
+              && !groupTranscriptMessage
+              ? deriveLatestTodoChecklist(message.turnItems)
+              : undefined;
+            const todoChecklistNode = todoChecklistSnapshot ? (
+              <ConversationTodoChecklist
+                snapshot={todoChecklistSnapshot}
+                lang={lang}
+                turnSettled={hasTerminalCanonicalTurnOutcome(message)}
+              />
+            ) : null;
             // Only force the answer body open while tokens are still streaming.
             // Tying this to defaultResponseExpanded made the last few answers
             // impossible to collapse (toggle flipped aria state but body stayed).
@@ -4906,6 +4925,9 @@ export function ConversationView({
                     - When tools only exist on feedback/timeline (alongside), processNode must
                       still precede codexTranscriptNode so the answer is not above the tools.
                   */}
+                  {/* Checklist overview sits above the process trail: it is a
+                      progress summary, not a second process row. */}
+                  {todoChecklistNode}
                   {processNode}
                   {compactActiveTurnPlaceholderNode}
                   {codexTranscriptNode}
