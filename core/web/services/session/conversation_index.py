@@ -1173,6 +1173,7 @@ def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
         )
     missing_after_lock = False
     selected_conversation: dict[str, Any] | None = None
+    metadata_changed = False
     with s._CHAT_STATE_LOCK:
         conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
         changed = False
@@ -1194,6 +1195,7 @@ def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
                     activate=need_activate,
                 )
             selected_conversation = dict(conversation)
+            metadata_changed = changed
     if missing_after_lock or selected_conversation is None:
         s._retire_unopenable_directory_session(
             normalized_session_id,
@@ -1205,7 +1207,10 @@ def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
     # Viewing a session is not session activity: the directory list must keep
     # ordering by last activity, so a select must not touch recency.
     directory_bridge.sync_conversation_record(selected_conversation, touch_recency=False)
-    s._invalidate_session_list_cache()
+    if metadata_changed:
+        # Plain view switches keep the index signature stable; invalidating on
+        # every select forced the next poll to rebuild the whole projection.
+        s._invalidate_session_list_cache()
     if lightweight:
         normalized = s._normalize_conversation(selected_conversation) or selected_conversation
         detail = s._build_lightweight_session_detail(normalized)
