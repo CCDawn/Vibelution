@@ -34,6 +34,7 @@ from core.web.routes.session_turn_models import (
 )
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 from core.web.services import session_service
+from core.web.services.session import document_attachments as session_document_attachments
 from core.web.services.session.composer_example_commands import (
     get_composer_example_command,
 )
@@ -554,8 +555,16 @@ def session_image_artifact(
 ) -> FileResponse:
     try:
         path, content_type = resolve_session_image_artifact(session_id, artifact_id)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="Session artifact not found") from exc
+    except FileNotFoundError:
+        # Document artifacts live beside images in the session workspace;
+        # fall through to the document resolver before giving up.
+        try:
+            path, content_type = session_document_attachments.resolve_session_document_artifact(
+                session_id,
+                artifact_id,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Session artifact not found") from exc
     filename = path.name if download else None
     return FileResponse(path, media_type=content_type, filename=filename)
 
@@ -600,7 +609,17 @@ async def session_upload_attachment(session_id: str, request: Request) -> dict:
     filename = str(request.headers.get("x-vibelution-filename") or "").strip()
     try:
         payload = await _read_session_attachment_payload(session_id, request)
-        return store_session_user_image_attachment(
+        # Images are identified by content sniffing; anything that does not
+        # sniff as png/jpeg/webp goes to the document store, which enforces
+        # its own extension/size/payload gates.
+        if session_service._sniff_image_extension(payload) or content_type.lower().startswith("image/"):
+            return store_session_user_image_attachment(
+                session_id,
+                payload,
+                filename=filename,
+                content_type=content_type,
+            )
+        return session_document_attachments.store_session_user_document_attachment(
             session_id,
             payload,
             filename=filename,

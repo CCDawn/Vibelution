@@ -19,6 +19,8 @@ from typing import Any
 
 from core.chat.turn_journal import TurnJournalPostTerminalWriteError
 
+from . import conversation_references
+from . import document_attachments
 from .admission import (
     DevelopmentSubmissionAdmissionConfigurationError,
     get_development_submission_admission_runtime,
@@ -171,31 +173,50 @@ def _enqueue_busy_session_turn(
         raise service.SessionNotFoundError(
             service.text_for(lang, zh="未找到当前会话。", en="Session not found.")
         )
+    image_ids, document_ids = document_attachments.partition_session_attachment_ids(
+        conversation,
+        attachment_ids or [],
+    )
     attachments = (
         list(resolved_attachments)
         if resolved_attachments is not None
-        else service._resolve_session_image_attachments(
-            session_id,
-            attachment_ids or [],
-            conversation=conversation,
-        )
+        else [
+            *service._resolve_session_image_attachments(
+                session_id,
+                image_ids,
+                conversation=conversation,
+            ),
+            *document_attachments._resolve_session_document_attachments(
+                session_id,
+                document_ids,
+                conversation=conversation,
+            ),
+        ]
+    )
+    session_reference_rows, knowledge_file_rows = conversation_references.partition_conversation_references(
+        references or []
     )
     session_references = (
         list(resolved_references)
         if resolved_references is not None
         else service._resolve_session_references(
             session_id,
-            references or [],
+            session_reference_rows,
             conversations=_session_reference_conversation_rows(
                 service,
                 session_id,
                 conversation,
-                references or [],
+                session_reference_rows,
             ),
             lang=lang,
         )
     )
-    if not message and not attachments and not session_references:
+    knowledge_file_references = conversation_references.normalize_knowledge_file_references(knowledge_file_rows)
+    all_references = [
+        *session_references,
+        *conversation_references.strip_reference_content(knowledge_file_references),
+    ]
+    if not message and not attachments and not all_references:
         raise service.SessionValidationError(
             service.text_for(
                 lang,
@@ -207,7 +228,7 @@ def _enqueue_busy_session_turn(
         session_id,
         content=message,
         attachments=attachments,
-        references=session_references,
+        references=all_references,
         mental_model_enabled=mental_model_enabled,
         runtime_status_enabled=runtime_status_enabled,
         turn_mode=turn_mode,
@@ -766,22 +787,40 @@ def submit_session_message(
             conversation=conversation,
         )
         s._ensure_conversation_workspace_metadata(conversation)
-        attachments = s._resolve_session_image_attachments(
-            conversation_id,
+        image_ids, document_ids = document_attachments.partition_session_attachment_ids(
+            conversation,
             attachment_ids or [],
+        )
+        image_attachments = s._resolve_session_image_attachments(
+            conversation_id,
+            image_ids,
             conversation=conversation,
+        )
+        document_attachments_list = document_attachments._resolve_session_document_attachments(
+            conversation_id,
+            document_ids,
+            conversation=conversation,
+        )
+        attachments = [*image_attachments, *document_attachments_list]
+        session_reference_rows, knowledge_file_rows = conversation_references.partition_conversation_references(
+            references or []
         )
         session_references = s._resolve_session_references(
             conversation_id,
-            references or [],
+            session_reference_rows,
             conversations=_session_reference_conversation_rows(
                 s,
                 conversation_id,
                 conversation,
-                references or [],
+                session_reference_rows,
             ),
             lang=lang,
         )
+        knowledge_file_reference_rows = conversation_references.normalize_knowledge_file_references(knowledge_file_rows)
+        all_references = [
+            *session_references,
+            *conversation_references.strip_reference_content(knowledge_file_reference_rows),
+        ]
         active_task = s._normalize_session_active_task(conversation.get("active_task") or conversation.get("activeTask"))
         if not s._is_task_tool_backed_active_task(active_task):
             active_task = None
@@ -809,25 +848,27 @@ def submit_session_message(
         recent_image_reference_missing = False
         if recent_image_reference_requested:
             if contextual_recent_image_artifact_ids:
-                attachments = s._resolve_session_image_attachments(
+                image_attachments = s._resolve_session_image_attachments(
                     conversation_id,
                     contextual_recent_image_artifact_ids,
                     conversation=conversation,
                 )
-                recent_image_reference_missing = not bool(attachments)
+                recent_image_reference_missing = not bool(image_attachments)
+                attachments = [*image_attachments, *document_attachments_list]
             elif explicit_recent_image_reference:
                 recent_attachment = s._find_recent_user_image_attachment(conversation)
                 if recent_attachment:
-                    attachments = s._resolve_session_image_attachments(
+                    image_attachments = s._resolve_session_image_attachments(
                         conversation_id,
                         [str(recent_attachment.get("artifactId") or "").strip()],
                         conversation=conversation,
                     )
                 else:
                     recent_image_reference_missing = True
+                attachments = [*image_attachments, *document_attachments_list]
             else:
                 recent_image_reference_missing = True
-        if not message and not attachments and not session_references:
+        if not message and not attachments and not all_references:
             raise s.SessionValidationError(
                 s.text_for(lang, zh="请输入本轮消息、添加图片或引用会话后再发送。", en="Enter a message, attach an image, or reference a session before sending.")
             )
@@ -841,7 +882,7 @@ def submit_session_message(
                     attachment_ids=attachment_ids,
                     references=references,
                     resolved_attachments=attachments,
-                    resolved_references=session_references,
+                    resolved_references=all_references,
                     mental_model_enabled=mental_model_enabled,
                     runtime_status_enabled=runtime_status_enabled,
                     turn_mode=turn_mode,
@@ -888,6 +929,20 @@ def submit_session_message(
                 conversation.get("agent_id") or conversation.get("agentId") or prepared_agent_id
             ).strip() or prepared_agent_id
             agent = prepared_agent
+        if knowledge_file_reference_rows:
+            # Resolve content after the turn agent is known: KB retrieval is
+            # governed per agent and file references read session artifacts.
+            knowledge_file_reference_rows = conversation_references.resolve_knowledge_file_references(
+                conversation_id,
+                knowledge_file_reference_rows,
+                agent_id=agent_id,
+                query=message,
+                lang=lang,
+            )
+            all_references = [
+                *session_references,
+                *conversation_references.strip_reference_content(knowledge_file_reference_rows),
+            ]
         persist_resolve_finished_at = s._perf_counter()
         submit_timing_fields["persistResolveMs"] = s._elapsed_ms_between(
             persist_started_at,
@@ -935,8 +990,8 @@ def submit_session_message(
             "agentId": agent_id,
         }
         deferred_kernel_trace["conversation"] = conversation_snapshot_for_kernel
-        if session_references:
-            persisted_message_metadata["sessionReferences"] = session_references
+        if all_references:
+            persisted_message_metadata["sessionReferences"] = all_references
         if skill_invocation:
             persisted_message_metadata["slashSkillCommand"] = {
                 "command": skill_invocation.get("command", ""),
@@ -950,7 +1005,7 @@ def submit_session_message(
             message,
             metadata=persisted_message_metadata,
             attachments=attachments,
-            references=session_references,
+            references=all_references,
         )
         if recent_image_reference_requested:
             user_entry.setdefault("metadata", {})
@@ -1027,7 +1082,10 @@ def submit_session_message(
             user_payload={
                 "content": message,
                 "attachments": s._normalize_message_attachments(attachments),
-                "references": s._normalize_session_references(session_references),
+                "references": [
+                    *s._normalize_session_references(all_references),
+                    *conversation_references.normalize_knowledge_file_references(all_references),
+                ],
                 "metadata": persisted_message_metadata,
                 "source": normalized_message_source,
             },
@@ -1085,14 +1143,16 @@ def submit_session_message(
             trace_context_carrier=normalized_trace_context_carrier,
         )
         submit_timing_fields["turnStartedSceneLogMs"] = s._elapsed_ms(stage_started_at)
-        if session_references:
+        if all_references:
             s._record_session_turn_lifecycle_event(
                 conversation_id,
                 "session_references_attached",
                 turn_id=turn_control.turn_id,
                 outcome="recorded",
                 fields={
-                    "referenceCount": len(session_references),
+                    "referenceCount": len(all_references),
+                    "sessionReferenceCount": len(session_references),
+                    "knowledgeFileReferenceCount": len(knowledge_file_reference_rows),
                     "targetSessionIds": [str(item.get("sessionId") or "").strip() for item in session_references],
                     "queryAllowed": True,
                     "sendRequiresExplicitUserIntent": True,
@@ -1128,7 +1188,7 @@ def submit_session_message(
             if include_started_turn_id:
                 detail["startedTurnId"] = turn_control.turn_id
             return detail
-        if attachments and normalized_message_source != "agent_inbox":
+        if image_attachments and normalized_message_source != "agent_inbox":
             image_capability = s._resolve_image_attachment_capability(agent_instance=agent)
             image_capability_log_fields = {
                 "supportsImageInput": image_capability.get("supports_image_input"),
@@ -1208,6 +1268,20 @@ def submit_session_message(
             effective_user_message = stage_task_continuation_prompt
             user_message_source = "source_collection_stage_task_continue"
         reference_prompt_block = s._session_reference_prompt_block(session_references)
+        knowledge_prompt_block = conversation_references.knowledge_file_reference_prompt_block(
+            knowledge_file_reference_rows,
+            lang=lang,
+        )
+        document_prompt_block = document_attachments.build_session_document_prompt_block(
+            conversation_id,
+            document_attachments_list,
+            lang=lang,
+        )
+        reference_prompt_block = "\n\n".join(
+            block
+            for block in (reference_prompt_block, knowledge_prompt_block, document_prompt_block)
+            if block
+        )
         if reference_prompt_block:
             effective_user_message = "\n\n".join(part for part in [effective_user_message or message, reference_prompt_block] if part).strip()
             if not user_message_source or user_message_source == "raw":
@@ -1595,7 +1669,10 @@ def _resubmit_session_user_message(
                 attachments = s._normalize_message_attachments(stored_attachments)
             stored_references = previous_messages[target_index].get("references")
             if isinstance(stored_references, list):
-                session_references = s._normalize_session_references(stored_references)
+                session_references = [
+                    *s._normalize_session_references(stored_references),
+                    *conversation_references.normalize_knowledge_file_references(stored_references),
+                ]
             if not message and not attachments:
                 raise s.SessionValidationError(
                     s.text_for(
@@ -1606,11 +1683,22 @@ def _resubmit_session_user_message(
                 )
             s._validate_user_message_not_encoding_replacement(message, lang=lang)
         else:
-            attachments = s._resolve_session_image_attachments(
-                conversation_id,
+            edit_image_ids, edit_document_ids = document_attachments.partition_session_attachment_ids(
+                conversation,
                 attachment_ids or [],
-                conversation=conversation,
             )
+            attachments = [
+                *s._resolve_session_image_attachments(
+                    conversation_id,
+                    edit_image_ids,
+                    conversation=conversation,
+                ),
+                *document_attachments._resolve_session_document_attachments(
+                    conversation_id,
+                    edit_document_ids,
+                    conversation=conversation,
+                ),
+            ]
             if not message and not attachments:
                 raise s.SessionValidationError(
                     s.text_for(
@@ -1839,6 +1927,15 @@ def _resubmit_session_user_message(
             history_before_target,
             existing_task=active_task,
         )
+        edit_document_prompt_block = document_attachments.build_session_document_prompt_block(
+            conversation_id,
+            attachments,
+            lang=lang,
+        )
+        if edit_document_prompt_block:
+            effective_user_message = "\n\n".join(
+                part for part in [effective_user_message or message, edit_document_prompt_block] if part
+            ).strip()
         if effective_user_message != message:
             s._record_session_user_message_filtered_event(
                 conversation_id,

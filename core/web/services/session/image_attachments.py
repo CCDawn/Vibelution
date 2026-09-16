@@ -471,6 +471,11 @@ def _build_llm_image_attachments(session_id: str, attachments: list[dict[str, An
     s = _service()
     prepared: list[dict[str, Any]] = []
     for attachment in s._normalize_message_attachments(attachments):
+        # Document attachments (kind user_document / non-image content) are
+        # injected as text at submit time; skip them here instead of failing
+        # the turn in image data-URL preparation.
+        if not s._is_ready_user_image_attachment(attachment):
+            continue
         artifact_id = str(attachment.get("artifactId") or "").strip()
         if not artifact_id:
             continue
