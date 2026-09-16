@@ -147,7 +147,10 @@ def test_proactive_turn_waits_for_user_turn_then_captures_latest_history(
             self.contexts: list[dict] = []
 
         def submit(self, _operation, context):
-            self.contexts.append(context)
+            # Queued-turn drain scheduling submits `(drain_fn, session_id)`;
+            # only real turn contexts (dict payloads) are executions to capture.
+            if isinstance(context, dict):
+                self.contexts.append(context)
 
     executor = CapturingExecutor()
     monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", executor)
