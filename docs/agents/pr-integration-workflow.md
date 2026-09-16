@@ -143,3 +143,37 @@
 ### 12.4 配置默认值
 
 轮询间隔 60s；并发度 1；重试 3 次；draft=等 ready；分支过滤 `codex/*`。均可用环境变量/配置覆盖。
+
+## 13. 方向修订（2026-09-17）：本地集成权威 + GitHub 发布镜像
+
+用户拍板：git 管理全部本地完成，GitHub 仅作发布存储站。本节取代 §4 的"单一集成权威=GitHub"与 §12.1 的 gh 轮询触发；SHIP/SHOW/ASK 分级（§4）、门禁分层（§8）、审查规范（§9）、队列设计（§12.2）全部保留，仅换宿主。
+
+### 13.1 本地合并请求（Local Merge Request, LMR）
+
+PR 的本地等价物是一份登记记录，存 `.git` common-dir 下的 ledger（进程工件，不进仓库树）：
+
+- 字段：branch、HEAD SHA、base、标题/任务包引用、证据 manifest 路径、分级（show/ask）、状态机 `pending_review → in_review →（rework → pending_review）* → approved → merging → merged / rejected`、审查记录（verdict + findings + Evidence 段）、时间戳。
+- 生命周期：Worker 本地门禁跑完 → 登记 LMR → watcher 自动入队审查 → APPROVE → 集成收口（stale_main 合并 + 快门复跑 + ff-only 合入本地 `main`，即现行 task_closeout 机制原封不动）→ 清理 → 进入待发布队列；REWORK → 返工信封回 Worker。
+
+### 13.2 组件映射（GitHub PR → 本地）
+
+| GitHub PR 概念 | 本地等价 |
+|---|---|
+| PR 对象 | LMR ledger 记录 |
+| push 新 commit | branch SHA 变化 → 顶替任务 + 作废旧 verdict |
+| review / 行评论 | findings（file+行号+severity+category+confidence）写入 LMR |
+| required checks | closeout 门禁 + 证据 manifest（机器可验） |
+| approve 撤销 | 新 SHA 自动作废旧 verdict（§12.2） |
+| merge button | task_closeout ff-only 合入本地 `main`（现状机制） |
+| 平台可见性 | 本地状态/汇总命令；发布后 GitHub 即镜像 |
+| branch protection | 不需要（合入权在本地集成 agent + 审查门） |
+
+### 13.3 发布（GitHub = 存储站）
+
+- 集成完成后 `main` 进入待发布队列；发布 = `git push origin main`（策略待拍板：每任务即推 / 定量定时批推 / 手动指令）。
+- 无双权威分叉：本地 `main` 唯一权威，`origin/main` 为镜像；远端默认不留任务分支。
+
+### 13.4 剩余待拍板 / 待建
+
+- 待拍板：①发布策略（建议：定量批推 + 手动即推并存）；②FAST_PATCH 是否豁免 LMR（建议豁免，维持本地直合）。
+- 待建（三角色流水线，互相独立可并行）：①LMR ledger 与生命周期脚本（登记/查询/状态流转/作废旧 verdict）；②`pr_review_watch.py` 改监听本地 ledger（零网络，其余 §12 设计不变）；③审查 verdict 写入 LMR + 状态汇总命令；④发布队列脚本（批推 + 推送卫生检查）。
