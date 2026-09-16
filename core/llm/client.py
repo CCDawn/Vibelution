@@ -4675,6 +4675,52 @@ class LLMClient:
             raise last_error
         raise LLMError("provider_protocol_error", "LLM backend failed before returning a response.", retryable=False)
 
+    def _emit_stream_restart_marker(
+        self,
+        *,
+        attempt: int,
+        max_attempts: int,
+        previous_error: Optional[LLMError],
+        event_metadata: Dict[str, Any],
+    ) -> None:
+        """Announce a stream restart before a new attempt after partial emission.
+
+        对齐外部成熟实践（Vercel AI SDK resumable streams / SSE Last-Event-ID
+        重放 / Ably durable sessions）：服务端整段重启推断时必须给出显式的新
+        边界，消费端才能按边界去重、把重生成内容替换失败残段而不是追加在其
+        后。标记复用既有 ``LLM_STATUS`` 通道并新增内部字段 ``streamRestart``
+        （不改任何既有事件名/字段名）；session capture 据此清空进行中边界。
+        """
+        category = str(getattr(previous_error, "category", "") or "")
+        _record_llm_scene_event(
+            "stream",
+            "llm.stream.restart",
+            message="LLM stream restarting after partial emission; consumer capture boundaries reset.",
+            level="warning",
+            outcome="retrying",
+            fields={
+                "role": self.role,
+                "profileId": self.profile_id,
+                "provider": self.provider.kind,
+                "model": self.profile.model,
+                "sessionId": event_metadata.get("sessionId", ""),
+                "turnId": event_metadata.get("turnId", ""),
+                "invocationId": event_metadata.get("invocationId", ""),
+                "attempt": attempt,
+                "previousAttempt": attempt - 1,
+                "maxAttempts": max_attempts,
+                "category": category,
+            },
+            lifecycle=True,
+        )
+        _publish_llm_status_event(
+            "retrying",
+            attempt=attempt,
+            max_attempts=max_attempts,
+            category=category,
+            streamRestart=attempt,
+        )
+
     def _record_llm_retry_or_failure(
         self,
         *,
@@ -5303,6 +5349,7 @@ class LLMClient:
         payload_prepare_ms = max(0, int((time.perf_counter() - payload_prepare_started) * 1000))
         max_attempts = _retry_policy_max_attempts(self.profile, role=self.role)
         last_error: LLMError | None = None
+        previous_attempt_emitted = False
         stream_usage_options_downgraded = False
         route_key = _llm_route_concurrency_key(self.provider, self.profile, profile_id=self.profile_id)
         for attempt in range(1, max_attempts + 1):
@@ -5311,6 +5358,13 @@ class LLMClient:
                 _raise_if_llm_cancelled()
             except LLMCancelledError as exc:
                 raise _llm_cancelled_error(exc.reason) from exc
+            if attempt > 1 and previous_attempt_emitted:
+                self._emit_stream_restart_marker(
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    previous_error=last_error,
+                    event_metadata=event_metadata,
+                )
             start = time.time()
             # 流式总时长硬上限按单次 attempt 计：litellm 重试循环的每次重试
             # 都在这里重新起算，不跨 attempt 泄漏。
@@ -5727,6 +5781,10 @@ class LLMClient:
                 classification = classify_error(exc)
                 llm_error = _with_retry_details(classification.error, attempt=attempt, max_attempts=max_attempts)
                 last_error = llm_error
+                # 下一个 attempt 开始前是否需要发 stream_restart 边界标记，取决于
+                # 刚失败的这次 attempt 是否已向消费者发出过 chunk（含工具调用
+                # 部分）。所有 continue 重试路径都依赖这里记录的值。
+                previous_attempt_emitted = bool(emitted)
                 if provider_started:
                     self._capture_operator_attempt_receipt(
                         error=llm_error,
@@ -5739,28 +5797,51 @@ class LLMClient:
                         retry_count=max(0, attempt - 1),
                     )
                 if emitted:
-                    _record_llm_scene_event(
-                        "stream",
-                        "llm.stream.failed",
-                        message=f"LLM stream failed: {llm_error.category}",
-                        level="error",
-                        outcome="failed",
-                        fields=_llm_retry_event_fields(
-                            role=self.role,
-                            profile_id=self.profile_id,
-                            provider=self.provider.kind,
-                            model=self.profile.model,
-                            message_count=message_count,
-                            tool_count=tool_count,
-                            metadata=event_metadata,
-                            attempt=attempt,
-                            max_attempts=max_attempts,
-                            llm_error=llm_error,
-                            disposition=classification.disposition,
-                        ),
-                        lifecycle=True,
+                    if str((getattr(llm_error, "details", {}) or {}).get("terminal_reason") or "").strip():
+                        # wire 干净结束但缺 canonical terminal（stream exhaustion /
+                        # 输出截断 / provider 控制泄漏）：重发同请求只会整段重生成
+                        # 重复内容，保持终死不重试。
+                        _record_llm_scene_event(
+                            "stream",
+                            "llm.stream.failed",
+                            message=f"LLM stream failed: {llm_error.category}",
+                            level="error",
+                            outcome="failed",
+                            fields=_llm_retry_event_fields(
+                                role=self.role,
+                                profile_id=self.profile_id,
+                                provider=self.provider.kind,
+                                model=self.profile.model,
+                                message_count=message_count,
+                                tool_count=tool_count,
+                                metadata=event_metadata,
+                                attempt=attempt,
+                                max_attempts=max_attempts,
+                                llm_error=llm_error,
+                                disposition=classification.disposition,
+                            ),
+                            lifecycle=True,
+                        )
+                        raise llm_error from exc
+                    # P1：partial emission 之后的可重试传输中断（连接中断/idle
+                    # 超时等）不再绕过重试环；重试判定、退避与 LLM_STATUS
+                    # retrying/failed 事件统一走 _record_llm_retry_or_failure。
+                    # 新 attempt 开始前由 _emit_stream_restart_marker 通知消费端
+                    # 重置边界，转写不会把重生成内容拼在失败残段之后。
+                    should_retry = self._record_llm_retry_or_failure(
+                        phase="stream",
+                        event_code="llm.stream.failed",
+                        message="LLM stream failed",
+                        message_count=message_count,
+                        tool_count=tool_count,
+                        metadata=event_metadata,
+                        attempt=attempt,
+                        max_attempts=max_attempts,
+                        llm_error=llm_error,
                     )
-                    raise llm_error from exc
+                    if not should_retry:
+                        raise llm_error from exc
+                    continue
                 if (
                     not stream_usage_options_downgraded
                     and payload.get("stream_options")

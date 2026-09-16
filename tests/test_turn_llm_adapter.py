@@ -9,6 +9,7 @@ from agent import AgentRuntime, TurnStopRequested
 from core.infrastructure.llm_utils import MAX_CONSECUTIVE_FAILURES
 from core.infrastructure.runtime_input import build_chat_user_message
 from core.llm import LLMError
+from core.llm.recovery import plan_recovery
 from core.llm.route_fallback_registry import (
     clear_route_fallbacks,
     get_route_fallback,
@@ -842,3 +843,292 @@ def test_adapter_parses_camelcase_error_details_without_treating_true_as_attempt
     )
     assert truthy.last_failure_attempts == 0
     assert truthy.last_error_details["provider_stream_retry_exhausted"] is False
+
+
+# --- attempt-level degradation dispatch (core/llm/recovery.py actions) -------
+# These tests bind the REAL plan_recovery so the adapter's dispatch stays
+# locked to the single-source action mapping in core/llm/recovery.py.
+
+
+def _empty_content_error() -> LLMError:
+    return LLMError("empty_content_error", "chat content is empty", retryable=False)
+
+
+def _tool_protocol_error() -> LLMError:
+    return LLMError(
+        "tool_protocol_error",
+        "invalid params, duplicate tool_call id: call_1",
+        retryable=False,
+    )
+
+
+def test_adapter_degrades_empty_content_to_single_non_streaming_retry():
+    """(a) empty_content -> one same-profile non-streaming retry keeps the turn alive."""
+    streaming_calls = []
+    invoke_calls = []
+    llm_requests = []
+    events = []
+    primary = _route_llm("primary", identity=("relay", "primary"))
+    primary.stream = True
+
+    def get_llm_for_mode(**kwargs):
+        llm_requests.append((kwargs.get("disable_tools"), kwargs.get("profile_id")))
+        return primary
+
+    def run_streaming_outcome(*_args, **_kwargs):
+        streaming_calls.append(1)
+        raise _empty_content_error()
+
+    def invoke_outcome(*_args, **_kwargs):
+        invoke_calls.append(1)
+        return TurnOutcome.final_answer(identity=_identity(), text="recovered")
+
+    result = invoke_agent_llm_turn(
+        messages=[AIMessage(content="hello")],
+        hooks=_adapter_hooks(
+            get_llm_for_mode=get_llm_for_mode,
+            should_stream=lambda *_args, **_kwargs: True,
+            run_streaming_outcome=run_streaming_outcome,
+            invoke_outcome=invoke_outcome,
+            plan_recovery=plan_recovery,
+            record_scene_event=lambda _module, event, **kwargs: events.append(
+                (event, kwargs.get("fields") or {})
+            ),
+        ),
+    )
+    assert streaming_calls == [1]
+    assert invoke_calls == [1]
+    assert llm_requests == [(False, None), (False, None)]
+    assert result.payload is not None
+    assert result.payload[1].content == "recovered"
+    assert result.degraded_actions == ["retry_without_streaming"]
+    degraded = [fields for event, fields in events if event == "llm_route_degraded_retry"]
+    assert len(degraded) == 1
+    assert degraded[0]["action"] == "retry_without_streaming"
+    assert degraded[0]["fromCategory"] == "empty_content_error"
+    assert degraded[0]["routeAttempt"] == 1
+    assert degraded[0]["attempt"] == 2
+    assert degraded[0]["profileId"] == "primary"
+
+
+def test_adapter_degrades_tool_protocol_to_tools_off_non_streaming_retry():
+    """(b) tool_protocol -> one same-profile tools-off non-streaming retry."""
+    llm_requests = []
+    events = []
+    primary = _route_llm("primary", identity=("relay", "primary"))
+    primary.stream = True
+
+    def get_llm_for_mode(**kwargs):
+        llm_requests.append(kwargs.get("disable_tools"))
+        return primary
+
+    def run_streaming_outcome(*_args, **_kwargs):
+        raise _tool_protocol_error()
+
+    def invoke_outcome(*_args, **_kwargs):
+        return TurnOutcome.final_answer(identity=_identity(), text="plain text answer")
+
+    result = invoke_agent_llm_turn(
+        messages=[AIMessage(content="hello")],
+        hooks=_adapter_hooks(
+            get_llm_for_mode=get_llm_for_mode,
+            should_stream=lambda *_args, **_kwargs: True,
+            run_streaming_outcome=run_streaming_outcome,
+            invoke_outcome=invoke_outcome,
+            plan_recovery=plan_recovery,
+            record_scene_event=lambda _module, event, **kwargs: events.append(
+                (event, kwargs.get("fields") or {})
+            ),
+        ),
+    )
+    assert llm_requests == [False, True]
+    assert result.payload is not None
+    assert result.payload[1].content == "plain text answer"
+    assert result.degraded_actions == ["disable_tools_and_retry_without_streaming"]
+    degraded = [fields for event, fields in events if event == "llm_route_degraded_retry"]
+    assert len(degraded) == 1
+    assert degraded[0]["action"] == "disable_tools_and_retry_without_streaming"
+    assert degraded[0]["fromCategory"] == "tool_protocol_error"
+    assert degraded[0]["streamingDisabled"] is True
+    assert degraded[0]["toolsDisabled"] is True
+
+
+def test_adapter_degraded_retry_does_not_loop():
+    """(c) each degradation action fires at most once per turn, then terminal."""
+    streaming_calls = []
+    invoke_calls = []
+    events = []
+    primary = _route_llm("primary", identity=("relay", "primary"))
+    primary.stream = True
+
+    def run_streaming_outcome(*_args, **_kwargs):
+        streaming_calls.append(1)
+        raise _empty_content_error()
+
+    def invoke_outcome(*_args, **_kwargs):
+        invoke_calls.append(1)
+        raise _empty_content_error()
+
+    result = invoke_agent_llm_turn(
+        messages=[AIMessage(content="hello")],
+        hooks=_adapter_hooks(
+            get_llm_for_mode=lambda **_kwargs: primary,
+            should_stream=lambda *_args, **_kwargs: True,
+            run_streaming_outcome=run_streaming_outcome,
+            invoke_outcome=invoke_outcome,
+            plan_recovery=plan_recovery,
+            record_scene_event=lambda _module, event, **kwargs: events.append(
+                (event, kwargs.get("fields") or {})
+            ),
+        ),
+    )
+    assert streaming_calls == [1]
+    assert invoke_calls == [1]
+    assert result.payload is None
+    assert result.degraded_actions == ["retry_without_streaming"]
+    assert len([1 for event, _f in events if event == "llm_route_degraded_retry"]) == 1
+    terminal = [fields for event, fields in events if event == "llm_turn_terminal"]
+    assert terminal and terminal[0]["routeAttempts"] == 2
+
+
+def test_adapter_degrades_before_declared_fallback_switch():
+    """(d) priority: same-profile degraded retry first, declared fallback only after."""
+    clear_route_fallbacks()
+    streaming_calls = []
+    invoke_calls = []
+    llm_requests = []
+    route_attempts = []
+    events = []
+    primary = _route_llm("primary", identity=("relay", "primary"), fallback="backup_qwen")
+    primary.stream = True
+    backup = _route_llm("backup_qwen", identity=("dashscope", "backup_qwen"))
+    backup.stream = True
+
+    def get_llm_for_mode(**kwargs):
+        llm_requests.append((kwargs.get("disable_tools"), kwargs.get("profile_id")))
+        return primary if kwargs.get("profile_id") is None else backup
+
+    def run_streaming_outcome(llm, *_args, **_kwargs):
+        streaming_calls.append(llm.profile_id)
+        if llm.profile_id == "primary":
+            raise _empty_content_error()
+        return TurnOutcome.final_answer(identity=_identity(), text="rescued")
+
+    def invoke_outcome(client, *_args, **_kwargs):
+        invoke_calls.append(client.profile_id)
+        raise LLMError(
+            "server_error",
+            "gateway down",
+            retryable=True,
+            details={"attempt": 5, "max_attempts": 5, "retry_budget_exhausted": True},
+        )
+
+    def build_invocation_context(**kwargs):
+        route_attempts.append(kwargs.get("route_attempt"))
+        metadata = {
+            "sessionId": "sess-degrade",
+            "turnId": "turn-1",
+            "invocationId": f"inv-{kwargs.get('route_attempt')}",
+        }
+        return SimpleNamespace(
+            metadata=metadata,
+            to_metadata=lambda client=None: dict(metadata),
+        )
+
+    result = invoke_agent_llm_turn(
+        messages=[AIMessage(content="hello")],
+        hooks=_adapter_hooks(
+            get_llm_for_mode=get_llm_for_mode,
+            should_stream=lambda *_args, **_kwargs: True,
+            run_streaming_outcome=run_streaming_outcome,
+            invoke_outcome=invoke_outcome,
+            build_invocation_context=build_invocation_context,
+            plan_recovery=plan_recovery,
+            record_scene_event=lambda _module, event, **kwargs: events.append(
+                (event, kwargs.get("fields") or {})
+            ),
+        ),
+    )
+    # attempt 1: primary streamed and hit empty content -> degraded retry;
+    # attempt 2: primary, non-streaming, hit a gateway failure -> fallback
+    # switch; attempt 3: backup, streaming again (degrade overrides expired).
+    assert streaming_calls == ["primary", "backup_qwen"]
+    assert invoke_calls == ["primary"]
+    assert llm_requests == [(False, None), (False, None), (False, "backup_qwen")]
+    assert route_attempts == [1, 2, 3]
+    assert result.payload is not None
+    assert result.payload[1].content == "rescued"
+    assert result.degraded_actions == ["retry_without_streaming"]
+    assert result.route_fallback == {"from": "primary", "to": "backup_qwen"}
+    event_names = [event for event, _fields in events]
+    assert event_names.index("llm_route_degraded_retry") < event_names.index(
+        "llm_route_fallback_switched"
+    )
+    switched = [fields for event, fields in events if event == "llm_route_fallback_switched"]
+    assert switched and switched[0]["reason"] == "server_error"
+    assert get_route_fallback("sess-degrade", "turn-1") == {
+        "from": "primary",
+        "to": "backup_qwen",
+    }
+    clear_route_fallbacks()
+
+
+def test_adapter_skips_noop_degrade_when_attempt_was_already_non_streaming():
+    """retry_without_streaming is a no-op on a non-streaming attempt: no extra request."""
+    invoke_calls = []
+    events = []
+    primary = _route_llm("primary", identity=("relay", "primary"))
+
+    def invoke_outcome(*_args, **_kwargs):
+        invoke_calls.append(1)
+        raise _empty_content_error()
+
+    result = invoke_agent_llm_turn(
+        messages=[AIMessage(content="hello")],
+        hooks=_adapter_hooks(
+            get_llm_for_mode=lambda **_kwargs: primary,
+            should_stream=lambda *_args, **_kwargs: False,
+            invoke_outcome=invoke_outcome,
+            plan_recovery=plan_recovery,
+            record_scene_event=lambda _module, event, **kwargs: events.append(
+                (event, kwargs.get("fields") or {})
+            ),
+        ),
+    )
+    assert invoke_calls == [1]
+    assert result.payload is None
+    assert result.degraded_actions == []
+    assert not any(event == "llm_route_degraded_retry" for event, _fields in events)
+    assert any(event == "llm_turn_terminal" for event, _fields in events)
+
+
+def test_adapter_degrades_tool_protocol_even_without_streaming():
+    """Dropping tools still changes the request shape on a non-streaming attempt."""
+    invoke_calls = []
+    llm_requests = []
+    primary = _route_llm("primary", identity=("relay", "primary"))
+
+    def get_llm_for_mode(**kwargs):
+        llm_requests.append(kwargs.get("disable_tools"))
+        return primary
+
+    def invoke_outcome(*_args, **_kwargs):
+        invoke_calls.append(len(invoke_calls) + 1)
+        if len(invoke_calls) == 1:
+            raise _tool_protocol_error()
+        return TurnOutcome.final_answer(identity=_identity(), text="plain answer")
+
+    result = invoke_agent_llm_turn(
+        messages=[AIMessage(content="hello")],
+        hooks=_adapter_hooks(
+            get_llm_for_mode=get_llm_for_mode,
+            should_stream=lambda *_args, **_kwargs: False,
+            invoke_outcome=invoke_outcome,
+            plan_recovery=plan_recovery,
+        ),
+    )
+    assert llm_requests == [False, True]
+    assert invoke_calls == [1, 2]
+    assert result.payload is not None
+    assert result.payload[1].content == "plain answer"
+    assert result.degraded_actions == ["disable_tools_and_retry_without_streaming"]
