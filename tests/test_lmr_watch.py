@@ -300,3 +300,53 @@ def test_watcher_restart_recovers_queue_from_ledger(git_repo):
     assert second.run_once() == "reviewed"
     ledger = lmr.Ledger(lmr.ledger_dir_for(repo))
     assert ledger.get(record["id"])["state"] == lmr.STATE_APPROVED
+
+
+def test_in_review_orphan_recovered_and_requeued(git_repo):
+    """回归：崩溃残留的 in_review 记录（无存活标记）必须被恢复，不静默卡死。"""
+    repo, git = git_repo
+    record = _register(repo, _commit(repo, git, "orphan\n"))
+    ledger = lmr.Ledger(lmr.ledger_dir_for(repo))
+    ledger.transition(record["id"], lmr.STATE_IN_REVIEW)
+
+    watcher = _make_watcher(repo)  # 无执行器
+    assert watcher.poll() == [record["id"]]
+    assert ledger.get(record["id"])["state"] == lmr.STATE_PENDING_REVIEW
+    assert any('"orphan-recovered"' in line for line in watcher.log.lines())
+    # 恢复后能被正常驱动到可见终态，不停在中间态
+    assert watcher.run_once() == "escalated"
+    assert ledger.get(record["id"])["state"] == lmr.STATE_ESCALATED
+
+
+def test_in_review_with_live_marker_not_recovered(git_repo):
+    repo, git = git_repo
+    record = _register(repo, _commit(repo, git, "live\n"))
+    ledger = lmr.Ledger(lmr.ledger_dir_for(repo))
+    ledger.transition(record["id"], lmr.STATE_IN_REVIEW)
+    watcher = _make_watcher(repo)
+    marker = lmr.locks_dir_for(repo) / f"reviewing-{record['id']}.lock"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(
+        json.dumps({"pid": os.getpid(), "ts": lmr.utcnow()}), encoding="utf-8"
+    )
+    try:
+        assert watcher.poll() == []
+        assert ledger.get(record["id"])["state"] == lmr.STATE_IN_REVIEW
+    finally:
+        marker.unlink(missing_ok=True)
+
+
+def test_review_marker_dead_pid_takeover(git_repo):
+    """崩溃 watcher 留下死 PID 标记：新 watcher 接管标记并正常驱动到终态。"""
+    repo, git = git_repo
+    record = _register(repo, _commit(repo, git, "deadpid\n"))
+    marker = lmr.locks_dir_for(repo) / f"reviewing-{record['id']}.lock"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(json.dumps({"pid": 999999999, "ts": lmr.utcnow()}), encoding="utf-8")
+
+    watcher = _make_watcher(repo, cmd=_verdict_cmd("approve"))
+    assert watcher.run_once() == "reviewed"
+
+    ledger = lmr.Ledger(lmr.ledger_dir_for(repo))
+    assert ledger.get(record["id"])["state"] == lmr.STATE_APPROVED
+    assert not marker.exists()

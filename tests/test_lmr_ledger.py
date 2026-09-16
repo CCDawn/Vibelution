@@ -241,3 +241,107 @@ def test_register_rejects_bad_input(git_repo):
         _register(ledger, "codex/bad", "zzzz-not-a-sha")
     with pytest.raises(lmr.LedgerError):
         _register(ledger, "codex/bad", "abcdef123456", grade="ultra")
+
+
+def test_transition_register_concurrent_amplified(git_repo):
+    """回归：register × transition/append/retry 并发放大，无失败无裸异常。
+
+    台账全部变更串行在同一把 per-branch 跨进程锁后（含锁内重读），
+    Windows 下不再出现 os.replace PermissionError 或 register 失败。
+    """
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    repo, git = git_repo
+    ledger = _ledger(repo)
+    shas = [_commit(repo, git, f"amp-{index}\n") for index in range(20)]
+    errors: list[Exception] = []
+    start = threading.Barrier(3)
+
+    def registrar() -> None:
+        start.wait()
+        for sha in shas:
+            try:
+                ledger.register(
+                    branch="codex/amp", sha=sha, base="main", title="amp", grade="show"
+                )
+            except Exception as exc:  # noqa: BLE001 - 回归测试收集一切异常
+                errors.append(exc)
+
+    def churner() -> None:
+        start.wait()
+        for _ in range(300):
+            actives = [
+                r
+                for r in ledger.list_records()
+                if r.get("branch") == "codex/amp"
+                and r.get("state") == lmr.STATE_PENDING_REVIEW
+            ]
+            if not actives:
+                continue
+            target = actives[0]
+            try:
+                ledger.transition(target["id"], lmr.STATE_IN_REVIEW)
+            except lmr.LedgerError as exc:
+                # 并发顶替后目标记录已 superseded：合法竞争结果，不算失败
+                if "invalid_transition" not in str(exc):
+                    errors.append(exc)
+                continue
+            try:
+                ledger.append_review(
+                    target["id"],
+                    {
+                        "verdict": "comment",
+                        "findings": [],
+                        "evidence_section": "amp",
+                        "sha": target["sha"],
+                    },
+                )
+                ledger.set_retry_count(target["id"], 1)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = [pool.submit(registrar), pool.submit(churner), pool.submit(churner)]
+        for future in futures:
+            future.result()
+
+    assert errors == []
+    records = ledger.list_records()
+    active = [
+        r
+        for r in records
+        if r.get("branch") == "codex/amp" and r.get("state") != lmr.STATE_SUPERSEDED
+    ]
+    assert len(active) == 1
+
+
+def test_atomic_write_wraps_oserror(git_repo, monkeypatch):
+    repo, _ = git_repo
+    target = lmr.ledger_dir_for(repo) / "boom.json"
+
+    def always_denied(src, dst, **_kwargs):
+        raise PermissionError(5, "denied")
+
+    monkeypatch.setattr(lmr.os, "replace", always_denied)
+    with pytest.raises(lmr.LedgerError, match="atomic_write_failed"):
+        lmr.atomic_write_json(target, {"a": 1})
+
+
+def test_read_transient_corruption_retries(git_repo, monkeypatch):
+    """回归：读者对并发 os.replace 的瞬态共享冲突有界重试后成功。"""
+    repo, git = git_repo
+    ledger = _ledger(repo)
+    record, _ = _register(ledger, "codex/retry", _commit(repo, git, "retry\n"))
+    real_read_text = Path.read_text
+    flaky = {"count": 0}
+
+    def flaky_read_text(self, *args, **kwargs):
+        if self.suffix == ".json" and flaky["count"] < 2:
+            flaky["count"] += 1
+            raise PermissionError(5, "transient sharing violation")
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", flaky_read_text)
+    assert ledger.get(record["id"])["id"] == record["id"]
+    assert flaky["count"] == 2

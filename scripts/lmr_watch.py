@@ -8,6 +8,8 @@
 - 单飞锁（§14.2.2）：``<common-dir>/lmr/locks/review.lock``（PID + 心跳，
   默认 30s 刷新）；后来者发现心跳 >90s（或 PID 已死）判死安全接管。
 - FIFO + aging：等待每超 15min 优先级 +1，防长审查连续压队饿死后续。
+- 孤儿恢复：扫描发现 in_review/review_timeout 且无存活 review 标记（进程崩溃
+  残留）→ 转回 pending_review 重入队，任何记录不会停在无人驱动的状态。
 - 单任务审查超时（默认 30min）→ review_timeout，重试 ≤2（指数退避），
   仍失败 → escalated；执行器未配置 → escalated（reason=reviewer_executor_unconfigured，
   §14.4 显式降级，不静默）。
@@ -488,6 +490,7 @@ class LmrWatcher:
     def poll(self) -> list[str]:
         """ledger -> 队列（按 created 排序；重复登记/已入队去重）。"""
         assert self.ledger is not None and self.queue is not None
+        self._recover_orphans()
         pending = [
             r for r in self.ledger.list_records() if r.get("state") == lmr.STATE_PENDING_REVIEW
         ]
@@ -537,31 +540,119 @@ class LmrWatcher:
                     self.log.emit("failed", error=f"loop:{exc}")
             time.sleep(self.config.poll_interval)
 
+    # -- 孤儿恢复与 review 标记 ------------------------------------------------
+
+    def _marker_path(self, lmr_id: str) -> Path:
+        assert self.ledger is not None
+        return self.ledger.locks_dir / f"reviewing-{lmr_id}.lock"
+
+    def _marker_alive(self, lmr_id: str) -> bool:
+        """标记存活 = 持有进程仍活着（处理可长达分钟级，不做心跳超时）。"""
+        try:
+            info = json.loads(self._marker_path(lmr_id).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        pid = int(info.get("pid") or 0) if isinstance(info, dict) else 0
+        return pid > 0 and pid_alive(pid)
+
+    def _acquire_review_marker(self, lmr_id: str) -> bool:
+        """写 per-task 标记；死进程残留标记安全接管（与单飞锁同语义）。"""
+        assert self.ledger is not None
+        self.ledger.locks_dir.mkdir(parents=True, exist_ok=True)
+        path = self._marker_path(lmr_id)
+        while True:
+            try:
+                fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                try:
+                    info = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    info = {}
+                pid = int(info.get("pid") or 0) if isinstance(info, dict) else 0
+                if pid > 0 and pid_alive(pid):
+                    return False
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    return False
+                continue
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+                json.dump({"pid": os.getpid(), "ts": lmr.utcnow()}, handle)
+            return True
+
+    def _release_review_marker(self, lmr_id: str) -> None:
+        with contextlib.suppress(OSError):
+            self._marker_path(lmr_id).unlink(missing_ok=True)
+
+    def _recover_orphans(self) -> list[str]:
+        """崩溃恢复：无存活标记的 in_review/review_timeout 记录重置入队（§14.1）。
+
+        任何记录不得停在无人驱动的中间态；并发下已被顶替/流转的记录交给下一轮。
+        """
+        assert self.ledger is not None
+        recovered: list[str] = []
+        for record in self.ledger.list_records():
+            state = record.get("state")
+            if state not in (lmr.STATE_IN_REVIEW, lmr.STATE_REVIEW_TIMEOUT):
+                continue
+            lmr_id = str(record["id"])
+            if self._marker_alive(lmr_id):
+                continue
+            try:
+                self.ledger.transition(lmr_id, lmr.STATE_PENDING_REVIEW)
+            except lmr.LedgerError:
+                continue
+            if self.log is not None:
+                self.log.emit("orphan-recovered", id=lmr_id, previous=state)
+            recovered.append(lmr_id)
+        return recovered
+
     # -- 单任务处理 ----------------------------------------------------------
 
     def _process(self, item: QueueItem) -> str:
         assert self.ledger is not None
+        marker_held = False
         try:
-            record = self.ledger.get(item.lmr_id)
-        except lmr.LedgerError:
+            try:
+                record = self.ledger.get(item.lmr_id)
+            except lmr.LedgerError:
+                if self.log is not None:
+                    self.log.emit("skipped", id=item.lmr_id, reason="record-missing")
+                return "missing"
+            if record.get("state") != lmr.STATE_PENDING_REVIEW:
+                if self.log is not None:
+                    self.log.emit(
+                        "skipped", id=item.lmr_id, reason=f"state:{record.get('state')}"
+                    )
+                return "skipped"
+            if not self._acquire_review_marker(item.lmr_id):
+                if self.log is not None:
+                    self.log.emit(
+                        "skipped", id=item.lmr_id, reason="review-in-progress-elsewhere"
+                    )
+                return "skipped"
+            marker_held = True
+            self.ledger.transition(item.lmr_id, lmr.STATE_IN_REVIEW)
             if self.log is not None:
-                self.log.emit("skipped", id=item.lmr_id, reason="record-missing")
-            return "missing"
-        if record.get("state") != lmr.STATE_PENDING_REVIEW:
-            if self.log is not None:
-                self.log.emit("skipped", id=item.lmr_id, reason=f"state:{record.get('state')}")
-            return "skipped"
-        self.ledger.transition(item.lmr_id, lmr.STATE_IN_REVIEW)
-        if self.log is not None:
-            self.log.emit("started", id=item.lmr_id, sha=record.get("sha"))
-        if self.executor is None:
-            # §14.4：reviewer 执行器未配置 → 显式 escalated，不静默。
-            self.ledger.transition(
-                item.lmr_id, lmr.STATE_ESCALATED, reason="reviewer_executor_unconfigured"
-            )
-            if self.log is not None:
-                self.log.emit("failed", id=item.lmr_id, reason="reviewer_executor_unconfigured")
-            return "escalated"
+                self.log.emit("started", id=item.lmr_id, sha=record.get("sha"))
+            if self.executor is None:
+                # §14.4：reviewer 执行器未配置 → 显式 escalated，不静默。
+                self.ledger.transition(
+                    item.lmr_id, lmr.STATE_ESCALATED, reason="reviewer_executor_unconfigured"
+                )
+                if self.log is not None:
+                    self.log.emit(
+                        "failed", id=item.lmr_id, reason="reviewer_executor_unconfigured"
+                    )
+                return "escalated"
+            return self._run_review(item.lmr_id, record)
+        finally:
+            if marker_held:
+                self._release_review_marker(item.lmr_id)
+
+    def _run_review(self, lmr_id: str, record: dict) -> str:
+        """执行审查（含超时重试升级）；调用方持有 review 标记。"""
+        assert self.executor is not None and self.ledger is not None
         worktree: Path | None = None
         snapshot: Path | None = None
         verdict_path: Path | None = None
@@ -578,7 +669,7 @@ class LmrWatcher:
                         verdict_path=verdict_path,
                     )
                 except ExecutorTimeout:
-                    outcome = self._handle_timeout(item.lmr_id, attempt, attempts)
+                    outcome = self._handle_timeout(lmr_id, attempt, attempts)
                     if outcome is not None:
                         return outcome
                     self._sleep_backoff(attempt)
@@ -586,15 +677,15 @@ class LmrWatcher:
                 except ExecutorError as exc:
                     if self.log is not None:
                         self.log.emit(
-                            "failed", id=item.lmr_id, attempt=attempt, error=str(exc)[:200]
+                            "failed", id=lmr_id, attempt=attempt, error=str(exc)[:200]
                         )
                     if attempt < attempts:
                         self._sleep_backoff(attempt)
                         continue
                     reason = f"review_executor_failed:{str(exc)[:120]}"
-                    self.ledger.transition(item.lmr_id, lmr.STATE_ESCALATED, reason=reason)
+                    self.ledger.transition(lmr_id, lmr.STATE_ESCALATED, reason=reason)
                     return "escalated"
-                self._apply_verdict(item.lmr_id, verdict)
+                self._apply_verdict(lmr_id, verdict)
                 return "reviewed"
             return "exhausted"  # pragma: no cover - 循环必经 return
         finally:

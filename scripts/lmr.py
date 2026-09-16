@@ -5,8 +5,12 @@
 
 - 存储：``<git-common-dir>/lmr/``（worktree 共享 common dir）；一条记录一个文件
   ``lmr-<id>.json``，id = ``<branchslug>-<sha8>``。
-- 写入语义（§14.2.1）：temp + ``os.replace`` 原子替换；同分支的读改写串行只靠
-  per-branch 短临界锁（带陈旧接管），无全局长锁，登记永不互相阻塞。
+- 写入语义（§14.2.1）：temp + ``os.replace`` 原子替换（OSError 有界重试并包装为
+  ``LedgerError``）；**全部**台账变更（register/transition/append_review/
+  set_retry_count/supersede）都串行在同一把 per-branch 跨进程 OS 文件锁之后
+  （复用 ``core/infrastructure/file_lock.py``：字节范围 OS 锁随进程死亡自动
+  释放，等待有界超时报错），锁内重读并校验状态再写；无全局长锁，登记永不
+  互相阻塞，Windows 下并发 os.replace 不再产生 PermissionError。
 - 状态机：pending_review → in_review →（rework → pending_review）* →
   approved → merging → merged / rejected / escalated / review_timeout。
   ``superseded`` 为登记器内部状态：同 branch 新 SHA 顶替旧记录并作废旧 reviews。
@@ -28,6 +32,13 @@ import time
 from collections.abc import Iterator, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
+
+# scripts -> core 复用（先例：no_console_git）；台账变更锁用跨进程 OS 文件锁。
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from core.infrastructure.file_lock import cross_process_file_lock
 
 LEDGER_DIRNAME = "lmr"
 LOCKS_DIRNAME = "locks"
@@ -68,8 +79,10 @@ TERMINAL_STATES = frozenset({STATE_MERGED, STATE_REJECTED, STATE_SUPERSEDED})
 # §13.1 状态机 + watcher 重试路径（review_timeout -> in_review）+ 升级恢复。
 TRANSITIONS: dict[str, frozenset[str]] = {
     STATE_PENDING_REVIEW: frozenset({STATE_IN_REVIEW, STATE_ESCALATED}),
+    # in_review → pending_review：watcher 孤儿恢复（崩溃后无人驱动的记录重入队）。
     STATE_IN_REVIEW: frozenset(
         {
+            STATE_PENDING_REVIEW,
             STATE_REWORK,
             STATE_APPROVED,
             STATE_REJECTED,
@@ -195,20 +208,46 @@ def make_record_id(branch: str, sha: str) -> str:
 
 
 def atomic_write_json(path: Path, payload: dict) -> None:
-    """temp + os.replace 原子写（§14.2.1），LF 行尾。"""
+    """temp + os.replace 原子写（§14.2.1），LF 行尾。
+
+    Windows 下与并发读者/写者竞争时 os.replace 可能瞬态 OSError
+    （PermissionError），有界重试收敛；最终失败包装为 LedgerError，
+    CLI 干净报错不裸栈。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     data = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp_name, path)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp_name)
-        raise
+    last_exc: OSError | None = None
+    for attempt in range(5):
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(path.parent), prefix=path.name + ".", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp_name, path)
+            return
+        except OSError as exc:
+            last_exc = exc
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_name)
+            time.sleep(0.01 * (attempt + 1))
+    raise LedgerError(f"atomic_write_failed:{path.name}:{last_exc}")
+
+
+def _read_payload(path: Path) -> object:
+    """读取记录 JSON；对并发 os.replace 的瞬态共享冲突做有界重试。"""
+    last_exc: Exception | None = None
+    for attempt in range(4):
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError as exc:
+            raise LedgerError(f"record_not_found:{path.stem}") from exc
+        except (OSError, ValueError) as exc:
+            last_exc = exc
+            time.sleep(0.005 * (attempt + 1))
+    raise LedgerError(f"record_unreadable:{path.name}:{last_exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -264,8 +303,8 @@ class Ledger:
             return records
         for path in sorted(self.directory.glob(RECORD_GLOB)):
             try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
+                payload = _read_payload(path)
+            except LedgerError:
                 continue
             if isinstance(payload, dict) and payload.get("id"):
                 records.append(payload)
@@ -273,56 +312,33 @@ class Ledger:
         return records
 
     def get(self, record_id: str) -> dict:
-        path = self._path_for(record_id)
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except FileNotFoundError as exc:
-            raise LedgerError(f"record_not_found:{record_id}") from exc
-        except (OSError, ValueError) as exc:
-            raise LedgerError(f"record_unreadable:{record_id}:{exc}") from exc
-        if not isinstance(payload, dict):
+        payload = _read_payload(self._path_for(record_id))
+        if not isinstance(payload, dict) or not payload.get("id"):
             raise LedgerError(f"record_unreadable:{record_id}")
         return payload
 
     def save(self, record: dict) -> None:
         atomic_write_json(self._path_for(str(record["id"])), record)
 
-    # -- per-branch 短临界锁 -------------------------------------------------
+    # -- per-branch 跨进程锁 ---------------------------------------------------
 
     @contextlib.contextmanager
-    def branch_lock(
-        self, branch: str, *, timeout: float = 15.0, stale_after: float = 10.0
-    ) -> Iterator[None]:
-        """同分支读改写串行的短临界锁；陈旧锁（mtime 超时）安全接管。"""
+    def branch_lock(self, branch: str, *, timeout: float = 15.0) -> Iterator[None]:
+        """同分支读改写串行：复用 core 跨进程 OS 文件锁（§14.2.1）。
+
+        字节范围 OS 锁随持有进程死亡自动释放，无陈旧接管需求；等待有界，
+        超时包装为 LedgerError（§14.1 一切等待有界、可见）。
+        """
+        branch = branch.strip()
+        if not branch:
+            raise LedgerError("invalid_branch:empty")
         self.locks_dir.mkdir(parents=True, exist_ok=True)
-        path = self.locks_dir / f"{BRANCH_LOCK_PREFIX}{branch_slug(branch)}.lock"
-        deadline = time.monotonic() + timeout
-        fd: int | None = None
-        while True:
-            try:
-                fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                break
-            except FileExistsError:
-                try:
-                    age = time.time() - path.stat().st_mtime
-                except FileNotFoundError:
-                    continue
-                if age > stale_after:
-                    with contextlib.suppress(OSError):
-                        path.unlink(missing_ok=True)
-                    continue
-                if time.monotonic() >= deadline:
-                    raise LedgerError(f"branch_lock_timeout:{branch}")
-                time.sleep(0.05)
+        sidecar = self.locks_dir / f"{BRANCH_LOCK_PREFIX}{branch_slug(branch)}.lock"
         try:
-            os.write(fd, json.dumps({"pid": os.getpid(), "ts": utcnow()}).encode("utf-8"))
-        finally:
-            os.close(fd)
-        try:
-            yield
-        finally:
-            with contextlib.suppress(OSError):
-                path.unlink(missing_ok=True)
+            with cross_process_file_lock(self.directory, lock_path=sidecar, timeout=timeout):
+                yield
+        except TimeoutError as exc:
+            raise LedgerError(f"branch_lock_timeout:{branch}") from exc
 
     # -- 生命周期操作 --------------------------------------------------------
 
@@ -388,38 +404,43 @@ class Ledger:
     def transition(
         self, record_id: str, to_state: str, *, reason: str | None = None
     ) -> dict:
-        record = self.get(record_id)
-        from_state = str(record.get("state"))
-        allowed = TRANSITIONS.get(from_state, frozenset())
-        if to_state not in allowed:
-            raise LedgerError(f"invalid_transition:{from_state}->{to_state}")
-        record["state"] = to_state
-        record["updated"] = utcnow()
-        if to_state == STATE_ESCALATED:
-            record["escalatedReason"] = reason or "unspecified"
-        elif from_state == STATE_ESCALATED:
-            record["escalatedReason"] = None
-        if to_state == STATE_MERGED:
-            record["publishState"] = PUBLISH_PENDING
-        if to_state == STATE_PENDING_REVIEW:
-            record["retryCount"] = 0
-        self.save(record)
-        return record
+        branch = str(self.get(record_id).get("branch") or "")
+        with self.branch_lock(branch):
+            record = self.get(record_id)  # 锁内重读，防并发顶替/流转竞态
+            from_state = str(record.get("state"))
+            allowed = TRANSITIONS.get(from_state, frozenset())
+            if to_state not in allowed:
+                raise LedgerError(f"invalid_transition:{from_state}->{to_state}")
+            record["state"] = to_state
+            record["updated"] = utcnow()
+            if to_state == STATE_ESCALATED:
+                record["escalatedReason"] = reason or "unspecified"
+            elif from_state == STATE_ESCALATED:
+                record["escalatedReason"] = None
+            if to_state == STATE_MERGED:
+                record["publishState"] = PUBLISH_PENDING
+            if to_state == STATE_PENDING_REVIEW:
+                record["retryCount"] = 0
+            self.save(record)
+            return record
 
     def append_review(self, record_id: str, review: dict) -> dict:
-        record = self.get(record_id)
-        reviews = record.setdefault("reviews", [])
-        reviews.append(review)
-        record["updated"] = utcnow()
-        self.save(record)
-        return record
+        branch = str(self.get(record_id).get("branch") or "")
+        with self.branch_lock(branch):
+            record = self.get(record_id)  # 锁内重读
+            record.setdefault("reviews", []).append(review)
+            record["updated"] = utcnow()
+            self.save(record)
+            return record
 
     def set_retry_count(self, record_id: str, count: int) -> dict:
-        record = self.get(record_id)
-        record["retryCount"] = int(count)
-        record["updated"] = utcnow()
-        self.save(record)
-        return record
+        branch = str(self.get(record_id).get("branch") or "")
+        with self.branch_lock(branch):
+            record = self.get(record_id)  # 锁内重读
+            record["retryCount"] = int(count)
+            record["updated"] = utcnow()
+            self.save(record)
+            return record
 
     # -- 内部 ---------------------------------------------------------------
 
