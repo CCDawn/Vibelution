@@ -4499,7 +4499,14 @@ def test_chat_stream_reuses_keyed_cancellable_client(monkeypatch):
     assert observed_clients == [created[0], created[0]]
 
 
-def test_stream_does_not_replay_after_partial_output(monkeypatch):
+def test_stream_retries_after_partial_output_and_marks_restart_boundary(monkeypatch):
+    """09-16 provider 审计 P1：partial emission 后的可重试传输中断不再终死。
+
+    旧行为是 emitted 后一律直接 raise（绕过重试环且不发 LLM_STATUS 事件），
+    外层重试时 capture 追加语义会把重生成内容拼在失败残段之后。新契约：进入
+    既有重试环，且每次新 attempt 开始前发 llm.stream.restart scene event 和
+    带 streamRestart 内部字段的 retrying 状态，消费端据此清空边界。
+    """
     config = make_config(
         **{
             "llm.providers.default.kind": "local",
@@ -4508,9 +4515,12 @@ def test_stream_does_not_replay_after_partial_output(monkeypatch):
             "llm.profiles.primary.provider_id": "default",
             "llm.profiles.primary.model": "qwen-32b-awq",
             "llm.profiles.primary.retry_policy.max_attempts": 5,
+            "llm.profiles.primary.retry_policy.backoff_base_seconds": 0.1,
         }
     )
     attempts = {"count": 0}
+    recorded = []
+    statuses = []
 
     def partial_then_failure():
         yield {"choices": [{"delta": {"content": "partial"}}]}
@@ -4521,13 +4531,81 @@ def test_stream_does_not_replay_after_partial_output(monkeypatch):
         return partial_then_failure()
 
     monkeypatch.setattr("core.llm.client.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        "core.llm.client._record_llm_scene_event",
+        lambda *args, **kwargs: recorded.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        "core.llm.client._publish_llm_status_event",
+        lambda status, **fields: statuses.append((status, fields)),
+    )
 
     client = LLMClient(config=config, backend=backend)
     with pytest.raises(LLMError) as raised:
         list(client.stream_events([{"role": "user", "content": "ping"}]))
 
     assert raised.value.category == "timeout"
+    assert attempts["count"] == 5
+    restart_events = [item for item in recorded if item[0][1] == "llm.stream.restart"]
+    assert [event[1]["fields"]["attempt"] for event in restart_events] == [2, 3, 4, 5]
+    assert all(event[1]["fields"]["previousAttempt"] == event[1]["fields"]["attempt"] - 1 for event in restart_events)
+    restart_statuses = [item for item in statuses if item[1].get("streamRestart")]
+    assert [item[1]["streamRestart"] for item in restart_statuses] == [2, 3, 4, 5]
+    assert all(item[0] == "retrying" for item in restart_statuses)
+    # 失败 attempt 的可重试失败补上了既有 helper 的 retrying/failed 状态事件
+    plain_retry_statuses = [
+        item for item in statuses if item[0] == "retrying" and not item[1].get("streamRestart")
+    ]
+    assert len(plain_retry_statuses) == 4
+    assert [item[1]["attempt"] for item in plain_retry_statuses] == [1, 2, 3, 4]
+    final_failed_statuses = [item for item in statuses if item[0] == "failed"]
+    assert [item[1]["attempt"] for item in final_failed_statuses] == [5]
+
+
+def test_stream_after_partial_output_still_fails_fast_on_permanent_error(monkeypatch):
+    """emitted 后的 permanent 类别照旧终死：不重试、不发 restart 标记。"""
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+            "llm.profiles.primary.retry_policy.max_attempts": 5,
+            "llm.profiles.primary.retry_policy.backoff_base_seconds": 0.1,
+        }
+    )
+    attempts = {"count": 0}
+    recorded = []
+    statuses = []
+
+    def partial_then_auth_failure():
+        yield {"choices": [{"delta": {"content": "partial"}}]}
+        raise Exception("Error code: 401 - invalid api key")
+
+    def backend(_payload):
+        attempts["count"] += 1
+        return partial_then_auth_failure()
+
+    monkeypatch.setattr("core.llm.client.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        "core.llm.client._record_llm_scene_event",
+        lambda *args, **kwargs: recorded.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        "core.llm.client._publish_llm_status_event",
+        lambda status, **fields: statuses.append((status, fields)),
+    )
+
+    client = LLMClient(config=config, backend=backend)
+    with pytest.raises(LLMError) as raised:
+        list(client.stream_events([{"role": "user", "content": "ping"}]))
+
     assert attempts["count"] == 1
+    assert not [item for item in recorded if item[0][1] == "llm.stream.restart"]
+    assert not [item for item in statuses if item[1].get("streamRestart")]
+    assert [item for item in statuses if item[0] == "failed"]
+    assert raised.value.retryable is False
 
 
 def test_invoke_does_not_retry_non_retryable_protocol_error(monkeypatch):

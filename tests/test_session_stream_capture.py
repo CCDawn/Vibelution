@@ -434,3 +434,92 @@ def test_successful_tool_records_progress_before_live_projection(monkeypatch):
             "callId": "progress-call", "sessionId": "progress-s", "turnId": "progress-t", "result": "found"})
     assert [item[0] for item in order][:2] == ["progress", "projection"]
     assert order[0][1] == {"session_id": "progress-s", "turn_id": "progress-t", "stage": "tool_result"}
+
+
+def _publish_stream_restart(session_id: str, turn_id: str, attempt: int = 2) -> None:
+    get_event_bus().publish(
+        EventNames.LLM_STATUS,
+        {
+            "status": "retrying",
+            "streamRestart": attempt,
+            "session_id": session_id,
+            "turn_id": turn_id,
+        },
+    )
+
+
+def test_stream_restart_marker_resets_partial_boundaries(monkeypatch) -> None:
+    """restart 标记清空进行中边界，重试 attempt 的内容不拼在失败残段之后。"""
+
+    capture = stream_capture.SessionTurnCapture(session_id="restart-s", turn_id="restart-t")
+    monkeypatch.setattr(session_service, "_set_session_live_output", lambda *a, **kw: None)
+    monkeypatch.setattr(session_service, "_set_session_llm_status_live_output", lambda *a, **kw: None)
+
+    with stream_capture._capture_session_ui_stream("restart-s", capture):
+        capture.note_thought("失败 attempt 的部分推理。")
+        capture.note_content("失败 attempt 的部分回答")
+        assert capture.thought and capture.content
+        assert [item for item in capture.feedback_events if item.get("kind") == "thought"]
+
+        _publish_stream_restart("restart-s", "restart-t")
+
+        assert capture.thought == ""
+        assert capture.content == ""
+        assert capture.uncommitted_content_segment() == ""
+        assert not [item for item in capture.feedback_events if item.get("kind") == "thought"]
+
+        # 重试 attempt 的重生成内容从干净边界写入，不与失败残段拼接
+        capture.note_content("重试 attempt 的完整回答")
+        assert capture.content == "重试 attempt 的完整回答"
+        capture.note_thought("重试 attempt 的推理。")
+        thoughts = [item for item in capture.feedback_events if item.get("kind") == "thought"]
+        assert len(thoughts) == 1
+        assert thoughts[0]["resultPreview"] == "重试 attempt 的推理。"
+
+
+def test_stream_restart_marker_drops_stale_running_tool_calls(monkeypatch) -> None:
+    """失败 attempt 发出的 running 工具条目被摘除；已完成工具与对应历史保留。"""
+
+    capture = stream_capture.SessionTurnCapture(session_id="restart-tool-s", turn_id="restart-tool-t")
+    monkeypatch.setattr(session_service, "_set_session_live_output", lambda *a, **kw: None)
+    monkeypatch.setattr(session_service, "_set_session_llm_status_live_output", lambda *a, **kw: None)
+
+    with stream_capture._capture_session_ui_stream("restart-tool-s", capture):
+        capture.note_tool_event("read_log", "done", call_id="call-done", result="ok")
+        capture.note_tool_event("web_search", "running", call_id="call-stale")
+
+        _publish_stream_restart("restart-tool-s", "restart-tool-t")
+
+        call_ids = [str(item.get("callId") or "") for item in capture.tool_calls]
+        assert call_ids == ["call-done"]
+        stale_feedback = [
+            item
+            for item in capture.feedback_events
+            if item.get("kind") == "tool" and str(item.get("callId") or "") == "call-stale"
+        ]
+        assert not stale_feedback
+        kept_feedback = [
+            item
+            for item in capture.feedback_events
+            if item.get("kind") == "tool" and str(item.get("callId") or "") == "call-done"
+        ]
+        assert kept_feedback
+
+
+def test_stream_restart_marker_failure_does_not_break_capture(monkeypatch) -> None:
+    """restart 处理抛错不得外溢：流继续，后续内容仍按既有语义写入 capture。"""
+
+    capture = stream_capture.SessionTurnCapture(session_id="restart-err-s", turn_id="restart-err-t")
+    monkeypatch.setattr(session_service, "_set_session_live_output", lambda *a, **kw: None)
+    monkeypatch.setattr(session_service, "_set_session_llm_status_live_output", lambda *a, **kw: None)
+
+    def broken_reset(*_args, **_kwargs):
+        raise RuntimeError("reset failed")
+
+    monkeypatch.setattr(stream_capture, "_reset_capture_stream_restart_boundary", broken_reset)
+
+    with stream_capture._capture_session_ui_stream("restart-err-s", capture):
+        capture.note_content("失败 attempt 的部分回答")
+        _publish_stream_restart("restart-err-s", "restart-err-t")
+        capture.note_content("失败 attempt 的部分回答（追加）")
+        assert capture.content == "失败 attempt 的部分回答（追加）"
