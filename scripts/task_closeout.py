@@ -31,7 +31,21 @@ STALE_RETRY_SCHEMA_VERSION = 1
 RECOVERABLE_VALIDATION_ACTIONS = {
     "reuse_research_missing": "record_reuse_research_evidence",
     "reuse_research_invalid": "fix_reuse_research_evidence",
+    "validation_node_modules_source_missing": "install_node_modules_in_main_checkout",
+    "validation_node_modules_link_failed": "create_node_modules_link_manually",
 }
+
+# Task-owned disposable paths removed before the worktree itself.  The
+# node_modules entries are junctions the closeout preflight creates (or that
+# older tasks created by hand); they must be unlinked first so the worktree
+# removal never descends into the shared main checkout's real install.
+TASK_OWNED_EPHEMERAL_PATHS = (
+    Path(".venv"),
+    Path("node_modules"),
+    Path("web") / "node_modules",
+    Path("desktop") / "electron" / "node_modules",
+    Path("挑战杯"),
+)
 
 CloseoutStatus = Literal[
     "merged_clean",
@@ -602,12 +616,7 @@ def cleanup_task_resources(context: CloseoutContext, *, agent_id: str) -> None:
 
     if task_exists:
         if worktree_registered:
-            for relative in (
-                Path(".venv"),
-                Path("node_modules"),
-                Path("web") / "node_modules",
-                Path("挑战杯"),
-            ):
+            for relative in TASK_OWNED_EPHEMERAL_PATHS:
                 _remove_link_or_junction(context.task_root / relative)
             if invocation_cwd_is_inside_task(context.task_root):
                 os.chdir(context.main_root)
@@ -846,11 +855,18 @@ def run_managed_closeout(
             resolved_manifest = closeout.manifest_path
             manifest_path_text = str(resolved_manifest or "")
             if closeout.outcome != "passed" or resolved_manifest is None:
+                # ``detail`` carries the one actionable sentence behind link
+                # preflight outcomes (which tree is missing, why creation
+                # failed); every other outcome leaves it empty, so the exact
+                # ``errors == [...]`` stale_main/head_moved checks below hold.
                 validation_result = ManagedCloseoutResult(
                     status="validation_failed",
                     exit_code=1,
                     manifest_path=manifest_path_text,
-                    errors=[str(closeout.outcome)],
+                    errors=[
+                        str(closeout.outcome),
+                        *([closeout.detail] if closeout.detail else []),
+                    ],
                     failures=command_failure_details(closeout.outcome, closeout.commands),
                 )
 

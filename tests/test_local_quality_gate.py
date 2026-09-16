@@ -2115,3 +2115,252 @@ def test_manifest_payload_redacts_and_bounds_failure_summary_before_persistence(
     assert all(secret not in persisted_summary for secret in fake_secrets)
     assert "\n" not in persisted_summary
     assert len(persisted_summary) <= 300
+
+
+def _command_spec(kind: str) -> gate.CommandSpec:
+    return gate.CommandSpec(kind=kind, argv=["node"], cwd=Path.cwd())
+
+
+def test_required_node_modules_projects_follows_selected_command_kinds() -> None:
+    specs = [
+        _command_spec("web-test"),
+        _command_spec("pytest"),
+        _command_spec("electron-vitest"),
+        _command_spec("web-typecheck"),
+        _command_spec("web-test"),
+    ]
+
+    assert gate.required_node_modules_projects(specs) == ["web", "desktop/electron"]
+    assert gate.required_node_modules_projects(
+        [_command_spec("pytest"), _command_spec("selector")]
+    ) == []
+
+
+def test_node_modules_preflight_creates_link_to_main_source(tmp_path: Path) -> None:
+    main_root = tmp_path / "main"
+    task_root = tmp_path / ".worktrees" / "task"
+    task_root.mkdir(parents=True)
+    marker = main_root / "web" / "node_modules" / "vitest" / "vitest.mjs"
+    marker.parent.mkdir(parents=True)
+    marker.write_text("export {};\n", encoding="utf-8")
+
+    preflight = gate.ensure_node_modules_links(task_root, main_root, ["web"])
+
+    link = task_root / "web" / "node_modules"
+    assert (link / "vitest" / "vitest.mjs").is_file()
+    assert gate.path_is_reparse_link(link)
+    assert preflight.missing_sources == []
+    assert preflight.failures == []
+    [recorded] = preflight.provenance
+    assert recorded["path"] == "web/node_modules"
+    assert recorded["action"] == "created"
+    assert recorded["source"] == str((main_root / "web" / "node_modules").resolve())
+    assert recorded["createdAt"]
+
+
+def test_node_modules_preflight_is_noop_for_existing_link(tmp_path: Path) -> None:
+    main_root = tmp_path / "main"
+    task_root = tmp_path / ".worktrees" / "task"
+    task_root.mkdir(parents=True)
+    marker = main_root / "web" / "node_modules" / "vitest" / "vitest.mjs"
+    marker.parent.mkdir(parents=True)
+    marker.write_text("export {};\n", encoding="utf-8")
+    gate.ensure_node_modules_links(task_root, main_root, ["web"])
+
+    preflight = gate.ensure_node_modules_links(task_root, main_root, ["web"])
+
+    assert preflight.missing_sources == []
+    assert preflight.failures == []
+    [recorded] = preflight.provenance
+    assert recorded["action"] == "already_present"
+    assert recorded["createdAt"] == ""
+    assert (task_root / "web" / "node_modules" / "vitest" / "vitest.mjs").is_file()
+
+
+def test_node_modules_preflight_leaves_real_install_alone(tmp_path: Path) -> None:
+    main_root = tmp_path / "main"
+    task_root = tmp_path / ".worktrees" / "task"
+    task_root.mkdir(parents=True)
+    (main_root / "web" / "node_modules").mkdir(parents=True)
+    local_marker = task_root / "web" / "node_modules" / "installed-here.txt"
+    local_marker.parent.mkdir(parents=True)
+    local_marker.write_text("real install\n", encoding="utf-8")
+
+    preflight = gate.ensure_node_modules_links(task_root, main_root, ["web"])
+
+    assert preflight.missing_sources == []
+    assert preflight.failures == []
+    [recorded] = preflight.provenance
+    assert recorded["action"] == "already_present"
+    assert local_marker.is_file()
+
+
+def test_node_modules_preflight_reports_missing_source(tmp_path: Path) -> None:
+    main_root = tmp_path / "main"
+    main_root.mkdir()
+    task_root = tmp_path / ".worktrees" / "task"
+    task_root.mkdir(parents=True)
+
+    preflight = gate.ensure_node_modules_links(
+        task_root,
+        main_root,
+        ["web", "desktop/electron"],
+    )
+
+    assert preflight.missing_sources == [
+        "web/node_modules",
+        "desktop/electron/node_modules",
+    ]
+    assert preflight.failures == []
+    assert not (task_root / "web" / "node_modules").exists()
+    assert [entry["action"] for entry in preflight.provenance] == [
+        "source_missing",
+        "source_missing",
+    ]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction lifecycle")
+def test_node_modules_preflight_replaces_dangling_junction(tmp_path: Path) -> None:
+    main_root = tmp_path / "main"
+    task_root = tmp_path / ".worktrees" / "task"
+    task_root.mkdir(parents=True)
+    vanished = tmp_path / "vanished-install"
+    vanished.mkdir()
+    link = task_root / "web" / "node_modules"
+    link.parent.mkdir(parents=True)
+    gate.create_directory_link(vanished, link)
+    vanished.rmdir()
+    assert not link.exists()
+    assert gate.path_is_reparse_link(link)
+    marker = main_root / "web" / "node_modules" / "vitest" / "vitest.mjs"
+    marker.parent.mkdir(parents=True)
+    marker.write_text("export {};\n", encoding="utf-8")
+
+    preflight = gate.ensure_node_modules_links(task_root, main_root, ["web"])
+
+    assert preflight.missing_sources == []
+    assert preflight.failures == []
+    [recorded] = preflight.provenance
+    assert recorded["action"] == "created"
+    assert (link / "vitest" / "vitest.mjs").is_file()
+
+
+def test_run_closeout_links_node_modules_and_records_provenance(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    git(git_repo, "branch", "-M", "main")
+    commit_file(git_repo, ".gitignore", "node_modules/\n", "ignore installs")
+    source_tree = git_repo / "web" / "node_modules" / "vitest"
+    source_tree.mkdir(parents=True)
+    (source_tree / "vitest.mjs").write_text("export {};\n", encoding="utf-8")
+    git(git_repo, "worktree", "add", ".worktrees/task", "-b", "codex/link-task")
+    task_root = git_repo / ".worktrees" / "task"
+    commit_file(task_root, "docs/note.md", "changed\n", "docs change")
+    monkeypatch.setattr(
+        gate,
+        "read_guard_status",
+        lambda root: active_claim("claim-test", ["docs/note.md"]),
+    )
+    monkeypatch.setattr(
+        gate,
+        "selected_validation",
+        lambda changed, *, root=None: {
+            "commands": [
+                "node web/node_modules/vitest/vitest.mjs run src/app.test.ts --root web"
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        gate,
+        "execute_command",
+        lambda spec, toolchain=None: gate.ProcessResult(
+            kind=spec.kind,
+            argv=list(spec.argv),
+            cwd=str(spec.cwd),
+            exit_code=0,
+            duration_ms=1,
+            status="passed",
+        ),
+    )
+
+    result = gate.run_closeout(task_root, "main", "claim-test")
+
+    assert result.outcome == "passed"
+    link = task_root / "web" / "node_modules"
+    assert (link / "vitest" / "vitest.mjs").is_file()
+    assert gate.path_is_reparse_link(link)
+    assert result.manifest_path is not None
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    [recorded] = manifest["nodeModulesLinks"]
+    assert recorded["path"] == "web/node_modules"
+    assert recorded["action"] == "created"
+    assert recorded["source"] == str((git_repo / "web" / "node_modules").resolve())
+    assert recorded["createdAt"]
+    # The link is a gitignored lifecycle object: it must not dirty the worktree
+    # the manifest just proved clean.
+    assert git(task_root, "status", "--porcelain").stdout.strip() == ""
+
+
+def test_run_closeout_reports_missing_node_modules_source_actionably(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    git(git_repo, "branch", "-M", "main")
+    commit_file(git_repo, ".gitignore", "node_modules/\n", "ignore installs")
+    git(git_repo, "worktree", "add", ".worktrees/task", "-b", "codex/link-task")
+    task_root = git_repo / ".worktrees" / "task"
+    commit_file(task_root, "docs/note.md", "changed\n", "docs change")
+    monkeypatch.setattr(
+        gate,
+        "read_guard_status",
+        lambda root: active_claim("claim-test", ["docs/note.md"]),
+    )
+    monkeypatch.setattr(
+        gate,
+        "selected_validation",
+        lambda changed, *, root=None: {
+            "commands": [
+                "node web/node_modules/vitest/vitest.mjs run src/app.test.ts --root web"
+            ]
+        },
+    )
+
+    result = gate.run_closeout(task_root, "main", "claim-test")
+
+    assert result.outcome == "validation_node_modules_source_missing"
+    assert result.exit_code == 1
+    assert "web/node_modules" in result.detail
+    assert "npm --prefix web ci" in result.detail
+    assert not (task_root / "web" / "node_modules").exists()
+    assert result.manifest_path is not None
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["outcome"] == "validation_node_modules_source_missing"
+    [recorded] = manifest["nodeModulesLinks"]
+    assert recorded["action"] == "source_missing"
+
+
+def test_run_closeout_skips_link_preflight_without_npm_commands(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    git(git_repo, "branch", "-M", "main")
+    git(git_repo, "switch", "-c", "codex/test-task")
+    commit_file(git_repo, "docs/note.md", "changed\n", "docs change")
+    monkeypatch.setattr(
+        gate,
+        "read_guard_status",
+        lambda root: active_claim("claim-test", ["docs/note.md"]),
+    )
+    monkeypatch.setattr(
+        gate,
+        "selected_validation",
+        lambda changed, *, root=None: {"commands": ["git diff --check"]},
+    )
+
+    result = gate.run_closeout(git_repo, "main", "claim-test")
+
+    assert result.outcome == "passed"
+    assert result.manifest_path is not None
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["nodeModulesLinks"] is None

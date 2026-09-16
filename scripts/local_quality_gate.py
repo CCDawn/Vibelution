@@ -47,6 +47,8 @@ Outcome = Literal[
     "validation_toolchain_mismatch",
     "validation_toolchain_requirements_missing",
     "validation_toolchain_unhealthy",
+    "validation_node_modules_source_missing",
+    "validation_node_modules_link_failed",
 ]
 
 FATAL_RUFF_RULES = "E9,F63,F7,F82"
@@ -162,6 +164,10 @@ class GateResult:
     exit_code: int
     commands: list[ProcessResult] = field(default_factory=list)
     manifest_path: Path | None = None
+    # One bounded, human-readable sentence for outcomes whose recovery needs
+    # more than the code alone (which node_modules path is missing, and why a
+    # link could not be created).  Empty for every other outcome.
+    detail: str = ""
 
 
 class UnsupportedValidationCommand(ValueError):
@@ -524,6 +530,171 @@ def bind_closeout_command(
     )
 
 
+# Selector command kinds execute inside an npm project tree whose node_modules
+# the validation matrix pins by path (``web/node_modules/vitest/vitest.mjs``,
+# ``desktop/electron/node_modules/vitest/vitest.mjs``, ``npm --prefix web``).
+# A task worktree gets a junction to the main checkout's node_modules for
+# exactly the trees a run's selected commands enter; nothing else is linked.
+NODE_MODULES_LINK_PROJECTS_BY_COMMAND_KIND = {
+    "bundle-check": ("web",),
+    "electron-test": ("desktop/electron",),
+    "electron-vitest": ("desktop/electron",),
+    "web-build": ("web",),
+    "web-test": ("web",),
+    "web-typecheck": ("web",),
+}
+
+
+@dataclass(frozen=True)
+class NodeModulesLinkPreflight:
+    """Outcome of the node_modules link preflight for one closeout run.
+
+    ``provenance`` records every tree considered, including trees whose source
+    was missing or whose link could not be created, so the manifest shows what
+    validation actually ran against.
+    """
+
+    provenance: list[dict[str, str]] = field(default_factory=list)
+    missing_sources: list[str] = field(default_factory=list)
+    failures: list[str] = field(default_factory=list)
+
+
+def required_node_modules_projects(specs: Sequence[CommandSpec]) -> list[str]:
+    """npm project trees the selected commands enter, in first-seen order."""
+
+    projects: list[str] = []
+    for spec in specs:
+        for project in NODE_MODULES_LINK_PROJECTS_BY_COMMAND_KIND.get(spec.kind, ()):
+            if project not in projects:
+                projects.append(project)
+    return projects
+
+
+def _bounded_error(error: BaseException | str) -> str:
+    return str(error).splitlines()[0].strip()[:200] or type(error).__name__
+
+
+def path_is_reparse_link(path: Path) -> bool:
+    """True for symlinks and Windows junctions, including dangling ones."""
+
+    if path.is_symlink():
+        return True
+    if os.name != "nt":
+        return False
+    is_junction = getattr(path, "is_junction", None)
+    if callable(is_junction) and is_junction():
+        return True
+    try:
+        stat_result = os.lstat(path)
+    except OSError:
+        return False
+    return bool(getattr(stat_result, "st_reparse_tag", 0))
+
+
+def create_directory_link(source: Path, link: Path) -> None:
+    """Create ``link`` pointing at ``source`` with no console and no elevation.
+
+    ``_winapi.CreateJunction`` is the same operation PowerShell's
+    ``New-Item -ItemType Junction`` performs, issued in-process: no shell, no
+    visible window, and junctions need no administrator rights.  Other platforms
+    get a plain directory symlink.
+    """
+
+    if os.name == "nt":
+        import _winapi
+
+        _winapi.CreateJunction(str(source), str(link))
+    else:
+        os.symlink(str(source), str(link), target_is_directory=True)
+
+
+def ensure_node_modules_links(
+    task_root: Path,
+    main_root: Path,
+    projects: Sequence[str],
+) -> NodeModulesLinkPreflight:
+    """Point the task worktree's npm trees at the main checkout's node_modules.
+
+    Task worktrees ship without node_modules, while closeout selectors run
+    Vitest and tsc straight from ``web/node_modules`` and
+    ``desktop/electron/node_modules``.  Before validation, each tree the
+    selected commands enter is linked to the main checkout's identical tree --
+    the same lifecycle object the closeout cleanup side already removes.
+    Existing links and real installs are left untouched; a dangling link from
+    an interrupted earlier run is replaced.
+    """
+
+    provenance: list[dict[str, str]] = []
+    missing_sources: list[str] = []
+    failures: list[str] = []
+    for project in projects:
+        relative = normalize_path(str(Path(project) / "node_modules"))
+        source = main_root / relative
+        link = task_root / relative
+        if link.exists():
+            provenance.append(
+                {
+                    "path": relative,
+                    "source": str(source),
+                    "action": "already_present",
+                    "createdAt": "",
+                }
+            )
+            continue
+        if path_is_reparse_link(link):
+            # Dangling link from an interrupted earlier run: ``os.rmdir``
+            # removes the junction reparse point itself without touching
+            # whatever it pointed at; ``unlink`` covers POSIX dangling symlinks.
+            try:
+                os.rmdir(link)
+            except OSError:
+                try:
+                    link.unlink()
+                except OSError as error:
+                    failures.append(f"{relative}: {_bounded_error(error)}")
+                    continue
+        if not source.is_dir():
+            missing_sources.append(relative)
+            provenance.append(
+                {
+                    "path": relative,
+                    "source": str(source),
+                    "action": "source_missing",
+                    "createdAt": "",
+                }
+            )
+            continue
+        try:
+            # ``CreateJunction`` only creates the final path component; make
+            # sure the project directory itself exists in this worktree.
+            link.parent.mkdir(parents=True, exist_ok=True)
+            create_directory_link(source.resolve(), link)
+        except OSError as error:
+            failures.append(f"{relative}: {_bounded_error(error)}")
+            provenance.append(
+                {
+                    "path": relative,
+                    "source": str(source),
+                    "action": "create_failed",
+                    "createdAt": "",
+                }
+            )
+            continue
+        provenance.append(
+            {
+                "path": relative,
+                "source": str(source.resolve()),
+                "action": "created",
+                "createdAt": utc_now(),
+            }
+        )
+    return NodeModulesLinkPreflight(
+        provenance=provenance,
+        missing_sources=missing_sources,
+        failures=failures,
+    )
+
+
 def current_branch(root: Path) -> str:
     branches = git_lines(root, "branch", "--show-current")
     return branches[0] if branches else ""
@@ -819,6 +990,7 @@ def manifest_payload(
     reuse_research: dict[str, object] | None = None,
     validation_toolchain: dict[str, object] | None = None,
     head_files_fingerprint_sha256: str = "",
+    node_modules_links: Sequence[dict[str, str]] | None = None,
 ) -> dict[str, object]:
     return {
         "schemaVersion": MANIFEST_SCHEMA_VERSION,
@@ -846,6 +1018,7 @@ def manifest_payload(
         "reuseResearchRequired": reuse_research_required,
         "reuseResearch": reuse_research,
         "validationToolchain": validation_toolchain,
+        "nodeModulesLinks": list(node_modules_links) if node_modules_links else None,
         "outcome": outcome,
         "generatedAt": utc_now(),
     }
@@ -975,6 +1148,7 @@ def run_closeout(root: Path, base: str, claim_id: str) -> GateResult:
     reuse_research_required = False
     reuse_research: dict[str, object] | None = None
     validation_toolchain: ValidationToolchain | None = None
+    node_modules_links: list[dict[str, str]] = []
     checks = {
         "worktreeClean": False,
         "claimValid": False,
@@ -984,7 +1158,7 @@ def run_closeout(root: Path, base: str, claim_id: str) -> GateResult:
         "validationToolchain": False,
     }
 
-    def finish(outcome: Outcome) -> GateResult:
+    def finish(outcome: Outcome, *, detail: str = "") -> GateResult:
         payload = manifest_payload(
             task_id=task_id,
             branch=branch,
@@ -1006,6 +1180,7 @@ def run_closeout(root: Path, base: str, claim_id: str) -> GateResult:
             head_files_fingerprint_sha256=(
                 head_files_fingerprint(root, files) if files else ""
             ),
+            node_modules_links=node_modules_links,
         )
         path = write_manifest(root, task_id, payload)
         return GateResult(
@@ -1013,6 +1188,7 @@ def run_closeout(root: Path, base: str, claim_id: str) -> GateResult:
             exit_code=0 if outcome == "passed" else 1,
             commands=commands,
             manifest_path=path,
+            detail=detail,
         )
 
     if not branch or branch == base or not branch.startswith("codex/"):
@@ -1063,6 +1239,36 @@ def run_closeout(root: Path, base: str, claim_id: str) -> GateResult:
     except UnsupportedValidationCommand:
         return finish("unsupported_validation_command")
     checks["commandsAllowlisted"] = True
+
+    # Task worktrees have no node_modules of their own; the selectors below run
+    # straight from the npm trees the matrix pins by path.  Link the trees the
+    # selected commands actually enter before running anything, so a missing
+    # link surfaces as one actionable outcome instead of a Vitest module error.
+    link_preflight = ensure_node_modules_links(
+        root,
+        main_root,
+        required_node_modules_projects(specs),
+    )
+    node_modules_links = link_preflight.provenance
+    if link_preflight.missing_sources:
+        return finish(
+            "validation_node_modules_source_missing",
+            detail=(
+                "no node_modules to link for the selected validation commands: "
+                f"{', '.join(link_preflight.missing_sources)}; install them in "
+                f"the {base} checkout ({main_root}), for example "
+                "`npm --prefix web ci`, then rerun closeout"
+            ),
+        )
+    if link_preflight.failures:
+        return finish(
+            "validation_node_modules_link_failed",
+            detail=(
+                f"{'; '.join(link_preflight.failures)}; create the junction "
+                "manually (PowerShell: New-Item -ItemType Junction) and rerun "
+                "closeout"
+            ),
+        )
 
     def main_is_fresh() -> bool:
         # Validation takes minutes while other sessions merge into main.  Only a
