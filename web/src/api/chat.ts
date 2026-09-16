@@ -24,7 +24,7 @@ import type {
 // and classifies aborts through the shared client helpers. Routes consume them
 // from this domain module — never from `api/client` directly
 // (fullStackApiBoundary.test.ts).
-export { fetchWithControl, isFetchAbortError } from "./client";
+export { fetchWithControl, isFetchAbortError, isFetchJsonHttpError } from "./client";
 
 export function isSessionNotFoundError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error ?? "");
