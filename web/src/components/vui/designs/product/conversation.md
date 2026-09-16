@@ -171,6 +171,29 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 - 不重新引入悬停聚类 + 右侧二级面板或两栏等高外壳。
 - 不替代 composer 工具栏或斜杠内联建议。
 
+## Composer 引用候选（@ type-ahead）
+
+### 功能
+composer 正文任意位置输入 `@` 时弹出的引用候选 listbox：按 `@` 到光标的片段过滤知识库、知识条目与会话文件候选，键盘 ↑/↓ 循环、Tab/Enter 选中、Escape 关闭；每行带「引用」徽标与斜杠指令区分。
+
+### 适用范围
+- **适用**：直连 Agent 会话 composer（与 plus menu 同一数据源 `composerReferenceOptions`）。
+- **不适用**：陪伴模式（无 plus menu，同步关闭）；编辑重发（不支持引用）；composition（IME）进行中一律不弹，`compositionend` 后重估。
+
+### 行为
+- 选中候选**不向正文插入任何引用语法**：与 plus menu picker 完全同路径——登记同一结构化 `SessionReferenceAttachment`（去重、单轮上限 6），仅把 `@片段` 从草稿移除，光标落在移除点（两侧粘连时补一个空格）。
+- 触发规则：`@` 起词才触发（句首、空白/标点/中文标点/汉字后）；ASCII 词后（`foo@bar` 邮箱形态）与含空白片段不触发；超长片段（>64 字符）不触发。
+- 复用斜杠建议的 listbox 视觉与键盘协议（`role="listbox"/option`、`aria-activedescendant`、循环导航、Escape 按 draft 值记忆关闭）。
+
+### 实现落点
+- 纯函数：`web/src/components/conversation/conversationReferenceTypeahead.ts`（token 检测/过滤/移除）
+- 集成：`web/src/components/conversation/ConversationView.tsx` composer 建议区
+- 数据源：`web/src/routes/chat/ChatCodingRouteWorkbench.tsx` `composerKnowledgeReferenceOptions`（与 `ChatComposerPlusMenu` 同源）
+
+### 反冗余
+- 不新增第二套引用登记通道；后端 `conversation_references.py` 只认结构化 payload，不引入文本内 @ 语法。
+- 不复制斜杠建议的样式/键盘实现；listbox 行直接复用 slash suggestion 样式类。
+
 ## ChatGroupManagementDialog
 
 ### 功能

@@ -26,6 +26,44 @@ from core.web.services.team_workflow.research_runtime import meeting_receipt_aut
 from tests.helpers.chat_turn_harness import wait_for_matching_event
 
 
+# Room ops sync chat_room_service's own (possibly monkeypatched) PROJECT_ROOT
+# into sibling service modules with plain assignments, which monkeypatch never
+# records. Under a parallel lane those writes leak into later tests running in
+# the same worker process, which is why the failure only shows up in the full
+# selector and vanishes when the file runs alone.
+_SERVICE_GLOBAL_ROOT_MODULES = (
+    chat_room_service,
+    session_service,
+    agent_directory_service,
+    agent_kernel_service,
+)
+# Captured at collection time, before any test can leak a tmp path into it.
+_KERNEL_SERVICE_DEFAULT_PROJECT_ROOT = agent_kernel_service.PROJECT_ROOT
+
+
+@pytest.fixture(autouse=True)
+def _restore_service_project_root_globals():
+    """Contain the cross-module PROJECT_ROOT writes room ops perform."""
+
+    # Inbound cure: agent_kernel_service is not covered by the conftest
+    # runtime-isolation stack, so an earlier lane neighbor can leave a stale
+    # tmp root here. The other modules are outer-fixture managed and must not
+    # be blanket-reset (an outer autouse fixture may already have pinned them).
+    if agent_kernel_service.PROJECT_ROOT != _KERNEL_SERVICE_DEFAULT_PROJECT_ROOT:
+        agent_kernel_service.PROJECT_ROOT = _KERNEL_SERVICE_DEFAULT_PROJECT_ROOT
+    saved = {
+        module: getattr(module, "PROJECT_ROOT", None)
+        for module in _SERVICE_GLOBAL_ROOT_MODULES
+    }
+    yield
+    # Runs before the outer fixtures' monkeypatch teardown, so restoring the
+    # snapshot keeps their recorded unwind values intact while rolling back
+    # every plain assignment this test's service calls performed.
+    for module, value in saved.items():
+        if value is not None:
+            module.PROJECT_ROOT = value
+
+
 def _valid_meeting_output(conclusion):
     return json.dumps({
         "schemaVersion": 1,
@@ -228,7 +266,12 @@ def _lightweight_agent_context(*args, **kwargs):
 
 def test_chat_room_store_retries_transient_permission_error(tmp_path, monkeypatch):
     store = chat_room_store.ChatRoomStore(root=tmp_path)
-    real_replace = chat_room_store.os.replace
+    # The retry seam moved with the shared atomic writer: the store now
+    # delegates to core.infrastructure.atomic_io, so the transient
+    # PermissionError is injected at that module's os.replace.
+    from core.infrastructure import atomic_io
+
+    real_replace = atomic_io.os.replace
     attempts: list[str] = []
 
     def flaky_replace(source, target):
@@ -237,7 +280,7 @@ def test_chat_room_store_retries_transient_permission_error(tmp_path, monkeypatc
             raise PermissionError("locked")
         return real_replace(source, target)
 
-    monkeypatch.setattr(chat_room_store.os, "replace", flaky_replace)
+    monkeypatch.setattr(atomic_io.os, "replace", flaky_replace)
 
     store.save({"rooms": [{"roomId": "room-a"}]})
 

@@ -22,6 +22,7 @@ from core.external_agent.contracts import (
     SERVER_VERSION,
     TASK_TERMINAL_STATUSES,
 )
+from core.infrastructure.atomic_io import atomic_write_json
 from vibelution_storage import resolve_project_runtime_home
 
 CONTROL_TOKEN_HEADER = "X-Vibelution-Control-Token"
@@ -50,22 +51,15 @@ def _default_state_path(project_root: Path) -> Path:
 
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    # The shared helper locks the target across processes and bounds
+    # PermissionError retries; the previous bare os.replace could fail on a
+    # concurrent reader/writer of the managed-agent state file. Strict replace
+    # keeps the original all-or-nothing contract (no in-place fallback).
+    atomic_write_json(path, payload, sort_keys=True, indent=2, strict_replace=True)
     try:
-        with temporary.open("w", encoding="utf-8", newline="\n") as handle:
-            json.dump(payload, handle, ensure_ascii=False, sort_keys=True, indent=2)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        try:
-            os.chmod(temporary, 0o600)
-        except OSError:
-            pass
-        os.replace(temporary, path)
-    finally:
-        if temporary.exists():
-            temporary.unlink()
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
 
 
 def _read_json(path: Path) -> dict[str, Any]:

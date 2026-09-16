@@ -5,8 +5,10 @@ import chatComposerPlusMenuSource from "../../routes/chat/ChatComposerPlusMenu.t
 import chatComposerSubmitModelSource from "../../routes/chat/chatComposerSubmitModel.ts?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import {
+  MAX_COMPOSER_STARTERS,
   resolveComposerGhost,
   resolveComposerPlaceholder,
+  resolveComposerStarters,
   shouldAcceptComposerGhost,
   shouldLoadComposerExample,
   shouldRequestComposerPromptSuggestion,
@@ -16,7 +18,7 @@ import { promptSuggestionToggleStorageKey } from "../../routes/chat/chatComposer
 describe("composerPromptSuggestionModel", () => {
   it("requests exactly once per turn for the idle empty composer", () => {
     const base = {
-      enabled: true,
+      suggestionEnabled: true,
       sessionId: "session-1",
       busy: false,
       draft: "",
@@ -25,7 +27,7 @@ describe("composerPromptSuggestionModel", () => {
     };
     expect(shouldRequestComposerPromptSuggestion(base)).toBe(true);
     expect(shouldRequestComposerPromptSuggestion({ ...base, issued: true })).toBe(false);
-    expect(shouldRequestComposerPromptSuggestion({ ...base, enabled: false })).toBe(false);
+    expect(shouldRequestComposerPromptSuggestion({ ...base, suggestionEnabled: false })).toBe(false);
     expect(shouldRequestComposerPromptSuggestion({ ...base, busy: true })).toBe(false);
     expect(shouldRequestComposerPromptSuggestion({ ...base, draft: "继续" })).toBe(false);
     expect(shouldRequestComposerPromptSuggestion({ ...base, hasConversation: false })).toBe(false);
@@ -36,6 +38,32 @@ describe("composerPromptSuggestionModel", () => {
     expect(shouldLoadComposerExample({ enabled: true, sessionId: "s", hasConversation: false })).toBe(true);
     expect(shouldLoadComposerExample({ enabled: true, sessionId: "s", hasConversation: true })).toBe(false);
     expect(shouldLoadComposerExample({ enabled: false, sessionId: "s", hasConversation: false })).toBe(false);
+  });
+
+  it("normalizes backend starters and promotes the legacy single command", () => {
+    expect(resolveComposerStarters({
+      starters: [
+        { heading: "修复问题", command: " 修复 lint 报错 " },
+        { heading: "", command: "" },
+        { heading: "修复问题", command: "修复 lint 报错" },
+        { heading: "理解代码", command: "agent.py 是怎么工作的？" },
+      ],
+    })).toEqual([
+      { heading: "修复问题", command: "修复 lint 报错" },
+      { heading: "理解代码", command: "agent.py 是怎么工作的？" },
+    ]);
+    expect(resolveComposerStarters({ command: "修复 lint 报错", starters: [] })).toEqual([
+      { heading: "", command: "修复 lint 报错" },
+    ]);
+    expect(resolveComposerStarters({ command: null, starters: null })).toEqual([]);
+    expect(resolveComposerStarters({
+      starters: [
+        { heading: "一", command: "一" },
+        { heading: "二", command: "二" },
+        { heading: "三", command: "三" },
+        { heading: "四", command: "四" },
+      ],
+    })).toHaveLength(MAX_COMPOSER_STARTERS);
   });
 
   it("hides the ghost while busy or after typing", () => {

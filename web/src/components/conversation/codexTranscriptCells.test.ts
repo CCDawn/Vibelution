@@ -669,7 +669,7 @@ describe("codexTranscriptCells", () => {
     ]);
   });
 
-  it("keeps model retry status cells in the process transcript while filtering setup noise", () => {
+  it("keeps model retry status cells out of the process transcript while filtering setup noise", () => {
     const cells = buildCodexTranscriptCells(message({ id: "legacy-internal-status" }), {
       operations: [
         {
@@ -691,13 +691,9 @@ describe("codexTranscriptCells", () => {
       ],
     });
 
-    expect(cells).toHaveLength(1);
-    expect(cells[0]).toMatchObject({
-      kind: "status",
-      title: "retrying",
-      status: "completed",
-      summary: "第 1/5 次；原因：server_error。",
-    });
+    // Codex shows retries only as a live status heartbeat; the settled
+    // transcript filters both the setup noise and the retry row.
+    expect(cells).toHaveLength(0);
   });
 
   it("attaches the Codex-like lifecycle model to terminal tool cells", () => {

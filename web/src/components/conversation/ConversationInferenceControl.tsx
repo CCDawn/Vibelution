@@ -16,6 +16,11 @@ type ConversationInferenceControlProps = {
   currentReasoningEffort: string;
   disabled: boolean;
   pending: boolean;
+  /**
+   * Change-to-open channel for the /模型 builtin: a fresh non-empty value pops
+   * the menu once (empty initial value never auto-opens).
+   */
+  openSignal?: string;
   onReasoningEffortChange: (reasoningEffort: string) => void;
 };
 
@@ -41,6 +46,7 @@ export function ConversationInferenceControl({
   currentReasoningEffort,
   disabled,
   pending,
+  openSignal = "",
   onReasoningEffortChange,
 }: ConversationInferenceControlProps) {
   const [open, setOpen] = useState(false);
@@ -59,6 +65,13 @@ export function ConversationInferenceControl({
       setOpen(false);
     }
   }, [disabled, pending]);
+
+  // /模型 builtin: a new openSignal value pops the menu when usable.
+  useEffect(() => {
+    if (openSignal && !disabled && !pending) {
+      setOpen(true);
+    }
+  }, [disabled, openSignal, pending]);
 
   if (!model) return null;
   if (!model.reasoningEffortValues?.length) {

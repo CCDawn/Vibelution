@@ -900,6 +900,7 @@ def query_sessions(
     catalog_status = "disabled"
     catalog_error_type = ""
     from . import directory_bridge
+    from . import read_health
 
     directory_payload = None
     directory_error_type = ""
@@ -919,7 +920,7 @@ def query_sessions(
         # with no signal; the warning and event fields below keep it visible.
         directory_payload = None
         directory_error_type = type(exc).__name__
-        directory_bridge.note_session_read_degraded(
+        read_health.note_session_read_degraded(
             source="session query",
             error_type=directory_error_type,
         )
