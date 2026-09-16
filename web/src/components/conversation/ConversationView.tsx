@@ -30,7 +30,7 @@ import {
 } from "lucide-react";
 import React, { DragEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import type { ConversationMessage, SkillLibraryItem } from "../../api/types";
+import type { ConversationMessage } from "../../api/types";
 import type {
   AgentMessage,
   AgentMentalPart,
@@ -79,7 +79,6 @@ import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
 import {
   MAX_COMPOSER_STARTERS,
   resolveComposerPlaceholder,
-  resolveComposerStarters,
   shouldAcceptComposerGhost,
   type ComposerStarter,
 } from "./composerPromptSuggestionModel";
