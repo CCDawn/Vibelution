@@ -29,13 +29,13 @@ _DIRECTORY_UNAVAILABLE_LOG_INTERVAL_SECONDS = 60.0
 _directory_unavailable_log_monotonic = 0.0
 
 
-def _note_directory_store_unavailable(*, source: str) -> None:
-    """Surface a degraded directory read path instead of failing silently.
+def note_session_read_degraded(*, source: str, error_type: str = "") -> None:
+    """Throttled visibility for a degraded session read.
 
-    A missing store used to be invisible: list/query simply fell back to the
-    discarded JSON projection and rebuilt for tens of seconds. Callers still
-    get their fallback, but operators get a throttled warning naming the
-    runtime status and error type.
+    A missing store or a raising read used to be invisible: list/query simply
+    fell back to the discarded JSON projection and rebuilt for tens of seconds.
+    Callers still get their fallback, but operators get a throttled warning
+    naming the runtime status and error type.
     """
 
     global _directory_unavailable_log_monotonic
@@ -45,11 +45,16 @@ def _note_directory_store_unavailable(*, source: str) -> None:
     _directory_unavailable_log_monotonic = now
     runtime_status = directory_runtime.current_directory_runtime_status()
     logger.warning(
-        "Session directory store unavailable (status=%s error=%s); %s reads degrade to fallback.",
+        "Session read degraded (status=%s error=%s detail=%s); %s reads fall back.",
         str(getattr(runtime_status, "status", "") or "idle"),
         str(getattr(runtime_status, "error_type", "") or "none"),
+        str(error_type or "none"),
         source,
     )
+
+
+def _note_directory_store_unavailable(*, source: str) -> None:
+    note_session_read_degraded(source=source)
 
 
 def _service():
@@ -582,7 +587,12 @@ def _session_runtime_status_snapshot() -> dict[str, str] | None:
     s = _service()
     try:
         active_items = s.list_active_session_work_runs(reconcile=True)
-    except Exception:
+    except Exception as exc:
+        # Losing this read silently renders running sessions as idle.
+        note_session_read_degraded(
+            source="session runtime status",
+            error_type=type(exc).__name__,
+        )
         return None
     statuses: dict[str, str] = {}
     for item in active_items:
@@ -631,7 +641,13 @@ def _merge_agent_directory_stub_summaries(
             seed,
             agent_by_id=lookup,
         )
-    except Exception:
+    except Exception as exc:
+        # Dropping these stubs silently removes Agent direct sessions from the
+        # index, so keep the failure visible even though the list still renders.
+        note_session_read_degraded(
+            source="agent direct session stubs",
+            error_type=type(exc).__name__,
+        )
         return summaries
     extra: list[dict[str, Any]] = []
     for conversation in conversations:

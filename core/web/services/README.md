@@ -236,6 +236,7 @@
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
 | `pet_service.py` | Pet space summary helpers. | — | `pet.py` | `test_pet_web_actions.py` |
+| `pet_activity_service.py` | Read-only desktop-pet projection over native Session authorities. | — | `pet.py` | `test_pet_activity_service.py`, `test_pet_web_actions.py` |
 
 ## Computer Use
 

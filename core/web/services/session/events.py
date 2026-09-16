@@ -298,6 +298,9 @@ def _record_session_list_query_event(
     has_kind_filter: bool,
     has_state_filter: bool,
     sort: str,
+    source: str = "",
+    directory_error_type: str = "",
+    catalog_status: str = "",
 ) -> None:
     s = _service()
     try:
@@ -320,6 +323,9 @@ def _record_session_list_query_event(
                 "hasKindFilter": bool(has_kind_filter),
                 "hasStateFilter": bool(has_state_filter),
                 "sort": str(sort or "").strip(),
+                "source": str(source or "")[:64],
+                "directoryErrorType": str(directory_error_type or "")[:64],
+                "catalogStatus": str(catalog_status or "")[:64],
                 "readOnly": True,
                 "hydrateAgent": False,
             },

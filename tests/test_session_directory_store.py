@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 from pathlib import Path
@@ -736,3 +737,86 @@ def test_list_sessions_serves_stale_snapshot_without_rebuilding(
         inflight_builds = list_cache._SESSION_LIST_CACHE.get("inflight_builds")
         if isinstance(inflight_builds, dict):
             inflight_builds.clear()
+
+
+def test_list_build_reports_directory_read_failure_before_legacy_fallback(
+    isolated_directory_runtime: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    """A raising directory read must be visible, not a silent heavy rebuild."""
+    from core.web.services.session import projection
+
+    def fail_list(**_kwargs):
+        raise RuntimeError("directory page read failed")
+
+    monkeypatch.setattr(directory_bridge, "list_session_summaries", fail_list)
+    monkeypatch.setattr(session_service, "_load_conversations", lambda *_args, **_kwargs: ({}, []))
+    monkeypatch.setattr(
+        session_service,
+        "_append_agent_directory_conversations",
+        lambda conversations, **_kwargs: list(conversations),
+    )
+    monkeypatch.setattr(directory_bridge, "_directory_unavailable_log_monotonic", 0.0)
+
+    with caplog.at_level(logging.WARNING):
+        result = projection._build_session_list_data(
+            session_service,
+            include_hidden_internal=False,
+        )
+
+    assert result.source == "legacy_projection"
+    assert result.sessions == []
+    assert "Session read degraded" in caplog.text
+    assert "RuntimeError" in caplog.text
+
+
+def test_runtime_status_snapshot_reports_work_run_read_failure(
+    isolated_directory_runtime: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    """Rows must not silently render as idle when the work-run read fails."""
+
+    def fail_active(**_kwargs):
+        raise RuntimeError("work run read failed")
+
+    monkeypatch.setattr(session_service, "list_active_session_work_runs", fail_active)
+    monkeypatch.setattr(directory_bridge, "_directory_unavailable_log_monotonic", 0.0)
+
+    with caplog.at_level(logging.WARNING):
+        assert directory_bridge._session_runtime_status_snapshot() is None
+
+    assert "session runtime status" in caplog.text
+    assert "RuntimeError" in caplog.text
+
+
+def test_agent_directory_stub_merge_reports_failure_and_keeps_summaries(
+    isolated_directory_runtime: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    """Dropped Agent direct-session stubs must leave a visible signal."""
+    seeded = [{"id": "session-visible"}]
+
+    def fail_append(*_args, **_kwargs):
+        raise RuntimeError("stub merge failed")
+
+    monkeypatch.setattr(session_service, "_append_agent_directory_conversations", fail_append)
+    monkeypatch.setattr(directory_bridge, "_directory_unavailable_log_monotonic", 0.0)
+
+    with caplog.at_level(logging.WARNING):
+        merged = directory_bridge._merge_agent_directory_stub_summaries(
+            seeded,
+            agent_by_id={
+                "agent-alpha": {
+                    "agentId": "agent-alpha",
+                    "directSessionId": "legacy-session",
+                }
+            },
+            include_hidden=False,
+        )
+
+    assert merged == seeded
+    assert "agent direct session stubs" in caplog.text
+    assert "RuntimeError" in caplog.text

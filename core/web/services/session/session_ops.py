@@ -974,7 +974,9 @@ def _stale_running_live_owner_reason(session_id: str) -> str:
     try:
         queued_pairs = s._SESSION_TURN_SCHEDULER.queued_session_turn_ids()
     except Exception:
-        queued_pairs = set()
+        # An unreadable queue is not evidence of "nothing queued": reporting the
+        # reason keeps repair hands-off (fail-safe) and visible to the operator.
+        return "scheduler_queue_unreadable"
     for queued_session_id, _queued_turn_id in queued_pairs or ():
         if str(queued_session_id or "").strip() == session_id:
             return "scheduler_queued_turn"
@@ -982,7 +984,9 @@ def _stale_running_live_owner_reason(session_id: str) -> str:
     try:
         active = s._WORK_RUN_STORE.load_active_snapshot("chat_turn")
     except Exception:
-        active = None
+        # Same rationale as the queue read: without cross-process evidence the
+        # repair must not assume the turn is dead.
+        return "work_run_snapshot_unreadable"
     if not isinstance(active, dict):
         return ""
     active_session_id = str(active.get("sessionId") or "").strip()

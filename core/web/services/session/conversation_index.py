@@ -902,6 +902,7 @@ def query_sessions(
     from . import directory_bridge
 
     directory_payload = None
+    directory_error_type = ""
     try:
         directory_payload = directory_bridge.query_session_summaries(
             limit=normalized_limit,
@@ -913,8 +914,15 @@ def query_sessions(
             sort=normalized_sort,
             agent_by_id=agent_by_id,
         )
-    except Exception:
+    except Exception as exc:
+        # A raising directory read used to vanish into the canonical fallback
+        # with no signal; the warning and event fields below keep it visible.
         directory_payload = None
+        directory_error_type = type(exc).__name__
+        directory_bridge.note_session_read_degraded(
+            source="session query",
+            error_type=directory_error_type,
+        )
     if directory_payload is not None:
         page_items = list(directory_payload.get("items") or [])
         total = max(0, int(directory_payload.get("totalEstimate") or 0))
@@ -936,6 +944,8 @@ def query_sessions(
             has_kind_filter=bool(normalized_session_kind),
             has_state_filter=bool(normalized_state),
             sort=normalized_sort,
+            source="directory_store",
+            directory_error_type=directory_error_type,
         )
         return payload
     if catalog_mode == "read_preferred" and not agent_direct_hidden_from_index:
@@ -979,6 +989,9 @@ def query_sessions(
                 has_kind_filter=bool(normalized_session_kind),
                 has_state_filter=bool(normalized_state),
                 sort=normalized_sort,
+                source="catalog",
+                directory_error_type=directory_error_type,
+                catalog_status=catalog_status or "healthy",
             )
             s._record_session_catalog_read_event(
                 source="catalog",
@@ -1050,6 +1063,9 @@ def query_sessions(
         has_kind_filter=bool(normalized_session_kind),
         has_state_filter=bool(normalized_state),
         sort=normalized_sort,
+        source="canonical_projection",
+        directory_error_type=directory_error_type,
+        catalog_status=catalog_status,
     )
     payload = {
         "items": page_items,

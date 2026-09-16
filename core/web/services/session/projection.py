@@ -248,8 +248,14 @@ def _build_session_list_data(
         directory_sessions = directory_bridge.list_session_summaries(
             include_hidden=include_hidden_internal,
         )
-    except Exception:
+    except Exception as exc:
+        # A raising directory read must not disappear into the legacy rebuild:
+        # that silent fallback is the slow path this module exists to avoid.
         directory_sessions = None
+        directory_bridge.note_session_read_degraded(
+            source="session list build",
+            error_type=type(exc).__name__,
+        )
     if directory_sessions is not None:
         return _SessionListBuildResult(
             sessions=directory_sessions,
