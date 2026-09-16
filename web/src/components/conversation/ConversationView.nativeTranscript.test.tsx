@@ -491,6 +491,68 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).toContain("思考");
   });
 
+  it("keeps short progress commentary static and only toggles progress beyond the clamp", () => {
+    const shortText = "先检查配置，再运行回归测试。";
+    const longText = "先检查本地配置与缓存，再运行定向回归测试，确认没有新的回归，并补齐证据。".repeat(7);
+    const html = renderConversation([
+      {
+        id: "assistant-progress-toggle",
+        role: "assistant",
+        timestamp: "2026-09-11T06:10:00Z",
+        turnId: "turn-progress-toggle",
+        status: "completed",
+        turnItems: [
+          {
+            id: "progress-short:0",
+            itemId: "progress-short",
+            version: 3,
+            sessionId: "session-1",
+            turnId: "turn-progress-toggle",
+            type: "agent_message",
+            phase: "commentary",
+            status: "completed",
+            revision: 0,
+            sequence: 1,
+            terminal: true,
+            text: shortText,
+          },
+          {
+            id: "progress-long:0",
+            itemId: "progress-long",
+            version: 3,
+            sessionId: "session-1",
+            turnId: "turn-progress-toggle",
+            type: "agent_message",
+            phase: "commentary",
+            status: "completed",
+            revision: 0,
+            sequence: 2,
+            terminal: true,
+            text: longText,
+          },
+        ],
+      },
+    ]);
+
+    const shortTextIndex = html.indexOf(shortText);
+    const shortSection = html.slice(
+      html.lastIndexOf("<section", shortTextIndex),
+      html.indexOf("</section>", shortTextIndex),
+    );
+    expect(shortSection).toContain('data-codex-progress-expandable="false"');
+    expect(shortSection).toContain('data-codex-progress-static="true"');
+    expect(shortSection).not.toContain("aria-expanded");
+
+    const longTextIndex = html.indexOf(longText);
+    const longSection = html.slice(
+      html.lastIndexOf("<section", longTextIndex),
+      html.indexOf("</section>", longTextIndex),
+    );
+    expect(longSection).toContain('data-codex-progress-expandable="true"');
+    expect(longSection).toContain("aria-expanded");
+    expect(longSection).not.toContain('data-codex-progress-static="true"');
+  });
+
   it("renders context compression outcomes in their canonical event order", () => {
     const marker = (
       turnId: string,

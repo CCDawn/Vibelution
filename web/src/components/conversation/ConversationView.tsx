@@ -420,6 +420,22 @@ function ProgressScrollBody({
   );
 }
 
+const PROGRESS_CLAMP_LINES = 3;
+const PROGRESS_CLAMP_CHARACTERS_PER_LINE = 72;
+
+/**
+ * Codex parity: only offer an expand toggle when expanding would reveal
+ * something the 3-line clamp hides; a short update stays static text.
+ */
+function progressTextExceedsClamp(text: string) {
+  const segments = String(text ?? "").split("\n");
+  let lines = 0;
+  for (const segment of segments) {
+    lines += Math.max(1, Math.ceil(segment.length / PROGRESS_CLAMP_CHARACTERS_PER_LINE));
+  }
+  return lines > PROGRESS_CLAMP_LINES;
+}
+
 const ConversationTurnRow = React.memo(function ConversationTurnRow({
   renderTurn,
 }: ConversationTurnRowProps) {
@@ -2201,6 +2217,7 @@ export function ConversationView({
             activity={node.activity}
             language={lang === "en" ? "en" : "zh"}
             renderToolDetails={renderCodexTranscriptToolDetailContent}
+            toolDetailIsEmpty={codexTranscriptToolDetailIsEmpty}
             approvalSlot={attachApproval && toolApproval ? toolApproval.content : null}
           />
         );
@@ -2588,7 +2605,22 @@ export function ConversationView({
     const isLive = cell.status === "running" || cell.status === "pending";
     const defaultExpanded = isLive;
     const expanded = getExpansionState(messageId, sectionId, defaultExpanded);
+    const canExpand = progressTextExceedsClamp(text);
     const toneClassName = styles[`codexTranscriptCell_${cell.tone}` as keyof typeof styles] ?? "";
+    const headerContent = (
+      <>
+        <span className={styles.codexTranscriptCellIcon} aria-hidden="true">
+          {isLive
+            ? <LoaderCircle className={styles.statusSpinner} size={14} />
+            : <MessageSquareText size={14} />}
+        </span>
+        <span className={styles.codexTranscriptReasoningHeaderBody}>
+          <span className={styles.codexTranscriptReasoningTitleRow}>
+            <span className={styles.codexTranscriptCellTitle}>{lang === "zh" ? "进展" : "Progress"}</span>
+          </span>
+        </span>
+      </>
+    );
     return (
       <section
         key={cell.id}
@@ -2603,34 +2635,35 @@ export function ConversationView({
         data-codex-transcript-cell-channel={cell.channel || undefined}
         data-codex-transcript-cell-phase={cell.phase ?? ""}
         data-codex-progress-cell="true"
+        data-codex-progress-expandable={canExpand ? "true" : "false"}
         data-conversation-part-key={cell.id}
         data-progress-section={sectionId}
         data-progress-expanded={expanded ? "true" : "false"}
         role={isLive ? "status" : undefined}
         aria-live={isLive ? "polite" : undefined}
       >
-        <VButton
-          type="button"
-          contentLayout="plain"
-          className={styles.codexTranscriptProgressHeader}
-          aria-expanded={expanded}
-          aria-label={expanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden")}
-          onClick={(event) => {
-            event.stopPropagation();
-            toggleSection(messageId, sectionId, defaultExpanded);
-          }}
-        >
-          <span className={styles.codexTranscriptCellIcon} aria-hidden="true">
-            {isLive
-              ? <LoaderCircle className={styles.statusSpinner} size={14} />
-              : <MessageSquareText size={14} />}
-          </span>
-          <span className={styles.codexTranscriptReasoningHeaderBody}>
-            <span className={styles.codexTranscriptReasoningTitleRow}>
-              <span className={styles.codexTranscriptCellTitle}>{lang === "zh" ? "进展" : "Progress"}</span>
-            </span>
-          </span>
-        </VButton>
+        {canExpand ? (
+          <VButton
+            type="button"
+            contentLayout="plain"
+            className={styles.codexTranscriptProgressHeader}
+            aria-expanded={expanded}
+            aria-label={expanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden")}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleSection(messageId, sectionId, defaultExpanded);
+            }}
+          >
+            {headerContent}
+          </VButton>
+        ) : (
+          <div
+            className={styles.codexTranscriptProgressHeader}
+            data-codex-progress-static="true"
+          >
+            {headerContent}
+          </div>
+        )}
         <ProgressScrollBody text={text} streaming={isLive} clamped={!expanded} />
       </section>
     );
@@ -2840,6 +2873,36 @@ export function ConversationView({
     );
   }
 
+  /**
+   * Codex/opencode parity: a row with nothing to expand renders no toggle.
+   * Mirrors the detail builder above so the two can never disagree.
+   */
+  function codexTranscriptToolDetailIsEmpty(cell: CodexTranscriptCell): boolean {
+    if (cell.kind === "error_notice") {
+      const activityRows = buildConversationToolActivityDetailRows(cell, lang);
+      const diagnosticRows = activityRows.length > 0
+        ? activityRows
+        : buildTurnErrorDiagnosticRows(cell.diagnosticSummary, lang);
+      return diagnosticRows.length === 0;
+    }
+    if (cell.kind !== "tool_call") {
+      return true;
+    }
+    if (buildConversationTerminalToolDetail(cell, lang)) {
+      return false;
+    }
+    if (codexTranscriptToolDetailRows(cell).length > 0) {
+      return false;
+    }
+    if (renderCodexTranscriptRolloutEvents(cell)) {
+      return false;
+    }
+    if (conversationToolPatchText(cell)) {
+      return false;
+    }
+    return buildConversationToolActivityDetailRows(cell, lang).length === 0;
+  }
+
   function codexTranscriptToolDetailRows(cell: CodexTranscriptCell): OperationDetailRow[] {
     const model = cell.toolLifecycleModel;
     if (!model) {
@@ -2904,10 +2967,20 @@ export function ConversationView({
       }
     }
     const resultPreview = firstNonEmptyText(...toolCalls.map((toolCall) => toolCall.resultPreview));
+    if (!rows.some((row) => row.label === instructionLabel)) {
+      const argumentInstruction = codexTranscriptToolInstructionText(primaryToolCall?.arguments);
+      if (argumentInstruction) {
+        pushInstruction(argumentInstruction);
+      }
+    }
+    const resultTruncated = toolCalls.some((toolCall) => toolCall.truncated === true);
     if (resultPreview && !rows.some((row) => row.label === operationDetailLabels.toolCallResult && row.value.includes(resultPreview.slice(0, 80)))) {
+      const boundedResult = presentDetail(resultPreview);
       rows.push({
         label: operationDetailLabels.toolCallResult,
-        value: presentDetail(resultPreview),
+        value: resultTruncated && boundedResult
+          ? `${boundedResult}\n\n[${lang === "zh" ? "输出已截断，仅显示预览" : "Output truncated; preview only"}]`
+          : boundedResult,
       });
     }
     const error = firstNonEmptyText(...toolCalls.map((toolCall) => toolCall.error));
@@ -2928,6 +3001,38 @@ export function ConversationView({
       }
     }
     return "";
+  }
+
+  /** Codex/opencode parity: replay keeps the command, not just the result blob. */
+  function codexTranscriptToolInstructionText(argumentsRecord: Record<string, unknown> | undefined | null) {
+    if (!argumentsRecord || typeof argumentsRecord !== "object") {
+      return "";
+    }
+    const pickString = (keys: string[]) => {
+      for (const key of keys) {
+        const value = argumentsRecord[key];
+        if (typeof value === "string" && value.trim()) {
+          return value.trim();
+        }
+        if (Array.isArray(value) && value.length > 0) {
+          const joined = value.map((entry) => String(entry ?? "")).join(" ").trim();
+          if (joined) {
+            return joined;
+          }
+        }
+      }
+      return "";
+    };
+    const direct = pickString(["command", "cmd", "shell_command", "path", "query", "url"]);
+    if (direct) {
+      return direct;
+    }
+    try {
+      const serialized = JSON.stringify(argumentsRecord);
+      return serialized && serialized !== "{}" ? serialized : "";
+    } catch {
+      return "";
+    }
   }
 
   function boundedCodexToolDetailText(value: string) {

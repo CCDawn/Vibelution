@@ -359,6 +359,23 @@ describe("ConversationToolActivity", () => {
     expect(html).not.toContain("itemStatic");
   });
 
+  it("renders no detail toggle when the cell has nothing to expand", () => {
+    const cell = toolCell("tool-empty-detail", "运行测试");
+
+    const html = renderToStaticMarkup(
+      <ConversationToolActivity
+        activity={createCodexTranscriptToolActivity([cell])}
+        language="zh"
+        renderToolDetails={() => null}
+        toolDetailIsEmpty={() => true}
+      />,
+    );
+
+    expect(html).toContain('data-codex-tool-detail="none"');
+    expect(html).not.toContain("无更多详情");
+    expect(html).not.toContain('data-codex-tool-detail-toggle="inline-symbol"');
+  });
+
   it("opens the current running tool detail directly by default", () => {
     const runningCell = toolCell("tool-running", "正在执行");
     runningCell.status = "running";
