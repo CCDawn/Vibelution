@@ -1395,17 +1395,24 @@ def test_session_detail_exposes_pre_model_progress_as_ordered_feedback_events(tm
 
     session_service._set_session_running("session-live", True, turn_id="turn-progress-events")
     try:
+        # A live turn carries a fresh durable work-run timestamp: the stale
+        # sweep settles genuinely abandoned runs in the same pass (journal
+        # interruption included, so the terminal turn cannot be reopened by a
+        # surviving live cache), and this projection must keep ordering the
+        # pre-model progress feedback events of turns that are still alive.
         session_service._persist_chat_turn_work_run(
             session_id="session-live",
             turn_id="turn-progress-events",
             status="running",
             user_message="继续",
-            updated_at="2026-06-05T00:00:00",
+            updated_at=session_service._now_timestamp(),
         )
         session_service._set_session_turn_progress_live_output("session-live", "context_prepare", turn_id="turn-progress-events")
         session_service._set_session_turn_progress_live_output("session-live", "agent_prepare", turn_id="turn-progress-events")
         session_service._set_session_turn_progress_live_output("session-live", "model_request", turn_id="turn-progress-events")
         response = client.get("/api/sessions/session-live")
+        # Snapshot before the finally-block settles the run for teardown.
+        work_run_after_read = session_service._WORK_RUN_STORE.load_snapshot("chat_turn", "turn-progress-events")
     finally:
         session_service._clear_session_live_output("session-live", turn_id="turn-progress-events")
         session_service._set_session_running("session-live", False, turn_id="turn-progress-events")
@@ -1427,9 +1434,10 @@ def test_session_detail_exposes_pre_model_progress_as_ordered_feedback_events(tm
         "thinking",
     ]
     assert status_items[-1]["status"] == "running"
-    work_run = session_service._WORK_RUN_STORE.load_snapshot("chat_turn", "turn-progress-events")
-    assert work_run is not None
-    assert work_run["updatedAt"] != "2026-06-05T00:00:00"
+    # The session-detail read path must not settle a live turn whose durable
+    # work-run is fresh: status stays running so the overlay keeps streaming.
+    assert work_run_after_read is not None
+    assert str(work_run_after_read.get("status") or "").strip().lower() == "running"
 
 
 def test_session_detail_prefers_running_turn_context_composition(tmp_path, monkeypatch):
@@ -3933,10 +3941,13 @@ def test_session_user_image_attachment_rejects_unsupported_type(tmp_path, monkey
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 
+    # Text/PDF documents are routed to the document store since document
+    # attachments shipped; only formats outside both gates must still be
+    # rejected with 422.
     response = client.post(
         "/api/sessions/session-live/attachments",
-        content=b"not an image",
-        headers={"Content-Type": "text/plain", "X-Vibelution-Filename": "note.txt"},
+        content=b"\x00\x01binary blob",
+        headers={"Content-Type": "application/octet-stream", "X-Vibelution-Filename": "note.bin"},
     )
 
     assert response.status_code == 422
