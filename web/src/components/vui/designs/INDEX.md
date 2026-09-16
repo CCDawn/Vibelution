@@ -119,6 +119,7 @@
 | `ConversationActiveTurnStatusNote` | [product/conversation.md](./product/conversation.md#conversationactiveturnstatusnote) |
 | `ConversationFollowupQueueBar` | [product/conversation.md](./product/conversation.md#conversationfollowupqueuebar) |
 | `ConversationMessageVersionSwitcher` | [product/conversation.md](./product/conversation.md#conversationmessageversionswitcher) |
+| Composer 引用候选（@ type-ahead） | [product/conversation.md](./product/conversation.md#composer-引用候选-type-ahead) |
 
 ## Product — virtual-human companion
 
