@@ -667,3 +667,72 @@ def test_agent_direct_session_available_does_not_load_detail(
         {"directSessionId": ""},
         session_service=session_service,
     )
+
+
+def test_bootstrap_agent_import_failure_degrades_without_closing_store(
+    isolated_directory_runtime: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A slow/failed bootstrap step must not take the directory read path down."""
+    project_root = isolated_directory_runtime
+    _write_agents_registry(agent_directory_service.registry_path())
+
+    def fail_import(*_args, **_kwargs):
+        raise TimeoutError("agent import timed out")
+
+    monkeypatch.setattr(directory_runtime, "_import_agent_snapshots", fail_import)
+
+    status = directory_runtime.initialize_session_directory_runtime(project_root=project_root)
+
+    assert status.status == "degraded"
+    assert status.degraded_reasons == ("agent_import:TimeoutError",)
+    assert directory_runtime.is_directory_store_open() is True
+    store = directory_runtime.get_open_directory_store()
+    assert store is not None
+    assert directory_runtime.wait_for_directory_startup(timeout=0.1) == "degraded"
+
+
+def test_list_sessions_serves_stale_snapshot_without_rebuilding(
+    isolated_directory_runtime: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A signature miss must serve the last-good page, not re-run the projection."""
+    from core.web.services.session import directory_bridge, list_cache
+
+    project_root = isolated_directory_runtime
+    _write_agents_registry(agent_directory_service.registry_path())
+    directory_runtime.initialize_session_directory_runtime(project_root=project_root)
+
+    seeded = [{"id": "session-cached", "title": "Cached page"}]
+    signature = (session_service._session_list_source_signature(), False)
+    list_cache.set_session_list_cache(
+        seeded,
+        now=session_service._perf_counter(),
+        signature=signature,
+        conversation_count=1,
+        agent_count=1,
+    )
+    # Signature churn (a registry/inbox write) must not force a sync rebuild.
+    registry_path = agent_directory_service.registry_path()
+    registry_path.write_text(registry_path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+
+    build_gate = threading.Event()
+
+    def block_heavy_build(*_args, **_kwargs):
+        build_gate.wait(timeout=5.0)
+        raise AssertionError("stale serve must not re-enter the heavy projection")
+
+    monkeypatch.setattr(session_service, "_load_conversations", block_heavy_build)
+    monkeypatch.setattr(directory_bridge, "list_session_summaries", lambda **_kwargs: None)
+
+    sessions = session_service.list_sessions()
+    assert [str(item.get("id") or "") for item in sessions] == ["session-cached"]
+
+    assert list_cache.is_session_list_refresh_reserved(signature=signature) is True
+    # Let the background worker drain, then drop its reservation so the next
+    # test starts from a clean cache.
+    build_gate.set()
+    with list_cache._SESSION_LIST_CACHE_CONDITION:
+        inflight_builds = list_cache._SESSION_LIST_CACHE.get("inflight_builds")
+        if isinstance(inflight_builds, dict):
+            inflight_builds.clear()
