@@ -2,12 +2,17 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import type { ConversationMessage, SessionTurnError } from "../../api/types";
+import { dictionaryChat } from "../../i18n/domains/dictionaryChat";
 import {
+  CONVERSATION_TURN_ERROR_TYPE_LABEL_KEYS,
   buildConversationTurnErrorReasonRows,
   buildCurrentTurnErrorRows,
   buildTurnErrorDiagnosticRows,
   formatTurnErrorRetrySummary,
+  resolveConversationTurnErrorRecoveryAction,
   resolveConversationTurnErrorType,
+  resolveSessionTurnErrorRecoveryAction,
+  resolveTurnErrorTypeLabelKey,
   summarizeCurrentTurnError,
 } from "./conversationTurnErrorPresentation";
 
@@ -47,6 +52,59 @@ describe("conversationTurnErrorPresentation", () => {
     expect(resolveConversationTurnErrorType({
       metadata: { errorType: 404 },
     } as unknown as ConversationMessage)).toBe("");
+  });
+
+  it("maps the full errorType enum to dictionary keys present in both languages", () => {
+    // Exhaustive over the backend errorType vocabulary; the mapping must stay
+    // total so a chip never regresses to a raw English code.
+    expect(Object.keys(CONVERSATION_TURN_ERROR_TYPE_LABEL_KEYS).sort()).toEqual([
+      "StaleChatTurnSettled",
+      "agent_llm_resolution_failed",
+      "prompt_cache_unsupported",
+      "provider_error",
+      "provider_protocol_error",
+      "provider_upstream_error",
+      "resource_lease_conflict",
+      "runtime_error",
+      "turn_persistence_failed",
+    ]);
+    for (const key of Object.values(CONVERSATION_TURN_ERROR_TYPE_LABEL_KEYS)) {
+      expect(dictionaryChat.zh[key], `zh missing for ${key}`).toBeTruthy();
+      expect(dictionaryChat.en[key], `en missing for ${key}`).toBeTruthy();
+    }
+  });
+
+  it("falls back to the runtime label for unknown or exception-class errorTypes", () => {
+    expect(resolveTurnErrorTypeLabelKey("")).toBe("");
+    expect(resolveTurnErrorTypeLabelKey("provider_protocol_error")).toBe("turnErrorTypeProviderProtocolError");
+    expect(resolveTurnErrorTypeLabelKey("TimeoutError")).toBe("turnErrorTypeRuntimeError");
+    expect(resolveTurnErrorTypeLabelKey("some_future_code")).toBe("turnErrorTypeRuntimeError");
+  });
+
+  it("points budget-family failed turns at the compress-context recovery action", () => {
+    expect(resolveConversationTurnErrorRecoveryAction({
+      metadata: { failureDisposition: "budget_or_context" },
+    } as ConversationMessage)).toBe("compress_context");
+    expect(resolveConversationTurnErrorRecoveryAction({
+      metadata: { reason_code: "context_budget_exhausted" },
+    } as ConversationMessage)).toBe("compress_context");
+    expect(resolveConversationTurnErrorRecoveryAction({
+      metadata: { failureCategory: "budget_or_context", errorType: "runtime_error" },
+    } as ConversationMessage)).toBe("compress_context");
+    expect(resolveConversationTurnErrorRecoveryAction({
+      metadata: { errorType: "provider_upstream_error", reasonCode: "upstream_unavailable" },
+    } as ConversationMessage)).toBe("");
+
+    expect(resolveSessionTurnErrorRecoveryAction({
+      failureDisposition: "budget_or_context",
+    } as unknown as Record<string, unknown>)).toBe("compress_context");
+    expect(resolveSessionTurnErrorRecoveryAction({
+      reasonCode: "context_limit",
+    } as unknown as Record<string, unknown>)).toBe("compress_context");
+    expect(resolveSessionTurnErrorRecoveryAction({
+      reasonCode: "upstream_unavailable",
+      failureDisposition: "transient",
+    } as unknown as Record<string, unknown>)).toBe("");
   });
 
   it("builds localized persisted turn-error diagnostic rows in stable priority order", () => {

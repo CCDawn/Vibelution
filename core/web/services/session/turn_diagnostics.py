@@ -2470,17 +2470,16 @@ def _user_visible_failure_summary(
             zh=f"模型服务上游暂时失败，本轮没有完成。{reason_line}{detail_line}完整 provider 错误已写入运行日志；可以稍后直接重试或发送“继续”。",
             en=f'The model provider failed upstream, so this turn did not complete. {reason_line}{detail_line} The full provider error was written to runtime logs; retry later or send "continue".',
         )
-    reason = s.trim_lines(text, max_lines=2)
-    summary = s.text_for(
+    # Human summary only (what happened / impact / what next). The raw error
+    # text stays out of the chat body on purpose: it is already captured in
+    # runtime logs, runtime-scene rawErrorPreview, and the structured
+    # reason_summary/reason_detail fields that feed the frontend diagnostics
+    # disclosure, so the turn body never dumps technical/stack text.
+    return s.text_for(
         language,
-        zh="网页工作台这一轮执行失败，请检查配置或稍后重试。",
-        en="This web workbench turn failed. Check configuration and try again.",
+        zh="网页工作台这一轮执行失败，本轮没有正常完成；完整错误已写入运行日志，可以稍后重试或先检查配置。",
+        en="This web workbench turn failed and did not complete. The full error was written to runtime logs; retry later or check the configuration first.",
     )
-    if reason:
-        return f"{summary}\n{reason}"
-    if exc is not None:
-        return f"{summary}\n{type(exc).__name__}"
-    return summary
 
 
 def _touch_chat_turn_work_run(

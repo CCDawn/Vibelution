@@ -56,6 +56,7 @@ import type { ChatEditTarget } from "../chatComposerState";
 import type { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import {
   chatStreamPerformanceNowMs,
+  describeChatSubmitError,
   isBusyPhase,
 } from "./chatCodingRouteViewModel";
 import {
@@ -405,7 +406,9 @@ export function useChatComposerTurnMutations({
       setSessionDrafts((current) => restoreSubmittedDraftIfComposerStillEmpty(current, variables.sessionId, variables.content));
       setSessionComposerErrors((current) => ({
         ...current,
-        [variables.sessionId]: describeError(error, t("submitFailed")),
+        // Classified human copy (e.g. 409 -> "a turn is already generating");
+        // the raw error is reported through telemetry above, not the composer.
+        [variables.sessionId]: describeChatSubmitError(error, t, t("submitFailed")),
       }));
       void chatWorkspaceCache.afterDirectTurnFailed(variables.sessionId);
     },

@@ -551,6 +551,28 @@ def test_provider_failure_classification_includes_payload_protocol_error():
     assert "协议" in summary
 
 
+def test_runtime_failure_summary_stays_human_and_moves_raw_error_to_diagnostics():
+    """Unknown/runtime failures keep one human line; raw text never concatenates."""
+
+    raw_error = (
+        "Traceback (most recent call last):\n"
+        "  File \"worker.py\", line 88, in step\n"
+        "RuntimeError: conversation stream reset mid-turn"
+    )
+    summary = session_service._user_visible_failure_summary(raw_error, lang="zh")
+    # What / impact / next pointer, single line, no raw stack text.
+    assert "RuntimeError" not in summary
+    assert "Traceback" not in summary
+    assert "这一轮执行失败" in summary
+    assert "运行日志" in summary
+    assert "\n" not in summary
+
+    en_summary = session_service._user_visible_failure_summary("raw failure text", lang="en")
+    assert "raw failure text" not in en_summary
+    assert "runtime logs" in en_summary
+    assert "\n" not in en_summary
+
+
 def test_build_followup_prompt_unwraps_nested_continue_goal():
     prompt = session_service._build_followup_prompt(
         original_prompt="审查对话日志并汇报",
@@ -2272,7 +2294,11 @@ def test_run_session_turn_blocks_if_agent_archived_after_scheduling(tmp_path, mo
 
     next_detail = session_service.get_session_detail(detail["id"])
     assert next_detail["currentPhase"] == "failed"
-    assert "已归档" in next_detail["lastTurnError"]["message"]
+    # Failure body stays one human line; the specific reason moves into the
+    # structured diagnostics fields that feed the frontend details disclosure.
+    assert "已归档" in next_detail["lastTurnError"]["reasonDetail"]
+    assert "已归档" not in next_detail["lastTurnError"]["message"]
+    assert "运行日志" in next_detail["lastTurnError"]["message"]
     blocked_events = [item for item in events if item[0][2] == "conversation.turn.blocked_archived_agent"]
     assert len(blocked_events) == 1
     assert blocked_events[0][1]["fields"]["agentId"] == detail["agentId"]
@@ -2997,7 +3023,11 @@ def test_session_user_image_attachment_vision_intent_blocks_unsupported_agent(tm
     assert response.status_code == 202
     payload = response.json()
     assert payload["currentPhase"] == "failed"
-    assert "明确不支持图像输入" in str((payload.get("lastTurnError") or {}).get("message") or "")
+    # Failure body stays one human line; the specific model-capability reason
+    # moves into the structured diagnostics fields (frontend details fold-out).
+    assert "明确不支持图像输入" in str((payload.get("lastTurnError") or {}).get("reasonDetail") or "")
+    assert "明确不支持图像输入" not in str((payload.get("lastTurnError") or {}).get("message") or "")
+    assert "运行日志" in str((payload.get("lastTurnError") or {}).get("message") or "")
     state = load_chat_state(tmp_path)
     assert state["conversations"][0]["last_turn_status"] == "failed"
 
@@ -3044,7 +3074,8 @@ def test_session_user_image_attachment_picture_content_phrase_stays_vision_inten
     assert response.status_code == 202
     _img_payload = response.json()
     assert _img_payload["currentPhase"] == "failed"
-    assert "明确不支持图像输入" in _img_payload["lastTurnError"]["message"]
+    assert "明确不支持图像输入" in _img_payload["lastTurnError"]["reasonDetail"]
+    assert "明确不支持图像输入" not in _img_payload["lastTurnError"]["message"]
 
 
 def test_session_user_image_attachment_vision_intent_reaches_supported_agent(tmp_path, monkeypatch):
@@ -3531,7 +3562,8 @@ def test_session_user_image_attachment_edit_intent_blocks_when_agent_cannot_read
     assert response.status_code == 202
     payload = response.json()
     assert payload["currentPhase"] == "failed"
-    assert "明确不支持图像输入" in str((payload.get("lastTurnError") or {}).get("message") or "")
+    assert "明确不支持图像输入" in str((payload.get("lastTurnError") or {}).get("reasonDetail") or "")
+    assert "明确不支持图像输入" not in str((payload.get("lastTurnError") or {}).get("message") or "")
     router_events = [
         kwargs for args, kwargs in recorded_scene_events
         if args[:3] == ("conversation", "image_attachment_capability", "conversation.image_attachment.capability_checked")
@@ -3606,7 +3638,8 @@ def test_session_recent_image_reference_blocks_when_agent_cannot_read_images(tmp
     assert response.status_code == 202
     payload = response.json()
     assert payload["currentPhase"] == "failed"
-    assert "明确不支持图像输入" in str((payload.get("lastTurnError") or {}).get("message") or "")
+    assert "明确不支持图像输入" in str((payload.get("lastTurnError") or {}).get("reasonDetail") or "")
+    assert "明确不支持图像输入" not in str((payload.get("lastTurnError") or {}).get("message") or "")
     router_events = [
         kwargs for args, kwargs in recorded_scene_events
         if args[:3] == ("conversation", "image_attachment_capability", "conversation.image_attachment.capability_checked")
@@ -5916,7 +5949,8 @@ def test_persist_turn_result_blocks_phantom_image_generation_success(tmp_path, m
     detail = session_service.get_session_detail("session-live")
     assert sum(message.get("turnId") == "turn-segments" for message in detail["messages"]) == 0
     assert detail["currentPhase"] == "failed"
-    assert "没有实际生成新的图片" in detail["lastTurnError"]["message"]
+    assert "没有实际生成新的图片" in detail["lastTurnError"]["reasonDetail"]
+    assert "没有实际生成新的图片" not in detail["lastTurnError"]["message"]
     assert "messages" not in conversation
     assert conversation["last_turn_status"] == "failed"
     assert any(
@@ -8251,7 +8285,8 @@ def test_submit_session_message_recovers_when_scheduler_fails(tmp_path, monkeypa
     assert payload["currentPhase"] == "failed"
     assert payload["messages"][-1]["role"] == "user"
     assert payload["messages"][-1]["content"] == "继续检查调度失败恢复"
-    assert "scheduler unavailable" in payload["lastTurnError"]["message"]
+    assert "scheduler unavailable" in payload["lastTurnError"]["reasonDetail"]
+    assert "scheduler unavailable" not in payload["lastTurnError"]["message"]
     assert session_service._is_session_running("session-live") is False
     assert session_service._get_session_turn_control("session-live") is None
     assert session_service._WORK_RUN_STORE.load_active_snapshot("chat_turn") is None
@@ -10745,7 +10780,8 @@ def test_submit_session_message_persists_visible_failure(tmp_path, monkeypatch):
     assert payload["lastTurnError"] is not None
     error_text = payload["lastTurnError"]["message"]
     assert "失败" in error_text or "failed" in error_text.lower()
-    assert "LLM unavailable" in error_text
+    assert "LLM unavailable" in payload["lastTurnError"]["reasonDetail"]
+    assert "LLM unavailable" not in error_text
     assert payload["currentPhase"] == "failed"
 
 
@@ -10788,7 +10824,8 @@ def test_submit_session_message_surfaces_failed_result_error(tmp_path, monkeypat
         message.get("metadata", {}).get("kind") == "turn_error"
         for message in payload["messages"]
     )
-    assert "LiteLLM 未安装" in payload["lastTurnError"]["message"]
+    assert "LiteLLM 未安装" in payload["lastTurnError"]["reasonDetail"]
+    assert "LiteLLM 未安装" not in payload["lastTurnError"]["message"]
     assert payload["currentPhase"] == "failed"
 
 
@@ -10890,7 +10927,8 @@ def test_submit_session_message_surfaces_local_runtime_exception_as_turn_error(t
     assert payload["messages"][-1]["role"] == "user"
     assert payload["lastTurnError"]["errorType"] == "ValueError"
     assert payload["lastTurnError"]["recoverable"] is False
-    assert "未设置 API Key" in payload["lastTurnError"]["message"]
+    assert "未设置 API Key" in payload["lastTurnError"]["reasonDetail"]
+    assert "未设置 API Key" not in payload["lastTurnError"]["message"]
     latest_run = session_service._WORK_RUN_STORE.load_latest_snapshot("chat_turn")
     assert latest_run["errorType"] == "ValueError"
     assert "VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY" in latest_run["error"]
@@ -10961,7 +10999,15 @@ def test_failed_runtime_turn_result_is_persisted_as_turn_error_with_trace(tmp_pa
     assert payload["lastTurnError"]["traceId"] == "trace-runtime-1"
     assert payload["lastTurnError"]["protocol"] == "responses"
     assert "模型响应未完成规范化" in payload["lastTurnError"]["reasonSummary"]
-    assert "当前模型不支持图片输入" in payload["lastTurnError"]["message"]
+    # Body stays one human line; the visible raw text is no longer concatenated
+    # into the message (structured llm_failure diagnostics own the reason
+    # fields; the full raw text lives in the runtime logs / rawErrorPreview).
+    assert "当前模型不支持图片输入" not in payload["lastTurnError"]["message"]
+    assert "运行日志" in payload["lastTurnError"]["message"]
+    turn_error_scene_raw = next(
+        item for item in scene_events if item["eventCode"] == "conversation.turn_error"
+    )["fields"]["rawErrorPreview"]
+    assert "当前模型不支持图片输入" in turn_error_scene_raw
     assert payload["currentPhase"] == "failed"
     turn_error_scene = next(item for item in scene_events if item["eventCode"] == "conversation.turn_error")
     assert turn_error_scene["fields"]["chainStage"] == "llm_response_normalization"
