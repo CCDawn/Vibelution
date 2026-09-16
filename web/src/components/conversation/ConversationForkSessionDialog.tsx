@@ -1,4 +1,5 @@
 import { VConfirmDialog, VSelect } from "../vui";
+import { styles } from "./ConversationForkSessionDialog.styles";
 
 /** Copy scope for forking a new session from one journal node. */
 export type ConversationForkScope = "visible_path" | "with_branches";
@@ -60,7 +61,7 @@ export function ConversationForkSessionDialog({
         }
       }}
     >
-      <div className="mt-1 flex w-full flex-col gap-2 [font-size:var(--vui-font-sm)] text-[var(--fg-secondary)]">
+      <div className={styles.forkScopeField}>
         <span>{labels.scopeLabel}</span>
         <VSelect
           aria-label={labels.scopeLabel}
