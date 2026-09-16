@@ -1,35 +1,8 @@
-import { useState, type CSSProperties } from "react";
-import { ChevronDown } from "lucide-react";
-
+import { useState } from "react";
+import { ArrowLeft, ChevronDown, ChevronRight, X } from "lucide-react";
 import { VButton, VPopover } from "../vui";
-import type {
-  ComposerContextHitKind,
-  ComposerContextRingModel,
-  ComposerContextSegment,
-} from "../../routes/chat/composerContextModel";
+import type { ComposerContextRingModel } from "../../routes/chat/composerContextModel";
 import styles from "./ComposerContextRing.styles";
-
-const HIT_LABEL_ZH: Record<ComposerContextHitKind, string> = {
-  hit: "命中",
-  miss: "未命中",
-  never: "不可缓存",
-  unknown: "未观测",
-};
-const HIT_LABEL_EN: Record<ComposerContextHitKind, string> = {
-  hit: "hit",
-  miss: "miss",
-  never: "uncacheable",
-  unknown: "unobserved",
-};
-const CACHE_STATE_LABEL_ZH = {
-  missing: "上游未返回缓存命中",
-  not_called: "本轮未调用模型",
-} as const;
-const CACHE_STATE_LABEL_EN = {
-  missing: "upstream cache usage missing",
-  not_called: "model not called this turn",
-} as const;
-const HIT_ORDER: ComposerContextHitKind[] = ["hit", "miss", "never", "unknown"];
 
 export type ComposerContextRingProps = {
   model: ComposerContextRingModel;
@@ -37,215 +10,242 @@ export type ComposerContextRingProps = {
   sessionId?: string | null;
   onOpenDetail?: () => void;
 };
-
-export type ComposerContextRingPanelProps = {
-  model: ComposerContextRingModel;
-  lang: "zh" | "en";
-  onOpenDetail?: () => void;
-};
-
-function segmentTip(segment: ComposerContextSegment, lang: "zh" | "en") {
-  const hitLabel = (lang === "zh" ? HIT_LABEL_ZH : HIT_LABEL_EN)[segment.hit];
-  return `${segment.name} · ${hitLabel} · ${segment.tokensLabel} · ${segment.pctLabel}`;
-}
-
-function cacheHeadline(model: ComposerContextRingModel, lang: "zh" | "en") {
-  if (model.cacheState === "observed") {
-    return lang === "zh"
-      ? `上轮真实命中 ${model.hitPercent}%`
-      : `Last-turn true hit ${model.hitPercent}%`;
-  }
-  return (lang === "zh" ? CACHE_STATE_LABEL_ZH : CACHE_STATE_LABEL_EN)[model.cacheState];
-}
+export type ComposerContextRingPanelProps = Omit<
+  ComposerContextRingProps,
+  "sessionId"
+> & { onClose?: () => void };
 
 export function ComposerContextRingPanel({
   model,
   lang,
   onOpenDetail,
+  onClose,
 }: ComposerContextRingPanelProps) {
-  const [hint, setHint] = useState("");
-  const [expandedKey, setExpandedKey] = useState("");
-  const hitLabels = lang === "zh" ? HIT_LABEL_ZH : HIT_LABEL_EN;
-
+  const [detail, setDetail] = useState(false);
+  const [expanded, setExpanded] = useState("");
+  const zh = lang === "zh";
+  const cacheLabel =
+    model.cacheState === "observed"
+      ? zh
+        ? `已复用 ${model.hitPercent}% 输入`
+        : `${model.hitPercent}% of input reused`
+      : model.cacheState === "not_called"
+        ? zh
+          ? "尚未调用模型"
+          : "Model not called yet"
+        : zh
+          ? "暂无上游数据"
+          : "Not reported by provider";
+  const note = model.empty
+    ? zh
+      ? "模型调用后显示用量。"
+      : "Usage appears after a model call."
+    : !model.capacityKnown
+      ? zh
+        ? "窗口上限未知，暂不计算占比。"
+        : "Window limit unknown; percentage unavailable."
+      : model.usagePercent >= 90
+        ? zh
+          ? "接近窗口上限，可查看主要占用来源。"
+          : "Near the window limit. Review the main sources."
+        : zh
+          ? `窗口余量约 ${model.remainingLabel} · 最近一次上下文估算`
+          : `About ${model.remainingLabel} of window remaining · Latest context estimate`;
   return (
     <>
       <div className={styles.head}>
-        <span className={styles.title}>{lang === "zh" ? "上下文" : "Context"}</span>
-        <span className={styles.nums} title={model.usedLabel}>
-          {model.empty
-            ? <b>--</b>
-            : (
-              <>
-                <b>{model.usagePercent}%</b>
-                {" · "}
-                {model.usedLabel}
-              </>
-            )}
+        {detail ? (
+          <VButton
+            variant="ghost"
+            contentLayout="plain"
+            className={styles.back}
+            onClick={() => {
+              setDetail(false);
+              setExpanded("");
+            }}
+          >
+            <ArrowLeft size={14} />
+            {zh ? "上下文明细" : "Context details"}
+          </VButton>
+        ) : (
+          <strong className={styles.title}>{zh ? "上下文" : "Context"}</strong>
+        )}
+        {onClose && (
+          <VButton
+            variant="ghost"
+            isIconOnly
+            className={styles.close}
+            aria-label={zh ? "关闭上下文卡片" : "Close context"}
+            onClick={onClose}
+          >
+            <X size={14} />
+          </VButton>
+        )}
+      </div>
+      <div className={styles.capacity}>
+        <span>
+          {model.empty ? (
+            zh ? (
+              "暂无用量数据"
+            ) : (
+              "No usage data"
+            )
+          ) : (
+            <>
+              {zh ? "已用" : "Used"} <b>{model.usageLabel}</b>
+            </>
+          )}
+        </span>
+        <span className={styles.nums}>
+          {model.empty ? "— / —" : model.usedLabel} <span>tokens</span>
         </span>
       </div>
-
-      <div className={styles.compositionSection} data-composer-context-composition="true">
-        <span className={styles.sectionTitle}>{lang === "zh" ? "上下文构成" : "Composition"}</span>
-        <div
-          className={styles.compBar}
-          title={model.empty ? undefined : model.usedLabel}
-        >
-          {model.segments.map((segment) => (
-            <i
-              key={`comp-${segment.key}`}
-              className={styles.compSeg}
-              style={{
-                flex: `${Math.max(segment.pct, 0.1)} 0 0`,
-                background: segment.color,
-              } as CSSProperties}
-              title={segmentTip(segment, lang)}
-              onMouseEnter={() => setHint(segmentTip(segment, lang))}
-              onMouseLeave={() => setHint("")}
-            />
-          ))}
-        </div>
-
-        <div className={styles.rows}>
-          {model.empty ? (
-            <div className={styles.rowEmpty}>
-              <span />
-              <span className={styles.rowName}>{lang === "zh" ? "暂无组成" : "No composition yet"}</span>
-              <span className={styles.rowValue}>--</span>
-            </div>
-          ) : model.segments.map((segment) => {
-            const expandable = Boolean(segment.contentPreview);
-            const expanded = expandable && expandedKey === segment.key;
-            const content = (
-              <>
-                <span className={styles.swatch} style={{ background: segment.color }} />
-                <span className={styles.rowName}>{segment.name}</span>
-                <span className={styles.rowPct} data-context-pct="true">{segment.pctLabel}</span>
-                <span className={styles.rowValue}>{segment.tokensLabel}</span>
-                <span
-                  className={`${styles.rowBadge} ${styles[`rowBadge_${segment.hit}`]}`}
-                  data-context-badge={segment.hit}
-                >
-                  {hitLabels[segment.hit]}
-                </span>
-                {expandable ? (
-                  <ChevronDown
-                    className={`${styles.rowChevron} ${expanded ? styles.rowChevronOpen : ""}`}
-                    aria-hidden="true"
-                  />
-                ) : null}
-              </>
-            );
-            return (
-              <div key={`row-${segment.key}`} className={styles.rowGroup}>
-                {expandable ? (
+      <div
+        className={styles.track}
+        role="progressbar"
+        aria-label={zh ? "上下文容量占用" : "Context window usage"}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={model.capacityKnown ? model.usagePercent : undefined}
+        aria-valuetext={
+          model.capacityKnown ? model.usageLabel : zh ? "未知" : "Unknown"
+        }
+      >
+        <i
+          className={
+            model.usagePercent >= 90 ? styles.warningFill : styles.fill
+          }
+          style={{ width: `${model.usagePercent}%` }}
+        />
+      </div>
+      <p className={styles.note}>{note}</p>
+      {model.groups.length > 0 && (
+        <section data-composer-context-composition="true">
+          <h2 className={styles.sectionTitle}>
+            <span>
+              {detail
+                ? zh
+                  ? "按来源查看"
+                  : "By source"
+                : zh
+                  ? "主要占用"
+                  : "Main sources"}
+            </span>
+            <span>tokens</span>
+          </h2>
+          {model.groups.map((group) => (
+            <div key={group.key}>
+              {detail ? (
+                <>
                   <VButton
-                    type="button"
                     variant="ghost"
                     contentLayout="plain"
-                    className={styles.rowButton}
-                    data-context-row={segment.key}
-                    data-context-hit={segment.hit}
-                    aria-expanded={expanded}
-                    title={segmentTip(segment, lang)}
-                    onMouseEnter={() => setHint(segmentTip(segment, lang))}
-                    onMouseLeave={() => setHint("")}
-                    onClick={() => setExpandedKey(expanded ? "" : segment.key)}
+                    className={styles.detailRow}
+                    aria-expanded={expanded === group.key}
+                    onClick={() =>
+                      setExpanded(expanded === group.key ? "" : group.key)
+                    }
                   >
-                    {content}
+                    <ChevronDown
+                      size={13}
+                      className={expanded === group.key ? "" : "-rotate-90"}
+                    />
+                    <span className={styles.name}>{group.name}</span>
+                    <b>{group.tokensLabel}</b>
                   </VButton>
-                ) : (
-                  <div
-                    className={styles.row}
-                    data-context-row={segment.key}
-                    data-context-hit={segment.hit}
-                    title={segmentTip(segment, lang)}
-                    onMouseEnter={() => setHint(segmentTip(segment, lang))}
-                    onMouseLeave={() => setHint("")}
-                  >
-                    {content}
-                  </div>
-                )}
-                {expanded ? (
-                  <div className={styles.rowPreview} data-context-preview={segment.key}>
-                    {segment.contentPreview}
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
+                  {expanded === group.key && (
+                    <div className={styles.expanded}>
+                      {group.segments.map((segment) => (
+                        <div key={segment.key} data-context-row={segment.key}>
+                          <div className={styles.segment}>
+                            <span className={styles.name}>{segment.name}</span>
+                            <span className={styles.muted}>
+                              {segment.pctLabel}
+                            </span>
+                            <span>{segment.tokensLabel}</span>
+                          </div>
+                          {segment.contentPreview && (
+                            <p
+                              className={styles.preview}
+                              data-context-preview={segment.key}
+                            >
+                              {segment.contentPreview}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className={styles.row}>
+                  <span className={styles.name}>{group.name}</span>
+                  <b>{group.tokensLabel}</b>
+                </div>
+              )}
+            </div>
+          ))}
+        </section>
+      )}
       <div
-        className={styles.cacheSection}
+        className={styles.cache}
         data-composer-context-cache="true"
         data-cache-state={model.cacheState}
       >
-        <div className={styles.cacheHead}>
-          <span className={styles.sectionTitle}>{lang === "zh" ? "缓存" : "Cache"}</span>
-          <span className={styles.cacheHeadline}>{cacheHeadline(model, lang)}</span>
-        </div>
-        <div className={styles.hitEdge}>
-          {model.segments.map((segment) => (
-            <i
-              key={`hit-${segment.key}`}
-              className={`${styles.hitSeg} ${styles[`hitSeg_${segment.hit}`]}`}
-              style={{ flex: `${Math.max(segment.pct, 0.1)} 0 0` }}
-              title={segmentTip(segment, lang)}
-              onMouseEnter={() => setHint(segmentTip(segment, lang))}
-              onMouseLeave={() => setHint("")}
-            />
-          ))}
-        </div>
-        <div className={styles.cacheLegend}>
-          {HIT_ORDER.map((kind) => {
-            const share = Math.round(model.hitShares[kind] * 10) / 10;
-            if (share <= 0) {
-              return null;
-            }
-            return (
-              <span key={kind} className={styles.cacheLegendItem} data-cache-kind={kind}>
-                <i className={`${styles.legendDot} ${styles[`legendDot_${kind}`]}`} aria-hidden="true" />
-                {hitLabels[kind]} {share}%
-              </span>
-            );
-          })}
-        </div>
+        <span>{zh ? "上次调用缓存" : "Last call cache"}</span>
+        <span
+          className={
+            model.cacheState === "observed" ? styles.observed : styles.muted
+          }
+        >
+          {cacheLabel}
+        </span>
       </div>
-
-      <div className={styles.foot}>
-        <span className={styles.hint}>{hint}</span>
-        {onOpenDetail && model.detailAvailable ? (
-          <VButton
-            type="button"
-            contentLayout="plain"
-            className={styles.detailLink}
-            title={lang === "zh" ? "打开完整缓存命中详情" : "Open full cache hit details"}
-            onClick={onOpenDetail}
-          >
-            {lang === "zh" ? "详情" : "Details"}
-          </VButton>
-        ) : null}
-      </div>
+      {detail && (
+        <p className={styles.detailNote}>
+          {zh
+            ? "分段为独立估算，可能与总量略有差异；比例以列出内容为基准。缓存影响费用与速度，不减少上下文占用。"
+            : "Segments are independently estimated and may differ slightly from the total; shares refer to listed content. Caching affects cost and speed, not context size."}
+        </p>
+      )}
+      {!detail && model.groups.length > 0 && (
+        <VButton
+          variant="ghost"
+          contentLayout="plain"
+          className={styles.detailLink}
+          onClick={() => setDetail(true)}
+        >
+          <span>{zh ? "查看完整明细" : "View breakdown"}</span>
+          <ChevronRight size={14} />
+        </VButton>
+      )}
+      {detail && onOpenDetail && model.detailAvailable && (
+        <VButton
+          variant="ghost"
+          contentLayout="plain"
+          className={styles.detailLink}
+          onClick={onOpenDetail}
+        >
+          <span>{zh ? "查看缓存诊断" : "View cache diagnostics"}</span>
+          <ChevronRight size={14} />
+        </VButton>
+      )}
     </>
   );
 }
 
-export function ComposerContextRing({
+function SessionContextRing({
   model,
   lang,
-  sessionId = "",
+  sessionId,
   onOpenDetail,
 }: ComposerContextRingProps) {
   const [open, setOpen] = useState(false);
-
-  const usageDash = model.empty ? 0 : model.usagePercent;
   const ringTitle = model.empty
-    ? (lang === "zh" ? "暂无上下文数据" : "No context data yet")
-    : (lang === "zh"
-      ? `占用 ${model.usagePercent}% · ${model.usedLabel}`
-      : `Usage ${model.usagePercent}% · ${model.usedLabel}`);
-
+    ? lang === "zh"
+      ? "暂无上下文数据"
+      : "No context data yet"
+    : `${lang === "zh" ? "上下文占用" : "Context usage"} ${model.usageLabel} · ${model.usedLabel}`;
   return (
     <div className={styles.root} data-testid="composer-context-ring">
       <VPopover
@@ -253,70 +253,63 @@ export function ComposerContextRing({
         onOpenChange={setOpen}
         side="top"
         align="end"
-        sideOffset={10}
-        aria-label={lang === "zh" ? "上下文组成" : "Context composition"}
+        sideOffset={12}
+        aria-label={lang === "zh" ? "上下文用量" : "Context usage"}
         contentClassName={styles.popover}
-        trigger={(
+        trigger={
           <VButton
-            type="button"
             variant="ghost"
-            isIconOnly
             contentLayout="plain"
             className={styles.trigger}
-            title={ringTitle}
             aria-label={ringTitle}
-            data-chrome="bare"
-            data-empty={model.empty ? "true" : "false"}
+            title={ringTitle}
             data-session={sessionId || undefined}
+            data-empty={model.empty ? "true" : "false"}
           >
-            <svg className={styles.ring} viewBox="0 0 32 32" aria-hidden="true">
+            <svg className={styles.ring} viewBox="0 0 24 24" aria-hidden="true">
               <circle
-                cx="16"
-                cy="16"
-                r="10.4"
+                cx="12"
+                cy="12"
+                r="9"
                 fill="none"
-                stroke="color-mix(in srgb, var(--accent-cool) 18%, transparent)"
-                strokeWidth="2.4"
+                stroke="currentColor"
+                opacity=".15"
+                strokeWidth="2"
               />
               <circle
-                cx="16"
-                cy="16"
-                r="10.4"
+                cx="12"
+                cy="12"
+                r="9"
                 fill="none"
-                stroke="var(--accent-cool)"
-                strokeWidth="2.4"
-                strokeLinecap="round"
-                pathLength={100}
-                strokeDasharray={`${usageDash} 100`}
-                transform="rotate(-90 16 16)"
-                opacity={model.empty ? 0.35 : 1}
+                stroke="currentColor"
+                strokeWidth="2"
+                pathLength="100"
+                strokeDasharray={`${model.usagePercent} 100`}
+                transform="rotate(-90 12 12)"
               />
-              <text
-                x="16"
-                y="16.5"
-                textAnchor="middle"
-                dominantBaseline="central"
-                fontSize={model.empty ? 9 : 8}
-                fontWeight={750}
-                fill={model.empty ? "var(--fg-tertiary)" : "var(--fg-primary)"}
-              >
-                {model.empty ? "--" : String(Math.round(model.usagePercent))}
-              </text>
             </svg>
+            <span>{model.empty ? "—" : model.usageLabel}</span>
           </VButton>
-        )}
+        }
       >
         <ComposerContextRingPanel
           model={model}
           lang={lang}
-          onOpenDetail={onOpenDetail
-            ? () => {
-              setOpen(false);
-              onOpenDetail();
-            }
-            : undefined}
+          onClose={() => setOpen(false)}
+          onOpenDetail={
+            onOpenDetail
+              ? () => {
+                  setOpen(false);
+                  onOpenDetail();
+                }
+              : undefined
+          }
         />
       </VPopover>
     </div>
   );
+}
+
+export function ComposerContextRing(props: ComposerContextRingProps) {
+  return <SessionContextRing key={props.sessionId ?? ""} {...props} />;
 }
