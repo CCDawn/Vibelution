@@ -6,6 +6,7 @@ import type {
   ChatRoomRoundAcceptedResponse,
   ChatWorkbenchBootstrap,
   ConversationAttachment,
+  ConversationQueryResponse,
   ConversationSummary,
   SessionChatReviewCandidateResponse,
   SessionDeleteResponse,
@@ -82,6 +83,7 @@ export type SessionQueryParams = {
   sessionKind?: string;
   state?: string;
   sort?: string;
+  teamId?: string;
 };
 
 export function listSessionChildSessions(sessionId: string): Promise<SessionSummary[]> {
@@ -113,9 +115,50 @@ export function querySessions(params: SessionQueryParams = {}): Promise<SessionQ
   if (params.sort) {
     search.set("sort", params.sort);
   }
+  if (params.teamId) {
+    search.set("teamId", params.teamId);
+  }
   const suffix = search.toString();
   return fetchJson<SessionQueryResponse>(
     suffix ? `/api/sessions/query?${suffix}` : "/api/sessions/query",
+  );
+}
+
+export type ConversationQueryParams = {
+  limit?: number;
+  cursor?: string;
+  q?: string;
+  agentId?: string;
+  teamId?: string;
+  /** "direct_agent" | "group_room" — empty keeps both halves of the index. */
+  type?: string;
+};
+
+export function queryConversations(
+  params: ConversationQueryParams = {},
+): Promise<ConversationQueryResponse> {
+  const search = new URLSearchParams();
+  if (params.limit != null) {
+    search.set("limit", String(params.limit));
+  }
+  if (params.cursor) {
+    search.set("cursor", params.cursor);
+  }
+  if (params.q) {
+    search.set("q", params.q);
+  }
+  if (params.agentId) {
+    search.set("agentId", params.agentId);
+  }
+  if (params.teamId) {
+    search.set("teamId", params.teamId);
+  }
+  if (params.type) {
+    search.set("type", params.type);
+  }
+  const suffix = search.toString();
+  return fetchJson<ConversationQueryResponse>(
+    suffix ? `/api/conversations?${suffix}` : "/api/conversations",
   );
 }
 
@@ -133,10 +176,6 @@ export function getActiveSession(): Promise<{ activeSessionId: string }> {
 
 export function listSessions(): Promise<SessionSummary[]> {
   return fetchJson<SessionSummary[]>("/api/sessions");
-}
-
-export function listConversations(): Promise<ConversationSummary[]> {
-  return fetchJson<ConversationSummary[]>("/api/conversations");
 }
 
 export type SessionDetailQueryOptions = {

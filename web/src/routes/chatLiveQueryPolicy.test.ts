@@ -4,6 +4,7 @@ import {
   ACTIVE_BACKGROUND_SYNC_POLL_MS,
   ACTIVE_INDEX_POLL_MS,
   ACTIVE_SESSION_DETAIL_POLL_MS,
+  CONVERSATIONS_CATALOG_POLL_MS,
   resolveChatLiveQueryPolicy,
 } from "./chatLiveQueryPolicy";
 
@@ -56,7 +57,7 @@ describe("resolveChatLiveQueryPolicy", () => {
 
     expect(policy.directSessionStreamOwnsLiveQueries).toBe(false);
     expect(policy.sessionsRefetchInterval).toBe(ACTIVE_INDEX_POLL_MS);
-    expect(policy.conversationsRefetchInterval).toBe(ACTIVE_INDEX_POLL_MS);
+    expect(policy.conversationsRefetchInterval).toBe(CONVERSATIONS_CATALOG_POLL_MS);
     expect(policy.sessionDetailRefetchInterval).toBe(ACTIVE_SESSION_DETAIL_POLL_MS);
     expect(policy.childSessionsRefetchInterval).toBe(ACTIVE_INDEX_POLL_MS);
   });
@@ -108,6 +109,6 @@ describe("resolveChatLiveQueryPolicy", () => {
     });
 
     expect(policy.groupStreamOwnsLiveQueries).toBe(false);
-    expect(policy.conversationsRefetchInterval).toBe(ACTIVE_INDEX_POLL_MS);
+    expect(policy.conversationsRefetchInterval).toBe(CONVERSATIONS_CATALOG_POLL_MS);
   });
 });

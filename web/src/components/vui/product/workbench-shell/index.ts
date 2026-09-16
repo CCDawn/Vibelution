@@ -10,3 +10,9 @@ export {
   type VWorkbenchPowerMenuLabels,
   type VWorkbenchPowerMenuProps,
 } from "./VWorkbenchPowerMenu";
+export {
+  VSessionSearchDialog,
+  type VSessionSearchDialogItem,
+  type VSessionSearchDialogLabels,
+  type VSessionSearchDialogProps,
+} from "./VSessionSearchDialog";

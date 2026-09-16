@@ -3,8 +3,9 @@ import type { DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent } from "re
 import { useEffect, useRef, useState } from "react";
 
 import type { AgentInstance, SessionReferenceAttachment, SessionSummary, Team } from "../api/types";
-import { VButton, VDialog, VIconButton, VNativeButton, VNativeInput, VStateSurface } from "../components/vui";
-import { recentAgentSessions, searchAgentSessionHistory } from "./agentSessionHistory";
+import { VButton, VIconButton, VNativeInput, VSessionSearchDialog, VStringSelect } from "../components/vui";
+import { recentAgentSessions } from "./agentSessionHistory";
+import { useSessionSearchQuery } from "./useSessionSearchQuery";
 import type { TranslationKey } from "../i18n/dictionary";
 import { sessionAgentDisplayInfo } from "./agentDisplay";
 import {
@@ -204,8 +205,14 @@ export function AgentSessionTabStrip({
 }: AgentSessionTabStripProps) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyQuery, setHistoryQuery] = useState("");
+  const [historyAgentFilter, setHistoryAgentFilter] = useState("");
+  const [historyTeamFilter, setHistoryTeamFilter] = useState("");
   const visibleSessions = recentAgentSessions(sessions, [activeSessionId, editingSessionId, contextMenuSessionId]);
-  const historySessions = searchAgentSessionHistory(sessions, historyQuery);
+  const sessionSearch = useSessionSearchQuery({
+    queryText: historyQuery,
+    filters: { agentId: historyAgentFilter, teamId: historyTeamFilter },
+    enabled: historyOpen,
+  });
   const tabGroupRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const activeTab = tabGroupRef.current?.querySelector<HTMLElement>('[data-session-tab-active="true"]');
@@ -569,24 +576,79 @@ export function AgentSessionTabStrip({
       {lang === "zh" ? `全部会话（${sessions.length}）` : `All sessions (${sessions.length})`}
     </VButton>
     </div>
-    <VDialog open={historyOpen} onOpenChange={setHistoryOpen} title={lang === "zh" ? "全部会话" : "All sessions"} description={lang === "zh" ? "搜索并继续历史会话" : "Search and resume a conversation"}>
-      <VNativeInput type="search" aria-label={lang === "zh" ? "搜索会话" : "Search sessions"} placeholder={lang === "zh" ? "标题、摘要或会话编号" : "Title, summary or session ID"} value={historyQuery} onChange={(event) => setHistoryQuery(event.target.value)} />
-      <div className={styles.historyList}>
-        {historySessions.map((session) => {
-          const tone = agentSessionStatusTone(session.status || "", { session, isActive: session.id === activeSessionId, needsApproval: approvalSessionIds.has(session.id), isRuntimeRunning: runtimeSessionIds.has(session.id) });
-          return <VNativeButton key={session.id} className={styles.historyRow} aria-pressed={session.id === activeSessionId} onClick={() => {
+    <VSessionSearchDialog
+      open={historyOpen}
+      onOpenChange={setHistoryOpen}
+      query={historyQuery}
+      onQueryChange={setHistoryQuery}
+      filters={
+        <>
+          <VStringSelect
+            ariaLabel={lang === "zh" ? "按 Agent 过滤" : "Filter by agent"}
+            value={historyAgentFilter}
+            onValueChange={setHistoryAgentFilter}
+            options={[
+              { value: "", label: lang === "zh" ? "全部 Agent" : "All agents" },
+              ...[...agentsById.values()].map((agent) => ({
+                value: agent.agentId,
+                label: agent.displayName || agent.agentCode || agent.agentId,
+              })),
+            ]}
+          />
+          <VStringSelect
+            ariaLabel={lang === "zh" ? "按团队过滤" : "Filter by team"}
+            value={historyTeamFilter}
+            onValueChange={setHistoryTeamFilter}
+            options={[
+              { value: "", label: lang === "zh" ? "全部团队" : "All teams" },
+              ...teams.map((team) => ({
+                value: team.teamId,
+                label: team.name || team.teamId,
+              })),
+            ]}
+          />
+        </>
+      }
+      items={sessionSearch.sessions.map((session) => {
+        const tone = agentSessionStatusTone(session.status || "", {
+          session,
+          isActive: session.id === activeSessionId,
+          needsApproval: approvalSessionIds.has(session.id),
+          isRuntimeRunning: runtimeSessionIds.has(session.id),
+        });
+        const searchAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
+        return {
+          id: session.id,
+          title: session.title || searchAgent?.displayName || session.id,
+          detail: session.taskSummary || session.resultCard?.summary || "",
+          meta: [
+            session.agentDisplayName || searchAgent?.displayName || "",
+            sessionActivityLabel(tone, lang),
+            session.updatedAt || session.lastActive || "",
+          ].filter(Boolean).join(" · "),
+          highlight: sessionSearch.debouncedQueryText,
+          active: session.id === activeSessionId,
+          onOpen: () => {
             if (session.id === activeSessionId) onSetActiveTab(session.id, "agent");
             else onOpenDirectSession(session.id);
-            setHistoryOpen(false);
-          }}>
-            <strong>{session.title || session.id}</strong>
-            <span>{[session.agentDisplayName, sessionActivityLabel(tone, lang)].filter(Boolean).join(" · ")}</span>
-            <small>{session.updatedAt || session.lastActive}</small>
-          </VNativeButton>;
-        })}
-        {historySessions.length === 0 ? <VStateSurface tone="empty" title={lang === "zh" ? "没有匹配的会话" : "No matching sessions"} /> : null}
-      </div>
-    </VDialog>
+          },
+        };
+      })}
+      loading={sessionSearch.isLoading}
+      hasMore={sessionSearch.hasMore}
+      loadingMore={sessionSearch.isLoadingMore}
+      onLoadMore={() => void sessionSearch.loadMore()}
+      totalEstimate={sessionSearch.totalEstimate}
+      labels={{
+        searchPlaceholder: lang === "zh" ? "搜索标题、摘要或会话编号" : "Search titles, summaries or session IDs",
+        emptyTitle: lang === "zh" ? "没有匹配的会话" : "No matching sessions",
+        emptyHint: lang === "zh" ? "换个关键词，或清空过滤条件" : "Try another keyword or clear the filters",
+        loadMore: lang === "zh" ? "加载更多" : "Load more",
+        loadingMore: lang === "zh" ? "加载中…" : "Loading…",
+        resultSummary: (loaded, total) => (lang === "zh" ? `已加载 ${loaded} / ${total} 个会话` : `Loaded ${loaded} of ${total} sessions`),
+        hint: lang === "zh" ? "↑↓ 选择 · Enter 打开 · Esc 关闭" : "↑↓ navigate · Enter open · Esc close",
+      }}
+    />
     </>
   );
 }

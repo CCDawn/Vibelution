@@ -188,6 +188,7 @@ export type SessionQueryResponse = {
     sessionKind: string;
     state: string;
     sort: string;
+    teamId?: string;
     limit: number;
     cursor: string;
   };
@@ -247,6 +248,27 @@ export type ConversationSummary = {
   sourceRef?: SourceAuthorityRef;
   projectionEdit?: ProjectionEditContract;
   agentSourceRef?: SourceAuthorityRef | null;
+};
+
+export type ConversationQueryFilters = {
+  q: string;
+  agentId: string;
+  teamId: string;
+  type: string;
+  sort: string;
+  limit: number;
+  cursor: string;
+};
+
+/**
+ * Cursor-paginated unified conversation index envelope (GET /api/conversations).
+ * Mirrors SessionQueryResponse: integer offset cursor via `nextCursor`.
+ */
+export type ConversationQueryResponse = {
+  items: ConversationSummary[];
+  nextCursor: string;
+  totalEstimate?: number;
+  filters: ConversationQueryFilters;
 };
 
 export type ConversationIndexVisibility =

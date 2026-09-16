@@ -848,6 +848,7 @@ def query_sessions(
     session_kind: str = "",
     state: str = "",
     sort: str = "updatedAt_desc",
+    team_id: str = "",
     agent_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Return a paginated, filtered session summary payload."""
@@ -860,6 +861,7 @@ def query_sessions(
     normalized_agent_id = str(agent_id or "").strip()
     normalized_session_kind = str(session_kind or "").strip().lower()
     normalized_state = str(state or "").strip().lower()
+    normalized_team_id = str(team_id or "").strip()
     normalized_sort = s._normalize_session_query_sort(sort)
 
     def filter_payload(effective_cursor: int) -> dict[str, Any]:
@@ -869,6 +871,7 @@ def query_sessions(
             "sessionKind": normalized_session_kind,
             "state": normalized_state,
             "sort": normalized_sort,
+            "teamId": normalized_team_id,
             "limit": normalized_limit,
             "cursor": str(effective_cursor) if effective_cursor > 0 else "",
         }
@@ -881,7 +884,33 @@ def query_sessions(
         "session_kind": normalized_session_kind,
         "state": normalized_state,
         "sort": normalized_sort,
+        "team_id": normalized_team_id,
     }
+    # A team scope resolves to the roster's agent ids once, then behaves like a
+    # hard agent-set filter in every read path (directory store, canonical).
+    if agent_by_id is None and normalized_team_id:
+        agent_by_id = s._agent_lookup_for_conversations()
+    team_agent_ids: tuple[str, ...] = ()
+    if normalized_team_id:
+        team_agent_ids = tuple(sorted(
+            str(candidate_id or "").strip()
+            for candidate_id, candidate in (agent_by_id or {}).items()
+            if isinstance(candidate, dict)
+            and s._agent_team_identity(
+                candidate,
+                candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {},
+            ).get("teamId", "") == normalized_team_id
+        ))
+    if normalized_team_id and not team_agent_ids:
+        # Unknown or member-less team: deterministic empty page without a store
+        # or catalog round-trip. An empty ``IN ()`` scope cannot be expressed
+        # downstream, so the contract is honored here.
+        return {
+            "items": [],
+            "nextCursor": "",
+            "totalEstimate": 0,
+            "filters": filter_payload(0),
+        }
     agent_direct_summary = (
         _agent_direct_session_query_summary(agent_id=normalized_agent_id)
         if normalized_agent_id
@@ -914,6 +943,7 @@ def query_sessions(
             state=normalized_state,
             sort=normalized_sort,
             agent_by_id=agent_by_id,
+            agent_ids=team_agent_ids,
         )
     except Exception as exc:
         # A raising directory read used to vanish into the canonical fallback
@@ -949,7 +979,14 @@ def query_sessions(
             directory_error_type=directory_error_type,
         )
         return payload
-    if catalog_mode == "read_preferred" and not agent_direct_hidden_from_index:
+    if (
+        catalog_mode == "read_preferred"
+        and not agent_direct_hidden_from_index
+        and not normalized_team_id
+    ):
+        # The catalog intentionally mirrors the indexed query contract without a
+        # team scope; a team-scoped read stays on the canonical paths below so
+        # the roster filter cannot be silently dropped.
         candidate_payload: dict[str, Any] | None = None
         try:
             from . import catalog_bridge
@@ -1026,7 +1063,13 @@ def query_sessions(
     ):
         sessions = [*sessions, agent_direct_summary]
 
-    has_filters = bool(normalized_query or normalized_agent_id or normalized_session_kind or normalized_state)
+    has_filters = bool(
+        normalized_query
+        or normalized_agent_id
+        or normalized_session_kind
+        or normalized_state
+        or team_agent_ids
+    )
     if not has_filters and normalized_sort == "updatedAt_desc":
         filtered = sessions
     else:
@@ -1039,6 +1082,10 @@ def query_sessions(
                 agent_id=normalized_agent_id,
                 session_kind=normalized_session_kind,
                 state=normalized_state,
+            )
+            and (
+                not team_agent_ids
+                or str(item.get("agentId") or "").strip() in set(team_agent_ids)
             )
         ]
     if normalized_sort != "updatedAt_desc":

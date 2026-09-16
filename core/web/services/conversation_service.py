@@ -60,6 +60,85 @@ def list_conversations() -> list[dict[str, Any]]:
     return items
 
 
+def query_conversations(
+    *,
+    limit: int = 100,
+    cursor: str = "",
+    q: str = "",
+    agent_id: str = "",
+    team_id: str = "",
+    conversation_type: str = "",
+) -> dict[str, Any]:
+    """Return a cursor-paginated, filtered page of the unified conversation index.
+
+    Cursor model mirrors ``session_service.query_sessions``: integer offset
+    cursor, ``items``/``nextCursor``/``totalEstimate``/``filters`` envelope.
+    ``q`` matches title, summary, conversation/session/room ids and agent
+    identity fields — it does not scan message content.
+    """
+
+    items = list_conversations()
+    needle = str(q or "").strip().lower()
+    normalized_agent_id = str(agent_id or "").strip()
+    normalized_team_id = str(team_id or "").strip()
+    normalized_type = str(conversation_type or "").strip().lower()
+    try:
+        limit_value = int(limit)
+    except (TypeError, ValueError):
+        limit_value = 100
+    normalized_limit = max(1, min(200, limit_value if limit_value > 0 else 100))
+
+    def _matches(item: dict[str, Any]) -> bool:
+        if normalized_type and str(item.get("type") or "").strip().lower() != normalized_type:
+            return False
+        if normalized_agent_id and str(item.get("agentId") or "").strip() != normalized_agent_id:
+            return False
+        if normalized_team_id and str(item.get("teamId") or "").strip() != normalized_team_id:
+            return False
+        if not needle:
+            return True
+        haystack = " ".join(
+            str(item.get(key) or "")
+            for key in (
+                "title",
+                "summary",
+                "conversationId",
+                "directSessionId",
+                "roomId",
+                "agentId",
+                "agentCode",
+                "agentDisplayName",
+                "teamId",
+                "teamName",
+                "status",
+            )
+        ).lower()
+        return needle in haystack
+
+    filtered = [item for item in items if _matches(item)]
+    total = len(filtered)
+    try:
+        cursor_value = int(str(cursor or "").strip() or "0")
+    except (TypeError, ValueError):
+        cursor_value = 0
+    start = min(max(cursor_value, 0), total)
+    end = min(start + normalized_limit, total)
+    return {
+        "items": filtered[start:end],
+        "nextCursor": str(end) if end < total else "",
+        "totalEstimate": total,
+        "filters": {
+            "q": str(q or "").strip(),
+            "agentId": normalized_agent_id,
+            "teamId": normalized_team_id,
+            "type": normalized_type,
+            "sort": "updatedAt_desc",
+            "limit": normalized_limit,
+            "cursor": str(start) if start > 0 else "",
+        },
+    }
+
+
 def list_group_conversations(
     sessions: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:

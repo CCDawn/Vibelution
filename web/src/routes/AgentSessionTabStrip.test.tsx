@@ -1,5 +1,6 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
-import React, { type ComponentProps } from "react";
+import React, { type ComponentProps, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentInstance, SessionReferenceAttachment, SessionSummary } from "../api/types";
@@ -101,7 +102,11 @@ function renderStrip(overrides: Partial<ComponentProps<typeof AgentSessionTabStr
     onSubmitRename: () => undefined,
     ...overrides,
   };
-  return renderToStaticMarkup(<AgentSessionTabStrip {...props} />);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const render = (node: ReactNode) => renderToStaticMarkup(
+    <QueryClientProvider client={client}>{node}</QueryClientProvider>,
+  );
+  return render(<AgentSessionTabStrip {...props} />);
 }
 
 describe("AgentSessionTabStrip", () => {

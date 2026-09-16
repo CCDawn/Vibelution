@@ -5,7 +5,6 @@ import { querySessions } from "../api/chat";
 import { queryKeys } from "../api/queryKeys";
 import type {
   AgentInstance,
-  ConversationSummary,
   SessionDetail,
   SessionQueryResponse,
   SessionSummary,
@@ -167,18 +166,6 @@ export function evictUnopenableSessionFromCaches(queryClient: QueryClient, sessi
     sessions?.filter((session) => session.id !== normalizedSessionId),
   );
   removeSessionFromAgentSessionCaches(queryClient, normalizedSessionId);
-  queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) => {
-    if (!conversations) {
-      return conversations;
-    }
-    return conversations.filter((conversation) => {
-      if (conversation.type !== "direct_agent") {
-        return true;
-      }
-      return conversation.directSessionId !== normalizedSessionId
-        && conversation.conversationId !== normalizedSessionId;
-    });
-  });
 }
 
 export function updateAgentSessionSummaryCaches(queryClient: QueryClient, updater: SessionSummaryUpdater) {

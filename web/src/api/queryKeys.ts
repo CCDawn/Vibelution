@@ -41,6 +41,9 @@ export const queryKeys = {
   promptTemplates: () => ["prompt-templates"] as const,
   agentModeBindings: () => ["agent-mode-bindings"] as const,
   conversations: () => ["conversations"] as const,
+  // Paginated group-room catalog page ("conversations" is a valid prefix so
+  // broad invalidations still reach this key).
+  conversationsCatalogQuery: (limit = 100) => ["conversations", "query", limit] as const,
   sessions: () => ["sessions"] as const,
   sessionQuery: (q = "", limit = 50, cursor = "") => ["sessions", "query", q, limit, cursor] as const,
   session: (id: string) => ["sessions", id] as const,

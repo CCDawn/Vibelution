@@ -2,7 +2,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 
 import { queryKeys } from "../api/queryKeys";
-import type { AgentInstance, ConversationSummary, SessionDetail, SessionQueryResponse, SessionSummary } from "../api/types";
+import type { AgentInstance, SessionDetail, SessionQueryResponse, SessionSummary } from "../api/types";
 import {
   captureAgentSessionCacheSnapshots,
   captureSessionIndexCacheSnapshots,
@@ -233,27 +233,6 @@ describe("chatSessionIndexQuery cache helpers", () => {
       pageParams: [""],
     });
     queryClient.setQueryData(["sessions", "agent", "agent-a"], page([ghost, keep], "", 2));
-    queryClient.setQueryData(queryKeys.conversations(), [
-      {
-        conversationId: "session-ghost",
-        type: "direct_agent",
-        title: "Ghost",
-        directSessionId: "session-ghost",
-        status: "ready",
-        summary: "",
-        updatedAt: "2026-06-09T08:00:00",
-        workspacePath: "",
-      },
-      {
-        conversationId: "room-1",
-        type: "group_room",
-        title: "Room",
-        status: "ready",
-        summary: "",
-        updatedAt: "2026-06-09T08:00:00",
-        workspacePath: "",
-      },
-    ] satisfies ConversationSummary[]);
     queryClient.setQueryData(queryKeys.session("session-ghost"), detail({ id: "session-ghost" }));
     pinSessionCreatePreserve(ghost);
 
@@ -263,8 +242,6 @@ describe("chatSessionIndexQuery cache helpers", () => {
       .toEqual(["session-keep"]);
     expect(queryClient.getQueryData<SessionQueryResponse>(["sessions", "agent", "agent-a"])?.items.map((item) => item.id))
       .toEqual(["session-keep"]);
-    expect(queryClient.getQueryData<ConversationSummary[]>(queryKeys.conversations())?.map((item) => item.conversationId))
-      .toEqual(["room-1"]);
     expect(queryClient.getQueryData(queryKeys.session("session-ghost"))).toEqual(detail({ id: "session-ghost" }));
     expect(isSessionDeleteTombstoned("session-ghost")).toBe(true);
     expect(isSessionCreatePreserved("session-ghost")).toBe(false);

@@ -1169,7 +1169,7 @@ def test_agent_and_conversation_api_create_direct_agent(tmp_path, monkeypatch):
     conversations_response = client.get("/api/conversations")
 
     assert conversations_response.status_code == 200
-    conversations = conversations_response.json()
+    conversations = conversations_response.json()["items"]
     direct = next(
         item
         for item in conversations

@@ -3219,7 +3219,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatApiSource).toContain('fetchJson<ChatWorkbenchBootstrap>("/api/sessions/bootstrap?limit=50"');
     expect(routeSource).toContain("fetchChatWorkbenchBootstrap({ signal })");
     expect(routeSource).toContain("queryClient.setQueryData(queryKeys.agents(), payload.agents)");
-    expect(routeSource).toContain("queryClient.setQueryData(queryKeys.conversations(), payload.conversations)");
+    // The bootstrap seeds the paginated group-room catalog (direct conversations
+    // come from the session index + agent merge), not a flat conversations list.
+    expect(routeSource).toContain("queryKeys.conversationsCatalogQuery(CONVERSATIONS_CATALOG_PAGE_SIZE)");
     expect(routeSource).toContain('queryKeys.sessionQuery("", 50)');
     expect(routeSource).toContain("mergePreservedCreatedSessions");
     expect(routeSource).toContain("Never hard-replace the session index page");

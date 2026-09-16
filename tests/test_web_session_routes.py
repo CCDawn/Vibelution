@@ -1067,7 +1067,9 @@ def test_conversation_index_exposes_direct_agent_classification_fields(tmp_path,
     response = client.get("/api/conversations")
 
     assert response.status_code == 200
-    direct = next(item for item in response.json() if item["conversationId"] == "session-direct")
+    direct = next(
+        item for item in response.json()["items"] if item["conversationId"] == "session-direct"
+    )
     assert direct["type"] == "direct_agent"
     assert direct["conversationIndexKind"] == "personal_agent"
     assert direct["conversationIndexVisibility"] == "user_visible"
@@ -1078,6 +1080,207 @@ def test_conversation_index_exposes_direct_agent_classification_fields(tmp_path,
     assert direct["projectionEdit"]["mode"] == "deep_link_to_source"
     assert direct["agentSourceRef"]["owner"] == "AgentDirectory"
     assert direct["agentSourceRef"]["canonicalEditRoute"] == "/agents?agent=agent-direct&pane=config"
+
+
+def test_conversation_query_paginates_with_cursor_envelope(tmp_path, monkeypatch):
+    conversations = [
+        {
+            "conversation_id": f"session-{index}",
+            "title": f"会话 {index}",
+            "session_kind": "main",
+            "updated_at": f"2026-05-1{index}T10:00:00",
+            "messages": [{"role": "user", "content": f"body {index}", "timestamp": f"2026-05-1{index}T10:00:00"}],
+        }
+        for index in range(5)
+    ]
+    _seed_chat_state(tmp_path, conversations=conversations)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+
+    first_page = client.get("/api/conversations?limit=2")
+    assert first_page.status_code == 200
+    first_payload = first_page.json()
+    assert first_payload["totalEstimate"] == 5
+    assert len(first_payload["items"]) == 2
+    assert first_payload["nextCursor"] == "2"
+    assert first_payload["filters"]["limit"] == 2
+    assert first_payload["filters"]["cursor"] == ""
+
+    second_page = client.get("/api/conversations?limit=2&cursor=2")
+    assert second_page.status_code == 200
+    second_payload = second_page.json()
+    assert len(second_payload["items"]) == 2
+    assert second_payload["nextCursor"] == "4"
+    assert second_payload["filters"]["cursor"] == "2"
+
+    last_page = client.get("/api/conversations?limit=2&cursor=4")
+    assert last_page.status_code == 200
+    last_payload = last_page.json()
+    assert len(last_payload["items"]) == 1
+    assert last_payload["nextCursor"] == ""
+
+    first_ids = [item["conversationId"] for item in first_payload["items"]]
+    second_ids = [item["conversationId"] for item in second_payload["items"]]
+    assert not set(first_ids) & set(second_ids)
+
+
+def test_conversation_query_q_matches_identity_fields_but_not_message_content(tmp_path, monkeypatch):
+    conversations = [
+        {
+            "conversation_id": "session-alpha",
+            "title": "接口重构",
+            "session_kind": "main",
+            "updated_at": "2026-05-18T10:00:00",
+            "messages": [
+                {"role": "user", "content": "深海磷虾迁徙观测日志", "timestamp": "2026-05-18T09:30:00"},
+                {"role": "user", "content": "最终结论已归档", "timestamp": "2026-05-18T10:00:00"},
+            ],
+        },
+        {
+            "conversation_id": "session-beta",
+            "title": "日常记录",
+            "agent_id": "agent-beta",
+            "agentId": "agent-beta",
+            "session_kind": "main",
+            "updated_at": "2026-05-18T11:00:00",
+            "messages": [{"role": "user", "content": "alpha", "timestamp": "2026-05-18T11:00:00"}],
+        },
+    ]
+    _seed_chat_state(tmp_path, conversations=conversations)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-beta",
+                    "displayName": "Beta 助手",
+                    "status": "active",
+                    "directSessionId": "session-beta",
+                }
+            ]
+        }
+    )
+
+    title_hit = client.get("/api/conversations?q=接口").json()
+    assert [item["conversationId"] for item in title_hit["items"]] == ["session-alpha"]
+
+    summary_or_identity_hit = client.get("/api/conversations?q=beta").json()
+    assert {item["conversationId"] for item in summary_or_identity_hit["items"]} == {"session-beta"}
+
+    agent_name_hit = client.get("/api/conversations?q=Beta%20%E5%8A%A9%E6%89%8B").json()
+    assert {item["conversationId"] for item in agent_name_hit["items"]} == {"session-beta"}
+
+    # The last-message preview (taskSummary) is searchable...
+    preview_hit = client.get("/api/conversations?q=%E6%9C%80%E7%BB%88%E7%BB%93%E8%AE%BA").json()
+    assert {item["conversationId"] for item in preview_hit["items"]} == {"session-alpha"}
+
+    # ...but q never scans the transcript: an earlier message body that is not
+    # the title/summary/identity of any conversation stays invisible.
+    transcript_only = client.get("/api/conversations?q=%E6%B7%B1%E6%B5%B7%E7%A3%B7%E8%99%BE%E8%BF%81%E5%BE%99").json()
+    assert transcript_only["items"] == []
+    assert transcript_only["totalEstimate"] == 0
+
+
+def test_conversation_query_type_filter_narrows_to_group_rooms(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-direct",
+                "title": "直会",
+                "session_kind": "main",
+                "updated_at": "2026-05-18T10:00:00",
+                "messages": [{"role": "user", "content": "hi", "timestamp": "2026-05-18T10:00:00"}],
+            }
+        ],
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+
+    team_response = client.post("/api/teams", json={"name": "分页团队"})
+    assert team_response.status_code in (200, 201), team_response.text
+
+    rooms_page = client.get("/api/conversations?type=group_room")
+    assert rooms_page.status_code == 200
+    rooms_payload = rooms_page.json()
+    assert rooms_payload["totalEstimate"] == 1
+    assert [item["type"] for item in rooms_payload["items"]] == ["group_room"]
+    assert rooms_payload["filters"]["type"] == "group_room"
+
+    direct_page = client.get("/api/conversations?type=direct_agent")
+    assert direct_page.status_code == 200
+    assert {item["type"] for item in direct_page.json()["items"]} == {"direct_agent"}
+
+
+def test_session_query_team_filter_scopes_to_team_roster(tmp_path, monkeypatch):
+    conversations = [
+        {
+            "conversation_id": "session-team",
+            "title": "团队会话",
+            "agent_id": "agent-in-team",
+            "agentId": "agent-in-team",
+            "session_kind": "main",
+            "updated_at": "2026-05-18T10:00:00",
+            "messages": [{"role": "user", "content": "team", "timestamp": "2026-05-18T10:00:00"}],
+        },
+        {
+            "conversation_id": "session-solo",
+            "title": "独立会话",
+            "agent_id": "agent-solo",
+            "agentId": "agent-solo",
+            "session_kind": "main",
+            "updated_at": "2026-05-18T11:00:00",
+            "messages": [{"role": "user", "content": "solo", "timestamp": "2026-05-18T11:00:00"}],
+        },
+    ]
+    _seed_chat_state(tmp_path, conversations=conversations)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-in-team",
+                    "displayName": "Team Member",
+                    "status": "active",
+                    "directSessionId": "session-team",
+                    # A personal agent tagged with metadata.teamId: team
+                    # membership the way the Agent directory records it, while
+                    # the session stays user-visible in the global index.
+                    "metadata": {"teamId": "team-1", "conversationIndexKind": "personal_agent"},
+                },
+                {
+                    "agentId": "agent-solo",
+                    "displayName": "Solo Agent",
+                    "status": "active",
+                    "directSessionId": "session-solo",
+                    "metadata": {"conversationIndexKind": "personal_agent"},
+                },
+            ]
+        }
+    )
+
+    team_page = client.get("/api/sessions/query?teamId=team-1")
+    assert team_page.status_code == 200
+    team_payload = team_page.json()
+    assert [item["id"] for item in team_payload["items"]] == ["session-team"]
+    assert team_payload["filters"]["teamId"] == "team-1"
+
+    unknown_team = client.get("/api/sessions/query?teamId=team-missing")
+    assert unknown_team.status_code == 200
+    assert unknown_team.json()["items"] == []
+    assert unknown_team.json()["totalEstimate"] == 0
+
+    intersection = client.get("/api/sessions/query?teamId=team-1&agentId=agent-solo")
+    assert intersection.status_code == 200
+    assert intersection.json()["items"] == []
+
+    roster_page = client.get("/api/sessions/query?teamId=team-1&q=团队")
+    assert roster_page.status_code == 200
+    assert [item["id"] for item in roster_page.json()["items"]] == ["session-team"]
 
 
 def test_team_agent_session_summary_exposes_agent_owned_team_identity(tmp_path, monkeypatch):

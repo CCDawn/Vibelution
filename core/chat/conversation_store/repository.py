@@ -554,6 +554,7 @@ class SessionDao:
         query: str = "",
         include_hidden: bool = False,
         matching_agent_ids: Sequence[str] = (),
+        agent_ids: Sequence[str] = (),
         limit: int = 50,
         before: tuple[int, str] | None = None,
     ) -> dict[str, Any]:
@@ -566,6 +567,13 @@ class SessionDao:
         if normalized_agent_id:
             where.append("agent_id=?")
             parameters.append(normalized_agent_id)
+        # Hard AND-filter for membership-style scopes (e.g. team rosters).
+        # Unlike ``matching_agent_ids`` this never ORs with the free-text query.
+        scoped_agent_ids = [str(item).strip() for item in agent_ids if str(item).strip()]
+        if scoped_agent_ids:
+            placeholders = ",".join("?" for _ in scoped_agent_ids)
+            where.append(f"agent_id IN ({placeholders})")
+            parameters.extend(scoped_agent_ids)
         normalized_kind = str(session_kind or "").strip().lower()
         if normalized_kind:
             where.append("LOWER(session_kind)=?")

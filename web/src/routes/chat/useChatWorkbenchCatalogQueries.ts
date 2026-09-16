@@ -4,8 +4,8 @@
  * chat-room catalog and expanded agent detail windows — not session detail SSE.
  */
 
-import { useQueries, useQuery, type QueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo, useState } from "react";
+import { useInfiniteQuery, useQueries, useQuery, type InfiniteData, type QueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { listAgentSummaries } from "../../api/agents";
 import {
@@ -13,7 +13,7 @@ import {
   fetchChatWorkbenchBootstrap,
   listChatRoomModes,
   listChatRoomPurposes,
-  listConversations,
+  queryConversations,
 } from "../../api/chat";
 import { fetchPublicConfig } from "../../api/config";
 import { listProjectAgentBusTimeline } from "../../api/projectAgentBus";
@@ -22,6 +22,7 @@ import { fetchSkillLibrary } from "../../api/skills";
 import { listTeams } from "../../api/teams";
 import { queryKeys } from "../../api/queryKeys";
 import type {
+  ConversationQueryResponse,
   SessionSummary,
 } from "../../api/types";
 import { resolvePollingInterval } from "../../app/pollingPolicy";
@@ -37,6 +38,15 @@ import { isVisibleDirectSession } from "../conversationIndexModel";
 import { mergePreservedCreatedSessions } from "../sessionCreatePreserve";
 import { filterOutTombstonedConversations } from "../sessionDeleteTombstone";
 import { fetchSessionDetailWindow } from "./chatSessionDetailHelpers";
+
+/**
+ * The unified catalog poll keeps only the group-room half of the conversation
+ * index: direct conversations are projected from the session index query plus
+ * the agent directory merge, so polling them duplicated ~90% of the payload.
+ * Measured against a 144-item index (130 sessions / 14 rooms): full pull
+ * ~195 KB across 2 requests vs ~16 KB for this group-room page.
+ */
+const CONVERSATIONS_CATALOG_PAGE_SIZE = 100;
 
 export type ChatWorkbenchCatalogQueriesInput = {
   queryClient: QueryClient;
@@ -96,7 +106,21 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     queryFn: async ({ signal }) => {
       const payload = await fetchChatWorkbenchBootstrap({ signal });
       queryClient.setQueryData(queryKeys.agents(), payload.agents);
-      queryClient.setQueryData(queryKeys.conversations(), payload.conversations);
+      // Seed the group-room catalog with the bootstrap projection so the rail
+      // paints before the paginated catalog query resolves; the catalog query
+      // reconciles (and continues paging) right after.
+      queryClient.setQueryData<InfiniteData<ConversationQueryResponse, string>>(
+        queryKeys.conversationsCatalogQuery(CONVERSATIONS_CATALOG_PAGE_SIZE),
+        (existing) => existing ?? {
+          pages: [{
+            items: payload.conversations,
+            nextCursor: "",
+            totalEstimate: payload.conversations.length,
+            filters: { q: "", agentId: "", teamId: "", type: "group_room", sort: "updatedAt_desc", limit: CONVERSATIONS_CATALOG_PAGE_SIZE, cursor: "" },
+          }],
+          pageParams: [""],
+        },
+      );
       // Never hard-replace the session index page: create optimism / pins must
       // survive bootstrap refetch triggered by broad `["sessions"]` invalidation.
       const previous = queryClient.getQueryData<{
@@ -165,19 +189,55 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     }),
     [rawSessionsQuery, visibleSessionsData],
   );
-  const conversationsQueryRaw = useQuery({
-    queryKey: queryKeys.conversations(),
-    queryFn: () => listConversations(),
+  const conversationsQueryRaw = useInfiniteQuery({
+    queryKey: queryKeys.conversationsCatalogQuery(CONVERSATIONS_CATALOG_PAGE_SIZE),
+    initialPageParam: "",
     enabled: secondaryChatDataEnabled && bootstrapSettled,
     staleTime: 5_000,
     refetchInterval: chatLiveQueryPolicy.conversationsRefetchInterval,
     refetchIntervalInBackground: chatLiveQueryPolicy.sharedRefetchIntervalInBackground,
+    queryFn: async ({ pageParam }) => {
+      const payload = await queryConversations({
+        limit: CONVERSATIONS_CATALOG_PAGE_SIZE,
+        cursor: String(pageParam || ""),
+        type: "group_room",
+      });
+      return {
+        ...payload,
+        items: filterOutTombstonedConversations(payload.items) ?? [],
+      };
+    },
+    getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
   });
+  // The rail renders every team room, so exhaust the cursor like the session
+  // index does instead of stopping at the first catalog page.
+  useEffect(() => {
+    if (!conversationsQueryRaw.hasNextPage || conversationsQueryRaw.isFetchingNextPage) {
+      return;
+    }
+    void conversationsQueryRaw.fetchNextPage();
+  }, [
+    conversationsQueryRaw.hasNextPage,
+    conversationsQueryRaw.isFetchingNextPage,
+    conversationsQueryRaw.fetchNextPage,
+  ]);
   const conversationsQuery = useMemo(() => {
-    const data = filterOutTombstonedConversations(conversationsQueryRaw.data);
+    const data = filterOutTombstonedConversations(
+      conversationsQueryRaw.data?.pages.flatMap((page) => page.items ?? []),
+    );
+    const lastPage = conversationsQueryRaw.data?.pages.at(-1);
     return {
-      ...conversationsQueryRaw,
       data,
+      dataUpdatedAt: conversationsQueryRaw.dataUpdatedAt,
+      error: conversationsQueryRaw.error,
+      isError: conversationsQueryRaw.isError,
+      isFetching: conversationsQueryRaw.isFetching,
+      isLoading: conversationsQueryRaw.isLoading,
+      refetch: conversationsQueryRaw.refetch,
+      totalEstimate:
+        typeof lastPage?.totalEstimate === "number"
+          ? lastPage.totalEstimate
+          : (data?.length ?? 0),
     };
   }, [conversationsQueryRaw]);
   const teamsQuery = useQuery({

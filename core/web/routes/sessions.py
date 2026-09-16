@@ -314,6 +314,7 @@ def session_query(
     sessionKind: str = "",
     state: str = "",
     sort: str = "updatedAt_desc",
+    teamId: str = "",
 ) -> dict:
     return query_sessions(
         limit=limit,
@@ -323,6 +324,7 @@ def session_query(
         session_kind=sessionKind,
         state=state,
         sort=sort,
+        team_id=teamId,
     )
 
 

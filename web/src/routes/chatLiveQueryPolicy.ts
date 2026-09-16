@@ -3,6 +3,14 @@ import { resolvePollingInterval, type PollingInterval } from "../app/pollingPoli
 export const ACTIVE_INDEX_POLL_MS = 3_000;
 export const ACTIVE_BACKGROUND_SYNC_POLL_MS = 5_000;
 export const ACTIVE_SESSION_DETAIL_POLL_MS = 3_000;
+/**
+ * Group-room catalog poll (GET /api/conversations?type=group_room, limit 100).
+ * Measured ~34 ms / ~16 KB per page against a 144-item index — the catalog no
+ * longer pulls the direct-session half (covered by the session index query),
+ * so the poll cadence relaxes from the 3s index beat to 15s without hurting
+ * rail freshness; room create/archive paths still invalidate immediately.
+ */
+export const CONVERSATIONS_CATALOG_POLL_MS = 15_000;
 
 export type ChatLiveQueryPolicyInput = {
   chatPollingVisible: boolean;
@@ -70,7 +78,7 @@ export function resolveChatLiveQueryPolicy(input: ChatLiveQueryPolicyInput): Cha
     ),
     conversationsRefetchInterval: resolvePollingInterval(
       input.chatPollingVisible,
-      directSessionStreamOwnsLiveQueries || groupStreamOwnsLiveQueries ? false : ACTIVE_INDEX_POLL_MS,
+      directSessionStreamOwnsLiveQueries || groupStreamOwnsLiveQueries ? false : CONVERSATIONS_CATALOG_POLL_MS,
       { backgroundMs: sharedBackgroundMs },
     ),
     sessionDetailRefetchInterval: input.activeSessionId

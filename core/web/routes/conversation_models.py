@@ -18,3 +18,24 @@ class ConversationIndexItem(BaseModel):
     title: str = ""
     status: str = ""
     updatedAt: str = ""
+
+
+class ConversationQueryFilters(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    q: str = ""
+    agentId: str = ""
+    teamId: str = ""
+    type: str = ""
+    sort: str = "updatedAt_desc"
+    limit: int = 100
+    cursor: str = ""
+
+
+class ConversationQueryResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    items: list[ConversationIndexItem] = []
+    nextCursor: str = ""
+    totalEstimate: int = 0
+    filters: ConversationQueryFilters = ConversationQueryFilters()

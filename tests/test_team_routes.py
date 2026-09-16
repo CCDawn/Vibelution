@@ -340,7 +340,7 @@ def test_archived_team_room_is_hidden_from_conversation_index_and_deleted(tmp_pa
     room_id = team["linkedChatRoomId"]
 
     archive_response = client.patch(f"/api/teams/{team['teamId']}", json={"status": "archived"})
-    conversations = client.get("/api/conversations").json()
+    conversations = client.get("/api/conversations").json()["items"]
     room_response = client.get(f"/api/chat-rooms/{room_id}")
 
     assert archive_response.status_code == 200, archive_response.text

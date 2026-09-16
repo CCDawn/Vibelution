@@ -88,7 +88,7 @@ def test_agent_archive_seals_direct_and_child_sessions(tmp_path, monkeypatch):
 
     indexed_ids = {
         item["conversationId"]
-        for item in client.get("/api/conversations").json()
+        for item in client.get("/api/conversations").json()["items"]
     }
     assert direct["id"] not in indexed_ids
     assert child["id"] not in indexed_ids
@@ -168,7 +168,9 @@ def test_reset_all_agent_test_conversations_preserves_agents_and_clears_lineage(
     assert result["deletedCount"] == 3
     assert result["agentBindingsCleared"] >= 2
     assert not child_workspace.exists()
-    assert client.get("/api/conversations").json() == []
+    conversations_payload = client.get("/api/conversations").json()
+    assert conversations_payload["items"] == []
+    assert conversations_payload["totalEstimate"] == 0
     for agent_id in (direct["agentId"], second["agentId"]):
         agent = agent_directory_service.get_agent(agent_id, include_archived=True)
         assert agent is not None

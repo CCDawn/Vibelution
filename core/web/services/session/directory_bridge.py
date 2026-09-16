@@ -6,7 +6,7 @@ Callers must not wait on SQLite futures while holding ``_CHAT_STATE_LOCK``.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from concurrent.futures import Future
 from datetime import datetime
 import logging
@@ -50,6 +50,7 @@ def query_session_summaries(
     state: str = "",
     sort: str = "updatedAt_desc",
     agent_by_id: Mapping[str, Mapping[str, Any]] | None = None,
+    agent_ids: Sequence[str] = (),
 ) -> dict[str, Any] | None:
     if directory_runtime.wait_for_directory_startup(
         timeout=directory_runtime.LIST_QUERY_STARTUP_WAIT_SECONDS,
@@ -99,6 +100,7 @@ def query_session_summaries(
             query=normalized_query,
             include_hidden=include_hidden,
             matching_agent_ids=matching_agent_ids,
+            agent_ids=agent_ids,
             limit=_DIRECTORY_LIST_PAGE,
         )
         summaries = [
@@ -148,6 +150,7 @@ def query_session_summaries(
             query=normalized_query,
             include_hidden=include_hidden,
             matching_agent_ids=matching_agent_ids,
+            agent_ids=agent_ids,
             limit=normalized_limit,
             before=before,
         )

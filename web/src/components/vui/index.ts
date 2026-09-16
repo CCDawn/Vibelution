@@ -160,3 +160,9 @@ export {
   type VWorkbenchPowerMenuLabels,
   type VWorkbenchPowerMenuProps,
 } from "./product/workbench-shell";
+export {
+  VSessionSearchDialog,
+  type VSessionSearchDialogItem,
+  type VSessionSearchDialogLabels,
+  type VSessionSearchDialogProps,
+} from "./product/workbench-shell";
