@@ -287,7 +287,7 @@ def _resolve_session_image_attachments(
     attachments: list[dict[str, Any]] = []
     for artifact_id in normalized_ids:
         existing = s._find_session_attachment_metadata(conversation, artifact_id)
-        if existing:
+        if existing and s._is_ready_user_image_attachment(existing):
             attachments.append(existing)
             continue
         try:

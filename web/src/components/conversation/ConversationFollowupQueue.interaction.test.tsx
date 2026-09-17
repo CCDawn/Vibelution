@@ -80,6 +80,31 @@ describe("ConversationFollowupQueueBar", () => {
     expect(onUpdate).toHaveBeenCalledWith("q-1", "先不要改测试，只汇报改了哪些文件。");
   });
 
+  it("labels queued attachment counts neutrally", async () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <ConversationFollowupQueueBar
+          items={[
+            { id: "q-1", text: "带附件的排队", attachmentCount: 2 },
+          ]}
+          lang="zh"
+          editLabel="修改这条排队"
+          withdrawLabel="撤回这条排队"
+          onUpdate={() => undefined}
+          onRemove={() => undefined}
+          onMove={() => undefined}
+        />,
+      );
+    });
+
+    const chip = container.querySelector('[title="2 个附件"]');
+    expect(chip).not.toBeNull();
+    expect(chip?.textContent).toContain("2");
+  });
+
   it("collapses long queues behind an expand toggle", async () => {
     container = document.createElement("div");
     document.body.appendChild(container);

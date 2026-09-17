@@ -498,6 +498,16 @@ def _format_visible_reply(result: Any) -> str:
     )
 
 
+def _is_explicit_non_image_attachment_dict(item: dict[str, Any]) -> bool:
+    kind = str(item.get("kind") or "").strip().lower()
+    if kind in {"document", "user_document"}:
+        return True
+    content_type = str(item.get("contentType") or item.get("content_type") or "").split(";", 1)[0].strip().lower()
+    if content_type:
+        return not content_type.startswith("image/")
+    return False
+
+
 def _has_image_generation_artifact_evidence(result: Any) -> bool:
     s = _service()
     if not isinstance(result, dict):
@@ -511,7 +521,8 @@ def _has_image_generation_artifact_evidence(result: Any) -> bool:
             if marker in seen:
                 continue
             seen.add(marker)
-            if str(current.get("imageUrl") or current.get("image_url") or "").strip():
+            image_url = str(current.get("imageUrl") or current.get("image_url") or "").strip()
+            if image_url and not s._is_explicit_non_image_attachment_dict(current):
                 return True
             if str(current.get("artifactId") or current.get("artifact_id") or "").strip():
                 kind = str(current.get("kind") or current.get("toolName") or current.get("tool_name") or "").strip()

@@ -233,6 +233,7 @@ import {
   comparableConversationImageUrl,
   conversationImageDownloadName,
   conversationImagePreviewUrl,
+  isLikelyConversationImageUrl,
 } from "./conversationImagePreview";
 import {
   formatConversationDuration,
@@ -4181,6 +4182,13 @@ export function ConversationView({
   }
 
   function renderMarkdownImage(alt: string, url: string, duplicateImageUrls?: Set<string>) {
+    if (!isLikelyConversationImageUrl(url)) {
+      return (
+        <a className={styles.markdownImageLink} href={url}>
+          {alt || url}
+        </a>
+      );
+    }
     const previewUrl = conversationImagePreviewUrl(url);
     if (duplicateImageUrls?.has(comparableConversationImageUrl(url))) {
       return null;

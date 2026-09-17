@@ -122,6 +122,71 @@ def normalize_chat_tool_calls(value: Any) -> list[str | dict[str, Any]]:
     return tool_calls
 
 
+# Mirror of the document store's accepted extension set
+# (core/web/services/session/document_attachments.py). Kept as a local literal
+# because core/ui must not import web service modules.
+_CHAT_ATTACHMENT_DOCUMENT_KINDS = frozenset({"document", "user_document"})
+_CHAT_ATTACHMENT_IMAGE_EXTENSIONS = frozenset({
+    "png", "jpg", "jpeg", "webp", "gif", "bmp", "svg", "avif", "heic", "heif", "ico", "tif", "tiff",
+})
+_CHAT_ATTACHMENT_DOCUMENT_EXTENSIONS = frozenset({
+    "md", "markdown", "txt", "text",
+    "csv", "tsv", "json", "jsonl", "yaml", "yml", "xml", "html", "htm",
+    "py", "pyw", "ipynb", "ts", "tsx", "js", "jsx", "mjs", "cjs",
+    "css", "scss", "less", "sql", "sh", "bash", "zsh", "ps1", "bat",
+    "r", "rmd", "rb", "php", "java", "kt", "swift", "c", "h", "cc",
+    "cpp", "hpp", "cs", "go", "rs", "scala", "pl", "lua", "dart",
+    "toml", "ini", "cfg", "conf", "log", "srt", "vtt", "bib", "tex", "sty",
+    "pdf", "rtf", "epub", "odt", "ods", "odp", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+})
+_CHAT_ATTACHMENT_DOCUMENT_CONTENT_TYPES = frozenset({
+    "application/pdf",
+    "application/json",
+    "application/xml",
+    "application/rtf",
+    "application/epub+zip",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.oasis.opendocument.text",
+    "application/vnd.oasis.opendocument.spreadsheet",
+    "application/vnd.oasis.opendocument.presentation",
+})
+
+
+def _chat_attachment_url_extension(url: str) -> str:
+    path = str(url or "").split("?", 1)[0].split("#", 1)[0]
+    filename = path.rsplit("/", 1)[-1]
+    if "." not in filename:
+        return ""
+    return filename.rsplit(".", 1)[-1].strip().lower()
+
+
+def _classify_chat_attachment_kind(raw_kind: str, content_type: str, url: str) -> str:
+    kind = str(raw_kind or "").strip()
+    normalized_kind = kind.lower()
+    if normalized_kind:
+        return kind
+    normalized_type = str(content_type or "").split(";", 1)[0].strip().lower()
+    extension = _chat_attachment_url_extension(url)
+    if normalized_type.startswith("image/"):
+        return "user_image"
+    if extension in _CHAT_ATTACHMENT_IMAGE_EXTENSIONS:
+        return "user_image"
+    if normalized_type.startswith("text/") or normalized_type in _CHAT_ATTACHMENT_DOCUMENT_CONTENT_TYPES:
+        return "user_document"
+    if extension in _CHAT_ATTACHMENT_DOCUMENT_EXTENSIONS:
+        return "user_document"
+    return "user_image"
+
+
+def _is_chat_attachment_document_kind(kind: str) -> bool:
+    return str(kind or "").strip().lower() in _CHAT_ATTACHMENT_DOCUMENT_KINDS
+
+
 def normalize_chat_attachments(value: Any) -> list[dict[str, Any]]:
     attachments: list[dict[str, Any]] = []
     for item in list(value or []):
@@ -132,15 +197,21 @@ def normalize_chat_attachments(value: Any) -> list[dict[str, Any]]:
         content_type = str(item.get("contentType") or item.get("content_type") or "").strip()
         if not artifact_id and not url:
             continue
+        kind = _classify_chat_attachment_kind(str(item.get("kind") or ""), content_type, url)
+        image_url = str(item.get("imageUrl") or item.get("image_url") or "").strip()
+        if _is_chat_attachment_document_kind(kind):
+            image_url = ""
+        elif not image_url:
+            image_url = url
         normalized: dict[str, Any] = {
             "artifactId": artifact_id,
             "filename": str(item.get("filename") or artifact_id or "").strip(),
             "url": url,
-            "imageUrl": str(item.get("imageUrl") or url).strip(),
+            "imageUrl": image_url,
             "downloadUrl": str(item.get("downloadUrl") or item.get("download_url") or url).strip(),
             "contentType": content_type,
             "sizeBytes": int(item.get("sizeBytes") or item.get("size_bytes") or 0),
-            "kind": str(item.get("kind") or "user_image").strip() or "user_image",
+            "kind": kind,
             "status": str(item.get("status") or "ready").strip() or "ready",
         }
         artifact_path = str(item.get("artifactPath") or item.get("artifact_path") or "").strip()

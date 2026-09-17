@@ -11,7 +11,11 @@ export function comparableConversationImageUrl(url: string) {
 
 export function isLikelyConversationImageUrl(url: string) {
   const normalized = String(url ?? "").toLowerCase();
-  return /\.(png|jpe?g|webp|gif)(?:[?#].*)?$/.test(normalized) || normalized.includes("/artifacts/image");
+  return (
+    normalized.startsWith("data:image/")
+    || /\.(png|jpe?g|webp|gif|svg|avif|bmp)(?:[?#].*)?$/.test(normalized)
+    || normalized.includes("/artifacts/image")
+  );
 }
 
 export function conversationImagePreviewUrl(url: string) {
