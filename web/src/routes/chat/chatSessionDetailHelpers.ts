@@ -6,7 +6,6 @@ import { queryKeys } from "../../api/queryKeys";
 import type {
   ChatRoomDetail,
   ConversationMessage,
-  ConversationSummary,
   SessionDetail,
   SessionSummary,
 } from "../../api/types";
@@ -17,8 +16,6 @@ import {
   assistantTurnItemsForMessage,
 } from "../chatTurnProtocol";
 import { isTurnErrorMessage } from "../../components/conversation/conversationMessagePredicates";
-import { sessionToConversationSummary } from "../conversationIndexModel";
-import { isAgentRootSession } from "../DirectSessionIndexItem";
 
 export const SESSION_DETAIL_INITIAL_MESSAGE_LIMIT = 40;
 export const SESSION_DETAIL_HISTORY_PAGE_SIZE = 40;
@@ -278,82 +275,6 @@ export function latestVisibleTurnErrorMessage(messages: ConversationMessage[] | 
     }
   }
   return "";
-}
-
-
-export function removeDeletedSessionFromConversations(
-  conversations: ConversationSummary[] | undefined,
-  deletedSessionId: string,
-): ConversationSummary[] | undefined {
-  if (!conversations) {
-    return conversations;
-  }
-  return conversations.filter((conversation) => {
-    if (conversation.type !== "direct_agent") {
-      return true;
-    }
-    return conversation.directSessionId !== deletedSessionId && conversation.conversationId !== deletedSessionId;
-  });
-}
-
-
-export function mergeSessionDetailIntoConversations(
-  conversations: ConversationSummary[] | undefined,
-  detail: SessionDetail,
-): ConversationSummary[] | undefined {
-  if (!conversations) {
-    return conversations;
-  }
-  const nextConversation = sessionToConversationSummary(detail);
-  const existingIndex = conversations.findIndex(
-    (conversation) =>
-      conversation.type === "direct_agent"
-      && (conversation.directSessionId === detail.id || conversation.conversationId === detail.id),
-  );
-  if (existingIndex < 0) {
-    return [nextConversation, ...conversations];
-  }
-  return conversations.map((conversation, index) =>
-    index === existingIndex
-      ? {
-          ...conversation,
-          ...nextConversation,
-        }
-      : conversation,
-  );
-}
-
-
-export function renameSessionInConversations(
-  conversations: ConversationSummary[] | undefined,
-  sessionId: string,
-  title: string,
-  updatedAt: string,
-  session?: SessionSummary | SessionDetail,
-): ConversationSummary[] | undefined {
-  if (!conversations || !sessionId) {
-    return conversations;
-  }
-
-  return conversations.map((conversation) => {
-    const directSessionId = String(conversation.directSessionId || conversation.conversationId || "").trim();
-    if (conversation.type !== "direct_agent" || directSessionId !== sessionId) {
-      return conversation;
-    }
-    if (session && isAgentRootSession(session)) {
-      return {
-        ...conversation,
-        title,
-        agentDisplayName: title,
-        updatedAt,
-      };
-    }
-    return {
-      ...conversation,
-      title,
-      updatedAt,
-    };
-  });
 }
 
 

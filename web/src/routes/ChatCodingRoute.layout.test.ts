@@ -2265,7 +2265,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("? chatLiveQueryPolicy.sessionDetailRefetchInterval");
     expect(routeSource).toContain("startupDetailSettledSessionId === activeSessionId");
     expect(routeSource).toContain("refetchInterval: childSessionLiveQueryPolicy.childSessionsRefetchInterval");
-    expect(routeSource).toContain("mergeSessionDetailIntoConversations(conversations, mergedDetail)");
+    // Detail sync must not optimistically write the dead flat ["conversations"]
+    // cache: the paginated group-room catalog is the only conversation consumer.
+    expect(routeSource).not.toContain("mergeSessionDetailIntoConversations");
   });
 
   it("does not refetch chat indexes or detail immediately after an accepted direct turn", () => {
@@ -3340,7 +3342,7 @@ describe("ChatCodingRoute layout contract", () => {
     );
     expect(bulkDeleteMutationSource).toContain("bulkDeleteChatSessions");
     expect(bulkDeleteMutationSource).toContain("onMutate: async (variables)");
-    expect(bulkDeleteMutationSource).toContain("removeDeletedSessionFromConversations");
+    expect(bulkDeleteMutationSource).not.toContain("removeDeletedSessionFromConversations");
   });
 
   it("reuses the Agent direct-session reset contract for quick history clearing", () => {
@@ -3365,19 +3367,18 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("isAgentRootSession(contextMenuSession)");
   });
 
-  it("removes deleted direct sessions from cached lists before refetch", () => {
+  it("deletes direct sessions without touching the dead flat conversations cache", () => {
     const deleteMutationSource = routeAndLifecycleSource.slice(
       routeAndLifecycleSource.indexOf("const deleteSessionMutation"),
     );
-    expect(routeSource).toContain("removeDeletedSessionFromConversations");
+    // The paginated group-room catalog is the only conversation consumer; the
+    // flat ["conversations"] cache has no live query, so optimistic writes to
+    // it are no-ops. Deletes rely on tombstones + invalidation instead.
+    expect(routeSource).not.toContain("removeDeletedSessionFromConversations");
     expect(deleteMutationSource).toContain("updateSessionSummaryCaches(queryClient");
-    expect(deleteMutationSource).toContain("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()");
-    expect(routeAndHelpersSource).toContain("conversation.type !== \"direct_agent\"");
-    expect(routeAndHelpersSource).toContain("conversation.directSessionId !== deletedSessionId && conversation.conversationId !== deletedSessionId");
+    expect(deleteMutationSource).not.toContain("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()");
+    expect(routeAndHelpersSource).not.toContain("conversation.directSessionId !== deletedSessionId && conversation.conversationId !== deletedSessionId");
     expect(deleteMutationSource.indexOf("updateSessionSummaryCaches(queryClient")).toBeLessThan(
-      deleteMutationSource.indexOf("void chatWorkspaceCache.afterSessionDeleted({"),
-    );
-    expect(deleteMutationSource.indexOf("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()")).toBeLessThan(
       deleteMutationSource.indexOf("void chatWorkspaceCache.afterSessionDeleted({"),
     );
     expect(deleteMutationSource).toContain("deleteChatSession(sessionId)");
@@ -3394,12 +3395,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(deleteMutationSource).toContain("previousRouteSessionId === variables.sessionId");
     expect(deleteMutationSource).not.toContain("setActiveSession");
     expect(deleteMutationSource).toContain("captureSessionIndexCacheSnapshots(queryClient)");
-    expect(deleteMutationSource).toContain("previousConversations");
+    expect(deleteMutationSource).not.toContain("previousConversations");
     expect(deleteMutationSource).toContain("previousAgents");
     expect(deleteMutationSource).toContain("agent.directSessionId === variables.sessionId");
     expect(deleteMutationSource).toContain("queryClient.setQueryData(queryKeys.agents(), context.previousAgents)");
     expect(deleteMutationSource).toContain("restoreSessionIndexCacheSnapshots(queryClient, context?.previousSessionIndexCaches)");
-    expect(deleteMutationSource).toContain("queryClient.setQueryData(queryKeys.conversations(), context.previousConversations)");
+    expect(deleteMutationSource).not.toContain("queryClient.setQueryData(queryKeys.conversations(), context.previousConversations)");
     expect(deleteMutationSource).toContain("chatWorkspaceCache.afterSessionDeleted({");
     expect(deleteMutationSource).not.toContain("void chatWorkspaceCache.afterChatRoomsChanged()");
     expect(deleteMutationSource).not.toContain("void chatWorkspaceCache.afterSessionChanged()");
@@ -3459,7 +3460,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("hasBlockingError={sessionDetailErrorState.blockingError}");
   });
 
-  it("keeps renamed direct session titles visible before conversation refetch finishes", () => {
+  it("renames direct sessions in session caches without the dead conversations cache", () => {
     const renameStart = routeAndLifecycleSource.indexOf("const renameSessionMutation");
     const renameEnd = routeAndLifecycleSource.indexOf("const addSessionToReviewMutation", renameStart);
     const renameMutationSource = routeAndLifecycleSource.slice(renameStart, renameEnd);
@@ -3468,9 +3469,9 @@ describe("ChatCodingRoute layout contract", () => {
     const titleHelperSource = directSessionIndexItemSource.slice(titleHelperStart, titleHelperEnd);
     const titleHelperChildEnd = titleHelperSource.indexOf(").trim();", titleHelperSource.indexOf('if (sessionKind === "child")'));
     const titleHelperRootSource = titleHelperSource.slice(titleHelperChildEnd + 1);
-    expect(routeSource).toContain("mergeSessionDetailIntoConversations");
+    expect(routeSource).not.toContain("mergeSessionDetailIntoConversations");
     expect(routeAndLifecycleSource).toContain("renameSessionInSummaries");
-    expect(routeAndLifecycleSource).toContain("renameSessionInConversations");
+    expect(routeAndLifecycleSource).not.toContain("renameSessionInConversations");
     expect(routeAndLifecycleSource).toContain("renameSessionDetail");
     expect(conversationIndexTreeSource).toContain("DirectSessionIndexList");
     expect(conversationIndexTreeSource).toContain("<DirectSessionIndexList");
@@ -3498,24 +3499,18 @@ describe("ChatCodingRoute layout contract", () => {
     expect(directSessionIndexItemSource).toContain("showSessionSummaryInline");
     expect(directSessionIndexItemSource).not.toContain('label === "会话入口"');
     expect(directSessionIndexItemSource).toContain("const sessionTitle = sessionListTitle(session) || sessionDisplay.name");
-    expect(routeAndHelpersSource).toContain("agentDisplayName: title");
-    expect(routeAndLifecycleSource).toContain("targetSession");
+    expect(routeAndHelpersSource).not.toContain("agentDisplayName: title");
+    expect(chatWorkspaceLifecycleSource).not.toContain("targetSession");
     expect(directSessionIndexItemSource).toContain("{sessionTitle}");
     expect(renameMutationSource).toContain("onMutate: (variables) =>");
     expect(renameMutationSource).toContain("setEditingSessionId(null)");
     expect(renameMutationSource).toContain("updateSessionSummaryCaches(queryClient");
     expect(renameMutationSource).toContain("captureSessionIndexCacheSnapshots(queryClient)");
     expect(renameMutationSource).toContain("restoreSessionIndexCacheSnapshots(queryClient, context?.previousSessionIndexCaches)");
-    expect(renameMutationSource).toContain("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()");
+    expect(renameMutationSource).not.toContain("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()");
     expect(renameMutationSource).toContain("queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId)");
     expect(renameMutationSource).toContain("setEditingSessionId(variables.sessionId)");
     expect(renameMutationSource).toContain("setEditingSessionTitle(variables.title)");
-    expect(renameMutationSource.indexOf("updateSessionSummaryCaches(queryClient")).toBeLessThan(
-      renameMutationSource.indexOf("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()"),
-    );
-    expect(renameMutationSource.indexOf("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()")).toBeLessThan(
-      renameMutationSource.indexOf("onError:"),
-    );
     expect(renameMutationSource).toContain("const confirmedTitle =");
     expect(renameMutationSource).toContain("const confirmedUpdatedAt =");
     expect(renameMutationSource).not.toContain("mergeSessionDetailIntoSummaries(sessions, nextDetail)");

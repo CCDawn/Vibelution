@@ -11010,6 +11010,9 @@ def test_failed_runtime_turn_result_is_persisted_as_turn_error_with_trace(tmp_pa
     assert payload["lastTurnError"]["traceId"] == "trace-runtime-1"
     assert payload["lastTurnError"]["protocol"] == "responses"
     assert "模型响应未完成规范化" in payload["lastTurnError"]["reasonSummary"]
+    # Structured reason_detail keeps precedence over the raw-text fallback:
+    # the drawer shows the structured provider detail, not the raw preview.
+    assert "canonical TurnOutcome" in payload["lastTurnError"]["reasonDetail"]
     # Body stays one human line; the visible raw text is no longer concatenated
     # into the message (structured llm_failure diagnostics own the reason
     # fields; the full raw text lives in the runtime logs / rawErrorPreview).
@@ -11023,6 +11026,60 @@ def test_failed_runtime_turn_result_is_persisted_as_turn_error_with_trace(tmp_pa
     turn_error_scene = next(item for item in scene_events if item["eventCode"] == "conversation.turn_error")
     assert turn_error_scene["fields"]["chainStage"] == "llm_response_normalization"
     assert turn_error_scene["fields"]["traceId"] == "trace-runtime-1"
+
+
+def test_structured_llm_failure_without_detail_keeps_bounded_raw_text_in_reason_detail(
+    tmp_path, monkeypatch
+):
+    """Structured llm_failure owns the reason fields, so a long unparseable raw
+    error otherwise never reaches the API payload (d6aad130a trade-off). The
+    reason_detail fallback must carry a bounded raw preview so the frontend
+    diagnostic drawer always has the original failure text to show.
+    """
+
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    raw_marker = "RAWPROBE-7f3a 下游流水线在重试窗口内持续返回分段中断，且未携带可解析的结构化错误体。"
+    long_raw_error = raw_marker + ("该中断横跨多个分片重传周期，网关侧只留下聚合摘要，无法还原单一失败原因。" * 6)
+    assert len(long_raw_error) > 220
+
+    failed_result = {
+        "status": "failed_runtime",
+        "summary": "failed_runtime",
+        "raw_output": long_raw_error,
+        "error": long_raw_error,
+        "outcome": "blocked",
+        "llm_failure": {
+            "category": "protocol_error",
+            "message": "模型响应未完成规范化：模型已返回，但响应适配器没有生成 canonical TurnOutcome。",
+            "reason_code": "canonical_turn_outcome_missing",
+            "reason_summary": "模型响应未完成规范化",
+            "chain_stage": "llm_response_normalization",
+            "event_code": "llm.turn_outcome.missing",
+            "retryable": False,
+        },
+    }
+
+    session_service._set_session_running("session-live", True, turn_id="turn-raw-detail")
+    try:
+        session_service._persist_session_turn_result(
+            "session-live",
+            failed_result,
+            turn_id="turn-raw-detail",
+        )
+    finally:
+        session_service._set_session_running("session-live", False, turn_id="turn-raw-detail")
+    payload = session_service.get_session_detail("session-live")
+    turn_error = payload["lastTurnError"]
+
+    # Structured diagnostics still own the reason fields...
+    assert turn_error["reasonCode"] == "canonical_turn_outcome_missing"
+    assert turn_error["reasonSummary"] == "模型响应未完成规范化"
+    assert turn_error["chainStage"] == "llm_response_normalization"
+    # ...but the raw text now lands in reasonDetail (bounded preview) instead
+    # of living only in the runtime logs / rawErrorPreview.
+    assert raw_marker in turn_error["reasonDetail"]
 
 
 def test_submit_session_message_surfaces_provider_http_diagnostics(tmp_path, monkeypatch):

@@ -2068,6 +2068,14 @@ def _make_session_turn_error(
     reason_detail = _failure_text("reason_detail", "reasonDetail", max_lines=4) or str(
         provider_reason.get("detail") or ""
     ).strip()
+    # Structured llm_failure diagnostics own the reason fields, so for long or
+    # unparseable raw errors the original text otherwise only survives in the
+    # runtime logs / rawErrorPreview and never reaches the API payload. When
+    # the structured diagnostics carry no detail of their own, keep a bounded
+    # raw preview in reason_detail so the frontend diagnostic drawer always
+    # has the original failure text to show.
+    if structured_failure and not reason_detail:
+        reason_detail = s.trim_lines(str(raw_error or ""), max_lines=2)
     chain_stage = _failure_text("chain_stage", "chainStage")
     event_code = _failure_text("event_code", "eventCode")
     trace_id = _failure_text("trace_id", "traceId") or str(payload_trace.get("traceId") or "").strip()

@@ -29,7 +29,6 @@ import type {
   AgentInstance,
   ChatRoomDetail,
   ChatRoomRoundAcceptedResponse,
-  ConversationSummary,
   SessionChatReviewCandidateResponse,
   SessionDeleteResponse,
   SessionBulkDeleteResponse,
@@ -56,11 +55,7 @@ import {
   sessionSummaryFromDetail,
 } from "../chatSessionState";
 import type { createChatWorkspaceCache } from "../chatWorkspaceCache";
-import {
-  fetchSessionDetailWindow,
-  removeDeletedSessionFromConversations,
-  renameSessionInConversations,
-} from "./chatSessionDetailHelpers";
+import { fetchSessionDetailWindow } from "./chatSessionDetailHelpers";
 import {
   pinSessionCreatePreserve,
   unpinSessionCreatePreserve,
@@ -188,7 +183,6 @@ export type UseChatWorkspaceLifecycleResult = {
       previousSessions: SessionSummary[] | undefined;
       previousSessionIndexCaches: ReturnType<typeof captureSessionIndexCacheSnapshots>;
       previousAgentSessionCaches: ReturnType<typeof captureAgentSessionCacheSnapshots>;
-      previousConversations: ConversationSummary[] | undefined;
       previousAgents: AgentInstance[] | undefined;
       deletedAgentId: string;
     }
@@ -201,7 +195,6 @@ export type UseChatWorkspaceLifecycleResult = {
       previousSessions: SessionSummary[] | undefined;
       previousSessionIndexCaches: ReturnType<typeof captureSessionIndexCacheSnapshots>;
       previousAgentSessionCaches: ReturnType<typeof captureAgentSessionCacheSnapshots>;
-      previousConversations: ConversationSummary[] | undefined;
       previousAgents: AgentInstance[] | undefined;
       previousRouteSessionId: string;
       deletedSessionIds: string[];
@@ -222,7 +215,6 @@ export type UseChatWorkspaceLifecycleResult = {
     {
       previousSessions: SessionSummary[] | undefined;
       previousSessionIndexCaches: ReturnType<typeof captureSessionIndexCacheSnapshots>;
-      previousConversations: ConversationSummary[] | undefined;
       previousDetail: SessionDetail | undefined;
     }
   >;
@@ -820,7 +812,6 @@ export function useChatWorkspaceLifecycle({
       const previousSessions = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions());
       const previousSessionIndexCaches = captureSessionIndexCacheSnapshots(queryClient);
       const previousAgentSessionCaches = captureAgentSessionCacheSnapshots(queryClient);
-      const previousConversations = queryClient.getQueryData<ConversationSummary[]>(queryKeys.conversations());
       const previousAgents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents());
       const previousRouteSessionId = routeSelectionRef.current.kind === "session"
         ? routeSelectionRef.current.sessionId
@@ -833,9 +824,6 @@ export function useChatWorkspaceLifecycle({
         sessions?.filter((session) => session.id !== variables.sessionId),
       );
       removeSessionFromAgentSessionCaches(queryClient, variables.sessionId);
-      queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
-        removeDeletedSessionFromConversations(conversations, variables.sessionId),
-      );
       queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (agents) =>
         agents?.map((agent) => (
           agent.directSessionId === variables.sessionId
@@ -888,7 +876,6 @@ export function useChatWorkspaceLifecycle({
         previousSessions,
         previousSessionIndexCaches,
         previousAgentSessionCaches,
-        previousConversations,
         previousAgents,
         previousRouteSessionId,
         optimisticNextActiveSessionId,
@@ -943,9 +930,6 @@ export function useChatWorkspaceLifecycle({
       }
       restoreSessionIndexCacheSnapshots(queryClient, context?.previousSessionIndexCaches);
       restoreAgentSessionCacheSnapshots(queryClient, context?.previousAgentSessionCaches);
-      if (context?.previousConversations) {
-        queryClient.setQueryData(queryKeys.conversations(), context.previousConversations);
-      }
       if (context?.previousAgents !== undefined) {
         queryClient.setQueryData(queryKeys.agents(), context.previousAgents);
       }
@@ -981,7 +965,6 @@ export function useChatWorkspaceLifecycle({
       const previousSessions = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions());
       const previousSessionIndexCaches = captureSessionIndexCacheSnapshots(queryClient);
       const previousAgentSessionCaches = captureAgentSessionCacheSnapshots(queryClient);
-      const previousConversations = queryClient.getQueryData<ConversationSummary[]>(queryKeys.conversations());
       const previousAgents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents());
       const previousRouteSessionId = routeSelectionRef.current.kind === "session"
         ? routeSelectionRef.current.sessionId
@@ -994,12 +977,6 @@ export function useChatWorkspaceLifecycle({
       deletedSessionIds.forEach((sessionId) => {
         removeSessionFromAgentSessionCaches(queryClient, sessionId);
       });
-      queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
-        (conversations ?? []).filter((conversation) => {
-          const sessionId = String(conversation.directSessionId || conversation.conversationId || "").trim();
-          return !deletedSessionIdSet.has(sessionId);
-        }),
-      );
       queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (agents) =>
         agents?.map((agent) => (
           agent.directSessionId && deletedSessionIdSet.has(agent.directSessionId)
@@ -1048,7 +1025,6 @@ export function useChatWorkspaceLifecycle({
         previousSessions,
         previousSessionIndexCaches,
         previousAgentSessionCaches,
-        previousConversations,
         previousAgents,
         previousRouteSessionId,
         deletedSessionIds,
@@ -1119,9 +1095,6 @@ export function useChatWorkspaceLifecycle({
       }
       restoreSessionIndexCacheSnapshots(queryClient, context?.previousSessionIndexCaches);
       restoreAgentSessionCacheSnapshots(queryClient, context?.previousAgentSessionCaches);
-      if (context?.previousConversations) {
-        queryClient.setQueryData(queryKeys.conversations(), context.previousConversations);
-      }
       if (context?.previousAgents !== undefined) {
         queryClient.setQueryData(queryKeys.agents(), context.previousAgents);
       }
@@ -1174,9 +1147,6 @@ export function useChatWorkspaceLifecycle({
         // Optimistically drop the old row from list caches so UI does not flash a duplicate.
         updateSessionSummaryCaches(queryClient, (sessions) =>
           (sessions ?? []).filter((session) => session.id !== previousDirectSessionId),
-        );
-        queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
-          removeDeletedSessionFromConversations(conversations, previousDirectSessionId),
         );
       }
       queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (agents) =>
@@ -1243,9 +1213,7 @@ export function useChatWorkspaceLifecycle({
       const previousSessions = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions());
       const previousSessionIndexCaches = captureSessionIndexCacheSnapshots(queryClient);
       const previousAgentSessionCaches = captureAgentSessionCacheSnapshots(queryClient);
-      const previousConversations = queryClient.getQueryData<ConversationSummary[]>(queryKeys.conversations());
       const previousDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(variables.sessionId));
-      const targetSession = previousDetail ?? previousSessions?.find((session) => session.id === variables.sessionId);
       const renameSummaries = (sessions: SessionSummary[] | undefined) =>
         renameSessionInSummaries(sessions, variables.sessionId, variables.title, updatedAt);
       editingSessionIdRef.current = null;
@@ -1257,9 +1225,6 @@ export function useChatWorkspaceLifecycle({
       }));
       updateSessionSummaryCaches(queryClient, renameSummaries);
       updateAgentSessionSummaryCaches(queryClient, renameSummaries);
-      queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
-        renameSessionInConversations(conversations, variables.sessionId, variables.title, updatedAt, targetSession),
-      );
       queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detail) =>
         renameSessionDetail(detail, variables.sessionId, variables.title, updatedAt),
       );
@@ -1268,7 +1233,6 @@ export function useChatWorkspaceLifecycle({
         previousSessions,
         previousSessionIndexCaches,
         previousAgentSessionCaches,
-        previousConversations,
         previousDetail,
         telemetry,
       };
@@ -1288,9 +1252,6 @@ export function useChatWorkspaceLifecycle({
         renameSessionInSummaries(sessions, variables.sessionId, confirmedTitle, confirmedUpdatedAt);
       updateSessionSummaryCaches(queryClient, renameSummaries);
       updateAgentSessionSummaryCaches(queryClient, renameSummaries);
-      queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
-        renameSessionInConversations(conversations, variables.sessionId, confirmedTitle, confirmedUpdatedAt, nextDetail),
-      );
       queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detail) =>
         renameSessionDetail(detail, variables.sessionId, confirmedTitle, confirmedUpdatedAt),
       );
@@ -1306,9 +1267,6 @@ export function useChatWorkspaceLifecycle({
       }
       restoreSessionIndexCacheSnapshots(queryClient, context?.previousSessionIndexCaches);
       restoreAgentSessionCacheSnapshots(queryClient, context?.previousAgentSessionCaches);
-      if (context?.previousConversations) {
-        queryClient.setQueryData(queryKeys.conversations(), context.previousConversations);
-      }
       if (context?.previousDetail) {
         queryClient.setQueryData(queryKeys.session(variables.sessionId), context.previousDetail);
       }

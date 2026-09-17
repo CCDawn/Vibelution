@@ -7,9 +7,3 @@ export function recentAgentSessions(sessions: SessionSummary[], retainedIds: rea
   const visibleIds = new Set([...recent.map((session) => session.id), ...retainedIds]);
   return sessions.filter((session) => visibleIds.has(session.id));
 }
-
-export function searchAgentSessionHistory(sessions: SessionSummary[], query: string) {
-  const needle = query.trim().toLocaleLowerCase();
-  return sessions.filter((session) => [session.title, session.taskSummary, session.agentDisplayName, session.id]
-    .filter(Boolean).join(" ").toLocaleLowerCase().includes(needle));
-}

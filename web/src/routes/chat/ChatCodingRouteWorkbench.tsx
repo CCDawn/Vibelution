@@ -262,8 +262,6 @@ import {
   fetchSessionDetailWindow,
   isSessionDetailHardLoading,
   prefetchSessionDetailWindow,
-  removeDeletedSessionFromConversations,
-  mergeSessionDetailIntoConversations,
   resolveActiveSessionDetailForUi,
   resolveNeighborSessionIdsForPrefetch,
   resolveSessionDetailPlaceholder,
@@ -983,9 +981,6 @@ export function ChatCodingRouteWorkbench() {
           mergeSessionDetailIntoSummaries(sessions, mergedDetail),
         );
       }
-      queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
-        mergeSessionDetailIntoConversations(conversations, mergedDetail),
-      );
     },
     [queryClient],
   );

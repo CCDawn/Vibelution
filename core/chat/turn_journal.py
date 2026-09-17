@@ -6,7 +6,6 @@ import json
 import os
 import re
 import threading
-import time
 from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -17,6 +16,7 @@ from typing import Any, Iterable
 from uuid import uuid4
 
 from core.infrastructure import developer_sandbox
+from core.infrastructure.file_lock import locked_sidecar
 
 from .model_messages import EMPTY_TOOL_RESULT_PLACEHOLDER_TEXT, normalize_model_messages
 
@@ -2460,71 +2460,17 @@ def _journal_thread_lock(path: Path):
 
 @contextmanager
 def _journal_file_lock(path: Path, *, timeout: float = _JOURNAL_LOCK_TIMEOUT_SECONDS):
-    """Serialize one journal's read-modify-write cycle across processes."""
+    """Serialize one journal's read-modify-write cycle across processes.
 
-    lock_path = path.with_name(f"{path.name}.lock")
-    _ensure_journal_parent(lock_path)
-    with lock_path.open("a+b") as handle:
-        deadline = time.monotonic() + max(0.0, float(timeout))
-        while True:
-            if _try_lock_handle(handle):
-                break
-            if time.monotonic() >= deadline:
-                raise TimeoutError(f"Timed out acquiring turn journal lock: {lock_path}")
-            time.sleep(0.01)
-        try:
-            # Seed the first byte only while holding the lock. Two processes can
-            # both observe an empty lock file, and a pre-lock write can land in
-            # the byte range another process already locked (Windows maps that
-            # lock violation to PermissionError). msvcrt.locking can lock a
-            # byte range at/beyond EOF, so deferring the seed is safe and the
-            # lock owner is the only writer.
-            handle.seek(0, os.SEEK_END)
-            if handle.tell() == 0:
-                handle.write(b"\0")
-                handle.flush()
-            yield
-        finally:
-            _unlock_handle(handle)
+    Thin wrapper over the shared file-lock helper: same ``<name>.lock``
+    sidecar convention, same seed-byte-inside-the-lock discipline, and the
+    journal's patient timeout (bounded, but well above the append critical
+    section). Threads are serialized separately by :func:`_journal_thread_lock`,
+    which read paths also take, so readers never need the OS lock.
+    """
 
-
-def _try_lock_handle(handle) -> bool:
-    handle.seek(0)
-    if os.name == "nt":
-        import msvcrt
-
-        try:
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-        except OSError:
-            return False
-        return True
-
-    import fcntl
-
-    try:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except (BlockingIOError, OSError):
-        return False
-    return True
-
-
-def _unlock_handle(handle) -> None:
-    handle.seek(0)
-    if os.name == "nt":
-        import msvcrt
-
-        try:
-            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-        except OSError:
-            pass
-        return
-
-    import fcntl
-
-    try:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-    except OSError:
-        pass
+    with locked_sidecar(path, timeout=timeout):
+        yield
 
 
 def _fsync_directory(path: Path) -> None:
