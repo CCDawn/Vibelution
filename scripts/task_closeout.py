@@ -23,6 +23,10 @@ INTEGRATION_RETRY_DELAY_SECONDS = 0.5
 CLEANUP_RETRY_SECONDS = 2.0
 CLEANUP_RETRY_DELAY_SECONDS = 0.2
 STALE_RETRY_SCHEMA_VERSION = 1
+# Upper bound for the per-file lines attached to a dirty_main outcome. A
+# stray session can leave dozens of edits in main; the attribution must stay
+# bounded evidence, not an unbounded dump of ``git status``.
+DIRTY_MAIN_FILE_LIMIT = 20
 
 # Validation outcomes whose next step is one specific, mechanical action. Naming
 # it here keeps the operator or agent from rediscovering the workflow from the
@@ -92,6 +96,11 @@ class ManagedCloseoutError(RuntimeError):
     def __init__(self, code: str, message: str = "") -> None:
         super().__init__(message or code)
         self.code = code
+        # ``dirty_main`` carries bounded attribution evidence here so the
+        # ``errors`` envelope can stay exactly ``["dirty_main", ...lines]``
+        # while the raised error itself explains who is holding main dirty.
+        self.detail_lines: list[str] = []
+        self.next_action = ""
 
 
 def command_failure_details(code: str, commands: Sequence[Any]) -> list[FailureDetail]:
@@ -129,6 +138,192 @@ def _bounded_error(error: BaseException | str) -> str:
     return value[:300] or type(error).__name__
 
 
+@dataclass(frozen=True)
+class DirtyMainAttribution:
+    """Bounded evidence for one dirty_main outcome: what changed, when, who.
+
+    ``file_lines`` are ready-to-print ``dirty_main_file:`` entries (path plus
+    mtime) capped at ``DIRTY_MAIN_FILE_LIMIT``; ``owner_lines`` name the active
+    claims whose scopes touch the dirty paths; ``next_action`` is the one
+    human-readable recovery sentence naming the suspected owner.
+    """
+
+    file_lines: tuple[str, ...]
+    owner_lines: tuple[str, ...]
+    next_action: str
+
+
+def _dirty_main_entries(main_root: Path) -> list[tuple[str, str]]:
+    """Parse ``git status --porcelain -z`` into bounded ``(status, path)`` pairs.
+
+    The ``-z`` format separates entries with NULs and, for rename/copy entries,
+    records the new path first and the original path as a second NUL-separated
+    field; the original path is skipped so only real worktree paths survive.
+    """
+
+    completed = gate.run_process(
+        ["git", "status", "--porcelain", "-z", "--untracked-files=all"],
+        main_root,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(completed.stderr.strip() or "git status failed")
+    entries: list[tuple[str, str]] = []
+    tokens = completed.stdout.split("\0")
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        index += 1
+        if not token:
+            continue
+        status = token[:2]
+        path = token[3:] if len(token) > 3 else token
+        if status and status[0] in {"R", "C"} and index < len(tokens):
+            index += 1
+        entries.append((status, gate.normalize_path(path)))
+    return entries
+
+
+def _dirty_main_mtime_line(main_root: Path, path: str) -> str:
+    try:
+        stamp = os.stat(main_root / path).st_mtime
+    except OSError:
+        return "mtime=unavailable"
+    return (
+        "mtime="
+        + datetime.fromtimestamp(stamp, tz=timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def _suspected_dirty_main_owners(
+    context: CloseoutContext,
+    paths: Sequence[str],
+) -> tuple[str, ...]:
+    """Name active claims whose scopes touch the dirty paths (best effort).
+
+    The claim table is read through the same coordination ``status`` call the
+    closeout already uses for claim validation; any failure to read it must not
+    mask the underlying dirty_main outcome, so every error collapses to "no
+    suspected owner".
+    """
+
+    if not paths:
+        return ()
+    try:
+        status = _coordination_call(context, "status")
+    except (OSError, RuntimeError, ValueError):
+        return ()
+    claims = status.get("claims") if isinstance(status.get("claims"), list) else []
+    agents = status.get("agents") if isinstance(status.get("agents"), list) else []
+    agents_by_id = {
+        str(item.get("id")): item
+        for item in agents
+        if isinstance(item, dict) and item.get("id")
+    }
+    owners: list[str] = []
+    for claim in claims:
+        if not isinstance(claim, dict) or claim.get("status") not in {
+            "active",
+            "ready",
+        }:
+            continue
+        raw_scopes = claim.get("scopes")
+        scopes = (
+            [str(scope) for scope in raw_scopes if isinstance(scope, str)]
+            if isinstance(raw_scopes, list)
+            else []
+        )
+        matched = [
+            path for path in paths if any(gate.scope_covers(scope, path) for scope in scopes)
+        ]
+        if not matched:
+            continue
+        agent = agents_by_id.get(str(claim.get("agentId") or ""), {})
+        branch = str(agent.get("branch") or "") if isinstance(agent, dict) else ""
+        description = (
+            f"agent {claim.get('agentId') or 'unknown'}"
+            + (f" (branch {branch})" if branch else "")
+            + f" via claim {claim.get('id') or 'unknown'} covering "
+            f"{len(matched)}/{len(paths)} dirty paths, e.g. {matched[0]}"
+        )
+        owners.append(description)
+    return tuple(owners[:3])
+
+
+def describe_dirty_main(context: CloseoutContext) -> DirtyMainAttribution:
+    """Attribute an unexpectedly dirty main checkout to its likely owner.
+
+    The 2026-09 incidents showed a foreign session holding main dirty for 20
+    minutes with nobody knowing whom to ask; this turns the raw ``dirty_main``
+    outcome into evidence (file list with mtimes) plus one actionable sentence.
+    """
+
+    entries = _dirty_main_entries(context.main_root)
+    shown = entries[:DIRTY_MAIN_FILE_LIMIT]
+    file_lines = tuple(
+        f"dirty_main_file: {status or '??'} {path} "
+        f"({_dirty_main_mtime_line(context.main_root, path)})"
+        for status, path in shown
+    )
+    hidden = len(entries) - len(shown)
+    if hidden > 0:
+        file_lines += (f"dirty_main_file: ...and {hidden} more paths not listed",)
+    owners = _suspected_dirty_main_owners(context, [path for _status, path in shown])
+    owner_lines = tuple(
+        f"dirty_main_suspected_owner: {owner}" for owner in owners
+    )
+    if owners:
+        next_action = (
+            "main has uncommitted edits; ask the suspected owner to commit or "
+            "revert them before rerunning this closeout: " + "; ".join(owners)
+        )
+    else:
+        next_action = (
+            "main has uncommitted edits and no active claim covers them; ask "
+            "the sessions that edited main recently before rerunning this "
+            "closeout"
+        )
+    return DirtyMainAttribution(
+        file_lines=file_lines,
+        owner_lines=owner_lines,
+        next_action=next_action,
+    )
+
+
+def dirty_main_error(context: CloseoutContext) -> ManagedCloseoutError:
+    """Build the dirty_main failure with attribution attached (never fails)."""
+
+    try:
+        attribution = describe_dirty_main(context)
+    except (OSError, RuntimeError, ValueError):
+        # Attribution is best effort: the gate must still report dirty_main
+        # even when status parsing or the coordination read fails.
+        return ManagedCloseoutError("dirty_main")
+    error = ManagedCloseoutError("dirty_main")
+    error.detail_lines = [*attribution.file_lines, *attribution.owner_lines]
+    error.next_action = attribution.next_action
+    return error
+
+
+def _apply_dirty_main_attribution(
+    result: ManagedCloseoutResult,
+    error: BaseException,
+) -> ManagedCloseoutResult:
+    """Move a raised dirty_main error's attribution into the result envelope."""
+
+    if getattr(error, "code", "") != "dirty_main":
+        return result
+    detail_lines = list(getattr(error, "detail_lines", None) or [])
+    next_action = str(getattr(error, "next_action", "") or "")
+    if detail_lines:
+        head = result.errors[0] if result.errors else "dirty_main"
+        result.errors = [head, *detail_lines]
+    if next_action:
+        result.next_action = next_action
+    return result
+
+
 def _is_within(path: Path, parent: Path) -> bool:
     try:
         path.resolve().relative_to(parent.resolve())
@@ -154,7 +349,9 @@ def resolve_context(task_worktree: Path | str, *, base: str = "main") -> Closeou
     if task_root == main_root or gate.current_branch(main_root) != base:
         raise ManagedCloseoutError("invalid_main_worktree")
     if gate.git_lines(main_root, "status", "--porcelain"):
-        raise ManagedCloseoutError("dirty_main")
+        raise dirty_main_error(
+            CloseoutContext(main_root=main_root, task_root=task_root, branch=branch)
+        )
     if gate.git_lines(task_root, "status", "--porcelain"):
         raise ManagedCloseoutError("dirty_worktree")
     expected_parent = (main_root / ".worktrees").resolve()
@@ -397,7 +594,7 @@ def prune_coordination(context: CloseoutContext) -> None:
 
 def merge_ff_only(context: CloseoutContext, *, integration_claim_id: str, target_sha: str | None = None) -> str:
     if gate.git_lines(context.main_root, "status", "--porcelain"):
-        raise ManagedCloseoutError("dirty_main")
+        raise dirty_main_error(context)
     target_sha = gate.rev_parse(context.task_root, target_sha or "HEAD")
     old_sha = gate.rev_parse(context.main_root, "HEAD")
     claim_guard.issue_main_permit(
@@ -658,7 +855,9 @@ def resolve_cleanup_context(
     if gate.current_branch(main_root) != base:
         raise ManagedCloseoutError("invalid_main_worktree")
     if gate.git_lines(main_root, "status", "--porcelain"):
-        raise ManagedCloseoutError("dirty_main")
+        raise dirty_main_error(
+            CloseoutContext(main_root=main_root, task_root=task_root, branch=branch)
+        )
     if not branch.startswith("codex/") or branch == "codex/":
         raise ManagedCloseoutError("invalid_task_branch")
     if task_root.is_dir():
@@ -686,13 +885,16 @@ def run_cleanup_only(
         cleanup_task_resources(context, agent_id=agent_id)
         prune_coordination(context)
     except (OSError, RuntimeError, ValueError) as error:
-        return ManagedCloseoutResult(
-            status="merged_cleanup_pending",
-            exit_code=2,
-            merged=True,
-            retryable=True,
-            next_action="rerun_cleanup_only_from_main",
-            errors=[_bounded_error(error)],
+        return _apply_dirty_main_attribution(
+            ManagedCloseoutResult(
+                status="merged_cleanup_pending",
+                exit_code=2,
+                merged=True,
+                retryable=True,
+                next_action="rerun_cleanup_only_from_main",
+                errors=[_bounded_error(error)],
+            ),
+            error,
         )
     return ManagedCloseoutResult(
         status="merged_clean",
@@ -784,12 +986,15 @@ def run_managed_closeout(
     except (OSError, RuntimeError, ValueError) as error:
         code = getattr(error, "code", "")
         expired_claim = code == "invalid_development_claim"
-        return ManagedCloseoutResult(
-            status="failed",
-            exit_code=1,
-            retryable=expired_claim,
-            next_action="refresh_development_claim" if expired_claim else "",
-            errors=[_bounded_error(error)],
+        return _apply_dirty_main_attribution(
+            ManagedCloseoutResult(
+                status="failed",
+                exit_code=1,
+                retryable=expired_claim,
+                next_action="refresh_development_claim" if expired_claim else "",
+                errors=[_bounded_error(error)],
+            ),
+            error,
         )
 
     explicit_manifest = manifest_path is not None
@@ -1051,15 +1256,18 @@ def run_managed_closeout(
         else:
             status = "failed"
             exit_code = 1
-        result = ManagedCloseoutResult(
-            status=status,
-            exit_code=exit_code,
-            merged=bool(merge_sha),
-            merge_sha=merge_sha,
-            manifest_path=manifest_path_text,
-            retryable=bool(merge_sha),
-            next_action=("run_cleanup_only_from_main" if merge_sha else ""),
-            errors=[_bounded_error(error)],
+        result = _apply_dirty_main_attribution(
+            ManagedCloseoutResult(
+                status=status,
+                exit_code=exit_code,
+                merged=bool(merge_sha),
+                merge_sha=merge_sha,
+                manifest_path=manifest_path_text,
+                retryable=bool(merge_sha),
+                next_action=("run_cleanup_only_from_main" if merge_sha else ""),
+                errors=[_bounded_error(error)],
+            ),
+            error,
         )
     finally:
         if not integration_released:

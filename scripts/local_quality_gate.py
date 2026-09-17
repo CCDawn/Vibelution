@@ -110,6 +110,29 @@ GATE_SELF_TEST_COMMANDS = (
         "tests/test_github_project_library_service.py -n 4 --dist load -m \"not serial\" -q --maxfail=0"
     ),
 )
+# Closeout-only contract sweep for frontend work.  The selector matches matrix
+# rules by changed-path ownership, but two 2026-09-17 incidents shipped VUI
+# red-line violations (native controls, unregistered component previews) in
+# tasks whose selectors never picked the contract tests.  Every closeout whose
+# changed files reach ``web/src`` (or any TS/TSX under ``web/``) appends these
+# fixed commands regardless of what the matrix rules selected.  Each command
+# must stay parseable by ``parse_allowed_command`` (root-bound ``--root web``
+# Vitest form, same shape as the matrix's web-test commands) so a matrix or
+# allowlist change that would silently drop the sweep fails validation instead.
+CLOSEOUT_WEB_CONTRACT_COMMANDS = (
+    (
+        "node web/node_modules/vitest/vitest.mjs run "
+        "src/components/vui/vuiBatchMigration.test.ts "
+        "src/components/vui/vuiComponentDesignContract.test.ts "
+        "src/components/vui/vuiShadcnRouteContract.test.ts "
+        "src/design/vui-component-preview/vuiComponentPreviewCoverage.test.ts "
+        "--root web"
+    ),
+    (
+        "node web/node_modules/vitest/vitest.mjs run "
+        "src/i18n/useAppI18n.domains.contract.test.ts --root web"
+    ),
+)
 GATE_DEFINITION_FILES = frozenset(
     {
         ".githooks/pre-commit",
@@ -1064,6 +1087,24 @@ def is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
     return completed.returncode == 0
 
 
+def changed_files_touch_web(files: Sequence[str]) -> bool:
+    """Whether a closeout's changed files reach the web app source tree.
+
+    ``web/src`` counts as a whole (styles, JSON, and other non-TS assets still
+    ship through the VUI product surface); outside it, only TS/TSX under
+    ``web/`` counts, which covers entry/config scripts such as
+    ``web/vite.config.ts``.
+    """
+
+    for raw in files:
+        path = normalize_path(raw)
+        if path == "web/src" or path.startswith("web/src/"):
+            return True
+        if path.startswith("web/") and path.endswith((".ts", ".tsx")):
+            return True
+    return False
+
+
 def expected_closeout_commands(
     root: Path,
     files: Sequence[str],
@@ -1082,6 +1123,12 @@ def expected_closeout_commands(
         selected_commands.extend(
             command
             for command in GATE_SELF_TEST_COMMANDS
+            if command not in selected_commands
+        )
+    if changed_files_touch_web(files):
+        selected_commands.extend(
+            command
+            for command in CLOSEOUT_WEB_CONTRACT_COMMANDS
             if command not in selected_commands
         )
 
