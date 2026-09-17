@@ -1,7 +1,7 @@
 {
   "benchmark": "vibelution_supervised_candidate_patch_smoke",
   "bundle_name": "supervised_candidate_patch_smoke_v1",
-  "default_timeout_seconds": 600,
+  "default_timeout_seconds": 1800,
   "candidate_mutation_contract": {
     "supported": true,
     "required": true,

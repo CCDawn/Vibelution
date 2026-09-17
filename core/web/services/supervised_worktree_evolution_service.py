@@ -864,6 +864,7 @@ def _execute_flow(
                 "workflowStepId": "improve",
                 "conversationSessionId": str(snapshot.get("baselineConversationSessionId") or ""),
                 "progressCallback": _workflow_progress_callback(snapshot, "baseline", "improve"),
+                "timeoutSeconds": _bundle_self_edit_timeout_budget(root, str(options["bundleName"])),
             },
         )
         _raise_if_run_cancelled(snapshot)
@@ -2003,9 +2004,36 @@ def _candidate_self_edit_correction_prompt(
     )
 
 
+def _bundle_self_edit_timeout_budget(root: Path, bundle_name: str) -> int:
+    """自改预算：bundle 声明值与 900 秒保底取大者。
+
+    real 自改会话历史硬编码 900 秒，真实 Agent 在大仓库里读码-补丁-验证
+    常超预算被 candidate_modify_timeout 收口（swte-28e3980425ef 实弹定案：
+    Agent 已产出真实 diff 仍被 900 秒截断）。bundle 可通过
+    default_timeout_seconds 声明更高预算；缺省或声明更低时保持 900 保底。
+    """
+    try:
+        bundle = load_supervised_bundle(
+            bundle_name, project_root=_storage_project_root_arg(root)
+        )
+    except Exception:
+        return 900
+    declared = int(bundle.get("default_timeout_seconds") or 0)
+    return max(900, declared)
+
+
+def _real_self_edit_timeout(context: dict[str, Any]) -> int:
+    """Resolve the real self-edit turn budget from the flow-provided context."""
+    try:
+        provided = int(context.get("timeoutSeconds") or 0)
+    except (TypeError, ValueError):
+        provided = 0
+    return max(900, provided)
+
+
 def _real_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str, Any]) -> dict[str, Any]:
     started = _now_iso()
-    timeout_seconds = 900
+    timeout_seconds = _real_self_edit_timeout(context)
     cancel_checker = context.get("cancelChecker") if callable(context.get("cancelChecker")) else None
     progress_callback = context.get("progressCallback") if callable(context.get("progressCallback")) else None
     options = context.get("options") if isinstance(context.get("options"), dict) else {}
