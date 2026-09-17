@@ -40,8 +40,13 @@ def test_launcher_precommit_hook_supports_posix_venv_and_verifies_web_lock():
         check=True,
     ).stdout.split(maxsplit=1)[0]
 
-    assert '"$repo_root/.venv/Scripts/python.exe"' in source
-    assert '"$repo_root/.venv/bin/python"' in source
+    # The hook resolves the shared project Python via dependency_root: Windows
+    # venv layout first, POSIX venv layout second, falling back to the primary
+    # worktree (git common dir) when a linked task worktree has no .venv.
+    assert '"$dependency_root/.venv/Scripts/python.exe"' in source
+    assert '"$dependency_root/.venv/bin/python"' in source
+    assert "git rev-parse --path-format=absolute --git-common-dir" in source
+    assert 'exec "$project_python" "$repo_root/scripts/local_quality_gate.py" commit' in source
     assert 'npm --silent --prefix "$repo_root/web" ci --ignore-scripts --dry-run --no-audit --no-fund' in source
     assert ".githooks/* text eol=lf" in attributes
     assert mode == "100755"
