@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
-from core.infrastructure.codex_cli_sandbox import (
+from core.infrastructure.codex_cli_sandbox import (  # noqa: F401 - 保留导入供测试接缝与后续沙箱恢复使用
     start_codex_sandbox_terminal_session,
     write_codex_sandbox_terminal_stdin,
 )
@@ -89,56 +89,60 @@ def _bounded_value(value: Any, *, depth: int = 0) -> Any:
     return _redacted_text(value)
 
 
-def _run_candidate_sandbox_command(
-    command: str,
+def _run_candidate_evidence_subprocess(
+    argv: list[str],
     *,
     timeout: int,
     cwd: str,
     _cancel_checker: Callable[[], str] | None = None,
     _environment_policy: str = "candidate_runtime",
 ) -> str:
+    """Run the bounded candidate-evidence protocol in a direct no-window subprocess.
+
+    通用沙箱终端在 Windows 上对非 danger_full_access 的直 shell 一律
+    fail-closed 拒绝（``SANDBOX_UNVERIFIED``，见 ``codex_cli_sandbox``），
+    导致候选证据子进程结构性无法启动（swte-823fac5f4081 定案：复跑
+    Agent 已完整通过验收，证据子进程却零输出即失败）。本协议的命令由
+    服务方全权构造（无用户/模型可控片段）、输入有界、纯本地计算，因此
+    走专用直子进程：无 shell、``CREATE_NO_WINDOW``、超时与输出上限保留；
+    不改变通用沙箱边界。
+    """
     if _environment_policy != "candidate_runtime":
         raise CandidateRuntimeExecutionError("Candidate harness requires the isolated environment policy.")
-    snapshot = start_codex_sandbox_terminal_session(
-        command,
-        timeout=timeout,
-        cwd=cwd,
-        yield_time_ms=1_000,
-        max_output_chars=_CANDIDATE_RUNTIME_OUTPUT_LIMIT,
-        _cancel_checker=_cancel_checker,
-        _environment_policy=_environment_policy,
-    )
-    stdout_parts: list[str] = []
-    while True:
-        stdout_parts.append(str(snapshot.get("stdout") or ""))
-        if bool(snapshot.get("truncated")) or int(snapshot.get("originalLength") or 0) > _CANDIDATE_RUNTIME_OUTPUT_LIMIT:
-            session_id = str(snapshot.get("terminalSessionId") or "").strip()
-            if str(snapshot.get("status") or "").strip().lower() == "running" and session_id:
-                write_codex_sandbox_terminal_stdin(
-                    session_id,
-                    "",
-                    yield_time_ms=0,
-                    max_output_chars=256,
-                    _cancel_checker=lambda: "candidate_runtime_output_limit",
-                )
-            raise CandidateRuntimeExecutionError("Candidate harness subprocess output exceeded the bounded contract.")
-        status = str(snapshot.get("status") or "").strip().lower()
-        if status != "running":
-            if status != "completed" or int(snapshot.get("exitCode") or 0) != 0:
-                raise CandidateRuntimeExecutionError(
-                    f"Candidate harness subprocess ended with status {status or 'unknown'}."
-                )
-            return "".join(stdout_parts)
-        session_id = str(snapshot.get("terminalSessionId") or "").strip()
-        if not session_id:
-            raise CandidateRuntimeExecutionError("Candidate harness terminal session identity is missing.")
-        snapshot = write_codex_sandbox_terminal_stdin(
-            session_id,
-            "",
-            yield_time_ms=1_000,
-            max_output_chars=_CANDIDATE_RUNTIME_OUTPUT_LIMIT,
-            _cancel_checker=_cancel_checker,
+    if _cancel_checker is not None:
+        cancel_reason = _cancel_checker()
+        if cancel_reason:
+            raise CandidateRuntimeExecutionError(
+                f"Candidate harness subprocess cancelled: {cancel_reason}"
+            )
+    creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    try:
+        completed = subprocess.run(
+            list(argv),
+            cwd=cwd,
+            timeout=timeout,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=creationflags,
+            check=False,
         )
+    except subprocess.TimeoutExpired as exc:
+        raise CandidateRuntimeExecutionError("Candidate harness subprocess timed out.") from exc
+    except OSError as exc:
+        raise CandidateRuntimeExecutionError(
+            f"Candidate harness subprocess could not be executed ({type(exc).__name__})."
+        ) from exc
+    if completed.returncode != 0:
+        detail = str(completed.stderr or completed.stdout or "").strip()[-400:]
+        raise CandidateRuntimeExecutionError(
+            f"Candidate harness subprocess exited with {completed.returncode}: {detail}"
+        )
+    stdout = str(completed.stdout or "")
+    if len(stdout) > _CANDIDATE_RUNTIME_OUTPUT_LIMIT:
+        raise CandidateRuntimeExecutionError("Candidate harness subprocess output exceeded the bounded contract.")
+    return stdout
 
 
 def _candidate_runtime_events(result: HarnessResult) -> list[dict[str, Any]]:
@@ -260,18 +264,16 @@ def run_candidate_runtime_evidence(
     try:
         input_path.write_text(input_text, encoding="utf-8")
         relative_input = input_path.relative_to(candidate_root).as_posix()
-        command = subprocess.list2cmdline(
-            [
-                sys.executable,
-                "-m",
-                "scripts.evolution_harness",
-                "--candidate-runtime-input",
-                relative_input,
-            ]
-        )
+        argv = [
+            sys.executable,
+            "-m",
+            "scripts.evolution_harness",
+            "--candidate-runtime-input",
+            relative_input,
+        ]
         try:
-            output = (sandbox_runner or _run_candidate_sandbox_command)(
-                command,
+            output = (sandbox_runner or _run_candidate_evidence_subprocess)(
+                argv,
                 timeout=_CANDIDATE_RUNTIME_TIMEOUT_SECONDS,
                 cwd=str(candidate_root),
                 _cancel_checker=cancel_checker,
