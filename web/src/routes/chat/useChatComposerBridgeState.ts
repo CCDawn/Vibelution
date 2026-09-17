@@ -187,7 +187,7 @@ export function useChatComposerBridgeState({
   const sessionBusy = isBusyPhase(detail?.currentPhase)
     && !(lastTurnTerminal && !liveActiveTurnOpen && !sessionStopping);
   const activeImageInputGuidance = buildComposerImageInputGuidance({
-    attachmentCount: activeImageAttachments.length,
+    attachmentCount: activeImageAttachments.filter((attachment) => attachment.kind === "image").length,
     queuedUntilTurnEnds: sessionBusy && !resolvedEditTarget,
     imageInputSupport: activeAgentImageInputSupported,
     modelLabel: activeImageInputModelLabel,

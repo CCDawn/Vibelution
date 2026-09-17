@@ -4040,7 +4040,7 @@ def _build_last_context_composition(
                 chars=sum(len(str(item.get("filename") or "")) + len(str(item.get("contentType") or "")) for item in normalized_attachments),
                 item_count=len(normalized_attachments),
                 source="user_attachments",
-                description="User image attachments prepared for this turn.",
+                description="User attachments prepared for this turn.",
                 kind="attachment",
                 lifecycle="turn",
                 authority=55,

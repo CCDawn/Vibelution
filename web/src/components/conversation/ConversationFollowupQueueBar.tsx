@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { ArrowRight, GripVertical, Image as ImageIcon, Pencil, X } from "lucide-react";
+import { ArrowRight, GripVertical, Paperclip, Pencil, X } from "lucide-react";
 
 import { VButton, VNativeInput } from "../vui";
 import styles from "./ConversationView.styles";
@@ -108,11 +108,11 @@ export function ConversationFollowupQueueBar({
                       className={styles.followupQueueChip}
                       title={
                         lang === "zh"
-                          ? `${item.attachmentCount} 张图片`
-                          : `${item.attachmentCount} image attachment(s)`
+                          ? `${item.attachmentCount} 个附件`
+                          : `${item.attachmentCount} attachment(s)`
                       }
                     >
-                      <ImageIcon size={11} />
+                      <Paperclip size={11} />
                       {item.attachmentCount}
                     </span>
                   ) : null}

@@ -86,35 +86,98 @@ function renderAgentContextAttachmentPart(part: AgentAttachmentPart, lang: "zh" 
     if (!imageUrl) {
       return null;
     }
-    const downloadLabel = lang === "zh" ? `下载图片 ${filename}` : `Download image ${filename}`;
     return (
-      <figure
+      <AgentContextImageAttachment
         key={part.id}
-        className={styles.userAttachment}
-        role="listitem"
-        aria-label={attachmentLabel}
-        data-agent-context-part-id={part.id}
-        data-agent-context-part-type={part.type}
-        data-agent-context-attachment-name={filename}
-      >
-        <img className={styles.userAttachmentImage} src={imageUrl} alt={filename} loading="lazy" />
-        <figcaption className={styles.userAttachmentMeta}>
-          <span title={filename}>{filename}</span>
-          <a
-            className={styles.imageDownloadButton}
-            href={attachment.downloadUrl || imageUrl}
-            download={attachment.artifactId || true}
-            title={downloadLabel}
-            aria-label={downloadLabel}
-          >
-            <Download size={14} />
-          </a>
-        </figcaption>
-      </figure>
+        part={part}
+        attachment={attachment}
+        imageUrl={imageUrl}
+        filename={filename}
+        attachmentLabel={attachmentLabel}
+        lang={lang}
+      />
     );
   }
 
-  const downloadHref = attachment.downloadUrl || attachment.url || "";
+  return renderAgentContextFileCard(
+    part,
+    attachment,
+    filename,
+    attachmentLabel,
+    lang,
+    attachment.downloadUrl || attachment.url || "",
+  );
+}
+
+type AgentContextImageAttachmentProps = {
+  part: AgentAttachmentPart;
+  attachment: AgentAttachmentPart["attachment"];
+  imageUrl: string;
+  filename: string;
+  attachmentLabel: string;
+  lang: "zh" | "en";
+};
+
+function AgentContextImageAttachment({
+  part,
+  attachment,
+  imageUrl,
+  filename,
+  attachmentLabel,
+  lang,
+}: AgentContextImageAttachmentProps) {
+  const [loadFailed, setLoadFailed] = React.useState(false);
+  if (loadFailed) {
+    return renderAgentContextFileCard(
+      part,
+      attachment,
+      filename,
+      attachmentLabel,
+      lang,
+      attachment.downloadUrl || imageUrl,
+    );
+  }
+  const downloadLabel = lang === "zh" ? `下载图片 ${filename}` : `Download image ${filename}`;
+  return (
+    <figure
+      className={styles.userAttachment}
+      role="listitem"
+      aria-label={attachmentLabel}
+      data-agent-context-part-id={part.id}
+      data-agent-context-part-type={part.type}
+      data-agent-context-attachment-name={filename}
+    >
+      <img
+        className={styles.userAttachmentImage}
+        src={imageUrl}
+        alt={filename}
+        loading="lazy"
+        onError={() => setLoadFailed(true)}
+      />
+      <figcaption className={styles.userAttachmentMeta}>
+        <span title={filename}>{filename}</span>
+        <a
+          className={styles.imageDownloadButton}
+          href={attachment.downloadUrl || imageUrl}
+          download={attachment.artifactId || true}
+          title={downloadLabel}
+          aria-label={downloadLabel}
+        >
+          <Download size={14} />
+        </a>
+      </figcaption>
+    </figure>
+  );
+}
+
+function renderAgentContextFileCard(
+  part: AgentAttachmentPart,
+  attachment: AgentAttachmentPart["attachment"],
+  filename: string,
+  attachmentLabel: string,
+  lang: "zh" | "en",
+  downloadHref: string,
+) {
   const downloadLabel = lang === "zh" ? `下载文件 ${filename}` : `Download file ${filename}`;
   const sizeLabel = attachmentSizeLabel(attachment.sizeBytes);
   return (

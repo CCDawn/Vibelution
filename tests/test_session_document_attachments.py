@@ -15,6 +15,7 @@ import pytest
 from core.web.services import session_service
 from core.web.services.session import conversation_references
 from core.web.services.session import document_attachments as doc_attachments
+from core.web.services.session import image_attachments as image_attachments
 
 
 # ---------------------------------------------------------------------------
@@ -625,3 +626,74 @@ def test_submit_injects_knowledge_reference_block_into_turn_prompt(
         )
     finally:
         _reset_seeded_session_runtime(session_id)
+
+
+# ---------------------------------------------------------------------------
+# attachment kind classification: documents must not default to images
+
+
+def test_normalize_chat_attachments_classifies_documents_instead_of_defaulting_to_images() -> None:
+    normalized = session_service.normalize_chat_attachments([
+        {
+            "artifactId": "report.md",
+            "url": "/api/sessions/session-x/artifacts/report.md",
+            "contentType": "text/plain",
+        },
+        {
+            "artifactId": "brief.pdf",
+            "url": "/api/sessions/session-x/artifacts/brief.pdf",
+        },
+        {
+            "artifactId": "data.bin",
+            "filename": "data.bin",
+            "url": "/api/sessions/session-x/artifacts/data.bin",
+            "kind": "user_document",
+            "imageUrl": "/api/sessions/session-x/artifacts/data.bin",
+        },
+    ])
+
+    assert [item["kind"] for item in normalized] == ["user_document", "user_document", "user_document"]
+    assert all(item["imageUrl"] == "" for item in normalized)
+    assert normalized[0]["downloadUrl"].endswith("/artifacts/report.md")
+
+
+def test_normalize_chat_attachments_keeps_images_and_clears_stale_document_image_url() -> None:
+    normalized = session_service.normalize_chat_attachments([
+        {
+            "artifactId": "shot.png",
+            "url": "/api/sessions/session-x/artifacts/shot.png",
+            "contentType": "image/png",
+        },
+        {
+            "artifactId": "legacy-notes.md",
+            "url": "/api/sessions/session-x/artifacts/legacy-notes.md",
+            "imageUrl": "/api/sessions/session-x/artifacts/legacy-notes.md",
+            "contentType": "text/plain",
+        },
+    ])
+
+    assert normalized[0]["kind"] == "user_image"
+    assert normalized[0]["imageUrl"] == "/api/sessions/session-x/artifacts/shot.png"
+    assert normalized[1]["kind"] == "user_document"
+    assert normalized[1]["imageUrl"] == ""
+
+
+def test_resolve_image_attachments_skips_document_metadata(seeded_document_session: str) -> None:
+    session_id = seeded_document_session
+    attachment = doc_attachments.store_session_user_document_attachment(
+        session_id,
+        b"# notes",
+        filename="notes.md",
+        content_type="text/markdown",
+    )
+    conversation = {
+        "conversation_id": session_id,
+        "uploaded_attachments": [attachment],
+    }
+
+    with pytest.raises(session_service.SessionValidationError, match="Image attachment not found"):
+        image_attachments._resolve_session_image_attachments(
+            session_id,
+            [attachment["artifactId"]],
+            conversation=conversation,
+        )

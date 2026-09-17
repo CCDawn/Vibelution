@@ -1576,12 +1576,12 @@ def _message_content_with_attachment_summary(content: Any, attachments: list[dic
         return text
     lines = [text] if text else []
     lines.append("")
-    lines.append("[图片附件摘要]")
+    lines.append("[附件摘要]")
     for index, attachment in enumerate(normalized, start=1):
         filename = str(attachment.get("filename") or attachment.get("artifactId") or f"image-{index}").strip()
         content_type = str(attachment.get("contentType") or "").strip()
         size_bytes = s._coerce_nonnegative_int(attachment.get("sizeBytes") or 0)
-        lines.append(f"- {filename} · {content_type or 'image'} · {size_bytes} bytes")
+        lines.append(f"- {filename} · {content_type or 'attachment'} · {size_bytes} bytes")
     return "\n".join(lines).strip()
 
 

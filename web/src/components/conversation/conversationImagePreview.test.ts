@@ -45,7 +45,10 @@ describe("conversation image preview boundary", () => {
   it("detects image URLs and extracts download names", () => {
     expect(isLikelyConversationImageUrl("/files/image.webp?download=1")).toBe(true);
     expect(isLikelyConversationImageUrl("/api/artifacts/image/123")).toBe(true);
+    expect(isLikelyConversationImageUrl("/files/diagram.svg")).toBe(true);
+    expect(isLikelyConversationImageUrl("data:image/png;base64,AAAA")).toBe(true);
     expect(isLikelyConversationImageUrl("/files/readme.txt")).toBe(false);
+    expect(isLikelyConversationImageUrl("/api/sessions/session-1/artifacts/report.md")).toBe(false);
     expect(conversationImageDownloadName("/files/nested/image.webp?download=1#preview")).toBe("image.webp");
     expect(conversationImageDownloadName("")).toBe("");
   });
