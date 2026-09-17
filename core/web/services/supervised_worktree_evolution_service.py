@@ -1944,9 +1944,11 @@ def _harness_result_payload(result: HarnessResult, *, case_id: str, role: str) -
 def _simulation_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str, Any]) -> dict[str, Any]:
     marker = worktree_path / "tests" / "supervised_worktree_candidate_marker.py"
     marker.parent.mkdir(parents=True, exist_ok=True)
+    run_id = str(context.get("runId") or "unknown")
     marker.write_text(
         '"""Simulation marker for supervised worktree evolution."""\n\n'
-        'CANDIDATE_SELF_EDITED = True\n',
+        'CANDIDATE_SELF_EDITED = True\n'
+        f"SIMULATION_RUN_ID = {json.dumps(run_id)}\n",
         encoding="utf-8",
         # 文本模式默认在 Windows 把 \n 翻译成 \r\n，会让受控提交被
         # pre-commit 的 diff-check 以 trailing whitespace 拒绝。
@@ -1954,7 +1956,7 @@ def _simulation_candidate_modifier(worktree_path: Path, prompt: str, context: di
     )
     return {
         "status": "success",
-        "summary": "simulation wrote a candidate marker file",
+        "summary": f"simulation wrote a candidate marker file for run {run_id}",
         "promptPreview": prompt[:500],
         "changedPath": "tests/supervised_worktree_candidate_marker.py",
     }
