@@ -936,6 +936,17 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.sessionContextMenuItem).toContain("sessionContextMenuItem");
   });
 
+  it("keeps the all-sessions catalog entry in the left conversation rail", () => {
+    expect(conversationIndexRailSource).toContain('data-vui="session-catalog-entry"');
+    expect(conversationIndexRailSource).toContain("<VSessionSearchDialog");
+    expect(conversationIndexRailSource).toContain("useSessionSearchQuery");
+    expect(agentSessionTabStripSource).not.toContain("VSessionSearchDialog");
+    expect(agentSessionTabStripSource).not.toContain("useSessionSearchQuery");
+    expect(agentSessionTabStripSource).not.toContain("全部会话");
+    expect(agentSessionTabStripStyles).not.toHaveProperty("historyButton");
+    expect(agentSessionTabStripStyles).not.toHaveProperty("historyList");
+  });
+
   it("shows a safe return link when Chat is opened from another workspace surface", () => {
     expect(routeAndPresentationSource).toContain(
       "safeAgentCenterReturnToPath(new URLSearchParams(locationSearch).get(\"returnTo\"))",
@@ -3124,16 +3135,18 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.sessionLoadMoreStatus).toBeUndefined();
   });
 
-  it("keeps search, create and collapse together above a compact two-row index", () => {
+  it("keeps search, catalog, create and collapse together above a compact two-row index", () => {
     const railTopSource = routeAndIndexRailSource.slice(
       routeAndIndexRailSource.indexOf("<div className={styles.railTop}>"),
       routeAndIndexRailSource.indexOf("<div", routeAndIndexRailSource.indexOf("<div className={styles.railTop}>") + 1),
     );
 
     expect(railTopSource).toContain("<VDropdownMenu");
-    expect(railTopSource.match(/<VNativeButton|<VIconButton/g)).toHaveLength(3);
+    expect(railTopSource.match(/<VNativeButton|<VIconButton/g)).toHaveLength(4);
     expect(railTopSource).toContain('<Plus size={16} aria-hidden="true" />');
     expect(railTopSource).toContain('<Search size={16} aria-hidden="true" />');
+    expect(railTopSource).toContain('data-vui="session-catalog-entry"');
+    expect(railTopSource).toContain('<LayoutList size={16} aria-hidden="true" />');
     expect(railTopSource).not.toContain("<VInput");
     expect(routeAndIndexRailSource).toContain('aria-keyshortcuts="Control+N Meta+N"');
     expect(routeAndIndexRailSource).toContain('aria-keyshortcuts="Control+K Meta+K"');

@@ -3591,6 +3591,11 @@ export function ChatCodingRouteWorkbench() {
         onCreateGroupRoom={handleCreateGroupRoom}
         onOpenDirectSession={handleOpenDirectSession}
         onPrefetchDirectSession={handlePrefetchDirectSession}
+        activeSessionId={activeSessionId}
+        onSetActiveTab={setActiveTab}
+        sessionIdsNeedingApproval={sessionIdsNeedingApproval}
+        runtimeRunningSessionIds={runtimeRunningSessionIds}
+        teams={teams}
         resolveModelLabel={resolveModelLabel}
         statusLabel={statusLabel}
         describeError={describeError}

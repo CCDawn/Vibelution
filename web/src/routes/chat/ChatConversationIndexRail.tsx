@@ -1,6 +1,7 @@
 import {
   Bot,
   ChevronRight,
+  LayoutList,
   MessageSquarePlus,
   MessageCircleHeart,
   Search,
@@ -19,6 +20,7 @@ import type {
   ChatRoomPurpose,
   SessionDetail,
   SessionSummary,
+  Team,
 } from "../../api/types";
 import {
   VButton,
@@ -28,6 +30,7 @@ import {
   VIconButton,
   VNativeButton,
   VNativeInput,
+  VSessionSearchDialog,
   VStateSurface,
   VStringSelect,
   VTabs,
@@ -35,6 +38,9 @@ import {
 import type { VDropdownMenuItem } from "../../components/vui";
 import type { TranslationKey } from "../../i18n/dictionary";
 import { agentDisplayInfo } from "../agentDisplay";
+import { agentSessionStatusTone } from "../AgentSessionTabStrip";
+import { sessionActivityLabel } from "../sessionActivityIndicator";
+import { useSessionSearchQuery } from "../useSessionSearchQuery";
 import {
   contextUsagePercent,
   formatContextUsage,
@@ -84,6 +90,11 @@ export type ChatConversationIndexRailProps = {
   onCreateGroupRoom: () => void;
   onOpenDirectSession: (sessionId: string) => void;
   onPrefetchDirectSession?: (sessionId: string) => void;
+  activeSessionId: string | null;
+  onSetActiveTab: (sessionId: string, tab: "agent") => void;
+  sessionIdsNeedingApproval?: readonly string[];
+  runtimeRunningSessionIds?: readonly string[];
+  teams?: Team[];
   onToggleGroupAgent: (agentId: string) => void;
   onToggleGroupComposer: () => void;
   readyChatRoomModes: ChatRoomMode[];
@@ -167,6 +178,11 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
     onCreateGroupRoom,
     onOpenDirectSession,
     onPrefetchDirectSession,
+    activeSessionId,
+    onSetActiveTab,
+    sessionIdsNeedingApproval = [],
+    runtimeRunningSessionIds = [],
+    teams = [],
     onToggleGroupAgent,
     onToggleGroupComposer,
     readyChatRoomModes,
@@ -238,6 +254,22 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
     },
   ], [createGroupRoomPending, createSessionPending, lang, onCreateAgent, onCreateSession, onToggleGroupComposer]);
 
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [catalogQuery, setCatalogQuery] = useState("");
+  const [catalogAgentFilter, setCatalogAgentFilter] = useState("");
+  const [catalogTeamFilter, setCatalogTeamFilter] = useState("");
+  const catalogSearch = useSessionSearchQuery({
+    queryText: catalogQuery,
+    filters: { agentId: catalogAgentFilter, teamId: catalogTeamFilter },
+    enabled: catalogOpen,
+  });
+  const catalogApprovalSessionIds = new Set(
+    sessionIdsNeedingApproval.map((id) => String(id || "").trim()).filter(Boolean),
+  );
+  const catalogRuntimeSessionIds = new Set(
+    runtimeRunningSessionIds.map((id) => String(id || "").trim()).filter(Boolean),
+  );
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) {
@@ -280,6 +312,16 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
               title={lang === "zh" ? "搜索 Agent 或团队；Ctrl+K 搜索全部任务" : "Search Agents or teams; Ctrl+K searches all tasks"}
             >
               {directorySearchOpen ? <X size={16} aria-hidden="true" /> : <Search size={16} aria-hidden="true" />}
+            </VNativeButton>
+            <VNativeButton
+              type="button"
+              data-vui="session-catalog-entry"
+              className={styles.railActionButton}
+              aria-label={lang === "zh" ? "全部会话" : "All sessions"}
+              onClick={() => setCatalogOpen(true)}
+              title={lang === "zh" ? "全部会话" : "All sessions"}
+            >
+              <LayoutList size={16} aria-hidden="true" />
             </VNativeButton>
             <VDropdownMenu
               aria-label={lang === "zh" ? "新建任务" : "Create task"}
@@ -677,6 +719,80 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
             }}
             maxVisible={7}
             data-vui="chat-left-rail-search"
+          />
+          <VSessionSearchDialog
+            open={catalogOpen}
+            onOpenChange={setCatalogOpen}
+            query={catalogQuery}
+            onQueryChange={setCatalogQuery}
+            filters={
+              <>
+                <VStringSelect
+                  ariaLabel={lang === "zh" ? "按 Agent 过滤" : "Filter by agent"}
+                  value={catalogAgentFilter}
+                  onValueChange={setCatalogAgentFilter}
+                  options={[
+                    { value: "", label: lang === "zh" ? "全部 Agent" : "All agents" },
+                    ...[...agentsById.values()].map((agent) => ({
+                      value: agent.agentId,
+                      label: agent.displayName || agent.agentCode || agent.agentId,
+                    })),
+                  ]}
+                />
+                <VStringSelect
+                  ariaLabel={lang === "zh" ? "按团队过滤" : "Filter by team"}
+                  value={catalogTeamFilter}
+                  onValueChange={setCatalogTeamFilter}
+                  options={[
+                    { value: "", label: lang === "zh" ? "全部团队" : "All teams" },
+                    ...teams.map((team) => ({
+                      value: team.teamId,
+                      label: team.name || team.teamId,
+                    })),
+                  ]}
+                />
+              </>
+            }
+            items={catalogSearch.sessions.map((session) => {
+              const tone = agentSessionStatusTone(session.status || "", {
+                session,
+                isActive: session.id === activeSessionId,
+                needsApproval: catalogApprovalSessionIds.has(session.id),
+                isRuntimeRunning: catalogRuntimeSessionIds.has(session.id),
+              });
+              const searchAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
+              return {
+                id: session.id,
+                title: session.title || searchAgent?.displayName || session.id,
+                detail: session.taskSummary || session.resultCard?.summary || "",
+                meta: [
+                  session.agentDisplayName || searchAgent?.displayName || "",
+                  sessionActivityLabel(tone, lang),
+                  session.updatedAt || session.lastActive || "",
+                ].filter(Boolean).join(" · "),
+                highlight: catalogSearch.debouncedQueryText,
+                active: session.id === activeSessionId,
+                onOpen: () => {
+                  if (session.id === activeSessionId) onSetActiveTab(session.id, "agent");
+                  else onOpenDirectSession(session.id);
+                },
+              };
+            })}
+            loading={catalogSearch.isLoading}
+            hasMore={catalogSearch.hasMore}
+            loadingMore={catalogSearch.isLoadingMore}
+            onLoadMore={() => void catalogSearch.loadMore()}
+            totalEstimate={catalogSearch.totalEstimate}
+            labels={{
+              searchPlaceholder: lang === "zh" ? "搜索标题、摘要或会话编号" : "Search titles, summaries or session IDs",
+              emptyTitle: lang === "zh" ? "没有匹配的会话" : "No matching sessions",
+              emptyHint: lang === "zh" ? "换个关键词，或清空过滤条件" : "Try another keyword or clear the filters",
+              loadMore: lang === "zh" ? "加载更多" : "Load more",
+              loadingMore: lang === "zh" ? "加载中…" : "Loading…",
+              resultSummary: (loaded, total) => (lang === "zh" ? `已加载 ${loaded} / ${total} 个会话` : `Loaded ${loaded} of ${total} sessions`),
+              hint: lang === "zh" ? "↑↓ 选择 · Enter 打开 · Esc 关闭" : "↑↓ navigate · Enter open · Esc close",
+            }}
+            data-vui="chat-left-rail-session-catalog"
           />
         </aside>
   );

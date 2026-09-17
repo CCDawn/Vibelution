@@ -13,6 +13,13 @@
 过滤槽位、服务端分页结果列表（键盘 ↑/↓/Enter、命中词高亮、已加载 N/M、加载更多）。
 用户按标题或话题片段找到任意历史会话并直接打开。
 
+### 入口
+
+- 挂载面是左侧会话栏头部（`data-vui="session-catalog-entry"` 图标按钮，标签「全部会话」），
+  点击打开本弹窗；会话 Tag 行只保留 标签 +「新建会话」，不再承载目录入口。
+- 与 `Ctrl+K` 的分工：`Ctrl+K` 仍是会话栏内的 `VCommandPalette`（本地导航/动作）；
+  目录弹窗提供跨 Agent 的服务端分页搜索与 Agent/团队过滤。
+
 ### 适用范围
 
 - **适用**：结果集来自服务端分页查询（`/api/sessions/query` 的 `q`/`agentId`/
@@ -80,6 +87,8 @@ import { VSessionSearchDialog, type VSessionSearchDialogItem } from "@/component
 ### 实现落点
 
 - 源码：`web/src/components/vui/product/workbench-shell/VSessionSearchDialog.tsx`
+- 挂载面：`web/src/routes/chat/ChatConversationIndexRail.tsx`（头部图标 + 弹窗宿主 +
+  `useSessionSearchQuery` 防抖/分页）
 - Renderer：无自有 renderer；组合 `VDialog` + `VInput` + `VNativeButton` +
   `VStateSurface`。
 
