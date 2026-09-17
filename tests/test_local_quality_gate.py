@@ -675,6 +675,92 @@ def test_materialize_command_keeps_root_bound_vitest_at_repository_root(git_repo
     assert materialized.cwd == git_repo
 
 
+@pytest.mark.parametrize(
+    "files",
+    [
+        ["web/src/components/example.tsx"],
+        ["web/src/styles/theme.css"],
+        ["web/vite.config.ts"],
+        ["core/feature.py", "web/src/routes/DemoRoute.tsx"],
+    ],
+)
+def test_closeout_appends_web_contract_commands_for_web_changes(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    files: list[str],
+) -> None:
+    monkeypatch.setattr(
+        gate,
+        "selected_validation",
+        lambda changed, *, root=None: {"commands": []},
+    )
+    sha = git(git_repo, "rev-parse", "HEAD").stdout.strip()
+
+    specs = gate.expected_closeout_commands(git_repo, files, sha, sha)
+
+    assert [spec.kind for spec in specs] == ["web-test", "web-test"]
+    assert specs == [
+        gate.materialize_command(gate.parse_allowed_command(command, git_repo))
+        for command in gate.CLOSEOUT_WEB_CONTRACT_COMMANDS
+    ]
+
+
+@pytest.mark.parametrize(
+    "files",
+    [
+        ["docs/note.md"],
+        ["core/feature.py"],
+        ["web/README.md"],
+        ["desktop/electron/main.ts"],
+        [],
+    ],
+)
+def test_closeout_skips_web_contract_commands_without_web_changes(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    files: list[str],
+) -> None:
+    monkeypatch.setattr(
+        gate,
+        "selected_validation",
+        lambda changed, *, root=None: {"commands": []},
+    )
+    sha = git(git_repo, "rev-parse", "HEAD").stdout.strip()
+
+    specs = gate.expected_closeout_commands(git_repo, files, sha, sha)
+
+    assert specs == []
+
+
+def test_closeout_web_contract_commands_match_matrix_shape_and_exist() -> None:
+    matrix = select_tests.load_matrix(gate.PROJECT_ROOT / "tests" / "test_matrix.yaml")
+    matrix_commands = [
+        str(command)
+        for rule in matrix.get("rules", [])
+        if isinstance(rule, dict)
+        for command in rule.get("commands", [])
+    ]
+
+    def shape(command: str) -> tuple[str, ...]:
+        tokens = command.split()
+        return (tokens[0], tokens[1], tokens[2], tokens[-2], tokens[-1])
+
+    matrix_shapes = {
+        shape(command)
+        for command in matrix_commands
+        if command.startswith("node web/node_modules/vitest/vitest.mjs run ")
+    }
+    assert matrix_shapes, "matrix must keep root-bound web-test commands"
+
+    for command in gate.CLOSEOUT_WEB_CONTRACT_COMMANDS:
+        spec = gate.parse_allowed_command(command, gate.PROJECT_ROOT)
+        assert spec.kind == "web-test"
+        assert spec.cwd == gate.PROJECT_ROOT
+        assert shape(command) in matrix_shapes
+        for token in command.split()[3:-2]:
+            assert (gate.PROJECT_ROOT / "web" / token).is_file()
+
+
 def test_local_quality_gate_matrix_command_matches_self_test_and_allowlist(
     git_repo: Path,
 ) -> None:
