@@ -41,6 +41,7 @@ from scripts.evolution_harness import (
     delete_checkpoint_ref,
     remove_worktree,
 )
+from scripts.git_claim_guard import coordination_call
 from vibelution_storage import resolve_project_workspace_home
 
 from .i18n import get_web_language, text_for
@@ -296,9 +297,10 @@ def run_supervised_worktree_flow(
     }
     run_id = str(snapshot.get("runId") or "")
     try:
-        return _execute_flow(snapshot, options, root=root, dependencies=dependencies or WorktreeRunDependencies())
+        result = _execute_flow(snapshot, options, root=root, dependencies=dependencies or WorktreeRunDependencies())
     finally:
         _clear_run_cancel_event(run_id)
+    return _auto_cleanup_failed_candidate(result)
 
 
 def get_supervised_worktree_run(run_id: str) -> dict[str, Any] | None:
@@ -698,6 +700,7 @@ def _run_supervised_worktree_thread(run_id: str, options: dict[str, Any]) -> Non
                 _ACTIVE_RUN_ID = None
         final_snapshot = _work_run_store().load_snapshot(RUN_KIND, run_id)
         if final_snapshot:
+            final_snapshot = _auto_cleanup_failed_candidate(final_snapshot)
             _persist_snapshot(final_snapshot, active_run_id="")
 
 
@@ -4094,6 +4097,143 @@ def _discard_candidate(snapshot: dict[str, Any]) -> dict[str, Any]:
     updated["updatedAt"] = _now_iso()
     _persist_snapshot(updated, active_run_id="")
     return updated
+
+
+def _auto_cleanup_failed_candidate(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """失败/取消终态的候选 worktree 自动回收。
+
+    历史上清理只挂在手动 discard 动作上，失败路径（如
+    CandidateModificationNoChanges、受控提交被 pre-commit 拒收）会同时泄漏
+    harness worktree、候选分支和提交期登记的 claim（swte-7f06b70537f9 /
+    swte-6fb5b3fe25f4 实弹验收定案）。这里在运行终态之后统一回收：沿既有
+    ``_cleanup_candidate_worktree`` 的所有权计划执行，并释放绑定到本轮
+    分支的 claim；清理永不改变运行终态，失败只记录。
+    """
+    status = str(snapshot.get("status") or "").strip().lower()
+    if status not in {"failed", "cancelled"}:
+        return snapshot
+    if bool(snapshot.get("keepWorktree")):
+        return snapshot
+    if str(snapshot.get("outcome") or "").strip().lower() == "preserved":
+        return snapshot
+    worktree = snapshot.get("candidateWorktree") if isinstance(snapshot.get("candidateWorktree"), dict) else {}
+    if not str(worktree.get("path") or "").strip():
+        return snapshot
+    prior_cleanup = worktree.get("cleanup") if isinstance(worktree.get("cleanup"), dict) else {}
+    if str(prior_cleanup.get("status") or "") == "removed":
+        return snapshot
+    cleanup = _cleanup_candidate_worktree(snapshot)
+    claim_release = _release_harness_claims(snapshot)
+    branch_removal = (
+        _delete_candidate_branch(snapshot)
+        if str(cleanup.get("status") or "") == "removed"
+        else {"status": "skipped", "reason": "worktree_not_removed"}
+    )
+    worktree_after = (
+        snapshot.get("candidateWorktree")
+        if isinstance(snapshot.get("candidateWorktree"), dict)
+        else {}
+    )
+    snapshot["candidateWorktree"] = {
+        **worktree_after,
+        "autoCleanup": {
+            "status": str(cleanup.get("status") or ""),
+            "reason": str(cleanup.get("reason") or ""),
+            "claimRelease": claim_release,
+            "branchRemoval": branch_removal,
+            "at": _now_iso(),
+        },
+    }
+    snapshot["updatedAt"] = _now_iso()
+    return snapshot
+
+
+def _delete_candidate_branch(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """删除本轮的候选分支（默认工厂命名为 codex/supervised-<runId>）。
+
+    remove_worktree 只回收工作树不删分支；自定义 worktree 工厂没有该分支，
+    删除按 not found 静默处理，永不抛错。
+    """
+    run_id = str(snapshot.get("runId") or "").strip()
+    if not run_id:
+        return {"status": "skipped", "reason": "missing_run_id"}
+    root = _snapshot_project_root(snapshot)
+    branch = f"codex/supervised-{run_id}"
+    completed = git_process.run_git(
+        ["branch", "-D", branch],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if completed.returncode == 0:
+        return {"status": "deleted", "branch": branch}
+    output = str(completed.stderr or completed.stdout or "").strip()
+    if "not found" in output.lower():
+        return {"status": "noop", "branch": branch}
+    return {"status": "failed", "branch": branch, "message": output[:200]}
+
+
+def _release_harness_claims(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """释放绑定到本轮候选分支的开发 claim（尽力而为，失败只记录）。
+
+    受控提交在 harness worktree 里执行时，pre-commit 的 claim guard 会按
+    暂存路径登记 claim；提交失败后即使 worktree 被回收，协调注册表里的
+    claim 也会变成僵尸并阻塞后续同 scope 提交（claim_overlap）。
+    """
+    run_id = str(snapshot.get("runId") or "").strip()
+    if not run_id:
+        return {"status": "skipped", "reason": "missing_run_id", "released": []}
+    root = _snapshot_project_root(snapshot)
+    try:
+        payload = coordination_call(root, "status")
+    except Exception as exc:
+        return {
+            "status": "skipped",
+            "reason": "coordination_unavailable",
+            "message": str(exc)[:200],
+            "released": [],
+        }
+    claims = payload.get("claims") if isinstance(payload, dict) else None
+    if not isinstance(claims, list):
+        return {"status": "skipped", "reason": "coordination_invalid_response", "released": []}
+    expected_branch = f"codex/supervised-{run_id}"
+    released: list[str] = []
+    failures: list[dict[str, str]] = []
+    for claim in claims:
+        if not isinstance(claim, dict):
+            continue
+        claim_id = str(
+            claim.get("claim_id") or claim.get("claimId") or claim.get("id") or ""
+        ).strip()
+        if not claim_id:
+            continue
+        bound = f"{claim.get('branch') or ''} {claim.get('task') or ''}"
+        if run_id not in bound and expected_branch not in bound:
+            continue
+        try:
+            coordination_call(
+                root,
+                "release",
+                "--claim-id",
+                claim_id,
+                "--status",
+                "completed",
+                "--reason",
+                f"supervised run {run_id} reached terminal failure; auto-cleanup released its harness claim",
+            )
+            released.append(claim_id)
+        except Exception as exc:
+            failures.append({"claimId": claim_id, "message": str(exc)[:200]})
+    if failures and not released:
+        return {"status": "failed", "released": released, "failures": failures}
+    if failures:
+        return {"status": "partial", "released": released, "failures": failures}
+    if not released:
+        return {"status": "noop", "released": []}
+    return {"status": "released", "released": released}
 
 
 def _cleanup_candidate_worktree(snapshot: dict[str, Any]) -> dict[str, Any]:
