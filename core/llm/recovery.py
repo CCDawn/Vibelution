@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Mapping
 
 from .errors import classify_exception
+from .resilience_policy import DEGRADED_RETRY_CATEGORIES
 from .types import LLMError
 
 
@@ -24,9 +27,12 @@ class LLMRecoveryDecision:
 
 # Attempt-level capability-degradation actions. ``turn_llm_adapter`` executes
 # each of these at most once per turn, on the route that just failed, before
-# any declared fallback switch. Keeping the vocabulary next to
+# any declared fallback switch (the ladder order is owned by
+# ``core/llm/resilience_policy.py``). Keeping the vocabulary next to
 # ``_action_for_category`` makes this module the single source of truth for
-# what a category's action means; the adapter must not re-declare the mapping.
+# what a category's *action* means; the adapter must not re-declare the
+# mapping, and the stage side of the same categories is machine-checked below
+# against the policy module.
 DEGRADED_RETRY_ACTIONS = frozenset(
     {
         "retry_without_streaming",
@@ -86,7 +92,14 @@ def plan_recovery(
 
 
 def _action_for_category(category: str) -> str:
-    return {
+    return _ACTION_FOR_CATEGORY.get(category, "fail_fast")
+
+
+# Category → action vocabulary (single source of truth for what a category's
+# action means). Module-level so tests can machine-check its degraded subset
+# against core/llm/resilience_policy.py's stage map.
+_ACTION_FOR_CATEGORY: Mapping[str, str] = MappingProxyType(
+    {
         "network_error": "retry_with_backoff",
         "timeout": "retry_with_backoff",
         "server_error": "retry_with_backoff",
@@ -108,7 +121,31 @@ def _action_for_category(category: str) -> str:
         "configuration_error": "fail_fast",
         "provider_protocol_error": "fail_fast",
         "user_interrupt": "stop",
-    }.get(category, "fail_fast")
+    }
+)
+
+
+def _validate_degraded_actions_match_policy_stages() -> None:
+    """Machine-checked tie between the action vocabulary and the policy stage map.
+
+    Every category whose action is a degraded retry must sit at the policy
+    ladder's DEGRADED_RETRY stage, and vice versa. Drift in either module fails
+    at import time instead of silently forking the resilience vocabulary.
+    """
+    degraded_action_categories = {
+        category
+        for category, action in _ACTION_FOR_CATEGORY.items()
+        if action in DEGRADED_RETRY_ACTIONS
+    }
+    if degraded_action_categories != set(DEGRADED_RETRY_CATEGORIES):
+        raise ValueError(
+            "core/llm/recovery.py degraded action categories drifted from "
+            "core/llm/resilience_policy.py DEGRADED_RETRY_CATEGORIES: "
+            f"{sorted(degraded_action_categories)} != {sorted(DEGRADED_RETRY_CATEGORIES)}"
+        )
+
+
+_validate_degraded_actions_match_policy_stages()
 
 
 def _retry_wait_seconds(error: LLMError, attempt: int, max_attempts: int) -> int:

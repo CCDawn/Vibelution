@@ -16,6 +16,7 @@ from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from core.infrastructure.llm_utils import MAX_CONSECUTIVE_FAILURES
 from core.llm import LLMError
 from core.llm.recovery import DEGRADED_RETRY_ACTIONS, degraded_retry_overrides
+from core.llm.resilience_policy import can_switch_fallback
 from core.llm.turn_request_capture import (
     capture_turn_request,
     record_turn_request_outcome,
@@ -25,13 +26,10 @@ from core.orchestration.agent_runtime_bindings import (
     _llm_route_trace_fields,
     _safe_llm_error_diagnostic_details,
 )
-
-# Explicit fallback switching triggers only when the primary route's transport
-# retry budget is exhausted on a gateway-level recoverable failure (the same
-# error classes LiteLLM's general ``fallbacks`` bucket covers). Permanent
-# categories (auth/parameter/capability) never switch, and the fallback target
-# itself is never switched again (single hop, no chained fallbacks).
-_FALLBACK_SWITCH_CATEGORIES = frozenset({"network_error", "timeout", "server_error", "rate_limit"})
+# The route-level resilience ladder order (transport retry budget → same-profile
+# degradation → single-hop fallback switch → turn terminal) and the
+# category vocabulary for each stage are owned by core/llm/resilience_policy.py;
+# this adapter only executes that order via the imported predicate.
 
 
 def _coerce_text(value: Any) -> str:
@@ -360,7 +358,9 @@ def invoke_agent_llm_turn(
     Per-failure handling order: first the recovery decision's attempt-level
     degradation action (same profile, streaming and/or tools dropped, each
     action at most once per turn — see ``core/llm/recovery.py``); only then an
-    explicit fallback profile switch; only then the turn is terminal.
+    explicit fallback profile switch; only then the turn is terminal. The
+    ladder order and its category vocabulary are owned by
+    ``core/llm/resilience_policy.py``.
 
     Route attempts count across profiles: attempt 1 is the configured route;
     later attempts exist through degraded retries and/or the operator-declared
@@ -692,15 +692,16 @@ def invoke_agent_llm_turn(
                 # the provider prompt-cache prefix and the tool/AI message
                 # context that a profile switch would discard, and the degrade
                 # categories (empty_content_error / tool_protocol_error /
-                # protocol_error) are disjoint from the gateway-level
-                # _FALLBACK_SWITCH_CATEGORIES, so this ordering never competes
-                # within a single failure — a degraded retry that later fails
-                # on a transport category still reaches the fallback branch
-                # below in its own iteration. Each action fires at most once
-                # per turn (no degradation loops), and the skipped case where
-                # the degraded shape would equal the failed shape (already
-                # non-streaming and already tool-less) falls through instead
-                # of burning a no-op request.
+                # protocol_error / answer_channel_leak) are disjoint from the
+                # gateway-level fallback-switch categories (machine-checked in
+                # core/llm/resilience_policy.py), so this ordering never
+                # competes within a single failure — a degraded retry that
+                # later fails on a transport category still reaches the
+                # fallback branch below in its own iteration. Each action fires
+                # at most once per turn (no degradation loops), and the skipped
+                # case where the degraded shape would equal the failed shape
+                # (already non-streaming and already tool-less) falls through
+                # instead of burning a no-op request.
                 degraded_action = _coerce_text(recovery.action).strip()
                 if (
                     degraded_action in DEGRADED_RETRY_ACTIONS
@@ -745,8 +746,9 @@ def invoke_agent_llm_turn(
                         continue
 
                 # Explicit fallback switch: only on the primary route (single
-                # hop), only for recoverable gateway-level categories, and only
-                # once the route's own transport retry budget is exhausted.
+                # hop), only for recoverable gateway-level categories (policy
+                # predicate), and only once the route's own transport retry
+                # budget is exhausted.
                 fallback_profile_id = (
                     "" if pending_fallback_profile_id else _resolve_explicit_fallback_profile_id(failed_route)
                 )
@@ -754,7 +756,7 @@ def invoke_agent_llm_turn(
                     fallback_profile_id
                     and is_retryable
                     and provider_stream_retry_exhausted
-                    and category in _FALLBACK_SWITCH_CATEGORIES
+                    and can_switch_fallback(category)
                 ):
                     hooks.record_scene_event(
                         "llm_route",
