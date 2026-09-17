@@ -1125,3 +1125,271 @@ def test_cleanup_unlinks_every_task_owned_ephemeral_path(
     assert removed == [[True] * len(closeout.TASK_OWNED_EPHEMERAL_PATHS)]
     for relative in closeout.TASK_OWNED_EPHEMERAL_PATHS:
         assert not (task_root / relative).exists()
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", *args],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+
+def dirty_main_repo(tmp_path: Path, *, dirty: bool = True) -> Path:
+    """A minimal main checkout with one uncommitted ``stray.txt`` edit."""
+
+    main_root = tmp_path / "main"
+    main_root.mkdir()
+    _git(main_root, "init", "-q")
+    _git(main_root, "config", "user.email", "closeout@example.invalid")
+    _git(main_root, "config", "user.name", "Closeout Test")
+    _git(main_root, "config", "core.autocrlf", "false")
+    (main_root / ".gitignore").write_text(".worktrees/\n", encoding="utf-8")
+    (main_root / "seed.txt").write_text("seed\n", encoding="utf-8")
+    _git(main_root, "add", ".")
+    _git(main_root, "commit", "-q", "-m", "seed")
+    _git(main_root, "branch", "-M", "main")
+    if dirty:
+        (main_root / "stray.txt").write_text("dirty\n", encoding="utf-8")
+    return main_root
+
+
+def stub_coordination(
+    monkeypatch: pytest.MonkeyPatch,
+    claims: list[dict[str, object]],
+    agents: list[dict[str, object]],
+) -> None:
+    monkeypatch.setattr(
+        closeout,
+        "_coordination_call",
+        lambda _context, *arguments: (
+            pytest.fail(f"unexpected coordination call: {arguments}")
+            if arguments[0] != "status"
+            else {"claims": claims, "agents": agents}
+        ),
+    )
+
+
+def test_describe_dirty_main_names_claim_owner_and_lists_files_with_mtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    main_root = dirty_main_repo(tmp_path)
+    (main_root / "web").mkdir()
+    (main_root / "web" / "edit.tsx").write_text("export {};\n", encoding="utf-8")
+    context = closeout.CloseoutContext(
+        main_root=main_root,
+        task_root=tmp_path / "task",
+        branch="codex/task",
+    )
+    stub_coordination(
+        monkeypatch,
+        claims=[
+            {
+                "id": "claim-web",
+                "status": "active",
+                "agentId": "agent-web",
+                "scopes": ["web/"],
+            },
+            {
+                "id": "claim-done",
+                "status": "completed",
+                "agentId": "agent-done",
+                "scopes": ["*"],
+            },
+        ],
+        agents=[
+            {
+                "id": "agent-web",
+                "state": "active",
+                "branch": "codex/web-task",
+                "worktree": str(tmp_path / "wt"),
+            }
+        ],
+    )
+
+    attribution = closeout.describe_dirty_main(context)
+
+    web_line = next(line for line in attribution.file_lines if "web/edit.tsx" in line)
+    assert web_line.startswith("dirty_main_file:")
+    assert "mtime=" in web_line
+    assert "mtime=unavailable" not in web_line
+    assert any("stray.txt" in line for line in attribution.file_lines)
+    assert len(attribution.owner_lines) == 1
+    assert "agent-web" in attribution.owner_lines[0]
+    assert "claim-web" in attribution.owner_lines[0]
+    assert "claim-done" not in attribution.owner_lines[0]
+    assert "agent-web" in attribution.next_action
+    assert "codex/web-task" in attribution.next_action
+
+
+def test_describe_dirty_main_without_matching_claim_gives_generic_guidance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    main_root = dirty_main_repo(tmp_path)
+    context = closeout.CloseoutContext(
+        main_root=main_root,
+        task_root=tmp_path / "task",
+        branch="codex/task",
+    )
+    stub_coordination(monkeypatch, claims=[], agents=[])
+
+    attribution = closeout.describe_dirty_main(context)
+
+    assert attribution.owner_lines == ()
+    assert any("stray.txt" in line for line in attribution.file_lines)
+    assert "no active claim covers them" in attribution.next_action
+
+
+def test_describe_dirty_main_caps_file_listing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    main_root = dirty_main_repo(tmp_path)
+    extra_count = 5
+    for index in range(closeout.DIRTY_MAIN_FILE_LIMIT + extra_count):
+        (main_root / f"loose-{index:02d}.txt").write_text("x\n", encoding="utf-8")
+    context = closeout.CloseoutContext(
+        main_root=main_root,
+        task_root=tmp_path / "task",
+        branch="codex/task",
+    )
+    stub_coordination(monkeypatch, claims=[], agents=[])
+
+    attribution = closeout.describe_dirty_main(context)
+
+    assert len(attribution.file_lines) == closeout.DIRTY_MAIN_FILE_LIMIT + 1
+    assert f"{extra_count + 1} more paths" in attribution.file_lines[-1]
+
+
+def test_resolve_context_dirty_main_error_carries_attribution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    main_root = dirty_main_repo(tmp_path)
+    task_root = main_root / ".worktrees" / "task"
+    _git(main_root, "worktree", "add", str(task_root), "-b", "codex/task")
+    stub_coordination(monkeypatch, claims=[], agents=[])
+
+    with pytest.raises(closeout.ManagedCloseoutError) as excinfo:
+        closeout.resolve_context(task_root)
+
+    assert excinfo.value.code == "dirty_main"
+    assert any("stray.txt" in line for line in excinfo.value.detail_lines)
+
+
+def test_managed_closeout_reports_dirty_main_attribution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    main_root = dirty_main_repo(tmp_path)
+    task_root = main_root / ".worktrees" / "task"
+    _git(main_root, "worktree", "add", str(task_root), "-b", "codex/task")
+    stub_coordination(
+        monkeypatch,
+        claims=[
+            {
+                "id": "claim-stray",
+                "status": "active",
+                "agentId": "agent-stray",
+                "scopes": ["*"],
+            }
+        ],
+        agents=[{"id": "agent-stray", "state": "active", "branch": "codex/stray"}],
+    )
+
+    result = closeout.run_managed_closeout(
+        task_root,
+        claim_id="claim-dev",
+        agent_id="agent-test",
+    )
+
+    assert result.status == "failed"
+    assert result.exit_code == 1
+    assert result.errors[0] == "dirty_main"
+    assert any("stray.txt" in line for line in result.errors[1:])
+    assert "agent-stray" in result.next_action
+
+
+def test_merge_stage_dirty_main_reports_attribution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    main_root = dirty_main_repo(tmp_path, dirty=False)
+    task_root = main_root / ".worktrees" / "task"
+    _git(main_root, "worktree", "add", str(task_root), "-b", "codex/task")
+    stub_coordination(monkeypatch, claims=[], agents=[])
+    manifest = tmp_path / "manifest.json"
+    monkeypatch.setattr(
+        gate,
+        "run_closeout",
+        lambda *_args, **_kwargs: gate.GateResult(
+            outcome="passed",
+            exit_code=0,
+            manifest_path=manifest,
+        ),
+    )
+    verify_calls = {"count": 0}
+
+    def fake_verify(*_args, **_kwargs):
+        verify_calls["count"] += 1
+        if verify_calls["count"] == 2:
+            # A foreign session dirties main between the two verification
+            # passes, so the ff-only merge must refuse with attribution.
+            (main_root / "late.txt").write_text("dirty\n", encoding="utf-8")
+        return gate.GateResult(outcome="passed", exit_code=0, manifest_path=manifest)
+
+    monkeypatch.setattr(gate, "verify_manifest", fake_verify)
+    monkeypatch.setattr(
+        closeout,
+        "acquire_integration_claim",
+        lambda *_args, **_kwargs: "claim-int",
+    )
+    monkeypatch.setattr(closeout, "release_claim", lambda *_args, **_kwargs: None)
+
+    result = closeout.run_managed_closeout(
+        task_root,
+        claim_id="claim-dev",
+        agent_id="agent-test",
+    )
+
+    assert verify_calls["count"] == 2
+    assert result.status == "failed"
+    assert result.merged is False
+    assert result.errors[0] == "dirty_main"
+    assert any("late.txt" in line for line in result.errors[1:])
+
+
+def test_cleanup_only_dirty_main_reports_attribution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    main_root = dirty_main_repo(tmp_path)
+    context = closeout.CloseoutContext(
+        main_root=main_root,
+        task_root=tmp_path / "task",
+        branch="codex/task",
+    )
+    stub_coordination(monkeypatch, claims=[], agents=[])
+    error = closeout.dirty_main_error(context)
+    assert error.code == "dirty_main"
+    monkeypatch.setattr(
+        closeout,
+        "resolve_cleanup_context",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(error),
+    )
+
+    result = closeout.run_cleanup_only(
+        tmp_path / "task",
+        branch="codex/task",
+        agent_id="agent-test",
+    )
+
+    assert result.status == "merged_cleanup_pending"
+    assert result.errors[0] == "dirty_main"
+    assert any("stray.txt" in line for line in result.errors[1:])
+    assert result.next_action == error.next_action

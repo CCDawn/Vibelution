@@ -1059,6 +1059,73 @@ def test_adapter_degrades_before_declared_fallback_switch():
     assert switched[0]["turnId"] == "turn-1"
 
 
+def test_adapter_degraded_attempt_failing_on_transport_category_still_reaches_fallback():
+    """A consumed degraded retry does not block the fallback branch: when the
+    degraded attempt itself fails on a transport category with its budget
+    exhausted, the single-hop fallback switch still fires."""
+    streaming_calls = []
+    invoke_calls = []
+    llm_requests = []
+    events = []
+    primary = _route_llm("primary", identity=("relay", "primary"), fallback="backup_qwen")
+    primary.stream = True
+    backup = _route_llm("backup_qwen", identity=("dashscope", "backup_qwen"))
+    backup.stream = True
+
+    def get_llm_for_mode(**kwargs):
+        llm_requests.append((kwargs.get("disable_tools"), kwargs.get("profile_id")))
+        return primary if kwargs.get("profile_id") is None else backup
+
+    def run_streaming_outcome(llm, *_args, **_kwargs):
+        streaming_calls.append(llm.profile_id)
+        if llm.profile_id == "primary":
+            raise LLMError(
+                "answer_channel_leak",
+                "analysis envelope leaked into the final answer",
+                retryable=False,
+            )
+        return TurnOutcome.final_answer(identity=_identity(), text="rescued")
+
+    def invoke_outcome(client, *_args, **_kwargs):
+        invoke_calls.append(client.profile_id)
+        raise LLMError(
+            "network_error",
+            "connection reset by peer",
+            retryable=True,
+            details={"attempt": 5, "max_attempts": 5, "retry_budget_exhausted": True},
+        )
+
+    result = invoke_agent_llm_turn(
+        messages=[AIMessage(content="hello")],
+        hooks=_adapter_hooks(
+            get_llm_for_mode=get_llm_for_mode,
+            should_stream=lambda *_args, **_kwargs: True,
+            run_streaming_outcome=run_streaming_outcome,
+            invoke_outcome=invoke_outcome,
+            plan_recovery=plan_recovery,
+            record_scene_event=lambda _module, event, **kwargs: events.append(
+                (event, kwargs.get("fields") or {})
+            ),
+        ),
+    )
+    # attempt 1: primary streamed and hit answer_channel_leak -> one-shot
+    # retry_answer_without_tools degraded retry (streaming + tools off);
+    # attempt 2: primary degraded (tool-less, non-streaming) attempt fails on
+    # the transport category network_error -> fallback branch still reached;
+    # attempt 3: backup, tools and streaming back (degrade overrides expired).
+    assert streaming_calls == ["primary", "backup_qwen"]
+    assert invoke_calls == ["primary"]
+    assert llm_requests == [(False, None), (True, None), (False, "backup_qwen")]
+    assert result.degraded_actions == ["retry_answer_without_tools"]
+    assert result.route_fallback == {"from": "primary", "to": "backup_qwen"}
+    event_names = [event for event, _fields in events]
+    assert event_names.index("llm_route_degraded_retry") < event_names.index(
+        "llm_route_fallback_switched"
+    )
+    switched = [fields for event, fields in events if event == "llm_route_fallback_switched"]
+    assert switched and switched[0]["reason"] == "network_error"
+
+
 def test_adapter_skips_noop_degrade_when_attempt_was_already_non_streaming():
     """retry_without_streaming is a no-op on a non-streaming attempt: no extra request."""
     invoke_calls = []

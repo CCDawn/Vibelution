@@ -39,6 +39,7 @@ from .payload_validator import payload_protocol_summary
 from .protocol_resolver import ProtocolResolutionError, resolve_model_protocol
 from .protocols import ModelProtocol, WireProtocol
 from .reasoning_extractor import extract_reasoning_text, strip_think_tag_reasoning
+from .resilience_policy import CONNECTION_BACKOFF_CAP_CATEGORIES
 from .responses_websocket import (
     RESPONSES_WEBSOCKET_TRANSPORT_KEY,
     ResponsesWebSocketBackend,
@@ -1088,7 +1089,10 @@ def _retry_policy_backoff_seconds(profile: Any, attempt: int, *, category: str =
         base = 2.0
     base = max(0.1, base)
     normalized_category = str(category or "").strip().lower()
-    if normalized_category in {"network_error", "timeout", "server_error"}:
+    # Category subset from core/llm/resilience_policy.py: connection-shaped
+    # failures cap exponential backoff hard; rate_limit waits on server-advised
+    # (longer) backoff and stays out of the cap.
+    if normalized_category in CONNECTION_BACKOFF_CAP_CATEGORIES:
         return min(base * (2 ** max(0, attempt - 1)), _RETRY_BACKOFF_CONNECTION_CAP_SECONDS)
     return base * (2 ** max(0, attempt - 1))
 

@@ -6,6 +6,25 @@ Do not put SSE transport, session_detail publish, or submit/worker orchestration
 
 Bodies late-bind ``session_service`` for sanitizers, live_output, and journal helpers
 so facade monkeypatches remain effective.
+
+Capture invariants（回归保护清单，行为测试见 tests/test_stream_capture_invariants.py）:
+1. feedback sequence 单一计数器严格递增且唯一（_append_feedback_event /
+   reserve_feedback_sequence）；_last_committed_thought_sequence 经 max 合并单调不减
+   （mark_thought_events_committed）；uncommitted 恰为 sequence > 水位的 thought 事件
+   （uncommitted_thought_events）。
+2. note_thought 驱动下 self.thought 单调前缀延伸，非空 _latest_thought_text 恒为
+   self.thought 的后缀（_resolve_thought_text_update）。
+3. thought 判重仅在归一化后完全相等，或双方 >=48 字符且包含比 >=85% 时生效；
+   判重只把 _pending_related_thought_sequence 指回旧段，不改 feedback_events /
+   已提交 journal（_is_repeated_recorded_thought）。
+4. mark_content_committed 后 _committed_content_length == len(sanitize(content))；
+   流式快照单调不减时恒有 _committed_content_length <= len(sanitize(content))，
+   快照长度回退由 uncommitted_content_segment 的 clamp 兜底（依赖 sanitize 幂等）。
+5. reset_stream_restart_boundary 只丢弃 in-progress 状态（仍 running 的最新未提交
+   thought 事件、thought/content 累积、_committed_content_length、running 工具条目
+   及其 running 反馈事件），保留已提交水位与已完成工具历史；去重记忆
+   _last_recorded_thought_* 仅在指向被移除的 running thought 时重置——provider
+   重试不双写已提交 journal。
 """
 
 from __future__ import annotations
