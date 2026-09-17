@@ -1948,6 +1948,9 @@ def _simulation_candidate_modifier(worktree_path: Path, prompt: str, context: di
         '"""Simulation marker for supervised worktree evolution."""\n\n'
         'CANDIDATE_SELF_EDITED = True\n',
         encoding="utf-8",
+        # 文本模式默认在 Windows 把 \n 翻译成 \r\n，会让受控提交被
+        # pre-commit 的 diff-check 以 trailing whitespace 拒绝。
+        newline="\n",
     )
     return {
         "status": "success",
