@@ -18,8 +18,19 @@ const styles = {
   composerReferenceTitle:
     "vui-components-conversationview composerReferenceTitle min-w-0 truncate [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
   imageDownloadButton:
-    `vui-components-conversationview imageDownloadButton min-w-0 ${vuiControlQuietClass}`,
+    `vui-components-conversationview imageDownloadButton min-w-0 shrink-0 ${vuiControlQuietClass}`,
   userAttachment: `vui-components-conversationview userAttachment min-w-0 overflow-hidden ${vuiOpaqueRowClass}`,
+  userAttachmentFile: `vui-components-conversationview userAttachmentFile min-w-0 w-fit max-w-full overflow-hidden ${vuiOpaqueRowClass} flex items-center gap-2 px-2 py-1.5`,
+  userAttachmentFileCopy:
+    "vui-components-conversationview userAttachmentFileCopy grid min-w-0 gap-0.5 text-left",
+  userAttachmentFileIcon:
+    "vui-components-conversationview userAttachmentFileIcon min-w-0 shrink-0 text-[var(--fg-tertiary)]",
+  userAttachmentFileMeta:
+    "vui-components-conversationview userAttachmentFileMeta flex min-w-0 items-center gap-2",
+  userAttachmentFileName:
+    "vui-components-conversationview userAttachmentFileName min-w-0 truncate [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  userAttachmentFileSize:
+    "vui-components-conversationview userAttachmentFileSize min-w-0 truncate [font-size:var(--vui-font-xs)] font-medium leading-tight text-[var(--fg-tertiary)]",
   userAttachmentGrid:
     "vui-components-conversationview userAttachmentGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(min(12rem,100%),1fr))]",
   userAttachmentImage:

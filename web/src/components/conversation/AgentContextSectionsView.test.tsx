@@ -76,9 +76,54 @@ describe("AgentContextSectionsView", () => {
     expect(html).not.toContain("旧会话摘录 · 前端代理");
   });
 
+  it("renders document attachments as file cards instead of image previews", () => {
+    const sections: AgentMessageContextSection[] = [
+      {
+        id: "user-context-section-doc",
+        kind: "context",
+        parts: [
+          {
+            id: "user-context-attachment-doc",
+            type: "attachment",
+            attachment: {
+              artifactId: "vib_smoke_ref.md",
+              filename: "vib_smoke_ref.md",
+              url: "/api/sessions/session-agent-thread/artifacts/vib_smoke_ref.md",
+              imageUrl: "",
+              downloadUrl: "/api/sessions/session-agent-thread/artifacts/vib_smoke_ref.md?download=1",
+              contentType: "text/plain",
+              sizeBytes: 4096,
+              kind: "user_document",
+              status: "ready",
+            },
+          },
+        ],
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      <AgentContextSectionsView sections={sections} lang="zh" />,
+    );
+
+    expect(html).not.toContain("<img");
+    expect(html).toContain("userAttachmentFile");
+    expect(html).toContain("userAttachmentFileIcon");
+    expect(html).toContain("userAttachmentFileName");
+    expect(html).toContain("4 KB");
+    expect(html).toContain('href="/api/sessions/session-agent-thread/artifacts/vib_smoke_ref.md?download=1"');
+    expect(html).toContain("下载文件");
+    expect(html).toContain('data-agent-context-part-type="attachment"');
+    expect(html).toContain('data-agent-context-attachment-name="vib_smoke_ref.md"');
+  });
+
   it("keeps attachments and reference chips bounded for dense conversation rows", () => {
     expect(styles.userAttachmentGrid).toContain("grid-cols-[repeat(auto-fit,minmax(min(12rem,100%),1fr))]");
     expect(styles.userAttachment).toContain("overflow-hidden");
+    expect(styles.userAttachmentFile).toContain("w-fit");
+    expect(styles.userAttachmentFile).toContain("max-w-full");
+    expect(styles.userAttachmentFile).toContain("items-center");
+    expect(styles.userAttachmentFileName).toContain("truncate");
+    expect(styles.userAttachmentFileSize).toContain("text-[var(--fg-tertiary)]");
     expect(styles.userAttachmentImage).toContain("aspect-[16/9]");
     expect(styles.userAttachmentImage).toContain("object-cover");
     expect(styles.userAttachmentImage).toContain("max-h-44");

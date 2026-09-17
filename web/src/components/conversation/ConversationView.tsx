@@ -45,6 +45,7 @@ import { ConversationForkSessionDialog } from "./ConversationForkSessionDialog";
 import { ConversationStreamingResponseContent } from "./ConversationStreamingResponseContent";
 import { ConversationTranscriptLoadingState } from "./ConversationTranscriptLoadingState";
 import { ConversationTurnAvatarContent } from "./ConversationTurnAvatarContent";
+import { attachmentSizeLabel, isImageAttachment } from "./attachmentPresentation";
 import {
   buildOperationDetailRows,
   DeferredOperationDetails,
@@ -362,19 +363,6 @@ const INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT = 36;
 const RESPONSE_PARSE_CACHE_LIMIT = 80;
 const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
 const EMPTY_SECTION_EXPANSION: Record<string, boolean> = {};
-
-/** Compact human-readable size for pending composer images (e.g. 820 KB, 2.4 MB). */
-function composerAttachmentSizeLabel(sizeBytes: number): string {
-  const bytes = Number(sizeBytes);
-  if (!Number.isFinite(bytes) || bytes <= 0) {
-    return "";
-  }
-  const megabytes = bytes / (1024 * 1024);
-  if (megabytes >= 1) {
-    return `${megabytes >= 10 ? Math.round(megabytes) : megabytes.toFixed(1)} MB`;
-  }
-  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-}
 
 /** Height-capped thought body; sticks to bottom while streaming. */
 function ThoughtScrollBody({
@@ -5232,14 +5220,12 @@ export function ConversationView({
               aria-label={t("composerAttachmentTrayLabel")}
             >
               {composerAttachments.map((attachment) => {
-                const isImageAttachment = attachment.kind
-                  ? attachment.kind === "image"
-                  : Boolean(attachment.contentType && attachment.contentType.startsWith("image/"));
+                const attachmentIsImage = isImageAttachment(attachment);
                 const previewLabel = t("composerAttachmentPreviewLabel").replace("{filename}", attachment.filename);
-                const sizeLabel = composerAttachmentSizeLabel(attachment.sizeBytes);
+                const sizeLabel = attachmentSizeLabel(attachment.sizeBytes);
                 return (
                   <div key={attachment.id} className={styles.composerAttachmentChip} role="listitem">
-                    {isImageAttachment ? (
+                    {attachmentIsImage ? (
                       <VButton
                         className={styles.composerAttachmentPreview}
                         variant="ghost"

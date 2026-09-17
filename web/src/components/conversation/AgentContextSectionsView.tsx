@@ -1,10 +1,11 @@
-import { Download, Link2 } from "lucide-react";
+import { Download, FileText, Link2 } from "lucide-react";
 import React, { ReactNode } from "react";
 
 import type {
   AgentAttachmentPart,
   AgentReferencePart,
 } from "../../agent-thread/types";
+import { attachmentSizeLabel, isImageAttachment } from "./attachmentPresentation";
 import type { AgentMessageContextSection } from "./agentMessageSections";
 import styles from "./AgentContextSectionsView.styles";
 
@@ -71,36 +72,83 @@ export function AgentContextSectionsView({ sections, lang }: AgentContextSection
 
 function renderAgentContextAttachmentPart(part: AgentAttachmentPart, lang: "zh" | "en") {
   const attachment = part.attachment;
-  const imageUrl = attachment.imageUrl || attachment.url;
-  if (!imageUrl) {
-    return null;
-  }
-  const filename = attachment.filename || attachment.artifactId || (lang === "zh" ? "图片" : "Image");
+  const isImage = isImageAttachment(attachment);
+  const filename =
+    attachment.filename
+    || attachment.artifactId
+    || (isImage
+      ? (lang === "zh" ? "图片" : "Image")
+      : (lang === "zh" ? "附件" : "Attachment"));
   const attachmentLabel = lang === "zh" ? `用户上下文附件 ${filename}` : `User context attachment ${filename}`;
-  const downloadLabel = lang === "zh" ? `下载图片 ${filename}` : `Download image ${filename}`;
+
+  if (isImage) {
+    const imageUrl = attachment.imageUrl || attachment.url;
+    if (!imageUrl) {
+      return null;
+    }
+    const downloadLabel = lang === "zh" ? `下载图片 ${filename}` : `Download image ${filename}`;
+    return (
+      <figure
+        key={part.id}
+        className={styles.userAttachment}
+        role="listitem"
+        aria-label={attachmentLabel}
+        data-agent-context-part-id={part.id}
+        data-agent-context-part-type={part.type}
+        data-agent-context-attachment-name={filename}
+      >
+        <img className={styles.userAttachmentImage} src={imageUrl} alt={filename} loading="lazy" />
+        <figcaption className={styles.userAttachmentMeta}>
+          <span title={filename}>{filename}</span>
+          <a
+            className={styles.imageDownloadButton}
+            href={attachment.downloadUrl || imageUrl}
+            download={attachment.artifactId || true}
+            title={downloadLabel}
+            aria-label={downloadLabel}
+          >
+            <Download size={14} />
+          </a>
+        </figcaption>
+      </figure>
+    );
+  }
+
+  const downloadHref = attachment.downloadUrl || attachment.url || "";
+  const downloadLabel = lang === "zh" ? `下载文件 ${filename}` : `Download file ${filename}`;
+  const sizeLabel = attachmentSizeLabel(attachment.sizeBytes);
   return (
     <figure
       key={part.id}
-      className={styles.userAttachment}
+      className={styles.userAttachmentFile}
       role="listitem"
       aria-label={attachmentLabel}
       data-agent-context-part-id={part.id}
       data-agent-context-part-type={part.type}
       data-agent-context-attachment-name={filename}
     >
-      <img className={styles.userAttachmentImage} src={imageUrl} alt={filename} loading="lazy" />
-      <figcaption className={styles.userAttachmentMeta}>
-        <span title={filename}>{filename}</span>
+      <figcaption className={styles.userAttachmentFileMeta}>
+        <span className={styles.userAttachmentFileIcon} aria-hidden="true">
+          <FileText size={17} />
+        </span>
+        <span className={styles.userAttachmentFileCopy}>
+          <span className={styles.userAttachmentFileName} title={filename}>{filename}</span>
+          {sizeLabel ? (
+            <span className={styles.userAttachmentFileSize}>{sizeLabel}</span>
+          ) : null}
+        </span>
+      </figcaption>
+      {downloadHref ? (
         <a
           className={styles.imageDownloadButton}
-          href={attachment.downloadUrl || imageUrl}
+          href={downloadHref}
           download={attachment.artifactId || true}
           title={downloadLabel}
           aria-label={downloadLabel}
         >
           <Download size={14} />
         </a>
-      </figcaption>
+      ) : null}
     </figure>
   );
 }
