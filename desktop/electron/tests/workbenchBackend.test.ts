@@ -17,8 +17,7 @@ import {
   clearWorkbenchLauncherRuntimeState,
   executeMainLineWorkbench,
   ensureFrontendRelease,
-  ensureFrontendBuild,
-  FRONTEND_BUILD_TIMEOUT_MS,
+  defaultEnsureFrontend,
   launcherLifecycleBlockedResultPath,
   mainLineBackendIsReachable,
   mainLineBackendIsReusable,
@@ -28,12 +27,9 @@ import {
   resolveBindableWorkbenchPort,
   reclaimStaleWorkbenchBackend,
   resolveNoConsolePython,
-  resolveNodeExecutable,
-  runWaitable,
   runningCodeFingerprintReadPaths,
   sameProjectRoot,
   spawnWorkbenchBackend,
-  type WorkbenchFrontendBuildChild,
   writeLauncherStateFile,
   workbenchBackendArgs,
   workbenchBackendEnv
@@ -51,31 +47,6 @@ function fakeBackendChild(pid = 4242) {
     killed: false,
     unref: () => undefined,
     kill: () => true
-  };
-}
-
-function frontendBuildChild(): {
-  child: WorkbenchFrontendBuildChild;
-  close: (code?: number | null, signal?: NodeJS.Signals | null) => void;
-  error: (error: Error) => void;
-} {
-  let errorListener: ((error: Error) => void) | undefined;
-  let closeListener: ((code: number | null, signal: NodeJS.Signals | null) => void) | undefined;
-  const child: WorkbenchFrontendBuildChild = {
-    kill: vi.fn(() => true),
-    once: (event: "error" | "close", listener: ((error: Error) => void) | ((code: number | null, signal: NodeJS.Signals | null) => void)) => {
-      if (event === "error") {
-        errorListener = listener as (error: Error) => void;
-      } else {
-        closeListener = listener as (code: number | null, signal: NodeJS.Signals | null) => void;
-      }
-      return child;
-    }
-  };
-  return {
-    child,
-    close: (code = 0, signal = null) => closeListener?.(code, signal),
-    error: (error) => errorListener?.(error)
   };
 }
 
@@ -1060,18 +1031,6 @@ describe("resolveNoConsolePython", () => {
   });
 });
 
-describe("resolveNodeExecutable", () => {
-  it("does not treat Electron or Vibelution.exe as node for the compatibility build helper", () => {
-    expect(
-      resolveNodeExecutable(
-        (path) => path.toLowerCase().replace(/\\/g, "/").endsWith("/electron.exe"),
-        "C:/app/electron.exe",
-        ""
-      )
-    ).toBe("node");
-  });
-});
-
 describe("workbenchBackendEnv", () => {
   it("injects slot data home and shared operator config", () => {
     const env = workbenchBackendEnv({
@@ -1225,144 +1184,13 @@ describe("frontend build supervision", () => {
     expect(runBridge).toHaveBeenCalledOnce();
   });
 
-  it("does not use a direct-child kill when a build has no verifiable tree identity", async () => {
-    const harness = frontendBuildChild();
-    Object.assign(harness.child, { pid: 5151 });
-    await expect(
-      runWaitable("node", ["tsc", "-b"], "C:/repo/web", {
-        phase: "tsc",
-        timeoutMs: 10,
-        spawnImpl: () => harness.child
-      })
-    ).rejects.toMatchObject({
-      name: "WorkbenchFrontendBuildError",
-      code: "frontend_build_failed",
-      phase: "tsc"
-    });
-    expect(harness.child.kill).not.toHaveBeenCalled();
-  });
-
-  it("does not use a direct-child kill when an unverified build is aborted", async () => {
-    const harness = frontendBuildChild();
-    Object.assign(harness.child, { pid: 5151 });
-    const controller = new AbortController();
-    const pending = runWaitable("node", ["vite", "build"], "C:/repo/web", {
-      phase: "vite",
-      signal: controller.signal,
-      timeoutMs: FRONTEND_BUILD_TIMEOUT_MS,
-      spawnImpl: () => harness.child
-    });
-    controller.abort();
-    await expect(pending).rejects.toMatchObject({
-      code: "frontend_build_failed",
-      phase: "vite"
-    });
-    expect(harness.child.kill).not.toHaveBeenCalled();
-  });
-
-  it("uses the verified frontend process tree when a build is interrupted", async () => {
-    const harness = frontendBuildChild();
-    Object.assign(harness.child, { pid: 5151 });
-    const terminateProcessTree = vi.fn(async () => false);
-    await expect(
-      runWaitable("node", ["C:/repo/web/node_modules/vite/bin/vite.js", "build"], "C:/repo/web", {
-        phase: "vite",
-        workspaceRoot: "C:/repo",
-        pythonPath: "C:/repo/.venv/Scripts/python.exe",
-        timeoutMs: 10,
-        spawnImpl: () => harness.child,
-        captureProcessIdentity: async () => ({
-          pid: 5151,
-          createTime: 1,
-          executable: "C:/Program Files/nodejs/node.exe"
-        }),
-        terminateProcessTree
-      })
-    ).rejects.toMatchObject({ code: "frontend_build_failed", phase: "vite" });
-    expect(terminateProcessTree).toHaveBeenCalledWith(5151, expect.objectContaining({ pid: 5151 }));
-    expect(harness.child.kill).not.toHaveBeenCalled();
-  });
-
-  it("fails closed after a non-zero root exit when tree retirement cannot be verified", async () => {
-    const harness = frontendBuildChild();
-    Object.assign(harness.child, { pid: 5151 });
-    const terminateProcessTree = vi.fn(async () => false);
-    const pending = runWaitable("node", ["tsc", "-b"], "C:/repo/web", {
-      phase: "tsc",
-      workspaceRoot: "C:/repo",
-      pythonPath: "C:/repo/.venv/Scripts/python.exe",
-      timeoutMs: FRONTEND_BUILD_TIMEOUT_MS,
-      spawnImpl: () => harness.child,
-      captureProcessIdentity: async () => ({
-        pid: 5151,
-        createTime: 1,
-        executable: "C:/Program Files/nodejs/node.exe"
-      }),
-      terminateProcessTree
-    });
-    harness.close(2, null);
-    await expect(pending).rejects.toMatchObject({ code: "frontend_build_failed", phase: "tsc" });
-    expect(terminateProcessTree).toHaveBeenCalledWith(5151, expect.objectContaining({ pid: 5151 }));
-    expect(harness.child.kill).not.toHaveBeenCalled();
-  });
-
-  it("surfaces child spawn errors with the build phase", async () => {
-    const failure = new Error("spawn ENOENT");
-    await expect(
-      runWaitable("node", ["tsc", "-b"], "C:/repo/web", {
-        phase: "tsc",
-        timeoutMs: 100,
-        spawnImpl: () => {
-          throw failure;
-        }
-      })
-    ).rejects.toMatchObject({
-      code: "frontend_build_failed",
-      phase: "tsc",
-      cause: failure
-    });
-  });
-
-  it("surfaces a child error event without waiting for the timeout", async () => {
-    const harness = frontendBuildChild();
-    const failure = new Error("vite child failed");
-    const pending = runWaitable("node", ["vite", "build"], "C:/repo/web", {
-      phase: "vite",
-      timeoutMs: FRONTEND_BUILD_TIMEOUT_MS,
-      spawnImpl: (_command, _args, options) => {
-        expect(options.windowsHide).toBe(true);
-        expect(options.stdio).toEqual(["ignore", "ignore", "ignore"]);
-        queueMicrotask(() => harness.error(failure));
-        return harness.child;
-      }
-    });
-    await expect(pending).rejects.toMatchObject({
-      code: "frontend_build_failed",
-      phase: "vite",
-      cause: failure
-    });
-    expect(harness.child.kill).not.toHaveBeenCalled();
-  });
-
-  it("does not invoke Vite when tsc exits unsuccessfully", async () => {
-    const harness = frontendBuildChild();
-    const spawnImpl = vi.fn(() => {
-      queueMicrotask(() => harness.close(2, null));
-      return harness.child;
-    });
-    await expect(
-      ensureFrontendBuild({
-        workspaceRoot: "C:/repo",
-        force: true,
-        fileExists: () => false,
-        spawnImpl
-      })
-    ).rejects.toMatchObject({
-      code: "frontend_build_failed",
-      phase: "tsc"
-    });
-    expect(spawnImpl).toHaveBeenCalledOnce();
-    expect(spawnImpl.mock.calls[0]?.[1]?.[0]).toContain("typescript");
+  it("fails fast when pythonPath is missing instead of serving an unverified frontend", async () => {
+    await expect(defaultEnsureFrontend("C:/repo", { force: false })).rejects.toThrow(
+      "pythonPath is required to verify the frontend build fingerprint"
+    );
+    await expect(defaultEnsureFrontend("C:/repo", { force: true }, "   ")).rejects.toThrow(
+      "pythonPath is required to verify the frontend build fingerprint"
+    );
   });
 });
 
