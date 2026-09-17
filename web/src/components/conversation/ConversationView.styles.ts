@@ -486,17 +486,17 @@ backToBottomButton:
     "vui-components-conversationview emptyState w-full max-w-[min(100%,28rem)] min-w-0 justify-items-center border-dashed border-[color-mix(in_srgb,var(--fg-tertiary)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--vui-surface-panel)_55%,var(--vui-surface-row))] px-6 py-8 text-center shadow-[var(--vui-shadow-hairline)] " +
     "[&_strong]:[font-size:var(--vui-type-emphasis-size)] [&_strong]:font-[var(--vui-weight-semibold)] [&_strong]:leading-[var(--vui-type-emphasis-line)] [&_strong]:text-[var(--fg-primary)]",
   emptyStateStarters:
-    "vui-components-conversationview emptyStateStarters mt-5 grid w-full max-w-[min(100%,34rem)] min-w-0 justify-items-center gap-2.5",
+    "vui-components-conversationview emptyStateStarters mt-5 grid w-full max-w-[min(100%,40rem)] min-w-0 justify-items-center gap-2.5",
   emptyStateStartersHeading:
     "vui-components-conversationview emptyStateStartersHeading m-0 inline-flex items-center gap-1.5 [font-size:var(--vui-font-xs)] leading-none text-[var(--fg-tertiary)]",
   emptyStateStarterGrid:
     "vui-components-conversationview emptyStateStarterGrid grid w-full min-w-0 grid-cols-1 gap-2 sm:grid-cols-3",
   emptyStateStarterCard:
-    "vui-components-conversationview emptyStateStarterCard !h-auto min-h-[4.5rem] w-full !max-w-full cursor-pointer grid content-start gap-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-3 py-2.5 text-left shadow-none hover:border-[color-mix(in_srgb,var(--accent-cool)_45%,var(--vui-border-subtle))] hover:bg-[var(--vui-control-muted)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent-cool)]",
+    "vui-components-conversationview emptyStateStarterCard !h-auto min-h-[4.5rem] w-full !max-w-full cursor-pointer !flex !flex-col !items-stretch !justify-start gap-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-3 py-2.5 text-left shadow-none hover:border-[color-mix(in_srgb,var(--accent-cool)_45%,var(--vui-border-subtle))] hover:bg-[var(--vui-control-muted)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent-cool)]",
   emptyStateStarterCardHeading:
-    "vui-components-conversationview emptyStateStarterCardHeading min-w-0 truncate [font-size:var(--vui-font-xs)] font-[var(--vui-weight-semibold)] leading-tight text-[var(--fg-primary)]",
+    "vui-components-conversationview emptyStateStarterCardHeading min-w-0 w-full truncate [font-size:var(--vui-font-xs)] font-[var(--vui-weight-semibold)] leading-tight text-[var(--fg-primary)]",
   emptyStateStarterCardCommand:
-    "vui-components-conversationview emptyStateStarterCardCommand min-w-0 [font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
+    "vui-components-conversationview emptyStateStarterCardCommand min-w-0 w-full [font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
   executionRequestSummary: `vui-components-conversationview executionRequestSummary min-w-0 ${vuiGlassPanelClass} p-2`,
   executionTraceGroup:
     "vui-components-conversationview executionTraceGroup min-w-0 border-0 bg-transparent",

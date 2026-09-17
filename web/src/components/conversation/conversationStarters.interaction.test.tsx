@@ -170,6 +170,10 @@ describe("conversation starter cards and builtin slash commands", () => {
     expect(cards).toHaveLength(3);
     expect(cards[0]?.textContent).toContain("修复问题");
     expect(cards[0]?.textContent).toContain("修复 lint 报错");
+    expect(cards[0]?.className).toContain("!flex-col");
+    expect(cards[0]?.className).toContain("!items-stretch");
+    expect(cards[0]?.children[0]?.className).toContain("emptyStateStarterCardHeading");
+    expect(cards[0]?.children[1]?.className).toContain("emptyStateStarterCardCommand");
 
     await act(async () => {
       cards[1]?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
