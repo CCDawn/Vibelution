@@ -23,6 +23,7 @@ from scripts.evolution_harness import (
 )
 
 from .session_service import (
+    SessionBusyError,
     create_supervised_agent_session,
     get_session_detail,  # noqa: F401 - retained as the no-full-detail test seam
     get_session_turn_completion_snapshot,
@@ -135,6 +136,42 @@ def _evolution_transaction_closed(summary: dict[str, Any] | None) -> bool:
         and transaction.get("opened")
         and transaction.get("closed")
     )
+
+
+_SUBMIT_BUSY_RETRY_ATTEMPTS = 6
+_SUBMIT_BUSY_RETRY_INTERVAL_SECONDS = 5.0
+
+
+def _submit_continuation_with_busy_retry(
+    session_id: str,
+    continuation_prompt: str,
+    *,
+    mental_model_enabled: bool | None,
+    message_metadata: dict[str, Any],
+) -> dict[str, Any]:
+    """Submit a continuation turn, tolerating a busy session with bounded retries.
+
+    ``needs_continue`` 会触发产品的自动续跑；harness 自己的手工续跑提交可能
+    与其撞车吃到 SessionBusyError（swte-e997ff8c7691 实弹定案）。忙碌时等待
+    重试而非立刻判失败；其他异常原样抛出。
+    """
+    last_exc: Exception | None = None
+    for _ in range(_SUBMIT_BUSY_RETRY_ATTEMPTS):
+        try:
+            return submit_session_message(
+                session_id,
+                continuation_prompt,
+                mental_model_enabled=mental_model_enabled,
+                message_metadata=message_metadata,
+                message_source="supervised_evolution",
+                include_started_turn_id=True,
+                lightweight_response=True,
+            )
+        except SessionBusyError as exc:
+            last_exc = exc
+            time.sleep(_SUBMIT_BUSY_RETRY_INTERVAL_SECONDS)
+    assert last_exc is not None
+    raise last_exc
 
 
 def run_supervised_conversation_harness(
@@ -405,7 +442,7 @@ def run_supervised_conversation_harness(
             continuation_count += 1
             continuation_prompt = _supervised_continuation_prompt(role=role, scenario=scenario)
             try:
-                accepted = submit_session_message(
+                accepted = _submit_continuation_with_busy_retry(
                     session_id,
                     continuation_prompt,
                     mental_model_enabled=mental_model_enabled,
@@ -419,9 +456,6 @@ def run_supervised_conversation_harness(
                         "mentalModelMode": normalized_mental_mode,
                         "workspaceOverride": normalized_workspace_override,
                     },
-                    message_source="supervised_evolution",
-                    include_started_turn_id=True,
-                    lightweight_response=True,
                 )
                 turn_id = str(accepted.get("turnId") or accepted.get("startedTurnId") or "").strip()
                 if turn_id:
