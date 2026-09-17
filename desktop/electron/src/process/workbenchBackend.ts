@@ -68,62 +68,6 @@ export const WEB_WORKBENCH_SCRIPT = ["scripts", "web_workbench.py"] as const;
 // (code_freshness.running_code_fingerprint_path), Electron only ever reads.
 export const RUNNING_CODE_FINGERPRINT_RELATIVE = [".runtime", "running-code-fingerprint.json"] as const;
 const RUNNING_CODE_FINGERPRINT_NAME = "running-code-fingerprint.json";
-export const FRONTEND_BUILD_TIMEOUT_MS = 120_000;
-
-export type WorkbenchFrontendBuildErrorCode =
-  | "frontend_build_timeout"
-  | "frontend_build_aborted"
-  | "frontend_build_failed";
-
-export type WorkbenchFrontendBuildPhase = "tsc" | "vite";
-
-export class WorkbenchFrontendBuildError extends Error {
-  readonly code: WorkbenchFrontendBuildErrorCode;
-  readonly phase: WorkbenchFrontendBuildPhase;
-  readonly command: string;
-  readonly args: string[];
-  readonly timeoutMs: number;
-  readonly cause?: unknown;
-
-  constructor(
-    code: WorkbenchFrontendBuildErrorCode,
-    message: string,
-    options: {
-      phase: WorkbenchFrontendBuildPhase;
-      command: string;
-      args: string[];
-      timeoutMs: number;
-      cause?: unknown;
-    }
-  ) {
-    super(message);
-    this.name = "WorkbenchFrontendBuildError";
-    this.code = code;
-    this.phase = options.phase;
-    this.command = options.command;
-    this.args = [...options.args];
-    this.timeoutMs = options.timeoutMs;
-    this.cause = options.cause;
-  }
-}
-
-export type WorkbenchFrontendBuildChild = {
-  pid?: number;
-  kill: (signal?: NodeJS.Signals) => boolean;
-  once(event: "error", listener: (error: Error) => void): unknown;
-  once(event: "close", listener: (code: number | null, signal: NodeJS.Signals | null) => void): unknown;
-};
-
-export type WorkbenchFrontendBuildSpawn = (
-  command: string,
-  args: string[],
-  options: {
-    cwd: string;
-    env: NodeJS.ProcessEnv;
-    windowsHide: boolean;
-    stdio: ["ignore", "ignore", "ignore"];
-  }
-) => WorkbenchFrontendBuildChild;
 
 export type WorkbenchBackendSpawnChild = {
   pid?: number;
@@ -1152,80 +1096,6 @@ export async function resolveBindableWorkbenchPort(input: {
   throw new Error(`No free workbench backend port found near ${preferred}`);
 }
 
-export function shouldRebuildFrontend(input: { distExists: boolean; force: boolean }): boolean {
-  return input.force || !input.distExists;
-}
-
-export function resolveNodeExecutable(
-  fileExists: (path: string) => boolean,
-  execPath = String(process.execPath || ""),
-  envNode = String(process.env.NODE || "")
-): string {
-  const explicit = envNode.trim();
-  if (explicit && fileExists(explicit)) {
-    return explicit;
-  }
-  const resolvedExec = execPath.trim();
-  const execName = resolvedExec.replace(/\\/g, "/").toLowerCase();
-  const electronLike = execName.endsWith("/electron.exe")
-    || execName.endsWith("/electron")
-    || execName.endsWith("/vibelution.exe")
-    || execName.includes("/electron/");
-  if (resolvedExec && !electronLike && fileExists(resolvedExec)) {
-    return resolvedExec;
-  }
-  const localAppData = String(process.env.LOCALAPPDATA || "").trim();
-  const programFiles = String(process.env.ProgramFiles || "").trim();
-  const programFilesX86 = String(process.env["ProgramFiles(x86)"] || "").trim();
-  const candidates = [
-    ...(localAppData ? [join(localAppData, "Programs", "nodejs", "node.exe")] : []),
-    ...(programFiles ? [join(programFiles, "nodejs", "node.exe")] : []),
-    ...(programFilesX86 ? [join(programFilesX86, "nodejs", "node.exe")] : [])
-  ];
-  for (const candidate of candidates) {
-    if (fileExists(candidate)) {
-      return candidate;
-    }
-  }
-  return "node";
-}
-
-export async function ensureFrontendBuild(input: {
-  workspaceRoot: string;
-  force: boolean;
-  pythonPath?: string;
-  fileExists?: (path: string) => boolean;
-  signal?: AbortSignal;
-  timeoutMs?: number;
-  spawnImpl?: WorkbenchFrontendBuildSpawn;
-}): Promise<void> {
-  const fileExists = input.fileExists ?? existsSync;
-  const distIndex = join(input.workspaceRoot, "web", "dist", "index.html");
-  if (!shouldRebuildFrontend({ distExists: fileExists(distIndex), force: input.force })) {
-    return;
-  }
-  const webDir = join(input.workspaceRoot, "web");
-  const tsc = join(webDir, "node_modules", "typescript", "bin", "tsc");
-  const vite = join(webDir, "node_modules", "vite", "bin", "vite.js");
-  const node = resolveNodeExecutable(fileExists);
-  await runWaitable(node, [tsc, "-b"], webDir, {
-    phase: "tsc",
-    workspaceRoot: input.workspaceRoot,
-    pythonPath: input.pythonPath,
-    signal: input.signal,
-    timeoutMs: input.timeoutMs,
-    spawnImpl: input.spawnImpl
-  });
-  await runWaitable(node, [vite, "build"], webDir, {
-    phase: "vite",
-    workspaceRoot: input.workspaceRoot,
-    pythonPath: input.pythonPath,
-    signal: input.signal,
-    timeoutMs: input.timeoutMs,
-    spawnImpl: input.spawnImpl
-  });
-}
-
 export type FrontendReleaseEnsureResult = {
   skipped: boolean;
   rebuilt: boolean;
@@ -1302,192 +1172,24 @@ export async function ensureFrontendRelease(input: {
   };
 }
 
-function defaultEnsureFrontend(
+export function defaultEnsureFrontend(
   workspaceRoot: string,
   options: { force: boolean; signal?: AbortSignal },
-  fileExists: (path: string) => boolean,
   pythonPath?: string
 ): Promise<void> {
-  if (pythonPath) {
-    return ensureFrontendRelease({ workspaceRoot, pythonPath, signal: options.signal }).then(() => undefined);
+  // Every start path must verify the content-addressed frontend fingerprint
+  // through the shared Python builder. Without pythonPath the bridge cannot
+  // verify (or rebuild) a release, so fail fast instead of falling back to
+  // serving an unverified legacy dist; ``force`` only means "ensure current
+  // sources", matching the builder's own semantics.
+  const resolved = String(pythonPath || "").trim();
+  if (!resolved) {
+    return Promise.reject(new Error(
+      "pythonPath is required to verify the frontend build fingerprint; refusing to serve an unverified frontend."
+    ));
   }
-  return ensureFrontendBuild({
-    workspaceRoot,
-    force: options.force,
-    pythonPath,
-    signal: options.signal,
-    fileExists
-  });
-}
-
-export function runWaitable(
-  command: string,
-  args: string[],
-  cwd: string,
-  options: {
-    phase?: WorkbenchFrontendBuildPhase;
-    workspaceRoot?: string;
-    pythonPath?: string;
-    signal?: AbortSignal;
-    timeoutMs?: number;
-    spawnImpl?: WorkbenchFrontendBuildSpawn;
-    terminateProcessTree?: PythonOwnedProcessTreeTerminator;
-    captureProcessIdentity?: (input: {
-      pythonPath: string;
-      workspaceRoot: string;
-      pid: number;
-    }) => Promise<PythonProcessIdentity | null>;
-  } = {}
-): Promise<void> {
-  const phase = options.phase ?? "tsc";
-  const timeoutMs = options.timeoutMs ?? FRONTEND_BUILD_TIMEOUT_MS;
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    return Promise.reject(new RangeError("frontend build timeoutMs must be a positive finite number"));
-  }
-  const roundedTimeoutMs = Math.max(1, Math.round(timeoutMs));
-  const spawnImpl = options.spawnImpl ?? (nodeSpawn as unknown as WorkbenchFrontendBuildSpawn);
-  const terminateProcessTree = options.terminateProcessTree
-    ?? (options.pythonPath && options.workspaceRoot
-      ? createPythonOwnedProcessTreeTerminator({
-          pythonPath: options.pythonPath,
-          workspaceRoot: options.workspaceRoot,
-          allowedKinds: ["frontend_build_process"]
-        })
-      : undefined);
-  const captureProcessIdentity = options.captureProcessIdentity
-    ?? (options.pythonPath && options.workspaceRoot
-      ? (captureInput: { pythonPath: string; workspaceRoot: string; pid: number }) =>
-        capturePythonProcessIdentity(captureInput)
-      : undefined);
-  const commandLabel = [command, ...args].join(" ");
-  const createError = (
-    code: WorkbenchFrontendBuildErrorCode,
-    detail: string,
-    cause?: unknown
-  ): WorkbenchFrontendBuildError => new WorkbenchFrontendBuildError(
-    code,
-    `frontend ${phase} ${detail}: ${commandLabel}`,
-    {
-      phase,
-      command,
-      args,
-      timeoutMs: roundedTimeoutMs,
-      cause
-    }
-  );
-
-  if (options.signal?.aborted) {
-    return Promise.reject(createError("frontend_build_aborted", "was aborted before spawn"));
-  }
-
-  return new Promise((resolve, reject) => {
-    let child: WorkbenchFrontendBuildChild | null = null;
-    let settled = false;
-    let terminating = false;
-    let identityPromise: Promise<PythonProcessIdentity | null> = Promise.resolve(null);
-    let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const cleanup = (): void => {
-      if (timeoutTimer !== null) {
-        clearTimeout(timeoutTimer);
-        timeoutTimer = null;
-      }
-      options.signal?.removeEventListener("abort", onAbort);
-    };
-    const resolveOnce = (): void => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      cleanup();
-      resolve();
-    };
-    const rejectOnce = (error: WorkbenchFrontendBuildError): void => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      cleanup();
-      reject(error);
-    };
-    const terminate = async (): Promise<void> => {
-      if (terminating) {
-        return;
-      }
-      terminating = true;
-      const pid = Number(child?.pid || 0);
-      if (!Number.isFinite(pid) || pid <= 0) {
-        // An error before the OS allocated a PID leaves no process tree to
-        // retire. Do not manufacture a direct-child kill fallback.
-        return;
-      }
-      if (terminateProcessTree && captureProcessIdentity && pid > 0 && options.workspaceRoot && options.pythonPath) {
-        const identity = await identityPromise;
-        if (!identity) {
-          throw new Error(`frontend ${phase} process identity could not be captured for pid ${pid}`);
-        }
-        const terminated = await terminateProcessTree(pid, identity);
-        if (!terminated) {
-          throw new Error(`frontend ${phase} process-tree retirement was not verified for pid ${pid}`);
-        }
-        return;
-      }
-      throw new Error(`frontend ${phase} process-tree ownership was not configured for pid ${pid}`);
-    };
-    const settleAfterTermination = (error: WorkbenchFrontendBuildError): void => {
-      void terminate()
-        .then(() => rejectOnce(error))
-        .catch((terminationError: unknown) => rejectOnce(
-          createError("frontend_build_failed", "could not retire its process tree", terminationError)
-        ));
-    };
-    const onAbort = (): void => {
-      settleAfterTermination(createError("frontend_build_aborted", "was aborted"));
-    };
-
-    try {
-      child = spawnImpl(command, args, {
-        cwd,
-        windowsHide: true,
-        stdio: ["ignore", "ignore", "ignore"],
-        env: pythonBridgeEnv()
-      });
-    } catch (error: unknown) {
-      rejectOnce(createError("frontend_build_failed", "failed to start", error));
-      return;
-    }
-
-    child.once("error", (error) => {
-      settleAfterTermination(createError("frontend_build_failed", "failed to start or communicate with the child process", error));
-    });
-    child.once("close", (code, signal) => {
-      if (terminating) {
-        return;
-      }
-      if (code === 0) {
-        resolveOnce();
-        return;
-      }
-      const status = code === null ? `signal ${signal ?? "unknown"}` : `code ${code}`;
-      // A non-zero root exit can leave a re-parented build child behind.
-      // Only the verified tree terminator may establish that it is gone.
-      settleAfterTermination(createError("frontend_build_failed", `exited with ${status}`));
-    });
-    options.signal?.addEventListener("abort", onAbort, { once: true });
-    if (captureProcessIdentity && child.pid && options.workspaceRoot && options.pythonPath) {
-      identityPromise = Promise.resolve(captureProcessIdentity({
-        pythonPath: options.pythonPath,
-        workspaceRoot: options.workspaceRoot,
-        pid: Math.trunc(Number(child.pid))
-      })).catch(() => null);
-    }
-    timeoutTimer = setTimeout(() => {
-      settleAfterTermination(createError("frontend_build_timeout", `timed out after ${roundedTimeoutMs}ms`));
-    }, roundedTimeoutMs);
-    if (options.signal?.aborted) {
-      onAbort();
-    }
-  });
+  void options;
+  return ensureFrontendRelease({ workspaceRoot, pythonPath: resolved, signal: options.signal }).then(() => undefined);
 }
 
 export type SpawnedWorkbenchBackend = {
@@ -1933,7 +1635,6 @@ export async function executeMainLineWorkbench(
     await (input.ensureFrontend ?? ((opts) => defaultEnsureFrontend(
       input.workspaceRoot,
       opts,
-      fileExists,
       input.pythonPath
     )))({
       force: operation === "rebuild-and-start",
