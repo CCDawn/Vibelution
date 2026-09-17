@@ -1,11 +1,9 @@
 import { type QueryClient } from "@tanstack/react-query";
 import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 
-import { queryKeys } from "../../api/queryKeys";
-import type { AgentInstance, ConversationSummary, SessionSummary } from "../../api/types";
+import type { AgentInstance, SessionSummary } from "../../api/types";
 import { updateSessionSummaryCaches } from "../chatSessionIndexQuery";
 import { isVisibleDirectSession } from "../conversationIndexModel";
-import { removeDeletedSessionFromConversations } from "./chatSessionDetailHelpers";
 import { resolveArchivedSessionRouteTransition } from "./chatSessionRouteSync";
 import type { ChatRouteSelection } from "./chatSelectionProjection";
 
@@ -106,12 +104,6 @@ export function useChatArchivedAgentRetirement({
 
     updateSessionSummaryCaches(queryClient, (sessions) =>
       sessions?.filter((session) => !archivedSessionIdSet.has(session.id)),
-    );
-    queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
-      archivedSessionIds.reduce(
-        (current, sessionId) => removeDeletedSessionFromConversations(current, sessionId),
-        conversations,
-      ),
     );
     archivedSessionIds.forEach((sessionId) => {
       clearSessionTransientUiState(sessionId);

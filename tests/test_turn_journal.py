@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 import core.chat.turn_journal as turn_journal
+import core.infrastructure.file_lock as file_lock
 from core.chat.conversation_invariant import check_conversation_payload_invariant
 from core.chat.turn_journal import (
     EVENT_ASSISTANT_MESSAGE,
@@ -204,57 +205,34 @@ def test_concurrent_process_appends_keep_sequences_unique_and_contiguous(tmp_pat
     assert len({event.event_id for event in events}) == expected_count
 
 
-def test_journal_file_lock_seeds_first_byte_only_after_lock_acquisition(
+def test_journal_file_lock_delegates_to_shared_file_lock_helper(
     tmp_path, monkeypatch
 ):
-    """The lock-file seed write must never run before the lock is held.
+    """The journal file lock is a thin wrapper over the shared file-lock helper.
 
-    Two processes can both observe an empty lock file; on Windows a pre-lock
-    write can land in the byte range another process already locked, which
-    surfaces as PermissionError (lock violation) and aborts the append.
+    It must keep the journal's own lock path convention, pass the patient
+    journal timeout through, and still leave the sidecar seeded with exactly
+    one lock byte. The seed-inside-the-lock discipline itself is covered by
+    ``tests/test_file_lock.py``.
     """
 
     journal_path = tmp_path / "session-lock-seed.jsonl"
     lock_path = journal_path.with_name(f"{journal_path.name}.lock")
-    events: list[str] = []
-    real_try_lock = turn_journal._try_lock_handle
-    real_open = turn_journal.Path.open
+    seen: dict[str, object] = {}
+    real_locked_sidecar = file_lock.locked_sidecar
 
-    class _SpyLockHandle:
-        def __init__(self, handle):
-            self._handle = handle
+    def spy_locked_sidecar(path, *, timeout, **kwargs):
+        seen["path"] = Path(path)
+        seen["timeout"] = timeout
+        return real_locked_sidecar(path, timeout=timeout, **kwargs)
 
-        def __getattr__(self, name):
-            return getattr(self._handle, name)
-
-        def write(self, data):
-            events.append("write")
-            return self._handle.write(data)
-
-        def __enter__(self):
-            self._handle.__enter__()
-            return self
-
-        def __exit__(self, *exc_info):
-            return self._handle.__exit__(*exc_info)
-
-    def spy_open(path_self, mode="r", **kwargs):
-        return _SpyLockHandle(real_open(path_self, mode, **kwargs))
-
-    def spy_try_lock(handle):
-        acquired = real_try_lock(handle)
-        events.append("locked" if acquired else "lock-busy")
-        return acquired
-
-    monkeypatch.setattr(turn_journal.Path, "open", spy_open)
-    monkeypatch.setattr(turn_journal, "_try_lock_handle", spy_try_lock)
+    monkeypatch.setattr(turn_journal, "locked_sidecar", spy_locked_sidecar)
 
     with turn_journal._journal_file_lock(journal_path):
         pass
 
-    assert events.count("write") == 1
-    assert "locked" in events
-    assert events.index("write") > events.index("locked")
+    assert seen["path"] == journal_path
+    assert seen["timeout"] == turn_journal._JOURNAL_LOCK_TIMEOUT_SECONDS
     assert lock_path.stat().st_size == 1
 
 

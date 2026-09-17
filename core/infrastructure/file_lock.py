@@ -10,7 +10,8 @@ The seed byte is written only while holding the OS lock. Two processes can
 both observe an empty lock file, and a pre-lock write can land in the byte
 range another process already locked (Windows maps that lock violation to
 ``PermissionError``); deferring the seed until the lock is held keeps the
-lock owner the only writer. This mirrors ``core/chat/turn_journal.py``.
+lock owner the only writer. ``core/chat/turn_journal.py`` shares this
+implementation through :func:`locked_sidecar`.
 """
 
 from __future__ import annotations
@@ -98,31 +99,75 @@ def cross_process_file_lock(
         entry.users += 1
     try:
         with entry.lock:
-            sidecar.parent.mkdir(parents=True, exist_ok=True)
-            deadline: float | None = None
-            if timeout is not None:
-                deadline = time.monotonic() + max(0.0, float(timeout))
-            handle = _open_locked_sidecar(
+            with _locked_sidecar(
                 sidecar,
                 key=key,
-                deadline=deadline,
+                timeout=timeout,
                 poll_interval=poll_interval,
-            )
-            try:
-                _seed_lock_byte(handle)
+            ):
                 depth[key] = 1
                 try:
                     yield
                 finally:
                     depth.pop(key, None)
-            finally:
-                _release_os_lock(handle)
-                handle.close()
     finally:
         with _THREAD_LOCKS_GUARD:
             entry.users -= 1
             if entry.users == 0 and _THREAD_LOCKS.get(key) is entry:
                 _THREAD_LOCKS.pop(key, None)
+
+
+@contextmanager
+def locked_sidecar(
+    path: str | os.PathLike[str],
+    *,
+    timeout: float | None = DEFAULT_LOCK_TIMEOUT_SECONDS,
+    poll_interval: float = _DEFAULT_POLL_INTERVAL_SECONDS,
+    lock_path: str | os.PathLike[str] | None = None,
+) -> Iterator[BinaryIO]:
+    """Hold only the OS byte-range lock on a sidecar; no in-process locking.
+
+    For callers that already serialize threads themselves (for example the
+    turn journal's per-path thread lock) and only need the cross-process
+    half of :func:`cross_process_file_lock`. Yields the open handle with the
+    byte-range lock held; the seed byte is written inside the lock, per the
+    module docstring.
+    """
+
+    sidecar = Path(lock_path) if lock_path is not None else lock_path_for(path)
+    with _locked_sidecar(
+        sidecar,
+        key=_path_key(sidecar),
+        timeout=timeout,
+        poll_interval=poll_interval,
+    ) as handle:
+        yield handle
+
+
+@contextmanager
+def _locked_sidecar(
+    sidecar: Path,
+    *,
+    key: str,
+    timeout: float | None,
+    poll_interval: float,
+) -> Iterator[BinaryIO]:
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    deadline: float | None = None
+    if timeout is not None:
+        deadline = time.monotonic() + max(0.0, float(timeout))
+    handle = _open_locked_sidecar(
+        sidecar,
+        key=key,
+        deadline=deadline,
+        poll_interval=poll_interval,
+    )
+    try:
+        _seed_lock_byte(handle)
+        yield handle
+    finally:
+        _release_os_lock(handle)
+        handle.close()
 
 
 def _open_locked_sidecar(
@@ -207,4 +252,9 @@ def _release_os_lock(handle: BinaryIO) -> None:
         pass
 
 
-__all__ = ["DEFAULT_LOCK_TIMEOUT_SECONDS", "cross_process_file_lock", "lock_path_for"]
+__all__ = [
+    "DEFAULT_LOCK_TIMEOUT_SECONDS",
+    "cross_process_file_lock",
+    "lock_path_for",
+    "locked_sidecar",
+]
