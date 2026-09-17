@@ -32,7 +32,24 @@ from .session_service import (
 )
 
 CONVERSATION_HARNESS_CANCEL_GRACE_SECONDS = 8.0
-CONVERSATION_HARNESS_MAX_CONTINUATIONS = 3
+CONVERSATION_HARNESS_MAX_CONTINUATIONS = 8
+# 结构化单发场景（Judge 评分、独立审批）保持紧上限；基线/自改/复跑等
+# 执行型场景的 agent 常以 needs_continue 分段完成大量工作，历史上 3 次
+# 上限会在产出真实补丁后把复跑判死（swte-3458aa8712c6：4 个 turn 全部
+# needs_continue 撞上限）。执行型场景的总量仍受每 turn 超时预算约束。
+_SINGLE_SHOT_CONTINUATION_SCENARIOS = frozenset(
+    {
+        "supervised_judge_evaluation",
+        "supervised_independent_approval",
+    }
+)
+_SINGLE_SHOT_MAX_CONTINUATIONS = 3
+
+
+def _max_continuations_for_scenario(scenario: str) -> int:
+    if str(scenario or "").strip() in _SINGLE_SHOT_CONTINUATION_SCENARIOS:
+        return _SINGLE_SHOT_MAX_CONTINUATIONS
+    return CONVERSATION_HARNESS_MAX_CONTINUATIONS
 _CONVERSATION_HARNESS_TRANSCRIPT_LIMIT = 8
 _CONVERSATION_HARNESS_TOOL_TRACE_LIMIT = 12
 _CONVERSATION_HARNESS_TOOL_TRACE_ITEM_LIMIT = 20
@@ -436,7 +453,7 @@ def run_supervised_conversation_harness(
         if (
             last_status == "needs_continue"
             and not cancel_requested
-            and continuation_count < CONVERSATION_HARNESS_MAX_CONTINUATIONS
+            and continuation_count < _max_continuations_for_scenario(scenario)
             and time.monotonic() < deadline
         ):
             continuation_count += 1
