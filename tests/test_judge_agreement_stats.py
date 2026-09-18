@@ -30,7 +30,7 @@ def _run(
             "baselineScore": baseline,
             "candidateScore": candidate,
         },
-        "approvalDecision": {"decision": approval},
+        "approvalDecision": {"decision": approval, "mode": "agent"},
     }
 
 
@@ -126,3 +126,49 @@ def test_loader_delegates_to_run_store(monkeypatch: pytest.MonkeyPatch) -> None:
     assert panel["schemaVersion"] == 1
     assert panel["agreementPairs"] == 1
     assert panel["scoreSeries"][0]["runId"] == "a"
+
+
+def _human_run(run_id: str, *, judge: str, approval: str) -> dict:
+    return {
+        "runId": run_id,
+        "executionMode": "real",
+        "outcome": "",
+        "finishedAt": "2026-09-18T02:00:00Z",
+        "decision": {"judgeDecision": judge, "baselineScore": 1.0, "candidateScore": 2.0},
+        "approvalDecision": {"decision": approval, "mode": "human"},
+    }
+
+
+def test_human_anchor_pairs_counted_separately() -> None:
+    runs = [
+        _human_run("h1", judge="APPROVE", approval="APPROVE"),
+        _run("a1", judge="APPROVE", approval="APPROVE"),
+    ]
+    report = build_judge_agreement_report(runs)
+    assert report.anchoredPairs == 1
+    assert report.agentPairs == 1
+    # 顶层优先人工锚定样本
+    assert report.topLevelSampleSource == "anchored"
+    assert report.confusionMatrix["trueNegatives"] == 1
+    assert report.anchoredConfusionMatrix["trueNegatives"] == 1
+    assert report.agentConfusionMatrix["trueNegatives"] == 1
+
+
+def test_all_agent_sample_falls_back_with_source_label() -> None:
+    runs = [_run("a1", judge="REVISE", approval="RERUN_REQUIRED")]
+    report = build_judge_agreement_report(runs)
+    assert report.anchoredPairs == 0
+    assert report.topLevelSampleSource == "agent"
+    assert report.confusionMatrix["truePositives"] == 1
+    assert report.agentConfusionMatrix["truePositives"] == 1
+
+
+def test_human_disagreement_lands_in_anchored_false_auto_approve() -> None:
+    runs = [
+        _human_run("h1", judge="APPROVE", approval="RERUN_REQUIRED"),
+        _human_run("h2", judge="APPROVE", approval="APPROVE"),
+    ]
+    report = build_judge_agreement_report(runs)
+    assert report.anchoredPairs == 2
+    assert report.anchoredConfusionMatrix["falseNegatives"] == 1
+    assert report.falseAutoApproveUpperBounds["falseAutoApproves"] == 1
