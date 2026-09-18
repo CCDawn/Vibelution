@@ -210,9 +210,15 @@ def run_supervised_conversation_harness(
     clean_room: bool = False,
     progress_callback: Any = None,
     cancel_checker: Any = None,
+    journal_project_root: Path | None = None,
 ) -> HarnessResult:
     del mode, post_restart_observe_seconds, keep_worktree, max_steps
     started_at = _now_timestamp()
+    # 会话的 turn journal 落在「创建会话的主项目」workspace 下；当 repo_root
+    # 是候选 worktree 时（自改/复跑），按 worktree 根解析会落到另一个实例
+    # 而读不到 journal，证据包会变成零工具轨迹、Judge 只能按缺证判罚
+    # （swte-38cfc2b63358 定案）。journal 解析一律使用主项目根。
+    journal_root = Path(journal_project_root) if journal_project_root else repo_root
     binding = dict(agent_binding or {}) if isinstance(agent_binding, dict) else {}
     agent_id = str(binding.get("agentId") or "").strip()
     role = str(binding.get("role") or binding.get("supervisedRole") or "").strip()
@@ -413,7 +419,7 @@ def run_supervised_conversation_harness(
                 latest_detail,
                 assistant_text=latest_output,
                 restart_expected=expect_restart,
-                repo_root=repo_root,
+                repo_root=journal_root,
             )
             if _evolution_transaction_closed(continuation_summary):
                 latest_output = _closed_transaction_assistant_text(
@@ -530,7 +536,7 @@ def run_supervised_conversation_harness(
                 latest_detail,
                 assistant_text=assistant_text,
                 restart_expected=expect_restart,
-                repo_root=repo_root,
+                repo_root=journal_root,
             )
             if callable(progress_callback):
                 progress_callback(
@@ -584,7 +590,7 @@ def run_supervised_conversation_harness(
                 latest_detail,
                 assistant_text=assistant_text,
                 restart_expected=expect_restart,
-                repo_root=repo_root,
+                repo_root=journal_root,
             )
             return _conversation_harness_result(
                 run_id=run_id,
@@ -612,7 +618,7 @@ def run_supervised_conversation_harness(
         latest_detail,
         assistant_text=assistant_text,
         restart_expected=expect_restart,
-        repo_root=repo_root,
+        repo_root=journal_root,
     )
     last_status = str(
         latest_completion_snapshot.get("terminalStatus")

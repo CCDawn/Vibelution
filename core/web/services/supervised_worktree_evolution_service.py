@@ -865,6 +865,8 @@ def _execute_flow(
                 "conversationSessionId": str(snapshot.get("baselineConversationSessionId") or ""),
                 "progressCallback": _workflow_progress_callback(snapshot, "baseline", "improve"),
                 "timeoutSeconds": _bundle_self_edit_timeout_budget(root, str(options["bundleName"])),
+                # 自改在候选 worktree 中进行，但会话 journal 属于主项目。
+                "projectRoot": str(root),
             },
         )
         _raise_if_run_cancelled(snapshot)
@@ -939,6 +941,9 @@ def _execute_flow(
                 "cleanRoom": True,
                 "candidateVariant": snapshot["candidateWorktree"].get("variant"),
                 "progressCallback": _workflow_progress_callback(snapshot, "baseline_rerun", "rerun_eval"),
+                # 复跑会话的 turn journal 落在主项目 workspace；repo_root 是
+                # 候选 worktree，journal 解析必须用主根（否则零工具轨迹）。
+                "journalProjectRoot": str(root),
             },
         )
         _raise_if_run_cancelled(snapshot)
@@ -1642,6 +1647,9 @@ def _real_evaluation_runner(project_root: Path, bundle_name: str, role: str, con
             clean_room=bool(context.get("cleanRoom")),
             progress_callback=progress_callback,
             cancel_checker=cancel_checker,
+            journal_project_root=Path(
+                str(context.get("journalProjectRoot") or "").strip() or project_root
+            ),
         )
         if role == "baseline_rerun":
             candidate_variant = (
@@ -2065,6 +2073,9 @@ def _real_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str
             conversation_session_id=session_id or None,
             progress_callback=progress_callback,
             cancel_checker=cancel_checker,
+            journal_project_root=Path(
+                str(context.get("projectRoot") or "").strip() or worktree_path
+            ),
         )
         return _preserve_candidate_modifier_conversation_terminal(result)
 
