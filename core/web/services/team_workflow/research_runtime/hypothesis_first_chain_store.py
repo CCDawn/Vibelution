@@ -1,9 +1,8 @@
 """JSONL ledger, scope lock and errors for the hypothesis-first chain.
 
-Owning surface for durable chain records. Command/meeting orchestration stays
-in ``hypothesis_first_chain``; auto-advance lives in
-``hypothesis_first_chain_auto_advance``. Public imports remain on
-``hypothesis_first_chain``.
+Owning surface for durable chain records. Command, meeting and auto-advance
+orchestration stay in ``hypothesis_first_chain``. Public imports remain on
+that facade.
 """
 
 from __future__ import annotations
