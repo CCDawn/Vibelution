@@ -201,3 +201,11 @@ class EvolutionDeletedResponse(EvolutionJsonResponse):
     sessionIds: list[str] | None = None
     candidateIds: list[str] | None = None
     txnIds: list[str] | None = None
+
+
+class EvolutionJudgeQualityResponse(EvolutionJsonResponse):
+    schemaVersion: int | None = None
+    totalRuns: int | None = None
+    agreementPairs: int | None = None
+    kappa: dict[str, Any] | None = None
+    scoreStatsByMode: dict[str, Any] | None = None

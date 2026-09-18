@@ -702,6 +702,36 @@ def _run_supervised_worktree_thread(run_id: str, options: dict[str, Any]) -> Non
         if final_snapshot:
             final_snapshot = _auto_cleanup_failed_candidate(final_snapshot)
             _persist_snapshot(final_snapshot, active_run_id="")
+        _append_judge_quality_snapshot(run_id, final_snapshot)
+
+
+def _append_judge_quality_snapshot(run_id: str, final_snapshot: dict[str, Any] | None) -> None:
+    """每轮监督 run 终态后追加一条评审质量快照（尽力而为，永不影响运行）。
+
+    紧凑快照写入 ``evaluation/judge_quality`` 台账：终态身份 + kappa/上界/
+    分模式分数统计。全量面板按需从 run 存储复算，台账负责跨时间积累。
+    """
+    try:
+        from core.web.services.supervised_judge_quality_service import (
+            build_supervised_judge_quality_report,
+        )
+        from core.web.services.evaluation_quality_ledger import append_quality_ledger
+
+        panel = build_supervised_judge_quality_report(limit=200)
+        payload = {
+            "schemaVersion": 1,
+            "triggerRunId": str(run_id),
+            "triggerStatus": str((final_snapshot or {}).get("status") or ""),
+            "triggerOutcome": str((final_snapshot or {}).get("outcome") or ""),
+            "totalRuns": panel.get("totalRuns"),
+            "agreementPairs": panel.get("agreementPairs"),
+            "kappa": panel.get("kappa"),
+            "falseAutoApproveUpperBounds": panel.get("falseAutoApproveUpperBounds"),
+            "scoreStatsByMode": panel.get("scoreStatsByMode"),
+        }
+        append_quality_ledger("judge_quality", payload)
+    except Exception:
+        return
 
 
 def _execute_flow(
