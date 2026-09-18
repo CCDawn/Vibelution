@@ -51,13 +51,25 @@ _OUTCOME_APPROVAL_MAP = {
 
 
 def _approval_decision(run: Mapping[str, Any]) -> str:
+    decision, _mode = _approval_decision_entry(run)
+    return decision
+
+
+def _approval_decision_entry(run: Mapping[str, Any]) -> tuple[str, str]:
+    """Return (decision, approvalMode) for one run snapshot.
+
+    ``approvalMode == "human"`` 的裁决是人工锚点：与 Judge 同模型族的审批
+    Agent 存在相关性误差（Meta-Evaluation Collapse 一致但共同偏差的风险），
+    人工裁决优先作为 kappa 的 human 侧真值。
+    """
     approval = run.get("approvalDecision")
     if isinstance(approval, Mapping):
         decision = str(approval.get("decision") or "").strip().upper()
+        mode = str(approval.get("mode") or "").strip().lower()
         if decision:
-            return decision
+            return decision, (mode or "agent")
     outcome = str(run.get("outcome") or "").strip().lower()
-    return _OUTCOME_APPROVAL_MAP.get(outcome, "")
+    return _OUTCOME_APPROVAL_MAP.get(outcome, ""), "agent"
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +103,15 @@ class JudgeAgreementReport:
     falseAutoApproveUpperBounds: dict[str, Any]
     scoreStatsByMode: dict[str, dict[str, Any]]
     scoreSeries: list[dict[str, Any]] = field(default_factory=list)
+    # 人工锚点（approvalMode=="human" 的裁决）与 agent 审批复立统计；
+    # 顶层 confusionMatrix/kappa 优先取人工锚定样本，回落 agent 样本。
+    topLevelSampleSource: str = "agent"
+    anchoredPairs: int = 0
+    anchoredConfusionMatrix: dict[str, int] = field(default_factory=dict)
+    anchoredKappa: dict[str, Any] = field(default_factory=dict)
+    agentPairs: int = 0
+    agentConfusionMatrix: dict[str, int] = field(default_factory=dict)
+    agentKappa: dict[str, Any] = field(default_factory=dict)
 
 
 def _float_or_none(value: Any) -> float | None:
@@ -122,33 +143,36 @@ def build_judge_agreement_report(runs: Sequence[Mapping[str, Any]]) -> JudgeAgre
     Snapshots may come in any order; the score series is sorted by
     ``finishedAt`` ascending and falls back to ``startedAt``.
     """
-    calibration_records: list[dict[str, str]] = []
+    anchored_records: list[dict[str, str]] = []
+    agent_records: list[dict[str, str]] = []
     series: list[ScoreSeriesPoint] = []
     for run in runs:
         if not isinstance(run, Mapping):
             continue
         decision = run.get("decision") if isinstance(run.get("decision"), Mapping) else {}
         judge_decision = str(decision.get("judgeDecision") or "").strip().upper()
-        approval_decision = _approval_decision(run)
+        approval_decision, approval_mode = _approval_decision_entry(run)
         mode = str(run.get("executionMode") or "").strip().lower()
         if judge_decision and approval_decision:
-            calibration_records.append(
-                {
-                    "autoDecision": (
-                        "auto_approve"
-                        if judge_decision == _JUDGE_POSITIVE
-                        else "auto_escalate"
-                    ),
-                    "humanDecision": (
-                        "approve"
-                        if approval_decision == _APPROVAL_POSITIVE
-                        else "escalate"
-                    ),
-                    "riskClass": "low",
-                    "domain": mode or "unknown",
-                    "runId": str(run.get("runId") or ""),
-                }
-            )
+            record = {
+                "autoDecision": (
+                    "auto_approve"
+                    if judge_decision == _JUDGE_POSITIVE
+                    else "auto_escalate"
+                ),
+                "humanDecision": (
+                    "approve"
+                    if approval_decision == _APPROVAL_POSITIVE
+                    else "escalate"
+                ),
+                "riskClass": "low",
+                "domain": mode or "unknown",
+                "runId": str(run.get("runId") or ""),
+            }
+            if approval_mode == "human":
+                anchored_records.append(record)
+            else:
+                agent_records.append(record)
         baseline = _float_or_none(decision.get("baselineScore"))
         candidate = _float_or_none(decision.get("candidateScore"))
         if baseline is not None and candidate is not None:
@@ -163,8 +187,21 @@ def build_judge_agreement_report(runs: Sequence[Mapping[str, Any]]) -> JudgeAgre
                 )
             )
 
-    confusion = build_confusion_matrix(calibration_records)
-    kappa_result = cohens_kappa_with_ci(confusion)
+    anchored_confusion = build_confusion_matrix(anchored_records)
+    anchored_kappa = cohens_kappa_with_ci(anchored_confusion)
+    agent_confusion = build_confusion_matrix(agent_records)
+    agent_kappa = cohens_kappa_with_ci(agent_confusion)
+    # 顶层视图向后兼容：有人工锚点用锚定样本，否则回落 agent 样本。
+    if anchored_records:
+        confusion, kappa_result, top_source = (
+            anchored_confusion,
+            anchored_kappa,
+            "anchored",
+        )
+        calibration_size = len(anchored_records)
+    else:
+        confusion, kappa_result, top_source = agent_confusion, agent_kappa, "agent"
+        calibration_size = len(agent_records)
     bounds: dict[str, Any] = {"trialsAutoApproved": 0, "falseAutoApproves": 0}
     auto_approved = confusion.false_negatives + confusion.true_negatives
     bounds["trialsAutoApproved"] = auto_approved
@@ -187,9 +224,16 @@ def build_judge_agreement_report(runs: Sequence[Mapping[str, Any]]) -> JudgeAgre
     }
     return JudgeAgreementReport(
         totalRuns=len(runs),
-        agreementPairs=len(calibration_records),
+        agreementPairs=calibration_size,
         confusionMatrix=confusion.as_dict(),
         kappa=kappa_result.as_dict(),
+        topLevelSampleSource=top_source,
+        anchoredPairs=len(anchored_records),
+        anchoredConfusionMatrix=anchored_confusion.as_dict(),
+        anchoredKappa=anchored_kappa.as_dict(),
+        agentPairs=len(agent_records),
+        agentConfusionMatrix=agent_confusion.as_dict(),
+        agentKappa=agent_kappa.as_dict(),
         falseAutoApproveUpperBounds=bounds,
         scoreStatsByMode=stats_by_mode,
         scoreSeries=[
