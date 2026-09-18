@@ -14,6 +14,7 @@ def build_workspace_runtime_projection(
     supervised_active_run: dict[str, Any] | None = None,
     self_worktree_active_run: dict[str, Any] | None = None,
     self_observation_active_run: dict[str, Any] | None = None,
+    current_baseline: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Project all currently loaded evolution runtimes into one stable shape."""
 
@@ -31,10 +32,13 @@ def build_workspace_runtime_projection(
         by_kind[kind] = projection
 
     active = _choose_active_projection(active_runs)
+    baseline = dict(current_baseline) if isinstance(current_baseline, dict) else {}
     return {
         "active": active,
         "activeRuns": active_runs,
         "byKind": by_kind,
+        "promotionLane": str(baseline.get("lane") or "git_expected_head"),
+        "currentBaseline": baseline,
     }
 
 

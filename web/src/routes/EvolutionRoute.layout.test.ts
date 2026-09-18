@@ -794,6 +794,15 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("monitoredRun.runId === supervisedWorkflowRun.runId");
   });
 
+  it("projects the single git expected_head promotion lane on the workbench", () => {
+    expect(evolutionTypesSource).toContain("export type EvolutionBaselinePromotion");
+    expect(evolutionTypesSource).toContain("promotionLane: \"git_expected_head\"");
+    expect(evolutionTypesSource).toContain("currentBaseline: EvolutionBaselinePromotion");
+    expect(routeSource).toContain("EvolutionBaselinePromotionStrip");
+    expect(routeSource).toContain("workspaceSnapshot?.evolutionRuntime?.currentBaseline");
+    expect(evolutionDictionarySource).toContain("promotionLane:");
+  });
+
   it("keeps supervised closed-loop review in a dedicated ledger projection", () => {
     expect(evolutionTypesSource).toContain("export type EvolutionClosedLoopRecord");
     expect(evolutionTypesSource).toContain("export type EvolutionClosedLoopRoleSession");

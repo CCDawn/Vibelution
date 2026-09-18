@@ -579,7 +579,12 @@ def test_evolution_workspace_snapshot_combines_dashboard_payloads(tmp_path, monk
     assert payload["currentAgentBindingIssues"] == []
     assert payload["worktreeActiveRun"] is None
     assert payload["worktreeRuns"] == []
-    assert payload["evolutionRuntime"] == {"active": None, "activeRuns": [], "byKind": {}}
+    assert payload["evolutionRuntime"]["active"] is None
+    assert payload["evolutionRuntime"]["activeRuns"] == []
+    assert payload["evolutionRuntime"]["byKind"] == {}
+    assert payload["evolutionRuntime"]["promotionLane"] == "git_expected_head"
+    assert payload["evolutionRuntime"]["currentBaseline"]["lane"] == "git_expected_head"
+    assert payload["evolutionRuntime"]["currentBaseline"]["status"] in {"none", "current", "superseded", "unreadable"}
     assert payload["selfOverview"]["enabled"] in {True, False}
     assert payload["selfWorktreeActiveRun"] is None
     assert payload["selfWorktreeRuns"] == []

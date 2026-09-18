@@ -1,4 +1,4 @@
-/** Route/domain dictionary slice: evolution (186 keys). */
+/** Route/domain dictionary slice: evolution (191 keys). */
 export const dictionaryEvolution = {
   zh: {
     navEvolution: "进化",
@@ -187,6 +187,11 @@ export const dictionaryEvolution = {
     supervisedEvolutionMode: "监督进化",
     intakeAuto: "自动审查",
     intakeManualReview: "手工操作",
+    promotionLane: "Git 晋级路",
+    promotionNone: "尚无合入",
+    promotionCurrent: "当前基线",
+    promotionSuperseded: "基线已前进",
+    promotionCommit: "提交",
   },
   en: {
     navEvolution: "Evolution",
@@ -375,5 +380,10 @@ export const dictionaryEvolution = {
     supervisedEvolutionMode: "supervised evolution",
     intakeAuto: "automatic review",
     intakeManualReview: "manual operation",
+    promotionLane: "Git promotion",
+    promotionNone: "No promotion yet",
+    promotionCurrent: "Current baseline",
+    promotionSuperseded: "Baseline moved on",
+    promotionCommit: "Commit",
   },
 } as const;

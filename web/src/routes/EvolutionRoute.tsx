@@ -62,6 +62,7 @@ import {
 import { useAppI18n } from "../i18n/useAppI18n";
 import { useShellStore } from "../store/shellStore";
 import { SupervisedApprovalDecisionPanel } from "./SupervisedApprovalDecisionPanel";
+import { EvolutionBaselinePromotionStrip } from "./evolution/EvolutionBaselinePromotionStrip";
 import { useEvolutionProposalMutations } from "./evolution/useEvolutionProposalMutations";
 import { useEvolutionRunMutations } from "./evolution/useEvolutionRunMutations";
 import { useSupervisedRunDetail } from "./evolution/useSupervisedRunDetail";
@@ -2239,6 +2240,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           : null
       }
     >
+      <EvolutionBaselinePromotionStrip
+        lang={lang}
+        t={t}
+        promotion={workspaceSnapshot?.evolutionRuntime?.currentBaseline}
+      />
       {activeTrack === "self" ? (
         <EvolutionSelfTrackBoundary
           lang={lang}

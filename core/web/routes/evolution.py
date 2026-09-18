@@ -47,6 +47,7 @@ from core.web.services.chat_review_service import (
     submit_chat_review_decision,
 )
 from core.web.services.evolution_service import (
+    PROJECT_ROOT as EVOLUTION_PROJECT_ROOT,
     EvolutionProposalDeleteBlockedError,
     EvolutionProposalEditBlockedError,
     EvolutionProposalNotFoundError,
@@ -63,6 +64,7 @@ from core.web.services.evolution_service import (
     bulk_delete_proposals,
     update_proposal,
 )
+from core.web.services.evolution_promotion_lane import build_current_baseline_promotion
 from core.web.services.evolution_runtime_projection_service import build_workspace_runtime_projection
 from core.web.services.self_evolution_service import (
     SelfEvolutionHistoryDeleteError,
@@ -237,6 +239,10 @@ def evolution_workspace_snapshot(includeSelf: bool = False) -> dict:
         supervised_active_run=supervised_runtime_active_run,
         self_worktree_active_run=self_worktree_active_run,
         self_observation_active_run=self_observation_active_run,
+        current_baseline=timed(
+            "current_baseline",
+            lambda: build_current_baseline_promotion(EVOLUTION_PROJECT_ROOT),
+        ),
     )
     payload = {
         "overview": dashboard["overview"],

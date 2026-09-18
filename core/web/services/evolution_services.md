@@ -21,7 +21,7 @@
 | Self **observation / worktree run** 控制 | `self_evolution_control_service.py`（route：`evolution.py` · `agents.py`） | 在 `self_evolution_service` 里 spawn agent/LLM |
 | 用户批准的 **autonomous self-evolution loop** | `self_evolution_autonomous_loop_service.py` + `self_evolution_autonomous_loop_*.py` | 绕过 user approval 扩 iteration；写 score loop 第二套 |
 | Candidate **隔离执行**（harness 协议） | `supervised_candidate_runtime_service.py` | 可见控制台 sandbox；超协议 limit 仍落盘全文 |
-| Candidate **Git 集成**（promote 到 main） | `supervised_candidate_integration_service.py` | `expected_head` 不匹配仍 force merge |
+| Candidate **Git 集成**（唯一晋级路） | `supervised_candidate_integration_service.py` + `evolution_promotion_lane.py` | `expected_head` 不匹配仍 force merge；Gym/live run 当第二写入者改 baseline |
 | Supervised Agent 角色对齐 | `supervised_agent_service.py`（route：`agents.py`） | 与 evolution control 双写 AgentInstance |
 | HTTP 路由 / DTO | `core/web/routes/evolution.py` + `evolution_models.py` | route 业务体；泄露 harness 原始 prompt/secret |
 
@@ -49,7 +49,8 @@ Worktree / Harness / Git（隔离与证据）
   → core/runtime_manager/work_run_store + lease：WORKTREE_WRITE / EVALUATION 冲突检查
   → developer_sandbox + launcher_service：隔离路径与 active-work 语义
   → supervised_candidate_runtime_service：candidate 协议执行
-  → supervised_candidate_integration_service：expected_head 保护下的 promote
+  → supervised_candidate_integration_service：唯一允许写 local main 的晋级（expected_head）
+  → evolution_promotion_lane：工作台只读「当前 Git 基线」；Gym apply 仍是提案记录，不是 baseline 写入
 
 Domain SSOT（业务规则与持久化）
   → core/evaluation/supervised_evolution.py · self_evolution_* · gym · chat_*

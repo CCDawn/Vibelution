@@ -921,6 +921,26 @@ export type EvolutionLibraryPayload = {
   pending: EvolutionLibraryEntry[];
 };
 
+export type EvolutionBaselinePromotion = {
+  lane: "git_expected_head";
+  status: "none" | "current" | "superseded" | "unreadable";
+  commitSha: string;
+  baseCommit: string;
+  runId: string;
+  sourceKind: string;
+  changedFiles: string[];
+  committedAt: string;
+  rollbackManifestPath: string;
+};
+
+export type EvolutionRuntimeProjection = {
+  active: Record<string, unknown> | null;
+  activeRuns: Array<Record<string, unknown>>;
+  byKind: Record<string, Record<string, unknown>>;
+  promotionLane: "git_expected_head";
+  currentBaseline: EvolutionBaselinePromotion;
+};
+
 export type EvolutionWorkspaceSnapshot = {
   overview: EvolutionOverview;
   runs: EvolutionRun[];
@@ -928,6 +948,7 @@ export type EvolutionWorkspaceSnapshot = {
   workbench: EvolutionWorkbench;
   activeRun: EvolutionActiveRun | null;
   latestRun: EvolutionActiveRun | null;
+  evolutionRuntime?: EvolutionRuntimeProjection;
   latestClosedLoopRecord: EvolutionClosedLoopRecord | null;
   currentAgentBindings: Record<string, EvolutionActiveRunAgentBinding>;
   currentAgentBindingSource?: string;
