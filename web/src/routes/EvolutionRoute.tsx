@@ -140,6 +140,8 @@ import {
 } from "./supervisedWorktreeReview";
 import {
   isLiveSupervisedRunStatus,
+  isSupervisedStartLocked,
+  isSupervisedRuntimeActivationBusy,
   parseRunStreamSnapshot,
   selectRunSnapshotWithRunId,
   selectSupervisedRunMonitorSource,
@@ -619,12 +621,25 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     && ["queued", "running", "paused", "stopping"].includes(String((activeWorktreeRun ?? selfWorktreeRun)?.status || "").toLowerCase()),
   );
   const supervisedStartSubmitting = startWorktreeRunMutation.isPending || isLocalSupervisedStartPlaceholder(liveActiveRun);
-  const supervisedPrimaryRunning = runLocked || worktreeRunLocked;
+  const activationLocked = isSupervisedRuntimeActivationBusy(
+    reviewCandidateWorktree?.runtimeActivation?.status
+    ?? selfWorktreeRun?.runtimeActivation?.status,
+  );
+  const startLocked = isSupervisedStartLocked({
+    liveStatus: runningRun?.status,
+    worktreeStatus: (activeWorktreeRun ?? selfWorktreeRun)?.status,
+    activationStatus: reviewCandidateWorktree?.runtimeActivation?.status
+      ?? selfWorktreeRun?.runtimeActivation?.status,
+    submitting: supervisedStartSubmitting,
+  });
+  const supervisedPrimaryRunning = runLocked || worktreeRunLocked || activationLocked;
   const supervisedStartButtonLabel = supervisedStartSubmitting
     ? (lang === "zh" ? "提交中" : "Submitting")
-    : supervisedPrimaryRunning
-      ? (lang === "zh" ? "监督运行中" : "Supervised running")
-      : t("startSupervisedRun");
+    : activationLocked
+      ? (lang === "zh" ? "激活中" : "Activating")
+      : supervisedPrimaryRunning
+        ? (lang === "zh" ? "监督运行中" : "Supervised running")
+        : t("startSupervisedRun");
   const monitoredCaseTranscript = monitoredRun?.currentCaseIo?.transcript ?? [];
   const monitoredCaseConversationMessages = monitoredRun?.currentCaseIo?.conversationMessages ?? [];
   const monitoredCaseTraceItems = useMemo(
@@ -910,7 +925,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       : null;
     return {
       status: statusLabel(step.status),
-      detail: step.livePreview || step.summary || (lang === "zh" ? "等待实时输出" : "Waiting for live output"),
+      detail: step.current
+        ? (lang === "zh" ? "进行中" : "In progress")
+        : statusLabel(step.status),
       count: scoreDelta !== null
         ? `Δ ${scoreDelta}`
         : score !== null
@@ -1260,17 +1277,15 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const availableBundles = workbenchControl?.bundles ?? [];
   const selectedBundleExists = availableBundles.some((item) => item.name === bundleNameInput);
   const datasetLimitError = supervisedDatasetLimitError(sourceKind, datasetLimitInput);
-  const supervisedStartDisabledReason = datasetLimitError || (runLocked || worktreeRunLocked
-    ? t("runningLockHint")
+  const supervisedStartDisabledReason = datasetLimitError || (startLocked
+    ? (activationLocked ? t("supervisedActivationLockHint") : t("runningLockHint"))
     : !workbenchControl
       ? (lang === "zh" ? "监督运行控制暂不可用。" : "Supervised run controls are unavailable.")
-      : startWorktreeRunMutation.isPending
-        ? (lang === "zh" ? "监督运行正在启动。" : "The supervised run is starting.")
-        : sourceKind === "dataset" && !datasetName
-          ? (lang === "zh" ? "先选择数据集。" : "Choose a dataset first.")
-          : sourceKind === "bundle" && !selectedBundleExists
-            ? (lang === "zh" ? "先选择有效的评测包。" : "Choose a valid evaluation bundle first.")
-            : undefined);
+      : sourceKind === "dataset" && !datasetName
+        ? (lang === "zh" ? "先选择数据集。" : "Choose a dataset first.")
+        : sourceKind === "bundle" && !selectedBundleExists
+          ? (lang === "zh" ? "先选择有效的评测包。" : "Choose a valid evaluation bundle first.")
+          : undefined);
   const supervisedMembersHint = supervisedMembersSource === "current_config"
     ? (lang === "zh" ? "当前 Agent 配置；启动后锁定为本轮绑定。" : "Current Agent config; a run locks its own bindings after start.")
     : undefined;
@@ -1345,10 +1360,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       memberCountText={`${configuredSupervisedAgentCount} / ${SUPERVISED_RUN_MEMBER_ROLES.length}`}
       startDisabled={
         Boolean(datasetLimitError) ||
-        runLocked
-        || worktreeRunLocked
+        startLocked
         || !workbenchControl
-        || startWorktreeRunMutation.isPending
         || (sourceKind === "dataset" && !datasetName)
         || (sourceKind === "bundle" && !selectedBundleExists)
       }
@@ -2405,10 +2418,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   onMentalModelModeChange={setSupervisedMentalModelMode}
                   startDisabled={
                     Boolean(datasetLimitError) ||
-                    runLocked
-                    || worktreeRunLocked
+                    startLocked
                     || !workbenchControl
-                    || startWorktreeRunMutation.isPending
                     || (sourceKind === "dataset" && !datasetName)
                     || (sourceKind === "bundle" && !selectedBundleExists)
                   }
@@ -2423,8 +2434,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   mentalModeFollowLabel={t("supervisedMentalModeFollow")}
                   mentalModeEnabledLabel={t("supervisedMentalModeEnabled")}
                   mentalModeDisabledLabel={t("supervisedMentalModeDisabled")}
-                  runningLockHint={t("runningLockHint")}
-                  showRunningLock={runLocked || worktreeRunLocked}
+                  runningLockHint={activationLocked ? t("supervisedActivationLockHint") : t("runningLockHint")}
+                  showRunningLock={runLocked || worktreeRunLocked || activationLocked}
                   controlError={datasetLimitError || supervisedControlError}
                   onStart={() => startWorktreeRunMutation.mutate()}
                 />

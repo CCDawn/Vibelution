@@ -277,7 +277,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(runRecordsPanelSource).not.toContain('title={selectedRun.outcomeSemantics.runtimeExplanation}');
     expect(runRecordsPanelSource).not.toContain('title={selectedRun.riskReasons.join(" / ")}');
     expect(supervisedLibraryViewSource).toContain("proposalDetail.supervised.riskReasons.join");
-    expect(evolutionDictionarySource).toContain('supervisedFlowRunsHint: "同一改良 Agent 提建议并改候选"');
+    expect(evolutionDictionarySource).toContain('supervisedFlowRunsHint: "本轮候选改动"');
     expect(coreDictionarySource).toContain('decision: "治理结论"');
     expect(coreDictionarySource).toContain('diagnosis: "治理结论说明"');
     expect(coreDictionarySource).not.toContain('retrySupervisedRun: "重跑失败项"');

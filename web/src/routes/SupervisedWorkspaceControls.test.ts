@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
 import { getEffectiveIntakeMode } from "./SupervisedWorkspaceControls";
+import { supervisedStageTabTitle } from "./SupervisedWorkspaceTabs";
 
 const controlsSource = readFileSync(new URL("./SupervisedWorkspaceControls.tsx", import.meta.url), "utf-8");
 const controlsStylesSource = readFileSync(new URL("./SupervisedWorkspaceControls.styles.ts", import.meta.url), "utf-8");
@@ -18,6 +19,15 @@ const evolutionDictionarySource = readFileSync(
 );
 
 describe("supervised workspace controls", () => {
+  it("keeps stage tab titles short and drops long judge reports", () => {
+    expect(supervisedStageTabTitle("基线评测", "已完成")).toBe("基线评测 · 已完成");
+    expect(supervisedStageTabTitle("合入审批")).toBe("合入审批");
+    expect(tabsSource).not.toContain("summary?.detail");
+    expect(evolutionRouteSource).toContain("isSupervisedStartLocked");
+    expect(evolutionRouteSource).toContain("startLocked");
+    expect(evolutionRouteSource).toContain("supervisedActivationLockHint");
+  });
+
   it("keeps the saved manual mode authoritative over a stale auto overview", () => {
     expect(getEffectiveIntakeMode("auto", "manual_review")).toBe("manual_review");
   });
@@ -53,12 +63,15 @@ describe("supervised workspace controls", () => {
     expect(tabsSource).not.toContain("VButton");
     expect(tabsSource).toContain("stepHintClass");
     expect(evolutionDictionarySource).toContain('supervisedFlowLive: "基线评测"');
-    expect(evolutionDictionarySource).toContain('supervisedFlowRuns: "提出建议与改良"');
-    expect(evolutionDictionarySource).toContain('supervisedFlowLibrary: "复跑与评分"');
-    expect(evolutionDictionarySource).toContain('supervisedFlowReview: "用户审批"');
+    expect(evolutionDictionarySource).toContain('supervisedFlowRuns: "基线自改"');
+    expect(evolutionDictionarySource).toContain('supervisedFlowLibrary: "复跑评分"');
+    expect(evolutionDictionarySource).toContain('supervisedFlowReview: "合入审批"');
+    expect(evolutionDictionarySource).toContain('supervisedRunStage: "本轮阶段"');
+    expect(evolutionDictionarySource).not.toContain('supervisedFlowRuns: "提出建议与改良"');
     expect(evolutionDictionarySource).not.toContain('supervisedFlowRuns: "运行结果"');
     expect(evolutionDictionarySource).not.toContain('supervisedFlowLibrary: "改进提案"');
     expect(evolutionDictionarySource).not.toContain('supervisedFlowReview: "样本评审"');
+    expect(evolutionDictionarySource).not.toContain('supervisedFlowReview: "用户审批"');
     expect(tabsSource).toContain("flowTabsClass");
     expect(controlsSource).toContain("controlsShellClass");
     expect(controlsSource).toContain("flowRegionClass");
@@ -128,8 +141,10 @@ describe("supervised workspace controls", () => {
     expect(tabsStylesSource).not.toContain("min-h-[36px]");
     expect(tabsStylesSource).not.toContain("stepMetaClass = \"flex");
     expect(tabsStylesSource).toContain("stepMetaClass = \"sr-only");
+    expect(tabsSource).toContain("supervisedStageTabTitle");
     expect(tabsSource).toContain("const tabDescription");
-    expect(tabsSource).toContain("title: tabDescription");
+    expect(tabsSource).not.toContain("summary?.detail");
+    expect(tabsSource).toContain('aria-label={t("supervisedRunStage")}');
     expect(tabsStylesSource).toContain("data-[state=active]");
     expect(tabsStylesSource).toContain("data-step-index");
   });
@@ -145,6 +160,8 @@ describe("supervised workspace controls", () => {
     expect(evolutionRouteSource).toContain("activeWorkflowStepId={supervisedWorkspaceActiveStepId}");
     expect(evolutionRouteSource).toContain("onWorkflowStepSelect={handleSupervisedWorkflowStepSelect}");
     expect(evolutionRouteSource).toContain("tabSummaries={supervisedTabSummaries}");
+    expect(controlsSource).toContain("onWorkflowStepSelect ?");
+    expect(controlsSource).toContain("{t(\"supervisedRunStage\")}");
   });
 
   it("keeps supervised workspace style maps in the Evolution lazy CSS entry", () => {

@@ -17,6 +17,37 @@ export function isLiveSupervisedRunStatus(status: string) {
   return ["queued", "running", "paused", "stopping"].includes(normalizedSupervisedRunStatus(status));
 }
 
+export const SUPERVISED_RUNTIME_ACTIVATION_BUSY_STATUSES = [
+  "restart_queued",
+  "activating",
+  "activation_verifying",
+  "rollback_activating",
+] as const;
+
+export function isSupervisedRuntimeActivationBusy(status: string | null | undefined) {
+  return (SUPERVISED_RUNTIME_ACTIVATION_BUSY_STATUSES as readonly string[]).includes(
+    normalizedSupervisedRunStatus(status || ""),
+  );
+}
+
+export function isSupervisedStartLocked(input: {
+  liveStatus?: string | null;
+  worktreeStatus?: string | null;
+  activationStatus?: string | null;
+  submitting?: boolean;
+}) {
+  if (input.submitting) {
+    return true;
+  }
+  if (input.liveStatus && isLiveSupervisedRunStatus(input.liveStatus)) {
+    return true;
+  }
+  if (input.worktreeStatus && isLiveSupervisedRunStatus(input.worktreeStatus)) {
+    return true;
+  }
+  return isSupervisedRuntimeActivationBusy(input.activationStatus);
+}
+
 export function isTerminalSupervisedRunStatus(status: string) {
   return ["done", "failed", "cancelled"].includes(normalizedSupervisedRunStatus(status));
 }
