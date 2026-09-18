@@ -209,3 +209,11 @@ class EvolutionJudgeQualityResponse(EvolutionJsonResponse):
     agreementPairs: int | None = None
     kappa: dict[str, Any] | None = None
     scoreStatsByMode: dict[str, Any] | None = None
+
+
+class EvolutionRubricPromotionResponse(EvolutionJsonResponse):
+    schemaVersion: int | None = None
+    eligible: bool | None = None
+    candidateVersionId: str | None = None
+    checks: list[dict[str, Any]] | None = None
+    promoted: dict[str, Any] | None = None

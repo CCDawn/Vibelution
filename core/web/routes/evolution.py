@@ -20,6 +20,7 @@ from core.web.routes.evolution_models import (
     EvolutionProposalResponse,
     EvolutionRunResponse,
     EvolutionJudgeQualityResponse,
+    EvolutionRubricPromotionResponse,
     EvolutionSelfWorkspaceSnapshotResponse,
     EvolutionWorkspaceSnapshotResponse,
     ProposalBulkDeletePayload,
@@ -598,6 +599,38 @@ def evolution_judge_quality() -> dict:
     )
 
     return build_supervised_judge_quality_report()
+
+
+@router.get(
+    "/evolution/rubric-promotion-gate",
+    response_model=EvolutionRubricPromotionResponse,
+    response_model_exclude_unset=True,
+)
+def evolution_rubric_promotion_gate() -> dict:
+    """Evaluate the shadow→active rubric promotion gate (read-only)."""
+    from core.web.services.supervised_rubric_promotion_service import (
+        evaluate_rubric_promotion,
+    )
+
+    return evaluate_rubric_promotion()
+
+
+@router.post(
+    "/evolution/rubric-promotion-gate/promote",
+    response_model=EvolutionRubricPromotionResponse,
+    response_model_exclude_unset=True,
+)
+def evolution_rubric_promotion_promote() -> dict:
+    """Promote the pending shadow rubric; the frozen gate must pass first."""
+    from core.web.services.supervised_rubric_promotion_service import (
+        RubricPromotionBlockedError,
+        promote_rubric_if_eligible,
+    )
+
+    try:
+        return promote_rubric_if_eligible()
+    except RubricPromotionBlockedError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get(
