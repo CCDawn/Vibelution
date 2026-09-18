@@ -19,6 +19,7 @@ from core.web.routes.evolution_models import (
     EvolutionOverviewResponse,
     EvolutionProposalResponse,
     EvolutionRunResponse,
+    EvolutionJudgeQualityResponse,
     EvolutionSelfWorkspaceSnapshotResponse,
     EvolutionWorkspaceSnapshotResponse,
     ProposalBulkDeletePayload,
@@ -583,6 +584,20 @@ def evolution_run_command_status(command_id: str) -> dict:
 )
 def evolution_worktree_runs() -> list[dict]:
     return list_supervised_worktree_runs()
+
+
+@router.get(
+    "/evolution/judge-quality",
+    response_model=EvolutionJudgeQualityResponse,
+    response_model_exclude_unset=True,
+)
+def evolution_judge_quality() -> dict:
+    """Longitudinal judge-vs-approval quality panel (read-only, recomputable)."""
+    from core.web.services.supervised_judge_quality_service import (
+        build_supervised_judge_quality_report,
+    )
+
+    return build_supervised_judge_quality_report()
 
 
 @router.get(
