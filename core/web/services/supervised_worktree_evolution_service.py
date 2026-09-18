@@ -797,6 +797,7 @@ def _execute_flow(
         _raise_if_run_cancelled(snapshot)
         snapshot["judgeRubric"] = judge_rubric
         snapshot["judgeConversationSessionId"] = _evaluation_conversation_session_id(judge_rubric)
+        _record_rubric_shadow_version(run_id, judge_rubric)
         if str(judge_rubric.get("status") or "").strip().lower() != "success":
             raise SupervisedWorktreeRunValidationError(
                 str(judge_rubric.get("reason") or "Judge 未能生成有效任务 rubric。")
@@ -2290,6 +2291,50 @@ def _ensure_bundle_available_in_candidate(project_root: Path, *, candidate_path:
     shutil.copy2(source, target)
 
 
+def _record_rubric_shadow_version(run_id: str, judge_rubric: dict[str, Any]) -> None:
+    """Rubric 冻结时登记 shadow 版本（尽力而为，永不影响运行）。
+
+    评估器版本化地基：每轮冻结的 rubric 进 append-only 台账，后续晋升/
+    对比（shadow→active）由治理证据驱动；记录失败只降级不阻断。
+    """
+    try:
+        from core.web.services.supervised_rubric_version_store import (
+            record_rubric_version,
+        )
+
+        record_rubric_version(
+            {
+                key: value
+                for key, value in judge_rubric.items()
+                if key not in {"status", "reason", "conversationSessionId"}
+            },
+            source=str(run_id),
+            rubric_hash=str(judge_rubric.get("rubricHash") or ""),
+        )
+    except Exception:
+        return
+
+
+def _dimension_guidance_hint() -> str:
+    """从评审者质量台账取最新维度引导 hint（缺省返回空串）。"""
+    try:
+        from core.web.services.evaluation_quality_ledger import read_quality_ledger
+        from core.research.competition.dimension_guidance import (
+            build_dimension_guidance,
+        )
+
+        records = read_quality_ledger("reviewer_diagnostic_reward", limit=1)
+        if not records:
+            return ""
+        reward = (records[-1].get("diagnosticReward") or {})
+        by_dimension = reward.get("score_by_dimension") or {}
+        if not isinstance(by_dimension, dict) or not by_dimension:
+            return ""
+        return build_dimension_guidance(by_dimension).guidance_hint
+    except Exception:
+        return ""
+
+
 def _build_reflection(
     snapshot: dict[str, Any],
     baseline: dict[str, Any],
@@ -2306,6 +2351,7 @@ def _build_reflection(
     self_origin = snapshot.get("selfEvolutionOrigin") if isinstance(snapshot.get("selfEvolutionOrigin"), dict) else {}
     requested_goal = str(self_origin.get("goal") or "").strip()
     if isinstance(baseline_judgment, dict) and baseline_judgment:
+        guidance_hint = _dimension_guidance_hint()
         return {
             "summary": (
                 f"Judge 基线评分 {baseline_judgment.get('score')}；"
@@ -2320,7 +2366,8 @@ def _build_reflection(
                     if isinstance(snapshot.get("taskContract"), dict)
                     else {}
                 ),
-            ),
+            )
+            + (f"\n\n{guidance_hint}" if guidance_hint else ""),
         }
     goal_section = ""
     if requested_goal:
