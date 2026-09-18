@@ -249,7 +249,27 @@ def test_selector_matches_session_service_to_chat_validation_commands():
     assert "core/web/services/session_service.py" in result["matchedRules"][0]["matchedFiles"]
     assert "git diff --check" in result["commands"]
     assert any("tests/test_web_session_routes.py" in command for command in result["commands"])
+    assert any("tests/test_session_submit.py" in command for command in result["commands"])
+    assert any("tests/test_session_worker.py" in command for command in result["commands"])
     assert not any("ChatCodingRoute.layout.test.ts" in command for command in result["commands"])
+
+
+def test_selector_runs_session_hot_path_unit_tests_for_worker_edits():
+    result = select_tests.select_tests(
+        ["core/web/services/session/worker.py"],
+        select_tests.load_matrix(),
+    )
+
+    assert result["matchedRules"][0]["id"] == "web-session-chat"
+    hot_path = next(
+        command
+        for command in result["commands"]
+        if "tests/test_session_submit.py" in command
+    )
+    assert "tests/test_session_worker.py" in hot_path
+    assert " -n 2 " in hot_path
+    assert "--dist loadfile" in hot_path
+    assert "tests/test_chat_room_service.py" not in hot_path
 
 
 def test_selector_matches_virtual_human_plugin_to_focused_validation_commands():
@@ -381,6 +401,7 @@ def test_selector_matches_chat_style_map_to_chat_validation_commands():
     assert any("vuiComponentDesignContract.test.ts" in command for command in result["commands"])
     assert any("vuiImportBoundary.test.ts" in command for command in result["commands"])
     assert any("vuiSurfaceAlphaPolicy.test.ts" in command for command in result["commands"])
+    assert any("fullStackApiBoundary.test.ts" in command for command in result["commands"])
     assert FRONTEND_TYPECHECK_COMMAND in result["commands"]
     assert all(
         command.endswith(select_tests.FRONTEND_TEST_ROOT_ARGUMENT)
@@ -406,6 +427,7 @@ def test_selector_matches_teams_style_map_to_teams_validation_commands():
     assert any("vuiShadcnRouteContract.test.ts" in command for command in result["commands"])
     assert any("vuiImportBoundary.test.ts" in command for command in result["commands"])
     assert any("vuiSurfaceAlphaPolicy.test.ts" in command for command in result["commands"])
+    assert any("fullStackApiBoundary.test.ts" in command for command in result["commands"])
     assert FRONTEND_TYPECHECK_COMMAND in result["commands"]
     assert not any("npm --prefix web run build" in command for command in result["commands"])
     assert not any("挑战杯/" in command for command in result["commands"])
@@ -484,6 +506,8 @@ def test_selector_matches_large_file_split_extracted_paths():
     rule_ids = {rule["id"] for rule in result["matchedRules"]}
     assert {"web-session-chat", "teams-knowledge", "teams-knowledge-ui", "frontend-non-ui"}.issubset(rule_ids)
     assert any("tests/test_web_session_routes.py" in command for command in result["commands"])
+    assert any("tests/test_session_worker.py" in command for command in result["commands"])
+    assert any("fullStackApiBoundary.test.ts" in command for command in result["commands"])
     assert any("tests/test_team_workflow_source_collection_cases.py" in command for command in result["commands"])
     assert any("ChatCodingRoute" not in command and "--changed main" in command for command in result["commands"])
     assert FRONTEND_TYPECHECK_COMMAND in result["commands"]
@@ -499,6 +523,7 @@ def test_selector_uses_non_ui_frontend_fallback_without_vui_contracts():
 
     assert {rule["id"] for rule in result["matchedRules"]} == {"frontend-non-ui"}
     assert any("--changed main --passWithNoTests" in command for command in result["commands"])
+    assert any("fullStackApiBoundary.test.ts" in command for command in result["commands"])
     assert FRONTEND_TYPECHECK_COMMAND in result["commands"]
     assert not any("vuiShadcnRouteContract.test.ts" in command for command in result["commands"])
     assert not any("vuiComponentDesignContract.test.ts" in command for command in result["commands"])
@@ -519,6 +544,8 @@ def test_selector_matches_real_session_route_files_to_chat_validation_commands()
         "core/web/routes/chat_rooms.py",
     ]
     assert any("tests/test_web_session_routes.py" in command for command in result["commands"])
+    assert any("tests/test_session_submit.py" in command for command in result["commands"])
+    assert any("tests/test_session_worker.py" in command for command in result["commands"])
     assert not any("ChatCodingRoute.layout.test.ts" in command for command in result["commands"])
 
 
@@ -803,6 +830,7 @@ def test_selector_includes_global_vui_policy_gates_for_visible_ui():
     assert result["matchedRules"][0]["id"] == "frontend-workbench"
     assert any("vuiImportBoundary.test.ts" in command for command in result["commands"])
     assert any("vuiSurfaceAlphaPolicy.test.ts" in command for command in result["commands"])
+    assert any("fullStackApiBoundary.test.ts" in command for command in result["commands"])
 
 
 def test_selector_suppresses_frontend_fallback_when_chat_rule_covers_file():

@@ -281,13 +281,17 @@ rules:
       - "tests/test_web_session_routes.py"
       - "tests/test_chat_room_service.py"
       - "tests/test_chat_room_routes.py"
+      - "tests/test_session_submit.py"
+      - "tests/test_session_worker.py"
       - "tests/helpers/web_chat_state.py"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_session_routes.py tests/test_chat_room_service.py tests/test_chat_room_routes.py -n 4 --dist load -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_session_submit.py tests/test_session_worker.py -n 2 --dist loadfile -q"
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_app.py -k \"branch_edit_reports_versions or regenerate_with_base_message_id\" -q"
     notes:
       - "Use the route/service subset first; widen to tests/test_web_app.py only when shared app fixtures or legacy route coverage changed."
       - "The route/service batch is serial-marked but measured safe for per-test distribution: 176.7s serial -> 78.5s/83.0s at -n 3 and 54.4s/56.9s at -n 4 --dist load; keep the explicit override rather than loadfile."
+      - "Submit and worker unit tests own the session hot path; the matrix must run them or import fallback cannot, because session/** is already claimed."
 
   - id: web-session-chat-ui
     description: "Chat route and conversation UI focused validation."
@@ -303,10 +307,10 @@ rules:
       - "web/src/components/conversation/**"
     commands:
       - "node web/node_modules/vitest/vitest.mjs run src/routes/ChatCodingRoute.layout.test.ts --root web"
-      - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts src/components/vui/vuiComponentDesignContract.test.ts src/components/vui/vuiImportBoundary.test.ts src/design/vuiSurfaceAlphaPolicy.test.ts --root web"
+      - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts src/components/vui/vuiComponentDesignContract.test.ts src/components/vui/vuiImportBoundary.test.ts src/design/vuiSurfaceAlphaPolicy.test.ts src/api/fullStackApiBoundary.test.ts --root web"
       - "node web/node_modules/typescript/bin/tsc -b web/tsconfig.json --pretty false"
     notes:
-      - "Small Chat UI changes keep a focused route test, the global VUI policy contracts, and incremental typecheck; they do not imply backend pytest or a full build."
+      - "Small Chat UI changes keep a focused route test, the global VUI policy contracts, the zero-budget API boundary, and incremental typecheck; they do not imply backend pytest or a full build."
 
   - id: web-route-contract-coverage
     description: "Low-churn Web route modules share one importable public-route contract and a direct focused selector boundary."
@@ -648,10 +652,10 @@ rules:
       - "web/src/routes/teams/**"
     commands:
       - "node web/node_modules/vitest/vitest.mjs run src/routes/teams TeamsRoute.layout.test.ts --root web"
-      - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts src/components/vui/vuiComponentDesignContract.test.ts src/components/vui/vuiImportBoundary.test.ts src/design/vuiSurfaceAlphaPolicy.test.ts --root web"
+      - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts src/components/vui/vuiComponentDesignContract.test.ts src/components/vui/vuiImportBoundary.test.ts src/design/vuiSurfaceAlphaPolicy.test.ts src/api/fullStackApiBoundary.test.ts --root web"
       - "node web/node_modules/typescript/bin/tsc -b web/tsconfig.json --pretty false"
     notes:
-      - "Small Teams UI changes keep a focused route test, the global VUI policy contracts, and incremental typecheck; they do not imply workflow pytest or a full build."
+      - "Small Teams UI changes keep a focused route test, the global VUI policy contracts, the zero-budget API boundary, and incremental typecheck; they do not imply workflow pytest or a full build."
 
   - id: frontend-build-inputs
     description: "Frontend dependency, compiler, bundler, entrypoint, and static build inputs."
@@ -684,12 +688,12 @@ rules:
       - "web/src/components/**"
       - "web/src/app/**"
     commands:
-      - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts src/components/vui/vuiComponentDesignContract.test.ts src/components/vui/vuiImportBoundary.test.ts src/design/vuiSurfaceAlphaPolicy.test.ts --root web"
+      - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts src/components/vui/vuiComponentDesignContract.test.ts src/components/vui/vuiImportBoundary.test.ts src/design/vuiSurfaceAlphaPolicy.test.ts src/api/fullStackApiBoundary.test.ts --root web"
       - "node web/node_modules/vitest/vitest.mjs run --changed main --passWithNoTests --root web"
       - "node web/node_modules/typescript/bin/tsc -b web/tsconfig.json --pretty false"
     notes:
-      - "VUI/shadcn route, component design, import ownership, and surface-alpha contracts are mandatory for any web UI path (root AGENTS.md §2)."
-      - "The UI fallback keeps changed-file Vitest, the global VUI policy contracts, and incremental typecheck; it is suppressed file-by-file when a focused frontend rule owns every changed file."
+      - "VUI/shadcn route, component design, import ownership, surface-alpha, and zero-budget API boundary contracts are mandatory for any web UI path (root AGENTS.md §2)."
+      - "The UI fallback keeps changed-file Vitest, the global VUI policy contracts, the API boundary, and incremental typecheck; it is suppressed file-by-file when a focused frontend rule owns every changed file."
 
   - id: frontend-non-ui
     description: "Shared frontend API types, API helpers, i18n, and non-visual TypeScript surfaces."
@@ -703,10 +707,12 @@ rules:
       - "web/src/i18n/**"
       - "web/bundleBudget.test.ts"
     commands:
+      - "node web/node_modules/vitest/vitest.mjs run src/api/fullStackApiBoundary.test.ts --root web"
       - "node web/node_modules/vitest/vitest.mjs run --changed main --passWithNoTests --root web"
       - "node web/node_modules/typescript/bin/tsc -b web/tsconfig.json --pretty false"
     notes:
       - "Non-UI frontend changes use changed-file Vitest and incremental typecheck; VUI contracts are reserved for visible UI surfaces."
+      - "fullStackApiBoundary is explicit because --changed main will skip it unless the guard file itself changed."
 
   - id: test-tool-authorization
     description: "Tool authorization implementation, fixtures, helpers, and authorization contract tests."
