@@ -11,8 +11,10 @@
 
 - 维度与评级直接复用假说链的审计契约：七维 ``REQUIRED_REVIEW_DIMENSIONS``
   × 五档 ordinal ``REVIEW_DIMENSION_RATINGS``（insufficient=0 … strong=4）。
-  五维数值评分通道（HYPOTHESIS_SCORE_DIMENSIONS）不进 v1：其持久化形态
-  与轮次记录的绑定关系需另行核实，留作后续任务。
+  v1.1（2026-09-18）核实生产轮次的持久化形态后新增**数值分数通道**：轮次
+  候选内联携带五维 ``SCORE_DIMENSIONS`` 0-1 浮点分，按同样的相邻轮次×
+  同候选配对计算维度级 delta（批评=基线分未达 1.0）；ordinal 通道依赖的
+  权威审计行存储（``dimensionReviewRefs`` 所指）尚未接线，两通道独立报告。
 - 「批评」的定义：评级低于 ``strong`` 的审计维度行（存在改进空间的发现）。
   评级为 strong 的行不构成批评，也不参与 delta 计算。
 - 归因配对：只在相邻两轮（rounds[i], rounds[i+1]）中按 ``candidateId``
@@ -40,7 +42,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from core.research.workflow.contracts import ContractValidationError
+from core.research.workflow.contracts import ContractValidationError, SCORE_DIMENSIONS
 from .question_result_package import (
     REQUIRED_REVIEW_DIMENSIONS,
     REVIEW_DIMENSION_RATINGS,
@@ -52,6 +54,11 @@ RATING_ORDINAL: dict[str, int] = {
     rating: index for index, rating in enumerate(REVIEW_DIMENSION_RATINGS)
 }
 _ALLOWED_DIMENSIONS = frozenset(REQUIRED_REVIEW_DIMENSIONS)
+
+# 数值分数通道的「批评」定义：维度基线分未达满分即存在改进空间（与
+# ordinal 通道「评级低于 strong」同义）。生产持久化的五维分数为 0-1 浮点。
+_SCORE_CRITIQUE_HEADROOM = 0.999
+_SCORE_DIMENSIONS = frozenset(SCORE_DIMENSIONS)
 
 _WILSON_Z = 1.959963984540054  # two-sided 95%
 
@@ -104,6 +111,30 @@ class DiagnosticRewardReport:
     by_reviewer: dict[str, ReviewerDiagnosticSummary] = field(default_factory=dict)
     by_dimension: dict[str, DimensionDiagnosticSummary] = field(default_factory=dict)
     overall: ReviewerDiagnosticSummary | None = None
+    # 数值分数通道（生产轮次内联的五维 0-1 分数；2026-09-18 核实持久化
+    # 形态后启用）。ordinal 通道依赖的权威审计行存储尚未接线，两者独立。
+    score_outcomes: tuple[ScoreCritiqueOutcome, ...] = ()
+    score_by_reviewer: dict[str, ReviewerDiagnosticSummary] = field(default_factory=dict)
+    score_by_dimension: dict[str, DimensionDiagnosticSummary] = field(default_factory=dict)
+    score_overall: ReviewerDiagnosticSummary | None = None
+    score_candidate_transitions: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ScoreCritiqueOutcome:
+    """One numeric-score critique and the next-round score change it faces."""
+
+    reviewer: str
+    candidate_id: str
+    dimension: str
+    from_round_index: int
+    to_round_index: int
+    score_from: float
+    score_to: float
+    delta: float
+    reward: float
+    improved: bool
+    harmed: bool
 
 
 def rating_ordinal(rating: str) -> int:
@@ -221,17 +252,103 @@ def _summarize(
     )
 
 
+def _dimension_summary(
+    dimension: str, outcomes: Sequence[Any]
+) -> DimensionDiagnosticSummary:
+    count = len(outcomes)
+    return DimensionDiagnosticSummary(
+        dimension=dimension,
+        critique_count=count,
+        improved_count=sum(1 for o in outcomes if o.improved),
+        harmed_count=sum(1 for o in outcomes if o.harmed),
+        mean_delta=(sum(o.delta for o in outcomes) / count if count else 0.0),
+    )
+
+
+def _candidate_scores(
+    round_record: Mapping[str, Any]
+) -> dict[str, dict[str, float]]:
+    """Index one round's inline five-dimension scores per candidate.
+
+    Fail-closed on unknown dimension keys and non-numeric values; unknown
+    shape elsewhere is absence, not a violation.
+    """
+    indexed: dict[str, dict[str, float]] = {}
+    candidates = round_record.get("candidates")
+    if not isinstance(candidates, Sequence) or isinstance(candidates, (str, bytes)):
+        return indexed
+    for candidate in candidates:
+        if not isinstance(candidate, Mapping):
+            continue
+        candidate_id = str(candidate.get("candidateId") or "").strip()
+        if not candidate_id:
+            continue
+        scores = candidate.get("scores")
+        if not isinstance(scores, Mapping):
+            continue
+        dims: dict[str, float] = {}
+        for key, value in scores.items():
+            dimension = str(key).strip()
+            if dimension not in _SCORE_DIMENSIONS:
+                raise ContractValidationError(
+                    f"unknown score dimension {dimension!r}; allowed dimensions "
+                    f"are {list(SCORE_DIMENSIONS)}"
+                )
+            if dimension in dims:
+                raise ContractValidationError(
+                    f"candidate {candidate_id} has duplicate score for {dimension!r}"
+                )
+            try:
+                dims[dimension] = float(value)
+            except (TypeError, ValueError) as exc:
+                raise ContractValidationError(
+                    f"candidate {candidate_id} score for {dimension!r} is not numeric"
+                ) from exc
+        indexed[candidate_id] = dims
+    return indexed
+
+
+def _candidate_score_reviewer(
+    round_record: Mapping[str, Any], candidate: Mapping[str, Any]
+) -> str:
+    explicit = str(candidate.get("reviewedBy") or "").strip()
+    if explicit:
+        return explicit
+    roles = round_record.get("roles")
+    if isinstance(roles, Mapping):
+        reflection_agent = str(roles.get("reflection") or "").strip()
+        if reflection_agent:
+            return reflection_agent
+    return DEFAULT_REFLECTION_REVIEWER
+
+
 def build_diagnostic_reward_report(
     rounds: Sequence[Mapping[str, Any]],
 ) -> DiagnosticRewardReport:
     """Compute diagnostic rewards over an ordered sequence of round records.
 
     Only critiques (audit rows rated below ``strong``) whose candidate also
-    appears in the immediately following round contribute outcomes.
+    appears in the immediately following round contribute outcomes. The
+    numeric lane applies the same pairing to the inline five-dimension
+    scores, counting dimensions with headroom (below 1.0) as critiques.
     """
     indexed_rounds = [_candidate_dimension_rows(record) for record in rounds]
     outcomes: list[CritiqueOutcome] = []
     transitions = 0
+    score_indexed_rounds = [_candidate_scores(record) for record in rounds]
+    score_candidates_by_round: list[dict[str, Mapping[str, Any]]] = []
+    for record in rounds:
+        candidates = record.get("candidates")
+        entries: dict[str, Mapping[str, Any]] = {}
+        if isinstance(candidates, Sequence) and not isinstance(candidates, (str, bytes)):
+            for candidate in candidates:
+                if isinstance(candidate, Mapping):
+                    candidate_id = str(candidate.get("candidateId") or "").strip()
+                    if candidate_id:
+                        entries[candidate_id] = candidate
+        score_candidates_by_round.append(entries)
+    score_outcomes: list[ScoreCritiqueOutcome] = []
+    score_transitions = 0
     for index in range(len(rounds) - 1):
         current, following = indexed_rounds[index], indexed_rounds[index + 1]
         for candidate_id, current_rows in current.items():
@@ -264,6 +381,37 @@ def build_diagnostic_reward_report(
                         harmed=delta < 0,
                     )
                 )
+        current_scores = score_indexed_rounds[index]
+        following_scores = score_indexed_rounds[index + 1]
+        for candidate_id, current_dims in current_scores.items():
+            following_dims = following_scores.get(candidate_id)
+            if following_dims is None:
+                continue
+            score_transitions += 1
+            for dimension, score_from in current_dims.items():
+                if score_from >= _SCORE_CRITIQUE_HEADROOM:
+                    continue
+                if dimension not in following_dims:
+                    continue
+                score_to = following_dims[dimension]
+                score_delta = score_to - score_from
+                score_outcomes.append(
+                    ScoreCritiqueOutcome(
+                        reviewer=_candidate_score_reviewer(
+                            rounds[index], score_candidates_by_round[index][candidate_id]
+                        ),
+                        candidate_id=candidate_id,
+                        dimension=dimension,
+                        from_round_index=index,
+                        to_round_index=index + 1,
+                        score_from=score_from,
+                        score_to=score_to,
+                        delta=score_delta,
+                        reward=max(0.0, score_delta),
+                        improved=score_delta > 0,
+                        harmed=score_delta < 0,
+                    )
+                )
 
     by_reviewer: dict[str, ReviewerDiagnosticSummary] = {}
     dimension_totals: dict[str, list[CritiqueOutcome]] = {}
@@ -273,19 +421,28 @@ def build_diagnostic_reward_report(
         dimension_totals.setdefault(outcome.dimension, []).append(outcome)
     for reviewer, reviewer_outcomes in reviewer_totals.items():
         by_reviewer[reviewer] = _summarize(reviewer, reviewer_outcomes)
-    by_dimension: dict[str, DimensionDiagnosticSummary] = {}
-    for dimension, dimension_outcomes in dimension_totals.items():
-        count = len(dimension_outcomes)
-        by_dimension[dimension] = DimensionDiagnosticSummary(
-            dimension=dimension,
-            critique_count=count,
-            improved_count=sum(1 for o in dimension_outcomes if o.improved),
-            harmed_count=sum(1 for o in dimension_outcomes if o.harmed),
-            mean_delta=(
-                sum(o.delta for o in dimension_outcomes) / count if count else 0.0
-            ),
-        )
+    by_dimension: dict[str, DimensionDiagnosticSummary] = {
+        dimension: _dimension_summary(dimension, dimension_outcomes)
+        for dimension, dimension_outcomes in dimension_totals.items()
+    }
     overall = _summarize("(overall)", outcomes) if outcomes else None
+
+    score_reviewer_totals: dict[str, list[ScoreCritiqueOutcome]] = {}
+    score_dimension_totals: dict[str, list[ScoreCritiqueOutcome]] = {}
+    for outcome in score_outcomes:
+        score_reviewer_totals.setdefault(outcome.reviewer, []).append(outcome)
+        score_dimension_totals.setdefault(outcome.dimension, []).append(outcome)
+    score_by_reviewer = {
+        reviewer: _summarize(reviewer, reviewer_outcomes)
+        for reviewer, reviewer_outcomes in score_reviewer_totals.items()
+    }
+    score_by_dimension = {
+        dimension: _dimension_summary(dimension, dimension_outcomes)
+        for dimension, dimension_outcomes in score_dimension_totals.items()
+    }
+    score_overall = (
+        _summarize("(overall)", score_outcomes) if score_outcomes else None
+    )
     return DiagnosticRewardReport(
         rounds_examined=len(rounds),
         candidate_transitions=transitions,
@@ -293,4 +450,9 @@ def build_diagnostic_reward_report(
         by_reviewer=by_reviewer,
         by_dimension=by_dimension,
         overall=overall,
+        score_outcomes=tuple(score_outcomes),
+        score_by_reviewer=score_by_reviewer,
+        score_by_dimension=score_by_dimension,
+        score_overall=score_overall,
+        score_candidate_transitions=score_transitions,
     )

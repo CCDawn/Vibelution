@@ -271,3 +271,85 @@ def test_wilson_lower_bound_sanity() -> None:
     assert _wilson_lower_bound(100, 100) > 0.9
     assert _wilson_lower_bound(0, 10) == 0.0
     assert _wilson_lower_bound(1, 1) < 0.5
+
+
+def _score_round(candidates: list[dict], roles: dict | None = None) -> dict:
+    return {
+        "roundId": "round-fixture",
+        "status": "closed",
+        "roles": roles or {},
+        "candidates": candidates,
+    }
+
+
+def _score_candidate(candidate_id: str, scores: dict, reviewed_by: str = "") -> dict:
+    payload: dict = {"candidateId": candidate_id, "scores": scores}
+    if reviewed_by:
+        payload["reviewedBy"] = reviewed_by
+    return payload
+
+
+def test_score_lane_improvement_and_harm() -> None:
+    rounds = [
+        _score_round(
+            [
+                _score_candidate("c1", {"novelty": 0.3, "feasibility": 0.9}, "agent-a"),
+                _score_candidate("c2", {"novelty": 0.5}),
+            ]
+        ),
+        _score_round(
+            [
+                _score_candidate("c1", {"novelty": 0.8, "feasibility": 0.7}, "agent-a"),
+                _score_candidate("c2", {"novelty": 0.5}),
+            ]
+        ),
+    ]
+    report = build_diagnostic_reward_report(rounds)
+    assert report.score_candidate_transitions == 2
+    # c1 novelty(+0.5)、c1 feasibility(-0.2)、c2 novelty(0.0, 0.5 有改进空间) 共三条批评样本。
+    assert len(report.score_outcomes) == 3
+    by_dimension = report.score_by_dimension
+    assert by_dimension["novelty"].improved_count == 1
+    assert by_dimension["feasibility"].harmed_count == 1
+    assert report.score_overall is not None
+    # (+0.5 - 0.2 + 0.0) / 3 = 0.1
+    assert abs(report.score_overall.mean_delta - 0.1) < 1e-9
+
+
+def test_score_lane_full_score_dimension_not_critique() -> None:
+    rounds = [
+        _score_round([_score_candidate("c1", {"novelty": 1.0})]),
+        _score_round([_score_candidate("c1", {"novelty": 0.4})]),
+    ]
+    report = build_diagnostic_reward_report(rounds)
+    assert report.score_candidate_transitions == 1
+    assert report.score_outcomes == ()
+    assert report.score_overall is None
+
+
+def test_score_lane_reviewer_fallback_chain() -> None:
+    rounds = [
+        _score_round(
+            [_score_candidate("c1", {"novelty": 0.3})],
+            roles={"reflection": "agent-role"},
+        ),
+        _score_round([_score_candidate("c1", {"novelty": 0.6})]),
+    ]
+    report = build_diagnostic_reward_report(rounds)
+    assert report.score_outcomes[0].reviewer == "agent-role"
+    assert set(report.score_by_reviewer) == {"agent-role"}
+
+
+def test_score_lane_unknown_dimension_fails_closed() -> None:
+    rounds = [_score_round([_score_candidate("c1", {"charm": 0.5})])]
+    with pytest.raises(ContractValidationError):
+        build_diagnostic_reward_report(rounds)
+
+
+def test_score_lane_missing_next_round_dimension_skips() -> None:
+    rounds = [
+        _score_round([_score_candidate("c1", {"novelty": 0.3, "feasibility": 0.4})]),
+        _score_round([_score_candidate("c1", {"novelty": 0.6})]),
+    ]
+    report = build_diagnostic_reward_report(rounds)
+    assert [o.dimension for o in report.score_outcomes] == ["novelty"]
