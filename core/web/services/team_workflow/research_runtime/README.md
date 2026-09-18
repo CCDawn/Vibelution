@@ -85,6 +85,8 @@ Command transaction (WorkflowCommandService)
 | `real_domain_ports.py` | 生产 DomainPorts：binding 解析 / 预算 reserve+settle / 真实 task |
 | `real_readiness_context.py` | 生产 DomainReadinessContext：冻结 input snapshot + 领域查询 |
 | `runtime_factory.py` | composition root：`build_workflow_runtime(...)` |
+| `hypothesis_first_chain.py` | 假说链命令/会议/自动推进入口；公共导入保持在此 |
+| `hypothesis_first_chain_store.py` | 假说链 JSONL 账本、scope lock、错误类型 |
 
 ## T5 收口要点（P1 审查项）
 
