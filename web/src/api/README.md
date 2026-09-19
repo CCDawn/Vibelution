@@ -57,6 +57,7 @@
 | `teamKnowledge.ts` | Team workflow knowledge ingestion (`/api/teams/.../knowledge-ingestion`); distinct from `knowledge.ts` |
 | `teamMemberMessages.ts` | Team member messages |
 | `teamResearchOps.ts` | Team research ops |
+| `teamBundles.ts` | `/api/teams/{id}/bundle`, `/api/team-bundles/import` |
 | `teams.ts` | `/api/teams/*` |
 | `teamWorkflow.ts` | Team workflow orchestration |
 | `tools.ts` | `/api/tools/*` |
