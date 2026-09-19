@@ -166,6 +166,8 @@ powershell -ExecutionPolicy Bypass -File scripts/install_windows.ps1
 
 Open **Vibelution Launcher** from the desktop after installation. The first launch prepares external configuration files; follow the [model configuration guide](docs/ops/config/INDEX.md) to set up models and credentials.
 
+On macOS or Linux, follow the platform guides ([macOS](docs/guides/install-macos.md) · [Linux](docs/guides/install-linux.md)) to start the workbench from a terminal; the browser workbench carries the same features.
+
 **Start building around a research question:**
 
 1. Create agents and configure their roles, models, prompts, and required tools.
@@ -173,7 +175,7 @@ Open **Vibelution Launcher** from the desktop after installation. The first laun
 3. Provide the question, available sources, and this round's objective, then work through sessions, team discussions, and the research workflow.
 4. Inspect member messages, stage artifacts, and review feedback before deciding on the next research direction.
 
-[Windows installation](docs/guides/install-windows.md) · [Development and contributing](CONTRIBUTING.md) · [Linux deployment reference](docs/ops/linux-bootstrap.md)
+[Windows installation](docs/guides/install-windows.md) · [macOS installation](docs/guides/install-macos.md) · [Linux installation](docs/guides/install-linux.md) · [Development and contributing](CONTRIBUTING.md) · [Linux deployment reference](docs/ops/linux-bootstrap.md)
 
 The workbench runs locally, using models you configure. Cloud model requests are sent to the selected provider and may incur fees; credentials and runtime configuration live outside the repository.
 

@@ -1,5 +1,7 @@
 # Windows 安装指南（最终用户）
 
+其他平台：[macOS](install-macos.md) · [Linux](install-linux.md)
+
 目标：用尽量少的步骤在本机打开 Vibelution 工作台。
 
 ## 你需要什么
