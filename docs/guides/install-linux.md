@@ -26,7 +26,17 @@ sudo apt install -y python3.12 python3.12-venv nodejs npm git
 
 ## 安装
 
+### 一键安装（推荐）
+
 在终端进入项目目录后执行：
+
+```sh
+bash scripts/install_posix.sh
+```
+
+脚本会检查依赖、创建 `.venv`、安装 Python 依赖、安装前端依赖并构建、激活项目 git hooks，并还原 npm 可能改写的 `package-lock.json`。可选参数：`--start`（装完自动启动）、`--skip-frontend-build`、`--skip-frontend-install`。幂等，可重复执行。
+
+### 手动安装
 
 ```sh
 # 1) Python 虚拟环境与依赖
@@ -41,7 +51,7 @@ npm run build
 cd ..
 ```
 
-> `npm install` 可能改写 `web/package-lock.json`（npm 版本间的元数据格式差异）。启动器要求 git 工作树干净，若启动被拒，先还原：`git checkout -- web/package-lock.json`。
+> `npm install` 可能改写 `web/package-lock.json`（npm 版本间的元数据格式差异）。启动器要求 git 工作树干净，若启动被拒，先还原：`git checkout -- web/package-lock.json`（一键脚本会自动处理）。
 
 ## 启动与停止
 
