@@ -153,3 +153,127 @@ def test_evidence_trail_cache_serves_repeated_reads_and_invalidates(tmp_path: Pa
     # Store changed -> recompute.
     chain.candidate_evidence_trail("t", "SCI-001")
     assert list_calls["count"] == 2
+
+
+# ---------------------------------------------------------------------------
+# true-append primitives: parity, torn-line tolerance, compaction races
+# ---------------------------------------------------------------------------
+
+
+def test_append_record_output_is_byte_identical_to_whole_file_append(tmp_path: Path) -> None:
+    """The locked true append must produce exactly the old algorithm's bytes."""
+    from core.web.services.team_workflow.storage_durability import append_record
+
+    records = [
+        {"b": 1, "a": "plain"},
+        {"unicode": "会议纪要·候选假说", "n": 2},
+        {"nested": {"z": [1, 2, {"k": "v"}], "y": None}},
+        {},
+    ]
+    new_store = tmp_path / "new.jsonl"
+    old_store = tmp_path / "old.jsonl"
+    for record in records:
+        append_record(new_store, record)
+        # The previous whole-file algorithm, verbatim.
+        import json as _json
+        import os as _os
+        import tempfile as _tempfile
+
+        line = _json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+        existing = old_store.read_text(encoding="utf-8") if old_store.exists() else ""
+        fd, name = _tempfile.mkstemp(prefix=".old.", suffix=".tmp", dir=tmp_path)
+        with _os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(existing)
+            handle.write(line)
+        _os.replace(name, old_store)
+    assert new_store.read_bytes() == old_store.read_bytes()
+
+
+def test_append_record_scales_with_line_not_file(tmp_path: Path) -> None:
+    """Appending to a multi-megabyte store must not rewrite the file.
+
+    The whole-file append rewrote the store per record; the true append
+    must complete 2000 appends against a 5 MB store in a bounded time that
+    a rewrite-per-append could not meet (5 MB x 2000 rewrites >> budget).
+    """
+    from core.web.services.team_workflow.storage_durability import append_record
+
+    store = tmp_path / "big.jsonl"
+    filler = {"pad": "x" * 512}
+    for _ in range(10_000):  # ~5 MB
+        append_record(store, filler)
+    size_before = store.stat().st_size
+    assert size_before > 4_000_000
+
+    import time as _time
+
+    started = _time.monotonic()
+    for index in range(2_000):
+        append_record(store, {"i": index})
+    elapsed = _time.monotonic() - started
+    # 2000 O(line) appends with fsync land well under 30s; 2000 whole-file
+    # rewrites of a 5 MB store would need minutes of pure IO.
+    assert elapsed < 30.0
+    assert store.stat().st_size > size_before
+    records = read_jsonl_tolerant(store)
+    assert len(records) == 12_000
+
+
+def test_torn_trailing_line_survives_appends_and_quarantine(tmp_path: Path) -> None:
+    """A crash-torn last line quarantines on read; later appends stay healthy."""
+    from core.web.services.team_workflow.storage_durability import append_record
+
+    store = tmp_path / "torn.jsonl"
+    append_record(store, {"ok": 1})
+    with open(store, "a", encoding="utf-8") as handle:
+        handle.write('{"torn": "trunc')  # no newline, invalid JSON tail
+
+    records = read_jsonl_tolerant(store)
+    assert records == [{"ok": 1}]
+    append_record(store, {"ok": 2})
+    records = read_jsonl_tolerant(store)
+    assert records == [{"ok": 1}, {"ok": 2}]
+
+
+def test_transform_records_does_not_lose_racing_append(tmp_path: Path) -> None:
+    """Compaction via transform_records cannot drop a concurrent append."""
+    from core.web.services.team_workflow.storage_durability import (
+        append_record,
+        transform_records,
+    )
+
+    store = tmp_path / "race.jsonl"
+    for index in range(50):
+        append_record(store, {"i": index})
+    worker = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            _WORKER_SCRIPT.format(
+                root=str(Path(__file__).resolve().parents[1]),
+                store=str(store),
+                count=20,
+                worker=99,
+            ),
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    # Dedupe-compaction in a tight loop while the racer appends.  Each
+    # transform locks read+rewrite, so a racer record either landed before
+    # a read (kept by the identity transform) or appends after a rewrite
+    # (kept on disk).  Losing rows is structurally impossible.
+    import time as _time
+
+    deadline = _time.monotonic() + 5.0
+    while worker.poll() is None and _time.monotonic() < deadline:
+        transform_records(store, lambda rows: rows)
+        _time.sleep(0.01)
+    _, stderr = worker.communicate(timeout=60)
+    assert worker.returncode == 0, stderr.decode("utf-8", "replace")
+
+    records = read_jsonl_tolerant(store)
+    racer_indexes = sorted(
+        r["index"] for r in records if r.get("worker") == 99
+    )
+    assert racer_indexes == list(range(20))
