@@ -49,7 +49,7 @@ type BindingDraft = {
 };
 
 const DEFAULT_DRAFT: BindingDraft = {
-  homeLocationId: "CN-SHANGHAI",
+  homeLocationId: "",
   lifeIdentityKind: "student",
   autonomyLevel: "autonomous",
   proactiveMessagesEnabled: true,
@@ -59,6 +59,12 @@ const DEFAULT_DRAFT: BindingDraft = {
   quietStart: "23:00",
   quietEnd: "08:00",
 };
+
+export function lifeOriginNeedsSetup(binding: AgentPluginBinding | null | undefined): boolean {
+  // Legacy enabled Companions may predate city selection. Enabling alone is
+  // not proof of an established origin; never require disable/re-enable.
+  return binding?.lifeWorld?.setupState !== "ready" && !binding?.homeLocation?.locationId;
+}
 
 function draftFromBinding(binding: AgentPluginBinding | null | undefined): BindingDraft {
   return {
@@ -317,7 +323,9 @@ export function AgentVirtualHumanPluginPanel({ agentId, lang }: { agentId: strin
   });
   const pending = bindingMutation.isPending;
   const enabled = Boolean(binding?.enabled);
-  const enableBlocked = !enabled && (
+  const originNeedsSetup = lifeOriginNeedsSetup(binding);
+  const originLocked = !originNeedsSetup;
+  const enableBlocked = (
     !draft.homeLocationId
     || locationsQuery.isPending
     || locationsQuery.isError
@@ -366,8 +374,8 @@ export function AgentVirtualHumanPluginPanel({ agentId, lang }: { agentId: strin
             <p>{lang === "zh" ? "生活起点" : "Life origin"}</p>
             <strong>{lang === "zh" ? "她住在哪里，以什么身份生活" : "Where she lives and who she is"}</strong>
           </div>
-          <VStatusChip tone={enabled ? "success" : "warning"}>
-            {enabled ? (lang === "zh" ? "已建立" : "Established") : (lang === "zh" ? "启用前必选" : "Required")}
+          <VStatusChip tone={originNeedsSetup ? "warning" : "success"}>
+            {originNeedsSetup ? (lang === "zh" ? "待补齐" : "Setup needed") : (lang === "zh" ? "已选择" : "Selected")}
           </VStatusChip>
         </div>
         <div className={styles.setupGrid}>
@@ -376,7 +384,7 @@ export function AgentVirtualHumanPluginPanel({ agentId, lang }: { agentId: strin
             <VSelect
               aria-label={lang === "zh" ? "居住城市" : "Home city"}
               selectedKey={draft.homeLocationId}
-              isDisabled={pending || enabled || locationsQuery.isPending || locationsQuery.isError}
+              isDisabled={pending || originLocked || locationsQuery.isPending || locationsQuery.isError}
               options={(locationsQuery.data ?? []).map((location) => ({
                 id: location.locationId,
                 label: `${location.countryName} · ${location.cityName}`,
@@ -392,7 +400,7 @@ export function AgentVirtualHumanPluginPanel({ agentId, lang }: { agentId: strin
             <VSelect
               aria-label={lang === "zh" ? "身份类型" : "Life identity"}
               selectedKey={draft.lifeIdentityKind}
-              isDisabled={pending || enabled}
+              isDisabled={pending || originLocked}
               options={[
                 { id: "student", label: lang === "zh" ? "学生" : "Student" },
                 { id: "employee", label: lang === "zh" ? "上班族" : "Employee" },
@@ -410,8 +418,10 @@ export function AgentVirtualHumanPluginPanel({ agentId, lang }: { agentId: strin
         <p className={styles.setupHint}>
           {locationsQuery.isError
             ? (lang === "zh" ? "城市列表暂不可用，暂时不能启用虚拟人生活。" : "The city list is unavailable, so Virtual Human Life cannot be enabled yet.")
-            : enabled
-              ? (lang === "zh" ? "城市和初始身份已进入她的生活世界；详细学校、单位、资产和作息可在人物聊天右栏确认。" : "The city and initial identity now anchor her life world. Confirm school, workplace, belongings, and routine from the companion chat rail.")
+            : !originNeedsSetup
+              ? (lang === "zh" ? "已选择城市和初始身份；请到人物聊天右栏查看生活档案，确认学校、单位、资产和作息。" : "City and initial identity selected. Review and confirm school, workplace, belongings, and routine in the companion chat rail.")
+              : enabled
+                ? (lang === "zh" ? "这个人物还没有生活起点。选择城市和身份后保存即可生成草案，无需先禁用；草案确认前不会成为正式生活档案。" : "This companion still needs a life origin. Select a city and identity, then save to create a draft without disabling the plugin. Facts become active only after confirmation.")
               : (lang === "zh" ? "启用后先生成可编辑草案；确认前不会把学校、单位、物品或金额当作既成事实。" : "Enabling creates an editable draft. School, workplace, belongings, and money are not treated as facts until confirmation.")}
         </p>
       </section>
@@ -501,6 +511,7 @@ export function AgentVirtualHumanPluginPanel({ agentId, lang }: { agentId: strin
             variant="primary"
             icon={<Save size={14} />}
             isPending={pending}
+            isDisabled={originNeedsSetup && enableBlocked}
             onPress={() => bindingMutation.mutate({ enabled: true, nextDraft: draft })}
           >
             {lang === "zh" ? "保存插件配置" : "Save plugin settings"}
@@ -510,7 +521,7 @@ export function AgentVirtualHumanPluginPanel({ agentId, lang }: { agentId: strin
           type="button"
           variant={enabled ? "danger" : "primary"}
           isPending={pending}
-          isDisabled={enableBlocked}
+          isDisabled={!enabled && enableBlocked}
           onPress={() => bindingMutation.mutate({ enabled: !enabled, nextDraft: draft })}
         >
           {enabled ? (lang === "zh" ? "禁用插件" : "Disable plugin") : (lang === "zh" ? "启用虚拟人生活" : "Enable Virtual Human Life")}

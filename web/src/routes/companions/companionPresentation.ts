@@ -13,16 +13,11 @@ export function companionInitials(companion: Pick<VirtualHumanCompanion, "agentC
 
 export function companionIdentity(companion: VirtualHumanCompanion): string {
   const world = companion.snapshot.lifeWorld;
-  const draftPayload = world?.draft?.payload;
-  const identity = world?.setupState === "ready"
-    ? world.facts.identities[0]
-    : draftPayload?.identity;
-  const affiliation = world?.setupState === "ready"
-    ? world.facts.affiliations[0]
-    : draftPayload?.affiliations[0];
+  // A draft is not a person fact until the operator confirms it.
+  const identity = world?.setupState === "ready" ? world.facts.identities[0] : undefined;
+  const affiliation = world?.setupState === "ready" ? world.facts.affiliations[0] : undefined;
   const cityName = String(
-    draftPayload?.homeLocation?.cityName
-    || companion.snapshot.binding?.homeLocation?.cityName
+    companion.snapshot.binding?.homeLocation?.cityName
     || companion.snapshot.environment?.location?.cityName
     || "",
   ).trim();
@@ -35,12 +30,12 @@ export function companionIdentity(companion: VirtualHumanCompanion): string {
     return structuredIdentity.join(" · ");
   }
   const profile = companion.personaProfile ?? {};
+  const personality = String(profile.personality || "").trim();
   const expertise = Array.isArray(profile.expertise)
     ? profile.expertise.filter(Boolean).slice(0, 2).join(" · ")
     : "";
   return String(
-    profile.identityNotes
-    || profile.personality
+    (personality && !isDefaultPersonaPersonality(personality) ? personality : "")
     || expertise
     || companion.agentCode
     || "独立生活中的虚拟人",
@@ -49,12 +44,42 @@ export function companionIdentity(companion: VirtualHumanCompanion): string {
 
 export function companionAbout(companion: VirtualHumanCompanion): string {
   const profile = companion.personaProfile ?? {};
-  return String(
-    profile.background
-    || profile.communicationStyle
-    || profile.collaborationPreference
-    || "她有自己的日程、心情和记忆，也会在合适的时候主动联系你。",
-  ).trim();
+  const background = String(profile.background || "").trim();
+  // Prompt rules are implementation guidance, not a user-facing biography.
+  if (background && !isDefaultPersonaBackground(background) && !isPromptRuleText(background)) return background;
+  return "她有自己的日程、心情和记忆，也会在合适的时候主动联系你。";
+}
+
+function isPromptRuleText(value: string): boolean {
+  return /(?:communication[_ ]?style|collaboration[_ ]?preference|沟通风格|协作偏好|提示词|系统指令)/i.test(value);
+}
+
+function isDefaultPersonaBackground(value: string): boolean {
+  return /^我是[^，。]+，一个独立存在的虚构人物。我会安排自己的生活、完成活动、形成日记，并在重要经历值得保留时积累长期记忆。$/.test(value);
+}
+
+function isDefaultPersonaPersonality(value: string): boolean {
+  return value === "有自己的判断、情绪和边界；温和但不盲从，会认真经营每天的生活。";
+}
+
+const LOCATION_LABELS: Record<string, { zh: string; en: string }> = {
+  home: { zh: "在家", en: "At home" },
+  house: { zh: "在家", en: "At home" },
+  campus: { zh: "在校园", en: "On campus" },
+  school: { zh: "在学校", en: "At school" },
+  university: { zh: "在大学", en: "At university" },
+  office: { zh: "在办公室", en: "At the office" },
+  workplace: { zh: "在工作地点", en: "At work" },
+  outdoors: { zh: "在户外", en: "Outdoors" },
+  park: { zh: "在公园", en: "At the park" },
+  cafe: { zh: "在咖啡馆", en: "At a cafe" },
+  street: { zh: "在街上", en: "On the street" },
+};
+
+export function companionLocationLabel(value: string | null | undefined, lang: "zh" | "en"): string {
+  const raw = String(value || "").trim();
+  if (!raw) return lang === "zh" ? "未记录" : "Not recorded";
+  return LOCATION_LABELS[raw.toLowerCase()]?.[lang] || raw;
 }
 
 export function companionReturnTarget(
@@ -122,6 +147,10 @@ const MOOD_LABELS: Record<string, { zh: string; en: string }> = {
   focused: { zh: "专注", en: "Focused" },
   tired: { zh: "有些疲惫", en: "A little tired" },
   sad: { zh: "低落", en: "Low" },
+  bright: { zh: "愉悦", en: "Bright" },
+  low: { zh: "低落", en: "Low" },
+  neutral: { zh: "平常", en: "Neutral" },
+  surprised: { zh: "惊讶", en: "Surprised" },
 };
 
 const MOOD_SYMBOLS: Record<string, string> = {
@@ -131,11 +160,15 @@ const MOOD_SYMBOLS: Record<string, string> = {
   focused: "🧐",
   tired: "😴",
   sad: "😔",
+  bright: "🌞",
+  low: "😔",
+  neutral: "🙂",
+  surprised: "😮",
 };
 
 export function lifeMoodLabel(snapshot: VirtualHumanSnapshot, lang: "zh" | "en"): string {
   const mood = String(snapshot.state?.mood?.label || "calm").trim().toLowerCase();
-  return MOOD_LABELS[mood]?.[lang] || mood || (lang === "zh" ? "平静" : "Calm");
+  return MOOD_LABELS[mood]?.[lang] || (lang === "zh" ? "平静" : "Calm");
 }
 
 export function lifeMoodSymbol(snapshot: VirtualHumanSnapshot): string {

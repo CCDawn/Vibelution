@@ -3,11 +3,14 @@ import { describe, expect, it } from "vitest";
 import type { VirtualHumanCompanion } from "../../api/types";
 import {
   companionReturnTarget,
+  companionAbout,
+  companionLocationLabel,
   companionIdentity,
   currentLifeActivity,
   currentLifeActivityLabel,
   formatCompanionLocalTime,
   lifeMoodSymbol,
+  lifeMoodLabel,
   upcomingLifeActivities,
 } from "./companionPresentation";
 
@@ -126,6 +129,52 @@ describe("companion presentation", () => {
       ...companion.snapshot,
       state: { ...companion.snapshot.state!, mood: { ...companion.snapshot.state!.mood, label: "sad" } },
     })).toBe("😔");
+  });
+
+  it("translates every backend mood key without leaking internal keys", () => {
+    for (const [key, label] of [["bright", "愉悦"], ["low", "低落"], ["neutral", "平常"], ["surprised", "惊讶"]] as const) {
+      expect(lifeMoodLabel({ ...companion.snapshot, state: { ...companion.snapshot.state!, mood: { ...companion.snapshot.state!.mood, label: key } } }, "zh")).toBe(label);
+    }
+    expect(lifeMoodLabel({ ...companion.snapshot, state: { ...companion.snapshot.state!, mood: { ...companion.snapshot.state!.mood, label: "future_internal_key" } } }, "zh")).toBe("平静");
+  });
+
+  it("maps known location codes while preserving custom person-authored places", () => {
+    expect(companionLocationLabel("home", "zh")).toBe("在家");
+    expect(companionLocationLabel("school", "zh")).toBe("在学校");
+    expect(companionLocationLabel("上海的住处", "zh")).toBe("上海的住处");
+  });
+
+  it("does not present prompt rules as biography and keeps real background text", () => {
+    expect(companionAbout({ ...companion, personaProfile: { communicationStyle: "请始终保持简短" } })).toContain("自己的日程");
+    expect(companionAbout({ ...companion, personaProfile: { background: "她在上海长大，喜欢夜跑。", communicationStyle: "请始终保持简短" } })).toBe("她在上海长大，喜欢夜跑。");
+    expect(companionAbout({ ...companion, displayName: "洛天依", personaProfile: { background: "我是洛天依，一个独立存在的虚构人物。我会安排自己的生活、完成活动、形成日记，并在重要经历值得保留时积累长期记忆。" } })).toContain("自己的日程");
+  });
+
+  it("does not use the virtual-human default behavior as a person identity", () => {
+    expect(companionIdentity({
+      ...companion,
+      personaProfile: {
+        personality: "有自己的判断、情绪和边界；温和但不盲从，会认真经营每天的生活。",
+        expertise: [],
+      },
+    })).toBe("nora");
+  });
+
+  it("does not promote an unconfirmed draft identity into confirmed identity", () => {
+    expect(companionIdentity({
+      ...companion,
+      personaProfile: { identityNotes: "草案中的身份规则", personality: "安静、直接" },
+      snapshot: {
+        ...companion.snapshot,
+        lifeWorld: {
+          schemaVersion: 1,
+          setupState: "draft",
+          revision: 1,
+          draft: { payload: { identity: { roleTitle: "草案学生", stage: "大二" }, affiliations: [], homeLocation: { cityName: "草案城市" } } } as never,
+          facts: { identities: [], affiliations: [], routines: [], items: [], accounts: [], recurringRules: [] },
+        },
+      },
+    })).toBe("安静、直接");
   });
 
   it("uses one human-readable fallback for sleeping, resting, and unscheduled time", () => {

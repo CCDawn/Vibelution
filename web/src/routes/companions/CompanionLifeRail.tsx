@@ -34,6 +34,7 @@ import { VButton, VStateSurface, VStatusChip, VTabs } from "../../components/vui
 import {
   currentLifeActivity,
   currentLifeActivityLabel,
+  companionLocationLabel,
   formatLifeTime,
   lifeMoodLabel,
   lifeMoodSymbol,
@@ -693,8 +694,8 @@ export function CompanionLifeRail({
   const activeAffectCount = causal?.affect?.activeEpisodeIds?.length ?? 0;
   const locationStatus = companion?.snapshot.state?.locationStatus ?? "stationary";
   const locationLabel = locationStatus === "moving" && companion?.snapshot.state?.movingTo
-    ? `${companion.snapshot.state.currentLocation} → ${companion.snapshot.state.movingTo}`
-    : (companion?.snapshot.state?.currentLocation || (lang === "zh" ? "未记录" : "Not recorded"));
+    ? `${companionLocationLabel(companion.snapshot.state.currentLocation, lang)} → ${companionLocationLabel(companion.snapshot.state.movingTo, lang)}`
+    : companionLocationLabel(companion?.snapshot.state?.currentLocation, lang);
   const locationSource = companion?.snapshot.state?.locationSource;
   const memoryQueriesEnabled = state === "ready" && Boolean(companion) && activeTab === "memory";
   const todayEventsQuery = useQuery({

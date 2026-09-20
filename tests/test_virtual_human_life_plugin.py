@@ -590,6 +590,50 @@ def test_disable_invalidates_revision_without_deleting_life_data(
     assert service.snapshot("agent-a")["state"] == before
 
 
+@pytest.mark.parametrize("delivery_kind", ["proactive", "followup", "burst_continuation"])
+def test_proactive_turn_origin_survives_state_truncation_and_matches_only_current_turn(
+    service: VirtualHumanLifeService, delivery_kind: str,
+) -> None:
+    from core.prompt_manager.assembly_contract import PromptDecision, PromptSegment
+    from core.prompt_manager.assembly_resolver import PromptAssemblyContext, PromptSectionResolver
+
+    service.set_binding("agent-a", enabled=True, expected_version=0)
+    service.store.append_jsonl("agent-a", "proactive/deliveries.jsonl", {
+        "turnId": "proactive-current", "status": "delivering", "triggerId": "trigger-a",
+        "deliveryKind": delivery_kind,
+    })
+    segment = service.build_prompt_segments(
+        "agent-a", session_id="session-agent-a", run_id="proactive-current",
+    )[1]
+    assert segment["block"].startswith("## Companion Turn Origin: internal_proactive")
+    assert "本轮没有新的用户消息" in segment["block"][:500]
+    if delivery_kind in {"followup", "burst_continuation"}:
+        assert "上一条回复的自然延续" in segment["block"][:500]
+    else:
+        assert "根据生活事件主动联系用户" in segment["block"][:500]
+
+    # Exercise the real budget resolver without changing native assembly policy.
+    oversized = PromptSegment.from_internal_dict({**segment, "block": segment["block"] + "生活经历" * 8_000})
+    result = PromptSectionResolver().resolve([oversized], PromptAssemblyContext(context_window=20_000))
+    selected = result.segments[0]
+    assert selected.decision == PromptDecision.TRUNCATED
+    assert "本轮没有新的用户消息" in selected.content
+    assert "不询问用户是否发空了" in selected.content
+
+    other = service.build_prompt_segments("agent-a", run_id="another-user-turn")[1]
+    assert "## Companion Turn Origin" not in other["block"]
+    assert service.build_prompt_segments("agent-b", run_id="proactive-current") == []
+
+
+def test_reserved_proactive_attempt_does_not_mark_a_turn_as_admitted(service: VirtualHumanLifeService) -> None:
+    service.set_binding("agent-a", enabled=True, expected_version=0)
+    service.store.append_jsonl("agent-a", "proactive/deliveries.jsonl", {
+        "turnId": "not-admitted", "status": "reserved", "deliveryKind": "proactive",
+    })
+    state = service.build_prompt_segments("agent-a", run_id="not-admitted")[1]
+    assert "## Companion Turn Origin" not in state["block"]
+
+
 def test_prompt_and_tool_bundle_require_enabled_binding_and_policy_intersection(
     service: VirtualHumanLifeService,
 ) -> None:
@@ -606,6 +650,7 @@ def test_prompt_and_tool_bundle_require_enabled_binding_and_policy_intersection(
     assert segments[1]["trust"] == "derived_runtime"
     assert "agent-a" not in segments[0]["block"]
     assert 'action="record_reply"' in segments[0]["block"]
+    assert "本轮没有新的用户输入" in segments[0]["block"]
 
     visible = service.filter_tool_names(
         "agent-a",

@@ -7,6 +7,7 @@ import { CompanionPortrait } from "./CompanionPortrait";
 import {
   formatCompanionLocalTime,
   companionReturnTarget,
+  companionLocationLabel,
   currentLifeActivityLabel,
   lifeMoodLabel,
   lifeMoodSymbol,
@@ -38,7 +39,7 @@ export function CompanionPersonRail({
       ? (lang === "zh" ? "人物状态载入失败" : "Failed to load person")
       : (lang === "zh" ? "这个人物当前不可进入" : "This person is unavailable");
   const activityLabel = companion ? currentLifeActivityLabel(companion.snapshot, lang) : "";
-  const locationLabel = companion?.snapshot.state?.currentLocation || (lang === "zh" ? "未记录" : "Not recorded");
+  const locationLabel = companionLocationLabel(companion?.snapshot.state?.currentLocation, lang);
   const relationshipLabel = companion?.snapshot.state?.relationshipSummary || (lang === "zh" ? "慢慢熟悉" : "Getting closer");
   const localTime = companion ? formatCompanionLocalTime(companion.snapshot, lang) : "--:--";
   return (
