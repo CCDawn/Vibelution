@@ -110,6 +110,7 @@ from core.mental_model_flags import mental_model_enabled_override
 from core.orchestration.output_boundary import (
     sanitize_assistant_thought_delta_text,
     sanitize_assistant_thought_text,
+    sanitize_assistant_visible_delta_text,
     sanitize_assistant_visible_text,
 )
 from core.orchestration.cache_diagnostics import compact_repeated_metadata_text
@@ -889,6 +890,7 @@ from core.web.services.session.runtime_glue import (
     _root_session_id_for_conversations,
     _sandbox_terminal_result_facts,
     _sanitize_message_content,
+    _sanitize_message_delta_content,
     _sanitize_thought_delta_text,
     _sanitize_thought_text,
     _select_existing_active_task_for_update,

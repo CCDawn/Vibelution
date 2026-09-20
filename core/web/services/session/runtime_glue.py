@@ -2005,6 +2005,15 @@ def _sanitize_message_content(role: str, content: Any) -> str:
     return s.sanitize_assistant_visible_text(text)
 
 
+def _sanitize_message_delta_content(role: str, content: Any) -> str:
+    """Sanitize one streamed assistant delta without trimming token whitespace."""
+    s = _service()
+    text = str(content or "")
+    if str(role or "").strip().lower() != "assistant":
+        return text
+    return s.sanitize_assistant_visible_delta_text(text)
+
+
 def _sanitize_thought_delta_text(text: Any) -> str:
     s = _service()
     return s.sanitize_assistant_thought_delta_text(text)

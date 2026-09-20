@@ -1785,7 +1785,7 @@ def _ensure_session_ui_capture_hooks(ui: Any) -> None:
             session_id = str(context.get("sessionId") or "").strip()
             if not isinstance(capture, SessionTurnCapture) or not session_id:
                 return
-            cleaned = s._sanitize_message_content("assistant", text)
+            cleaned = s._sanitize_message_delta_content("assistant", text)
             if cleaned:
                 # Worker liveness heartbeat (throttled inside the helper): a
                 # long response stream otherwise leaves the work-run updatedAt
@@ -1797,9 +1797,7 @@ def _ensure_session_ui_capture_hooks(ui: Any) -> None:
                 )
                 capture.close_latest_thought_boundary()
                 previous = str(capture.content or "")
-                if done:
-                    next_content = cleaned
-                elif previous and cleaned.startswith(previous):
+                if previous and cleaned.startswith(previous):
                     next_content = cleaned
                 else:
                     next_content = f"{previous}{cleaned}" if previous else cleaned

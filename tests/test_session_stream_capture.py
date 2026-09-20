@@ -124,6 +124,28 @@ def test_text_batcher_done_flushes_response(monkeypatch) -> None:
     assert "streamed assistant text" in str(published[-1].get("content") or "")
 
 
+def test_stream_response_preserves_delta_whitespace_and_newlines(monkeypatch) -> None:
+    capture = stream_capture.SessionTurnCapture(session_id="cap-whitespace", turn_id="turn-whitespace")
+    published: list[dict] = []
+    ui = SimpleNamespace(
+        stream_response=lambda *_args, **_kwargs: None,
+        clear_response_stream=lambda: None,
+        stream_thought=lambda *_args, **_kwargs: None,
+        clear_thought_stream=lambda: None,
+        set_pet_mental_state=lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr("core.ui.get_ui", lambda: ui)
+    monkeypatch.setattr(session_service, "_set_session_live_output", lambda session_id, **kwargs: published.append({"sessionId": session_id, **kwargs}))
+
+    with stream_capture._capture_session_ui_stream("cap-whitespace", capture):
+        ui.stream_response("Hello", done=False)
+        ui.stream_response(" world", done=False)
+        ui.stream_response("\nnext line", done=True)
+
+    assert capture.content == "Hello world\nnext line"
+    assert published[-1]["content"] == "Hello world\nnext line"
+
+
 def test_tool_start_with_explicit_turn_identity_survives_thread_boundary(monkeypatch) -> None:
     capture = stream_capture.SessionTurnCapture(session_id="cap-s3", turn_id="cap-t3")
     published: list[dict] = []
