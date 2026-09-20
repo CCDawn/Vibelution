@@ -807,3 +807,90 @@ def test_v2_projection_defaults_deepseek_prompt_cache_to_automatic() -> None:
 
     assert model["prompt_cache"]["mode"] == "automatic"
     assert profile["prompt_cache"]["mode"] == "automatic"
+
+
+def test_v2_profile_provider_id_derived_from_model_ref_prefix() -> None:
+    """A model_ref-only profile must not keep the phantom default provider id.
+
+    The LLMProfile.provider_id default is "default", but the providers table
+    usually has no "default" entry; before the derivation this combination was
+    a latent bad reference that only exploded at discover_model time.
+    """
+    public_config = _v2_config()
+    public_config["llm"]["profiles"]["pixel_only"] = {"model_ref": "pixel_relay/gpt-5.6-luna"}
+
+    app = AppConfig.model_validate(public_config)
+    profile = app.llm.profiles["pixel_only"]
+    assert profile.provider_id == "pixel_relay"
+    assert app.llm.get_provider(profile.provider_id).provider_id == "pixel_relay"
+
+
+def test_v2_explicit_provider_id_is_not_overridden_by_model_ref() -> None:
+    public_config = _v2_config()
+    public_config["llm"]["profiles"]["pinned"] = {
+        "model_ref": "pixel_relay/gpt-5.6-luna",
+        "provider_id": "pixel_relay",
+    }
+
+    app = AppConfig.model_validate(public_config)
+    assert app.llm.profiles["pinned"].provider_id == "pixel_relay"
+
+
+def test_v2_dangling_fallback_reference_fails_closed() -> None:
+    public_config = _v2_config()
+    public_config["llm"]["profiles"]["primary"]["fallback"] = "backup_typo"
+
+    with pytest.raises(ValueError) as exc_info:
+        AppConfig.model_validate(public_config)
+    assert "fallback references unknown profile: backup_typo" in str(exc_info.value)
+
+
+def test_v2_self_referencing_fallback_fails_closed() -> None:
+    public_config = _v2_config()
+    public_config["llm"]["profiles"]["primary"]["fallback"] = "primary"
+
+    with pytest.raises(ValueError) as exc_info:
+        AppConfig.model_validate(public_config)
+    assert "must not reference itself" in str(exc_info.value)
+
+
+def test_v2_unknown_provider_reference_fails_closed() -> None:
+    public_config = _v2_config()
+    public_config["llm"]["profiles"]["broken"] = {
+        "model": "some-model",
+        "provider_id": "no_such_provider",
+    }
+
+    with pytest.raises(ValueError) as exc_info:
+        AppConfig.model_validate(public_config)
+    assert "provider_id references unknown provider: no_such_provider" in str(exc_info.value)
+
+
+def test_v2_reference_integrity_enforced_on_config_apply_path() -> None:
+    """The apply-time validator (config_service -> validate_llm_public_config)
+    must reject dangling references before the config is written, not wait for
+    the next typed-model load on restart."""
+    from config.llm_security import validate_llm_public_config
+
+    # validate_llm_public_config takes the public TOML shape (credential_ref),
+    # not the normalized runtime shape.
+    base = copy.deepcopy(_v2_config())
+
+    dangling = copy.deepcopy(base)
+    dangling["llm"]["profiles"]["primary"]["fallback"] = "ghost"
+    with pytest.raises(ValueError, match="fallback references unknown profile: ghost"):
+        validate_llm_public_config(dangling)
+
+    unknown_provider = copy.deepcopy(base)
+    unknown_provider["llm"]["profiles"]["broken"] = {
+        "model": "some-model",
+        "provider_id": "no_such_provider",
+    }
+    with pytest.raises(ValueError, match="provider_id references unknown provider: no_such_provider"):
+        validate_llm_public_config(unknown_provider)
+
+    model_ref_derived = copy.deepcopy(base)
+    model_ref_derived["llm"]["profiles"]["pixel_only"] = {
+        "model_ref": "pixel_relay/gpt-5.6-luna",
+    }
+    validate_llm_public_config(model_ref_derived)

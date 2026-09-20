@@ -639,6 +639,38 @@ class LLMConfig(BaseModel):
         for profile_id, profile in self.profiles.items():
             if not profile.profile_id:
                 profile.profile_id = profile_id
+        # model_ref 型 profile（"provider/model"）未显式声明 provider_id 时，
+        # 从 ref 前缀推导。否则字段默认值 "default" 在 providers 表中通常不
+        # 存在，成为只在 discover_model 才炸的潜伏坏引用。
+        for profile in self.profiles.values():
+            if "provider_id" in profile.model_fields_set:
+                continue
+            model_ref = str(getattr(profile, "model_ref", "") or "").strip()
+            if "/" not in model_ref:
+                continue
+            ref_provider = model_ref.split("/", 1)[0].strip()
+            if ref_provider and ref_provider in self.providers:
+                profile.provider_id = ref_provider
+        # 引用完整性：fallback / provider_id 是跨 profile、跨表的声明式引用。
+        # 运行时（get_profile/get_provider）虽 fail-loud，但坏引用若拖到主路由
+        # 重试耗尽后的切换点才炸，排障时会误判为备用路由自身故障——必须在
+        # 配置加载（含 operator config draft→apply）阶段就拒绝。
+        for profile_id, profile in self.profiles.items():
+            fallback_target = str(getattr(profile, "fallback", "") or "").strip()
+            if fallback_target:
+                if fallback_target == profile_id:
+                    raise ValueError(
+                        f"llm.profiles.{profile_id}.fallback must not reference itself"
+                    )
+                if fallback_target not in self.profiles:
+                    raise ValueError(
+                        f"llm.profiles.{profile_id}.fallback references unknown profile: {fallback_target}"
+                    )
+            provider_ref = str(getattr(profile, "provider_id", "") or "").strip()
+            if provider_ref and provider_ref not in self.providers:
+                raise ValueError(
+                    f"llm.profiles.{profile_id}.provider_id references unknown provider: {provider_ref}"
+                )
         return self
 
     def get_role_profile_id(self, role: str = "primary") -> str:

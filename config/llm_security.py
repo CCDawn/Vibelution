@@ -5,7 +5,7 @@ from __future__ import annotations
 import ipaddress
 import re
 import socket
-from typing import Any
+from typing import Any, Dict
 from urllib.parse import urlparse
 
 
@@ -336,6 +336,53 @@ def validate_llm_public_config(public_config: dict[str, Any], *, context: str = 
             env_name = str(profile.get("api_key_env", "") or "").strip()
             if env_name:
                 validate_llm_api_key_env(env_name, context=f"{context}.llm.profiles.{profile_id}.api_key_env")
+        _validate_llm_profile_reference_integrity(llm, profiles, context=context)
+
+
+def _validate_llm_profile_reference_integrity(
+    llm: Dict[str, Any],
+    profiles: Dict[str, Any],
+    *,
+    context: str,
+) -> None:
+    """Cross-table reference checks for fallback / provider_id declarations.
+
+    Must mirror the typed-model rules in config.models.LLMConfig.ensure_defaults:
+    a dangling fallback or provider reference has to fail at config-apply time,
+    not surface as a mid-run "missing profile/provider" crash after the primary
+    route exhausted its retry budget.
+    """
+
+    provider_ids = {
+        str(provider_id)
+        for provider_id, item in (llm.get("providers", {}) or {}).items()
+        if isinstance(item, dict)
+    }
+    for profile_id, profile in profiles.items():
+        if not isinstance(profile, dict):
+            continue
+        fallback_target = str(profile.get("fallback", "") or "").strip()
+        if fallback_target:
+            if fallback_target == str(profile_id):
+                raise ValueError(
+                    f"{context}.llm.profiles.{profile_id}.fallback must not reference itself"
+                )
+            if fallback_target not in profiles:
+                raise ValueError(
+                    f"{context}.llm.profiles.{profile_id}.fallback references unknown profile: {fallback_target}"
+                )
+        model_ref = str(profile.get("model_ref", "") or "").strip()
+        provider_ref = str(profile.get("provider_id", "") or "").strip()
+        if "/" in model_ref:
+            # Same derivation as the typed model: an undeclared provider_id on a
+            # model_ref profile resolves from the ref prefix, never the phantom
+            # "default".
+            ref_provider = model_ref.split("/", 1)[0].strip()
+            provider_ref = ref_provider or provider_ref
+        if provider_ref and provider_ref not in provider_ids:
+            raise ValueError(
+                f"{context}.llm.profiles.{profile_id}.provider_id references unknown provider: {provider_ref}"
+            )
 
 
 def _coerce_probe_timeout_value(value: Any, default: int) -> int:

@@ -117,7 +117,16 @@ def test_projection_carries_the_declaration_for_unconfigured_profiles() -> None:
 def test_dangling_declaration_fails_closed_during_graph_validation() -> None:
     payload = _llm_section()
     payload["profiles"]["primary"]["fallback"] = "missing_route"
-    config = validate_canonical_llm_payload(payload)
+    # Reference integrity now fails closed at canonical validation time (typed
+    # LLMConfig.ensure_defaults), before the graph builder ever runs.
+    with pytest.raises(CanonicalLLMConfigError):
+        validate_canonical_llm_payload(payload)
+
+    # The graph builder keeps its own independent fallback_profile_not_found
+    # defence: inject the dangling reference past validation and confirm it is
+    # still rejected there.
+    config = validate_canonical_llm_payload(_llm_section())
+    config.profiles["primary"].fallback = "missing_route"
     with pytest.raises(LLMGraphError) as exc:
         EffectiveLLMGraphBuilder().build(
             config, fallback_profile_ids=config.declared_fallback_profile_ids()
