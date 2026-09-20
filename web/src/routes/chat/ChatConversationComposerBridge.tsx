@@ -139,13 +139,10 @@ export function buildConversationComposerBridgeState(
 ): ChatConversationComposerBridgeState {
   const hasSession = Boolean(input.sessionId);
   const isEditingMessage = Boolean(input.editTargetMessageId);
-  // A requested stop ends the turn for the composer immediately: the user can
-  // queue the next message while the worker is still confirming the stop.
-  const actionMode = input.sessionStopping
-    ? "send"
-    : input.sessionBusy || input.submitPending
-      ? "stop"
-      : "send";
+  // Keep the stop affordance visible until the server confirms a terminal
+  // snapshot. This makes the click feedback explicit and prevents a pending
+  // submit from looking like a new-message spinner.
+  const actionMode = input.sessionBusy || input.submitPending || input.sessionStopping ? "stop" : "send";
   const pending = actionMode === "stop"
     ? input.stopPending || input.sessionStopping
     : input.submitPending;
@@ -156,7 +153,7 @@ export function buildConversationComposerBridgeState(
   const hasReferences = input.references.length > 0;
   const actionDisabled = !hasSession || (
     actionMode === "stop"
-      ? input.sessionStopping
+      ? input.sessionStopping || input.stopPending
       : input.submitPending || (!hasDraftContent && !hasAttachments && !hasReferences)
   );
   const placeholder = !hasSession

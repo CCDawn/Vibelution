@@ -16,6 +16,7 @@ import {
 
 function mutationStub<TVariables>(
   mutate: (variables: TVariables) => void,
+  overrides: Record<string, unknown> = {},
 ) {
   return {
     mutate,
@@ -24,6 +25,7 @@ function mutationStub<TVariables>(
       return {};
     },
     isPending: false,
+    ...overrides,
   } as ChatComposerTurnMutations[keyof ChatComposerTurnMutations];
 }
 
@@ -192,5 +194,186 @@ describe("useChatComposerSubmitActions stop intent", () => {
       sessionId: "session-1",
       turnId: "turn-2",
     });
+  });
+
+  it("keeps a deferred stop scoped across a session switch until its late acceptance arrives", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const stopMutate = vi.fn();
+    const sessionOnePending = baseOptions(queryClient, stopMutate, {
+      activeSessionId: "session-1",
+      activeTurnId: "optimistic-submit-1",
+      detail: runningDetail(),
+      submitTurnMutation: mutationStub(vi.fn(), {
+        isPending: true,
+        variables: { sessionId: "session-1", clientSubmissionId: "submission-1" },
+      }),
+    });
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(<Host options={sessionOnePending} />);
+    });
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="stop"]')?.click();
+    });
+
+    await act(async () => {
+      root?.render(<Host options={baseOptions(queryClient, stopMutate, {
+        activeSessionId: "session-2",
+        activeTurnId: "turn-new-session",
+        detail: runningDetail({ id: "session-2", activeTurnId: "turn-new-session" }),
+        submitTurnMutation: mutationStub(vi.fn()),
+      })} />);
+    });
+    expect(stopMutate).not.toHaveBeenCalled();
+
+    await act(async () => {
+      root?.render(<Host options={baseOptions(queryClient, stopMutate, {
+        activeSessionId: "session-1",
+        activeTurnId: "turn-accepted-late",
+        detail: runningDetail({ activeTurnId: "turn-accepted-late" }),
+        submitTurnMutation: mutationStub(vi.fn(), {
+          data: {
+            accepted: true,
+            sessionId: "session-1",
+            turnId: "turn-accepted-late",
+            clientSubmissionId: "submission-1",
+          },
+          variables: { sessionId: "session-1", clientSubmissionId: "submission-1" },
+        }),
+      })} />);
+    });
+
+    expect(stopMutate).toHaveBeenCalledTimes(1);
+    expect(stopMutate).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: "session-1",
+      turnId: "turn-accepted-late",
+    }));
+  });
+
+  it("handles A's late acceptance after B submitted, even when the mutation observer only exposes B", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const stopMutate = vi.fn();
+    const sessionOnePending = baseOptions(queryClient, stopMutate, {
+      activeSessionId: "session-1",
+      activeTurnId: "optimistic-submit-1",
+      detail: runningDetail(),
+      submitTurnMutation: mutationStub(vi.fn(), {
+        isPending: true,
+        variables: { sessionId: "session-1", clientSubmissionId: "submission-a" },
+      }),
+    });
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(<Host options={sessionOnePending} />);
+    });
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="stop"]')?.click();
+    });
+
+    // B is now the active observer result. A's result is deliberately absent
+    // from the observer-shaped props below; the cache still retains both
+    // mutation instances and reports each completion independently.
+    await act(async () => {
+      root?.render(<Host options={baseOptions(queryClient, stopMutate, {
+        activeSessionId: "session-2",
+        activeTurnId: "turn-b",
+        detail: runningDetail({ id: "session-2", activeTurnId: "turn-b" }),
+        submitTurnMutation: mutationStub(vi.fn(), {
+          data: {
+            accepted: true,
+            sessionId: "session-2",
+            turnId: "turn-b",
+            clientSubmissionId: "submission-b",
+          },
+          variables: { sessionId: "session-2", clientSubmissionId: "submission-b" },
+        }),
+      })} />);
+    });
+
+    const executeAccepted = (variables: { sessionId: string; clientSubmissionId: string }, turnId: string) =>
+      queryClient.getMutationCache().build(queryClient, {
+        mutationFn: async () => ({
+          accepted: true,
+          sessionId: variables.sessionId,
+          turnId,
+          clientSubmissionId: variables.clientSubmissionId,
+        }),
+      }).execute(variables);
+
+    await act(async () => {
+      await executeAccepted({ sessionId: "session-2", clientSubmissionId: "submission-b" }, "turn-b");
+      await executeAccepted({ sessionId: "session-1", clientSubmissionId: "submission-a" }, "turn-a");
+    });
+
+    expect(stopMutate).toHaveBeenCalledTimes(1);
+    expect(stopMutate).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: "session-1",
+      turnId: "turn-a",
+    }));
+  });
+
+  it("drops a deferred stop when its submit fails, so a later turn is not stopped", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const stopMutate = vi.fn();
+    const submitError = new Error("submit failed");
+    const pendingSubmit = mutationStub(vi.fn(), {
+      isPending: true,
+      variables: { sessionId: "session-1", clientSubmissionId: "submission-failed" },
+    });
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(<Host options={baseOptions(queryClient, stopMutate, {
+        submitTurnMutation: pendingSubmit,
+        activeTurnId: "optimistic-submit-1",
+        detail: runningDetail(),
+      })} />);
+    });
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="stop"]')?.click();
+    });
+    await act(async () => {
+      root?.render(<Host options={baseOptions(queryClient, stopMutate, {
+        activeSessionId: "session-2",
+        activeTurnId: "turn-2",
+        detail: runningDetail({ id: "session-2", activeTurnId: "turn-2" }),
+        submitTurnMutation: mutationStub(vi.fn()),
+      })} />);
+    });
+    await act(async () => {
+      root?.render(<Host options={baseOptions(queryClient, stopMutate, {
+        activeSessionId: "session-2",
+        activeTurnId: "turn-2",
+        detail: runningDetail({ id: "session-2", activeTurnId: "turn-2" }),
+        submitTurnMutation: mutationStub(vi.fn(), {
+          error: submitError,
+          variables: { sessionId: "session-1", clientSubmissionId: "submission-failed" },
+        }),
+      })} />);
+    });
+    await act(async () => {
+      root?.render(<Host options={baseOptions(queryClient, stopMutate, {
+        activeSessionId: "session-2",
+        activeTurnId: "turn-2",
+        detail: runningDetail({ id: "session-2", activeTurnId: "turn-2" }),
+        submitTurnMutation: mutationStub(vi.fn(), {
+          data: {
+            accepted: true,
+            sessionId: "session-1",
+            turnId: "late-old-turn",
+            clientSubmissionId: "submission-failed",
+          },
+          variables: { sessionId: "session-1", clientSubmissionId: "submission-failed" },
+        }),
+      })} />);
+    });
+    expect(stopMutate).not.toHaveBeenCalled();
   });
 });

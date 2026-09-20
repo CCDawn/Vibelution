@@ -4233,6 +4233,16 @@ export function ConversationView({
 
   const composerActions = (
     <div className={styles.composerActionStack}>
+      {resolvedActionMode === "stop" && composerPending ? (
+        <span
+          className={styles.composerStopPendingFeedback}
+          role="status"
+          aria-live="polite"
+          data-testid="composer-stop-pending-feedback"
+        >
+          {resolvedPendingLabel}
+        </span>
+      ) : null}
       {!runningGuidanceActionsEnabled || showQueuePrimary ? (
         <VButton
           className={primaryActionClassName}
