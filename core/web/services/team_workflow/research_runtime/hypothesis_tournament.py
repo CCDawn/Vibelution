@@ -172,3 +172,57 @@ def validate_tournament_artifact(artifact: Mapping[str, Any]) -> List[str]:
     if not isinstance(artifact.get("rounds"), list):
         problems.append("rounds must be a list")
     return problems
+
+
+def _outcomes_from_comparisons(comparisons: Sequence[Mapping[str, Any]]) -> List[Dict[str, str]]:
+    """Adapt executor comparisons (left_wins/right_wins/tie) to Elo inputs."""
+
+    adapted: List[Dict[str, str]] = []
+    for record in comparisons:
+        if not isinstance(record, Mapping):
+            continue
+        left = _normalize_candidate_id(record.get("leftCandidateId"))
+        right = _normalize_candidate_id(record.get("rightCandidateId"))
+        outcome = str(record.get("outcome") or "").strip().lower()
+        if not left or not right or left == right:
+            continue
+        if outcome == "left_wins":
+            adapted.append({"kind": "win", "winner": left, "loser": right})
+        elif outcome == "right_wins":
+            adapted.append({"kind": "win", "winner": right, "loser": left})
+        elif outcome == "tie":
+            adapted.append({"kind": "tie", "a": left, "b": right})
+    return adapted
+
+
+def tournament_from_comparisons(
+    comparisons: Sequence[Mapping[str, Any]],
+    *,
+    tournament_id: str,
+    created_at: str,
+    k_factor: float = DEFAULT_K_FACTOR,
+) -> Dict[str, Any]:
+    """Fold one hypothesis-review round's comparisons into an Elo artifact.
+
+    ``build_tournament_artifact`` re-normalizes raw ``winnerId`` records, so
+    the already-normalized internal outcomes are folded here directly.
+    """
+
+    outcomes = _outcomes_from_comparisons(comparisons)
+    ratings = apply_pairwise_round({}, outcomes, k_factor=k_factor)
+    return {
+        "schemaVersion": TOURNAMENT_ARTIFACT_CONTRACT_VERSION,
+        "tournamentId": _normalize_candidate_id(tournament_id),
+        "kFactor": float(k_factor),
+        "initialRating": DEFAULT_INITIAL_RATING,
+        "rounds": [
+            {
+                "round": 1,
+                "outcomeCount": len(outcomes),
+                "ratings": {key: round(value, 2) for key, value in sorted(ratings.items())},
+            }
+        ],
+        "totalOutcomes": len(outcomes),
+        "ranking": rank_candidates(ratings),
+        "createdAt": str(created_at or "").strip(),
+    }
