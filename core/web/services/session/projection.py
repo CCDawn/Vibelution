@@ -389,23 +389,29 @@ def get_session_detail(
     # sibling agent read of a candidate child session.
     assert_candidate_session_read(conversation, requester)
 
-    from . import directory_bridge
-
-    directory_bridge.sync_conversation_record(conversation, touch_recency=False)
-
     with s._RUNNING_SESSIONS_LOCK:
         active_turn_id = str(s._SESSION_ACTIVE_TURN_IDS.get(normalized_session_id) or "").strip()
         session_running = normalized_session_id in s._RUNNING_SESSION_IDS
+    # Light running polls already have the live turn state in memory. Skip the
+    # directory write and follow-up persisted-state reload for that path while
+    # preserving idle recovery and full-detail behavior.
+    light_running_poll = not include_secondary_lists and session_running
+    if include_secondary_lists:
+        from . import directory_bridge
+
+        directory_bridge.sync_conversation_record(conversation, touch_recency=False)
+
     s._reconcile_stale_session_ledger(
         normalized_session_id,
         active_turn_id=active_turn_id if session_running else "",
         reason="detail_loaded_after_restart",
     )
-    conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id) or conversation
+    if not light_running_poll:
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id) or conversation
     target = s._load_conversation_detail_target(
         normalized_session_id,
         payload={"conversations": [conversation]},
-        repair=True,
+        repair=not light_running_poll,
         persist_session_row=True,
         agent_by_id=agent_by_id,
         lightweight=window_requested,
