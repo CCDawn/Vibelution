@@ -13,7 +13,11 @@
 
 import type { ConversationMessage, SessionDetail } from "../../api/types";
 import { forgetSessionTimelineScroll } from "../../components/conversation/conversationSessionScrollMemory";
-import { mergeSessionDetailMessageWindow } from "../chatSessionState";
+import {
+  clearEditResubmitProtection,
+  mergeSessionDetailMessageWindow,
+  protectSessionDetailForEditResubmit,
+} from "../chatSessionState";
 
 const MAX_LAST_GOOD_SESSIONS = 12;
 const lastGoodBySessionId = new Map<string, SessionDetail>();
@@ -86,21 +90,42 @@ export function mergeStickySessionDetailPaint(
   if (!sticky || sticky.id !== live.id) {
     return { ...live, provisionalTranscript: undefined };
   }
+  const protection = sticky.editResubmitProtection;
+  const acknowledged = Boolean(
+    protection
+    && (live.messages ?? []).some((message) => (
+      String(message.id || "").trim() === protection.targetMessageId
+      && String(message.metadata?.clientSubmissionId ?? "").trim() === protection.clientSubmissionId
+      && message.metadata?.optimisticUserMessage !== true
+    )),
+  );
+  const guardedLive = protection && !acknowledged
+    ? protectSessionDetailForEditResubmit(
+      live,
+      protection,
+      sticky.messages?.find((message) => String(message.id || "").trim() === protection.targetMessageId),
+    ) ?? live
+    : live;
   // Prefer full window merge when both sides carry messageWindow metadata.
-  if (sticky.messageWindow && live.messageWindow) {
-    return {
-      ...mergeSessionDetailMessageWindow(sticky, live),
-      provisionalTranscript: undefined,
-    };
+  const merged = sticky.messageWindow && guardedLive.messageWindow
+    ? {
+        ...mergeSessionDetailMessageWindow(sticky, guardedLive),
+        provisionalTranscript: undefined,
+      }
+    : (() => {
+      const messages = mergeMessageLists(sticky.messages, guardedLive.messages);
+      return {
+        ...sticky,
+        ...guardedLive,
+        messages,
+        provisionalTranscript: undefined,
+        messageWindow: guardedLive.messageWindow ?? sticky.messageWindow,
+      };
+    })();
+  if (!protection || acknowledged) {
+    return clearEditResubmitProtection(merged) ?? merged;
   }
-  const messages = mergeMessageLists(sticky.messages, live.messages);
-  return {
-    ...sticky,
-    ...live,
-    messages,
-    provisionalTranscript: undefined,
-    messageWindow: live.messageWindow ?? sticky.messageWindow,
-  };
+  return protectSessionDetailForEditResubmit(merged, protection) ?? merged;
 }
 
 /** Store a hydrated detail for instant re-paint on tab return. */

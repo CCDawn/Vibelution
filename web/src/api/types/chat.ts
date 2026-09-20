@@ -1009,6 +1009,13 @@ export type SessionDetail = SessionSummary & {
    * Never set by the API; cleared when a real detail/select payload arrives.
    */
   provisionalTranscript?: boolean;
+  /** Client-only guard while an edit-resubmit replaces the active tail. */
+  editResubmitProtection?: {
+    targetMessageId: string;
+    clientSubmissionId: string;
+    baseLedgerSeq?: number;
+    supersededTurnId?: string;
+  } | null;
   /**
    * Select handoff (``Prefer: respond-async``): summary/control fields only,
    * empty ``messages``. The windowed GET/SSE stays the transcript authority,

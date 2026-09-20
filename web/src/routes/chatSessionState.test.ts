@@ -194,9 +194,9 @@ describe("chatSessionState", () => {
 
     expect(next?.status).toBe("running");
     expect(next?.currentPhase).toBe("running");
-    // Branch mode keeps the superseded tail visible until the authoritative
-    // snapshot arrives; the server drops it through the window reconcile.
-    expect(next?.messages).toHaveLength(4);
+    // The superseded tail is hidden at mutate time; the server remains the
+    // durable owner and will later provide the rebased authoritative branch.
+    expect(next?.messages).toHaveLength(1);
     expect(next?.messages[0]).toMatchObject({
       id: "session-live-message-1",
       role: "user",
@@ -207,8 +207,57 @@ describe("chatSessionState", () => {
         optimisticUserMessage: true,
       },
     });
-    expect(next?.messages.slice(1)).toEqual(detail.messages.slice(1));
-    expect(next?.messageWindow).toBe(detail.messageWindow);
+    expect(next?.editResubmitProtection).toMatchObject({
+      targetMessageId: "session-live-message-1",
+      clientSubmissionId: "submission-edit-1",
+    });
+    expect(next?.messageWindow).toMatchObject(detail.messageWindow ?? {});
+  });
+
+  it("does not let a stale detail merge resurrect an edit-resubmit tail", () => {
+    const original = makeDetail({
+      ledgerSeq: 10,
+      messages: [1, 2, 3].map((index) => ({
+        id: `session-live-message-${index}`,
+        role: index === 2 ? "assistant" : "user",
+        content: `message ${index}`,
+        metadata: index === 2 ? { turnId: "turn-old" } : undefined,
+      })),
+    });
+    const optimistic = applyOptimisticEditResubmit(original, {
+      messageId: "session-live-message-1",
+      content: "改写",
+      clientSubmissionId: "submission-edit-2",
+      supersededTurnId: "turn-old",
+    });
+    const stale = { ...original, ledgerSeq: 10 };
+    const merged = mergeSessionDetailMessageWindow(optimistic, stale);
+    expect(merged.messages.map((message) => message.id)).toEqual(["session-live-message-1"]);
+    expect(merged.editResubmitProtection?.clientSubmissionId).toBe("submission-edit-2");
+  });
+
+  it("releases edit protection only when the committed target carries the submission id", () => {
+    const original = makeDetail({
+      ledgerSeq: 10,
+      messages: [{ id: "session-live-message-1", role: "user", content: "旧" }],
+    });
+    const optimistic = applyOptimisticEditResubmit(original, {
+      messageId: "session-live-message-1",
+      content: "新",
+      clientSubmissionId: "submission-edit-3",
+    });
+    const committed = mergeSessionDetailMessageWindow(optimistic, {
+      ...optimistic,
+      ledgerSeq: 11,
+      messages: [{
+        id: "session-live-message-1",
+        role: "user",
+        content: "新",
+        metadata: { clientSubmissionId: "submission-edit-3" },
+      }],
+    });
+    expect(committed.editResubmitProtection).toBeUndefined();
+    expect(committed.messages[0]?.content).toBe("新");
   });
 
   it("keeps running status when edit target is missing without wiping history", () => {

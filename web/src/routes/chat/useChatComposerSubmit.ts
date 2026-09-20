@@ -450,6 +450,13 @@ export function useChatComposerTurnMutations({
       await queryClient.cancelQueries({ queryKey: sessionKey, exact: true });
       const previousDetail = queryClient.getQueryData<SessionDetail>(sessionKey);
       const createdAt = new Date().toISOString();
+      const targetIndex = previousDetail?.messages?.findIndex((message) => message.id === variables.messageId) ?? -1;
+      const supersededMessage = targetIndex >= 0
+        ? [...(previousDetail?.messages ?? [])]
+          .slice(targetIndex)
+          .find((message) => message.role === "assistant" && String(message.metadata?.turnId || "").trim())
+        : undefined;
+      const supersededTurnId = String(supersededMessage?.metadata?.turnId || "").trim() || undefined;
       setActiveTurnLayersBySession((current) =>
         setActiveTurnLayerForSession(
           current,
@@ -462,12 +469,14 @@ export function useChatComposerTurnMutations({
           }),
         )
       );
-      // Immediate truncate + rewrite (ChatGPT/Claude edit UX); snapshot for rollback.
+      // Immediately hide the superseded tail; the edit marker blocks stale
+      // detail/SSE/paint merges until the authoritative branch arrives.
       queryClient.setQueryData<SessionDetail>(sessionKey, (detailState) =>
         applyOptimisticEditResubmit(detailState, {
           messageId: variables.messageId,
           content: variables.content,
           clientSubmissionId: variables.clientSubmissionId,
+          supersededTurnId,
         }),
       );
       updateSessionSummaryCaches(queryClient, (sessions) =>
@@ -522,9 +531,14 @@ export function useChatComposerTurnMutations({
       const previousDetail = context && typeof context === "object" && "previousDetail" in context
         ? (context as { previousDetail?: SessionDetail }).previousDetail
         : undefined;
-      if (previousDetail) {
-        queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), previousDetail);
-      } else {
+      const currentDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(variables.sessionId));
+      const ownsPendingEdit = currentDetail?.editResubmitProtection?.clientSubmissionId === variables.clientSubmissionId;
+      if (previousDetail && ownsPendingEdit) {
+        queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), {
+          ...previousDetail,
+          editResubmitProtection: null,
+        });
+      } else if (!currentDetail || ownsPendingEdit) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.session(variables.sessionId), exact: true });
       }
       setActiveTurnLayersBySession((current) =>

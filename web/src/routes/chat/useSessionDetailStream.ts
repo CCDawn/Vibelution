@@ -46,6 +46,16 @@ type DesktopConversationNotifier = {
   ) => void;
 };
 
+export function shouldDropSupersededEditDelta(
+  protection: SessionDetail["editResubmitProtection"],
+  turnId: string | undefined,
+): boolean {
+  return Boolean(
+    protection?.supersededTurnId
+    && String(turnId || "").trim() === protection.supersededTurnId,
+  );
+}
+
 export type UseSessionDetailStreamOptions = {
   activeSessionId: string | null | undefined;
   sessionStreamShouldConnect: boolean;
@@ -184,6 +194,7 @@ export function useSessionDetailStream({
     let applyTimer: number | null = null;
     let lastAppliedAt = 0;
     let committedAssistantDeltaLayer: ActiveTurnLayerState | undefined = activeTurnLayersBySessionRef.current[streamSessionId];
+    let observedEditSubmissionId = "";
     const assistantDeltaScheduler = createSessionAssistantDeltaScheduler({
       nowMs: chatStreamPerformanceNowMs,
     });
@@ -218,6 +229,22 @@ export function useSessionDetailStream({
 
     const sessionStopIntentActive = () =>
       Boolean(queryClient.getQueryData<SessionDetail>(queryKeys.session(streamSessionId))?.stopRequested);
+
+    const syncEditResubmitGuard = () => {
+      const protection = queryClient.getQueryData<SessionDetail>(queryKeys.session(streamSessionId))?.editResubmitProtection;
+      const submissionId = String(protection?.clientSubmissionId || "").trim();
+      if (submissionId && submissionId !== observedEditSubmissionId) {
+        // A new edit replaces the local delta accumulator as well as the
+        // transcript tail; queued deltas from the superseded turn must not be
+        // appended to the new optimistic layer.
+        assistantDeltaScheduler.cancel();
+        committedAssistantDeltaLayer = activeTurnLayersBySessionRef.current[streamSessionId];
+        observedEditSubmissionId = submissionId;
+      } else if (!submissionId) {
+        observedEditSubmissionId = "";
+      }
+      return protection;
+    };
 
     const logStopFrozenDeltas = (droppedCount: number) => {
       if (sessionStreamStopFrozenLoggedRef.current[streamSessionId]) {
@@ -381,6 +408,7 @@ export function useSessionDetailStream({
     }
 
     function applyPendingAssistantDeltas(reason: "frame" | "close" | "final") {
+      syncEditResubmitGuard();
       if (assistantDeltaScheduler.pendingCount === 0 || disposed) {
         return;
       }
@@ -467,6 +495,11 @@ export function useSessionDetailStream({
       const stats = sessionStreamApplyStatsRef.current[streamSessionId] ?? { received: 0, applied: 0, dropped: 0 };
       stats.received += 1;
       sessionStreamApplyStatsRef.current[streamSessionId] = stats;
+      const editProtection = syncEditResubmitGuard();
+      if (shouldDropSupersededEditDelta(editProtection, payload.turnId)) {
+        stats.dropped += 1;
+        return;
+      }
       if (sessionStopIntentActive()) {
         stats.dropped += 1;
         logStopFrozenDeltas(1);
