@@ -707,13 +707,16 @@ describe("ConfigRoute layout contract", () => {
   it("supports Agent Center return links and section deep links", () => {
     expect(routeSource).toContain("useSearchParams");
     expect(routeSource).toContain("safeAgentCenterReturnToPath");
-    expect(routeSource).toContain("const lastRequestedSectionRef = useRef(\"\")");
+    expect(routeSource).toContain("const lastRequestedSelectionRef = useRef(\"\")");
     expect(routeSource).toContain("const requestedSectionId = String(searchParams.get(\"section\") || \"\").trim()");
     expect(routeSource).toContain("const returnToPath = safeAgentCenterReturnToPath(searchParams.get(\"returnTo\"))");
     expect(routeSource).toContain("const returnToLabel = searchParams.get(\"returnLabel\") === \"agents\" ? copy.returnToAgents : copy.returnToSource");
-    expect(routeSource).toContain("requestedSectionId !== lastRequestedSectionRef.current");
-    expect(routeSource).toContain("lastRequestedSectionRef.current = requestedSectionId");
-    expect(routeSource).toContain("setActiveGroupId(requestedGroup.id)");
+    expect(routeSource).toContain("requestedSelectionKey !== lastRequestedSelectionRef.current");
+    expect(routeSource).toContain("lastRequestedSelectionRef.current = requestedSelectionKey");
+    expect(routeSource).toContain("const requestedPageId = String(searchParams.get(\"page\") || \"\").trim()");
+    expect(routeSource).toContain("const requestedFocusSectionId = String(searchParams.get(\"focus\") || \"\").trim()");
+    expect(routeSource).toContain("buildConfigSettingsNavigationSearch(searchParams, groupId, pageId, focusSectionId)");
+    expect(routeSource).toContain("setActiveGroupId(requestedGroup?.id ?? \"\")");
     expect(routeSource).toContain("<VRouteLinkButton");
     expect(routeSource).toContain("className={styles.returnButton}");
     expect(routeSource).toContain("to={returnToPath}");

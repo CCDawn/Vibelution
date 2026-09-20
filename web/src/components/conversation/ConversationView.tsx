@@ -5173,7 +5173,7 @@ export function ConversationView({
           onDragLeave={handleComposerDragLeave}
           onDrop={handleComposerDrop}
         >
-          {composerError ? <p className={styles.composerError}>{composerError}</p> : null}
+          {composerError ? <p className={styles.composerError} role="alert">{composerError}</p> : null}
           {composerGuidance ? (
             <div className={styles.composerGuidance} role="status" aria-live="polite" data-composer-guidance>
               <span className={styles.composerGuidanceIcon} aria-hidden="true">i</span>

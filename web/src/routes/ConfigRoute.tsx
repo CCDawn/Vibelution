@@ -131,7 +131,11 @@ import {
   type ConfigSettingsGroupCopy,
   type ConfigSettingsGroupId,
 } from "./ConfigSettingsNavigation";
-import { buildConfigSettingsSearchIndex } from "./configSettingsSearch";
+import {
+  buildConfigSettingsNavigationSearch,
+  buildConfigSettingsSearchIndex,
+  resolveConfigSettingsFocus,
+} from "./configSettingsSearch";
 import { ConfigWorkspacePlaceholderPanel } from "./ConfigWorkspacePlaceholderPanel";
 
 /** Heavy settings sections — keep off Config shell first paint (R2). */
@@ -2051,7 +2055,7 @@ function ConfigSectionEditor({
   }
 
   return (
-    <VSurface as="section" id={`config-${section.id}`} className={sectionClassName} padding="none">
+    <VSurface as="section" id={`config-${section.id}`} tabIndex={-1} className={sectionClassName} padding="none">
       <div className={styles.sectionHeader}>
         <div className={styles.sectionHeaderMain}>
           <p className={styles.eyebrow}>{section.path}</p>
@@ -2203,7 +2207,9 @@ export function ConfigRoute() {
   const [searchParams] = useSearchParams();
   const contentViewportRef = useRef<HTMLDivElement | null>(null);
   const modelEditorRef = useRef<HTMLDivElement | null>(null);
-  const lastRequestedSectionRef = useRef("");
+  const lastRequestedSelectionRef = useRef("");
+  const lastFocusedSelectionRef = useRef("");
+  const pendingFocusSectionRef = useRef("");
   const providerDraftRequestRef = useRef<{
     publicConfig: PublicConfigShape;
     draftMeta: ConfigDraftMeta;
@@ -2300,6 +2306,8 @@ export function ConfigRoute() {
   const currentLanguage = getDraftLanguage(draftConfig, workspace?.language === "en" ? "en" : "zh");
   const copy = CONFIG_COPY[currentLanguage];
   const requestedSectionId = String(searchParams.get("section") || "").trim();
+  const requestedPageId = String(searchParams.get("page") || "").trim();
+  const requestedFocusSectionId = String(searchParams.get("focus") || "").trim();
   const returnToPath = safeAgentCenterReturnToPath(searchParams.get("returnTo"));
   const returnToLabel = searchParams.get("returnLabel") === "agents" ? copy.returnToAgents : copy.returnToSource;
   const formattedDraft = useMemo(
@@ -2424,14 +2432,28 @@ export function ConfigRoute() {
       setActivePageId("");
       return;
     }
-    const requestedGroup = settingsGroups.find((group) => group.id === requestedSectionId);
-    if (
-      requestedGroup
-      && requestedSectionId !== lastRequestedSectionRef.current
-    ) {
-      lastRequestedSectionRef.current = requestedSectionId;
-      setActiveGroupId(requestedGroup.id);
-      setActivePageId(requestedGroup.pages[0]?.id ?? "");
+    const requestedSelectionKey = `${requestedSectionId}:${requestedPageId}:${requestedFocusSectionId}`;
+    if (requestedSelectionKey !== lastRequestedSelectionRef.current) {
+      lastRequestedSelectionRef.current = requestedSelectionKey;
+      const requestedGroup = settingsGroups.find((group) => group.id === requestedSectionId)
+        ?? settingsGroups.find((group) => group.id === DEFAULT_CONFIG_SETTINGS_GROUP_ID)
+        ?? settingsGroups[0];
+      setActiveGroupId(requestedGroup?.id ?? "");
+      const requestedPage = requestedGroup?.pages.find((page) => page.id === requestedPageId);
+      setActivePageId(requestedPage?.id ?? requestedGroup?.pages[0]?.id ?? "");
+      const focusPage = requestedPage ?? requestedGroup?.pages[0];
+      if (requestedFocusSectionId && focusPage?.memberSectionIds.includes(requestedFocusSectionId)) {
+        setSectionUiState((current) => ({
+          ...current,
+          [requestedFocusSectionId]: resolveConfigSectionUiStateOnSelect(
+            current[requestedFocusSectionId],
+            defaultSectionUiState(requestedFocusSectionId),
+          ),
+        }));
+        pendingFocusSectionRef.current = requestedFocusSectionId;
+      } else {
+        pendingFocusSectionRef.current = "";
+      }
       return;
     }
     const currentGroup = settingsGroups.find((group) => group.id === activeGroupId)
@@ -2443,7 +2465,7 @@ export function ConfigRoute() {
     if (!currentGroup.pages.some((page) => page.id === activePageId)) {
       setActivePageId(currentGroup.pages[0]?.id ?? "");
     }
-  }, [activeGroupId, activePageId, requestedSectionId, settingsGroups]);
+  }, [activeGroupId, activePageId, requestedFocusSectionId, requestedPageId, requestedSectionId, settingsGroups]);
 
   const sectionMap = useMemo(() => {
     return new Map((workspace?.sections ?? []).map((section) => [section.id, section]));
@@ -2494,16 +2516,66 @@ export function ConfigRoute() {
     return Boolean(activePage?.memberSectionIds.includes(sectionId));
   }
 
+  function navigateSettingsSelection(groupId: ConfigSettingsGroupId, pageId: string, focusSectionId?: string) {
+    pendingFocusSectionRef.current = focusSectionId ?? "";
+    navigate({ search: buildConfigSettingsNavigationSearch(searchParams, groupId, pageId, focusSectionId) });
+  }
+
+  function focusSettingsSection(sectionId: string) {
+    pendingFocusSectionRef.current = sectionId;
+    window.requestAnimationFrame(() => {
+      const section = document.getElementById(`config-${sectionId}`);
+      if (!section || !isSectionVisible(sectionId)) return;
+      section.scrollIntoView({ behavior: "smooth", block: "start" });
+      section.focus({ preventScroll: true });
+      pendingFocusSectionRef.current = "";
+    });
+  }
+
+  useEffect(() => {
+    const focusSectionId = pendingFocusSectionRef.current || requestedFocusSectionId;
+    const focusDecision = resolveConfigSettingsFocus(
+      lastFocusedSelectionRef.current,
+      activeGroupId,
+      activePageId,
+      focusSectionId,
+    );
+    if (!focusSectionId) {
+      lastFocusedSelectionRef.current = focusDecision.nextKey;
+      return;
+    }
+    if (!isSectionVisible(focusSectionId) || !focusDecision.shouldFocus) return;
+    const frame = window.requestAnimationFrame(() => {
+      const section = document.getElementById(`config-${focusSectionId}`);
+      if (!section) return;
+      section.scrollIntoView({ behavior: "smooth", block: "start" });
+      section.focus({ preventScroll: true });
+      lastFocusedSelectionRef.current = focusDecision.nextKey;
+      pendingFocusSectionRef.current = "";
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeGroupId, activePageId, requestedFocusSectionId, activePage?.id]);
+
   function handleSelectGroup(groupId: ConfigSettingsGroupId) {
     const group = settingsGroups.find((candidate) => candidate.id === groupId);
+    const pageId = group?.pages[0]?.id ?? "";
     setActiveGroupId(groupId);
-    setActivePageId(group?.pages[0]?.id ?? "");
+    setActivePageId(pageId);
+    navigateSettingsSelection(groupId, pageId);
     contentViewportRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function handleNavigateSettings(groupId: ConfigSettingsGroupId, pageId: string) {
+  function handleNavigateSettings(groupId: ConfigSettingsGroupId, pageId: string, sectionId?: string) {
     setActiveGroupId(groupId);
     setActivePageId(pageId);
+    if (sectionId) {
+      setSectionUiState((current) => ({
+        ...current,
+        [sectionId]: resolveConfigSectionUiStateOnSelect(current[sectionId], defaultSectionUiState(sectionId)),
+      }));
+      focusSettingsSection(sectionId);
+    }
+    navigateSettingsSelection(groupId, pageId, sectionId);
     contentViewportRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -2513,6 +2585,7 @@ export function ConfigRoute() {
     for (const sectionId of page?.memberSectionIds ?? []) {
       updateSectionUiState(sectionId, resolveConfigSectionUiStateOnSelect(sectionUiState[sectionId], defaultSectionUiState(sectionId)));
     }
+    if (activeGroup?.id) navigateSettingsSelection(activeGroup.id, pageId);
     contentViewportRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   }
 

@@ -14,6 +14,31 @@ export type ConfigSettingsSearchDocument = ConfigSettingsSearchHit & {
   haystack: string;
 };
 
+export function buildConfigSettingsNavigationSearch(
+  current: URLSearchParams | string,
+  groupId: ConfigSettingsGroupId,
+  pageId: string,
+  focusSectionId?: string,
+): string {
+  const params = new URLSearchParams(current);
+  params.set("section", groupId);
+  params.set("page", pageId);
+  if (focusSectionId) params.set("focus", focusSectionId);
+  else params.delete("focus");
+  return `?${params.toString()}`;
+}
+
+export function resolveConfigSettingsFocus(
+  previousKey: string,
+  activeGroupId: string,
+  activePageId: string,
+  focusSectionId: string,
+): { nextKey: string; shouldFocus: boolean } {
+  if (!focusSectionId) return { nextKey: "", shouldFocus: false };
+  const nextKey = `${activeGroupId}:${activePageId}:${focusSectionId}`;
+  return { nextKey, shouldFocus: nextKey !== previousKey };
+}
+
 function normalizeSearchText(value: string): string {
   return value.trim().toLowerCase();
 }

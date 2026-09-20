@@ -77,6 +77,9 @@ function Harness({
     [sessionId]: draft,
   });
   const [sessionFollowupQueues] = useState(queues);
+  const [sessionImageAttachments, setSessionImageAttachments] = useState<Record<string, ComposerImageAttachment[]>>({
+    [sessionId]: imageAttachments,
+  });
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
   const actions = useChatComposerSubmitActions({
     queryClient,
@@ -96,14 +99,14 @@ function Harness({
         onErrors?.(value);
       }
     },
-    setSessionImageAttachments: () => undefined,
+    setSessionImageAttachments,
     setSessionReferenceAttachments: () => undefined,
     setSessionImageUploadPending: () => undefined,
     setSessionEditTargets: () => undefined,
     imageUploadInFlightRef,
     activeSessionId: sessionId,
     activeDraftEffective: draft,
-    activeImageAttachments: imageAttachments,
+    activeImageAttachments: sessionImageAttachments[sessionId] ?? [],
     activeReferenceAttachments: [],
     mentalModelEnabledForNextTurn: false,
     runtimeStatusEnabledForNextTurn: false,
@@ -139,6 +142,11 @@ function Harness({
       >
         add-image
       </button>
+      <output data-testid="images">{JSON.stringify((sessionImageAttachments[sessionId] ?? []).map((item) => item.filename))}</output>
+      <button type="button" data-testid="remove-image" onClick={() => {
+        const first = sessionImageAttachments[sessionId]?.[0];
+        if (first) actions.handleRemoveComposerAttachment(first.id);
+      }}>remove image</button>
       <button
         type="button"
         data-testid="add-reference"
@@ -296,6 +304,29 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
     });
 
     expect(errors["session-1"] ?? "").toBe("");
+  });
+
+  it("keeps both attachments when add is invoked twice in one act", async () => {
+    const { mutations } = createMutations();
+    await mount({ busy: true, draft: "", queues: {}, mutations });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="add-image"]')?.click();
+      container?.querySelector<HTMLButtonElement>('[data-testid="add-image"]')?.click();
+    });
+
+    expect(JSON.parse(container?.querySelector<HTMLOutputElement>('[data-testid="images"]')?.textContent ?? "[]")).toHaveLength(2);
+  });
+
+  it("does not restore a removed attachment when adding again in the same act", async () => {
+    const { mutations } = createMutations();
+    await mount({ busy: true, draft: "", queues: {}, mutations });
+    await act(async () => container?.querySelector<HTMLButtonElement>('[data-testid="add-image"]')?.click());
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="remove-image"]')?.click();
+      container?.querySelector<HTMLButtonElement>('[data-testid="add-image"]')?.click();
+    });
+    expect(JSON.parse(container?.querySelector<HTMLOutputElement>('[data-testid="images"]')?.textContent ?? "[]")).toHaveLength(1);
   });
 
   it("accepts references added while the turn is still running", async () => {

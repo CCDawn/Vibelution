@@ -119,4 +119,42 @@ describe("VCommandPalette", () => {
       expect(document.body.textContent).toContain("没有匹配项");
     });
   });
+
+  it("keeps keyboard selections rendered beyond the former result cap", async () => {
+    const list = Array.from({ length: 40 }, (_, index) => ({
+      id: String(index), group: "Tasks", label: `Task ${index}`, onRun: vi.fn(),
+    }));
+    await act(async () => root.render(
+      <VCommandPalette open onOpenChange={() => {}} items={list} maxVisible={7}
+        labels={{ searchPlaceholder: "Search", emptyTitle: "Empty", hint: "hint" }} />,
+    ));
+    const input = document.querySelector("input")!;
+    for (let index = 0; index < 35; index += 1) {
+      await act(async () => input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+      expect(document.querySelector('[data-active="true"]')?.textContent).toBe(`Task ${index + 1}`);
+    }
+    await act(async () => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(list[35].onRun).toHaveBeenCalledOnce();
+  });
+
+  it("runs the focused row and clamps selection when results shrink", async () => {
+    const list = items();
+    const render = (next: typeof list) => root.render(
+      <VCommandPalette open onOpenChange={() => {}} items={next}
+        labels={{ searchPlaceholder: "Search", emptyTitle: "Empty", hint: "hint" }} />,
+    );
+    await act(async () => render(list));
+    const row = document.querySelector<HTMLElement>('[data-index="2"]')!;
+    await act(async () => row.focus());
+    await act(async () => row.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(list[2].onRun).toHaveBeenCalledOnce();
+    await act(async () => row.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true })));
+    expect(document.activeElement?.getAttribute("data-index")).toBe("1");
+    await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(list[1].onRun).toHaveBeenCalledOnce();
+    await act(async () => render(list.slice(0, 1)));
+    expect(document.querySelector('[data-active="true"]')?.textContent).toContain(list[0].label);
+    await act(async () => document.querySelector("input")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(list[0].onRun).toHaveBeenCalledOnce();
+  });
 });

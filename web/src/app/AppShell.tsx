@@ -850,7 +850,14 @@ export function AppShell() {
     if (pathname.startsWith("/teams")) return t("navTeams");
     if (pathname.startsWith("/kernel")) return "Kernel";
     if (pathname.startsWith("/memory")) return t("navMemory");
+    if (pathname.startsWith("/agents/tools") || pathname.startsWith("/tools")) return t("navTools");
+    if (pathname.startsWith("/agents/skills") || pathname.startsWith("/skills")) return t("navSkills");
+    if (pathname.startsWith("/agents/prompts")) return t("navPrompts");
     if (pathname.startsWith("/agents")) return t("navAgents");
+    if (pathname.startsWith("/config")) return t("navConfig");
+    if (pathname.startsWith("/usage")) return t("navUsage");
+    if (pathname.startsWith("/logs")) return t("navLogs");
+    if (pathname.startsWith("/git")) return t("navGit");
     return t("appTitle");
   }, [location.pathname, t]);
   const handleReturnNavigation = useCallback(() => {

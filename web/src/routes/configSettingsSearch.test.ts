@@ -3,7 +3,12 @@ import { describe, expect, it } from "vitest";
 import type { ConfigEditorSection } from "../api/types";
 
 import { buildConfigSettingsGroups, type ConfigSettingsGroupCopy } from "./ConfigSettingsNavigation";
-import { buildConfigSettingsSearchIndex, searchConfigSettings } from "./configSettingsSearch";
+import {
+  buildConfigSettingsNavigationSearch,
+  buildConfigSettingsSearchIndex,
+  resolveConfigSettingsFocus,
+  searchConfigSettings,
+} from "./configSettingsSearch";
 
 const sections = [
   { id: "overview", title: "配置源", summary: "配置状态" },
@@ -42,6 +47,33 @@ const editorSections: ConfigEditorSection[] = [
 ];
 
 describe("configSettingsSearch", () => {
+  it("resets focus de-duplication when navigation leaves a focused section", () => {
+    const focused = resolveConfigSettingsFocus("", "runtime-context", "runtime-context", "context-compression");
+    expect(focused.shouldFocus).toBe(true);
+    const cleared = resolveConfigSettingsFocus(focused.nextKey, "models-profiles", "model-connection", "");
+    expect(cleared).toEqual({ nextKey: "", shouldFocus: false });
+    const revisited = resolveConfigSettingsFocus(cleared.nextKey, "runtime-context", "runtime-context", "context-compression");
+    expect(revisited.shouldFocus).toBe(true);
+  });
+
+  it("preserves return context while writing the selected page and focus section", () => {
+    const search = buildConfigSettingsNavigationSearch(
+      "returnTo=%2Fagents%3Fpane%3Dconfig&returnLabel=agents&focus=old",
+      "runtime-context",
+      "runtime-context",
+      "context-compression",
+    );
+    const params = new URLSearchParams(search);
+    expect(params.get("section")).toBe("runtime-context");
+    expect(params.get("page")).toBe("runtime-context");
+    expect(params.get("focus")).toBe("context-compression");
+    expect(params.get("returnLabel")).toBe("agents");
+
+    const withoutFocus = new URLSearchParams(buildConfigSettingsNavigationSearch(params, "models-profiles", "model-connection"));
+    expect(withoutFocus.get("focus")).toBeNull();
+    expect(withoutFocus.get("returnTo")).toBe("/agents?pane=config");
+  });
+
   it("jumps API Key and background queries to the owning settings page", () => {
     const groups = buildConfigSettingsGroups(sections, groupCopy, "zh");
     const documents = buildConfigSettingsSearchIndex({

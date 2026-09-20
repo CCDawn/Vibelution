@@ -126,7 +126,7 @@ type ConfigSettingsSidebarProps = {
   groups: ConfigSettingsGroup[];
   activeGroupId: string;
   onSelectGroup: (groupId: ConfigSettingsGroupId) => void;
-  onNavigate?: (groupId: ConfigSettingsGroupId, pageId: string) => void;
+  onNavigate?: (groupId: ConfigSettingsGroupId, pageId: string, sectionId?: string) => void;
   searchDocuments?: ConfigSettingsSearchDocument[];
   headerAction?: ReactNode;
 };
@@ -153,7 +153,7 @@ export function ConfigSettingsSidebar({
 
   function selectHit(hit: ConfigSettingsSearchHit) {
     if (onNavigate) {
-      onNavigate(hit.groupId, hit.pageId);
+      onNavigate(hit.groupId, hit.pageId, hit.sectionId);
     } else {
       onSelectGroup(hit.groupId);
     }

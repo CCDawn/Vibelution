@@ -299,26 +299,40 @@ export function mergeComposerAttachments(
     maxDocuments?: number;
   } = {},
 ) {
+  return mergeComposerAttachmentsWithRejections(existing, incoming, options).attachments;
+}
+
+export function mergeComposerAttachmentsWithRejections(
+  existing: ComposerImageAttachment[],
+  incoming: ComposerImageAttachment[],
+  options: {
+    maxTotal?: number;
+    maxImages?: number;
+    maxDocuments?: number;
+  } = {},
+) {
   const maxTotal = options.maxTotal ?? MAX_COMPOSER_IMAGE_ATTACHMENTS + MAX_COMPOSER_DOCUMENT_ATTACHMENTS;
-  const merged = [...existing, ...incoming].slice(0, maxTotal);
-  const imageCount = merged.filter((item) => item.kind !== "document").length;
-  const overflow = Math.max(0, imageCount - (options.maxImages ?? MAX_COMPOSER_IMAGE_ATTACHMENTS));
-  if (!overflow) {
-    return merged;
-  }
-  // Drop the newest image attachments that break the per-kind cap, keeping
-  // every document regardless of order.
-  let imagesToDrop = overflow;
+  const maxImages = options.maxImages ?? MAX_COMPOSER_IMAGE_ATTACHMENTS;
+  const maxDocuments = options.maxDocuments ?? MAX_COMPOSER_DOCUMENT_ATTACHMENTS;
+  let imageCount = 0;
+  let documentCount = 0;
+  const rejected: ComposerImageAttachment[] = [];
   const kept: ComposerImageAttachment[] = [];
-  for (let index = merged.length - 1; index >= 0; index -= 1) {
-    const item = merged[index];
-    if (item.kind !== "document" && imagesToDrop > 0) {
-      imagesToDrop -= 1;
+  for (const item of [...existing, ...incoming]) {
+    const atTotalLimit = kept.length >= maxTotal;
+    const atKindLimit = item.kind === "document" ? documentCount >= maxDocuments : imageCount >= maxImages;
+    if (atTotalLimit || atKindLimit) {
+      rejected.push(item);
       continue;
     }
-    kept.unshift(item);
+    kept.push(item);
+    if (item.kind === "document") {
+      documentCount += 1;
+    } else {
+      imageCount += 1;
+    }
   }
-  return kept;
+  return { attachments: kept, rejected };
 }
 
 export function resolveComposerSubmitGuard(options: {

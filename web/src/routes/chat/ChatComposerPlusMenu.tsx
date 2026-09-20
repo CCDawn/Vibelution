@@ -474,12 +474,11 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
             placeholder={lang === "zh" ? "搜索会话" : "Search sessions"}
             aria-label={lang === "zh" ? "搜索会话" : "Search sessions"}
           />
-          <div className={styles.referenceList} role="listbox" aria-label={lang === "zh" ? "可引用会话" : "Referenceable sessions"}>
+          <div className={styles.referenceList} role="group" aria-label={lang === "zh" ? "可引用会话" : "Referenceable sessions"}>
             {filteredReferences.map((option) => (
               <VButton
                 key={option.id}
                 type="button"
-                role="option"
                 className={styles.referenceOption}
                 variant="ghost"
                 onPress={() => {
@@ -520,16 +519,11 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
             placeholder={t("composerReferenceKnowledgeSearch")}
             aria-label={t("composerReferenceKnowledgeSearch")}
           />
-          <div
-            className={styles.referenceList}
-            role="listbox"
-            aria-label={t("composerReferenceKnowledgeTitle")}
-          >
+          <div className={styles.referenceList} role="group" aria-label={t("composerReferenceKnowledgeTitle")}>
             {filteredKnowledgeReferences.map((option) => (
               <VButton
                 key={option.id}
                 type="button"
-                role="option"
                 className={styles.referenceOption}
                 variant="ghost"
                 onPress={() => {

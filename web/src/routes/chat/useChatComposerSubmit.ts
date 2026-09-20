@@ -67,9 +67,8 @@ import {
   clearSessionImageAttachments,
   clearSessionReferenceAttachments,
   encodeUtf8Base64,
-  mergeComposerAttachments,
+  mergeComposerAttachmentsWithRejections,
   optimisticTurnIdForSubmission,
-  removeSessionImageAttachment,
   resolveComposerSubmitGuard,
   restoreSubmittedDraftIfComposerStillEmpty,
   sessionReferenceId,
@@ -926,6 +925,15 @@ export function useChatComposerSubmitActions({
 }: UseChatComposerSubmitActionsOptions): UseChatComposerSubmitActionsResult {
   const pendingStopAfterAcceptRef = useRef<DeferredStopIntent | null>(null);
   const previousSessionRef = useRef(activeSessionId);
+  const attachmentSnapshotRef = useRef<{ sessionId: string | null | undefined; attachments: ComposerImageAttachment[] }>({
+    sessionId: activeSessionId,
+    attachments: activeImageAttachments,
+  });
+  const lastAttachmentInputRef = useRef(activeImageAttachments);
+  if (attachmentSnapshotRef.current.sessionId !== activeSessionId || lastAttachmentInputRef.current !== activeImageAttachments) {
+    lastAttachmentInputRef.current = activeImageAttachments;
+    attachmentSnapshotRef.current = { sessionId: activeSessionId, attachments: activeImageAttachments };
+  }
 
   const handleComposerChange = useCallback((value: string) => {
     if (!activeSessionId) {
@@ -964,35 +972,56 @@ export function useChatComposerSubmitActions({
     const accepted = activeAgentImageInputUnsupported
       ? classifiedAccepted.filter((attachment) => attachment.kind !== "image")
       : classifiedAccepted;
-    const effectiveRejected = activeAgentImageInputUnsupported
-      ? [
-          ...rejected,
-          ...classifiedAccepted
-            .filter((attachment) => attachment.kind === "image")
-            .map((attachment) => attachment.filename),
-        ]
-      : rejected;
+    const unsupportedImageNames = activeAgentImageInputUnsupported
+      ? classifiedAccepted.filter((attachment) => attachment.kind === "image").map((attachment) => attachment.filename)
+      : [];
+    if (activeAgentImageInputUnsupported) {
+      classifiedAccepted
+        .filter((attachment) => attachment.kind === "image")
+        .forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
+    }
+    let capacityRejected: ComposerImageAttachment[] = [];
     if (accepted.length) {
+      const attachmentSnapshot = attachmentSnapshotRef.current.sessionId === activeSessionId
+        ? attachmentSnapshotRef.current.attachments
+        : activeImageAttachments;
+      const mergePreview = mergeComposerAttachmentsWithRejections(attachmentSnapshot, accepted, {
+        maxTotal: MAX_COMPOSER_IMAGE_ATTACHMENTS + MAX_COMPOSER_DOCUMENT_ATTACHMENTS,
+        maxImages: MAX_COMPOSER_IMAGE_ATTACHMENTS,
+        maxDocuments: MAX_COMPOSER_DOCUMENT_ATTACHMENTS,
+      });
+      capacityRejected = mergePreview.rejected.filter((attachment) => accepted.some((item) => item.id === attachment.id));
+      capacityRejected.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
+      attachmentSnapshotRef.current = { sessionId: activeSessionId, attachments: mergePreview.attachments };
       setSessionImageAttachments((current) => {
-        const existing = current[activeSessionId] ?? [];
         return {
           ...current,
-          [activeSessionId]: mergeComposerAttachments(existing, accepted, {
-            maxTotal: MAX_COMPOSER_IMAGE_ATTACHMENTS + MAX_COMPOSER_DOCUMENT_ATTACHMENTS,
-            maxImages: MAX_COMPOSER_IMAGE_ATTACHMENTS,
-            maxDocuments: MAX_COMPOSER_DOCUMENT_ATTACHMENTS,
-          }),
+          [activeSessionId]: mergePreview.attachments,
         };
       });
     }
+    const rejectedMessages = [
+      rejected.length
+        ? (lang === "zh" ? `格式或大小不支持：${rejected.join("、")}` : `type or size is unsupported: ${rejected.join(", ")}`)
+        : "",
+      unsupportedImageNames.length
+        ? (lang === "zh" ? `当前模型不支持图片：${unsupportedImageNames.join("、")}` : `images are unsupported by this model: ${unsupportedImageNames.join(", ")}`)
+        : "",
+      capacityRejected.length
+        ? (lang === "zh"
+          ? `数量超出上限：${capacityRejected.map((attachment) => attachment.filename).join("、")}`
+          : `attachment limit exceeded: ${capacityRejected.map((attachment) => attachment.filename).join(", ")}`)
+        : "",
+    ].filter(Boolean);
     setSessionComposerErrors((current) => ({
       ...current,
-      [activeSessionId]: effectiveRejected.length
-        ? (lang === "zh" ? "部分附件格式或大小不支持。" : "Some attachments were rejected by type or size.")
+      [activeSessionId]: rejectedMessages.length
+        ? (lang === "zh" ? `部分附件未添加（${rejectedMessages.join("；")}）` : `Some attachments were rejected (${rejectedMessages.join("; ")})`)
         : "",
     }));
   }, [
     activeAgentImageInputUnsupported,
+    activeImageAttachments,
     activeSessionId,
     lang,
     sessionBusy,
@@ -1004,8 +1033,23 @@ export function useChatComposerSubmitActions({
     if (!activeSessionId) {
       return;
     }
-    setSessionImageAttachments((current) => removeSessionImageAttachment(current, activeSessionId, attachmentId));
-  }, [activeSessionId, setSessionImageAttachments]);
+    const attachmentSnapshot = attachmentSnapshotRef.current.sessionId === activeSessionId
+      ? attachmentSnapshotRef.current.attachments
+      : activeImageAttachments;
+    const nextAttachments = attachmentSnapshot.filter((attachment) => attachment.id !== attachmentId);
+    if (nextAttachments.length === attachmentSnapshot.length) {
+      return;
+    }
+    const removed = attachmentSnapshot.find((attachment) => attachment.id === attachmentId);
+    if (removed) {
+      URL.revokeObjectURL(removed.previewUrl);
+    }
+    attachmentSnapshotRef.current = { sessionId: activeSessionId, attachments: nextAttachments };
+    setSessionImageAttachments((current) => ({
+      ...current,
+      [activeSessionId]: nextAttachments,
+    }));
+  }, [activeImageAttachments, activeSessionId, setSessionImageAttachments]);
 
   const handleAddComposerReference = useCallback((reference: SessionReferenceAttachment) => {
     if (!activeSessionId) {

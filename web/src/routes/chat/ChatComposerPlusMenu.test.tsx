@@ -61,4 +61,9 @@ describe("ChatComposerPlusMenu contract", () => {
     expect(source).toContain("onAddKnowledgeReference");
     expect(source).not.toContain('accept="image/png,image/jpeg,image/webp"');
   });
+
+  it("keeps reference pickers as native button lists", () => {
+    expect(source).not.toContain('role="listbox"');
+    expect(source).not.toContain('role="option"');
+  });
 });

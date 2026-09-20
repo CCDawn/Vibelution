@@ -28,7 +28,7 @@ export type VCommandPaletteProps = {
   onOpenChange: (open: boolean) => void;
   items: VCommandPaletteItem[];
   labels: VCommandPaletteLabels;
-  /** Max rendered rows per group before the list scrolls. */
+  /** Values up to 7 use the compact viewport; results are never truncated. */
   maxVisible?: number;
   className?: string;
   "data-vui"?: string;
@@ -78,6 +78,7 @@ export function VCommandPalette({
       .sort((left, right) => right.score - left.score)
       .map((entry) => entry.item);
   }, [items, query]);
+  const selectedIndex = Math.max(0, Math.min(activeIndex, flat.length - 1));
 
   useEffect(() => {
     setActiveIndex(0);
@@ -89,9 +90,9 @@ export function VCommandPalette({
 
   useEffect(() => {
     listRef.current
-      ?.querySelector<HTMLElement>(`[data-index="${activeIndex}"]`)
+      ?.querySelector<HTMLElement>(`[data-index="${selectedIndex}"]`)
       ?.scrollIntoView({ block: "nearest" });
-  }, [activeIndex]);
+  }, [selectedIndex, flat, open]);
 
   const runItem = (item: VCommandPaletteItem) => {
     onOpenChange(false);
@@ -99,21 +100,25 @@ export function VCommandPalette({
   };
 
   const onKeyDown = (event: React.KeyboardEvent) => {
+    const focusedRow = (event.target as HTMLElement).closest<HTMLElement>("[data-index]");
+    const selectIndex = (nextIndex: number) => {
+      setActiveIndex(nextIndex);
+      if (focusedRow) listRef.current?.querySelector<HTMLElement>(`[data-index="${nextIndex}"]`)?.focus();
+    };
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      setActiveIndex((current) => Math.min(current + 1, flat.length - 1));
+      selectIndex(Math.max(0, Math.min(selectedIndex + 1, flat.length - 1)));
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      setActiveIndex((current) => Math.max(current - 1, 0));
+      selectIndex(Math.max(selectedIndex - 1, 0));
     } else if (event.key === "Enter") {
       event.preventDefault();
-      const item = flat[activeIndex];
+      const item = flat[focusedRow ? Number(focusedRow.dataset.index) : selectedIndex];
       if (item) runItem(item);
     }
   };
 
-  let renderedInGroup = 0;
-  const rows = flat.slice(0, maxVisible * 4);
+  const rows = flat;
 
   return (
     <VDialog
@@ -133,7 +138,7 @@ export function VCommandPalette({
           aria-label={labels.searchPlaceholder}
           autoFocus
         />
-        <div ref={listRef} className="mt-2 max-h-[46vh] overflow-y-auto">
+        <div ref={listRef} className={cn("mt-2 overflow-y-auto", maxVisible <= 7 ? "max-h-[min(46vh,336px)]" : "max-h-[46vh]")}>
           {rows.length === 0 ? (
             <p className="m-0 px-1 py-3 text-center [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]">
               {labels.emptyTitle}
@@ -141,9 +146,7 @@ export function VCommandPalette({
           ) : (
             rows.map((item, index) => {
               const firstOfGroup = index === 0 || rows[index - 1].group !== item.group;
-              if (firstOfGroup) renderedInGroup = 0;
-              renderedInGroup += 1;
-              const active = index === activeIndex;
+              const active = index === selectedIndex;
               return (
                 <div key={item.id}>
                   {firstOfGroup ? (
@@ -160,6 +163,7 @@ export function VCommandPalette({
                       "data-[active=true]:border-[var(--vui-border)] data-[active=true]:bg-[var(--vui-surface-inset)]"
                     }
                     onMouseEnter={() => setActiveIndex(index)}
+                    onFocus={() => setActiveIndex(index)}
                     onClick={() => runItem(item)}
                   >
                     <span className="[font-size:var(--vui-font-xs)]">{item.label}</span>

@@ -24,6 +24,10 @@ import { shouldShowNextStateSignalInConversation } from "./conversationNextState
 import { isAgentInboxMessage } from "./conversationMessagePredicates";
 
 describe("composer leading control contract", () => {
+  it("announces composer errors without moving focus", () => {
+    const html = renderConversation([], { showComposer: true, composerError: "Attachment limit reached" });
+    expect(html).toMatch(/<p[^>]*role="alert"[^>]*>Attachment limit reached<\/p>/);
+  });
   it("lets Chat replace the legacy image button without changing other routes", () => {
     expect(conversationViewSource).toContain("composerLeadingControl ?? (");
     expect(conversationViewSource).toContain("attachmentInputRef.current?.click()");

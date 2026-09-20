@@ -198,7 +198,11 @@ export function SkillsRoute() {
   async function copyCommand(command: string) {
     const text = `${command} `;
     try {
-      await navigator.clipboard?.writeText(text);
+      if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") {
+        setCopyState(copy.copyFailed);
+        return;
+      }
+      await navigator.clipboard.writeText(text);
       setCopyState(copy.copied);
     } catch {
       setCopyState(copy.copyFailed);
@@ -232,7 +236,11 @@ export function SkillsRoute() {
     }
     const text = selectedSkills.map((skill) => `${skill.command} `).join("\n");
     try {
-      await navigator.clipboard?.writeText(text);
+      if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") {
+        setCopyState(copy.copyFailed);
+        return;
+      }
+      await navigator.clipboard.writeText(text);
       setCopyState(copy.copied);
     } catch {
       setCopyState(copy.copyFailed);

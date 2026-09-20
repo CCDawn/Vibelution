@@ -277,7 +277,9 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("validateAgentToolPolicy(");
     expect(routeSource).toContain("updateAgentToolPolicy(");
     expect(routeSource).toContain("expectedPolicyFingerprint: preview.policyFingerprint");
-    expect(routeSource).toContain("window.confirm(preview.confirmation.summary)");
+    expect(routeSource).toContain("setToolPolicyConfirm({");
+    expect(routeSource).toContain("Confirm and save");
+    expect(routeSource).not.toContain("window.confirm(preview.confirmation.summary)");
     expect(routeSource).toContain("服务端生效预览");
     expect(routeSource).toContain("验证并预览");
     expect(routeSource).not.toContain("DEFAULT_SESSION_AGENT_ALLOWED_TOOLS");

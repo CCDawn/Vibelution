@@ -10,6 +10,7 @@ import {
   MAX_COMPOSER_DOCUMENT_BYTES,
   MAX_COMPOSER_IMAGE_BYTES,
   mergeComposerAttachments,
+  mergeComposerAttachmentsWithRejections,
   mergeComposerImageAttachments,
   resolveComposerSubmitGuard,
   restoreSubmittedDraftIfComposerStillEmpty,
@@ -119,6 +120,25 @@ describe("chatComposerSubmitModel", () => {
     );
     // the newest image that breaks the per-image cap is dropped; docs always stay
     expect(overImages.map((item) => item.id)).toEqual(["i1", "i2", "i3", "i4", "d9"]);
+  });
+
+  it("enforces the document cap and reports rejected attachments in order", () => {
+    const make = (id: string, kind: "image" | "document") => ({
+      id,
+      file: new File([], id),
+      filename: id,
+      previewUrl: id,
+      sizeBytes: 1,
+      contentType: kind === "image" ? "image/png" : "text/plain",
+      kind,
+    });
+    const result = mergeComposerAttachmentsWithRejections(
+      [make("doc-1", "document"), make("img-1", "image")],
+      [make("doc-2", "document"), make("doc-3", "document"), make("img-2", "image")],
+      { maxTotal: 8, maxImages: 4, maxDocuments: 2 },
+    );
+    expect(result.attachments.map((item) => item.id)).toEqual(["doc-1", "img-1", "doc-2", "img-2"]);
+    expect(result.rejected.map((item) => item.filename)).toEqual(["doc-3"]);
   });
 
   it("builds knowledge and file reference payloads", () => {
