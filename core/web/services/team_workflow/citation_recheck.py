@@ -330,7 +330,7 @@ def verify_receipts_with_heartbeat(
     question_id: str,
     run_id: str,
     ledger_path: Path,
-    verifier: Callable[[str], Mapping[str, Any] | None] | None = None,
+    verifier: Callable[[str], Mapping[str, Any] | None] = None,
     timeout_seconds: float | None = None,
     max_verifications: int = 0,
     force_full: bool = False,
@@ -338,6 +338,7 @@ def verify_receipts_with_heartbeat(
     retry_policy: RetryPolicy | None = None,
     sleeper: Callable[[float], None] | None = None,
     monotonic: Callable[[], float] = time.monotonic,
+    url_cache: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Verify failing citation receipts with heartbeat, resume and retries.
 
@@ -348,10 +349,19 @@ def verify_receipts_with_heartbeat(
     plus the resume/failure extras ``resumedSourceUrls``,
     ``failedSourceUrls`` and ``ledgerWriteFailures``.
 
+    ``url_cache`` is the team-scoped cross-run cache view
+    (:mod:`core.web.services.team_workflow.citation_url_cache`): fresh
+    ``verified`` entries act like resume hits, fresh definitive failures
+    skip the network with the cached outcome, and every network-learned
+    result is collected into ``cacheWriteThrough`` so the caller can persist
+    it after the loop.  Cache hits never increment ``attemptedCount`` and
+    never mutate the caller's view.
+
     ``KeyboardInterrupt``/``SystemExit`` are never retried or swallowed:
     they propagate after the already-processed URLs are persisted, which is
     exactly the interrupted-run resume case.
     """
+
 
     from core.web.services.team_workflow.doi_metadata_verification import (
         DEFAULT_TIMEOUT_SECONDS,
@@ -368,6 +378,18 @@ def verify_receipts_with_heartbeat(
         resume = {} if force_full else dict(resume_verified)
     else:
         resume = {} if force_full else read_resume_verified(ledger_path)
+    from core.web.services.team_workflow.citation_url_cache import (
+        is_cacheable_failure_reason,
+        split_fresh,
+    )
+
+    cached_verified, cached_negative = (
+        split_fresh(url_cache) if url_cache is not None else ({}, {})
+    )
+    for url in cached_verified:
+        resume.setdefault(url, True)
+    cache_hits: list[str] = []
+    cache_write_through: list[dict[str, Any]] = []
     total = len(checks)
     attempt_id = f"citrecheck-{uuid4().hex[:20]}"
 
@@ -460,6 +482,24 @@ def verify_receipts_with_heartbeat(
                 done += 1
                 _beat(resumed=True)
                 continue
+            if source_url in cached_negative:
+                # Cross-run negative cache: a definitive rejection learned by
+                # an earlier run skips the retry ladder for the negative TTL.
+                reason = str(cached_negative[source_url].get("reason") or "")
+                unresolved.append(source_url)
+                failures.append(
+                    {"sourceUrl": source_url, "reason": reason, "attempts": 0}
+                )
+                _url_result(
+                    source_url=source_url,
+                    outcome=OUTCOME_FAILED,
+                    reason=reason,
+                    attempts=0,
+                )
+                cache_hits.append(source_url)
+                done += 1
+                _beat()
+                continue
             doi = extract_doi(source_url, item.get("doi"))
             if not doi:
                 # No DOI authority: deterministic, non-retryable, and — as
@@ -535,6 +575,15 @@ def verify_receipts_with_heartbeat(
                     reason="",
                     attempts=attempts,
                 )
+                cache_write_through.append(
+                    {
+                        "sourceUrl": source_url,
+                        "outcome": OUTCOME_VERIFIED,
+                        "reason": "",
+                        "questionId": question_id,
+                        "runId": run_id,
+                    }
+                )
                 done += 1
                 _beat()
                 continue
@@ -547,8 +596,21 @@ def verify_receipts_with_heartbeat(
                 reason=reason,
                 attempts=attempts,
             )
+            if is_cacheable_failure_reason(reason):
+                cache_write_through.append(
+                    {
+                        "sourceUrl": source_url,
+                        "outcome": OUTCOME_FAILED,
+                        "reason": reason,
+                        "questionId": question_id,
+                        "runId": run_id,
+                    }
+                )
             done += 1
             _beat()
+        for url in cached_verified:
+            if verified.get(url):
+                cache_hits.append(url)
         return {
             "verifiedSourceUrls": verified,
             "attemptedCount": attempted,
@@ -557,6 +619,8 @@ def verify_receipts_with_heartbeat(
             "resumedSourceUrls": sorted(resume),
             "failedSourceUrls": failures,
             "ledgerWriteFailures": write_failures,
+            "cacheHitSourceUrls": sorted(set(cache_hits)),
+            "cacheWriteThrough": cache_write_through,
         }
     except (KeyboardInterrupt, SystemExit):
         outcome = "interrupted"
