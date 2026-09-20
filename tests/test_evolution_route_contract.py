@@ -40,6 +40,7 @@ JSON_ROUTE_FUNCTIONS = {
     "evolution_update_proposal",
     "evolution_delete_proposal",
     "evolution_bulk_delete_proposals",
+    "evolution_prompt_reflection_generate",
     "evolution_workbench",
     "evolution_chat_review",
     "evolution_chat_review_candidate",

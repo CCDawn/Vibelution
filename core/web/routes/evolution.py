@@ -23,6 +23,7 @@ from core.web.routes.evolution_models import (
     EvolutionWorkspaceSnapshotResponse,
     ProposalBulkDeletePayload,
     ProposalUpdatePayload,
+    PromptReflectionGeneratePayload,
     SelfEvolutionAutonomousRunActionPayload,
     SelfEvolutionAutonomousRunStartPayload,
     SelfEvolutionHistoryDeletePayload,
@@ -64,6 +65,10 @@ from core.web.services.evolution_service import (
     update_proposal,
 )
 from core.web.services.evolution_runtime_projection_service import build_workspace_runtime_projection
+from core.web.services.prompt_reflection_service import (
+    PromptReflectionError,
+    generate_prompt_reflection_proposal,
+)
 from core.web.services.self_evolution_service import (
     SelfEvolutionHistoryDeleteError,
     delete_self_evolution_history_groups,
@@ -972,3 +977,25 @@ def self_evolution_delete_history(payload: SelfEvolutionHistoryDeletePayload) ->
 )
 def self_evolution_audit() -> list[dict]:
     return list_self_evolution_audit_events()
+
+
+@router.post(
+    "/evolution/supervised/prompt-reflection/generate",
+    response_model=EvolutionJsonResponse,
+    response_model_exclude_unset=True,
+)
+def evolution_prompt_reflection_generate(payload: PromptReflectionGeneratePayload) -> dict:
+    try:
+        return generate_prompt_reflection_proposal(
+            payload.decisionPath,
+            model_ref=payload.modelRef,
+            max_samples=payload.maxSamples,
+        )
+    except PromptReflectionError as exc:
+        status_code = {
+            "decision_unreadable": status.HTTP_404_NOT_FOUND,
+            "decision_invalid": status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "no_failure_samples": status.HTTP_409_CONFLICT,
+            "proposal_dominated": status.HTTP_409_CONFLICT,
+        }.get(exc.code, status.HTTP_400_BAD_REQUEST)
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc

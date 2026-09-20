@@ -201,3 +201,9 @@ class EvolutionDeletedResponse(EvolutionJsonResponse):
     sessionIds: list[str] | None = None
     candidateIds: list[str] | None = None
     txnIds: list[str] | None = None
+
+
+class PromptReflectionGeneratePayload(BaseModel):
+    decisionPath: str
+    modelRef: str
+    maxSamples: int = 8
