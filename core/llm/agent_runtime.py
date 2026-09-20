@@ -9,6 +9,7 @@ profile contract.
 from __future__ import annotations
 
 import copy
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -21,6 +22,9 @@ from .reasoning_effort import (
     resolve_reasoning_effort_request,
 )
 from .types import LLMCapabilities, ResolvedModelSpec
+
+
+_logger = logging.getLogger(__name__)
 
 
 DEFAULT_AGENT_LLM_SLOT = "dialogue"
@@ -276,9 +280,31 @@ def _apply_agent_reasoning_effort_override(
         if normalize_reasoning_effort(value)
     }
     adapter = str(getattr(profile, "reasoning_effort_adapter", "") or "none").strip().lower()
+    profile_label = str(getattr(profile, "profile_id", "") or "") or str(getattr(profile, "model", "") or "")
+    agent_label = str(agent.get("agentId") or agent.get("id") or "") or "unknown"
     if not allowed_values or adapter in {"", "none"}:
+        # The operator explicitly requested an effort for this agent slot; a
+        # silent drop here reads as "the toggle does nothing" during triage.
+        _logger.warning(
+            "agent reasoning-effort override skipped: slot=%s agent=%s profile=%s "
+            "reason=%s requested_effort=%s",
+            slot,
+            agent_label,
+            profile_label,
+            "no_reasoning_effort_values" if not allowed_values else "adapter_disabled",
+            effort,
+        )
         return
     if effort not in allowed_values:
+        _logger.warning(
+            "agent reasoning-effort override skipped: slot=%s agent=%s profile=%s "
+            "reason=effort_not_in_declared_values requested_effort=%s allowed=%s",
+            slot,
+            agent_label,
+            profile_label,
+            effort,
+            sorted(allowed_values),
+        )
         return
     profile.reasoning_effort = effort
 
