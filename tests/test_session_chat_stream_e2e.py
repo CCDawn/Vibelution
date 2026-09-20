@@ -30,6 +30,7 @@ from core.web.services import agent_directory_service, session_service
 from tests.helpers.web_chat_state import (
     _bind_seeded_session_agent,
     _bind_seeded_submittable_agent,
+    _read_next_state_signals,
     _seed_chat_state,
 )
 
@@ -38,6 +39,8 @@ pytestmark = pytest.mark.serial
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
 _STREAM_DRAIN_TIMEOUT_S = 30.0
+# 投进 subscriber 队列让消费线程退出并关闭生成器的哨兵帧；type 不与生产事件冲突。
+_SHUTDOWN_EVENT_TYPE = "__e2e_stream_shutdown__"
 
 
 @pytest.fixture(autouse=True)
@@ -190,6 +193,8 @@ class _SseFrameLog:
                         data_lines.append(line.split(":", 1)[1].strip())
                 if event_name and data_lines:
                     payload = json.loads("\n".join(data_lines))
+                    if payload.get("type") == _SHUTDOWN_EVENT_TYPE:
+                        break
                     self.frames.append((event_name, payload))
                     self.first_frame.set()
         except StopIteration:
@@ -198,14 +203,37 @@ class _SseFrameLog:
             self.error = exc
         finally:
             self.first_frame.set()
+            generator = self._generator
+            if generator is not None:
+                try:
+                    # 同线程关闭：此刻生成器停在 yield 挂起点，GeneratorExit 触发
+                    # 其 finally 注销 subscriber；跨线程 close 会因生成器正在执行
+                    # 抛 ValueError 被吞，subscriber 从此泄漏。
+                    generator.close()
+                except Exception:  # noqa: BLE001 - 关闭路径不掩盖断言
+                    pass
 
     def close(self) -> None:
-        generator = self._generator
-        if generator is not None:
+        """向 subscriber 队列投哨兵帧，让消费线程自行退出并关闭生成器。
+
+        本文件每个用例自开自关且 serial 串行，session-live 的 subscriber
+        集合里只有本用例的连接，广播哨兵不会误伤其他流。
+        """
+        with session_service._SESSION_STREAM_SUBSCRIBERS_LOCK:
+            subscribers = list(session_service._SESSION_STREAM_SUBSCRIBERS.get("session-live") or [])
+        for subscriber in subscribers:
             try:
-                generator.close()
-            except Exception:  # noqa: BLE001 - 关闭路径不掩盖断言
+                subscriber.put_nowait({"type": _SHUTDOWN_EVENT_TYPE})
+            except Exception:  # noqa: BLE001 - 队列满时哨兵丢失，走下方泄漏自检兜底
                 pass
+        if self._thread is not None:
+            self._thread.join(timeout=5.0)
+        if self.error is not None:
+            raise self.error
+        with session_service._SESSION_STREAM_SUBSCRIBERS_LOCK:
+            remaining = len(session_service._SESSION_STREAM_SUBSCRIBERS.get("session-live") or [])
+        if remaining:
+            raise AssertionError(f"SSE subscriber 未随流关闭注销（泄漏 {remaining} 条）")
 
     def wait_first_frame(self, timeout_s: float = 10.0) -> None:
         if not self.first_frame.wait(timeout_s):
@@ -305,10 +333,7 @@ def test_reopened_stream_replays_full_snapshot_after_completed_turn(tmp_path, mo
 
 def test_provider_failed_turn_is_visible_and_next_submit_recovers(tmp_path, monkeypatch):
     """provider 失败轮可见且不阻断后续提交：失败信号落盘、历史两轮共存。"""
-    from tests.helpers.web_chat_state import _read_next_state_signals
-
     outcomes = iter(["failed", "completed"])
-    holder: dict[str, _E2EChatAgent] = {}
 
     class _SwitchableAgent(_E2EChatAgent):
         def run_single_turn(self, initial_prompt=None):
@@ -324,7 +349,6 @@ def test_provider_failed_turn_is_visible_and_next_submit_recovers(tmp_path, monk
             return _completed_turn_result(text="失败后恢复的一轮。", reasoning="第二次提交成功。")
 
     agent = _SwitchableAgent(result={})
-    holder["agent"] = agent
     _seed_streamed_session(tmp_path, monkeypatch, agent)
 
     failed = _submit_message("触发上游失败", submission_id="submission-stream-e2e-fail")
