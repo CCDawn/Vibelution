@@ -388,6 +388,7 @@ def _append_canonical_turn_output(project_root, task: dict, output: dict) -> Non
 
 
 def _isolate_store(tmp_path, monkeypatch) -> None:
+    from core.web.services.team_workflow import citation_url_cache
     from core.web.services.team_workflow.research_runtime import (
         model_invocation_receipt_registry,
     )
@@ -398,8 +399,20 @@ def _isolate_store(tmp_path, monkeypatch) -> None:
         "resolve_team_program_root",
         lambda _team_id: tmp_path,
     )
-    monkeypatch.setattr(challenge_question_runs.team_service, "get_team", lambda team_id: {"teamId": team_id})
-    monkeypatch.setattr(challenge_question_runs.team_service, "assert_team_exists", lambda team_id: team_id)
+    monkeypatch.setattr(
+        challenge_question_runs.team_service, "get_team", lambda team_id: {"teamId": team_id}
+    )
+    monkeypatch.setattr(
+        challenge_question_runs.team_service, "assert_team_exists", lambda team_id: team_id
+    )
+    # The team-scoped citation URL cache must not leak across tests (or into
+    # a real workspace): a fresh verified entry would skip the verifier and
+    # an earlier test's write-through would poison every later one.
+    monkeypatch.setattr(
+        citation_url_cache,
+        "citation_url_cache_path",
+        lambda _team_id: tmp_path / "citation_url_cache.jsonl",
+    )
     monkeypatch.setattr(challenge_question_runs, "record_runtime_scene_event", lambda *args, **kwargs: None)
     evidence_path = tmp_path / "official_model_evidence" / "index.json"
     evidence_path.parent.mkdir(parents=True, exist_ok=True)
