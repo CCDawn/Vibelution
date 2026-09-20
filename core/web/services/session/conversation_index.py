@@ -1443,16 +1443,10 @@ def create_chat_session(
         if not bound_agent:
             raise s.SessionValidationError(s._session_agent_unavailable_message("missing_agent", lang=lang))
     explicit_title = s.trim_lines(title or "", max_lines=1).strip()
+    # A new session always starts from one placeholder label; the first user
+    # turn generates the real title (see session/title_generation.py). The
+    # bound Agent name stays session metadata, never the session title.
     fallback_title = s.text_for(lang, zh="新会话", en="New session")
-    if bound_agent is not None:
-        agent_name = str(
-            bound_agent.get("displayName")
-            or bound_agent.get("agentCode")
-            or bound_agent.get("name")
-            or ""
-        ).strip()
-        if agent_name:
-            fallback_title = s.trim_lines(agent_name, max_lines=1).strip()[:120] or fallback_title
     normalized_title = explicit_title or fallback_title
     declared_title_source = str(title_source or "").strip().lower()
     if declared_title_source not in {"placeholder", "auto", "manual"}:

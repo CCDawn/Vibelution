@@ -779,9 +779,8 @@ def test_create_session_persists_new_active_empty_conversation(tmp_path, monkeyp
     assert response.status_code == 201
     payload = response.json()
     assert payload["id"].startswith("session-")
-    assert payload["title"] == payload["agentDisplayName"]
+    assert payload["title"] == "新会话"
     assert payload["taskTitle"] == "新会话"
-    assert payload["title"] != "新会话"
     assert payload["messages"] == []
     assert payload["currentPhase"] == "ready"
     assert payload["sourceRef"]["owner"] == "ConversationLedger"
@@ -831,7 +830,7 @@ def test_create_session_invalidates_agent_index_cache_after_project_root_switch(
     assert response.status_code == 201
     payload = response.json()
     assert payload["title"] != old_cached_title
-    assert payload["title"] == payload["agentDisplayName"]
+    assert payload["title"] == "新会话"
     assert payload["taskTitle"] == "新会话"
     assert payload["agentId"]
     assert agent_directory_service.PROJECT_ROOT == new_root

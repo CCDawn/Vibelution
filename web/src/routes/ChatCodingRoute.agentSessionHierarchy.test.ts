@@ -46,8 +46,8 @@ describe("ChatCodingRoute Agent-session hierarchy", () => {
     // Only an operator-opened rename on the temp tab survives the remap.
     expect(lifecycleSource).toContain("if (keepFocusOnCreated && editingTempTitle) {");
     expect(lifecycleSource).toContain("suppressRenameBlurUntilRef.current = Date.now() + 2500");
-    // New sessions default to the Agent display name (backend + optimistic shell).
-    expect(lifecycleSource).toContain("agentDisplayName || defaultNewSessionTitle(lang)");
+    // New sessions start from the placeholder label (backend + optimistic shell).
+    expect(lifecycleSource).toContain("const title = defaultNewSessionTitle(lang);");
     expect(lifecycleSource).not.toContain("renameAgentDirectoryEntries(agents, agentId, confirmedTitle)");
   });
 

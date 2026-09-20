@@ -89,9 +89,9 @@ def create_agent_from_catalog_request(
     )
 
     session = session_service.create_chat_session(
-        title=normalized_display_name,
-        # The Agent display name is a chat display default, not an operator title:
-        # the first user turn may replace it with a generated title.
+        # A new session starts from the shared placeholder label; the first user
+        # turn generates the real title. The Agent display name stays in the
+        # Agent directory metadata, never as the session title.
         title_source="placeholder",
         llm_bindings=normalized_llm_bindings,
         created_by=source,

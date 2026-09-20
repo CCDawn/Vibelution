@@ -278,8 +278,9 @@ export function useChatWorkspaceLifecycle({
       const agents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents()) ?? [];
       const agentRow = agents.find((item) => String(item.agentId || "").trim() === normalizedAgentId);
       const agentDisplayName = String(agentRow?.displayName || agentRow?.agentCode || "").trim();
-      // Match backend: prefer Agent display name so tabs are identifiable immediately.
-      const title = agentDisplayName || defaultNewSessionTitle(lang);
+      // Match backend: a new session starts from the placeholder label; the
+      // first user turn generates the real title.
+      const title = defaultNewSessionTitle(lang);
       const optimisticDetail: SessionDetail = {
         id: tempSessionId,
         title,
