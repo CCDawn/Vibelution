@@ -148,6 +148,13 @@ describe("companion presentation", () => {
     expect(companionAbout({ ...companion, personaProfile: { communicationStyle: "请始终保持简短" } })).toContain("自己的日程");
     expect(companionAbout({ ...companion, personaProfile: { background: "她在上海长大，喜欢夜跑。", communicationStyle: "请始终保持简短" } })).toBe("她在上海长大，喜欢夜跑。");
     expect(companionAbout({ ...companion, displayName: "洛天依", personaProfile: { background: "我是洛天依，一个独立存在的虚构人物。我会安排自己的生活、完成活动、形成日记，并在重要经历值得保留时积累长期记忆。" } })).toContain("自己的日程");
+    for (const background of [
+      "她的沟通风格冷静直接，喜欢夜跑。",
+      "她研究系统指令与提示词，协作偏好是结对讨论。",
+      "我是另一个人，一个独立存在的虚构人物。我会安排自己的生活、完成活动、形成日记，并在重要经历值得保留时积累长期记忆。",
+    ]) {
+      expect(companionAbout({ ...companion, personaProfile: { background } })).toBe(background);
+    }
   });
 
   it("does not use the virtual-human default behavior as a person identity", () => {
@@ -155,9 +162,13 @@ describe("companion presentation", () => {
       ...companion,
       personaProfile: {
         personality: "有自己的判断、情绪和边界；温和但不盲从，会认真经营每天的生活。",
-        expertise: [],
+        expertise: ["独立生活规划", "情绪表达", "长期陪伴"],
       },
     })).toBe("nora");
+    expect(companionIdentity({
+      ...companion,
+      personaProfile: { expertise: ["独立生活规划", "情绪表达", "登山"] },
+    })).toBe("独立生活规划 · 情绪表达");
   });
 
   it("does not promote an unconfirmed draft identity into confirmed identity", () => {

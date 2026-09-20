@@ -31,7 +31,7 @@ export function companionIdentity(companion: VirtualHumanCompanion): string {
   }
   const profile = companion.personaProfile ?? {};
   const personality = String(profile.personality || "").trim();
-  const expertise = Array.isArray(profile.expertise)
+  const expertise = Array.isArray(profile.expertise) && !isDefaultPersonaExpertise(profile.expertise)
     ? profile.expertise.filter(Boolean).slice(0, 2).join(" · ")
     : "";
   return String(
@@ -46,16 +46,17 @@ export function companionAbout(companion: VirtualHumanCompanion): string {
   const profile = companion.personaProfile ?? {};
   const background = String(profile.background || "").trim();
   // Prompt rules are implementation guidance, not a user-facing biography.
-  if (background && !isDefaultPersonaBackground(background) && !isPromptRuleText(background)) return background;
+  if (background && !isDefaultPersonaBackground(background, companion.displayName || companion.agentId)) return background;
   return "她有自己的日程、心情和记忆，也会在合适的时候主动联系你。";
 }
 
-function isPromptRuleText(value: string): boolean {
-  return /(?:communication[_ ]?style|collaboration[_ ]?preference|沟通风格|协作偏好|提示词|系统指令)/i.test(value);
+function isDefaultPersonaBackground(value: string, displayName: string): boolean {
+  return value === `我是${displayName.trim()}，一个独立存在的虚构人物。我会安排自己的生活、完成活动、形成日记，并在重要经历值得保留时积累长期记忆。`;
 }
 
-function isDefaultPersonaBackground(value: string): boolean {
-  return /^我是[^，。]+，一个独立存在的虚构人物。我会安排自己的生活、完成活动、形成日记，并在重要经历值得保留时积累长期记忆。$/.test(value);
+function isDefaultPersonaExpertise(value: string[]): boolean {
+  const defaults = ["独立生活规划", "情绪表达", "长期陪伴"];
+  return value.length === defaults.length && value.every((item, index) => item === defaults[index]);
 }
 
 function isDefaultPersonaPersonality(value: string): boolean {
