@@ -4,6 +4,9 @@ from __future__ import annotations
 from fastapi import HTTPException, Query, Request, status
 
 from core.web.services.team_service import TeamNotFoundError, TeamServiceError
+from core.web.services.team_workflow.challenge_question_runs import (
+    machine_pre_review,
+)
 from core.web.services.team_workflow_orchestration_service import *
 from core.web.services.team_workflow.research_runtime.operator_authorization import (
     require_privileged_server_operator,
@@ -222,6 +225,32 @@ def team_workflow_challenge_question_run_review(
             exc,
             status_code=422,
             fields={"questionId": question_id, "runId": run_id, "reviewer": payload.reviewer},
+        )
+
+
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/challenge-program/questions/{question_id}/runs/{run_id}/machine-pre-review",
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
+)
+def team_workflow_challenge_question_run_machine_pre_review(
+    team_id: str,
+    question_id: str,
+    run_id: str,
+) -> dict:
+    """Advisory per-gate machine verdicts (read-only; human gates unchanged)."""
+
+    try:
+        return machine_pre_review(team_id, question_id, run_id)
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        _raise_team_workflow_route_error(
+            "challenge_question_run.machine_pre_review",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"questionId": question_id, "runId": run_id},
         )
 
 

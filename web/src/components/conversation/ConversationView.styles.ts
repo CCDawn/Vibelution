@@ -321,6 +321,8 @@ backToBottomButton:
   // toolbar end look cluttered next to the model picker and context ring).
   composerActionStack:
     "vui-components-conversationview composerActionStack flex min-w-0 w-fit items-center justify-end gap-1",
+  composerStopPendingFeedback:
+    "vui-components-conversationview composerStopPendingFeedback min-w-0 max-w-[12rem] truncate [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)]",
   composerError:
     `vui-components-conversationview composerError min-w-0 ${vuiStateDangerSoftClass}`,
   composerEditModeDescription:

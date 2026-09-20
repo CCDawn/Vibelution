@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionDetail, SessionReferenceAttachment } from "../../api/types";
+import { queryKeys } from "../../api/queryKeys";
 import type { TranslationKey } from "../../i18n/dictionary";
 import type { ChatEditTarget } from "../chatComposerState";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
@@ -23,18 +24,20 @@ const apiMocks = vi.hoisted(() => ({
   })),
   editResubmitSessionMessage: vi.fn(async (_sessionId: string, _payload: unknown) => ({
     id: "session-1",
+    activeTurnId: "accepted-edit-turn",
     currentPhase: "running",
     status: "running",
     messages: [],
     updatedAt: "2026-09-15T02:00:00Z",
   })),
+  stopSessionTurn: vi.fn(async () => ({ id: "session-1", currentPhase: "stopping" })),
 }));
 
 vi.mock("../../api/chat", () => ({
   editResubmitSessionMessage: apiMocks.editResubmitSessionMessage,
   querySessions: vi.fn(),
   regenerateSessionMessage: vi.fn(),
-  stopSessionTurn: vi.fn(),
+  stopSessionTurn: apiMocks.stopSessionTurn,
   submitSessionGuidance: vi.fn(),
   submitSessionMessage: vi.fn(),
   switchSessionHead: vi.fn(),
@@ -71,7 +74,12 @@ const imageAttachment: ComposerImageAttachment = {
   contentType: "image/png",
 };
 
-function Harness({ queryClient }: { queryClient: QueryClient }) {
+function Harness({ queryClient, sessionBusy = false, activeTurnId = "turn-1", activeSessionId = "session-1" }: {
+  queryClient: QueryClient;
+  sessionBusy?: boolean;
+  activeTurnId?: string;
+  activeSessionId?: string;
+}) {
   const chatWorkspaceCache = useRef(createChatWorkspaceCache(queryClient)).current;
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
   const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>({
@@ -92,7 +100,7 @@ function Harness({ queryClient }: { queryClient: QueryClient }) {
     id: "session-1",
     messages: [{ id: "user-1", role: "user", content: "原始内容" }],
   } as SessionDetail);
-  const activeEditTarget = sessionEditTargets["session-1"] ?? null;
+  const activeEditTarget = sessionEditTargets[activeSessionId] ?? null;
   const describeError = (error: unknown, fallback: string) => (
     error instanceof Error ? error.message : fallback
   );
@@ -125,21 +133,21 @@ function Harness({ queryClient }: { queryClient: QueryClient }) {
     setSessionImageUploadPending,
     setSessionEditTargets,
     imageUploadInFlightRef,
-    activeSessionId: "session-1",
-    activeDraftEffective: sessionDrafts["session-1"] ?? "",
-    activeImageAttachments: sessionImageAttachments["session-1"] ?? [],
+    activeSessionId,
+    activeDraftEffective: sessionDrafts[activeSessionId] ?? "",
+    activeImageAttachments: sessionImageAttachments[activeSessionId] ?? [],
     activeReferenceAttachments: [],
     mentalModelEnabledForNextTurn: false,
     runtimeStatusEnabledForNextTurn: false,
     resolvedEditTarget: activeEditTarget,
     activeEditTarget,
     composerDisabled: false,
-    sessionBusy: false,
+    sessionBusy,
     sessionStopping: false,
     activePhase: "ready",
     activeAgentImageInputUnsupported: false,
     activeImageInputModelId: "model-1",
-    activeTurnId: "turn-1",
+    activeTurnId,
     detail: detailRef.current,
     setMentalModelEnabledForNextTurn: () => undefined,
     setRuntimeStatusEnabledForNextTurn: () => undefined,
@@ -148,18 +156,21 @@ function Harness({ queryClient }: { queryClient: QueryClient }) {
   return (
     <div>
       <output data-testid="images">
-        {JSON.stringify((sessionImageAttachments["session-1"] ?? []).map((attachment) => attachment.id))}
+        {JSON.stringify((sessionImageAttachments[activeSessionId] ?? []).map((attachment) => attachment.id))}
       </output>
       <output data-testid="edit-target">
-        {JSON.stringify(sessionEditTargets["session-1"] ?? null)}
+        {JSON.stringify(sessionEditTargets[activeSessionId] ?? null)}
       </output>
-      <output data-testid="draft">{sessionDrafts["session-1"] ?? ""}</output>
+      <output data-testid="draft">{sessionDrafts[activeSessionId] ?? ""}</output>
       <output data-testid="upload-pending">
-        {JSON.stringify(Boolean(sessionImageUploadPending["session-1"]))}
+        {JSON.stringify(Boolean(sessionImageUploadPending[activeSessionId]))}
       </output>
-      <output data-testid="error">{sessionComposerErrors["session-1"] ?? ""}</output>
+      <output data-testid="error">{sessionComposerErrors[activeSessionId] ?? ""}</output>
       <button type="button" data-testid="submit" onClick={() => actions.handleSubmitTurn()}>
         submit
+      </button>
+      <button type="button" data-testid="stop" onClick={() => actions.handleStopTurn()}>
+        stop
       </button>
     </div>
   );
@@ -180,11 +191,30 @@ describe("useChatComposerSubmit edit-resubmit attachments", () => {
     container = null;
     apiMocks.uploadSessionImageAttachment.mockClear();
     apiMocks.editResubmitSessionMessage.mockClear();
+    apiMocks.stopSessionTurn.mockClear();
   });
 
   it("uploads the pending image and sends it with the edited message, then clears the tray", async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1",
+      title: "Session",
+      status: "running",
+      taskSummary: "",
+      lastActive: "",
+      updatedAt: "",
+      currentPhase: "running",
+      defaultFileContext: "",
+      previewTabs: [],
+      activePreviewPath: "",
+      changedFiles: [],
+      readFiles: [],
+      messages: [{ id: "user-1", role: "user", content: "原始内容" }],
+      stopRequested: false,
+      stopRequestedAt: "",
+      stopReason: "",
     });
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -222,5 +252,139 @@ describe("useChatComposerSubmit edit-resubmit attachments", () => {
     expect(container?.querySelector('[data-testid="draft"]')?.textContent).toBe("");
     expect(container?.querySelector('[data-testid="upload-pending"]')?.textContent).toBe("false");
     expect(container?.querySelector('[data-testid="error"]')?.textContent).toBe("");
+  });
+
+  it("keeps the stop identity while edit attachments are still uploading", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    let resolveUpload: ((value: { artifactId: string }) => void) | undefined;
+    apiMocks.uploadSessionImageAttachment.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveUpload = resolve;
+    }));
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <QueryClientProvider client={queryClient}>
+          <Harness queryClient={queryClient} sessionBusy activeTurnId="" />
+        </QueryClientProvider>,
+      );
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="stop"]')?.click();
+    });
+    expect(apiMocks.editResubmitSessionMessage).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveUpload?.({ artifactId: "artifact-edit-1" });
+      await Promise.resolve();
+    });
+    for (let round = 0; round < 6; round += 1) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+
+    expect(apiMocks.editResubmitSessionMessage).toHaveBeenCalledTimes(1);
+    expect(apiMocks.editResubmitSessionMessage.mock.calls[0]?.[1]).toEqual(expect.objectContaining({
+      clientSubmissionId: expect.any(String),
+    }));
+    expect((await import("../../api/chat")).stopSessionTurn).toHaveBeenCalledWith(
+      "session-1",
+      "accepted-edit-turn",
+    );
+  });
+
+  it("restores the pre-stop detail after upload failure across a session switch and keeps the next turn independent", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1",
+      title: "Session",
+      status: "running",
+      taskSummary: "",
+      lastActive: "",
+      updatedAt: "",
+      currentPhase: "running",
+      defaultFileContext: "",
+      previewTabs: [],
+      activePreviewPath: "",
+      changedFiles: [],
+      readFiles: [],
+      messages: [{ id: "user-1", role: "user", content: "原始内容" }],
+      stopRequested: false,
+      stopRequestedAt: "",
+      stopReason: "",
+    });
+    let rejectUpload: ((reason?: unknown) => void) | undefined;
+    apiMocks.uploadSessionImageAttachment.mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      rejectUpload = reject;
+    }));
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <QueryClientProvider client={queryClient}>
+          <Harness queryClient={queryClient} sessionBusy activeTurnId="" />
+        </QueryClientProvider>,
+      );
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
+      await Promise.resolve();
+      container?.querySelector<HTMLButtonElement>('[data-testid="stop"]')?.click();
+    });
+    expect(queryClient.getQueryData<SessionDetail>(queryKeys.session("session-1"))?.stopRequested).toBe(true);
+
+    await act(async () => {
+      root?.render(
+        <QueryClientProvider client={queryClient}>
+          <Harness queryClient={queryClient} activeSessionId="session-2" sessionBusy activeTurnId="" />
+        </QueryClientProvider>,
+      );
+      await Promise.resolve();
+    });
+    await act(async () => {
+      rejectUpload?.(new Error("upload failed"));
+      await Promise.resolve();
+    });
+    for (let round = 0; round < 6; round += 1) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+
+    const restored = queryClient.getQueryData<SessionDetail>(queryKeys.session("session-1"));
+    expect(restored?.stopRequested).toBe(false);
+    expect(restored?.currentPhase).toBe("running");
+    expect(apiMocks.stopSessionTurn).not.toHaveBeenCalled();
+
+    await act(async () => {
+      root?.render(
+        <QueryClientProvider client={queryClient}>
+          <Harness queryClient={queryClient} activeSessionId="session-1" sessionBusy={false} activeTurnId="turn-next" />
+        </QueryClientProvider>,
+      );
+    });
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
+    });
+    for (let round = 0; round < 6; round += 1) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+    expect(apiMocks.editResubmitSessionMessage).toHaveBeenCalledTimes(1);
+    expect(apiMocks.stopSessionTurn).not.toHaveBeenCalled();
   });
 });

@@ -96,7 +96,9 @@ function renderConversation(
     composerPlaceholder?: string;
     composerActionMode?: "send" | "stop";
     composerActionDisabled?: boolean;
+    composerPending?: boolean;
     submitLabel?: string;
+    stopPendingLabel?: string;
     composerError?: string;
     composerGuidance?: string;
     followupQueue?: Array<{ id: string; text: string }>;
@@ -159,8 +161,9 @@ function renderConversation(
         composerDisabled={options.composerDisabled ?? false}
         composerActionMode={options.composerActionMode}
         composerActionDisabled={options.composerActionDisabled}
-        composerPending={false}
+        composerPending={options.composerPending ?? false}
         submitLabel={options.submitLabel}
+        stopPendingLabel={options.stopPendingLabel}
         composerError={options.composerError}
         composerGuidance={options.composerGuidance}
         followupQueue={options.followupQueue}
@@ -213,6 +216,19 @@ describe("ConversationView VUI control contract", () => {
     expect(conversationViewSource).not.toMatch(/<textarea\b/);
     expect(conversationViewSource).toContain("primaryActionIsQueueSubmit");
     expect(conversationViewSource).toContain("ConversationFollowupQueueBar");
+  });
+});
+
+describe("ConversationView stop feedback", () => {
+  it("shows a visible stopping label while the stop action is pending", () => {
+    const html = renderConversation([], {
+      showComposer: true,
+      composerActionMode: "stop",
+      composerPending: true,
+      stopPendingLabel: "正在停止…",
+    });
+    expect(html).toContain('data-testid="composer-stop-pending-feedback"');
+    expect(html).toContain("正在停止…");
   });
 });
 

@@ -781,6 +781,146 @@ def _human_gate_summary(output: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Machine pre-review (R: H1-H4 gate throughput). Advisory only: every verdict
+# is computed from signals the platform already produced (artifact structure
+# plus the registration-time validation record). Nothing here changes the
+# human gate authority — a green row means "machine checks are all green, a
+# one-glance confirm is reasonable", a yellow row defers to human judgment.
+_PLAN_CORE_SECTIONS = ("objective", "method", "analysis", "success_criteria", "data_and_materials")
+_PLAN_FULL_SECTIONS = (
+    "objective", "method", "data_and_materials", "analysis", "controls",
+    "success_criteria", "failure_criteria", "stop_conditions", "timeline",
+    "resources", "risks",
+)
+_H4_VALIDATION_FIELDS = ("citationValidation", "modelInvocationReceipts", "officialModelCall")
+
+
+def _section_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        return " ".join(_section_text(item) for item in value).strip()
+    if isinstance(value, dict):
+        return " ".join(_section_text(item) for item in value.values()).strip()
+    return ""
+
+
+def _machine_pre_review_gates(output: dict[str, Any], validation: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    problem = output.get("problem_understanding") if isinstance(output.get("problem_understanding"), dict) else {}
+    selection = output.get("selection") if isinstance(output.get("selection"), dict) else {}
+    plan = output.get("research_plan") if isinstance(output.get("research_plan"), dict) else {}
+    hypotheses = output.get("hypotheses") if isinstance(output.get("hypotheses"), list) else []
+    evidence = output.get("evidence") if isinstance(output.get("evidence"), list) else []
+
+    gates: dict[str, dict[str, Any]] = {}
+
+    h1_missing = [field for field in ("scope", "subquestions") if not _section_text(problem.get(field))]
+    gates["H1_problem_understanding"] = {
+        "status": "green" if not h1_missing else ("red" if len(h1_missing) == 2 else "yellow"),
+        "signals": ([f"missing:{field}" for field in h1_missing] or ["scope+subquestions present"]),
+    }
+
+    selected_id = str(selection.get("selected_hypothesis_id") or "").strip()
+    selected = next(
+        (
+            item
+            for item in hypotheses
+            if isinstance(item, dict) and str(item.get("hypothesis_id") or item.get("id") or "") == selected_id
+        ),
+        None,
+    )
+    selected_claim = _section_text(selected.get("claim")) or _section_text(selected.get("statement")) if selected is not None else ""
+    if selected_id and selected is not None and selected_claim:
+        gates["H2_hypothesis_selection"] = {"status": "green", "signals": [f"selected {selected_id} with claim"]}
+    elif not hypotheses:
+        gates["H2_hypothesis_selection"] = {"status": "red", "signals": ["no hypotheses registered"]}
+    else:
+        gates["H2_hypothesis_selection"] = {
+            "status": "yellow",
+            "signals": ["selection missing or selected hypothesis lacks claim text"],
+        }
+
+    empty_sections = [name for name in _PLAN_FULL_SECTIONS if not _section_text(plan.get(name))]
+    missing_core = [name for name in _PLAN_CORE_SECTIONS if name in empty_sections]
+    if not empty_sections:
+        gates["H3_research_plan"] = {"status": "green", "signals": ["all 11 plan sections present"]}
+    elif missing_core:
+        gates["H3_research_plan"] = {"status": "red", "signals": [f"missing core:{name}" for name in missing_core]}
+    else:
+        gates["H3_research_plan"] = {
+            "status": "yellow",
+            "signals": [f"optional section empty:{name}" for name in empty_sections],
+        }
+
+    h4_signals: list[str] = []
+    h4_status = "green"
+    for field in _H4_VALIDATION_FIELDS:
+        value = str(validation.get(field) or "").strip().lower()
+        if value == "passed":
+            h4_signals.append(f"{field}:passed")
+        elif value in {"failed", "missing"}:
+            h4_status = "red"
+            h4_signals.append(f"{field}:{value}")
+        else:
+            # Pending / unknown dimension: never silently green — defer.
+            if h4_status != "red":
+                h4_status = "yellow"
+            h4_signals.append(f"{field}:{value or 'unknown'}")
+    if not evidence:
+        h4_status = "red" if h4_status == "red" else "yellow"
+        h4_signals.append("evidence list empty")
+    gates["H4_external_output"] = {"status": h4_status, "signals": h4_signals}
+    return gates
+
+
+def machine_pre_review(team_id: str, question_id: str, run_id: str) -> dict[str, Any]:
+    """Advisory per-gate machine verdicts for one registered run (read-only).
+
+    Green = every machine signal for that gate is green and a one-glance human
+    confirm is reasonable; yellow = defers to human judgment; red = a machine
+    check definitely failed. The human gate decision flow is unchanged.
+    """
+
+    team_service.get_team(team_id)
+    normalized_question_id = str(question_id or "").strip().upper()
+    normalized_run_id = str(run_id or "").strip()
+    if not normalized_question_id or not normalized_run_id:
+        raise ValueError("questionId and runId are required.")
+    output = _read_json(_artifact_path(team_id, normalized_question_id, normalized_run_id))
+    if not output:
+        raise ValueError("Challenge question run artifact was not found.")
+    with _STORE_LOCK:
+        store = _load_store(team_id)
+        record = next(
+            (
+                item
+                for item in store.get("records", [])
+                if isinstance(item, dict)
+                and item.get("questionId") == normalized_question_id
+                and item.get("runId") == normalized_run_id
+            ),
+            None,
+        )
+        validation = (
+            deepcopy(record.get("validation"))
+            if record is not None and isinstance(record.get("validation"), dict)
+            else {}
+        )
+    gates = _machine_pre_review_gates(output, validation)
+    statuses = [gate["status"] for gate in gates.values()]
+    overall = "red" if "red" in statuses else ("yellow" if "yellow" in statuses else "green")
+    return {
+        "teamId": team_id,
+        "questionId": normalized_question_id,
+        "runId": normalized_run_id,
+        "gates": gates,
+        "overall": overall,
+        "greenGateCount": statuses.count("green"),
+        "computedAt": _utc_now(),
+        "advisoryOnly": True,
+    }
+
+
 def _replay_canonical_output_sha256(output: dict[str, Any]) -> str:
     """Hash the output modulo review decisions and registration projections.
 

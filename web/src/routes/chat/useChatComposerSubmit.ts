@@ -1,4 +1,5 @@
 import { useMutation, type QueryClient, type UseMutationResult } from "@tanstack/react-query";
+import type { MutationCacheNotifyEvent } from "@tanstack/query-core";
 import {
   useCallback,
   useEffect,
@@ -923,8 +924,27 @@ export function useChatComposerSubmitActions({
   setRuntimeStatusEnabledForNextTurn,
   companionAgentId,
 }: UseChatComposerSubmitActionsOptions): UseChatComposerSubmitActionsResult {
-  const pendingStopAfterAcceptRef = useRef<DeferredStopIntent | null>(null);
-  const previousSessionRef = useRef(activeSessionId);
+  const pendingStopAfterAcceptRef = useRef<Map<string, DeferredStopIntent>>(new Map());
+  // Uploading attachments happens before React Query creates the submit/edit
+  // mutation. Keep the same submission identity visible to Stop during that
+  // gap so a stop requested before upload completion can still match the late
+  // mutation acceptance, even after switching sessions.
+  const pendingUploadSubmissionRef = useRef<Map<string, string>>(new Map());
+  const restorePendingStopAfterUploadFailure = useCallback((sessionId: string) => {
+    const pendingStop = pendingStopAfterAcceptRef.current.get(sessionId);
+    if (pendingStop?.stoppingAt) {
+      queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (current) => {
+        if (!current) {
+          return current;
+        }
+        return clearSessionDetailStopping(current, {
+          requestedAt: pendingStop.stoppingAt!,
+          previous: pendingStop.previousDetail,
+        });
+      });
+    }
+    pendingStopAfterAcceptRef.current.delete(sessionId);
+  }, [queryClient]);
   const attachmentSnapshotRef = useRef<{ sessionId: string | null | undefined; attachments: ComposerImageAttachment[] }>({
     sessionId: activeSessionId,
     attachments: activeImageAttachments,
@@ -1144,6 +1164,7 @@ export function useChatComposerSubmitActions({
       return;
     }
     imageUploadInFlightRef.current[sessionId] = true;
+    pendingUploadSubmissionRef.current.set(sessionId, clientSubmissionId);
     setSessionImageUploadPending((current) => ({
       ...current,
       [sessionId]: true,
@@ -1239,7 +1260,11 @@ export function useChatComposerSubmitActions({
         );
         setSessionDrafts((current) => restoreSubmittedDraftIfComposerStillEmpty(current, sessionId, content));
       }
+      restorePendingStopAfterUploadFailure(sessionId);
     } finally {
+      if (pendingUploadSubmissionRef.current.get(sessionId) === clientSubmissionId) {
+        pendingUploadSubmissionRef.current.delete(sessionId);
+      }
       imageUploadInFlightRef.current[sessionId] = false;
       setSessionImageUploadPending((current) => ({
         ...current,
@@ -1251,6 +1276,7 @@ export function useChatComposerSubmitActions({
     imageUploadInFlightRef,
     lang,
     queryClient,
+    restorePendingStopAfterUploadFailure,
     setSessionComposerErrors,
     setSessionDrafts,
     setSessionImageUploadPending,
@@ -1518,6 +1544,7 @@ export function useChatComposerSubmitActions({
         let attachmentIds: string[] = [];
         if (editAttachments.length) {
           imageUploadInFlightRef.current[activeSessionId] = true;
+          pendingUploadSubmissionRef.current.set(activeSessionId, clientSubmissionId);
           setSessionImageUploadPending((current) => ({
             ...current,
             [activeSessionId]: true,
@@ -1532,8 +1559,12 @@ export function useChatComposerSubmitActions({
               ...current,
               [activeSessionId]: describeError(error, lang === "zh" ? "图片上传失败" : "Image upload failed"),
             }));
+            restorePendingStopAfterUploadFailure(activeSessionId);
             return;
           } finally {
+            if (pendingUploadSubmissionRef.current.get(activeSessionId) === clientSubmissionId) {
+              pendingUploadSubmissionRef.current.delete(activeSessionId);
+            }
             imageUploadInFlightRef.current[activeSessionId] = false;
             setSessionImageUploadPending((current) => ({
               ...current,
@@ -1580,6 +1611,7 @@ export function useChatComposerSubmitActions({
     lang,
     mentalModelEnabledForNextTurn,
     runtimeStatusEnabledForNextTurn,
+    restorePendingStopAfterUploadFailure,
     resolvedEditTarget,
     sessionBusy,
     sessionFollowupQueues,
@@ -1783,10 +1815,22 @@ export function useChatComposerSubmitActions({
       if (optimisticDetail) {
         queryClient.setQueryData(sessionKey, optimisticDetail);
       }
-      pendingStopAfterAcceptRef.current = { sessionId: activeSessionId, previousDetail, stoppingAt };
+      const pendingSubmissionId = submitTurnMutation.isPending
+        && submitTurnMutation.variables?.sessionId === activeSessionId
+        ? submitTurnMutation.variables.clientSubmissionId
+        : editResubmitMutation.isPending
+          && editResubmitMutation.variables?.sessionId === activeSessionId
+          ? editResubmitMutation.variables.clientSubmissionId
+          : pendingUploadSubmissionRef.current.get(activeSessionId);
+      pendingStopAfterAcceptRef.current.set(activeSessionId, {
+        sessionId: activeSessionId,
+        previousDetail,
+        stoppingAt,
+        clientSubmissionId: pendingSubmissionId,
+      });
       return;
     }
-    pendingStopAfterAcceptRef.current = null;
+    pendingStopAfterAcceptRef.current.delete(activeSessionId);
     stopTurnMutation.mutate({
       sessionId: activeSessionId,
       turnId,
@@ -1805,17 +1849,117 @@ export function useChatComposerSubmitActions({
     submitTurnMutation.variables?.sessionId,
   ]);
 
+  // Mutation observers only expose the most recently submitted mutation. A
+  // late acceptance from session A can therefore disappear behind a newer
+  // submission in session B. Subscribe to the cache so every mutation keeps
+  // its own submission identity until the deferred stop is dispatched.
   useEffect(() => {
-    const pendingStop = pendingStopAfterAcceptRef.current;
-    if (!activeSessionId || pendingStop?.sessionId !== activeSessionId) {
-      return;
+    const unsubscribe = queryClient.getMutationCache().subscribe((event: MutationCacheNotifyEvent) => {
+      if (event.type !== "updated") return;
+      const { mutation } = event;
+      const variables = mutation.state.variables as {
+        sessionId?: unknown;
+        clientSubmissionId?: unknown;
+        messageId?: unknown;
+      } | undefined;
+      const sessionId = typeof variables?.sessionId === "string" ? variables.sessionId : "";
+      const clientSubmissionId = typeof variables?.clientSubmissionId === "string"
+        ? variables.clientSubmissionId
+        : "";
+      if (!sessionId || !clientSubmissionId) return;
+      const pendingStop = pendingStopAfterAcceptRef.current.get(sessionId);
+      if (!pendingStop || pendingStop.clientSubmissionId !== clientSubmissionId) return;
+
+      if (mutation.state.status === "error") {
+        pendingStopAfterAcceptRef.current.delete(sessionId);
+        return;
+      }
+      if (mutation.state.status !== "success") return;
+
+      const data = mutation.state.data as {
+        sessionId?: unknown;
+        turnId?: unknown;
+      } | SessionDetail | undefined;
+      const acceptedTurnId = variables?.messageId
+        ? resolveSessionStopTurnId(data as SessionDetail | undefined, "")
+        : data && typeof data === "object" && "turnId" in data
+          ? String(data.turnId || "").trim()
+          : "";
+      if (!acceptedTurnId) return;
+
+      if (stopTurnMutation.isPending) {
+        pendingStop.acceptedTurnId = acceptedTurnId;
+        return;
+      }
+      pendingStopAfterAcceptRef.current.delete(sessionId);
+      stopTurnMutation.mutate({
+        sessionId,
+        turnId: acceptedTurnId,
+        deferredStop: {
+          previousDetail: pendingStop.previousDetail,
+          stoppingAt: pendingStop.stoppingAt,
+        },
+      });
+    });
+    return unsubscribe;
+  }, [queryClient, stopTurnMutation]);
+
+  useEffect(() => {
+    const acceptedSubmit = submitTurnMutation.data;
+    const submitVariables = submitTurnMutation.variables;
+    const acceptedEdit = editResubmitMutation.data;
+    const editVariables = editResubmitMutation.variables;
+
+    for (const [sessionId, pendingStop] of pendingStopAfterAcceptRef.current) {
+      if (!pendingStop.clientSubmissionId) continue;
+      const submitMatches = acceptedSubmit?.sessionId === sessionId
+        && acceptedSubmit.clientSubmissionId === pendingStop.clientSubmissionId;
+      const editMatches = editVariables?.sessionId === sessionId
+        && editVariables.clientSubmissionId === pendingStop.clientSubmissionId
+        && !editResubmitMutation.isPending
+        && !editResubmitMutation.error
+        && Boolean(acceptedEdit);
+      const acceptedTurnId = pendingStop.acceptedTurnId || (submitMatches
+        ? String(acceptedSubmit?.turnId || "").trim()
+        : editMatches
+          ? resolveSessionStopTurnId(acceptedEdit, "")
+          : "");
+      if (acceptedTurnId && !stopTurnMutation.isPending) {
+        pendingStopAfterAcceptRef.current.delete(sessionId);
+        stopTurnMutation.mutate({
+          sessionId,
+          turnId: acceptedTurnId,
+          deferredStop: {
+            previousDetail: pendingStop.previousDetail,
+            stoppingAt: pendingStop.stoppingAt,
+          },
+        });
+        return;
+      }
+      const submitFailed = submitVariables?.sessionId === sessionId
+        && submitVariables.clientSubmissionId === pendingStop.clientSubmissionId
+        && !submitTurnMutation.isPending
+        && Boolean(submitTurnMutation.error)
+        && !submitMatches;
+      const editFailed = editVariables?.sessionId === sessionId
+        && editVariables.clientSubmissionId === pendingStop.clientSubmissionId
+        && !editResubmitMutation.isPending
+        && Boolean(editResubmitMutation.error)
+        && !editMatches;
+      if (submitFailed || editFailed) {
+        pendingStopAfterAcceptRef.current.delete(sessionId);
+      }
     }
+
+    if (!activeSessionId) return;
+    const pendingStop = pendingStopAfterAcceptRef.current.get(activeSessionId);
+    if (!pendingStop || pendingStop.clientSubmissionId) return;
     const submitPending = Boolean(
       (submitTurnMutation.isPending && submitTurnMutation.variables?.sessionId === activeSessionId)
       || (editResubmitMutation.isPending && editResubmitMutation.variables?.sessionId === activeSessionId)
     );
     if (!sessionBusy && !submitPending) {
-      pendingStopAfterAcceptRef.current = null;
+      pendingStopAfterAcceptRef.current.delete(activeSessionId);
       return;
     }
     if (stopTurnMutation.isPending && stopTurnMutation.variables?.sessionId === activeSessionId) {
@@ -1825,7 +1969,7 @@ export function useChatComposerSubmitActions({
     if (!turnId) {
       return;
     }
-    pendingStopAfterAcceptRef.current = null;
+    pendingStopAfterAcceptRef.current.delete(activeSessionId);
     stopTurnMutation.mutate({
       sessionId: activeSessionId,
       turnId,
@@ -1843,6 +1987,12 @@ export function useChatComposerSubmitActions({
     sessionBusy,
     stopTurnMutation,
     submitTurnMutation.isPending,
+    submitTurnMutation.data,
+    submitTurnMutation.error,
+    submitTurnMutation.variables,
+    editResubmitMutation.data,
+    editResubmitMutation.error,
+    editResubmitMutation.variables,
     submitTurnMutation.variables?.sessionId,
   ]);
 
@@ -1861,15 +2011,9 @@ export function useChatComposerSubmitActions({
     });
   }, [activeDraftEffective, activeSessionId, sessionBusy, sessionGuidanceMutation, sessionStopping]);
 
-  // The server drains the queue when a turn settles, so the composer only keeps
-  // the deferred-stop intent scoped to the active session.
-  useEffect(() => {
-    if (previousSessionRef.current === activeSessionId) {
-      return;
-    }
-    previousSessionRef.current = activeSessionId;
-    pendingStopAfterAcceptRef.current = null;
-  }, [activeSessionId]);
+  // Deferred stop intents remain keyed by session while the user moves between
+  // sessions. A late submit acceptance is matched by submission identity and
+  // stopped immediately, without being applied to a newer turn.
 
   return {
     handleComposerChange,
