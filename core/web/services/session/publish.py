@@ -16,6 +16,8 @@ import time
 from typing import Any
 from uuid import uuid4
 
+from .stream_transport_delta import SessionStreamItemDelta
+
 
 def _service():
     from core.web.services import session_service
@@ -201,6 +203,7 @@ def stream_session_events(
         if initial_event is not None:
             event_count += 1
             yield initial_event
+        item_delta = SessionStreamItemDelta()
         while True:
             try:
                 event = subscriber.get(timeout=s._SESSION_STREAM_HEARTBEAT_SECONDS)
@@ -209,7 +212,7 @@ def stream_session_events(
                 yield ": keep-alive\n\n"
                 continue
             event_count += 1
-            yield s._encode_sse_event(str(event.get("type") or "message"), event)
+            yield s._encode_sse_event(str(event.get("type") or "message"), item_delta.compact(event))
     except Exception as exc:
         if opened:
             failed = True
@@ -284,6 +287,7 @@ async def stream_session_events_async(
         if initial_event is not None:
             event_count += 1
             yield initial_event
+        item_delta = SessionStreamItemDelta()
         while True:
             try:
                 event = await subscriber.get_async(timeout=s._SESSION_STREAM_HEARTBEAT_SECONDS)
@@ -292,7 +296,7 @@ async def stream_session_events_async(
                 yield ": keep-alive\n\n"
                 continue
             event_count += 1
-            yield s._encode_sse_event(str(event.get("type") or "message"), event)
+            yield s._encode_sse_event(str(event.get("type") or "message"), item_delta.compact(event))
     except Exception as exc:
         if opened:
             failed = True
