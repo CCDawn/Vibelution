@@ -294,9 +294,9 @@ export function DesktopPetRoute() {
           <section className={styles.hud} aria-label={copy.settings}>
             <header className={styles.hudHeader}><strong>{copy.settings}</strong></header>
             <div className={styles.hudList}>
-              <VCheckbox isSelected={preferences.showStatus} onChange={(showStatus) => updatePreferences({ showStatus })}>{copy.showStatus}</VCheckbox>
-              <VCheckbox isSelected={preferences.showTitles} onChange={(showTitles) => updatePreferences({ showTitles })}>{copy.showTitles}</VCheckbox>
-              <VCheckbox isSelected={preferences.showCompletion} onChange={(showCompletion) => updatePreferences({ showCompletion })}>{copy.showCompletion}</VCheckbox>
+              <VCheckbox isSelected={preferences.showStatus} onChange={(showStatus) => updatePreferences({ showStatus })}><span className="text-white">{copy.showStatus}</span></VCheckbox>
+              <VCheckbox isSelected={preferences.showTitles} onChange={(showTitles) => updatePreferences({ showTitles })}><span className="text-white">{copy.showTitles}</span></VCheckbox>
+              <VCheckbox isSelected={preferences.showCompletion} onChange={(showCompletion) => updatePreferences({ showCompletion })}><span className="text-white">{copy.showCompletion}</span></VCheckbox>
               <label>
                 {copy.idleMessage}
                 <VInput value={preferences.idleMessage} maxLength={48} placeholder={copy.idleHint}

@@ -14,9 +14,9 @@ export const DEFAULT_PET_PREFERENCES: DesktopPetPreferences = {
   showCompletion: true, idleMessage: "",
 };
 
-export function readPetPreferences(storage: Pick<Storage, "getItem"> = localStorage): DesktopPetPreferences {
+export function readPetPreferences(storage?: Pick<Storage, "getItem">): DesktopPetPreferences {
   try {
-    const value = JSON.parse(storage.getItem(KEY) ?? "null") as Partial<DesktopPetPreferences> | null;
+    const value = JSON.parse((storage ?? localStorage).getItem(KEY) ?? "null") as Partial<DesktopPetPreferences> | null;
     return {
       characterId: value?.characterId === "dafeiyu" ? "dafeiyu" : "xiaoluo",
       showStatus: value?.showStatus !== false,
@@ -29,9 +29,9 @@ export function readPetPreferences(storage: Pick<Storage, "getItem"> = localStor
   }
 }
 
-export function savePetPreferences(value: DesktopPetPreferences, storage: Pick<Storage, "setItem"> = localStorage): boolean {
+export function savePetPreferences(value: DesktopPetPreferences, storage?: Pick<Storage, "setItem">): boolean {
   try {
-    storage.setItem(KEY, JSON.stringify(value));
+    (storage ?? localStorage).setItem(KEY, JSON.stringify(value));
     return true;
   } catch {
     return false;

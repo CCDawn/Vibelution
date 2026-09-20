@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_PET_PREFERENCES, readPetPreferences, savePetPreferences } from "./desktopPetPreferences";
 
 describe("desktop pet preferences", () => {
@@ -12,5 +12,14 @@ describe("desktop pet preferences", () => {
   it("handles unavailable or malformed storage and reports save failure", () => {
     expect(readPetPreferences({ getItem: () => "{" })).toEqual(DEFAULT_PET_PREFERENCES);
     expect(savePetPreferences(DEFAULT_PET_PREFERENCES, { setItem: () => { throw new Error("denied"); } })).toBe(false);
+  });
+  it("falls back when browser storage is unavailable", () => {
+    vi.stubGlobal("localStorage", undefined);
+    try {
+      expect(readPetPreferences()).toEqual(DEFAULT_PET_PREFERENCES);
+      expect(savePetPreferences(DEFAULT_PET_PREFERENCES)).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
