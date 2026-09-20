@@ -146,6 +146,62 @@ class MeetingApproveDigestPayload(BaseModel):
     expectedDigestContentHash: str = Field(..., min_length=1, max_length=200)
 
 
+class PendingDigestApprovalItem(BaseModel):
+    """One awaiting digest row in the team-wide approval queue."""
+
+    meetingRoundId: str = Field(..., min_length=1)
+    meetingType: str = ""
+    questionId: str = ""
+    digestContentHash: str = Field(..., min_length=1)
+    digestSummary: str = ""
+    proposedCandidateCount: int = 0
+    riskCount: int = 0
+    startedAt: str = ""
+    ageSeconds: int = 0
+    ttlOverdue: bool = False
+    ttlMessage: str = ""
+
+
+class PendingDigestApprovalsResponse(BaseModel):
+    """Result of ``GET .../chain/digest-approvals/pending``."""
+
+    items: list[PendingDigestApprovalItem] = Field(default_factory=list)
+    count: int = 0
+    fetchedAtMs: int = 0
+
+
+class BatchDigestApproveItem(BaseModel):
+    """One meeting to approve: the hash must echo the listed draft verbatim."""
+
+    meetingRoundId: str = Field(..., min_length=1)
+    expectedDigestContentHash: str = Field(..., min_length=1, max_length=200)
+
+
+class BatchDigestApprovePayload(BaseModel):
+    """Payload for ``POST .../chain/digest-approvals/batch-approve``."""
+
+    closedBy: str = Field(..., min_length=1, max_length=200)
+    items: list[BatchDigestApproveItem] = Field(..., min_length=1)
+
+
+class BatchDigestApproveItemResult(BaseModel):
+    """Per-meeting outcome: one bad row never fails the batch response."""
+
+    meetingRoundId: str = ""
+    status: str
+    errorType: str = ""
+    error: str = ""
+
+
+class BatchDigestApproveResponse(BaseModel):
+    """Result of ``POST .../chain/digest-approvals/batch-approve``."""
+
+    results: list[BatchDigestApproveItemResult] = Field(default_factory=list)
+    approvedCount: int = 0
+    failedCount: int = 0
+    closedBy: str = ""
+
+
 class ReviewNextRoundResponse(BaseModel):
     """Result of opening the next review round for a selection.
 

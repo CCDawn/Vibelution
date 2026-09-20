@@ -15,6 +15,7 @@ export { HypothesisFirstNodeInspector } from "./research-workflow/HypothesisFirs
 export { HypothesisLeaderboardPanel } from "./research-workflow/HypothesisLeaderboardPanel";
 export { ResearchAgentBindingPanel } from "./research-workflow/ResearchAgentBindingPanel";
 export { ResearchAnomalyInboxPanel } from "./research-workflow/ResearchAnomalyInboxPanel";
+export { DigestApprovalQueuePanel } from "./research-workflow/DigestApprovalQueuePanel";
 export { ResearchProcessDefinitionNodePanel } from "./research-workflow/ResearchProcessDefinitionNodePanel";
 export { ResearchProcessNodeInspector } from "./research-workflow/ResearchProcessNodeInspector";
 export { ResearchRunLaunchPanel } from "./research-workflow/ResearchRunLaunchPanel";

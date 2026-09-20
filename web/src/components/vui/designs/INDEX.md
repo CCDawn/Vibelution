@@ -18,6 +18,7 @@
 | `ChallengeTokenUsageStrip` | [product/challenge-token-usage.md](./product/challenge-token-usage.md#challengetokenusagestrip) |
 | `ChallengeRealBatchControlPanel` | [product/challenge-real-batch.md](./product/challenge-real-batch.md#challengerealbatchcontrolpanel) |
 | `ResearchAnomalyInboxPanel` | [product/research-anomaly-inbox.md](./product/research-anomaly-inbox.md#researchanomalyinboxpanel) |
+| `DigestApprovalQueuePanel` | [product/digest-approval-queue.md](./product/digest-approval-queue.md#digestapprovalqueuepanel) |
 | `ResearchAnomalyInboxExtendCta` | [product/research-anomaly-inbox.md](./product/research-anomaly-inbox.md#researchanomalyinboxextendcta) |
 | `ResearchWorkflowRecoveryPanel` | [product/research-recovery-panel.md](./product/research-recovery-panel.md#researchworkflowrecoverypanel) |
 | `ResearchWorkflowRecoveryEntry` | [product/research-recovery-panel.md](./product/research-recovery-panel.md#researchworkflowrecoveryentry) |

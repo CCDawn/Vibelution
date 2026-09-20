@@ -1,4 +1,5 @@
 export const queryKeys = {
+  digestApprovals: (teamId: string) => ["teams", teamId, "hypothesis-first", "digest-approvals"] as const,
   challengePhaseBoundary: (teamId: string) => ["teams", teamId, "challenge-phase-boundary"] as const,
   runtimeSummary: () => ["runtime", "summary"] as const,
   petActivity: () => ["pet", "activity"] as const,

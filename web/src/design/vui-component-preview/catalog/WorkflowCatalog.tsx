@@ -12,6 +12,7 @@ import { ChallengeTokenUsageStrip } from "../../../routes/teams/challenge-cup/Ch
 import { ChallengeRealBatchControlPanel } from "../../../routes/teams/research-workflow/ChallengeRealBatchControlPanel";
 import { ChallengeSubmissionReadinessPanel } from "../../../routes/teams/research-workflow/ChallengeSubmissionReadinessPanel";
 import { ResearchAnomalyInboxPanel } from "../../../routes/teams/research-workflow/ResearchAnomalyInboxPanel";
+import { DigestApprovalQueuePanel } from "../../../routes/teams/research-workflow/DigestApprovalQueuePanel";
 import { VuiPreviewCard } from "../VuiPreviewCard";
 import { VuiPreviewSection } from "../VuiPreviewSection";
 import { workflowCatalogClasses } from "./WorkflowCatalog.styles";
@@ -167,6 +168,45 @@ const challengeReadinessQueryClient = new QueryClient({
 challengeReadinessQueryClient.setQueryData(
   queryKeys.challengeSubmissionReadiness(previewTeamId),
   challengeReadinessPreview,
+);
+const digestApprovalQueuePreview = {
+  items: [
+    {
+      meetingRoundId: "hf-candgen-preview-r0",
+      meetingType: "hypothesis_candidate_generation",
+      questionId: "SCI-091",
+      digestContentHash: "preview-hash-1",
+      digestSummary: "第 0 轮候选生成讨论产出 12 条候选假说，共识收敛到三个可检验方向。",
+      proposedCandidateCount: 3,
+      riskCount: 1,
+      startedAt: "2026-09-01T10:00:00Z",
+      ageSeconds: 7_200,
+      ttlOverdue: false,
+      ttlMessage: "",
+    },
+    {
+      meetingRoundId: "hf-review-preview-r2",
+      meetingType: "hypothesis_review",
+      questionId: "SCI-096",
+      digestContentHash: "preview-hash-2",
+      digestSummary: "第二轮评审完成 pairwise 与 pareto，推荐保留 WIMP 假说进入修订。",
+      proposedCandidateCount: 2,
+      riskCount: 2,
+      startedAt: "2026-09-02T08:00:00Z",
+      ageSeconds: 86_400,
+      ttlOverdue: true,
+      ttlMessage: "digest TTL 已超时，等待人工确认",
+    },
+  ],
+  count: 2,
+  fetchedAtMs: 1_759_000_000_000,
+};
+const digestApprovalQueryClient = new QueryClient({
+  defaultOptions: { queries: { staleTime: Infinity, retry: false } },
+});
+digestApprovalQueryClient.setQueryData(
+  queryKeys.digestApprovals(previewTeamId),
+  digestApprovalQueuePreview,
 );
 const challengeCatalogOverviewPreview: CatalogOverview = {
   schemaVersion: 1,
@@ -376,6 +416,11 @@ export function WorkflowCatalog() {
       <VuiPreviewCard name="ResearchAnomalyInboxPanel" className={workflowCatalogClasses.card}>
         <QueryClientProvider client={challengeReadinessQueryClient}>
           <ResearchAnomalyInboxPanel teamId={previewTeamId} lang="zh" />
+        </QueryClientProvider>
+      </VuiPreviewCard>
+      <VuiPreviewCard name="DigestApprovalQueuePanel" className={workflowCatalogClasses.card}>
+        <QueryClientProvider client={digestApprovalQueryClient}>
+          <DigestApprovalQueuePanel teamId={previewTeamId} lang="zh" />
         </QueryClientProvider>
       </VuiPreviewCard>
       <VuiPreviewCard name="VWorkflowCanvas" className={workflowCatalogClasses.card}>
