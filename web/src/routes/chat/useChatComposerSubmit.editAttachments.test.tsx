@@ -23,6 +23,7 @@ const apiMocks = vi.hoisted(() => ({
   })),
   editResubmitSessionMessage: vi.fn(async (_sessionId: string, _payload: unknown) => ({
     id: "session-1",
+    activeTurnId: "accepted-edit-turn",
     currentPhase: "running",
     status: "running",
     messages: [],
@@ -34,7 +35,7 @@ vi.mock("../../api/chat", () => ({
   editResubmitSessionMessage: apiMocks.editResubmitSessionMessage,
   querySessions: vi.fn(),
   regenerateSessionMessage: vi.fn(),
-  stopSessionTurn: vi.fn(),
+  stopSessionTurn: vi.fn(async () => ({ id: "session-1", currentPhase: "stopping" })),
   submitSessionGuidance: vi.fn(),
   submitSessionMessage: vi.fn(),
   switchSessionHead: vi.fn(),
@@ -71,7 +72,11 @@ const imageAttachment: ComposerImageAttachment = {
   contentType: "image/png",
 };
 
-function Harness({ queryClient }: { queryClient: QueryClient }) {
+function Harness({ queryClient, sessionBusy = false, activeTurnId = "turn-1" }: {
+  queryClient: QueryClient;
+  sessionBusy?: boolean;
+  activeTurnId?: string;
+}) {
   const chatWorkspaceCache = useRef(createChatWorkspaceCache(queryClient)).current;
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
   const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>({
@@ -134,12 +139,12 @@ function Harness({ queryClient }: { queryClient: QueryClient }) {
     resolvedEditTarget: activeEditTarget,
     activeEditTarget,
     composerDisabled: false,
-    sessionBusy: false,
+    sessionBusy,
     sessionStopping: false,
     activePhase: "ready",
     activeAgentImageInputUnsupported: false,
     activeImageInputModelId: "model-1",
-    activeTurnId: "turn-1",
+    activeTurnId,
     detail: detailRef.current,
     setMentalModelEnabledForNextTurn: () => undefined,
     setRuntimeStatusEnabledForNextTurn: () => undefined,
@@ -160,6 +165,9 @@ function Harness({ queryClient }: { queryClient: QueryClient }) {
       <output data-testid="error">{sessionComposerErrors["session-1"] ?? ""}</output>
       <button type="button" data-testid="submit" onClick={() => actions.handleSubmitTurn()}>
         submit
+      </button>
+      <button type="button" data-testid="stop" onClick={() => actions.handleStopTurn()}>
+        stop
       </button>
     </div>
   );
@@ -222,5 +230,53 @@ describe("useChatComposerSubmit edit-resubmit attachments", () => {
     expect(container?.querySelector('[data-testid="draft"]')?.textContent).toBe("");
     expect(container?.querySelector('[data-testid="upload-pending"]')?.textContent).toBe("false");
     expect(container?.querySelector('[data-testid="error"]')?.textContent).toBe("");
+  });
+
+  it("keeps the stop identity while edit attachments are still uploading", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    let resolveUpload: ((value: { artifactId: string }) => void) | undefined;
+    apiMocks.uploadSessionImageAttachment.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveUpload = resolve;
+    }));
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <QueryClientProvider client={queryClient}>
+          <Harness queryClient={queryClient} sessionBusy activeTurnId="" />
+        </QueryClientProvider>,
+      );
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="stop"]')?.click();
+    });
+    expect(apiMocks.editResubmitSessionMessage).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveUpload?.({ artifactId: "artifact-edit-1" });
+      await Promise.resolve();
+    });
+    for (let round = 0; round < 6; round += 1) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+
+    expect(apiMocks.editResubmitSessionMessage).toHaveBeenCalledTimes(1);
+    expect(apiMocks.editResubmitSessionMessage.mock.calls[0]?.[1]).toEqual(expect.objectContaining({
+      clientSubmissionId: expect.any(String),
+    }));
+    expect((await import("../../api/chat")).stopSessionTurn).toHaveBeenCalledWith(
+      "session-1",
+      "accepted-edit-turn",
+    );
   });
 });

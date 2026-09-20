@@ -925,6 +925,11 @@ export function useChatComposerSubmitActions({
   companionAgentId,
 }: UseChatComposerSubmitActionsOptions): UseChatComposerSubmitActionsResult {
   const pendingStopAfterAcceptRef = useRef<Map<string, DeferredStopIntent>>(new Map());
+  // Uploading attachments happens before React Query creates the submit/edit
+  // mutation. Keep the same submission identity visible to Stop during that
+  // gap so a stop requested before upload completion can still match the late
+  // mutation acceptance, even after switching sessions.
+  const pendingUploadSubmissionRef = useRef<Map<string, string>>(new Map());
   const attachmentSnapshotRef = useRef<{ sessionId: string | null | undefined; attachments: ComposerImageAttachment[] }>({
     sessionId: activeSessionId,
     attachments: activeImageAttachments,
@@ -1144,6 +1149,7 @@ export function useChatComposerSubmitActions({
       return;
     }
     imageUploadInFlightRef.current[sessionId] = true;
+    pendingUploadSubmissionRef.current.set(sessionId, clientSubmissionId);
     setSessionImageUploadPending((current) => ({
       ...current,
       [sessionId]: true,
@@ -1239,7 +1245,11 @@ export function useChatComposerSubmitActions({
         );
         setSessionDrafts((current) => restoreSubmittedDraftIfComposerStillEmpty(current, sessionId, content));
       }
+      pendingStopAfterAcceptRef.current.delete(sessionId);
     } finally {
+      if (pendingUploadSubmissionRef.current.get(sessionId) === clientSubmissionId) {
+        pendingUploadSubmissionRef.current.delete(sessionId);
+      }
       imageUploadInFlightRef.current[sessionId] = false;
       setSessionImageUploadPending((current) => ({
         ...current,
@@ -1518,6 +1528,7 @@ export function useChatComposerSubmitActions({
         let attachmentIds: string[] = [];
         if (editAttachments.length) {
           imageUploadInFlightRef.current[activeSessionId] = true;
+          pendingUploadSubmissionRef.current.set(activeSessionId, clientSubmissionId);
           setSessionImageUploadPending((current) => ({
             ...current,
             [activeSessionId]: true,
@@ -1532,8 +1543,12 @@ export function useChatComposerSubmitActions({
               ...current,
               [activeSessionId]: describeError(error, lang === "zh" ? "图片上传失败" : "Image upload failed"),
             }));
+            pendingStopAfterAcceptRef.current.delete(activeSessionId);
             return;
           } finally {
+            if (pendingUploadSubmissionRef.current.get(activeSessionId) === clientSubmissionId) {
+              pendingUploadSubmissionRef.current.delete(activeSessionId);
+            }
             imageUploadInFlightRef.current[activeSessionId] = false;
             setSessionImageUploadPending((current) => ({
               ...current,
@@ -1789,7 +1804,7 @@ export function useChatComposerSubmitActions({
         : editResubmitMutation.isPending
           && editResubmitMutation.variables?.sessionId === activeSessionId
           ? editResubmitMutation.variables.clientSubmissionId
-          : undefined;
+          : pendingUploadSubmissionRef.current.get(activeSessionId);
       pendingStopAfterAcceptRef.current.set(activeSessionId, {
         sessionId: activeSessionId,
         previousDetail,
