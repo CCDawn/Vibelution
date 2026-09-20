@@ -1,13 +1,13 @@
 import "../../design/route-css/desktop-pet.tailwind.css";
 
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronUp, RefreshCw, X } from "lucide-react";
+import { ChevronDown, ChevronUp, RefreshCw, Settings, X } from "lucide-react";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import { fetchPetActivity } from "../../api/pet";
 import { queryKeys } from "../../api/queryKeys";
 import type { PetActivity } from "../../api/types/petActivity";
-import { VIconButton, VNativeButton } from "../../components/vui";
+import { VCheckbox, VIconButton, VInput, VNativeButton } from "../../components/vui";
 import { useShellI18n } from "../../i18n/useShellI18n";
 import { DesktopPetCharacter } from "./DesktopPetCharacter";
 import {
@@ -15,6 +15,7 @@ import {
   type DesktopPetCharacterId,
 } from "./desktopPetCharacterModel";
 import styles from "./DesktopPetRoute.styles";
+import { readPetPreferences, savePetPreferences, type DesktopPetPreferences } from "./desktopPetPreferences";
 import {
   openSessionFromDesktopPet,
   petActivityRefetchInterval,
@@ -50,6 +51,15 @@ const COPY = {
     collapse: "收起实时对话",
     close: "关闭桌面伙伴",
     unavailable: "暂时无法读取对话状态",
+    settings: "桌宠设置",
+    showStatus: "显示状态提示",
+    showTitles: "显示会话标题",
+    showCompletion: "显示完成提示和庆祝动作",
+    idleMessage: "空闲提示语",
+    idleHint: "留空使用默认提示",
+    saveFailed: "设置仅本次生效：无法保存到本机",
+    openFailed: "未能打开对话，请稍后重试",
+    anonymous: "会话",
   },
   en: {
     names: { xiaoluo: "Xiao Luo", dafeiyu: "DeepSeek Whale" },
@@ -60,13 +70,25 @@ const COPY = {
     collapse: "Hide live conversations",
     close: "Close desktop companion",
     unavailable: "Conversation status is unavailable",
+    settings: "Pet settings",
+    showStatus: "Show status",
+    showTitles: "Show conversation titles",
+    showCompletion: "Show completion and celebration",
+    idleMessage: "Idle message",
+    idleHint: "Leave blank for the default",
+    saveFailed: "Settings apply this time only: local storage unavailable",
+    openFailed: "Could not open the conversation. Try again.",
+    anonymous: "Conversation",
   },
 } as const;
 
 export function DesktopPetRoute() {
   const { lang } = useShellI18n();
   const copy = COPY[lang];
-  const [characterId, setCharacterId] = useState<DesktopPetCharacterId>("xiaoluo");
+  const [preferences, setPreferences] = useState(readPetPreferences);
+  const characterId = preferences.characterId;
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [feedback, setFeedback] = useState("");
   const [expanded, setExpanded] = useState(false);
   const [dragging, setDragging] = useState(false);
   const dragStateRef = useRef<DesktopPetDragState | null>(null);
@@ -125,8 +147,11 @@ export function DesktopPetRoute() {
   }
 
   async function openSession(sessionId: string) {
+    setFeedback("");
     if (await openSessionFromDesktopPet(sessionId)) {
       setExpanded(false);
+    } else {
+      setFeedback(copy.openFailed);
     }
   }
 
@@ -195,17 +220,32 @@ export function DesktopPetRoute() {
       suppressClickRef.current = false;
       return;
     }
+    setSettingsOpen(false);
     setExpanded((value) => !value);
   }
 
-  function switchCharacter() {
-    setCharacterId((current) => nextDesktopPetCharacter(current));
+  function updatePreferences(patch: Partial<DesktopPetPreferences>) {
+    const next = { ...preferences, ...patch };
+    setPreferences(next);
+    setFeedback(savePetPreferences(next) ? "" : copy.saveFailed);
   }
 
-  const visibleSessions = activity.sessions.slice(0, 5);
+  function setCharacterId(next: DesktopPetCharacterId) {
+    updatePreferences({ characterId: next });
+  }
+
+  function switchCharacter() {
+    setCharacterId(nextDesktopPetCharacter(characterId));
+  }
+
+  const visibleSessions = activity.sessions.filter((session) => preferences.showCompletion || session.tone !== "completed");
+  const tone = activityQuery.isError ? "idle"
+    : activity.aggregateTone === "completed" && !preferences.showCompletion ? "idle" : activity.aggregateTone;
+  const animationState = activityQuery.isError || (activity.aggregateTone === "completed" && !preferences.showCompletion)
+    ? "idle" : activity.animationState;
   const statusText = activityQuery.isError
     ? copy.unavailable
-    : petToneLabel(activity.aggregateTone, lang);
+    : tone === "idle" && preferences.idleMessage.trim() ? preferences.idleMessage : petToneLabel(tone, lang);
   const characterName = copy.names[characterId];
   const nextCharacterId = nextDesktopPetCharacter(characterId);
 
@@ -214,17 +254,25 @@ export function DesktopPetRoute() {
       className={styles.root}
       data-desktop-pet-root="true"
       data-vui-domain-recipe="desktop-pet"
-      data-tone={activity.aggregateTone}
+      data-tone={tone}
       data-dragging={dragging ? "true" : "false"}
       aria-label={characterName}
     >
       <div className={styles.stage}>
         <div className={styles.toolbar}>
-          <span className={styles.status} role="status" aria-live="polite">
+          {preferences.showStatus || activityQuery.isError ? <span className={styles.status} role="status" aria-live="polite">
             <span className={styles.statusDot} aria-hidden="true" />
             {statusText}
-          </span>
+          </span> : <span />}
           <div className={styles.toolbarActions}>
+            <VIconButton
+              label={copy.settings}
+              icon={<Settings size={14} aria-hidden="true" />}
+              variant="ghost"
+              className={styles.switchCharacter}
+              aria-expanded={settingsOpen}
+              onPress={() => { setSettingsOpen((value) => !value); setExpanded(false); }}
+            />
             <VIconButton
               label={copy.switchTo[nextCharacterId]}
               icon={<RefreshCw size={14} aria-hidden="true" />}
@@ -242,14 +290,31 @@ export function DesktopPetRoute() {
           </div>
         </div>
 
-        {expanded ? (
+        {settingsOpen ? (
+          <section className={styles.hud} aria-label={copy.settings}>
+            <header className={styles.hudHeader}><strong>{copy.settings}</strong></header>
+            <div className={styles.hudList}>
+              <VCheckbox isSelected={preferences.showStatus} onChange={(showStatus) => updatePreferences({ showStatus })}>{copy.showStatus}</VCheckbox>
+              <VCheckbox isSelected={preferences.showTitles} onChange={(showTitles) => updatePreferences({ showTitles })}>{copy.showTitles}</VCheckbox>
+              <VCheckbox isSelected={preferences.showCompletion} onChange={(showCompletion) => updatePreferences({ showCompletion })}>{copy.showCompletion}</VCheckbox>
+              <label>
+                {copy.idleMessage}
+                <VInput value={preferences.idleMessage} maxLength={48} placeholder={copy.idleHint}
+                  onChange={(event) => updatePreferences({ idleMessage: event.target.value })} />
+              </label>
+              {feedback ? <p role="status" className={styles.hudEmpty}>{feedback}</p> : null}
+            </div>
+          </section>
+        ) : expanded ? (
           <section className={styles.hud} aria-label={copy.sessions}>
             <header className={styles.hudHeader}>
               <strong>{copy.sessions}</strong>
               <span>{activity.activeCount}</span>
             </header>
             <div className={styles.hudList}>
-              {visibleSessions.length > 0 ? visibleSessions.map((session) => (
+              {feedback ? <p role="status" className={styles.hudEmpty}>{feedback}</p> : null}
+              {activityQuery.isError ? <p role="status" className={styles.hudEmpty}>{copy.unavailable}</p> : null}
+              {visibleSessions.length > 0 ? visibleSessions.map((session, index) => (
                 <VNativeButton
                   key={session.sessionId}
                   className={styles.session}
@@ -258,9 +323,9 @@ export function DesktopPetRoute() {
                 >
                   <span className={styles.sessionMarker} aria-hidden="true" />
                   <span className={styles.sessionCopy}>
-                    <strong>{session.title}</strong>
+                    <strong>{preferences.showTitles ? session.title : `${copy.anonymous} ${index + 1}`}</strong>
                     <span>
-                      {session.agentDisplayName ? `${session.agentDisplayName} · ` : ""}
+                      {preferences.showTitles && session.agentDisplayName ? `${session.agentDisplayName} · ` : ""}
                       {petPhaseLabel(session.phase, lang)}
                     </span>
                   </span>
@@ -285,8 +350,8 @@ export function DesktopPetRoute() {
           <DesktopPetCharacter
             characterId={characterId}
             name={characterName}
-            tone={activity.aggregateTone}
-            animationState={activity.animationState}
+            tone={tone}
+            animationState={animationState}
           />
           <span className={styles.expandCue} aria-hidden="true">
             {expanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}

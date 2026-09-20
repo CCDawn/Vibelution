@@ -81,6 +81,11 @@ export async function openSessionFromDesktopPet(
   if (!SESSION_ID_PATTERN.test(normalized) || typeof bridge?.openConversationFromPet !== "function") {
     return false;
   }
-  await bridge.openConversationFromPet(normalized);
-  return true;
+  try {
+    const result = await bridge.openConversationFromPet(normalized);
+    return typeof result === "object" && result !== null
+      && (result as { opened?: unknown }).opened === true;
+  } catch {
+    return false;
+  }
 }
