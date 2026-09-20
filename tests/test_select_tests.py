@@ -697,12 +697,21 @@ def test_selector_keeps_mixed_serial_parallel_rules_serial():
     pytest_commands = [
         command for command in result["commands"] if " -m pytest " in command
     ]
-    assert len(pytest_commands) == 3
+    # 4 batches: protocol/wire serial batch, the measured web_config_routes
+    # --dist load override, the remaining serial config batch, and the
+    # llm-provider-config-v2 parallel batch below.
+    assert len(pytest_commands) == 4
     assert all(
         " -n " not in command
         for command in pytest_commands
         if "tests/test_config_panel.py" in command
         or "tests/test_llm_protocol_cache_alignment.py" in command
+    )
+    # web_config_routes keeps its module serial mark but is a measured-safe
+    # per-test-distribution exception; the override must stay explicit (-n 4).
+    assert any(
+        "tests/test_web_config_routes.py -n 4 --dist load" in command
+        for command in pytest_commands
     )
     # The llm-provider-config-v2 focus rule carries no local-serial layer, so its
     # eight-file batch gets bounded xdist like every other multi-file batch.

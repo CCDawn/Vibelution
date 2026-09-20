@@ -181,7 +181,7 @@ Vibelution 支持通过 `pytest-xdist` 做进程级并行。直接运行 pytest 
 并行策略：
 
 - 优先使用 `--dist loadfile`，按测试文件分发，降低同一文件内共享 fixture/全局状态的交叉风险。
-- 已实测可安全按测试分发的 serial 套件是显式例外：`tests/test_web_app.py` 从 155.8s 降到 55.8s/55.9s/59.5s（`-n 4 --dist load`，三次通过；队列/并发时序测试的等待窗口已放宽到 10s）；web-session-chat 三文件路由/服务批次从 176.7s 降到 54.4s/56.9s（`-n 4 --dist load`，两次通过）。这类文件仍保留模块级 `serial` 标记（不进入通用 `not serial` 批次），只在矩阵规则或回退批次里用显式 `--dist load` 覆盖。
+- 已实测可安全按测试分发的 serial 套件是显式例外：`tests/test_web_app.py` 从 155.8s 降到 55.8s/55.9s/59.5s（`-n 4 --dist load`，三次通过；队列/并发时序测试的等待窗口已放宽到 10s）；web-session-chat 三文件路由/服务批次从 176.7s 降到 54.4s/56.9s（`-n 4 --dist load`，两次通过）；`tests/test_web_runtime_routes.py` 从 47.5s 降到 26.2s/22.1s（两次通过）；`tests/test_web_config_routes.py` 从 60.3s 降到 24.8s/30.4s（两次通过）。这类文件仍保留模块级 `serial` 标记（不进入通用 `not serial` 批次），只在矩阵规则或回退批次里用显式 `--dist load` 覆盖。
 - 在并行模式下排除 `serial` 标记；涉及真实进程、端口、共享全局状态、真实 workspace、外部 config 或 Launcher/runtime 生命周期的测试应标记为 `serial`。
 - 需要完整验证时优先使用 `--hybrid`：先并行运行 `not serial`，再串行运行 `serial`，避免把并行子集误判为全量通过。
 - 不把 `-n auto` 作为默认；本地开发建议先用 `--workers 2` 或 `--workers 4`，再根据耗时和稳定性调整。
