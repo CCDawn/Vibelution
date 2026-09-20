@@ -2462,3 +2462,68 @@ def test_reverify_citation_receipts_covers_evidence_set_beyond_default_cap(
     stored = challenge_question_runs._load_store("research-team")["records"][0]
     assert stored["validation"]["citationValidation"] == "passed"
     assert stored["validation"]["citation"]["missingUrls"] == []
+
+
+# ---------------------------------------------------------------------------
+# machine pre-review (advisory H1-H4 verdicts)
+# ---------------------------------------------------------------------------
+
+
+def test_machine_pre_review_green_structural_gates(tmp_path, monkeypatch) -> None:
+    _isolate_store(tmp_path, monkeypatch)
+    output = _output()
+    challenge_question_runs.register_challenge_question_output(
+        "research-team",
+        {"output": output, "registeredBy": "test-agent"},
+    )
+    report = challenge_question_runs.machine_pre_review(
+        "research-team", "SCI-096", "run-sci-096"
+    )
+    assert report["advisoryOnly"] is True
+    gates = report["gates"]
+    assert gates["H1_problem_understanding"]["status"] == "green"
+    assert gates["H2_hypothesis_selection"]["status"] == "green"
+    assert gates["H3_research_plan"]["status"] == "green"
+    # H4 depends on registration validation; with metadata-checked evidence the
+    # citation validation is not "passed" yet, so H4 must not be silently green.
+    assert gates["H4_external_output"]["status"] in {"yellow", "red"}
+
+
+def test_machine_pre_review_h4_maps_validation_dimensions() -> None:
+    gates_fn = challenge_question_runs._machine_pre_review_gates
+    output = {
+        "problem_understanding": {"scope": "s", "subquestions": ["q"]},
+        "selection": {"selected_hypothesis_id": "HYP-1"},
+        "hypotheses": [{"hypothesis_id": "HYP-1", "claim": "c"}],
+        "research_plan": {name: "text" for name in challenge_question_runs._PLAN_FULL_SECTIONS},
+        "evidence": [{"evidence_id": "E1"}],
+    }
+    green = gates_fn(
+        output,
+        {"citationValidation": "passed", "modelInvocationReceipts": "passed", "officialModelCall": "passed"},
+    )
+    assert green["H4_external_output"]["status"] == "green"
+    failed = gates_fn(
+        output,
+        {"citationValidation": "failed", "modelInvocationReceipts": "passed", "officialModelCall": "passed"},
+    )
+    assert failed["H4_external_output"]["status"] == "red"
+    unknown = gates_fn(output, {})
+    assert unknown["H4_external_output"]["status"] == "yellow"
+    no_evidence = gates_fn(
+        {**output, "evidence": []},
+        {"citationValidation": "passed", "modelInvocationReceipts": "passed", "officialModelCall": "passed"},
+    )
+    assert no_evidence["H4_external_output"]["status"] in {"yellow", "red"}
+
+
+def test_machine_pre_review_structural_degrades() -> None:
+    gates_fn = challenge_question_runs._machine_pre_review_gates
+    empty_output = {"evidence": []}
+    gates = gates_fn(empty_output, {})
+    assert gates["H1_problem_understanding"]["status"] == "red"
+    assert gates["H2_hypothesis_selection"]["status"] == "red"
+    assert gates["H3_research_plan"]["status"] == "red"
+    core_plan = {name: "text" for name in challenge_question_runs._PLAN_CORE_SECTIONS}
+    partial = gates_fn({"research_plan": core_plan}, {})
+    assert partial["H3_research_plan"]["status"] == "yellow"
