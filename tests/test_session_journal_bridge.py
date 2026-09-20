@@ -255,3 +255,47 @@ def test_facade_forwards_monkeypatched_project_root(tmp_path: Path, monkeypatch)
     assert session_service._session_ledger_sequence(session_id) >= 1
     snapshot = session_service.load_session_conversation_events_snapshot(session_id)
     assert len(snapshot) == 1
+
+
+def test_stale_inflight_slot_is_taken_over(tmp_path: Path, monkeypatch) -> None:
+    session_id = "journal-stale-takeover"
+    journal_bridge.invalidate_session_conversation_events_cache(session_id)
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-1",
+        EVENT_TURN_STARTED,
+        status="running",
+        payload={},
+        source="test",
+    )
+    root = tmp_path.resolve()
+    cache_key = journal_bridge._cache_key(root, session_id)
+    stale_owner = object()
+    with journal_bridge._SESSION_CONVERSATION_EVENTS_CACHE_CONDITION:
+        journal_bridge._SESSION_CONVERSATION_EVENTS_INFLIGHT[cache_key] = (
+            stale_owner,
+            journal_bridge._perf_counter() - journal_bridge._SESSION_EVENTS_INFLIGHT_STALE_SECONDS - 1.0,
+        )
+
+    events = journal_bridge.load_session_conversation_events_cached(session_id, project_root=root)
+
+    assert events, "stale slot must be taken over and the load must complete"
+    assert cache_key not in journal_bridge._SESSION_CONVERSATION_EVENTS_INFLIGHT
+
+
+def test_base_exception_releases_inflight_slot(tmp_path: Path, monkeypatch) -> None:
+    session_id = "journal-base-exc-cleanup"
+    journal_bridge.invalidate_session_conversation_events_cache(session_id)
+    root = tmp_path.resolve()
+    cache_key = journal_bridge._cache_key(root, session_id)
+
+    def raise_interrupt(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(journal_bridge, "load_conversation_events", raise_interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        journal_bridge.load_session_conversation_events_cached(session_id, project_root=root)
+
+    assert cache_key not in journal_bridge._SESSION_CONVERSATION_EVENTS_INFLIGHT
