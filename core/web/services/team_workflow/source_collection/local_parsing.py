@@ -250,7 +250,8 @@ def _safe_xml_frombytes(data: bytes, *, label: str) -> etree._Element:
 
 
 def _element_text(element: Any) -> str:
-    return " ".join("".join(element.itertext()).split())
+    normalized, _ = normalize_text_safety(" ".join("".join(element.itertext()).split()))
+    return normalized
 
 
 def _trim_block_text(text: str) -> str:
@@ -349,6 +350,10 @@ def parse_json(data: bytes) -> dict[str, Any]:
         payload = json.loads(text)
     except json.JSONDecodeError as exc:
         raise LocalParsingBlocked("json_invalid", str(exc)) from exc
+    except RecursionError as exc:
+        # 深嵌套在 loads 阶段就会炸（MAX_JSON_DEPTH 检查在其后），不隔离会
+        # 击穿整个导入链（run 启动即 500 且重试确定性再崩）。
+        raise LocalParsingBlocked("json_depth_exceeded", "recursion during json.loads") from exc
     depth = _json_depth(payload)
     if depth > MAX_JSON_DEPTH:
         raise LocalParsingBlocked("json_depth_exceeded", f"depth={depth}")
@@ -356,10 +361,14 @@ def parse_json(data: bytes) -> dict[str, Any]:
     if isinstance(payload, dict):
         for key, value in list(payload.items())[:MAX_BLOCKS]:
             rendered = json.dumps(value, ensure_ascii=False)[:MAX_BLOCK_TEXT_CHARS] if not isinstance(value, str) else value[:MAX_BLOCK_TEXT_CHARS]
+            rendered, norm_warnings = normalize_text_safety(rendered)
+            warnings.extend(norm_warnings)
             _append_block(blocks, f"key:{key}", rendered)
     elif isinstance(payload, list):
         for index, item in enumerate(payload[:MAX_BLOCKS], start=1):
             rendered = json.dumps(item, ensure_ascii=False)[:MAX_BLOCK_TEXT_CHARS] if not isinstance(item, str) else item[:MAX_BLOCK_TEXT_CHARS]
+            rendered, norm_warnings = normalize_text_safety(rendered)
+            warnings.extend(norm_warnings)
             _append_block(blocks, f"item:{index}", rendered)
     else:
         _append_block(blocks, "value:1", str(payload))
@@ -391,11 +400,13 @@ def parse_jsonl(data: bytes) -> dict[str, Any]:
             break
         try:
             payload = json.loads(line)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, RecursionError):
             parse_errors += 1
             continue
         depth = max(depth, _json_depth(payload))
         rendered = json.dumps(payload, ensure_ascii=False)[:MAX_BLOCK_TEXT_CHARS]
+        rendered, norm_warnings = normalize_text_safety(rendered)
+        warnings.extend(norm_warnings)
         _append_block(blocks, f"line:{line_count}", rendered)
     if parse_errors:
         warnings.append(f"jsonl_parse_errors:{parse_errors}")
