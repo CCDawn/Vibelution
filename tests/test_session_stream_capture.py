@@ -140,11 +140,68 @@ def test_stream_response_preserves_delta_whitespace_and_newlines(monkeypatch) ->
     with stream_capture._capture_session_ui_stream("cap-whitespace", capture):
         ui.stream_response("Hello", done=False)
         ui.stream_response(" world", done=False)
-        ui.stream_response("\nnext line", done=True)
+        ui.stream_response("\nnext line", done=False)
 
     assert capture.content == "Hello world\nnext line"
     assert published[-1]["content"] == "Hello world\nnext line"
 
+
+def test_stream_response_repeated_delta_is_not_deduplicated(monkeypatch) -> None:
+    capture = stream_capture.SessionTurnCapture(session_id="cap-repeat", turn_id="turn-repeat")
+    ui = SimpleNamespace(
+        stream_response=lambda *_args, **_kwargs: None,
+        clear_response_stream=lambda: None,
+        stream_thought=lambda *_args, **_kwargs: None,
+        clear_thought_stream=lambda: None,
+        set_pet_mental_state=lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr("core.ui.get_ui", lambda: ui)
+    monkeypatch.setattr(session_service, "_set_session_live_output", lambda *_args, **_kwargs: None)
+
+    with stream_capture._capture_session_ui_stream("cap-repeat", capture):
+        ui.stream_response("a", done=False)
+        ui.stream_response("a", done=False)
+        ui.stream_response("aa", done=True)
+
+    assert capture.content == "aa"
+
+
+def test_stream_response_done_replaces_draft_with_authoritative_text(monkeypatch) -> None:
+    capture = stream_capture.SessionTurnCapture(session_id="cap-revision", turn_id="turn-revision")
+    ui = SimpleNamespace(
+        stream_response=lambda *_args, **_kwargs: None,
+        clear_response_stream=lambda: None,
+        stream_thought=lambda *_args, **_kwargs: None,
+        clear_thought_stream=lambda: None,
+        set_pet_mental_state=lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr("core.ui.get_ui", lambda: ui)
+    monkeypatch.setattr(session_service, "_set_session_live_output", lambda *_args, **_kwargs: None)
+
+    with stream_capture._capture_session_ui_stream("cap-revision", capture):
+        ui.stream_response("draft", done=False)
+        ui.stream_response("final revised", done=True)
+
+    assert capture.content == "final revised"
+
+
+def test_stream_response_repeated_final_does_not_append(monkeypatch) -> None:
+    capture = stream_capture.SessionTurnCapture(session_id="cap-final", turn_id="turn-final")
+    ui = SimpleNamespace(
+        stream_response=lambda *_args, **_kwargs: None,
+        clear_response_stream=lambda: None,
+        stream_thought=lambda *_args, **_kwargs: None,
+        clear_thought_stream=lambda: None,
+        set_pet_mental_state=lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr("core.ui.get_ui", lambda: ui)
+    monkeypatch.setattr(session_service, "_set_session_live_output", lambda *_args, **_kwargs: None)
+
+    with stream_capture._capture_session_ui_stream("cap-final", capture):
+        ui.stream_response("final", done=True)
+        ui.stream_response("final", done=True)
+
+    assert capture.content == "final"
 
 def test_tool_start_with_explicit_turn_identity_survives_thread_boundary(monkeypatch) -> None:
     capture = stream_capture.SessionTurnCapture(session_id="cap-s3", turn_id="cap-t3")

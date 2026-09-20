@@ -1785,8 +1785,12 @@ def _ensure_session_ui_capture_hooks(ui: Any) -> None:
             session_id = str(context.get("sessionId") or "").strip()
             if not isinstance(capture, SessionTurnCapture) or not session_id:
                 return
-            cleaned = s._sanitize_message_delta_content("assistant", text)
-            if cleaned:
+            cleaned = (
+                s._sanitize_message_content("assistant", text)
+                if done
+                else s._sanitize_message_delta_content("assistant", text)
+            )
+            if cleaned or done:
                 # Worker liveness heartbeat (throttled inside the helper): a
                 # long response stream otherwise leaves the work-run updatedAt
                 # frozen at the last tool result and can trip the stale sweep.
@@ -1797,11 +1801,10 @@ def _ensure_session_ui_capture_hooks(ui: Any) -> None:
                 )
                 capture.close_latest_thought_boundary()
                 previous = str(capture.content or "")
-                if previous and cleaned.startswith(previous):
-                    next_content = cleaned
-                else:
-                    next_content = f"{previous}{cleaned}" if previous else cleaned
-                capture.note_content(next_content)
+                next_content = cleaned if done else f"{previous}{cleaned}" if previous else cleaned
+                # Stream callbacks provide deltas until the terminal callback,
+                # which provides the authoritative complete response.
+                capture.content = next_content
                 batcher = context.get("textBatcher")
                 if isinstance(batcher, _SessionUiCaptureTextBatcher):
                     batcher.note_response(next_content, done=done)
