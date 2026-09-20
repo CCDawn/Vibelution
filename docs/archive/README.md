@@ -19,6 +19,7 @@
 | [plans/2026-08-15/](plans/2026-08-15/) | 团队 Agent 感知 / 点对点 / 会话团队标签历史计划 |
 | [ops/2026-05/](ops/2026-05/) | 原 ops 根下治理/审计快照 |
 | [ops/efficiency-baselines/](ops/efficiency-baselines/) | 效率基线快照 |
+| [ops/rust-partial-replacement-pilot.md](ops/rust-partial-replacement-pilot.md) | Rust sidecar 部分替换试验（2026-09-20 退役，统一回 Python 实现） |
 | [frontend/](frontend/) | 一次性前端预算/计划笔记 |
 | [superpowers/](superpowers/) | 原 `docs/superpowers/`（specs / plans / evidence） |
 | [testing/](testing/) | 一次性测试报告与迁移 ledger |
