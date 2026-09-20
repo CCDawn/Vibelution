@@ -110,7 +110,15 @@ def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = ""
         event_turn_id = str(event.turn_id or turn_id)
         s._invalidate_session_conversation_events_cache(normalized_session_id)
         s._discard_session_live_output_state(normalized_session_id, turn_id=turn_id)
-    except Exception:
+    except Exception as exc:
+        # 这是崩溃后关闭开轮/丢弃残留 live output 的唯一入口；持续失败会让
+        # 会话永远显示 running 且连一条告警都没有。保持不抛语义，但必须可见。
+        from . import read_health
+
+        read_health.note_session_read_degraded(
+            source="stale session ledger reconcile",
+            error_type=type(exc).__name__,
+        )
         return
     try:
         s.record_runtime_scene_event(

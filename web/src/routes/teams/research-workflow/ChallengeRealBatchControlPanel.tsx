@@ -310,8 +310,19 @@ export function ChallengeRealBatchControlPanel({
     ].slice(0, 5));
   }
 
-  function updateProjection(next: ChallengeCupRealBatchProjection) {
-    queryClient.setQueryData(statusKey, next);
+  function updateProjection(next: ChallengeCupRealBatchProjection, planId: ChallengeCupRealBatchPlanId) {
+    // Write back under the key of the plan that issued the request: the
+    // mutation callbacks close over the latest render, so a plan switch while
+    // the request is in flight would otherwise relabel the response onto the
+    // newly selected plan's cache.
+    queryClient.setQueryData(queryKeys.challengeCupRealBatchStatus(teamId, planId), next);
+  }
+
+  function planIsCurrent(planId: ChallengeCupRealBatchPlanId) {
+    // UI-only side effects (events, polling toggles, confirm reset) belong to
+    // the plan the user is looking at; a response arriving for a plan they
+    // switched away from must not touch the current view.
+    return planId === selectedPlanId;
   }
 
   function setPollingState(enabled: boolean) {
@@ -360,25 +371,29 @@ export function ChallengeRealBatchControlPanel({
         maxItems: null,
         failureBudget: null,
       }),
-    onSuccess: (result: ChallengeCupRealBatchStartResponse, _vars, ctx) => {
-      const next = normalizeProjection(result, selectedPlanId);
+    onSuccess: (result: ChallengeCupRealBatchStartResponse, vars, ctx) => {
+      const next = normalizeProjection(result, vars.planId);
       if (!next) {
         ctx?.telemetry?.failed(new Error("start_response_shape_invalid"));
-        setAuthorization(null);
-        setPollingState(false);
-        setConfirmAction(null);
-        addEvent(zh ? "启动响应异常 · 状态保持关闭" : "Start response invalid · state remains closed");
+        if (planIsCurrent(vars.planId)) {
+          setAuthorization(null);
+          setPollingState(false);
+          setConfirmAction(null);
+          addEvent(zh ? "启动响应异常 · 状态保持关闭" : "Start response invalid · state remains closed");
+        }
         return;
       }
       ctx?.telemetry?.succeeded({
         launchedCount: (result.launched ?? []).length,
         questionCount: next.questionCount,
       });
-      updateProjection(next);
-      setConfirmAction(null);
-      setPollingState(!next.gateComplete && !next.cancelled && next.canResume);
-      const launched = result.launched ?? [];
-      addEvent(zh ? `启动完成 · 新派遣 ${launched.length} 个问题` : `Start completed · launched ${launched.length} questions`);
+      updateProjection(next, vars.planId);
+      if (planIsCurrent(vars.planId)) {
+        setConfirmAction(null);
+        setPollingState(!next.gateComplete && !next.cancelled && next.canResume);
+        const launched = result.launched ?? [];
+        addEvent(zh ? `启动完成 · 新派遣 ${launched.length} 个问题` : `Start completed · launched ${launched.length} questions`);
+      }
     },
     onError: (reason: unknown, _vars, ctx) => {
       ctx?.telemetry?.failed(reason);
@@ -391,27 +406,33 @@ export function ChallengeRealBatchControlPanel({
   const pollMutation = useMutation({
     mutationFn: ({ teamId: mutationTeamId, planId }: { teamId: string; planId: ChallengeCupRealBatchPlanId }) =>
       pollChallengeCupRealBatch(mutationTeamId, planId),
-    onSuccess: (result: ChallengeCupRealBatchPollResponse) => {
-      const next = normalizeProjection(result, selectedPlanId);
+    onSuccess: (result: ChallengeCupRealBatchPollResponse, vars) => {
+      const next = normalizeProjection(result, vars.planId);
       if (!next) {
-        setPollingState(false);
-        addEvent(zh ? "后台刷新响应异常 · 状态保持关闭" : "Background poll response invalid · state remains closed");
+        if (planIsCurrent(vars.planId)) {
+          setPollingState(false);
+          addEvent(zh ? "后台刷新响应异常 · 状态保持关闭" : "Background poll response invalid · state remains closed");
+        }
         return;
       }
-      updateProjection(next);
-      if (next.gateComplete || next.cancelled || !next.canResume) setPollingState(false);
-      const harvested = result.harvested ?? [];
-      const launched = result.launched ?? [];
-      if (harvested.length || launched.length) {
-        addEvent(zh
-          ? `后台刷新 · 收获 ${harvested.length} · 新派遣 ${launched.length}`
-          : `Background poll · harvested ${harvested.length} · launched ${launched.length}`);
+      updateProjection(next, vars.planId);
+      if (planIsCurrent(vars.planId)) {
+        if (next.gateComplete || next.cancelled || !next.canResume) setPollingState(false);
+        const harvested = result.harvested ?? [];
+        const launched = result.launched ?? [];
+        if (harvested.length || launched.length) {
+          addEvent(zh
+            ? `后台刷新 · 收获 ${harvested.length} · 新派遣 ${launched.length}`
+            : `Background poll · harvested ${harvested.length} · launched ${launched.length}`);
+        }
       }
     },
     onError: (reason: unknown, vars) => {
       observeRealBatchPollLoopStopped({ teamId: vars.teamId, planId: vars.planId, error: reason });
-      setPollingState(false);
-      addEvent(zh ? `后台刷新失败 · ${errorText(reason, "状态不可用")}` : `Background poll failed · ${errorText(reason, "Status unavailable")}`);
+      if (planIsCurrent(vars.planId)) {
+        setPollingState(false);
+        addEvent(zh ? `后台刷新失败 · ${errorText(reason, "状态不可用")}` : "Background poll failed · Status unavailable");
+      }
     },
   });
 
@@ -421,20 +442,24 @@ export function ChallengeRealBatchControlPanel({
     }),
     mutationFn: ({ teamId: mutationTeamId, planId }: { teamId: string; planId: ChallengeCupRealBatchPlanId }) =>
       cancelChallengeCupRealBatch(mutationTeamId, planId, { confirmed: true }),
-    onSuccess: (result: ChallengeCupRealBatchProjection, _vars, ctx) => {
-      const next = normalizeProjection(result, selectedPlanId);
+    onSuccess: (result: ChallengeCupRealBatchProjection, vars, ctx) => {
+      const next = normalizeProjection(result, vars.planId);
       if (!next) {
         ctx?.telemetry?.failed(new Error("cancel_response_shape_invalid"));
-        setPollingState(false);
-        setConfirmAction(null);
-        addEvent(zh ? "取消响应异常 · 状态保持关闭" : "Cancel response invalid · state remains closed");
+        if (planIsCurrent(vars.planId)) {
+          setPollingState(false);
+          setConfirmAction(null);
+          addEvent(zh ? "取消响应异常 · 状态保持关闭" : "Cancel response invalid · state remains closed");
+        }
         return;
       }
       ctx?.telemetry?.succeeded();
-      updateProjection(next);
-      setConfirmAction(null);
-      setPollingState(false);
-      addEvent(zh ? "批次已取消 · 运行中的问题未被强制终止" : "Batch cancelled · running questions were not force-stopped");
+      updateProjection(next, vars.planId);
+      if (planIsCurrent(vars.planId)) {
+        setConfirmAction(null);
+        setPollingState(false);
+        addEvent(zh ? "批次已取消 · 运行中的问题未被强制终止" : "Batch cancelled · running questions were not force-stopped");
+      }
     },
     onError: (reason: unknown, _vars, ctx) => {
       ctx?.telemetry?.failed(reason);
