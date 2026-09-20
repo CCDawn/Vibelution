@@ -46,6 +46,7 @@ export type SessionSummary = {
   };
   readOnly?: boolean;
   lastTurnStatus?: string;
+  lastTurnTerminalTurnId?: string;
   /** Canonical turn terminal reason: success | failed_runtime | needs_continue | ... */
   terminalReason?: string;
   sessionKind?: "main" | "child" | string;
