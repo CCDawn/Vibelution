@@ -7,6 +7,8 @@ import os
 from pathlib import Path, PurePath
 from typing import Any, Mapping
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 def _lexical_normalize(path: Path) -> Path:
     """Collapse . / .. without requiring the path to exist."""
