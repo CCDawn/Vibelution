@@ -267,6 +267,30 @@ def test_readonly_batch_isolates_worker_exception_and_preserves_success_results(
     assert all(message_id != id(original_messages) for message_id in worker_message_ids)
 
 
+def test_serial_tool_exception_isolated_into_error_tool_message():
+    """A failing serial (mutating) tool must degrade to an error ToolMessage, not burn the turn."""
+
+    original_messages: list[Any] = []
+
+    class CapturingBridge(ToolLifecycleBridge):
+        def execute_tool(self, tool_call, messages):  # type: ignore[override]
+            raise RuntimeError("kaboom")
+
+    bridge = CapturingBridge(tool_executor_execute=lambda _name, _args: ("unused", None))
+
+    action = bridge.execute_tools(
+        [{"name": "write_file_tool", "args": {}, "id": "call-write"}],
+        original_messages,
+    )
+
+    assert action is None
+    assert len(original_messages) == 1
+    message = original_messages[0]
+    assert isinstance(message, ToolMessage)
+    assert message.tool_call_id == "call-write"
+    assert "[错误] 工具 write_file_tool 执行失败: RuntimeError: kaboom" in message.content
+
+
 def test_readonly_batch_gives_each_future_an_independent_context_copy():
     worker_context = ContextVar("readonly_worker_context", default="missing")
     parent_token = worker_context.set("parent")

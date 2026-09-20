@@ -107,6 +107,10 @@ import {
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { publishConfigDraftPresence } from "./configDraftPresence";
+import {
+  markProviderOnboardingSeen,
+  shouldAutoOpenProviderOnboarding,
+} from "./config/onboardingGate";
 import { useConfigWorkspaceQueries } from "./config/useConfigWorkspaceQueries";
 import {
   buildConfigApplyRequestPayload,
@@ -2319,6 +2323,18 @@ export function ConfigRoute() {
   useEffect(() => {
     publishConfigDraftPresence(configDraftPresenceDirty);
   }, [configDraftPresenceDirty]);
+  // First-run onboarding: auto-open the provider quick-setup panel once per
+  // browser session while no model credential is configured (skippable, and
+  // the settings entry stays available via "添加连接").
+  useEffect(() => {
+    if (!workspace?.modelOptions) {
+      return;
+    }
+    if (shouldAutoOpenProviderOnboarding(workspace.modelOptions)) {
+      markProviderOnboardingSeen();
+      setProviderConnecting(true);
+    }
+  }, [workspace]);
   const workspaceSections = workspace?.sections ?? [];
   const editorSections = workspace?.editorSections ?? [];
   const editorMeta = workspace?.editorMeta ?? {};
@@ -2525,7 +2541,11 @@ export function ConfigRoute() {
     pendingFocusSectionRef.current = sectionId;
     window.requestAnimationFrame(() => {
       const section = document.getElementById(`config-${sectionId}`);
-      if (!section || !isSectionVisible(sectionId)) return;
+      if (!section || !isSectionVisible(sectionId)) {
+        // 消费掉这次交互意图：聚焦失败不残留 pending，避免陈旧值遮蔽后续导航。
+        pendingFocusSectionRef.current = "";
+        return;
+      }
       section.scrollIntoView({ behavior: "smooth", block: "start" });
       section.focus({ preventScroll: true });
       pendingFocusSectionRef.current = "";
@@ -2544,15 +2564,34 @@ export function ConfigRoute() {
       lastFocusedSelectionRef.current = focusDecision.nextKey;
       return;
     }
-    if (!isSectionVisible(focusSectionId) || !focusDecision.shouldFocus) return;
-    const frame = window.requestAnimationFrame(() => {
+    if (!isSectionVisible(focusSectionId) || !focusDecision.shouldFocus) {
+      // URL 跨页 focus 等待目标页可见是合法状态；但 pending 不应残留，
+      // 否则它会以陈旧值遮蔽后续 URL 焦点参数。
+      pendingFocusSectionRef.current = "";
+      return;
+    }
+    // 懒加载 section 可能晚于首帧挂载（R2），单帧拿不到 DOM 时有界重试，
+    // 避免「跳转到设置项」静默失效；重试耗尽同样清理，不残留焦点意图。
+    let frame = 0;
+    let attempts = 0;
+    const focusWhenMounted = () => {
       const section = document.getElementById(`config-${focusSectionId}`);
-      if (!section) return;
+      if (!section) {
+        if (attempts >= 60) {
+          lastFocusedSelectionRef.current = focusDecision.nextKey;
+          pendingFocusSectionRef.current = "";
+          return;
+        }
+        attempts += 1;
+        frame = window.requestAnimationFrame(focusWhenMounted);
+        return;
+      }
       section.scrollIntoView({ behavior: "smooth", block: "start" });
       section.focus({ preventScroll: true });
       lastFocusedSelectionRef.current = focusDecision.nextKey;
       pendingFocusSectionRef.current = "";
-    });
+    };
+    frame = window.requestAnimationFrame(focusWhenMounted);
     return () => window.cancelAnimationFrame(frame);
   }, [activeGroupId, activePageId, requestedFocusSectionId, activePage?.id]);
 
