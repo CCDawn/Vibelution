@@ -34,6 +34,23 @@ _CONSERVATIVE_BOUND_METHOD = "beta_binomial"
 _EVIDENCE_SCOPE = "global_panel_v1"
 
 
+def _safe_int(value: Any) -> int:
+    """Evidence counters coerce malformed values to 0 (fail-closed), never raise."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def _safe_float(value: Any) -> float | None:
+    """Numeric evidence must be a real number; bool counts as missing."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
 @dataclass(frozen=True, slots=True)
 class GateCheck:
     check_id: str
@@ -96,17 +113,17 @@ def evaluate_rubric_promotion_gate(
         panel = {}
     candidate = _select_candidate(versions)
 
-    anchored_pairs = int(panel.get("anchoredPairs") or 0)
+    anchored_pairs = _safe_int(panel.get("anchoredPairs"))
     anchored_kappa_payload = panel.get("anchoredKappa")
     anchored_kappa_payload = (
         anchored_kappa_payload if isinstance(anchored_kappa_payload, Mapping) else {}
     )
     kappa_defined = bool(anchored_kappa_payload.get("defined"))
-    kappa_value = anchored_kappa_payload.get("kappa")
+    kappa_value = _safe_float(anchored_kappa_payload.get("kappa"))
     bounds = panel.get("falseAutoApproveUpperBounds")
     bounds = bounds if isinstance(bounds, Mapping) else {}
-    trials_auto_approved = int(bounds.get("trialsAutoApproved") or 0)
-    bound_value = bounds.get(_CONSERVATIVE_BOUND_METHOD)
+    trials_auto_approved = _safe_int(bounds.get("trialsAutoApproved"))
+    bound_value = _safe_float(bounds.get(_CONSERVATIVE_BOUND_METHOD))
 
     checks: list[GateCheck] = []
 
@@ -130,8 +147,8 @@ def evaluate_rubric_promotion_gate(
     )
     kappa_passed = bool(
         kappa_defined
-        and isinstance(kappa_value, (int, float))
-        and float(kappa_value) >= KAPPA_ACCEPTABLE_THRESHOLD
+        and kappa_value is not None
+        and kappa_value >= KAPPA_ACCEPTABLE_THRESHOLD
     )
     checks.append(
         GateCheck(
@@ -147,8 +164,8 @@ def evaluate_rubric_promotion_gate(
     )
     bound_passed = bool(
         trials_auto_approved >= 1
-        and isinstance(bound_value, (int, float))
-        and float(bound_value) <= DEFAULT_MAX_FALSE_AUTO_APPROVE_UPPER_BOUND
+        and bound_value is not None
+        and bound_value <= DEFAULT_MAX_FALSE_AUTO_APPROVE_UPPER_BOUND
     )
     checks.append(
         GateCheck(

@@ -132,3 +132,37 @@ def test_promote_service_promotes_when_eligible(
     assert promoted[0][0] == "rv-1"
     assert promoted[0][1]["gate"] == "rubric_promotion_v1"
     assert promoted[0][1]["anchoredPairs"] == 5
+
+
+def test_malformed_evidence_counters_fail_closed() -> None:
+    """Malformed (non-numeric) counters must fail closed, not raise 500."""
+    panel = _panel()
+    panel["anchoredPairs"] = "many"
+    panel["falseAutoApproveUpperBounds"]["trialsAutoApproved"] = None
+    result = evaluate_rubric_promotion_gate(panel, [_version("rv-1", "shadow", "h1")])
+    assert result.eligible is False
+    failed = {c.check_id for c in result.checks if not c.passed}
+    assert "anchored_evidence_sufficient" in failed
+    assert "false_auto_approve_bounded" in failed
+    assert result.evidence["anchoredPairs"] == 0
+
+
+def test_bool_evidence_values_count_as_missing() -> None:
+    """bool is an int subclass; True must never satisfy a numeric threshold."""
+    panel = _panel()
+    panel["anchoredKappa"]["kappa"] = True
+    panel["falseAutoApproveUpperBounds"]["beta_binomial"] = True
+    result = evaluate_rubric_promotion_gate(panel, [_version("rv-1", "shadow", "h1")])
+    assert result.eligible is False
+    failed = {c.check_id for c in result.checks if not c.passed}
+    assert "anchored_kappa_acceptable" in failed
+    assert "false_auto_approve_bounded" in failed
+
+
+def test_negative_or_fractional_pair_counts_fail_closed() -> None:
+    panel = _panel(anchored_pairs=-3)
+    result = evaluate_rubric_promotion_gate(panel, [_version("rv-1", "shadow", "h1")])
+    assert result.eligible is False
+    assert "anchored_evidence_sufficient" in {
+        c.check_id for c in result.checks if not c.passed
+    }

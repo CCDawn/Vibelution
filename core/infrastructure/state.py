@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import os
 import json
+import tempfile
 import threading
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 
 
 # ============================================================================
@@ -314,11 +316,19 @@ class StateManager:
             "tools_executed": self._tools_executed,
             "recent_actions": self._recent_actions[-10:],  # 只保存最近10个
             "consecutive_count": self._consecutive_count,
-            "saved_at": datetime.now().isoformat(),
+            "saved_at": datetime.now().astimezone().isoformat(),
         }
 
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(state_data, f, ensure_ascii=False, indent=2)
+        target = Path(filepath)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp_path = tempfile.mkstemp(prefix=f".{target.name}.", dir=str(target.parent))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(state_data, f, ensure_ascii=False, indent=2)
+            os.replace(temp_path, target)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
 
         return filepath
 
