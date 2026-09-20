@@ -11,6 +11,7 @@ const styles = {
   hudHeader: "desktop-pet-hud__header",
   hudList: "desktop-pet-hud__list",
   hudEmpty: "desktop-pet-hud__empty",
+  settingsLabel: "text-white",
   session: "desktop-pet-session",
   sessionMarker: "desktop-pet-session__marker",
   sessionCopy: "desktop-pet-session__copy",
