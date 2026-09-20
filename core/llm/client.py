@@ -2125,44 +2125,47 @@ def _llm_provider_proxy_env(config: Any, base_url: Any) -> Iterator[None]:
     proxy_url = str(getattr(network_config, "proxy_url", "") or "").strip()
     raw_base_url = str(base_url or "").strip()
     proxy_token = _LLM_EFFECTIVE_PROXY.set(None)
+    leased = False
     try:
         if is_llm_local_network_base_url(raw_base_url):
             _ensure_no_proxy_for_local_base_url(raw_base_url)
             yield
             return
-        desired_proxy = proxy_url if proxy_enabled and proxy_url else None    # Calls with the same effective proxy share one environment lease. The
-    # first entrant installs it and the last exit restores it; holding an
-    # exclusive writer for a whole stream would serialize identical callers.
-    with _PROXY_ENV_CONDITION:
-        while _PROXY_ENV_STATE["users"] and _PROXY_ENV_STATE["proxy"] != desired_proxy:
-            _PROXY_ENV_CONDITION.wait()
-        if not _PROXY_ENV_STATE["users"]:
-            _PROXY_ENV_STATE["previous"] = {
-                env_name: os.environ.get(env_name) for env_name in _PROXY_ENV_NAMES
-            }
-            _PROXY_ENV_STATE["proxy"] = desired_proxy
-            for env_name in _PROXY_ENV_NAMES:
-                if desired_proxy is None:
-                    os.environ.pop(env_name, None)
-                else:
-                    os.environ[env_name] = desired_proxy
-        _PROXY_ENV_STATE["users"] += 1
-    _LLM_EFFECTIVE_PROXY.set(desired_proxy)
-    try:
+        desired_proxy = proxy_url if proxy_enabled and proxy_url else None
+        # Calls with the same effective proxy share one environment lease. The
+        # first entrant installs it and the last exit restores it; holding an
+        # exclusive writer for a whole stream would serialize identical callers.
+        with _PROXY_ENV_CONDITION:
+            while _PROXY_ENV_STATE["users"] and _PROXY_ENV_STATE["proxy"] != desired_proxy:
+                _PROXY_ENV_CONDITION.wait()
+            if not _PROXY_ENV_STATE["users"]:
+                _PROXY_ENV_STATE["previous"] = {
+                    env_name: os.environ.get(env_name) for env_name in _PROXY_ENV_NAMES
+                }
+                _PROXY_ENV_STATE["proxy"] = desired_proxy
+                for env_name in _PROXY_ENV_NAMES:
+                    if desired_proxy is None:
+                        os.environ.pop(env_name, None)
+                    else:
+                        os.environ[env_name] = desired_proxy
+            _PROXY_ENV_STATE["users"] += 1
+        leased = True
+        _LLM_EFFECTIVE_PROXY.set(desired_proxy)
         yield
     finally:
         _LLM_EFFECTIVE_PROXY.reset(proxy_token)
-        with _PROXY_ENV_CONDITION:
-            _PROXY_ENV_STATE["users"] -= 1
-            if not _PROXY_ENV_STATE["users"]:
-                for env_name, value in _PROXY_ENV_STATE["previous"].items():
-                    if value is None:
-                        os.environ.pop(env_name, None)
-                    else:
-                        os.environ[env_name] = value
-                _PROXY_ENV_STATE["previous"] = {}
-                _PROXY_ENV_STATE["proxy"] = None
-                _PROXY_ENV_CONDITION.notify_all()
+        if leased:
+            with _PROXY_ENV_CONDITION:
+                _PROXY_ENV_STATE["users"] -= 1
+                if not _PROXY_ENV_STATE["users"]:
+                    for env_name, value in _PROXY_ENV_STATE["previous"].items():
+                        if value is None:
+                            os.environ.pop(env_name, None)
+                        else:
+                            os.environ[env_name] = value
+                    _PROXY_ENV_STATE["previous"] = {}
+                    _PROXY_ENV_STATE["proxy"] = None
+                    _PROXY_ENV_CONDITION.notify_all()
 
 
 def _llm_new_httpx_client(
@@ -2170,7 +2173,7 @@ def _llm_new_httpx_client(
     timeout: Any,
     verify: Any,
     follow_redirects: bool = False,
-) -> "httpx.Client":
+) -> Any:
     """Build an httpx client with an explicit proxy and ``trust_env=False``.
 
     The process-level proxy env lease only covers code that reads
@@ -2182,6 +2185,8 @@ def _llm_new_httpx_client(
     lease scope; outside a lease the client is a direct connection, which
     matches the lease semantics (it pops ambient proxy env while active).
     """
+
+    import httpx
 
     return httpx.Client(
         timeout=timeout,
