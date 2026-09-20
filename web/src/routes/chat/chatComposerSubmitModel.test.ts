@@ -139,6 +139,13 @@ describe("chatComposerSubmitModel", () => {
     );
     expect(result.attachments.map((item) => item.id)).toEqual(["doc-1", "img-1", "doc-2", "img-2"]);
     expect(result.rejected.map((item) => item.filename)).toEqual(["doc-3"]);
+    const overExisting = mergeComposerAttachmentsWithRejections(
+      [make("old-1", "document"), make("old-2", "document"), make("old-3", "document")],
+      [make("new-image", "image")],
+      { maxDocuments: 2 },
+    );
+    expect(overExisting.attachments.map((item) => item.id)).toEqual(["old-1", "old-2", "new-image"]);
+    expect(overExisting.rejected.map((item) => item.id)).toEqual(["old-3"]);
   });
 
   it("builds knowledge and file reference payloads", () => {

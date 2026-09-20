@@ -990,7 +990,7 @@ export function useChatComposerSubmitActions({
         maxImages: MAX_COMPOSER_IMAGE_ATTACHMENTS,
         maxDocuments: MAX_COMPOSER_DOCUMENT_ATTACHMENTS,
       });
-      capacityRejected = mergePreview.rejected.filter((attachment) => accepted.some((item) => item.id === attachment.id));
+      capacityRejected = mergePreview.rejected;
       capacityRejected.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
       attachmentSnapshotRef.current = { sessionId: activeSessionId, attachments: mergePreview.attachments };
       setSessionImageAttachments((current) => {
