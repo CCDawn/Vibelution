@@ -67,6 +67,16 @@
 
 ---
 
+## P4 — 动态层（2026-09-20 新增：并行态势 / 修复知识 / 开工简报）
+
+静态导航层（R01–R26）已打满；本批补动态层。工具均为只读或自愿登记，不接门禁。
+
+| ID | 项 | 范围 | DoD | 验证 | Status |
+| --- | --- | --- | --- | --- | --- |
+| **R40** | **并行会话态势** | `scripts/agent_session_status.py` | 一条命令输出活跃 claims/worktree/main 近合入/脏文件疑似 owner/合入时机判断（`--check-merge --files`）；coordination 缺失降级 git-only | `tests/test_agent_session_status.py` | **done** (2026-09-20) |
+| **R41** | **跨会话修复知识库** | `scripts/fix_ledger.py` + `scripts/fix_ledger_seed.jsonl` | record/query/list/import 子命令；entries.jsonl 存 Git common-dir `vibelution-cache/fix_ledger/`；三类条目 defect/erratum/recipe；seed 14 条勘误/配方/根因导入幂等 | `tests/test_fix_ledger.py` | **done** (2026-09-20) |
+| **R42** | **任务开工简报** | `scripts/task_brief.py` | `--task/--files` 聚合：矩阵域定位+测试命令、claim 冲突预检、fix_ledger 修复历史、文档指引 | `tests/test_task_brief.py` | **done** (2026-09-20) |
+
 ## P3 — 低 ROI 或延后（ enticing 但贵）
 
 | ID | 项 | 为何延后 |
