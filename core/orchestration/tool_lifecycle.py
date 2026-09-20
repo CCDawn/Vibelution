@@ -643,7 +643,20 @@ class ToolLifecycleBridge:
                 continue
             if len(batch) == 1:
                 tool_call = batch[0]
-                result, action = self.execute_tool(tool_call, messages)
+                try:
+                    result, action = self.execute_tool(tool_call, messages)
+                except Exception as exc:
+                    # One failing tool must not burn the whole turn: bind an
+                    # error ToolMessage for the declared call (same isolation
+                    # semantics as the read-only batch path) so the model can
+                    # react to the failure instead of the turn hard-failing.
+                    result, action = self._serial_tool_error_result(tool_call, exc), None
+                    _debug_logger.warning(
+                        f"[工具生命周期] 串行工具失败但不终止整轮: "
+                        f"{_tool_call_name(tool_call if isinstance(tool_call, Mapping) else {})} "
+                        f"{type(exc).__name__}: {exc}",
+                        tag="TOOL",
+                    )
                 self.handle_tool_result(tool_call, result, action, messages)
                 if action in ("restart", "hibernated", "turn_complete", "tool_budget_exhausted"):
                     lifecycle_action = action
@@ -734,3 +747,8 @@ class ToolLifecycleBridge:
     def _readonly_batch_error_result(tool_call: Dict[str, Any], exc: Exception) -> str:
         tool_name = _tool_call_name(tool_call if isinstance(tool_call, Mapping) else {})
         return f"[错误] read-only 工具 {tool_name} 执行失败: {type(exc).__name__}: {exc}"
+
+    @staticmethod
+    def _serial_tool_error_result(tool_call: Dict[str, Any], exc: Exception) -> str:
+        tool_name = _tool_call_name(tool_call if isinstance(tool_call, Mapping) else {})
+        return f"[错误] 工具 {tool_name} 执行失败: {type(exc).__name__}: {exc}"
