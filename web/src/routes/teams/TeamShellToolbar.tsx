@@ -1,4 +1,5 @@
 import { RefreshCw } from "lucide-react";
+import type { ReactNode } from "react";
 
 import type { TeamShellMode } from "./teamShellModel";
 import { VButton, VSelect, VStatusChip } from "../../components/vui";
@@ -25,6 +26,8 @@ export type TeamShellToolbarProps = {
   selectedTeamId?: string;
   onSelectTeamId?: (teamId: string) => void;
   kindLabel?: string;
+  /** Optional trailing toolbar actions (e.g. team bundle import/export). */
+  actions?: ReactNode;
 };
 
 /**
@@ -44,6 +47,7 @@ export function TeamShellToolbar({
   selectedTeamId = "",
   onSelectTeamId,
   kindLabel = "",
+  actions,
 }: TeamShellToolbarProps) {
   const fallbackName = lang === "zh" ? "暂无团队" : "No team";
   const fallbackPurpose = lang === "zh" ? "团队工作台" : "Team workbench";
@@ -88,6 +92,11 @@ export function TeamShellToolbar({
             icon={<RefreshCw size={14} aria-hidden="true" />}
             onClick={onRefresh}
           />
+        </div>
+      ) : null}
+      {actions ? (
+        <div className={actionsClassName} data-vui-region="team-shell-toolbar-actions">
+          {actions}
         </div>
       ) : null}
     </div>

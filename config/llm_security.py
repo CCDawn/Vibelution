@@ -27,6 +27,9 @@ _ALLOWED_API_KEY_ENV_PREFIXES = (
     "SILICONFLOW_",
     "ZHIPU_",
     "GROQ_",
+    "MOONSHOT_",
+    "ARK_",
+    "OPENROUTER_",
     "VIBELUTION_LLM_",
 )
 _FORBIDDEN_API_KEY_ENV_NAMES = {
@@ -75,10 +78,13 @@ _REMOTE_PROVIDER_HOSTS = {
     "google": {"generativelanguage.googleapis.com"},
     "groq": {"api.groq.com"},
     "minimax": {"api.minimax.io", "api.minimaxi.com"},
+    "moonshot": {"api.moonshot.cn"},
     "openai": {"api.openai.com"},
     "opencode": {"opencode.ai"},
+    "openrouter": {"openrouter.ai"},
     "relay": {"pixel.try-chatapi.com", "ai-pixel.online"},
     "siliconflow": {"api.siliconflow.cn"},
+    "volcengine": {"ark.cn-beijing.volces.com"},
     "xiaomi": {
         "api.xiaomimimo.com",
         "token-plan-ams.xiaomimimo.com",

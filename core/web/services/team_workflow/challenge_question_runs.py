@@ -3855,6 +3855,12 @@ def reverify_citation_receipts(
         # resumes from the ledger instead of re-verifying verified URLs.
         ledger_path = artifact_path.with_name(f"{normalized_run_id}.citation-recheck.jsonl")
         resume_verified = {} if force_full else read_resume_verified(ledger_path)
+        from .citation_url_cache import (
+            read_citation_url_cache,
+            record_citation_url_results,
+        )
+
+        url_cache = None if force_full else read_citation_url_cache(team_id)
         verification = verify_receipts_with_heartbeat(
             verification_input,
             team_id=team_id,
@@ -3869,6 +3875,14 @@ def reverify_citation_receipts(
             resume_verified=resume_verified,
             retry_policy=retry_policy,
             sleeper=sleeper,
+            url_cache=url_cache,
+        )
+        record_citation_url_results(
+            team_id,
+            [
+                {**entry, "questionId": entry.get("questionId") or normalized_question_id}
+                for entry in verification.get("cacheWriteThrough") or []
+            ],
         )
         checks = _citation_checks(
             evidence,

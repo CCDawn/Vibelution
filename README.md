@@ -166,6 +166,8 @@ powershell -ExecutionPolicy Bypass -File scripts/install_windows.ps1
 
 安装完成后，打开桌面上的 **Vibelution Launcher**。首次启动会准备外部配置文件；按[模型配置指南](docs/ops/config/INDEX.md)配置模型与密钥。
 
+macOS / Linux 用户按对应安装指南（[macOS](docs/guides/install-macos.md) · [Linux](docs/guides/install-linux.md)）以终端启动工作台，功能以浏览器工作台为准。
+
 **从一个研究课题开始搭建：**
 
 1. 创建 Agent，配置各自的角色、模型、提示词与所需工具。
@@ -173,7 +175,7 @@ powershell -ExecutionPolicy Bypass -File scripts/install_windows.ps1
 3. 给出研究问题、已有资料和本轮目标，通过会话、团队讨论与研究流程推进任务。
 4. 查看成员通信、阶段产物和评审意见，再决定下一步研究方向。
 
-[Windows 安装说明](docs/guides/install-windows.md) · [开发环境与贡献](CONTRIBUTING.md) · [Linux 部署参考](docs/ops/linux-bootstrap.md)
+[Windows 安装说明](docs/guides/install-windows.md) · [macOS 安装说明](docs/guides/install-macos.md) · [Linux 安装说明](docs/guides/install-linux.md) · [开发环境与贡献](CONTRIBUTING.md) · [Linux 部署参考](docs/ops/linux-bootstrap.md)
 
 工作台运行在本机，模型由你配置。使用云端模型时，相应请求会发送给所选服务商并可能产生费用；密钥与运行配置保存在仓库之外。
 

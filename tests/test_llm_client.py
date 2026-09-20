@@ -5963,6 +5963,40 @@ def test_llm_provider_proxy_env_uses_configured_project_proxy(monkeypatch):
     assert os.environ.get("ALL_PROXY") is None
 
 
+def test_self_built_httpx_client_bakes_call_scoped_proxy_and_ignores_ambient_env(monkeypatch):
+    """Self-built clients must not trust the ambient proxy env.
+
+    Regression guard for the lease-window cross-talk: a client lazily built
+    while another provider call holds a proxy lease must bake this call's
+    explicit proxy (or direct connection) instead of reading os.environ.
+    """
+    from core.llm.client import _llm_new_httpx_client
+
+    config = make_config(
+        **{
+            "network.proxy_enabled": True,
+            "network.proxy_url": "http://127.0.0.1:7897",
+            "llm.providers.default.kind": "xiaomi",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "mimo-v2.5-pro",
+        }
+    )
+    monkeypatch.setenv("HTTP_PROXY", "http://ambient-proxy:1")
+    monkeypatch.setenv("HTTPS_PROXY", "http://ambient-proxy:1")
+
+    with _llm_provider_proxy_env(config, "https://token-plan-cn.xiaomimimo.com/v1"):
+        inside = _llm_new_httpx_client(timeout=5, verify=True)
+        assert inside.trust_env is False
+        inside.close()
+
+    outside = _llm_new_httpx_client(timeout=5, verify=True)
+    assert outside.trust_env is False
+    assert getattr(outside._transport._pool, "_proxy_url", None) is None
+    outside.close()
+
+
 def test_duplicate_tool_call_error_classified_as_tool_protocol_error():
     error = Exception("invalid params, duplicate tool_call id: call_function_8euvktt1r7y4_1")
 

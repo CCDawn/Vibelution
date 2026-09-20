@@ -660,6 +660,23 @@ def _build_session_detail_from_summary(
     )
     detail = {
         **summary,
+        # Keep terminal outcome fields explicit on every detail projection.
+        # ``ready`` only describes the idle phase; notifications need the
+        # current turn's persisted outcome to distinguish success from stop.
+        "lastTurnStatus": summary.get("lastTurnStatus")
+        or str(
+            conversation.get("last_turn_status")
+            or conversation.get("lastTurnStatus")
+            or ""
+        ).strip().lower(),
+        "lastTurnTerminalTurnId": summary.get("lastTurnTerminalTurnId")
+        or str(
+            conversation.get("last_turn_terminal_turn_id")
+            or conversation.get("lastTurnTerminalTurnId")
+            or ""
+        ).strip(),
+        "terminalReason": summary.get("terminalReason")
+        or s._terminal_reason_from_conversation(conversation),
         "ledgerSeq": s._session_ledger_sequence(conversation["id"]),
         "activeTask": s._active_task_to_api(active_task),
         "defaultFileContext": default_file_context,
@@ -1187,6 +1204,11 @@ def _normalize_conversation(
         "runtimeNotices": visible_runtime_notices,
         "queuedTurns": s._session_queued_turn_rows(raw),
         "lastTurnStatus": last_turn_status,
+        "lastTurnTerminalTurnId": str(
+            raw.get("last_turn_terminal_turn_id")
+            or raw.get("lastTurnTerminalTurnId")
+            or ""
+        ).strip(),
         "terminalReason": s._terminal_reason_from_conversation(raw),
         "lastTurnError": last_turn_error,
         "lastContextComposition": last_context_composition,

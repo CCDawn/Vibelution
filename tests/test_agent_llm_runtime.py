@@ -448,3 +448,82 @@ def test_resolve_agent_llm_ignores_effort_for_gpt5_without_protocol_contract():
     resolved = resolve_agent_llm(agent, "dialogue", config=config)
 
     assert resolved.config.llm.profiles["primary"].reasoning_effort == ""
+
+
+def test_reasoning_override_skip_is_visible_in_logs_without_values(caplog):
+    """A requested effort dropped for a missing protocol contract must log why."""
+    config = _config_with_agent_models()
+    config.llm.providers["default"].kind = "relay"
+    config.llm.providers["default"].compat_mode = "openai"
+    config.llm.model_library["dialogue-model"].update({
+        "model": "gpt-5.5",
+        "transport": "responses",
+        # no reasoning_effort_values / adapter
+    })
+    agent = {
+        "agentId": "agent-a",
+        "llmBindings": {"dialogue": {"modelId": "dialogue-model"}},
+        "metadata": {"llmReasoningEffort": {"dialogue": "high"}},
+    }
+
+    with caplog.at_level("WARNING", logger="core.llm.agent_runtime"):
+        resolved = resolve_agent_llm(agent, "dialogue", config=config)
+
+    assert resolved.config.llm.profiles["primary"].reasoning_effort == ""
+    warnings = [r for r in caplog.records if "reasoning-effort override skipped" in r.message]
+    assert warnings, "expected a visible skip warning"
+    assert "no_reasoning_effort_values" in warnings[0].getMessage()
+
+
+def test_reasoning_override_skip_is_visible_in_logs_for_undeclared_effort(caplog):
+    """A requested effort outside the declared ladder must log the ladder too."""
+    config = _config_with_agent_models()
+    config.llm.providers["default"].kind = "relay"
+    config.llm.providers["default"].compat_mode = "openai"
+    config.llm.model_library["dialogue-model"].update({
+        "model": "gpt-5.5",
+        "transport": "responses",
+        "reasoning_effort_values": ["low"],
+        "default_reasoning_effort": "low",
+        "reasoning_effort_adapter": "reasoning_object",
+    })
+    agent = {
+        "agentId": "agent-a",
+        "llmBindings": {"dialogue": {"modelId": "dialogue-model"}},
+        "metadata": {"llmReasoningEffort": {"dialogue": "high"}},
+    }
+
+    with caplog.at_level("WARNING", logger="core.llm.agent_runtime"):
+        resolved = resolve_agent_llm(agent, "dialogue", config=config)
+
+    assert resolved.config.llm.profiles["primary"].reasoning_effort != "high"
+    warnings = [r for r in caplog.records if "reasoning-effort override skipped" in r.message]
+    assert warnings, "expected a visible skip warning"
+    message = warnings[0].getMessage()
+    assert "effort_not_in_declared_values" in message
+    assert "requested_effort=high" in message
+
+
+def test_reasoning_override_applied_path_stays_silent(caplog):
+    """A successful override must not add log noise."""
+    config = _config_with_agent_models()
+    config.llm.providers["default"].kind = "relay"
+    config.llm.providers["default"].compat_mode = "openai"
+    config.llm.model_library["dialogue-model"].update({
+        "model": "gpt-5.5",
+        "transport": "responses",
+        "reasoning_effort_values": ["low", "high"],
+        "default_reasoning_effort": "low",
+        "reasoning_effort_adapter": "reasoning_object",
+    })
+    agent = {
+        "agentId": "agent-a",
+        "llmBindings": {"dialogue": {"modelId": "dialogue-model"}},
+        "metadata": {"llmReasoningEffort": {"dialogue": "high"}},
+    }
+
+    with caplog.at_level("WARNING", logger="core.llm.agent_runtime"):
+        resolved = resolve_agent_llm(agent, "dialogue", config=config)
+
+    assert resolved.config.llm.profiles["primary"].reasoning_effort == "high"
+    assert not [r for r in caplog.records if "reasoning-effort override skipped" in r.message]

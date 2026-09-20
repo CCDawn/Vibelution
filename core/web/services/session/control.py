@@ -164,6 +164,11 @@ def _persist_session_interrupted_snapshot(
         messages = s._session_ledger_visible_messages(session_id)
         if s._latest_assistant_message_is_stop(messages):
             conversation["last_turn_status"] = "ready"
+            conversation["last_turn_terminal_turn_id"] = turn_id
+            conversation["last_turn_terminal_reason"] = s._terminal_reason_for_turn(
+                "ready",
+                stop_requested=True,
+            )
             conversation.setdefault("updated_at", s._now_timestamp())
             s.save_session_chat_state(s.PROJECT_ROOT, session_id, conversation)
             s._clear_session_live_output(session_id)
@@ -187,7 +192,15 @@ def _persist_session_interrupted_snapshot(
                     "previousStatus": "queued",
                 },
             )
+            # ``ready`` is the idle phase, not the outcome of this turn. Keep
+            # the explicit stop reason so projections and notifications cannot
+            # infer a successful completion from the idle phase.
             conversation["last_turn_status"] = "ready"
+            conversation["last_turn_terminal_turn_id"] = turn_id
+            conversation["last_turn_terminal_reason"] = s._terminal_reason_for_turn(
+                "ready",
+                stop_requested=True,
+            )
             conversation["updated_at"] = stopped_at
             s.save_session_chat_state(s.PROJECT_ROOT, session_id, conversation)
             s._persist_chat_turn_work_run(
@@ -264,6 +277,11 @@ def _persist_session_interrupted_snapshot(
         s._set_or_clear_session_active_task(conversation, next_active_task)
         conversation.pop("messages", None)
         conversation["last_turn_status"] = "ready"
+        conversation["last_turn_terminal_turn_id"] = turn_id
+        conversation["last_turn_terminal_reason"] = s._terminal_reason_for_turn(
+            "ready",
+            stop_requested=True,
+        )
         conversation["updated_at"] = assistant_entry["timestamp"]
         s.save_session_chat_state(s.PROJECT_ROOT, session_id, conversation)
         s._persist_chat_turn_work_run(

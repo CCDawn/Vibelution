@@ -219,7 +219,7 @@ describe("desktop conversation notifier", () => {
     const maliciousTitle = "sk-live-secret from C:\\Users\\17533\\Desktop\\prompt.txt";
 
     notifier.handleAssistantDelta(assistantDelta(), { sessionTitle: maliciousTitle });
-    notifier.handleSessionDetail(detail({ title: maliciousTitle }));
+    notifier.handleSessionDetail(detail({ title: maliciousTitle, terminalReason: "success" }));
 
     const notifyPayload = notify.mock.calls[0]?.[0];
     const telemetryPayload = telemetry.mock.calls[0]?.[0];
@@ -259,7 +259,7 @@ describe("desktop conversation notifier", () => {
     notifier.handleSessionDetail(detail({ id: "session-1", currentPhase: "running", status: "running" }), {
       viewedSessionId: "session-1",
     });
-    notifier.handleSessionDetail(detail({ id: "session-1", currentPhase: "ready", status: "ready" }), {
+    notifier.handleSessionDetail(detail({ id: "session-1", currentPhase: "ready", status: "ready", terminalReason: "success" }), {
       viewedSessionId: "session-1",
     });
     notifier.handleSessionSummaries(
@@ -324,6 +324,123 @@ describe("desktop conversation notifier", () => {
     notifier.handleAssistantDelta(assistantDelta(), { sessionTitle: "测试会话" });
 
     expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("does not notify from a bare ready phase without a turn outcome", () => {
+    const notify = vi.fn();
+    const notifier = createDesktopConversationNotifier({
+      bridge: { notifyConversationCompleted: notify },
+      postTelemetry: vi.fn(),
+    });
+
+    notifier.handleAssistantDelta(assistantDelta());
+    notifier.handleSessionDetail(detail({ currentPhase: "running", status: "running" }));
+    notifier.handleSessionDetail(detail({ currentPhase: "ready", status: "ready" }));
+
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("does not notify for a user stop", () => {
+    const notify = vi.fn();
+    const notifier = createDesktopConversationNotifier({
+      bridge: { notifyConversationCompleted: notify },
+      postTelemetry: vi.fn(),
+    });
+
+    notifier.handleAssistantDelta(assistantDelta());
+    notifier.handleSessionDetail(detail({ currentPhase: "running", status: "running" }));
+    notifier.handleSessionDetail(detail({
+      currentPhase: "ready",
+      status: "ready",
+      lastTurnStatus: "stopped_by_user",
+    }));
+
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("remembers an initially observed stopped turn without a busy transition", () => {
+    const notify = vi.fn();
+    const notifier = createDesktopConversationNotifier({
+      bridge: { notifyConversationCompleted: notify },
+      postTelemetry: vi.fn(),
+    });
+
+    notifier.handleSessionDetail(detail({
+      currentPhase: "ready",
+      status: "ready",
+      lastTurnStatus: "stopped_by_user",
+      lastTurnTerminalTurnId: "turn-1",
+    }));
+    notifier.handleAssistantDelta(assistantDelta());
+    notifier.handleSessionDetail(detail({
+      currentPhase: "ready",
+      status: "ready",
+      terminalReason: "success",
+      lastTurnTerminalTurnId: "turn-1",
+    }));
+
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("ignores late events for a stopped turn after a later turn completes", () => {
+    const notify = vi.fn();
+    const notifier = createDesktopConversationNotifier({
+      bridge: { notifyConversationCompleted: notify },
+      postTelemetry: vi.fn(),
+    });
+
+    notifier.handleAssistantDelta(assistantDelta());
+    notifier.handleSessionDetail(detail({ currentPhase: "running", status: "running" }));
+    notifier.handleSessionDetail(detail({
+      currentPhase: "ready",
+      status: "ready",
+      lastTurnStatus: "stopped_by_user",
+      lastTurnTerminalTurnId: "turn-1",
+    }));
+    notifier.handleAssistantDelta(assistantDelta({ turnId: "turn-2" }));
+    notifier.handleSessionDetail(detail({
+      currentPhase: "ready",
+      status: "ready",
+      terminalReason: "success",
+      lastTurnTerminalTurnId: "turn-2",
+    }));
+    notifier.handleAssistantDelta(assistantDelta({ turnId: "turn-1" }));
+    notifier.handleSessionDetail(detail({
+      currentPhase: "ready",
+      status: "ready",
+      terminalReason: "success",
+      lastTurnTerminalTurnId: "turn-1",
+    }));
+
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ turnId: "turn-2" }));
+  });
+
+  it("allows a later turn to notify after an earlier turn was stopped", () => {
+    const notify = vi.fn();
+    const notifier = createDesktopConversationNotifier({
+      bridge: { notifyConversationCompleted: notify },
+      postTelemetry: vi.fn(),
+    });
+
+    notifier.handleAssistantDelta(assistantDelta());
+    notifier.handleSessionDetail(detail({ currentPhase: "running", status: "running" }));
+    notifier.handleSessionDetail(detail({
+      currentPhase: "ready",
+      status: "ready",
+      lastTurnStatus: "stopped_by_user",
+      lastTurnTerminalTurnId: "turn-1",
+    }));
+    notifier.handleAssistantDelta(assistantDelta({ turnId: "turn-2" }));
+    notifier.handleSessionDetail(detail({
+      currentPhase: "ready",
+      status: "ready",
+      terminalReason: "success",
+      lastTurnTerminalTurnId: "turn-2",
+    }));
+
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ turnId: "turn-2" }));
   });
 
   it("reports needs_continue as ended and never as completed", () => {
@@ -440,7 +557,7 @@ describe("desktop conversation notifier", () => {
     notifier.handleAssistantDelta(assistantDelta({ turnId: "turn-2" }));
     notifier.handleSessionDetail(detail());
     expect(notify).not.toHaveBeenCalled();
-    const settled = detail();
+    const settled = detail({ terminalReason: "success" });
     settled.messages[0].turnId = "turn-2";
     notifier.handleSessionDetail(settled);
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({ turnId: "turn-2" }));

@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import type { Team } from "../../api/types";
+import { TeamBundleToolbarActions } from "./TeamBundleToolbarActions";
 import { TeamShellStatusRail } from "./TeamShellStatusRail";
 import { TeamShellToolbar } from "./TeamShellToolbar";
 import { TeamsShellGateSurface } from "./TeamsShellGateSurface";
@@ -118,6 +119,9 @@ export function renderTeamsShellToolbar(args: Pick<
         switchClassName={args.styles.teamShellToolbarSwitch}
         actionsClassName={args.styles.teamShellToolbarActions}
         refreshButtonClassName={args.styles.teamRefreshButton}
+        actions={
+          <TeamBundleToolbarActions lang={args.lang} selectedTeamId={args.effectiveTeamId} />
+        }
         teamOptions={args.visibleTeams.map((team) => ({
           id: team.teamId,
           label: team.name,

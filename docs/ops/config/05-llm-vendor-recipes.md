@@ -234,6 +234,42 @@ Wire 可为 `gemini_generate_content`；body 仍为 OpenAI 形经 LiteLLM。
 
 ---
 
+## 智谱官方 / 月之暗面 Kimi / 火山方舟豆包 / OpenRouter
+
+内置预设（`zhipu_glm_4_7` / `moonshot_kimi_k2_5` / `volcengine_doubao_seed_1_6` / `openrouter_aggregator`），配置页添加 Provider 时直接选预设填 key 即可；静态模型条目为初始参考，实际可用模型以 discovery 自动发现为准。
+
+```toml
+[llm.providers.zhipu_main]
+kind = "zhipu"
+driver = "openai"
+base_url = "https://open.bigmodel.cn/api/paas/v4"
+credential_ref = "env:ZHIPU_API_KEY"
+
+[llm.providers.moonshot_main]
+kind = "moonshot"
+driver = "openai"
+base_url = "https://api.moonshot.cn/v1"
+credential_ref = "env:MOONSHOT_API_KEY"
+
+[llm.providers.volcengine_main]
+kind = "volcengine"
+driver = "openai"
+base_url = "https://ark.cn-beijing.volces.com/api/v3"
+credential_ref = "env:ARK_API_KEY"
+
+[llm.providers.openrouter_main]
+kind = "openrouter"
+driver = "openai"
+base_url = "https://openrouter.ai/api/v1"
+credential_ref = "env:OPENROUTER_API_KEY"
+```
+
+| 检查 | 值 |
+| --- | --- |
+| Wire | chat_completions |
+| 密钥 env | ZHIPU_API_KEY / MOONSHOT_API_KEY / ARK_API_KEY / OPENROUTER_API_KEY |
+| Discovery | 建议 auto（OpenRouter 模型面最大，尤其依赖发现） |
+
 ## 一页对照
 
 | 厂商 | kind | driver | transport | cache mode 推荐 |

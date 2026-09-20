@@ -34,6 +34,9 @@
 | [agent-dev-roi-backlog.md](agent-dev-roi-backlog.md) | **便利度 ROI 改造清单**（P0–P3） | ~138 | 非 ROI/便利度认领任务 |
 | [button-selection.md](button-selection.md) | **按钮选型** V / VNative / 禁止裸 button | ~76 | 不改按钮/表单提交控件 |
 | [install-windows.md](install-windows.md) | Windows 最终用户安装（人类） | ~87 | **Agent 开发一律跳过** |
+| [install-macos.md](install-macos.md) | macOS 最终用户安装（人类） | ~100 | **Agent 开发一律跳过** |
+| [install-linux.md](install-linux.md) | Linux 最终用户安装（人类） | ~95 | **Agent 开发一律跳过** |
+| [reproduce-challenge-cup.md](reproduce-challenge-cup.md) | 挑战杯团队复现（人类） | ~80 | **Agent 开发一律跳过** |
 
 **FE 路由索引：** [`web/src/routes/README.md`](../../web/src/routes/README.md)（非 Chat/Teams 30 秒表；~80 行）
 

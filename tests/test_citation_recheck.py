@@ -430,3 +430,103 @@ def test_ledger_write_failures_never_break_the_recheck(tmp_path, monkeypatch):
     # attempt-finished write lands after the report is built.
     assert report["verifiedCount"] == 1
     assert report["ledgerWriteFailures"] == 3
+
+
+# ---------------------------------------------------------------------------
+# team-scoped cross-run URL cache
+# ---------------------------------------------------------------------------
+
+
+def test_url_cache_verified_hit_skips_network(tmp_path) -> None:
+    calls: list[str] = []
+
+    def verifier(doi: str):
+        calls.append(doi)
+        return _metadata(doi)
+
+    checks = [_check("https://a.example/p1", doi="10.1000/a")]
+    cache = {
+        "https://a.example/p1": {
+            "outcome": "verified", "reason": "", "atMs": 9_000_000_000_000,
+        }
+    }
+    _ledger, report = _run(
+        tmp_path, checks, verifier, url_cache=cache
+    )
+    assert calls == []
+    assert report["attemptedCount"] == 0
+    assert report["verifiedSourceUrls"] == {"https://a.example/p1": True}
+    assert report["cacheHitSourceUrls"] == ["https://a.example/p1"]
+
+
+def test_url_cache_negative_hit_skips_retry_ladder(tmp_path) -> None:
+    calls: list[str] = []
+
+    def verifier(doi: str):
+        calls.append(doi)
+        return _metadata(doi)
+
+    checks = [_check("https://a.example/p2", doi="10.1000/b")]
+    cache = {
+        "https://a.example/p2": {
+            "outcome": "failed",
+            "reason": "doi_definitive_rejection:403",
+            "atMs": 9_000_000_000_000,
+        }
+    }
+    _ledger, report = _run(tmp_path, checks, verifier, url_cache=cache)
+    assert calls == []
+    assert report["attemptedCount"] == 0
+    assert report["failedSourceUrls"] == [
+        {"sourceUrl": "https://a.example/p2", "reason": "doi_definitive_rejection:403", "attempts": 0}
+    ]
+    assert report["cacheHitSourceUrls"] == ["https://a.example/p2"]
+
+
+def test_url_cache_stale_entries_reverify_and_write_through(tmp_path) -> None:
+    stale = 1  # both TTLs expired long ago
+    checks = [
+        _check("https://a.example/verified", doi="10.1000/v"),
+        _check("https://a.example/walled", doi="10.1000/w"),
+    ]
+    cache = {
+        "https://a.example/verified": {"outcome": "verified", "reason": "", "atMs": stale},
+        "https://a.example/walled": {
+            "outcome": "failed", "reason": "doi_definitive_rejection:403", "atMs": stale
+        },
+    }
+    calls: list[str] = []
+
+    def verifier(doi: str):
+        calls.append(doi)
+        if doi == "10.1000/w":
+            raise DefinitiveDoiRejection(doi, 403)
+        return _metadata(doi)
+
+    _ledger, report = _run(
+        tmp_path, checks, verifier, url_cache=cache,
+        retry_policy=RetryPolicy(maximum_attempts=2),
+    )
+    assert sorted(calls) == ["10.1000/v", "10.1000/w"]
+    write_through = {
+        entry["sourceUrl"]: entry for entry in report["cacheWriteThrough"]
+    }
+    assert write_through["https://a.example/verified"]["outcome"] == "verified"
+    assert write_through["https://a.example/walled"] == {
+        "sourceUrl": "https://a.example/walled",
+        "outcome": "failed",
+        "reason": "doi_definitive_rejection:403",
+        "questionId": QUESTION_ID,
+        "runId": RUN_ID,
+    }
+
+
+def test_transient_failure_is_not_written_through(tmp_path) -> None:
+    checks = [_check("https://a.example/flaky", doi="10.1000/f")]
+
+    def verifier(_doi: str):
+        return None  # transient: exhausts attempts without a definitive reason
+
+    _ledger, report = _run(tmp_path, checks, verifier)
+    assert report["failedSourceUrls"][0]["reason"] == "attempts_exhausted"
+    assert report["cacheWriteThrough"] == []
