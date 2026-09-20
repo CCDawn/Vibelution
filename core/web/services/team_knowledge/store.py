@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
@@ -291,36 +292,53 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     items: list[dict[str, Any]] = []
+    # 逐行容错：半写行/坏字节只丢该行，绝不把整份 index 读成空列表
+    # （读空 + 全量重写的组合曾让一条坏输入静默清空 inbox registry）。
     try:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return items
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
             payload = json.loads(line)
-            if isinstance(payload, dict):
-                items.append(payload)
-    except (OSError, json.JSONDecodeError):
-        return []
+        except (json.JSONDecodeError, RecursionError, ValueError):
+            continue
+        if isinstance(payload, dict):
+            items.append(payload)
     return items
 
 
-def _write_jsonl(path: Path, items: list[dict[str, Any]]) -> None:
-    s = _service()
+def _atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    text = "".join(json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n" for item in items if isinstance(item, dict))
-    path.write_text(text, encoding="utf-8")
+    fd, temp_path = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
+def _write_jsonl(path: Path, items: list[dict[str, Any]]) -> None:
+    # ensure_ascii=True：surrogate 等不可编码字符被转义，从根上免疫
+    # UnicodeEncodeError（原 write_text 是先截断原文件再编码，坏输入会清空整份文件）。
+    text = "".join(json.dumps(item, ensure_ascii=True, sort_keys=True) + "\n" for item in items if isinstance(item, dict))
+    _atomic_write_text(path, text)
 
 
 def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
     s = _service()
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8", newline="\n") as handle:
-        handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+        handle.write(json.dumps(payload, ensure_ascii=True, sort_keys=True) + "\n")
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     s = _service()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _atomic_write_text(path, json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n")
 
 
 def _read_team_graph_reference(team_id: str) -> dict[str, Any] | None:

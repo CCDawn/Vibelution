@@ -2507,3 +2507,45 @@ def test_get_or_create_team_knowledge_base_treats_legacy_missing_status_as_activ
 
     assert reused["created"] is False
     assert reused["knowledgeBase"]["knowledgeBaseId"] == existing["knowledgeBaseId"]
+
+
+def test_concurrent_grants_both_survive(knowledge_env):
+    """锁内重读回归：两个线程并发 ensure 不同 steward，后写不得覆盖先写。"""
+    import threading
+
+    team_id = knowledge_env["team"]["teamId"]
+    outsider_id = knowledge_env["outsider"]["agentId"]
+    member_id = knowledge_env["member"]["agentId"]
+
+    barrier = threading.Barrier(2)
+    original = team_knowledge_service._source_governance_for_owner
+
+    def slow_read(owner):
+        # 放大锁外读的竞态窗口：修复前该读发生在 _LOCK 之外
+        barrier.wait(timeout=5)
+        return original(owner)
+
+    results: list[dict] = []
+    errors: list[BaseException] = []
+
+    def grant(agent_id: str) -> None:
+        try:
+            results.append(team_knowledge_service.ensure_owner_source_review_grant("team", team_id, agent_id))
+        except BaseException as exc:  # noqa: BLE001 - 收集失败用于断言
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=grant, args=(outsider_id,)),
+        threading.Thread(target=grant, args=(member_id,)),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert not errors
+    final = team_knowledge_service._source_governance_for_owner(
+        team_knowledge_service._require_owner_context("team", team_id)
+    )
+    stewards = set(final.get("localStewardAgentIds") or [])
+    assert {outsider_id, member_id} <= stewards
