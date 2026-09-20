@@ -107,6 +107,10 @@ import {
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { publishConfigDraftPresence } from "./configDraftPresence";
+import {
+  markProviderOnboardingSeen,
+  shouldAutoOpenProviderOnboarding,
+} from "./config/onboardingGate";
 import { useConfigWorkspaceQueries } from "./config/useConfigWorkspaceQueries";
 import {
   buildConfigApplyRequestPayload,
@@ -2319,6 +2323,18 @@ export function ConfigRoute() {
   useEffect(() => {
     publishConfigDraftPresence(configDraftPresenceDirty);
   }, [configDraftPresenceDirty]);
+  // First-run onboarding: auto-open the provider quick-setup panel once per
+  // browser session while no model credential is configured (skippable, and
+  // the settings entry stays available via "添加连接").
+  useEffect(() => {
+    if (!workspace?.modelOptions) {
+      return;
+    }
+    if (shouldAutoOpenProviderOnboarding(workspace.modelOptions)) {
+      markProviderOnboardingSeen();
+      setProviderConnecting(true);
+    }
+  }, [workspace]);
   const workspaceSections = workspace?.sections ?? [];
   const editorSections = workspace?.editorSections ?? [];
   const editorMeta = workspace?.editorMeta ?? {};

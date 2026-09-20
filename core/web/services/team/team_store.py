@@ -14,6 +14,7 @@ from time import perf_counter
 from typing import Any
 
 from core.infrastructure import developer_sandbox
+from core.infrastructure.atomic_io import atomic_write_json
 from core.logging import debug as _debug_logger
 
 from .. import project_agent_bus_service
@@ -76,8 +77,10 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    # Atomic temp+replace write, same standard as agents.json: a crash mid-write
+    # must never leave a truncated teams.json behind.
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_json(path, payload, sort_keys=True, strict_replace=True)
 
 
 def _teams_root() -> Path:

@@ -47,6 +47,9 @@ PROVIDER_API_KEY_ENV_MAP: Dict[str, str] = {
     "groq": "GROQ_API_KEY",
     "minimax": "MINIMAX_API_KEY",
     "xiaomi": "MIMO_API_KEY",
+    "moonshot": "MOONSHOT_API_KEY",
+    "volcengine": "ARK_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
 }
 
 PROVIDER_API_KEY_ENV_ALIASES: Dict[str, List[str]] = {
