@@ -22,6 +22,9 @@ from vibelution_storage import (
     project_memory_migration_state_path,
     storage_migration_state_path,
 )
+import logging
+
+from core.infrastructure.codex_sandbox import environment
 from core.infrastructure.codex_sandbox.environment import sandbox_temp_root
 
 
@@ -344,3 +347,51 @@ def test_legacy_memory_tombstone_fails_closed_on_every_fallback(monkeypatch, tmp
     # Without the tombstone the pre-existing fallback behavior is unchanged.
     tombstone.unlink()
     assert resolve_project_memory_home(project_root) == legacy_memory
+
+
+def test_codex_sandbox_temp_uses_short_bucket_for_identified_checkout(monkeypatch, tmp_path):
+    """The sandbox temp root must not nest under project_id/instances/<id>/cache.
+
+    Composed child paths (pytest basetemp, data home, business session dirs)
+    otherwise creep over the Windows MAX_PATH limit and fail with WinError 206.
+    """
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    _write_identity(project_root)
+    projects_home = tmp_path / "project-state"
+    monkeypatch.setenv(PROJECTS_HOME_ENV, str(projects_home))
+
+    temp_root = sandbox_temp_root(project_root)
+
+    assert temp_root.is_relative_to(projects_home)
+    assert not temp_root.is_relative_to(project_root)
+    assert "instances" not in temp_root.parts
+    assert "cache" not in temp_root.parts
+    assert temp_root.name == "codex-cli"
+
+
+def test_codex_sandbox_temp_honours_explicit_home_override(monkeypatch, tmp_path):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    _write_identity(project_root)
+    override = tmp_path / "sbx"
+    monkeypatch.setenv("VIBELUTION_SANDBOX_HOME", str(override))
+
+    temp_root = sandbox_temp_root(project_root)
+
+    assert temp_root.is_relative_to(override)
+    assert temp_root.name == "codex-cli"
+
+
+def test_sandbox_process_environment_warns_over_path_budget(monkeypatch, tmp_path, caplog):
+    """An over-budget sandbox root must surface a warning, not a random 206."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    _write_identity(project_root)
+    monkeypatch.setenv(PROJECTS_HOME_ENV, str(tmp_path / "project-state"))
+    monkeypatch.setattr(environment, "SANDBOX_TEMP_PATH_BUDGET", 1)
+
+    with caplog.at_level(logging.WARNING):
+        environment.sandbox_process_environment(project_root, "abcdef012345", platform="windows")
+
+    assert "sandbox temp path" in caplog.text.lower()
