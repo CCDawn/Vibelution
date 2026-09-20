@@ -1485,3 +1485,118 @@ def resolve_hypothesis_round_failures(
                     },
                 )
     return len(resolved)
+
+
+_COMPACTION_MIN_SIZE_BYTES = 1_000_000
+
+
+def _created_at_sort_key(record: Mapping[str, Any]) -> str:
+    return str(record.get("createdAt") or "")
+
+
+def _rewrite_failure_ledger(path: Path, records: list[dict[str, Any]]) -> None:
+    """Atomically replace the failure ledger with ``records`` (sorted keys).
+
+    Mirrors the temp-file + ``os.replace`` discipline of :func:`_append_jsonl`
+    so a crash mid-rewrite can never leave a partial line behind.
+    """
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            for record in records:
+                handle.write(
+                    json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                    + "\n"
+                )
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_name, path)
+    finally:
+        if os.path.exists(temporary_name):
+            os.unlink(temporary_name)
+
+
+def compact_hypothesis_round_failures(
+    team_id: str,
+    *,
+    min_size_bytes: int = _COMPACTION_MIN_SIZE_BYTES,
+) -> dict[str, Any]:
+    """Collapse legacy duplicate wait rows in the failure ledger (idempotent).
+
+    Before blocked waits became idempotent per scope key, every auto-advance
+    tick appended one ``blocked`` row per re-entry, leaving thousands of
+    duplicate observations of the same wait state (SCI-117 pushed the ledger
+    past 10 MB, and every append rewrites the whole file).  This maintenance
+    pass rewrites the ledger keeping:
+
+    * the newest open ``blocked`` row per :func:`_failure_scope_key` — older
+      duplicates of the same wait episode are dropped as derivable noise;
+    * the latest copy of every other ``failureId`` — resolution appends
+      updated copies, so superseded copies collapse to one row;
+    * every ``failed`` (real attempt) trace, untouched.
+
+    Surviving open wait rows keep their original ``resolvedAt`` emptiness:
+    fabricating a resolution timestamp for an episode that ended unobserved
+    would invent history.  Ledgers below ``min_size_bytes`` are skipped so
+    the common small-team case costs one ``stat`` call.
+    """
+
+    from core.web.services.team_service import assert_team_exists
+
+    path = _failure_storage_path(_safe_team_id(team_id))
+    try:
+        if not path.exists() or path.stat().st_size < min_size_bytes:
+            return {"compacted": False, "reason": "below_threshold"}
+    except OSError:
+        return {"compacted": False, "reason": "stat_failed"}
+    normalized_team_id = assert_team_exists(team_id)
+    path = _failure_storage_path(normalized_team_id)
+    from core.web.services.team_workflow.storage_durability import inter_process_lock
+
+    with _LOCK, inter_process_lock(path):
+        records = _read_jsonl(path)
+        if len(records) < 2:
+            return {"compacted": False, "reason": "no_duplicates", "records": len(records)}
+        latest_by_id: dict[str, dict[str, Any]] = {}
+        for record in records:
+            latest_by_id[str(record.get("failureId") or "")] = record
+        collapsed_copies = len(records) - len(latest_by_id)
+        newest_open_wait: dict[tuple[Any, ...], dict[str, Any]] = {}
+        kept: dict[str, dict[str, Any]] = {}
+        dropped_duplicates = 0
+        for record in latest_by_id.values():
+            is_open_wait = (
+                str(record.get("status") or "") == "blocked"
+                and not str(record.get("resolvedAt") or "")
+            )
+            if not is_open_wait:
+                kept[str(record.get("failureId") or "")] = record
+                continue
+            key = _failure_scope_key(record)
+            current = newest_open_wait.get(key)
+            if current is None:
+                newest_open_wait[key] = record
+                kept[str(record.get("failureId") or "")] = record
+                continue
+            loser, winner = (
+                (current, record)
+                if _created_at_sort_key(record) >= _created_at_sort_key(current)
+                else (record, current)
+            )
+            dropped_duplicates += 1
+            kept.pop(str(loser.get("failureId") or ""), None)
+            newest_open_wait[key] = winner
+            kept[str(winner.get("failureId") or "")] = winner
+        if dropped_duplicates == 0 and collapsed_copies == 0:
+            return {"compacted": False, "reason": "no_duplicates", "records": len(records)}
+        kept_records = sorted(kept.values(), key=_created_at_sort_key)
+        _rewrite_failure_ledger(path, kept_records)
+        return {
+            "compacted": True,
+            "recordsBefore": len(records),
+            "recordsAfter": len(kept_records),
+            "droppedDuplicateWaitRows": dropped_duplicates,
+            "collapsedSupersededCopies": collapsed_copies,
+        }

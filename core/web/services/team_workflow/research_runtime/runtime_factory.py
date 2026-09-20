@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -58,6 +59,13 @@ AUTO_ADVANCE_SWEEP_INTERVAL_ENV = "VIBELUTION_AUTO_ADVANCE_SWEEP_INTERVAL_MS"
 _LAST_AUTO_ADVANCE_SWEEP_MS: int | None = None
 _AUTO_ADVANCE_SWEEP_LOCK = threading.Lock()
 
+# Failure-ledger compaction cadence: the pass itself is idempotent and skips
+# ledgers below 1 MB, so a slow cadence keeps the cost near zero while legacy
+# pre-idempotence wait rows (SCI-117-class) still get collapsed eventually.
+FAILURE_COMPACTION_INTERVAL_MS = 6 * 60 * 60 * 1000
+_LAST_FAILURE_COMPACTION_MS: int | None = None
+_FAILURE_COMPACTION_LOCK = threading.Lock()
+
 
 def _auto_advance_sweep_interval_ms() -> int:
     raw = str(os.environ.get(AUTO_ADVANCE_SWEEP_INTERVAL_ENV) or "").strip()
@@ -89,6 +97,23 @@ def _auto_advance_sweep_due(now_ms: int) -> bool:
             return False
         _LAST_AUTO_ADVANCE_SWEEP_MS = now_ms
         return True
+
+
+def _failure_compaction_due(now_ms: int) -> bool:
+    global _LAST_FAILURE_COMPACTION_MS
+    with _FAILURE_COMPACTION_LOCK:
+        last = _LAST_FAILURE_COMPACTION_MS
+        if last is not None and now_ms - last < FAILURE_COMPACTION_INTERVAL_MS:
+            return False
+        _LAST_FAILURE_COMPACTION_MS = now_ms
+        return True
+
+
+def reset_failure_compaction_throttle_for_tests() -> None:
+    """Test seam: forget the last compaction run so the next tick executes."""
+    global _LAST_FAILURE_COMPACTION_MS
+    with _FAILURE_COMPACTION_LOCK:
+        _LAST_FAILURE_COMPACTION_MS = None
 
 
 def reset_auto_advance_sweep_throttle_for_tests() -> None:
@@ -195,7 +220,47 @@ class WorkflowRuntime:
         """Run slow review recovery without starving delivery and repairs."""
         self._sweep_auto_advance_closure_best_effort()
         self._reap_awaiting_approval_best_effort()
+        self._compact_hypothesis_round_failures_best_effort()
         return 0
+
+    def _compact_hypothesis_round_failures_best_effort(self) -> None:
+        """Collapse legacy duplicate wait rows in heavy failure ledgers.
+
+        Hosted on the hypothesis recovery tick behind its own slow throttle:
+        the compaction itself skips small ledgers with one ``stat`` call, and
+        any per-team failure is swallowed after logging so one broken team
+        workspace never blocks recovery for the rest.  Never fires under
+        pytest — acceptance tests drive the recovery loop against real
+        runtime objects without isolating the shared teams workspace, and a
+        test process must not rewrite production ledgers.
+        """
+        if os.environ.get("PYTEST_CURRENT_TEST") or "pytest" in sys.modules:
+            return
+        if not _failure_compaction_due(int(time.time() * 1000)):
+            return
+        try:
+            from core.web.services.team_workflow import hypothesis_rounds
+            from core.web.services.team_workflow.research_runtime import (
+                hypothesis_command_attempts,
+            )
+
+            root = hypothesis_command_attempts._teams_workspace_root()
+            if not root.exists():
+                return
+            for ledger in sorted(
+                root.glob("*/research_workflow/hypothesis_round_failures.jsonl")
+            ):
+                team_id = ledger.parts[-3] if len(ledger.parts) >= 3 else ""
+                if not team_id:
+                    continue
+                try:
+                    hypothesis_rounds.compact_hypothesis_round_failures(team_id)
+                except Exception:  # noqa: BLE001 - one team must not block the rest
+                    logger.exception(
+                        "hypothesis round failure compaction failed for %s", team_id
+                    )
+        except Exception:  # noqa: BLE001 - compaction must never break recovery
+            logger.exception("hypothesis round failure compaction sweep failed")
 
     def _reap_awaiting_approval_best_effort(self) -> None:
         """Escalate / auto-reject forever-waiting awaiting_approval digests.
