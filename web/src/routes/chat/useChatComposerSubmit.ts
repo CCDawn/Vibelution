@@ -930,6 +930,21 @@ export function useChatComposerSubmitActions({
   // gap so a stop requested before upload completion can still match the late
   // mutation acceptance, even after switching sessions.
   const pendingUploadSubmissionRef = useRef<Map<string, string>>(new Map());
+  const restorePendingStopAfterUploadFailure = useCallback((sessionId: string) => {
+    const pendingStop = pendingStopAfterAcceptRef.current.get(sessionId);
+    if (pendingStop?.stoppingAt) {
+      queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (current) => {
+        if (!current) {
+          return current;
+        }
+        return clearSessionDetailStopping(current, {
+          requestedAt: pendingStop.stoppingAt!,
+          previous: pendingStop.previousDetail,
+        });
+      });
+    }
+    pendingStopAfterAcceptRef.current.delete(sessionId);
+  }, [queryClient]);
   const attachmentSnapshotRef = useRef<{ sessionId: string | null | undefined; attachments: ComposerImageAttachment[] }>({
     sessionId: activeSessionId,
     attachments: activeImageAttachments,
@@ -1245,7 +1260,7 @@ export function useChatComposerSubmitActions({
         );
         setSessionDrafts((current) => restoreSubmittedDraftIfComposerStillEmpty(current, sessionId, content));
       }
-      pendingStopAfterAcceptRef.current.delete(sessionId);
+      restorePendingStopAfterUploadFailure(sessionId);
     } finally {
       if (pendingUploadSubmissionRef.current.get(sessionId) === clientSubmissionId) {
         pendingUploadSubmissionRef.current.delete(sessionId);
@@ -1261,6 +1276,7 @@ export function useChatComposerSubmitActions({
     imageUploadInFlightRef,
     lang,
     queryClient,
+    restorePendingStopAfterUploadFailure,
     setSessionComposerErrors,
     setSessionDrafts,
     setSessionImageUploadPending,
@@ -1543,7 +1559,7 @@ export function useChatComposerSubmitActions({
               ...current,
               [activeSessionId]: describeError(error, lang === "zh" ? "图片上传失败" : "Image upload failed"),
             }));
-            pendingStopAfterAcceptRef.current.delete(activeSessionId);
+            restorePendingStopAfterUploadFailure(activeSessionId);
             return;
           } finally {
             if (pendingUploadSubmissionRef.current.get(activeSessionId) === clientSubmissionId) {
@@ -1595,6 +1611,7 @@ export function useChatComposerSubmitActions({
     lang,
     mentalModelEnabledForNextTurn,
     runtimeStatusEnabledForNextTurn,
+    restorePendingStopAfterUploadFailure,
     resolvedEditTarget,
     sessionBusy,
     sessionFollowupQueues,
