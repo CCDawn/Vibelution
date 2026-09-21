@@ -193,6 +193,7 @@ class SessionTurnCapture:
     _last_recorded_thought_text: str = ""
     _last_committed_thought_sequence: int = 0
     _pending_related_thought_sequence: int = 0
+    _evicted_thought_events: list[dict[str, Any]] = field(default_factory=list)
     _tool_loop_call_count: int = 0
     _tool_loop_failure_count: int = 0
     _tool_loop_last_failure: str = ""
@@ -340,9 +341,13 @@ class SessionTurnCapture:
     def uncommitted_thought_events(self) -> list[dict[str, Any]]:
         s = _service()
         with self._lock:
+            candidates = sorted(
+                [*self.feedback_events, *self._evicted_thought_events],
+                key=lambda event: s._coerce_nonnegative_int(event.get("sequence")),
+            )
             return [
                 dict(event)
-                for event in self.feedback_events
+                for event in candidates
                 if event.get("kind") == "thought"
                 and s._coerce_nonnegative_int(event.get("sequence")) > self._last_committed_thought_sequence
             ]
@@ -687,7 +692,16 @@ class SessionTurnCapture:
             }
             self.feedback_events.append(entry)
             if len(self.feedback_events) > 120:
-                self.feedback_events = self.feedback_events[-120:]
+                evicted, kept = self.feedback_events[:-120], self.feedback_events[-120:]
+                # 被上限逐出的未提交 thought 段移入旁路列表：uncommitted 消费端
+                # 只扫主列表，不保留的话一轮内 120 条上限就会把 durably 捕获的
+                # 推理段静默丢掉（journal 里永不落盘）。
+                if evicted:
+                    self._evicted_thought_events.extend(
+                        event for event in evicted if event.get("kind") == "thought"
+                    )
+                    del self._evicted_thought_events[:-120]
+                self.feedback_events = kept
             return sequence
 
     def _append_tool_feedback_event(self, tool_call: dict[str, Any], *, related_thought_sequence: int = 0) -> None:

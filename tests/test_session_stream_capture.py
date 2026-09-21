@@ -602,3 +602,21 @@ def test_stream_restart_marker_failure_does_not_break_capture(monkeypatch) -> No
         _publish_stream_restart("restart-err-s", "restart-err-t")
         capture.note_content("失败 attempt 的部分回答（追加）")
         assert capture.content == "失败 attempt 的部分回答（追加）"
+
+
+def test_evicted_thought_events_survive_for_commit() -> None:
+    """120 条上限逐出的未提交 thought 段必须仍能被 uncommitted 消费到。"""
+    capture = stream_capture.SessionTurnCapture(session_id="cap-evict", turn_id="turn-evict")
+    thought_entry = {"kind": "thought", "status": "ok", "name": "reason", "resultPreview": "early reasoning"}
+    capture._append_feedback_event(dict(thought_entry))
+    for index in range(130):
+        capture._append_feedback_event(
+            {"kind": "tool", "status": "ok", "name": f"tool-{index}", "summary": "x"}
+        )
+
+    assert len(capture.feedback_events) == 120
+    uncommitted = capture.uncommitted_thought_events()
+    assert uncommitted, "evicted thought segment must stay visible to the commit path"
+    assert uncommitted[0]["resultPreview"] == "early reasoning"
+    capture.mark_thought_events_committed(uncommitted[0]["sequence"])
+    assert capture.uncommitted_thought_events() == []
