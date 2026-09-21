@@ -3,7 +3,8 @@
 The table borrows ZCode's ``canTransitionTo`` semantics (declarative state ->
 allowed next event categories) for the journal-replayed turn state. Covered
 here: table integrity, the legal/illegal phase matrix, shadow telemetry on
-illegal sequences *without* intercepting the write, the opt-in hard gate that
+illegal sequences other than a second terminal, the always-on duplicate
+terminal reject, the opt-in hard gate that
 reuses the post-terminal degrade path, rewrite-aware cache invalidation, and
 false-positive replay over the real production turn shapes (normal submit,
 proactive, edit/regenerate resubmit, LLM-resilience post-terminal immunity).
@@ -359,18 +360,25 @@ def test_shadow_mode_records_violation_and_does_not_intercept_write(tmp_path, vi
     assert "after terminal" in record["reason"]
 
 
-def test_shadow_mode_reports_duplicate_terminal_and_keeps_it_durable(tmp_path, violations):
+def test_default_mode_rejects_duplicate_terminal_and_keeps_first_settle(tmp_path, violations):
+    """A second terminal is the only class rejected while the rest stay shadow."""
     append_turn_event(tmp_path, "session-a", "turn-1", EVENT_TURN_STARTED, status="running")
     append_turn_event(tmp_path, "session-a", "turn-1", EVENT_TURN_COMPLETED, status="completed")
-    append_turn_event(tmp_path, "session-a", "turn-1", EVENT_TURN_FAILED, status="failed")
+    with pytest.raises(TurnJournalIllegalTransitionError) as excinfo:
+        append_turn_event(tmp_path, "session-a", "turn-1", EVENT_TURN_FAILED, status="failed")
+    assert isinstance(excinfo.value, TurnJournalPostTerminalWriteError)
 
     assert len(violations) == 1
     record = violations[0]
+    assert record["mode"] == TURN_TRANSITION_GUARD_ENFORCE
     assert record["eventType"] == EVENT_TURN_FAILED
     assert "duplicate terminal" in record["reason"]
     assert record["priorTerminalType"] == EVENT_TURN_COMPLETED
     events = load_turn_events(tmp_path, "session-a")
-    assert len(events) == 3
+    assert [event.event_type for event in events] == [
+        EVENT_TURN_STARTED,
+        EVENT_TURN_COMPLETED,
+    ]
 
 
 def test_shadow_mode_default_when_env_missing_or_garbage(monkeypatch):

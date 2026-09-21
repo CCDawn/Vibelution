@@ -100,13 +100,12 @@ class TurnJournalPostTerminalWriteError(ValueError):
 
 
 class TurnJournalIllegalTransitionError(TurnJournalPostTerminalWriteError):
-    """Raised when the hard gate is on and an event fails the transition table.
+    """Raised when an append is rejected by the transition table.
 
-    Shadow mode (the default) never raises this: it only emits the guard
-    telemetry record. When enforcement is enabled via
-    ``VIBELUTION_TURN_TRANSITION_GUARD=enforce``, the error deliberately
-    subclasses the post-terminal write error so every caller that already
-    degrades late writes (drop + telemetry) keeps exactly the same handling;
+    Duplicate terminals always raise. Other illegal classes only raise when
+    ``VIBELUTION_TURN_TRANSITION_GUARD=enforce``; otherwise they emit a shadow
+    record and the write proceeds. The error subclasses the post-terminal
+    write error so callers that already drop late writes keep that handling.
     ``isinstance(exc, ValueError)`` still holds for existing classifiers.
     """
 
@@ -251,8 +250,11 @@ TURN_EVENT_TRANSITIONS: dict[str, frozenset[str]] = {
     TURN_STATE_TERMINAL: frozenset({TURN_PHASE_OUT_OF_BAND}),
 }
 
-# Shadow by default; VIBELUTION_TURN_TRANSITION_GUARD=enforce (or 1/true/yes/on)
-# turns the table into a hard gate that raises TurnJournalIllegalTransitionError.
+# Shadow by default for every illegal class except a second terminal.
+# Replays of real journals only showed duplicate terminals (turn_interrupted
+# after turn_completed, turn_failed after turn_interrupted), so that class is
+# rejected on the write path. VIBELUTION_TURN_TRANSITION_GUARD=enforce
+# (or 1/true/yes/on) turns the rest of the table into the same hard gate.
 TURN_TRANSITION_GUARD_ENV = "VIBELUTION_TURN_TRANSITION_GUARD"
 TURN_TRANSITION_GUARD_SHADOW = "shadow"
 TURN_TRANSITION_GUARD_ENFORCE = "enforce"
@@ -266,6 +268,23 @@ _TURN_TRANSITION_CACHE: dict = {}
 
 _TURN_TRANSITION_HOOK_LOCK = threading.Lock()
 _TURN_TRANSITION_HOOK: Any = None
+
+
+def transition_rejection_is_hard(summary: tuple[int, bool, str], event_type: str) -> bool:
+    """Whether this illegal append must be dropped instead of shadowed.
+
+    Duplicate terminals are always hard: they were the only disorder in a
+    replay of the live journals, and a second settle rewrites the turn's
+    outcome. Every other illegal class stays shadow until the env flag asks
+    for full enforcement.
+    """
+
+    if turn_transition_guard_mode() == TURN_TRANSITION_GUARD_ENFORCE:
+        return True
+    return (
+        turn_transition_state_from_summary(summary) == TURN_STATE_TERMINAL
+        and turn_event_phase(str(event_type or "").strip()) == TURN_PHASE_TERMINAL
+    )
 
 
 def turn_transition_guard_mode() -> str:
@@ -508,6 +527,7 @@ def append_turn_event(
     normalized_turn_id = str(turn_id or "").strip()
     normalized_event_type = str(event_type or "").strip()
     transition_violation: dict[str, Any] | None = None
+    hard_rejection: dict[str, Any] | None = None
     with _journal_thread_lock(path):
         with _journal_file_lock(path):
             if (
@@ -518,22 +538,19 @@ def append_turn_event(
                     f"Cannot append {normalized_event_type} after terminal event for turn {normalized_turn_id}."
                 )
             # Declarative transition table (supplements, never replaces, the
-            # post-terminal guard above). Shadow by default: illegal moves are
-            # reported through the guard hook and the write proceeds unchanged;
-            # the opt-in hard gate raises a post-terminal-compatible error so
-            # existing degrade paths keep working.
+            # post-terminal guard above). Duplicate terminals are dropped here.
+            # Other illegal moves stay shadow unless the env hard gate is on:
+            # the hook sees them and the write proceeds. A hard rejection is
+            # raised only after this lock is released, so the telemetry hook
+            # never runs while the journal file is locked.
             if normalized_turn_id:
                 summary = _cached_turn_transition_summary(path, normalized_turn_id)
                 legal, reason = classify_turn_event_transition(summary, normalized_event_type)
                 if not legal:
-                    if turn_transition_guard_mode() == TURN_TRANSITION_GUARD_ENFORCE:
-                        raise TurnJournalIllegalTransitionError(
-                            f"Illegal turn transition for turn {normalized_turn_id}: "
-                            f"{normalized_event_type} -> {reason}."
-                        )
-                    transition_violation = {
+                    hard = transition_rejection_is_hard(summary, normalized_event_type)
+                    record = {
                         "schema": "turn_transition_guard.v1",
-                        "mode": TURN_TRANSITION_GUARD_SHADOW,
+                        "mode": TURN_TRANSITION_GUARD_ENFORCE if hard else TURN_TRANSITION_GUARD_SHADOW,
                         "sessionId": normalized_session_id,
                         "turnId": normalized_turn_id,
                         "eventType": normalized_event_type,
@@ -543,43 +560,54 @@ def append_turn_event(
                         "priorTerminalType": summary[2],
                         "reason": reason,
                     }
-            sequence = _next_sequence(path)
-            event = TurnJournalEvent(
-                schema_version=SCHEMA_VERSION,
-                event_id=f"{_safe_event_token(normalized_turn_id or normalized_session_id)}-{sequence:06d}-{uuid4().hex[:8]}",
-                session_id=normalized_session_id,
-                turn_id=normalized_turn_id,
-                sequence=sequence,
-                event_type=normalized_event_type,
-                status=str(status or "").strip(),
-                timestamp=str(timestamp or "").strip() or _now_timestamp(),
-                source=str(source or "").strip(),
-                payload=dict(payload or {}),
-                parent_event_id=str(parent_event_id or "").strip(),
-                visible_in_model=bool(visible_in_model),
-                projection_kind=str(projection_kind or "").strip(),
-                provider_role=str(provider_role or "").strip(),
-                tool_call_id=str(tool_call_id or "").strip(),
-                correlation_id=str(correlation_id or "").strip(),
-                source_kind=str(source_kind or "").strip(),
-            )
-            encoded = (
-                json.dumps(event.to_dict(), ensure_ascii=False, separators=(",", ":")) + "\n"
-            ).encode("utf-8")
-            with path.open("ab") as handle:
-                handle.write(encoded)
-                handle.flush()
-                if (
-                    normalized_event_type not in VOLATILE_MODEL_EVENT_TYPES
-                    and normalized_event_type not in DEFERRED_FSYNC_EVENT_TYPES
-                ):
-                    os.fsync(handle.fileno())
-            _remember_sequence(path, sequence)
-            if normalized_event_type in TERMINAL_EVENTS:
-                _remember_terminal_turn_id(path, normalized_turn_id)
-            else:
-                _refresh_terminal_cache_signature(path)
-            _remember_turn_transition_summary(path, normalized_turn_id, normalized_event_type)
+                    if hard:
+                        hard_rejection = record
+                    else:
+                        transition_violation = record
+            if hard_rejection is None:
+                sequence = _next_sequence(path)
+                event = TurnJournalEvent(
+                    schema_version=SCHEMA_VERSION,
+                    event_id=f"{_safe_event_token(normalized_turn_id or normalized_session_id)}-{sequence:06d}-{uuid4().hex[:8]}",
+                    session_id=normalized_session_id,
+                    turn_id=normalized_turn_id,
+                    sequence=sequence,
+                    event_type=normalized_event_type,
+                    status=str(status or "").strip(),
+                    timestamp=str(timestamp or "").strip() or _now_timestamp(),
+                    source=str(source or "").strip(),
+                    payload=dict(payload or {}),
+                    parent_event_id=str(parent_event_id or "").strip(),
+                    visible_in_model=bool(visible_in_model),
+                    projection_kind=str(projection_kind or "").strip(),
+                    provider_role=str(provider_role or "").strip(),
+                    tool_call_id=str(tool_call_id or "").strip(),
+                    correlation_id=str(correlation_id or "").strip(),
+                    source_kind=str(source_kind or "").strip(),
+                )
+                encoded = (
+                    json.dumps(event.to_dict(), ensure_ascii=False, separators=(",", ":")) + "\n"
+                ).encode("utf-8")
+                with path.open("ab") as handle:
+                    handle.write(encoded)
+                    handle.flush()
+                    if (
+                        normalized_event_type not in VOLATILE_MODEL_EVENT_TYPES
+                        and normalized_event_type not in DEFERRED_FSYNC_EVENT_TYPES
+                    ):
+                        os.fsync(handle.fileno())
+                _remember_sequence(path, sequence)
+                if normalized_event_type in TERMINAL_EVENTS:
+                    _remember_terminal_turn_id(path, normalized_turn_id)
+                else:
+                    _refresh_terminal_cache_signature(path)
+                _remember_turn_transition_summary(path, normalized_turn_id, normalized_event_type)
+    if hard_rejection is not None:
+        _emit_turn_transition_violation(hard_rejection)
+        raise TurnJournalIllegalTransitionError(
+            f"Illegal turn transition for turn {normalized_turn_id}: "
+            f"{normalized_event_type} -> {hard_rejection['reason']}."
+        )
     if transition_violation is not None:
         # Emitted after the file lock is released: the hook may be a heavy
         # scene-service sink and must never run under the journal lock.
