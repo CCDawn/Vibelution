@@ -1525,6 +1525,17 @@ def _persist_chat_turn_work_run(
     started = str(started_at or previous.get("startedAt") or now).strip()
     finished = str(finished_at or previous.get("finishedAt") or "").strip()
     normalized_status = str(status or previous.get("status") or "running").strip().lower() or "running"
+    # 终态单调性：touch/心跳可能从事件线程晚到（与 worker 线程的终态写并发），
+    # 一个已经终态的 work-run 不允许被复活为 queued/running/stopping，也不允许
+    # 因此清空 finishedAt——那会让快照短暂复活并丢失 completed/failed 的区分。
+    _terminal_work_run_statuses = {
+        "completed", "failed", "failed_provider", "failed_runtime",
+        "stopped", "cancelled", "paused_limit", "needs_continue",
+        "stopped_by_user", "superseded",
+    }
+    previous_status = str(previous.get("status") or "").strip().lower()
+    if previous_status in _terminal_work_run_statuses and normalized_status not in _terminal_work_run_statuses:
+        normalized_status = previous_status
     if normalized_status in {"running", "stopping"}:
         active_run_id = normalized_turn_id
     elif normalized_status == "queued":

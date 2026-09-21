@@ -236,6 +236,22 @@ def reserve_node_budget(
         reserved = dict(current_ledger.get("reserved") or {})
         for key, value in request.items():
             reserved[key] = int(reserved.get(key) or 0) + value
+        # 容量判定必须基于临界段内的 current 重算（对齐 budget_authority_
+        # adapter 的单事务预留）：外层快照上的 read-before-submit 允许两个
+        # 并发调用者同时看到余量充足而超额预留同一 stage。闭包内 raise 会
+        # 让 mutate_run 放弃本次变更（无副作用）。
+        consumed = dict(current_ledger.get("consumed") or {})
+        over_limit = [
+            key
+            for key, value in request.items()
+            if int(reserved.get(key) or 0) + int(consumed.get(key) or 0)
+            > int((current_ledger.get("limits") or {}).get(key, 0))
+        ]
+        if over_limit:
+            raise BudgetLifecycleError(
+                f"budget exceeded for {', '.join(sorted(over_limit))}",
+                code="budget_exceeded",
+            )
         current_ledger.update(
             {
                 "reserved": reserved,

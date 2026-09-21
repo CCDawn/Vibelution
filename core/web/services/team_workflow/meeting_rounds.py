@@ -1813,6 +1813,23 @@ def record_meeting_queue_activity(
     return updated
 
 
+def _running_bound_room_round_ids(meeting_round: Mapping[str, Any]) -> list[str]:
+    """IDs of bound chat-room rounds still in a running status (empty when unbound)."""
+
+    bound_round_ids = _normalized_str_list(meeting_round.get("chatRoomRoundIds"))
+    if not bound_round_ids:
+        return []
+    from core.web.services import chat_room_service
+
+    bound_rounds = _load_bound_room_rounds(meeting_round)
+    return [
+        round_id
+        for round_id, room_round in bound_rounds.items()
+        if str(room_round.get("status") or "").strip().lower()
+        in chat_room_service.RUNNING_ROUND_STATUSES
+    ]
+
+
 def begin_meeting_summary(
     team_id: str,
     meeting_round_id: str,
@@ -1830,24 +1847,21 @@ def begin_meeting_summary(
     with _read_lock("begin_meeting_summary.check"):
         meeting_round = _load_meeting_round(normalized_team_id, normalized_round_id)
         _ensure_transition_from(meeting_round, "open", "summarizing")
-        bound_round_ids = _normalized_str_list(meeting_round.get("chatRoomRoundIds"))
-    if bound_round_ids and not human_triggered:
-        from core.web.services import chat_room_service
-
-        bound_rounds = _load_bound_room_rounds(meeting_round)
-        running = [
-            round_id
-            for round_id, room_round in bound_rounds.items()
-            if str(room_round.get("status") or "").strip().lower()
-            in chat_room_service.RUNNING_ROUND_STATUSES
-        ]
-        if running:
-            raise ResearchMeetingRoundError(
-                "discussion round is still running; wait for completion or pass human_triggered=True"
-            )
+    if not human_triggered and _running_bound_room_round_ids(meeting_round):
+        raise ResearchMeetingRoundError(
+            "discussion round is still running; wait for completion or pass human_triggered=True"
+        )
     with _write_lock("begin_meeting_summary.commit"):
         meeting_round = _load_meeting_round(normalized_team_id, normalized_round_id)
         _ensure_transition_from(meeting_round, "open", "summarizing")
+        # 抢跑护栏在写临界段内复核：read 检查与写提交之间绑定的 round 启动
+        # 会让 summarizing 与运行中 round 并存，后续 digest 护栏只能拒收。
+        if not human_triggered:
+            running = _running_bound_room_round_ids(meeting_round)
+            if running:
+                raise ResearchMeetingRoundError(
+                    "discussion round is still running; wait for completion or pass human_triggered=True"
+                )
         updated = dict(meeting_round)
         updated["status"] = "summarizing"
         updated["summarizedBy"] = str(actor or "").strip()
@@ -2026,6 +2040,15 @@ def submit_meeting_digest_draft(
     with _write_lock("submit_meeting_digest_draft"):
         meeting_round = _load_meeting_round(normalized_team_id, normalized_round_id)
         _ensure_transition_from(meeting_round, "summarizing", "awaiting_approval")
+        # 抢跑护栏必须在写临界段内复核：read 检查与写提交之间绑定的讨论
+        # round 启动的话，draft 照常落盘会让 approve 永远 fail-closed 且
+        # gate-passing 的 digest 无 reaper 救援（read 阶段的同一检查不够）。
+        running_round_ids = running_bound_round_ids(meeting_round)
+        if running_round_ids:
+            raise ContractValidationError(
+                "cannot persist a digest draft while a bound discussion round "
+                f"is still running: {running_round_ids[0]}"
+            )
         _validate_digest_draft(normalized_draft)
         # Sanitize LLM-proposed candidate lineage refs against the meeting's
         # evidence whitelist BEFORE the content hash is computed, so the saved
@@ -2622,6 +2645,34 @@ def approve_meeting_closure(
         closure_hash=_approval_closure_hash(request, digest_draft),
     )
     with _write_lock("approve_meeting_closure.commit"):
+        # 双重关闭竞态：approve 有四个互不同步的 actor（sweep 自动批准、
+        # 批量队列、automation executor、人类路由）。上面的 check 在 read
+        # 锁内、重型副作用在锁外，写提交前必须复核状态仍为 awaiting_approval，
+        # 否则两个 actor 会各追加一份 closed 记录（后写覆盖先写，人的修改
+        # 可能被自动批准静默顶掉）。
+        latest = _load_meeting_round(normalized_team_id, normalized_round_id)
+        latest_status = str(latest.get("status") or "").strip().lower()
+        if latest_status != "awaiting_approval":
+            if latest_status == "closed":
+                latest_draft = (
+                    dict(latest.get("digestDraft"))
+                    if isinstance(latest.get("digestDraft"), Mapping)
+                    else {}
+                )
+                if str(latest.get("closureHash") or "") != _approval_closure_hash(request, latest_draft):
+                    raise ResearchMeetingRoundError(
+                        "closed meeting round cannot be reused with different closure content"
+                    )
+                reused = _reused_close_result(normalized_team_id, latest)
+                _promote_closed_meeting_room_context(
+                    latest,
+                    reused.get("digest") or {},
+                    list(reused.get("decisions") or []),
+                )
+                return reused
+            raise ResearchMeetingRoundError(
+                f"meeting round status changed during approval: {latest_status}"
+            )
         _append_round_record(normalized_team_id, closed_record)
     _promote_closed_meeting_room_context(closed_record, digest, decisions)
     return {
