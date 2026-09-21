@@ -24,7 +24,12 @@ from .hypothesis_session_scope_mode import (
 )
 from .model_routing import ModelRoutingError, select_model_route
 from .node_execution import start_node_execution
-from .node_execution_support import NodeExecutionError, latest_node_run, replace_by_id
+from .node_execution_support import (
+    NodeExecutionError,
+    latest_node_run,
+    reopen_node_run_for_running,
+    replace_by_id,
+)
 from .session_binding_bridge import SessionBindingBridge, SessionBindingError
 from .store import WorkflowRunStore
 from .task_adapter_registry import PROJECT_NODE_TASKS, SOURCE_NODE_TASKS
@@ -1257,14 +1262,7 @@ def _retry_candidate_task(
         if current_node_run is None:
             return current
         if current_node_run.get("status") == "blocked":
-            current_node_run.update(
-                {
-                    "status": "running",
-                    "finishedAt": "",
-                    "failureCode": "",
-                    "failureSummary": "",
-                }
-            )
+            reopen_node_run_for_running(current_node_run)
             replace_by_id(
                 node_runs,
                 "nodeRunId",

@@ -199,7 +199,12 @@ def _wake_completion(uow: Any, *, run_id: str, node_run_id: str, scope: dict,
                     or run_problem.get("code") != COMPLETION_PENDING):
                 continue
             uow.repository.update_run_status(
-                run_id, run.team_id, "running", now_ms, blocked_problem_json=None,
+                run_id,
+                run.team_id,
+                "running",
+                now_ms,
+                active_node_id=attempt.node_id,
+                blocked_problem_json=None,
             )
         uow.repository.execute(
             "UPDATE outbox_actions SET status='pending', available_at_ms=?, "
@@ -400,6 +405,7 @@ def redrive_authority_complete_completions(
                 run.team_id,
                 "running",
                 effective_now,
+                active_node_id=attempt.node_id,
                 blocked_problem_json=None,
             )
             from core.research.workflow.ledger import EventRecord

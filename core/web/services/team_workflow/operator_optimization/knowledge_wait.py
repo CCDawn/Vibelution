@@ -207,7 +207,12 @@ def _wake_in_uow(uow: Any, invocation_id: str, now_ms: int) -> bool:
         woke = True
     if woke:
         uow.repository.update_run_status(
-            run.run_id, run.team_id, "running", now_ms, blocked_problem_json=None
+            run.run_id,
+            run.team_id,
+            "running",
+            now_ms,
+            active_node_id=run.active_node_id,
+            blocked_problem_json=None,
         )
     return woke
 

@@ -98,6 +98,10 @@ def test_enforced_authorization_applies_plugin_binding_fence_after_policy():
     assert reason is not None
     assert reason.code.value == "not_assigned"
     assert reason.phase == "visibility"
+    # 插件绑定 fence 与 policy.allowedTools 未分配必须产出可区分的 ruleId。
+    assert reason.gate_id == "binding.externallyBlockedTools"
+    assert reason.rule_id == "tool-agent-a:binding.externallyBlockedTools:not_assigned"
+    assert decision.public_projection()["denied"]["virtual_human_status_tool"]["ruleId"] == reason.rule_id
 
 
 def test_bind_authorization_runtime_fills_identity_without_policy():

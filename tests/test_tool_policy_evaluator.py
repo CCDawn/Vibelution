@@ -80,6 +80,82 @@ def test_deny_first_evaluator_keeps_blocked_and_unassigned_tools_invisible():
     assert decision.deny_reason_for("apply_patch_tool").code is ToolDenyCode.NOT_ASSIGNED
 
 
+def test_deny_reasons_carry_rule_id_and_gate_id_for_audit():
+    policy = _policy(
+        {
+            "allowedTools": ["grep_search_tool", "web_search_tool"],
+            "blockedTools": ["web_search_tool"],
+            "preferredTools": ["grep_search_tool"],
+            "networkAccess": "none",
+            "mutationAccess": "none",
+        }
+    )
+
+    decision = _evaluate(policy, _grant())
+
+    blocked = decision.deny_reason_for("web_search_tool")
+    unassigned = decision.deny_reason_for("apply_patch_tool")
+    # grep_search_tool 保持可见可执行；web 被 blocked、apply_patch 未分配。
+    assert decision.deny_reason_for("grep_search_tool") is None
+    assert blocked.gate_id == "policy.blockedTools"
+    assert blocked.rule_id == "policy-test:policy.blockedTools:agent_blocked"
+    assert unassigned.gate_id == "policy.allowedTools"
+    assert unassigned.rule_id == "policy-test:policy.allowedTools:not_assigned"
+    projection = decision.public_projection()["denied"]
+    assert projection["web_search_tool"]["ruleId"] == blocked.rule_id
+    assert projection["apply_patch_tool"]["ruleId"] == unassigned.rule_id
+    # 同一 deny code 由不同规则源触发时 ruleId 必须可区分。
+    assert blocked.rule_id != unassigned.rule_id
+
+
+def test_execution_deny_reasons_carry_their_rule_source():
+    policy = _policy(
+        {
+            "allowedTools": ["web_search_tool", "apply_patch_tool"],
+            "preferredTools": [],
+            "networkAccess": "none",
+            "mutationAccess": "none",
+        }
+    )
+
+    decision = _evaluate(policy, _grant())
+
+    network = decision.deny_reason_for("web_search_tool")
+    mutation = decision.deny_reason_for("apply_patch_tool")
+    assert network.gate_id == "policy.networkAccess"
+    assert network.rule_id == "policy-test:policy.networkAccess:network_denied"
+    assert mutation.gate_id == "policy.mutationAccess"
+    assert mutation.rule_id == "policy-test:policy.mutationAccess:mutation_denied"
+
+
+def test_externally_blocked_tool_gets_distinct_not_assigned_rule_id():
+    policy = _policy(
+        {
+            "allowedTools": ["grep_search_tool", "web_search_tool"],
+            "preferredTools": [],
+            "networkAccess": "full",
+            "mutationAccess": "workspace",
+        }
+    )
+
+    decision = evaluate_tool_policy(
+        agent_id="agent-1",
+        policy=policy,
+        grant=_grant(),
+        descriptors=_descriptors(),
+        registry_version=1,
+        registry_fingerprint="registry-1",
+        available_tool_names=("grep_search_tool", "web_search_tool", "apply_patch_tool"),
+        externally_blocked_tools=("apply_patch_tool",),
+        generated_at="2026-07-14T00:00:00Z",
+    )
+
+    reason = decision.deny_reason_for("apply_patch_tool")
+    assert reason.code is ToolDenyCode.NOT_ASSIGNED
+    assert reason.gate_id == "binding.externallyBlockedTools"
+    assert reason.rule_id == "policy-test:binding.externallyBlockedTools:not_assigned"
+
+
 def test_turn_constraints_and_environment_only_narrow_visibility():
     policy = _policy(
         {

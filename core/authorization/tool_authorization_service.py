@@ -16,6 +16,9 @@ from .tool_policy_models import AuthorizationDecision, TurnToolGrant
 
 MAX_TERMINAL_WAITS_PER_SESSION = 8
 MAX_TERMINAL_WAITS_PER_TURN = 16
+# 执行上下文携带的决策级 deny 规则上限：ruleId 审计富化用，超出部分由
+# decision_reasons 事件面覆盖，避免上下文随注册表规模无界增长。
+MAX_DENY_RULES_IN_CONTEXT = 256
 
 # 交付类工具豁免回合调用额度：研究链路等 stage 会话在额度耗尽后仍必须能把已有
 # 成果写回落盘，否则整个回合的检索成果零交付。只豁免白名单命中或以
@@ -126,6 +129,7 @@ class ToolExecutionAuthorizationContext:
     permission_preset: str
     executable_tools: tuple[str, ...]
     approval_requirements: tuple[tuple[str, str, str], ...] = ()
+    deny_rules: tuple[tuple[str, str, str], ...] = ()
     max_calls_per_turn: int = 0
     call_count: int = 0
     delivery_exempt_call_count: int = 0
@@ -147,6 +151,8 @@ class ToolExecutionAuthorizationResult:
     agent_id: str = ""
     turn_id: str = ""
     decision_fingerprint: str = ""
+    reason_code: str = ""
+    rule_id: str = ""
 
 
 _EXECUTION_AUTHORIZATION: ContextVar[ToolExecutionAuthorizationContext | None] = ContextVar(
@@ -308,6 +314,25 @@ def _runtime_llm_identity(runtime: Mapping[str, Any]) -> tuple[str, str, str]:
     return model, provider, profile_id
 
 
+def _deny_rules_from_decision(decision: Any) -> tuple[tuple[str, str, str], ...]:
+    """Bound (toolName, reasonCode, ruleId) triples for execution-time audit."""
+
+    rules: list[tuple[str, str, str]] = []
+    for item in tuple(getattr(decision, "denied", ()) or ())[:MAX_DENY_RULES_IN_CONTEXT]:
+        if not isinstance(item, tuple) or len(item) != 2:
+            continue
+        name, reason = item
+        code = getattr(reason, "code", "")
+        rules.append(
+            (
+                _coerce_text(name).strip(),
+                _coerce_text(getattr(code, "value", code)).strip(),
+                _coerce_text(getattr(reason, "rule_id", "")).strip(),
+            )
+        )
+    return tuple(rules)
+
+
 def install_execution_authorization(report: AuthorizationReport) -> ToolExecutionAuthorizationContext:
     from core.orchestration.tool_budget_profiles import resolve_max_calls_per_turn
     from core.web.services.agent_directory_service import current_agent_runtime
@@ -335,6 +360,7 @@ def install_execution_authorization(report: AuthorizationReport) -> ToolExecutio
         permission_preset=_coerce_text(runtime.get("permissionPreset")).strip(),
         executable_tools=tuple(decision.executable_tools),
         approval_requirements=tuple(getattr(decision, "approval_requirements", ()) or ()),
+        deny_rules=_deny_rules_from_decision(decision),
         max_calls_per_turn=max_calls_per_turn,
         budget_profile=budget_profile,
         model_family=budget_profile,
@@ -399,15 +425,43 @@ def authorize_tool_execution(
             message="",
         )
     runtime_turn_id = _coerce_text(runtime.get("turnId") or runtime.get("runId")).strip()
+    normalized_tool = _coerce_text(tool_name).strip()
     context = current_execution_authorization()
     if context is None:
-        return _execution_denial("missing_decision", "当前 Agent 缺少可信工具授权决策。", runtime_agent_id, runtime_turn_id)
+        return _execution_denial(
+            "missing_decision",
+            "当前 Agent 缺少可信工具授权决策。",
+            runtime_agent_id,
+            runtime_turn_id,
+            tool_name=normalized_tool,
+        )
     if not _coerce_text(tool_call_id).strip():
-        return _execution_denial("missing_call_id", "当前工具调用缺少 callId。", runtime_agent_id, runtime_turn_id, context)
+        return _execution_denial(
+            "missing_call_id",
+            "当前工具调用缺少 callId。",
+            runtime_agent_id,
+            runtime_turn_id,
+            context,
+            tool_name=normalized_tool,
+        )
     if context.agent_id != runtime_agent_id:
-        return _execution_denial("agent_mismatch", "工具授权决策不属于当前 Agent。", runtime_agent_id, runtime_turn_id, context)
+        return _execution_denial(
+            "agent_mismatch",
+            "工具授权决策不属于当前 Agent。",
+            runtime_agent_id,
+            runtime_turn_id,
+            context,
+            tool_name=normalized_tool,
+        )
     if runtime_turn_id and context.turn_id != runtime_turn_id:
-        return _execution_denial("turn_mismatch", "工具授权决策不属于当前回合。", runtime_agent_id, runtime_turn_id, context)
+        return _execution_denial(
+            "turn_mismatch",
+            "工具授权决策不属于当前回合。",
+            runtime_agent_id,
+            runtime_turn_id,
+            context,
+            tool_name=normalized_tool,
+        )
     runtime_config_snapshot = _as_mapping(runtime.get("agentConfigSnapshot"))
     if (
         _safe_int(runtime_config_snapshot.get("configRevision"), 0)
@@ -423,14 +477,28 @@ def authorize_tool_execution(
             runtime_agent_id,
             runtime_turn_id,
             context,
+            tool_name=normalized_tool,
         )
-    normalized_tool = _coerce_text(tool_name).strip()
     if normalized_tool not in set(context.executable_tools):
-        return _execution_denial("tool_not_executable", "当前工具未被本回合授权执行。", runtime_agent_id, runtime_turn_id, context)
+        return _execution_denial(
+            "tool_not_executable",
+            "当前工具未被本回合授权执行。",
+            runtime_agent_id,
+            runtime_turn_id,
+            context,
+            tool_name=normalized_tool,
+        )
     constraint_denial = _runtime_constraint_denial(runtime, normalized_tool, tool_args or {})
     if constraint_denial:
         code, detail = constraint_denial
-        return _execution_denial(code, detail, runtime_agent_id, runtime_turn_id, context)
+        return _execution_denial(
+            code,
+            detail,
+            runtime_agent_id,
+            runtime_turn_id,
+            context,
+            tool_name=normalized_tool,
+        )
     terminal_wait_session_id = _empty_terminal_wait_session_id(normalized_tool, tool_args)
     with context.call_count_lock:
         if terminal_wait_session_id:
@@ -441,6 +509,7 @@ def authorize_tool_execution(
                     runtime_agent_id,
                     runtime_turn_id,
                     context,
+                    tool_name=normalized_tool,
                 )
             count = context.terminal_wait_counts.get(terminal_wait_session_id, 0)
             if count >= MAX_TERMINAL_WAITS_PER_SESSION:
@@ -450,6 +519,7 @@ def authorize_tool_execution(
                     runtime_agent_id,
                     runtime_turn_id,
                     context,
+                    tool_name=normalized_tool,
                 )
             context.terminal_wait_counts[terminal_wait_session_id] = count + 1
             context.terminal_wait_count += 1
@@ -477,9 +547,17 @@ def authorize_tool_execution(
                     runtime_agent_id,
                     runtime_turn_id,
                     context,
+                    tool_name=normalized_tool,
                 )
         elif context.max_calls_per_turn > 0 and context.call_count >= context.max_calls_per_turn:
-            return _execution_denial("call_budget_exhausted", "当前回合工具调用额度已用尽。", runtime_agent_id, runtime_turn_id, context)
+            return _execution_denial(
+                "call_budget_exhausted",
+                "当前回合工具调用额度已用尽。",
+                runtime_agent_id,
+                runtime_turn_id,
+                context,
+                tool_name=normalized_tool,
+            )
         else:
             context.call_count += 1
     approval_requirement = next(
@@ -520,6 +598,7 @@ def authorize_tool_execution(
                 runtime_agent_id,
                 runtime_turn_id,
                 context,
+                tool_name=normalized_tool,
             )
         if not approval_outcome.allowed:
             return ToolExecutionAuthorizationResult(
@@ -583,7 +662,20 @@ def _execution_denial(
     agent_id: str,
     turn_id: str,
     context: ToolExecutionAuthorizationContext | None = None,
+    *,
+    tool_name: str = "",
 ) -> ToolExecutionAuthorizationResult:
+    normalized_tool = _coerce_text(tool_name).strip()
+    reason_code, rule_id = _decision_deny_rule_for(context, normalized_tool)
+    _record_execution_denial_reason(
+        tool_name=normalized_tool,
+        gate_id=code,
+        reason_code=reason_code,
+        rule_id=rule_id,
+        agent_id=agent_id,
+        turn_id=turn_id,
+        context=context,
+    )
     return ToolExecutionAuthorizationResult(
         enforced=True,
         allowed=False,
@@ -592,7 +684,49 @@ def _execution_denial(
         agent_id=agent_id,
         turn_id=turn_id,
         decision_fingerprint=str(getattr(context, "decision_fingerprint", "") or ""),
+        reason_code=reason_code,
+        rule_id=rule_id,
     )
+
+
+def _decision_deny_rule_for(
+    context: ToolExecutionAuthorizationContext | None,
+    tool_name: str,
+) -> tuple[str, str]:
+    """Resolve the decision-level deny rule (reasonCode, ruleId) for one tool."""
+
+    if context is None or not tool_name:
+        return "", ""
+    for name, reason_code, rule_id in tuple(getattr(context, "deny_rules", ()) or ()):
+        if name == tool_name:
+            return reason_code, rule_id
+    return "", ""
+
+
+def _record_execution_denial_reason(
+    *,
+    tool_name: str,
+    gate_id: str,
+    reason_code: str,
+    rule_id: str,
+    agent_id: str,
+    turn_id: str,
+    context: ToolExecutionAuthorizationContext | None,
+) -> None:
+    try:
+        from core.logging.tool_authorization_events import record_execution_denial_reason
+
+        record_execution_denial_reason(
+            tool_name=tool_name,
+            gate_id=gate_id,
+            reason_code=reason_code,
+            rule_id=rule_id,
+            agent_id=agent_id,
+            turn_id=turn_id,
+            decision_fingerprint=str(getattr(context, "decision_fingerprint", "") or ""),
+        )
+    except Exception:
+        return
 
 
 def _load_registry_payload(registry_loader: Callable[[], Mapping[str, Any]] | None) -> Mapping[str, Any]:

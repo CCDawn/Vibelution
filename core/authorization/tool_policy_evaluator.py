@@ -5,7 +5,7 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 import re
-from typing import Any, Iterable, Mapping, Protocol, Sequence
+from typing import Any, Iterable, Literal, Mapping, Protocol, Sequence
 
 from .tool_policy_models import (
     AgentIdentityMissingError,
@@ -21,6 +21,7 @@ from .tool_policy_models import (
     TurnToolGrant,
     TurnToolGrantInvalidError,
     TurnToolGrantMissingError,
+    compose_deny_rule_id,
 )
 
 
@@ -190,6 +191,7 @@ def evaluate_tool_policy(
         name = descriptor.name
         visibility_reason = _visibility_deny_reason(
             descriptor,
+            policy_id=policy.policy_id,
             allowed=allowed,
             blocked=blocked,
             turn_denied=turn_denied,
@@ -209,7 +211,7 @@ def evaluate_tool_policy(
                     str(descriptor.risk or "read"),
                 )
             )
-        execution_reason = _execution_deny_reason(descriptor, policy=policy, grant=grant)
+        execution_reason = _execution_deny_reason(descriptor, policy=policy, policy_id=policy.policy_id, grant=grant)
         if execution_reason is not None:
             denied[name] = execution_reason
             continue
@@ -274,6 +276,7 @@ def authorization_cache_key(
 def _visibility_deny_reason(
     descriptor: ToolDescriptorLike,
     *,
+    policy_id: str,
     allowed: set[str],
     blocked: set[str],
     turn_denied: set[str],
@@ -283,23 +286,61 @@ def _visibility_deny_reason(
 ) -> ToolDenyReason | None:
     name = descriptor.name
     if not descriptor.enabled:
-        return ToolDenyReason(ToolDenyCode.TOOL_DISABLED, "visibility", "Tool is disabled in the Registry")
+        return _deny_reason(
+            policy_id,
+            ToolDenyCode.TOOL_DISABLED,
+            "registry.toolEnabled",
+            "visibility",
+            "Tool is disabled in the Registry",
+        )
     if name in blocked:
-        return ToolDenyReason(ToolDenyCode.AGENT_BLOCKED, "visibility", "Tool is blocked by the Agent policy")
+        return _deny_reason(
+            policy_id,
+            ToolDenyCode.AGENT_BLOCKED,
+            "policy.blockedTools",
+            "visibility",
+            "Tool is blocked by the Agent policy",
+        )
     if name in externally_blocked:
-        return ToolDenyReason(
+        return _deny_reason(
+            policy_id,
             ToolDenyCode.NOT_ASSIGNED,
+            "binding.externallyBlockedTools",
             "visibility",
             "Tool is not assigned because its plugin binding is disabled for the Agent",
         )
     if name not in allowed:
-        return ToolDenyReason(ToolDenyCode.NOT_ASSIGNED, "visibility", "Tool is not assigned to the Agent")
+        return _deny_reason(
+            policy_id,
+            ToolDenyCode.NOT_ASSIGNED,
+            "policy.allowedTools",
+            "visibility",
+            "Tool is not assigned to the Agent",
+        )
     if name in turn_denied:
-        return ToolDenyReason(ToolDenyCode.TURN_DENIED, "visibility", "Tool is denied for this turn")
+        return _deny_reason(
+            policy_id,
+            ToolDenyCode.TURN_DENIED,
+            "grant.deniedTools",
+            "visibility",
+            "Tool is denied for this turn",
+        )
     if not set(descriptor.capabilities).intersection(allowed_capabilities):
-        return ToolDenyReason(ToolDenyCode.CAPABILITY_MISMATCH, "visibility", "Turn grant lacks a compatible capability")
+        return _deny_reason(
+            policy_id,
+            ToolDenyCode.CAPABILITY_MISMATCH,
+            "grant.allowedCapabilities",
+            "visibility",
+            "Turn grant lacks a compatible capability",
+        )
     if name not in available:
-        return ToolDenyReason(ToolDenyCode.ENVIRONMENT_UNAVAILABLE, "visibility", "Tool is unavailable in the current environment")
+        return _deny_reason(
+            policy_id,
+            ToolDenyCode.ENVIRONMENT_UNAVAILABLE,
+            "environment.availableTools",
+            "visibility",
+            "Tool is unavailable in the current environment",
+        )
     return None
 
 
@@ -307,18 +348,55 @@ def _execution_deny_reason(
     descriptor: ToolDescriptorLike,
     *,
     policy: ToolPolicyV2,
+    policy_id: str,
     grant: TurnToolGrant,
 ) -> ToolDenyReason | None:
     network_access = _narrow_network_access(policy.network_access, grant.network_access)
     mutation_access = _narrow_mutation_access(policy.mutation_access, grant.mutation_access)
     if descriptor.risk == "network" and network_access == "none":
-        return ToolDenyReason(ToolDenyCode.NETWORK_DENIED, "execution", "Network access is disabled")
+        return _deny_reason(
+            policy_id,
+            ToolDenyCode.NETWORK_DENIED,
+            "policy.networkAccess",
+            "execution",
+            "Network access is disabled",
+        )
     if descriptor.risk in {"write", "execute", "destructive"} and mutation_access == "none":
-        return ToolDenyReason(ToolDenyCode.MUTATION_DENIED, "execution", "Mutation access is disabled")
+        return _deny_reason(
+            policy_id,
+            ToolDenyCode.MUTATION_DENIED,
+            "policy.mutationAccess",
+            "execution",
+            "Mutation access is disabled",
+        )
     required_approval = policy.approval_override_for(descriptor.name) or str(descriptor.approval or "never")
     if grant.approval_mode == "never" and required_approval != "never":
-        return ToolDenyReason(ToolDenyCode.APPROVAL_REQUIRED, "execution", "Required approval mode is not available")
+        return _deny_reason(
+            policy_id,
+            ToolDenyCode.APPROVAL_REQUIRED,
+            "approval.requirement",
+            "execution",
+            "Required approval mode is not available",
+        )
     return None
+
+
+def _deny_reason(
+    policy_id: str,
+    code: ToolDenyCode,
+    gate_id: str,
+    phase: Literal["visibility", "execution"],
+    message: str,
+) -> ToolDenyReason:
+    """Build one deny reason carrying its stable audit ruleId."""
+
+    return ToolDenyReason(
+        code=code,
+        phase=phase,
+        message=message,
+        gate_id=gate_id,
+        rule_id=compose_deny_rule_id(policy_id, code, gate_id),
+    )
 
 
 def _validated_descriptor_snapshot(

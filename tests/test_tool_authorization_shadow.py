@@ -87,6 +87,71 @@ def test_authorization_decision_logging_is_bounded_and_has_no_legacy_fields(monk
     assert kwargs["fields"]["executableCount"] == 1
     assert "legacyVisibleCount" not in kwargs["fields"]
     assert "toolPolicy" not in kwargs["fields"]
+    # 聚合事件 schema 不变：per-tool 明细只进并行事件。
+    assert "deniedTools" not in kwargs["fields"]
+
+
+def test_decision_reasons_event_carries_bounded_per_tool_rule_ids(monkeypatch):
+    report = resolve_enforced_authorization(
+        runtime=_runtime({"allowedTools": ["grep_search_tool"], "preferredTools": []}),
+        registry_payload=_registry_payload(),
+        generated_at="2026-07-14T00:00:00Z",
+    )
+    captured = []
+    monkeypatch.setattr(
+        "core.web.services.runtime_scene_service.record_runtime_scene_event",
+        lambda *args, **kwargs: captured.append((args, kwargs)),
+    )
+
+    tool_authorization_events.record_authorization_decision(report)
+
+    assert [item[0][2] for item in captured] == [
+        "tool.authorization.decision",
+        "tool.authorization.decision_reasons",
+    ]
+    args, kwargs = captured[1]
+    assert args == ("tool_authorization", "decision", "tool.authorization.decision_reasons")
+    fields = kwargs["fields"]
+    assert fields["agentId"] == "agent-auth"
+    assert fields["turnId"] == "turn-auth"
+    assert fields["policyId"] == "tool-agent-auth"
+    assert fields["deniedCount"] == 1
+    assert "denyCodeCounts" not in fields
+    assert "durationMs" not in fields
+    entries = fields["deniedTools"]
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry["toolName"] == "web_search_tool"
+    assert entry["phase"] == "visibility"
+    assert entry["reasonCode"] == "not_assigned"
+    assert entry["gateId"] == "policy.allowedTools"
+    assert entry["ruleId"] == "tool-agent-auth:policy.allowedTools:not_assigned"
+    assert isinstance(entry["message"], str) and entry["message"]
+    # per-tool 明细必须有界。
+    assert tool_authorization_events.MAX_DECISION_REASON_TOOLS == 8
+
+
+def test_decision_reasons_event_absent_when_no_tool_is_denied(monkeypatch):
+    report = resolve_enforced_authorization(
+        runtime=_runtime(
+            {
+                "allowedTools": ["grep_search_tool", "web_search_tool"],
+                "preferredTools": [],
+            }
+        ),
+        registry_payload=_registry_payload(),
+        generated_at="2026-07-14T00:00:00Z",
+    )
+    assert report.decision.denied == ()
+    captured = []
+    monkeypatch.setattr(
+        "core.web.services.runtime_scene_service.record_runtime_scene_event",
+        lambda *args, **kwargs: captured.append((args, kwargs)),
+    )
+
+    tool_authorization_events.record_authorization_decision(report)
+
+    assert [item[0][2] for item in captured] == ["tool.authorization.decision"]
 
 
 def test_string_capabilities_and_aliases_are_not_split_into_characters():
