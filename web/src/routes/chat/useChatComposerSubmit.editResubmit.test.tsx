@@ -4,12 +4,13 @@ import React, { act, useEffect, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ConversationMessage, SessionDetail } from "../../api/types";
+import type { ConversationMessage, SessionDetail, SessionTurnItem } from "../../api/types";
 import { queryKeys } from "../../api/queryKeys";
 import type { TranslationKey } from "../../i18n/dictionary";
 import type { ChatEditTarget } from "../chatComposerState";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import type { ActiveTurnLayerState } from "../chatActiveTurnLayer";
+import { mergeAssistantDeltaIntoActiveTurnLayer } from "../chatActiveTurnLayer";
 import { mergeSessionDetailMessageWindow } from "../chatSessionState";
 import { useChatComposerSubmitActions, useChatComposerTurnMutations } from "./useChatComposerSubmit";
 
@@ -93,15 +94,28 @@ function Harness({ queryClient }: { queryClient: QueryClient }) {
     <button data-testid="second-draft" type="button" onClick={() => { setDrafts({ "session-1": "第二次编辑" }); }}>second</button>
     <button data-testid="submit-second" type="button" onClick={() => actions.handleSubmitTurn()}>submit-second</button>
     <button data-testid="seed-terminal-layer" type="button" onClick={() => {
-      const submitted = queryClient.getQueryData<SessionDetail>(queryKeys.session("session-1"))?.messages
-        ?.find((item) => item.role === "user" && item.metadata?.clientSubmissionId)?.metadata?.clientSubmissionId;
-      if (!submitted) return;
-      setLayers({ "session-1": {
-        id: "session-1-message-active-turn-new", renderKey: "session-1-active", clientSubmissionId: String(submitted),
-        sessionId: "session-1", turnId: "turn-new", updatedAt: "2026-01-01T00:00:00.000Z", status: "completed",
-        processStage: "answering", turnItems: [], ledgerSeq: 20,
-      } });
+      const layer = mergeAssistantDeltaIntoActiveTurnLayer(undefined, {
+        type: "assistant_delta", sessionId: "session-1", turnId: "turn-new", ledgerSeq: 20,
+        stage: "answering", updatedAt: "2026-01-01T00:00:00.000Z", done: true,
+        turnItems: [{
+          id: "answer:1", itemId: "answer", version: 3, sessionId: "session-1", turnId: "turn-new",
+          type: "agent_message", phase: "final_answer", status: "completed", revision: 1, sequence: 1,
+          terminal: true, text: "SSE 已完成", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
+        } satisfies SessionTurnItem],
+      });
+      if (layer) setLayers({ "session-1": layer });
     }}>seed-terminal-layer</button>
+    <button data-testid="seed-stream-layer" type="button" onClick={() => {
+      const layer = mergeAssistantDeltaIntoActiveTurnLayer(undefined, {
+        type: "assistant_delta", sessionId: "session-1", turnId: "turn-new", ledgerSeq: 20,
+        stage: "answering", turnItems: [{
+          id: "answer:1", itemId: "answer", version: 3, sessionId: "session-1", turnId: "turn-new",
+          type: "agent_message", phase: "answering", status: "running", revision: 1, sequence: 1,
+          terminal: false, text: "partial", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
+        } satisfies SessionTurnItem], updatedAt: "2026-01-01T00:00:00.000Z", done: false,
+      });
+      if (layer) setLayers({ "session-1": layer });
+    }}>seed-stream-layer</button>
   </div>;
 }
 
@@ -173,7 +187,7 @@ describe("useChatComposerSubmit edit-resubmit", () => {
     await act(async () => {
       queryClient.setQueryData(queryKeys.session("session-1"), detail([
         message("u1", "user", "U1"), message("a1", "assistant", "A1", { turnId: "turn-1" }),
-        message("u2", "user", "编辑后的 U2", { clientSubmissionId: submissionId }),
+        message("u2", "user", "编辑后的 U2", { clientSubmissionId: submissionId, turnId: "turn-new" }),
         message("a-new", "assistant", "新 A2", { turnId: "turn-new" }),
       ]));
     });
@@ -231,20 +245,53 @@ describe("useChatComposerSubmit edit-resubmit", () => {
     await act(async () => {
       queryClient.setQueryData(queryKeys.session("session-1"), detail([
         message("u1", "user", "U1"), message("a1", "assistant", "A1", { turnId: "turn-1" }),
-        message("u2", "user", "编辑后的 U2", { clientSubmissionId: submissionId }),
+        message("u2", "user", "编辑后的 U2", { clientSubmissionId: submissionId, turnId: "turn-new" }),
         message("a-new", "assistant", "SSE 已完成", { turnId: "turn-new" }),
       ]));
       container.querySelector<HTMLButtonElement>("[data-testid=seed-terminal-layer]")?.click();
     });
+    await flushTurn();
     await act(async () => {
       resolve(detail([
         message("u1", "user", "U1"), message("a1", "assistant", "A1", { turnId: "turn-1" }),
-        message("u2", "user", "编辑后的 U2", { clientSubmissionId: submissionId }),
+        message("u2", "user", "编辑后的 U2", { clientSubmissionId: submissionId, turnId: "turn-new" }),
       ]));
       await Promise.resolve();
     });
     const layer = JSON.parse(container.querySelector("[data-testid=layer]")!.textContent!)["session-1"];
+    expect(layer.clientSubmissionId).toBeUndefined();
     expect(layer.status).toBe("completed");
     expect(layer.turnId).toBe("turn-new");
+    expect(layer.turnItems[0]?.text).toBe("SSE 已完成");
+  });
+
+  it("matches a stream-created layer by accepted turn when the delta has no submission id", async () => {
+    current = setup(); const { queryClient, root, container } = current;
+    let resolve!: (value: SessionDetail) => void;
+    apiMocks.editResubmitSessionMessage.mockReturnValue(new Promise((r) => { resolve = r; }));
+    await renderHarness(queryClient, root);
+    await act(async () => { container.querySelector<HTMLButtonElement>("[data-testid=submit]")?.click(); });
+    await flushTurn();
+    const submissionId = (apiMocks.editResubmitSessionMessage.mock.calls[0]?.[1] as { clientSubmissionId: string }).clientSubmissionId;
+    await act(async () => {
+      queryClient.setQueryData(queryKeys.session("session-1"), detail([
+        message("u1", "user", "U1"), message("a1", "assistant", "A1", { turnId: "turn-1" }),
+        message("u2", "user", "编辑后的 U2", { clientSubmissionId: submissionId, turnId: "turn-new" }),
+      ]));
+      container.querySelector<HTMLButtonElement>("[data-testid=seed-stream-layer]")?.click();
+    });
+    await flushTurn();
+    await act(async () => {
+      resolve(detail([
+        message("u1", "user", "U1"), message("a1", "assistant", "A1", { turnId: "turn-1" }),
+        message("u2", "user", "编辑后的 U2", { clientSubmissionId: submissionId, turnId: "turn-new" }),
+      ]));
+      await Promise.resolve();
+    });
+    const layer = JSON.parse(container.querySelector("[data-testid=layer]")!.textContent!)["session-1"];
+    expect(layer.clientSubmissionId).toBeUndefined();
+    expect(layer.turnId).toBe("turn-new");
+    expect(layer.status).toBe("running");
+    expect(layer.turnItems[0]?.text).toBe("partial");
   });
 });

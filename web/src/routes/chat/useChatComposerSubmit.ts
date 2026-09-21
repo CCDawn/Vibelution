@@ -510,10 +510,14 @@ export function useChatComposerTurnMutations({
       setActiveTurnLayersBySession((current) => {
         const existing = current[variables.sessionId];
         const sameSubmission = existing?.clientSubmissionId === variables.clientSubmissionId;
+        // Stream-created layers intentionally do not always carry the client
+        // submission id.  Once the canonical user message exposes its turn,
+        // the turn id is the second ownership key for the same edit.
+        const sameAcceptedTurn = Boolean(existing && acceptedTurnId && existing.turnId === acceptedTurnId);
         const existingHasOutput = Boolean(existing && existing.ledgerSeq > 0 && existing.turnItems.length > 0);
         const preservePaintedLayer = Boolean(
           existing
-          && sameSubmission
+          && (sameSubmission || sameAcceptedTurn)
           && (
             existing.status === "completed"
             || existing.status === "failed"

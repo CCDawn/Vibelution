@@ -1179,7 +1179,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(editMutateBlock).toContain("turnId: optimisticTurnIdForSubmission(\"edit\", variables.sessionId, createdAt)");
     expect(editMutateBlock).toContain("applyOptimisticEditResubmit");
     expect(editMutateBlock).toContain("previousDetail");
-    expect(editSuccessBlock).toContain("const acceptedTurnId = latestUserTurnId(nextDetail)");
+    expect(editSuccessBlock).toContain("const acceptedTurnId = latestUserTurnId(syncedDetail)");
     expect(editSuccessBlock).toContain("setActiveTurnLayersBySession((current) =>");
     expect(editSuccessBlock).toContain("turnId: acceptedTurnId");
     expect(editSuccessBlock).toContain("setActiveTurnLayerForSession(current, variables.sessionId, undefined)");
