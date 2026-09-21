@@ -1015,6 +1015,10 @@ export type SessionDetail = SessionSummary & {
     clientSubmissionId: string;
     baseLedgerSeq?: number;
     supersededTurnId?: string;
+    supersededTurnIds?: string[];
+    targetMessageIndex?: number;
+    phase?: "pending" | "accepted" | "rolled_back";
+    acceptedLedgerSeq?: number;
   } | null;
   /**
    * Select handoff (``Prefer: respond-async``): summary/control fields only,

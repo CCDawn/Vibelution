@@ -82,6 +82,7 @@ import { loadTurnStatusTailConfig } from "./turnStatusTailModel";
 import { type ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
 import { startUserAction, type UserActionTracker } from "../../app/userActionTelemetry";
+import { isEditAcknowledged, rollbackEditResubmit } from "./chatEditResubmitState";
 import {
   resolveSessionStopTurnId,
   resolveStopOptimisticTarget,
@@ -450,13 +451,6 @@ export function useChatComposerTurnMutations({
       await queryClient.cancelQueries({ queryKey: sessionKey, exact: true });
       const previousDetail = queryClient.getQueryData<SessionDetail>(sessionKey);
       const createdAt = new Date().toISOString();
-      const targetIndex = previousDetail?.messages?.findIndex((message) => message.id === variables.messageId) ?? -1;
-      const supersededMessage = targetIndex >= 0
-        ? [...(previousDetail?.messages ?? [])]
-          .slice(targetIndex)
-          .find((message) => message.role === "assistant" && String(message.metadata?.turnId || "").trim())
-        : undefined;
-      const supersededTurnId = String(supersededMessage?.metadata?.turnId || "").trim() || undefined;
       setActiveTurnLayersBySession((current) =>
         setActiveTurnLayerForSession(
           current,
@@ -476,7 +470,6 @@ export function useChatComposerTurnMutations({
           messageId: variables.messageId,
           content: variables.content,
           clientSubmissionId: variables.clientSubmissionId,
-          supersededTurnId,
         }),
       );
       updateSessionSummaryCaches(queryClient, (sessions) =>
@@ -485,6 +478,9 @@ export function useChatComposerTurnMutations({
       return { previousDetail, telemetry };
     },
     onSuccess: (nextDetail, variables, context) => {
+      const currentDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(variables.sessionId));
+      if (currentDetail?.editResubmitProtection
+        && currentDetail.editResubmitProtection.clientSubmissionId !== variables.clientSubmissionId) return;
       context?.telemetry?.succeeded({
         sessionId: variables.sessionId,
         messageId: variables.messageId,
@@ -505,9 +501,27 @@ export function useChatComposerTurnMutations({
         return remaining;
       });
       syncSessionDetail(nextDetail);
-      const acceptedTurnId = latestUserTurnId(nextDetail);
+      // The HTTP response can arrive after SSE has already painted the
+      // accepted turn.  Read the merged cache after sync instead of using the
+      // response snapshot: a late running snapshot must not rebuild a fresh
+      // layer over terminal/output that belongs to this submission.
+      const syncedDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(variables.sessionId)) ?? nextDetail;
+      const acceptedTurnId = latestUserTurnId(syncedDetail) || latestUserTurnId(nextDetail);
       setActiveTurnLayersBySession((current) => {
-        if (!acceptedTurnId || !isBusyPhase(nextDetail.currentPhase || nextDetail.status)) {
+        const existing = current[variables.sessionId];
+        const sameSubmission = existing?.clientSubmissionId === variables.clientSubmissionId;
+        const existingHasOutput = Boolean(existing && existing.ledgerSeq > 0 && existing.turnItems.length > 0);
+        const preservePaintedLayer = Boolean(
+          existing
+          && sameSubmission
+          && (
+            existing.status === "completed"
+            || existing.status === "failed"
+            || (existingHasOutput && (!acceptedTurnId || existing.turnId === acceptedTurnId))
+          ),
+        );
+        if (preservePaintedLayer) return current;
+        if (!acceptedTurnId || !isBusyPhase(syncedDetail.currentPhase || syncedDetail.status)) {
           return setActiveTurnLayerForSession(current, variables.sessionId, undefined);
         }
         return setActiveTurnLayerForSession(
@@ -532,13 +546,13 @@ export function useChatComposerTurnMutations({
         ? (context as { previousDetail?: SessionDetail }).previousDetail
         : undefined;
       const currentDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(variables.sessionId));
-      const ownsPendingEdit = currentDetail?.editResubmitProtection?.clientSubmissionId === variables.clientSubmissionId;
-      if (previousDetail && ownsPendingEdit) {
-        queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), {
-          ...previousDetail,
-          editResubmitProtection: null,
-        });
-      } else if (!currentDetail || ownsPendingEdit) {
+      const guard = currentDetail?.editResubmitProtection;
+      if (isEditAcknowledged(currentDetail, variables.clientSubmissionId)
+        || (guard && (guard.clientSubmissionId !== variables.clientSubmissionId || guard.phase === "accepted"))) return;
+      if (previousDetail && guard) {
+        queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (current) =>
+          rollbackEditResubmit(current, previousDetail, variables.clientSubmissionId));
+      } else if (!currentDetail) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.session(variables.sessionId), exact: true });
       }
       setActiveTurnLayersBySession((current) =>

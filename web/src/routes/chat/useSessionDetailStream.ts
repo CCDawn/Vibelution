@@ -24,6 +24,8 @@ import {
 } from "../chatStreamApplyController";
 import { createSessionAssistantDeltaScheduler } from "../sessionAssistantDeltaScheduler";
 import { chatStreamPerformanceNowMs, isBusyPhase } from "./chatCodingRouteViewModel";
+import { supersededEditDelta } from "./chatEditResubmitState";
+import { mergeSessionDetailMessageWindow } from "../chatSessionState";
 import {
   SESSION_STREAM_ERROR_REFRESH_MIN_INTERVAL_MS,
   SESSION_STREAM_MIN_APPLY_INTERVAL_MS,
@@ -49,11 +51,9 @@ type DesktopConversationNotifier = {
 export function shouldDropSupersededEditDelta(
   protection: SessionDetail["editResubmitProtection"],
   turnId: string | undefined,
+  ledgerSeq?: number,
 ): boolean {
-  return Boolean(
-    protection?.supersededTurnId
-    && String(turnId || "").trim() === protection.supersededTurnId,
-  );
+  return supersededEditDelta(protection, turnId, ledgerSeq);
 }
 
 export type UseSessionDetailStreamOptions = {
@@ -238,7 +238,7 @@ export function useSessionDetailStream({
         // transcript tail; queued deltas from the superseded turn must not be
         // appended to the new optimistic layer.
         assistantDeltaScheduler.cancel();
-        committedAssistantDeltaLayer = activeTurnLayersBySessionRef.current[streamSessionId];
+        committedAssistantDeltaLayer = undefined;
         observedEditSubmissionId = submissionId;
       } else if (!submissionId) {
         observedEditSubmissionId = "";
@@ -326,7 +326,8 @@ export function useSessionDetailStream({
       if (!pendingDetail || disposed) {
         return;
       }
-      const detail = pendingDetail;
+      const detail = mergeSessionDetailMessageWindow(
+        queryClient.getQueryData<SessionDetail>(queryKeys.session(streamSessionId)), pendingDetail);
       const trace = pendingDetailTrace;
       pendingDetail = null;
       pendingDetailTrace = null;
@@ -496,7 +497,7 @@ export function useSessionDetailStream({
       stats.received += 1;
       sessionStreamApplyStatsRef.current[streamSessionId] = stats;
       const editProtection = syncEditResubmitGuard();
-      if (shouldDropSupersededEditDelta(editProtection, payload.turnId)) {
+      if (shouldDropSupersededEditDelta(editProtection, payload.turnId, payload.ledgerSeq)) {
         stats.dropped += 1;
         return;
       }
@@ -669,6 +670,8 @@ export function useSessionDetailStream({
         return;
       }
       markStreamConnected();
+      const editGuard = queryClient.getQueryData<SessionDetail>(queryKeys.session(streamSessionId))?.editResubmitProtection;
+      if (shouldDropSupersededEditDelta(editGuard, routed.payload.turnId, routed.payload.ledgerSeq)) return;
       desktopConversationNotifierRef.current.handleAssistantDelta(routed.payload, {
         sessionTitle: sessionTitleForNotificationsRef.current || streamSessionId,
         viewedSessionId: viewedSessionIdRef.current,

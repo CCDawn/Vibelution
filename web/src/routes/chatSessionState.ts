@@ -1,6 +1,7 @@
 import { ConversationMessage, SessionDetail, SessionMessageWindow, SessionReferenceAttachment, SessionStreamEvent, SessionSummary } from "../api/types";
 import { isRunningPhase } from "./chat/chatCodingRouteViewModel";
 import { hasTerminalCanonicalTurnOutcome } from "./chatTurnProtocol";
+import { editMessageIndex, editMessageTurnId, mergeEditResubmitDetail } from "./chat/chatEditResubmitState";
 
 export type OptimisticUserMessageInput = {
   sessionId: string;
@@ -238,74 +239,6 @@ export type OptimisticEditResubmitInput = {
   supersededTurnId?: string;
 };
 
-function editResubmitTargetIndex(
-  detail: SessionDetail | undefined,
-  targetMessageId: string | undefined,
-): number {
-  const target = String(targetMessageId || "").trim();
-  if (!detail || !target) {
-    return -1;
-  }
-  return (detail.messages ?? []).findIndex((message) => String(message.id || "").trim() === target);
-}
-
-function editResubmitTargetMessageIndex(message: ConversationMessage, fallback: number): number {
-  const metadataIndex = Number(message.metadata?.messageIndex ?? 0);
-  if (Number.isFinite(metadataIndex) && metadataIndex > 0) {
-    return metadataIndex;
-  }
-  const match = String(message.id || "").match(/-message-(\d+)$/);
-  return match ? Number(match[1]) : fallback;
-}
-
-/** Keep the optimistic edit marker attached while stale snapshots are merged. */
-export function protectSessionDetailForEditResubmit(
-  detail: SessionDetail | undefined,
-  protection: NonNullable<SessionDetail["editResubmitProtection"]> | undefined,
-  protectedTarget?: ConversationMessage,
-): SessionDetail | undefined {
-  if (!detail || !protection) {
-    return detail;
-  }
-  const targetIndex = editResubmitTargetIndex(detail, protection.targetMessageId);
-  if (targetIndex < 0) {
-    return { ...detail, editResubmitProtection: protection };
-  }
-  const messages = (detail.messages ?? []).slice(0, targetIndex + 1).map((message) => (
-    protectedTarget && String(message.id || "").trim() === protection.targetMessageId
-      ? protectedTarget
-      : message
-  ));
-  const targetMessageIndex = editResubmitTargetMessageIndex(
-    detail.messages?.[targetIndex] as ConversationMessage,
-    targetIndex + 1,
-  );
-  const window = detail.messageWindow;
-  return {
-    ...detail,
-    messages,
-    messageWindow: window
-      ? {
-          ...window,
-          totalMessages: Math.min(window.totalMessages, targetMessageIndex),
-          returnedMessages: messages.length,
-          newestMessageIndex: Math.min(window.newestMessageIndex, targetMessageIndex),
-          hasLater: false,
-          nextBeforeMessageIndex: window.hasEarlier ? window.nextBeforeMessageIndex : null,
-        }
-      : window,
-    editResubmitProtection: protection,
-  };
-}
-
-export function clearEditResubmitProtection(detail: SessionDetail | undefined): SessionDetail | undefined {
-  if (!detail?.editResubmitProtection) {
-    return detail;
-  }
-  const { editResubmitProtection: _protection, ...rest } = detail;
-  return rest;
-}
-
 /**
  * Branch-mode edit-resubmit: immediately rewrite the target user message and
  * hide the superseded tail. The marker prevents stale detail/SSE/paint merges
@@ -361,6 +294,9 @@ export function applyOptimisticEditResubmit(
     targetMessageId: messageId,
     clientSubmissionId,
     baseLedgerSeq: Number(detail.ledgerSeq ?? 0) || undefined,
+    phase: "pending" as const,
+    targetMessageIndex: Number.isFinite(editMessageIndex(target)) ? editMessageIndex(target) : undefined,
+    supersededTurnIds: [...new Set(messages.slice(targetIndex).map(editMessageTurnId).filter(Boolean))],
     ...(input.supersededTurnId ? { supersededTurnId: input.supersededTurnId } : {}),
   };
 
@@ -552,33 +488,8 @@ export function mergeSessionDetailMessageWindow(
   previous: SessionDetail | undefined,
   next: SessionDetail,
 ): SessionDetail {
-  const nextExplicitlyClearsProtection = next.editResubmitProtection === null;
-  const protection = nextExplicitlyClearsProtection
-    ? undefined
-    : (previous?.editResubmitProtection ?? next.editResubmitProtection ?? undefined);
-  const acknowledged = Boolean(
-    protection
-    && (next.messages ?? []).some((message) => (
-      String(message.id || "").trim() === protection.targetMessageId
-      && conversationMessageClientSubmissionId(message) === protection.clientSubmissionId
-      && message.metadata?.[OPTIMISTIC_USER_MESSAGE_METADATA_KEY] !== true
-    )),
-  );
-  const guardedNext = protection && !acknowledged
-    ? protectSessionDetailForEditResubmit(
-      next,
-      protection,
-      previous?.messages?.find((message) => String(message.id || "").trim() === protection.targetMessageId),
-    ) ?? next
-    : next;
-  const merged = preserveSessionDetailStopIntent(
-    previous,
-    mergeSessionDetailMessageWindowInner(previous, guardedNext),
-  );
-  if (!protection || acknowledged || nextExplicitlyClearsProtection) {
-    return clearEditResubmitProtection(merged) ?? merged;
-  }
-  return protectSessionDetailForEditResubmit(merged, protection) ?? merged;
+  return mergeEditResubmitDetail(previous, next, (before, incoming) =>
+    preserveSessionDetailStopIntent(before, mergeSessionDetailMessageWindowInner(before, incoming)));
 }
 
 /**

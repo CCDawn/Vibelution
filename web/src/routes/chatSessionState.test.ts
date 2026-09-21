@@ -256,7 +256,7 @@ describe("chatSessionState", () => {
         metadata: { clientSubmissionId: "submission-edit-3" },
       }],
     });
-    expect(committed.editResubmitProtection).toBeUndefined();
+    expect(committed.editResubmitProtection?.phase).toBe("accepted");
     expect(committed.messages[0]?.content).toBe("新");
   });
 

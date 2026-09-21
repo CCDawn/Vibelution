@@ -10,6 +10,8 @@ import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../../api/queryKeys";
+import type { SessionDetail } from "../../api/types";
+import { applyOptimisticEditResubmit, mergeSessionDetailMessageWindow } from "../chatSessionState";
 import { SESSION_STREAM_ERROR_REFRESH_MIN_INTERVAL_MS, SESSION_STREAM_ROUTE_SWITCH_GRACE_MS } from "./chatSessionStreamConnect";
 import {
   useSessionDetailStream,
@@ -521,6 +523,45 @@ describe("useSessionDetailStream stop intent freeze", () => {
     });
 
     expect(setActiveTurnLayersBySessionSpy).not.toHaveBeenCalled();
+    unmount(root);
+  });
+
+  it("discards queued old edit frames and keeps rejecting them after the new branch is acknowledged", () => {
+    vi.useFakeTimers();
+    const { options, queryClient } = baseOptions({});
+    const original = { id: "s1", ledgerSeq: 10, currentPhase: "ready", messages: [
+      { id: "s1-message-1", role: "user", content: "old", metadata: { turnId: "turn-1" } },
+      { id: "s1-message-2", role: "assistant", content: "stopped", metadata: { turnId: "turn-1" } },
+    ] } as SessionDetail;
+    queryClient.setQueryData(queryKeys.session("s1"), original);
+    const root = mount(options);
+    const setLayer = options.setActiveTurnLayersBySession as ReturnType<typeof vi.fn>;
+    const stream = FakeEventSource.instances[0];
+    act(() => {
+      stream.emit("assistant_delta", assistantDeltaEvent({ ledgerSeq: 10 }));
+      queryClient.setQueryData(queryKeys.session("s1"), applyOptimisticEditResubmit(original, {
+        messageId: "s1-message-1", content: "edited", clientSubmissionId: "edit-1",
+      }));
+      vi.advanceTimersByTime(64);
+    });
+    expect(setLayer).not.toHaveBeenCalled();
+    const accepted = mergeSessionDetailMessageWindow(
+      queryClient.getQueryData<SessionDetail>(queryKeys.session("s1")),
+      { ...original, ledgerSeq: 12, currentPhase: "running", messages: [{
+        id: "s1-message-1", role: "user", content: "edited",
+        metadata: { clientSubmissionId: "edit-1", turnId: "turn-new" },
+      }] },
+    );
+    queryClient.setQueryData(queryKeys.session("s1"), accepted);
+    act(() => {
+      stream.emit("assistant_delta", assistantDeltaEvent({ done: true, ledgerSeq: 10 }));
+      const next = JSON.parse(assistantDeltaEvent({ done: true, ledgerSeq: 13 }));
+      next.turnId = "turn-new";
+      next.turnItems[0].turnId = "turn-new";
+      stream.emit("assistant_delta", JSON.stringify(next));
+    });
+    expect(setLayer).toHaveBeenCalledTimes(1);
+    expect(setLayer.mock.calls[0][0]({}).s1.turnId).toBe("turn-new");
     unmount(root);
   });
 
