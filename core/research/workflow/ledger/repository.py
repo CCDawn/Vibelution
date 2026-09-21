@@ -323,16 +323,25 @@ class WorkflowLedgerRepository:
         terminal_reason: str | None = None,
         blocked_problem_json: str | None = None,
     ) -> bool:
+        """Settlement full-replacement for the run status row.
+
+        Every mutable settlement field is written from this call; nothing is
+        carried over by omission.  ``active_node_id=None`` clears the
+        operational node pointer — callers that keep pointing at a node pass
+        it explicitly.  ``completed_at_ms`` is written only by a terminal
+        settlement and NULLed by every non-terminal settlement, so a stale
+        completion timestamp can never survive a return to a live status.
+        """
         self._require_run_transition(run_id, status)
         cursor = self.execute(
             """
             UPDATE workflow_runs
             SET status = :status,
-                active_node_id = COALESCE(:active_node_id, active_node_id),
+                active_node_id = :active_node_id,
                 completion_kind = :completion_kind,
                 terminal_reason = :terminal_reason,
                 blocked_problem_json = :blocked_problem_json,
-                completed_at_ms = CASE WHEN :terminal = 1 THEN :now ELSE completed_at_ms END,
+                completed_at_ms = CASE WHEN :terminal = 1 THEN :now ELSE NULL END,
                 updated_at_ms = :now
             WHERE run_id = :run_id AND team_id = :team_id
             """,

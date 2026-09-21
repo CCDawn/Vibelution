@@ -10,6 +10,7 @@ from .node_execution_support import (
     build_event,
     iso,
     latest_node_run,
+    reopen_node_run_for_running,
     replace_by_id,
     utc_now,
 )
@@ -128,14 +129,7 @@ def reopen_external_agent_reconciliation_failure(
             return current
 
         previous_status = str(current_node_run.get("status") or "")
-        current_node_run.update(
-            {
-                "status": "running",
-                "finishedAt": "",
-                "failureCode": "",
-                "failureSummary": "",
-            }
-        )
+        reopen_node_run_for_running(current_node_run)
         node_runs = [dict(item) for item in current.get("nodeRuns") or []]
         replace_by_id(node_runs, "nodeRunId", node_run_id, current_node_run)
         leases = [dict(item) for item in current.get("taskLeases") or []]

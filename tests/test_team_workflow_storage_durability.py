@@ -354,3 +354,207 @@ def test_read_jsonl_cached_quarantine_rewrite_stays_consistent(tmp_path: Path) -
     assert sd.read_jsonl_cached(store) == [{"ok": 1}]
     sd.append_record(store, {"ok": 2})
     assert sd.read_jsonl_cached(store) == [{"ok": 1}, {"ok": 2}]
+
+
+# ---------------------------------------------------------------------------
+# crash injection matrix: fsync / replace / truncation / raise failures
+#
+# Each row injects one real crash mode into one write primitive and asserts
+# the same invariants: the failure surfaces as an exception (never a silent
+# success), whatever bytes the crash left behind are either whole lines or
+# quarantined torn lines on the next tolerant read, previously-acked records
+# survive, no .tmp residue leaks, and the inter-process lock is never wedged.
+# ---------------------------------------------------------------------------
+
+
+class _FailAfter:
+    """Callable replacing a real os/json function; raises from call N on."""
+
+    def __init__(self, real, error: Exception, *, fail_from: int = 1):
+        self._real = real
+        self._error = error
+        self._fail_from = fail_from
+        self.calls = 0
+
+    def __call__(self, *args, **kwargs):
+        self.calls += 1
+        if self.calls >= self._fail_from:
+            raise self._error
+        return self._real(*args, **kwargs)
+
+
+def _assert_whole_lines(records: list[dict]) -> None:
+    """A crashed store must still parse: the tolerant reader returned dicts."""
+    assert all(isinstance(record, dict) for record in records)
+
+
+def test_crash_matrix_fsync_failure_mid_append(tmp_path: Path, monkeypatch) -> None:
+    """os.fsync raising in append_record surfaces the error; the in-flight
+    line may or may not be visible (durability was never acknowledged) but
+    previously-acked lines survive and the store keeps working."""
+    import os as os_module
+
+    from core.web.services.team_workflow import storage_durability as sd
+
+    store = tmp_path / "fsync-append.jsonl"
+    append_jsonl_locked(store, {"i": 1})
+    injected = _FailAfter(os_module.fsync, OSError("device power lost (injected)"))
+    monkeypatch.setattr(sd.os, "fsync", injected)
+
+    import pytest
+
+    with pytest.raises(OSError, match="injected"):
+        append_jsonl_locked(store, {"i": 2})
+    assert injected.calls == 1
+    monkeypatch.undo()
+
+    records = read_jsonl_tolerant(store)
+    _assert_whole_lines(records)
+    assert records[0] == {"i": 1}
+    assert len(records) in (1, 2)
+    append_jsonl_locked(store, {"recovered": True})
+    assert read_jsonl_tolerant(store)[-1] == {"recovered": True}
+
+
+def test_crash_matrix_fsync_failure_mid_rewrite(tmp_path: Path, monkeypatch) -> None:
+    """os.fsync raising inside rewrite_records leaves the store untouched."""
+    import os as os_module
+
+    from core.web.services.team_workflow import storage_durability as sd
+
+    store = tmp_path / "fsync-rewrite.jsonl"
+    append_jsonl_locked(store, {"i": 1})
+    append_jsonl_locked(store, {"i": 2})
+    monkeypatch.setattr(
+        sd.os, "fsync", _FailAfter(os_module.fsync, OSError("device power lost (injected)"))
+    )
+
+    import pytest
+
+    with pytest.raises(OSError, match="injected"):
+        sd.rewrite_records(store, [{"i": 1}, {"i": 2}, {"i": 3}])
+    monkeypatch.undo()
+
+    records = read_jsonl_tolerant(store)
+    assert [r.get("i") for r in records] == [1, 2]
+    assert not list(tmp_path.glob(".*.tmp")), "failed rewrite must not leak temp files"
+
+
+def test_crash_matrix_replace_failure_mid_rewrite(tmp_path: Path, monkeypatch) -> None:
+    """os.replace raising leaves the previous store content authoritative."""
+    import os as os_module
+
+    from core.web.services.team_workflow import storage_durability as sd
+
+    store = tmp_path / "replace.jsonl"
+    append_jsonl_locked(store, {"i": 1})
+    real_replace = os_module.replace
+
+    def failing_replace(src, dst):
+        if str(dst) == str(store):
+            raise OSError("replace interrupted (injected)")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(sd.os, "replace", failing_replace)
+
+    import pytest
+
+    with pytest.raises(OSError, match="injected"):
+        sd.rewrite_records(store, [{"i": 9}])
+    monkeypatch.undo()
+
+    records = read_jsonl_tolerant(store)
+    assert [r.get("i") for r in records] == [1]
+    assert not list(tmp_path.glob(".*.tmp"))
+
+
+def test_crash_matrix_truncated_write_handle_mid_append(tmp_path: Path, monkeypatch) -> None:
+    """A handle dying mid-line (crash between write and fsync) leaves one
+    torn line; the next read quarantines it and later appends stay healthy."""
+    import builtins
+
+    from core.web.services.team_workflow import storage_durability as sd
+
+    store = tmp_path / "truncated.jsonl"
+    append_jsonl_locked(store, {"i": 1})
+    real_open = builtins.open
+
+    def truncating_open(*args, **kwargs):
+        handle = real_open(*args, **kwargs)
+        mode = kwargs.get("mode") or (args[1] if len(args) > 1 else "")
+        if mode == "a":
+            real_write = handle.write
+
+            def truncated_write(data):
+                real_write(data[: len(data) // 3])
+                raise ValueError("handle died mid-line (injected)")
+
+            handle.write = truncated_write  # type: ignore[method-assign]
+        return handle
+
+    monkeypatch.setattr(sd, "open", truncating_open, raising=False)
+
+    import pytest
+
+    with pytest.raises(ValueError, match="injected"):
+        append_jsonl_locked(store, {"i": 2})
+    monkeypatch.undo()
+
+    # Torn in-flight line quarantines; the acked record survives; appends work.
+    records = read_jsonl_tolerant(store)
+    assert records == [{"i": 1}]
+    append_jsonl_locked(store, {"i": 3})
+    assert read_jsonl_tolerant(store) == [{"i": 1}, {"i": 3}]
+
+
+def test_crash_matrix_raise_between_lines_mid_rewrite(tmp_path: Path, monkeypatch) -> None:
+    """A raise between record writes leaves the store byte-identical."""
+    import json as json_module
+
+    from core.web.services.team_workflow import storage_durability as sd
+
+    store = tmp_path / "between.jsonl"
+    append_jsonl_locked(store, {"i": 1})
+    append_jsonl_locked(store, {"i": 2})
+    real_dump = json_module.dumps
+    injected = _FailAfter(real_dump, RuntimeError("writer killed between lines (injected)"), fail_from=2)
+    monkeypatch.setattr(sd.json, "dumps", injected)
+
+    import pytest
+
+    with pytest.raises(RuntimeError, match="injected"):
+        sd.rewrite_records(store, [{"i": 1}, {"i": 2}, {"i": 3}])
+    assert injected.calls == 2
+    monkeypatch.undo()
+
+    records = read_jsonl_tolerant(store)
+    assert [r.get("i") for r in records] == [1, 2]
+    assert not list(tmp_path.glob(".*.tmp"))
+
+
+def test_crash_matrix_crash_under_lock_releases_the_lock(tmp_path: Path, monkeypatch) -> None:
+    """A crash inside the locked section never wedges the lock file: the OS
+    releases it when the crashed writer's handle closes, so the next writer
+    acquires it cleanly."""
+    import os as os_module
+
+    from core.web.services.team_workflow import storage_durability as sd
+
+    store = tmp_path / "lock.jsonl"
+    append_jsonl_locked(store, {"i": 1})
+    monkeypatch.setattr(
+        sd.os, "fsync", _FailAfter(os_module.fsync, OSError("crash under lock (injected)"))
+    )
+
+    import pytest
+
+    with pytest.raises(OSError, match="injected"):
+        append_jsonl_locked(store, {"i": 2})
+    monkeypatch.undo()
+
+    # The in-flight line was fully written+flushed before the fsync crash.
+    records = read_jsonl_tolerant(store)
+    assert [r.get("i") for r in records] == [1, 2]
+    # The lock released with the crashed writer: a plain append succeeds.
+    append_jsonl_locked(store, {"i": 3})
+    assert [r.get("i") for r in read_jsonl_tolerant(store)] == [1, 2, 3]
