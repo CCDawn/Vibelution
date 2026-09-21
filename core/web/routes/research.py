@@ -18,10 +18,16 @@ from core.web.routes.research_models import (
     ResearchOrganizationPayload,
     ResearchPromptUpdatePayload,
     ResearchPromptsResponse,
+    ResearchReportSynthesisPayload,
+    ResearchReportSynthesisResponse,
     ThemeDiscoverySessionDeleteResponse,
     ThemeDiscoverySessionListResponse,
     ThemeDiscoverySessionPayload,
     ThemeDiscoverySessionResponse,
+)
+from core.web.services.team_workflow.research_runtime.report_synthesis_service import (
+    ReportSynthesisError,
+    synthesize_research_report,
 )
 from core.web.services.research_service import (
     approve_theme_card,
@@ -337,3 +343,27 @@ def _run_research_action(action):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (ResearchOrganizationError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post(
+    "/research/teams/{team_id}/report-synthesis",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ResearchReportSynthesisResponse,
+    response_model_exclude_unset=True,
+)
+def research_report_synthesize(team_id: str, payload: ResearchReportSynthesisPayload) -> dict:
+    try:
+        return synthesize_research_report(
+            team_id,
+            topic=payload.topic,
+            items=payload.items,
+            model_ref=payload.modelRef,
+            workflow_run_id=payload.workflowRunId,
+        )
+    except ReportSynthesisError as exc:
+        status_code = {
+            "invalid_request": status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "empty_items": status.HTTP_409_CONFLICT,
+            "anchor_violation": status.HTTP_422_UNPROCESSABLE_ENTITY,
+        }.get(exc.code, status.HTTP_400_BAD_REQUEST)
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc

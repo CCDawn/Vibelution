@@ -29,6 +29,7 @@ _SUPPORTED_KINDS = OPERATOR_ARTIFACT_KINDS | frozenset(
     {
         "run_artifacts",
         "research_result_package",
+        "research_report",
         "smoke_evidence",
         "smoke_release",
         "frozen_protocol",
