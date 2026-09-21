@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from core.infrastructure import developer_sandbox
+from core.infrastructure.canonical_json import sha256_hex
 from core.web.services import agent_directory_service, session_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 
@@ -1159,17 +1160,66 @@ def _new_id(prefix: str) -> str:
     return f"{prefix}-{timestamp}-{digest}"
 
 
+# Content-addressed default idempotency key version.  Bumped (v1 ``kernel-``
+# -> v2 ``kernel-v2-``) when the key recipe changed from a dict-order
+# sensitive ``repr`` hash to canonical JSON, so persisted v1 index entries
+# can never be mistaken for v2 lookups.
+_IDEMPOTENCY_KEY_VERSION = "kernel-v2"
+
+# Transient envelope fields callers sometimes embed inside a semantic
+# payload.  They describe when/which delivery attempt it is, not what the
+# event says, so they are pruned before the content hash; retries of the
+# same semantic event keep the same key even when these markers differ.
+_TRANSIENT_PAYLOAD_KEYS = frozenset(
+    {
+        "createdAt",
+        "updatedAt",
+        "eventId",
+        "timestamp",
+        "requestedAt",
+        "sentAt",
+        "occurredAt",
+    }
+)
+
+
+def _prune_transient_payload_fields(value: Any) -> Any:
+    """Recursively drop transient envelope keys from the keying payload."""
+    if isinstance(value, dict):
+        return {
+            key: _prune_transient_payload_fields(item)
+            for key, item in value.items()
+            if str(key) not in _TRANSIENT_PAYLOAD_KEYS
+        }
+    if isinstance(value, list):
+        return [_prune_transient_payload_fields(item) for item in value]
+    return value
+
+
 def _default_idempotency_key(*, sender_agent_id: str, recipients: list[str], semantic_payload: dict[str, Any]) -> str:
-    digest = hashlib.sha256(
-        repr(
-            {
-                "senderAgentId": sender_agent_id,
-                "recipients": recipients,
-                "semanticPayload": semantic_payload,
-            }
-        ).encode("utf-8", errors="replace")
-    ).hexdigest()[:24]
-    return f"kernel-{digest}"
+    """Content-addressed default idempotency key (v2).
+
+    Canonical JSON (sorted object keys, no whitespace) replaces the old
+    dict-insertion-order sensitive ``repr`` hash: equal semantic content now
+    hashes equal no matter how the caller built its payload dict.  The
+    delivery target list is deduped and sorted — recipients are a set for
+    keying purposes — while lists inside the semantic payload keep their
+    order, because list position is content there.  Transient envelope
+    fields (createdAt/eventId-class markers callers may embed) are pruned
+    before hashing so a retry of the same semantic event does not miss.
+    The ``kernel-v2`` prefix keeps new keys from colliding with legacy
+    ``kernel-`` entries already persisted in the taskIdsByIdempotencyKey
+    index.
+    """
+    digest = sha256_hex(
+        {
+            "keyVersion": 2,
+            "senderAgentId": sender_agent_id,
+            "recipients": sorted({str(item) for item in recipients}),
+            "semanticPayload": _prune_transient_payload_fields(semantic_payload),
+        }
+    )
+    return f"{_IDEMPOTENCY_KEY_VERSION}-{digest[:24]}"
 
 
 def _required_id(value: Any, *, label: str) -> str:

@@ -150,6 +150,98 @@ def test_kernel_event_idempotency_reuses_existing_terminal_task(tmp_path, monkey
     assert [task["taskId"] for task in tasks] == [first_payload["task"]["taskId"]]
 
 
+def _default_key_event(agent_id: str, *, payload: dict, recipients: list[str] | None = None) -> dict:
+    return {
+        "sender": {"type": "user", "id": "user"},
+        "recipientAgentIds": recipients if recipients is not None else [agent_id],
+        "semanticType": "agent.message",
+        "payload": payload,
+        "wakeTarget": False,
+    }
+
+
+def test_kernel_default_idempotency_key_is_dict_order_insensitive(tmp_path, monkeypatch):
+    """The v2 content-addressed default key hashes canonical JSON: the same
+    semantic content must reuse one task regardless of payload dict order."""
+    _isolate_kernel(tmp_path, monkeypatch)
+    agent = _create_agent()
+    client = _client()
+
+    first = client.post(
+        "/api/kernel/events",
+        json=_default_key_event(agent["agentId"], payload={"content": "hello", "goal": "hello", "meta": {"b": 2, "a": 1}}),
+    )
+    reordered = client.post(
+        "/api/kernel/events",
+        json=_default_key_event(agent["agentId"], payload={"meta": {"a": 1, "b": 2}, "goal": "hello", "content": "hello"}),
+    )
+
+    assert first.status_code == 202
+    assert reordered.status_code == 202
+    assert reordered.json()["reused"] is True
+    assert reordered.json()["task"]["taskId"] == first.json()["task"]["taskId"]
+
+
+def test_kernel_default_idempotency_key_prunes_transient_fields_and_sorts_recipients(tmp_path, monkeypatch):
+    """Delivery-attempt markers (createdAt/eventId class) never change the
+    key, and the recipient list is keyed as a set, not as an ordered list."""
+    _isolate_kernel(tmp_path, monkeypatch)
+    agent_a = _create_agent("Kernel Alpha")
+    agent_b = agent_directory_service.create_agent_instance(
+        display_name="Kernel Beta", direct_session_id="session-beta"
+    )
+    client = _client()
+
+    base = _default_key_event(
+        agent_a,
+        payload={"content": "hello", "createdAt": "2026-01-01T00:00:00Z", "eventId": "event-first"},
+        recipients=[agent_a["agentId"], agent_b["agentId"]],
+    )
+    retry = {
+        **_default_key_event(
+            agent_a,
+            payload={"eventId": "event-second", "content": "hello", "createdAt": "2026-02-02T00:00:00Z"},
+            recipients=[agent_b["agentId"], agent_a["agentId"]],
+        ),
+        # Same semantic event retried under a different envelope eventId.
+        "eventId": "event-envelope-retry",
+    }
+
+    first = client.post("/api/kernel/events", json=base)
+    second = client.post("/api/kernel/events", json=retry)
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert second.json()["reused"] is True
+    assert second.json()["task"]["taskId"] == first.json()["task"]["taskId"]
+
+
+def test_kernel_default_idempotency_key_is_versioned_and_content_sensitive(tmp_path, monkeypatch):
+    """New keys carry the kernel-v2 prefix so persisted legacy kernel- index
+    entries can never collide, and changed content still gets a new task."""
+    import json as _json
+
+    _project_root, data_home = _isolate_kernel(tmp_path, monkeypatch)
+    agent = _create_agent()
+    client = _client()
+
+    first = client.post(
+        "/api/kernel/events",
+        json=_default_key_event(agent["agentId"], payload={"content": "first message"}),
+    ).json()
+    changed = client.post(
+        "/api/kernel/events",
+        json=_default_key_event(agent["agentId"], payload={"content": "second message"}),
+    ).json()
+
+    index = _json.loads((data_home / "workspace" / "agent_kernel" / "index.json").read_text(encoding="utf-8"))
+    keys = list(index["taskIdsByIdempotencyKey"])
+    assert len(keys) == 2
+    assert all(key.startswith("kernel-v2-") for key in keys)
+    assert changed["reused"] is False
+    assert changed["task"]["taskId"] != first["task"]["taskId"]
+
+
 def test_kernel_task_list_returns_latest_tasks_first_after_limit(tmp_path, monkeypatch):
     _isolate_kernel(tmp_path, monkeypatch)
     agent = _create_agent()

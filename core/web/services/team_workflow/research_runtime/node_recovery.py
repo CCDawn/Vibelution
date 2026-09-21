@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from .node_execution_support import (
+    NODE_RUN_TERMINAL_FIELD_KEYS,
     NodeExecutionError,
     build_event,
     iso,
@@ -159,11 +160,11 @@ def retry_node_execution(
             "escalationReason": "",
             "budgetLedgerRef": "",
             "artifactRefs": [],
-            "startedAt": "",
-            "finishedAt": "",
-            "failureCode": "",
-            "failureSummary": "",
             "supersedesNodeRunId": prior_run["nodeRunId"],
+            "startedAt": "",
+            # A fresh attempt never inherits the prior attempt's terminal
+            # residue; the field set is shared with the reopen settlement.
+            **{key: "" for key in NODE_RUN_TERMINAL_FIELD_KEYS},
             "retryKind": retry_kind,
             "countsAgainstRetryBudget": retry_kind != "infrastructure_recovery",
             "recoveryOfNodeRunId": (
