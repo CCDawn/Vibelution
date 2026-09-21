@@ -37,7 +37,9 @@ _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION = threading.Condition(
     _SESSION_CONVERSATION_EVENTS_CACHE_LOCK
 )
 _SESSION_CONVERSATION_EVENTS_CACHE: dict[str, dict[str, Any]] = {}
-_SESSION_CONVERSATION_EVENTS_INFLIGHT: dict[str, object] = {}
+_SESSION_CONVERSATION_EVENTS_INFLIGHT: dict[str, tuple[object, float]] = {}
+_SESSION_EVENTS_INFLIGHT_STALE_SECONDS = 30.0
+_SESSION_EVENTS_INFLIGHT_POLL_SECONDS = 5.0
 
 
 def _perf_counter() -> float:
@@ -122,7 +124,14 @@ def load_session_conversation_events_cached(
     *,
     project_root: Path | None = None,
 ) -> list[Any]:
-    """Load ledger events with signature cache + single-flight inflight wait."""
+    """Load ledger events with signature cache + single-flight inflight wait.
+
+    Inflight slots carry a start timestamp and waiters take over a slot that
+    exceeded ``_SESSION_EVENTS_INFLIGHT_STALE_SECONDS`` — a stuck or leaked
+    owner (load hanging on AV/file-lock, or a BaseException escaping the
+    ``except Exception`` cleanup) otherwise blocks every ledger read of that
+    session forever. Mirrors the stale-takeover protection in list_cache.
+    """
 
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
@@ -141,21 +150,26 @@ def load_session_conversation_events_cached(
             if cached and cached.get("signature") == signature:
                 cached["last_access"] = now
                 return list(cached.get("events") or ())
-            if cache_key not in _SESSION_CONVERSATION_EVENTS_INFLIGHT:
-                _SESSION_CONVERSATION_EVENTS_INFLIGHT[cache_key] = owner
+            inflight = _SESSION_CONVERSATION_EVENTS_INFLIGHT.get(cache_key)
+            if inflight is None or (now - inflight[1]) >= _SESSION_EVENTS_INFLIGHT_STALE_SECONDS:
+                _SESSION_CONVERSATION_EVENTS_INFLIGHT[cache_key] = (owner, now)
                 break
-            _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION.wait()
+            _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION.wait(timeout=_SESSION_EVENTS_INFLIGHT_POLL_SECONDS)
 
     try:
         events = list(load_conversation_events(root, normalized_session_id) or [])
-    except Exception:
+    except BaseException:
+        # BaseException：KeyboardInterrupt/SystemExit 也必须释放槽位，
+        # 否则该会话的所有后续读都在 wait() 上永久阻塞。
         with _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION:
-            if _SESSION_CONVERSATION_EVENTS_INFLIGHT.get(cache_key) is owner:
+            inflight = _SESSION_CONVERSATION_EVENTS_INFLIGHT.get(cache_key)
+            if inflight is not None and inflight[0] is owner:
                 _SESSION_CONVERSATION_EVENTS_INFLIGHT.pop(cache_key, None)
             _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION.notify_all()
         raise
     with _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION:
-        if _SESSION_CONVERSATION_EVENTS_INFLIGHT.get(cache_key) is owner:
+        inflight = _SESSION_CONVERSATION_EVENTS_INFLIGHT.get(cache_key)
+        if inflight is not None and inflight[0] is owner:
             _SESSION_CONVERSATION_EVENTS_CACHE[cache_key] = {
                 "signature": signature,
                 "events": tuple(events),

@@ -283,15 +283,19 @@ rules:
       - "tests/test_chat_room_routes.py"
       - "tests/test_session_submit.py"
       - "tests/test_session_worker.py"
+      - "tests/test_session_chat_stream_e2e.py"
+      - "tests/test_session_sse_http_e2e.py"
       - "tests/helpers/web_chat_state.py"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_session_routes.py tests/test_chat_room_service.py tests/test_chat_room_routes.py -n 4 --dist load -q"
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_session_submit.py tests/test_session_worker.py -n 2 --dist loadfile -q"
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_app.py -k \"branch_edit_reports_versions or regenerate_with_base_message_id\" -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_session_chat_stream_e2e.py tests/test_session_sse_http_e2e.py -q"
     notes:
       - "Use the route/service subset first; widen to tests/test_web_app.py only when shared app fixtures or legacy route coverage changed."
       - "The route/service batch is serial-marked but measured safe for per-test distribution: 176.7s serial -> 78.5s/83.0s at -n 3 and 54.4s/56.9s at -n 4 --dist load; keep the explicit override rather than loadfile."
       - "Submit and worker unit tests own the session hot path; the matrix must run them or import fallback cannot, because session/** is already claimed."
+      - "The two stream e2e files are the cross-layer weld regression (service-stream and real-HTTP transport); they are module-level serial and run in one serial command."
 
   - id: web-session-chat-ui
     description: "Chat route and conversation UI focused validation."
@@ -358,9 +362,11 @@ rules:
       - "tests/test_web_runtime_routes.py"
       - "tests/helpers/web_runtime_scene.py"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_launcher_scripts_contract.py tests/test_runtime_manager.py tests/test_launcher_service.py tests/test_web_runtime_routes.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_launcher_scripts_contract.py tests/test_runtime_manager.py tests/test_launcher_service.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_runtime_routes.py -n 4 --dist load -q"
     notes:
       - "Runtime lifecycle changes need an explicit Launcher refresh decision after automated validation."
+      - "tests/test_web_runtime_routes.py keeps its module serial mark but is measured safe for per-test distribution: 47.5s serial -> 26.2s/22.1s at -n 4 --dist load; the launcher/runtime-manager batch stays serial because it drives real processes."
 
   - id: desktop-electron-shell
     description: "Electron desktop shell, tray, IPC, and packaged Launcher control plane (ADR 0009)."
@@ -441,10 +447,12 @@ rules:
       - "tests/test_turn_status_bar_and_budget_profiles.py"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_llm_protocol_cache_alignment.py tests/test_llm_protocol_resolver.py tests/test_llm_wire_chat_completions.py tests/test_llm_wire_responses.py tests/test_prompt_cache_hit_optimization.py tests/test_llm_invocation_context.py tests/test_turn_status_bar_and_budget_profiles.py -q"
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_config_routes.py tests/test_config_panel.py tests/test_config_sync.py tests/test_public_config_model_refs.py tests/test_llm_client.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_config_routes.py -n 4 --dist load -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_config_panel.py tests/test_config_sync.py tests/test_public_config_model_refs.py tests/test_llm_client.py -q"
     notes:
       - "Verify effective config behavior, not only source defaults."
-      - "Protocol/wire/cache tests are parallel-safe; config panel and web config routes stay serial."
+      - "Protocol/wire/cache tests are parallel-safe; config panel stays serial."
+      - "tests/test_web_config_routes.py keeps its module serial mark but is measured safe for per-test distribution: 60.3s serial -> 24.8s/30.4s at -n 4 --dist load."
       - "Turn status bar placement affects DeepSeek automatic prefix cache; keep with LLM hot path."
       - "client.py and the models/settings/public_config trio are the highest-churn files here; their focused rules below carry them."
 

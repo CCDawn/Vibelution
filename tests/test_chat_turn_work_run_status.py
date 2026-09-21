@@ -93,3 +93,26 @@ def test_list_active_session_work_runs_reports_degraded_reads(
     assert runs[0]["status"] == "running"
     assert "Session read degraded" in caplog.text
     assert "RuntimeError" in caplog.text
+
+
+def test_terminal_work_run_status_is_not_revived_by_late_touch(monkeypatch, tmp_path) -> None:
+    """晚到的 touch/心跳（事件线程）不得把终态 work-run 复活为 running 或清空 finishedAt。"""
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    session_service._persist_chat_turn_work_run(
+        session_id="session-done",
+        turn_id="turn-terminal",
+        status="completed",
+        summary="done",
+        finished_at="2026-09-20T00:00:00Z",
+    )
+    # 模拟跨线程晚到的心跳：终态之后才落盘的 running touch。
+    session_service._persist_chat_turn_work_run(
+        session_id="session-done",
+        turn_id="turn-terminal",
+        status="running",
+    )
+
+    snapshot = session_service._WORK_RUN_STORE.load_snapshot("chat_turn", "turn-terminal") or {}
+    assert snapshot.get("status") == "completed"
+    assert str(snapshot.get("finishedAt") or "").strip() != ""

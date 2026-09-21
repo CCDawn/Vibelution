@@ -2693,10 +2693,8 @@ def _record_agent_directory_conversation_index_event(
     if not normalized_session_id or not agent_id:
         return
     dedupe_key = (str(s.PROJECT_ROOT.resolve()), normalized_session_id, agent_id)
-    with s._SESSION_INDEX_EVENT_DEDUPE_LOCK:
-        if dedupe_key in s._AGENT_DIRECTORY_INDEX_EVENT_KEYS:
-            return
-        s._AGENT_DIRECTORY_INDEX_EVENT_KEYS.add(dedupe_key)
+    if not s._claim_index_event_key_once(s._AGENT_DIRECTORY_INDEX_EVENT_KEYS, dedupe_key):
+        return
     try:
         s.record_runtime_scene_event(
             "conversation",

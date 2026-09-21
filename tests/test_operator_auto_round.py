@@ -793,7 +793,11 @@ def test_feedback_adapter_closes_only_when_pinned_definition_ends_at_feedback(
 def test_native_readiness_refusal_does_not_create_attempt(
     activity, completed, monkeypatch
 ):
-    store, _, payload, _ = completed
+    from core.web.services.team_workflow.research_runtime.command_service import (
+        NodeNotReadyError,
+    )
+
+    store, run_id, payload, _ = completed
     service = WorkflowCommandService(
         store=store,
         readiness_context=lambda: None,
@@ -803,19 +807,22 @@ def test_native_readiness_refusal_does_not_create_attempt(
     )
     monkeypatch.setattr(iteration, "get_command_service", lambda: service)
     requested = iteration.advance_iteration(store, payload, now_ms=1900)
-    result = iteration.apply_iteration_decision(
-        store,
-        payload,
-        {
-            "decisionId": requested["decisionId"],
-            "kind": "discuss",
-            "reason": "continue bounded optimization",
-            "decidedBy": "fixture-decision-agent",
-        },
-        now_ms=2000,
-    )
-    assert result["status"] == "blocked"
-    assert store.latest_attempt(result["nextRunId"], "optimization_discussion") is None
+    decision = {
+        "decisionId": requested["decisionId"],
+        "kind": "discuss",
+        "reason": "continue bounded optimization",
+        "decidedBy": "fixture-decision-agent",
+    }
+    # NodeNotReady 是瞬态拒绝：抛出（而非终态化 blocked），outbox requeue
+    # 后重放从 preparing 态再次直达 submit——不被 blocked 早退吞掉。
+    with pytest.raises(NodeNotReadyError):
+        iteration.apply_iteration_decision(store, payload, decision, now_ms=2000)
+    with pytest.raises(NodeNotReadyError):
+        iteration.apply_iteration_decision(store, payload, decision, now_ms=2100)
+    run = store.get_run(run_id)
+    state = json.loads(run.input_snapshot_json).get("operatorDecision", {})
+    assert state.get("status") not in {"blocked", "started", "stopped"}
+    assert store.latest_attempt(state["nextRunId"], "optimization_discussion") is None
 
 
 def test_reserved_model_usage_prevents_next_round(activity, completed):

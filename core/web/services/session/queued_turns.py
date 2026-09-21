@@ -211,6 +211,17 @@ def update_session_queued_turn(
                 s.text_for(lang, zh="该排队消息已不在队列中。", en="That queued message is no longer in the queue.")
             )
         row = rows[index]
+        if row["status"] == "starting":
+            # claim→submit 窗口内 submit 消费的是 claim 时的快照，此时编辑会被
+            # 静默丢弃（用户以为改成功了）；明确拒绝。crash 遗留的 stale
+            # starting 行由 _reset_stale_starting_rows 恢复为可编辑。
+            raise s.SessionValidationError(
+                s.text_for(
+                    lang,
+                    zh="该排队消息正在发送，暂不能编辑；请等它发出后再发修改版。",
+                    en="That queued message is being sent and cannot be edited; wait for it to go out, then send a corrected version.",
+                )
+            )
         if content is not None:
             next_content = str(content or "").strip()
             if not next_content and not row["attachments"]:

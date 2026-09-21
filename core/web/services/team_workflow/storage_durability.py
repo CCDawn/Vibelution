@@ -99,28 +99,134 @@ def inter_process_lock(store_path: Path, *, timeout_s: float = 10.0) -> Iterator
         handle.close()
 
 
-def append_jsonl_locked(path: Path, record: dict) -> None:
-    """Atomic append that re-reads under the inter-process lock.
+def append_record(
+    path: Path,
+    record: dict,
+    *,
+    ascii: bool = False,
+    timeout_s: float = 30.0,
+) -> None:
+    """True O(1) durable append: lock, write one line, flush, fsync.
 
-    The re-read inside the lock is the fix: concurrent writers append on
-    top of the *current* snapshot instead of a pre-lock stale one, so no
-    record is silently dropped.
+    The store family grew out of a whole-file-replace append whose cost was
+    O(file) per record — a 7 MB meeting ledger paid a 7 MB rewrite for every
+    appended row.  This primitive writes only the new line inside the same
+    inter-process lock, so append cost stays O(line) while cross-process
+    serialization is unchanged (a locked append can never lose a record the
+    way the old unlocked read-modify-write race did).
+
+    The trade versus whole-file replace is a crash window of at most one
+    torn line (``os.replace`` could never tear the file); the tolerant
+    readers already quarantine such lines to ``<store>.corrupt``, so a torn
+    line degrades to losing that one in-flight record, never the store.
+
+    ``ascii`` selects ``ensure_ascii=True`` for stores whose historical
+    format escaped non-ASCII (``team_knowledge``); everything else uses the
+    canonical ``ensure_ascii=False, sort_keys=True`` line format, which is
+    byte-identical to the previous whole-file append output.
+    """
+    line = (
+        json.dumps(
+            record,
+            ensure_ascii=bool(ascii),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with inter_process_lock(path, timeout_s=timeout_s):
+        with open(path, "a", encoding="utf-8", newline="\n") as handle:
+            handle.write(line)
+            handle.flush()
+            os.fsync(handle.fileno())
+
+
+def rewrite_records(path: Path, records: list[dict]) -> None:
+    """Locked whole-file replace for compaction, quarantine and cleanup.
+
+    Writers that genuinely need read-modify-write semantics (collapse
+    superseded copies, drop quarantined lines) rewrite through this single
+    primitive so every mutation of a store serializes on the same lock an
+    :func:`append_record` takes — an append racing a compaction can never
+    be lost to a stale snapshot.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    line = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
     with inter_process_lock(path):
-        existing = path.read_text(encoding="utf-8") if path.exists() else ""
-        fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+        )
         try:
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-                handle.write(existing)
-                handle.write(line)
+                for record in records:
+                    handle.write(
+                        json.dumps(
+                            record,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        )
+                        + "\n"
+                    )
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary_name, path)
         finally:
             if os.path.exists(temporary_name):
                 os.unlink(temporary_name)
+
+
+def transform_records(
+    path: Path,
+    transform,
+) -> list[dict]:
+    """Locked read-transform-rewrite for compaction and cleanup.
+
+    A compaction that reads outside the lock can lose a racing append (it
+    rewrites from a stale snapshot).  This primitive holds the same
+    inter-process lock :func:`append_record` takes across the whole
+    read-compute-rewrite sequence, so a concurrent append either lands
+    before the read (kept) or after the rewrite (kept) — never dropped.
+    ``transform`` receives the tolerant-read records and returns the
+    records to keep; the return value lists what was written.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with inter_process_lock(path):
+        records = read_jsonl_tolerant(path) if path.exists() else []
+        kept = list(transform(records) or [])
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+                for record in kept:
+                    handle.write(
+                        json.dumps(
+                            record,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        )
+                        + "\n"
+                    )
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary_name, path)
+        finally:
+            if os.path.exists(temporary_name):
+                os.unlink(temporary_name)
+    return kept
+
+
+def append_jsonl_locked(path: Path, record: dict) -> None:
+    """Canonical locked append; see :func:`append_record`.
+
+    Historical name kept for the existing call sites (meeting rounds, the
+    hypothesis chain store, driver work): the whole-file re-read that used
+    to live here fixed the cross-process lost-update race, and the locked
+    true append preserves exactly that guarantee at O(line) cost.
+    """
+    append_record(path, record)
 
 
 def read_jsonl_tolerant(path: Path) -> list[dict]:

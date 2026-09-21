@@ -1063,10 +1063,8 @@ def _record_session_agent_missing_index_event(
     agent_id = str(summary.get("agentId") or summary.get("agentMissingId") or "").strip()
     normalized_source = str(source or "").strip()
     dedupe_key = (str(s.PROJECT_ROOT.resolve()), session_id, agent_id, agent_status_code, normalized_source)
-    with s._SESSION_INDEX_EVENT_DEDUPE_LOCK:
-        if dedupe_key in s._SESSION_MISSING_INDEX_EVENT_KEYS:
-            return
-        s._SESSION_MISSING_INDEX_EVENT_KEYS.add(dedupe_key)
+    if not s._claim_index_event_key_once(s._SESSION_MISSING_INDEX_EVENT_KEYS, dedupe_key):
+        return
     try:
         s.record_runtime_scene_event(
             "conversation",
@@ -1139,10 +1137,8 @@ def _record_session_agent_missing_index_batch_event(
         hidden_count,
         tuple((item["sessionId"], item["agentId"], item["agentStatusCode"]) for item in samples),
     )
-    with s._SESSION_INDEX_EVENT_DEDUPE_LOCK:
-        if dedupe_key in s._SESSION_MISSING_INDEX_BATCH_EVENT_KEYS:
-            return
-        s._SESSION_MISSING_INDEX_BATCH_EVENT_KEYS.add(dedupe_key)
+    if not s._claim_index_event_key_once(s._SESSION_MISSING_INDEX_BATCH_EVENT_KEYS, dedupe_key):
+        return
     try:
         s.record_runtime_scene_event(
             "conversation",

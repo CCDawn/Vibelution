@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import json
-import os
 import sqlite3
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -27,78 +24,13 @@ def build_git_memory_maintenance_report(
     *,
     keep_latest: int | None = None,
     integrity_check: bool = False,
-    executable: str | Path | None = None,
-    timeout_seconds: float = 10.0,
 ) -> dict[str, Any]:
-    """Return a Git memory maintenance report, preferring the Rust accelerator when available."""
-
-    normalized_db_path = Path(db_path)
-    normalized_keep_latest = normalize_keep_latest(keep_latest)
-    binary_path = Path(executable) if executable else default_maintenance_binary()
-    if not binary_path or not binary_path.exists():
-        fallback = build_python_git_memory_maintenance_report(
-            normalized_db_path,
-            keep_latest=normalized_keep_latest,
-            integrity_check=integrity_check,
-        )
-        fallback["accelerator"] = {
-            "available": False,
-            "reason": "rust_binary_missing",
-            "path": str(binary_path) if binary_path else "",
-        }
-        return fallback
-
-    command = [
-        str(binary_path),
-        "git-memory",
-        "--db",
-        str(normalized_db_path),
-        "--keep-latest",
-        str(normalized_keep_latest),
-    ]
-    if integrity_check:
-        command.append("--integrity-check")
-    creationflags = 0
-    if os.name == "nt":
-        creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    completed = subprocess.run(
-        command,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=timeout_seconds,
-        stdin=subprocess.DEVNULL,
-        creationflags=creationflags,
+    """Return a Git memory maintenance report (read-only)."""
+    return build_python_git_memory_maintenance_report(
+        db_path,
+        keep_latest=keep_latest,
+        integrity_check=integrity_check,
     )
-    if completed.returncode != 0:
-        fallback = build_python_git_memory_maintenance_report(
-            normalized_db_path,
-            keep_latest=normalized_keep_latest,
-            integrity_check=integrity_check,
-        )
-        fallback["accelerator"] = {
-            "available": False,
-            "reason": "rust_binary_failed",
-            "returnCode": completed.returncode,
-            "stderrTail": _tail(completed.stderr),
-        }
-        return fallback
-    payload = json.loads(completed.stdout)
-    if isinstance(payload, dict):
-        payload["accelerator"] = {
-            "available": True,
-            "path": str(binary_path),
-        }
-    return payload
-
-
-def default_maintenance_binary() -> Path:
-    suffix = ".exe" if os.name == "nt" else ""
-    crate_root = Path(__file__).resolve().parents[2] / "crates" / "vibelution-maintenance"
-    release_binary = crate_root / "target" / "release" / f"vibelution-maintenance{suffix}"
-    if release_binary.exists():
-        return release_binary
-    return crate_root / "target" / "debug" / f"vibelution-maintenance{suffix}"
 
 
 def build_python_git_memory_maintenance_report(
@@ -342,10 +274,3 @@ def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
 def _count(conn: sqlite3.Connection, sql: str, params: tuple[Any, ...] = ()) -> int:
     row = conn.execute(sql, params).fetchone()
     return int(row[0] if row else 0)
-
-
-def _tail(value: str, *, max_chars: int = 2000) -> str:
-    normalized = str(value or "").strip()
-    if len(normalized) <= max_chars:
-        return normalized
-    return normalized[-max_chars:]

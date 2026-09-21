@@ -291,7 +291,7 @@ def _ensure_session_context_window(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         session_service,
         "_session_context_limit_payload",
-        lambda conversation=None: {"limit": 65536, "source": "t518-stub"},
+        lambda conversation=None: {"limit": 131072, "source": "t518-stub"},
     )
 
 
@@ -322,7 +322,7 @@ def _use_t518_model_library(monkeypatch: pytest.MonkeyPatch) -> None:
                             "upstream_id": "qwen3.5-9b",
                             "label": "T5.1 qwen fixture",
                             "enabled": True,
-                            "context_window": 65536,
+                            "context_window": 131072,
                         }
                     },
                 }

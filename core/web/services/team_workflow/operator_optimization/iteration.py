@@ -188,7 +188,15 @@ def advance_iteration(store, payload, *, now_ms):
             return stop("round_not_completed")
         cid = snapshot["researchObjectiveContract"]["optimizationCampaignId"]
         campaign = read_campaign(run.team_id, run.project_id, cid)
-        record = next(r for r in campaign.rounds if r.runId == run.run_id)
+        record = next(
+            (r for r in campaign.rounds if r.runId == run.run_id),
+            None,
+        )
+        if record is None:
+            # 账本/轮次记录分叉窗口：裸 StopIteration 只有类型名，无法分类排障。
+            raise CampaignConflict(
+                "Completed round has no campaign round record (ledger divergence)"
+            )
         if record.feedbackRef is None or record.evaluationRef is None:
             raise CampaignConflict("Completed round has no canonical feedback")
         feedback = read_ref(run.team_id, run.run_id, record.feedbackRef)
@@ -380,11 +388,12 @@ def apply_iteration_decision(store, payload, decision, *, now_ms):
                 )
             )
         except NodeNotReadyError as exc:
-            return _save(
-                store,
-                run.run_id,
-                {**state, "status": "blocked", "reason": str(exc)[:500]},
-            )
+            # 瞬态拒绝（command 侧明确定义为 no attempt / no runVersion bump）。
+            # 落成 blocked 终态会让事件被 ACK 且 :247 的早退集合吞掉所有重放，
+            # campaign.activeRunId 指向一个永不启动的 run——没有 sweep 再驱动，
+            # 整个迭代永久停摆。改回抛出让 outbox requeue（5s × 12 次窗口）：
+            # 重放从 preparing 态直达 submit，start_key 幂等查询防双启动。
+            raise
         return _save(
             store,
             run.run_id,

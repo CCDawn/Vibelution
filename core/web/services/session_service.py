@@ -1181,6 +1181,20 @@ _SESSION_WORKSPACE_SAFE_CHARS = re.compile(r"[^A-Za-z0-9_.-]+")
 _SESSION_IMAGE_ARTIFACT_SAFE_CHARS = re.compile(r"^[A-Za-z0-9_.-]+$")
 _SESSION_WORKSPACE_SUBDIRS = ("artifacts", "tmp", "mental_model", "notes", "logs", "memory")
 _SESSION_INDEX_EVENT_DEDUPE_LOCK = threading.Lock()
+
+
+def _claim_index_event_key_once(collection: set, key: tuple, *, cap: int = 4096) -> bool:
+    """进程级一次性事件去重；集合有界（超限整体重置，最坏重放一次事件）。"""
+
+    with _SESSION_INDEX_EVENT_DEDUPE_LOCK:
+        if key in collection:
+            return False
+        if len(collection) >= cap:
+            collection.clear()
+        collection.add(key)
+        return True
+
+
 _SESSION_MISSING_INDEX_EVENT_KEYS: set[tuple[str, str, str, str, str]] = set()
 _SESSION_MISSING_INDEX_BATCH_EVENT_KEYS: set[tuple[Any, ...]] = set()
 _AGENT_DIRECTORY_INDEX_EVENT_KEYS: set[tuple[str, str, str]] = set()

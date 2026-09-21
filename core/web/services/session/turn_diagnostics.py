@@ -110,7 +110,15 @@ def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = ""
         event_turn_id = str(event.turn_id or turn_id)
         s._invalidate_session_conversation_events_cache(normalized_session_id)
         s._discard_session_live_output_state(normalized_session_id, turn_id=turn_id)
-    except Exception:
+    except Exception as exc:
+        # 这是崩溃后关闭开轮/丢弃残留 live output 的唯一入口；持续失败会让
+        # 会话永远显示 running 且连一条告警都没有。保持不抛语义，但必须可见。
+        from . import read_health
+
+        read_health.note_session_read_degraded(
+            source="stale session ledger reconcile",
+            error_type=type(exc).__name__,
+        )
         return
     try:
         s.record_runtime_scene_event(
@@ -1517,6 +1525,17 @@ def _persist_chat_turn_work_run(
     started = str(started_at or previous.get("startedAt") or now).strip()
     finished = str(finished_at or previous.get("finishedAt") or "").strip()
     normalized_status = str(status or previous.get("status") or "running").strip().lower() or "running"
+    # 终态单调性：touch/心跳可能从事件线程晚到（与 worker 线程的终态写并发），
+    # 一个已经终态的 work-run 不允许被复活为 queued/running/stopping，也不允许
+    # 因此清空 finishedAt——那会让快照短暂复活并丢失 completed/failed 的区分。
+    _terminal_work_run_statuses = {
+        "completed", "failed", "failed_provider", "failed_runtime",
+        "stopped", "cancelled", "paused_limit", "needs_continue",
+        "stopped_by_user", "superseded",
+    }
+    previous_status = str(previous.get("status") or "").strip().lower()
+    if previous_status in _terminal_work_run_statuses and normalized_status not in _terminal_work_run_statuses:
+        normalized_status = previous_status
     if normalized_status in {"running", "stopping"}:
         active_run_id = normalized_turn_id
     elif normalized_status == "queued":
