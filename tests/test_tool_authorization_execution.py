@@ -207,6 +207,97 @@ def test_execution_decisions_emit_bounded_audit_events(monkeypatch):
     assert authorization_events[1][1]["fields"]["code"] == "tool_not_executable"
 
 
+def test_not_executable_denial_carries_decision_rule_id_and_reason(monkeypatch):
+    """执行期拒绝必须可审计回决策级规则源：tool_not_executable 带 ruleId+reasonCode。"""
+
+    _runtime(monkeypatch)
+    _install()
+    context = tool_authorization_service.current_execution_authorization()
+    assert context is not None
+    # 决策核真实产物会携带 denied（hidden_tool → not_assigned）；测试上下文补齐等价信息。
+    context.deny_rules = (("hidden_tool", "not_assigned", "tool-agent-a:policy.allowedTools:not_assigned"),)
+    recorded = []
+    monkeypatch.setattr(
+        "core.logging.tool_authorization_events.record_execution_denial_reason",
+        lambda **kwargs: recorded.append(kwargs),
+    )
+
+    result = tool_authorization_service.authorize_tool_execution(
+        tool_name="hidden_tool",
+        tool_call_id="call-hidden",
+    )
+
+    assert result.allowed is False
+    assert result.code == "tool_not_executable"
+    assert result.reason_code == "not_assigned"
+    assert result.rule_id == "tool-agent-a:policy.allowedTools:not_assigned"
+    assert len(recorded) == 1
+    fields = recorded[0]
+    assert fields["tool_name"] == "hidden_tool"
+    assert fields["gate_id"] == "tool_not_executable"
+    assert fields["reason_code"] == "not_assigned"
+    assert fields["rule_id"] == "tool-agent-a:policy.allowedTools:not_assigned"
+    assert fields["agent_id"] == "agent-a"
+    assert fields["turn_id"] == "turn-a"
+    assert fields["decision_fingerprint"] == "decision-a"
+
+
+def test_budget_denial_has_gate_id_without_decision_rule(monkeypatch):
+    """额度闸拒绝的工具有自己的 gateId；决策级规则不适用时 reasonCode/ruleId 为空。"""
+
+    _runtime(monkeypatch, max_calls_per_turn=1)
+    _install()
+    context = tool_authorization_service.current_execution_authorization()
+    assert context is not None
+    context.max_calls_per_turn = 1
+    context.call_count = 1
+    recorded = []
+    monkeypatch.setattr(
+        "core.logging.tool_authorization_events.record_execution_denial_reason",
+        lambda **kwargs: recorded.append(kwargs),
+    )
+
+    result = tool_authorization_service.authorize_tool_execution(
+        tool_name="allowed_tool",
+        tool_call_id="call-over-budget",
+    )
+
+    assert result.allowed is False
+    assert result.code == "call_budget_exhausted"
+    assert result.reason_code == ""
+    assert result.rule_id == ""
+    assert recorded[0]["gate_id"] == "call_budget_exhausted"
+    assert recorded[0]["reason_code"] == ""
+    assert recorded[0]["rule_id"] == ""
+
+
+def test_execution_denial_reason_event_is_recorded_via_scene_service(monkeypatch):
+    """并行事件走 scene 服务，事件码为 tool.authorization.execution_denied_reason。"""
+
+    _runtime(monkeypatch)
+    _install()
+    captured = []
+    monkeypatch.setattr(
+        "core.web.services.runtime_scene_service.record_runtime_scene_event",
+        lambda *args, **kwargs: captured.append((args, kwargs)),
+    )
+
+    tool_authorization_service.authorize_tool_execution(
+        tool_name="hidden_tool",
+        tool_call_id="call-hidden",
+    )
+
+    reason_events = [item for item in captured if item[0][2] == "tool.authorization.execution_denied_reason"]
+    assert len(reason_events) == 1
+    args, kwargs = reason_events[0]
+    assert args[0] == "tool_authorization"
+    assert kwargs["outcome"] == "blocked"
+    fields = kwargs["fields"]
+    assert fields["toolName"] == "hidden_tool"
+    assert fields["gateId"] == "tool_not_executable"
+    assert fields["decisionFingerprintPresent"] is True
+
+
 def test_call_budget_is_shared_by_execution_authorization(monkeypatch):
     _runtime(monkeypatch, max_calls_per_turn=1)
     _install()
