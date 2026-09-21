@@ -142,13 +142,17 @@ def _read_store(path: Path) -> tuple[list[dict[str, Any]], int]:
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    return _read_store(path)[0]
+    from core.web.services.team_workflow.storage_durability import read_jsonl_cached
+
+    return read_jsonl_cached(path)
 
 
 def _append_jsonl(path: Path, record: dict[str, Any]) -> None:
     from core.web.services.team_workflow.storage_durability import append_record
 
     append_record(path, record)
+
+
 def _resolve_scope(payload: Mapping[str, Any]) -> dict[str, str]:
     identity: dict[str, str] = {}
     for field in _SCOPE_FIELDS:

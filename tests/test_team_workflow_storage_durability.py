@@ -277,3 +277,80 @@ def test_transform_records_does_not_lose_racing_append(tmp_path: Path) -> None:
         r["index"] for r in records if r.get("worker") == 99
     )
     assert racer_indexes == list(range(20))
+
+
+# ---------------------------------------------------------------------------
+# stat-validated read cache
+# ---------------------------------------------------------------------------
+
+
+def test_read_jsonl_cached_serves_hits_and_invalidates_on_write(tmp_path: Path) -> None:
+    from core.web.services.team_workflow import storage_durability as sd
+
+    store = tmp_path / "cache.jsonl"
+    sd.append_record(store, {"i": 1})
+
+    parses = []
+    real_tolerant = sd.read_jsonl_tolerant
+
+    def counting_tolerant(path):
+        parses.append(path)
+        return real_tolerant(path)
+
+    monkey_patched = counting_tolerant
+    original = sd.read_jsonl_tolerant
+    sd.read_jsonl_tolerant = monkey_patched
+    try:
+        assert sd.read_jsonl_cached(store) == [{"i": 1}]
+        assert sd.read_jsonl_cached(store) == [{"i": 1}]
+        assert sd.read_jsonl_cached(store) == [{"i": 1}]
+        assert len(parses) == 1, "repeat reads must be served from the cache"
+        sd.append_record(store, {"i": 2})
+        assert sd.read_jsonl_cached(store) == [{"i": 1}, {"i": 2}]
+        assert len(parses) == 2, "a write must invalidate eagerly"
+    finally:
+        sd.read_jsonl_tolerant = original
+
+
+def test_read_jsonl_cached_invalidates_on_foreign_process_append(tmp_path: Path) -> None:
+    """An append from another process invalidates via the stat check."""
+    from core.web.services.team_workflow import storage_durability as sd
+
+    store = tmp_path / "foreign.jsonl"
+    sd.append_record(store, {"i": 1})
+    assert sd.read_jsonl_cached(store) == [{"i": 1}]
+
+    worker = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            _WORKER_SCRIPT.format(
+                root=str(Path(__file__).resolve().parents[1]),
+                store=str(store),
+                count=5,
+                worker=7,
+            ),
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    _, stderr = worker.communicate(timeout=60)
+    assert worker.returncode == 0, stderr.decode("utf-8", "replace")
+
+    records = sd.read_jsonl_cached(store)
+    assert len(records) == 6
+    assert sum(1 for r in records if r.get("worker") == 7) == 5
+
+
+def test_read_jsonl_cached_quarantine_rewrite_stays_consistent(tmp_path: Path) -> None:
+    """A torn line quarantines through the cache without stale hits."""
+    from core.web.services.team_workflow import storage_durability as sd
+
+    store = tmp_path / "tq.jsonl"
+    sd.append_record(store, {"ok": 1})
+    assert sd.read_jsonl_cached(store) == [{"ok": 1}]
+    with open(store, "a", encoding="utf-8") as handle:
+        handle.write('{"torn":')
+    assert sd.read_jsonl_cached(store) == [{"ok": 1}]
+    sd.append_record(store, {"ok": 2})
+    assert sd.read_jsonl_cached(store) == [{"ok": 1}, {"ok": 2}]

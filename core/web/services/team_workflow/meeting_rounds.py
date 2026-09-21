@@ -240,9 +240,9 @@ def _stable_hash(payload: Any) -> str:
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    from core.web.services.team_workflow.storage_durability import read_jsonl_tolerant
+    from core.web.services.team_workflow.storage_durability import read_jsonl_cached
 
-    return read_jsonl_tolerant(path)
+    return read_jsonl_cached(path)
 
 
 def _append_jsonl(path: Path, record: dict[str, Any]) -> None:

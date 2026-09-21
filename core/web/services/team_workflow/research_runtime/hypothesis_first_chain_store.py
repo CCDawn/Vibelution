@@ -238,41 +238,17 @@ def _stable_hash(payload: Any) -> str:
     )
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
-_RECORDS_CACHE: dict[Path, tuple[int, int, list[dict[str, Any]]]] = {}
-
-_RECORDS_CACHE_MAX_ENTRIES = 64
-
-def _records_cache_stamp(path: Path) -> tuple[int, int] | None:
-    try:
-        stat = path.stat()
-    except OSError:
-        return None
-    return (stat.st_mtime_ns, stat.st_size)
-
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    from core.web.services.team_workflow.storage_durability import read_jsonl_tolerant
+    from core.web.services.team_workflow.storage_durability import read_jsonl_cached
 
-    with _LOCK:
-        stamp = _records_cache_stamp(path)
-        if stamp is not None:
-            cached = _RECORDS_CACHE.get(path)
-            if cached is not None and (cached[0], cached[1]) == stamp:
-                return list(cached[2])
-        records = read_jsonl_tolerant(path)
-        if stamp is None:
-            _RECORDS_CACHE.pop(path, None)
-        else:
-            if len(_RECORDS_CACHE) >= _RECORDS_CACHE_MAX_ENTRIES:
-                _RECORDS_CACHE.clear()
-            _RECORDS_CACHE[path] = (stamp[0], stamp[1], records)
-        return list(records)
+    # The shared stat-validated cache replaces this module's private
+    # mtime/size records cache; the write primitives invalidate it eagerly.
+    return read_jsonl_cached(path)
 
 def _append_jsonl(path: Path, record: dict[str, Any]) -> None:
     from core.web.services.team_workflow.storage_durability import append_jsonl_locked
 
     append_jsonl_locked(path, record)
-    with _LOCK:
-        _RECORDS_CACHE.pop(path, None)
 
 def _latest_by_id(
     records: list[dict[str, Any]], field: str, record_id: str
@@ -292,8 +268,11 @@ def _rewrite_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
         for record in records
     )
     atomic_write_text(path, payload)
-    with _LOCK:
-        _RECORDS_CACHE.pop(path, None)
+    from core.web.services.team_workflow.storage_durability import (
+        _invalidate_read_cache,
+    )
+
+    _invalidate_read_cache(path)
 
 def _latest_records(records: list[dict[str, Any]], field: str) -> dict[str, dict[str, Any]]:
     latest: dict[str, dict[str, Any]] = {}
