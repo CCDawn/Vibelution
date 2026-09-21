@@ -21,7 +21,10 @@ from core.chat.conversation_ledger import (
     load_conversation_events,
 )
 from core.chat.session_catalog import notify_session_catalog_dirty
-from core.chat.turn_journal import TERMINAL_EVENTS
+from core.chat.turn_journal import (
+    TERMINAL_EVENTS,
+    set_turn_transition_guard_hook,
+)
 
 from ..runtime_scene_service import record_runtime_scene_event
 
@@ -312,3 +315,57 @@ _invalidate_session_conversation_events_cache = invalidate_session_conversation_
 _load_session_conversation_events_cached = load_session_conversation_events_cached
 _session_ledger_sequence = session_ledger_sequence
 _append_session_conversation_event = append_session_conversation_event
+
+
+def _record_turn_transition_guard_scene_event(record: dict[str, Any]) -> None:
+    """Forward one transition-table violation into the runtime scene log.
+
+    Sink for the shadow-first turn transition guard: keeps the disorder visible
+    (same funnel as ``chat.capture.write_dropped``) without intercepting the
+    write. The record is already bounded and payload-free; only identity,
+    category, and reason fields are re-bounded here for the scene log.
+    """
+
+    try:
+        mode = str(record.get("mode") or "shadow").strip()
+        record_runtime_scene_event(
+            "conversation",
+            "turn_transition_guard",
+            "conversation.turn.transition_violation",
+            level="warning",
+            outcome="discarded" if mode == "enforce" else "observed",
+            message="Turn journal event failed the declarative transition table.",
+            fields={
+                "guardMode": mode,
+                "sessionId": str(record.get("sessionId") or "")[:80],
+                "turnId": str(record.get("turnId") or "")[:80],
+                "eventType": str(record.get("eventType") or "")[:80],
+                "phase": str(record.get("phase") or "")[:40],
+                "priorEventCount": max(0, int(record.get("priorEventCount") or 0)),
+                "priorHasTurnStarted": bool(record.get("priorHasTurnStarted")),
+                "priorTerminalType": str(record.get("priorTerminalType") or "")[:40],
+                "reason": str(record.get("reason") or "")[:200],
+            },
+        )
+    except Exception:
+        pass
+
+
+_register_turn_transition_guard_hook_done = False
+
+
+def _register_turn_transition_guard_hook() -> None:
+    global _register_turn_transition_guard_hook_done
+    if _register_turn_transition_guard_hook_done:
+        return
+    _register_turn_transition_guard_hook_done = True
+    try:
+        set_turn_transition_guard_hook(_record_turn_transition_guard_scene_event)
+    except Exception:
+        _register_turn_transition_guard_hook_done = False
+
+
+# The session services are the production append path for the turn journal;
+# register the shadow guard's telemetry sink once at import so even the first
+# append of a process reports violations. Idempotent and best-effort.
+_register_turn_transition_guard_hook()
