@@ -6856,6 +6856,15 @@ import core.infrastructure.developer_sandbox as _developer_sandbox
 _developer_sandbox.resolve_workspace_home = (
     lambda *args, **kwargs: Path({str(tmp_path)!r}) / "workspace"
 )
+# runtime-scene 事件根不走 DATA_HOME，而是 session_service.PROJECT_ROOT +
+# 活跃项目存储解析；不补丁时 worker 的 scene 写入与 manifest 刷新会落在
+# 共享真实目录，全量并发下所有 worker 在同一全局 timeline 上排队刷新，
+# 命令收尾（claim 已写、result 未写）被拖过 communicate(timeout=30)。
+from core.web.services import session_service as _session_service
+import core.web.services.runtime_scene.record as _scene_record
+
+_session_service.PROJECT_ROOT = Path({str(tmp_path)!r})
+_scene_record.PROJECT_ROOT = Path({str(tmp_path)!r})
 chain.PROJECT_ROOT = Path({str(tmp_path)!r})
 claim = Path({str(claim)!r})
 active = Path({str(active)!r})
