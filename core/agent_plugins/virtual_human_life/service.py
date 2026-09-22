@@ -4798,23 +4798,65 @@ class VirtualHumanLifeService:
         binding_revision: int,
         delivery_token: str,
     ) -> bool:
-        self.reconcile_proactive_attempts(agent_id)
         binding = self.binding_for(agent_id)
         agent = self._agent(agent_id, include_archived=False)
         attempt = self.proactive_attempt(agent_id, delivery_token)
+        if not self._proactive_attempt_matches_binding(
+            binding,
+            agent,
+            attempt,
+            binding_revision=binding_revision,
+        ):
+            return False
+        status = str(attempt.get("status") or "")
+        if status == "delivered":
+            # Reconciliation may already have counted the journaled assistant
+            # item. The native turn still has to persist its terminal event.
+            return self._delivered_attempt_awaits_native_close(attempt)
+        if status not in {"reserved", "delivering"}:
+            return False
+        self.reconcile_proactive_attempts(agent_id)
+        binding = self.binding_for(agent_id)
+        attempt = self.proactive_attempt(agent_id, delivery_token)
+        if not self._proactive_attempt_matches_binding(
+            binding,
+            agent,
+            attempt,
+            binding_revision=binding_revision,
+        ):
+            return False
+        status = str(attempt.get("status") or "")
+        if status == "delivered":
+            return self._delivered_attempt_awaits_native_close(attempt)
+        if status == "delivering":
+            return True
+        if status != "reserved":
+            return False
+        valid_until = _parse_datetime(attempt.get("validUntil"))
+        return valid_until is None or self._now() <= valid_until
+
+    def _proactive_attempt_matches_binding(
+        self,
+        binding: dict[str, Any] | None,
+        agent: dict[str, Any] | None,
+        attempt: dict[str, Any] | None,
+        *,
+        binding_revision: int,
+    ) -> bool:
         if not binding or not binding.get("enabled") or not agent or not attempt:
             return False
         if int(binding.get("bindingRevision") or 0) != int(binding_revision):
             return False
-        if int(attempt.get("bindingRevision") or 0) != int(binding_revision):
+        return int(attempt.get("bindingRevision") or 0) == int(binding_revision)
+
+    def _delivered_attempt_awaits_native_close(self, attempt: dict[str, Any]) -> bool:
+        session_id = str(attempt.get("sessionId") or "").strip()
+        turn_id = str(attempt.get("turnId") or "").strip()
+        if not session_id or not turn_id:
             return False
-        status = str(attempt.get("status") or "")
-        if status not in {"reserved", "delivering"}:
-            return False
-        if status == "delivering":
-            return True
-        valid_until = _parse_datetime(attempt.get("validUntil"))
-        return valid_until is None or self._now() <= valid_until
+        from core.chat.turn_journal import turn_has_terminal_event
+
+        return not turn_has_terminal_event(self.project_root, session_id, turn_id)
 
     def cancel_open_proactive_attempts(
         self,

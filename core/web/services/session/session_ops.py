@@ -329,13 +329,15 @@ def _chat_turn_result_status(result_status: str, result: Any, *, stop_requested:
             return "needs_continue"
         if normalized == "completed" and not visible and (tool_count > 0 or tool_trace):
             return "needs_continue"
-        # Tool-heavy turns that only left intermediate notes (no conclusion / next step)
-        # must not look finished to the user.
+        # Short tool-turn notes without a conclusion or next step stay open.
+        # A substantive reply is settled even without the marker whitelist, so
+        # a normal coding wrap-up does not force another full continuation.
         if (
             normalized == "completed"
             and visible
             and (tool_count > 0 or tool_trace)
             and explicit_outcome != "progress"
+            and _tool_turn_reply_is_short_fragment(visible)
             and not s.has_conclusion_signal(visible)
             and not s.has_next_action_signal(visible)
         ):
@@ -1755,9 +1757,29 @@ def update_chat_session_title(session_id: str, title: str) -> dict:
     return detail
 
 
+# Below this length, a tool-using reply with no conclusion or next-step
+# marker is still an intermediate note. Longer replies are settled answers.
+_TOOL_TURN_SETTLED_REPLY_MIN_CHARS = 80
+
+
+def _tool_turn_reply_is_short_fragment(text: str) -> bool:
+    return len(str(text or "").strip()) < _TOOL_TURN_SETTLED_REPLY_MIN_CHARS
+
+
 SESSION_TITLE_SOURCE_PLACEHOLDER = "placeholder"
 SESSION_TITLE_SOURCE_AUTO = "auto"
 SESSION_TITLE_SOURCE_MANUAL = "manual"
+
+
+def session_title_is_placeholder(conversation: Mapping[str, Any] | None) -> bool:
+    """True when auto title generation may still replace the session title."""
+
+    raw = conversation if isinstance(conversation, Mapping) else {}
+    declared = _session_title_source_of(dict(raw))
+    if declared:
+        return declared == SESSION_TITLE_SOURCE_PLACEHOLDER
+    title = str(raw.get("title") or "").strip()
+    return bool(_service()._is_default_empty_session_title(title))
 
 
 def _session_title_source_of(conversation: dict[str, Any]) -> str:
