@@ -69,6 +69,7 @@ import {
   ConversationMessage,
   ToolCall,
   VirtualHumanCompanion,
+  AgentPermissionPreset,
 } from "../../api/types";
 import type { ConversationStreamingFramePaintMetrics } from "../../components/conversation/conversationStreamingMetrics";
 import type { ConversationForkScope } from "../../components/conversation/conversationViewTypes";
@@ -1852,6 +1853,13 @@ export function ChatCodingRouteWorkbench() {
     runningSessionIds.sort();
     return runningSessionIds.join("|");
   }, []));
+  // The bridge input only needs the active session's turn id; subscribing to
+  // the primitive id (not the whole layer) keeps per-frame commits from
+  // re-rendering the workbench while the turn id itself still updates once
+  // per turn.
+  const activeTurnIdSignal = useActiveTurnLayersSignal(useCallback((layers) => {
+    return layers[activeTurnSessionKey]?.turnId ?? "";
+  }, [activeTurnSessionKey]));
   useEffect(() => {
     if (!activeSessionId || !terminalIndexRefreshKey) {
       return;
@@ -2353,7 +2361,7 @@ export function ChatCodingRouteWorkbench() {
     activeAgentImageInputUnsupported,
     activeImageInputModelId,
     latestUserMessageId,
-    activeTurnId: activeTurnLayer?.turnId,
+    activeTurnId: activeTurnIdSignal || undefined,
     detail,
     setMentalModelEnabledForNextTurn,
     setRuntimeStatusEnabledForNextTurn,
@@ -3172,7 +3180,7 @@ export function ChatCodingRouteWorkbench() {
           && agentPermissionPresetMutation.variables?.agentId === activeSessionAgent.agentId
         ),
         agentName: activeAgentDisplayName,
-        onChange: (permissionPreset) => {
+        onChange: (permissionPreset: AgentPermissionPreset) => {
           if (
             !activeSessionId
             || agentPermissionPresetMutation.isPending

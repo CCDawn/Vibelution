@@ -38,7 +38,7 @@ export type ActiveTurnLayersState = Record<string, ActiveTurnLayerState>;
 
 export type ActiveTurnLayersStore = {
   getSnapshot: () => ActiveTurnLayersState;
-  subscribe: (listener: () => void) => void;
+  subscribe: (listener: () => void) => () => void;
   setActiveTurnLayersBySession: Dispatch<SetStateAction<ActiveTurnLayersState>>;
   /** Latest committed state, updated synchronously on every commit. */
   activeTurnLayersBySessionRef: MutableRefObject<ActiveTurnLayersState>;

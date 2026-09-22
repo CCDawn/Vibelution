@@ -225,6 +225,8 @@ export const ChatConversationComposerBridge = memo(function ChatConversationComp
   return (
     <LazyConversationView
       {...props}
+      sessionId={sessionId}
+      messages={messages}
       activeTurnMessage={streamedActiveTurnMessage}
       composerVariant="codex"
       slashCommandSuggestions={slashCommandSuggestions}
