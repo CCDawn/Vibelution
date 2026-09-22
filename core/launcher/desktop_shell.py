@@ -715,7 +715,7 @@ def resolve_desktop_shell_launch(
     lifecycle = str(then_lifecycle or "").strip().lower()
     # A live main owns freshness and guarded relaunch. Rebuilding here first
     # consumes its `rebuilt` signal and leaves old main code running indefinitely.
-    if slot_root is None and lifecycle in {"start", "restart", "rebuild-and-start"}:
+    if lifecycle in {"start", "restart", "rebuild-and-start"}:
         from core.launcher.desktop_shell_owner import _identity_status, read_desktop_shell_owner
 
         owner = read_desktop_shell_owner(shell_root)
@@ -728,7 +728,7 @@ def resolve_desktop_shell_launch(
                 "schemaVersion": 1, "kind": "unpackaged", "reason": "forward_to_live_shell",
                 "cwd": str(shell_root), "rebuilt": False,
                 "args": _desktop_shell_electron_args(str(electron_bin), [str(main_js)],
-                    shell_root=shell_root, slot_root=None, open_workbench=open_workbench, lifecycle=lifecycle),
+                    shell_root=shell_root, slot_root=slot_root, open_workbench=open_workbench, lifecycle=lifecycle),
             }
     packaged_status = inspect_desktop_shell(shell_root)
     if not packaged_status.get("stale") and packaged_status.get("reason") == "current":

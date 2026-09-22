@@ -341,6 +341,27 @@ def test_live_shell_owns_rebuild_decision_before_relaunch(tmp_path, monkeypatch)
     assert "--local-debugging" in spec["args"]
 
 
+def test_branch_launch_does_not_consume_live_shell_rebuild_signal(tmp_path, monkeypatch):
+    from core.launcher import desktop_shell_owner
+
+    branch = tmp_path / ".worktrees" / "task"
+    exe = _write_unpackaged_electron(tmp_path, tree_hash="a" * 40, main_mtime=2_000_000_000)
+    monkeypatch.setattr(desktop_shell, "resolve_desktop_shell_launch_roots", lambda root: (tmp_path, branch))
+    monkeypatch.setattr(desktop_shell_owner, "read_desktop_shell_owner", lambda root: {
+        "owner": "electron", "pid": 123, "executable": str(exe),
+    })
+    monkeypatch.setattr(desktop_shell_owner, "_identity_status", lambda owner: "match")
+
+    def unexpected_build(root):
+        raise AssertionError("Branch entry must not replace the live shared shell bundle")
+
+    monkeypatch.setattr(desktop_shell, "ensure_unpackaged_electron", unexpected_build)
+    spec = desktop_shell.resolve_desktop_shell_launch(branch, then_lifecycle="start")
+    assert spec["reason"] == "forward_to_live_shell"
+    assert spec["args"][spec["args"].index("--project") + 1] == str(branch)
+    assert spec["args"][-1] == "start"
+
+
 def test_ensure_unpackaged_electron_rebuilds_stale_bundle(tmp_path, monkeypatch):
     tree = "a" * 40
     _write_unpackaged_electron(tmp_path, tree_hash="b" * 40, main_mtime=2_000_000_000)
