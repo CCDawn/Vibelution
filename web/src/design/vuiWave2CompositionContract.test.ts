@@ -36,10 +36,9 @@ describe("Wave 2D composition demo paths", () => {
 
   it("Chat direct session index item uses dense row + selected state recipe", () => {
     expect(sessionStyles.sessionItem).toMatch(/!bg-vui-surface-row|!bg-\[var\(--vui-surface-row\)\]/);
-    expect(sessionStyles.sessionItemActive).toContain(
-      "bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
-    );
-    expect(sessionStyles.sessionItemActive).toContain("text-[var(--accent-cool)]");
+    expect(sessionStyles.sessionItemActive).toContain("!bg-[var(--bg-active)]");
+    expect(sessionStyles.sessionItemActive).toContain("text-[var(--fg-primary)]");
+    expect(sessionStyles.sessionItemActive).not.toContain("accent-cool");
 
     const hits = scanSourceForVuiSurfaceAlpha(
       `${sessionStyles.sessionItem} ${sessionStyles.sessionItemActive}`,

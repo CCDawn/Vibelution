@@ -70,7 +70,7 @@ const styles = {
   navLink:
     "vui-app-appshell navLink relative z-[2] inline-flex min-h-[30px] min-w-0 cursor-pointer items-center justify-center rounded-[var(--radius-control)] px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-primary)] no-underline select-none",
   navLinkActive:
-    `vui-app-appshell navLinkActive relative z-[2] inline-flex min-h-[30px] min-w-0 cursor-pointer items-center justify-center rounded-[var(--radius-control)] border ${vuiStateSelectedRowClass} px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--accent-cool)] no-underline select-none`,
+    "vui-app-appshell navLinkActive relative z-[2] inline-flex min-h-[30px] min-w-0 cursor-pointer items-center justify-center rounded-[var(--radius-control)] border border-transparent bg-[var(--bg-active)] px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-primary)] no-underline select-none",
   navLinkDisabled:
     "vui-app-appshell navLinkDisabled relative inline-flex min-h-[30px] min-w-0 cursor-not-allowed items-center justify-center rounded-[var(--radius-control)] px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-tertiary)] opacity-55 select-none pointer-events-none",
   returnButton:

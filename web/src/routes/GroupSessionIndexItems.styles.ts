@@ -38,7 +38,7 @@ const styles = {
     "vui-routes-chatcodingroute groupSessionItem min-w-0 overflow-hidden !border-0 !bg-transparent shadow-none transition-[background-color] hover:!bg-vui-surface-card",
   sessionItem: `vui-routes-chatcodingroute sessionItem relative grid min-w-0 grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden ${vuiOpaqueRowClass} text-left shadow-none transition-[border-color,background-color,box-shadow] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] focus-within:border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] focus-within:bg-[color-mix(in_srgb,var(--accent-cool)_5%,var(--vui-surface-row))]`,
   sessionItemActive:
-    "vui-routes-chatcodingroute sessionItemActive border-[color-mix(in_srgb,var(--accent-cool)_46%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_9%,var(--vui-surface-row))] shadow-[var(--vui-shadow-inset-accent)]",
+    "vui-routes-chatcodingroute sessionItemActive !border-transparent !bg-[var(--bg-active)] text-[var(--fg-primary)] shadow-none",
   sessionItemMain:
     "vui-routes-chatcodingroute sessionItemMain !grid !w-full min-h-[60px] min-w-0 appearance-none grid-cols-[32px_minmax(0,1fr)] items-center justify-stretch gap-2.5 rounded-none border-0 [border:0] bg-transparent !px-2.5 !py-2 text-left text-[var(--fg-primary)] shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] disabled:cursor-not-allowed disabled:opacity-55",
   sessionItemTitle:

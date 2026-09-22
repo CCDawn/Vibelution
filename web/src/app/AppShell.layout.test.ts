@@ -278,13 +278,11 @@ describe("AppShell layout contract", () => {
     expect(shellSource).not.toContain("returnNavigationHelper");
   });
 
-  it("keeps the global shell background in the layered starfield treatment", () => {
-    expect(shellStyles).toContain("--shell-star-color");
-    expect(shellStyles).toContain("--shell-star-faint");
-    expect(shellStyles).toContain("--shell-nebula-cool");
-    expect(shellStyles).toContain(".shell::before");
-    expect(shellStyles).toContain(".shell::after");
-    expect(shellStyles).toContain("radial-gradient(circle at 8% 18%");
+  it("keeps the default shell on a flat canvas and custom images optional", () => {
+    expect(shellStyles).toContain("background: var(--vui-surface-base)");
+    expect(shellStyles).not.toContain("--shell-star-color");
+    expect(shellStyles).not.toContain(".shell::before");
+    expect(shellStyles).not.toContain("radial-gradient(circle at 8% 18%");
     expect(shellSource).toContain("configThemeBackgroundImageUrl(configQuery.data)");
     expect(shellSource).toContain("configThemeBackgroundReadability(");
     expect(shellSource).toContain('data-theme-background={themeBackgroundImageUrl ? "custom" : "default"}');

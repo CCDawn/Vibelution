@@ -199,7 +199,7 @@ const styles: Record<string, string> = {
   answerOnlyProcessToggle:
     "vui-components-conversationview answerOnlyProcessToggle min-w-0 grid border-0 bg-transparent p-0 text-[var(--fg-secondary)] hover:border-transparent hover:bg-transparent [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:inline-grid [&_[data-slot=vui-button-label]]:max-w-full [&_[data-slot=vui-button-label]]:grid-cols-[14px_auto_auto_minmax(0,1fr)_14px] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5",
   assistantCard:
-    "vui-components-conversationview assistantCard min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-strong)_72%,transparent)] bg-[var(--vui-surface-chat-panel)] p-2 shadow-none",
+    "vui-components-conversationview assistantCard min-w-0 border-0 bg-transparent p-0 shadow-none",
   assistantTurn:
     `vui-components-conversationview assistantTurn ${assistantTranscriptGrid} [&_.turnAvatar]:col-start-1 [&_.turnAvatar]:row-start-1 [&_.turnContent]:col-start-2 [&_.turnContent]:row-start-1 [&_.turnContent]:w-full [&_.turnContent]:p-0 [&_.turnContent]:border-l-0`,
   assistantTurnContinuation:
@@ -473,7 +473,7 @@ backToBottomButton:
     "vui-components-conversationview codexTranscriptProgressText min-w-0 max-w-[min(100%,128ch)] whitespace-pre-wrap break-words [overflow-wrap:anywhere] border-0 bg-transparent p-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   /** Shared thought body: max ~8–10 lines, scroll inside the box when longer. */
   thoughtScrollBody:
-    "vui-components-conversationview thoughtScrollBody min-w-0 max-h-[12rem] overflow-y-auto overflow-x-hidden overscroll-contain [scrollbar-gutter:stable] rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_55%,transparent)] px-2.5 py-2",
+    "vui-components-conversationview thoughtScrollBody min-w-0 max-h-[12rem] overflow-y-auto overflow-x-hidden overscroll-contain [scrollbar-gutter:stable] border-0 bg-transparent px-0 py-1 text-[var(--fg-tertiary)]",
   codexTranscriptReasoningTextButton:
     "vui-components-conversationview codexTranscriptReasoningTextButton min-w-0 !h-auto !w-full !max-w-full cursor-pointer !justify-start !rounded-none !border-0 !bg-transparent !p-0 !pl-[28px] !text-left !shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] focus-visible:ring-offset-1 [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   codexTranscriptSurface:
@@ -1336,7 +1336,7 @@ timeline:
   userContextSection:
     "vui-components-conversationview userContextSection min-w-0 grid gap-2",
   userCard:
-    "vui-components-conversationview userCard min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_5%,var(--vui-surface-panel))] p-1.5 shadow-none",
+    "vui-components-conversationview userCard min-w-0 border-0 bg-transparent p-0 shadow-none",
   userMessageBody: userMessageBubble,
   userTurn:
     `vui-components-conversationview userTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[minmax(0,1fr)_2rem] items-start gap-x-3 [&_.turnAvatar]:col-start-2 [&_.turnAvatar]:row-start-1 [&_.turnContent]:col-start-1 [&_.turnContent]:row-start-1 [&_.turnContent]:w-fit [&_.turnContent]:max-w-[min(76%,640px)] [&_.turnContent]:justify-self-end [&_.turnMeta]:justify-self-end [&_.turnMeta]:justify-end [&_.turnMeta]:text-right [&_.turnMetaActions]:justify-end [&_.turnMetaIdentity]:justify-end max-[719px]:gap-x-2 max-[719px]:[&_.turnContent]:max-w-[min(88%,36rem)]`,

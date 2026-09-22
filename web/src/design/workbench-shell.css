@@ -9,9 +9,6 @@
   --shell-panel: var(--vui-surface-panel);
   --shell-card: var(--vui-surface-row);
   --shell-page-end: var(--bg-canvas);
-  --shell-star-color: color-mix(in srgb, var(--accent-warm) 20%, transparent);
-  --shell-star-faint: color-mix(in srgb, var(--accent-warm) 8%, transparent);
-  --shell-nebula-cool: color-mix(in srgb, var(--accent-cool) 9%, transparent);
   --theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 44%, transparent);
   --theme-background-blur: 1px;
   display: grid;
@@ -20,11 +17,9 @@
   min-height: 100dvh;
   overflow: hidden;
   isolation: isolate;
-  background:
-    radial-gradient(ellipse at 52% -18%, color-mix(in srgb, var(--accent-warm) 8%, transparent) 0 18%, transparent 52%),
-    radial-gradient(circle at 16% 18%, color-mix(in srgb, var(--accent-cool) 9%, transparent) 0 11%, transparent 34%),
-    radial-gradient(circle at 82% 8%, color-mix(in srgb, var(--fg-tertiary) 8%, transparent) 0 9%, transparent 31%),
-    var(--vui-gradient-route-soft);
+  /* Flat canvas. Decorative glows repainted the whole window and competed with the transcript. */
+  background: var(--vui-surface-base);
+  backdrop-filter: none;
   color: var(--fg-primary);
 }
 
@@ -64,39 +59,6 @@
 :where(.vui-app-appshell).shell[data-theme-background="custom"][data-theme-background-readability="strong"] {
   --theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 60%, transparent);
   --theme-background-blur: 2px;
-}
-
-:where(.vui-app-appshell).shell::before,
-:where(.vui-app-appshell).shell::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-}
-
-:where(.vui-app-appshell).shell::before {
-  opacity: 0.28;
-  background-image:
-    radial-gradient(circle at 8% 18%, var(--shell-star-color) 0 1px, transparent 1.6px),
-    radial-gradient(circle at 38% 28%, color-mix(in srgb, var(--fg-primary) 16%, transparent) 0 1px, transparent 1.5px),
-    radial-gradient(circle at 82% 64%, color-mix(in srgb, var(--fg-primary) 12%, transparent) 0 1px, transparent 1.5px),
-    radial-gradient(circle, color-mix(in srgb, var(--fg-primary) 8%, transparent) 0 0.7px, transparent 1px);
-  background-size: 263px 211px, 359px 293px, 331px 367px, 137px 173px;
-  /* Full-viewport backdrop-filter is a known Edge/Chromium whole-window flicker source
-     when any layer invalidates; keep the starfield without live blur. */
-  backdrop-filter: none;
-}
-
-:where(.vui-app-appshell).shell::after {
-  opacity: 0.2;
-  background:
-    radial-gradient(ellipse at 50% 102%, color-mix(in srgb, var(--accent-warm) 16%, transparent), transparent 42%),
-    radial-gradient(circle at 78% 82%, color-mix(in srgb, var(--accent-cool) 10%, transparent), transparent 30%);
-}
-
-:where(.vui-app-appshell).shell[data-theme-background="custom"]::before {
-  opacity: 0.18;
 }
 
 :where(.vui-app-appshell).shell[data-desktop-shell="electron"] {
@@ -267,9 +229,9 @@
 }
 
 :where(.vui-app-appshell).navLinkActive {
-  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--vui-border-subtle));
-  background: color-mix(in srgb, var(--accent-cool) 12%, var(--shell-surface));
-  color: var(--accent-cool);
+  border-color: transparent;
+  background: var(--bg-active);
+  color: var(--fg-primary);
 }
 
 :where(.vui-app-appshell).navLinkDisabled {

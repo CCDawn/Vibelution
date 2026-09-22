@@ -100,11 +100,12 @@ describe("DirectSessionIndexItem helpers", () => {
 
   it("keeps the selected session row visible above the dense row surface", () => {
     expect(directSessionIndexItemStyles.sessionItemActive).toContain(
-      "!bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+      "!bg-[var(--bg-active)]",
     );
     expect(directSessionIndexItemStyles.sessionItemActive).toContain(
-      "data-[selected=true]:!bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+      "data-[selected=true]:!bg-[var(--bg-active)]",
     );
+    expect(directSessionIndexItemStyles.sessionItemActive).not.toContain("accent-cool");
     expect(directSessionIndexItemStyles.sessionItemActive).not.toContain(
       "shadow-[var(--vui-shadow-inset-accent)]",
     );

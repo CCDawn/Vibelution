@@ -7,7 +7,6 @@ import {
   vuiDenseRowClass,
   vuiOpaqueRowClass,
   vuiStateCoolInfoClass,
-  vuiStateSelectedOpaqueRowClass,
   vuiStateSelectedRowFillClass,
   vuiStateSuccessSoftClass,
 } from "../design/vuiSurfaceRecipes";
@@ -81,7 +80,7 @@ const styles = {
   sessionBulkSelectInput:
     "vui-routes-chatcodingroute sessionBulkSelectInput absolute !w-px !h-px opacity-0 pointer-events-none",
   sessionItemActive:
-    `vui-routes-chatcodingroute sessionItemActive ${vuiStateSelectedOpaqueRowClass}`,
+    "vui-routes-chatcodingroute sessionItemActive !border-transparent !bg-[var(--bg-active)] data-[selected=true]:!bg-[var(--bg-active)] text-[var(--fg-primary)]",
   sessionItemContextTarget:
     "vui-routes-chatcodingroute sessionItemContextTarget border-[color-mix(in_srgb,var(--accent-cool)_18%,transparent)] !bg-[var(--vui-surface-card)] shadow-[var(--vui-shadow-inset-accent)] before:opacity-70",
   sessionItemError:
