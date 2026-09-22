@@ -1684,15 +1684,31 @@ def _bind_conversation_to_agent_instance(
     )
 
 
-def _repair_agent_direct_session_collisions(
-    *,
-    source_signature: tuple[Any, ...] | None = None,
-) -> bool:
+def _direct_session_collision_repair_fingerprint() -> tuple[Any, ...]:
+    """Fingerprint the collision repair's only detection input: the registry.
+
+    Duplicate direct-session groups are fully determined by the persisted
+    agent registry (each agent's ``directSessionId``); conversation-store/WAL
+    and inbox-file churn during active streaming cannot change the scan
+    outcome. Keying the repair memo on the volatile list signature forced a
+    full ``_CHAT_STATE_LOCK`` chat-state reload per streaming disk write. The
+    memo stays eventual-correct because any ``directSessionId`` write rewrites
+    ``agents.json`` (new stat) and mutation paths reset the memo through
+    ``_invalidate_session_list_cache``.
+    """
+
+    s = _service()
+    project_root = getattr(s, "PROJECT_ROOT", None)
+    root_key = str(Path(project_root).resolve()) if project_root else ""
+    return (root_key, agent_directory_service._registry_state_signature())
+
+
+def _repair_agent_direct_session_collisions() -> bool:
     s = _service()
     s._sync_agent_directory_project_root()
-    signature = source_signature or s._session_list_source_signature()
+    fingerprint = _direct_session_collision_repair_fingerprint()
     with s._DIRECT_SESSION_COLLISION_REPAIR_LOCK:
-        if s._DIRECT_SESSION_COLLISION_REPAIR_SIGNATURE == signature:
+        if s._DIRECT_SESSION_COLLISION_REPAIR_SIGNATURE == fingerprint:
             return False
     with s._CHAT_STATE_LOCK:
         payload = s.load_chat_state(s.PROJECT_ROOT)
@@ -1719,7 +1735,7 @@ def _repair_agent_direct_session_collisions(
         }
         if not duplicate_groups:
             with s._DIRECT_SESSION_COLLISION_REPAIR_LOCK:
-                s._DIRECT_SESSION_COLLISION_REPAIR_SIGNATURE = signature
+                s._DIRECT_SESSION_COLLISION_REPAIR_SIGNATURE = fingerprint
             return False
 
         existing_session_ids = {
@@ -1802,7 +1818,7 @@ def _repair_agent_direct_session_collisions(
     directory_bridge.sync_conversation_records(collision_snapshots)
     s._invalidate_session_list_cache()
     with s._DIRECT_SESSION_COLLISION_REPAIR_LOCK:
-        s._DIRECT_SESSION_COLLISION_REPAIR_SIGNATURE = s._session_list_source_signature()
+        s._DIRECT_SESSION_COLLISION_REPAIR_SIGNATURE = _direct_session_collision_repair_fingerprint()
     s._record_agent_direct_session_collision_repaired_event(
         preserved_session_ids=sorted(preserved_session_ids),
         repaired=repaired,
