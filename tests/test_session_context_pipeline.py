@@ -1640,6 +1640,27 @@ def test_chat_turn_result_status_main_loop_exception_is_failed_runtime():
     )
 
 
+def test_chat_turn_result_status_substantive_tool_reply_without_marker_completes():
+    visible = (
+        "登录校验已经补上会话标识，标题生成失败后下一条用户消息还会再试。"
+        "普通对话的收尾写完就结束，不再整段重跑。"
+        "相关检查也跟着这条规则走完，列表里能看到这次改动，记录也留好了。"
+    )
+    result = {
+        "status": "completed",
+        "summary": visible,
+        "raw_output": visible,
+        "tool_call_count": 8,
+        "tool_trace": [{"name": "cli_tool", "status": "done"}],
+    }
+
+    assert len(visible) >= 80
+    assert (
+        session_service._chat_turn_result_status("completed", result, stop_requested=False)
+        == "completed"
+    )
+
+
 def test_chat_turn_result_status_tool_heavy_fragment_without_conclusion_needs_continue():
     result = {
         "status": "completed",

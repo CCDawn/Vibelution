@@ -1105,11 +1105,14 @@ def submit_session_message(
         try:
             from . import title_generation
 
+            from .session_ops import session_title_is_placeholder
+
             title_generation.maybe_schedule_session_title_generation(
                 conversation_id,
                 message=message,
                 message_source=normalized_message_source,
                 had_previous_user_message=s._latest_user_message_index(previous_messages) >= 0,
+                title_still_placeholder=session_title_is_placeholder(conversation),
             )
         except Exception as exc:
             s._debug_logger.warning(
