@@ -11,7 +11,8 @@
     "package.json"
   ],
   "asarUnpack": [
-    "package-provenance.json"
+    "package-provenance.json",
+    "dist/native/workbench_job.node"
   ],
   "extraResources": [
     {

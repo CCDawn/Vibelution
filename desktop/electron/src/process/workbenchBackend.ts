@@ -36,6 +36,7 @@ import {
   type WorkbenchPortOwnerResolution
 } from "./resolveWorkbenchPortOwner.js";
 import { knownPidIsAlive, observeMainLineWorkbench, probeTcpConnect } from "../lifecycle/mainLine/observation.js";
+import { closeTrackedWorkbenchJob, spawnTrackedWorkbenchProcess, terminateTrackedWorkbenchJob } from "./workbenchJob.js";
 import {
   BACKEND_HEALTH_HTTP_TIMEOUT_MS,
   defaultFetchWorkbenchHealth,
@@ -810,6 +811,11 @@ export async function reclaimStaleWorkbenchBackend(input: {
   const killPid = input.killPid ?? terminatePid;
   const failedTreePids = new Set<number>();
   const terminateOne = async (pid: number): Promise<boolean> => {
+    if (await terminateTrackedWorkbenchJob(input.workspaceRoot)) {
+      if (!pidAlive(pid)) {
+        return true;
+      }
+    }
     if (input.terminateProcessTree) {
       const expectedIdentity = expectedIdentities[String(pid)];
       // The project classifier is not a substitute for pid/create-time/exe
@@ -913,6 +919,9 @@ export async function reclaimStaleWorkbenchBackend(input: {
         delay: input.delay
       });
       gracefulCompleted = graceful.completed;
+      if (gracefulCompleted) {
+        await closeTrackedWorkbenchJob(input.workspaceRoot);
+      }
     }
     if (
       !gracefulCompleted
@@ -1238,6 +1247,40 @@ export function spawnWorkbenchBackend(input: {
     extra: input.extraEnv
   });
   const spawnImpl = input.spawnImpl ?? (nodeSpawn as unknown as WorkbenchBackendSpawn);
+  if (process.platform === "win32" && !input.spawnImpl) {
+    const runtimeDir = resolveLauncherRuntimeDir(input.workspaceRoot);
+    mkdirSync(runtimeDir, { recursive: true });
+    const managed = spawnTrackedWorkbenchProcess(input.workspaceRoot, {
+      executable: pythonPath,
+      arguments: args,
+      cwd: input.workspaceRoot,
+      env,
+      stdoutPath: join(runtimeDir, "backend.stdout.log"),
+      stderrPath: join(runtimeDir, "backend.stderr.log")
+    });
+    let killed = false;
+    const child: WorkbenchBackendSpawnChild = {
+      pid: managed.pid,
+      get exitCode() {
+        return killed || !knownPidIsAlive(managed.pid) ? 1 : null;
+      },
+      get killed() {
+        return killed;
+      },
+      unref() {
+        return undefined;
+      },
+      kill() {
+        killed = true;
+        void terminateTrackedWorkbenchJob(input.workspaceRoot);
+        return true;
+      },
+      once() {
+        return undefined;
+      }
+    };
+    return { child, pythonPath, args, spawnError: () => null };
+  }
   let stdio: ["ignore", number, number] | ["ignore", "ignore", "ignore"] = ["ignore", "ignore", "ignore"];
   let stdoutFd: number | undefined;
   let stderrFd: number | undefined;
@@ -1821,6 +1864,9 @@ export async function executeMainLineWorkbench(
   }
   const retireSpawnedTree = async (): Promise<void> => {
     if (spawnPid <= 0) {
+      return;
+    }
+    if (await terminateTrackedWorkbenchJob(input.workspaceRoot)) {
       return;
     }
     if (terminateProcessTree) {

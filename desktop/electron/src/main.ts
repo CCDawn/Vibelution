@@ -116,6 +116,7 @@ import {
   readLauncherStateFile,
   spawnWorkbenchBackend
 } from "./process/workbenchBackend.js";
+import { terminateTrackedWorkbenchJob } from "./process/workbenchJob.js";
 import { waitForBackendHealthy } from "./process/workbenchBackendHealth.js";
 import {
   inspectWorkbenchServingVersion,
@@ -3782,6 +3783,9 @@ async function runIsolatedRegistryMutation(input: {
       }
       const retireSpawnedTree = async (): Promise<void> => {
         if (spawnPid <= 0) {
+          return;
+        }
+        if (await terminateTrackedWorkbenchJob(target.projectRoot)) {
           return;
         }
         if (!spawnIdentity) {

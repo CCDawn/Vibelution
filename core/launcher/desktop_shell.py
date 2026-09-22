@@ -442,6 +442,8 @@ def schedule_desktop_shell_refresh(
     lifecycle = str(then_lifecycle or "").strip().lower()
     if lifecycle:
         args.extend(["--then-lifecycle", lifecycle])
+    # The refresh helper must outlive the desktop shell. Workbench jobs allow
+    # explicit breakaway and nothing else, so this flag is the only exit.
     flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
     kwargs = no_window_subprocess_kwargs(creationflags=flags)
     try:
