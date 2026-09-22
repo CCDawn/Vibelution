@@ -1829,6 +1829,19 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                 }
                 if history_seed_profile == "full":
                     context_assembly_kwargs["recent_message_limit"] = None
+                    # Micro-compaction tier seed decision: only project old
+                    # whitelisted tool results when the history alone already
+                    # sits at or above the agent's micro trigger line (the
+                    # full model input is strictly larger). Read-time only.
+                    micro_assembly_kwargs_provider = getattr(
+                        runtime_agent, "micro_compact_assembly_kwargs", None
+                    )
+                    if callable(micro_assembly_kwargs_provider):
+                        micro_assembly_kwargs = micro_assembly_kwargs_provider(
+                            seedable_history_messages
+                        )
+                        if micro_assembly_kwargs:
+                            context_assembly_kwargs.update(micro_assembly_kwargs)
                 context_assembly = s.assemble_conversation_context(
                     seedable_history_messages,
                     **context_assembly_kwargs,
