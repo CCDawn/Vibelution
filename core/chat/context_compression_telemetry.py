@@ -230,7 +230,7 @@ def collect_compression_cache_telemetry(project_root: Path, session_id: str) -> 
     if not normalized_session_id:
         return build_compression_cache_telemetry([], [], session_id="")
     events = load_turn_events(root, normalized_session_id)
-    rows = _load_session_usage_rows(root, normalized_session_id)
+    rows = load_session_usage_rows(root, normalized_session_id)
     return build_compression_cache_telemetry(
         events,
         rows,
@@ -238,7 +238,7 @@ def collect_compression_cache_telemetry(project_root: Path, session_id: str) -> 
     )
 
 
-def _load_session_usage_rows(project_root: Path, session_id: str) -> list[dict[str, Any]]:
+def load_session_usage_rows(project_root: Path, session_id: str) -> list[dict[str, Any]]:
     """Read-only usage-ledger query for one session (no schema DDL, no writes)."""
 
     from core.llm.usage_ledger import usage_ledger_path
@@ -447,4 +447,5 @@ def _nonnegative_float(value: Any) -> float:
 __all__ = [
     "build_compression_cache_telemetry",
     "collect_compression_cache_telemetry",
+    "load_session_usage_rows",
 ]
