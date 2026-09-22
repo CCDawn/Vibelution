@@ -2353,12 +2353,17 @@ export function ConfigRoute() {
     [currentLanguage, groupCopy, workspaceSections],
   );
   const settingsSearchDocuments = useMemo(
-    () => buildConfigSettingsSearchIndex({
+    () => [...buildConfigSettingsSearchIndex({
       groups: settingsGroups,
       editorSections: workspace?.editorSections ?? [],
       editorMeta: workspace?.editorMeta ?? {},
-    }),
-    [settingsGroups, workspace?.editorMeta, workspace?.editorSections],
+    }), {
+      groupId: "avatar-pet" as const, pageId: "",
+      title: currentLanguage === "zh" ? "桌面宠物" : "Desktop pet",
+      detail: currentLanguage === "zh" ? "开启或关闭桌面宠物" : "Open or close desktop pet",
+      haystack: "桌宠 桌面宠物 开启 关闭 desktop pet",
+    }],
+    [currentLanguage, settingsGroups, workspace?.editorMeta, workspace?.editorSections],
   );
   const { group: activeGroup, page: activePage } = useMemo(
     () => resolveConfigSettingsSelection(settingsGroups, activeGroupId, activePageId),
@@ -3582,7 +3587,7 @@ export function ConfigRoute() {
               </VButton>
           </div>
         }
-        toolbar={isSectionVisible("models") ? undefined : (
+        toolbar={(
           <div className={styles.configToolbar}>
             {isSectionVisible("overview") ? <VStatusStrip
               className={styles.configStatusMeta}

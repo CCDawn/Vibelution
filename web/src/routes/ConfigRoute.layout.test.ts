@@ -1006,6 +1006,7 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain('title={showingSettingsIndex && !requestedSectionId ? copy.pageTitle : activeGroup?.title ?? copy.pageTitle}');
     expect(routeSource).toContain("<ConfigSettingsIndex");
     expect(routeSource).toContain("返回设置列表");
+    expect(routeSource).not.toContain('toolbar={isSectionVisible("models") ? undefined');
   });
 
   it("routes Config controls through VUI primitives", () => {
