@@ -1267,6 +1267,62 @@ def test_proactive_reconciliation_promotes_only_a_persisted_assistant_receipt(
     assert service.proactive_usage("agent-a", "2026-08-27")["delivered"] == 1
 
 
+def test_in_flight_assistant_receipt_keeps_native_turn_current(tmp_path: Path) -> None:
+    """A journaled assistant item must not fence the turn before it is closed."""
+
+    from core.chat.turn_journal import EVENT_TURN_INTERRUPTED, append_turn_event
+
+    agent = _active_agent("agent-a")
+    persisted_receipts: dict[str, dict[str, str]] = {}
+    service = VirtualHumanLifeService(
+        project_root=tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        proactive_submitter=lambda **_payload: {
+            "accepted": True,
+            "turnId": "turn-still-open",
+        },
+        delivery_receipt_resolver=lambda _agent_id, attempt: persisted_receipts.get(
+            str(attempt.get("deliveryToken") or "")
+        ),
+        now_provider=lambda: datetime(2026, 8, 27, 9, 0, tzinfo=timezone.utc),
+    )
+    binding = service.set_binding("agent-a", enabled=True, expected_version=0)
+    attempt = service.request_proactive_message("agent-a", reason="写完回复再收口")
+    persisted_receipts[attempt["deliveryToken"]] = {
+        "receiptEventId": "event-assistant-visible",
+        "persistedAt": "2026-08-27T09:05:00+00:00",
+    }
+
+    assert service.proactive_turn_is_current(
+        agent_id="agent-a",
+        binding_revision=int(binding["bindingRevision"]),
+        delivery_token=attempt["deliveryToken"],
+    ) is True
+    open_attempt = service.proactive_attempt("agent-a", attempt["deliveryToken"])
+    assert open_attempt["status"] == "delivered"
+
+    append_turn_event(
+        tmp_path,
+        str(open_attempt["sessionId"]),
+        str(open_attempt["turnId"]),
+        EVENT_TURN_INTERRUPTED,
+        status="cancelled",
+        payload={"reason": "test_close"},
+        source="test",
+    )
+    assert service.proactive_turn_is_current(
+        agent_id="agent-a",
+        binding_revision=int(binding["bindingRevision"]),
+        delivery_token=attempt["deliveryToken"],
+    ) is False
+
+
 def test_archive_revision_fence_cancels_attempt_and_can_roll_back(
     service: VirtualHumanLifeService,
 ) -> None:

@@ -1,10 +1,10 @@
 """T5 contract tests for the six Challenge Cup role context policies.
 
-Pins the versioned custom compression policy migration, the hard input-limit
-budget formula (configurable protocol reserve), compression retention
-validation (including paired preservation of unresolved tool calls), the
-fail-closed ``context_budget_exhausted`` path, and snapshot/rollback safety
-(rollback must never restore ``inherit``).
+Pins the versioned custom compression policy migration, the industry-shaped
+hard input-limit budget formula (capped model-output reserve, fixed trigger
+pad), compression retention validation (including paired preservation of
+unresolved tool calls), the fail-closed ``context_budget_exhausted`` path,
+and snapshot/rollback safety (rollback must never restore ``inherit``).
 """
 
 from __future__ import annotations
@@ -22,11 +22,11 @@ from core.web.services import agent_directory_service, team_service
 from core.web.services.team import challenge_cup_context_policy as ccp
 
 CONTEXT_WINDOW = 262_144
-RESERVED_MAX_OUTPUT = 32_768
-PROTOCOL_RESERVE = 8_192
-HARD_LIMIT = 221_184
-TRIGGER = 204_800
-POST_TARGET = 147_456
+MODEL_MAX_OUTPUT = 32_768
+APPLIED_OUTPUT_RESERVE = 20_480
+HARD_LIMIT = 241_664  # 262,144 - min(32,768, 20,480)
+TRIGGER = 228_664  # hard - 13,000
+POST_TARGET = 161_109  # floor(hard * 2 / 3) = floor(483,328 / 3)
 
 
 def _use_tmp_project_root(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -93,44 +93,78 @@ def _seed_all_roles(monkeypatch, tmp_path) -> dict[str, dict]:
 
 
 # ---------------------------------------------------------------------------
-# 1) Hard-limit budget formula (configurable reserve, versioned defaults)
+# 1) Hard-limit budget formula (industry shape: capped model-output reserve,
+#    fixed 13,000-token trigger pad, versioned defaults)
 # ---------------------------------------------------------------------------
 
 
-def test_budget_formula_matches_frozen_first_round_values():
+def test_budget_formula_matches_frozen_industry_shape_values():
     budget = ccp.challenge_cup_context_budget(context_window=CONTEXT_WINDOW)
     assert budget["contextWindow"] == CONTEXT_WINDOW
-    assert budget["reservedMaxOutputTokens"] == RESERVED_MAX_OUTPUT
-    assert budget["protocolAndSafetyReserveTokens"] == PROTOCOL_RESERVE
+    assert budget["reservedMaxOutputTokens"] == APPLIED_OUTPUT_RESERVE
     assert budget["effectiveInputHardLimit"] == HARD_LIMIT
     assert budget["compressionTriggerTokenLimit"] == TRIGGER
-    assert budget["postCompressionTargetTokenLimit"] <= POST_TARGET
+    assert budget["postCompressionTargetTokenLimit"] == POST_TARGET
+    # v4 formula: hard = window - applied output reserve; no protocol layer.
     assert budget["effectiveInputHardLimit"] == (
-        budget["contextWindow"]
-        - budget["reservedMaxOutputTokens"]
-        - budget["protocolAndSafetyReserveTokens"]
+        budget["contextWindow"] - budget["reservedMaxOutputTokens"]
     )
+    assert "protocolAndSafetyReserveTokens" not in budget
+    assert ccp.MAX_OUTPUT_RESERVE_TOKENS == 20_480
+    assert ccp.TRIGGER_SAFETY_MARGIN_TOKENS == 13_000
 
 
-def test_budget_reserve_is_configurable():
+def test_budget_output_reserve_is_capped_at_20480():
+    """A large model output reservation is clamped down to the cap."""
+
     budget = ccp.challenge_cup_context_budget(
         context_window=CONTEXT_WINDOW,
-        protocol_and_safety_reserve_tokens=16_384,
+        reserved_max_output_tokens=MODEL_MAX_OUTPUT,
     )
-    assert budget["protocolAndSafetyReserveTokens"] == 16_384
-    assert budget["effectiveInputHardLimit"] == CONTEXT_WINDOW - RESERVED_MAX_OUTPUT - 16_384
+    assert budget["reservedMaxOutputTokens"] == APPLIED_OUTPUT_RESERVE
+    assert budget["effectiveInputHardLimit"] == CONTEXT_WINDOW - 20_480
+    assert budget["compressionTriggerTokenLimit"] == HARD_LIMIT - 13_000
+    assert budget["postCompressionTargetTokenLimit"] == int(HARD_LIMIT * 2 / 3)
+
+
+def test_budget_smaller_model_output_reserves_less():
+    """A model capped below 20,480 output reserves only what it needs."""
+
+    budget = ccp.challenge_cup_context_budget(
+        context_window=CONTEXT_WINDOW,
+        reserved_max_output_tokens=8_192,
+    )
+    assert budget["reservedMaxOutputTokens"] == 8_192
+    assert budget["effectiveInputHardLimit"] == CONTEXT_WINDOW - 8_192  # 253,952
+    assert budget["compressionTriggerTokenLimit"] == 253_952 - 13_000  # 240,952
+    assert budget["postCompressionTargetTokenLimit"] == int(253_952 * 2 / 3)  # 169,301
     assert budget["compressionTriggerTokenLimit"] < budget["effectiveInputHardLimit"]
     assert budget["postCompressionTargetTokenLimit"] < budget["compressionTriggerTokenLimit"]
 
 
-def test_budget_reads_configurable_reserve_from_operator_config(monkeypatch):
+def test_budget_defaults_output_reserve_when_model_output_unconfigured():
+    budget = ccp.challenge_cup_context_budget(context_window=131_072)
+    assert budget["reservedMaxOutputTokens"] == 20_480
+    assert budget["effectiveInputHardLimit"] == 131_072 - 20_480  # 110,592
+    assert budget["compressionTriggerTokenLimit"] == 110_592 - 13_000  # 97,592
+    assert budget["postCompressionTargetTokenLimit"] == int(110_592 * 2 / 3)  # 73,728
+
+
+def test_budget_reads_output_reserve_cap_from_operator_config(monkeypatch):
+    """The operator knob feeds the reserve and still honors the 20,480 cap."""
+
     from config import get_config
 
     cc = get_config().context_compression
-    monkeypatch.setattr(cc, "protocol_and_safety_reserve_tokens", 12_288)
+    monkeypatch.setattr(cc, "reserved_max_output_tokens", 12_288)
     budget = ccp.challenge_cup_context_budget(context_window=CONTEXT_WINDOW)
-    assert budget["protocolAndSafetyReserveTokens"] == 12_288
-    assert budget["effectiveInputHardLimit"] == CONTEXT_WINDOW - RESERVED_MAX_OUTPUT - 12_288
+    assert budget["reservedMaxOutputTokens"] == 12_288
+    assert budget["effectiveInputHardLimit"] == CONTEXT_WINDOW - 12_288  # 249,856
+
+    monkeypatch.setattr(cc, "reserved_max_output_tokens", 40_000)
+    capped = ccp.challenge_cup_context_budget(context_window=CONTEXT_WINDOW)
+    assert capped["reservedMaxOutputTokens"] == 20_480
+    assert capped["effectiveInputHardLimit"] == HARD_LIMIT
 
 
 def test_budget_rejects_non_positive_window():
@@ -249,13 +283,25 @@ def test_non_challenge_role_policy_contract_does_not_cover_other_roles():
     assert ccp.challenge_cup_role_context_policy("") is None
 
 
-def test_version_gate_migrates_v1_v2_and_unversioned_policies(monkeypatch, tmp_path):
-    """Policies without a version or below v3 are migrated exactly once."""
+def test_version_gate_migrates_v1_v2_v3_and_unversioned_policies(monkeypatch, tmp_path):
+    """Policies without a version or below the contract version migrate once.
+
+    Includes the deployed v3 (conservative first-round) policies: the v4
+    version bump is what re-materializes them onto the industry-shaped budget.
+    """
 
     _use_tmp_project_root(tmp_path, monkeypatch)
     versioned = {
         "challenge_cup_search": {"mode": "custom", "enabled": True, "policyVersion": 1, "maxTokenLimit": 262_144},
         "challenge_cup_extractor": {"mode": "custom", "enabled": False, "policyVersion": 2, "maxTokenLimit": 1_000_000},
+        "challenge_cup_evaluator": {
+            "mode": "custom",
+            "enabled": True,
+            "policyVersion": 3,
+            "maxTokenLimit": 221_184,
+            "compressionTriggerTokenLimit": 204_800,
+            "postCompressionTargetTokenLimit": 147_456,
+        },
         "challenge_cup_knowledge_manager": {"mode": "custom", "enabled": True, "maxTokenLimit": 262_144},
     }
     seeded = {
@@ -265,7 +311,7 @@ def test_version_gate_migrates_v1_v2_and_unversioned_policies(monkeypatch, tmp_p
     assert ccp.challenge_cup_context_policies_outdated() is True
 
     result = ccp.apply_challenge_cup_context_policies()
-    assert result["migratedCount"] == 3
+    assert result["migratedCount"] == 4
     assert set(result["migratedRoles"]) == set(seeded)
     # The snapshot was exported before the first write and keeps priors verbatim.
     search_entry = next(
@@ -284,8 +330,12 @@ def test_version_gate_migrates_v1_v2_and_unversioned_policies(monkeypatch, tmp_p
     assert ccp.challenge_cup_context_policies_outdated() is False
 
 
-def test_operator_customized_v3_policy_is_never_overwritten(monkeypatch, tmp_path):
-    """A current-version policy that drifts from canonical is operator intent."""
+def test_operator_customized_current_version_policy_is_never_overwritten(monkeypatch, tmp_path):
+    """A current-version policy that drifts from canonical is operator intent.
+
+    A stale v3 policy does NOT count: the version gate migrates it to the
+    current contract (covered by the v1/v2/v3 migration test above).
+    """
 
     _use_tmp_project_root(tmp_path, monkeypatch)
     canonical = ccp.challenge_cup_role_context_policy("challenge_cup_search")
@@ -689,9 +739,14 @@ def test_compression_summary_carries_retention_contract_fields():
     )
     assert prompt_manager.updates, "summary must be persisted via the prompt manager"
     persisted = prompt_manager.updates[-1]
+    # sessionId is resolved from the runtime binding (directSessionId=s1) and
+    # deliberately overrides the contract's copy, so every compression
+    # artifact belongs to the turn being run; the other contract fields pass
+    # through verbatim.
     for marker in (
         "challenge-sci-001",
-        "session-x",
+        "sessionId=s1",
+        "agent-x",
         "compressionGeneration=",
         "unresolvedToolCallIds=call-open",
         "iteration=4",
@@ -759,11 +814,13 @@ def test_effective_policy_carries_explicit_trigger_and_target():
 
 
 def test_effective_policy_window_clamp_rederives_versioned_trigger_and_target():
-    """A v3 policy replayed on a smaller runtime window stays deadlock-free.
+    """A current-version policy replayed on a smaller runtime window stays
+    deadlock-free.
 
-    Regression: the frozen 262,144-window trigger (204,800) passed through
-    verbatim onto a 131,072 runtime window, so compression could never fire
-    before the fail-closed ``context_budget_exhausted`` preflight gate.
+    Regression: the frozen 262,144-window trigger (228,664 = hard − 13,000)
+    passed through verbatim onto a 131,072 runtime window, so compression
+    could never fire before the fail-closed ``context_budget_exhausted``
+    preflight gate.
     """
     agent_policy = ccp.challenge_cup_role_context_policy("challenge_cup_extractor")
     assert agent_policy is not None
@@ -773,7 +830,8 @@ def test_effective_policy_window_clamp_rederives_versioned_trigger_and_target():
         context_window_limit=131_072,
     )
     assert int(effective["effectiveTokenLimit"]) == 131_072
-    assert int(effective["compressionTriggerTokenLimit"]) == 114_688
+    # Clamp cap: hard (131,072) − 13,000 fixed pad.
+    assert int(effective["compressionTriggerTokenLimit"]) == 118_072
     assert int(effective["postCompressionTargetTokenLimit"]) == 87_381
     assert int(effective["compressionTriggerTokenLimit"]) < int(effective["effectiveTokenLimit"])
 
@@ -817,8 +875,10 @@ def test_effective_policy_unversioned_trigger_never_exceeds_effective_limit():
 
 def test_unversioned_policy_unreachable_trigger_derives_frozen_window_budget():
     """An unversioned policy whose trigger sits at the hard limit (the live
-    262,144/262,144 residue) must derive the v3 fail-safe budget instead of
-    letting the provider reject the call before automatic compression fires.
+    262,144/262,144 residue) must derive the versioned fail-safe budget
+    instead of letting the provider reject the call before automatic
+    compression fires. The model's 32,768 output reservation is capped at
+    20,480, then the fixed 13,000 pad is applied.
     """
 
     effective = agent_directory_service.effective_agent_context_compression_policy(
@@ -836,8 +896,8 @@ def test_unversioned_policy_unreachable_trigger_derives_frozen_window_budget():
     )
 
     assert int(effective["effectiveTokenLimit"]) == 262_144
-    assert int(effective["compressionTriggerTokenLimit"]) == 204_800
-    assert int(effective["postCompressionTargetTokenLimit"]) == 147_456
+    assert int(effective["compressionTriggerTokenLimit"]) == 228_664
+    assert int(effective["postCompressionTargetTokenLimit"]) == 161_109
     assert int(effective["compressionTriggerTokenLimit"]) < int(
         effective["effectiveTokenLimit"]
     )

@@ -1134,12 +1134,18 @@ class ContextCompressionConfig(BaseModel):
     reserved_max_output_tokens: int = Field(
         default=0,
         ge=0,
-        description="调用前为模型输出预留的 token 上限；0 表示使用模型能力配置的 max_output"
+        description=(
+            "调用前为模型输出预留的 token 上限；0 表示使用模型能力配置的 max_output，"
+            "未配置时默认 20480；应用时统一封顶 20480（v4 预算合同）"
+        )
     )
     protocol_and_safety_reserve_tokens: int = Field(
         default=0,
         ge=0,
-        description="协议封装、工具 schema 与估算误差的安全余量；0 表示使用版本化默认值 8192"
+        description=(
+            "已退役：v4 预算公式不再扣除协议安全余量层（v3 的 -8192 已移除）；"
+            "字段保留仅为兼容旧配置文件，填写不再影响预算"
+        )
     )
     levels: CompressionLevelsConfig = Field(
         default_factory=CompressionLevelsConfig,
