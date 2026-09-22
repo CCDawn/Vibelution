@@ -243,7 +243,7 @@ function ToolActivityItem({
   if (toolDetailIsEmpty?.(cell)) {
     return (
       <div
-        className={styles.item}
+        className={styles.itemStatic}
         data-codex-tool-activity-item="true"
         data-codex-tool-detail="none"
         data-codex-transcript-cell-kind={cell.kind}
