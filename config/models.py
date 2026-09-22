@@ -1111,6 +1111,7 @@ class ContextCompressionConfig(BaseModel):
         compression_temperature: 压缩用模型温度
         max_compressions_per_session: 每会话最大压缩次数
         effectiveness_threshold: 压缩效率阈值
+        llm_summary_failure_breaker_threshold: 压缩 LLM 摘要连败熔断阈值
         micro_compact_enabled: 微压缩 tier（全量压缩先行层）
         micro_compact_keep_recent_groups: 微压缩保留最近的工具调用组数
         micro_compact_min_savings_tokens: 微压缩最小节省 token 数
@@ -1157,6 +1158,15 @@ class ContextCompressionConfig(BaseModel):
         ge=0.0,
         le=1.0,
         description="压缩效率阈值"
+    )
+    llm_summary_failure_breaker_threshold: int = Field(
+        default=3,
+        ge=0,
+        description=(
+            "压缩 LLM 摘要连败熔断阈值：同一会话/agent 作用域内 LLM 摘要连续失败达到该次数后，"
+            "自动全量压缩显式降级为规则摘要（不再尝试 LLM），手动/显式压缩不受限；"
+            "成功一次即归零并解除熔断；0=禁用熔断（仅保留显式降级事件）"
+        )
     )
     reserved_max_output_tokens: int = Field(
         default=0,
