@@ -65,7 +65,7 @@ def list_sessions(
         return []
     s._sync_agent_directory_project_root()
     signature = (s._session_list_source_signature(), bool(include_hidden_internal))
-    if repair_collisions and s._repair_agent_direct_session_collisions(source_signature=signature):
+    if repair_collisions and s._repair_agent_direct_session_collisions():
         signature = (s._session_list_source_signature(), bool(include_hidden_internal))
     cached, should_build, waited_for_inflight = s._begin_session_list_cache_build(
         now=started_at,
