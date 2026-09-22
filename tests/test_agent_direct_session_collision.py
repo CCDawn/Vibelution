@@ -191,6 +191,113 @@ def test_session_list_preserves_protected_knowledge_steward_direct_session(tmp_p
     assert agent_directory_service.get_agent(intruder_id)["directSessionId"] == intruder_session["id"]
 
 
+def _seed_two_agent_registry(agent_directory_service) -> None:
+    state = agent_directory_service.default_state()
+    state["agents"] = [
+        _agent(
+            "agent-one",
+            code="A041",
+            name="沈知微",
+            session_id="session-one",
+            updated_at="2026-06-10T01:00:00Z",
+        ),
+        _agent(
+            "agent-two",
+            code="A042",
+            name="陆望舒",
+            session_id="session-two",
+            updated_at="2026-06-10T01:01:00Z",
+        ),
+    ]
+    agent_directory_service.save_state(state)
+
+
+def _write_inbox_churn(agent_directory_service, agent_id: str) -> None:
+    """Simulate streaming-side churn on a signature input that cannot change
+    collision-repair detection: the agent's inbox JSONL."""
+    state = agent_directory_service.load_state()
+    agent = next(
+        (
+            item
+            for item in state.get("agents") or []
+            if isinstance(item, dict)
+            and str(item.get("agentId") or "").strip() == agent_id
+        ),
+        None,
+    )
+    assert agent is not None
+    inbox_path = agent_directory_service._agent_workspace_event_path(
+        agent,
+        "agent_inbox_messages.jsonl",
+    )
+    inbox_path.parent.mkdir(parents=True, exist_ok=True)
+    with inbox_path.open("a", encoding="utf-8") as handle:
+        handle.write('{"kind":"probe","body":"streaming churn"}\n')
+
+
+def test_collision_repair_memo_skips_rescan_while_registry_unchanged(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_two_agent_registry(agent_directory_service)
+    original_load = session_service.load_chat_state
+    load_calls = {"count": 0}
+
+    def counting_load(project_root):
+        load_calls["count"] += 1
+        return original_load(project_root)
+
+    monkeypatch.setattr(session_service, "load_chat_state", counting_load)
+
+    # First scan runs and memoizes on the registry fingerprint.
+    assert session_service._repair_agent_direct_session_collisions() is False
+    first_scan_loads = load_calls["count"]
+    assert first_scan_loads >= 1
+
+    # Inbox/churn writes cannot change duplicate-group detection, so the memo
+    # must skip the chat-state reload behind _CHAT_STATE_LOCK.
+    _write_inbox_churn(agent_directory_service, "agent-one")
+    assert session_service._repair_agent_direct_session_collisions() is False
+    assert load_calls["count"] == first_scan_loads
+
+
+def test_collision_repair_still_runs_after_registry_change(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_two_agent_registry(agent_directory_service)
+    original_load = session_service.load_chat_state
+    load_calls = {"count": 0}
+
+    def counting_load(project_root):
+        load_calls["count"] += 1
+        return original_load(project_root)
+
+    monkeypatch.setattr(session_service, "load_chat_state", counting_load)
+
+    assert session_service._repair_agent_direct_session_collisions() is False
+    first_scan_loads = load_calls["count"]
+
+    # Streaming churn keeps the repair memoized (delayed convergence).
+    _write_inbox_churn(agent_directory_service, "agent-two")
+    assert session_service._repair_agent_direct_session_collisions() is False
+    assert load_calls["count"] == first_scan_loads
+
+    # A registry change (collision introduced, bypassing create/update
+    # validation like the legacy data this repair exists for) changes the
+    # fingerprint, so the repair must run again.
+    state = agent_directory_service.load_state()
+    for agent in state.get("agents") or []:
+        if not isinstance(agent, dict):
+            continue
+        if str(agent.get("agentId") or "").strip() == "agent-two":
+            agent["directSessionId"] = "session-one"
+    agent_directory_service.save_state(state)
+
+    assert session_service._repair_agent_direct_session_collisions() is True
+    assert load_calls["count"] > first_scan_loads
+    assert agent_directory_service.get_agent("agent-one")["directSessionId"] == "session-one"
+    repaired_two = agent_directory_service.get_agent("agent-two")
+    assert repaired_two["directSessionId"] != "session-one"
+    assert repaired_two["directSessionId"].startswith("session-")
+
+
 def test_agent_directory_rejects_new_active_direct_session_collision(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     first = agent_directory_service.create_agent_instance(

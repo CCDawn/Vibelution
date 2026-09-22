@@ -249,12 +249,20 @@ import {
   buildTimelineScrollSignal,
 } from "./conversationTimelineScrollSignals";
 import {
+  freshTimelineUserScrollIntent,
   isTimelineNearBottom,
+  reconcileFollowingBeforeContentStick,
   recordConversationRowHeight,
   resolveConversationVirtualRange,
   resolveTimelineFollowState,
   shouldKeepFollowingLatestOnProcessToggle,
   shouldStickTimelineToBottomOnContentResize,
+  TIMELINE_CONTENT_WIDTH_RESIZE_SETTLE_MS,
+  timelineKeyboardScrollIntent,
+  timelineTouchScrollIntent,
+  timelineWheelScrollIntent,
+  type TimelineScrollSource,
+  type TimelineUserScrollIntent,
 } from "./conversationTimelineFollowState";
 import {
   peekSessionTimelineScroll,
@@ -610,6 +618,11 @@ export const ConversationView = React.memo(function ConversationView({
   const atBottomRef = useRef(true);
   const followLatestRef = useRef(true);
   const lastTimelineScrollTopRef = useRef(0);
+  const userScrollIntentRef = useRef<TimelineUserScrollIntent>("none");
+  const userScrollIntentAtRef = useRef(0);
+  const ignoreNextProgrammaticFollowRef = useRef(false);
+  const lastTimelineContentWidthRef = useRef(0);
+  const contentWidthChangingUntilRef = useRef(0);
   const streamingScrollFrameRef = useRef<number | null>(null);
   const autoScrollToLatestRef = useRef(autoScrollToLatest);
   autoScrollToLatestRef.current = autoScrollToLatest;
@@ -1307,11 +1320,59 @@ export const ConversationView = React.memo(function ConversationView({
     setPreviewImage(null);
   }
 
+  function rememberUserScrollIntent(intent: TimelineUserScrollIntent) {
+    if (intent === "none") {
+      return;
+    }
+    userScrollIntentRef.current = intent;
+    userScrollIntentAtRef.current = performance.now();
+  }
+
+  function currentUserScrollIntent() {
+    return freshTimelineUserScrollIntent(
+      userScrollIntentRef.current,
+      userScrollIntentAtRef.current,
+      performance.now(),
+    );
+  }
+
+  function contentWidthIsChanging() {
+    return performance.now() < contentWidthChangingUntilRef.current;
+  }
+
+  function noteTimelineContentWidth(width: number) {
+    if (!Number.isFinite(width) || width <= 0) {
+      return;
+    }
+    const previous = lastTimelineContentWidthRef.current;
+    if (previous > 0 && width !== previous) {
+      contentWidthChangingUntilRef.current = performance.now() + TIMELINE_CONTENT_WIDTH_RESIZE_SETTLE_MS;
+    }
+    lastTimelineContentWidthRef.current = width;
+  }
+
+  function reconcileFollowBeforeStick(timeline: HTMLDivElement) {
+    const next = reconcileFollowingBeforeContentStick({
+      following: followLatestRef.current,
+      isAtBottom: isTimelineNearBottom({
+        scrollHeight: timeline.scrollHeight,
+        clientHeight: timeline.clientHeight,
+        scrollTop: timeline.scrollTop,
+      }),
+      userScrollIntent: currentUserScrollIntent(),
+      scrollTop: timeline.scrollTop,
+      lastObservedScrollTop: lastTimelineScrollTopRef.current,
+    });
+    followLatestRef.current = next;
+    return next;
+  }
+
   function scrollTimelineToBottom(
     timeline: HTMLDivElement,
     options: { followLatest?: boolean; behavior?: ScrollBehavior } = {},
   ) {
     const wasAtBottom = atBottomRef.current;
+    ignoreNextProgrammaticFollowRef.current = true;
     if (options.behavior) {
       timeline.scrollTo({ top: timeline.scrollHeight, behavior: options.behavior });
     } else {
@@ -1328,6 +1389,13 @@ export const ConversationView = React.memo(function ConversationView({
   }
 
   function scheduleTimelineScrollToBottom() {
+    const timeline = timelineRef.current;
+    if (contentWidthIsChanging()) {
+      return;
+    }
+    if (timeline && !reconcileFollowBeforeStick(timeline)) {
+      return;
+    }
     if (streamingScrollFrameRef.current !== null) {
       return;
     }
@@ -1346,6 +1414,8 @@ export const ConversationView = React.memo(function ConversationView({
    * Do this before onSubmit so optimistic user + active-turn paint under followLatest.
    */
   function pinFollowLatestForSubmit() {
+    userScrollIntentRef.current = "none";
+    userScrollIntentAtRef.current = 0;
     followLatestRef.current = true;
     atBottomRef.current = true;
     setIsAtBottom(true);
@@ -1430,9 +1500,11 @@ export const ConversationView = React.memo(function ConversationView({
       return undefined;
     }
     const observer = new ResizeObserver(() => {
+      noteTimelineContentWidth(timeline.clientWidth);
       if (shouldStickTimelineToBottomOnContentResize({
         autoScrollToLatest: autoScrollToLatestRef.current,
         followingLatest: followLatestRef.current,
+        contentWidthChanging: contentWidthIsChanging(),
       })) {
         scheduleTimelineScrollToBottom();
       }
@@ -1478,6 +1550,7 @@ export const ConversationView = React.memo(function ConversationView({
       if (shouldStickTimelineToBottomOnContentResize({
         autoScrollToLatest: autoScrollToLatestRef.current,
         followingLatest: followLatestRef.current,
+        contentWidthChanging: contentWidthIsChanging(),
       })) {
         scheduleTimelineScrollToBottom();
       }
@@ -1621,9 +1694,10 @@ export const ConversationView = React.memo(function ConversationView({
     if (!autoScrollToLatest) {
       return;
     }
-    // Content growth while still near the bottom re-enables follow even if a prior
-    // expand briefly suspended it.
-    if (
+    const userScrollIntent = currentUserScrollIntent();
+    if (userScrollIntent === "awayFromBottom") {
+      followLatestRef.current = false;
+    } else if (
       !followLatestRef.current
       && isTimelineNearBottom({
         scrollHeight: timeline.scrollHeight,
@@ -1631,6 +1705,8 @@ export const ConversationView = React.memo(function ConversationView({
         scrollTop: timeline.scrollTop,
       })
     ) {
+      // Content growth while still near the bottom re-enables follow even if a prior
+      // expand briefly suspended it. An upward wheel recorded before this commit wins.
       followLatestRef.current = true;
       atBottomRef.current = true;
       setIsAtBottom(true);
@@ -1683,9 +1759,83 @@ export const ConversationView = React.memo(function ConversationView({
   useEffect(() => {
     const timeline = timelineRef.current;
     if (!timeline) {
+      return undefined;
+    }
+    const wheelTargetConsumesScroll = (target: EventTarget | null, deltaY: number) => {
+      if (!(target instanceof HTMLElement) || target === timeline) {
+        return false;
+      }
+      let node: HTMLElement | null = target;
+      while (node && node !== timeline) {
+        if (
+          node instanceof HTMLInputElement
+          || node instanceof HTMLTextAreaElement
+          || node.isContentEditable
+        ) {
+          return true;
+        }
+        const overflowY = window.getComputedStyle(node).overflowY;
+        if (
+          (overflowY === "auto" || overflowY === "scroll")
+          && node.scrollHeight > node.clientHeight + 1
+        ) {
+          if (deltaY < 0 && node.scrollTop > 0) {
+            return true;
+          }
+          if (deltaY > 0 && node.scrollTop + node.clientHeight < node.scrollHeight - 1) {
+            return true;
+          }
+        }
+        node = node.parentElement;
+      }
+      return false;
+    };
+    const onWheel = (event: WheelEvent) => {
+      if (wheelTargetConsumesScroll(event.target, event.deltaY)) {
+        return;
+      }
+      rememberUserScrollIntent(timelineWheelScrollIntent(event.deltaY));
+    };
+    let lastTouchY = 0;
+    const onTouchStart = (event: TouchEvent) => {
+      lastTouchY = event.touches[0]?.clientY ?? lastTouchY;
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      const nextY = event.touches[0]?.clientY ?? lastTouchY;
+      rememberUserScrollIntent(timelineTouchScrollIntent(lastTouchY, nextY));
+      lastTouchY = nextY;
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      const editableTarget = target instanceof HTMLElement && (
+        target.isContentEditable
+        || target.tagName === "INPUT"
+        || target.tagName === "TEXTAREA"
+      );
+      rememberUserScrollIntent(timelineKeyboardScrollIntent({
+        key: event.key,
+        shiftKey: event.shiftKey,
+        editableTarget,
+      }));
+    };
+    timeline.addEventListener("wheel", onWheel, { passive: true });
+    timeline.addEventListener("touchstart", onTouchStart, { passive: true });
+    timeline.addEventListener("touchmove", onTouchMove, { passive: true });
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      timeline.removeEventListener("wheel", onWheel);
+      timeline.removeEventListener("touchstart", onTouchStart);
+      timeline.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [sessionId]);
+
+  useEffect(() => {
+    const timeline = timelineRef.current;
+    if (!timeline) {
       return;
     }
-    const handleScroll = () => {
+    const handleScroll = (consumeProgrammatic = true) => {
       const previousScrollTop = lastTimelineScrollTopRef.current;
       if (shouldLoadEarlierConversationMessages({
         clientHeight: timeline.clientHeight,
@@ -1697,12 +1847,19 @@ export const ConversationView = React.memo(function ConversationView({
       })) {
         revealEarlierTimelineMessages();
       }
+      const programmaticFollow = consumeProgrammatic && ignoreNextProgrammaticFollowRef.current;
+      if (consumeProgrammatic) {
+        ignoreNextProgrammaticFollowRef.current = false;
+      }
+      const scrollSource: TimelineScrollSource = programmaticFollow ? "programmatic" : "user";
       const nextState = resolveTimelineFollowState({
         scrollHeight: timeline.scrollHeight,
         clientHeight: timeline.clientHeight,
         scrollTop: timeline.scrollTop,
         previousScrollTop,
         wasFollowingLatest: followLatestRef.current,
+        scrollSource,
+        userScrollIntent: currentUserScrollIntent(),
       });
       lastTimelineScrollTopRef.current = timeline.scrollTop;
       atBottomRef.current = nextState.isAtBottom;
@@ -1717,10 +1874,11 @@ export const ConversationView = React.memo(function ConversationView({
         followingLatest: nextState.shouldFollowLatest,
       });
     };
-    handleScroll();
-    timeline.addEventListener("scroll", handleScroll);
+    const onTimelineScroll = () => handleScroll(true);
+    handleScroll(false);
+    timeline.addEventListener("scroll", onTimelineScroll);
     return () => {
-      timeline.removeEventListener("scroll", handleScroll);
+      timeline.removeEventListener("scroll", onTimelineScroll);
       rememberSessionTimelineScroll(sessionId, {
         scrollTop: lastTimelineScrollTopRef.current,
         followingLatest: followLatestRef.current,

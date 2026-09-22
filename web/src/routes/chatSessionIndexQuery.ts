@@ -11,6 +11,7 @@ import type {
 } from "../api/types";
 import { mergeSessionDetailIntoSummaries } from "./chatSessionState";
 import { mergePreservedCreatedSessions, unpinSessionCreatePreserve } from "./sessionCreatePreserve";
+import { stabilizeSessionSummaries } from "./sessionIndexReferenceStabilization";
 import { filterOutTombstonedSessions, markSessionDeleteTombstone } from "./sessionDeleteTombstone";
 import { chatAgentSessionStorage, forgetAgentLastSessionBySessionId } from "./chat/chatAgentSessionMemory";
 
@@ -56,33 +57,57 @@ function repartitionSessionPages(
 ): SessionQueryInfiniteData {
   const previousSessions = mergeSessionPages(data.pages);
   const nextSessions = updater(previousSessions) ?? previousSessions;
-  const sessionDelta = nextSessions.length - previousSessions.length;
+  // Reuse previous summary references for content-equivalent entries so a
+  // <=350ms stream apply only rotates the session that actually changed.
+  const stabilizedSessions = stabilizeSessionSummaries(previousSessions, nextSessions);
+  if (stabilizedSessions === previousSessions) {
+    // Identical membership, content, and order: re-slicing would reproduce
+    // `data` exactly, so keep the whole cached value reference-stable.
+    return data;
+  }
+  const sessionDelta = stabilizedSessions.length - previousSessions.length;
   let cursor = 0;
+  let allPagesReused = true;
   const nextPages = data.pages.map((page, index) => {
     const isLastPage = index === data.pages.length - 1;
     const pageSize = isLastPage
-      ? Math.max(page.items.length, nextSessions.length - cursor)
+      ? Math.max(page.items.length, stabilizedSessions.length - cursor)
       : page.items.length;
-    const items = nextSessions.slice(cursor, cursor + pageSize);
+    const items = stabilizedSessions.slice(cursor, cursor + pageSize);
     cursor += pageSize;
+    const totalEstimate =
+      typeof page.totalEstimate === "number"
+        ? Math.max(0, page.totalEstimate + sessionDelta)
+        : page.totalEstimate;
+    if (
+      page.items.length === items.length
+      && page.items.every((item, itemIndex) => item === items[itemIndex])
+      && page.totalEstimate === totalEstimate
+    ) {
+      // Unchanged partition: reuse the previous page object so only the page
+      // that actually contains a changed session rotates.
+      return page;
+    }
+    allPagesReused = false;
     return {
       ...page,
       items,
-      totalEstimate:
-        typeof page.totalEstimate === "number"
-          ? Math.max(0, page.totalEstimate + sessionDelta)
-          : page.totalEstimate,
+      totalEstimate,
     };
   });
   if (nextPages.length === 0) {
     return data;
   }
-  if (cursor < nextSessions.length) {
+  if (cursor < stabilizedSessions.length) {
+    allPagesReused = false;
     const lastPage = nextPages[nextPages.length - 1];
     nextPages[nextPages.length - 1] = {
       ...lastPage,
-      items: [...lastPage.items, ...nextSessions.slice(cursor)],
+      items: [...lastPage.items, ...stabilizedSessions.slice(cursor)],
     };
+  }
+  if (allPagesReused) {
+    return data;
   }
   return {
     ...data,
@@ -142,7 +167,15 @@ export function removeSessionFromAgentSessionCaches(queryClient: QueryClient, se
 }
 
 export function updateSessionSummaryCaches(queryClient: QueryClient, updater: SessionSummaryUpdater) {
-  queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions(), updater);
+  // Stabilize against the previous cached list so a stream apply that does not
+  // change summary content keeps both cache values reference-identical.
+  queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions(), (previous) => {
+    const next = updater(previous);
+    if (!next || !previous) {
+      return next;
+    }
+    return stabilizeSessionSummaries(previous, next);
+  });
   queryClient.setQueriesData<SessionQueryInfiniteData>({ queryKey: ["sessions", "query"] }, (data) =>
     data ? repartitionSessionPages(data, updater) : data,
   );
@@ -173,7 +206,7 @@ export function updateAgentSessionSummaryCaches(queryClient: QueryClient, update
     if (!data) {
       return data;
     }
-    const items = updater(data.items) ?? data.items;
+    const items = stabilizeSessionSummaries(data.items, updater(data.items) ?? data.items);
     return items === data.items ? data : {
       ...data,
       items,
@@ -199,8 +232,14 @@ export function reconcileAgentSessionDetailCache(queryClient: QueryClient, detai
     if (!data) {
       return data;
     }
-    const items = mergeSessionDetailIntoSummaries(data.items, detail);
+    // `mergeSessionDetailIntoSummaries` always spreads the target session into
+    // a new object; fold that back onto the cached reference when the folded
+    // detail did not change any summary field (recurring snapshot applies).
+    const items = stabilizeSessionSummaries(data.items, mergeSessionDetailIntoSummaries(data.items, detail));
     const addedCount = items.length - data.items.length;
+    if (items === data.items) {
+      return data;
+    }
     return {
       ...data,
       items,
@@ -252,15 +291,20 @@ export function useSessionIndexQuery({
       const previousPageItems = previousPages ? mergeSessionPages(previousPages.pages) : [];
       // Drop tombstoned rows, then re-attach optimistic / just-created tabs that a
       // racing bootstrap or index refetch can briefly omit after create.
-      const filteredItems = mergePreservedCreatedSessions(
-        filterOutTombstonedSessions(payload.items) ?? [],
-        { localItems: previousPageItems },
-      );
-      const merged = filterOutTombstonedSessions(
-        mergePreservedCreatedSessions(mergeSessions([existing, filteredItems]), {
+      const filteredItems = stabilizeSessionSummaries(
+        previousPageItems,
+        mergePreservedCreatedSessions(filterOutTombstonedSessions(payload.items) ?? [], {
           localItems: previousPageItems,
         }),
-      ) ?? [];
+      );
+      const merged = stabilizeSessionSummaries(
+        existing,
+        filterOutTombstonedSessions(
+          mergePreservedCreatedSessions(mergeSessions([existing, filteredItems]), {
+            localItems: previousPageItems,
+          }),
+        ) ?? [],
+      );
       queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions(), merged);
       return {
         ...payload,

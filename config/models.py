@@ -1075,6 +1075,29 @@ class CompressionPreservationConfig(BaseModel):
     )
 
 
+# 微压缩 tier 默认白名单：大输出、只读/检索类工具族（与 core/chat/chat_result_contract.py
+# READ_TOOL_NAMES 及 Key_Tools 注册名对齐）；命令输出类（cli_tool/exec_command）按
+# ZCode microcompact 的 Bash 先例纳入；写类工具一律不入白名单。
+MICRO_COMPACT_DEFAULT_TOOL_WHITELIST: tuple = (
+    "read_file_tool",
+    "grep_search_tool",
+    "glob_tool",
+    "code_symbol_tool",
+    "project_search_tool",
+    "web_search_tool",
+    "web_fetch_tool",
+    "batch_web_search_tool",
+    "paper_search_tool",
+    "news_search_tool",
+    "search_summarize_sources_tool",
+    "history_search_tool",
+    "history_fetch_tool",
+    "history_timeline_tool",
+    "cli_tool",
+    "exec_command",
+)
+
+
 class ContextCompressionConfig(BaseModel):
     """
     运行时上下文压缩配置
@@ -1088,6 +1111,11 @@ class ContextCompressionConfig(BaseModel):
         compression_temperature: 压缩用模型温度
         max_compressions_per_session: 每会话最大压缩次数
         effectiveness_threshold: 压缩效率阈值
+        llm_summary_failure_breaker_threshold: 压缩 LLM 摘要连败熔断阈值
+        micro_compact_enabled: 微压缩 tier（全量压缩先行层）
+        micro_compact_keep_recent_groups: 微压缩保留最近的工具调用组数
+        micro_compact_min_savings_tokens: 微压缩最小节省 token 数
+        micro_compact_tool_whitelist: 微压缩白名单工具
     """
     model_config = ConfigDict(extra="ignore")
 
@@ -1131,6 +1159,15 @@ class ContextCompressionConfig(BaseModel):
         le=1.0,
         description="压缩效率阈值"
     )
+    llm_summary_failure_breaker_threshold: int = Field(
+        default=3,
+        ge=0,
+        description=(
+            "压缩 LLM 摘要连败熔断阈值：同一会话/agent 作用域内 LLM 摘要连续失败达到该次数后，"
+            "自动全量压缩显式降级为规则摘要（不再尝试 LLM），手动/显式压缩不受限；"
+            "成功一次即归零并解除熔断；0=禁用熔断（仅保留显式降级事件）"
+        )
+    )
     reserved_max_output_tokens: int = Field(
         default=0,
         ge=0,
@@ -1158,6 +1195,32 @@ class ContextCompressionConfig(BaseModel):
     preservation: CompressionPreservationConfig = Field(
         default_factory=CompressionPreservationConfig,
         description="智能保留策略配置"
+    )
+    micro_compact_enabled: bool = Field(
+        default=True,
+        description=(
+            "微压缩 tier：token 估算进入 [微压缩触发线, 全量触发线) 区间时，"
+            "先把白名单只读工具的旧工具结果替换为引用+预览占位符（读时投影，不动 ledger），"
+            "重估低于全量触发线则本轮不触发全量压缩；微压缩触发线 = min(全量触发×0.9, 全量触发−2000)"
+        )
+    )
+    micro_compact_keep_recent_groups: int = Field(
+        default=5,
+        ge=0,
+        le=50,
+        description="微压缩保留最近 N 组「assistant 工具调用 + 工具结果」，更旧的组才可清除"
+    )
+    micro_compact_min_savings_tokens: int = Field(
+        default=256,
+        ge=0,
+        description="微压缩预计节省低于该 token 数时整体回滚，不做部分替换"
+    )
+    micro_compact_tool_whitelist: List[str] = Field(
+        default_factory=lambda: list(MICRO_COMPACT_DEFAULT_TOOL_WHITELIST),
+        description=(
+            "微压缩白名单（大输出只读/检索类工具）；留空列表表示使用内置默认白名单；"
+            "写类工具（write_file/apply_diff 等）不属于白名单"
+        )
     )
 
     @model_validator(mode="after")
