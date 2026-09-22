@@ -18,7 +18,7 @@ from core.diagnostics.agent_log_context import build_agent_log_context  # noqa: 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Return unified agent log context: active paths, current runtime scene, and optional session turn diagnosis."
+        description="Return the shared agent log firstRead. Stop after conclusion, evidencePaths, nextStep, and doNotDo."
     )
     parser.add_argument("--project", type=Path, default=PROJECT_ROOT)
     parser.add_argument("--session-id", default="")
