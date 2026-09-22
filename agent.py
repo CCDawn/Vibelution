@@ -796,9 +796,11 @@ class AgentRuntime:
         ).effective_enabled
 
     def _init_model_discovery(self):
-        """解析模型 max 上下文窗口并派生压缩阈值。
+        """解析模型 max 上下文窗口并派生压缩预算。
 
         禁止静默 32k/16k 兜底：窗口未知时直接失败，避免隐藏错误窗口。
+        预算走版本化合同（hard = window − min(模型输出预留, 20,480)），
+        不再砍半窗口。
         """
         primary_profile_id = self.config.llm.get_role_profile_id("primary")
         doctor = doctor_llm_profile(self.config, primary_profile_id)
@@ -819,11 +821,34 @@ class AgentRuntime:
             _debug_logger.error(message, tag="LLM")
             raise RuntimeError(message)
         self._context_window_limit = context_window
-        # Compression threshold is derived from the known window; never invent the window itself.
-        # The derivation stays in this runtime attribute and is never written back into
-        # ``self.config.context_compression``: the loaded config is operator-owned state
-        # shared with other readers, and silent in-place rewrites lose the TOML provenance.
-        self._effective_max_token_limit = max(1, int(context_window * 0.5))
+        # Compression budget follows the versioned contract (industry shape,
+        # mirrors Claude Code / ZCode auto-compact): the input hard limit is
+        # window minus the model's own output reservation capped at 20,480 —
+        # never a half-window guess. The legacy ``window * 0.5`` derivation is
+        # retired; an unknown window still fails loud above. The derivation
+        # stays in this runtime attribute and is never written back into
+        # ``self.config.context_compression``: the loaded config is operator-owned
+        # state shared with other readers, and silent in-place rewrites lose the
+        # TOML provenance.
+        try:
+            from core.web.services.team.challenge_cup_context_policy import (
+                challenge_cup_context_budget,
+            )
+
+            budget = challenge_cup_context_budget(
+                context_window=context_window,
+                reserved_max_output_tokens=(
+                    int(getattr(self.model_info, "max_output_tokens", 0) or 0) or None
+                ),
+            )
+            self._effective_max_token_limit = max(
+                1, int(budget["effectiveInputHardLimit"])
+            )
+        except ValueError:
+            # Degenerate tiny window (smaller than the output reserve plus the
+            # trigger pad): budget every token to input rather than fail
+            # startup; the ratio-based trigger fallback stays usable.
+            self._effective_max_token_limit = max(1, int(context_window))
         try:
             from core.pet_system import get_pet_system
             get_pet_system().update_context_window(self._context_window_limit)
@@ -898,8 +923,8 @@ class AgentRuntime:
         self._context_compression_policy = dict(policy)
         # Versioned budget contract (policy v3+): explicit compression trigger,
         # hard input limit and post-compression target override the legacy
-        # ratio derivation. Agents without the explicit fields keep the legacy
-        # behavior unchanged.
+        # ratio derivation. Agents without the explicit fields keep the
+        # contract-derived fallback above.
         explicit_trigger = int(policy.get("compressionTriggerTokenLimit") or 0)
         post_target = int(policy.get("postCompressionTargetTokenLimit") or 0)
         self._context_compression_trigger_tokens = max(0, explicit_trigger)
