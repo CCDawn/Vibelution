@@ -1,8 +1,12 @@
-import React from "react";
+// @vitest-environment happy-dom
+import React, { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import styles from "./ConversationView.styles";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 describe("ConversationMarkdownRenderer", () => {
   it("normalizes common agent markdown glitches into readable blocks", async () => {
@@ -151,5 +155,44 @@ describe("ConversationMarkdownRenderer", () => {
     expect(html).not.toContain("javascript:");
     expect(html).not.toContain("<script");
     expect(html).not.toContain("alert(1)");
+  });
+
+  it("skips re-parsing when the content is unchanged (completed messages never re-parse)", async () => {
+    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
+    const subtreeRenders: number[] = [];
+    let root: Root | null = null;
+    let container: HTMLElement | null = null;
+
+    const renderWith = (content: string) => {
+      act(() => {
+        root!.render(
+          <React.Profiler id="markdown" onRender={() => subtreeRenders.push(1)}>
+            <ConversationMarkdownRenderer content={content} classNames={styles} />
+          </React.Profiler>,
+        );
+      });
+    };
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    try {
+      renderWith("# stable block");
+      expect(subtreeRenders).toHaveLength(1);
+
+      // Parent re-render with unchanged content: the memo gate short-circuits
+      // before normalize + the react-markdown AST pass.
+      renderWith("# stable block");
+      expect(subtreeRenders).toHaveLength(1);
+
+      // Streaming growth re-parses exactly the changed message.
+      renderWith("# stable block\nmore");
+      expect(subtreeRenders).toHaveLength(2);
+    } finally {
+      act(() => {
+        root?.unmount();
+      });
+      container.remove();
+    }
   });
 });

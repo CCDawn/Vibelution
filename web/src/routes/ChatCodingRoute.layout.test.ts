@@ -56,6 +56,7 @@ import chatSubmitTelemetrySource from "./chat/chatSubmitTelemetry.ts?raw";
 import chatComposerSubmitModelSource from "./chat/chatComposerSubmitModel.ts?raw";
 import chatComposerSubmitHookSource from "./chat/useChatComposerSubmit.ts?raw";
 import chatActiveTurnLayerSource from "./chatActiveTurnLayer.ts?raw";
+import activeTurnLayersStoreSource from "./chat/activeTurnLayersStore.ts?raw";
 import chatStreamApplyControllerSource from "./chatStreamApplyController.ts?raw";
 import terminalPanelSource from "./chat/CliAgentRunTerminalPanel.tsx?raw";
 import conversationIndexModelSource from "./conversationIndexModel.ts?raw";
@@ -81,6 +82,7 @@ import tokenCoreStatusPanelStyles from "./chat/TokenCoreStatusPanel.styles";
 /** Workbench shell + catalog queries hook (R01c F1) + Phase F2/F3 extract modules. */
 const routeSource = [
   chatCodingRouteWorkbenchSource,
+  activeTurnLayersStoreSource,
   chatWorkbenchCatalogQueriesSource,
   chatToolApprovalBridgeSource,
   chatComposerBridgeStateSource,
@@ -588,7 +590,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatConversationComposerBridgeSource).toContain("composerValue={composer.value}");
     expect(chatConversationComposerBridgeSource).toContain("composerAttachments={composer.attachments}");
     expect(routeAndComposerSource).toContain("conversationConstants");
-    expect(chatSessionWorkspacePanelSource).toContain("const conversationLoadingFallback = (");
+    expect(chatSessionWorkspacePanelSource).toContain("const conversationLoadingFallback = useMemo(");
     expect(chatSessionWorkspacePanelSource).toContain("fallback={conversationLoadingFallback}");
     expect(routeSource).not.toContain("fallback={<div className={styles.emptySurface}>{t(\"loadingSession\")}</div>}");
     expect(routeSource).not.toContain("<div className={styles.emptySurface}>{t(\"loadingSession\")}</div>");
@@ -600,7 +602,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("buildConversationComposerBridgeState({");
     expect(routeSource).toContain("const composerDisabled = conversationComposer.disabled");
     expect(routeSource).toContain("<ChatSessionWorkspacePanel");
-    expect(routeSource).toContain("conversation={detail ? {");
+    expect(routeSource).toContain("const conversationModel = useMemo(");
+    expect(routeSource).toContain("conversation={conversationModel}");
     expect(routeSource).toContain("composer: companionConversationComposer");
     expect(chatSessionWorkspacePanelSource).toContain("<ChatConversationComposerBridge");
     expect(chatSessionWorkspacePanelSource).toContain("composer={conversation.composer}");
@@ -627,13 +630,18 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("keeps live assistant output in an active turn layer outside committed session messages", () => {
     expect(routeSource).toContain("activeTurnLayersBySession");
-    expect(routeSource).toContain("Object.entries(activeTurnLayersBySession).forEach");
+    expect(routeSource).toContain("Object.entries(activeTurnLayersBySessionRef.current).forEach");
     expect(routeSource).toContain("runningSessionIds.add(sessionId)");
     expect(routeSource).toContain("activeStatusSource: paintedActiveTurn?.ledgerSeq ? \"assistant_delta\" : \"optimistic_submit\"");
-    expect(routeSource).toContain("activeTurnMessage,");
+    // The streaming message is projected from the store inside the bridge: the
+    // per-frame subscriber ends there, not at the whole workbench.
+    expect(chatConversationComposerBridgeSource).toContain("useActiveTurnLayerForSession");
+    expect(chatConversationComposerBridgeSource).toContain("projectActiveTurnLayerMessage(streamedActiveTurnLayer, messages)");
+    expect(chatConversationComposerBridgeSource).toContain("activeTurnMessage={streamedActiveTurnMessage}");
     expect(routeAndStreamSource).toContain("planAppliedAssistantDeltaDrain");
     expect(chatStreamApplyControllerSource).toContain("mergeAssistantDeltaIntoActiveTurnLayer");
     expect(routeSource).toContain("isActiveTurnSettledByDetail");
+    expect(routeSource).toContain("isActiveTurnSettledByMessages");
     expect(routeSource).not.toContain("mergeLiveAssistantMessagesIntoSessionDetail");
     expect(routeSource).not.toContain("setLiveAssistantMessagesBySession");
   });
@@ -1682,10 +1690,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const rawSessionDetail = resolveActiveSessionDetailForUi");
     expect(routeSource).toContain("const detail = useStableSessionDetailPaint({");
     expect(routeSource).toContain("detail: rawSessionDetail");
-    expect(routeSource).toContain("const activeTurnLayer = activeSessionId ? activeTurnLayersBySession[activeSessionId] : undefined");
-    expect(routeSource).toContain("const activeTurnSettledByDetail = isActiveTurnSettledByDetail(activeTurnLayer, detail)");
-    expect(routeSource).toContain("const activeTurnMessage = useMemo(");
-    expect(routeSource).toContain("activeTurnSettledByDetail ? undefined : activeTurnLayerToConversationMessage(activeTurnLayer)");
+    expect(routeSource).toContain("const activeTurnSessionKey = activeSessionId ?? \"\"");
+    expect(routeSource).toContain("const activeTurnSettledByDetail = useActiveTurnLayersSignalFlag(useCallback((layers) => {");
+    expect(routeSource).toContain("return isActiveTurnSettledByMessages(layers[activeTurnSessionKey], detail?.messages);");
+    expect(routeSource).toContain("const terminalIndexRefreshKey = useActiveTurnLayersSignal(useCallback((layers) => {");
     expect(routeSource).toContain("setActiveTurnLayerForSession(current, activeSessionId, undefined)");
     expect(routeSource).toContain('eventCode: "browser.session_stream.active_layer_reconciled"');
     expect(routeSource).toContain('source: "session_detail_query"');
@@ -2130,7 +2138,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndStreamSource).toContain("setActiveTurnLayerForSession(current, streamSessionId, decision.nextCommittedLayer)");
     expect(chatStreamApplyControllerSource).toContain("mergeAssistantDeltaIntoActiveTurnLayer(pendingLayer, entry.payload)");
     expect(routeAndStreamSource).toContain("isActiveTurnSettledByDetail(activeLayer, detail)");
-    expect(routeSource).toContain("activeTurnMessage,");
+    expect(chatConversationComposerBridgeSource).toContain("projectActiveTurnLayerMessage(streamedActiveTurnLayer, messages)");
     expect(routeAndHelpersSource).toContain("function isStaleLedgerUpdate(currentSeq: unknown, incomingSeq: unknown)");
     expect(routeAndStreamSource).not.toContain("function mergeLiveAssistantMessagesIntoSessionDetail(");
     expect(routeAndStreamSource).not.toContain("kind: \"session_live_overlay\"");
@@ -2227,12 +2235,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("lastAssistantDeltaAppliedAtRef");
     expect(routeSource).toContain("const handleConversationStreamingFramePaint = useCallback");
     expect(routeSource).toContain("browser.conversation_stream.frame_painted");
-    expect(routeSource).toContain("activeTurnLayersBySessionRef.current = activeTurnLayersBySession;");
-    expect(routeSource).not.toContain([
-      "useEffect(() => {",
-      "    activeTurnLayersBySessionRef.current = activeTurnLayersBySession;",
-      "  }, [activeTurnLayersBySession]);",
-    ].join("\n"));
+    // The store keeps its read-through ref current synchronously on commit;
+    // there is no render-time ref sync left in the workbench.
+    expect(routeSource).toContain("const { setActiveTurnLayersBySession, activeTurnLayersBySessionRef } = activeTurnLayersStore;");
+    expect(routeSource).not.toContain("activeTurnLayersBySessionRef.current = activeTurnLayersBySession;");
     expect(routeSource).toContain("const paintedActiveTurn = activeTurnLayersBySessionRef.current[sessionId]");
     expect(routeSource).toContain("turnId: paintedActiveTurn?.turnId ?? \"\"");
     expect(routeSource).toContain("paintedAtMs");

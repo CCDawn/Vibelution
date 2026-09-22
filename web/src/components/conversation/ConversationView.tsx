@@ -484,7 +484,11 @@ async function copyTextToClipboard(text: string) {
   }
 }
 
-export function ConversationView({
+// Memo gate: with stable prop references from the route (memoized conversation
+// model + composer bridge) unrelated parent re-renders stop here. Streaming
+// frames still re-render this component because the active-turn message prop
+// changes per committed frame.
+export const ConversationView = React.memo(function ConversationView({
   sessionId,
   title,
   phase,
@@ -1293,9 +1297,11 @@ export function ConversationView({
     return compactConversationPreview(value, maxLength);
   }
 
-  function openImagePreview(image: ConversationImagePreviewRequest) {
+  // Stable identities: the markdown renderer is content-memoized, so a fresh
+  // renderImage closure per render would force a full re-parse of every block.
+  const openImagePreview = useCallback((image: ConversationImagePreviewRequest) => {
     setPreviewImage(image);
-  }
+  }, []);
 
   function closeImagePreview() {
     setPreviewImage(null);
@@ -4181,7 +4187,7 @@ export function ConversationView({
     );
   }
 
-  function renderMarkdownImage(alt: string, url: string, duplicateImageUrls?: Set<string>) {
+  const renderMarkdownImage = useCallback((alt: string, url: string, duplicateImageUrls?: Set<string>) => {
     if (!isLikelyConversationImageUrl(url)) {
       return (
         <a className={styles.markdownImageLink} href={url}>
@@ -4225,7 +4231,7 @@ export function ConversationView({
         </figcaption>
       </figure>
     );
-  }
+  }, [lang, openImagePreview]);
 
   function isNonNullNode<T>(node: T | null): node is T {
     return node !== null;
@@ -5664,4 +5670,4 @@ export function ConversationView({
       />
     </div>
   );
-}
+});

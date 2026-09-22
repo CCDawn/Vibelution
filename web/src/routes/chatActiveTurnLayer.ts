@@ -283,9 +283,21 @@ export function isActiveTurnSettledByDetail(
   layer: ActiveTurnLayerState | undefined,
   detail: SessionDetail | undefined,
 ) {
-  if (!layer || !detail || !layer.turnId) return false;
+  return isActiveTurnSettledByMessages(layer, detail?.messages);
+}
+
+/**
+ * Settle projection over the message window alone: consumers that only hold
+ * `detail.messages` (streaming-layer projection) share the exact rule without
+ * needing the full detail object.
+ */
+export function isActiveTurnSettledByMessages(
+  layer: ActiveTurnLayerState | undefined,
+  messages: ConversationMessage[] | undefined,
+) {
+  if (!layer || !messages || !layer.turnId) return false;
   const layerUpdatedAt = Date.parse(layer.updatedAt);
-  return (detail.messages ?? []).some((message) => {
+  return messages.some((message) => {
     if (
       message.role !== "assistant"
       || message.metadata?.kind === "session_active_turn_layer"
@@ -305,6 +317,20 @@ export function isActiveTurnSettledByDetail(
       && Number.isFinite(messageTimestamp)
       && messageTimestamp > layerUpdatedAt;
   });
+}
+
+/**
+ * The one ConversationView-facing projection of a live active-turn layer:
+ * settled layers hide the streaming message (the canonical transcript is the
+ * authority), everything else renders as the in-flight assistant message.
+ */
+export function projectActiveTurnLayerMessage(
+  layer: ActiveTurnLayerState | undefined,
+  messages: ConversationMessage[] | undefined,
+): ConversationMessage | undefined {
+  return isActiveTurnSettledByMessages(layer, messages)
+    ? undefined
+    : activeTurnLayerToConversationMessage(layer);
 }
 
 export function settleActiveTurnLayerFromDetail(
