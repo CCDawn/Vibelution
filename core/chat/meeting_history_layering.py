@@ -8,7 +8,19 @@ ledger。多轮会议之后，参会者历史 seed 会全量重放所有轮次�
 
 - 最近 M 轮「[群聊同步]」消息逐字保留（M 由环境变量
   ``VIBELUTION_MEETING_HISTORY_VERBATIM_ROUNDS`` 控制，默认 2，0=禁用）；
-- 更早的所有轮替换为**单条**确定性 recap 消息（同一输入逐字节同一输出）。
+- 更早的每一轮**原位**替换为一条冻结 recap assistant 消息（一轮一条）。
+
+闭轮冻结（稳定前缀契约）：
+
+- 一条冻结 recap 只依赖两样输入：该轮不可变的 ledger 原文，以及该轮在本房间
+  轮次序列中的绝对序号（1-based，出现顺序）。渲染是确定性纯函数（无 LLM、
+  无时间戳、无随机），因此闭轮 recap 语义冻结：重复投影逐字节一致，不因后
+  续轮次增加、窗口滑动或重算路径不同而漂移——无需持久化即保证「永不改字
+  节」，因为重算与首算逐字节相同；
+- 一轮从逐字窗滑出时发生**一次性** verbatim→recap 转换；此后每开一轮，投影
+  字节变化只从「正在老化出的那一轮」开始，更早的冻结前缀逐字节不变。这与
+  Manus 上下文工程的稳定前缀 + append-only 铁律、以及 ZCode 微压缩的
+  preserveCanonicalContextPrefix/copy-on-write（只改尾部保前缀）同构。
 
 硬约束：
 
@@ -21,8 +33,9 @@ ledger。多轮会议之后，参会者历史 seed 会全量重放所有轮次�
   图，recap 属于后处理层，不参与 fingerprint），也不会破坏
   ``seed_chat_history`` 的 provider tool 链不变量；
 - recap 不进入 cacheable system prompt，始终保持 history 消息形态，同一轮内
-  两次装配结果逐字节一致（qwen 前缀缓存的硬前提）。轮窗口边界跨越时 recap
-  内容会变（每轮一次缓存失效，可接受）。
+  两次装配结果逐字节一致；跨轮的稳定前缀位于 qwen cache_control 断点（当前
+  user 前最后一条 history，见 core/llm/payload_builder.py）之前，前缀缓存按
+  最长公共前缀命中到老化边界，每轮至多一次显式缓存重建。
 
 借鉴：core/chat/context_compression_ledger 的「按 event sequence 覆盖的投影
 层替换」思想（压缩 checkpoint 以投影层覆盖历史）与业界分层压缩（近期原文 +
@@ -39,7 +52,7 @@ DEFAULT_MEETING_HISTORY_VERBATIM_ROUNDS = 2
 
 # 「[群聊同步]」消息的 metadata.kind 标记（与 chat_room_service 保持一致）。
 GROUP_ROOM_TRANSCRIPT_KIND = "group_room_transcript"
-# 分层后 recap 消息的 metadata.kind 标记。
+# 分层后冻结 recap 消息的 metadata.kind 标记。
 MEETING_HISTORY_RECAP_KIND = "meeting_history_recap"
 
 # recap 中每条发言保留的首行内容上限（字符）。
@@ -121,8 +134,8 @@ def apply_meeting_history_layering(
     - ``verbatim_rounds <= 0``：禁用，原样返回（与基线装配逐字节一致）；
     - 「[群聊同步]」轮次消息按出现顺序视作轮（每轮恰有一条同步消息，由
       ``_has_group_round_session_sync`` 幂等保证）；最近 M 轮逐字保留；
-    - 更早的所有轮替换为单条 recap assistant 消息，置于首个被替换轮次的原
-      位置，非同步消息（本轮任务提示、工具链等）一律不动。
+    - 更早的每一轮原位替换为单轮冻结 recap assistant 消息（一轮一条，消息
+      数不变），非同步消息（本轮任务提示、工具链等）一律不动。
     """
 
     source = list(messages or [])
@@ -155,48 +168,60 @@ def apply_meeting_history_layering(
         return source, state
 
     recapped_indexes = transcript_indexes[:-resolved_rounds]
-    recapped = [source[index] for index in recapped_indexes]
-    recap_content = build_meeting_history_recap(recapped)
-    recap_message = _build_recap_message(
-        recap_content,
-        room_id=normalized_room_id,
-        recapped_messages=recapped,
-    )
-    state["recapRoundCount"] = len(recapped)
-    state["recappedRoundIds"] = _recapped_round_ids(recapped)
-    state["originalChars"] = sum(len(str(item.get("content") or "")) for item in recapped)
-    state["recapChars"] = len(recap_content)
+    # 轮的绝对序号（1-based，按本房间轮次出现顺序）；闭轮后不再变化，是冻结
+    # recap 字节的一部分。
+    round_number_by_index = {
+        index: number for number, index in enumerate(transcript_indexes, start=1)
+    }
 
-    replaced = set(recapped_indexes)
+    recap_message_by_index: dict[int, dict[str, Any]] = {}
+    original_chars = 0
+    recap_chars = 0
+    for index in recapped_indexes:
+        round_message = source[index]
+        recap_message = _build_round_recap_message(
+            round_message,
+            round_number=round_number_by_index[index],
+            room_id=normalized_room_id,
+        )
+        recap_message_by_index[index] = recap_message
+        original_chars += len(str(round_message.get("content") or ""))
+        recap_chars += len(recap_message["content"])
+
+    state["recapRoundCount"] = len(recapped_indexes)
+    state["recappedRoundIds"] = _recapped_round_ids([source[index] for index in recapped_indexes])
+    state["originalChars"] = original_chars
+    state["recapChars"] = recap_chars
+
     layered: list[dict[str, Any]] = []
-    recap_inserted = False
     for index, message in enumerate(source):
-        if index in replaced:
-            if not recap_inserted:
-                recap_inserted = True
-                layered.append(recap_message)
-            continue
-        layered.append(message)
+        recap_message = recap_message_by_index.get(index)
+        # 原位替换：冻结 recap 占据该轮同步消息的确切位置，其前其后的非替换
+        # 消息逐字节不动。
+        layered.append(recap_message if recap_message is not None else message)
     return layered, state
 
 
-def build_meeting_history_recap(recapped_messages: Iterable[Any]) -> str:
-    """按固定格式把更早轮次的「[群聊同步]」消息渲染成单条 recap 文本。
+def build_meeting_round_recap(message: Any, *, round_number: int) -> str:
+    """把一条已关闭轮次的「[群聊同步]」消息渲染成该轮的冻结 recap 文本。
 
-    输入相同则输出逐字节相同：只做确定性的行解析与截断，不涉及时间、随机
-    或集合迭代序。
+    只依赖该轮消息原文与轮次绝对序号：输入相同则输出逐字节相同，不读其他
+    轮次、窗口大小或任何运行期状态（时间、随机、集合迭代序），因此对同一
+    闭轮重复调用永不改字节（冻结语义由纯函数确定性保证）。
     """
 
-    lines: list[str] = [RECAP_HEADER, RECAP_HEADER_NOTE]
-    for round_index, message in enumerate(recapped_messages, start=1):
-        round_lines = _parse_round_lines(message)
-        lines.append(f"## 轮 {round_index}: {round_lines.topic}")
-        for speaker, content in round_lines.utterances:
-            bounded = _bounded_recap_content(content)
-            if speaker:
-                lines.append(f"- {speaker}：{bounded}")
-            else:
-                lines.append(f"- {bounded}")
+    round_lines = _parse_round_lines(message)
+    lines: list[str] = [
+        RECAP_HEADER,
+        RECAP_HEADER_NOTE,
+        f"## 轮 {int(round_number)}: {round_lines.topic}",
+    ]
+    for speaker, content in round_lines.utterances:
+        bounded = _bounded_recap_content(content)
+        if speaker:
+            lines.append(f"- {speaker}：{bounded}")
+        else:
+            lines.append(f"- {bounded}")
     return "\n".join(lines)
 
 
@@ -268,20 +293,25 @@ def _recapped_round_ids(recapped: list[Any]) -> list[str]:
     return ids
 
 
-def _build_recap_message(
-    content: str,
+def _build_round_recap_message(
+    message: Any,
     *,
+    round_number: int,
     room_id: str,
-    recapped_messages: list[Any],
 ) -> dict[str, Any]:
+    metadata = (
+        message.get("metadata")
+        if isinstance(message, dict) and isinstance(message.get("metadata"), dict)
+        else {}
+    )
     return {
         "role": "assistant",
-        "content": content,
+        "content": build_meeting_round_recap(message, round_number=round_number),
         "metadata": {
             "kind": MEETING_HISTORY_RECAP_KIND,
-            "sourceRoomId": room_id,
-            "recapRoundCount": len(recapped_messages),
-            "recappedRoundIds": _recapped_round_ids(recapped_messages),
+            "sourceRoomId": str(room_id or "").strip(),
+            "roundNumber": int(round_number),
+            "sourceRoundId": str(metadata.get("sourceRoundId") or "").strip(),
         },
     }
 
@@ -292,7 +322,7 @@ __all__ = [
     "MEETING_HISTORY_RECAP_KIND",
     "GROUP_ROOM_TRANSCRIPT_KIND",
     "apply_meeting_history_layering",
-    "build_meeting_history_recap",
+    "build_meeting_round_recap",
     "is_group_room_transcript_message",
     "resolve_meeting_history_verbatim_rounds",
 ]

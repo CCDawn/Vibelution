@@ -5,18 +5,32 @@ Policy history:
     v2  ad-hoc custom policies with drifted limits (disabled / 1,000,000 /
         262,144 residue)
     v3  explicit, versioned custom policies aligned to the AutoDL
-        GLM-5.3-flash window contract (this module)
+        GLM-5.3-flash window contract (conservative first round:
+        window - 32,768 output - 8,192 protocol reserve, -16,384 trigger pad)
+    v4  industry-shaped budget (current contract, this module). Same shape as
+        the Claude Code / ZCode auto-compact policy
+        (``zai-org/ZCode`` ``apps/zcode-cli/packages/core/src/compact/policy.ts``,
+        Apache-2.0, design borrowed not code): reserve the model's own output
+        cap only, keep a fixed 13,000-token trigger pad, and target two
+        thirds of the remaining input budget.
 
-Budget contract (first-round frozen values, configurable via operator config):
+Budget contract (frozen values, configurable via operator config):
 
-    effective_input_hard_limit = context_window - reserved_max_output - reserve
-    compression_trigger        = effective_input_hard_limit - 16,384
+    applied_output_reserve     = min(model_max_output | operator knob | 20,480, 20,480)
+    effective_input_hard_limit = context_window - applied_output_reserve
+    compression_trigger        = effective_input_hard_limit - 13,000
     post_compression_target    = effective_input_hard_limit * 2 / 3
 
-With ``context_window=262,144``, ``reserved_max_output=32,768`` and
-``protocol_and_safety_reserve=8,192`` this yields the frozen plan values
-221,184 / 204,800 / 147,456. The protocol reserve is a conservative
-first-round value and must only change through this versioned contract.
+With ``context_window=262,144`` and the capped/default output reserve of
+20,480 this yields the frozen values 241,664 / 228,664 / 161,109.
+
+Deliberately not conservative (operator decision 2026-09-21): the model's
+own output reservation is the only structural deduction — the v3 protocol
+reserve layer (−8,192) and the deeper trigger pad (−16,384) are retired, and
+no path may fall back to a half-window derivation. The budget only changes
+through this versioned contract; the version bump is what makes the
+version-gated migration re-materialize already-deployed v3 roles onto the
+new budget.
 """
 
 from __future__ import annotations
@@ -25,13 +39,14 @@ import copy
 from datetime import datetime, timezone
 from typing import Any
 
-CHALLENGE_CUP_CONTEXT_POLICY_VERSION = 3
+CHALLENGE_CUP_CONTEXT_POLICY_VERSION = 4
 
-# Frozen first-round budget values (plan CC-AGENT-CONVERSATION-REPAIR §5.4).
+# Contract reference window and budget constants (v4).
 CONTEXT_WINDOW_TOKENS = 262_144
-RESERVED_MAX_OUTPUT_TOKENS = 32_768
-PROTOCOL_AND_SAFETY_RESERVE_TOKENS = 8_192
-TRIGGER_SAFETY_MARGIN_TOKENS = 16_384
+# Output reserve cap AND default: when the model's configured max output is
+# unknown the budget still reserves the industry-standard 20,480.
+MAX_OUTPUT_RESERVE_TOKENS = 20_480
+TRIGGER_SAFETY_MARGIN_TOKENS = 13_000
 POST_COMPRESSION_TARGET_RATIO = 2 / 3
 
 # Shared compression retention contract (must survive every compression).
@@ -90,35 +105,31 @@ def challenge_cup_context_budget(
     *,
     context_window: int = CONTEXT_WINDOW_TOKENS,
     reserved_max_output_tokens: int | None = None,
-    protocol_and_safety_reserve_tokens: int | None = None,
 ) -> dict[str, int]:
     """Compute the versioned context budget for one model window.
 
-    ``reserved_max_output_tokens`` / ``protocol_and_safety_reserve_tokens``
-    fall back to the frozen contract values; the protocol reserve may be
-    overridden by the operator config knob
-    ``context_compression.protocol_and_safety_reserve_tokens``.
+    ``reserved_max_output_tokens`` is the model's configured max output (or
+    an explicit override). It is capped at ``MAX_OUTPUT_RESERVE_TOKENS``;
+    when unset it falls back to the operator knob
+    ``context_compression.reserved_max_output_tokens`` and then to the same
+    20,480 default, so an unconfigured model keeps a real output reservation.
     """
 
     if int(context_window or 0) <= 0:
         raise ValueError("context_window must be a positive token count")
     cc = _config_context_compression()
-    reserved_output = (
-        int(reserved_max_output_tokens)
-        if reserved_max_output_tokens is not None
-        else _config_int(cc, "reserved_max_output_tokens") or RESERVED_MAX_OUTPUT_TOKENS
+    if reserved_max_output_tokens is not None:
+        requested_reserve = max(0, int(reserved_max_output_tokens))
+    else:
+        requested_reserve = max(0, _config_int(cc, "reserved_max_output_tokens"))
+    applied_reserve = min(
+        requested_reserve or MAX_OUTPUT_RESERVE_TOKENS,
+        MAX_OUTPUT_RESERVE_TOKENS,
     )
-    reserve = (
-        int(protocol_and_safety_reserve_tokens)
-        if protocol_and_safety_reserve_tokens is not None
-        else _config_int(cc, "protocol_and_safety_reserve_tokens") or PROTOCOL_AND_SAFETY_RESERVE_TOKENS
-    )
-    reserved_output = max(0, int(reserved_output))
-    reserve = max(0, int(reserve))
-    hard_limit = int(context_window) - reserved_output - reserve
+    hard_limit = int(context_window) - applied_reserve
     if hard_limit <= 0:
         raise ValueError(
-            "context budget is non-positive: window minus reservations must stay positive"
+            "context budget is non-positive: window minus the output reserve must stay positive"
         )
     trigger = hard_limit - TRIGGER_SAFETY_MARGIN_TOKENS
     if trigger <= 0:
@@ -126,8 +137,7 @@ def challenge_cup_context_budget(
     target = int(hard_limit * POST_COMPRESSION_TARGET_RATIO)
     return {
         "contextWindow": int(context_window),
-        "reservedMaxOutputTokens": reserved_output,
-        "protocolAndSafetyReserveTokens": reserve,
+        "reservedMaxOutputTokens": applied_reserve,
         "effectiveInputHardLimit": hard_limit,
         "compressionTriggerTokenLimit": trigger,
         "postCompressionTargetTokenLimit": target,
