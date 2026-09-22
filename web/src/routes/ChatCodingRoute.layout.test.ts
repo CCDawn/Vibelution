@@ -56,7 +56,7 @@ import chatSubmitTelemetrySource from "./chat/chatSubmitTelemetry.ts?raw";
 import chatComposerSubmitModelSource from "./chat/chatComposerSubmitModel.ts?raw";
 import chatComposerSubmitHookSource from "./chat/useChatComposerSubmit.ts?raw";
 import chatActiveTurnLayerSource from "./chatActiveTurnLayer.ts?raw";
-import activeTurnLayersStoreSource from "./chat/activeTurnLayersStore.ts?raw";
+import activeTurnLayersStoreSource from "./chat/activeTurnLayersStore.tsx?raw";
 import chatStreamApplyControllerSource from "./chatStreamApplyController.ts?raw";
 import terminalPanelSource from "./chat/CliAgentRunTerminalPanel.tsx?raw";
 import conversationIndexModelSource from "./conversationIndexModel.ts?raw";

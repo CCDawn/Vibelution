@@ -196,11 +196,15 @@ describe("ChatConversationComposerBridge active-turn store isolation", () => {
     expect(lazyViewProps).toHaveLength(2);
 
     // Parent re-render with identical prop references: memo short-circuits.
-    renderTree(
-      <ActiveTurnLayersStoreProvider store={store}>
-        <ChatConversationComposerBridge {...bridgeProps} />
-      </ActiveTurnLayersStoreProvider>,
-    );
+    // Re-render the SAME root: a fresh createRoot would be a remount, which no
+    // memo gate can short-circuit.
+    act(() => {
+      root!.render(
+        <ActiveTurnLayersStoreProvider store={store}>
+          <ChatConversationComposerBridge {...bridgeProps} />
+        </ActiveTurnLayersStoreProvider>,
+      );
+    });
     expect(lazyViewProps).toHaveLength(2);
   });
 });

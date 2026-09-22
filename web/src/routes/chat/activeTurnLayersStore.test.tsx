@@ -173,11 +173,18 @@ describe("activeTurnLayersStore", () => {
     );
     const rendersAfterMount = renderCounts.signalProbe;
 
-    // Content revision for an already-running session keeps the key identical.
+    // Bring s1 into the running set first so the baseline includes it.
     act(() => {
       store.setActiveTurnLayersBySession((current) => ({ ...current, s1: makeLayer("s1", 1) }));
     });
-    expect(renderCounts.signalProbe).toBe(rendersAfterMount);
+    const rendersWithRunningSession = renderCounts.signalProbe;
+    expect(rendersWithRunningSession).toBe(rendersAfterMount + 1);
+
+    // Content revision for an already-running session keeps the key identical.
+    act(() => {
+      store.setActiveTurnLayersBySession((current) => ({ ...current, s1: makeLayer("s1", 2) }));
+    });
+    expect(renderCounts.signalProbe).toBe(rendersWithRunningSession);
 
     // A status transition changes the key and re-renders the subscriber.
     act(() => {
@@ -186,7 +193,7 @@ describe("activeTurnLayersStore", () => {
         s1: { ...makeLayer("s1", 2), status: "completed" },
       }));
     });
-    expect(renderCounts.signalProbe).toBe(rendersAfterMount + 1);
+    expect(renderCounts.signalProbe).toBe(rendersWithRunningSession + 1);
     expect(container.querySelector("[data-probe='signalProbe']")?.getAttribute("data-signal")).toBe("");
   });
 });
