@@ -1003,7 +1003,9 @@ describe("ConfigRoute layout contract", () => {
     expect(placeholderPanelSource).not.toContain("<VPanelHeader");
     expect(routeSource).toContain("<ConfigSettingsSidebar");
     expect(routeSource).toContain("VSettingsFormPage");
-    expect(routeSource).toContain('title={activeGroup?.title ?? copy.pageTitle}');
+    expect(routeSource).toContain('title={showingSettingsIndex && !requestedSectionId ? copy.pageTitle : activeGroup?.title ?? copy.pageTitle}');
+    expect(routeSource).toContain("<ConfigSettingsIndex");
+    expect(routeSource).toContain("返回设置列表");
   });
 
   it("routes Config controls through VUI primitives", () => {

@@ -129,9 +129,11 @@ type ConfigSettingsSidebarProps = {
   onNavigate?: (groupId: ConfigSettingsGroupId, pageId: string, sectionId?: string) => void;
   searchDocuments?: ConfigSettingsSearchDocument[];
   headerAction?: ReactNode;
+  onShowAll?: () => void;
 };
 
 export function ConfigSettingsSidebar({
+  onShowAll,
   language,
   title,
   subtitle,
@@ -210,6 +212,10 @@ export function ConfigSettingsSidebar({
         <strong className={styles.statusValue}>{statusLabel}</strong>
       </div>
       <nav className={styles.groupNav} aria-label={language === "zh" ? "设置分区" : "Settings groups"}>
+        {onShowAll ? <VButton className={!activeGroupId ? `${styles.groupButton} ${styles.groupButtonActive}` : styles.groupButton}
+          contentLayout="plain" variant="ghost" aria-pressed={!activeGroupId} onPress={onShowAll}>
+          {language === "zh" ? "全部设置" : "All settings"}
+        </VButton> : null}
         {groups.map((group) => (
           <VButton
             key={group.id}

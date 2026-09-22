@@ -1,4 +1,5 @@
 import "../design/route-css/config.tailwind.css";
+import { ConfigSettingsIndex } from "./ConfigSettingsIndex";
 
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -2312,6 +2313,7 @@ export function ConfigRoute() {
   const requestedSectionId = String(searchParams.get("section") || "").trim();
   const requestedPageId = String(searchParams.get("page") || "").trim();
   const requestedFocusSectionId = String(searchParams.get("focus") || "").trim();
+  const showingSettingsIndex = !requestedPageId && !requestedFocusSectionId;
   const returnToPath = safeAgentCenterReturnToPath(searchParams.get("returnTo"));
   const returnToLabel = searchParams.get("returnLabel") === "agents" ? copy.returnToAgents : copy.returnToSource;
   const formattedDraft = useMemo(
@@ -2364,6 +2366,7 @@ export function ConfigRoute() {
   );
   const editorSectionById = new Map(editorSections.map((section) => [section.id, section]));
   const activeEditorSections = (activePage?.memberSectionIds ?? [])
+    .filter((sectionId) => !requestedFocusSectionId || sectionId === requestedFocusSectionId)
     .map((sectionId) => editorSectionById.get(sectionId))
     .filter((section): section is ConfigEditorSection => Boolean(section) && section?.id !== "agent");
   const modelOptions = workspace?.modelOptions ?? [];
@@ -2529,7 +2532,8 @@ export function ConfigRoute() {
   }
 
   function isSectionVisible(sectionId: string): boolean {
-    return Boolean(activePage?.memberSectionIds.includes(sectionId));
+    return !showingSettingsIndex && (!requestedFocusSectionId || requestedFocusSectionId === sectionId)
+      && Boolean(activePage?.memberSectionIds.includes(sectionId));
   }
 
   function navigateSettingsSelection(groupId: ConfigSettingsGroupId, pageId: string, focusSectionId?: string) {
@@ -2600,8 +2604,17 @@ export function ConfigRoute() {
     const pageId = group?.pages[0]?.id ?? "";
     setActiveGroupId(groupId);
     setActivePageId(pageId);
-    navigateSettingsSelection(groupId, pageId);
+    showSettingsIndex(groupId);
     contentViewportRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function showSettingsIndex(groupId?: ConfigSettingsGroupId) {
+    const params = new URLSearchParams(searchParams);
+    params.delete("page"); params.delete("focus");
+    if (groupId) params.set("section", groupId);
+    else params.delete("section");
+    pendingFocusSectionRef.current = "";
+    navigate({ search: params.toString() });
   }
 
   function handleNavigateSettings(groupId: ConfigSettingsGroupId, pageId: string, sectionId?: string) {
@@ -2638,6 +2651,7 @@ export function ConfigRoute() {
     setSelectedProviderId(providerId);
     setSelectedProviderTab("connection");
     setProviderCredentialEditId(providerId);
+    navigateSettingsSelection("models-profiles", "model-connection", "models");
     setProviderCredentialValue("");
     setRouteEditProviderId("");
     setRouteEditProvider({});
@@ -3493,7 +3507,8 @@ export function ConfigRoute() {
             subtitleHint={copy.subtitleHint}
             statusLabel={hasPendingApply ? "有未保存修改" : "配置已保存"}
             groups={settingsGroups}
-            activeGroupId={activeGroup?.id ?? ""}
+            activeGroupId={showingSettingsIndex && !requestedSectionId ? "" : activeGroup?.id ?? ""}
+            onShowAll={() => showSettingsIndex()}
             onSelectGroup={handleSelectGroup}
             onNavigate={handleNavigateSettings}
             searchDocuments={settingsSearchDocuments}
@@ -3515,7 +3530,7 @@ export function ConfigRoute() {
         data-vui-region="config-settings-main"
         headerClassName={styles.configHeader}
         bodyClassName="!gap-0 !overflow-hidden !content-stretch"
-        title={activeGroup?.title ?? copy.pageTitle}
+        title={showingSettingsIndex && !requestedSectionId ? copy.pageTitle : activeGroup?.title ?? copy.pageTitle}
         actions={
           <div className={styles.configStatusActions}>
             {isSectionVisible("models") && workspace.schemaVersion === 2 ? (
@@ -3588,16 +3603,24 @@ export function ConfigRoute() {
                 },
               ]}
             /> : null}
-            <ConfigSettingsPageTabs
+            {!showingSettingsIndex ? <VButton variant="ghost" onPress={() => showSettingsIndex(activeGroup?.id)}>
+              {currentLanguage === "zh" ? "返回设置列表" : "Back to settings"}
+            </VButton> : null}
+            {!showingSettingsIndex && !requestedFocusSectionId ? <ConfigSettingsPageTabs
               language={currentLanguage}
               group={activeGroup}
               activePageId={activePage?.id ?? ""}
               onSelectPage={handleSelectPage}
-            />
+            /> : null}
           </div>
         )}
       >
         <div ref={contentViewportRef} className={styles.pageViewport} data-vui-region="config-settings-body">
+
+        {showingSettingsIndex ? <ConfigSettingsIndex
+          groups={requestedSectionId ? settingsGroups.filter((group) => group.id === activeGroup?.id) : settingsGroups}
+          sections={workspaceSections} language={currentLanguage} onNavigate={handleNavigateSettings}
+        /> : null}
 
         {notice.text ? (
           <div
@@ -3916,7 +3939,7 @@ export function ConfigRoute() {
           </div>
         ) : null}
 
-        {activePage?.id === "tooling-access" ? (
+        {!showingSettingsIndex && activePage?.id === "tooling-access" ? (
           <VSurface as="section" className={styles.toolingMetaPanel} padding="compact" tone="row">
             <VStatusStrip
               aria-label={copy.developerModeReadonly}
@@ -3960,7 +3983,7 @@ export function ConfigRoute() {
           </>
         ) : null}
 
-        {workspace.schemaVersion === 2 && isSectionVisible("models") ? null : activeEditorSections.map((section) => (
+        {showingSettingsIndex || (workspace.schemaVersion === 2 && isSectionVisible("models")) ? null : activeEditorSections.map((section) => (
           <ConfigSectionEditor
             key={section.id}
             section={section}
