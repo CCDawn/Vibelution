@@ -1,9 +1,10 @@
 import { ExternalLink, X } from "lucide-react";
 
-import { VButton, VNativeInput, VTooltip } from "../components/vui";
+import { VButton, VCheckbox, VNativeInput, VTooltip } from "../components/vui";
 import styles from "./AgentMemoryPolicyPanel.styles";
 
 export type AgentMemoryPolicyDraft = {
+  enabled: boolean;
   readSharedGroups: string[];
   writeSharedGroups: string[];
   readKnowledgeBaseIds: string[];
@@ -35,6 +36,8 @@ type AgentMemoryInputField =
 
 export type AgentMemoryPolicyPanelCopy = {
   memoryPolicyTitle: string;
+  memoryEnabled: string;
+  memoryEnabledHint: string;
   readSharedGroups: string;
   writeSharedGroups: string;
   readKnowledgeBaseIds: string;
@@ -176,6 +179,17 @@ export function AgentMemoryPolicyPanel({
         <span className={dirty ? styles.dirtyPill : styles.cleanPill}>
           {dirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
         </span>
+      </div>
+      <div className={styles.memoryEnabledSection}>
+        <span>{copy.memoryEnabled}</span>
+        <div className={styles.toggleGrid}>
+          <VCheckbox
+            isSelected={draft.enabled}
+            onChange={(value) => onDraftChange({ enabled: value })}
+          >
+            {copy.memoryEnabledHint}
+          </VCheckbox>
+        </div>
       </div>
       <div className={styles.memoryPolicyGrid}>
         {sharedGroupSections.map((section) => (

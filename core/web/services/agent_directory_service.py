@@ -90,6 +90,7 @@ from .agent_directory.policies import (
     _tool_policy_for_agent,
     _tool_policy_source_for_agent,
     _with_temporary_tool_grants,
+    _without_personal_memory_write_tools,
     _without_subagent_delegation_tools,
     _workspace_path_for_policy,
     agent_conversation_index_visibility,
