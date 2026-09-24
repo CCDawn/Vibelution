@@ -44,6 +44,8 @@ Tailwind v4 将 `text-sm` 编译为 `font-size: var(--text-sm); line-height: var
 
 \* 本次精扫 `web/src`（.ts/.tsx，排除 `text-vui-*`），原生槽位共 101 处；审计口径 93 处为不同扫描范围。逃逸 `text-[Npx/rem]` 共 228 处，不经槽位、接管不影响，需另行治理。
 
+**集成期更正（2026-09，实施时发现）**：`web/src/design/tailwind.css:55` 存在手写兼容规则 `.text-xs { font-size: var(--vui-font-xs); line-height: var(--vui-line-readable) }`（非分层，级联胜过分层 utility）——线上 text-xs 实际一直是 **14px/1.58**，并非本表所依据的 Tailwind 原生 12px。集成保留该规则：线上 text-xs 保持 14px（真实零位移），`@theme` 的 `--text-xs → var(--vui-font-2xs)` 仍按批准契约生效并守护，对无此规则的 route-css 分入口生效。本页 A/B 作为机制演示仍然有效；text-xs 行的「原生 12px」前提以此更正为准。
+
 **行高关键结论**：原生行高是无单位 ratio（如 sm=calc(1.25/0.875)），跟随重定向后的字号等比缩放——四个零位移档行高像素级不变，text-xl 行高 28px→26.6px（比值 1.4 不变）。vui 的 `--vui-font-*` 本身不带配对行高（配对在 `--vui-type-*` 语义角色层），生产 `text-vui-*` 槽位也未配 `--line-height`。
 
 **备选被否方案**：text-xl→`--vui-font-xl`（22px，+2px 更远）；「语义对齐」text-sm→`--vui-font-sm`（15px，36 处 +1px，违背零漂移目标）。
