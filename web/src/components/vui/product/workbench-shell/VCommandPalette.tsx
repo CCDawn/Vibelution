@@ -30,6 +30,14 @@ export type VCommandPaletteProps = {
   labels: VCommandPaletteLabels;
   /** Values up to 7 use the compact viewport; results are never truncated. */
   maxVisible?: number;
+  /**
+   * Optional controlled query. When both `query` and `onQueryChange` are
+   * provided the mounting surface owns the query text (global mounts may
+   * preset or clear it); when omitted the palette keeps its internal state
+   * and behaves exactly as before.
+   */
+  query?: string;
+  onQueryChange?: (query: string) => void;
   className?: string;
   "data-vui"?: string;
 };
@@ -63,29 +71,42 @@ export function VCommandPalette({
   items,
   labels,
   maxVisible = 9,
+  query,
+  onQueryChange,
   className,
   "data-vui": dataVui = "command-palette",
 }: VCommandPaletteProps) {
-  const [query, setQuery] = useState("");
+  const [internalQuery, setInternalQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const listRef = useRef<HTMLDivElement | null>(null);
 
+  const isControlledQuery = query !== undefined && onQueryChange !== undefined;
+  const activeQuery = isControlledQuery ? query : internalQuery;
+  const setQuery = (next: string) => {
+    if (isControlledQuery) {
+      onQueryChange(next);
+    } else {
+      setInternalQuery(next);
+    }
+  };
+
   const flat = useMemo(() => {
-    if (!query) return items;
+    if (!activeQuery) return items;
     return items
-      .map((item) => ({ item, score: scoreItem(item, query) }))
+      .map((item) => ({ item, score: scoreItem(item, activeQuery) }))
       .filter((entry) => entry.score > 0)
       .sort((left, right) => right.score - left.score)
       .map((entry) => entry.item);
-  }, [items, query]);
+  }, [items, activeQuery]);
   const selectedIndex = Math.max(0, Math.min(activeIndex, flat.length - 1));
 
   useEffect(() => {
     setActiveIndex(0);
-  }, [query, open]);
+  }, [activeQuery, open]);
 
   useEffect(() => {
     if (!open) setQuery("");
+    // setQuery identity is stable per render; the reset only depends on `open`.
   }, [open]);
 
   useEffect(() => {
@@ -132,7 +153,7 @@ export function VCommandPalette({
     >
       <div className="flex min-h-0 flex-col" onKeyDown={onKeyDown} data-testid="vui-command-palette">
         <VInput
-          value={query}
+          value={activeQuery}
           onChange={(event) => setQuery(event.currentTarget.value)}
           placeholder={labels.searchPlaceholder}
           aria-label={labels.searchPlaceholder}

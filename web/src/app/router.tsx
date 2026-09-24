@@ -2,6 +2,7 @@ import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
 import { createBrowserRouter } from "react-router-dom";
 
 import { AppShell } from "./AppShell";
+import { GlobalCommandSurfaces } from "./GlobalCommandSurfaces";
 import { LauncherShell } from "./LauncherShell";
 import { RouteLoadingShell, type RouteLoadingLayout } from "./RouteLoadingShell";
 import { RouteErrorBoundary, type RouteErrorSurface } from "./RouteErrorBoundary";
@@ -123,7 +124,14 @@ export const router = createBrowserRouter([
   },
   {
     path: "/",
-    element: <AppShell />,
+    // 壳层与全局命令面并列：GlobalCommandSurfaces 只渲染 portal 对话框，
+    // 不进 AppShell 布局树（AppShell.tsx 当前由并行会话 claim）。
+    element: (
+      <>
+        <AppShell />
+        <GlobalCommandSurfaces />
+      </>
+    ),
     errorElement: routeErrorElement("workbench"),
     children: [
       { index: true, element: <HomeRedirect /> },
