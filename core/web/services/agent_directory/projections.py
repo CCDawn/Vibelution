@@ -206,7 +206,8 @@ def build_agent_runtime_context_block(
     task_lines = s._format_task_profile_context(agent.get("taskProfile"))
     if task_lines:
         lines.extend(task_lines)
-    lines.extend(_format_personal_episodes_context(episodes))
+    if bool(memory_policy.get("enabled", True)):
+        lines.extend(_format_personal_episodes_context(episodes))
     if events:
         lines.append("GroupContextEvents:")
         for event in events[-limit:]:
@@ -796,6 +797,9 @@ def active_agent_runtime(
         if isinstance(agent_snapshot.get("memoryPolicy"), dict)
         else s.resolve_memory_policy_for_agent(agent_id)
     )
+    if not bool(memory_policy.get("enabled", True)):
+        # 生效层摘除：只改本回合运行时副本，绝不回写持久化 agent 记录。
+        tool_policy = s._without_personal_memory_write_tools(tool_policy)
     supervision_policy = (
         s.normalize_supervision_policy(metadata.get("supervisionPolicy"))
         if agent_snapshot
