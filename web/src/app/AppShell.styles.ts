@@ -30,19 +30,37 @@ const styles = {
   actionIconButton:
     `vui-app-appshell actionIconButton !border-0 ${vuiControlIconSmClass}`,
   activeWorkDetailCopy:
-    "vui-app-appshell activeWorkDetailCopy min-w-0 grid gap-1 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [&_p]:m-0 [&_p]:min-w-0 [&_p]:line-clamp-2 [&_p]:[overflow-wrap:anywhere] [&_code]:block [&_code]:min-w-0 [&_code]:truncate [&_code]:rounded-[var(--radius-control)] [&_code]:bg-[color-mix(in_srgb,var(--vui-control-muted)_88%,transparent)] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:[font-size:var(--vui-font-xs)] [&_code]:text-[var(--fg-tertiary)]",
+    "vui-app-appshell activeWorkDetailCopy min-w-0 grid gap-1 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [&_p]:m-0 [&_p]:min-w-0 [&_p]:truncate",
   activeWorkDetailHeader:
-    "vui-app-appshell activeWorkDetailHeader min-w-0 flex flex-wrap items-center justify-between gap-1.5 border-b border-[color-mix(in_srgb,var(--accent-cool)_22%,transparent)] px-0.5 pb-1.5 text-[var(--accent-cool)] [&_strong]:[font-size:var(--vui-font-sm)] [&_strong]:font-semibold [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)]",
+    "vui-app-appshell activeWorkDetailHeader min-w-0 flex items-center justify-between gap-1.5 border-b border-[var(--vui-border-subtle)] px-2 pb-2 text-[var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-sm)] [&_strong]:font-semibold [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)]",
   activeWorkDetailItem:
-    "vui-app-appshell activeWorkDetailItem min-w-0 grid grid-cols-[max-content_minmax(0,1fr)] items-start gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] bg-[var(--vui-surface-row)] px-2.5 py-2",
+    "vui-app-appshell activeWorkDetailItem min-w-0 grid grid-cols-[7px_minmax(0,1fr)_max-content] items-start gap-2 rounded-[var(--radius-control)] border-0 bg-transparent px-2 py-2 hover:bg-[var(--vui-surface-row-hover)]",
   activeWorkDetailList:
     "vui-app-appshell activeWorkDetailList m-0 grid min-h-0 list-none content-start gap-1.5 overflow-y-auto p-0",
   activeWorkDetailLink:
     "vui-app-appshell activeWorkDetailLink block min-w-0 rounded-[var(--radius-control)] text-inherit no-underline outline-none transition-colors hover:text-[var(--fg-primary)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_45%,transparent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--vui-surface-panel)]",
   activeWorkDetailTitle:
     "vui-app-appshell activeWorkDetailTitle min-w-0 [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)]",
+  activeWorkEmpty:
+    "vui-app-appshell activeWorkEmpty m-0 px-2 py-4 text-xs text-[var(--fg-tertiary)]",
+  activeWorkItemDot:
+    "vui-app-appshell activeWorkItemDot mt-1.5 block size-1.5 shrink-0 rounded-full bg-current",
   activeWorkItemToneChip:
-    "vui-app-appshell activeWorkItemToneChip !min-h-5 max-w-[7rem] shrink-0 truncate !px-1.5 !text-[10px]",
+    "vui-app-appshell activeWorkItemToneChip !h-auto !min-h-0 max-w-[7rem] shrink-0 truncate !border-0 !bg-transparent !p-0 !text-[10px]",
+  activeWorkPanel:
+    "vui-app-appshell activeWorkPanel grid min-w-0 gap-1 p-2",
+  activeWorkPopoverContent:
+    "vui-app-appshell activeWorkPopoverContent z-[95] w-[min(370px,calc(100vw-20px))] max-h-[min(400px,calc(100dvh-70px))] overflow-y-auto border-[var(--border-strong)] bg-[var(--shell-panel)] p-0 shadow-[var(--vui-shadow-soft)]",
+  activeWorkSlot:
+    "vui-app-appshell activeWorkSlot min-w-0 shrink-0",
+  activeWorkTrigger:
+    `vui-app-appshell activeWorkTrigger !h-7 !min-h-7 !px-2 !text-xs ${vuiControlQuietChromeClass}`,
+  activeWorkTriggerContent:
+    "vui-app-appshell activeWorkTriggerContent flex min-w-0 items-center gap-1.5 whitespace-nowrap",
+  activeWorkTriggerDot:
+    "vui-app-appshell activeWorkTriggerDot block size-1.5 shrink-0 rounded-full bg-current",
+  activeWorkTriggerLabel:
+    "vui-app-appshell activeWorkTriggerLabel text-xs text-[var(--fg-secondary)]",
   brandBlock:
     "vui-app-appshell brandBlock min-w-0",
   brandGate:
@@ -66,6 +84,10 @@ const styles = {
     `vui-app-appshell mobileRouteLinkActive ${vuiStateSelectedRowClass}`,
   mobileRouteMenu:
     "vui-app-appshell mobileRouteMenu hidden min-w-0 w-full gap-1 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
+  mobileRouteMenuOpen:
+    "vui-app-appshell mobileRouteMenuOpen",
+  mobileRouteToggle:
+    `vui-app-appshell mobileRouteToggle hidden min-w-0 !h-10 !min-h-10 !w-full !justify-start !border-0 !px-2 !text-xs !shadow-none ${vuiControlQuietChromeClass}`,
   nav: "vui-app-appshell nav min-w-0",
   navLink:
     "vui-app-appshell navLink relative z-[2] inline-flex min-h-[30px] min-w-0 cursor-pointer items-center justify-center rounded-[var(--radius-control)] px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-primary)] no-underline select-none",
@@ -76,33 +98,39 @@ const styles = {
   returnButton:
     `vui-app-appshell returnButton min-w-0 ${vuiControlQuietClass}`,
   settingsActionButton:
-    `vui-app-appshell settingsActionButton min-w-0 !h-7 !min-h-7 !w-full !justify-start !border-0 !px-2 !text-xs !shadow-none ${vuiControlQuietChromeClass}`,
+    `vui-app-appshell settingsActionButton min-w-0 !h-10 !min-h-10 !w-full !justify-start !border-0 !px-2 !text-xs !shadow-none ${vuiControlQuietChromeClass}`,
   settingsActionList:
-    "vui-app-appshell settingsActionList grid min-w-0 grid-cols-2 gap-1 border-t border-[var(--vui-border-subtle)] py-1",
-  settingsActiveWork:
-    "vui-app-appshell settingsActiveWork grid min-w-0 gap-2 border-t border-[var(--vui-border-subtle)] px-2 pt-2",
+    "vui-app-appshell settingsActionList grid min-w-0 grid-cols-1 gap-0",
   settingsChevron:
     "vui-app-appshell settingsChevron ml-auto shrink-0 text-[var(--fg-secondary)] transition-transform",
   settingsChoiceButton:
-    `vui-app-appshell settingsChoiceButton min-w-0 !h-7 !min-h-7 !border-0 !px-2 !text-xs !shadow-none ${vuiControlQuietChromeClass}`,
+    `vui-app-appshell settingsChoiceButton min-w-0 !h-8 !min-h-8 !w-full !justify-start !border-0 !px-2 !text-xs !shadow-none ${vuiControlQuietChromeClass} [&_[data-slot=vui-button-label]]:flex [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:justify-between`,
   settingsChoiceButtonActive:
     `vui-app-appshell settingsChoiceButtonActive ${vuiStateSelectedRowClass}`,
   settingsDock:
     "vui-app-appshell settingsDock min-w-0",
   settingsPopoverBody:
-    "vui-app-appshell settingsPopoverBody grid min-w-0 gap-1 p-1.5",
+    "vui-app-appshell settingsPopoverBody grid min-w-0 gap-0 p-2",
   settingsPopoverContent:
-    "vui-app-appshell settingsPopoverContent z-[95] w-[min(292px,calc(100vw-20px))] max-h-[min(520px,calc(100dvh-96px))] overflow-y-auto border-[var(--border-strong)] bg-[var(--shell-panel)] p-0 shadow-[var(--vui-shadow-soft)]",
+    "vui-app-appshell settingsPopoverContent z-[95] w-[min(350px,calc(100vw-20px))] max-h-[min(650px,calc(100dvh-90px))] overflow-y-auto border-[var(--border-strong)] bg-[var(--shell-panel)] p-0 shadow-[var(--vui-shadow-soft)]",
   settingsPopoverHeader:
     "vui-app-appshell settingsPopoverHeader flex min-w-0 items-center justify-between gap-2 border-b border-[var(--vui-border-subtle)] px-2 py-1.5 [&_strong]:text-sm [&_strong]:font-semibold",
   settingsSection:
-    "vui-app-appshell settingsSection flex min-w-0 items-center justify-between gap-2 px-2 py-0.5",
-  settingsSectionLabel:
-    "vui-app-appshell settingsSectionLabel min-w-0 text-[13px] text-[var(--fg-secondary)]",
+    "vui-app-appshell settingsSection grid min-w-0 gap-0",
+  settingsRowContent:
+    "vui-app-appshell settingsRowContent flex w-full min-w-0 items-center gap-2",
+  settingsRowLabel:
+    "vui-app-appshell settingsRowLabel min-w-0 flex-1 text-left",
+  settingsRowValue:
+    "vui-app-appshell settingsRowValue max-w-32 truncate text-[var(--fg-tertiary)]",
+  settingsRowChevron:
+    "vui-app-appshell settingsRowChevron shrink-0 text-[var(--fg-tertiary)] transition-transform",
+  settingsRowChevronOpen:
+    "vui-app-appshell settingsRowChevronOpen shrink-0 rotate-90 text-[var(--fg-tertiary)] transition-transform",
   settingsStatus:
     "vui-app-appshell settingsStatus flex min-w-0 items-center gap-1.5 text-xs text-[var(--fg-tertiary)]",
   settingsThemeChoices:
-    "vui-app-appshell settingsThemeChoices flex min-w-0 shrink-0 gap-1",
+    "vui-app-appshell settingsThemeChoices grid min-w-0 gap-0 border-l border-[var(--vui-border-subtle)] pl-2 ml-7",
   settingsTrigger:
     "vui-app-appshell settingsTrigger !h-full !min-h-0 !max-h-none !w-full !justify-start !rounded-none !border-0 !bg-transparent !px-4 !py-0 !shadow-none hover:!bg-[var(--bg-active)]",
   settingsTriggerContent:

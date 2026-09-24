@@ -87,13 +87,13 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
   const gitRow = (
     <VRouteLinkButton
       to="/git"
-      className={styles.gitSummaryRow}
+      className={utilityNavClass(location.pathname, "/git") + ` ${styles.gitSummaryRow}`}
       onClick={onClose}
-      aria-label={gitTitle}
+      aria-label={`${gitTitle} · ${gitBranch}`}
+      icon={<GitBranch size={16} aria-hidden="true" />}
     >
-      <GitBranch size={12} aria-hidden="true" />
-      <VStatusChip tone={gitToneToStatus(gitTone)}>{gitHeroLabel}</VStatusChip>
-      <span className={styles.gitSummaryBranch}>{gitBranch}</span>
+      <span className={styles.gitRowLabel}>{t("navGit")}</span>
+      <VStatusChip tone={gitToneToStatus(gitTone)} className={styles.gitStatusChip}>{gitHeroLabel}</VStatusChip>
     </VRouteLinkButton>
   );
 
@@ -127,14 +127,7 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
         >
           {t("navLogs")}
         </VRouteLinkButton>
-        <VRouteLinkButton
-          to="/git"
-          className={utilityNavClass(location.pathname, "/git")}
-          onClick={onClose}
-          icon={<GitBranch size={16} aria-hidden="true" />}
-        >
-          {t("navGit")}
-        </VRouteLinkButton>
+        {gitTooltip ? <VTooltip content={gitTooltip} width="wide">{gitRow}</VTooltip> : gitRow}
         <VRouteLinkButton
           to={{ pathname: "/chat", search: serializeChatRouteSelection("", { kind: "project_bus" }) }}
           variant="ghost"
@@ -150,13 +143,6 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
           {lang === "zh" ? "助手通知流" : "Agent notice stream"}
         </VRouteLinkButton>
       </div>
-      {gitTooltip ? (
-        <VTooltip content={gitTooltip} width="wide">
-          {gitRow}
-        </VTooltip>
-      ) : (
-        gitRow
-      )}
     </div>
   );
 }
