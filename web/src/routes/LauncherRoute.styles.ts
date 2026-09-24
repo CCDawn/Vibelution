@@ -33,7 +33,7 @@ export const launcherRouteStyles = {
   settingsRail: "min-w-0 min-h-0 row-start-1",
   toolsPageHeader: "mx-2 mt-2 flex min-w-0 items-start justify-between gap-3 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-panel px-3 py-2 max-[620px]:flex-col",
   toolsPageTitle: "m-0 text-vui-xs font-semibold text-vui-fg-primary",
-  toolsPageHint: "mb-0 mt-1 text-vui-2xs text-vui-fg-secondary",
+  toolsPageHint: "mb-0 mt-1 text-vui-xs text-vui-fg-secondary",
   toolsWorkspace: "grid min-w-0 gap-1.5 px-0 pb-2",
   statusBar:
     "grid w-full max-w-none min-w-0 grid-cols-[minmax(0,1fr)_max-content] items-center gap-2 max-[1200px]:grid-cols-[minmax(0,1fr)] max-[1200px]:justify-items-stretch",

@@ -7,8 +7,8 @@ const styles = {
   icon: "shrink-0 text-vui-fg-tertiary",
   copy: "grid min-w-0 flex-1 gap-1",
   label: "text-vui-xs font-semibold text-vui-fg-primary",
-  hint: "text-vui-2xs font-normal leading-relaxed text-vui-fg-tertiary",
-  value: "shrink-0 text-vui-2xs text-vui-fg-secondary",
+  hint: "text-vui-xs font-normal leading-relaxed text-vui-fg-tertiary",
+  value: "shrink-0 text-vui-xs text-vui-fg-secondary",
   feedback: "m-0 p-3 text-vui-xs text-vui-fg-secondary",
 };
 export default styles;

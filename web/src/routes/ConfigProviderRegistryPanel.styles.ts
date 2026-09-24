@@ -89,9 +89,9 @@ const styles = {
   table:
     "vui-routes-configproviderregistrypanel table w-full min-w-0 !border-0 !rounded-none [&_table]:w-full [&_table]:table-fixed [&_td]:whitespace-normal [&_td]:break-words [&_td]:!align-top [&_td]:!py-4 !overflow-visible [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10",
   verification: "grid min-w-0 gap-1 justify-items-start",
-  verificationError: "text-vui-2xs text-[var(--state-error)]",
+  verificationError: "text-vui-xs text-[var(--state-error)]",
   verificationDetails: "cursor-pointer text-vui-xs font-medium text-vui-fg-secondary",
-  verificationMessage: "mt-2 max-w-full whitespace-pre-wrap break-words text-vui-2xs text-vui-fg-secondary [overflow-wrap:anywhere]",
+  verificationMessage: "mt-2 max-w-full whitespace-pre-wrap break-words text-vui-xs text-vui-fg-secondary [overflow-wrap:anywhere]",
   connectionAddress: "text-vui-xs text-vui-fg-secondary break-words [overflow-wrap:anywhere]",
   modelName: "min-w-0 break-words [overflow-wrap:anywhere]",
   compactModelActions: "flex min-w-0 flex-wrap items-center gap-1",

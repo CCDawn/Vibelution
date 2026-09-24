@@ -42,7 +42,7 @@ const styles = {
   activeWorkDetailTitle:
     "vui-app-appshell activeWorkDetailTitle min-w-0 [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)]",
   activeWorkEmpty:
-    "vui-app-appshell activeWorkEmpty m-0 px-2 py-4 text-vui-2xs text-[var(--fg-tertiary)]",
+    "vui-app-appshell activeWorkEmpty m-0 px-2 py-4 text-vui-xs text-[var(--fg-tertiary)]",
   activeWorkItemDot:
     "vui-app-appshell activeWorkItemDot mt-1.5 block size-1.5 shrink-0 rounded-full bg-current",
   activeWorkItemToneChip:
@@ -54,13 +54,13 @@ const styles = {
   activeWorkSlot:
     "vui-app-appshell activeWorkSlot min-w-0 shrink-0",
   activeWorkTrigger:
-    `vui-app-appshell activeWorkTrigger !h-7 !min-h-7 !px-2 !text-vui-2xs ${vuiControlQuietChromeClass}`,
+    `vui-app-appshell activeWorkTrigger !h-7 !min-h-7 !px-2 !text-vui-xs ${vuiControlQuietChromeClass}`,
   activeWorkTriggerContent:
     "vui-app-appshell activeWorkTriggerContent flex min-w-0 items-center gap-1.5 whitespace-nowrap",
   activeWorkTriggerDot:
     "vui-app-appshell activeWorkTriggerDot block size-1.5 shrink-0 rounded-full bg-current",
   activeWorkTriggerLabel:
-    "vui-app-appshell activeWorkTriggerLabel text-vui-2xs text-[var(--fg-secondary)]",
+    "vui-app-appshell activeWorkTriggerLabel text-vui-xs text-[var(--fg-secondary)]",
   brandBlock:
     "vui-app-appshell brandBlock min-w-0",
   brandGate:
@@ -87,7 +87,7 @@ const styles = {
   mobileRouteMenuOpen:
     "vui-app-appshell mobileRouteMenuOpen",
   mobileRouteToggle:
-    `vui-app-appshell mobileRouteToggle hidden min-w-0 !h-10 !min-h-10 !w-full !justify-start !border-0 !px-2 !text-vui-2xs !shadow-none ${vuiControlQuietChromeClass}`,
+    `vui-app-appshell mobileRouteToggle hidden min-w-0 !h-10 !min-h-10 !w-full !justify-start !border-0 !px-2 !text-vui-xs !shadow-none ${vuiControlQuietChromeClass}`,
   nav: "vui-app-appshell nav min-w-0",
   navLink:
     "vui-app-appshell navLink relative z-[2] inline-flex min-h-[var(--vui-control-height-sm)] min-w-0 cursor-pointer items-center justify-center rounded-[var(--radius-control)] px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-primary)] no-underline select-none",
@@ -98,13 +98,13 @@ const styles = {
   returnButton:
     `vui-app-appshell returnButton min-w-0 ${vuiControlQuietClass}`,
   settingsActionButton:
-    `vui-app-appshell settingsActionButton min-w-0 !h-10 !min-h-10 !w-full !justify-start !border-0 !px-2 !text-vui-2xs !shadow-none ${vuiControlQuietChromeClass}`,
+    `vui-app-appshell settingsActionButton min-w-0 !h-10 !min-h-10 !w-full !justify-start !border-0 !px-2 !text-vui-xs !shadow-none ${vuiControlQuietChromeClass}`,
   settingsActionList:
     "vui-app-appshell settingsActionList grid min-w-0 grid-cols-1 gap-0",
   settingsChevron:
     "vui-app-appshell settingsChevron ml-auto shrink-0 text-[var(--fg-secondary)] transition-transform",
   settingsChoiceButton:
-    `vui-app-appshell settingsChoiceButton min-w-0 !h-8 !min-h-8 !w-full !justify-start !border-0 !px-2 !text-vui-2xs !shadow-none ${vuiControlQuietChromeClass} [&_[data-slot=vui-button-label]]:flex [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:justify-between`,
+    `vui-app-appshell settingsChoiceButton min-w-0 !h-8 !min-h-8 !w-full !justify-start !border-0 !px-2 !text-vui-xs !shadow-none ${vuiControlQuietChromeClass} [&_[data-slot=vui-button-label]]:flex [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:justify-between`,
   settingsChoiceButtonActive:
     `vui-app-appshell settingsChoiceButtonActive ${vuiStateSelectedRowClass}`,
   settingsDock:
@@ -128,7 +128,7 @@ const styles = {
   settingsRowChevronOpen:
     "vui-app-appshell settingsRowChevronOpen shrink-0 rotate-90 text-[var(--fg-tertiary)] transition-transform",
   settingsStatus:
-    "vui-app-appshell settingsStatus flex min-w-0 items-center gap-1.5 text-vui-2xs text-[var(--fg-tertiary)]",
+    "vui-app-appshell settingsStatus flex min-w-0 items-center gap-1.5 text-vui-xs text-[var(--fg-tertiary)]",
   settingsThemeChoices:
     "vui-app-appshell settingsThemeChoices grid min-w-0 gap-0 border-l border-[var(--vui-border-subtle)] pl-2 ml-7",
   settingsTrigger:
