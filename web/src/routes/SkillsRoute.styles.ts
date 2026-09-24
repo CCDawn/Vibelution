@@ -21,7 +21,7 @@ const listPanelClass = `${panelClass} grid-rows-[auto_auto_auto_auto_minmax(0,1f
 const detailPanelClass = `${panelClass} overflow-auto`;
 const panelHeaderClass = "flex min-w-0 items-start justify-between gap-3";
 const panelEyebrowClass = "m-0 mb-px [font-size:var(--vui-font-xs)] uppercase tracking-[0.07em] text-vui-fg-tertiary";
-const panelTitleClass = "m-0 font-[var(--font-display)] text-base leading-[1.2] text-vui-fg-primary";
+const panelTitleClass = "m-0 font-[var(--font-display)] text-vui-md leading-[1.2] text-vui-fg-primary";
 const detailDescriptionClass = "m-0 mt-[3px] [font-size:var(--vui-font-xs)] leading-[1.32] text-vui-fg-secondary";
 const searchBoxClass = `flex min-h-8 items-center gap-2 ${fieldSurfaceClass} px-2 text-vui-fg-tertiary`;
 const searchInputClass = "min-w-0 w-full border-0 bg-transparent text-vui-fg-primary outline-0";
@@ -76,7 +76,7 @@ const rootPathClass = "min-w-0 truncate";
 const emptyDetailClass = `grid min-h-[190px] place-items-center ${detailSurfaceClass} p-[18px] text-center max-[920px]:min-h-24 max-[920px]:p-3`;
 const emptyDetailTextClass = "m-0 [font-size:var(--vui-font-xs)] leading-[1.3] text-vui-fg-secondary";
 
-const metadataSummaryClass = "cursor-pointer py-2 text-sm text-vui-fg-secondary";
+const metadataSummaryClass = "cursor-pointer py-2 text-vui-xs text-vui-fg-secondary";
 
 const styles = {
   metadataSummaryClass,

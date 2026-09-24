@@ -10,11 +10,11 @@ const flowTabsClass = [
   "max-[760px]:!grid-cols-[repeat(4,minmax(72px,1fr))] max-[760px]:!w-full max-[760px]:max-w-full",
 ].join(" ");
 const flowTabClass = [
-  "!inline-grid h-[34px] min-h-[34px] max-h-[34px] min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1 overflow-hidden rounded-[6px] border border-transparent",
+  "!inline-grid h-[var(--vui-control-height-md)] min-h-[var(--vui-control-height-md)] max-h-[var(--vui-control-height-md)] min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1 overflow-hidden rounded-[var(--radius-control)] border border-transparent",
   "bg-transparent p-[4px_6px] text-left font-[inherit] text-vui-fg-secondary no-underline shadow-none transition-[background,border-color,color] duration-150",
   "hover:!bg-[var(--vui-surface-row-hover)] hover:text-vui-fg-primary max-[760px]:p-[3px_4px]",
   // Keep multi-slot labels in the tab grid (VTabs label may wrap text nodes).
-  "[&]:!max-h-[34px] [&]:!min-h-[34px]",
+  "[&]:!max-h-[var(--vui-control-height-md)] [&]:!min-h-[var(--vui-control-height-md)]",
   // Selected surface (replaces flowTabActive twin).
   "data-[state=active]:border-[color-mix(in_srgb,var(--accent-warm)_28%,var(--vui-border-subtle))]",
   "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-warm)_13%,var(--vui-surface-row))]",

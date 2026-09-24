@@ -4,7 +4,7 @@ import { type VuiTone } from "./buttonVariants";
 
 /** Compact shadcn Badge-like label with Apple-style restrained geometry. */
 export const vuiChipBaseClass =
-  "inline-flex max-w-full items-center justify-center gap-1 rounded-[6px] border border-vui-border-subtle bg-vui-control-muted text-vui-fg-secondary shadow-none";
+  "inline-flex max-w-full items-center justify-center gap-1 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-control-muted text-vui-fg-secondary shadow-none";
 
 export const vuiChipSizeClass =
   "h-[22px] min-h-[22px] max-h-[22px] px-1.5 [font-size:var(--vui-font-xs)] font-[650] leading-none tracking-[-0.004em]";

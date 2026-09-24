@@ -13,7 +13,7 @@ const styles = {
   searchHit: "vui-routes-configsettingsnavigation searchHit !grid min-h-10 !w-full !grid-cols-[minmax(0,1fr)] !justify-stretch rounded-md px-3 text-left [font-size:var(--vui-font-sm)] font-semibold [&_small]:block [&_small]:[font-size:var(--vui-font-xs)] [&_small]:font-medium [&_small]:text-vui-fg-tertiary",
   eyebrow:
     "vui-routes-configsettingsnavigation eyebrow m-0 [font-size:var(--vui-font-xs)] font-bold uppercase tracking-[0.08em] text-vui-fg-tertiary",
-  title: "vui-routes-configsettingsnavigation title m-0 text-lg font-extrabold text-vui-fg-primary",
+  title: "vui-routes-configsettingsnavigation title m-0 text-vui-lg font-extrabold text-vui-fg-primary",
   titleRow: "vui-routes-configsettingsnavigation titleRow flex min-w-0 items-center gap-1.5",
   status:
     "vui-routes-configsettingsnavigation status flex min-h-10 items-center justify-between gap-3 rounded-lg border border-vui-border-subtle bg-vui-surface-row px-3 [font-size:var(--vui-font-sm)] font-semibold text-vui-fg-secondary",

@@ -197,7 +197,7 @@ export function AgentDenseList({
                 {column.label}
               </strong>
             </div>
-            <em className="inline-flex min-h-5 min-w-5 items-center justify-center rounded-[6px] bg-[var(--vui-control-muted)] px-1 text-[0.72rem] font-extrabold not-italic text-[var(--fg-secondary)]">
+            <em className="inline-flex min-h-5 min-w-5 items-center justify-center rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-1 text-[0.72rem] font-extrabold not-italic text-[var(--fg-secondary)]">
               {column.count}
             </em>
           </div>

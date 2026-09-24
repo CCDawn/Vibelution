@@ -49,7 +49,7 @@ const DETAILS =
   "[font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] " +
   "[overflow-wrap:anywhere] [word-break:break-word] whitespace-pre-wrap";
 const TOGGLE =
-  "inline-flex min-h-6 w-fit items-center rounded-[6px] px-1.5 [font-size:var(--vui-font-xs)] font-[650] text-[var(--fg-tertiary)] " +
+  "inline-flex min-h-6 w-fit items-center rounded-[var(--radius-control)] px-1.5 [font-size:var(--vui-font-xs)] font-[650] text-[var(--fg-tertiary)] " +
   "hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--fg-primary)] " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_40%,transparent)]";
 const ACTIONS = "flex min-w-0 flex-wrap items-center gap-1.5 pt-0.5";

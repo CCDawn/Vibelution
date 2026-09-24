@@ -79,7 +79,7 @@ export const selfEvolutionTrackStyles = {
   loadingPanel:
     `grid min-h-0 content-start gap-2 p-3 ${rowSurfaceSoft} [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-secondary`,
   loadingStatGrid:
-    "grid grid-cols-3 gap-1.5 [&_span]:grid [&_span]:min-w-0 [&_span]:gap-1 [&_span]:rounded-[7px] [&_span]:bg-vui-surface-row [&_span]:px-[7px] [&_span]:py-1.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)] [&_strong]:font-mono [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)]",
+    "grid grid-cols-3 gap-1.5 [&_span]:grid [&_span]:min-w-0 [&_span]:gap-1 [&_span]:rounded-[var(--radius-control)] [&_span]:bg-vui-surface-row [&_span]:px-[7px] [&_span]:py-1.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)] [&_strong]:font-mono [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)]",
   loadingBody: "grid min-h-0 grid-cols-3 gap-2",
   skeletonLineWide: "block h-2 w-[min(100%,620px)] animate-pulse rounded-full bg-[var(--vui-gradient-route-soft)]",
   skeletonLine: "block h-2 w-[min(72%,460px)] animate-pulse rounded-full bg-[var(--vui-gradient-route-soft)]",
@@ -91,7 +91,7 @@ export const selfEvolutionTrackStyles = {
   paginationBar: "flex flex-wrap items-center justify-between gap-3 max-[760px]:flex-col max-[760px]:items-stretch",
   subsurfaceHeader: "flex items-start justify-between gap-3 max-[760px]:flex-col max-[760px]:items-stretch",
   eyebrow: "m-0 mb-1 [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-[var(--fg-tertiary)]",
-  sectionTitle: "m-0 text-base text-[var(--fg-primary)]",
+  sectionTitle: "m-0 text-vui-md text-[var(--fg-primary)]",
   subsurfaceTitle: "m-0 text-[0.98rem] text-[var(--fg-primary)]",
   subsectionTitle: "m-0 [font-size:var(--vui-font-xs)] uppercase tracking-[0.06em] text-[var(--fg-tertiary)]",
   sectionSummary: "m-0 leading-normal text-[var(--fg-secondary)]",
@@ -161,9 +161,9 @@ export const selfEvolutionTrackStyles = {
   transactionDateFilterBar:
     "flex flex-wrap items-center gap-2 [&>span]:[font-size:var(--vui-font-xs)] [&>span]:leading-tight [&>span]:text-[var(--fg-tertiary)]",
   transactionVisibleSummary:
-    "inline-flex min-h-[30px] items-center whitespace-nowrap font-mono [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "inline-flex min-h-[var(--vui-control-height-sm)] items-center whitespace-nowrap font-mono [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   transactionFilterButton:
-    `inline-flex min-h-[34px] w-fit max-w-full cursor-pointer items-center gap-2 rounded-[var(--radius-control)] px-2.5 text-vui-fg-secondary ${controlSurface} [&_strong]:min-w-[22px] [&_strong]:text-right [&_strong]:font-mono [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary`,
+    `inline-flex min-h-[var(--vui-control-height-md)] w-fit max-w-full cursor-pointer items-center gap-2 rounded-[var(--radius-control)] px-2.5 text-vui-fg-secondary ${controlSurface} [&_strong]:min-w-[22px] [&_strong]:text-right [&_strong]:font-mono [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary`,
   transactionFilterButtonActive:
     "border-[color-mix(in_srgb,var(--accent-warm)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_12%,transparent)] text-[var(--accent-warm-2)]",
   transactionDetailsToggle:
@@ -171,7 +171,7 @@ export const selfEvolutionTrackStyles = {
   transactionDateGroup:
     "grid gap-2 pt-0.5 [&+&]:mt-3 [&+&]:pt-1",
   transactionDateHeader:
-    "flex min-h-[30px] items-center justify-between gap-2.5 px-0.5 max-[760px]:flex-col max-[760px]:items-stretch [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-tight [&_span]:text-[var(--fg-tertiary)]",
+    "flex min-h-[var(--vui-control-height-sm)] items-center justify-between gap-2.5 px-0.5 max-[760px]:flex-col max-[760px]:items-stretch [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-tight [&_span]:text-[var(--fg-tertiary)]",
   transactionGroupList: "grid gap-2",
   selectionToggle:
     `inline-flex min-h-8 w-fit max-w-full cursor-pointer items-center gap-2 rounded-[var(--radius-control)] px-3 text-vui-fg-secondary disabled:cursor-default disabled:opacity-50 ${controlSurface}`,

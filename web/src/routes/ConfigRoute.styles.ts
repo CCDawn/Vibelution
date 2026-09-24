@@ -231,9 +231,9 @@ const styles = {
   treeFieldHead:
     "vui-routes-configroute treeFieldHead [display:flex] [align-items:start] [justify-content:space-between] [gap:8px] [align-items:center]",
   treeFieldLabel:
-    "vui-routes-configroute treeFieldLabel text-sm font-medium text-vui-fg-primary",
+    "vui-routes-configroute treeFieldLabel text-vui-xs font-medium text-vui-fg-primary",
   treeFieldValue:
-    "vui-routes-configroute treeFieldValue text-sm leading-relaxed text-vui-fg-secondary break-words",
+    "vui-routes-configroute treeFieldValue text-vui-xs leading-relaxed text-vui-fg-secondary break-words",
   treeGrid:
     "vui-routes-configroute treeGrid grid min-w-0 grid-cols-1 gap-0",
   treeHint:

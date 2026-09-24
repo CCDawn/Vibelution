@@ -105,13 +105,13 @@ describe("supervised workspace controls", () => {
     expect(tabsStylesSource).toContain("w-fit");
     expect(tabsStylesSource).toContain("min-w-0");
     expect(tabsStylesSource).toContain("grid-cols-[repeat(4,minmax(112px,168px))]");
-    expect(tabsStylesSource).toContain("h-[34px]");
+    expect(tabsStylesSource).toContain("h-[var(--vui-control-height-md)]");
     expect(tabsStylesSource).toContain("h-5 w-5");
     expect(tabsStylesSource).toContain("min-w-6");
     expect(tabsStylesSource).toContain("hidden overflow-hidden");
     expect(tabsStylesSource).toContain("max-[1120px]:!grid-cols-[repeat(4,minmax(100px,150px))]");
     expect(tabsSource).not.toContain("repeat(2");
-    expect(controlsStylesSource).toContain("min-h-[34px]");
+    expect(controlsStylesSource).toContain("min-h-[var(--vui-control-height-md)]");
     expect(controlsStylesSource).toContain("min-h-[26px]");
     expect(controlsStylesSource).toContain("intakeTabsTriggerClass");
     expect(controlsStylesSource).toContain("data-[state=active]");
@@ -136,8 +136,8 @@ describe("supervised workspace controls", () => {
 
   it("keeps workflow tabs from expanding into tall VButton cards", () => {
     expect(tabsStylesSource).toContain("!inline-grid");
-    expect(tabsStylesSource).toContain("h-[34px]");
-    expect(tabsStylesSource).toContain("max-h-[34px]");
+    expect(tabsStylesSource).toContain("h-[var(--vui-control-height-md)]");
+    expect(tabsStylesSource).toContain("max-h-[var(--vui-control-height-md)]");
     expect(tabsStylesSource).not.toContain("min-h-[36px]");
     expect(tabsStylesSource).not.toContain("stepMetaClass = \"flex");
     expect(tabsStylesSource).toContain("stepMetaClass = \"sr-only");
