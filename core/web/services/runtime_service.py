@@ -12,6 +12,8 @@ from functools import wraps
 from pathlib import Path
 from typing import Any
 import subprocess
+import sys
+import tempfile
 import threading
 import time
 
@@ -1087,7 +1089,28 @@ def _spawn_managed_launcher_shutdown() -> None:
         )
 
 
+def _record_pytest_hard_exit_skip(kind: str) -> None:
+    current_test = os.environ.get("PYTEST_CURRENT_TEST", "")
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    try:
+        log_path = Path(tempfile.gettempdir()) / "vibelution_pytest_hard_exit_skips.log"
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(
+                f"{time.strftime('%Y-%m-%dT%H:%M:%S')} worker={worker} kind={kind} test={current_test}\n"
+            )
+    except OSError:
+        pass
+
+
 def _schedule_local_backend_exit(delay_seconds: float = 0.35) -> None:
+    # 测试在进程内（TestClient）触达 shutdown 接受路径时，os._exit 会当场杀掉
+    # pytest/xdist worker，控制器随即死等已死节点、整套悬挂。判据只看本进程
+    # 是否加载过 pytest（子进程不继承），真产品进程与测试拉起的后端子进程
+    # 仍走原硬退出语义。
+    if "pytest" in sys.modules:
+        _record_pytest_hard_exit_skip("runtime_service.local_backend_exit")
+        return
+
     def _exit_later() -> None:
         time.sleep(max(0.0, float(delay_seconds)))
         os._exit(0)

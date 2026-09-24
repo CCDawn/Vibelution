@@ -838,6 +838,11 @@ def _release_daemon_ownership(pid: int) -> None:
 
 
 def _exit_current_process(exit_code: int = 0) -> None:
+    # pytest 进程内触达 daemon 停止路径时，os._exit 会静默杀掉测试进程/xdist
+    # worker 且不留任何崩溃记录；改抛 SystemExit 让该测试显式失败而不是悬挂
+    # run_forever。真 daemon 进程不会导入 pytest，硬退出语义不变。
+    if "pytest" in sys.modules:
+        raise SystemExit(int(exit_code))
     os._exit(int(exit_code))
 
 
