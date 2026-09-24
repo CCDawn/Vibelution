@@ -73,7 +73,7 @@ export const ShadcnCheckbox = forwardRef<HTMLInputElement, ShadcnCheckboxProps>(
     return (
       <label
         className={[
-          "inline-flex min-w-0 items-center gap-2 rounded-[var(--radius-control)] text-sm text-vui-fg-secondary",
+          "inline-flex min-w-0 items-center gap-2 rounded-[var(--radius-control)] text-vui-xs text-vui-fg-secondary",
           hasLabel
             ? `${vuiControlMinHeightClass(density)} px-1`
             : "size-8 justify-center",

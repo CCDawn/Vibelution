@@ -401,6 +401,7 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
         memoryPolicy: {
           ...options.defaultMemoryPolicy(payload.basePolicy?.policyId || ""),
           ...(payload.basePolicy ?? {}),
+          enabled: payload.draft.enabled,
           readSharedGroups: options.sortedIds(payload.draft.readSharedGroups),
           writeSharedGroups: options.sortedIds(payload.draft.writeSharedGroups),
           readKnowledgeBaseIds: options.sortedIds(payload.draft.readKnowledgeBaseIds),

@@ -2344,6 +2344,18 @@ def test_run_forever_marks_runtime_stopping_then_finalizes_idle_before_exit(monk
     assert saved_states[-1]["workbench"]["phase"] == "steady"
 
 
+def test_exit_current_process_raises_instead_of_killing_pytest_process():
+    """回归守卫：pytest 进程内的 daemon 退出必须显式抛 SystemExit。
+
+    修复前是 os._exit 静默杀掉 pytest/xdist worker 且不留崩溃记录，整套
+    测试随控制器死等已死节点悬挂到死。
+    """
+    with pytest.raises(SystemExit) as exit_info:
+        daemon._exit_current_process(3)
+
+    assert exit_info.value.code == 3
+
+
 def test_reconcile_observation_keeps_daemon_running_true_and_preserves_stopping(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
 
