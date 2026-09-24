@@ -1,6 +1,7 @@
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
+import tailwindcss from "@tailwindcss/vite";
 
 /**
  * Isolated preview entry. Lives under web/preview/chat-stream-core/ and is
@@ -10,10 +11,12 @@ import { defineConfig } from "vite";
  * `server.fs.allow` whitelists the worktree web/ directory so the preview can
  * import pure logic modules from web/src (codexStreamController,
  * streamingMarkdown, conversationTimelineFollowState, conversationHistoryWindow)
- * without modifying them.
+ * without modifying them. The tailwind plugin powers the runtime scene
+ * (runtime-scene.html), which mounts the real ConversationView with the
+ * production stylesheet chain.
  */
 export default defineConfig({
-  plugins: [react()],
+  plugins: [tailwindcss(), react()],
   resolve: {
     dedupe: ["react", "react-dom"],
   },

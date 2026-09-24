@@ -339,3 +339,89 @@ export function settleActiveTurnLayerFromDetail(
 ): ActiveTurnLayerState | undefined {
   return isActiveTurnSettledByDetail(layer, detail) ? undefined : layer;
 }
+
+type OverlayReconcileItem = {
+  type: string;
+  itemKey: string;
+  revision: number;
+};
+
+function overlayItemIdentity(item: SessionTurnItem): OverlayReconcileItem {
+  const itemKey = compactText(
+    ("callId" in item && item.callId)
+    || ("itemId" in item && item.itemId)
+    || ("id" in item && item.id)
+    || "",
+  );
+  const revision = Number(item.revision ?? 0);
+  return {
+    type: compactText(item.type),
+    itemKey,
+    revision: Number.isFinite(revision) && revision > 0 ? revision : 0,
+  };
+}
+
+function overlayItemSortKey(item: OverlayReconcileItem) {
+  return `${item.type}\u001f${item.itemKey}`;
+}
+
+/**
+ * Per-item reconciliation between the optimistic/active overlay and the
+ * authoritative projection (pattern: zai-org/ZCode conversationProjectionStore,
+ * Apache-2.0 — refined from whole-turn settlement to item granularity).
+ *
+ * An overlay turn item is dropped once the canonical transcript carries an
+ * item with the same identity (type + call/item id) at an equal or newer
+ * revision: the authoritative copy paints instead of a duplicated overlay
+ * copy, while items the authority has not committed yet keep rendering from
+ * the overlay. An overlay with nothing left to show is cleared entirely
+ * (same contract as the whole-turn settle path).
+ */
+export function reconcileActiveTurnLayerItemsWithMessages(
+  layer: ActiveTurnLayerState | undefined,
+  messages: ConversationMessage[] | undefined,
+): ActiveTurnLayerState | undefined {
+  if (!layer || !layer.turnId || !messages?.length || !layer.turnItems.length) {
+    return layer;
+  }
+  const authoritative = new Map<string, number>();
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    if (message.metadata?.kind === "session_active_turn_layer") continue;
+    if (String(message.turnId || "").trim() !== layer.turnId) continue;
+    for (const item of message.turnItems ?? []) {
+      const identity = overlayItemIdentity(item);
+      if (!identity.itemKey) continue;
+      const sortKey = overlayItemSortKey(identity);
+      authoritative.set(sortKey, Math.max(authoritative.get(sortKey) ?? 0, identity.revision));
+    }
+  }
+  if (authoritative.size === 0) {
+    return layer;
+  }
+  let removed = 0;
+  const remainingItems = layer.turnItems.filter((item) => {
+    const identity = overlayItemIdentity(item);
+    if (!identity.itemKey) {
+      return true;
+    }
+    const authoritativeRevision = authoritative.get(overlayItemSortKey(identity));
+    if (authoritativeRevision === undefined) {
+      return true;
+    }
+    // Equal revision means the authority committed exactly this item; a newer
+    // authority revision supersedes the overlay copy outright.
+    if (identity.revision <= authoritativeRevision) {
+      removed += 1;
+      return false;
+    }
+    return true;
+  });
+  if (removed === 0) {
+    return layer;
+  }
+  // Fully reconciled but not yet settled turns keep their (now empty) overlay
+  // shell so stage/status UI survives until the canonical transcript settles
+  // the turn through the whole-layer path.
+  return { ...layer, turnItems: remainingItems };
+}

@@ -889,28 +889,30 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     expect(conversationViewSource).toContain("initializedSessionRef.current !== sessionId");
   });
 
-  it("keeps virtual-row ResizeObservers and streaming paint free of per-render thrash", () => {
-    expect(conversationViewSource).toContain("timelineVirtualRowRefCallbacksRef");
-    expect(conversationViewSource).toContain("timelineRowNodesRef");
+  it("keeps react-virtual measurement and streaming paint free of per-render thrash", () => {
+    // react-virtual owns row measurement: stable keys feed its item-size cache,
+    // and row refs delegate to measureElement (rAF-batched ResizeObserver).
+    expect(conversationViewSource).toContain("useVirtualizer({");
+    expect(conversationViewSource).toContain("getItemKey: (index) => timelineHistoryRowKeys[index]");
+    expect(conversationViewSource).toContain("measureTimelineVirtualRow");
+    expect(conversationViewSource).toContain("useAnimationFrameWithResizeObserver: true");
+    expect(conversationViewSource).not.toContain("timelineRowResizeObserversRef");
+    expect(conversationViewSource).not.toContain("scheduleTimelineHeightVersionBump");
     expect(conversationViewSource).toContain("streamingPaintMetricsRef");
-    expect(conversationViewSource).toContain("followLatestRef.current ? 8 : 2");
     // ChatGPT/Claude: send always re-pins stick-to-bottom even after user scrolled up.
     expect(conversationViewSource).toContain("function pinFollowLatestForSubmit");
     expect(conversationViewSource).toContain("function handleSendAndFollowLatest");
     expect(conversationViewSource).toContain("handleSendAndFollowLatest()");
-    expect(conversationViewSource).toContain("ref={timelineVirtualRowRef(rowKey)}");
+    expect(conversationViewSource).toContain("ref={rowPlan.virtualStartPx === null ? undefined : measureTimelineVirtualRow}");
     expect(conversationViewSource).toContain("timelineContentRef");
     expect(conversationViewSource).toContain("styles.timelineContent");
-    // Height bumps re-pin only while following latest (coalesced rAF; content host RO is primary).
-    expect(conversationViewSource).toMatch(
-      /scheduleTimelineHeightVersionBump[\s\S]*?setTimelineRowHeightVersion/,
+    // Content-host ResizeObserver still re-pins only while following latest.
+    const contentRoBlock = conversationViewSource.slice(
+      conversationViewSource.indexOf("// Stick-to-bottom: re-pin when timeline viewport or content height changes"),
+      conversationViewSource.indexOf("}, [sessionId, activeTimelineMessages.length > 0]);"),
     );
-    const bumpBlock = conversationViewSource.slice(
-      conversationViewSource.indexOf("const scheduleTimelineHeightVersionBump"),
-      conversationViewSource.indexOf("const bindTimelineVirtualRow"),
-    );
-    expect(bumpBlock).toContain("shouldStickTimelineToBottomOnContentResize");
-    expect(bumpBlock).toContain("scheduleTimelineScrollToBottom()");
+    expect(contentRoBlock).toContain("shouldStickTimelineToBottomOnContentResize");
+    expect(contentRoBlock).toContain("scheduleTimelineScrollToBottom()");
     expect(conversationViewSource).toContain("pinnedLatestUserMessageIdRef");
     expect(conversationViewSource).toContain("latestUserChanged");
     // Paint effect must not depend on Map/array identities that change every render.
@@ -921,6 +923,22 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     expect(paintBlock).toContain("streamingTimelineScrollSignal");
     expect(paintBlock).not.toContain("agentRenderStatesByMessageId");
     expect(paintBlock).not.toContain("streamingTimelineMessages");
+  });
+
+  it("virtualizes the whole history and renders the running turn as an independent live tail", () => {
+    // No client message window: every local message is renderable.
+    expect(conversationViewSource).toContain("const visibleMessageCount = displayMessages.length;");
+    expect(conversationViewSource).not.toContain("INITIAL_VISIBLE_MESSAGE_COUNT");
+    expect(conversationViewSource).not.toContain("nextVisibleMessageLimit");
+    // Trailing in-flight rows leave the virtual window as the live-tail block.
+    expect(conversationViewSource).toContain("const timelineLiveTailStartIndex = useMemo");
+    expect(conversationViewSource).toContain("!assistantTurnIsStreaming(message) && !assistantTurnIsInFlight(message)");
+    expect(conversationViewSource).toContain("timelineLiveTailMessages.length");
+    expect(conversationViewSource).toContain('data-conversation-virtual-host="1"');
+    // Follow/anchor semantics keep the production contracts.
+    expect(conversationViewSource).toContain("resolveTimelineFollowState({");
+    expect(conversationViewSource).toContain("captureTimelineRowKeyAnchor(timelineRef.current)");
+    expect(conversationViewSource).toContain("restoreTimelineRowKeyAnchor(timeline, pending.anchor)");
   });it("colors operation rows from each operation status instead of the operation kind", () => {
     expect(conversationViewSource).toContain("function operationStatusToneClassName(operation: AgentMessageOperation)");
     expect(conversationViewSource).toContain("operationStatusTone(operation)");
@@ -1006,7 +1024,7 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     expect(conversationViewSource).toContain("handleScroll");
     expect(conversationViewSource).toContain("revealEarlierTimelineMessages()");
     expect(conversationViewSource).toContain("captureTimelineRowKeyAnchor(timelineRef.current)");
-    expect(conversationViewSource).toContain("restoreTimelineRowKeyAnchor(timelineRef.current, anchor)");
+    expect(conversationViewSource).toContain("restoreTimelineRowKeyAnchor(timeline, pending.anchor)");
     expect(conversationViewSource).not.toContain("function showEarlierMessages()");
     expect(conversationViewSource).not.toContain("onClick={showEarlierMessages}");
     expect(conversationViewSource).not.toContain("setAllMessagesVisible(true)");

@@ -30,6 +30,7 @@ import {
   Wrench,
 } from "lucide-react";
 import React, { DragEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 
 import type { ConversationMessage } from "../../api/types";
 import type {
@@ -217,9 +218,6 @@ import {
   type AgentMessageSectionState,
 } from "./agentMessageSections";
 import {
-  INITIAL_VISIBLE_MESSAGE_COUNT,
-  nextVisibleMessageLimit,
-  resolveVisibleMessageCount,
   shouldLoadEarlierConversationMessages,
   shouldPreferServerEarlierLoad,
   TIMELINE_HISTORY_LOAD_THRESHOLD_PX,
@@ -249,11 +247,10 @@ import {
   buildTimelineScrollSignal,
 } from "./conversationTimelineScrollSignals";
 import {
+  CONVERSATION_VIRTUAL_ROW_ESTIMATE_PX,
   freshTimelineUserScrollIntent,
   isTimelineNearBottom,
   reconcileFollowingBeforeContentStick,
-  recordConversationRowHeight,
-  resolveConversationVirtualRange,
   resolveTimelineFollowState,
   shouldKeepFollowingLatestOnProcessToggle,
   shouldStickTimelineToBottomOnContentResize,
@@ -372,6 +369,18 @@ const INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT = 36;
 const RESPONSE_PARSE_CACHE_LIMIT = 80;
 const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
 const EMPTY_SECTION_EXPANSION: Record<string, boolean> = {};
+// Virtual timeline (react-virtual): rows rendered beyond the measured viewport
+// per direction, vertical rhythm matching the timelineContent grid gap, the
+// scroll container's top padding (py-4) before the virtual host, and a
+// generous SSR/first-paint rect so server-rendered windows stay deterministic.
+const TIMELINE_VIRTUAL_OVERSCAN = 8;
+const TIMELINE_VIRTUAL_ROW_GAP_PX = 10;
+const TIMELINE_VIRTUAL_SCROLL_MARGIN_PX = 16;
+const TIMELINE_VIRTUAL_INITIAL_RECT = { width: 1280, height: 900 };
+// Prepend anchor correction: bounded frames for measurements to land before
+// the viewport position is declared final (2px tolerance = subpixel jitter).
+const TIMELINE_ANCHOR_CORRECTION_MAX_FRAMES = 30;
+const TIMELINE_ANCHOR_CORRECTION_TOLERANCE_PX = 2;
 
 /** Height-capped thought body; sticks to bottom while streaming. */
 function ThoughtScrollBody({
@@ -608,6 +617,14 @@ export const ConversationView = React.memo(function ConversationView({
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const timelineContentRef = useRef<HTMLDivElement | null>(null);
   const historyScrollAnchorRef = useRef<TimelineScrollRowKeyAnchor | null>(null);
+  /** Active prepend anchor while correction frames converge (see layout effect below). */
+  const historyAnchorCorrectingRef = useRef<{
+    anchor: TimelineScrollRowKeyAnchor;
+    /** Message count at capture; correction starts once the prepend commits. */
+    startLength: number;
+    attempts: number;
+    fallbackDone: boolean;
+  } | null>(null);
   /** Ensures a pending tool approval mounts under at most one tool activity per render. */
   const toolApprovalConsumedRef = useRef(false);
   toolApprovalConsumedRef.current = false;
@@ -636,20 +653,7 @@ export const ConversationView = React.memo(function ConversationView({
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [previewImage, setPreviewImage] = useState<ConversationImagePreviewRequest | null>(null);
   const [composerDragActive, setComposerDragActive] = useState(false);
-  const [visibleMessageLimit, setVisibleMessageLimit] = useState(INITIAL_VISIBLE_MESSAGE_COUNT);
-  const [timelineVirtualMetrics, setTimelineVirtualMetrics] = useState({
-    scrollTop: 0,
-    viewportHeight: 720,
-  });
-  /** D2+: measured row heights by conversation row key. */
-  const timelineRowHeightCacheRef = useRef<Map<string, number>>(new Map());
-  const timelineRowResizeObserversRef = useRef<Map<string, ResizeObserver>>(new Map());
-  const timelineRowNodesRef = useRef<Map<string, HTMLDivElement>>(new Map());
-  /** Stable per-row ref callbacks so React does not null→node thrash ResizeObservers each render. */
-  const timelineVirtualRowRefCallbacksRef = useRef<Map<string, (node: HTMLDivElement | null) => void>>(new Map());
-  const timelineHeightBumpFrameRef = useRef<number | null>(null);
   const streamingPaintMetricsRef = useRef({ streamingMessageCount: 0, renderedTextLength: 0 });
-  const [timelineRowHeightVersion, setTimelineRowHeightVersion] = useState(0);
   const [computerUseSessionResults, setComputerUseSessionResults] = useState<Record<string, ComputerUseResult>>({});
   const [computerUseSessionPending, setComputerUseSessionPending] = useState<Record<string, "confirm" | "cancel" | undefined>>({});
   const [copiedAnswerMessageId, setCopiedAnswerMessageId] = useState("");
@@ -1057,16 +1061,13 @@ export const ConversationView = React.memo(function ConversationView({
       && Boolean(assistantFinalAnswerText(message).trim())
     ));
   }, [displayMessages, turnError]);
-  const visibleMessageCount = resolveVisibleMessageCount({
-    displayMessageCount: displayMessages.length,
-    visibleLimit: visibleMessageLimit,
-  });
+  // Full-history virtualization renders every local message; the old client
+  // window (first 12 / +12 / soft cap 72) is gone, so there is no locally
+  // hidden history left — only the server earlier-load signal below.
+  const visibleMessageCount = displayMessages.length;
   const hiddenRenderedMessageCount = displayMessages.length - visibleMessageCount;
   const hiddenHistorySignalCount = hiddenRenderedMessageCount + (hasEarlierMessages ? 1 : 0);
-  const timelineMessages = useMemo(
-    () => displayMessages.slice(displayMessages.length - visibleMessageCount),
-    [displayMessages, visibleMessageCount],
-  );
+  const timelineMessages = displayMessages;
   const activeAgentMessageTimelineProjection = useMemo(
     () => projectAgentMessageTimelineMessages({ timelineMessages, activeTurnMessage, companionMode }),
     [activeTurnMessage, companionMode, timelineMessages],
@@ -1101,36 +1102,703 @@ export const ConversationView = React.memo(function ConversationView({
   const activeAgentMessages = activeAgentMessageTimelineProjection.agentMessages;
   const streamingTimelineMessages = activeAgentMessageTimelineProjection.streamingMessages;
   const activeTimelineRowIdentities = activeAgentMessageTimelineProjection.rowIdentities;
-  const timelineMeasuredHeights = useMemo(() => {
-    return activeTimelineRowIdentities.map((identity) => {
-      const measured = timelineRowHeightCacheRef.current.get(identity.rowKey);
-      return measured && measured > 0 ? measured : 0;
-    });
-  }, [activeTimelineRowIdentities, timelineRowHeightVersion]);
-  const timelineVirtualRange = useMemo(
-    () => resolveConversationVirtualRange({
-      itemCount: activeTimelineMessages.length,
-      scrollTop: timelineVirtualMetrics.scrollTop,
-      viewportHeight: timelineVirtualMetrics.viewportHeight,
-      followingLatest: followLatestRef.current,
-      heights: timelineMeasuredHeights,
-    }),
-    [
-      activeTimelineMessages.length,
-      timelineVirtualMetrics.scrollTop,
-      timelineVirtualMetrics.viewportHeight,
-      isAtBottom,
-      timelineMeasuredHeights,
-    ],
+  const getTimelineScrollElement = useCallback(() => timelineRef.current, []);
+  /**
+   * Live-tail partition (zai-org/ZCode ConversationTimeline pattern,
+   * Apache-2.0): the trailing run of in-flight turn rows renders OUTSIDE the
+   * virtualized history window, so per-frame tail growth never reslices the
+   * virtual range. A session executes one turn at a time, so this is normally
+   * a single row.
+   */
+  const timelineLiveTailStartIndex = useMemo(() => {
+    let index = activeTimelineMessages.length;
+    while (index > 0) {
+      const message = activeTimelineMessages[index - 1];
+      if (!assistantTurnIsStreaming(message) && !assistantTurnIsInFlight(message)) {
+        break;
+      }
+      index -= 1;
+    }
+    return index;
+  }, [activeTimelineMessages]);
+  const timelineHistoryMessages = useMemo(
+    () => activeTimelineMessages.slice(0, timelineLiveTailStartIndex),
+    [activeTimelineMessages, timelineLiveTailStartIndex],
   );
-  const virtualTimelineMessages = useMemo(
-    () => activeTimelineMessages.slice(timelineVirtualRange.start, timelineVirtualRange.end),
-    [activeTimelineMessages, timelineVirtualRange.end, timelineVirtualRange.start],
+  const timelineLiveTailMessages = useMemo(
+    () => activeTimelineMessages.slice(timelineLiveTailStartIndex),
+    [activeTimelineMessages, timelineLiveTailStartIndex],
   );
-  const virtualTimelineRowIdentities = useMemo(
-    () => activeTimelineRowIdentities.slice(timelineVirtualRange.start, timelineVirtualRange.end),
-    [activeTimelineRowIdentities, timelineVirtualRange.end, timelineVirtualRange.start],
+  const timelineHistoryRowKeys = useMemo(
+    () => activeTimelineRowIdentities.map((identity) => identity.rowKey),
+    [activeTimelineRowIdentities],
   );
+  // react-virtual keeps measured sizes in an item-size cache keyed by the
+  // stable row keys from getItemKey, so measured heights survive index shifts
+  // (prepend/load-earlier) without a hand-rolled cache.
+  const timelineVirtualizer = useVirtualizer({
+    count: timelineHistoryMessages.length,
+    getScrollElement: getTimelineScrollElement,
+    estimateSize: () => CONVERSATION_VIRTUAL_ROW_ESTIMATE_PX,
+    getItemKey: (index) => timelineHistoryRowKeys[index] ?? `timeline-row-${index}`,
+    overscan: TIMELINE_VIRTUAL_OVERSCAN,
+    gap: TIMELINE_VIRTUAL_ROW_GAP_PX,
+    scrollMargin: TIMELINE_VIRTUAL_SCROLL_MARGIN_PX,
+    initialRect: { width: TIMELINE_VIRTUAL_INITIAL_RECT.width, height: TIMELINE_VIRTUAL_INITIAL_RECT.height },
+    useAnimationFrameWithResizeObserver: true,
+  });
+  const measureTimelineVirtualRow = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (node) {
+        timelineVirtualizer.measureElement(node);
+      }
+    },
+    [timelineVirtualizer],
+  );
+  /**
+   * One render plan for both blocks: measured virtual rows inside the history
+   * host (virtualStartPx set) plus the in-flight live-tail rows after it
+   * (virtualStartPx null, static flow). The plan is rebuilt every render from
+   * the virtualizer snapshot so scroll/measure notifications stay live.
+   */
+  const timelineRowPlan: Array<{ index: number; virtualStartPx: number | null }> = [];
+  for (const virtualItem of timelineVirtualizer.getVirtualItems()) {
+    timelineRowPlan.push({ index: virtualItem.index, virtualStartPx: virtualItem.start });
+  }
+  for (let tailOffset = 0; tailOffset < timelineLiveTailMessages.length; tailOffset += 1) {
+    timelineRowPlan.push({ index: timelineLiveTailStartIndex + tailOffset, virtualStartPx: null });
+  }
+
+  function renderTimelineRow(rowPlan: { index: number; virtualStartPx: number | null }) {
+              const index = rowPlan.index;
+              const message = activeTimelineMessages[index];
+              if (!message) {
+                return null;
+              }
+              const rowIdentity = activeTimelineRowIdentities[index];
+              const rowKey = rowIdentity?.rowKey ?? message.id;
+              return (
+              <div
+                key={rowKey}
+                ref={rowPlan.virtualStartPx === null ? undefined : measureTimelineVirtualRow}
+                {...(rowPlan.virtualStartPx === null
+                  ? {}
+                  : {
+                    "data-index": index,
+                    style: {
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${rowPlan.virtualStartPx}px)`,
+                    },
+                  })}
+                className={styles.timelineVirtualRow}
+                data-conversation-virtual-row={rowKey}
+              >
+              <ConversationTurnRow
+                message={message}
+                previousMessage={activeTimelineMessages[index - 1]}
+                agentMessage={agentMessagesByMessageId.get(message.id)}
+                agentRenderState={agentRenderStatesByMessageId.get(message.id)}
+                previousAgentRenderState={
+                  activeTimelineMessages[index - 1]
+                    ? agentRenderStatesByMessageId.get(activeTimelineMessages[index - 1].id)
+                    : undefined
+                }
+                codexTranscriptCells={agentCodexSurfacesByMessageId.get(message.id)?.cells}
+                rowIdentity={rowIdentity}
+                defaultResponseExpanded={defaultExpandedResponseIds.has(message.id)}
+                latestUserMessageId={latestUserMessageId}
+                editingMessageId={editingMessageId}
+                editUserMessageLabel={editUserMessageLabel}
+                editUserMessageDisabled={editUserMessageDisabled}
+                composerPlaceholder={composerPlaceholder}
+                answerOnlyProcessMode={answerOnlyProcessMode}
+                showMentalSnapshots={showMentalSnapshots}
+                lang={lang}
+                assistantLabel={assistantLabel}
+                assistantAvatarImageUrl={assistantAvatarImageUrl}
+                assistantAvatarFallback={assistantAvatarFallback}
+                userLabel={userLabel}
+                userAvatarLabel={userAvatarLabel}
+                userAvatarImageUrl={userAvatarImageUrl}
+                operationLabels={operationLabels}
+                resolveTurnAvatar={resolveTurnAvatar}
+                onEditUserMessage={onEditUserMessage}
+                onRegenerateAssistantMessage={onRegenerateAssistantMessage}
+                onSwitchMessageVersion={onSwitchMessageVersion}
+                branchVersionSwitchDisabled={branchVersionSwitchDisabled}
+                regenerableAssistantMessageId={regenerableAssistantMessageId}
+                regenerateDisabled={regenerateDisabled}
+                regeneratePending={regeneratePending}
+                sectionExpansionForMessage={sectionExpansion[message.id] ?? EMPTY_SECTION_EXPANSION}
+                computerUseStateForMessage={buildComputerUseStateForMessage(
+                  message,
+                  computerUseSessionResults,
+                  computerUseSessionPending,
+                )}
+                imageArtifactUrlsBeforeMessage={imageArtifactUrlsBeforeMessage.get(message.id)}
+                renderTurn={() => {
+            const rowIdentity = activeTimelineRowIdentities[index];
+            // The global companion typing affordance is the entire in-flight
+            // shell; do not leave an empty speaker/avatar row beside it.
+            if (companionTypingMessage?.id === message.id) {
+              return null;
+            }
+            if (isCliAgentLifecycleMessage(message)) {
+              const detail = cliAgentLifecycleDetail(message);
+              return (
+                <article
+                  key={rowIdentity?.rowKey ?? message.id}
+                  className={styles.cliAgentLifecycleTurn}
+                  data-conversation-row-key={rowIdentity?.rowKey ?? message.id}
+                >
+                  <span className={styles.cliAgentLifecycleIcon} aria-hidden="true">
+                    <TerminalSquare size={14} />
+                  </span>
+                  <span className={styles.cliAgentLifecycleText}>
+                    {cliAgentLifecycleLabel(message, lang)}
+                  </span>
+                  {detail ? <code className={styles.cliAgentLifecycleMeta}>{detail}</code> : null}
+                  {message.timestamp ? (
+                    <span className={styles.cliAgentLifecycleTime}>{formatTimestamp(message.timestamp)}</span>
+                  ) : null}
+                </article>
+              );
+            }
+            const agentMessage = agentMessagesByMessageId.get(message.id);
+            if (!agentMessage) {
+              return null;
+            }
+            const baseOperationGroups = agentOperationGroupsByMessageId.get(agentMessage.id)
+              ?? buildAgentMessageOperationGroups(agentMessage, operationLabels);
+            const operationGroups = operationGroupsWithFeedbackStatusPlaceholder(baseOperationGroups, message, lang);
+            const agentRenderState = agentRenderStatesByMessageId.get(message.id) ?? buildAgentMessageRenderState(agentMessage);
+            const agentSections = agentRenderState.sectionState;
+            const processSections = agentRenderState.processSections;
+            const responseText = agentSections.answerText;
+            const noFinalAnswerStatusText = isNoFinalAnswerStatusContent(responseText)
+              ? responseText.trim()
+              : "";
+            const userContentText = agentSections.userText;
+            const hasActiveProcess = operationGroups.timeline.some((operation) => isRunningOperationStatus(operation.status));
+            const hasFeedbackTimeline = agentSections.hasFeedbackTimeline;
+            const showResponseBlock = shouldShowAgentResponseBlock(message, agentSections, hasFeedbackTimeline);
+            const turnErrorMessage = isTurnErrorMessage(message);
+            const imageArtifact = imageArtifactForMessage(message);
+            const agentInboxMessage = isAgentInboxMessage(message);
+            const groupTranscriptMessage = isGroupRoomTranscriptMessage(message);
+            const previousMessage = activeTimelineMessages[index - 1];
+            const previousAgentRenderState = previousMessage
+              ? agentRenderStatesByMessageId.get(previousMessage.id)
+              : undefined;
+            const compactTurnHeader = shouldCompactConversationTurnHeader(
+              previousMessage,
+              message,
+              previousAgentRenderState?.sectionState,
+              agentSections,
+            );
+            const codexTranscriptSurface = agentCodexSurfacesByMessageId.get(agentMessage.id);
+            const codexTranscriptCells = codexTranscriptSurface?.cells ?? [];
+            // Phase C: display plan picks package_cells vs legacy; single track for final answer.
+            const displayPlanSeed = resolveAssistantDisplayPlan({
+              message,
+              surface: codexTranscriptSurface,
+            });
+            const shouldRenderLegacyTurnError = Boolean(
+              turnErrorMessage && !displayPlanSeed.suppressProjectedError,
+            );
+            // Failure-turn presentation: human-readable errorType chip and a
+            // budget-directed recovery action instead of raw codes.
+            const turnErrorTypeLabelKey = shouldRenderLegacyTurnError
+              ? resolveTurnErrorTypeLabelKey(resolveConversationTurnErrorType(message))
+              : "";
+            const turnErrorRecoveryAction = shouldRenderLegacyTurnError
+              ? resolveConversationTurnErrorRecoveryAction(message)
+              : "";
+            const timelineOptions = {
+              lang,
+              // The assistant body always comes from the canonical cell surface.
+              // Do not manufacture a second answer row in the process timeline.
+              includeAssistantText: false,
+            };
+            const agentMessageTimelineItems = buildAgentMessageTimelineItems(
+              agentMessage,
+              operationGroups.timeline,
+              timelineOptions,
+            );
+            const hasAgentMessageTimeline =
+              message.role === "assistant"
+              && hasFeedbackTimeline
+              && !turnErrorMessage
+              && !agentInboxMessage
+              && !groupTranscriptMessage
+              && agentMessageTimelineItems.length > 0;
+            const displayPlan = resolveAssistantDisplayPlan({
+              message,
+              surface: codexTranscriptSurface,
+            });
+            const timelineRendersAssistantText = false;
+            const showUserContent = agentSections.hasUserContent;
+            const steerGuidanceMessage = isSteerGuidanceMessage(message);
+            const userAuthoredMessage = message.role === "user" && !agentInboxMessage;
+            const isStreamingStatusPlaceholder = assistantTurnIsStreaming(message)
+              && showResponseBlock
+              && answerOnlyProcessMode
+              && isStreamingStatusPlaceholderContent(responseText);
+            const isResponseStreaming = assistantTurnIsStreaming(message) && showResponseBlock && !isStreamingStatusPlaceholder;
+            const copyableAnswerText = message.role === "assistant"
+              && !turnErrorMessage
+              && !assistantTurnIsStreaming(message)
+              ? responseText.trim()
+              : "";
+            const canRegenerateAnswer = message.role === "assistant"
+              && !turnErrorMessage
+              && !assistantTurnIsStreaming(message)
+              && Boolean(onRegenerateAssistantMessage)
+              // Any settled answer on a branch can regenerate; messages without
+              // a journal node id keep the legacy latest-only fallback.
+              && (Boolean(message.nodeId) || message.id === regenerableAssistantMessageId);
+            // A settled failed turn offers in-place recovery: retry reruns the
+            // turn's original user message through the same branch-aware
+            // regenerate pipeline as the regenerate action. Without a journal
+            // node id only the legacy latest-turn fallback remains, so the
+            // entry is hidden for older untargetable failures.
+            const canRetryFailedTurnMessage = message.role === "assistant"
+              && turnErrorMessage
+              && !assistantTurnIsStreaming(message)
+              && !agentInboxMessage
+              && !groupTranscriptMessage
+              && Boolean(onRegenerateAssistantMessage)
+              && (Boolean(message.nodeId) || message.id === regenerableAssistantMessageId);
+            const branchInfo = message.branch;
+            const siblingNodeIds = Array.isArray(branchInfo?.siblingNodeIds)
+              ? branchInfo.siblingNodeIds.filter((value): value is string => Boolean(value))
+              : [];
+            const siblingCount = Math.max(
+              Number(branchInfo?.siblingCount ?? 0) || 0,
+              siblingNodeIds.length,
+            );
+            const siblingIndex = Number(branchInfo?.siblingIndex ?? 0) || 0;
+            const currentNodeId = String(message.nodeId || "").trim();
+            // Fork exit: any settled journal node (user or assistant) can seed a
+            // new session; companion/private/group surfaces stay out of scope.
+            const canForkSessionFromMessage = Boolean(onForkSessionFromNode)
+              && !companionMode
+              && !agentInboxMessage
+              && !groupTranscriptMessage
+              && !assistantTurnIsStreaming(message)
+              && Boolean(currentNodeId);
+            const showVersionSwitcher = Boolean(onSwitchMessageVersion)
+              && siblingCount > 1
+              && siblingNodeIds.length > 1
+              && siblingIndex >= 1
+              && siblingIndex <= siblingNodeIds.length
+              && Boolean(currentNodeId)
+              && siblingNodeIds.includes(currentNodeId);
+            const versionSwitchDisabled = Boolean(branchVersionSwitchDisabled);
+            const previousSiblingNodeId = siblingIndex > 1 ? siblingNodeIds[siblingIndex - 2] : "";
+            const nextSiblingNodeId = siblingIndex < siblingNodeIds.length
+              ? siblingNodeIds[siblingIndex]
+              : "";
+            const showResponseSpinner = isResponseStreaming && !hasActiveProcess;
+            const defaultResponseExpanded = assistantTurnIsStreaming(message) || defaultExpandedResponseIds.has(message.id);
+            const responseExpanded = getExpansionState(message.id, "response", defaultResponseExpanded);
+            const responseSegments = showResponseBlock && !isStreamingStatusPlaceholder && !isResponseStreaming
+              ? getCachedResponseSegments(responseText)
+              : [];
+            const codexTranscriptNode = (
+              displayPlan.shouldRenderCodexSurface
+              && !agentInboxMessage
+              && !groupTranscriptMessage
+            )
+              ? renderCodexTranscriptCells(message, codexTranscriptCells, rowIdentity, companionMode)
+              : null;
+            // Todo checklist card: client-derived from the latest journaled
+            // todo_write call in this turn (no extra SSE event). Companion and
+            // private-message surfaces stay minimal by contract.
+            const todoChecklistSnapshot = message.role === "assistant"
+              && !companionMode
+              && !agentInboxMessage
+              && !groupTranscriptMessage
+              ? deriveLatestTodoChecklist(message.turnItems)
+              : undefined;
+            const todoChecklistNode = todoChecklistSnapshot ? (
+              <ConversationTodoChecklist
+                snapshot={todoChecklistSnapshot}
+                lang={lang}
+                turnSettled={hasTerminalCanonicalTurnOutcome(message)}
+              />
+            ) : null;
+            // Only force the answer body open while tokens are still streaming.
+            // Tying this to defaultResponseExpanded made the last few answers
+            // impossible to collapse (toggle flipped aria state but body stayed).
+            const shouldForceResponseBodyVisible = isResponseStreaming;
+            const isEditingMessage = userAuthoredMessage && message.id === editingMessageId;
+            const agentInboxExpanded = getExpansionState(message.id, "agentInbox", false);
+            const agentInboxPreview = agentInboxMessage ? compactPreview(agentInboxSummary(message), 140) : "";
+            const researchOrgChips = researchOrgMessageChips(message);
+            const contextNode = !companionMode && (agentRenderState.contextSections?.length ?? 0) > 0 ? (
+              <React.Suspense fallback={null}>
+                <AgentContextSectionsView sections={agentRenderState.contextSections} lang={lang} />
+              </React.Suspense>
+            ) : null;
+            const turnClassName = [
+              groupTranscriptMessage
+                ? styles.groupTranscriptTurn
+                : message.role === "assistant"
+                  ? styles.assistantTurn
+                  : agentInboxMessage
+                  ? styles.agentInboxTurn
+                  : styles.userTurn,
+              turnErrorMessage ? styles.turnErrorTurn : "",
+              compactTurnHeader ? styles.assistantTurnContinuation : "",
+              isEditingMessage ? styles.turnEditing : "",
+            ].filter(Boolean).join(" ");
+            const speakerLabel = groupTranscriptMessage
+              ? groupRoomTranscriptLabel(message)
+              : message.role === "assistant"
+                ? assistantLabel
+                : agentInboxMessage
+                  ? agentInboxSourceLabel(message)
+                  : userLabel;
+            const editDisabled = Boolean(editUserMessageDisabled);
+            const processTone = operationCollectionTone(operationGroups.timeline);
+            const processDefaultExpanded = processTone === "running";
+            const renderAgentProcessDetails = (defaultExpandedOverride?: boolean) => (
+              <>
+                {renderOperationGroup(
+                  message.id,
+                  "thought",
+                  operationGroups.thoughts,
+                  defaultExpandedOverride ?? assistantTurnIsStreaming(message),
+                )}
+                {renderAgentMentalPanel(
+                  message.id,
+                  latestAgentMentalPart(processSections),
+                  defaultExpandedOverride,
+                  assistantTurnIsStreaming(message) && operationGroups.tools.length === 0 && !agentSections.hasResponseBlock,
+                )}
+                {renderOperationGroup(
+                  message.id,
+                  "tools",
+                  operationGroups.tools,
+                  defaultExpandedOverride ?? shouldExpandToolGroupByDefault(message, operationGroups.tools),
+                )}
+              </>
+            );
+            const renderProcessDetails = () => {
+              if (hasAgentMessageTimeline) {
+                return renderAgentMessageTimeline(message, agentMessageTimelineItems, rowIdentity, agentRenderState.processSectionIds);
+              }
+              if (hasFeedbackTimeline) {
+                return renderFeedbackTimelineDetails(message.id, operationGroups.timeline);
+              }
+              return renderAgentProcessDetails(true);
+            };
+            // One assistant turn has one display source: its local turnItems cell surface.
+            const responseSectionNode = null;
+            // The fallback process rail is only useful while a future producer has
+            // not emitted a canonical cell yet. It never receives assistant text.
+            const processNode = companionMode || displayPlan.suppressProjectedProcess
+              ? null
+              : displayPlan.renderMode === "turn_items"
+                ? null
+                : hasAgentMessageTimeline
+                  ? renderAgentMessageTimeline(message, agentMessageTimelineItems, rowIdentity, agentRenderState.processSectionIds)
+                  : hasFeedbackTimeline
+                    ? renderFeedbackTimelineGroup(
+                      message.id,
+                      operationGroups.timeline,
+                      false,
+                      agentRenderState.processSectionIds,
+                    )
+                    : null;
+            const showCompactActiveTurnPlaceholder = shouldRenderCompactActiveTurnPlaceholder(message, {
+              showResponseBlock,
+              hasFeedbackTimeline,
+              hasActiveProcess,
+              turnErrorMessage,
+              // Avoid "状态" placeholder stacking above an already-visible codex process trail.
+              hasCodexSurface: Boolean(displayPlan.shouldRenderCodexSurface),
+            });
+            // Prefer compact active-turn note over projected turnStatus for in-flight shells.
+            const turnStatusNode = !companionMode && !showCompactActiveTurnPlaceholder
+              && !displayPlan.suppressProjectedTurnStatus
+              && noFinalAnswerStatusText ? (
+              <div className={styles.turnStatusNote} role="status" aria-live="polite">
+                <span className={styles.turnStatusLabel}>{lang === "zh" ? "状态" : "Status"}</span>
+                <span className={styles.turnStatusText}>{noFinalAnswerStatusText}</span>
+              </div>
+            ) : null;
+            const compactActiveTurnPlaceholderNode = !companionMode && showCompactActiveTurnPlaceholder ? (
+              <ConversationActiveTurnStatusNote
+                message={message}
+                lang={lang}
+                statusLabel={lang === "zh" ? "状态" : "Status"}
+              />
+            ) : null;
+            return (
+              <AgentMessageTurnView
+                key={rowIdentity.rowKey}
+                rowKey={rowIdentity.rowKey}
+                messageKey={rowIdentity.messageKey}
+                agentMessageId={agentMessage.id}
+                sectionCount={agentSections.sectionCount}
+                sectionKinds={agentRenderState.sectionKinds}
+                className={turnClassName}
+                compactHeader={false}
+                avatar={
+                  <ConversationTurnAvatarContent
+                    content={resolveMessageTurnAvatar(message, {
+                      resolveTurnAvatar,
+                      assistantAvatarImageUrl,
+                      assistantAvatarFallback,
+                      assistantLabel,
+                      userAvatarImageUrl,
+                      userAvatarLabel,
+                      agentInboxMessage,
+                      groupTranscriptMessage,
+                    })}
+                  />
+                }
+                speakerLabel={speakerLabel}
+                identityAccessory={
+                  isEditingMessage
+                    ? <span className={styles.turnEditBadge}>{t("editMessage")}</span>
+                    : steerGuidanceMessage
+                      ? <span className={styles.turnEditBadge}>{resolvedSafeGuidanceLabel}</span>
+                      : null
+                }
+                metaActions={
+                  <>
+                    {message.timestamp ? <span>{formatTimestamp(message.timestamp)}</span> : null}
+                    {showVersionSwitcher ? (
+                      <VActionGroup
+                        ariaLabel={t("branchVersionLabel")}
+                        className={styles.turnVersionSwitcher}
+                      >
+                        <VButton
+                          type="button"
+                          className={styles.turnIconButton}
+                          onClick={() => onSwitchMessageVersion?.(message, previousSiblingNodeId)}
+                          isDisabled={versionSwitchDisabled || !previousSiblingNodeId}
+                          title={t("switchBranchVersionPrevious")}
+                          aria-label={t("switchBranchVersionPrevious")}
+                          isIconOnly
+                          icon={<ChevronLeft size={14}/>} />
+                        <span className={styles.turnVersionLabel} aria-live="polite">
+                          {`${siblingIndex}/${siblingCount}`}
+                        </span>
+                        <VButton
+                          type="button"
+                          className={styles.turnIconButton}
+                          onClick={() => onSwitchMessageVersion?.(message, nextSiblingNodeId)}
+                          isDisabled={versionSwitchDisabled || !nextSiblingNodeId}
+                          title={t("switchBranchVersionNext")}
+                          aria-label={t("switchBranchVersionNext")}
+                          isIconOnly
+                          icon={<ChevronRight size={14}/>} />
+                      </VActionGroup>
+                    ) : null}
+                    {copyableAnswerText ? (
+                      <VButton
+                        type="button"
+                        className={styles.turnIconButton}
+                        onClick={() => handleCopyAnswer(message.id, copyableAnswerText)}
+                        title={t("copyAnswer")}
+                        aria-label={t("copyAnswer")}
+                        isIconOnly
+                        icon={copiedAnswerMessageId === message.id ? <Check size={14}/> : <Copy size={14}/>} />
+                    ) : null}
+                    {canForkSessionFromMessage ? (
+                      <VButton
+                        type="button"
+                        className={styles.turnIconButton}
+                        onClick={() => {
+                          setForkScope("visible_path");
+                          setForkDialogMessage(message);
+                        }}
+                        isDisabled={versionSwitchDisabled}
+                        title={t("forkSessionFromMessage")}
+                        aria-label={t("forkSessionFromMessage")}
+                        isIconOnly
+                        icon={<GitFork size={14}/>} />
+                    ) : null}
+                    {canRegenerateAnswer ? (
+                      <VButton
+                        type="button"
+                        className={styles.turnIconButton}
+                        onClick={() => onRegenerateAssistantMessage?.(message)}
+                        isDisabled={regenerateDisabled}
+                        isPending={regeneratePending}
+                        title={regeneratePending ? t("regeneratePending") : t("regenerateAnswer")}
+                        aria-label={regeneratePending ? t("regeneratePending") : t("regenerateAnswer")}
+                        isIconOnly
+                        icon={<RefreshCw size={14}/>} />
+                    ) : null}
+                    {userAuthoredMessage && !steerGuidanceMessage && onEditUserMessage ? (
+                      <VButton
+                        type="button"
+                        className={
+                          isEditingMessage
+                            ? `${styles.turnIconButton} ${styles.turnIconButtonActive}`
+                            : styles.turnIconButton
+                        }
+                        onClick={() => onEditUserMessage(message)}
+                        isDisabled={editDisabled}
+                        aria-pressed={isEditingMessage}
+                        title={editDisabled ? composerPlaceholder : editUserMessageLabel ?? t("editMessage")}
+                        aria-label={editUserMessageLabel ?? t("editMessage")}
+                        isIconOnly
+                        icon={<Pencil size={14}/>} />
+                    ) : null}
+                  </>
+                }
+              >
+
+                  <span
+                    hidden
+                    data-codex-transcript-cell-count={codexTranscriptCells.length}
+                    data-codex-transcript-surface-mode={codexTranscriptSurface?.mode ?? "empty"}
+                    data-codex-transcript-native-primary={displayPlan.nativePrimary ? "true" : "false"}
+                    data-assistant-render-mode={displayPlan.renderMode}
+                    data-assistant-has-turn-item-package={displayPlan.hasTurnItemPackage ? "true" : "false"}
+                    data-codex-transcript-projection-gap-reason={codexTranscriptSurface?.projectionGap?.reason ?? ""}
+                    data-codex-transcript-projection-gap-projected-cell-count={codexTranscriptSurface?.projectionGap?.projectedCellCount ?? 0}
+                  />
+                  {agentInboxMessage ? (
+                    <section className={styles.agentInboxSection}>
+                      {researchOrgChips.length > 0 ? (
+                        <div className={styles.researchOrgChipRow} aria-label={lang === "zh" ? "科研组织消息标签" : "Research organization message labels"}>
+                          {researchOrgChips.map((chip) => (
+                            <span
+                              key={chip.key}
+                              className={`${styles.researchOrgChip} ${styles[`researchOrgChip_${chip.tone}`]}`}
+                            >
+                              {chip.label}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                      <VButton
+                        type="button"
+                        className={styles.agentInboxToggle}
+                        aria-expanded={agentInboxExpanded}
+                        onClick={() => toggleSection(message.id, "agentInbox", false)}
+                        title={agentInboxExpanded ? (lang === "zh" ? "折叠私信内容" : "Collapse private message") : (lang === "zh" ? "展开私信内容" : "Expand private message")}
+                        icon={agentInboxExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}><span>{lang === "zh" ? "私信内容" : "Private message"}</span>
+                        {agentInboxPreview ? <span className={styles.agentInboxPreview}>{agentInboxPreview}</span> : null}</VButton>
+                      {agentInboxExpanded ? (
+                        <div className={styles.agentInboxMessageBody}>
+                          {renderResponseText(assistantFinalAnswerText(message))}
+                        </div>
+                      ) : null}
+                    </section>
+                  ) : showUserContent ? (
+                    <AgentUserContentSectionView userContentSectionIds={agentRenderState.userContentSectionIds}>
+                      {renderResponseText(userContentText)}
+                    </AgentUserContentSectionView>
+                  ) : null}
+                  {groupTranscriptMessage ? (
+                    <div className={styles.groupTranscriptBody}>{renderResponseText(assistantFinalAnswerText(message))}</div>
+                  ) : null}
+                  {contextNode}
+
+                  {/*
+                    Codex-aligned order: process / tools first, then final answer surface.
+                    - renderCodexTranscriptCells already does processCells → finalCells inside.
+                    - When tools only exist on feedback/timeline (alongside), processNode must
+                      still precede codexTranscriptNode so the answer is not above the tools.
+                  */}
+                  {/* Checklist overview sits above the process trail: it is a
+                      progress summary, not a second process row. */}
+                  {todoChecklistNode}
+                  {processNode}
+                  {compactActiveTurnPlaceholderNode}
+                  {codexTranscriptNode}
+                  {turnStatusNode}
+                  {shouldRenderLegacyTurnError ? (
+                    <div className={styles.turnErrorNotice} role="status" aria-live="polite">
+                      <div className={styles.turnErrorNoticeIcon} aria-hidden="true">
+                        <TerminalSquare size={15} />
+                      </div>
+                      <div className={styles.turnErrorNoticeBody}>
+                        <div className={styles.turnErrorNoticeMeta}>
+                          <span>{lang === "zh" ? "运行提示" : "Runtime notice"}</span>
+                          {turnErrorTypeLabelKey ? (
+                            <span title={resolveConversationTurnErrorType(message)}>{t(turnErrorTypeLabelKey)}</span>
+                          ) : null}
+                        </div>
+                        <div className={styles.turnErrorNoticeText}>{renderResponseText(assistantFinalAnswerText(message))}</div>
+                        {buildConversationTurnErrorReasonRows(message, lang).length > 0 ? (
+                          <details className={styles.turnErrorDiagnostics}>
+                            <summary className={styles.turnErrorDiagnosticsSummary}>
+                              {lang === "zh" ? "诊断详情" : "Diagnostics"}
+                            </summary>
+                            <dl className={styles.turnErrorReasonList}>
+                              {buildConversationTurnErrorReasonRows(message, lang).map((row) => (
+                                <div key={`${row.label}-${row.value}`} className={styles.turnErrorReasonRow}>
+                                  <dt>{row.label}</dt>
+                                  <dd>{row.value}</dd>
+                                </div>
+                              ))}
+                            </dl>
+                          </details>
+                        ) : null}
+                        {turnErrorRecoveryAction === "compress_context" && onOpenComposerContextDetail ? (
+                          <div className={styles.turnErrorActions}>
+                            <VButton
+                              type="button"
+                              contentLayout="plain"
+                              className={styles.turnErrorRetryButton}
+                              onClick={onOpenComposerContextDetail}
+                              title={t("turnErrorActionCompressContextTitle")}
+                              aria-label={t("turnErrorActionCompressContext")}
+                            >
+                              <Gauge size={12}/>
+                              <span>{t("turnErrorActionCompressContext")}</span>
+                            </VButton>
+                          </div>
+                        ) : null}
+                        {canRetryFailedTurnMessage ? (
+                          <div className={styles.turnErrorActions}>
+                            <VButton
+                              type="button"
+                              contentLayout="plain"
+                              className={styles.turnErrorRetryButton}
+                              onClick={() => onRegenerateAssistantMessage?.(message)}
+                              isDisabled={regenerateDisabled}
+                              isPending={regeneratePending}
+                              title={regeneratePending ? t("retryFailedTurnPending") : t("retryFailedTurn")}
+                              aria-label={regeneratePending ? t("retryFailedTurnPending") : t("retryFailedTurn")}
+                            >
+                              <RefreshCw size={12}/>
+                              <span>{t("retryFailedTurn")}</span>
+                            </VButton>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
+                  {answerOnlyProcessMode ? responseSectionNode : null}
+                  {imageArtifact ? (
+                    <ConversationImageArtifactView
+                      artifact={imageArtifact}
+                      lang={lang}
+                      onPreviewImage={openImagePreview}
+                    />
+                  ) : null}
+
+                  {!answerOnlyProcessMode ? responseSectionNode : null}
+              </AgentMessageTurnView>
+            );
+                }}
+              />
+              </div>
+              );
+  }
   const activeConversationMessagesById = useMemo(() => {
     const messagesById = new Map<string, ConversationMessage>();
     for (const message of activeTimelineMessages) {
@@ -1468,10 +2136,6 @@ export const ConversationView = React.memo(function ConversationView({
           scrollTimelineToBottom(timeline);
         }
         lastTimelineScrollTopRef.current = timeline.scrollTop;
-        setTimelineVirtualMetrics((current) => ({
-          scrollTop: timeline.scrollTop,
-          viewportHeight: timeline.clientHeight || current.viewportHeight,
-        }));
       };
     }
     // Reading history: pin the summary so expand/collapse does not yank the viewport.
@@ -1484,10 +2148,6 @@ export const ConversationView = React.memo(function ConversationView({
     return () => {
       restoreConversationProcessScrollAnchor(timeline, summary, anchor);
       lastTimelineScrollTopRef.current = timeline.scrollTop;
-      setTimelineVirtualMetrics((current) => ({
-        scrollTop: timeline.scrollTop,
-        viewportHeight: timeline.clientHeight || current.viewportHeight,
-      }));
     };
   }, []);
 
@@ -1508,16 +2168,6 @@ export const ConversationView = React.memo(function ConversationView({
       })) {
         scheduleTimelineScrollToBottom();
       }
-      setTimelineVirtualMetrics((current) => {
-        const next = {
-          scrollTop: timeline.scrollTop,
-          viewportHeight: timeline.clientHeight || current.viewportHeight,
-        };
-        if (next.scrollTop === current.scrollTop && next.viewportHeight === current.viewportHeight) {
-          return current;
-        }
-        return next;
-      });
     });
     observer.observe(timeline);
     const content = timelineContentRef.current;
@@ -1527,104 +2177,6 @@ export const ConversationView = React.memo(function ConversationView({
     return () => observer.disconnect();
   }, [sessionId, activeTimelineMessages.length > 0]);
 
-  useEffect(() => {
-    timelineRowHeightCacheRef.current.clear();
-    for (const observer of timelineRowResizeObserversRef.current.values()) {
-      observer.disconnect();
-    }
-    timelineRowResizeObserversRef.current.clear();
-    timelineRowNodesRef.current.clear();
-    timelineVirtualRowRefCallbacksRef.current.clear();
-    setTimelineRowHeightVersion((version) => version + 1);
-  }, [sessionId]);
-
-  const scheduleTimelineHeightVersionBump = useCallback(() => {
-    if (timelineHeightBumpFrameRef.current !== null) {
-      return;
-    }
-    timelineHeightBumpFrameRef.current = window.requestAnimationFrame(() => {
-      timelineHeightBumpFrameRef.current = null;
-      setTimelineRowHeightVersion((version) => version + 1);
-      // Row measure can change scrollHeight without resizing the scroll container box.
-      // While following latest, re-pin so expand/stream growth stays on the tail.
-      if (shouldStickTimelineToBottomOnContentResize({
-        autoScrollToLatest: autoScrollToLatestRef.current,
-        followingLatest: followLatestRef.current,
-        contentWidthChanging: contentWidthIsChanging(),
-      })) {
-        scheduleTimelineScrollToBottom();
-      }
-    });
-  }, []);
-
-  const bindTimelineVirtualRow = useCallback((rowKey: string, node: HTMLDivElement | null) => {
-    const key = String(rowKey || "").trim();
-    if (!key) {
-      return;
-    }
-    if (!node) {
-      const previous = timelineRowResizeObserversRef.current.get(key);
-      if (previous) {
-        previous.disconnect();
-        timelineRowResizeObserversRef.current.delete(key);
-      }
-      timelineRowNodesRef.current.delete(key);
-      return;
-    }
-    // Inline ref callbacks change identity every render; React then does null→node.
-    // Skip rebind when we already observe this exact node to avoid measure thrash.
-    if (
-      timelineRowNodesRef.current.get(key) === node
-      && timelineRowResizeObserversRef.current.has(key)
-    ) {
-      return;
-    }
-    const previous = timelineRowResizeObserversRef.current.get(key);
-    if (previous) {
-      previous.disconnect();
-      timelineRowResizeObserversRef.current.delete(key);
-    }
-    if (typeof ResizeObserver === "undefined") {
-      timelineRowNodesRef.current.set(key, node);
-      return;
-    }
-    const publish = (height: number) => {
-      // Following latest: spinner / subpixel reflow often jitters 2–6px; ignore that noise.
-      const minDeltaPx = followLatestRef.current ? 8 : 2;
-      if (recordConversationRowHeight(timelineRowHeightCacheRef.current, key, height, { minDeltaPx })) {
-        scheduleTimelineHeightVersionBump();
-      }
-    };
-    publish(node.getBoundingClientRect().height);
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      const height = entry?.borderBoxSize?.[0]?.blockSize
-        ?? entry?.contentRect?.height
-        ?? node.getBoundingClientRect().height;
-      publish(height);
-    });
-    observer.observe(node);
-    timelineRowResizeObserversRef.current.set(key, observer);
-    timelineRowNodesRef.current.set(key, node);
-  }, [scheduleTimelineHeightVersionBump]);
-  const bindTimelineVirtualRowLatestRef = useRef(bindTimelineVirtualRow);
-  bindTimelineVirtualRowLatestRef.current = bindTimelineVirtualRow;
-
-  const timelineVirtualRowRef = useCallback((rowKey: string) => {
-    const key = String(rowKey || "").trim();
-    if (!key) {
-      return (_node: HTMLDivElement | null) => undefined;
-    }
-    const existing = timelineVirtualRowRefCallbacksRef.current.get(key);
-    if (existing) {
-      return existing;
-    }
-    const callback = (node: HTMLDivElement | null) => {
-      bindTimelineVirtualRowLatestRef.current(key, node);
-    };
-    timelineVirtualRowRefCallbacksRef.current.set(key, callback);
-    return callback;
-  }, []);
 
   useEffect(() => () => {
     if (copyAnswerFeedbackTimerRef.current !== null) {
@@ -1633,18 +2185,61 @@ export const ConversationView = React.memo(function ConversationView({
   }, []);
 
   useLayoutEffect(() => {
-    const anchor = historyScrollAnchorRef.current;
-    if (!anchor) {
+    const pending = historyAnchorCorrectingRef.current;
+    if (!pending || !pending.anchor) {
       return;
     }
-    historyScrollAnchorRef.current = null;
-    if (restoreTimelineRowKeyAnchor(timelineRef.current, anchor)) {
-      atBottomRef.current = false;
-      followLatestRef.current = false;
-      lastTimelineScrollTopRef.current = timelineRef.current?.scrollTop ?? 0;
-      setIsAtBottom(false);
+    const timeline = timelineRef.current;
+    if (!timeline) {
+      return;
     }
-  }, [activeTimelineMessages.length, visibleMessageLimit]);
+    if (activeTimelineMessages.length === pending.startLength) {
+      // Capture done, prepend not committed yet: keep the anchor pending.
+      return;
+    }
+    if (!pending.fallbackDone) {
+      // First pass after the prepend: exact row-key restore when the anchor
+      // row is mounted, scrollHeight-delta fallback otherwise (the fallback
+      // drifts by the estimate error of all prepended rows; the correction
+      // frames below eliminate that residual).
+      pending.fallbackDone = true;
+      if (restoreTimelineRowKeyAnchor(timeline, pending.anchor)) {
+        atBottomRef.current = false;
+        followLatestRef.current = false;
+        lastTimelineScrollTopRef.current = timeline.scrollTop;
+        setIsAtBottom(false);
+      }
+      return;
+    }
+    // Correction frames: re-run until the anchor row is mounted at its captured
+    // viewport offset. Measurements streaming in after the prepend keep
+    // re-rendering this effect, so the residual estimate error converges to
+    // zero within a couple of frames instead of shipping a visible jump.
+    const rootTop = timeline.getBoundingClientRect().top;
+    let anchorRow: Element | null = null;
+    for (const row of timeline.querySelectorAll("[data-conversation-row-key]")) {
+      if (row.getAttribute("data-conversation-row-key") === pending.anchor.rowKey) {
+        anchorRow = row;
+        break;
+      }
+    }
+    if (!anchorRow) {
+      pending.attempts += 1;
+      if (pending.attempts > TIMELINE_ANCHOR_CORRECTION_MAX_FRAMES) {
+        historyAnchorCorrectingRef.current = null;
+        historyScrollAnchorRef.current = null;
+      }
+      return;
+    }
+    const drift = anchorRow.getBoundingClientRect().top - rootTop - pending.anchor.offsetTop;
+    if (Math.abs(drift) <= TIMELINE_ANCHOR_CORRECTION_TOLERANCE_PX) {
+      historyAnchorCorrectingRef.current = null;
+      historyScrollAnchorRef.current = null;
+      return;
+    }
+    timeline.scrollTop += drift;
+    lastTimelineScrollTopRef.current = timeline.scrollTop;
+  });
 
   useLayoutEffect(() => {
     const timeline = timelineRef.current;
@@ -1662,10 +2257,6 @@ export const ConversationView = React.memo(function ConversationView({
         atBottomRef.current = false;
         setIsAtBottom(false);
         lastTimelineScrollTopRef.current = restored.scrollTop;
-        setTimelineVirtualMetrics({
-          scrollTop: restored.scrollTop,
-          viewportHeight: timeline.clientHeight || 720,
-        });
         // Sticky→full hydrate and virtual row measure can grow height after first paint.
         window.requestAnimationFrame(() => {
           const nextTimeline = timelineRef.current;
@@ -1865,10 +2456,6 @@ export const ConversationView = React.memo(function ConversationView({
       atBottomRef.current = nextState.isAtBottom;
       followLatestRef.current = nextState.shouldFollowLatest;
       setIsAtBottom(nextState.isAtBottom);
-      setTimelineVirtualMetrics({
-        scrollTop: timeline.scrollTop,
-        viewportHeight: timeline.clientHeight || 720,
-      });
       rememberSessionTimelineScroll(sessionId, {
         scrollTop: timeline.scrollTop,
         followingLatest: nextState.shouldFollowLatest,
@@ -1951,8 +2538,8 @@ export const ConversationView = React.memo(function ConversationView({
   }, [composerDisabled, composerFocusSignal, onComposerFocusRequestSettled]);
 
   useEffect(() => {
-    setVisibleMessageLimit(INITIAL_VISIBLE_MESSAGE_COUNT);
     historyScrollAnchorRef.current = null;
+    historyAnchorCorrectingRef.current = null;
     defaultExpansionRef.current = {};
     responseSegmentCacheRef.current.clear();
     setSectionExpansion({});
@@ -2085,32 +2672,26 @@ export const ConversationView = React.memo(function ConversationView({
       hasEarlierMessages: Boolean(hasEarlierMessages),
       earlierMessagesLoading: Boolean(earlierMessagesLoading),
     });
-    if (preferServerEarlier && onLoadEarlierMessages) {
-      // U5: once the local window is large, prefer server pages over only growing DOM.
-      preserveCurrentExpansionDefaults();
-      historyScrollAnchorRef.current = captureTimelineRowKeyAnchor(timelineRef.current);
-      atBottomRef.current = false;
-      followLatestRef.current = false;
-      setIsAtBottom(false);
-      setVisibleMessageLimit((current) => nextVisibleMessageLimit({
-        currentLimit: current,
-        displayMessageCount: Math.max(displayMessages.length, current + 1),
-      }));
-      onLoadEarlierMessages();
-      return;
-    }
-    if (visibleMessageCount >= displayMessages.length) {
+    if (!preferServerEarlier || !onLoadEarlierMessages) {
+      // U5 with full-history virtualization: every local message is already
+      // rendered (visibleMessageCount === displayMessages.length), so there is
+      // no client window left to expand — earlier history is server pages only.
       return;
     }
     preserveCurrentExpansionDefaults();
     historyScrollAnchorRef.current = captureTimelineRowKeyAnchor(timelineRef.current);
+    historyAnchorCorrectingRef.current = historyScrollAnchorRef.current
+      ? {
+        anchor: historyScrollAnchorRef.current,
+        startLength: activeTimelineMessages.length,
+        attempts: 0,
+        fallbackDone: false,
+      }
+      : null;
     atBottomRef.current = false;
     followLatestRef.current = false;
     setIsAtBottom(false);
-    setVisibleMessageLimit((current) => nextVisibleMessageLimit({
-      currentLimit: current,
-      displayMessageCount: displayMessages.length,
-    }));
+    onLoadEarlierMessages();
   }
 
   function preserveCurrentExpansionDefaults() {
@@ -4593,627 +5174,20 @@ export const ConversationView = React.memo(function ConversationView({
           )
         ) : (
           <div ref={timelineContentRef} className={styles.timelineContent}>
-            {timelineVirtualRange.topSpacerPx > 0 ? (
-              <div
-                aria-hidden="true"
-                className={styles.timelineVirtualSpacer}
-                style={{ height: timelineVirtualRange.topSpacerPx }}
-              />
-            ) : null}
-            {virtualTimelineMessages.map((message, virtualIndex) => {
-              const index = timelineVirtualRange.start + virtualIndex;
-              const rowIdentity = virtualTimelineRowIdentities[virtualIndex] ?? activeTimelineRowIdentities[index];
-              const rowKey = rowIdentity?.rowKey ?? message.id;
-              return (
-              <div
-                key={rowKey}
-                ref={timelineVirtualRowRef(rowKey)}
-                className={styles.timelineVirtualRow}
-                data-conversation-virtual-row={rowKey}
-              >
-              <ConversationTurnRow
-                message={message}
-                previousMessage={activeTimelineMessages[index - 1]}
-                agentMessage={agentMessagesByMessageId.get(message.id)}
-                agentRenderState={agentRenderStatesByMessageId.get(message.id)}
-                previousAgentRenderState={
-                  activeTimelineMessages[index - 1]
-                    ? agentRenderStatesByMessageId.get(activeTimelineMessages[index - 1].id)
-                    : undefined
-                }
-                codexTranscriptCells={agentCodexSurfacesByMessageId.get(message.id)?.cells}
-                rowIdentity={rowIdentity}
-                defaultResponseExpanded={defaultExpandedResponseIds.has(message.id)}
-                latestUserMessageId={latestUserMessageId}
-                editingMessageId={editingMessageId}
-                editUserMessageLabel={editUserMessageLabel}
-                editUserMessageDisabled={editUserMessageDisabled}
-                composerPlaceholder={composerPlaceholder}
-                answerOnlyProcessMode={answerOnlyProcessMode}
-                showMentalSnapshots={showMentalSnapshots}
-                lang={lang}
-                assistantLabel={assistantLabel}
-                assistantAvatarImageUrl={assistantAvatarImageUrl}
-                assistantAvatarFallback={assistantAvatarFallback}
-                userLabel={userLabel}
-                userAvatarLabel={userAvatarLabel}
-                userAvatarImageUrl={userAvatarImageUrl}
-                operationLabels={operationLabels}
-                resolveTurnAvatar={resolveTurnAvatar}
-                onEditUserMessage={onEditUserMessage}
-                onRegenerateAssistantMessage={onRegenerateAssistantMessage}
-                onSwitchMessageVersion={onSwitchMessageVersion}
-                branchVersionSwitchDisabled={branchVersionSwitchDisabled}
-                regenerableAssistantMessageId={regenerableAssistantMessageId}
-                regenerateDisabled={regenerateDisabled}
-                regeneratePending={regeneratePending}
-                sectionExpansionForMessage={sectionExpansion[message.id] ?? EMPTY_SECTION_EXPANSION}
-                computerUseStateForMessage={buildComputerUseStateForMessage(
-                  message,
-                  computerUseSessionResults,
-                  computerUseSessionPending,
-                )}
-                imageArtifactUrlsBeforeMessage={imageArtifactUrlsBeforeMessage.get(message.id)}
-                renderTurn={() => {
-            const rowIdentity = activeTimelineRowIdentities[index];
-            // The global companion typing affordance is the entire in-flight
-            // shell; do not leave an empty speaker/avatar row beside it.
-            if (companionTypingMessage?.id === message.id) {
-              return null;
-            }
-            if (isCliAgentLifecycleMessage(message)) {
-              const detail = cliAgentLifecycleDetail(message);
-              return (
-                <article
-                  key={rowIdentity?.rowKey ?? message.id}
-                  className={styles.cliAgentLifecycleTurn}
-                  data-conversation-row-key={rowIdentity?.rowKey ?? message.id}
-                >
-                  <span className={styles.cliAgentLifecycleIcon} aria-hidden="true">
-                    <TerminalSquare size={14} />
-                  </span>
-                  <span className={styles.cliAgentLifecycleText}>
-                    {cliAgentLifecycleLabel(message, lang)}
-                  </span>
-                  {detail ? <code className={styles.cliAgentLifecycleMeta}>{detail}</code> : null}
-                  {message.timestamp ? (
-                    <span className={styles.cliAgentLifecycleTime}>{formatTimestamp(message.timestamp)}</span>
-                  ) : null}
-                </article>
-              );
-            }
-            const agentMessage = agentMessagesByMessageId.get(message.id);
-            if (!agentMessage) {
-              return null;
-            }
-            const baseOperationGroups = agentOperationGroupsByMessageId.get(agentMessage.id)
-              ?? buildAgentMessageOperationGroups(agentMessage, operationLabels);
-            const operationGroups = operationGroupsWithFeedbackStatusPlaceholder(baseOperationGroups, message, lang);
-            const agentRenderState = agentRenderStatesByMessageId.get(message.id) ?? buildAgentMessageRenderState(agentMessage);
-            const agentSections = agentRenderState.sectionState;
-            const processSections = agentRenderState.processSections;
-            const responseText = agentSections.answerText;
-            const noFinalAnswerStatusText = isNoFinalAnswerStatusContent(responseText)
-              ? responseText.trim()
-              : "";
-            const userContentText = agentSections.userText;
-            const hasActiveProcess = operationGroups.timeline.some((operation) => isRunningOperationStatus(operation.status));
-            const hasFeedbackTimeline = agentSections.hasFeedbackTimeline;
-            const showResponseBlock = shouldShowAgentResponseBlock(message, agentSections, hasFeedbackTimeline);
-            const turnErrorMessage = isTurnErrorMessage(message);
-            const imageArtifact = imageArtifactForMessage(message);
-            const agentInboxMessage = isAgentInboxMessage(message);
-            const groupTranscriptMessage = isGroupRoomTranscriptMessage(message);
-            const previousMessage = activeTimelineMessages[index - 1];
-            const previousAgentRenderState = previousMessage
-              ? agentRenderStatesByMessageId.get(previousMessage.id)
-              : undefined;
-            const compactTurnHeader = shouldCompactConversationTurnHeader(
-              previousMessage,
-              message,
-              previousAgentRenderState?.sectionState,
-              agentSections,
-            );
-            const codexTranscriptSurface = agentCodexSurfacesByMessageId.get(agentMessage.id);
-            const codexTranscriptCells = codexTranscriptSurface?.cells ?? [];
-            // Phase C: display plan picks package_cells vs legacy; single track for final answer.
-            const displayPlanSeed = resolveAssistantDisplayPlan({
-              message,
-              surface: codexTranscriptSurface,
-            });
-            const shouldRenderLegacyTurnError = Boolean(
-              turnErrorMessage && !displayPlanSeed.suppressProjectedError,
-            );
-            // Failure-turn presentation: human-readable errorType chip and a
-            // budget-directed recovery action instead of raw codes.
-            const turnErrorTypeLabelKey = shouldRenderLegacyTurnError
-              ? resolveTurnErrorTypeLabelKey(resolveConversationTurnErrorType(message))
-              : "";
-            const turnErrorRecoveryAction = shouldRenderLegacyTurnError
-              ? resolveConversationTurnErrorRecoveryAction(message)
-              : "";
-            const timelineOptions = {
-              lang,
-              // The assistant body always comes from the canonical cell surface.
-              // Do not manufacture a second answer row in the process timeline.
-              includeAssistantText: false,
-            };
-            const agentMessageTimelineItems = buildAgentMessageTimelineItems(
-              agentMessage,
-              operationGroups.timeline,
-              timelineOptions,
-            );
-            const hasAgentMessageTimeline =
-              message.role === "assistant"
-              && hasFeedbackTimeline
-              && !turnErrorMessage
-              && !agentInboxMessage
-              && !groupTranscriptMessage
-              && agentMessageTimelineItems.length > 0;
-            const displayPlan = resolveAssistantDisplayPlan({
-              message,
-              surface: codexTranscriptSurface,
-            });
-            const timelineRendersAssistantText = false;
-            const showUserContent = agentSections.hasUserContent;
-            const steerGuidanceMessage = isSteerGuidanceMessage(message);
-            const userAuthoredMessage = message.role === "user" && !agentInboxMessage;
-            const isStreamingStatusPlaceholder = assistantTurnIsStreaming(message)
-              && showResponseBlock
-              && answerOnlyProcessMode
-              && isStreamingStatusPlaceholderContent(responseText);
-            const isResponseStreaming = assistantTurnIsStreaming(message) && showResponseBlock && !isStreamingStatusPlaceholder;
-            const copyableAnswerText = message.role === "assistant"
-              && !turnErrorMessage
-              && !assistantTurnIsStreaming(message)
-              ? responseText.trim()
-              : "";
-            const canRegenerateAnswer = message.role === "assistant"
-              && !turnErrorMessage
-              && !assistantTurnIsStreaming(message)
-              && Boolean(onRegenerateAssistantMessage)
-              // Any settled answer on a branch can regenerate; messages without
-              // a journal node id keep the legacy latest-only fallback.
-              && (Boolean(message.nodeId) || message.id === regenerableAssistantMessageId);
-            // A settled failed turn offers in-place recovery: retry reruns the
-            // turn's original user message through the same branch-aware
-            // regenerate pipeline as the regenerate action. Without a journal
-            // node id only the legacy latest-turn fallback remains, so the
-            // entry is hidden for older untargetable failures.
-            const canRetryFailedTurnMessage = message.role === "assistant"
-              && turnErrorMessage
-              && !assistantTurnIsStreaming(message)
-              && !agentInboxMessage
-              && !groupTranscriptMessage
-              && Boolean(onRegenerateAssistantMessage)
-              && (Boolean(message.nodeId) || message.id === regenerableAssistantMessageId);
-            const branchInfo = message.branch;
-            const siblingNodeIds = Array.isArray(branchInfo?.siblingNodeIds)
-              ? branchInfo.siblingNodeIds.filter((value): value is string => Boolean(value))
-              : [];
-            const siblingCount = Math.max(
-              Number(branchInfo?.siblingCount ?? 0) || 0,
-              siblingNodeIds.length,
-            );
-            const siblingIndex = Number(branchInfo?.siblingIndex ?? 0) || 0;
-            const currentNodeId = String(message.nodeId || "").trim();
-            // Fork exit: any settled journal node (user or assistant) can seed a
-            // new session; companion/private/group surfaces stay out of scope.
-            const canForkSessionFromMessage = Boolean(onForkSessionFromNode)
-              && !companionMode
-              && !agentInboxMessage
-              && !groupTranscriptMessage
-              && !assistantTurnIsStreaming(message)
-              && Boolean(currentNodeId);
-            const showVersionSwitcher = Boolean(onSwitchMessageVersion)
-              && siblingCount > 1
-              && siblingNodeIds.length > 1
-              && siblingIndex >= 1
-              && siblingIndex <= siblingNodeIds.length
-              && Boolean(currentNodeId)
-              && siblingNodeIds.includes(currentNodeId);
-            const versionSwitchDisabled = Boolean(branchVersionSwitchDisabled);
-            const previousSiblingNodeId = siblingIndex > 1 ? siblingNodeIds[siblingIndex - 2] : "";
-            const nextSiblingNodeId = siblingIndex < siblingNodeIds.length
-              ? siblingNodeIds[siblingIndex]
-              : "";
-            const showResponseSpinner = isResponseStreaming && !hasActiveProcess;
-            const defaultResponseExpanded = assistantTurnIsStreaming(message) || defaultExpandedResponseIds.has(message.id);
-            const responseExpanded = getExpansionState(message.id, "response", defaultResponseExpanded);
-            const responseSegments = showResponseBlock && !isStreamingStatusPlaceholder && !isResponseStreaming
-              ? getCachedResponseSegments(responseText)
-              : [];
-            const codexTranscriptNode = (
-              displayPlan.shouldRenderCodexSurface
-              && !agentInboxMessage
-              && !groupTranscriptMessage
-            )
-              ? renderCodexTranscriptCells(message, codexTranscriptCells, rowIdentity, companionMode)
-              : null;
-            // Todo checklist card: client-derived from the latest journaled
-            // todo_write call in this turn (no extra SSE event). Companion and
-            // private-message surfaces stay minimal by contract.
-            const todoChecklistSnapshot = message.role === "assistant"
-              && !companionMode
-              && !agentInboxMessage
-              && !groupTranscriptMessage
-              ? deriveLatestTodoChecklist(message.turnItems)
-              : undefined;
-            const todoChecklistNode = todoChecklistSnapshot ? (
-              <ConversationTodoChecklist
-                snapshot={todoChecklistSnapshot}
-                lang={lang}
-                turnSettled={hasTerminalCanonicalTurnOutcome(message)}
-              />
-            ) : null;
-            // Only force the answer body open while tokens are still streaming.
-            // Tying this to defaultResponseExpanded made the last few answers
-            // impossible to collapse (toggle flipped aria state but body stayed).
-            const shouldForceResponseBodyVisible = isResponseStreaming;
-            const isEditingMessage = userAuthoredMessage && message.id === editingMessageId;
-            const agentInboxExpanded = getExpansionState(message.id, "agentInbox", false);
-            const agentInboxPreview = agentInboxMessage ? compactPreview(agentInboxSummary(message), 140) : "";
-            const researchOrgChips = researchOrgMessageChips(message);
-            const contextNode = !companionMode && (agentRenderState.contextSections?.length ?? 0) > 0 ? (
-              <React.Suspense fallback={null}>
-                <AgentContextSectionsView sections={agentRenderState.contextSections} lang={lang} />
-              </React.Suspense>
-            ) : null;
-            const turnClassName = [
-              groupTranscriptMessage
-                ? styles.groupTranscriptTurn
-                : message.role === "assistant"
-                  ? styles.assistantTurn
-                  : agentInboxMessage
-                  ? styles.agentInboxTurn
-                  : styles.userTurn,
-              turnErrorMessage ? styles.turnErrorTurn : "",
-              compactTurnHeader ? styles.assistantTurnContinuation : "",
-              isEditingMessage ? styles.turnEditing : "",
-            ].filter(Boolean).join(" ");
-            const speakerLabel = groupTranscriptMessage
-              ? groupRoomTranscriptLabel(message)
-              : message.role === "assistant"
-                ? assistantLabel
-                : agentInboxMessage
-                  ? agentInboxSourceLabel(message)
-                  : userLabel;
-            const editDisabled = Boolean(editUserMessageDisabled);
-            const processTone = operationCollectionTone(operationGroups.timeline);
-            const processDefaultExpanded = processTone === "running";
-            const renderAgentProcessDetails = (defaultExpandedOverride?: boolean) => (
-              <>
-                {renderOperationGroup(
-                  message.id,
-                  "thought",
-                  operationGroups.thoughts,
-                  defaultExpandedOverride ?? assistantTurnIsStreaming(message),
-                )}
-                {renderAgentMentalPanel(
-                  message.id,
-                  latestAgentMentalPart(processSections),
-                  defaultExpandedOverride,
-                  assistantTurnIsStreaming(message) && operationGroups.tools.length === 0 && !agentSections.hasResponseBlock,
-                )}
-                {renderOperationGroup(
-                  message.id,
-                  "tools",
-                  operationGroups.tools,
-                  defaultExpandedOverride ?? shouldExpandToolGroupByDefault(message, operationGroups.tools),
-                )}
-              </>
-            );
-            const renderProcessDetails = () => {
-              if (hasAgentMessageTimeline) {
-                return renderAgentMessageTimeline(message, agentMessageTimelineItems, rowIdentity, agentRenderState.processSectionIds);
-              }
-              if (hasFeedbackTimeline) {
-                return renderFeedbackTimelineDetails(message.id, operationGroups.timeline);
-              }
-              return renderAgentProcessDetails(true);
-            };
-            // One assistant turn has one display source: its local turnItems cell surface.
-            const responseSectionNode = null;
-            // The fallback process rail is only useful while a future producer has
-            // not emitted a canonical cell yet. It never receives assistant text.
-            const processNode = companionMode || displayPlan.suppressProjectedProcess
-              ? null
-              : displayPlan.renderMode === "turn_items"
-                ? null
-                : hasAgentMessageTimeline
-                  ? renderAgentMessageTimeline(message, agentMessageTimelineItems, rowIdentity, agentRenderState.processSectionIds)
-                  : hasFeedbackTimeline
-                    ? renderFeedbackTimelineGroup(
-                      message.id,
-                      operationGroups.timeline,
-                      false,
-                      agentRenderState.processSectionIds,
-                    )
-                    : null;
-            const showCompactActiveTurnPlaceholder = shouldRenderCompactActiveTurnPlaceholder(message, {
-              showResponseBlock,
-              hasFeedbackTimeline,
-              hasActiveProcess,
-              turnErrorMessage,
-              // Avoid "状态" placeholder stacking above an already-visible codex process trail.
-              hasCodexSurface: Boolean(displayPlan.shouldRenderCodexSurface),
-            });
-            // Prefer compact active-turn note over projected turnStatus for in-flight shells.
-            const turnStatusNode = !companionMode && !showCompactActiveTurnPlaceholder
-              && !displayPlan.suppressProjectedTurnStatus
-              && noFinalAnswerStatusText ? (
-              <div className={styles.turnStatusNote} role="status" aria-live="polite">
-                <span className={styles.turnStatusLabel}>{lang === "zh" ? "状态" : "Status"}</span>
-                <span className={styles.turnStatusText}>{noFinalAnswerStatusText}</span>
-              </div>
-            ) : null;
-            const compactActiveTurnPlaceholderNode = !companionMode && showCompactActiveTurnPlaceholder ? (
-              <ConversationActiveTurnStatusNote
-                message={message}
-                lang={lang}
-                statusLabel={lang === "zh" ? "状态" : "Status"}
-              />
-            ) : null;
-            return (
-              <AgentMessageTurnView
-                key={rowIdentity.rowKey}
-                rowKey={rowIdentity.rowKey}
-                messageKey={rowIdentity.messageKey}
-                agentMessageId={agentMessage.id}
-                sectionCount={agentSections.sectionCount}
-                sectionKinds={agentRenderState.sectionKinds}
-                className={turnClassName}
-                compactHeader={false}
-                avatar={
-                  <ConversationTurnAvatarContent
-                    content={resolveMessageTurnAvatar(message, {
-                      resolveTurnAvatar,
-                      assistantAvatarImageUrl,
-                      assistantAvatarFallback,
-                      assistantLabel,
-                      userAvatarImageUrl,
-                      userAvatarLabel,
-                      agentInboxMessage,
-                      groupTranscriptMessage,
-                    })}
-                  />
-                }
-                speakerLabel={speakerLabel}
-                identityAccessory={
-                  isEditingMessage
-                    ? <span className={styles.turnEditBadge}>{t("editMessage")}</span>
-                    : steerGuidanceMessage
-                      ? <span className={styles.turnEditBadge}>{resolvedSafeGuidanceLabel}</span>
-                      : null
-                }
-                metaActions={
-                  <>
-                    {message.timestamp ? <span>{formatTimestamp(message.timestamp)}</span> : null}
-                    {showVersionSwitcher ? (
-                      <VActionGroup
-                        ariaLabel={t("branchVersionLabel")}
-                        className={styles.turnVersionSwitcher}
-                      >
-                        <VButton
-                          type="button"
-                          className={styles.turnIconButton}
-                          onClick={() => onSwitchMessageVersion?.(message, previousSiblingNodeId)}
-                          isDisabled={versionSwitchDisabled || !previousSiblingNodeId}
-                          title={t("switchBranchVersionPrevious")}
-                          aria-label={t("switchBranchVersionPrevious")}
-                          isIconOnly
-                          icon={<ChevronLeft size={14}/>} />
-                        <span className={styles.turnVersionLabel} aria-live="polite">
-                          {`${siblingIndex}/${siblingCount}`}
-                        </span>
-                        <VButton
-                          type="button"
-                          className={styles.turnIconButton}
-                          onClick={() => onSwitchMessageVersion?.(message, nextSiblingNodeId)}
-                          isDisabled={versionSwitchDisabled || !nextSiblingNodeId}
-                          title={t("switchBranchVersionNext")}
-                          aria-label={t("switchBranchVersionNext")}
-                          isIconOnly
-                          icon={<ChevronRight size={14}/>} />
-                      </VActionGroup>
-                    ) : null}
-                    {copyableAnswerText ? (
-                      <VButton
-                        type="button"
-                        className={styles.turnIconButton}
-                        onClick={() => handleCopyAnswer(message.id, copyableAnswerText)}
-                        title={t("copyAnswer")}
-                        aria-label={t("copyAnswer")}
-                        isIconOnly
-                        icon={copiedAnswerMessageId === message.id ? <Check size={14}/> : <Copy size={14}/>} />
-                    ) : null}
-                    {canForkSessionFromMessage ? (
-                      <VButton
-                        type="button"
-                        className={styles.turnIconButton}
-                        onClick={() => {
-                          setForkScope("visible_path");
-                          setForkDialogMessage(message);
-                        }}
-                        isDisabled={versionSwitchDisabled}
-                        title={t("forkSessionFromMessage")}
-                        aria-label={t("forkSessionFromMessage")}
-                        isIconOnly
-                        icon={<GitFork size={14}/>} />
-                    ) : null}
-                    {canRegenerateAnswer ? (
-                      <VButton
-                        type="button"
-                        className={styles.turnIconButton}
-                        onClick={() => onRegenerateAssistantMessage?.(message)}
-                        isDisabled={regenerateDisabled}
-                        isPending={regeneratePending}
-                        title={regeneratePending ? t("regeneratePending") : t("regenerateAnswer")}
-                        aria-label={regeneratePending ? t("regeneratePending") : t("regenerateAnswer")}
-                        isIconOnly
-                        icon={<RefreshCw size={14}/>} />
-                    ) : null}
-                    {userAuthoredMessage && !steerGuidanceMessage && onEditUserMessage ? (
-                      <VButton
-                        type="button"
-                        className={
-                          isEditingMessage
-                            ? `${styles.turnIconButton} ${styles.turnIconButtonActive}`
-                            : styles.turnIconButton
-                        }
-                        onClick={() => onEditUserMessage(message)}
-                        isDisabled={editDisabled}
-                        aria-pressed={isEditingMessage}
-                        title={editDisabled ? composerPlaceholder : editUserMessageLabel ?? t("editMessage")}
-                        aria-label={editUserMessageLabel ?? t("editMessage")}
-                        isIconOnly
-                        icon={<Pencil size={14}/>} />
-                    ) : null}
-                  </>
-                }
-              >
-
-                  <span
-                    hidden
-                    data-codex-transcript-cell-count={codexTranscriptCells.length}
-                    data-codex-transcript-surface-mode={codexTranscriptSurface?.mode ?? "empty"}
-                    data-codex-transcript-native-primary={displayPlan.nativePrimary ? "true" : "false"}
-                    data-assistant-render-mode={displayPlan.renderMode}
-                    data-assistant-has-turn-item-package={displayPlan.hasTurnItemPackage ? "true" : "false"}
-                    data-codex-transcript-projection-gap-reason={codexTranscriptSurface?.projectionGap?.reason ?? ""}
-                    data-codex-transcript-projection-gap-projected-cell-count={codexTranscriptSurface?.projectionGap?.projectedCellCount ?? 0}
-                  />
-                  {agentInboxMessage ? (
-                    <section className={styles.agentInboxSection}>
-                      {researchOrgChips.length > 0 ? (
-                        <div className={styles.researchOrgChipRow} aria-label={lang === "zh" ? "科研组织消息标签" : "Research organization message labels"}>
-                          {researchOrgChips.map((chip) => (
-                            <span
-                              key={chip.key}
-                              className={`${styles.researchOrgChip} ${styles[`researchOrgChip_${chip.tone}`]}`}
-                            >
-                              {chip.label}
-                            </span>
-                          ))}
-                        </div>
-                      ) : null}
-                      <VButton
-                        type="button"
-                        className={styles.agentInboxToggle}
-                        aria-expanded={agentInboxExpanded}
-                        onClick={() => toggleSection(message.id, "agentInbox", false)}
-                        title={agentInboxExpanded ? (lang === "zh" ? "折叠私信内容" : "Collapse private message") : (lang === "zh" ? "展开私信内容" : "Expand private message")}
-                        icon={agentInboxExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}><span>{lang === "zh" ? "私信内容" : "Private message"}</span>
-                        {agentInboxPreview ? <span className={styles.agentInboxPreview}>{agentInboxPreview}</span> : null}</VButton>
-                      {agentInboxExpanded ? (
-                        <div className={styles.agentInboxMessageBody}>
-                          {renderResponseText(assistantFinalAnswerText(message))}
-                        </div>
-                      ) : null}
-                    </section>
-                  ) : showUserContent ? (
-                    <AgentUserContentSectionView userContentSectionIds={agentRenderState.userContentSectionIds}>
-                      {renderResponseText(userContentText)}
-                    </AgentUserContentSectionView>
-                  ) : null}
-                  {groupTranscriptMessage ? (
-                    <div className={styles.groupTranscriptBody}>{renderResponseText(assistantFinalAnswerText(message))}</div>
-                  ) : null}
-                  {contextNode}
-
-                  {/*
-                    Codex-aligned order: process / tools first, then final answer surface.
-                    - renderCodexTranscriptCells already does processCells → finalCells inside.
-                    - When tools only exist on feedback/timeline (alongside), processNode must
-                      still precede codexTranscriptNode so the answer is not above the tools.
-                  */}
-                  {/* Checklist overview sits above the process trail: it is a
-                      progress summary, not a second process row. */}
-                  {todoChecklistNode}
-                  {processNode}
-                  {compactActiveTurnPlaceholderNode}
-                  {codexTranscriptNode}
-                  {turnStatusNode}
-                  {shouldRenderLegacyTurnError ? (
-                    <div className={styles.turnErrorNotice} role="status" aria-live="polite">
-                      <div className={styles.turnErrorNoticeIcon} aria-hidden="true">
-                        <TerminalSquare size={15} />
-                      </div>
-                      <div className={styles.turnErrorNoticeBody}>
-                        <div className={styles.turnErrorNoticeMeta}>
-                          <span>{lang === "zh" ? "运行提示" : "Runtime notice"}</span>
-                          {turnErrorTypeLabelKey ? (
-                            <span title={resolveConversationTurnErrorType(message)}>{t(turnErrorTypeLabelKey)}</span>
-                          ) : null}
-                        </div>
-                        <div className={styles.turnErrorNoticeText}>{renderResponseText(assistantFinalAnswerText(message))}</div>
-                        {buildConversationTurnErrorReasonRows(message, lang).length > 0 ? (
-                          <details className={styles.turnErrorDiagnostics}>
-                            <summary className={styles.turnErrorDiagnosticsSummary}>
-                              {lang === "zh" ? "诊断详情" : "Diagnostics"}
-                            </summary>
-                            <dl className={styles.turnErrorReasonList}>
-                              {buildConversationTurnErrorReasonRows(message, lang).map((row) => (
-                                <div key={`${row.label}-${row.value}`} className={styles.turnErrorReasonRow}>
-                                  <dt>{row.label}</dt>
-                                  <dd>{row.value}</dd>
-                                </div>
-                              ))}
-                            </dl>
-                          </details>
-                        ) : null}
-                        {turnErrorRecoveryAction === "compress_context" && onOpenComposerContextDetail ? (
-                          <div className={styles.turnErrorActions}>
-                            <VButton
-                              type="button"
-                              contentLayout="plain"
-                              className={styles.turnErrorRetryButton}
-                              onClick={onOpenComposerContextDetail}
-                              title={t("turnErrorActionCompressContextTitle")}
-                              aria-label={t("turnErrorActionCompressContext")}
-                            >
-                              <Gauge size={12}/>
-                              <span>{t("turnErrorActionCompressContext")}</span>
-                            </VButton>
-                          </div>
-                        ) : null}
-                        {canRetryFailedTurnMessage ? (
-                          <div className={styles.turnErrorActions}>
-                            <VButton
-                              type="button"
-                              contentLayout="plain"
-                              className={styles.turnErrorRetryButton}
-                              onClick={() => onRegenerateAssistantMessage?.(message)}
-                              isDisabled={regenerateDisabled}
-                              isPending={regeneratePending}
-                              title={regeneratePending ? t("retryFailedTurnPending") : t("retryFailedTurn")}
-                              aria-label={regeneratePending ? t("retryFailedTurnPending") : t("retryFailedTurn")}
-                            >
-                              <RefreshCw size={12}/>
-                              <span>{t("retryFailedTurn")}</span>
-                            </VButton>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  ) : null}
-                  {answerOnlyProcessMode ? responseSectionNode : null}
-                  {imageArtifact ? (
-                    <ConversationImageArtifactView
-                      artifact={imageArtifact}
-                      lang={lang}
-                      onPreviewImage={openImagePreview}
-                    />
-                  ) : null}
-
-                  {!answerOnlyProcessMode ? responseSectionNode : null}
-              </AgentMessageTurnView>
-            );
-                }}
-              />
-              </div>
-              );
-            })}
+            <div
+              data-conversation-virtual-host="1"
+              style={{
+                height: timelineVirtualizer.getTotalSize(),
+                position: "relative",
+              }}
+            >
+            {timelineRowPlan
+              .filter((row) => row.virtualStartPx !== null)
+              .map((rowPlan) => renderTimelineRow(rowPlan))}
+            </div>
+            {timelineRowPlan
+              .filter((row) => row.virtualStartPx === null)
+              .map((rowPlan) => renderTimelineRow(rowPlan))}
             {companionTypingMessage ? (
               <div
                 className={styles.companionTypingTurn}
@@ -5246,13 +5220,6 @@ export const ConversationView = React.memo(function ConversationView({
                   />
                 </div>
               </div>
-            ) : null}
-            {timelineVirtualRange.bottomSpacerPx > 0 ? (
-              <div
-                aria-hidden="true"
-                className={styles.timelineVirtualSpacer}
-                style={{ height: timelineVirtualRange.bottomSpacerPx }}
-              />
             ) : null}
             {turnError?.message && !hasVisibleTurnErrorMessage && !turnErrorSupersededByFinalAnswer ? (
               <div className={styles.turnError} role="status" aria-live="polite">

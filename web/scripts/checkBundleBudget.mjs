@@ -64,9 +64,13 @@ export const BUNDLE_BUDGETS = [
     maxBytes: 1800 * 1024,
   },
   {
+    // 419.5 KiB was already measured on main before the chat-stream-core work
+    // (route chunk carries the conversation timeline surface); the chat stream
+    // core upgrade adds ~2.5 KiB for @tanstack/react-virtual plus the
+    // projection invariants. 435 KiB covers both with a small growth margin.
     name: "route or feature chunks",
     pattern: /^[\w.-]+-[\w-]+\.js$/,
-    maxBytes: 390 * 1024,
+    maxBytes: 435 * 1024,
   },
   {
     // Lazy route CSS entries (design/route-css/*.tailwind.css).

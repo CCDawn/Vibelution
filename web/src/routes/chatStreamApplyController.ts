@@ -3,6 +3,7 @@ import {
   activeTurnLayerTextLength,
   mergeAssistantDeltaIntoActiveTurnLayer,
   type ActiveTurnLayerState,
+  type AssistantDeltaEvent,
 } from "./chatActiveTurnLayer";
 import {
   canonicalItemCounts,
@@ -72,6 +73,16 @@ export type PlanAppliedAssistantDeltaDrainInput = {
   applyStartedAtMs: number;
   applyFinishedAtMs?: number;
   nowMs?: () => number;
+  /**
+   * Optional projection continuity gate (chatStreamProjectionGate). When
+   * provided, each drained payload passes through it before merge: stale
+   * frames are dropped and gap-held frames stop the drain (the remaining
+   * entries are counted as held and left to the watermark recovery).
+   */
+  assistantDeltaSeqGate?: (payload: AssistantDeltaEvent) =>
+    | { action: "apply" }
+    | { action: "drop-stale" }
+    | { action: "hold-gap"; watermark: number; seq: number };
 };
 
 export type AppliedAssistantDeltaDrainDecision =
@@ -82,6 +93,7 @@ export type AppliedAssistantDeltaDrainDecision =
     shouldLogApplied: false;
     shouldScheduleNextFrame: false;
     shouldInvalidateSession: false;
+    hold?: AssistantDeltaDrainHoldInfo;
   }
   | {
     applied: true;
@@ -95,6 +107,7 @@ export type AppliedAssistantDeltaDrainDecision =
     shouldInvalidateSession: boolean;
     lastAppliedAtMs: number;
     telemetry: Record<string, unknown>;
+    hold?: AssistantDeltaDrainHoldInfo;
   };
 
 export function normalizeSessionStreamApplyStats(
@@ -170,27 +183,60 @@ export function planAppliedSessionDetail(
   };
 }
 
+export type AssistantDeltaDrainHoldInfo = {
+  /** Ledger sequence of the first gap-held frame. */
+  heldLedgerSeq: number;
+  /** Watermark the recovery resubscribes from (lastAppliedSeq + 1). */
+  watermark: number;
+  /** Entries skipped by the hold (the held frame plus everything behind it). */
+  heldCount: number;
+};
+
 export function planAppliedAssistantDeltaDrain(
   input: PlanAppliedAssistantDeltaDrainInput,
 ): AppliedAssistantDeltaDrainDecision {
   let pendingLayer = input.committedLayer;
   let appliedPayloadCount = 0;
   let finalDone = false;
-  for (const entry of input.drain.entries) {
+  let holdInfo: AssistantDeltaDrainHoldInfo | null = null;
+  const entries = input.drain.entries;
+  for (let entryIndex = 0; entryIndex < entries.length; entryIndex += 1) {
+    const entry = entries[entryIndex];
+    if (input.assistantDeltaSeqGate) {
+      const gateDecision = input.assistantDeltaSeqGate(entry.payload);
+      if (gateDecision.action === "hold-gap") {
+        // Continuity gate: the frame (and everything queued behind it) is held
+        // instead of corrupting the projection; the watermark recovery brings
+        // the authoritative state that closes the gap.
+        holdInfo = {
+          heldLedgerSeq: gateDecision.seq,
+          watermark: gateDecision.watermark,
+          heldCount: entries.length - entryIndex,
+        };
+        break;
+      }
+      if (gateDecision.action === "drop-stale") {
+        continue;
+      }
+    }
     pendingLayer = mergeAssistantDeltaIntoActiveTurnLayer(pendingLayer, entry.payload);
     appliedPayloadCount += 1;
     finalDone = finalDone || entry.payload.done;
   }
 
   const currentStats = normalizeSessionStreamApplyStats(input.stats);
+  const heldCount = holdInfo?.heldCount ?? 0;
   if (appliedPayloadCount === 0) {
     return {
       applied: false,
-      stats: currentStats,
+      stats: heldCount > 0
+        ? { ...currentStats, dropped: currentStats.dropped + heldCount }
+        : currentStats,
       appliedPayloadCount: 0,
       shouldLogApplied: false,
       shouldScheduleNextFrame: false,
       shouldInvalidateSession: false,
+      ...(holdInfo ? { hold: holdInfo } : {}),
     };
   }
 
@@ -198,7 +244,8 @@ export function planAppliedAssistantDeltaDrain(
   const nextStats = {
     ...currentStats,
     applied: currentStats.applied + (shouldCommitRender ? 1 : 0),
-    dropped: currentStats.dropped + (shouldCommitRender ? 0 : appliedPayloadCount),
+    dropped: currentStats.dropped
+      + (shouldCommitRender ? heldCount : appliedPayloadCount + heldCount),
   };
   const applyFinishedAtMs = input.applyFinishedAtMs ?? input.nowMs?.() ?? input.applyStartedAtMs;
   const shouldLogApplied = input.reason === "final"
@@ -233,6 +280,7 @@ export function planAppliedAssistantDeltaDrain(
     shouldInvalidateSession: input.reason === "final" && (Boolean(input.drain.telemetry.done) || finalDone),
     lastAppliedAtMs: applyFinishedAtMs,
     telemetry,
+    ...(holdInfo ? { hold: holdInfo } : {}),
   };
 }
 

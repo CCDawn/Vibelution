@@ -7,6 +7,7 @@ import { queryKeys } from "../../api/queryKeys";
 import type { SessionDetail, SessionStreamEvent } from "../../api/types";
 import {
   isActiveTurnSettledByDetail,
+  reconcileActiveTurnLayerItemsWithMessages,
   setActiveTurnLayerForSession,
   type ActiveTurnLayerState,
 } from "../chatActiveTurnLayer";
@@ -25,6 +26,11 @@ import {
 import { createSessionAssistantDeltaScheduler } from "../sessionAssistantDeltaScheduler";
 import { chatStreamPerformanceNowMs, isBusyPhase } from "./chatCodingRouteViewModel";
 import { supersededEditDelta } from "./chatEditResubmitState";
+import {
+  createAssistantDeltaSeqGate,
+  createSessionStreamRecoveryController,
+  SESSION_STREAM_RECOVERY_MAX_ATTEMPTS,
+} from "../chatStreamProjectionGate";
 import { mergeSessionDetailMessageWindow } from "../chatSessionState";
 import {
   SESSION_STREAM_ERROR_REFRESH_MIN_INTERVAL_MS,
@@ -288,6 +294,26 @@ export function useSessionDetailStream({
     };
     forceCloseStreamRef.current = forceCloseStream;
 
+    // Projection invariants (pattern: zai-org/ZCode conversationProjectionStore,
+    // Apache-2.0): seq continuity gate before delta application + single-flight
+    // watermark recovery. The authoritative refetch after stream errors below
+    // stays as the coarse fallback path.
+    const sessionProjectionGate = createAssistantDeltaSeqGate();
+    const sessionStreamRecovery = createSessionStreamRecoveryController({
+      requestRecovery: ({ attempt }) => {
+        if (disposed) {
+          return;
+        }
+        void queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) });
+        // The reconnect re-baselines the gate through the stream open handler;
+        // once the backoff ladder is exhausted only the authoritative refetch
+        // keeps running so a flapping transport cannot loop reconnects.
+        if (attempt <= SESSION_STREAM_RECOVERY_MAX_ATTEMPTS) {
+          forceCloseStream();
+        }
+      },
+    });
+
     function logRejectedSessionStreamRoute(trace: SessionStreamProtocolTrace, message: string) {
       if (trace.rejectReason === "parse_error") {
         if (!sessionStreamPayloadErrorLoggedRef.current[streamSessionId]) {
@@ -367,6 +393,27 @@ export function useSessionDetailStream({
         setActiveTurnLayersBySession((current) =>
           setActiveTurnLayerForSession(current, streamSessionId, undefined)
         );
+        sessionProjectionGate.noteTurnBoundary();
+        return;
+      }
+      // Authoritative watermark advance: re-baselines the continuity gate and
+      // completes a pending watermark recovery once the snapshot reaches it.
+      const authoritativeLedgerSeq = Number(detail.ledgerSeq ?? 0);
+      if (Number.isFinite(authoritativeLedgerSeq) && authoritativeLedgerSeq > 0) {
+        sessionProjectionGate.noteAuthoritative(authoritativeLedgerSeq);
+        sessionStreamRecovery.noteAuthoritative(authoritativeLedgerSeq);
+      }
+      // Per-item overlay reconciliation (projection invariant c): overlay turn
+      // items the canonical transcript already commits are dropped at item
+      // granularity; whole-turn settlement above stays the coarse path.
+      if (activeLayer) {
+        const reconciledLayer = reconcileActiveTurnLayerItemsWithMessages(activeLayer, detail.messages);
+        if (reconciledLayer !== activeLayer) {
+          committedAssistantDeltaLayer = reconciledLayer;
+          setActiveTurnLayersBySession((current) =>
+            setActiveTurnLayerForSession(current, streamSessionId, reconciledLayer)
+          );
+        }
       }
     }
 
@@ -444,7 +491,24 @@ export function useSessionDetailStream({
         stats: sessionStreamApplyStatsRef.current[streamSessionId],
         applyStartedAtMs,
         nowMs: chatStreamPerformanceNowMs,
+        assistantDeltaSeqGate: (payload) => sessionProjectionGate.decide(payload),
       });
+      const drainHold = decision.hold;
+      if (drainHold) {
+        postBrowserTelemetry({
+          phase: "session_stream",
+          eventCode: "browser.session_stream.assistant_delta_gap_held",
+          message: "Session assistant delta frame was held by the projection continuity gate.",
+          level: "warning",
+          fields: {
+            sessionId: streamSessionId,
+            heldLedgerSeq: drainHold.heldLedgerSeq,
+            watermark: drainHold.watermark,
+            heldCount: drainHold.heldCount,
+          },
+        });
+        sessionStreamRecovery.request(drainHold.watermark);
+      }
       if (!decision.applied) {
         return;
       }
@@ -545,6 +609,11 @@ export function useSessionDetailStream({
       if (!disposed) {
         markStreamConnected();
         sessionStreamErrorLoggedRef.current[streamSessionId] = false;
+        // A stream (re)open re-baselines the continuity gate: the first frame
+        // after the server resumes applies even when the ledger jumped during
+        // the outage, and any pending watermark recovery episode retires.
+        sessionProjectionGate.noteStreamReopened();
+        sessionStreamRecovery.noteStreamReopened();
         postBrowserTelemetry({
           phase: "session_stream",
           eventCode: "browser.session_stream.opened",
@@ -637,6 +706,13 @@ export function useSessionDetailStream({
         return;
       }
       markStreamConnected();
+      // session_initial carries the authoritative ledger watermark on every
+      // (re)connect; advance the gate so post-reconnect frames cannot lag it.
+      const initialLedgerSeq = Number(routed.payload.ledgerSeq ?? 0);
+      if (Number.isFinite(initialLedgerSeq) && initialLedgerSeq > 0) {
+        sessionProjectionGate.noteAuthoritative(initialLedgerSeq);
+        sessionStreamRecovery.noteAuthoritative(initialLedgerSeq);
+      }
       postBrowserTelemetry({
         phase: "session_stream",
         eventCode: "browser.session_stream.initial_received",
@@ -702,6 +778,7 @@ export function useSessionDetailStream({
       pendingDetail = null;
       pendingDetailTrace = null;
       assistantDeltaScheduler.cancel();
+      sessionStreamRecovery.dispose();
       setSessionStreamConnected(false);
       if (activeStreamRef.current?.stream === stream) {
         activeStreamRef.current = null;

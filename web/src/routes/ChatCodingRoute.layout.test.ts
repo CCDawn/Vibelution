@@ -2152,7 +2152,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndStreamSource).toContain("let assistantDeltaApplyFrame: number | null = null");
     expect(routeAndStreamSource).toContain("function applyPendingAssistantDeltas(reason: \"frame\" | \"close\" | \"final\")");
     expect(routeAndStreamSource).toContain("assistantDeltaScheduler.drain(reason, { frameScheduledAtMs: scheduledAtMs })");
-    expect(chatStreamApplyControllerSource).toContain("for (const entry of input.drain.entries)");
+    expect(chatStreamApplyControllerSource).toContain("const entry = entries[entryIndex];");
+    expect(chatStreamApplyControllerSource).toContain("assistantDeltaSeqGate");
     expect(routeAndStreamSource).toContain("function scheduleAssistantDeltaFrame()");
     expect(routeAndStreamSource).toContain("window.requestAnimationFrame");
     expect(routeAndStreamSource).toContain("window.cancelAnimationFrame");
