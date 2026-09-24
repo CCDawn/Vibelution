@@ -105,7 +105,7 @@ const styles: Record<string, string> = {
   overlayPaneRight:
     "vui-routes-chatcodingroute overlayPaneRight right-0",
   overlayPaneToggle:
-    "vui-routes-chatcodingroute overlayPaneToggle inline-flex min-h-[30px] items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)]",
+    "vui-routes-chatcodingroute overlayPaneToggle inline-flex min-h-[var(--vui-control-height-sm)] items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)]",
   panelNotice:
     "vui-routes-chatcodingroute panelNotice grid min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_22%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_5%,var(--vui-surface-row))] px-2 py-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)]",
   panelState:
@@ -134,7 +134,7 @@ const styles: Record<string, string> = {
   railSectionHeading:
     "vui-routes-chatcodingroute railSectionHeading m-0 min-w-0 truncate [font-size:var(--vui-font-xs)] font-[650] leading-tight text-[var(--fg-primary)]",
   conversationIndexToggle:
-    "vui-routes-chatcodingroute conversationIndexToggle !size-[30px] !min-h-[30px] !min-w-[30px] !border-0 !bg-transparent text-[var(--fg-secondary)] shadow-none hover:!bg-[var(--vui-control-muted-hover)]",
+    "vui-routes-chatcodingroute conversationIndexToggle !size-[var(--vui-control-height-sm)] !min-h-[var(--vui-control-height-sm)] !min-w-[var(--vui-control-height-sm)] !border-0 !bg-transparent text-[var(--fg-secondary)] shadow-none hover:!bg-[var(--vui-control-muted-hover)]",
   sessionBulkBar:
     "vui-routes-chatcodingroute sessionBulkBar mx-2 mb-2 min-w-0",
   tab:

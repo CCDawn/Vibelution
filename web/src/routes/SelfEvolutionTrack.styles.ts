@@ -16,9 +16,9 @@ export const selfEvolutionTrackStyles = {
   trackBodyContent:
     "min-h-0 min-w-0 max-w-full flex-1 overflow-hidden overflow-x-hidden",
   primaryAction:
-    "inline-flex min-h-8 w-fit max-w-full cursor-pointer items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-control-muted))] px-3 [font-size:var(--vui-font-sm)] font-semibold text-vui-fg-primary disabled:cursor-default disabled:opacity-50",
+    "inline-flex min-h-8 w-fit max-w-full cursor-pointer items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-strong),var(--vui-control-muted))] px-3 [font-size:var(--vui-font-sm)] font-semibold text-vui-fg-primary disabled:cursor-default disabled:opacity-50",
   dangerAction:
-    "inline-flex min-h-8 w-fit max-w-full cursor-pointer items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_30%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_9%,var(--vui-control-muted))] px-3 [font-size:var(--vui-font-sm)] font-semibold text-[var(--state-error)] disabled:cursor-default disabled:opacity-50",
+    "inline-flex min-h-8 w-fit max-w-full cursor-pointer items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-tint-strong),var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash),var(--vui-control-muted))] px-3 [font-size:var(--vui-font-sm)] font-semibold text-[var(--state-error)] disabled:cursor-default disabled:opacity-50",
   workspaceLayout:
     "grid h-full max-h-full min-h-0 min-w-0 max-w-full grid-cols-[var(--self-sidebar-width,340px)_10px_minmax(0,1fr)] items-stretch overflow-hidden overflow-x-hidden",
   sideColumn: "grid min-w-0 content-start bg-vui-surface-rail",
@@ -50,14 +50,14 @@ export const selfEvolutionTrackStyles = {
   railAgentActions: "flex min-h-8 min-w-0 flex-wrap items-center gap-1.5",
   railAgentGroup: "inline-flex items-center gap-1",
   railAgentButton: "h-8 w-8 min-w-8 p-0",
-  railAgentButtonActive: "border-[color-mix(in_srgb,var(--accent-cool)_36%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-control-muted))] text-vui-fg-primary",
+  railAgentButtonActive: "border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-strong),var(--vui-control-muted))] text-vui-fg-primary",
   railEmptyValue: "font-mono text-vui-fg-tertiary",
   workflowHeader: "flex min-h-10 min-w-0 items-center px-2 py-1",
   workflowCardGrid: "inline-flex w-fit min-w-0 max-w-full items-center gap-1",
   workflowCard:
     "h-8 w-8 min-w-8 cursor-pointer rounded-md border border-transparent bg-transparent p-0 text-vui-fg-secondary",
   workflowCardActive:
-    "!border-transparent bg-[color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-surface-row))] text-vui-fg-primary [&_strong]:text-[var(--accent-cool)]",
+    "!border-transparent bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-strong),var(--vui-surface-row))] text-vui-fg-primary [&_strong]:text-[var(--accent-cool)]",
   approvalPanel: `grid min-h-0 content-start gap-3 overflow-auto p-3.5 ${panelSurface}`,
   statusDetailScroll: "grid h-full min-h-0 content-start gap-3 overflow-y-auto p-3",
   statusPage: "grid min-h-0",
@@ -69,8 +69,8 @@ export const selfEvolutionTrackStyles = {
     "inline-flex w-fit max-w-full flex-wrap items-center gap-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-1",
   modeTabsTrigger:
     "min-h-8 w-fit rounded-md border border-transparent px-3 py-1 [font-size:var(--vui-font-sm)] text-[var(--fg-secondary)] " +
-    "data-[state=active]:border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] " +
-    "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-warm)_12%,transparent)] " +
+    "data-[state=active]:border-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-tint),transparent)] " +
+    "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-wash-strong),transparent)] " +
     "data-[state=active]:font-semibold data-[state=active]:text-[var(--accent-warm-2)]",
   surface: `${panelSurface} p-3.5 max-[760px]:p-4`,
   loadingShell:
@@ -79,7 +79,7 @@ export const selfEvolutionTrackStyles = {
   loadingPanel:
     `grid min-h-0 content-start gap-2 p-3 ${rowSurfaceSoft} [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-secondary`,
   loadingStatGrid:
-    "grid grid-cols-3 gap-1.5 [&_span]:grid [&_span]:min-w-0 [&_span]:gap-1 [&_span]:rounded-[7px] [&_span]:bg-vui-surface-row [&_span]:px-[7px] [&_span]:py-1.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)] [&_strong]:font-mono [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)]",
+    "grid grid-cols-3 gap-1.5 [&_span]:grid [&_span]:min-w-0 [&_span]:gap-1 [&_span]:rounded-[var(--radius-control)] [&_span]:bg-vui-surface-row [&_span]:px-[7px] [&_span]:py-1.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)] [&_strong]:font-mono [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)]",
   loadingBody: "grid min-h-0 grid-cols-3 gap-2",
   skeletonLineWide: "block h-2 w-[min(100%,620px)] animate-pulse rounded-full bg-[var(--vui-gradient-route-soft)]",
   skeletonLine: "block h-2 w-[min(72%,460px)] animate-pulse rounded-full bg-[var(--vui-gradient-route-soft)]",
@@ -91,7 +91,7 @@ export const selfEvolutionTrackStyles = {
   paginationBar: "flex flex-wrap items-center justify-between gap-3 max-[760px]:flex-col max-[760px]:items-stretch",
   subsurfaceHeader: "flex items-start justify-between gap-3 max-[760px]:flex-col max-[760px]:items-stretch",
   eyebrow: "m-0 mb-1 [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-[var(--fg-tertiary)]",
-  sectionTitle: "m-0 text-base text-[var(--fg-primary)]",
+  sectionTitle: "m-0 text-vui-md text-[var(--fg-primary)]",
   subsurfaceTitle: "m-0 text-[0.98rem] text-[var(--fg-primary)]",
   subsectionTitle: "m-0 [font-size:var(--vui-font-xs)] uppercase tracking-[0.06em] text-[var(--fg-tertiary)]",
   sectionSummary: "m-0 leading-normal text-[var(--fg-secondary)]",
@@ -99,9 +99,9 @@ export const selfEvolutionTrackStyles = {
   noticeText: "m-0 leading-normal text-[var(--fg-secondary)]",
   feedbackText: "m-0 overflow-wrap-anywhere leading-normal text-[var(--accent-warm-2)]",
   errorText: "m-0 overflow-wrap-anywhere leading-normal text-[var(--state-error)]",
-  statusIcon: "inline-flex h-8 w-8 flex-none items-center justify-center rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--accent-cool)_14%,transparent)] text-[var(--accent-cool)]",
+  statusIcon: "inline-flex h-8 w-8 flex-none items-center justify-center rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-strong),transparent)] text-[var(--accent-cool)]",
   statusPill:
-    "inline-flex min-h-7 items-center justify-center whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_12%,transparent)] px-2.5 [font-size:var(--vui-font-xs)] text-[var(--accent-warm-2)] max-[760px]:w-fit",
+    "inline-flex min-h-7 items-center justify-center whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-wash-strong),transparent)] px-2.5 [font-size:var(--vui-font-xs)] text-[var(--accent-warm-2)] max-[760px]:w-fit",
   secondaryPill:
     "inline-flex min-h-7 items-center justify-center whitespace-nowrap rounded-full border border-vui-border-subtle bg-vui-control-muted px-2.5 [font-size:var(--vui-font-xs)] text-vui-fg-secondary max-[760px]:w-fit",
   counter:
@@ -115,7 +115,7 @@ export const selfEvolutionTrackStyles = {
   paginationButton:
     `inline-flex min-h-[38px] min-w-[38px] w-fit max-w-full cursor-pointer items-center justify-center gap-2 rounded-[var(--radius-control)] px-2.5 text-vui-fg-primary disabled:cursor-default disabled:opacity-50 ${controlSurface}`,
   paginationButtonActive:
-    "border-[color-mix(in_srgb,var(--accent-warm)_32%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_12%,transparent)] text-[var(--accent-warm-2)]",
+    "border-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-line),transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-wash-strong),transparent)] text-[var(--accent-warm-2)]",
   spinning: "animate-spin",
   noticeStack: "grid gap-2",
   detailStack: "grid gap-2",
@@ -128,23 +128,23 @@ export const selfEvolutionTrackStyles = {
   textInput: "w-full max-w-[180px]",
   textArea: "w-full",
   worktreeEscalation:
-    "flex items-center justify-between gap-3 rounded-[var(--radius-panel)] bg-[color-mix(in_srgb,var(--accent-cool)_9%,var(--vui-surface-row))] px-3.5 py-3 [&_p]:flex-[1_1_220px]",
+    "flex items-center justify-between gap-3 rounded-[var(--radius-panel)] bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash),var(--vui-surface-row))] px-3.5 py-3 [&_p]:flex-[1_1_220px]",
   supportGrid: "grid gap-4",
   subsurface:
     `grid min-h-0 content-start gap-3 overflow-auto p-3.5 ${panelSurface}`,
   listItem:
     `grid gap-2 px-[13px] py-3 ${rowSurfaceSoft} [&_strong]:overflow-wrap-anywhere [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary`,
   listItemSelected:
-    "border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)]",
+    "border-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-tint-strong),transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-wash-faint),transparent)]",
   petAvatarStage:
     `relative grid min-h-[164px] place-items-center overflow-hidden max-[760px]:min-h-[200px] ${rowSurface}`,
   petAvatarHalo:
-    "absolute inset-auto h-[86px] w-32 rounded-[14px] border border-[color-mix(in_srgb,var(--accent-warm)_14%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_7%,transparent)]",
+    "absolute inset-auto h-[86px] w-32 rounded-[14px] border border-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-wash-strong),transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-wash-faint),transparent)]",
   petAvatarMark: "relative flex animate-bounce items-center justify-center gap-[7px]",
   petAvatarBody:
-    "h-[98px] w-[74px] rounded-[48%_48%_42%_42%] border border-[color-mix(in_srgb,var(--accent-warm)_42%,transparent)] bg-[var(--vui-gradient-route-soft)]",
+    "h-[98px] w-[74px] rounded-[48%_48%_42%_42%] border border-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-line-strong),transparent)] bg-[var(--vui-gradient-route-soft)]",
   petAvatarClaw:
-    "h-[42px] w-[30px] rounded-[60%_42%_58%_46%] border border-[color-mix(in_srgb,var(--accent-warm)_36%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_18%,var(--vui-surface-row))]",
+    "h-[42px] w-[30px] rounded-[60%_42%_58%_46%] border border-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-line),transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_18%,var(--vui-surface-row))]",
   petAvatarBadge:
     "absolute bottom-2.5 left-2.5 inline-flex min-h-7 items-center gap-1.5 rounded-full border border-vui-border-subtle bg-vui-control-muted px-2.5 [font-size:var(--vui-font-xs)] text-vui-fg-secondary",
   petCompanionCopy: "grid gap-1.5 [&_p]:m-0 [&_p]:text-[0.92rem] [&_p]:leading-normal [&_p]:text-[var(--fg-primary)] [&_span]:m-0 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-normal [&_span]:text-[var(--fg-secondary)]",
@@ -161,17 +161,17 @@ export const selfEvolutionTrackStyles = {
   transactionDateFilterBar:
     "flex flex-wrap items-center gap-2 [&>span]:[font-size:var(--vui-font-xs)] [&>span]:leading-tight [&>span]:text-[var(--fg-tertiary)]",
   transactionVisibleSummary:
-    "inline-flex min-h-[30px] items-center whitespace-nowrap font-mono [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "inline-flex min-h-[var(--vui-control-height-sm)] items-center whitespace-nowrap font-mono [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   transactionFilterButton:
-    `inline-flex min-h-[34px] w-fit max-w-full cursor-pointer items-center gap-2 rounded-[var(--radius-control)] px-2.5 text-vui-fg-secondary ${controlSurface} [&_strong]:min-w-[22px] [&_strong]:text-right [&_strong]:font-mono [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary`,
+    `inline-flex min-h-[var(--vui-control-height-md)] w-fit max-w-full cursor-pointer items-center gap-2 rounded-[var(--radius-control)] px-2.5 text-vui-fg-secondary ${controlSurface} [&_strong]:min-w-[22px] [&_strong]:text-right [&_strong]:font-mono [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary`,
   transactionFilterButtonActive:
-    "border-[color-mix(in_srgb,var(--accent-warm)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_12%,transparent)] text-[var(--accent-warm-2)]",
+    "border-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-line),transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-wash-strong),transparent)] text-[var(--accent-warm-2)]",
   transactionDetailsToggle:
-    "inline-flex min-h-7 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_78%,transparent)] px-[9px] [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] aria-expanded:border-[color-mix(in_srgb,var(--accent-cool)_30%,transparent)] aria-expanded:text-[var(--accent-cool)]",
+    "inline-flex min-h-7 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_var(--vui-alpha-veil),transparent)] px-[9px] [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] aria-expanded:border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),transparent)] aria-expanded:text-[var(--accent-cool)]",
   transactionDateGroup:
     "grid gap-2 pt-0.5 [&+&]:mt-3 [&+&]:pt-1",
   transactionDateHeader:
-    "flex min-h-[30px] items-center justify-between gap-2.5 px-0.5 max-[760px]:flex-col max-[760px]:items-stretch [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-tight [&_span]:text-[var(--fg-tertiary)]",
+    "flex min-h-[var(--vui-control-height-sm)] items-center justify-between gap-2.5 px-0.5 max-[760px]:flex-col max-[760px]:items-stretch [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-tight [&_span]:text-[var(--fg-tertiary)]",
   transactionGroupList: "grid gap-2",
   selectionToggle:
     `inline-flex min-h-8 w-fit max-w-full cursor-pointer items-center gap-2 rounded-[var(--radius-control)] px-3 text-vui-fg-secondary disabled:cursor-default disabled:opacity-50 ${controlSurface}`,

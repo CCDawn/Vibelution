@@ -22,7 +22,7 @@ const styles = {
     "vui-routes-configproviderregistrypanel providerButton !flex !h-auto !min-h-16 !w-full min-w-0 !flex-col !items-stretch !justify-center gap-2 !border-0 !bg-transparent !shadow-none px-2 py-2 text-left",
   providerIdentity: "vui-routes-configproviderregistrypanel providerIdentity grid min-w-0 gap-0.5",
   providerLabel:
-    "vui-routes-configproviderregistrypanel providerLabel min-w-0 whitespace-normal break-words text-sm font-semibold leading-snug text-vui-fg-primary",
+    "vui-routes-configproviderregistrypanel providerLabel min-w-0 whitespace-normal break-words text-vui-xs font-semibold leading-snug text-vui-fg-primary",
   providerMeta:
     "vui-routes-configproviderregistrypanel providerMeta min-w-0 whitespace-normal break-all [overflow-wrap:anywhere] [font-size:var(--vui-font-xs)] leading-snug text-vui-fg-tertiary",
   providerStatusRow:
@@ -89,10 +89,10 @@ const styles = {
   table:
     "vui-routes-configproviderregistrypanel table w-full min-w-0 !border-0 !rounded-none [&_table]:w-full [&_table]:table-fixed [&_td]:whitespace-normal [&_td]:break-words [&_td]:!align-top [&_td]:!py-4 !overflow-visible [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10",
   verification: "grid min-w-0 gap-1 justify-items-start",
-  verificationError: "text-xs text-[var(--state-error)]",
-  verificationDetails: "cursor-pointer text-sm font-medium text-vui-fg-secondary",
-  verificationMessage: "mt-2 max-w-full whitespace-pre-wrap break-words text-xs text-vui-fg-secondary [overflow-wrap:anywhere]",
-  connectionAddress: "text-sm text-vui-fg-secondary break-words [overflow-wrap:anywhere]",
+  verificationError: "text-vui-xs text-[var(--state-error)]",
+  verificationDetails: "cursor-pointer text-vui-xs font-medium text-vui-fg-secondary",
+  verificationMessage: "mt-2 max-w-full whitespace-pre-wrap break-words text-vui-xs text-vui-fg-secondary [overflow-wrap:anywhere]",
+  connectionAddress: "text-vui-xs text-vui-fg-secondary break-words [overflow-wrap:anywhere]",
   modelName: "min-w-0 break-words [overflow-wrap:anywhere]",
   compactModelActions: "flex min-w-0 flex-wrap items-center gap-1",
   modelDetails: "grid min-w-0 gap-4",

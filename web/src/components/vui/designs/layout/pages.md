@@ -179,6 +179,8 @@ import { VListDetailPage } from "@/components/vui";
 
 ## VSettingsFormPage
 
+设置工作台采用“功能列表 → 原有详情编辑器”导航：主页按分组一项一行展示 VNativeButton，整行可点击；详情保留现有字段、校验和保存语义。配置 URL 的 page/focus 支持深链、浏览器返回和搜索定位，返回列表不丢失父级草稿。模型连接继续复用完整 Provider 工作区，Agent 模型选择不移入设置。全局设置入口保持左下角，不随页内布局迁移。
+
 ### 功能
 设置页 recipe：顶栏 + 可滚动表单体 + 粘性底栏（保存等）。
 

@@ -7,6 +7,9 @@ const isDesktopPetWindow = process.argv.includes("--vibelution-window-role=deskt
 contextBridge.exposeInMainWorld("vibelutionLauncher", {
   getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.getVersion),
   getDesktopShellSummary: () => ipcRenderer.invoke(IPC_CHANNELS.getDesktopShellSummary),
+  ...(!isLauncherControlWindow && !isDesktopPetWindow ? {
+    controlDesktopPet: (open?: boolean) => ipcRenderer.invoke(IPC_CHANNELS.controlDesktopPet, open)
+  } : {}),
   focusWorkbenchWindow: () => ipcRenderer.invoke(IPC_CHANNELS.focusWorkbenchWindow),
   requestDesktopShellExit: () => ipcRenderer.invoke(IPC_CHANNELS.requestDesktopShellExit),
   notifyConversationCompleted: (payload: unknown) =>

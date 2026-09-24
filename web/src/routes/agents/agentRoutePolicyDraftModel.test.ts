@@ -8,6 +8,7 @@ import {
   membershipDraftEqualsWorkspace,
   membershipDraftFromWorkspace,
   memoryPolicyDraftEqualsAgent,
+  memoryPolicyDraftEqualsDraft,
   memoryPolicyDraftFromAgent,
   supervisionPolicyDraftFromAgent,
   toolPolicyDeltaFromDraft,
@@ -94,7 +95,19 @@ describe("agentRoutePolicyDraftModel", () => {
     const memory = memoryPolicyDraftFromAgent(agent);
     expect(memory.readSharedGroups).toEqual(["project"]);
     expect(memory.readKnowledgeBaseIds).toEqual(["kb1"]);
+    expect(memory.enabled).toBe(true);
     expect(memoryPolicyDraftEqualsAgent(memory, agent)).toBe(true);
+    expect(memoryPolicyDraftEqualsAgent({ ...memory, enabled: false }, agent)).toBe(false);
+
+    const disabledAgent = {
+      ...agent,
+      memoryPolicy: { ...agent.memoryPolicy, enabled: false },
+    } as AgentConfigWorkspaceAgent;
+    const disabledDraft = memoryPolicyDraftFromAgent(disabledAgent);
+    expect(disabledDraft.enabled).toBe(false);
+    expect(memoryPolicyDraftEqualsAgent(disabledDraft, disabledAgent)).toBe(true);
+    expect(memoryPolicyDraftEqualsDraft(memory, disabledDraft)).toBe(false);
+    expect(memoryPolicyDraftEqualsDraft(disabledDraft, disabledDraft)).toBe(true);
 
     const delegation = delegationPolicyDraftFromAgent(agent);
     expect(delegation.allowSubagents).toBe(true);
@@ -106,5 +119,6 @@ describe("agentRoutePolicyDraftModel", () => {
 
     expect(defaultToolPolicy("x").policyId).toBe("x");
     expect(defaultMemoryPolicy("m").policyId).toBe("m");
+    expect(defaultMemoryPolicy("m").enabled).toBe(true);
   });
 });

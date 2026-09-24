@@ -45,7 +45,7 @@ const conversationComposerShell = cv(
 );
 const conversationComposerCodexShell = cv(
   "composerCodex",
-  "mx-auto grid w-full max-w-[830px] min-w-0 flex-none overflow-hidden rounded-[20px] border border-[color-mix(in_srgb,var(--border-soft)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_96%,var(--vui-surface-workspace))] shadow-[0_8px_26px_color-mix(in_srgb,var(--fg-primary)_7%,transparent)] max-[719px]:rounded-[16px]",
+  "mx-auto grid w-full max-w-[830px] min-w-0 flex-none overflow-hidden rounded-[20px] border border-[color-mix(in_srgb,var(--border-soft)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_96%,var(--vui-surface-workspace))] shadow-[0_8px_26px_color-mix(in_srgb,var(--fg-primary)_var(--vui-alpha-wash-faint),transparent)] max-[719px]:rounded-[16px]",
 );
 const composerNativeFieldTargets =
   "[&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-[72px] [&_textarea]:max-h-[220px] [&_textarea]:resize-none [&_input]:w-full [&_select]:w-full [&_textarea]:w-full [@media(max-height:520px)]:[&_textarea]:min-h-[44px]";
@@ -59,7 +59,7 @@ const composerFieldCodexShell = cv(
 const composerToolbarShell = cv("composerToolbar", "flex min-w-0 items-center gap-1 pt-0.5");
 const composerToolbarCodexShell = cv(
   "composerToolbarCodex",
-  "flex min-h-8 min-w-0 items-center justify-between gap-2 border-t border-[color-mix(in_srgb,var(--border-soft)_28%,transparent)] pt-1.5",
+  "flex min-h-8 min-w-0 items-center justify-between gap-2 border-t border-[color-mix(in_srgb,var(--border-soft)_var(--vui-alpha-tint-strong),transparent)] pt-1.5",
 );
 const composerFieldDragActiveShell = cv(
   "composerFieldDragActive",
@@ -70,7 +70,7 @@ const compactControlButton =
 const compactIconButtonSize =
   "h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] shrink-0";
 const composerQuietActionState =
-  "border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] text-[var(--fg-tertiary)] shadow-none transition-colors duration-150 hover:border-[color-mix(in_srgb,var(--border-strong)_72%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-surface-workspace)_14%,var(--vui-control-muted-hover))] hover:text-[var(--fg-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--vui-surface-panel)] active:border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] active:bg-[color-mix(in_srgb,var(--vui-surface-workspace)_18%,var(--vui-control-muted-hover))] disabled:cursor-default disabled:opacity-45 disabled:hover:border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] disabled:hover:bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] disabled:hover:text-[var(--fg-tertiary)]";
+  "border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] text-[var(--fg-tertiary)] shadow-none transition-colors duration-150 hover:border-[color-mix(in_srgb,var(--border-strong)_72%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-surface-workspace)_14%,var(--vui-control-muted-hover))] hover:text-[var(--fg-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),transparent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--vui-surface-panel)] active:border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint),var(--vui-border-subtle))] active:bg-[color-mix(in_srgb,var(--vui-surface-workspace)_18%,var(--vui-control-muted-hover))] disabled:cursor-default disabled:opacity-45 disabled:hover:border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] disabled:hover:bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] disabled:hover:text-[var(--fg-tertiary)]";
 const composerIconOnlySlot =
   "overflow-visible !px-0 !py-0 [&_[data-slot=vui-button-content]]:!inline-grid [&_[data-slot=vui-button-content]]:!size-full [&_[data-slot=vui-button-content]]:!max-w-none [&_[data-slot=vui-button-content]]:place-items-center [&_[data-slot=vui-button-icon]]:!inline-grid [&_[data-slot=vui-button-icon]]:!size-full [&_[data-slot=vui-button-icon]]:place-items-center [&_[data-slot=vui-button-icon]_svg]:shrink-0";
 const composerRoundActionButton = cv(
@@ -86,7 +86,7 @@ const composerPrimaryActionButton = cv(
   compactIconButtonSize,
   "p-0",
   composerIconOnlySlot,
-  "!border-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] !bg-[color-mix(in_srgb,var(--accent-cool)_14%,var(--vui-surface-row))] !text-[var(--accent-cool)] hover:!border-[color-mix(in_srgb,var(--accent-cool)_56%,transparent)] hover:!bg-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-control-muted-hover))] hover:!text-[var(--accent-cool)] focus-visible:!ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] active:!border-[color-mix(in_srgb,var(--accent-cool)_62%,transparent)] active:!bg-[color-mix(in_srgb,var(--accent-cool)_22%,var(--vui-surface-row))] disabled:hover:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] disabled:hover:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] disabled:hover:!text-[var(--fg-tertiary)]",
+  "!border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line-strong),transparent)] !bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-strong),var(--vui-surface-row))] !text-[var(--accent-cool)] hover:!border-[color-mix(in_srgb,var(--accent-cool)_56%,transparent)] hover:!bg-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-control-muted-hover))] hover:!text-[var(--accent-cool)] focus-visible:!ring-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line-strong),transparent)] active:!border-[color-mix(in_srgb,var(--accent-cool)_62%,transparent)] active:!bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint),var(--vui-surface-row))] disabled:hover:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] disabled:hover:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] disabled:hover:!text-[var(--fg-tertiary)]",
 );
 const composerSendActionButton = cv(
   "sendButton",
@@ -200,7 +200,7 @@ const styles: Record<string, string> = {
   companionTypingContent:
     "vui-components-conversationview companionTypingContent col-start-2 row-start-1 min-w-0 justify-self-start",
   attachButton:
-    cv("attachButton", "min-w-0 inline-grid", compactIconButtonSize, "place-items-center !rounded-full !border-transparent !bg-transparent p-0 [font-size:var(--vui-font-xs)] font-semibold leading-tight", composerIconOnlySlot, composerQuietActionState, "hover:!bg-[var(--vui-control-muted)] active:!bg-[color-mix(in_srgb,var(--vui-control-muted-hover)_78%,transparent)] disabled:hover:!bg-transparent"),
+    cv("attachButton", "min-w-0 inline-grid", compactIconButtonSize, "place-items-center !rounded-full !border-transparent !bg-transparent p-0 [font-size:var(--vui-font-xs)] font-semibold leading-tight", composerIconOnlySlot, composerQuietActionState, "hover:!bg-[var(--vui-control-muted)] active:!bg-[color-mix(in_srgb,var(--vui-control-muted-hover)_var(--vui-alpha-veil),transparent)] disabled:hover:!bg-transparent"),
   auxiliaryBlock:
     "vui-components-conversationview auxiliaryBlock min-w-0",
   auxiliaryBlock_active:
@@ -269,7 +269,7 @@ const styles: Record<string, string> = {
   auxiliaryPanel_mental: `vui-components-conversationview auxiliaryPanel_mental min-w-0 ${vuiGlassPanelClass} p-2`,
   auxiliaryPanel_thought: `vui-components-conversationview auxiliaryPanel_thought min-w-0 ${vuiGlassPanelClass} p-2`,
 backToBottomButton:
-    "vui-components-conversationview backToBottomButton absolute bottom-3 right-3 z-20 size-8 min-w-0 shrink-0 !inline-flex !w-8 !min-w-8 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)] p-0 text-[var(--fg-secondary)] shadow-[var(--vui-shadow-soft)] backdrop-blur-[10px] transition-[color,background-color,border-color,box-shadow,opacity] duration-150 hover:border-[var(--vui-control-hover-border)] hover:bg-[color-mix(in_srgb,var(--vui-surface-panel)_92%,transparent)] hover:text-[var(--fg-primary)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:!inline-flex [&_[data-slot=vui-button-content]]:items-center [&_[data-slot=vui-button-content]]:justify-center",  cliAgentLifecycleIcon:
+    "vui-components-conversationview backToBottomButton absolute bottom-3 right-3 z-20 size-8 min-w-0 shrink-0 !inline-flex !w-8 !min-w-8 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)] p-0 text-[var(--fg-secondary)] shadow-[var(--vui-shadow-soft)] backdrop-blur-[10px] transition-[color,background-color,border-color,box-shadow,opacity] duration-150 hover:border-[var(--vui-control-hover-border)] hover:bg-[color-mix(in_srgb,var(--vui-surface-panel)_92%,transparent)] hover:text-[var(--fg-primary)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),transparent)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:!inline-flex [&_[data-slot=vui-button-content]]:items-center [&_[data-slot=vui-button-content]]:justify-center",  cliAgentLifecycleIcon:
     `vui-components-conversationview cliAgentLifecycleIcon min-w-0 shrink-0 text-[var(--fg-tertiary)] ${vuiStateCoolInfoClass}`,
   cliAgentLifecycleMeta:
     `vui-components-conversationview cliAgentLifecycleMeta min-w-0 flex flex-wrap items-center gap-1.5 ${vuiStateCoolInfoClass} [&_time]:flex-none`,
@@ -294,7 +294,7 @@ backToBottomButton:
   composerAttachmentPreview:
     "vui-components-conversationview composerAttachmentPreview shrink-0 cursor-zoom-in !h-14 !min-h-14 !w-14 !min-w-14 !overflow-hidden !rounded-[10px] !bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,var(--vui-control-muted))] !p-0 shadow-none hover:!bg-[var(--vui-control-muted-hover)] hover:!shadow-none focus-visible:!ring-offset-0 [&_[data-slot=vui-button-content]]:!size-full [&_[data-slot=vui-button-content]]:!max-w-none [&_[data-slot=vui-button-label]]:!block [&_[data-slot=vui-button-label]]:!size-full",
   composerAttachmentRemoveButton:
-    "vui-components-conversationview composerAttachmentRemoveButton !h-6 !min-h-6 !w-6 !min-w-6 shrink-0 !rounded-full !p-0 text-[var(--fg-tertiary)] hover:!bg-[color-mix(in_srgb,var(--state-error)_12%,var(--vui-control-muted-hover))] hover:!text-[var(--state-error)]",
+    "vui-components-conversationview composerAttachmentRemoveButton !h-6 !min-h-6 !w-6 !min-w-6 shrink-0 !rounded-full !p-0 text-[var(--fg-tertiary)] hover:!bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash-strong),var(--vui-control-muted-hover))] hover:!text-[var(--state-error)]",
   composerAttachmentThumbFrame:
     "vui-components-conversationview composerAttachmentThumbFrame relative block size-full overflow-hidden rounded-[10px]",
   composerAttachmentThumb:
@@ -333,17 +333,17 @@ backToBottomButton:
   followupQueueTray:
     "vui-components-conversationview followupQueueTray mb-1 grid min-w-0 gap-0.5",
   followupQueueTrayBleed:
-    "vui-components-conversationview followupQueueTrayBleed -mx-3.5 -mt-2.5 rounded-t-[20px] border-b border-[color-mix(in_srgb,var(--border-hairline)_75%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_42%,transparent)] px-3.5 pb-1 pt-1.5",
+    "vui-components-conversationview followupQueueTrayBleed -mx-3.5 -mt-2.5 rounded-t-[20px] border-b border-[color-mix(in_srgb,var(--border-hairline)_var(--vui-alpha-veil),transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_42%,transparent)] px-3.5 pb-1 pt-1.5",
   followupQueueTrayInset:
-    "vui-components-conversationview followupQueueTrayInset rounded-[10px] border border-[color-mix(in_srgb,var(--vui-border-subtle)_75%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_42%,transparent)] px-2 pb-1 pt-1.5",
+    "vui-components-conversationview followupQueueTrayInset rounded-[10px] border border-[color-mix(in_srgb,var(--vui-border-subtle)_var(--vui-alpha-veil),transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_42%,transparent)] px-2 pb-1 pt-1.5",
   followupQueueHeader:
     "vui-components-conversationview followupQueueHeader px-1.5 pb-0.5 pt-0.5 [font-size:var(--vui-font-2xs)] leading-tight text-[var(--fg-tertiary)]",
   followupQueueRows:
     "vui-components-conversationview followupQueueRows grid min-w-0 [&>*+*]:border-t [&>*+*]:border-[color-mix(in_srgb,var(--border-hairline)_55%,transparent)]",
   followupQueueRow:
-    "vui-components-conversationview followupQueueRow group grid min-h-7 min-w-0 grid-cols-[14px_1.4ch_minmax(0,1fr)_auto] items-center gap-2 rounded-[6px] px-1.5 py-0.5 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] transition-colors duration-150 hover:bg-[var(--vui-row-hover-bg)] focus-within:bg-[var(--vui-row-hover-bg)]",
+    "vui-components-conversationview followupQueueRow group grid min-h-7 min-w-0 grid-cols-[14px_1.4ch_minmax(0,1fr)_auto] items-center gap-2 rounded-[var(--radius-control)] px-1.5 py-0.5 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] transition-colors duration-150 hover:bg-[var(--vui-row-hover-bg)] focus-within:bg-[var(--vui-row-hover-bg)]",
   followupQueueRowEditing:
-    "vui-components-conversationview followupQueueRowEditing bg-[color-mix(in_srgb,var(--accent-cool)_6%,transparent)]",
+    "vui-components-conversationview followupQueueRowEditing bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),transparent)]",
   followupQueueDrag:
     "vui-components-conversationview followupQueueDrag grid shrink-0 cursor-grab place-items-center text-[var(--fg-tertiary)] opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100",
   followupQueueIndex:
@@ -353,7 +353,7 @@ backToBottomButton:
   followupQueueRowMain:
     "vui-components-conversationview followupQueueRowMain flex min-w-0 items-center gap-1.5",
   followupQueueChip:
-    "vui-components-conversationview followupQueueChip inline-flex shrink-0 items-center gap-0.5 rounded-[5px] border border-[color-mix(in_srgb,var(--vui-border-subtle)_75%,transparent)] px-1 [font-size:var(--vui-font-2xs)] leading-tight text-[var(--fg-tertiary)]",
+    "vui-components-conversationview followupQueueChip inline-flex shrink-0 items-center gap-0.5 rounded-[5px] border border-[color-mix(in_srgb,var(--vui-border-subtle)_var(--vui-alpha-veil),transparent)] px-1 [font-size:var(--vui-font-2xs)] leading-tight text-[var(--fg-tertiary)]",
   followupQueueChipBlocked:
     "vui-components-conversationview followupQueueChipBlocked inline-flex shrink-0 items-center rounded-[5px] border border-[color-mix(in_srgb,var(--state-warning)_45%,transparent)] px-1 [font-size:var(--vui-font-2xs)] font-semibold leading-tight text-[var(--state-warning)]",
   followupQueueRowActions:
@@ -363,7 +363,7 @@ backToBottomButton:
   followupQueueEditInput:
     "vui-components-conversationview followupQueueEditInput !h-6 !min-h-6 !rounded-none !border-0 !bg-transparent !px-0 !py-0 !shadow-none focus-visible:!ring-0 ![font-size:var(--vui-font-xs)]",
   followupQueueMore:
-    "vui-components-conversationview followupQueueMore w-fit justify-self-start rounded-[6px] !min-h-0 !h-auto !bg-transparent !px-1.5 !py-0.5 text-left [font-size:var(--vui-font-2xs)] leading-tight !text-[var(--fg-tertiary)] hover:!bg-transparent hover:!text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)]",
+    "vui-components-conversationview followupQueueMore w-fit justify-self-start rounded-[var(--radius-control)] !min-h-0 !h-auto !bg-transparent !px-1.5 !py-0.5 text-left [font-size:var(--vui-font-2xs)] leading-tight !text-[var(--fg-tertiary)] hover:!bg-transparent hover:!text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),transparent)]",
   // Text + icon primary for edit/rerun — never compose with square composerRoundButton* slots.
   composerEditSubmitButton:
     "vui-components-conversationview composerEditSubmitButton !inline-flex !h-[var(--vui-control-height-sm)] !min-h-[var(--vui-control-height-sm)] !w-fit !min-w-0 max-w-[min(100%,12.5rem)] shrink-0 items-center justify-center gap-1.5 !rounded-full !border !border-[var(--fg-primary)] !bg-[var(--fg-primary)] !px-3 !py-0 [font-size:var(--vui-font-xs)] font-semibold leading-none !text-[var(--vui-surface-workspace)] shadow-none transition-colors duration-150 hover:!border-[color-mix(in_srgb,var(--fg-primary)_82%,var(--accent-cool))] hover:!bg-[color-mix(in_srgb,var(--fg-primary)_82%,var(--accent-cool))] hover:!text-[var(--vui-surface-workspace)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--vui-surface-panel)] active:!bg-[color-mix(in_srgb,var(--fg-primary)_72%,var(--accent-cool))] disabled:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] disabled:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] disabled:!text-[var(--fg-tertiary)] disabled:hover:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] disabled:hover:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] disabled:hover:!text-[var(--fg-tertiary)] [&_[data-slot=vui-button-content]]:!inline-flex [&_[data-slot=vui-button-content]]:!w-auto [&_[data-slot=vui-button-content]]:!max-w-full [&_[data-slot=vui-button-content]]:items-center [&_[data-slot=vui-button-content]]:gap-1.5 [&_[data-slot=vui-button-label]]:truncate [&_svg]:shrink-0",
@@ -464,17 +464,17 @@ backToBottomButton:
   thoughtScrollBody:
     "vui-components-conversationview thoughtScrollBody min-w-0 max-h-[12rem] overflow-y-auto overflow-x-hidden overscroll-contain [scrollbar-gutter:stable] border-0 bg-transparent px-0 py-1 text-[var(--fg-tertiary)]",
   codexTranscriptReasoningTextButton:
-    "vui-components-conversationview codexTranscriptReasoningTextButton min-w-0 !h-auto !w-full !max-w-full cursor-pointer !justify-start !rounded-none !border-0 !bg-transparent !p-0 !pl-[28px] !text-left !shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] focus-visible:ring-offset-1 [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+    "vui-components-conversationview codexTranscriptReasoningTextButton min-w-0 !h-auto !w-full !max-w-full cursor-pointer !justify-start !rounded-none !border-0 !bg-transparent !p-0 !pl-[28px] !text-left !shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),transparent)] focus-visible:ring-offset-1 [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   codexTranscriptSurface:
     "vui-components-conversationview codexTranscriptSurface grid w-full max-w-full min-w-0 content-start gap-2 px-0",
   codexTurnChangeBadge:
-    "vui-components-conversationview codexTurnChangeBadge mt-1 inline-flex w-fit max-w-full items-center rounded-full border border-[color-mix(in_srgb,var(--fg-tertiary)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--vui-surface-panel)_70%,transparent)] px-2.5 py-1 [font-size:var(--vui-font-xs)] font-normal leading-none text-[var(--fg-tertiary)]",
+    "vui-components-conversationview codexTurnChangeBadge mt-1 inline-flex w-fit max-w-full items-center rounded-full border border-[color-mix(in_srgb,var(--fg-tertiary)_var(--vui-alpha-tint-strong),var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--vui-surface-panel)_70%,transparent)] px-2.5 py-1 [font-size:var(--vui-font-xs)] font-normal leading-none text-[var(--fg-tertiary)]",
   conversationCellTimeline:
     "vui-components-conversationview conversationCellTimeline min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   emptyStateHost:
     "vui-components-conversationview emptyStateHost grid min-h-full w-full min-w-0 flex-1 place-content-center place-items-center px-4 py-10 sm:py-14",
   emptyState:
-    "vui-components-conversationview emptyState w-full max-w-[min(100%,28rem)] min-w-0 justify-items-center border-dashed border-[color-mix(in_srgb,var(--fg-tertiary)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--vui-surface-panel)_55%,var(--vui-surface-row))] px-6 py-8 text-center shadow-[var(--vui-shadow-hairline)] " +
+    "vui-components-conversationview emptyState w-full max-w-[min(100%,28rem)] min-w-0 justify-items-center border-dashed border-[color-mix(in_srgb,var(--fg-tertiary)_var(--vui-alpha-tint-strong),var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--vui-surface-panel)_55%,var(--vui-surface-row))] px-6 py-8 text-center shadow-[var(--vui-shadow-hairline)] " +
     "[&_strong]:[font-size:var(--vui-type-emphasis-size)] [&_strong]:font-[var(--vui-weight-semibold)] [&_strong]:leading-[var(--vui-type-emphasis-line)] [&_strong]:text-[var(--fg-primary)]",
   emptyStateStarters:
     "vui-components-conversationview emptyStateStarters mt-5 grid w-full max-w-[min(100%,40rem)] min-w-0 justify-items-center gap-2.5",
@@ -523,9 +523,9 @@ backToBottomButton:
   imagePreviewOverlay: `vui-components-conversationview imagePreviewOverlay min-w-0 ${vuiGlassPanelClass} p-2`,
   imagePreviewToolbar: `vui-components-conversationview imagePreviewToolbar min-w-0 ${vuiGlassPanelClass} p-2 flex flex-wrap items-center gap-1.5`,
   inlineCode:
-    "vui-components-conversationview inlineCode min-w-0 rounded-[0.3rem] bg-[color-mix(in_srgb,var(--fg-primary)_7%,transparent)] px-1 py-0.5 font-mono [font-size:var(--vui-font-xs)] text-[var(--fg-primary)] whitespace-normal break-words [box-decoration-break:clone]",
+    "vui-components-conversationview inlineCode min-w-0 rounded-[0.3rem] bg-[color-mix(in_srgb,var(--fg-primary)_var(--vui-alpha-wash-faint),transparent)] px-1 py-0.5 font-mono [font-size:var(--vui-font-xs)] text-[var(--fg-primary)] whitespace-normal break-words [box-decoration-break:clone]",
   inlineLink:
-    "vui-components-conversationview inlineLink min-w-0 text-[var(--accent-cool)] underline decoration-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] underline-offset-2 hover:decoration-[var(--accent-cool)]",
+    "vui-components-conversationview inlineLink min-w-0 text-[var(--accent-cool)] underline decoration-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line-strong),transparent)] underline-offset-2 hover:decoration-[var(--accent-cool)]",
   inlineStrong:
     "vui-components-conversationview inlineStrong min-w-0 font-semibold text-[var(--fg-primary)]",
   input: composerGenericInputField,
@@ -705,7 +705,7 @@ backToBottomButton:
   operationIcon_error:
     `vui-components-conversationview operationIcon_error min-w-0 ${vuiStateDangerSoftClass} shrink-0 text-[var(--fg-tertiary)]`,
   operationIcon_failed:
-    "vui-components-conversationview operationIcon_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] !text-[var(--state-error)] shrink-0 text-[var(--fg-tertiary)]",
+    "vui-components-conversationview operationIcon_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)] bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash),transparent)] !text-[var(--state-error)] shrink-0 text-[var(--fg-tertiary)]",
   operationIcon_files:
     "vui-components-conversationview operationIcon_files min-w-0 shrink-0 text-[var(--fg-tertiary)]",
   operationIcon_idle:
@@ -749,7 +749,7 @@ backToBottomButton:
   operationIcon_warn:
     "vui-components-conversationview operationIcon_warn min-w-0 shrink-0 text-[var(--fg-tertiary)]",
   operationIcon_warning:
-    "vui-components-conversationview operationIcon_warning min-w-0 shrink-0 text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] !text-[var(--state-warning)]",
+    "vui-components-conversationview operationIcon_warning min-w-0 shrink-0 text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--state-warning)_var(--vui-alpha-line),transparent)] bg-[color-mix(in_srgb,var(--state-warning)_var(--vui-alpha-wash),transparent)] !text-[var(--state-warning)]",
   operationItem: `vui-components-conversationview operationItem min-w-0 ${vuiOpaqueRowClass} p-2 w-[min(100%,72ch)] grid grid-cols-[22px_minmax(0,1fr)_auto_auto_16px] items-start gap-1.5 !rounded-none !border-0 !bg-transparent !p-0 !pb-1 !text-[var(--fg-secondary)] !shadow-none`,
   operationItemActive: `vui-components-conversationview operationItemActive min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateSelectedRowClass}`,
   operationItemTool: `vui-components-conversationview operationItemTool min-w-0 ${vuiOpaqueRowClass} p-2 text-[var(--fg-secondary)] max-w-full`,
@@ -763,7 +763,7 @@ backToBottomButton:
   operationItem_danger: `vui-components-conversationview operationItem_danger min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateDangerSoftClass}`,
   operationItem_done: `vui-components-conversationview operationItem_done min-w-0 ${vuiOpaqueRowClass} p-2`,
   operationItem_error: `vui-components-conversationview operationItem_error min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateDangerSoftClass}`,
-  operationItem_failed: `vui-components-conversationview operationItem_failed min-w-0 ${vuiOpaqueRowClass} p-2 !border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] !bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] !text-[var(--state-error)]`,
+  operationItem_failed: `vui-components-conversationview operationItem_failed min-w-0 ${vuiOpaqueRowClass} p-2 !border-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)] !bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash),transparent)] !text-[var(--state-error)]`,
   operationItem_files: `vui-components-conversationview operationItem_files min-w-0 ${vuiOpaqueRowClass} p-2`,
   operationItem_idle: `vui-components-conversationview operationItem_idle min-w-0 ${vuiOpaqueRowClass} p-2 text-[var(--fg-tertiary)]`,
   operationItem_info: `vui-components-conversationview operationItem_info min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateCoolInfoClass}`,
@@ -785,7 +785,7 @@ backToBottomButton:
   operationItem_verification: `vui-components-conversationview operationItem_verification min-w-0 ${vuiOpaqueRowClass} p-2`,
   operationItem_wake: `vui-components-conversationview operationItem_wake min-w-0 ${vuiOpaqueRowClass} p-2`,
   operationItem_warn: `vui-components-conversationview operationItem_warn min-w-0 ${vuiOpaqueRowClass} p-2`,
-  operationItem_warning: `vui-components-conversationview operationItem_warning min-w-0 ${vuiOpaqueRowClass} p-2 !border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] !bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] !text-[var(--state-warning)]`,
+  operationItem_warning: `vui-components-conversationview operationItem_warning min-w-0 ${vuiOpaqueRowClass} p-2 !border-[color-mix(in_srgb,var(--state-warning)_var(--vui-alpha-line),transparent)] !bg-[color-mix(in_srgb,var(--state-warning)_var(--vui-alpha-wash),transparent)] !text-[var(--state-warning)]`,
   operationName:
     "vui-components-conversationview operationName min-w-0 [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)]",
   operationStatus:
@@ -1086,7 +1086,7 @@ backToBottomButton:
   rolloutTraceItem_running:
     "vui-components-conversationview rolloutTraceItem_running min-w-0 text-[var(--fg-secondary)]",
   rolloutTraceList:
-    "vui-components-conversationview rolloutTraceList mt-2 grid min-w-0 gap-1 border-l border-[color-mix(in_srgb,var(--fg-tertiary)_22%,transparent)] bg-transparent pl-2 shadow-none",
+    "vui-components-conversationview rolloutTraceList mt-2 grid min-w-0 gap-1 border-l border-[color-mix(in_srgb,var(--fg-tertiary)_var(--vui-alpha-tint),transparent)] bg-transparent pl-2 shadow-none",
   rolloutTraceMeta:
     "vui-components-conversationview rolloutTraceMeta min-w-0 text-[var(--fg-tertiary)] [overflow-wrap:anywhere]",
   rolloutTraceText:
@@ -1127,13 +1127,13 @@ backToBottomButton:
   slashCommandSuggestionButtonActive:
     "vui-components-conversationview slashCommandSuggestionButtonActive !bg-[var(--vui-control-muted)] !text-[var(--fg-primary)]",
   slashCommandBuiltinBadge:
-    "vui-components-conversationview slashCommandBuiltinBadge ml-auto shrink-0 rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_34%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] px-1.5 py-px [font-size:var(--vui-font-xs)] leading-none text-[var(--accent-cool)]",
+    "vui-components-conversationview slashCommandBuiltinBadge ml-auto shrink-0 rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash),transparent)] px-1.5 py-px [font-size:var(--vui-font-xs)] leading-none text-[var(--accent-cool)]",
   slashCommandSuggestions:
     "vui-components-conversationview slashCommandSuggestions min-w-0 overflow-hidden rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] shadow-[var(--vui-shadow-hairline)]",
   statusSpinner:
     "vui-components-conversationview statusSpinner min-w-0 animate-spin",
   stopButton:
-    "vui-components-conversationview stopButton min-w-0 !border-[color-mix(in_srgb,var(--state-error)_34%,transparent)] !bg-[color-mix(in_srgb,var(--state-error)_9%,var(--vui-surface-row))] !text-[var(--state-error)] hover:!border-[color-mix(in_srgb,var(--state-error)_48%,transparent)] hover:!bg-[color-mix(in_srgb,var(--state-error)_14%,var(--vui-control-muted-hover))] hover:!text-[var(--state-error)] focus-visible:!ring-[color-mix(in_srgb,var(--state-error)_36%,transparent)] active:!border-[color-mix(in_srgb,var(--state-error)_58%,transparent)] active:!bg-[color-mix(in_srgb,var(--state-error)_18%,var(--vui-surface-row))] disabled:hover:!border-[color-mix(in_srgb,var(--state-error)_34%,transparent)] disabled:hover:!bg-[color-mix(in_srgb,var(--state-error)_9%,var(--vui-surface-row))] disabled:hover:!text-[var(--state-error)]",
+    "vui-components-conversationview stopButton min-w-0 !border-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)] !bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash),var(--vui-surface-row))] !text-[var(--state-error)] hover:!border-[color-mix(in_srgb,var(--state-error)_48%,transparent)] hover:!bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash-strong),var(--vui-control-muted-hover))] hover:!text-[var(--state-error)] focus-visible:!ring-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)] active:!border-[color-mix(in_srgb,var(--state-error)_58%,transparent)] active:!bg-[color-mix(in_srgb,var(--state-error)_18%,var(--vui-surface-row))] disabled:hover:!border-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)] disabled:hover:!bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash),var(--vui-surface-row))] disabled:hover:!text-[var(--state-error)]",
   streamingCodeBlock:
     "vui-components-conversationview streamingCodeBlock min-w-0 font-mono [font-size:var(--vui-font-xs)]",
   streamingResponseText:
@@ -1149,7 +1149,7 @@ backToBottomButton:
   supplemental:
     "vui-components-conversationview supplemental min-w-0",
   surface:
-    "vui-components-conversationview surface relative flex h-full max-h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-strong)_74%,transparent)] bg-[var(--vui-surface-chat)] shadow-none",
+    "vui-components-conversationview surface relative flex h-full max-h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-strong)_var(--vui-alpha-veil),transparent)] bg-[var(--vui-surface-chat)] shadow-none",
   surfaceCompact:
     "vui-components-conversationview surfaceCompact rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-strong)_70%,transparent)] bg-[var(--vui-surface-chat)] [&_.timeline]:bg-[var(--vui-surface-chat)] [&_.timeline]:pt-[9px] [&_.timeline]:pb-[11px] [&_.composer]:gap-[7px] [&_.composer]:px-2.5 [&_.composer]:pt-1.5 [&_.composer]:pb-2",
   thoughtMetaPill:
@@ -1177,7 +1177,7 @@ timeline:
   timelineCellDetailButton:
     "vui-components-conversationview timelineCellDetailButton min-w-0 inline-grid size-6 shrink-0 self-start place-items-center rounded-[var(--radius-control)] border border-transparent bg-transparent p-0 text-[var(--fg-tertiary)] hover:border-[var(--vui-border-subtle)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
   timelineCellHeader:
-    "vui-components-conversationview timelineCellHeader min-w-0 overflow-visible !grid !h-auto !min-h-0 !w-full !max-w-full !shrink grid-cols-[20px_minmax(0,1fr)] !items-start !justify-start gap-x-2 gap-y-1 !rounded-none !border-0 !bg-transparent !p-0 !text-left !font-normal !leading-normal !shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none focus-visible:!rounded-[var(--radius-control)] focus-visible:!ring-2 focus-visible:!ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+    "vui-components-conversationview timelineCellHeader min-w-0 overflow-visible !grid !h-auto !min-h-0 !w-full !max-w-full !shrink grid-cols-[20px_minmax(0,1fr)] !items-start !justify-start gap-x-2 gap-y-1 !rounded-none !border-0 !bg-transparent !p-0 !text-left !font-normal !leading-normal !shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none focus-visible:!rounded-[var(--radius-control)] focus-visible:!ring-2 focus-visible:!ring-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),transparent)] [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   timelineCellBody:
     "vui-components-conversationview timelineCellBody min-w-0 overflow-hidden text-left",
   timelineCellCompactTitleRow:
@@ -1197,7 +1197,7 @@ timeline:
   timelineCellTitle:
     "vui-components-conversationview timelineCellTitle min-w-0 whitespace-normal [font-size:var(--vui-font-xs)] font-normal leading-[1.4] text-[var(--fg-tertiary)] [overflow-wrap:anywhere]",
   timelineCommandError:
-    "vui-components-conversationview timelineCommandError col-start-2 mt-0.5 min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] px-2 py-1.5 [font-size:var(--vui-font-xs)] leading-[1.45] text-[var(--state-error)] whitespace-pre-wrap [overflow-wrap:anywhere]",
+    "vui-components-conversationview timelineCommandError col-start-2 mt-0.5 min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)] bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash),transparent)] px-2 py-1.5 [font-size:var(--vui-font-xs)] leading-[1.45] text-[var(--state-error)] whitespace-pre-wrap [overflow-wrap:anywhere]",
   timelineCommandList:
     "vui-components-conversationview timelineCommandList min-w-0 grid min-h-0 content-start gap-0 border-0 py-1 my-0.5 max-h-[min(18rem,42vh)] overflow-y-auto overflow-x-hidden [scrollbar-width:thin]",
   timelineCommandRow:
@@ -1229,13 +1229,13 @@ timeline:
   timelineThoughtText:
     "vui-components-conversationview timelineThoughtText min-w-0 !block max-w-[min(100%,128ch)] whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-left border-0 bg-transparent p-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   timelineThoughtTextButton:
-    "vui-components-conversationview timelineThoughtTextButton min-w-0 !h-auto !w-full !max-w-full cursor-pointer !justify-start !rounded-none !border-0 !bg-transparent !p-0 !text-left !shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] focus-visible:ring-offset-1 [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+    "vui-components-conversationview timelineThoughtTextButton min-w-0 !h-auto !w-full !max-w-full cursor-pointer !justify-start !rounded-none !border-0 !bg-transparent !p-0 !text-left !shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),transparent)] focus-visible:ring-offset-1 [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   title:
     "vui-components-conversationview title min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   toolPill:
     `vui-components-conversationview toolPill min-w-0 ${vuiControlPillClass} ${vuiStateWarmSoftClass}`,
   toolRow:
-    "vui-components-conversationview toolRow min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_22%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_5%,var(--vui-surface-panel))] px-2 py-1.5 text-[var(--accent-warm)] shadow-none",
+    "vui-components-conversationview toolRow min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-tint),var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_5%,var(--vui-surface-panel))] px-2 py-1.5 text-[var(--accent-warm)] shadow-none",
   toolsBlock:
     "vui-components-conversationview toolsBlock min-w-0",
   toolsLabel:
@@ -1250,7 +1250,7 @@ timeline:
     "vui-components-conversationview turnContent grid min-w-0 gap-[5px]",
   turnEditBadge: `vui-components-conversationview turnEditBadge min-w-0 ${vuiOpaqueRowClass} p-2 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]`,
   turnEditing:
-    "vui-components-conversationview turnEditing min-w-0 [&_.userMessageBody]:border-[color-mix(in_srgb,var(--accent-cool)_34%,var(--vui-border-subtle))] [&_.userMessageBody]:bg-[color-mix(in_srgb,var(--accent-cool)_7%,var(--vui-surface-panel))] [&_.userMessageBody]:ring-1 [&_.userMessageBody]:ring-inset [&_.userMessageBody]:ring-[color-mix(in_srgb,var(--accent-cool)_22%,transparent)]",
+    "vui-components-conversationview turnEditing min-w-0 [&_.userMessageBody]:border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--vui-border-subtle))] [&_.userMessageBody]:bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),var(--vui-surface-panel))] [&_.userMessageBody]:ring-1 [&_.userMessageBody]:ring-inset [&_.userMessageBody]:ring-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint),transparent)]",
   toolApprovalFallback:
     "toolApprovalFallback z-[6] min-w-0 w-full max-w-[min(44rem,100%)] shrink-0 justify-self-center px-2 pb-1.5 pt-0.5",
   turnError:

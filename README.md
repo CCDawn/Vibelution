@@ -4,12 +4,11 @@
 <p align="center">原生多 Agent · Agent 通信 · 团队协作 · 自进化与监督进化 · 虚拟人</p>
 
 <p align="center">
-  中文 · <a href="README.en.md">English</a><br>
-  <a href="#原生多-agent-搭建">搭建 Agent</a> · <a href="#agent-通信">Agent 通信</a> · <a href="#团队协作">团队协作</a> · <a href="#自进化与监督进化">进化</a> · <a href="#虚拟人">虚拟人</a> · <a href="#开始使用">开始使用</a>
+  中文 · <a href="README.en.md">English</a>
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/Code-MIT-38bdae?style=flat-square" alt="代码许可证：MIT"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/CCDawn/Vibelution?style=flat-square" alt="MIT License"></a>
   <a href="docs/guides/install-windows.md"><img src="https://img.shields.io/badge/Desktop-Windows-4979e8?style=flat-square" alt="Windows 桌面工作台"></a>
   <a href="https://github.com/CCDawn/Vibelution/issues"><img src="https://img.shields.io/badge/Feedback-welcome-f2b36d?style=flat-square" alt="欢迎反馈"></a>
 </p>
@@ -29,6 +28,19 @@
 | **团队协作** | 分配角色、连接任务与人工确认节点，在研究画布里推进调研、知识整理、假说评审和实验设计 |
 | **自进化与监督进化** | 以明确目标进行自检、修改和验证，或通过数据集、基线与候选对照评估改进 |
 | **虚拟人** | 为 Agent 绑定人物生活能力，提供日程、情绪、日记、长期记忆与主动消息 |
+
+## 目录
+
+- [看一支科研团队如何工作](#看一支科研团队如何工作)
+- [原生多 Agent 搭建](#原生多-agent-搭建)
+- [Agent 通信](#agent-通信)
+- [团队协作](#团队协作)
+- [自进化与监督进化](#自进化与监督进化)
+- [虚拟人](#虚拟人)
+- [模型、工具与研究工作环境](#模型工具与研究工作环境)
+- [开始使用](#开始使用)
+- [相关项目](#相关项目)
+- [文档与贡献](#文档与贡献)
 
 ## 看一支科研团队如何工作
 
@@ -178,6 +190,13 @@ macOS / Linux 用户按对应安装指南（[macOS](docs/guides/install-macos.md
 [Windows 安装说明](docs/guides/install-windows.md) · [macOS 安装说明](docs/guides/install-macos.md) · [Linux 安装说明](docs/guides/install-linux.md) · [开发环境与贡献](CONTRIBUTING.md) · [Linux 部署参考](docs/ops/linux-bootstrap.md)
 
 工作台运行在本机，模型由你配置。使用云端模型时，相应请求会发送给所选服务商并可能产生费用；密钥与运行配置保存在仓库之外。
+
+## 相关项目
+
+- [briefbound-skills](https://github.com/CCDawn/briefbound-skills) — Briefbound Agent Skills
+- [Codex-Dynamic-Skin](https://github.com/CCDawn/Codex-Dynamic-Skin) — Codex 动态壁纸与主题
+- [harmony-codex](https://github.com/CCDawn/harmony-codex) — 鸿蒙手机远程操作 Codex Desktop
+- [pc-touchpad](https://github.com/CCDawn/pc-touchpad) — 鸿蒙手机变 Windows 触控板
 
 ## 文档与贡献
 

@@ -75,6 +75,24 @@
   --vui-transition: 150ms var(--vui-ease);
   --vui-radius-soft: 10px;
 
+  /* VUI alpha tiers — wash/tint convergence (P2 visual-unification wave).
+     Semantic percentage slots for hand-tuned color-mix() alphas OUTSIDE the
+     structural surface wash governed by vuiSurfaceAlphaPolicy: state tints,
+     hover washes, accent lines, and divider fades (base color stays explicit
+     at the call site; these vars only pin the alpha tier).
+     Tiers are the census modes of the 2026-09 color-mix distribution sweep
+     (1618 in-scope calls): wash band 8/10/12%, tint band 24/28%, line band
+     34/42%, veil 76%. Zero-displacement mapping takes priority; values more
+     than 2pp from a tier stay literal until a later ratchet wave. */
+  --vui-alpha-wash-faint: 8%; /* hover/selected wash over rows & controls */
+  --vui-alpha-wash: 10%; /* soft background wash (info/quiet fills) */
+  --vui-alpha-wash-strong: 12%; /* emphasized soft wash on accent/state */
+  --vui-alpha-tint: 24%; /* chip / badge tint fills */
+  --vui-alpha-tint-strong: 28%; /* selected & active tint fills */
+  --vui-alpha-line: 34%; /* accent/state hairline borders, focus rings */
+  --vui-alpha-line-strong: 42%; /* emphasized accent borders */
+  --vui-alpha-veil: 76%; /* divider/border fade toward transparent */
+
   --vui-gradient-route-soft: linear-gradient(
     180deg,
     color-mix(in srgb, var(--vui-surface-panel) 92%, transparent),
@@ -233,6 +251,46 @@
 
   /* Theme-aware form chrome (Path B Wave 7). Select chevron fill follows tertiary fg. */
   --vui-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%237d8796' d='M2.5 4.5 6 8l3.5-3.5'/%3E%3C/svg%3E");
+
+  /*
+   * Desktop pet always-dark skin (恒暗皮肤). The desktop-pet window renders an
+   * intentionally theme-independent dark bubble: these are fixed literals that
+   * MUST NOT follow [data-theme] (no light override exists, by design) and are
+   * consumed only by the desktop-pet surface
+   * (web/src/design/route-css/desktop-pet.tailwind.css + routes/desktopPet/*).
+   * Values were consolidated verbatim from that surface (P3 visual unification).
+   */
+  --vui-pet-accent: #36d5cc;
+  --vui-pet-accent-rgb: 54 213 204;
+  --vui-pet-tone-approval: #ffc857;
+  --vui-pet-tone-approval-rgb: 255 200 87;
+  --vui-pet-tone-error: #ff7385;
+  --vui-pet-tone-error-rgb: 255 115 133;
+  --vui-pet-tone-completed: #8cef8c;
+  --vui-pet-tone-completed-rgb: 140 239 140;
+  --vui-pet-marker: #54ddd5;
+  --vui-pet-marker-glow: rgb(84 221 213 / 55%);
+  --vui-pet-fg: #eaffff;
+  --vui-pet-fg-bright: #ffffff;
+  --vui-pet-fg-control: rgb(233 255 255 / 78%);
+  --vui-pet-fg-muted: rgb(223 247 247 / 62%);
+  --vui-pet-fg-meta: rgb(221 247 247 / 58%);
+  --vui-pet-fg-cue: #dffefa;
+  --vui-pet-message-bg: rgb(2 6 23 / 80%);
+  --vui-pet-credit-bg: rgb(2 6 23 / 60%);
+  --vui-pet-credit-fg: rgb(255 255 255 / 80%);
+  --vui-pet-credit-size: 8px;
+  --vui-pet-panel: rgb(8 25 38 / 78%);
+  --vui-pet-panel-control: rgb(8 25 38 / 55%);
+  --vui-pet-panel-cue: rgb(7 25 38 / 72%);
+  --vui-pet-hud-bg: linear-gradient(145deg, rgb(9 29 42 / 92%), rgb(10 18 35 / 88%));
+  --vui-pet-hud-border: rgb(92 225 218 / 25%);
+  --vui-pet-hud-divider: rgb(124 232 226 / 13%);
+  --vui-pet-row-hover: rgb(116 231 225 / 10%);
+  --vui-pet-cue-border: rgb(166 244 238 / 25%);
+  --vui-pet-shadow-status: 0 8px 24px rgb(1 10 18 / 24%);
+  --vui-pet-shadow-hud: 0 18px 48px rgb(1 8 18 / 36%);
+  --vui-pet-shadow-drop: drop-shadow(0 14px 12px rgb(2 12 23 / 28%));
 }
 
 [data-theme="light"] {

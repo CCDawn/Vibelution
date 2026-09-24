@@ -5,17 +5,19 @@ import { useEffect, useRef, useState } from "react";
 
 import {
   getLauncherBranchInstances,
+  getLauncherFreshness,
   getLauncherStatus,
   isLauncherControlPlaneNotReady,
   requestBranchInstanceLifecycle,
+  restartLatestLauncher,
   saveLauncherWorkbenchWindowMode,
   updateLauncherStartupSettings,
 } from "../api/launcher";
 import { queryKeys } from "../api/queryKeys";
-import type { LauncherOperation } from "../api/types";
+import type { LauncherFreshness, LauncherOperation } from "../api/types";
 import { useWorkbenchLifecycleActions } from "../app/useWorkbenchLifecycleActions";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VDenseOpsPage, VRouteLinkButton, VStateSurface } from "../components/vui";
+import { VConfirmDialog, VDenseOpsPage, VRouteLinkButton, VStateSurface } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { LauncherBranchInstancesPanel } from "./LauncherBranchInstancesPanel";
 import {
@@ -29,6 +31,33 @@ import { LauncherStartupSettingsPanel } from "./LauncherStartupSettingsPanel";
 import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
 
 const LAUNCHER_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.launcher;
+
+function dismissLauncherUpdate(
+  token: string,
+  setDismissed: (value: string) => void,
+): void {
+  setDismissed(token);
+  try {
+    window.sessionStorage.setItem("vibelution.launcher-update-dismissed", token);
+  } catch {
+    // The in-memory dismissal still covers this page visit.
+  }
+}
+
+function launcherUpdateDescription(freshness: LauncherFreshness | undefined, zh: boolean): string {
+  const running = freshness?.runningShort || "";
+  const head = freshness?.headShort || "";
+  if (zh) {
+    const version = running && head && freshness?.current === false
+      ? `正在运行的是 ${running}，当前代码是 ${head}。`
+      : "桌面壳还不是当前代码。";
+    return `${version}重启会先退出这个窗口和正在运行的工作区，构建完成后再打开最新的 Launcher。`;
+  }
+  const version = running && head && freshness?.current === false
+    ? `This window is ${running}; the checkout is ${head}. `
+    : "The desktop shell is behind the current checkout. ";
+  return `${version}Restart exits this window and running workbenches, then opens the latest Launcher after the build.`;
+}
 
 type BranchLifecycleRequest = {
   instanceId: string;
@@ -104,6 +133,18 @@ export function LauncherRoute() {
   const [selectedInstanceId, setSelectedInstanceId] = useState("");
   const [notice, setNotice] = useState("");
   const [noticeTone, setNoticeTone] = useState<"info" | "error">("info");
+  const [rowFeedback, setRowFeedback] = useState<{
+    instanceId: string;
+    tone: "error" | "info";
+    message: string;
+  } | null>(null);
+  const [updateDismissed, setUpdateDismissed] = useState(() => {
+    try {
+      return window.sessionStorage.getItem("vibelution.launcher-update-dismissed") || "";
+    } catch {
+      return "";
+    }
+  });
   const showNotice = (text: string, tone: "info" | "error" = "info") => {
     setNotice(text);
     setNoticeTone(tone);
@@ -122,6 +163,20 @@ export function LauncherRoute() {
     queryKey: queryKeys.launcherBranchInstances(),
     queryFn: () => getLauncherBranchInstances(),
   });
+  const freshnessQuery = useQuery({
+    queryKey: queryKeys.launcherFreshness(),
+    queryFn: getLauncherFreshness,
+    refetchInterval: 60_000,
+    retry: false,
+  });
+  const freshness = freshnessQuery.data;
+  const updateToken = freshness
+    ? `${freshness.runningShort || ""}|${freshness.headShort || ""}|${freshness.shellReason || ""}|${String(freshness.current)}|${String(Boolean(freshness.shellStale))}`
+    : "";
+  const updateAvailable = Boolean(
+    freshness && (freshness.updateAvailable || freshness.current === false || freshness.shellStale),
+  );
+  const updateDialogOpen = updateAvailable && updateToken !== "" && updateToken !== updateDismissed;
   const refreshLauncherData = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
     void queryClient.invalidateQueries({ queryKey: queryKeys.launcherBranchInstances() });
@@ -149,6 +204,23 @@ export function LauncherRoute() {
       const message = response.message || fallback;
       // A refusal must stay visible on the row it belongs to: name the branch
       // and flag the notice as an error instead of a neutral status line.
+      setRowFeedback(
+        response.accepted
+          ? response.shellStale
+            ? {
+                instanceId: request.instanceId,
+                tone: "info",
+                message: lang === "zh"
+                  ? "桌面壳仍是旧版本，刷新桌面壳后才会换上桌面代码。"
+                  : "The desktop shell is still an older build. Refresh the shell to pick up desktop code.",
+              }
+            : null
+          : {
+              instanceId: request.instanceId,
+              tone: "error",
+              message,
+            },
+      );
       showNotice(
         response.accepted ? message : withBranchLabel(request.instanceId, message),
         response.accepted ? "info" : "error",
@@ -162,12 +234,22 @@ export function LauncherRoute() {
         lifecycleIntentsRef.current = next;
         return next;
       });
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      setRowFeedback({
+        instanceId: request.instanceId,
+        tone: "error",
+        message: errorMessage,
+      });
       showNotice(
-        withBranchLabel(request.instanceId, error instanceof Error ? error.message : String(error)),
+        withBranchLabel(request.instanceId, errorMessage),
         "error",
       );
       refreshLauncherData();
     },
+  });
+  const restartLatestMutation = useMutation({
+    mutationFn: restartLatestLauncher,
+    onError: (error) => showNotice(error instanceof Error ? error.message : String(error), "error"),
   });
   const startupSettingsMutation = useMutation({
     mutationFn: updateLauncherStartupSettings,
@@ -232,6 +314,7 @@ export function LauncherRoute() {
     lifecycleIntentsRef.current = accepted.table;
     setLifecycleIntents(accepted.table);
     setSelectedInstanceId(instanceId);
+    setRowFeedback((current) => (current?.instanceId === instanceId ? null : current));
     lifecycleMutation.mutate({
       instanceId,
       operation,
@@ -286,6 +369,24 @@ export function LauncherRoute() {
             lifecyclePending={lifecycleMutation.isPending || controlPlaneStarting}
             onLifecycle={requestInstanceLifecycle}
             onStopMany={(instanceIds) => instanceIds.forEach((instanceId) => requestInstanceLifecycle(instanceId, "stop"))}
+            rowFeedback={rowFeedback}
+          />
+          <VConfirmDialog
+            isOpen={updateDialogOpen}
+            title={lang === "zh" ? "发现更新的 Launcher" : "A newer Launcher is available"}
+            description={launcherUpdateDescription(freshness, lang === "zh")}
+            confirmLabel={lang === "zh" ? "重启并启动最新版" : "Restart into the latest Launcher"}
+            cancelLabel={lang === "zh" ? "稍后" : "Not now"}
+            confirmPending={restartLatestMutation.isPending}
+            onConfirm={() => {
+              restartLatestMutation.mutate();
+            }}
+            onCancel={() => dismissLauncherUpdate(updateToken, setUpdateDismissed)}
+            onOpenChange={(open) => {
+              if (!open) {
+                dismissLauncherUpdate(updateToken, setUpdateDismissed);
+              }
+            }}
           />
         </div>
       </div>

@@ -2,7 +2,7 @@ export default {
   root: "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-[var(--surface-canvas)]",
   header: "border-b border-[var(--border-subtle)] bg-[var(--surface-panel)] px-4 py-3",
   titleRow: "flex min-w-0 items-start justify-between gap-3",
-  title: "min-w-0 text-balance text-base font-semibold leading-6 text-[var(--fg-primary)]",
+  title: "min-w-0 text-balance text-vui-md font-semibold leading-6 text-[var(--fg-primary)]",
   detail: "px-4 pt-3 text-pretty [font-size:var(--vui-font-sm)] leading-5 text-[var(--fg-secondary)]",
   errorSteps: "mt-2 list-disc space-y-1 pl-4 [overflow-wrap:anywhere]",
   progress: "px-4 pt-2 [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)]",

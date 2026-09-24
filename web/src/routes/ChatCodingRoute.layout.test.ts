@@ -399,7 +399,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationStyles.sendButton).not.toContain("-translate-y");
     expect(conversationStyles.attachButton).toMatch(/bg-\[|!bg-\[|var\(--vui-surface/);
     expect(conversationStyles.attachButton).toContain("active:bg-[color-mix(in_srgb,var(--vui-surface-workspace)_18%,var(--vui-control-muted-hover))]");
-    expect(conversationStyles.stopButton).toContain("!border-[color-mix(in_srgb,var(--state-error)_34%,transparent)]");
+    expect(conversationStyles.stopButton).toContain("!border-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)]");
     expect(conversationStyles.stopButton).toContain("!text-[var(--state-error)]");
 
     expect(conversationStyles.userCard).toContain("bg-transparent");
@@ -2152,7 +2152,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndStreamSource).toContain("let assistantDeltaApplyFrame: number | null = null");
     expect(routeAndStreamSource).toContain("function applyPendingAssistantDeltas(reason: \"frame\" | \"close\" | \"final\")");
     expect(routeAndStreamSource).toContain("assistantDeltaScheduler.drain(reason, { frameScheduledAtMs: scheduledAtMs })");
-    expect(chatStreamApplyControllerSource).toContain("for (const entry of input.drain.entries)");
+    expect(chatStreamApplyControllerSource).toContain("const entry = entries[entryIndex];");
+    expect(chatStreamApplyControllerSource).toContain("assistantDeltaSeqGate");
     expect(routeAndStreamSource).toContain("function scheduleAssistantDeltaFrame()");
     expect(routeAndStreamSource).toContain("window.requestAnimationFrame");
     expect(routeAndStreamSource).toContain("window.cancelAnimationFrame");
@@ -2523,7 +2524,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.panelState).not.toContain("bg-");
     expect(routeStyles.panelState).not.toContain("shadow");
     expect(routeStyles.railTop).toContain("flex");
-    expect(routeStyles.railActionButton).toContain("!size-[30px]");
+    expect(routeStyles.railActionButton).toContain("!size-[var(--vui-control-height-sm)]");
     expect(routeStyles.railActionButton).toContain("!border-0");
     expect(routeAndIndexRailSource).toContain("<VCommandPalette");
     expect(directSessionIndexItemStyles.sessionItem).not.toContain("shadow-[var(--vui-elevation-panel)]");
@@ -3116,7 +3117,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.conversationGroup).toBeTypeOf("string");
     expect(routeStyles.conversationGroupHeader).toBeTypeOf("string");
     expect(routeStyles.conversationGroupList).toBeTypeOf("string");
-    expect(routeStyles.conversationGroupHeader).toContain("min-h-[34px]");
+    expect(routeStyles.conversationGroupHeader).toContain("min-h-[var(--vui-control-height-md)]");
     expect(routeStyles.conversationGroupHeader).toContain("grid-cols-[14px_minmax(0,1fr)_auto]");
     expect(routeStyles.conversationGroupHeader).toContain("bg-transparent");
     expect(routeStyles.conversationGroupList).toContain("gap-1");
@@ -3160,7 +3161,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndIndexRailSource).toContain('aria-keyshortcuts="Control+K Meta+K"');
     expect(routeAndIndexRailSource).toContain("<VCommandPalette");
     expect(routeStyles.railTop).toContain("gap-1");
-    expect(routeStyles.railActionButton).toContain("!size-[30px]");
+    expect(routeStyles.railActionButton).toContain("!size-[var(--vui-control-height-sm)]");
     expect(routeStyles.railActionButton).toContain("!border-0");
     expect(routeStyles.railActionButton).toContain("!bg-transparent");
     expect(routeStyles.conversationIndexPanelBody).toContain("!overflow-hidden");
@@ -3184,7 +3185,7 @@ describe("ChatCodingRoute layout contract", () => {
   it("uses one lightweight Tailwind grammar for conversation index sections and rows", () => {
     expect(conversationIndexSectionStyles.conversationGroupHeader).toContain("[&_svg]:transition-transform");
     expect(conversationIndexSectionStyles.conversationGroupHeader).toContain("aria-expanded=true");
-    expect(conversationIndexSectionStyles.conversationGroupHeader).toContain("min-h-[34px]");
+    expect(conversationIndexSectionStyles.conversationGroupHeader).toContain("min-h-[var(--vui-control-height-md)]");
     expect(conversationIndexSectionStyles.conversationGroupHeader).toContain("[&_strong]:tabular-nums");
     expect(conversationIndexSectionStyles.conversationGroupHeader).toContain("[border:0]");
     expect(conversationIndexSectionStyles.conversationGroupHeader).not.toContain("[&_strong]:rounded-full");

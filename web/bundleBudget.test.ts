@@ -104,7 +104,9 @@ describe("bundle budget", () => {
   });
 
   it("fails when an ordinary feature chunk grows beyond its budget", () => {
-    writeAsset("ChatCodingRoute-CcYah-sm.js", 420 * 1024);
+    // Budget raised to 435 KiB with the chat stream core integration
+    // (main measured 419.5 KiB before it); the fixture stays above it.
+    writeAsset("ChatCodingRoute-CcYah-sm.js", 445 * 1024);
 
     const result = checkBundleBudget(tempRoot, { expectElkWorker: false });
 

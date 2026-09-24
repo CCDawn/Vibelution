@@ -2074,6 +2074,7 @@ def _refresh_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]
         wait_pid=int(args.wait_pid or 0),
         then_lifecycle=str(args.then_lifecycle or ""),
         project_root=_workspace_root(args),
+        shell_kind=str(getattr(args, "shell_kind", "") or ""),
     )
     _append_log(
         "desktop_entry_python.desktop_shell.refreshed",
@@ -2245,6 +2246,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Clear recent desktop shell refresh failure cooldown before scheduling.",
     )
+    parser.add_argument(
+        "--shell-kind",
+        default="",
+        help="Refresh helper target: packaged or unpackaged. Empty keeps the packaged refresh.",
+    )
     return parser.parse_args(argv)
 
 
@@ -2269,6 +2275,7 @@ def main(argv: list[str] | None = None) -> int:
         "resolve-workbench",
         "resolve-workbench-port-owner",
         "desktop-shell-status",
+        "unpackaged-shell-status",
         "schedule-desktop-shell-refresh",
         "refresh-desktop-shell",
         "launch-desktop-shell",
@@ -2336,6 +2343,14 @@ def main(argv: list[str] | None = None) -> int:
                 print(
                     f"Workbench port owner pid={payload.get('pid')} kind={payload.get('kind') or 'none'}"
                 )
+        elif action == "unpackaged-shell-status":
+            from core.launcher.desktop_shell import inspect_unpackaged_electron
+
+            payload = inspect_unpackaged_electron(_workspace_root(args))
+            if args.output == "json":
+                print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            else:
+                print(f"Unpackaged shell stale={payload.get('stale')} reason={payload.get('reason')}")
         elif action == "desktop-shell-status":
             payload = _desktop_shell_status_bridge(args)
             if args.output == "json":
@@ -2401,7 +2416,23 @@ def main(argv: list[str] | None = None) -> int:
             error_type=type(exc).__name__,
             error=str(exc),
         )
+        if str(getattr(args, "output", "") or "").strip().lower() == "json":
+            print(_json_action_failure(exc), flush=True)
         return 1
+
+
+def _json_action_failure(exc: BaseException) -> str:
+    """Return the exception text the desktop bridge can show on the launcher row."""
+
+    return json.dumps(
+        {
+            "schemaVersion": 1,
+            "ok": False,
+            "errorType": type(exc).__name__,
+            "message": str(exc),
+        },
+        ensure_ascii=False,
+    )
 
 
 if __name__ == "__main__":

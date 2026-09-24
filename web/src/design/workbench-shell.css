@@ -267,8 +267,12 @@
 }
 
 :where(.vui-app-appshell).settingsPopoverBody .utilityButtonGrid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 4px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+:where(.vui-app-appshell).settingsPopoverBody .mobileRouteToggle {
+  display: none;
 }
 
 :where(.vui-app-appshell).settingsPopoverBody .utilityPanel {
@@ -282,12 +286,32 @@
 
 :where(.vui-app-appshell).settingsPopoverBody .utilityButton {
   justify-content: flex-start;
-  min-height: 30px;
-  padding: 4px 7px;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  box-shadow: none;
+  font-weight: 600;
 }
 
-:where(.vui-app-appshell).settingsActiveWork .activeWorkDetailList {
-  max-height: min(210px, 30vh);
+:where(.vui-app-appshell).settingsPopoverBody .utilityButton:hover {
+  border: 0;
+  background: var(--vui-surface-row-hover);
+  box-shadow: none;
+}
+
+:where(.vui-app-appshell).settingsPopoverBody .utilityButtonActive {
+  background: var(--bg-active);
+}
+
+:where(.vui-app-appshell).settingsPopoverBody .utilityButton span {
+  font-size: var(--vui-font-sm);
+  font-weight: 600;
+}
+
+:where(.vui-app-appshell).activeWorkDetailList {
+  max-height: min(330px, 45vh);
 }
 
 :where(.vui-app-appshell).shutdownOverlay,
@@ -360,8 +384,8 @@
   justify-content: space-between;
   gap: 10px;
   min-width: 0;
-  padding: 0 2px 2px;
-  border: 0;
+  padding: 6px 8px 9px;
+  border-bottom: 1px solid var(--vui-border-subtle);
   background: transparent;
   box-shadow: none;
 }
@@ -370,7 +394,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: var(--vui-font-chat);
+  font-size: var(--vui-font-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -383,7 +407,7 @@
 
 :where(.vui-app-appshell).activeWorkDetailList {
   display: grid;
-  gap: 6px;
+  gap: 0;
   min-width: 0;
   min-height: 0;
   margin: 0;
@@ -398,20 +422,20 @@
 
 :where(.vui-app-appshell).activeWorkDetailItem {
   display: grid;
-  grid-template-columns: 12px minmax(0, 1fr);
+  grid-template-columns: 7px minmax(0, 1fr) max-content;
   align-items: start;
   gap: 8px;
   min-width: 0;
-  padding: 8px;
-  border: 1px solid color-mix(in srgb, var(--accent-cool) 20%, var(--border-soft));
+  padding: 10px 8px;
+  border: 0;
   border-radius: var(--radius-control);
-  background: var(--shell-card);
+  background: transparent;
   color: var(--fg-secondary);
   box-shadow: none;
 }
 
-:where(.vui-app-appshell).activeWorkDetailItem > .statusDot {
-  margin-top: 5px;
+:where(.vui-app-appshell).activeWorkDetailItem:hover {
+  background: var(--vui-surface-row-hover);
 }
 
 :where(.vui-app-appshell).activeWorkDetailLink {
@@ -423,7 +447,7 @@
 
 :where(.vui-app-appshell).activeWorkDetailCopy {
   display: grid;
-  gap: 5px;
+  gap: 4px;
   min-width: 0;
   padding: 0;
   border: 0;
@@ -434,7 +458,7 @@
 
 :where(.vui-app-appshell).activeWorkDetailTitle {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -444,8 +468,7 @@
   box-shadow: none;
 }
 
-:where(.vui-app-appshell).activeWorkDetailTitle strong,
-:where(.vui-app-appshell).activeWorkDetailTitle span {
+:where(.vui-app-appshell).activeWorkDetailTitle strong {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -454,33 +477,17 @@
 
 :where(.vui-app-appshell).activeWorkDetailTitle strong {
   color: var(--fg-primary);
-  font-size: var(--vui-font-md);
-  font-weight: 700;
-}
-
-:where(.vui-app-appshell).activeWorkDetailTitle span {
-  color: var(--accent-cool);
-  font-size: var(--vui-font-xs);
-  font-weight: 700;
+  font-size: var(--vui-font-sm);
+  font-weight: 650;
 }
 
 :where(.vui-app-appshell).activeWorkDetailCopy p {
   min-width: 0;
   margin: 0;
-  overflow-wrap: anywhere;
-  color: var(--fg-secondary);
-  font-size: var(--vui-font-sm);
-  line-height: 1.35;
-}
-
-:where(.vui-app-appshell).activeWorkDetailCopy code {
-  display: block;
-  max-width: 100%;
-  min-width: 0;
   overflow: hidden;
-  color: var(--fg-tertiary);
+  color: var(--fg-secondary);
   font-size: var(--vui-font-xs);
-  line-height: 1.25;
+  line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1083,7 +1090,15 @@
     display: flex;
   }
 
+  :where(.vui-app-appshell).settingsPopoverBody .mobileRouteToggle {
+    display: flex;
+  }
+
   :where(.vui-app-appshell).settingsPopoverBody .mobileRouteMenu {
+    display: none;
+  }
+
+  :where(.vui-app-appshell).settingsPopoverBody .mobileRouteMenuOpen {
     display: grid;
   }
 }

@@ -2,7 +2,7 @@ const quietButton =
   "!border-0 !bg-transparent !shadow-none !font-normal hover:!bg-[var(--vui-control-muted)]";
 const styles = {
   root: "relative inline-flex shrink-0",
-  trigger: `${quietButton} !flex !h-[30px] !min-w-0 !items-center !gap-1 !rounded-md !px-1.5 !py-0 !text-[11px] !text-[var(--accent-cool)] tabular-nums`,
+  trigger: `${quietButton} !flex !h-[var(--vui-control-height-sm)] !min-w-0 !items-center !gap-1 !rounded-md !px-1.5 !py-0 !text-[11px] !text-[var(--accent-cool)] tabular-nums`,
   ring: "size-5 shrink-0",
   popover:
     "w-[min(324px,calc(100vw-24px))] max-h-[calc(100dvh-36px)] overflow-y-auto !rounded-xl !px-4 !pt-3.5 !pb-2",
@@ -22,7 +22,7 @@ const styles = {
     "mb-1 flex items-center justify-between text-[10px] font-normal text-[var(--fg-tertiary)]",
   row: "flex min-h-7 items-center justify-between gap-3 text-[12px] [&_b]:font-medium [&_b]:tabular-nums",
   name: "min-w-0 flex-1 break-words text-left",
-  detailRow: `${quietButton} !flex !min-h-[30px] !h-auto !w-full !items-center !gap-1.5 !px-0 !py-1 !text-[12px] [&_b]:font-medium [&_b]:tabular-nums [&_svg]:shrink-0 [&_svg]:text-[var(--fg-tertiary)]`,
+  detailRow: `${quietButton} !flex !min-h-[var(--vui-control-height-sm)] !h-auto !w-full !items-center !gap-1.5 !px-0 !py-1 !text-[12px] [&_b]:font-medium [&_b]:tabular-nums [&_svg]:shrink-0 [&_svg]:text-[var(--fg-tertiary)]`,
   expanded: "pb-2.5 pl-[19px] text-[10px] text-[var(--fg-secondary)]",
   segment: "flex items-baseline justify-between gap-2 py-1 tabular-nums",
   preview:
@@ -39,6 +39,6 @@ const styles = {
     "flex items-center justify-between gap-2 font-medium text-[var(--accent-warm)] tabular-nums",
   autoCompactNote: "mt-1 text-[10px] leading-relaxed text-[var(--fg-tertiary)]",
   detailNote: "mb-2 text-[10px] leading-relaxed text-[var(--fg-tertiary)]",
-  detailLink: `${quietButton} !flex !h-[30px] !w-full !items-center !justify-between !gap-2 !p-0 !text-[11px] !text-[var(--accent-cool)] hover:underline`,
+  detailLink: `${quietButton} !flex !h-[var(--vui-control-height-sm)] !w-full !items-center !justify-between !gap-2 !p-0 !text-[11px] !text-[var(--accent-cool)] hover:underline`,
 };
 export default styles;

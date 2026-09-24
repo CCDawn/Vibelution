@@ -183,6 +183,34 @@ export function parseDesktopShellRefreshSchedule(raw: string): DesktopShellRefre
   };
 }
 
+export type UnpackagedShellStatus = {
+  stale: boolean;
+  reason: string;
+};
+
+export async function inspectUnpackagedShell(input: {
+  workspaceRoot: string;
+  pythonPath: string;
+  spawnImpl?: PythonJsonBridgeSpawn;
+  signal?: AbortSignal;
+}): Promise<UnpackagedShellStatus> {
+  const raw = await runPythonJsonBridge({
+    pythonPath: input.pythonPath,
+    args: desktopShellBridgeArgs(input.workspaceRoot, input.pythonPath, "unpackaged-shell-status"),
+    cwd: input.workspaceRoot,
+    spawnImpl: input.spawnImpl,
+    failureLabel: "unpackaged shell status",
+    timeoutMs: PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS,
+    signal: input.signal,
+    killPolicy: "child"
+  });
+  const parsed = parsePythonJsonBridgePayload<Record<string, unknown>>(raw, "unpackaged shell status");
+  return {
+    stale: parsed.stale === true,
+    reason: typeof parsed.reason === "string" ? parsed.reason : ""
+  };
+}
+
 export async function inspectDesktopShell(input: {
   workspaceRoot: string;
   pythonPath: string;
@@ -208,6 +236,7 @@ export async function scheduleDesktopShellRefresh(input: {
   waitPid: number;
   thenLifecycle?: string;
   force?: boolean;
+  shellKind?: "packaged" | "unpackaged" | "";
   spawnImpl?: PythonJsonBridgeSpawn;
   signal?: AbortSignal;
 }): Promise<DesktopShellRefreshSchedule> {
@@ -218,6 +247,10 @@ export async function scheduleDesktopShellRefresh(input: {
   }
   if (input.force) {
     extra.push("--force-refresh");
+  }
+  const shellKind = String(input.shellKind || "").trim().toLowerCase();
+  if (shellKind === "packaged" || shellKind === "unpackaged") {
+    extra.push("--shell-kind", shellKind);
   }
   const raw = await runPythonJsonBridge({
     pythonPath: input.pythonPath,

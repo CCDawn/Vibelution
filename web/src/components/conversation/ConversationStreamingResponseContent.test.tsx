@@ -59,19 +59,26 @@ describe("ConversationStreamingResponseContent", () => {
     expect(html).toContain("<table");
   });
 
-  it("keeps the Codex stream controller while rendering through the shared markdown renderer", async () => {
+  it("keeps the Codex stream controller with a light-parsed live tail and static stable zone", async () => {
     const source = await import("./ConversationStreamingResponseContent.tsx?raw").then((module) => module.default);
 
     expect(source).toContain('from "./codexStreamController"');
     expect(source).toContain("createCodexStreamController");
+    // Stable zone keeps the full lazy react-markdown pipeline.
     expect(source).toContain('from "./LazyConversationMarkdownRenderer"');
     expect(source).toContain("<LazyConversationMarkdownRenderer");
-    expect(source).not.toContain('from "./ConversationMarkdownRenderer"');
     expect(source).toContain("streamProjection.stableText");
     expect(source).toContain("streamProjection.liveText");
     expect(source).toContain("StreamingStableMarkdown");
+    // Live tail is the dual-mode light pipeline: repair + line-level blocks,
+    // never a second full markdown engine in the streaming component.
+    expect(source).toContain('from "./streamingIncompleteMarkdown"');
+    expect(source).toContain("repairIncompleteMarkdown");
+    expect(source).toContain("parseStreamingMarkdownBlocks");
+    expect(source).toContain("<StreamingLiveMarkdownBlocks");
     expect(source).toContain("data-streaming-live-tail");
-    expect(source).not.toContain("parseStreamingMarkdownBlocks");
+    expect(source).not.toContain("from \"react-markdown\"");
+    expect(source).not.toContain("remarkGfm");
     expect(source).not.toContain("StableStreamingMarkdownBlocks");
     expect(source).not.toContain("blocks.map((block, index) => renderBlock(block, index))");
   });

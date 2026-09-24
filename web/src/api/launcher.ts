@@ -14,6 +14,7 @@ import type {
   LauncherMaintenancePreviewResponse,
   LauncherMaintenanceSummary,
   LauncherControlResponse,
+  LauncherFreshness,
   LauncherOperation,
   LauncherStartupSettings as BaseLauncherStartupSettings,
   LauncherStatus as BaseLauncherStatus,
@@ -489,6 +490,16 @@ function isLauncherControlConnectionError(error: unknown) {
 
 export function getLauncherStatus() {
   return fetchLauncherJson<LauncherStatus>("status");
+}
+
+export function getLauncherFreshness() {
+  return fetchLauncherJson<LauncherFreshness>("freshness");
+}
+
+export function restartLatestLauncher() {
+  return invokeLauncherLifecycleJson<LauncherControlResponse>("restart-latest-shell", {
+    method: "POST",
+  });
 }
 
 export function getLauncherBranchInstances(options?: { cleanupMetadata?: boolean }) {

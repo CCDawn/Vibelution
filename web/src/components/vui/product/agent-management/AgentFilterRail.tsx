@@ -35,13 +35,13 @@ export type AgentFilterRailProps = {
 };
 
 const GROUP_BUTTON_BASE =
-  "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 w-full min-h-[34px] px-[9px] py-[6px] rounded-none border-0 border-b border-[var(--vui-border-hairline)] bg-transparent text-[var(--fg-secondary)] text-left transition-[background,color,border-color] duration-150 hover:bg-[var(--vui-surface-row-hover)] hover:text-[var(--fg-primary)]";
+  "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 w-full min-h-[var(--vui-control-height-md)] px-[9px] py-[6px] rounded-none border-0 border-b border-[var(--vui-border-hairline)] bg-transparent text-[var(--fg-secondary)] text-left transition-[background,color,border-color] duration-150 hover:bg-[var(--vui-surface-row-hover)] hover:text-[var(--fg-primary)]";
 
 const GROUP_BUTTON_ACTIVE =
   "border-l-2 border-l-[var(--accent-warm)] bg-[color-mix(in_srgb,var(--accent-warm)_9%,transparent)] text-[var(--fg-primary)]";
 
 const STATUS_BUTTON_BASE =
-  "inline-flex min-w-0 flex-1 items-center justify-between gap-2 min-h-[30px] px-2.5 rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-transparent text-[var(--fg-secondary)] text-[0.76rem] font-bold transition-[background,color,border-color] duration-150 hover:border-[var(--border-strong)] hover:bg-[var(--vui-surface-row-hover)] hover:text-[var(--fg-primary)]";
+  "inline-flex min-w-0 flex-1 items-center justify-between gap-2 min-h-[var(--vui-control-height-sm)] px-2.5 rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-transparent text-[var(--fg-secondary)] text-[0.76rem] font-bold transition-[background,color,border-color] duration-150 hover:border-[var(--border-strong)] hover:bg-[var(--vui-surface-row-hover)] hover:text-[var(--fg-primary)]";
 
 const STATUS_BUTTON_ACTIVE =
   "border-[color-mix(in_srgb,var(--fg-primary)_18%,var(--border-soft))] bg-[var(--vui-control-muted)] text-[var(--fg-primary)]";
@@ -50,13 +50,13 @@ const GROUP_LABEL =
   "inline-flex items-center gap-2 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap";
 
 const COUNT_BADGE =
-  "inline-flex min-h-5 min-w-5 items-center justify-center rounded-[6px] bg-[var(--vui-control-muted)] px-1 text-[0.72rem] font-bold not-italic text-[var(--fg-secondary)]";
+  "inline-flex min-h-5 min-w-5 items-center justify-center rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-1 text-[0.72rem] font-bold not-italic text-[var(--fg-secondary)]";
 
 const HEALTH_BADGE =
   "inline-flex items-center justify-center gap-1 min-w-[22px] min-h-[22px] px-[7px] rounded-full text-[0.72rem] not-italic bg-[color-mix(in_srgb,var(--accent-warm)_12%,transparent)] text-[var(--accent-warm-2)]";
 
 const DETAILS_SUMMARY =
-  "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 min-h-[30px] px-2.5 rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-transparent text-[var(--fg-secondary)] text-[0.76rem] font-bold cursor-pointer list-none [&::-webkit-details-marker]:hidden hover:border-[var(--border-strong)] hover:bg-[var(--vui-surface-row-hover)] hover:text-[var(--fg-primary)]";
+  "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 min-h-[var(--vui-control-height-sm)] px-2.5 rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-transparent text-[var(--fg-secondary)] text-[0.76rem] font-bold cursor-pointer list-none [&::-webkit-details-marker]:hidden hover:border-[var(--border-strong)] hover:bg-[var(--vui-surface-row-hover)] hover:text-[var(--fg-primary)]";
 
 function FilterSection({
   section,

@@ -30,7 +30,7 @@ const styles = {
   decisionCopy:
     "grid min-w-0 gap-1 [&_p]:m-0 [&_p]:max-w-[76ch] [&_p]:text-[length:var(--vui-font-xs)] [&_p]:leading-[1.45] [&_p]:text-[var(--fg-secondary)] [&_small]:text-[length:var(--vui-font-xs)] [&_small]:font-semibold [&_small]:uppercase [&_small]:tracking-[0.06em] [&_small]:text-[var(--fg-tertiary)] [&_strong]:min-w-0 [&_strong]:text-[length:var(--vui-font-md)] [&_strong]:leading-[1.35] [&_strong]:text-[var(--fg-primary)]",
   delta:
-    "grid min-w-[82px] justify-items-end gap-0.5 @max-[520px]:min-w-0 @max-[520px]:justify-items-start [&_span]:text-[length:var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)] [&_strong]:text-xl [&_strong]:font-semibold [&_strong]:text-[var(--state-success)]",
+    "grid min-w-[82px] justify-items-end gap-0.5 @max-[520px]:min-w-0 @max-[520px]:justify-items-start [&_span]:text-[length:var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)] [&_strong]:text-vui-title [&_strong]:font-semibold [&_strong]:text-[var(--state-success)]",
   detail:
     `min-w-0 ${borderedSurface} [&_summary]:flex [&_summary]:min-h-9 [&_summary]:cursor-pointer [&_summary]:list-none [&_summary]:items-center [&_summary]:justify-between [&_summary]:gap-2 [&_summary]:px-3 [&_summary]:text-[length:var(--vui-font-xs)] [&_summary]:font-semibold [&_summary]:text-[var(--fg-primary)] [&_summary::-webkit-details-marker]:hidden`,
   detailMeta:

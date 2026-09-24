@@ -29,6 +29,7 @@ describe("agent workbench mutations contract", () => {
     });
     expect(mutationsSource).not.toContain("fetchJson");
     expect(mutationsSource).not.toContain('from "../../api/client"');
+    expect(mutationsSource).toContain("enabled: payload.draft.enabled");
   });
 
   it("is wired from AgentsRoute without inline definitions", () => {

@@ -1285,6 +1285,7 @@ describe("IPC channels", () => {
   it("keeps the bridge narrow", () => {
     expect(Object.keys(IPC_CHANNELS).sort()).toEqual([
       "beginDesktopPetWindowDrag",
+      "controlDesktopPet",
       "conversationNotificationOpened",
       "endDesktopPetWindowDrag",
       "focusWorkbenchWindow",

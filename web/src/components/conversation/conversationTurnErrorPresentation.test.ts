@@ -35,10 +35,10 @@ describe("conversationTurnErrorPresentation", () => {
     );
     expect(pinnedSlot).not.toContain("styles.turnError");
 
-    const virtualSpacerIndex = conversationViewSource.indexOf("timelineVirtualRange.bottomSpacerPx > 0");
+    const virtualHostIndex = conversationViewSource.indexOf('data-conversation-virtual-host="1"');
     const inlineTurnErrorIndex = conversationViewSource.indexOf("turnErrorSupersededByFinalAnswer ? (");
-    expect(virtualSpacerIndex).toBeGreaterThan(-1);
-    expect(inlineTurnErrorIndex).toBeGreaterThan(virtualSpacerIndex);
+    expect(virtualHostIndex).toBeGreaterThan(-1);
+    expect(inlineTurnErrorIndex).toBeGreaterThan(virtualHostIndex);
   });
 
   it("resolves trimmed turn-error type from camelCase or snake_case metadata", () => {

@@ -126,3 +126,20 @@ def test_hot_path_module_does_not_import_llm():
     ]
     assert import_lines
     assert all("llm" not in line.lower() for line in import_lines)
+
+
+def test_append_and_supersede_rejected_when_memory_policy_disabled(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = _make_agent()
+    agent_id = agent["agentId"]
+    existing = agent_directory_service.append_episodic_event(agent_id, text="Before switch off")
+
+    agent_directory_service.update_agent_instance(agent_id, memory_policy={"enabled": False})
+
+    with pytest.raises(agent_directory_service.AgentDirectoryError, match="memoryPolicy.enabled"):
+        agent_directory_service.append_episodic_event(agent_id, text="After switch off")
+    with pytest.raises(agent_directory_service.AgentDirectoryError, match="memoryPolicy.enabled"):
+        agent_directory_service.supersede_episodic_event(agent_id, existing["episodeId"])
+
+    episode_path = _policy_path(agent_id, "episodicEventsPath")
+    assert len(_jsonl_lines(episode_path)) == 1

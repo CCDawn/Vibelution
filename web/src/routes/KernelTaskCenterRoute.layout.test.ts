@@ -219,8 +219,8 @@ describe("KernelTaskCenterRoute layout contract", () => {
     expect(styles.headerActionsClass).toContain("flex-wrap");
     expect(styles.statusFilterClass).toContain("w-fit");
     expect(styles.statusFilterClass).toContain("max-w-full");
-    expect(styles.iconButtonClass).toContain("h-[34px]");
-    expect(styles.iconButtonClass).toContain("w-[34px]");
+    expect(styles.iconButtonClass).toContain("h-[var(--vui-control-height-md)]");
+    expect(styles.iconButtonClass).toContain("w-[var(--vui-control-height-md)]");
     expect(styles.iconButtonClass).not.toContain("w-full");
   });
 

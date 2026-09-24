@@ -29,6 +29,7 @@ import {
   paginateItems,
   lifecycleIntentRejectMessage,
   resolveItemPending,
+  summarizeLifecycleFeedback,
   shouldHoldOpenClickGuard,
   type InstanceListFilters,
   type LifecyclePendingInput,
@@ -67,6 +68,11 @@ type LauncherBranchInstancesPanelProps = {
     operation: Extract<LauncherOperation, "start" | "stop" | "force-stop">,
   ) => LifecycleRequestOutcome | void;
   onStopMany?: (instanceIds: string[]) => void;
+  rowFeedback?: {
+    instanceId: string;
+    tone: "error" | "info";
+    message: string;
+  } | null;
 };
 
 type BranchTableTab = "all" | "running" | "attention" | "startable";
@@ -146,6 +152,7 @@ export function LauncherBranchInstancesPanel({
   lifecyclePending = false,
   onLifecycle,
   onStopMany,
+  rowFeedback = null,
 }: LauncherBranchInstancesPanelProps) {
   const queryClient = useQueryClient();
   const zh = isZhCopy(copy);
@@ -476,7 +483,9 @@ export function LauncherBranchInstancesPanel({
         throw error;
       }
     };
+    const feedback = rowFeedback?.instanceId === item.id ? rowFeedback : null;
     return (
+      <div className={styles.actionStack}>
       <VActionGroup
         ariaLabel={labels.actions}
         aria-busy={startingOrRestarting || stopBusy || undefined}
@@ -556,6 +565,15 @@ export function LauncherBranchInstancesPanel({
           </VButton>
         ) : null}
       </VActionGroup>
+      {feedback ? (
+        <span
+          className={feedback.tone === "error" ? styles.rowFeedbackError : styles.rowFeedback}
+          title={feedback.message}
+        >
+          {summarizeLifecycleFeedback(feedback.message)}
+        </span>
+      ) : null}
+      </div>
     );
   };
 

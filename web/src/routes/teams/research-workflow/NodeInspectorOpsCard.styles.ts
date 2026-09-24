@@ -1,5 +1,5 @@
 export const nodeInspectorOpsCardStyles = {
-  resourceEmpty: "py-2 text-xs text-[var(--fg-secondary)]",
+  resourceEmpty: "py-2 text-vui-xs text-[var(--fg-secondary)]",
   header: "nio-header",
   stage: "nio-stage",
   titleRow: "nio-title-row",
