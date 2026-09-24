@@ -5,6 +5,9 @@ LLM 模型模板引用结构测试
 
 from pathlib import Path
 
+import pytest
+
+import config.public_config as public_config_module
 from config import ConfigLoader
 from config.llm_schema_upgrader import convert_legacy_llm_config
 from config.public_config import (
@@ -428,3 +431,48 @@ def test_delete_llm_model_leaves_legacy_profiles_unchanged():
     assert "openai_gpt_5_5" not in deleted["llm"]["model_library"]
     assert deleted["llm"]["profiles"]["primary"] == public_config["llm"]["profiles"]["primary"]
     assert deleted["llm"]["profiles"]["mental_model"] == public_config["llm"]["profiles"]["mental_model"]
+
+
+def test_load_public_config_cache_hits_same_file_signature(tmp_path, monkeypatch):
+    public_config_module._reset_public_config_cache()
+    config_file = tmp_path / "config.toml"
+    config_file.write_text('[ui]\nlanguage = "en"\n', encoding="utf-8")
+
+    read_calls: list[Path] = []
+    real_read_text = Path.read_text
+
+    def counting_read_text(self, *args, **kwargs):
+        if Path(self) == config_file:
+            read_calls.append(Path(self))
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counting_read_text)
+
+    first = public_config_module.load_public_config(config_file)
+    second = public_config_module.load_public_config(config_file)
+
+    assert read_calls == [config_file]
+    assert second == first
+    assert second is not first
+
+    # 命中缓存返回深拷贝：调用方改动不得污染缓存或后续调用。
+    second["ui"]["language"] = "fr"
+    third = public_config_module.load_public_config(config_file)
+    assert third["ui"]["language"] == "en"
+
+
+def test_load_public_config_rereads_when_signature_changes_or_missing(tmp_path):
+    public_config_module._reset_public_config_cache()
+    config_file = tmp_path / "config.toml"
+    config_file.write_text('[ui]\nlanguage = "en"\n', encoding="utf-8")
+
+    first = public_config_module.load_public_config(config_file)
+    assert first["ui"]["language"] == "en"
+
+    config_file.write_text('[ui]\nlanguage = "zh"\n', encoding="utf-8")
+    second = public_config_module.load_public_config(config_file)
+    assert second["ui"]["language"] == "zh"
+
+    config_file.unlink()
+    with pytest.raises(FileNotFoundError):
+        public_config_module.load_public_config(config_file)
