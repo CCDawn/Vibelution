@@ -39,7 +39,7 @@ export function VEntityList<TItem extends VEntityListItem>({
         .join(" ")}
     >
       {items.length === 0 ? (
-        <div data-vui="entity-list-empty" className="px-2 py-3 text-sm text-vui-fg-tertiary">
+        <div data-vui="entity-list-empty" className="px-2 py-3 text-vui-xs text-vui-fg-tertiary">
           {empty ?? "No items"}
         </div>
       ) : (
@@ -50,7 +50,7 @@ export function VEntityList<TItem extends VEntityListItem>({
             data-vui="entity-list-item"
             role="listitem"
             className={[
-              "min-w-0 rounded-md border border-transparent px-2 py-1.5 text-sm",
+              "min-w-0 rounded-md border border-transparent px-2 py-1.5 text-vui-xs",
               "text-vui-fg-secondary transition-colors",
               activeId === item.id
                 ? "border-vui-accent-cool bg-[var(--vui-status-info-bg)] text-vui-fg-primary"

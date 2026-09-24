@@ -28,17 +28,6 @@ const readableMarkdownMeasure = "max-w-full";
 const assistantMessageMeasure = "w-full max-w-full";
 const transcriptTurnRail = "w-full max-w-[830px] justify-self-center";
 const assistantTranscriptGrid = `grid min-w-0 ${transcriptTurnRail} grid-cols-[2rem_minmax(0,1fr)] items-start gap-x-3 max-[719px]:gap-x-2`;
-const assistantResponseSection = cv(
-  "responseSection",
-  "min-w-0 grid",
-  assistantMessageMeasure,
-  "gap-1 border-l border-[color-mix(in_srgb,var(--fg-tertiary)_24%,var(--vui-border-subtle))] bg-transparent pl-2.5 shadow-none",
-);
-const assistantResponseBody = cv(
-  "responseBody",
-  readableMessageText,
-  "grid gap-1.5 border-0 bg-transparent py-1 pl-5 pr-0 text-[var(--fg-primary)] shadow-none",
-);
 const answerOnlyProcessShell = cv(
   "answerOnlyProcessGroup",
   "min-w-0 grid",
@@ -1004,10 +993,8 @@ backToBottomButton:
     `vui-components-conversationview researchOrgChip_warning min-w-0 ${vuiStateWarningSoftClass}`,
   responseBlock:
     "vui-components-conversationview responseBlock min-w-0",
-  responseBody: assistantResponseBody,
   responseLabel:
-    "vui-components-conversationview responseLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] [font-size:var(--vui-font-md)]",
-  responseSection: assistantResponseSection,
+    "vui-components-conversationview responseLabel min-w-0 leading-tight text-[var(--fg-tertiary)] [font-size:var(--vui-font-md)]",
   responseSegment:
     "vui-components-conversationview responseSegment min-w-0",
   responseSegmentHeader:

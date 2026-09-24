@@ -228,7 +228,7 @@ export const ShadcnSelect = forwardRef<HTMLButtonElement, ShadcnSelectProps>(
                     >
                       <span className="flex min-w-0 flex-1 flex-col justify-center gap-1 overflow-visible">
                         <SelectPrimitive.ItemText>
-                          <span className="block min-w-0 truncate text-sm font-medium leading-5 text-[var(--fg-primary)]">
+                          <span className="block min-w-0 truncate text-vui-xs font-medium leading-5 text-[var(--fg-primary)]">
                             {option.label}
                           </span>
                         </SelectPrimitive.ItemText>

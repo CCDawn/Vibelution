@@ -32,4 +32,15 @@
   --color-vui-accent-warm: var(--accent-warm);
   --radius-vui-control: var(--radius-control);
   --radius-vui-panel: var(--radius-panel);
+  /* Text utility ladder: exposes the tokens.css size ladder as text-vui-* utilities.
+     Product UI must use these; built-in text-sm/text-xs/text-base or arbitrary
+     text-[13px] values are design-system defects (see designs/primitives/type-scale.md). */
+  --text-vui-2xs: var(--vui-font-2xs);
+  --text-vui-xs: var(--vui-font-xs);
+  --text-vui-sm: var(--vui-font-sm);
+  --text-vui-md: var(--vui-font-md);
+  --text-vui-chat: var(--vui-font-chat);
+  --text-vui-lg: var(--vui-font-lg);
+  --text-vui-title: var(--vui-font-title);
+  --text-vui-xl: var(--vui-font-xl);
 }

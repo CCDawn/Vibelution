@@ -641,21 +641,6 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     expect(styles.userMessageBody).toContain("shadow-none");
     expect(styles.userMessageBody).toContain("text-left");
 
-    expect(styles.responseSection).toContain("w-full");
-    expect(styles.responseSection).toContain("max-w-full");
-    expect(styles.responseSection).not.toContain("justify-self-stretch");
-    expect(styles.responseSection).toContain("border-l");
-    expect(styles.responseSection).toContain("bg-transparent");
-    expect(styles.responseSection).not.toContain("bg-[var(--vui-surface-chat-panel)]");
-    expect(styles.responseSection).not.toContain("rounded-[var(--radius-panel)]");
-    expect(styles.responseSection).not.toContain("white)");
-    expect(styles.responseSection).toContain("pl-2.5");
-    expect(styles.responseSection).toContain("shadow-none");
-    expect(styles.responseBody).toContain("border-0");
-    expect(styles.responseBody).toContain("bg-transparent");
-    expect(styles.responseBody).toContain("pl-5");
-    expect(styles.responseBody).toContain("shadow-none");
-    expect(styles.responseBody).not.toContain("bg-[color-mix(in_srgb,var(--surface-panel)_66%,transparent)]");
 
     expect(styles.answerOnlyProcessGroup).toContain("w-full");
     expect(styles.answerOnlyProcessGroup).toContain("max-w-full");
@@ -667,12 +652,10 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
   it("keeps visible message shell styles as named Tailwind slices", () => {
     expect(conversationViewStylesModuleSource).toContain("const conversationViewScope");
     expect(conversationViewStylesModuleSource).toContain("const readableMessageText");
-    expect(conversationViewStylesModuleSource).toContain("const assistantResponseSection");
-    expect(conversationViewStylesModuleSource).toContain("const assistantResponseBody");
     expect(conversationViewStylesModuleSource).toContain("const answerOnlyProcessShell");
     expect(conversationViewStylesModuleSource).toContain("const userMessageBubble");
-    expect(conversationViewStylesModuleSource).toContain("responseSection: assistantResponseSection");
-    expect(conversationViewStylesModuleSource).toContain("responseBody: assistantResponseBody");
+    expect(conversationViewStylesModuleSource).not.toContain("assistantResponseSection");
+    expect(conversationViewStylesModuleSource).not.toContain("assistantResponseBody");
     expect(conversationViewStylesModuleSource).toContain("answerOnlyProcessGroup: answerOnlyProcessShell");
     expect(conversationViewStylesModuleSource).toContain("userMessageBody: userMessageBubble");
   });

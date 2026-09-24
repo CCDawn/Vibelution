@@ -125,7 +125,7 @@ export function ShadcnDialog({
                 )}
                 aria-label="Close"
               >
-                <span aria-hidden="true" className="text-sm leading-none">
+                <span aria-hidden="true" className="text-vui-xs leading-none">
                   ×
                 </span>
               </DialogPrimitive.Close>
