@@ -51,7 +51,7 @@ const STEPS_ROW =
   "border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-0.5 [scrollbar-width:thin]";
 
 const STEP_CHIP =
-  "inline-flex shrink-0 items-center gap-1 rounded-[6px] border border-transparent px-1.5 py-1 text-[0.62rem] font-[720] " +
+  "inline-flex shrink-0 items-center gap-1 rounded-[var(--radius-control)] border border-transparent px-1.5 py-1 text-[0.62rem] font-[720] " +
   "bg-transparent text-[var(--fg-tertiary)] transition-[background-color,color,box-shadow] duration-150";
 
 const STEP_CHIP_SELECTED =
@@ -71,7 +71,7 @@ const STAT_PILL_ACCENT =
 const STAT_PILL_DANGER =
   "text-[var(--state-danger)]";
 const STAT_PILL_BUTTON =
-  "cursor-pointer rounded-[6px] px-1.5 hover:bg-[var(--vui-control-muted-hover)] focus-visible:outline-none focus-visible:shadow-[var(--vui-shadow-focus)]";
+  "cursor-pointer rounded-[var(--radius-control)] px-1.5 hover:bg-[var(--vui-control-muted-hover)] focus-visible:outline-none focus-visible:shadow-[var(--vui-shadow-focus)]";
 const STAT_VALUE = "flex-none text-[0.78rem] font-[820] text-[var(--fg-primary)]";
 
 function statusTooltip(status: ReactNode): string | undefined {

@@ -9,7 +9,7 @@ const sectionHeaderSurface =
 
 const styles = {
   detailCard:
-    "vui-routes-configoverviewpanel detailCard flex items-baseline gap-3 py-2 [&>span]:text-sm [&>span]:text-vui-fg-secondary [&>strong]:text-lg [&>strong]:font-semibold",
+    "vui-routes-configoverviewpanel detailCard flex items-baseline gap-3 py-2 [&>span]:text-vui-xs [&>span]:text-vui-fg-secondary [&>strong]:text-vui-lg [&>strong]:font-semibold",
   eyebrow:
     "vui-routes-configoverviewpanel eyebrow [margin:0] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [text-transform:uppercase] [letter-spacing:0.08em]",
   summaryGrid:

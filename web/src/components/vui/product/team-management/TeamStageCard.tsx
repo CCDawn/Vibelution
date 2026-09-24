@@ -52,7 +52,7 @@ const CARD_SELECTED =
 
 const HEADER = "flex min-w-0 items-center gap-2";
 const STEP_INDEX =
-  "flex h-[22px] min-w-[26px] items-center justify-center rounded-[6px] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] text-[0.62rem] font-[820] text-[var(--fg-secondary)]";
+  "flex h-[22px] min-w-[26px] items-center justify-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] text-[0.62rem] font-[820] text-[var(--fg-secondary)]";
 const STATUS_BADGE =
   "max-w-[58%] text-[0.64rem] font-[720] text-[color:var(--source-step-fg,var(--fg-muted))]";
 const BODY = "flex min-w-0 items-center";

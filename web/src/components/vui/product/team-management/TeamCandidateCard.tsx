@@ -51,7 +51,7 @@ const ACTIONS =
   "ml-auto flex flex-wrap items-center justify-end gap-1.5 min-w-0 max-[820px]:ml-0 " +
   "[&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center " +
   "[&_[data-vui=native-button]]:gap-1 [&_[data-vui=native-button]]:min-h-[26px] [&_[data-vui=native-button]]:px-2 " +
-  "[&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border " +
+  "[&_[data-vui=native-button]]:rounded-[var(--radius-control)] [&_[data-vui=native-button]]:border " +
   "[&_[data-vui=native-button]]:border-[var(--vui-border-subtle)] " +
   "[&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--vui-surface-row)_74%,transparent)] " +
   "[&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:[font-size:var(--vui-font-xs)] " +

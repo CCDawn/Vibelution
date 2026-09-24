@@ -470,7 +470,7 @@ const styles = {
   toolPermissionMeta:
     "toolPermissionMeta text-vui-fg-secondary [&_em]:not-italic min-w-0 flex flex-wrap items-center gap-1.5",
   toolPermissionRow:
-    "toolPermissionRow min-w-0 max-w-full rounded-[7px] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] !bg-[var(--vui-surface-row)] !grid grid-cols-1 min-[1600px]:grid-cols-[minmax(0,1fr)_12rem] items-center gap-3 px-3 py-3 max-[640px]:grid-cols-[1fr]",
+    "toolPermissionRow min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] !bg-[var(--vui-surface-row)] !grid grid-cols-1 min-[1600px]:grid-cols-[minmax(0,1fr)_12rem] items-center gap-3 px-3 py-3 max-[640px]:grid-cols-[1fr]",
   ts:
     "ts min-w-0",
   workspace:

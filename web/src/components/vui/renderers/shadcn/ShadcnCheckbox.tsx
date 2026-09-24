@@ -116,7 +116,7 @@ export const ShadcnCheckbox = forwardRef<HTMLInputElement, ShadcnCheckboxProps>(
               data-slot="checkbox-indicator"
               aria-hidden="true"
               className={[
-                "pointer-events-none grid size-5 place-items-center rounded-[6px] border",
+                "pointer-events-none grid size-5 place-items-center rounded-[var(--radius-control)] border",
                 "border-[var(--vui-border-strong)] bg-[var(--vui-surface-panel)] text-[var(--vui-surface-base)]",
                 "shadow-[inset_0_1px_0_color-mix(in_srgb,var(--vui-surface-panel)_70%,transparent)]",
                 "transition-[background-color,border-color,box-shadow] duration-150 motion-reduce:transition-none",
