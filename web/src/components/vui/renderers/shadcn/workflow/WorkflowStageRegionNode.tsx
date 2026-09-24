@@ -95,19 +95,19 @@ export function WorkflowStageRegionNode(props: NodeProps) {
       <div className="flex items-center gap-2 px-3.5 pt-3 pb-1">
         <span
           className={cn(
-            "inline-flex h-5 min-w-5 items-center justify-center rounded-full border px-1.5 text-[10px] font-semibold tabular-nums",
+            "inline-flex h-5 min-w-5 items-center justify-center rounded-full border px-1.5 [font-size:var(--vui-font-canvas-xs)] font-semibold tabular-nums",
             meta.indexBadge,
           )}
         >
           {index}
         </span>
-        <div className="truncate text-[12px] font-semibold tracking-wide text-[var(--fg-secondary)]">
+        <div className="truncate [font-size:var(--vui-font-canvas-md)] font-semibold tracking-wide text-[var(--fg-secondary)]">
           {label}
         </div>
         {meta.Icon ? (
           <span
             className={cn(
-              "inline-flex h-5 shrink-0 items-center gap-1 rounded-md border px-1.5 text-[9px] font-semibold",
+              "inline-flex h-5 shrink-0 items-center gap-1 rounded-md border px-1.5 [font-size:var(--vui-font-canvas-2xs)] font-semibold",
               meta.chip,
             )}
             data-stage-tone-chip={tone}

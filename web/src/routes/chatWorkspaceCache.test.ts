@@ -134,6 +134,44 @@ describe("createChatWorkspaceCache", () => {
     expect(queryKeysFromCalls()).not.toContain(queryKeys.conversations());
   });
 
+  it("keeps single-agent display saves clear of the broad agents prefix", async () => {
+    const { cache, queryKeysFromCalls } = makeCache();
+
+    await cache.afterAgentDisplaySaved("agent-1");
+
+    expect(queryKeysFromCalls()).toEqual([
+      queryKeys.agentConfigWorkspace(),
+      queryKeys.agentSummary(true),
+      queryKeys.agentSummary(false),
+      queryKeys.agent("agent-1"),
+    ]);
+    // The ["agents"] prefix would cascade into runs / inbox / runtime evidence
+    // refetch storms for a display-only PATCH; it must not appear here.
+    expect(queryKeysFromCalls()).not.toContain(queryKeys.agents());
+    expect(queryKeysFromCalls()).not.toContain(queryKeys.agentRuns("agent-1"));
+    expect(queryKeysFromCalls()).not.toContain(queryKeys.agentMessages("agent-1"));
+    expect(queryKeysFromCalls()).not.toContain(queryKeys.agentRuntimeEvidence("agent-1"));
+    expect(queryKeysFromCalls()).not.toContain(queryKeys.sessions());
+    expect(queryKeysFromCalls()).not.toContain(queryKeys.conversations());
+  });
+
+  it("adds mode bindings on membership saves without leaking into chat indexes", async () => {
+    const { cache, queryKeysFromCalls } = makeCache();
+
+    await cache.afterAgentMembershipSaved("agent-1");
+
+    expect(queryKeysFromCalls()).toEqual([
+      queryKeys.agentConfigWorkspace(),
+      queryKeys.agentSummary(true),
+      queryKeys.agentSummary(false),
+      queryKeys.agentModeBindings(),
+      queryKeys.agent("agent-1"),
+    ]);
+    expect(queryKeysFromCalls()).not.toContain(queryKeys.agents());
+    expect(queryKeysFromCalls()).not.toContain(queryKeys.sessions());
+    expect(queryKeysFromCalls()).not.toContain(queryKeys.conversations());
+  });
+
   it("refreshes Agent chat-room membership without a route-level recipe", async () => {
     const { cache, queryKeysFromCalls } = makeCache();
 

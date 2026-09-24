@@ -452,12 +452,21 @@ def build_agent_context(
             },
         )
 
+    _stop("memory_policy")
+    stage_started_at = _perf_counter()
+    memory_policy = agent_directory_service.resolve_memory_policy_for_agent(normalized_agent_id)
+    timings["memoryPolicyMs"] = _elapsed_ms(stage_started_at)
     _stop("episodic_events")
     stage_started_at = _perf_counter()
-    episodic_events = agent_directory_service.list_current_episodic_events(
-        normalized_agent_id,
-        limit=agent_directory_service.PROMPT_LIST_LIMIT,
-    )
+    if bool(memory_policy.get("enabled", True)):
+        episodic_events = agent_directory_service.list_current_episodic_events(
+            normalized_agent_id,
+            limit=agent_directory_service.PROMPT_LIST_LIMIT,
+        )
+    else:
+        # 记忆开关关闭：预取与投影保持同一语义，零接触 episodic JSONL；
+        # build_agent_runtime_context_block 对 disabled 也忽略 snapshot。
+        episodic_events = []
     timings["episodicEventsMs"] = _elapsed_ms(stage_started_at)
     _stop("group_context_events")
     stage_started_at = _perf_counter()
@@ -476,10 +485,6 @@ def build_agent_context(
         prompt_eligible_only=True,
     )
     timings["inboxMessagesMs"] = _elapsed_ms(stage_started_at)
-    _stop("memory_policy")
-    stage_started_at = _perf_counter()
-    memory_policy = agent_directory_service.resolve_memory_policy_for_agent(normalized_agent_id)
-    timings["memoryPolicyMs"] = _elapsed_ms(stage_started_at)
     _stop("runtime_context_block")
     stage_started_at = _perf_counter()
     raw_runtime_context_block = agent_directory_service.build_agent_runtime_context_block(

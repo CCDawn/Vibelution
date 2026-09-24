@@ -341,10 +341,10 @@ export function WorkflowNodeChrome({
             <KindGlyph kind={visualKind} className="h-[22px] w-[22px] shrink-0" />
           </span>
           <span className="grid min-w-0 flex-1 gap-0.5 text-left">
-            <span className="truncate text-[15px] font-bold leading-[1.2] tracking-[-0.02em] text-[var(--fg-primary)]">
+            <span className="truncate [font-size:var(--vui-font-canvas-xl)] font-bold leading-[1.2] tracking-[-0.02em] text-[var(--fg-primary)]">
               {label}
             </span>
-            <span className="truncate text-[12px] leading-[1.35] text-[var(--fg-secondary)]">
+            <span className="truncate [font-size:var(--vui-font-canvas-md)] leading-[1.35] text-[var(--fg-secondary)]">
               {visualKind === "human_gate" || (visualKind === "agent_task" && !primaryRoleKey)
                 ? (subtitle?.trim() || moduleSubtitle(visualKind, primaryRoleKey, primaryAgentId, status))
                 : moduleSubtitle(visualKind, primaryRoleKey, primaryAgentId, status)}
@@ -352,7 +352,7 @@ export function WorkflowNodeChrome({
           </span>
           <span
             className={cn(
-              "inline-flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 text-[11px] font-semibold leading-none",
+              "inline-flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 [font-size:var(--vui-font-canvas-sm)] font-semibold leading-none",
               visual.badgeClass,
             )}
             data-status-badge={status}
@@ -370,7 +370,7 @@ export function WorkflowNodeChrome({
           <div className="flex min-w-0 items-start justify-between gap-1.5">
             <div className="flex min-w-0 items-center gap-1.5">
               <KindGlyph kind={visualKind} />
-              <div className="min-w-0 truncate text-[13px] font-semibold leading-tight text-[var(--fg-primary)]">
+              <div className="min-w-0 truncate [font-size:var(--vui-font-canvas-lg)] font-semibold leading-tight text-[var(--fg-primary)]">
                 {label}
               </div>
             </div>
@@ -379,9 +379,9 @@ export function WorkflowNodeChrome({
           {children ?? (
             <div className="mt-1 flex min-w-0 flex-col gap-0.5">
               {subtitle ? (
-                <div className="truncate text-[11px] leading-tight text-[var(--fg-secondary)]">{subtitle}</div>
+                <div className="truncate [font-size:var(--vui-font-canvas-sm)] leading-tight text-[var(--fg-secondary)]">{subtitle}</div>
               ) : null}
-              <div className={cn("flex min-w-0 items-center gap-1 text-[11px] font-medium leading-tight", visual.textClass)}>
+              <div className={cn("flex min-w-0 items-center gap-1 [font-size:var(--vui-font-canvas-sm)] font-medium leading-tight", visual.textClass)}>
                 <StatusIcon icon={visual.icon} />
                 <span className="truncate">{visual.statusLabel}</span>
                 {attempt && attempt > 1 ? (

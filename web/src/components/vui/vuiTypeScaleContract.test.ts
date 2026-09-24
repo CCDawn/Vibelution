@@ -17,7 +17,7 @@ const themeCssPath = resolve(import.meta.dirname, "../../design/theme.tailwind.c
 
 // Built-in sizes are now at zero; arbitrary micro sizes remain as measured debt (ceilings, not targets).
 const BUILTIN_TEXT_UTILITY_BASELINE = 0;
-const ARBITRARY_TEXT_SIZE_BASELINE = 45;
+const ARBITRARY_TEXT_SIZE_BASELINE = 26;
 
 const BUILTIN_TEXT_UTILITY = /\btext-(?:sm|xs|base|lg|xl|2xl|3xl)\b/g;
 const ARBITRARY_TEXT_SIZE = /text-\[[0-9.]+(?:px|rem)\]/g;

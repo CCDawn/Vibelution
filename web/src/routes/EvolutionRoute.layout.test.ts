@@ -188,6 +188,15 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).not.toContain("`/api/evolution/runs/${runId}`");
   });
 
+  it("polls the workbench catalog at low frequency while runtime data stays on snapshots", () => {
+    expect(evolutionApiSource).toContain("export const EVOLUTION_WORKBENCH_POLL_INTERVAL_MS = 60_000");
+    expect(routeSource).toContain("EVOLUTION_WORKBENCH_POLL_INTERVAL_MS");
+    expect(routeSource).not.toMatch(/evolutionWorkbench\(\)[\s\S]{0,400}refetchInterval: resolvePollingInterval\(pageVisible, (8_000|15_000)\)/);
+    expect(routeSource).toContain(
+      "refetchInterval: resolvePollingInterval(pageVisible, EVOLUTION_WORKBENCH_POLL_INTERVAL_MS)",
+    );
+  });
+
   it("merges supervised datasets and bundles into one source picker", () => {
     expect(routeSource).toContain("workbenchCatalogQuery");
     expect(routeSource).toContain("queryKeys.evolutionWorkbench()");

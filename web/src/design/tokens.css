@@ -171,6 +171,25 @@
   --vui-font-title: 1.1875rem; /* 19 — section / route title */
   --vui-font-xl: 1.375rem; /* 22 — page title (rare) */
 
+  /*
+   * Workflow canvas sub-ladder (declared micro axis, 2026-09 visual-unification
+   * long-tail wave). Diagram surfaces render at a fixed zoomed-out density:
+   * node/edge/legend labels sit below the main 2xs floor (12px), so the main
+   * ladder cannot absorb them. Naming mirrors the main ladder's relative scale
+   * names and follows the ZCode 2xs-exception precedent: a declared, named
+   * sub-scale instead of scattered text-[9..15px] literals. Scope is the
+   * canvas axis only — node chrome, stage regions, edge labels, legend and
+   * knowledge badges under components/vui/renderers/shadcn/workflow/; main
+   * surfaces must keep using --vui-font-*. Consume as
+   * [font-size:var(--vui-font-canvas-*)], never text-[var(...)] (color trap).
+   */
+  --vui-font-canvas-2xs: 9px; /* stage-region kicker */
+  --vui-font-canvas-xs: 10px; /* node badges, status chips, legend */
+  --vui-font-canvas-sm: 11px; /* node meta / secondary labels */
+  --vui-font-canvas-md: 12px; /* node subtitle / body */
+  --vui-font-canvas-lg: 13px; /* emphasized node label */
+  --vui-font-canvas-xl: 15px; /* node / stage title */
+
   /* Line-height pairs */
   --vui-line-none: 1;
   --vui-line-tight: 1.25;

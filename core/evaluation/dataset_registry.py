@@ -7,7 +7,8 @@ import json
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from threading import Lock
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from core.infrastructure.workspace_manager import get_workspace
 from vibelution_storage import resolve_project_workspace_home
@@ -1053,6 +1054,42 @@ def _dataset_score_label(spec: DatasetSpec, evaluation_mode: str) -> str:
     return labels.get(spec.score_semantics, "official_or_local_score")
 
 
+_DATASET_CASE_COUNT_CACHE_LOCK = Lock()
+_DATASET_CASE_COUNT_CACHE: Dict[tuple, int] = {}
+_DATASET_CASE_COUNT_CACHE_LIMIT = 512
+
+
+def _dataset_source_signature(path: Path) -> tuple:
+    """Return (path, exists, mtime_ns, size) signature; content changes invalidate it."""
+
+    try:
+        stat = path.stat()
+    except OSError:
+        return (str(path), False, 0, 0)
+    return (str(path), True, int(stat.st_mtime_ns), int(stat.st_size))
+
+
+def _cached_dataset_case_count(path: Path, load_count: Callable[[], int]) -> int:
+    """Cache a full-corpus case count by (path, mtime_ns, size) signature.
+
+    workbench/评测轮询会反复列出同一批数据集；文件未变时命中签名缓存，
+    避免每次全量读取 bundle JSON 或逐行扫描源 JSONL。文件变化后签名失效自然重扫。
+    计数失败（损坏 JSONL、缺失 bundle 字段等）不写缓存，保持原有报错语义。
+    """
+
+    signature = _dataset_source_signature(path)
+    with _DATASET_CASE_COUNT_CACHE_LOCK:
+        cached = _DATASET_CASE_COUNT_CACHE.get(signature)
+    if cached is not None:
+        return cached
+    count = int(load_count())
+    with _DATASET_CASE_COUNT_CACHE_LOCK:
+        if len(_DATASET_CASE_COUNT_CACHE) >= _DATASET_CASE_COUNT_CACHE_LIMIT:
+            _DATASET_CASE_COUNT_CACHE.clear()
+        _DATASET_CASE_COUNT_CACHE[signature] = count
+    return count
+
+
 def list_dataset_status(
     project_root: Optional[Path] = None,
     *,
@@ -1069,14 +1106,21 @@ def list_dataset_status(
         if spec.kind == "supervised_bundle":
             try:
                 source_bundle = resolve_supervised_bundle_path(spec.bundle_name, project_root=root)
-                payload = json.loads(source_bundle.read_text(encoding="utf-8"))
-                case_count = len(list(payload.get("cases") or []))
+                case_count = _cached_dataset_case_count(
+                    source_bundle,
+                    lambda bundle=source_bundle: len(
+                        list(json.loads(bundle.read_text(encoding="utf-8")).get("cases") or [])
+                    ),
+                )
             except Exception as exc:  # pragma: no cover - defensive status reporting
                 validation_error = str(exc)
                 case_count = 0
         elif source and source.exists():
             try:
-                case_count = sum(1 for _ in _iter_jsonl(source))
+                case_count = _cached_dataset_case_count(
+                    source,
+                    lambda jsonl=source: sum(1 for _ in _iter_jsonl(jsonl)),
+                )
             except Exception as exc:
                 validation_error = str(exc)
                 case_count = 0

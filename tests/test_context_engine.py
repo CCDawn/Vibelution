@@ -1457,3 +1457,65 @@ def test_research_org_context_cache_drops_expired_entries_on_write(tmp_path, mon
     with context_engine._RESEARCH_ORG_CONTEXT_CACHE_LOCK:
         remaining = [(key[0], key[1]) for key in context_engine._RESEARCH_ORG_CONTEXT_CACHE]
     assert remaining == [("agent-b", 6)]
+
+
+def test_build_agent_context_skips_episodic_read_when_memory_disabled(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="记忆关闭 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="chat",
+        direct_session_id="session-memory-off",
+    )
+    agent_directory_service.update_agent_instance(agent["agentId"], memory_policy={"enabled": False})
+
+    episodic_calls: list[str] = []
+    real_episodic = agent_directory_service.list_current_episodic_events
+
+    def tracked_episodic(episodic_agent_id, *args, **kwargs):
+        episodic_calls.append(str(episodic_agent_id))
+        return real_episodic(episodic_agent_id, *args, **kwargs)
+
+    monkeypatch.setattr(agent_directory_service, "list_current_episodic_events", tracked_episodic)
+
+    packet = context_engine.build_agent_context(
+        agent["agentId"],
+        session_id="session-memory-off",
+        run_id="turn-1",
+    )
+
+    assert episodic_calls == []
+    assert packet.episodic_events == []
+    assert packet.memory_policy.get("enabled") is False
+    assert "## 个人记忆" not in packet.context_block
+    assert "episodicEventsMs" in packet.timings
+
+
+def test_build_agent_context_still_reads_episodic_when_memory_enabled(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="记忆开启 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="chat",
+        direct_session_id="session-memory-on",
+    )
+
+    episodic_calls: list[str] = []
+    real_episodic = agent_directory_service.list_current_episodic_events
+
+    def tracked_episodic(episodic_agent_id, *args, **kwargs):
+        episodic_calls.append(str(episodic_agent_id))
+        return real_episodic(episodic_agent_id, *args, **kwargs)
+
+    monkeypatch.setattr(agent_directory_service, "list_current_episodic_events", tracked_episodic)
+
+    packet = context_engine.build_agent_context(
+        agent["agentId"],
+        session_id="session-memory-on",
+        run_id="turn-1",
+    )
+
+    assert episodic_calls == [agent["agentId"]]
+    assert packet.episodic_events == []
+    assert packet.memory_policy.get("enabled", True) is True
+    assert "## 个人记忆" in packet.context_block

@@ -138,7 +138,7 @@ const styles = {
   settingsTriggerIcon:
     "vui-app-appshell settingsTriggerIcon flex size-6 shrink-0 items-center justify-center rounded-full bg-[var(--accent-warm)] text-white",
   settingsTriggerLabel:
-    "vui-app-appshell settingsTriggerLabel min-w-0 truncate text-[15px] font-normal text-[var(--fg-primary)]",
+    "vui-app-appshell settingsTriggerLabel min-w-0 truncate text-vui-sm font-normal text-[var(--fg-primary)]",
   settingsTriggerOpen:
     "vui-app-appshell settingsTriggerOpen !bg-[var(--bg-active)]",
   shell: `vui-app-appshell shell min-w-0 grid h-full min-h-0 content-start overflow-hidden ${vuiWorkspaceFillClass} text-[var(--fg-primary)]`,
