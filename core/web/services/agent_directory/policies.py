@@ -1177,7 +1177,7 @@ def effective_agent_context_compression_policy(
     )
     # Window invariant: the trigger must stay below the window-derived hard
     # limit. When an explicit trigger (e.g. the 262,144-window Challenge Cup
-    # v3 values) is replayed on a smaller runtime window (qwen3.7-plus,
+    # contract values) is replayed on a smaller runtime window (qwen3.7-plus,
     # 131,072), trigger > effectiveTokenLimit means automatic compression can
     # never fire before the fail-closed context_budget_exhausted preflight
     # gate rejects the call — the continuation ladder then replays the same
@@ -1208,7 +1208,8 @@ def effective_agent_context_compression_policy(
             # trigger is missing or unreachable (at/above the effective hard
             # limit, which means automatic compression could never fire before
             # the provider's own input cap rejects the call). The derived
-            # values reuse the v3 reserved-output / safety-reserve contract.
+            # values reuse the current contract: window minus the capped
+            # model-output reserve, minus the fixed 13,000-token trigger pad.
             from core.web.services.team.challenge_cup_context_policy import (
                 challenge_cup_context_budget,
             )

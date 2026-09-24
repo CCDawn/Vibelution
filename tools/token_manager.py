@@ -826,6 +826,7 @@ class EnhancedTokenCompressor:
         keep_count: int = 3,
         preserve_errors: bool = True,
         use_llm_summary: bool = True,
+        llm_summary_reporter: Any = None,
     ) -> CompressionOutput:
         """
         执行压缩：保留最近 N 条原始AI回复 + 压缩旧消息为摘要。
@@ -842,6 +843,8 @@ class EnhancedTokenCompressor:
             keep_count: 保留的最近 AI 消息数量
             preserve_errors: 是否强制保留错误消息
             use_llm_summary: 是否使用 LLM 生成摘要（False 时用规则提取）
+            llm_summary_reporter: 可选的 LLM 摘要成败上报钩子（on_failure/on_success）；
+                仅在真实尝试了 LLM 摘要时回调，供熔断与显式降级事件使用
 
         Returns:
             (压缩后的消息, 压缩统计/摘要对象)
@@ -928,7 +931,12 @@ class EnhancedTokenCompressor:
 
         summary = ""
         if old_msgs:
-            summary = self._generate_summary(old_msgs, max_chars, use_llm=use_llm_summary)
+            summary = self._generate_summary(
+                old_msgs,
+                max_chars,
+                use_llm=use_llm_summary,
+                llm_summary_reporter=llm_summary_reporter,
+            )
         if not old_msgs and not summary:
             return CompressionOutput(
                 messages,
@@ -1034,17 +1042,34 @@ class EnhancedTokenCompressor:
         max_chars: int,
         reason: str = "",
         use_llm: bool = True,
+        llm_summary_reporter: Any = None,
     ) -> str:
-        """生成摘要。use_llm=False 时跳过 LLM，直接用规则提取。"""
+        """生成摘要。use_llm=False 时跳过 LLM，直接用规则提取。
+
+        llm_summary_reporter 仅在真实尝试 LLM 摘要时回调：失败传 on_failure
+        （含错误摘要文本），成功传 on_success；未尝试时不回调，避免把
+        「没有 LLM 尝试」误计成熔断的成败。
+        """
         if not messages:
             return ""
 
         if self.compression_llm and use_llm:
             try:
-                return self._generate_llm_summary(messages, max_chars, reason)
+                summary = self._generate_llm_summary(messages, max_chars, reason)
             except Exception as e:
+                if llm_summary_reporter is not None:
+                    try:
+                        llm_summary_reporter.on_failure(str(e))
+                    except Exception:
+                        pass
                 logging.warning(f"LLM 摘要生成失败，回退到规则摘要: {e}")
                 return self._rule_based_summary(messages, max_chars)
+            if llm_summary_reporter is not None:
+                try:
+                    llm_summary_reporter.on_success()
+                except Exception:
+                    pass
+            return summary
 
         # 回退到基于规则的摘要
         return self._rule_based_summary(messages, max_chars)

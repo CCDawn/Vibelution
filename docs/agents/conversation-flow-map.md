@@ -104,10 +104,10 @@
 
 ## 只读诊断命令
 
-统一入口：**`agent_log_context`**（CLI 与 `conversation_log_inspect_tool` 无 `log_path` 时相同）。细则：[agent-log-routing.md](../guides/agent-log-routing.md)。
+统一入口：**`agent_log_context`**（CLI 与 `conversation_log_inspect_tool` 无 `log_path` 时相同）。先读返回 JSON 的 `firstRead`，需要看某一轮时再读 `session.diagnosis.nextMinimalAction`。细则：[agent-log-routing.md](../guides/agent-log-routing.md)。
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\agent_log_context.py --project-root . --session-id <sessionId> --turn-id <turnId>
+.\.venv\Scripts\python.exe scripts\agent_log_context.py --project . --session-id <sessionId> --turn-id <turnId>
 ```
 
 `session` 字段含 journal、live checkpoint、runtime-scene 线索；只读，不 import `session_service.py`。

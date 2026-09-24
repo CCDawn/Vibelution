@@ -30,9 +30,13 @@ const styles = {
     "itemSummary",
     "flex w-full max-w-full min-w-0 list-none cursor-pointer items-center gap-x-2 py-[0.28rem] text-left [&::-webkit-details-marker]:hidden [&::marker]:hidden [&::marker]:content-none focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
   ),
+  // Static (no-toggle) tool row: same single-line chrome as the expandable
+  // summary, minus the pointer affordance. The flex row is load-bearing -
+  // Tailwind preflight renders the leading lucide <svg> as display:block, so a
+  // plain block wrapper drops the icon onto its own line above the subject.
   itemStatic: cx(
     "itemStatic",
-    "flex w-full max-w-full min-w-0 cursor-pointer items-center gap-x-2 py-[0.28rem]",
+    "flex w-full max-w-full min-w-0 items-center gap-x-2 py-[0.28rem]",
   ),
   itemChevron: cx(
     "itemChevron",

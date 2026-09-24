@@ -443,9 +443,7 @@ def test_direct_session_collision_repair_upserts_replacement(
         if str(agent.get("agentId") or "").strip() in {"agent-alpha", second_id}:
             agent["directSessionId"] = session_id
     agent_directory_service.save_state(state)
-    repaired = session_service._repair_agent_direct_session_collisions(
-        source_signature=("directory-store-collision", session_id),
-    )
+    repaired = session_service._repair_agent_direct_session_collisions()
     assert repaired is True
     alpha = agent_directory_service.get_agent("agent-alpha") or {}
     beta = agent_directory_service.get_agent(second_id) or {}

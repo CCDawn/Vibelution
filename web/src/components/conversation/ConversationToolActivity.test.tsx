@@ -374,6 +374,15 @@ describe("ConversationToolActivity", () => {
     expect(html).toContain('data-codex-tool-detail="none"');
     expect(html).not.toContain("无更多详情");
     expect(html).not.toContain('data-codex-tool-detail-toggle="inline-symbol"');
+    // The static wrapper must stay a single flex line: Tailwind preflight
+    // renders the leading lucide <svg> as display:block, so a plain block
+    // wrapper pushes the icon onto its own line above the action/subject.
+    const staticRow = openingTagContaining(html, 'data-codex-tool-detail="none"');
+    expect(staticRow).toContain("flex");
+    expect(staticRow).toContain("items-center");
+    expect(staticRow).not.toContain("cursor-pointer");
+    expect(styles.itemStatic).toContain("flex");
+    expect(styles.itemStatic).toContain("items-center");
   });
 
   it("opens the current running tool detail directly by default", () => {

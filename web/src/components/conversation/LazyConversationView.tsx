@@ -1,4 +1,4 @@
-import { lazy, Suspense, type ReactNode } from "react";
+import { lazy, memo, Suspense, type ReactNode } from "react";
 
 import type { ConversationViewProps } from "./conversationViewTypes";
 import { prefetchConversationView } from "./prefetchConversationView";
@@ -12,12 +12,15 @@ type LazyConversationViewProps = ConversationViewProps & {
   fallback: ReactNode;
 };
 
-export function LazyConversationView({ fallback, ...props }: LazyConversationViewProps) {
+export const LazyConversationView = memo(function LazyConversationView({
+  fallback,
+  ...props
+}: LazyConversationViewProps) {
   return (
     <Suspense fallback={fallback}>
       <ConversationView {...props} />
     </Suspense>
   );
-}
+});
 
 export { prefetchConversationView };

@@ -1137,28 +1137,36 @@ def _build_key_tools() -> List[BaseTool]:
         log_path: str = "",
         limit: int = 5,
         max_events: int = 8000,
+        session_id: str = "",
+        turn_id: str = "",
     ) -> str:
         """
-        【会话日志审查】只读分析 conversation JSONL 日志并返回紧凑诊断摘要。
+        【日志第一眼】不传 log_path 时，返回与 scripts/agent_log_context.py 相同的 JSON。
 
-        适合在用户要求审查“最近对话”“某个 Agent 对话日志”“为什么卡/慢/失败”时优先调用。
-        本工具不会执行 shell，不写文件，不返回整段日志正文；它会先定位候选 conversation_*.jsonl，
-        再汇总事件类型、LLM/token 用量、工具调用序列、错误摘要和低效模式提示。
+        先读 firstRead 的四段：conclusion、evidencePaths、nextStep、doNotDo，然后停止。
+        只有 nextStep 点名的 evidencePaths.absolutePath 才可以再查。带 warning 的文件不要整篇读。
+        要看某一轮会话时传 session_id / turn_id，之后只读 session.diagnosis.nextMinimalAction。
+        传 log_path 才是深读，且该文件必须已经出现在 firstRead.evidencePaths。
+        本工具不执行 shell，不写文件，不返回整段日志正文。
 
         Args:
-            query: 可选关键词，会匹配文件名和日志开头片段；为空时读取最近日志候选
-            log_path: 可选明确日志路径，仅允许项目内 log_info/ 或 logs/runtime_scenes/ 下的 .jsonl
-            limit: 候选日志数量，默认 5，最大 20
+            query: 深读时的可选关键词；不传 log_path 时忽略
+            log_path: 可选。仅允许项目内 log_info/ 或 logs/runtime_scenes/ 下、且已被 firstRead 点名的文件
+            limit: 深读时的候选数量，默认 5，最大 20
             max_events: 单个日志最多解析事件数，默认 8000，最大 50000
+            session_id: 可选会话。只在需要看这一轮时传递
+            turn_id: 可选轮次。配合 session_id
 
         Returns:
-            JSON 格式的只读日志审查摘要
+            不传 log_path 时为 agent_log_context JSON；传 log_path 时为单文件深读摘要
         """
         return _conversation_log_inspect_impl(
             query=query,
             log_path=log_path,
             limit=limit,
             max_events=max_events,
+            session_id=session_id,
+            turn_id=turn_id,
         )
 
     @tool

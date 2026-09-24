@@ -96,7 +96,8 @@ describe("virtual-human native Chat reuse", () => {
     expect(attentionSource).toContain("listVirtualHumanCompanionActivity");
     expect(attentionSource).toContain("companionAgentId: companion.agentId");
     expect(attentionSource).toContain('completionIdentity: String(activity.activityStamp || "").trim()');
-    expect(attentionSource).toContain("refetchIntervalInBackground: Boolean(desktopBridge)");
+    expect(attentionSource).toContain("resolveCompanionActivityRefetchInterval");
+    expect(attentionSource).toContain("refetchIntervalInBackground: false");
     expect(attentionSource).toContain("openCompanionSession(");
     expect(lobbySource).toContain("isSessionActivitySeen(");
     expect(lobbySource).toContain("markSessionActivitySeen(");

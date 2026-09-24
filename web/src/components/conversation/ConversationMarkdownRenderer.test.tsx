@@ -1,8 +1,31 @@
-import React from "react";
+// @vitest-environment happy-dom
+import React, { act, type ComponentPropsWithoutRef } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import styles from "./ConversationView.styles";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+/**
+ * Parse counter: every ConversationMarkdownRenderer execution creates exactly
+ * one ReactMarkdown element, so wrapping the real renderer (transparently,
+ * same props) counts parse passes without changing rendered output. A Profiler
+ * here would be the wrong instrument: its onRender fires even when the memo
+ * gate short-circuits the subtree, because the Profiler itself re-renders.
+ */
+const parseCalls = vi.hoisted(() => [] as number[]);
+
+vi.mock("react-markdown", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-markdown")>();
+  const RealMarkdown = actual.default;
+  const CountingMarkdown = (props: ComponentPropsWithoutRef<typeof RealMarkdown>) => {
+    parseCalls.push(1);
+    return <RealMarkdown {...props} />;
+  };
+  return { default: CountingMarkdown };
+});
 
 describe("ConversationMarkdownRenderer", () => {
   it("normalizes common agent markdown glitches into readable blocks", async () => {
@@ -151,5 +174,43 @@ describe("ConversationMarkdownRenderer", () => {
     expect(html).not.toContain("javascript:");
     expect(html).not.toContain("<script");
     expect(html).not.toContain("alert(1)");
+  });
+
+  it("skips re-parsing when the content is unchanged (completed messages never re-parse)", async () => {
+    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
+    parseCalls.length = 0;
+    let root: Root | null = null;
+    let container: HTMLElement | null = null;
+
+    const renderWith = (content: string) => {
+      act(() => {
+        root!.render(
+          <ConversationMarkdownRenderer content={content} classNames={styles} />,
+        );
+      });
+    };
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    try {
+      renderWith("# stable block");
+      expect(parseCalls).toHaveLength(1);
+
+      // Parent re-render with unchanged content: the memo gate short-circuits
+      // before normalize + the react-markdown AST pass, so the parse-counting
+      // ReactMarkdown wrapper is never re-invoked.
+      renderWith("# stable block");
+      expect(parseCalls).toHaveLength(1);
+
+      // Streaming growth re-parses exactly the changed message.
+      renderWith("# stable block\nmore");
+      expect(parseCalls).toHaveLength(2);
+    } finally {
+      act(() => {
+        root?.unmount();
+      });
+      container.remove();
+    }
   });
 });

@@ -84,6 +84,11 @@ from core.infrastructure.runtime_input import (
 from core.evaluation.chat_dataset_capture import ChatDatasetCaptureService
 from core.evaluation.chat_segmenter import ChatTurnRecord
 from core.chat.chat_result_contract import build_chat_coding_result_contract
+from core.chat.microcompact import (
+    apply_micro_compact_projection,
+    empty_micro_compact_state,
+    micro_compact_trigger_tokens,
+)
 from core.chat.model_messages import normalize_model_messages
 from core.orchestration.output_boundary import sanitize_assistant_visible_text
 from core.orchestration.cache_diagnostics import (
@@ -796,9 +801,11 @@ class AgentRuntime:
         ).effective_enabled
 
     def _init_model_discovery(self):
-        """解析模型 max 上下文窗口并派生压缩阈值。
+        """解析模型 max 上下文窗口并派生压缩预算。
 
         禁止静默 32k/16k 兜底：窗口未知时直接失败，避免隐藏错误窗口。
+        预算走版本化合同（hard = window − min(模型输出预留, 20,480)），
+        不再砍半窗口。
         """
         primary_profile_id = self.config.llm.get_role_profile_id("primary")
         doctor = doctor_llm_profile(self.config, primary_profile_id)
@@ -819,11 +826,34 @@ class AgentRuntime:
             _debug_logger.error(message, tag="LLM")
             raise RuntimeError(message)
         self._context_window_limit = context_window
-        # Compression threshold is derived from the known window; never invent the window itself.
-        # The derivation stays in this runtime attribute and is never written back into
-        # ``self.config.context_compression``: the loaded config is operator-owned state
-        # shared with other readers, and silent in-place rewrites lose the TOML provenance.
-        self._effective_max_token_limit = max(1, int(context_window * 0.5))
+        # Compression budget follows the versioned contract (industry shape,
+        # mirrors Claude Code / ZCode auto-compact): the input hard limit is
+        # window minus the model's own output reservation capped at 20,480 —
+        # never a half-window guess. The legacy ``window * 0.5`` derivation is
+        # retired; an unknown window still fails loud above. The derivation
+        # stays in this runtime attribute and is never written back into
+        # ``self.config.context_compression``: the loaded config is operator-owned
+        # state shared with other readers, and silent in-place rewrites lose the
+        # TOML provenance.
+        try:
+            from core.web.services.team.challenge_cup_context_policy import (
+                challenge_cup_context_budget,
+            )
+
+            budget = challenge_cup_context_budget(
+                context_window=context_window,
+                reserved_max_output_tokens=(
+                    int(getattr(self.model_info, "max_output_tokens", 0) or 0) or None
+                ),
+            )
+            self._effective_max_token_limit = max(
+                1, int(budget["effectiveInputHardLimit"])
+            )
+        except ValueError:
+            # Degenerate tiny window (smaller than the output reserve plus the
+            # trigger pad): budget every token to input rather than fail
+            # startup; the ratio-based trigger fallback stays usable.
+            self._effective_max_token_limit = max(1, int(context_window))
         try:
             from core.pet_system import get_pet_system
             get_pet_system().update_context_window(self._context_window_limit)
@@ -898,8 +928,8 @@ class AgentRuntime:
         self._context_compression_policy = dict(policy)
         # Versioned budget contract (policy v3+): explicit compression trigger,
         # hard input limit and post-compression target override the legacy
-        # ratio derivation. Agents without the explicit fields keep the legacy
-        # behavior unchanged.
+        # ratio derivation. Agents without the explicit fields keep the
+        # contract-derived fallback above.
         explicit_trigger = int(policy.get("compressionTriggerTokenLimit") or 0)
         post_target = int(policy.get("postCompressionTargetTokenLimit") or 0)
         self._context_compression_trigger_tokens = max(0, explicit_trigger)
@@ -962,6 +992,145 @@ class AgentRuntime:
 
     def _should_automatically_compress(self, current_tokens: int) -> bool:
         return max(0, int(current_tokens)) > self._automatic_context_compression_threshold_tokens()
+
+    def _micro_compact_enabled(self) -> bool:
+        """Master switch for the micro-compaction tier.
+
+        The tier is a sub-tier of context compression, so the shared
+        ``context_compression`` feature decision gates it in addition to its
+        own operator flag.
+        """
+
+        try:
+            compression_decision = resolve_feature_decision(
+                "context_compression",
+                config=self.config,
+            )
+            if not compression_decision.effective_enabled:
+                return False
+        except Exception:
+            return False
+        cc = getattr(self.config, "context_compression", None)
+        return bool(getattr(cc, "micro_compact_enabled", True))
+
+    def _micro_compact_trigger_tokens(self) -> int:
+        """Micro line: min(full trigger * 0.9, full trigger - 2000); 0 disables."""
+
+        return micro_compact_trigger_tokens(
+            self._automatic_context_compression_threshold_tokens()
+        )
+
+    def _micro_compact_settings(self) -> Dict[str, Any]:
+        cc = getattr(self.config, "context_compression", None)
+        return {
+            "keep_recent_groups": int(
+                getattr(cc, "micro_compact_keep_recent_groups", 5) or 5
+            ),
+            "min_savings_tokens": int(
+                getattr(cc, "micro_compact_min_savings_tokens", 256) or 256
+            ),
+            "tool_whitelist": list(getattr(cc, "micro_compact_tool_whitelist", []) or []),
+        }
+
+    def _apply_micro_compact_messages(
+        self,
+        messages: list,
+        *,
+        iteration: int,
+        estimated_tokens: int,
+        trigger_tokens: int,
+    ) -> tuple[list, Dict[str, Any]]:
+        """Apply the read-time micro-compaction projection to live turn messages.
+
+        Ledger stays untouched; the projection only rewrites old whitelisted
+        tool-result contents, so the next turn rebuilds the same view from the
+        ledger via the context assembler.
+        """
+
+        settings = self._micro_compact_settings()
+        session_id = str((_turn_runtime_from_env() or {}).get("sessionId") or "").strip()
+        try:
+            projected, state = apply_micro_compact_projection(
+                messages,
+                session_id=session_id,
+                keep_recent_groups=settings["keep_recent_groups"],
+                min_savings_tokens=settings["min_savings_tokens"],
+                tool_whitelist=settings["tool_whitelist"],
+            )
+        except Exception as exc:
+            state = empty_micro_compact_state()
+            state["rollbackReason"] = "projection_failed"
+            _record_agent_scene_event(
+                "llm",
+                "agent.context_micro_compact.failed",
+                message="微压缩投影执行失败，本轮直接按原上下文继续。",
+                level="warning",
+                outcome="fallback",
+                fields={
+                    "iteration": iteration,
+                    "errorType": type(exc).__name__,
+                    "errorPreview": str(exc)[:300],
+                },
+            )
+            return messages, state
+        common_fields = {
+            "iteration": iteration,
+            "triggerTokens": max(0, int(trigger_tokens or 0)),
+            "estimatedTokens": max(0, int(estimated_tokens or 0)),
+            "clearedGroups": int(state.get("clearedGroups") or 0),
+            "clearedResults": int(state.get("clearedResults") or 0),
+            "tokensSaved": int(state.get("tokensSaved") or 0),
+            "keptRecentGroups": int(state.get("keptRecentGroups") or 0),
+            "rollbackReason": str(state.get("rollbackReason") or ""),
+        }
+        if state.get("applied"):
+            _record_agent_scene_event(
+                "llm",
+                "agent.context_micro_compact.applied",
+                message="微压缩已清除白名单工具的旧工具结果。",
+                fields=common_fields,
+            )
+        else:
+            _record_agent_scene_event(
+                "llm",
+                "agent.context_micro_compact.skipped",
+                message="微压缩未产生足够节省，整体跳过。",
+                fields=common_fields,
+            )
+        return projected, state
+
+    def micro_compact_assembly_kwargs(self, history_messages: Any) -> Optional[Dict[str, Any]]:
+        """Seed-path micro-compaction decision for the context assembler.
+
+        Returns assembler kwargs only when the seedable history alone already
+        sits at or above the micro-compaction trigger line; the full model
+        input (system prefix, runtime context, current user message) is
+        strictly larger, so the model-call gate faces the same pressure.
+        Returns ``None`` when the tier is off or there is no pressure, so the
+        seed path never pays the projection cost speculatively.
+        """
+
+        try:
+            if not self._micro_compact_enabled():
+                return None
+            micro_trigger = self._micro_compact_trigger_tokens()
+            if micro_trigger <= 0:
+                return None
+            candidate = list(history_messages or [])
+            if not candidate:
+                return None
+            estimate = estimate_messages_tokens_for_threshold(candidate, micro_trigger)
+            if estimate < micro_trigger:
+                return None
+        except Exception:
+            return None
+        settings = self._micro_compact_settings()
+        return {
+            "micro_compact_old_tool_results": True,
+            "micro_compact_keep_recent_groups": settings["keep_recent_groups"],
+            "micro_compact_min_savings_tokens": settings["min_savings_tokens"],
+            "micro_compact_tool_whitelist": settings["tool_whitelist"],
+        }
 
     def _context_budget_retention_contract(self) -> Dict[str, Any]:
         """Bounded scope fields pinned into every compression summary header."""
@@ -2595,6 +2764,36 @@ class AgentRuntime:
                 compression_triggered = self._should_automatically_compress(current_tokens)
                 compression_trigger_source = "auto" if compression_triggered else ""
                 compression_reason = "达到配置的上下文压缩阈值" if compression_triggered else ""
+                # 微压缩 tier：估算落入 [微压缩触发线, 全量触发线) 时先做读时
+                # 投影，清除白名单工具的旧工具结果；重估降到全量触发线之下则
+                # 本轮不触发全量压缩（ledger 不动，下轮按 ledger 重建同视图）。
+                micro_compact_state: Optional[Dict[str, Any]] = None
+                if not compression_triggered:
+                    micro_trigger_tokens = self._micro_compact_trigger_tokens()
+                    if (
+                        micro_trigger_tokens > 0
+                        and current_tokens >= micro_trigger_tokens
+                        and self._micro_compact_enabled()
+                    ):
+                        messages, micro_compact_state = self._apply_micro_compact_messages(
+                            messages,
+                            iteration=iteration,
+                            estimated_tokens=current_tokens,
+                            trigger_tokens=micro_trigger_tokens,
+                        )
+                        if micro_compact_state.get("applied"):
+                            current_tokens = estimate_messages_tokens_for_threshold(
+                                messages,
+                                compress_threshold_tokens,
+                            )
+                            try:
+                                ui.note_context_window(current_tokens, context_limit)
+                            except Exception:
+                                pass
+                            if current_tokens > compress_threshold_tokens:
+                                compression_triggered = True
+                                compression_trigger_source = "auto"
+                                compression_reason = "微压缩后仍高于全量压缩触发线"
                 if not compression_triggered and is_compression_requested():
                     requested_source = compression_request_source() or "manual"
                     compression_reason = consume_compression_request() or "provider context limit"
@@ -2634,6 +2833,9 @@ class AgentRuntime:
                         "contextEstimatedTokens": current_tokens,
                         "contextCompressionThresholdTokens": compress_threshold_tokens,
                         "contextCompressionTriggered": compression_triggered,
+                        "contextMicroCompactApplied": bool(
+                            (micro_compact_state or {}).get("applied")
+                        ),
                         "gitRefreshMs": git_refresh_ms,
                         "runtimeStateSyncMs": runtime_sync_ms,
                         "promptBuildMs": prompt_build_ms,

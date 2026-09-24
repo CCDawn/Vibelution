@@ -19,6 +19,10 @@ from .tool_result_replacement import (
     empty_tool_result_replacement_state,
     replace_large_tool_results_for_compression as replace_tool_results_for_compression,
 )
+from .microcompact import (
+    apply_micro_compact_projection,
+    empty_micro_compact_state,
+)
 from .conversation_ledger import (
     ConversationLedgerEvent,
     apply_context_compression_checkpoints,
@@ -73,6 +77,7 @@ class ContextAssemblyResult:
     tool_result_replacement_state: dict[str, Any] = field(
         default_factory=empty_tool_result_replacement_state
     )
+    micro_compact_state: dict[str, Any] = field(default_factory=empty_micro_compact_state)
     history_seed_compaction_state: dict[str, Any] = field(default_factory=dict)
 
     def to_composition_patch(self) -> dict[str, Any]:
@@ -93,6 +98,7 @@ class ContextAssemblyResult:
             },
             "segments": [segment.to_dict() for segment in self.segments],
             "toolResultReplacement": dict(self.tool_result_replacement_state or {}),
+            "microCompact": dict(self.micro_compact_state or {}),
             "historySeedCompaction": dict(self.history_seed_compaction_state or {}),
         }
 
@@ -144,6 +150,10 @@ def assemble_conversation_context(
     ledger_events: Iterable[ConversationLedgerEvent] | None = None,
     replace_large_tool_results_for_compression: bool = False,
     tool_result_replacement_char_limit: int = 12_000,
+    micro_compact_old_tool_results: bool = False,
+    micro_compact_keep_recent_groups: int = 5,
+    micro_compact_min_savings_tokens: int = 256,
+    micro_compact_tool_whitelist: Iterable[str] | None = None,
     history_seed_profile: str = "full",
     enforce_conversation_invariant: bool = True,
 ) -> ContextAssemblyResult:
@@ -266,6 +276,30 @@ def assemble_conversation_context(
             char_limit=tool_result_replacement_char_limit,
             session_id=session_id,
         )
+    micro_state = empty_micro_compact_state()
+    if micro_compact_old_tool_results:
+        # Read-time micro-compaction tier: clear old whitelisted tool results
+        # into reference+preview placeholders without touching the ledger. The
+        # memo scope rides on the assembled history list identity; any ledger
+        # change rebuilds the list contents and misses on purpose.
+        memoized_micro = _ASSEMBLY_MEMO.lookup(
+            ("micro_compact_projection", *memo_scope),
+            history_messages,
+        )
+        if memoized_micro is _MISS:
+            memoized_micro = apply_micro_compact_projection(
+                history_messages,
+                session_id=session_id,
+                keep_recent_groups=micro_compact_keep_recent_groups,
+                min_savings_tokens=micro_compact_min_savings_tokens,
+                tool_whitelist=micro_compact_tool_whitelist,
+            )
+            _ASSEMBLY_MEMO.store(
+                ("micro_compact_projection", *memo_scope),
+                history_messages,
+                memoized_micro,
+            )
+        history_messages, micro_state = memoized_micro
     history_compaction_state = empty_history_seed_compaction_state(profile=history_seed_profile)
     if str(history_seed_profile or "").strip().lower() == "agent_inbox":
         agent_inbox_tool_result_limit = min(
@@ -360,6 +394,7 @@ def assemble_conversation_context(
         cacheable_prefix_hash=_hash_text("agent_protocol:v1"),
         dynamic_context_hash=_hash_messages(history_messages),
         tool_result_replacement_state=replacement_state,
+        micro_compact_state=micro_state,
         history_seed_compaction_state=history_compaction_state,
     )
 

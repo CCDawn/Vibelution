@@ -18,7 +18,14 @@ export type ConversationMarkdownRendererProps = {
 
 const markdownPlugins = [remarkGfm];
 
-export function ConversationMarkdownRenderer({
+/**
+ * Content-memoized: completed messages never re-parse; a re-render with the
+ * same content/classNames/renderImage short-circuits before the normalize +
+ * react-markdown AST pass. During streaming only the live message (whose
+ * content actually grows) re-parses; its stable prefix is additionally split
+ * out by ConversationStreamingResponseContent.
+ */
+export const ConversationMarkdownRenderer = React.memo(function ConversationMarkdownRenderer({
   content,
   classNames = conversationMarkdownRendererStyles,
   duplicateImageUrls,
@@ -40,7 +47,7 @@ export function ConversationMarkdownRenderer({
       </ReactMarkdown>
     </div>
   );
-}
+});
 
 export function normalizeConversationMarkdown(content: string) {
   const lines = String(content ?? "").replace(/\r\n/g, "\n").split("\n");

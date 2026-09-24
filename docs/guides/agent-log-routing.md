@@ -1,84 +1,51 @@
-# Agent 日志路由（统一入口）
+# Agent 日志路由
 
-**读者：** 所有开发 Agent（Cursor、工作台内 Agent、脚本），无内外分叉。
+**读者：** 工作台内 Agent 和外置开发 Agent。两边读同一份 JSON，没有两套路径。
 
-**唯一入口：** `agent_log_context` — CLI 与 `conversation_log_inspect_tool` 共用同一 JSON 契约。
+**入口：** `scripts/agent_log_context.py`。工作台内调用 `conversation_log_inspect_tool` 且不传 `log_path`，输出相同。
 
 ---
 
 ## 1. 命令
 
 ```powershell
-# 项目根（Launcher 所在 checkout）
 .\.venv\Scripts\python.exe scripts\agent_log_context.py --project "<ROOT>"
-
-# 会话/轮次问题附加 session/turn
 .\.venv\Scripts\python.exe scripts\agent_log_context.py --project "<ROOT>" --session-id "<ID>" --turn-id "<TID>"
-
-# 指定 runtime scene
-.\.venv\Scripts\python.exe scripts\agent_log_context.py --project "<ROOT>" --scene-id "<sceneId>"
 ```
 
-工作台内 Agent：调用 **`conversation_log_inspect_tool`（无 `log_path`）**，输出与 CLI 相同。
+指定某一次运行现场时加 `--scene-id "<sceneId>"`。深读某一个已经被点名的文件时，同一命令或工具再传 `log_path`。
 
-深读某一文件或 scene 包：同一 tool / CLI 传 **`log_path`**（第二步，非默认）。
+## 2. 只读 firstRead
 
----
+返回 JSON 里先看 `firstRead`。它有且只有四段：
 
-## 2. 读序（强制）
-
-1. **`agent_log_context`** — 解析 `activePaths`、当前 scene、`agentBrief`
-2. **`summary.json`** — 已在 (1) 摘要；需要细节再打开
-3. **`resolvedEvidenceRefs.absolutePath`** — 优先于手工拼接 `evidence_refs`
-4. **有 session/turn 时** — (1) 内 `session` 字段（journal + runtime 证据）
-5. **仅当仍不够** — `log_path` 深读；禁止未做 (1) 就 grep 全仓或大 stdout
-
----
-
-## 3. 路径 SSOT
-
-| 项 | 权威 |
-| --- | --- |
-| 活跃 logs/runtime | `agent_log_context.activePaths`（来自 `vibelution_storage`） |
-| 当前运行现场 | `{activePaths.runtime}/launcher/active-runtime-scene.json` → `currentScene` |
-| 诊断首读 | `<scene>/summary.json` → `agent_brief` |
-| Launcher 原始 stdout/stderr | `{activePaths.runtime}/launcher/`（工作台 `launcher_runtime` 日志根）；`resolvedEvidenceRefs.source=launcher_runtime` 表示 live 文件 |
-| Scene raw 尾段 | `resolvedEvidenceRefs.source=runtime_scene_raw` — Python Launcher 启动时会写入 bounded tail（≤512KB） |
-| 大文件 | `launcherRuntime.largeLogs` 与 `resolvedEvidenceRefs.warning`；禁止全量读 live stdout |
-
-`activePaths.migrated=false` 时 runtime/logs 可能在 checkout 内；`migrated=true` 时在外部 instance 树。一律以 `agent_log_context.activePaths` 为准，迁移前可跑：
-
-```powershell
-python scripts/migrate_project_storage.py inventory --project "<ROOT>"
-```
-
-**不要**在未授权时执行 `apply`；迁移是 HIGH_RISK 操作。
-
----
-
-## 4. 症状 → 下一步
-
-| 症状 | 第一步 | 然后 |
+| 段 | 字段 | 怎么用 |
 | --- | --- | --- |
-| 启动/Launcher/卡住 | `agent_log_context` | `raw/launcher-control.log` → timeline |
-| API/后端 | `agent_log_context` | `raw/backend.api.log` |
-| 浏览器/前端 | `agent_log_context` | `raw/browser.telemetry.log` |
-| Agent/会话/工具 | `agent_log_context --session-id …` | 按 `session.diagnosis.evidenceRefs` |
-| 深读 JSONL/scene 文件 | `conversation_log_inspect_tool(log_path=…)` | 窄范围 |
+| 结论 | `conclusion` | 一句话：要不要动手，主问题是什么 |
+| 证据路径 | `evidencePaths` | 先看 `ref`。入口会补上 `absolutePath` 和 `exists`。有 `warning` 就不要整篇读 |
+| 下一步 | `nextStep` | 唯一允许的下一步 |
+| 不要做 | `doNotDo` | 停在这些动作之外 |
 
----
+`nextStep` 说停止，或结论是没有进行中的问题：不要打开原始日志。
 
-## 5. 禁止
+`diagnostic_entrypoint.first_read` 仍是场景包里的文件名（通常是 `summary.json`），不是这四段。不要从它开始读。
 
-- 未跑 `agent_log_context` 就猜测路径或读 8MB+ stdout 全文件
-- 把 `diagnose_session_turn.py` 当独立流程（已并入 `agent_log_context`）
-- 区分「外部 / 内部」两套日志路径
+要看某一轮会话时才加 `--session-id`。之后只读 `session.diagnosis.nextMinimalAction`，不要展开 journal。
 
----
+## 3. 路径
+
+活跃日志根在 `activePaths`。迁移之后不在 git checkout 里。不要猜 `logs/`，也不要跑存储迁移。
+
+场景包里的 `summary.json` 会带同一形状的 `agent_brief.first_read`。绝对路径以入口 JSON 的 `evidencePaths.absolutePath` 为准。
+
+## 4. 不要做
+
+- 未跑入口就 grep，或整篇读取超过 8MB 的 stdout
+- 打开 `evidencePaths` 里没有的文件
+- 把 `diagnose_session_turn.py` 当成另一套流程
+- 为内置 Agent 和外置 Agent 各写一套日志路径
 
 ## 相关
 
 - [loop.md](loop.md) §3
 - [conversation-flow-map.md](../agents/conversation-flow-map.md)
-- [launcher_runtime.md](../../core/web/services/launcher_runtime.md)
-- [development-standard §8](../standards/development-standard.md)

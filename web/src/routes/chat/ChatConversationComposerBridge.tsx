@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 
 import type { SessionReferenceAttachment } from "../../api/types";
 import { LazyConversationView } from "../../components/conversation/LazyConversationView";
@@ -7,6 +7,11 @@ import type {
   ConversationComposerAttachment,
   ConversationViewProps,
 } from "../../components/conversation/conversationViewTypes";
+import { projectActiveTurnLayerMessage } from "../chatActiveTurnLayer";
+import {
+  useActiveTurnLayerForSession,
+  useActiveTurnLayersStore,
+} from "./activeTurnLayersStore";
 
 export type ChatComposerImageAttachment = {
   id: string;
@@ -187,15 +192,42 @@ export function buildConversationComposerBridgeState(
   };
 }
 
-export function ChatConversationComposerBridge({
+/**
+ * Memo gate between the workbench and ConversationView: with stable props the
+ * bridge never re-renders on unrelated workbench state changes. The
+ * active-turn layer store subscription below still fires through the memo —
+ * streaming frames re-render exactly this component and ConversationView.
+ */
+export const ChatConversationComposerBridge = memo(function ChatConversationComposerBridge({
   composer,
   fallback,
+  activeTurnMessage,
+  messages,
+  sessionId,
   slashCommandSuggestions,
   ...props
 }: ChatConversationComposerBridgeProps) {
+  // Outside the workbench provider (no active-turn store) the prop passes
+  // through unchanged; inside it, the streaming layer is projected from the
+  // store for this session with the same settle rule the route used.
+  const activeTurnLayersStore = useActiveTurnLayersStore();
+  const streamedActiveTurnLayer = useActiveTurnLayerForSession(
+    activeTurnLayersStore ? sessionId : null,
+  );
+  const streamedActiveTurnMessage = useMemo(
+    () => (
+      activeTurnLayersStore
+        ? projectActiveTurnLayerMessage(streamedActiveTurnLayer, messages)
+        : activeTurnMessage
+    ),
+    [activeTurnLayersStore, streamedActiveTurnLayer, messages, activeTurnMessage],
+  );
   return (
     <LazyConversationView
       {...props}
+      sessionId={sessionId}
+      messages={messages}
+      activeTurnMessage={streamedActiveTurnMessage}
       composerVariant="codex"
       slashCommandSuggestions={slashCommandSuggestions}
       composerValue={composer.value}
@@ -220,4 +252,4 @@ export function ChatConversationComposerBridge({
       fallback={fallback}
     />
   );
-}
+});

@@ -39,10 +39,6 @@ function compactText(value: string, limit: number): string {
   return truncateText(String(value ?? "").replace(/\s+/g, " ").trim(), limit);
 }
 
-function compactLength(value: string): number {
-  return String(value ?? "").replace(/\s+/g, " ").trim().length;
-}
-
 function summarizeUnknown(value: unknown, limit = 240): string {
   if (value instanceof Error) {
     return truncateText(value.stack || value.message || value.name, limit);
@@ -73,7 +69,6 @@ export function collectBrowserPageSnapshot(): Record<string, unknown> {
   const port = window.location.port || "";
   const activeNav = document.querySelector<HTMLAnchorElement>("header nav a[aria-current='page']");
   const heading = document.querySelector("h1");
-  const main = document.querySelector("main");
   const shell = document.querySelector<HTMLElement>("[data-browser-role], [data-shell]");
   const browserRole = shell?.dataset.browserRole || (shell?.dataset.shell === "launcher" ? "launcher_control_surface" : "workbench");
   const telemetrySurface = port === "5173" || port === "5174"
@@ -100,7 +95,6 @@ export function collectBrowserPageSnapshot(): Record<string, unknown> {
     activeNavHref: activeNav?.getAttribute("href") ?? "",
     activeNavText: compactText(activeNav?.textContent ?? "", 80),
     heading: compactText(heading?.textContent ?? "", 120),
-    mainTextLength: compactLength(main?.textContent ?? ""),
   };
 }
 
