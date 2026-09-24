@@ -1079,7 +1079,7 @@ function WorkflowCanvasInner({
       ) : null}
       {layout.degraded ? (
         <div
-          className="absolute right-3 top-3 z-20 max-w-[16rem] rounded-md border border-[var(--state-warning,#d97706)]/50 bg-[var(--vui-surface-panel)] px-2.5 py-1.5 text-[11px] leading-snug text-[var(--state-warning,#d97706)] shadow-sm"
+          className="absolute right-3 top-3 z-20 max-w-[16rem] rounded-md border border-[var(--state-warning,#d97706)]/50 bg-[var(--vui-surface-panel)] px-2.5 py-1.5 [font-size:var(--vui-font-canvas-sm)] leading-snug text-[var(--state-warning,#d97706)] shadow-sm"
           data-vui="workflow-degraded"
           role="status"
         >

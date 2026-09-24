@@ -5,7 +5,7 @@
  */
 const styles = {
   panel:
-    "sourceCollectionSearchBriefPanel min-w-0 grid content-start gap-3 rounded-[var(--radius-panel)] border border-[color:var(--border-soft)] bg-[color:var(--source-workbench-panel)] p-3 shadow-[var(--shadow-subtle)]",
+    "sourceCollectionSearchBriefPanel min-w-0 grid content-start gap-3 rounded-[var(--radius-panel)] border border-[color:var(--border-soft)] bg-[color:var(--source-workbench-panel)] p-3 shadow-[var(--vui-elevation-1)]",
   header:
     "flex min-w-0 items-center justify-between gap-2",
   title:
