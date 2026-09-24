@@ -380,6 +380,7 @@ export function groupPolicyToolsByBundle(
 export function defaultMemoryPolicy(policyId = ""): MemoryPolicy {
   return {
     policyId,
+    enabled: true,
     privateMemoryRoot: "",
     episodicEventsPath: "",
     groupContextEventsPath: "",
@@ -397,6 +398,7 @@ export function defaultMemoryPolicy(policyId = ""): MemoryPolicy {
 
 export function memoryPolicyDraftFromAgent(agent: AgentConfigWorkspaceAgent | null | undefined): AgentMemoryPolicyDraft {
   return {
+    enabled: agent?.memoryPolicy?.enabled ?? true,
     readSharedGroups: sortedIds(agent?.memoryPolicy?.readSharedGroups ?? []),
     writeSharedGroups: sortedIds(agent?.memoryPolicy?.writeSharedGroups ?? []),
     readKnowledgeBaseIds: sortedIds(agent?.memoryPolicy?.readKnowledgeBaseIds ?? []),
@@ -415,7 +417,8 @@ export function memoryPolicyDraftFromAgent(agent: AgentConfigWorkspaceAgent | nu
 export function memoryPolicyDraftEqualsAgent(draft: AgentMemoryPolicyDraft, agent: AgentConfigWorkspaceAgent | null | undefined) {
   const base = memoryPolicyDraftFromAgent(agent);
   return (
-    sameStringSet(draft.readSharedGroups, base.readSharedGroups)
+    draft.enabled === base.enabled
+    && sameStringSet(draft.readSharedGroups, base.readSharedGroups)
     && sameStringSet(draft.writeSharedGroups, base.writeSharedGroups)
     && sameStringSet(draft.readKnowledgeBaseIds, base.readKnowledgeBaseIds)
     && sameStringSet(draft.proposeKnowledgeBaseIds, base.proposeKnowledgeBaseIds)
@@ -426,7 +429,8 @@ export function memoryPolicyDraftEqualsAgent(draft: AgentMemoryPolicyDraft, agen
 
 export function memoryPolicyDraftEqualsDraft(left: AgentMemoryPolicyDraft, right: AgentMemoryPolicyDraft) {
   return (
-    sameStringSet(left.readSharedGroups, right.readSharedGroups)
+    left.enabled === right.enabled
+    && sameStringSet(left.readSharedGroups, right.readSharedGroups)
     && sameStringSet(left.writeSharedGroups, right.writeSharedGroups)
     && sameStringSet(left.readKnowledgeBaseIds, right.readKnowledgeBaseIds)
     && sameStringSet(left.proposeKnowledgeBaseIds, right.proposeKnowledgeBaseIds)
