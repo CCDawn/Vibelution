@@ -48,7 +48,7 @@
       }
     },
     "arbitraryTextSize": {
-      "total": 169,
+      "total": 167,
       "files": {
         "app/AppShell.styles.ts": 2,
         "app/AppShellUtilityMenu.styles.ts": 1,
@@ -71,8 +71,6 @@
         "routes/companions/CompanionLifeWorldCard.styles.ts": 4,
         "routes/companions/companions.styles.ts": 5,
         "routes/ConfigFeatureDecisionPanel.styles.ts": 1,
-        "routes/desktopPet/DesktopPetCharacter.styles.ts": 1,
-        "routes/desktopPet/WhaleRigCharacter.styles.ts": 1,
         "routes/GitDiffView.styles.ts": 1,
         "routes/GitRoute.styles.ts": 5,
         "routes/GroupSessionIndexItems.styles.ts": 1,
