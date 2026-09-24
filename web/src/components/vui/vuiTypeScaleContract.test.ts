@@ -15,8 +15,8 @@ import { describe, expect, it } from "vitest";
 const vuiRoot = resolve(import.meta.dirname);
 const themeCssPath = resolve(import.meta.dirname, "../../design/theme.tailwind.css");
 
-// Measured debt at the time the contract landed; these are ceilings, not targets.
-const BUILTIN_TEXT_UTILITY_BASELINE = 17;
+// Built-in sizes are now at zero; arbitrary micro sizes remain as measured debt (ceilings, not targets).
+const BUILTIN_TEXT_UTILITY_BASELINE = 0;
 const ARBITRARY_TEXT_SIZE_BASELINE = 45;
 
 const BUILTIN_TEXT_UTILITY = /\btext-(?:sm|xs|base|lg|xl|2xl|3xl)\b/g;
