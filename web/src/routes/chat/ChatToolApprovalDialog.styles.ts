@@ -12,7 +12,7 @@ const styles = {
   header:
     "min-w-0 flex flex-wrap items-center gap-1 text-[var(--fg-primary)]",
   headerTitle:
-    "text-[12px] font-semibold leading-none text-[var(--fg-primary)]",
+    "text-vui-2xs font-semibold leading-none text-[var(--fg-primary)]",
   hotkeys:
     "m-0 [font-size:10px] font-medium leading-none tracking-wide text-[var(--fg-tertiary)]",
   grantDescription:

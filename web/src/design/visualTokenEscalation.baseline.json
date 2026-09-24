@@ -1,7 +1,7 @@
 {
   "comment": "Baseline for visualTokenEscalationContract.test.ts. Ratchet: counts may only shrink. Regenerate with: npm run tokens:baseline-update (web/).",
   "updatedAt": "2026-09-24",
-  "scannedFileCount": 1313,
+  "scannedFileCount": 1320,
   "exemptFiles": [
     "routes/chat/CliAgentRunTerminalPanel.tsx",
     "routes/teams/challenge-cup/questionArchiveExport.ts"
@@ -12,12 +12,12 @@
       "files": {}
     },
     "arbitraryTextSize": {
-      "total": 167,
+      "total": 157,
       "files": {
-        "app/AppShell.styles.ts": 2,
+        "app/AppShell.styles.ts": 1,
         "app/AppShellUtilityMenu.styles.ts": 1,
         "app/RouteErrorBoundary.styles.ts": 1,
-        "components/conversation/ComposerContextRing.styles.ts": 18,
+        "components/conversation/ComposerContextRing.styles.ts": 13,
         "components/preview/FilePreview.styles.ts": 1,
         "routes/AgentInspectorRailPanel.styles.ts": 1,
         "routes/AgentModelPicker.styles.ts": 1,
@@ -28,9 +28,9 @@
         "routes/chat/ChatComposerPlusMenu.styles.ts": 2,
         "routes/chat/ChatConversationIndexRail.styles.ts": 2,
         "routes/chat/ChatGroupCenterSurface.styles.ts": 4,
-        "routes/chat/ChatToolApprovalDialog.styles.ts": 5,
+        "routes/chat/ChatToolApprovalDialog.styles.ts": 4,
         "routes/chat/TokenCoreStatusPanel.styles.ts": 4,
-        "routes/companions/CompanionChatRails.styles.ts": 42,
+        "routes/companions/CompanionChatRails.styles.ts": 41,
         "routes/companions/CompanionConversationHeader.styles.ts": 2,
         "routes/companions/CompanionLifeWorldCard.styles.ts": 4,
         "routes/companions/companions.styles.ts": 5,
@@ -63,7 +63,6 @@
         "routes/teams/research-workflow/ResearchRunLaunchPanel.styles.ts": 1,
         "routes/teams/ResearchBoardKanban.tsx": 1,
         "routes/teams/TeamHypothesisRoundTimeline.styles.ts": 1,
-        "routes/TeamsRoute.styles.ts": 2,
         "routes/ToolsRoute.styles.ts": 1,
         "routes/UsageRoute.styles.ts": 2
       }

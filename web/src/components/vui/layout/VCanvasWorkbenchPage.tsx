@@ -159,7 +159,7 @@ function CanvasWorkbenchDrawer({
   }, [id, open, returnFocusRef]);
 
   const panelClassName = cn(
-    "!top-[var(--shell-topbar-height,0px)] !bottom-0 !h-auto !max-h-none !w-[min(88vw,380px)] !translate-x-0 !translate-y-0 rounded-none border-y-0 shadow-[var(--vui-shadow-panel)]",
+    "!top-[var(--shell-topbar-height,0px)] !bottom-0 !h-auto !max-h-none !w-[min(88vw,380px)] !translate-x-0 !translate-y-0 rounded-none border-y-0 shadow-[var(--vui-elevation-panel)]",
     side === "left"
       ? "!left-0 !right-auto !translate-x-0 border-l-0"
       : "!left-auto !right-0 !translate-x-0 border-r-0",

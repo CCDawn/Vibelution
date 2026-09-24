@@ -8,10 +8,10 @@ const styles = {
     "w-[min(324px,calc(100vw-24px))] max-h-[calc(100dvh-36px)] overflow-y-auto !rounded-xl !px-4 !pt-3.5 !pb-2",
   head: "mb-3 flex h-6 items-center justify-between gap-2",
   title: "text-[13px] font-semibold text-vui-fg-primary",
-  back: `${quietButton} !flex !h-6 !items-center !gap-1.5 !p-0 !text-[12px] !font-semibold`,
+  back: `${quietButton} !flex !h-6 !items-center !gap-1.5 !p-0 !text-vui-2xs !font-semibold`,
   close: `${quietButton} !size-[26px] !min-w-0 !p-0 !text-[var(--fg-tertiary)]`,
   capacity:
-    "flex items-baseline justify-between gap-2 text-[12px] tabular-nums [&_b]:text-[17px] [&_b]:font-semibold",
+    "flex items-baseline justify-between gap-2 text-vui-2xs tabular-nums [&_b]:text-vui-chat [&_b]:font-semibold",
   nums: "text-[11px] text-[var(--fg-secondary)] [&_span]:text-[var(--fg-tertiary)]",
   track:
     "mt-2.5 h-1.5 overflow-hidden rounded-full bg-[var(--vui-control-muted)]",
@@ -20,9 +20,9 @@ const styles = {
   note: "mb-4 mt-2 text-[10px] leading-relaxed text-[var(--fg-tertiary)]",
   sectionTitle:
     "mb-1 flex items-center justify-between text-[10px] font-normal text-[var(--fg-tertiary)]",
-  row: "flex min-h-7 items-center justify-between gap-3 text-[12px] [&_b]:font-medium [&_b]:tabular-nums",
+  row: "flex min-h-7 items-center justify-between gap-3 text-vui-2xs [&_b]:font-medium [&_b]:tabular-nums",
   name: "min-w-0 flex-1 break-words text-left",
-  detailRow: `${quietButton} !flex !min-h-[var(--vui-control-height-sm)] !h-auto !w-full !items-center !gap-1.5 !px-0 !py-1 !text-[12px] [&_b]:font-medium [&_b]:tabular-nums [&_svg]:shrink-0 [&_svg]:text-[var(--fg-tertiary)]`,
+  detailRow: `${quietButton} !flex !min-h-[var(--vui-control-height-sm)] !h-auto !w-full !items-center !gap-1.5 !px-0 !py-1 !text-vui-2xs [&_b]:font-medium [&_b]:tabular-nums [&_svg]:shrink-0 [&_svg]:text-[var(--fg-tertiary)]`,
   expanded: "pb-2.5 pl-[19px] text-[10px] text-[var(--fg-secondary)]",
   segment: "flex items-baseline justify-between gap-2 py-1 tabular-nums",
   preview:

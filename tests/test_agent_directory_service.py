@@ -283,3 +283,42 @@ def test_runtime_context_block_skips_personal_memory_section_when_disabled(
     disabled_block = agent_directory_service.build_agent_runtime_context_block(agent_id)
     assert "## 个人记忆" not in disabled_block
     assert read_calls == []
+
+
+def test_team_knowledge_access_lines_cache_hits_and_invalidates_on_agent_update(
+    tmp_path, monkeypatch
+):
+    """访问行解析缓存：同状态重复构建零重读；agent 记录更新后立即失效。"""
+
+    from core.web.services import chat_room_service, team_knowledge_service, team_service
+    from core.web.services.agent_directory import projections as agent_directory_projections
+
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
+    for module in (agent_directory_service, chat_room_service, team_service, team_knowledge_service):
+        monkeypatch.setattr(module, "PROJECT_ROOT", tmp_path)
+    agent_directory_projections._reset_team_knowledge_access_cache()
+
+    agent = agent_directory_service.create_agent_instance(display_name="Cache Probe Agent")
+    agent_id = agent["agentId"]
+
+    overview_calls: list[str] = []
+    real_overview = team_knowledge_service.list_knowledge_overview
+
+    def counting_overview(*args, **kwargs):
+        overview_calls.append(str(kwargs.get("agent_id") or ""))
+        return real_overview(*args, **kwargs)
+
+    monkeypatch.setattr(team_knowledge_service, "list_knowledge_overview", counting_overview)
+
+    first_block = agent_directory_service.build_agent_runtime_context_block(agent_id)
+    assert "未配置可读知识库" in first_block
+    assert overview_calls == [agent_id]
+
+    second_block = agent_directory_service.build_agent_runtime_context_block(agent_id)
+    assert overview_calls == [agent_id]
+    assert second_block == first_block
+
+    agent_directory_service.update_agent_instance(agent_id, memory_policy={"enabled": False})
+    third_block = agent_directory_service.build_agent_runtime_context_block(agent_id)
+    assert overview_calls == [agent_id, agent_id]
+    assert "未配置可读知识库" in third_block
