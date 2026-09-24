@@ -50,4 +50,15 @@ describe("memory workbench queries contract", () => {
     // Item detail stays route-local: depends on selected pair + contentDeferred after list derivation.
     expect(routeSource).toContain("const activeItemDetailQuery = useQuery({");
   });
+
+  it("gates the overview poll by view and keeps content variants in the query key", () => {
+    // Ops views (manage-family) and library render sections content; knowledge,
+    // graph, personal/agents and team views must not pull full-content payloads.
+    expect(queriesSource).toContain(
+      "const overviewNeedsContent = isManageMemoryView(forcedView) || isLibraryMemoryView(forcedView)",
+    );
+    expect(queriesSource).toContain("queryKey: queryKeys.memoryOverview(overviewNeedsContent)");
+    expect(queriesSource).toContain("fetchMemoryOverview<MemoryOverview>({ includeContent: overviewNeedsContent, signal })");
+    expect(queriesSource).toContain("enabled: overviewNeedsContent");
+  });
 });
