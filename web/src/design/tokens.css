@@ -75,6 +75,24 @@
   --vui-transition: 150ms var(--vui-ease);
   --vui-radius-soft: 10px;
 
+  /* VUI alpha tiers — wash/tint convergence (P2 visual-unification wave).
+     Semantic percentage slots for hand-tuned color-mix() alphas OUTSIDE the
+     structural surface wash governed by vuiSurfaceAlphaPolicy: state tints,
+     hover washes, accent lines, and divider fades (base color stays explicit
+     at the call site; these vars only pin the alpha tier).
+     Tiers are the census modes of the 2026-09 color-mix distribution sweep
+     (1618 in-scope calls): wash band 8/10/12%, tint band 24/28%, line band
+     34/42%, veil 76%. Zero-displacement mapping takes priority; values more
+     than 2pp from a tier stay literal until a later ratchet wave. */
+  --vui-alpha-wash-faint: 8%; /* hover/selected wash over rows & controls */
+  --vui-alpha-wash: 10%; /* soft background wash (info/quiet fills) */
+  --vui-alpha-wash-strong: 12%; /* emphasized soft wash on accent/state */
+  --vui-alpha-tint: 24%; /* chip / badge tint fills */
+  --vui-alpha-tint-strong: 28%; /* selected & active tint fills */
+  --vui-alpha-line: 34%; /* accent/state hairline borders, focus rings */
+  --vui-alpha-line-strong: 42%; /* emphasized accent borders */
+  --vui-alpha-veil: 76%; /* divider/border fade toward transparent */
+
   --vui-gradient-route-soft: linear-gradient(
     180deg,
     color-mix(in srgb, var(--vui-surface-panel) 92%, transparent),

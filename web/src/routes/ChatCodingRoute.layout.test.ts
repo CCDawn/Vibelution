@@ -399,7 +399,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationStyles.sendButton).not.toContain("-translate-y");
     expect(conversationStyles.attachButton).toMatch(/bg-\[|!bg-\[|var\(--vui-surface/);
     expect(conversationStyles.attachButton).toContain("active:bg-[color-mix(in_srgb,var(--vui-surface-workspace)_18%,var(--vui-control-muted-hover))]");
-    expect(conversationStyles.stopButton).toContain("!border-[color-mix(in_srgb,var(--state-error)_34%,transparent)]");
+    expect(conversationStyles.stopButton).toContain("!border-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)]");
     expect(conversationStyles.stopButton).toContain("!text-[var(--state-error)]");
 
     expect(conversationStyles.userCard).toContain("bg-transparent");

@@ -32,13 +32,13 @@ import {
 const styles: Record<string, string> = {
   actionRow: `actionRow min-w-0 flex flex-wrap items-center gap-1.5 ${vuiOpaqueRowClass} p-2`,
   canvas:
-    "canvas min-w-0 grid min-h-0 gap-2 p-2 relative flex-1 overflow-auto bg-[var(--vui-surface-base)] [background-image:linear-gradient(to_right,color-mix(in_srgb,var(--vui-border-subtle)_24%,transparent)_1px,transparent_1px),linear-gradient(to_bottom,color-mix(in_srgb,var(--vui-border-subtle)_18%,transparent)_1px,transparent_1px)] [background-size:40px_40px]",
+    "canvas min-w-0 grid min-h-0 gap-2 p-2 relative flex-1 overflow-auto bg-[var(--vui-surface-base)] [background-image:linear-gradient(to_right,color-mix(in_srgb,var(--vui-border-subtle)_var(--vui-alpha-tint),transparent)_1px,transparent_1px),linear-gradient(to_bottom,color-mix(in_srgb,var(--vui-border-subtle)_18%,transparent)_1px,transparent_1px)] [background-size:40px_40px]",
   canvasLayoutModeSwitch:
     "canvasLayoutModeSwitch min-w-0 grid min-h-0 gap-2 p-2 grid-cols-[repeat(auto-fit,minmax(86px,max-content))] !gap-1 !p-0 content-start",
   canvasPanel:
     "canvasPanel min-w-0 !flex min-h-0 flex-col overflow-hidden",
   canvasReadOnlyBadge:
-    `canvasReadOnlyBadge min-w-0 grid min-h-0 gap-2 p-2 ${vuiControlPillClass} min-h-[26px] border-[color-mix(in_srgb,var(--accent-cool)_36%,var(--vui-border-subtle))] ${vuiStateSelectedRowFillClass} px-2 text-[var(--accent-cool)]`,
+    `canvasReadOnlyBadge min-w-0 grid min-h-0 gap-2 p-2 ${vuiControlPillClass} min-h-[26px] border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--vui-border-subtle))] ${vuiStateSelectedRowFillClass} px-2 text-[var(--accent-cool)]`,
   canvasReadOnlyNode:
     "canvasReadOnlyNode min-w-0 grid min-h-0 gap-2 p-2 grid-cols-[repeat(2,minmax(0,1fr))]",
   canvasReadOnlyNodeWide:
@@ -66,7 +66,7 @@ const styles: Record<string, string> = {
     "emptyCanvasContent min-w-0 grid min-h-0 gap-2 p-2 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] max-w-[520px] content-start gap-1.5 p-2 text-left",
   emptyCanvasKicker:
     "emptyCanvasKicker min-w-0 grid min-h-0 gap-2 p-2 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
-  emptyCanvasPanel: `emptyCanvasPanel min-w-0 grid min-h-0 gap-2 p-2 ${vuiFlatPanelClass} [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] flex-1 content-start overflow-auto p-2 bg-[var(--vui-surface-base)] [background-image:linear-gradient(to_right,color-mix(in_srgb,var(--vui-border-subtle)_24%,transparent)_1px,transparent_1px),linear-gradient(to_bottom,color-mix(in_srgb,var(--vui-border-subtle)_18%,transparent)_1px,transparent_1px)] [background-size:40px_40px]`,
+  emptyCanvasPanel: `emptyCanvasPanel min-w-0 grid min-h-0 gap-2 p-2 ${vuiFlatPanelClass} [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] flex-1 content-start overflow-auto p-2 bg-[var(--vui-surface-base)] [background-image:linear-gradient(to_right,color-mix(in_srgb,var(--vui-border-subtle)_var(--vui-alpha-tint),transparent)_1px,transparent_1px),linear-gradient(to_bottom,color-mix(in_srgb,var(--vui-border-subtle)_18%,transparent)_1px,transparent_1px)] [background-size:40px_40px]`,
   emptyCanvasSteps:
     "emptyCanvasSteps min-w-0 grid min-h-0 gap-2 p-2 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] !flex flex-wrap gap-1.5",
   header:
@@ -97,7 +97,7 @@ const styles: Record<string, string> = {
   nodeBindingSection:
     "nodeBindingSection min-w-0 grid content-start gap-2",
   nodeBound:
-    "nodeBound min-w-0 border-[color-mix(in_srgb,var(--state-success)_42%,var(--vui-border-subtle))]",
+    "nodeBound min-w-0 border-[color-mix(in_srgb,var(--state-success)_var(--vui-alpha-line-strong),var(--vui-border-subtle))]",
   nodeIcon:
     "nodeIcon min-w-0 shrink-0 text-[var(--fg-tertiary)] row-span-4 inline-flex h-5 w-5 items-center justify-center text-[var(--fg-tertiary)]",
   nodeOpen:
@@ -109,22 +109,22 @@ const styles: Record<string, string> = {
   nodeRoleBadge:
     `nodeRoleBadge min-w-0 ${vuiControlPillClass} min-h-[18px] max-w-[128px] justify-self-start truncate rounded-full border border-[var(--node-role-border,var(--vui-border-subtle))] bg-[var(--node-role-bg,var(--vui-control-muted))] px-1.5 py-0 text-[var(--node-role-fg,var(--fg-secondary))] [font-size:var(--vui-font-xs)] font-semibold leading-none`,
   nodeRoleBadgeAdvisor:
-    "nodeRoleBadgeAdvisor min-w-0 [--node-role-bg:color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] [--node-role-fg:var(--accent-cool)]",
+    "nodeRoleBadgeAdvisor min-w-0 [--node-role-bg:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-strong),var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line-strong),var(--vui-border-subtle))] [--node-role-fg:var(--accent-cool)]",
   nodeRoleBadgeGeneral:
     "nodeRoleBadgeGeneral min-w-0 [--node-role-bg:var(--vui-control-muted)] [--node-role-border:var(--vui-border-subtle)] [--node-role-fg:var(--fg-secondary)]",
   nodeRoleBadgeLead:
-    "nodeRoleBadgeLead min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [--node-role-bg:color-mix(in_srgb,var(--state-success)_11%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--state-success)_38%,var(--vui-border-subtle))] [--node-role-fg:var(--state-success)]",
+    "nodeRoleBadgeLead min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [--node-role-bg:color-mix(in_srgb,var(--state-success)_var(--vui-alpha-wash-strong),var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--state-success)_38%,var(--vui-border-subtle))] [--node-role-fg:var(--state-success)]",
   nodeRoleBadgeOpen:
     `nodeRoleBadgeOpen min-w-0 ${vuiStateCoolSoftClass} [--node-role-bg:var(--vui-control-muted)] [--node-role-border:var(--vui-border-subtle)] [--node-role-fg:var(--fg-tertiary)]`,
   nodeRoleBadgeResearch:
-    "nodeRoleBadgeResearch min-w-0 [--node-role-bg:color-mix(in_srgb,var(--accent-warm)_10%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--accent-warm)_34%,var(--vui-border-subtle))] [--node-role-fg:var(--accent-warm)]",
+    "nodeRoleBadgeResearch min-w-0 [--node-role-bg:color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-wash),var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-line),var(--vui-border-subtle))] [--node-role-fg:var(--accent-warm)]",
   nodeRoleBadgeSelf:
-    "nodeRoleBadgeSelf min-w-0 [--node-role-bg:color-mix(in_srgb,var(--state-error)_9%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--state-error)_34%,var(--vui-border-subtle))] [--node-role-fg:var(--state-error)]",
+    "nodeRoleBadgeSelf min-w-0 [--node-role-bg:color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash),var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),var(--vui-border-subtle))] [--node-role-fg:var(--state-error)]",
   nodeRoleBadgeStale:
-    "nodeRoleBadgeStale min-w-0 [--node-role-bg:color-mix(in_srgb,var(--state-error)_9%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--state-error)_40%,var(--vui-border-subtle))] [--node-role-fg:var(--state-error)]",
+    "nodeRoleBadgeStale min-w-0 [--node-role-bg:color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash),var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line-strong),var(--vui-border-subtle))] [--node-role-fg:var(--state-error)]",
   nodeRoleBadgeSteward:
-    "nodeRoleBadgeSteward min-w-0 [--node-role-bg:color-mix(in_srgb,var(--state-warning)_11%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--state-warning)_42%,var(--vui-border-subtle))] [--node-role-fg:var(--state-warning)]",
-  nodeSourceAuthority: `nodeSourceAuthority min-w-0 !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 p-2 ${vuiOpaqueRowClass} [&>div]:grid [&>div]:gap-0.5 [&>div]:min-w-0 [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[var(--radius-control)] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]`,
+    "nodeRoleBadgeSteward min-w-0 [--node-role-bg:color-mix(in_srgb,var(--state-warning)_var(--vui-alpha-wash-strong),var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--state-warning)_var(--vui-alpha-line-strong),var(--vui-border-subtle))] [--node-role-fg:var(--state-warning)]",
+  nodeSourceAuthority: `nodeSourceAuthority min-w-0 !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 p-2 ${vuiOpaqueRowClass} [&>div]:grid [&>div]:gap-0.5 [&>div]:min-w-0 [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),var(--vui-surface-panel))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[var(--radius-control)] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),var(--vui-surface-panel))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]`,
   nodeStale:
     "nodeStale min-w-0 border-[color-mix(in_srgb,var(--state-error)_48%,var(--vui-border-subtle))]",
   challengeProgramScope:
@@ -142,7 +142,7 @@ const styles: Record<string, string> = {
   challengeSurfaceSwitch:
     "challengeSurfaceSwitch sticky top-0 z-20 inline-grid w-fit min-w-0 grid-cols-2 gap-1 rounded-[var(--radius-card)] border border-[var(--vui-border-subtle)] !bg-vui-surface-panel p-1 shadow-[var(--shadow-xs)] [&>span]:contents [&_button]:min-w-[132px] [&_button]:rounded-[var(--radius-control)] [&_button]:border [&_button]:border-transparent [&_button]:bg-transparent [&_button]:px-3 [&_button]:py-2 [&_button]:text-center [&_button]:text-[var(--fg-secondary)] [&_button]:transition-colors [&_button:hover]:bg-[var(--vui-surface-row-hover)] [&_button:focus-visible]:outline-none [&_button:focus-visible]:shadow-[var(--focus-ring)] [&_strong]:[font-size:var(--vui-font-sm)]",
   challengeSurfaceSwitchActive:
-    "!border-[color:color-mix(in_srgb,var(--accent-cool)_34%,var(--vui-border-subtle))] !bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] !text-[var(--fg-primary)]",
+    "!border-[color:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--vui-border-subtle))] !bg-[color:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),var(--vui-surface-panel))] !text-[var(--fg-primary)]",
   revokeButton:
     `revokeButton min-w-0 ${vuiControlQuietClass}`,
   // shadcn / Kernel list-detail fill: page owns viewport height; body row is minmax(0,1fr).
@@ -168,16 +168,16 @@ const styles: Record<string, string> = {
   sourceCollectionRunBadge:
     `sourceCollectionRunBadge min-w-0 ${vuiControlPillClass}`,
   sourceCollectionStepActive:
-    `sourceCollectionStepActive min-w-0 ${vuiStateSelectedRowClass} [--source-step-color:var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_52%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-base))]`,
+    `sourceCollectionStepActive min-w-0 ${vuiStateSelectedRowClass} [--source-step-color:var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_52%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),var(--vui-surface-base))]`,
   sourceCollectionStepDone:
-    "sourceCollectionStepDone min-w-0 [--source-step-color:var(--state-success)] border-[color-mix(in_srgb,var(--state-success)_48%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-success)_8%,var(--vui-surface-base))]",
+    "sourceCollectionStepDone min-w-0 [--source-step-color:var(--state-success)] border-[color-mix(in_srgb,var(--state-success)_48%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-success)_var(--vui-alpha-wash-faint),var(--vui-surface-base))]",
   sourceCollectionStepFailed:
-    `sourceCollectionStepFailed min-w-0 ${vuiStateDangerSoftClass} [--source-step-color:var(--state-error)] border-[color-mix(in_srgb,var(--state-error)_50%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_8%,var(--vui-surface-base))]`,
+    `sourceCollectionStepFailed min-w-0 ${vuiStateDangerSoftClass} [--source-step-color:var(--state-error)] border-[color-mix(in_srgb,var(--state-error)_50%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash-faint),var(--vui-surface-base))]`,
   sourceCollectionStepIdle:
-    "sourceCollectionStepIdle min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)] [--source-step-color:var(--fg-tertiary)] border-[color-mix(in_srgb,var(--fg-tertiary)_26%,var(--vui-border-subtle))] bg-[var(--vui-surface-base)]",
+    "sourceCollectionStepIdle min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)] [--source-step-color:var(--fg-tertiary)] border-[color-mix(in_srgb,var(--fg-tertiary)_var(--vui-alpha-tint-strong),var(--vui-border-subtle))] bg-[var(--vui-surface-base)]",
   sourceCollectionStepPending:
-    "sourceCollectionStepPending min-w-0 [--source-step-color:var(--state-warning)] border-[color-mix(in_srgb,var(--state-warning)_48%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_8%,var(--vui-surface-base))]",
-  sourceCollectionUnavailable: `sourceCollectionUnavailable min-w-0 !grid gap-2 content-center justify-items-start p-[18px] ${vuiFlatPanelClass} [&_strong]:text-[var(--fg-primary)] [&_span]:text-[var(--fg-muted)] [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[var(--radius-control)] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]`,
+    "sourceCollectionStepPending min-w-0 [--source-step-color:var(--state-warning)] border-[color-mix(in_srgb,var(--state-warning)_48%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_var(--vui-alpha-wash-faint),var(--vui-surface-base))]",
+  sourceCollectionUnavailable: `sourceCollectionUnavailable min-w-0 !grid gap-2 content-center justify-items-start p-[18px] ${vuiFlatPanelClass} [&_strong]:text-[var(--fg-primary)] [&_span]:text-[var(--fg-muted)] [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),var(--vui-surface-panel))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[var(--radius-control)] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),var(--vui-surface-panel))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]`,
   teamContextActions:
     "teamContextActions min-w-0 !flex flex-nowrap items-center justify-end gap-1.5",
   teamContextBar:

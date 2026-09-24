@@ -10,9 +10,9 @@ import {
 
 const styles = {
   knowledgeCompletionFlowActions:
-    "knowledgeCompletionFlowActions min-w-0 flex flex-wrap items-center gap-1.5 !flex flex-wrap items-center gap-1.5 min-w-0 mt-auto [&_a]:inline-flex [&_a]:w-fit [&_a]:max-w-full [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:w-fit [&_[data-vui=native-button]]:max-w-full [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[var(--radius-control)] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]",
+    "knowledgeCompletionFlowActions min-w-0 flex flex-wrap items-center gap-1.5 !flex flex-wrap items-center gap-1.5 min-w-0 mt-auto [&_a]:inline-flex [&_a]:w-fit [&_a]:max-w-full [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),var(--vui-surface-panel))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:w-fit [&_[data-vui=native-button]]:max-w-full [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[var(--radius-control)] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),var(--vui-surface-panel))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]",
   knowledgeCompletionFlowError:
-    "knowledgeCompletionFlowError min-w-0 break-words rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] px-2 py-1 [font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--state-error)]",
+    "knowledgeCompletionFlowError min-w-0 break-words rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)] bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash),transparent)] px-2 py-1 [font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--state-error)]",
   knowledgeCompletionFlowHeader:
     "knowledgeCompletionFlowHeader min-w-0 !grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 max-[680px]:grid-cols-[minmax(0,1fr)] [&>div]:grid [&>div]:min-w-0 [&>div]:gap-1 [&_span]:min-w-0 [&_span]:break-words [&_span]:[font-size:var(--vui-font-sm)] [&_span]:leading-[var(--vui-line-readable)]",
   knowledgeCompletionFlowNode: `knowledgeCompletionFlowNode min-w-0 grid min-h-[164px] grid-rows-[auto_minmax(0,1fr)_auto] gap-2 ${vuiOpaqueRowClass} p-2`,
@@ -62,7 +62,7 @@ const styles = {
   researchLoopChoiceTabsTrigger:
     "researchLoopChoiceTabsTrigger min-w-0 max-w-full !h-auto !min-h-[var(--vui-control-height-sm)] !whitespace-normal break-words px-2 py-1 text-left leading-[var(--vui-line-compact)] " +
     "data-[state=active]:!border-[color:color-mix(in_srgb,var(--accent-cool)_52%,var(--border-soft))] " +
-    "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] " +
+    "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash),var(--vui-surface-row))] " +
     "data-[state=active]:!text-[var(--fg-primary)]",
   researchLoopDecisionForm:
     "researchLoopDecisionForm min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
@@ -76,7 +76,7 @@ const styles = {
   researchLoopStats:
     "researchLoopStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   researchLoopStatusPills:
-    "researchLoopStatusPills min-w-0 flex flex-wrap items-center justify-end gap-1.5 max-[760px]:justify-start [&_span]:inline-flex [&_span]:max-w-full [&_span]:items-center [&_span]:rounded-full [&_span]:border [&_span]:border-[color:color-mix(in_srgb,var(--accent-cool)_30%,var(--border-soft))] [&_span]:bg-[var(--vui-surface-row)] [&_span]:px-2 [&_span]:py-0.5 [&_span]:break-all [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-[var(--vui-line-compact)]",
+    "researchLoopStatusPills min-w-0 flex flex-wrap items-center justify-end gap-1.5 max-[760px]:justify-start [&_span]:inline-flex [&_span]:max-w-full [&_span]:items-center [&_span]:rounded-full [&_span]:border [&_span]:border-[color:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),var(--border-soft))] [&_span]:bg-[var(--vui-surface-row)] [&_span]:px-2 [&_span]:py-0.5 [&_span]:break-all [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-[var(--vui-line-compact)]",
   researchLoopTemplateBar:
     "researchLoopTemplateBar min-w-0 flex flex-wrap items-center gap-1.5",
   researchLoopTemplateSummary: `researchLoopTemplateSummary min-w-0 ${vuiFlatPanelClass} p-2`,
@@ -84,96 +84,96 @@ const styles = {
     "researchLoopWide min-w-0",
   researchStageActionPanel: `researchStageActionPanel min-w-0 ${vuiFlatPanelClass} p-2 flex flex-wrap items-center gap-1.5`,
   researchStageActions:
-    "researchStageActions min-w-0 mt-auto flex flex-wrap items-center gap-2 border-t border-[var(--vui-border-subtle)] pt-2 [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-8 [&_a]:px-2.5 [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-8 [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[var(--radius-control)] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]",
+    "researchStageActions min-w-0 mt-auto flex flex-wrap items-center gap-2 border-t border-[var(--vui-border-subtle)] pt-2 [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-8 [&_a]:px-2.5 [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),var(--vui-surface-panel))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-8 [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[var(--radius-control)] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),var(--vui-surface-panel))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]",
   researchStageAgentActions:
-    "researchStageAgentActions min-w-0 flex flex-wrap items-center gap-1.5 text-[var(--fg-secondary)] !flex min-w-0 items-center justify-between gap-2 [&_a]:inline-flex [&_a]:shrink-0 [&_a]:min-h-[28px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-[5px] [&_a]:px-[9px] [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_28%,var(--border-soft))] [&_a]:!bg-[var(--vui-surface-row)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap",
-  researchStageAgentCard: `researchStageAgentCard min-w-0 ${vuiOpaqueRowClass} p-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] text-[var(--accent-cool)]`,
+    "researchStageAgentActions min-w-0 flex flex-wrap items-center gap-1.5 text-[var(--fg-secondary)] !flex min-w-0 items-center justify-between gap-2 [&_a]:inline-flex [&_a]:shrink-0 [&_a]:min-h-[28px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-[5px] [&_a]:px-[9px] [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),var(--border-soft))] [&_a]:!bg-[var(--vui-surface-row)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap",
+  researchStageAgentCard: `researchStageAgentCard min-w-0 ${vuiOpaqueRowClass} p-1.5 border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),transparent)] text-[var(--accent-cool)]`,
   researchStageAgentCard_acquire:
-    "researchStageAgentCard_acquire min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] text-[var(--accent-cool)]",
+    "researchStageAgentCard_acquire min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),transparent)] text-[var(--accent-cool)]",
   researchStageAgentCard_active:
-    "researchStageAgentCard_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] text-[var(--accent-cool)]",
+    "researchStageAgentCard_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),transparent)] text-[var(--accent-cool)]",
   researchStageAgentCard_blocked:
-    "researchStageAgentCard_blocked min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] text-[var(--state-error)]",
+    "researchStageAgentCard_blocked min-w-0 border-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)] text-[var(--state-error)]",
   researchStageAgentCard_cache:
-    "researchStageAgentCard_cache min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] text-[var(--accent-cool)]",
+    "researchStageAgentCard_cache min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),transparent)] text-[var(--accent-cool)]",
   researchStageAgentCard_danger:
-    "researchStageAgentCard_danger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] text-[var(--state-error)]",
+    "researchStageAgentCard_danger min-w-0 border-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)] text-[var(--state-error)]",
   researchStageAgentCard_done:
-    "researchStageAgentCard_done min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] text-[var(--state-success)]",
+    "researchStageAgentCard_done min-w-0 border-[color-mix(in_srgb,var(--state-success)_var(--vui-alpha-line),transparent)] text-[var(--state-success)]",
   researchStageAgentCard_error:
-    "researchStageAgentCard_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] text-[var(--state-error)]",
+    "researchStageAgentCard_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)] text-[var(--state-error)]",
   researchStageAgentCard_extract:
-    "researchStageAgentCard_extract min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] text-[var(--accent-cool)]",
+    "researchStageAgentCard_extract min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),transparent)] text-[var(--accent-cool)]",
   researchStageAgentCard_failed:
-    "researchStageAgentCard_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] text-[var(--state-error)]",
+    "researchStageAgentCard_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)] text-[var(--state-error)]",
   researchStageAgentCard_idle:
     "researchStageAgentCard_idle min-w-0 border-[var(--vui-border-subtle)] text-[var(--fg-tertiary)]",
   researchStageAgentCard_info:
-    "researchStageAgentCard_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] text-[var(--accent-cool)]",
+    "researchStageAgentCard_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),transparent)] text-[var(--accent-cool)]",
   researchStageAgentCard_mental:
-    "researchStageAgentCard_mental min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] text-[var(--accent-cool)]",
+    "researchStageAgentCard_mental min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),transparent)] text-[var(--accent-cool)]",
   researchStageAgentCard_missing:
-    "researchStageAgentCard_missing min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] text-[var(--state-warning)]",
+    "researchStageAgentCard_missing min-w-0 border-[color-mix(in_srgb,var(--state-warning)_var(--vui-alpha-line),transparent)] text-[var(--state-warning)]",
   researchStageAgentCard_muted:
     "researchStageAgentCard_muted min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] border-[var(--vui-border-subtle)]",
   researchStageAgentCard_neutral:
     "researchStageAgentCard_neutral min-w-0 border-[var(--vui-border-subtle)] text-[var(--fg-secondary)]",
   researchStageAgentCard_ok:
-    "researchStageAgentCard_ok min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] text-[var(--state-success)]",
+    "researchStageAgentCard_ok min-w-0 border-[color-mix(in_srgb,var(--state-success)_var(--vui-alpha-line),transparent)] text-[var(--state-success)]",
   researchStageAgentCard_pending:
-    "researchStageAgentCard_pending min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] text-[var(--state-warning)]",
+    "researchStageAgentCard_pending min-w-0 border-[color-mix(in_srgb,var(--state-warning)_var(--vui-alpha-line),transparent)] text-[var(--state-warning)]",
   researchStageAgentCard_plan:
-    "researchStageAgentCard_plan min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] text-[var(--accent-cool)]",
+    "researchStageAgentCard_plan min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),transparent)] text-[var(--accent-cool)]",
   researchStageAgentCard_quality:
-    "researchStageAgentCard_quality min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] text-[var(--accent-cool)]",
+    "researchStageAgentCard_quality min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),transparent)] text-[var(--accent-cool)]",
   researchStageAgentCard_ready:
-    "researchStageAgentCard_ready min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] text-[var(--state-success)]",
+    "researchStageAgentCard_ready min-w-0 border-[color-mix(in_srgb,var(--state-success)_var(--vui-alpha-line),transparent)] text-[var(--state-success)]",
   researchStageAgentCard_running:
-    "researchStageAgentCard_running min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] text-[var(--accent-cool)]",
+    "researchStageAgentCard_running min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),transparent)] text-[var(--accent-cool)]",
   researchStageAgentCard_search:
-    "researchStageAgentCard_search min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] text-[var(--accent-cool)]",
+    "researchStageAgentCard_search min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),transparent)] text-[var(--accent-cool)]",
   researchStageAgentCard_status:
-    "researchStageAgentCard_status min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] text-[var(--accent-cool)]",
+    "researchStageAgentCard_status min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),transparent)] text-[var(--accent-cool)]",
   researchStageAgentCard_storage:
-    "researchStageAgentCard_storage min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] text-[var(--accent-cool)]",
+    "researchStageAgentCard_storage min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),transparent)] text-[var(--accent-cool)]",
   researchStageAgentCard_success:
-    "researchStageAgentCard_success min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] text-[var(--state-success)]",
+    "researchStageAgentCard_success min-w-0 border-[color-mix(in_srgb,var(--state-success)_var(--vui-alpha-line),transparent)] text-[var(--state-success)]",
   researchStageAgentCard_thought:
-    "researchStageAgentCard_thought min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] text-[var(--accent-cool)]",
+    "researchStageAgentCard_thought min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),transparent)] text-[var(--accent-cool)]",
   researchStageAgentCard_warn:
-    "researchStageAgentCard_warn min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] text-[var(--state-warning)]",
+    "researchStageAgentCard_warn min-w-0 border-[color-mix(in_srgb,var(--state-warning)_var(--vui-alpha-line),transparent)] text-[var(--state-warning)]",
   researchStageAgentCard_warning:
-    "researchStageAgentCard_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] text-[var(--state-warning)]",
+    "researchStageAgentCard_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_var(--vui-alpha-line),transparent)] text-[var(--state-warning)]",
   researchStageAgentGrid:
     "researchStageAgentGrid min-w-0 grid gap-2 text-[var(--fg-secondary)] !grid grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-2",
   researchStageAgentMeta:
     "researchStageAgentMeta min-w-0 flex flex-wrap items-center gap-1.5 text-[var(--fg-secondary)]",
-  researchStageAgentPanel: `researchStageAgentPanel min-w-0 ${vuiOpaqueRowClass} p-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] text-[var(--accent-cool)]`,
+  researchStageAgentPanel: `researchStageAgentPanel min-w-0 ${vuiOpaqueRowClass} p-1.5 border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),transparent)] text-[var(--accent-cool)]`,
   researchStageAgentPanelCompact:
-    "researchStageAgentPanelCompact min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] text-[var(--accent-cool)]",
-  researchStageAgentPanelHeader: `researchStageAgentPanelHeader min-w-0 ${vuiOpaqueRowClass} p-1.5 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] text-[var(--accent-cool)] !flex min-w-0 items-center justify-between gap-2.5 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&>div_strong]:truncate [&>div_strong]:text-[var(--fg-primary)] [&>div_span]:truncate [&>div_span]:text-[var(--fg-muted)] [&>div_span]:font-[760] [&_a]:inline-flex [&_a]:shrink-0 [&_a]:min-h-[28px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-[5px] [&_a]:px-[9px] [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_28%,var(--border-soft))] [&_a]:!bg-[var(--vui-surface-row)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap`,
+    "researchStageAgentPanelCompact min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),transparent)] text-[var(--accent-cool)]",
+  researchStageAgentPanelHeader: `researchStageAgentPanelHeader min-w-0 ${vuiOpaqueRowClass} p-1.5 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),transparent)] text-[var(--accent-cool)] !flex min-w-0 items-center justify-between gap-2.5 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&>div_strong]:truncate [&>div_strong]:text-[var(--fg-primary)] [&>div_span]:truncate [&>div_span]:text-[var(--fg-muted)] [&>div_span]:font-[760] [&_a]:inline-flex [&_a]:shrink-0 [&_a]:min-h-[28px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-[5px] [&_a]:px-[9px] [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),var(--border-soft))] [&_a]:!bg-[var(--vui-surface-row)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap`,
   researchStageAgentRole:
     "researchStageAgentRole min-w-0 text-[var(--fg-primary)]",
   researchStageAgentSummary:
     "researchStageAgentSummary min-w-0 inline-flex w-fit max-w-full items-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--fg-secondary)]",
   researchStageAgentSummaryBlocked:
-    "researchStageAgentSummaryBlocked min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] text-[var(--state-error)]",
+    "researchStageAgentSummaryBlocked min-w-0 border-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)] text-[var(--state-error)]",
   researchStageAgentSummaryMissing:
-    "researchStageAgentSummaryMissing min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] text-[var(--state-warning)]",
+    "researchStageAgentSummaryMissing min-w-0 border-[color-mix(in_srgb,var(--state-warning)_var(--vui-alpha-line),transparent)] text-[var(--state-warning)]",
   researchStageAgentSummaryReady:
-    "researchStageAgentSummaryReady min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] text-[var(--state-success)]",
+    "researchStageAgentSummaryReady min-w-0 border-[color-mix(in_srgb,var(--state-success)_var(--vui-alpha-line),transparent)] text-[var(--state-success)]",
   researchStageAgentSummaryLoading:
     "researchStageAgentSummaryLoading min-w-0 border-[var(--vui-border-subtle)] text-[var(--fg-muted)]",
   researchStageBoundaryPanel: `researchStageBoundaryPanel min-w-0 ${vuiFlatPanelClass} p-2`,
   researchStageCard:
     "researchStageCard min-w-0 flex h-full flex-col gap-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-3 shadow-[var(--vui-elevation-1)]",
   researchStageCardActive:
-    `researchStageCardActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_44%,var(--vui-border-subtle))] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-cool)_14%,transparent),var(--vui-elevation-1)] ${vuiStateSelectedRowFillClass}`,
+    `researchStageCardActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line-strong),var(--vui-border-subtle))] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-strong),transparent),var(--vui-elevation-1)] ${vuiStateSelectedRowFillClass}`,
   // Overview: progress only — no competing start CTAs; quieter metrics density.
   researchStageCardReadonly:
     "researchStageCardReadonly min-w-0 [&_.researchStageCardMetrics]:opacity-90 [&_.researchStageActions]:mt-auto [&_.researchStageActions]:border-t [&_.researchStageActions]:border-[var(--vui-border-subtle)] [&_.researchStageActions]:pt-2.5",
   researchStageCardDone:
-    "researchStageCardDone min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,var(--vui-border-subtle))] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--state-success)_8%,var(--vui-surface-row)),var(--vui-surface-row)_55%)]",
+    "researchStageCardDone min-w-0 border-[color-mix(in_srgb,var(--state-success)_var(--vui-alpha-line),var(--vui-border-subtle))] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--state-success)_var(--vui-alpha-wash-faint),var(--vui-surface-row)),var(--vui-surface-row)_55%)]",
   researchExperimentMethodReadonly:
     "researchExperimentMethodReadonly min-w-0 flex flex-wrap items-center gap-2 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1.5 [font-size:var(--vui-type-caption-size)] text-[var(--fg-secondary)] [&>strong]:font-[820] [&>strong]:text-[var(--fg-primary)]",
   researchStageViewLink:
@@ -198,7 +198,7 @@ const styles = {
   researchStageGrid:
     "researchStageGrid min-w-0 grid items-stretch gap-3 grid-cols-[repeat(auto-fit,minmax(280px,1fr))]",
   researchExperimentMethodQuickSelect:
-    "researchExperimentMethodQuickSelect min-w-0 grid gap-2 rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] bg-[color:color-mix(in_srgb,var(--accent-cool)_5%,var(--vui-surface-panel))] p-2 [&>label]:grid [&>label]:min-w-0 [&>label]:gap-1 [&>label>span]:[font-size:var(--vui-font-xs)] [&>label>span]:font-semibold [&>label>span]:text-[var(--fg-secondary)] [&_select]:w-full [&>div]:flex [&>div]:min-w-0 [&>div]:flex-wrap [&>div]:items-center [&>div]:gap-2 [&>div>span]:[font-size:var(--vui-font-xs)] [&>div>a]:ml-auto [&>div>a]:inline-flex [&>div>a]:min-h-7 [&>div>a]:items-center [&>div>a]:gap-1 [&>div>a]:rounded-[var(--radius-control)] [&>div>a]:border [&>div>a]:border-[var(--vui-border-subtle)] [&>div>a]:px-2 [&>div>a]:[font-size:var(--vui-font-xs)] [&>div>a]:font-semibold [&>div>a]:text-[var(--fg-primary)]",
+    "researchExperimentMethodQuickSelect min-w-0 grid gap-2 rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint),var(--vui-border-subtle))] bg-[color:color-mix(in_srgb,var(--accent-cool)_5%,var(--vui-surface-panel))] p-2 [&>label]:grid [&>label]:min-w-0 [&>label]:gap-1 [&>label>span]:[font-size:var(--vui-font-xs)] [&>label>span]:font-semibold [&>label>span]:text-[var(--fg-secondary)] [&_select]:w-full [&>div]:flex [&>div]:min-w-0 [&>div]:flex-wrap [&>div]:items-center [&>div]:gap-2 [&>div>span]:[font-size:var(--vui-font-xs)] [&>div>a]:ml-auto [&>div>a]:inline-flex [&>div>a]:min-h-7 [&>div>a]:items-center [&>div>a]:gap-1 [&>div>a]:rounded-[var(--radius-control)] [&>div>a]:border [&>div>a]:border-[var(--vui-border-subtle)] [&>div>a]:px-2 [&>div>a]:[font-size:var(--vui-font-xs)] [&>div>a]:font-semibold [&>div>a]:text-[var(--fg-primary)]",
   researchExperimentMethodReady:
     "text-[var(--state-success)]",
   researchExperimentMethodPending:
@@ -216,19 +216,19 @@ const styles = {
   researchStageHeaderActions:
     "researchStageHeaderActions min-w-0 flex flex-wrap items-center justify-end gap-1.5 [&_a]:inline-flex [&_a]:min-h-8 [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[var(--vui-border-subtle)] [&_a]:bg-[var(--vui-control-muted)] [&_a]:px-2.5 [&_a]:font-[760] [&_a]:text-[var(--fg-primary)] [&_a]:no-underline [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:min-h-8 [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:rounded-[var(--radius-control)] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[var(--vui-border-subtle)] [&_[data-vui=native-button]]:bg-[var(--vui-control-muted)] [&_[data-vui=native-button]]:px-2",
   researchStageDegradedNotice:
-    "researchStageDegradedNotice min-w-0 !flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--state-warning)_40%,var(--vui-border-subtle))] bg-[color:color-mix(in_srgb,var(--state-warning)_8%,var(--vui-surface-panel))] px-3 py-2 [font-size:var(--vui-font-sm)] text-[var(--fg-secondary)] [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:min-h-8 [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:rounded-[var(--radius-control)] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[var(--vui-border-subtle)] [&_[data-vui=native-button]]:bg-[var(--vui-surface-panel)] [&_[data-vui=native-button]]:px-2.5",
+    "researchStageDegradedNotice min-w-0 !flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--state-warning)_var(--vui-alpha-line-strong),var(--vui-border-subtle))] bg-[color:color-mix(in_srgb,var(--state-warning)_var(--vui-alpha-wash-faint),var(--vui-surface-panel))] px-3 py-2 [font-size:var(--vui-font-sm)] text-[var(--fg-secondary)] [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:min-h-8 [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:rounded-[var(--radius-control)] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[var(--vui-border-subtle)] [&_[data-vui=native-button]]:bg-[var(--vui-surface-panel)] [&_[data-vui=native-button]]:px-2.5",
   researchStageStatus:
     "researchStageStatus inline-flex w-fit max-w-full items-center rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-0.5 [font-size:var(--vui-font-xs)] font-[760] leading-tight text-[var(--fg-secondary)]",
   researchStageStatusActive:
-    "researchStageStatusActive border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] bg-[color:color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-control-muted))] text-[var(--accent-cool)]",
+    "researchStageStatusActive border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line-strong),var(--vui-border-subtle))] bg-[color:color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-strong),var(--vui-control-muted))] text-[var(--accent-cool)]",
   researchStageStatusPending:
     "researchStageStatusPending text-[var(--fg-muted)]",
   researchStageStatusRecorded:
-    "researchStageStatusRecorded border-[color-mix(in_srgb,var(--state-success)_32%,var(--vui-border-subtle))] text-[var(--state-success)]",
+    "researchStageStatusRecorded border-[color-mix(in_srgb,var(--state-success)_var(--vui-alpha-line),var(--vui-border-subtle))] text-[var(--state-success)]",
   researchStageStatusLoading:
     "researchStageStatusLoading text-[var(--fg-muted)]",
   researchStageStatusUnavailable:
-    "researchStageStatusUnavailable border-[color-mix(in_srgb,var(--state-warning)_42%,var(--vui-border-subtle))] text-[var(--state-warning)]",
+    "researchStageStatusUnavailable border-[color-mix(in_srgb,var(--state-warning)_var(--vui-alpha-line-strong),var(--vui-border-subtle))] text-[var(--state-warning)]",
   researchStageModuleCard: `researchStageModuleCard min-w-0 ${vuiFlatPanelClass} p-2`,
   researchStageModuleGrid:
     "researchStageModuleGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
