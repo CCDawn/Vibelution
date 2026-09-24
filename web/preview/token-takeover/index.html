@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>P0-a 预览 · Tailwind 原生字号槽位接管</title>
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <div class="preview-shell">
+      <header class="preview-header">
+        <h1>P0-a 预览 · Tailwind 原生字号槽位接管</h1>
+        <span class="sub">隔离预览（web/preview/token-takeover）· 未改动任何生产文件 · 分支 codex/zcode-visual-theme-takeover</span>
+      </header>
+
+      <div class="controlbar">
+        <label><input type="checkbox" id="toggle-takeover" /> 全页接管（html[data-takeover]）</label>
+        <label><input type="checkbox" id="toggle-lh" /> 行高配对模式（可选，默认关）</label>
+        <label
+          >主题
+          <select id="theme-select" style="color-scheme: inherit">
+            <option value="dark">dark</option>
+            <option value="light">light</option>
+          </select>
+        </label>
+        <span class="probe-out" id="toggle-state-hint">左列=现状（原生槽位钉死）· 右列=接管后（槽位指向 vui 变量）</span>
+      </div>
+
+      <!-- ===================== A. 控件原语 A/B ===================== -->
+      <section style="display: flex; flex-direction: column; gap: 8px">
+        <h2 class="section-title">A · 控件原语（VButton / VInput 槽位复刻）</h2>
+        <p class="section-desc">
+          复刻 VUI buttonSlots/chipSlots 的真实 class 串，并故意在标签上使用原生字号槽位（text-xs/text-sm）——这正是存量
+          93~101 处写法的代表。两列 class 完全相同，只有右列把原生槽位变量重定向到 vui 阶梯。每行右侧是实时计算值
+          字号 / 行高。
+        </p>
+        <div class="ab-grid">
+          <div class="ab-card is-native native-scope">
+            <span class="ab-tag"><span class="dot"></span>现状 · 原生 Tailwind 默认</span>
+
+            <div class="probe-line">
+              <span class="text-xs text-vui-fg-tertiary" data-probe>工具栏标签 Toolbar label（text-xs）</span>
+              <span class="probe-out"></span>
+            </div>
+            <div class="demo-row">
+              <button
+                type="button"
+                class="inline-flex items-center justify-center gap-1.5 min-h-[var(--vui-control-height-sm)] px-3 rounded-[8px] border border-transparent bg-[var(--fg-primary)] text-[var(--vui-surface-base)] shadow-none text-sm font-medium" data-probe
+              >
+                主操作（text-sm）
+              </button>
+              <span class="probe-out"></span>
+            </div>
+            <div class="probe-line">
+              <span class="text-base text-vui-fg-secondary" data-probe>正文段落示例：检索阶段已完成 42 个来源。（text-base）</span>
+              <span class="probe-out"></span>
+            </div>
+            <div class="probe-line">
+              <span class="text-lg font-semibold text-vui-fg-primary" data-probe>区块标题（text-lg）</span>
+              <span class="probe-out"></span>
+            </div>
+            <div class="probe-line">
+              <span class="text-xl font-semibold text-vui-fg-primary" data-probe>页面标题（text-xl）</span>
+              <span class="probe-out"></span>
+            </div>
+            <div class="probe-line">
+              <input
+                type="text"
+                readonly
+                value="输入框占位（text-sm）"
+                class="w-full min-h-[var(--vui-control-height-sm)] px-3 rounded-[8px] border border-vui-border-subtle bg-[var(--vui-surface-panel)] text-[var(--fg-primary)] shadow-none text-sm" data-probe
+              />
+              <span class="probe-out"></span>
+            </div>
+            <div class="probe-line">
+              <span class="text-vui-sm text-vui-fg-secondary" data-probe>对照：合规写法 text-vui-sm（不受接管影响）</span>
+              <span class="probe-out"></span>
+            </div>
+          </div>
+
+          <div class="ab-card is-takeover takeover-scope">
+            <span class="ab-tag"><span class="dot"></span>接管后 · 原生槽位 → vui 变量</span>
+
+            <div class="probe-line">
+              <span class="text-xs text-vui-fg-tertiary" data-probe>工具栏标签 Toolbar label（text-xs）</span>
+              <span class="probe-out"></span>
+            </div>
+            <div class="demo-row">
+              <button
+                type="button"
+                class="inline-flex items-center justify-center gap-1.5 min-h-[var(--vui-control-height-sm)] px-3 rounded-[8px] border border-transparent bg-[var(--fg-primary)] text-[var(--vui-surface-base)] shadow-none text-sm font-medium" data-probe
+              >
+                主操作（text-sm）
+              </button>
+              <span class="probe-out"></span>
+            </div>
+            <div class="probe-line">
+              <span class="text-base text-vui-fg-secondary" data-probe>正文段落示例：检索阶段已完成 42 个来源。（text-base）</span>
+              <span class="probe-out"></span>
+            </div>
+            <div class="probe-line">
+              <span class="text-lg font-semibold text-vui-fg-primary" data-probe>区块标题（text-lg）</span>
+              <span class="probe-out"></span>
+            </div>
+            <div class="probe-line">
+              <span class="text-xl font-semibold text-vui-fg-primary" data-probe>页面标题（text-xl）</span>
+              <span class="probe-out"></span>
+            </div>
+            <div class="probe-line">
+              <input
+                type="text"
+                readonly
+                value="输入框占位（text-sm）"
+                class="w-full min-h-[var(--vui-control-height-sm)] px-3 rounded-[8px] border border-vui-border-subtle bg-[var(--vui-surface-panel)] text-[var(--fg-primary)] shadow-none text-sm" data-probe
+              />
+              <span class="probe-out"></span>
+            </div>
+            <div class="probe-line">
+              <span class="text-vui-sm text-vui-fg-secondary" data-probe>对照：合规写法 text-vui-sm（不受接管影响）</span>
+              <span class="probe-out"></span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== B. 业务面板片段 A/B ===================== -->
+      <section style="display: flex; flex-direction: column; gap: 8px">
+        <h2 class="section-title">B · 业务面板片段（存量违规复刻）</h2>
+        <p class="section-desc">
+          按 ChallengeMvpProgressPanel 类真实排布复刻：text-lg 标题、text-xs 元信息行、text-sm 数值、text-base 摘要、
+          text-xs chips。左=现状，右=接管后（预期视觉等价，唯一可见差异点是 text-xl 场景，本片段未用到）。
+        </p>
+        <div class="ab-grid">
+          <div class="ab-card is-native native-scope">
+            <span class="ab-tag"><span class="dot"></span>现状</span>
+            <div class="rounded-[10px] border border-vui-border-subtle bg-vui-surface-panel p-3">
+              <div class="flex items-start justify-between gap-2">
+                <h4 class="m-0 text-lg font-semibold text-vui-fg-primary">研究批处理进度</h4>
+                <span class="text-xs text-vui-fg-tertiary">更新于 12:40</span>
+              </div>
+              <p class="mt-1.5 mb-0 text-base text-vui-fg-secondary">
+                批量研究管线已完成 3/7 个课题，证据抽取阶段命中 128 条引文，等待审阅后进入汇总。
+              </p>
+              <div class="mt-2 grid gap-1">
+                <div class="flex items-center justify-between text-xs">
+                  <span class="text-vui-fg-tertiary">检索阶段</span>
+                  <span class="text-vui-fg-secondary">完成 · 42 个来源</span>
+                </div>
+                <div class="flex items-center justify-between text-xs">
+                  <span class="text-vui-fg-tertiary">证据抽取</span>
+                  <span class="text-vui-fg-secondary">进行中 · 128 条引文</span>
+                </div>
+                <div class="flex items-center justify-between text-sm">
+                  <span class="text-vui-fg-tertiary">总耗时</span>
+                  <span class="text-vui-fg-primary font-medium">18 分 22 秒</span>
+                </div>
+              </div>
+              <div class="mt-2 flex flex-wrap gap-1">
+                <span
+                  class="inline-flex max-w-full items-center justify-center gap-1 rounded-[6px] border border-vui-border-subtle bg-vui-control-muted text-vui-fg-secondary shadow-none text-xs px-2 py-0.5"
+                  >检索 42</span
+                >
+                <span
+                  class="inline-flex max-w-full items-center justify-center gap-1 rounded-[6px] border border-vui-border-subtle bg-vui-control-muted text-vui-fg-secondary shadow-none text-xs px-2 py-0.5"
+                  >引文 128</span
+                >
+                <span
+                  class="inline-flex max-w-full items-center justify-center gap-1 rounded-[6px] border border-[color-mix(in_srgb,var(--state-warning)_34%,var(--vui-border-subtle))] text-[var(--state-warning)] bg-vui-control-muted shadow-none text-xs px-2 py-0.5"
+                  >待审阅 2</span
+                >
+              </div>
+            </div>
+          </div>
+
+          <div class="ab-card is-takeover takeover-scope">
+            <span class="ab-tag"><span class="dot"></span>接管后</span>
+            <div class="rounded-[10px] border border-vui-border-subtle bg-vui-surface-panel p-3">
+              <div class="flex items-start justify-between gap-2">
+                <h4 class="m-0 text-lg font-semibold text-vui-fg-primary">研究批处理进度</h4>
+                <span class="text-xs text-vui-fg-tertiary">更新于 12:40</span>
+              </div>
+              <p class="mt-1.5 mb-0 text-base text-vui-fg-secondary">
+                批量研究管线已完成 3/7 个课题，证据抽取阶段命中 128 条引文，等待审阅后进入汇总。
+              </p>
+              <div class="mt-2 grid gap-1">
+                <div class="flex items-center justify-between text-xs">
+                  <span class="text-vui-fg-tertiary">检索阶段</span>
+                  <span class="text-vui-fg-secondary">完成 · 42 个来源</span>
+                </div>
+                <div class="flex items-center justify-between text-xs">
+                  <span class="text-vui-fg-tertiary">证据抽取</span>
+                  <span class="text-vui-fg-secondary">进行中 · 128 条引文</span>
+                </div>
+                <div class="flex items-center justify-between text-sm">
+                  <span class="text-vui-fg-tertiary">总耗时</span>
+                  <span class="text-vui-fg-primary font-medium">18 分 22 秒</span>
+                </div>
+              </div>
+              <div class="mt-2 flex flex-wrap gap-1">
+                <span
+                  class="inline-flex max-w-full items-center justify-center gap-1 rounded-[6px] border border-vui-border-subtle bg-vui-control-muted text-vui-fg-secondary shadow-none text-xs px-2 py-0.5"
+                  >检索 42</span
+                >
+                <span
+                  class="inline-flex max-w-full items-center justify-center gap-1 rounded-[6px] border border-vui-border-subtle bg-vui-control-muted text-vui-fg-secondary shadow-none text-xs px-2 py-0.5"
+                  >引文 128</span
+                >
+                <span
+                  class="inline-flex max-w-full items-center justify-center gap-1 rounded-[6px] border border-[color-mix(in_srgb,var(--state-warning)_34%,var(--vui-border-subtle))] text-[var(--state-warning)] bg-vui-control-muted shadow-none text-xs px-2 py-0.5"
+                  >待审阅 2</span
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== C. 密集 label/chip 布局 A/B ===================== -->
+      <section id="dense-chips" style="display: flex; flex-direction: column; gap: 8px">
+        <h2 class="section-title">C · 密集 label / chip 布局</h2>
+        <p class="section-desc">
+          工具条场景：text-xs chips + text-[10px]/text-[11px] 逃逸微标签混排（逃逸值取自 ComposerContextRing、
+          ChallengeMvpProgressPanel、SelfEvolutionTrack、CompanionChatRails 的真实写法）。注意逃逸类在两列中渲染完全
+          相同——它们不经任何槽位，P0-a 不覆盖；原生槽位（text-xs）则被兜进 vui 阶梯。
+        </p>
+        <div class="ab-grid">
+          <div class="ab-card is-native native-scope">
+            <span class="ab-tag"><span class="dot"></span>现状</span>
+            <div class="flex flex-wrap items-center gap-1.5">
+              <span
+                class="inline-flex max-w-full items-center justify-center gap-1 rounded-[6px] border border-vui-border-subtle bg-vui-control-muted text-vui-fg-secondary shadow-none text-xs px-2 py-0.5"
+                >agent: researcher-07</span
+              >
+              <span
+                class="inline-flex max-w-full items-center justify-center gap-1 rounded-[6px] border border-vui-border-subtle bg-vui-control-muted text-vui-fg-secondary shadow-none text-xs px-2 py-0.5"
+                >session: 3f2a</span
+              >
+              <span
+                class="inline-flex max-w-full items-center justify-center gap-1 rounded-[6px] border border-[color-mix(in_srgb,var(--state-success)_30%,var(--vui-border-subtle))] text-[var(--state-success)] bg-vui-control-muted shadow-none text-xs px-2 py-0.5"
+                >通过 18</span
+              >
+              <span
+                class="inline-flex max-w-full items-center justify-center gap-1 rounded-[6px] border border-[color-mix(in_srgb,var(--state-error)_30%,var(--vui-border-subtle))] text-[var(--state-error)] bg-vui-control-muted shadow-none text-xs px-2 py-0.5"
+                >失败 1</span
+              >
+              <span class="text-[10px] text-vui-fg-tertiary">上下文环 92%（text-[10px]）</span>
+              <span class="text-[11px] text-vui-fg-tertiary">批 4/7（text-[11px]）</span>
+              <span class="text-xs text-vui-fg-secondary">队列深度 3（text-xs）</span>
+              <span class="text-[0.62rem] text-vui-fg-tertiary">RAIL-META（text-[0.62rem]）</span>
+              <span class="text-[0.92rem] text-vui-fg-primary">正文混排样本（text-[0.92rem]）</span>
+            </div>
+            <div class="probe-line">
+              <span class="text-xs text-vui-fg-secondary" data-probe>text-xs 探针</span>
+              <span class="probe-out"></span>
+            </div>
+            <div class="probe-line">
+              <span class="text-[11px] text-vui-fg-secondary" data-probe>text-[11px] 逃逸探针</span>
+              <span class="probe-out"></span>
+            </div>
+          </div>
+
+          <div class="ab-card is-takeover takeover-scope">
+            <span class="ab-tag"><span class="dot"></span>接管后</span>
+            <div class="flex flex-wrap items-center gap-1.5">
+              <span
+                class="inline-flex max-w-full items-center justify-center gap-1 rounded-[6px] border border-vui-border-subtle bg-vui-control-muted text-vui-fg-secondary shadow-none text-xs px-2 py-0.5"
+                >agent: researcher-07</span
+              >
+              <span
+                class="inline-flex max-w-full items-center justify-center gap-1 rounded-[6px] border border-vui-border-subtle bg-vui-control-muted text-vui-fg-secondary shadow-none text-xs px-2 py-0.5"
+                >session: 3f2a</span
+              >
+              <span
+                class="inline-flex max-w-full items-center justify-center gap-1 rounded-[6px] border border-[color-mix(in_srgb,var(--state-success)_30%,var(--vui-border-subtle))] text-[var(--state-success)] bg-vui-control-muted shadow-none text-xs px-2 py-0.5"
+                >通过 18</span
+              >
+              <span
+                class="inline-flex max-w-full items-center justify-center gap-1 rounded-[6px] border border-[color-mix(in_srgb,var(--state-error)_30%,var(--vui-border-subtle))] text-[var(--state-error)] bg-vui-control-muted shadow-none text-xs px-2 py-0.5"
+                >失败 1</span
+              >
+              <span class="text-[10px] text-vui-fg-tertiary">上下文环 92%（text-[10px]）</span>
+              <span class="text-[11px] text-vui-fg-tertiary">批 4/7（text-[11px]）</span>
+              <span class="text-xs text-vui-fg-secondary">队列深度 3（text-xs）</span>
+              <span class="text-[0.62rem] text-vui-fg-tertiary">RAIL-META（text-[0.62rem]）</span>
+              <span class="text-[0.92rem] text-vui-fg-primary">正文混排样本（text-[0.92rem]）</span>
+            </div>
+            <div class="probe-line">
+              <span class="text-xs text-vui-fg-secondary" data-probe>text-xs 探针</span>
+              <span class="probe-out"></span>
+            </div>
+            <div class="probe-line">
+              <span class="text-[11px] text-vui-fg-secondary" data-probe>text-[11px] 逃逸探针</span>
+              <span class="probe-out"></span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== D. 映射表 + 逃逸兜底示意 ===================== -->
+      <section id="mapping-table" style="display: flex; flex-direction: column; gap: 8px">
+        <h2 class="section-title">D · 接管映射表</h2>
+        <div class="ab-card">
+          <table class="map-table">
+            <thead>
+              <tr>
+                <th>原生槽位</th>
+                <th class="mono">原生默认</th>
+                <th class="mono">原生行高</th>
+                <th class="mono">接管目标变量</th>
+                <th class="mono">vui 值</th>
+                <th>位移</th>
+                <th class="mono">存量用量*</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="mono">text-xs</td>
+                <td class="mono">12px</td>
+                <td class="mono">1.3333</td>
+                <td class="mono">var(--vui-font-2xs)</td>
+                <td class="mono">12px</td>
+                <td><span class="badge zero">0 · 零位移</span></td>
+                <td class="mono">45</td>
+              </tr>
+              <tr>
+                <td class="mono">text-sm</td>
+                <td class="mono">14px</td>
+                <td class="mono">1.4286</td>
+                <td class="mono">var(--vui-font-xs)</td>
+                <td class="mono">14px</td>
+                <td><span class="badge zero">0 · 零位移</span></td>
+                <td class="mono">36</td>
+              </tr>
+              <tr>
+                <td class="mono">text-base</td>
+                <td class="mono">16px</td>
+                <td class="mono">1.5</td>
+                <td class="mono">var(--vui-font-md)</td>
+                <td class="mono">16px</td>
+                <td><span class="badge zero">0 · 零位移</span></td>
+                <td class="mono">13</td>
+              </tr>
+              <tr>
+                <td class="mono">text-lg</td>
+                <td class="mono">18px</td>
+                <td class="mono">1.5556</td>
+                <td class="mono">var(--vui-font-lg)</td>
+                <td class="mono">18px</td>
+                <td><span class="badge zero">0 · 零位移</span></td>
+                <td class="mono">4</td>
+              </tr>
+              <tr>
+                <td class="mono">text-xl</td>
+                <td class="mono">20px</td>
+                <td class="mono">1.4</td>
+                <td class="mono">var(--vui-font-title)</td>
+                <td class="mono">19px</td>
+                <td><span class="badge shift">−1px · 最近档</span></td>
+                <td class="mono">3</td>
+              </tr>
+              <tr>
+                <td class="mono">text-2xl</td>
+                <td class="mono">24px</td>
+                <td class="mono">1.3333</td>
+                <td class="mono">不接管</td>
+                <td class="mono">—</td>
+                <td><span class="badge">0 处使用</span></td>
+                <td class="mono">0</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="footer-note" style="margin: 8px 0 0">
+            * 本次精扫 web/src（.ts/.tsx，排除 text-vui-*）：原生槽位共 101 处；审计口径 93 处为不同扫描范围。text-xl
+            备选 --vui-font-xl（22px，+2px）更远被否；「语义对齐」方案 text-sm→--vui-font-sm（15px，+1px）会让 36 处
+            +1px，与 P0 零漂移目标冲突，仅作集成阶段备选。
+          </p>
+        </div>
+
+        <div class="ab-grid">
+          <div class="note-card">
+            <b>「写错也被兜住」正面示意</b><br />
+            接管后，新代码再写 text-sm / text-xs（最常见的历史逃逸写法）会直接落在 vui 阶梯：14px=--vui-font-xs、
+            12px=--vui-font-2xs。右列探针实时显示解析值。text-vui-* 合规写法不受任何影响（两列均 15px）。
+          </div>
+          <div class="note-card">
+            <b>逃逸类（text-[Npx]）不被兜住</b><br />
+            text-[10px] / text-[11px] / text-[0.62rem] / text-[0.92rem] 等任意值不经槽位变量，接管前后渲染完全相同
+            （见 C 区两列探针一致）。存量 228 处 text-[Npx/rem] 需要另行治理（归档/归槽），不在 P0-a 范围。
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== E. 行高与圆角分析 ===================== -->
+      <section style="display: flex; flex-direction: column; gap: 8px">
+        <h2 class="section-title">E · 行高与圆角分析（行高可切换演示，圆角仅分析）</h2>
+        <div class="ab-grid">
+          <div class="note-card">
+            <b>行高分析</b>
+            <ul style="margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px">
+              <li>原生 text-* 自带 v4 配对行高：xs 1.3333 / sm 1.4286 / base 1.5 / lg 1.5556 / xl 1.4。</li>
+              <li>tokens.css 的 --vui-font-* 只定义字号，不带行高；配对行高存在于语义角色层（--vui-type-*-line）。</li>
+              <li>生产 @theme inline 的 text-vui-* 槽位也未配 --line-height → text-vui-* 只改字号，行高继承。</li>
+              <li>
+                <b>默认（size-only）接管：仅重定义 --text-* 字号。原生行高是 ratios（如 sm=calc(1.25/0.875)），会跟随新字号
+                等比缩放 → 四个零位移档行高像素级不变；唯一变档 text-xl 行高 28px→26.6px（比值 1.4 不变）。</b>
+              </li>
+              <li>
+                可选「行高配对」模式（勾选演示）：--text-*--line-height 指向 vui 语义档（xs/sm→tight 1.25、base→readable
+                1.58、lg→snug 1.375、xl→tight 1.25），与语义角色一致，但存量行高变化 −0.08 ~ −0.18（base +0.08），
+                视觉差异明显，需集成阶段单独决策。
+              </li>
+            </ul>
+          </div>
+          <div class="note-card">
+            <b>圆角槽位分析（仅分析，不实施）</b>
+            <ul style="margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px">
+              <li>Tailwind v4：rounded(sm)=4px、md=6px、lg=8px、xl=12px、2xl=16px、3xl=24px；rounded-full 不经变量。</li>
+              <li>vui：--radius-control 8px、--vui-radius-soft 10px、--vui-radius-panel-soft 12px（panel/card 同值）。</li>
+              <li>可零位移接管：rounded-lg→--radius-control（8=8）、rounded-xl→--vui-radius-panel-soft（12=12）。</li>
+              <li>
+                不可零位移接管：rounded(4)/rounded-md(6)/rounded-2xl(16) 无对应 vui 槽位（最近 8/8/12，位移 +4/+2/−4px），
+                建议维持原生或先补 4/6px vui 微圆角档再评估。结论：圆角只宜做「lg/xl 两档部分接管」。
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <p class="footer-note">
+        机制说明：Tailwind v4 将 text-sm 编译为 font-size: var(--text-sm)，槽位默认值发布在 :root；本预览用
+        .takeover-scope（右列钉住）与 html[data-takeover]（全页）在更近的祖先上重定义同一自定义属性，即等价于集成阶段在
+        @theme inline 重定义槽位的效果。cn()（web/src/components/vui/lib/cn.ts）是纯字符串拼接、未用 tailwind-merge，
+        槽位重定义不改变任何 class 合并行为。
+      </p>
+    </div>
+  </body>
+</html>
