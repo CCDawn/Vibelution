@@ -565,8 +565,8 @@ export class ElectronWindowProvider {
     return this.workbenchCloseInFlight;
   }
 
-  instanceWindowStates(): Array<{ instanceId: string; open: boolean; rendererProcessId: number }> {
-    const states: Array<{ instanceId: string; open: boolean; rendererProcessId: number }> = [];
+  instanceWindowStates(): Array<{ instanceId: string; open: boolean; rendererProcessId: number; url: string }> {
+    const states: Array<{ instanceId: string; open: boolean; rendererProcessId: number; url: string }> = [];
     for (const [instanceId, entry] of this.instanceWindows) {
       const window = entry.window;
       if (!window || window.isDestroyed() || !entry.readyUrl) {
@@ -575,6 +575,7 @@ export class ElectronWindowProvider {
       states.push({
         instanceId,
         open: true,
+        url: entry.readyUrl,
         rendererProcessId: window.webContents.getOSProcessId()
       });
     }

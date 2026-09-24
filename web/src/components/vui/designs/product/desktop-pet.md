@@ -28,6 +28,9 @@
 
 ### 非职责
 
+- 启动入口位于工作台设置的功能列表，不再放在托盘菜单。窗口默认关闭；关闭后仍可从设置重新打开。
+- 设置入口复用 VNativeButton，展示真实开关状态、等待、失败和桌面壳版本不支持状态；跨工作区不抢占或关闭已有桌宠。
+
 - 不保存消息、不判断 Turn 权威、不创建 Companion mailbox，也不修改普通 Session admission、worker、projection 或 composer。
 - 不显示用户消息、工具参数、审批 payload 或模型推理正文。
 

@@ -228,6 +228,7 @@ import type { ManagedWindowState } from "./windows/windowProviderTypes.js";
 import { createLauncherWindow } from "./windows/launcherWindow.js";
 import { createWorkbenchWindow } from "./windows/workbenchWindow.js";
 import { createPetWindow, isDesktopPetWindowUrl } from "./windows/petWindow.js";
+import { createPetSettingsControl, petSettingsOrigin } from "./windows/petSettingsControl.js";
 import { PET_WINDOW_HEIGHT, PET_WINDOW_WIDTH } from "./windows/petWindowBounds.js";
 import {
   beginDesktopPetWindowDrag,
@@ -2946,6 +2947,16 @@ ipcMain.handle(IPC_CHANNELS.focusWorkbenchWindow, async (event) => {
   return await windowProvider?.focusWorkbench();
 });
 
+const controlPetFromSettings = createPetSettingsControl(() => windowProvider);
+ipcMain.handle(IPC_CHANNELS.controlDesktopPet, async (event, open: unknown) => {
+  const instances = windowProvider?.instanceWindowStates() ?? [];
+  assertTrustedIpcSender(event, [...trustedIpcOrigins(), ...instances.filter(item => item.open).map(item => new URL(item.url).origin)]);
+  if (event.senderFrame !== event.sender.mainFrame) throw new Error("Blocked pet settings subframe");
+  const identity = identifyDebugWindow(event.sender.getOSProcessId(), windowProvider?.snapshot() ?? null, instances);
+  const origin = petSettingsOrigin(event.senderFrame.url, identity.role);
+  return controlPetFromSettings(origin, open);
+});
+
 ipcMain.handle(IPC_CHANNELS.openConversationFromPet, async (event, rawSessionId: unknown) => {
   assertDesktopPetIpcSender(event);
   const sessionId = String(rawSessionId || "").trim();
@@ -4615,16 +4626,6 @@ app.whenReady()
       openLauncher: () => {
         void windowProvider?.openLauncher().catch((error: unknown) => {
           console.warn(error instanceof Error ? error.message : String(error));
-        });
-      },
-      openPet: () => {
-        const url = currentWorkbenchUrl || launcherBootstrap?.workbenchUrl;
-        if (!url) {
-          console.warn("Desktop pet window unavailable: Workbench URL is not ready.");
-          return;
-        }
-        void windowProvider?.openPet(url).catch((error: unknown) => {
-          console.warn(`Desktop pet window unavailable: ${error instanceof Error ? error.message : String(error)}`);
         });
       },
       listInstances: async () => {
