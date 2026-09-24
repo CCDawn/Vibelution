@@ -34,7 +34,9 @@ MEMORY_OVERVIEW_PERF_STATE_LOCK = Lock()
 MEMORY_OVERVIEW_WAS_SLOW = False
 MEMORY_OVERVIEW_SLOW_MS = 500.0
 MEMORY_OVERVIEW_SUBTIMING_LIMIT = 12
-MEMORY_OVERVIEW_SECTION_CACHE_TTL_SECONDS = 3.0
+# overview 前端轮询周期为 30s；TTL 必须略高于轮询周期，否则每次轮询都视为过期。
+# 过期后仍按 section 签名 (mtime_ns+size) 校验：内容变化自然失效重建，TTL 放大不牺牲正确性。
+MEMORY_OVERVIEW_SECTION_CACHE_TTL_SECONDS = 45.0
 MEMORY_OVERVIEW_SECTION_CACHE_LOCK = Lock()
 MEMORY_OVERVIEW_SECTION_CACHE: dict[str, Any] = {
     "root": "",
@@ -733,7 +735,6 @@ def _timed_base_memory_sections(root: Path, warnings: list[str]) -> tuple[list[d
     timings: list[dict[str, Any]] = []
     for fallback_section_id, load_section in _base_memory_section_specs(root, warnings):
         cached = None
-        signature = _memory_overview_section_signature(root, fallback_section_id)
         with MEMORY_OVERVIEW_SECTION_CACHE_LOCK:
             if MEMORY_OVERVIEW_SECTION_CACHE.get("root") == cache_root:
                 cache_sections = MEMORY_OVERVIEW_SECTION_CACHE.get("sections")
@@ -742,7 +743,13 @@ def _timed_base_memory_sections(root: Path, warnings: list[str]) -> tuple[list[d
                 MEMORY_OVERVIEW_SECTION_CACHE.update({"root": cache_root, "sections": {}})
         cache_expired = not (isinstance(cached, dict) and float(cached.get("expiresAt") or 0.0) > now)
         cached_signature = cached.get("signature") if isinstance(cached, dict) else None
-        signature_matches = bool(signature is not None and cached_signature == signature)
+        # 未过期缓存直接命中（命中本就不看签名）；只有过期需要校验、或无缓存需要重建时
+        # 才计算目录签名，避免每次轮询对全部 session 目录做无谓的全量 stat。
+        signature: str | None = None
+        signature_matches = False
+        if cached is None or cache_expired:
+            signature = _memory_overview_section_signature(root, fallback_section_id)
+            signature_matches = bool(signature is not None and cached_signature == signature)
         if isinstance(cached, dict) and (not cache_expired or signature_matches):
             warnings.extend(copy.deepcopy(cached.get("warnings") or []))
             section = copy.deepcopy(cached.get("section") or {})

@@ -1618,3 +1618,85 @@ def test_memory_overview_perf_event_records_single_recovery_after_slow(tmp_path,
     ]
     assert recorded_events[-1]["level"] == "info"
     assert recorded_events[-1]["outcome"] == "recovered"
+
+
+def _expire_memory_overview_section_cache_for_test() -> None:
+    with memory_service.MEMORY_OVERVIEW_SECTION_CACHE_LOCK:
+        sections = memory_service.MEMORY_OVERVIEW_SECTION_CACHE.get("sections") or {}
+        for entry in sections.values():
+            if isinstance(entry, dict):
+                entry["expiresAt"] = 0.0
+
+
+def test_memory_overview_section_cache_serves_repeated_polls_without_rebuild(tmp_path, monkeypatch):
+    """TTL(45s) 高于前端 30s 轮询周期：TTL 内重复请求整体命中缓存，不重建、不做签名 stat。"""
+
+    prompt_dir = tmp_path / "workspace" / "prompts"
+    prompt_dir.mkdir(parents=True)
+    (prompt_dir / "STATE_MEMORY.md").write_text("Poll cache probe.", encoding="utf-8")
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
+    memory_service._clear_memory_overview_section_cache()
+
+    load_calls = {"count": 0}
+    real_prompt_section = memory_service._prompt_memory_section
+
+    def counting_prompt_section(*args, **kwargs):
+        load_calls["count"] += 1
+        return real_prompt_section(*args, **kwargs)
+
+    monkeypatch.setattr(memory_service, "_prompt_memory_section", counting_prompt_section)
+
+    memory_service.get_memory_overview()
+    assert load_calls["count"] == 1
+
+    signature_calls = {"count": 0}
+    real_signature = memory_service._memory_overview_section_signature
+
+    def counting_signature(root, section_id):
+        signature_calls["count"] += 1
+        return real_signature(root, section_id)
+
+    monkeypatch.setattr(memory_service, "_memory_overview_section_signature", counting_signature)
+
+    memory_service.get_memory_overview()
+
+    assert load_calls["count"] == 1
+    assert signature_calls["count"] == 0
+
+
+def test_memory_overview_section_cache_rebuilds_only_after_signature_changes(tmp_path, monkeypatch):
+    """过期但签名未变继续用缓存；签名（mtime/size）变化后自然失效重建最新内容。"""
+
+    prompt_dir = tmp_path / "workspace" / "prompts"
+    prompt_dir.mkdir(parents=True)
+    (prompt_dir / "STATE_MEMORY.md").write_text("Signature probe before.", encoding="utf-8")
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
+    memory_service._clear_memory_overview_section_cache()
+
+    load_calls = {"count": 0}
+    real_prompt_section = memory_service._prompt_memory_section
+
+    def counting_prompt_section(*args, **kwargs):
+        load_calls["count"] += 1
+        return real_prompt_section(*args, **kwargs)
+
+    monkeypatch.setattr(memory_service, "_prompt_memory_section", counting_prompt_section)
+
+    first = memory_service.get_memory_overview()
+    assert load_calls["count"] == 1
+
+    # 过期但底层文件未变：按 section 签名校验后继续命中缓存
+    _expire_memory_overview_section_cache_for_test()
+    memory_service.get_memory_overview()
+    assert load_calls["count"] == 1
+
+    # 底层文件变化（size/mtime 变化）：签名失效，重建出最新内容
+    (prompt_dir / "STATE_MEMORY.md").write_text("Signature probe after rewrite.", encoding="utf-8")
+    second = memory_service.get_memory_overview()
+
+    assert load_calls["count"] == 2
+    sections = {section["id"]: section for section in second["sections"]}
+    state_item = next(
+        item for item in sections["prompt-memory"]["items"] if item["title"] == "STATE_MEMORY.md"
+    )
+    assert state_item["content"] == "Signature probe after rewrite."
