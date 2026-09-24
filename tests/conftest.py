@@ -13,6 +13,9 @@ import os
 import sys
 import ast
 import tempfile
+import threading
+import time
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
@@ -50,6 +53,11 @@ def pytest_sessionstart(session):
         session._web_dist_placeholder = acquire_web_dist_placeholder(PROJECT_ROOT)
     except Exception:  # noqa: BLE001 - 测试基础设施不得阻断收集
         session._web_dist_placeholder = None
+    # Hang diagnosis baseline (see the block comment further down).
+    try:
+        session._baseline_non_daemon_threads = _alive_non_daemon_thread_count()
+    except Exception:  # noqa: BLE001 - diagnostics must never block the session
+        session._baseline_non_daemon_threads = None
 
 
 def pytest_sessionfinish(session, exitstatus):
@@ -61,6 +69,78 @@ def pytest_sessionfinish(session, exitstatus):
             release_web_dist_placeholder(placeholder)
         except Exception:  # noqa: BLE001
             pass
+    # Hang diagnosis: report leaked non-daemon threads (see block comment below).
+    try:
+        baseline = getattr(session, "_baseline_non_daemon_threads", None)
+        if baseline is not None:
+            current = _alive_non_daemon_thread_count()
+            if current > baseline:
+                report_path = _write_hang_thread_report(session, baseline, current)
+                print(
+                    f"[hang-diag] non-daemon threads {baseline} -> {current} at session finish; "
+                    f"stacks written to {report_path}"
+                )
+    except Exception:  # noqa: BLE001 - diagnostics must never affect the exit path
+        pass
+
+
+# ============================================================================
+# Hang diagnosis — detect non-daemon thread leaks that keep xdist workers alive
+# ============================================================================
+# Module-level ThreadPoolExecutors with untimed waits (e.g. condition.wait()
+# without a timeout) strand non-daemon threads inside xdist workers; such a
+# worker never exits and its join blocks the whole run. Record the live
+# non-daemon thread count at session start; when session finish exceeds that
+# baseline, dump the full stack of every live thread next to the basetemp for
+# post-mortem. Best effort only: every step is wrapped and can never affect
+# the normal exit path.
+
+
+def _alive_non_daemon_thread_count() -> int:
+    """Count live non-daemon threads; leaked executor threads show up here."""
+    return sum(1 for thread in threading.enumerate() if thread.is_alive() and not thread.daemon)
+
+
+def _hang_report_basetemp(session) -> Path:
+    """Best-effort basetemp resolution for the hang report."""
+    config = getattr(session, "config", None)
+    try:
+        factory = getattr(config, "_tmp_path_factory", None)
+        if factory is not None:
+            return Path(factory.getbasetemp())
+    except Exception:  # noqa: BLE001
+        pass
+    configured = getattr(getattr(config, "option", None), "basetemp", None)
+    if configured:
+        return Path(str(configured))
+    return Path(os.environ.get("PYTEST_DEBUG_TEMPROOT") or tempfile.gettempdir())
+
+
+def _write_hang_thread_report(session, baseline: int, current: int) -> Path:
+    """Dump the full stack of every live thread under basetemp."""
+    frames = dict(sys._current_frames())
+    sections = [
+        f"hang diagnosis at {time.strftime('%Y-%m-%d %H:%M:%S')} "
+        f"(pid {os.getpid()}, sessionfinish)",
+        f"non-daemon threads: baseline={baseline} current={current}",
+        "",
+    ]
+    for thread in threading.enumerate():
+        if not thread.is_alive():
+            continue
+        sections.append(f"Thread name={thread.name!r} daemon={thread.daemon} ident={thread.ident}")
+        frame = frames.get(thread.ident)
+        if frame is None:
+            sections.append("    <no current frame>")
+        else:
+            sections.append("".join(traceback.format_stack(frame)).rstrip("\n"))
+        sections.append("")
+    report_path = _hang_report_basetemp(session) / (
+        f"hang_threads_{time.strftime('%Y%m%d_%H%M%S')}_{os.getpid()}.txt"
+    )
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("\n".join(sections) + "\n", encoding="utf-8")
+    return report_path
 
 
 # Storage bootstrap modules resolve checkout-owned mutable state (runtime
