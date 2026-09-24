@@ -24,6 +24,7 @@ if (rebuild.status !== 0) {
 }
 
 const built = join(electronRoot, "native", "workbench-job", "build", "Release", "workbench_job.node");
-const outputDir = join(electronRoot, "dist", "native");
+const outputRoot = String(process.env.VIBELUTION_ELECTRON_DIST || "").trim() || join(electronRoot, "dist");
+const outputDir = join(outputRoot, "native");
 mkdirSync(outputDir, { recursive: true });
 copyFileSync(built, join(outputDir, "workbench_job.node"));

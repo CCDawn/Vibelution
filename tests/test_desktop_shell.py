@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import types
 from pathlib import Path
+
+import pytest
 
 from core.infrastructure.branch_workspace import (
     BranchWorkspaceError,
@@ -365,27 +368,60 @@ def test_branch_launch_does_not_consume_live_shell_rebuild_signal(tmp_path, monk
 def test_ensure_unpackaged_electron_rebuilds_stale_bundle(tmp_path, monkeypatch):
     tree = "a" * 40
     _write_unpackaged_electron(tmp_path, tree_hash="b" * 40, main_mtime=2_000_000_000)
-    ran: dict[str, object] = {}
+    calls: list[list[str]] = []
 
     def fake_run(command, **kwargs):
-        ran["command"] = command
-        ran["kwargs"] = kwargs
+        calls.append([str(part) for part in command])
+        stage = Path(kwargs.get("env", {}).get("VIBELUTION_ELECTRON_DIST", ""))
+        if "--outDir" in command:
+            out = Path(command[command.index("--outDir") + 1])
+            out.mkdir(parents=True, exist_ok=True)
+            main_js = out / "main.js"
+            main_js.write_text("new-main\n", encoding="utf-8")
+            os.utime(main_js, (2_000_000_100, 2_000_000_100))
+        if command[-1].endswith("preload.cjs") or "--outfile" in command:
+            outfile = Path(command[command.index("--outfile") + 1])
+            outfile.parent.mkdir(parents=True, exist_ok=True)
+            outfile.write_text("preload\n", encoding="utf-8")
+        if str(command[-1]).endswith("buildWorkbenchJob.js"):
+            native = stage / "native"
+            native.mkdir(parents=True, exist_ok=True)
+            (native / "workbench_job.node").write_bytes(b"node")
         return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
     monkeypatch.setattr(desktop_shell, "_node_command", lambda: r"C:\nodejs\node.exe")
-    monkeypatch.setattr(
-        desktop_shell,
-        "_npm_cli_script_for_node",
-        lambda command: r"C:\nodejs\node_modules\npm\bin\npm-cli.js",
-    )
     monkeypatch.setattr(desktop_shell.subprocess, "run", fake_run)
     result = desktop_shell.ensure_unpackaged_electron(tmp_path)
-    command = ran["command"]
-    assert command[-2:] == ["run", "build"]
-    assert "package:dir" not in command
+    assert all("package:dir" not in " ".join(command) for command in calls)
+    assert any("--outDir" in command for command in calls)
+    assert not (tmp_path / "desktop" / "electron" / ".build-stage").exists()
+    assert desktop_shell.unpackaged_main_js(tmp_path).read_text(encoding="utf-8") == "new-main\n"
     assert result["rebuilt"] is True
     assert result["reason"] == "current"
+
+
+def test_publish_staged_electron_dist_keeps_live_dist_when_rename_is_busy(tmp_path, monkeypatch):
+    electron = tmp_path / "desktop" / "electron"
+    dist = electron / "dist"
+    dist.mkdir(parents=True)
+    (dist / "main.js").write_text("old\n", encoding="utf-8")
+    stage = electron / ".build-stage"
+    stage.mkdir()
+    (stage / "main.js").write_text("new\n", encoding="utf-8")
+
+    def locked(src, dest):
+        if Path(src) == dist:
+            error = PermissionError(13, "in use", str(src))
+            error.winerror = 32
+            raise error
+        os.rename(src, dest)
+
+    monkeypatch.setattr(desktop_shell, "_rename_dir", locked)
+    with pytest.raises(desktop_shell.UnpackagedElectronPublishBusy):
+        desktop_shell._publish_staged_electron_dist(stage, dist)
+    assert (dist / "main.js").read_text(encoding="utf-8") == "old\n"
+    assert not (electron / ".dist-incoming").exists()
 
 
 def test_ensure_latest_launcher_rebuilds_electron_and_frontend(tmp_path, monkeypatch):

@@ -369,6 +369,23 @@ def test_lifecycle_bridge_refuses_product_writes(monkeypatch):
         assert payload["schemaVersion"] == 1
 
 
+def test_json_action_failure_prints_the_exception_message(monkeypatch, capsys):
+    entry = _load_desktop_entry_py()
+    monkeypatch.setattr(entry, "_append_log", lambda *args, **kwargs: None)
+
+    def boom(_args):
+        raise RuntimeError("EBUSY workbench_job.node")
+
+    monkeypatch.setattr(entry, "_ensure_latest_launcher_bridge", boom)
+    code = entry.main(["--action", "ensure-latest-launcher", "--output", "json", "--no-browser"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert code == 1
+    assert payload["ok"] is False
+    assert payload["errorType"] == "RuntimeError"
+    assert "EBUSY workbench_job.node" in payload["message"]
+
+
 def test_direct_lifecycle_actions_return_electron_takeover_error(monkeypatch, capsys):
     entry = _load_desktop_entry_py()
     monkeypatch.setattr(entry, "_append_log", lambda *a, **k: None)

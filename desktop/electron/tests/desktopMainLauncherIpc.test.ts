@@ -262,13 +262,16 @@ describe("Electron main Launcher IPC facade", () => {
     expect(readyBody).toContain("verifyRestartedServingVersion");
     const lifecycleStart = mainSource.indexOf("async function orchestrateLauncherLifecycle");
     const lifecycleBody = mainSource.slice(lifecycleStart, mainSource.indexOf("async function orchestrateBranchInstanceLifecycle"));
-    expect(lifecycleBody.indexOf("await ensureLatestLauncher(")).toBeGreaterThanOrEqual(0);
-    expect(lifecycleBody.indexOf("await ensureLatestLauncher(")).toBeLessThan(
+    expect(lifecycleBody).not.toContain("await ensureLatestLauncher(");
+    expect(lifecycleBody.indexOf("await ensureFrontendRelease(")).toBeGreaterThanOrEqual(0);
+    expect(lifecycleBody.indexOf("await ensureFrontendRelease(")).toBeLessThan(
       lifecycleBody.indexOf("await mainLineBackendIsReusable(paths.workspaceRoot)")
     );
     expect(lifecycleBody).toContain("mainLineBackendIsReachable(paths.workspaceRoot)");
     expect(lifecycleBody).toContain('lifecycleOperation = "restart"');
-    expect(lifecycleBody).toContain("app.relaunch()");
+    expect(lifecycleBody).not.toContain("app.relaunch()");
+    expect(lifecycleBody).toContain("inspectUnpackagedShell");
+    expect(mainSource).toContain("async function restartLauncherToLatestBuild");
     const productStart = mainSource.indexOf("async function startOrFocusWorkbenchFromProductEntryOnShell");
     const productBody = mainSource.slice(productStart, productStart + 1200);
     expect(productBody).toContain('orchestrateLauncherLifecycle("start", { schemaVersion: 1, path: "open" })');

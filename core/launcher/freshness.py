@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from core.infrastructure import git_process
@@ -47,6 +48,8 @@ def get_launcher_freshness() -> dict[str, Any]:
         label = f"Launcher 已是最新 · {running_short}"
     else:
         label = f"Launcher 落后本地 main · {running_short} → {head_short}"
+    shell_stale, shell_reason = _unpackaged_shell_update()
+    update_available = (current is False) or shell_stale
     return {
         "schemaVersion": 1,
         "current": current if known else None,
@@ -58,6 +61,9 @@ def get_launcher_freshness() -> dict[str, Any]:
         "headShort": head_short,
         "headBranch": head.get("branch") or "",
         "startedAt": started.get("startedAt") or "",
+        "shellStale": shell_stale,
+        "shellReason": shell_reason,
+        "updateAvailable": update_available,
     }
 
 
@@ -89,6 +95,36 @@ def _git_identity() -> dict[str, str]:
         }
     except (OSError, TypeError, ValueError):
         return {"commit": "", "branch": ""}
+
+
+def _unpackaged_shell_update() -> tuple[bool, str]:
+    """Report whether the checkout Electron bundle is behind the current sources.
+
+    A missing Electron binary is an environment gap, not a version the user can
+    restart into. Inspection failure must not turn a freshness read into a prompt.
+    """
+
+    try:
+        from core.launcher.desktop_shell import (
+            inspect_unpackaged_electron,
+            unpackaged_electron_executable,
+        )
+        from core.launcher.desktop_shell_owner import read_desktop_shell_owner
+
+        status = inspect_unpackaged_electron(PROJECT_ROOT)
+        reason = str(status.get("reason") or "")
+        if reason == "missing_binary" or not status.get("stale"):
+            return False, reason
+        owner = read_desktop_shell_owner(PROJECT_ROOT) or {}
+        electron_bin = unpackaged_electron_executable(PROJECT_ROOT)
+        owner_exe = str(owner.get("executable") or "").strip()
+        if electron_bin is None or not owner_exe:
+            return False, reason
+        if Path(owner_exe).resolve() != electron_bin.resolve():
+            return False, reason
+        return True, reason
+    except (OSError, RuntimeError, ValueError, TypeError, ImportError):
+        return False, ""
 
 
 def _short_sha(value: str) -> str:

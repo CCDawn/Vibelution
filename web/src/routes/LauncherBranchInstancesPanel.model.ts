@@ -179,6 +179,14 @@ export function acceptLifecycleIntent(
   };
 }
 
+export function summarizeLifecycleFeedback(message: string, limit = 180): string {
+  const line = message.split(/\r?\n/).map((part) => part.trim()).find(Boolean) || "";
+  if (line.length <= limit) {
+    return line;
+  }
+  return `${line.slice(0, Math.max(1, limit - 1))}…`;
+}
+
 export function shouldApplyLifecycleMutationFeedback(
   table: LifecycleIntentTable,
   input: {
