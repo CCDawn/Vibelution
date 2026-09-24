@@ -30,7 +30,7 @@ const styles = {
   workflowGraphNodeWarning:
     "workflowGraphNodeWarning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   workflowGraphNodeFocus:
-    "workflowGraphNodeFocus min-w-0 z-[2] ring-2 ring-[color-mix(in_srgb,var(--accent-cool)_55%,transparent)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-cool)_25%,transparent)]",
+    "workflowGraphNodeFocus min-w-0 z-[2] ring-2 ring-[color-mix(in_srgb,var(--accent-cool)_55%,transparent)] shadow-[var(--vui-shadow-accent)]",
   workflowGraphNodeDim:
     "workflowGraphNodeDim min-w-0 opacity-45",
   workflowGraphSvg:

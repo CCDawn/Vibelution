@@ -231,7 +231,7 @@ const styles: Record<string, string> = {
   teamShellToolbar:
     "teamShellToolbar min-w-0 shrink-0 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-3 py-2",
   teamShellToolbarIdentity:
-    "teamShellToolbarIdentity min-w-0 flex flex-1 items-center gap-3 [&>strong]:text-[14px] [&>strong]:font-[760] [&>strong]:text-[var(--fg-primary)] [&>span]:text-[12px] [&>span]:text-[var(--fg-secondary)]",
+    "teamShellToolbarIdentity min-w-0 flex flex-1 items-center gap-3 [&>strong]:text-vui-xs [&>strong]:font-[760] [&>strong]:text-[var(--fg-primary)] [&>span]:text-vui-2xs [&>span]:text-[var(--fg-secondary)]",
   teamShellToolbarSwitch:
     "teamShellToolbarSwitch min-w-0 flex-1 basis-[12rem] max-w-[22rem] [&_[data-vui=select-shell]]:w-full [&_[data-vui=select-shell]]:min-w-0 [&_[data-vui=select]]:w-full [&_[data-vui=select]]:min-w-0",
   teamShellToolbarActions:
@@ -255,7 +255,7 @@ const styles: Record<string, string> = {
   boardInspectorOverlayBackdrop:
     "boardInspectorOverlayBackdrop fixed inset-0 z-[70] bg-[color-mix(in_srgb,var(--vui-surface-glass)_55%,transparent)] backdrop-blur-[1px]",
   boardInspectorOverlayPanel:
-    "boardInspectorOverlayPanel fixed top-[var(--shell-topbar-height,62px)] right-0 bottom-0 z-[71] flex w-[min(88vw,420px)] min-h-0 flex-col border-l border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] shadow-[var(--vui-shadow-panel)]",
+    "boardInspectorOverlayPanel fixed top-[var(--shell-topbar-height,62px)] right-0 bottom-0 z-[71] flex w-[min(88vw,420px)] min-h-0 flex-col border-l border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] shadow-[var(--vui-elevation-overlay)]",
   boardInspectorOverlayHeader:
     "boardInspectorOverlayHeader flex min-w-0 shrink-0 items-center justify-between gap-2 border-b border-[var(--vui-border-subtle)] px-3 py-2",
   boardInspectorOverlayBody:

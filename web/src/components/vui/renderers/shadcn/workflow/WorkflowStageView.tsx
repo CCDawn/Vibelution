@@ -33,7 +33,7 @@ export function WorkflowStageView(props: ShadcnWorkflowCanvasProps) {
               <span className="text-[var(--fg-secondary)]">{isCurrent ? "当前任务" : node.actorKind === "human" ? "人工确认" : node.actorKind === "agent" ? "Agent 任务" : "系统任务"}</span>
               <span className={cn("rounded-full border px-2 py-0.5", visual.badgeClass)}>{visual.statusLabel}</span>
             </span>
-            <span className="text-[15px] font-semibold leading-6">{node.label}</span>
+            <span className="[font-size:var(--vui-font-canvas-xl)] font-semibold leading-6">{node.label}</span>
             {node.description ? <span className="text-vui-2xs leading-5 text-[var(--fg-secondary)]">{node.description}</span> : null}
             {node.blockedReason ? <span className="text-vui-2xs text-[var(--state-warning)]">{node.blockedReason}</span> : null}
             {node.knowledgeBadge ? <span className="text-vui-2xs text-[var(--fg-secondary)]">知识子任务 {node.knowledgeBadge.total} · 进行中 {node.knowledgeBadge.running} · 待交接 {node.knowledgeBadge.awaitingHandoff}</span> : null}
