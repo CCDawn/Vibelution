@@ -13,6 +13,7 @@ import {
   fetchEvolutionWorkbench,
   fetchEvolutionWorkspaceSnapshot,
   postEvolutionWorktreeRunAction,
+  EVOLUTION_WORKBENCH_POLL_INTERVAL_MS,
 } from "../api/evolution";
 import { queryKeys } from "../api/queryKeys";
 import {
@@ -90,7 +91,8 @@ export function SupervisedReviewRoute() {
   const workbenchQuery = useQuery({
     queryKey: queryKeys.evolutionWorkbench(),
     queryFn: () => fetchEvolutionWorkbench<EvolutionWorkbench>(),
-    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
+    // workbench 全量载荷（含 dataset catalog）低频刷新；高频运行态来自 workspace-snapshot。
+    refetchInterval: resolvePollingInterval(pageVisible, EVOLUTION_WORKBENCH_POLL_INTERVAL_MS),
     refetchIntervalInBackground: false,
   });
   const workspaceSnapshotQuery = useQuery({

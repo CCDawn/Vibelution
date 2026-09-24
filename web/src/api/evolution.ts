@@ -34,6 +34,11 @@ export function fetchEvolutionWorkspaceSnapshot<T = EvolutionWorkspaceSnapshot>(
   return fetchJson<T>("/api/evolution/workspace-snapshot");
 }
 
+// workbench 全量载荷（含 dataset catalog）只在低频轮询中刷新；高频运行态数据
+// 由 workspace-snapshot 内嵌的无 catalog workbench 投影承载，避免 EvolutionRoute 与
+// SupervisedReviewRoute 两个挂载点每 8-15s 各拉一次全量 catalog（触发后端全语料计数 IO）。
+export const EVOLUTION_WORKBENCH_POLL_INTERVAL_MS = 60_000;
+
 export function fetchEvolutionWorkbench<T = EvolutionWorkbench>(): Promise<T> {
   return fetchJson<T>("/api/evolution/workbench");
 }
