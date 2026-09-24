@@ -1656,28 +1656,6 @@ function itemMatchesManageFilter(item: MemoryItem, filterMode: ManageFilterMode)
   return true;
 }
 
-function filterSections(
-  sections: MemorySection[],
-  activeSectionId: string,
-  searchText: string,
-  filterMode: FilterMode,
-  channelFilter: ChannelFilter,
-) {
-  const query = normalizeText(searchText);
-  return sections
-    .filter((section) => !activeSectionId || section.id === activeSectionId)
-    .map((section) => ({
-      ...section,
-      items: section.items.filter(
-        (item) =>
-          itemMatchesFilter(item, filterMode)
-          && itemMatchesChannelFilter(item, channelFilter)
-          && (!query || searchTarget(section, item).includes(query)),
-      ),
-    }))
-    .filter((section) => section.items.length > 0 || !query);
-}
-
 function flattenSections(sections: MemorySection[]): MemoryPair[] {
   return sections.flatMap((section) =>
     section.items.map((item) => ({
@@ -2793,10 +2771,39 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
     ],
     [allPairs, copy],
   );
-  const visibleSectionsBySource = useMemo(
-    () => filterSections(sections, "", searchText, activeFilter, activeChannel),
-    [activeChannel, activeFilter, searchText, sections],
-  );
+  // One traversal derives the three section projections (source metrics, the
+  // visible list, the manage list) instead of three full O(sections×items)
+  // filter scans over the same items.
+  const { visibleSectionsBySource, visibleSections, manageSections } = useMemo(() => {
+    const query = normalizeText(searchText);
+    const bySource: MemorySection[] = [];
+    const visible: MemorySection[] = [];
+    const manage: MemorySection[] = [];
+    for (const section of sections) {
+      const filteredItems = section.items.filter(
+        (item) =>
+          itemMatchesFilter(item, activeFilter)
+          && itemMatchesChannelFilter(item, activeChannel)
+          && (!query || searchTarget(section, item).includes(query)),
+      );
+      // filterSections keeps empty sections only while no search query is active.
+      if (filteredItems.length > 0 || !query) {
+        bySource.push({ ...section, items: filteredItems });
+        if (!activeSectionId || section.id === activeSectionId) {
+          visible.push({ ...section, items: filteredItems });
+        }
+      }
+      if (!activeSectionId || section.id === activeSectionId) {
+        const manageItems = filteredItems.filter(
+          (item) => itemIsManageable(item) && itemMatchesManageFilter(item, activeManageFilter),
+        );
+        if (manageItems.length > 0) {
+          manage.push({ ...section, items: manageItems });
+        }
+      }
+    }
+    return { visibleSectionsBySource: bySource, visibleSections: visible, manageSections: manage };
+  }, [activeChannel, activeFilter, activeManageFilter, activeSectionId, searchText, sections]);
   const sourceSectionMetrics = useMemo(
     () =>
       new Map(
@@ -2839,20 +2846,6 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
         }),
       ),
     [sections],
-  );
-  const visibleSections = useMemo(
-    () => filterSections(sections, activeSectionId, searchText, activeFilter, activeChannel),
-    [activeChannel, activeFilter, activeSectionId, searchText, sections],
-  );
-  const manageSections = useMemo(
-    () =>
-      filterSections(sections, activeSectionId, searchText, activeFilter, activeChannel)
-        .map((section) => ({
-          ...section,
-          items: section.items.filter((item) => itemIsManageable(item) && itemMatchesManageFilter(item, activeManageFilter)),
-        }))
-        .filter((section) => section.items.length > 0),
-    [activeChannel, activeFilter, activeManageFilter, activeSectionId, searchText, sections],
   );
   const activeDisplaySections = forcedView === "manage" ? manageSections : visibleSections;
   const flatVisibleItems = useMemo(

@@ -72,4 +72,20 @@ describe("evolution catalog API", () => {
     expect(controlsSource).toContain("fetchEvolutionOverview<");
     expect(controlsSource).not.toContain("/api/evolution/");
   });
+
+  it("polls the full workbench payload at low frequency instead of every cycle", () => {
+    expect(apiSource).toContain("export const EVOLUTION_WORKBENCH_POLL_INTERVAL_MS = 60_000");
+    expect(routeSource).toContain(
+      "refetchInterval: resolvePollingInterval(pageVisible, EVOLUTION_WORKBENCH_POLL_INTERVAL_MS)",
+    );
+    expect(reviewSource).toContain(
+      "refetchInterval: resolvePollingInterval(pageVisible, EVOLUTION_WORKBENCH_POLL_INTERVAL_MS)",
+    );
+    expect(routeSource).not.toMatch(
+      /queryKeys\.evolutionWorkbench\(\)[\s\S]{0,400}refetchInterval: resolvePollingInterval\(pageVisible, (8_000|15_000)\)/,
+    );
+    expect(reviewSource).not.toMatch(
+      /queryKeys\.evolutionWorkbench\(\)[\s\S]{0,400}refetchInterval: resolvePollingInterval\(pageVisible, (8_000|15_000)\)/,
+    );
+  });
 });

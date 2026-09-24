@@ -21,6 +21,8 @@ describe("memory catalog API", () => {
     expect(apiSource).toContain("export function previewMemoryCleanup");
     expect(apiSource).toContain("export function executeMemoryCleanup");
     expect(apiSource).toContain("/api/memory/overview");
+    // Overview callers pass includeContent per view; the transport must forward it.
+    expect(apiSource).toContain('params.set("includeContent", String(options.includeContent))');
     expect(apiSource).toContain("/api/memory/usage-contract");
     expect(apiSource).toContain("/api/memory/agents");
     expect(apiSource).toContain("/api/memory/agents/${encodeURIComponent(agentId)}");

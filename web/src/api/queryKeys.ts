@@ -139,7 +139,12 @@ export const queryKeys = {
   dataProcessingCollectionAssignments: (id: string) => ["data-processing", "runs", id, "collection-assignments"] as const,
   fileContent: (path: string) => ["files", "content", path] as const,
   // Memory workbench — web/src/api/memory.ts / /api/memory/*
-  memoryOverview: () => ["memory", "overview"] as const,
+  // memoryOverview() stays the prefix form so broad invalidations reach every
+  // variant; pass the includeContent flag for a specific cache entry.
+  memoryOverview: (includeContent?: boolean) =>
+    includeContent === undefined
+      ? (["memory", "overview"] as const)
+      : (["memory", "overview", includeContent] as const),
   githubProjectLibrary: () => ["memory", "github-projects"] as const,
   memoryItemDetails: () => ["memory", "item-detail"] as const,
   memoryItemDetail: (sectionId: string, itemId: string) => ["memory", "item-detail", sectionId, itemId] as const,
