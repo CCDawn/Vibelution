@@ -1,3 +1,4 @@
+// visual-token-escalation-exempt: self-contained HTML export artifact — inline <style> colors are the exported document's own CSS, not app UI tokens.
 /**
  * Challenge-cup question archive export: single-file HTML artifact page.
  *
