@@ -1,0 +1,27 @@
+{
+  "name": "vibelution-chat-stream-core-preview",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Isolated preview for the chat stream core upgrade (Wave 1b). Not wired into the production router; not part of the web/ build graph.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5199 --strictPort",
+    "build": "vite build",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@tanstack/react-virtual": "^3.13.12",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "@types/react": "^19.2.6",
+    "@types/react-dom": "^19.2.6",
+    "@vitejs/plugin-react": "^5.1.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.13"
+  }
+}
