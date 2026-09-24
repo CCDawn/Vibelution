@@ -34,8 +34,8 @@ export function VEmptyState({
         .join(" ")}
     >
       {icon ? <div className="text-vui-fg-tertiary">{icon}</div> : null}
-      <strong className="text-sm text-vui-fg-secondary">{title}</strong>
-      {children ? <span className="text-xs text-vui-fg-tertiary">{children}</span> : null}
+      <strong className="text-vui-xs text-vui-fg-secondary">{title}</strong>
+      {children ? <span className="text-vui-2xs text-vui-fg-tertiary">{children}</span> : null}
       {actions ? (
         <div
           className={[
