@@ -3514,6 +3514,22 @@ def test_runtime_shutdown_falls_back_to_local_exit_when_not_managed(monkeypatch)
     assert response.json()["chatTurns"] == []
     assert calls == ["local"]
 
+
+def test_local_backend_exit_schedule_is_defused_under_pytest(monkeypatch):
+    """回归守卫：pytest 进程内调度本地后端退出不得硬退。
+
+    修复前该调用会在 0.35s 后静默 os._exit(0) 杀掉 pytest/xdist worker，
+    控制器随即死等已死节点、整套测试悬挂到死。
+    """
+    recorded: list[str] = []
+    monkeypatch.setattr(runtime_service, "_record_pytest_hard_exit_skip", lambda kind: recorded.append(kind))
+
+    runtime_service._schedule_local_backend_exit(0.05)
+    time.sleep(0.3)
+
+    assert recorded == ["runtime_service.local_backend_exit"]
+
+
 def test_runtime_scene_endpoints_list_detail_content_and_delete(tmp_path, monkeypatch):
     _seed_runtime_scene_bundle(tmp_path, scene_id="scene-a")
     _seed_runtime_scene_bundle(tmp_path, scene_id="scene-b")
