@@ -155,18 +155,22 @@ def build_agent_runtime_context_block(
             prompt_eligible_only=True,
         )
     )
-    from . import episodic_memory as episodic_memory_mod
-
-    episodes = (
-        list(episodic_events_snapshot)
-        if episodic_events_snapshot is not None
-        else s.list_current_episodic_events(agent_id, limit=episodic_memory_mod.PROMPT_LIST_LIMIT)
-    )
     memory_policy = (
         dict(memory_policy_snapshot)
         if isinstance(memory_policy_snapshot, dict)
         else s.resolve_memory_policy_for_agent(agent_id)
     )
+    from . import episodic_memory as episodic_memory_mod
+
+    if bool(memory_policy.get("enabled", True)):
+        episodes = (
+            list(episodic_events_snapshot)
+            if episodic_events_snapshot is not None
+            else s.list_current_episodic_events(agent_id, limit=episodic_memory_mod.PROMPT_LIST_LIMIT)
+        )
+    else:
+        # 记忆开关关闭：与个人记忆零接触——既不读 episodic JSONL，也不注入该段。
+        episodes = []
     tool_policy = (
         agent.get("toolPolicy")
         if isinstance(agent.get("toolPolicy"), dict)

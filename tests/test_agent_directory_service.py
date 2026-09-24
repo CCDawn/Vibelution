@@ -270,5 +270,16 @@ def test_runtime_context_block_skips_personal_memory_section_when_disabled(
     agent_directory_service.update_agent_instance(
         agent_id, memory_policy={"enabled": False}
     )
+    read_calls: list[str] = []
+    real_list = agent_directory_service.list_current_episodic_events
+
+    def tracked_list_episodes(tracked_agent_id, **kwargs):
+        read_calls.append(str(tracked_agent_id))
+        return real_list(tracked_agent_id, **kwargs)
+
+    monkeypatch.setattr(
+        agent_directory_service, "list_current_episodic_events", tracked_list_episodes
+    )
     disabled_block = agent_directory_service.build_agent_runtime_context_block(agent_id)
     assert "## 个人记忆" not in disabled_block
+    assert read_calls == []
