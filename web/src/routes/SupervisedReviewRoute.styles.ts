@@ -16,7 +16,7 @@ const reviewControlButtonActive =
 const reviewPrimaryActionButton =
   "inline-flex min-h-8 min-w-0 w-fit max-w-full items-center justify-center gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_30%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_16%,var(--vui-control-muted))] px-2.5 text-[13px] font-semibold leading-tight text-[var(--accent-warm-2)] no-underline transition disabled:cursor-not-allowed disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0";
 const reviewFormLabel =
-  "block [&_span]:mb-1 [&_span]:block [&_span]:text-vui-2xs [&_span]:uppercase [&_span]:tracking-[0.08em] [&_span]:text-[var(--fg-tertiary)]";
+  "block [&_span]:mb-1 [&_span]:block [&_span]:text-vui-xs [&_span]:uppercase [&_span]:tracking-[0.08em] [&_span]:text-[var(--fg-tertiary)]";
 const reviewInputTargets =
   "[&_input]:min-h-[var(--vui-control-height-md)] [&_input]:w-full [&_input]:rounded-[var(--radius-control)] [&_input]:border [&_input]:border-vui-border-subtle [&_input]:bg-vui-control-muted [&_input]:px-3 [&_input]:font-[inherit] [&_input]:text-vui-fg-primary [&_input]:outline-none [&_input::placeholder]:text-vui-fg-tertiary [&_select]:min-h-[var(--vui-control-height-md)] [&_select]:w-full [&_select]:rounded-[var(--radius-control)] [&_select]:border [&_select]:border-vui-border-subtle [&_select]:bg-vui-control-muted [&_select]:px-3 [&_select]:font-[inherit] [&_select]:text-vui-fg-primary [&_select]:outline-none";
 const reviewTextAreaTargets =
@@ -60,9 +60,9 @@ const styles = {
   detailTitle: "m-0 text-vui-md font-bold leading-snug",
   detailLead: "m-0 mt-1.5 leading-snug text-[var(--fg-secondary)]",
   secondaryPill:
-    "inline-flex min-h-6 items-center justify-center rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-control-muted px-2 text-vui-2xs font-semibold text-vui-fg-secondary",
+    "inline-flex min-h-6 items-center justify-center rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-control-muted px-2 text-vui-xs font-semibold text-vui-fg-secondary",
   statusBadge:
-    "inline-flex min-h-6 items-center justify-center rounded-[var(--radius-control)] border border-transparent px-2 text-vui-2xs font-semibold",
+    "inline-flex min-h-6 items-center justify-center rounded-[var(--radius-control)] border border-transparent px-2 text-vui-xs font-semibold",
   statusPending:
     "border-[color-mix(in_srgb,var(--fg-tertiary)_20%,transparent)] bg-[color-mix(in_srgb,var(--fg-tertiary)_12%,transparent)] text-[var(--accent-warm-2)]",
   statusPositive:
@@ -100,7 +100,7 @@ const styles = {
   bulkToolbar:
     `grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 px-2 py-1.5 max-[520px]:grid-cols-1 ${reviewRowSurfaceSoft}`,
   bulkCounter:
-    "flex min-w-[70px] items-baseline justify-start gap-2 text-vui-2xs text-[var(--fg-secondary)] [&_strong]:text-vui-md [&_strong]:text-[var(--fg-primary)]",
+    "flex min-w-[70px] items-baseline justify-start gap-2 text-vui-xs text-[var(--fg-secondary)] [&_strong]:text-vui-md [&_strong]:text-[var(--fg-primary)]",
   bulkActions: "flex min-w-0 flex-wrap items-center justify-end gap-1.5 max-[520px]:justify-start",
   queueList: "flex min-h-0 max-w-full flex-col gap-1.5 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-gutter:stable] max-[980px]:max-h-none",
   queueItem:
@@ -112,8 +112,8 @@ const styles = {
   queueHeadline: "my-1.5 min-w-0 break-words leading-normal text-[var(--fg-secondary)]",
   signalRow: "flex min-w-0 flex-wrap items-center justify-start gap-2.5",
   signalPill:
-    "inline-flex min-h-6 max-w-full min-w-0 items-center justify-center truncate rounded-[var(--radius-control)] bg-vui-control-muted px-2 text-vui-2xs font-semibold text-vui-fg-secondary",
-  queueFooter: "flex flex-wrap items-center justify-between gap-2.5 text-vui-2xs text-[var(--fg-tertiary)]",
+    "inline-flex min-h-6 max-w-full min-w-0 items-center justify-center truncate rounded-[var(--radius-control)] bg-vui-control-muted px-2 text-vui-xs font-semibold text-vui-fg-secondary",
+  queueFooter: "flex flex-wrap items-center justify-between gap-2.5 text-vui-xs text-[var(--fg-tertiary)]",
   selectionButton:
     "inline-flex h-7 w-7 flex-none items-center justify-center rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-control-muted p-0 text-vui-fg-tertiary disabled:cursor-not-allowed disabled:opacity-55",
   selectionButtonActive:
@@ -123,9 +123,9 @@ const styles = {
   signalColumns: "grid grid-cols-2 gap-2 max-[980px]:grid-cols-1",
   formGrid: "grid grid-cols-2 gap-2 max-[980px]:grid-cols-1",
   factCard:
-    `min-w-0 px-2.5 py-2 ${reviewRowSurfaceSoft} [&_span]:mb-1 [&_span]:block [&_span]:text-vui-2xs [&_span]:uppercase [&_span]:tracking-[0.08em] [&_span]:text-vui-fg-tertiary [&_strong]:block [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:leading-normal`,
+    `min-w-0 px-2.5 py-2 ${reviewRowSurfaceSoft} [&_span]:mb-1 [&_span]:block [&_span]:text-vui-xs [&_span]:uppercase [&_span]:tracking-[0.08em] [&_span]:text-vui-fg-tertiary [&_strong]:block [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:leading-normal`,
   metricCard:
-    `min-w-0 px-2.5 py-2 ${reviewRowSurfaceSoft} [&_span]:mb-1 [&_span]:block [&_span]:text-vui-2xs [&_span]:uppercase [&_span]:tracking-[0.08em] [&_span]:text-vui-fg-tertiary [&_strong]:block [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:leading-normal [&_p]:m-0 [&_p]:mt-1 [&_p]:leading-snug [&_p]:text-vui-fg-secondary`,
+    `min-w-0 px-2.5 py-2 ${reviewRowSurfaceSoft} [&_span]:mb-1 [&_span]:block [&_span]:text-vui-xs [&_span]:uppercase [&_span]:tracking-[0.08em] [&_span]:text-vui-fg-tertiary [&_strong]:block [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:leading-normal [&_p]:m-0 [&_p]:mt-1 [&_p]:leading-snug [&_p]:text-vui-fg-secondary`,
   signalSection:
     `min-w-0 px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-[0.95rem] [&_h3]:font-bold [&_ul]:m-0 [&_ul]:pl-[18px] [&_ul]:leading-relaxed [&_ul]:text-vui-fg-secondary`,
   detailSection:

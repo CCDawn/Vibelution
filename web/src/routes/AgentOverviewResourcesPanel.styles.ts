@@ -8,8 +8,8 @@ const styles = {
   title: "m-0 text-vui-xs font-semibold text-[var(--fg-primary)]",
   list: "mt-2 grid gap-1.5",
   item: "grid min-w-0 grid-cols-[minmax(0,_1fr)_auto] items-center gap-2 rounded-[var(--radius-control)] !bg-[var(--vui-surface-base)] px-2 py-1.5",
-  itemText: "min-w-0 [&_span]:block [&_span]:text-[11px] [&_span]:font-medium [&_span]:text-[var(--fg-tertiary)] [&_strong]:block [&_strong]:truncate [&_strong]:text-vui-2xs [&_strong]:font-semibold [&_strong]:text-[var(--fg-primary)]",
-  empty: "m-0 mt-2 text-vui-2xs leading-5 text-[var(--fg-secondary)]",
+  itemText: "min-w-0 [&_span]:block [&_span]:text-[11px] [&_span]:font-medium [&_span]:text-[var(--fg-tertiary)] [&_strong]:block [&_strong]:truncate [&_strong]:text-vui-xs [&_strong]:font-semibold [&_strong]:text-[var(--fg-primary)]",
+  empty: "m-0 mt-2 text-vui-xs leading-5 text-[var(--fg-secondary)]",
 } as const;
 
 export default styles;

@@ -12,8 +12,8 @@ const styles = {
   cardContent: "min-w-0 flex-1",
   cardHeader: "flex min-w-0 items-center justify-between gap-3",
   cardTitle: "truncate text-vui-xs text-[var(--vui-text-primary)]",
-  cardStatus: "shrink-0 text-vui-2xs text-[var(--vui-text-secondary)]",
-  reason: "m-0 mt-1 text-vui-2xs leading-5 text-[var(--vui-text-secondary)]",
+  cardStatus: "shrink-0 text-vui-xs text-[var(--vui-text-secondary)]",
+  reason: "m-0 mt-1 text-vui-xs leading-5 text-[var(--vui-text-secondary)]",
   provenance: "m-0 mt-1 flex items-center gap-1 font-mono text-[11px] text-[var(--vui-text-tertiary)]",
 } as const;
 

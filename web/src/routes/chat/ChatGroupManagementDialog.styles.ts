@@ -11,7 +11,7 @@ const styles: Record<string, string> = {
   dialogBody: "vui-routes-chatgroupmanagementdialog dialogBody grid min-h-0 gap-4 overflow-y-auto py-1",
   header: "vui-routes-chatgroupmanagementdialog header min-w-0 flex flex-wrap items-center gap-1.5",
   identity: "vui-routes-chatgroupmanagementdialog identity grid min-w-0 gap-0.5",
-  identityMeta: "vui-routes-chatgroupmanagementdialog identityMeta text-vui-2xs text-[var(--fg-tertiary)]",
+  identityMeta: "vui-routes-chatgroupmanagementdialog identityMeta text-vui-xs text-[var(--fg-tertiary)]",
   actions: "vui-routes-chatgroupmanagementdialog actions min-w-0 !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[7px]",
   applyButton: `vui-routes-chatgroupmanagementdialog applyButton min-w-0 ${vuiControlQuietClass}`,
   secondaryButton: `vui-routes-chatgroupmanagementdialog secondaryButton min-w-0 ${vuiControlQuietClass}`,

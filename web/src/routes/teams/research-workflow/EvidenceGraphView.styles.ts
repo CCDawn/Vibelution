@@ -1,7 +1,7 @@
 export default {
   note: "text-vui-xs leading-relaxed text-[var(--fg-secondary)]",
   header: "flex items-center justify-between gap-2",
-  eyebrow: "text-vui-2xs font-medium text-[var(--fg-tertiary)]",
+  eyebrow: "text-vui-xs font-medium text-[var(--fg-tertiary)]",
   empty: "h-auto w-full border-0 bg-transparent",
   section: "grid gap-1",
   list: "m-0 list-none space-y-1 p-0",

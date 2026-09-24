@@ -16,7 +16,7 @@ const styles: Record<string, string> = {
   referenceList: "vui-routes-chatcomposerplusmenu referenceList grid max-h-[min(52vh,24rem)] gap-1 overflow-y-auto",
   referenceOption: "vui-routes-chatcomposerplusmenu referenceOption !grid min-h-11 w-full !justify-start gap-0.5 px-3 py-2 text-left",
   referenceTitle: "vui-routes-chatcomposerplusmenu referenceTitle truncate text-vui-xs",
-  referenceMeta: "vui-routes-chatcomposerplusmenu referenceMeta truncate text-vui-2xs text-[var(--fg-tertiary)]",
+  referenceMeta: "vui-routes-chatcomposerplusmenu referenceMeta truncate text-vui-xs text-[var(--fg-tertiary)]",
   referenceEmpty: "vui-routes-chatcomposerplusmenu referenceEmpty px-3 py-5 text-center text-vui-xs text-[var(--fg-tertiary)]",
 };
 
