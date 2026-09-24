@@ -204,7 +204,7 @@ export function WorkflowSemanticEdge({
               boxShadow: "0 0 0 3px var(--vui-surface-workspace)",
             }}
             className={cn(
-              "truncate rounded-md border text-center text-[11px] font-medium leading-tight",
+              "truncate rounded-md border text-center [font-size:var(--vui-font-canvas-sm)] font-medium leading-tight",
               "flex items-center justify-center px-1.5",
               "border-[var(--vui-border-subtle)] text-[var(--fg-secondary)]",
               pathState === "active" ? "border-[color-mix(in_srgb,var(--accent-cool)_40%,var(--vui-border-subtle))] text-[var(--accent-cool)]" : "",
