@@ -1,0 +1,76 @@
+{
+  "shots": [
+    {
+      "file": "01-settings-list.png",
+      "label": "快捷键设置清单（默认绑定 + 操作）"
+    },
+    {
+      "file": "02-recording.png",
+      "label": "录制新绑定态（修饰键等待提示）"
+    },
+    {
+      "file": "03-conflict-occupied.png",
+      "label": "录制命中占用冲突（归一判定详情）"
+    },
+    {
+      "file": "04-reserved-enter.png",
+      "label": "保留键拒绝（Enter）"
+    },
+    {
+      "file": "05-cleared-unset.png",
+      "label": "显式空数组清除（未设置 + 持久化 JSON）"
+    },
+    {
+      "file": "06-reset-all-default.png",
+      "label": "恢复全部默认（覆盖清空）"
+    }
+  ],
+  "asserts": [
+    {
+      "name": "rows rendered",
+      "ok": true
+    },
+    {
+      "name": "kbd rendered",
+      "ok": true
+    },
+    {
+      "name": "pending hint shown",
+      "ok": true
+    },
+    {
+      "name": "occupied rejected",
+      "ok": true
+    },
+    {
+      "name": "canonical detail shown",
+      "ok": true
+    },
+    {
+      "name": "reserved rejected",
+      "ok": true
+    },
+    {
+      "name": "empty-array persisted",
+      "ok": true
+    },
+    {
+      "name": "override json shown",
+      "ok": true
+    },
+    {
+      "name": "cleared survives reload",
+      "ok": true
+    },
+    {
+      "name": "storage key removed",
+      "ok": true
+    },
+    {
+      "name": "kbd back to default",
+      "ok": true
+    }
+  ],
+  "consoleErrors": [],
+  "pageErrors": []
+}
