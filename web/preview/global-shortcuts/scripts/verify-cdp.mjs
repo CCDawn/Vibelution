@@ -236,6 +236,51 @@ try {
   // 给 server 查询与渲染留点时间。
   await sleep(2500);
 
+  // ---- 覆盖语义运行时演示：显式空数组 = 清除 openCommandPalette ----
+  const seedOverrides = async (overrides) => {
+    await evaluate(
+      `localStorage.setItem("vibelution.shortcuts.overrides", ${JSON.stringify(JSON.stringify(overrides))}); "ok"`,
+    );
+    await cdp.send("Page.navigate", { url: APP_URL });
+    if (!(await waitFor(`Boolean(document.querySelector('[data-shell-group="navigation"]'))`, 45000, "remount"))) {
+      throw new Error("shell did not remount after override seed");
+    }
+    await sleep(1000);
+  };
+
+  await seedOverrides({ openCommandPalette: [] });
+  await pressCombo("k", "KeyK", 75, 2);
+  await sleep(800);
+  const clearedStaysClosed = await evaluate(
+    `!document.querySelector('[data-testid="vui-command-palette"]')`,
+  );
+  record("清除覆盖后 Ctrl+K 不再打开面板", clearedStaysClosed === true);
+  await pressCombo("p", "KeyP", 80, 2);
+  const searchStillWorks = await waitFor(
+    `Boolean(document.querySelector('[data-testid="vui-session-search-dialog"]'))`,
+    5000,
+    "cleared-search",
+  );
+  record("清除只影响目标命令，Ctrl+P 仍打开会话搜索", searchStillWorks);
+  await pressCombo("Escape", "Escape", 27, 0);
+  await sleep(500);
+
+  // ---- 覆盖语义运行时演示：改绑 Ctrl+Alt+k（旧组合让位） ----
+  await seedOverrides({ openCommandPalette: ["Ctrl+Alt+k"] });
+  await pressCombo("k", "KeyK", 75, 2);
+  await sleep(800);
+  const oldComboInert = await evaluate(
+    `!document.querySelector('[data-testid="vui-command-palette"]')`,
+  );
+  record("改绑后旧组合 Ctrl+K 失效", oldComboInert === true);
+  await pressCombo("k", "KeyK", 75, 2 + 1); // modifiers: Ctrl|Alt = 3
+  const newComboOpens = await waitFor(
+    `Boolean(document.querySelector('[data-testid="vui-command-palette"]'))`,
+    5000,
+    "rebound-palette",
+  );
+  record("改绑后新组合 Ctrl+Alt+K 打开面板", newComboOpens);
+
   const newErrors = results.consoleErrors.slice(baselineErrors);
   const newExceptions = results.jsExceptions.slice(baselineExceptions);
   const unexpectedErrors = newErrors.filter((text) => !isExpectedNetworkError(text));

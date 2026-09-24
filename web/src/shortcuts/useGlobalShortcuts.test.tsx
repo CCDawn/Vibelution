@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveEffectiveBindings } from "./commands";
 import {
   matchesShortcutBinding,
+  recordShortcutBinding,
   useGlobalShortcuts,
 } from "./useGlobalShortcuts";
 
@@ -89,6 +90,41 @@ function unmountHost(host: { root: Root; container: HTMLElement }): void {
   });
   host.container.remove();
 }
+
+describe("recordShortcutBinding（录制器，迁移自 preview logic-selftest）", () => {
+  const bare = { metaKey: false, ctrlKey: false, shiftKey: false, altKey: false };
+
+  it("纯修饰键按下返回 pending，等待完整组合", () => {
+    expect(
+      recordShortcutBinding({ key: "Control", code: "ControlLeft", ...bare, ctrlKey: true }, false),
+    ).toEqual({ kind: "pending" });
+  });
+
+  it("win 上 Ctrl+J 录制为 CmdOrCtrl+j（平台归一）", () => {
+    expect(
+      recordShortcutBinding({ key: "j", code: "KeyJ", ...bare, ctrlKey: true }, false),
+    ).toEqual({ kind: "binding", binding: "CmdOrCtrl+j" });
+  });
+
+  it("Shift+7 用 event.code 反查物理基键（布局无关）", () => {
+    expect(
+      recordShortcutBinding({ key: "&", code: "Digit7", ...bare, shiftKey: true }, false),
+    ).toEqual({ kind: "binding", binding: "Shift+7" });
+  });
+
+  it("无修饰键的普通字符键拒绝（no-modifier）", () => {
+    expect(recordShortcutBinding({ key: "g", code: "KeyG", ...bare }, false)).toEqual({
+      kind: "invalid",
+      reason: "no-modifier",
+    });
+  });
+
+  it("win 上纯 Win 键组合拒绝：归一后主修饰键丢失，防裸键落盘", () => {
+    expect(
+      recordShortcutBinding({ key: "j", code: "KeyJ", ...bare, metaKey: true }, false).kind,
+    ).toBe("invalid");
+  });
+});
 
 describe("useGlobalShortcuts 分发（window capture 集成 smoke）", () => {
   const effective = resolveEffectiveBindings();
