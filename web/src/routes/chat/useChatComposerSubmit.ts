@@ -201,6 +201,43 @@ export type EditResubmitVariables = {
   attachmentIds?: string[];
 };
 
+/**
+ * The edit-resubmit API rebuilds the target message's attachments from the
+ * submitted ids alone, so the original artifacts must ride along with any new
+ * composer uploads; a text-only edit would otherwise silently strip them.
+ * Artifact ids resolve server-side against the session ledger metadata, so the
+ * already-stored originals reattach without a re-upload.
+ */
+export function resolveEditCarryOverAttachmentIds(
+  detail: SessionDetail | undefined,
+  messageId: string,
+): string[] {
+  if (!detail) {
+    return [];
+  }
+  const normalizedMessageId = String(messageId || "").trim();
+  if (!normalizedMessageId) {
+    return [];
+  }
+  const target = (detail.messages ?? []).find(
+    (message) => String(message.id || "").trim() === normalizedMessageId,
+  );
+  if (!target || target.role !== "user") {
+    return [];
+  }
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const attachment of target.attachments ?? []) {
+    const artifactId = String(attachment.artifactId || "").trim();
+    if (!artifactId || seen.has(artifactId)) {
+      continue;
+    }
+    seen.add(artifactId);
+    ids.push(artifactId);
+  }
+  return ids;
+}
+
 export type RegenerateVariables = {
   sessionId: string;
   messageId: string;
@@ -1898,11 +1935,12 @@ export function useChatComposerSubmitActions({
       );
       const editTarget = resolvedEditTarget;
       const editAttachments = activeImageAttachments;
+      const carriedAttachmentIds = resolveEditCarryOverAttachmentIds(detail, editTarget.messageId);
       void (async () => {
         if (editAttachments.length && imageUploadInFlightRef.current[activeSessionId]) {
           return;
         }
-        let attachmentIds: string[] = [];
+        let uploadedAttachmentIds: string[] = [];
         if (editAttachments.length) {
           imageUploadInFlightRef.current[activeSessionId] = true;
           pendingUploadSubmissionRef.current.set(activeSessionId, clientSubmissionId);
@@ -1914,7 +1952,7 @@ export function useChatComposerSubmitActions({
             const uploaded = await Promise.all(
               editAttachments.map((attachment) => uploadSessionImageAttachment(activeSessionId, attachment)),
             );
-            attachmentIds = uploaded.map((attachment) => attachment.artifactId).filter(Boolean);
+            uploadedAttachmentIds = uploaded.map((attachment) => attachment.artifactId).filter(Boolean);
           } catch (error) {
             setSessionComposerErrors((current) => ({
               ...current,
@@ -1939,7 +1977,7 @@ export function useChatComposerSubmitActions({
           ...(editTarget.nodeId ? { baseMessageId: editTarget.nodeId } : {}),
           clientSubmissionId,
           content,
-          attachmentIds,
+          attachmentIds: [...carriedAttachmentIds, ...uploadedAttachmentIds],
           mentalModelEnabled: mentalModelEnabledForNextTurn,
           runtimeStatusEnabled: runtimeStatusEnabledForNextTurn,
           turnStatusTail: loadTurnStatusTailConfig(activeSessionId),

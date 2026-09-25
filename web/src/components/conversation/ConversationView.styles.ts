@@ -316,22 +316,6 @@ backToBottomButton:
     "vui-components-conversationview composerStopPendingFeedback min-w-0 max-w-[12rem] truncate text-vui-xs leading-tight text-[var(--fg-secondary)]",
   composerError:
     `vui-components-conversationview composerError min-w-0 ${vuiStateDangerSoftClass}`,
-  composerEditModeDescription:
-    "vui-components-conversationview composerEditModeDescription min-w-0 truncate text-vui-xs font-medium leading-tight text-[var(--fg-tertiary)]",
-  composerEditModeBar:
-    "vui-components-conversationview composerEditModeBar grid min-w-0 min-h-7 w-full max-w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_55%,transparent)] px-2 py-1 text-vui-xs leading-tight text-[var(--fg-secondary)]",
-  composerEditModeCancel:
-    "vui-components-conversationview composerEditModeCancel !inline-flex !h-6 !min-h-6 !w-fit !min-w-0 shrink-0 items-center justify-center !rounded-full !border !border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] !bg-[color-mix(in_srgb,var(--vui-control-muted)_55%,transparent)] !px-2 !py-0 text-vui-xs font-semibold leading-none !text-[var(--fg-secondary)] shadow-none hover:!border-[color-mix(in_srgb,var(--border-strong)_72%,transparent)] hover:!bg-[color-mix(in_srgb,var(--vui-surface-workspace)_14%,var(--vui-control-muted-hover))] hover:!text-[var(--fg-primary)]",
-  composerEditModeCopy:
-    "vui-components-conversationview composerEditModeCopy grid min-w-0 items-center gap-0.5",
-  composerEditModeIcon:
-    "vui-components-conversationview composerEditModeIcon min-w-0 shrink-0 text-[var(--fg-tertiary)]",
-  composerEditModeLabel:
-    "vui-components-conversationview composerEditModeLabel min-w-0 truncate font-semibold text-[var(--fg-secondary)]",
-  composerEditModePreview:
-    "vui-components-conversationview composerEditModePreview min-w-0 max-w-full truncate text-vui-xs leading-tight text-[var(--fg-tertiary)]",
-  composerEditModeWarning:
-    "vui-components-conversationview composerEditModeWarning min-w-0 whitespace-normal break-words text-vui-xs font-semibold leading-[1.45] text-[var(--state-warning)] [overflow-wrap:anywhere]",
   followupQueueTray:
     "vui-components-conversationview followupQueueTray mb-1 grid min-w-0 gap-0.5",
   followupQueueTrayBleed:
@@ -380,8 +364,6 @@ backToBottomButton:
     "vui-components-conversationview composerGuidance min-w-0",
   composerGuidanceIcon:
     "vui-components-conversationview composerGuidanceIcon min-w-0 shrink-0 text-[var(--fg-tertiary)]",
-  composerModeNotice: `vui-components-conversationview composerModeNotice min-w-0 ${vuiGlassPanelClass} p-2`,
-  composerModeNoticeIcon: `vui-components-conversationview composerModeNoticeIcon min-w-0 ${vuiGlassPanelClass} p-2 shrink-0 text-[var(--fg-tertiary)]`,
   composerReferenceChip:
     `vui-components-conversationview composerReferenceChip min-w-0 ${vuiControlPillClass}`,
   composerReferenceCopy:
@@ -1270,6 +1252,22 @@ timeline:
   turnEditBadge: `vui-components-conversationview turnEditBadge min-w-0 ${vuiOpaqueRowClass} p-2 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full bg-[var(--vui-control-muted)] px-2 text-vui-xs font-semibold leading-none text-[var(--fg-secondary)]`,
   turnEditing:
     "vui-components-conversationview turnEditing min-w-0 [&_.userMessageBody]:border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--vui-border-subtle))] [&_.userMessageBody]:bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),var(--vui-surface-panel))] [&_.userMessageBody]:ring-1 [&_.userMessageBody]:ring-inset [&_.userMessageBody]:ring-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint),transparent)]",
+  turnInlineEditor:
+    "vui-components-conversationview turnInlineEditor grid min-w-0 max-w-full gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),var(--vui-surface-panel))] p-1.5 shadow-none",
+  turnInlineEditorActions:
+    "vui-components-conversationview turnInlineEditorActions flex min-w-0 flex-wrap items-center justify-end gap-1.5",
+  turnInlineEditorChip:
+    "vui-components-conversationview turnInlineEditorChip inline-flex h-5 min-w-0 max-w-full items-center gap-1 rounded-full border border-[color-mix(in_srgb,var(--vui-border-subtle)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_55%,transparent)] px-2 text-vui-2xs leading-none text-[var(--fg-secondary)]",
+  turnInlineEditorChipIcon:
+    "vui-components-conversationview turnInlineEditorChipIcon size-3 shrink-0 text-[var(--fg-tertiary)]",
+  turnInlineEditorChipName:
+    "vui-components-conversationview turnInlineEditorChipName min-w-0 truncate",
+  turnInlineEditorChipRow:
+    "vui-components-conversationview turnInlineEditorChipRow flex min-w-0 max-w-full flex-wrap items-center gap-1",
+  turnInlineEditorChipThumb:
+    "vui-components-conversationview turnInlineEditorChipThumb size-3.5 shrink-0 rounded-full object-cover",
+  turnInlineEditorInput:
+    "vui-components-conversationview turnInlineEditorInput !min-h-16 max-h-64 resize-none overflow-y-auto !py-1.5 leading-5",
   toolApprovalFallback:
     "toolApprovalFallback z-[6] min-w-0 w-full max-w-[min(44rem,100%)] shrink-0 justify-self-center px-2 pb-1.5 pt-0.5",
   turnError:

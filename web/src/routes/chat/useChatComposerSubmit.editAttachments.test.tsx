@@ -74,11 +74,13 @@ const imageAttachment: ComposerImageAttachment = {
   contentType: "image/png",
 };
 
-function Harness({ queryClient, sessionBusy = false, activeTurnId = "turn-1", activeSessionId = "session-1" }: {
+function Harness({ queryClient, sessionBusy = false, activeTurnId = "turn-1", activeSessionId = "session-1", targetAttachments, trayImages }: {
   queryClient: QueryClient;
   sessionBusy?: boolean;
   activeTurnId?: string;
   activeSessionId?: string;
+  targetAttachments?: Array<Record<string, unknown>>;
+  trayImages?: ComposerImageAttachment[];
 }) {
   const chatWorkspaceCache = useRef(createChatWorkspaceCache(queryClient)).current;
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
@@ -87,7 +89,7 @@ function Harness({ queryClient, sessionBusy = false, activeTurnId = "turn-1", ac
   });
   const [sessionComposerErrors, setSessionComposerErrors] = useState<Record<string, string>>({});
   const [sessionImageAttachments, setSessionImageAttachments] = useState<Record<string, ComposerImageAttachment[]>>({
-    "session-1": [imageAttachment],
+    "session-1": trayImages ?? [imageAttachment],
   });
   const [sessionReferenceAttachments, setSessionReferenceAttachments] =
     useState<Record<string, SessionReferenceAttachment[]>>({});
@@ -98,7 +100,12 @@ function Harness({ queryClient, sessionBusy = false, activeTurnId = "turn-1", ac
   const [activeTurnLayersBySession, setActiveTurnLayersBySession] = useState({});
   const detailRef = useRef({
     id: "session-1",
-    messages: [{ id: "user-1", role: "user", content: "原始内容" }],
+    messages: [{
+      id: "user-1",
+      role: "user",
+      content: "原始内容",
+      ...(targetAttachments?.length ? { attachments: targetAttachments } : {}),
+    }],
   } as SessionDetail);
   const activeEditTarget = sessionEditTargets[activeSessionId] ?? null;
   const describeError = (error: unknown, fallback: string) => (
@@ -252,6 +259,138 @@ describe("useChatComposerSubmit edit-resubmit attachments", () => {
     expect(container?.querySelector('[data-testid="draft"]')?.textContent).toBe("");
     expect(container?.querySelector('[data-testid="upload-pending"]')?.textContent).toBe("false");
     expect(container?.querySelector('[data-testid="error"]')?.textContent).toBe("");
+  });
+
+  it("carries the target message's original attachments before new uploads", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1",
+      title: "Session",
+      status: "running",
+      taskSummary: "",
+      lastActive: "",
+      updatedAt: "",
+      currentPhase: "running",
+      defaultFileContext: "",
+      previewTabs: [],
+      activePreviewPath: "",
+      changedFiles: [],
+      readFiles: [],
+      messages: [{
+        id: "user-1",
+        role: "user",
+        content: "原始内容",
+        attachments: [
+          { artifactId: "artifact-orig-2", filename: "notes.csv" },
+          { artifactId: "artifact-orig-1", filename: "sketch.png" },
+        ],
+      }],
+      stopRequested: false,
+      stopRequestedAt: "",
+      stopReason: "",
+    });
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <QueryClientProvider client={queryClient}>
+          <Harness
+            queryClient={queryClient}
+            targetAttachments={[
+              { artifactId: "artifact-orig-2", filename: "notes.csv" },
+              { artifactId: "artifact-orig-1", filename: "sketch.png" },
+            ]}
+          />
+        </QueryClientProvider>,
+      );
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
+    });
+    for (let round = 0; round < 6; round += 1) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+
+    expect(apiMocks.uploadSessionImageAttachment).toHaveBeenCalledTimes(1);
+    expect(apiMocks.editResubmitSessionMessage).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        messageId: "user-1",
+        content: "编辑后的内容",
+        // Originals ride along in ledger order; the fresh upload appends.
+        attachmentIds: ["artifact-orig-2", "artifact-orig-1", "artifact-edit-1"],
+      }),
+    );
+  });
+
+  it("carries original attachments even when the edit uploads nothing new", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1",
+      title: "Session",
+      status: "running",
+      taskSummary: "",
+      lastActive: "",
+      updatedAt: "",
+      currentPhase: "running",
+      defaultFileContext: "",
+      previewTabs: [],
+      activePreviewPath: "",
+      changedFiles: [],
+      readFiles: [],
+      messages: [{
+        id: "user-1",
+        role: "user",
+        content: "原始内容",
+        attachments: [{ artifactId: "artifact-orig-1", filename: "sketch.png" }],
+      }],
+      stopRequested: false,
+      stopRequestedAt: "",
+      stopReason: "",
+    });
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <QueryClientProvider client={queryClient}>
+          <Harness
+            queryClient={queryClient}
+            targetAttachments={[{ artifactId: "artifact-orig-1", filename: "sketch.png" }]}
+            trayImages={[]}
+          />
+        </QueryClientProvider>,
+      );
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
+    });
+    for (let round = 0; round < 6; round += 1) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+
+    // No pending composer uploads: the tray image must not upload, but the
+    // original artifact still re-attaches so the resubmit keeps it.
+    expect(apiMocks.uploadSessionImageAttachment).not.toHaveBeenCalled();
+    expect(apiMocks.editResubmitSessionMessage).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        messageId: "user-1",
+        content: "编辑后的内容",
+        attachmentIds: ["artifact-orig-1"],
+      }),
+    );
   });
 
   it("keeps the stop identity while edit attachments are still uploading", async () => {
