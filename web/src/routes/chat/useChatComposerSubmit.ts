@@ -911,6 +911,7 @@ export type UseChatComposerSubmitActionsResult = {
   handleFollowupQueueRemove: (id: string) => void;
   handleFollowupQueueMove: (fromIndex: number, toIndex: number) => void;
   handleFollowupQueueSteer: (id: string) => void;
+  handleFollowupQueueTogglePause: (id: string, paused: boolean) => void;
   handleEditUserMessage: (message: ConversationMessage) => void;
   handleCancelEditMessage: () => void;
   handleRegenerateAssistantMessage: (message: ConversationMessage) => void;
@@ -1419,6 +1420,24 @@ export function useChatComposerSubmitActions({
         lang === "zh" ? "调整排队顺序失败" : "Failed to reorder the queue",
       ));
   }, [activeSessionId, detail?.queuedTurns, lang, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
+
+  // Pausing holds one row out of draining (the server skips paused rows);
+  // resuming re-queues it at the tail, mirroring the server semantics.
+  const handleFollowupQueueTogglePause = useCallback((id: string, paused: boolean) => {
+    const sessionId = activeSessionId;
+    if (!sessionId) {
+      return;
+    }
+    void updateSessionQueuedTurn(sessionId, id, { status: paused ? "paused" : "queued" })
+      .then((rows) => syncQueuedTurnsIntoDetail(sessionId, rows))
+      .catch((error) => reportQueuedTurnError(
+        sessionId,
+        error,
+        paused
+          ? (lang === "zh" ? "暂停排队消息失败" : "Failed to pause the queued message")
+          : (lang === "zh" ? "恢复排队消息失败" : "Failed to resume the queued message"),
+      ));
+  }, [activeSessionId, lang, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
 
   const handleSubmitTurn = useCallback(() => {
     if (!activeSessionId) {
@@ -2069,6 +2088,7 @@ export function useChatComposerSubmitActions({
     handleFollowupQueueRemove,
     handleFollowupQueueMove,
     handleFollowupQueueSteer,
+    handleFollowupQueueTogglePause,
     handleEditUserMessage,
     handleCancelEditMessage,
     handleRegenerateAssistantMessage,

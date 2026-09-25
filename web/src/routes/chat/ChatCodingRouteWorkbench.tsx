@@ -49,6 +49,7 @@ import type { AgentArchiveResponse } from "../agentWorkspaceCache";
 import { prefetchConversationView } from "../../components/conversation/prefetchConversationView";
 import type { ActiveTurnStreamState } from "../../components/conversation/activeTurnStreamState";
 import type { ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
+import { FollowupQueueTogglePauseContext } from "../../components/conversation/ConversationFollowupQueueBar";
 import { queryKeys } from "../../api/queryKeys";
 import {
   AgentInstance,
@@ -2318,6 +2319,7 @@ export function ChatCodingRouteWorkbench() {
     handleFollowupQueueRemove,
     handleFollowupQueueMove,
     handleFollowupQueueSteer,
+    handleFollowupQueueTogglePause,
     handleEditUserMessage,
     handleCancelEditMessage,
     handleRegenerateAssistantMessage,
@@ -3595,6 +3597,7 @@ export function ChatCodingRouteWorkbench() {
             />
             )}
             sessionWorkspace={(
+            <FollowupQueueTogglePauseContext.Provider value={handleFollowupQueueTogglePause}>
             <ChatSessionWorkspacePanel
               activeCliAgentRunAvailable={Boolean(activeCliAgentRun)}
               activeCliAgentRunId={activeCliAgentRunId}
@@ -3626,6 +3629,7 @@ export function ChatCodingRouteWorkbench() {
               onApproveToolForSession={handleApproveToolForSession}
               onRejectToolApproval={handleRejectToolApproval}
             />
+            </FollowupQueueTogglePauseContext.Provider>
             )}
           />
         )}

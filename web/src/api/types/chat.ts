@@ -719,7 +719,11 @@ export type ConversationAttachment = {
 export type SessionQueuedTurn = {
   id: string;
   position: number;
-  /** `queued` waits for the running turn to settle; `blocked` needs an edit to retry. */
+  /**
+   * `queued` waits for the running turn to settle; `paused` holds the row out
+   * of draining until resumed (resume re-queues it at the tail); `blocked`
+   * needs an edit to retry.
+   */
   status: string;
   content: string;
   attachments?: Array<{

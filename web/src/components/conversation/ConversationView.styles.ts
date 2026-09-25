@@ -356,6 +356,10 @@ backToBottomButton:
     "vui-components-conversationview followupQueueChip inline-flex shrink-0 items-center gap-0.5 rounded-[5px] border border-[color-mix(in_srgb,var(--vui-border-subtle)_var(--vui-alpha-veil),transparent)] px-1 [font-size:var(--vui-font-2xs)] leading-tight text-[var(--fg-tertiary)]",
   followupQueueChipBlocked:
     "vui-components-conversationview followupQueueChipBlocked inline-flex shrink-0 items-center rounded-[5px] border border-[color-mix(in_srgb,var(--state-warning)_45%,transparent)] px-1 [font-size:var(--vui-font-2xs)] font-semibold leading-tight text-[var(--state-warning)]",
+  followupQueueRowPaused:
+    "vui-components-conversationview followupQueueRowPaused opacity-55 transition-opacity duration-150 hover:opacity-90 focus-within:opacity-100",
+  followupQueueChipPaused:
+    "vui-components-conversationview followupQueueChipPaused inline-flex shrink-0 items-center rounded-[5px] border border-[color-mix(in_srgb,var(--vui-border-subtle)_var(--vui-alpha-veil),transparent)] px-1 [font-size:var(--vui-font-2xs)] italic leading-tight text-[var(--fg-tertiary)]",
   followupQueueRowActions:
     "vui-components-conversationview followupQueueRowActions flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100",
   followupQueueRowActionsEditing:

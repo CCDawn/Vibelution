@@ -175,6 +175,20 @@ function Harness({
       >
         move
       </button>
+      <button
+        type="button"
+        data-testid="pause-queue"
+        onClick={() => actions.handleFollowupQueueTogglePause("q-1", true)}
+      >
+        pause
+      </button>
+      <button
+        type="button"
+        data-testid="resume-queue"
+        onClick={() => actions.handleFollowupQueueTogglePause("q-1", false)}
+      >
+        resume
+      </button>
     </div>
   );
 }
@@ -481,6 +495,28 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
     expect(updateSessionQueuedTurn).toHaveBeenCalledWith("session-1", "q-1", { content: "改后的排队文本" });
     expect(removeSessionQueuedTurn).toHaveBeenCalledWith("session-1", "q-1");
     expect(updateSessionQueuedTurn).toHaveBeenCalledWith("session-1", "q-1", { position: 2 });
+  });
+
+  it("pauses and resumes queued turns through the server status patch", async () => {
+    const { mutations } = createMutations();
+    await mount({
+      busy: true,
+      draft: "",
+      queues: {
+        "session-1": [{ id: "q-1", text: "第一条", status: "queued" }],
+      },
+      mutations,
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="pause-queue"]')?.click();
+    });
+    expect(updateSessionQueuedTurn).toHaveBeenCalledWith("session-1", "q-1", { status: "paused" });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="resume-queue"]')?.click();
+    });
+    expect(updateSessionQueuedTurn).toHaveBeenCalledWith("session-1", "q-1", { status: "queued" });
   });
 
   it("no longer flushes the queue locally when the turn ends", async () => {
