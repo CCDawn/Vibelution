@@ -2,8 +2,10 @@
 
 关键约束（见 docs/guides/e2e-playwright.md 与 pytest.ini 注释）：
 - ``e2e`` marker 已被刻意删除，**禁止重新注册**；本目录所有模块用现有
-  ``serial`` marker + 模块级环境门（``VIBELUTION_E2E != "1"`` 时
-  ``pytest.skip(allow_module_level=True)``）。默认/serial 收集到也只会 skip。
+  ``serial`` marker + ``skipif`` 环境门（``VIBELUTION_E2E != "1"`` 时逐条 skip，
+  退出码 0）。默认/serial 收集到也只会 skip。注意不能用模块级
+  ``pytest.skip(allow_module_level=True)``——那会零收集，closeout 选择器
+  直跑本目录文件时 pytest 退出码 5 判失败。
 - 生命周期用官方 Launcher：start → registry steady/open → health 就绪口径 →
   测试 → stop → registry closed/closed。不用 taskkill，不弹可见控制台。
 - playwright 在 fixture 内导入，保证其他车道 import 本 conftest 不依赖 playwright。

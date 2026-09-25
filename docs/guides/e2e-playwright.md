@@ -7,8 +7,11 @@
 ## 车道与挂载约定
 
 - pytest.ini **没有 `e2e` marker（已刻意删除，禁止重新注册）**。本目录所有模块
-  使用现有 `serial` marker + 模块级环境门：未设 `VIBELUTION_E2E=1` 时模块级
-  skip。因此默认车道、serial 车道、closeout selector 收集到这些文件也只会跳过。
+  使用现有 `serial` marker + `skipif` 环境门：未设 `VIBELUTION_E2E=1` 时逐条
+  skip（退出码 0）。因此默认车道、serial 车道、closeout selector 收集到这些
+  文件也只会跳过。注意不能用模块级 `pytest.skip(allow_module_level=True)`：
+  那会「零收集」，closeout 选择器直跑本目录文件时 pytest 按退出码 5
+  （NO_TESTS_COLLECTED）判失败。
 - 环境变量：
   - `VIBELUTION_E2E=1`：启用本车道（唯一开关）。
   - `VIBELUTION_E2E_MODE=headless|cdp`：浏览器模式，默认 headless。

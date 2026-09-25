@@ -30,13 +30,16 @@ from tests.e2e.helpers.page_anchors import (
     domain_recipe_selector,
 )
 
-pytestmark = [pytest.mark.serial, pytest.mark.timeout(0)]
-
-if os.environ.get("VIBELUTION_E2E") != "1":
-    pytest.skip(
-        "e2e 手动车道：设 VIBELUTION_E2E=1 后运行（见 docs/guides/e2e-playwright.md）",
-        allow_module_level=True,
-    )
+pytestmark = [
+    pytest.mark.serial,
+    pytest.mark.timeout(0),
+    # skipif 而非模块级 skip：模块级 skip 会「零收集」，closeout 选择器直跑
+    # 本文件时 pytest 退出码 5（NO_TESTS_COLLECTED）判失败；skipif 逐条跳过退出码 0。
+    pytest.mark.skipif(
+        os.environ.get("VIBELUTION_E2E") != "1",
+        reason="e2e 手动车道：设 VIBELUTION_E2E=1 后运行（见 docs/guides/e2e-playwright.md）",
+    ),
+]
 
 
 # ---------------------------------------------------------------------------
