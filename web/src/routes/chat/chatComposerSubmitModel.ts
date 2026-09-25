@@ -1,6 +1,9 @@
 import type { DragEvent } from "react";
 
-import { uploadSessionImageAttachment as postSessionImageAttachment } from "../../api/chat";
+import {
+  registerSessionImageAttachmentFromPath,
+  uploadSessionImageAttachment as postSessionImageAttachment,
+} from "../../api/chat";
 import type {
   SessionReferenceAttachment,
   SessionSummary,
@@ -41,6 +44,12 @@ export type ComposerImageAttachment = {
   sizeBytes: number;
   contentType: string;
   kind: ComposerAttachmentKind;
+  /**
+   * Resolved local absolute path (desktop shell only). When present, the
+   * submit upload registers the path for zero-copy backend read instead of
+   * POSTing the file bytes; clipboard screenshots never carry one.
+   */
+  localPath?: string;
 };
 
 export type ComposerSubmitGuardReason = "composer_disabled" | "empty_content" | "";
@@ -222,11 +231,42 @@ export function removeSessionImageAttachment(
 }
 
 export async function uploadSessionImageAttachment(sessionId: string, attachment: ComposerImageAttachment) {
+  if (attachment.localPath) {
+    try {
+      return await registerSessionImageAttachmentFromPath(sessionId, {
+        localPath: attachment.localPath,
+        contentType: attachment.contentType,
+        filename: attachment.filename,
+      });
+    } catch {
+      // Zero-copy registration failed (missing path, non-file, oversize or
+      // unsupported content): fall back to the binary upload transparently.
+    }
+  }
   return postSessionImageAttachment(sessionId, {
     contentType: attachment.contentType,
     filename: attachment.filename,
     body: attachment.file,
   });
+}
+
+/** Optional desktop hook that maps a File to its local absolute path (null when unavailable). */
+export type ComposerLocalPathResolver = (file: File) => string | null;
+
+function composerLocalPathFields(
+  file: File,
+  resolveLocalPath?: ComposerLocalPathResolver,
+): { localPath?: string } {
+  if (!resolveLocalPath) {
+    return {};
+  }
+  try {
+    const resolved = resolveLocalPath(file);
+    const normalized = typeof resolved === "string" ? resolved.trim() : "";
+    return normalized.length > 0 ? { localPath: normalized } : {};
+  } catch {
+    return {};
+  }
 }
 
 export function classifyComposerImageFiles(
@@ -235,6 +275,7 @@ export function classifyComposerImageFiles(
     createObjectUrl?: (file: File) => string;
     nowMs?: number;
     randomId?: () => string;
+    resolveLocalPath?: ComposerLocalPathResolver;
   } = {},
 ) {
   const createObjectUrl = options.createObjectUrl ?? ((file: File) => URL.createObjectURL(file));
@@ -260,6 +301,7 @@ export function classifyComposerImageFiles(
       sizeBytes: file.size,
       contentType: file.type,
       kind: "image",
+      ...composerLocalPathFields(file, options.resolveLocalPath),
     });
   }
   return { accepted, rejected };
@@ -271,6 +313,7 @@ export function classifyComposerFiles(
     createObjectUrl?: (file: File) => string;
     nowMs?: number;
     randomId?: () => string;
+    resolveLocalPath?: ComposerLocalPathResolver;
   } = {},
 ) {
   const createObjectUrl = options.createObjectUrl ?? ((file: File) => URL.createObjectURL(file));
@@ -292,6 +335,7 @@ export function classifyComposerFiles(
         sizeBytes: file.size,
         contentType: file.type,
         kind: "image",
+        ...composerLocalPathFields(file, options.resolveLocalPath),
       });
       continue;
     }
@@ -308,6 +352,7 @@ export function classifyComposerFiles(
         sizeBytes: file.size,
         contentType: file.type || "application/octet-stream",
         kind: "document",
+        ...composerLocalPathFields(file, options.resolveLocalPath),
       });
       continue;
     }

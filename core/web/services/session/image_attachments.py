@@ -13,6 +13,7 @@ import hashlib
 import mimetypes
 import re
 import secrets
+import stat
 import time
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,62 @@ from typing import Any
 from core.infrastructure.runtime_input import build_chat_user_message
 
 from .image_model_variant import build_model_image_variant
+
+
+class LocalAttachmentReadError(ValueError):
+    """A zero-copy local attachment path cannot be read safely.
+
+    `reason` maps to an HTTP status at the route layer:
+    not_found -> 404, too_large -> 413, everything else -> 422.
+    """
+
+    def __init__(self, message: str, *, reason: str):
+        super().__init__(message)
+        self.reason = reason
+
+
+def read_local_attachment_bytes(local_path: str, *, max_bytes: int) -> bytes:
+    """Read a user-declared local file for zero-copy attachment registration.
+
+    Desktop zero-copy uploads reference a real local path instead of shipping
+    the bytes through the renderer. Safety gates, in order: path must be
+    non-empty, must exist, must be a regular file (no directories, fifos or
+    device nodes), and its size is stat-checked before any read. The returned
+    bytes still go through the regular sniffing/size/whitelist validation at
+    the store layer, so a file swapped in after the stat cannot smuggle
+    anything past the standard gates.
+    """
+    normalized = str(local_path or "").strip()
+    if not normalized:
+        raise LocalAttachmentReadError(
+            "Local attachment path is required.",
+            reason="invalid_path",
+        )
+    path = Path(normalized)
+    try:
+        stat_result = path.stat()
+    except (OSError, ValueError):
+        raise LocalAttachmentReadError(
+            f"Attachment path does not exist: {path.name}",
+            reason="not_found",
+        )
+    if not stat.S_ISREG(stat_result.st_mode):
+        raise LocalAttachmentReadError(
+            f"Attachment path is not a regular file: {path.name}",
+            reason="not_regular_file",
+        )
+    if stat_result.st_size > max_bytes:
+        raise LocalAttachmentReadError(
+            "Attachment file is too large.",
+            reason="too_large",
+        )
+    try:
+        return path.read_bytes()
+    except OSError:
+        raise LocalAttachmentReadError(
+            f"Attachment file could not be read: {path.name}",
+            reason="unreadable",
+        )
 
 
 def _service():

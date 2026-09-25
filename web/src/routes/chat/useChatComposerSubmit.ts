@@ -20,6 +20,7 @@ import {
   switchSessionHead,
   updateSessionQueuedTurn,
 } from "../../api/chat";
+import { resolveLocalFilePath } from "../../api/desktopPlatform";
 import { submitVirtualHumanConversationMessage } from "../../api/virtualHumanLife";
 import { queryKeys } from "../../api/queryKeys";
 import type {
@@ -1232,7 +1233,12 @@ export function useChatComposerSubmitActions({
     if (!activeSessionId) {
       return;
     }
-    const { accepted: classifiedAccepted, rejected } = classifyComposerFiles(files);
+    // Desktop shell resolves drag/picker files back to their local paths so the
+    // submit upload can register them zero-copy; clipboard screenshots and web
+    // browsers resolve to null and keep the in-memory upload path.
+    const { accepted: classifiedAccepted, rejected } = classifyComposerFiles(files, {
+      resolveLocalPath: resolveLocalFilePath,
+    });
     if (!classifiedAccepted.length && !rejected.length) {
       return;
     }
