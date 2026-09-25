@@ -512,6 +512,78 @@ def _task_workspace_layout(*, checkout: Path, integration: Path, worktree: Path)
     )
 
 
+def test_desktop_shell_electron_args_default_keeps_hidden_presentation_off(tmp_path):
+    base = dict(shell_root=tmp_path, slot_root=None, open_workbench=True, lifecycle="start")
+    default_args = desktop_shell._desktop_shell_electron_args("electron", ["main.js"], **base)
+    explicit_off = desktop_shell._desktop_shell_electron_args(
+        "electron", ["main.js"], hidden_presentation=False, **base
+    )
+    hidden_args = desktop_shell._desktop_shell_electron_args(
+        "electron", ["main.js"], hidden_presentation=True, **base
+    )
+    assert default_args == explicit_off
+    assert "--hidden-presentation" not in default_args
+    assert hidden_args == default_args + ["--hidden-presentation"]
+
+
+def test_resolve_desktop_shell_launch_default_omits_hidden_presentation(tmp_path, monkeypatch):
+    tree = "a" * 40
+    _write_packaged_shell(tmp_path, tree_hash=tree, asar_mtime=2_000_000_000)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    spec = desktop_shell.resolve_desktop_shell_launch(tmp_path, then_lifecycle="start", open_workbench=True)
+    assert spec["kind"] == "packaged"
+    assert "--hidden-presentation" not in spec["args"]
+
+
+def test_resolve_desktop_shell_launch_forwards_hidden_presentation(tmp_path, monkeypatch):
+    tree = "a" * 40
+    _write_packaged_shell(tmp_path, tree_hash=tree, asar_mtime=2_000_000_000)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    packaged = desktop_shell.resolve_desktop_shell_launch(
+        tmp_path, then_lifecycle="start", open_workbench=True, hidden_presentation=True
+    )
+    assert packaged["kind"] == "packaged"
+    assert packaged["args"][-2:] == ["start", "--hidden-presentation"]
+
+    from core.launcher import desktop_shell_owner
+    exe = _write_unpackaged_electron(tmp_path, tree_hash=tree, main_mtime=2_000_000_000)
+    monkeypatch.setattr(
+        desktop_shell_owner,
+        "read_desktop_shell_owner",
+        lambda root: {"owner": "electron", "pid": 123, "executable": str(exe)},
+    )
+    monkeypatch.setattr(desktop_shell_owner, "_identity_status", lambda owner: "match")
+    live = desktop_shell.resolve_desktop_shell_launch(tmp_path, then_lifecycle="restart", hidden_presentation=True)
+    assert live["reason"] == "forward_to_live_shell"
+    assert "--hidden-presentation" in live["args"]
+
+
+def test_launch_desktop_shell_forwards_hidden_presentation_to_electron_argv(tmp_path, monkeypatch):
+    tree = "a" * 40
+    electron_exe = _write_unpackaged_electron(tmp_path, tree_hash=tree, main_mtime=2_000_000_000)
+    captured: dict[str, object] = {}
+
+    class FakePopen:
+        def __init__(self, args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            self.pid = 88
+
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    monkeypatch.setattr(desktop_shell.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(
+        "core.infrastructure.branch_workspace.resolve_branch_workspace",
+        lambda _requested: (_ for _ in ()).throw(BranchWorkspaceError("not a git checkout")),
+    )
+    result = desktop_shell.launch_desktop_shell(
+        project_root=tmp_path, open_workbench=True, hidden_presentation=True
+    )
+    assert result["kind"] == "unpackaged"
+    assert captured["args"][0] == str(electron_exe)
+    assert "--hidden-presentation" in captured["args"]
+    assert "--open-workbench" in captured["args"]
+
+
 def test_resolve_desktop_shell_launch_roots_falls_back_without_git(tmp_path):
     shell_root, slot_root = desktop_shell.resolve_desktop_shell_launch_roots(tmp_path)
     assert shell_root == tmp_path

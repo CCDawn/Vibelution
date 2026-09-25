@@ -21,13 +21,14 @@ describe("Electron main public deep-link consumption", () => {
     expect(source).toContain("let pendingOpenWorkbenchRequest = desktopCliArgs.openWorkbench");
     expect(source).toContain("const secondCli = resolveSingleInstanceCliIntent(additionalData)");
     expect(source).toContain("resolveSecondInstanceIntent({");
-    expect(source).toContain("applyPendingProjectSlot(intent.projectRoot, intent.lifecycleCommand, secondInstanceProvenance)");
+    expect(source).toContain("applyPendingProjectSlot(intent.projectRoot, intent.lifecycleCommand, secondInstanceProvenance, {");
+    expect(source).toContain("hiddenPresentation: intent.hiddenPresentation");
     expect(source).toContain("lifecycleCommand: secondCli.lifecycleCommand");
     expect(source).not.toContain('if (secondCli.lifecycleCommand && secondCli.lifecycleCommand !== "open")');
     expect(source).toContain("secondCli.openWorkbench");
     expect(source).toContain("projectRoot: desktopCliArgs.projectRoot");
     expect(source).toContain("openWorkbench: desktopCliArgs.openWorkbench");
-    expect(source).toContain("await provider.openOrFocusInstanceWorkbench({ instanceId: plan.instanceId, url })");
+    expect(source).toContain("instanceId: plan.instanceId,");
     expect(source).toContain("const windowAction = projectSlotWindowAction(plan)");
     expect(source).toContain("await startOrFocusWorkbenchFromProductEntryOnShell()");
     expect(source).not.toContain("await windowProvider.openOrFocusWorkbench()");
