@@ -14,12 +14,15 @@ import type {
   ConfigWorkspace,
 } from "../../api/types";
 import { shouldResetMigrationPreview } from "../configRouteLogic";
+import { type ConfigCopy, formatConfigCopy } from "./configCopy";
 
 type NoticeTone = "neutral" | "success" | "error";
 
 export type UseConfigMigrationActionsOptions = {
   migrationPreview: ConfigMigrationPreview | null;
   migrationPreviewExpiredMessage: string;
+  /** Bilingual copy table (wave 4): busy labels + apply confirmation copy. */
+  copy: ConfigCopy;
   workspaceQuery: UseQueryResult<ConfigWorkspace, Error>;
   queryClient: QueryClient;
   setBusyAction: (value: string) => void;
@@ -35,6 +38,7 @@ export function useConfigMigrationActions(options: UseConfigMigrationActionsOpti
   const {
     migrationPreview,
     migrationPreviewExpiredMessage,
+    copy,
     workspaceQuery,
     queryClient,
     setBusyAction,
@@ -49,7 +53,7 @@ export function useConfigMigrationActions(options: UseConfigMigrationActionsOpti
   const handlePreviewMigration = useCallback(async (
     artifactResolutions: ConfigMigrationArtifactResolution[] = [],
   ) => {
-    setBusyAction("正在生成迁移预览…");
+    setBusyAction(copy.migrationPreviewPending);
     try {
       const payload: ConfigMigrationPreviewRequest = { artifactResolutions };
       const response = await previewLlmV2Migration(payload);
@@ -68,10 +72,13 @@ export function useConfigMigrationActions(options: UseConfigMigrationActionsOpti
     }
     const impactedRefs = Object.values(migrationPreview.modelRefMap).slice(0, 8).join("\n");
     const confirmed = confirmApplyMigration(
-      `将修改外部 operator config。\nLive references: ${migrationPreview.referenceImpact.liveReferenceCount}\nCanonical model refs:\n${impactedRefs}\n\n确认应用已预览的迁移？`,
+      formatConfigCopy(copy.migrationApplyConfirm, {
+        liveCount: migrationPreview.referenceImpact.liveReferenceCount,
+        refs: impactedRefs,
+      }),
     );
     if (!confirmed) return;
-    setBusyAction("正在应用迁移…");
+    setBusyAction(copy.migrationApplyPending);
     try {
       await applyLlmV2Migration({ previewId, baseHash: previewBaseHash });
       const refreshed = await workspaceQuery.refetch();
@@ -93,6 +100,7 @@ export function useConfigMigrationActions(options: UseConfigMigrationActionsOpti
     }
   }, [
     confirmApplyMigration,
+    copy,
     markError,
     migrationPreview,
     migrationPreviewExpiredMessage,

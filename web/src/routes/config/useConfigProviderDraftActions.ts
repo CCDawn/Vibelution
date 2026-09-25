@@ -33,6 +33,7 @@ import type {
   ConfigProviderRegistryTab,
   ProviderActionFeedback,
 } from "../ConfigProviderRegistryPanel";
+import { type ConfigCopy, formatConfigCopy } from "./configCopy";
 import {
   formatProviderPinBusyMessage,
   formatProviderPinErrorMessage,
@@ -69,6 +70,8 @@ export type UseConfigProviderDraftActionsOptions = {
   draftConfig: PublicConfigShape | null | undefined;
   draftMeta: ConfigDraftMeta;
   loadFailedMessage: string;
+  /** Bilingual copy table (wave 4): all user-facing action messages come from here. */
+  copy: ConfigCopy;
   editBaselineRef: MutableRefObject<{ baseConfig: PublicConfigShape | null; baseHash: string }>;
   providerDraftRequestRef: MutableRefObject<ProviderDraftRequestSnapshot | null>;
   activeWorkspace: ConfigWorkspace | null | undefined;
@@ -100,6 +103,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     draftConfig,
     draftMeta,
     loadFailedMessage,
+    copy,
     editBaselineRef,
     providerDraftRequestRef,
     activeWorkspace,
@@ -124,7 +128,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     dispatchProviderWizard,
     confirmDeleteProvider = (providerId: string) => (
       typeof window === "undefined"
-      || window.confirm(`删除 Provider ${providerId}？此操作只允许在没有固定模型时继续。`)
+      || window.confirm(formatConfigCopy(copy.actionDeleteProviderConfirm, { id: providerId }))
     ),
   } = options;
 
@@ -145,9 +149,9 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
   }, [baseHash, draftConfig, draftMeta, editBaselineRef, loadFailedMessage, providerDraftRequestRef]);
 
   const handleDiscoverProvider = useCallback(async (providerId: string, credentialValue = ""): Promise<ConfigCatalogModel[]> => {
-    setBusyAction("正在发现 Provider 模型…");
+    setBusyAction(copy.actionDiscoverProviderBusy);
     setProviderActionError("");
-    setProviderActionFeedback({ kind: "discover", providerId, phase: "busy", message: "正在发现模型…" });
+    setProviderActionFeedback({ kind: "discover", providerId, phase: "busy", message: copy.actionDiscoverBusy });
     try {
       const response = await discoverDraftProvider(
         providerId,
@@ -159,7 +163,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
         kind: "discover",
         providerId,
         phase: "success",
-        message: models.length > 0 ? `发现 ${models.length} 个模型` : "目录已刷新",
+        message: models.length > 0 ? formatConfigCopy(copy.actionDiscoverFoundTemplate, { count: models.length }) : copy.actionCatalogRefreshed,
       });
       return models;
     } catch (error) {
@@ -179,6 +183,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     }
   }, [
     buildProviderDraftRequest,
+    copy,
     providerDiscoveryFailureDetail,
     providerDiscoveryFailureMessage,
     setBusyAction,
@@ -195,7 +200,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
   }, [buildProviderDraftRequest]);
 
   const handleCreateProvider = useCallback(async (state: ProviderWizardState, credentialValue: string): Promise<void> => {
-    setBusyAction("正在创建 Provider 草稿…");
+    setBusyAction(copy.actionCreateProviderBusy);
     setProviderActionError("");
     const template = providerPresetOptions.find((item) => item.provider_preset_id === state.templateId);
     const provider = buildProviderWizardDraft(state, template?.provider);
@@ -239,13 +244,14 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     };
 
     if (!models.length) {
-      report("error", "没有可固定的模型。请先点「发现模型」，确认列表里有「已发现」状态的行。");
+      report("error", copy.actionPinNoneMessage);
       return false;
     }
 
     const pinBusy = formatProviderPinBusyMessage({
       modelCount: models.length,
       firstModelRef: models[0]?.modelRef,
+      labels: copy,
     });
     setBusyAction(pinBusy);
     report("busy", pinBusy);
@@ -277,7 +283,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
       setBusyAction("");
       setSelectedProviderId(providerId);
       setSelectedProviderTab("models");
-      report("success", "所选模型均已固定。已切换到「已固定」列表。");
+      report("success", copy.actionAllPinnedMessage);
       return true;
     }
 
@@ -322,6 +328,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
               modelCount: pendingModels.length,
               completed: pinnedCount,
               total: pendingModels.length,
+              labels: copy,
             }));
           }
         } catch (error) {
@@ -339,7 +346,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
       const skippedTotal = skippedExisting + skippedRuntime;
       report(
         "success",
-        formatProviderPinSuccessMessage({ pinnedCount, skippedTotal }),
+        formatProviderPinSuccessMessage({ pinnedCount, skippedTotal, labels: copy }),
       );
       return true;
     } catch (error) {
@@ -347,7 +354,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
       markError(error);
       report(
         "error",
-        formatProviderPinErrorMessage({ pinnedCount, errorMessage: message }),
+        formatProviderPinErrorMessage({ pinnedCount, errorMessage: message, labels: copy }),
       );
       return false;
     } finally {
@@ -356,6 +363,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
   }, [
     activeWorkspace,
     baseHash,
+    copy,
     dispatchProviderWizard,
     draftMeta,
     editBaselineRef,
@@ -377,7 +385,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     if (separator <= 0) return false;
     const providerId = modelRef.slice(0, separator);
     const modelKey = modelRef.slice(separator + 1);
-    setBusyAction("正在取消固定模型…");
+    setBusyAction(copy.actionUnpinBusy);
     try {
       const response = await unpinDraftProviderModel(
         providerId,
@@ -404,7 +412,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
 
   const handleDeleteProvider = useCallback(async (providerId: string) => {
     if (!confirmDeleteProvider(providerId)) return;
-    setBusyAction("正在删除 Provider…");
+    setBusyAction(copy.actionDeleteProviderBusy);
     try {
       const provider = asRecord(asRecord(asRecord(requireDraft().llm).providers)[providerId]);
       const response = await deleteDraftProvider(
@@ -433,9 +441,9 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
 
   const handleUpdateProviderCredential = useCallback(async (providerId: string, credentialValue: string) => {
     if (!credentialValue.trim()) return false;
-    setBusyAction("正在更新 Provider API Key 草稿…");
+    setBusyAction(copy.actionCredentialBusy);
     setProviderActionError("");
-    setProviderActionFeedback({ kind: "credential", providerId, phase: "busy", message: "正在保存 API Key…" });
+    setProviderActionFeedback({ kind: "credential", providerId, phase: "busy", message: copy.actionSavingKey });
     try {
       const provider = asRecord(asRecord(asRecord(requireDraft().llm).providers)[providerId]);
       const response = await updateDraftProvider(
@@ -445,7 +453,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
       syncWorkspace(response, "success", { resetBase: false });
       setProviderCredentialEditId("");
       setProviderCredentialValue("");
-      setProviderActionFeedback({ kind: "credential", providerId, phase: "success", message: "API Key 已写入 operator config" });
+      setProviderActionFeedback({ kind: "credential", providerId, phase: "success", message: copy.actionKeySaved });
       return true;
     } catch (error) {
       const message = readableErrorMessage(error).slice(0, 480);
@@ -469,13 +477,13 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
   ]);
 
   const handleUpdateProviderContextWindow = useCallback(async (providerId: string, contextWindow: number | null) => {
-    setBusyAction("正在更新上下文窗口草稿…");
+    setBusyAction(copy.actionContextWindowBusy);
     setProviderActionError("");
     setProviderActionFeedback({
       kind: "credential",
       providerId,
       phase: "busy",
-      message: "正在保存上下文窗口…",
+      message: copy.actionSavingContextWindow,
     });
     try {
       const provider = clonePublicConfig(asRecord(asRecord(asRecord(requireDraft().llm).providers)[providerId]));
@@ -494,8 +502,8 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
         providerId,
         phase: "success",
         message: contextWindow && contextWindow > 0
-          ? `上下文窗口已设为 ${contextWindow}`
-          : "已清除 Provider 上下文窗口",
+          ? formatConfigCopy(copy.actionContextWindowSetTemplate, { value: contextWindow })
+          : copy.actionContextWindowCleared,
       });
       return true;
     } catch (error) {
@@ -527,9 +535,9 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
   }, [requireDraft, setProviderActionFeedback, setRouteEditProvider, setRouteEditProviderId, setRoutePreview]);
 
   const handlePreviewProviderRoute = useCallback(async (providerId: string, provider: Record<string, unknown>) => {
-    setBusyAction("正在预览路由影响…");
+    setBusyAction(copy.actionRoutePreviewBusy);
     setProviderActionError("");
-    setProviderActionFeedback({ kind: "route", providerId, phase: "busy", message: "正在生成路由预览…" });
+    setProviderActionFeedback({ kind: "route", providerId, phase: "busy", message: copy.actionGeneratingRoutePreview });
     try {
       const preview = await previewDraftProviderRoute(
         providerId,
@@ -540,7 +548,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
         kind: "route",
         providerId,
         phase: "success",
-        message: preview.routeChanged ? "路由预览已生成" : "当前路由没有变化",
+        message: preview.routeChanged ? copy.actionRoutePreviewReady : copy.actionRouteUnchanged,
       });
     } catch (error) {
       const message = readableErrorMessage(error).slice(0, 480);
@@ -562,9 +570,9 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
   const handleApplyProviderRoutePreview = useCallback(async (routePreview: ProviderRoutePreview | null) => {
     if (!routePreview?.routeChanged || !routePreview.routePreviewToken) return;
     const providerId = routePreview.providerId;
-    setBusyAction("正在更新 Provider 路由…");
+    setBusyAction(copy.actionRouteApplyBusy);
     setProviderActionError("");
-    setProviderActionFeedback({ kind: "route", providerId, phase: "busy", message: "正在更新 Provider 路由…" });
+    setProviderActionFeedback({ kind: "route", providerId, phase: "busy", message: copy.actionUpdatingRoute });
     try {
       const response = await updateDraftProvider(
         routePreview.providerId,
@@ -578,7 +586,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
       setRoutePreview(null);
       setRouteEditProviderId("");
       setRouteEditProvider({});
-      setProviderActionFeedback({ kind: "route", providerId, phase: "success", message: "Provider 路由已更新到草稿" });
+      setProviderActionFeedback({ kind: "route", providerId, phase: "success", message: copy.actionRouteApplied });
     } catch (error) {
       const message = readableErrorMessage(error).slice(0, 480);
       setProviderActionFeedback({ kind: "route", providerId, phase: "error", message });

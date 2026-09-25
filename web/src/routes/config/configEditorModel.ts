@@ -158,18 +158,35 @@ export function providerDiscoveryFailureDetail(error: unknown): ProviderDiscover
   }
 }
 
-export function providerDiscoveryFailureMessage(detail: ProviderDiscoveryFailureDetail | null): string {
+/** Copy templates for provider discovery failure reasons (subset of ConfigCopy). */
+export type DiscoveryFailureLabels = {
+  discoveryFailureCredentialMissing: string;
+  discoveryFailureCredentialRejected: string;
+  discoveryFailureEndpointInvalid: string;
+  discoveryFailureNetwork: string;
+  discoveryFailureTimeout: string;
+  discoveryFailureProtocolMismatch: string;
+  discoveryFailureInvalidResponse: string;
+  discoveryFailureRateLimited: string;
+  discoveryFailureUpstreamRejected: string;
+  discoveryFailureDefault: string;
+};
+
+export function providerDiscoveryFailureMessage(
+  detail: ProviderDiscoveryFailureDetail | null,
+  labels: DiscoveryFailureLabels,
+): string {
   switch (detail?.reasonCode) {
-    case "credential_missing": return "未配置 API Key；请先保存该 Provider 的凭据。";
-    case "credential_rejected": return "API Key 被上游拒绝；请检查凭据后重试。";
-    case "endpoint_invalid": return "服务地址无效或不允许访问；请检查端点配置。";
-    case "network": return "无法连接到服务地址；请检查网络、局域网服务或端口。";
-    case "timeout": return "服务响应超时；可稍后重试。";
-    case "protocol_mismatch": return "该端点不支持当前模型发现协议；请改用兼容接口或手动填写模型。";
-    case "invalid_response": return "服务返回的模型目录格式不兼容；请检查 Provider 协议。";
-    case "rate_limited": return "上游暂时限流；请稍后重试。";
-    case "upstream_rejected": return "上游服务拒绝了模型目录请求；请检查服务状态或协议。";
-    default: return "该 Provider 的模型发现暂不可用；请检查连接后重试。";
+    case "credential_missing": return labels.discoveryFailureCredentialMissing;
+    case "credential_rejected": return labels.discoveryFailureCredentialRejected;
+    case "endpoint_invalid": return labels.discoveryFailureEndpointInvalid;
+    case "network": return labels.discoveryFailureNetwork;
+    case "timeout": return labels.discoveryFailureTimeout;
+    case "protocol_mismatch": return labels.discoveryFailureProtocolMismatch;
+    case "invalid_response": return labels.discoveryFailureInvalidResponse;
+    case "rate_limited": return labels.discoveryFailureRateLimited;
+    case "upstream_rejected": return labels.discoveryFailureUpstreamRejected;
+    default: return labels.discoveryFailureDefault;
   }
 }
 

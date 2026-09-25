@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { CONFIG_COPY } from "./configCopy";
 import {
   classifyProviderQuickSetupErrorKind,
   formatProviderPinBusyMessage,
@@ -22,11 +23,11 @@ describe("configProviderActionModel", () => {
   });
 
   it("formats pin busy / success / error copy", () => {
-    expect(formatProviderPinBusyMessage({ modelCount: 1, firstModelRef: "p/m1" })).toContain("p/m1");
-    expect(formatProviderPinBusyMessage({ modelCount: 3, completed: 2, total: 3 })).toContain("2/3");
-    expect(formatProviderPinSuccessMessage({ pinnedCount: 2, skippedTotal: 1 })).toContain("新固定 2");
-    expect(formatProviderPinSuccessMessage({ pinnedCount: 2, skippedTotal: 1 })).toContain("跳过已存在 1");
-    expect(formatProviderPinErrorMessage({ pinnedCount: 0, errorMessage: "boom" })).toBe("固定失败：boom");
-    expect(formatProviderPinErrorMessage({ pinnedCount: 1, errorMessage: "boom" })).toContain("已固定 1");
+    expect(formatProviderPinBusyMessage({ modelCount: 1, firstModelRef: "p/m1", labels: CONFIG_COPY.zh })).toContain("p/m1");
+    expect(formatProviderPinBusyMessage({ modelCount: 3, completed: 2, total: 3, labels: CONFIG_COPY.zh })).toContain("2/3");
+    expect(formatProviderPinSuccessMessage({ pinnedCount: 2, skippedTotal: 1, labels: CONFIG_COPY.zh })).toContain("新固定 2");
+    expect(formatProviderPinSuccessMessage({ pinnedCount: 2, skippedTotal: 1, labels: CONFIG_COPY.zh })).toContain("跳过已存在 1");
+    expect(formatProviderPinErrorMessage({ pinnedCount: 0, errorMessage: "boom", labels: CONFIG_COPY.zh })).toBe("固定失败：boom");
+    expect(formatProviderPinErrorMessage({ pinnedCount: 1, errorMessage: "boom", labels: CONFIG_COPY.zh })).toContain("已固定 1");
   });
 });

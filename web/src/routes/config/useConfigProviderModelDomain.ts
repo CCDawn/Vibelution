@@ -31,6 +31,7 @@ import {
   type ProviderRoutePreview,
 } from "./useConfigProviderDraftActions";
 import type { ConfigCopy } from "./configCopy";
+import { formatConfigCopy } from "./configCopy";
 import {
   buildModelDetailsDraft,
   buildModelDetailsPayload,
@@ -209,13 +210,13 @@ export function useConfigProviderModelDomain(options: UseConfigProviderModelDoma
 
   async function handleTestProviderModel(modelRef: string) {
     if (structuredActionsDisabled) return;
-    setBusyAction(`正在测试 ${modelRef}…`);
+    setBusyAction(formatConfigCopy(copy.testModelBusyTemplate, { ref: modelRef }));
     setProviderActionError("");
     setProviderActionFeedback({
       kind: "discover",
       providerId: modelRef.includes("/") ? modelRef.slice(0, modelRef.indexOf("/")) : selectedProviderId,
       phase: "busy",
-      message: `正在真实调用测试 ${modelRef}…`,
+      message: formatConfigCopy(copy.testRealCallTemplate, { ref: modelRef }),
     });
     try {
       const result = await testConfigLlm({
@@ -232,10 +233,12 @@ export function useConfigProviderModelDomain(options: UseConfigProviderModelDoma
         providerId: result.provider_id || (modelRef.includes("/") ? modelRef.slice(0, modelRef.indexOf("/")) : selectedProviderId),
         phase: result.ok ? "success" : "error",
         message: result.ok
-          ? `${modelRef} 可调用${result.verification_persisted ? "（已写入真实调用状态）" : ""}`
-          : `${modelRef} 调用失败：${result.message || result.verification_error_type || "unknown"}${
-              result.verification_http_status ? ` · HTTP ${result.verification_http_status}` : ""
-            }`,
+          ? formatConfigCopy(copy.testCallOkTemplate, { ref: modelRef })
+            + (result.verification_persisted ? copy.testCallPersistedSuffix : "")
+          : formatConfigCopy(copy.testCallFailedTemplate, {
+              ref: modelRef,
+              reason: result.message || result.verification_error_type || "unknown",
+            }) + (result.verification_http_status ? ` · HTTP ${result.verification_http_status}` : ""),
       });
       // Reload catalog so「真实调用」column picks up persisted verification (draft or saved).
       const refreshed = await workspaceQuery.refetch();
@@ -251,7 +254,7 @@ export function useConfigProviderModelDomain(options: UseConfigProviderModelDoma
         kind: "discover",
         providerId: modelRef.includes("/") ? modelRef.slice(0, modelRef.indexOf("/")) : selectedProviderId,
         phase: "error",
-        message: `${modelRef} 测试请求失败：${message}`,
+        message: formatConfigCopy(copy.testRequestFailedTemplate, { ref: modelRef, message }),
       });
       markError(error);
     } finally {

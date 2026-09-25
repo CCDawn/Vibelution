@@ -16,10 +16,13 @@ import {
   type ProviderWizardState,
 } from "../configProviderLogic";
 import type { ConfigApplyDraftOverride } from "./configApplyModel";
+import { type ConfigCopy } from "./configCopy";
 import { classifyProviderQuickSetupErrorKind } from "./configProviderActionModel";
 
 export type UseConfigProviderQuickSetupActionsOptions = {
   providerQuickSetupState: ProviderQuickSetupState;
+  /** Bilingual copy table (wave 4): quick-setup failure + busy copy. */
+  copy: ConfigCopy;
   providerPresetOptions: Array<{
     provider_preset_id: string;
     provider?: Record<string, unknown>;
@@ -40,6 +43,7 @@ export type UseConfigProviderQuickSetupActionsOptions = {
 export function useConfigProviderQuickSetupActions(options: UseConfigProviderQuickSetupActionsOptions) {
   const {
     providerQuickSetupState,
+    copy,
     providerPresetOptions,
     providerDraftRequestRef,
     queryClient,
@@ -115,7 +119,7 @@ export function useConfigProviderQuickSetupActions(options: UseConfigProviderQui
       if (providerQuickSetupState.errorKind !== "partial_save") {
         const pinned = await handlePinProviderModels(provider.providerId, [selectedModel]);
         if (!pinned) {
-          dispatchProviderQuickSetup({ type: "save_failed", errorKind: "save", errorMessage: "模型未添加成功，请重试保存。已检测结果和选择已保留。" });
+          dispatchProviderQuickSetup({ type: "save_failed", errorKind: "save", errorMessage: copy.quickSetupPinFailedMessage });
           return;
         }
         modelAdded = true;
@@ -128,12 +132,12 @@ export function useConfigProviderQuickSetupActions(options: UseConfigProviderQui
             baseHash: snapshot.baseHash,
           }
         : undefined;
-      const applied = await handleApply("正在应用快速配置…", draftOverride);
+      const applied = await handleApply(copy.quickSetupApplyBusy, draftOverride);
       if (!applied) {
         dispatchProviderQuickSetup({
           type: "save_failed",
           errorKind: "partial_save",
-          errorMessage: "配置尚未保存，已检测结果和模型选择已保留。请点击「重试保存」。",
+          errorMessage: copy.quickSetupPartialSaveMessage,
         });
         return;
       }

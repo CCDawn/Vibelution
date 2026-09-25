@@ -402,10 +402,10 @@ export function ConfigRoute() {
       language: currentLanguage,
     }), {
       groupId: "avatar-pet" as const, pageId: "identity-profile", sectionId: "pet",
-      title: currentLanguage === "zh" ? "桌面宠物" : "Desktop pet",
-      detail: currentLanguage === "zh" ? "开启或关闭桌面宠物" : "Open or close desktop pet",
-      haystack: "桌宠 桌面宠物 开启 关闭 desktop pet",
-      titleHaystack: currentLanguage === "zh" ? "桌面宠物 桌宠" : "Desktop pet",
+      title: copy.searchPetTitle,
+      detail: copy.searchPetDetail,
+      haystack: copy.searchPetHaystack,
+      titleHaystack: copy.searchPetTitleHaystack,
       valueHaystack: "",
     }],
     [currentLanguage, draftConfig, settingsGroups, workspace?.editorMeta, workspace?.editorSections],
@@ -986,6 +986,7 @@ export function ConfigRoute() {
     draftConfig,
     draftMeta,
     loadFailedMessage: copy.loadFailed,
+    copy,
     editBaselineRef,
     providerDraftRequestRef,
     activeWorkspace,
@@ -995,7 +996,7 @@ export function ConfigRoute() {
     markError,
     readableErrorMessage,
     providerDiscoveryFailureDetail,
-    providerDiscoveryFailureMessage,
+    providerDiscoveryFailureMessage: (detail) => providerDiscoveryFailureMessage(detail, copy),
     setBusyAction,
     setProviderActionError,
     setProviderActionFeedback,
@@ -1015,6 +1016,7 @@ export function ConfigRoute() {
     handleConfirmProviderQuickSetup,
   } = useConfigProviderQuickSetupActions({
     providerQuickSetupState,
+    copy,
     providerPresetOptions,
     providerDraftRequestRef,
     queryClient,
@@ -1069,6 +1071,7 @@ export function ConfigRoute() {
   } = useConfigMigrationActions({
     migrationPreview,
     migrationPreviewExpiredMessage: copy.migrationPreviewExpired,
+    copy,
     workspaceQuery,
     queryClient,
     setBusyAction,
@@ -1417,10 +1420,7 @@ export function ConfigRoute() {
   }
 
   function intakeLabel(mode: string) {
-    if (mode === "auto") {
-      return currentLanguage === "en" ? "automatic review" : "自动审查";
-    }
-    return currentLanguage === "en" ? "manual operation" : "手工操作";
+    return mode === "auto" ? copy.intakeAuto : copy.intakeManual;
   }
 
   if (!draftConfig && workspaceQuery.isLoading) {
@@ -1495,7 +1495,7 @@ export function ConfigRoute() {
           layoutId: CONFIG_SETTINGS_LAYOUT_ID,
           sidebar: CONFIG_SETTINGS_SIDEBAR_RESIZE,
           collapse: {
-            sidebar: { separatorLabel: "设置导航宽度", collapseLabel: "收起设置导航", expandLabel: "展开设置导航" },
+            sidebar: { separatorLabel: copy.navResizeSeparator, collapseLabel: copy.navCollapse, expandLabel: copy.navExpand },
           },
         }}
         sidebar={(
@@ -1504,7 +1504,7 @@ export function ConfigRoute() {
             title={copy.pageTitle}
             subtitle={copy.subtitle}
             subtitleHint={copy.subtitleHint}
-            statusLabel={hasPendingApply ? "有未保存修改" : "配置已保存"}
+            statusLabel={hasPendingApply ? copy.statusUnsaved : copy.statusSaved}
             groups={settingsGroups}
             activeGroupId={showingSettingsIndex && !requestedSectionId ? "" : activeGroup?.id ?? ""}
             onShowAll={() => showSettingsIndex()}
@@ -1533,9 +1533,9 @@ export function ConfigRoute() {
         actions={
           <div className={styles.configStatusActions}>
             {isSectionVisible("models") && workspace.schemaVersion === 2 ? (
-                <VActionGroup ariaLabel="模型连接操作">
+                <VActionGroup ariaLabel={copy.modelsActionsAria}>
                   <VButton
-                    title="选择服务商，填写连接信息，检测后选择模型并保存。"
+                    title={copy.addConnectionHint}
                     className={styles.providerModeButton}
                     aria-pressed={providerConnecting}
                     variant={providerConnecting ? "primary" : "secondary"}
@@ -1545,16 +1545,16 @@ export function ConfigRoute() {
                       setProviderConnecting(true);
                     }}
                   >
-                    添加连接
+                    {copy.addConnection}
                   </VButton>
                   <VButton
-                    title="模板向导、迁移与底层参数。"
+                    title={copy.advancedSettingsHint}
                     className={styles.providerModeButton}
                     aria-pressed={providerShowMore}
                     variant={providerShowMore ? "primary" : "ghost"}
                     onPress={() => { setProviderConnecting(false); setProviderShowMore((open) => !open); }}
                   >
-                    {providerShowMore ? "收起高级设置" : "高级设置"}
+                    {providerShowMore ? copy.collapseAdvancedSettings : copy.advancedSettings}
                   </VButton>
                 </VActionGroup>
             ) : null}
@@ -1694,9 +1694,10 @@ export function ConfigRoute() {
                       variant="ghost"
                       onPress={() => setProviderConnecting(false)}
                     >
-                      返回已配置服务
+                      {copy.backToConfiguredProviders}
                     </VButton>
                     <ConfigQuickSetupPanel
+                      copy={copy}
                       state={providerQuickSetupState}
                       templates={providerPresetOptions}
                       credentialValue={providerQuickCredential}
@@ -1723,13 +1724,14 @@ export function ConfigRoute() {
                 ) : !providerShowMore ? (
                   <>
                 <ConfigProviderRegistryPanel
+                  copy={copy}
                   routeEditor={routeEditProviderId ? <>
                 {routeEditProviderId && !routePreview ? (
                   <VSurface as="section" padding="compact" tone="row" className={styles.providerRouteEditSurface}>
                     <VSection
-                    title="服务地址与协议"
+                    title={copy.routeEditSectionTitle}
                     actions={(
-                      <VActionGroup ariaLabel="Provider 路由编辑操作">
+                      <VActionGroup ariaLabel={copy.routeEditActionsAria}>
                         <VButton
                           isDisabled={Boolean(busyAction)}
                           onPress={() => {
@@ -1739,7 +1741,7 @@ export function ConfigRoute() {
                             setProviderActionFeedback(null);
                           }}
                         >
-                          取消
+                          {copy.cancel}
                         </VButton>
                         <VButton
                           variant="primary"
@@ -1749,15 +1751,15 @@ export function ConfigRoute() {
                           }}
                         >
                           {providerActionFeedback?.kind === "route" && providerActionFeedback.phase === "busy"
-                            ? "生成预览中…"
-                            : "预览替换影响"}
+                            ? copy.routePreviewPending
+                            : copy.routePreviewAction}
                         </VButton>
                       </VActionGroup>
                     )}
                     >
                     <div className={styles.providerRouteEditGrid}>
                       <label className={styles.providerRouteEditField}>
-                        <span>服务地址</span>
+                        <span>{copy.routeFieldBaseUrl}</span>
                         <VInput
                           value={getString(routeEditProvider.base_url)}
                           disabled={Boolean(busyAction)}
@@ -1765,7 +1767,7 @@ export function ConfigRoute() {
                         />
                       </label>
                       <label className={styles.providerRouteEditField}>
-                        <span>接口类型</span>
+                        <span>{copy.routeFieldDriver}</span>
                         <VStringSelect
                           ariaLabel="Provider route driver"
                           value={getString(routeEditProvider.driver)}
@@ -1775,7 +1777,7 @@ export function ConfigRoute() {
                         />
                       </label>
                       <label className={styles.providerRouteEditField}>
-                        <span>请求协议</span>
+                        <span>{copy.routeFieldProtocol}</span>
                         <VStringSelect
                           ariaLabel="Provider default wire protocol"
                           value={getString(asRecord(routeEditProvider.protocols).default)}
@@ -1793,7 +1795,7 @@ export function ConfigRoute() {
                       </label>
                     </div>
                     <p className={styles.providerRouteEditWarning} role="alert">
-                      保存前会检查哪些模型和 Agent 受到影响，请确认后再应用。
+                      {copy.routeEditWarning}
                     </p>
                     </VSection>
                   </VSurface>
@@ -1801,18 +1803,18 @@ export function ConfigRoute() {
                 {routePreview ? (
                   <VStateSurface
                     tone={routePreview.routeChanged ? "unavailable" : "info"}
-                    title={routePreview.routeChanged ? "确认连接修改" : "连接没有变化"}
+                    title={routePreview.routeChanged ? copy.routeConfirmChangedTitle : copy.routeConfirmUnchangedTitle}
                     facts={routePreview.impactedRefs.map((impact, index) => ({
                       key: impact.modelRef ?? String(index),
                       label: impact.modelRef ?? routePreview.modelRefs[index] ?? "modelRef",
-                      value: `${impact.liveReferenceCount ?? 0} 处引用`,
+                      value: `${impact.liveReferenceCount ?? 0}${copy.routeReferenceCountUnit}`,
                     }))}
                     actions={(
-                      <VActionGroup ariaLabel="Provider 路由替换确认">
+                      <VActionGroup ariaLabel={copy.routeConfirmActionsAria}>
                         <VButton onPress={() => {
                           setRoutePreview(null);
                           setProviderActionFeedback(null);
-                        }}>取消</VButton>
+                        }}>{copy.cancel}</VButton>
                         <VButton
                           variant="danger"
                           isDisabled={!routePreview.routeChanged || !routePreview.routePreviewToken || Boolean(busyAction)}
@@ -1821,13 +1823,13 @@ export function ConfigRoute() {
                           }}
                         >
                           {providerActionFeedback?.kind === "route" && providerActionFeedback.phase === "busy"
-                            ? "更新中…"
-                            : "确认并更新连接"}
+                            ? copy.routeApplyPending
+                            : copy.routeConfirmAction}
                         </VButton>
                       </VActionGroup>
                     )}
                   >
-                    以上模型和引用会使用新的连接设置。确认前请核对服务地址与协议。
+                    {copy.routeConfirmBody}
                   </VStateSurface>
                 ) : null}
                   </> : undefined}
@@ -1908,6 +1910,7 @@ export function ConfigRoute() {
                 {providerShowMore ? (
                   <>
                 <ConfigProviderWizard
+                  copy={copy}
                   state={providerWizardState}
                   templates={providerPresetOptions}
                   disabled={structuredActionsDisabled}
@@ -1924,6 +1927,7 @@ export function ConfigRoute() {
                   }}
                 />
                 {workspace.modelAliasUsage.totalLiveReferenceCount > 0 ? <ConfigModelMigrationPanel
+                  copy={copy}
                   schemaVersion={2}
                   preview={null}
                   aliasUsageCount={workspace.modelAliasUsage.totalLiveReferenceCount}
@@ -1936,6 +1940,7 @@ export function ConfigRoute() {
               </>
             ) : (
               <ConfigModelMigrationPanel
+                copy={copy}
                 schemaVersion={1}
                 preview={migrationPreview}
                 aliasUsageCount={workspace.modelAliasUsage.totalLiveReferenceCount}
