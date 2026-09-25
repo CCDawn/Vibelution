@@ -297,7 +297,7 @@ type ConversationMarkdownCodeBlockProps = {
  * rounding; the header attaches above it). Local-only state: wrap applies to
  * this block for its mount lifetime, copy feedback self-resets.
  */
-function ConversationMarkdownCodeBlock({
+export function ConversationMarkdownCodeBlock({
   language,
   text,
   preClassName,

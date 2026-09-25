@@ -18,6 +18,8 @@ import {
 } from "../../../components/vui";
 import { ConversationFollowupQueueBar } from "../../../components/conversation/ConversationFollowupQueueBar";
 import { ConversationTodoChecklist } from "../../../components/conversation/ConversationTodoChecklist";
+import { ConversationMarkdownCodeBlock } from "../../../components/conversation/ConversationMarkdownRenderer";
+import conversationViewStyles from "../../../components/conversation/ConversationView.styles";
 import type { TodoChecklistSnapshot } from "../../../components/conversation/conversationTodoChecklistModel";
 import { ConversationTranscriptLoadingState } from "../../../components/conversation/ConversationTranscriptLoadingState";
 import {
@@ -199,7 +201,20 @@ export function StructureCatalog() {
           <ConversationActiveTurnStatusNote lang="zh" message={activeTurnRetryPreviewMessage} />
         </div>
       </VuiPreviewCard>
-      <VuiPreviewCard name="ConversationTodoChecklist" className="col-span-full min-h-0">
+            <VuiPreviewCard name="ConversationMarkdownCodeBlock" className="col-span-full min-h-0">
+        <div className="w-full max-w-[520px]">
+          <ConversationMarkdownCodeBlock
+            language="ts"
+            text={`const answer = 42;
+// 语言标签、复制与换行切换均可直接交互`}
+            preClassName={conversationViewStyles.responseSegmentPre}
+            code={<code className="language-ts">{`const answer = 42;
+// 语言标签、复制与换行切换均可直接交互`}</code>}
+            truncation={null}
+          />
+        </div>
+      </VuiPreviewCard>
+<VuiPreviewCard name="ConversationTodoChecklist" className="col-span-full min-h-0">
         <div className="w-full max-w-[520px] rounded-[12px] border border-vui-border-subtle bg-vui-surface-panel p-3">
           <ConversationTodoChecklist
             snapshot={conversationTodoChecklistPreviewSnapshot}
