@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from config.models import (
     AppConfig,
     LLMConfig,
@@ -13,6 +15,7 @@ from config.models import (
 from core.llm.client import LLMClient
 from core.llm.protocols import WireProtocol
 from core.llm.semantic_messages import (
+    ImagePart,
     InvocationScope,
     SemanticGenerationSettings,
     SemanticMessage,
@@ -20,7 +23,11 @@ from core.llm.semantic_messages import (
     SemanticToolDefinition,
     TextPart,
 )
-from core.llm.wire.anthropic_messages import AnthropicMessagesNativeWireAdapter
+from core.llm.wire.anthropic_messages import (
+    ANTHROPIC_IMAGE_MEDIA_TYPES,
+    AnthropicMessagesNativeWireAdapter,
+    encode_image_source,
+)
 from core.llm.wire.chat_completions import OUTPUT_LENGTH_TRUNCATED
 from core.llm.wire.compat_native import AnthropicMessagesLiteLLMCompatWireAdapter
 
@@ -58,6 +65,17 @@ def _route(adapter_id: str = "anthropic_messages_native"):
     )
 
 
+def _image_request(image: ImagePart) -> SemanticModelRequest:
+    return SemanticModelRequest(
+        scope=_scope(),
+        messages=(
+            SemanticMessage("user", (TextPart("what is in this image?"), image)),
+        ),
+        tools=(),
+        settings=SemanticGenerationSettings(max_output_tokens=256),
+    )
+
+
 def test_native_adapter_encodes_real_messages_shape_not_openai_chat_shape() -> None:
     payload = AnthropicMessagesNativeWireAdapter().encode_request(
         _request(), route=_route()
@@ -72,6 +90,50 @@ def test_native_adapter_encodes_real_messages_shape_not_openai_chat_shape() -> N
     ]
     assert "tool_choice" in payload
     assert "functions" not in payload
+
+
+def test_native_adapter_encodes_data_url_image_as_base64_source() -> None:
+    request = _image_request(
+        ImagePart(uri="data:image/png;base64,aGVsbG8=", media_type="image/png")
+    )
+
+    payload = AnthropicMessagesNativeWireAdapter().encode_request(request, route=_route()).body
+
+    image_block = payload["messages"][0]["content"][1]
+    assert image_block == {
+        "type": "image",
+        "source": {"type": "base64", "media_type": "image/png", "data": "aGVsbG8="},
+    }
+
+
+def test_native_adapter_keeps_url_source_for_remote_image_uri() -> None:
+    request = _image_request(
+        ImagePart(uri="https://example.com/cat.png", media_type="image/png")
+    )
+
+    payload = AnthropicMessagesNativeWireAdapter().encode_request(request, route=_route()).body
+
+    image_block = payload["messages"][0]["content"][1]
+    assert image_block == {
+        "type": "image",
+        "source": {"type": "url", "url": "https://example.com/cat.png"},
+    }
+
+
+def test_encode_image_source_rejects_unsupported_media_type() -> None:
+    assert ANTHROPIC_IMAGE_MEDIA_TYPES == {"image/png", "image/jpeg", "image/webp", "image/gif"}
+    with pytest.raises(ValueError, match="image/tiff"):
+        encode_image_source("data:image/tiff;base64,aGVsbG8=", "image/tiff")
+
+
+def test_encode_image_source_falls_back_to_part_media_type_when_data_url_omits_it() -> None:
+    source = encode_image_source("data:;base64,aGVsbG8=", "image/webp")
+    assert source == {"type": "base64", "media_type": "image/webp", "data": "aGVsbG8="}
+
+
+def test_encode_image_source_rejects_non_base64_data_url() -> None:
+    with pytest.raises(ValueError, match="base64"):
+        encode_image_source("data:image/png,url-encoded-payload", "image/png")
 
 
 def test_native_adapter_decodes_text_tool_and_cache_usage() -> None:
