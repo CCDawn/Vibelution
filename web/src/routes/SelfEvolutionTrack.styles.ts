@@ -20,7 +20,7 @@ export const selfEvolutionTrackStyles = {
   dangerAction:
     "inline-flex min-h-8 w-fit max-w-full cursor-pointer items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-tint-strong),var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash),var(--vui-control-muted))] px-3 [font-size:var(--vui-font-sm)] font-semibold text-[var(--state-error)] disabled:cursor-default disabled:opacity-50",
   workspaceLayout:
-    "grid h-full max-h-full min-h-0 min-w-0 max-w-full grid-cols-[var(--self-sidebar-width,340px)_10px_minmax(0,1fr)] items-stretch overflow-hidden overflow-x-hidden",
+    "grid h-full max-h-full min-h-0 min-w-0 max-w-full grid-cols-[var(--pane-w-sidebar,340px)_10px_minmax(0,1fr)] items-stretch overflow-hidden overflow-x-hidden",
   sideColumn: "grid min-w-0 content-start bg-vui-surface-rail",
   sideColumnScrollable: "h-full overflow-y-auto",
   paneCollapsed: "overflow-hidden p-0 invisible",

@@ -1,7 +1,8 @@
-import { type ComponentPropsWithoutRef, type ReactNode, useMemo, useState } from "react";
+import { type ComponentPropsWithoutRef, type ReactNode, useCallback, useMemo, useState } from "react";
 
 import { PaneCollapseHandle } from "../../layout/PaneCollapseHandle";
 import { PaneResizeHandle } from "../../layout/PaneResizeHandle";
+import { paneWidthCssVar } from "../../layout/paneCssVariables";
 import { usePersistedPaneResize, type UsePersistedPaneResizeResult } from "../../layout/usePersistedPaneResize";
 import type { PaneSpec } from "../../layout/paneLayoutPersistence";
 
@@ -95,6 +96,7 @@ function ResizableSplitWorkspace({
   main,
   sidebar,
   resize,
+  style,
   ...props
 }: VSplitWorkspaceProps & { resize: VSplitWorkspaceResizeConfig }) {
   const hasSidebar = Boolean(sidebar);
@@ -113,15 +115,25 @@ function ResizableSplitWorkspace({
 
   const {
     layoutRef,
+    registerSplitContainer,
+    paneVariablesStyle,
     widths,
     draggingPaneId,
     startResize,
     onResizeKeyDown,
-    getPaneStyle,
   }: UsePersistedPaneResizeResult = usePersistedPaneResize({
     layoutId: resize.layoutId,
     panes,
   });
+  // One stable ref callback: the container both drives width reclamp and
+  // hosts the --pane-w-* variables panes consume during drags.
+  const setSplitContainerRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      layoutRef.current = element;
+      registerSplitContainer(element);
+    },
+    [layoutRef, registerSplitContainer],
+  );
 
   const sidebarSpec = panes.find((pane) => pane.id === (resize.sidebar?.id || "sidebar"));
   const asideSpec = panes.find((pane) => pane.id === (resize.aside?.id || "aside"));
@@ -144,11 +156,12 @@ function ResizableSplitWorkspace({
   return (
     <div
       {...props}
-      ref={layoutRef}
+      ref={setSplitContainerRef}
       data-vui="split-workspace"
       data-vui-resizable="true"
       data-vui-collapsible={resize.collapse ? "true" : undefined}
       data-vui-layout-id={resize.layoutId}
+      style={style ? { ...paneVariablesStyle, ...style } : paneVariablesStyle}
       className={[
         "flex min-h-0 min-w-0 flex-1 items-stretch gap-0 overflow-hidden",
         stripGridLayoutClasses(className),
@@ -164,8 +177,8 @@ function ResizableSplitWorkspace({
             hidden={sidebarCollapsed}
             className="flex h-full min-h-0 min-w-0 shrink-0 flex-col overflow-hidden"
             style={{
-              width: sidebarWidth,
-              flexBasis: sidebarWidth,
+              width: `var(${paneWidthCssVar(sidebarSpec.id)})`,
+              flexBasis: `var(${paneWidthCssVar(sidebarSpec.id)})`,
               minWidth: sidebarSpec.minWidth,
               maxWidth: sidebarSpec.maxWidth,
             }}
@@ -240,8 +253,8 @@ function ResizableSplitWorkspace({
             hidden={asideCollapsed}
             className="flex h-full min-h-0 min-w-0 shrink-0 flex-col overflow-hidden"
             style={{
-              width: asideWidth,
-              flexBasis: asideWidth,
+              width: `var(${paneWidthCssVar(asideSpec.id)})`,
+              flexBasis: `var(${paneWidthCssVar(asideSpec.id)})`,
               minWidth: asideSpec.minWidth,
               maxWidth: asideSpec.maxWidth,
             }}

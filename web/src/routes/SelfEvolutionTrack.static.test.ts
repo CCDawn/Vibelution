@@ -120,9 +120,9 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("PaneCollapseHandle");
     expect(selfEvolutionSource).toContain("sidebarCollapsed");
     expect(selfEvolutionSource).toContain("setSidebarCollapsed");
-    expect(selfEvolutionSource).toContain("--self-sidebar-width");
-    expect(selfEvolutionSource).toContain("workspaceLayoutStyle(sidebarCollapsed, sidebarWidth)");
-    expect(selfEvolutionSource).not.toContain('style={{ ["--self-sidebar-width" as string]');
+    expect(selfEvolutionSource).toContain('paneWidthCssVar("sidebar")');
+    expect(selfEvolutionSource).toContain("workspaceLayoutStyle(sidebarCollapsed, selfPaneVariablesStyle)");
+    expect(selfEvolutionSource).not.toContain('style={{ ["--pane-w-sidebar" as string]');
   });
 
   it("uses the compact workbench conversation density on the self-evolution workspace", () => {
@@ -564,7 +564,7 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("WORKBENCH_LAYOUT_IDS.evolutionSelf");
     expect(selfEvolutionSource).toContain("migrateLegacyNumericPane");
     expect(selfEvolutionSource).toContain("SELF_SIDEBAR_PANE");
-    expect(styles.workspaceLayout).toContain("var(--self-sidebar-width,340px)");
+    expect(styles.workspaceLayout).toContain("var(--pane-w-sidebar,340px)");
     expect(styles.workspaceLayout).not.toContain("max-[1180px]:grid-cols-1");
     expect(styles.conversationShell).toContain("border-0");
     expect(styles.conversationShell).toContain("bg-vui-surface-panel");

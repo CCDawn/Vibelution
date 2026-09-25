@@ -38,7 +38,7 @@ describe("LogsRoute layout contract", () => {
     expect(routeSource).toContain("VActionGroup");
     expect(routeSource).toContain("LOG_SIDEBAR_STORAGE_KEY");
     expect(routeSource).toContain("LOG_RIGHT_RAIL_STORAGE_KEY");
-    expect(styles.resizableLayout).toContain("grid-cols-[var(--logs-sidebar-width)_auto_minmax(0,1fr)]");
+    expect(styles.resizableLayout).toContain("grid-cols-[var(--pane-w-sidebar)_auto_minmax(0,1fr)]");
     expect(styles.packageButtonPath).toContain("truncate");
     expect(styles.rootButtonPath).toContain("truncate");
     expect(styles.deleteButton).toContain("w-fit");
@@ -83,7 +83,7 @@ describe("LogsRoute layout contract", () => {
   });
 
   it("keeps the resizable logs workspace as a three-column grid", () => {
-    expect(styles.workspace).toContain("grid-cols-[minmax(0,1fr)_10px_minmax(220px,var(--logs-right-rail-width,280px))]");
+    expect(styles.workspace).toContain("grid-cols-[minmax(0,1fr)_10px_minmax(220px,var(--pane-w-right,280px))]");
     expect(styles.workspace).toContain("grid-rows-[minmax(0,1fr)]");
     expect(styles.workspace).toContain("overflow-hidden");
   });
@@ -121,7 +121,7 @@ describe("LogsRoute layout contract", () => {
 
   it("avoids adding another card shell around the actual log preview stack", () => {
     expect(styles.previewPane).toContain("grid-rows-[minmax(0,1fr)]");
-    expect(styles.logPreviewStack).toContain("--logs-package-files-height");
+    expect(styles.logPreviewStack).toContain("--pane-h-package-files");
     expect(styles.logPreviewStack).toContain("minmax(0,1fr)");
     expect(styles.logPreviewStack).not.toContain("rounded-[var(--radius-panel)]");
     expect(styles.logPreviewStack).not.toContain("border border-[color-mix(in_srgb");
@@ -147,7 +147,8 @@ describe("LogsRoute layout contract", () => {
     expect(routeSource).toContain("usePersistedPaneHeight");
     expect(routeSource).toContain("PaneHeightResizeHandle");
     expect(routeSource).toContain("package-files");
-    expect(routeSource).toContain("--logs-package-files-height");
+    expect(routeSource).toContain("registerLogsHeightContainer");
+    expect(routeSource).toContain("logPaneHeightVariablesStyle");
   });
 
   it("keeps short toolbar and picker controls content-sized unless the whole row is the target", () => {

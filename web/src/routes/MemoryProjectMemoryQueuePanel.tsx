@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 
 import type { AgentProjectMemoryUpdateProposal } from "../api/types";
 import { PaneHeightResizeHandle } from "../components/layout/PaneHeightResizeHandle";
+import { paneHeightCssVar } from "../components/layout/paneCssVariables";
 import type { PaneHeightSpec } from "../components/layout/paneHeightPersistence";
 import { usePersistedPaneHeight } from "../components/layout/usePersistedPaneHeight";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
@@ -85,6 +86,8 @@ export function MemoryProjectMemoryQueuePanel({
   proposalResolverLabel,
 }: MemoryProjectMemoryQueuePanelProps) {
   const {
+    registerSplitContainer: registerQueueContainer,
+    paneVariablesStyle: queueVariablesStyle,
     heights: queueHeights,
     draggingPaneId: queueHeightDraggingPaneId,
     startResize: startQueueHeightResize,
@@ -95,12 +98,14 @@ export function MemoryProjectMemoryQueuePanel({
   });
   const queueHeight = queueHeights["project-memory-queue"] ?? MEMORY_PROJECT_QUEUE_HEIGHT_PANE.defaultHeight;
   const queueStyle = {
-    height: `${queueHeight}px`,
+    ...queueVariablesStyle,
+    height: `var(${paneHeightCssVar("project-memory-queue")})`,
   } as CSSProperties;
 
   return (
     <>
     <section
+      ref={registerQueueContainer}
       className={styles.projectMemoryQueuePanel}
       style={queueStyle}
       data-vui-region="memory-project-queue"

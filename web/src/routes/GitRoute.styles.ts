@@ -25,7 +25,7 @@ export const gitRouteStyles = {
   notice:
     "mx-2 mt-1.5 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)] bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash-strong),transparent)] px-2.5 py-2 [font-size:var(--vui-font-xs)] text-[var(--state-error)]",
   workspace:
-    `grid min-h-0 min-w-0 grid-cols-[var(--git-change-panel-width,320px)_10px_minmax(0,1fr)_clamp(250px,22vw,360px)] p-1.5 max-[1200px]:grid-cols-[minmax(240px,var(--git-change-panel-width,300px))_8px_minmax(0,1fr)] max-[1200px]:grid-rows-[minmax(0,1fr)_minmax(200px,34vh)] max-[1200px]:gap-y-1.5 max-[860px]:grid-cols-[minmax(0,1fr)] max-[860px]:grid-rows-none max-[860px]:content-start max-[860px]:gap-1.5 ${vuiWorkspaceFillClass}`,
+    `grid min-h-0 min-w-0 grid-cols-[var(--pane-w-change-panel,320px)_10px_minmax(0,1fr)_clamp(250px,22vw,360px)] p-1.5 max-[1200px]:grid-cols-[minmax(240px,var(--pane-w-change-panel,300px))_8px_minmax(0,1fr)] max-[1200px]:grid-rows-[minmax(0,1fr)_minmax(200px,34vh)] max-[1200px]:gap-y-1.5 max-[860px]:grid-cols-[minmax(0,1fr)] max-[860px]:grid-rows-none max-[860px]:content-start max-[860px]:gap-1.5 ${vuiWorkspaceFillClass}`,
   // Clean overview must fully override the dirty-mode 4-column change-list template
   // (workspace + workspaceOverview are combined). Without !grid-cols, left rail stays
   // ~320px and nested 本地提交|WORKTREE cards crush/overlap text.

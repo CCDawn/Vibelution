@@ -517,7 +517,7 @@ describe("MemoryRoute layout contract", () => {
     expect(graphViewPanelSource).not.toContain("styles.summaryCard");
     expect(graphViewPanelStyles.sourcePanel).not.toMatch(/bg-vui-surface-panel|bg-\[var\(--vui-surface-panel\)\]/);
     expect(graphViewPanelStyles.graphCanvasPanel).not.toContain("rounded-[var(--radius-panel)]");
-    expect(graphViewPanelStyles.graphCanvasPanel).toContain("--memory-graph-node-list-height");
+    expect(graphViewPanelStyles.graphCanvasPanel).toContain("--pane-h-graph-node-list");
     expect(graphViewPanelStyles.graphNodeListResizeHandle).not.toContain("cursor-row-resize");
     expect(graphViewPanelStyles).not.toHaveProperty("managementHeader");
   });

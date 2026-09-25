@@ -389,7 +389,7 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("PaneCollapseHandle");
     expect(routeSource).toContain("leftPanelCollapsed");
     expect(routeSource).toContain("setLeftPanelCollapsed");
-    expect(routeSource).toContain("--tools-left-panel-width");
+    expect(routeSource).toContain('paneWidthCssVar("left")');
   });
 
   it("supports bulk selection while preserving tool registry safety rules", () => {
@@ -479,7 +479,7 @@ describe("ToolsRoute layout contract", () => {
       expect(styles[key]).toContain("overflow-x-hidden");
     }
 
-    expect(styles.workspace).toContain("grid-cols-[minmax(0,var(--tools-left-panel-width))_auto_minmax(0,1fr)]");
+    expect(styles.workspace).toContain("grid-cols-[minmax(0,var(--pane-w-left))_auto_minmax(0,1fr)]");
     expect(styles.workspace).toContain("max-[760px]:grid-cols-[minmax(0,1fr)]");
   });
 

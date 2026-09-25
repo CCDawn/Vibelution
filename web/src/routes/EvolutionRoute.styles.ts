@@ -237,7 +237,7 @@ const styles = {
   liveSurface:
     "[overflow:auto] grid [align-content:start] [gap:8px] [height:100%] min-h-0 [padding:10px_12px_12px] [font-size:0.9rem] max-[900px]:[height:auto] max-[900px]:min-h-0 max-[900px]:[overflow:visible]",
   masterDetail:
-    "grid [grid-template-columns:var(--evolution-library-list-width,_360px)_12px_minmax(0,_1fr)] min-h-0 [height:100%] [overflow:hidden] max-[1200px]:[grid-template-columns:1fr] max-[1200px]:[height:auto] max-[1200px]:[overflow:visible]",
+    "grid [grid-template-columns:var(--pane-w-library-list,_360px)_12px_minmax(0,_1fr)] min-h-0 [height:100%] [overflow:hidden] max-[1200px]:[grid-template-columns:1fr] max-[1200px]:[height:auto] max-[1200px]:[overflow:visible]",
   metaRow:
     "flex [align-items:center] [justify-content:space-between] [gap:12px] [&_span]:[color:var(--fg-tertiary)]",
   metricTile:
@@ -247,7 +247,7 @@ const styles = {
   noticeTextCompact:
     `[margin:0] [padding:9px_10px] [line-height:1.45] [overflow-wrap:anywhere] [color:var(--fg-secondary)] ${rowSurfaceSoft}`,
   overviewGrid:
-    "grid grid-cols-[var(--evolution-live-launch-width,440px)_12px_minmax(360px,1fr)_12px_var(--evolution-live-run-width,380px)] [grid-template-rows:minmax(0,_1fr)] items-stretch min-h-0 h-full overflow-hidden pr-1 max-[1200px]:[grid-template-columns:minmax(0,_1fr)_minmax(292px,_0.82fr)] max-[1200px]:[grid-template-rows:minmax(180px,_0.58fr)_minmax(300px,_1fr)] max-[1200px]:[overflow:auto] max-[1200px]:[gap:10px] max-[900px]:[grid-template-columns:1fr] max-[900px]:[grid-template-rows:max-content_max-content_max-content] max-[900px]:[align-content:start] max-[900px]:[height:auto] max-[900px]:[min-height:100%] max-[900px]:[overflow:auto]",
+    "grid grid-cols-[var(--pane-w-live-launch,440px)_12px_minmax(360px,1fr)_12px_var(--pane-w-live-run,380px)] [grid-template-rows:minmax(0,_1fr)] items-stretch min-h-0 h-full overflow-hidden pr-1 max-[1200px]:[grid-template-columns:minmax(0,_1fr)_minmax(292px,_0.82fr)] max-[1200px]:[grid-template-rows:minmax(180px,_0.58fr)_minmax(300px,_1fr)] max-[1200px]:[overflow:auto] max-[1200px]:[gap:10px] max-[900px]:[grid-template-columns:1fr] max-[900px]:[grid-template-rows:max-content_max-content_max-content] max-[900px]:[align-content:start] max-[900px]:[height:auto] max-[900px]:[min-height:100%] max-[900px]:[overflow:auto]",
   // Fill geometry owned by VTrackWorkbenchPage; keep padding/gap chrome only.
   page:
     "min-h-0 min-w-0 max-w-full gap-1.5 p-[6px_10px_10px] max-[640px]:px-2.5",
@@ -283,7 +283,7 @@ const styles = {
   runsCommandStrip:
     "grid [grid-template-columns:minmax(220px,_0.42fr)_minmax(0,_1fr)] [gap:10px] [align-items:end] [padding:8px_10px] max-[1200px]:[grid-template-columns:1fr]",
   runsWorkspace:
-    "grid [grid-template-columns:var(--evolution-runs-queue-width,_380px)_12px_minmax(0,_1fr)] [align-items:stretch] min-h-0 max-[1200px]:[grid-template-columns:1fr]",
+    "grid [grid-template-columns:var(--pane-w-runs-queue,_380px)_12px_minmax(0,_1fr)] [align-items:stretch] min-h-0 max-[1200px]:[grid-template-columns:1fr]",
   secondaryPill:
     `${pillSurface} [color:var(--fg-secondary)]`,
   sectionHeadingRow:

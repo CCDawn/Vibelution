@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
@@ -17,6 +18,7 @@ import {
   type PaneSpec,
   type PaneWidthMap,
 } from "./paneLayoutPersistence";
+import { paneWidthCssVar, paneWidthVariablesStyle } from "./paneCssVariables";
 import { attachAxisResizeSession } from "./attachAxisResizeSession";
 import {
   PANE_KEYBOARD_STEP,
@@ -45,6 +47,14 @@ export type UsePersistedPaneResizeOptions = {
 export type UsePersistedPaneResizeResult = {
   /** Host element for width reclamp (section/div page roots or workspace grids). */
   layoutRef: RefObject<HTMLDivElement | null>;
+  /**
+   * Ref callback registering the split container that hosts `--pane-w-*` drag
+   * variables. Spread `paneVariablesStyle` on the same element so render-time
+   * values and drag-time direct writes stay in sync.
+   */
+  registerSplitContainer: (element: HTMLDivElement | null) => void;
+  /** Render-time `--pane-w-<paneId>` variables; spread on the registered container. */
+  paneVariablesStyle: CSSProperties;
   widths: PaneWidthMap;
   draggingPaneId: string | null;
   setPaneWidth: (paneId: string, width: number) => void;
@@ -58,7 +68,6 @@ export type UsePersistedPaneResizeResult = {
     event: ReactKeyboardEvent<HTMLDivElement>,
     options?: { direction?: 1 | -1 },
   ) => void;
-  getPaneStyle: (paneId: string) => { width: number; flexBasis: number; minWidth: number; maxWidth: number };
 };
 
 function paneSpecMap(panes: readonly PaneSpec[]): Map<string, PaneSpec> {
@@ -75,9 +84,17 @@ export function usePersistedPaneResize({
   preserveMainMinWidth = 360,
 }: UsePersistedPaneResizeOptions): UsePersistedPaneResizeResult {
   const layoutRef = useRef<HTMLDivElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const specs = useMemo(() => paneSpecMap(panes), [panes]);
   const [widths, setWidths] = useState<PaneWidthMap>(() => resolvePaneWidths(layoutId, panes));
   const [drag, setDrag] = useState<DragState | null>(null);
+  const registerSplitContainer = useCallback((element: HTMLDivElement | null) => {
+    containerRef.current = element;
+  }, []);
+  const paneVariablesStyle = useMemo(
+    () => paneWidthVariablesStyle(panes, widths),
+    [panes, widths],
+  );
 
   // Re-resolve if layoutId / pane specs change (e.g. inspector appears).
   useEffect(() => {
@@ -149,6 +166,15 @@ export function usePersistedPaneResize({
       const direction = options?.direction ?? 1;
       const startX = event.clientX;
       const startWidth = widths[paneId] ?? spec.defaultWidth;
+      const container = containerRef.current;
+      const cssVar = paneWidthCssVar(paneId);
+      // Wave 5B drag discipline (zai-org/ZCode WorkbenchSplitDivider,
+      // Apache-2.0): the latest width lives outside React state during the
+      // drag. Moves rAF-coalesce in the shared session and write the pane CSS
+      // variable straight onto the registered container, so the subtree never
+      // re-renders mid-drag; pointerup commits state once and persistence
+      // stays a single write.
+      let latestWidth = startWidth;
       setDrag({
         paneId,
         direction,
@@ -157,20 +183,18 @@ export function usePersistedPaneResize({
       });
       attachAxisResizeSession({
         cursor: "col-resize",
+        rafThrottle: true,
         onMove: (moveEvent) => {
           const delta = (moveEvent.clientX - startX) * direction;
-          const nextWidth = clampPaneWidth(startWidth + delta, spec.minWidth, spec.maxWidth);
-          setWidths((current) => (
-            current[paneId] === nextWidth
-              ? current
-              : { ...current, [paneId]: nextWidth }
-          ));
+          latestWidth = clampPaneWidth(startWidth + delta, spec.minWidth, spec.maxWidth);
+          container?.style.setProperty(cssVar, `${latestWidth}px`);
         },
         onEnd: () => {
           setDrag(null);
           setWidths((current) => {
-            writePaneLayout(layoutId, current);
-            return current;
+            const next = { ...current, [paneId]: latestWidth };
+            writePaneLayout(layoutId, next);
+            return next;
           });
         },
       });
@@ -200,27 +224,14 @@ export function usePersistedPaneResize({
     [setPaneWidth, specs, widths],
   );
 
-  const getPaneStyle = useCallback(
-    (paneId: string) => {
-      const spec = specs.get(paneId);
-      const width = widths[paneId] ?? spec?.defaultWidth ?? 280;
-      return {
-        width,
-        flexBasis: width,
-        minWidth: spec?.minWidth ?? width,
-        maxWidth: spec?.maxWidth ?? width,
-      };
-    },
-    [specs, widths],
-  );
-
   return {
     layoutRef,
+    registerSplitContainer,
+    paneVariablesStyle,
     widths,
     draggingPaneId: drag?.paneId ?? null,
     setPaneWidth,
     startResize,
     onResizeKeyDown,
-    getPaneStyle,
   };
 }

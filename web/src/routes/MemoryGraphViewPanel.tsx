@@ -1,5 +1,5 @@
 import { Search, XCircle } from "lucide-react";
-import { lazy, Suspense, type CSSProperties } from "react";
+import { lazy, Suspense } from "react";
 
 import type { MemoryKnowledgeGraphEdge, MemoryKnowledgeGraphNode, MemoryKnowledgeGraphPayload } from "../api/types";
 import { PaneHeightResizeHandle } from "../components/layout/PaneHeightResizeHandle";
@@ -96,6 +96,8 @@ export function MemoryGraphViewPanel({
   onFocusGraphNode,
 }: MemoryGraphViewPanelProps) {
   const {
+    registerSplitContainer: registerGraphContainer,
+    paneVariablesStyle: graphHeightVariablesStyle,
     heights: graphHeights,
     draggingPaneId: graphHeightDraggingPaneId,
     startResize: startGraphHeightResize,
@@ -105,9 +107,7 @@ export function MemoryGraphViewPanel({
     panes: MEMORY_GRAPH_HEIGHT_PANES,
   });
   const graphNodeListHeight = graphHeights["graph-node-list"] ?? MEMORY_GRAPH_NODE_LIST_PANE.defaultHeight;
-  const graphCanvasStyle = {
-    ["--memory-graph-node-list-height" as string]: `${graphNodeListHeight}px`,
-  } as CSSProperties;
+  const graphCanvasStyle = graphHeightVariablesStyle;
 
   return (
     <VCanvasWorkbenchPage
@@ -193,6 +193,7 @@ export function MemoryGraphViewPanel({
       )}
       canvas={(
         <div
+          ref={registerGraphContainer}
           className={styles.graphCanvasInner}
           style={graphCanvasStyle}
           data-vui-region="memory-graph-canvas"

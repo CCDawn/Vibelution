@@ -50,6 +50,7 @@ import {
 } from "../components/layout/paneHeightPersistence";
 import { usePersistedPaneHeight } from "../components/layout/usePersistedPaneHeight";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
+import { paneHeightCssVar, paneWidthCssVar } from "../components/layout/paneCssVariables";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import {
   VButton,
@@ -332,6 +333,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   }, []);
   const {
     layoutRef: evolutionLayoutRef,
+    registerSplitContainer: registerEvolutionContainer,
+    paneVariablesStyle: evolutionPaneVariablesStyle,
     widths: evolutionPaneWidths,
     draggingPaneId: evolutionDraggingPaneId,
     startResize: startEvolutionPaneResize,
@@ -352,6 +355,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     EVOLUTION_LIVE_IO_HEIGHT_KEY,
   );
   const {
+    registerSplitContainer: registerEvolutionHeightContainer,
+    paneVariablesStyle: evolutionHeightVariablesStyle,
     heights: evolutionPaneHeights,
     draggingPaneId: evolutionHeightDraggingPaneId,
     startResize: startEvolutionHeightResize,
@@ -1697,29 +1702,41 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     : libraryFilteredEmpty
       ? t("noProposalMatches")
       : t("chooseProposalDetail");
+  // Collapse-only styles: widths/heights themselves come from the hook-owned
+  // --pane-w-* / --pane-h-* variables on the registered split container.
   const runsWorkspaceStyle = useMemo(
     () =>
       ({
-        "--evolution-runs-queue-width": runsQueueCollapsed ? "0px" : `${runsQueueWidth}px`,
+        ...(runsQueueCollapsed ? { [paneWidthCssVar("runs-queue")]: "0px" } : null),
       }) as CSSProperties,
-    [runsQueueCollapsed, runsQueueWidth],
+    [runsQueueCollapsed],
   );
   const libraryWorkspaceStyle = useMemo(
     () =>
       ({
-        "--evolution-library-list-width": libraryListCollapsed ? "0px" : `${libraryListWidth}px`,
+        ...(libraryListCollapsed ? { [paneWidthCssVar("library-list")]: "0px" } : null),
       }) as CSSProperties,
-    [libraryListCollapsed, libraryListWidth],
+    [libraryListCollapsed],
   );
   const liveWorkspaceStyle = useMemo(
     () =>
       ({
-        "--evolution-live-launch-width": liveLaunchCollapsed ? "0px" : `${liveLaunchWidth}px`,
-        "--evolution-live-run-width": liveRunCollapsed ? "0px" : `${liveRunWidth}px`,
-        "--evolution-live-io-height": `${liveIoHeight}px`,
+        ...(liveLaunchCollapsed ? { [paneWidthCssVar("live-launch")]: "0px" } : null),
+        ...(liveRunCollapsed ? { [paneWidthCssVar("live-run")]: "0px" } : null),
+        "--evolution-live-io-height": `var(${paneHeightCssVar("live-io")})`,
       }) as CSSProperties,
-    [liveIoHeight, liveLaunchCollapsed, liveLaunchWidth, liveRunCollapsed, liveRunWidth],
+    [liveLaunchCollapsed, liveRunCollapsed],
   );
+  // display:contents wrapper: hosts the hook drag variables (and both
+  // registrations) without adding a box between the page body and its branches.
+  const evolutionVariablesStyle = useMemo(
+    () => ({ ...evolutionPaneVariablesStyle, ...evolutionHeightVariablesStyle }) as CSSProperties,
+    [evolutionHeightVariablesStyle, evolutionPaneVariablesStyle],
+  );
+  const registerEvolutionVariablesContainer = useCallback((element: HTMLDivElement | null) => {
+    registerEvolutionContainer(element);
+    registerEvolutionHeightContainer(element);
+  }, [registerEvolutionContainer, registerEvolutionHeightContainer]);
   const resizeLiveLaunchLabel = lang === "zh" ? "调整启动卡片宽度" : "Resize launch card";
   const resizeLiveRunLabel = lang === "zh" ? "调整当前任务卡片宽度" : "Resize active run card";
   const resizeLiveIoLabel = lang === "zh" ? "调整 CASE 输出高度" : "Resize case output height";
@@ -2256,6 +2273,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           : null
       }
     >
+      <div
+        ref={registerEvolutionVariablesContainer}
+        style={evolutionVariablesStyle}
+        className="contents"
+      >
       <EvolutionBaselinePromotionStrip
         lang={lang}
         t={t}
@@ -2789,6 +2811,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           formatAvailableActions={formatAvailableActions}
         />
       ) : null}
+      </div>
     </VTrackWorkbenchPage>
   );
 }

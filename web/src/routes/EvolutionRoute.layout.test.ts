@@ -891,7 +891,7 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("keeps the supervised live console as a dense desktop split before narrow layouts", () => {
-    expect(routeStyles.overviewGrid).toContain("grid-cols-[var(--evolution-live-launch-width,440px)");
+    expect(routeStyles.overviewGrid).toContain("grid-cols-[var(--pane-w-live-launch,440px)");
     expect(routeStyles.overviewGrid).toContain("[grid-template-rows:minmax(0,_1fr)]");
     expect(routeStyles.overviewGrid).not.toContain("grid-template-areas");
     expect(routeStyles.overviewGrid).not.toContain("--evolution-overview-areas");
@@ -919,8 +919,8 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("uses denser supervised launch and member panels at narrow workbench widths", () => {
-    expect(routeStyles.overviewGrid).toContain("var(--evolution-live-launch-width,440px)");
-    expect(routeStyles.overviewGrid).toContain("var(--evolution-live-run-width,380px)");
+    expect(routeStyles.overviewGrid).toContain("var(--pane-w-live-launch,440px)");
+    expect(routeStyles.overviewGrid).toContain("var(--pane-w-live-run,380px)");
     expect(routeStyles.supervisedRunConsole).toContain("[container-type:inline-size]");
     expect(routeStyles.supervisedRunConsoleGrid).toContain("[@container(min-width:560px)]:[grid-template-columns:minmax(0,_1.08fr)_minmax(214px,_0.72fr)]");
     expect(routeStyles.supervisedRunConsoleGrid).toContain("[@container(min-width:560px)]:[align-items:start]");

@@ -58,6 +58,7 @@ import {
   migrateLegacyNumericPane,
   type PaneSpec,
 } from "../components/layout/paneLayoutPersistence";
+import { paneWidthCssVar } from "../components/layout/paneCssVariables";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { ToolsRouteAgentScopePanel } from "./ToolsRouteAgentScopePanel";
@@ -875,6 +876,8 @@ export function ToolsRoute() {
   }, []);
   const {
     layoutRef: toolsLayoutRef,
+    registerSplitContainer: registerToolsContainer,
+    paneVariablesStyle: toolsPaneVariablesStyle,
     widths: toolsPaneWidths,
     draggingPaneId: toolsDraggingPaneId,
     startResize: startToolsPaneResize,
@@ -1409,9 +1412,10 @@ export function ToolsRoute() {
   const workspaceStyle = useMemo(
     () =>
       ({
-        "--tools-left-panel-width": leftPanelCollapsed ? "0px" : `${leftPanelWidth}px`,
+        ...toolsPaneVariablesStyle,
+        ...(leftPanelCollapsed ? { [paneWidthCssVar("left")]: "0px" } : null),
       }) as CSSProperties,
-    [leftPanelCollapsed, leftPanelWidth],
+    [leftPanelCollapsed, toolsPaneVariablesStyle],
   );
   const resizeLeftPanelLabel = lang === "zh" ? "调整工具列表宽度" : "Resize tool list";
 
@@ -1724,7 +1728,10 @@ export function ToolsRoute() {
       />
 
       <div
-        ref={toolsLayoutRef}
+        ref={(element) => {
+          toolsLayoutRef.current = element;
+          registerToolsContainer(element);
+        }}
         className={styles.workspace}
         style={workspaceStyle}
         data-vui-recipe="tools-workbench"

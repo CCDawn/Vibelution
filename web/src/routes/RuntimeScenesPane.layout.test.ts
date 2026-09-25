@@ -110,7 +110,7 @@ describe("RuntimeScenesPane layout contract", () => {
     expect(paneSource).toContain("WORKBENCH_LAYOUT_IDS.logsRuntimeScenes");
     expect(paneSource).toContain("sidebarCollapsed");
     expect(paneSource).toContain("setSidebarCollapsed");
-    expect(paneSource).toContain("--logs-sidebar-width");
+    expect(paneSource).toContain('paneWidthCssVar("sidebar")');
     expect(paneSource).toContain("data-vui-layout-id");
   });
 

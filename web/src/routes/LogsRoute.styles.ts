@@ -77,7 +77,7 @@ const styles = {
   headerMeta:
     "headerMeta min-w-0 flex flex-wrap items-center gap-1.5",
   logPreviewStack:
-    "logPreviewStack min-w-0 grid h-full min-h-0 grid-rows-[var(--logs-package-files-height,190px)_auto_minmax(0,1fr)_auto] content-stretch gap-y-1 font-mono [font-size:var(--vui-font-xs)]",
+    "logPreviewStack min-w-0 grid h-full min-h-0 grid-rows-[var(--pane-h-package-files,190px)_auto_minmax(0,1fr)_auto] content-stretch gap-y-1 font-mono [font-size:var(--vui-font-xs)]",
   metaPill:
     "metaPill min-w-0 flex flex-wrap items-center gap-1.5 inline-flex min-h-6 w-fit max-w-full justify-center rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   notice: `notice min-w-0 ${vuiFlatPanelClass} p-2`,
@@ -148,7 +148,7 @@ const styles = {
   rawFileButton:
     `rawFileButton min-w-0 ${vuiControlQuietClass}`,
   resizableLayout:
-    "resizableLayout min-w-0 max-w-full grid h-full min-h-0 gap-1.5 p-1.5 !grid grid-cols-[var(--logs-sidebar-width)_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:grid-rows-[minmax(180px,34vh)_minmax(360px,1fr)] max-[760px]:overflow-y-auto max-[760px]:overflow-x-hidden",
+    "resizableLayout min-w-0 max-w-full grid h-full min-h-0 gap-1.5 p-1.5 !grid grid-cols-[var(--pane-w-sidebar)_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:grid-rows-[minmax(180px,34vh)_minmax(360px,1fr)] max-[760px]:overflow-y-auto max-[760px]:overflow-x-hidden",
   // Wave 4B: visual contract from PaneCollapseHandle; route only gates mobile hide.
   resizeHandle:
     "resizeHandle min-w-0 max-[760px]:hidden",
@@ -209,7 +209,7 @@ const styles = {
   toolbarButton:
     "toolbarButton min-w-0 flex flex-wrap items-center gap-1.5 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full justify-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 [&>span]:truncate",
   workspace:
-    `workspace min-w-0 max-w-full grid h-full min-h-0 gap-1.5 p-1.5 grid-cols-[minmax(0,1fr)_10px_minmax(220px,var(--logs-right-rail-width,280px))] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:grid-rows-[minmax(360px,1fr)_minmax(180px,34vh)] max-[760px]:overflow-y-auto max-[760px]:overflow-x-hidden ${vuiWorkspaceFillClass}`,
+    `workspace min-w-0 max-w-full grid h-full min-h-0 gap-1.5 p-1.5 grid-cols-[minmax(0,1fr)_10px_minmax(220px,var(--pane-w-right,280px))] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:grid-rows-[minmax(360px,1fr)_minmax(180px,34vh)] max-[760px]:overflow-y-auto max-[760px]:overflow-x-hidden ${vuiWorkspaceFillClass}`,
 } as const;
 
 export default styles;
