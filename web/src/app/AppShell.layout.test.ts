@@ -612,11 +612,14 @@ describe("AppShell layout contract", () => {
     // Only backend-stale verdicts prompt; frontend-only stays on refresh-frontend.
     expect(shellSource).toContain("updateBannerVerdict === \"backend_and_frontend_behind\"");
 
-    // The banner is a sibling row between the fixed top bar and mainArea.
+    // Notification is a collapsed top-bar popover, never a workspace row.
     const bannerRegion = shellSource.slice(
-      shellSource.lastIndexOf("</header>"),
-      shellSource.indexOf("<main className={styles.mainArea}"),
+      shellSource.indexOf("{updateBannerVisible ?"),
+      shellSource.indexOf('data-shell-group="active-work"'),
     );
+    expect(shellSource.indexOf("{updateBannerVisible ?")).toBeLessThan(shellSource.lastIndexOf("</header>"));
+    expect(bannerRegion).toContain("<VPopover");
+    expect(bannerRegion).not.toContain("defaultOpen");
     expect(bannerRegion).toContain('role="status"');
     expect(bannerRegion).toContain("updateBannerVisible ?");
     expect(bannerRegion).toContain("onPress={beginRestart}");
@@ -635,19 +638,19 @@ describe("AppShell layout contract", () => {
     // Active work keeps the restart action from even trying: guard copy surfaces.
     expect(shellSource).toContain("updateBannerRestartBlockedByWork = Boolean(activeWorkIndicator)");
 
-    // The banner row joins the shell grid inline; workbench-shell.css stays untouched.
-    expect(shellSource).toContain('gridTemplateRows: "auto minmax(0, 1fr)"');
-    expect(shellSource).toContain("UPDATE_BANNER_MAIN_AREA_STYLE");
+    expect(shellSource).not.toContain("UPDATE_BANNER_MAIN_AREA_STYLE");
+    expect(shellSource).not.toContain("UPDATE_BANNER_SHELL_GRID_ROWS");
+    expect(shellSource).toContain('<main className={styles.mainArea}>');
 
     // It rides the whitelisted code-freshness poll — no per-second ticker.
     expect(shellSource).not.toContain("setClockNow");
     expect(shellSource).not.toMatch(/updateBanner[\s\S]{0,200}setInterval/);
 
-    expect(styles.updateBanner).toContain("mt-[var(--shell-topbar-height)]");
+    expect(styles.updateBanner).not.toContain("mt-[var(--shell-topbar-height)]");
+    expect(styles.updateBannerPopover).toContain("overflow-y-auto");
     expect(styles.updateBanner).not.toMatch(/rounded-\[\d/);
     expect(styles.updateBannerTitle).toContain("[font-size:var(--vui-font-sm)]");
     expect(styles.updateBannerRestartButton).toBeTypeOf("string");
-    expect(styles.updateBannerDismissButton).toBeTypeOf("string");
     expect(styles.updateBannerNote).toContain("whitespace-pre-line");
   });
 
