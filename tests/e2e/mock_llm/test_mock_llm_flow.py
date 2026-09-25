@@ -61,6 +61,14 @@ def send_message(page: Any, text: str) -> None:
     composer.press("Enter")
 
 
+def _attr(holder: Any, name: str, *, timeout_ms: int = 800) -> str:
+    """读元素属性；元素瞬时分离（turn 收口竞态）时返回空串而不是挂死。"""
+    try:
+        return holder.get_attribute(name, timeout=timeout_ms) or ""
+    except Exception:  # noqa: BLE001 - playwright 定位失败即视为元素已消失
+        return ""
+
+
 def collect_turn(page: Any, *, timeout_ms: int = TURN_COMPLETE_TIMEOUT_MS) -> dict[str, Any]:
     """采样 turn 生命周期直到收口；返回阶段序列与 elapsed 样本（用于断言与证据）。"""
     stages: list[str] = []
@@ -71,15 +79,15 @@ def collect_turn(page: Any, *, timeout_ms: int = TURN_COMPLETE_TIMEOUT_MS) -> di
         if notes.count() == 0:
             break
         note = notes.first
-        stage = note.get_attribute("data-active-turn-stage") or ""
-        raw_elapsed = note.get_attribute("data-active-turn-elapsed-seconds") or ""
+        stage = _attr(note, "data-active-turn-stage")
+        raw_elapsed = _attr(note, "data-active-turn-elapsed-seconds")
         if stage and (not stages or stages[-1] != stage):
             stages.append(stage)
         try:
             elapsed_samples.append(float(raw_elapsed))
         except ValueError:
             pass
-        thread_status = page.locator(THREAD_ROOT).first.get_attribute("data-agent-thread-status") or ""
+        thread_status = _attr(page.locator(THREAD_ROOT).first, "data-agent-thread-status")
         if not stage and thread_status == "idle":
             break
         page.wait_for_timeout(120)
@@ -93,8 +101,8 @@ def wait_turn_closed(page: Any, *, expected_messages: int, timeout_ms: int = 60_
     deadline = time.monotonic() + timeout_ms / 1000
     thread = page.locator(THREAD_ROOT).first
     while time.monotonic() < deadline:
-        status = thread.get_attribute("data-agent-thread-status") or ""
-        raw_count = thread.get_attribute("data-agent-thread-message-count") or "0"
+        status = _attr(thread, "data-agent-thread-status")
+        raw_count = _attr(thread, "data-agent-thread-message-count") or "0"
         try:
             count = int(raw_count)
         except ValueError:
@@ -173,7 +181,7 @@ def wait_turn_started(
             return True
         notes = page.locator(TURN_STATUS_NOTE)
         for i in range(min(notes.count(), 3)):
-            stage = notes.nth(i).get_attribute("data-active-turn-stage") or ""
+            stage = _attr(notes.nth(i), "data-active-turn-stage")
             if stage and stage != "user_submit":
                 return True
         return False
@@ -378,9 +386,9 @@ def test_long_think_stage_elapsed_grows(page: Any, e2e_instance: Any, mock_llm: 
     while time.monotonic() < deadline and len(samples) < 2:
         notes = page.locator(TURN_STATUS_NOTE)
         if notes.count():
-            stage = notes.first.get_attribute("data-active-turn-stage") or ""
+            stage = _attr(notes.first, "data-active-turn-stage")
             try:
-                elapsed = float(notes.first.get_attribute("data-active-turn-elapsed-seconds") or "")
+                elapsed = float(_attr(notes.first, "data-active-turn-elapsed-seconds"))
             except ValueError:
                 elapsed = -1.0
             if stage and elapsed >= 0:
