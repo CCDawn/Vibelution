@@ -166,7 +166,6 @@ export function ConfigSettingsSidebar({
     <aside className={styles.sidebar} data-vui-region="config-settings-nav">
       <VPanelHeader
         className={styles.sidebarHeader}
-        eyebrow={language === "zh" ? "设置" : "Settings"}
         title={title}
         headingLevel={2}
         tooltip={sidebarHelp || undefined}

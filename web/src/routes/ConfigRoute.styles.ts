@@ -1,3 +1,4 @@
+import { settingsSectionHeader, settingsSectionSurface } from "./configSettingsSurfaces";
 // Wave 8 prune: removed 100 unused keys (ConfigRoute panel-componentization residue).
 // Explicit Tailwind style map for ConfigRoute.
 // Generated from the legacy ConfigRoute stylesheet during the CSS-module retirement wave;
@@ -63,7 +64,7 @@ const styles = {
   compactButton:
     "vui-routes-configroute compactButton",
   configProgressiveBody:
-    "vui-routes-configroute configProgressiveBody grid min-w-0 w-full max-w-[64rem] gap-6 p-4 max-[720px]:p-2",
+    "vui-routes-configroute configProgressiveBody grid min-w-0 w-full max-w-[64rem] gap-6 py-2",
   configCompactPathProgressiveBody:
     "vui-routes-configroute configCompactPathProgressiveBody gap-4",
   configCompactAdvancedProgressiveBody:
@@ -101,7 +102,7 @@ const styles = {
   content:
     "vui-routes-configroute content max-[720px]:!h-auto max-[720px]:!overflow-visible !flex min-h-0 min-w-0 h-full flex-col overflow-hidden !bg-vui-surface-panel",
   pageViewport:
-    "vui-routes-configroute pageViewport [display:grid] [align-content:start] [gap:12px] min-w-0 min-h-0 overflow-y-auto overflow-x-hidden [padding:12px] [scrollbar-gutter:stable] [&:has(>_.providerModelsLayout)]:[align-content:stretch] [&:has(>_.providerModelsLayout)]:[grid-template-rows:minmax(0,1fr)] [&:has(>_.notice):has(>_.providerModelsLayout)]:[grid-template-rows:auto_minmax(0,1fr)]",
+    "vui-routes-configroute pageViewport [display:grid] [align-content:start] [gap:24px] min-w-0 min-h-0 overflow-y-auto overflow-x-hidden [padding:24px] max-[720px]:[padding:16px] [scrollbar-gutter:stable] [&:has(>_.providerModelsLayout)]:[align-content:stretch] [&:has(>_.providerModelsLayout)]:[grid-template-rows:minmax(0,1fr)] [&:has(>_.notice):has(>_.providerModelsLayout)]:[grid-template-rows:auto_minmax(0,1fr)]",
   contentModels:
     "vui-routes-configroute contentModels [align-content:stretch] [grid-template-rows:minmax(0,1fr)_auto] [height:100%] [max-height:calc(100dvh_-_76px)] [min-width:0] [&:has(>_.notice)]:[grid-template-rows:auto_minmax(0,1fr)_auto] max-[720px]:[max-height:none] max-[720px]:[height:auto] max-[720px]:[overflow:visible]",
   providerModelsLayout:
@@ -167,15 +168,15 @@ const styles = {
   returnButton:
     "vui-routes-configroute returnButton justify-self-start max-w-full [&_svg]:rotate-180",
   sectionHeader:
-    `vui-routes-configroute sectionHeader flex-wrap [display:flex] [align-items:start] [justify-content:space-between] [gap:8px] [min-height:40px] [padding:7px_var(--config-section-x)] ${sectionHeaderSurface}`,
+    `vui-routes-configroute sectionHeader flex-wrap [display:flex] [align-items:start] [justify-content:space-between] [gap:8px] [min-height:40px] [padding:7px_var(--config-section-x)] ${sectionHeaderSurface} ${settingsSectionHeader}`,
   sectionHeaderActions:
     "vui-routes-configroute sectionHeaderActions [display:flex] [align-items:center] [justify-content:end] [gap:6px] [flex-wrap:wrap]",
   sectionHeaderMain:
     "vui-routes-configroute sectionHeaderMain [display:grid] [gap:3px] [min-width:0]",
   sectionSurface:
-    `vui-routes-configroute sectionSurface ${panelSurface} [display:grid] [gap:0] [padding:0] [scroll-margin-top:84px] [overflow:visible] [&>_.sectionText]:[padding:6px_var(--config-section-x)_0] [&>_.sectionText]:[max-width:980px] [&>_.sectionText]:[font-size:var(--vui-font-xs)] [&>_:where(_.hashGrid,.matrixGrid,.healthSummaryGrid,.logHelperGrid,.toggleGrid,.healthWorkbenchGrid,.profileTableWrap,.formSurface,.actionsRow,.rawConfigPanel,.editorWrap,.agentRunPanel_)]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)] [&>_.sectionText_+_:where(_.hashGrid,.matrixGrid,.healthSummaryGrid,.logHelperGrid,.toggleGrid,.healthWorkbenchGrid,.profileTableWrap,.formSurface,.actionsRow,.rawConfigPanel,.editorWrap_)]:[margin-top:6px]`,
+    `vui-routes-configroute sectionSurface ${panelSurface} [display:grid] [gap:0] [padding:0] [scroll-margin-top:84px] [overflow:visible] [&>_.sectionText]:[padding:6px_var(--config-section-x)_0] [&>_.sectionText]:[max-width:980px] [&>_.sectionText]:[font-size:var(--vui-font-xs)] [&>_:where(_.hashGrid,.matrixGrid,.healthSummaryGrid,.logHelperGrid,.toggleGrid,.healthWorkbenchGrid,.profileTableWrap,.formSurface,.actionsRow,.rawConfigPanel,.editorWrap,.agentRunPanel_)]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)] [&>_.sectionText_+_:where(_.hashGrid,.matrixGrid,.healthSummaryGrid,.logHelperGrid,.toggleGrid,.healthWorkbenchGrid,.profileTableWrap,.formSurface,.actionsRow,.rawConfigPanel,.editorWrap_)]:[margin-top:6px] ${settingsSectionSurface}`,
   sectionText:
-    "vui-routes-configroute sectionText [margin:0] [color:var(--fg-secondary)] [line-height:1.38]",
+    "vui-routes-configroute sectionText m-0 text-vui-xs leading-relaxed text-vui-fg-tertiary",
   sectionTitle:
     "vui-routes-configroute sectionTitle [margin:1px_0_0] [color:var(--fg-primary)] [font-size:0.92rem] [line-height:1.15]",
   sectionToolbarGroup:
@@ -265,17 +266,17 @@ const styles = {
   treeHint:
     "vui-routes-configroute treeHint [margin:0] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [line-height:1.35]",
   treeNestedBlock:
-    "vui-routes-configroute treeNestedBlock grid min-w-0 gap-3 border-t border-vui-border-subtle pt-3",
+    "vui-routes-configroute treeNestedBlock grid min-w-0 gap-3 pt-3",
   treeNestedHeader:
     "vui-routes-configroute treeNestedHeader [display:flex] [align-items:start] [justify-content:space-between] [gap:8px] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[font-weight:600]",
   treeObjectBlock:
-    "vui-routes-configroute treeObjectBlock grid min-w-0 gap-3 border-t border-vui-border-subtle pt-3",
+    "vui-routes-configroute treeObjectBlock grid min-w-0 gap-3 pt-3",
   treeObjectCell:
     "vui-routes-configroute treeObjectCell [min-width:0] [&_.treeObjectBlock]:[min-height:42px] [&_.treeNestedBlock]:[min-height:42px] [&_.treeToggle]:[min-height:34px] [&_.treeToggle_.treeHint]:[display:none]",
   treeStack:
     "vui-routes-configroute treeStack [display:grid] [gap:6px]",
   treeToggle:
-    "vui-routes-configroute treeToggle !flex !w-full !justify-between !items-center gap-3 !border-0 !bg-transparent !px-0 !py-2 text-left",
+    "vui-routes-configroute treeToggle !rounded-none !shadow-none !flex !w-full !justify-between !items-center gap-3 !border-0 !bg-transparent !px-0 !py-2 text-left",
   treeToggleIcon:
     "vui-routes-configroute treeToggleIcon [color:var(--fg-tertiary)] [flex:0_0_auto] [transition:transform_140ms_ease]",
   treeToggleIconExpanded:

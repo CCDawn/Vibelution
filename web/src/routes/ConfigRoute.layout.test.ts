@@ -1039,7 +1039,10 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("VSettingsFormPage");
     expect(routeSource).toContain('title={showingSettingsIndex && !requestedSectionId ? copy.pageTitle : activeGroup?.title ?? copy.pageTitle}');
     expect(routeSource).toContain("<ConfigSettingsIndex");
-    expect(routeSource).toContain("返回设置列表");
+    expect(routeSource).not.toContain("返回设置列表");
+    expect(routeSource).toContain('onShowAll={() => showSettingsIndex()}');
+    expect(routeSource).toContain("<ConfigDesktopPetSettings language={currentLanguage}");
+    expect(routeSource).toContain('pageId: "identity-profile", sectionId: "pet"');
     expect(routeSource).not.toContain('toolbar={isSectionVisible("models") ? undefined');
   });
 
