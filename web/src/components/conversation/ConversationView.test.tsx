@@ -1145,6 +1145,78 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
       "[contain-intrinsic-size:auto_200px]",
     );
   });
+
+  it("reveals per-message action buttons on hover while keeping them reachable", () => {
+    // zai-org/ZCode ConversationRowView treatment (Apache-2.0): opacity
+    // transition + group-hover reveal, focus-within for keyboard reachability,
+    // and always-visible on touch (hover:none) with reduced-motion safety.
+    for (const hoverClass of [styles.turnHoverActions, styles.turnErrorActionsHover]) {
+      expect(hoverClass).toContain("opacity-0");
+      expect(hoverClass).toContain("group-hover:opacity-100");
+      expect(hoverClass).toContain("focus-within:opacity-100");
+      expect(hoverClass).toContain("[@media(hover:none)]:opacity-100");
+      expect(hoverClass).toContain("transition-opacity");
+      expect(hoverClass).toContain("motion-reduce:transition-none");
+    }
+    // The hover reveal needs a group anchor on the row container.
+    expect(conversationViewSource).toContain('// Hover-reveal anchor: per-message action buttons fade in only');
+    const turnClassNameStart = conversationViewSource.indexOf("const turnClassName = [");
+    const turnClassNameBlock = conversationViewSource.slice(
+      turnClassNameStart,
+      conversationViewSource.indexOf('].filter(Boolean).join(" ");', turnClassNameStart),
+    );
+    expect(turnClassNameBlock).toContain('"group",');
+    expect(turnClassNameBlock.indexOf("// Hover-reveal anchor")).toBeGreaterThan(-1);
+    // The meta action buttons (version switch, copy, fork, regenerate, edit)
+    // stay in the DOM inside one hover-reveal container; the timestamp stays
+    // outside it.
+    const metaActionsBlock = conversationViewSource.slice(
+      conversationViewSource.indexOf("metaActions={"),
+      conversationViewSource.indexOf("}</span>\n                  </>\n                }"),
+    );
+    expect(metaActionsBlock).toContain('data-conversation-hover-actions="1"');
+    expect(metaActionsBlock).toContain('aria-label={t("copyAnswer")}');
+    expect(metaActionsBlock).toContain('aria-label={t("forkSessionFromMessage")}');
+    expect(metaActionsBlock).toContain('aria-label={regeneratePending ? t("regeneratePending") : t("regenerateAnswer")}');
+    expect(metaActionsBlock).toContain('aria-label={editUserMessageLabel ?? t("editMessage")}');
+    expect(metaActionsBlock).toContain('aria-label={t("switchBranchVersionPrevious")}');
+    // Editing keeps the (active) edit affordance visible without hover.
+    expect(metaActionsBlock).toContain("isEditingMessage ? styles.turnHoverActionsVisible : styles.turnHoverActions");
+    // The failed-turn retry uses the hover-reveal variant too.
+    expect(conversationViewSource).toContain("className={styles.turnErrorActionsHover}");
+  });
+
+  it("keeps message actions in the DOM inside the hover container when rendered", () => {
+    const html = renderConversation([
+      {
+        id: "message-assistant-1",
+        role: "assistant",
+        content: "答案正文",
+        timestamp: "2026-05-22T00:01:00Z",
+        turnId: "turn-1",
+        status: "completed",
+        nodeId: "node-assistant-1",
+        turnItems: [
+          {
+            id: "message-assistant-1-item-answer",
+            itemId: "message-assistant-1-item-answer",
+            sessionId: "session-1",
+            turnId: "turn-1",
+            version: 3,
+            revision: 1,
+            sequence: 1,
+            type: "agent_message",
+            phase: "final_answer",
+            text: "答案正文",
+            status: "completed",
+            terminal: true,
+          },
+        ],
+      },
+    ] as unknown as ConversationMessage[]);
+    expect(html).toContain('data-conversation-hover-actions="1"');
+    expect(html).toContain("lucide-copy");
+  });
   it("renders composer session reference chips", () => {
     const html = renderConversation([], {
       composerReferences: [

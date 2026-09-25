@@ -1281,6 +1281,8 @@ timeline:
     "vui-components-conversationview turnErrorReasonRow grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] items-start gap-x-2 gap-y-0.5 [&_dd]:m-0 [&_dd]:min-w-0 [&_dd]:whitespace-pre-wrap [&_dd]:break-words [&_dd]:[overflow-wrap:anywhere] [&_dt]:font-semibold [&_dt]:text-[var(--fg-tertiary)]",
   turnErrorActions:
     "vui-components-conversationview turnErrorActions flex min-w-0 flex-wrap items-center justify-end gap-1.5",
+  turnErrorActionsHover:
+    "vui-components-conversationview turnErrorActionsHover flex min-w-0 flex-wrap items-center justify-end gap-1.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none",
   turnErrorRetryButton:
     "vui-components-conversationview turnErrorRetryButton w-fit rounded-[var(--radius-control)] border-0 bg-transparent px-1.5 py-0.5 [font-size:var(--vui-font-xs)] font-medium leading-tight text-[var(--fg-secondary)] hover:bg-[var(--vui-control-muted)] hover:text-[var(--fg-primary)]",
   turnErrorText:
@@ -1289,6 +1291,10 @@ timeline:
     "vui-components-conversationview turnErrorTurn min-w-0 [&_.turnContent]:gap-1",
   turnErrorType:
     "vui-components-conversationview turnErrorType min-w-0 w-fit max-w-full [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+  turnHoverActions:
+    "vui-components-conversationview turnHoverActions inline-flex min-w-0 max-w-full shrink-0 flex-wrap items-center justify-start gap-2 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none",
+  turnHoverActionsVisible:
+    "vui-components-conversationview turnHoverActionsVisible inline-flex min-w-0 max-w-full shrink-0 flex-wrap items-center justify-start gap-2",
   turnIconButton: `vui-components-conversationview turnIconButton min-w-0 ${vuiOpaqueRowClass} p-2 inline-grid h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] place-items-center bg-[var(--vui-control-muted)] p-0 text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] shrink-0 text-[var(--fg-tertiary)]`,
   turnIconButtonActive: `vui-components-conversationview turnIconButtonActive min-w-0 ${vuiOpaqueRowClass} p-2 shrink-0 text-[var(--fg-tertiary)] ${vuiStateSelectedRowClass}`,
   turnVersionSwitcher:

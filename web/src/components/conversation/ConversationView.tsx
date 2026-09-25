@@ -1445,6 +1445,9 @@ export const ConversationView = React.memo(function ConversationView({
               </React.Suspense>
             ) : null;
             const turnClassName = [
+              // Hover-reveal anchor: per-message action buttons fade in only
+              // while the pointer (or keyboard focus) is on this row.
+              "group",
               groupTranscriptMessage
                 ? styles.groupTranscriptTurn
                 : message.role === "assistant"
@@ -1574,6 +1577,10 @@ export const ConversationView = React.memo(function ConversationView({
                 metaActions={
                   <>
                     {message.timestamp ? <span>{formatTimestamp(message.timestamp)}</span> : null}
+                    <span
+                      className={isEditingMessage ? styles.turnHoverActionsVisible : styles.turnHoverActions}
+                      data-conversation-hover-actions="1"
+                    >
                     {showVersionSwitcher ? (
                       <VActionGroup
                         ariaLabel={t("branchVersionLabel")}
@@ -1654,6 +1661,7 @@ export const ConversationView = React.memo(function ConversationView({
                         isIconOnly
                         icon={<Pencil size={14}/>} />
                     ) : null}
+                    </span>
                   </>
                 }
               >
@@ -1763,7 +1771,10 @@ export const ConversationView = React.memo(function ConversationView({
                           </div>
                         ) : null}
                         {canRetryFailedTurnMessage ? (
-                          <div className={styles.turnErrorActions}>
+                          <div
+                            className={styles.turnErrorActionsHover}
+                            data-conversation-hover-actions="1"
+                          >
                             <VButton
                               type="button"
                               contentLayout="plain"
