@@ -96,6 +96,12 @@ def _recover_challenge_meeting_drivers_on_startup() -> object:
     return recover_challenge_meeting_drivers()
 
 
+def _recover_orphaned_chat_room_rounds_on_startup() -> object:
+    from .services.chat_room_startup_recovery import recover_chat_room_rounds_on_startup
+
+    return recover_chat_room_rounds_on_startup()
+
+
 def _recover_hypothesis_command_attempts_on_startup() -> object:
     """Fence long hypothesis commands interrupted by a restart (SCI-049).
 
@@ -248,6 +254,9 @@ async def web_workbench_lifespan(app: FastAPI | None):
     startup_meeting_driver_recovery_task = asyncio.create_task(
         asyncio.to_thread(_recover_challenge_meeting_drivers_on_startup)
     )
+    startup_chat_room_round_recovery_task = asyncio.create_task(
+        asyncio.to_thread(_recover_orphaned_chat_room_rounds_on_startup)
+    )
     startup_command_attempt_recovery_task = asyncio.create_task(
         asyncio.to_thread(_recover_hypothesis_command_attempts_on_startup)
     )
@@ -313,6 +322,11 @@ async def web_workbench_lifespan(app: FastAPI | None):
             task, message="Challenge meeting driver recovery failed during startup."
         )
     )
+    startup_chat_room_round_recovery_task.add_done_callback(
+        lambda task: consume_startup_task_result(
+            task, message="Chat room round startup recovery failed during startup."
+        )
+    )
     startup_command_attempt_recovery_task.add_done_callback(
         lambda task: consume_startup_task_result(
             task, message="Hypothesis command attempt recovery failed during startup."
@@ -373,6 +387,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
                         "session_catalog",
                         "agent_inbox_recovery",
                         "meeting_driver_recovery",
+                        "chat_room_round_recovery",
                         "command_attempt_recovery",
                         "session_recovery_sweep",
                         "challenge_fence_config_validation",
@@ -397,6 +412,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
             startup_catalog_task,
             startup_agent_inbox_recovery_task,
             startup_meeting_driver_recovery_task,
+            startup_chat_room_round_recovery_task,
             startup_command_attempt_recovery_task,
             startup_session_recovery_task,
             startup_challenge_fence_validation_task,
