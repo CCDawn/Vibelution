@@ -147,13 +147,6 @@ function systemToneToStatus(tone: SystemStatusTone): VStatusTone {
   return "neutral";
 }
 
-// The update banner joins the shell grid as a row between the fixed top bar
-// and mainArea. Inline styles (not workbench-shell.css) keep the change inside
-// the shell component: the banner row is `auto`, mainArea keeps the remaining
-// `1fr`, and mainArea's built-in padding-top would double the top-bar offset.
-const UPDATE_BANNER_SHELL_GRID_ROWS: CSSProperties = { gridTemplateRows: "auto minmax(0, 1fr)" };
-const UPDATE_BANNER_MAIN_AREA_STYLE: CSSProperties = { paddingTop: 0 };
-
 function systemToneToDotClass(tone: SystemStatusTone): string {
   if (tone === "running") return styles.status_running;
   if (tone === "caution") return styles.status_caution;
@@ -997,12 +990,6 @@ export function AppShell() {
     setUpdateBannerDismissedHead(updateBannerDiskHead);
     storeUpdateBannerDismissedHead(updateBannerDiskHead);
   }, [updateBannerDiskHead]);
-  const shellStyleWithBanner = useMemo<CSSProperties | undefined>(
-    () => (updateBannerVisible
-      ? { ...(shellStyle ?? {}), ...UPDATE_BANNER_SHELL_GRID_ROWS }
-      : shellStyle),
-    [shellStyle, updateBannerVisible],
-  );
   const clearRestartCompletionDismissTimer = useCallback(() => {
     if (restartCompletionDismissTimerRef.current === null) {
       return;
@@ -2161,7 +2148,7 @@ export function AppShell() {
       data-theme-background-readability={themeBackgroundImageUrl ? themeBackgroundReadability : undefined}
       data-shell="workbench"
       data-browser-role="workbench"
-      style={shellStyleWithBanner}
+      style={shellStyle}
     >
       {startupOverlayActive && !shutdownOpen ? (
         <div
@@ -2337,6 +2324,47 @@ export function AppShell() {
         </div>
 
         <div className={styles.windowDragRegion} data-shell-group="window-drag-region" aria-hidden="true" />
+        {updateBannerVisible ? (
+          <VPopover
+            align="end"
+            side="bottom"
+            sideOffset={8}
+            aria-label={lang === "en" ? "Update notification" : "更新通知"}
+            contentClassName={styles.updateBannerPopover}
+            trigger={(
+              <VButton variant="ghost" contentLayout="plain" className={styles.activeWorkTrigger}
+                aria-label={lang === "en" ? "Update notification" : "更新通知"}
+                title={updateBannerText.title}>
+                <span className={styles.activeWorkTriggerContent}>
+                  {lang === "en" ? "Update available" : "有更新"}
+                  <ChevronDown size={12} aria-hidden="true" />
+                </span>
+              </VButton>
+            )}
+          >
+            <div className={styles.updateBanner} role="status" data-shell-group="update-banner">
+              <div className={styles.updateBannerCopy}>
+                <strong className={styles.updateBannerTitle}>{updateBannerText.title}</strong>
+                <span className={styles.updateBannerDetail}>{updateBannerText.detail}</span>
+              </div>
+              {updateBannerRestartGuard ? (
+                <span className={styles.updateBannerNote}>{updateBannerRestartGuard}</span>
+              ) : null}
+              <div className={styles.updateBannerActions}>
+                <VButton type="button" variant="secondary"
+                  className={styles.updateBannerRestartButton}
+                  onPress={beginRestart} isDisabled={updateBannerRestartDisabled}
+                  title={updateBannerRestartGuard || updateBannerRestartActionLabel}>
+                  {updateBannerRestartActionLabel}
+                </VButton>
+                <VButton type="button" variant="ghost" onPress={dismissUpdateBanner}
+                  title={updateBannerDismissActionLabel}>
+                  {lang === "en" ? "Dismiss" : "暂不提醒"}
+                </VButton>
+              </div>
+            </div>
+          </VPopover>
+        ) : null}
         <div className={styles.activeWorkSlot} data-shell-group="active-work">
           <VPopover
             open={activeWorkOpen}
@@ -2594,40 +2622,7 @@ export function AppShell() {
       </div>
       </header>
 
-      {updateBannerVisible ? (
-        <div className={styles.updateBanner} role="status" data-shell-group="update-banner">
-          <div className={styles.updateBannerCopy}>
-            <strong className={styles.updateBannerTitle}>{updateBannerText.title}</strong>
-            <span className={styles.updateBannerDetail}>{updateBannerText.detail}</span>
-          </div>
-          <div className={styles.updateBannerActions}>
-            <VButton
-              type="button"
-              variant="secondary"
-              className={styles.updateBannerRestartButton}
-              onPress={beginRestart}
-              isDisabled={updateBannerRestartDisabled}
-              title={updateBannerRestartGuard || updateBannerRestartActionLabel}
-            >
-              {updateBannerRestartActionLabel}
-            </VButton>
-            <VIconButton
-              type="button"
-              variant="secondary"
-              className={styles.updateBannerDismissButton}
-              onPress={dismissUpdateBanner}
-              label={updateBannerDismissActionLabel}
-              title={updateBannerDismissActionLabel}
-              icon={<X size={14} />}
-            />
-          </div>
-          {updateBannerRestartGuard ? (
-            <span className={styles.updateBannerNote}>{updateBannerRestartGuard}</span>
-          ) : null}
-        </div>
-      ) : null}
-
-      <main className={styles.mainArea} style={updateBannerVisible ? UPDATE_BANNER_MAIN_AREA_STYLE : undefined}>
+      <main className={styles.mainArea}>
         <CompanionDesktopAttention />
         <Outlet />
       </main>
