@@ -185,6 +185,137 @@ describe("ConversationMarkdownRenderer", () => {
     expect(html).toContain("代码行 200");
   });
 
+  it("renders a code block header with the lowercase language label and a text fallback", async () => {
+    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
+    const html = renderToStaticMarkup(
+      <ConversationMarkdownRenderer
+        content={["```Ts", "const x = 1;", "```", "", "```", "纯目录树", "```"].join("\n")}
+        classNames={styles}
+      />,
+    );
+
+    expect(html.match(/data-markdown-code-block="true"/g)?.length).toBe(2);
+    expect(html).toMatch(/<span[^>]*markdownCodeBlockLanguage[^>]*>ts<\/span>/);
+    expect(html).toMatch(/<span[^>]*markdownCodeBlockLanguage[^>]*>text<\/span>/);
+    expect(html).toContain('aria-label="复制代码"');
+    expect(html).toContain('aria-label="自动换行"');
+    // Copy source is the rendered code text (including the fence trailing newline).
+    expect(html).toContain("lucide-copy");
+    expect(html).toContain("lucide-text-wrap");
+  });
+
+  it("copies the block text from the header with a Copy→Check feedback window", async () => {
+    vi.useFakeTimers();
+    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
+    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
+    const prototypeDescriptor = Object.getOwnPropertyDescriptor(Navigator.prototype, "clipboard");
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => {
+        root.render(
+          <ConversationMarkdownRenderer
+            content={["```python", "print('hi')", "", "print('bye')", "```"].join("\n")}
+            classNames={styles}
+          />,
+        );
+      });
+      const copyButton = host.querySelector<HTMLButtonElement>('button[aria-label="复制代码"]');
+      expect(copyButton).not.toBeNull();
+      expect(copyButton!.querySelector("svg.lucide-copy")).not.toBeNull();
+      expect(copyButton!.querySelector("svg.lucide-check")).toBeNull();
+
+      await act(async () => {
+        copyButton!.click();
+      });
+      expect(writeText).toHaveBeenCalledTimes(1);
+      expect(writeText).toHaveBeenCalledWith("print('hi')\n\nprint('bye')\n");
+      expect(copyButton!.querySelector("svg.lucide-check")).not.toBeNull();
+      expect(copyButton!.querySelector("svg.lucide-copy")).toBeNull();
+
+      // Feedback window (same duration semantics as the turn hover copy):
+      // the icon reverts to Copy afterwards.
+      await act(async () => {
+        vi.advanceTimersByTime(1600);
+      });
+      expect(copyButton!.querySelector("svg.lucide-copy")).not.toBeNull();
+      expect(copyButton!.querySelector("svg.lucide-check")).toBeNull();
+      expect(writeText).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      host.remove();
+      delete (navigator as { clipboard?: unknown }).clipboard;
+      if (prototypeDescriptor) {
+        Object.defineProperty(Navigator.prototype, "clipboard", prototypeDescriptor);
+      }
+      vi.useRealTimers();
+    }
+  });
+
+  it("toggles soft wrap per code block from the header control", async () => {
+    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => {
+        root.render(
+          <ConversationMarkdownRenderer
+            content={["```python", "first = 1", "```", "", "```js", "second = 2", "```"].join("\n")}
+            classNames={styles}
+          />,
+        );
+      });
+      const pres = host.querySelectorAll("pre");
+      expect(pres.length).toBe(2);
+      const wrapButton = host.querySelector<HTMLButtonElement>('button[aria-label="自动换行"]');
+      expect(wrapButton).not.toBeNull();
+      expect(wrapButton!.getAttribute("aria-pressed")).toBe("false");
+      expect(pres[0]!.className).not.toContain("whitespace-pre-wrap");
+      expect(pres[1]!.className).not.toContain("whitespace-pre-wrap");
+
+      // Toggle affects only its own block.
+      await act(async () => {
+        wrapButton!.click();
+      });
+      expect(wrapButton!.getAttribute("aria-pressed")).toBe("true");
+      expect(pres[0]!.className).toContain("whitespace-pre-wrap");
+      expect(pres[1]!.className).not.toContain("whitespace-pre-wrap");
+
+      await act(async () => {
+        wrapButton!.click();
+      });
+      expect(wrapButton!.getAttribute("aria-pressed")).toBe("false");
+      expect(pres[0]!.className).not.toContain("whitespace-pre-wrap");
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      host.remove();
+    }
+  });
+
+  it("keeps the code block header on the folded overflow path", async () => {
+    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
+    const codeLines = Array.from({ length: 260 }, (_, index) => `代码行 ${String(index + 1).padStart(3, "0")}`);
+    const html = renderToStaticMarkup(
+      <ConversationMarkdownRenderer content={["```text", ...codeLines, "```"].join("\n")} classNames={styles} />,
+    );
+
+    expect(html).toContain('data-markdown-code-block="true"');
+    expect(html).toContain(">text<");
+    expect(html).toContain("<details");
+    expect(html).toContain("展开其余 60 行");
+    // Header controls stay unique to the block (not duplicated per pre half).
+    expect(html.match(/aria-label="复制代码"/g)?.length).toBe(1);
+    expect(html.match(/aria-label="自动换行"/g)?.length).toBe(1);
+  });
+
   it("truncates an oversized table behind an expandable disclosure", async () => {
     const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const rows = Array.from({ length: 40 }, (_, index) => `| 行 ${String(index + 1).padStart(2, "0")} | 值 |`);

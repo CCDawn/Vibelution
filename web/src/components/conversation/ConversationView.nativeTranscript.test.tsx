@@ -680,7 +680,7 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain("context_compression_failed_preserved");
   });
 
-  it("collapses a settled reasoning cell to a preview and unmounts its body", () => {
+  it("keeps reasoning cells collapsed while streaming and after settle, with a rolling summary", () => {
     const reasoning = (status: "running" | "completed"): ConversationMessage => ({
       id: `assistant-reasoning-${status}`,
       role: "assistant",
@@ -702,18 +702,24 @@ describe("ConversationView native Codex transcript surface", () => {
       }],
     });
 
+    // ZCode parity: live reasoning stays collapsed too, only the running title
+    // and the latest-sentence summary roll in the header.
     const live = renderConversation([reasoning("running")]);
-    expect(live).toContain('data-thought-expanded="true"');
-    expect(live).toContain('data-thought-scroll-body="true"');
+    expect(live).toContain('data-thought-expanded="false"');
+    expect(live).toContain("思考中");
+    expect(live).toContain('data-thought-streaming-summary="true"');
     expect(live).toContain("先确认这个函数的两条来源路径");
+    expect(live).not.toContain('data-thought-scroll-body="true"');
 
     const settled = renderConversation([reasoning("completed")]);
     expect(settled).toContain('data-thought-expanded="false"');
+    expect(settled).toContain("已思考");
     // Collapsed means the long body is not mounted at all: the finished thought
     // stops re-rendering its text on every transcript update.
     expect(settled).not.toContain('data-thought-scroll-body="true"');
-    // The one-line preview keeps the collapsed cell scannable.
-    expect(settled).toContain(styles.timelineThoughtInlinePreview);
+    // The latest-sentence summary keeps the collapsed lane scannable.
+    expect(settled).toContain('data-thought-streaming-summary="true"');
+    expect(settled).toContain("先确认这个函数的两条来源路径");
   });
 
   it("keeps a retry turn item out of the settled transcript", () => {
