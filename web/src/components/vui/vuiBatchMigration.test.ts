@@ -427,7 +427,7 @@ function isRawControlGuardExempt(path: string): boolean {
 }
 
 function sourceHasRawControlOutsideAllowedExceptions(path: string, source: string): boolean {
-  if (path === "routes/ConfigRoute.tsx") {
+  if (path === "routes/config/ConfigSectionEditor.tsx") {
     const allowedFileInputs = source.match(configFileInputPattern) ?? [];
     const hasExpectedFileInputExceptions = allowedFileInputs.length === configFileInputContexts.length
       && allowedFileInputs.every((input) => input.includes("onChange={async"))
@@ -474,7 +474,7 @@ describe("VUI batch migration", () => {
   });
 
   it("permits only the styled image-upload inputs in Config via VInput", () => {
-    const configSource = readTargetSource("routes/ConfigRoute.tsx");
+    const configSource = readTargetSource("routes/config/ConfigSectionEditor.tsx");
     const configStyles = readTargetSource("routes/ConfigRoute.styles.ts");
     const currentFileInputs = configSource.match(configFileInputPattern) ?? [];
 
@@ -487,8 +487,8 @@ describe("VUI batch migration", () => {
     expect(configStyles).toContain("avatarImageDropButton");
     expect(configStyles).toContain("fileUploadButton");
     expect((configStyles.match(/\[&_input\]:\[opacity:0\]/g) ?? []).length).toBeGreaterThanOrEqual(3);
-    expect(sourceHasRawControlOutsideAllowedExceptions("routes/ConfigRoute.tsx", configSource)).toBe(false);
-    expect(sourceHasRawControlOutsideAllowedExceptions("routes/ConfigRoute.tsx", `${configSource}\n${currentFileInputs[0]}`)).toBe(true);
+    expect(sourceHasRawControlOutsideAllowedExceptions("routes/config/ConfigSectionEditor.tsx", configSource)).toBe(false);
+    expect(sourceHasRawControlOutsideAllowedExceptions("routes/config/ConfigSectionEditor.tsx", `${configSource}\n${currentFileInputs[0]}`)).toBe(true);
   });
 
   it("Evolution route and run-record panels preserve block button geometry after VUI native migration", () => {

@@ -265,7 +265,44 @@ def _profile_label(profile_id: str, lang: str, profile: dict[str, Any] | None = 
     return token.title() if lang == "en" else token
 
 
+# Settings-align wave 3 — single registration authority for settings sections.
+# Every section emitted by `_config_sections` carries its settings navigation
+# membership (`group` + `page`) so a newly registered section shows up in the
+# frontend settings workbench without any frontend-side per-section edit.
+# The vocabulary mirrors web/src/routes/ConfigSettingsNavigation.tsx
+# (GROUP_ORDER + PAGE_DEFINITIONS); SSOT tests pin both sides together.
+_SECTION_GROUP_PAGE: dict[str, tuple[str, str]] = {
+    "overview": ("overview-apply", "overview-save"),
+    "diagnostics": ("overview-apply", "overview-save"),
+    "shell": ("workbench-interface", "workbench-interface"),
+    "shortcuts": ("workbench-interface", "workbench-shortcuts"),
+    "ui": ("workbench-interface", "workbench-interface"),
+    "models": ("models-profiles", "model-connection"),
+    "user-profile": ("avatar-pet", "identity-profile"),
+    "avatar": ("avatar-pet", "identity-profile"),
+    "pet": ("avatar-pet", "identity-profile"),
+    "context-compression": ("runtime-context", "runtime-context"),
+    "session-recovery": ("runtime-context", "runtime-context"),
+    "analysis": ("runtime-context", "runtime-context"),
+    "security": ("tooling-diagnostics", "tooling-access"),
+    "network": ("tooling-diagnostics", "tooling-access"),
+    "parser": ("tooling-diagnostics", "tooling-access"),
+    "log": ("tooling-diagnostics", "tooling-health"),
+    "debug": ("tooling-diagnostics", "tooling-health"),
+    "health-diagnostics": ("tooling-diagnostics", "tooling-health"),
+    "git-commit-model": ("tooling-diagnostics", "tooling-git"),
+    "git-commit-prompt": ("tooling-diagnostics", "tooling-git"),
+    "draft": ("tooling-diagnostics", "tooling-git"),
+}
+
+
 def _config_sections(lang: str, editor_sections: list[dict[str, Any]] | None = None) -> list[dict[str, str]]:
+    def with_membership(section: dict[str, str]) -> dict[str, str]:
+        membership = _SECTION_GROUP_PAGE.get(str(section.get("id", "")))
+        if membership:
+            return {**section, "group": membership[0], "page": membership[1]}
+        return section
+
     sections = [
         {
             "id": "overview",
@@ -343,7 +380,7 @@ def _config_sections(lang: str, editor_sections: list[dict[str, Any]] | None = N
             },
         ]
     )
-    return sections
+    return [with_membership(section) for section in sections]
 
 
 def _empty_draft_meta() -> dict[str, object]:

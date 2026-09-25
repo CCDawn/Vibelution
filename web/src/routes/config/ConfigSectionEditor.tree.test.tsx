@@ -172,8 +172,8 @@ describe("ConfigSectionEditor tree rendering (wave 3 safety net)", () => {
       const nestedPath = "context_compression.micro_compact_tool_whitelist";
       const row = harness.container.querySelector(`[data-testid="row-${nestedPath}"]`);
       expect(row).not.toBeNull();
-      // string_list 编辑态：textarea 承载逐行文本
-      const textarea = harness.container.querySelector(`textarea[aria-label="${nestedPath}"]`);
+      // string_list 编辑态：textarea 承载逐行文本（行内定位，标签文案变化不影响）
+      const textarea = row?.querySelector("textarea") ?? null;
       expect(textarea).not.toBeNull();
       expect((textarea as HTMLTextAreaElement).value).toBe("read_file_tool");
     } finally {
