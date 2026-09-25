@@ -61,6 +61,7 @@ describe("single-instance lifecycle envelope", () => {
       kind: "vibelution-single-instance",
       projectRoot: "",
       openWorkbench: false,
+      hiddenPresentation: false,
       lifecycle: {
         command: "stop",
         provenance: "forwarded",
@@ -79,6 +80,7 @@ describe("single-instance lifecycle envelope", () => {
       kind: "vibelution-single-instance",
       projectRoot: "",
       openWorkbench: false,
+      hiddenPresentation: false,
       lifecycle: {
         command: "stop",
         provenance: "operator"
@@ -97,12 +99,35 @@ describe("single-instance lifecycle envelope", () => {
     expect(resolveSingleInstanceCliIntent(envelope)).toEqual({
       projectRoot: "C:/repo/.worktrees/task",
       openWorkbench: true,
+      hiddenPresentation: false,
       lifecycleCommand: "start"
     });
     expect(resolveSingleInstanceCliIntent({ schemaVersion: 1, kind: "other" })).toEqual({
       projectRoot: "",
       openWorkbench: false,
+      hiddenPresentation: false,
       lifecycleCommand: ""
+    });
+  });
+
+  it("round-trips hidden presentation through the envelope without defaulting it on", () => {
+    const envelope = createSingleInstanceEnvelope({
+      projectRoot: "C:/repo/.worktrees/task",
+      lifecycleCommand: "start"
+    });
+    expect(envelope.hiddenPresentation).toBe(false);
+    expect(resolveSingleInstanceCliIntent(envelope).hiddenPresentation).toBe(false);
+
+    const hiddenEnvelope = createSingleInstanceEnvelope({
+      projectRoot: "C:/repo/.worktrees/task",
+      lifecycleCommand: "start",
+      hiddenPresentation: true
+    });
+    expect(hiddenEnvelope.hiddenPresentation).toBe(true);
+    expect(resolveSingleInstanceCliIntent(hiddenEnvelope)).toMatchObject({
+      projectRoot: "C:/repo/.worktrees/task",
+      openWorkbench: false,
+      hiddenPresentation: true
     });
   });
 });
@@ -197,7 +222,16 @@ describe("resolveSecondInstanceIntent", () => {
     expect(resolveSecondInstanceIntent({ projectRoot: "C:/repo" })).toEqual({
       action: "apply_project",
       projectRoot: "C:/repo",
-      lifecycleCommand: ""
+      lifecycleCommand: "",
+      hiddenPresentation: false
+    });
+    expect(
+      resolveSecondInstanceIntent({ projectRoot: "C:/repo", hiddenPresentation: true })
+    ).toEqual({
+      action: "apply_project",
+      projectRoot: "C:/repo",
+      lifecycleCommand: "",
+      hiddenPresentation: true
     });
     expect(resolveSecondInstanceIntent({ openWorkbench: true })).toEqual({ action: "open_workbench" });
   });
@@ -218,7 +252,8 @@ describe("resolveSecondInstanceIntent", () => {
     ).toEqual({
       action: "apply_project",
       projectRoot: "C:/repo/.worktrees/task",
-      lifecycleCommand: "start"
+      lifecycleCommand: "start",
+      hiddenPresentation: false
     });
     expect(resolveSecondInstanceIntent({ lifecycleCommand: "start" })).toEqual({
       action: "lifecycle",

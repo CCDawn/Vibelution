@@ -22,7 +22,7 @@ internal static class VibelutionLauncher
             string action = ResolveAction(parsed.ForwardedArgs);
             if (!action.Equals("launcher", StringComparison.OrdinalIgnoreCase))
             {
-                return RunNativeAction(projectDir, parsed.ForwardedArgs);
+                return RunNativeAction(projectDir, parsed.ForwardedArgs, parsed.HiddenPresentation);
             }
 
             bool created;
@@ -72,6 +72,10 @@ internal static class VibelutionLauncher
         public string ProjectDir;
         public List<string> ForwardedArgs;
         public bool FromShortcut;
+        // --hidden / --hidden-presentation: forward hidden presentation so the
+        // shared shell opens branch instance workbench windows without
+        // show/focus (e2e lanes). Absent the flag, nothing changes.
+        public bool HiddenPresentation;
     }
 
     // The Python desktop-entry bridge settles lifecycle commands itself and
@@ -898,6 +902,7 @@ internal static class VibelutionLauncher
         var forwardedArgs = new List<string>();
         string projectDir = "";
         bool fromShortcut = false;
+        bool hiddenPresentation = false;
         for (int index = 0; index < args.Length; index++)
         {
             string arg = args[index] ?? "";
@@ -911,6 +916,12 @@ internal static class VibelutionLauncher
                 fromShortcut = true;
                 continue;
             }
+            if (arg.Equals("--hidden", StringComparison.OrdinalIgnoreCase)
+                || arg.Equals("--hidden-presentation", StringComparison.OrdinalIgnoreCase))
+            {
+                hiddenPresentation = true;
+                continue;
+            }
             forwardedArgs.Add(arg);
         }
 
@@ -922,7 +933,8 @@ internal static class VibelutionLauncher
         {
             ProjectDir = Path.GetFullPath(projectDir),
             ForwardedArgs = forwardedArgs,
-            FromShortcut = fromShortcut
+            FromShortcut = fromShortcut,
+            HiddenPresentation = hiddenPresentation
         };
     }
 
@@ -953,12 +965,12 @@ internal static class VibelutionLauncher
         return action;
     }
 
-    private static int RunNativeAction(string projectDir, List<string> forwardedArgs)
+    private static int RunNativeAction(string projectDir, List<string> forwardedArgs, bool hiddenPresentation)
     {
         string action = ResolveAction(forwardedArgs);
         if (action == "open")
         {
-            if (ForwardOrLaunchElectron(projectDir, action, forwardedArgs))
+            if (ForwardOrLaunchElectron(projectDir, action, forwardedArgs, hiddenPresentation))
             {
                 WriteNativeEntryLog(projectDir, "native_action.electron_forwarded", "action=open");
                 return 0;
@@ -984,7 +996,7 @@ internal static class VibelutionLauncher
 
         // Electron main owns lifecycle commands. Launch the current checkout
         // shell (packaged if current, otherwise unpackaged Electron main).
-        if (ForwardOrLaunchElectron(projectDir, action, forwardedArgs))
+        if (ForwardOrLaunchElectron(projectDir, action, forwardedArgs, hiddenPresentation))
         {
             WriteNativeEntryLog(projectDir, "native_action.electron_forwarded", "action=" + action);
             return 0;
@@ -1146,13 +1158,13 @@ internal static class VibelutionLauncher
         return "";
     }
 
-    private static bool ForwardOrLaunchElectron(string projectDir, string action, List<string> forwardedArgs)
+    private static bool ForwardOrLaunchElectron(string projectDir, string action, List<string> forwardedArgs, bool hiddenPresentation)
     {
         bool openWorkbench = action == "open" || action == "start" || action == "restart" || action == "rebuild-and-start";
         lastBridgeFailure = null;
         try
         {
-            LaunchCurrentElectronMain(projectDir, action, openWorkbench);
+            LaunchCurrentElectronMain(projectDir, action, openWorkbench, hiddenPresentation);
             return true;
         }
         catch (BridgeFailureException ex)
@@ -1189,11 +1201,11 @@ internal static class VibelutionLauncher
         return path;
     }
 
-    private static void LaunchCurrentElectronMain(string projectDir, string thenLifecycle, bool openWorkbench)
+    private static void LaunchCurrentElectronMain(string projectDir, string thenLifecycle, bool openWorkbench, bool hiddenPresentation)
     {
         // 90s first settlement window + one 30s retry window (dropped
         // second-instance signal) plus spawn/overhead must fit the deadline.
-        RunPythonBridge(projectDir, "launch-desktop-shell", true, true, thenLifecycle, openWorkbench, 240000);
+        RunPythonBridge(projectDir, "launch-desktop-shell", true, true, thenLifecycle, openWorkbench, 240000, hiddenPresentation);
     }
 
     private static bool HasArgument(List<string> args, params string[] accepted)
@@ -1243,7 +1255,8 @@ internal static class VibelutionLauncher
         bool outputJson,
         string thenLifecycle,
         bool openWorkbench,
-        int timeoutMs)
+        int timeoutMs,
+        bool hiddenPresentation = false)
     {
         string requestedRoot = Path.GetFullPath(projectDir);
         string shellRoot = ResolveDesktopShellWorkspace(requestedRoot);
@@ -1292,6 +1305,10 @@ internal static class VibelutionLauncher
         if (openWorkbench)
         {
             arguments.Add("--open-workbench");
+        }
+        if (hiddenPresentation)
+        {
+            arguments.Add("--hidden-presentation");
         }
 
         var startInfo = new ProcessStartInfo

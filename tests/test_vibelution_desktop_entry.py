@@ -663,15 +663,27 @@ def test_parse_args_accepts_launch_desktop_shell_flags():
     assert args.workspace == r"C:\repo"
 
 
+def test_parse_args_hidden_presentation_defaults_off_and_requires_explicit_flag():
+    default_args = desktop_entry.parse_args(
+        ["--action", "launch-desktop-shell", "--then-lifecycle", "start"]
+    )
+    assert default_args.hidden_presentation is False
+    hidden_args = desktop_entry.parse_args(
+        ["--action", "launch-desktop-shell", "--then-lifecycle", "start", "--hidden-presentation"]
+    )
+    assert hidden_args.hidden_presentation is True
+
+
 def test_launch_desktop_shell_action_dispatches_to_desktop_shell(monkeypatch, capsys, tmp_path):
     captured: dict[str, object] = {}
     order: list[str] = []
 
-    def fake_launch(*, project_root, then_lifecycle, open_workbench):
+    def fake_launch(*, project_root, then_lifecycle, open_workbench, hidden_presentation=False):
         order.append("launch")
         captured["project_root"] = project_root
         captured["then_lifecycle"] = then_lifecycle
         captured["open_workbench"] = open_workbench
+        captured["hidden_presentation"] = hidden_presentation
         return {"schemaVersion": 1, "kind": "unpackaged", "pid": 9, "thenLifecycle": then_lifecycle, "openWorkbench": open_workbench}
 
     def fake_wait(workspace_root, operation, *, baseline_command_id="", **_kwargs):
@@ -713,6 +725,7 @@ def test_launch_desktop_shell_action_dispatches_to_desktop_shell(monkeypatch, ca
     assert result == 0
     assert captured["then_lifecycle"] == "start"
     assert captured["open_workbench"] is True
+    assert captured["hidden_presentation"] is False
     assert captured["settle_operation"] == "start"
     assert captured["settle_workspace"] == str(tmp_path)
     assert captured["settle_baseline_command_id"] == "cmd_before_launch"
@@ -722,6 +735,44 @@ def test_launch_desktop_shell_action_dispatches_to_desktop_shell(monkeypatch, ca
     assert payload["pid"] == 9
     assert payload["ok"] is True
     assert payload["lifecycleSettlement"]["observed"] == "queue_settlement"
+
+
+def test_launch_desktop_shell_bridge_forwards_hidden_presentation_flag(monkeypatch, capsys, tmp_path):
+    captured: dict[str, object] = {}
+
+    def fake_launch(*, project_root, then_lifecycle, open_workbench, hidden_presentation=False):
+        captured["hidden_presentation"] = hidden_presentation
+        return {"schemaVersion": 1, "kind": "unpackaged", "pid": 9, "thenLifecycle": then_lifecycle, "openWorkbench": open_workbench}
+
+    monkeypatch.setattr("core.launcher.desktop_shell.launch_desktop_shell", fake_launch)
+    monkeypatch.setattr(
+        desktop_entry,
+        "_capture_lifecycle_settlement_baseline",
+        lambda _root: {"kind": "main_line", "commandId": "cmd_before_launch"},
+    )
+    monkeypatch.setattr(
+        desktop_entry,
+        "wait_for_lifecycle_settlement",
+        lambda _root, _op, **_kwargs: {
+            "operation": _op, "observed": "queue_settlement", "settled": True, "accepted": True,
+            "ok": True, "commandId": "cmd_test_settled", "code": "", "message": "", "resultsPath": "",
+        },
+    )
+    result = desktop_entry.main(
+        [
+            "--action",
+            "launch-desktop-shell",
+            "--output",
+            "json",
+            "--then-lifecycle",
+            "start",
+            "--hidden-presentation",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    assert result == 0
+    assert captured["hidden_presentation"] is True
 
 
 def test_resolve_workbench_port_owner_reports_inventory_trusted_backend(monkeypatch, capsys):
@@ -790,7 +841,7 @@ def test_launch_desktop_shell_retries_once_when_intent_not_consumed(monkeypatch,
     launches: list[dict[str, object]] = []
     wait_kwargs: list[dict[str, object]] = []
 
-    def fake_launch(*, project_root, then_lifecycle, open_workbench):
+    def fake_launch(*, project_root, then_lifecycle, open_workbench, hidden_presentation=False):
         launches.append({"then_lifecycle": then_lifecycle})
         return {
             "schemaVersion": 1,
@@ -854,7 +905,7 @@ def test_launch_desktop_shell_retries_once_when_intent_not_consumed(monkeypatch,
 def test_launch_desktop_shell_does_not_retry_an_unsettled_intent(monkeypatch, capsys, tmp_path):
     launches: list[dict[str, object]] = []
 
-    def fake_launch(*, project_root, then_lifecycle, open_workbench):
+    def fake_launch(*, project_root, then_lifecycle, open_workbench, hidden_presentation=False):
         launches.append({"then_lifecycle": then_lifecycle})
         return {
             "schemaVersion": 1,
@@ -1339,7 +1390,7 @@ def test_await_launch_lifecycle_settlement_routes_worktrees_to_instance_registry
 def test_launch_desktop_shell_waits_for_settlement_and_reports_visible_failure(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(
         "core.launcher.desktop_shell.launch_desktop_shell",
-        lambda *, project_root, then_lifecycle, open_workbench: {
+        lambda *, project_root, then_lifecycle, open_workbench, hidden_presentation=False: {
             "schemaVersion": 1,
             "kind": "unpackaged",
             "pid": 9,
@@ -1384,7 +1435,7 @@ def test_launch_desktop_shell_waits_for_settlement_and_reports_visible_failure(m
 def test_launch_desktop_shell_skips_settlement_wait_for_non_lifecycle_ops(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(
         "core.launcher.desktop_shell.launch_desktop_shell",
-        lambda *, project_root, then_lifecycle, open_workbench: {
+        lambda *, project_root, then_lifecycle, open_workbench, hidden_presentation=False: {
             "schemaVersion": 1,
             "kind": "unpackaged",
             "pid": 9,

@@ -13,6 +13,14 @@ describe("desktop CLI arguments", () => {
     expect(parseDesktopCliArgs(["--workspace", "C:/workspace"]).projectRoot).toBe("");
   });
 
+  it("defaults hidden presentation to off and only enables it via the explicit flag", () => {
+    expect(parseDesktopCliArgs(["--project", "C:/repo", "start"]).hiddenPresentation).toBe(false);
+    expect(
+      parseDesktopCliArgs(["--project", "C:/repo", "start", "--hidden-presentation"]).hiddenPresentation
+    ).toBe(true);
+    expect(parseDesktopCliArgs(["--workspace", "C:/w"]).hiddenPresentation).toBe(false);
+  });
+
   it("parses forwarded shim lifecycle commands without confusing them with paths", () => {
     expect(parseDesktopCliArgs(["--project", "C:/repo", "start"]).lifecycleCommand).toBe("start");
     expect(parseDesktopCliArgs(["--project", "C:/repo", "restart"]).lifecycleCommand).toBe("restart");
@@ -162,6 +170,7 @@ describe("desktop CLI arguments", () => {
       smoke: true,
       openWorkbench: true,
       workbenchCloseCanary: true,
+      hiddenPresentation: false,
       lifecycleCommand: ""
     });
     expect(applyDesktopCliToEnvironment({ NODE_ENV: "production" } as NodeJS.ProcessEnv, args)).toMatchObject({

@@ -18,7 +18,7 @@ const POSITION_QUANTUM = 8;
 const POSITION_POLL_MS = 1000;
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
-let positionPollTimer: ReturnType<typeof setInterval> | null = null;
+let positionPollTimer: number | null = null;
 let lastSavedMode: ObservedWorkbenchWindowMode | null = null;
 let lastSavedSize = "";
 let lastSavedPosition = "";
