@@ -93,6 +93,17 @@ describe("conversation slash command suggestions", () => {
     ]);
   });
 
+  it("ranks a command-prefix match above a substring match for /b", () => {
+    const bSkills = [skill("/abc-tool", "bug tracking"), skill("/bug-report", "report bugs")];
+    // "/b" drops its slash before scoring, so "/bug-report" must still reach
+    // the prefix tier via the slashless haystack token and beat "/abc-tool",
+    // which only contains the query and would win an alphabetical tie.
+    expect(filterSlashCommandSuggestions(bSkills, "/b").map((item) => item.command)).toEqual([
+      "/bug-report",
+      "/abc-tool",
+    ]);
+  });
+
   it("does not match CJK skills through scattered characters", () => {
     const cjkSkills = [skill("/杂谈", "这里文散着件字")];
     expect(filterSlashCommandSuggestions(cjkSkills, "/文件")).toEqual([]);
@@ -151,6 +162,17 @@ describe("conversation slash command suggestions", () => {
     expect(mergeSlashCommandSuggestions(builtins, betterSkills, "/mdl").map((item) => item.command)).toEqual([
       "/mdl-tools",
       "/model",
+    ]);
+  });
+
+  it("ranks /new_session first for /new via the prefix tier", () => {
+    // Without the slashless haystack token the builtin only substring-matches
+    // ("new" lives in its alias) and loses to the "/newbie-guide" prefix hit.
+    const builtins = [builtin("/new_session", "new_session", ["new", "session"])];
+    const newSkills = [skill("/newbie-guide", "guide for newcomers")];
+    expect(mergeSlashCommandSuggestions(builtins, newSkills, "/new").map((item) => item.command)).toEqual([
+      "/new_session",
+      "/newbie-guide",
     ]);
   });
 

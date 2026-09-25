@@ -44,8 +44,18 @@ export function composerSlashCommandQuery(value: string): string {
   return token ? token.replace(/^\/+/, "").trim().toLowerCase() : "";
 }
 
+/**
+ * The composer query arrives with its leading slash stripped, so haystacks
+ * lead with the slashless command token too; without it the token's own "/"
+ * would push every command match down to the substring tier.
+ */
+function slashlessToken(value: string): string {
+  return String(value || "").replace(/^\/+/, "");
+}
+
 function skillHaystack(skill: SkillLibraryItem): string {
   return [
+    slashlessToken(skill.command),
     skill.command,
     skill.name,
     skill.directoryName,
@@ -103,7 +113,14 @@ export function mergeSlashCommandSuggestions(
     if (!builtin?.command) {
       continue;
     }
-    const haystack = [builtin.command, ...builtin.aliases, builtin.description].join(" ").toLowerCase();
+    const haystack = [
+      slashlessToken(builtin.command),
+      builtin.command,
+      ...builtin.aliases,
+      builtin.description,
+    ]
+      .join(" ")
+      .toLowerCase();
     const score = scoreMatch(query, haystack);
     if (!Number.isFinite(score)) {
       continue;
