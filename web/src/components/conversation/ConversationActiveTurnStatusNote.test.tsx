@@ -235,3 +235,65 @@ describe("ConversationActiveTurnStatusNote stream advisories", () => {
     expect(html).toContain(dictionaryChat.en.chatStreamDisconnectedReconnecting);
   });
 });
+
+describe("ConversationActiveTurnStatusNote manual reconnect action", () => {
+  const disconnectedState = (): ActiveTurnStreamState => ({
+    streamConnected: false,
+    streamDisconnectedSinceMs: Date.now() - 7_000,
+    lastAssistantDeltaAtMs: Date.now() - 1_000,
+    reconnectSessionStream: () => {},
+  });
+
+  it("renders the small ghost reconnect button beside the disconnect chip", () => {
+    const html = renderNote({ streamState: disconnectedState() });
+
+    expect(html).toContain('data-testid="active-turn-reconnect"');
+    expect(html).toContain('aria-label="重新连接"');
+    expect(html).toContain('data-variant="ghost"');
+    expect(html).toContain('data-density="compact"');
+    expect(html).toContain(">重新连接</span>");
+    expect(html).not.toContain('data-active-turn-reconnect-pending="true"');
+  });
+
+  it("uses the English label for en", () => {
+    const html = renderNote({ lang: "en", streamState: disconnectedState() });
+
+    expect(html).toContain('aria-label="Reconnect"');
+    expect(html).toContain(">Reconnect</span>");
+  });
+
+  it("hides the button while the stream is healthy", () => {
+    const html = renderNote({
+      streamState: {
+        streamConnected: true,
+        lastAssistantDeltaAtMs: Date.now() - 1_000,
+        reconnectSessionStream: () => {},
+      },
+    });
+
+    expect(html).not.toContain('data-testid="active-turn-reconnect"');
+  });
+
+  it("hides the button when no reconnect handler is wired", () => {
+    const { reconnectSessionStream: _omitted, ...stateWithoutHandler } = disconnectedState();
+    const html = renderNote({ streamState: stateWithoutHandler });
+
+    expect(html).toContain('data-testid="active-turn-disconnected"');
+    expect(html).not.toContain('data-testid="active-turn-reconnect"');
+  });
+
+  it("never renders the button in companion mode", () => {
+    const html = renderNote({
+      companionMode: true,
+      message: {
+        timestamp: new Date(Date.now() - 120_000).toISOString(),
+        status: "running",
+        turnItems: [],
+      },
+      streamState: disconnectedState(),
+    });
+
+    expect(html).not.toContain('data-testid="active-turn-reconnect"');
+    expect(html).not.toContain('data-testid="active-turn-disconnected"');
+  });
+});

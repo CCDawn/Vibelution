@@ -929,6 +929,8 @@ export const ConversationView = React.memo(function ConversationView({
   onComposerChange,
   onAddComposerAttachments,
   onRemoveComposerAttachment,
+  onRetryComposerAttachment,
+  onRetryComposerAttachmentUploads,
   onAddComposerReference,
   onRemoveComposerReference,
   onEditUserMessage,
@@ -6088,7 +6090,27 @@ export const ConversationView = React.memo(function ConversationView({
           onDragLeave={handleComposerDragLeave}
           onDrop={handleComposerDrop}
         >
-          {composerError ? <p className={styles.composerError} role="alert">{composerError}</p> : null}
+          {/* Upload-failure repair: the error row grows a retry-all action only
+              while failed attachment chips exist, so unrelated composer errors
+              stay plain. */}
+          {composerError ? (
+            <p className={styles.composerError} role="alert">
+              {composerError}
+              {composerAttachments.some((attachment) => attachment.uploadStatus === "failed") && onRetryComposerAttachmentUploads ? (
+                <VButton
+                  className={styles.composerErrorRetryButton}
+                  variant="ghost"
+                  type="button"
+                  isDisabled={composerPending}
+                  onClick={onRetryComposerAttachmentUploads}
+                  title={t("retryUpload")}
+                >
+                  <RefreshCw size={12} aria-hidden="true" />
+                  <span>{t("retryUpload")}</span>
+                </VButton>
+              ) : null}
+            </p>
+          ) : null}
           {composerGuidance ? (
             <div className={styles.composerGuidance} role="status" aria-live="polite" data-composer-guidance>
               <span className={styles.composerGuidanceIcon} aria-hidden="true">i</span>
@@ -6106,8 +6128,18 @@ export const ConversationView = React.memo(function ConversationView({
                 const attachmentIsImage = isImageAttachment(attachment);
                 const previewLabel = t("composerAttachmentPreviewLabel").replace("{filename}", attachment.filename);
                 const sizeLabel = attachmentSizeLabel(attachment.sizeBytes);
+                const uploadFailed = attachment.uploadStatus === "failed";
+                const uploading = attachment.uploadStatus === "uploading";
                 return (
-                  <div key={attachment.id} className={styles.composerAttachmentChip} role="listitem">
+                  <div
+                    key={attachment.id}
+                    className={uploadFailed
+                      ? `${styles.composerAttachmentChip} ${styles.composerAttachmentChipFailed}`
+                      : styles.composerAttachmentChip}
+                    role="listitem"
+                    aria-invalid={uploadFailed || undefined}
+                    title={uploadFailed ? t("attachmentUploadFailedRetryHint") : undefined}
+                  >
                     {attachmentIsImage ? (
                       <VButton
                         className={styles.composerAttachmentPreview}
@@ -6136,10 +6168,31 @@ export const ConversationView = React.memo(function ConversationView({
                     )}
                     <span className={styles.composerAttachmentCopy}>
                       <span className={styles.composerAttachmentName} title={attachment.filename}>{attachment.filename}</span>
-                      {sizeLabel ? (
+                      {uploading ? (
+                        <span className={styles.composerAttachmentStatusUploading}>
+                          <LoaderCircle size={11} aria-hidden="true" className={styles.composerAttachmentUploadingIcon} />
+                          {t("attachmentUploading")}
+                        </span>
+                      ) : sizeLabel ? (
                         <span className={styles.composerAttachmentMeta}>{sizeLabel}</span>
                       ) : null}
+                      {uploadFailed ? (
+                        <span className={styles.composerAttachmentStatusFailed}>{t("attachmentUploadFailedRetryHint")}</span>
+                      ) : null}
                     </span>
+                    {uploadFailed && onRetryComposerAttachment ? (
+                      <VButton
+                        className={styles.composerAttachmentRetryButton}
+                        isIconOnly
+                        variant="ghost"
+                        type="button"
+                        onClick={() => onRetryComposerAttachment(attachment.id)}
+                        title={t("retryUpload")}
+                        aria-label={`${t("retryUpload")}: ${attachment.filename}`}
+                      >
+                        <RefreshCw size={13} aria-hidden="true" />
+                      </VButton>
+                    ) : null}
                     {onRemoveComposerAttachment ? (
                       <VButton
                         className={styles.composerAttachmentRemoveButton}

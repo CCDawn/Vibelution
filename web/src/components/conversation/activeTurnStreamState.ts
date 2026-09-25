@@ -15,6 +15,12 @@ export type ActiveTurnStreamState = {
   streamDisconnectedSinceMs?: number | null;
   /** Epoch ms of the last applied assistant delta for the viewed session. */
   lastAssistantDeltaAtMs?: number | null;
+  /**
+   * Manual "reconnect now" action wired from `useSessionDetailStream` (the sole
+   * stream owner). Absent on surfaces without a guarded stream; the disconnect
+   * advisory only renders its reconnect button when this exists.
+   */
+  reconnectSessionStream?: () => void;
 };
 
 export const ActiveTurnStreamStateContext = createContext<ActiveTurnStreamState>({});

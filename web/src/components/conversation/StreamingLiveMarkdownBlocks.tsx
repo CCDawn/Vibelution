@@ -1,5 +1,6 @@
 import { memo } from "react";
 
+import { renderConversationInlineMarkdown } from "./conversationInlineMarkdown";
 import { formattedCodeBlockContent } from "./conversationFormattedCodeBlock";
 import {
   LIVE_CODE_MAX_VISIBLE_LINES,
@@ -53,7 +54,14 @@ function LiveBlock({
       );
     }
     case "paragraph":
-      return <p className={classNames.messageBody}>{block.content}</p>;
+      // Live-tail inline light rendering (code pills / links / strong) shares
+      // the same classNames map as the settled pipeline, so inline code never
+      // paints as bare backticks and the settle flip keeps one visual.
+      return (
+        <p className={classNames.messageBody}>
+          {renderConversationInlineMarkdown(block.content, classNames, blockIndex)}
+        </p>
+      );
     case "code": {
       // Live-tail render budget: an unclosed fence holds its whole block in
       // the live tail, so only the newest lines paint per frame (static hint,

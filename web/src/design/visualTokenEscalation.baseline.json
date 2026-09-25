@@ -1,7 +1,7 @@
 {
   "comment": "Baseline for visualTokenEscalationContract.test.ts. Ratchet: counts may only shrink. Regenerate with: npm run tokens:baseline-update (web/).",
-  "updatedAt": "2026-09-24",
-  "scannedFileCount": 1320,
+  "updatedAt": "2026-09-25",
+  "scannedFileCount": 1352,
   "exemptFiles": [
     "routes/chat/CliAgentRunTerminalPanel.tsx",
     "routes/teams/challenge-cup/questionArchiveExport.ts"
@@ -68,13 +68,13 @@
       }
     },
     "arbitraryRadius": {
-      "total": 30,
+      "total": 29,
       "files": {
         "components/conversation/AgentUserContentSectionView.styles.ts": 1,
         "components/conversation/ConversationInferenceControl.styles.ts": 2,
         "components/conversation/ConversationTodoChecklist.styles.ts": 1,
         "components/conversation/ConversationTranscriptLoadingState.styles.ts": 1,
-        "components/conversation/ConversationView.styles.ts": 12,
+        "components/conversation/ConversationView.styles.ts": 11,
         "routes/AgentModelPicker.styles.ts": 3,
         "routes/companions/CompanionChatRails.styles.ts": 6,
         "routes/companions/CompanionLifeWorldCard.styles.ts": 1,

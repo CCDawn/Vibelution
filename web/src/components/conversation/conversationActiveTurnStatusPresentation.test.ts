@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ACTIVE_TURN_NO_DELTA_STALL_AFTER_MS,
+  ACTIVE_TURN_RECONNECT_ACTION_COOLDOWN_MS,
   MIN_VISIBLE_API_RETRY_ATTEMPT,
   activeTurnElapsedSeconds,
   activeTurnOptimisticStageSummary,
@@ -15,6 +16,7 @@ import {
   resolveActiveTurnRetryProgress,
   resolveActiveTurnRouteFallback,
   resolveActiveTurnStallSeconds,
+  shouldShowActiveTurnReconnectAction,
   visibleActiveTurnRetryProgress,
 } from "./conversationActiveTurnStatusPresentation";
 
@@ -177,6 +179,18 @@ describe("conversationActiveTurnStatusPresentation", () => {
       streamDisconnectedSinceMs: nowMs + 5_000,
       nowMs,
     })).toBe(0);
+  });
+
+  it("gates the manual reconnect action on a real drop plus a wired handler", () => {
+    expect(ACTIVE_TURN_RECONNECT_ACTION_COOLDOWN_MS).toBe(2_000);
+    // Real reconnect loop + stream-owner callback: button shows.
+    expect(shouldShowActiveTurnReconnectAction({ disconnectSeconds: 0, hasReconnectHandler: true })).toBe(true);
+    expect(shouldShowActiveTurnReconnectAction({ disconnectSeconds: 42, hasReconnectHandler: true })).toBe(true);
+    // No wired callback (companion surfaces, supervised panels): chip stays informational.
+    expect(shouldShowActiveTurnReconnectAction({ disconnectSeconds: 42, hasReconnectHandler: false })).toBe(false);
+    // Healthy or unknown stream: no button even with a handler.
+    expect(shouldShowActiveTurnReconnectAction({ disconnectSeconds: null, hasReconnectHandler: true })).toBe(false);
+    expect(shouldShowActiveTurnReconnectAction({ disconnectSeconds: null, hasReconnectHandler: false })).toBe(false);
   });
 
   it("escalates the stall hint only past the no-delta threshold", () => {

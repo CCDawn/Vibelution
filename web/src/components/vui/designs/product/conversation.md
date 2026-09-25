@@ -54,7 +54,7 @@
 ## ConversationActiveTurnStatusNote
 
 ### 功能
-运行中回合的紧凑状态行：一条心跳文案（阶段 + 秒数/重试进度），并叠加流连通性提示——连接断开重连、长时间无输出可停止、备用模型路由切换。让 SSE 断流与输出停滞从"无限累加的秒数"升级为可读的轻量提示。
+运行中回合的紧凑状态行：一条心跳文案（阶段 + 秒数/重试进度），并叠加流连通性提示——连接断开重连、长时间无输出可停止、备用模型路由切换。让 SSE 断流与输出停滞从"无限累加的秒数"升级为可读的轻量提示。断流提示附一个「重新连接」小 ghost 按钮：自动重连卡住（keep-warm 租约异常、浏览器挂起恢复）时用户可手动触发硬重连。
 
 ### 适用范围
 - **适用**：直连会话活跃回合的状态占位（`ConversationView` 时间线内）；需要流连通性可见性的位置。
@@ -62,7 +62,7 @@
 
 | 场景 | 选择 |
 | --- | --- |
-| 运行中回合 + 流断开重连 | 断连提示条（`VStatusChip tone=warning`）+ 断开持续秒数 |
+| 运行中回合 + 流断开重连 | 断连提示条（`VStatusChip tone=warning`）+ 断开持续秒数 + 重连按钮（见下） |
 | 运行中回合 + 已连接但超 90s 无 assistant delta | 停滞提示条（可停止），与断连正交叠加 |
 | 消息带 `routeFallback {from,to}` | 备用路由提示条（`tone=accent`）；字段缺失不渲染 |
 | 陪伴模式 | 仅 typing 提示 |
@@ -79,25 +79,28 @@
 | --- | --- | --- |
 | message | 活跃回合消息（turnItems/timestamp/可选 routeFallback） | routeFallback 缺字段则整条不渲染 |
 | lang | 语言 | 新文案一律走 `dictionaryChat`，禁止内联三目 |
-| streamState（context） | `streamConnected` 三态 + 断连起点 + 最近 delta 时间 | 不是第二套状态通道，只是 `useSessionDetailStream` 状态的跨层投影 |
+| streamState（context） | `streamConnected` 三态 + 断连起点 + 最近 delta 时间 + `reconnectSessionStream` 回调 | 不是第二套状态通道，只是 `useSessionDetailStream` 状态的跨层投影 |
 
 ### 非职责
 - 不判定生成是否失败（journal 是事实源，断连不取消生成）。
-- 不做模态阻断或 toast；不提供重试按钮（重连自动进行）。
+- 不做模态阻断或 toast。
 
 ### 视觉与状态
 - 提示条用 `VStatusChip`（warning=断连/停滞，accent=路由回退），紧跟心跳行，非模态。
 - 停滞阈值 `ACTIVE_TURN_NO_DELTA_STALL_AFTER_MS = 90s`（模块常量，覆盖长工具/思考静默）。
 - 重连成功提示条自动消失；断连与停滞可同时显示。
+- 重连按钮：`VButton variant=ghost density=compact` + RotateCw 图标，仅断流且有 `reconnectSessionStream` 回调时渲染（陪伴/无守卫流面板无回调即无按钮）；点击后冷却 `ACTIVE_TURN_RECONNECT_ACTION_COOLDOWN_MS = 2s` 防连点。
 
 ### 实现落点
 - 源码：`web/src/components/conversation/ConversationActiveTurnStatusNote.tsx`
-- 纯 helper：`conversationActiveTurnStatusPresentation.ts`（`resolveActiveTurnDisconnectSeconds` / `resolveActiveTurnStallSeconds` / `resolveActiveTurnRouteFallback`）
+- 纯 helper：`conversationActiveTurnStatusPresentation.ts`（`resolveActiveTurnDisconnectSeconds` / `resolveActiveTurnStallSeconds` / `resolveActiveTurnRouteFallback` / `shouldShowActiveTurnReconnectAction`）
 - 状态投影：`web/src/components/conversation/activeTurnStreamState.ts`
+- 重连动作权威：`web/src/routes/chat/useSessionDetailStream.ts`（唯一流拥有者；复用硬关 + keep-warm 重取 + 一次权威 detail 失效）
 
 ### 反冗余
 - 不新增第二套断线横幅；群聊横幅与主聊天提示条各归其位。
 - 禁止绕过 context 直接在 `ConversationView` 加第二份连接状态 prop。
+- 禁止重连按钮旁开第二条 `/api/sessions/:id/events` 连接；手动重连必须走唯一拥有者的硬关+重取路径。
 
 ## ConversationFollowupQueueBar
 
@@ -191,6 +194,53 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 ### 反冗余
 - 不替代消息编辑或重新生成入口；不新增独立分支列表页。
 
+## AgentUserContentSectionView 用户消息折叠
+
+### 功能
+用户消息气泡的超长折叠（对齐 ZCode）：正文按测量高度（`scrollHeight`）超过 120px 阈值时默认折叠——内容区钳在 `max-h-[120px] overflow-hidden`，底部渐隐提示还有内容，下方一枚小 ghost 文字钮「展开」；展开后变「收起」。不持久化：每次挂载默认折叠。
+
+### 适用范围
+- **适用**：`ConversationView` 时间线内的用户消息正文（markdown children 透传），含异步媒体（图片加载撑高经 ResizeObserver 重测）。
+- **不适用**：编辑态（`ConversationUserInlineEditor` 整体替换气泡，折叠不参与）；assistant 回答与群聊转录行（各自正交）。
+
+| 场景 | 选择 |
+| --- | --- |
+| 测量高度 ≤ 120px | 原样渲染，无按钮无渐隐 |
+| 测量高度 > 120px | 默认折叠 + 底部渐隐 +「展开」ghost 钮 |
+| 用户展开 | 解除钳制与渐隐，按钮变「收起」；内容缩回阈值下时按钮与渐隐整体消失 |
+
+### 使用方式
+```tsx
+// 生产：ConversationView 用户正文槽（编辑态 ternary 的另一侧，组件不自取数据）。
+<AgentUserContentSectionView userContentSectionIds={...}>
+  {renderResponseText(userContentText)}
+</AgentUserContentSectionView>
+```
+
+| Prop / 槽位 | 说明 | 设计注意 |
+| --- | --- | --- |
+| userContentSectionIds | AgentMessage content section 元数据 | 透传 `data-agent-content-*`，不参与折叠 |
+| children | markdown 渲染结果 | 折叠只钳可视高度，不裁剪、不改写内容 |
+
+### 非职责
+- 不持久化展开状态（无 storage、无 per-message 记忆）。
+- 不改写 markdown 管线或正文；不承担编辑/重发入口。
+
+### 视觉与状态
+- 钳制在包装层（`relative max-h-[120px] overflow-hidden`）；被测子节点保持自然高度，折叠态下 ResizeObserver 仍能看到真实内容增长。
+- 渐隐遮罩 `bg-gradient-to-t from-[var(--vui-control-muted)] to-transparent`（与气泡底色同令牌）+ `pointer-events-none`。
+- 按钮仅实际超高时渲染：`VNativeButton` ghost 文字钮、caption 字号、`--fg-tertiary`，带 `aria-expanded`；测量只在跨越阈值时 setState，不做每帧重渲染。
+
+### 实现落点
+- 源码：`web/src/components/conversation/AgentUserContentSectionView.tsx`
+- 纯策略：`web/src/components/conversation/conversationUserMessageCollapse.ts`（`USER_MESSAGE_COLLAPSE_THRESHOLD_PX` / `shouldCollapseUserMessage`）
+- 样式：`web/src/components/conversation/AgentUserContentSectionView.styles.ts`（`userMessageBodyClamped` / `userMessageCollapseFade` / `userMessageCollapseToggle`）
+- 文案：`dictionaryChat.expandUserMessage` / `collapseUserMessage`
+
+### 反冗余
+- 测量式（scrollHeight + ResizeObserver）而非行数预算；不复制 `ConversationMarkdownRenderer` 的 `<details>` 行预算折叠。
+- 按钮复用 `VNativeButton`，禁止第二套展开钮、渐隐样式或直连 shadcn renderer。
+
 ## ChatComposerPlusMenu
 
 ### 功能
@@ -241,6 +291,38 @@ composer 正文任意位置输入 `@` 时弹出的引用候选 listbox：按 `@`
 ### 反冗余
 - 不新增第二套引用登记通道；后端 `conversation_references.py` 只认结构化 payload，不引入文本内 @ 语法。
 - 不复制斜杠建议的样式/键盘实现；listbox 行直接复用 slash suggestion 样式类。
+
+## Composer 图片附件上传失败态与重试
+
+### 功能
+composer 图片附件的上传生命周期与失败恢复：每个 chip 携带 `uploadStatus`（pending/uploading/uploaded/failed）与 `artifactId`；提交路径 `Promise.allSettled` 逐 chip 写回，失败保留批次语义（错误行 + 草稿恢复 + 乐观消息移除），成功 chip 记住 `artifactId`，重发时复用不重传。
+
+### 适用范围
+- **适用**：直连会话 composer 的图片附件 chips、提交与重试路径。
+- **不适用**：知识库/会话引用（走引用候选结构化登记）；时间线内已落库附件展示。
+
+| 场景 | 选择 |
+| --- | --- |
+| 单 chip 上传失败 | 红系失败态 chip + chip 内 `RefreshCw` 重试钮 |
+| 存在失败 chip 的提交 | composer 错误行追加「重试上传」ghost 钮，失败批次不静默吞掉 |
+| 重试 / 重发 | 只修上传链路，绝不自动发消息；已成功 chip 复用 `artifactId` 不重传 |
+
+### 非职责
+- 不自动发送消息：重试仅补上传，发送始终是用户显式动作。
+- 不承担时间线侧附件预览（走 image preview dialog）。
+
+### 视觉与状态
+- 失败 chip：`composerAttachmentChipFailed`（`--state-error` 红系 ring/wash）+ `aria-invalid`，tooltip `attachmentUploadFailedRetryHint`。
+- 错误行「重试上传」：`VButton` ghost + `RefreshCw` 12px，仅存在失败 chip 时渲染；文案走 `dictionaryChat.retryUpload`。
+
+### 实现落点
+- 纯模型：`web/src/routes/chat/chatComposerSubmitModel.ts`（`ComposerImageAttachment.uploadStatus` / allSettled 逐 chip 写回 / `mergeComposerImageAttachments`）
+- 集成：`web/src/components/conversation/ConversationView.tsx`（chips 失败态 + 错误行重试钮）
+- 样式：`ConversationView.styles.ts` 的 `composerAttachmentChipFailed`
+
+### 反冗余
+- 不新增第二套上传通道或第二处错误行；批次失败复用既有草稿恢复路径。
+- 禁止重试自动发送；禁止对已上传 chip 重复 POST。
 
 ## ChatGroupManagementDialog
 
@@ -404,3 +486,24 @@ Settled 消息里 fenced 代码块的头部三件套（对齐 ZCode CodeBlockHea
 ### 反冗余
 - 不新建通用 CodeBlock primitive；本块是 conversation product 组合，头部控件复用 `VNativeButton`。
 - 代码卡边框/圆角复用宿主 `responseSegmentPre`，禁止第二套卡片壳或平行样式 map。
+
+## 流式行内渲染统一（live tail 与 settled 同源）
+
+### 功能
+live 尾部段落（流式未落定的最后一段文本）经 `renderConversationInlineMarkdown` 渲染行内富文本：code pill、链接、加粗与 settled 落定管线同一套 classNames 与同一条 inline 管线，流式↔落定切换无「换皮」跳变。该函数原为孤儿模块，本次转正为 live/settled 共用的行内渲染入口。
+
+### 适用范围
+- **适用**：`StreamingLiveMarkdownBlocks` 的 live 尾部段落；settled 管线同源的行内 classNames map。
+- **不适用**：fenced 代码块头部（`ConversationMarkdownCodeBlock`）；diff 块（`ConversationPatchDiff`）；整段 markdown 的块级解析（各自管线）。
+
+### 非职责
+- 不做块级切分与流式缓冲策略；只统一行内片段渲染。
+- 不引入第二套流式样式 map；classNames 与落定管线同源，禁止 live 专属配色。
+
+### 实现落点
+- 行内渲染入口：`web/src/components/conversation/conversationInlineMarkdown.tsx`（`renderConversationInlineMarkdown`，原孤儿模块转正）
+- live 消费方：`web/src/components/conversation/StreamingLiveMarkdownBlocks.tsx`
+- settled 管线：`web/src/components/conversation/ConversationMarkdownRenderer.tsx`（classNames 同源）
+
+### 反冗余
+- 禁止为 live tail 另开第二套行内渲染或样式 map；新增行内语法只在 `conversationInlineMarkdown` 一处扩展。

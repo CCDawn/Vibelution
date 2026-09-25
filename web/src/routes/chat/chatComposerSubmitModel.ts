@@ -36,6 +36,13 @@ export { COMPOSER_IMAGE_ACCEPT_TYPES, COMPOSER_DOCUMENT_ACCEPT_EXTENSIONS };
 
 export type ComposerAttachmentKind = "image" | "document";
 
+/**
+ * Per-attachment upload lifecycle. Undefined stays the "not attempted yet"
+ * pending state so older persisted trays and every existing call site remain
+ * compatible; "uploaded" chips hold their backend artifactId for reuse.
+ */
+export type ComposerAttachmentUploadStatus = "pending" | "uploading" | "uploaded" | "failed";
+
 export type ComposerImageAttachment = {
   id: string;
   file: File;
@@ -50,7 +57,110 @@ export type ComposerImageAttachment = {
    * POSTing the file bytes; clipboard screenshots never carry one.
    */
   localPath?: string;
+  uploadStatus?: ComposerAttachmentUploadStatus;
+  /** Backend artifact id from a successful upload; reused on resubmit. */
+  artifactId?: string;
 };
+
+/** One settled upload attempt from {@link uploadComposerAttachmentsSettled}. */
+export type ComposerAttachmentUploadOutcome =
+  | { id: string; status: "uploaded"; artifactId: string }
+  | { id: string; status: "failed"; error: unknown };
+
+/** An attachment still needs an upload unless a previous attempt produced its artifact. */
+export function needsComposerAttachmentUpload(attachment: ComposerImageAttachment): boolean {
+  return !(attachment.uploadStatus === "uploaded" && Boolean(attachment.artifactId));
+}
+
+/** Failed chips are the retry surface: the tray keeps them until a retry lands. */
+export function failedComposerAttachmentUploads(
+  attachments: readonly ComposerImageAttachment[],
+): ComposerImageAttachment[] {
+  return attachments.filter((attachment) => attachment.uploadStatus === "failed");
+}
+
+/**
+ * Flip not-yet-uploaded chips to "uploading"; uploaded ones stay reusable.
+ * `onlyAttachmentIds` restricts the flip to a retry's target subset so chips
+ * outside the attempt keep their state.
+ */
+export function markComposerAttachmentsUploading(
+  attachments: readonly ComposerImageAttachment[],
+  onlyAttachmentIds?: ReadonlySet<string>,
+): ComposerImageAttachment[] {
+  let changed = false;
+  const next = attachments.map((attachment) => {
+    if (!needsComposerAttachmentUpload(attachment) || attachment.uploadStatus === "uploading") {
+      return attachment;
+    }
+    if (onlyAttachmentIds && !onlyAttachmentIds.has(attachment.id)) {
+      return attachment;
+    }
+    changed = true;
+    return { ...attachment, uploadStatus: "uploading" as const };
+  });
+  return changed ? next : [...attachments];
+}
+
+/**
+ * Upload every attachment that still needs it and settle per attachment
+ * (Promise.allSettled semantics): one rejection no longer discards the
+ * successes, which keep their artifactId for the retry/resubmit path.
+ */
+export async function uploadComposerAttachmentsSettled(
+  sessionId: string,
+  attachments: readonly ComposerImageAttachment[],
+): Promise<ComposerAttachmentUploadOutcome[]> {
+  const settled = await Promise.allSettled(
+    attachments.map((attachment) => uploadSessionImageAttachment(sessionId, attachment)),
+  );
+  return settled.map((result, index) => {
+    const attachment = attachments[index];
+    if (!attachment) {
+      return { id: "", status: "failed" as const, error: new Error("attachment missing for upload outcome") };
+    }
+    if (result.status === "fulfilled" && result.value.artifactId) {
+      return { id: attachment.id, status: "uploaded" as const, artifactId: result.value.artifactId };
+    }
+    return {
+      id: attachment.id,
+      status: "failed" as const,
+      error: result.status === "rejected" ? result.reason : new Error("attachment upload returned no artifactId"),
+    };
+  });
+}
+
+/** Write per-attachment outcomes back onto a tray array (pure; also used for local math). */
+export function applyComposerAttachmentUploadOutcomes(
+  attachments: readonly ComposerImageAttachment[],
+  outcomes: readonly ComposerAttachmentUploadOutcome[],
+): ComposerImageAttachment[] {
+  if (!outcomes.length) {
+    return [...attachments];
+  }
+  const outcomeById = new Map(outcomes.map((outcome) => [outcome.id, outcome]));
+  let changed = false;
+  const next = attachments.map((attachment) => {
+    const outcome = outcomeById.get(attachment.id);
+    if (!outcome) {
+      return attachment;
+    }
+    changed = true;
+    return outcome.status === "uploaded"
+      ? { ...attachment, uploadStatus: "uploaded" as const, artifactId: outcome.artifactId }
+      : { ...attachment, uploadStatus: "failed" as const };
+  });
+  return changed ? next : [...attachments];
+}
+
+/** Uploaded artifact ids in tray order — the mutation's attachmentIds payload. */
+export function composerUploadedArtifactIds(
+  attachments: readonly ComposerImageAttachment[],
+): string[] {
+  return attachments
+    .filter((attachment) => attachment.uploadStatus === "uploaded" && attachment.artifactId)
+    .map((attachment) => attachment.artifactId as string);
+}
 
 export type ComposerSubmitGuardReason = "composer_disabled" | "empty_content" | "";
 
