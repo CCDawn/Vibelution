@@ -358,3 +358,49 @@ composer 正文任意位置输入 `@` 时弹出的引用候选 listbox：按 `@`
 ### 反冗余
 - 复用 `VConfirmDialog` + `VSelect`，不新建 `V*` 导出组件。
 - 危险确认走 `VConfirmDialog` danger tone；本弹窗非破坏性（源会话只读），保持 neutral。
+
+## ConversationMarkdownCodeBlock
+
+### 功能
+Settled 消息里 fenced 代码块的头部三件套（对齐 ZCode CodeBlockHeader）：左侧小写语言标签（无语言回退 `text`），右侧自动换行切换与复制按钮；复制成功后图标 Copy→Check 短暂反馈。头部与代码卡片视觉合为一体，超行数折叠路径共用同一头部。
+
+### 适用范围
+- **适用**：`ConversationMarkdownRenderer`（settled 内容路径）渲染的 `<pre>` 代码块；折叠（`<details>`）与完整路径同构。
+- **不适用**（改用 `…`）：流式 live tail（`StreamingLiveMarkdownBlocks` 轻量渲染，settled 后自然升级）；行内 code（保持 `inlineCode` 样式，无头部）；diff 块（`ConversationPatchDiff` 自带头部）。
+
+| 场景 | 选择 |
+| --- | --- |
+| 普通 fenced 块 | 头部 + 代码卡片 |
+| 超行数预算块 | 同一头部 + 折叠 `<details>`（展开交互不变） |
+| 无语言 fence | 标签回退 `text` |
+
+### 使用方式
+```tsx
+// 生产：ConversationMarkdownRenderer 的 pre 组件覆写内部构造，不直接对外使用。
+<pre override → <ConversationMarkdownCodeBlock language text preClassName code truncation />
+```
+
+| Prop / 槽位 | 说明 | 设计注意 |
+| --- | --- | --- |
+| language | fence 语言（`language-*` 提取） | 渲染为小写；缺失回退 `text` |
+| text | 代码纯文本（clipboard 源） | 与渲染内容同源，不经 DOM 取值 |
+| preClassName | 宿主传入的 `responseSegmentPre` | 边框/圆角归宿主样式 map，头部只做附加 |
+| truncation | 超行预算切分结果 | 为空渲染完整 `<pre>`，存在则 `visible`+`<details>` |
+
+### 非职责
+- 不持久化换行偏好（仅本块挂载期生效）；不做跨块同步。
+- 不处理流式 live tail 渲染；不改动折叠预算与展开交互。
+- 不承担剪贴板权限 UI；复制失败静默（与 turn hover copy 一致）。
+
+### 视觉与状态
+- 语言标签 `text-vui-2xs` + `--fg-tertiary` 最浅文字色；头部底 `--vui-surface-row`，与 pre 共享边框拼成一张卡。
+- 换行切换 `aria-pressed`，激活态 `--accent-cool`；复制反馈 Copy→Check 约 1.6s（与 turn hover copy 同语义）后自动还原。
+- 控件用 `VNativeButton` + 图标 14px，命中区 h-6 w-6；`data-markdown-code-block` 作测试锚点。
+
+### 实现落点
+- 源码：`web/src/components/conversation/ConversationMarkdownRenderer.tsx`（`ConversationMarkdownCodeBlock`）
+- 样式：`web/src/components/conversation/ConversationMarkdownRenderer.styles.ts`（`conversationMarkdownCodeBlockStyles`）
+
+### 反冗余
+- 不新建通用 CodeBlock primitive；本块是 conversation product 组合，头部控件复用 `VNativeButton`。
+- 代码卡边框/圆角复用宿主 `responseSegmentPre`，禁止第二套卡片壳或平行样式 map。

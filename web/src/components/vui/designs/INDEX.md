@@ -27,6 +27,7 @@
 | 会话起点卡 | [product/conversation-starter-cards.md](./product/conversation-starter-cards.md#会话起点卡) |
 | 内置斜杠命令 | [product/conversation-starter-cards.md](./product/conversation-starter-cards.md#内置斜杠命令) |
 | ConversationForkSessionDialog | [product/conversation.md](./product/conversation.md#conversationforksessiondialog) |
+| `ConversationMarkdownCodeBlock` | [product/conversation.md](./product/conversation.md#conversationmarkdowncodeblock) |
 
 ## Primitives
 
