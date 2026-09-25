@@ -90,7 +90,7 @@ def switch_session_head(session_id: str, node_id: str) -> dict[str, Any]:
                 projection_kind="session_branch_rebase",
                 parent_event_id=leaf.event_id,
             )
-            s.advance_session_branch_generation(conversation_id)
+            s.advance_session_branch_generation(conversation_id, publish=False)
     finally:
         admit_lock.release()
     s._publish_session_detail_snapshot(conversation_id)

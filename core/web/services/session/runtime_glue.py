@@ -2677,7 +2677,7 @@ def _append_session_branch_rebase_event(
         projection_kind="session_branch_rebase",
         parent_event_id=from_event_id,
     )
-    s.advance_session_branch_generation(session_id)
+    s.advance_session_branch_generation(session_id, publish=False)
     return from_event_id
 
 

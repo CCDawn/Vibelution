@@ -401,12 +401,13 @@ def session_branch_generation(session_id: str) -> int:
     return branch_generation_from_conversation(conversation)
 
 
-def advance_session_branch_generation(session_id: str) -> int:
+def advance_session_branch_generation(session_id: str, *, publish: bool = True) -> int:
     """Move the session to the next rewind generation and drop stale notices.
 
     User-authored queued turns stay. Background-task and child-session notices
     stamped with an older generation are removed, including ones that arrive
-    after the rewind.
+    after the rewind. Callers that already publish a session snapshot pass
+    ``publish=False`` so a later failure does not emit an extra snapshot.
     """
 
     s = _service()
@@ -426,7 +427,8 @@ def advance_session_branch_generation(session_id: str) -> int:
             if not _notice_is_stale(row, generation)
         ]
         _write_queued_turn_rows(s, normalized_session_id, conversation, rows)
-    s._publish_session_detail_snapshot(normalized_session_id)
+    if publish:
+        s._publish_session_detail_snapshot(normalized_session_id)
     return generation
 
 
