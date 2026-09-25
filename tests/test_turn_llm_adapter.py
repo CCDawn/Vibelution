@@ -11,7 +11,7 @@ from core.infrastructure.runtime_input import build_chat_user_message
 from core.llm import LLMError
 from core.llm.recovery import plan_recovery
 from core.llm.semantic_messages import SemanticOutputSchema
-from core.llm.types import CanonicalItemIdentity, TurnOutcome
+from core.llm.types import CanonicalItemIdentity, LLMProtocolEvent, TurnOutcome
 from core.orchestration.turn_llm_adapter import (
     AgentLlmTurnHooks,
     invoke_agent_llm_turn,
@@ -43,6 +43,68 @@ class _DummyUI:
 
     def add_log(self, *_args, **_kwargs):
         return None
+
+
+def test_adapter_streams_interim_text_deltas_to_ui_response_surface():
+    """⑦b 根因回归：绑工具的 chat 路由把 content delta 解码为 interim_text_delta，
+    它是真实流式路径上唯一可见正文流；必须与 commentary/answer delta 一样转发到
+    ui.stream_response，否则 responding 阶段只能等到终态回调（turn 收口瞬间）才
+    可观测。"""
+
+    def _protocol_event(kind: str, text: str, sequence: int) -> LLMProtocolEvent:
+        return LLMProtocolEvent(
+            kind=kind,
+            sequence=sequence,
+            session_id=_identity().session_id,
+            invocation_id=_identity().invocation_id,
+            iteration=0,
+            text=text,
+        )
+
+    streamed = {"thought": [], "response": []}
+
+    class _StreamingUI:
+        def thinking(self, _label):
+            return _DummyContext()
+
+        def add_log(self, *_args, **_kwargs):
+            return None
+
+        def stream_thought(self, text, done=False):
+            streamed["thought"].append((text, done))
+
+        def stream_response(self, text, done=False):
+            streamed["response"].append((text, done))
+
+    def run_streaming_outcome(_client, _messages, *, on_event=None, **_kwargs):
+        if on_event is not None:
+            on_event(_protocol_event("reasoning_delta", "先判断用户意图", 0))
+            # 绑工具路由：可见正文以 interim 通道流出（wire adapter 打标）。
+            on_event(_protocol_event("interim_text_delta", "第一段正文", 1))
+            on_event(_protocol_event("interim_text_delta", "第二段正文", 2))
+            on_event(_protocol_event("answer_delta", "最终答案", 3))
+        return TurnOutcome.final_answer(identity=_identity(), text="最终答案")
+
+    streaming_llm = _route_llm("primary")
+    streaming_llm.stream = True
+    result = invoke_agent_llm_turn(
+        messages=[AIMessage(content="hello")],
+        hooks=_adapter_hooks(
+            get_ui=lambda: _StreamingUI(),
+            get_llm_for_mode=lambda **_kwargs: streaming_llm,
+            should_stream=lambda *_args, **_kwargs: True,
+            run_streaming_outcome=run_streaming_outcome,
+        ),
+    )
+    assert result.payload is not None
+    assert streamed["thought"] == [("先判断用户意图", False)]
+    assert streamed["response"] == [
+        ("第一段正文", False),
+        ("第二段正文", False),
+        ("最终答案", False),
+    ]
+    # 终态权威正文由 emit_visible_response(done=True) 负责；流式转发永远 done=False。
+    assert not any(done for _text, done in streamed["response"])
 
 
 def test_sanitize_llm_turn_messages_preserves_tool_and_cache_blocks():

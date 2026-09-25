@@ -1845,6 +1845,11 @@ export const ConversationView = React.memo(function ConversationView({
               : "";
             const userContentText = agentSections.userText;
             const hasActiveProcess = operationGroups.timeline.some((operation) => isRunningOperationStatus(operation.status));
+            // Defect ⑦b: the active-turn shell gate must not count decorative
+            // streaming operations (thought/mental/status rows) as active
+            // process — a mid-stream reasoning flush would otherwise retire the
+            // shell and hide the responding stage. Only running tools suppress.
+            const hasRunningToolOperation = operationGroups.tools.some((operation) => isRunningOperationStatus(operation.status));
             const hasFeedbackTimeline = agentSections.hasFeedbackTimeline;
             const showResponseBlock = shouldShowAgentResponseBlock(message, agentSections, hasFeedbackTimeline);
             const turnErrorMessage = isTurnErrorMessage(message);
@@ -2093,7 +2098,7 @@ export const ConversationView = React.memo(function ConversationView({
             const showCompactActiveTurnPlaceholder = shouldRenderCompactActiveTurnPlaceholder(message, {
               showResponseBlock,
               hasFeedbackTimeline,
-              hasActiveProcess,
+              hasActiveProcess: hasRunningToolOperation,
               turnErrorMessage,
               // Avoid "状态" placeholder stacking above an already-visible codex process trail.
               hasCodexSurface: Boolean(displayPlan.shouldRenderCodexSurface),
