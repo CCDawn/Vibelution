@@ -2096,6 +2096,7 @@ def _launch_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]:
         project_root=workspace_root,
         then_lifecycle=str(args.then_lifecycle or ""),
         open_workbench=bool(getattr(args, "open_workbench", False)),
+        hidden_presentation=bool(getattr(args, "hidden_presentation", False)),
     )
     _append_log(
         "desktop_entry_python.desktop_shell.launched",
@@ -2129,6 +2130,7 @@ def _launch_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]:
                 project_root=workspace_root,
                 then_lifecycle=str(args.then_lifecycle or ""),
                 open_workbench=bool(getattr(args, "open_workbench", False)),
+                hidden_presentation=bool(getattr(args, "hidden_presentation", False)),
             )
         except Exception as exc:  # noqa: BLE001 - keep the first visible failure
             _append_log(
@@ -2229,6 +2231,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--open-workbench",
         action="store_true",
         help="Ask Electron main to open or focus the workbench window after launch.",
+    )
+    parser.add_argument(
+        "--hidden-presentation",
+        action="store_true",
+        help=(
+            "Forward hidden presentation for branch instance workbench windows: "
+            "the shared shell loads them without show/focus (e2e lanes)."
+        ),
     )
     parser.add_argument(
         "--lifecycle-settle-timeout",

@@ -721,6 +721,7 @@ def _desktop_shell_electron_args(
     slot_root: Path | None,
     open_workbench: bool,
     lifecycle: str,
+    hidden_presentation: bool = False,
 ) -> list[str]:
     args = [executable, *prefix, "--workspace", str(shell_root), "--local-debugging"]
     if slot_root is not None:
@@ -729,6 +730,11 @@ def _desktop_shell_electron_args(
         args.append("--open-workbench")
     if lifecycle:
         args.append(lifecycle)
+    if hidden_presentation:
+        # Branch instance workbench windows load without show/focus (e2e
+        # lanes); the argv switch is the transport into the already-running
+        # shared shell, where env vars of this spawn would never reach it.
+        args.append("--hidden-presentation")
     return args
 
 
@@ -737,6 +743,7 @@ def resolve_desktop_shell_launch(
     *,
     then_lifecycle: str = "",
     open_workbench: bool = False,
+    hidden_presentation: bool = False,
     prefer: str = "",
 ) -> dict[str, Any]:
     """Choose the current checkout's Electron main: packaged if current, else unpackaged."""
@@ -756,6 +763,7 @@ def resolve_desktop_shell_launch(
             slot_root=slot_root,
             open_workbench=open_workbench,
             lifecycle=lifecycle,
+            hidden_presentation=hidden_presentation,
         )
         return {
             "schemaVersion": 1,
@@ -781,7 +789,8 @@ def resolve_desktop_shell_launch(
                 "schemaVersion": 1, "kind": "unpackaged", "reason": "forward_to_live_shell",
                 "cwd": str(shell_root), "rebuilt": False,
                 "args": _desktop_shell_electron_args(str(electron_bin), [str(main_js)],
-                    shell_root=shell_root, slot_root=slot_root, open_workbench=open_workbench, lifecycle=lifecycle),
+                    shell_root=shell_root, slot_root=slot_root, open_workbench=open_workbench,
+                    lifecycle=lifecycle, hidden_presentation=hidden_presentation),
             }
     packaged_status = inspect_desktop_shell(shell_root)
     if not packaged_status.get("stale") and packaged_status.get("reason") == "current":
@@ -792,6 +801,7 @@ def resolve_desktop_shell_launch(
             slot_root=slot_root,
             open_workbench=open_workbench,
             lifecycle=lifecycle,
+            hidden_presentation=hidden_presentation,
         )
         return {
             "schemaVersion": 1,
@@ -813,6 +823,7 @@ def resolve_desktop_shell_launch(
         slot_root=slot_root,
         open_workbench=open_workbench,
         lifecycle=lifecycle,
+        hidden_presentation=hidden_presentation,
     )
     return {
         "schemaVersion": 1,
@@ -830,6 +841,7 @@ def launch_desktop_shell(
     project_root: Path | str = PROJECT_ROOT,
     then_lifecycle: str = "",
     open_workbench: bool = False,
+    hidden_presentation: bool = False,
     prefer: str = "",
 ) -> dict[str, Any]:
     """Start Electron main for the current checkout without hiding the GUI."""
@@ -838,6 +850,7 @@ def launch_desktop_shell(
         project_root,
         then_lifecycle=then_lifecycle,
         open_workbench=open_workbench,
+        hidden_presentation=hidden_presentation,
         prefer=prefer,
     )
     process = _spawn_visible_electron(list(spec["args"]), cwd=Path(str(spec["cwd"])))
