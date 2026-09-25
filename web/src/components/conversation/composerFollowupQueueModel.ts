@@ -1,6 +1,8 @@
 export type ComposerQueueItem = {
   id: string;
   text: string;
+  /** `task_notification` and `subagent_message` are system returns, not editable follow-ups. */
+  kind?: string;
   /** Server-owned queue metadata; absent for the local design-preview queue. */
   status?: string;
   position?: number;

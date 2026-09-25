@@ -598,9 +598,13 @@ from core.web.services.session.image_attachments import (
     _safe_attachment_log_summary,
 )
 from core.web.services.session.queued_turns import (
+    advance_session_branch_generation,
     enqueue_session_queued_turn,
+    enqueue_session_runtime_notice,
     list_session_queued_turns,
+    notify_parent_session_of_child_return,
     remove_session_queued_turn,
+    session_branch_generation,
     update_session_queued_turn,
     session_queued_turn_rows as _session_queued_turn_rows,
     drain_session_queued_turns as _drain_session_queued_turns,
