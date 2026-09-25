@@ -1,4 +1,5 @@
 import type { SessionReferenceAttachment } from "../../api/types";
+import { rankByScore } from "./conversationFuzzyMatch";
 
 /**
  * Caret-aware "@ reference" type-ahead parsing for the chat composer.
@@ -80,9 +81,10 @@ export function detectReferenceToken(text: string, caretIndex: number): Referenc
 }
 
 /**
- * Filter and cap reference options for the current token query, matching the
- * reference dialog's "title + meta contains" semantics. An empty query shows
- * the first options as-is.
+ * Filter and rank reference options for the current token query, matching the
+ * reference dialog's "title + meta contains" semantics. Candidates are ranked
+ * prefix-first, then substring, then (non-CJK only) subsequence; equal tiers
+ * keep the caller's order. An empty query shows the first options as-is.
  */
 export function filterReferenceTypeaheadOptions(
   options: readonly ReferenceTypeaheadOption[],
@@ -90,10 +92,13 @@ export function filterReferenceTypeaheadOptions(
   limit: number = MAX_REFERENCE_TYPEAHEAD_SUGGESTIONS,
 ): ReferenceTypeaheadOption[] {
   const normalized = String(query ?? "").trim().toLocaleLowerCase();
-  const matches = !normalized
-    ? [...options]
-    : options.filter((option) => `${option.title} ${option.meta ?? ""}`.toLocaleLowerCase().includes(normalized));
-  return matches.slice(0, Math.max(0, limit));
+  const cap = Math.max(0, limit);
+  if (!normalized) {
+    return options.slice(0, cap);
+  }
+  return rankByScore(options, normalized, (option) =>
+    `${option.title} ${option.meta ?? ""}`.toLocaleLowerCase(),
+  ).slice(0, cap);
 }
 
 /**
