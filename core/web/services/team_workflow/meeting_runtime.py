@@ -53,6 +53,7 @@ from core.research.workflow.contracts.discussion_scope import (
     parse_discussion_scope,
     session_scope_key,
 )
+from core.ui.chat_state import borrowing_session_chat_state
 from core.web.services.team_workflow import meeting_driver_work, meeting_rounds
 from core.web.services.team_workflow.research_runtime.challenge_cup_maintenance_fence import (
     assert_writes_allowed,
@@ -1655,6 +1656,7 @@ def _chat_room_round_config(room_id: str) -> dict[str, Any]:
     return dict(config) if isinstance(config, Mapping) else {}
 
 
+@borrowing_session_chat_state
 def open_hypothesis_review_meeting(
     team_id: str,
     payload: Mapping[str, Any] | None = None,
@@ -1849,6 +1851,7 @@ def open_hypothesis_review_meeting(
     }
 
 
+@borrowing_session_chat_state
 def open_candidate_generation_meeting(
     team_id: str,
     payload: Mapping[str, Any] | None = None,

@@ -418,6 +418,12 @@ def build_default_operator_config(
         "workflow_session_scope_v3": {
             "hypothesis_design": "shadow",
         },
+        # 重启恢复：重启后自动恢复被打断的轮次/队列；max_auto_retries 限制
+        # 每个被打断对象的自动重发次数（0-5），防止毒丸对象无限循环。
+        "session_recovery": {
+            "enabled": True,
+            "max_auto_retries": 2,
+        },
     }
 
 

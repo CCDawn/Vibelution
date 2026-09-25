@@ -7,9 +7,9 @@
  */
 const styles = {
   liveCodeInflowHint:
-    "vui-components-conversationview liveMarkdownCodeInflowHint min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "vui-components-conversationview liveMarkdownCodeInflowHint min-w-0 text-vui-xs leading-tight text-[var(--fg-tertiary)]",
   liveTableInflowHint:
-    "vui-components-conversationview liveMarkdownTableInflowHint min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "vui-components-conversationview liveMarkdownTableInflowHint min-w-0 text-vui-xs leading-tight text-[var(--fg-tertiary)]",
 } as const;
 
 export default styles;

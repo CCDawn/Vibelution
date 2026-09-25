@@ -16,6 +16,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNod
 
 import type { SessionReferenceAttachment } from "../../api/types";
 import { VButton, VDialog, VNativeInput, VPopover } from "../../components/vui";
+import { rankByScore } from "../../components/conversation/conversationFuzzyMatch";
 import { composerAttachmentAcceptAttribute } from "./chatComposerSubmitModel";
 import styles from "./ChatComposerPlusMenu.styles";
 
@@ -137,7 +138,9 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
     if (!query) {
       return sessionReferences;
     }
-    return sessionReferences.filter((option) => `${option.title} ${option.meta ?? ""}`.toLocaleLowerCase().includes(query));
+    return rankByScore(sessionReferences, query, (option) =>
+      `${option.title} ${option.meta ?? ""}`.toLocaleLowerCase(),
+    );
   }, [referenceQuery, sessionReferences]);
 
   const filteredKnowledgeReferences = useMemo(() => {
@@ -146,7 +149,9 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
     if (!query) {
       return options;
     }
-    return options.filter((option) => `${option.title} ${option.meta ?? ""}`.toLocaleLowerCase().includes(query));
+    return rankByScore(options, query, (option) =>
+      `${option.title} ${option.meta ?? ""}`.toLocaleLowerCase(),
+    );
   }, [knowledgeQuery, knowledgeReferenceOptions]);
 
   useEffect(() => {

@@ -9,7 +9,7 @@ import conversationViewStyles from "./ConversationView.styles";
 export const conversationMarkdownOverflowStyles = {
   overflowDetails: "vui-components-conversationview markdownOverflowDetails min-w-0 max-w-full",
   overflowSummary:
-    "vui-components-conversationview markdownOverflowSummary flex w-full list-none cursor-pointer items-center gap-x-1.5 py-1 text-left [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)] [&::-webkit-details-marker]:hidden [&::marker]:hidden [&::marker]:content-none hover:text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
+    "vui-components-conversationview markdownOverflowSummary flex w-full list-none cursor-pointer items-center gap-x-1.5 py-1 text-left text-vui-xs text-[var(--fg-tertiary)] [&::-webkit-details-marker]:hidden [&::marker]:hidden [&::marker]:content-none hover:text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
 } as const;
 
 export const conversationMarkdownRendererStyles: ConversationMarkdownClassNames = {

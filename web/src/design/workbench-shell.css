@@ -1,7 +1,5 @@
 :where(.vui-app-appshell).shell {
   --shell-topbar-height: 40px;
-  --shell-settings-dock-height: 56px;
-  --shell-settings-dock-width: 300px;
   --shell-window-control-inset: 0px;
   --shell-surface: var(--vui-surface-rail);
   --shell-surface-muted: var(--vui-surface-row);
@@ -240,30 +238,6 @@
   opacity: 0.55;
   pointer-events: none !important;
   -webkit-app-region: no-drag !important;
-}
-
-:where(.vui-app-appshell).settingsDock {
-  position: fixed;
-  left: 0;
-  bottom: 0;
-  z-index: 55;
-  display: flex;
-  align-items: stretch;
-  width: min(var(--shell-settings-dock-width), 100vw);
-  height: var(--shell-settings-dock-height);
-  border-top: 1px solid var(--border-hairline);
-  border-right: 1px solid var(--border-hairline);
-  background: var(--shell-surface);
-  box-shadow: var(--vui-shadow-hairline);
-  -webkit-app-region: no-drag;
-}
-
-:where(.vui-app-appshell).settingsDock > * {
-  width: 100%;
-}
-
-:where(.vui-app-appshell).settingsTriggerOpen .settingsChevron {
-  transform: rotate(180deg);
 }
 
 :where(.vui-app-appshell).settingsPopoverBody .utilityButtonGrid {
@@ -1067,17 +1041,6 @@
   :where(.vui-app-appshell).topBar {
     gap: 3px;
     padding-left: 4px;
-  }
-}
-
-@media (max-width: 700px) {
-  :where(.vui-app-appshell).mainArea {
-    padding-bottom: var(--shell-settings-dock-height);
-  }
-
-  :where(.vui-app-appshell).settingsDock {
-    width: 100vw;
-    border-right: 0;
   }
 }
 

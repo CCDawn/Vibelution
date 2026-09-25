@@ -1485,9 +1485,12 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('view: "agents"');
     expect(routeSource).toContain("returnTo: selectedAgentReturnRoute");
     expect(coreConfigPanelSource).toContain("styles.configDeepLinkRow");
-    expect(routeSource).toContain("onOpenModelConfig: () => navigate(selectedAgentModelConfigRoute)");
+    expect(routeSource).toContain("onOpenModelConfig: () => {\n          if (selectedAgent?.agentId) {\n            navigate(selectedAgentModelConfigRoute);");
     expect(coreConfigPanelSource).toContain("onPress={onOpenModelConfig}");
-    expect(routeSource).toContain("onOpenContextConfig: () => navigate(selectedAgentContextConfigRoute)");
+    expect(routeSource).toContain("onOpenContextConfig: () => {\n          if (selectedAgent?.agentId) {\n            navigate(selectedAgentContextConfigRoute);");
+    // 无选中 Agent 时经意图模块跳全局设置（settingsNavigation 统一收口，不再拼 section URL）。
+    expect(routeSource).toContain('requestSettingsFocus({ groupId: "models-profiles" });');
+    expect(routeSource).toContain('requestSettingsFocus({ groupId: "runtime-context" });');
     expect(routeSource).toContain("onOpenMemoryPage: () => navigate(selectedAgentMemoryConfigRoute)");
     expect(coreConfigPanelSource).toContain("去模型库配置");
     expect(contextCompressionPanelSource).toContain("去上下文配置");

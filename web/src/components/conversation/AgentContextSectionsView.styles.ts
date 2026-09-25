@@ -8,15 +8,15 @@ import {
 
 const styles = {
   composerReferenceChip:
-    "vui-components-conversationview composerReferenceChip min-w-0 inline-flex min-h-6 w-fit max-w-[min(100%,32rem)] items-start justify-start gap-1.5 overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    "vui-components-conversationview composerReferenceChip min-w-0 inline-flex min-h-6 w-fit max-w-[min(100%,32rem)] items-start justify-start gap-1.5 overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1.5 text-vui-xs font-semibold leading-none text-[var(--fg-secondary)]",
   composerReferenceCopy:
     "vui-components-conversationview composerReferenceCopy grid min-w-0 gap-0.5 text-left",
   composerReferenceIcon:
     "vui-components-conversationview composerReferenceIcon min-w-0 shrink-0 pt-0.5 text-[var(--fg-tertiary)]",
   composerReferenceMeta:
-    "vui-components-conversationview composerReferenceMeta min-w-0 truncate [font-size:var(--vui-font-xs)] font-medium leading-tight text-[var(--fg-tertiary)]",
+    "vui-components-conversationview composerReferenceMeta min-w-0 truncate text-vui-xs font-medium leading-tight text-[var(--fg-tertiary)]",
   composerReferenceTitle:
-    "vui-components-conversationview composerReferenceTitle min-w-0 truncate [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
+    "vui-components-conversationview composerReferenceTitle min-w-0 truncate text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
   imageDownloadButton:
     `vui-components-conversationview imageDownloadButton min-w-0 shrink-0 ${vuiControlQuietClass}`,
   userAttachment: `vui-components-conversationview userAttachment min-w-0 overflow-hidden ${vuiOpaqueRowClass}`,
@@ -28,9 +28,9 @@ const styles = {
   userAttachmentFileMeta:
     "vui-components-conversationview userAttachmentFileMeta flex min-w-0 items-center gap-2",
   userAttachmentFileName:
-    "vui-components-conversationview userAttachmentFileName min-w-0 truncate [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    "vui-components-conversationview userAttachmentFileName min-w-0 truncate text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   userAttachmentFileSize:
-    "vui-components-conversationview userAttachmentFileSize min-w-0 truncate [font-size:var(--vui-font-xs)] font-medium leading-tight text-[var(--fg-tertiary)]",
+    "vui-components-conversationview userAttachmentFileSize min-w-0 truncate text-vui-xs font-medium leading-tight text-[var(--fg-tertiary)]",
   userAttachmentGrid:
     "vui-components-conversationview userAttachmentGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(min(12rem,100%),1fr))]",
   userAttachmentImage:

@@ -8121,6 +8121,307 @@ def _stopped_chat_room_round_detail(room_id: str, round_id: str) -> dict[str, An
     return _room_to_api(room)
 
 
+# Startup recovery sweep: re-drive rounds a backend restart left durable-running
+# without an in-process controller.  The retry chain markers live on the round
+# config so the count survives restarts inside the same store and every chain
+# stays rooted at the orphan round that started it (a later, unrelated round
+# starts a fresh chain with no bookkeeping).
+_CHAT_ROOM_STARTUP_RECOVERY_SOURCE = "missing_process_controller"
+_CHAT_ROOM_STARTUP_RECOVERY_RETRY_CONFIG_KEY = "startupRecoveryRetries"
+_CHAT_ROOM_STARTUP_RECOVERY_ROOT_CONFIG_KEY = "startupRecoveryOfRoundId"
+
+
+def recover_orphaned_chat_room_rounds_on_startup(
+    *,
+    max_auto_retries: int | None = None,
+) -> dict[str, Any]:
+    """Re-drive plain-room rounds a restart orphaned, after one close-out pass.
+
+    The lazy read-path reconcile already closes such orphans; this sweep adds
+    the missing half.  It runs one reconcile pass (the single close-out
+    authority, including session sync and WorkRun re-projection) and then
+    re-sends every orphan it closed as ``missing_process_controller`` with the
+    original topic/mode/purpose and a roster narrowed to the members that never
+    completed a statement, so an interrupted discussion resumes instead of
+    silently dying.  Rooms with their own recovery owners or an unreplayable
+    round entry stay on the lazy path: meeting-bound and Challenge-scoped rooms
+    (meeting_runtime owns their redrive; scoped rounds also hard-require
+    receipt authority), operator rooms (a single logical round for life — a
+    second start is rejected by design even with the frozen authority), chains
+    past ``max_auto_retries``, and rounds every roster member already spoke in.
+    Per-room failures are isolated and never block the sweep or startup.
+    """
+
+    from core.session_recovery_flags import session_recovery_max_auto_retries
+
+    limit = (
+        session_recovery_max_auto_retries()
+        if max_auto_retries is None
+        else max(0, int(max_auto_retries))
+    )
+    reconciled = _reconcile_chat_room_round_state()
+    orphans = [
+        item
+        for item in reconciled
+        if str(item.get("reconciliationSource") or "").strip()
+        == _CHAT_ROOM_STARTUP_RECOVERY_SOURCE
+    ]
+    outcomes: list[dict[str, Any]] = []
+    for item in orphans:
+        try:
+            outcomes.append(_redrive_orphaned_chat_room_round(item, max_auto_retries=limit))
+        except Exception as exc:  # noqa: BLE001 - one room must not block the rest
+            room_id = _startup_recovery_item_room_id(item)
+            outcomes.append(
+                {
+                    "roomId": room_id,
+                    "roundId": _startup_recovery_item_round_id(item),
+                    "action": "failed",
+                    "errorType": type(exc).__name__,
+                }
+            )
+            _record_startup_recovery_failed_event(room_id, exc)
+    return {
+        "orphanCount": len(orphans),
+        "maxAutoRetries": limit,
+        "outcomes": outcomes,
+    }
+
+
+def _startup_recovery_item_room_id(item: Mapping[str, Any]) -> str:
+    return str(
+        item.get("roomId")
+        or (
+            item.get("room").get("roomId")
+            if isinstance(item.get("room"), Mapping)
+            else ""
+        )
+        or ""
+    ).strip()
+
+
+def _startup_recovery_item_round_id(item: Mapping[str, Any]) -> str:
+    return str(
+        item.get("roundId")
+        or (
+            item.get("round").get("roundId")
+            if isinstance(item.get("round"), Mapping)
+            else ""
+        )
+        or ""
+    ).strip()
+
+
+def _redrive_orphaned_chat_room_round(
+    item: Mapping[str, Any],
+    *,
+    max_auto_retries: int,
+) -> dict[str, Any]:
+    room_id = _startup_recovery_item_room_id(item)
+    old_round_id = _startup_recovery_item_round_id(item)
+    with _CHAT_ROOM_LOCK:
+        state = _store().load()
+        room = _find_room(state, room_id)
+        # Shallow snapshot like the reconcile candidates: nested lists are only
+        # ever swapped (never mutated in place), so decisions below can read
+        # the copy after the lock is released; the round start re-reads and
+        # re-validates the live room itself.
+        room = dict(room) if isinstance(room, dict) else room
+    if not isinstance(room, dict):
+        return {"roomId": room_id, "roundId": old_round_id, "action": "skipped_room_missing"}
+    old_round = _find_round(room, old_round_id)
+    if not isinstance(old_round, dict):
+        return {"roomId": room_id, "roundId": old_round_id, "action": "skipped_round_missing"}
+    if str(old_round.get("status") or "").strip().lower() in RUNNING_ROUND_STATUSES:
+        # Reconcile never closed it (gate skipped or heartbeat exempt): the
+        # round may be live again, so recovery must not touch it.
+        return {"roomId": room_id, "roundId": old_round_id, "action": "skipped_still_running"}
+    room_config = _safe_config(room.get("config"))
+    old_config = _safe_config(old_round.get("config"))
+    if _chat_room_round_is_meeting_bound(room, old_config):
+        return {"roomId": room_id, "roundId": old_round_id, "action": "skipped_meeting_bound"}
+    if _is_challenge_discussion_room(room) or _is_scoped_discussion_room(room):
+        return {"roomId": room_id, "roundId": old_round_id, "action": "skipped_challenge_scoped"}
+    if room_config.get("operatorDiscussionAuthority") is not None:
+        return {"roomId": room_id, "roundId": old_round_id, "action": "skipped_operator_room"}
+    previous_retries = _startup_recovery_retry_count(old_config)
+    if previous_retries >= max_auto_retries:
+        return {
+            "roomId": room_id,
+            "roundId": old_round_id,
+            "action": "skipped_retry_limit",
+            "retries": previous_retries,
+        }
+    remaining_agent_ids = _startup_recovery_remaining_speaker_agent_ids(room, old_round)
+    if not remaining_agent_ids:
+        return {"roomId": room_id, "roundId": old_round_id, "action": "skipped_all_spoken"}
+    redrive_config = dict(old_config)
+    redrive_config.pop("meetingRoundId", None)
+    redrive_config["participantAgentIds"] = remaining_agent_ids
+    redrive_config[_CHAT_ROOM_STARTUP_RECOVERY_RETRY_CONFIG_KEY] = previous_retries + 1
+    redrive_config[_CHAT_ROOM_STARTUP_RECOVERY_ROOT_CONFIG_KEY] = str(
+        old_config.get(_CHAT_ROOM_STARTUP_RECOVERY_ROOT_CONFIG_KEY) or old_round_id
+    ).strip()
+    accepted = start_chat_room_round(
+        room_id,
+        str(old_round.get("topic") or "").strip(),
+        mode=str(old_round.get("mode") or ""),
+        purpose=str(old_round.get("purpose") or ""),
+        config=redrive_config,
+        background=True,
+        lightweight_response=True,
+    )
+    new_round_id = str(accepted.get("roundId") or "").strip()
+    _record_startup_recovery_redriven_event(
+        room,
+        old_round_id,
+        new_round_id,
+        speaker_agent_ids=remaining_agent_ids,
+        retries=previous_retries + 1,
+    )
+    return {
+        "roomId": room_id,
+        "roundId": old_round_id,
+        "action": "redriven",
+        "newRoundId": new_round_id,
+        "speakerAgentIds": list(remaining_agent_ids),
+        "retries": previous_retries + 1,
+    }
+
+
+def _startup_recovery_retry_count(round_config: Mapping[str, Any]) -> int:
+    raw = round_config.get(_CHAT_ROOM_STARTUP_RECOVERY_RETRY_CONFIG_KEY)
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return 0
+    return max(0, int(raw))
+
+
+def _chat_room_round_is_meeting_bound(
+    room: Mapping[str, Any],
+    round_config: Mapping[str, Any],
+) -> bool:
+    """Meeting-bound rounds own their restart redrive in meeting_runtime."""
+
+    if str(round_config.get("meetingRoundId") or "").strip():
+        return True
+    return bool(str(_safe_config(room.get("config")).get("meetingRoundId") or "").strip())
+
+
+def _startup_recovery_remaining_speaker_agent_ids(
+    room: Mapping[str, Any],
+    old_round: Mapping[str, Any],
+) -> list[str]:
+    """Roster for the redriven round: prior members minus completed speakers."""
+
+    spoken_participant_ids = {
+        str(message.get("participantId") or "").strip()
+        for message in list(old_round.get("messages") or [])
+        if isinstance(message, Mapping)
+        and str(message.get("status") or "").strip().lower() == "completed"
+    }
+    for progress in list(old_round.get("speakerProgress") or []):
+        if not isinstance(progress, Mapping):
+            continue
+        if (
+            str(progress.get("state") or "").strip().lower() == "settled"
+            and str(progress.get("status") or "").strip().lower() == "completed"
+        ):
+            spoken_participant_ids.add(str(progress.get("participantId") or "").strip())
+    participants = [
+        item for item in list(room.get("participants") or []) if isinstance(item, dict)
+    ]
+    agent_by_participant_id = {
+        str(item.get("participantId") or "").strip(): str(item.get("agentId") or "").strip()
+        for item in participants
+    }
+    spoken_agent_ids = {
+        agent_id
+        for agent_id in (
+            agent_by_participant_id.get(participant_id, "")
+            for participant_id in spoken_participant_ids
+        )
+        if agent_id
+    }
+    old_config = old_round.get("config") if isinstance(old_round.get("config"), Mapping) else {}
+    room_config = room.get("config") if isinstance(room.get("config"), Mapping) else {}
+    base_roster: list[str] = []
+    for source in (old_config, room_config):
+        raw_roster = source.get("participantAgentIds")
+        if isinstance(raw_roster, list):
+            base_roster = [str(item or "").strip() for item in raw_roster]
+            base_roster = [item for item in base_roster if item]
+            break
+    if not base_roster:
+        base_roster = [
+            str(item.get("agentId") or "").strip()
+            for item in participants
+            if item.get("enabled", True) is not False
+            and not bool(item.get("agentMissing"))
+            and str(item.get("agentId") or "").strip()
+        ]
+    remaining: list[str] = []
+    seen: set[str] = set()
+    for agent_id in base_roster:
+        if agent_id in seen or agent_id in spoken_agent_ids:
+            continue
+        seen.add(agent_id)
+        remaining.append(agent_id)
+    return remaining
+
+
+def _record_startup_recovery_redriven_event(
+    room: Mapping[str, Any],
+    old_round_id: str,
+    new_round_id: str,
+    *,
+    speaker_agent_ids: list[str],
+    retries: int,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "chat_room",
+            "startup_recovery",
+            "chat_room.round.startup_recovery_redriven",
+            message=(
+                "A chat room round orphaned by a backend restart was closed and "
+                "re-sent with the members that had not spoken yet."
+            ),
+            outcome="redriven",
+            fields={
+                "roomId": str(room.get("roomId") or "").strip(),
+                "sourceRoundId": str(old_round_id or "").strip(),
+                "newRoundId": str(new_round_id or "").strip(),
+                "speakerAgentIds": list(speaker_agent_ids),
+                "retries": max(0, int(retries)),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _record_startup_recovery_failed_event(room_id: str, exc: Exception) -> None:
+    try:
+        record_runtime_scene_event(
+            "chat_room",
+            "startup_recovery",
+            "chat_room.round.startup_recovery_failed",
+            message=(
+                "Re-driving a restart-orphaned chat room round failed; the round "
+                "stays closed by reconcile and the room falls back to the lazy path."
+            ),
+            level="warning",
+            outcome="failed",
+            fields={
+                "roomId": str(room_id or "").strip(),
+                "errorType": type(exc).__name__,
+                "errorPreview": trim_lines(str(exc), max_lines=2),
+            },
+        )
+    except Exception:
+        return
+
+
 def _persist_chat_room_work_run(
     room: dict[str, Any],
     round_payload: dict[str, Any],

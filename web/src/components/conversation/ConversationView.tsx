@@ -78,7 +78,6 @@ import {
   type MentalStateLabels,
 } from "./conversationMentalState";
 import { AgentMessageTurnView } from "./AgentMessageTurnView";
-import { AgentResponseSectionView } from "./AgentResponseSectionView";
 import { AgentUserContentSectionView } from "./AgentUserContentSectionView";
 
 /** T1: dialog/context chrome load only when opened — keep transcript path leaner. */
@@ -225,6 +224,7 @@ import {
   isAgentInboxMessage,
   isCliAgentLifecycleMessage,
   isGroupRoomTranscriptMessage,
+  isSessionRecoveryResumedMessage,
   isSteerGuidanceMessage,
   isTurnErrorMessage,
   researchOrgMessageChips,
@@ -317,6 +317,8 @@ import {
   cliAgentLifecycleDetail,
   cliAgentLifecycleLabel,
   groupRoomTranscriptLabel,
+  sessionRecoveryResumedDetail,
+  sessionRecoveryResumedLabel,
 } from "./conversationSpecialMessagePresentation";
 import { projectedConversationMessageIds } from "./conversationMessageIdentity";
 import { shouldCompactConversationTurnHeader } from "./conversationTurnHeaderCompaction";
@@ -364,6 +366,7 @@ import {
   resolveComposerEditMode,
   resolveComposerGuidanceUi,
   resolveComposerPrimaryActionFlags,
+  shouldStopComposerOnEscape,
 } from "./conversationComposerActionModel";
 import { conversationOperationIconKind } from "./conversationOperationIconModel";
 import { getCachedResponseSegments as getCachedResponseSegmentsFromCache } from "./conversationResponseSegmentCache";
@@ -1447,6 +1450,27 @@ export const ConversationView = React.memo(function ConversationView({
                   </span>
                   <span className={styles.cliAgentLifecycleText}>
                     {cliAgentLifecycleLabel(message, lang)}
+                  </span>
+                  {detail ? <code className={styles.cliAgentLifecycleMeta}>{detail}</code> : null}
+                  {message.timestamp ? (
+                    <span className={styles.cliAgentLifecycleTime}>{formatTimestamp(message.timestamp)}</span>
+                  ) : null}
+                </article>
+              );
+            }
+            if (isSessionRecoveryResumedMessage(message)) {
+              const detail = sessionRecoveryResumedDetail(message, lang);
+              return (
+                <article
+                  key={rowIdentity?.rowKey ?? message.id}
+                  className={styles.cliAgentLifecycleTurn}
+                  data-conversation-row-key={rowIdentity?.rowKey ?? message.id}
+                >
+                  <span className={styles.cliAgentLifecycleIcon} aria-hidden="true">
+                    <RefreshCw size={14} />
+                  </span>
+                  <span className={styles.cliAgentLifecycleText}>
+                    {sessionRecoveryResumedLabel(message, lang)}
                   </span>
                   {detail ? <code className={styles.cliAgentLifecycleMeta}>{detail}</code> : null}
                   {message.timestamp ? (
@@ -5941,6 +5965,25 @@ export const ConversationView = React.memo(function ConversationView({
                   handleReferenceTypeaheadDismiss();
                   return;
                 }
+              }
+              // Yield-aware Esc→stop: ghost/slash/typeahead branches above
+              // return when they consume Escape; this fallback only fires when
+              // the key is still unclaimed and a turn is running. Repeats are
+              // deduped downstream by the sessionStopping stop guard.
+              if (
+                shouldStopComposerOnEscape({
+                  key: event.key,
+                  defaultPrevented: event.defaultPrevented,
+                  composing: event.nativeEvent.isComposing,
+                  actionMode: resolvedActionMode,
+                  hasStopHandler: Boolean(onStop),
+                  ghostVisible: Boolean(composerPromptSuggestion.ghost),
+                  slashSuggestionsOpen: showSlashSuggestions,
+                  referenceTypeaheadOpen: showReferenceSuggestions,
+                })
+              ) {
+                event.preventDefault();
+                onStop?.();
               }
               if (
                 shouldSubmitComposerOnKeydown({

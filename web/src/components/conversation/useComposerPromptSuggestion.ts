@@ -32,10 +32,10 @@ export type ComposerPromptSuggestionState = {
 };
 
 /**
- * One suggestion attempt per turn: after a reply completes we ask the backend
- * for the cached suggestion of that turn; starting to type dismisses it and no
- * new attempt happens until the next turn starts. A local dismiss (Escape)
- * also stays dismissed for the turn.
+ * One shown suggestion per turn. An attempt that never appears (aborted
+ * before the text arrives, or an empty result) can run again when the
+ * composer is empty. Typing over a visible suggestion, or Escape, stays
+ * dismissed until the next turn.
  */
 export function useComposerPromptSuggestion(
   input: ComposerPromptSuggestionInput,
@@ -47,9 +47,11 @@ export function useComposerPromptSuggestion(
   const [exampleCommand, setExampleCommand] = useState("");
   const [starters, setStarters] = useState<ComposerStarter[]>([]);
   const issuedRef = useRef(false);
+  const shownRef = useRef(false);
 
   useEffect(() => {
     issuedRef.current = false;
+    shownRef.current = false;
     setSuggestion("");
     setDismissed(false);
     setExampleCommand("");
@@ -59,13 +61,19 @@ export function useComposerPromptSuggestion(
   useEffect(() => {
     if (busy) {
       issuedRef.current = false;
+      shownRef.current = false;
       setSuggestion("");
       setDismissed(false);
       return;
     }
     if (draft !== "") {
-      // Typing dismisses the current suggestion for the rest of the turn.
+      if (shownRef.current) {
+        setDismissed(true);
+      }
       setSuggestion("");
+      return;
+    }
+    if (dismissed) {
       return;
     }
     if (!shouldRequestComposerPromptSuggestion({
@@ -80,17 +88,36 @@ export function useComposerPromptSuggestion(
     }
     issuedRef.current = true;
     const controller = new AbortController();
+    let revealed = false;
     fetchSessionPromptSuggestion(sessionId, { signal: controller.signal })
       .then((response) => {
-        setSuggestion(String(response?.suggestion ?? ""));
+        if (controller.signal.aborted) {
+          return;
+        }
+        const text = String(response?.suggestion ?? "").trim();
+        if (!text) {
+          issuedRef.current = false;
+          setSuggestion("");
+          return;
+        }
+        revealed = true;
+        shownRef.current = true;
+        setSuggestion(text);
       })
       .catch((error) => {
-        if (!isFetchAbortError(error)) {
-          setSuggestion("");
+        if (controller.signal.aborted || isFetchAbortError(error)) {
+          return;
         }
+        issuedRef.current = false;
+        setSuggestion("");
       });
-    return () => controller.abort();
-  }, [busy, draft, hasConversation, sessionId, suggestionEnabled]);
+    return () => {
+      controller.abort();
+      if (!revealed && !shownRef.current) {
+        issuedRef.current = false;
+      }
+    };
+  }, [busy, dismissed, draft, hasConversation, sessionId, suggestionEnabled]);
 
   useEffect(() => {
     if (!shouldLoadComposerExample({ enabled: starterEnabled, sessionId, hasConversation })) {

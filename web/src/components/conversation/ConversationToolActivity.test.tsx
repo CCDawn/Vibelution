@@ -250,7 +250,7 @@ describe("ConversationToolActivity", () => {
     expect(styles.activity).toContain("max-h-[min(18rem,42vh)]");
     expect(styles.activity).toContain("overflow-y-auto");
     expect(styles.itemBody).toContain("text-[var(--fg-tertiary)]");
-    expect(styles.itemBody).toContain("[font-size:var(--vui-font-xs)]");
+    expect(styles.itemBody).toContain("text-vui-xs");
     expect(styles.itemBody).toContain("items-center");
     expect(styles.actionLabel).toContain("font-medium");
     expect(styles.actionLabel).not.toContain("rounded-full");

@@ -6,7 +6,6 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  ChevronUp,
   LoaderCircle,
   Menu,
   Moon,
@@ -14,6 +13,7 @@ import {
   Settings,
   SlidersHorizontal,
   Sun,
+  X,
 } from "lucide-react";
 
 import { fetchJson, setFetchJsonFailureReporter, type FetchJsonFailureReport } from "../api/client";
@@ -34,6 +34,14 @@ import {
   parseRuntimeControlBlockedDetail,
 } from "./workbenchLifecycleActions";
 import { useWorkbenchLifecycleActions } from "./useWorkbenchLifecycleActions";
+import {
+  readStoredUpdateBannerDismissedHead,
+  shouldShowUpdateBanner,
+  storeUpdateBannerDismissedHead,
+  updateBannerCopy,
+  updateBannerDismissLabel,
+  updateBannerRestartLabel,
+} from "./updateBanner";
 import { useShellI18n } from "../i18n/useShellI18n";
 import {
   collectBrowserMemorySnapshot,
@@ -138,6 +146,13 @@ function systemToneToStatus(tone: SystemStatusTone): VStatusTone {
   if (tone === "failed") return "danger";
   return "neutral";
 }
+
+// The update banner joins the shell grid as a row between the fixed top bar
+// and mainArea. Inline styles (not workbench-shell.css) keep the change inside
+// the shell component: the banner row is `auto`, mainArea keeps the remaining
+// `1fr`, and mainArea's built-in padding-top would double the top-bar offset.
+const UPDATE_BANNER_SHELL_GRID_ROWS: CSSProperties = { gridTemplateRows: "auto minmax(0, 1fr)" };
+const UPDATE_BANNER_MAIN_AREA_STYLE: CSSProperties = { paddingTop: 0 };
 
 function systemToneToDotClass(tone: SystemStatusTone): string {
   if (tone === "running") return styles.status_running;
@@ -290,7 +305,6 @@ type ConfigSummaryWithThemeBackground = ConfigSummary & {
 
 type WorkbenchShellStyle = CSSProperties & {
   "--workbench-theme-background-image"?: string;
-  "--shell-settings-dock-width"?: string;
 };
 
 type ThemeBackgroundReadability = "soft" | "standard" | "strong";
@@ -677,7 +691,6 @@ export function AppShell() {
   const [activeWorkOpen, setActiveWorkOpen] = useState(false);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
-  const chatLeftPanelWidth = useShellStore((state) => state.chatPanelWidths.leftPanelWidth);
   const desktopShell = useMemo(() => isElectronDesktopShell(), []);
   const [theme, setTheme] = useState(() => readStoredWorkbenchTheme());
   const [frontendVisible, setFrontendVisible] = useState(
@@ -688,6 +701,7 @@ export function AppShell() {
   );
   const [frontendRefreshRequested, setFrontendRefreshRequested] = useState(false);
   const [shellStartupDataReady, setShellStartupDataReady] = useState(false);
+  const [updateBannerDismissedHead, setUpdateBannerDismissedHead] = useState(readStoredUpdateBannerDismissedHead);
   const [returnNavigationStack, setReturnNavigationStack] = useState(() => readStoredReturnNavigationStack());
   const shutdownPromiseRef = useRef<Promise<void> | null>(null);
   const restartPromiseRef = useRef<Promise<void> | null>(null);
@@ -721,12 +735,11 @@ export function AppShell() {
   );
   const shellStyle = useMemo<WorkbenchShellStyle | undefined>(
     () => ({
-      "--shell-settings-dock-width": `${chatLeftPanelWidth}px`,
       ...(themeBackgroundImageUrl
         ? { "--workbench-theme-background-image": `url(${JSON.stringify(themeBackgroundImageUrl)})` }
         : {}),
     }),
-    [chatLeftPanelWidth, themeBackgroundImageUrl],
+    [themeBackgroundImageUrl],
   );
   const shellStartupWarmupActive = useStartupWarmup(shellStartupDataReady);
   const shellPollingVisible = frontendVisible || shellStartupWarmupActive;
@@ -954,6 +967,42 @@ export function AppShell() {
   const activeWorkCountDisplay = activeWorkUnavailable ? "—" : activeWorkLoading ? "…" : String(activeWorkIndicator?.count ?? 0);
   // Human-readable only (no raw session ids). Used for shutdown/restart copy and aria, not native title.
   const activeWorkDetailsTitle = activeWorkIndicator?.items.map((item) => item.detail).join(" · ") ?? "";
+  // Update banner: main moved ahead of the running backend, so a restart is
+  // needed to apply the new code. Rides the existing 120s code-freshness poll
+  // (data is in its notifyOnChangeProps whitelist) — no extra ticker here.
+  const updateBannerVerdict = codeFreshnessQuery.data?.verdict ?? null;
+  const updateBannerDiskHead = codeFreshnessQuery.data?.backend.disk?.head ?? "";
+  const updateBannerVisible = shouldShowUpdateBanner({
+    verdict: updateBannerVerdict,
+    diskHead: updateBannerDiskHead,
+    dismissedHead: updateBannerDismissedHead,
+  });
+  const updateBannerText = updateBannerCopy(
+    lang,
+    updateBannerDiskHead,
+    updateBannerVerdict === "backend_and_frontend_behind",
+  );
+  const updateBannerRestartActionLabel = updateBannerRestartLabel(lang);
+  const updateBannerDismissActionLabel = updateBannerDismissLabel(lang);
+  const updateBannerRestartBlockedByWork = Boolean(activeWorkIndicator);
+  const updateBannerRestartDisabled =
+    updateBannerRestartBlockedByWork
+    || restartRequested
+    || shutdownRequested
+    || (shutdownOpen && !shutdownSettled);
+  const updateBannerRestartGuard = updateBannerRestartBlockedByWork
+    ? restartActiveWorkBlockedMessage(lang, activeWorkDetailsTitle)
+    : "";
+  const dismissUpdateBanner = useCallback(() => {
+    setUpdateBannerDismissedHead(updateBannerDiskHead);
+    storeUpdateBannerDismissedHead(updateBannerDiskHead);
+  }, [updateBannerDiskHead]);
+  const shellStyleWithBanner = useMemo<CSSProperties | undefined>(
+    () => (updateBannerVisible
+      ? { ...(shellStyle ?? {}), ...UPDATE_BANNER_SHELL_GRID_ROWS }
+      : shellStyle),
+    [shellStyle, updateBannerVisible],
+  );
   const clearRestartCompletionDismissTimer = useCallback(() => {
     if (restartCompletionDismissTimerRef.current === null) {
       return;
@@ -966,6 +1015,11 @@ export function AppShell() {
     setAppearanceOpen(false);
     setMobileNavigationOpen(false);
   }, []);
+  useEffect(() => {
+    closeUtilityMenu();
+    setActiveWorkOpen(false);
+  }, [location.key, closeUtilityMenu]);
+
   const closeActiveWorkMenu = useCallback(() => {
     setActiveWorkOpen(false);
   }, []);
@@ -2107,7 +2161,7 @@ export function AppShell() {
       data-theme-background-readability={themeBackgroundImageUrl ? themeBackgroundReadability : undefined}
       data-shell="workbench"
       data-browser-role="workbench"
-      style={shellStyle}
+      style={shellStyleWithBanner}
     >
       {startupOverlayActive && !shutdownOpen ? (
         <div
@@ -2362,14 +2416,7 @@ export function AppShell() {
             </section>
           </VPopover>
         </div>
-      </header>
-
-      <main className={styles.mainArea}>
-        <CompanionDesktopAttention />
-        <Outlet />
-      </main>
-
-      <div className={styles.settingsDock} data-shell-group="settings-dock">
+      <div className={styles.settingsSlot} data-shell-group="settings">
         <VPopover
           open={utilityOpen}
           onOpenChange={(open) => {
@@ -2380,8 +2427,8 @@ export function AppShell() {
               setMobileNavigationOpen(false);
             }
           }}
-          align="start"
-          side="top"
+          align="end"
+          side="bottom"
           sideOffset={10}
           aria-label={settingsAndToolsLabel}
           contentClassName={styles.settingsPopoverContent}
@@ -2401,13 +2448,7 @@ export function AppShell() {
                 setActiveWorkOpen(false);
               }}
             >
-              <span className={styles.settingsTriggerContent}>
-                <span className={styles.settingsTriggerIcon} aria-hidden="true">
-                  <Settings size={13} />
-                </span>
-                <span className={styles.settingsTriggerLabel}>{settingsLabel}</span>
-                <ChevronUp size={16} className={styles.settingsChevron} aria-hidden="true" />
-              </span>
+              <Settings size={17} aria-hidden="true" />
             </VButton>
           )}
         >
@@ -2526,7 +2567,7 @@ export function AppShell() {
                 onClick={closeUtilityMenu}
                 icon={<SlidersHorizontal size={15} aria-hidden="true" />}
               >
-                {lang === "en" ? "Workbench settings" : "工作台设置"}
+                {lang === "en" ? "All settings" : "全部设置"}
               </VRouteLinkButton>
               <VButton
                 type="button"
@@ -2551,6 +2592,46 @@ export function AppShell() {
           </div>
         </VPopover>
       </div>
+      </header>
+
+      {updateBannerVisible ? (
+        <div className={styles.updateBanner} role="status" data-shell-group="update-banner">
+          <div className={styles.updateBannerCopy}>
+            <strong className={styles.updateBannerTitle}>{updateBannerText.title}</strong>
+            <span className={styles.updateBannerDetail}>{updateBannerText.detail}</span>
+          </div>
+          <div className={styles.updateBannerActions}>
+            <VButton
+              type="button"
+              variant="secondary"
+              className={styles.updateBannerRestartButton}
+              onPress={beginRestart}
+              isDisabled={updateBannerRestartDisabled}
+              title={updateBannerRestartGuard || updateBannerRestartActionLabel}
+            >
+              {updateBannerRestartActionLabel}
+            </VButton>
+            <VIconButton
+              type="button"
+              variant="secondary"
+              className={styles.updateBannerDismissButton}
+              onPress={dismissUpdateBanner}
+              label={updateBannerDismissActionLabel}
+              title={updateBannerDismissActionLabel}
+              icon={<X size={14} />}
+            />
+          </div>
+          {updateBannerRestartGuard ? (
+            <span className={styles.updateBannerNote}>{updateBannerRestartGuard}</span>
+          ) : null}
+        </div>
+      ) : null}
+
+      <main className={styles.mainArea} style={updateBannerVisible ? UPDATE_BANNER_MAIN_AREA_STYLE : undefined}>
+        <CompanionDesktopAttention />
+        <Outlet />
+      </main>
+
     </div>
   );
 }

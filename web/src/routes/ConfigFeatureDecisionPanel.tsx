@@ -12,6 +12,7 @@ type ConfigFeatureDecisionPanelProps = {
 const FEATURE_LABELS: Record<string, { zh: string; en: string }> = {
   mental_model: { zh: "心智模型", en: "Mental model" },
   context_compression: { zh: "上下文压缩", en: "Context compression" },
+  session_recovery: { zh: "重启自动恢复", en: "Restart auto-recovery" },
   pet: { zh: "宠物状态", en: "Pet state" },
   semantic_memory: { zh: "语义记忆", en: "Semantic memory" },
   memory_extraction: { zh: "LLM 记忆提取", en: "LLM memory extraction" },

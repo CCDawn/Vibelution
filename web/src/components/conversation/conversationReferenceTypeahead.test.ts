@@ -134,6 +134,35 @@ describe("filterReferenceTypeaheadOptions", () => {
     expect(filterReferenceTypeaheadOptions(options, "知识库").map((item) => item.id)).toEqual(["1"]);
   });
 
+  it("ranks CJK prefix hits above CJK substring hits", () => {
+    const cjk = [
+      option("a", "项目文件归档"),
+      option("b", "文件管理指南"),
+      option("c", "整理项目文件的方法"),
+    ];
+    expect(filterReferenceTypeaheadOptions(cjk, "文件").map((item) => item.id)).toEqual(["b", "a", "c"]);
+  });
+
+  it("never lets CJK queries match through scattered characters", () => {
+    // "文" and "件" both appear, but scattered: no CJK subsequence tier.
+    const scattered = [option("a", "把文散着的件混起来")];
+    expect(filterReferenceTypeaheadOptions(scattered, "文件")).toEqual([]);
+  });
+
+  it("adds English subsequence hits as the lowest tier above same-tier order", () => {
+    const english = [
+      option("1", "Scattered r-o-a-d notes"),
+      option("2", "Roadmap 2026", "planning"),
+      option("3", "Project roadmap 2026"),
+    ];
+    expect(filterReferenceTypeaheadOptions(english, "road").map((item) => item.id)).toEqual(["2", "3", "1"]);
+  });
+
+  it("keeps the caller's order within one tier", () => {
+    const ties = [option("a", "项目文件归档"), option("b", "会议文件纪要")];
+    expect(filterReferenceTypeaheadOptions(ties, "文件").map((item) => item.id)).toEqual(["a", "b"]);
+  });
+
   it("caps results at the configured limit", () => {
     const many = Array.from({ length: 10 }, (_, index) => option(`id-${index}`, `文档 ${index}`));
     expect(filterReferenceTypeaheadOptions(many, "")).toHaveLength(MAX_REFERENCE_TYPEAHEAD_SUGGESTIONS);

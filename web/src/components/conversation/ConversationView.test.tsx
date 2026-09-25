@@ -324,6 +324,61 @@ describe("ConversationView failed-turn error presentation", () => {
   });
 });
 
+describe("ConversationView session recovery presentation", () => {
+  function recoveryResumedFixture(metadata: Record<string, unknown>) {
+    return {
+      id: "assistant-resumed",
+      role: "assistant",
+      content: "已从重启中恢复，继续执行",
+      timestamp: "2026-09-25T08:00:00Z",
+      turnId: "turn-recovered",
+      turnItems: [
+        {
+          id: "assistant-resumed-item",
+          itemId: "assistant-resumed-item",
+          sessionId: "session-1",
+          turnId: "turn-recovered",
+          version: 3,
+          revision: 1,
+          sequence: 1,
+          type: "agent_message",
+          phase: "final_answer",
+          text: "已从重启中恢复，继续执行",
+          status: "completed",
+          terminal: true,
+        },
+      ],
+      metadata: { kind: "session_recovery_resumed", ...metadata },
+    } as unknown as ConversationMessage;
+  }
+
+  it("renders an in-stream recovery status row with attempt and turn meta", () => {
+    const html = renderConversation([
+      recoveryResumedFixture({ attempt: 2, turnLabel: "重构导出脚本" }),
+    ]);
+    expect(semanticArticleClassCount(html, "cliAgentLifecycleTurn")).toBe(1);
+    expect(html).toContain("已从重启中恢复，继续执行");
+    expect(html).toContain("重构导出脚本");
+    expect(html).toContain("自动重试 2");
+  });
+
+  it("hides interrupted partials once recovery supersedes them", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-partial",
+        role: "assistant",
+        content: "half-streamed answer before the restart",
+        timestamp: "2026-09-25T07:59:00Z",
+        turnId: "turn-recovered",
+        metadata: { interrupted: true, recoverySuperseded: true },
+      } as unknown as ConversationMessage,
+      recoveryResumedFixture({ turnLabel: "重构导出脚本" }),
+    ]);
+    expect(html).not.toContain("half-streamed answer before the restart");
+    expect(html).toContain("已从重启中恢复，继续执行");
+  });
+});
+
 describe("ConversationView compact active-turn status rails", () => {
   it("does not force-OR compact placeholder over process/feedback gates", () => {
     expect(conversationViewSource).not.toContain("Force Thinking/waiting when in-flight with no visible paint");
@@ -453,10 +508,10 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(styles.timelineCellPreview).toContain("whitespace-normal");
     expect(styles.timelineCellPreview).toContain("[overflow-wrap:anywhere]");
     expect(styles.timelineCellPreview).toContain("line-clamp-2");
-    expect(styles.timelineCellPreview).toContain("[font-size:var(--vui-font-sm)]");
-    expect(styles.timelineCellPreview).not.toContain("[font-size:var(--vui-font-xs)]");
+    expect(styles.timelineCellPreview).toContain("text-vui-sm");
+    expect(styles.timelineCellPreview).not.toContain("text-vui-xs");
     // Codex-aligned tool chrome keeps titles muted/small; pills own the primary action label.
-    expect(styles.timelineCellTitle).toContain("[font-size:var(--vui-font-xs)]");
+    expect(styles.timelineCellTitle).toContain("text-vui-xs");
     expect(styles.timelineCellTitle).toContain("font-normal");
     expect(styles.operationItem).not.toContain("860px");
     expect(styles.operationItem).toContain("w-[min(100%,72ch)]");
@@ -764,10 +819,10 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
   });
 
   it("uses shared readable scale tokens for dense conversation text", () => {
-    expect(conversationViewStylesSource).toContain("var(--vui-font-xs)");
-    expect(conversationViewStylesSource).toContain("var(--vui-font-sm)");
-    expect(conversationViewStylesSource).toContain("var(--vui-font-md)");
-    expect(conversationViewStylesSource).toContain("var(--vui-font-chat)");
+    expect(conversationViewStylesSource).toContain("text-vui-xs");
+    expect(conversationViewStylesSource).toContain("text-vui-sm");
+    expect(conversationViewStylesSource).toContain("text-vui-md");
+    expect(conversationViewStylesSource).toContain("text-vui-chat");
     expect(conversationViewStylesSource).not.toMatch(/font-size:\s*0\.(?:6\d|7[0-7])rem/);
   });
   it("caches response segmentation while delegating markdown rendering to the shared renderer", () => {

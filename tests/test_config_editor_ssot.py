@@ -74,3 +74,39 @@ def test_context_window_seed_defaults_have_single_constants() -> None:
     )
     stub_provider = _unconfigured_profile_stub()["provider"]
     assert stub_provider["context_window"] == UNCONFIGURED_PROVIDER_CONTEXT_WINDOW
+
+
+def test_number_editor_meta_passes_through_pydantic_bounds_and_units() -> None:
+    """Wave-1 settings alignment: number rows get read-only schema bounds + units."""
+    public_config = {
+        "context_compression": {
+            "enabled": True,
+            "max_token_limit": 16000,
+            "compression_temperature": 0.3,
+            "micro_compact_tool_whitelist": ["read_file_tool"],
+        },
+        "runtime": {"profile": "balanced"},
+    }
+    meta = editor_schema.build_editor_meta(public_config, "zh")
+
+    token_limit = meta["context_compression.max_token_limit"]
+    assert token_limit["kind"] == "number"
+    # config.models declares max_token_limit with gt=0 -> exclusive minimum.
+    assert token_limit["exclusiveMinimum"] == 0.0
+    assert "minimum" not in token_limit
+    # Badge "Token" carries the physical unit; localized for display.
+    assert token_limit["unit"] == "令牌"
+
+    temperature = meta["context_compression.compression_temperature"]
+    assert temperature["minimum"] == 0.0
+    assert temperature["maximum"] == 2.0
+    # "Number" numbers carry no invented unit or bounds.
+    assert "unit" not in temperature
+
+    whitelist = meta["context_compression.micro_compact_tool_whitelist"]
+    assert whitelist["kind"] == "string_list"
+    assert "minimum" not in whitelist and "maximum" not in whitelist
+
+    # English display unit follows the requested language.
+    meta_en = editor_schema.build_editor_meta(public_config, "en")
+    assert meta_en["context_compression.max_token_limit"]["unit"] == "Token"

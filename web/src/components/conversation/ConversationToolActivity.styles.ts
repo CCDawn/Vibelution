@@ -15,7 +15,7 @@ const styles = {
   groupSummary: cx(
     "groupSummary",
     // list-none + empty ::marker: kill native <details> disclosure (Edge shows a lone ">")
-    "flex w-full max-w-full min-w-0 list-none cursor-pointer items-baseline gap-x-1.5 py-1 text-left [font-size:var(--vui-font-xs)] leading-[1.45] text-[var(--fg-tertiary)] [&::-webkit-details-marker]:hidden [&::marker]:hidden [&::marker]:content-none hover:text-[var(--fg-secondary)] focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
+    "flex w-full max-w-full min-w-0 list-none cursor-pointer items-baseline gap-x-1.5 py-1 text-left text-vui-xs leading-[1.45] text-[var(--fg-tertiary)] [&::-webkit-details-marker]:hidden [&::marker]:hidden [&::marker]:content-none hover:text-[var(--fg-secondary)] focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
   ),
   groupTitle: cx("groupTitle", "min-w-0 font-normal text-[var(--fg-tertiary)]"),
   groupMeta: cx("groupMeta", "shrink-0 text-[color-mix(in_srgb,var(--fg-tertiary)_82%,transparent)]"),
@@ -53,7 +53,7 @@ const styles = {
   ),
   batchCount: cx(
     "batchCount",
-    "shrink-0 [font-size:var(--vui-font-xs)] font-normal text-[color-mix(in_srgb,var(--fg-tertiary)_88%,transparent)]",
+    "shrink-0 text-vui-xs font-normal text-[color-mix(in_srgb,var(--fg-tertiary)_88%,transparent)]",
   ),
   batchDetails: cx(
     "batchDetails",
@@ -69,7 +69,7 @@ const styles = {
   itemBody: cx(
     "itemBody",
     // Single-line Codex tool row: icon + plain action + muted subject + duration.
-    "inline-flex w-full max-w-full min-w-0 items-center gap-x-1.5 [font-size:var(--vui-font-xs)] leading-[1.4] text-[var(--fg-tertiary)]",
+    "inline-flex w-full max-w-full min-w-0 items-center gap-x-1.5 text-vui-xs leading-[1.4] text-[var(--fg-tertiary)]",
   ),
   // Plain action label (no chip chrome). data-codex-tool-action-pill kept for tests/selectors.
   actionLabel: cx(
@@ -115,7 +115,7 @@ const styles = {
   ),
   itemDetailsBody: cx(
     "itemDetailsBody",
-    "min-w-0 max-h-48 overflow-auto py-1 pl-1 text-[var(--fg-tertiary)] [font-size:var(--vui-font-xs)] leading-[1.45] [&_pre]:max-h-48 [&_pre]:overflow-auto [&_pre]:text-[var(--fg-tertiary)]",
+    "min-w-0 max-h-48 overflow-auto py-1 pl-1 text-[var(--fg-tertiary)] text-vui-xs leading-[1.45] [&_pre]:max-h-48 [&_pre]:overflow-auto [&_pre]:text-[var(--fg-tertiary)]",
   ),
 } as const;
 

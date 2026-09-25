@@ -798,6 +798,25 @@ describe("configRouteLogic", () => {
         nextPathname: "/config",
       }),
     ).toBe(false);
+
+    expect(
+      shouldBlockConfigLeave({
+        hasPendingApply: false,
+        hasPendingSectionDrafts: true,
+        busy: false,
+        currentPathname: "/config",
+        nextPathname: "/chat",
+      }),
+    ).toBe(true);
+    expect(
+      shouldBlockConfigLeave({
+        hasPendingApply: false,
+        hasPendingSectionDrafts: true,
+        busy: false,
+        currentPathname: "/config",
+        nextPathname: "/config",
+      }),
+    ).toBe(false);
   });
 
   it("keeps avatar crop movement inside the visible square", () => {

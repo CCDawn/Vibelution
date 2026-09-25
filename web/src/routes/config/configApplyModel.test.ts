@@ -4,6 +4,7 @@ import {
   buildConfigApplyRequestPayload,
   isConfigBaselineStaleErrorMessage,
   shouldImmediateApplyConfigPath,
+  shouldImmediateApplyFieldKind,
 } from "./configApplyModel";
 
 describe("configApplyModel", () => {
@@ -19,6 +20,18 @@ describe("configApplyModel", () => {
     expect(shouldImmediateApplyConfigPath("pet.name")).toBe(true);
     expect(shouldImmediateApplyConfigPath("security")).toBe(false);
     expect(shouldImmediateApplyConfigPath("context_compression")).toBe(false);
+  });
+
+  it("declares boolean/select kinds immediate and everything else draft", () => {
+    expect(shouldImmediateApplyFieldKind("boolean")).toBe(true);
+    expect(shouldImmediateApplyFieldKind("select")).toBe(true);
+    expect(shouldImmediateApplyFieldKind("number")).toBe(false);
+    expect(shouldImmediateApplyFieldKind("string_list")).toBe(false);
+    expect(shouldImmediateApplyFieldKind("json")).toBe(false);
+    expect(shouldImmediateApplyFieldKind("text")).toBe(false);
+    expect(shouldImmediateApplyFieldKind("multiline")).toBe(false);
+    expect(shouldImmediateApplyFieldKind("secret")).toBe(false);
+    expect(shouldImmediateApplyFieldKind(undefined)).toBe(false);
   });
 
   it("prefers frozen baseline hash when applying a draft override", () => {

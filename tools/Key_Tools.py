@@ -1146,7 +1146,7 @@ def _build_key_tools() -> List[BaseTool]:
         先读 firstRead 的四段：conclusion、evidencePaths、nextStep、doNotDo，然后停止。
         只有 nextStep 点名的 evidencePaths.absolutePath 才可以再查。带 warning 的文件不要整篇读。
         要看某一轮会话时传 session_id / turn_id，之后只读 session.diagnosis.nextMinimalAction。
-        传 log_path 才是深读，且该文件必须已经出现在 firstRead.evidencePaths。
+        传 log_path 才是深读；可深读的文件是 firstRead.evidencePaths 里已经点名的路径。
         本工具不执行 shell，不写文件，不返回整段日志正文。
 
         Args:

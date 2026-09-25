@@ -193,3 +193,59 @@ def test_string_requested_flags_are_coerced() -> None:
     )
     assert denied.effective_enabled is True
     assert denied.managed_denied is False
+
+
+def test_session_recovery_defaults_to_enabled_when_unconfigured() -> None:
+    """重启恢复缺省（未配置 section/字段）= enabled，对齐默认开语义。"""
+    missing_section = resolve_feature_decision("session_recovery", config={})
+    assert missing_section.configured_enabled is True
+    assert missing_section.effective_enabled is True
+    assert missing_section.reason == "operator_config_enabled"
+
+    missing_field = resolve_feature_decision(
+        "session_recovery",
+        config={"session_recovery": {}},
+    )
+    assert missing_field.effective_enabled is True
+
+    namespace_without_section = resolve_feature_decision(
+        "session_recovery",
+        config=_config(mental_model=False),
+    )
+    assert namespace_without_section.effective_enabled is True
+
+
+def test_session_recovery_explicit_false_stays_disabled() -> None:
+    """显式 false 关闭，且 run 请求不能强开（fail-closed 收窄语义）。"""
+    off = resolve_feature_decision(
+        "session_recovery",
+        config={"session_recovery": {"enabled": False}},
+    )
+    assert off.configured_enabled is False
+    assert off.effective_enabled is False
+    assert off.reason == "operator_config_disabled"
+
+    forced = resolve_feature_decision(
+        "session_recovery",
+        config={"session_recovery": {"enabled": False}},
+        requested=True,
+    )
+    assert forced.configured_enabled is False
+    assert forced.effective_enabled is False
+
+    string_off = resolve_feature_decision(
+        "session_recovery",
+        config={"session_recovery": {"enabled": "false"}},
+    )
+    assert string_off.effective_enabled is False
+
+
+def test_session_recovery_request_can_narrow_enabled_feature() -> None:
+    decision = resolve_feature_decision(
+        "session_recovery",
+        config={"session_recovery": {"enabled": True}},
+        requested=False,
+    )
+    assert decision.configured_enabled is True
+    assert decision.effective_enabled is False
+    assert decision.reason == "run_narrowed_disabled"

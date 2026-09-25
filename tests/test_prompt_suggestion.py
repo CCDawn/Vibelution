@@ -150,7 +150,6 @@ def test_clean_prompt_suggestion_strips_wrapping_and_whitespace():
 def test_generate_prompt_suggestion_forks_parent_request(monkeypatch):
     _register(usage=UsageStats(input_tokens=5_000, cached_input_tokens=4_000, output_tokens=200))
     calls = _install_fake_invoke(monkeypatch, "跑一下测试")
-    monkeypatch.setattr(prompt_suggestion, "_assistant_turn_count", lambda _sid: 2)
 
     result = prompt_suggestion.generate_prompt_suggestion("session-1", after_turn_id="turn-2")
 
@@ -177,7 +176,6 @@ def test_generate_prompt_suggestion_forks_parent_request(monkeypatch):
 
 def test_generate_prompt_suggestion_guards(monkeypatch):
     calls = _install_fake_invoke(monkeypatch, "跑一下测试")
-    monkeypatch.setattr(prompt_suggestion, "_assistant_turn_count", lambda _sid: 2)
 
     assert prompt_suggestion.generate_prompt_suggestion("missing")["reason"] == "no_capture"
 
@@ -201,7 +199,6 @@ def test_generate_prompt_suggestion_guards(monkeypatch):
 
 
 def test_generate_prompt_suggestion_filters_and_failures(monkeypatch):
-    monkeypatch.setattr(prompt_suggestion, "_assistant_turn_count", lambda _sid: 2)
 
     _install_fake_invoke(monkeypatch, "看起来不错")
     _register()
@@ -233,12 +230,13 @@ def test_generate_prompt_suggestion_filters_and_failures(monkeypatch):
     )
 
 
-def test_generate_prompt_suggestion_early_conversation(monkeypatch):
-    _install_fake_invoke(monkeypatch, "跑一下测试")
-    monkeypatch.setattr(prompt_suggestion, "_assistant_turn_count", lambda _sid: 1)
+def test_generate_prompt_suggestion_runs_on_first_assistant_turn(monkeypatch):
+    calls = _install_fake_invoke(monkeypatch, "跑一下测试")
     _register()
     result = prompt_suggestion.generate_prompt_suggestion("session-1", after_turn_id="turn-2")
-    assert result["reason"] == "early_conversation"
+    assert result["suggestion"] == "跑一下测试"
+    assert result["reason"] == "ok"
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize(
