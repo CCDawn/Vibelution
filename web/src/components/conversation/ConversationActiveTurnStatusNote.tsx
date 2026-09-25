@@ -12,6 +12,7 @@ import {
   resolveActiveTurnRetryProgress,
   resolveActiveTurnRouteFallback,
   resolveActiveTurnStallSeconds,
+  visibleActiveTurnRetryProgress,
   type ActiveTurnStatusMessageLike,
 } from "./conversationActiveTurnStatusPresentation";
 import { useActiveTurnStreamState } from "./activeTurnStreamState";
@@ -79,6 +80,11 @@ export function ConversationActiveTurnStatusNote({
   const retryProgress = stage === "model_retry" || stage === "retrying"
     ? resolveActiveTurnRetryProgress(message)
     : null;
+  // ZCode semantics: retries 1-2 stay silent on the heartbeat; from the third
+  // attempt the counter becomes visible and earns the shimmer treatment.
+  const visibleRetryProgress = companionMode
+    ? null
+    : visibleActiveTurnRetryProgress(retryProgress);
   const heartbeatText = companionMode
     ? (lang === "en" ? "Typing…" : "正在输入…")
     : formatActiveTurnHeartbeatText(stage, elapsedSeconds, lang, retryProgress);
@@ -111,6 +117,7 @@ export function ConversationActiveTurnStatusNote({
       aria-label={companionMode ? undefined : [resolvedStatusLabel, heartbeatText].filter(Boolean).join(" · ")}
       data-active-turn-stage={stage}
       data-active-turn-elapsed-seconds={elapsedSeconds ?? ""}
+      data-active-turn-retry-attempt={visibleRetryProgress ? visibleRetryProgress.attempt : undefined}
       data-active-turn-disconnected={disconnectSeconds !== null ? "true" : undefined}
       data-active-turn-stalled={stallSeconds !== null ? "true" : undefined}
       data-active-turn-route-fallback={routeFallback ? "true" : undefined}
@@ -120,7 +127,11 @@ export function ConversationActiveTurnStatusNote({
       <div className={styles.body}>
         <span className={styles.textRow}>
           <LoaderCircle className={styles.spinner} size={14} aria-hidden="true" />
-          <span className={styles.text}>{heartbeatText}</span>
+          <span
+            className={visibleRetryProgress ? `${styles.text} ${styles.retryShimmer}` : styles.text}
+          >
+            {heartbeatText}
+          </span>
         </span>
         {disconnectSeconds !== null ? (
           <VStatusChip

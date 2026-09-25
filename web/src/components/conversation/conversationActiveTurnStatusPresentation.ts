@@ -53,6 +53,14 @@ export type ActiveTurnRetryProgress = {
   maxAttempts: number;
 };
 
+/**
+ * ZCode-aligned retry visibility: the first two short recoveries are
+ * indistinguishable from a normal load for the user, so they stay silent on
+ * the heartbeat. Only from the third attempt onward does the turn surface a
+ * visible "第 X/N 次重试" counter.
+ */
+export const MIN_VISIBLE_API_RETRY_ATTEMPT = 3;
+
 const RETRY_STAGE_NAMES = ["model_retry", "retrying"];
 
 function turnItemLooksLikeRetry(item: SessionTurnItem) {
@@ -126,6 +134,22 @@ export function resolveActiveTurnRetryProgress(
     }
   }
   return null;
+}
+
+/**
+ * Retry progress worth showing on the heartbeat, or null while the current
+ * retry is still inside the silent first-attempts window. `null` progress
+ * (no attempt number known) stays silent too: an uncounted "retrying" line is
+ * exactly the noise this gate exists to remove.
+ */
+export function visibleActiveTurnRetryProgress(
+  progress: ActiveTurnRetryProgress | null | undefined,
+): ActiveTurnRetryProgress | null {
+  return progress && progress.attempt >= MIN_VISIBLE_API_RETRY_ATTEMPT ? progress : null;
+}
+
+function isRetryStageName(stage: string) {
+  return RETRY_STAGE_NAMES.includes(normalizeStage(stage));
 }
 
 export function resolveActiveTurnProgressStage(message: ActiveTurnStatusMessageLike): string {
@@ -310,11 +334,23 @@ export function formatActiveTurnHeartbeatText(
   lang: "zh" | "en" | string,
   retryProgress?: ActiveTurnRetryProgress | null,
 ) {
-  const label = activeTurnStageLabel(stage, lang);
-  const retrySuffix = retryProgress && retryProgress.attempt > 0
-    ? `${retryProgress.attempt}/${Math.max(retryProgress.attempt, retryProgress.maxAttempts)}`
-    : "";
-  const head = retrySuffix ? `${label} ${retrySuffix}` : label;
+  const zh = lang !== "en";
+  // Only counted retries from the third attempt onward earn a visible counter;
+  // the silent early attempts keep the plain request wording so the heartbeat
+  // does not advertise recoveries the user never needed to know about.
+  const visibleRetry = visibleActiveTurnRetryProgress(retryProgress ?? null);
+  let head: string;
+  if (visibleRetry) {
+    // Stable count only — backend pushes a point-in-time snapshot, never a
+    // per-second countdown, so no delay seconds are invented here.
+    head = zh
+      ? `第 ${visibleRetry.attempt}/${Math.max(visibleRetry.attempt, visibleRetry.maxAttempts)} 次重试`
+      : `Retrying (attempt ${visibleRetry.attempt}/${Math.max(visibleRetry.attempt, visibleRetry.maxAttempts)})`;
+  } else if (isRetryStageName(stage)) {
+    head = activeTurnStageLabel("model_request", lang);
+  } else {
+    head = activeTurnStageLabel(stage, lang);
+  }
   if (elapsedSeconds == null || !Number.isFinite(elapsedSeconds)) {
     return head;
   }

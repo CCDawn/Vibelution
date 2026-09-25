@@ -1334,6 +1334,18 @@ timeline:
     "vui-components-conversationview turnStatusNote min-w-0 inline-grid w-[min(100%,920px)] grid-cols-[auto_minmax(0,1fr)] items-start gap-2 border-l border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] bg-transparent py-1 pl-2.5 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   turnStatusText:
     "vui-components-conversationview turnStatusText min-w-0 max-w-[min(100%,128ch)] whitespace-normal [overflow-wrap:anywhere]",
+  // Settled-turn work header (ZCode AssistantHistoryStatus alignment): a thin
+  // rule with a collapsible 「已工作 N 分钟」 trigger at the turn tail.
+  turnWorkHeader:
+    "vui-components-conversationview turnWorkHeader w-fit min-w-0 max-w-full border-b border-[color-mix(in_srgb,var(--vui-border-subtle)_60%,transparent)] pb-2",
+  turnWorkHeaderSummary:
+    "vui-components-conversationview turnWorkHeaderSummary flex w-full list-none cursor-pointer items-center gap-1.5 py-0.5 text-left text-vui-sm text-[var(--fg-tertiary)] [&::-webkit-details-marker]:hidden [&::marker]:hidden [&::marker]:content-none hover:text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
+  turnWorkHeaderChevron:
+    "vui-components-conversationview turnWorkHeaderChevron shrink-0 text-[var(--fg-tertiary)] opacity-70 transition-transform motion-reduce:transition-none",
+  turnWorkHeaderLabel:
+    "vui-components-conversationview turnWorkHeaderLabel min-w-0 truncate",
+  turnWorkHeaderBody:
+    "vui-components-conversationview turnWorkHeaderBody min-w-0 pt-2 text-vui-xs leading-[var(--vui-line-readable)] text-[var(--fg-tertiary)]",
   updateLine: `vui-components-conversationview updateLine min-w-0 ${vuiOpaqueRowClass} p-2`,
   userAttachment:
     "vui-components-conversationview userAttachment min-w-0",

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ACTIVE_TURN_NO_DELTA_STALL_AFTER_MS,
+  MIN_VISIBLE_API_RETRY_ATTEMPT,
   activeTurnElapsedSeconds,
   activeTurnOptimisticStageSummary,
   activeTurnStageBarPhase,
@@ -14,6 +15,7 @@ import {
   resolveActiveTurnRetryProgress,
   resolveActiveTurnRouteFallback,
   resolveActiveTurnStallSeconds,
+  visibleActiveTurnRetryProgress,
 } from "./conversationActiveTurnStatusPresentation";
 
 describe("conversationActiveTurnStatusPresentation", () => {
@@ -129,13 +131,33 @@ describe("conversationActiveTurnStatusPresentation", () => {
     })).toBeNull();
   });
 
-  it("formats retry heartbeat with attempt counts", () => {
+  it("keeps early retries silent and counts only from the third attempt", () => {
+    expect(MIN_VISIBLE_API_RETRY_ATTEMPT).toBe(3);
+    expect(visibleActiveTurnRetryProgress(null)).toBeNull();
+    expect(visibleActiveTurnRetryProgress({ attempt: 1, maxAttempts: 5 })).toBeNull();
+    expect(visibleActiveTurnRetryProgress({ attempt: 2, maxAttempts: 5 })).toBeNull();
+    expect(visibleActiveTurnRetryProgress({ attempt: 3, maxAttempts: 5 })).toEqual({
+      attempt: 3,
+      maxAttempts: 5,
+    });
+  });
+
+  it("formats retry heartbeats with the ZCode visibility rule", () => {
+    // Attempts 1-2 (and uncounted retries) stay silent: plain request wording.
     expect(formatActiveTurnHeartbeatText("model_retry", 12, "zh", { attempt: 2, maxAttempts: 5 }))
-      .toBe("请求重试 2/5 · 12s");
-    expect(formatActiveTurnHeartbeatText("model_retry", null, "en", { attempt: 3, maxAttempts: 5 }))
-      .toBe("Retrying request 3/5");
+      .toBe("请求模型 · 12s");
     expect(formatActiveTurnHeartbeatText("model_retry", 8, "zh"))
-      .toBe("请求重试 · 8s");
+      .toBe("请求模型 · 8s");
+    expect(formatActiveTurnHeartbeatText("retrying", null, "en"))
+      .toBe("Requesting model");
+    // From the third attempt the counter becomes visible, count only (no
+    // invented countdown), elapsed seconds keep the heartbeat convention.
+    expect(formatActiveTurnHeartbeatText("model_retry", null, "en", { attempt: 3, maxAttempts: 5 }))
+      .toBe("Retrying (attempt 3/5)");
+    expect(formatActiveTurnHeartbeatText("model_retry", 12, "zh", { attempt: 4, maxAttempts: 5 }))
+      .toBe("第 4/5 次重试 · 12s");
+    // Non-retry stages keep their own labels untouched.
+    expect(formatActiveTurnHeartbeatText("model_thinking", 12, "zh")).toBe("思考中 · 12s");
   });
 
   it("resolves disconnect seconds only while the stream is reconnecting", () => {

@@ -137,6 +137,12 @@ import {
 } from "./conversationInternalStatus";
 import { ConversationActiveTurnStatusNote } from "./ConversationActiveTurnStatusNote";
 import {
+  formatConversationTurnWorkBreakdown,
+  formatConversationTurnWorkedFor,
+  resolveConversationTurnWorkSummary,
+  type ConversationTurnWorkSummary,
+} from "./conversationTurnWorkStatus";
+import {
   operationGroupsWithFeedbackStatusPlaceholder,
 } from "./conversationFeedbackStatusPresentation";
 import { isInternalRuntimeStatus } from "./conversationDisplayProtocol";
@@ -568,6 +574,50 @@ function progressTextExceedsClamp(text: string) {
   }
   return lines > PROGRESS_CLAMP_LINES;
 }
+
+/**
+ * Settled-turn work header (ZCode AssistantHistoryStatus alignment): a thin
+ * bottom rule with a collapsible 「已工作 N 分钟」 trigger at the turn tail.
+ * Expanded, it shows only what the turn data can honestly back — tool call
+ * count and tool time when measurable (see conversationTurnWorkStatus.ts for
+ * the duration口径).
+ */
+const ConversationTurnWorkHeader = React.memo(function ConversationTurnWorkHeader({
+  summary,
+  lang,
+}: {
+  summary: ConversationTurnWorkSummary;
+  lang: "zh" | "en" | string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <details
+      className={styles.turnWorkHeader}
+      data-testid="conversation-turn-work-header"
+      data-turn-work-basis={summary.basis}
+      data-turn-work-duration-ms={summary.durationMs}
+      open={open}
+      onToggle={(event) => setOpen((event.target as HTMLDetailsElement).open)}
+    >
+      <summary
+        className={styles.turnWorkHeaderSummary}
+        aria-label={formatConversationTurnWorkedFor(summary, lang)}
+      >
+        <ChevronDown
+          size={14}
+          aria-hidden="true"
+          className={`${styles.turnWorkHeaderChevron} ${open ? "rotate-90" : "rotate-0"}`}
+        />
+        <span className={styles.turnWorkHeaderLabel}>
+          {formatConversationTurnWorkedFor(summary, lang)}
+        </span>
+      </summary>
+      <div className={styles.turnWorkHeaderBody}>
+        {formatConversationTurnWorkBreakdown(summary, lang)}
+      </div>
+    </details>
+  );
+});
 
 const ConversationTurnRow = React.memo(function ConversationTurnRow({
   renderTurn,
@@ -1831,6 +1881,18 @@ export const ConversationView = React.memo(function ConversationView({
                 statusLabel={lang === "zh" ? "状态" : "Status"}
               />
             ) : null;
+            // Turn-tail work header: settled assistant turns only (companion,
+            // inbox and group-transcript shells stay minimal by contract).
+            const turnWorkSummary = message.role === "assistant"
+              && !companionMode
+              && !agentInboxMessage
+              && !groupTranscriptMessage
+              && !assistantTurnIsStreaming(message)
+              ? resolveConversationTurnWorkSummary(message)
+              : null;
+            const turnWorkHeaderNode = turnWorkSummary ? (
+              <ConversationTurnWorkHeader summary={turnWorkSummary} lang={lang} />
+            ) : null;
             return (
               <AgentMessageTurnView
                 key={rowIdentity.rowKey}
@@ -2092,6 +2154,7 @@ export const ConversationView = React.memo(function ConversationView({
                   ) : null}
 
                   {!answerOnlyProcessMode ? responseSectionNode : null}
+                  {turnWorkHeaderNode}
               </AgentMessageTurnView>
             );
                 }}

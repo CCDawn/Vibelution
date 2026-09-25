@@ -134,3 +134,63 @@ pre {
     scroll-behavior: auto !important;
   }
 }
+
+/*
+ * Text sweep for counted API retries (`.vui-shimmer-text`).
+ *
+ * ZCode-aligned semantics: a retry that is quietly recovered within the first
+ * two attempts never paints; from the third attempt the visible counter text
+ * carries this single low-contrast sweep. Peak tone is the secondary foreground
+ * (a running secondary status must not hit the pure primary text peak), the
+ * moving valley is a transparent mix of the same token so every theme inherits
+ * the gradient from its own foreground.
+ */
+.vui-shimmer-text {
+  --vui-shimmer-strong: var(--fg-secondary);
+  --vui-shimmer-soft: color-mix(in srgb, var(--fg-secondary) 25%, transparent);
+  display: inline-block;
+  background: linear-gradient(
+    90deg,
+    var(--vui-shimmer-strong) 0%,
+    var(--vui-shimmer-strong) 34%,
+    var(--vui-shimmer-soft) 50%,
+    var(--vui-shimmer-strong) 66%,
+    var(--vui-shimmer-strong) 100%
+  );
+  background-size: 300% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: vui-shimmer-text-flow 4s linear infinite;
+  will-change: background-position;
+}
+
+@keyframes vui-shimmer-text-flow {
+  0% {
+    background-position: 100% 0;
+  }
+
+  50% {
+    background-position: 0% 0;
+  }
+
+  100% {
+    background-position: 0% 0;
+  }
+}
+
+/*
+ * Reduced motion: drop the sweep entirely and restore a solid, readable
+ * foreground. The global reduce block above only shortens animations; without
+ * this pairing the frozen gradient would strand part of the label at the
+ * valley alpha.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .vui-shimmer-text {
+    animation: none;
+    background: none;
+    color: var(--vui-shimmer-strong);
+    -webkit-text-fill-color: currentcolor;
+  }
+}

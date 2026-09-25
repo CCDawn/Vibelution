@@ -755,6 +755,73 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain("第 1/3 次");
   });
 
+  it("adds the settled-turn work header only when a derivable span exists", () => {
+    const startMs = Date.parse("2026-09-11T07:00:00.000Z");
+    const base = {
+      id: "assistant-work-header",
+      role: "assistant" as const,
+      timestamp: "2026-09-11T07:00:00.000Z",
+      turnId: "turn-work-header",
+      status: "completed" as const,
+      turnItems: [
+        {
+          id: "tool-1-r1",
+          itemId: "tool-1",
+          version: 3 as const,
+          sessionId: "session-1",
+          turnId: "turn-work-header",
+          type: "tool_call" as const,
+          status: "completed" as const,
+          revision: 1,
+          sequence: 1,
+          callId: "call-1",
+          toolName: "terminal",
+          metadata: {
+            executionStartedAtEpochMs: startMs + 1_000,
+            durationMs: 120_000,
+          },
+        },
+        {
+          id: "answer-1-r1",
+          itemId: "answer-1",
+          version: 3 as const,
+          sessionId: "session-1",
+          turnId: "turn-work-header",
+          type: "agent_message" as const,
+          phase: "final_answer" as const,
+          status: "completed" as const,
+          revision: 1,
+          sequence: 2,
+          text: "已经完成。",
+        },
+      ],
+    };
+
+    const withWork = renderConversation([base]);
+    expect(withWork).toContain('data-testid="conversation-turn-work-header"');
+    expect(withWork).toContain("已工作 2 分 1 秒");
+    expect(withWork).toContain('data-turn-work-basis="turn_span"');
+    // Collapsed by default: no open attribute (hiding is UA behavior for
+    // details, so the body markup exists but starts collapsed).
+    expect(withWork).not.toMatch(/<details[^>]*\sopen[=\s>]/);
+
+    // Short turns stay quiet.
+    const short = renderConversation([{
+      ...base,
+      id: "assistant-work-header-short",
+      turnItems: base.turnItems.map((item) => (
+        item.type === "tool_call"
+          ? { ...item, id: "tool-short-r1", metadata: { executionStartedAtEpochMs: startMs, durationMs: 2_000 } }
+          : item
+      )),
+    }]);
+    expect(short).not.toContain('data-testid="conversation-turn-work-header"');
+
+    // In-flight turns stay quiet too.
+    const streaming = renderConversation([{ ...base, id: "assistant-work-header-live", status: "running" as const }]);
+    expect(streaming).not.toContain('data-testid="conversation-turn-work-header"');
+  });
+
   it("offers a copy action on a settled assistant answer", () => {
     const answer = (status: "running" | "completed"): ConversationMessage => ({
       id: `assistant-copy-${status}`,

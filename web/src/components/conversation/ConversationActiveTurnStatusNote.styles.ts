@@ -18,6 +18,9 @@ const styles = {
   ),
   label: cv("label", "sr-only"),
   advisory: cv("advisory", "shrink-0"),
+  // Visible retry counter (attempt >= 3) only; the sweep itself lives in the
+  // global `.vui-shimmer-text` keyframes (design/base.css).
+  retryShimmer: cv("retryShimmer", "vui-shimmer-text"),
 } as const;
 
 export default styles;

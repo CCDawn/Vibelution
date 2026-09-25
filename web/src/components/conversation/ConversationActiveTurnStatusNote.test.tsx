@@ -62,7 +62,7 @@ describe("ConversationActiveTurnStatusNote canonical turn items", () => {
     expect(html).not.toContain("aria-label=");
   });
 
-  it("derives the visible retry heartbeat from a retry item", () => {
+  it("keeps the first two retries silent on the heartbeat", () => {
     const html = renderToStaticMarkup(
       <ConversationActiveTurnStatusNote
         lang="zh"
@@ -87,10 +87,44 @@ describe("ConversationActiveTurnStatusNote canonical turn items", () => {
       />,
     );
 
-    expect(html).toContain("data-active-turn-stage=\"model_retry\"");
-    expect(html).toContain("请求重试 2/5");
-    expect(html).not.toContain("data-stage-phase");
-    expect(html).not.toContain("stageDot");
+    expect(html).toContain('data-active-turn-stage="model_retry"');
+    // Early retries read as a plain request: no counter, no retry copy.
+    expect(html).toContain("请求模型");
+    expect(html).not.toContain("请求重试");
+    expect(html).not.toContain("2/5");
+    expect(html).not.toContain("data-active-turn-retry-attempt=");
+    expect(html).not.toContain("vui-shimmer-text");
+  });
+
+  it("shows the counted retry with shimmer from the third attempt", () => {
+    const html = renderToStaticMarkup(
+      <ConversationActiveTurnStatusNote
+        lang="zh"
+        message={{
+          timestamp: new Date().toISOString(),
+          turnItems: [{
+            id: "retry-3-r1",
+            itemId: "retry-3",
+            version: 3,
+            sessionId: "session-1",
+            turnId: "turn-1",
+            type: "retry",
+            status: "running",
+            revision: 1,
+            sequence: 1,
+            attempt: 3,
+            targetItemId: "request-1",
+            reason: "模型连接正在重试...\n第 3/5 次；原因：server_error。",
+            metadata: { maxAttempts: 5 },
+          }],
+        }}
+      />,
+    );
+
+    expect(html).toContain('data-active-turn-stage="model_retry"');
+    expect(html).toContain("第 3/5 次重试");
+    expect(html).toContain('data-active-turn-retry-attempt="3"');
+    expect(html).toContain("vui-shimmer-text");
   });
 });
 
