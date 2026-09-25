@@ -52,6 +52,13 @@ export type ConfigEditorMeta = {
     | "multiline";
   badge: string;
   options: ConfigEditorOption[];
+  /** Read-only numeric schema passthrough (number fields only, optional). */
+  minimum?: number;
+  exclusiveMinimum?: number;
+  maximum?: number;
+  exclusiveMaximum?: number;
+  /** Localized display unit for number fields with a real physical unit. */
+  unit?: string;
 };
 
 export type ConfigEditorSection = {

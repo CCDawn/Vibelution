@@ -30,7 +30,26 @@ export function isConfigBaselineStaleErrorMessage(message: string): boolean {
 
 const IMMEDIATE_APPLY_ROOTS = new Set(["ui", "user_profile", "avatar", "pet"]);
 
-/** Appearance/profile section paths persist on save; routing and tooling still wait for explicit apply. */
+/**
+ * Field-level save-mode declaration — single source of truth for the row save
+ * model (settings-align wave 1): boolean/select fields are immediate (the view
+ * row hosts a live control and every change goes through draft save + apply),
+ * everything else is draft-based (section edit state, explicit save).
+ */
+const IMMEDIATE_FIELD_KINDS = new Set(["boolean", "select"]);
+
+/** Row badge lifecycle for an immediate-kind field change. */
+export type ImmediateFieldStatus = "waiting" | "applied" | "failed";
+
+/** Immediate-kind fields apply inline; all other kinds buffer as drafts. */
+export function shouldImmediateApplyFieldKind(kind: string | undefined | null): boolean {
+  return IMMEDIATE_FIELD_KINDS.has(String(kind || ""));
+}
+
+/**
+ * Section-level immediate roots: sections under these paths keep applying the
+ * whole working draft on section save (existing behavior, unchanged).
+ */
 export function shouldImmediateApplyConfigPath(path: string): boolean {
   const root = String(path || "").split(".")[0]?.trim();
   return Boolean(root) && IMMEDIATE_APPLY_ROOTS.has(root);

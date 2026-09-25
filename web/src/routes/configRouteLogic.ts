@@ -59,6 +59,8 @@ export type ConfigSectionExpansionState = {
 
 export type ConfigLeaveGuardInput = {
   hasPendingApply: boolean;
+  /** Section edit drafts pending explicit save (settings-align wave 1). */
+  hasPendingSectionDrafts?: boolean;
   busy: boolean;
   currentPathname: string;
   nextPathname: string;
@@ -413,7 +415,8 @@ export function resolveConfigSectionUiStateOnSelect<T extends ConfigSectionExpan
 }
 
 export function shouldBlockConfigLeave(input: ConfigLeaveGuardInput): boolean {
-  return input.hasPendingApply && !input.busy && input.currentPathname === "/config" && input.nextPathname !== "/config";
+  const hasPendingWork = input.hasPendingApply || input.hasPendingSectionDrafts === true;
+  return hasPendingWork && !input.busy && input.currentPathname === "/config" && input.nextPathname !== "/config";
 }
 
 export function shouldResetMigrationPreview(error: unknown): boolean {

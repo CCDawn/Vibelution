@@ -89,7 +89,7 @@ const styles = {
   configAdvancedBody:
     "vui-routes-configroute configAdvancedBody [display:grid] [gap:7px] [padding-top:2px]",
   configDenseSection:
-    "vui-routes-configroute configDenseSection [&>_.treeGrid]:[grid-template-columns:repeat(3,minmax(220px,1fr))] [&>_.treeGrid]:[gap:7px] [&_.treeFieldCardView]:[grid-template-columns:minmax(108px,0.34fr)_minmax(0,1fr)] [&_.treeFieldCardView]:[gap:4px_7px] [&_.treeFieldCardView]:[min-height:34px] [&_.treeFieldCardView]:[padding:6px] [&_.treeFieldCardEdit]:[gap:5px] [&_.treeFieldCardEdit]:[padding:7px] [&_.treeObjectCell_.treeObjectBlock]:[min-height:38px] [&_.treeObjectCell_.treeObjectBlock]:[padding:7px] [&_.treeObjectCell_.treeNestedBlock]:[min-height:38px] [&_.treeObjectCell_.treeNestedBlock]:[padding:7px] [&_.treeObjectCell_.treeToggle]:[min-height:30px] max-[1500px]:[&>_.treeGrid]:[grid-template-columns:repeat(2,minmax(220px,1fr))] max-[860px]:[&>_.treeGrid]:[grid-template-columns:1fr]",
+    "vui-routes-configroute configDenseSection [&_.treeFieldCardView]:[grid-template-columns:minmax(108px,0.34fr)_minmax(0,1fr)] [&_.treeFieldCardView]:[gap:4px_7px] [&_.treeFieldCardView]:[min-height:34px] [&_.treeFieldCardView]:[padding:6px] [&_.treeFieldCardEdit]:[gap:5px] [&_.treeFieldCardEdit]:[padding:7px] [&_.treeObjectCell_.treeObjectBlock]:[min-height:38px] [&_.treeObjectCell_.treeObjectBlock]:[padding:7px] [&_.treeObjectCell_.treeNestedBlock]:[min-height:38px] [&_.treeObjectCell_.treeNestedBlock]:[padding:7px] [&_.treeObjectCell_.treeToggle]:[min-height:30px]",
   configEditorSection:
     "vui-routes-configroute configEditorSection [&>_.treeGrid]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)] [&>_.treeStack]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)] [&>_.helperText]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)]",
   configStatusActions:
@@ -236,6 +236,36 @@ const styles = {
     "vui-routes-configroute treeFieldValue text-vui-xs leading-relaxed text-vui-fg-secondary break-words",
   treeGrid:
     "vui-routes-configroute treeGrid grid min-w-0 grid-cols-1 gap-0",
+  settingsRowReadonlyValue:
+    "vui-routes-configroute settingsRowReadonlyValue text-vui-xs [line-height:1.25rem] text-vui-fg-secondary break-words",
+  numberStepper:
+    "vui-routes-configroute numberStepper [display:flex] [align-items:center] [justify-content:end] [gap:6px]",
+  numberStepperInput:
+    "vui-routes-configroute numberStepperInput w-20 text-right",
+  numberStepperInputInvalid:
+    "vui-routes-configroute numberStepperInputInvalid [border-color:var(--state-error)]",
+  numberStepperUnit:
+    "vui-routes-configroute numberStepperUnit w-12 text-vui-2xs text-vui-fg-tertiary",
+  numberStepperMeta:
+    "vui-routes-configroute numberStepperMeta [display:grid] [justify-items:end] [row-gap:2px] [text-align:right]",
+  numberStepperHint:
+    "vui-routes-configroute numberStepperHint text-vui-2xs text-vui-fg-tertiary",
+  numberStepperError:
+    "vui-routes-configroute numberStepperError text-vui-2xs [color:var(--state-error)]",
+  settingsRowFooter:
+    "vui-routes-configroute settingsRowFooter [display:grid] [gap:8px]",
+  settingsWideTextarea:
+    "vui-routes-configroute settingsWideTextarea [font-family:var(--font-mono)] text-vui-xs",
+  settingsWideTextareaInvalid:
+    "vui-routes-configroute settingsWideTextareaInvalid [border-color:var(--state-error)]",
+  settingsRowStatusLine:
+    "vui-routes-configroute settingsRowStatusLine text-vui-xs text-vui-fg-tertiary",
+  settingsRowStatusLineInvalid:
+    "vui-routes-configroute settingsRowStatusLineInvalid text-vui-xs [color:var(--state-error)]",
+  settingsRowIssueLine:
+    "vui-routes-configroute settingsRowIssueLine text-vui-xs [color:var(--state-error)]",
+  settingsRowWarning:
+    "vui-routes-configroute settingsRowWarning text-vui-2xs text-vui-fg-tertiary",
   treeHint:
     "vui-routes-configroute treeHint [margin:0] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [line-height:1.35]",
   treeNestedBlock:

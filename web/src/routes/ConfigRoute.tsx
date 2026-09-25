@@ -92,12 +92,15 @@ import {
   VButton,
   VActionGroup,
   VCheckbox,
+  VChip,
   VDialog,
   VInput,
   VPanelHeader,
   VRouteLinkButton,
   VSection,
   VSettingsFormPage,
+  VSettingsGroupCard,
+  VSettingsRow,
   VSplitWorkspace,
   VStatusChip,
   VStatusStrip,
@@ -118,8 +121,26 @@ import {
   buildConfigApplyRequestPayload,
   isConfigBaselineStaleErrorMessage,
   shouldImmediateApplyConfigPath,
+  shouldImmediateApplyFieldKind,
   type ConfigApplyDraftOverride,
+  type ImmediateFieldStatus,
 } from "./config/configApplyModel";
+import {
+  collectPendingDraftLeaves,
+  configValuesEqual,
+  deriveNumberStep,
+  fieldEditorDisplayText,
+  isToolNameListPath,
+  numberBounds,
+  resolveDraftSubtreeForSave,
+  stepNumberValue,
+  validateJsonText,
+  validateListText,
+  validateNumberText,
+  type JsonParseIssue,
+  type ListIssue,
+  type NumberIssue,
+} from "./config/configFieldEditorsModel";
 import { useConfigProviderDraftActions } from "./config/useConfigProviderDraftActions";
 import { useConfigProviderQuickSetupActions } from "./config/useConfigProviderQuickSetupActions";
 import { useConfigMigrationActions } from "./config/useConfigMigrationActions";
@@ -189,6 +210,8 @@ const CONFIG_SETTINGS_SIDEBAR_RESIZE = {
   minWidth: 220,
   maxWidth: 360,
 } as const;
+/** 已生效徽标的最短展示时长：apply 成功后基线立即对齐，徽标短暂驻留后再清除。 */
+const IMMEDIATE_APPLIED_BADGE_HOLD_MS = 4000;
 
 export type ConfigLanguage = "zh" | "en";
 type NoticeTone = "neutral" | "success" | "error";
@@ -256,7 +279,7 @@ export type ModelEditorState = {
   details: ModelDetailsDraft;
 };
 
-type ConfigSectionUiState = {
+export type ConfigSectionUiState = {
   expanded: boolean;
   editing: boolean;
   advancedExpanded: boolean;
@@ -264,7 +287,7 @@ type ConfigSectionUiState = {
   draftValue?: unknown;
 };
 
-function defaultSectionUiState(sectionId = ""): ConfigSectionUiState {
+export function defaultSectionUiState(sectionId = ""): ConfigSectionUiState {
   return {
     expanded: configSectionExpandedByDefault(sectionId),
     editing: false,
@@ -525,6 +548,31 @@ export const CONFIG_COPY = {
     saveSection: "确认分区修改",
     cancelSection: "取消编辑",
     sectionSavePending: "保存分区修改中",
+    rowStatusApplied: "已生效",
+    rowStatusPending: "待保存",
+    rowStatusWaiting: "等待中",
+    rowStatusFailed: "未生效",
+    settingsPendingCountUnit: " 项待保存",
+    saveBlockedInvalid: "有格式不正确的修改，修正后才能保存",
+    jsonValidHint: "✓ 格式正确",
+    jsonInvalidPrefix: "格式有误：",
+    jsonErrorAt: "（第",
+    jsonErrorLine: "行，第",
+    jsonErrorCol: "列）",
+    numberRequired: "请输入数值",
+    numberInvalidPrefix: "不是合法数字：",
+    numberBelowMinInclusive: "不能小于 ",
+    numberBelowMinExclusive: "必须大于 ",
+    numberAboveMaxInclusive: "不能大于 ",
+    numberAboveMaxExclusive: "必须小于 ",
+    numberRangeHint: "范围",
+    numberStepHint: "步进",
+    listLinePrefix: "第",
+    listLineMid: "行：",
+    listInvalidToolName: "不是合法工具注册名（小写字母开头，仅小写字母/数字/下划线）",
+    listDuplicateItem: "重复项",
+    listBlankLineWarning: "空行会在保存时自动忽略",
+    listWhitespaceWarning: "首尾空格会在保存时自动清理",
     uploadAvatarImage: "上传本地图片",
     clearAvatarImage: "清除图片",
     avatarImageUploading: "上传头像图片中",
@@ -802,6 +850,31 @@ export const CONFIG_COPY = {
     saveSection: "Confirm section changes",
     cancelSection: "Cancel editing",
     sectionSavePending: "Saving section changes",
+    rowStatusApplied: "Applied",
+    rowStatusPending: "Pending save",
+    rowStatusWaiting: "Waiting",
+    rowStatusFailed: "Not applied",
+    settingsPendingCountUnit: " pending",
+    saveBlockedInvalid: "Some changes are invalid; fix them before saving",
+    jsonValidHint: "✓ Correct format",
+    jsonInvalidPrefix: "Format error: ",
+    jsonErrorAt: " (line ",
+    jsonErrorLine: ", column ",
+    jsonErrorCol: ")",
+    numberRequired: "Enter a number",
+    numberInvalidPrefix: "Not a valid number: ",
+    numberBelowMinInclusive: "Cannot be below ",
+    numberBelowMinExclusive: "Must be greater than ",
+    numberAboveMaxInclusive: "Cannot exceed ",
+    numberAboveMaxExclusive: "Must be below ",
+    numberRangeHint: "range",
+    numberStepHint: "step",
+    listLinePrefix: "Line ",
+    listLineMid: ": ",
+    listInvalidToolName: "Not a valid tool name (start with a lowercase letter; letters, digits, underscore only)",
+    listDuplicateItem: "duplicate item",
+    listBlankLineWarning: "Blank lines are ignored on save",
+    listWhitespaceWarning: "Leading/trailing spaces are trimmed on save",
     uploadAvatarImage: "Upload local image",
     clearAvatarImage: "Clear image",
     avatarImageUploading: "Uploading avatar image",
@@ -1157,6 +1230,39 @@ function formatConfigDisplayValue(value: unknown, kind: ConfigEditorMeta["kind"]
   return String(value);
 }
 
+/** Map a structured field-editor issue to bilingual copy (codes stay pure in configFieldEditorsModel). */
+function describeJsonIssue(issue: JsonParseIssue, copy: ConfigCopy): string {
+  const position = issue.line !== null
+    ? `${copy.jsonErrorAt}${issue.line}${copy.jsonErrorLine}${issue.column ?? "?"}${copy.jsonErrorCol}`
+    : "";
+  return `${copy.jsonInvalidPrefix}${issue.message}${position}`;
+}
+
+function describeNumberIssue(issue: NumberIssue, copy: ConfigCopy): string {
+  switch (issue.code) {
+    case "numberRequired":
+      return copy.numberRequired;
+    case "numberInvalid":
+      return `${copy.numberInvalidPrefix}「${issue.value}」`;
+    case "numberBelowMin":
+      return `${issue.exclusive ? copy.numberBelowMinExclusive : copy.numberBelowMinInclusive}${issue.bound}`;
+    case "numberAboveMax":
+      return `${issue.exclusive ? copy.numberAboveMaxExclusive : copy.numberAboveMaxInclusive}${issue.bound}`;
+  }
+}
+
+function describeListIssue(issue: ListIssue, copy: ConfigCopy): string {
+  const detail = issue.code === "listInvalidToolName"
+    ? copy.listInvalidToolName
+    : issue.code === "listDuplicateItem"
+      ? copy.listDuplicateItem
+      : issue.code === "listBlankLine"
+        ? copy.listBlankLineWarning
+        : copy.listWhitespaceWarning;
+  const value = issue.code === "listWhitespace" || issue.code === "listInvalidToolName" ? `「${issue.value}」` : "";
+  return `${copy.listLinePrefix}${issue.line}${copy.listLineMid}${value} ${detail}`.trimEnd();
+}
+
 type ConfigSectionEditorProps = {
   section: ConfigEditorSection;
   value: unknown;
@@ -1167,6 +1273,8 @@ type ConfigSectionEditorProps = {
   uiState: ConfigSectionUiState;
   onUiStateChange: (sectionId: string, nextState: ConfigSectionUiState) => void;
   onSaveSection: (path: string, nextValue: unknown) => Promise<boolean>;
+  onImmediateFieldChange: (path: string, nextValue: unknown) => void;
+  immediateFieldStatus: Record<string, ImmediateFieldStatus>;
   onAvatarImageUpload: (file: File) => Promise<AvatarImageUploadResponse | null>;
   onThemeBackgroundImageUpload: (file: File) => Promise<AvatarImageUploadResponse | null>;
 };
@@ -1243,7 +1351,7 @@ function isDenseConfigSection(section: ConfigEditorSection): boolean {
   return Number(section.fieldCount || 0) >= 12;
 }
 
-function ConfigSectionEditor({
+export function ConfigSectionEditor({
   section,
   value,
   metaMap,
@@ -1253,6 +1361,8 @@ function ConfigSectionEditor({
   uiState,
   onUiStateChange,
   onSaveSection,
+  onImmediateFieldChange,
+  immediateFieldStatus,
   onAvatarImageUpload,
   onThemeBackgroundImageUpload,
 }: ConfigSectionEditorProps) {
@@ -1263,6 +1373,16 @@ function ConfigSectionEditor({
   const presentation = configSectionPresentation(section.id, lang);
   const tierCounts = configSectionTierCounts(section.id, section.fieldCount);
   const draftValue = editing ? (uiState.draftValue ?? value) : value;
+  const metaAt = useCallback((path: string) => metaMap[path], [metaMap]);
+  // 待保存口径：草稿类字段的草稿值（原始文本先按 schema 解析）与当前分区值比较；
+  // 即时类字段（boolean/select）永不滞留草稿，不计入。
+  const pendingDraftLeaves = useMemo(
+    () => (editing
+      ? collectPendingDraftLeaves({ draft: draftValue, committed: value, path: section.path, metaAt })
+      : []),
+    [editing, draftValue, value, section.path, metaAt],
+  );
+  const sectionSaveBlocked = pendingDraftLeaves.some((leaf) => !leaf.valid);
   const sectionClassName = [
     styles.sectionSurface,
     styles.configEditorSection,
@@ -1361,7 +1481,15 @@ function ConfigSectionEditor({
   }
 
   async function handleSave() {
-    const ok = await onSaveSection(section.path, draftValue);
+    // 非法草稿阻塞分区保存（不再静默存原始串）：先整树解析，非法即拒绝。
+    if (sectionSaveBlocked) {
+      return;
+    }
+    const resolution = resolveDraftSubtreeForSave({ draft: draftValue, path: section.path, metaAt });
+    if (!resolution.ok) {
+      return;
+    }
+    const ok = await onSaveSection(section.path, resolution.value);
     if (ok) {
       onUiStateChange(section.id, {
         ...uiState,
@@ -1491,6 +1619,43 @@ function ConfigSectionEditor({
     );
   }
 
+  function renderRowStatusBadge(absolutePath: string, options: { pending?: boolean; invalid?: boolean } = {}) {
+    const immediateStatus = immediateFieldStatus[absolutePath];
+    if (immediateStatus === "waiting") {
+      return (
+        <VChip tone="info" data-testid={`row-status-${absolutePath}`} data-vui-row-status="waiting">
+          {copy.rowStatusWaiting}
+        </VChip>
+      );
+    }
+    if (immediateStatus === "applied") {
+      return (
+        <VChip tone="accent" data-testid={`row-status-${absolutePath}`} data-vui-row-status="applied">
+          {copy.rowStatusApplied}
+        </VChip>
+      );
+    }
+    if (immediateStatus === "failed") {
+      return (
+        <VChip tone="danger" data-testid={`row-status-${absolutePath}`} data-vui-row-status="failed">
+          {copy.rowStatusFailed}
+        </VChip>
+      );
+    }
+    if (options.pending) {
+      return (
+        <VChip
+          tone={options.invalid ? "danger" : "neutral"}
+          data-testid={`row-status-${absolutePath}`}
+          data-vui-row-status={options.invalid ? "invalid" : "pending"}
+        >
+          {copy.rowStatusPending}
+        </VChip>
+      );
+    }
+    return null;
+  }
+
   function renderFieldView(fieldValue: unknown, absolutePath: string) {
     const meta = metaMap[absolutePath];
     const kind = configEditorFieldKind(meta);
@@ -1534,14 +1699,50 @@ function ConfigSectionEditor({
         </article>
       );
     }
+    const label = configLabel(metaMap, absolutePath, lang);
+    const hint = configHint(metaMap, absolutePath, lang);
+    // 即时类字段（布尔/下拉）在查看态行内直接可改：改动即走保存+apply。
+    const immediate = shouldImmediateApplyFieldKind(meta?.kind);
+    let control: ReactNode;
+    if (kind === "boolean") {
+      control = (
+        <VCheckbox
+          className={styles.toggleField}
+          isSelected={Boolean(fieldValue)}
+          isDisabled={disabled}
+          aria-label={label}
+          onChange={(isSelected) => onImmediateFieldChange(absolutePath, isSelected)}
+        />
+      );
+    } else if (kind === "select") {
+      control = (
+        <VStringSelect
+          ariaLabel={label}
+          isDisabled={disabled}
+          value={getString(fieldValue)}
+          options={(meta?.options ?? []).map((option) => ({
+            value: option.value,
+            label: option.label,
+          }))}
+          onValueChange={(nextValue) => onImmediateFieldChange(absolutePath, nextValue)}
+        />
+      );
+    } else {
+      control = (
+        <span className={styles.settingsRowReadonlyValue} data-testid={`value-${absolutePath}`}>
+          {formatConfigDisplayValue(fieldValue, meta?.kind, copy)}
+        </span>
+      );
+    }
     return (
-      <article key={absolutePath} className={`${styles.treeFieldCard} ${styles.treeFieldCardView}`}>
-        <div className={styles.treeFieldHead}>
-          <span className={styles.treeFieldLabel}>{configLabel(metaMap, absolutePath, lang)}</span>
-        </div>
-        {configHint(metaMap, absolutePath, lang) ? <p className={styles.treeHint}>{configHint(metaMap, absolutePath, lang)}</p> : null}
-        <div className={styles.treeFieldValue}>{formatConfigDisplayValue(fieldValue, meta?.kind, copy)}</div>
-      </article>
+      <VSettingsRow
+        key={absolutePath}
+        testId={`row-${absolutePath}`}
+        label={label}
+        description={hint || undefined}
+        control={control}
+        status={renderRowStatusBadge(absolutePath)}
+      />
     );
   }
 
@@ -1549,11 +1750,20 @@ function ConfigSectionEditor({
     const meta = metaMap[absolutePath];
     const kind = configEditorFieldKind(meta);
     const imageUploading = uploadingImagePath === absolutePath;
-    let control;
 
     if (kind === "background_image") {
-      control = renderThemeBackgroundControl(fieldValue, absolutePath);
-    } else if (kind === "image") {
+      const backgroundHint = configHint(metaMap, absolutePath, lang);
+      return (
+        <article
+          key={absolutePath}
+          className={`${styles.treeFieldCard} ${styles.treeFieldCardEdit} ${styles.themeBackgroundImageCard}`}
+          title={backgroundHint || undefined}
+        >
+          {renderThemeBackgroundControl(fieldValue, absolutePath)}
+        </article>
+      );
+    }
+    if (kind === "image") {
       const previewUrl = avatarImagePreviewUrl(fieldValue);
       const displayName = avatarImageDisplayName(fieldValue, copy);
       const cropDraft = avatarCrop?.absolutePath === absolutePath ? avatarCrop : null;
@@ -1575,7 +1785,7 @@ function ConfigSectionEditor({
             transform: `translate(calc(-50% + ${cropDraft.offsetX * cropPreviewRatio}px), calc(-50% + ${cropDraft.offsetY * cropPreviewRatio}px))`,
           }
         : undefined;
-      control = (
+      const control = (
         <div className={styles.avatarImageEditor}>
           <div className={styles.avatarImageValue}>
             <label
@@ -1746,118 +1956,209 @@ function ConfigSectionEditor({
           {avatarCropError ? <p className={styles.inlineError}>{avatarCropError}</p> : null}
         </div>
       );
-    } else if (kind === "boolean") {
+      return (
+        <article key={absolutePath} className={`${styles.treeFieldCard} ${styles.treeFieldCardEdit} ${styles.avatarImageCard}`}>
+          {control}
+        </article>
+      );
+    }
+    const label = configLabel(metaMap, absolutePath, lang);
+    const hint = configHint(metaMap, absolutePath, lang);
+    // 即时类字段在编辑态也直接生效（与查看态同一声明），不会滞留草稿。
+    const pendingLeaf = pendingDraftLeaves.find((leaf) => leaf.path === absolutePath);
+    const pendingFlag = Boolean(pendingLeaf);
+    const invalidFlag = pendingLeaf ? !pendingLeaf.valid : false;
+    let control: ReactNode;
+    let detail: ReactNode;
+    let footer: ReactNode;
+    let controlLayout: "default" | "wide" = "default";
+
+    if (kind === "boolean") {
       control = (
         <VCheckbox
           className={styles.toggleField}
           isSelected={Boolean(fieldValue)}
-          onChange={(isSelected) => updateSectionDraft(absolutePath, isSelected)}
-        >
-          {configLabel(metaMap, absolutePath, lang)}
-        </VCheckbox>
+          isDisabled={disabled}
+          aria-label={label}
+          onChange={(isSelected) => onImmediateFieldChange(absolutePath, isSelected)}
+        />
       );
     } else if (kind === "select") {
       control = (
-        <label className={styles.field}>
-          <span>{configLabel(metaMap, absolutePath, lang)}</span>
-          <VStringSelect
-            ariaLabel={configLabel(metaMap, absolutePath, lang)}
-            value={getString(fieldValue)}
-            options={(meta?.options ?? []).map((option) => ({
-              value: option.value,
-              label: option.label,
-            }))}
-            onValueChange={(nextValue) => updateSectionDraft(absolutePath, nextValue)}
-          />
-        </label>
+        <VStringSelect
+          ariaLabel={label}
+          isDisabled={disabled}
+          value={getString(fieldValue)}
+          options={(meta?.options ?? []).map((option) => ({
+            value: option.value,
+            label: option.label,
+          }))}
+          onValueChange={(nextValue) => onImmediateFieldChange(absolutePath, nextValue)}
+        />
       );
     } else if (kind === "number") {
+      // number：步进器 + schema min/max 硬校验 + 单位后缀（schema 无范围则不造范围）。
+      const bounds = numberBounds(meta);
+      const step = deriveNumberStep(meta, typeof fieldValue === "number" ? fieldValue : undefined);
+      const rawText = fieldEditorDisplayText("number", fieldValue, fieldValue);
+      const numberResult = validateNumberText(rawText, bounds);
+      const rangeParts = [
+        bounds.min ? `${bounds.min.exclusive ? "(" : "["}${bounds.min.value}` : null,
+        bounds.max ? `${bounds.max.value}${bounds.max.exclusive ? ")" : "]"}` : null,
+      ].filter(Boolean);
+      controlLayout = "wide";
       control = (
-        <label className={styles.field}>
-          <span>{configLabel(metaMap, absolutePath, lang)}</span>
-          <VInput
-            type="number"
-            step="any"
-            value={getString(fieldValue)}
-            onChange={(event) => {
-              const raw = event.target.value;
-              updateSectionDraft(absolutePath, raw === "" ? "" : Number(raw));
+        <div className={styles.numberStepper} data-testid={`number-editor-${absolutePath}`}>
+          <VButton
+            type="button"
+            variant="secondary"
+            density="compact"
+            contentLayout="plain"
+            aria-label="-"
+            data-testid={`step-down-${absolutePath}`}
+            isDisabled={disabled || !numberResult.ok}
+            onClick={() => {
+              const current = numberResult.ok ? numberResult.value : 0;
+              updateSectionDraft(absolutePath, String(stepNumberValue(current, bounds, -1, step)));
             }}
+          >
+            −
+          </VButton>
+          <VInput
+            type="text"
+            inputMode="decimal"
+            value={rawText}
+            aria-label={label}
+            aria-invalid={numberResult.ok ? undefined : true}
+            className={`${styles.numberStepperInput} ${numberResult.ok ? "" : styles.numberStepperInputInvalid}`}
+            onChange={(event) => updateSectionDraft(absolutePath, event.target.value)}
           />
-        </label>
+          <VButton
+            type="button"
+            variant="secondary"
+            density="compact"
+            contentLayout="plain"
+            aria-label="+"
+            data-testid={`step-up-${absolutePath}`}
+            isDisabled={disabled || !numberResult.ok}
+            onClick={() => {
+              const current = numberResult.ok ? numberResult.value : (bounds.min?.value ?? 0);
+              updateSectionDraft(absolutePath, String(stepNumberValue(current, bounds, 1, step)));
+            }}
+          >
+            +
+          </VButton>
+          {meta?.unit ? <span className={styles.numberStepperUnit}>{meta.unit}</span> : null}
+        </div>
+      );
+      detail = (
+        <div className={styles.numberStepperMeta}>
+          {rangeParts.length ? (
+            <span className={styles.numberStepperHint}>
+              {copy.numberRangeHint} {rangeParts.join(" ~ ")} · {copy.numberStepHint} ±{step}
+            </span>
+          ) : null}
+          {!numberResult.ok ? (
+            <span className={styles.numberStepperError} data-testid={`number-error-${absolutePath}`}>
+              {describeNumberIssue(numberResult.issue, copy)}
+            </span>
+          ) : null}
+        </div>
       );
     } else if (kind === "string_list") {
-      control = (
-        <label className={styles.field}>
-          <span>{configLabel(metaMap, absolutePath, lang)}</span>
+      // list：textarea 逐行校验。工具名单类=注册名格式+去重（错误，阻塞保存）；
+      // 通用列表=空行/首尾空格自动清理提示（warning，不阻塞）。
+      const rawText = fieldEditorDisplayText("string_list", fieldValue, fieldValue);
+      const listResult = validateListText(rawText, { toolNames: isToolNameListPath(absolutePath) });
+      const listErrors = listResult.issues.filter((issue) => issue.severity === "error");
+      const listWarnings = listResult.issues.filter((issue) => issue.severity === "warning");
+      const warningMessages = [...new Set(listWarnings.map((issue) => describeListIssue(issue, copy)))];
+      footer = (
+        <div className={styles.settingsRowFooter}>
           <VTextarea
-            minRows={Math.max(4, Array.isArray(fieldValue) ? fieldValue.length + 1 : 4)}
-            value={Array.isArray(fieldValue) ? fieldValue.join("\n") : getString(fieldValue)}
-            onChange={(event) =>
-              updateSectionDraft(
-                absolutePath,
-                event.target.value
-                  .split(/\r?\n/)
-                  .map((line) => line.trim())
-                  .filter(Boolean),
-              )
-            }
+            minRows={Math.max(4, rawText.split(/\r?\n/).length + 1)}
+            value={rawText}
+            aria-label={label}
+            aria-invalid={listErrors.length > 0 ? true : undefined}
+            // vuiFormControlClass 自带固定高度类；多行编辑器按 rows 自然撑高。
+            style={{ height: "auto" }}
+            className={`${styles.settingsWideTextarea} ${listErrors.length > 0 ? styles.settingsWideTextareaInvalid : ""}`}
+            onChange={(event) => updateSectionDraft(absolutePath, event.target.value)}
           />
-        </label>
+          {listErrors.length > 0 ? (
+            <ul className={styles.settingsRowFooter} data-testid={`list-errors-${absolutePath}`}>
+              {listErrors.map((issue, issueIndex) => (
+                <li key={`${issue.line}-${issueIndex}`} className={styles.settingsRowIssueLine}>
+                  {describeListIssue(issue, copy)}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {warningMessages.length > 0 ? (
+            <p className={styles.settingsRowWarning}>{warningMessages.join(" ")}</p>
+          ) : null}
+        </div>
       );
     } else if (kind === "multiline") {
       control = (
-        <label className={styles.field}>
-          <span>{configLabel(metaMap, absolutePath, lang)}</span>
-          <VTextarea
-            minRows={10}
-            value={getString(fieldValue)}
-            onChange={(event) => updateSectionDraft(absolutePath, event.target.value)}
-          />
-        </label>
+        <VTextarea
+          minRows={10}
+          value={getString(fieldValue)}
+          aria-label={label}
+          onChange={(event) => updateSectionDraft(absolutePath, event.target.value)}
+        />
       );
     } else if (kind === "json") {
-      control = (
-        <label className={styles.field}>
-          <span>{configLabel(metaMap, absolutePath, lang)}</span>
+      // json：实时校验。非法=红边+首个解析错误行列定位（阻塞保存），合法=弱提示。
+      const rawText = fieldEditorDisplayText("json", fieldValue, fieldValue);
+      const jsonResult = validateJsonText(rawText);
+      footer = (
+        <div className={styles.settingsRowFooter}>
           <VTextarea
             minRows={6}
-            value={typeof fieldValue === "string" ? fieldValue : formatJson(fieldValue)}
-            onChange={(event) => {
-              const raw = event.target.value;
-              try {
-                updateSectionDraft(absolutePath, JSON.parse(raw));
-              } catch {
-                updateSectionDraft(absolutePath, raw);
-              }
-            }}
+            value={rawText}
+            aria-label={label}
+            aria-invalid={jsonResult.ok ? undefined : true}
+            data-testid={`json-editor-${absolutePath}`}
+            // vuiFormControlClass 自带固定高度类；宽编辑器按 rows 自然撑高。
+            style={{ height: "auto" }}
+            className={`${styles.settingsWideTextarea} ${jsonResult.ok ? "" : styles.settingsWideTextareaInvalid}`}
+            onChange={(event) => updateSectionDraft(absolutePath, event.target.value)}
           />
-        </label>
+          {jsonResult.ok ? (
+            <p className={styles.settingsRowStatusLine} data-vui-json="valid">
+              {copy.jsonValidHint}
+            </p>
+          ) : (
+            <p className={styles.settingsRowStatusLineInvalid} data-vui-json="invalid" data-testid={`json-error-${absolutePath}`}>
+              {describeJsonIssue(jsonResult.issue, copy)}
+            </p>
+          )}
+        </div>
       );
     } else {
       control = (
-        <label className={styles.field}>
-          <span>{configLabel(metaMap, absolutePath, lang)}</span>
-          <VInput
-            type={kind === "secret" ? "password" : "text"}
-            value={getString(fieldValue)}
-            onChange={(event) => updateSectionDraft(absolutePath, event.target.value)}
-          />
-        </label>
+        <VInput
+          type={kind === "secret" ? "password" : "text"}
+          value={getString(fieldValue)}
+          aria-label={label}
+          onChange={(event) => updateSectionDraft(absolutePath, event.target.value)}
+        />
       );
     }
 
-    const hint = configHint(metaMap, absolutePath, lang);
-    const fieldCardClassName =
-      kind === "background_image"
-        ? `${styles.treeFieldCard} ${styles.treeFieldCardEdit} ${styles.themeBackgroundImageCard}`
-        : `${styles.treeFieldCard} ${styles.treeFieldCardEdit}`;
-
     return (
-      <article key={absolutePath} className={fieldCardClassName} title={kind === "background_image" && hint ? hint : undefined}>
-        {control}
-        {kind !== "background_image" && hint ? <p className={styles.treeHint}>{hint}</p> : null}
-      </article>
+      <VSettingsRow
+        key={absolutePath}
+        testId={`row-${absolutePath}`}
+        label={label}
+        description={hint || undefined}
+        control={control}
+        detail={detail}
+        footer={footer}
+        controlLayout={controlLayout}
+        status={renderRowStatusBadge(absolutePath, { pending: pendingFlag, invalid: invalidFlag })}
+      />
     );
   }
 
@@ -1906,16 +2207,18 @@ function ConfigSectionEditor({
             <VStatusChip tone="neutral">{presentation.advancedCountLabel(tierCounts.common)}</VStatusChip>
           </div>
           <div className={styles.userProfilePrimaryGrid}>
-            <div className={styles.userProfileIdentityFields}>{field("display_name")}</div>
+            <VSettingsGroupCard className={styles.userProfileIdentityFields}>
+              {field("display_name")}
+            </VSettingsGroupCard>
             <div className={styles.userProfileAvatarGroup}>
               <div className={styles.userProfileAvatarHeader}>
                 <strong>{copy.userProfileAvatarGroupTitle}</strong>
                 <span>{copy.userProfileAvatarGroupHint}</span>
               </div>
-              <div className={styles.userProfileAvatarFields}>
+              <VSettingsGroupCard className={styles.userProfileAvatarFields}>
                 {field("avatar_preset")}
                 {field("avatar_image_path")}
-              </div>
+              </VSettingsGroupCard>
             </div>
           </div>
         </div>
@@ -1946,10 +2249,10 @@ function ConfigSectionEditor({
             </div>
           </VButton>
           {advancedExpanded ? (
-            <div className={`${styles.configAdvancedBody} ${styles.userProfileAdvancedFields}`}>
+            <VSettingsGroupCard className={`${styles.configAdvancedBody} ${styles.userProfileAdvancedFields}`}>
               {field("bio")}
               {field("preferences")}
-            </div>
+            </VSettingsGroupCard>
           ) : null}
         </div>
       </div>
@@ -2011,11 +2314,12 @@ function ConfigSectionEditor({
               </div>
               <VStatusChip tone="neutral">{presentation.advancedCountLabel(tierCounts.common)}</VStatusChip>
             </div>
-            <div
+            <VSettingsGroupCard
+              testId={`settings-group-${absolutePath}`}
               className={styles.treeGrid}
             >
               {commonEntries.map((entry) => renderObjectEntry(entry, absolutePath, mode))}
-            </div>
+            </VSettingsGroupCard>
           </div>
 
           {advancedEntries.length > 0 ? (
@@ -2046,9 +2350,9 @@ function ConfigSectionEditor({
               </VButton>
               {advancedExpanded ? (
                 <div className={styles.configAdvancedBody}>
-                  <div className={`${styles.treeGrid} ${styles.configAdvancedGrid}`}>
+                  <VSettingsGroupCard className={`${styles.treeGrid} ${styles.configAdvancedGrid}`}>
                     {advancedEntries.map((entry) => renderObjectEntry(entry, absolutePath, mode))}
-                  </div>
+                  </VSettingsGroupCard>
                 </div>
               ) : null}
             </div>
@@ -2057,9 +2361,12 @@ function ConfigSectionEditor({
       );
     }
     return (
-      <div className={styles.treeGrid}>
+      <VSettingsGroupCard
+        testId={`settings-group-${absolutePath}`}
+        className={styles.treeGrid}
+      >
         {entries.map((entry) => renderObjectEntry(entry, absolutePath, mode))}
-      </div>
+      </VSettingsGroupCard>
     );
   }
 
@@ -2141,7 +2448,8 @@ function ConfigSectionEditor({
               <VButton
                 type="button"
                 className={`${styles.primaryButton} ${styles.compactButton} ${styles.toolbarButton}`}
-                isDisabled={disabled}
+                isDisabled={disabled || sectionSaveBlocked}
+                title={sectionSaveBlocked ? copy.saveBlockedInvalid : undefined}
                 onClick={handleSave}
  icon={<Save size={14} />}>
                   {copy.saveSection}
@@ -2319,6 +2627,9 @@ export function ConfigRoute() {
   const [activeGroupId, setActiveGroupId] = useState(() => searchParams.get("section") ?? "");
   const [activePageId, setActivePageId] = useState("");
   const [sectionUiState, setSectionUiState] = useState<Record<string, ConfigSectionUiState>>({});
+  // 即时类字段（boolean/select）的行徽标生命周期：waiting → applied|failed。
+  const [immediateFieldStatus, setImmediateFieldStatus] = useState<Record<string, ImmediateFieldStatus>>({});
+  const immediateStatusTimersRef = useRef<Record<string, number>>({});
   // Atomic edit baseline: only rewritten on full workspace load/apply, never on draft pin/key/route ops.
   // Keeps baseConfig + baseHash paired so apply after pin does not 409 with "配置基线已过期".
   const editBaselineRef = useRef<{ baseConfig: PublicConfigShape | null; baseHash: string }>({
@@ -2378,10 +2689,6 @@ export function ConfigRoute() {
     [draftConfig, workspace?.editorSections],
   );
   const hasUnsavedConfigChanges = Boolean(baseHash && draftHash && baseHash !== draftHash);
-  const configDraftPresenceDirty = hasUnsavedConfigChanges || hasPendingSecretChanges(draftMeta);
-  useEffect(() => {
-    publishConfigDraftPresence(configDraftPresenceDirty);
-  }, [configDraftPresenceDirty]);
   // First-run onboarding: auto-open the provider quick-setup panel once per
   // browser session while no model credential is configured (skippable, and
   // the settings entry stays available via "添加连接").
@@ -2571,15 +2878,54 @@ export function ConfigRoute() {
   const credentialProvider = providerRows.find((row) => row.providerId === providerCredentialEditId);
   const modelEditorRequiredFieldsReady = Boolean(modelEditor.model.trim() && modelEditor.provider.base_url.trim());
   const canSubmitModelEditor = !structuredActionsDisabled && modelEditorRequiredFieldsReady;
+  // 全局待保存计数口径：各分区编辑态草稿里「草稿值≠当前分区值」的叶子字段数。
+  // 原始文本 kinds（json/number/string_list）先按 schema 解析再比较，"16000" 与
+  // 16000 不会误报；解析失败的叶子计入且 valid=false（阻塞全局保存）。即时类
+  // 字段（boolean/select，见 configApplyModel.shouldImmediateApplyFieldKind）
+  // 永不滞留草稿，不计入。
+  const pendingConfigDraftItems = useMemo(() => {
+    const items: Array<{ path: string; sectionId: string; valid: boolean }> = [];
+    if (!draftConfig) {
+      return items;
+    }
+    const metaAt = (path: string) => editorMeta[path];
+    for (const section of editorSections) {
+      const sectionState = sectionUiState[section.id];
+      if (!sectionState?.editing || sectionState.draftValue === undefined) {
+        continue;
+      }
+      const sectionValue = getConfigValueAtPath(draftConfig, section.path);
+      for (const leaf of collectPendingDraftLeaves({
+        draft: sectionState.draftValue,
+        committed: sectionValue,
+        path: section.path,
+        metaAt,
+      })) {
+        items.push({ ...leaf, sectionId: section.id });
+      }
+    }
+    return items;
+  }, [draftConfig, editorMeta, editorSections, sectionUiState]);
+  const pendingConfigDraftCount = pendingConfigDraftItems.length;
+  const hasInvalidConfigDraft = pendingConfigDraftItems.some((item) => !item.valid);
+  const canApplyConfigWorkspace =
+    !structuredActionsDisabled && !hasInvalidConfigDraft && (canSaveConfig || pendingConfigDraftCount > 0);
+  // 跨页 presence 广播：保持原有口径，接入分区草稿待保存计数。
+  const configDraftPresenceDirty =
+    hasUnsavedConfigChanges || hasPendingSecretChanges(draftMeta) || pendingConfigDraftCount > 0;
+  useEffect(() => {
+    publishConfigDraftPresence(configDraftPresenceDirty);
+  }, [configDraftPresenceDirty]);
   const shouldBlockLeave = useCallback<BlockerFunction>(
     ({ currentLocation, nextLocation }) =>
       shouldBlockConfigLeave({
         hasPendingApply,
+        hasPendingSectionDrafts: pendingConfigDraftCount > 0,
         busy: Boolean(busyAction),
         currentPathname: currentLocation.pathname,
         nextPathname: nextLocation.pathname,
       }),
-    [busyAction, hasPendingApply],
+    [busyAction, hasPendingApply, pendingConfigDraftCount],
   );
   const leaveBlocker = useBlocker(shouldBlockLeave);
   const leaveGuardOpen = leaveBlocker.state === "blocked";
@@ -3000,6 +3346,29 @@ export function ConfigRoute() {
     }
   }
 
+  /**
+   * 把各分区编辑态草稿折叠进整份草稿（非法草稿分区跳过并标记 allValid=false）。
+   * 供全局「保存到外部配置」使用：分区草稿在显式保存前只存在于分区 UI 状态。
+   */
+  function foldPendingSectionDrafts(baseShape: PublicConfigShape): { config: PublicConfigShape; allValid: boolean } {
+    let next = clonePublicConfig(baseShape);
+    let allValid = true;
+    const metaAt = (path: string) => editorMeta[path];
+    for (const section of editorSections) {
+      const sectionState = sectionUiState[section.id];
+      if (!sectionState?.editing || sectionState.draftValue === undefined) {
+        continue;
+      }
+      const resolution = resolveDraftSubtreeForSave({ draft: sectionState.draftValue, path: section.path, metaAt });
+      if (!resolution.ok) {
+        allValid = false;
+        continue;
+      }
+      next = setValueAtConfigPath(next, section.path, resolution.value);
+    }
+    return { config: next, allValid };
+  }
+
   async function handleApply(
     pendingLabel: string = copy.applying,
     draftOverride?: ConfigApplyDraftOverride,
@@ -3013,8 +3382,25 @@ export function ConfigRoute() {
         throw new Error(copy.loadFailed);
       }
 
+      // 有分区草稿待保存时，把折叠后的草稿作为 apply 主体（同一保存+apply 管线，
+      // baseHash 乐观并发与过期降级重试保持不变）。
+      let effectiveOverride = draftOverride;
+      let foldedSectionDrafts = false;
+      if (!effectiveOverride && pendingConfigDraftCount > 0) {
+        const folded = foldPendingSectionDrafts(requireDraft());
+        if (!folded.allValid) {
+          throw new Error(copy.saveBlockedInvalid);
+        }
+        effectiveOverride = {
+          publicConfig: folded.config,
+          draftMeta,
+          baseHash: applyBaseHash,
+        };
+        foldedSectionDrafts = true;
+      }
+
       const payload = buildConfigApplyRequestPayload({
-        draftOverride,
+        draftOverride: effectiveOverride,
         draftConfig,
         draftMeta,
         applyBaseHash,
@@ -3042,6 +3428,17 @@ export function ConfigRoute() {
         });
       }
       syncWorkspace(response, "success");
+      if (foldedSectionDrafts) {
+        // 保存成功后清空所有分区编辑态（草稿已提交，徽标清除）。
+        setSectionUiState((current) =>
+          Object.fromEntries(
+            Object.entries(current).map(([sectionId, sectionState]) => [
+              sectionId,
+              { ...sectionState, editing: false, draftValue: undefined },
+            ]),
+          ),
+        );
+      }
       publishConfigDraftPresence(false);
       await invalidateWorkbenchQueries(payload.publicConfig);
       return true;
@@ -3054,7 +3451,7 @@ export function ConfigRoute() {
   }
 
   async function handleSaveAndLeave() {
-    if (leaveBlocker.state !== "blocked" || !canSaveConfig) {
+    if (leaveBlocker.state !== "blocked" || !canApplyConfigWorkspace) {
       return;
     }
     const proceed = leaveBlocker.proceed;
@@ -3118,6 +3515,77 @@ export function ConfigRoute() {
       return false;
     }
   }
+
+  function clearImmediateStatusTimer(path: string) {
+    const timer = immediateStatusTimersRef.current[path];
+    if (timer) {
+      window.clearTimeout(timer);
+      delete immediateStatusTimersRef.current[path];
+    }
+  }
+
+  /**
+   * 即时类字段（boolean/select）行内变更：走「保存分区草稿 previewConfigDraft +
+   * 自动 apply」同一管线（复用 baseHash 乐观并发与过期降级重试）。
+   * 行徽标：等待中 → 已生效（短暂驻留后清除）/ 未生效（失败不静默，notice 走 toast）。
+   */
+  async function handleImmediateFieldChange(path: string, nextValue: unknown) {
+    if (structuredActionsDisabled) {
+      return;
+    }
+    clearImmediateStatusTimer(path);
+    setImmediateFieldStatus((current) => ({ ...current, [path]: "waiting" }));
+    try {
+      const updated = setValueAtConfigPath(requireDraft(), path, nextValue);
+      const previewed = await previewDraft(updated, draftMeta, copy.applying);
+      if (!previewed) {
+        setImmediateFieldStatus((current) => ({ ...current, [path]: "failed" }));
+        return;
+      }
+      const applied = await persistImmediateDraft(copy.applying);
+      if (!applied) {
+        setImmediateFieldStatus((current) => ({ ...current, [path]: "failed" }));
+        return;
+      }
+      setImmediateFieldStatus((current) => ({ ...current, [path]: "applied" }));
+      immediateStatusTimersRef.current[path] = window.setTimeout(() => {
+        setImmediateFieldStatus((current) => {
+          if (current[path] !== "applied") {
+            return current;
+          }
+          const next = { ...current };
+          delete next[path];
+          return next;
+        });
+      }, IMMEDIATE_APPLIED_BADGE_HOLD_MS);
+    } catch {
+      setImmediateFieldStatus((current) => ({ ...current, [path]: "failed" }));
+    }
+  }
+
+  // 失败徽标的自动清理：该字段草稿值回到基线值（例如用户改回原值）时清除。
+  useEffect(() => {
+    setImmediateFieldStatus((current) => {
+      let changed = false;
+      const next: Record<string, ImmediateFieldStatus> = {};
+      for (const [path, status] of Object.entries(current)) {
+        if (status === "failed" && configValuesEqual(getConfigValueAtPath(draftConfig, path), getConfigValueAtPath(baseConfig, path))) {
+          changed = true;
+          continue;
+        }
+        next[path] = status;
+      }
+      return changed ? next : current;
+    });
+  }, [draftConfig, baseConfig]);
+
+  // 卸载时清理「已生效」徽标的驻留定时器。
+  useEffect(() => {
+    const timers = immediateStatusTimersRef.current;
+    return () => {
+      Object.values(timers).forEach((timer) => window.clearTimeout(timer));
+    };
+  }, []);
 
   async function handleAvatarImageUpload(file: File): Promise<AvatarImageUploadResponse | null> {
     setBusyAction(copy.avatarImageUploading);
@@ -3532,7 +4000,7 @@ export function ConfigRoute() {
             <VButton
               type="button"
               className={styles.primaryButton}
-              isDisabled={!canSaveConfig || Boolean(busyAction)}
+              isDisabled={!canApplyConfigWorkspace || Boolean(busyAction)}
               onClick={() => {
                 void handleSaveAndLeave();
               }}
@@ -3631,11 +4099,21 @@ export function ConfigRoute() {
  icon={<RotateCcw size={14} />}>
                 {copy.refresh}
               </VButton>
+            {pendingConfigDraftCount > 0 ? (
+              <VChip
+                tone={hasInvalidConfigDraft ? "danger" : "warning"}
+                data-testid="config-pending-save-count"
+                title={hasInvalidConfigDraft ? copy.saveBlockedInvalid : undefined}
+              >
+                {pendingConfigDraftCount}{copy.settingsPendingCountUnit}
+              </VChip>
+            ) : null}
             <VButton
               type="button"
               variant="primary"
               className={styles.primaryButton}
-              isDisabled={!canSaveConfig || Boolean(busyAction)}
+              isDisabled={!canApplyConfigWorkspace}
+              title={!canApplyConfigWorkspace && hasInvalidConfigDraft ? copy.saveBlockedInvalid : undefined}
               onClick={() => {
                 void handleApply();
               }}
@@ -4063,6 +4541,8 @@ export function ConfigRoute() {
             uiState={sectionUiState[section.id] ?? defaultSectionUiState(section.id)}
             onUiStateChange={updateSectionUiState}
             onSaveSection={saveConfigSection}
+            onImmediateFieldChange={handleImmediateFieldChange}
+            immediateFieldStatus={immediateFieldStatus}
             onAvatarImageUpload={handleAvatarImageUpload}
             onThemeBackgroundImageUpload={handleThemeBackgroundImageUpload}
           />

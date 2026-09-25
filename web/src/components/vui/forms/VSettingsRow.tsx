@@ -1,12 +1,11 @@
 /**
- * VSettingsRow / VSettingsGroupCard —— 预览本地行原语（正式 designs 登记留给集成任务）。
+ * VSettingsRow / VSettingsGroupCard —— 设置面行原语（ZCode SettingsRow 对齐）。
  *
- * 对照 ZCode packages/ui/src/settings/SettingsPageParts.tsx 的 SettingsRow：
  * - label（--vui-font-sm 加重）+ 一行说明（xs 弱色）在左；
- * - 右侧定宽控件列：默认 192px，宽控件 280px；宽控件时 detail 并列在控件左侧，
- *   否则 detail 换行渲染在行下方；
+ * - 右侧定宽控件列：默认 192px，宽控件（controlLayout="wide"）280px；宽控件时
+ *   detail 并列在控件左侧，否则 detail 换行渲染在行下方；
  * - 行间 border-t 分隔（--vui-border-subtle），组容器=圆角边框卡、无阴影
- *   （对照 SettingsGroupCard）。
+ *   （VSettingsGroupCard）。
  * 本组件只做布局壳，不引第二设计系统；全部样式走 --vui-* 令牌阶梯。
  */
 import type { ReactNode } from "react";
@@ -16,11 +15,11 @@ export type VSettingsRowProps = {
   label: ReactNode;
   /** 一行说明（xs 弱色）。 */
   description?: ReactNode;
-  /** 右侧控件（查看态=只读值展示，编辑态=控件）。 */
+  /** 右侧控件（查看态=只读值展示或即时类活控件，编辑态=控件）。 */
   control?: ReactNode;
   /** 附属内容：宽控件时并列在控件左；普通控件时换行渲染在行下方。 */
   detail?: ReactNode;
-  /** 始终渲染在整行下方的块（宽控件内联错误、list/json 编辑器等）。 */
+  /** 始终渲染在整行下方的块（宽编辑器、list/json 编辑器等）。 */
   footer?: ReactNode;
   /** 宽控件布局（280px 列），用于 number 步进器等。 */
   controlLayout?: "default" | "wide";
@@ -43,7 +42,7 @@ export function VSettingsRow({
   return (
     <div
       data-testid={testId}
-      data-vui-settings-row=""
+      data-vui="settings-row"
       className="border-t border-vui-border-subtle px-4 py-3 first:border-t-0"
     >
       <div
@@ -72,12 +71,22 @@ export function VSettingsRow({
 }
 
 /** 组容器：圆角边框卡、无阴影（对照 ZCode SettingsGroupCard）。 */
-export function VSettingsGroupCard({ children, testId }: { children: ReactNode; testId?: string }) {
+export function VSettingsGroupCard({
+  children,
+  testId,
+  className,
+}: {
+  children: ReactNode;
+  testId?: string;
+  className?: string;
+}) {
   return (
     <div
       data-testid={testId}
-      data-vui-settings-group=""
-      className="overflow-hidden rounded-vui-panel border border-vui-border-subtle bg-vui-surface-card"
+      data-vui="settings-group"
+      className={["overflow-hidden rounded-vui-panel border border-vui-border-subtle bg-vui-surface-card", className]
+        .filter(Boolean)
+        .join(" ")}
     >
       {children}
     </div>

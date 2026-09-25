@@ -85,7 +85,10 @@ describe("route style display contract", () => {
 
     const configRouteSource = readFileSync(new URL("./ConfigRoute.tsx", import.meta.url), "utf-8");
     expect(configRouteSource).toContain("`${styles.treeGrid} ${styles.configAdvancedGrid}`");
-    expect(configRouteSource).toContain("`${styles.treeFieldCard} ${styles.treeFieldCardView}`");
+    // Settings-align wave 1: plain fields render as VSettingsRow; the composed
+    // grid-template card styles remain attached to the image/background cards.
+    expect(configRouteSource).toContain("`${styles.treeFieldCard} ${styles.treeFieldCardView} ${styles.themeBackgroundImageCard}`");
+    expect(configRouteSource).toContain("`${styles.treeFieldCard} ${styles.treeFieldCardView} ${styles.avatarImageCard}`");
 
     expect(directSessionIndexItemSource).toContain("styles.sessionItem,");
     expect(directSessionIndexItemSource).toContain("bulkSelectionEnabled ? styles.sessionItemWithBulkSelect");

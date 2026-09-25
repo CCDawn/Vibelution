@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import annotated_types
 import copy
-from typing import Any
+from typing import Any, get_args, get_origin
 
 from config.editor_schema_data import (
     AVATAR_PRESET_OPTIONS,
@@ -42,6 +43,83 @@ EDITOR_SECTION_SPECS = [
 LAUNCHER_OWNED_FIELD_PATHS = {
     "ui.language",
 }
+
+# Number badges that carry a real physical unit; anything else ("Number") is not
+# surfaced as a unit so the editor never invents one.
+_NUMBER_FIELD_UNIT_BADGES = {"Seconds", "Token"}
+
+# path -> numeric bounds read once from the pydantic models (static at runtime).
+_NUMBER_CONSTRAINT_CACHE: dict[str, dict[str, float]] = {}
+
+
+def _unwrap_model_annotation(annotation: Any) -> Any:
+    """Peel Optional[X]/List[X]/Dict[str, X] down to the inner model annotation."""
+    origin = get_origin(annotation)
+    if origin in (list, dict):
+        args = get_args(annotation)
+        if args:
+            return args[-1] if origin is dict else args[0]
+    args = get_args(annotation)
+    for arg in args:
+        if arg is not type(None):
+            return arg
+    return annotation
+
+
+def _resolve_model_field_info(path: str) -> Any:
+    """Walk an editor path against AppConfig model fields; None when unmappable."""
+    try:
+        from pydantic import BaseModel
+
+        from config.models import AppConfig
+    except Exception:  # pragma: no cover - config models always available in app
+        return None
+    model: Any = AppConfig
+    info: Any = None
+    for token in str(path or "").split("."):
+        if not token:
+            continue
+        if token.isdigit():
+            # object_list item index: keep walking the item model.
+            model = _unwrap_model_annotation(model)
+            continue
+        if not (isinstance(model, type) and issubclass(model, BaseModel)):
+            return None
+        info = getattr(model, "model_fields", {}).get(token)
+        if info is None:
+            return None
+        model = _unwrap_model_annotation(info.annotation)
+    return info
+
+
+def _number_field_constraints(path: str) -> dict[str, float]:
+    """Read-only passthrough of pydantic Field bounds (ge/gt/le/lt) for one path."""
+    cached = _NUMBER_CONSTRAINT_CACHE.get(path)
+    if cached is not None:
+        return dict(cached)
+    constraints: dict[str, float] = {}
+    field_info = _resolve_model_field_info(path)
+    if field_info is not None:
+        for rule in getattr(field_info, "metadata", []) or []:
+            if isinstance(rule, annotated_types.Ge):
+                constraints["minimum"] = float(rule.ge)
+            elif isinstance(rule, annotated_types.Gt):
+                constraints["exclusiveMinimum"] = float(rule.gt)
+            elif isinstance(rule, annotated_types.Le):
+                constraints["maximum"] = float(rule.le)
+            elif isinstance(rule, annotated_types.Lt):
+                constraints["exclusiveMaximum"] = float(rule.lt)
+    _NUMBER_CONSTRAINT_CACHE[path] = constraints
+    return dict(constraints)
+
+
+def _number_field_metadata(path: str, badge: str, lang: str) -> dict[str, Any]:
+    """Additive editor metadata for number rows: schema bounds + display unit."""
+    metadata: dict[str, Any] = {}
+    if badge in _NUMBER_FIELD_UNIT_BADGES:
+        metadata["unit"] = localize_badge(badge, lang)
+    metadata.update(_number_field_constraints(path))
+    return metadata
 
 
 def _humanize_token(token: str) -> str:
@@ -261,7 +339,7 @@ def _walk_editor_meta(value: Any, path: str, lang: str, into: dict[str, dict[str
         return
     options = _field_options_for_config(path, public_config, lang)
     kind, badge = _field_kind(path, value, options)
-    into[path] = {
+    entry = {
         "path": path,
         "label": localize_label(path, path.split(".")[-1] if path else "", lang),
         "hint": hint,
@@ -269,6 +347,9 @@ def _walk_editor_meta(value: Any, path: str, lang: str, into: dict[str, dict[str
         "badge": localize_badge(badge, lang),
         "options": options,
     }
+    if kind == "number":
+        entry.update(_number_field_metadata(path, badge, lang))
+    into[path] = entry
 
 
 def build_editor_meta(public_config: dict[str, Any], lang: str) -> dict[str, dict[str, Any]]:

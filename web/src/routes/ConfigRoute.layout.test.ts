@@ -931,7 +931,29 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).not.toContain("configCommonGridClass");
   });
 
-  it("uses a compact layout for large config sections with many fields", () => {
+  it("wires the wave-1 save model: immediate rows, pending count, invalid blocking, and guard", () => {
+    // 即时/草稿声明单源在 configApplyModel；行内即时变更走同一 preview+apply 管线。
+    expect(routeSource).toContain("shouldImmediateApplyFieldKind");
+    expect(routeSource).toContain("handleImmediateFieldChange");
+    expect(configApplyModelSource).toContain("IMMEDIATE_FIELD_KINDS");
+    expect(configApplyModelSource).toContain('new Set(["boolean", "select"])');
+    // 全局保存按钮常显待保存计数，非法草稿阻塞保存。
+    expect(routeSource).toContain("collectPendingDraftLeaves");
+    expect(routeSource).toContain("config-pending-save-count");
+    expect(routeSource).toContain("canApplyConfigWorkspace");
+    expect(routeSource).toContain("foldPendingSectionDrafts");
+    // 非法草稿阻塞分区保存（不再静默存原始串）。
+    expect(routeSource).toContain("resolveDraftSubtreeForSave");
+    expect(routeSource).toContain("sectionSaveBlocked");
+    // 离开守卫与跨页 presence 接入分区草稿计数。
+    expect(routeSource).toContain("hasPendingSectionDrafts");
+    expect(routeSource).toContain("pendingConfigDraftCount > 0");
+    // 行原语来自 VUI，而非路由本地复刻。
+    expect(routeSource).toContain("VSettingsRow");
+    expect(routeSource).toContain("VSettingsGroupCard");
+  });
+
+  it("uses the approved wave-1 row density for large config sections with many fields", () => {
     expect(routeSource).toContain("function isDenseConfigSection");
     expect(routeSource).toContain("Number(section.fieldCount || 0) >= 12");
     expect(routeSource).toContain("styles.configDenseSection");
@@ -941,8 +963,11 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("styles.treeObjectCell");
     expect(routeSource).toContain("styles.treeToggle");
     expect(stylesSource).toContain("configDenseSection:");
-    expect(stylesSource).toContain("[&>_.treeGrid]:[grid-template-columns:repeat(3,minmax(220px,1fr))]");
-    expect(stylesSource).toContain("max-[1500px]:[&>_.treeGrid]:[grid-template-columns:repeat(2,minmax(220px,1fr))]");
+    // Settings-align wave 1: dense sections keep the single-column row density
+    // (settings group card + rows) — multi-column grid overrides are retired.
+    expect(stylesSource).not.toContain("[&>_.treeGrid]:[grid-template-columns:repeat(3,minmax(220px,1fr))]");
+    expect(stylesSource).not.toContain("max-[1500px]:[&>_.treeGrid]:[grid-template-columns:repeat(2,minmax(220px,1fr))]");
+    expect(styles.configDenseSection).not.toContain("treeGrid]:[grid-template-columns");
     expect(styles.configDenseSection).not.toContain("repeat(auto-fit");
     expect(stylesSource).toContain("treeGrid:");
   });
@@ -953,7 +978,7 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.sidebar).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(styles.sectionSurface).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(styles.treeGrid).toContain("grid-cols-1");
-    expect(styles.configDenseSection).toContain("[&>_.treeGrid]:[grid-template-columns:repeat(3,minmax(220px,1fr))]");
+    expect(styles.configDenseSection).not.toContain("[&>_.treeGrid]:[grid-template-columns");
     expect(styles.configDenseSection).not.toContain("repeat(auto-fit");
     expect(styles.treeFieldValue).toContain("text-vui-fg-secondary");
     expect(healthDiagnosticsPanelStylesSource).toContain("vuiSurfaceRecipes");
