@@ -385,7 +385,7 @@ describe("ConversationToolActivity", () => {
     expect(styles.itemStatic).toContain("items-center");
   });
 
-  it("opens the current running tool detail directly by default", () => {
+  it("keeps the running tool row collapsed with a shimmering action word and a static icon", () => {
     const runningCell = toolCell("tool-running", "正在执行");
     runningCell.status = "running";
     runningCell.tone = "running";
@@ -401,7 +401,50 @@ describe("ConversationToolActivity", () => {
     expect(html).toContain('data-codex-transcript-cell-status="running"');
     expect(html).toContain('data-codex-tool-activity-state="running"');
     expect(html).not.toContain("正在运行工具");
-    expect(openingTagContaining(html, 'data-codex-tool-detail="true"')).toContain('open=""');
+    // Default collapsed: running rows no longer open themselves.
+    expect(openingTagContaining(html, 'data-codex-tool-detail="true"')).not.toContain("open");
+    // Running lives in the action word's shimmer, not a spinning icon.
+    expect(html).toContain('data-codex-tool-action-running="true"');
+    expect(html).toContain("actionLabelRunning");
+    expect(html).not.toContain("animate-spin");
+  });
+
+  it("carries failure semantics via a dashed status word with a hover tooltip, not a red blast", () => {
+    const failedCell = toolCell("tool-failed", "HTTP 406: https://elifesciences.org/articles/13810");
+    failedCell.status = "failed";
+    failedCell.tone = "error";
+
+    const html = renderToStaticMarkup(
+      <ConversationToolActivity
+        activity={createCodexTranscriptToolActivity([failedCell])}
+        language="zh"
+        renderToolDetails={() => null}
+      />,
+    );
+
+    // Status word keeps its color + dashed underline and reveals the error on hover.
+    expect(html).toContain('data-codex-tool-status-pill="true"');
+    expect(html).toContain('data-codex-tool-status-kind="failed"');
+    expect(html).toContain('title="HTTP 406: https://elifesciences.org/articles/13810"');
+    // The expanded body (SSR keeps it mounted) keeps the full error + a copy affordance.
+    expect(html).toContain('data-codex-tool-failure-copy="true"');
+    expect(html).toContain("复制错误详情");
+    // Leading icon stays muted (no red).
+    expect(html).toContain("itemIconFailed");
+    expect(styles.statusLabel).toContain("underline");
+    expect(styles.statusLabel).toContain("decoration-dashed");
+  });
+
+  it("encodes the running shimmer in CSS with a reduced-motion static fallback", () => {
+    expect(styles.actionLabelRunning).toContain("inline-block");
+    expect(activityCss).toContain("@keyframes vui-tool-activity-shimmer");
+    expect(activityCss).toContain(".vui-components-conversation-tool-activity.actionLabelRunning");
+    expect(activityCss).toContain("background-clip: text");
+    // Reduced motion: no sweep, static tinted word instead.
+    const shimmerIndex = activityCss.indexOf(".vui-components-conversation-tool-activity.actionLabelRunning");
+    const reducedBlock = activityCss.slice(activityCss.indexOf("prefers-reduced-motion", shimmerIndex));
+    expect(reducedBlock).toContain(".vui-components-conversation-tool-activity.actionLabelRunning");
+    expect(reducedBlock).toContain("animation: none");
   });
 
   it("uses a semantic code result as the row title without repeating the generic tool name", () => {

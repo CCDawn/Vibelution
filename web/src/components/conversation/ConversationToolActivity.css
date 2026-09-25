@@ -101,3 +101,53 @@ details[open] > summary .vui-components-conversation-tool-activity.activityChevr
     animation: none !important;
   }
 }
+
+/*
+ * Running rows: the leading icon stays static; the action word carries the live
+ * state via a gradient sweep (background-position animation + background-clip:
+ * text), ZCode ToolLayout's "animated-gradient-text" language. Colors derive
+ * from the fg/accent tokens only — no literals.
+ */
+@keyframes vui-tool-activity-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+
+  50% {
+    background-position: 0% 0;
+  }
+
+  100% {
+    background-position: 0% 0;
+  }
+}
+
+.vui-components-conversation-tool-activity.actionLabelRunning {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent-cool) 72%, var(--fg-secondary)) 0%,
+    color-mix(in srgb, var(--accent-cool) 72%, var(--fg-secondary)) 34%,
+    color-mix(in srgb, var(--fg-tertiary) 45%, transparent) 50%,
+    color-mix(in srgb, var(--accent-cool) 72%, var(--fg-secondary)) 66%,
+    color-mix(in srgb, var(--accent-cool) 72%, var(--fg-secondary)) 100%
+  );
+  background-size: 300% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: vui-tool-activity-shimmer 4s linear infinite;
+  will-change: background-position;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Degrade to a static tinted word: no sweep, no transparent-text pitfalls. */
+  .vui-components-conversation-tool-activity.actionLabelRunning {
+    animation: none;
+    background: none;
+    color: var(--accent-cool);
+    -webkit-text-fill-color: currentColor;
+  }
+}

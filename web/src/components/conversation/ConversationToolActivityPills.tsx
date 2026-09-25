@@ -31,22 +31,28 @@ export function toolActivityAriaTitle(pills: CodexToolActivityPills) {
  * Shared Codex-style tool row chrome used by the native tool rail and the
  * legacy agent-message timeline.
  *
- * Visual contract (Codex-aligned):
- * - leading icon carries running/done/failed state
+ * Visual contract (Codex/ZCode-aligned):
+ * - leading icon is always static; running lives in the action word's shimmer
  * - action is plain text (not a rounded chip)
- * - status text only for failures / attention (not "运行中"/"执行完成" chips)
+ * - status text only for failures / attention (not "运行中"/"执行完成" chips);
+ *   the colored word + dashed underline carries failure semantics, hovering it
+ *   reveals the error summary (statusTooltip) instead of a red card blast
  * - subject + duration stay muted
  */
 export function ConversationToolActivityPills({
   pills,
   leadingIcon = null,
   className = "",
+  statusTooltip,
 }: {
   pills: CodexToolActivityPills;
   leadingIcon?: ReactNode;
   className?: string;
+  /** Error summary revealed on hover of the status word (title tooltip). */
+  statusTooltip?: string;
 }) {
   const showStatusLabel = SHOW_STATUS_LABEL.has(pills.statusKind) && Boolean(pills.statusLabel);
+  const running = pills.statusKind === "running";
 
   return (
     <>
@@ -56,7 +62,11 @@ export function ConversationToolActivityPills({
         data-codex-tool-row="true"
         data-codex-tool-status-kind={pills.statusKind}
       >
-        <span className={styles.actionLabel} data-codex-tool-action-pill="true">
+        <span
+          className={running ? `${styles.actionLabel} ${styles.actionLabelRunning}` : styles.actionLabel}
+          data-codex-tool-action-pill="true"
+          data-codex-tool-action-running={running ? "true" : undefined}
+        >
           {pills.actionLabel}
         </span>
         {showStatusLabel ? (
@@ -64,6 +74,7 @@ export function ConversationToolActivityPills({
             className={`${styles.statusLabel} ${styles[`statusLabel_${pills.statusKind}` as keyof typeof styles] || ""}`}
             data-codex-tool-status-pill="true"
             data-codex-tool-status-kind={pills.statusKind}
+            title={statusTooltip || undefined}
           >
             {pills.statusLabel}
           </span>

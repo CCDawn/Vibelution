@@ -1,6 +1,7 @@
-import { ChevronRight, CircleAlert, LoaderCircle } from "lucide-react";
+import { ChevronRight, Check, CircleAlert, Copy, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
+import { VNativeButton } from "../vui";
 import "./ConversationToolActivity.css";
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
 import {
@@ -47,6 +48,102 @@ type ConversationToolActivityProps = {
 
 const STAGGERED_DETAILS_CLOSE_DURATION_MS = 520;
 const MAX_STAGGERED_ROW_DELAY = 8;
+
+/**
+ * ZCode ToolLayout-aligned open persistence: the user's explicit expand/collapse
+ * choice survives re-renders and remounts via a module-level map keyed by the
+ * tool's stable identity. Rows start collapsed — a running row no longer opens
+ * itself; the action word's shimmer carries the live state instead.
+ */
+const toolRowOpenState = new Map<string, boolean>();
+const TOOL_ROW_BODY_UNMOUNT_DELAY_MS = 300;
+const TOOL_FAILURE_COPY_FEEDBACK_MS = 1600;
+const TOOL_FAILURE_SUMMARY_MAX_LENGTH = 240;
+
+/** Most stable per-tool identity: the tool call id, falling back to the cell id. */
+function toolRowPersistKey(cell: CodexTranscriptCell): string {
+  return cell.toolLifecycleModel?.toolCalls?.[0]?.toolCallId || cell.id;
+}
+
+/** First meaningful error line, for the status word's hover tooltip and the copy affordance. */
+function toolFailureDetailText(cell: CodexTranscriptCell): string {
+  const toolCall = cell.toolLifecycleModel?.toolCalls?.[0];
+  const candidates = [cell.summary, cell.text, toolCall?.error, toolCall?.resultPreview];
+  for (const candidate of candidates) {
+    const text = String(candidate ?? "").replace(/\s+/g, " ").trim();
+    if (!text) {
+      continue;
+    }
+    return text.length > TOOL_FAILURE_SUMMARY_MAX_LENGTH
+      ? `${text.slice(0, TOOL_FAILURE_SUMMARY_MAX_LENGTH - 1)}…`
+      : text;
+  }
+  return "";
+}
+
+async function copyToolFailureToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textArea = document.createElement("textarea");
+  textArea.value = text;
+  textArea.setAttribute("readonly", "true");
+  textArea.style.position = "absolute";
+  textArea.style.opacity = "0";
+  textArea.style.pointerEvents = "none";
+  document.body.appendChild(textArea);
+  textArea.select();
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textArea);
+  if (!copied) {
+    throw new Error("copy failed");
+  }
+}
+
+/**
+ * Expand/collapse state for one tool row: reads the module-level map on mount,
+ * writes through on every toggle, and keeps the body mounted for a short delay
+ * after a collapse so a rapid re-expand never unmounts/remounts the content.
+ */
+function usePersistentToolRowOpen(persistKey: string) {
+  const [isOpen, setIsOpen] = useState(() => toolRowOpenState.get(persistKey) ?? false);
+  const [shouldRenderBody, setShouldRenderBody] = useState(isOpen);
+  const bodyUnmountTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const toggle = useCallback(() => {
+    const next = !(toolRowOpenState.get(persistKey) ?? false);
+    toolRowOpenState.set(persistKey, next);
+    setShouldRenderBody(true);
+    setIsOpen(next);
+  }, [persistKey]);
+
+  useEffect(() => {
+    if (isOpen) {
+      if (bodyUnmountTimerRef.current !== null) {
+        clearTimeout(bodyUnmountTimerRef.current);
+        bodyUnmountTimerRef.current = null;
+      }
+      setShouldRenderBody(true);
+      return;
+    }
+    if (!shouldRenderBody) {
+      return;
+    }
+    bodyUnmountTimerRef.current = setTimeout(() => {
+      bodyUnmountTimerRef.current = null;
+      setShouldRenderBody(false);
+    }, TOOL_ROW_BODY_UNMOUNT_DELAY_MS);
+    return () => {
+      if (bodyUnmountTimerRef.current !== null) {
+        clearTimeout(bodyUnmountTimerRef.current);
+        bodyUnmountTimerRef.current = null;
+      }
+    };
+  }, [isOpen, shouldRenderBody]);
+
+  return { isOpen, shouldRenderBody, toggle };
+}
 
 function staggeredRowStyle(index: number, count: number): CSSProperties {
   const openIndex = Math.min(index, MAX_STAGGERED_ROW_DELAY);
@@ -198,7 +295,10 @@ function ToolStatusIcon({
     return <CircleAlert className={`${styles.itemIcon} ${styles.itemIconFailed}`} size={15} />;
   }
   if (cell.status === "running" || cell.status === "pending") {
-    return <LoaderCircle className={`${styles.itemIcon} ${styles.itemIconRunning} animate-spin`} size={15} />;
+    // ZCode-aligned: icons stay static while running; the action word's shimmer
+    // carries the live state. A spinning icon burns animation cost across the
+    // long stream of tool rows and shouts louder than the quiet tool rail.
+    return <LoaderCircle className={`${styles.itemIcon} ${styles.itemIconRunning}`} size={15} />;
   }
   if (conversationToolActivityHasNonzeroTerminalExit(cell)) {
     return <CircleAlert className={`${styles.itemIcon} ${styles.itemIconWarning}`} size={15} />;
@@ -226,8 +326,39 @@ function ToolActivityItem({
   const title = toolActivityAriaTitle(pills);
   const detailsId = `codex-tool-detail-${cell.id}`;
   const details = renderToolDetails(cell, detailsId);
-  const openByDefault = !isSettledFailedCell(cell)
-    && (cell.status === "running" || cell.status === "pending");
+  const persistKey = toolRowPersistKey(cell);
+  const { isOpen, shouldRenderBody, toggle } = usePersistentToolRowOpen(persistKey);
+  // ZCode failure denoising: the colored status word + dashed underline carries
+  // the failure semantics; hovering it reveals the error summary, and the
+  // expanded body keeps the full error with a copy affordance.
+  const failureDetail = pills.statusKind === "failed" || pills.statusKind === "timeout"
+    ? toolFailureDetailText(cell)
+    : "";
+  const [failureCopied, setFailureCopied] = useState(false);
+  const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (copyResetTimerRef.current !== null) {
+      clearTimeout(copyResetTimerRef.current);
+    }
+  }, []);
+  const copyLabel = language === "zh"
+    ? (failureCopied ? "已复制错误详情" : "复制错误详情")
+    : (failureCopied ? "Copied error details" : "Copy error details");
+  const handleCopyFailureDetail = () => {
+    if (!failureDetail) {
+      return;
+    }
+    void copyToolFailureToClipboard(failureDetail).then(() => {
+      setFailureCopied(true);
+      if (copyResetTimerRef.current !== null) {
+        clearTimeout(copyResetTimerRef.current);
+      }
+      copyResetTimerRef.current = setTimeout(() => {
+        copyResetTimerRef.current = null;
+        setFailureCopied(false);
+      }, TOOL_FAILURE_COPY_FEEDBACK_MS);
+    }).catch(() => undefined);
+  };
   const label = language === "zh"
     ? `展开或收起工具结果：${title}`
     : `Expand or collapse tool results: ${title}`;
@@ -235,6 +366,7 @@ function ToolActivityItem({
     <ConversationToolActivityPills
       pills={pills}
       leadingIcon={<ToolStatusIcon cell={cell} language={language} />}
+      statusTooltip={failureDetail}
     />
   );
   const emptyDetail = language === "zh" ? "无更多详情" : "No further details";
@@ -257,6 +389,10 @@ function ToolActivityItem({
     );
   }
 
+  // SSR keeps the body mounted (the closed details hides it via CSS); on the
+  // client the delayed unmount in usePersistentToolRowOpen prevents flash.
+  const renderBody = shouldRenderBody || typeof window === "undefined";
+
   return (
     <details
       className={`${styles.item} ${styles.itemDetails} group`}
@@ -267,12 +403,18 @@ function ToolActivityItem({
       data-codex-transcript-cell-status={cell.status}
       data-codex-transcript-cell-phase={cell.phase ?? "tool_call"}
       data-conversation-part-key={cell.id}
-      open={openByDefault || undefined}
+      open={isOpen}
     >
       <summary
         className={styles.itemSummary}
         aria-label={label}
         aria-live={cell.status === "running" || cell.status === "pending" ? "polite" : undefined}
+        onClick={(event) => {
+          // Native <details> toggles on summary click; route it through the
+          // persisted state so the choice survives re-renders.
+          event.preventDefault();
+          toggle();
+        }}
       >
         {content}
         <ChevronRight
@@ -282,9 +424,24 @@ function ToolActivityItem({
           data-codex-tool-detail-toggle="inline-symbol"
         />
       </summary>
-      <div id={detailsId} className={styles.itemDetailsBody}>
-        {details ?? <p className={styles.itemDetailsEmpty}>{emptyDetail}</p>}
-      </div>
+      {renderBody ? (
+        <div id={detailsId} className={styles.itemDetailsBody} data-codex-tool-detail-body="true">
+          {details ?? <p className={styles.itemDetailsEmpty}>{emptyDetail}</p>}
+          {failureDetail ? (
+            <div className={styles.itemDetailsActions} data-codex-tool-failure-copy="true">
+              <VNativeButton
+                data-vui="icon-button"
+                className={styles.itemDetailsCopyButton}
+                onClick={handleCopyFailureDetail}
+                aria-label={copyLabel}
+                title={copyLabel}
+              >
+                {failureCopied ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
+              </VNativeButton>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </details>
   );
 }
