@@ -789,6 +789,21 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     expect(conversationViewSource).toContain("window.setTimeout(prewarmNext, 48)");
   });
 
+  it("renders the codex assistant cell through one component type across streaming and settled", () => {
+    // Settle must not swap renderer component types: the transcript cell
+    // keeps ConversationStreamingResponseContent mounted and the streaming
+    // decision travels as the isStreaming prop instead.
+    expect(conversationViewSource).toContain("function renderAssistantTranscriptResponseText(");
+    expect(conversationViewSource).toContain("isStreaming={isStreaming}");
+    expect(conversationViewSource).toContain(
+      "renderAssistantTranscriptResponseText(\n            text,\n            assistantTurnIsStreaming(message),",
+    );
+    expect(conversationViewSource).not.toContain("renderStreamingResponseText");
+    expect(conversationViewSource).not.toMatch(
+      /assistantTurnIsStreaming\(message\)\s*\?\s*render\w+ResponseText/,
+    );
+  });
+
   it("keeps tool detail expansion work off collapsed renders", () => {
     expect(conversationViewSource).toContain('from "./ConversationOperationDetails"');
     expect(conversationViewSource).not.toContain("function DeferredOperationDetails");

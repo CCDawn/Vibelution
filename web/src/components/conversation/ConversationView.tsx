@@ -3229,7 +3229,11 @@ export const ConversationView = React.memo(function ConversationView({
           data-codex-transcript-cell-phase={cell.phase ?? ""}
           data-conversation-part-key={cell.id}
         >
-          {assistantTurnIsStreaming(message) ? renderStreamingResponseText(text) : renderResponseText(text, imageArtifactUrlsBeforeMessage.get(message.id))}
+          {renderAssistantTranscriptResponseText(
+            text,
+            assistantTurnIsStreaming(message),
+            imageArtifactUrlsBeforeMessage.get(message.id),
+          )}
         </section>
       );
     }
@@ -4915,13 +4919,24 @@ export const ConversationView = React.memo(function ConversationView({
     );
   }
 
-  function renderStreamingResponseText(content: string) {
+  function renderAssistantTranscriptResponseText(
+    content: string,
+    isStreaming: boolean,
+    duplicateImageUrls?: Set<string>,
+  ) {
     if (!content) {
       return null;
     }
+    // One component type across streaming and settled: the Codex transcript
+    // cell keeps its markdown subtree mounted on the streaming→settled flip
+    // (settled text re-routes through the shared stable renderer instead of
+    // swapping to a different renderer component).
     return (
       <ConversationStreamingResponseContent
         content={content}
+        isStreaming={isStreaming}
+        duplicateImageUrls={duplicateImageUrls}
+        renderImage={renderMarkdownImage}
       />
     );
   }

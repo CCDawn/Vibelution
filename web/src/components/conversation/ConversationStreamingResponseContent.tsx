@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 
 import { createCodexStreamController } from "./codexStreamController";
 import type { ConversationMarkdownClassNames } from "./conversationMarkdownTypes";
@@ -18,6 +18,16 @@ export type ConversationStreamingResponseContentClassNames = ConversationMarkdow
 
 type ConversationStreamingResponseContentProps = {
   content: string;
+  /**
+   * Single render surface for assistant transcript markdown: the streaming
+   * phase keeps the Codex stable/live split, settled mode renders the full
+   * text through the same shared stable renderer so the streaming→settled
+   * flip never unmounts the markdown subtree (pattern: zai-org/ZCode message
+   * renderer keying, Apache-2.0).
+   */
+  isStreaming?: boolean;
+  duplicateImageUrls?: Set<string>;
+  renderImage?: (alt: string, url: string, duplicateImageUrls?: Set<string>) => ReactNode;
   classNames?: ConversationStreamingResponseContentClassNames;
 };
 
@@ -28,19 +38,38 @@ type ConversationStreamingResponseContentProps = {
 const StreamingStableMarkdown = memo(function StreamingStableMarkdown({
   content,
   classNames,
+  duplicateImageUrls,
+  renderImage,
 }: {
   content: string;
   classNames: ConversationMarkdownClassNames;
+  duplicateImageUrls?: Set<string>;
+  renderImage?: (alt: string, url: string, duplicateImageUrls?: Set<string>) => ReactNode;
 }) {
-  return <LazyConversationMarkdownRenderer content={content} classNames={classNames} />;
+  return (
+    <LazyConversationMarkdownRenderer
+      content={content}
+      classNames={classNames}
+      duplicateImageUrls={duplicateImageUrls}
+      renderImage={renderImage}
+    />
+  );
 });
 
 export function ConversationStreamingResponseContent({
   content,
+  isStreaming = true,
+  duplicateImageUrls,
+  renderImage,
   classNames = styles,
 }: ConversationStreamingResponseContentProps) {
   const visibleText = String(content ?? "");
   const streamProjection = useMemo(() => {
+    if (!isStreaming) {
+      // Settled: the whole message goes through the shared stable renderer —
+      // no Codex holdback split, no live tail, no incomplete-markdown repair.
+      return { stableText: visibleText, liveText: "" };
+    }
     const controller = createCodexStreamController();
     controller.push(visibleText);
     const snapshot = controller.snapshot();
@@ -50,7 +79,7 @@ export function ConversationStreamingResponseContent({
       return projectStreamingMarkdownBlocks(visibleText);
     }
     return { stableText, liveText };
-  }, [visibleText]);
+  }, [visibleText, isStreaming]);
 
   const hasStable = Boolean(streamProjection.stableText?.trim());
   const hasLive = Boolean(streamProjection.liveText);
@@ -84,7 +113,12 @@ export function ConversationStreamingResponseContent({
       ].filter(Boolean).join(" ")}
     >
       {stableText.trim() ? (
-        <StreamingStableMarkdown content={stableText} classNames={classNames} />
+        <StreamingStableMarkdown
+          content={stableText}
+          classNames={classNames}
+          duplicateImageUrls={duplicateImageUrls}
+          renderImage={renderImage}
+        />
       ) : null}
       {liveBlocks.length ? (
         <div
