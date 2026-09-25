@@ -79,6 +79,7 @@ import {
   type ComposerImageAttachment,
 } from "./chatComposerSubmitModel";
 import { loadTurnStatusTailConfig } from "./turnStatusTailModel";
+import { removeStoredSessionDraft, scheduleSessionDraftSave } from "./chatDraftPersistence";
 import { type ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
 import { startUserAction, type UserActionTracker } from "../../app/userActionTelemetry";
@@ -494,6 +495,7 @@ export function useChatComposerTurnMutations({
         ...current,
         [variables.sessionId]: "",
       }));
+      removeStoredSessionDraft(variables.sessionId);
       setSessionImageAttachments((current) => clearSessionImageAttachments(current, variables.sessionId));
       setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, variables.sessionId));
       setSessionEditTargets((current) => {
@@ -833,6 +835,7 @@ export function useChatComposerTurnMutations({
         ...current,
         [variables.sessionId]: "",
       }));
+      removeStoredSessionDraft(variables.sessionId);
       syncSessionDetail(nextDetail);
       void chatWorkspaceCache.afterSessionChanged({ sessionId: variables.sessionId });
     },
@@ -995,6 +998,8 @@ export function useChatComposerSubmitActions({
       ...current,
       [activeSessionId]: value,
     }));
+    // Debounced localStorage persistence: drafts survive a reload/restart.
+    scheduleSessionDraftSave(activeSessionId, value);
     setSessionComposerErrors((current) => ({
       ...current,
       [activeSessionId]: "",
@@ -1202,6 +1207,8 @@ export function useChatComposerSubmitActions({
       [sessionId]: true,
     }));
     setSessionDrafts((current) => clearSessionDraftForSubmittedTurn(current, sessionId));
+    // The submitted draft must not resurrect from localStorage after a reload.
+    removeStoredSessionDraft(sessionId);
     setSessionComposerErrors((current) => ({
       ...current,
       [sessionId]: "",

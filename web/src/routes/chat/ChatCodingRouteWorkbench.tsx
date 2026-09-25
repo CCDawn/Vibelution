@@ -287,6 +287,7 @@ import {
   cliAgentRunTabId,
 } from "./cliAgentRunModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
+import { readStoredSessionDrafts, removeStoredSessionDraft } from "./chatDraftPersistence";
 import {
   buildFileReferencePayload,
   buildKnowledgeBaseReferencePayload,
@@ -579,7 +580,7 @@ export function ChatCodingRouteWorkbench() {
   const setActiveTab = useChatWorkbenchStore((state) => state.setActiveTab);
   const [sessionFilter, setSessionFilter] = useState("");
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
-  const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>({});
+  const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>(() => readStoredSessionDrafts());
   const [sessionComposerErrors, setSessionComposerErrors] = useState<Record<string, string>>({});
   const composerFocusSequenceRef = useRef(0);
   const [composerFocusRequest, setComposerFocusRequest] = useState({ sessionId: "", signal: "" });
@@ -1130,6 +1131,7 @@ export function ChatCodingRouteWorkbench() {
         const { [normalizedSessionId]: _removed, ...remaining } = current;
         return remaining;
       });
+      removeStoredSessionDraft(normalizedSessionId);
       setSessionImageAttachments((current) => clearSessionImageAttachments(current, normalizedSessionId));
       setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, normalizedSessionId));
       delete imageUploadInFlightRef.current[normalizedSessionId];
