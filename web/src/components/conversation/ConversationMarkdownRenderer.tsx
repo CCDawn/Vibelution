@@ -119,7 +119,13 @@ function markdownComponents(
       if (!safeSrc) {
         return null;
       }
-      return renderImage ? <>{renderImage(alt ?? "", safeSrc, duplicateImageUrls)}</> : null;
+      if (!renderImage) {
+        // Default path (e.g. streaming stable prefix): render lazily and
+        // async-decoded so offscreen images never block first paint. No
+        // className — callers constrain via `[&_img]` wrappers.
+        return <img alt={alt ?? ""} src={safeSrc} loading="lazy" decoding="async" />;
+      }
+      return <>{renderImage(alt ?? "", safeSrc, duplicateImageUrls)}</>;
     },
     ol({ children }: ComponentPropsWithoutRef<"ol">) {
       return <ol className={classNames.responseSegmentList}>{children}</ol>;

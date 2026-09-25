@@ -72,10 +72,12 @@ details[open] > summary .vui-components-conversation-tool-activity.activityChevr
   }
 }
 
-.vui-components-conversation-tool-activity.activity[open]
-  > .vui-components-conversation-tool-activity.activityDetails
-  > .vui-components-conversation-tool-activity.activityDetailsInner
-  > .vui-components-conversation-tool-activity.activityRow,
+/*
+ * Batch-only enter/exit animation. The former `.activity[open] > …activityRow`
+ * and `.activity[data-closing]` chains were dead code: no TSX ever emitted the
+ * `activityDetails`/`activityDetailsInner` classes, and the `.activity` rail
+ * div (a plain scroll container) never carries `open`/`data-closing`.
+ */
 .vui-components-conversation-tool-activity.batch[open]
   > .vui-components-conversation-tool-activity.batchDetails
   > .vui-components-conversation-tool-activity.batchDetailsInner
@@ -84,10 +86,6 @@ details[open] > summary .vui-components-conversation-tool-activity.activityChevr
   animation-delay: var(--tool-activity-row-open-delay, 0ms);
 }
 
-.vui-components-conversation-tool-activity.activity[data-closing="true"]
-  > .vui-components-conversation-tool-activity.activityDetails
-  > .vui-components-conversation-tool-activity.activityDetailsInner
-  > .vui-components-conversation-tool-activity.activityRow,
 .vui-components-conversation-tool-activity.batch[data-closing="true"]
   > .vui-components-conversation-tool-activity.batchDetails
   > .vui-components-conversation-tool-activity.batchDetailsInner

@@ -176,6 +176,24 @@ describe("ConversationMarkdownRenderer", () => {
     expect(html).not.toContain("alert(1)");
   });
 
+  it("renders default-path markdown images lazily and async-decoded", async () => {
+    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
+    const html = renderToStaticMarkup(
+      <ConversationMarkdownRenderer
+        content={["![截图](https://example.com/screen.png)", "![bad](javascript:alert(1))"].join("\n\n")}
+        classNames={styles}
+      />,
+    );
+
+    expect(html).toMatch(/<img[^>]*loading="lazy"/);
+    expect(html).toMatch(/<img[^>]*decoding="async"/);
+    expect(html).toContain('src="https://example.com/screen.png"');
+    expect(html).toContain('alt="截图"');
+    // Unsafe schemes never reach the DOM even on the default image path.
+    expect(html).not.toContain("javascript:");
+    expect((html.match(/<img/g) ?? []).length).toBe(1);
+  });
+
   it("skips re-parsing when the content is unchanged (completed messages never re-parse)", async () => {
     const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     parseCalls.length = 0;
