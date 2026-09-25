@@ -1,5 +1,6 @@
 import "../design/route-css/config.tailwind.css";
 import { ConfigSettingsIndex } from "./ConfigSettingsIndex";
+import { ConfigShortcutsPanel } from "./ConfigShortcutsPanel";
 
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -360,6 +361,34 @@ export const CONFIG_COPY = {
     healthStatusBlocked: "阻塞",
     healthMissing: "暂无日志文件",
     healthNotRecorded: "未记录",
+    shortcutsTitle: "快捷键",
+    shortcutsIntro: "点击「修改」后按下新组合键完成录制，Esc 取消；「清除」写入显式空数组（未设置，不回退默认）。",
+    shortcutsPersistence: "覆盖持久化到 localStorage 键 vibelution.shortcuts.overrides，与全局快捷键同一存储。",
+    shortcutsEffectiveNow: "改键即时生效，无需重启；快捷键在应用全局生效，触发时走命令面板同一执行路径。",
+    shortcutsResetAll: "恢复全部默认",
+    shortcutsClose: "关闭",
+    shortcutsStatusDefault: "默认",
+    shortcutsStatusOverridden: "已覆盖",
+    shortcutsStatusCleared: "已清除",
+    shortcutsUnset: "未设置",
+    shortcutsModify: "修改",
+    shortcutsClear: "清除",
+    shortcutsRestore: "恢复默认",
+    shortcutsRecording: "录制中：请按下新组合键",
+    shortcutsRecordingHint: "Esc 取消",
+    shortcutsRecordingPending: "已收到修饰键，等待完整组合…",
+    shortcutsRecordCancelled: "录制已取消，绑定未变更。",
+    shortcutsInvalidNoModifier: "录制失败：普通字符键必须至少带一个修饰键（F 键、方向键等命名键允许裸键）。",
+    shortcutsInvalidUnsupported: "录制失败：不支持的按键组合（主修饰键在归一中丢失），绑定未变更。",
+    shortcutsBoundNotice: "已把 {binding} 绑定到「{title}」（覆盖为整组替换该命令的绑定）。",
+    shortcutsReservedNotice: "拒绝：{binding} 是保留键（浏览器/编辑原生行为或组件固定交互），不能绑定为「{title}」的全局快捷键。",
+    shortcutsOccupiedNotice: "拒绝：{binding} 已被「{owner}」占用。请换一个组合，或抢占该键。",
+    shortcutsSteal: "抢占并绑定",
+    shortcutsStealHint: "抢占会把「{owner}」变为未绑定，并把 {binding} 绑定到「{title}」。",
+    shortcutsStealDone: "已把 {binding} 绑定到「{title}」，「{owner}」变为未绑定。",
+    shortcutsClearedNotice: "已清除「{title}」的全部绑定（显式空数组 = 未设置，不回退默认）。",
+    shortcutsRestoredNotice: "「{title}」已移除用户覆盖，恢复默认绑定。",
+    shortcutsResetAllNotice: "已恢复全部默认绑定，并清除持久化覆盖。",
     settingsStatusTitle: "设置状态",
     settingsNextStep: "下一步",
     settingsCanSave: "可以保存",
@@ -609,6 +638,34 @@ export const CONFIG_COPY = {
     healthStatusBlocked: "Blocked",
     healthMissing: "No log files yet",
     healthNotRecorded: "Not recorded",
+    shortcutsTitle: "Keyboard shortcuts",
+    shortcutsIntro: "Click Change and press the new key combination to record it; Esc cancels. Clear writes an explicit empty array (not set, no fallback to defaults).",
+    shortcutsPersistence: "Overrides persist to the localStorage key vibelution.shortcuts.overrides, the same storage the global shortcuts read.",
+    shortcutsEffectiveNow: "Rebinds apply immediately without a restart; shortcuts work across the app through the same execution path as the command palette.",
+    shortcutsResetAll: "Restore all defaults",
+    shortcutsClose: "Close",
+    shortcutsStatusDefault: "Default",
+    shortcutsStatusOverridden: "Customized",
+    shortcutsStatusCleared: "Cleared",
+    shortcutsUnset: "Not set",
+    shortcutsModify: "Change",
+    shortcutsClear: "Clear",
+    shortcutsRestore: "Restore default",
+    shortcutsRecording: "Recording: press the new key combination",
+    shortcutsRecordingHint: "Esc to cancel",
+    shortcutsRecordingPending: "Modifier received, waiting for the full combination…",
+    shortcutsRecordCancelled: "Recording cancelled. No binding changed.",
+    shortcutsInvalidNoModifier: "Recording failed: plain character keys need at least one modifier (named keys such as F-keys and arrows may be bare).",
+    shortcutsInvalidUnsupported: "Recording failed: unsupported key combination (primary modifier lost in normalization). No binding changed.",
+    shortcutsBoundNotice: "Bound {binding} to \"{title}\" (the override replaces all bindings of that command).",
+    shortcutsReservedNotice: "Rejected: {binding} is a reserved key (native browser/editor behavior or fixed component interaction) and cannot be bound to \"{title}\".",
+    shortcutsOccupiedNotice: "Rejected: {binding} is already used by \"{owner}\". Choose another combination, or steal the key.",
+    shortcutsSteal: "Steal and bind",
+    shortcutsStealHint: "Stealing unbinds \"{owner}\" and binds {binding} to \"{title}\".",
+    shortcutsStealDone: "Bound {binding} to \"{title}\"; \"{owner}\" is now unset.",
+    shortcutsClearedNotice: "Cleared all bindings of \"{title}\" (explicit empty array = not set, no fallback to defaults).",
+    shortcutsRestoredNotice: "\"{title}\" overrides removed; default bindings restored.",
+    shortcutsResetAllNotice: "All default bindings restored and persisted overrides cleared.",
     settingsStatusTitle: "Settings status",
     settingsNextStep: "Next step",
     settingsCanSave: "Ready to save",
@@ -3968,6 +4025,12 @@ export function ConfigRoute() {
               {busyAction === copy.openEnvironmentPending ? copy.openEnvironmentPending : copy.openEnvironment}
             </VButton>
           </VSurface>
+        ) : null}
+
+        {isSectionVisible("shortcuts") ? (
+          <VSection id="config-shortcuts" tabIndex={-1} title={copy.shortcutsTitle}>
+            <ConfigShortcutsPanel lang={currentLanguage} copy={copy} />
+          </VSection>
         ) : null}
 
         {isSectionVisible("health-diagnostics") ? (

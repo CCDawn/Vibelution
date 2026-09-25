@@ -286,6 +286,15 @@ def _config_sections(lang: str, editor_sections: list[dict[str, Any]] | None = N
             ),
         },
         {
+            "id": "shortcuts",
+            "title": text_for(lang, zh="快捷键", en="Keyboard shortcuts"),
+            "summary": text_for(
+                lang,
+                zh="查看并修改全局快捷键：录制改键、冲突检测、清除与恢复默认。",
+                en="View and rebind global shortcuts: record new keys, resolve conflicts, clear, or reset.",
+            ),
+        },
+        {
             "id": "models",
             "title": text_for(lang, zh="模型库", en="Model Library"),
             "summary": text_for(

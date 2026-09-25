@@ -17,6 +17,7 @@ const sections: ConfigSummary["sections"] = [
   { id: "overview", title: "配置源", summary: "配置状态" },
   { id: "diagnostics", title: "诊断", summary: "保存前诊断" },
   { id: "shell", title: "工作台默认项", summary: "工作台行为" },
+  { id: "shortcuts", title: "快捷键", summary: "全局快捷键" },
   { id: "ui", title: "界面", summary: "界面显示" },
   { id: "user-profile", title: "用户信息", summary: "用户资料" },
   { id: "avatar", title: "终端形象", summary: "终端形象" },
@@ -62,6 +63,7 @@ describe("ConfigSettingsNavigation", () => {
     ]);
     expect(groups.find((group) => group.id === "workbench-interface")?.pages).toEqual([
       expect.objectContaining({ id: "workbench-interface", memberSectionIds: ["shell", "ui"] }),
+      expect.objectContaining({ id: "workbench-shortcuts", memberSectionIds: ["shortcuts"] }),
     ]);
     expect(groups.find((group) => group.id === "avatar-pet")?.pages).toEqual([
       expect.objectContaining({ id: "identity-profile", memberSectionIds: ["user-profile", "avatar", "pet"] }),
@@ -80,17 +82,17 @@ describe("ConfigSettingsNavigation", () => {
 
   it("omits redundant page tabs when a settings group has one combined page", () => {
     const groups = buildConfigSettingsGroups(sections, groupCopy, "zh");
-    const workbenchGroup = groups.find((group) => group.id === "workbench-interface") ?? null;
-    const markup = renderToStaticMarkup(
+    const modelsGroup = groups.find((group) => group.id === "models-profiles") ?? null;
+    const modelsMarkup = renderToStaticMarkup(
       <ConfigSettingsPageTabs
         language="zh"
-        group={workbenchGroup}
-        activePageId="workbench-interface"
+        group={modelsGroup}
+        activePageId="model-connection"
         onSelectPage={() => undefined}
       />,
     );
 
-    expect(markup).toBe("");
+    expect(modelsMarkup).toBe("");
 
     const runtimeGroup = groups.find((group) => group.id === "runtime-context") ?? null;
     const runtimeMarkup = renderToStaticMarkup(
@@ -104,18 +106,6 @@ describe("ConfigSettingsNavigation", () => {
 
     expect(runtimeMarkup).toBe("");
 
-    const profileGroup = groups.find((group) => group.id === "avatar-pet") ?? null;
-    const profileMarkup = renderToStaticMarkup(
-      <ConfigSettingsPageTabs
-        language="zh"
-        group={profileGroup}
-        activePageId="identity-profile"
-        onSelectPage={() => undefined}
-      />,
-    );
-
-    expect(profileMarkup).toBe("");
-
     const overviewGroup = groups.find((group) => group.id === "overview-apply") ?? null;
     const overviewMarkup = renderToStaticMarkup(
       <ConfigSettingsPageTabs
@@ -127,6 +117,23 @@ describe("ConfigSettingsNavigation", () => {
     );
 
     expect(overviewMarkup).toBe("");
+  });
+
+  it("shows page tabs with the shortcuts page when the workbench group has two pages", () => {
+    const groups = buildConfigSettingsGroups(sections, groupCopy, "zh");
+    const workbenchGroup = groups.find((group) => group.id === "workbench-interface") ?? null;
+    const markup = renderToStaticMarkup(
+      <ConfigSettingsPageTabs
+        language="zh"
+        group={workbenchGroup}
+        activePageId="workbench-shortcuts"
+        onSelectPage={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("工作台与界面");
+    expect(markup).toContain("快捷键");
+    expect(markup).toContain('aria-current="page"');
   });
 
   it("falls back to the requested group's first page", () => {

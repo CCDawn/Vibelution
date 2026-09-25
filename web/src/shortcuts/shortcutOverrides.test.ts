@@ -1,10 +1,11 @@
 /** @vitest-environment node */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   normalizeShortcutOverrides,
   readStoredShortcutOverrides,
   SHORTCUT_OVERRIDES_STORAGE_KEY,
+  subscribeStoredShortcutOverrides,
   writeStoredShortcutOverrides,
 } from "./shortcutOverrides";
 
@@ -82,4 +83,36 @@ describe("readStoredShortcutOverrides / writeStoredShortcutOverrides", () => {
     expect(readStoredShortcutOverrides(throwing)).toEqual({});
     expect(() => writeStoredShortcutOverrides({ openSessionSearch: [] }, throwing)).not.toThrow();
   });
+
+  it("真实写入触发订阅者；内容未变的幂等写入不触发", () => {
+    const { storage } = memoryStorage();
+    const listener = vi.fn();
+    const unsubscribe = subscribeStoredShortcutOverrides(listener);
+    try {
+      // 空覆盖写入空存储 = 无变化，不通知。
+      writeStoredShortcutOverrides({}, storage);
+      expect(listener).not.toHaveBeenCalled();
+
+      writeStoredShortcutOverrides({ openSessionSearch: ["Ctrl+Alt+f"] }, storage);
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(readStoredShortcutOverrides(storage)).toEqual({ openSessionSearch: ["Ctrl+Alt+f"] });
+
+      // 相同内容重复写入（如壳层挂载写回）= 幂等，不通知。
+      writeStoredShortcutOverrides({ openSessionSearch: ["Ctrl+Alt+f"] }, storage);
+      expect(listener).toHaveBeenCalledTimes(1);
+
+      // 清空覆盖移除键并通知。
+      writeStoredShortcutOverrides({}, storage);
+      expect(listener).toHaveBeenCalledTimes(2);
+      expect(mapHas(storage)).toBe(false);
+    } finally {
+      unsubscribe();
+    }
+    writeStoredShortcutOverrides({ openCommandPalette: ["Ctrl+Alt+k"] }, storage);
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
 });
+
+function mapHas(storage: Pick<Storage, "getItem">): boolean {
+  return storage.getItem(SHORTCUT_OVERRIDES_STORAGE_KEY) !== null;
+}

@@ -59,6 +59,7 @@ const PAGE_DEFINITIONS: Record<ConfigSettingsGroupId, readonly PageDefinition[]>
   ],
   "workbench-interface": [
     { id: "workbench-interface", zh: "工作台与界面", en: "Workbench & interface", members: ["shell", "ui"] },
+    { id: "workbench-shortcuts", zh: "快捷键", en: "Keyboard shortcuts", members: ["shortcuts"] },
   ],
   "avatar-pet": [
     { id: "identity-profile", zh: "个人资料与陪伴体", en: "Profile & companion", members: ["user-profile", "avatar", "pet"] },

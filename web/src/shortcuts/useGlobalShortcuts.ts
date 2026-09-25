@@ -213,19 +213,45 @@ export type UseGlobalShortcutsOptions = {
   isApple: boolean;
   /** 录制态：置真时分发短路，按键进入录制器（对应 ZCode 的录制抑制语义）。 */
   recording: boolean;
+  /** false 时完全不挂 window 监听（设置页录制器非录制态复用全局分发）；默认 true。 */
+  enabled?: boolean;
   onCommand: GlobalShortcutHandler;
   onRecord: GlobalShortcutRecordHandler;
 };
 
+// 录制会话登记（跨 hook 实例共享）：设置页录制器录制时，其他实例的分发必须
+// 让路，否则录制组合若命中生效表会先被全局分发抢跑（preventDefault + 触发命令）。
+let activeRecorderCount = 0;
+
+/** 是否有录制会话进行中（任意 useGlobalShortcuts 实例）。 */
+export function isShortcutRecordingActive(): boolean {
+  return activeRecorderCount > 0;
+}
+
 /**
  * window capture 级 keydown 监听：命中生效表即 preventDefault + stopPropagation
  * 并分发命令；录制态下按键交给录制器。监听器通过 ref 读最新依赖，避免每次渲染重挂。
+ * 其他实例处于录制态时分发静默让路（录制优先）。
  */
 export function useGlobalShortcuts(options: UseGlobalShortcutsOptions): void {
   const optionsRef = useRef(options);
   optionsRef.current = options;
+  const { enabled = true, recording } = options;
 
   useEffect(() => {
+    if (!enabled || !recording) {
+      return;
+    }
+    activeRecorderCount += 1;
+    return () => {
+      activeRecorderCount -= 1;
+    };
+  }, [enabled, recording]);
+
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     const handler = (event: KeyboardEvent) => {
       const current = optionsRef.current;
       if (isNoiseEvent(event)) {
@@ -244,6 +270,9 @@ export function useGlobalShortcuts(options: UseGlobalShortcutsOptions): void {
         current.onRecord(outcome);
         return;
       }
+      if (activeRecorderCount > 0) {
+        return;
+      }
       for (const entry of SHORTCUT_COMMANDS) {
         for (const binding of current.effective[entry.id] ?? []) {
           if (matchesShortcutBinding(event, binding, current.isApple)) {
@@ -257,5 +286,5 @@ export function useGlobalShortcuts(options: UseGlobalShortcutsOptions): void {
     };
     window.addEventListener("keydown", handler, { capture: true });
     return () => window.removeEventListener("keydown", handler, { capture: true });
-  }, []);
+  }, [enabled]);
 }

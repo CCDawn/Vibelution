@@ -4,8 +4,9 @@
  *
  * - Ctrl+K / ⌘K 唤起 VCommandPalette（命令源：壳层主导航 + 壳层动作，非 mock）；
  * - Ctrl+P / ⌘P 唤起 VSessionSearchDialog（数据源：useSessionSearchQuery，server 分页）；
- * - 快捷键基建见 web/src/shortcuts/；用户覆盖静默持久化到
- *   localStorage（vibelution.shortcuts.overrides），设置页改键 UI 属后续任务。
+ * - 快捷键基建见 web/src/shortcuts/；用户覆盖持久化到
+ *   localStorage（vibelution.shortcuts.overrides），改键入口在设置页
+ *   「快捷键」分区（ConfigShortcutsPanel），覆盖变更经订阅即时生效，无需重载。
  *
  * 本组件只渲染 portal 对话框，不进 AppShell 布局树；特性开关经
  * config 公共接口自行解析（与 AppShell 共享同一 react-query 缓存键）。
@@ -26,6 +27,7 @@ import {
 } from "../shortcuts/commands";
 import {
   readStoredShortcutOverrides,
+  subscribeStoredShortcutOverrides,
   writeStoredShortcutOverrides,
 } from "../shortcuts/shortcutOverrides";
 import { isAppleKeyboardPlatform } from "../shortcuts/platform";
@@ -50,11 +52,19 @@ export function GlobalCommandSurfaces() {
   const [paletteQuery, setPaletteQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  // 用户覆盖：本轮只做静默持久化（读取+写回），改键 UI 属后续设置页任务。
-  const [overrides] = useState<ShortcutOverrides>(() => readStoredShortcutOverrides());
+  // 用户覆盖：与设置页改键（ConfigShortcutsPanel）共用同一 localStorage 存储；
+  // 订阅变更即时重读，改键无需重载即对新分发生效。
+  const [overrides, setOverrides] = useState<ShortcutOverrides>(() => readStoredShortcutOverrides());
   useEffect(() => {
     writeStoredShortcutOverrides(overrides);
   }, [overrides]);
+  useEffect(
+    () =>
+      subscribeStoredShortcutOverrides(() => {
+        setOverrides(readStoredShortcutOverrides());
+      }),
+    [],
+  );
 
   const effective = useMemo(() => resolveEffectiveBindings(overrides), [overrides]);
   const isApple = useMemo(() => isAppleKeyboardPlatform(), []);

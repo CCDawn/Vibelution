@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { resolveEffectiveBindings } from "./commands";
 import {
+  isShortcutRecordingActive,
   matchesShortcutBinding,
   recordShortcutBinding,
   useGlobalShortcuts,
@@ -260,6 +261,93 @@ describe("useGlobalShortcuts 状态接线 smoke", () => {
       expect(host.opened()).toBe(false);
     } finally {
       unmountHost(host);
+    }
+  });
+});
+
+/** 录制宿主：recording=true 的 hook 实例（模拟设置页改键面板录制态）。 */
+function RecorderHost(props: {
+  effective: ReturnType<typeof resolveEffectiveBindings>;
+  onRecord: (outcome: { kind: string; binding?: string }) => void;
+  enabled?: boolean;
+}): { root: Root; container: HTMLElement } {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  function Host() {
+    useGlobalShortcuts({
+      effective: props.effective,
+      isApple: false,
+      recording: true,
+      enabled: props.enabled,
+      onCommand: () => undefined,
+      onRecord: props.onRecord as never,
+    });
+    return null;
+  }
+  act(() => {
+    root.render(createElement(Host));
+  });
+  return { root, container };
+}
+
+describe("useGlobalShortcuts 录制门与 enabled（跨实例协调）", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("其他实例录制时分发让路，录制实例收到按键", () => {
+    const onCommand = vi.fn();
+    const onRecord = vi.fn();
+    const dispatcher = HookHost({ effective: resolveEffectiveBindings(), onCommand });
+    const recorder = RecorderHost({ effective: resolveEffectiveBindings(), onRecord });
+    try {
+      expect(isShortcutRecordingActive()).toBe(true);
+      act(() => {
+        window.dispatchEvent(keyEvent({ key: "j", code: "KeyJ" }));
+      });
+      expect(onRecord).toHaveBeenCalledWith({ kind: "binding", binding: "CmdOrCtrl+j" });
+      expect(onCommand).not.toHaveBeenCalled();
+    } finally {
+      unmountHost(recorder);
+    }
+    expect(isShortcutRecordingActive()).toBe(false);
+    act(() => {
+      window.dispatchEvent(keyEvent());
+    });
+    expect(onCommand).toHaveBeenCalledWith("openCommandPalette", "CmdOrCtrl+k");
+    unmountHost(dispatcher);
+  });
+
+  it("enabled=false 时不挂监听，按键不分发", () => {
+    const onCommand = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    function Host() {
+      useGlobalShortcuts({
+        effective: resolveEffectiveBindings(),
+        isApple: false,
+        recording: false,
+        enabled: false,
+        onCommand,
+        onRecord: () => undefined,
+      });
+      return null;
+    }
+    try {
+      act(() => {
+        root.render(createElement(Host));
+      });
+      act(() => {
+        window.dispatchEvent(keyEvent());
+      });
+      expect(onCommand).not.toHaveBeenCalled();
+    } finally {
+      act(() => {
+        root.unmount();
+      });
+      container.remove();
     }
   });
 });

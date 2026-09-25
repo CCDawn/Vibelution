@@ -68,6 +68,33 @@ export function readStoredShortcutOverrides(
   }
 }
 
+type StoredShortcutOverridesListener = () => void;
+
+const changeListeners = new Set<StoredShortcutOverridesListener>();
+
+/**
+ * 订阅覆盖变更（写入真实发生变化时触发）。返回取消订阅函数。
+ * 全局快捷键分发层据此即时重读生效表，设置页改键无需重载。
+ */
+export function subscribeStoredShortcutOverrides(
+  listener: StoredShortcutOverridesListener,
+): () => void {
+  changeListeners.add(listener);
+  return () => {
+    changeListeners.delete(listener);
+  };
+}
+
+function notifyStoredShortcutOverridesChanged(): void {
+  for (const listener of [...changeListeners]) {
+    listener();
+  }
+}
+
+/**
+ * 写入覆盖并通知订阅者；内容与已存值一致时跳过写入与通知（幂等）。
+ * 空覆盖移除存储键（= 全部恢复默认）。
+ */
 export function writeStoredShortcutOverrides(
   overrides: ShortcutOverrides,
   storage: OverridesStorage | null = browserStorage(),
@@ -77,11 +104,16 @@ export function writeStoredShortcutOverrides(
   }
   try {
     const hasEntries = Object.keys(overrides).length > 0;
+    const serialized = hasEntries ? JSON.stringify(overrides) : null;
+    if (storage.getItem(SHORTCUT_OVERRIDES_STORAGE_KEY) === serialized) {
+      return;
+    }
     if (hasEntries) {
-      storage.setItem(SHORTCUT_OVERRIDES_STORAGE_KEY, JSON.stringify(overrides));
+      storage.setItem(SHORTCUT_OVERRIDES_STORAGE_KEY, serialized as string);
     } else {
       storage.removeItem(SHORTCUT_OVERRIDES_STORAGE_KEY);
     }
+    notifyStoredShortcutOverridesChanged();
   } catch {
     // 存储不可写（隐私模式/配额）时静默降级为会话内覆盖。
   }

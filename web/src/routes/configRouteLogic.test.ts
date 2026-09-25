@@ -875,6 +875,19 @@ describe("config route copy", () => {
     expect(visibleCopy.en).not.toMatch(/\bJSON editor\b/i);
   });
 
+  it("keeps shortcuts panel copy bilingual with bindable placeholders", () => {
+    const shortcutsKeys = Object.keys(CONFIG_COPY.zh).filter((key) => key.startsWith("shortcuts"));
+    expect(shortcutsKeys.length).toBeGreaterThanOrEqual(28);
+    for (const key of shortcutsKeys) {
+      expect(key in CONFIG_COPY.en, `${key} missing from en copy`).toBe(true);
+    }
+    expect(CONFIG_COPY.zh.shortcutsTitle).toBe("快捷键");
+    expect(CONFIG_COPY.en.shortcutsTitle).toBe("Keyboard shortcuts");
+    for (const key of ["shortcutsBoundNotice", "shortcutsReservedNotice", "shortcutsOccupiedNotice", "shortcutsStealHint", "shortcutsStealDone", "shortcutsClearedNotice", "shortcutsRestoredNotice"]) {
+      expect(CONFIG_COPY.zh[key]).toMatch(/\{\w+\}/);
+    }
+  });
+
   it("points startup settings to Launcher instead of generic config", () => {
     const zhCopy = Object.values(CONFIG_COPY.zh).join("\n");
     const enCopy = Object.values(CONFIG_COPY.en).join("\n");
