@@ -141,6 +141,7 @@ import { VDialog } from "@/components/vui";
 | --- | --- | --- |
 | `open` / `onOpenChange` | 受控开关 | 关闭后焦点回触发器 |
 | title / children | 标题与正文 | 正文内部可滚动 |
+| `data-vui` | 定位锚点，透传到 Content | 缺省 `dialog-content`；挂载面（如命令面板、会话搜索）传各自锚点覆盖，e2e 用 `data-vui` 定位，不另设第二套定位通道 |
 
 ### 非职责
 - 不做抽屉；不做动作菜单（`VDropdownMenu`）。
@@ -150,6 +151,7 @@ import { VDialog } from "@/components/vui";
 
 ### 反冗余
 - 禁止 route 内 `fixed inset-0` 手写遮罩。
+- 禁止为定位在 `data-vui` 之外再加平行的自定义锚点属性。
 
 ---
 
