@@ -35,7 +35,11 @@
   /* Text utility ladder: exposes the tokens.css size ladder as text-vui-* utilities.
      Product UI must use these; built-in text-sm/text-xs/text-base or arbitrary
      text-[13px] values are design-system defects (see designs/primitives/type-scale.md). */
+  --text-vui-micro-9: var(--vui-font-micro-9);
+  --text-vui-micro-10: var(--vui-font-micro-10);
+  --text-vui-micro-11: var(--vui-font-micro-11);
   --text-vui-2xs: var(--vui-font-2xs);
+  --text-vui-micro-13: var(--vui-font-micro-13);
   --text-vui-xs: var(--vui-font-xs);
   --text-vui-sm: var(--vui-font-sm);
   --text-vui-md: var(--vui-font-md);

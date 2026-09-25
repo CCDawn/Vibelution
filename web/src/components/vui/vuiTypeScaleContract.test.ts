@@ -15,9 +15,9 @@ import { describe, expect, it } from "vitest";
 const vuiRoot = resolve(import.meta.dirname);
 const themeCssPath = resolve(import.meta.dirname, "../../design/theme.tailwind.css");
 
-// Built-in sizes are now at zero; arbitrary micro sizes remain as measured debt (ceilings, not targets).
+// Both ladders are at zero: product UI must use text-vui-* (micro steps included).
 const BUILTIN_TEXT_UTILITY_BASELINE = 0;
-const ARBITRARY_TEXT_SIZE_BASELINE = 26;
+const ARBITRARY_TEXT_SIZE_BASELINE = 0;
 
 const BUILTIN_TEXT_UTILITY = /\btext-(?:sm|xs|base|lg|xl|2xl|3xl)\b/g;
 const ARBITRARY_TEXT_SIZE = /text-\[[0-9.]+(?:px|rem)\]/g;

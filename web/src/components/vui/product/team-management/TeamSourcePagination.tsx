@@ -18,12 +18,12 @@ export type TeamSourcePaginationProps = {
 const BAR =
   "flex min-w-0 items-center justify-between gap-2 px-2 py-1.5 rounded-[var(--radius-control)] select-none whitespace-nowrap " +
   "border border-[color:color-mix(in_srgb,var(--accent-cool)_18%,var(--border-soft))] " +
-  "bg-[color:var(--source-workbench-card)] text-[0.64rem] font-[800] text-[var(--fg-muted)]";
+  "bg-[color:var(--source-workbench-card)] text-vui-micro-10 font-[800] text-[var(--fg-muted)]";
 
 const BUTTON =
   "min-h-[24px] items-center justify-center rounded-[var(--radius-control)] border px-2 " +
   "border-[color:color-mix(in_srgb,var(--accent-cool)_26%,var(--border-soft))] " +
-  "bg-[color:var(--source-workbench-card)] text-[0.62rem] font-[820] text-[var(--fg-primary)] " +
+  "bg-[color:var(--source-workbench-card)] text-vui-micro-10 font-[820] text-[var(--fg-primary)] " +
   "cursor-pointer data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-55";
 
 /**

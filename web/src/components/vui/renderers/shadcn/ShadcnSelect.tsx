@@ -235,7 +235,7 @@ export const ShadcnSelect = forwardRef<HTMLButtonElement, ShadcnSelectProps>(
                         {hasDescription ? (
                           <span
                             data-slot="select-item-description"
-                            className="block min-w-0 truncate text-[11px] leading-4 text-[var(--fg-tertiary)]"
+                            className="block min-w-0 truncate text-vui-micro-11 leading-4 text-[var(--fg-tertiary)]"
                           >
                             {option.description}
                           </span>

@@ -56,7 +56,7 @@ const ROLE_TAG_BASE =
   "inline-flex min-h-[18px] max-w-full items-center justify-self-start overflow-hidden text-ellipsis whitespace-nowrap px-0.5 [font-size:var(--vui-font-xs)] font-[600] not-italic leading-none text-[var(--fg-secondary)]";
 
 const AVATAR =
-  "grid place-items-center shrink-0 w-[30px] h-[30px] rounded-full overflow-hidden text-[var(--fg-primary)] bg-[var(--vui-control-muted)] [font-family:var(--font-display)] font-extrabold text-[0.66rem]";
+  "grid place-items-center shrink-0 w-[30px] h-[30px] rounded-full overflow-hidden text-[var(--fg-primary)] bg-[var(--vui-control-muted)] [font-family:var(--font-display)] font-extrabold text-vui-micro-11";
 
 function issueToneClass(tone: string): string {
   if (tone === "ok") {
@@ -193,11 +193,11 @@ export function AgentDenseList({
         >
           <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 min-w-0 px-1 pb-0.5">
             <div className="flex items-center gap-[6px] min-w-0" title={column.description}>
-              <strong className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--fg-primary)] text-[0.82rem] font-extrabold">
+              <strong className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--fg-primary)] text-vui-micro-13 font-extrabold">
                 {column.label}
               </strong>
             </div>
-            <em className="inline-flex min-h-5 min-w-5 items-center justify-center rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-1 text-[0.72rem] font-extrabold not-italic text-[var(--fg-secondary)]">
+            <em className="inline-flex min-h-5 min-w-5 items-center justify-center rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-1 text-vui-2xs font-extrabold not-italic text-[var(--fg-secondary)]">
               {column.count}
             </em>
           </div>

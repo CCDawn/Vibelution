@@ -34,6 +34,10 @@
 
 | Token | 取值（tokens.css） | 用途 |
 | --- | --- | --- |
+| `text-vui-micro-9` | `--vui-font-micro-9` (9px) | 极密微标注（角标/点），罕用 |
+| `text-vui-micro-10` | `--vui-font-micro-10` (10px) | 微标注 |
+| `text-vui-micro-11` | `--vui-font-micro-11` (11px) | 微标注 / eyebrow |
+| `text-vui-micro-13` | `--vui-font-micro-13` (13px) | 微标注 / 密集 label |
 | `text-vui-2xs` | `--vui-font-2xs` (12px) | 密集元信息，少用 |
 | `text-vui-xs` | `--vui-font-xs` (14px) | caption / chip / toolbar |
 | `text-vui-sm` | `--vui-font-sm` (15px) | 控件 / 列表次要文字 |

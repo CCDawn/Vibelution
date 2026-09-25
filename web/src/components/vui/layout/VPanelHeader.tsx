@@ -14,7 +14,7 @@ export type VPanelHeaderProps = {
 };
 
 const titleClassName =
-  "m-0 text-[1rem] font-bold leading-[1.2] text-[var(--fg-primary)] [overflow-wrap:anywhere] [font-family:var(--font-display)]";
+  "m-0 text-vui-md font-bold leading-[1.2] text-[var(--fg-primary)] [overflow-wrap:anywhere] [font-family:var(--font-display)]";
 
 export function VPanelHeader({
   title,

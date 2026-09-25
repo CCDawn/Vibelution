@@ -176,7 +176,11 @@
   --font-mono: "JetBrains Mono", "Cascadia Code", "SF Mono", ui-monospace, monospace;
 
   /* Primitive size ladder (rem @ 16px root) */
+  --vui-font-micro-9: 0.5625rem; /* 9 — micro meta, badge/eyebrow only, rare */
+  --vui-font-micro-10: 0.625rem; /* 10 — micro meta */
+  --vui-font-micro-11: 0.6875rem; /* 11 — micro meta */
   --vui-font-2xs: 0.75rem; /* 12 — dense meta, rare */
+  --vui-font-micro-13: 0.8125rem; /* 13 — micro meta / label */
   --vui-font-xs: 0.875rem; /* 14 — caption / chip / toolbar */
   --vui-font-sm: 0.9375rem; /* 15 — control / list secondary */
   --vui-font-md: 1rem; /* 16 — body default */
