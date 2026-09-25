@@ -379,8 +379,12 @@ def test_ensure_unpackaged_electron_rebuilds_stale_bundle(tmp_path, monkeypatch)
             main_js = out / "main.js"
             main_js.write_text("new-main\n", encoding="utf-8")
             os.utime(main_js, (2_000_000_100, 2_000_000_100))
-        if command[-1].endswith("preload.cjs") or "--outfile" in command:
-            outfile = Path(command[command.index("--outfile") + 1])
+        outfile_arg = next((part for part in command if part.startswith("--outfile")), None)
+        if outfile_arg is not None:
+            if "=" in outfile_arg:
+                outfile = Path(outfile_arg.split("=", 1)[1])
+            else:
+                outfile = Path(command[command.index(outfile_arg) + 1])
             outfile.parent.mkdir(parents=True, exist_ok=True)
             outfile.write_text("preload\n", encoding="utf-8")
         if str(command[-1]).endswith("buildWorkbenchJob.js"):
@@ -395,6 +399,11 @@ def test_ensure_unpackaged_electron_rebuilds_stale_bundle(tmp_path, monkeypatch)
     result = desktop_shell.ensure_unpackaged_electron(tmp_path)
     assert all("package:dir" not in " ".join(command) for command in calls)
     assert any("--outDir" in command for command in calls)
+    # esbuild CLI rejects space-separated values for value flags (e.g. "--outfile x"),
+    # so the launcher must pass them joined, matching the npm build:preload script.
+    esbuild_call = next(command for command in calls if any(part.startswith("--outfile") for part in command))
+    assert any(part.startswith("--outfile=") for part in esbuild_call)
+    assert "--platform=node" in esbuild_call and "--format=cjs" in esbuild_call
     assert not (tmp_path / "desktop" / "electron" / ".build-stage").exists()
     assert desktop_shell.unpackaged_main_js(tmp_path).read_text(encoding="utf-8") == "new-main\n"
     assert result["rebuilt"] is True
