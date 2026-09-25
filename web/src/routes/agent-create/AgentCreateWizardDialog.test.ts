@@ -36,6 +36,10 @@ describe("AgentCreateWizardDialog contract", () => {
     expect(dialogSource).toContain("enabled: open");
     expect(dialogSource).toContain("draftDirty");
     expect(dialogSource).toContain("normalizeCreateDraftForWorkspace");
+    // Field-level default backfill: the normalize effect must not gate on the
+    // whole-draft dirty flag (defect 2026-09-25 #6, archive plan 2026-07-19:81).
+    expect(dialogSource).toContain("if (!open || (!workspaceQuery.data && !toolBundles.length)) return;");
+    expect(dialogSource).not.toContain("draftDirty ||");
     expect(dialogSource).toContain("createAgent(createAgentPayload(nextDraft, toolBundles))");
     expect(dialogSource).toContain("onStartConversation");
     expect(dialogSource).toContain("onStartConversation(createdAgent)");
