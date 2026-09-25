@@ -1,8 +1,13 @@
 # Playwright E2E 手动车道（隔离分支实例）
 
 针对真实分支实例（真实后端 + 真实前端产物 + headless/CDP 浏览器）的端到端测试车道。
-当前覆盖：AppShell 全路由只读冒烟（`test_routes_smoke.py`）与主导航性能基线
-（`test_perf_baseline.py`，只测量不断言阈值）。
+当前覆盖：AppShell 全路由只读冒烟（`test_routes_smoke.py`）、主导航性能基线
+（`test_perf_baseline.py`，只测量不断言阈值）、会话交互链路（`test_conversation_flow.py`，
+发消息/终止/空态/hover 工具条/划词引用）、Agent 生命周期（`test_agent_lifecycle.py`，
+三步向导建 Agent + 记忆设置关闭持久化）、快捷键改键（`test_shortcuts.py`，录键/
+localStorage 覆盖/冲突抢占）与会话 SSE keep-warm 回归（`test_keep_warm.py`）。
+交互与生命周期用例的 arrange 优先走实例 API（`helpers/agent_factory.py`，
+POST /api/sessions、POST /api/agents 等，控制令牌同 GET 口径）。
 
 ## 车道与挂载约定
 
@@ -139,9 +144,15 @@ $env:VIBELUTION_E2E = "1"; .\.venv\Scripts\python.exe -m pytest tests/e2e -m ser
   - Agent 创建入口 `#agents-create-trigger`（三步向导，成功标题「Agent 已创建」）。
   - 记忆开关：`/agents` config pane「记忆设置」checkbox（`data-vui="checkbox"`），
     保存断言用面板 pill「未保存→已同步」。
-  - 快捷键：`/config?section=workbench-shortcuts`；命令面板 Ctrl+K、会话搜索 Ctrl+P，
-    面板 `data-vui="global-command-palette"` / `"global-session-search"`；覆盖存
-    localStorage `vibelution.shortcuts.overrides`。
+  - 快捷键：`/config?section=workbench-interface&page=workbench-shortcuts`
+    （`?section=` 是设置分组 id、`?page=` 是页面 id，见 ConfigRoute.tsx）；命令行
+    testid `shortcuts-row-<id>` / `shortcuts-modify-<id>` / `shortcuts-recording-strip`，
+    状态 chip「默认/已覆盖」，冲突 banner `shortcuts-banner` +「抢占并绑定」；
+    命令面板 Ctrl+K、会话搜索 Ctrl+P，覆盖存 localStorage
+    `vibelution.shortcuts.overrides`（canonical 串如 `CmdOrCtrl+Shift+l`）。
+    已知缺陷（2026-09-25 实测 head=5eeb54a40）：VDialog/ShadcnDialog 不透传
+    `data-vui`，`global-command-palette` / `global-session-search` 锚点不在 DOM；
+    面板打开断言用 `[data-vui="dialog-content"]` + `[data-testid="vui-command-palette"]`。
   - hover 工具条 `span[data-conversation-hover-actions="1"]`（断言可见性而非存在性）；
     划词引用菜单 `data-conversation-selection-menu="1"`。
 - 空态：全新实例全部路由有空态兜底；`/` 配置读取失败显示「工作台配置读取失败」，
