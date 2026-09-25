@@ -33,10 +33,12 @@ describe("VPopover contract", () => {
   it("AppShell active-work details stay inside the settings VPopover", () => {
     const shell = readFileSync(resolve(vuiRoot, "../../app/AppShell.tsx"), "utf8");
     const styles = readFileSync(resolve(vuiRoot, "../../app/AppShell.styles.ts"), "utf8");
+    // cdfe8b5f0 moved active work from the settings popover to a title-bar
+    // VPopover; the details must stay inside that popover, not a hover cluster.
     expect(shell).not.toContain('data-vui="active-work-popover"');
-    expect(shell).toContain("className={styles.settingsActiveWork}");
+    expect(shell).not.toContain("settingsActiveWork");
+    expect(shell).toContain("contentClassName={styles.activeWorkPopoverContent}");
     expect(shell).toContain("activeWorkIndicator.items.map");
-    expect(styles).toContain("settingsActiveWork");
     expect(styles).not.toContain("[&:hover_.activeWorkDetailPanel]:visible");
   });
 
