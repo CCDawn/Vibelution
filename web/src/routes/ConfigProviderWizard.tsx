@@ -23,9 +23,12 @@ import {
   type ProviderWizardState,
   type ProviderWizardStep,
 } from "./configProviderLogic";
+import { type ConfigCopy, formatConfigCopy } from "./config/configCopy";
 import styles from "./ConfigProviderWizard.styles";
 
 export type ConfigProviderWizardProps = {
+  /** Bilingual copy table (wave 4). */
+  copy: ConfigCopy;
   state: ProviderWizardState;
   templates: ConfigProviderPresetOption[];
   disabled: boolean;
@@ -37,21 +40,21 @@ export type ConfigProviderWizardProps = {
   onPin: (providerId: string, models: ConfigCatalogModel[]) => Promise<void>;
 };
 
-const STEPS: Array<{ id: ProviderWizardStep; label: string }> = [
-  { id: "template", label: "1 模板" },
-  { id: "connection", label: "2 连接" },
-  { id: "discovery", label: "3 发现" },
-  { id: "pin", label: "4 固定" },
+const STEPS: Array<{ id: ProviderWizardStep; copyKey: "wizardStepTemplate" | "wizardStepConnection" | "wizardStepDiscovery" | "wizardStepPin" }> = [
+  { id: "template", copyKey: "wizardStepTemplate" },
+  { id: "connection", copyKey: "wizardStepConnection" },
+  { id: "discovery", copyKey: "wizardStepDiscovery" },
+  { id: "pin", copyKey: "wizardStepPin" },
 ];
 
-const TEMPLATE_GROUPS = [
-  { id: "official_api", label: "官方 API" },
-  { id: "aggregator", label: "聚合平台" },
-  { id: "relay", label: "中继" },
-  { id: "self_hosted", label: "远程自托管" },
-  { id: "local_runtime", label: "本地框架" },
-  { id: "custom", label: "自定义" },
-] as const;
+const TEMPLATE_GROUPS: Array<{ id: string; copyKey: "wizardGroupOfficial" | "wizardGroupAggregator" | "wizardGroupRelay" | "wizardGroupSelfHosted" | "wizardGroupLocalRuntime" | "wizardGroupCustom" }> = [
+  { id: "official_api", copyKey: "wizardGroupOfficial" },
+  { id: "aggregator", copyKey: "wizardGroupAggregator" },
+  { id: "relay", copyKey: "wizardGroupRelay" },
+  { id: "self_hosted", copyKey: "wizardGroupSelfHosted" },
+  { id: "local_runtime", copyKey: "wizardGroupLocalRuntime" },
+  { id: "custom", copyKey: "wizardGroupCustom" },
+];
 
 const PROTOCOL_OPTIONS = ["responses", "chat_completions", "anthropic_messages", "gemini_generate_content"];
 
@@ -77,12 +80,13 @@ function templateServiceClass(template: ConfigProviderPresetOption): string {
   return "self_hosted";
 }
 
-function templateModelFamily(template: ConfigProviderPresetOption): string {
+function templateModelFamily(template: ConfigProviderPresetOption, copy: ConfigCopy): string {
   const model = asRecord(template.default_model);
-  return asString(model.family) || asString(model.model) || asString(model.label) || "模型族未标注";
+  return asString(model.family) || asString(model.model) || asString(model.label) || copy.wizardModelFamilyUnlabeled;
 }
 
 export function ConfigProviderWizard({
+  copy,
   state,
   templates,
   disabled,
@@ -158,7 +162,7 @@ export function ConfigProviderWizard({
           }
         })
         .catch((error: unknown) => {
-          if (!cancelled) setLocalError(error instanceof Error ? error.message : "Provider ID 建议失败");
+          if (!cancelled) setLocalError(error instanceof Error ? error.message : copy.wizardSuggestFailed);
         });
     }, 250);
     return () => {
@@ -198,7 +202,7 @@ export function ConfigProviderWizard({
       const models = await onDiscover(state.providerId, credentialValue);
       onChange({ type: "set_discovery", models });
     } catch (error) {
-      setLocalError(error instanceof Error ? error.message : "发现失败；已保留上一次目录。 ");
+      setLocalError(error instanceof Error ? error.message : copy.wizardDiscoverPreserved);
     } finally {
       setCredentialValue("");
     }
@@ -215,7 +219,7 @@ export function ConfigProviderWizard({
       setDiscoveryAttempted(false);
       appliedTemplateRef.current = "";
     } catch (error) {
-      setLocalError(error instanceof Error ? error.message : "固定模型失败");
+      setLocalError(error instanceof Error ? error.message : copy.wizardPinFailed);
     }
   }
 
@@ -225,15 +229,15 @@ export function ConfigProviderWizard({
     <VSurface as="section" className={styles.wizard} padding="none" data-wizard-step={state.step}>
       <VPanelHeader
         eyebrow="Provider setup"
-        title="模型服务高级配置"
-        actions={<VStatusChip tone={busyLabel ? "warning" : "accent"}>{busyLabel || `步骤 ${selectedStepIndex + 1}/4`}</VStatusChip>}
+        title={copy.wizardTitle}
+        actions={<VStatusChip tone={busyLabel ? "warning" : "accent"}>{busyLabel || formatConfigCopy(copy.wizardStepProgressTemplate, { current: selectedStepIndex + 1, total: STEPS.length })}</VStatusChip>}
       />
-      <div className={styles.wizardSteps} aria-label="Provider 向导进度">
+      <div className={styles.wizardSteps} aria-label={copy.wizardStepsAria}>
         {STEPS.map((step, index) => (
           <VButton key={step.id} variant={step.id === state.step ? "primary" : "ghost"} isDisabled
             icon={index < selectedStepIndex ? <Check size={13} /> : null}
           >
-            {step.label}
+            {copy[step.copyKey]}
           </VButton>
         ))}
       </div>
@@ -248,7 +252,7 @@ export function ConfigProviderWizard({
               if (group.id !== "custom" && !groupTemplates.length) return null;
               return (
                 <section key={group.id} className={styles.templateGroup}>
-                  <strong>{group.label}</strong>
+                  <strong>{copy[group.copyKey]}</strong>
                   <div className={styles.templateGrid}>
                     {groupTemplates.map((template) => (
                       <VButton
@@ -264,7 +268,7 @@ export function ConfigProviderWizard({
                       >
                         <span className={styles.providerIdentity}>
                           <strong className={styles.ellipsis}>{template.label}</strong>
-                          <small className={styles.muted}>{templateModelFamily(template)}</small>
+                          <small className={styles.muted}>{templateModelFamily(template, copy)}</small>
                         </span>
                       </VButton>
                     ))}
@@ -277,7 +281,7 @@ export function ConfigProviderWizard({
                           onChange({ type: "choose_template", templateId: "custom", serviceClass: "self_hosted" });
                         }}
                       >
-                        自定义服务
+                        {copy.wizardCustomService}
                       </VButton>
                     ) : null}
                   </div>
@@ -290,8 +294,8 @@ export function ConfigProviderWizard({
         {state.step === "connection" ? (
           <div className={styles.fieldGrid}>
             {providerCreated ? (
-              <VStateSurface className={styles.fieldWide} tone="unavailable" title="Provider 已创建，连接字段已锁定">
-                返回 Provider 详情使用“修改路由”并完成 backend preview token 确认；向导不会静默忽略字段修改。
+              <VStateSurface className={styles.fieldWide} tone="unavailable" title={copy.wizardLockedTitle}>
+                {copy.wizardLockedBody}
               </VStateSurface>
             ) : null}
             <label className={styles.field}>
@@ -299,7 +303,7 @@ export function ConfigProviderWizard({
               <VInput value={state.providerId} disabled={connectionLocked} onChange={(event) => updateConnection({ providerId: event.target.value })} />
             </label>
             <label className={styles.field}>
-              <span>显示名称</span>
+              <span>{copy.wizardDisplayName}</span>
               <VInput value={state.label} disabled={connectionLocked} onChange={(event) => updateConnection({ label: event.target.value })} />
             </label>
             <label className={styles.fieldWide}>
@@ -311,7 +315,7 @@ export function ConfigProviderWizard({
               <VInput value={state.credentialRef} disabled={connectionLocked} onChange={(event) => updateConnection({ credentialRef: event.target.value })} />
             </label>
             <label className={styles.field}>
-              <span>Secret（仅本次请求）</span>
+              <span>{copy.wizardSecretOnce}</span>
               <VInput
                 type="password"
                 autoComplete="new-password"
@@ -351,9 +355,9 @@ export function ConfigProviderWizard({
               />
             </label>
             <label className={styles.field}>
-              <span>默认 wire protocol</span>
+              <span>{copy.wizardDefaultWireProtocol}</span>
               <VStringSelect
-                ariaLabel="默认 wire protocol"
+                ariaLabel={copy.wizardDefaultWireProtocol}
                 value={state.defaultProtocol}
                 isDisabled={connectionLocked}
                 options={PROTOCOL_OPTIONS.map((value) => ({ value, label: value }))}
@@ -400,11 +404,15 @@ export function ConfigProviderWizard({
             <VStateSurface
               tone={localError ? "error" : discoveryAttempted && state.discoveredModels.length ? "info" : "empty"}
               icon={<Search size={15} />}
-              title={localError ? "发现失败，已保留上次目录" : state.discoveredModels.length ? `发现 ${state.discoveredModels.length} 个模型` : "创建草稿并测试发现"}
+              title={localError
+                ? copy.wizardDiscoverFailedTitle
+                : state.discoveredModels.length
+                  ? formatConfigCopy(copy.wizardDiscoveredTemplate, { count: state.discoveredModels.length })
+                  : copy.wizardDiscoverIdleTitle}
               facts={state.discoveredModels.slice(0, 4).map((model) => ({ key: model.modelRef, label: model.modelRef, value: model.availability }))}
-              actions={<VButton variant="primary" icon={<ServerCog size={14} />} isDisabled={disabled || Boolean(busyLabel)} onPress={() => void createAndDiscover()}>创建 / 测试 / 发现</VButton>}
+              actions={<VButton variant="primary" icon={<ServerCog size={14} />} isDisabled={disabled || Boolean(busyLabel)} onPress={() => void createAndDiscover()}>{copy.wizardCreateTestDiscover}</VButton>}
             >
-              仅展示归一化目录与有界错误，不展示原始 Provider 响应。Secret 完成请求后立即清空。
+              {copy.wizardDiscoveryBody}
             </VStateSurface>
           </div>
         ) : null}
@@ -431,12 +439,12 @@ export function ConfigProviderWizard({
 
       {localError ? <p className={styles.critical} role="alert">{localError}</p> : null}
       <div className={styles.wizardFooter}>
-        <VButton icon={<ChevronLeft size={14} />} isDisabled={disabled || state.step === "template"} onPress={() => onChange({ type: "back" })}>上一步</VButton>
-        <VActionGroup ariaLabel="向导下一步">
+        <VButton icon={<ChevronLeft size={14} />} isDisabled={disabled || state.step === "template"} onPress={() => onChange({ type: "back" })}>{copy.wizardPrevious}</VButton>
+        <VActionGroup ariaLabel={copy.wizardNextActionsAria}>
           {state.step === "pin" ? (
-            <VButton variant="primary" icon={<KeyRound size={14} />} isDisabled={disabled || Boolean(busyLabel) || !canAdvanceProviderWizard(state)} onPress={() => void pinSelectedModels()}>固定所选模型</VButton>
+            <VButton variant="primary" icon={<KeyRound size={14} />} isDisabled={disabled || Boolean(busyLabel) || !canAdvanceProviderWizard(state)} onPress={() => void pinSelectedModels()}>{copy.wizardPinSelected}</VButton>
           ) : (
-            <VButton variant="primary" trailingIcon={<ChevronRight size={14} />} isDisabled={disabled || !canAdvanceProviderWizard(state)} onPress={() => onChange({ type: "next" })}>下一步</VButton>
+            <VButton variant="primary" trailingIcon={<ChevronRight size={14} />} isDisabled={disabled || !canAdvanceProviderWizard(state)} onPress={() => onChange({ type: "next" })}>{copy.wizardNext}</VButton>
           )}
         </VActionGroup>
       </div>

@@ -29,6 +29,7 @@ import type {
   ConfigProviderMergePreview,
   ConfigProviderMergeResult,
 } from "../api/types";
+import { type ConfigCopy, formatConfigCopy } from "./config/configCopy";
 import {
   buildProviderSetupChecklist,
   canTestProviderModel,
@@ -58,6 +59,8 @@ export type ProviderActionFeedback = {
 } | null;
 
 export type ConfigProviderRegistryPanelProps = {
+  /** Bilingual copy table (wave 4): every user-facing string comes from here. */
+  copy: ConfigCopy;
   rows: ProviderRegistryRow[];
   selectedProviderId: string;
   selectedTab: ConfigProviderRegistryTab;
@@ -92,41 +95,74 @@ export type ConfigProviderRegistryPanelProps = {
   onAddConnection?: () => void;
 };
 
-const TABS: Array<{ id: ConfigProviderRegistryTab; label: string }> = [
-  { id: "connection", label: "连接" },
-  { id: "models", label: "模型库 · 固定" },
-  { id: "protocols", label: "协议与能力" },
-  { id: "diagnostics", label: "诊断" },
+const TABS: Array<{ id: ConfigProviderRegistryTab; copyKey: "registryTabConnection" | "registryTabModels" | "registryTabProtocols" | "registryTabDiagnostics" }> = [
+  { id: "connection", copyKey: "registryTabConnection" },
+  { id: "models", copyKey: "registryTabModels" },
+  { id: "protocols", copyKey: "registryTabProtocols" },
+  { id: "diagnostics", copyKey: "registryTabDiagnostics" },
 ];
 
 const MODEL_FILTERS: Array<{
   id: ProviderModelFilter;
-  label: string;
+  copyKey: "registryFilterAll" | "registryFilterPinned" | "registryFilterDiscovered";
   countKey: "total" | "pinned" | "discovered" | "unavailable";
 }> = [
-  { id: "all", label: "全部", countKey: "total" },
-  { id: "pinned", label: "已添加", countKey: "pinned" },
-  { id: "discovered", label: "添加模型", countKey: "discovered" },
+  { id: "all", copyKey: "registryFilterAll", countKey: "total" },
+  { id: "pinned", copyKey: "registryFilterPinned", countKey: "pinned" },
+  { id: "discovered", copyKey: "registryFilterDiscovered", countKey: "discovered" },
 ];
 
-export function modelTestRecoveryHint(kind: string): string {
-  if (["auth_failed", "missing_credential"].includes(kind)) return "请在连接设置中检查 API Key。";
-  if (kind === "rate_limited") return "请求受到限流，请稍后重试；若持续出现，请检查服务额度。";
-  if (kind === "network") return "无法连接服务，请检查网络和服务是否启动。";
-  if (kind === "timeout") return "服务响应超时，请稍后重试并检查服务负载。";
-  if (["service_unavailable", "upstream_unavailable"].includes(kind)) return "上游服务暂不可用，请稍后重试或切换服务。";
-  if (kind === "not_found") return "请核对模型名称与服务地址，必要时刷新模型目录。";
-  return "请查看错误详情，核对请求参数后重试。";
+export type ModelTestRecoveryLabels = {
+  testRecoveryAuth: string;
+  testRecoveryRateLimited: string;
+  testRecoveryNetwork: string;
+  testRecoveryTimeout: string;
+  testRecoveryUnavailable: string;
+  testRecoveryNotFound: string;
+  testRecoveryDefault: string;
+};
+
+export function modelTestRecoveryHint(kind: string, labels: ModelTestRecoveryLabels): string {
+  if (["auth_failed", "missing_credential"].includes(kind)) return labels.testRecoveryAuth;
+  if (kind === "rate_limited") return labels.testRecoveryRateLimited;
+  if (kind === "network") return labels.testRecoveryNetwork;
+  if (kind === "timeout") return labels.testRecoveryTimeout;
+  if (["service_unavailable", "upstream_unavailable"].includes(kind)) return labels.testRecoveryUnavailable;
+  if (kind === "not_found") return labels.testRecoveryNotFound;
+  return labels.testRecoveryDefault;
 }
 
-function providerStatusLabel(status: string): string {
-  const labels: Record<string, string> = {
-    reachable: "目录已更新", stale: "目录待更新", not_discovered: "尚未发现模型", configured: "已配置",
-    auth_failed: "认证失败", discovery_failed: "模型发现失败", protocol_mismatch: "协议不匹配",
-    blocked: "已阻塞", observed: "已发现", pinned: "已添加", missing_remote: "已添加 · 最新目录未收录",
-    disabled: "已禁用",
+type ProviderStatusLabels = {
+  providerStatusReachable: string;
+  providerStatusStale: string;
+  providerStatusNotDiscovered: string;
+  providerStatusConfigured: string;
+  providerStatusAuthFailed: string;
+  providerStatusDiscoveryFailed: string;
+  providerStatusProtocolMismatch: string;
+  providerStatusBlocked: string;
+  providerStatusObserved: string;
+  providerStatusPinned: string;
+  providerStatusMissingRemote: string;
+  providerStatusDisabled: string;
+};
+
+function providerStatusLabel(status: string, labels: ProviderStatusLabels): string {
+  const labelsByStatus: Record<string, string> = {
+    reachable: labels.providerStatusReachable,
+    stale: labels.providerStatusStale,
+    not_discovered: labels.providerStatusNotDiscovered,
+    configured: labels.providerStatusConfigured,
+    auth_failed: labels.providerStatusAuthFailed,
+    discovery_failed: labels.providerStatusDiscoveryFailed,
+    protocol_mismatch: labels.providerStatusProtocolMismatch,
+    blocked: labels.providerStatusBlocked,
+    observed: labels.providerStatusObserved,
+    pinned: labels.providerStatusPinned,
+    missing_remote: labels.providerStatusMissingRemote,
+    disabled: labels.providerStatusDisabled,
   };
-  return labels[status] || status;
+  return labelsByStatus[status] || status;
 }
 
 function statusTone(status: string): VStatusTone {
@@ -141,12 +177,14 @@ function ProviderAssetRow({
   selected,
   inspecting,
   disabled,
+  copy,
   onSelect,
 }: {
   row: ProviderRegistryRow;
   selected: boolean;
   inspecting: boolean;
   disabled: boolean;
+  copy: ConfigCopy;
   onSelect: () => void;
 }) {
   return (
@@ -169,8 +207,8 @@ function ProviderAssetRow({
           <strong className={styles.providerLabel}>{row.label || row.providerId}</strong>
         </span>
         <span className={styles.providerStatusRow}>
-          <small className={styles.providerMeta}>{row.pinnedCount} 个模型</small>
-          <VStatusChip tone={statusTone(row.status)} data-provider-status={row.status}>{providerStatusLabel(row.status)}</VStatusChip>
+          <small className={styles.providerMeta}>{row.pinnedCount}{copy.registryModelsCountUnit}</small>
+          <VStatusChip tone={statusTone(row.status)} data-provider-status={row.status}>{providerStatusLabel(row.status, copy)}</VStatusChip>
         </span>
       </VButton>
 
@@ -178,24 +216,40 @@ function ProviderAssetRow({
   );
 }
 
-function discoveryErrorLabel(errorType: string): string {
+type DiscoveryErrorLabels = {
+  discoveryErrTimeout: string;
+  discoveryErrNetwork: string;
+  discoveryErrCredentialMissing: string;
+  discoveryErrAuthFailed: string;
+  discoveryErrEndpointInvalid: string;
+  discoveryErrProtocolMismatch: string;
+  discoveryErrInvalidResponse: string;
+  discoveryErrRateLimited: string;
+  discoveryErrUpstreamRejected: string;
+  discoveryErrUnavailable: string;
+  discoveryErrBlocked: string;
+  discoveryErrOther: string;
+  discoveryErrNone: string;
+};
+
+function discoveryErrorLabel(errorType: string, labels: DiscoveryErrorLabels): string {
   switch (errorType) {
-    case "timeout": return "请求超时";
-    case "network": return "网络不可达";
-    case "credential_missing": return "未配置凭据";
+    case "timeout": return labels.discoveryErrTimeout;
+    case "network": return labels.discoveryErrNetwork;
+    case "credential_missing": return labels.discoveryErrCredentialMissing;
     case "credential_rejected":
-    case "auth_failed": return "认证失败";
-    case "endpoint_invalid": return "服务地址无效";
-    case "protocol_mismatch": return "协议不兼容";
-    case "invalid_response": return "返回格式不兼容";
-    case "rate_limited": return "上游限流";
-    case "upstream_rejected": return "上游拒绝请求";
+    case "auth_failed": return labels.discoveryErrAuthFailed;
+    case "endpoint_invalid": return labels.discoveryErrEndpointInvalid;
+    case "protocol_mismatch": return labels.discoveryErrProtocolMismatch;
+    case "invalid_response": return labels.discoveryErrInvalidResponse;
+    case "rate_limited": return labels.discoveryErrRateLimited;
+    case "upstream_rejected": return labels.discoveryErrUpstreamRejected;
     case "service_unavailable":
     case "upstream_unavailable":
-    case "discovery_unavailable": return "上游暂不可用";
-    case "blocked": return "访问被阻止";
-    case "other": return "发现失败";
-    default: return errorType || "无";
+    case "discovery_unavailable": return labels.discoveryErrUnavailable;
+    case "blocked": return labels.discoveryErrBlocked;
+    case "other": return labels.discoveryErrOther;
+    default: return errorType || labels.discoveryErrNone;
   }
 }
 
@@ -205,7 +259,7 @@ function capabilityTone(observation: ConfigCapabilityObservation): VStatusTone {
   return "warning";
 }
 
-function CapabilityList({ model }: { model: ConfigCatalogModel }) {
+function CapabilityList({ model, copy }: { model: ConfigCatalogModel; copy: ConfigCopy }) {
   const capabilities = Object.entries(model.capabilities);
   const reasoningValues = model.reasoningEffortValues ?? [];
   const reasoningSource = String(model.reasoningCapabilitySource || "");
@@ -216,22 +270,22 @@ function CapabilityList({ model }: { model: ConfigCatalogModel }) {
     const isOperator = reasoningSource === "operator_override" || model.reasoningVerificationStatus === "declared";
     reasoningRows.push({
       key: "reasoning_effort",
-      label: `思考深度: ${reasoningValues.join("/")}`,
+      label: `${copy.reasoningDepthPrefix}${reasoningValues.join("/")}`,
       detail: isOperator
-        ? `协议已声明 · 默认 ${model.defaultReasoningEffort || "-"} · adapter ${model.reasoningAdapter || "none"}`
-        : `已验证 · adapter ${model.reasoningAdapter || "none"}`,
+        ? formatConfigCopy(copy.reasoningDeclaredDetail, { default: model.defaultReasoningEffort || "-", adapter: model.reasoningAdapter || "none" })
+        : formatConfigCopy(copy.reasoningVerifiedDetail, { adapter: model.reasoningAdapter || "none" }),
       tone: "success",
     });
   } else if (isPinned) {
     reasoningRows.push({
       key: "reasoning_effort_missing",
-      label: "思考深度: 未配置",
-      detail: "固定后可写 pin defaults.reasoning_effort_values，或对 Responses 模型点「验证推理 low/high」",
+      label: copy.reasoningMissingLabel,
+      detail: copy.reasoningMissingDetail,
       tone: "warning",
     });
   }
   if (!capabilities.length && !reasoningRows.length) {
-    return <span className={styles.capabilityUnknown}>{isPinned ? "能力未观测" : "—"}</span>;
+    return <span className={styles.capabilityUnknown}>{isPinned ? copy.capabilityUnobserved : "—"}</span>;
   }
   return (
     <div className={styles.capabilityList}>
@@ -245,12 +299,12 @@ function CapabilityList({ model }: { model: ConfigCatalogModel }) {
       {capabilities.map(([name, observation]) => (
         <VTooltip
           key={name}
-          content={`${observation.source} · ${observation.confidence || "confidence unknown"} · ${observation.checked_at || "未记录时间"}`}
+          content={`${observation.source} · ${observation.confidence || "confidence unknown"} · ${observation.checked_at || copy.capabilityCheckedAtMissing}`}
           width="wide"
         >
           <span className={styles.providerIdentity}>
             <VStatusChip tone={capabilityTone(observation)}>
-              {name}: {observation.value === "unknown" ? "unknown（未知）" : observation.value === "unsupported" ? "unsupported（不支持）" : "supported"}
+              {name}: {observation.value === "unknown" ? copy.capabilityValueUnknown : observation.value === "unsupported" ? copy.capabilityValueUnsupported : "supported"}
             </VStatusChip>
           </span>
         </VTooltip>
@@ -259,11 +313,11 @@ function CapabilityList({ model }: { model: ConfigCatalogModel }) {
   );
 }
 
-function ProviderSetupChecklist({ provider }: { provider: ProviderRegistryRow }) {
-  const items = buildProviderSetupChecklist(provider);
+function ProviderSetupChecklist({ provider, copy }: { provider: ProviderRegistryRow; copy: ConfigCopy }) {
+  const items = buildProviderSetupChecklist(provider, copy);
   const next = items.find((item) => !item.done);
   return (
-    <div className={styles.setupChecklist} data-provider-checklist="true" aria-label="配置进度">
+    <div className={styles.setupChecklist} data-provider-checklist="true" aria-label={copy.checklistAria}>
       <div className={styles.setupChecklistItems}>
         {items.map((item) => (
           <span
@@ -273,7 +327,7 @@ function ProviderSetupChecklist({ provider }: { provider: ProviderRegistryRow })
             data-optional={item.optional ? "true" : "false"}
           >
             <VStatusChip tone={item.done ? "success" : item.optional ? "neutral" : "warning"}>
-              {item.done ? "完成" : item.optional ? "可选" : "待办"}
+              {item.done ? copy.checklistDone : item.optional ? copy.checklistOptional : copy.checklistTodo}
             </VStatusChip>
             <small className={styles.muted}>{item.label}</small>
           </span>
@@ -281,14 +335,14 @@ function ProviderSetupChecklist({ provider }: { provider: ProviderRegistryRow })
       </div>
       {next ? (
         <p className={styles.setupChecklistNext} role="status">
-          下一步：{next.label}
-          {next.id === "pin" ? "（在下方「已固定 / 已发现」中固定对话模型）" : ""}
-          {next.id === "credential" ? "（点「设置 API Key」）" : ""}
-          {next.id === "connection" ? "（点「发现」或检查路由）" : ""}
+          {copy.checklistNextPrefix}{next.label}
+          {next.id === "pin" ? copy.checklistNextPinHint : ""}
+          {next.id === "credential" ? copy.checklistNextCredentialHint : ""}
+          {next.id === "connection" ? copy.checklistNextConnectionHint : ""}
         </p>
       ) : (
         <p className={styles.setupChecklistNext} role="status">
-          本 Provider 基础配置已完成。固定的模型可在 Agent 中选用。
+          {copy.checklistAllDone}
         </p>
       )}
     </div>
@@ -301,6 +355,7 @@ function ConnectionTab({
   credentialActive,
   credentialValue,
   disabled,
+  copy,
   onContextWindowDraftChange,
   onSaveContextWindow,
   onEditCredential,
@@ -313,6 +368,7 @@ function ConnectionTab({
   credentialActive: boolean;
   credentialValue: string;
   disabled: boolean;
+  copy: ConfigCopy;
   onContextWindowDraftChange: (value: string) => void;
   onSaveContextWindow: () => void;
   onEditCredential: () => void;
@@ -323,42 +379,42 @@ function ConnectionTab({
   const needsKey = provider.credentialState !== "not_required";
   return (
     <VSettingsGroupCard>
-      <VSettingsRow label="API 密钥"
-        description={needsKey ? "此供应商下的模型共用一把密钥；已保存的密钥不会回显。" : "此服务无需 API Key。"}
+      <VSettingsRow label={copy.apiKeyRowLabel}
+        description={needsKey ? copy.apiKeySharedHint : copy.apiKeyNotRequiredHint}
         control={needsKey ? <VButton variant="secondary" isDisabled={disabled} onPress={onEditCredential}>
-          {provider.credentialState === "configured" ? "更新 API Key" : "填写 API Key"}
-        </VButton> : <span className={styles.muted}>无需 Key</span>}
+          {provider.credentialState === "configured" ? copy.updateApiKey : copy.enterApiKey}
+        </VButton> : <span className={styles.muted}>{copy.noKeyNeeded}</span>}
         footer={needsKey && credentialActive ? (
           <div className={styles.inlineCredential}>
             <label className={styles.inlineCredentialField}>
               <span>API Key</span>
               <VInput type="password" autoComplete="new-password" value={credentialValue}
-                disabled={disabled} placeholder="输入新的 API Key"
+                disabled={disabled} placeholder={copy.newApiKeyPlaceholder}
                 onChange={(event) => onCredentialValueChange(event.target.value)} />
             </label>
-            <VActionGroup ariaLabel="API Key 操作">
-              <VButton isDisabled={disabled} onPress={onCancelCredential}>取消</VButton>
+            <VActionGroup ariaLabel={copy.apiKeyActionsAria}>
+              <VButton isDisabled={disabled} onPress={onCancelCredential}>{copy.cancel}</VButton>
               <VButton variant="primary" isDisabled={disabled || !credentialValue.trim()}
-                onPress={onSaveCredential}>保存 Key</VButton>
+                onPress={onSaveCredential}>{copy.saveKey}</VButton>
             </VActionGroup>
           </div>
         ) : undefined} />
-      <VSettingsRow label="默认上下文上限"
-        description="供应商级兜底值，仅在模型没有独立上限时使用。"
-        control={<span className={styles.muted}>{provider.contextWindow ? `${provider.contextWindow.toLocaleString()} token` : "使用模型声明"}</span>}
+      <VSettingsRow label={copy.contextLimitRowLabel}
+        description={copy.contextLimitRowHint}
+        control={<span className={styles.muted}>{provider.contextWindow ? `${provider.contextWindow.toLocaleString()} token` : copy.useModelDeclared}</span>}
         footer={<details>
-          <summary className={styles.verificationDetails}>调整上限与部署详情</summary>
+          <summary className={styles.verificationDetails}>{copy.adjustContextDetails}</summary>
           <div className={styles.connectionCardBody}>
             <label className={styles.inlineCredentialField}>
-              <span>上下文窗口</span>
+              <span>{copy.contextWindowFieldLabel}</span>
               <VInput type="number" min={1} step={1} value={contextWindowDraft} disabled={disabled}
-                placeholder="例如 128000" onChange={(event) => onContextWindowDraftChange(event.target.value)} />
+                placeholder={copy.contextWindowExample} onChange={(event) => onContextWindowDraftChange(event.target.value)} />
             </label>
             <VButton variant="secondary" isDisabled={disabled || (contextWindowDraft.trim() !== "" && (!Number.isFinite(Number(contextWindowDraft)) || Number(contextWindowDraft) <= 0))}
-              onPress={onSaveContextWindow}>保存上下文窗口</VButton>
-            <span className={styles.muted}>驱动：{provider.driver || "未配置"} · {provider.serviceClass || "未配置"}</span>
+              onPress={onSaveContextWindow}>{copy.saveContextWindow}</VButton>
+            <span className={styles.muted}>{copy.driverPrefix}{provider.driver || copy.notConfigured} · {provider.serviceClass || copy.notConfigured}</span>
             {provider.serviceClass === "local_runtime" ? <span className={styles.connectionAddress}>
-              运行框架：{provider.runtimeFramework || "未知"} · 模型文件：{provider.artifactPath || "未配置"}
+              {copy.runtimeFrameworkPrefix}{provider.runtimeFramework || copy.unknownValue} · {copy.artifactFilePrefix}{provider.artifactPath || copy.notConfigured}
             </span> : null}
           </div>
         </details>} />
@@ -367,6 +423,7 @@ function ConnectionTab({
 }
 
 export type ProviderModelsTabProps = {
+  copy: ConfigCopy;
   toolbarIdentity?: ReactNode;
   toolbarActions?: ReactNode;
   provider: ProviderRegistryRow;
@@ -391,6 +448,7 @@ export type ProviderModelsTabProps = {
 };
 
 export function ProviderModelsTab({
+  copy,
   toolbarIdentity,
   toolbarActions,
   provider,
@@ -419,48 +477,48 @@ export function ProviderModelsTab({
     [modelFilter, modelQuery, provider.models],
   );
   const emptyText = provider.models.length === 0
-    ? "还没有模型目录，请点击「发现模型」获取。"
+    ? copy.modelsEmptyCatalog
     : modelFilter === "pinned" && summary.pinned === 0
-      ? "还没有添加模型。切换到「添加模型」，选择需要使用的模型。"
+      ? copy.modelsEmptyPinned
       : modelFilter === "discovered" && summary.discovered === 0
-        ? "没有待添加模型。可刷新模型目录，或查看「已添加」。"
-        : "没有匹配的模型。请调整搜索或筛选条件。";
+        ? copy.modelsEmptyDiscovered
+        : copy.modelsEmptyNoMatch;
 
   const [detailModelRef, setDetailModelRef] = useState("");
   const detailModel = provider.models.find((model) => model.modelRef === detailModelRef);
   const verificationColumn: VDenseTableColumn<ConfigCatalogModel> = {
     id: "verification",
-    header: "最近测试",
+    header: copy.verificationHeader,
     render: (model) => {
       const verificationStatus = model.verificationStatus || "unverified";
       const errorLabel = (() => {
         const kind = String(model.verificationErrorType || "").trim();
         if (!kind) return "";
-        if (kind === "timeout") return "超时";
-        if (kind === "bad_request") return "上游 400 拒绝";
-        if (kind === "auth_failed") return "鉴权失败";
-        if (kind === "rate_limited") return "限流";
-        if (kind === "not_found") return "模型不存在";
-        if (kind === "network") return "网络错误";
-        if (kind === "missing_credential") return "缺 Key";
-        if (kind === "service_unavailable" || kind === "upstream_unavailable") return "上游不可用";
+        if (kind === "timeout") return copy.verifyErrTimeout;
+        if (kind === "bad_request") return copy.verifyErrBadRequest;
+        if (kind === "auth_failed") return copy.verifyErrAuthFailed;
+        if (kind === "rate_limited") return copy.verifyErrRateLimited;
+        if (kind === "not_found") return copy.verifyErrNotFound;
+        if (kind === "network") return copy.verifyErrNetwork;
+        if (kind === "missing_credential") return copy.verifyErrMissingCredential;
+        if (kind === "service_unavailable" || kind === "upstream_unavailable") return copy.verifyErrUnavailable;
         return kind;
       })();
       const detail = [
         model.verificationHttpStatus ? `HTTP ${model.verificationHttpStatus}` : "",
         errorLabel,
         model.verificationMessage || "",
-        model.verificationCheckedAt || (verificationStatus === "unverified" ? "未测试" : ""),
+        model.verificationCheckedAt || (verificationStatus === "unverified" ? copy.verifyUntested : ""),
       ].filter(Boolean).join(" · ");
       return (
         <div className={styles.verification}>
           <VStatusChip tone={verificationStatus === "verified" ? "success" : verificationStatus === "failed" ? "danger" : "neutral"}>
-            {verificationStatus === "verified" ? "测试通过" : verificationStatus === "failed" ? "测试失败" : "未测试"}
+            {verificationStatus === "verified" ? copy.verifyPassed : verificationStatus === "failed" ? copy.verifyFailed : copy.verifyUntested}
           </VStatusChip>
           {verificationStatus === "failed" ? <>
-            <small className={styles.verificationError}>{errorLabel || "请求未成功"}{model.verificationHttpStatus ? ` · HTTP ${model.verificationHttpStatus}` : ""}</small>
-            <small className={styles.muted}>{modelTestRecoveryHint(model.verificationErrorType || "")}</small>
-            <details><summary className={styles.verificationDetails}>错误详情</summary><p className={styles.verificationMessage}>{detail}</p></details>
+            <small className={styles.verificationError}>{errorLabel || copy.verifyRequestFailed}{model.verificationHttpStatus ? ` · HTTP ${model.verificationHttpStatus}` : ""}</small>
+            <small className={styles.muted}>{modelTestRecoveryHint(model.verificationErrorType || "", copy)}</small>
+            <details><summary className={styles.verificationDetails}>{copy.verifyErrorDetails}</summary><p className={styles.verificationMessage}>{detail}</p></details>
           </> : model.verificationCheckedAt ? <small className={styles.muted}>{model.verificationCheckedAt}</small> : null}
         </div>
       );
@@ -470,7 +528,7 @@ export function ProviderModelsTab({
 
     {
       id: "model-ref",
-      header: "模型引用",
+      header: copy.columnModelRef,
       render: (model) => (
         <span className={styles.modelIdentity} data-model-availability={model.availability}>
           <strong className={styles.ellipsis} title={model.modelRef}>{model.modelRef}</strong>
@@ -480,21 +538,22 @@ export function ProviderModelsTab({
     },
     {
       id: "upstream",
-      header: "上游 ID",
+      header: copy.columnUpstreamId,
       render: (model) => <span className={styles.ellipsis} title={model.upstreamId}>{model.upstreamId}</span>,
     },
-    { id: "availability", header: "可用性", render: (model) => <VStatusChip tone={model.availability === "disabled" ? "danger" : "neutral"}>{providerStatusLabel(model.availability)}</VStatusChip> },
+    { id: "availability", header: copy.columnAvailability, render: (model) => <VStatusChip tone={model.availability === "disabled" ? "danger" : "neutral"}>{providerStatusLabel(model.availability, copy)}</VStatusChip> },
     verificationColumn,
-    { id: "capabilities", header: "能力来源", render: (model) => <CapabilityList model={model} /> },
+    { id: "capabilities", header: copy.columnCapabilities, render: (model) => <CapabilityList model={model} copy={copy} /> },
     {
       id: "actions",
-      header: "操作",
+      header: copy.columnActions,
       render: (model) => {
         const action = deriveProviderModelActionState(
           provider,
           model,
           liveReferenceCountByModelRef[model.modelRef] ?? 0,
           disabled,
+          copy,
         );
         const testAvailable = canTestProviderModel(model);
         const imageCapability = model.capabilities?.image_input;
@@ -525,21 +584,21 @@ export function ProviderModelsTab({
           && !provider.refreshDue
         );
         return (
-          <VActionGroup ariaLabel={`${model.modelRef} 模型操作`}>
+          <VActionGroup ariaLabel={`${model.modelRef}${copy.modelActionsAriaSuffix}`}>
             {imageProbeAvailable ? (
               <VButton
                 data-model-capability-action="image_input"
                 density="compact"
                 icon={<ImageIcon size={14} />}
                 isDisabled={disabled || imageCapabilityBusy}
-                title="发送一张最小有效图片，验证当前模型路由是否支持图像输入，并保存运行时能力证据。"
+                title={copy.imageProbeHint}
                 onPress={() => onProbeImageInput?.(model.modelRef)}
               >
                 {imageCapabilityBusy
-                  ? "验证图片中…"
+                  ? copy.imageProbeBusy
                   : imageCapability?.value === "supported" || imageCapability?.value === "unsupported"
-                    ? "重新验证图片"
-                    : "验证图片输入"}
+                    ? copy.imageProbeRetry
+                    : copy.imageProbeAction}
               </VButton>
             ) : null}
             {reasoningHasContract ? (
@@ -548,22 +607,22 @@ export function ProviderModelsTab({
                 data-model-reasoning={reasoningDeclared && !reasoningVerified ? "declared" : "verified"}
                 title={
                   reasoningDeclared && !reasoningVerified
-                    ? "运营协议合同已声明；Composer 可显示档位。可选再验证 low/high 取证。"
-                    : "运行时验证已保存能力证据。完整档位仍以运营协议合同为准。"
+                    ? copy.reasoningDeclaredTooltip
+                    : copy.reasoningVerifiedTooltip
                 }
               >
                 {reasoningDeclared && !reasoningVerified
-                  ? `协议已声明 ${reasoningValues.join(" / ")}`
-                  : `推理 ${reasoningValues.join(" / ")} 已验证`}
+                  ? `${copy.reasoningDeclaredPrefix}${reasoningValues.join(" / ")}`
+                  : formatConfigCopy(copy.reasoningVerifiedTemplate, { values: reasoningValues.join(" / ") })}
               </span>
             ) : reasoningProbeAvailable ? (
               <VButton
                 density="compact"
                 isDisabled={disabled || reasoningFeedback?.phase === "busy"}
-                title="一期探测仅验证 low/high + reasoning_object（Responses）。成功后保存能力证据；完整档位（medium/xhigh 等）请在 pin defaults 写协议合同。"
+                title={copy.reasoningProbeHint}
                 onPress={() => onProbeReasoning?.(model.modelRef)}
               >
-                {reasoningFeedback?.phase === "busy" ? "验证推理中…" : "验证推理 low / high"}
+                {reasoningFeedback?.phase === "busy" ? copy.reasoningProbeBusy : copy.reasoningProbeAction}
               </VButton>
             ) : null}
             {action.kind === "pin" ? (
@@ -575,17 +634,17 @@ export function ProviderModelsTab({
                 title={action.reason}
                 onPress={() => onPin(provider.providerId, [model])}
               >
-                {pinBusy ? "正在添加…" : "添加到模型库"}
+                {pinBusy ? copy.pinAdding : copy.pinToAdd}
               </VButton>
             ) : null}
             {testAvailable ? (
               <VButton
                 density="compact"
                 isDisabled={disabled}
-                title="发送最小真实模型请求并保存脱敏结果。"
+                title={copy.testCallHint}
                 onPress={() => onTestModel(model.modelRef)}
               >
-                测试调用
+                {copy.testCall}
               </VButton>
             ) : null}
             {action.kind === "unpin" ? (
@@ -596,11 +655,11 @@ export function ProviderModelsTab({
                 title={action.reason || undefined}
                 onPress={() => onUnpin(model.modelRef)}
               >
-                从模型库移除
+                {copy.unpinAction}
               </VButton>
             ) : action.kind === "in_use" || action.kind === "unavailable" ? (
               <span className={styles.modelActionState} data-model-action={action.kind}>
-                {action.label}{action.kind === "in_use" ? ` · ${action.referenceCount} 个引用` : ""}
+                {action.label}{action.kind === "in_use" ? ` · ${action.referenceCount}${copy.referenceCountUnit}` : ""}
               </span>
             ) : null}
             {reasoningFeedback?.phase === "error" ? (
@@ -618,13 +677,13 @@ export function ProviderModelsTab({
       <div className={styles.modelToolbar}>
         {toolbarIdentity}
         <VInput
-          aria-label="搜索模型"
+          aria-label={copy.searchModelsAria}
           className={styles.modelSearch}
-          placeholder="搜索模型名称或 ID"
+          placeholder={copy.searchModelsPlaceholder}
           value={modelQuery}
           onChange={(event) => onQueryChange(event.currentTarget.value)}
         />
-        <VActionGroup ariaLabel="模型状态筛选" className={styles.modelFilters}>
+        <VActionGroup ariaLabel={copy.modelFiltersAria} className={styles.modelFilters}>
           {MODEL_FILTERS.map((filter) => (
             <VButton
               key={filter.id}
@@ -633,32 +692,32 @@ export function ProviderModelsTab({
               aria-pressed={modelFilter === filter.id}
               onPress={() => onFilterChange(filter.id)}
             >
-              {filter.label} {summary[filter.countKey]}
+              {copy[filter.copyKey]} {summary[filter.countKey]}
             </VButton>
           ))}
         </VActionGroup>
         {toolbarActions}
       </div>
       {modelFilter === "discovered" && pinnableModels.length > 0 ? (
-        <div className={styles.pinBanner} role="region" aria-label="批量添加模型">
-          <VActionGroup ariaLabel="批量添加操作" className={styles.pinBannerActions}>
+        <div className={styles.pinBanner} role="region" aria-label={copy.pinBannerAria}>
+          <VActionGroup ariaLabel={copy.pinBannerActionsAria} className={styles.pinBannerActions}>
             <VButton
               variant="primary"
               data-model-action="pin-all"
               isDisabled={disabled || pinBusy}
               tooltip={
                 pinBusy
-                  ? "正在添加模型…"
+                  ? copy.pinAllBusy
                   : [
-                      "添加当前搜索结果中的模型，添加成功后可在 Agent 中选用。",
+                      copy.pinAllHint,
                       provider.refreshDue
-                        ? `目录可能已过期，仍可添加当前列表中的 ${pinnableModels.length} 个已发现模型；建议稍后点「发现模型」刷新。`
+                        ? formatConfigCopy(copy.pinAllStaleHint, { count: pinnableModels.length })
                         : "",
                     ].filter(Boolean).join(" ")
               }
               onPress={() => onPin(provider.providerId, pinnableModels)}
             >
-              {pinBusy ? "正在添加…" : `添加当前结果（${pinnableModels.length}）`}
+              {pinBusy ? copy.pinAdding : formatConfigCopy(copy.pinAllTemplate, { count: pinnableModels.length })}
             </VButton>
 
           </VActionGroup>
@@ -667,33 +726,33 @@ export function ProviderModelsTab({
       </div>
       <div className={styles.tableScroll}>
         <VDenseTable
-          ariaLabel={`${provider.label} 模型目录`}
+          ariaLabel={`${provider.label}${copy.catalogTableAriaSuffix}`}
           className={styles.table}
           rows={visibleModels}
           getRowKey={(model) => model.modelRef}
           emptyText={emptyText}
           columns={[
-            { id: "model", header: "模型", className: "w-auto", render: (model) => (
+            { id: "model", header: copy.columnModel, className: "w-auto", render: (model) => (
               <span className={styles.modelIdentity} data-model-availability={model.availability}>
                 <strong className={styles.modelName} title={model.modelRef}>{model.label || model.modelKey}</strong>
-                <small className={styles.muted}>{providerStatusLabel(model.availability)}</small>
+                <small className={styles.muted}>{providerStatusLabel(model.availability, copy)}</small>
               </span>
             ) },
             { ...verificationColumn, className: "w-[16rem]" },
-            { id: "actions", header: "操作", className: "w-[12rem]", render: (model) => (
+            { id: "actions", header: copy.columnActions, className: "w-[12rem]", render: (model) => (
               <div className={styles.compactModelActions}>
                 {(() => {
-                  const action = deriveProviderModelActionState(provider, model, liveReferenceCountByModelRef[model.modelRef] ?? 0, disabled);
-                  return action.kind === "pin" ? <VButton density="compact" variant="primary" isDisabled={action.disabled || pinBusy} title={action.reason} onPress={() => onPin(provider.providerId, [model])}>添加</VButton> : null;
+                  const action = deriveProviderModelActionState(provider, model, liveReferenceCountByModelRef[model.modelRef] ?? 0, disabled, copy);
+                  return action.kind === "pin" ? <VButton density="compact" variant="primary" isDisabled={action.disabled || pinBusy} title={action.reason} onPress={() => onPin(provider.providerId, [model])}>{copy.pinCompact}</VButton> : null;
                 })()}
-                <VButton density="compact" variant="ghost" onPress={() => setDetailModelRef(model.modelRef)} aria-label={`${model.label || model.modelKey} 详情`}>详情</VButton>
-                {canTestProviderModel(model) ? <VButton density="compact" isDisabled={disabled} title="发送最小真实模型请求并保存脱敏结果。" onPress={() => onTestModel(model.modelRef)}>测试调用</VButton> : null}
+                <VButton density="compact" variant="ghost" onPress={() => setDetailModelRef(model.modelRef)} aria-label={`${model.label || model.modelKey}${copy.detailAriaSuffix}`}>{copy.detailsAction}</VButton>
+                {canTestProviderModel(model) ? <VButton density="compact" isDisabled={disabled} title={copy.testCallHint} onPress={() => onTestModel(model.modelRef)}>{copy.testCall}</VButton> : null}
               </div>
             ) },
           ]}
         />
       </div>
-      <VDialog open={Boolean(detailModel)} onOpenChange={(open) => { if (!open) setDetailModelRef(""); }} title={detailModel?.label || detailModel?.modelKey || "模型详情"} description="完整标识、能力与验证记录">
+      <VDialog open={Boolean(detailModel)} onOpenChange={(open) => { if (!open) setDetailModelRef(""); }} title={detailModel?.label || detailModel?.modelKey || copy.modelDetailTitle} description={copy.modelDetailDescription}>
         {detailModel ? <div className={styles.modelDetails}>
           {detailColumns.map((column) => <section key={column.id} className={styles.modelDetailSection}>
             <h3>{column.header}</h3>
@@ -705,19 +764,19 @@ export function ProviderModelsTab({
   );
 }
 
-function ProtocolsTab({ provider }: { provider: ProviderRegistryRow }) {
+function ProtocolsTab({ provider, copy }: { provider: ProviderRegistryRow; copy: ConfigCopy }) {
   return (
     <div className={styles.tabSurface}>
       <span className={styles.fact}>
-        <small className={styles.factLabel}>默认 wire protocol</small>
+        <small className={styles.factLabel}>{copy.wireProtocolLabel}</small>
         <strong className={styles.factValue}>{provider.defaultProtocol || "unknown"}</strong>
       </span>
       {provider.models.length ? provider.models.map((model) => (
         <span key={model.modelRef} className={styles.fact} data-model-availability={model.availability}>
           <small className={styles.factLabel} title={model.modelRef}>{model.modelRef}</small>
-          <CapabilityList model={model} />
+          <CapabilityList model={model} copy={copy} />
         </span>
-      )) : <VStateSurface tone="empty" title="暂无能力观测">运行发现后，unknown 与 unsupported 会分别显示。</VStateSurface>}
+      )) : <VStateSurface tone="empty" title={copy.noCapabilityTitle}>{copy.noCapabilityBody}</VStateSurface>}
     </div>
   );
 }
@@ -725,10 +784,12 @@ function ProtocolsTab({ provider }: { provider: ProviderRegistryRow }) {
 function DiagnosticsTab({
   provider,
   disabled,
+  copy,
   onDiscover,
 }: {
   provider: ProviderRegistryRow;
   disabled: boolean;
+  copy: ConfigCopy;
   onDiscover: (providerId: string) => void;
 }) {
   const isCritical = ["auth_failed", "protocol_mismatch", "blocked", "discovery_failed"].includes(provider.status);
@@ -736,18 +797,18 @@ function DiagnosticsTab({
     <div className={styles.tabSurface}>
       {isCritical ? (
         <p className={styles.critical} role="alert">
-          当前 Provider 状态为 {providerStatusLabel(provider.status)}。请修复认证或协议后再用于运行路由。
+          {copy.providerCriticalPrefix}{providerStatusLabel(provider.status, copy)}{copy.providerCriticalSuffix}
         </p>
       ) : null}
       <VStateSurface
         tone={isCritical ? "error" : provider.refreshDue ? "unavailable" : "info"}
-        title={provider.refreshDue ? "目录已过期，需要刷新" : "Provider 诊断"}
+        title={provider.refreshDue ? copy.refreshDueTitle : copy.registryDiagnosticsTitle}
         facts={[
-          { key: "attempt", label: "最近尝试", value: provider.lastAttemptAt || "从未" },
-          { key: "success", label: "最近成功", value: provider.lastSuccessAt || "从未" },
-          { key: "failure", label: "最近失败原因", value: discoveryErrorLabel(provider.lastErrorType ?? "") },
-          { key: "auth", label: "认证", value: provider.status === "auth_failed" ? "失败" : provider.credentialState },
-          { key: "protocol", label: "协议", value: provider.status === "protocol_mismatch" ? "不匹配" : provider.defaultProtocol || "unknown" },
+          { key: "attempt", label: copy.factLastAttempt, value: provider.lastAttemptAt || copy.valueNever },
+          { key: "success", label: copy.factLastSuccess, value: provider.lastSuccessAt || copy.valueNever },
+          { key: "failure", label: copy.factLastFailure, value: discoveryErrorLabel(provider.lastErrorType ?? "", copy) },
+          { key: "auth", label: copy.factAuth, value: provider.status === "auth_failed" ? copy.valueFailed : provider.credentialState },
+          { key: "protocol", label: copy.factProtocol, value: provider.status === "protocol_mismatch" ? copy.valueMismatch : provider.defaultProtocol || "unknown" },
         ]}
         actions={(
           <VButton
@@ -756,17 +817,18 @@ function DiagnosticsTab({
             isDisabled={disabled}
             onPress={() => onDiscover(provider.providerId)}
           >
-            重新发现
+            {copy.rediscover}
           </VButton>
         )}
       >
-        诊断只展示有界状态，不展示原始响应或凭据内容。
+        {copy.registryDiagnosticsBody}
       </VStateSurface>
     </div>
   );
 }
 
 export function ConfigProviderRegistryPanel({
+  copy,
   rows,
   selectedProviderId,
   selectedTab,
@@ -897,12 +959,12 @@ export function ConfigProviderRegistryPanel({
   const probeReasoning = async (modelRef: string) => {
     setReasoningFeedbackByModelRef((current) => ({
       ...current,
-      [modelRef]: { phase: "busy", values: [], message: "正在验证 low/high…" },
+      [modelRef]: { phase: "busy", values: [], message: copy.reasoningProbePending },
     }));
     try {
       const result = await testConfigLlm({ modelId: modelRef, capability: "reasoning_effort" });
       if (!result.ok || !result.reasoning_contract_persisted) {
-        throw new Error(result.message || "推理能力验证失败");
+        throw new Error(result.message || copy.reasoningProbeFailed);
       }
       const values = result.reasoning_effort_values ?? [];
       setReasoningFeedbackByModelRef((current) => ({
@@ -910,7 +972,7 @@ export function ConfigProviderRegistryPanel({
         [modelRef]: {
           phase: "success",
           values,
-          message: `已验证并保存 ${values.join(" / ")}（一期仅 low/high；完整档位请写 pin defaults 协议合同）`,
+          message: formatConfigCopy(copy.reasoningProbeSuccess, { values: values.join(" / ") }),
         },
       }));
     } catch (error) {
@@ -1012,17 +1074,17 @@ export function ConfigProviderRegistryPanel({
       {hasPendingApply ? (
         <div className={styles.savePrompt} role="status" data-save-prompt="pending" aria-live="polite">
           <div className={styles.savePromptCopy}>
-            <strong>有未保存的模型配置</strong>
+            <strong>{copy.unsavedModelsTitle}</strong>
           </div>
           <VButton
             variant="primary"
             data-save-prompt-action="apply"
             icon={<Save size={14} />}
             isDisabled={!canSaveConfig || disabled || saveBusy}
-            tooltip="路由替换等高级改动仍在草稿。必须点「保存到外部配置」或完成 preview 确认后才会写入 operator config.toml。"
+            tooltip={copy.savePromptTooltip}
             onPress={() => onSaveExternal?.()}
           >
-            {saveBusy ? "保存中…" : "保存到外部配置"}
+            {saveBusy ? copy.saveBusy : copy.saveConfig}
           </VButton>
         </div>
       ) : null}
@@ -1032,26 +1094,26 @@ export function ConfigProviderRegistryPanel({
           layoutId: WORKBENCH_LAYOUT_IDS.configModelAssets,
           sidebar: { defaultWidth: 224, minWidth: 180, maxWidth: 300 },
           collapse: {
-            sidebar: { separatorLabel: "服务列表宽度", collapseLabel: "收起服务列表", expandLabel: "展开服务列表" },
+            sidebar: { separatorLabel: copy.navResizeSeparator, collapseLabel: copy.navCollapse, expandLabel: copy.navExpand },
           },
         }}
         sidebar={(
           <div className={styles.providerRail}>
             {onAddConnection ? <VButton variant="secondary" isDisabled={disabled} onPress={onAddConnection}>
-              添加供应商
+              {copy.addProvider}
             </VButton> : null}
             <div className={styles.providerListSection}>
-              <p className={styles.providerListHeading}>已配置服务 · {healthyRows.length}</p>
+              <p className={styles.providerListHeading}>{copy.configuredProvidersHeading} · {healthyRows.length}</p>
               <VEntityList
-                ariaLabel="已配置服务列表"
+                ariaLabel={copy.configuredListAria}
                 activeId={provider?.providerId}
                 className={styles.providerList}
                 items={healthyRows.map((row) => ({ ...row, id: row.providerId }))}
                 empty={(
-                  <VStateSurface tone="empty" title="暂无已配置服务">
+                  <VStateSurface tone="empty" title={copy.emptyConfiguredTitle}>
                     {abnormalRows.length
-                      ? "当前仅有需要处理。可展开下方「需要处理」处理，或点「添加连接」。"
-                      : "请点「添加连接」接入中转站并保存 Key。"}
+                      ? copy.emptyConfiguredAbnormal
+                      : copy.emptyConfiguredNormal}
                   </VStateSurface>
                 )}
                 renderItem={(row) => (
@@ -1060,6 +1122,7 @@ export function ConfigProviderRegistryPanel({
                     selected={provider?.providerId === row.providerId}
                     inspecting={inspectorOpen && provider?.providerId === row.providerId}
                     disabled={disabled}
+                    copy={copy}
                     onSelect={() => onSelectProvider(row.providerId)}
                   />
                 )}
@@ -1074,15 +1137,15 @@ export function ConfigProviderRegistryPanel({
                   contentLayout="plain"
                   aria-expanded={showAbnormalAssets}
                   data-abnormal-expanded={showAbnormalAssets ? "true" : "false"}
-                  tooltip="认证失败 / 发现失败等，默认折叠"
+                  tooltip={copy.abnormalToggleTooltip}
                   onPress={() => setShowAbnormalAssets((open) => !open)}
                 >
-                  <span>需要处理 · {abnormalRows.length}</span>
-                  <span>{showAbnormalAssets ? "收起" : "展开"}</span>
+                  <span>{copy.needsAttention} · {abnormalRows.length}</span>
+                  <span>{showAbnormalAssets ? copy.collapseAction : copy.expandAction}</span>
                 </VButton>
                 {showAbnormalAssets ? (
                   <VEntityList
-                    ariaLabel="需要处理列表"
+                    ariaLabel={copy.attentionListAria}
                     activeId={provider?.providerId}
                     className={styles.providerList}
                     items={abnormalRows.map((row) => ({ ...row, id: row.providerId }))}
@@ -1092,6 +1155,7 @@ export function ConfigProviderRegistryPanel({
                         selected={provider?.providerId === row.providerId}
                         inspecting={inspectorOpen && provider?.providerId === row.providerId}
                         disabled={disabled}
+                        copy={copy}
                         onSelect={() => onSelectProvider(row.providerId)}
                           />
                     )}
@@ -1123,18 +1187,19 @@ export function ConfigProviderRegistryPanel({
             <div className={styles.providerSettings} data-vui-region="config-provider-connection">
               <VPanelHeader title={provider.label || provider.providerId} headingLevel={3}
                 actions={<VButton data-provider-action="edit-asset" variant="ghost" isDisabled={disabled}
-                  onPress={() => openInspector(provider.providerId)}>高级管理</VButton>} />
+                  onPress={() => openInspector(provider.providerId)}>{copy.advancedManage}</VButton>} />
               <VSettingsGroupCard>
-                <VSettingsRow label="服务地址" description={provider.baseUrl || "未配置"}
+                <VSettingsRow label={copy.baseUrlRowLabel} description={provider.baseUrl || copy.notConfigured}
                   control={<VButton data-provider-action="route" variant="secondary" isDisabled={disabled}
-                    onPress={() => onEditRoute(provider.providerId)}>修改地址与协议</VButton>}
+                    onPress={() => onEditRoute(provider.providerId)}>{copy.editRouteAction}</VButton>}
                   footer={routeActive ? routeEditor : undefined} />
-                <VSettingsRow label="接口协议" description="此供应商下模型使用的默认协议"
-                  control={<span className={styles.muted}>{provider.defaultProtocol || "未配置"}</span>} />
+                <VSettingsRow label={copy.protocolRowLabel} description={copy.protocolRowHint}
+                  control={<span className={styles.muted}>{provider.defaultProtocol || copy.notConfigured}</span>} />
               </VSettingsGroupCard>
               <ConnectionTab key={provider.providerId}
                 provider={provider} contextWindowDraft={contextWindowDraft}
                 credentialActive={credentialActive} credentialValue={credentialValue} disabled={disabled}
+                copy={copy}
                 onContextWindowDraftChange={setContextWindowDraft}
                 onSaveContextWindow={() => saveContextWindowFor(provider)}
                 onEditCredential={() => onEditCredential(provider.providerId)}
@@ -1143,26 +1208,27 @@ export function ConfigProviderRegistryPanel({
             </div>
             <div className={styles.detailBody} data-provider-tab="models">
               <ProviderModelsTab
+                copy={copy}
                 toolbarIdentity={(
               <span className={styles.detailIdentity}>
                 <strong title={provider.providerId}>{provider.label || provider.providerId}</strong>
                 <small className={styles.muted}>
-                  已添加 {provider.pinnedCount} 个模型
+                  {formatConfigCopy(copy.pinnedModelsTemplate, { count: provider.pinnedCount })}
 
                 </small>
               </span>
                 )}
                 toolbarActions={(
-              <VActionGroup ariaLabel="模型库操作" className={`${styles.actions} ml-auto`}>
+              <VActionGroup ariaLabel={copy.modelsLibraryActionsAria} className={`${styles.actions} ml-auto`}>
                 <VButton
                   data-provider-action="discover"
                   variant="secondary"
                   icon={<RefreshCw size={14} />}
                   isDisabled={disabled}
-                  title="从中转站 / 上游拉取模型目录（发现后可选择添加到模型库）"
+                  title={copy.discoverHint}
                   onPress={() => onDiscover(provider.providerId)}
                 >
-                  {discoverBusy ? "发现中…" : "发现模型"}
+                  {discoverBusy ? copy.discoverBusy : copy.discoverModels}
                 </VButton>
               </VActionGroup>
                 )}
@@ -1185,21 +1251,21 @@ export function ConfigProviderRegistryPanel({
             </div>
           </div>
         ) : (
-          <VStateSurface tone="empty" icon={<Database size={16} />} title="选择左侧已配置服务">点选服务查看已添加模型；点「连接设置」修改地址与密钥。</VStateSurface>
+          <VStateSurface tone="empty" icon={<Database size={16} />} title={copy.pickProviderTitle}>{copy.pickProviderBody}</VStateSurface>
         )}
       />
       <VDialog
         open={Boolean(inspectorProvider)}
         onOpenChange={(open) => { if (!open) closeInspector(); }}
-        title={inspectorProvider ? `高级管理 · ${inspectorProvider.label || inspectorProvider.providerId}` : "高级管理"}
-        description="查看服务诊断、合并重复供应商或移除服务。"
+        title={inspectorProvider ? `${copy.inspectorTitlePrefix}${inspectorProvider.label || inspectorProvider.providerId}` : copy.inspectorTitle}
+        description={copy.inspectorDescription}
         size="lg"
       >
         {inspectorProvider ? (
           <div className={styles.inspectorPanel} data-vui-region="config-asset-inspector" data-provider-id={inspectorProvider.providerId}>
             <div className={styles.inspectorBody}>
               {visibleFeedback ? <p className={visibleFeedback.phase === "error" ? styles.actionFeedbackError : styles.actionFeedback} role="status">{visibleFeedback.message}</p> : null}
-              <VActionGroup ariaLabel="进阶连接操作" className={styles.actions}>
+              <VActionGroup ariaLabel={copy.advancedOpsAria} className={styles.actions}>
 
                 <VButton
                   density="compact"
@@ -1207,33 +1273,36 @@ export function ConfigProviderRegistryPanel({
                   isDisabled={disabled}
                   onPress={() => setShowAdvancedTools((open) => !open)}
                 >
-                  {showAdvancedTools ? "收起诊断" : "诊断 / 合并（高级）"}
+                  {showAdvancedTools ? copy.collapseDiagnostics : copy.diagnosticsMergeAdvanced}
                 </VButton>
               </VActionGroup>
               {showAdvancedTools ? (
                 <div className={styles.inspectorAdvanced}>
-                  <DiagnosticsTab provider={inspectorProvider} disabled={disabled} onDiscover={onDiscover} />
+                  <DiagnosticsTab provider={inspectorProvider} disabled={disabled} copy={copy} onDiscover={onDiscover} />
                   {mergeCandidate ? (
                     <VSection
                       className={styles.mergeSection}
-                      title="合并重复 Provider（高级）"
-                      meta="仅当存在端点完全相同的重复项时使用；日常中转站不需要"
+                      title={copy.mergeSectionTitle}
+                      meta={copy.mergeSectionMeta}
                     >
                       <div className={styles.mergeContent} data-provider-merge-status={mergePreview?.status ?? "idle"}>
                         <p className={styles.muted}>
-                          保留 <strong>{mergeCandidate.canonicalProviderId}</strong>，候选重复项：{mergeCandidate.duplicateProviderIds.join("、")}。
+                          {formatConfigCopy(copy.mergeKeepTemplate, {
+                            canonical: mergeCandidate.canonicalProviderId,
+                            duplicates: mergeCandidate.duplicateProviderIds.join("、"),
+                          })}
                         </p>
                         {mergePreview ? (
                           <div className={styles.mergeFacts}>
                             <VStatusChip tone={mergePreview.status === "READY" ? "success" : "warning"}>{mergePreview.status}</VStatusChip>
-                            <span>新增模型 {mergePreview.modelsToAdd.length}</span>
+                            <span>{formatConfigCopy(copy.mergeModelsToAddTemplate, { count: mergePreview.modelsToAdd.length })}</span>
                           </div>
                         ) : null}
                         {mergeError ? <p className={styles.actionFeedbackError} role="alert">{mergeError}</p> : null}
-                        <VActionGroup ariaLabel="重复 Provider 合并操作">
+                        <VActionGroup ariaLabel={copy.mergeActionsAria}>
                           {!mergeResult ? (
                             <VButton isDisabled={disabled || mergeBusy} onPress={() => void previewMerge()}>
-                              {mergeBusy ? "验证中…" : "生成合并预览"}
+                              {mergeBusy ? copy.mergePreviewBusy : copy.mergePreviewAction}
                             </VButton>
                           ) : null}
                           {mergePreview?.status === "READY" && !mergeResult ? (
@@ -1242,7 +1311,7 @@ export function ConfigProviderRegistryPanel({
                               isDisabled={disabled || mergeBusy || !mergeConfirmed}
                               onPress={() => void applyMerge()}
                             >
-                              应用合并
+                              {copy.applyMerge}
                             </VButton>
                           ) : null}
                         </VActionGroup>
@@ -1253,7 +1322,7 @@ export function ConfigProviderRegistryPanel({
                             isDisabled={disabled || mergeBusy}
                             onChange={setMergeConfirmed}
                           >
-                            确认使用主 Provider 凭据并迁移引用
+                            {copy.mergeConfirmLabel}
                           </VCheckbox>
                         ) : null}
                       </div>
@@ -1266,10 +1335,10 @@ export function ConfigProviderRegistryPanel({
                   variant="danger"
                   icon={<Trash2 size={14} />}
                   isDisabled={disabled || providerDeleteBlocked}
-                  title={providerDeleteBlocked ? "请先移除此服务下的模型，并解除 Agent 等引用。" : "删除服务 草稿"}
+                  title={providerDeleteBlocked ? copy.deleteProviderBlockedHint : copy.deleteProviderDraftHint}
                   onPress={() => onDeleteProvider(inspectorProvider.providerId)}
                 >
-                  删除服务
+                  {copy.deleteProviderAction}
                 </VButton>
               </div>
             </div>
