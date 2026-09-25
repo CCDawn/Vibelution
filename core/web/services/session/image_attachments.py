@@ -17,6 +17,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .image_model_variant import build_model_image_variant
+
 
 def _service():
     from core.web.services import session_service
@@ -251,7 +253,12 @@ def _resolve_session_image_attachment(session_id: str, artifact_id: str) -> dict
 
 
 def resolve_session_image_attachment_data_url(session_id: str, artifact_id: str) -> dict[str, Any]:
-    """Read a session image artifact as a transient data URL for model input."""
+    """Read a session image artifact as a transient data URL for model input.
+
+    The payload handed to the model is normalized through the model variant
+    layer (longest edge <= 2000px, base64 <= 5MiB) with a sibling cache; the
+    original artifact bytes stay untouched for UI preview.
+    """
     s = _service()
 
     attachment = s._resolve_session_image_attachment(session_id, artifact_id)
@@ -260,7 +267,11 @@ def resolve_session_image_attachment_data_url(session_id: str, artifact_id: str)
     if len(payload) > s._SESSION_USER_IMAGE_MAX_BYTES:
         raise s.SessionValidationError("Image attachment is too large for model input.")
     content_type = str(attachment.get("contentType") or "").strip() or "image/png"
-    data_url = f"data:{content_type};base64,{base64.b64encode(payload).decode('ascii')}"
+    variant = build_model_image_variant(path, payload, source_content_type=content_type)
+    data_url = (
+        f"data:{variant['contentType']};base64,"
+        f"{base64.b64encode(variant['payload']).decode('ascii')}"
+    )
     return {
         **{key: value for key, value in attachment.items() if key != "path"},
         "dataUrl": data_url,
