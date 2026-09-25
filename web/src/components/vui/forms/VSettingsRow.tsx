@@ -52,7 +52,7 @@ export function VSettingsRow({
       data-vui-highlighted={highlighted ? "true" : undefined}
       className={
         [
-          "border-t border-vui-border-subtle px-4 py-3 first:border-t-0",
+          "@container min-w-0 border-t border-vui-border-subtle px-4 py-4 first:border-t-0",
           highlighted
             ? "rounded-vui-control ring-2 ring-[color-mix(in_srgb,var(--accent-cool)_45%,transparent)] ring-offset-1 ring-offset-[var(--vui-surface-panel)] transition-shadow"
             : "",
@@ -64,8 +64,8 @@ export function VSettingsRow({
       <div
         className={
           controlLayout === "wide"
-            ? "grid grid-cols-[minmax(0,1fr)_280px] items-center gap-4"
-            : "grid grid-cols-[minmax(0,1fr)_192px] items-center gap-4"
+            ? "grid grid-cols-1 @min-[32rem]:!grid-cols-[minmax(0,1fr)_280px] items-center gap-3 @min-[32rem]:!gap-6"
+            : "grid grid-cols-1 @min-[28rem]:!grid-cols-[minmax(0,1fr)_192px] items-center gap-3 @min-[28rem]:!gap-6"
         }
       >
         <div className="min-w-0">
@@ -74,7 +74,7 @@ export function VSettingsRow({
             <div className="mt-1 text-vui-xs leading-5 text-vui-fg-tertiary">{description}</div>
           ) : null}
         </div>
-        <div className="flex w-full flex-nowrap items-center justify-end gap-2">
+        <div className="flex min-w-0 w-full flex-wrap items-center justify-end gap-2 [&>*]:max-w-full">
           {status}
           {controlLayout === "wide" ? detail : null}
           {control}

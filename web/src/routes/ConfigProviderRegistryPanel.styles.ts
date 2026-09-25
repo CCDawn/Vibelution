@@ -13,8 +13,8 @@ const styles = {
   abnormalToggle:
     "vui-routes-configproviderregistrypanel abnormalToggle !flex !h-auto !min-h-9 !w-full !items-center !justify-between gap-2 px-2 py-1.5 text-left [&_span]:grid [&_span]:min-w-0 [&_span]:gap-0.5 [&_small]:[font-size:10px] [&_small]:font-normal [&_small]:text-vui-fg-tertiary",
   registryWorkspace:
-    "vui-routes-configproviderregistrypanel registryWorkspace h-full min-h-0 min-w-0 [--vui-workspace-sidebar:clamp(18rem,24vw,22rem)] [--vui-workspace-aside:clamp(18rem,24vw,22rem)] gap-2 overflow-hidden",
-  providerRail: "vui-routes-configproviderregistrypanel providerRail grid h-full min-h-0 min-w-0 content-start gap-4 overflow-y-auto border-r border-vui-border-subtle pr-3",
+    "vui-routes-configproviderregistrypanel registryWorkspace max-[720px]:[&>[data-vui=split-sidebar]]:!w-full max-[720px]:[&>[data-vui=split-sidebar]]:!max-w-none max-[720px]:[&>[data-vui=split-sidebar]]:!basis-auto max-[720px]:[&>[data-vui=split-sidebar]]:!h-auto max-[720px]:[&>[role=separator]]:hidden max-[720px]:[&>[data-vui=split-main]]:!h-auto max-[720px]:[&>[data-vui=split-main]]:!overflow-visible h-full min-h-0 min-w-0 gap-4 overflow-hidden max-[720px]:!flex-col",
+  providerRail: "vui-routes-configproviderregistrypanel providerRail grid h-full min-h-0 min-w-0 content-start gap-4 overflow-y-auto border-r border-vui-border-subtle pr-3 max-[720px]:max-h-40",
   providerList: "vui-routes-configproviderregistrypanel providerList min-h-0 min-w-0 overflow-y-auto !border-0 !bg-transparent !backdrop-blur-none !p-0 [&>[data-vui=entity-list-item]]:!px-1 [&>[data-vui=entity-list-item]]:!py-0.5",
   providerRow:
     "vui-routes-configproviderregistrypanel providerRow min-w-0",
@@ -29,7 +29,8 @@ const styles = {
     "vui-routes-configproviderregistrypanel providerStatusRow flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1",
   ellipsis: "vui-routes-configproviderregistrypanel ellipsis min-w-0 truncate",
   modelsColumn:
-    "vui-routes-configproviderregistrypanel modelsColumn grid h-full min-h-0 min-w-0 grid-rows-[minmax(0,1fr)] gap-2 overflow-hidden [&:has(>_[data-feedback-phase])]:grid-rows-[auto_minmax(0,1fr)]",
+    "vui-routes-configproviderregistrypanel modelsColumn grid h-full min-h-0 min-w-0 content-start gap-6 overflow-y-auto overflow-x-hidden pr-1",
+  providerSettings: "grid min-w-0 gap-4 [&_[data-vui=settings-row]]:[overflow-wrap:anywhere]",
   inspectorPanel:
     "vui-routes-configproviderregistrypanel inspectorPanel grid min-h-0 min-w-0 max-h-[72vh] overflow-hidden",
   inspectorBody:
@@ -49,7 +50,7 @@ const styles = {
   tabs: "vui-routes-configproviderregistrypanel tabs flex min-w-0 flex-wrap items-center gap-1",
   tabButton: "vui-routes-configproviderregistrypanel tabButton",
   detailBody:
-    "vui-routes-configproviderregistrypanel detailBody min-h-0 min-w-0 overflow-hidden [&>_*]:h-full",
+    "vui-routes-configproviderregistrypanel detailBody min-h-80 min-w-0",
   tabSurface: "vui-routes-configproviderregistrypanel tabSurface grid h-full min-h-0 min-w-0 content-start gap-2 overflow-auto",
   connectionWorkspace:
     "vui-routes-configproviderregistrypanel connectionWorkspace relative isolate z-[1] grid min-h-0 min-w-0 content-start gap-3",
@@ -74,7 +75,7 @@ const styles = {
   factValue: "vui-routes-configproviderregistrypanel factValue min-w-0 truncate [font-size:var(--vui-font-sm)] font-semibold text-vui-fg-primary",
   deployment:
     "vui-routes-configproviderregistrypanel deployment grid min-w-0 gap-2 rounded-md border border-vui-border-subtle bg-vui-surface-glass p-2",
-  modelsWorkspace: "vui-routes-configproviderregistrypanel modelsWorkspace grid h-full min-h-0 min-w-0 [grid-template-rows:auto_minmax(0,1fr)] gap-2 overflow-hidden",
+  modelsWorkspace: "vui-routes-configproviderregistrypanel modelsWorkspace grid min-h-0 min-w-0 content-start gap-3",
   modelChrome: "vui-routes-configproviderregistrypanel modelChrome grid min-w-0 gap-2",
   modelToolbar:
     "vui-routes-configproviderregistrypanel modelToolbar flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 pb-2 border-b border-vui-border-subtle",

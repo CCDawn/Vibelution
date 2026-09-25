@@ -1698,7 +1698,7 @@ export function ConfigSectionEditor({
       return (
         <article
           key={absolutePath}
-          className={`${styles.treeFieldCard} ${styles.treeFieldCardView} ${styles.themeBackgroundImageCard}`}
+          className={`${styles.treeFieldCard} ${styles.themeBackgroundImageCard}`}
           title={hint || undefined}
         >
           {renderThemeBackgroundControl(fieldValue, absolutePath)}
@@ -1791,7 +1791,7 @@ export function ConfigSectionEditor({
       return (
         <article
           key={absolutePath}
-          className={`${styles.treeFieldCard} ${styles.treeFieldCardEdit} ${styles.themeBackgroundImageCard}`}
+          className={`${styles.treeFieldCard} ${styles.themeBackgroundImageCard}`}
           title={backgroundHint || undefined}
         >
           {renderThemeBackgroundControl(fieldValue, absolutePath)}
@@ -1932,6 +1932,7 @@ export function ConfigSectionEditor({
               <div className={styles.avatarImageActions}>
                 <VButton
                   type="button"
+                  variant="primary"
                   className={`${styles.primaryButton} ${styles.compactButton}`}
                   isDisabled={disabled || imageUploading}
                   onClick={() => {
@@ -2483,6 +2484,7 @@ export function ConfigSectionEditor({
             <>
               <VButton
                 type="button"
+                variant="primary"
                 className={`${styles.primaryButton} ${styles.compactButton} ${styles.toolbarButton}`}
                 isDisabled={disabled || sectionSaveBlocked}
                 title={sectionSaveBlocked ? copy.saveBlockedInvalid : undefined}
@@ -3250,10 +3252,7 @@ export function ConfigRoute() {
   function handleSelectGroup(groupId: ConfigSettingsGroupId) {
     const group = settingsGroups.find((candidate) => candidate.id === groupId);
     const pageId = group?.pages[0]?.id ?? "";
-    setActiveGroupId(groupId);
-    setActivePageId(pageId);
-    showSettingsIndex(groupId);
-    contentViewportRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    handleNavigateSettings(groupId, pageId);
   }
 
   function showSettingsIndex(groupId?: ConfigSettingsGroupId) {
@@ -4238,6 +4237,7 @@ export function ConfigRoute() {
           <>
             <VButton
               type="button"
+              variant="primary"
               className={styles.primaryButton}
               isDisabled={!canApplyConfigWorkspace || Boolean(busyAction)}
               onClick={() => {
@@ -4247,7 +4247,7 @@ export function ConfigRoute() {
             >
               {leaveGuardSaveLabel}
             </VButton>
-            <VButton type="button" className={styles.dangerButton} isDisabled={Boolean(busyAction)} onClick={handleDiscardAndLeave}>
+            <VButton type="button" variant="danger" className={styles.dangerButton} isDisabled={Boolean(busyAction)} onClick={handleDiscardAndLeave}>
               {copy.leaveGuardDiscard}
             </VButton>
             <VButton type="button" className={styles.actionButton} isDisabled={Boolean(busyAction)} onClick={handleCancelLeave}>

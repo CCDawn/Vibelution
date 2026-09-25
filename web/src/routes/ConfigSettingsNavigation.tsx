@@ -226,7 +226,7 @@ export function ConfigSettingsSidebar({
             className={group.id === activeGroupId ? `${styles.groupButton} ${styles.groupButtonActive}` : styles.groupButton}
             contentLayout="plain"
             variant={group.id === activeGroupId ? "primary" : "ghost"}
-            tooltip={group.summary}
+            title={group.summary}
             aria-pressed={group.id === activeGroupId}
             onPress={() => onSelectGroup(group.id)}
           >
@@ -259,7 +259,7 @@ export function ConfigSettingsPageTabs({
           key={page.id}
           className={page.id === activePageId ? `${styles.pageButton} ${styles.pageButtonActive}` : styles.pageButton}
           variant={page.id === activePageId ? "primary" : "ghost"}
-          tooltip={page.summary}
+          title={page.summary}
           aria-current={page.id === activePageId ? "page" : undefined}
           onPress={() => onSelectPage(page.id)}
         >
