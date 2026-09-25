@@ -2,7 +2,7 @@ import type { MouseEvent } from "react";
 
 import { VButton } from "../vui";
 import type { ConversationSelectionMenuPosition } from "./conversationTextSelection";
-import styles from "./ConversationView.styles";
+import styles from "./ConversationSelectionQuoteMenu.styles";
 
 export type ConversationSelectionQuoteMenuProps = {
   position: ConversationSelectionMenuPosition;
