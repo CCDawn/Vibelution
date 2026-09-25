@@ -116,3 +116,21 @@ pre {
 :where(button:disabled, input:disabled, textarea:disabled, select:disabled) {
   cursor: not-allowed;
 }
+
+/*
+ * Global reduced-motion fallback (Wave 5B, standard degradation block).
+ * Collapses every transition/animation to effectively zero length so
+ * prefers-reduced-motion users never see non-essential movement, including in
+ * route-css chunks that ship no local motion-reduce pairing. Durations stay at
+ * 0.01ms (not none) so transition events still fire for state-driven logic.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

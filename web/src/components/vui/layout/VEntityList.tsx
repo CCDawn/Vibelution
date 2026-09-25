@@ -51,7 +51,7 @@ export function VEntityList<TItem extends VEntityListItem>({
             role="listitem"
             className={[
               "min-w-0 rounded-md border border-transparent px-2 py-1.5 text-vui-xs",
-              "text-vui-fg-secondary transition-colors",
+              "text-vui-fg-secondary transition-colors motion-reduce:transition-none",
               activeId === item.id
                 ? "border-vui-accent-cool bg-[var(--vui-status-info-bg)] text-vui-fg-primary"
                 : "hover:border-vui-border-subtle hover:bg-vui-control-muted",

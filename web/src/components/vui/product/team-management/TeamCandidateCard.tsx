@@ -36,7 +36,7 @@ const CARD_BASE =
   "max-[820px]:flex-wrap";
 
 const CARD_INTERACTIVE =
-  "transition-[border-color,box-shadow,background] duration-150 ease-[var(--vui-ease)] " +
+  "transition-[border-color,box-shadow,background] duration-150 ease-vui " +
   "hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:shadow-[var(--vui-elevation-1)] " +
   "has-[:focus-visible]:border-[var(--border-strong)] has-[:focus-visible]:shadow-[var(--vui-elevation-1)]";
 

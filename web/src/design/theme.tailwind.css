@@ -80,4 +80,13 @@
    */
   --radius-lg: var(--radius-control);
   --radius-xl: var(--vui-radius-panel-soft);
+
+  /*
+   * Motion ease slots (Wave 5B). The v4 --ease-* namespace generates the
+   * ease-vui / ease-vui-out utility classes; values live in tokens.css so the
+   * route-css lazy chunks and every Tailwind entry resolve them at runtime.
+   * Guard: motionTokens.test.ts (does not touch the locked slots above).
+   */
+  --ease-vui: var(--vui-ease);
+  --ease-vui-out: var(--vui-ease-out-quart);
 }

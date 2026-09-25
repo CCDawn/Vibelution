@@ -2,6 +2,8 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { type ReactNode } from "react";
 
 import { cn } from "../../lib/cn";
+// Wave 5B dialog motion: keyframes + token-driven durations (see file header).
+import "./shadcnDialogMotion.css";
 
 export type ShadcnDialogSize = "sm" | "md" | "lg" | "xl";
 
@@ -66,7 +68,8 @@ export function ShadcnDialog({
           data-renderer="radix"
           className={cn(
             "fixed inset-0 z-[90]",
-            // shadcn-like dim: ink wash, light blur (no animate plugin dependency)
+            // shadcn-like dim: ink wash, light blur; enter/exit motion lives in
+            // shadcnDialogMotion.css (pure CSS keyframes, no animate plugin).
             "bg-[color-mix(in_srgb,var(--fg-primary)_28%,transparent)]",
             "backdrop-blur-[2px]",
           )}

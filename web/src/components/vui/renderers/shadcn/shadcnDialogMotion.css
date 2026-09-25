@@ -1,0 +1,71 @@
+/*
+ * Dialog motion (Wave 5B): lightweight enter/exit for the Radix dialog
+ * renderer — overlay fade, content fade + micro scale. Pure CSS keyframes on
+ * Radix data-state attributes (no animate plugin, no animation library).
+ * Durations and curves come from the tokens.css motion section; the local
+ * motion-reduce pairing mirrors the global base.css fallback for any surface
+ * that renders dialogs without it. Radix Presence keeps the dialog mounted
+ * until the close animation finishes, so exits are visible without JS timers.
+ */
+@keyframes vui-dialog-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes vui-dialog-overlay-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes vui-dialog-content-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes vui-dialog-content-out {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.96);
+  }
+}
+
+[data-vui="dialog-overlay"][data-state="open"] {
+  animation: vui-dialog-overlay-in var(--vui-motion-duration-base, 150ms) var(--vui-ease-out-quart, ease-out) both;
+}
+
+[data-vui="dialog-overlay"][data-state="closed"] {
+  animation: vui-dialog-overlay-out var(--vui-motion-duration-fast, 120ms) var(--vui-ease) both;
+}
+
+[data-vui="dialog-content"][data-state="open"] {
+  animation: vui-dialog-content-in var(--vui-motion-duration-slow, 240ms) var(--vui-ease-out-quart, ease-out) both;
+}
+
+[data-vui="dialog-content"][data-state="closed"] {
+  animation: vui-dialog-content-out var(--vui-motion-duration-fast, 120ms) var(--vui-ease) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-vui="dialog-overlay"],
+  [data-vui="dialog-content"] {
+    animation: none;
+  }
+}

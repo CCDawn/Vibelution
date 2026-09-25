@@ -72,8 +72,22 @@
   --vui-elevation-panel: var(--vui-elevation-1-sheen);
   --vui-elevation-overlay: var(--vui-elevation-2-sheen);
   --vui-ease: cubic-bezier(0.2, 0, 0, 1);
-  --vui-transition: 150ms var(--vui-ease);
+  --vui-transition: var(--vui-motion-duration-base) var(--vui-ease);
   --vui-radius-soft: 10px;
+
+  /*
+   * Motion (Wave 5B, discipline borrowed from zai-org/ZCode styles.css
+   * motion tokens, Apache-2.0): durations are the only sanctioned
+   * transition/animation lengths, --vui-ease-out-quart is the emphasis curve
+   * for enter transitions. Exposed to Tailwind as ease-vui / ease-vui-out via
+   * the --ease-* theme slots in theme.tailwind.css. Reduced-motion users get
+   * the global fallback in base.css; component-level motion-reduce pairing is
+   * still required for keyframe/transform-heavy effects.
+   */
+  --vui-motion-duration-fast: 120ms;
+  --vui-motion-duration-base: 150ms;
+  --vui-motion-duration-slow: 240ms;
+  --vui-ease-out-quart: cubic-bezier(0.23, 1, 0.32, 1);
 
   /* VUI alpha tiers — wash/tint convergence (P2 visual-unification wave).
      Semantic percentage slots for hand-tuned color-mix() alphas OUTSIDE the
