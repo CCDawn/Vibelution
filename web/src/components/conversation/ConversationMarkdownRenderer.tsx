@@ -61,7 +61,42 @@ export const ConversationMarkdownRenderer = React.memo(function ConversationMark
 
 export function normalizeConversationMarkdown(content: string) {
   const lines = String(content ?? "").replace(/\r\n/g, "\n").split("\n");
-  return lines.map((line) => normalizeConversationMarkdownLine(line)).join("\n");
+  // Fence state for the HTML-tag escape below: code-fence content must pass
+  // through untouched (a backslash there renders literally).
+  let fenceMarker: string | null = null;
+  return lines
+    .map((line) => {
+      const normalized = normalizeConversationMarkdownLine(line);
+      const fence = normalized.match(/^\s{0,3}(`{3,}|~{3,})/);
+      if (fenceMarker) {
+        if (fence && fence[1].startsWith(fenceMarker)) {
+          fenceMarker = null;
+        }
+        return normalized;
+      }
+      if (fence) {
+        fenceMarker = fence[1].slice(0, 1).repeat(3);
+        return normalized;
+      }
+      return escapeLineInitialEnvelopeTag(normalized);
+    })
+    .join("\n");
+}
+
+// Internal-format envelope tags some relays leak into the answer channel.
+// At line start they would open a CommonMark HTML block, and `skipHtml`
+// drops that block wholesale — silently swallowing every following plaintext
+// line up to the next blank line. Backslash-escaping the leading `<` turns
+// the tag into literal text so adjacent content survives. Other raw HTML
+// (e.g. `<script>...`) keeps its existing inert-drop posture. The optional
+// leading backslash in the pattern keeps the escape idempotent across
+// repeated normalize passes while streaming.
+const ENVELOPE_TAG_LINE_RE = /^\s{0,3}(\\?)<\/?(?:think|thinking|summary|analysis)\b/i;
+
+function escapeLineInitialEnvelopeTag(line: string) {
+  return line.replace(ENVELOPE_TAG_LINE_RE, (match, existingEscape: string) =>
+    existingEscape ? match : match.replace("<", "\\<"),
+  );
 }
 
 function normalizeConversationMarkdownLine(line: string) {

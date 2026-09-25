@@ -55,6 +55,34 @@ def _finish_reason(value: Any) -> str:
     }.get(str(value or "").strip().lower(), str(value or "stop"))
 
 
+ANTHROPIC_IMAGE_MEDIA_TYPES = frozenset({"image/png", "image/jpeg", "image/webp", "image/gif"})
+_DATA_URL_PREFIX = "data:"
+
+
+def encode_image_source(uri: str, media_type: str) -> dict[str, Any]:
+    """Encode a semantic image part into a native Anthropic image source block.
+
+    Data URLs carry the raw bytes inline, which the native Anthropic Messages
+    API only accepts in the explicit base64 source shape; plain http(s) URLs
+    keep the url source shape. Unsupported media types fail loudly instead of
+    producing a payload the upstream API would reject.
+    """
+    if not uri.casefold().startswith(_DATA_URL_PREFIX):
+        return {"type": "url", "url": uri}
+    header, separator, data = uri.partition(",")
+    if not separator or ";base64" not in header.casefold():
+        raise ValueError("semantic image data url must be base64-encoded for the Anthropic Messages API")
+    parsed_media_type = (
+        header[len(_DATA_URL_PREFIX) :].split(";", 1)[0].strip().lower() or media_type.strip().lower()
+    )
+    if parsed_media_type not in ANTHROPIC_IMAGE_MEDIA_TYPES:
+        supported = ", ".join(sorted(ANTHROPIC_IMAGE_MEDIA_TYPES))
+        raise ValueError(
+            f"unsupported Anthropic image media_type {parsed_media_type!r}; expected one of: {supported}"
+        )
+    return {"type": "base64", "media_type": parsed_media_type, "data": data}
+
+
 class AnthropicMessagesNativeWireAdapter:
     adapter_id = "anthropic_messages_native"
     wire_protocol = WireProtocol.ANTHROPIC_MESSAGES
@@ -101,7 +129,7 @@ class AnthropicMessagesNativeWireAdapter:
                     block["cache_control"] = {"type": part.cache_hint.mode}
                 blocks.append(block)
             elif isinstance(part, ImagePart):
-                blocks.append({"type": "image", "source": {"type": "url", "url": part.uri}})
+                blocks.append({"type": "image", "source": encode_image_source(part.uri, part.media_type)})
             elif isinstance(part, ToolCallPart):
                 blocks.append({"type": "tool_use", "id": part.call.call_id, "name": part.call.name, "input": _json_value(part.call.arguments)})
             elif isinstance(part, ToolResultPart):
@@ -188,4 +216,4 @@ class AnthropicMessagesNativeWireAdapter:
                 yield {"type": "chat.failed", "error": {"message": str(error.get("message") or error.get("type") or "Anthropic request failed")}}
 
 
-__all__ = ["AnthropicMessagesNativeWireAdapter"]
+__all__ = ["ANTHROPIC_IMAGE_MEDIA_TYPES", "AnthropicMessagesNativeWireAdapter", "encode_image_source"]
