@@ -126,18 +126,22 @@ tests/e2e/mock_llm/scenarios/
 
 ## 已知缺口与产品实测事实（勿当 bug 反复试）
 
-- **UI 投影滞后**：thread 转 idle（`data-agent-thread-status=idle`）时助手正文
-  的 DOM 投影可能落后一拍，即时读 `inner_text` 会拿到没有正文的时间线；用例统一
-  用 `wait_thread_text(page, needle)` 轮询等文本上屏后再断言。
+- **UI 投影滞后（③⑦a 已修，保留轮询写法）**：thread 转 idle
+  （`data-agent-thread-status=idle`）时助手正文的 DOM 投影落后一拍（实测 839ms
+  空窗）的根因已修：settle 期空壳层保留到权威 detail 应用（`chatActiveTurnLayer.ts`
+  done 帧不再删层），不再出现无正文空窗；`wait_thread_text(page, needle)` 轮询写法
+  保留为通用防抖。另自 2026-09-25 起首个 answer delta 会发出 `responding` 阶段
+  （⑦b 已修），`data-active-turn-stage` 序列含 responding。
 - **thread 容器文本含 composer 常驻件**：`thread_text` 会带出权限档按钮
   （"请求批准"）、模型 pill、上下文占用（"13%"）等 composer chrome，属正常，
   不是审批卡片。
 - **格式泄漏渲染吞字**：`<think>`/`<summary>` 等原始 HTML 标签连同标签内文本被
   渲染器丢弃，且紧随其后无空行的明文段也会被并入 HTML 块丢弃；只有纯文本行上屏。
   泄漏用例闸门只锁「原始行可见 + 不炸 + 收口」。
-- **流式 markdown 偶发丢代码块**：增量渲染在 ``` fence 的 chunk 边界上不稳定，
-  同一内容偶发整块代码块不渲染（非流式复现可正常渲染）；正文硬断言只锁标题、
-  列表与行内代码，代码块仅打印事实。
+- **流式 markdown 偶发丢代码块（③ 已修，根因改口径）**：审查定案切分器无罪，
+  真身是 settle 换窗瞬时投影空窗（与③⑦a 同根，`chatActiveTurnLayer.ts` done 帧
+  删层早于权威 detail 落地）——空壳层保留修复后 fence 丢块随之消除；「正文硬断言
+  只锁标题、列表与行内代码」的用例写法保留，代码块仍仅打印事实。
 - **提交偶发冻结在乐观态**：同一实例连续跑多个用例后，偶发提交停在
   「已发送 · 0s」乐观态、服务端未起 turn（journal 为空）；用例统一走
   `wait_turn_started`（等 stage 条或 journal 出现请求，超时重发一次）。

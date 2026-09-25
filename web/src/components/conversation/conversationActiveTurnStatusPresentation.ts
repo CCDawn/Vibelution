@@ -5,13 +5,14 @@ import type { SessionTurnItem } from "../../api/types";
 /** Keep a stage label on screen at least this long before switching (anti-flicker). */
 export const ACTIVE_TURN_STAGE_MIN_DWELL_MS = 700;
 
-export type ActiveTurnStageBarPhase = "sent" | "prepare" | "request" | "thinking";
+export type ActiveTurnStageBarPhase = "sent" | "prepare" | "request" | "thinking" | "respond";
 
 export const ACTIVE_TURN_STAGE_BAR_PHASES: readonly ActiveTurnStageBarPhase[] = [
   "sent",
   "prepare",
   "request",
   "thinking",
+  "respond",
 ] as const;
 
 export type ActiveTurnStatusMessageLike = {
@@ -174,6 +175,12 @@ export function activeTurnStageBarPhase(stage: string): ActiveTurnStageBarPhase 
     case "reasoning":
     case "thinking":
       return "thinking";
+    // The backend emits a `responding` status row on the first answer delta;
+    // `assistant_response` is the legacy transport stage the live-output state
+    // keeps during answer streaming — both belong to the respond phase.
+    case "responding":
+    case "assistant_response":
+      return "respond";
     default:
       return "other";
   }
@@ -193,6 +200,8 @@ export function activeTurnStageBarPhaseLabel(
       return zh ? "请求" : "Request";
     case "thinking":
       return zh ? "思考" : "Think";
+    case "respond":
+      return zh ? "回答" : "Respond";
     default:
       return zh ? "处理" : "Work";
   }
@@ -229,6 +238,9 @@ export function activeTurnStageLabel(stage: string, lang: "zh" | "en" | string) 
     case "tooling":
       return zh ? "执行工具" : "Running tools";
     case "responding":
+    // Legacy transport stage for answer streaming (backend keeps it on the
+    // live-output state; the visible responding row drives the chip).
+    case "assistant_response":
       return zh ? "生成回答" : "Generating";
     case "model_failed":
       return zh ? "请求失败" : "Request failed";

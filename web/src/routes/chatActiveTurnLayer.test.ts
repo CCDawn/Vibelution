@@ -8,11 +8,14 @@ import {
   activeTurnLayerTextLength,
   activeTurnTerminalRefreshKey,
   createOptimisticActiveTurnLayer,
+  projectActiveTurnLayerMessage,
+  reconcileActiveTurnLayerItemsWithMessages,
   selectFirstUnpaintedRunningTool,
   isActiveTurnSettledByDetail,
   mergeAssistantDeltaIntoActiveTurnLayer,
   runningToolStartedAtEpochMs,
   runningToolPaintKeys,
+  settleActiveTurnLayerFromDetail,
   toolStartToFirstPaintMs,
 } from "./chatActiveTurnLayer";
 
@@ -286,6 +289,67 @@ describe("chat active turn layer", () => {
       undefined,
       assistantDelta({ done: true, ledgerSeq: 9, turnItems: [] }),
     )).toBeUndefined();
+  });
+
+  it("keeps an in-flight shell when a done frame merges into an already-reconciled empty layer", () => {
+    const answerItem = {
+      id: "answer:1",
+      itemId: "answer",
+      version: 3,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      type: "agent_message",
+      phase: "final_answer",
+      status: "completed",
+      revision: 1,
+      sequence: 1,
+      terminal: true,
+      text: "正文答案",
+      createdAt: "2026-09-25T08:00:00Z",
+      updatedAt: "2026-09-25T08:00:00Z",
+    } satisfies SessionTurnItem;
+    const canonicalMessage = {
+      id: "assistant-final",
+      role: "assistant",
+      status: "completed",
+      turnId: "turn-1",
+      timestamp: "2026-09-25T08:00:01Z",
+      turnItems: [answerItem],
+    } as ConversationMessage;
+    const streamed = mergeAssistantDeltaIntoActiveTurnLayer(
+      undefined,
+      assistantDelta({ ledgerSeq: 5, stage: "responding", turnItems: [answerItem] }),
+    );
+    // The canonical transcript already commits the answer item, so the
+    // reconcile pass empties the overlay while the turn is not settled yet.
+    const reconciled = reconcileActiveTurnLayerItemsWithMessages(streamed, [canonicalMessage]);
+    expect(reconciled).toMatchObject({ turnItems: [], processStage: "responding" });
+    // Defect ③⑦a: the terminal frame (items already committed) must keep the
+    // shell alive instead of deleting the layer ahead of the throttled
+    // authoritative detail apply.
+    const shell = mergeAssistantDeltaIntoActiveTurnLayer(
+      reconciled,
+      assistantDelta({ done: true, ledgerSeq: 9, stage: "", turnItems: [] }),
+    );
+    expect(shell).toMatchObject({
+      status: "running",
+      processStage: "responding",
+      turnItems: [],
+      ledgerSeq: 9,
+      turnId: "turn-1",
+    });
+    // The shell keeps projecting as the in-flight row while no canonical
+    // commit is in the message window...
+    expect(projectActiveTurnLayerMessage(shell, [])).not.toBeUndefined();
+    // ...and the settle handoff hides it in the same pass that renders the
+    // committed canonical answer.
+    expect(projectActiveTurnLayerMessage(shell, [canonicalMessage])).toBeUndefined();
+    // The whole-layer settle path retires the shell once the authoritative
+    // detail is applied.
+    expect(settleActiveTurnLayerFromDetail(shell, {
+      id: "session-1",
+      messages: [canonicalMessage],
+    } as SessionDetail)).toBeUndefined();
   });
 
   it("requests an authoritative index refresh when persisted detail settles a still-running layer", () => {
