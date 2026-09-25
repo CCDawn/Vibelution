@@ -200,7 +200,13 @@ export type ChatComposerTurnMutations = {
   sessionGuidanceMutation: UseMutationResult<
     SessionDetail,
     Error,
-    { sessionId: string; content: string; mode: SessionGuidanceMode },
+    {
+      sessionId: string;
+      content: string;
+      mode: SessionGuidanceMode;
+      /** Set by queue steer: keep this row out of the paint until its DELETE rebases. */
+      steeredQueuedTurnId?: string;
+    },
     unknown
   >;
 };
@@ -853,6 +859,7 @@ export function useChatComposerTurnMutations({
         sessionId: string;
         content: string;
         mode: SessionGuidanceMode;
+        steeredQueuedTurnId?: string;
       },
     ) =>
       submitSessionGuidance(sessionId, { content, mode }),
@@ -878,6 +885,21 @@ export function useChatComposerTurnMutations({
       }));
       removeStoredSessionDraft(variables.sessionId);
       syncSessionDetail(nextDetail);
+      if (variables.steeredQueuedTurnId) {
+        // Optimistic steer: the row left the cache before the POST, but this
+        // response snapshot still carries it because the queue DELETE has not
+        // run yet; keep it out of the paint until the DELETE rebases.
+        queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detailState) =>
+          detailState
+            ? {
+              ...detailState,
+              queuedTurns: (detailState.queuedTurns ?? []).filter(
+                (row) => row.id !== variables.steeredQueuedTurnId,
+              ),
+            }
+            : detailState,
+        );
+      }
       void chatWorkspaceCache.afterSessionChanged({ sessionId: variables.sessionId });
     },
     onError: (error, variables, context) => {
@@ -1388,14 +1410,52 @@ export function useChatComposerSubmitActions({
     if (!sessionId || !content) {
       return;
     }
+    // Optimistic edit (same pending-intent style as withdraw): the new text
+    // paints at save time while status/pause metadata stay untouched; the
+    // PATCH response rebases the authoritative rows and a failure restores
+    // the pre-edit text without clobbering fields that moved meanwhile.
+    const rowsAtIntent = queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId))?.queuedTurns ?? [];
+    const snapshotRow = rowsAtIntent.find((row) => row.id === id);
+    if (snapshotRow) {
+      queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+        detailState
+          ? {
+            ...detailState,
+            queuedTurns: (detailState.queuedTurns ?? []).map((row) =>
+              row.id === id ? { ...row, content } : row,
+            ),
+          }
+          : detailState,
+      );
+    }
     void updateSessionQueuedTurn(sessionId, id, { content })
       .then((rows) => syncQueuedTurnsIntoDetail(sessionId, rows))
-      .catch((error) => reportQueuedTurnError(
-        sessionId,
-        error,
-        lang === "zh" ? "修改排队消息失败" : "Failed to update the queued message",
-      ));
-  }, [activeSessionId, lang, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
+      .catch((error) => {
+        if (snapshotRow) {
+          queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) => {
+            if (!detailState) {
+              return detailState;
+            }
+            let reverted = false;
+            const queuedTurns = (detailState.queuedTurns ?? []).map((row) => {
+              // Roll back only this intent: a row edited again while the
+              // failed PATCH was in flight keeps its newer text.
+              if (row.id !== id || row.content !== content) {
+                return row;
+              }
+              reverted = true;
+              return { ...row, content: snapshotRow.content };
+            });
+            return reverted ? { ...detailState, queuedTurns } : detailState;
+          });
+        }
+        reportQueuedTurnError(
+          sessionId,
+          error,
+          lang === "zh" ? "修改排队消息失败" : "Failed to update the queued message",
+        );
+      });
+  }, [activeSessionId, lang, queryClient, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
 
   const handleFollowupQueueRemove = useCallback((id: string) => {
     const sessionId = activeSessionId;
@@ -1444,7 +1504,7 @@ export function useChatComposerSubmitActions({
   // references stay queued because guidance cannot carry them.
   const handleFollowupQueueSteer = useCallback((id: string) => {
     const sessionId = activeSessionId;
-    if (!sessionId) {
+    if (!sessionId || pendingQueueWithdrawalIdsRef.current.has(id)) {
       return;
     }
     const item = (sessionFollowupQueues[sessionId] ?? []).find((entry) => entry.id === id);
@@ -1460,18 +1520,64 @@ export function useChatComposerSubmitActions({
       }));
       return;
     }
-    void (async () => {
-      try {
-        await sessionGuidanceMutation.mutateAsync({ sessionId, content: item.text, mode: "safe" });
-        const rows = await removeSessionQueuedTurn(sessionId, id);
-        syncQueuedTurnsIntoDetail(sessionId, rows);
-      } catch {
-        // The item stays queued; the guidance mutation already surfaced its error.
+    // Optimistic steer (same pending-intent style as withdraw): the row leaves
+    // the bar at click time; guidance + DELETE converge the authoritative rows
+    // and either failure rolls the row back into its pre-intent slot. The
+    // shared pending set also drops a second click while this steer is still
+    // in flight.
+    const rowsAtIntent = queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId))?.queuedTurns ?? [];
+    const snapshotIndex = rowsAtIntent.findIndex((row) => row.id === id);
+    const snapshotRow = snapshotIndex >= 0 ? rowsAtIntent[snapshotIndex] : undefined;
+    const restoreSteeredRow = () => {
+      if (!snapshotRow) {
+        return;
       }
-    })();
+      queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+        detailState
+          ? {
+            ...detailState,
+            queuedTurns: restoreQueuedTurnIntoRows(detailState.queuedTurns ?? [], { row: snapshotRow, index: snapshotIndex }),
+          }
+          : detailState,
+      );
+    };
+    pendingQueueWithdrawalIdsRef.current.add(id);
+    if (snapshotRow) {
+      queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+        detailState
+          ? { ...detailState, queuedTurns: (detailState.queuedTurns ?? []).filter((row) => row.id !== id) }
+          : detailState,
+      );
+    }
+    let guidanceAccepted = false;
+    void sessionGuidanceMutation
+      .mutateAsync({ sessionId, content: item.text, mode: "safe", steeredQueuedTurnId: id })
+      .then(() => {
+        guidanceAccepted = true;
+        return removeSessionQueuedTurn(sessionId, id);
+      })
+      .then((rows) => syncQueuedTurnsIntoDetail(sessionId, rows))
+      .catch((error) => {
+        // Roll back only this intent; authoritative rows that landed meanwhile
+        // stay. The guidance mutation surfaces its own copy on its failure, so
+        // only the withdraw step reports here.
+        restoreSteeredRow();
+        if (guidanceAccepted) {
+          reportQueuedTurnError(
+            sessionId,
+            error,
+            lang === "zh" ? "立即引导排队消息失败" : "Failed to steer the queued message",
+          );
+        }
+      })
+      .finally(() => {
+        pendingQueueWithdrawalIdsRef.current.delete(id);
+      });
   }, [
     activeSessionId,
     lang,
+    queryClient,
+    reportQueuedTurnError,
     sessionFollowupQueues,
     sessionGuidanceMutation,
     setSessionComposerErrors,

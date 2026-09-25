@@ -1,19 +1,22 @@
 /** @vitest-environment happy-dom */
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React, { act, useEffect, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../../api/queryKeys";
-import type { SessionDetail, SessionQueuedTurn } from "../../api/types";
+import type { SessionDetail, SessionGuidanceMode, SessionQueuedTurn } from "../../api/types";
 import {
   removeSessionQueuedTurn,
+  submitSessionGuidance,
   updateSessionQueuedTurn,
 } from "../../api/chat";
 import {
   useChatComposerSubmitActions,
+  useChatComposerTurnMutations,
   type ChatComposerTurnMutations,
 } from "./useChatComposerSubmit";
+import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import type { ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
 import type { ComposerImageAttachment } from "./chatComposerSubmitModel";
 
@@ -29,6 +32,7 @@ vi.mock("../../api/chat", async (importOriginal) => {
     removeSessionQueuedTurn: vi.fn(async () => []),
     updateSessionQueuedTurn: vi.fn(async () => []),
     uploadSessionImageAttachment: vi.fn(async () => ({ artifactId: "artifact-1" })),
+    submitSessionGuidance: vi.fn(async () => ({ id: "session-1" }) as SessionDetail),
   };
 });
 
@@ -200,6 +204,13 @@ function Harness({
       </button>
       <button
         type="button"
+        data-testid="steer-queue"
+        onClick={() => actions.handleFollowupQueueSteer("q-1")}
+      >
+        steer
+      </button>
+      <button
+        type="button"
         data-testid="pause-queue"
         onClick={() => actions.handleFollowupQueueTogglePause("q-1", true)}
       >
@@ -216,10 +227,50 @@ function Harness({
   );
 }
 
+type MutationsHarnessProps = {
+  queryClient: QueryClient;
+  guidanceVars: {
+    sessionId: string;
+    content: string;
+    mode: SessionGuidanceMode;
+    steeredQueuedTurnId?: string;
+  };
+};
+
+/** Mounts the real turn mutations so guidance onSuccess cache behavior runs. */
+function MutationsHarness({ queryClient, guidanceVars }: MutationsHarnessProps) {
+  const mutations = useChatComposerTurnMutations({
+    queryClient,
+    chatWorkspaceCache: createChatWorkspaceCache(queryClient),
+    t: (key) => key,
+    describeError: (error, fallback) => (error instanceof Error ? error.message : fallback),
+    syncSessionDetail: (detail) => {
+      queryClient.setQueryData<SessionDetail>(queryKeys.session(detail.id), (previous) => ({
+        ...(previous ?? {}),
+        ...detail,
+      }) as SessionDetail);
+    },
+    setActiveTurnLayersBySession: () => undefined,
+    setSessionDrafts: () => undefined,
+    setSessionComposerErrors: () => undefined,
+    setSessionImageAttachments: () => undefined,
+    setSessionReferenceAttachments: () => undefined,
+    setSessionEditTargets: () => undefined,
+  });
+  return (
+    <button
+      type="button"
+      data-testid="guide"
+      onClick={() => mutations.sessionGuidanceMutation.mutate(guidanceVars)}
+    >
+      guide
+    </button>
+  );
+}
+
 describe("useChatComposerSubmitActions follow-up queue", () => {
   let root: Root | null = null;
   let container: HTMLDivElement | null = null;
-
   afterEach(async () => {
     if (root) {
       await act(async () => {
@@ -253,13 +304,17 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
     };
   }
 
-  async function mount(props: HarnessProps) {
+  async function mountNode(node: React.ReactNode) {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
     await act(async () => {
-      root?.render(<Harness {...props} />);
+      root?.render(node);
     });
+  }
+
+  async function mount(props: HarnessProps) {
+    await mountNode(<Harness {...props} />);
   }
 
   function readCachedQueue(): string[] {
@@ -472,6 +527,7 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
       sessionId: "session-1",
       content: "先不要改测试",
       mode: "safe",
+      steeredQueuedTurnId: "q-1",
     });
     expect(removeSessionQueuedTurn).toHaveBeenCalledWith("session-1", "q-1");
     expect(mutations.submitTurnMutation.mutate).not.toHaveBeenCalled();
@@ -501,6 +557,268 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
     expect(removeSessionQueuedTurn).not.toHaveBeenCalled();
   });
 
+  it("steers a queued turn optimistically and rebases after guidance and delete", async () => {
+    const guidance = vi.fn();
+    let resolveGuidance: (() => void) | undefined;
+    const mutations = {
+      submitTurnMutation: mutationStub(vi.fn()),
+      editResubmitMutation: mutationStub(vi.fn()),
+      regenerateMutation: mutationStub(vi.fn()),
+      stopTurnMutation: mutationStub(vi.fn()),
+      sessionGuidanceMutation: mutationStub(guidance, (variables: unknown) => {
+        guidance(variables);
+        return new Promise<unknown>((resolve) => {
+          resolveGuidance = () => resolve({});
+        });
+      }),
+    } as ChatComposerTurnMutations;
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1",
+      activeTurnId: "turn-session-1",
+      queuedTurns: [
+        { id: "q-1", position: 1, status: "queued", content: "第一条" },
+        { id: "q-2", position: 2, status: "queued", content: "第二条" },
+      ],
+    } as SessionDetail);
+    await mount({
+      busy: true,
+      draft: "",
+      queues: {
+        "session-1": [
+          { id: "q-1", text: "第一条", position: 1 },
+          { id: "q-2", text: "第二条", position: 2 },
+        ],
+      },
+      mutations,
+      queryClient,
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="steer-queue"]')?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // The row leaves the cache at click time, while guidance is still in flight.
+    expect(readCachedQueue()).toEqual(["q-2"]);
+    expect(guidance).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      content: "第一条",
+      mode: "safe",
+      steeredQueuedTurnId: "q-1",
+    });
+    expect(removeSessionQueuedTurn).not.toHaveBeenCalled();
+
+    // Guidance answers and the DELETE rebases the authoritative rows.
+    await act(async () => {
+      resolveGuidance?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(removeSessionQueuedTurn).toHaveBeenCalledTimes(1);
+    expect(removeSessionQueuedTurn).toHaveBeenCalledWith("session-1", "q-1");
+    expect(readCachedQueue()).toEqual([]);
+  });
+
+  it("dedupes steer clicks while the first steer is still in flight", async () => {
+    const guidance = vi.fn();
+    let resolveGuidance: (() => void) | undefined;
+    const mutations = {
+      submitTurnMutation: mutationStub(vi.fn()),
+      editResubmitMutation: mutationStub(vi.fn()),
+      regenerateMutation: mutationStub(vi.fn()),
+      stopTurnMutation: mutationStub(vi.fn()),
+      sessionGuidanceMutation: mutationStub(guidance, (variables: unknown) => {
+        guidance(variables);
+        return new Promise<unknown>((resolve) => {
+          resolveGuidance = () => resolve({});
+        });
+      }),
+    } as ChatComposerTurnMutations;
+    const queuedRows: SessionQueuedTurn[] = [
+      { id: "q-1", position: 1, status: "queued", content: "第一条" },
+      { id: "q-2", position: 2, status: "queued", content: "第二条" },
+    ];
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1",
+      activeTurnId: "turn-session-1",
+      queuedTurns: queuedRows,
+    } as SessionDetail);
+    await mount({
+      busy: true,
+      draft: "",
+      queues: {
+        "session-1": [
+          { id: "q-1", text: "第一条", position: 1 },
+          { id: "q-2", text: "第二条", position: 2 },
+        ],
+      },
+      mutations,
+      queryClient,
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="steer-queue"]')?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(guidance).toHaveBeenCalledTimes(1);
+    expect(readCachedQueue()).toEqual(["q-2"]);
+
+    // A late echo that still carries the row must not tempt a second steer.
+    await act(async () => {
+      queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), (current) =>
+        current ? { ...current, queuedTurns: queuedRows } : current,
+      );
+    });
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="steer-queue"]')?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(guidance).toHaveBeenCalledTimes(1);
+    expect(removeSessionQueuedTurn).not.toHaveBeenCalled();
+    expect(readCachedQueue()).toEqual(["q-1", "q-2"]);
+
+    // Settled: guidance answers and the DELETE rebases.
+    await act(async () => {
+      resolveGuidance?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(removeSessionQueuedTurn).toHaveBeenCalledTimes(1);
+    expect(readCachedQueue()).toEqual([]);
+  });
+
+  it("rolls an optimistic steer back when guidance fails", async () => {
+    const guidance = vi.fn();
+    const mutations = {
+      submitTurnMutation: mutationStub(vi.fn()),
+      editResubmitMutation: mutationStub(vi.fn()),
+      regenerateMutation: mutationStub(vi.fn()),
+      stopTurnMutation: mutationStub(vi.fn()),
+      sessionGuidanceMutation: mutationStub(guidance, async () => {
+        throw new Error("引导失败");
+      }),
+    } as ChatComposerTurnMutations;
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1",
+      activeTurnId: "turn-session-1",
+      queuedTurns: [
+        { id: "q-1", position: 1, status: "queued", content: "第一条" },
+        { id: "q-2", position: 2, status: "queued", content: "第二条" },
+      ],
+    } as SessionDetail);
+    await mount({
+      busy: true,
+      draft: "",
+      queues: {
+        "session-1": [
+          { id: "q-1", text: "第一条", position: 1 },
+          { id: "q-2", text: "第二条", position: 2 },
+        ],
+      },
+      mutations,
+      queryClient,
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="steer-queue"]')?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // The row returns to its pre-intent slot; no DELETE was attempted (the
+    // guidance mutation owns the error copy for this leg).
+    expect(readCachedQueue()).toEqual(["q-1", "q-2"]);
+    expect(removeSessionQueuedTurn).not.toHaveBeenCalled();
+  });
+
+  it("rolls an optimistic steer back and reports when the queue delete fails", async () => {
+    const { mutations, guidance } = createMutations();
+    let errors: Record<string, string> = {};
+    let rejectRemove: ((error: Error) => void) | undefined;
+    vi.mocked(removeSessionQueuedTurn).mockImplementationOnce(
+      () => new Promise<SessionQueuedTurn[]>((_resolve, reject) => {
+        rejectRemove = reject;
+      }),
+    );
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1",
+      activeTurnId: "turn-session-1",
+      queuedTurns: [
+        { id: "q-1", position: 1, status: "queued", content: "第一条" },
+        { id: "q-2", position: 2, status: "queued", content: "第二条" },
+      ],
+    } as SessionDetail);
+    await mount({
+      busy: true,
+      draft: "",
+      queues: {
+        "session-1": [
+          { id: "q-1", text: "第一条", position: 1 },
+          { id: "q-2", text: "第二条", position: 2 },
+        ],
+      },
+      mutations,
+      onErrors: (next) => {
+        errors = next;
+      },
+      queryClient,
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="steer-queue"]')?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(readCachedQueue()).toEqual(["q-2"]);
+
+    await act(async () => {
+      rejectRemove?.(new Error("网络断了"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // The row returns to its pre-intent slot and the failure is surfaced.
+    expect(readCachedQueue()).toEqual(["q-1", "q-2"]);
+    expect(errors["session-1"]).toContain("网络断了");
+    expect(guidance).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a steered row out of the paint when the guidance answer still carries it", async () => {
+    const queuedRows: SessionQueuedTurn[] = [
+      { id: "q-1", position: 1, status: "queued", content: "第一条" },
+      { id: "q-2", position: 2, status: "queued", content: "第二条" },
+    ];
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1",
+      activeTurnId: "turn-session-1",
+      queuedTurns: queuedRows,
+    } as SessionDetail);
+    vi.mocked(submitSessionGuidance).mockResolvedValueOnce({
+      id: "session-1",
+      activeTurnId: "turn-session-1",
+      queuedTurns: queuedRows,
+    } as SessionDetail);
+    await mountNode(
+      <QueryClientProvider client={queryClient}>
+        <MutationsHarness
+          queryClient={queryClient}
+          guidanceVars={{ sessionId: "session-1", content: "第一条", mode: "safe", steeredQueuedTurnId: "q-1" }}
+        />
+      </QueryClientProvider>,
+    );
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="guide"]')?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // The response snapshot still carries the row because the DELETE has not
+    // run; the steeredQueuedTurnId filter keeps it out of the paint anyway.
+    const paintedRows = queryClient.getQueryData<SessionDetail>(queryKeys.session("session-1"))?.queuedTurns ?? [];
+    expect(paintedRows.map((row) => row.id)).toEqual(["q-2"]);
+    expect(submitSessionGuidance).toHaveBeenCalledWith("session-1", { content: "第一条", mode: "safe" });
+  });
+
   it("updates a queued turn's content through the server patch", async () => {
     const { mutations } = createMutations();
     await mount({
@@ -517,6 +835,115 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
     });
 
     expect(updateSessionQueuedTurn).toHaveBeenCalledWith("session-1", "q-1", { content: "改后的排队文本" });
+  });
+
+  it("edits a queued turn optimistically and rebases the authoritative rows", async () => {
+    const { mutations } = createMutations();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1",
+      activeTurnId: "turn-session-1",
+      queuedTurns: [
+        { id: "q-1", position: 1, status: "paused", content: "第一条" },
+        { id: "q-2", position: 2, status: "queued", content: "第二条" },
+      ],
+    } as SessionDetail);
+    let resolveUpdate: ((rows: SessionQueuedTurn[]) => void) | undefined;
+    vi.mocked(updateSessionQueuedTurn).mockImplementationOnce(
+      () => new Promise<SessionQueuedTurn[]>((resolve) => {
+        resolveUpdate = resolve;
+      }),
+    );
+    await mount({
+      busy: true,
+      draft: "",
+      queues: {
+        "session-1": [
+          { id: "q-1", text: "第一条", position: 1, status: "paused" },
+          { id: "q-2", text: "第二条", position: 2 },
+        ],
+      },
+      mutations,
+      queryClient,
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="update-queue"]')?.click();
+    });
+
+    // The new text paints at save time; pause metadata stays untouched.
+    expect(updateSessionQueuedTurn).toHaveBeenCalledWith("session-1", "q-1", { content: "改后的排队文本" });
+    const paintedRows = queryClient.getQueryData<SessionDetail>(queryKeys.session("session-1"))?.queuedTurns ?? [];
+    expect(paintedRows.find((row) => row.id === "q-1")).toMatchObject({
+      content: "改后的排队文本",
+      status: "paused",
+    });
+
+    // The PATCH answers: the authoritative rows (edit retry clears "paused") win.
+    await act(async () => {
+      resolveUpdate?.([
+        { id: "q-1", position: 1, status: "queued", content: "改后的排队文本" },
+        { id: "q-2", position: 2, status: "queued", content: "第二条" },
+      ]);
+      await Promise.resolve();
+    });
+    const rebasedRows = queryClient.getQueryData<SessionDetail>(queryKeys.session("session-1"))?.queuedTurns ?? [];
+    expect(rebasedRows.find((row) => row.id === "q-1")).toMatchObject({
+      content: "改后的排队文本",
+      status: "queued",
+    });
+    expect(readCachedQueue()).toEqual(["q-1", "q-2"]);
+  });
+
+  it("rolls an optimistic edit back when the server rejects it", async () => {
+    const { mutations } = createMutations();
+    let errors: Record<string, string> = {};
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1",
+      activeTurnId: "turn-session-1",
+      queuedTurns: [
+        { id: "q-1", position: 1, status: "queued", content: "第一条" },
+        { id: "q-2", position: 2, status: "queued", content: "第二条" },
+      ],
+    } as SessionDetail);
+    let rejectUpdate: ((error: Error) => void) | undefined;
+    vi.mocked(updateSessionQueuedTurn).mockImplementationOnce(
+      () => new Promise<SessionQueuedTurn[]>((_resolve, reject) => {
+        rejectUpdate = reject;
+      }),
+    );
+    await mount({
+      busy: true,
+      draft: "",
+      queues: {
+        "session-1": [
+          { id: "q-1", text: "第一条", position: 1 },
+          { id: "q-2", text: "第二条", position: 2 },
+        ],
+      },
+      mutations,
+      onErrors: (next) => {
+        errors = next;
+      },
+      queryClient,
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="update-queue"]')?.click();
+    });
+    const paintedRows = queryClient.getQueryData<SessionDetail>(queryKeys.session("session-1"))?.queuedTurns ?? [];
+    expect(paintedRows.find((row) => row.id === "q-1")?.content).toBe("改后的排队文本");
+
+    await act(async () => {
+      rejectUpdate?.(new Error("网络断了"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // The pre-edit text is back and the failure is surfaced.
+    const rolledBackRows = queryClient.getQueryData<SessionDetail>(queryKeys.session("session-1"))?.queuedTurns ?? [];
+    expect(rolledBackRows.find((row) => row.id === "q-1")?.content).toBe("第一条");
+    expect(errors["session-1"]).toContain("网络断了");
   });
 
   it("withdraws a queued turn optimistically, dedupes in-flight clicks and rebases authoritative rows", async () => {
