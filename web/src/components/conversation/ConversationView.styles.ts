@@ -452,8 +452,21 @@ backToBottomButton:
     "vui-components-conversationview codexTranscriptReasoningHeaderBody min-w-0 overflow-hidden text-left",
   codexTranscriptReasoningTitleRow:
     "vui-components-conversationview codexTranscriptReasoningTitleRow inline-flex min-w-0 max-w-full flex-nowrap items-center gap-x-2 overflow-hidden",
+  // Thought title keeps a fixed label so the rolling summary owns the leftover
+  // width instead of squeezing the status text into multiple lines.
+  codexTranscriptReasoningTitle:
+    "vui-components-conversationview codexTranscriptReasoningTitle shrink-0 whitespace-nowrap text-vui-xs font-normal leading-[1.4] text-[var(--fg-tertiary)]",
   codexTranscriptReasoningText:
     "vui-components-conversationview codexTranscriptReasoningText min-w-0 max-w-[min(100%,128ch)] whitespace-pre-wrap break-words [overflow-wrap:anywhere] border-0 bg-transparent p-0 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  // Collapsed thought summary: one nowrap line that hides overflow and rolls
+  // the newest words to the right edge; the mask only fades real overflow so
+  // short summaries keep clean edges.
+  thoughtStreamingSummary:
+    "vui-components-conversationview thoughtStreamingSummary min-w-0 flex-1 overflow-hidden whitespace-nowrap text-vui-xs leading-[1.4] text-[var(--fg-tertiary)]",
+  thoughtStreamingSummaryMasked:
+    "vui-components-conversationview thoughtStreamingSummaryMasked [mask-image:linear-gradient(to_right,transparent_0,black_12px,black_calc(100%_-_12px),transparent_100%)] [-webkit-mask-image:linear-gradient(to_right,transparent_0,black_12px,black_calc(100%_-_12px),transparent_100%)] [mask-repeat:no-repeat] [-webkit-mask-repeat:no-repeat] [mask-size:100%_100%] [-webkit-mask-size:100%_100%]",
+  thoughtStreamingSummaryText:
+    "vui-components-conversationview thoughtStreamingSummaryText inline-block min-w-max whitespace-nowrap",
   // User-facing progress narration: a lighter lane than thinking (no box chrome),
   // clamped while settled so long narration stays scannable.
   codexTranscriptProgressCell:

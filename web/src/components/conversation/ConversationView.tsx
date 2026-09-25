@@ -378,7 +378,11 @@ import {
   extractToolDisplayCommand,
   type CodexToolActivityPills,
 } from "./conversationToolPresentation";
-import { humanizeReasoningPreview } from "./conversationReasoningPreview";
+import {
+  isThoughtScrollAtBottom,
+  resolveThoughtStreamingSummary,
+  type ThoughtStreamingSummary,
+} from "./conversationThoughtSummary";
 import { VActionGroup, VButton, VNativeInput, VNativeTextarea } from "../vui";
 import styles from "./ConversationView.styles";
 
@@ -400,7 +404,10 @@ const TIMELINE_VIRTUAL_INITIAL_RECT = { width: 1280, height: 900 };
 const TIMELINE_ANCHOR_CORRECTION_MAX_FRAMES = 30;
 const TIMELINE_ANCHOR_CORRECTION_TOLERANCE_PX = 2;
 
-/** Height-capped thought body; sticks to bottom while streaming. */
+/**
+ * Height-capped thought body; sticks to bottom while streaming until the user
+ * scrolls away from the bottom, then pauses follow until they return.
+ */
 function ThoughtScrollBody({
   text,
   streaming,
@@ -411,6 +418,20 @@ function ThoughtScrollBody({
   className?: string;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // Starts true on every (re)mount so an expand or fresh stream follows the
+  // newest content; onScroll flips it off as soon as the user leaves the bottom.
+  const autoFollowBottomRef = useRef(true);
+  const handleScroll = useCallback(() => {
+    const node = scrollRef.current;
+    if (!node) {
+      return;
+    }
+    autoFollowBottomRef.current = isThoughtScrollAtBottom({
+      clientHeight: node.clientHeight,
+      scrollHeight: node.scrollHeight,
+      scrollTop: node.scrollTop,
+    });
+  }, []);
   useLayoutEffect(() => {
     if (!streaming) {
       return;
@@ -419,17 +440,73 @@ function ThoughtScrollBody({
     if (!node) {
       return;
     }
-    node.scrollTop = node.scrollHeight;
+    if (autoFollowBottomRef.current) {
+      node.scrollTop = node.scrollHeight;
+    }
   }, [streaming, text]);
   return (
     <div
       ref={scrollRef}
+      onScroll={handleScroll}
       className={[styles.thoughtScrollBody, className].filter(Boolean).join(" ")}
       data-thought-scroll-body="true"
       data-thought-scroll-streaming={streaming ? "true" : undefined}
     >
       <pre className={styles.codexTranscriptReasoningText}>{text}</pre>
     </div>
+  );
+}
+
+/**
+ * Collapsed thought summary: the latest thought sentence in one nowrap line.
+ * Overflow hides and the viewport is pushed to its end on every content or
+ * width change, so the newest words stay pinned at the right edge while older
+ * text rolls out to the left; a CSS mask fades both edges only once the line
+ * actually overflows.
+ */
+function ThoughtStreamingSummary({ text }: { text: string }) {
+  const viewportRef = useRef<HTMLSpanElement | null>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  const summary: ThoughtStreamingSummary | null = resolveThoughtStreamingSummary(text);
+  const summaryText = summary?.text ?? "";
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !summaryText) {
+      return;
+    }
+    const syncSummaryViewport = () => {
+      setOverflowing((current) => {
+        const next = viewport.scrollWidth > viewport.clientWidth + 1;
+        return current === next ? current : next;
+      });
+      viewport.scrollLeft = viewport.scrollWidth;
+    };
+    syncSummaryViewport();
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const resizeObserver = new ResizeObserver(syncSummaryViewport);
+    resizeObserver.observe(viewport);
+    return () => resizeObserver.disconnect();
+  }, [summaryText]);
+  if (!summary) {
+    return null;
+  }
+  return (
+    <>
+      <span className={styles.timelineCellSeparator} aria-hidden="true">·</span>
+      <span
+        ref={viewportRef}
+        className={[
+          styles.thoughtStreamingSummary,
+          overflowing ? styles.thoughtStreamingSummaryMasked : "",
+        ].filter(Boolean).join(" ")}
+        data-thought-streaming-summary="true"
+        data-thought-summary-mask={overflowing ? "both" : "none"}
+      >
+        <span className={styles.thoughtStreamingSummaryText}>{summary.text}</span>
+      </span>
+    </>
   );
 }
 
@@ -3669,10 +3746,11 @@ export const ConversationView = React.memo(function ConversationView({
   }
 
   /**
-   * Process-trail thought box (reasoning + commentary): shown in chrono order with
-   * tools, height-capped and scrollable while it streams. Once the segment settles
-   * the body collapses to a one-line preview, so a finished thought neither keeps
-   * covering the transcript nor keeps its text mounted.
+   * Collapsible thinking lane (ZCode reasoning parity): streaming and settled
+   * thoughts both stay collapsed until the user expands. The collapsed header
+   * keeps icon + status title plus a single-line horizontally rolling summary
+   * of the latest thought sentence; the expanded body is height-capped and
+   * bottom-following.
    */
   function renderCodexThoughtScrollCell(
     messageId: string,
@@ -3682,11 +3760,9 @@ export const ConversationView = React.memo(function ConversationView({
       text: string;
       status: CodexTranscriptCell["status"];
       tone: CodexTranscriptCell["tone"];
-      title: string;
       phase?: string;
       channel?: string;
       kind?: CodexTranscriptCell["kind"];
-      meta?: string;
     },
   ) {
     const fullText = String(input.text || "").trim();
@@ -3694,14 +3770,16 @@ export const ConversationView = React.memo(function ConversationView({
       return null;
     }
     const isLive = input.status === "running" || input.status === "pending";
-    // Open while live so the streamed text is readable; the default flips to
-    // collapsed on completion and the section refreshes to the inline preview.
-    // The section id comes from `reasoningExpansionSectionId`, which prefers
-    // sourceItemId: a stream update that rewrites cell.id keeps the same
-    // open/closed choice, and an explicit toggle always wins over the default.
-    const defaultExpanded = isLive;
+    // ZCode parity: streaming and completed reasoning default collapsed, so a
+    // live stream no longer unfolds over the transcript. The user's explicit
+    // toggle (explicit expansion state) still wins over the default; the
+    // section id comes from `reasoningExpansionSectionId`, which prefers
+    // sourceItemId so stream updates that rewrite cell.id keep the choice.
+    const defaultExpanded = false;
     const expanded = getExpansionState(messageId, input.sectionId, defaultExpanded);
-    const inlinePreview = expanded ? "" : humanizeReasoningPreview(fullText);
+    const thoughtTitle = isLive
+      ? (lang === "zh" ? "思考中" : "Thinking…")
+      : (lang === "zh" ? "已思考" : "Thought");
     const toneClassName = styles[`codexTranscriptCell_${input.tone}` as keyof typeof styles] ?? "";
     return (
       <section
@@ -3740,14 +3818,8 @@ export const ConversationView = React.memo(function ConversationView({
           </span>
           <span className={styles.codexTranscriptReasoningHeaderBody}>
             <span className={styles.codexTranscriptReasoningTitleRow}>
-              <span className={styles.codexTranscriptCellTitle}>{input.title}</span>
-              {input.meta ? <span className={styles.codexTranscriptCellMeta}>{input.meta}</span> : null}
-              {!expanded && inlinePreview ? (
-                <>
-                  <span className={styles.timelineCellSeparator} aria-hidden="true">·</span>
-                  <span className={styles.timelineThoughtInlinePreview}>{inlinePreview}</span>
-                </>
-              ) : null}
+              <span className={styles.codexTranscriptReasoningTitle}>{thoughtTitle}</span>
+              {!expanded ? <ThoughtStreamingSummary text={fullText} /> : null}
             </span>
           </span>
         </VButton>
@@ -3848,11 +3920,9 @@ export const ConversationView = React.memo(function ConversationView({
       text: fullText,
       status: cell.status,
       tone: cell.tone,
-      title: codexTranscriptCellTitle(cell) || (lang === "zh" ? "思考" : "Thinking"),
       phase: cell.phase,
       channel: cell.channel,
       kind: cell.kind,
-      meta: codexTranscriptCellMeta(cell) || undefined,
     });
   }
 
@@ -4293,15 +4363,17 @@ export const ConversationView = React.memo(function ConversationView({
     rowIdentity: AgentMessageTimelineRowIdentity,
     isActiveTimelineItem: boolean,
   ) {
-    // Live SSE: keep the body open while thought is running so streaming text is visible.
-    // Settled thoughts default collapsed; shouldRefreshConversationExpansionDefault auto-closes.
-    const inlinePreview = humanizeReasoningPreview(String(item.preview || item.text || ""));
-    const defaultExpanded = Boolean(item.defaultExpanded)
-      || item.status === "running"
-      || item.status === "pending";
+    // ZCode parity: streaming and settled thoughts both stay collapsed until the
+    // user expands; the collapsed header shows the running/settled title plus a
+    // single-line rolling summary of the latest thought sentence.
+    const isLive = item.status === "running" || item.status === "pending";
+    const defaultExpanded = false;
     const sectionId = `thought:${item.id}`;
     const expanded = getExpansionState(message.id, sectionId, defaultExpanded);
     const toggleLabel = expanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden");
+    const thoughtTitle = isLive
+      ? (lang === "zh" ? "思考中" : "Thinking…")
+      : (lang === "zh" ? "已思考" : "Thought");
     return (
       <section
         key={agentMessageTimelineItemRowKey(rowIdentity, item)}
@@ -4321,16 +4393,11 @@ export const ConversationView = React.memo(function ConversationView({
             toggleSection(message.id, sectionId, defaultExpanded);
           }}
         >
-          {isActiveTimelineItem && item.status === "running" ? <LoaderCircle className={styles.statusSpinner} size={14} /> : <BrainCircuit size={14} />}
+          {isActiveTimelineItem && isLive ? <LoaderCircle className={styles.statusSpinner} size={14} /> : <BrainCircuit size={14} />}
           <span className={styles.timelineCellBody}>
             <span className={`${styles.timelineCellTitleRow} ${styles.timelineCellCompactTitleRow}`}>
-              <span className={styles.timelineCellTitle}>{lang === "zh" ? "思考" : "Thinking"}</span>
-              {!expanded && inlinePreview ? (
-                <>
-                  <span className={styles.timelineCellSeparator} aria-hidden="true">·</span>
-                  <span className={styles.timelineThoughtInlinePreview}>{inlinePreview}</span>
-                </>
-              ) : null}
+              <span className={styles.codexTranscriptReasoningTitle}>{thoughtTitle}</span>
+              {!expanded ? <ThoughtStreamingSummary text={item.text} /> : null}
             </span>
           </span>
           {expanded ? <ChevronDown size={15} aria-hidden="true" /> : <ChevronRight size={15} aria-hidden="true" />}
@@ -4339,7 +4406,7 @@ export const ConversationView = React.memo(function ConversationView({
           <div className={styles.codexTranscriptReasoningTextButton}>
             <ThoughtScrollBody
               text={item.text}
-              streaming={item.status === "running" || item.status === "pending"}
+              streaming={isLive}
             />
           </div>
         ) : null}
