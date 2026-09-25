@@ -12,6 +12,13 @@ const styles = {
   bannerToneWarning: "vui-tone-warning",
   bannerToneDanger: "vui-tone-danger",
   groupList: "vui-routes-configshortcutspanel groupList grid min-w-0 content-start gap-5",
+  filterRow: "vui-routes-configshortcutspanel filterRow flex min-w-0 flex-wrap items-center gap-2",
+  filterInput:
+    "vui-routes-configshortcutspanel filterInput min-w-0 flex-1 basis-48 text-vui-xs",
+  filterCapturing:
+    "vui-routes-configshortcutspanel filterCapturing text-vui-xs font-medium text-vui-fg-primary",
+  filterEmpty:
+    "vui-routes-configshortcutspanel filterEmpty rounded-lg border border-vui-border-subtle px-4 py-3 text-vui-xs text-vui-fg-tertiary",
   group: "vui-routes-configshortcutspanel group grid min-w-0 gap-2",
   groupTitle:
     "vui-routes-configshortcutspanel groupTitle m-0 px-1 text-vui-xs font-semibold text-vui-fg-secondary",

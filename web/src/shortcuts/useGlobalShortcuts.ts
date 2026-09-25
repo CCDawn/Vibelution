@@ -122,8 +122,10 @@ function eventMatchesKey(
 export type ShortcutRecordOutcome =
   | { kind: "pending" }
   | { kind: "binding"; binding: string }
-  | { kind: "invalid"; reason: "no-modifier" | "unsupported-key" }
-  | { kind: "cancel" };
+  | { kind: "invalid"; reason: "no-modifier" | "unsupported-key"; /** no-modifier 时携带已解析键名（按键过滤等消费方使用）。 */ key?: string }
+  | { kind: "cancel" }
+  /** 录制态按 Backspace：恢复该命令默认绑定（ZCode useShortcutRecording 语义）；非录制态不产生。 */
+  | { kind: "restore-default" };
 
 const MODIFIER_ONLY_KEYS = new Set([
   "Shift",
@@ -174,7 +176,7 @@ export function recordShortcutBinding(
   }
   const hasModifier = event.metaKey || event.ctrlKey || event.altKey || event.shiftKey;
   if (!hasModifier && key.length === 1) {
-    return { kind: "invalid", reason: "no-modifier" };
+    return { kind: "invalid", reason: "no-modifier", key };
   }
   const parsed: ParsedShortcutBinding = {
     cmdOrCtrl: isApple ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey,
@@ -261,6 +263,13 @@ export function useGlobalShortcuts(options: UseGlobalShortcutsOptions): void {
         if (event.key === "Escape") {
           event.preventDefault();
           current.onRecord({ kind: "cancel" });
+          return;
+        }
+        // 录制态 Backspace = 恢复默认绑定（ZCode useShortcutRecording 语义）。
+        // Backspace 本就不是可绑定键（不在 KEY_TO_CODE），仅在录制态拦截。
+        if (event.key === "Backspace") {
+          event.preventDefault();
+          current.onRecord({ kind: "restore-default" });
           return;
         }
         const outcome = recordShortcutBinding(event, current.isApple);

@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
+from core.chat.turn_journal import EVENT_SESSION_RECOVERY_RESUMED
 from core.research.workflow.contracts.discussion_scope import (
     PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND,
 )
@@ -1387,6 +1388,20 @@ def _normalize_messages(
     timeline_lang = s.get_web_language() if include_timeline else ""
     normalized_start_index = max(1, int(source_start_index or 1))
     normalized_transcript_scope = s._normalize_session_detail_transcript_scope(transcript_scope)
+    # Startup-recovery supersede marks (display-only): turns whose interrupted
+    # partial was superseded by an auto-resume get metadata.recoverySuperseded
+    # so the display layer can drop the stale partial. The journal keeps both
+    # messages untouched and the model replay never passes through here.
+    recovery_superseded_turn_ids = {
+        turn_id
+        for raw_item in raw_items
+        if isinstance(raw_item, dict)
+        and str(raw_item.get("role") or "").strip().lower() == "assistant"
+        and isinstance(raw_item.get("metadata"), dict)
+        and str(raw_item["metadata"].get("kind") or "").strip() == EVENT_SESSION_RECOVERY_RESUMED
+        for turn_id in (str(raw_item["metadata"].get("recoveredTurnId") or "").strip(),)
+        if turn_id
+    }
     # Always compute per-turn hosts so tool-event air bubbles can be collapsed even
     # when timeline/transcript enrichment is disabled for a payload window.
     timeline_target_indices = s._assistant_timeline_target_indices(
@@ -1614,6 +1629,13 @@ def _normalize_messages(
             client_submission_id = client_submission_id_by_turn.get(turn_id, "")
             if client_submission_id:
                 metadata.setdefault("clientSubmissionId", client_submission_id)
+        if (
+            role == "assistant"
+            and turn_id
+            and turn_id in recovery_superseded_turn_ids
+            and metadata.get("interrupted") is True
+        ):
+            metadata["recoverySuperseded"] = True
         if isinstance(metadata, dict) and metadata:
             entry["metadata"] = dict(metadata)
             if role == "assistant" and str(metadata.get("kind") or "").strip() == "turn_error":

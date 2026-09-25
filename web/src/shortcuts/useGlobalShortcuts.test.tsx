@@ -113,10 +113,11 @@ describe("recordShortcutBinding（录制器，迁移自 preview logic-selftest�
     ).toEqual({ kind: "binding", binding: "Shift+7" });
   });
 
-  it("无修饰键的普通字符键拒绝（no-modifier）", () => {
+  it("无修饰键的普通字符键拒绝（no-modifier），携带解析键名供按键过滤使用", () => {
     expect(recordShortcutBinding({ key: "g", code: "KeyG", ...bare }, false)).toEqual({
       kind: "invalid",
       reason: "no-modifier",
+      key: "g",
     });
   });
 
@@ -348,6 +349,38 @@ describe("useGlobalShortcuts 录制门与 enabled（跨实例协调）", () => {
         root.unmount();
       });
       container.remove();
+    }
+  });
+
+  it("录制态 Backspace 返回 restore-default 并 preventDefault", () => {
+    const onRecord = vi.fn();
+    const recorder = RecorderHost({ effective: resolveEffectiveBindings(), onRecord });
+    try {
+      const event = keyEvent({ key: "Backspace", code: "Backspace" });
+      act(() => {
+        window.dispatchEvent(event);
+      });
+      expect(onRecord).toHaveBeenCalledWith({ kind: "restore-default" });
+      expect(event.defaultPrevented).toBe(true);
+    } finally {
+      unmountHost(recorder);
+    }
+  });
+
+  it("非录制态 Backspace 不被拦截（既不分发命令也不产生录制结果）", () => {
+    const onCommand = vi.fn();
+    const onRecord = vi.fn();
+    const host = HookHost({ effective: resolveEffectiveBindings(), onCommand });
+    try {
+      const event = keyEvent({ key: "Backspace", code: "Backspace", ctrlKey: false });
+      act(() => {
+        window.dispatchEvent(event);
+      });
+      expect(event.defaultPrevented).toBe(false);
+      expect(onCommand).not.toHaveBeenCalled();
+      expect(onRecord).not.toHaveBeenCalled();
+    } finally {
+      unmountHost(host);
     }
   });
 });

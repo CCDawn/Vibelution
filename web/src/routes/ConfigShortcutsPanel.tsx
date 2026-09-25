@@ -5,8 +5,12 @@
  * 逻辑全部复用 web/src/shortcuts 真实基建（零拷贝）：
  * - 命令清单/生效表 resolveEffectiveBindings（commands.ts，唯一数据源）；
  * - 冲突检测 checkBindingConflict（保留键黑名单 + canonical 物理归一占用）；
- * - 录制 useGlobalShortcuts（本面板仅录制态挂监听；非录制态分发交给
+ * - 录制 useGlobalShortcuts（本面板仅录制/捕获态挂监听；非录制态分发交给
  *   GlobalCommandSurfaces 同一执行路径，录制期间其分发经录制门让路）；
+ * - 录制态语义：Esc 取消 · Backspace 恢复该命令默认绑定（ZCode
+ *   useShortcutRecording 对齐；Backspace 非可绑定键，仅录制态拦截）；
+ * - 过滤：文本过滤（当前语言标题/描述）+「按键盘找」按键过滤（canonical
+ *   物理归一，与 conflicts.ts 同源口径）；空态区分文本无命中 vs 键未占用；
  * - 持久化 read/writeStoredShortcutOverrides（localStorage 键
  *   vibelution.shortcuts.overrides），写入经订阅让全局分发即时生效。
  *
@@ -15,7 +19,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { VButton, VChip } from "../components/vui";
+import { VButton, VChip, VNativeInput } from "../components/vui";
 import {
   SHORTCUT_COMMANDS,
   resolveEffectiveBindings,
@@ -24,6 +28,7 @@ import {
   type ShortcutOverrides,
 } from "../shortcuts/commands";
 import { checkBindingConflict } from "../shortcuts/conflicts";
+import { canonicalBindingKey } from "../shortcuts/platform";
 import {
   formatBindingLabel,
   isAppleKeyboardPlatform,
@@ -58,6 +63,14 @@ export type ConfigShortcutsPanelCopy = {
   shortcutsRecordingHint: string;
   shortcutsRecordingPending: string;
   shortcutsRecordCancelled: string;
+  shortcutsRestoredByBackspace: string;
+  shortcutsFilterPlaceholder: string;
+  shortcutsFilterByKeystroke: string;
+  shortcutsFilterCapturing: string;
+  shortcutsFilterClear: string;
+  shortcutsFilterUnknownKey: string;
+  shortcutsFilterNoTextMatch: string;
+  shortcutsFilterKeyUnbound: string;
   shortcutsInvalidNoModifier: string;
   shortcutsInvalidUnsupported: string;
   shortcutsBoundNotice: string;
@@ -117,6 +130,12 @@ export function ConfigShortcutsPanel({ lang, copy }: ConfigShortcutsPanelProps) 
   const [recordingTarget, setRecordingTarget] = useState<ShortcutCommandId | null>(null);
   const [recordingPending, setRecordingPending] = useState(false);
   const [banner, setBanner] = useState<ShortcutsBanner>(null);
+  // 命令文本过滤（按当前语言标题/描述/命令 id 匹配）。
+  const [textFilter, setTextFilter] = useState("");
+  // 按键式过滤：keyCapture = 等待下一次物理按键；keyFilter = 已捕获组合
+  //（canonical 为物理等价口径，null 表示捕获到不可绑定键 → 必然无占用）。
+  const [keyCapture, setKeyCapture] = useState(false);
+  const [keyFilter, setKeyFilter] = useState<{ canonical: string | null; label: string } | null>(null);
 
   const isApple = useMemo(() => isAppleKeyboardPlatform(), []);
   const labelStyle: BindingLabelStyle = isApple ? "apple" : "windows";
@@ -183,9 +202,43 @@ export function ConfigShortcutsPanel({ lang, copy }: ConfigShortcutsPanelProps) 
     [copy, titleFor],
   );
 
-  // 录制态回调：pending 更新提示；binding 走冲突检测；invalid/cancel 收尾。
+  // 录制/捕获态回调：命令录制走冲突检测落键；按键过滤捕获态把一次物理按键
+  // 归一为过滤条件；pending 更新提示；cancel/restore-default 收尾。
   const handleRecord = useCallback(
     (outcome: ShortcutRecordOutcome) => {
+      if (keyCapture) {
+        if (outcome.kind === "pending") {
+          return;
+        }
+        setKeyCapture(false);
+        if (outcome.kind === "cancel") {
+          // Esc 退出按键捕获，不影响已有过滤。
+          return;
+        }
+        if (outcome.kind === "binding") {
+          const canonical = canonicalBindingKey(outcome.binding, isApple);
+          setKeyFilter({
+            canonical,
+            label: canonical ? formatBindingLabel(outcome.binding, labelStyle) : copy.shortcutsFilterUnknownKey,
+          });
+          return;
+        }
+        if (outcome.kind === "invalid") {
+          if (outcome.reason === "no-modifier" && outcome.key) {
+            // 裸字符键：物理等价口径下等价于「无修饰键 + 该键」组合。
+            const bare = outcome.key.toLowerCase();
+            setKeyFilter({
+              canonical: isApple ? `0000:${bare}` : `000:${bare}`,
+              label: outcome.key.toUpperCase(),
+            });
+          } else {
+            setKeyFilter({ canonical: null, label: copy.shortcutsFilterUnknownKey });
+          }
+          return;
+        }
+        // restore-default 在捕获态无恢复语义：等同退出捕获。
+        return;
+      }
       const target = recordingTarget;
       if (target === null) {
         return;
@@ -200,6 +253,19 @@ export function ConfigShortcutsPanel({ lang, copy }: ConfigShortcutsPanelProps) 
         setBanner({ tone: "info", text: copy.shortcutsRecordCancelled });
         return;
       }
+      if (outcome.kind === "restore-default") {
+        // 录制态 Backspace：恢复该命令默认绑定（移除用户覆盖）。
+        setOverrides((prev) => {
+          const next = { ...prev };
+          delete next[target];
+          return next;
+        });
+        setBanner({
+          tone: "info",
+          text: formatCopy(copy.shortcutsRestoredByBackspace, { title: titleFor(target) }),
+        });
+        return;
+      }
       if (outcome.kind === "invalid") {
         setBanner({
           tone: "warning",
@@ -212,15 +278,16 @@ export function ConfigShortcutsPanel({ lang, copy }: ConfigShortcutsPanelProps) 
       }
       attemptBinding(target, outcome.binding);
     },
-    [attemptBinding, copy, recordingTarget],
+    [attemptBinding, copy, isApple, keyCapture, labelStyle, recordingTarget, titleFor],
   );
 
-  // 本面板只负责录制；非录制态不挂监听，命令分发仍由 GlobalCommandSurfaces 执行。
+  // 本面板负责录制与按键捕获；空闲态不挂监听，命令分发仍由 GlobalCommandSurfaces
+  // 执行（录制/捕获期间其分发经录制门让路）。
   useGlobalShortcuts({
     effective,
     isApple,
-    recording: recordingTarget !== null,
-    enabled: recordingTarget !== null,
+    recording: recordingTarget !== null || keyCapture,
+    enabled: recordingTarget !== null || keyCapture,
     onCommand: () => undefined,
     onRecord: handleRecord,
   });
@@ -228,6 +295,7 @@ export function ConfigShortcutsPanel({ lang, copy }: ConfigShortcutsPanelProps) 
   const startRecording = useCallback((commandId: ShortcutCommandId) => {
     setBanner(null);
     setRecordingPending(false);
+    setKeyCapture(false);
     setRecordingTarget(commandId);
   }, []);
 
@@ -264,10 +332,37 @@ export function ConfigShortcutsPanel({ lang, copy }: ConfigShortcutsPanelProps) 
     setBanner({ tone: "info", text: copy.shortcutsResetAllNotice });
   }, [copy]);
 
+  // 过滤后的命令清单：文本过滤（当前语言标题/描述/命令 id）+ 按键过滤
+  //（canonical 物理等价口径，与 conflicts.ts 冲突检测同源）取 AND。
+  const visibleCommands = useMemo(() => {
+    const normalizedText = textFilter.trim().toLowerCase();
+    return SHORTCUT_COMMANDS.filter((command) => {
+      if (normalizedText) {
+        const display = COMMAND_DISPLAY_COPY[command.id];
+        const haystack = `${display.title[lang]} ${display.description[lang]} ${command.id}`.toLowerCase();
+        if (!haystack.includes(normalizedText)) {
+          return false;
+        }
+      }
+      if (keyFilter) {
+        if (keyFilter.canonical === null) {
+          return false;
+        }
+        const hit = (effective[command.id] ?? []).some(
+          (binding) => canonicalBindingKey(binding, isApple) === keyFilter.canonical,
+        );
+        if (!hit) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [effective, isApple, keyFilter, lang, textFilter]);
+
   // 分组保持命令表顺序；组名与命令描述按语言取自统一文案映射。
   const groups = useMemo(() => {
     const map = new Map<string, ShortcutCommandEntry[]>();
-    for (const command of SHORTCUT_COMMANDS) {
+    for (const command of visibleCommands) {
       const groupLabel = COMMAND_DISPLAY_COPY[command.id].group[lang];
       const bucket = map.get(groupLabel);
       if (bucket === undefined) {
@@ -277,7 +372,7 @@ export function ConfigShortcutsPanel({ lang, copy }: ConfigShortcutsPanelProps) 
       }
     }
     return Array.from(map.entries());
-  }, [lang]);
+  }, [lang, visibleCommands]);
 
   const bannerToneStyle =
     banner?.tone === "danger"
@@ -331,6 +426,56 @@ export function ConfigShortcutsPanel({ lang, copy }: ConfigShortcutsPanelProps) 
               {copy.shortcutsClose}
             </VButton>
           </div>
+        </div>
+      ) : null}
+
+      <div className={styles.filterRow} data-testid="shortcuts-filter-row">
+        <VNativeInput
+          type="search"
+          value={textFilter}
+          className={styles.filterInput}
+          placeholder={copy.shortcutsFilterPlaceholder}
+          aria-label={copy.shortcutsFilterPlaceholder}
+          data-testid="shortcuts-filter-input"
+          onChange={(event) => setTextFilter(event.target.value)}
+        />
+        {keyCapture ? (
+          <span className={styles.filterCapturing} role="status" data-testid="shortcuts-key-capturing">
+            {copy.shortcutsFilterCapturing}
+          </span>
+        ) : null}
+        <VButton
+          variant={keyCapture ? "primary" : "secondary"}
+          density="compact"
+          aria-pressed={keyCapture}
+          data-testid="shortcuts-filter-key-button"
+          onClick={() => {
+            setBanner(null);
+            setKeyCapture((active) => !active);
+          }}
+        >
+          {copy.shortcutsFilterByKeystroke}
+        </VButton>
+        {keyFilter ? (
+          <>
+            <VChip tone="info" data-testid="shortcuts-key-filter-chip">
+              {keyFilter.label}
+            </VChip>
+            <VButton
+              variant="ghost"
+              density="compact"
+              data-testid="shortcuts-filter-key-clear"
+              onClick={() => setKeyFilter(null)}
+            >
+              {copy.shortcutsFilterClear}
+            </VButton>
+          </>
+        ) : null}
+      </div>
+
+      {visibleCommands.length === 0 && (textFilter.trim() || keyFilter) ? (
+        <div className={styles.filterEmpty} role="status" data-testid="shortcuts-filter-empty">
+          {textFilter.trim() ? copy.shortcutsFilterNoTextMatch : copy.shortcutsFilterKeyUnbound}
         </div>
       ) : null}
 

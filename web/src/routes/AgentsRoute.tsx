@@ -63,6 +63,7 @@ import {
 } from "../components/vui/product/agent-management";
 import { VButton } from "../components/vui";
 import { safeReturnToPath } from "../app/navigationReturn";
+import { requestSettingsFocus } from "../app/settingsNavigation";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { mergeAgentsRouteCopyWithDictionary } from "../i18n/mergeAgentsWorkbenchCopy";
 import { useShellI18n } from "../i18n/useShellI18n";
@@ -719,7 +720,7 @@ export function AgentsRoute() {
           returnLabel: "agents",
           returnTo: selectedAgentReturnRoute,
         })
-      : "/config?section=models-profiles",
+      : "/config",
     [selectedAgent?.agentId, selectedAgentReturnRoute],
   );
   const selectedAgentContextConfigRoute = useMemo(
@@ -730,7 +731,7 @@ export function AgentsRoute() {
           returnLabel: "agents",
           returnTo: selectedAgentReturnRoute,
         })
-      : "/config?section=runtime-context",
+      : "/config",
     [selectedAgent?.agentId, selectedAgentReturnRoute],
   );
   const selectedAgentMemoryConfigRoute = useMemo(
@@ -2406,9 +2407,25 @@ export function AgentsRoute() {
           ),
         }),
         onContextCompressionChange: updateContextCompressionDraft,
-        onOpenModelConfig: () => navigate(selectedAgentModelConfigRoute),
+        onOpenModelConfig: () => {
+          if (selectedAgent?.agentId) {
+            navigate(selectedAgentModelConfigRoute);
+            return;
+          }
+          // 全局设置入口：经意图模块聚焦模型连接组（settingsNavigation 统一收口，
+          // 不再拼 /config?section= URL）。
+          requestSettingsFocus({ groupId: "models-profiles" });
+          navigate("/config");
+        },
         onOpenPromptConfig: () => navigate(selectedAgentPromptConfigRoute),
-        onOpenContextConfig: () => navigate(selectedAgentContextConfigRoute),
+        onOpenContextConfig: () => {
+          if (selectedAgent?.agentId) {
+            navigate(selectedAgentContextConfigRoute);
+            return;
+          }
+          requestSettingsFocus({ groupId: "runtime-context" });
+          navigate("/config");
+        },
         onReset: () => setConfigDraft(draftFromAgent(selectedAgent)),
         onSave: saveAgentConfig,
       },

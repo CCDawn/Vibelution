@@ -161,6 +161,8 @@ export function GlobalCommandSurfaces() {
       { to: "/kernel", label: "Kernel", keywords: "kernel 内核 任务" },
       { to: "/memory", label: t("navMemory"), keywords: "memory 记忆" },
       { to: "/agents", label: t("navAgents"), keywords: "agents 智能体 助手 prompts skills tools" },
+      // 设置页导航：落地位置由 settingsNavigation 统一裁决（意图 > 上次停留 > 默认）。
+      { to: "/config", label: t("navConfig"), keywords: "config settings 配置 设置 偏好 preferences" },
     ];
     // MRU 只记命令面板内执行的条目；会话模式走上面分支，不经过这里。
     const runWithRecent = (commandId: string, run: () => void) => () => {

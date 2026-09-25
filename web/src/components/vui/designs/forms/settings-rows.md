@@ -78,6 +78,7 @@ import { VSettingsGroupCard, VSettingsRow, VCheckbox } from "@/components/vui";
 | controlLayout | 列宽变体 | number 步进器等宽控件用 `wide`（280px） |
 | footer / detail | 行下/行内附属 | 宽编辑器一律放 `footer`，不塞进控件列 |
 | testId | 测试定位 | 约定 `row-<fieldPath>` |
+| highlighted | 瞬态高亮环（搜索深链落点等短暂定位） | accent-cool 语义 ring（color-mix），约 2s 后由调用方摘除；不造新色、不改变布局 |
 
 ### 非职责
 

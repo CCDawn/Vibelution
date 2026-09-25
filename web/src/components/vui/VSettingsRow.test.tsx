@@ -61,4 +61,17 @@ describe("VSettingsRow", () => {
     expect(markup).toContain("border-vui-border-subtle");
     expect(markup).toContain("bg-vui-surface-card");
   });
+
+  it("renders the transient highlight ring only when highlighted", () => {
+    const highlighted = renderToStaticMarkup(
+      <VSettingsRow testId="row-hl" label="L" highlighted />,
+    );
+    expect(highlighted).toContain('data-vui-highlighted="true"');
+    // accent-cool 语义 ring（color-mix），不造新色。
+    expect(highlighted).toContain("ring-2");
+    expect(highlighted).toContain("color-mix(in_srgb,var(--accent-cool)_45%,transparent)");
+    const plain = renderToStaticMarkup(<VSettingsRow testId="row-plain" label="L" />);
+    expect(plain).not.toContain("data-vui-highlighted");
+    expect(plain).not.toContain("ring-2");
+  });
 });
