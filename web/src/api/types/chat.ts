@@ -119,6 +119,42 @@ export type SessionLlmOptions = {
   model: SessionLlmModelOption | null;
 };
 
+/** In-conversation SFT dataset curation decision for one assistant answer. */
+export type SessionMessageCurationAction = "include" | "exclude";
+
+export type SessionMessageCurationItem = {
+  messageId: string;
+  action: SessionMessageCurationAction;
+  modelId: string;
+  candidateId: string;
+  decidedAt: string;
+};
+
+export type SessionMessageCurationCountsByModel = {
+  modelId: string;
+  included: number;
+  excluded: number;
+};
+
+export type SessionMessageCurationResponse = {
+  sessionId: string;
+  captureEnabled: boolean;
+  items: SessionMessageCurationItem[];
+  countsByModel: SessionMessageCurationCountsByModel[];
+};
+
+export type SessionMessageCurationMutationResponse = {
+  sessionId: string;
+  messageId: string;
+  action: SessionMessageCurationAction;
+  status: "included" | "excluded";
+  candidateId: string;
+  caseId: string;
+  modelId: string;
+  datasetName: string;
+  summary: string;
+};
+
 export type SessionAgentPromptSnapshot = {
   schemaVersion?: number;
   promptTemplateId?: string;

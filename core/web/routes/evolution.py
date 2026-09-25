@@ -10,6 +10,7 @@ from starlette.responses import StreamingResponse
 from core.web.routes.evolution_models import (
     ChatReviewActionPayload,
     ChatReviewBulkDeletePayload,
+    EvolutionChatCurationModelStatsResponse,
     EvolutionChatReviewCandidateResponse,
     EvolutionChatReviewQueueResponse,
     EvolutionCommandStatusResponse,
@@ -43,6 +44,7 @@ from core.web.services.chat_review_service import (
     ChatReviewDecisionValidationError,
     approve_chat_review_candidate,
     bulk_discard_chat_review_candidates,
+    get_chat_curation_model_stats,
     get_chat_review_candidate,
     get_chat_review_queue,
     reject_chat_review_candidate,
@@ -445,6 +447,15 @@ def evolution_workbench() -> dict:
 )
 def evolution_chat_review(includeDetails: bool = False) -> dict:
     return get_chat_review_queue(include_details=includeDetails)
+
+
+@router.get(
+    "/chat-review/model-curation-stats",
+    response_model=EvolutionChatCurationModelStatsResponse,
+    response_model_exclude_unset=True,
+)
+def evolution_chat_curation_model_stats() -> dict:
+    return get_chat_curation_model_stats()
 
 
 @router.get(

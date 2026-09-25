@@ -14,6 +14,9 @@ import type {
   SessionDetail,
   SessionGuidanceMode,
   SessionLlmOptions,
+  SessionMessageCurationAction,
+  SessionMessageCurationMutationResponse,
+  SessionMessageCurationResponse,
   SessionQueryResponse,
   SessionQueuedTurn,
   SessionSummary,
@@ -276,6 +279,34 @@ export function bulkDeleteChatSessions(sessionIds: string[]): Promise<SessionBul
 export function fetchSessionLlmOptions(sessionId: string): Promise<SessionLlmOptions> {
   return fetchJson<SessionLlmOptions>(
     `/api/sessions/${encodeURIComponent(sessionId)}/llm-options`,
+  );
+}
+
+export function fetchSessionMessageCuration(sessionId: string): Promise<SessionMessageCurationResponse> {
+  return fetchJson<SessionMessageCurationResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/curation`,
+  );
+}
+
+/**
+ * Includes/excludes one settled assistant answer in the SFT dataset.
+ * A 409 means the answer already lives in the other side's dataset; the
+ * server-authored Chinese copy rides on `FetchJsonHttpError.message`.
+ */
+export function setSessionMessageCuration(
+  sessionId: string,
+  messageId: string,
+  action: SessionMessageCurationAction,
+): Promise<SessionMessageCurationMutationResponse> {
+  return fetchJson<SessionMessageCurationMutationResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/curation`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ action }),
+    },
   );
 }
 

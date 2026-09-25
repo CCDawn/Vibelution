@@ -195,6 +195,10 @@ class EvolutionChatReviewCandidateResponse(EvolutionJsonResponse):
     status: str | None = None
 
 
+class EvolutionChatCurationModelStatsResponse(EvolutionJsonResponse):
+    models: list[dict[str, Any]] | None = None
+
+
 class EvolutionDeletedResponse(EvolutionJsonResponse):
     deleted: bool | None = None
     deletedCount: int | None = None

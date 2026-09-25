@@ -511,6 +511,11 @@ from core.web.services.session.turn_diagnostics import (
     _touch_chat_turn_work_run,
     _record_session_chat_review_candidate_event,
 )
+from core.web.services.session.message_curation import (
+    set_session_message_curation,
+    get_session_message_curation,
+    _record_session_message_curation_event,
+)
 from core.web.services.session.agent_runtime import (
     _agent_from_lookup,
     _recover_active_direct_session_agent,
@@ -1299,6 +1304,10 @@ class SessionValidationError(ValueError):
 
 class SessionChatReviewCandidateExistsError(RuntimeError):
     """Raised when the session snapshot is already queued for chat review."""
+
+
+class SessionMessageCurationStateError(RuntimeError):
+    """Raised when an inline message curation decision conflicts with its recorded queue state."""
 
 
 @dataclass

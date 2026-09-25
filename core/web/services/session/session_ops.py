@@ -30,10 +30,34 @@ def _service():
     return session_service
 
 
+def _assistant_turn_metadata_annotations(item: dict[str, Any], user_message_id: str) -> dict[str, Any]:
+    """Build additive ChatTurnRecord.metadata annotations for curation provenance.
+
+    Existing keys ``{"mode", "source"}`` stay untouched; message ids and the
+    assistant model id are appended only when present so legacy consumers of
+    the segment payloads stay compatible.
+    """
+
+    assistant_message_id = str(item.get("id") or "").strip()
+    annotations: dict[str, Any] = {}
+    if assistant_message_id:
+        annotations["assistant_message_id"] = assistant_message_id
+    user_message_id_value = str(user_message_id or "").strip()
+    if user_message_id_value:
+        annotations["user_message_id"] = user_message_id_value
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    llm_usage = metadata.get("llmUsage") if isinstance(metadata.get("llmUsage"), dict) else {}
+    llm_model_id = str(llm_usage.get("llmModelId") or llm_usage.get("llm_model_id") or "").strip()
+    if llm_model_id:
+        annotations["llm_model_id"] = llm_model_id
+    return annotations
+
+
 def _build_chat_turn_records_from_messages(messages: list[dict[str, Any]]) -> list[Any]:
     s = _service()
     turns: list[Any] = []
     pending_user_message = ""
+    pending_user_message_id = ""
     for item in list(messages or []):
         if not isinstance(item, dict):
             continue
@@ -45,6 +69,7 @@ def _build_chat_turn_records_from_messages(messages: list[dict[str, Any]]) -> li
             continue
         if role == "user":
             pending_user_message = content
+            pending_user_message_id = str(item.get("id") or "").strip()
             continue
         if role != "assistant" or not pending_user_message:
             continue
@@ -53,6 +78,8 @@ def _build_chat_turn_records_from_messages(messages: list[dict[str, Any]]) -> li
             for tool_call in s.normalize_chat_tool_calls(item.get("tool_calls") or item.get("toolCalls") or item.get("tools") or [])
         ]
         tool_calls = [tool_name for tool_name in tool_calls if tool_name]
+        turn_metadata: dict[str, Any] = {"mode": "chat", "source": "web_session"}
+        turn_metadata.update(_assistant_turn_metadata_annotations(item, pending_user_message_id))
         turns.append(
             s.ChatTurnRecord(
                 turn_number=len(turns) + 1,
@@ -63,10 +90,11 @@ def _build_chat_turn_records_from_messages(messages: list[dict[str, Any]]) -> li
                 had_delegation=False,
                 had_explicit_conclusion=s.has_conclusion_signal(content),
                 had_next_action=s.has_next_action_signal(content),
-                metadata={"mode": "chat", "source": "web_session"},
+                metadata=turn_metadata,
             )
         )
         pending_user_message = ""
+        pending_user_message_id = ""
     return turns
 
 

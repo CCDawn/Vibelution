@@ -1,5 +1,6 @@
 import { fetchJson } from "./client";
 import type {
+  ChatReviewModelCurationStats,
   EvolutionChatReviewBulkDeleteResponse,
   EvolutionChatReviewCandidate,
   EvolutionChatReviewDecisionResponse,
@@ -134,6 +135,11 @@ export function postEvolutionWorktreeRunAction<T = SupervisedWorktreeRun>(
 
 export function fetchEvolutionChatReviewQueue<T = EvolutionChatReviewQueue>(): Promise<T> {
   return fetchJson<T>("/api/evolution/chat-review");
+}
+
+/** Aggregate include/exclude tallies per model for the in-chat curation flow. */
+export function fetchChatReviewModelCurationStats(): Promise<ChatReviewModelCurationStats> {
+  return fetchJson<ChatReviewModelCurationStats>("/api/chat-review/model-curation-stats");
 }
 
 export function fetchEvolutionChatReviewCandidate<T = EvolutionChatReviewCandidate>(

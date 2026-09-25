@@ -1247,10 +1247,16 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     );
     expect(metaActionsBlock).toContain('data-conversation-hover-actions="1"');
     expect(metaActionsBlock).toContain('aria-label={t("copyAnswer")}');
+    expect(metaActionsBlock).toContain('aria-label={t("addToDataset")}');
+    expect(metaActionsBlock).toContain('aria-label={t("excludeFromDataset")}');
     expect(metaActionsBlock).toContain('aria-label={t("forkSessionFromMessage")}');
     expect(metaActionsBlock).toContain('aria-label={regeneratePending ? t("regeneratePending") : t("regenerateAnswer")}');
     expect(metaActionsBlock).toContain('aria-label={editUserMessageLabel ?? t("editMessage")}');
     expect(metaActionsBlock).toContain('aria-label={t("switchBranchVersionPrevious")}');
+    // Curation buttons share the copy gate and mark the decided side active.
+    expect(metaActionsBlock).toContain("messageCurationDecision === \"include\"");
+    expect(metaActionsBlock).toContain("messageCurationDecision === \"exclude\"");
+    expect(metaActionsBlock).toContain("styles.turnIconButtonActive");
     // Editing keeps the (active) edit affordance visible without hover.
     expect(metaActionsBlock).toContain("isEditingMessage ? styles.turnHoverActionsVisible : styles.turnHoverActions");
     // The failed-turn retry uses the hover-reveal variant too.
@@ -1287,6 +1293,9 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     ] as unknown as ConversationMessage[]);
     expect(html).toContain('data-conversation-hover-actions="1"');
     expect(html).toContain("lucide-copy");
+    // Settled assistant answers carry the SFT curation pair next to copy.
+    expect(html).toContain("lucide-list-plus");
+    expect(html).toContain("lucide-circle-minus");
   });
   it("renders composer session reference chips", () => {
     const html = renderConversation([], {

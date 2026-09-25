@@ -25,6 +25,9 @@ from core.web.routes.session_detail_models import SessionDetailResponse
 from core.web.routes.session_side_models import (
     SessionChatReviewCandidateResponse,
     SessionChildCreateResponse,
+    SessionMessageCurationPayload,
+    SessionMessageCurationResponse,
+    SessionMessageCurationStateResponse,
     SessionToolApprovalItem,
 )
 from core.web.routes.session_turn_models import (
@@ -57,6 +60,7 @@ from core.web.services.session_service import (
     SESSION_USER_IMAGE_MAX_BYTES,
     SessionBusyError,
     SessionChatReviewCandidateExistsError,
+    SessionMessageCurationStateError,
     SessionNotFoundError,
     SessionValidationError,
     create_chat_review_candidate_from_session,
@@ -70,6 +74,7 @@ from core.web.services.session_service import (
     get_active_session_summary,
     get_session_detail,
     get_session_llm_options,
+    get_session_message_curation,
     list_child_sessions,
     list_sessions,
     list_session_queued_turns,
@@ -81,6 +86,7 @@ from core.web.services.session_service import (
     resolve_session_image_artifact,
     resolve_session_stream_initial_payload,
     select_chat_session,
+    set_session_message_curation,
     store_session_user_image_attachment,
     stream_session_events_async,
     submit_session_guidance,
@@ -987,3 +993,33 @@ def session_create_chat_review_candidate(session_id: str) -> dict:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except SessionValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post(
+    "/sessions/{session_id}/messages/{message_id}/curation",
+    status_code=status.HTTP_200_OK,
+    response_model=SessionMessageCurationResponse,
+    response_model_exclude_unset=True,
+)
+def session_set_message_curation(session_id: str, message_id: str, payload: SessionMessageCurationPayload) -> dict:
+    try:
+        return set_session_message_curation(session_id, message_id, action=payload.action)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionMessageCurationStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get(
+    "/sessions/{session_id}/curation",
+    status_code=status.HTTP_200_OK,
+    response_model=SessionMessageCurationStateResponse,
+    response_model_exclude_unset=True,
+)
+def session_message_curation_state(session_id: str) -> dict:
+    try:
+        return get_session_message_curation(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

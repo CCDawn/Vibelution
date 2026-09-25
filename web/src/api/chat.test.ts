@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import apiSource from "./chat.ts?raw";
+import evolutionApiSource from "./evolution.ts?raw";
 import routeSource from "../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
 import mutationSource from "../routes/chat/useChatSessionDetailMutations.ts?raw";
 import lifecycleSource from "../routes/chat/useChatWorkspaceLifecycle.ts?raw";
 import composerSource from "../routes/chat/useChatComposerSubmit.ts?raw";
 import composerModelSource from "../routes/chat/chatComposerSubmitModel.ts?raw";
 import helperSource from "../routes/chat/chatSessionDetailHelpers.ts?raw";
+import conversationViewSource from "../components/conversation/ConversationView.tsx?raw";
 
 describe("Chat session tool approval API", () => {
   it("owns pending approval query and decision transports", () => {
@@ -89,6 +91,26 @@ describe("Chat session tool approval API", () => {
     expect(apiSource).toContain('method: "POST"');
     expect(lifecycleSource).toContain("createSessionChatReviewCandidate");
     expect(lifecycleSource).not.toContain("/chat-review-candidate");
+  });
+
+  it("owns session message curation transport outside the view layer", () => {
+    expect(apiSource).toContain("export function fetchSessionMessageCuration");
+    expect(apiSource).toContain("export function setSessionMessageCuration");
+    expect(apiSource).toContain("`/api/sessions/${encodeURIComponent(sessionId)}/curation`");
+    expect(apiSource).toContain(
+      "`/api/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/curation`",
+    );
+    expect(apiSource).toContain("JSON.stringify({ action })");
+    // The aggregate model tally rides the chat-review domain module instead.
+    expect(evolutionApiSource).toContain("/api/chat-review/model-curation-stats");
+    // View layers consume the api functions and never the endpoint strings.
+    expect(conversationViewSource).toContain("fetchSessionMessageCuration");
+    expect(conversationViewSource).toContain("setSessionMessageCuration");
+    expect(conversationViewSource).not.toContain("/curation");
+    expect(routeSource).not.toContain("/curation");
+    expect(mutationSource).not.toContain("/curation");
+    expect(lifecycleSource).not.toContain("/curation");
+    expect(composerSource).not.toContain("Curation");
   });
 
   it("owns conversation and child-session list transport", () => {
