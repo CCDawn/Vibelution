@@ -109,6 +109,37 @@ export function createChatWorkspaceCache(queryClient: QueryClientLike) {
         ...(normalizedAgentId ? [queryKeys.agent(normalizedAgentId)] : []),
       ]);
     },
+    /**
+     * Single-Agent display-layer PATCH (persona/task/prompt, tool & memory
+     * policy, runtime policy, avatar, governance, inbox consume). The caller
+     * already patched the workspace cache in place, so only the Agent-directory
+     * projections refetch. Deliberately NOT the ["agents"] prefix: mounted
+     * runs/inbox/evidence queries are untouched by display edits.
+     */
+    afterAgentDisplaySaved(agentId?: string) {
+      const normalizedAgentId = String(agentId || "").trim();
+      return invalidateAll(queryClient, [
+        queryKeys.agentConfigWorkspace(),
+        queryKeys.agentSummary(true),
+        queryKeys.agentSummary(false),
+        ...(normalizedAgentId ? [queryKeys.agent(normalizedAgentId)] : []),
+      ]);
+    },
+    /**
+     * Mode-membership PATCH: touches the shared mode-slot collection, so the
+     * mode-bindings key joins the display-level refresh. Still no ["agents"]
+     * prefix and no sessions/conversations — chat indexes are unaffected.
+     */
+    afterAgentMembershipSaved(agentId?: string) {
+      const normalizedAgentId = String(agentId || "").trim();
+      return invalidateAll(queryClient, [
+        queryKeys.agentConfigWorkspace(),
+        queryKeys.agentSummary(true),
+        queryKeys.agentSummary(false),
+        queryKeys.agentModeBindings(),
+        ...(normalizedAgentId ? [queryKeys.agent(normalizedAgentId)] : []),
+      ]);
+    },
     afterSessionAgentChanged(sessionId: string) {
       return invalidateAll(queryClient, [
         queryKeys.sessions(),
@@ -154,8 +185,10 @@ export function createChatWorkspaceCache(queryClient: QueryClientLike) {
       return invalidateAll(queryClient, [queryKeys.projectAgentBus()]);
     },
     afterAgentWorkspaceChanged() {
-      // Structural agent changes (create/archive/purge) may affect chat indexes.
-      // Prefer afterAgentConfigSaved for routine config PATCH.
+      // Structural agent changes (create/archive/purge/reset, bulk edits) may
+      // affect chat indexes. Prefer afterAgentDisplaySaved for single-agent
+      // display PATCH and afterAgentMembershipSaved for mode-membership saves;
+      // afterAgentConfigSaved stays the routine config-PATCH recipe.
       return invalidateAll(queryClient, [
         queryKeys.agentConfigWorkspace(),
         queryKeys.agents(),

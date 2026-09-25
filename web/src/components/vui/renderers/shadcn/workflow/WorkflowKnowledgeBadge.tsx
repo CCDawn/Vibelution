@@ -42,8 +42,8 @@ export function WorkflowKnowledgeBadge(props: { badge: WorkflowKnowledgeBadgeInp
       title={title}
       className={
         attention
-          ? "inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--state-warning)_35%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_8%,transparent)] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-[var(--state-warning)]"
-          : "inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_30%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-[var(--accent-cool)]"
+          ? "inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--state-warning)_35%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_8%,transparent)] px-1.5 py-0.5 [font-size:var(--vui-font-canvas-xs)] font-semibold leading-none text-[var(--state-warning)]"
+          : "inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_30%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] px-1.5 py-0.5 [font-size:var(--vui-font-canvas-xs)] font-semibold leading-none text-[var(--accent-cool)]"
       }
     >
       {segments.map((segment) => (

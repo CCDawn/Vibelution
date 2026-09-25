@@ -78,54 +78,63 @@ def handle_kernel_event(payload: dict[str, Any]) -> dict[str, Any]:
                 "proposals": _outcome_proposals(index, outcome),
             }
 
-        persist_each_transition = not trace_only
-        _persist_event(store, index, event, persist_index=persist_each_transition)
-        task = _create_task(event)
-        _persist_task_transition(store, index, task, "queued", persist_index=persist_each_transition)
-        _persist_task_transition(store, index, task, "running", persist_index=persist_each_transition)
-        execution = _create_execution(task, event)
-        _persist_execution_transition(store, index, execution, "created", persist_index=persist_each_transition)
-        _persist_execution_transition(store, index, execution, "running", persist_index=persist_each_transition)
+        # Index write batching: every transition below is already durable as
+        # a complete row in its JSONL stream (events/tasks/executions/
+        # outcomes/proposals), and index.json is a materialized projection of
+        # those streams (readModel truthSource=TaskLedger; the timeline read
+        # path already treats stream rows as primary with the index as
+        # fallback).  So the crash-safe boundary is one final-consistent
+        # index write per event instead of one per transition.  The finally
+        # also lands the last in-memory state when delivery or a transition
+        # raises mid-loop.
+        try:
+            _persist_event(store, index, event, persist_index=False)
+            task = _create_task(event)
+            _persist_task_transition(store, index, task, "queued", persist_index=False)
+            _persist_task_transition(store, index, task, "running", persist_index=False)
+            execution = _create_execution(task, event)
+            _persist_execution_transition(store, index, execution, "created", persist_index=False)
+            _persist_execution_transition(store, index, execution, "running", persist_index=False)
 
-        deliveries = [] if trace_only else _deliver_event_to_recipients(event, task)
-        failed_deliveries = [item for item in deliveries if str(item.get("status") or "") != "delivered"]
-        if trace_only:
-            outcome_status = "succeeded"
-            result_summary = "Kernel trace event recorded without recipient delivery."
-            final_task_status = "succeeded"
-            final_execution_status = "succeeded"
-        elif failed_deliveries:
-            outcome_status = "blocked"
-            result_summary = f"Kernel event delivered partially; {len(failed_deliveries)} recipient(s) blocked."
-            final_task_status = "blocked"
-            final_execution_status = "blocked"
-        else:
-            outcome_status = "succeeded"
-            result_summary = f"Kernel event delivered to {len(deliveries)} recipient(s)."
-            final_task_status = "succeeded"
-            final_execution_status = "succeeded"
+            deliveries = [] if trace_only else _deliver_event_to_recipients(event, task)
+            failed_deliveries = [item for item in deliveries if str(item.get("status") or "") != "delivered"]
+            if trace_only:
+                outcome_status = "succeeded"
+                result_summary = "Kernel trace event recorded without recipient delivery."
+                final_task_status = "succeeded"
+                final_execution_status = "succeeded"
+            elif failed_deliveries:
+                outcome_status = "blocked"
+                result_summary = f"Kernel event delivered partially; {len(failed_deliveries)} recipient(s) blocked."
+                final_task_status = "blocked"
+                final_execution_status = "blocked"
+            else:
+                outcome_status = "succeeded"
+                result_summary = f"Kernel event delivered to {len(deliveries)} recipient(s)."
+                final_task_status = "succeeded"
+                final_execution_status = "succeeded"
 
-        _persist_execution_transition(
-            store,
-            index,
-            execution,
-            final_execution_status,
-            deliveries=deliveries,
-            persist_index=persist_each_transition,
-        )
-        outcome = _create_outcome(task, execution, event, status=outcome_status, result_summary=result_summary, deliveries=deliveries)
-        _persist_outcome(store, index, outcome, persist_index=persist_each_transition)
-        task["workRunId"] = execution["workRunId"]
-        task["outcomeId"] = outcome["outcomeId"]
-        _persist_task_transition(store, index, task, final_task_status, persist_index=persist_each_transition)
-        proposals = _create_proposal_stubs_from_outcome(
-            store,
-            index,
-            event,
-            outcome,
-            persist_index=persist_each_transition,
-        )
-        if trace_only:
+            _persist_execution_transition(
+                store,
+                index,
+                execution,
+                final_execution_status,
+                deliveries=deliveries,
+                persist_index=False,
+            )
+            outcome = _create_outcome(task, execution, event, status=outcome_status, result_summary=result_summary, deliveries=deliveries)
+            _persist_outcome(store, index, outcome, persist_index=False)
+            task["workRunId"] = execution["workRunId"]
+            task["outcomeId"] = outcome["outcomeId"]
+            _persist_task_transition(store, index, task, final_task_status, persist_index=False)
+            proposals = _create_proposal_stubs_from_outcome(
+                store,
+                index,
+                event,
+                outcome,
+                persist_index=False,
+            )
+        finally:
             store.save_index(index)
         _record_kernel_scene_event(
             "kernel.event.completed",

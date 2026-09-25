@@ -102,6 +102,16 @@ def create_agent_from_catalog_request(
     if not agent:
         raise AgentDirectoryError("Agent was not created for the direct session.")
 
+    # The session layer names the auto-created Agent from the placeholder
+    # session id. Land the requested display name as the Agent identity here;
+    # creation-time naming keeps the "responsibility" source (same as
+    # create_agent_instance), so this is not a post-hoc user rename.
+    agent = update_agent_instance(
+        agent_id,
+        display_name=normalized_display_name,
+        metadata={"displayNameSource": "responsibility"},
+    )
+
     if normalized_metadata:
         agent = update_agent_instance(agent_id, metadata=normalized_metadata)
     if primary_mode or role_key or prompt_template_id or context_compression_policy:

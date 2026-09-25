@@ -1182,3 +1182,73 @@ def test_materialize_dataset_rejects_unknown_training_tier(tmp_path: Path):
 
     with pytest.raises(ValueError, match="training tier"):
         materialize_dataset_bundle("custom_prompt_jsonl", project_root=tmp_path)
+
+
+def test_list_dataset_status_caches_case_count_until_source_changes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """重复列出同一数据集时按 (path, mtime_ns, size) 签名命中计数缓存；文件变化后重扫。"""
+
+    import core.evaluation.dataset_registry as dataset_registry_module
+
+    datasets_dir = tmp_path / "workspace" / "evaluation" / "datasets"
+    datasets_dir.mkdir(parents=True, exist_ok=True)
+    source_path = datasets_dir / "cached_count_cases.jsonl"
+    source_path.write_text(
+        "\n".join(
+            [
+                json.dumps({"case_id": "case_0001", "prompt": "first"}),
+                json.dumps({"case_id": "case_0002", "prompt": "second"}),
+                json.dumps({"case_id": "case_0003", "prompt": "third"}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    registry_path = datasets_dir / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "datasets": [
+                    {
+                        "name": "cached_count_cases",
+                        "kind": "prompt_jsonl",
+                        "bundle_name": "cached_count_cases_v1",
+                        "source_path": "workspace/evaluation/datasets/cached_count_cases.jsonl",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    scan_stats = {"scans": 0}
+    real_iter_jsonl = dataset_registry_module._iter_jsonl
+
+    def counting_iter_jsonl(path, *, limit=None):
+        scan_stats["scans"] += 1
+        yield from real_iter_jsonl(path, limit=limit)
+
+    monkeypatch.setattr(dataset_registry_module, "_iter_jsonl", counting_iter_jsonl)
+
+    first_rows = list_dataset_status(tmp_path)
+    first_row = next(item for item in first_rows if item["name"] == "cached_count_cases")
+    assert first_row["case_count"] == 3
+    assert scan_stats["scans"] == 1
+
+    second_rows = list_dataset_status(tmp_path)
+    second_row = next(item for item in second_rows if item["name"] == "cached_count_cases")
+    assert second_row["case_count"] == 3
+    assert scan_stats["scans"] == 1
+
+    with source_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"case_id": "case_0004", "prompt": "fourth"}) + "\n")
+
+    third_rows = list_dataset_status(tmp_path)
+    third_row = next(item for item in third_rows if item["name"] == "cached_count_cases")
+    assert third_row["case_count"] == 4
+    assert scan_stats["scans"] == 2

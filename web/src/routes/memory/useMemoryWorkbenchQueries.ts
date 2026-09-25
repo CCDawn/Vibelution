@@ -120,11 +120,19 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
     selectedGraphNodeId,
   } = options;
 
+  // Overview payload serves two tiers. Ops views (overview/effective/manage/
+  // sources/cleanup) and the library browse render item content; knowledge,
+  // graph, personal/agents and team views never read sections content, so they
+  // must not keep polling the full-content payload every 30s. The flag lives in
+  // the queryKey (separate cache entries), so entering a content view fetches
+  // the content variant immediately; non-content views skip the query entirely.
+  const overviewNeedsContent = isManageMemoryView(forcedView) || isLibraryMemoryView(forcedView);
   const overviewQuery = useQuery({
-    queryKey: queryKeys.memoryOverview(),
-    queryFn: ({ signal }) => fetchMemoryOverview<MemoryOverview>({ includeContent: true, signal }),
+    queryKey: queryKeys.memoryOverview(overviewNeedsContent),
+    queryFn: ({ signal }) => fetchMemoryOverview<MemoryOverview>({ includeContent: overviewNeedsContent, signal }),
     refetchInterval: resolvePollingInterval(pageVisible, 30_000),
     refetchIntervalInBackground: false,
+    enabled: overviewNeedsContent,
   });
   const projectMemoryUpdatesQuery = useQuery({
     queryKey: queryKeys.agentProjectMemoryUpdates(memoryProposalStatusFilter, "", 100),
