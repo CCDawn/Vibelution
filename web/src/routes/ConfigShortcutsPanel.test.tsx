@@ -47,6 +47,22 @@ function queryAll(testId: string): HTMLElement[] {
   return [...host.querySelectorAll(`[data-testid="${testId}"]`)];
 }
 
+function queryAllRows(): HTMLElement[] {
+  return [...host.querySelectorAll('[data-testid^="shortcuts-row-"]')];
+}
+
+async function typeIntoInput(testId: string, value: string): Promise<void> {
+  const input = query(testId) as HTMLInputElement;
+  if (!input) {
+    throw new Error(`missing input: ${testId}`);
+  }
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  await act(async () => {
+    setter?.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
 async function click(testId: string): Promise<void> {
   const element = query(testId);
   if (!element) {
@@ -221,5 +237,85 @@ describe("ConfigShortcutsPanel", () => {
     await click("shortcuts-banner-close");
     expect(query("shortcuts-banner")).toBeNull();
     expect(readStoredShortcutOverrides()).toEqual({});
+  });
+
+  it("restores the recorded command default when Backspace is pressed while recording", async () => {
+    window.localStorage.setItem(
+      SHORTCUT_OVERRIDES_STORAGE_KEY,
+      JSON.stringify({ openSessionSearch: ["CmdOrCtrl+j"] }),
+    );
+    await renderPanel();
+    await click("shortcuts-modify-openSessionSearch");
+    expect(query("shortcuts-recording-strip")?.textContent).toContain("Esc 取消 · Backspace 恢复默认");
+    await pressKey({ key: "Backspace", code: "Backspace" });
+    // 覆盖被移除，回到默认 Ctrl+P；录制态退出。
+    expect(readStoredShortcutOverrides()).toEqual({});
+    expect(query("shortcuts-recording-strip")).toBeNull();
+    const sessionKeys = query("shortcuts-keys-openSessionSearch")?.textContent ?? "";
+    expect(sessionKeys).toContain("Ctrl+P");
+    expect(sessionKeys).toContain("默认");
+    expect(query("shortcuts-banner")?.textContent).toContain("已恢复「会话搜索」的默认绑定");
+  });
+
+  it("does not intercept Backspace outside recording", async () => {
+    await renderPanel();
+    await act(async () => {
+      window.dispatchEvent(keyEvent({ key: "Backspace", code: "Backspace", ctrlKey: false }));
+    });
+    expect(query("shortcuts-banner")).toBeNull();
+    expect(readStoredShortcutOverrides()).toEqual({});
+    // 无录制条目出现（非录制态 Backspace 不进入录制/恢复流程）。
+    expect(query("shortcuts-recording-strip")).toBeNull();
+  });
+
+  it("filters commands by the next physical keypress (find by key)", async () => {
+    await renderPanel();
+    await click("shortcuts-filter-key-button");
+    expect(query("shortcuts-key-capturing")).not.toBeNull();
+    // Ctrl+P 只被「会话搜索」占用。
+    await pressKey({ key: "p", code: "KeyP" });
+    expect(query("shortcuts-key-capturing")).toBeNull();
+    expect(query("shortcuts-key-filter-chip")?.textContent).toContain("Ctrl+P");
+    expect(queryAllRows().map((row) => row.getAttribute("data-testid"))).toEqual([
+      "shortcuts-row-openSessionSearch",
+    ]);
+    // 文本过滤与按键过滤叠加：文本无任何命中 → 空态给「无文本命中」。
+    await typeIntoInput("shortcuts-filter-input", "不存在的命令xyz");
+    expect(query("shortcuts-filter-empty")?.textContent).toContain("没有文本命中的命令");
+    expect(queryAllRows()).toHaveLength(0);
+    // 清空文本 → 恢复按键命中的行。
+    await typeIntoInput("shortcuts-filter-input", "");
+    expect(query("shortcuts-filter-empty")).toBeNull();
+    expect(queryAllRows()).toHaveLength(1);
+    // 清除按键过滤 → 全部命令回到列表。
+    await click("shortcuts-filter-key-clear");
+    expect(query("shortcuts-key-filter-chip")).toBeNull();
+    expect(queryAllRows()).toHaveLength(SHORTCUT_COMMANDS.length);
+  });
+
+  it("distinguishes unbound keys from text misses in the key-filter empty state", async () => {
+    await renderPanel();
+    await click("shortcuts-filter-key-button");
+    // Ctrl+Shift+7 未被任何命令占用 → 空态为「该组合键未被任何命令占用」。
+    await pressKey({ key: "7", code: "Digit7", shiftKey: true });
+    expect(query("shortcuts-key-capturing")).toBeNull();
+    expect(query("shortcuts-key-filter-chip")).not.toBeNull();
+    expect(query("shortcuts-filter-empty")?.textContent).toContain("该组合键未被任何命令占用");
+    expect(queryAllRows()).toHaveLength(0);
+    // Esc 退出捕获模式：不产生过滤/横幅变化。
+    await click("shortcuts-filter-key-button");
+    await pressKey({ key: "Escape", code: "Escape", ctrlKey: false });
+    expect(query("shortcuts-key-capturing")).toBeNull();
+    expect(query("shortcuts-banner")).toBeNull();
+    expect(readStoredShortcutOverrides()).toEqual({});
+  });
+
+  it("matches bare named keys through the physical-equivalence filter", async () => {
+    await renderPanel();
+    await click("shortcuts-filter-key-button");
+    // 裸字符键（无修饰键）没有命令可占用：走键未占用空态。
+    await pressKey({ key: "a", code: "KeyA", ctrlKey: false });
+    expect(query("shortcuts-key-filter-chip")?.textContent).toContain("A");
+    expect(query("shortcuts-filter-empty")?.textContent).toContain("该组合键未被任何命令占用");
   });
 });

@@ -127,7 +127,7 @@ type ConfigSettingsSidebarProps = {
   groups: ConfigSettingsGroup[];
   activeGroupId: string;
   onSelectGroup: (groupId: ConfigSettingsGroupId) => void;
-  onNavigate?: (groupId: ConfigSettingsGroupId, pageId: string, sectionId?: string) => void;
+  onNavigate?: (groupId: ConfigSettingsGroupId, pageId: string, sectionId?: string, fieldId?: string) => void;
   searchDocuments?: ConfigSettingsSearchDocument[];
   headerAction?: ReactNode;
   onShowAll?: () => void;
@@ -156,7 +156,7 @@ export function ConfigSettingsSidebar({
 
   function selectHit(hit: ConfigSettingsSearchHit) {
     if (onNavigate) {
-      onNavigate(hit.groupId, hit.pageId, hit.sectionId);
+      onNavigate(hit.groupId, hit.pageId, hit.sectionId, hit.fieldId);
     } else {
       onSelectGroup(hit.groupId);
     }
@@ -188,13 +188,16 @@ export function ConfigSettingsSidebar({
           <nav className={styles.searchResults} aria-label={language === "zh" ? "搜索结果" : "Search results"}>
             {searchHits.map((hit) => (
               <VButton
-                key={`${hit.groupId}:${hit.pageId}:${hit.sectionId ?? ""}:${hit.title}`}
+                key={`${hit.groupId}:${hit.pageId}:${hit.sectionId ?? ""}:${hit.fieldId ?? ""}:${hit.title}`}
                 className={styles.searchHit}
                 contentLayout="plain"
                 variant="ghost"
                 onPress={() => selectHit(hit)}
               >
                 <span>{hit.title}</span>
+                {hit.valueSummary ? (
+                  <small data-testid="config-search-hit-value">{hit.valueSummary}</small>
+                ) : null}
                 <small>{hit.detail}</small>
               </VButton>
             ))}

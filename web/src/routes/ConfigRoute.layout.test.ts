@@ -715,7 +715,7 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("lastRequestedSelectionRef.current = requestedSelectionKey");
     expect(routeSource).toContain("const requestedPageId = String(searchParams.get(\"page\") || \"\").trim()");
     expect(routeSource).toContain("const requestedFocusSectionId = String(searchParams.get(\"focus\") || \"\").trim()");
-    expect(routeSource).toContain("buildConfigSettingsNavigationSearch(searchParams, groupId, pageId, focusSectionId)");
+    expect(routeSource).toContain("buildConfigSettingsNavigationSearch(searchParams, groupId, pageId, focusSectionId, focusFieldId)");
     expect(routeSource).toContain("setActiveGroupId(requestedGroup?.id ?? \"\")");
     expect(routeSource).toContain("<VRouteLinkButton");
     expect(routeSource).toContain("className={styles.returnButton}");
