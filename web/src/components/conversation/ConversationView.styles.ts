@@ -26,7 +26,9 @@ function cv(key: string, ...classNames: string[]) {
 const readableMessageText = "min-w-0 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]";
 const readableMarkdownMeasure = "max-w-full";
 const assistantMessageMeasure = "w-full max-w-full";
-const transcriptTurnRail = "w-full max-w-[830px] justify-self-center";
+// Single readable transcript measure: one cap for every transcript body and turn.
+const transcriptMeasure = "max-w-[830px]";
+const transcriptTurnRail = `w-full ${transcriptMeasure} justify-self-center`;
 const assistantTranscriptGrid = `grid min-w-0 ${transcriptTurnRail} grid-cols-[2rem_minmax(0,1fr)] items-start gap-x-3 max-[719px]:gap-x-2`;
 const answerOnlyProcessShell = cv(
   "answerOnlyProcessGroup",
@@ -109,7 +111,7 @@ const styles: Record<string, string> = {
   agentInboxToggle:
     `vui-components-conversationview agentInboxToggle min-w-0 ${vuiStateCoolInfoClass}`,
   agentInboxTurn:
-    `vui-components-conversationview agentInboxTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[34px_minmax(0,1fr)] gap-x-3 [&_.turnContent]:w-[min(100%,1360px)] [&_.turnContent]:p-0 [&_.turnContent]:border-l-0`,
+    `vui-components-conversationview agentInboxTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[34px_minmax(0,1fr)] gap-x-3 [&_.turnContent]:w-full [&_.turnContent]:p-0 [&_.turnContent]:border-l-0`,
   answerOnlyProcessDetails:
     "vui-components-conversationview answerOnlyProcessDetails min-w-0",
   answerOnlyProcessGroup: answerOnlyProcessShell,
@@ -500,7 +502,7 @@ backToBottomButton:
   groupTranscriptBody:
     "vui-components-conversationview groupTranscriptBody min-w-0 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   groupTranscriptTurn:
-    `vui-components-conversationview groupTranscriptTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[34px_minmax(0,1fr)] gap-x-3 [&_.turnContent]:w-[min(100%,1360px)] [&_.turnContent]:p-0 [&_.turnContent]:border-l-0`,
+    `vui-components-conversationview groupTranscriptTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[34px_minmax(0,1fr)] gap-x-3 [&_.turnContent]:w-full [&_.turnContent]:p-0 [&_.turnContent]:border-l-0`,
   header:
     "vui-components-conversationview header min-w-0 flex flex-wrap items-center gap-1.5",
   headerControls:
@@ -1177,7 +1179,7 @@ timeline:
   timelineVirtualRow:
     "vui-components-conversationview timelineVirtualRow min-w-0 [content-visibility:auto] [contain-intrinsic-size:auto_120px]",
   timelineAssistantTextCell:
-    "vui-components-conversationview timelineAssistantTextCell min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-w-[min(100%,1360px)]",
+    `vui-components-conversationview timelineAssistantTextCell min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] mx-auto ${transcriptMeasure}`,
   timelineCellDetailButton:
     "vui-components-conversationview timelineCellDetailButton min-w-0 inline-grid size-6 shrink-0 self-start place-items-center rounded-[var(--radius-control)] border border-transparent bg-transparent p-0 text-[var(--fg-tertiary)] hover:border-[var(--vui-border-subtle)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
   timelineCellHeader:
