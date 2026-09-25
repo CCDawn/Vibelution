@@ -53,6 +53,12 @@ import {
   type ConversationSelectionMenuPosition,
 } from "./conversationTextSelection";
 import { ConversationTranscriptLoadingState } from "./ConversationTranscriptLoadingState";
+import { ConversationTurnNavigator } from "./ConversationTurnNavigator";
+import {
+  buildConversationTurnNavDirectory,
+  resolveConversationTurnNavCurrentIndex,
+  type ConversationTurnNavEntry,
+} from "./conversationTurnNavigation";
 import { ConversationTurnAvatarContent } from "./ConversationTurnAvatarContent";
 import { attachmentSizeLabel, isImageAttachment } from "./attachmentPresentation";
 import {
@@ -508,6 +514,17 @@ async function copyTextToClipboard(text: string) {
   if (!copied) {
     throw new Error("copy failed");
   }
+}
+
+/** Turn navigator label source: the user's prompt, else the assistant answer. */
+function turnNavPreviewText(message: ConversationMessage | undefined): string {
+  if (!message) {
+    return "";
+  }
+  if (message.role === "user") {
+    return String((message as { content?: string }).content ?? "");
+  }
+  return assistantFinalAnswerText(message);
 }
 
 // Memo gate: with stable prop references from the route (memoized conversation
@@ -1272,6 +1289,22 @@ export const ConversationView = React.memo(function ConversationView({
     () => activeTimelineRowIdentities.map((identity) => identity.rowKey),
     [activeTimelineRowIdentities],
   );
+  // Turn navigation directory (minimap rail): one entry per conversation
+  // turn, derived from the same row identities the virtualizer keys on.
+  const timelineTurnNavEntries = useMemo(
+    () => buildConversationTurnNavDirectory(
+      activeTimelineRowIdentities.map((identity, index) => ({
+        rowKey: identity.rowKey,
+        previewText: turnNavPreviewText(activeTimelineMessages[index]),
+      })),
+      {
+        fallbackLabel: lang === "zh"
+          ? (turnNumber: number) => `第 ${turnNumber} 轮`
+          : (turnNumber: number) => `Turn ${turnNumber}`,
+      },
+    ),
+    [activeTimelineRowIdentities, activeTimelineMessages, lang],
+  );
   // react-virtual keeps measured sizes in an item-size cache keyed by the
   // stable row keys from getItemKey, so measured heights survive index shifts
   // (prepend/load-earlier) without a hand-rolled cache.
@@ -1307,6 +1340,19 @@ export const ConversationView = React.memo(function ConversationView({
   for (let tailOffset = 0; tailOffset < timelineLiveTailMessages.length; tailOffset += 1) {
     timelineRowPlan.push({ index: timelineLiveTailStartIndex + tailOffset, virtualStartPx: null });
   }
+  // Minimap current-turn highlight: rebuilt every render like the row plan so
+  // scroll notifications stay live (virtual history + static live tail).
+  const timelineTurnNavCurrentIndex = resolveConversationTurnNavCurrentIndex({
+    entries: timelineTurnNavEntries,
+    historyRowCount: timelineLiveTailStartIndex,
+    historyTotalSize: timelineVirtualizer.getTotalSize(),
+    scrollOffset: timelineVirtualizer.scrollOffset ?? 0,
+    viewportHeight: timelineVirtualizer.scrollRect?.height ?? 0,
+    rowIndexAtOffset: (offset) => {
+      const item = timelineVirtualizer.getVirtualItemForOffset(offset);
+      return item ? item.index : null;
+    },
+  });
 
   function renderTimelineRow(rowPlan: { index: number; virtualStartPx: number | null }) {
               const index = rowPlan.index;
@@ -2816,6 +2862,24 @@ export const ConversationView = React.memo(function ConversationView({
       return;
     }
     scrollTimelineToBottom(timeline, { followLatest: true, behavior: "smooth" });
+  }
+
+  /**
+   * Minimap jump: virtualized history rows go through the virtualizer's
+   * scrollToIndex; the live tail (last entry) just pins to the bottom.
+   * Reduced motion falls back to instant jumps.
+   */
+  function handleTurnNavigate(entry: ConversationTurnNavEntry) {
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    const behavior: ScrollBehavior = reducedMotion ? "auto" : "smooth";
+    if (entry.anchorRowIndex < timelineLiveTailStartIndex) {
+      timelineVirtualizer.scrollToIndex(entry.anchorRowIndex, { behavior, align: "start" });
+      return;
+    }
+    const timeline = timelineRef.current;
+    if (timeline) {
+      scrollTimelineToBottom(timeline, { followLatest: false, behavior });
+    }
   }
 
   function revealEarlierTimelineMessages() {
@@ -5475,7 +5539,15 @@ export const ConversationView = React.memo(function ConversationView({
         >
           <ArrowDown size={16} />
         </VButton>
-      ) : null}      </div>
+      ) : null}
+
+      <ConversationTurnNavigator
+        entries={timelineTurnNavEntries}
+        currentIndex={timelineTurnNavCurrentIndex}
+        ariaLabel={lang === "zh" ? "会话轮次导航" : "Turn navigation"}
+        onNavigate={handleTurnNavigate}
+      />
+      </div>
 
       {toolApproval && !toolApprovalConsumedRef.current ? (
         <div className={styles.toolApprovalFallback} data-codex-tool-approval-fallback="true">
