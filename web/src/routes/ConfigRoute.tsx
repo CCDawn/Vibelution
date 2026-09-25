@@ -1,5 +1,6 @@
 import "../design/route-css/config.tailwind.css";
 import { ConfigSettingsIndex } from "./ConfigSettingsIndex";
+import { ConfigDesktopPetSettings } from "./ConfigDesktopPetSettings";
 import { ConfigShortcutsPanel } from "./ConfigShortcutsPanel";
 
 import { useQueryClient } from "@tanstack/react-query";
@@ -308,7 +309,7 @@ export function defaultSectionUiState(sectionId = ""): ConfigSectionUiState {
 
 export const CONFIG_COPY = {
   zh: {
-    pageTitle: "统一配置工作台",
+    pageTitle: "设置",
     subtitle: "结构化配置、模型资产与保存状态。启动设置在 Launcher 面板维护。",
     subtitleHint: "启动设置在 Launcher 面板维护；结构化编辑、完整配置检查和最终保存仍收口到外部 operator config.toml。",
     returnToAgents: "返回 Agent 配置",
@@ -354,7 +355,7 @@ export const CONFIG_COPY = {
     groupOverviewSaveSummary: "在一个页面查看保存状态、阻塞问题与建议动作，修复后直接保存。",
     groupWorkbenchTitle: "界面与工作台",
     groupWorkbenchSummary: "管理工作台行为、配色和背景；启动相关设置仍由 Launcher 维护。",
-    groupAvatarPetTitle: "用户、终端形象与陪伴体",
+    groupAvatarPetTitle: "个人资料与桌宠",
     groupAvatarPetSummary: "统一设置显示名、终端形象与陪伴体；Web 用户头像在用户信息里维护，常用项直接展示，其余参数按需展开。",
     groupModelingTitle: "模型库",
     groupModelingSummary: "模型资产、服务商账号、密钥、能力检测和模型发现都在这里集中管理。",
@@ -618,7 +619,7 @@ export const CONFIG_COPY = {
     no: "否",
   },
   en: {
-    pageTitle: "Unified Config Workbench",
+    pageTitle: "Settings",
     subtitle: "Structured config, model assets, and save state. Startup settings are maintained in Launcher.",
     subtitleHint: "Startup settings are maintained in Launcher; structured editing, full-config checks, and final writes still converge on the external operator config.toml.",
     returnToAgents: "Return to Agent config",
@@ -664,7 +665,7 @@ export const CONFIG_COPY = {
     groupOverviewSaveSummary: "Review save state, blockers, and suggested actions in one place, then save after fixes.",
     groupWorkbenchTitle: "Workbench & Interface",
     groupWorkbenchSummary: "Manage workbench behavior, colors, and background here. Startup settings remain in Launcher.",
-    groupAvatarPetTitle: "User, Terminal Avatar, and Companion",
+    groupAvatarPetTitle: "Profile & desktop pet",
     groupAvatarPetSummary: "Set the display name, terminal avatar, and companion in one place. The Web user avatar lives under User Info, while advanced parameters remain on demand.",
     groupModelingTitle: "Model Library",
     groupModelingSummary: "Manage model assets, provider accounts, keys, capability checks, and discovery in one place.",
@@ -2464,8 +2465,7 @@ export function ConfigSectionEditor({
     <VSurface as="section" id={`config-${section.id}`} tabIndex={-1} className={sectionClassName} padding="none">
       <div className={styles.sectionHeader}>
         <div className={styles.sectionHeaderMain}>
-          <p className={styles.eyebrow}>{section.path}</p>
-          <h2 className={styles.sectionTitle}>{presentation?.sectionTitle ?? section.title}</h2>
+          <h2 className={styles.sectionTitle} title={section.path}>{presentation?.sectionTitle ?? section.title}</h2>
           <p className={styles.sectionText}>{presentation?.sectionSummary ?? section.summary}</p>
         </div>
         <div className={styles.sectionHeaderActions}>
@@ -2773,7 +2773,7 @@ export function ConfigRoute() {
       configValues: draftConfig,
       language: currentLanguage,
     }), {
-      groupId: "avatar-pet" as const, pageId: "",
+      groupId: "avatar-pet" as const, pageId: "identity-profile", sectionId: "pet",
       title: currentLanguage === "zh" ? "桌面宠物" : "Desktop pet",
       detail: currentLanguage === "zh" ? "开启或关闭桌面宠物" : "Open or close desktop pet",
       haystack: "桌宠 桌面宠物 开启 关闭 desktop pet",
@@ -3269,6 +3269,10 @@ export function ConfigRoute() {
     setActiveGroupId(groupId);
     setActivePageId(pageId);
     contentViewportRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    if (groupId === "avatar-pet" && sectionId === "pet") {
+      navigateSettingsSelection(groupId, pageId, sectionId);
+      return;
+    }
     if (sectionId || fieldId) {
       // 搜索选中等显式落点：经意图模块统一落地（分区/字段聚焦 + 瞬态高亮）。
       applySettingsFocusTarget({ groupId, pageId, sectionId, fieldId });
@@ -4361,7 +4365,7 @@ export function ConfigRoute() {
               </VButton>
           </div>
         }
-        toolbar={(
+        toolbar={isSectionVisible("overview") || (!showingSettingsIndex && !requestedFocusSectionId && (activeGroup?.pages.length ?? 0) > 1) ? (
           <div className={styles.configToolbar}>
             {isSectionVisible("overview") ? <VStatusStrip
               className={styles.configStatusMeta}
@@ -4382,9 +4386,6 @@ export function ConfigRoute() {
                 },
               ]}
             /> : null}
-            {!showingSettingsIndex ? <VButton variant="ghost" onPress={() => showSettingsIndex(activeGroup?.id)}>
-              {currentLanguage === "zh" ? "返回设置列表" : "Back to settings"}
-            </VButton> : null}
             {!showingSettingsIndex && !requestedFocusSectionId ? <ConfigSettingsPageTabs
               language={currentLanguage}
               group={activeGroup}
@@ -4392,7 +4393,7 @@ export function ConfigRoute() {
               onSelectPage={handleSelectPage}
             /> : null}
           </div>
-        )}
+        ) : undefined}
       >
         <div ref={contentViewportRef} className={styles.pageViewport} data-vui-region="config-settings-body">
 
@@ -4400,6 +4401,13 @@ export function ConfigRoute() {
           groups={requestedSectionId ? settingsGroups.filter((group) => group.id === activeGroup?.id) : settingsGroups}
           sections={workspaceSections} language={currentLanguage} onNavigate={handleNavigateSettings}
         /> : null}
+
+        {!showingSettingsIndex && activeGroup?.id === "avatar-pet"
+          && (!requestedFocusSectionId || requestedFocusSectionId === "pet") ? (
+          <VSettingsGroupCard>
+            <ConfigDesktopPetSettings language={currentLanguage} />
+          </VSettingsGroupCard>
+        ) : null}
 
         {notice.text ? (
           <div
@@ -4745,7 +4753,8 @@ export function ConfigRoute() {
         ) : null}
 
         {isSectionVisible("shortcuts") ? (
-          <VSection id="config-shortcuts" tabIndex={-1} title={copy.shortcutsTitle}>
+          <VSection id="config-shortcuts" tabIndex={-1} title={copy.shortcutsTitle}
+            className={styles.sectionSurface} headerClassName={styles.sectionHeader}>
             <ConfigShortcutsPanel lang={currentLanguage} copy={copy} />
           </VSection>
         ) : null}

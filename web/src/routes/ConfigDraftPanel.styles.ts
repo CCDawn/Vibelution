@@ -1,3 +1,4 @@
+import { settingsSectionHeader, settingsSectionSurface } from "./configSettingsSurfaces";
 import {
   vuiElevatedPanelClass,
   vuiOpaqueRowClass,
@@ -31,11 +32,11 @@ const styles = {
   rawToml:
     "vui-routes-configdraftpanel rawToml [max-height:18rem] [overflow:auto] [overflow-wrap:anywhere] [margin:0] [padding:10px] [border:1px_solid_var(--vui-border-subtle)] [border-radius:8px] [background:var(--vui-surface-workspace)] [font-family:var(--font-mono)] [font-size:var(--vui-font-xs)] [line-height:1.55] [color:var(--vui-fg-secondary)]",
   sectionHeader:
-    `vui-routes-configdraftpanel sectionHeader [display:flex] [align-items:start] [justify-content:space-between] [gap:8px] [min-height:40px] [padding:7px_var(--config-section-x)] ${sectionHeaderSurface}`,
+    `vui-routes-configdraftpanel sectionHeader [display:flex] [align-items:start] [justify-content:space-between] [gap:8px] [min-height:40px] [padding:7px_var(--config-section-x)] ${sectionHeaderSurface} ${settingsSectionHeader}`,
   sectionIcon:
     "vui-routes-configdraftpanel sectionIcon [color:var(--accent-warm-2)] [margin-top:1px]",
   sectionSurface:
-    `vui-routes-configdraftpanel sectionSurface ${readablePanelSurface} [display:grid] [grid-template-rows:auto_auto_minmax(0,1fr)] [gap:0] [padding:0] [min-height:0] [height:100%] [scroll-margin-top:84px] [overflow:hidden] [&>_.sectionText]:[padding:10px_var(--config-section-x)_0] [&>_.sectionText]:[max-width:980px] [&>_.sectionText]:[font-size:var(--vui-font-sm)] [&>_:where(_.actionsRow,.draftWorkbench_)]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)] [&>_.sectionText_+_:where(_.actionsRow,.draftWorkbench_)]:[margin-top:8px]`,
+    `vui-routes-configdraftpanel sectionSurface ${readablePanelSurface} [display:grid] [grid-template-rows:auto_auto_minmax(0,1fr)] [gap:0] [padding:0] [min-height:0] [height:100%] [scroll-margin-top:84px] [overflow:hidden] [&>_.sectionText]:[padding:10px_var(--config-section-x)_0] [&>_.sectionText]:[max-width:980px] [&>_.sectionText]:[font-size:var(--vui-font-sm)] [&>_:where(_.actionsRow,.draftWorkbench_)]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)] [&>_.sectionText_+_:where(_.actionsRow,.draftWorkbench_)]:[margin-top:8px] ${settingsSectionSurface}`,
   sectionText:
     "vui-routes-configdraftpanel sectionText [margin:0] [color:var(--fg-secondary)] [line-height:1.38]",
   sectionTitle:

@@ -16,14 +16,14 @@ const styles = {
   title: "vui-routes-configsettingsnavigation title m-0 text-vui-lg font-extrabold text-vui-fg-primary",
   titleRow: "vui-routes-configsettingsnavigation titleRow flex min-w-0 items-center gap-1.5",
   status:
-    "vui-routes-configsettingsnavigation status flex min-h-10 items-center justify-between gap-3 rounded-lg border border-vui-border-subtle bg-vui-surface-row px-3 [font-size:var(--vui-font-sm)] font-semibold text-vui-fg-secondary",
+    "vui-routes-configsettingsnavigation status flex min-h-8 items-center justify-between gap-3 px-1 text-vui-xs font-normal text-vui-fg-secondary",
   statusValue: "vui-routes-configsettingsnavigation statusValue text-vui-fg-primary",
   groupNav: "vui-routes-configsettingsnavigation groupNav grid min-h-0 content-start gap-1 overflow-y-auto pr-1 max-[720px]:overflow-visible max-[720px]:grid-cols-2",
   groupButton:
     "vui-routes-configsettingsnavigation groupButton !grid !min-h-9 !w-full !grid-cols-[minmax(0,1fr)] !justify-stretch !border-transparent rounded-vui-control px-3 text-left text-vui-sm font-medium",
   groupButtonActive:
     "vui-routes-configsettingsnavigation groupButtonActive !text-vui-fg-primary !bg-vui-surface-row !border-transparent !shadow-none",
-  pageTabs: `vui-routes-configsettingsnavigation pageTabs flex min-w-0 items-center gap-2 overflow-x-auto border-b border-vui-border-subtle ${vuiToolbarFillClass} px-4 py-2 [scrollbar-width:thin]`,
+  pageTabs: `vui-routes-configsettingsnavigation pageTabs flex min-w-0 items-center gap-2 overflow-x-auto border-b border-vui-border-subtle ${vuiToolbarFillClass} !bg-transparent px-0 py-0 [scrollbar-width:thin]`,
   pageButton:
     "vui-routes-configsettingsnavigation pageButton shrink-0 text-vui-sm font-medium",
   pageButtonActive:
