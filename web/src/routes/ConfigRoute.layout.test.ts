@@ -1089,6 +1089,37 @@ describe("ConfigRoute layout contract", () => {
     expect(configSources).not.toMatch(/<textarea\b/);
   });
 
+  it("routes destructive confirms through VConfirmDialog request state instead of window.confirm", () => {
+    // Wave 4 item 2: settings-domain confirms are VConfirmDialog (Radix) requests.
+    expect(routeSource).toContain("<VConfirmDialog");
+    expect(routeSource).toContain("deleteProviderRequest");
+    expect(routeSource).toContain("handleConfirmDeleteProvider");
+    expect(routeSource).toContain("handleCancelDeleteProvider");
+    expect(routeSource).toContain("migrationApplyRequest");
+    expect(routeSource).toContain("handleConfirmApplyMigration");
+    expect(routeSource).toContain("handleCancelApplyMigration");
+    // No blocking window.confirm in the route shell or the model panels.
+    // (routeSource additionally concatenates useConfigProviderModelDomain,
+    // whose unreachable v1 handleDeleteModel window.confirm dies in the
+    // wave-4 dead-code cleanup; tightened there.)
+    expect(routeSourceRaw).not.toContain("window.confirm");
+    expect(providerPanelSource).not.toContain("window.confirm");
+    expect(wizardSource).not.toContain("window.confirm");
+    expect(quickSetupSource).not.toContain("window.confirm");
+    expect(migrationPanelSource).not.toContain("window.confirm");
+  });
+
+  it("surfaces section save failures inline inside the failing section", () => {
+    // Wave 4 item 4: section-scoped save errors render inside the section,
+    // the global notice strip stays reserved for global operations.
+    expect(routeSource).toContain("sectionSaveErrors");
+    expect(routeSource).toContain("setSectionSaveError(path, readableErrorMessage(error))");
+    expect(routeSource).toContain('saveError={sectionSaveErrors[section.path] ?? ""}');
+    expect(routeSource).toContain("data-section-save-error");
+    expect(routeSource).toContain("<VErrorSummary");
+    expect(routeSource).toContain('role="alert"');
+  });
+
   it("prioritizes the visible VUI select trigger when focusing the model editor", () => {
     expect(routeSource).toContain('button[data-vui="select-trigger"]:not([data-disabled="true"]):not([disabled])');
     expect(routeSource).toContain('input:not([disabled]):not([type="hidden"])');

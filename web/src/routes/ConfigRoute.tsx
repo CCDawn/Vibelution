@@ -313,6 +313,9 @@ export function ConfigRoute() {
   // 即时类字段（boolean/select）的行徽标生命周期：waiting → applied|failed。
   const [immediateFieldStatus, setImmediateFieldStatus] = useState<Record<string, ImmediateFieldStatus>>({});
   const immediateStatusTimersRef = useRef<Record<string, number>>({});
+  // 分区保存失败的行内错误（wave 4）：按分区 path 记录，落在该分区内，
+  // 不再占用全局 notice strip（那里保留给 apply/上传等真正全局的操作）。
+  const [sectionSaveErrors, setSectionSaveErrors] = useState<Record<string, string>>({});
   // Atomic edit baseline: only rewritten on full workspace load/apply, never on draft pin/key/route ops.
   // Keeps baseConfig + baseHash paired so apply after pin does not 409 with "配置基线已过期".
   const editBaselineRef = useRef<{ baseConfig: PublicConfigShape | null; baseHash: string }>({
@@ -1102,7 +1105,12 @@ export function ConfigRoute() {
     }).publicConfig;
   }
 
-  async function previewDraft(nextConfig: PublicConfigShape, nextMeta: ConfigDraftMeta, pendingLabel: string) {
+  async function previewDraft(
+    nextConfig: PublicConfigShape,
+    nextMeta: ConfigDraftMeta,
+    pendingLabel: string,
+    onError: (error: unknown) => void = markError,
+  ) {
     setBusyAction(pendingLabel);
     try {
       const response = await previewConfigDraft({
@@ -1113,11 +1121,26 @@ export function ConfigRoute() {
       syncWorkspace(response, "success", { resetBase: false });
       return true;
     } catch (error) {
-      markError(error);
+      onError(error);
       return false;
     } finally {
       setBusyAction("");
     }
+  }
+
+  function setSectionSaveError(path: string, message: string) {
+    setSectionSaveErrors((current) => ({ ...current, [path]: message }));
+  }
+
+  function clearSectionSaveError(path: string) {
+    setSectionSaveErrors((current) => {
+      if (!(path in current)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[path];
+      return next;
+    });
   }
 
   async function reloadWorkspace() {
@@ -1302,18 +1325,23 @@ export function ConfigRoute() {
   }
 
   async function saveConfigSection(path: string, nextValue: unknown) {
+    clearSectionSaveError(path);
+    let updated: PublicConfigShape;
     try {
-      const updated = setValueAtConfigPath(requireDraft(), path, nextValue);
-      const previewed = await previewDraft(updated, draftMeta, copy.sectionSavePending);
-      if (!previewed) return false;
-      if (shouldImmediateApplyConfigPath(path)) {
-        return persistImmediateDraft(copy.applying);
-      }
-      return true;
+      updated = setValueAtConfigPath(requireDraft(), path, nextValue);
     } catch (error) {
-      markError(error);
+      // 分区级失败：行内呈现，不进全局 notice。
+      setSectionSaveError(path, readableErrorMessage(error));
       return false;
     }
+    const previewed = await previewDraft(updated, draftMeta, copy.sectionSavePending, (error) => {
+      setSectionSaveError(path, readableErrorMessage(error));
+    });
+    if (!previewed) return false;
+    if (shouldImmediateApplyConfigPath(path)) {
+      return persistImmediateDraft(copy.applying);
+    }
+    return true;
   }
 
   function clearImmediateStatusTimer(path: string) {
@@ -2064,6 +2092,7 @@ export function ConfigRoute() {
             onAvatarImageUpload={handleAvatarImageUpload}
             onThemeBackgroundImageUpload={handleThemeBackgroundImageUpload}
             highlightFieldPath={fieldHighlight?.path ?? ""}
+            saveError={sectionSaveErrors[section.path] ?? ""}
           />
         ))}
 

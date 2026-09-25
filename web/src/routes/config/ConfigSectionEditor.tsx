@@ -14,6 +14,7 @@ import {
   VButton,
   VCheckbox,
   VChip,
+  VErrorSummary,
   VInput,
   VSettingsGroupCard,
   VSettingsRow,
@@ -78,6 +79,8 @@ type ConfigSectionEditorProps = {
   onThemeBackgroundImageUpload: (file: File) => Promise<AvatarImageUploadResponse | null>;
   /** 搜索深链的瞬态高亮字段（绝对配置路径）；仅该路径的行渲染高亮环。 */
   highlightFieldPath?: string;
+  /** 分区保存失败的行内错误（wave 4）：落在该分区头部，不进全局 notice strip。 */
+  saveError?: string;
 };
 
 export type AvatarImageUploadResponse = {
@@ -167,6 +170,7 @@ export function ConfigSectionEditor({
   onAvatarImageUpload,
   onThemeBackgroundImageUpload,
   highlightFieldPath = "",
+  saveError = "",
 }: ConfigSectionEditorProps) {
   const sectionExpanded = uiState.expanded;
   const editing = uiState.editing;
@@ -1300,6 +1304,16 @@ export function ConfigSectionEditor({
           </div>
         </div>
       </div>
+      {saveError ? (
+        <div className={styles.sectionSaveError} data-section-save-error="true" role="alert">
+          <VErrorSummary
+            tone="error"
+            summary={saveError}
+            label={copy.sectionErrorPrefix}
+            details={copy.sectionErrorInline}
+          />
+        </div>
+      ) : null}
       {sectionExpanded ? renderNode(editing ? draftValue : value, section.path, editing ? "edit" : "view") : null}
     </VSurface>
   );
