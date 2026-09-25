@@ -2,8 +2,10 @@
  * Config provider draft write actions:
  * create / discover / pin / suggest / unpin / delete / credential / context window / route preview.
  * Route still owns quick-setup orchestration, LLM test, migration, and formal apply.
+ * Wave 4: the destructive provider delete confirm is a VConfirmDialog request
+ * state (two-phase) instead of a blocking window.confirm.
  */
-import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { useCallback, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 
 import {
   addDraftProvider,
@@ -65,6 +67,11 @@ export type ProviderRoutePreview = {
   proposedProvider: Record<string, unknown>;
 };
 
+/** Pending "delete provider" confirmation (rendered by the route as VConfirmDialog). */
+export type DeleteProviderConfirmRequest = {
+  providerId: string;
+};
+
 export type UseConfigProviderDraftActionsOptions = {
   baseHash: string;
   draftConfig: PublicConfigShape | null | undefined;
@@ -94,7 +101,6 @@ export type UseConfigProviderDraftActionsOptions = {
   setRouteEditProvider: (value: Record<string, unknown>) => void;
   setRoutePreview: Dispatch<SetStateAction<ProviderRoutePreview | null>>;
   dispatchProviderWizard: Dispatch<ProviderWizardAction>;
-  confirmDeleteProvider?: (providerId: string) => boolean;
 };
 
 export function useConfigProviderDraftActions(options: UseConfigProviderDraftActionsOptions) {
@@ -126,11 +132,10 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     setRouteEditProvider,
     setRoutePreview,
     dispatchProviderWizard,
-    confirmDeleteProvider = (providerId: string) => (
-      typeof window === "undefined"
-      || window.confirm(formatConfigCopy(copy.actionDeleteProviderConfirm, { id: providerId }))
-    ),
   } = options;
+
+  // Wave 4: destructive delete confirms via a route-rendered VConfirmDialog.
+  const [deleteProviderRequest, setDeleteProviderRequest] = useState<DeleteProviderConfirmRequest | null>(null);
 
   const buildProviderDraftRequest = useCallback((extra: Record<string, unknown>) => {
     const baselineHash = editBaselineRef.current.baseHash || baseHash;
@@ -410,8 +415,20 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     syncWorkspace,
   ]);
 
-  const handleDeleteProvider = useCallback(async (providerId: string) => {
-    if (!confirmDeleteProvider(providerId)) return;
+  /** Opens the delete confirmation dialog (no destructive work happens here). */
+  const handleDeleteProvider = useCallback((providerId: string) => {
+    setDeleteProviderRequest({ providerId });
+  }, []);
+
+  const handleCancelDeleteProvider = useCallback(() => {
+    setDeleteProviderRequest(null);
+  }, []);
+
+  const handleConfirmDeleteProvider = useCallback(async () => {
+    const request = deleteProviderRequest;
+    setDeleteProviderRequest(null);
+    if (!request) return;
+    const providerId = request.providerId;
     setBusyAction(copy.actionDeleteProviderBusy);
     try {
       const provider = asRecord(asRecord(asRecord(requireDraft().llm).providers)[providerId]);
@@ -429,7 +446,8 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     }
   }, [
     buildProviderDraftRequest,
-    confirmDeleteProvider,
+    copy,
+    deleteProviderRequest,
     markError,
     readableErrorMessage,
     requireDraft,
@@ -615,6 +633,9 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     handlePinProviderModels,
     handleUnpinProviderModel,
     handleDeleteProvider,
+    deleteProviderRequest,
+    handleConfirmDeleteProvider,
+    handleCancelDeleteProvider,
     handleUpdateProviderCredential,
     handleUpdateProviderContextWindow,
     handleBeginProviderRouteEdit,

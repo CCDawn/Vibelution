@@ -1,8 +1,10 @@
 /**
  * Config LLM v2 migration preview/apply actions.
  * Formal operator-config apply remains on ConfigRoute.
+ * Wave 4: the destructive apply confirm is a VConfirmDialog request state
+ * (two-phase) instead of a blocking window.confirm.
  */
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import type { QueryClient, UseQueryResult } from "@tanstack/react-query";
 
 import { applyLlmV2Migration, previewLlmV2Migration } from "../../api/config";
@@ -18,6 +20,13 @@ import { type ConfigCopy, formatConfigCopy } from "./configCopy";
 
 type NoticeTone = "neutral" | "success" | "error";
 
+/** Pending "apply previewed migration" confirmation (rendered by the route as VConfirmDialog). */
+export type MigrationApplyConfirmRequest = {
+  previewId: string;
+  previewBaseHash: string;
+  message: string;
+};
+
 export type UseConfigMigrationActionsOptions = {
   migrationPreview: ConfigMigrationPreview | null;
   migrationPreviewExpiredMessage: string;
@@ -31,7 +40,6 @@ export type UseConfigMigrationActionsOptions = {
   syncWorkspace: (workspace: ConfigWorkspace, tone?: NoticeTone, options?: { resetBase?: boolean }) => void;
   markError: (error: unknown) => string;
   readableErrorMessage: (error: unknown) => string;
-  confirmApplyMigration?: (message: string) => boolean;
 };
 
 export function useConfigMigrationActions(options: UseConfigMigrationActionsOptions) {
@@ -47,8 +55,11 @@ export function useConfigMigrationActions(options: UseConfigMigrationActionsOpti
     syncWorkspace,
     markError,
     readableErrorMessage,
-    confirmApplyMigration = (message: string) => typeof window === "undefined" || window.confirm(message),
   } = options;
+
+  // Wave 4: destructive apply confirms via a route-rendered VConfirmDialog
+  // request state instead of a blocking window.confirm.
+  const [migrationApplyRequest, setMigrationApplyRequest] = useState<MigrationApplyConfirmRequest | null>(null);
 
   const handlePreviewMigration = useCallback(async (
     artifactResolutions: ConfigMigrationArtifactResolution[] = [],
@@ -64,20 +75,33 @@ export function useConfigMigrationActions(options: UseConfigMigrationActionsOpti
     } finally {
       setBusyAction("");
     }
-  }, [markError, readableErrorMessage, setBusyAction, setMigrationPreview, setProviderActionError]);
+  }, [copy, markError, readableErrorMessage, setBusyAction, setMigrationPreview, setProviderActionError]);
 
-  const handleApplyMigration = useCallback(async (previewId: string, previewBaseHash: string) => {
+  /** Opens the apply confirmation dialog (no destructive work happens here). */
+  const handleApplyMigration = useCallback((previewId: string, previewBaseHash: string) => {
     if (!migrationPreview || migrationPreview.previewId !== previewId || migrationPreview.baseHash !== previewBaseHash) {
       return;
     }
     const impactedRefs = Object.values(migrationPreview.modelRefMap).slice(0, 8).join("\n");
-    const confirmed = confirmApplyMigration(
-      formatConfigCopy(copy.migrationApplyConfirm, {
+    setMigrationApplyRequest({
+      previewId,
+      previewBaseHash,
+      message: formatConfigCopy(copy.migrationApplyConfirm, {
         liveCount: migrationPreview.referenceImpact.liveReferenceCount,
         refs: impactedRefs,
       }),
-    );
-    if (!confirmed) return;
+    });
+  }, [copy, migrationPreview]);
+
+  const handleCancelApplyMigration = useCallback(() => {
+    setMigrationApplyRequest(null);
+  }, []);
+
+  const handleConfirmApplyMigration = useCallback(async () => {
+    const request = migrationApplyRequest;
+    setMigrationApplyRequest(null);
+    if (!request) return;
+    const { previewId, previewBaseHash } = request;
     setBusyAction(copy.migrationApplyPending);
     try {
       await applyLlmV2Migration({ previewId, baseHash: previewBaseHash });
@@ -99,10 +123,9 @@ export function useConfigMigrationActions(options: UseConfigMigrationActionsOpti
       setBusyAction("");
     }
   }, [
-    confirmApplyMigration,
     copy,
     markError,
-    migrationPreview,
+    migrationApplyRequest,
     migrationPreviewExpiredMessage,
     queryClient,
     readableErrorMessage,
@@ -116,5 +139,8 @@ export function useConfigMigrationActions(options: UseConfigMigrationActionsOpti
   return {
     handlePreviewMigration,
     handleApplyMigration,
+    migrationApplyRequest,
+    handleConfirmApplyMigration,
+    handleCancelApplyMigration,
   };
 }

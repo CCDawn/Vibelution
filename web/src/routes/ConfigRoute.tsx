@@ -94,6 +94,7 @@ import {
   VActionGroup,
   VCheckbox,
   VChip,
+  VConfirmDialog,
   VDialog,
   VInput,
   VPanelHeader,
@@ -228,7 +229,7 @@ import {
   type ProviderRouteImpact,
   type ProviderRoutePreview,
 } from "./config/useConfigProviderDraftActions";
-import { CONFIG_COPY, type ConfigCopy, type ConfigLanguage } from "./config/configCopy";
+import { CONFIG_COPY, formatConfigCopy, type ConfigCopy, type ConfigLanguage } from "./config/configCopy";
 import {
   type AvatarImageUploadResponse,
   ConfigSectionEditor,
@@ -976,6 +977,9 @@ export function ConfigRoute() {
     handlePinProviderModels,
     handleUnpinProviderModel: unpinProviderModel,
     handleDeleteProvider,
+    deleteProviderRequest,
+    handleConfirmDeleteProvider,
+    handleCancelDeleteProvider,
     handleUpdateProviderCredential: updateProviderCredential,
     handleUpdateProviderContextWindow: updateProviderContextWindow,
     handleBeginProviderRouteEdit,
@@ -1068,6 +1072,9 @@ export function ConfigRoute() {
   const {
     handlePreviewMigration,
     handleApplyMigration,
+    migrationApplyRequest,
+    handleConfirmApplyMigration,
+    handleCancelApplyMigration,
   } = useConfigMigrationActions({
     migrationPreview,
     migrationPreviewExpiredMessage: copy.migrationPreviewExpired,
@@ -1488,6 +1495,38 @@ export function ConfigRoute() {
       >
         <p className={styles.helperText}>{sidebarApplyHint}</p>
       </VDialog>
+      <VConfirmDialog
+        open={Boolean(deleteProviderRequest)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) handleCancelDeleteProvider();
+        }}
+        tone="danger"
+        title={copy.confirmTitle}
+        description={deleteProviderRequest
+          ? formatConfigCopy(copy.actionDeleteProviderConfirm, { id: deleteProviderRequest.providerId })
+          : ""}
+        confirmLabel={copy.confirmAction}
+        cancelLabel={copy.cancel}
+        confirmPending={Boolean(busyAction)}
+        onConfirm={() => {
+          void handleConfirmDeleteProvider();
+        }}
+      />
+      <VConfirmDialog
+        open={Boolean(migrationApplyRequest)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) handleCancelApplyMigration();
+        }}
+        tone="danger"
+        title={copy.confirmTitle}
+        description={migrationApplyRequest ? <span className="whitespace-pre-line">{migrationApplyRequest.message}</span> : ""}
+        confirmLabel={copy.migrationApplyAction}
+        cancelLabel={copy.cancel}
+        confirmPending={Boolean(busyAction)}
+        onConfirm={() => {
+          void handleConfirmApplyMigration();
+        }}
+      />
       <VSplitWorkspace
         className={styles.settingsSplit}
         data-vui-region="config-settings-split"
