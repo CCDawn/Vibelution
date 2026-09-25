@@ -1,13 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import routeSourceRaw from "./ConfigRoute.tsx?raw";
+// Settings-align wave 3: route-local modules extracted from the ConfigRoute
+// monolith; layout contracts may live in any of them (concatenated below).
+import configCopySource from "./config/configCopy.ts?raw";
+import configEditorModelSource from "./config/configEditorModel.ts?raw";
+import configSectionEditorSource from "./config/ConfigSectionEditor.tsx?raw";
+import providerModelDomainSource from "./config/useConfigProviderModelDomain.ts?raw";
 import providerDraftActionsSource from "./config/useConfigProviderDraftActions.ts?raw";
 import configApplyModelSource from "./config/configApplyModel.ts?raw";
 import configProviderActionModelSource from "./config/configProviderActionModel.ts?raw";
 import configMigrationActionsSource from "./config/useConfigMigrationActions.ts?raw";
 import configQuickSetupActionsSource from "./config/useConfigProviderQuickSetupActions.ts?raw";
 /** Route + extracted config write helpers (layout contracts may live in either). */
-const routeSource = `${routeSourceRaw}\n${providerDraftActionsSource}\n${configApplyModelSource}\n${configProviderActionModelSource}\n${configMigrationActionsSource}\n${configQuickSetupActionsSource}`;
+const routeSource = `${routeSourceRaw}\n${configCopySource}\n${configEditorModelSource}\n${configSectionEditorSource}\n${providerModelDomainSource}\n${providerDraftActionsSource}\n${configApplyModelSource}\n${configProviderActionModelSource}\n${configMigrationActionsSource}\n${configQuickSetupActionsSource}`;
 import draftPanelSource from "./ConfigDraftPanel.tsx?raw";
 import draftPanelStylesSource from "./ConfigDraftPanel.styles.ts?raw";
 import draftPanelStyles from "./ConfigDraftPanel.styles";

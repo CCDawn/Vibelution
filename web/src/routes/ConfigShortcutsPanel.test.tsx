@@ -8,7 +8,7 @@ import {
   SHORTCUT_OVERRIDES_STORAGE_KEY,
   readStoredShortcutOverrides,
 } from "../shortcuts/shortcutOverrides";
-import { CONFIG_COPY } from "./ConfigRoute";
+import { CONFIG_COPY } from "./config/configCopy";
 import { ConfigShortcutsPanel } from "./ConfigShortcutsPanel";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

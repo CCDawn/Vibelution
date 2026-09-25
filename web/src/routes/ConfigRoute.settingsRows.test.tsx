@@ -11,7 +11,9 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { describe, expect, it, vi } from "vitest";
 
-import { CONFIG_COPY, ConfigSectionEditor, defaultSectionUiState, type ConfigSectionUiState } from "./ConfigRoute";
+import { CONFIG_COPY } from "./config/configCopy";
+import { ConfigSectionEditor } from "./config/ConfigSectionEditor";
+import { defaultSectionUiState, type ConfigSectionUiState } from "./config/configEditorModel";
 import type { ConfigEditorMeta, ConfigEditorSection } from "../api/types";
 
 const SECTION: ConfigEditorSection = {
