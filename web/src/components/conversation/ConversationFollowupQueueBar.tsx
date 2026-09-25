@@ -1,5 +1,5 @@
-import { useRef, useState } from "react";
-import { ArrowRight, GripVertical, Paperclip, Pencil, X } from "lucide-react";
+import { createContext, useContext, useRef, useState } from "react";
+import { ArrowRight, GripVertical, Paperclip, Pause, Pencil, Play, X } from "lucide-react";
 
 import { VButton, VNativeInput } from "../vui";
 import styles from "./ConversationView.styles";
@@ -8,6 +8,16 @@ import {
 } from "./composerFollowupQueueModel";
 
 const VISIBLE_QUEUE_ROWS = 4;
+
+/**
+ * Pause/resume reaches the bar without prop drilling through ConversationView
+ * (whose props surface is owned by the timeline task): the workbench provides
+ * the handler around the conversation surface and the bar consumes it here.
+ * A direct `onTogglePause` prop always wins when present.
+ */
+export type FollowupQueueTogglePauseAction = (id: string, paused: boolean) => void;
+
+export const FollowupQueueTogglePauseContext = createContext<FollowupQueueTogglePauseAction | null>(null);
 
 export type ConversationFollowupQueueBarProps = {
   items: readonly ComposerQueueItem[];
@@ -20,6 +30,7 @@ export type ConversationFollowupQueueBarProps = {
   onRemove: (id: string) => void;
   onMove: (fromIndex: number, toIndex: number) => void;
   onSteer?: (id: string) => void;
+  onTogglePause?: FollowupQueueTogglePauseAction;
 };
 
 export function ConversationFollowupQueueBar({
@@ -33,11 +44,14 @@ export function ConversationFollowupQueueBar({
   onRemove,
   onMove,
   onSteer,
+  onTogglePause,
 }: ConversationFollowupQueueBarProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [queueExpanded, setQueueExpanded] = useState(false);
   const dragFrom = useRef<number | null>(null);
+  const contextTogglePause = useContext(FollowupQueueTogglePauseContext);
+  const togglePause = onTogglePause ?? contextTogglePause ?? undefined;
 
   if (!items.length) {
     return null;
@@ -63,10 +77,18 @@ export function ConversationFollowupQueueBar({
       <div className={styles.followupQueueRows}>
         {visibleItems.map((item, index) => {
           const editing = editingId === item.id;
+          const paused = item.status === "paused";
+          const canTogglePause = Boolean(togglePause) && (item.status === "queued" || paused);
           return (
             <div
               key={item.id}
-              className={editing ? `${styles.followupQueueRow} ${styles.followupQueueRowEditing}` : styles.followupQueueRow}
+              className={
+                editing
+                  ? `${styles.followupQueueRow} ${styles.followupQueueRowEditing}`
+                  : paused
+                    ? `${styles.followupQueueRow} ${styles.followupQueueRowPaused}`
+                    : styles.followupQueueRow
+              }
               draggable={!editing}
               onDragStart={() => {
                 dragFrom.current = index;
@@ -124,6 +146,11 @@ export function ConversationFollowupQueueBar({
                       {lang === "zh" ? "发送失败" : "Failed"}
                     </span>
                   ) : null}
+                  {paused ? (
+                    <span className={`${styles.followupQueueChip} ${styles.followupQueueChipPaused}`}>
+                      {lang === "zh" ? "已暂停" : "Paused"}
+                    </span>
+                  ) : null}
                 </span>
               )}
               <div
@@ -151,6 +178,24 @@ export function ConversationFollowupQueueBar({
                   </>
                 ) : (
                   <>
+                    {canTogglePause ? (
+                      <VButton
+                        density="compact"
+                        variant="ghost"
+                        isIconOnly
+                        aria-label={
+                          paused
+                            ? (lang === "zh" ? "恢复发送，排到队尾" : "Resume sending; moves to the end of the queue")
+                            : (lang === "zh" ? "暂停发送" : "Pause sending")
+                        }
+                        icon={paused ? <Play size={13} /> : <Pause size={13} />}
+                        onPress={() => {
+                          if (togglePause) {
+                            togglePause(item.id, !paused);
+                          }
+                        }}
+                      />
+                    ) : null}
                     {onSteer ? (
                       <VButton
                         density="compact"

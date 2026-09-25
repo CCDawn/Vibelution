@@ -214,7 +214,13 @@ def _enqueue_busy_session_turn(
     knowledge_file_references = conversation_references.normalize_knowledge_file_references(knowledge_file_rows)
     all_references = [
         *session_references,
-        *conversation_references.strip_reference_content(knowledge_file_references),
+        # keep_quote: queued message references must survive dequeue, which
+        # re-submits them through the full resolve pipeline (quote is the
+        # re-resolution key; knowledge/file ids re-resolve without content).
+        *conversation_references.strip_reference_content(
+            knowledge_file_references,
+            keep_quote=True,
+        ),
     ]
     if not message and not attachments and not all_references:
         raise service.SessionValidationError(
@@ -1084,7 +1090,10 @@ def submit_session_message(
                 "attachments": s._normalize_message_attachments(attachments),
                 "references": [
                     *s._normalize_session_references(all_references),
-                    *conversation_references.normalize_knowledge_file_references(all_references),
+                    # Re-normalize the resolved rows (not the stripped
+                    # all_references): message-kind rows need their quote to
+                    # survive this journal sanitize pass.
+                    *conversation_references.normalize_knowledge_file_references(knowledge_file_reference_rows),
                 ],
                 "metadata": persisted_message_metadata,
                 "source": normalized_message_source,

@@ -47,6 +47,38 @@ function assistantMessage(): ConversationMessage {
   } as unknown as ConversationMessage;
 }
 
+/**
+ * In-flight turn: renders through the live-tail (static) segment, so the row
+ * wrapper exists in happy-dom where the virtualized history window does not.
+ */
+function streamingAssistantMessage(): ConversationMessage {
+  return {
+    id: "message-assistant-1",
+    role: "assistant",
+    content: ANSWER_TEXT,
+    timestamp: "2026-05-22T00:01:00Z",
+    turnId: "turn-1",
+    status: "running",
+    nodeId: "node-assistant-1",
+    turnItems: [
+      {
+        id: "message-assistant-1-item-answer",
+        itemId: "message-assistant-1-item-answer",
+        sessionId: "session-selection-quote",
+        turnId: "turn-1",
+        version: 3,
+        revision: 1,
+        sequence: 1,
+        type: "agent_message",
+        phase: "final_answer",
+        text: ANSWER_TEXT,
+        status: "running",
+        terminal: false,
+      },
+    ],
+  } as unknown as ConversationMessage;
+}
+
 function fakeRect(partial: Partial<ConversationSelectionRect>): ConversationSelectionRect {
   return { top: 0, left: 0, width: 0, height: 0, bottom: 0, right: 0, ...partial };
 }
@@ -89,7 +121,10 @@ describe("ConversationView text selection quote menu", () => {
     container = null;
   });
 
-  async function renderSelectionConversation() {
+  async function renderSelectionConversation(
+    handlers: { onAddComposerReference?: (reference: unknown) => void } = {},
+    message: ConversationMessage = assistantMessage(),
+  ) {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: Infinity } },
     });
@@ -105,7 +140,7 @@ describe("ConversationView text selection quote menu", () => {
             sessionId="session-selection-quote"
             title="Session"
             phase="ready"
-            messages={[assistantMessage()]}
+            messages={[message]}
             showHeader={false}
             showSessionOverview={false}
             showComposer
@@ -117,6 +152,7 @@ describe("ConversationView text selection quote menu", () => {
             onComposerChange={setValue}
             onSubmit={() => undefined}
             onEditUserMessage={() => undefined}
+            onAddComposerReference={handlers.onAddComposerReference}
           />
         </QueryClientProvider>
       );
@@ -197,6 +233,71 @@ describe("ConversationView text selection quote menu", () => {
     });
     await flushSelectionFrames();
     expect(selectionMenu()).toBeNull();
+  });
+
+  it("attaches a structured message reference from the selection menu", async () => {
+    const onAddComposerReference = vi.fn();
+    await renderSelectionConversation({ onAddComposerReference }, streamingAssistantMessage());
+    // The in-flight row renders through the live-tail segment carrying the
+    // owning message id (walker source for the structured reference).
+    const messageRow = container?.querySelector('[data-conversation-message-id="message-assistant-1"]');
+    if (!messageRow) {
+      throw new Error("message row with data-conversation-message-id not mounted");
+    }
+    vi.spyOn(window, "getSelection").mockReturnValue(
+      fakeSelection(messageRow, fakeRect({ top: 40, left: 10, width: 80, height: 16, bottom: 56, right: 90 })),
+    );
+
+    await act(async () => {
+      document.dispatchEvent(new Event("mouseup"));
+    });
+    await flushSelectionFrames();
+
+    const menu = selectionMenu();
+    expect(menu?.textContent).toContain("作为引用");
+    const referenceButton = Array.from(menu?.querySelectorAll("button") ?? []).find(
+      (button) => button.textContent?.includes("作为引用"),
+    );
+    if (!referenceButton) {
+      throw new Error("reference button not mounted");
+    }
+    await act(async () => {
+      referenceButton.click();
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+
+    expect(onAddComposerReference).toHaveBeenCalledTimes(1);
+    expect(onAddComposerReference).toHaveBeenCalledWith({
+      referenceId: "message:message-assistant-1",
+      kind: "message",
+      sourceSessionId: "session-selection-quote",
+      sourceMessageId: "message-assistant-1",
+      quote: ANSWER_TEXT,
+      title: ANSWER_TEXT,
+      createdAt: expect.any(String),
+    });
+    // The structured reference never mutates the draft text.
+    expect(container?.querySelector("textarea")?.value).toBe("");
+    expect(selectionMenu()).toBeNull();
+  });
+
+  it("does not offer the reference action when the selection anchor has no message row", async () => {
+    const { timeline } = await renderSelectionConversation();
+    // Anchor on the timeline element itself: no message row in the ancestor
+    // chain, so only quote/copy are offered.
+    vi.spyOn(window, "getSelection").mockReturnValue(
+      fakeSelection(timeline, fakeRect({ top: 40, left: 10, width: 80, height: 16, bottom: 56, right: 90 })),
+    );
+
+    await act(async () => {
+      document.dispatchEvent(new Event("mouseup"));
+    });
+    await flushSelectionFrames();
+
+    const menu = selectionMenu();
+    expect(menu).not.toBeNull();
+    expect(menu?.textContent).toContain("引用到输入框");
+    expect(menu?.textContent).not.toContain("作为引用");
   });
 
   it("closes on Escape and on timeline scroll", async () => {

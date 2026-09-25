@@ -11875,3 +11875,227 @@ def test_queued_turn_withdraw_and_drain_failure_stays_visible(tmp_path, monkeypa
     session_service._set_session_running("session-live", False)
     session_service._clear_session_turn_control("session-live")
     session_service._clear_session_live_output("session-live")
+
+
+def test_queued_turn_pause_resume_requeues_at_tail_and_edit_stays_paused(tmp_path, monkeypatch):
+    _seed_queued_turn_session(tmp_path, monkeypatch, prefix="queued-turn-pause")
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: None,
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_EXECUTOR",
+        SimpleNamespace(submit=lambda fn, session_id: fn(session_id)),
+    )
+
+    first = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "第一轮", "mentalModelEnabled": False},
+    )
+    assert first.status_code == 202
+
+    def _enqueue(content: str) -> str:
+        response = client.post(
+            "/api/sessions/session-live/messages",
+            json={"content": content, "queueIfBusy": True, "mentalModelEnabled": False},
+        )
+        assert response.status_code == 202
+        return str(response.json()["queuedTurnId"])
+
+    turn_a = _enqueue("排队甲")
+    turn_b = _enqueue("排队乙")
+    turn_c = _enqueue("排队丙")
+
+    paused = client.patch(
+        f"/api/sessions/session-live/queued-turns/{turn_a}",
+        json={"status": "paused"},
+    )
+    assert paused.status_code == 200
+    rows = paused.json()["queuedTurns"]
+    assert [(row["id"], row["status"]) for row in rows] == [
+        (turn_a, "paused"),
+        (turn_b, "queued"),
+        (turn_c, "queued"),
+    ]
+
+    # Editing a paused row keeps it paused and keeps its place.
+    edited = client.patch(
+        f"/api/sessions/session-live/queued-turns/{turn_a}",
+        json={"content": "排队甲改"},
+    )
+    assert edited.status_code == 200
+    rows = edited.json()["queuedTurns"]
+    assert [(row["id"], row["status"]) for row in rows] == [
+        (turn_a, "paused"),
+        (turn_b, "queued"),
+        (turn_c, "queued"),
+    ]
+
+    # Resuming re-queues at the tail instead of jumping back to its old slot.
+    resumed = client.patch(
+        f"/api/sessions/session-live/queued-turns/{turn_a}",
+        json={"status": "queued"},
+    )
+    assert resumed.status_code == 200
+    rows = resumed.json()["queuedTurns"]
+    assert [(row["id"], row["status"], row["position"]) for row in rows] == [
+        (turn_b, "queued", 1),
+        (turn_c, "queued", 2),
+        (turn_a, "queued", 3),
+    ]
+
+    # Resume only applies to paused rows; unknown status values are rejected.
+    not_paused = client.patch(
+        f"/api/sessions/session-live/queued-turns/{turn_b}",
+        json={"status": "queued"},
+    )
+    assert not_paused.status_code == 422
+    invalid = client.patch(
+        f"/api/sessions/session-live/queued-turns/{turn_b}",
+        json={"status": "held"},
+    )
+    assert invalid.status_code == 422
+
+    session_service._set_session_running("session-live", False)
+    session_service._clear_session_turn_control("session-live")
+    session_service._clear_session_live_output("session-live")
+
+
+def test_queued_turn_drain_skips_paused_and_all_paused_holds(tmp_path, monkeypatch):
+    _seed_queued_turn_session(tmp_path, monkeypatch, prefix="queued-turn-drain-pause")
+    scheduled_contexts: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: scheduled_contexts.append(dict(context)),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_EXECUTOR",
+        SimpleNamespace(submit=lambda fn, session_id: fn(session_id)),
+    )
+
+    first = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "第一轮", "mentalModelEnabled": False},
+    )
+    assert first.status_code == 202
+    active_turn_id = str(session_service._SESSION_ACTIVE_TURN_IDS.get("session-live") or "")
+    assert active_turn_id
+
+    def _enqueue(content: str) -> str:
+        response = client.post(
+            "/api/sessions/session-live/messages",
+            json={"content": content, "queueIfBusy": True, "mentalModelEnabled": False},
+        )
+        assert response.status_code == 202
+        return str(response.json()["queuedTurnId"])
+
+    turn_a = _enqueue("排队甲")
+    turn_b = _enqueue("排队乙")
+
+    paused = client.patch(
+        f"/api/sessions/session-live/queued-turns/{turn_a}",
+        json={"status": "paused"},
+    )
+    assert paused.status_code == 200
+
+    # The head row is paused, so drain takes the next queued row instead.
+    session_service._set_session_running("session-live", False, turn_id=active_turn_id)
+    session_service._clear_session_turn_control("session-live")
+    assert len(scheduled_contexts) == 2
+    assert scheduled_contexts[1]["user_message"] == "排队乙"
+    rows = session_service.get_session_detail("session-live")["queuedTurns"]
+    assert [(row["id"], row["status"]) for row in rows] == [(turn_a, "paused")]
+
+    second_turn_id = str(session_service._SESSION_ACTIVE_TURN_IDS.get("session-live") or "")
+    assert second_turn_id
+    turn_c = _enqueue("排队丙")
+    assert turn_c != turn_a
+    paused_c = client.patch(
+        f"/api/sessions/session-live/queued-turns/{turn_c}",
+        json={"status": "paused"},
+    )
+    assert paused_c.status_code == 200
+
+    # Every row paused: the settle drain starts nothing and keeps the queue.
+    session_service._set_session_running("session-live", False, turn_id=second_turn_id)
+    session_service._clear_session_turn_control("session-live")
+    assert len(scheduled_contexts) == 2
+    rows = session_service.get_session_detail("session-live")["queuedTurns"]
+    assert [(row["id"], row["status"]) for row in rows] == [
+        (turn_a, "paused"),
+        (turn_c, "paused"),
+    ]
+
+    # Resuming the tail row starts it right away; the paused head stays held.
+    resumed = client.patch(
+        f"/api/sessions/session-live/queued-turns/{turn_c}",
+        json={"status": "queued"},
+    )
+    assert resumed.status_code == 200
+    assert len(scheduled_contexts) == 3
+    assert scheduled_contexts[2]["user_message"] == "排队丙"
+    rows = session_service.get_session_detail("session-live")["queuedTurns"]
+    assert [(row["id"], row["status"]) for row in rows] == [(turn_a, "paused")]
+
+    session_service._set_session_running("session-live", False)
+    session_service._clear_session_turn_control("session-live")
+    session_service._clear_session_live_output("session-live")
+
+
+def test_queued_turn_blocked_cannot_pause(tmp_path, monkeypatch):
+    _seed_queued_turn_session(tmp_path, monkeypatch, prefix="queued-turn-blocked-pause")
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: None,
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_EXECUTOR",
+        SimpleNamespace(submit=lambda fn, session_id: fn(session_id)),
+    )
+
+    first = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "第一轮", "mentalModelEnabled": False},
+    )
+    assert first.status_code == 202
+
+    queued = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "会失败的排队消息", "queueIfBusy": True, "mentalModelEnabled": False},
+    )
+    assert queued.status_code == 202
+    queued_turn_id = queued.json()["queuedTurnId"]
+
+    state = load_chat_state(tmp_path)
+    conversations = [row for row in state["conversations"] if row["conversation_id"] == "session-live"]
+    assert conversations
+    queued_state_rows = conversations[0]["queued_turns"]
+    queued_state_rows[0]["status"] = "blocked"
+    save_chat_state(tmp_path, state)
+
+    rejected = client.patch(
+        f"/api/sessions/session-live/queued-turns/{queued_turn_id}",
+        json={"status": "paused"},
+    )
+    assert rejected.status_code == 422
+    rows = session_service.get_session_detail("session-live")["queuedTurns"]
+    assert [(row["id"], row["status"]) for row in rows] == [(queued_turn_id, "blocked")]
+
+    # The edit-retry path for blocked rows is unchanged.
+    retried = client.patch(
+        f"/api/sessions/session-live/queued-turns/{queued_turn_id}",
+        json={"content": "重试的排队消息"},
+    )
+    assert retried.status_code == 200
+    rows = session_service.get_session_detail("session-live")["queuedTurns"]
+    assert [(row["id"], row["status"]) for row in rows] == [(queued_turn_id, "queued")]
+
+    session_service._set_session_running("session-live", False)
+    session_service._clear_session_turn_control("session-live")
+    session_service._clear_session_live_output("session-live")

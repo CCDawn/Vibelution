@@ -1,11 +1,12 @@
-"""Knowledge / file conversation reference normalization, resolution, prompts.
+"""Knowledge / file / message conversation reference normalization, resolution, prompts.
 
 Claim scope: non-session conversation reference kinds (``knowledge_item``,
-``knowledge_base``, ``file``) submitted from the composer. Session-kind
-references stay on the existing ``turn_diagnostics`` pipeline; this module only
-handles the new kinds: normalization, access-checked resolution (KB governed
-search / session artifact read), budgeted content extraction, and the fenced
-untrusted-data prompt block.
+``knowledge_base``, ``file``, ``message``) submitted from the composer.
+Session-kind references stay on the existing ``turn_diagnostics`` pipeline;
+this module only handles the new kinds: normalization, access-checked
+resolution (KB governed search / session artifact read / source message
+existence check), budgeted content extraction, and the fenced untrusted-data
+prompt block.
 """
 
 from __future__ import annotations
@@ -16,10 +17,12 @@ from typing import Any
 KNOWLEDGE_ITEM_REFERENCE_KIND = "knowledge_item"
 KNOWLEDGE_BASE_REFERENCE_KIND = "knowledge_base"
 FILE_REFERENCE_KIND = "file"
+MESSAGE_REFERENCE_KIND = "message"
 KNOWLEDGE_FILE_REFERENCE_KINDS = frozenset({
     KNOWLEDGE_ITEM_REFERENCE_KIND,
     KNOWLEDGE_BASE_REFERENCE_KIND,
     FILE_REFERENCE_KIND,
+    MESSAGE_REFERENCE_KIND,
 })
 
 KNOWLEDGE_FILE_MAX_REFERENCES_PER_TURN = 6
@@ -31,6 +34,29 @@ _RAG_MAX_CONTEXT_CHARS = 4_000
 
 _REFERENCE_CONTENT_BEGIN = "<<<BEGIN_REFERENCE_CONTENT>>>"
 _REFERENCE_CONTENT_END = "<<<END_REFERENCE_CONTENT>>>"
+_DOCUMENT_CONTENT_BEGIN = "<<<BEGIN_DOCUMENT_CONTENT>>>"
+_DOCUMENT_CONTENT_END = "<<<END_DOCUMENT_CONTENT>>>"
+_FENCE_MARKERS = (
+    _REFERENCE_CONTENT_BEGIN,
+    _REFERENCE_CONTENT_END,
+    _DOCUMENT_CONTENT_BEGIN,
+    _DOCUMENT_CONTENT_END,
+)
+_FENCE_MARKER_PLACEHOLDER = "[[fence marker removed]]"
+
+
+def _sanitize_fence_markers(text: str) -> str:
+    """Replace prompt-block fence literals in untrusted text with a placeholder.
+
+    Quoted content is injected between fence markers; a literal marker inside
+    the quote would let the quote escape (or prematurely close) the data fence.
+    """
+
+    cleaned = str(text or "")
+    for marker in _FENCE_MARKERS:
+        if marker in cleaned:
+            cleaned = cleaned.replace(marker, _FENCE_MARKER_PLACEHOLDER)
+    return cleaned
 
 
 def _service():
@@ -87,13 +113,14 @@ def resolve_knowledge_file_references(
     query: str = "",
     lang: str = "",
 ) -> list[dict[str, Any]]:
-    """Resolve normalized knowledge/file references into content-bearing rows.
+    """Resolve normalized knowledge/file/message references into content-bearing rows.
 
     knowledge_base references run governed KB retrieval (``retrieve_rag_contexts``)
     scoped to the base with the user message as query; knowledge_item references
     read the reviewed item content through the permission-checked knowledge
-    service; file references read a previously uploaded session artifact. All
-    content is budget-capped per turn.
+    service; file references read a previously uploaded session artifact;
+    message references verify the quoted source message still exists and inject
+    the cleaned user-selected quote. All content is budget-capped per turn.
     """
 
     s = _service()
@@ -116,6 +143,8 @@ def resolve_knowledge_file_references(
                 title, content, source = _resolve_knowledge_item_reference(reference, agent_id=agent_id)
             elif kind == FILE_REFERENCE_KIND:
                 title, content, source = _resolve_file_reference(session_id, reference)
+            elif kind == MESSAGE_REFERENCE_KIND:
+                title, content, source = _resolve_message_reference(reference)
             else:
                 continue
         except ValueError as exc:
@@ -259,6 +288,54 @@ def _resolve_file_reference(
     return title, content, source
 
 
+def _resolve_message_reference(
+    reference: dict[str, Any],
+) -> tuple[str, str, dict[str, Any]]:
+    """Verify the quoted source message exists and return its cleaned quote.
+
+    Session existence is checked against the session runtime row; the message
+    is looked up in the source session's ledger-visible messages using the
+    same projection ids the composer quotes (``{conversation_id}-message-{n}``,
+    assigned per visible entry) and matching any role: word-selection quotes
+    may target assistant messages too. The injected content is the
+    user-selected quote (already fence-sanitized and capped at normalize
+    time), never the full stored message body.
+    """
+
+    s = _service()
+    source_session_id = str(reference.get("sourceSessionId") or "").strip()
+    source_message_id = str(reference.get("sourceMessageId") or "").strip()
+    quote = str(reference.get("quote") or "").strip()
+    if not source_session_id or not source_message_id or not quote:
+        raise ValueError("sourceSessionId, sourceMessageId and quote are required")
+    conversation = None
+    try:
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, source_session_id)
+    except Exception:
+        conversation = None
+    if not isinstance(conversation, dict):
+        raise ValueError("referenced session was not found")
+    try:
+        visible_messages = s._session_ledger_visible_messages(source_session_id)
+    except Exception:
+        visible_messages = []
+    found = any(
+        str(item.get("id") or f"{source_session_id}-message-{index}").strip() == source_message_id
+        for index, item in enumerate(
+            [item for item in list(visible_messages or []) if isinstance(item, dict)],
+            start=1,
+        )
+    )
+    if not found:
+        raise ValueError("referenced message not found")
+    title = str(reference.get("title") or "").strip() or s.trim_lines(quote[:60], max_lines=1)
+    source = {
+        "sourceSessionId": source_session_id,
+        "sourceMessageId": source_message_id,
+    }
+    return title, quote, source
+
+
 def knowledge_file_reference_prompt_block(resolved_references: list[dict[str, Any]], *, lang: str = "") -> str:
     """Build the turn prompt block for knowledge/file references.
 
@@ -289,17 +366,26 @@ def knowledge_file_reference_prompt_block(resolved_references: list[dict[str, An
         kind = str(reference.get("kind") or "").strip()
         title = str(reference.get("title") or reference.get("referenceId") or "").strip()
         content = str(reference.get("content") or "").strip()
-        source = reference.get("source") if isinstance(reference.get("source"), dict) else {}
-        source_bits = [
-            str(source.get(key) or "").strip()
-            for key in ("knowledgeBaseId", "knowledgeItemId", "artifactId")
-        ]
-        source_label = ", ".join(bit for bit in source_bits if bit)
-        header = f"- ref {index}: kind={kind}; title={title}"
-        if source_label:
-            header += f"; source={source_label}"
-        header += "; allowed=query_only"
-        lines.append(header)
+        if kind == MESSAGE_REFERENCE_KIND:
+            header = (
+                f"- ref {index}: kind={kind}; "
+                f"sourceSessionId={str(reference.get('sourceSessionId') or '').strip()}; "
+                f"sourceMessageId={str(reference.get('sourceMessageId') or '').strip()}; "
+                f"title={title}; allowed=query_only"
+            )
+            lines.append(header)
+        else:
+            source = reference.get("source") if isinstance(reference.get("source"), dict) else {}
+            source_bits = [
+                str(source.get(key) or "").strip()
+                for key in ("knowledgeBaseId", "knowledgeItemId", "artifactId")
+            ]
+            source_label = ", ".join(bit for bit in source_bits if bit)
+            header = f"- ref {index}: kind={kind}; title={title}"
+            if source_label:
+                header += f"; source={source_label}"
+            header += "; allowed=query_only"
+            lines.append(header)
         if not content:
             lines.append(s.text_for(lang, zh="  （本次未取到可注入内容）", en="  (no injectable content retrieved this turn)"))
             continue
@@ -343,6 +429,38 @@ def normalize_knowledge_file_references(value: Any) -> list[dict[str, Any]]:
                 "knowledgeBaseId": key,
                 "title": s.trim_lines(raw.get("title") or key, max_lines=1),
             }
+        elif kind == MESSAGE_REFERENCE_KIND:
+            source_session_id = str(raw.get("sourceSessionId") or raw.get("source_session_id") or "").strip()
+            source_message_id = str(raw.get("sourceMessageId") or raw.get("source_message_id") or "").strip()
+            raw_quote = str(raw.get("quote") or "")
+            missing = [
+                name
+                for name, value in (
+                    ("sourceSessionId", source_session_id),
+                    ("sourceMessageId", source_message_id),
+                    ("quote", raw_quote.strip()),
+                )
+                if not value
+            ]
+            if missing:
+                s._debug_logger.warning(
+                    f"dropped invalid message reference: missing {', '.join(missing)}",
+                    tag="SESSION_REFERENCES",
+                )
+                continue
+            quote, _truncated_chars = _trim_content(
+                _sanitize_fence_markers(raw_quote),
+                char_limit=KNOWLEDGE_ITEM_CONTENT_CHAR_LIMIT,
+            )
+            reference_id = str(raw.get("referenceId") or f"message:{source_message_id}").strip()
+            item = {
+                "referenceId": reference_id,
+                "kind": kind,
+                "sourceSessionId": source_session_id,
+                "sourceMessageId": source_message_id,
+                "quote": quote,
+                "title": s.trim_lines(raw.get("title") or "", max_lines=1),
+            }
         else:
             key = str(raw.get("artifactId") or raw.get("artifact_id") or "").strip()
             if not key:
@@ -359,11 +477,22 @@ def normalize_knowledge_file_references(value: Any) -> list[dict[str, Any]]:
     return references[:KNOWLEDGE_FILE_MAX_REFERENCES_PER_TURN]
 
 
-def strip_reference_content(references: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Return metadata-only copies safe for chat-state metadata and journals."""
+def strip_reference_content(
+    references: list[dict[str, Any]],
+    *,
+    keep_quote: bool = False,
+) -> list[dict[str, Any]]:
+    """Return metadata-only copies safe for chat-state metadata and journals.
 
+    Message-kind quote text is dropped with the resolved content by default;
+    ``keep_quote=True`` retains the cleaned quote for payloads that must
+    re-resolve the reference later (queued-turn storage re-submits references
+    through the full resolve pipeline after dequeue).
+    """
+
+    dropped_keys = ("content",) if keep_quote else ("content", "quote")
     return [
-        {key: value for key, value in dict(item).items() if key != "content"}
+        {key: value for key, value in dict(item).items() if key not in dropped_keys}
         for item in list(references or [])
         if isinstance(item, dict)
     ]

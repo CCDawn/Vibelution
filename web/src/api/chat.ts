@@ -401,7 +401,7 @@ export function listSessionQueuedTurns(sessionId: string): Promise<SessionQueued
 export function updateSessionQueuedTurn(
   sessionId: string,
   queuedTurnId: string,
-  payload: { content?: string; position?: number },
+  payload: { content?: string; position?: number; status?: "paused" | "queued" },
 ): Promise<SessionQueuedTurn[]> {
   return fetchJson<{ queuedTurns?: SessionQueuedTurn[] }>(
     `/api/sessions/${encodeURIComponent(sessionId)}/queued-turns/${encodeURIComponent(queuedTurnId)}`,

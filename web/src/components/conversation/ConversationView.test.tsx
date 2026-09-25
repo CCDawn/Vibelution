@@ -17,6 +17,7 @@ import conversationOperationDetailsSource from "./ConversationOperationDetails.t
 import conversationStreamingResponseContentSource from "./ConversationStreamingResponseContent.tsx?raw";
 import conversationStreamingResponseContentStyles from "./ConversationStreamingResponseContent.styles";
 import conversationTurnAvatarContentSource from "./ConversationTurnAvatarContent.tsx?raw";
+import navigatorSource from "./ConversationTurnNavigator.tsx?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import conversationInlineMarkdownSource from "./conversationInlineMarkdown.tsx?raw";
 import { ConversationView } from "./ConversationView";
@@ -2220,5 +2221,20 @@ describe("ConversationView historical failed turn retry", () => {
     );
 
     expect(html).not.toContain("重试此轮");
+  });
+});
+
+describe("conversation turn navigator contract", () => {
+  it("mounts the minimap rail with the six-turn gate and live-tail-aware navigation", () => {
+    // ConversationView wires the navigator to the same row plan the
+    // virtualizer renders, and keeps the gate in the navigator module.
+    expect(conversationViewSource).toContain('from "./ConversationTurnNavigator"');
+    expect(conversationViewSource).toContain("buildConversationTurnNavDirectory");
+    expect(conversationViewSource).toContain("resolveConversationTurnNavCurrentIndex");
+    expect(conversationViewSource).toContain("<ConversationTurnNavigator");
+    expect(conversationViewSource).toContain("scrollToIndex(entry.anchorRowIndex");
+    expect(navigatorSource).toContain("CONVERSATION_TURN_NAV_MIN_TURNS");
+    expect(navigatorSource).toContain("entries.length < CONVERSATION_TURN_NAV_MIN_TURNS");
+    expect(navigatorSource).toContain('data-conversation-turn-navigator="1"');
   });
 });

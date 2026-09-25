@@ -5,7 +5,17 @@ import remarkGfm from "remark-gfm";
 import { formattedCodeBlockContent } from "./conversationFormattedCodeBlock";
 import { safeConversationMarkdownUrl } from "./conversationMarkdownUrl";
 import type { ConversationMarkdownClassNames } from "./conversationMarkdownTypes";
-import { conversationMarkdownRendererStyles } from "./ConversationMarkdownRenderer.styles";
+import {
+  CODE_BLOCK_MAX_VISIBLE_LINES,
+  TABLE_MAX_VISIBLE_ROWS,
+  exceedsLineBudget,
+  headLines,
+  headRows,
+} from "./conversationRenderBudget";
+import {
+  conversationMarkdownOverflowStyles,
+  conversationMarkdownRendererStyles,
+} from "./ConversationMarkdownRenderer.styles";
 
 export type { ConversationMarkdownClassNames } from "./conversationMarkdownTypes";
 
@@ -134,16 +144,49 @@ function markdownComponents(
       return <p className={classNames.messageBody}>{children}</p>;
     },
     pre({ children }: ComponentPropsWithoutRef<"pre">) {
-      return <pre className={classNames.responseSegmentPre}>{markdownCodeBlockChildren(children)}</pre>;
+      const codeBlock = markdownCodeBlockChildren(children);
+      const truncation = truncateConversationMarkdownCodeBlock(codeBlock);
+      if (!truncation) {
+        return <pre className={classNames.responseSegmentPre}>{codeBlock}</pre>;
+      }
+      return (
+        <>
+          <pre className={classNames.responseSegmentPre}>{truncation.visible}</pre>
+          <details className={conversationMarkdownOverflowStyles.overflowDetails}>
+            <summary className={conversationMarkdownOverflowStyles.overflowSummary}>
+              {`展开其余 ${truncation.overflowCount} 行`}
+            </summary>
+            <pre className={classNames.responseSegmentPre}>{truncation.overflow}</pre>
+          </details>
+        </>
+      );
     },
     strong({ children }: ComponentPropsWithoutRef<"strong">) {
       return <strong className={classNames.inlineStrong}>{children}</strong>;
     },
     table({ children }: ComponentPropsWithoutRef<"table">) {
+      const truncation = truncateConversationMarkdownTable(children);
+      if (!truncation) {
+        return (
+          <div className={classNames.markdownTableWrap}>
+            <table className={classNames.markdownTable}>{children}</table>
+          </div>
+        );
+      }
       return (
-        <div className={classNames.markdownTableWrap}>
-          <table className={classNames.markdownTable}>{children}</table>
-        </div>
+        <>
+          <div className={classNames.markdownTableWrap}>
+            <table className={classNames.markdownTable}>{truncation.visible}</table>
+          </div>
+          <details className={conversationMarkdownOverflowStyles.overflowDetails}>
+            <summary className={conversationMarkdownOverflowStyles.overflowSummary}>
+              {`展开其余 ${truncation.overflowCount} 行`}
+            </summary>
+            <div className={classNames.markdownTableWrap}>
+              <table className={classNames.markdownTable}>{truncation.overflow}</table>
+            </div>
+          </details>
+        </>
       );
     },
     ul({ children }: ComponentPropsWithoutRef<"ul">) {
@@ -176,4 +219,103 @@ function markdownCodeBlockChildren(children: React.ReactNode) {
       {formattedCodeBlockChildren(codeElement.props.children, languageFromCodeClassName(className))}
     </code>
   );
+}
+
+type ConversationMarkdownCodeTruncation = {
+  visible: React.ReactNode;
+  overflow: React.ReactNode;
+  overflowCount: number;
+};
+
+/**
+ * Render budget for completed code blocks: over-budget blocks keep the head
+ * lines in the primary `<pre>` and fold the rest behind a native `<details>`
+ * (same interaction shape as ConversationPatchDiff). Full semantics stay in
+ * the DOM; only first paint is bounded.
+ */
+function truncateConversationMarkdownCodeBlock(node: React.ReactNode): ConversationMarkdownCodeTruncation | null {
+  if (!React.isValidElement<ComponentPropsWithoutRef<"code">>(node)) {
+    return null;
+  }
+  const parts = React.Children.toArray(node.props.children);
+  if (parts.length !== 1 || typeof parts[0] !== "string") {
+    return null;
+  }
+  // remark fenced-code values carry a trailing newline; that newline is fence
+  // syntax, not a rendered line, so it is stripped before budget arithmetic.
+  const text = parts[0].replace(/\n$/, "");
+  if (!exceedsLineBudget(text, CODE_BLOCK_MAX_VISIBLE_LINES)) {
+    return null;
+  }
+  const slice = headLines(text, CODE_BLOCK_MAX_VISIBLE_LINES);
+  const className = node.props.className || undefined;
+  return {
+    visible: <code className={className}>{slice.visible}</code>,
+    overflow: <code className={className}>{slice.overflow}</code>,
+    overflowCount: slice.overflowCount,
+  };
+}
+
+type ConversationMarkdownTableTruncation = {
+  visible: React.ReactNode;
+  overflow: React.ReactNode;
+  overflowCount: number;
+};
+
+/**
+ * Render budget for completed tables: over-budget tables render the head data
+ * rows and fold the rest behind a `<details>` that repeats the column headers
+ * so the expansion stays readable.
+ */
+function truncateConversationMarkdownTable(children: React.ReactNode): ConversationMarkdownTableTruncation | null {
+  const sections = React.Children.toArray(children);
+  const bodySectionIndexes: number[] = [];
+  const bodyRowLists: React.ReactNode[][] = [];
+  let totalRows = 0;
+  sections.forEach((section, index) => {
+    if (!React.isValidElement<{ children?: React.ReactNode }>(section) || section.type !== "tbody") {
+      return;
+    }
+    const rows = React.Children.toArray(section.props.children);
+    bodySectionIndexes.push(index);
+    bodyRowLists.push(rows);
+    totalRows += rows.length;
+  });
+  if (totalRows <= TABLE_MAX_VISIBLE_ROWS) {
+    return null;
+  }
+
+  let visibleBudget = TABLE_MAX_VISIBLE_ROWS;
+  const visibleBodyRows = bodyRowLists.map((rows) => {
+    const visible = rows.slice(0, Math.max(0, visibleBudget));
+    visibleBudget -= visible.length;
+    return visible;
+  });
+  const overflowBodyRows = bodyRowLists.map((rows, index) => rows.slice(visibleBodyRows[index]?.length ?? 0));
+  const projectSections = (renderOverflow: boolean) =>
+    sections
+      .map((section, index) => {
+        if (!React.isValidElement<{ children?: React.ReactNode }>(section)) {
+          return null;
+        }
+        const bodyIndex = bodySectionIndexes.indexOf(index);
+        if (bodyIndex >= 0) {
+          const projectedRows = renderOverflow ? overflowBodyRows[bodyIndex] : visibleBodyRows[bodyIndex];
+          return React.cloneElement(section, {}, projectedRows);
+        }
+        // Primary table keeps every non-body section as-is; the overflow
+        // table repeats only the column headers (thead) so the expansion
+        // stays readable without duplicating other sections.
+        if (!renderOverflow) {
+          return section;
+        }
+        return section.type === "thead" ? section : null;
+      })
+      .filter(Boolean);
+
+  return {
+    visible: projectSections(false),
+    overflow: projectSections(true),
+    overflowCount: totalRows - TABLE_MAX_VISIBLE_ROWS,
+  };
 }
