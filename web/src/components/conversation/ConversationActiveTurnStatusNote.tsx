@@ -1,9 +1,10 @@
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { VStatusChip } from "../vui";
+import { VButton, VStatusChip } from "../vui";
 import { dictionaryChat } from "../../i18n/domains/dictionaryChat";
 import {
+  ACTIVE_TURN_RECONNECT_ACTION_COOLDOWN_MS,
   activeTurnElapsedSeconds,
   formatActiveTurnHeartbeatText,
   planActiveTurnStageSwitch,
@@ -12,6 +13,7 @@ import {
   resolveActiveTurnRetryProgress,
   resolveActiveTurnRouteFallback,
   resolveActiveTurnStallSeconds,
+  shouldShowActiveTurnReconnectAction,
   visibleActiveTurnRetryProgress,
   type ActiveTurnStatusMessageLike,
 } from "./conversationActiveTurnStatusPresentation";
@@ -109,6 +111,46 @@ export function ConversationActiveTurnStatusNote({
     });
   const routeFallback = companionMode ? null : resolveActiveTurnRouteFallback(message);
 
+  // Manual reconnect affordance: only while a real reconnect loop is showing
+  // AND the stream owner wired its action through the context (companion
+  // surfaces and supervised panels pass no handler, so no dead button).
+  const [reconnectPending, setReconnectPending] = useState(false);
+  const reconnectCooldownTimerRef = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (reconnectCooldownTimerRef.current !== null) {
+      window.clearTimeout(reconnectCooldownTimerRef.current);
+      reconnectCooldownTimerRef.current = null;
+    }
+  }, []);
+  useEffect(() => {
+    // A fresh disconnect episode gets a fresh button: clear the stale cooldown
+    // so a second drop right after recovery is still actionable.
+    if (disconnectSeconds === null && reconnectCooldownTimerRef.current !== null) {
+      window.clearTimeout(reconnectCooldownTimerRef.current);
+      reconnectCooldownTimerRef.current = null;
+      setReconnectPending(false);
+    }
+  }, [disconnectSeconds]);
+  const showReconnectAction = shouldShowActiveTurnReconnectAction({
+    disconnectSeconds,
+    hasReconnectHandler: typeof streamState.reconnectSessionStream === "function",
+  });
+  const handleReconnectStream = () => {
+    if (reconnectPending) {
+      return;
+    }
+    setReconnectPending(true);
+    if (reconnectCooldownTimerRef.current !== null) {
+      window.clearTimeout(reconnectCooldownTimerRef.current);
+    }
+    reconnectCooldownTimerRef.current = window.setTimeout(() => {
+      reconnectCooldownTimerRef.current = null;
+      setReconnectPending(false);
+    }, ACTIVE_TURN_RECONNECT_ACTION_COOLDOWN_MS);
+    streamState.reconnectSessionStream?.();
+  };
+  const reconnectLabel = dictionaryChat[langKey].reconnectStream;
+
   return (
     <div
       className={styles.note}
@@ -141,6 +183,21 @@ export function ConversationActiveTurnStatusNote({
           >
             {`${dictionaryChat[langKey].chatStreamDisconnectedReconnecting}${disconnectSeconds > 0 ? ` · ${disconnectSeconds}s` : ""}`}
           </VStatusChip>
+        ) : null}
+        {showReconnectAction ? (
+          <VButton
+            variant="ghost"
+            density="compact"
+            className={styles.reconnectAction}
+            icon={<RotateCw size={14} aria-hidden="true" />}
+            isDisabled={reconnectPending}
+            aria-label={reconnectLabel}
+            data-testid="active-turn-reconnect"
+            data-active-turn-reconnect-pending={reconnectPending ? "true" : undefined}
+            onClick={handleReconnectStream}
+          >
+            {reconnectLabel}
+          </VButton>
         ) : null}
         {stallSeconds !== null ? (
           <VStatusChip

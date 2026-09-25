@@ -69,6 +69,8 @@
   --vui-elevation-2-sheen: var(--vui-sheen), var(--vui-elevation-2);
   --vui-radius-panel-soft: 12px;
   --vui-radius-overlay: 12px;
+  /* Small pill/chip radius (inline code pills); ≈ the legacy 0.3rem wash. */
+  --vui-radius-chip: 5px;
   --vui-elevation-panel: var(--vui-elevation-1-sheen);
   --vui-elevation-overlay: var(--vui-elevation-2-sheen);
   --vui-ease: cubic-bezier(0.2, 0, 0, 1);
@@ -408,6 +410,8 @@
   --vui-elevation-2-sheen: var(--vui-sheen), var(--vui-elevation-2);
   --vui-radius-panel-soft: 12px;
   --vui-radius-overlay: 12px;
+  /* Small pill/chip radius (inline code pills); ≈ the legacy 0.3rem wash. */
+  --vui-radius-chip: 5px;
   --vui-elevation-panel: var(--vui-elevation-1-sheen);
   --vui-elevation-overlay: var(--vui-elevation-2-sheen);
 

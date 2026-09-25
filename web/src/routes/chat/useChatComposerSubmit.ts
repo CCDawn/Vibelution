@@ -64,19 +64,26 @@ import {
 import {
   MAX_COMPOSER_DOCUMENT_ATTACHMENTS,
   MAX_COMPOSER_IMAGE_ATTACHMENTS,
+  applyComposerAttachmentUploadOutcomes,
   classifyComposerFiles,
   clearSessionDraftForSubmittedTurn,
   clearSessionImageAttachments,
   clearSessionReferenceAttachments,
+  composerUploadedArtifactIds,
   encodeUtf8Base64,
+  failedComposerAttachmentUploads,
+  markComposerAttachmentsUploading,
   mergeComposerAttachmentsWithRejections,
+  needsComposerAttachmentUpload,
   optimisticTurnIdForSubmission,
   resolveComposerSubmitGuard,
   restoreSubmittedDraftIfComposerStillEmpty,
   sessionReferenceId,
+  uploadComposerAttachmentsSettled,
   uploadSessionImageAttachment,
   writeStoredMentalModelToggle,
   writeStoredRuntimeStatusToggle,
+  type ComposerAttachmentUploadOutcome,
   type ComposerImageAttachment,
 } from "./chatComposerSubmitModel";
 import { loadTurnStatusTailConfig } from "./turnStatusTailModel";
@@ -116,6 +123,12 @@ type ChatSubmitAcceptedResponse = SessionTurnAcceptedResponse & {
   /** Active turn id this queued turn waits behind (observability only). */
   queuedBehindTurnId?: string;
 };
+
+type ComposerAttachmentUploadFailure = Extract<ComposerAttachmentUploadOutcome, { status: "failed" }>;
+
+function isFailedUploadOutcome(outcome: ComposerAttachmentUploadOutcome): outcome is ComposerAttachmentUploadFailure {
+  return outcome.status === "failed";
+}
 
 /**
  * A queued turn waiting this long without starting is surfaced to the user:
@@ -1069,6 +1082,12 @@ export type UseChatComposerSubmitActionsResult = {
   handleRuntimeStatusEnabledChange: (enabled: boolean) => void;
   handleAddComposerAttachments: (files: FileList | File[]) => void;
   handleRemoveComposerAttachment: (attachmentId: string) => void;
+  /** Re-upload one failed attachment chip; never auto-sends the draft. */
+  handleRetryComposerAttachmentUpload: (attachmentId: string) => void;
+  /** Re-upload every failed attachment chip of the active session at once. */
+  handleRetryComposerAttachmentUploads: () => void;
+  /** Session-keyed retry core (tests and advanced callers). */
+  retryComposerAttachmentUploads: (sessionId: string, onlyAttachmentId?: string) => Promise<void>;
   handleAddComposerReference: (reference: SessionReferenceAttachment) => void;
   handleRemoveComposerReference: (referenceId: string) => void;
   handleSubmitTurn: () => void;
@@ -1326,6 +1345,117 @@ export function useChatComposerSubmitActions({
     }));
   }, [activeImageAttachments, activeSessionId, setSessionImageAttachments]);
 
+  // Upload-repair entry for failed attachment chips: re-uploads only the
+  // failed subset (or one chip), respects the same per-session in-flight guard
+  // as submit, and never auto-sends — the restored draft waits for the user.
+  const retryComposerAttachmentUploads = useCallback(async (sessionId: string, onlyAttachmentId?: string) => {
+    if (!sessionId || imageUploadInFlightRef.current[sessionId]) {
+      return;
+    }
+    const tray = activeImageAttachments;
+    const targets = failedComposerAttachmentUploads(tray).filter(
+      (attachment) => !onlyAttachmentId || attachment.id === onlyAttachmentId,
+    );
+    if (!targets.length) {
+      return;
+    }
+    imageUploadInFlightRef.current[sessionId] = true;
+    setSessionImageUploadPending((current) => ({
+      ...current,
+      [sessionId]: true,
+    }));
+    setSessionImageAttachments((current) => ({
+      ...current,
+      [sessionId]: markComposerAttachmentsUploading(
+        current[sessionId] ?? [],
+        new Set(targets.map((attachment) => attachment.id)),
+      ),
+    }));
+    postSubmitTelemetry(
+      "browser.chat_submit.upload_retry_started",
+      "Composer attachment upload retry started.",
+      sessionId,
+      { attachmentCount: targets.length },
+    );
+    try {
+      const outcomes = await uploadComposerAttachmentsSettled(sessionId, targets);
+      setSessionImageAttachments((current) => ({
+        ...current,
+        [sessionId]: applyComposerAttachmentUploadOutcomes(current[sessionId] ?? [], outcomes),
+      }));
+      const failedOutcomes = outcomes.filter(isFailedUploadOutcome);
+      const remainingFailedChips = failedComposerAttachmentUploads(
+        applyComposerAttachmentUploadOutcomes(tray, outcomes),
+      ).length;
+      if (failedOutcomes.length) {
+        postSubmitTelemetry(
+          "browser.chat_submit.upload_retry_failed",
+          "Composer attachment upload retry finished with failures.",
+          sessionId,
+          {
+            attachmentCount: targets.length,
+            uploadedAttachmentCount: targets.length - failedOutcomes.length,
+            error: failedOutcomes[0]?.error,
+          },
+          "error",
+        );
+        setSessionComposerErrors((current) => ({
+          ...current,
+          [sessionId]: describeError(
+            failedOutcomes[0]?.error,
+            lang === "zh" ? "图片上传失败" : "Image upload failed",
+          ),
+        }));
+      } else {
+        postSubmitTelemetry(
+          "browser.chat_submit.upload_retry_succeeded",
+          "Composer attachment upload retry succeeded.",
+          sessionId,
+          {
+            attachmentCount: targets.length,
+            uploadedAttachmentCount: targets.length,
+          },
+        );
+        if (remainingFailedChips === 0) {
+          // The upload-failure hint must not outlive its chips; unrelated
+          // errors were already replaced by the submit failure branch.
+          setSessionComposerErrors((current) => ({
+            ...current,
+            [sessionId]: "",
+          }));
+        }
+      }
+    } finally {
+      imageUploadInFlightRef.current[sessionId] = false;
+      setSessionImageUploadPending((current) => ({
+        ...current,
+        [sessionId]: false,
+      }));
+    }
+  }, [
+    activeImageAttachments,
+    describeError,
+    imageUploadInFlightRef,
+    lang,
+    setSessionComposerErrors,
+    setSessionImageAttachments,
+    setSessionImageUploadPending,
+  ]);
+
+  const handleRetryComposerAttachmentUploads = useCallback(() => {
+    if (!activeSessionId) {
+      return;
+    }
+    void retryComposerAttachmentUploads(activeSessionId);
+  }, [activeSessionId, retryComposerAttachmentUploads]);
+
+  const handleRetryComposerAttachmentUpload = useCallback((attachmentId: string) => {
+    if (!activeSessionId) {
+      return;
+    }
+    void retryComposerAttachmentUploads(activeSessionId, attachmentId);
+  }, [activeSessionId, retryComposerAttachmentUploads]);
+
   const handleAddComposerReference = useCallback((reference: SessionReferenceAttachment) => {
     if (!activeSessionId) {
       return;
@@ -1451,7 +1581,53 @@ export function useChatComposerSubmitActions({
           },
         );
       }
-      const uploaded = await Promise.all(attachments.map((attachment) => uploadSessionImageAttachment(sessionId, attachment)));
+      // Per-attachment settle: successes keep their artifactId (reused on
+      // resubmit), failures flip their chip to the retryable failed state
+      // instead of discarding the whole batch.
+      const needUpload = attachments.filter(needsComposerAttachmentUpload);
+      let outcomes: ComposerAttachmentUploadOutcome[] = [];
+      if (needUpload.length) {
+        setSessionImageAttachments((current) => ({
+          ...current,
+          [sessionId]: markComposerAttachmentsUploading(current[sessionId] ?? []),
+        }));
+        outcomes = await uploadComposerAttachmentsSettled(sessionId, needUpload);
+        setSessionImageAttachments((current) => ({
+          ...current,
+          [sessionId]: applyComposerAttachmentUploadOutcomes(current[sessionId] ?? [], outcomes),
+        }));
+      }
+      const failedOutcomes = outcomes.filter(isFailedUploadOutcome);
+      if (failedOutcomes.length) {
+        const firstFailure = failedOutcomes[0];
+        postSubmitTelemetry(
+          "browser.chat_submit.upload_failed",
+          "Direct chat submit image upload failed before message POST.",
+          sessionId,
+          {
+            content,
+            attachmentCount: attachments.length,
+            uploadedAttachmentCount: attachments.length - failedOutcomes.length,
+            referenceCount: references.length,
+            mentalModelEnabled,
+            clientSubmissionId,
+            error: firstFailure.error,
+          },
+          "error",
+        );
+        setSessionComposerErrors((current) => ({
+          ...current,
+          [sessionId]: describeError(firstFailure.error, lang === "zh" ? "图片上传失败" : "Image upload failed"),
+        }));
+        if (content || references.length) {
+          queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+            removeOptimisticUserMessage(detailState, { sessionId, content, references, clientSubmissionId }),
+          );
+          setSessionDrafts((current) => restoreSubmittedDraftIfComposerStillEmpty(current, sessionId, content));
+        }
+        restorePendingStopAfterUploadFailure(sessionId);
+        return;
+      }
       if (attachments.length) {
         postSubmitTelemetry(
           "browser.chat_submit.upload_succeeded",
@@ -1460,13 +1636,16 @@ export function useChatComposerSubmitActions({
           {
             content,
             attachmentCount: attachments.length,
-            uploadedAttachmentCount: uploaded.length,
+            uploadedAttachmentCount: attachments.length,
             referenceCount: references.length,
             mentalModelEnabled,
             clientSubmissionId,
           },
         );
       }
+      const uploadedAttachmentIds = composerUploadedArtifactIds(
+        applyComposerAttachmentUploadOutcomes(attachments, outcomes),
+      );
       postSubmitTelemetry(
         "browser.chat_submit.submit_mutate_requested",
         "Direct chat submit mutation was requested.",
@@ -1474,7 +1653,7 @@ export function useChatComposerSubmitActions({
         {
           content,
           attachmentCount: attachments.length,
-          uploadedAttachmentCount: uploaded.length,
+          uploadedAttachmentCount: uploadedAttachmentIds.length,
           referenceCount: references.length,
           mentalModelEnabled,
           clientSubmissionId,
@@ -1487,12 +1666,14 @@ export function useChatComposerSubmitActions({
         mentalModelEnabled,
         runtimeStatusEnabled,
         turnStatusTail: loadTurnStatusTailConfig(sessionId),
-        attachmentIds: uploaded.map((attachment) => attachment.artifactId).filter(Boolean),
+        attachmentIds: uploadedAttachmentIds,
         references,
         requestStartedAtMs: chatStreamPerformanceNowMs(),
         queuedBehindActiveTurn,
       });
     } catch (error) {
+      // Defense net only: attachment uploads settle per attachment above, so
+      // this keeps any unexpected throw on the same failure semantics.
       postSubmitTelemetry(
         "browser.chat_submit.upload_failed",
         "Direct chat submit image upload failed before message POST.",
@@ -1955,10 +2136,37 @@ export function useChatComposerSubmitActions({
             [activeSessionId]: true,
           }));
           try {
-            const uploaded = await Promise.all(
-              editAttachments.map((attachment) => uploadSessionImageAttachment(activeSessionId, attachment)),
+            // Same per-attachment settle as the direct submit: chips that
+            // already carry an artifactId ride along without a re-upload, and
+            // failures stay in the tray as retryable failed chips.
+            let outcomes: ComposerAttachmentUploadOutcome[] = [];
+            const needUpload = editAttachments.filter(needsComposerAttachmentUpload);
+            if (needUpload.length) {
+              setSessionImageAttachments((current) => ({
+                ...current,
+                [activeSessionId]: markComposerAttachmentsUploading(current[activeSessionId] ?? []),
+              }));
+              outcomes = await uploadComposerAttachmentsSettled(activeSessionId, needUpload);
+              setSessionImageAttachments((current) => ({
+                ...current,
+                [activeSessionId]: applyComposerAttachmentUploadOutcomes(current[activeSessionId] ?? [], outcomes),
+              }));
+            }
+            const failedOutcomes = outcomes.filter(isFailedUploadOutcome);
+            if (failedOutcomes.length) {
+              setSessionComposerErrors((current) => ({
+                ...current,
+                [activeSessionId]: describeError(
+                  failedOutcomes[0].error,
+                  lang === "zh" ? "图片上传失败" : "Image upload failed",
+                ),
+              }));
+              restorePendingStopAfterUploadFailure(activeSessionId);
+              return;
+            }
+            uploadedAttachmentIds = composerUploadedArtifactIds(
+              applyComposerAttachmentUploadOutcomes(editAttachments, outcomes),
             );
-            uploadedAttachmentIds = uploaded.map((attachment) => attachment.artifactId).filter(Boolean);
           } catch (error) {
             setSessionComposerErrors((current) => ({
               ...current,
@@ -2426,6 +2634,9 @@ export function useChatComposerSubmitActions({
     handleRuntimeStatusEnabledChange,
     handleAddComposerAttachments,
     handleRemoveComposerAttachment,
+    handleRetryComposerAttachmentUpload,
+    handleRetryComposerAttachmentUploads,
+    retryComposerAttachmentUploads,
     handleAddComposerReference,
     handleRemoveComposerReference,
     handleSubmitTurn,

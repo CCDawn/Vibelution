@@ -85,8 +85,12 @@ function renderConversation(
       previewUrl: string;
       sizeBytes: number;
       contentType: string;
+      uploadStatus?: "pending" | "uploading" | "uploaded" | "failed";
+      artifactId?: string;
     }>;
     onRemoveComposerAttachment?: (id: string) => void;
+    onRetryComposerAttachment?: (id: string) => void;
+    onRetryComposerAttachmentUploads?: () => void;
     composerReferences?: Array<{
       referenceId: string;
       kind: string;
@@ -176,6 +180,8 @@ function renderConversation(
         onOpenComposerContextDetail={options.onOpenComposerContextDetail}
         composerAttachments={options.composerAttachments}
         onRemoveComposerAttachment={options.onRemoveComposerAttachment}
+        onRetryComposerAttachment={options.onRetryComposerAttachment}
+        onRetryComposerAttachmentUploads={options.onRetryComposerAttachmentUploads}
         composerReferences={options.composerReferences}
         slashCommandSuggestions={options.slashCommandSuggestions}
         nextStateSignals={options.nextStateSignals}
@@ -2377,5 +2383,112 @@ describe("conversation turn navigator contract", () => {
     expect(navigatorSource).toContain("CONVERSATION_TURN_NAV_MIN_TURNS");
     expect(navigatorSource).toContain("entries.length < CONVERSATION_TURN_NAV_MIN_TURNS");
     expect(navigatorSource).toContain('data-conversation-turn-navigator="1"');
+  });
+});
+
+describe("composer attachment upload status contract", () => {
+  const chipAttachments = [
+    {
+      id: "att-ok",
+      filename: "ok.png",
+      previewUrl: "blob:ok",
+      sizeBytes: 12,
+      contentType: "image/png",
+      uploadStatus: "uploaded" as const,
+      artifactId: "artifact-ok",
+    },
+    {
+      id: "att-bad",
+      filename: "bad.png",
+      previewUrl: "blob:bad",
+      sizeBytes: 12,
+      contentType: "image/png",
+      uploadStatus: "failed" as const,
+    },
+    {
+      id: "att-run",
+      filename: "run.png",
+      previewUrl: "blob:run",
+      sizeBytes: 12,
+      contentType: "image/png",
+      uploadStatus: "uploading" as const,
+    },
+  ];
+
+  it("paints only the failed chip with the danger variant plus a per-chip retry action", () => {
+    const html = renderConversation([], {
+      showComposer: true,
+      composerAttachments: chipAttachments,
+      onRemoveComposerAttachment: () => undefined,
+      onRetryComposerAttachment: () => undefined,
+    });
+    expect(html.match(/composerAttachmentChipFailed/g)?.length).toBe(1);
+    expect(html.match(/composerAttachmentRetryButton/g)?.length).toBe(1);
+    expect(html).toContain('aria-label="重试上传: bad.png"');
+    // The hint copy appears twice: the chip title and the failed status line.
+    expect(html.match(/上传失败，可重试/g)?.length).toBe(2);
+  });
+
+  it("shows the uploading spinner only on the uploading chip", () => {
+    const html = renderConversation([], {
+      showComposer: true,
+      composerAttachments: chipAttachments,
+    });
+    expect(html.match(/composerAttachmentUploadingIcon/g)?.length).toBe(1);
+    expect(html).toContain("上传中");
+  });
+
+  it("keeps healthy chips on the neutral style without retry affordances", () => {
+    const html = renderConversation([], {
+      showComposer: true,
+      composerAttachments: [chipAttachments[0]],
+      onRemoveComposerAttachment: () => undefined,
+      onRetryComposerAttachment: () => undefined,
+    });
+    expect(html).not.toContain("composerAttachmentChipFailed");
+    expect(html).not.toContain("composerAttachmentRetryButton");
+    expect(html).toContain("composerAttachmentRemoveButton");
+  });
+
+  it("adds the retry-all ghost action to the error row only while failed chips exist", () => {
+    const htmlWith = renderConversation([], {
+      showComposer: true,
+      composerError: "图片上传失败",
+      composerAttachments: chipAttachments,
+      onRetryComposerAttachmentUploads: () => undefined,
+    });
+    expect(htmlWith).toContain("composerErrorRetryButton");
+    expect(htmlWith).toContain("重试上传");
+    // role=alert keeps announcing the message itself.
+    expect(htmlWith).toMatch(/<p[^>]*role="alert"[^>]*>图片上传失败/);
+
+    const htmlWithoutHandler = renderConversation([], {
+      showComposer: true,
+      composerError: "图片上传失败",
+      composerAttachments: chipAttachments,
+    });
+    expect(htmlWithoutHandler).not.toContain("composerErrorRetryButton");
+
+    const htmlPlainError = renderConversation([], {
+      showComposer: true,
+      composerError: "Attachment limit reached",
+      composerAttachments: chipAttachments,
+    });
+    expect(htmlPlainError).not.toContain("composerErrorRetryButton");
+    // Unrelated composer errors keep the exact plain <p role="alert"> shape.
+    expect(htmlPlainError).toMatch(/<p[^>]*role="alert"[^>]*>Attachment limit reached<\/p>/);
+  });
+
+  it("keeps the failed-chip styles on the shared danger tokens", () => {
+    expect(styles.composerAttachmentChipFailed).toContain("var(--state-error)");
+    expect(styles.composerAttachmentRetryButton).toContain("var(--state-error)");
+    expect(styles.composerAttachmentStatusFailed).toContain("var(--state-error)");
+    expect(styles.composerAttachmentUploadingIcon).toContain("animate-spin");
+    expect(styles.composerErrorRetryButton).toContain("vui-components-conversationview composerErrorRetryButton");
+  });
+
+  it("wires the retry entry points through the route surface", () => {
+    expect(conversationViewSource).toContain("onRetryComposerAttachmentUploads");
+    expect(conversationViewSource).toContain("onRetryComposerAttachment(attachment.id)");
   });
 });

@@ -20,6 +20,7 @@ const previewExemptDesignSections = new Set([
   "ResearchWorkflowRecoveryPanel",
   "ResearchWorkflowRecoveryEntry",
   "ConversationMessageVersionSwitcher",
+  "AgentUserContentSectionView",
 ]);
 
 function collectPreviewSources(directory: string): string {

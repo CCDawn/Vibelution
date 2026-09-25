@@ -406,6 +406,27 @@ export function resolveActiveTurnDisconnectSeconds(input: {
 }
 
 /**
+ * Cooldown after a manual reconnect click: the button stays disabled so a
+ * stuck transport cannot be hammered; the state flipping back to connected
+ * clears it earlier through the advisory unmounting.
+ */
+export const ACTIVE_TURN_RECONNECT_ACTION_COOLDOWN_MS = 2_000;
+
+/**
+ * Whether the disconnect advisory earns its manual "reconnect now" affordance:
+ * only a real reconnect loop (disconnectSeconds from
+ * `resolveActiveTurnDisconnectSeconds`) with the stream-owner callback wired
+ * through ActiveTurnStreamState. Without the callback there is nothing to
+ * invoke, so the chip stays informational.
+ */
+export function shouldShowActiveTurnReconnectAction(input: {
+  disconnectSeconds: number | null;
+  hasReconnectHandler: boolean;
+}): boolean {
+  return input.disconnectSeconds !== null && input.hasReconnectHandler;
+}
+
+/**
  * Seconds the running turn has produced no assistant delta, once past the
  * stall threshold; null while output is fresh (or before the threshold).
  * The baseline is the fresher of the last applied delta and the turn start,

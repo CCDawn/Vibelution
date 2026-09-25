@@ -287,6 +287,10 @@ backToBottomButton:
   // preview dialog, so it keeps a real tap area (56px) and a hover/focus hint.
   composerAttachmentChip:
     "vui-components-conversationview composerAttachmentChip group inline-flex min-w-0 w-fit max-w-full items-center gap-2.5 overflow-hidden rounded-[14px] border border-[color-mix(in_srgb,var(--vui-border-subtle)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] p-1.5 pr-2 transition-colors duration-150 hover:border-[color-mix(in_srgb,var(--border-strong)_72%,transparent)] hover:bg-[var(--vui-control-muted-hover)] focus-within:border-[var(--accent-cool)]",
+  // Failed upload keeps the chip in place but repaints it on the danger scale:
+  // red ring + faint error wash, with the retry icon button carrying the fix.
+  composerAttachmentChipFailed:
+    "vui-components-conversationview composerAttachmentChipFailed !border-[color-mix(in_srgb,var(--state-error)_45%,transparent)] !bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash-faint),transparent)] hover:!border-[color-mix(in_srgb,var(--state-error)_62%,transparent)] hover:!bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash-strong),transparent)] focus-within:!border-[var(--state-error)]",
   composerAttachmentCopy:
     "vui-components-conversationview composerAttachmentCopy grid min-w-0 gap-1 pr-1",
   composerAttachmentMeta:
@@ -297,6 +301,16 @@ backToBottomButton:
     "vui-components-conversationview composerAttachmentPreview shrink-0 cursor-zoom-in !h-14 !min-h-14 !w-14 !min-w-14 !overflow-hidden !rounded-[10px] !bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,var(--vui-control-muted))] !p-0 shadow-none hover:!bg-[var(--vui-control-muted-hover)] hover:!shadow-none focus-visible:!ring-offset-0 [&_[data-slot=vui-button-content]]:!size-full [&_[data-slot=vui-button-content]]:!max-w-none [&_[data-slot=vui-button-label]]:!block [&_[data-slot=vui-button-label]]:!size-full",
   composerAttachmentRemoveButton:
     "vui-components-conversationview composerAttachmentRemoveButton !h-6 !min-h-6 !w-6 !min-w-6 shrink-0 !rounded-full !p-0 text-[var(--fg-tertiary)] hover:!bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash-strong),var(--vui-control-muted-hover))] hover:!text-[var(--state-error)]",
+  // Per-chip retry: same compact icon-button footprint as remove, but on the
+  // danger scale so the fix reads as part of the failed state.
+  composerAttachmentRetryButton:
+    "vui-components-conversationview composerAttachmentRetryButton !h-6 !min-h-6 !w-6 !min-w-6 shrink-0 !rounded-full !p-0 text-[var(--state-error)] hover:!bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash-strong),transparent)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)] disabled:cursor-default disabled:opacity-55",
+  composerAttachmentStatusFailed:
+    "vui-components-conversationview composerAttachmentStatusFailed min-w-0 text-vui-2xs leading-none text-[var(--state-error)]",
+  composerAttachmentStatusUploading:
+    "vui-components-conversationview composerAttachmentStatusUploading inline-flex min-w-0 items-center gap-1 text-vui-2xs leading-none text-[var(--fg-tertiary)]",
+  composerAttachmentUploadingIcon:
+    "vui-components-conversationview composerAttachmentUploadingIcon shrink-0 animate-spin",
   composerAttachmentThumbFrame:
     "vui-components-conversationview composerAttachmentThumbFrame relative block size-full overflow-hidden rounded-[10px]",
   composerAttachmentThumb:
@@ -316,6 +330,10 @@ backToBottomButton:
     "vui-components-conversationview composerStopPendingFeedback min-w-0 max-w-[12rem] truncate text-vui-xs leading-tight text-[var(--fg-secondary)]",
   composerError:
     `vui-components-conversationview composerError min-w-0 ${vuiStateDangerSoftClass}`,
+  // Retry-all action inside the error row: a quiet ghost button that inherits
+  // the danger row so the fix sits next to the failure it repairs.
+  composerErrorRetryButton:
+    "vui-components-conversationview composerErrorRetryButton !h-6 !min-h-6 shrink-0 gap-1 !rounded-full !px-2 text-vui-2xs font-semibold !text-[var(--state-error)] hover:!bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash-strong),transparent)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:inline-flex [&_[data-slot=vui-button-content]]:items-center [&_[data-slot=vui-button-content]]:gap-1",
   followupQueueTray:
     "vui-components-conversationview followupQueueTray mb-1 grid min-w-0 gap-0.5",
   followupQueueTrayBleed:
@@ -524,7 +542,7 @@ backToBottomButton:
   imagePreviewOverlay: `vui-components-conversationview imagePreviewOverlay min-w-0 ${vuiGlassPanelClass} p-2`,
   imagePreviewToolbar: `vui-components-conversationview imagePreviewToolbar min-w-0 ${vuiGlassPanelClass} p-2 flex flex-wrap items-center gap-1.5`,
   inlineCode:
-    "vui-components-conversationview inlineCode min-w-0 rounded-[0.3rem] bg-[color-mix(in_srgb,var(--fg-primary)_var(--vui-alpha-wash-faint),transparent)] px-1 py-0.5 font-mono text-vui-xs text-[var(--fg-primary)] whitespace-normal break-words [box-decoration-break:clone]",
+    "vui-components-conversationview inlineCode min-w-0 rounded-[var(--vui-radius-chip)] bg-[color-mix(in_srgb,var(--fg-primary)_var(--vui-alpha-wash-faint),transparent)] px-1 py-0.5 font-mono text-vui-xs text-[var(--fg-primary)] whitespace-normal break-words [box-decoration-break:clone]",
   inlineLink:
     "vui-components-conversationview inlineLink min-w-0 text-[var(--accent-cool)] underline decoration-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line-strong),transparent)] underline-offset-2 hover:decoration-[var(--accent-cool)]",
   inlineStrong:
