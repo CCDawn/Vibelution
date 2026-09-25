@@ -76,19 +76,21 @@ export function resolveComposerPrimaryActionFlags(input: {
  * Fallback Esc→stop yield decision (claim: composer action state). The composer
  * keydown handler consumes Escape for ghost dismiss, slash suggestions, and
  * reference typeahead first; only when none of those surfaces claims the key
- * and the event is still pristine may Escape stop the running turn.
+ * and the event is still pristine may Escape stop the running turn. IME
+ * composition also yields: Escape cancels the composing text, it never stops.
  * Pure: no React / DOM.
  */
 export function shouldStopComposerOnEscape(input: {
   key: string;
   defaultPrevented: boolean;
+  composing: boolean;
   actionMode: ComposerActionMode;
   hasStopHandler: boolean;
   ghostVisible?: boolean;
   slashSuggestionsOpen?: boolean;
   referenceTypeaheadOpen?: boolean;
 }) {
-  if (input.key !== "Escape" || input.defaultPrevented) {
+  if (input.key !== "Escape" || input.defaultPrevented || input.composing) {
     return false;
   }
   if (input.actionMode !== "stop" || !input.hasStopHandler) {

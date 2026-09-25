@@ -123,8 +123,13 @@ describe("composer Escape stop interaction", () => {
     return textarea;
   }
 
-  function pressEscape(textarea: HTMLTextAreaElement) {
-    textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  function pressEscape(textarea: HTMLTextAreaElement, options: { composing?: boolean } = {}) {
+    textarea.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Escape",
+      isComposing: options.composing ?? false,
+      bubbles: true,
+      cancelable: true,
+    }));
   }
 
   function listbox(): HTMLElement | null {
@@ -155,6 +160,23 @@ describe("composer Escape stop interaction", () => {
       pressEscape(textarea);
     });
     expect(onStop).not.toHaveBeenCalled();
+  });
+
+  it("yields to IME composition: composing Escape never stops", async () => {
+    const onStop = vi.fn();
+    const textarea = await renderEscapeStopComposer({ onStop });
+
+    // Escape pressed while the IME is composing cancels the composition.
+    await act(async () => {
+      pressEscape(textarea, { composing: true });
+    });
+    expect(onStop).not.toHaveBeenCalled();
+
+    // Once composition is over, Escape reaches the stop fallback again.
+    await act(async () => {
+      pressEscape(textarea);
+    });
+    expect(onStop).toHaveBeenCalledTimes(1);
   });
 
   it("lets a live reference typeahead claim Escape instead of stopping", async () => {

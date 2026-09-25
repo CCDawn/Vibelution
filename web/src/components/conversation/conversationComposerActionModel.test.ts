@@ -69,6 +69,7 @@ describe("conversationComposerActionModel", () => {
     const base = {
       key: "Escape",
       defaultPrevented: false,
+      composing: false,
       actionMode: "stop" as const,
       hasStopHandler: true,
     };
@@ -77,6 +78,8 @@ describe("conversationComposerActionModel", () => {
     expect(shouldStopComposerOnEscape({ ...base, actionMode: "send" as const })).toBe(false);
     // A already-consumed event must yield.
     expect(shouldStopComposerOnEscape({ ...base, defaultPrevented: true })).toBe(false);
+    // IME composition owns Escape (cancel composition, not stop the turn).
+    expect(shouldStopComposerOnEscape({ ...base, composing: true })).toBe(false);
     // No stop handler (e.g. legacy embed) stays inert.
     expect(shouldStopComposerOnEscape({ ...base, hasStopHandler: false })).toBe(false);
     // Non-Escape keys are not stop keys.

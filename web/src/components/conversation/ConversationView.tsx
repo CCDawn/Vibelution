@@ -5951,6 +5951,7 @@ export const ConversationView = React.memo(function ConversationView({
                 shouldStopComposerOnEscape({
                   key: event.key,
                   defaultPrevented: event.defaultPrevented,
+                  composing: event.nativeEvent.isComposing,
                   actionMode: resolvedActionMode,
                   hasStopHandler: Boolean(onStop),
                   ghostVisible: Boolean(composerPromptSuggestion.ghost),
