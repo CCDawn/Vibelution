@@ -150,19 +150,31 @@ mock.addFixture({
   },
 });
 
-// (9) tool_calls：参数多分片（长 arguments 超过 20 字符分片阈值）。
+// (9) tool_calls：参数多分片（长 arguments 超过 20 字符分片阈值）。首次调用返回
+//     toolCalls（踩未绑工具 Agent 的阻断路径）；后续调用返回纯文本——产品阻断后
+//     会带合成 tool 结果再次调用模型，若剧本每次都回 toolCalls，turn 会一路迭代
+//     到 200 上限才收口（实测 2026-09-26：单用例 202 条 journal、agent 归档/purge
+//     与实例 graceful shutdown 在 teardown 窗口内 settle 不完，全链报错）。
 mock.addFixture({
   match: { predicate: makeScenarioPredicate("E2E-MOCK-TOOL-V1") },
-  response: {
-    toolCalls: [
-      {
-        name: "write_file",
-        arguments: JSON.stringify({
-          path: "logs/e2e-mock.log",
-          content: "X".repeat(200),
-        }),
-      },
-    ],
+  response: (req) => {
+    const attempt = bump("E2E-MOCK-TOOL-V1");
+    if (attempt === 1) {
+      return {
+        toolCalls: [
+          {
+            name: "write_file",
+            arguments: JSON.stringify({
+              path: "logs/e2e-mock.log",
+              content: "X".repeat(200),
+            }),
+          },
+        ],
+      };
+    }
+    return {
+      content: "工具调用已被拦截（Agent 未绑定该工具），改为直接回复：tool_calls 阻断链路正常。",
+    };
   },
 });
 
