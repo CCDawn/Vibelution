@@ -35,6 +35,11 @@ EVENT_TOOL_RESULT = "tool_result"
 EVENT_CLI_TASK_SENT = "cli_task_sent"
 EVENT_CLI_TASK_RESULT = "cli_task_result"
 EVENT_CLI_SESSION_LIFECYCLE = "cli_session_lifecycle"
+# Startup recovery status line (session startup sweep). Journaled against the
+# synthetic turn id "session-recovery:{original_turn_id}" — never a real turn —
+# so the post-terminal guard cannot trip and the status row does not coalesce
+# into any real turn's assistant bubble.
+EVENT_SESSION_RECOVERY_RESUMED = "session_recovery_resumed"
 EVENT_TURN_COMPLETED = "turn_completed"
 EVENT_TURN_FAILED = "turn_failed"
 EVENT_TURN_INTERRUPTED = "turn_interrupted"
@@ -63,6 +68,7 @@ MODEL_VISIBLE_EVENT_TYPES = {
     EVENT_CLI_TASK_SENT,
     EVENT_CLI_TASK_RESULT,
     EVENT_CLI_SESSION_LIFECYCLE,
+    EVENT_SESSION_RECOVERY_RESUMED,
     EVENT_TURN_INTERRUPTED,
     EVENT_COMPACTION_CHECKPOINT,
 }
@@ -192,6 +198,7 @@ TURN_EVENT_PHASES: dict[str, str] = {
     EVENT_TURN_INTERRUPTED: TURN_PHASE_TERMINAL,
     EVENT_LLM_RESILIENCE: TURN_PHASE_OUT_OF_BAND,
     EVENT_BRANCH_REBASE: TURN_PHASE_OUT_OF_BAND,
+    EVENT_SESSION_RECOVERY_RESUMED: TURN_PHASE_OUT_OF_BAND,
     _EVENT_INTERNAL_TURN_TRIGGER: TURN_PHASE_OUT_OF_BAND,
 }
 
@@ -2151,6 +2158,10 @@ def _model_visible_messages_from_events(event_list: list[TurnJournalEvent]) -> l
             lifecycle_message = _lifecycle_message_from_event(event)
             if _message_has_visible_payload(lifecycle_message):
                 messages.append(lifecycle_message)
+        elif event.event_type == EVENT_SESSION_RECOVERY_RESUMED:
+            recovery_message = _session_recovery_resumed_message_from_event(event)
+            if _message_has_visible_payload(recovery_message):
+                messages.append(recovery_message)
         elif event.event_type in TERMINAL_EVENTS:
             terminal_turn_ids.add(turn_id)
             usage = payload.get("llmUsage") or payload.get("llm_usage")
@@ -2774,6 +2785,45 @@ def _lifecycle_message_from_event(event: TurnJournalEvent) -> dict[str, Any]:
     }
 
 
+def _session_recovery_resumed_message_from_event(event: TurnJournalEvent) -> dict[str, Any]:
+    """Project a startup-recovery status line into a visible assistant message.
+
+    Mirrors ``_lifecycle_message_from_event``: the journal payload is the
+    authority, the projection only reshapes it. Downstream message
+    normalization derives ``turnItems`` from the content, so the row survives
+    the timeline's ``hasVisibleTurnData`` filter exactly like other assistant
+    messages.
+    """
+
+    payload = dict(event.payload or {})
+    recovery = dict(payload.get("recovery") or payload)
+    content = str(recovery.get("content") or "").strip()
+    if not content:
+        return {}
+    metadata: dict[str, Any] = {
+        "kind": EVENT_SESSION_RECOVERY_RESUMED,
+        "turnId": event.turn_id,
+        "eventId": event.event_id,
+    }
+    for key in ("attempt", "turnLabel", "recoveredTurnId", "resumedTurnId"):
+        value = recovery.get(key)
+        if value is None:
+            continue
+        if key == "attempt":
+            try:
+                metadata[key] = max(0, int(value))
+            except (TypeError, ValueError):
+                continue
+        else:
+            metadata[key] = str(value).strip()
+    return {
+        "role": "assistant",
+        "content": content,
+        "timestamp": event.timestamp,
+        "metadata": metadata,
+    }
+
+
 def _event_tool_call_id(event: TurnJournalEvent) -> str:
     if event.tool_call_id:
         return event.tool_call_id
@@ -3154,6 +3204,7 @@ __all__ = [
     "EVENT_CLI_SESSION_LIFECYCLE",
     "EVENT_CLI_TASK_SENT",
     "EVENT_CLI_TASK_RESULT",
+    "EVENT_SESSION_RECOVERY_RESUMED",
     "EVENT_COMPACTION_CHECKPOINT",
     "EVENT_COMPRESSION_ATTEMPT",
     "MODEL_VISIBLE_EVENT_TYPES",
