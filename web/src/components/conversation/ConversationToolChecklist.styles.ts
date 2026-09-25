@@ -6,15 +6,15 @@ const styles = {
   header:
     `${scope} header flex min-w-0 max-w-full flex-wrap items-baseline gap-x-2 gap-y-0.5`,
   title:
-    `${scope} title min-w-0 [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)]`,
+    `${scope} title min-w-0 text-vui-xs font-semibold text-[var(--fg-secondary)]`,
   progress:
-    `${scope} progress shrink-0 tabular-nums [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)]`,
+    `${scope} progress shrink-0 tabular-nums text-vui-xs text-[var(--fg-tertiary)]`,
   explanation:
-    `${scope} explanation min-w-0 w-full [overflow-wrap:anywhere] [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)]`,
+    `${scope} explanation min-w-0 w-full [overflow-wrap:anywhere] text-vui-xs text-[var(--fg-tertiary)]`,
   items:
     `${scope} items m-0 grid list-none gap-1 p-0`,
   item:
-    `${scope} item grid min-w-0 grid-cols-[0.875rem_minmax(0,1fr)] items-start gap-x-1.5 [font-size:var(--vui-font-xs)] leading-[1.5]`,
+    `${scope} item grid min-w-0 grid-cols-[0.875rem_minmax(0,1fr)] items-start gap-x-1.5 text-vui-xs leading-[1.5]`,
   marker:
     `${scope} marker mt-[0.12rem] inline-grid size-3.5 shrink-0 place-items-center`,
   label:

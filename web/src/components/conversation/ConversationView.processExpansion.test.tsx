@@ -44,15 +44,15 @@ function renderConversation(messages: ConversationMessage[]) {
 
 describe("ConversationView process expansion defaults", () => {
   it("keeps feedback process typography on dense VUI row tokens", () => {
-    expect(styles.answerOnlyProcessTitle).toContain("[font-size:var(--vui-font-sm)]");
-    expect(styles.answerOnlyProcessTitle).not.toContain("[font-size:var(--vui-font-title)]");
-    expect(styles.answerOnlyProcessMeta).toContain("[font-size:var(--vui-font-xs)]");
-    expect(styles.operationName).toContain("[font-size:var(--vui-font-sm)]");
-    expect(styles.reActOperationTitle).toContain("[font-size:var(--vui-font-sm)]");
-    expect(styles.reActToolName).toContain("[font-size:var(--vui-font-sm)]");
-    expect(styles.reActToolSummary).toContain("[font-size:var(--vui-font-sm)]");
-    expect(styles.reActToolStatus).toContain("[font-size:var(--vui-font-xs)]");
-    expect(styles.reActResultToggle).toContain("[font-size:var(--vui-font-xs)]");
+    expect(styles.answerOnlyProcessTitle).toContain("text-vui-sm");
+    expect(styles.answerOnlyProcessTitle).not.toContain("text-vui-title");
+    expect(styles.answerOnlyProcessMeta).toContain("text-vui-xs");
+    expect(styles.operationName).toContain("text-vui-sm");
+    expect(styles.reActOperationTitle).toContain("text-vui-sm");
+    expect(styles.reActToolName).toContain("text-vui-sm");
+    expect(styles.reActToolSummary).toContain("text-vui-sm");
+    expect(styles.reActToolStatus).toContain("text-vui-xs");
+    expect(styles.reActResultToggle).toContain("text-vui-xs");
   });
 
   it("keeps legacy feedback details flat under the process disclosure", () => {

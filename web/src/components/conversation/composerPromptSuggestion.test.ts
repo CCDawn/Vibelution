@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import chatRouteSource from "../../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
 import chatComposerPlusMenuSource from "../../routes/chat/ChatComposerPlusMenu.tsx?raw";
@@ -13,7 +13,11 @@ import {
   shouldLoadComposerExample,
   shouldRequestComposerPromptSuggestion,
 } from "./composerPromptSuggestionModel";
-import { promptSuggestionToggleStorageKey } from "../../routes/chat/chatComposerSubmitModel";
+import {
+  promptSuggestionToggleStorageKey,
+  readStoredPromptSuggestionToggle,
+  writeStoredPromptSuggestionToggle,
+} from "../../routes/chat/chatComposerSubmitModel";
 
 describe("composerPromptSuggestionModel", () => {
   it("requests exactly once per turn for the idle empty composer", () => {
@@ -116,6 +120,29 @@ describe("composerPromptSuggestionModel", () => {
   it("keys the per-session toggle without leaking across sessions", () => {
     expect(promptSuggestionToggleStorageKey("abc")).toBe("vibelution.chat.promptSuggestionEnabled:abc");
     expect(promptSuggestionToggleStorageKey("abc")).not.toBe(promptSuggestionToggleStorageKey("def"));
+  });
+
+  it("turns prompt suggestions on until that session stores an explicit off", () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal("window", {
+      localStorage: {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => {
+          store.set(key, value);
+        },
+      },
+    });
+    try {
+      expect(readStoredPromptSuggestionToggle("")).toBe(false);
+      expect(readStoredPromptSuggestionToggle("session-1")).toBe(true);
+      writeStoredPromptSuggestionToggle("session-1", false);
+      expect(readStoredPromptSuggestionToggle("session-1")).toBe(false);
+      expect(readStoredPromptSuggestionToggle("session-2")).toBe(true);
+      writeStoredPromptSuggestionToggle("session-1", true);
+      expect(readStoredPromptSuggestionToggle("session-1")).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

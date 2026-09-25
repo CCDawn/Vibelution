@@ -1880,6 +1880,19 @@ class RuntimeStatusConfig(BaseModel):
     show_in_status_rail: bool = Field(default=True, description="是否在前端状态栏展示")
 
 
+class SessionRecoveryConfig(BaseModel):
+    """重启恢复（被打断轮次/队列的自动恢复）操作员开关。"""
+
+    model_config = ConfigDict(extra="ignore")
+    enabled: bool = Field(default=True, description="重启后是否自动恢复被打断的轮次/队列")
+    max_auto_retries: int = Field(
+        default=2,
+        ge=0,
+        le=5,
+        description="每个被打断对象的自动重发上限（防毒丸循环）",
+    )
+
+
 class WorkflowSessionScopeV3Config(BaseModel):
     """Workflow candidate-session rollout controlled by trusted operator config."""
 
@@ -2390,6 +2403,7 @@ class AppConfig(BaseModel):
     workflow_session_scope_v3: WorkflowSessionScopeV3Config = Field(
         default_factory=WorkflowSessionScopeV3Config
     )
+    session_recovery: SessionRecoveryConfig = Field(default_factory=SessionRecoveryConfig)
     research: ResearchConfig = Field(default_factory=ResearchConfig)
     supervised_evolution: SupervisedEvolutionFeatureConfig = Field(
         default_factory=SupervisedEvolutionFeatureConfig

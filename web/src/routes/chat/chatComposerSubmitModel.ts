@@ -412,10 +412,13 @@ export function promptSuggestionToggleStorageKey(sessionId: string): string {
 }
 
 export function readStoredPromptSuggestionToggle(sessionId: string): boolean {
-  if (typeof window === "undefined" || !String(sessionId || "").trim()) {
+  if (!String(sessionId || "").trim()) {
     return false;
   }
-  return window.localStorage.getItem(promptSuggestionToggleStorageKey(sessionId)) === "true";
+  if (typeof window === "undefined") {
+    return true;
+  }
+  return window.localStorage.getItem(promptSuggestionToggleStorageKey(sessionId)) !== "false";
 }
 
 export function writeStoredPromptSuggestionToggle(sessionId: string, enabled: boolean) {

@@ -877,7 +877,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatSurfaceCss).toContain("var(--vui-font-xs)");
     expect(chatSurfaceCss).toContain("var(--vui-font-sm)");
     expect(chatSurfaceCss).toContain("var(--vui-font-md)");
-    expect(conversationCssSource).toContain("var(--vui-font-chat)");
+    expect(conversationCssSource).toContain("text-vui-chat");
     expect(chatSurfaceCss).not.toMatch(/font-size:\s*0\.(?:6\d|7[0-7])rem/);
   });
 
@@ -3168,7 +3168,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.conversationIndexPanelBody).toContain("!pr-0");
     expect(routeStyles.conversationIndexPanelBody).toContain("![scrollbar-gutter:auto]");
     expect(routeStyles.conversationIndexLayout).toContain("grid-rows-[minmax(0,1fr)]");
-    expect(routeStyles.conversationIndexPanelBody).toContain("!pb-[var(--shell-settings-dock-height)]");
+    expect(routeStyles.conversationIndexPanelBody).not.toContain("--shell-settings-dock-height");
     expect(conversationIndexRailSource).not.toContain("systemEntryGroup");
     expect(routeStyles.conversationIndexScrollRegion).toContain("overflow-y-auto");
     expect(routeAndIndexRailSource).toContain("styles.conversationIndexPanelBody");

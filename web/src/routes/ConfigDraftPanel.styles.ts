@@ -1,3 +1,4 @@
+import { settingsSectionHeader, settingsSectionSurface } from "./configSettingsSurfaces";
 import {
   vuiElevatedPanelClass,
   vuiOpaqueRowClass,
@@ -6,14 +7,12 @@ import {
 
 const readablePanelSurface = vuiElevatedPanelClass;
 const readableRowSurface = vuiOpaqueRowClass;
-const mutedControl =
-  "[display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] [min-height:var(--control-height)] [padding:0_9px] [border-radius:var(--control-radius)] [font:inherit] [font-size:var(--vui-font-xs)] [font-weight:600] [line-height:1] [white-space:nowrap] [transition:border-color_140ms_ease,background-color_140ms_ease,color_140ms_ease] [border:1px_solid_var(--vui-border-soft)] [background:var(--vui-control-muted)] [color:var(--vui-fg-primary)] hover:[cursor:pointer] hover:[border-color:var(--vui-border-soft)] hover:[background:var(--vui-control-muted-hover)] disabled:[cursor:not-allowed] disabled:[opacity:0.56]";
 const sectionHeaderSurface =
   `[border-bottom:1px_solid_var(--vui-border-subtle)] !${vuiToolbarFillClass}`;
 
 const styles = {
   actionButton:
-    `vui-routes-configdraftpanel actionButton ${mutedControl}`,
+    "vui-routes-configdraftpanel actionButton",
   actionsRow:
     "vui-routes-configdraftpanel actionsRow [display:flex] [align-items:center] [gap:6px] [flex-wrap:wrap]",
   draftActionRail:
@@ -33,11 +32,11 @@ const styles = {
   rawToml:
     "vui-routes-configdraftpanel rawToml [max-height:18rem] [overflow:auto] [overflow-wrap:anywhere] [margin:0] [padding:10px] [border:1px_solid_var(--vui-border-subtle)] [border-radius:8px] [background:var(--vui-surface-workspace)] [font-family:var(--font-mono)] [font-size:var(--vui-font-xs)] [line-height:1.55] [color:var(--vui-fg-secondary)]",
   sectionHeader:
-    `vui-routes-configdraftpanel sectionHeader [display:flex] [align-items:start] [justify-content:space-between] [gap:8px] [min-height:40px] [padding:7px_var(--config-section-x)] ${sectionHeaderSurface}`,
+    `vui-routes-configdraftpanel sectionHeader [display:flex] [align-items:start] [justify-content:space-between] [gap:8px] [min-height:40px] [padding:7px_var(--config-section-x)] ${sectionHeaderSurface} ${settingsSectionHeader}`,
   sectionIcon:
     "vui-routes-configdraftpanel sectionIcon [color:var(--accent-warm-2)] [margin-top:1px]",
   sectionSurface:
-    `vui-routes-configdraftpanel sectionSurface ${readablePanelSurface} [display:grid] [grid-template-rows:auto_auto_minmax(0,1fr)] [gap:0] [padding:0] [min-height:0] [height:100%] [scroll-margin-top:84px] [overflow:hidden] [&>_.sectionText]:[padding:10px_var(--config-section-x)_0] [&>_.sectionText]:[max-width:980px] [&>_.sectionText]:[font-size:var(--vui-font-sm)] [&>_:where(_.actionsRow,.draftWorkbench_)]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)] [&>_.sectionText_+_:where(_.actionsRow,.draftWorkbench_)]:[margin-top:8px]`,
+    `vui-routes-configdraftpanel sectionSurface ${readablePanelSurface} [display:grid] [grid-template-rows:auto_auto_minmax(0,1fr)] [gap:0] [padding:0] [min-height:0] [height:100%] [scroll-margin-top:84px] [overflow:hidden] [&>_.sectionText]:[padding:10px_var(--config-section-x)_0] [&>_.sectionText]:[max-width:980px] [&>_.sectionText]:[font-size:var(--vui-font-sm)] [&>_:where(_.actionsRow,.draftWorkbench_)]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)] [&>_.sectionText_+_:where(_.actionsRow,.draftWorkbench_)]:[margin-top:8px] ${settingsSectionSurface}`,
   sectionText:
     "vui-routes-configdraftpanel sectionText [margin:0] [color:var(--fg-secondary)] [line-height:1.38]",
   sectionTitle:

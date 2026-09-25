@@ -738,6 +738,38 @@ def test_v2_empty_provider_or_profile_set_fails_closed_without_legacy_defaults(m
     assert "llm.providers must not be empty in schema v2" in str(typed_exc_info.value)
 
 
+def test_default_public_config_load_skips_init_after_cache_hit(tmp_path, monkeypatch) -> None:
+    """Repeated default-path reads must not reinitialize the operator config."""
+
+    import config.public_config as public_config_module
+
+    public_config_module._reset_public_config_cache()
+    config_file = tmp_path / "config.toml"
+    config_file.write_text('[ui]\nlanguage = "en"\n', encoding="utf-8")
+    monkeypatch.setattr(public_config_module, "CONFIG_PATH", config_file)
+    calls = {"n": 0}
+    real_init = public_config_module.ensure_global_config_initialized
+
+    def counting_init(*args, **kwargs):
+        calls["n"] += 1
+        return real_init(*args, **kwargs)
+
+    monkeypatch.setattr(
+        public_config_module,
+        "ensure_global_config_initialized",
+        counting_init,
+    )
+
+    first = public_config_module.load_public_config()
+    second = public_config_module.load_public_config()
+
+    assert calls["n"] == 1
+    assert second["ui"]["language"] == "en"
+    assert second == first
+    assert second is not first
+    public_config_module._reset_public_config_cache()
+
+
 @pytest.mark.parametrize(
     "upstream_id",
     [

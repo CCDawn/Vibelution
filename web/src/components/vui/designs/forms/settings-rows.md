@@ -23,6 +23,10 @@ ZCode SettingsRow 对齐的设置行布局壳：左侧 label（`--vui-font-sm` �
 行右侧可挂状态徽标（`status`，clean 时不渲染）。本组件只做布局，不含校验、
 保存逻辑或第二套控件。
 
+响应式依据行容器可用宽度，而非窗口宽度：默认行小于 28rem、宽控件行小于
+32rem 时上下排列，避免侧栏占用后文字被压扁。控件组允许换行，保留右对齐；
+行内上下留白统一为 16px。不覆盖子控件的 VUI 按钮密度或语义变体。
+
 **密度语义**：设置面结构化字段的标准密度。查看态右列放只读值或即时类活控件
 （布尔/下拉），编辑态放对应控件；宽编辑器（json/list 文本域、说明性错误列表）
 放 `footer`，占满组卡宽度。
@@ -78,6 +82,7 @@ import { VSettingsGroupCard, VSettingsRow, VCheckbox } from "@/components/vui";
 | controlLayout | 列宽变体 | number 步进器等宽控件用 `wide`（280px） |
 | footer / detail | 行下/行内附属 | 宽编辑器一律放 `footer`，不塞进控件列 |
 | testId | 测试定位 | 约定 `row-<fieldPath>` |
+| highlighted | 瞬态高亮环（搜索深链落点等短暂定位） | accent-cool 语义 ring（color-mix），约 2s 后由调用方摘除；不造新色、不改变布局 |
 
 ### 非职责
 

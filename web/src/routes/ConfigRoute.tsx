@@ -1,5 +1,6 @@
 import "../design/route-css/config.tailwind.css";
 import { ConfigSettingsIndex } from "./ConfigSettingsIndex";
+import { ConfigDesktopPetSettings } from "./ConfigDesktopPetSettings";
 import { ConfigShortcutsPanel } from "./ConfigShortcutsPanel";
 
 import { useQueryClient } from "@tanstack/react-query";
@@ -163,6 +164,16 @@ import {
   buildConfigSettingsSearchIndex,
   resolveConfigSettingsFocus,
 } from "./configSettingsSearch";
+import {
+  consumeSettingsFocusIntent,
+  notifySettingsContentReady,
+  onSettingsContentReady,
+  readLastSettingsLocation,
+  resolveSettingsEntry,
+  subscribeSettingsFocus,
+  writeLastSettingsLocation,
+  type SettingsFocusTarget,
+} from "../app/settingsNavigation";
 import { ConfigWorkspacePlaceholderPanel } from "./ConfigWorkspacePlaceholderPanel";
 
 /** Heavy settings sections — keep off Config shell first paint (R2). */
@@ -298,7 +309,7 @@ export function defaultSectionUiState(sectionId = ""): ConfigSectionUiState {
 
 export const CONFIG_COPY = {
   zh: {
-    pageTitle: "统一配置工作台",
+    pageTitle: "设置",
     subtitle: "结构化配置、模型资产与保存状态。启动设置在 Launcher 面板维护。",
     subtitleHint: "启动设置在 Launcher 面板维护；结构化编辑、完整配置检查和最终保存仍收口到外部 operator config.toml。",
     returnToAgents: "返回 Agent 配置",
@@ -344,7 +355,7 @@ export const CONFIG_COPY = {
     groupOverviewSaveSummary: "在一个页面查看保存状态、阻塞问题与建议动作，修复后直接保存。",
     groupWorkbenchTitle: "界面与工作台",
     groupWorkbenchSummary: "管理工作台行为、配色和背景；启动相关设置仍由 Launcher 维护。",
-    groupAvatarPetTitle: "用户、终端形象与陪伴体",
+    groupAvatarPetTitle: "个人资料与桌宠",
     groupAvatarPetSummary: "统一设置显示名、终端形象与陪伴体；Web 用户头像在用户信息里维护，常用项直接展示，其余参数按需展开。",
     groupModelingTitle: "模型库",
     groupModelingSummary: "模型资产、服务商账号、密钥、能力检测和模型发现都在这里集中管理。",
@@ -385,7 +396,7 @@ export const CONFIG_COPY = {
     healthMissing: "暂无日志文件",
     healthNotRecorded: "未记录",
     shortcutsTitle: "快捷键",
-    shortcutsIntro: "点击「修改」后按下新组合键完成录制，Esc 取消；「清除」写入显式空数组（未设置，不回退默认）。",
+    shortcutsIntro: "点击「修改」后按下新组合键完成录制（Esc 取消 · Backspace 恢复默认）；「清除」写入显式空数组（未设置，不回退默认）。",
     shortcutsPersistence: "覆盖持久化到 localStorage 键 vibelution.shortcuts.overrides，与全局快捷键同一存储。",
     shortcutsEffectiveNow: "改键即时生效，无需重启；快捷键在应用全局生效，触发时走命令面板同一执行路径。",
     shortcutsResetAll: "恢复全部默认",
@@ -398,9 +409,17 @@ export const CONFIG_COPY = {
     shortcutsClear: "清除",
     shortcutsRestore: "恢复默认",
     shortcutsRecording: "录制中：请按下新组合键",
-    shortcutsRecordingHint: "Esc 取消",
+    shortcutsRecordingHint: "Esc 取消 · Backspace 恢复默认",
     shortcutsRecordingPending: "已收到修饰键，等待完整组合…",
     shortcutsRecordCancelled: "录制已取消，绑定未变更。",
+    shortcutsRestoredByBackspace: "已恢复「{title}」的默认绑定（录制态 Backspace）。",
+    shortcutsFilterPlaceholder: "过滤命令…",
+    shortcutsFilterByKeystroke: "按键盘找",
+    shortcutsFilterCapturing: "按下组合键…（Esc 退出）",
+    shortcutsFilterClear: "清除按键过滤",
+    shortcutsFilterUnknownKey: "无法识别的按键",
+    shortcutsFilterNoTextMatch: "没有文本命中的命令",
+    shortcutsFilterKeyUnbound: "该组合键未被任何命令占用",
     shortcutsInvalidNoModifier: "录制失败：普通字符键必须至少带一个修饰键（F 键、方向键等命名键允许裸键）。",
     shortcutsInvalidUnsupported: "录制失败：不支持的按键组合（主修饰键在归一中丢失），绑定未变更。",
     shortcutsBoundNotice: "已把 {binding} 绑定到「{title}」（覆盖为整组替换该命令的绑定）。",
@@ -600,7 +619,7 @@ export const CONFIG_COPY = {
     no: "否",
   },
   en: {
-    pageTitle: "Unified Config Workbench",
+    pageTitle: "Settings",
     subtitle: "Structured config, model assets, and save state. Startup settings are maintained in Launcher.",
     subtitleHint: "Startup settings are maintained in Launcher; structured editing, full-config checks, and final writes still converge on the external operator config.toml.",
     returnToAgents: "Return to Agent config",
@@ -646,7 +665,7 @@ export const CONFIG_COPY = {
     groupOverviewSaveSummary: "Review save state, blockers, and suggested actions in one place, then save after fixes.",
     groupWorkbenchTitle: "Workbench & Interface",
     groupWorkbenchSummary: "Manage workbench behavior, colors, and background here. Startup settings remain in Launcher.",
-    groupAvatarPetTitle: "User, Terminal Avatar, and Companion",
+    groupAvatarPetTitle: "Profile & desktop pet",
     groupAvatarPetSummary: "Set the display name, terminal avatar, and companion in one place. The Web user avatar lives under User Info, while advanced parameters remain on demand.",
     groupModelingTitle: "Model Library",
     groupModelingSummary: "Manage model assets, provider accounts, keys, capability checks, and discovery in one place.",
@@ -687,7 +706,7 @@ export const CONFIG_COPY = {
     healthMissing: "No log files yet",
     healthNotRecorded: "Not recorded",
     shortcutsTitle: "Keyboard shortcuts",
-    shortcutsIntro: "Click Change and press the new key combination to record it; Esc cancels. Clear writes an explicit empty array (not set, no fallback to defaults).",
+    shortcutsIntro: "Click Change and press the new key combination to record it (Esc to cancel · Backspace to restore default). Clear writes an explicit empty array (not set, no fallback to defaults).",
     shortcutsPersistence: "Overrides persist to the localStorage key vibelution.shortcuts.overrides, the same storage the global shortcuts read.",
     shortcutsEffectiveNow: "Rebinds apply immediately without a restart; shortcuts work across the app through the same execution path as the command palette.",
     shortcutsResetAll: "Restore all defaults",
@@ -700,9 +719,17 @@ export const CONFIG_COPY = {
     shortcutsClear: "Clear",
     shortcutsRestore: "Restore default",
     shortcutsRecording: "Recording: press the new key combination",
-    shortcutsRecordingHint: "Esc to cancel",
+    shortcutsRecordingHint: "Esc to cancel · Backspace to restore default",
     shortcutsRecordingPending: "Modifier received, waiting for the full combination…",
     shortcutsRecordCancelled: "Recording cancelled. No binding changed.",
+    shortcutsRestoredByBackspace: "\"{title}\" default bindings restored (Backspace while recording).",
+    shortcutsFilterPlaceholder: "Filter commands…",
+    shortcutsFilterByKeystroke: "Find by key",
+    shortcutsFilterCapturing: "Press a key combination… (Esc to exit)",
+    shortcutsFilterClear: "Clear key filter",
+    shortcutsFilterUnknownKey: "Unrecognized key",
+    shortcutsFilterNoTextMatch: "No commands match the text",
+    shortcutsFilterKeyUnbound: "No command uses this key combination",
     shortcutsInvalidNoModifier: "Recording failed: plain character keys need at least one modifier (named keys such as F-keys and arrows may be bare).",
     shortcutsInvalidUnsupported: "Recording failed: unsupported key combination (primary modifier lost in normalization). No binding changed.",
     shortcutsBoundNotice: "Bound {binding} to \"{title}\" (the override replaces all bindings of that command).",
@@ -1277,6 +1304,8 @@ type ConfigSectionEditorProps = {
   immediateFieldStatus: Record<string, ImmediateFieldStatus>;
   onAvatarImageUpload: (file: File) => Promise<AvatarImageUploadResponse | null>;
   onThemeBackgroundImageUpload: (file: File) => Promise<AvatarImageUploadResponse | null>;
+  /** 搜索深链的瞬态高亮字段（绝对配置路径）；仅该路径的行渲染高亮环。 */
+  highlightFieldPath?: string;
 };
 
 type AvatarImageUploadResponse = {
@@ -1365,6 +1394,7 @@ export function ConfigSectionEditor({
   immediateFieldStatus,
   onAvatarImageUpload,
   onThemeBackgroundImageUpload,
+  highlightFieldPath = "",
 }: ConfigSectionEditorProps) {
   const sectionExpanded = uiState.expanded;
   const editing = uiState.editing;
@@ -1374,6 +1404,11 @@ export function ConfigSectionEditor({
   const tierCounts = configSectionTierCounts(section.id, section.fieldCount);
   const draftValue = editing ? (uiState.draftValue ?? value) : value;
   const metaAt = useCallback((path: string) => metaMap[path], [metaMap]);
+  // 内容 ready 脉冲：挂载与行可见性（分区展开/高级展开/嵌套展开）变化后经
+  // 意图模块广播；导航意图（分区/字段聚焦）据此落地，替代旧的 60 帧 rAF 轮询。
+  useEffect(() => {
+    notifySettingsContentReady();
+  }, [section.id, sectionExpanded, advancedExpanded, expandedPaths]);
   // 待保存口径：草稿类字段的草稿值（原始文本先按 schema 解析）与当前分区值比较；
   // 即时类字段（boolean/select）永不滞留草稿，不计入。
   const pendingDraftLeaves = useMemo(
@@ -1664,7 +1699,7 @@ export function ConfigSectionEditor({
       return (
         <article
           key={absolutePath}
-          className={`${styles.treeFieldCard} ${styles.treeFieldCardView} ${styles.themeBackgroundImageCard}`}
+          className={`${styles.treeFieldCard} ${styles.themeBackgroundImageCard}`}
           title={hint || undefined}
         >
           {renderThemeBackgroundControl(fieldValue, absolutePath)}
@@ -1742,6 +1777,7 @@ export function ConfigSectionEditor({
         description={hint || undefined}
         control={control}
         status={renderRowStatusBadge(absolutePath)}
+        highlighted={highlightFieldPath === absolutePath}
       />
     );
   }
@@ -1756,7 +1792,7 @@ export function ConfigSectionEditor({
       return (
         <article
           key={absolutePath}
-          className={`${styles.treeFieldCard} ${styles.treeFieldCardEdit} ${styles.themeBackgroundImageCard}`}
+          className={`${styles.treeFieldCard} ${styles.themeBackgroundImageCard}`}
           title={backgroundHint || undefined}
         >
           {renderThemeBackgroundControl(fieldValue, absolutePath)}
@@ -1897,6 +1933,7 @@ export function ConfigSectionEditor({
               <div className={styles.avatarImageActions}>
                 <VButton
                   type="button"
+                  variant="primary"
                   className={`${styles.primaryButton} ${styles.compactButton}`}
                   isDisabled={disabled || imageUploading}
                   onClick={() => {
@@ -2158,6 +2195,7 @@ export function ConfigSectionEditor({
         footer={footer}
         controlLayout={controlLayout}
         status={renderRowStatusBadge(absolutePath, { pending: pendingFlag, invalid: invalidFlag })}
+        highlighted={highlightFieldPath === absolutePath}
       />
     );
   }
@@ -2427,8 +2465,7 @@ export function ConfigSectionEditor({
     <VSurface as="section" id={`config-${section.id}`} tabIndex={-1} className={sectionClassName} padding="none">
       <div className={styles.sectionHeader}>
         <div className={styles.sectionHeaderMain}>
-          <p className={styles.eyebrow}>{section.path}</p>
-          <h2 className={styles.sectionTitle}>{presentation?.sectionTitle ?? section.title}</h2>
+          <h2 className={styles.sectionTitle} title={section.path}>{presentation?.sectionTitle ?? section.title}</h2>
           <p className={styles.sectionText}>{presentation?.sectionSummary ?? section.summary}</p>
         </div>
         <div className={styles.sectionHeaderActions}>
@@ -2447,6 +2484,7 @@ export function ConfigSectionEditor({
             <>
               <VButton
                 type="button"
+                variant="primary"
                 className={`${styles.primaryButton} ${styles.compactButton} ${styles.toolbarButton}`}
                 isDisabled={disabled || sectionSaveBlocked}
                 title={sectionSaveBlocked ? copy.saveBlockedInvalid : undefined}
@@ -2626,6 +2664,16 @@ export function ConfigRoute() {
   const [modelEditorExpanded, setModelEditorExpanded] = useState(false);
   const [activeGroupId, setActiveGroupId] = useState(() => searchParams.get("section") ?? "");
   const [activePageId, setActivePageId] = useState("");
+  // 导航意图（settingsNavigation）：搜索选中/命令面板跳转的落地目标；
+  // 等待分区内容 ready（onContentReady / 依赖变化）后一次性消费。
+  const [pendingIntentFocus, setPendingIntentFocus] = useState<{ sectionId: string; fieldId: string } | null>(null);
+  // 字段深链的瞬态高亮（~2s 后摘除）。
+  const [fieldHighlight, setFieldHighlight] = useState<{ path: string } | null>(null);
+  const fieldHighlightTimerRef = useRef(0);
+  // 分区内容 ready 脉冲：ConfigSectionEditor 经意图模块广播，触发落地重放。
+  const [settingsReadyToken, setSettingsReadyToken] = useState(0);
+  // 「上次停留分区」恢复每次挂载只尝试一次。
+  const lastLocationRestoreAttemptedRef = useRef(false);
   const [sectionUiState, setSectionUiState] = useState<Record<string, ConfigSectionUiState>>({});
   // 即时类字段（boolean/select）的行徽标生命周期：waiting → applied|failed。
   const [immediateFieldStatus, setImmediateFieldStatus] = useState<Record<string, ImmediateFieldStatus>>({});
@@ -2681,6 +2729,7 @@ export function ConfigRoute() {
   const requestedSectionId = String(searchParams.get("section") || "").trim();
   const requestedPageId = String(searchParams.get("page") || "").trim();
   const requestedFocusSectionId = String(searchParams.get("focus") || "").trim();
+  const requestedFocusFieldId = String(searchParams.get("field") || "").trim();
   const showingSettingsIndex = !requestedPageId && !requestedFocusSectionId;
   const returnToPath = safeAgentCenterReturnToPath(searchParams.get("returnTo"));
   const returnToLabel = searchParams.get("returnLabel") === "agents" ? copy.returnToAgents : copy.returnToSource;
@@ -2721,13 +2770,17 @@ export function ConfigRoute() {
       groups: settingsGroups,
       editorSections: workspace?.editorSections ?? [],
       editorMeta: workspace?.editorMeta ?? {},
+      configValues: draftConfig,
+      language: currentLanguage,
     }), {
-      groupId: "avatar-pet" as const, pageId: "",
+      groupId: "avatar-pet" as const, pageId: "identity-profile", sectionId: "pet",
       title: currentLanguage === "zh" ? "桌面宠物" : "Desktop pet",
       detail: currentLanguage === "zh" ? "开启或关闭桌面宠物" : "Open or close desktop pet",
       haystack: "桌宠 桌面宠物 开启 关闭 desktop pet",
+      titleHaystack: currentLanguage === "zh" ? "桌面宠物 桌宠" : "Desktop pet",
+      valueHaystack: "",
     }],
-    [currentLanguage, settingsGroups, workspace?.editorMeta, workspace?.editorSections],
+    [currentLanguage, draftConfig, settingsGroups, workspace?.editorMeta, workspace?.editorSections],
   );
   const { group: activeGroup, page: activePage } = useMemo(
     () => resolveConfigSettingsSelection(settingsGroups, activeGroupId, activePageId),
@@ -2833,10 +2886,12 @@ export function ConfigRoute() {
       if (requestedFocusSectionId && focusPage?.memberSectionIds.includes(requestedFocusSectionId)) {
         setSectionUiState((current) => ({
           ...current,
-          [requestedFocusSectionId]: resolveConfigSectionUiStateOnSelect(
-            current[requestedFocusSectionId],
-            defaultSectionUiState(requestedFocusSectionId),
-          ),
+          [requestedFocusSectionId]: requestedFocusFieldId
+            ? prepareSectionUiStateForFocus(current[requestedFocusSectionId], requestedFocusSectionId, requestedFocusFieldId)
+            : resolveConfigSectionUiStateOnSelect(
+              current[requestedFocusSectionId],
+              defaultSectionUiState(requestedFocusSectionId),
+            ),
         }));
         pendingFocusSectionRef.current = requestedFocusSectionId;
       } else {
@@ -2944,28 +2999,135 @@ export function ConfigRoute() {
       && Boolean(activePage?.memberSectionIds.includes(sectionId));
   }
 
-  function navigateSettingsSelection(groupId: ConfigSettingsGroupId, pageId: string, focusSectionId?: string) {
+  function navigateSettingsSelection(groupId: ConfigSettingsGroupId, pageId: string, focusSectionId?: string, focusFieldId?: string) {
     pendingFocusSectionRef.current = focusSectionId ?? "";
-    navigate({ search: buildConfigSettingsNavigationSearch(searchParams, groupId, pageId, focusSectionId) });
+    navigate({ search: buildConfigSettingsNavigationSearch(searchParams, groupId, pageId, focusSectionId, focusFieldId) });
   }
 
-  function focusSettingsSection(sectionId: string) {
-    pendingFocusSectionRef.current = sectionId;
-    window.requestAnimationFrame(() => {
-      const section = document.getElementById(`config-${sectionId}`);
-      if (!section || !isSectionVisible(sectionId)) {
-        // 消费掉这次交互意图：聚焦失败不残留 pending，避免陈旧值遮蔽后续导航。
-        pendingFocusSectionRef.current = "";
-        return;
+  /** 字段/分区聚焦前的分区 UI 预备：展开分区、高级层与目标路径的祖先嵌套层。 */
+  function prepareSectionUiStateForFocus(
+    current: ConfigSectionUiState | undefined,
+    sectionId: string,
+    fieldId: string,
+  ): ConfigSectionUiState {
+    const base = resolveConfigSectionUiStateOnSelect(current, defaultSectionUiState(sectionId));
+    const ancestors: Record<string, boolean> = {};
+    const tokens = fieldId.split(".").filter(Boolean);
+    // 祖先对象键是分区路径下的绝对子路径（如 ui.workbench_theme）：跳过分区根本身与叶子本身。
+    for (let index = 2; index < tokens.length; index += 1) {
+      ancestors[tokens.slice(0, index).join(".")] = true;
+    }
+    return {
+      ...base,
+      expanded: true,
+      advancedExpanded: true,
+      expandedPaths: { ...base.expandedPaths, ...ancestors },
+    };
+  }
+
+  /** 字段深链落地：滚动到目标行并挂 ~2s 瞬态高亮环。 */
+  function triggerFieldHighlight(path: string) {
+    window.clearTimeout(fieldHighlightTimerRef.current);
+    setFieldHighlight({ path });
+    fieldHighlightTimerRef.current = window.setTimeout(() => setFieldHighlight(null), 2000);
+  }
+
+  /** 一次性聚焦尝试：分区级滚到分区顶，字段级滚到目标 VSettingsRow 行。 */
+  function tryFocusSettingsTarget(sectionId: string, fieldId: string): boolean {
+    const section = document.getElementById(`config-${sectionId}`);
+    if (!section) {
+      return false;
+    }
+    if (fieldId) {
+      const row = document.querySelector<HTMLElement>(`[data-testid="row-${fieldId}"]`);
+      if (!row) {
+        return false;
       }
-      section.scrollIntoView({ behavior: "smooth", block: "start" });
-      section.focus({ preventScroll: true });
-      pendingFocusSectionRef.current = "";
-    });
+      row.scrollIntoView({ behavior: "smooth", block: "center" });
+      triggerFieldHighlight(fieldId);
+      return true;
+    }
+    section.scrollIntoView({ behavior: "smooth", block: "start" });
+    section.focus({ preventScroll: true });
+    return true;
   }
 
+  /**
+   * 意图模块的统一落地入口（搜索选中/命令面板/跨页跳转共用）。
+   * URL 只承载 section/page 导航状态；聚焦意图走意图模块（显式 URL 参数优先）。
+   */
+  function applySettingsFocusTarget(target: SettingsFocusTarget) {
+    const fieldId = (target.fieldId ?? "").trim();
+    let sectionId = (target.sectionId ?? "").trim();
+    let group = target.groupId ? settingsGroups.find((candidate) => candidate.id === target.groupId) : undefined;
+    if (!group && sectionId) {
+      for (const candidate of settingsGroups) {
+        const ownerPage = candidate.pages.find((item) => item.memberSectionIds.includes(sectionId));
+        if (ownerPage) {
+          group = candidate;
+          break;
+        }
+      }
+    }
+    if (!sectionId && fieldId) {
+      // 字段目标缺分区时按编辑器分区归属推导。
+      const owner = (workspace?.editorSections ?? []).find(
+        (section) => fieldId === section.path || fieldId.startsWith(`${section.path}.`),
+      );
+      sectionId = owner?.id ?? "";
+    }
+    const page = group?.pages.find((item) => item.id === target.pageId) ?? group?.pages[0];
+    if (group) {
+      setActiveGroupId(group.id);
+      setActivePageId(page?.id ?? "");
+    }
+    if (sectionId) {
+      setSectionUiState((current) => ({
+        ...current,
+        [sectionId]: fieldId
+          ? prepareSectionUiStateForFocus(current[sectionId], sectionId, fieldId)
+          : resolveConfigSectionUiStateOnSelect(current[sectionId], defaultSectionUiState(sectionId)),
+      }));
+      // 显式选择总是重新聚焦：清 dedup，允许同一目标重复落点。
+      lastFocusedSelectionRef.current = "";
+      setPendingIntentFocus({ sectionId, fieldId });
+    }
+    if (group) {
+      navigate({ search: buildConfigSettingsNavigationSearch(searchParams, group.id, page?.id ?? "") });
+    }
+  }
+
+  const applySettingsFocusTargetRef = useRef(applySettingsFocusTarget);
+  applySettingsFocusTargetRef.current = applySettingsFocusTarget;
+
+  // 已打开设置页的即时热切换：意图广播 → 落地（同时清掉暂存，避免下次挂载重复消费）。
+  useEffect(
+    () =>
+      subscribeSettingsFocus((target) => {
+        consumeSettingsFocusIntent();
+        applySettingsFocusTargetRef.current(target);
+      }),
+    [],
+  );
+
+  // 分区内容 ready 信号：落地执行器据此重放聚焦尝试。
+  useEffect(
+    () =>
+      onSettingsContentReady(() => {
+        setSettingsReadyToken((token) => token + 1);
+      }),
+    [],
+  );
+
+  useEffect(() => () => window.clearTimeout(fieldHighlightTimerRef.current), []);
+
+  // 落地执行器：意图/URL 聚焦目标等待内容 ready 后一次性滚动聚焦。
+  // ready 来源：意图模块脉冲（分区编辑器挂载/展开变化）+ 本 effect 依赖变化
+  // （工作区数据到达、页切换等）；DOM 仍缺失时挂 MutationObserver 事件驱动
+  // 等待（懒分区/特殊面板），替代旧的 60 帧 rAF 轮询。
   useEffect(() => {
-    const focusSectionId = pendingFocusSectionRef.current || requestedFocusSectionId;
+    const intentTarget = pendingIntentFocus;
+    const focusSectionId = intentTarget?.sectionId || pendingFocusSectionRef.current || requestedFocusSectionId;
     const focusDecision = resolveConfigSettingsFocus(
       lastFocusedSelectionRef.current,
       activeGroupId,
@@ -2976,67 +3138,147 @@ export function ConfigRoute() {
       lastFocusedSelectionRef.current = focusDecision.nextKey;
       return;
     }
-    if (!isSectionVisible(focusSectionId) || !focusDecision.shouldFocus) {
-      // URL 跨页 focus 等待目标页可见是合法状态；但 pending 不应残留，
-      // 否则它会以陈旧值遮蔽后续 URL 焦点参数。
-      pendingFocusSectionRef.current = "";
+    if (!isSectionVisible(focusSectionId)) {
+      // URL 跨页 focus 等待目标页可见是合法状态；URL pending 不残留（陈旧值遮蔽后续参数），
+      // 意图 pending 留存等可见后落地。
+      if (!intentTarget) {
+        pendingFocusSectionRef.current = "";
+      }
       return;
     }
-    // 懒加载 section 可能晚于首帧挂载（R2），单帧拿不到 DOM 时有界重试，
-    // 避免「跳转到设置项」静默失效；重试耗尽同样清理，不残留焦点意图。
-    let frame = 0;
-    let attempts = 0;
-    const focusWhenMounted = () => {
-      const section = document.getElementById(`config-${focusSectionId}`);
-      if (!section) {
-        if (attempts >= 60) {
-          lastFocusedSelectionRef.current = focusDecision.nextKey;
-          pendingFocusSectionRef.current = "";
-          return;
-        }
-        attempts += 1;
-        frame = window.requestAnimationFrame(focusWhenMounted);
-        return;
+    if (!focusDecision.shouldFocus) {
+      if (intentTarget) {
+        setPendingIntentFocus(null);
+      } else {
+        pendingFocusSectionRef.current = "";
       }
-      section.scrollIntoView({ behavior: "smooth", block: "start" });
-      section.focus({ preventScroll: true });
+      return;
+    }
+    const fieldTarget = intentTarget
+      ? (intentTarget.sectionId === focusSectionId ? intentTarget.fieldId : "")
+      : (requestedFocusSectionId === focusSectionId ? requestedFocusFieldId : "");
+    if (tryFocusSettingsTarget(focusSectionId, fieldTarget)) {
       lastFocusedSelectionRef.current = focusDecision.nextKey;
       pendingFocusSectionRef.current = "";
-    };
-    frame = window.requestAnimationFrame(focusWhenMounted);
-    return () => window.cancelAnimationFrame(frame);
-  }, [activeGroupId, activePageId, requestedFocusSectionId, activePage?.id]);
+      if (intentTarget) {
+        setPendingIntentFocus(null);
+      }
+      return;
+    }
+    if (intentTarget || pendingFocusSectionRef.current) {
+      // 内容未 ready：挂 MutationObserver 等待目标节点出现（事件驱动，不轮询）。
+      const viewport = contentViewportRef.current;
+      if (!viewport || typeof MutationObserver === "undefined") {
+        return;
+      }
+      const observer = new MutationObserver(() => {
+        if (tryFocusSettingsTarget(focusSectionId, fieldTarget)) {
+          observer.disconnect();
+          lastFocusedSelectionRef.current = focusDecision.nextKey;
+          pendingFocusSectionRef.current = "";
+          setPendingIntentFocus(null);
+        }
+      });
+      observer.observe(viewport, { childList: true, subtree: true });
+      return () => observer.disconnect();
+    }
+  }, [
+    pendingIntentFocus,
+    settingsReadyToken,
+    activeGroupId,
+    activePageId,
+    requestedFocusSectionId,
+    activePage?.id,
+    showingSettingsIndex,
+    workspace,
+    sectionUiState,
+  ]);
+
+  // 挂载入口裁决（每次挂载一次）：显式 URL > 意图 > 上次停留 > 默认。
+  // 默认分支不做事 = 保持现状（首次进入落在全部设置总览）。
+  useEffect(() => {
+    if (lastLocationRestoreAttemptedRef.current || !settingsGroups.length) {
+      return;
+    }
+    lastLocationRestoreAttemptedRef.current = true;
+    if (requestedSectionId || requestedPageId || requestedFocusSectionId || requestedFocusFieldId) {
+      // 显式 URL 入口：由既有 URL 流程处理，意图留存到下一次无参进入。
+      return;
+    }
+    const entry = resolveSettingsEntry({
+      urlGroupId: requestedSectionId,
+      urlPageId: requestedPageId,
+      urlSectionId: requestedFocusSectionId,
+      urlFieldId: requestedFocusFieldId,
+    });
+    if (entry.source === "intent") {
+      if (entry.groupId || entry.pageId || entry.sectionId || entry.fieldId) {
+        applySettingsFocusTarget({
+          groupId: entry.groupId,
+          pageId: entry.pageId,
+          sectionId: entry.sectionId,
+          fieldId: entry.fieldId,
+        });
+      }
+      return;
+    }
+    if (entry.source === "last" && entry.groupId) {
+      const group = settingsGroups.find((candidate) => candidate.id === entry.groupId);
+      if (!group) {
+        return;
+      }
+      const page = group.pages.find((candidate) => candidate.id === entry.pageId) ?? group.pages[0];
+      setActiveGroupId(group.id);
+      setActivePageId(page?.id ?? "");
+      // 与手点分组一致：落回该组的设置索引（?section=组，无 page/focus/field）。
+      const params = new URLSearchParams(searchParams);
+      params.set("section", group.id);
+      params.delete("page");
+      params.delete("focus");
+      params.delete("field");
+      navigate({ search: params.toString() }, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsGroups, requestedSectionId, requestedPageId, requestedFocusSectionId, requestedFocusFieldId]);
+
+  // 「上次停留分区」记忆：组/页确定后写入，下一次打开设置页默认停在该组。
+  useEffect(() => {
+    if (!activeGroupId || !activePageId) {
+      return;
+    }
+    writeLastSettingsLocation({ groupId: activeGroupId, pageId: activePageId });
+  }, [activeGroupId, activePageId]);
 
   function handleSelectGroup(groupId: ConfigSettingsGroupId) {
     const group = settingsGroups.find((candidate) => candidate.id === groupId);
     const pageId = group?.pages[0]?.id ?? "";
-    setActiveGroupId(groupId);
-    setActivePageId(pageId);
-    showSettingsIndex(groupId);
-    contentViewportRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    handleNavigateSettings(groupId, pageId);
   }
 
   function showSettingsIndex(groupId?: ConfigSettingsGroupId) {
     const params = new URLSearchParams(searchParams);
-    params.delete("page"); params.delete("focus");
+    params.delete("page"); params.delete("focus"); params.delete("field");
     if (groupId) params.set("section", groupId);
     else params.delete("section");
     pendingFocusSectionRef.current = "";
+    setPendingIntentFocus(null);
     navigate({ search: params.toString() });
   }
 
-  function handleNavigateSettings(groupId: ConfigSettingsGroupId, pageId: string, sectionId?: string) {
+  function handleNavigateSettings(groupId: ConfigSettingsGroupId, pageId: string, sectionId?: string, fieldId?: string) {
     setActiveGroupId(groupId);
     setActivePageId(pageId);
-    if (sectionId) {
-      setSectionUiState((current) => ({
-        ...current,
-        [sectionId]: resolveConfigSectionUiStateOnSelect(current[sectionId], defaultSectionUiState(sectionId)),
-      }));
-      focusSettingsSection(sectionId);
-    }
-    navigateSettingsSelection(groupId, pageId, sectionId);
     contentViewportRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    if (groupId === "avatar-pet" && sectionId === "pet") {
+      navigateSettingsSelection(groupId, pageId, sectionId);
+      return;
+    }
+    if (sectionId || fieldId) {
+      // 搜索选中等显式落点：经意图模块统一落地（分区/字段聚焦 + 瞬态高亮）。
+      applySettingsFocusTarget({ groupId, pageId, sectionId, fieldId });
+      return;
+    }
+    navigateSettingsSelection(groupId, pageId);
   }
 
   function handleSelectPage(pageId: string) {
@@ -3999,6 +4241,7 @@ export function ConfigRoute() {
           <>
             <VButton
               type="button"
+              variant="primary"
               className={styles.primaryButton}
               isDisabled={!canApplyConfigWorkspace || Boolean(busyAction)}
               onClick={() => {
@@ -4008,7 +4251,7 @@ export function ConfigRoute() {
             >
               {leaveGuardSaveLabel}
             </VButton>
-            <VButton type="button" className={styles.dangerButton} isDisabled={Boolean(busyAction)} onClick={handleDiscardAndLeave}>
+            <VButton type="button" variant="danger" className={styles.dangerButton} isDisabled={Boolean(busyAction)} onClick={handleDiscardAndLeave}>
               {copy.leaveGuardDiscard}
             </VButton>
             <VButton type="button" className={styles.actionButton} isDisabled={Boolean(busyAction)} onClick={handleCancelLeave}>
@@ -4122,7 +4365,7 @@ export function ConfigRoute() {
               </VButton>
           </div>
         }
-        toolbar={(
+        toolbar={isSectionVisible("overview") || (!showingSettingsIndex && !requestedFocusSectionId && (activeGroup?.pages.length ?? 0) > 1) ? (
           <div className={styles.configToolbar}>
             {isSectionVisible("overview") ? <VStatusStrip
               className={styles.configStatusMeta}
@@ -4143,9 +4386,6 @@ export function ConfigRoute() {
                 },
               ]}
             /> : null}
-            {!showingSettingsIndex ? <VButton variant="ghost" onPress={() => showSettingsIndex(activeGroup?.id)}>
-              {currentLanguage === "zh" ? "返回设置列表" : "Back to settings"}
-            </VButton> : null}
             {!showingSettingsIndex && !requestedFocusSectionId ? <ConfigSettingsPageTabs
               language={currentLanguage}
               group={activeGroup}
@@ -4153,7 +4393,7 @@ export function ConfigRoute() {
               onSelectPage={handleSelectPage}
             /> : null}
           </div>
-        )}
+        ) : undefined}
       >
         <div ref={contentViewportRef} className={styles.pageViewport} data-vui-region="config-settings-body">
 
@@ -4161,6 +4401,13 @@ export function ConfigRoute() {
           groups={requestedSectionId ? settingsGroups.filter((group) => group.id === activeGroup?.id) : settingsGroups}
           sections={workspaceSections} language={currentLanguage} onNavigate={handleNavigateSettings}
         /> : null}
+
+        {!showingSettingsIndex && activeGroup?.id === "avatar-pet"
+          && (!requestedFocusSectionId || requestedFocusSectionId === "pet") ? (
+          <VSettingsGroupCard>
+            <ConfigDesktopPetSettings language={currentLanguage} />
+          </VSettingsGroupCard>
+        ) : null}
 
         {notice.text ? (
           <div
@@ -4506,7 +4753,8 @@ export function ConfigRoute() {
         ) : null}
 
         {isSectionVisible("shortcuts") ? (
-          <VSection id="config-shortcuts" tabIndex={-1} title={copy.shortcutsTitle}>
+          <VSection id="config-shortcuts" tabIndex={-1} title={copy.shortcutsTitle}
+            className={styles.sectionSurface} headerClassName={styles.sectionHeader}>
             <ConfigShortcutsPanel lang={currentLanguage} copy={copy} />
           </VSection>
         ) : null}
@@ -4545,6 +4793,7 @@ export function ConfigRoute() {
             immediateFieldStatus={immediateFieldStatus}
             onAvatarImageUpload={handleAvatarImageUpload}
             onThemeBackgroundImageUpload={handleThemeBackgroundImageUpload}
+            highlightFieldPath={fieldHighlight?.path ?? ""}
           />
         ))}
 

@@ -60,23 +60,28 @@ describe("composer prompt suggestion interaction", () => {
     vi.unstubAllGlobals();
   });
 
+  let queryClient: QueryClient | null = null;
+
   async function renderComposer(options: {
     composerValue: string;
     composerActionMode?: "send" | "stop";
     promptSuggestionEnabled?: boolean;
     onComposerChange: (value: string) => void;
   }) {
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
-    });
-    queryClient.setQueryData(queryKeys.configPublic(), { language: "zh" });
-    queryClient.setQueryData(["i18n", "dictionary-domains", "core,chat"], dictionary);
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    root = createRoot(container);
+    if (!root || !queryClient || !container) {
+      queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+      });
+      queryClient.setQueryData(queryKeys.configPublic(), { language: "zh" });
+      queryClient.setQueryData(["i18n", "dictionary-domains", "core,chat"], dictionary);
+      container = document.createElement("div");
+      document.body.appendChild(container);
+      root = createRoot(container);
+    }
+    const activeQueryClient = queryClient;
     await act(async () => {
       root?.render(
-        <QueryClientProvider client={queryClient}>
+        <QueryClientProvider client={activeQueryClient}>
           <ConversationView
             sessionId="session-1"
             title="Session"
@@ -165,5 +170,62 @@ describe("composer prompt suggestion interaction", () => {
     });
     const calls = fetchMock.mock.calls.filter(([input]) => String(input).includes("/prompt-suggestion"));
     expect(calls).toHaveLength(1);
+  });
+
+  it("asks again when typing interrupts a suggestion that never appeared", async () => {
+    let resolveSuggestion: ((response: Response) => void) | null = null;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+      if (url.includes("/prompt-suggestion")) {
+        return new Promise<Response>((resolve) => {
+          resolveSuggestion = resolve;
+        });
+      }
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    seedControlTokenForTests();
+    const onComposerChange = vi.fn();
+
+    await renderComposer({ composerValue: "", onComposerChange });
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/prompt-suggestion"))).toHaveLength(1);
+
+    await renderComposer({ composerValue: "先写一点", onComposerChange });
+    await act(async () => {
+      resolveSuggestion?.(new Response(
+        JSON.stringify({ sessionId: "session-1", turnId: "turn-1", suggestion: "太晚了", reason: "ok" }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(container?.querySelector("[data-composer-prompt-suggestion]")).toBeNull();
+
+    await renderComposer({ composerValue: "", onComposerChange });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/prompt-suggestion"))).toHaveLength(2);
+  });
+
+  it("does not ask again after the user types over a visible suggestion", async () => {
+    const fetchMock = fetchRoutes("修复构建错误");
+    vi.stubGlobal("fetch", fetchMock);
+    seedControlTokenForTests();
+    const onComposerChange = vi.fn();
+
+    await renderComposer({ composerValue: "", onComposerChange });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(container?.querySelector("[data-composer-prompt-suggestion]")).toBeTruthy();
+    const callsAfterShow = fetchMock.mock.calls.filter(([input]) => String(input).includes("/prompt-suggestion")).length;
+
+    await renderComposer({ composerValue: "已经在写了", onComposerChange });
+    await renderComposer({ composerValue: "", onComposerChange });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/prompt-suggestion"))).toHaveLength(callsAfterShow);
+    expect(container?.querySelector("[data-composer-prompt-suggestion]")).toBeNull();
   });
 });

@@ -127,7 +127,7 @@ type ConfigSettingsSidebarProps = {
   groups: ConfigSettingsGroup[];
   activeGroupId: string;
   onSelectGroup: (groupId: ConfigSettingsGroupId) => void;
-  onNavigate?: (groupId: ConfigSettingsGroupId, pageId: string, sectionId?: string) => void;
+  onNavigate?: (groupId: ConfigSettingsGroupId, pageId: string, sectionId?: string, fieldId?: string) => void;
   searchDocuments?: ConfigSettingsSearchDocument[];
   headerAction?: ReactNode;
   onShowAll?: () => void;
@@ -156,7 +156,7 @@ export function ConfigSettingsSidebar({
 
   function selectHit(hit: ConfigSettingsSearchHit) {
     if (onNavigate) {
-      onNavigate(hit.groupId, hit.pageId, hit.sectionId);
+      onNavigate(hit.groupId, hit.pageId, hit.sectionId, hit.fieldId);
     } else {
       onSelectGroup(hit.groupId);
     }
@@ -166,7 +166,6 @@ export function ConfigSettingsSidebar({
     <aside className={styles.sidebar} data-vui-region="config-settings-nav">
       <VPanelHeader
         className={styles.sidebarHeader}
-        eyebrow={language === "zh" ? "设置" : "Settings"}
         title={title}
         headingLevel={2}
         tooltip={sidebarHelp || undefined}
@@ -188,13 +187,16 @@ export function ConfigSettingsSidebar({
           <nav className={styles.searchResults} aria-label={language === "zh" ? "搜索结果" : "Search results"}>
             {searchHits.map((hit) => (
               <VButton
-                key={`${hit.groupId}:${hit.pageId}:${hit.sectionId ?? ""}:${hit.title}`}
+                key={`${hit.groupId}:${hit.pageId}:${hit.sectionId ?? ""}:${hit.fieldId ?? ""}:${hit.title}`}
                 className={styles.searchHit}
                 contentLayout="plain"
                 variant="ghost"
                 onPress={() => selectHit(hit)}
               >
                 <span>{hit.title}</span>
+                {hit.valueSummary ? (
+                  <small data-testid="config-search-hit-value">{hit.valueSummary}</small>
+                ) : null}
                 <small>{hit.detail}</small>
               </VButton>
             ))}
@@ -223,7 +225,7 @@ export function ConfigSettingsSidebar({
             className={group.id === activeGroupId ? `${styles.groupButton} ${styles.groupButtonActive}` : styles.groupButton}
             contentLayout="plain"
             variant={group.id === activeGroupId ? "primary" : "ghost"}
-            tooltip={group.summary}
+            title={group.summary}
             aria-pressed={group.id === activeGroupId}
             onPress={() => onSelectGroup(group.id)}
           >
@@ -256,7 +258,7 @@ export function ConfigSettingsPageTabs({
           key={page.id}
           className={page.id === activePageId ? `${styles.pageButton} ${styles.pageButtonActive}` : styles.pageButton}
           variant={page.id === activePageId ? "primary" : "ghost"}
-          tooltip={page.summary}
+          title={page.summary}
           aria-current={page.id === activePageId ? "page" : undefined}
           onPress={() => onSelectPage(page.id)}
         >

@@ -86,8 +86,10 @@ describe("route style display contract", () => {
     const configRouteSource = readFileSync(new URL("./ConfigRoute.tsx", import.meta.url), "utf-8");
     expect(configRouteSource).toContain("`${styles.treeGrid} ${styles.configAdvancedGrid}`");
     // Settings-align wave 1: plain fields render as VSettingsRow; the composed
-    // grid-template card styles remain attached to the image/background cards.
-    expect(configRouteSource).toContain("`${styles.treeFieldCard} ${styles.treeFieldCardView} ${styles.themeBackgroundImageCard}`");
+    // grid-template card styles remain attached to the image cards. Wave 2's
+    // layout unification made the background card full-width single-column
+    // (no treeFieldHead/treeFieldValue pair), so it drops treeFieldCardView.
+    expect(configRouteSource).toContain("`${styles.treeFieldCard} ${styles.themeBackgroundImageCard}`");
     expect(configRouteSource).toContain("`${styles.treeFieldCard} ${styles.treeFieldCardView} ${styles.avatarImageCard}`");
 
     expect(directSessionIndexItemSource).toContain("styles.sessionItem,");

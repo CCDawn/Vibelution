@@ -8,8 +8,9 @@ export type ComposerPromptSuggestionRequestInput = {
 };
 
 /**
- * Mirrors the Claude Code lifecycle: exactly one suggestion attempt per turn.
- * `issued` is reset by the hook when a new turn starts (busy goes true).
+ * Gate for starting a suggestion request. `issued` means one is in flight or
+ * a suggestion is already showing; the hook clears it when that attempt never
+ * appears. A new turn (busy) also resets it.
  */
 export function shouldRequestComposerPromptSuggestion(
   input: ComposerPromptSuggestionRequestInput,
