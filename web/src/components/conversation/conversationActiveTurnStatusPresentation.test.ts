@@ -36,15 +36,25 @@ describe("conversationActiveTurnStatusPresentation", () => {
     expect(activeTurnElapsedSeconds("bad", Date.now())).toBeNull();
   });
 
-  it("maps prepare→thinking stage bar progression", () => {
+  it("maps prepare→thinking→respond stage bar progression", () => {
     expect(activeTurnStageBarPhase("user_submit")).toBe("sent");
     expect(activeTurnStageBarPhase("agent_prepare")).toBe("prepare");
     expect(activeTurnStageBarPhase("model_request")).toBe("request");
     expect(activeTurnStageBarPhase("model_thinking")).toBe("thinking");
     const bar = buildActiveTurnStageBarItems("model_thinking", "zh");
-    expect(bar.map((item) => item.label)).toEqual(["发送", "准备", "请求", "思考"]);
+    expect(bar.map((item) => item.label)).toEqual(["发送", "准备", "请求", "思考", "回答"]);
     expect(bar.find((item) => item.phase === "thinking")?.current).toBe(true);
     expect(bar.filter((item) => item.reached)).toHaveLength(4);
+  });
+
+  it("maps the responding answer stage onto the respond phase", () => {
+    expect(activeTurnStageBarPhase("responding")).toBe("respond");
+    expect(activeTurnStageBarPhase("assistant_response")).toBe("respond");
+    expect(activeTurnStageLabel("responding", "zh")).toBe("生成回答");
+    expect(activeTurnStageLabel("responding", "en")).toBe("Generating");
+    const bar = buildActiveTurnStageBarItems("responding", "zh");
+    expect(bar.find((item) => item.phase === "respond")?.current).toBe(true);
+    expect(bar.filter((item) => item.reached)).toHaveLength(5);
   });
 
   it("falls back to metadata.processStage then pending/running defaults", () => {

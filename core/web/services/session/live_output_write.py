@@ -259,6 +259,7 @@ def _set_session_live_output(
     checkpoint_snapshot: SessionLiveOutputState | None = None
     delete_checkpoint = False
     feedback_events_changed = feedback_events is not _UNSET
+    first_answer_delta = False
     # Live progress, assistant text, and tool updates already have a bounded
     # assistant_delta projection. Rebuilding the full session detail for each
     # of those updates blocks the Agent worker before the next LLM invocation.
@@ -300,6 +301,22 @@ def _set_session_live_output(
             thought_delta, replace_thought = s._live_output_delta(previous_thought, state.thought)
         if content is not _UNSET:
             content_delta, replace_content = s._live_output_delta(previous_content, state.content)
+        # First answer delta of the turn: surface the user-visible `responding`
+        # stage in the UI channel (defect ⑦b — answer streaming previously kept
+        # the stale thinking/working stage). Only the answer-streaming flush
+        # triggers: the response batcher and the non-batcher stream proxy stamp
+        # `assistant_response`, while status copy (retry/failed) carries its own
+        # stage and bare content writes (commit bookkeeping, diagnostics) carry
+        # none. The transport `stage` value itself is never rewritten: live
+        # output stage semantics are consumed by completion reconciliation
+        # (stream_capture) and diagnostics.
+        first_answer_delta = bool(
+            content is not _UNSET
+            and stage is not _UNSET
+            and str(stage or "").strip().lower() == "assistant_response"
+            and str(state.content or "").strip()
+            and not str(previous_content or "").strip()
+        )
         if mental_snapshot is not _UNSET:
             state.mental_snapshot = s._normalize_mental_snapshot(mental_snapshot)
         if tool_calls is not _UNSET:
@@ -388,6 +405,18 @@ def _set_session_live_output(
             s._delete_session_live_output_checkpoint(session_id)
         elif checkpoint_snapshot is not None:
             s._write_session_live_output_checkpoint(session_id, checkpoint_snapshot)
+    # The responding status event is emitted after the live-outputs lock is
+    # released: the progress helper re-enters the state writes (feedback event)
+    # and must not run under this function's lock scope. `set_stage=False`
+    # keeps the transport stage semantics (assistant_response) intact while the
+    # visible status row moves the projection onto `responding`.
+    if first_answer_delta and output_turn_id:
+        s._set_session_turn_progress_live_output(
+            session_id,
+            "model_responding",
+            turn_id=output_turn_id,
+            set_stage=False,
+        )
     if publish_full_snapshot:
         s._publish_session_detail_snapshot(session_id)
 
@@ -459,11 +488,18 @@ _SESSION_USER_VISIBLE_PROGRESS_STAGES = {
     "followup_prepare": "working",
     "model_request": "thinking",
     "model_thinking": "thinking",
+    "model_responding": "responding",
     "queued": "queued",
 }
 
 
-def _set_session_turn_progress_live_output(session_id: str, stage: str, *, turn_id: str = "") -> None:
+def _set_session_turn_progress_live_output(
+    session_id: str,
+    stage: str,
+    *,
+    turn_id: str = "",
+    set_stage: bool = True,
+) -> None:
     s = _service()
     language = s.get_web_language()
     stage_key = str(stage or "").strip().lower()
@@ -478,6 +514,11 @@ def _set_session_turn_progress_live_output(session_id: str, stage: str, *, turn_
             language,
             zh="等待模型响应...",
             en="Waiting for the model...",
+        ),
+        "responding": s.text_for(
+            language,
+            zh="正在生成回答...",
+            en="Generating the answer...",
         ),
     }.get(
         visible_stage,
@@ -505,7 +546,9 @@ def _set_session_turn_progress_live_output(session_id: str, stage: str, *, turn_
     s._set_session_live_output(
         session_id,
         turn_id=turn_id,
-        stage=visible_stage,
+        # `set_stage=False` appends the visible status row without rewriting the
+        # transport stage (used by the first-answer-delta responding emit).
+        stage=visible_stage if set_stage else _UNSET,
         feedback_events=feedback_events,
     )
     # Cosmetic progress is already checkpointed by the live-output channel.  Keep

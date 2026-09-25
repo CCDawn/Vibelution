@@ -7273,6 +7273,87 @@ def test_capture_session_ui_stream_surfaces_live_thought_as_model_thinking(tmp_p
     assert any(item["phase"] == "llm_status_reasoning" for item in lifecycle_events)
 
 
+def test_capture_session_ui_stream_marks_first_answer_delta_as_responding(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    lifecycle_events: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_turn_lifecycle_event",
+        lambda session_id, phase, **kwargs: lifecycle_events.append(
+            {"session_id": session_id, "phase": phase, **kwargs}
+        ),
+    )
+    published: list[str] = []
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda session_id: published.append(session_id))
+    stub_ui = SimpleNamespace(
+        stream_thought=lambda *args, **kwargs: None,
+        clear_thought_stream=lambda *args, **kwargs: None,
+        stream_response=lambda *args, **kwargs: None,
+        clear_response_stream=lambda *args, **kwargs: None,
+        set_pet_mental_state=lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("core.ui.get_ui", lambda: stub_ui)
+
+    capture = session_service.SessionTurnCapture(session_id="session-live-answer", turn_id="turn-answer")
+    with session_service._capture_session_ui_stream("session-live-answer", capture):
+        # One flush-sized answer delta (>= 24 chars): the first answer content
+        # the live channel carries must move the visible stage to responding.
+        stub_ui.stream_response("这是首段正文答案，长度超过响应批处理的阈值，立即落盘。", done=False)
+
+    live_state = session_service._snapshot_session_live_output("session-live-answer")
+    assert live_state is not None
+    # Transport stage semantics stay untouched; the visible projection moves to
+    # responding through the status event below.
+    assert live_state.stage == "assistant_response"
+    assert live_state.content
+    assert any(
+        item.get("kind") == "status"
+        and item.get("name") == "responding"
+        and "正在生成回答" in str(item.get("resultPreview") or "")
+        for item in live_state.feedback_events
+    )
+    assert any(item["phase"] == "ui_progress_model_responding" for item in lifecycle_events)
+
+
+def test_capture_session_ui_stream_keeps_responding_stage_across_answer_flushes(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_turn_lifecycle_event",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+    stub_ui = SimpleNamespace(
+        stream_thought=lambda *args, **kwargs: None,
+        clear_thought_stream=lambda *args, **kwargs: None,
+        stream_response=lambda *args, **kwargs: None,
+        clear_response_stream=lambda *args, **kwargs: None,
+        set_pet_mental_state=lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("core.ui.get_ui", lambda: stub_ui)
+
+    capture = session_service.SessionTurnCapture(session_id="session-live-answer-2", turn_id="turn-answer-2")
+    with session_service._capture_session_ui_stream("session-live-answer-2", capture):
+        stub_ui.stream_response("第一段正文答案，长度超过响应批处理阈值，立即落盘。", done=False)
+        # Later flushes restamp the legacy transport stage; the responding
+        # status row must survive exactly once instead of degrading or
+        # stacking a new row per flush.
+        stub_ui.stream_response(
+            "第一段正文答案，长度超过响应批处理阈值，立即落盘。"
+            "第二段追加的正文内容同样超过批处理阈值长度，再次立即落盘。",
+            done=False,
+        )
+
+    live_state = session_service._snapshot_session_live_output("session-live-answer-2")
+    assert live_state is not None
+    assert live_state.stage == "assistant_response"
+    responding_events = [
+        item for item in live_state.feedback_events
+        if item.get("kind") == "status" and item.get("name") == "responding"
+    ]
+    assert len(responding_events) == 1
+
+
 def test_session_continuation_marks_server_side_model_wait_as_thinking(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
