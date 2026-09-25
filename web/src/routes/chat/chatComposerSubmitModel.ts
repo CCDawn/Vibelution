@@ -134,6 +134,40 @@ export function buildKnowledgeItemReferencePayload(
   };
 }
 
+/** Chip title default: the quote's first 60 characters on a single line. */
+export const MESSAGE_REFERENCE_TITLE_MAX_CHARS = 60;
+
+export function messageReferenceTitle(quote: string): string {
+  const singleLine = String(quote ?? "").replace(/\s+/g, " ").trim();
+  return singleLine.slice(0, MESSAGE_REFERENCE_TITLE_MAX_CHARS);
+}
+
+/**
+ * Structured quote of one timeline message (kind "message"). The backend
+ * validates message existence, sanitizes fences, and caps the quote at 12000
+ * characters; the frontend only guarantees identity and a single-line title.
+ */
+export function buildMessageReferencePayload(input: {
+  sourceSessionId: string;
+  sourceMessageId: string;
+  quote: string;
+  title?: string;
+}): SessionReferenceAttachment {
+  const sourceSessionId = String(input.sourceSessionId || "").trim();
+  const sourceMessageId = String(input.sourceMessageId || "").trim();
+  const quote = String(input.quote || "").replace(/\r\n/g, "\n").trim();
+  const title = String(input.title || "").trim() || messageReferenceTitle(quote);
+  return {
+    referenceId: `message:${sourceMessageId}`,
+    kind: "message",
+    sourceSessionId,
+    sourceMessageId,
+    quote,
+    title,
+    createdAt: new Date().toISOString(),
+  };
+}
+
 export function startSessionReferenceDrag(
   event: DragEvent<HTMLElement>,
   reference: SessionReferenceAttachment,

@@ -21,6 +21,7 @@ import {
   LoaderCircle,
   MessageSquareText,
   Pencil,
+  Quote,
   RefreshCw,
   Square,
   X,
@@ -120,6 +121,7 @@ import {
   assistantTurnIsStreaming,
   hasTerminalCanonicalTurnOutcome,
 } from "../../routes/chatTurnProtocol";
+import { buildMessageReferencePayload } from "../../routes/chat/chatComposerSubmitModel";
 import { deriveLatestTodoChecklist } from "./conversationTodoChecklistModel";
 import { ConversationTodoChecklist } from "./ConversationTodoChecklist";
 import {
@@ -677,6 +679,7 @@ export const ConversationView = React.memo(function ConversationView({
   const [selectionQuoteMenu, setSelectionQuoteMenu] = useState<{
     text: string;
     position: ConversationSelectionMenuPosition;
+    sourceMessageId: string;
   } | null>(null);
   // Selection quote lifecycle: document-level selectionchange + mouseup/keyup,
   // rAF-coalesced. The menu opens only for a non-empty selection fully inside
@@ -706,6 +709,7 @@ export const ConversationView = React.memo(function ConversationView({
       }
       setSelectionQuoteMenu({
         text: snapshot.text,
+        sourceMessageId: snapshot.sourceMessageId,
         position: resolveSelectionQuoteMenuPosition(
           snapshot.rect,
           timelineArea.getBoundingClientRect(),
@@ -779,6 +783,24 @@ export const ConversationView = React.memo(function ConversationView({
     void copyTextToClipboard(selectionQuoteMenu.text);
     setSelectionQuoteMenu(null);
   }, [selectionQuoteMenu]);
+  /**
+   * Structured quote: attaches the selection as a `message` reference chip
+   * (contract: referenceId `message:{sourceMessageId}` + source session/
+   * message ids + quote + single-line title). Only offered when the selection
+   * anchor lives inside a message row.
+   */
+  const handleSelectionReferenceToComposer = useCallback(() => {
+    if (!selectionQuoteMenu?.sourceMessageId || !onAddComposerReference) {
+      return;
+    }
+    onAddComposerReference(buildMessageReferencePayload({
+      sourceSessionId: sessionId,
+      sourceMessageId: selectionQuoteMenu.sourceMessageId,
+      quote: selectionQuoteMenu.text,
+    }));
+    setSelectionQuoteMenu(null);
+    selectionQuoteDismissedTextRef.current = null;
+  }, [onAddComposerReference, selectionQuoteMenu, sessionId]);
   const resolvedActionMode = resolveComposerActionMode(composerActionMode);
   const composerPromptSuggestion = useComposerPromptSuggestion(
     {
@@ -1312,6 +1334,9 @@ export const ConversationView = React.memo(function ConversationView({
                   })}
                 className={styles.timelineVirtualRow}
                 data-conversation-virtual-row={rowKey}
+                // Kept in sync with CONVERSATION_SELECTION_MESSAGE_ATTRIBUTE
+                // (selection-quote reference wiring is covered by its tests).
+                data-conversation-message-id={message.id}
               >
               <ConversationTurnRow
                 message={message}
@@ -5429,8 +5454,12 @@ export const ConversationView = React.memo(function ConversationView({
         <ConversationSelectionQuoteMenu
           position={selectionQuoteMenu.position}
           quoteLabel={lang === "zh" ? "引用到输入框" : "Quote to composer"}
+          referenceLabel={lang === "zh" ? "作为引用" : "As reference"}
           copyLabel={lang === "zh" ? "复制" : "Copy"}
           onQuote={handleSelectionQuoteToComposer}
+          onReference={selectionQuoteMenu.sourceMessageId && onAddComposerReference
+            ? handleSelectionReferenceToComposer
+            : undefined}
           onCopy={handleSelectionCopy}
         />
       ) : null}
@@ -5593,11 +5622,19 @@ export const ConversationView = React.memo(function ConversationView({
                     ? t("composerReferenceKindKnowledgeItem")
                     : kind === "file"
                       ? t("composerReferenceKindFile")
-                      : t("composerReferenceKindSession");
+                      : kind === "message"
+                        ? t("composerReferenceKindMessage")
+                        : t("composerReferenceKindSession");
                 return (
                   <div key={`${kind}:${referenceId}`} className={styles.composerReferenceChip} role="listitem">
                     <span className={styles.composerReferenceIcon} aria-hidden="true">
-                      {kind === "knowledge_base" || kind === "knowledge_item" ? <BookOpen size={13} /> : kind === "file" ? <FileText size={13} /> : <Link2 size={13} />}
+                      {kind === "knowledge_base" || kind === "knowledge_item"
+                        ? <BookOpen size={13} />
+                        : kind === "file"
+                          ? <FileText size={13} />
+                          : kind === "message"
+                            ? <Quote size={13} />
+                            : <Link2 size={13} />}
                     </span>
                     <span className={styles.composerReferenceCopy}>
                       <strong title={title}>{title}</strong>
