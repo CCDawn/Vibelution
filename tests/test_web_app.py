@@ -7489,6 +7489,58 @@ def test_capture_session_ui_stream_keeps_responding_stage_across_answer_flushes(
     assert len(responding_events) == 1
 
 
+def test_capture_session_ui_stream_emits_responding_mid_stream_via_progressive_deltas(tmp_path, monkeypatch):
+    """⑦b 真实写入路径回归：正文以渐进小 delta 走 text batcher（delta 快速投影），
+    首次过批阈值即发射 responding——必须发生在流中（终态回调之前），且每 turn
+    恰好一次。真实链路上 interim_text_delta 转发修复后，这也是 UI 可观测的时序。"""
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    lifecycle_events: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_turn_lifecycle_event",
+        lambda session_id, phase, **kwargs: lifecycle_events.append(
+            {"session_id": session_id, "phase": phase, **kwargs}
+        ),
+    )
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+    stub_ui = SimpleNamespace(
+        stream_thought=lambda *args, **kwargs: None,
+        clear_thought_stream=lambda *args, **kwargs: None,
+        stream_response=lambda *args, **kwargs: None,
+        clear_response_stream=lambda *args, **kwargs: None,
+        set_pet_mental_state=lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("core.ui.get_ui", lambda: stub_ui)
+
+    capture = session_service.SessionTurnCapture(session_id="session-live-answer-3", turn_id="turn-answer-3")
+
+    def responding_rows():
+        live_state = session_service._snapshot_session_live_output("session-live-answer-3")
+        if live_state is None:
+            return []
+        return [
+            item for item in live_state.feedback_events
+            if item.get("kind") == "status" and item.get("name") == "responding"
+        ]
+
+    with session_service._capture_session_ui_stream("session-live-answer-3", capture):
+        # 阈值以下的 delta 只进 batcher 缓冲，不发布、不触发 responding。
+        stub_ui.stream_response("短", done=False)
+        assert responding_rows() == []
+        # 累计跨过批阈值：首次 content 落盘必须在此刻（流中）发出 responding，
+        # 而不是等到终态回调。
+        stub_ui.stream_response("第一段正文内容足够长，直接跨过批处理刷新的长度阈值边界。", done=False)
+        assert len(responding_rows()) == 1
+        # 后续 flush 与终态权威正文（done=True 替换语义）都不得叠加新 responding。
+        stub_ui.stream_response("第二段正文内容同样足够长，再次跨过批处理刷新的长度阈值边界值。", done=False)
+        assert len(responding_rows()) == 1
+        stub_ui.stream_response("最终完整答案。", done=True)
+        assert len(responding_rows()) == 1
+
+    assert len(responding_rows()) == 1
+    assert any(item["phase"] == "ui_progress_model_responding" for item in lifecycle_events)
+
+
 def test_session_continuation_marks_server_side_model_wait_as_thinking(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)

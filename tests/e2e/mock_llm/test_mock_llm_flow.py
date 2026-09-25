@@ -407,10 +407,9 @@ def test_tool_calls_turn_closes_without_crash(page: Any, e2e_instance: Any, mock
 
 
 def test_normal_stream_stage_and_markdown(page: Any, e2e_instance: Any, mock_llm: Any, chat_agent: dict) -> None:
-    """发消息 → stage 推进（thinking）→ markdown 正文上时间线 → turn 收口。
+    """发消息 → stage 推进（thinking/responding）→ markdown 正文上时间线 → turn 收口。
 
-    ⑦b responding 阶段未纳入闸门的原因见断言处注释（2026-09-26 实测在真实
-    aimock 流式路径上不可观测，与修复 c50d6b8a3 口径不符，已上报待产品收口）。
+    ⑦b responding 阶段已收紧为硬闸门（2026-09-26 钉死根因并修复，见断言处注释）。
     """
     open_agent_chat(page, e2e_instance, chat_agent["sessionId"])
     send_message(page, "E2E-MOCK-MARKDOWN-V1 请给我一份 markdown 样例")
@@ -434,16 +433,13 @@ def test_normal_stream_stage_and_markdown(page: Any, e2e_instance: Any, mock_llm
     # 阶段推进口径：wait_turn_started 已确认 stage 从 user_submit 推进过（提交阶段
     # 证据），collect_turn 从推进后开始采样。
     assert "thinking" in turn["stages"], f"未观测到 thinking 阶段: {turn['stages']}"
-    # ⑦b 口径说明（2026-09-26 实测，收紧尝试未落地）：修复 c50d6b8a3 声称
-    # 「首 answer delta 发 responding（stage 条第五相位）」，其单元测试直接调
-    # stream_response 可观测 responding；但在真实 aimock 流式路径上，本车道以
-    # 两种采样器（首个 note / 全部 note 扫描）× 多轮运行 × 首轮与第二轮（无标题
-    # 辅助调用并发）验证，data-active-turn-stage 始终不出现 responding（序列止于
-    # user_submit/working/thinking）——后端 first_answer_delta 发射条件在真实
-    # 流式写入路径上未触发（或被消费），SSE 线上 stage 仍为 transport 值。
-    # 这与修复口径不符，按纪律不落假闸门：恢复 thinking 闸门，缺陷⑦b 的
-    # 「UI 可观测 responding」按未闭合上报，待产品侧钉死根因后本闸门再收紧。
-    print(f"[mock_llm] responding 可观测={'responding' in turn['stages']}（⑦b 遗留） stages={turn['stages']}")
+    # ⑦b 闸门（2026-09-26 收紧）：根因已钉死并修复——绑工具的 chat 路由把可见
+    # 正文解码为 interim_text_delta，turn_llm_adapter.on_protocol_event 只转发
+    # commentary/answer delta，interim 被丢弃，导致 ui.stream_response 只在终态
+    # 回调（turn 收口瞬间）被调一次，c50d6b8a3 的 first_answer_delta 发射点在
+    # UI 采样窗内不可观测。adapter 转发 interim delta 后，正文流中途即跨过
+    # batcher 批阈值并发射 responding。此前打印留证升级回硬断言。
+    assert "responding" in turn["stages"], f"未观测到 responding 阶段（⑦b 回归）: {turn['stages']}"
     assert_no_error_surface(page)
     texts = wait_thread_text(page, "E2E 冒烟回复")
     assert "E2E 冒烟回复" in texts, f"markdown 标题未出现在时间线: {texts[:300]!r}"
@@ -547,7 +543,9 @@ def test_format_leak_renders_without_crash(page: Any, e2e_instance: Any, mock_ll
     assert_no_error_surface(page)
     # 页面壳仍活着：chat recipe 锚点可见，泄漏文本按内容上屏（不要求转义形态）。
     assert page.locator(domain_recipe_selector("chat-session-workbench")).first.is_visible()
-    texts = wait_thread_text(page, "write_file")
+    # 等待锚点用尾段明文：⑦b 修复后正文真实流式（不再收口才整段出现），
+    # 先上屏的 write_file 行出现时尾段可能仍在流式途中。
+    texts = wait_thread_text(page, "正文仍然可读")
     assert "write_file" in texts, f"泄漏剧本原始行未上时间线: {texts[:300]!r}"
     # ④ 闸门：紧随泄漏标签之后的明文段必须上屏（修复 d3cf4fa8f 前被 HTML 块
     # 语义连吞）；summary 信封行本体同样从「连吞」恢复为字面文本可见。

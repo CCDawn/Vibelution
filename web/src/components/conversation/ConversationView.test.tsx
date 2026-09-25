@@ -227,6 +227,58 @@ describe("ConversationView VUI control contract", () => {
   });
 });
 
+describe("ConversationView active-turn responding stage (defect 7b)", () => {
+  function statusTurnItem(code: string, sequence: number) {
+    return {
+      id: `active-item-${code}`,
+      itemId: `active-item-${code}`,
+      sessionId: "session-1",
+      turnId: "turn-current",
+      version: 3,
+      revision: 1,
+      sequence,
+      type: "status",
+      code,
+      title: code,
+      status: "running",
+    };
+  }
+
+  it("keeps the responding stage observable while the answer streams", () => {
+    const activeTurnLayerMessage = {
+      id: "session-1-message-active-turn-current",
+      role: "assistant",
+      timestamp: "2026-05-22T00:02:00Z",
+      turnId: "turn-current",
+      status: "running",
+      turnItems: [
+        statusTurnItem("thinking", 1),
+        statusTurnItem("responding", 2),
+        {
+          id: "active-item-answer",
+          itemId: "active-item-answer",
+          sessionId: "session-1",
+          turnId: "turn-current",
+          version: 3,
+          revision: 1,
+          sequence: 3,
+          type: "agent_message",
+          phase: "final_answer",
+          text: "## 流式中的回答",
+          status: "running",
+          terminal: false,
+        },
+      ],
+      metadata: {
+        kind: "session_active_turn_layer",
+        processStage: "assistant_response",
+      },
+    } as unknown as ConversationMessage;
+    const html = renderConversation([], { activeTurnMessage: activeTurnLayerMessage });
+    expect(html).toContain('data-active-turn-stage="responding"');
+  });
+});
+
 describe("ConversationView stop feedback", () => {
   it("shows a visible stopping label while the stop action is pending", () => {
     const html = renderConversation([], {

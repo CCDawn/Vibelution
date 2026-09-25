@@ -22,11 +22,28 @@ function message(patch: Partial<ConversationMessage>): ConversationMessage {
   };
 }
 
-describe("projection dual-paint contracts", () => {  it("does not stack compact status placeholder above a codex surface", () => {
+describe("projection dual-paint contracts", () => {
+  // Defect 7b (2026-09-26): the old "never stack the placeholder above a codex
+  // surface" rule retired the shell on the first streamed answer cell — one
+  // frame before the backend's responding status row — so the responding
+  // stage could never render. The shell now coexists with the codex answer
+  // while the turn streams and retires only at settle; running tools and
+  // errors still suppress it (see shouldRenderCompactActiveTurnPlaceholder).
+  it("keeps the compact status placeholder beside the codex answer while streaming", () => {
     expect(shouldRenderCompactActiveTurnPlaceholder({
       role: "assistant",
       streaming: true,
       showResponseBlock: false,
+      hasFeedbackTimeline: false,
+      hasActiveProcess: false,
+      turnErrorMessage: false,
+      hasCodexSurface: true,
+    })).toBe(true);
+    expect(shouldRenderCompactActiveTurnPlaceholder({
+      role: "assistant",
+      streaming: false,
+      inFlight: false,
+      showResponseBlock: true,
       hasFeedbackTimeline: false,
       hasActiveProcess: false,
       turnErrorMessage: false,
