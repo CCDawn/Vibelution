@@ -115,6 +115,8 @@ def _feature_values(config: Any) -> dict[str, bool]:
         "mental_model": _value(config, "mental_model.enabled"),
         # Default-on turn runtime status (budget/progress inject + rail).
         "runtime_status": _value(config, "runtime_status.enabled", default=True),
+        # Default-on restart recovery for interrupted turns/queues.
+        "session_recovery": _value(config, "session_recovery.enabled", default=True),
         "context_compression": _value(config, "context_compression.enabled"),
         "pet": _value(config, "pet.enabled"),
         "semantic_memory": _value(config, "memory.semantic_memory_enabled"),

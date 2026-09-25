@@ -324,6 +324,61 @@ describe("ConversationView failed-turn error presentation", () => {
   });
 });
 
+describe("ConversationView session recovery presentation", () => {
+  function recoveryResumedFixture(metadata: Record<string, unknown>) {
+    return {
+      id: "assistant-resumed",
+      role: "assistant",
+      content: "已从重启中恢复，继续执行",
+      timestamp: "2026-09-25T08:00:00Z",
+      turnId: "turn-recovered",
+      turnItems: [
+        {
+          id: "assistant-resumed-item",
+          itemId: "assistant-resumed-item",
+          sessionId: "session-1",
+          turnId: "turn-recovered",
+          version: 3,
+          revision: 1,
+          sequence: 1,
+          type: "agent_message",
+          phase: "final_answer",
+          text: "已从重启中恢复，继续执行",
+          status: "completed",
+          terminal: true,
+        },
+      ],
+      metadata: { kind: "session_recovery_resumed", ...metadata },
+    } as unknown as ConversationMessage;
+  }
+
+  it("renders an in-stream recovery status row with attempt and turn meta", () => {
+    const html = renderConversation([
+      recoveryResumedFixture({ attempt: 2, turnLabel: "重构导出脚本" }),
+    ]);
+    expect(semanticArticleClassCount(html, "cliAgentLifecycleTurn")).toBe(1);
+    expect(html).toContain("已从重启中恢复，继续执行");
+    expect(html).toContain("重构导出脚本");
+    expect(html).toContain("自动重试 2");
+  });
+
+  it("hides interrupted partials once recovery supersedes them", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-partial",
+        role: "assistant",
+        content: "half-streamed answer before the restart",
+        timestamp: "2026-09-25T07:59:00Z",
+        turnId: "turn-recovered",
+        metadata: { interrupted: true, recoverySuperseded: true },
+      } as unknown as ConversationMessage,
+      recoveryResumedFixture({ turnLabel: "重构导出脚本" }),
+    ]);
+    expect(html).not.toContain("half-streamed answer before the restart");
+    expect(html).toContain("已从重启中恢复，继续执行");
+  });
+});
+
 describe("ConversationView compact active-turn status rails", () => {
   it("does not force-OR compact placeholder over process/feedback gates", () => {
     expect(conversationViewSource).not.toContain("Force Thinking/waiting when in-flight with no visible paint");

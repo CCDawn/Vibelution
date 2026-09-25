@@ -225,6 +225,7 @@ import {
   isAgentInboxMessage,
   isCliAgentLifecycleMessage,
   isGroupRoomTranscriptMessage,
+  isSessionRecoveryResumedMessage,
   isSteerGuidanceMessage,
   isTurnErrorMessage,
   researchOrgMessageChips,
@@ -317,6 +318,8 @@ import {
   cliAgentLifecycleDetail,
   cliAgentLifecycleLabel,
   groupRoomTranscriptLabel,
+  sessionRecoveryResumedDetail,
+  sessionRecoveryResumedLabel,
 } from "./conversationSpecialMessagePresentation";
 import { projectedConversationMessageIds } from "./conversationMessageIdentity";
 import { shouldCompactConversationTurnHeader } from "./conversationTurnHeaderCompaction";
@@ -1448,6 +1451,27 @@ export const ConversationView = React.memo(function ConversationView({
                   </span>
                   <span className={styles.cliAgentLifecycleText}>
                     {cliAgentLifecycleLabel(message, lang)}
+                  </span>
+                  {detail ? <code className={styles.cliAgentLifecycleMeta}>{detail}</code> : null}
+                  {message.timestamp ? (
+                    <span className={styles.cliAgentLifecycleTime}>{formatTimestamp(message.timestamp)}</span>
+                  ) : null}
+                </article>
+              );
+            }
+            if (isSessionRecoveryResumedMessage(message)) {
+              const detail = sessionRecoveryResumedDetail(message, lang);
+              return (
+                <article
+                  key={rowIdentity?.rowKey ?? message.id}
+                  className={styles.cliAgentLifecycleTurn}
+                  data-conversation-row-key={rowIdentity?.rowKey ?? message.id}
+                >
+                  <span className={styles.cliAgentLifecycleIcon} aria-hidden="true">
+                    <RefreshCw size={14} />
+                  </span>
+                  <span className={styles.cliAgentLifecycleText}>
+                    {sessionRecoveryResumedLabel(message, lang)}
                   </span>
                   {detail ? <code className={styles.cliAgentLifecycleMeta}>{detail}</code> : null}
                   {message.timestamp ? (

@@ -70,4 +70,34 @@ describe("conversation display message projection", () => {
       "user-new",
       "assistant-new",
     ]);
-  });});
+  });
+
+  it("drops recovery-superseded interrupted partials from display while journal keeps them", async () => {
+    const projected = await projectConversationDisplayMessages([
+      message({
+        id: "assistant-partial",
+        content: "half-streamed answer before the restart",
+        metadata: { interrupted: true, recoverySuperseded: true },
+      }),
+      message({
+        id: "assistant-resumed",
+        content: "",
+        metadata: { kind: "session_recovery_resumed", attempt: 2, turnLabel: "重构导出脚本" },
+      }),
+    ]);
+
+    expect(projected.map((item) => item.id)).toEqual(["assistant-resumed"]);
+  });
+
+  it("keeps interrupted partials visible when recovery did not supersede them", async () => {
+    const projected = await projectConversationDisplayMessages([
+      message({
+        id: "assistant-partial",
+        content: "half-streamed answer",
+        metadata: { interrupted: true },
+      }),
+    ]);
+
+    expect(projected.map((item) => item.id)).toEqual(["assistant-partial"]);
+  });
+});

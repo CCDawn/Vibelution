@@ -28,6 +28,7 @@ EDITOR_SECTION_SPECS = [
     ("avatar", "avatar"),
     ("user-profile", "user_profile"),
     ("context-compression", "context_compression"),
+    ("session-recovery", "session_recovery"),
     ("security", "security"),
     ("log", "log"),
     ("network", "network"),
