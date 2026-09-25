@@ -877,7 +877,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatSurfaceCss).toContain("var(--vui-font-xs)");
     expect(chatSurfaceCss).toContain("var(--vui-font-sm)");
     expect(chatSurfaceCss).toContain("var(--vui-font-md)");
-    expect(conversationCssSource).toContain("var(--vui-font-chat)");
+    expect(conversationCssSource).toContain("text-vui-chat");
     expect(chatSurfaceCss).not.toMatch(/font-size:\s*0\.(?:6\d|7[0-7])rem/);
   });
 
