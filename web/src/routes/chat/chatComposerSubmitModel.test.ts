@@ -102,6 +102,51 @@ describe("chatComposerSubmitModel", () => {
     expect(result.rejected).toEqual(["big.json", "binary.exe"]);
   });
 
+  it("attaches resolved local paths to accepted image and document attachments", () => {
+    const image = new File([new Uint8Array([1])], "shot.png", { type: "image/png" });
+    const doc = new File([new Uint8Array([2])], "run.csv", { type: "text/csv" });
+    const result = classifyComposerFiles([image, doc], {
+      createObjectUrl: () => "blob:test",
+      nowMs: 2000,
+      randomId: () => "id",
+      resolveLocalPath: (file) => (file === image ? "C:\\pics\\shot.png" : null),
+    });
+    expect(result.accepted).toHaveLength(2);
+    expect(result.accepted[0]?.kind).toBe("image");
+    expect(result.accepted[0]?.localPath).toBe("C:\\pics\\shot.png");
+    expect(result.accepted[1]?.kind).toBe("document");
+    // Clipboard-style files resolve to null and keep the in-memory upload path.
+    expect(result.accepted[1]?.localPath).toBeUndefined();
+  });
+
+  it("keeps attachments without a local path when resolution is unavailable or fails", () => {
+    const image = new File([new Uint8Array([1])], "shot.png", { type: "image/png" });
+    const baseOptions = { createObjectUrl: () => "blob:test", nowMs: 2000, randomId: () => "id" };
+    expect(
+      classifyComposerImageFiles([image], baseOptions).accepted[0]?.localPath,
+    ).toBeUndefined();
+    expect(
+      classifyComposerImageFiles([image], {
+        ...baseOptions,
+        resolveLocalPath: () => "   ",
+      }).accepted[0]?.localPath,
+    ).toBeUndefined();
+    expect(
+      classifyComposerImageFiles([image], {
+        ...baseOptions,
+        resolveLocalPath: () => {
+          throw new Error("bridge failure");
+        },
+      }).accepted[0]?.localPath,
+    ).toBeUndefined();
+    expect(
+      classifyComposerImageFiles([image], {
+        ...baseOptions,
+        resolveLocalPath: () => "C:\\pics\\shot.png",
+      }).accepted[0]?.localPath,
+    ).toBe("C:\\pics\\shot.png");
+  });
+
   it("merges composer attachments with per-kind caps", () => {
     const make = (id: string, kind: "image" | "document") => ({
       id,

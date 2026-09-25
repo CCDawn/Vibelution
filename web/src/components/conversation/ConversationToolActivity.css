@@ -22,15 +22,18 @@ details[open] > summary .vui-components-conversation-tool-activity.activityChevr
  */
 .vui-components-conversation-tool-activity.itemDetails > summary,
 .vui-components-conversation-tool-activity.batch > summary,
+.vui-components-conversation-tool-activity.categoryGroup > summary,
 .vui-components-conversation-tool-activity.group > summary {
   list-style: none;
 }
 
 .vui-components-conversation-tool-activity.itemDetails > summary::-webkit-details-marker,
 .vui-components-conversation-tool-activity.batch > summary::-webkit-details-marker,
+.vui-components-conversation-tool-activity.categoryGroup > summary::-webkit-details-marker,
 .vui-components-conversation-tool-activity.group > summary::-webkit-details-marker,
 .vui-components-conversation-tool-activity.itemDetails > summary::marker,
 .vui-components-conversation-tool-activity.batch > summary::marker,
+.vui-components-conversation-tool-activity.categoryGroup > summary::marker,
 .vui-components-conversation-tool-activity.group > summary::marker {
   display: none;
   content: "";
@@ -43,6 +46,8 @@ details[open] > summary .vui-components-conversation-tool-activity.activityChevr
   > .vui-components-conversation-tool-activity.activityDetails,
 .vui-components-conversation-tool-activity.batch:not([open])
   > .vui-components-conversation-tool-activity.batchDetails,
+.vui-components-conversation-tool-activity.categoryGroup:not([open])
+  > .vui-components-conversation-tool-activity.categoryGroupDetails,
 .vui-components-conversation-tool-activity.group:not([open])
   > .vui-components-conversation-tool-activity.groupDetails,
 .vui-components-conversation-tool-activity.itemDetails:not([open])
@@ -95,11 +100,34 @@ details[open] > summary .vui-components-conversation-tool-activity.activityChevr
   animation-delay: var(--tool-activity-row-close-delay, 0ms);
 }
 
+/* Category parent groups reuse the batch enter animation on expand. */
+.vui-components-conversation-tool-activity.categoryGroup[open]
+  > .vui-components-conversation-tool-activity.categoryGroupDetails
+  > .vui-components-conversation-tool-activity.categoryGroupDetailsInner
+  > .vui-components-conversation-tool-activity.categoryGroupRow {
+  animation: vui-tool-activity-row-enter 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--tool-activity-row-open-delay, 0ms);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .vui-components-conversation-tool-activity.activityRow,
-  .vui-components-conversation-tool-activity.batchRow {
+  .vui-components-conversation-tool-activity.batchRow,
+  .vui-components-conversation-tool-activity.categoryGroupRow {
     animation: none !important;
   }
+}
+
+/*
+ * ZCode subagent-name chip: the hue comes from the inline --subagent-accent
+ * custom property (theme accent rotated per name bucket by
+ * conversationSubagentColor.ts); tint and fallback derive from the same token.
+ */
+.vui-components-conversation-tool-activity.agentNameChip {
+  color: var(--subagent-accent, var(--fg-tertiary));
+  background: color-mix(in srgb, var(--subagent-accent, var(--fg-tertiary)) 14%, transparent);
+  border-radius: var(--radius-control);
+  padding-inline: 0.25rem;
+  font-weight: 500;
 }
 
 /*

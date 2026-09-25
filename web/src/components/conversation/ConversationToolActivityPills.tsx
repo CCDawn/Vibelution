@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 import type {
   CodexToolActivityPillStatusKind,
@@ -44,15 +44,24 @@ export function ConversationToolActivityPills({
   leadingIcon = null,
   className = "",
   statusTooltip,
+  agentAccentStyle = null,
 }: {
   pills: CodexToolActivityPills;
   leadingIcon?: ReactNode;
   className?: string;
   /** Error summary revealed on hover of the status word (title tooltip). */
   statusTooltip?: string;
+  /**
+   * ZCode subagent-name coloring: when the row's subject IS the agent name,
+   * the caller resolves its stable color bucket and passes the
+   * `--subagent-accent` custom-property payload here; the name renders as a
+   * token-derived tinted chip. Absent → unchanged muted subject.
+   */
+  agentAccentStyle?: Record<string, string> | null;
 }) {
   const showStatusLabel = SHOW_STATUS_LABEL.has(pills.statusKind) && Boolean(pills.statusLabel);
   const running = pills.statusKind === "running";
+  const coloredAgentName = Boolean(agentAccentStyle && pills.subject);
 
   return (
     <>
@@ -81,7 +90,17 @@ export function ConversationToolActivityPills({
         ) : null}
         {pills.subject ? (
           <span className={styles.itemPreview} title={pills.subject} data-codex-tool-subject="true">
-            {pills.subject}
+            {coloredAgentName ? (
+              <span
+                className={styles.agentNameChip}
+                style={agentAccentStyle as CSSProperties}
+                data-codex-tool-agent-name="true"
+              >
+                {pills.subject}
+              </span>
+            ) : (
+              pills.subject
+            )}
           </span>
         ) : null}
         {pills.diffStatLabel ? (

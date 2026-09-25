@@ -21,6 +21,12 @@ function toolCell(id: string, summary: string): CodexTranscriptCell {
   };
 }
 
+function namedToolCell(id: string, rawToolName: string): CodexTranscriptCell {
+  const cell = toolCell(id, "已完成");
+  cell.title = rawToolName;
+  return cell;
+}
+
 function mountActivity(cells: CodexTranscriptCell[]) {
   const host = document.createElement("div");
   document.body.append(host);
@@ -107,5 +113,34 @@ describe("ConversationToolActivity row open persistence", () => {
     expect(host.querySelector("details")!.textContent).toContain("HTTP 406: https://elifesciences.org/articles/13810");
 
     await unmount();
+  });
+
+  it("persists the category group's expand choice across unmount and remount", async () => {
+    const cells = [
+      namedToolCell("group-persist-read-1", "read_file_tool"),
+      namedToolCell("group-persist-grep-1", "grep_search_tool"),
+    ];
+    const first = mountActivity(cells);
+    await act(async () => first.render());
+
+    const group = first.host.querySelector('[data-codex-tool-activity-category-group="true"]')!;
+    expect(group.hasAttribute("open")).toBe(false);
+    // Children stay unmounted while collapsed.
+    expect(first.host.querySelector('[data-codex-tool-detail="true"]')).toBeNull();
+
+    await act(async () => group.querySelector("summary")!.click());
+    expect(group.hasAttribute("open")).toBe(true);
+    expect(first.host.querySelector('[data-codex-tool-detail="true"]')).not.toBeNull();
+    await first.unmount();
+
+    const second = mountActivity(cells);
+    await act(async () => second.render());
+    const reopened = second.host.querySelector('[data-codex-tool-activity-category-group="true"]')!;
+    expect(reopened.hasAttribute("open")).toBe(true);
+    expect(second.host.querySelector('[data-codex-tool-detail="true"]')).not.toBeNull();
+
+    await act(async () => reopened.querySelector("summary")!.click());
+    expect(reopened.hasAttribute("open")).toBe(false);
+    await second.unmount();
   });
 });

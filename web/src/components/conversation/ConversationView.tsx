@@ -33,7 +33,11 @@ import {
 import React, { DragEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
-import type { ConversationMessage } from "../../api/types";
+import type {
+  ConversationAttachment,
+  ConversationMessage,
+  SessionReferenceAttachment,
+} from "../../api/types";
 import type {
   AgentMessage,
   AgentMentalPart,
@@ -657,6 +661,179 @@ function turnNavPreviewText(message: ConversationMessage | undefined): string {
   return assistantFinalAnswerText(message);
 }
 
+type ConversationUserInlineEditorProps = {
+  lang: "zh" | "en";
+  value: string;
+  onValueChange: (value: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+  disabled: boolean;
+  pending: boolean;
+  submitLabel: string;
+  cancelLabel: string;
+  ariaLabel: string;
+  error: string;
+  attachments: ConversationAttachment[];
+  references: SessionReferenceAttachment[];
+  inputRef: React.RefObject<HTMLTextAreaElement | null>;
+};
+
+function inlineEditorAttachmentLabel(attachment: ConversationAttachment): string {
+  return String(attachment.filename || attachment.artifactId || "").trim();
+}
+
+function inlineEditorReferenceLabel(reference: SessionReferenceAttachment): string {
+  return String(
+    reference.title
+    || reference.filename
+    || (reference.quote || "").trim().slice(0, 80)
+    || reference.kind
+    || "",
+  ).trim();
+}
+
+/**
+ * ZCode-style inline edit (packages/ui v4 ConversationRowView): the edited user
+ * row swaps its content body for this editor in place. Text lives in the shared
+ * composer draft so submit/cancel ride the existing edit-resubmit pipeline;
+ * original attachments/references render as read-only chips (the edit-resubmit
+ * pipeline carries the original attachment artifacts over server-side).
+ */
+function ConversationUserInlineEditor({
+  lang,
+  value,
+  onValueChange,
+  onSubmit,
+  onCancel,
+  disabled,
+  pending,
+  submitLabel,
+  cancelLabel,
+  ariaLabel,
+  error,
+  attachments,
+  references,
+  inputRef,
+}: ConversationUserInlineEditorProps) {
+  // Auto-height within the max-height clamp: grow with the draft, scroll
+  // internally once the cap is hit. Re-runs per value change.
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (!el) {
+      return;
+    }
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [inputRef, value]);
+  const canSubmit = !disabled && !pending && Boolean(value.trim());
+  return (
+    <div
+      className={styles.turnInlineEditor}
+      data-conversation-inline-edit="1"
+    >
+      {attachments.length ? (
+        <div
+          className={styles.turnInlineEditorChipRow}
+          aria-label={lang === "zh" ? "原消息附件（保留）" : "Original attachments (kept)"}
+          data-inline-edit-attachments={String(attachments.length)}
+        >
+          {attachments.map((attachment, index) => {
+            const label = inlineEditorAttachmentLabel(attachment);
+            const thumbUrl = attachment.imageUrl || attachment.url;
+            const isImage = thumbUrl
+              && (String(attachment.contentType || "").startsWith("image/") || attachment.kind === "user_image");
+            return (
+              <span
+                key={`${attachment.artifactId}-${index}`}
+                className={styles.turnInlineEditorChip}
+                title={label}
+              >
+                {isImage ? (
+                  <img className={styles.turnInlineEditorChipThumb} src={thumbUrl} alt="" />
+                ) : (
+                  <FileText className={styles.turnInlineEditorChipIcon} aria-hidden="true" />
+                )}
+                <span className={styles.turnInlineEditorChipName}>{label}</span>
+              </span>
+            );
+          })}
+        </div>
+      ) : null}
+      {references.length ? (
+        <div
+          className={styles.turnInlineEditorChipRow}
+          aria-label={lang === "zh" ? "原消息引用（保留）" : "Original references (kept)"}
+          data-inline-edit-references={String(references.length)}
+        >
+          {references.map((reference, index) => {
+            const label = inlineEditorReferenceLabel(reference);
+            return (
+              <span
+                key={`${reference.referenceId || reference.title || ""}-${index}`}
+                className={styles.turnInlineEditorChip}
+                title={label}
+              >
+                <MessageSquareText className={styles.turnInlineEditorChipIcon} aria-hidden="true" />
+                <span className={styles.turnInlineEditorChipName}>{label}</span>
+              </span>
+            );
+          })}
+        </div>
+      ) : null}
+      <VNativeTextarea
+        ref={inputRef}
+        className={styles.turnInlineEditorInput}
+        value={value}
+        disabled={disabled || pending}
+        aria-label={ariaLabel}
+        data-conversation-inline-edit-input="1"
+        onChange={(event) => onValueChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            onCancel();
+            return;
+          }
+          if (shouldSubmitComposerOnKeydown({
+            key: event.key,
+            shiftKey: event.shiftKey,
+            ctrlKey: event.ctrlKey,
+            metaKey: event.metaKey,
+            altKey: event.altKey,
+            isComposing: event.nativeEvent.isComposing,
+          })) {
+            event.preventDefault();
+            if (canSubmit) {
+              onSubmit();
+            }
+          }
+        }}
+      />
+      {error ? <p className={styles.composerError} role="alert">{error}</p> : null}
+      <div className={styles.turnInlineEditorActions}>
+        <VButton
+          type="button"
+          onClick={onCancel}
+          isDisabled={pending}
+        >
+          {cancelLabel}
+        </VButton>
+        <VButton
+          type="button"
+          className={styles.composerEditSubmitButton}
+          onClick={onSubmit}
+          isDisabled={!canSubmit}
+          icon={pending
+            ? <LoaderCircle className={styles.statusSpinner} size={14} aria-hidden="true" />
+            : <RefreshCw size={14} aria-hidden="true" />}
+        >
+          {submitLabel}
+        </VButton>
+      </div>
+    </div>
+  );
+}
+
 // Memo gate: with stable prop references from the route (memoized conversation
 // model + composer bridge) unrelated parent re-renders stop here. Streaming
 // frames still re-render this component because the active-turn message prop
@@ -785,6 +962,7 @@ export const ConversationView = React.memo(function ConversationView({
   const toolApprovalConsumedRef = useRef(false);
   toolApprovalConsumedRef.current = false;
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const inlineEditInputRef = useRef<HTMLTextAreaElement | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const initializedSessionRef = useRef("");
   const pinnedLatestUserMessageIdRef = useRef("");
@@ -1000,7 +1178,6 @@ export const ConversationView = React.memo(function ConversationView({
   const userAvatarLabel = userAvatarSymbol(userAvatarPreset, userLabel);
   const {
     editModeActive: composerEditModeActive,
-    failureNote: composerEditFailureNote,
   } = resolveComposerEditMode({
     modeNotice: composerModeNotice,
     modeTargetPreview: composerModeTargetPreview,
@@ -1775,6 +1952,7 @@ export const ConversationView = React.memo(function ConversationView({
             // impossible to collapse (toggle flipped aria state but body stayed).
             const shouldForceResponseBodyVisible = isResponseStreaming;
             const isEditingMessage = userAuthoredMessage && message.id === editingMessageId;
+            const editingUserMessage = isEditingMessage && message.role === "user" ? message : null;
             const agentInboxExpanded = getExpansionState(message.id, "agentInbox", false);
             const agentInboxPreview = agentInboxMessage ? compactPreview(agentInboxSummary(message), 140) : "";
             const researchOrgChips = researchOrgMessageChips(message);
@@ -2055,6 +2233,23 @@ export const ConversationView = React.memo(function ConversationView({
                         </div>
                       ) : null}
                     </section>
+                  ) : editingUserMessage ? (
+                    <ConversationUserInlineEditor
+                      lang={lang}
+                      value={composerValue}
+                      onValueChange={onComposerChange}
+                      onSubmit={handleSendAndFollowLatest}
+                      onCancel={() => onCancelComposerMode?.()}
+                      disabled={composerDisabled}
+                      pending={Boolean(editUserMessageDisabled)}
+                      submitLabel={submitLabel?.trim() || t("saveAndRerunMessage")}
+                      cancelLabel={cancelComposerModeLabel ?? t("cancelEditMessage")}
+                      ariaLabel={editUserMessageLabel ?? t("editMessage")}
+                      error={composerError ?? ""}
+                      attachments={editingUserMessage.attachments ?? []}
+                      references={editingUserMessage.references ?? []}
+                      inputRef={inlineEditInputRef}
+                    />
                   ) : showUserContent ? (
                     <AgentUserContentSectionView userContentSectionIds={agentRenderState.userContentSectionIds}>
                       {renderResponseText(userContentText)}
@@ -2859,17 +3054,27 @@ export const ConversationView = React.memo(function ConversationView({
 
   useEffect(() => {
     const focusSignal = String(editingMessageId || "").trim();
-    if (!focusSignal || focusSignal === lastComposerFocusSignalRef.current || composerDisabled) {
+    if (!focusSignal) {
+      // Reset so re-editing the same message after a cancel refocuses.
+      lastComposerFocusSignalRef.current = "";
+      return;
+    }
+    if (focusSignal === lastComposerFocusSignalRef.current || composerDisabled) {
       return;
     }
     lastComposerFocusSignalRef.current = focusSignal;
-    const input = composerInputRef.current;
-    if (!input) {
-      return;
-    }
-    input.focus();
-    const cursorPosition = input.value.length;
-    input.setSelectionRange(cursorPosition, cursorPosition);
+    // Inline edit lives in the timeline row, not the composer; the row editor
+    // mounts in this same commit, so focus it on the next frame.
+    const raf = window.requestAnimationFrame(() => {
+      const input = inlineEditInputRef.current;
+      if (!input) {
+        return;
+      }
+      input.focus();
+      const cursorPosition = input.value.length;
+      input.setSelectionRange(cursorPosition, cursorPosition);
+    });
+    return () => window.cancelAnimationFrame(raf);
   }, [composerDisabled, editingMessageId]);
 
   useEffect(() => {
@@ -5362,6 +5567,23 @@ export const ConversationView = React.memo(function ConversationView({
     return node !== null;
   }
 
+  // Shared so the queue bar stays visible while an inline edit hides the
+  // composer field (one edit UI lives in the row, the queue is session status).
+  const composerFollowupQueueBar = followupQueue.length ? (
+    <ConversationFollowupQueueBar
+      items={followupQueue}
+      lang={lang}
+      variant={composerVariant}
+      editLabel={t("editFollowupQueue")}
+      withdrawLabel={t("withdrawFollowupQueue")}
+      steerLabel={followupQueueSteerLabel ?? t("immediateSteer")}
+      onUpdate={onFollowupQueueUpdate ?? (() => undefined)}
+      onRemove={onFollowupQueueRemove ?? (() => undefined)}
+      onMove={onFollowupQueueMove ?? (() => undefined)}
+      onSteer={onFollowupQueueSteer}
+    />
+  ) : null;
+
   const composerActions = (
     <div className={styles.composerActionStack}>
       {resolvedActionMode === "stop" && composerPending ? (
@@ -5711,6 +5933,11 @@ export const ConversationView = React.memo(function ConversationView({
 
       {showComposer ? (
       <div className={composerVariant === "codex" ? styles.composerCodex : styles.composer}>
+        {/* Inline edit owns the row editor; the composer field steps aside and
+            only session status (the followup queue) keeps its slot here. */}
+        {editingMessageId ? (
+          composerFollowupQueueBar
+        ) : (
         <div
           className={
             composerDragActive
@@ -5729,47 +5956,7 @@ export const ConversationView = React.memo(function ConversationView({
               <span>{composerGuidance}</span>
             </div>
           ) : null}
-          {followupQueue.length ? (
-            <ConversationFollowupQueueBar
-              items={followupQueue}
-              lang={lang}
-              variant={composerVariant}
-              editLabel={t("editFollowupQueue")}
-              withdrawLabel={t("withdrawFollowupQueue")}
-              steerLabel={followupQueueSteerLabel ?? t("immediateSteer")}
-              onUpdate={onFollowupQueueUpdate ?? (() => undefined)}
-              onRemove={onFollowupQueueRemove ?? (() => undefined)}
-              onMove={onFollowupQueueMove ?? (() => undefined)}
-              onSteer={onFollowupQueueSteer}
-            />
-          ) : null}
-          {composerModeNotice ? (
-            <div
-              className={styles.composerEditModeBar}
-              role="status"
-              title={composerModeNotice}
-              aria-label={composerModeNotice}
-            >
-              <span className={styles.composerEditModeIcon} aria-hidden="true">
-                <Pencil size={14} />
-              </span>
-              <span className={styles.composerEditModeCopy}>
-                <span className={styles.composerEditModeLabel}>{t("editMessage")}</span>
-                {composerEditFailureNote ? (
-                  <span className={styles.composerEditModeWarning}>{composerEditFailureNote}</span>
-                ) : null}
-              </span>
-              {onCancelComposerMode ? (
-                <VButton
-                  type="button"
-                  className={styles.composerEditModeCancel}
-                  onClick={onCancelComposerMode}
-                >
-                  {cancelComposerModeLabel ?? t("cancelEditMessage")}
-                </VButton>
-              ) : null}
-            </div>
-          ) : null}
+          {composerFollowupQueueBar}
           {composerAttachments.length ? (
             <div
               className={styles.composerAttachmentTray}
@@ -6178,6 +6365,7 @@ export const ConversationView = React.memo(function ConversationView({
             </div>
           </div>
         </div>
+        )}
         <VNativeInput
           ref={attachmentInputRef}
           className={styles.hiddenAttachmentInput}

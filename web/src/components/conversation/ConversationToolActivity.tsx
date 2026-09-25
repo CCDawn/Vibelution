@@ -1,4 +1,16 @@
-import { ChevronRight, Check, CircleAlert, Copy, LoaderCircle } from "lucide-react";
+import {
+  Bot,
+  ChevronRight,
+  Check,
+  CircleAlert,
+  Copy,
+  FileSearch,
+  LoaderCircle,
+  MonitorSmartphone,
+  PencilLine,
+  TerminalSquare,
+  type LucideIcon,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import { VNativeButton } from "../vui";
@@ -10,6 +22,21 @@ import {
   formatCodexTranscriptDuration,
   type CodexTranscriptToolActivity,
 } from "./conversationToolActivityModel";
+import {
+  buildConversationToolCategoryGroups,
+  conversationToolPersistKey,
+  type ConversationToolCategoryGroupItem,
+  type ConversationToolCategorizedItem,
+} from "./conversationToolCategoryGrouping";
+import {
+  conversationAgentDisplayName,
+  conversationToolCategoryForCell,
+  type ConversationToolCategory,
+} from "./conversationToolCategory";
+import {
+  conversationSubagentAccentStyle,
+  conversationSubagentColorBucket,
+} from "./conversationSubagentColor";
 import {
   buildCodexToolActivityPills,
   completedToolPresentationSummary,
@@ -59,11 +86,6 @@ const toolRowOpenState = new Map<string, boolean>();
 const TOOL_ROW_BODY_UNMOUNT_DELAY_MS = 300;
 const TOOL_FAILURE_COPY_FEEDBACK_MS = 1600;
 const TOOL_FAILURE_SUMMARY_MAX_LENGTH = 240;
-
-/** Most stable per-tool identity: the tool call id, falling back to the cell id. */
-function toolRowPersistKey(cell: CodexTranscriptCell): string {
-  return cell.toolLifecycleModel?.toolCalls?.[0]?.toolCallId || cell.id;
-}
 
 /** First meaningful error line, for the status word's hover tooltip and the copy affordance. */
 function toolFailureDetailText(cell: CodexTranscriptCell): string {
@@ -226,7 +248,7 @@ function isSettledFailedCell(cell: CodexTranscriptCell) {
 function buildToolActivityPills(
   cell: CodexTranscriptCell,
   language: ConversationToolPresentationLanguage,
-  options?: { noMatch?: boolean },
+  options?: { noMatch?: boolean; agentName?: string },
 ): CodexToolActivityPills {
   const toolCall = cell.toolLifecycleModel?.toolCalls?.[0];
   const terminal = cell.toolLifecycleModel?.terminalOperations?.[0];
@@ -265,7 +287,7 @@ function buildToolActivityPills(
       toolSummary = semantic;
     }
   }
-  return buildCodexToolActivityPills({
+  const pills = buildCodexToolActivityPills({
     toolName,
     status,
     language,
@@ -281,6 +303,12 @@ function buildToolActivityPills(
     noMatch: Boolean(options?.noMatch),
     nonzeroExit,
   });
+  // ZCode subagent rows: when the row's subject IS the agent name (spawn /
+  // delegate tools), the name becomes the main text and picks its stable color.
+  if (options?.agentName) {
+    pills.subject = options.agentName;
+  }
+  return pills;
 }
 
 function ToolStatusIcon({
@@ -322,11 +350,18 @@ function ToolActivityItem({
   toolDetailIsEmpty?: ConversationToolActivityProps["toolDetailIsEmpty"];
 }) {
   const noMatch = conversationToolActivityIsNoMatchTerminalExit(cell);
-  const pills = buildToolActivityPills(cell, language, { noMatch });
+  // Agent-spawn rows render the subagent's name as the colored main subject.
+  const agentName = conversationToolCategoryForCell(cell) === "agent"
+    ? conversationAgentDisplayName(cell)
+    : "";
+  const agentAccentStyle = agentName
+    ? conversationSubagentAccentStyle(conversationSubagentColorBucket(agentName))
+    : null;
+  const pills = buildToolActivityPills(cell, language, { noMatch, agentName });
   const title = toolActivityAriaTitle(pills);
   const detailsId = `codex-tool-detail-${cell.id}`;
   const details = renderToolDetails(cell, detailsId);
-  const persistKey = toolRowPersistKey(cell);
+  const persistKey = conversationToolPersistKey(cell);
   const { isOpen, shouldRenderBody, toggle } = usePersistentToolRowOpen(persistKey);
   // ZCode failure denoising: the colored status word + dashed underline carries
   // the failure semantics; hovering it reveals the error summary, and the
@@ -367,6 +402,7 @@ function ToolActivityItem({
       pills={pills}
       leadingIcon={<ToolStatusIcon cell={cell} language={language} />}
       statusTooltip={failureDetail}
+      agentAccentStyle={agentAccentStyle}
     />
   );
   const emptyDetail = language === "zh" ? "无更多详情" : "No further details";
@@ -516,45 +552,197 @@ function checklistModelForBatch(
   return models[models.length - 1] ?? null;
 }
 
+/**
+ * ZCode-aligned parent group for a run of same-category tools (Explore /
+ * Execute / …). The row shows the category word + call count and aggregates the
+ * child states with B2 semantics: any running child keeps the category word
+ * shimmering; failures surface as a dashed attention word whose hover tooltip
+ * carries the first failed child's error summary. The expand choice persists
+ * through the shared B2 map keyed by the group's anchored id (first child's
+ * stable tool identity), so streaming appends never reset it.
+ */
+function ToolActivityCategoryGroup({
+  item,
+  language,
+  renderToolDetails,
+  toolDetailIsEmpty,
+}: {
+  item: ConversationToolCategoryGroupItem;
+  language: ConversationToolPresentationLanguage;
+  renderToolDetails: ConversationToolActivityProps["renderToolDetails"];
+  toolDetailIsEmpty?: ConversationToolActivityProps["toolDetailIsEmpty"];
+}) {
+  const { isOpen, shouldRenderBody, toggle } = usePersistentToolRowOpen(item.id);
+  const Icon = CATEGORY_GROUP_ICONS[item.category];
+  const countLabel = language === "zh" ? `${item.count} 次` : `${item.count} calls`;
+  const statusKind = item.failedCount > 0 ? "failed" : "attention";
+  const attentionLabel = item.attentionCount > 0
+    ? (language === "zh"
+      ? `${item.attentionCount} 项需关注`
+      : item.attentionCount === 1
+        ? "1 item needs attention"
+        : `${item.attentionCount} items need attention`)
+    : "";
+  const failureDetail = item.firstAttentionCell
+    ? toolFailureDetailText(item.firstAttentionCell)
+    : "";
+  const label = language === "zh"
+    ? `展开或收起${item.title}工具组：${item.title}，${countLabel}`
+    : `Expand or collapse ${item.title} tool group: ${item.title}, ${countLabel}`;
+  // SSR keeps the children mounted; on the client the persisted open flag gates
+  // them (same delayed-unmount semantics as tool rows).
+  const renderChildren = shouldRenderBody || typeof window === "undefined";
+
+  return (
+    <details
+      className={`${styles.categoryGroup} group`}
+      data-codex-tool-activity-category-group="true"
+      data-codex-tool-category={item.category}
+      data-codex-tool-activity-count={item.count}
+      data-codex-tool-category-attention-count={item.attentionCount || undefined}
+      data-conversation-part-key={item.id}
+      open={isOpen}
+    >
+      <summary
+        className={styles.categoryGroupSummary}
+        aria-label={label}
+        aria-live={item.running ? "polite" : undefined}
+        onClick={(event) => {
+          event.preventDefault();
+          toggle();
+        }}
+      >
+        {item.running ? (
+          <LoaderCircle className={`${styles.itemIcon} ${styles.itemIconRunning}`} size={15} />
+        ) : item.failedCount > 0 ? (
+          <CircleAlert className={`${styles.itemIcon} ${styles.itemIconFailed}`} size={15} />
+        ) : item.attentionCount > 0 ? (
+          <CircleAlert className={`${styles.itemIcon} ${styles.itemIconWarning}`} size={15} />
+        ) : (
+          <Icon className={styles.itemIcon} size={15} aria-hidden="true" />
+        )}
+        <span className={styles.itemBody}>
+          <span
+            className={item.running
+              ? `${styles.actionLabel} ${styles.actionLabelRunning}`
+              : styles.actionLabel}
+            data-codex-tool-action-pill="true"
+            data-codex-tool-action-running={item.running ? "true" : undefined}
+          >
+            {item.title}
+          </span>
+          <span className={styles.batchCount}>· {countLabel}</span>
+          {attentionLabel ? (
+            <span
+              className={`${styles.statusLabel} ${
+                statusKind === "failed" ? styles.statusLabel_failed : styles.statusLabel_attention
+              }`}
+              data-codex-tool-status-pill="true"
+              data-codex-tool-status-kind={statusKind}
+              title={failureDetail || undefined}
+            >
+              {attentionLabel}
+            </span>
+          ) : null}
+        </span>
+        <ChevronRight
+          className={styles.itemChevron}
+          size={12}
+          aria-hidden="true"
+          data-codex-tool-detail-toggle="inline-symbol"
+        />
+      </summary>
+      {renderChildren ? (
+        <div className={styles.categoryGroupDetails}>
+          <div className={styles.categoryGroupDetailsInner}>
+            {item.items.map((child, index) => (
+              <div
+                key={child.id}
+                className={styles.categoryGroupRow}
+                style={staggeredRowStyle(index, item.items.length)}
+              >
+                {toolActivityRowContent(child, language, renderToolDetails, toolDetailIsEmpty)}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </details>
+  );
+}
+
+/**
+ * ZCode-aligned category group icons. The category word carries the state via
+ * the same shimmer/failed language as tool rows; the icon stays static.
+ */
+const CATEGORY_GROUP_ICONS: Record<ConversationToolCategory, LucideIcon> = {
+  explore: FileSearch,
+  execute: TerminalSquare,
+  changes: PencilLine,
+  cua: MonitorSmartphone,
+  agent: Bot,
+};
+
+function toolActivityRowContent(
+  item: ConversationToolCategorizedItem,
+  language: ConversationToolPresentationLanguage,
+  renderToolDetails: ConversationToolActivityProps["renderToolDetails"],
+  toolDetailIsEmpty?: ConversationToolActivityProps["toolDetailIsEmpty"],
+): ReactNode {
+  if (item.kind === "categoryGroup") {
+    return (
+      <ToolActivityCategoryGroup
+        item={item}
+        language={language}
+        renderToolDetails={renderToolDetails}
+        toolDetailIsEmpty={toolDetailIsEmpty}
+      />
+    );
+  }
+  const checklist = item.kind === "batch"
+    ? checklistModelForBatch(item, language)
+    : conversationToolChecklistModel(item.cell, language);
+  if (checklist) {
+    return <ConversationToolChecklist model={checklist} language={language} />;
+  }
+  if (item.kind === "batch") {
+    return (
+      <ToolActivityBatch
+        item={item}
+        language={language}
+        renderToolDetails={renderToolDetails}
+        toolDetailIsEmpty={toolDetailIsEmpty}
+      />
+    );
+  }
+  return (
+    <ToolActivityItem
+      cell={item.cell}
+      language={language}
+      renderToolDetails={renderToolDetails}
+      toolDetailIsEmpty={toolDetailIsEmpty}
+    />
+  );
+}
+
 function ToolActivityRows({
   items,
   language,
   renderToolDetails,
   toolDetailIsEmpty,
 }: {
-  items: ConversationToolActivityPresentationItem[];
+  items: ConversationToolCategorizedItem[];
   language: ConversationToolPresentationLanguage;
   renderToolDetails: ConversationToolActivityProps["renderToolDetails"];
   toolDetailIsEmpty?: ConversationToolActivityProps["toolDetailIsEmpty"];
 }) {
   return (
     <>
-      {items.map((item) => {
-        const checklist = item.kind === "batch"
-          ? checklistModelForBatch(item, language)
-          : conversationToolChecklistModel(item.cell, language);
-        return (
-          <div key={item.id} className={styles.activityRow}>
-            {checklist ? (
-              <ConversationToolChecklist model={checklist} language={language} />
-            ) : item.kind === "batch" ? (
-              <ToolActivityBatch
-                item={item}
-                language={language}
-                renderToolDetails={renderToolDetails}
-                toolDetailIsEmpty={toolDetailIsEmpty}
-              />
-            ) : (
-              <ToolActivityItem
-                cell={item.cell}
-                language={language}
-                renderToolDetails={renderToolDetails}
-                toolDetailIsEmpty={toolDetailIsEmpty}
-              />
-            )}
-          </div>
-        );
-      })}
+      {items.map((item) => (
+        <div key={item.id} className={styles.activityRow}>
+          {toolActivityRowContent(item, language, renderToolDetails, toolDetailIsEmpty)}
+        </div>
+      ))}
     </>
   );
 }
@@ -566,7 +754,12 @@ export function ConversationToolActivity({
   toolDetailIsEmpty,
   approvalSlot = null,
 }: ConversationToolActivityProps) {
-  const items = buildConversationToolActivityPresentation(activity.cells, language);
+  // Category pass runs on top of the same-name batches: distinct same-category
+  // runs (read + grep + glob → "探索") escalate to one anchored parent group.
+  const items = buildConversationToolCategoryGroups(
+    buildConversationToolActivityPresentation(activity.cells, language),
+    language,
+  );
   const digest = buildConversationToolActivityDigestPresentation(activity.cells, language);
   const railRef = useRef<HTMLDivElement | null>(null);
   const isRunning = digest.state === "running";

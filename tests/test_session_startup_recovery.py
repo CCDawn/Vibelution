@@ -150,6 +150,7 @@ def _seed_interrupted_turn(
     turn_id: str = ORIGINAL_TURN_ID,
     prompt: str = ORIGINAL_PROMPT,
     with_partial: bool = False,
+    attachments: list[dict[str, Any]] | None = None,
 ) -> None:
     """An open (never-settled) turn: the crash-left-behind state the sweep owns."""
 
@@ -162,12 +163,15 @@ def _seed_interrupted_turn(
         payload={},
         source="submit",
     )
+    payload: dict[str, Any] = {"content": prompt, "metadata": {}}
+    if attachments is not None:
+        payload["attachments"] = attachments
     append_turn_event(
         tmp_path,
         session_id,
         turn_id,
         EVENT_USER_MESSAGE,
-        payload={"content": prompt, "metadata": {}},
+        payload=payload,
         source="submit",
     )
     if with_partial:
@@ -507,4 +511,76 @@ def test_finished_work_run_is_not_recovered(
     summary = startup_recovery.recover_interrupted_session_turns_on_startup()
 
     assert summary["resumedCount"] == 0
+    assert submit_calls == []
+
+
+_IMAGE_ATTACHMENT = {
+    "artifactId": "user-image-1.png",
+    "filename": "user-image-1.png",
+    "kind": "user_image",
+    "status": "ready",
+    "contentType": "image/png",
+}
+
+
+def test_interrupted_turn_with_attachments_resubmits_attachment_ids(
+    recovery_env, tmp_path, submit_calls
+) -> None:
+    """The resume carries the original turn's attachment ids back to submit."""
+
+    _seed_conversation(tmp_path)
+    _seed_interrupted_turn(tmp_path, attachments=[_IMAGE_ATTACHMENT])
+    _seed_active_work_run(recovery_env)
+
+    summary = startup_recovery.recover_interrupted_session_turns_on_startup()
+
+    assert summary["resumedCount"] == 1
+    assert len(submit_calls) == 1
+    call = submit_calls[0]
+    assert call["content"] == ORIGINAL_PROMPT
+    assert call["attachment_ids"] == ["user-image-1.png"]
+
+
+def test_attachment_only_interrupted_turn_is_resubmitted(
+    recovery_env, tmp_path, submit_calls
+) -> None:
+    """An attachment-only turn (empty content) is no longer skipped."""
+
+    _seed_conversation(tmp_path)
+    _seed_interrupted_turn(tmp_path, prompt="", attachments=[_IMAGE_ATTACHMENT])
+    _seed_active_work_run(recovery_env)
+
+    summary = startup_recovery.recover_interrupted_session_turns_on_startup()
+
+    assert summary["resumedCount"] == 1
+    assert summary["errorCount"] == 0
+    assert len(submit_calls) == 1
+    call = submit_calls[0]
+    assert call["content"] == ""
+    assert call["attachment_ids"] == ["user-image-1.png"]
+    assert call["turn_mode"] == "hot_restart_resume"
+
+    events = _recovery_events(tmp_path)
+    assert len(events) == 1
+    assert events[0].payload["recovery"]["turnLabel"] == "[图片]"
+
+
+def test_attachment_only_resume_counts_against_retry_budget(
+    recovery_env, tmp_path, submit_calls
+) -> None:
+    _seed_conversation(
+        tmp_path,
+        recovery_state={
+            "originTurnId": ORIGINAL_TURN_ID,
+            "resumedTurnId": "",
+            "attempts": 2,
+            "updatedAt": "2026-09-25T00:00:00Z",
+        },
+    )
+    _seed_interrupted_turn(tmp_path, prompt="", attachments=[_IMAGE_ATTACHMENT])
+    _seed_active_work_run(recovery_env)
+
+    summary = startup_recovery.recover_interrupted_session_turns_on_startup()
+
+    assert summary["retryLimitSkipCount"] == 1
     assert submit_calls == []

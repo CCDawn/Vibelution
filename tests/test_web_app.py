@@ -3965,6 +3965,141 @@ def test_session_user_image_attachment_rejects_spoofed_image_payload(tmp_path, m
     assert response.status_code == 422
 
 
+_MINIMAL_PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+    b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4"
+    b"\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05"
+    b"\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+def test_session_attachment_zero_copy_registration_stores_local_image(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+
+    local_file = tmp_path / "zero-copy-src" / "sketch.png"
+    local_file.parent.mkdir(parents=True, exist_ok=True)
+    local_file.write_bytes(_MINIMAL_PNG_BYTES)
+
+    response = client.post(
+        "/api/sessions/session-live/attachments",
+        json={"localPath": str(local_file), "contentType": "image/png", "filename": "sketch.png"},
+    )
+
+    assert response.status_code == 201
+    attachment = response.json()
+    assert attachment["artifactId"]
+    assert attachment["filename"] == "sketch.png"
+    assert attachment["kind"] == "user_image"
+    assert attachment["status"] == "ready"
+    assert attachment["sizeBytes"] == len(_MINIMAL_PNG_BYTES)
+    stored_path = (
+        session_service._ensure_session_workspace("session-live")
+        / "artifacts"
+        / "images"
+        / attachment["artifactId"]
+    )
+    assert stored_path.read_bytes() == _MINIMAL_PNG_BYTES
+
+
+def test_session_attachment_zero_copy_registration_rejects_missing_local_path(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "core.web.routes.sessions.store_session_user_image_attachment",
+        lambda *_args, **_kwargs: pytest.fail("missing path should be rejected before storage"),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/attachments",
+        json={
+            "localPath": str(tmp_path / "missing.png"),
+            "contentType": "image/png",
+            "filename": "missing.png",
+        },
+    )
+
+    assert response.status_code == 404
+
+
+def test_session_attachment_zero_copy_registration_rejects_non_regular_file(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "core.web.routes.sessions.store_session_user_image_attachment",
+        lambda *_args, **_kwargs: pytest.fail("directory path should be rejected before storage"),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/attachments",
+        json={"localPath": str(tmp_path), "contentType": "image/png", "filename": "directory.png"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_session_attachment_zero_copy_registration_rejects_oversized_local_file(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("core.web.routes.sessions.SESSION_USER_IMAGE_MAX_BYTES", 16)
+    monkeypatch.setattr(
+        "core.web.routes.sessions.store_session_user_image_attachment",
+        lambda *_args, **_kwargs: pytest.fail("oversized local file should be rejected before storage"),
+    )
+
+    local_file = tmp_path / "big.png"
+    local_file.write_bytes(b"0123456789abcdef" * 4)
+
+    response = client.post(
+        "/api/sessions/session-live/attachments",
+        json={"localPath": str(local_file), "contentType": "image/png", "filename": "big.png"},
+    )
+
+    assert response.status_code == 413
+
+
+def test_session_attachment_zero_copy_registration_rejects_spoofed_image_payload(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    local_file = tmp_path / "spoof.png"
+    local_file.write_bytes(b"not really a png")
+
+    response = client.post(
+        "/api/sessions/session-live/attachments",
+        json={"localPath": str(local_file), "contentType": "image/png", "filename": "spoof.png"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_session_attachment_zero_copy_registration_routes_non_image_to_document_store(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+
+    local_file = tmp_path / "zero-copy-src" / "notes.txt"
+    local_file.parent.mkdir(parents=True, exist_ok=True)
+    local_file.write_bytes("hello zero copy".encode("utf-8"))
+
+    response = client.post(
+        "/api/sessions/session-live/attachments",
+        json={"localPath": str(local_file), "contentType": "text/plain", "filename": "notes.txt"},
+    )
+
+    assert response.status_code == 201
+    attachment = response.json()
+    assert attachment["kind"] == "user_document"
+    stored_path = (
+        session_service._ensure_session_workspace("session-live")
+        / "artifacts"
+        / "documents"
+        / attachment["artifactId"]
+    )
+    assert stored_path.read_bytes() == b"hello zero copy"
+
+
 def test_session_user_image_attachment_rejects_oversized_content_length_before_storage(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
