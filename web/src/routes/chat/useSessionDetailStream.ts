@@ -42,6 +42,11 @@ import {
   createSessionEventStream as createDefaultSessionEventStream,
   type SessionEventStream,
 } from "./sessionEventStream";
+import {
+  acquireSessionStream,
+  releaseSessionStream,
+  SESSION_STREAM_WARM_MS,
+} from "./sessionStreamWarmRegistry";
 
 type DesktopConversationNotifier = {
   handleSessionDetail: (
@@ -79,8 +84,10 @@ export type UseSessionDetailStreamOptions = {
 };
 
 /**
- * Sole owner of the direct-session guarded event stream.
- * Do not open a second /api/sessions/:id/events connection elsewhere.
+ * Sole owner of the direct-session guarded event stream, through the module
+ * level keep-warm registry (sessionStreamWarmRegistry): unmount parks the
+ * stream instead of closing it. Do not open a second
+ * /api/sessions/:id/events connection elsewhere.
  */
 export function useSessionDetailStream({
   activeSessionId,
@@ -229,7 +236,13 @@ export function useSessionDetailStream({
         ...collectBrowserPageSnapshot(),
       },
     });
-    const stream = createSessionEventStream(streamSessionId);
+    // Keep-warm acquire (pattern: zai-org/ZCode sessionDataLayer, Apache-2.0):
+    // remounting the same session within the warm window reuses the parked live
+    // connection instead of paying a cold reconnect + resync.
+    const acquired = acquireSessionStream(streamSessionId, createSessionEventStream);
+    const stream = acquired.stream;
+    const reacquiredWarm = acquired.reusedWarm;
+    const parkedLedgerSeq = acquired.parkedLedgerSeq;
     activeStreamRef.current = { stream, sessionId: streamSessionId };
     let closeTelemetryFired = false;
 
@@ -313,6 +326,27 @@ export function useSessionDetailStream({
         }
       },
     });
+
+    if (reacquiredWarm) {
+      // The stream stayed open while this session was parked, so it may have
+      // reconnected or advanced without a mounted owner. Re-baseline the
+      // projection gates (the next frame applies like after a fresh open) and
+      // trigger one authoritative refresh when the parked watermark advanced
+      // over the cached detail, so the route re-enters on the latest state.
+      sessionProjectionGate.noteStreamReopened();
+      sessionStreamRecovery.noteStreamReopened();
+      if (parkedLedgerSeq > 0) {
+        const cachedLedgerSeq = Number(
+          queryClient.getQueryData<SessionDetail>(queryKeys.session(streamSessionId))?.ledgerSeq ?? 0,
+        );
+        if (parkedLedgerSeq > cachedLedgerSeq) {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) });
+        }
+      }
+      if (stream.readyState === 1) {
+        markStreamConnected();
+      }
+    }
 
     function logRejectedSessionStreamRoute(trace: SessionStreamProtocolTrace, message: string) {
       if (trace.rejectReason === "parse_error") {
@@ -760,11 +794,16 @@ export function useSessionDetailStream({
     stream.addEventListener("assistant_delta", handleAssistantDelta as EventListener);
 
     return () => {
-      // Route/session switch: dispose synchronously BEFORE touching the UI. Any
-      // pending payload from the old stream must be discarded, never applied to
-      // the React Query cache or the active-turn layer. Cleanup also cancels the
-      // coalesce timer and the assistant-delta animation frame so no expensive
-      // main-thread work outlives the old guarded stream.
+      // Route/session switch or unmount: detach this effect's projection state
+      // synchronously BEFORE touching the UI. Any pending payload from the old
+      // effect must be discarded, never applied to the React Query cache or the
+      // active-turn layer. Cleanup cancels the coalesce timer and the
+      // assistant-delta animation frame so no expensive main-thread work
+      // outlives the old guarded stream. The stream itself is NOT closed here:
+      // keep-warm release parks it (open) for SESSION_STREAM_WARM_MS so a
+      // remount reuses the live connection; the registry's parked listeners
+      // only record the ledger watermark and the stream is hard-closed once
+      // the warm window expires.
       disposed = true;
       const readyStateBeforeClose = stream.readyState;
       if (applyTimer) {
@@ -789,15 +828,16 @@ export function useSessionDetailStream({
       stream.removeEventListener("session_detail", handleSessionDetail as EventListener);
       stream.removeEventListener("session_initial", handleSessionInitial as EventListener);
       stream.removeEventListener("assistant_delta", handleAssistantDelta as EventListener);
-      stream.close();
+      releaseSessionStream(streamSessionId, stream);
       if (!closeTelemetryFired) {
         postBrowserTelemetry({
           phase: "session_stream",
-          eventCode: "browser.session_stream.closed",
-          message: "Session detail stream closed.",
+          eventCode: "browser.session_stream.parked",
+          message: "Session detail stream parked for reuse by the warm registry.",
           fields: {
             sessionId: streamSessionId,
             readyState: readyStateBeforeClose,
+            warmMs: SESSION_STREAM_WARM_MS,
           },
         });
       }

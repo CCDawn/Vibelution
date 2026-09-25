@@ -2,7 +2,11 @@
 /**
  * Behavior contract for direct-session stream lifecycle stability (perf root cause:
  * shouldConnect flapping on route settling must not close/reopen the guarded stream
- * and must not trigger authoritative session detail refreshes).
+ * and must not trigger authoritative session detail refreshes). Unmount no longer
+ * closes the stream: it parks it in the keep-warm registry for
+ * SESSION_STREAM_WARM_MS, drops pending projections, and a remount reuses the
+ * live connection with an authoritative re-baseline when the parked watermark
+ * advanced.
  */
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -13,6 +17,11 @@ import { queryKeys } from "../../api/queryKeys";
 import type { SessionDetail } from "../../api/types";
 import { applyOptimisticEditResubmit, mergeSessionDetailMessageWindow } from "../chatSessionState";
 import { SESSION_STREAM_ERROR_REFRESH_MIN_INTERVAL_MS, SESSION_STREAM_ROUTE_SWITCH_GRACE_MS } from "./chatSessionStreamConnect";
+import {
+  disposeSessionStreams,
+  peekParkedSessionStreamLedgerSeq,
+  SESSION_STREAM_WARM_MS,
+} from "./sessionStreamWarmRegistry";
 import {
   useSessionDetailStream,
   type UseSessionDetailStreamOptions,
@@ -209,9 +218,11 @@ describe("useSessionDetailStream stream lifecycle stability", () => {
   beforeEach(() => {
     FakeEventSource.reset();
     hookResults = [];
+    disposeSessionStreams();
   });
 
   afterEach(() => {
+    disposeSessionStreams();
     vi.unstubAllGlobals();
     vi.useRealTimers();
   });
@@ -381,6 +392,9 @@ describe("useSessionDetailStream stream lifecycle stability", () => {
 
     // Route switch to a different session must close the old EventSource
     // immediately — without waiting for SESSION_STREAM_ROUTE_SWITCH_GRACE_MS.
+    // The release parks the old stream, but the keep-warm registry holds a
+    // single warm slot, so acquiring the new session closes it synchronously
+    // inside the same commit.
     rerender(root, { ...options, activeSessionId: "s2" } as UseSessionDetailStreamOptions);
     expect(FakeEventSource.instances[0].closed).toBe(true);
     expect(FakeEventSource.instances).toHaveLength(2);
@@ -452,6 +466,122 @@ describe("useSessionDetailStream stream lifecycle stability", () => {
     unmount(root);
   });
 
+  it("parks the stream on unmount instead of closing it and hard-closes after the warm window", () => {
+    vi.useFakeTimers();
+    const { options } = baseOptions({});
+    const root = mount(options);
+    act(() => {
+      FakeEventSource.instances[0].open();
+    });
+
+    unmount(root);
+    // Keep-warm: unmount parks the live connection instead of tearing it down.
+    expect(FakeEventSource.instances[0].closed).toBe(false);
+
+    act(() => {
+      vi.advanceTimersByTime(SESSION_STREAM_WARM_MS + 1);
+    });
+    expect(FakeEventSource.instances[0].closed).toBe(true);
+  });
+
+  it("remount inside the warm window reuses the parked stream and re-baselines with an authoritative refresh", () => {
+    vi.useFakeTimers();
+    const { options, queryClient, invalidateSpy } = baseOptions({});
+    const root = mount(options);
+    act(() => {
+      FakeEventSource.instances[0].open();
+    });
+    unmount(root);
+
+    // Frames arriving while parked only advance the ledger watermark.
+    act(() => {
+      FakeEventSource.instances[0].emit("assistant_delta", assistantDeltaEvent({ ledgerSeq: 9 }));
+    });
+    expect(peekParkedSessionStreamLedgerSeq("s1")).toBe(9);
+
+    // The cached detail still sits at the last applied snapshot.
+    queryClient.setQueryData(queryKeys.session("s1"), { id: "s1", ledgerSeq: 5, messages: [] });
+
+    const remounted = mount(options);
+    // The same live stream is handed back — no cold reconnect.
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(FakeEventSource.instances[0].closed).toBe(false);
+    // Watermark advanced over the cache: one authoritative refresh + re-baseline.
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: queryKeys.session("s1") }),
+    );
+    expect(hookResults.at(-1)?.sessionStreamConnected).toBe(true);
+    unmount(remounted);
+  });
+
+  it("remount inside the warm window without a watermark advance skips the authoritative refresh", () => {
+    vi.useFakeTimers();
+    const { options, invalidateSpy } = baseOptions({});
+    const root = mount(options);
+    act(() => {
+      FakeEventSource.instances[0].open();
+    });
+    unmount(root);
+
+    const remounted = mount(options);
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(FakeEventSource.instances[0].closed).toBe(false);
+    expect(invalidateSpy).not.toHaveBeenCalled();
+    unmount(remounted);
+  });
+
+  it("drops parked delta and detail projections while no owner is mounted", () => {
+    vi.useFakeTimers();
+    const { options } = baseOptions({});
+    const syncSessionDetailSpy = options.syncSessionDetail as ReturnType<typeof vi.fn>;
+    const setActiveTurnLayersBySessionSpy = options.setActiveTurnLayersBySession as ReturnType<typeof vi.fn>;
+    const handleSessionDetailNotifierSpy =
+      options.desktopConversationNotifierRef.current.handleSessionDetail as ReturnType<typeof vi.fn>;
+    const handleAssistantDeltaNotifierSpy =
+      options.desktopConversationNotifierRef.current.handleAssistantDelta as ReturnType<typeof vi.fn>;
+    const root = mount(options);
+    act(() => {
+      FakeEventSource.instances[0].open();
+    });
+    act(() => {
+      FakeEventSource.instances[0].emit("session_detail", sessionDetailEvent({ ledgerSeq: 1 }));
+      vi.advanceTimersByTime(0);
+    });
+    expect(syncSessionDetailSpy).toHaveBeenCalledTimes(1);
+    unmount(root);
+
+    act(() => {
+      FakeEventSource.instances[0].emit("assistant_delta", assistantDeltaEvent({ ledgerSeq: 2 }));
+      FakeEventSource.instances[0].emit("session_detail", sessionDetailEvent({ ledgerSeq: 3 }));
+      vi.advanceTimersByTime(1_000);
+    });
+    // Parked frames only record the watermark: no projection, cache write or
+    // desktop notification fires while nobody is mounted.
+    expect(syncSessionDetailSpy).toHaveBeenCalledTimes(1);
+    expect(handleSessionDetailNotifierSpy).toHaveBeenCalledTimes(1);
+    expect(handleAssistantDeltaNotifierSpy).toHaveBeenCalledTimes(0);
+    expect(setActiveTurnLayersBySessionSpy).not.toHaveBeenCalled();
+    expect(peekParkedSessionStreamLedgerSeq("s1")).toBe(3);
+  });
+
+  it("keeps a single warm slot: mounting another session closes the parked one", () => {
+    vi.useFakeTimers();
+    const { options } = baseOptions({});
+    const root = mount(options);
+    act(() => {
+      FakeEventSource.instances[0].open();
+    });
+    unmount(root);
+    expect(FakeEventSource.instances[0].closed).toBe(false);
+
+    const second = baseOptions({ activeSessionId: "s2" });
+    const root2 = mount(second.options);
+    expect(FakeEventSource.instances[0].closed).toBe(true);
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(FakeEventSource.instances[1].closed).toBe(false);
+    unmount(root2);
+  });
+
   it("applies the current session final assistant delta and final session detail immediately", () => {
     const committedLayers: unknown[] = [];
     const setActiveTurnLayersBySession = vi.fn((updater) => {
@@ -490,9 +620,11 @@ describe("useSessionDetailStream stop intent freeze", () => {
   beforeEach(() => {
     FakeEventSource.reset();
     hookResults = [];
+    disposeSessionStreams();
   });
 
   afterEach(() => {
+    disposeSessionStreams();
     vi.unstubAllGlobals();
     vi.useRealTimers();
   });

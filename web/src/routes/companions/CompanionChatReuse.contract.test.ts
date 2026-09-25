@@ -57,7 +57,7 @@ describe("virtual-human native Chat reuse", () => {
 
   it("keeps one guarded session-stream owner and removes person/session pickers in companion mode", () => {
     expect(streamSource).toContain("createSessionEventStream = createDefaultSessionEventStream");
-    expect(streamSource).toContain("const stream = createSessionEventStream(streamSessionId);");
+    expect(streamSource).toContain("const acquired = acquireSessionStream(streamSessionId, createSessionEventStream);");
     expect(sessionEventStreamSource).toContain("consumeGuardedEventStream(");
     expect(sessionEventStreamSource).not.toContain("new EventSource");
     expect(lobbySource).not.toContain("EventSource");

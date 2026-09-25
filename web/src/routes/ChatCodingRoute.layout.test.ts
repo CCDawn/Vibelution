@@ -2168,7 +2168,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndStreamSource).toContain("stream.removeEventListener(\"session_initial\", handleSessionInitial as EventListener)");
     expect(routeAndStreamSource).toContain("stream.removeEventListener(\"assistant_delta\", handleAssistantDelta as EventListener)");
     expect(routeAndStreamSource).toContain("queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) })");
-    expect(routeAndStreamSource).toContain("const stream = createSessionEventStream(streamSessionId)");
+    expect(routeAndStreamSource).toContain("const acquired = acquireSessionStream(streamSessionId, createSessionEventStream)");
     expect(routeAndStreamSource).not.toContain("/events?initial=light");
     expect(routeAndStreamSource).not.toContain("let pendingAssistantDeltaDetail: SessionDetail | undefined");
     expect(routeAndStreamSource).not.toContain("pendingAssistantDeltaDetail = mergeAssistantDeltaIntoSessionDetail");
@@ -2304,7 +2304,7 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("keeps active chat streams stable during direct session route switches", () => {
     const sessionStreamEffectSource = routeAndStreamSource.slice(
-      routeAndStreamSource.indexOf("const stream = createSessionEventStream(streamSessionId);"),
+      routeAndStreamSource.indexOf("const acquired = acquireSessionStream(streamSessionId, createSessionEventStream);"),
       routeAndStreamSource.length,
     );
 
@@ -3582,7 +3582,7 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("requests authoritative session refresh when the session stream errors", () => {
     const sessionStreamStart = routeAndStreamSource.indexOf(
-      "const stream = createSessionEventStream(streamSessionId)",
+      "const acquired = acquireSessionStream(streamSessionId, createSessionEventStream)",
     );
     const onErrorStart = routeAndStreamSource.indexOf("stream.onerror = () => {", sessionStreamStart);
     const onErrorEnd = routeAndStreamSource.indexOf("function handleSessionDetail", onErrorStart);
