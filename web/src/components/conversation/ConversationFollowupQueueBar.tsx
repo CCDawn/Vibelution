@@ -147,7 +147,7 @@ export function ConversationFollowupQueueBar({
                     </span>
                   ) : null}
                   {paused ? (
-                    <span className={styles.followupQueueChipPaused}>
+                    <span className={`${styles.followupQueueChip} ${styles.followupQueueChipPaused}`}>
                       {lang === "zh" ? "已暂停" : "Paused"}
                     </span>
                   ) : null}
