@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { controlDesktopPet, desktopPetControlBridge, type DesktopPetState } from "../api/desktopPet";
 import { VButton, VSettingsRow } from "../components/vui";
+import styles from "./ConfigDesktopPetSettings.styles";
 
 /** One desktop bridge owner, reused by the directory and the companion category. */
 export function ConfigDesktopPetSettings({ language }: { language: "zh" | "en" }) {
@@ -55,7 +56,7 @@ export function ConfigDesktopPetSettings({ language }: { language: "zh" | "en" }
       variant="secondary"
       onPress={() => void toggle()}
     >{state?.open ? (zh ? "关闭桌宠" : "Close pet") : (zh ? "启动桌宠" : "Open pet")}</VButton>}
-    status={<span className="text-vui-xs text-vui-fg-tertiary" role="status">{label}</span>}
-    footer={error ? <p className="m-0 text-vui-xs text-[var(--state-error)]" role="alert">{error}</p> : undefined}
+    status={<span className={styles.status} role="status">{label}</span>}
+    footer={error ? <p className={styles.error} role="alert">{error}</p> : undefined}
   />;
 }
