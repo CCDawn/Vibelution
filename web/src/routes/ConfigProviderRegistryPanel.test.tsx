@@ -157,7 +157,7 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(onPin).toHaveBeenCalledWith("relay_a", [models[0]]);
   });
 
-  it("keeps address editing in the same service dialog", async () => {
+  it("edits connection and context directly in the selected supplier page", async () => {
     const onSaveContextWindow = vi.fn();
     const onEditRoute = vi.fn();
     const container = document.createElement("div");
@@ -165,16 +165,18 @@ describe("ConfigProviderRegistryPanel", () => {
     const root = createRoot(container);
     mountedRoots.push(root);
     await act(async () => root.render(<ConfigProviderRegistryPanel {...panelProps([], { onSaveContextWindow, onEditRoute })} />));
-    await act(async () => container.querySelector<HTMLButtonElement>('[data-provider-action="edit-asset"]')!.click());
-    const dialog = document.body.querySelector('[role="dialog"]');
-    expect(dialog?.textContent).toContain("编辑服务 · Relay A");
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    const connection = container.querySelector('[data-vui-region="config-provider-connection"]');
+    expect(connection?.textContent).toContain("https://relay.example/v1");
     expect(container.querySelector('[data-vui="split-aside"]')).toBeNull();
-    const save = Array.from(dialog!.querySelectorAll("button")).find((button) => button.textContent?.includes("保存上下文窗口"));
+    const save = Array.from(connection!.querySelectorAll("button")).find((button) => button.textContent?.includes("保存上下文窗口"));
     await act(async () => save!.click());
     expect(onSaveContextWindow).toHaveBeenCalledWith("relay_a", 128000);
-    await act(async () => dialog!.querySelector<HTMLButtonElement>('[data-provider-action="route"]')!.click());
+    await act(async () => connection!.querySelector<HTMLButtonElement>('[data-provider-action="route"]')!.click());
     expect(onEditRoute).toHaveBeenCalledWith("relay_a");
-    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-provider-action="edit-asset"]')!.click());
+    expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain("高级管理 · Relay A");
   });
 
   it("renders a searchable model toolbar with status counts", () => {
@@ -314,13 +316,13 @@ describe("ConfigProviderRegistryPanel", () => {
 
   it("fills the desktop workspace with large Provider rows and a bottom danger zone", () => {
     expect(panelStyles.sectionSurface).toContain("h-full");
-    expect(panelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(18rem,24vw,22rem)]");
+    expect(panelSource).toContain("defaultWidth: 224");
     expect(panelStyles.providerList).toContain("min-h-0");
     expect(panelStyles.providerButton).toContain("!min-h-16");
     expect(panelStyles.providerLabel).toContain("whitespace-normal");
     expect(panelStyles.providerLabel).toContain("break-words");
     expect(panelStyles.inspectorPanel).toContain("max-h-[72vh]");
-    expect(panelStyles.detailBody).toContain("min-h-0");
+    expect(panelStyles.modelsColumn).toContain("overflow-y-auto");
     expect(panelSource).toContain('data-provider-action="edit-asset"');
     expect(panelSource).toContain('data-provider-danger-zone="true"');
     expect(panelSource).toContain("openInspector");
@@ -349,16 +351,18 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(panelSource).toContain("confirmed: true");
   });
 
-  it("keeps API Key and context window in a focused service configuration dialog", () => {
-    expect(panelSource).toContain("一个中转站 / Provider = 一把 API Key");
-    expect(panelSource).toContain("上下文上限（token）");
+  it("keeps API Key and context window in setting rows above the model list", () => {
+    expect(panelSource).toContain("此供应商下的模型共用一把密钥");
+    expect(panelSource).toContain("默认上下文上限");
     expect(panelSource).toContain("<VDialog");
     expect(panelSource).toContain("保存上下文窗口");
     expect(panelSource).toContain("config-asset-inspector");
     const markup = renderToStaticMarkup(
       <ConfigProviderRegistryPanel {...panelProps([])} />,
     );
-    expect(markup).toContain("连接设置");
+    expect(markup).toContain("更新 API Key");
+    expect(markup).toContain('data-vui="settings-row"');
+    expect(markup.indexOf('config-provider-connection')).toBeLessThan(markup.indexOf('data-provider-tab="models"'));
     expect(markup).toContain("已配置服务");
   });
 
@@ -450,6 +454,6 @@ describe("ConfigProviderRegistryPanel", () => {
       <ConfigProviderRegistryPanel {...panelProps([], { rows: [timedOut] })} />,
     );
     expect(markup).toContain("discovery_failed");
-    expect(markup).toContain("连接设置");
+    expect(markup).toContain("修改地址与协议");
   });
 });

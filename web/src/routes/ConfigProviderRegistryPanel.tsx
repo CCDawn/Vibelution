@@ -1,4 +1,4 @@
-import { AlertTriangle, Database, Image as ImageIcon, Pencil, RefreshCw, Save, Trash2 } from "lucide-react";
+import { AlertTriangle, Database, Image as ImageIcon, RefreshCw, Save, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
@@ -14,6 +14,8 @@ import {
   VInput,
   VPanelHeader,
   VSection,
+  VSettingsGroupCard,
+  VSettingsRow,
   VSplitWorkspace,
   VStateSurface,
   VStatusChip,
@@ -318,140 +320,49 @@ function ConnectionTab({
   onCancelCredential: () => void;
   onSaveCredential: () => void;
 }) {
-  const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
   const needsKey = provider.credentialState !== "not_required";
-  const keyReady = provider.credentialState === "configured" || provider.credentialState === "not_required";
   return (
-    <div className={styles.connectionWorkspace}>
-      <section className={styles.connectionCard} aria-label="API Key">
-        <VPanelHeader
-          className={styles.connectionCardHeader}
-          headingLevel={3}
-          title="API 密钥"
-          tooltip="一个中转站 / Provider = 一把 API Key。下方 Key 对该 Provider 下全部固定模型共用，不必按模型重复填写。"
-          tooltipLabel="API Key 说明"
-          actions={(
-            <VStatusChip tone={keyReady ? "success" : "warning"}>
-              {provider.credentialState === "not_required"
-                ? "无需 Key"
-                : provider.credentialState === "configured"
-                  ? "已配置"
-                  : "未配置"}
-            </VStatusChip>
-          )}
-        />
-        {needsKey ? (
-          credentialActive ? (
-            <div className={styles.inlineCredential}>
-              <label className={styles.inlineCredentialField}>
-                <span>API Key</span>
-                <VInput
-                  type="password"
-                  autoComplete="new-password"
-                  value={credentialValue}
-                  disabled={disabled}
-                  placeholder="粘贴中转站提供的 Key"
-                  onChange={(event) => onCredentialValueChange(event.target.value)}
-                />
-              </label>
-              <VActionGroup ariaLabel="API Key 操作">
-                <VButton isDisabled={disabled} onPress={onCancelCredential}>取消</VButton>
-                <VButton
-                  variant="primary"
-                  isDisabled={disabled || !credentialValue.trim()}
-                  title="保存后，此服务下的模型将共用新的密钥。"
-                  onPress={onSaveCredential}
-                >
-                  保存 Key
-                </VButton>
-              </VActionGroup>
-            </div>
-          ) : (
-            <div className={styles.connectionCardBody}>
-              <VButton
-                variant="primary"
-                isDisabled={disabled}
-                title={
-                  provider.credentialState === "configured"
-                    ? "已有 Key。需要轮换时点此更新（仍是这一把，覆盖全站模型）。"
-                    : "还没有 Key。中转站通常只发一把 Key，配一次即可调用该站所有固定模型。"
-                }
-                onPress={onEditCredential}
-              >
-                {provider.credentialState === "configured" ? "更新 API Key" : "填写 API Key"}
-              </VButton>
-            </div>
-          )
-        ) : (
-          <p className={styles.muted}>此服务无需 API Key。</p>
-        )}
-      </section>
-
-      <details className={styles.connectionCard}>
-        <summary className={styles.verificationDetails}>上下文上限（高级）{provider.contextWindow ? ` · ${provider.contextWindow.toLocaleString()} token` : " · 未配置"}</summary>
-      <section className={styles.connectionCard} aria-label="上下文窗口">
-        <VPanelHeader
-          className={styles.connectionCardHeader}
-          headingLevel={3}
-          title="上下文上限（token）"
-          tooltip="上下文窗口是 Provider 级兜底（token 数）。填中转站/模型真实上限，例如 32000、128000。未填时依赖发现结果，缺失会导致 Agent 启动失败。保存后立即写入配置。"
-          tooltipLabel="上下文窗口说明"
-          actions={(
-            <VStatusChip tone={provider.contextWindow ? "success" : "warning"}>
-              {provider.contextWindow ? `${provider.contextWindow}` : "未配置"}
-            </VStatusChip>
-          )}
-        />
-        <div className={styles.connectionCardBody}>
-          <label className={styles.inlineCredentialField}>
-            <span>上下文窗口</span>
-            <VInput
-              type="number"
-              min={1}
-              step={1}
-              value={contextWindowDraft}
-              disabled={disabled}
-              placeholder="例如 128000"
-              onChange={(event) => onContextWindowDraftChange(event.target.value)}
-            />
-          </label>
-          <VButton variant="primary" isDisabled={disabled} onPress={onSaveContextWindow}>
-            保存上下文窗口
-          </VButton>
-        </div>
-      </section>
-      </details>
-
-      <VButton variant="ghost" aria-expanded={showTechnicalDetails} onPress={() => setShowTechnicalDetails((open) => !open)}>
-        {showTechnicalDetails ? "收起连接与部署详情" : "连接与部署详情"}
-      </VButton>
-      {showTechnicalDetails ? (
-        <div className={styles.detailGrid}>
-          <span className={styles.fact}>
-            <small className={styles.factLabel}>服务端点</small>
-            <strong className={styles.factValue} title={provider.baseUrl || "未配置"}>{provider.baseUrl || "未配置"}</strong>
-          </span>
-          <span className={styles.fact}>
-            <small className={styles.factLabel}>驱动 / 类型</small>
-            <strong className={styles.factValue}>{provider.driver || "未配置"} · {provider.serviceClass || "未配置"}</strong>
-          </span>
-          {provider.serviceClass === "local_runtime" ? (
-            <VSection className={`${styles.deployment} col-span-full`} title="本地部署" meta="与模型 upstream ID 分离">
-              <div className={styles.detailGrid}>
-                <span className={styles.fact}>
-                  <small className={styles.factLabel}>运行框架</small>
-                  <strong className={styles.factValue}>{provider.runtimeFramework || "未知"}</strong>
-                </span>
-                <span className={styles.fact}>
-                  <small className={styles.factLabel}>模型文件路径</small>
-                  <strong className={styles.factValue} title={provider.artifactPath || "未配置"}>{provider.artifactPath || "未配置"}</strong>
-                </span>
-              </div>
-            </VSection>
-        ) : null}
-      </div>
-      ) : null}
-    </div>
+    <VSettingsGroupCard>
+      <VSettingsRow label="API 密钥"
+        description={needsKey ? "此供应商下的模型共用一把密钥；已保存的密钥不会回显。" : "此服务无需 API Key。"}
+        control={needsKey ? <VButton variant="secondary" isDisabled={disabled} onPress={onEditCredential}>
+          {provider.credentialState === "configured" ? "更新 API Key" : "填写 API Key"}
+        </VButton> : <span className={styles.muted}>无需 Key</span>}
+        footer={needsKey && credentialActive ? (
+          <div className={styles.inlineCredential}>
+            <label className={styles.inlineCredentialField}>
+              <span>API Key</span>
+              <VInput type="password" autoComplete="new-password" value={credentialValue}
+                disabled={disabled} placeholder="输入新的 API Key"
+                onChange={(event) => onCredentialValueChange(event.target.value)} />
+            </label>
+            <VActionGroup ariaLabel="API Key 操作">
+              <VButton isDisabled={disabled} onPress={onCancelCredential}>取消</VButton>
+              <VButton variant="primary" isDisabled={disabled || !credentialValue.trim()}
+                onPress={onSaveCredential}>保存 Key</VButton>
+            </VActionGroup>
+          </div>
+        ) : undefined} />
+      <VSettingsRow label="默认上下文上限"
+        description="供应商级兜底值，仅在模型没有独立上限时使用。"
+        control={<span className={styles.muted}>{provider.contextWindow ? `${provider.contextWindow.toLocaleString()} token` : "使用模型声明"}</span>}
+        footer={<details>
+          <summary className={styles.verificationDetails}>调整上限与部署详情</summary>
+          <div className={styles.connectionCardBody}>
+            <label className={styles.inlineCredentialField}>
+              <span>上下文窗口</span>
+              <VInput type="number" min={1} step={1} value={contextWindowDraft} disabled={disabled}
+                placeholder="例如 128000" onChange={(event) => onContextWindowDraftChange(event.target.value)} />
+            </label>
+            <VButton variant="secondary" isDisabled={disabled || (contextWindowDraft.trim() !== "" && (!Number.isFinite(Number(contextWindowDraft)) || Number(contextWindowDraft) <= 0))}
+              onPress={onSaveContextWindow}>保存上下文窗口</VButton>
+            <span className={styles.muted}>驱动：{provider.driver || "未配置"} · {provider.serviceClass || "未配置"}</span>
+            {provider.serviceClass === "local_runtime" ? <span className={styles.connectionAddress}>
+              运行框架：{provider.runtimeFramework || "未知"} · 模型文件：{provider.artifactPath || "未配置"}
+            </span> : null}
+          </div>
+        </details>} />
+    </VSettingsGroupCard>
   );
 }
 
@@ -1083,8 +994,6 @@ export function ConfigProviderRegistryPanel({
 
   function closeInspector() {
     setInspectorOpen(false);
-    onCancelCredential();
-    onCancelRoute?.();
   }
 
   const saveContextWindowFor = (target: ProviderRegistryRow) => {
@@ -1121,13 +1030,16 @@ export function ConfigProviderRegistryPanel({
         className={styles.registryWorkspace}
         resize={{
           layoutId: WORKBENCH_LAYOUT_IDS.configModelAssets,
-          sidebar: { defaultWidth: 300, minWidth: 260, maxWidth: 420 },
+          sidebar: { defaultWidth: 224, minWidth: 180, maxWidth: 300 },
           collapse: {
             sidebar: { separatorLabel: "服务列表宽度", collapseLabel: "收起服务列表", expandLabel: "展开服务列表" },
           },
         }}
         sidebar={(
           <div className={styles.providerRail}>
+            {onAddConnection ? <VButton variant="secondary" isDisabled={disabled} onPress={onAddConnection}>
+              添加供应商
+            </VButton> : null}
             <div className={styles.providerListSection}>
               <p className={styles.providerListHeading}>已配置服务 · {healthyRows.length}</p>
               <VEntityList
@@ -1208,6 +1120,27 @@ export function ConfigProviderRegistryPanel({
                 {visibleFeedback.message}
               </p>
             ) : null}
+            <div className={styles.providerSettings} data-vui-region="config-provider-connection">
+              <VPanelHeader title={provider.label || provider.providerId} headingLevel={3}
+                actions={<VButton data-provider-action="edit-asset" variant="ghost" isDisabled={disabled}
+                  onPress={() => openInspector(provider.providerId)}>高级管理</VButton>} />
+              <VSettingsGroupCard>
+                <VSettingsRow label="服务地址" description={provider.baseUrl || "未配置"}
+                  control={<VButton data-provider-action="route" variant="secondary" isDisabled={disabled}
+                    onPress={() => onEditRoute(provider.providerId)}>修改地址与协议</VButton>}
+                  footer={routeActive ? routeEditor : undefined} />
+                <VSettingsRow label="接口协议" description="此供应商下模型使用的默认协议"
+                  control={<span className={styles.muted}>{provider.defaultProtocol || "未配置"}</span>} />
+              </VSettingsGroupCard>
+              <ConnectionTab key={provider.providerId}
+                provider={provider} contextWindowDraft={contextWindowDraft}
+                credentialActive={credentialActive} credentialValue={credentialValue} disabled={disabled}
+                onContextWindowDraftChange={setContextWindowDraft}
+                onSaveContextWindow={() => saveContextWindowFor(provider)}
+                onEditCredential={() => onEditCredential(provider.providerId)}
+                onCredentialValueChange={onCredentialValueChange} onCancelCredential={onCancelCredential}
+                onSaveCredential={() => onSaveCredential(provider.providerId)} />
+            </div>
             <div className={styles.detailBody} data-provider-tab="models">
               <ProviderModelsTab
                 toolbarIdentity={(
@@ -1230,15 +1163,6 @@ export function ConfigProviderRegistryPanel({
                   onPress={() => onDiscover(provider.providerId)}
                 >
                   {discoverBusy ? "发现中…" : "发现模型"}
-                </VButton>
-                <VButton
-                  data-provider-action="edit-asset"
-                  icon={<Pencil size={14} />}
-                  variant={inspectorOpen ? "primary" : "secondary"}
-                  isDisabled={disabled}
-                  onPress={() => openInspector(provider.providerId)}
-                >
-                  连接设置
                 </VButton>
               </VActionGroup>
                 )}
@@ -1267,32 +1191,14 @@ export function ConfigProviderRegistryPanel({
       <VDialog
         open={Boolean(inspectorProvider)}
         onOpenChange={(open) => { if (!open) closeInspector(); }}
-        title={inspectorProvider ? `编辑服务 · ${inspectorProvider.label || inspectorProvider.providerId}` : "编辑服务"}
-        description="服务地址和密钥只需配置一次，供此服务下的模型共用。"
+        title={inspectorProvider ? `高级管理 · ${inspectorProvider.label || inspectorProvider.providerId}` : "高级管理"}
+        description="查看服务诊断、合并重复供应商或移除服务。"
         size="lg"
       >
         {inspectorProvider ? (
           <div className={styles.inspectorPanel} data-vui-region="config-asset-inspector" data-provider-id={inspectorProvider.providerId}>
             <div className={styles.inspectorBody}>
               {visibleFeedback ? <p className={visibleFeedback.phase === "error" ? styles.actionFeedbackError : styles.actionFeedback} role="status">{visibleFeedback.message}</p> : null}
-              {routeEditor || <section className={styles.connectionCard}>
-                <h3 className={styles.connectionCardTitle}>服务地址</h3>
-                <p className={styles.connectionAddress}>{inspectorProvider.baseUrl || "未配置"}</p>
-                <VButton data-provider-action="route" variant="secondary" isDisabled={disabled} onPress={() => onEditRoute(inspectorProvider.providerId)}>修改地址与协议</VButton>
-              </section>}
-              <ConnectionTab
-                provider={inspectorProvider}
-                contextWindowDraft={contextWindowDraft}
-                credentialActive={credentialActive && activeCredentialProviderId === inspectorProvider.providerId}
-                credentialValue={credentialValue}
-                disabled={disabled}
-                onContextWindowDraftChange={setContextWindowDraft}
-                onSaveContextWindow={() => saveContextWindowFor(inspectorProvider)}
-                onEditCredential={() => onEditCredential(inspectorProvider.providerId)}
-                onCredentialValueChange={onCredentialValueChange}
-                onCancelCredential={onCancelCredential}
-                onSaveCredential={() => onSaveCredential(inspectorProvider.providerId)}
-              />
               <VActionGroup ariaLabel="进阶连接操作" className={styles.actions}>
 
                 <VButton

@@ -181,8 +181,9 @@ describe("ConfigSettingsNavigation", () => {
     expect(sidebarMarkup).toContain("搜索设置");
     expect(sidebarMarkup).toContain('data-vui="contextual-hint"');
     expect(sidebarMarkup).not.toContain('title="配置按使用场景分组，修改后统一保存"');
-    // VButton loads its tooltip renderer lazily, so SSR correctly renders the
-    // accessible button fallback rather than a Radix tooltip trigger.
+    // Navigation uses native titles so pointer entry cannot remount the click target.
+    expect(componentSource).toContain("title={group.summary}");
+    expect(componentSource).not.toContain("tooltip={group.summary}");
     expect(sidebarMarkup.match(/data-vui="button"/g)?.length ?? 0).toBe(groups.length);
     expect(sidebarMarkup).toMatch(/aria-pressed="true"[^>]*><span>工具与诊断<\/span>/);
     expect(tabsMarkup).toContain("日常工具");
@@ -192,8 +193,8 @@ describe("ConfigSettingsNavigation", () => {
     expect(tabsMarkup).not.toContain("原始配置");
     expect(tabsMarkup).toContain('aria-current="page"');
     expect(tabsMarkup.match(/data-vui="button"/g)?.length ?? 0).toBe(activeGroup?.pages.length ?? 0);
-    expect(styles.groupButton).toContain("min-h-11");
-    expect(styles.pageButton).toContain("min-h-10");
+    expect(styles.groupButton).toContain("!min-h-9");
+    expect(styles.pageButton).not.toContain("min-h-10");
     expect(styles.sidebar).toContain("w-full");
     expect(styles.pageTabs).toContain("overflow-x-auto");
     expect(componentSource).not.toContain(["@heroui", "react"].join("/"));

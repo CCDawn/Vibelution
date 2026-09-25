@@ -5,6 +5,16 @@ import { describe, expect, it } from "vitest";
 import { VSettingsGroupCard, VSettingsRow } from "./forms/VSettingsRow";
 
 describe("VSettingsRow", () => {
+  it("stacks controls by available container width and allows action groups to wrap", () => {
+    for (const controlLayout of ["default", "wide"] as const) {
+      const markup = renderToStaticMarkup(<VSettingsRow label="长标签" controlLayout={controlLayout} />);
+      expect(markup).toContain("@container");
+      expect(markup).toContain("grid-cols-1");
+      expect(markup).toContain(controlLayout === "wide" ? "@min-[32rem]:" : "@min-[28rem]:");
+      expect(markup).toContain("flex-wrap");
+      expect(markup).not.toContain("flex-nowrap");
+    }
+  });
   it("renders label/description on the left with a fixed 192px control column by default", () => {
     const markup = renderToStaticMarkup(
       <VSettingsRow testId="row-x" label="标签" description="一行说明" control={<span>值</span>} />,

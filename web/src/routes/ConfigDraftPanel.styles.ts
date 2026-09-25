@@ -6,14 +6,12 @@ import {
 
 const readablePanelSurface = vuiElevatedPanelClass;
 const readableRowSurface = vuiOpaqueRowClass;
-const mutedControl =
-  "[display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] [min-height:var(--control-height)] [padding:0_9px] [border-radius:var(--control-radius)] [font:inherit] [font-size:var(--vui-font-xs)] [font-weight:600] [line-height:1] [white-space:nowrap] [transition:border-color_140ms_ease,background-color_140ms_ease,color_140ms_ease] [border:1px_solid_var(--vui-border-soft)] [background:var(--vui-control-muted)] [color:var(--vui-fg-primary)] hover:[cursor:pointer] hover:[border-color:var(--vui-border-soft)] hover:[background:var(--vui-control-muted-hover)] disabled:[cursor:not-allowed] disabled:[opacity:0.56]";
 const sectionHeaderSurface =
   `[border-bottom:1px_solid_var(--vui-border-subtle)] !${vuiToolbarFillClass}`;
 
 const styles = {
   actionButton:
-    `vui-routes-configdraftpanel actionButton ${mutedControl}`,
+    "vui-routes-configdraftpanel actionButton",
   actionsRow:
     "vui-routes-configdraftpanel actionsRow [display:flex] [align-items:center] [gap:6px] [flex-wrap:wrap]",
   draftActionRail:
