@@ -138,6 +138,23 @@ export function isCliAgentLifecycleMessage(message: ConversationMessage) {
   return metadataString(message, "kind") === "cli_agent_lifecycle";
 }
 
+export function isSessionRecoveryResumedMessage(message: ConversationMessage) {
+  return message.role === "assistant"
+    && metadataString(message, "kind") === "session_recovery_resumed";
+}
+
+// Half-streamed partials from an interrupted turn already carry
+// metadata.interrupted; recovery supersedes them by appending
+// metadata.recoverySuperseded. Only the display layer drops them — the journal
+// keeps both messages untouched.
+export function isRecoverySupersededPartial(
+  message: Pick<ConversationMessage, "role" | "metadata">,
+) {
+  return message.role === "assistant"
+    && message.metadata?.interrupted === true
+    && message.metadata?.recoverySuperseded === true;
+}
+
 export type ImageArtifactMessage = {
   imageUrl: string;
   downloadUrl: string;

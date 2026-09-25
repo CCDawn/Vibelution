@@ -8,6 +8,8 @@ import {
   cliAgentLifecycleDetail,
   cliAgentLifecycleLabel,
   groupRoomTranscriptLabel,
+  sessionRecoveryResumedDetail,
+  sessionRecoveryResumedLabel,
 } from "./conversationSpecialMessagePresentation";
 
 const conversationViewSource = readFileSync(new URL("./ConversationView.tsx", import.meta.url), "utf8");
@@ -103,5 +105,33 @@ describe("conversation special message presentation", () => {
       content: "[群聊同步]",
       metadata: { kind: "group_room_transcript" },
     }))).toBe("群聊同步记录");
+  });
+
+  it("builds localized session recovery labels and details", () => {
+    const firstAttempt = message({
+      metadata: {
+        kind: "session_recovery_resumed",
+        attempt: 1,
+        turnLabel: "重构导出脚本",
+      },
+    });
+    const retried = message({
+      metadata: {
+        kind: "session_recovery_resumed",
+        attempt: 2,
+        turnLabel: "重构导出脚本",
+      },
+    });
+    const bare = message({
+      metadata: { kind: "session_recovery_resumed" },
+    });
+
+    expect(sessionRecoveryResumedLabel(firstAttempt, "zh")).toBe("已从重启中恢复，继续执行");
+    expect(sessionRecoveryResumedLabel(firstAttempt, "en")).toBe("Recovered after restart and resumed");
+    // attempt === 1 is the first auto-recovery: no retry counter in the meta.
+    expect(sessionRecoveryResumedDetail(firstAttempt, "zh")).toBe("重构导出脚本");
+    expect(sessionRecoveryResumedDetail(retried, "zh")).toBe("重构导出脚本 · 自动重试 2");
+    expect(sessionRecoveryResumedDetail(retried, "en")).toBe("重构导出脚本 · auto-retry 2");
+    expect(sessionRecoveryResumedDetail(bare, "zh")).toBe("");
   });
 });

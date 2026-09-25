@@ -24,6 +24,28 @@ export function cliAgentLifecycleDetail(message: ConversationMessage) {
     || messageText(message);
 }
 
+export function sessionRecoveryResumedLabel(_message: ConversationMessage, lang: "zh" | "en") {
+  return lang === "zh" ? "已从重启中恢复，继续执行" : "Recovered after restart and resumed";
+}
+
+function sessionRecoveryAttempt(message: ConversationMessage) {
+  const value = message.metadata?.attempt;
+  return typeof value === "number" && Number.isFinite(value) && value > 1
+    ? Math.floor(value)
+    : 0;
+}
+
+export function sessionRecoveryResumedDetail(message: ConversationMessage, lang: "zh" | "en") {
+  const attempt = sessionRecoveryAttempt(message);
+  const retryText = attempt
+    ? lang === "zh" ? `自动重试 ${attempt}` : `auto-retry ${attempt}`
+    : "";
+  return [
+    conversationMessageMetadataText(message.metadata, "turnLabel"),
+    retryText,
+  ].filter(Boolean).join(" · ");
+}
+
 export function agentInboxSourceLabel(message: ConversationMessage) {
   const metadata = message.metadata;
   const sourceLabel = [
