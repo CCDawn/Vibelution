@@ -20,7 +20,7 @@ const styles: Record<string, string> = {
   candidateHead:
     "flex items-center justify-between gap-2 [&_strong]:[font-size:var(--vui-font-2xs)] [&_small]:[font-size:var(--vui-font-2xs)] [&_small]:text-[var(--fg-secondary)]",
   scoreGrid:
-    "grid grid-cols-2 gap-1 @min-[400px]:grid-cols-4 [&>div]:grid [&>div]:gap-[2px] [&>div]:rounded-[var(--vui-radius-control)] [&>div]:bg-[var(--vui-surface-card)] [&>div]:p-1.5 [&_span]:text-[10px] [&_span]:text-[var(--fg-secondary)] [&_strong]:[font-size:var(--vui-font-2xs)]",
+    "grid grid-cols-2 gap-1 @min-[400px]:grid-cols-4 [&>div]:grid [&>div]:gap-[2px] [&>div]:rounded-[var(--vui-radius-control)] [&>div]:bg-[var(--vui-surface-card)] [&>div]:p-1.5 [&_span]:text-vui-micro-10 [&_span]:text-[var(--fg-secondary)] [&_strong]:[font-size:var(--vui-font-2xs)]",
   reviewCard:
     "grid gap-1.5 rounded-[var(--vui-radius-control)] border border-[var(--vui-border-subtle)] p-2.5 [&>span]:[font-size:var(--vui-font-2xs)] [&>span]:font-[650] [&>span]:tracking-[0.02em] [&>span]:text-[var(--fg-secondary)] [&_p]:[font-size:var(--vui-font-2xs)] [&_p]:leading-[1.5]",
   hint: "m-0 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]",

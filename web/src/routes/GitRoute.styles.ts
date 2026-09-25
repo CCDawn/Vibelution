@@ -40,11 +40,11 @@ export const gitRouteStyles = {
   gitOverviewPanel:
     "grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2 max-[1200px]:[.workspaceOverview_&]:col-start-1 max-[1200px]:[.workspaceOverview_&]:row-start-1 max-[860px]:[.workspaceOverview_&]:col-auto max-[860px]:[.workspaceOverview_&]:row-auto",
   cleanStateStrip:
-    `grid w-full min-w-0 cursor-pointer grid-cols-[minmax(140px,auto)_minmax(0,1fr)] items-center gap-3 ${panelSurface} px-3 py-2.5 text-left text-inherit hover:border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),transparent)] hover:bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),var(--vui-surface-panel))] max-[860px]:grid-cols-[minmax(0,1fr)] [&_h2]:m-0 [&_h2]:text-[0.98rem] [&_h2]:text-vui-fg-primary [&>span]:min-w-0 [&>span]:[overflow-wrap:anywhere] [&>span]:[white-space:normal] [&>span]:[font-size:var(--vui-font-xs)] [&>span]:leading-tight [&>span]:text-vui-fg-secondary`,
+    `grid w-full min-w-0 cursor-pointer grid-cols-[minmax(140px,auto)_minmax(0,1fr)] items-center gap-3 ${panelSurface} px-3 py-2.5 text-left text-inherit hover:border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),transparent)] hover:bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),var(--vui-surface-panel))] max-[860px]:grid-cols-[minmax(0,1fr)] [&_h2]:m-0 [&_h2]:text-vui-md [&_h2]:text-vui-fg-primary [&>span]:min-w-0 [&>span]:[overflow-wrap:anywhere] [&>span]:[white-space:normal] [&>span]:[font-size:var(--vui-font-xs)] [&>span]:leading-tight [&>span]:text-vui-fg-secondary`,
   gitSituationGrid:
     "grid min-h-0 min-w-0 grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)] gap-2 max-[1200px]:grid-cols-1",
   gitSituationCard:
-    `grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2 ${panelSurface} p-2.5 [&_h2]:m-0 [&_h2]:min-w-0 [&_h2]:text-[0.98rem] [&_h2]:text-vui-fg-primary`,
+    `grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2 ${panelSurface} p-2.5 [&_h2]:m-0 [&_h2]:min-w-0 [&_h2]:text-vui-md [&_h2]:text-vui-fg-primary`,
   situationList: "grid min-h-0 content-start gap-2.5 overflow-auto pr-1",
   worktreeList: "grid min-h-0 content-start gap-2.5 overflow-auto pr-1",
   worktreeItem:
@@ -52,7 +52,7 @@ export const gitRouteStyles = {
   historyPanel:
     "grid-rows-[auto_minmax(0,1fr)] max-[1200px]:[.workspaceOverview_&]:col-start-2 max-[1200px]:[.workspaceOverview_&]:row-[1/span_2] max-[1200px]:[.workspaceOverview_&]:grid-cols-1 max-[1200px]:[.workspaceOverview_&]:grid-rows-[auto_minmax(0,1fr)] max-[860px]:[.workspaceOverview_&]:col-auto max-[860px]:[.workspaceOverview_&]:row-auto",
   paneCollapsed: "overflow-hidden p-0 invisible",
-  panelHeader: "flex items-center justify-between gap-2 [&_h2]:m-0 [&_h2]:text-[0.94rem]",
+  panelHeader: "flex items-center justify-between gap-2 [&_h2]:m-0 [&_h2]:text-vui-sm",
   countPill:
     "inline-flex min-h-6 items-center justify-center gap-1.5 whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint),transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-strong),transparent)] px-2 [font-size:var(--vui-font-xs)] text-[var(--accent-cool)]",
   inlineMeta:
@@ -91,7 +91,7 @@ export const gitRouteStyles = {
   objectDetailPanel:
     "min-h-0 min-w-0 max-[1200px]:[.workspaceOverview_&]:col-start-1 max-[1200px]:[.workspaceOverview_&]:row-start-2 max-[860px]:[.workspaceOverview_&]:col-auto max-[860px]:[.workspaceOverview_&]:row-auto",
   emptyPreview:
-    `grid h-full content-start justify-items-start gap-[7px] ${panelSurface} p-3.5 text-vui-fg-secondary [&_p]:m-0 [&_p]:[font-size:var(--vui-font-xs)] [&_p]:leading-tight [&_p]:text-vui-fg-secondary [&_strong]:text-[0.98rem] [&_strong]:text-vui-fg-primary [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:text-[var(--accent-cool)]`,
+    `grid h-full content-start justify-items-start gap-[7px] ${panelSurface} p-3.5 text-vui-fg-secondary [&_p]:m-0 [&_p]:[font-size:var(--vui-font-xs)] [&_p]:leading-tight [&_p]:text-vui-fg-secondary [&_strong]:text-vui-md [&_strong]:text-vui-fg-primary [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:text-[var(--accent-cool)]`,
   emptyState: "m-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)]",
   // Single-column card with readable vertical rhythm: roomy padding, clear
   // inter-card gap (commitList), and distinct header / title / author rows.
@@ -107,7 +107,7 @@ export const gitRouteStyles = {
     "grid min-h-0 max-h-[min(100%,calc(100dvh-178px))] content-start gap-2 overflow-auto border-b border-[var(--border-soft)] pb-2 max-[1200px]:row-span-2 max-[1200px]:border-b-0 max-[1200px]:border-r max-[1200px]:pb-0 max-[1200px]:pr-3 max-[860px]:row-auto max-[860px]:max-h-none max-[860px]:overflow-visible max-[860px]:border-b max-[860px]:border-r-0 max-[860px]:pb-3 max-[860px]:pr-0",
   commitScopeBox: `grid gap-2 ${rowSurface} p-[9px]`,
   scopeHeader:
-    "flex items-start justify-between gap-2.5 [&_div]:grid [&_div]:min-w-0 [&_div]:gap-1 [&_div>span]:m-0 [&_div>span]:[font-size:var(--vui-font-xs)] [&_div>span]:leading-snug [&_div>span]:text-[var(--fg-tertiary)] [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[0.9rem] [&_strong]:text-[var(--fg-primary)]",
+    "flex items-start justify-between gap-2.5 [&_div]:grid [&_div]:min-w-0 [&_div]:gap-1 [&_div>span]:m-0 [&_div>span]:[font-size:var(--vui-font-xs)] [&_div>span]:leading-snug [&_div>span]:text-[var(--fg-tertiary)] [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-vui-xs [&_strong]:text-[var(--fg-primary)]",
   scopeReady:
     "inline-flex min-h-[23px] items-center whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--state-success)_var(--vui-alpha-tint-strong),transparent)] px-2 text-[var(--state-success)]",
   scopeList: "grid gap-1.5",

@@ -1,10 +1,10 @@
 export default {
   root: "flex min-h-0 flex-col gap-3 p-1 [font-size:var(--vui-font-xs)]",
   header: "flex flex-wrap items-center justify-between gap-2",
-  eyebrow: "text-[10px] uppercase tracking-wide text-[var(--fg-tertiary)]",
+  eyebrow: "text-vui-micro-10 uppercase tracking-wide text-[var(--fg-tertiary)]",
   segmentChips: "flex flex-wrap items-center gap-2",
   section: "grid gap-1.5",
-  sectionTitle: "text-[11px] font-semibold text-[var(--fg-primary)]",
+  sectionTitle: "text-vui-micro-11 font-semibold text-[var(--fg-primary)]",
   timeline: "m-0 list-none space-y-1.5 p-0",
   timelineItem:
     "grid grid-cols-[10px_minmax(0,1fr)] items-start gap-2 rounded border border-[var(--vui-border-subtle)] px-2 py-1.5",

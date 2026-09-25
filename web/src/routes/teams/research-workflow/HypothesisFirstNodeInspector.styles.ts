@@ -1,6 +1,6 @@
 const styles = {
   panel: "flex min-w-0 flex-col gap-3 p-3",
-  stage: "text-[10px] uppercase tracking-wide text-[var(--fg-tertiary)]",
+  stage: "text-vui-micro-10 uppercase tracking-wide text-[var(--fg-tertiary)]",
   title: "m-0 [font-size:var(--vui-font-md)] font-semibold text-[var(--fg-primary)]",
   description: "m-0 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]",
   facts: "flex flex-col gap-1.5",

@@ -11,7 +11,7 @@ const styles: Record<string, string> = {
   role:
     "inline-flex min-w-0 items-center gap-1.5 [font-size:var(--vui-font-2xs)] font-bold text-[var(--fg-primary)]",
   controls: "flex shrink-0 items-center gap-2",
-  status: "px-2 py-0.5 text-[10px] font-medium",
+  status: "px-2 py-0.5 text-vui-micro-10 font-medium",
   actions: "flex items-center gap-1.5",
 };
 

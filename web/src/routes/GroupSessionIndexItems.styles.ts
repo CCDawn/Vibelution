@@ -48,7 +48,7 @@ const styles = {
   sessionState:
     "vui-routes-chatcodingroute sessionState inline-grid shrink-0 place-items-center",
   sessionStatusChip:
-    "vui-routes-chatcodingroute sessionStatusChip !min-h-5 max-w-[5.5rem] shrink-0 truncate !px-1.5 !text-[10px]",
+    "vui-routes-chatcodingroute sessionStatusChip !min-h-5 max-w-[5.5rem] shrink-0 truncate !px-1.5 !text-vui-micro-10",
   // Flat rail row: matches AgentConversationDirectory agent rows under the same team section.
   teamTreeItem:
     `vui-routes-chatcodingroute teamTreeItem min-w-0 overflow-hidden !border-0 !bg-transparent shadow-none transition-[background-color] hover:!bg-vui-surface-card focus-within:!bg-[color-mix(in_srgb,var(--accent-cool)_6%,transparent)]`,

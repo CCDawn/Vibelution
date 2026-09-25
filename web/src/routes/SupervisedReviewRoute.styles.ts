@@ -10,11 +10,11 @@ const reviewRowSurfaceSoft = vuiOpaqueRowClass;
 const reviewControlSurface =
   "rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-control-muted transition hover:border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] hover:bg-vui-control-muted-hover";
 const reviewControlButton =
-  `inline-flex min-h-8 min-w-0 w-fit max-w-full items-center justify-center gap-2 px-2.5 text-[13px] font-semibold leading-tight text-vui-fg-primary no-underline disabled:cursor-not-allowed disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0 ${reviewControlSurface}`;
+  `inline-flex min-h-8 min-w-0 w-fit max-w-full items-center justify-center gap-2 px-2.5 text-vui-micro-13 font-semibold leading-tight text-vui-fg-primary no-underline disabled:cursor-not-allowed disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0 ${reviewControlSurface}`;
 const reviewControlButtonActive =
   "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] text-[var(--accent-warm-2)]";
 const reviewPrimaryActionButton =
-  "inline-flex min-h-8 min-w-0 w-fit max-w-full items-center justify-center gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_30%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_16%,var(--vui-control-muted))] px-2.5 text-[13px] font-semibold leading-tight text-[var(--accent-warm-2)] no-underline transition disabled:cursor-not-allowed disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0";
+  "inline-flex min-h-8 min-w-0 w-fit max-w-full items-center justify-center gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_30%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_16%,var(--vui-control-muted))] px-2.5 text-vui-micro-13 font-semibold leading-tight text-[var(--accent-warm-2)] no-underline transition disabled:cursor-not-allowed disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0";
 const reviewFormLabel =
   "block [&_span]:mb-1 [&_span]:block [&_span]:text-vui-xs [&_span]:uppercase [&_span]:tracking-[0.08em] [&_span]:text-[var(--fg-tertiary)]";
 const reviewInputTargets =
@@ -90,12 +90,12 @@ const styles = {
   primaryAction: reviewPrimaryActionButton,
   secondaryAction: reviewControlButton,
   compactAction:
-    `inline-flex min-h-7 min-w-0 w-fit max-w-full items-center justify-center gap-1.5 overflow-hidden whitespace-nowrap px-2 text-[11px] font-semibold text-vui-fg-primary no-underline disabled:cursor-not-allowed disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-label]]:truncate ${reviewControlSurface}`,
+    `inline-flex min-h-7 min-w-0 w-fit max-w-full items-center justify-center gap-1.5 overflow-hidden whitespace-nowrap px-2 text-vui-micro-11 font-semibold text-vui-fg-primary no-underline disabled:cursor-not-allowed disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-label]]:truncate ${reviewControlSurface}`,
   dangerAction:
     "border-[color-mix(in_srgb,var(--state-error)_34%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   searchField:
     "flex min-h-[var(--vui-control-height-md)] items-center gap-2 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-control-muted px-2.5 text-vui-fg-secondary [&_input]:w-full [&_input]:border-0 [&_input]:bg-transparent [&_input]:font-[inherit] [&_input]:text-vui-fg-primary [&_input]:outline-none [&_input::placeholder]:text-vui-fg-tertiary",
-  queueMeta: "flex items-center justify-between gap-2.5 text-[13px] text-[var(--fg-tertiary)]",
+  queueMeta: "flex items-center justify-between gap-2.5 text-vui-micro-13 text-[var(--fg-tertiary)]",
   queueBulkZone: "grid min-w-0 max-w-full gap-1.5 overflow-hidden",
   bulkToolbar:
     `grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 px-2 py-1.5 max-[520px]:grid-cols-1 ${reviewRowSurfaceSoft}`,
@@ -127,11 +127,11 @@ const styles = {
   metricCard:
     `min-w-0 px-2.5 py-2 ${reviewRowSurfaceSoft} [&_span]:mb-1 [&_span]:block [&_span]:text-vui-xs [&_span]:uppercase [&_span]:tracking-[0.08em] [&_span]:text-vui-fg-tertiary [&_strong]:block [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:leading-normal [&_p]:m-0 [&_p]:mt-1 [&_p]:leading-snug [&_p]:text-vui-fg-secondary`,
   signalSection:
-    `min-w-0 px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-[0.95rem] [&_h3]:font-bold [&_ul]:m-0 [&_ul]:pl-[18px] [&_ul]:leading-relaxed [&_ul]:text-vui-fg-secondary`,
+    `min-w-0 px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-vui-sm [&_h3]:font-bold [&_ul]:m-0 [&_ul]:pl-[18px] [&_ul]:leading-relaxed [&_ul]:text-vui-fg-secondary`,
   detailSection:
-    `min-w-0 px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-[0.95rem] [&_h3]:font-bold`,
+    `min-w-0 px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-vui-sm [&_h3]:font-bold`,
   decisionSection:
-    `grid min-w-0 gap-2 border-[color-mix(in_srgb,var(--accent-warm)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_6%,var(--vui-surface-row))] px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-[0.95rem] [&_h3]:font-bold`,
+    `grid min-w-0 gap-2 border-[color-mix(in_srgb,var(--accent-warm)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_6%,var(--vui-surface-row))] px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-vui-sm [&_h3]:font-bold`,
   transcriptSection:
     `min-w-0 px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_summary]:cursor-pointer [&_summary]:font-semibold`,
   evidenceList: "flex max-h-[clamp(168px,28vh,280px)] min-h-0 flex-col gap-1.5 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-gutter:stable]",

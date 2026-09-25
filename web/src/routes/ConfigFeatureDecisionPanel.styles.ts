@@ -14,7 +14,7 @@ const styles = {
   cardTitle: "truncate text-vui-xs text-[var(--vui-text-primary)]",
   cardStatus: "shrink-0 text-vui-xs text-[var(--vui-text-secondary)]",
   reason: "m-0 mt-1 text-vui-xs leading-5 text-[var(--vui-text-secondary)]",
-  provenance: "m-0 mt-1 flex items-center gap-1 font-mono text-[11px] text-[var(--vui-text-tertiary)]",
+  provenance: "m-0 mt-1 flex items-center gap-1 font-mono text-vui-micro-11 text-[var(--vui-text-tertiary)]",
 } as const;
 
 export default styles;
