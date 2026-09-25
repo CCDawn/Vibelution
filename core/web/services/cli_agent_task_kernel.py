@@ -250,6 +250,21 @@ def _task_timeout_or_idle_status(task_state: dict[str, Any], *, now: float) -> s
     return ""
 
 
+def _capture_branch_generation(session_id: str) -> int | None:
+    """Generation at task start. Missing sessions stay unstamped."""
+
+    normalized = str(session_id or "").strip()
+    if not normalized:
+        return None
+    try:
+        from . import session_service
+
+        value = session_service.session_branch_generation(normalized)
+        return max(0, int(value))
+    except (OSError, ValueError, TypeError, RuntimeError, ImportError, AttributeError):
+        return None
+
+
 def _initial_task_state(
     *,
     terminal_session: dict[str, Any],
@@ -276,6 +291,7 @@ def _initial_task_state(
         "cliRunId": str(terminal_session.get("cliRunId") or "").strip(),
         "lockKey": str(terminal_session.get("lockKey") or "").strip(),
         "sourceSessionId": str(terminal_session.get("sourceSessionId") or "").strip(),
+        "branchGeneration": _capture_branch_generation(str(terminal_session.get("sourceSessionId") or "").strip()),
         "sourceMessageId": str(terminal_session.get("sourceMessageId") or "").strip(),
         "sourceRunId": str(terminal_session.get("sourceRunId") or "").strip(),
         "cliSessionId": str(terminal_session.get("cliSessionId") or "").strip(),
@@ -490,6 +506,7 @@ def _public_task_result(
         "lockKey": str(task_state.get("lockKey") or terminal.get("lockKey") or "").strip(),
         "cliSessionId": str(task_state.get("cliSessionId") or terminal.get("cliSessionId") or "").strip(),
         "sourceSessionId": str(task_state.get("sourceSessionId") or terminal.get("sourceSessionId") or "").strip(),
+        "branchGeneration": task_state.get("branchGeneration"),
         "sourceMessageId": str(task_state.get("sourceMessageId") or terminal.get("sourceMessageId") or "").strip(),
         "sourceRunId": str(task_state.get("sourceRunId") or terminal.get("sourceRunId") or "").strip(),
         "createdAt": str(task_state.get("createdAt") or "").strip(),

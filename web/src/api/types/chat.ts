@@ -759,6 +759,8 @@ export type ConversationAttachment = {
 export type SessionQueuedTurn = {
   id: string;
   position: number;
+  /** `user` is a typed follow-up. `task_notification` and `subagent_message` are system returns. */
+  kind?: string;
   /**
    * `queued` waits for the running turn to settle; `paused` holds the row out
    * of draining until resumed (resume re-queues it at the tail); `blocked`
