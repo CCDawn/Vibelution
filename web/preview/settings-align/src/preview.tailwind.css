@@ -1,0 +1,12 @@
+/*
+ * 预览专用 Tailwind 入口 —— 只为预览代码 + 被引用的真实 VUI 组件生成令牌工具类。
+ * 主题 token 与生产同一份（theme.tailwind.css，inline @theme），运行时值来自
+ * tokens.css；本文件不含任何裸色值/字号/圆角（棘轮门红线）。
+ */
+@import "tailwindcss" source(none);
+@import "../../../src/design/theme.tailwind.css";
+
+/* 真实 VUI 组件的内部类名也要被扫描生成。 */
+@source "../../../src/components/**/*.{ts,tsx}";
+/* 本预览的类名。 */
+@source "./**/*.{ts,tsx}";

@@ -1,0 +1,168 @@
+{
+  "shots": [
+    {
+      "file": "01-view-rows.png",
+      "label": "查看态·行列表（新密度）"
+    },
+    {
+      "file": "02-view-cards.png",
+      "label": "查看态·卡片流（现状密度对比）"
+    },
+    {
+      "file": "03-edit-clean.png",
+      "label": "编辑态·干净（无变更）"
+    },
+    {
+      "file": "04-edit-dirty.png",
+      "label": "编辑态·脏（已生效+待保存徽标+保存条计数）"
+    },
+    {
+      "file": "05-json-error.png",
+      "label": "json 实时校验·红边+错误行列定位"
+    },
+    {
+      "file": "06-list-invalid.png",
+      "label": "list 逐行校验·非法行行号报错"
+    },
+    {
+      "file": "07-saved-toast.png",
+      "label": "保存流转完成·徽标清除+toast"
+    }
+  ],
+  "asserts": [
+    {
+      "name": "view-rows: 行列表组卡渲染",
+      "ok": true
+    },
+    {
+      "name": "view-rows: 7 行",
+      "ok": true
+    },
+    {
+      "name": "view-rows: 徽标默认无",
+      "ok": true
+    },
+    {
+      "name": "view-rows: 保存条计数 0",
+      "ok": true
+    },
+    {
+      "name": "view-cards: 卡片流渲染",
+      "ok": true
+    },
+    {
+      "name": "view-cards: 7 张卡",
+      "ok": true
+    },
+    {
+      "name": "edit-clean: 控件渲染（checkbox）",
+      "ok": true
+    },
+    {
+      "name": "edit-clean: 无待保存",
+      "ok": true
+    },
+    {
+      "name": "edit-clean: 保存按钮禁用",
+      "ok": true
+    },
+    {
+      "name": "edit-dirty: 即时字段=已生效徽标",
+      "ok": true
+    },
+    {
+      "name": "edit-dirty: 草稿字段=待保存徽标",
+      "ok": true
+    },
+    {
+      "name": "edit-dirty: 保存条计数 1",
+      "ok": true
+    },
+    {
+      "name": "json-error: 红边 aria-invalid",
+      "ok": true
+    },
+    {
+      "name": "json-error: 行内错误含行列",
+      "ok": true
+    },
+    {
+      "name": "json-error: 无 ✓ 提示",
+      "ok": true
+    },
+    {
+      "name": "list-invalid: 行号错误列表",
+      "ok": true
+    },
+    {
+      "name": "list-invalid: 文本域标红",
+      "ok": true
+    },
+    {
+      "name": "list-invalid: 统计含 2 项非法",
+      "ok": true
+    },
+    {
+      "name": "saved: toast 可见",
+      "ok": true
+    },
+    {
+      "name": "saved: toast 文案",
+      "ok": true
+    },
+    {
+      "name": "saved: 徽标清除",
+      "ok": true
+    },
+    {
+      "name": "saved: 保存条计数 0",
+      "ok": true
+    },
+    {
+      "name": "交互: 切卡片流",
+      "ok": true
+    },
+    {
+      "name": "交互: 切回行列表",
+      "ok": true
+    },
+    {
+      "name": "交互: 查看态徽标保留",
+      "ok": true
+    },
+    {
+      "name": "交互: 保存 toast",
+      "ok": true
+    },
+    {
+      "name": "交互: 保存后徽标清除",
+      "ok": true
+    },
+    {
+      "name": "交互: 保存后计数 0",
+      "ok": true
+    },
+    {
+      "name": "交互: 计数回到 1",
+      "ok": true
+    },
+    {
+      "name": "交互: 离开弹窗三按钮",
+      "ok": true
+    },
+    {
+      "name": "交互: 留下后无弹窗",
+      "ok": true
+    },
+    {
+      "name": "交互: 留下后草稿仍在",
+      "ok": true
+    },
+    {
+      "name": "交互: 放弃后计数 0",
+      "ok": true
+    }
+  ],
+  "consoleErrors": [],
+  "pageErrors": []
+}

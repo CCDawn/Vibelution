@@ -1,0 +1,12 @@
+{
+  "name": "@vibelution/preview-settings-align",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Isolated preview for the ZCode-aligned settings surface (wave 1): VSettingsRow primitive, control upgrades and the save model. Read-only imports of web/src VUI components; no production files touched, not in the production router/build.",
+  "scripts": {
+    "dev": "vite --config vite.config.ts",
+    "selftest": "node scripts/logic-selftest.mjs",
+    "capture": "python scripts/capture_screens.py"
+  }
+}
