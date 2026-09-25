@@ -166,6 +166,24 @@ const styles = {
   // Fixed square + flex-none: no border/baseline so dots share the pill mid-line with text.
   statusDot:
     "vui-app-appshell statusDot block h-2 w-2 shrink-0 grow-0 self-center rounded-full border-0 bg-current p-0 leading-none",
+  // Update banner: a full-width warning-soft row under the fixed top bar. The
+  // top-bar offset is a var (no arbitrary px literals) so the ratchet stays clean.
+  updateBanner:
+    "vui-app-appshell updateBanner mt-[var(--shell-topbar-height)] flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] px-3 py-1.5",
+  updateBannerActions:
+    "vui-app-appshell updateBannerActions flex shrink-0 items-center gap-1.5",
+  updateBannerCopy:
+    "vui-app-appshell updateBannerCopy flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5",
+  updateBannerDetail:
+    "vui-app-appshell updateBannerDetail min-w-0 [font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  updateBannerDismissButton:
+    "vui-app-appshell updateBannerDismissButton !size-7 !min-h-7 !min-w-7 !justify-center !rounded-md !border-0 !bg-transparent !p-0 !shadow-none text-[var(--fg-secondary)] hover:!bg-[var(--bg-active)]",
+  updateBannerNote:
+    "vui-app-appshell updateBannerNote basis-full min-w-0 whitespace-pre-line text-left [font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--state-warning)]",
+  updateBannerRestartButton:
+    `vui-app-appshell updateBannerRestartButton min-w-0 !h-7 !min-h-7 !px-2.5 !text-vui-xs ${vuiControlQuietChromeClass}`,
+  updateBannerTitle:
+    "vui-app-appshell updateBannerTitle min-w-0 [font-size:var(--vui-font-sm)] font-semibold leading-[var(--vui-line-readable)] text-[var(--fg-primary)]",
   // Rigid pill geometry: fixed height, zero vertical padding, shared leading-none mid-line.
   statusSummaryDot:
     "vui-app-appshell statusSummaryDot block h-1.5 w-1.5 shrink-0 grow-0 self-center rounded-full border-0 bg-current p-0 leading-none",

@@ -599,6 +599,56 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("browser.user_action.force_shutdown_requested");
     expect(shellSource).toContain("browser.user_action.force_shutdown_unconfirmed");
     expect(shellSource).not.toContain("lifecycleMenuRef");
+    // The update banner restart rides the same dormant shell lifecycle path
+    // (beginRestart -> requestLifecycle) — never a direct restart API call.
+    expect(shellSource).toContain("onPress={beginRestart}");
+  });
+
+  it("surfaces a dismissible update banner only when the backend is behind disk HEAD", () => {
+    expect(shellSource).toContain('from "./updateBanner"');
+    expect(shellSource).toContain("shouldShowUpdateBanner");
+    expect(shellSource).toContain("readStoredUpdateBannerDismissedHead");
+    expect(shellSource).toContain("storeUpdateBannerDismissedHead");
+    // Only backend-stale verdicts prompt; frontend-only stays on refresh-frontend.
+    expect(shellSource).toContain("updateBannerVerdict === \"backend_and_frontend_behind\"");
+
+    // The banner is a sibling row between the fixed top bar and mainArea.
+    const bannerRegion = shellSource.slice(
+      shellSource.lastIndexOf("</header>"),
+      shellSource.indexOf("<main className={styles.mainArea}"),
+    );
+    expect(bannerRegion).toContain('role="status"');
+    expect(bannerRegion).toContain("updateBannerVisible ?");
+    expect(bannerRegion).toContain("onPress={beginRestart}");
+    expect(bannerRegion).toContain("isDisabled={updateBannerRestartDisabled}");
+    expect(bannerRegion).toContain("{updateBannerRestartGuard}");
+    // Active-work guard copy is the existing shell guard message, not new copy.
+    expect(shellSource).toContain("updateBannerRestartGuard = updateBannerRestartBlockedByWork");
+    expect(shellSource).toContain("? restartActiveWorkBlockedMessage(lang, activeWorkDetailsTitle)");
+    expect(bannerRegion).toContain("onPress={dismissUpdateBanner}");
+    expect(bannerRegion).not.toContain("/api/runtime/");
+
+    // Dismissal is keyed to the disk HEAD commit, so a new commit re-prompts.
+    expect(shellSource).toContain("dismissedHead: updateBannerDismissedHead");
+    expect(shellSource).toContain("diskHead: updateBannerDiskHead");
+
+    // Active work keeps the restart action from even trying: guard copy surfaces.
+    expect(shellSource).toContain("updateBannerRestartBlockedByWork = Boolean(activeWorkIndicator)");
+
+    // The banner row joins the shell grid inline; workbench-shell.css stays untouched.
+    expect(shellSource).toContain('gridTemplateRows: "auto minmax(0, 1fr)"');
+    expect(shellSource).toContain("UPDATE_BANNER_MAIN_AREA_STYLE");
+
+    // It rides the whitelisted code-freshness poll — no per-second ticker.
+    expect(shellSource).not.toContain("setClockNow");
+    expect(shellSource).not.toMatch(/updateBanner[\s\S]{0,200}setInterval/);
+
+    expect(styles.updateBanner).toContain("mt-[var(--shell-topbar-height)]");
+    expect(styles.updateBanner).not.toMatch(/rounded-\[\d/);
+    expect(styles.updateBannerTitle).toContain("[font-size:var(--vui-font-sm)]");
+    expect(styles.updateBannerRestartButton).toBeTypeOf("string");
+    expect(styles.updateBannerDismissButton).toBeTypeOf("string");
+    expect(styles.updateBannerNote).toContain("whitespace-pre-line");
   });
 
   it("lets lifecycle wait overlays be cancelled without stopping active work", () => {
