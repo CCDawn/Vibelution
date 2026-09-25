@@ -134,24 +134,6 @@ def _uncached_parent_tokens(usage: Any) -> int:
     return max(0, input_tokens - cached_tokens) + cache_creation + output_tokens
 
 
-def _assistant_turn_count(session_id: str) -> int:
-    from core.chat.conversation_ledger import conversation_model_messages_from_events
-    from core.web.services import session_service as s
-
-    events = s._load_session_conversation_events_cached(session_id)
-    messages = conversation_model_messages_from_events(events)
-    count = 0
-    for message in messages:
-        role = (
-            message.get("role")
-            if isinstance(message, dict)
-            else getattr(message, "role", "")
-        )
-        if str(role or "").strip().lower() == "assistant":
-            count += 1
-    return count
-
-
 def _suggestion_word_count(text: str) -> int:
     """Count CJK characters individually and latin tokens by whitespace."""
 
@@ -369,22 +351,6 @@ def generate_prompt_suggestion(
         return _record_result(normalized_session_id, record, suggestion=None, reason="cache_cold")
     if not str(record.get("reply") or "").strip():
         return _record_result(normalized_session_id, record, suggestion=None, reason="empty_reply")
-    try:
-        if _assistant_turn_count(normalized_session_id) < 2:
-            return _record_result(
-                normalized_session_id,
-                record,
-                suggestion=None,
-                reason="early_conversation",
-            )
-    except Exception as exc:
-        _logger.warning("assistant turn count failed: %s: %s", type(exc).__name__, exc)
-        return _record_result(
-            normalized_session_id,
-            record,
-            suggestion=None,
-            reason="ledger_unavailable",
-        )
 
     fork_messages = list(record.get("messages") or [])
     fork_messages.append(AIMessage(content=str(record.get("reply") or "")))
