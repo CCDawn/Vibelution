@@ -110,7 +110,39 @@ export type SubmitTurnVariables = {
 type ChatSubmitAcceptedResponse = SessionTurnAcceptedResponse & {
   queued?: boolean;
   queueSequence?: number;
+  /** Server timestamp for when the turn entered the session queue. */
+  queuedAt?: string;
+  /** Active turn id this queued turn waits behind (observability only). */
+  queuedBehindTurnId?: string;
 };
+
+/**
+ * A queued turn waiting this long without starting is surfaced to the user:
+ * the drain depends on the running turn settling, so a stuck (ghost-running)
+ * turn would otherwise leave the message queued forever with zero feedback
+ * (defect ①).
+ */
+export const QUEUED_TURN_STUCK_HINT_MS = 90_000;
+const QUEUED_TURN_STUCK_CHECK_INTERVAL_MS = 15_000;
+
+/** Queued rows that have waited beyond ``thresholdMs`` and are still waiting. */
+export function queuedTurnsWaitingBeyondMs(
+  rows: SessionQueuedTurn[] | undefined,
+  nowMs: number,
+  thresholdMs: number = QUEUED_TURN_STUCK_HINT_MS,
+): SessionQueuedTurn[] {
+  const list = Array.isArray(rows) ? rows : [];
+  return list.filter((row) => {
+    if (String(row.status || "queued") !== "queued") {
+      return false;
+    }
+    const createdAtMs = Date.parse(String(row.createdAt || ""));
+    if (!Number.isFinite(createdAtMs)) {
+      return false;
+    }
+    return nowMs - createdAtMs >= thresholdMs;
+  });
+}
 
 type ChatSubmitMutationContext = {
   telemetry: UserActionTracker;
@@ -386,16 +418,50 @@ export function useChatComposerTurnMutations({
       setSessionImageAttachments((current) => clearSessionImageAttachments(current, variables.sessionId));
       setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, variables.sessionId));
       const acceptedTurnId = String(acceptedTurn.turnId || "").trim();
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detailState) => {
-        const acceptedDetail = markSessionDetailRunning(
-          markOptimisticUserMessageAccepted(detailState, variables, acceptedTurn.turnId),
-        );
-        return acceptedTurnId && acceptedDetail
-          ? { ...acceptedDetail, activeTurnId: acceptedTurnId }
-          : acceptedDetail;
-      });
+      // A queued acceptance must be projected as "queued", never as
+      // "sent/running": the turn did not start, it joined the session queue.
+      const isQueuedAcceptance = Boolean(
+        acceptedTurn.queued || String(acceptedTurn.queuedTurnId || "").trim(),
+      );
+      if (isQueuedAcceptance) {
+        const queuedTurnId = String(acceptedTurn.queuedTurnId || "").trim();
+        if (queuedTurnId) {
+          // Optimistic queue projection: the row lands in the follow-up queue
+          // bar immediately (from the response's queue facts); the
+          // listSessionQueuedTurns rebase below refreshes the authoritative rows.
+          const queuedAt = acceptedTurn.queuedAt || acceptedTurn.acceptedAt || new Date().toISOString();
+          queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detailState) => {
+            if (!detailState) {
+              return detailState;
+            }
+            const rows = detailState.queuedTurns ?? [];
+            if (rows.some((row) => row.id === queuedTurnId)) {
+              return detailState;
+            }
+            const optimisticQueuedRow: SessionQueuedTurn = {
+              id: queuedTurnId,
+              position: acceptedTurn.queuePosition ?? rows.length + 1,
+              status: "queued",
+              content: variables.content,
+              clientSubmissionId: variables.clientSubmissionId,
+              createdAt: queuedAt,
+              updatedAt: queuedAt,
+            };
+            return { ...detailState, queuedTurns: [...rows, optimisticQueuedRow] };
+          });
+        }
+      } else {
+        queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detailState) => {
+          const acceptedDetail = markSessionDetailRunning(
+            markOptimisticUserMessageAccepted(detailState, variables, acceptedTurn.turnId),
+          );
+          return acceptedTurnId && acceptedDetail
+            ? { ...acceptedDetail, activeTurnId: acceptedTurnId }
+            : acceptedDetail;
+        });
+      }
       setActiveTurnLayersBySession((current) =>
-        acceptedTurn.queued || variables.queuedBehindActiveTurn
+        isQueuedAcceptance
           ? current
           : setActiveTurnLayerForSession(
           current,
@@ -1034,6 +1100,46 @@ export function useChatComposerSubmitActions({
   // in flight must not re-send the DELETE, while different rows stay free to
   // race in parallel.
   const pendingQueueWithdrawalIdsRef = useRef<Set<string>>(new Set());
+  // Defect-① observability: a queued turn whose drain never fires (ghost
+  // running marker) would sit silently forever. Surface one composer hint per
+  // row once its wait exceeds the threshold; forget a row when it leaves the
+  // queue so a re-queued row can be hinted again.
+  const queuedStuckHintedIdsRef = useRef<Set<string>>(new Set());
+  const activeQueuedTurns = detail?.queuedTurns;
+  useEffect(() => {
+    const sessionId = activeSessionId;
+    if (!sessionId) {
+      return;
+    }
+    const surfaceStuckHints = () => {
+      const rows = activeQueuedTurns ?? [];
+      const aliveIds = new Set(rows.map((row) => row.id));
+      for (const hinted of [...queuedStuckHintedIdsRef.current]) {
+        if (!aliveIds.has(hinted)) {
+          queuedStuckHintedIdsRef.current.delete(hinted);
+        }
+      }
+      const firstStuck = queuedTurnsWaitingBeyondMs(rows, Date.now())[0];
+      if (!firstStuck || queuedStuckHintedIdsRef.current.has(firstStuck.id)) {
+        return;
+      }
+      queuedStuckHintedIdsRef.current.add(firstStuck.id);
+      const waitedSeconds = Math.max(
+        1,
+        Math.round((Date.now() - Date.parse(String(firstStuck.createdAt || ""))) / 1000),
+      );
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [sessionId]:
+          lang === "zh"
+            ? `有排队消息等待超过 ${waitedSeconds} 秒仍未开始，当前轮可能卡住了。可停止当前轮让队列立即发送，或撤回后重发。`
+            : `A queued message has waited over ${waitedSeconds} seconds without starting; the current turn may be stuck. Stop the current turn to send the queue now, or withdraw it and resend.`,
+      }));
+    };
+    surfaceStuckHints();
+    const timer = window.setInterval(surfaceStuckHints, QUEUED_TURN_STUCK_CHECK_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [activeSessionId, lang, activeQueuedTurns, setSessionComposerErrors]);
   const restorePendingStopAfterUploadFailure = useCallback((sessionId: string) => {
     const pendingStop = pendingStopAfterAcceptRef.current.get(sessionId);
     if (pendingStop?.stoppingAt) {
