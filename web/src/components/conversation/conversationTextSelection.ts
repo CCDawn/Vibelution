@@ -30,7 +30,20 @@ export type ConversationSelectionLike = {
 export type ConversationSelectionSnapshot = {
   text: string;
   rect: ConversationSelectionRect;
+  /**
+   * ConversationMessage id of the timeline row containing the selection
+   * anchor (row wrappers carry the attribute below), or "" when the
+   * selection is not anchored inside a message row.
+   */
+  sourceMessageId: string;
 };
+
+/**
+ * Row wrappers carry the owning message id so selection quotes can become a
+ * structured `message` reference chip, not just pasted text. Kept beside the
+ * walker so the render site and the lookup share one attribute name.
+ */
+export const CONVERSATION_SELECTION_MESSAGE_ATTRIBUTE = "data-conversation-message-id";
 
 export type ConversationSelectionMenuPosition = {
   top: number;
@@ -44,6 +57,32 @@ export const SELECTION_QUOTE_MENU_GAP_PX = 8;
 
 function rectContained(container: HTMLElement, node: Node) {
   return container.contains(node);
+}
+
+/**
+ * Owning message id for a selection: walks up from the range anchor to the
+ * timeline container and returns the first row wrapper's message id, or ""
+ * when the anchor never passes through a message row (loading state, error
+ * banner, chrome).
+ */
+export function findConversationSelectionMessageId(
+  startContainer: Node,
+  container: HTMLElement | null,
+): string {
+  if (!container) {
+    return "";
+  }
+  let node: Node | null = startContainer;
+  while (node && node !== container) {
+    const reader = node as { getAttribute?: (name: string) => string | null };
+    const value = reader.getAttribute?.(CONVERSATION_SELECTION_MESSAGE_ATTRIBUTE);
+    const messageId = typeof value === "string" ? value.trim() : "";
+    if (messageId) {
+      return messageId;
+    }
+    node = node.parentElement ?? node.parentNode;
+  }
+  return "";
 }
 
 /**
@@ -69,6 +108,7 @@ export function extractConversationSelectionSnapshot(
       return null;
     }
   }
+  const anchorRange = selection.getRangeAt(0);
   let union: ConversationSelectionRect | null = null;
   for (let index = 0; index < selection.rangeCount; index += 1) {
     const range = selection.getRangeAt(index);
@@ -91,7 +131,11 @@ export function extractConversationSelectionSnapshot(
     // Degenerate geometry (no painted rects): nothing to anchor a menu to.
     return null;
   }
-  return { text, rect: union };
+  return {
+    text,
+    rect: union,
+    sourceMessageId: findConversationSelectionMessageId(anchorRange.startContainer, container),
+  };
 }
 
 /**

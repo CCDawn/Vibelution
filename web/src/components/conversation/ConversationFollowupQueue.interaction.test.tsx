@@ -6,7 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../../api/queryKeys";
 import { dictionary } from "../../i18n/dictionary";
-import { ConversationFollowupQueueBar } from "./ConversationFollowupQueueBar";
+import {
+  ConversationFollowupQueueBar,
+  FollowupQueueTogglePauseContext,
+} from "./ConversationFollowupQueueBar";
 import { ConversationView } from "./ConversationView";
 import type { ComposerQueueItem } from "./composerFollowupQueueModel";
 
@@ -78,6 +81,150 @@ describe("ConversationFollowupQueueBar", () => {
       save?.click();
     });
     expect(onUpdate).toHaveBeenCalledWith("q-1", "先不要改测试，只汇报改了哪些文件。");
+  });
+
+  it("toggles pause and resume per queued item and weakens paused rows", async () => {
+    const onTogglePause = vi.fn();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <ConversationFollowupQueueBar
+          items={[
+            { id: "q-1", text: "正常排队", status: "queued" },
+            { id: "q-2", text: "暂停的排队", status: "paused" },
+          ]}
+          lang="zh"
+          editLabel="修改这条排队"
+          withdrawLabel="撤回这条排队"
+          onUpdate={() => undefined}
+          onRemove={() => undefined}
+          onMove={() => undefined}
+          onTogglePause={onTogglePause}
+        />,
+      );
+    });
+
+    const pauseButton = container?.querySelector<HTMLButtonElement>('button[aria-label="暂停发送"]');
+    const resumeButton = container?.querySelector<HTMLButtonElement>('button[aria-label="恢复发送，排到队尾"]');
+    expect(pauseButton).not.toBeNull();
+    expect(resumeButton).not.toBeNull();
+    // The paused row is visually weakened and labeled.
+    expect(container?.querySelector('[class*="followupQueueRowPaused"]')).not.toBeNull();
+    expect(container?.textContent).toContain("已暂停");
+
+    await act(async () => {
+      pauseButton?.click();
+    });
+    expect(onTogglePause).toHaveBeenCalledWith("q-1", true);
+
+    await act(async () => {
+      resumeButton?.click();
+    });
+    expect(onTogglePause).toHaveBeenCalledWith("q-2", false);
+  });
+
+  it("keeps paused rows editable, withdrawable and reorderable", async () => {
+    const onUpdate = vi.fn();
+    const onRemove = vi.fn();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <ConversationFollowupQueueBar
+          items={[{ id: "q-1", text: "暂停的排队", status: "paused" }]}
+          lang="zh"
+          editLabel="修改这条排队"
+          withdrawLabel="撤回这条排队"
+          onUpdate={onUpdate}
+          onRemove={onRemove}
+          onMove={() => undefined}
+          onTogglePause={() => undefined}
+        />,
+      );
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('button[aria-label="撤回这条排队"]')?.click();
+    });
+    expect(onRemove).toHaveBeenCalledWith("q-1");
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('button[aria-label="修改这条排队"]')?.click();
+    });
+    const editor = container?.querySelector<HTMLInputElement>('input[aria-label="修改这条排队 1"]');
+    expect(editor).toBeTruthy();
+    await act(async () => {
+      setNativeValue(editor!, "暂停的排队改文本");
+      const save = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent === "保存");
+      save?.click();
+    });
+    expect(onUpdate).toHaveBeenCalledWith("q-1", "暂停的排队改文本");
+  });
+
+  it("hides the pause toggle for blocked rows and without a handler", async () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <ConversationFollowupQueueBar
+          items={[{ id: "q-1", text: "失败的排队", status: "blocked" }]}
+          lang="zh"
+          editLabel="修改这条排队"
+          withdrawLabel="撤回这条排队"
+          onUpdate={() => undefined}
+          onRemove={() => undefined}
+          onMove={() => undefined}
+          onTogglePause={() => undefined}
+        />,
+      );
+    });
+    expect(container?.querySelector('button[aria-label="暂停发送"]')).toBeNull();
+
+    await act(async () => {
+      root?.render(
+        <ConversationFollowupQueueBar
+          items={[{ id: "q-1", text: "正常排队", status: "queued" }]}
+          lang="zh"
+          editLabel="修改这条排队"
+          withdrawLabel="撤回这条排队"
+          onUpdate={() => undefined}
+          onRemove={() => undefined}
+          onMove={() => undefined}
+        />,
+      );
+    });
+    expect(container?.querySelector('button[aria-label="暂停发送"]')).toBeNull();
+  });
+
+  it("receives the pause action from the workbench context provider", async () => {
+    const onTogglePause = vi.fn();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <FollowupQueueTogglePauseContext.Provider value={onTogglePause}>
+          <ConversationFollowupQueueBar
+            items={[{ id: "q-1", text: "正常排队", status: "queued" }]}
+            lang="zh"
+            editLabel="修改这条排队"
+            withdrawLabel="撤回这条排队"
+            onUpdate={() => undefined}
+            onRemove={() => undefined}
+            onMove={() => undefined}
+          />
+        </FollowupQueueTogglePauseContext.Provider>,
+      );
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('button[aria-label="暂停发送"]')?.click();
+    });
+    expect(onTogglePause).toHaveBeenCalledWith("q-1", true);
   });
 
   it("labels queued attachment counts neutrally", async () => {

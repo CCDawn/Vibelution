@@ -1,9 +1,16 @@
 import { memo } from "react";
 
 import { formattedCodeBlockContent } from "./conversationFormattedCodeBlock";
+import {
+  LIVE_CODE_MAX_VISIBLE_LINES,
+  LIVE_TABLE_MAX_VISIBLE_ROWS,
+  headRows,
+  tailLines,
+} from "./conversationRenderBudget";
 import { safeConversationMarkdownUrl } from "./conversationMarkdownUrl";
 import type { ConversationMarkdownClassNames } from "./conversationMarkdownTypes";
 import type { MarkdownBlock } from "./streamingMarkdown";
+import styles from "./StreamingLiveMarkdownBlocks.styles";
 
 export type StreamingLiveMarkdownBlocksProps = {
   blocks: MarkdownBlock[];
@@ -47,35 +54,55 @@ function LiveBlock({
     }
     case "paragraph":
       return <p className={classNames.messageBody}>{block.content}</p>;
-    case "code":
+    case "code": {
+      // Live-tail render budget: an unclosed fence holds its whole block in
+      // the live tail, so only the newest lines paint per frame (static hint,
+      // no interaction — settle flips to the full renderer with the
+      // details-expand budget).
+      const tail = tailLines(formattedCodeBlockContent(block.content, block.language), LIVE_CODE_MAX_VISIBLE_LINES);
       return (
-        <pre className={classNames.responseSegmentPre}>
-          <code>{formattedCodeBlockContent(block.content, block.language)}</code>
-        </pre>
+        <>
+          {tail.overflowCount > 0 ? (
+            <div className={styles.liveCodeInflowHint}>{`…已流入 ${tail.overflowCount} 行`}</div>
+          ) : null}
+          <pre className={classNames.responseSegmentPre}>
+            <code>{tail.visible}</code>
+          </pre>
+        </>
       );
-    case "table":
+    }
+    case "table": {
+      // Live-tail render budget: newest rows keep appending, so the head rows
+      // stay stable across frames and the inflow is announced, not rendered.
+      const rows = headRows(block.rows, LIVE_TABLE_MAX_VISIBLE_ROWS);
       return (
-        <div className={classNames.markdownTableWrap}>
-          <table className={classNames.markdownTable}>
-            <thead>
-              <tr>
-                {block.headers.map((cell, cellIndex) => (
-                  <th key={`h-${blockIndex}-${cellIndex}`}>{cell}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {block.rows.map((row, rowIndex) => (
-                <tr key={`r-${blockIndex}-${rowIndex}`}>
-                  {row.map((cell, cellIndex) => (
-                    <td key={`c-${blockIndex}-${rowIndex}-${cellIndex}`}>{cell}</td>
+        <>
+          <div className={classNames.markdownTableWrap}>
+            <table className={classNames.markdownTable}>
+              <thead>
+                <tr>
+                  {block.headers.map((cell, cellIndex) => (
+                    <th key={`h-${blockIndex}-${cellIndex}`}>{cell}</th>
                   ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {rows.visible.map((row, rowIndex) => (
+                  <tr key={`r-${blockIndex}-${rowIndex}`}>
+                    {row.map((cell, cellIndex) => (
+                      <td key={`c-${blockIndex}-${rowIndex}-${cellIndex}`}>{cell}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {rows.overflowCount > 0 ? (
+            <div className={styles.liveTableInflowHint}>{`+${rows.overflowCount} 行流入中`}</div>
+          ) : null}
+        </>
       );
+    }
     case "unorderedList":
       return (
         <ul className={classNames.responseSegmentList}>

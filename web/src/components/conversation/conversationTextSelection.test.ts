@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildQuotedDraftText,
+  CONVERSATION_SELECTION_MESSAGE_ATTRIBUTE,
   extractConversationSelectionSnapshot,
+  findConversationSelectionMessageId,
   resolveSelectionQuoteMenuPosition,
   SELECTION_QUOTE_MENU_GAP_PX,
   SELECTION_QUOTE_MENU_HEIGHT_PX,
@@ -102,6 +104,51 @@ describe("conversationTextSelection", () => {
     const snapshot = extractConversationSelectionSnapshot(selection, container);
     expect(snapshot?.text).toBe("第一段\n第二段");
     expect(snapshot?.rect).toEqual(stubRect({ top: 10, left: 2, width: 60, height: 42, bottom: 52, right: 62 }));
+    // No message row in this fixture, so the structured reference stays empty.
+    expect(snapshot?.sourceMessageId).toBe("");
+  });
+
+  it("resolves the selection's owning message id from the anchor row wrapper", () => {
+    const container = document.createElement("div");
+    const row = document.createElement("div");
+    row.setAttribute(CONVERSATION_SELECTION_MESSAGE_ATTRIBUTE, "message-anchor-1");
+    const nested = document.createElement("div");
+    const text = document.createTextNode("被划选的原文");
+    nested.appendChild(text);
+    row.appendChild(nested);
+    container.appendChild(row);
+
+    expect(findConversationSelectionMessageId(text, container)).toBe("message-anchor-1");
+    expect(findConversationSelectionMessageId(nested, container)).toBe("message-anchor-1");
+
+    // A second row wins when the anchor lives inside it.
+    const otherRow = document.createElement("div");
+    otherRow.setAttribute(CONVERSATION_SELECTION_MESSAGE_ATTRIBUTE, "message-anchor-2");
+    const otherText = document.createTextNode("另一行");
+    otherRow.appendChild(otherText);
+    container.appendChild(otherRow);
+    expect(findConversationSelectionMessageId(otherText, container)).toBe("message-anchor-2");
+
+    // Anchors outside any message row resolve to "".
+    const bare = document.createTextNode("没有行容器");
+    container.appendChild(bare);
+    expect(findConversationSelectionMessageId(bare, container)).toBe("");
+    expect(findConversationSelectionMessageId(text, null)).toBe("");
+  });
+
+  it("carries the anchor's message id on the selection snapshot", () => {
+    const container = document.createElement("div");
+    const row = document.createElement("div");
+    row.setAttribute(CONVERSATION_SELECTION_MESSAGE_ATTRIBUTE, "message-anchor-1");
+    const text = document.createTextNode("被划选的原文");
+    row.appendChild(text);
+    container.appendChild(row);
+
+    const snapshot = extractConversationSelectionSnapshot(
+      stubSelection([stubRange(text, text, stubRect({ top: 10, left: 0, width: 40, height: 10, bottom: 20, right: 40 }))], "被划选的原文"),
+      container,
+    );
+    expect(snapshot?.sourceMessageId).toBe("message-anchor-1");
   });
 
   it("anchors the menu above the selection and clamps it horizontally", () => {

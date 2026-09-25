@@ -4,14 +4,17 @@ import {
   buildFileReferencePayload,
   buildKnowledgeBaseReferencePayload,
   buildKnowledgeItemReferencePayload,
+  buildMessageReferencePayload,
   clearSessionDraftForSubmittedTurn,
   classifyComposerFiles,
   classifyComposerImageFiles,
   MAX_COMPOSER_DOCUMENT_BYTES,
   MAX_COMPOSER_IMAGE_BYTES,
+  MESSAGE_REFERENCE_TITLE_MAX_CHARS,
   mergeComposerAttachments,
   mergeComposerAttachmentsWithRejections,
   mergeComposerImageAttachments,
+  messageReferenceTitle,
   resolveComposerSubmitGuard,
   restoreSubmittedDraftIfComposerStillEmpty,
   sessionReferenceId,
@@ -164,6 +167,43 @@ describe("chatComposerSubmitModel", () => {
       title: "run.csv",
       createdAt: expect.any(String),
     });
+  });
+
+  it("builds structured message reference payloads with the locked contract shape", () => {
+    expect(buildMessageReferencePayload({
+      sourceSessionId: " session-1 ",
+      sourceMessageId: " message-9 ",
+      quote: "被引用的原文",
+    })).toEqual({
+      referenceId: "message:message-9",
+      kind: "message",
+      sourceSessionId: "session-1",
+      sourceMessageId: "message-9",
+      quote: "被引用的原文",
+      title: "被引用的原文",
+      createdAt: expect.any(String),
+    });
+  });
+
+  it("defaults message reference titles to a single-line 60-character quote prefix", () => {
+    const multiline = "第一行\n第二行  第三行";
+    expect(messageReferenceTitle(multiline)).toBe("第一行 第二行 第三行");
+    expect(messageReferenceTitle("").length).toBe(0);
+    const long = Array.from({ length: MESSAGE_REFERENCE_TITLE_MAX_CHARS + 10 }, (_, i) => String(i % 10)).join("");
+    expect(messageReferenceTitle(long)).toHaveLength(MESSAGE_REFERENCE_TITLE_MAX_CHARS);
+    // An explicit title always wins over the quote-derived default.
+    expect(buildMessageReferencePayload({
+      sourceSessionId: "session-1",
+      sourceMessageId: "message-9",
+      quote: multiline,
+      title: " 自定义标题 ",
+    }).title).toBe("自定义标题");
+    // Newlines never leak into the default title.
+    expect(buildMessageReferencePayload({
+      sourceSessionId: "session-1",
+      sourceMessageId: "message-9",
+      quote: multiline,
+    }).title).not.toContain("\n");
   });
 
   it("resolves session reference ids", () => {

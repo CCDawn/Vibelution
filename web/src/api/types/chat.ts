@@ -633,8 +633,8 @@ export type MentalStateSnapshot = {
 
 export type SessionReferenceAttachment = {
   referenceId?: string;
-  /** `session` is the legacy kind; knowledge/file kinds resolve at submit time. */
-  kind: "session" | "knowledge_item" | "knowledge_base" | "file" | string;
+  /** `session` is the legacy kind; knowledge/file/message kinds resolve at submit time. */
+  kind: "session" | "knowledge_item" | "knowledge_base" | "file" | "message" | string;
   sessionId?: string;
   title?: string;
   agentId?: string;
@@ -649,6 +649,10 @@ export type SessionReferenceAttachment = {
   /** file references point at a previously uploaded session artifact */
   artifactId?: string;
   filename?: string;
+  /** message references quote one timeline message from a source session */
+  sourceSessionId?: string;
+  sourceMessageId?: string;
+  quote?: string;
 };
 
 type ConversationMessageBase = {
@@ -719,7 +723,11 @@ export type ConversationAttachment = {
 export type SessionQueuedTurn = {
   id: string;
   position: number;
-  /** `queued` waits for the running turn to settle; `blocked` needs an edit to retry. */
+  /**
+   * `queued` waits for the running turn to settle; `paused` holds the row out
+   * of draining until resumed (resume re-queues it at the tail); `blocked`
+   * needs an edit to retry.
+   */
   status: string;
   content: string;
   attachments?: Array<{

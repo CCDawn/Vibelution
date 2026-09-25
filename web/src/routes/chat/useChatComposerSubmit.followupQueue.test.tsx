@@ -1,10 +1,11 @@
 /** @vitest-environment happy-dom */
 import { QueryClient } from "@tanstack/react-query";
-import React, { act, useRef, useState } from "react";
+import React, { act, useEffect, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { SessionDetail } from "../../api/types";
+import { queryKeys } from "../../api/queryKeys";
+import type { SessionDetail, SessionQueuedTurn } from "../../api/types";
 import {
   removeSessionQueuedTurn,
   updateSessionQueuedTurn,
@@ -43,6 +44,8 @@ type HarnessProps = {
   imageAttachments?: ComposerImageAttachment[];
   mutations: ChatComposerTurnMutations;
   onErrors?: (errors: Record<string, string>) => void;
+  /** Tests observing optimistic cache writes pass their own client. */
+  queryClient?: QueryClient;
 };
 
 function mutationStub<TVariables>(
@@ -69,10 +72,22 @@ function Harness({
   imageAttachments = [],
   mutations,
   onErrors,
+  queryClient: providedQueryClient,
 }: HarnessProps) {
-  const queryClient = useRef(new QueryClient({
+  const fallbackQueryClient = useRef(new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })).current;
+  const queryClient = providedQueryClient ?? fallbackQueryClient;
+  const [cachedQueueIds, setCachedQueueIds] = useState<string[]>(() =>
+    (queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId))?.queuedTurns ?? []).map((row) => row.id),
+  );
+  useEffect(() => {
+    const readCachedQueueIds = () => setCachedQueueIds(
+      (queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId))?.queuedTurns ?? []).map((row) => row.id),
+    );
+    readCachedQueueIds();
+    return queryClient.getQueryCache().subscribe(readCachedQueueIds);
+  }, [queryClient, sessionId]);
   const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>({
     [sessionId]: draft,
   });
@@ -133,6 +148,7 @@ function Harness({
   return (
     <div>
       <output data-testid="draft">{sessionDrafts[sessionId] ?? ""}</output>
+      <output data-testid="cached-queue">{JSON.stringify(cachedQueueIds)}</output>
       <button type="button" data-testid="submit" onClick={() => actions.handleSubmitTurn()}>submit</button>
       <button type="button" data-testid="stop" onClick={() => actions.handleStopTurn()}>stop</button>
       <button
@@ -170,10 +186,31 @@ function Harness({
       </button>
       <button
         type="button"
+        data-testid="remove-q2"
+        onClick={() => actions.handleFollowupQueueRemove("q-2")}
+      >
+        remove q2
+      </button>
+      <button
+        type="button"
         data-testid="move-queue"
         onClick={() => actions.handleFollowupQueueMove(0, 1)}
       >
         move
+      </button>
+      <button
+        type="button"
+        data-testid="pause-queue"
+        onClick={() => actions.handleFollowupQueueTogglePause("q-1", true)}
+      >
+        pause
+      </button>
+      <button
+        type="button"
+        data-testid="resume-queue"
+        onClick={() => actions.handleFollowupQueueTogglePause("q-1", false)}
+      >
+        resume
       </button>
     </div>
   );
@@ -223,6 +260,12 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
     await act(async () => {
       root?.render(<Harness {...props} />);
     });
+  }
+
+  function readCachedQueue(): string[] {
+    return JSON.parse(
+      container?.querySelector<HTMLOutputElement>('[data-testid="cached-queue"]')?.textContent ?? "[]",
+    ) as string[];
   }
 
   it("queues the typed follow-up on the server while the turn is running", async () => {
@@ -458,8 +501,42 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
     expect(removeSessionQueuedTurn).not.toHaveBeenCalled();
   });
 
-  it("updates, withdraws and reorders queued turns through the server", async () => {
+  it("updates a queued turn's content through the server patch", async () => {
     const { mutations } = createMutations();
+    await mount({
+      busy: true,
+      draft: "",
+      queues: {
+        "session-1": [{ id: "q-1", text: "第一条", position: 1 }],
+      },
+      mutations,
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="update-queue"]')?.click();
+    });
+
+    expect(updateSessionQueuedTurn).toHaveBeenCalledWith("session-1", "q-1", { content: "改后的排队文本" });
+  });
+
+  it("withdraws a queued turn optimistically, dedupes in-flight clicks and rebases authoritative rows", async () => {
+    const { mutations } = createMutations();
+    const queuedRows: SessionQueuedTurn[] = [
+      { id: "q-1", position: 1, status: "queued", content: "第一条" },
+      { id: "q-2", position: 2, status: "queued", content: "第二条" },
+    ];
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1",
+      activeTurnId: "turn-session-1",
+      queuedTurns: queuedRows,
+    } as SessionDetail);
+    let resolveRemove: ((rows: SessionQueuedTurn[]) => void) | undefined;
+    vi.mocked(removeSessionQueuedTurn).mockImplementationOnce(
+      () => new Promise<SessionQueuedTurn[]>((resolve) => {
+        resolveRemove = resolve;
+      }),
+    );
     await mount({
       busy: true,
       draft: "",
@@ -470,17 +547,216 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
         ],
       },
       mutations,
+      queryClient,
     });
 
     await act(async () => {
-      container?.querySelector<HTMLButtonElement>('[data-testid="update-queue"]')?.click();
       container?.querySelector<HTMLButtonElement>('[data-testid="remove-queue"]')?.click();
+    });
+
+    // The row leaves the cache at click time, before the DELETE answers.
+    expect(readCachedQueue()).toEqual(["q-2"]);
+    expect(removeSessionQueuedTurn).toHaveBeenCalledTimes(1);
+    expect(removeSessionQueuedTurn).toHaveBeenCalledWith("session-1", "q-1");
+
+    // A late echo that still carries the row must not tempt a second DELETE
+    // while the first is in flight (per-id pending guard).
+    await act(async () => {
+      queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), (current) =>
+        current ? { ...current, queuedTurns: queuedRows } : current,
+      );
+    });
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="remove-queue"]')?.click();
+    });
+    expect(removeSessionQueuedTurn).toHaveBeenCalledTimes(1);
+    expect(readCachedQueue()).toEqual(["q-1", "q-2"]);
+
+    // The DELETE answers: the authoritative rows rebase and win.
+    await act(async () => {
+      resolveRemove?.([{ id: "q-2", position: 1, status: "queued", content: "第二条" }]);
+      await Promise.resolve();
+    });
+    expect(readCachedQueue()).toEqual(["q-2"]);
+
+    // Settled: a different row may still withdraw while nothing is pending on it.
+    vi.mocked(removeSessionQueuedTurn).mockImplementationOnce(async () => [] as SessionQueuedTurn[]);
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="remove-q2"]')?.click();
+    });
+    expect(removeSessionQueuedTurn).toHaveBeenCalledTimes(2);
+    expect(removeSessionQueuedTurn).toHaveBeenLastCalledWith("session-1", "q-2");
+    expect(readCachedQueue()).toEqual([]);
+  });
+
+  it("reorders a queued turn optimistically and rebases the authoritative rows", async () => {
+    const { mutations } = createMutations();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1",
+      activeTurnId: "turn-session-1",
+      queuedTurns: [
+        { id: "q-1", position: 1, status: "queued", content: "第一条" },
+        { id: "q-2", position: 2, status: "queued", content: "第二条" },
+      ],
+    } as SessionDetail);
+    let resolveMove: ((rows: SessionQueuedTurn[]) => void) | undefined;
+    vi.mocked(updateSessionQueuedTurn).mockImplementationOnce(
+      () => new Promise<SessionQueuedTurn[]>((resolve) => {
+        resolveMove = resolve;
+      }),
+    );
+    await mount({
+      busy: true,
+      draft: "",
+      queues: {
+        "session-1": [
+          { id: "q-1", text: "第一条", position: 1 },
+          { id: "q-2", text: "第二条", position: 2 },
+        ],
+      },
+      mutations,
+      queryClient,
+    });
+
+    await act(async () => {
       container?.querySelector<HTMLButtonElement>('[data-testid="move-queue"]')?.click();
     });
 
-    expect(updateSessionQueuedTurn).toHaveBeenCalledWith("session-1", "q-1", { content: "改后的排队文本" });
-    expect(removeSessionQueuedTurn).toHaveBeenCalledWith("session-1", "q-1");
+    // The drop paints the new order immediately; the PATCH payload is unchanged.
+    expect(readCachedQueue()).toEqual(["q-2", "q-1"]);
     expect(updateSessionQueuedTurn).toHaveBeenCalledWith("session-1", "q-1", { position: 2 });
+
+    // The authoritative answer (here also carrying a row added meanwhile) wins.
+    await act(async () => {
+      resolveMove?.([
+        { id: "q-2", position: 1, status: "queued", content: "第二条" },
+        { id: "q-1", position: 2, status: "queued", content: "第一条" },
+        { id: "q-3", position: 3, status: "queued", content: "第三条" },
+      ]);
+      await Promise.resolve();
+    });
+    expect(readCachedQueue()).toEqual(["q-2", "q-1", "q-3"]);
+  });
+
+  it("rolls back an optimistic withdraw when the server rejects it", async () => {
+    const { mutations } = createMutations();
+    let errors: Record<string, string> = {};
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1",
+      activeTurnId: "turn-session-1",
+      queuedTurns: [
+        { id: "q-1", position: 1, status: "queued", content: "第一条" },
+        { id: "q-2", position: 2, status: "queued", content: "第二条" },
+      ],
+    } as SessionDetail);
+    let rejectRemove: ((error: Error) => void) | undefined;
+    vi.mocked(removeSessionQueuedTurn).mockImplementationOnce(
+      () => new Promise<SessionQueuedTurn[]>((_resolve, reject) => {
+        rejectRemove = reject;
+      }),
+    );
+    await mount({
+      busy: true,
+      draft: "",
+      queues: {
+        "session-1": [
+          { id: "q-1", text: "第一条", position: 1 },
+          { id: "q-2", text: "第二条", position: 2 },
+        ],
+      },
+      mutations,
+      onErrors: (next) => {
+        errors = next;
+      },
+      queryClient,
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="remove-queue"]')?.click();
+    });
+    expect(readCachedQueue()).toEqual(["q-2"]);
+
+    await act(async () => {
+      rejectRemove?.(new Error("网络断了"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // The row returns to its pre-intent slot and the failure is surfaced.
+    expect(readCachedQueue()).toEqual(["q-1", "q-2"]);
+    expect(errors["session-1"]).toContain("网络断了");
+  });
+
+  it("rolls back an optimistic reorder when the server rejects it", async () => {
+    const { mutations } = createMutations();
+    let errors: Record<string, string> = {};
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1",
+      activeTurnId: "turn-session-1",
+      queuedTurns: [
+        { id: "q-1", position: 1, status: "queued", content: "第一条" },
+        { id: "q-2", position: 2, status: "queued", content: "第二条" },
+      ],
+    } as SessionDetail);
+    let rejectMove: ((error: Error) => void) | undefined;
+    vi.mocked(updateSessionQueuedTurn).mockImplementationOnce(
+      () => new Promise<SessionQueuedTurn[]>((_resolve, reject) => {
+        rejectMove = reject;
+      }),
+    );
+    await mount({
+      busy: true,
+      draft: "",
+      queues: {
+        "session-1": [
+          { id: "q-1", text: "第一条", position: 1 },
+          { id: "q-2", text: "第二条", position: 2 },
+        ],
+      },
+      mutations,
+      onErrors: (next) => {
+        errors = next;
+      },
+      queryClient,
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="move-queue"]')?.click();
+    });
+    expect(readCachedQueue()).toEqual(["q-2", "q-1"]);
+
+    await act(async () => {
+      rejectMove?.(new Error("网络断了"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // The pre-drag order is restored and the failure is surfaced.
+    expect(readCachedQueue()).toEqual(["q-1", "q-2"]);
+    expect(errors["session-1"]).toContain("网络断了");
+  });
+
+  it("pauses and resumes queued turns through the server status patch", async () => {
+    const { mutations } = createMutations();
+    await mount({
+      busy: true,
+      draft: "",
+      queues: {
+        "session-1": [{ id: "q-1", text: "第一条", status: "queued" }],
+      },
+      mutations,
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="pause-queue"]')?.click();
+    });
+    expect(updateSessionQueuedTurn).toHaveBeenCalledWith("session-1", "q-1", { status: "paused" });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="resume-queue"]')?.click();
+    });
+    expect(updateSessionQueuedTurn).toHaveBeenCalledWith("session-1", "q-1", { status: "queued" });
   });
 
   it("no longer flushes the queue locally when the turn ends", async () => {

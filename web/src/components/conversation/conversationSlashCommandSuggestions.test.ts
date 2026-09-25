@@ -59,14 +59,43 @@ describe("conversation slash command suggestions", () => {
   });
 
   it("filters skills by command, alias, name, and description", () => {
-    expect(filterSlashCommandSuggestions(skills, "/ccd").map((item) => item.command)).toEqual(["/ccdawn-brt"]);
-    expect(filterSlashCommandSuggestions(skills, "/brt").map((item) => item.command)).toEqual(["/ccdawn-brt"]);
-    expect(filterSlashCommandSuggestions(skills, "/root").map((item) => item.command)).toEqual(["/systematic-debugging"]);
+    // The English subsequence tier adds low-priority matches (a query's
+    // characters scattered across a haystack) below exact contains matches.
+    expect(filterSlashCommandSuggestions(skills, "/ccd").map((item) => item.command)).toEqual([
+      "/ccdawn-brt",
+      "/systematic-debugging",
+    ]);
+    expect(filterSlashCommandSuggestions(skills, "/brt").map((item) => item.command)).toEqual([
+      "/ccdawn-brt",
+      "/brainstorming",
+      "/systematic-debugging",
+    ]);
+    expect(filterSlashCommandSuggestions(skills, "/root").map((item) => item.command)).toEqual([
+      "/systematic-debugging",
+      "/brainstorming",
+    ]);
     expect(filterSlashCommandSuggestions(skills, "/").map((item) => item.command)).toEqual([
       "/brainstorming",
       "/ccdawn-brt",
       "/systematic-debugging",
     ]);
+  });
+
+  it("ranks skill substring matches above subsequence matches", () => {
+    const englishSkills = [
+      skill("/abc", "r-o-a-d markers"),
+      skill("/x-road", "road mapping"),
+    ];
+    // Alphabetical order alone would put "/abc" first; the substring tier wins.
+    expect(filterSlashCommandSuggestions(englishSkills, "/road").map((item) => item.command)).toEqual([
+      "/x-road",
+      "/abc",
+    ]);
+  });
+
+  it("does not match CJK skills through scattered characters", () => {
+    const cjkSkills = [skill("/杂谈", "这里文散着件字")];
+    expect(filterSlashCommandSuggestions(cjkSkills, "/文件")).toEqual([]);
   });
 
   it("merges builtins before skills and flags builtin rows", () => {
@@ -97,9 +126,32 @@ describe("conversation slash command suggestions", () => {
       builtin("/压缩", "compress_context", ["compact", "compress"]),
     ];
     expect(mergeSlashCommandSuggestions(builtins, skills, "/新").map((item) => item.command)).toEqual(["/新会话"]);
-    expect(mergeSlashCommandSuggestions(builtins, skills, "/new").map((item) => item.command)).toEqual(["/新会话"]);
+    // "new" still wins on the builtin alias; the English subsequence tier adds
+    // a low-priority skill hit (n..e..w across "chinese ... ccdawn").
+    expect(mergeSlashCommandSuggestions(builtins, skills, "/new").map((item) => item.command)).toEqual([
+      "/新会话",
+      "/ccdawn-brt",
+    ]);
     expect(mergeSlashCommandSuggestions(builtins, skills, "/compact").map((item) => item.command)).toEqual(["/压缩"]);
     expect(mergeSlashCommandSuggestions(builtins, skills, "/zzz")).toEqual([]);
+  });
+
+  it("keeps the builtin-first, skills-alphabetical layout when scores tie", () => {
+    const builtins = [builtin("/model", "model", ["mode"])];
+    const tieSkills = [skill("/modem", "dial-up lines"), skill("/model-kit", "kit parts")];
+    const merged = mergeSlashCommandSuggestions(builtins, tieSkills, "/mode");
+    expect(merged.map((item) => item.command)).toEqual(["/model", "/model-kit", "/modem"]);
+  });
+
+  it("ranks a stronger skill match above a weaker builtin match", () => {
+    const builtins = [builtin("/model", "model", ["mode"])];
+    const betterSkills = [skill("/mdl-tools", "mdl helpers")];
+    // "mdl" only subsequence-matches the builtin ("/model" m..d..l) but
+    // substring-matches the skill, so the skill outranks the builtin.
+    expect(mergeSlashCommandSuggestions(builtins, betterSkills, "/mdl").map((item) => item.command)).toEqual([
+      "/mdl-tools",
+      "/model",
+    ]);
   });
 
   it("only offers builtin commands whose channels exist", () => {

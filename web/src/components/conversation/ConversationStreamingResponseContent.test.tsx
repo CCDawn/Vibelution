@@ -98,6 +98,39 @@ describe("ConversationStreamingResponseContent", () => {
     expect(html).toContain("完成的段落");
   });
 
+  it("caps the streaming live code tail so an unclosed fence cannot grow the render unbounded", async () => {
+    const { ConversationStreamingResponseContent } = await import("./ConversationStreamingResponseContent");
+    // An unclosed fence keeps its whole (growing) block in the live tail; the
+    // live block must still paint only the newest lines every frame.
+    const codeLines = Array.from({ length: 100 }, (_, index) => `代码行 ${String(index + 1).padStart(3, "0")}`);
+    const html = renderToStaticMarkup(
+      <ConversationStreamingResponseContent content={["```text", ...codeLines].join("\n")} classNames={classNames} />,
+    );
+
+    expect(html).toContain('data-streaming-live-tail="1"');
+    expect(html).toContain("…已流入 40 行");
+    expect(html).toContain("代码行 100");
+    expect(html).not.toContain("代码行 001");
+  });
+
+  it("caps the streaming live table while rows keep flowing in", async () => {
+    const { ConversationStreamingResponseContent } = await import("./ConversationStreamingResponseContent");
+    const rows = Array.from({ length: 30 }, (_, index) => `| 行 ${String(index + 1).padStart(2, "0")} | 值 |`);
+    const html = renderToStaticMarkup(
+      <ConversationStreamingResponseContent
+        content={["| 项目 | 状态 |", "| --- | --- |", ...rows, "", "段落尾巴"].join("\n")}
+        classNames={classNames}
+      />,
+    );
+
+    expect(html).toContain('data-streaming-live-tail="1"');
+    expect(html).toContain("+10 行流入中");
+    expect(html).toContain("行 01");
+    expect(html).toContain("行 20");
+    expect(html).not.toContain("行 21");
+    expect(html).toContain("段落尾巴");
+  });
+
   it("keeps streaming text bounded for long tokens while preserving the table width override", () => {
     expect(styles.markdownBody).toContain("max-w-[min(100%,128ch)]");
     expect(styles.markdownBody).toContain("whitespace-normal");

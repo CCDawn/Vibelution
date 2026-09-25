@@ -155,6 +155,74 @@ describe("ConversationMarkdownRenderer", () => {
     expect(html).not.toContain("inlineCode");
   });
 
+  it("folds an oversized fenced code block behind an expandable disclosure", async () => {
+    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
+    const codeLines = Array.from({ length: 260 }, (_, index) => `代码行 ${String(index + 1).padStart(3, "0")}`);
+    const html = renderToStaticMarkup(
+      <ConversationMarkdownRenderer content={["```text", ...codeLines, "```"].join("\n")} classNames={styles} />,
+    );
+
+    // Head budget renders inline; the overflow lines stay in the DOM behind
+    // the native disclosure (full semantics preserved, first paint bounded).
+    expect(html).toContain("<details");
+    expect(html).toContain("展开其余 60 行");
+    expect(html).toContain("代码行 001");
+    expect(html).toContain("代码行 200");
+    expect(html).toContain("代码行 260");
+    const firstPreEnd = html.indexOf("</pre>");
+    expect(firstPreEnd).toBeGreaterThan(0);
+    expect(html.slice(0, firstPreEnd)).not.toContain("代码行 201");
+  });
+
+  it("keeps a code block within the line budget unfolded", async () => {
+    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
+    const codeLines = Array.from({ length: 200 }, (_, index) => `代码行 ${String(index + 1).padStart(3, "0")}`);
+    const html = renderToStaticMarkup(
+      <ConversationMarkdownRenderer content={["```text", ...codeLines, "```"].join("\n")} classNames={styles} />,
+    );
+
+    expect(html).not.toContain("<details");
+    expect(html).toContain("代码行 200");
+  });
+
+  it("truncates an oversized table behind an expandable disclosure", async () => {
+    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
+    const rows = Array.from({ length: 40 }, (_, index) => `| 行 ${String(index + 1).padStart(2, "0")} | 值 |`);
+    const html = renderToStaticMarkup(
+      <ConversationMarkdownRenderer
+        content={["| 项目 | 状态 |", "| --- | --- |", ...rows].join("\n")}
+        classNames={styles}
+      />,
+    );
+
+    // Head rows render inline; the overflow table behind the disclosure
+    // repeats the column headers so the expansion stays readable.
+    expect(html).toContain("<details");
+    expect(html).toContain("展开其余 10 行");
+    expect(html).toContain("行 01");
+    expect(html).toContain("行 40");
+    const trCount = (html.match(/<tr>/g) ?? []).length;
+    // thead(1) + 30 visible rows + thead(1) + 10 overflow rows.
+    expect(trCount).toBe(42);
+    const firstTableEnd = html.indexOf("</table>");
+    expect(firstTableEnd).toBeGreaterThan(0);
+    expect(html.slice(0, firstTableEnd)).not.toContain("行 31");
+  });
+
+  it("keeps a table within the row budget unfolded", async () => {
+    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
+    const rows = Array.from({ length: 30 }, (_, index) => `| 行 ${String(index + 1).padStart(2, "0")} | 值 |`);
+    const html = renderToStaticMarkup(
+      <ConversationMarkdownRenderer
+        content={["| 项目 | 状态 |", "| --- | --- |", ...rows].join("\n")}
+        classNames={styles}
+      />,
+    );
+
+    expect(html).not.toContain("<details");
+    expect(html).toContain("行 30");
+  });
+
   it("keeps unsafe markdown inert while allowing safe links", async () => {
     const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const html = renderToStaticMarkup(

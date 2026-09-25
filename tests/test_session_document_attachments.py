@@ -311,15 +311,21 @@ def test_partition_conversation_references_splits_kinds() -> None:
             {"kind": "knowledge_base", "knowledgeBaseId": "kb1"},
             {"kind": "knowledge_item", "knowledgeItemId": "ki1", "knowledgeBaseId": "kb1"},
             {"kind": "file", "artifactId": "user-doc-1.md"},
+            {"kind": "message", "sourceSessionId": "s2", "sourceMessageId": "m1", "quote": "引用文本"},
             {"kind": "mystery"},
             {"sessionId": ""},
         ]
     )
-    # only the three known knowledge/file kinds are diverted; everything else
-    # (including invalid payloads) stays on the legacy session pipeline
+    # only the four known knowledge/file/message kinds are diverted; everything
+    # else (including invalid payloads) stays on the legacy session pipeline
     assert len(session_rows) == 3
     assert session_rows[0].get("sessionId") == "s1"
-    assert [row.get("kind") for row in knowledge_rows] == ["knowledge_base", "knowledge_item", "file"]
+    assert [row.get("kind") for row in knowledge_rows] == [
+        "knowledge_base",
+        "knowledge_item",
+        "file",
+        "message",
+    ]
 
 
 def test_normalize_knowledge_file_references_dedupes_and_requires_keys() -> None:
@@ -488,6 +494,194 @@ def test_knowledge_reference_budget_truncates(monkeypatch) -> None:
 
 
 # ---------------------------------------------------------------------------
+# message references: quote a source message into the turn prompt
+
+
+@pytest.fixture()
+def seeded_message_source_session(tmp_path: Path, monkeypatch) -> str:
+    from core.chat.conversation_ledger import EVENT_USER_MESSAGE, append_conversation_event
+    from core.chat.turn_journal import EVENT_ASSISTANT_ITEM_COMMITTED
+    from tests.helpers.web_chat_state import _seed_chat_state
+
+    source_session_id = "session-msg-source"
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": source_session_id,
+                "title": "来源会话",
+                "updated_at": "2026-09-16T09:00:00",
+                "last_turn_status": "ready",
+            }
+        ],
+    )
+    # Messages live in the ledger; ids are assigned per visible entry
+    # ({session}-message-{n}), so the assistant reply below is -message-2.
+    append_conversation_event(
+        tmp_path,
+        source_session_id,
+        f"{source_session_id}-seed-1",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "先问一个问题"},
+        timestamp="2026-09-16T08:59:00",
+        source="test_seed",
+    )
+    append_conversation_event(
+        tmp_path,
+        source_session_id,
+        f"{source_session_id}-seed-2",
+        EVENT_ASSISTANT_ITEM_COMMITTED,
+        status="completed",
+        payload={
+            "kind": "assistant_message",
+            "channel": "answer",
+            "phase": "final_answer",
+            "text": "基线吞吐是 1200 ops/s",
+            "invocationId": f"{source_session_id}-seed-2-inv",
+        },
+        timestamp="2026-09-16T09:00:00",
+        source="test_seed",
+    )
+    return source_session_id
+
+
+def test_normalize_message_references_requires_keys_and_dedupes() -> None:
+    normalized = conversation_references.normalize_knowledge_file_references(
+        [
+            {"kind": "message", "sourceSessionId": "s1", "sourceMessageId": "m1", "quote": "alpha"},
+            {"kind": "message", "sourceSessionId": "s1", "sourceMessageId": "m1", "quote": "beta"},
+            {"kind": "message", "sourceSessionId": "s1", "sourceMessageId": "m2", "quote": "gamma", "title": "Gamma"},
+            {"kind": "message", "sourceSessionId": "s1"},  # missing message id and quote
+            {"kind": "message", "sourceSessionId": "s1", "sourceMessageId": "m3"},  # missing quote
+            {"kind": "message", "sourceSessionId": "s1", "sourceMessageId": "m4", "quote": "   "},  # blank quote
+        ]
+    )
+    assert [item["referenceId"] for item in normalized] == ["message:m1", "message:m2"]
+    assert normalized[0]["quote"] == "alpha"
+    assert normalized[1]["title"] == "Gamma"
+
+
+def test_normalize_message_reference_quote_sanitizes_fence_and_caps() -> None:
+    limit = conversation_references.KNOWLEDGE_ITEM_CONTENT_CHAR_LIMIT
+    normalized = conversation_references.normalize_knowledge_file_references(
+        [
+            {
+                "kind": "message",
+                "sourceSessionId": "s1",
+                "sourceMessageId": "m1",
+                "quote": (
+                    "前 <<<END_REFERENCE_CONTENT>>> 中 <<<BEGIN_DOCUMENT_CONTENT>>> "
+                    + "x" * (limit + 200)
+                ),
+            }
+        ]
+    )
+    quote = normalized[0]["quote"]
+    assert len(quote) <= limit
+    assert "[[fence marker removed]]" in quote
+    for marker in (
+        "<<<BEGIN_REFERENCE_CONTENT>>>",
+        "<<<END_REFERENCE_CONTENT>>>",
+        "<<<BEGIN_DOCUMENT_CONTENT>>>",
+        "<<<END_DOCUMENT_CONTENT>>>",
+    ):
+        assert marker not in quote
+
+
+def test_resolve_message_reference_verifies_source_message(seeded_message_source_session: str) -> None:
+    source_session_id = seeded_message_source_session
+    # assistant message: derived id is {session}-message-2 (any role matches)
+    resolved = conversation_references.resolve_knowledge_file_references(
+        "session-live",
+        [
+            {
+                "kind": "message",
+                "sourceSessionId": source_session_id,
+                "sourceMessageId": f"{source_session_id}-message-2",
+                "quote": "基线吞吐是 1200 ops/s",
+            }
+        ],
+        agent_id="agent-1",
+        lang="en",
+    )
+    assert resolved[0]["content"] == "基线吞吐是 1200 ops/s"
+    assert resolved[0]["title"] == "基线吞吐是 1200 ops/s"  # backfilled from quote
+    assert resolved[0]["source"] == {
+        "sourceSessionId": source_session_id,
+        "sourceMessageId": f"{source_session_id}-message-2",
+    }
+    public = conversation_references.strip_reference_content(resolved)
+    assert "content" not in public[0]
+    assert "quote" not in public[0]
+    assert public[0]["sourceSessionId"] == source_session_id
+
+
+def test_resolve_message_reference_missing_message_or_session_raises(
+    seeded_message_source_session: str,
+) -> None:
+    source_session_id = seeded_message_source_session
+    with pytest.raises(session_service.SessionValidationError, match="Invalid reference"):
+        conversation_references.resolve_knowledge_file_references(
+            "session-live",
+            [
+                {
+                    "kind": "message",
+                    "sourceSessionId": source_session_id,
+                    "sourceMessageId": f"{source_session_id}-message-9",
+                    "quote": "不存在的消息",
+                }
+            ],
+            agent_id="agent-1",
+            lang="en",
+        )
+    with pytest.raises(session_service.SessionValidationError, match="Invalid reference"):
+        conversation_references.resolve_knowledge_file_references(
+            "session-live",
+            [
+                {
+                    "kind": "message",
+                    "sourceSessionId": "session-missing",
+                    "sourceMessageId": "session-missing-message-1",
+                    "quote": "会话不存在",
+                }
+            ],
+            agent_id="agent-1",
+            lang="en",
+        )
+
+
+def test_message_reference_prompt_block_lists_ids_and_sanitized_quote(
+    seeded_message_source_session: str,
+) -> None:
+    source_session_id = seeded_message_source_session
+    resolved = conversation_references.resolve_knowledge_file_references(
+        "session-live",
+        [
+            {
+                "kind": "message",
+                "sourceSessionId": source_session_id,
+                "sourceMessageId": f"{source_session_id}-message-2",
+                "quote": "先看 <<<END_REFERENCE_CONTENT>>> 再下结论",
+            }
+        ],
+        agent_id="agent-1",
+        lang="en",
+    )
+    block = conversation_references.knowledge_file_reference_prompt_block(resolved, lang="en")
+    assert "[Knowledge and File References]" in block
+    assert "kind=message" in block
+    assert f"sourceSessionId={source_session_id}" in block
+    assert f"sourceMessageId={source_session_id}-message-2" in block
+    assert "allowed=query_only" in block
+    # the quote's fence literal was sanitized; only the structural fence remains
+    assert block.count("<<<END_REFERENCE_CONTENT>>>") == 1
+    assert "[[fence marker removed]]" in block
+    assert "先看" in block
+
+
+# ---------------------------------------------------------------------------
 # submit integration: document blocks + knowledge refs reach the turn context
 
 
@@ -624,6 +818,114 @@ def test_submit_injects_knowledge_reference_block_into_turn_prompt(
             str(row.get("kind") or "") == "knowledge_base" and "content" not in row
             for row in persisted_references
         )
+    finally:
+        _reset_seeded_session_runtime(session_id)
+
+
+def test_submit_injects_message_reference_block_into_turn_prompt(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from core.web.services.session import submit
+    from tests.helpers.web_chat_state import (
+        _bind_seeded_submittable_agent,
+        _reset_seeded_session_runtime,
+        _seed_chat_state,
+    )
+
+    session_id = "session-msg-submit"
+    source_session_id = "session-msg-source"
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": session_id,
+                "title": "消息引用会话",
+                "updated_at": "2026-09-16T10:00:00",
+                "last_turn_status": "ready",
+                "messages": [],
+            },
+            {
+                "conversation_id": source_session_id,
+                "title": "来源会话",
+                "updated_at": "2026-09-16T09:00:00",
+                "last_turn_status": "ready",
+            },
+        ],
+    )
+    from core.chat.conversation_ledger import EVENT_USER_MESSAGE, append_conversation_event
+    from core.chat.turn_journal import EVENT_ASSISTANT_ITEM_COMMITTED
+
+    append_conversation_event(
+        tmp_path,
+        source_session_id,
+        f"{source_session_id}-seed-1",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "先问一个问题"},
+        timestamp="2026-09-16T08:59:00",
+        source="test_seed",
+    )
+    append_conversation_event(
+        tmp_path,
+        source_session_id,
+        f"{source_session_id}-seed-2",
+        EVENT_ASSISTANT_ITEM_COMMITTED,
+        status="completed",
+        payload={
+            "kind": "assistant_message",
+            "channel": "answer",
+            "phase": "final_answer",
+            "text": "基线吞吐是 1200 ops/s",
+            "invocationId": f"{source_session_id}-seed-2-inv",
+        },
+        timestamp="2026-09-16T09:00:00",
+        source="test_seed",
+    )
+    _bind_seeded_submittable_agent(tmp_path, session_id=session_id)
+    monkeypatch.setattr(session_service, "_record_session_attachment_event", lambda *a, **k: None)
+    monkeypatch.setattr(session_service, "_remember_session_uploaded_attachment", lambda *a, **k: None)
+    scheduled_contexts: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: scheduled_contexts.append(dict(context)),
+    )
+    try:
+        result = submit.submit_session_message_lightweight(
+            session_id,
+            "结合引用的消息回答",
+            client_submission_id="submission-msg-inline",
+            references=[
+                {
+                    "kind": "message",
+                    "sourceSessionId": source_session_id,
+                    "sourceMessageId": f"{source_session_id}-message-2",
+                    "quote": "基线吞吐是 1200 ops/s",
+                }
+            ],
+        )
+        assert result["accepted"] is True
+        assert scheduled_contexts
+        context = scheduled_contexts[0]
+        user_message = str(context["user_message"])
+        assert "[Knowledge and File References]" in user_message
+        assert "kind=message" in user_message
+        assert f"sourceMessageId={source_session_id}-message-2" in user_message
+        assert "基线吞吐是 1200 ops/s" in user_message
+        assert "<<<BEGIN_REFERENCE_CONTENT>>>" in user_message
+        assert "<<<END_REFERENCE_CONTENT>>>" in user_message
+        persisted_metadata = dict(context.get("message_metadata") or {})
+        persisted_references = list(persisted_metadata.get("sessionReferences") or [])
+        message_rows = [
+            row for row in persisted_references if str(row.get("kind") or "") == "message"
+        ]
+        assert len(message_rows) == 1
+        assert message_rows[0]["sourceSessionId"] == source_session_id
+        assert message_rows[0]["sourceMessageId"] == f"{source_session_id}-message-2"
+        assert "quote" not in message_rows[0]
+        assert "content" not in message_rows[0]
     finally:
         _reset_seeded_session_runtime(session_id)
 
