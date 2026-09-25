@@ -24,6 +24,8 @@ export type VDialogProps = {
   hideClose?: boolean;
   "aria-label"?: string;
   onCloseAutoFocus?: (event: Event) => void;
+  /** Locator anchor override forwarded to the renderer Content; defaults to "dialog-content". */
+  "data-vui"?: string;
 };
 
 /**
