@@ -27,9 +27,10 @@
    浏览器内核已在本机缓存（`playwright install` 的产物随 1.62.0 分发），无需重复下载。
 2. web 前端产物不需要手工构建：`e2e_instance` fixture 会自动执行
    `tests/e2e/helpers/ensure_web_build.py` —— 用 junction 把根 checkout 的
-   `web/node_modules` 映射进 worktree，`npm run build` 一次并在 `web/.e2e-build-stamp.json`
-   写 stamp（HEAD 未变且 `dist/index.html` 在场时跳过重建）。根 checkout 定位用
-   `git rev-parse --git-common-dir`，不假设固定路径。
+   `web/node_modules` 映射进 worktree，`npm run build` 一次并写 stamp 到
+   `%LOCALAPPDATA%\Vibelution\e2e\build-stamps\<worktree哈希>.json`（仓外，
+   不污染 git status；HEAD 未变且 `dist/index.html` 在场时跳过重建）。
+   根 checkout 定位用 `git rev-parse --git-common-dir`，不假设固定路径。
 
 ## 一条命令跑法
 
@@ -158,8 +159,8 @@ $env:VIBELUTION_E2E = "1"; .\.venv\Scripts\python.exe -m pytest tests/e2e -m ser
 `test_perf_baseline.py` 对主导航 8 项（`/chat` `/companions` `/supervised-evolution`
 `/self-evolution` `/teams` `/kernel` `/memory` `/agents`）各采集：
 
-- `gotoMs`：`page.goto` → 目标页 route-header h1 文本出现；
-- `clickNavMs`：从静态中转页 `/reset` 点击主导航项 → 目标页 h1 文本变化；
+- `gotoMs`：`page.goto` → 目标页 `[data-vui-domain-recipe]` 锚点可见；
+- `clickNavMs`：从静态中转页 `/reset` 点击主导航项 → URL 到达目标 + recipe 锚点可见；
 - `window.performance`：DOMContentLoaded/load、资源数、JS 堆；
 - 遥测事件计数（拦截 `POST /api/runtime/browser-telemetry` 放行并统计）：
   `browser.route.changed`、`browser.chat_route.chunk_load_started/loaded`。
@@ -179,8 +180,9 @@ AppShell「进行中」120s runtime summary。全局每次路由变化有
 - 实例起不来/停不干净：fixture 失败信息自带 registry 条目快照与 launcher 日志目录
   线索（`%LOCALAPPDATA%\Vibelution\projects\*\instances\<slotId>\runtime\launcher\`）；
   不要盲目重试，先核对 `instances.json`。
-- 前端白屏或 h1 超时：确认 `web/dist` stamp 与 HEAD 一致（删除 `web/.e2e-build-stamp.json`
-  强制重建），或用 `GET /api/health` 的 `serving.frontend.builtFromCommit` 核对实例
+- 前端白屏或锚点超时：确认 stamp 与 HEAD 一致（删除
+  `%LOCALAPPDATA%\Vibelution\e2e\build-stamps\` 下对应 worktree 的 stamp 强制重建），
+  或用 `GET /api/health` 的 `serving.frontend.builtFromCommit` 核对实例
   服务的产物身份。
 - 路由守卫改判（302）导致 URL 不符：先看 `/api/config/public` 的可用性字段，再核对
   `test_routes_smoke.py` 的路由表与 `workbenchContract.ts` 是否仍一致。
