@@ -1,0 +1,36 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "E2E-MOCK-TOOL-V1"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "name": "write_file",
+            "arguments": "{\"path\":\"logs/e2e-mock.log\",\"content\":\"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\"}"
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "userMessage": "E2E-MOCK-TOOLFIRST-V1"
+      },
+      "response": {
+        "blocks": [
+          {
+            "type": "toolCall",
+            "name": "search_web",
+            "arguments": "{\"query\":\"e2e mock\"}",
+            "id": "call_e2e_search_1"
+          },
+          {
+            "type": "text",
+            "text": "先调用工具，再补一句说明。"
+          }
+        ]
+      }
+    }
+  ]
+}
