@@ -61,6 +61,16 @@ const styles = {
   ),
   batchDetailsInner: cx("batchDetailsInner", "grid min-w-0 gap-0 pl-1"),
   batchRow: cx("batchRow", "min-w-0"),
+  // Category parent group (ZCode Explore/Execute-style stage container): same
+  // quiet row chrome as batches; colors/state live in the shared tokens.
+  categoryGroup: cx("categoryGroup", "w-full max-w-full min-w-0"),
+  categoryGroupSummary: cx(
+    "categoryGroupSummary",
+    "flex w-full max-w-full min-w-0 list-none cursor-pointer items-center gap-x-2 py-[0.28rem] text-left [&::-webkit-details-marker]:hidden [&::marker]:hidden [&::marker]:content-none focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
+  ),
+  categoryGroupDetails: cx("categoryGroupDetails", "min-w-0"),
+  categoryGroupDetailsInner: cx("categoryGroupDetailsInner", "grid min-w-0 gap-0 pl-1"),
+  categoryGroupRow: cx("categoryGroupRow", "min-w-0"),
   // Tool chrome stays quieter than narrative body (fg-primary).
   itemIcon: cx("itemIcon", "shrink-0 text-[color-mix(in_srgb,var(--fg-tertiary)_90%,transparent)]"),
   itemIconRunning: cx("itemIconRunning", "text-[var(--accent-cool)]"),
@@ -113,6 +123,12 @@ const styles = {
   itemPreview: cx(
     "itemPreview",
     "max-w-full min-w-0 flex-1 truncate font-normal text-[color-mix(in_srgb,var(--fg-tertiary)_78%,transparent)]",
+  ),
+  // ZCode subagent-name chip: layout only here — the tinted colors derive from
+  // the inline `--subagent-accent` custom property (see ConversationToolActivity.css).
+  agentNameChip: cx(
+    "agentNameChip",
+    "inline-flex max-w-full min-w-0 shrink items-center overflow-hidden whitespace-nowrap align-baseline",
   ),
   itemDuration: cx(
     "itemDuration",
