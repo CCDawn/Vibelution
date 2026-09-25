@@ -717,6 +717,22 @@ def _is_provider_failed_result(result: Any) -> bool:
     return s._looks_like_provider_error_text(s._provider_failure_raw_error(result))
 
 
+def _message_content_as_text(value: Any) -> str:
+    """Text of a message content value; multimodal blocks contribute their text."""
+
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            if isinstance(item, dict):
+                parts.append(str(item.get("text") or item.get("content") or ""))
+            else:
+                parts.append(str(item or ""))
+        return "".join(parts)
+    if isinstance(value, str):
+        return value
+    return str(value or "")
+
+
 def _latest_effective_user_message(messages: list[dict[str, Any]]) -> str:
     s = _service()
     content, _index = s._latest_effective_user_message_with_index(messages)
@@ -731,7 +747,7 @@ def _latest_effective_user_message_with_index(messages: list[dict[str, Any]]) ->
             continue
         if not s._is_real_user_message_entry(item):
             continue
-        content = s.trim_lines(item.get("content") or "", max_lines=4)
+        content = s.trim_lines(s._message_content_as_text(item.get("content")), max_lines=4)
         if s._is_effective_user_message(content):
             return content, index
     return "", -1
@@ -744,7 +760,7 @@ def _latest_effective_user_messages(messages: list[dict[str, Any]], *, limit: in
     for item in reversed(messages):
         if not s._is_real_user_message_entry(item):
             continue
-        content = s.trim_lines(item.get("content") or "", max_lines=4)
+        content = s.trim_lines(s._message_content_as_text(item.get("content")), max_lines=4)
         if not s._is_effective_user_message(content):
             continue
         dedupe_key = re.sub(r"\s+", "", content)

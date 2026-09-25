@@ -17,6 +17,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from core.infrastructure.runtime_input import build_chat_user_message
+
 from .image_model_variant import build_model_image_variant
 
 
@@ -501,6 +503,114 @@ def _build_llm_image_attachments(session_id: str, attachments: list[dict[str, An
             )
             raise s.SessionValidationError(f"Image attachment could not be prepared: {artifact_id}") from exc
     return prepared
+
+
+_HISTORY_IMAGE_UNAVAILABLE_PLACEHOLDER = "[图片不可用]"
+
+
+def _history_seed_image_blocks(
+    session_id: str,
+    attachments: Any,
+) -> list[dict[str, Any]]:
+    """Resolve historical image attachments into provider image_url blocks.
+
+    One block per ready user image, in attachment order. A dataUrl resolve
+    failure degrades to a text placeholder instead of failing the turn: the
+    artifact is from a previous turn, so a missing file must never block the
+    current model request.
+    """
+
+    s = _service()
+    blocks: list[dict[str, Any]] = []
+    for attachment in s._normalize_message_attachments(attachments or []):
+        if not s._is_ready_user_image_attachment(attachment):
+            continue
+        artifact_id = str(attachment.get("artifactId") or "").strip()
+        if not artifact_id:
+            continue
+        try:
+            resolved = resolve_session_image_attachment_data_url(session_id, artifact_id)
+        except (FileNotFoundError, OSError, s.SessionValidationError) as exc:
+            s._record_session_attachment_event(
+                session_id,
+                "history_unavailable",
+                attachment,
+                outcome=type(exc).__name__,
+            )
+            blocks.append({"type": "text", "text": _HISTORY_IMAGE_UNAVAILABLE_PLACEHOLDER})
+            continue
+        data_url = str(resolved.get("dataUrl") or "").strip()
+        if not data_url:
+            blocks.append({"type": "text", "text": _HISTORY_IMAGE_UNAVAILABLE_PLACEHOLDER})
+            continue
+        blocks.append({"type": "image_url", "image_url": {"url": data_url}})
+    return blocks
+
+
+def _history_seed_message_with_image_attachments(
+    session_id: str,
+    message: Any,
+) -> Any:
+    """Rebuild one retained-window user history message as multimodal blocks.
+
+    The text block keeps the exact string the plain string-seed path produces
+    (``build_chat_user_message``), so the conversation-layer fingerprint stays
+    identical whether or not image blocks are added: the send-time ledger gate
+    treats image blocks as fingerprint-invisible on both sides.
+    """
+
+    if not isinstance(message, dict):
+        return message
+    if str(message.get("role") or "").strip().lower() != "user":
+        return message
+    if isinstance(message.get("content"), list):
+        # Already-multimodal (live-turn carryover shape); nothing to rebuild.
+        return message
+    image_blocks = _history_seed_image_blocks(session_id, message.get("attachments"))
+    if not image_blocks:
+        return message
+    text = str(build_chat_user_message(str(message.get("content") or ""))["content"])
+    rebuilt = dict(message)
+    rebuilt["content"] = [{"type": "text", "text": text}, *image_blocks]
+    return rebuilt
+
+
+def _seed_history_messages_with_image_attachments(
+    session_id: str,
+    messages: list[dict[str, Any]] | None,
+    *,
+    agent_instance: dict[str, Any] | None = None,
+) -> list[dict[str, Any]] | None:
+    """Rebuild retained-window user history with image attachments for the model.
+
+    The session worker applies this AFTER ledger windowing/compaction, so
+    images follow the text history's lifecycle exactly: a turn the window or a
+    compression checkpoint dropped is absent from ``messages`` and its image is
+    never rebuilt. Capability gate: when the dialogue-slot model is known to
+    not support image input the seed stays text-only (status quo); an unknown
+    capability fails open like the live-turn path. Copy-on-write: input message
+    dicts are shared with the assembly memo and must not be mutated.
+    """
+
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id or not messages:
+        return messages
+    if (
+        s._session_agent_supports_image_input(
+            agent_instance,
+            slot=s.SESSION_LLM_SLOT_DIALOGUE,
+        )
+        is False
+    ):
+        return messages
+    rebuilt_messages = [
+        _history_seed_message_with_image_attachments(normalized_session_id, message)
+        for message in messages
+    ]
+    if all(new is old for new, old in zip(rebuilt_messages, messages)):
+        return messages
+    return rebuilt_messages
 
 
 def _record_session_attachment_event(

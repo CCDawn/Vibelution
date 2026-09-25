@@ -1866,3 +1866,272 @@ def test_run_session_turn_seeds_bounded_assembled_history(tmp_path, monkeypatch)
     assert "历史回答 9" in seeded_contents
     assert "当前请求" not in seeded_contents
     assert len(captured["history"]) >= 10
+
+
+_HISTORY_IMAGE_ATTACHMENT = {
+    "artifactId": "user-image-1.png",
+    "filename": "user-image-1.png",
+    "kind": "user_image",
+    "status": "ready",
+    "contentType": "image/png",
+}
+
+
+def _append_history_image_turn(tmp_path, session_id: str, *, turn_id: str = "turn-image") -> None:
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        turn_id,
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={
+            "content": "看看这张图",
+            "attachments": [_HISTORY_IMAGE_ATTACHMENT],
+        },
+    )
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        turn_id,
+        EVENT_ASSISTANT_PARTIAL,
+        status="completed",
+        payload={"content": "好的，我看到了。"},
+    )
+
+
+def _seed_history_image_capture(
+    tmp_path,
+    monkeypatch,
+    *,
+    session_id: str = "session-history-image",
+    supports_image_input: bool | None = True,
+):
+    """Run one session turn over an image-bearing history; capture the seed."""
+
+    import core.web.services.session.image_attachments as image_attachments_module
+
+    _append_history_image_turn(tmp_path, session_id)
+    messages = [{"role": "user", "content": "当前请求"}]
+    save_chat_state(
+        tmp_path,
+        build_chat_state(messages, conversation_id=session_id, title="历史图片测试"),
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "_session_agent_supports_image_input",
+        lambda agent_instance, slot="dialogue": supports_image_input,
+    )
+    monkeypatch.setattr(
+        image_attachments_module,
+        "resolve_session_image_attachment_data_url",
+        lambda session_id, artifact_id: {
+            "artifactId": artifact_id,
+            "dataUrl": "data:image/png;base64,aW1hZ2U=",
+        },
+    )
+    captured: dict[str, list] = {}
+
+    class DummyAgent:
+        def seed_chat_history(self, seeded_messages):
+            captured["history"] = list(seeded_messages)
+
+        def run_single_turn(self, initial_prompt=None, **_kwargs):
+            return {
+                "status": "completed",
+                "summary": "完成",
+                "raw_output": "完成",
+                "outcome": "done",
+            }
+
+    monkeypatch.setattr(
+        session_service,
+        "_create_chat_agent_for_session",
+        lambda *_args, **_kwargs: DummyAgent(),
+    )
+    session_service._run_session_turn(
+        {
+            "session_id": session_id,
+            "user_message": "当前请求",
+            "history_messages": messages,
+            "mental_model_enabled": False,
+            "active_task": None,
+        }
+    )
+    return captured
+
+
+def _seeded_image_user_messages(history: list) -> list[dict]:
+    return [
+        item
+        for item in history
+        if isinstance(item, dict)
+        and item.get("role") == "user"
+        and isinstance(item.get("content"), list)
+        and any(
+            isinstance(block, dict) and block.get("type") == "image_url"
+            for block in item["content"]
+        )
+    ]
+
+
+def test_run_session_turn_seeds_history_image_as_multimodal_blocks(tmp_path, monkeypatch):
+    captured = _seed_history_image_capture(tmp_path, monkeypatch)
+
+    image_messages = _seeded_image_user_messages(captured["history"])
+    assert len(image_messages) == 1
+    blocks = image_messages[0]["content"]
+    text_blocks = [block for block in blocks if block.get("type") == "text"]
+    image_blocks = [block for block in blocks if block.get("type") == "image_url"]
+    assert len(text_blocks) == 1
+    assert "看看这张图" in text_blocks[0]["text"]
+    assert image_blocks == [
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,aW1hZ2U="}}
+    ]
+
+
+def test_run_session_turn_seeds_history_text_only_when_image_input_unsupported(
+    tmp_path, monkeypatch
+):
+    captured = _seed_history_image_capture(
+        tmp_path, monkeypatch, supports_image_input=False
+    )
+
+    assert _seeded_image_user_messages(captured["history"]) == []
+    seeded_texts = [
+        str(item.get("content") or "")
+        for item in captured["history"]
+        if isinstance(item, dict) and item.get("role") == "user"
+    ]
+    assert any("看看这张图" in text for text in seeded_texts)
+
+
+def test_run_session_turn_seed_history_image_resolve_failure_degrades_to_placeholder(
+    tmp_path, monkeypatch
+):
+    import core.web.services.session.image_attachments as image_attachments_module
+
+    def _fail_resolve(session_id, artifact_id):
+        raise FileNotFoundError(artifact_id)
+
+    _append_history_image_turn(tmp_path, "session-history-image")
+    messages = [{"role": "user", "content": "当前请求"}]
+    save_chat_state(
+        tmp_path,
+        build_chat_state(messages, conversation_id="session-history-image", title="占位测试"),
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "_session_agent_supports_image_input",
+        lambda agent_instance, slot="dialogue": True,
+    )
+    monkeypatch.setattr(
+        image_attachments_module,
+        "resolve_session_image_attachment_data_url",
+        _fail_resolve,
+    )
+    captured: dict[str, list] = {}
+
+    class DummyAgent:
+        def seed_chat_history(self, seeded_messages):
+            captured["history"] = list(seeded_messages)
+
+        def run_single_turn(self, initial_prompt=None, **_kwargs):
+            return {
+                "status": "completed",
+                "summary": "完成",
+                "raw_output": "完成",
+                "outcome": "done",
+            }
+
+    monkeypatch.setattr(
+        session_service,
+        "_create_chat_agent_for_session",
+        lambda *_args, **_kwargs: DummyAgent(),
+    )
+    session_service._run_session_turn(
+        {
+            "session_id": "session-history-image",
+            "user_message": "当前请求",
+            "history_messages": messages,
+            "mental_model_enabled": False,
+            "active_task": None,
+        }
+    )
+
+    image_messages = _seeded_image_user_messages(captured["history"])
+    assert image_messages == []
+    seeded_user_items = [
+        item
+        for item in captured["history"]
+        if isinstance(item, dict)
+        and item.get("role") == "user"
+        and isinstance(item.get("content"), list)
+    ]
+    assert len(seeded_user_items) == 1
+    block_texts = [block.get("text") for block in seeded_user_items[0]["content"]]
+    assert any("看看这张图" in text for text in block_texts if text)
+    assert "[图片不可用]" in block_texts
+
+
+def test_history_image_seed_stays_inside_retained_window(tmp_path, monkeypatch):
+    """A turn dropped by the history window contributes no image blocks."""
+
+    import core.web.services.session.image_attachments as image_attachments_module
+
+    _append_history_image_turn(tmp_path, "session-window", turn_id="turn-old-image")
+    for index in range(6):
+        append_conversation_event(
+            tmp_path,
+            "session-window",
+            f"turn-recent-{index}",
+            EVENT_USER_MESSAGE,
+            status="recorded",
+            payload={"content": f"近期消息 {index}"},
+        )
+        append_conversation_event(
+            tmp_path,
+            "session-window",
+            f"turn-recent-{index}",
+            EVENT_ASSISTANT_PARTIAL,
+            status="completed",
+            payload={"content": f"近期回答 {index}"},
+        )
+
+    monkeypatch.setattr(
+        session_service,
+        "_session_agent_supports_image_input",
+        lambda agent_instance, slot="dialogue": True,
+    )
+    monkeypatch.setattr(
+        image_attachments_module,
+        "resolve_session_image_attachment_data_url",
+        lambda session_id, artifact_id: {
+            "artifactId": artifact_id,
+            "dataUrl": "data:image/png;base64,aW1hZ2U=",
+        },
+    )
+
+    events = [
+        event
+        for event in load_conversation_events(tmp_path, "session-window")
+        if str(getattr(event, "turn_id", "") or "").strip() != "turn-current"
+    ]
+    assembled = assemble_conversation_context(
+        [],
+        session_id="session-window",
+        current_turn_id="turn-current",
+        ledger_events=events,
+        recent_message_limit=3,
+        enforce_conversation_invariant=False,
+    )
+    assembled_texts = [str(item.get("content") or "") for item in assembled.history_messages]
+    assert all("看看这张图" not in text for text in assembled_texts)
+
+    seeded = session_service._seed_history_messages_with_image_attachments(
+        "session-window",
+        assembled.history_messages,
+        agent_instance=None,
+    )
+    assert _seeded_image_user_messages(seeded) == []
