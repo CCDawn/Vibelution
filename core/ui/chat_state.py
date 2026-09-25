@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+import contextvars
 import json
 import shutil
 import time
 from contextlib import contextmanager
 from datetime import datetime
+from functools import wraps
 from pathlib import Path
 from typing import Any, Callable
 
@@ -462,6 +464,71 @@ def save_session_chat_state(
         )
 
 
+_BORROWED_CHAT_STATE_STORE: contextvars.ContextVar[tuple[Path, Any] | None] = (
+    contextvars.ContextVar("vibelution_borrowed_chat_state_store", default=None)
+)
+
+
+@contextmanager
+def borrow_chat_state_store(project_root: Path):
+    """Reuse one conversation store across repeated session reads in this call.
+
+    A live directory store for the same root is reused and left open.
+    Otherwise one standalone store stays open until the block exits.
+    Nested calls for the same root share that store. A different root
+    opens its own store and restores the outer one afterwards.
+    """
+
+    from core.web.services.session import directory_runtime
+
+    root = Path(project_root).resolve()
+    current = _BORROWED_CHAT_STATE_STORE.get()
+    if current is not None and current[0] == root:
+        yield current[1]
+        return
+
+    live = directory_runtime.get_open_directory_store()
+    if live is not None and directory_runtime.directory_store_project_root() == root:
+        token = _BORROWED_CHAT_STATE_STORE.set((root, live))
+        try:
+            yield live
+        finally:
+            _BORROWED_CHAT_STATE_STORE.reset(token)
+        return
+
+    from core.chat.conversation_store import ConversationStore
+
+    standalone = ConversationStore(directory_runtime.conversation_store_path(root))
+    standalone.open()
+    token = _BORROWED_CHAT_STATE_STORE.set((root, standalone))
+    try:
+        yield standalone
+    finally:
+        _BORROWED_CHAT_STATE_STORE.reset(token)
+        standalone.close()
+
+
+@contextmanager
+def borrow_session_project_chat_state():
+    """Borrow the store for the session service's current project root."""
+
+    from core.web.services import session_service
+
+    with borrow_chat_state_store(session_service.PROJECT_ROOT):
+        yield
+
+
+def borrowing_session_chat_state(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Keep one chat-state store open for the whole call, including nested reads."""
+
+    @wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        with borrow_session_project_chat_state():
+            return fn(*args, **kwargs)
+
+    return wrapper
+
+
 @contextmanager
 def _chat_state_repository(project_root: Path):
     """Yield the process store repository or a bounded standalone store."""
@@ -469,6 +536,11 @@ def _chat_state_repository(project_root: Path):
     from core.web.services.session import directory_runtime
 
     root = Path(project_root).resolve()
+    borrowed = _BORROWED_CHAT_STATE_STORE.get()
+    if borrowed is not None and borrowed[0] == root:
+        yield borrowed[1].repository
+        return
+
     store = directory_runtime.get_open_directory_store()
     if store is not None and directory_runtime.directory_store_project_root() == root:
         yield store.repository
