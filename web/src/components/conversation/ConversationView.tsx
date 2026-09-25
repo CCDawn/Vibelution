@@ -78,7 +78,6 @@ import {
   type MentalStateLabels,
 } from "./conversationMentalState";
 import { AgentMessageTurnView } from "./AgentMessageTurnView";
-import { AgentResponseSectionView } from "./AgentResponseSectionView";
 import { AgentUserContentSectionView } from "./AgentUserContentSectionView";
 
 /** T1: dialog/context chrome load only when opened — keep transcript path leaner. */

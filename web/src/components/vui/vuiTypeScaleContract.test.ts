@@ -74,4 +74,14 @@ describe("VUI type scale contract", () => {
       ARBITRARY_TEXT_SIZE_BASELINE,
     );
   });
+
+  // The conversation surface is the largest consumer of the ladder; keep it on
+  // `text-vui-*` so a new `[font-size:var(--vui-font-*)]` cannot drift back in.
+  it("keeps the conversation surface on the product type ladder", () => {
+    const conversationRoot = resolve(import.meta.dirname, "../conversation");
+    const offenders = collectSourceFiles(conversationRoot)
+      .filter((file) => readFileSync(file, "utf8").includes("[font-size:var(--vui-font-"))
+      .map((file) => file.slice(conversationRoot.length + 1));
+    expect(offenders).toEqual([]);
+  });
 });

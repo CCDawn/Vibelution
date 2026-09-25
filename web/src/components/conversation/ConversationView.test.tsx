@@ -508,10 +508,10 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(styles.timelineCellPreview).toContain("whitespace-normal");
     expect(styles.timelineCellPreview).toContain("[overflow-wrap:anywhere]");
     expect(styles.timelineCellPreview).toContain("line-clamp-2");
-    expect(styles.timelineCellPreview).toContain("[font-size:var(--vui-font-sm)]");
-    expect(styles.timelineCellPreview).not.toContain("[font-size:var(--vui-font-xs)]");
+    expect(styles.timelineCellPreview).toContain("text-vui-sm");
+    expect(styles.timelineCellPreview).not.toContain("text-vui-xs");
     // Codex-aligned tool chrome keeps titles muted/small; pills own the primary action label.
-    expect(styles.timelineCellTitle).toContain("[font-size:var(--vui-font-xs)]");
+    expect(styles.timelineCellTitle).toContain("text-vui-xs");
     expect(styles.timelineCellTitle).toContain("font-normal");
     expect(styles.operationItem).not.toContain("860px");
     expect(styles.operationItem).toContain("w-[min(100%,72ch)]");
@@ -819,10 +819,10 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
   });
 
   it("uses shared readable scale tokens for dense conversation text", () => {
-    expect(conversationViewStylesSource).toContain("var(--vui-font-xs)");
-    expect(conversationViewStylesSource).toContain("var(--vui-font-sm)");
-    expect(conversationViewStylesSource).toContain("var(--vui-font-md)");
-    expect(conversationViewStylesSource).toContain("var(--vui-font-chat)");
+    expect(conversationViewStylesSource).toContain("text-vui-xs");
+    expect(conversationViewStylesSource).toContain("text-vui-sm");
+    expect(conversationViewStylesSource).toContain("text-vui-md");
+    expect(conversationViewStylesSource).toContain("text-vui-chat");
     expect(conversationViewStylesSource).not.toMatch(/font-size:\s*0\.(?:6\d|7[0-7])rem/);
   });
   it("caches response segmentation while delegating markdown rendering to the shared renderer", () => {

@@ -68,7 +68,7 @@ describe("ConversationProcessDisclosure", () => {
     expect(html).toContain("处理记录内容");
     expect(html).toContain('data-codex-process-expanded="false"');
     expect(styles.summary).toContain("w-full");
-    expect(styles.summary).toContain("[font-size:var(--vui-font-sm)]");
+    expect(styles.summary).toContain("text-vui-sm");
     expect(styles.content).not.toContain("border-l");
     expect(styles.content).not.toContain("ml-");
     expect(styles.content).not.toContain("pl-");
