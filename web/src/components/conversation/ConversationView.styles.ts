@@ -1006,7 +1006,7 @@ backToBottomButton:
   responseSegmentMeta:
     "vui-components-conversationview responseSegmentMeta min-w-0 flex flex-wrap items-center gap-1.5",
   responseSegmentPre:
-    "vui-components-conversationview responseSegmentPre my-3 min-w-0 max-w-full overflow-x-auto rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--fg-primary)_4%,var(--vui-surface-row))] p-3 font-mono [font-size:var(--vui-font-xs)] leading-[1.55] text-[var(--fg-primary)] whitespace-pre",
+    "vui-components-conversationview responseSegmentPre my-3 min-w-0 max-w-full overflow-x-auto rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--fg-primary)_4%,var(--vui-surface-row))] p-3 font-mono [font-size:var(--vui-font-xs)] leading-[1.55] text-[var(--fg-primary)] whitespace-pre [content-visibility:auto] [contain-intrinsic-size:auto_200px]",
   responseSegment_active:
     `vui-components-conversationview responseSegment_active min-w-0 ${vuiStateSelectedRowClass}`,
   responseSegment_answer:

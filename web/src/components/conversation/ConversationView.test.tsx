@@ -15,6 +15,7 @@ import agentMessageRenderStateSource from "./agentMessageRenderState.ts?raw";
 import conversationViewStylesModuleSource from "./ConversationView.styles.ts?raw";
 import conversationOperationDetailsSource from "./ConversationOperationDetails.tsx?raw";
 import conversationStreamingResponseContentSource from "./ConversationStreamingResponseContent.tsx?raw";
+import conversationStreamingResponseContentStyles from "./ConversationStreamingResponseContent.styles";
 import conversationTurnAvatarContentSource from "./ConversationTurnAvatarContent.tsx?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import conversationInlineMarkdownSource from "./conversationInlineMarkdown.tsx?raw";
@@ -1129,6 +1130,20 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     expect(styles.codexTranscriptSurface).toContain("max-w-full");
     expect(styles.codexTranscriptCellSummary).toContain("max-w-full");
     expect(styles.messageBody).not.toContain("max-w-[min(100%,128ch)]");
+  });
+
+  it("keeps off-screen code blocks cheap with content-visibility", () => {
+    // zai-org/ZCode code-block treatment (Apache-2.0): skip off-screen
+    // code-block paint while keeping a stable intrinsic size so virtualized
+    // row measurement does not thrash.
+    expect(styles.responseSegmentPre).toContain("[content-visibility:auto]");
+    expect(styles.responseSegmentPre).toContain("[contain-intrinsic-size:auto_200px]");
+    expect(conversationStreamingResponseContentStyles.responseSegmentPre).toContain(
+      "[content-visibility:auto]",
+    );
+    expect(conversationStreamingResponseContentStyles.responseSegmentPre).toContain(
+      "[contain-intrinsic-size:auto_200px]",
+    );
   });
   it("renders composer session reference chips", () => {
     const html = renderConversation([], {

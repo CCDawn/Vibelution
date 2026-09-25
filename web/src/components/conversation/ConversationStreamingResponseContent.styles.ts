@@ -36,7 +36,7 @@ const styles = {
   responseSegmentList:
     "vui-components-conversationview responseSegmentList min-w-0",
   responseSegmentPre:
-    "vui-components-conversationview responseSegmentPre min-w-0 max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere]",
+    "vui-components-conversationview responseSegmentPre min-w-0 max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere] [content-visibility:auto] [contain-intrinsic-size:auto_200px]",
 } as const;
 
 export default styles;
