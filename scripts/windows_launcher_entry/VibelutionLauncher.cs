@@ -154,7 +154,7 @@ internal static class VibelutionLauncher
         {
             try
             {
-                LaunchCurrentElectronMain(projectDir, "open", false);
+                LaunchCurrentElectronMain(projectDir, "open", false, false);
                 if (!fromShortcut)
                 {
                     ShowInfo("Launcher 已在托盘后台运行。");
@@ -180,7 +180,7 @@ internal static class VibelutionLauncher
                 {
                     try
                     {
-                        LaunchCurrentElectronMain(projectDir, "open", false);
+                        LaunchCurrentElectronMain(projectDir, "open", false, false);
                     }
                     catch (Exception ex)
                     {
@@ -707,7 +707,7 @@ internal static class VibelutionLauncher
     {
         try
         {
-            LaunchCurrentElectronMain(projectDir, "open", false);
+            LaunchCurrentElectronMain(projectDir, "open", false, false);
         }
         catch (Exception ex)
         {
@@ -800,7 +800,7 @@ internal static class VibelutionLauncher
     {
         try
         {
-            LaunchCurrentElectronMain(projectDir, "open", false);
+            LaunchCurrentElectronMain(projectDir, "open", false, false);
             WriteNativeEntryLog(projectDir, "native_action.secondary_launch", "action=open_console");
         }
         catch (Exception ex)
