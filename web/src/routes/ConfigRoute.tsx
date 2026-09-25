@@ -29,57 +29,31 @@ import {
 import { type BlockerFunction, useBlocker, useNavigate, useSearchParams } from "react-router-dom";
 
 import {
-  addDraftModel,
   applyConfigWorkspace,
-  checkDraftModelCapabilities,
-  deleteDraftModel,
-  discoverConfigModels,
   openConfigEnvironment,
   previewConfigDraft,
-  testConfigLlm,
-  updateDraftModel,
   uploadConfigAvatarImage,
   uploadConfigThemeBackgroundImage,
 } from "../api/config";
 import { queryKeys } from "../api/queryKeys";
 import {
-  ConfigEditorMeta,
   ConfigEditorSection,
-  ConfigCatalogModel,
-  ConfigDiscoveredModel,
   ConfigDraftMeta,
-  ConfigLlmTestResult,
-  ConfigModelOption,
-  ConfigMigrationArtifactResolution,
   ConfigMigrationPreview,
   ConfigWorkspace,
-  HealthDiagnostics,
 } from "../api/types";
 import {
   asRecord,
-  avatarCropSourceRect,
   clonePublicConfig,
   buildConfigApplyPayload,
   configInvalidationDomainsForApply,
-  defaultModelApiKeyEnv,
   deriveConfigEditorSyncState,
-  deriveModelCenterInventoryRows,
-  deriveModelCenterSummary,
-  countModelCenterHealthIssues,
   getString,
-  clampAvatarCropOffset,
-  groupProviderPresetsByVendor,
   hasPendingSecretChanges,
-  modelLibraryIdFromParts,
   pickEditableConfigView,
-  canDiscoverModelsForProvider,
   resolveConfigSectionUiStateOnSelect,
-  resolveImageInputCapabilityStatus,
   shouldBlockConfigLeave,
-  selectModelScenarioProviderPresetId,
   setValueAtConfigPath,
-  type ModelScenarioId,
-  uniqueModelLibraryId,
   type PublicConfigShape,
 } from "./configRouteLogic";
 import {
@@ -235,28 +209,16 @@ import {
   ConfigSectionEditor,
 } from "./config/ConfigSectionEditor";
 import {
-  buildModelDetailsDraft,
-  buildModelDetailsPayload,
-  buildProviderDraft,
-  buildProviderPayload,
   defaultSectionUiState,
   emptyDraftMeta,
-  emptyModelDetailsDraft,
-  emptyModelEditorState,
-  emptyProviderDraft,
   fileToBase64,
   formatJson,
-  getBoolean,
   getConfigValueAtPath,
   getDraftLanguage,
-  hydrateModelEditorFromOption,
   providerDiscoveryFailureDetail,
   providerDiscoveryFailureMessage,
   readableErrorMessage,
   type ConfigSectionUiState,
-  type ModelDetailsDraft,
-  type ModelEditorState,
-  type ProviderDraft,
 } from "./config/configEditorModel";
 import { useConfigProviderModelDomain } from "./config/useConfigProviderModelDomain";
 type NoticeTone = "neutral" | "success" | "error";
@@ -267,7 +229,6 @@ export function ConfigRoute() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const contentViewportRef = useRef<HTMLDivElement | null>(null);
-  const modelEditorRef = useRef<HTMLDivElement | null>(null);
   const lastRequestedSelectionRef = useRef("");
   const lastFocusedSelectionRef = useRef("");
   const pendingFocusSectionRef = useRef("");
@@ -346,7 +307,6 @@ export function ConfigRoute() {
     setDraftHash(workspace.hash);
     setJsonText(formatJson(pickEditableConfigView(workspace.publicConfig, workspace.editorSections)));
     setNotice({ tone, text: workspace.message || "" });
-    modelEditorsSyncRef.current(workspace);
   }
 
   useEffect(() => {
@@ -423,7 +383,6 @@ export function ConfigRoute() {
     .filter((sectionId) => !requestedFocusSectionId || sectionId === requestedFocusSectionId)
     .map((sectionId) => editorSectionById.get(sectionId))
     .filter((section): section is ConfigEditorSection => Boolean(section) && section?.id !== "agent");
-  const modelOptions = workspace?.modelOptions ?? [];
   const providerPresetOptions = workspace?.providerPresetOptions ?? [];
   const providerRows = useMemo(
     () => deriveProviderRegistryRows(
@@ -499,7 +458,6 @@ export function ConfigRoute() {
     canRestoreEditorText,
   } = editorSyncState;
 
-  const modelEditorsSyncRef = useRef<(workspace: ConfigWorkspace) => void>(() => undefined);
   // Provider/model domain (models page state machine) — see hook header.
   const {
     selectedProviderId,
@@ -527,14 +485,9 @@ export function ConfigRoute() {
     persistImmediateDraft,
     handleTestProviderModel,
     handleCheckModelImageCapabilities,
-    syncModelEditors,
   } = useConfigProviderModelDomain({
     workspaceQuery,
-    workspace,
-    modelOptions,
     providerRows,
-    providerPresetOptions,
-    draftConfig,
     draftMeta,
     baseHash,
     structuredActionsDisabled,
@@ -546,10 +499,8 @@ export function ConfigRoute() {
     readableErrorMessage,
     handleApply,
     providerDraftRequestRef,
-    modelEditorRef,
     copy,
   });
-  modelEditorsSyncRef.current = syncModelEditors;
   // 全局待保存计数口径：各分区编辑态草稿里「草稿值≠当前分区值」的叶子字段数。
   // 原始文本 kinds（json/number/string_list）先按 schema 解析再比较，"16000" 与
   // 16000 不会误报；解析失败的叶子计入且 valid=false（阻塞全局保存）。即时类

@@ -3,7 +3,7 @@
  * create / discover / pin / suggest / unpin / delete / credential / context window / route preview.
  * Route still owns quick-setup orchestration, LLM test, migration, and formal apply.
  * Wave 4: the destructive provider delete confirm is a VConfirmDialog request
- * state (two-phase) instead of a blocking window.confirm.
+ * state (two-phase) instead of a blocking native confirm.
  */
 import { useCallback, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 

@@ -2,7 +2,7 @@
  * Config LLM v2 migration preview/apply actions.
  * Formal operator-config apply remains on ConfigRoute.
  * Wave 4: the destructive apply confirm is a VConfirmDialog request state
- * (two-phase) instead of a blocking window.confirm.
+ * (two-phase) instead of a blocking native confirm.
  */
 import { useCallback, useState } from "react";
 import type { QueryClient, UseQueryResult } from "@tanstack/react-query";
@@ -58,7 +58,7 @@ export function useConfigMigrationActions(options: UseConfigMigrationActionsOpti
   } = options;
 
   // Wave 4: destructive apply confirms via a route-rendered VConfirmDialog
-  // request state instead of a blocking window.confirm.
+  // request state instead of a blocking native confirm.
   const [migrationApplyRequest, setMigrationApplyRequest] = useState<MigrationApplyConfirmRequest | null>(null);
 
   const handlePreviewMigration = useCallback(async (

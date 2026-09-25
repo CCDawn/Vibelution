@@ -684,9 +684,6 @@ describe("configRouteLogic", () => {
     expect(configRouteSource).toContain('supports_image_input: "unknown"');
     expect(configRouteSource).toContain("payload.supports_image_input = true");
     expect(configRouteSource).toContain("payload.supports_image_input = false");
-    // Wave 3: focusModelEditor lives in the provider/model domain module.
-    const providerModelDomainSource = readFileSync(fileURLToPath(new URL("./config/useConfigProviderModelDomain.ts", import.meta.url)), "utf8");
-    expect(providerModelDomainSource).toContain("modelEditorRef.current?.scrollIntoView");
   });
 
   it("maps model creation scenarios to extensible preset defaults", () => {

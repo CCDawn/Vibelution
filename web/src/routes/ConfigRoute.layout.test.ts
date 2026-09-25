@@ -418,13 +418,6 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.providerModelsLayout).toContain("[&>#config-models]:min-h-[28rem]");
   });
 
-  it("passes the workspace schema version into legacy model account compatibility", () => {
-    expect(routeSource).toMatch(
-      /deriveModelCenterSummary\(\{\s*modelOptions,\s*schemaVersion: workspace\?\.schemaVersion,\s*\}\)/,
-    );
-    expect(routeSource).toContain("[modelOptions, workspace?.schemaVersion]");
-  });
-
   it("uses a full workspace placeholder for initial loading and load failure states", () => {
     expect(routeSource).toContain("<ConfigWorkspacePlaceholderPanel title={copy.loading} />");
     expect(placeholderPanelSource).toContain("export function ConfigWorkspacePlaceholderPanel");
@@ -1098,10 +1091,9 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("migrationApplyRequest");
     expect(routeSource).toContain("handleConfirmApplyMigration");
     expect(routeSource).toContain("handleCancelApplyMigration");
-    // No blocking window.confirm in the route shell or the model panels.
-    // (routeSource additionally concatenates useConfigProviderModelDomain,
-    // whose unreachable v1 handleDeleteModel window.confirm dies in the
-    // wave-4 dead-code cleanup; tightened there.)
+    // No blocking window.confirm anywhere in the route shell, the extracted
+    // route modules, or the model panels (wave-4 item 2 + dead-code cleanup).
+    expect(routeSource).not.toContain("window.confirm");
     expect(routeSourceRaw).not.toContain("window.confirm");
     expect(providerPanelSource).not.toContain("window.confirm");
     expect(wizardSource).not.toContain("window.confirm");
@@ -1118,11 +1110,5 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("data-section-save-error");
     expect(routeSource).toContain("<VErrorSummary");
     expect(routeSource).toContain('role="alert"');
-  });
-
-  it("prioritizes the visible VUI select trigger when focusing the model editor", () => {
-    expect(routeSource).toContain('button[data-vui="select-trigger"]:not([data-disabled="true"]):not([disabled])');
-    expect(routeSource).toContain('input:not([disabled]):not([type="hidden"])');
-    expect(routeSource).toContain("textarea:not([disabled])");
   });
 });
