@@ -7,6 +7,7 @@ import {
   resolveComposerEditMode,
   resolveComposerGuidanceUi,
   resolveComposerPrimaryActionFlags,
+  shouldStopComposerOnEscape,
 } from "./conversationComposerActionModel";
 
 describe("conversationComposerActionModel", () => {
@@ -62,5 +63,27 @@ describe("conversationComposerActionModel", () => {
       interruptGuidancePending: false,
       queueCount: 1,
     }).queuePrimaryIsImmediate).toBe(true);
+  });
+
+  it("stops on unclaimed Escape only in stop mode with a handler and no live overlay", () => {
+    const base = {
+      key: "Escape",
+      defaultPrevented: false,
+      actionMode: "stop" as const,
+      hasStopHandler: true,
+    };
+    expect(shouldStopComposerOnEscape(base)).toBe(true);
+    // Send mode never stops via Escape.
+    expect(shouldStopComposerOnEscape({ ...base, actionMode: "send" as const })).toBe(false);
+    // A already-consumed event must yield.
+    expect(shouldStopComposerOnEscape({ ...base, defaultPrevented: true })).toBe(false);
+    // No stop handler (e.g. legacy embed) stays inert.
+    expect(shouldStopComposerOnEscape({ ...base, hasStopHandler: false })).toBe(false);
+    // Non-Escape keys are not stop keys.
+    expect(shouldStopComposerOnEscape({ ...base, key: "Enter" })).toBe(false);
+    // Any live composer overlay claims Escape before the stop fallback.
+    expect(shouldStopComposerOnEscape({ ...base, ghostVisible: true })).toBe(false);
+    expect(shouldStopComposerOnEscape({ ...base, slashSuggestionsOpen: true })).toBe(false);
+    expect(shouldStopComposerOnEscape({ ...base, referenceTypeaheadOpen: true })).toBe(false);
   });
 });

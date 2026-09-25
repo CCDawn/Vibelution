@@ -364,6 +364,7 @@ import {
   resolveComposerEditMode,
   resolveComposerGuidanceUi,
   resolveComposerPrimaryActionFlags,
+  shouldStopComposerOnEscape,
 } from "./conversationComposerActionModel";
 import { conversationOperationIconKind } from "./conversationOperationIconModel";
 import { getCachedResponseSegments as getCachedResponseSegmentsFromCache } from "./conversationResponseSegmentCache";
@@ -5941,6 +5942,24 @@ export const ConversationView = React.memo(function ConversationView({
                   handleReferenceTypeaheadDismiss();
                   return;
                 }
+              }
+              // Yield-aware Esc→stop: ghost/slash/typeahead branches above
+              // return when they consume Escape; this fallback only fires when
+              // the key is still unclaimed and a turn is running. Repeats are
+              // deduped downstream by the sessionStopping stop guard.
+              if (
+                shouldStopComposerOnEscape({
+                  key: event.key,
+                  defaultPrevented: event.defaultPrevented,
+                  actionMode: resolvedActionMode,
+                  hasStopHandler: Boolean(onStop),
+                  ghostVisible: Boolean(composerPromptSuggestion.ghost),
+                  slashSuggestionsOpen: showSlashSuggestions,
+                  referenceTypeaheadOpen: showReferenceSuggestions,
+                })
+              ) {
+                event.preventDefault();
+                onStop?.();
               }
               if (
                 shouldSubmitComposerOnKeydown({
