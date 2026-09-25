@@ -6,7 +6,6 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  ChevronUp,
   LoaderCircle,
   Menu,
   Moon,
@@ -290,7 +289,6 @@ type ConfigSummaryWithThemeBackground = ConfigSummary & {
 
 type WorkbenchShellStyle = CSSProperties & {
   "--workbench-theme-background-image"?: string;
-  "--shell-settings-dock-width"?: string;
 };
 
 type ThemeBackgroundReadability = "soft" | "standard" | "strong";
@@ -677,7 +675,6 @@ export function AppShell() {
   const [activeWorkOpen, setActiveWorkOpen] = useState(false);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
-  const chatLeftPanelWidth = useShellStore((state) => state.chatPanelWidths.leftPanelWidth);
   const desktopShell = useMemo(() => isElectronDesktopShell(), []);
   const [theme, setTheme] = useState(() => readStoredWorkbenchTheme());
   const [frontendVisible, setFrontendVisible] = useState(
@@ -721,12 +718,11 @@ export function AppShell() {
   );
   const shellStyle = useMemo<WorkbenchShellStyle | undefined>(
     () => ({
-      "--shell-settings-dock-width": `${chatLeftPanelWidth}px`,
       ...(themeBackgroundImageUrl
         ? { "--workbench-theme-background-image": `url(${JSON.stringify(themeBackgroundImageUrl)})` }
         : {}),
     }),
-    [chatLeftPanelWidth, themeBackgroundImageUrl],
+    [themeBackgroundImageUrl],
   );
   const shellStartupWarmupActive = useStartupWarmup(shellStartupDataReady);
   const shellPollingVisible = frontendVisible || shellStartupWarmupActive;
@@ -966,6 +962,11 @@ export function AppShell() {
     setAppearanceOpen(false);
     setMobileNavigationOpen(false);
   }, []);
+  useEffect(() => {
+    closeUtilityMenu();
+    setActiveWorkOpen(false);
+  }, [location.key, closeUtilityMenu]);
+
   const closeActiveWorkMenu = useCallback(() => {
     setActiveWorkOpen(false);
   }, []);
@@ -2362,14 +2363,7 @@ export function AppShell() {
             </section>
           </VPopover>
         </div>
-      </header>
-
-      <main className={styles.mainArea}>
-        <CompanionDesktopAttention />
-        <Outlet />
-      </main>
-
-      <div className={styles.settingsDock} data-shell-group="settings-dock">
+      <div className={styles.settingsSlot} data-shell-group="settings">
         <VPopover
           open={utilityOpen}
           onOpenChange={(open) => {
@@ -2380,8 +2374,8 @@ export function AppShell() {
               setMobileNavigationOpen(false);
             }
           }}
-          align="start"
-          side="top"
+          align="end"
+          side="bottom"
           sideOffset={10}
           aria-label={settingsAndToolsLabel}
           contentClassName={styles.settingsPopoverContent}
@@ -2401,13 +2395,7 @@ export function AppShell() {
                 setActiveWorkOpen(false);
               }}
             >
-              <span className={styles.settingsTriggerContent}>
-                <span className={styles.settingsTriggerIcon} aria-hidden="true">
-                  <Settings size={13} />
-                </span>
-                <span className={styles.settingsTriggerLabel}>{settingsLabel}</span>
-                <ChevronUp size={16} className={styles.settingsChevron} aria-hidden="true" />
-              </span>
+              <Settings size={17} aria-hidden="true" />
             </VButton>
           )}
         >
@@ -2526,7 +2514,7 @@ export function AppShell() {
                 onClick={closeUtilityMenu}
                 icon={<SlidersHorizontal size={15} aria-hidden="true" />}
               >
-                {lang === "en" ? "Workbench settings" : "工作台设置"}
+                {lang === "en" ? "All settings" : "全部设置"}
               </VRouteLinkButton>
               <VButton
                 type="button"
@@ -2551,6 +2539,13 @@ export function AppShell() {
           </div>
         </VPopover>
       </div>
+      </header>
+
+      <main className={styles.mainArea}>
+        <CompanionDesktopAttention />
+        <Outlet />
+      </main>
+
     </div>
   );
 }

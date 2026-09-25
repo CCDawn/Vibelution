@@ -101,14 +101,12 @@ const styles = {
     `vui-app-appshell settingsActionButton min-w-0 !h-10 !min-h-10 !w-full !justify-start !border-0 !px-2 !text-vui-xs !shadow-none ${vuiControlQuietChromeClass}`,
   settingsActionList:
     "vui-app-appshell settingsActionList grid min-w-0 grid-cols-1 gap-0",
-  settingsChevron:
-    "vui-app-appshell settingsChevron ml-auto shrink-0 text-[var(--fg-secondary)] transition-transform",
   settingsChoiceButton:
     `vui-app-appshell settingsChoiceButton min-w-0 !h-8 !min-h-8 !w-full !justify-start !border-0 !px-2 !text-vui-xs !shadow-none ${vuiControlQuietChromeClass} [&_[data-slot=vui-button-label]]:flex [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:justify-between`,
   settingsChoiceButtonActive:
     `vui-app-appshell settingsChoiceButtonActive ${vuiStateSelectedRowClass}`,
-  settingsDock:
-    "vui-app-appshell settingsDock min-w-0",
+  settingsSlot:
+    "vui-app-appshell settingsSlot flex shrink-0 items-center pr-1",
   settingsPopoverBody:
     "vui-app-appshell settingsPopoverBody grid min-w-0 gap-0 p-2",
   settingsPopoverContent:
@@ -132,13 +130,7 @@ const styles = {
   settingsThemeChoices:
     "vui-app-appshell settingsThemeChoices grid min-w-0 gap-0 border-l border-[var(--vui-border-subtle)] pl-2 ml-7",
   settingsTrigger:
-    "vui-app-appshell settingsTrigger !h-full !min-h-0 !max-h-none !w-full !justify-start !rounded-none !border-0 !bg-transparent !px-4 !py-0 !shadow-none hover:!bg-[var(--bg-active)]",
-  settingsTriggerContent:
-    "vui-app-appshell settingsTriggerContent flex w-full min-w-0 items-center gap-3",
-  settingsTriggerIcon:
-    "vui-app-appshell settingsTriggerIcon flex size-6 shrink-0 items-center justify-center rounded-full bg-[var(--accent-warm)] text-white",
-  settingsTriggerLabel:
-    "vui-app-appshell settingsTriggerLabel min-w-0 truncate text-vui-sm font-normal text-[var(--fg-primary)]",
+    "vui-app-appshell settingsTrigger !size-8 !min-h-8 !min-w-8 !justify-center !rounded-md !border-0 !bg-transparent !p-0 !shadow-none text-[var(--fg-secondary)] hover:!bg-[var(--bg-active)]",
   settingsTriggerOpen:
     "vui-app-appshell settingsTriggerOpen !bg-[var(--bg-active)]",
   shell: `vui-app-appshell shell min-w-0 grid h-full min-h-0 content-start overflow-hidden ${vuiWorkspaceFillClass} text-[var(--fg-primary)]`,

@@ -38,7 +38,7 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain('data-shell-group="brand"');
     expect(shellSource).toContain('data-shell-group="navigation"');
     expect(shellSource).toContain('data-shell-group="window-drag-region"');
-    expect(shellSource).toContain('data-shell-group="settings-dock"');
+    expect(shellSource).toContain('data-shell-group="settings"');
     expect(shellSource).not.toContain('data-shell-group="system-actions"');
     expect(shellSource).not.toContain('data-shell-group="tool-actions"');
     // 方案A: the nav container is flattened — only the active tab keeps a pill.
@@ -55,11 +55,11 @@ describe("AppShell layout contract", () => {
       shellSource.indexOf("</header>"),
     );
     expect(titleBar).not.toContain("RefreshCw");
-    expect(titleBar).not.toContain("Settings");
+    expect(titleBar).toContain("<Settings size={17}");
     expect(titleBar).not.toContain("statusSummaryChip");
     expect(titleBar).toContain("windowDragRegion");
-    expect(styles.settingsTrigger).toContain("!w-full");
-    expect(styles.settingsTrigger).toContain("!rounded-none");
+    expect(styles.settingsTrigger).toContain("!size-8");
+    expect(styles.settingsTrigger).toContain("!rounded-md");
   });
 
   it("keeps desktop primary navigation labels at their intrinsic readable width", () => {
@@ -128,17 +128,17 @@ describe("AppShell layout contract", () => {
     expect(shellSource).not.toContain("rightStatusCards.map((item) => (\n                <span key={item.id} className={styles.statusBadge}>");
   });
 
-  it("keeps the global shell top bar and settings dock compact", () => {
+  it("keeps the global shell top bar and settings trigger compact", () => {
     expect(styles.statusSummaryDot).toBeTypeOf("string");
     expect(styles.returnButton).toBeTypeOf("string");
     expect(shellStyles).toContain("--shell-topbar-height: 40px");
-    expect(shellStyles).toContain("--shell-settings-dock-height: 56px");
+    expect(shellStyles).not.toContain("--shell-settings-dock-height");
     expect(shellStyles).toContain("env(titlebar-area-width");
     expect(styles.settingsPopoverContent).toContain("w-[min(350px,calc(100vw-20px))]");
     expect(styles.settingsPopoverContent).toContain("max-h-[min(650px,calc(100dvh-90px))]");
     expect(styles.settingsActionList).toContain("grid-cols-1");
-    expect(styles.settingsTrigger).toContain("!h-full");
-    expect(styles.settingsTrigger).toContain("!w-full");
+    expect(styles.settingsTrigger).toContain("!min-h-8");
+    expect(styles.settingsTrigger).toContain("!size-8");
     expect(shellSource).toContain("VStatusChip");
     expect(shellSource).toContain("systemToneToStatus");
     expect(shellSource).toContain("systemToneToDotClass");
@@ -157,7 +157,7 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("max-width: 100%");
     expect(shellStyles).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
     expect(shellStyles).toContain("grid-template-columns: 36px minmax(0, 1fr)");
-    expect(shellStyles).toContain("@media (max-width: 700px)");
+    expect(shellStyles).toContain("@media (max-width: 639px)");
     expect(shellStyles).toContain("cursor: pointer");
 
     const compactDesktopBlock = shellStyles.slice(
@@ -252,18 +252,19 @@ describe("AppShell layout contract", () => {
     expect(launcherShellSource).toContain("}, [lang, theme, launcherWindowTitle])");
   });
 
-  it("keeps the unified title bar visible and exposes settings across the full left dock row", () => {
+  it("keeps the unified title bar visible and exposes a compact settings trigger on the title bar", () => {
     expect(shellSource).toContain("useShellStore");
     expect(shellSource).not.toContain("topBarMode");
     expect(shellSource).not.toContain("setTopBarMode");
     expect(shellSource).not.toContain("topBarRestoreButton");
     expect(shellStyles).not.toContain("data-topbar-mode");
-    expect(shellSource).toContain('"--shell-settings-dock-width": `${chatLeftPanelWidth}px`');
-    expect(shellSource).toContain('side="top"');
-    expect(shellSource).toContain('align="start"');
-    expect(styles.settingsTrigger).toContain("!w-full");
-    expect(styles.settingsTrigger).toContain("!rounded-none");
-    expect(shellStyles).toContain("width: min(var(--shell-settings-dock-width), 100vw)");
+    expect(shellSource).not.toContain("--shell-settings-dock-width");
+    expect(shellSource).toContain('side="bottom"');
+    expect(shellSource).toContain('align="end"');
+    expect(styles.settingsTrigger).toContain("!size-8");
+    expect(styles.settingsTrigger).toContain("!rounded-md");
+    expect(shellStyles).not.toContain(".settingsDock");
+    expect(shellSource).toContain("[location.key, closeUtilityMenu]");
   });
 
   it("exposes a shell-level semantic return action without visible helper copy", () => {
@@ -353,13 +354,13 @@ describe("AppShell layout contract", () => {
     expect(primaryNav).not.toContain('to="/tools"');
     expect(primaryNav).not.toContain('to="/agents/tools"');
     expect(primaryNav).not.toContain('to="/git"');
-    expect(shellSource).toContain("settingsDock");
+    expect(shellSource).toContain("settingsSlot");
     expect(shellSource).toContain("settingsTriggerOpen");
     expect(shellSource).toContain("aria-expanded={utilityOpen}");
     expect(shellSource).toContain("<VPopover");
     expect(shellSource).toContain("contentClassName={styles.settingsPopoverContent}");
-    expect(shellSource).toContain('side="top"');
-    expect(shellSource).toContain('align="start"');
+    expect(shellSource).toContain('side="bottom"');
+    expect(shellSource).toContain('align="end"');
     expect(shellSource).toContain("selectTheme(\"light\")");
     expect(shellSource).toContain("selectTheme(\"dark\")");
     expect(shellSource).toContain("LazyAppShellUtilityMenu");
@@ -417,7 +418,7 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("isShellPrimaryNavActive");
     expect(shellSource).not.toContain("<NavLink");
     expect(shellSource).toContain('to="/config"');
-    expect(shellSource).toContain("<Settings size={13}");
+    expect(shellSource).toContain("<Settings size={17}");
     expect(utilityMenuSource).toContain("requiresAttention");
     expect(utilityMenuSource).toContain("gitStatusLevel");
     expect(utilityMenuSource).not.toContain("gitSignalGrid");
@@ -651,7 +652,7 @@ describe("AppShell layout contract", () => {
   });
 
   it("keeps the global shell usable on narrow screens", () => {
-    expect(styles.settingsTriggerLabel).toBeTypeOf("string");
+    expect(styles.settingsSlot).toContain("shrink-0");
     expect(styles.statusBadgeLabel).toBeTypeOf("string");
     expect(styles.nav).not.toContain("max-[639px]");
     expect(styles.mobileNav).not.toContain("max-[639px]");
@@ -663,9 +664,9 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("shellMobileNavClass");
     expect(shellSource).toContain("closeUtilityMenu");
     expect(shellSource).toContain('to="/companions"');
-    expect(shellStyles).toContain("@media (max-width: 700px)");
-    expect(shellStyles).toContain("padding-bottom: var(--shell-settings-dock-height)");
-    expect(shellStyles).toContain("width: 100vw");
+    expect(shellStyles).toContain("@media (max-width: 639px)");
+    expect(shellStyles).not.toContain("padding-bottom: var(--shell-settings-dock-height)");
+    expect(shellSource).not.toContain('data-shell-group="settings-dock"');
     const mobileShellBlock = shellStyles.slice(shellStyles.indexOf("@media (max-width: 639px)"));
     expect(mobileShellBlock).toContain(":where(.vui-app-appshell).topBar .nav");
     expect(mobileShellBlock).toContain(":where(.vui-app-appshell).topBar .mobileNav");
