@@ -38,6 +38,14 @@ export type VCommandPaletteProps = {
    */
   query?: string;
   onQueryChange?: (query: string) => void;
+  /**
+   * Optional filter-text override. When provided, client-side matching runs
+   * against this text instead of the displayed `query` (scope prefixes such
+   * as `#`/`>` strip their marker before matching); an empty string lists
+   * `items` as-is for mounts that pre-filter server-side. When omitted the
+   * palette filters against `query` exactly as before.
+   */
+  matchQuery?: string;
   className?: string;
   "data-vui"?: string;
 };
@@ -73,6 +81,7 @@ export function VCommandPalette({
   maxVisible = 9,
   query,
   onQueryChange,
+  matchQuery,
   className,
   "data-vui": dataVui = "command-palette",
 }: VCommandPaletteProps) {
@@ -91,13 +100,14 @@ export function VCommandPalette({
   };
 
   const flat = useMemo(() => {
-    if (!activeQuery) return items;
+    const filterText = matchQuery !== undefined ? matchQuery : activeQuery;
+    if (!filterText) return items;
     return items
-      .map((item) => ({ item, score: scoreItem(item, activeQuery) }))
+      .map((item) => ({ item, score: scoreItem(item, filterText) }))
       .filter((entry) => entry.score > 0)
       .sort((left, right) => right.score - left.score)
       .map((entry) => entry.item);
-  }, [items, activeQuery]);
+  }, [items, activeQuery, matchQuery]);
   const selectedIndex = Math.max(0, Math.min(activeIndex, flat.length - 1));
 
   useEffect(() => {
