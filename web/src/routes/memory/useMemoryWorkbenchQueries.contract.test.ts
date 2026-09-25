@@ -61,4 +61,65 @@ describe("memory workbench queries contract", () => {
     expect(queriesSource).toContain("fetchMemoryOverview<MemoryOverview>({ includeContent: overviewNeedsContent, signal })");
     expect(queriesSource).toContain("enabled: overviewNeedsContent");
   });
+
+  it("keeps polled queries cache-first with staleTime >= refetchInterval", () => {
+    // Remounts inside one poll cycle must render from cache (no blocking reload)
+    // while the interval keeps refreshing in place.
+    const polledStaleTimeFloorMs: ReadonlyArray<readonly [string, number]> = [
+      ["overviewQuery", 30_000],
+      ["projectMemoryUpdatesQuery", 45_000],
+      ["memoryUsageContractQuery", 60_000],
+      ["agentsQuery", 60_000],
+      ["agentMemoryInventoryQuery", 45_000],
+      ["knowledgeDashboardSnapshotQuery", 45_000],
+      ["memoryKnowledgeGraphQuery", 60_000],
+      ["githubProjectLibraryQuery", 60_000],
+      ["knowledgeItemsQuery", 45_000],
+      ["knowledgeRagHealthQuery", 60_000],
+      ["ratingSuggestionsQuery", 45_000],
+      ["permissionAuditQuery", 60_000],
+      ["governanceTasksQuery", 45_000],
+      ["sourceInboxQuery", 45_000],
+      ["centralSourcesQuery", 60_000],
+    ];
+    polledStaleTimeFloorMs.forEach(([owner, floorMs]) => {
+      const block = extractQueryBlock(owner);
+      const staleTime = readOptionMs(block, "staleTime");
+      expect(staleTime, `${owner} staleTime`).not.toBeNull();
+      expect(staleTime ?? 0).toBeGreaterThanOrEqual(floorMs);
+    });
+    // Non-polled detail reads still get a short stale window so a quick
+    // remount does not immediately refetch.
+    ["agentMemoryDetailQuery", "memoryKnowledgeGraphNodeDetailQuery"].forEach((owner) => {
+      const staleTime = readOptionMs(extractQueryBlock(owner), "staleTime");
+      expect(staleTime, `${owner} staleTime`).not.toBeNull();
+      expect(staleTime ?? 0).toBeGreaterThanOrEqual(60_000);
+    });
+  });
+
+  it("extends gcTime for heavy payload queries beyond the 5min default", () => {
+    const heavyGcTimeFloorMs: ReadonlyArray<readonly [string, number]> = [
+      ["overviewQuery", 600_000],
+      ["agentMemoryDetailQuery", 900_000],
+      ["knowledgeDashboardSnapshotQuery", 600_000],
+    ];
+    heavyGcTimeFloorMs.forEach(([owner, floorMs]) => {
+      const gcTime = readOptionMs(extractQueryBlock(owner), "gcTime");
+      expect(gcTime, `${owner} gcTime`).not.toBeNull();
+      expect(gcTime ?? 0).toBeGreaterThanOrEqual(floorMs);
+      expect(gcTime ?? 0).toBeGreaterThanOrEqual(600_000);
+    });
+  });
 });
+
+function extractQueryBlock(owner: string): string {
+  const pattern = new RegExp(`const ${owner} = useQuery\\(\\{[\\s\\S]*?\\n  \\}\\);`);
+  const match = queriesSource.match(pattern);
+  expect(match, `query block for ${owner}`).not.toBeNull();
+  return match?.[0] ?? "";
+}
+
+function readOptionMs(block: string, option: "staleTime" | "gcTime"): number | null {
+  const match = block.match(new RegExp(`\\b${option}: (\\d+(?:_\\d+)*)`));
+  return match ? Number(match[1].replace(/_/g, "")) : null;
+}
