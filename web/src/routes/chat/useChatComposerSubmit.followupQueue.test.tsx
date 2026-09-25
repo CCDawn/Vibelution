@@ -5,13 +5,21 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../../api/queryKeys";
-import type { SessionDetail, SessionGuidanceMode, SessionQueuedTurn } from "../../api/types";
+import type {
+  SessionDetail,
+  SessionGuidanceMode,
+  SessionQueuedTurn,
+  SessionTurnAcceptedResponse,
+} from "../../api/types";
 import {
+  listSessionQueuedTurns,
   removeSessionQueuedTurn,
   submitSessionGuidance,
+  submitSessionMessage,
   updateSessionQueuedTurn,
 } from "../../api/chat";
 import {
+  queuedTurnsWaitingBeyondMs,
   useChatComposerSubmitActions,
   useChatComposerTurnMutations,
   type ChatComposerTurnMutations,
@@ -33,6 +41,9 @@ vi.mock("../../api/chat", async (importOriginal) => {
     updateSessionQueuedTurn: vi.fn(async () => []),
     uploadSessionImageAttachment: vi.fn(async () => ({ artifactId: "artifact-1" })),
     submitSessionGuidance: vi.fn(async () => ({ id: "session-1" }) as SessionDetail),
+    submitSessionMessage: vi.fn(async () => {
+      throw new Error("submitSessionMessage not stubbed for this test");
+    }),
   };
 });
 
@@ -50,6 +61,8 @@ type HarnessProps = {
   onErrors?: (errors: Record<string, string>) => void;
   /** Tests observing optimistic cache writes pass their own client. */
   queryClient?: QueryClient;
+  /** Overrides the cached detail rows seen by the actions hook (timeout hints). */
+  detailQueuedTurns?: SessionQueuedTurn[];
 };
 
 function mutationStub<TVariables>(
@@ -77,6 +90,7 @@ function Harness({
   mutations,
   onErrors,
   queryClient: providedQueryClient,
+  detailQueuedTurns,
 }: HarnessProps) {
   const fallbackQueryClient = useRef(new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -142,7 +156,7 @@ function Harness({
     detail: {
       id: sessionId,
       activeTurnId: `turn-${sessionId}`,
-      queuedTurns: queues[sessionId] ?? [],
+      queuedTurns: detailQueuedTurns ?? queues[sessionId] ?? [],
     } as SessionDetail,
     setMentalModelEnabledForNextTurn: () => undefined,
     setRuntimeStatusEnabledForNextTurn: () => undefined,
@@ -265,6 +279,66 @@ function MutationsHarness({ queryClient, guidanceVars }: MutationsHarnessProps) 
     >
       guide
     </button>
+  );
+}
+
+function readCachedQueueIds(queryClient: QueryClient, sessionId: string): string[] {
+  return (queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId))?.queuedTurns ?? []).map(
+    (row) => row.id,
+  );
+}
+
+/** Real turn mutations plus a queued submit trigger, for onSuccess cache assertions. */
+function QueuedSubmitHarness({ queryClient, sessionId = "session-1" }: { queryClient: QueryClient; sessionId?: string }) {
+  const mutations = useChatComposerTurnMutations({
+    queryClient,
+    chatWorkspaceCache: createChatWorkspaceCache(queryClient),
+    t: (key) => key,
+    describeError: (error, fallback) => (error instanceof Error ? error.message : fallback),
+    syncSessionDetail: () => undefined,
+    setActiveTurnLayersBySession: () => undefined,
+    setSessionDrafts: () => undefined,
+    setSessionComposerErrors: () => undefined,
+    setSessionImageAttachments: () => undefined,
+    setSessionReferenceAttachments: () => undefined,
+    setSessionEditTargets: () => undefined,
+  });
+  const [queueIds, setQueueIds] = useState<string[]>(() => readCachedQueueIds(queryClient, sessionId));
+  useEffect(() => {
+    const read = () => setQueueIds(readCachedQueueIds(queryClient, sessionId));
+    read();
+    return queryClient.getQueryCache().subscribe(read);
+  }, [queryClient, sessionId]);
+  const [statusLabel, setStatusLabel] = useState(
+    () => queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId))?.status ?? "",
+  );
+  useEffect(() => {
+    const read = () =>
+      setStatusLabel(queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId))?.status ?? "");
+    return queryClient.getQueryCache().subscribe(read);
+  }, [queryClient, sessionId]);
+  return (
+    <div>
+      <output data-testid="queued-submit-queue">{JSON.stringify(queueIds)}</output>
+      <output data-testid="queued-submit-status">{statusLabel}</output>
+      <button
+        type="button"
+        data-testid="submit-queued"
+        onClick={() =>
+          mutations.submitTurnMutation.mutate({
+            sessionId,
+            clientSubmissionId: "sub-queued-1",
+            content: "排队消息内容",
+            mentalModelEnabled: false,
+            runtimeStatusEnabled: false,
+            requestStartedAtMs: 0,
+            queuedBehindActiveTurn: true,
+          })
+        }
+      >
+        submit-queued
+      </button>
+    </div>
   );
 }
 
@@ -1212,5 +1286,119 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
     });
 
     expect(submitTurn).not.toHaveBeenCalled();
+  });
+
+  it("projects a queued acceptance into the follow-up queue instead of pretending sent", async () => {
+    let resolveQueueFetch: ((rows: SessionQueuedTurn[]) => void) | undefined;
+    vi.mocked(listSessionQueuedTurns).mockImplementation(
+      () =>
+        new Promise<SessionQueuedTurn[]>((resolve) => {
+          resolveQueueFetch = resolve;
+        }),
+    );
+    vi.mocked(submitSessionMessage).mockResolvedValue({
+      accepted: true,
+      sessionId: "session-1",
+      turnId: "",
+      clientSubmissionId: "sub-queued-1",
+      status: "queued",
+      acceptedAt: "2026-09-25T12:00:00Z",
+      queued: true,
+      queuedTurnId: "qt-1",
+      queuePosition: 1,
+      queuedAt: "2026-09-25T12:00:00Z",
+    } as SessionTurnAcceptedResponse);
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1",
+      activeTurnId: "turn-session-1",
+      queuedTurns: [],
+    } as SessionDetail);
+    await mountNode(
+      <QueryClientProvider client={queryClient}>
+        <QueuedSubmitHarness queryClient={queryClient} />
+      </QueryClientProvider>,
+    );
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="submit-queued"]')?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // The queue row is painted from the response's queue facts while the
+    // authoritative refetch is still in flight, and the detail is NOT marked
+    // running/sent.
+    expect(submitSessionMessage).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({ queueIfBusy: true, clientSubmissionId: "sub-queued-1" }),
+    );
+    expect(JSON.parse(
+      container?.querySelector<HTMLOutputElement>('[data-testid="queued-submit-queue"]')?.textContent ?? "[]",
+    ) as string[]).toEqual(["qt-1"]);
+    expect(
+      container?.querySelector<HTMLOutputElement>('[data-testid="queued-submit-status"]')?.textContent,
+    ).toBe("");
+
+    // The authoritative rebase keeps the row (server truth wins on content).
+    await act(async () => {
+      resolveQueueFetch?.([
+        { id: "qt-1", position: 1, status: "queued", content: "排队消息内容", createdAt: "2026-09-25T12:00:00Z" },
+      ]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(JSON.parse(
+      container?.querySelector<HTMLOutputElement>('[data-testid="queued-submit-queue"]')?.textContent ?? "[]",
+    ) as string[]).toEqual(["qt-1"]);
+  });
+
+  it("surfaces a hint once a queued turn waits beyond the threshold", async () => {
+    const { mutations } = createMutations();
+    let errors: Record<string, string> = {};
+    const staleCreatedAt = new Date(Date.now() - 120_000).toISOString();
+    await mount({
+      busy: true,
+      draft: "",
+      queues: {},
+      mutations,
+      detailQueuedTurns: [
+        { id: "qt-stuck", position: 1, status: "queued", content: "卡住的排队消息", createdAt: staleCreatedAt },
+      ],
+      onErrors: (next) => {
+        errors = next;
+      },
+    });
+
+    expect(queuedTurnsWaitingBeyondMs(
+      [{ id: "qt-stuck", position: 1, status: "queued", content: "x", createdAt: staleCreatedAt }],
+      Date.now(),
+    )).toHaveLength(1);
+    expect(errors["session-1"]).toContain("排队");
+    expect(errors["session-1"]).toContain("120 秒");
+  });
+
+  it("does not surface the stuck hint for a fresh queued row", async () => {
+    const { mutations } = createMutations();
+    let errors: Record<string, string> = {};
+    await mount({
+      busy: true,
+      draft: "",
+      queues: {},
+      mutations,
+      detailQueuedTurns: [
+        {
+          id: "qt-fresh",
+          position: 1,
+          status: "queued",
+          content: "刚排队的消息",
+          createdAt: new Date(Date.now() - 5_000).toISOString(),
+        },
+      ],
+      onErrors: (next) => {
+        errors = next;
+      },
+    });
+
+    expect(errors["session-1"] ?? "").toBe("");
   });
 });

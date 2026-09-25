@@ -20,7 +20,11 @@ describe("VDialog", () => {
     expect(dialogSource).toContain("export function VConfirmDialog");
     expect(dialogSource).toContain('variant={tone === "danger" ? "danger" : "primary"}');
     expect(rendererSource).toContain("@radix-ui/react-dialog");
-    expect(rendererSource).toContain('data-vui="dialog-content"');
+    // data-vui anchor contract: Content defaults to "dialog-content" and
+    // callers can override it (VButton convention) — the palette/search
+    // dialogs pin their own anchors through VDialog.
+    expect(rendererSource).toContain('data-vui={dataVui ?? "dialog-content"}');
+    expect(rendererSource).toContain('"data-vui"?: string');
     expect(rendererSource).toContain('data-vui="dialog-overlay"');
     expect(rendererSource).toContain("DialogPrimitive.Title");
     expect(rendererSource).toContain("DialogPrimitive.Description");

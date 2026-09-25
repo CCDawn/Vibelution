@@ -12,6 +12,8 @@ Bodies late-bind ``session_service`` so:
 
 from __future__ import annotations
 
+import threading
+import time
 from contextlib import contextmanager
 from typing import Any
 
@@ -138,17 +140,26 @@ def _submit_scheduled_session_turn(context: dict[str, Any]) -> None:
             _release_scheduled_session_turn(context)
             return
     context["_executor_submitted_at_monotonic"] = s._perf_counter()
+    # Register BEFORE handing the context to the executor: an idle worker can
+    # pick the item up immediately, and mark_started must always find the
+    # pending entry or the watchdog would leak a false-positive registration.
+    _executor_watchdog_register(context)
     try:
         s._SESSION_EXECUTOR.submit(_execute_scheduled_session_turn, context)
     except Exception:
+        _executor_watchdog_unregister(context)
         if bool(context.get("_scheduler_deferred_session_admission")):
             cancel_proactive_turn_context(context, reason="executor_submit_failed")
         raise
+    # Defect-① observability: running is already flagged while this context
+    # waits for an executor thread; a saturated pool means it may never start.
+    _record_executor_saturation_if_saturated(context)
 
 def _execute_scheduled_session_turn(context: dict[str, Any]) -> None:
     s = _service()
     executor_started_at = s._perf_counter()
     context["_executor_started_at_monotonic"] = executor_started_at
+    _executor_watchdog_mark_started(context)
     try:
         s._run_session_turn(context)
     except Exception as exc:
@@ -174,6 +185,7 @@ def _execute_scheduled_session_turn(context: dict[str, Any]) -> None:
             s._clear_session_turn_control(session_id, turn_id=turn_id)
             s._publish_session_detail_snapshot(session_id)
     finally:
+        _executor_watchdog_mark_finished(context)
         s._release_scheduled_session_turn(context)
 
 def _release_scheduled_session_turn(context: dict[str, Any]) -> None:
@@ -348,6 +360,258 @@ def _mark_session_turn_dequeued(context: dict[str, Any]) -> None:
     )
     s._publish_session_detail_snapshot(session_id)
 
+# ---------------------------------------------------------------------------
+# Worker-start watchdog (defect-① observability).
+#
+# ``submit_session_message`` flags the session running *before* the turn
+# context is handed to the shared thread pool (``_SESSION_EXECUTOR``). When
+# every executor thread is occupied by a hung turn, the submitted worker never
+# starts, nobody clears running, and the session looks silently dead. The
+# watchdog adds diagnostics only: each executor submission is registered, a
+# background sweep logs a structured event while a submission waits to start,
+# and the in-flight table names the turns currently occupying the pool. It
+# never settles turns and never changes ``reconcile_stale_chat_turn_work_runs``
+# thresholds or semantics.
+# ---------------------------------------------------------------------------
+
+_EXECUTOR_WATCHDOG_LOCK = threading.Lock()
+_EXECUTOR_PENDING_WORKER_STARTS: dict[str, dict[str, Any]] = {}
+_EXECUTOR_IN_FLIGHT_TURNS: dict[str, dict[str, Any]] = {}
+_EXECUTOR_WATCHDOG_THREAD: threading.Thread | None = None
+_EXECUTOR_WATCHDOG_TICK_SECONDS = 2.0
+_EXECUTOR_WORKER_START_WARN_SECONDS = 10.0
+_EXECUTOR_WORKER_START_REPEAT_SECONDS = 30.0
+_EXECUTOR_IN_FLIGHT_SNAPSHOT_LIMIT = 8
+
+
+def _executor_watchdog_turn_key(context: dict[str, Any]) -> str:
+    turn_id = str(context.get("turn_id") or context.get("turnId") or "").strip()
+    if turn_id:
+        return turn_id
+    session_id = str(context.get("session_id") or context.get("sessionId") or "").strip()
+    return f"session:{session_id or 'unknown'}"
+
+
+def _executor_saturation_fields() -> dict[str, Any]:
+    """Queue depth / worker capacity of the shared chat-turn executor."""
+
+    s = _service()
+    fields: dict[str, Any] = {"executorQueuedDepth": -1, "executorMaxWorkers": -1}
+    try:
+        fields["executorQueuedDepth"] = int(s._SESSION_EXECUTOR._work_queue.qsize())
+    except Exception:
+        # Diagnostics must never break scheduling; the fake executors used in
+        # tests and exotic executor swaps may lack the private queue.
+        pass
+    try:
+        fields["executorMaxWorkers"] = int(s._SESSION_EXECUTOR._max_workers)
+    except Exception:
+        pass
+    return fields
+
+
+def _executor_in_flight_snapshot_fields() -> dict[str, Any]:
+    """Name the turns currently occupying executor threads (oldest first)."""
+
+    s = _service()
+    now = s._perf_counter()
+    with _EXECUTOR_WATCHDOG_LOCK:
+        in_flight_count = len(_EXECUTOR_IN_FLIGHT_TURNS)
+        ordered = sorted(
+            _EXECUTOR_IN_FLIGHT_TURNS.values(),
+            key=lambda entry: float(entry.get("startedAtMonotonic") or 0.0),
+        )
+        snapshot = [
+            {
+                "turnId": str(entry.get("turnId") or ""),
+                "sessionId": str(entry.get("sessionId") or ""),
+                "agentId": str(entry.get("agentId") or ""),
+                "runningMs": int(
+                    max(0.0, now - float(entry.get("startedAtMonotonic") or now)) * 1000
+                ),
+            }
+            for entry in ordered[:_EXECUTOR_IN_FLIGHT_SNAPSHOT_LIMIT]
+        ]
+    return {
+        "executorInFlightCount": in_flight_count,
+        "executorInFlightTurns": snapshot,
+    }
+
+
+def _executor_watchdog_register(context: dict[str, Any]) -> None:
+    """Track an executor submission that has not started executing yet."""
+
+    s = _service()
+    key = _executor_watchdog_turn_key(context)
+    entry = {
+        "turnId": key,
+        "sessionId": str(context.get("session_id") or context.get("sessionId") or "").strip(),
+        "agentId": str(context.get("agent_id") or context.get("agentId") or "").strip(),
+        "submittedAtMonotonic": s._perf_counter(),
+        "lastWarnedWaitSeconds": 0.0,
+        "schedulerFields": _scheduler_log_fields(context),
+    }
+    with _EXECUTOR_WATCHDOG_LOCK:
+        _EXECUTOR_PENDING_WORKER_STARTS[key] = entry
+    _ensure_executor_watchdog_thread()
+
+
+def _executor_watchdog_unregister(context: dict[str, Any]) -> None:
+    """Drop a pending registration whose executor submission never landed."""
+
+    key = _executor_watchdog_turn_key(context)
+    with _EXECUTOR_WATCHDOG_LOCK:
+        _EXECUTOR_PENDING_WORKER_STARTS.pop(key, None)
+
+
+def _executor_watchdog_mark_started(context: dict[str, Any]) -> None:
+    """Move a submission from pending to in-flight; log a late start."""
+
+    s = _service()
+    key = _executor_watchdog_turn_key(context)
+    started_at = s._perf_counter()
+    with _EXECUTOR_WATCHDOG_LOCK:
+        entry = _EXECUTOR_PENDING_WORKER_STARTS.pop(key, None)
+        _EXECUTOR_IN_FLIGHT_TURNS[key] = {
+            "turnId": key,
+            "sessionId": str(context.get("session_id") or context.get("sessionId") or "").strip(),
+            "agentId": str(context.get("agent_id") or context.get("agentId") or "").strip(),
+            "startedAtMonotonic": started_at,
+        }
+    if entry is None:
+        return
+    waited_seconds = max(0.0, started_at - float(entry.get("submittedAtMonotonic") or started_at))
+    if waited_seconds < _EXECUTOR_WORKER_START_WARN_SECONDS:
+        return
+    try:
+        s.record_runtime_scene_event(
+            "conversation",
+            "worker_started_late",
+            "conversation.scheduler.worker_started_late",
+            level="warning",
+            outcome="running",
+            message="Session turn worker started after waiting for a shared executor thread.",
+            fields={
+                "sessionId": str(entry.get("sessionId") or ""),
+                "turnId": key,
+                "workerStartWaitMs": int(waited_seconds * 1000),
+                **_executor_saturation_fields(),
+            },
+        )
+    except Exception:
+        pass
+
+
+def _executor_watchdog_mark_finished(context: dict[str, Any]) -> None:
+    key = _executor_watchdog_turn_key(context)
+    with _EXECUTOR_WATCHDOG_LOCK:
+        _EXECUTOR_IN_FLIGHT_TURNS.pop(key, None)
+
+
+def _executor_watchdog_sweep() -> None:
+    """Log structured diagnostics for submissions still waiting to start."""
+
+    s = _service()
+    now = s._perf_counter()
+    due: list[tuple[str, dict[str, Any], float]] = []
+    with _EXECUTOR_WATCHDOG_LOCK:
+        for key, entry in _EXECUTOR_PENDING_WORKER_STARTS.items():
+            waited = max(0.0, now - float(entry.get("submittedAtMonotonic") or now))
+            last_warned = float(entry.get("lastWarnedWaitSeconds") or 0.0)
+            if (
+                waited >= _EXECUTOR_WORKER_START_WARN_SECONDS
+                and waited - last_warned >= _EXECUTOR_WORKER_START_REPEAT_SECONDS
+            ):
+                entry["lastWarnedWaitSeconds"] = waited
+                due.append((key, dict(entry), waited))
+    for key, entry, waited in due:
+        try:
+            s.record_runtime_scene_event(
+                "conversation",
+                "worker_start_watchdog",
+                "conversation.scheduler.worker_start_watchdog",
+                level="warning",
+                outcome="pending",
+                message=(
+                    "Session turn is flagged running but its worker has not started on the shared "
+                    "executor; every thread may be occupied by stuck turns (ghost-running candidate)."
+                ),
+                fields={
+                    "sessionId": str(entry.get("sessionId") or ""),
+                    "turnId": key,
+                    "activeTurnId": key,
+                    "workerStartWaitMs": int(waited * 1000),
+                    **_executor_saturation_fields(),
+                    **_executor_in_flight_snapshot_fields(),
+                    **(entry.get("schedulerFields") if isinstance(entry.get("schedulerFields"), dict) else {}),
+                },
+            )
+        except Exception:
+            pass
+
+
+def _executor_watchdog_loop() -> None:
+    while True:
+        time.sleep(_EXECUTOR_WATCHDOG_TICK_SECONDS)
+        try:
+            _executor_watchdog_sweep()
+        except Exception:
+            continue
+
+
+def _ensure_executor_watchdog_thread() -> None:
+    global _EXECUTOR_WATCHDOG_THREAD
+    with _EXECUTOR_WATCHDOG_LOCK:
+        if _EXECUTOR_WATCHDOG_THREAD is not None and _EXECUTOR_WATCHDOG_THREAD.is_alive():
+            return
+        thread = threading.Thread(
+            target=_executor_watchdog_loop,
+            name="web-chat-turn-start-watchdog",
+            daemon=True,
+        )
+        _EXECUTOR_WATCHDOG_THREAD = thread
+    thread.start()
+
+
+def _reset_executor_watchdog_for_tests() -> None:
+    """Clear watchdog registries (test isolation; the daemon sweep is no-op)."""
+
+    with _EXECUTOR_WATCHDOG_LOCK:
+        _EXECUTOR_PENDING_WORKER_STARTS.clear()
+        _EXECUTOR_IN_FLIGHT_TURNS.clear()
+
+
+def _record_executor_saturation_if_saturated(context: dict[str, Any]) -> None:
+    """Warn once per submission when the executor queue depth reaches capacity."""
+
+    fields = _executor_saturation_fields()
+    depth = int(fields.get("executorQueuedDepth") or -1)
+    workers = int(fields.get("executorMaxWorkers") or -1)
+    if workers <= 0 or depth < workers:
+        return
+    s = _service()
+    try:
+        s.record_runtime_scene_event(
+            "conversation",
+            "executor_saturated",
+            "conversation.scheduler.executor_saturated",
+            level="warning",
+            outcome="queued",
+            message=(
+                "The shared chat-turn executor has at least as many queued items as workers; "
+                "new turns wait for a free thread."
+            ),
+            fields={
+                "sessionId": str(context.get("session_id") or context.get("sessionId") or "").strip(),
+                "turnId": str(context.get("turn_id") or context.get("turnId") or "").strip(),
+                **fields,
+                **_executor_in_flight_snapshot_fields(),
+            },
+        )
+    except Exception:
+        pass
+
+
 def _scheduler_log_fields(context: dict[str, Any]) -> dict[str, Any]:
     s = _service()
     return {
@@ -357,6 +621,7 @@ def _scheduler_log_fields(context: dict[str, Any]) -> dict[str, Any]:
         "agentMaxActive": s._coerce_nonnegative_int(
             context.get("_scheduler_agent_max_active") or s._SESSION_AGENT_MAX_ACTIVE_TURNS
         ),
+        **_executor_saturation_fields(),
     }
 
 def _record_session_scheduler_event(

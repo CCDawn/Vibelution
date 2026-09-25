@@ -25,6 +25,8 @@ export type ShadcnDialogProps = {
   /** Accessible label when title is not plain text. */
   "aria-label"?: string;
   onCloseAutoFocus?: (event: Event) => void;
+  /** Locator anchor override applied to the Content node; defaults to "dialog-content". */
+  "data-vui"?: string;
 };
 
 const sizeClassName: Record<ShadcnDialogSize, string> = {
@@ -53,6 +55,7 @@ export function ShadcnDialog({
   hideClose = false,
   "aria-label": ariaLabel,
   onCloseAutoFocus,
+  "data-vui": dataVui,
 }: ShadcnDialogProps) {
   const controlledOpen = open ?? isOpen;
 
@@ -75,7 +78,7 @@ export function ShadcnDialog({
           )}
         />
         <DialogPrimitive.Content
-          data-vui="dialog-content"
+          data-vui={dataVui ?? "dialog-content"}
           data-renderer="radix"
           aria-label={ariaLabel}
           onCloseAutoFocus={onCloseAutoFocus}
