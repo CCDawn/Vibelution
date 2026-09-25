@@ -2773,6 +2773,7 @@ def create_child_session(
                 "task_title": title,
                 "child_status": "queued" if auto_start else "idle",
                 "handoff_context": s._normalize_child_handoff_context(handoff_context),
+                "originBranchGeneration": s.session_branch_generation(root_id),
             }
         )
         if normalized_experiment_binding:
@@ -4663,95 +4664,45 @@ def _wake_agent_for_cli_agent_task_result(
     signal_id: str = "",
     wake_reason: str = "",
 ) -> str:
+    """Queue the CLI result on the session, including while a turn is running.
+
+    The notice keeps the branch generation captured when the task started.
+    A rewind that moved the session past that generation drops it.
+    ``signal_id`` and ``wake_reason`` stay on the queue row only as diagnostics;
+    the drain starts the follow-up turn once the session is idle.
+    """
+
     s = _service()
-    if s._is_session_running(session_id):
-        return "guided_running"
-    lang = s.get_web_language()
-    prompt = "\n".join(
-        [
-            "CLI Agent 已返回任务结果，请把它当作当前会话的工具结果继续处理。",
-            "先吸收结果，再决定是否需要继续主 Agent 侧动作；不要因为看到 CLI 结果而重复启动同一个 CLI Agent。",
-            result_content,
-        ]
+    _ = (signal_id, wake_reason)
+    prompt = (
+        "CLI Agent 已返回任务结果，请把它当作当前会话的工具结果继续处理。\n"
+        "先吸收结果，再决定是否需要继续主 Agent 侧动作；不要因为看到 CLI 结果而重复启动同一个 CLI Agent。\n"
+        f"{result_content}"
     ).strip()
-    requested_leases = ["readonly_chat"]
-    lease_decision = s._check_chat_turn_lease_decision(requested_leases)
-    if not lease_decision.allowed:
-        return "wake_blocked_by_lease"
-    with s._CHAT_STATE_LOCK:
-        conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
-        if conversation is None:
-            return "wake_session_missing"
-        if s._is_session_running(session_id):
-            return "guided_running"
-        s._ensure_conversation_agent_metadata(conversation)
-        agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
-        agent = s._resolve_active_agent_for_turn(session_id, agent_id, lang=lang)
-        history_messages = s._session_ledger_visible_messages(session_id)
-        active_task = s._normalize_session_active_task(conversation.get("active_task") or conversation.get("activeTask"))
-        if not s._is_task_tool_backed_active_task(active_task):
-            active_task = None
-        turn_control = s._create_session_turn_control(session_id)
-        conversation["last_turn_status"] = "running"
-        conversation["updated_at"] = s._now_timestamp()
-        s.save_session_chat_state(s.PROJECT_ROOT, session_id, conversation)
-        s._set_session_running(session_id, True, turn_id=turn_control.turn_id, leases=requested_leases)
-        s._persist_chat_turn_work_run(
-            session_id=session_id,
-            turn_id=turn_control.turn_id,
-            status="running",
-            agent_id=agent_id,
-            leases=requested_leases,
-            user_message=prompt,
-            started_at=conversation["updated_at"],
-            updated_at=conversation["updated_at"],
-        )
-    s._set_session_waiting_live_output(session_id, turn_id=turn_control.turn_id)
-    s._record_session_turn_started_event(
-        session_id,
-        turn_id=turn_control.turn_id,
-        leases=requested_leases,
-        user_message=prompt,
-        raw_user_message="",
-        user_message_source="cli_agent_result",
-    )
-    context = {
-        "session_id": session_id,
-        "turn_id": turn_control.turn_id,
-        "turn_control": turn_control,
-        "user_message": prompt,
-        "raw_user_message": "",
-        "user_message_source": "cli_agent_result",
-        "history_messages": history_messages,
-        "mental_model_enabled": None,
-        "active_task": active_task,
-        "agent_id": agent_id,
-        "agent_snapshot": dict(agent) if isinstance(agent, dict) else {},
-        "agent_prompt_snapshot": dict(conversation.get("agentPromptSnapshot") or {})
-        if isinstance(conversation.get("agentPromptSnapshot"), dict)
-        else {},
-        "leases": requested_leases,
-        "llm_slot": Any,
-        "submit_timing_fields": {"source": "cli_agent_result", "signalId": signal_id, "wakeReason": str(wake_reason or "").strip()},
-        "submit_started_at_monotonic": s._perf_counter(),
-    }
-    s._record_session_turn_scheduled_event(context)
+    task_id = str(task_result.get("taskId") or "").strip()
+    status = str(task_result.get("status") or "unknown").strip().lower() or "unknown"
+    source_id = f"cli-task:{task_id or str(task_result.get('terminalSessionId') or '').strip()}:{status}"
+    stamped = task_result.get("branchGeneration", None)
+    branch_generation = None if stamped in (None, "") else stamped
     try:
-        s._schedule_session_turn(context)
-    except Exception as exc:
-        s._persist_chat_turn_work_run(
-            session_id=session_id,
-            turn_id=turn_control.turn_id,
-            status="failed",
-            leases=requested_leases,
-            user_message=prompt,
-            summary=f"{type(exc).__name__}: {exc}",
+        queued = s.enqueue_session_runtime_notice(
+            session_id,
+            kind="task_notification",
+            content=prompt,
+            source_id=source_id,
+            branch_generation=branch_generation,
+            task_id=task_id,
+            tool_name="cli_agent_run_tool",
         )
-        s._set_session_running(session_id, False, turn_id=turn_control.turn_id)
-        s._clear_session_turn_control(session_id, turn_id=turn_control.turn_id)
-        s._persist_session_turn_failure(session_id, context, exc)
-        return "wake_schedule_failed"
-    return "wake_scheduled"
+    except s.SessionNotFoundError:
+        return "wake_session_missing"
+    except s.SessionValidationError:
+        return "wake_rejected"
+    if str(queued.get("dropped") or "") == "stale_branch":
+        return "stale_branch_dropped"
+    if str(queued.get("dropped") or "") == "queue_full":
+        return "wake_queue_full"
+    return "queued"
 
 
 def _format_cli_agent_task_result_content(task_result: dict[str, Any]) -> str:
