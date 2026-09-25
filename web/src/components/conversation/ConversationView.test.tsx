@@ -405,7 +405,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(styles.timelineArea).toContain("flex-1");
     expect(styles.timelineArea).toContain("min-h-0");
     const timelineAreaSource = conversationViewSource.slice(
-      conversationViewSource.indexOf("<div className={styles.timelineArea}>"),
+      conversationViewSource.indexOf('<div ref={timelineAreaRef} className={styles.timelineArea}>'),
       conversationViewSource.indexOf("{toolApproval && !toolApprovalConsumedRef.current"),
     );
     expect(timelineAreaSource).toContain("styles.backToBottomButton");
