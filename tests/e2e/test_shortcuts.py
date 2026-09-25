@@ -14,9 +14,10 @@
 - 冲突：给「会话搜索」录 Ctrl+K（被「打开命令面板」默认 CmdOrCtrl+K 物理占用）→
   danger banner + 「抢占并绑定」按钮。
 
-已知产品缺陷（登记 e2e-playwright.md）：VDialog/ShadcnDialog 不透传 ``data-vui``，
-``global-command-palette`` / ``global-session-search`` 锚点不在 DOM；面板断言用
-``[data-testid="vui-command-palette"]``（VCommandPalette 自身 testid）。
+VDialog 锚点已透传（2026-09-25 修复 668cfa8c1）：面板打开后
+``[data-vui="global-command-palette"]`` / ``"global-session-search"`` 锚点在 DOM；
+用例沿用 ``[data-testid="vui-command-palette"]``（VCommandPalette 自身 testid，
+与锚点二选一皆可）。
 
 保留键黑名单含 CmdOrCtrl+Shift+j（DevTools），录新键选 Control+Shift+L。
 每个测试用例独立 browser context（conftest page fixture），localStorage 互不污染。

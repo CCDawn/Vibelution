@@ -150,9 +150,10 @@ $env:VIBELUTION_E2E = "1"; .\.venv\Scripts\python.exe -m pytest tests/e2e -m ser
     状态 chip「默认/已覆盖」，冲突 banner `shortcuts-banner` +「抢占并绑定」；
     命令面板 Ctrl+K、会话搜索 Ctrl+P，覆盖存 localStorage
     `vibelution.shortcuts.overrides`（canonical 串如 `CmdOrCtrl+Shift+l`）。
-    已知缺陷（2026-09-25 实测 head=5eeb54a40）：VDialog/ShadcnDialog 不透传
-    `data-vui`，`global-command-palette` / `global-session-search` 锚点不在 DOM；
-    面板打开断言用 `[data-vui="dialog-content"]` + `[data-testid="vui-command-palette"]`。
+    VDialog 锚点已透传（2026-09-25 修复 668cfa8c1）：命令面板/会话搜索打开后
+    `data-vui="global-command-palette"` / `"global-session-search"` 锚点在 DOM，
+    可直接定位；未传自定义值的对话框（如 Agent 创建向导）仍统一
+    `[data-vui="dialog-content"]`。
   - hover 工具条 `span[data-conversation-hover-actions="1"]`（断言可见性而非存在性）；
     划词引用菜单 `data-conversation-selection-menu="1"`。
 - 空态：全新实例全部路由有空态兜底；`/` 配置读取失败显示「工作台配置读取失败」，

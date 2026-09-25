@@ -135,9 +135,10 @@ tests/e2e/mock_llm/scenarios/
 - **thread 容器文本含 composer 常驻件**：`thread_text` 会带出权限档按钮
   （"请求批准"）、模型 pill、上下文占用（"13%"）等 composer chrome，属正常，
   不是审批卡片。
-- **格式泄漏渲染吞字**：`<think>`/`<summary>` 等原始 HTML 标签连同标签内文本被
-  渲染器丢弃，且紧随其后无空行的明文段也会被并入 HTML 块丢弃；只有纯文本行上屏。
-  泄漏用例闸门只锁「原始行可见 + 不炸 + 收口」。
+- **格式泄漏渲染（④ 已修，2026-09-25 d3cf4fa8f）**：行首 `<think>`/`<summary>` 等
+  信封标签现被转义为字面文本（fence 内不转义），紧随其后的明文段不再被 HTML 块
+  语义连吞；标签本体以字面形式可见。`<script>` 等其余原始 HTML 仍维持 inert-drop。
+  泄漏用例闸门保持「原始行可见 + 不炸 + 收口」口径即可。
 - **流式 markdown 偶发丢代码块（③ 已修，根因改口径）**：审查定案切分器无罪，
   真身是 settle 换窗瞬时投影空窗（与③⑦a 同根，`chatActiveTurnLayer.ts` done 帧
   删层早于权威 detail 落地）——空壳层保留修复后 fence 丢块随之消除；「正文硬断言
@@ -145,15 +146,18 @@ tests/e2e/mock_llm/scenarios/
 - **提交偶发冻结在乐观态**：同一实例连续跑多个用例后，偶发提交停在
   「已发送 · 0s」乐观态、服务端未起 turn（journal 为空）；用例统一走
   `wait_turn_started`（等 stage 条或 journal 出现请求，超时重发一次）。
-- **tool_calls 对未绑工具 Agent**：mock 返回 tool_calls 后产品 turn 以
-  runtime_error（`turn_journal_replay_failed`，"Seeded chat history does not
-  match ConversationLedger reconstruction"）失败，时间线出「请求错误/重试」内联
-  卡片——未声明工具却收到 tool_calls 应优雅降级，这是产品缺陷嫌疑（2026-09-25
-  记录）；车道闸门只锁「到达 mock + 收口 + 页面存活」。
-- **同实例第 6 个 Agent 的 turn 被静默丢弃**：同一实例连续建/用/删 5 个 Agent 后，
-  第 6 个 Agent 的对话 turn 会停在各阶段之前被静默丢弃（thread 回 idle、乐观态
-  行冻结在「已发送 · 0s」、无错误面、主调用不发向 LLM；重发同样被丢）。产品
-  turn 调度缺陷嫌疑（2026-09-25 记录）；因此 `test_tool_calls_turn_closes_without_crash`
+- **tool_calls 对未绑工具 Agent（② 已修，2026-09-25 354455df3）**：mock 返回
+  tool_calls 打到未绑/幻觉工具名时，阻断路径已补齐 ConversationLedger 落账
+  （`tool_call_started` + `tool_result` status=blocked），turn 不再以
+  `turn_journal_replay_failed` 失败，下一轮 reconcile 通过，「请求错误」内联卡片
+  消失，模型收到可见的阻断文案。车道闸门维持「到达 mock + 收口 + 页面存活」，
+  可按需收紧为「收口且无请求错误卡」。
+- **同实例第 6 个 Agent 的 turn 被静默丢弃（① 可观测性已加，2026-09-25
+  c0d8bf016）**：同一实例连续建/用/删 5 个 Agent 后第 6 个 Agent 的 turn 仍可能
+  停在各阶段之前（根因待生产日志钉死，怀疑共享线程池被挂死 turn 占满）。修复后
+  不再静默：忙时入队会在前端 followup 队列条投影「已排队」、超 90s 上浮提示；
+  后端 worker 未落地看门狗与 executor 饱和告警会留结构化日志（含占线 turn 清单）。
+  复现时先看日志再判断，勿再当哑按钮排查；用例侧 `test_tool_calls_turn_closes_without_crash`
   排在套件首位（全新实例上稳定），其余用例由 `complete_turn` 的「主调用未到
   mock 则整轮重发一次」兜底。
 - **进程零残留口径**：正常会话由 `AimockServer.stop()`（terminate→wait→kill→wait）
