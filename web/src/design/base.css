@@ -146,17 +146,8 @@ pre {
  * the gradient from its own foreground.
  */
 .vui-shimmer-text {
-  --vui-shimmer-strong: var(--fg-secondary);
-  --vui-shimmer-soft: color-mix(in srgb, var(--fg-secondary) 25%, transparent);
   display: inline-block;
-  background: linear-gradient(
-    90deg,
-    var(--vui-shimmer-strong) 0%,
-    var(--vui-shimmer-strong) 34%,
-    var(--vui-shimmer-soft) 50%,
-    var(--vui-shimmer-strong) 66%,
-    var(--vui-shimmer-strong) 100%
-  );
+  background: var(--vui-gradient-shimmer-text);
   background-size: 300% 100%;
   background-clip: text;
   -webkit-background-clip: text;
