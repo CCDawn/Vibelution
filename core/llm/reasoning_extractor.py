@@ -42,11 +42,41 @@ _THINK_BLOCK_RE = re.compile(
     r"<(?:think|thinking)\b[^>]*>([\s\S]*?)</(?:think|thinking)\s*>",
     flags=re.IGNORECASE,
 )
-_OPEN_THINK_BLOCK_RE = re.compile(
-    r"<(?:think|thinking)\b[^>]*>([\s\S]*)$",
+_THINK_TAG_RE = re.compile(r"</?(?:think|thinking)\b[^>]*>", flags=re.IGNORECASE)
+_OPEN_THINK_TAG_RE = re.compile(r"<(?:think|thinking)\b[^>]*>", flags=re.IGNORECASE)
+# A well-formed close tag for any element. While a think block is open, a
+# close tag for a *different* element (e.g. ``</summary>``) is positive
+# evidence the relay closed the block with the wrong name — the canonical
+# mismatched-think corruption where every following answer character would
+# otherwise be routed to the reasoning channel forever.
+_FOREIGN_CLOSE_TAG_RE = re.compile(
+    r"</([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*>",
     flags=re.IGNORECASE,
 )
-_THINK_TAG_RE = re.compile(r"</?(?:think|thinking)\b[^>]*>", flags=re.IGNORECASE)
+
+_THINK_FAMILY_NAMES = frozenset({"think", "thinking"})
+
+
+def _first_foreign_close(text: str, start: int) -> re.Match[str] | None:
+    """Return the first non-think close tag at/after ``start``, if any."""
+    for match in _FOREIGN_CLOSE_TAG_RE.finditer(text, start):
+        if match.group(1).lower() not in _THINK_FAMILY_NAMES:
+            return match
+    return None
+
+
+def _unclosed_think_recoverable(open_position: int, body: str, base_text: str) -> bool:
+    """Conservative preconditions for treating an unclosed think block as reasoning.
+
+    Mirrors the analysis-envelope gate: a genuine (output-truncated) think
+    body is long and its opening sits in the front of the text. Short or
+    mid-text unclosed tags are treated as prose, not envelopes.
+    """
+    return (
+        bool(body)
+        and len(body) >= UNCLOSED_ENVELOPE_MIN_BODY_CHARS
+        and open_position <= len(base_text) * UNCLOSED_ENVELOPE_MAX_OPEN_RATIO
+    )
 
 
 REASONING_TEXT_DETAIL_TYPE = "reasoning.text"
@@ -149,27 +179,56 @@ def extract_reasoning_text(
 
 
 def strip_think_tag_reasoning(content: Any, text_extractor: TextExtractor) -> str:
-    """Return visible content with explicit think/thinking blocks removed."""
+    """Return visible content with explicit think/thinking blocks removed.
+
+    Complete ``<think>...</think>`` blocks are always removed. A think block
+    terminated by a *foreign* close tag (``<think>...</summary>``) ends at
+    that close so the answer text after it stays visible. A think block with
+    no close at all is removed only under the conservative unclosed
+    preconditions (aligned with the analysis envelopes); otherwise it is
+    treated as prose and only the stray tag is dropped.
+    """
     text = text_extractor(content)
     if not text:
         return ""
-    text = _THINK_BLOCK_RE.sub("", text)
-    if re.search(r"<(?:think|thinking)\b[^>]*>", text, flags=re.IGNORECASE):
-        text = _OPEN_THINK_BLOCK_RE.sub("", text)
-    text = re.sub(r"</?(?:think|thinking)[^>]*>", "", text, flags=re.IGNORECASE)
-    return text
+    cleaned = _THINK_BLOCK_RE.sub("", text)
+    open_tag = _OPEN_THINK_TAG_RE.search(cleaned)
+    if open_tag is not None:
+        foreign_close = _first_foreign_close(cleaned, open_tag.end())
+        if foreign_close is not None:
+            # Mismatched terminator: drop up to and including the foreign
+            # close, keep everything after it visible.
+            cleaned = cleaned[: open_tag.start()] + cleaned[foreign_close.end() :]
+        else:
+            body = cleaned[open_tag.end() :].strip()
+            if _unclosed_think_recoverable(open_tag.start(), body, cleaned):
+                cleaned = cleaned[: open_tag.start()]
+            else:
+                # Prose, not an envelope: keep the body, drop only the tag.
+                cleaned = cleaned[: open_tag.start()] + cleaned[open_tag.end() :]
+    cleaned = re.sub(r"</?(?:think|thinking)[^>]*>", "", cleaned, flags=re.IGNORECASE)
+    return cleaned
 
 
 def extract_think_tag_reasoning(text: str) -> str:
     if not text:
         return ""
     matches = [match.strip() for match in _THINK_BLOCK_RE.findall(text) if match.strip()]
-    if matches:
-        return "\n".join(matches).strip()
-    open_match = _OPEN_THINK_BLOCK_RE.search(text)
-    if open_match:
-        return open_match.group(1).strip()
-    return ""
+    # Search for an unclosed/mismatched block only after complete blocks are
+    # gone, otherwise a complete block's opening tag would masquerade as open.
+    without_complete = _THINK_BLOCK_RE.sub("", text)
+    open_tag = _OPEN_THINK_TAG_RE.search(without_complete)
+    if open_tag is not None:
+        foreign_close = _first_foreign_close(without_complete, open_tag.end())
+        if foreign_close is not None:
+            mismatched = without_complete[open_tag.end() : foreign_close.start()].strip()
+            if mismatched:
+                matches.append(mismatched)
+        else:
+            body = without_complete[open_tag.end() :].strip()
+            if _unclosed_think_recoverable(open_tag.start(), body, without_complete):
+                matches.append(body)
+    return "\n".join(matches).strip()
 
 
 # Analysis-family envelopes (``<analysis>`` / ``<summary>``): internal复盘
@@ -265,7 +324,17 @@ def strip_analysis_envelopes(
 
 
 class ThinkTagStreamParser:
-    """Statefully split streamed think/thinking tags from visible content."""
+    """Statefully split streamed think/thinking tags from visible content.
+
+    Conservative mismatch handling: while a think block is open, a close tag
+    for a *different* element (``</summary>`` et al.) is treated as the block
+    terminator — the relay closed the think block with the wrong name, and
+    without this check every following answer character would be routed to
+    the reasoning channel forever. The stray close markup is dropped and the
+    remainder streams as visible text. A think block still open at stream end
+    was never correctly closed, so :meth:`flush` demotes its residue to the
+    visible channel instead of reasoning.
+    """
 
     def __init__(self) -> None:
         self._inside_think = False
@@ -296,6 +365,18 @@ class ThinkTagStreamParser:
                 continue
 
             candidate = text[tag_start:]
+            if self._inside_think:
+                close_match = _FOREIGN_CLOSE_TAG_RE.match(text, tag_start)
+                if close_match is not None and close_match.group(1).lower() not in _THINK_FAMILY_NAMES:
+                    # Mismatched terminator: exit think state, drop the stray
+                    # close markup, stream the rest as visible text.
+                    self._inside_think = False
+                    index = close_match.end()
+                    continue
+                if _looks_like_partial_close_tag(candidate):
+                    self._pending = candidate
+                    break
+
             if _looks_like_partial_think_tag(candidate):
                 self._pending = candidate
                 break
@@ -311,10 +392,14 @@ class ThinkTagStreamParser:
     def flush(self) -> ThinkTagStreamResult:
         pending = self._pending
         self._pending = ""
+        if self._inside_think:
+            # Never correctly closed: demote the residue to visible content
+            # rather than letting it disappear into the reasoning channel.
+            if pending:
+                return ThinkTagStreamResult(visible_text=pending)
+            return ThinkTagStreamResult()
         if not pending or _looks_like_partial_think_tag(pending):
             return ThinkTagStreamResult()
-        if self._inside_think:
-            return ThinkTagStreamResult(reasoning_text=pending)
         return ThinkTagStreamResult(visible_text=pending)
 
     def _append_segment(
@@ -339,6 +424,18 @@ def _looks_like_partial_think_tag(fragment: str) -> bool:
     if any(prefix.startswith(lowered) for prefix in complete_prefixes):
         return True
     return any(lowered.startswith(prefix) for prefix in complete_prefixes) and ">" not in fragment
+
+
+def _looks_like_partial_close_tag(fragment: str) -> bool:
+    """True when the fragment could still complete into a ``</name>`` close tag.
+
+    Used while a think block is open so a foreign close tag split across
+    chunk boundaries (``</summ`` + ``ary>``) is pended instead of being
+    emitted into the reasoning channel one character at a time.
+    """
+    if fragment == "</":
+        return True
+    return bool(re.match(r"</[a-zA-Z][a-zA-Z0-9-]*\Z", fragment))
 
 
 def _extract_field(payload: dict[str, Any], key: str, text_extractor: TextExtractor) -> str:

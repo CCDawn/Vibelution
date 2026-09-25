@@ -244,6 +244,51 @@ describe("ConversationMarkdownRenderer", () => {
     expect(html).not.toContain("alert(1)");
   });
 
+  it("keeps plaintext adjacent to leaked line-initial envelope tags visible", async () => {
+    const { ConversationMarkdownRenderer, normalizeConversationMarkdown } = await import(
+      "./ConversationMarkdownRenderer"
+    );
+    const html = renderToStaticMarkup(
+      <ConversationMarkdownRenderer
+        content={["<summary>内部摘要片段", "紧随其后的明文结论"].join("\n")}
+        classNames={styles}
+      />,
+    );
+
+    // The tag itself renders as literal text and no longer opens an HTML
+    // block that would swallow the following plaintext up to a blank line.
+    expect(html).toContain("summary");
+    expect(html).toContain("内部摘要片段");
+    expect(html).toContain("紧随其后的明文结论");
+
+    const closingHtml = renderToStaticMarkup(
+      <ConversationMarkdownRenderer
+        content={["</summary>", "</think>紧随闭合标签的明文"].join("\n")}
+        classNames={styles}
+      />,
+    );
+    expect(closingHtml).toContain("紧随闭合标签的明文");
+
+    // Escaping is idempotent across repeated normalize passes (streaming
+    // re-normalizes the whole content on every frame).
+    const once = normalizeConversationMarkdown("<summary>片段\n明文");
+    expect(normalizeConversationMarkdown(once)).toBe(once);
+    expect(once).toContain("\\<summary>");
+  });
+
+  it("does not escape envelope tags inside fenced code blocks", async () => {
+    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
+    const html = renderToStaticMarkup(
+      <ConversationMarkdownRenderer
+        content={["```text", "<summary>代码示例原文", "```"].join("\n")}
+        classNames={styles}
+      />,
+    );
+
+    expect(html).toContain("&lt;summary&gt;代码示例原文");
+    expect(html).not.toContain("\\<");
+  });
+
   it("renders default-path markdown images lazily and async-decoded", async () => {
     const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const html = renderToStaticMarkup(

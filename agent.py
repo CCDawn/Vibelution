@@ -1841,6 +1841,90 @@ class AgentRuntime:
             return None
         return Path(project_root_raw), session_id, turn_id
 
+    def _persist_hidden_tool_block_to_ledger(self, tool_call: Dict[str, Any], result: Any) -> None:
+        """Journal a hidden/hallucinated tool call and its blocked placeholder result.
+
+        The blocking branch never reaches the ToolExecutor, so the legal-path
+        event proxy (stream_capture) journals nothing for this call. Without a
+        ledger record the next send-time reconcile cannot rebuild this turn's
+        assistant/tool layer and the strict fingerprint gate fail-closes the
+        session (turn_journal_replay_failed). Mirror the legal tool timeline:
+        one ``tool_call_started`` entry plus one ``tool_result`` entry whose
+        payload carries the model-visible blocked message. Best-effort by
+        contract: a ledger write failure must never fail the turn.
+        """
+
+        identity = self._chat_ledger_identity()
+        if identity is None:
+            return
+        project_root, session_id, turn_id = identity
+        call = tool_call if isinstance(tool_call, Mapping) else {}
+        tool_call_id = str(call.get("id") or call.get("tool_call_id") or call.get("toolCallId") or "").strip()
+        tool_name = str(call.get("name") or "").strip()
+        try:
+            tool_args = parse_tool_args(
+                call.get("args") or call.get("arguments") or {}
+            )
+        except Exception:
+            tool_args = {}
+        result_text = str(result or "").strip()
+        blocked_status = "blocked"
+        tool_call_payload = {
+            "name": tool_name,
+            "status": blocked_status,
+            "arguments": tool_args if isinstance(tool_args, dict) else {},
+            "summary": result_text,
+        }
+        result_payload = {
+            **tool_call_payload,
+            "result": result_text,
+        }
+        try:
+            from core.chat.conversation_ledger import append_conversation_event
+            from core.chat.turn_journal import (
+                EVENT_TOOL_CALL_STARTED,
+                EVENT_TOOL_RESULT,
+            )
+
+            append_conversation_event(
+                project_root,
+                session_id,
+                turn_id,
+                EVENT_TOOL_CALL_STARTED,
+                status=blocked_status,
+                payload={"toolCall": dict(tool_call_payload)},
+                source="agent_hidden_tool_block",
+                tool_call_id=tool_call_id,
+                correlation_id=tool_call_id,
+                source_kind="agent_tool_visibility",
+            )
+            append_conversation_event(
+                project_root,
+                session_id,
+                turn_id,
+                EVENT_TOOL_RESULT,
+                status=blocked_status,
+                payload={"toolCall": dict(result_payload)},
+                source="agent_hidden_tool_block",
+                tool_call_id=tool_call_id,
+                correlation_id=tool_call_id,
+                source_kind="agent_tool_visibility",
+            )
+        except Exception as exc:
+            _record_agent_scene_event(
+                "tool_visibility",
+                "agent.hidden_tool_call.ledger_write_failed",
+                message="Hidden tool block ledger journaling failed; next reconcile may fail closed.",
+                level="warning",
+                fields={
+                    "sessionId": session_id,
+                    "turnId": turn_id,
+                    "toolName": tool_name,
+                    "toolCallId": tool_call_id,
+                    "errorType": type(exc).__name__,
+                },
+            )
+
     def _replay_current_turn_conversation_from_ledger(
         self,
         messages: list,
@@ -3224,6 +3308,7 @@ class AgentRuntime:
                     )
                     self._remember_tool_output(tool_call, result, None)
                     self.tool_lifecycle.handle_tool_result(tool_call, result, None, messages)
+                    self._persist_hidden_tool_block_to_ledger(tool_call, result)
                 lifecycle_action = (
                     self.tool_lifecycle.execute_tools(executable_tool_calls, messages)
                     if executable_tool_calls

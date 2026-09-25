@@ -15,6 +15,7 @@ import {
   type AgentConfigWorkspace,
   type AgentConfigWorkspaceAgent,
   type AgentInstance,
+  type ToolBundle,
   type ToolRegistryPayload,
 } from "../../api/types";
 import { startUserAction } from "../../app/userActionTelemetry";
@@ -40,6 +41,11 @@ import {
   withDialogueModel,
 } from "./agentCreateContract";
 import styles from "./AgentCreateWizardDialog.styles";
+
+// Stable empty identity: the normalize effect keys on `toolBundles`, so a
+// freshly allocated `[]` per render would re-fire the effect (and re-set the
+// draft state) on every keystroke while the tool registry is still loading.
+const NO_TOOL_BUNDLES: ToolBundle[] = [];
 
 type AgentCreateWizardDialogProps = {
   open: boolean;
@@ -156,7 +162,7 @@ export function AgentCreateWizardDialog({
     enabled: open,
     staleTime: 30_000,
   });
-  const toolBundles = toolsQuery.data?.toolBundles ?? [];
+  const toolBundles = toolsQuery.data?.toolBundles ?? NO_TOOL_BUNDLES;
   const modelChoices = useMemo(
     () => buildAgentModelChoices(workspaceQuery.data?.agentModelChoices ?? [], lang, probeResults),
     [lang, probeResults, workspaceQuery.data?.agentModelChoices],
@@ -214,8 +220,16 @@ export function AgentCreateWizardDialog({
     };
   }, [lang, open, triggerId, triggerRef]);
 
+  // Field-level default backfill: normalizeCreateDraftForWorkspace preserves
+  // user-entered values (displayName only backfills when empty; the model is
+  // replaced only when it is absent from the catalog or unavailable), and the
+  // tool-bundle fill below only fires while the selection is empty. Gating this
+  // effect on a whole-draft dirty flag froze every field once a keystroke
+  // landed before the async catalog resolved, leaving model/tool packages
+  // empty and the create button permanently disabled (defect 2026-09-25 #6;
+  // spec: field-level protection, archive plan 2026-07-19:81).
   useEffect(() => {
-    if (!open || draftDirty || (!workspaceQuery.data && !toolBundles.length)) return;
+    if (!open || (!workspaceQuery.data && !toolBundles.length)) return;
     setDraft((current) => {
       const normalized = normalizeCreateDraftForWorkspace(current, workspaceQuery.data, toolBundles, lang);
       if (normalized.selectedToolBundleIds.length || !toolBundles.length) return normalized;
@@ -224,7 +238,7 @@ export function AgentCreateWizardDialog({
         selectedToolBundleIds: createDraftFromWorkspace(workspaceQuery.data, toolBundles, lang).selectedToolBundleIds,
       };
     });
-  }, [draftDirty, lang, open, toolBundles, workspaceQuery.data]);
+  }, [lang, open, toolBundles, workspaceQuery.data]);
 
   const createMutation = useMutation({
     mutationFn: (nextDraft: AgentCreateDraft) => createAgent(createAgentPayload(nextDraft, toolBundles)),
