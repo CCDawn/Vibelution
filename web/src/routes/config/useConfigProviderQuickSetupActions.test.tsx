@@ -5,12 +5,14 @@ import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import { initialProviderQuickSetupState } from "../configProviderLogic";
 import { useConfigProviderQuickSetupActions, type UseConfigProviderQuickSetupActionsOptions } from "./useConfigProviderQuickSetupActions";
+import { CONFIG_COPY } from "./configCopy";
 
 function options(): UseConfigProviderQuickSetupActionsOptions {
   const initial = initialProviderQuickSetupState();
   return {
     providerQuickSetupState: { ...initial, phase: "review", provider: { ...initial.provider, providerId: "test" }, selectedModelRef: "test/model",
       discoveredModels: [{ availability: "observed", modelRef: "test/model", modelKey: "model", label: "Test", upstreamId: "model", status: "observed", capabilities: {} }] },
+    copy: CONFIG_COPY.zh,
     providerPresetOptions: [], providerDraftRequestRef: { current: null }, queryClient: new QueryClient(),
     dispatchProviderQuickSetup: vi.fn(), setProviderQuickCredential: vi.fn(), handleSuggestProviderId: vi.fn(),
     handleCreateProvider: vi.fn(), handleDiscoverProvider: vi.fn(), handlePinProviderModels: vi.fn().mockResolvedValue(true),

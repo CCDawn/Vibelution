@@ -248,6 +248,29 @@ describe("ConfigRoute main save flow (wave 3 safety net)", () => {
     expect(findButtonByText("编辑分区")).not.toBeNull();
   });
 
+  it("surfaces a failed section save inline inside the section instead of the global notice strip", async () => {
+    // Wave 4: section-scoped save failures render inside the section (VErrorSummary),
+    // the global notice strip stays reserved for global operations (apply/uploads).
+    installFetchMock({ workspace: workspaceFixture(), previewError: true });
+    await renderRoute();
+    await waitFor(() => Boolean(container.querySelector('[data-testid="row-context_compression.enabled"]')), "view row renders");
+
+    await editNumberDraft();
+    await act(async () => {
+      findButtonByText("确认分区修改")?.click();
+    });
+    await waitFor(
+      () => Boolean(container.querySelector('[data-section-save-error="true"]')),
+      "inline section save error shows",
+    );
+    const inlineError = container.querySelector('[data-section-save-error="true"]');
+    expect(inlineError?.textContent).toContain("配置基线已过期");
+    expect(inlineError?.getAttribute("role")).toBe("alert");
+    // 失败后编辑态保留，全局 notice strip 不出现该错误。
+    expect(findButtonByText("确认分区修改")).not.toBeNull();
+    expect(container.querySelector('[class*="noticeError"]')).toBeNull();
+  });
+
   it("blocks the global save while a section draft is invalid", async () => {
     const mock = installFetchMock({ workspace: workspaceFixture() });
     await renderRoute();

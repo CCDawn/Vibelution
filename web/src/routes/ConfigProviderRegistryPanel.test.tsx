@@ -11,7 +11,13 @@ import {
   ProviderModelsTab,
   type ConfigProviderRegistryPanelProps,
 } from "./ConfigProviderRegistryPanel";
-import panelSource from "./ConfigProviderRegistryPanel.tsx?raw";
+import panelSourceRaw from "./ConfigProviderRegistryPanel.tsx?raw";
+import configCopyRaw from "./config/configCopy.ts?raw";
+import { CONFIG_COPY } from "./config/configCopy";
+
+/** Panel source + shared bilingual copy table (wave 4): UI strings live in configCopy. */
+const panelSource = `${panelSourceRaw}
+${configCopyRaw}`;
 import panelStyles from "./ConfigProviderRegistryPanel.styles";
 import type { ProviderModelFilter, ProviderRegistryRow } from "./configProviderLogic";
 
@@ -58,6 +64,7 @@ function panelProps(
   overrides: Record<string, unknown> = {},
 ): ConfigProviderRegistryPanelProps {
   return {
+    copy: CONFIG_COPY.zh,
     rows: [provider(models)],
     selectedProviderId: "relay_a",
     selectedTab: "models",
@@ -96,6 +103,7 @@ function renderModels(
 ) {
   return renderToStaticMarkup(
     <ProviderModelsTab
+      copy={CONFIG_COPY.zh}
       provider={provider(models)}
       disabled={false}
       modelQuery={options.query ?? ""}
@@ -123,7 +131,7 @@ async function renderModelDetails(models: ConfigCatalogModel[], options: {liveRe
   document.body.appendChild(container);
   const root = createRoot(container);
   mountedRoots.push(root);
-  await act(async () => root.render(<ProviderModelsTab provider={provider(models)} disabled={false}
+  await act(async () => root.render(<ProviderModelsTab copy={CONFIG_COPY.zh} provider={provider(models)} disabled={false}
     modelQuery="" modelFilter="all" liveReferenceCountByModelRef={options.liveReferences ?? {}}
     onQueryChange={() => {}} onFilterChange={() => {}} onPin={() => {}} onUnpin={() => {}}
     onTestModel={options.onTestModel ?? (() => {})} onProbeImageInput={() => {}} imageCapabilityBusy={options.imageCapabilityBusy} />));
@@ -138,7 +146,7 @@ describe("ConfigProviderRegistryPanel", () => {
     ["auth_failed", "API Key"], ["network", "网络"], ["timeout", "服务负载"],
     ["rate_limited", "额度"], ["service_unavailable", "切换服务"], ["not_found", "模型名称"],
   ])("gives an actionable recovery hint for %s", (kind, hint) => {
-    expect(modelTestRecoveryHint(kind)).toContain(hint);
+    expect(modelTestRecoveryHint(kind, CONFIG_COPY.zh)).toContain(hint);
   });
   it("adds only discovered models matching the current search", async () => {
     const models = [model("alpha", "observed"), model("beta", "observed")];
@@ -147,7 +155,7 @@ describe("ConfigProviderRegistryPanel", () => {
     document.body.appendChild(container);
     const root = createRoot(container);
     mountedRoots.push(root);
-    await act(async () => root.render(<ProviderModelsTab provider={provider(models)} disabled={false}
+    await act(async () => root.render(<ProviderModelsTab copy={CONFIG_COPY.zh} provider={provider(models)} disabled={false}
       modelQuery="alpha" modelFilter="discovered" liveReferenceCountByModelRef={{}}
       onQueryChange={() => {}} onFilterChange={() => {}} onPin={onPin} onUnpin={() => {}}
       onTestModel={() => {}} onProbeImageInput={() => {}} />));
@@ -255,7 +263,8 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(markup).not.toContain("验证推理 low / high");
     expect(panelSource).toContain("testConfigLlm(");
     expect(panelSource).toContain('capability: "reasoning_effort"');
-    expect(panelSource).toContain("一期探测仅验证 low/high");
+    expect(configCopyRaw).toContain("一期探测仅验证 low/high");
+    expect(panelSource).toContain("reasoningProbeHint");
   });
 
   it("shows operator-declared reasoning contract without requiring probe", async () => {
@@ -344,18 +353,23 @@ describe("ConfigProviderRegistryPanel", () => {
   });
 
   it("offers a preview-first merge only for an exact-contract duplicate", () => {
-    expect(panelSource).toContain("合并重复 Provider（高级）");
-    expect(panelSource).toContain("日常中转站不需要");
+    expect(configCopyRaw).toContain("合并重复 Provider（高级）");
+    expect(configCopyRaw).toContain("日常中转站不需要");
+    expect(panelSource).toContain("mergeSectionTitle");
+    expect(panelSource).toContain("mergeSectionMeta");
     expect(panelSource).toContain("previewProviderMerge(");
     expect(panelSource).toContain("applyProviderMerge(");
     expect(panelSource).toContain("confirmed: true");
   });
 
   it("keeps API Key and context window in setting rows above the model list", () => {
-    expect(panelSource).toContain("此供应商下的模型共用一把密钥");
-    expect(panelSource).toContain("默认上下文上限");
+    expect(configCopyRaw).toContain("此供应商下的模型共用一把密钥");
+    expect(configCopyRaw).toContain("默认上下文上限");
+    expect(panelSource).toContain("apiKeySharedHint");
+    expect(panelSource).toContain("contextLimitRowLabel");
     expect(panelSource).toContain("<VDialog");
-    expect(panelSource).toContain("保存上下文窗口");
+    expect(configCopyRaw).toContain("保存上下文窗口");
+    expect(panelSource).toContain("saveContextWindow");
     expect(panelSource).toContain("config-asset-inspector");
     const markup = renderToStaticMarkup(
       <ConfigProviderRegistryPanel {...panelProps([])} />,
@@ -446,8 +460,10 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(errorMarkup).toContain("API Key 更新失败");
   });
   it("keeps the latest safe discovery failure on the selected Provider diagnostics", () => {
-    expect(panelSource).toContain("最近失败原因");
-    expect(panelSource).toContain("请求超时");
+    expect(configCopyRaw).toContain("最近失败原因");
+    expect(configCopyRaw).toContain("请求超时");
+    expect(panelSource).toContain("factLastFailure");
+    expect(panelSource).toContain("discoveryErrTimeout");
     expect(panelSource).toContain("function DiagnosticsTab");
     const timedOut = { ...provider([]), status: "discovery_failed" as const, lastErrorType: "timeout" };
     const markup = renderToStaticMarkup(

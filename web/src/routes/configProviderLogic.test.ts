@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ConfigCatalogModel, ConfigModelCatalog, ConfigProviderOption } from "../api/types";
+import { CONFIG_COPY } from "./config/configCopy";
 import {
   deriveProviderMergeCandidate,
   buildProviderWizardDraft,
@@ -430,7 +431,7 @@ describe("configProviderLogic", () => {
       lastSuccessAt: "",
       refreshDue: false,
       models: [{ ...catalogModel("dash/qwen"), availability: "observed" }],
-    });
+    }, CONFIG_COPY.zh);
     expect(checklist.find((item) => item.id === "credential")?.done).toBe(true);
     expect(checklist.find((item) => item.id === "connection")?.done).toBe(true);
     expect(checklist.find((item) => item.id === "pin")?.done).toBe(false);
@@ -472,19 +473,19 @@ describe("configProviderLogic", () => {
     const [provider] = deriveProviderRegistryRows(providers, catalog);
     const pinned = catalogModel("relay_a/pinned");
 
-    expect(deriveProviderModelActionState(provider, pinned, 0, false)).toEqual({
+    expect(deriveProviderModelActionState(provider, pinned, 0, false, CONFIG_COPY.zh)).toEqual({
       kind: "unpin",
       label: "取消固定",
       disabled: false,
       reason: "",
     });
-    expect(deriveProviderModelActionState(provider, pinned, 0, true)).toEqual({
+    expect(deriveProviderModelActionState(provider, pinned, 0, true, CONFIG_COPY.zh)).toEqual({
       kind: "unpin",
       label: "取消固定",
       disabled: true,
       reason: "当前配置操作不可用",
     });
-    expect(deriveProviderModelActionState(provider, pinned, 3, false)).toEqual({
+    expect(deriveProviderModelActionState(provider, pinned, 3, false, CONFIG_COPY.zh)).toEqual({
       kind: "in_use",
       label: "使用中",
       referenceCount: 3,
@@ -494,6 +495,7 @@ describe("configProviderLogic", () => {
       { ...pinned, availability: "observed" },
       0,
       false,
+      CONFIG_COPY.zh,
     )).toEqual({
       kind: "pin",
       label: "固定到配置",
@@ -505,6 +507,7 @@ describe("configProviderLogic", () => {
       { ...pinned, availability: "unknown" },
       0,
       false,
+      CONFIG_COPY.zh,
     )).toEqual({
       kind: "pin",
       label: "固定到配置",
@@ -516,6 +519,7 @@ describe("configProviderLogic", () => {
       { ...pinned, availability: "disabled" },
       0,
       false,
+      CONFIG_COPY.zh,
     )).toEqual({ kind: "unavailable", label: "不可用" });
   });
 

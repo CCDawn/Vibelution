@@ -1,6 +1,8 @@
 /**
  * Pure helpers for Config provider draft actions (pin / quick-setup errors).
  * Network + React state stay on ConfigRoute.
+ * Wave 4: user-facing pin messages are template-driven; zh/en strings live in
+ * configCopy.ts and are passed in as `labels`.
  */
 
 export function isProviderModelAlreadyPinnedErrorMessage(message: string): boolean {
@@ -31,40 +33,63 @@ export function classifyProviderQuickSetupErrorKind(message: string): ProviderQu
   return "discovery";
 }
 
+/** Copy templates used by the provider pin message formatters (subset of ConfigCopy). */
+export type ProviderPinCopyLabels = {
+  pinBusyProgressTemplate: string;
+  pinBusyOneTemplate: string;
+  pinBusyManyTemplate: string;
+  pinSuccessNewTemplate: string;
+  pinSuccessSkippedTemplate: string;
+  pinSuccessFallback: string;
+  pinSuccessListJoiner: string;
+  pinSuccessSuffix: string;
+  pinErrorPartialTemplate: string;
+  pinErrorTemplate: string;
+};
+
+function fillTemplate(template: string, vars: Record<string, string | number>): string {
+  return template.replace(/\{(\w+)\}/g, (match, key: string) =>
+    Object.prototype.hasOwnProperty.call(vars, key) ? String(vars[key]) : match,
+  );
+}
+
 export function formatProviderPinBusyMessage(options: {
   modelCount: number;
   firstModelRef?: string;
   completed?: number;
   total?: number;
+  labels: ProviderPinCopyLabels;
 }): string {
-  const { modelCount, firstModelRef, completed, total } = options;
+  const { modelCount, firstModelRef, completed, total, labels } = options;
   if (typeof completed === "number" && typeof total === "number" && total > 1) {
-    return `正在固定模型…（${completed}/${total}）`;
+    return fillTemplate(labels.pinBusyProgressTemplate, { completed, total });
   }
   if (modelCount === 1 && firstModelRef) {
-    return `正在固定 ${firstModelRef}…`;
+    return fillTemplate(labels.pinBusyOneTemplate, { ref: firstModelRef });
   }
-  return `正在固定 ${modelCount} 个模型…`;
+  return fillTemplate(labels.pinBusyManyTemplate, { count: modelCount });
 }
 
 export function formatProviderPinSuccessMessage(options: {
   pinnedCount: number;
   skippedTotal: number;
+  labels: ProviderPinCopyLabels;
 }): string {
-  const { pinnedCount, skippedTotal } = options;
+  const { pinnedCount, skippedTotal, labels } = options;
   const parts = [
-    pinnedCount > 0 ? `新固定 ${pinnedCount} 个` : null,
-    skippedTotal > 0 ? `跳过已存在 ${skippedTotal} 个` : null,
+    pinnedCount > 0 ? fillTemplate(labels.pinSuccessNewTemplate, { count: pinnedCount }) : null,
+    skippedTotal > 0 ? fillTemplate(labels.pinSuccessSkippedTemplate, { count: skippedTotal }) : null,
   ].filter(Boolean);
-  return `${parts.join("，") || "固定完成"}。已切换到「已固定」列表；请点右上角「保存到外部配置」。`;
+  return `${parts.join(labels.pinSuccessListJoiner) || labels.pinSuccessFallback}${labels.pinSuccessSuffix}`;
 }
 
 export function formatProviderPinErrorMessage(options: {
   pinnedCount: number;
   errorMessage: string;
+  labels: ProviderPinCopyLabels;
 }): string {
-  const { pinnedCount, errorMessage } = options;
+  const { pinnedCount, errorMessage, labels } = options;
   return pinnedCount > 0
-    ? `已固定 ${pinnedCount} 个后失败：${errorMessage}`
-    : `固定失败：${errorMessage}`;
+    ? fillTemplate(labels.pinErrorPartialTemplate, { count: pinnedCount, message: errorMessage })
+    : fillTemplate(labels.pinErrorTemplate, { message: errorMessage });
 }

@@ -1,25 +1,31 @@
 /**
  * Settings-align wave 3 — provider/model domain state machine for the
  * settings models page, extracted verbatim from ConfigRoute.tsx (zero
- * behavior changes): provider registry/route/credential UI state, model
- * editor drafts + discovery, model center summaries, and their handlers.
+ * behavior changes): provider registry/route/credential UI state and their
+ * handlers, model connection tests, and capability checks.
  * The route shell keeps quick-setup orchestration, formal apply,
  * navigation, and the composition wrappers that combine this domain with
  * the provider draft-write actions (useConfigProviderDraftActions).
+ *
+ * Wave 4: the unreachable v1 model-editor leftovers were removed —
+ * handleSaveModel / handleDiscoverModels / handleDeleteModel /
+ * applyProviderTemplate / applyProviderVendor / applyModelScenario /
+ * applyDiscoveredModel / focusModelEditor / handleTestSelectedLibraryModel /
+ * keyStateLabel / modelCenterSummary / modelCenterRows /
+ * modelCapabilityIssueCount / modelDiscoveryAvailable / canSubmitModelEditor,
+ * plus the editor draft state (modelEditor / modelEditorError /
+ * selectedModelTestId / discoveredModels / selectedDiscoveredModelId /
+ * selectedProviderVendorId / modelEditorExpanded) and the
+ * syncModelEditors reset plumbing that only those consumers ever read.
  */
 
 import { useEffect, useMemo, useReducer, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 
 import {
-  addDraftModel,
   checkDraftModelCapabilities,
-  deleteDraftModel,
-  discoverConfigModels,
   testConfigLlm,
-  updateDraftModel,
 } from "../../api/config";
 import type {
-  ConfigDiscoveredModel,
   ConfigDraftMeta,
   ConfigLlmTestResult,
   ConfigWorkspace,
@@ -31,32 +37,8 @@ import {
   type ProviderRoutePreview,
 } from "./useConfigProviderDraftActions";
 import type { ConfigCopy } from "./configCopy";
-import {
-  buildModelDetailsDraft,
-  buildModelDetailsPayload,
-  buildProviderDraft,
-  buildProviderPayload,
-  emptyModelDetailsDraft,
-  emptyModelEditorState,
-  emptyProviderDraft,
-  readableErrorMessage,
-  type ModelEditorState,
-} from "./configEditorModel";
-import {
-  asRecord,
-  canDiscoverModelsForProvider,
-  countModelCenterHealthIssues,
-  defaultModelApiKeyEnv,
-  deriveModelCenterInventoryRows,
-  deriveModelCenterSummary,
-  groupProviderPresetsByVendor,
-  modelLibraryIdFromParts,
-  resolveImageInputCapabilityStatus,
-  selectModelScenarioProviderPresetId,
-  type ModelScenarioId,
-  type PublicConfigShape,
-  uniqueModelLibraryId,
-} from "../configRouteLogic";
+import { formatConfigCopy } from "./configCopy";
+import { resolveImageInputCapabilityStatus, type PublicConfigShape } from "../configRouteLogic";
 import {
   deriveProviderRegistryRows,
   initialProviderWizardState,
@@ -76,11 +58,7 @@ type ProviderDraftRequestSnapshot = {
 
 export type UseConfigProviderModelDomainOptions = {
   workspaceQuery: { refetch: () => Promise<{ data?: ConfigWorkspace }> };
-  workspace: ConfigWorkspace | null | undefined;
-  modelOptions: ConfigWorkspace["modelOptions"];
   providerRows: ReturnType<typeof deriveProviderRegistryRows>;
-  providerPresetOptions: ConfigWorkspace["providerPresetOptions"];
-  draftConfig: PublicConfigShape | null;
   draftMeta: ConfigDraftMeta;
   baseHash: string;
   structuredActionsDisabled: boolean;
@@ -92,18 +70,13 @@ export type UseConfigProviderModelDomainOptions = {
   readableErrorMessage: (error: unknown) => string;
   handleApply: (pendingLabel?: string, draftOverride?: ConfigApplyDraftOverride) => Promise<boolean>;
   providerDraftRequestRef: MutableRefObject<ProviderDraftRequestSnapshot | null>;
-  modelEditorRef: MutableRefObject<HTMLDivElement | null>;
   copy: ConfigCopy;
 };
 
 export function useConfigProviderModelDomain(options: UseConfigProviderModelDomainOptions) {
   const {
     workspaceQuery,
-    workspace,
-    modelOptions,
     providerRows,
-    providerPresetOptions,
-    draftConfig,
     draftMeta,
     baseHash,
     structuredActionsDisabled,
@@ -112,18 +85,11 @@ export function useConfigProviderModelDomain(options: UseConfigProviderModelDoma
     markError,
     requireDraft,
     syncWorkspace,
+    readableErrorMessage,
     handleApply,
     providerDraftRequestRef,
-    modelEditorRef,
     copy,
   } = options;
-  const [modelEditor, setModelEditor] = useState<ModelEditorState>(emptyModelEditorState());
-  const [selectedModelTestId, setSelectedModelTestId] = useState("");
-  const [modelEditorError, setModelEditorError] = useState("");
-  const [modelDiscoveryError, setModelDiscoveryError] = useState("");
-  const [discoveredModels, setDiscoveredModels] = useState<ConfigDiscoveredModel[]>([]);
-  const [selectedDiscoveredModelId, setSelectedDiscoveredModelId] = useState("");
-  const [selectedProviderVendorId, setSelectedProviderVendorId] = useState("");
   const [selectedProviderId, setSelectedProviderId] = useState("");
   const [selectedProviderTab, setSelectedProviderTab] = useState<ConfigProviderRegistryTab>("connection");
 
@@ -136,7 +102,6 @@ export function useConfigProviderModelDomain(options: UseConfigProviderModelDoma
   const [providerCredentialValue, setProviderCredentialValue] = useState("");
   const [providerActionError, setProviderActionError] = useState("");
   const [providerActionFeedback, setProviderActionFeedback] = useState<ProviderActionFeedback>(null);
-  const [modelEditorExpanded, setModelEditorExpanded] = useState(false);
 
   const liveReferenceCountByModelRef = useMemo(
     () => Object.fromEntries(
@@ -146,45 +111,6 @@ export function useConfigProviderModelDomain(options: UseConfigProviderModelDoma
     ),
     [routePreview],
   );
-  const providerVendorGroups = useMemo(() => groupProviderPresetsByVendor(providerPresetOptions), [providerPresetOptions]);
-  const selectedProviderVendorTemplates = useMemo(
-    () => providerVendorGroups.find((group) => group.id === selectedProviderVendorId)?.templates ?? [],
-    [providerVendorGroups, selectedProviderVendorId],
-  );
-  const modelScenarioOptions = useMemo(
-    () =>
-      [
-        { id: "chat" as ModelScenarioId, label: copy.modelScenarioChat },
-        { id: "relay" as ModelScenarioId, label: copy.modelScenarioRelay },
-        { id: "image" as ModelScenarioId, label: copy.modelScenarioImage },
-        { id: "local" as ModelScenarioId, label: copy.modelScenarioLocal },
-        { id: "manual" as ModelScenarioId, label: copy.modelScenarioManual },
-      ],
-    [copy],
-  );
-  const modelCenterSummary = useMemo(
-    () =>
-      deriveModelCenterSummary({
-        modelOptions,
-        schemaVersion: workspace?.schemaVersion,
-      }),
-    [modelOptions, workspace?.schemaVersion],
-  );
-  const modelCenterRows = useMemo(() => deriveModelCenterInventoryRows(modelOptions), [modelOptions]);
-  const modelOptionsById = useMemo(() => new Map(modelOptions.map((option) => [option.model_id, option])), [modelOptions]);
-  useEffect(() => {
-    if (!modelOptions.length) {
-      if (selectedModelTestId) {
-        setSelectedModelTestId("");
-      }
-      return;
-    }
-    if (!selectedModelTestId || !modelOptionsById.has(selectedModelTestId)) {
-      setSelectedModelTestId(modelOptions[0]?.model_id ?? "");
-    }
-  }, [modelOptions, modelOptionsById, selectedModelTestId]);
-  const modelCapabilityIssueCount = countModelCenterHealthIssues(modelCenterRows);
-  const modelDiscoveryAvailable = canDiscoverModelsForProvider(modelEditor.provider);
 
   useEffect(() => {
     if (!providerRows.length) {
@@ -204,18 +130,16 @@ export function useConfigProviderModelDomain(options: UseConfigProviderModelDoma
   }, [providerCredentialEditId, selectedProviderId]);
 
   const credentialProvider = providerRows.find((row) => row.providerId === providerCredentialEditId);
-  const modelEditorRequiredFieldsReady = Boolean(modelEditor.model.trim() && modelEditor.provider.base_url.trim());
-  const canSubmitModelEditor = !structuredActionsDisabled && modelEditorRequiredFieldsReady;
 
   async function handleTestProviderModel(modelRef: string) {
     if (structuredActionsDisabled) return;
-    setBusyAction(`正在测试 ${modelRef}…`);
+    setBusyAction(formatConfigCopy(copy.testModelBusyTemplate, { ref: modelRef }));
     setProviderActionError("");
     setProviderActionFeedback({
       kind: "discover",
       providerId: modelRef.includes("/") ? modelRef.slice(0, modelRef.indexOf("/")) : selectedProviderId,
       phase: "busy",
-      message: `正在真实调用测试 ${modelRef}…`,
+      message: formatConfigCopy(copy.testRealCallTemplate, { ref: modelRef }),
     });
     try {
       const result = await testConfigLlm({
@@ -232,10 +156,12 @@ export function useConfigProviderModelDomain(options: UseConfigProviderModelDoma
         providerId: result.provider_id || (modelRef.includes("/") ? modelRef.slice(0, modelRef.indexOf("/")) : selectedProviderId),
         phase: result.ok ? "success" : "error",
         message: result.ok
-          ? `${modelRef} 可调用${result.verification_persisted ? "（已写入真实调用状态）" : ""}`
-          : `${modelRef} 调用失败：${result.message || result.verification_error_type || "unknown"}${
-              result.verification_http_status ? ` · HTTP ${result.verification_http_status}` : ""
-            }`,
+          ? formatConfigCopy(copy.testCallOkTemplate, { ref: modelRef })
+            + (result.verification_persisted ? copy.testCallPersistedSuffix : "")
+          : formatConfigCopy(copy.testCallFailedTemplate, {
+              ref: modelRef,
+              reason: result.message || result.verification_error_type || "unknown",
+            }) + (result.verification_http_status ? ` · HTTP ${result.verification_http_status}` : ""),
       });
       // Reload catalog so「真实调用」column picks up persisted verification (draft or saved).
       const refreshed = await workspaceQuery.refetch();
@@ -251,7 +177,7 @@ export function useConfigProviderModelDomain(options: UseConfigProviderModelDoma
         kind: "discover",
         providerId: modelRef.includes("/") ? modelRef.slice(0, modelRef.indexOf("/")) : selectedProviderId,
         phase: "error",
-        message: `${modelRef} 测试请求失败：${message}`,
+        message: formatConfigCopy(copy.testRequestFailedTemplate, { ref: modelRef, message }),
       });
       markError(error);
     } finally {
@@ -273,245 +199,6 @@ export function useConfigProviderModelDomain(options: UseConfigProviderModelDoma
     return handleApply(pendingLabel, snapshotDraftOverride());
   }
 
-  function applyProviderTemplate(templateId: string) {
-    setModelEditorExpanded(true);
-    setModelEditorError("");
-    setModelDiscoveryError("");
-    setDiscoveredModels([]);
-    setSelectedDiscoveredModelId("");
-    const template = providerPresetOptions.find((item) => item.provider_preset_id === templateId);
-    if (!template) {
-      setModelEditor((current) => ({ ...current, provider_template_id: templateId }));
-      return;
-    }
-    const templateModel = asRecord(template.default_model);
-    const templateDetails = {
-      ...buildModelDetailsDraft(templateModel),
-      supports_image_input: "unknown" as const,
-    };
-    setSelectedProviderVendorId(template.vendor_id);
-    setModelEditor({
-      mode: "create",
-      preset_id: "",
-      provider_template_id: templateId,
-      model_id: "",
-      label: "",
-      model: "",
-      api_key_env: "",
-      api_key: "",
-      clear_api_key: false,
-      provider: buildProviderDraft(asRecord(template.provider)),
-      details: templateDetails,
-    });
-  }
-
-  function applyProviderVendor(vendorId: string) {
-    setSelectedProviderVendorId(vendorId);
-    const template = providerVendorGroups.find((group) => group.id === vendorId)?.templates[0];
-    if (template) {
-      applyProviderTemplate(template.provider_preset_id);
-      return;
-    }
-    setModelEditor((current) => ({ ...current, provider_template_id: "" }));
-  }
-
-  function applyModelScenario(scenario: ModelScenarioId) {
-    const templateId = selectModelScenarioProviderPresetId(scenario, providerPresetOptions);
-    if (templateId) {
-      applyProviderTemplate(templateId);
-      return;
-    }
-    setModelEditorExpanded(true);
-    setModelEditorError("");
-    setModelDiscoveryError("");
-    setDiscoveredModels([]);
-    setSelectedDiscoveredModelId("");
-    setSelectedProviderVendorId("");
-    setModelEditor({
-      ...emptyModelEditorState(),
-      provider: {
-        ...emptyProviderDraft(),
-        kind: scenario === "local" ? "local" : scenario === "relay" || scenario === "image" ? "relay" : "openai_compatible",
-      },
-      details: {
-        ...emptyModelDetailsDraft(),
-        streaming: scenario !== "image",
-        tool_calling_mode: scenario === "image" ? "disabled" : "auto",
-      },
-    });
-  }
-
-  function applyDiscoveredModel(model: ConfigDiscoveredModel) {
-    const modelName = model.id;
-    const nextLabel = model.label || modelName;
-    const existingIds = modelOptions.map((option) => option.model_id);
-    const nextModelId = modelLibraryIdFromParts(nextLabel, modelName);
-    const uniqueModelId = uniqueModelLibraryId(nextModelId, existingIds);
-    setSelectedDiscoveredModelId(modelName);
-    setModelEditor((current) => ({
-      ...current,
-      model_id: current.mode === "edit" ? current.model_id : uniqueModelId,
-      label: current.mode === "create" ? nextLabel : current.label.trim() || nextLabel,
-      model: modelName,
-      api_key_env: current.mode === "create" ? defaultModelApiKeyEnv(uniqueModelId) : current.api_key_env.trim() || defaultModelApiKeyEnv(uniqueModelId),
-      provider: {
-        ...current.provider,
-        context_window:
-          !current.provider.context_window.trim() && typeof model.contextWindow === "number"
-            ? String(model.contextWindow)
-            : current.provider.context_window,
-      },
-    }));
-  }
-
-  async function handleDiscoverModels() {
-    if (structuredActionsDisabled || !modelDiscoveryAvailable) {
-      if (!modelDiscoveryAvailable) {
-        setModelDiscoveryError(copy.discoveryUnavailable);
-      }
-      return;
-    }
-    setBusyAction(copy.discoveryPending);
-    setModelDiscoveryError("");
-    setDiscoveredModels([]);
-    try {
-      const discoveryModelId =
-        modelEditor.mode === "edit"
-          ? modelEditor.model_id
-          : modelEditor.model_id.trim() ||
-            uniqueModelLibraryId(modelLibraryIdFromParts(modelEditor.label || modelEditor.model, modelEditor.model), modelOptions.map((option) => option.model_id));
-      const discoveryApiKeyEnv = modelEditor.api_key_env.trim() || defaultModelApiKeyEnv(discoveryModelId);
-      const response = await discoverConfigModels({
-        publicConfig: requireDraft(),
-        draftMeta,
-        baseHash,
-        provider: buildProviderPayload(modelEditor.provider),
-        modelId: discoveryModelId,
-        apiKeyEnv: discoveryApiKeyEnv,
-        apiKey: modelEditor.api_key,
-      });
-      setDiscoveredModels(response.models);
-      if (response.models.length) {
-        applyDiscoveredModel(response.models[0]);
-      } else {
-        setModelDiscoveryError(copy.discoveryEmpty);
-      }
-    } catch (error) {
-      setModelDiscoveryError(markError(error));
-    } finally {
-      setBusyAction("");
-    }
-  }
-
-  async function handleSaveModel() {
-    if (structuredActionsDisabled) {
-      return;
-    }
-    if (!modelEditorRequiredFieldsReady) {
-      setModelEditorError(copy.modelRequiredFieldsMissing);
-      setModelEditorExpanded(true);
-      return;
-    }
-    setBusyAction(copy.modelSavePending);
-    setModelEditorError("");
-    try {
-      const resolvedModelId =
-        modelEditor.mode === "edit"
-          ? modelEditor.model_id
-          : modelEditor.model_id.trim() ||
-            uniqueModelLibraryId(modelLibraryIdFromParts(modelEditor.label || modelEditor.model, modelEditor.model), modelOptions.map((option) => option.model_id));
-      const resolvedApiKeyEnv = modelEditor.api_key_env.trim() || defaultModelApiKeyEnv(resolvedModelId);
-      const draftModelBody = {
-        publicConfig: requireDraft(),
-        draftMeta,
-        baseHash,
-        presetId: "",
-        modelId: resolvedModelId,
-        provider: buildProviderPayload(modelEditor.provider),
-        model: modelEditor.model,
-        label: modelEditor.label,
-        details: buildModelDetailsPayload(modelEditor.details),
-        apiKeyEnv: resolvedApiKeyEnv,
-        apiKey: modelEditor.api_key,
-        clearApiKey: modelEditor.clear_api_key,
-      };
-      const response = modelEditor.mode === "edit"
-        ? await updateDraftModel(draftModelBody)
-        : await addDraftModel(draftModelBody);
-      syncWorkspace(response, "success", { resetBase: false });
-      setModelEditorExpanded(false);
-    } catch (error) {
-      setModelEditorError(markError(error));
-      setModelEditorExpanded(true);
-    } finally {
-      setBusyAction("");
-    }
-  }
-
-  async function handleDeleteModel(modelId: string) {
-    if (structuredActionsDisabled) {
-      return;
-    }
-    if (typeof window !== "undefined" && !window.confirm(copy.deleteModelConfirm)) {
-      return;
-    }
-    setBusyAction(copy.modelSavePending);
-    try {
-      const response = await deleteDraftModel({
-        publicConfig: requireDraft(),
-        draftMeta,
-        baseHash,
-        modelId,
-      });
-      syncWorkspace(response, "success", { resetBase: false });
-    } catch (error) {
-      markError(error);
-    } finally {
-      setBusyAction("");
-    }
-  }
-
-  function focusModelEditor() {
-    window.setTimeout(() => {
-      modelEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      const firstFocusableControl = modelEditorRef.current?.querySelector<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement>(
-        [
-          'button[data-vui="select-trigger"]:not([data-disabled="true"]):not([disabled])',
-          'input:not([disabled]):not([type="hidden"])',
-          "textarea:not([disabled])",
-        ].join(", "),
-      );
-      firstFocusableControl?.focus({ preventScroll: true });
-    }, 0);
-  }
-
-  async function handleTestSelectedLibraryModel() {
-    if (structuredActionsDisabled) {
-      return;
-    }
-    if (!selectedModelTestId) {
-      setNotice({ tone: "error", text: copy.modelTestRequired });
-      return;
-    }
-    setBusyAction(copy.testPending);
-    try {
-      const result = await testConfigLlm({
-        publicConfig: requireDraft(),
-        draftMeta,
-        baseHash,
-        modelId: selectedModelTestId,
-      });
-      setNotice({
-        tone: result.ok ? "success" : "error",
-        text: formatTestNotice(result),
-      });
-    } catch (error) {
-      markError(error);
-    } finally {
-      setBusyAction("");
-    }
-  }
-
   async function handleCheckModelImageCapabilities(modelIds: string[] = []) {
     if (structuredActionsDisabled) {
       return;
@@ -529,19 +216,6 @@ export function useConfigProviderModelDomain(options: UseConfigProviderModelDoma
       markError(error);
     } finally {
       setBusyAction("");
-    }
-  }
-
-  function keyStateLabel(state: string) {
-    switch (state) {
-      case "pending":
-        return copy.keyPending;
-      case "clear_pending":
-        return copy.keyClearPending;
-      case "configured":
-        return copy.keyConfigured;
-      default:
-        return copy.keyMissing;
     }
   }
 
@@ -596,18 +270,6 @@ export function useConfigProviderModelDomain(options: UseConfigProviderModelDoma
     }
   }
 
-  // Workspace sync must reset the model editors alongside the rest of the snapshot;
-  // syncWorkspace (route) invokes this via modelEditorsSyncRef after the hook mounts.
-  function syncModelEditors(workspace: ConfigWorkspace) {
-    setModelEditor(emptyModelEditorState());
-    setSelectedModelTestId((current) =>
-      current && workspace.modelOptions.some((option) => option.model_id === current)
-        ? current
-        : workspace.modelOptions[0]?.model_id ?? "",
-    );
-    setModelEditorError("");
-  }
-
   return {
     // state read by the route shell
     selectedProviderId,
@@ -637,6 +299,5 @@ export function useConfigProviderModelDomain(options: UseConfigProviderModelDoma
     persistImmediateDraft,
     handleTestProviderModel,
     handleCheckModelImageCapabilities,
-    syncModelEditors,
   };
 }

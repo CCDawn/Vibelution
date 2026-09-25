@@ -4,7 +4,13 @@ import { describe, expect, it } from "vitest";
 
 import type { ConfigProviderPresetOption } from "../api/types";
 import { ConfigQuickSetupPanel, templateToProvider, type ConfigQuickSetupPanelProps } from "./ConfigQuickSetupPanel";
-import panelSource from "./ConfigQuickSetupPanel.tsx?raw";
+import panelSourceRaw from "./ConfigQuickSetupPanel.tsx?raw";
+import configCopyRaw from "./config/configCopy.ts?raw";
+import { CONFIG_COPY } from "./config/configCopy";
+
+/** Panel source + shared bilingual copy table (wave 4): UI strings live in configCopy. */
+const panelSource = `${panelSourceRaw}
+${configCopyRaw}`;
 import styles from "./ConfigQuickSetupPanel.styles";
 import { initialProviderQuickSetupState, initialProviderWizardState } from "./configProviderLogic";
 
@@ -29,6 +35,7 @@ const templates: ConfigProviderPresetOption[] = [{
 
 function props(overrides: Partial<ConfigQuickSetupPanelProps> = {}): ConfigQuickSetupPanelProps {
   return {
+    copy: CONFIG_COPY.zh,
     state: initialProviderQuickSetupState(),
     templates,
     credentialValue: "",

@@ -14,6 +14,7 @@ import {
   VButton,
   VCheckbox,
   VChip,
+  VErrorSummary,
   VInput,
   VSettingsGroupCard,
   VSettingsRow,
@@ -78,6 +79,8 @@ type ConfigSectionEditorProps = {
   onThemeBackgroundImageUpload: (file: File) => Promise<AvatarImageUploadResponse | null>;
   /** 搜索深链的瞬态高亮字段（绝对配置路径）；仅该路径的行渲染高亮环。 */
   highlightFieldPath?: string;
+  /** 分区保存失败的行内错误（wave 4）：落在该分区头部，不进全局 notice strip。 */
+  saveError?: string;
 };
 
 export type AvatarImageUploadResponse = {
@@ -167,6 +170,7 @@ export function ConfigSectionEditor({
   onAvatarImageUpload,
   onThemeBackgroundImageUpload,
   highlightFieldPath = "",
+  saveError = "",
 }: ConfigSectionEditorProps) {
   const sectionExpanded = uiState.expanded;
   const editing = uiState.editing;
@@ -242,9 +246,9 @@ export function ConfigSectionEditor({
 
   async function beginAvatarCrop(file: File, absolutePath: string) {
     if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
-      throw new Error("头像只支持 PNG、JPG 或 WebP 图片。");
+      throw new Error(copy.avatarTypeError);
     }
-    const image = await loadImageForCrop(file);
+    const image = await loadImageForCrop(file, copy);
     setAvatarCropError("");
     setAvatarCrop((current) => {
       if (current?.objectUrl) {
@@ -269,7 +273,7 @@ export function ConfigSectionEditor({
     }
     setUploadingImagePath(avatarCrop.absolutePath);
     try {
-      const croppedFile = await createCroppedAvatarFile(avatarCrop);
+      const croppedFile = await createCroppedAvatarFile(avatarCrop, copy);
       const result = await onAvatarImageUpload(croppedFile);
       if (result?.path) {
         updateSectionDraft(avatarCrop.absolutePath, result.path);
@@ -415,7 +419,7 @@ export function ConfigSectionEditor({
                   >
                     {optionPreviewUrl ? <img src={optionPreviewUrl} alt="" /> : <ImageIcon size={14} />}
                     <span>{option.label}</span>
-                    {active ? <em>{lang === "zh" ? "当前" : "Current"}</em> : null}
+                    {active ? <em>{copy.currentBadge}</em> : null}
                   </VButton>
                 );
               })}
@@ -1300,12 +1304,30 @@ export function ConfigSectionEditor({
           </div>
         </div>
       </div>
+      {saveError ? (
+        <div className={styles.sectionSaveError} data-section-save-error="true" role="alert">
+          <VErrorSummary
+            tone="error"
+            summary={saveError}
+            label={copy.sectionErrorPrefix}
+            details={copy.sectionErrorInline}
+          />
+        </div>
+      ) : null}
       {sectionExpanded ? renderNode(editing ? draftValue : value, section.path, editing ? "edit" : "view") : null}
     </VSurface>
   );
 }
 
-function loadImageForCrop(file: File): Promise<{ objectUrl: string; width: number; height: number }> {
+/** Copy labels for avatar crop failures (subset of ConfigCopy). */
+type AvatarCropErrorLabels = {
+  avatarReadError: string;
+  avatarCropReadError: string;
+  avatarCropUnsupported: string;
+  avatarCropFailed: string;
+};
+
+function loadImageForCrop(file: File, labels: AvatarCropErrorLabels): Promise<{ objectUrl: string; width: number; height: number }> {
   return new Promise((resolve, reject) => {
     const objectUrl = URL.createObjectURL(file);
     const image = new Image();
@@ -1314,29 +1336,29 @@ function loadImageForCrop(file: File): Promise<{ objectUrl: string; width: numbe
     };
     image.onerror = () => {
       URL.revokeObjectURL(objectUrl);
-      reject(new Error("无法读取这张图片。"));
+      reject(new Error(labels.avatarReadError));
     };
     image.src = objectUrl;
   });
 }
 
-function loadImageElement(src: string): Promise<HTMLImageElement> {
+function loadImageElement(src: string, labels: AvatarCropErrorLabels): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("无法读取裁剪后的图片。"));
+    image.onerror = () => reject(new Error(labels.avatarCropReadError));
     image.src = src;
   });
 }
 
-async function createCroppedAvatarFile(draft: AvatarCropDraft): Promise<File> {
-  const image = await loadImageElement(draft.objectUrl);
+async function createCroppedAvatarFile(draft: AvatarCropDraft, labels: AvatarCropErrorLabels): Promise<File> {
+  const image = await loadImageElement(draft.objectUrl, labels);
   const canvas = document.createElement("canvas");
   canvas.width = AVATAR_CROP_OUTPUT_SIZE;
   canvas.height = AVATAR_CROP_OUTPUT_SIZE;
   const context = canvas.getContext("2d");
   if (!context) {
-    throw new Error("当前浏览器无法裁剪图片。");
+    throw new Error(labels.avatarCropUnsupported);
   }
   const source = avatarCropSourceRect({
     imageWidth: draft.imageWidth,
@@ -1363,7 +1385,7 @@ async function createCroppedAvatarFile(draft: AvatarCropDraft): Promise<File> {
         resolve(result);
         return;
       }
-      reject(new Error("头像裁剪失败。"));
+      reject(new Error(labels.avatarCropFailed));
     }, "image/png");
   });
   const stem = draft.fileName.replace(/\.[^.]+$/, "").replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "avatar";
