@@ -185,9 +185,17 @@ def update_session_queued_turn(
     *,
     content: str | None = None,
     position: int | None = None,
+    status: str | None = None,
     lang: str = "",
 ) -> list[dict[str, Any]]:
-    """Edit one queued turn (text and/or queue position) without starting it."""
+    """Edit one queued turn (text, queue position, and/or pause state) without starting it.
+
+    ``status`` toggles one row between "queued" and "paused". Pausing requires a
+    "queued" row (a "blocked" row must go through the edit-retry path, and a
+    "starting" row is being sent). Resuming is only valid for a "paused" row and
+    re-queues it at the tail, so a resumed message cannot jump ahead of items
+    that were enqueued or steered while it was held.
+    """
 
     s = _service()
     lang = str(lang or "").strip() or s.get_web_language()
@@ -222,6 +230,34 @@ def update_session_queued_turn(
                     en="That queued message is being sent and cannot be edited; wait for it to go out, then send a corrected version.",
                 )
             )
+        requested_status = str(status or "").strip().lower() or None
+        if requested_status is not None and requested_status not in ("queued", "paused"):
+            raise s.SessionValidationError(
+                s.text_for(
+                    lang,
+                    zh="排队消息只能暂停或恢复。",
+                    en="A queued message can only be paused or resumed.",
+                )
+            )
+        current_status = str(row.get("status") or "queued")
+        if requested_status == "paused" and current_status != "queued":
+            # A "blocked" row must go through the edit-retry path; a "starting"
+            # row was already rejected above.
+            raise s.SessionValidationError(
+                s.text_for(
+                    lang,
+                    zh="发送失败的排队消息不能暂停；编辑后会自动重试。",
+                    en="A failed queued message cannot be paused; edit it to retry.",
+                )
+            )
+        if requested_status == "queued" and current_status != "paused":
+            raise s.SessionValidationError(
+                s.text_for(
+                    lang,
+                    zh="该排队消息没有暂停，无需恢复。",
+                    en="That queued message is not paused.",
+                )
+            )
         if content is not None:
             next_content = str(content or "").strip()
             if not next_content and not row["attachments"]:
@@ -233,12 +269,24 @@ def update_session_queued_turn(
                     )
                 )
             row["content"] = str(content or "")
-        # Editing a blocked turn is an explicit retry: it becomes drainable again.
-        row["status"] = "queued"
+        if requested_status == "paused":
+            row["status"] = "paused"
+        elif requested_status == "queued":
+            row["status"] = "queued"
+        elif current_status != "paused":
+            # Editing a blocked turn is an explicit retry: it becomes drainable
+            # again. Editing a paused turn keeps it paused.
+            row["status"] = "queued"
         row["lastError"] = ""
         row["updatedAt"] = s._now_timestamp()
         rows[index] = row
-        if position is not None:
+        if requested_status == "queued":
+            # Resume re-queues at the tail; an explicit position never rides
+            # along with a status flip.
+            if index != len(rows) - 1:
+                rows.pop(index)
+                rows.append(row)
+        elif position is not None:
             target = max(0, min(len(rows) - 1, int(position) - 1))
             if target != index:
                 rows.pop(index)

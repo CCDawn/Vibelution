@@ -704,6 +704,7 @@ class SessionQueuedTurnUpdatePayload(BaseModel):
 
     content: str | None = None
     position: int | None = Field(default=None, ge=1)
+    status: Literal["paused", "queued"] | None = None
 
 
 @router.get("/sessions/{session_id}/queued-turns")
@@ -723,6 +724,7 @@ def session_update_queued_turn(
             queued_turn_id,
             content=payload.content,
             position=payload.position,
+            status=payload.status,
         )
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
