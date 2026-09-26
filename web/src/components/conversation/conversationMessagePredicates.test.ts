@@ -6,6 +6,7 @@ import {
   isAgentInboxMessage,
   isCliAgentLifecycleMessage,
   isGroupRoomTranscriptMessage,
+  isHotRestartResumeMessage,
   isProviderFailureSummaryText,
   isRecoverySupersededPartial,
   isRuntimeNoticeMessage,
@@ -76,6 +77,25 @@ describe("conversationMessagePredicates", () => {
       role: "user",
       content: "not an assistant row",
       metadata: { kind: "session_recovery_resumed" },
+    }))).toBe(false);
+  });
+
+  it("flags system-authored hot-restart resume user rows from metadata", () => {
+    expect(isHotRestartResumeMessage(message({
+      role: "user",
+      content: "E2E-MOCK-SLOW-V1 重启自动恢复",
+      metadata: { kind: "hot_restart_resume", recoveredTurnId: "turn-1" },
+    }))).toBe(true);
+    // The original (human-authored) row keeps the same text but no resume kind.
+    expect(isHotRestartResumeMessage(message({
+      role: "user",
+      content: "E2E-MOCK-SLOW-V1 重启自动恢复",
+      metadata: { kind: "journal_user_message" },
+    }))).toBe(false);
+    expect(isHotRestartResumeMessage(message({
+      role: "assistant",
+      content: "not a user row",
+      metadata: { kind: "hot_restart_resume" },
     }))).toBe(false);
   });
 

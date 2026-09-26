@@ -7,12 +7,15 @@ session_recovery_resumed 状态行）：
   且 finishedAt 空 → 判定轮次被重启打断；
 - startup sweep 用 ``submit_session_message(turn_mode="hot_restart_resume",
   write_intent=False, client_submission_id="resume:{turn_id}")`` 整轮重发
-  （半截丢弃，LLM 流无断点，UI 不重复用户消息）；
+  （半截丢弃，LLM 流无断点）；重发的 user 行带 kind=hot_restart_resume，
+  journal 保留（跨重启重试链），前端显示层过滤、不重复上屏
+  （isHotRestartResumeMessage，与 recoverySuperseded 半截同一显示层契约）；
 - 恢复状态行走 EVENT_SESSION_RECOVERY_RESUMED（合成 turn ``session-recovery:{id}``），
   前端按 ``metadata.kind="session_recovery_resumed"`` 渲染成独立状态行
   （article.cliAgentLifecycleTurn 字面量类 + 文案「已从重启中恢复，继续执行」）；
-- 重发后轮次正常收口，时间线消息计数有界（实测口径含一条重复 user 行，
-  见 EXPECTED_THREAD_MESSAGES 注释的缺陷候选留档）。
+- 重发后轮次正常收口，时间线消息计数有界（无重复 user 行）。
+  注意：修复前实测口径含一条重复 user 行（缺陷候选，见 git 历史 4 行 pin）；
+  显示层过滤落地后收紧为 3（2026-09-26）。
 
 中断编排为什么是「进程树硬终止」而不是 launcher stop（2026-09-26 实测定案）：
 - 官方 launcher stop 是优雅车道：Electron retire 先走 graceful shutdown，后端
@@ -85,13 +88,13 @@ RESUMED_MAIN_CALL_POLL_SECONDS = 90.0
 RECOVERY_ROW_TIMEOUT_MS = 60_000
 RESUMED_TURN_CLOSE_TIMEOUT_MS = 420_000
 
-# 收口后的时间线计数（pin 实测口径，2026-09-26 三次运行稳定复现）：
-# 原始 user 行 1 + 重发轮 user 行 1（重复！）+ 恢复状态行 1 + 重发轮助手行 1 = 4。
-# 缺陷候选如实留档：09-25 档案契约称 hot_restart_resume + write_intent=False
-# 「UI 不重复用户消息」，实测时间线仍出现第二条相同 user 行（同文本、独立
-# row-key、三次运行稳定）。按车道 ⑦b 先例不落假闸门：计数按实测 pin，
-# 重复 user 行作为缺陷候选随任务汇报，待产品收口后本 pin 收紧为 3。
-EXPECTED_THREAD_MESSAGES = 4
+# 收口后的时间线计数（2026-09-26 产品收口后口径）：
+# 原始 user 行 1 + 恢复状态行 1 + 重发轮助手行 1 = 3。
+# 重发轮的 user 行（kind=hot_restart_resume，journal 保留）由前端显示层过滤
+# （isHotRestartResumeMessage），不再与原始 user 行重复上屏。修复前实测为
+# 4 行（第二条同文本 user 行、独立 row-key、三次运行稳定复现），显示层
+# 过滤落地后本 pin 收紧为 3。
+EXPECTED_THREAD_MESSAGES = 3
 
 # 与 startup_recovery._RECOVERY_BUSY_WORK_RUN_STATUSES 同口径（快照 active 判据）。
 INTERRUPTED_SNAPSHOT_STATUSES = {"queued", "running", "stopping", "paused"}
@@ -896,7 +899,7 @@ def test_restart_mid_stream_resumes_turn(
             f"恢复行数={recovery_row.count()}"
         )
         assert final_count == EXPECTED_THREAD_MESSAGES, (
-            f"收口后时间线计数漂移（重复 user 行缺陷候选的观测口径，见常量注释）: "
+            f"收口后时间线计数漂移（重发 user 行必须由显示层过滤，见常量注释）: "
             f"count={final_count} 预期={EXPECTED_THREAD_MESSAGES} 时间线尾部={texts[-400:]!r}"
         )
         # 无界膨胀闸门：重发链不得循环制造行（有界 + 恰一条恢复状态行）。
