@@ -78,7 +78,8 @@ export function ConversationFollowupQueueBar({
         {visibleItems.map((item, index) => {
           const editing = editingId === item.id;
           const paused = item.status === "paused";
-          const canTogglePause = Boolean(togglePause) && (item.status === "queued" || paused);
+          const systemReturn = item.kind === "task_notification" || item.kind === "subagent_message";
+          const canTogglePause = !systemReturn && Boolean(togglePause) && (item.status === "queued" || paused);
           return (
             <div
               key={item.id}
@@ -89,7 +90,7 @@ export function ConversationFollowupQueueBar({
                     ? `${styles.followupQueueRow} ${styles.followupQueueRowPaused}`
                     : styles.followupQueueRow
               }
-              draggable={!editing}
+              draggable={!editing && !systemReturn}
               onDragStart={() => {
                 dragFrom.current = index;
               }}
@@ -124,6 +125,13 @@ export function ConversationFollowupQueueBar({
                 />
               ) : (
                 <span className={styles.followupQueueRowMain}>
+                  {systemReturn ? (
+                    <span className={styles.followupQueueChip}>
+                      {item.kind === "subagent_message"
+                        ? (lang === "zh" ? "子对话" : "Child")
+                        : (lang === "zh" ? "后台" : "Background")}
+                    </span>
+                  ) : null}
                   <span className={styles.followupQueueRowText} title={item.text}>{item.text}</span>
                   {item.attachmentCount ? (
                     <span
@@ -196,7 +204,7 @@ export function ConversationFollowupQueueBar({
                         }}
                       />
                     ) : null}
-                    {onSteer ? (
+                    {onSteer && !systemReturn ? (
                       <VButton
                         density="compact"
                         variant="ghost"
@@ -207,17 +215,19 @@ export function ConversationFollowupQueueBar({
                         onPress={() => onSteer(item.id)}
                       />
                     ) : null}
-                    <VButton
-                      density="compact"
-                      variant="ghost"
-                      isIconOnly
-                      aria-label={editLabel}
-                      icon={<Pencil size={13} />}
-                      onPress={() => {
-                        setEditingId(item.id);
-                        setEditDraft(item.text);
-                      }}
-                    />
+                    {systemReturn ? null : (
+                      <VButton
+                        density="compact"
+                        variant="ghost"
+                        isIconOnly
+                        aria-label={editLabel}
+                        icon={<Pencil size={13} />}
+                        onPress={() => {
+                          setEditingId(item.id);
+                          setEditDraft(item.text);
+                        }}
+                      />
+                    )}
                     <VButton
                       density="compact"
                       variant="ghost"

@@ -444,7 +444,22 @@ def invoke_agent_llm_turn(
                         hooks.raise_if_stop()
                         if event.kind == "reasoning_delta" and event.text:
                             ui.stream_thought(event.text, done=False)
-                        elif event.kind in {"commentary_delta", "answer_delta"} and event.text:
+                        elif event.kind in {
+                            "commentary_delta",
+                            "answer_delta",
+                            # Tool-enabled chat routes decode content deltas as
+                            # interim text (the wire adapter stamps channel
+                            # "interim" whenever tools are still allowed). They
+                            # are the only visible-answer stream those routes
+                            # produce, so they must reach the UI streaming
+                            # surface like commentary/answer deltas do; the
+                            # authoritative final text still arrives via the
+                            # done=True terminal callback. Defect ⑦b: dropping
+                            # them left the responding stage unobservable on the
+                            # real streaming path (first_answer_delta only
+                            # fired at turn close).
+                            "interim_text_delta",
+                        } and event.text:
                             stream_response = getattr(ui, "stream_response", None)
                             if callable(stream_response):
                                 stream_response(event.text, done=False)
