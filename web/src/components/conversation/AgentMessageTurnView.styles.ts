@@ -2,7 +2,7 @@ const styles = {
   turnAvatar:
     "vui-components-conversationview turnAvatar mt-0.5 grid size-8 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--vui-control-muted)] text-[var(--fg-primary)] font-semibold ring-1 ring-inset ring-[var(--vui-border-strong)]",
   turnContent:
-    "vui-components-conversationview turnContent grid min-w-0 gap-[5px]",
+    "vui-components-conversationview turnContent grid min-w-0 gap-2",
   turnMeta:
     "vui-components-conversationview turnMeta inline-flex min-w-0 w-fit max-w-full flex-wrap items-center justify-start gap-x-2 gap-y-1 text-vui-xs leading-tight text-[var(--fg-tertiary)]",
   turnMetaActions:
@@ -10,7 +10,7 @@ const styles = {
   turnMetaIdentity:
     "vui-components-conversationview turnMetaIdentity inline-flex min-w-0 w-fit max-w-full items-center gap-2",
   turnSpeaker:
-    "vui-components-conversationview turnSpeaker min-w-0 max-w-full truncate text-vui-md font-semibold leading-tight text-[var(--fg-primary)] [overflow-wrap:anywhere]",
+    "vui-components-conversationview turnSpeaker min-w-0 max-w-full truncate text-vui-xs font-medium leading-tight text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
 } as const;
 
 export default styles;

@@ -13,7 +13,7 @@ const styles = {
   userMessageCollapseToggle:
     "vui-components-conversationview userMessageCollapseToggle mt-1 flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-left [font-size:var(--vui-type-caption-size)] text-[var(--fg-tertiary)] hover:text-[var(--fg-secondary)]",
   userMessageBody:
-    "vui-components-conversationview userMessageBody min-w-0 w-fit max-w-full justify-self-end whitespace-pre-wrap rounded-2xl border-0 bg-[var(--vui-control-muted)] px-3 py-2 text-left text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-primary)] shadow-none [overflow-wrap:anywhere] [&_.markdownBody]:max-w-full [&_.markdownBody]:whitespace-normal [&_.markdownBody]:break-words [&_.markdownBody]:[overflow-wrap:anywhere] [&_.inlineLink]:break-words [&_.inlineLink]:[overflow-wrap:anywhere]",
+    "vui-components-conversationview userMessageBody min-w-0 w-fit max-w-full justify-self-end whitespace-pre-wrap rounded-xl border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-4 py-3 text-left text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-primary)] shadow-none [overflow-wrap:anywhere] [&_.markdownBody]:max-w-full [&_.markdownBody]:whitespace-normal [&_.markdownBody]:break-words [&_.markdownBody]:[overflow-wrap:anywhere] [&_.inlineLink]:break-words [&_.inlineLink]:[overflow-wrap:anywhere]",
 } as const;
 
 export default styles;

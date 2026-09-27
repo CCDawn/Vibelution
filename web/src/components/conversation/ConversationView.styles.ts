@@ -39,15 +39,15 @@ const answerOnlyProcessShell = cv(
 const userMessageBubble = cv(
   "userMessageBody",
   readableMessageText,
-  "w-fit max-w-full justify-self-end rounded-2xl border-0 bg-[var(--vui-control-muted)] px-3 py-2 text-left text-[var(--fg-primary)] shadow-none",
+  "w-fit max-w-full justify-self-end rounded-xl border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-4 py-3 text-left text-[var(--fg-primary)] shadow-none",
 );
 const conversationComposerShell = cv(
   "composer",
-  "grid flex-none grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-t border-[color-mix(in_srgb,var(--border-soft)_82%,transparent)] !bg-[var(--vui-surface-panel)] px-[11px] py-[7px] pb-[9px] shadow-none",
+  "grid flex-none grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-t border-[color-mix(in_srgb,var(--border-soft)_82%,transparent)] !bg-[var(--vui-surface-panel)] px-3 py-2 shadow-none",
 );
 const conversationComposerCodexShell = cv(
   "composerCodex",
-  "mx-auto grid w-full max-w-[830px] min-w-0 flex-none overflow-hidden rounded-[20px] border border-[color-mix(in_srgb,var(--border-soft)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_96%,var(--vui-surface-workspace))] shadow-[0_8px_26px_color-mix(in_srgb,var(--fg-primary)_var(--vui-alpha-wash-faint),transparent)] max-[719px]:rounded-2xl",
+  "mx-auto grid w-full max-w-[830px] min-w-0 flex-none overflow-hidden rounded-xl border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] shadow-none focus-within:border-[var(--accent-cool)]",
 );
 const composerNativeFieldTargets =
   "[&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-[72px] [&_textarea]:max-h-[220px] [&_textarea]:resize-none [&_input]:w-full [&_select]:w-full [&_textarea]:w-full [@media(max-height:520px)]:[&_textarea]:min-h-[44px]";
@@ -559,13 +559,13 @@ backToBottomButton:
   markdownHeading:
     `vui-components-conversationview markdownHeading min-w-0 font-semibold leading-tight text-[var(--fg-primary)] ${readableMarkdownMeasure}`,
   markdownHeading1:
-    "vui-components-conversationview markdownHeading1 mb-2 mt-5 text-[1.12em]",
+    "vui-components-conversationview markdownHeading1 mb-3 mt-6 text-vui-xl",
   markdownHeading2:
-    "vui-components-conversationview markdownHeading2 mb-2 mt-4 text-[1.08em]",
+    "vui-components-conversationview markdownHeading2 mb-3 mt-5 text-vui-lg",
   markdownHeading3:
-    "vui-components-conversationview markdownHeading3 mb-1.5 mt-3 text-[1.04em]",
+    "vui-components-conversationview markdownHeading3 mb-2 mt-5 text-vui-md",
   markdownHeading4:
-    "vui-components-conversationview markdownHeading4 mb-1.5 mt-3 text-[1em]",
+    "vui-components-conversationview markdownHeading4 mb-2 mt-4 text-vui-sm",
   markdownHeadingactive:
     "vui-components-conversationview markdownHeadingactive min-w-0",
   markdownHeadinganswer:
@@ -1266,7 +1266,7 @@ timeline:
   turnAvatarImage:
     "vui-components-conversationview turnAvatarImage block h-full w-full rounded-[inherit] object-cover",
   turnContent:
-    "vui-components-conversationview turnContent grid min-w-0 gap-[5px]",
+    "vui-components-conversationview turnContent grid min-w-0 gap-2",
   turnEditBadge: `vui-components-conversationview turnEditBadge min-w-0 ${vuiOpaqueRowClass} p-2 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full bg-[var(--vui-control-muted)] px-2 text-vui-xs font-semibold leading-none text-[var(--fg-secondary)]`,
   turnEditing:
     "vui-components-conversationview turnEditing min-w-0 [&_.userMessageBody]:border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--vui-border-subtle))] [&_.userMessageBody]:bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),var(--vui-surface-panel))] [&_.userMessageBody]:ring-1 [&_.userMessageBody]:ring-inset [&_.userMessageBody]:ring-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint),transparent)]",
@@ -1343,7 +1343,7 @@ timeline:
   turnMetaIdentity:
     "vui-components-conversationview turnMetaIdentity flex min-w-0 items-center gap-2",
   turnSpeaker:
-    "vui-components-conversationview turnSpeaker min-w-0 truncate text-vui-md font-semibold leading-tight text-[var(--fg-primary)]",
+    "vui-components-conversationview turnSpeaker min-w-0 truncate text-vui-xs font-medium leading-tight text-[var(--fg-secondary)]",
   turnStatusLabel:
     "vui-components-conversationview turnStatusLabel min-w-0 shrink-0 text-vui-xs font-semibold leading-tight text-[var(--fg-tertiary)]",
   turnStatusNote:
