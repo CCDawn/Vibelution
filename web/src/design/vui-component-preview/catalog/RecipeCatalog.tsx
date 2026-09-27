@@ -16,7 +16,7 @@ import {
 import { VuiPreviewCard } from "../VuiPreviewCard";
 import { VuiPreviewSection } from "../VuiPreviewSection";
 
-const panelClassName = "grid min-h-16 content-center px-2 text-center text-sm font-semibold";
+const panelClassName = "grid min-h-16 content-center px-2 text-center text-vui-xs font-semibold";
 
 export function RecipeCatalog() {
   return (

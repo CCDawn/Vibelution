@@ -168,7 +168,7 @@ export function StructureCatalog() {
         <VStateSurface tone="loading" title="加载中" />
       </VuiPreviewCard>
       <VuiPreviewCard name="ConversationFollowupQueueBar" className="col-span-full min-h-0">
-        <div className="w-full rounded-[12px] border border-vui-border-subtle bg-vui-surface-panel p-3">
+        <div className="w-full rounded-xl border border-vui-border-subtle bg-vui-surface-panel p-3">
           <ConversationFollowupQueueBar
             items={[
               { id: "queue-1", text: "继续整理 source collection 证据" },
@@ -184,20 +184,20 @@ export function StructureCatalog() {
         </div>
       </VuiPreviewCard>
       <VuiPreviewCard name="ConversationTranscriptLoadingState" className="col-span-full min-h-0">
-        <div className="h-[360px] w-full overflow-hidden rounded-[12px] border border-vui-border-subtle bg-vui-surface-panel">
+        <div className="h-[360px] w-full overflow-hidden rounded-xl border border-vui-border-subtle bg-vui-surface-panel">
           <ConversationTranscriptLoadingState label="正在加载会话消息" />
         </div>
       </VuiPreviewCard>
       <VuiPreviewCard name="ComposerContextRing" className="col-span-full min-h-0">
-        <div className="grid w-full justify-items-start gap-3 rounded-[12px] border border-vui-border-subtle bg-vui-surface-panel p-3">
+        <div className="grid w-full justify-items-start gap-3 rounded-xl border border-vui-border-subtle bg-vui-surface-panel p-3">
           <ComposerContextRing model={composerContextRingPreviewModel} lang="zh" sessionId="preview-session" />
-          <div className="w-full max-w-[324px] rounded-[12px] border border-vui-border-subtle bg-vui-surface-row p-3">
+          <div className="w-full max-w-[324px] rounded-xl border border-vui-border-subtle bg-vui-surface-row p-3">
             <ComposerContextRingPanel model={composerContextRingPreviewModel} lang="zh" />
           </div>
         </div>
       </VuiPreviewCard>
       <VuiPreviewCard name="ConversationActiveTurnStatusNote" className="col-span-full min-h-0">
-        <div className="w-full max-w-[520px] rounded-[12px] border border-vui-border-subtle bg-vui-surface-panel p-3">
+        <div className="w-full max-w-[520px] rounded-xl border border-vui-border-subtle bg-vui-surface-panel p-3">
           <ConversationActiveTurnStatusNote lang="zh" message={activeTurnRetryPreviewMessage} />
         </div>
       </VuiPreviewCard>
@@ -215,7 +215,7 @@ export function StructureCatalog() {
         </div>
       </VuiPreviewCard>
 <VuiPreviewCard name="ConversationTodoChecklist" className="col-span-full min-h-0">
-        <div className="w-full max-w-[520px] rounded-[12px] border border-vui-border-subtle bg-vui-surface-panel p-3">
+        <div className="w-full max-w-[520px] rounded-xl border border-vui-border-subtle bg-vui-surface-panel p-3">
           <ConversationTodoChecklist
             snapshot={conversationTodoChecklistPreviewSnapshot}
             lang="zh"

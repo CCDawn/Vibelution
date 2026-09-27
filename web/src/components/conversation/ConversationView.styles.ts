@@ -39,7 +39,7 @@ const answerOnlyProcessShell = cv(
 const userMessageBubble = cv(
   "userMessageBody",
   readableMessageText,
-  "w-fit max-w-full justify-self-end rounded-[16px] border-0 bg-[var(--vui-control-muted)] px-3 py-2 text-left text-[var(--fg-primary)] shadow-none",
+  "w-fit max-w-full justify-self-end rounded-2xl border-0 bg-[var(--vui-control-muted)] px-3 py-2 text-left text-[var(--fg-primary)] shadow-none",
 );
 const conversationComposerShell = cv(
   "composer",
@@ -47,7 +47,7 @@ const conversationComposerShell = cv(
 );
 const conversationComposerCodexShell = cv(
   "composerCodex",
-  "mx-auto grid w-full max-w-[830px] min-w-0 flex-none overflow-hidden rounded-[20px] border border-[color-mix(in_srgb,var(--border-soft)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_96%,var(--vui-surface-workspace))] shadow-[0_8px_26px_color-mix(in_srgb,var(--fg-primary)_var(--vui-alpha-wash-faint),transparent)] max-[719px]:rounded-[16px]",
+  "mx-auto grid w-full max-w-[830px] min-w-0 flex-none overflow-hidden rounded-[20px] border border-[color-mix(in_srgb,var(--border-soft)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_96%,var(--vui-surface-workspace))] shadow-[0_8px_26px_color-mix(in_srgb,var(--fg-primary)_var(--vui-alpha-wash-faint),transparent)] max-[719px]:rounded-2xl",
 );
 const composerNativeFieldTargets =
   "[&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-[72px] [&_textarea]:max-h-[220px] [&_textarea]:resize-none [&_input]:w-full [&_select]:w-full [&_textarea]:w-full [@media(max-height:520px)]:[&_textarea]:min-h-[44px]";

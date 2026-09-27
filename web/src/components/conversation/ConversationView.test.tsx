@@ -748,7 +748,7 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     expect(styles.userMessageBody).toContain("justify-self-end");
     expect(styles.userMessageBody).toContain("w-fit");
     expect(styles.userMessageBody).toContain("max-w-full");
-    expect(styles.userMessageBody).toContain("rounded-[16px]");
+    expect(styles.userMessageBody).toContain("rounded-2xl");
     expect(styles.userMessageBody).toContain("border-0");
     expect(styles.userMessageBody).toContain("bg-[var(--vui-control-muted)]");
     expect(styles.userMessageBody).toContain("px-3");

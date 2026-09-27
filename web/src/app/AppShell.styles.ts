@@ -46,7 +46,7 @@ const styles = {
   activeWorkItemDot:
     "vui-app-appshell activeWorkItemDot mt-1.5 block size-1.5 shrink-0 rounded-full bg-current",
   activeWorkItemToneChip:
-    "vui-app-appshell activeWorkItemToneChip !h-auto !min-h-0 max-w-[7rem] shrink-0 truncate !border-0 !bg-transparent !p-0 !text-[10px]",
+    "vui-app-appshell activeWorkItemToneChip !h-auto !min-h-0 max-w-[7rem] shrink-0 truncate !border-0 !bg-transparent !p-0 !text-vui-micro-10",
   activeWorkPanel:
     "vui-app-appshell activeWorkPanel grid min-w-0 gap-1 p-2",
   activeWorkPopoverContent:

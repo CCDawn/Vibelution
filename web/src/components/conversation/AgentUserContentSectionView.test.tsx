@@ -50,7 +50,7 @@ describe("AgentUserContentSectionView", () => {
     expect(styles.userMessageBody).toContain("whitespace-pre-wrap");
     expect(styles.userMessageBody).toContain("[overflow-wrap:anywhere]");
     expect(styles.userMessageBody).toContain("max-w-full");
-    expect(styles.userMessageBody).toContain("rounded-[16px]");
+    expect(styles.userMessageBody).toContain("rounded-2xl");
     expect(styles.userMessageBody).toContain("border-0");
     expect(styles.userMessageBody).toContain("bg-[var(--vui-control-muted)]");
     expect(styles.userMessageBody).toContain("px-3");
