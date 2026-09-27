@@ -8,11 +8,11 @@ export default {
   listPane: "max-h-[32rem] min-h-0 overflow-y-auto",
   detail: "grid gap-2 p-2",
   detailTitle: "[font-size:var(--vui-font-xs)] font-medium text-[var(--fg-primary)]",
-  detailMeta: "font-mono text-[10px] text-[var(--fg-secondary)]",
+  detailMeta: "font-mono text-vui-micro-10 text-[var(--fg-secondary)]",
   sourceRow: "rounded border border-[var(--vui-border-subtle)] px-2 py-1 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]",
   blocker: "grid gap-1 rounded border border-[var(--vui-border-subtle)] px-2 py-1.5 [font-size:var(--vui-font-2xs)]",
   blockerMessage: "text-[var(--fg-primary)]",
   blockerRemediation: "text-[var(--fg-secondary)]",
-  questionId: "font-mono text-[10px] text-[var(--fg-secondary)]",
+  questionId: "font-mono text-vui-micro-10 text-[var(--fg-secondary)]",
   title: "min-w-0 truncate text-[var(--fg-primary)]",
 } as const;

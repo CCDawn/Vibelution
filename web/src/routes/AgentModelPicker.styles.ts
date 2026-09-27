@@ -28,7 +28,7 @@ const styles = {
   optionTitle: "flex min-w-0 flex-wrap items-center gap-1.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-primary)]",
   optionMeta: "flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]",
   action: "shrink-0 text-right [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)]",
-  badge: "rounded-full border border-[var(--vui-border-subtle)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--fg-secondary)]",
+  badge: "rounded-full border border-[var(--vui-border-subtle)] px-1.5 py-0.5 text-vui-micro-10 font-medium text-[var(--fg-secondary)]",
   reason: "col-span-2 min-w-0 break-words [font-size:var(--vui-font-xs)] leading-5 text-[var(--status-warning-fg)]",
   check: "shrink-0 text-[var(--accent-cool)]",
   empty: "px-3 py-8 text-center [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)]",

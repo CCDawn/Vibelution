@@ -6,13 +6,13 @@
 export default {
   root: "flex min-h-0 w-full flex-col gap-3 p-1 [font-size:var(--vui-font-xs)]",
   header: "flex flex-wrap items-center justify-between gap-2",
-  eyebrow: "text-[10px] uppercase tracking-wide text-[var(--fg-tertiary)]",
+  eyebrow: "text-vui-micro-10 uppercase tracking-wide text-[var(--fg-tertiary)]",
   topline: "flex flex-wrap items-center gap-2",
   switcher: "min-w-40 max-w-full flex-1",
   metaRow: "flex flex-wrap items-center gap-x-3 gap-y-1 text-[var(--fg-tertiary)] [font-size:var(--vui-font-2xs)]",
   roundCard:
     "grid gap-2.5 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-card)] p-3 [&_p]:m-0",
-  sectionTitle: "text-[11px] font-semibold text-[var(--fg-primary)]",
+  sectionTitle: "text-vui-micro-11 font-semibold text-[var(--fg-primary)]",
   badgeRow: "flex flex-wrap items-center gap-1.5",
   summaryCard:
     "grid gap-1.5 rounded-[var(--vui-radius-control)] border border-[var(--vui-border-subtle)] p-2.5 [&_p]:[font-size:var(--vui-font-2xs)] [&_p]:leading-[1.5] [&_span]:[font-size:var(--vui-font-2xs)] [&_span]:font-[650] [&_span]:tracking-[0.02em] [&_span]:text-[var(--fg-secondary)]",
@@ -25,7 +25,7 @@ export default {
   claimText: "wrap-anywhere text-[var(--fg-primary)] [font-size:var(--vui-font-2xs)]",
   mutedText: "wrap-anywhere text-[var(--fg-secondary)] [font-size:var(--vui-font-2xs)]",
   scoreGrid:
-    "grid grid-cols-2 gap-1 @min-[400px]:grid-cols-5 [&>div]:grid [&>div]:gap-[2px] [&>div]:rounded-[var(--vui-radius-control)] [&>div]:bg-[var(--vui-surface-card)] [&>div]:p-1.5 [&_span]:text-[10px] [&_span]:text-[var(--fg-secondary)] [&_strong]:[font-size:var(--vui-font-2xs)]",
+    "grid grid-cols-2 gap-1 @min-[400px]:grid-cols-5 [&>div]:grid [&>div]:gap-[2px] [&>div]:rounded-[var(--vui-radius-control)] [&>div]:bg-[var(--vui-surface-card)] [&>div]:p-1.5 [&_span]:text-vui-micro-10 [&_span]:text-[var(--fg-secondary)] [&_strong]:[font-size:var(--vui-font-2xs)]",
   recordRow: "flex flex-wrap items-center gap-2 text-[var(--fg-secondary)] [font-size:var(--vui-font-2xs)]",
   detailList: "m-0 grid list-none gap-1 p-0",
   detailItem:

@@ -3,7 +3,7 @@ import {
   vuiOpaqueRowClass,
 } from "../design/vuiSurfaceRecipes";
 
-const worktreeReviewSurfaceClass = `grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-2 overflow-hidden ${vuiFlatPanelClass} px-3 pb-3 pt-2.5 text-[0.9rem] shadow-none`;
+const worktreeReviewSurfaceClass = `grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-2 overflow-hidden ${vuiFlatPanelClass} px-3 pb-3 pt-2.5 text-vui-xs shadow-none`;
 const surfaceHeaderCompactClass = "flex min-w-0 items-center justify-between gap-2.5";
 const headerCopyClass = "min-w-0";
 const eyebrowClass = "m-0 mb-0.5 [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-[var(--accent-warm-2)]";

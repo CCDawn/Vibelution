@@ -7,7 +7,7 @@ export const selfEvolutionAutonomousLoopPanelStyles = {
   eyebrow:
     "[font-size:var(--vui-font-xs)] font-[780] uppercase tracking-[0.08em] text-vui-fg-tertiary",
   title:
-    "min-w-0 break-words text-[0.98rem] font-[820] leading-tight text-vui-fg-primary [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:3]",
+    "min-w-0 break-words text-vui-md font-[820] leading-tight text-vui-fg-primary [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:3]",
   summary:
     "max-w-[88ch] [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-vui-fg-secondary",
   statusPill:

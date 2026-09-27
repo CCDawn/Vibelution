@@ -26,14 +26,14 @@ const flowTabClass = [
 ].join(" ");
 // Legacy aliases retained for style-source geometry contracts.
 const flowTabActiveClass = "border-[color-mix(in_srgb,var(--accent-warm)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_13%,var(--vui-surface-row))] text-[var(--accent-warm-2)]";
-const stepIndexClass = "inline-flex h-5 w-5 items-center justify-center whitespace-nowrap rounded-full border border-vui-border-soft text-[10px] leading-none text-vui-fg-tertiary max-[760px]:hidden";
+const stepIndexClass = "inline-flex h-5 w-5 items-center justify-center whitespace-nowrap rounded-full border border-vui-border-soft text-vui-micro-10 leading-none text-vui-fg-tertiary max-[760px]:hidden";
 const stepIndexActiveClass = "border-[color-mix(in_srgb,var(--accent-warm)_38%,var(--border-soft))] text-[var(--accent-warm-2)]";
 const stepBodyClass = "grid min-w-0 gap-0";
 const stepLabelClass = "overflow-hidden text-ellipsis whitespace-nowrap [font-size:var(--vui-font-xs)] font-bold leading-tight text-vui-fg-primary";
 const stepHintClass = "hidden overflow-hidden text-ellipsis whitespace-nowrap [font-size:var(--vui-font-xs)] leading-[1.2] text-vui-fg-tertiary";
 const stepMetaClass = "sr-only";
 const stepMetaItemClass = "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap";
-const stepCountClass = "inline-flex h-5 min-w-6 items-center justify-center whitespace-nowrap rounded-full border border-vui-border-soft bg-vui-control-muted px-1.5 text-[10px] font-bold leading-none text-vui-fg-secondary";
+const stepCountClass = "inline-flex h-5 min-w-6 items-center justify-center whitespace-nowrap rounded-full border border-vui-border-soft bg-vui-control-muted px-1.5 text-vui-micro-10 font-bold leading-none text-vui-fg-secondary";
 
 const styles = {
   flowTabsRootClass,

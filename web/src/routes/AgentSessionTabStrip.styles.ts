@@ -38,7 +38,7 @@ const styles = {
   agentSessionTabIconActive:
     "vui-routes-chatcodingroute agentSessionTabIconActive text-[var(--accent-cool)]",
   agentSessionTabKicker:
-    "vui-routes-chatcodingroute agentSessionTabKicker min-w-0 text-[10px] font-semibold leading-none text-[var(--fg-tertiary)]",
+    "vui-routes-chatcodingroute agentSessionTabKicker min-w-0 text-vui-micro-10 font-semibold leading-none text-[var(--fg-tertiary)]",
   // Content hit target only — selection chrome is on the outer agentSessionTab card.
   // Fixed row: [icon] [title flex] [status slot] — status always occupies the same 14px cell.
   agentSessionTabMainAction: `vui-routes-chatcodingroute agentSessionTabMainAction !inline-flex !h-9 !min-h-9 min-w-0 max-w-full flex-1 items-center !gap-1.5 !rounded-none !border-0 !bg-transparent !px-2 !py-0 !text-inherit !shadow-none hover:!border-transparent hover:!bg-transparent hover:!text-inherit`,

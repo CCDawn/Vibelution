@@ -1125,10 +1125,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.tokenStatusCopy).toContain("overflow-visible");
     expect(routeStyles.tokenStatusCopy).toContain("self-center");
     expect(routeStyles.tokenStatusLabel).toContain("whitespace-nowrap");
-    expect(routeStyles.tokenStatusLabel).toContain("text-[11px]");
+    expect(routeStyles.tokenStatusLabel).toContain("text-vui-micro-11");
     expect(routeStyles.tokenStatusMeta).toContain("sr-only");
     expect(routeStyles.tokenStatusRing).toContain("size-[28px]");
-    expect(routeStyles.tokenStatusRingCore).toContain("text-[10px]");
+    expect(routeStyles.tokenStatusRingCore).toContain("text-vui-micro-10");
     expect(routeStyles.tokenStatusRingCore).toContain("max-w-full");
     expect(routeStyles.tokenStatusRingCore).toContain("overflow-hidden");
     expect(routeStyles.tokenStatusRingCore).toContain("text-ellipsis");

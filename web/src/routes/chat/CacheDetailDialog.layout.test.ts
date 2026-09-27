@@ -95,7 +95,7 @@ describe("CacheDetailDialog donut layout contract", () => {
     expect(cacheDetailStyles.cacheDonutInnerSegment).toContain("[stroke-width:");
     expect(cacheDetailStyles.cacheDonutInnerSegment).toContain("[stroke-linecap:round]");
     expect(cacheDetailStyles.cacheDetailTooltip).toContain("grid");
-    expect(cacheDetailStyles.cacheDetailTooltipLine).toContain("text-[11px]");
+    expect(cacheDetailStyles.cacheDetailTooltipLine).toContain("text-vui-micro-11");
     expect(cacheDetailDialogSource).toContain("VTooltip");
     expect(cacheDetailDialogSource).not.toContain("读数说明");
     expect(cacheDetailDialogSource).not.toContain("cacheDetailDonutLegend");

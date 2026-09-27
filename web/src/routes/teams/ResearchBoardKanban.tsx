@@ -151,7 +151,7 @@ export function ResearchBoardKanban({
                     {card.meta.slice(0, 3).map((item) => (
                       <span
                         key={item}
-                        className="max-w-full truncate rounded-md bg-[var(--vui-control-muted)] px-1.5 py-0.5 text-[10.5px] text-[var(--fg-tertiary)]"
+                        className="max-w-full truncate rounded-md bg-[var(--vui-control-muted)] px-1.5 py-0.5 text-vui-micro-10 text-[var(--fg-tertiary)]"
                         title={item}
                       >
                         {item}

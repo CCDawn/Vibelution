@@ -37,9 +37,9 @@ const styles: Record<string, string> = {
   agentIndexRoster:
     `vui-routes-chatcodingroute agentIndexRoster min-w-0 ${vuiStateCoolInfoClass}`,
   agentIndexStatus:
-    "vui-routes-chatcodingroute agentIndexStatus inline-flex min-w-0 max-w-[72px] justify-self-end overflow-hidden text-ellipsis whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-[var(--accent-cool)]",
+    "vui-routes-chatcodingroute agentIndexStatus inline-flex min-w-0 max-w-[72px] justify-self-end overflow-hidden text-ellipsis whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] px-1.5 py-0.5 text-vui-micro-10 font-semibold leading-none text-[var(--accent-cool)]",
   agentModelLine:
-    "vui-routes-chatcodingroute agentModelLine block min-w-0 truncate text-[10px] font-medium leading-tight text-[var(--fg-tertiary)]",
+    "vui-routes-chatcodingroute agentModelLine block min-w-0 truncate text-vui-micro-10 font-medium leading-tight text-[var(--fg-tertiary)]",
   agentModelTag:
     "vui-routes-chatcodingroute agentModelTag inline-flex min-h-[18px] min-w-0 max-w-[96px] shrink items-center gap-0.5 overflow-hidden rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_7%,transparent)] px-1.5 py-0 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--accent-cool)] [&_span]:min-w-0 [&_span]:truncate [&_svg]:shrink-0",
   agentOptionMeta:
