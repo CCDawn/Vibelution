@@ -93,7 +93,7 @@ const styles: Record<string, string> = {
   paneCollapsed:
     "vui-routes-chatcodingroute paneCollapsed min-w-0 !hidden invisible pointer-events-none !overflow-hidden opacity-0",
   overlayBackdrop:
-    "vui-routes-chatcodingroute overlayBackdrop fixed inset-0 z-30 border-0 bg-black/35",
+    "vui-routes-chatcodingroute overlayBackdrop fixed inset-0 z-30 border-0 bg-vui-scrim-strong",
   overlayPane:
     `vui-routes-chatcodingroute overlayPane fixed inset-y-[var(--shell-topbar-height)] z-40 w-[min(86vw,320px)] ${vuiRailFillClass} shadow-[var(--vui-elevation-panel)]`,
   // ml-auto only when this block is the last flex child (narrow overlay toggles).

@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
  * - `builtinFontSize`: Tailwind built-in text sizes (`text-sm`, ...) including
  *   inline `fontSize: 13` literals,
  * - `arbitraryTextSize`: literal `text-[13px]` / `text-[0.75rem]` values,
- * - `arbitraryRadius`: literal `rounded-[4px]` / `rounded-t-[0.5rem]` values,
+ * - `arbitraryRadius`: literal `rounded` / `rounded-t-[0.5rem]` values,
  * - `bareHexColor`: bare hex colors in value positions (`"#0f5ea8"`,
  *   `color: #fff`, gradient stops).
  *
@@ -69,7 +69,7 @@ const BUILTIN_TEXT_SIZE = /\btext-(?:xs|sm|base|lg|xl|2xl|3xl)\b/g;
 const INLINE_FONT_SIZE_LITERAL = /\bfontSize:\s*(?:["'][0-9.]|[0-9])/g;
 /** `text-[13px]`, `text-[0.75rem]`, ... */
 const ARBITRARY_TEXT_SIZE = /\btext-\[[0-9]+(?:\.[0-9]+)?(?:px|rem)\]/g;
-/** `rounded-[4px]`, `rounded-t-[0.5rem]`, ... */
+/** `rounded`, `rounded-t-[0.5rem]`, ... */
 const ARBITRARY_RADIUS = /\brounded(?:-[a-z]+)*-\[[0-9]+(?:\.[0-9]+)?(?:px|rem)\]/g;
 /**
  * Bare hex in a value position. `var()` spans are stripped first so token

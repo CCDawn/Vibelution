@@ -17,7 +17,7 @@ export type TeamSourceEmptyStateProps = {
 };
 
 const PANEL =
-  "grid min-h-[132px] min-w-0 w-full content-center justify-items-center gap-3 rounded-[12px] border border-dashed " +
+  "grid min-h-[132px] min-w-0 w-full content-center justify-items-center gap-3 rounded-xl border border-dashed " +
   "border-[var(--vui-border-subtle)] bg-transparent px-6 py-7 text-center";
 
 const VISUAL =

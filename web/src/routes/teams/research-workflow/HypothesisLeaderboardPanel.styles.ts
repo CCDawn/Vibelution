@@ -25,7 +25,7 @@ export default {
   claimText: "wrap-anywhere text-[var(--fg-primary)] [font-size:var(--vui-font-2xs)]",
   mutedText: "wrap-anywhere text-[var(--fg-secondary)] [font-size:var(--vui-font-2xs)]",
   scoreGrid:
-    "grid grid-cols-2 gap-1 @min-[400px]:grid-cols-5 [&>div]:grid [&>div]:gap-[2px] [&>div]:rounded-[var(--vui-radius-control)] [&>div]:bg-[var(--vui-surface-card)] [&>div]:p-1.5 [&_span]:text-vui-micro-10 [&_span]:text-[var(--fg-secondary)] [&_strong]:[font-size:var(--vui-font-2xs)]",
+    "grid grid-cols-2 gap-1 @min-[400px]:grid-cols-5 [&>div]:grid [&>div]:gap-0.5 [&>div]:rounded-[var(--vui-radius-control)] [&>div]:bg-[var(--vui-surface-card)] [&>div]:p-1.5 [&_span]:text-vui-micro-10 [&_span]:text-[var(--fg-secondary)] [&_strong]:[font-size:var(--vui-font-2xs)]",
   recordRow: "flex flex-wrap items-center gap-2 text-[var(--fg-secondary)] [font-size:var(--vui-font-2xs)]",
   detailList: "m-0 grid list-none gap-1 p-0",
   detailItem:

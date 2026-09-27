@@ -4,7 +4,7 @@ export default {
   error: "rounded border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-raised)] px-2 py-1.5 [font-size:var(--vui-font-2xs)] text-[var(--fg-primary)]",
   header: "flex items-start justify-between gap-2",
   jumpNav: "flex flex-wrap gap-1.5",
-  jumpLink: "rounded border border-[var(--vui-border-subtle)] px-2 py-[2px] [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)] hover:border-[var(--vui-border)] hover:text-[var(--fg-primary)]",
+  jumpLink: "rounded border border-[var(--vui-border-subtle)] px-2 py-0.5 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)] hover:border-[var(--vui-border)] hover:text-[var(--fg-primary)]",
   anchor: "scroll-mt-4",
   eyebrow: "text-vui-micro-10 uppercase tracking-wide text-[var(--fg-tertiary)]",
   title: "mt-1 block [font-size:var(--vui-font-xs)] text-[var(--fg-primary)]",

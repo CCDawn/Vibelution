@@ -483,7 +483,7 @@ backToBottomButton:
   thoughtScrollBody:
     "vui-components-conversationview thoughtScrollBody min-w-0 max-h-[12rem] overflow-y-auto overflow-x-hidden overscroll-contain [scrollbar-gutter:stable] border-0 bg-transparent px-0 py-1 text-[var(--fg-tertiary)]",
   codexTranscriptReasoningTextButton:
-    "vui-components-conversationview codexTranscriptReasoningTextButton min-w-0 !h-auto !w-full !max-w-full cursor-pointer !justify-start !rounded-none !border-0 !bg-transparent !p-0 !pl-[28px] !text-left !shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),transparent)] focus-visible:ring-offset-1 [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+    "vui-components-conversationview codexTranscriptReasoningTextButton min-w-0 !h-auto !w-full !max-w-full cursor-pointer !justify-start !rounded-none !border-0 !bg-transparent !p-0 !pl-7 !text-left !shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),transparent)] focus-visible:ring-offset-1 [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   codexTranscriptSurface:
     "vui-components-conversationview codexTranscriptSurface grid w-full max-w-full min-w-0 content-start gap-2 px-0",
   codexTurnChangeBadge:
@@ -1186,7 +1186,7 @@ timeline:
     "vui-components-conversationview timeline flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden bg-[var(--vui-surface-chat)] pl-[clamp(1rem,3vw,3rem)] pr-[clamp(3rem,3vw,3.5rem)] py-4 [scrollbar-gutter:stable]",  timelineArea:
     "vui-components-conversationview timelineArea relative flex min-h-0 min-w-0 flex-1 flex-col",
   timelineContent:
-    "vui-components-conversationview timelineContent grid min-w-0 w-full content-start gap-[10px]",
+    "vui-components-conversationview timelineContent grid min-w-0 w-full content-start gap-2.5",
   timelineVirtualSpacer:
     "vui-components-conversationview timelineVirtualSpacer pointer-events-none min-w-0 shrink-0",
   timelineVirtualRow:

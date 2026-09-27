@@ -47,7 +47,7 @@ const RIGHT_CLUSTER =
   "flex min-w-0 flex-1 flex-wrap items-center gap-2";
 
 const STEPS_ROW =
-  "flex min-w-0 w-fit flex-nowrap items-center gap-0.5 overflow-x-auto overscroll-x-contain rounded-[8px] " +
+  "flex min-w-0 w-fit flex-nowrap items-center gap-0.5 overflow-x-auto overscroll-x-contain rounded-lg " +
   "border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-0.5 [scrollbar-width:thin]";
 
 const STEP_CHIP =

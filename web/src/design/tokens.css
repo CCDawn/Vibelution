@@ -474,4 +474,9 @@
 
   /* Light-theme chevron uses light tertiary gray for contrast on white fields. */
   --vui-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%237a8494' d='M2.5 4.5 6 8l3.5-3.5'/%3E%3C/svg%3E");
+  /* Overlay scrim: the sanctioned backdrop fill for dialogs, drawers and
+     destructive masks. Raw black lives here, not in component classnames. */
+  --vui-scrim-soft: color-mix(in srgb, #000 20%, transparent);
+  --vui-scrim-strong: color-mix(in srgb, #000 35%, transparent);
+
 }

@@ -29,7 +29,7 @@ const styles: Record<string, string> = {
   hint: "m-0 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]",
   candidateDisabledReason: "m-0 [font-size:var(--vui-font-2xs)] text-[var(--state-warning)]",
   trailToggle:
-    "cursor-pointer rounded-[var(--vui-radius-control)] border border-[var(--vui-border-subtle)] px-2 py-[2px] text-[var(--fg-secondary)] [font-size:var(--vui-font-2xs)] hover:border-[var(--vui-border)]",
+    "cursor-pointer rounded-[var(--vui-radius-control)] border border-[var(--vui-border-subtle)] px-2 py-0.5 text-[var(--fg-secondary)] [font-size:var(--vui-font-2xs)] hover:border-[var(--vui-border)]",
   evidenceTrail:
     "grid gap-2 rounded-[var(--vui-radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-inset)] p-2",
   trailList: "m-0 grid list-none gap-2 p-0",

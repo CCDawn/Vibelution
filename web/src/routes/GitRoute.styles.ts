@@ -71,9 +71,9 @@ export const gitRouteStyles = {
   fileList: "grid min-h-0 content-start gap-1.5 overflow-auto pr-1",
   commitList: "grid min-h-0 content-start gap-2.5 overflow-auto pr-1",
   fileButton:
-    `grid w-full grid-cols-[22px_34px_minmax(0,1fr)] items-start gap-1.5 ${rowSurface} p-[6px] text-left text-vui-fg-primary ${rowSurfaceHover}`,
+    `grid w-full grid-cols-[22px_34px_minmax(0,1fr)] items-start gap-1.5 ${rowSurface} p-1.5 text-left text-vui-fg-primary ${rowSurfaceHover}`,
   fileButtonActive:
-    "grid w-full grid-cols-[22px_34px_minmax(0,1fr)] items-start gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-tint-strong),transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-wash),var(--vui-surface-row))] p-[6px] text-left text-vui-fg-primary shadow-[var(--vui-shadow-inset-accent)]",
+    "grid w-full grid-cols-[22px_34px_minmax(0,1fr)] items-start gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-tint-strong),transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-wash),var(--vui-surface-row))] p-1.5 text-left text-vui-fg-primary shadow-[var(--vui-shadow-inset-accent)]",
   fileButtonSelected:
     "border-[color-mix(in_srgb,var(--state-success)_var(--vui-alpha-line),transparent)] bg-[color-mix(in_srgb,var(--state-success)_var(--vui-alpha-wash-faint),var(--vui-surface-row))]",
   fileStatus: "font-mono [font-size:var(--vui-font-xs)] text-[var(--accent-warm-2)]",

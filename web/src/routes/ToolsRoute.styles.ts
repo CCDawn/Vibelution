@@ -26,7 +26,7 @@ import {
 const panelSurface =
   `${vuiOpaquePanelClass} p-[7px]`;
 const quietPanelSurface =
-  `${vuiOpaquePanelClass} p-[6px]`;
+  `${vuiOpaquePanelClass} p-1.5`;
 const rowSurface =
   `${vuiOpaqueRowClass}`;
 const warmRowSurface =
@@ -67,7 +67,7 @@ const styles = {
     "bulkPolicyActions min-w-0 flex flex-wrap items-center gap-1.5",
   bulkPolicyToolRow: `bulkPolicyToolRow min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateWarmSoftClass}`,
   bulkSummary:
-    `bulkSummary inline-flex w-fit max-w-full shrink-0 items-center gap-1.5 whitespace-nowrap ${vuiOpaqueRowClass} px-2 py-[4px] [font-size:var(--vui-font-xs)]`,
+    `bulkSummary inline-flex w-fit max-w-full shrink-0 items-center gap-1.5 whitespace-nowrap ${vuiOpaqueRowClass} px-2 py-1 [font-size:var(--vui-font-xs)]`,
   controlStrip:
     "controlStrip min-w-0 flex flex-wrap items-center gap-1.5",
   contextualHint:
@@ -283,7 +283,7 @@ const styles = {
   scopeStats:
     "scopeStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   searchBox:
-    `searchBox min-w-0 max-w-full ${quietPanelSurface} grid grid-cols-[auto_minmax(0,1fr)] items-center gap-[6px] px-2 py-[5px]`,
+    `searchBox min-w-0 max-w-full ${quietPanelSurface} grid grid-cols-[auto_minmax(0,1fr)] items-center gap-1.5 px-2 py-[5px]`,
   secondaryButton:
     `secondaryButton min-w-0 ${buttonBase}`,
   // Host carries blocked-active danger tint so allowed/inherited keep cool selection.
@@ -302,7 +302,7 @@ const styles = {
     "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] " +
     "data-[state=active]:text-[var(--accent-cool)]",
   selectableToolRow:
-    `selectableToolRow min-w-0 max-w-full ${warmRowSurface} p-[4px] !grid grid-cols-[28px_minmax(0,1fr)] items-center gap-[5px]`,
+    `selectableToolRow min-w-0 max-w-full ${warmRowSurface} p-1 !grid grid-cols-[28px_minmax(0,1fr)] items-center gap-[5px]`,
   sourcePill:
     `sourcePill min-w-0 ${pillBase}`,
   stateBadge:

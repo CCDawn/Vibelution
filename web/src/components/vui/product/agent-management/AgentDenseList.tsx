@@ -183,7 +183,7 @@ export function AgentDenseList({
           key={column.id}
           aria-label={typeof column.label === "string" ? column.label : undefined}
           className={[
-            "grid content-start gap-[6px] min-w-0",
+            "grid content-start gap-1.5 min-w-0",
             index === 0
               ? ""
               : "pt-[7px] border-t border-[color-mix(in_srgb,var(--border-soft)_76%,transparent)]",
@@ -192,7 +192,7 @@ export function AgentDenseList({
             .join(" ")}
         >
           <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 min-w-0 px-1 pb-0.5">
-            <div className="flex items-center gap-[6px] min-w-0" title={column.description}>
+            <div className="flex items-center gap-1.5 min-w-0" title={column.description}>
               <strong className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--fg-primary)] text-vui-micro-13 font-extrabold">
                 {column.label}
               </strong>

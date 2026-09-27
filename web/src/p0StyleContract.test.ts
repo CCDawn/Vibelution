@@ -19,10 +19,10 @@ const srcRoot = resolve(import.meta.dirname);
 const BASELINES = {
   builtinText: 0,
   arbitraryText: 1,
-  arbitraryRadius: 36,
-  fixedRadius: 5,
-  alphaUtility: 2,
-  arbitrarySpacing: 319,
+  arbitraryRadius: 21,
+  fixedRadius: 6,
+  alphaUtility: 0,
+  arbitrarySpacing: 290,
 };
 
 const PATTERNS: Record<keyof typeof BASELINES, RegExp> = {

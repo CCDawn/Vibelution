@@ -35,7 +35,7 @@ export type AgentFilterRailProps = {
 };
 
 const GROUP_BUTTON_BASE =
-  "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 w-full min-h-[var(--vui-control-height-md)] px-[9px] py-[6px] rounded-none border-0 border-b border-[var(--vui-border-hairline)] bg-transparent text-[var(--fg-secondary)] text-left transition-[background,color,border-color] duration-150 hover:bg-[var(--vui-surface-row-hover)] hover:text-[var(--fg-primary)]";
+  "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 w-full min-h-[var(--vui-control-height-md)] px-[9px] py-1.5 rounded-none border-0 border-b border-[var(--vui-border-hairline)] bg-transparent text-[var(--fg-secondary)] text-left transition-[background,color,border-color] duration-150 hover:bg-[var(--vui-surface-row-hover)] hover:text-[var(--fg-primary)]";
 
 const GROUP_BUTTON_ACTIVE =
   "border-l-2 border-l-[var(--accent-warm)] bg-[color-mix(in_srgb,var(--accent-warm)_9%,transparent)] text-[var(--fg-primary)]";

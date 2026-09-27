@@ -147,7 +147,7 @@ describe("GitRoute layout contract", () => {
     expect(gitRouteStyles.changePanel).toContain("p-2");
     expect(gitRouteStyles.commitPanel).toContain("gap-1.5");
     expect(gitRouteStyles.fileButton).toContain("grid-cols-[22px_34px_minmax(0,1fr)]");
-    expect(gitRouteStyles.fileButton).toContain("p-[6px]");
+    expect(gitRouteStyles.fileButton).toContain("p-1.5");
     expect(gitRouteStyles.fileButtonActive).toContain("grid-cols-[22px_34px_minmax(0,1fr)]");
   });
 

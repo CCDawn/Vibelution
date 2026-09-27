@@ -93,4 +93,7 @@
    */
   --ease-vui: var(--vui-ease);
   --ease-vui-out: var(--vui-ease-out-quart);
+  --color-vui-scrim-soft: var(--vui-scrim-soft);
+  --color-vui-scrim-strong: var(--vui-scrim-strong);
+
 }
