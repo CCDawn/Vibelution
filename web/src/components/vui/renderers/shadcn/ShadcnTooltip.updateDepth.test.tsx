@@ -8,7 +8,7 @@
  */
 import React, { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { VTooltip } from "../../index";
 import { VuiProvider } from "../../VuiProvider";
@@ -28,12 +28,21 @@ function mount(node: React.ReactElement) {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   act(() => {
     root?.unmount();
   });
   root = null;
   container?.remove();
 });
+
+function pointerOver(host: Element) {
+  host.dispatchEvent(new MouseEvent("pointerover", { bubbles: true }));
+}
+
+function pointerOut(host: Element) {
+  host.dispatchEvent(new MouseEvent("pointerout", { bubbles: true, relatedTarget: document.body }));
+}
 
 function DenseTooltipHost({ count }: { count: number }) {
   const [tick, setTick] = useState(0);
@@ -69,7 +78,8 @@ describe("ShadcnTooltip React 19 update depth", () => {
     expect(document.querySelectorAll("[data-vui='tooltip-content']").length).toBe(0);
   });
 
-  it("keeps the trigger slot on the idle host and mounts overlay after pointer intent", () => {
+  it("keeps the trigger slot on the idle host until the pointer wait elapses", () => {
+    vi.useFakeTimers();
     mount(
       <VuiProvider>
         <VTooltip content="hello-tip">
@@ -82,17 +92,65 @@ describe("ShadcnTooltip React 19 update depth", () => {
     expect(host?.getAttribute("data-slot")).toBe("tooltip-trigger");
     expect(document.querySelector("[data-vui='tooltip-content']")).toBeNull();
 
-    expect(() => {
-      act(() => {
-        // React maps onPointerEnter to bubbling pointerover, not pointerenter.
-        host?.dispatchEvent(new MouseEvent("pointerover", { bubbles: true }));
-        host?.focus();
-      });
-    }).not.toThrow();
+    act(() => {
+      // React maps onPointerEnter to bubbling pointerover, not pointerenter.
+      if (host) pointerOver(host);
+    });
+    expect(document.querySelector("[data-vui='tooltip-content']")).toBeNull();
 
+    act(() => {
+      vi.advanceTimersByTime(319);
+    });
+    expect(document.querySelector("[data-vui='tooltip-content']")).toBeNull();
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
     const trigger = container.querySelector("[data-slot='tooltip-trigger']");
     expect(trigger?.getAttribute("data-state")).toBeTruthy();
-    const tip = document.querySelector("[data-vui='tooltip-content']");
-    expect(tip?.textContent ?? "").toContain("hello-tip");
+    expect(document.querySelector("[data-vui='tooltip-content']")?.textContent ?? "").toContain("hello-tip");
+  });
+
+  it("does not open when the pointer leaves before the delay", () => {
+    vi.useFakeTimers();
+    mount(
+      <VuiProvider>
+        <VTooltip content="hello-tip" delay={500}>
+          <button type="button">host</button>
+        </VTooltip>
+      </VuiProvider>,
+    );
+
+    const host = container.querySelector("button");
+    act(() => {
+      if (host) pointerOver(host);
+    });
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    act(() => {
+      if (host) pointerOut(host);
+    });
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    expect(document.querySelector("[data-vui='tooltip-content']")).toBeNull();
+  });
+
+  it("opens on keyboard focus without waiting for the hover delay", () => {
+    vi.useFakeTimers();
+    mount(
+      <VuiProvider>
+        <VTooltip content="hello-tip" delay={500}>
+          <button type="button">host</button>
+        </VTooltip>
+      </VuiProvider>,
+    );
+
+    const host = container.querySelector("button");
+    act(() => {
+      host?.focus();
+    });
+    expect(document.querySelector("[data-vui='tooltip-content']")?.textContent ?? "").toContain("hello-tip");
   });
 });

@@ -65,6 +65,7 @@ import { VTooltip, VIconButton } from "@/components/vui";
 | Prop | 说明 | 设计注意 |
 | --- | --- | --- |
 | `content` | 提示文案 | 短句；关键信息勿只藏在 tip |
+| `delay` | 鼠标打开前的等待，默认 320ms | 第一次放上去也要等够；到点前移开就不出现。键盘焦点仍立即打开 |
 
 ### 非职责
 - 不做必须先读完才能操作的主文案。
