@@ -4,8 +4,13 @@ import {
   useMemo,
   useState,
 } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import type { SessionLlmModelOption } from "../../api/types";
+import { fetchChatReviewModelCurationStats } from "../../api/evolution";
+import { queryKeys } from "../../api/queryKeys";
+import { resolveModelCurationTally } from "./conversationMessageCuration";
+import { useAppI18n } from "../../i18n/useAppI18n";
 import { VButton, VPopover } from "../vui";
 import styles from "./ConversationInferenceControl.styles";
 
@@ -40,6 +45,15 @@ export function resolveConversationInferenceEffort(
   };
 }
 
+/** Popover footer row: lifetime SFT curation tally for the model on display. */
+export function ConversationModelCurationStatsRow({ tally }: { tally: string }) {
+  return (
+    <div className={styles.curationStatsRow} data-testid="conversation-model-curation-stats">
+      {tally}
+    </div>
+  );
+}
+
 export function ConversationInferenceControl({
   model,
   sessionId = "",
@@ -49,7 +63,24 @@ export function ConversationInferenceControl({
   openSignal = "",
   onReasoningEffortChange,
 }: ConversationInferenceControlProps) {
+  const { t } = useAppI18n({ domains: ["chat"] });
   const [open, setOpen] = useState(false);
+  // Lifetime include/exclude tally for the model on display; cheap aggregate
+  // endpoint, so a 5-minute freshness window keeps the popover quiet. The
+  // label copy is composed here so zh/en surfaces localize it.
+  const modelCurationStatsQuery = useQuery({
+    queryKey: queryKeys.chatReviewModelCurationStats(),
+    queryFn: fetchChatReviewModelCurationStats,
+    staleTime: 5 * 60 * 1000,
+    enabled: Boolean(model?.modelId),
+  });
+  const curationTallyCounts = resolveModelCurationTally(
+    modelCurationStatsQuery.data?.models ?? [],
+    model?.modelId ?? "",
+  );
+  const curationTally = curationTallyCounts
+    ? `${t("curationTallyDataset")} +${curationTallyCounts.included} · ${t("curationTallyExcluded")} ${curationTallyCounts.excluded}`
+    : null;
   const current = useMemo(
     () => resolveConversationInferenceEffort(model, currentReasoningEffort),
     [currentReasoningEffort, model],
@@ -147,6 +178,7 @@ export function ConversationInferenceControl({
             );
           })}
         </div>
+        {curationTally ? <ConversationModelCurationStatsRow tally={curationTally} /> : null}
       </VPopover>
     </div>
   );

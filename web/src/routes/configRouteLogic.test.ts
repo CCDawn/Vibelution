@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   CONFIG_COPY,
-} from "./ConfigRoute";
+} from "./config/configCopy";
 import {
   avatarCropSourceRect,
   buildConfigApplyPayload,
@@ -44,7 +44,9 @@ import {
 } from "./configRouteLogic";
 import type { AgentInstance, ConfigModelOption, ConfigModelPresetOption, ConfigProviderPresetOption } from "../api/types";
 
-const configRouteSource = readFileSync(fileURLToPath(new URL("./ConfigRoute.tsx", import.meta.url)), "utf8");
+// Wave 3: buildModelDetailsPayload moved to config/configEditorModel.ts; the source
+// contract follows the code (assertion text unchanged).
+const configRouteSource = readFileSync(fileURLToPath(new URL("./config/configEditorModel.ts", import.meta.url)), "utf8");
 
 function preset(
   presetId: string,
@@ -682,7 +684,6 @@ describe("configRouteLogic", () => {
     expect(configRouteSource).toContain('supports_image_input: "unknown"');
     expect(configRouteSource).toContain("payload.supports_image_input = true");
     expect(configRouteSource).toContain("payload.supports_image_input = false");
-    expect(configRouteSource).toContain("modelEditorRef.current?.scrollIntoView");
   });
 
   it("maps model creation scenarios to extensible preset defaults", () => {

@@ -294,6 +294,57 @@ describe("Electron window provider state", () => {
     expect(provider.snapshot().workbench.open).toBe(true);
   });
 
+  it("keeps presenting an isolated instance window by default and when present is true", async () => {
+    const isolated = new FakeWindow(99, "", 9999);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8002", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => isolated
+    });
+
+    await provider.openOrFocusInstanceWorkbench({
+      instanceId: "worktree:task",
+      url: "http://127.0.0.1:8004/"
+    });
+    expect(isolated.showCount).toBe(1);
+    expect(isolated.focusCount).toBe(1);
+
+    await provider.openOrFocusInstanceWorkbench({
+      instanceId: "worktree:task",
+      url: "http://127.0.0.1:8004/",
+      present: true
+    });
+    expect(isolated.showCount).toBe(2);
+    expect(isolated.focusCount).toBe(2);
+  });
+
+  it("loads a hidden-presentation instance window without show, restore, or focus", async () => {
+    const isolated = new FakeWindow(99, "", 9999);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8002", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => isolated
+    });
+
+    const state = await provider.openOrFocusInstanceWorkbench({
+      instanceId: "worktree:task",
+      url: "http://127.0.0.1:8004/",
+      present: false
+    });
+
+    expect(isolated.showCount).toBe(0);
+    expect(isolated.focusCount).toBe(0);
+    expect(isolated.restoreCount).toBe(0);
+    expect(isolated.loadedUrls).toEqual(["http://127.0.0.1:8004/"]);
+    expect(state).toMatchObject({ open: true, focused: false, instanceId: "worktree:task" });
+
+    // A later default (present) call still restores focus on demand.
+    await provider.openOrFocusInstanceWorkbench({
+      instanceId: "worktree:task",
+      url: "http://127.0.0.1:8004/"
+    });
+    expect(isolated.showCount).toBe(1);
+    expect(isolated.focusCount).toBe(1);
+  });
+
   it("intercepts an isolated instance X and coalesces repeated close requests", async () => {
     const isolated = new FakeWindow(99, "", 9999, false);
     const closeRequests: string[] = [];

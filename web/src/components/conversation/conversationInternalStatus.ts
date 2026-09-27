@@ -35,8 +35,10 @@ const STREAMING_STATUS_CONTENT_MARKERS = [
   "正在处理...",
   "等待模型响应...",
   "排队中，等待空闲槽位...",
+  "正在生成回答...",
   "waiting for the model...",
   "queued; waiting for a free slot",
+  "generating the answer",
 ];
 
 const INTERNAL_STREAMING_STATUS_STAGES = new Set([
@@ -46,11 +48,18 @@ const INTERNAL_STREAMING_STATUS_STAGES = new Set([
   "history_restore",
   "model_request",
   "model_thinking",
+  "model_responding",
   "model_retry",
   "retrying",
   "followup_prepare",
   "working",
   "thinking",
+  // The first-answer-delta responding status (defect ⑦b) is cosmetic progress
+  // like thinking/working: it drives the active-turn chip and stage bar, and
+  // must not leak as an extra transcript status row (same contract as the
+  // backend visible-stage set comment in live_output_write.py).
+  "responding",
+  "assistant_response",
 ]);
 
 function normalizeInternalStreamingStatusText(content: string) {

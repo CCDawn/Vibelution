@@ -818,6 +818,17 @@ export type EvolutionChatReviewCandidate = {
   };
 };
 
+/** Per-model in-chat curation tally behind GET /api/chat-review/model-curation-stats. */
+export type ChatReviewModelCurationStat = {
+  modelId: string;
+  included: number;
+  excluded: number;
+};
+
+export type ChatReviewModelCurationStats = {
+  models: ChatReviewModelCurationStat[];
+};
+
 export type EvolutionChatReviewQueue = {
   datasetName: string;
   bundleName: string;

@@ -26,16 +26,27 @@ class LauncherCommandError(RuntimeError):
     """Launcher 原生退码非零或执行超时。"""
 
 
+def _e2e_mode() -> str:
+    return os.environ.get("VIBELUTION_E2E_MODE", "headless").strip().lower()
+
+
 def run_launcher_command(
     project_root: str | os.PathLike[str],
     command: str,
     *,
     timeout_seconds: float = LAUNCH_TIMEOUT_SECONDS,
+    hidden_presentation: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    """执行一条 Launcher 生命周期命令并原样返回 CompletedProcess。"""
+    """执行一条 Launcher 生命周期命令并原样返回 CompletedProcess。
+
+    ``hidden_presentation=True`` 追加 ``--hidden-presentation``：共享壳加载
+    分支工作台窗口但不 show/focus（窗口存在、renderer 存活，注册表照常观察）。
+    """
     if not LAUNCHER_EXE.is_file():
         raise LauncherCommandError(f"Launcher 可执行文件不存在: {LAUNCHER_EXE}")
     argv = [str(LAUNCHER_EXE), "--project", str(project_root), command]
+    if hidden_presentation:
+        argv.append("--hidden-presentation")
     try:
         completed = subprocess.run(
             argv,
@@ -54,8 +65,20 @@ def run_launcher_command(
     return completed
 
 
-def start_instance(project_root: str | os.PathLike[str]) -> None:
-    completed = run_launcher_command(project_root, "start")
+def start_instance(
+    project_root: str | os.PathLike[str],
+    *,
+    hidden_presentation: bool | None = None,
+) -> None:
+    """启动分支实例；headless 车道默认隐藏呈现，避免 e2e 抢用户桌面焦点。
+
+    按模式分流：``VIBELUTION_E2E_MODE=cdp`` 是人工/CDP 调试车道，默认保持
+    弹出真实窗口便于肉眼观察（显式传 ``hidden_presentation`` 可覆盖；隐藏
+    窗口 renderer 仍存活，CDP 亦能连接）。
+    """
+    if hidden_presentation is None:
+        hidden_presentation = _e2e_mode() != "cdp"
+    completed = run_launcher_command(project_root, "start", hidden_presentation=hidden_presentation)
     if completed.returncode != 0:
         raise LauncherCommandError(_failure("start", project_root, completed))
 

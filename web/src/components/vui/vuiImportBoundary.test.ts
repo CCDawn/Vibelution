@@ -19,6 +19,9 @@ const localVisualClassConstantPattern = /const\s+[A-Za-z0-9_]+Class\s*=/;
 const localStylesObjectPattern = /const\s+styles\s*=/;
 const parentRouteStyleImportPattern = /from\s+["']\.\/([A-Za-z0-9]+Route)\.styles["']/g;
 const productSharedParentStyleConsumers = [
+  // Settings-align wave 3: the extracted ConfigSectionEditor shares the owning
+  // route's style module (ConfigRoute.styles) instead of owning a copy.
+  "routes/config/ConfigSectionEditor.tsx",
   "components/layout/PersistedHeightListShell.tsx",
   "components/conversation/ConversationFollowupQueueBar.tsx",
   "components/conversation/ConversationToolActivityPills.tsx",

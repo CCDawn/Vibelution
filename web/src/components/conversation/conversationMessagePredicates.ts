@@ -143,6 +143,20 @@ export function isSessionRecoveryResumedMessage(message: ConversationMessage) {
     && metadataString(message, "kind") === "session_recovery_resumed";
 }
 
+// Startup-recovery resume resubmits re-journal the original user text as a
+// system-authored row (backend ``submit_session_message`` with
+// ``turn_mode="hot_restart_resume"`` / ``write_intent=False``; metadata kind
+// ``hot_restart_resume``). The journal keeps that row — the recovery retry
+// chain re-reads the open turn's user message across restarts, and the LLM
+// history already omits it server-side. Only the display layer drops it so
+// the timeline does not duplicate the user message next to the original row
+// (same contract as isRecoverySupersededPartial and the agent-inbox /
+// steer-guidance kinds).
+export function isHotRestartResumeMessage(message: ConversationMessage) {
+  return message.role === "user"
+    && metadataString(message, "kind") === "hot_restart_resume";
+}
+
 // Half-streamed partials from an interrupted turn already carry
 // metadata.interrupted; recovery supersedes them by appending
 // metadata.recoverySuperseded. Only the display layer drops them — the journal

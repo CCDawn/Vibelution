@@ -69,6 +69,8 @@
   --vui-elevation-2-sheen: var(--vui-sheen), var(--vui-elevation-2);
   --vui-radius-panel-soft: 12px;
   --vui-radius-overlay: 12px;
+  /* Small pill/chip radius (inline code pills); ≈ the legacy 0.3rem wash. */
+  --vui-radius-chip: 5px;
   --vui-elevation-panel: var(--vui-elevation-1-sheen);
   --vui-elevation-overlay: var(--vui-elevation-2-sheen);
   --vui-ease: cubic-bezier(0.2, 0, 0, 1);
@@ -116,6 +118,14 @@
     90deg,
     color-mix(in srgb, var(--accent-cool) 8%, transparent),
     transparent 68%
+  );
+  --vui-gradient-shimmer-text: linear-gradient(
+    90deg,
+    var(--fg-secondary) 0%,
+    var(--fg-secondary) 34%,
+    color-mix(in srgb, var(--fg-secondary) 25%, transparent) 50%,
+    var(--fg-secondary) 66%,
+    var(--fg-secondary) 100%
   );
   --vui-gradient-route-overlay: linear-gradient(
     180deg,
@@ -400,6 +410,8 @@
   --vui-elevation-2-sheen: var(--vui-sheen), var(--vui-elevation-2);
   --vui-radius-panel-soft: 12px;
   --vui-radius-overlay: 12px;
+  /* Small pill/chip radius (inline code pills); ≈ the legacy 0.3rem wash. */
+  --vui-radius-chip: 5px;
   --vui-elevation-panel: var(--vui-elevation-1-sheen);
   --vui-elevation-overlay: var(--vui-elevation-2-sheen);
 

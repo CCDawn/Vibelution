@@ -362,6 +362,7 @@ const desktopLifecycleLaunchMetadata = parseDesktopLifecycleLaunchMetadata(deskt
 const singleInstanceEnvelope = createSingleInstanceEnvelope({
   projectRoot: desktopCliArgs.projectRoot,
   openWorkbench: desktopCliArgs.openWorkbench,
+  hiddenPresentation: desktopCliArgs.hiddenPresentation,
   lifecycleCommand: desktopLifecycleLaunchMetadata.command,
   lifecycleSource: desktopLifecycleLaunchMetadata.source,
   lifecycleReason: desktopLifecycleLaunchMetadata.reason,
@@ -3999,10 +4000,12 @@ async function orchestrateBranchInstanceLifecycle(
     throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to orchestrate branch instances");
   }
   const body = payload.init?.body;
-  const instanceId =
-    typeof body === "object" && body !== null
-      ? String((body as Record<string, unknown>).instanceId ?? "").trim()
-      : "";
+  const bodyRecord = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : null;
+  const instanceId = bodyRecord ? String(bodyRecord.instanceId ?? "").trim() : "";
+  // Hidden presentation travels on the payload body: the isolated-start
+  // supervisor must open this instance's window without show/focus when the
+  // start request (e.g. `launcher --hidden`) carried the intent.
+  const hiddenPresentation = bodyRecord?.hiddenPresentation === true;
   if (!instanceId) {
     throw new Error("branch instance id is required");
   }
@@ -4080,7 +4083,11 @@ async function orchestrateBranchInstanceLifecycle(
           if (provider === null) {
             throw new Error("window provider is unavailable");
           }
-          await provider.openOrFocusInstanceWorkbench({ instanceId, url });
+          await provider.openOrFocusInstanceWorkbench({
+            instanceId,
+            url,
+            ...(hiddenPresentation ? { present: false } : {})
+          });
         },
         closeWindowIfSuperseded: async () => {
           await closeWindowIfSupersededByClosedIntent(instanceId);
@@ -4507,8 +4514,10 @@ async function requestOpenWorkbenchFromSecondInstance(): Promise<void> {
 async function applyPendingProjectSlot(
   projectRoot: string,
   lifecycleCommand = "",
-  provenance: LauncherLifecycleProvenance = "operator"
+  provenance: LauncherLifecycleProvenance = "operator",
+  options: { hiddenPresentation?: boolean } = {}
 ): Promise<void> {
+  const hiddenPresentation = options.hiddenPresentation === true;
   const wanted = projectRoot.trim();
   if (!wanted) {
     return;
@@ -4562,7 +4571,10 @@ async function applyPendingProjectSlot(
           path: `branch-instances/${plan.operation}`,
           init: {
             method: "POST",
-            body: { instanceId: plan.instanceId }
+            body: {
+              instanceId: plan.instanceId,
+              ...(hiddenPresentation ? { hiddenPresentation: true } : {})
+            }
           }
         });
       }
@@ -4589,7 +4601,11 @@ async function applyPendingProjectSlot(
       throw new Error(`工作区已匹配但没有可打开的地址：${plan.instanceId}`);
     }
     if (windowAction === "instance") {
-      await provider.openOrFocusInstanceWorkbench({ instanceId: plan.instanceId, url });
+      await provider.openOrFocusInstanceWorkbench({
+        instanceId: plan.instanceId,
+        url,
+        ...(hiddenPresentation ? { present: false } : {})
+      });
       return;
     }
     currentWorkbenchUrl = url;
@@ -4752,7 +4768,9 @@ app.whenReady()
       return;
     }
     if (pendingProjectRoot) {
-      await applyPendingProjectSlot(pendingProjectRoot, firstLifecycle, desktopLifecycleProvenance);
+      await applyPendingProjectSlot(pendingProjectRoot, firstLifecycle, desktopLifecycleProvenance, {
+        hiddenPresentation: desktopCliArgs.hiddenPresentation
+      });
     } else if (firstLifecycle && firstLifecycle !== "status" && windowProvider !== null) {
       if (firstLifecycle === "open") {
         pendingOpenWorkbenchRequest = false;
@@ -4800,6 +4818,7 @@ app.on("second-instance", (_event, argv, _workingDirectory, additionalData) => {
     deepLinkUrl: findVibelutionDeepLinkArg(argv) ?? "",
     projectRoot: secondCli.projectRoot,
     openWorkbench: secondCli.openWorkbench,
+    hiddenPresentation: secondCli.hiddenPresentation,
     lifecycleCommand: secondCli.lifecycleCommand
   });
   if (intent.action === "handle_deep_link") {
@@ -4807,7 +4826,9 @@ app.on("second-instance", (_event, argv, _workingDirectory, additionalData) => {
     return;
   }
   if (intent.action === "apply_project") {
-    void applyPendingProjectSlot(intent.projectRoot, intent.lifecycleCommand, secondInstanceProvenance);
+    void applyPendingProjectSlot(intent.projectRoot, intent.lifecycleCommand, secondInstanceProvenance, {
+      hiddenPresentation: intent.hiddenPresentation
+    });
     return;
   }
   if (intent.action === "lifecycle") {

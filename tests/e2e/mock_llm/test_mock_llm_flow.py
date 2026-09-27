@@ -70,25 +70,35 @@ def _attr(holder: Any, name: str, *, timeout_ms: int = 800) -> str:
 
 
 def collect_turn(page: Any, *, timeout_ms: int = TURN_COMPLETE_TIMEOUT_MS) -> dict[str, Any]:
-    """采样 turn 生命周期直到收口；返回阶段序列与 elapsed 样本（用于断言与证据）。"""
+    """采样 turn 生命周期直到收口；返回阶段序列与 elapsed 样本（用于断言与证据）。
+
+    实测（2026-09-26）：收口前时间线上可能同时存在多个 status note（乐观 turn 壳
+    与活动层投影各一），只读 ``.first`` 会盯住陈旧元素漏记后段阶段；这里逐个扫描
+    全部 note 并按出现顺序合并阶段序列。
+    """
     stages: list[str] = []
     elapsed_samples: list[float] = []
     deadline = time.monotonic() + timeout_ms / 1000
     while time.monotonic() < deadline:
         notes = page.locator(TURN_STATUS_NOTE)
-        if notes.count() == 0:
+        count = notes.count()
+        if count == 0:
             break
-        note = notes.first
-        stage = _attr(note, "data-active-turn-stage")
-        raw_elapsed = _attr(note, "data-active-turn-elapsed-seconds")
-        if stage and (not stages or stages[-1] != stage):
-            stages.append(stage)
-        try:
-            elapsed_samples.append(float(raw_elapsed))
-        except ValueError:
-            pass
+        saw_stage = ""
+        for i in range(min(count, 4)):
+            note = notes.nth(i)
+            stage = _attr(note, "data-active-turn-stage")
+            raw_elapsed = _attr(note, "data-active-turn-elapsed-seconds")
+            if stage:
+                saw_stage = saw_stage or stage
+                if not stages or stages[-1] != stage:
+                    stages.append(stage)
+            try:
+                elapsed_samples.append(float(raw_elapsed))
+            except ValueError:
+                pass
         thread_status = _attr(page.locator(THREAD_ROOT).first, "data-agent-thread-status")
-        if not stage and thread_status == "idle":
+        if not saw_stage and thread_status == "idle":
             break
         page.wait_for_timeout(120)
     else:
@@ -137,22 +147,71 @@ def wait_thread_text(page: Any, needle: str, *, timeout_ms: int = 15_000) -> str
     return texts
 
 
+def thread_text_after(
+    page: Any,
+    needle: str,
+    *,
+    timeout_ms: int = 15_000,
+    until: tuple[str, ...] = (),
+) -> str:
+    """等指定文本上屏后，返回该锚**最后一次出现**之后的时间线尾部。
+
+    同一句话在时间线上可能出现多次（如相邻两轮），锚后的尾部文本用于只断言
+    当前轮的投影，不被前一轮同文干扰。``until`` 给出尾部必须等待出现的文本
+    （任一命中即可）：锚（用户行）上屏是乐观投影、先于回复，直接返回会读到
+    尚未落正文的时间线（idle 投影晚一拍，见 wait_thread_text 注释）。
+    """
+    texts = wait_thread_text(page, needle, timeout_ms=timeout_ms)
+    deadline = time.monotonic() + timeout_ms / 1000
+    idx = texts.rfind(needle)
+    tail = texts[idx:] if idx >= 0 else texts
+    while until and not any(item in tail for item in until) and time.monotonic() < deadline:
+        page.wait_for_timeout(200)
+        texts = thread_text(page)
+        idx = texts.rfind(needle)
+        tail = texts[idx:] if idx >= 0 else texts
+    return tail
+
+
 def assert_no_error_surface(page: Any) -> None:
     errors = page.locator('section[data-vui="state-surface"][data-tone="error"]')
     assert errors.count() == 0, f"出现 error 状态面（count={errors.count()}）"
+
+
+# ② 内联错误卡结构锚（web/src/components/conversation/ConversationView.tsx）：
+# - div.turnError：turn 失败的实时「请求错误」横幅（role="status"；「请求错误」
+#   label 是 sr-only 文案，不能当可见锚）；
+# - div.turnErrorNotice：时间线内持久化 turn-error 消息卡。
+# 两者均为 ConversationView.styles.ts 里的字面量 class token（非构建期 hash），
+# 与 role="status" 组成结构锚，避免纯文案模糊匹配。
+TURN_ERROR_BANNER = 'div.turnError[role="status"]'
+TURN_ERROR_NOTICE = 'div.turnErrorNotice[role="status"]'
+
+
+def assert_no_turn_error_card(page: Any) -> None:
+    """② 收口面无「请求错误」内联错误卡（修复 354455df3 前该链路必出）。"""
+    banner = page.locator(TURN_ERROR_BANNER)
+    notice = page.locator(TURN_ERROR_NOTICE)
+    assert banner.count() == 0, f"出现「请求错误」实时错误横幅（count={banner.count()}）"
+    assert notice.count() == 0, f"出现时间线内联错误卡（count={notice.count()}）"
 
 
 def assert_journal_all_mock(mock_llm: Any, marker: str) -> list[dict[str, Any]]:
     """journal 口径：本轮只有打到 mock 的 chat/completions 请求，且都带本用例模型。"""
     entries = mock_llm.server.journal(path="/v1/chat/completions")
     assert entries, "journal 为空：产品没有向 e2e-mock 发起请求"
+
+    def _hit(entry: dict[str, Any]) -> bool:
+        if int(entry.get("response", {}).get("status") or 0) != 200:
+            return False
+        messages = (entry.get("body") or {}).get("messages") or []
+        # 与 runner.mjs 的路由口径一致：标记允许出现在任意 user 消息里。实测
+        # （2026-09-26）主调用末条 user 消息是 Turn Status Bar 遥测尾巴，第二轮
+        # 起标记只在更早的 user 消息里，只看 messages[-1] 会漏判。
+        return any(marker in str((m or {}).get("content") or "") for m in messages)
+
     # 标记请求必须以 200 命中（产品侧真实拿到 mock 的流式回复）。
-    marker_hits = [
-        entry
-        for entry in entries
-        if int(entry.get("response", {}).get("status") or 0) == 200
-        and marker in str(entry.get("body", {}).get("messages", [{}])[-1].get("content") or "")
-    ]
+    marker_hits = [entry for entry in entries if _hit(entry)]
     assert marker_hits, f"journal 无 {marker} 的 200 命中"
     # model 只允许本车道两个 pin（空 model 的辅助调用如会话标题生成允许，由
     # zz_catchall.json 兜底接住，同样落在 mock 上）。
@@ -265,14 +324,22 @@ def chat_agent(mock_llm: Any):
 
 def test_tool_calls_turn_closes_without_crash(page: Any, e2e_instance: Any, mock_llm: Any) -> None:
     """tool_calls 剧本（参数多分片 + finish tool_calls）：请求真实打到 mock，
-    turn 收口不挂死、页面存活。
+    turn 收口不挂死、页面存活，且全程无「请求错误」内联错误卡。
 
-    实测（2026-09-25）：API 建的 Agent 未绑产品工具时，mock 返回 tool_calls 会让
-    产品 turn 以 runtime_error（reasonCode=turn_journal_replay_failed，"Seeded chat
-    history does not match ConversationLedger reconstruction"）失败，时间线出
-    「请求错误/重试」内联卡片而非正文——这是产品缺陷嫌疑（未声明工具时收到
-    tool_calls 应优雅降级，而不是 journal 重建失败），证据随任务报告提交；
-    本用例闸门只锁「到达 mock + 收口 + 页面存活」。
+    钉已修缺陷②（修复 354455df3）：未绑工具 Agent 收到 tool_calls 时，阻断路径
+    此前只把合成 tool 结果写进内存、不落 ConversationLedger，下一轮 send-time
+    reconcile 撞严格指纹闸门，以 turn_journal_replay_failed fail-closed，时间线
+    出「请求错误/重试」内联卡片。修复后阻断路径补 `tool_call_started` +
+    `tool_result(status=blocked)` 两条 ledger 事件，reconcile 通过。本用例闸门：
+    - tool_calls 轮收口后时间线无错误卡（实时横幅 + 内联卡双锚）；
+    - 加发一轮普通消息（正好踩修复机制里的「下一轮 send-time reconcile」），
+      断言收口、正文上屏且仍无错误卡。
+
+    剧本契约（scenarios/runner.mjs 场景 9）：首次调用返回 toolCalls（触发阻断），
+    后续调用返回纯文本——产品阻断后会带合成 tool 结果再次调用模型；若每次都回
+    toolCalls，turn 会迭代到 200 上限（实测拖垮 teardown，见 runner.mjs 注释）。
+    修复前该剧本同样能触发②（第一次调用即阻断、不落 ledger），收紧不改变缺陷
+    复现面。
 
     排序约束：本用例必须跑在套件第一位。实测同一实例连续建/用/删 5 个 Agent 后，
     第 6 个 Agent 的 turn 会被产品静默丢弃（thread 回 idle、乐观态冻结、无错误面、
@@ -287,10 +354,12 @@ def test_tool_calls_turn_closes_without_crash(page: Any, e2e_instance: Any, mock
         complete_turn(page, mock_llm, "E2E-MOCK-TOOL-V1 请写文件", expected_messages=2)
         # 页面壳存活：chat recipe 锚点仍可见（tool_calls 响应不炸前端）。
         assert page.locator(domain_recipe_selector("chat-session-workbench")).first.is_visible()
-        texts = thread_text(page)
-        print(
-            "[mock_llm] tool_calls 轮内联错误卡片={'请求错误' in texts} 正文上屏="
-            f"{bool(texts.strip())} thread[:200]={texts[:200]!r}"
+        # ② 闸门一：tool_calls 轮收口后时间线无「请求错误」错误卡，且以正常正文
+        # 收口（剧本第二次调用返回的阻断降级文本，见 runner.mjs 场景 9 契约）。
+        assert_no_turn_error_card(page)
+        texts = wait_thread_text(page, "tool_calls 阻断链路正常")
+        assert "tool_calls 阻断链路正常" in texts, (
+            f"tool_calls 轮未以正文收口（阻断降级缺失）: {texts[:300]!r}"
         )
         entries = assert_journal_all_mock(mock_llm, "E2E-MOCK-TOOL-V1")
         mains, total = journal_main_counts(mock_llm)
@@ -299,12 +368,49 @@ def test_tool_calls_turn_closes_without_crash(page: Any, e2e_instance: Any, mock
             f"main={mains} total={total}"
         )
         print(f"[mock_llm] tool_calls journal 条目数={len(entries)} 主调用条目={mains}")
+
+        # ② 闸门二：下一轮普通消息触发 send-time reconcile（修复机制所在路径），
+        # 必须照常收口、正文上屏且无错误卡（修复 354455df3 前这里必出
+        # turn_journal_replay_failed 错误卡）。实测 V2 的请求历史携带 V1 标记，
+        # 会命中剧本场景 9 的后续调用文本（而非 catch-all），两种正文都算通过。
+        mains_before_v2, _ = journal_main_counts(mock_llm)
+        complete_turn(page, mock_llm, "E2E-MOCK-TOOL-V2 收尾确认", expected_messages=4)
+        tail = thread_text_after(
+            page,
+            "E2E-MOCK-TOOL-V2 收尾确认",
+            until=("catch-all", "改为直接回复"),
+        )
+        assert "catch-all" in tail or "改为直接回复" in tail, (
+            f"第二轮普通回复未上时间线: {tail[:300]!r}"
+        )
+        assert_no_turn_error_card(page)
+        # journal 侧不反查 V2 标记：主调用请求体可能超 aimock journal 64KB 条目
+        # 上限而 body 落 None（V1 的 marker 命中实为标题辅助调用的引文），改用
+        # 「主调用 200 条目增长 + 模型白名单」证明 V2 真实打到 mock 且被服务。
+        entries_v2 = mock_llm.server.journal(path="/v1/chat/completions")
+        mains_after_v2 = sum(
+            1
+            for e in entries_v2
+            if not _is_title_entry(e)
+            and int(e.get("response", {}).get("status") or 0) == 200
+        )
+        assert mains_after_v2 > mains_before_v2, (
+            "第二轮主调用未到 mock（journal 主调用 200 条目无增长）："
+            f"before={mains_before_v2} after={mains_after_v2}"
+        )
+        unexpected = {
+            str((e.get("body") or {}).get("model") or "") for e in entries_v2
+        } - {"e2e-mock-chat", "e2e-mock-tools", ""}
+        assert not unexpected, f"journal 出现意外 model: {unexpected}"
     finally:
         mock_llm.delete_agent(created["agentId"])
 
 
 def test_normal_stream_stage_and_markdown(page: Any, e2e_instance: Any, mock_llm: Any, chat_agent: dict) -> None:
-    """发消息 → stage 推进（thinking→responding）→ markdown 正文上时间线 → turn 收口。"""
+    """发消息 → stage 推进（thinking/responding）→ markdown 正文上时间线 → turn 收口。
+
+    ⑦b responding 阶段已收紧为硬闸门（2026-09-26 钉死根因并修复，见断言处注释）。
+    """
     open_agent_chat(page, e2e_instance, chat_agent["sessionId"])
     send_message(page, "E2E-MOCK-MARKDOWN-V1 请给我一份 markdown 样例")
     assert wait_turn_started(page, mock_llm, submit_text="E2E-MOCK-MARKDOWN-V1 请给我一份 markdown 样例"), "turn 未启动"
@@ -325,10 +431,15 @@ def test_normal_stream_stage_and_markdown(page: Any, e2e_instance: Any, mock_llm
     print(f"[mock_llm] stage 序列={turn['stages']} elapsed 样本数={len(turn['elapsed'])}")
     assert turn["stages"], "未观测到任何 data-active-turn-stage（turn 状态面没出现）"
     # 阶段推进口径：wait_turn_started 已确认 stage 从 user_submit 推进过（提交阶段
-    # 证据），collect_turn 从推进后开始采样，故这里断言 thinking（reasoning 流可
-    # 观测）即可；当前 HEAD 后端不再发 responding（e2e-playwright.md 锚点口径由其
-    # owner 更新）。
+    # 证据），collect_turn 从推进后开始采样。
     assert "thinking" in turn["stages"], f"未观测到 thinking 阶段: {turn['stages']}"
+    # ⑦b 闸门（2026-09-26 收紧）：根因已钉死并修复——绑工具的 chat 路由把可见
+    # 正文解码为 interim_text_delta，turn_llm_adapter.on_protocol_event 只转发
+    # commentary/answer delta，interim 被丢弃，导致 ui.stream_response 只在终态
+    # 回调（turn 收口瞬间）被调一次，c50d6b8a3 的 first_answer_delta 发射点在
+    # UI 采样窗内不可观测。adapter 转发 interim delta 后，正文流中途即跨过
+    # batcher 批阈值并发射 responding。此前打印留证升级回硬断言。
+    assert "responding" in turn["stages"], f"未观测到 responding 阶段（⑦b 回归）: {turn['stages']}"
     assert_no_error_surface(page)
     texts = wait_thread_text(page, "E2E 冒烟回复")
     assert "E2E 冒烟回复" in texts, f"markdown 标题未出现在时间线: {texts[:300]!r}"
@@ -416,7 +527,15 @@ def test_long_think_stage_elapsed_grows(page: Any, e2e_instance: Any, mock_llm: 
 
 
 def test_format_leak_renders_without_crash(page: Any, e2e_instance: Any, mock_llm: Any, chat_agent: dict) -> None:
-    """格式泄漏剧本：content/reasoning 混入协议文本，前端渲染不炸、turn 正常收口。"""
+    """格式泄漏剧本：content/reasoning 混入协议文本，前端渲染不炸、turn 正常收口。
+
+    钉已修缺陷④（修复 d3cf4fa8f）：此前流式 think 态遇异名闭合即错配、非流式
+    未闭合即吞到末尾，前端 skipHtml 的 HTML 块语义还把行首 summary 标签连同
+    紧随其后无空行的明文段一起吞掉——缺陷本体是吞正文。修复后行首
+    think/thinking/summary/analysis 标签被 fence 感知转义为字面文本，紧随明文
+    保住上屏。本用例闸门：summary 信封行与其后明文段（「正文仍然可读」）必须
+    可见；工具信封原始行照旧可见。
+    """
     from tests.e2e.helpers.page_anchors import domain_recipe_selector
 
     open_agent_chat(page, e2e_instance, chat_agent["sessionId"])
@@ -424,15 +543,23 @@ def test_format_leak_renders_without_crash(page: Any, e2e_instance: Any, mock_ll
     assert_no_error_surface(page)
     # 页面壳仍活着：chat recipe 锚点可见，泄漏文本按内容上屏（不要求转义形态）。
     assert page.locator(domain_recipe_selector("chat-session-workbench")).first.is_visible()
-    # 实测（2026-09-25）：渲染器把 <think>/<summary> 原始 HTML 连同标签内文本一起
-    # 吞掉，且紧随其后无空行的明文段也被并入 HTML 块丢弃；只有纯文本行
-    # （[TOOL_CALL: ...]）上屏。这里断言「原始行可见 + 不炸 + 收口」，吞字范围
-    # 打印留证（产品渲染保真度嫌疑记入报告，不作为本车道闸门）。
-    texts = wait_thread_text(page, "write_file")
+    # 等待锚点用尾段明文：⑦b 修复后正文真实流式（不再收口才整段出现），
+    # 先上屏的 write_file 行出现时尾段可能仍在流式途中。
+    texts = wait_thread_text(page, "正文仍然可读")
     assert "write_file" in texts, f"泄漏剧本原始行未上时间线: {texts[:300]!r}"
+    # ④ 闸门：紧随泄漏标签之后的明文段必须上屏（修复 d3cf4fa8f 前被 HTML 块
+    # 语义连吞）；summary 信封行本体同样从「连吞」恢复为字面文本可见。
+    assert "正文仍然可读" in texts, (
+        f"泄漏标签之后的明文段未上屏（缺陷④回归）: {texts[:300]!r}"
+    )
+    assert "内部摘要信封泄漏" in texts, (
+        f"summary 信封行未以字面文本上屏（缺陷④回归）: {texts[:300]!r}"
+    )
+    # 事实留证（非闸门）：content 里成对 <think>…</think> 属 reasoning 提取语义
+    # （修复保持不变），其内文本不上屏是预期；打印观察不判失败。
     print(
-        "[mock_llm] 泄漏文本上屏事实: "
-        f"think={'未闭合的思考标签泄漏' in texts} summary={'内部摘要信封泄漏' in texts} "
-        f"尾段={'正文仍然可读' in texts}"
+        "[mock_llm] 泄漏文本事实: "
+        f"think内文可见={'未闭合的思考标签泄漏' in texts}（reasoning 提取预期 False） "
+        f"summary信封={'内部摘要信封泄漏' in texts} 尾段明文={'正文仍然可读' in texts}"
     )
     assert_journal_all_mock(mock_llm, "E2E-MOCK-LEAK-V1")

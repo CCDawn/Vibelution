@@ -146,6 +146,32 @@ def _interrupted_turn_prompt(events: list[Any], turn_id: str) -> str:
     return ""
 
 
+def _interrupted_turn_attachment_ids(events: list[Any], turn_id: str) -> list[str]:
+    """The interrupted turn's attachment artifact ids from the journal payload.
+
+    The journal stores attachment metadata only (artifactId/url, no bytes), so
+    a faithful resume re-passes the ids and the submit path re-resolves the
+    artifacts exactly like the original submission did.
+    """
+
+    for event in reversed(list(events or [])):
+        if str(getattr(event, "event_type", "") or "").strip() != EVENT_USER_MESSAGE:
+            continue
+        if str(getattr(event, "turn_id", "") or "").strip() != turn_id:
+            continue
+        payload = getattr(event, "payload", None)
+        attachments = payload.get("attachments") if isinstance(payload, dict) else None
+        artifact_ids: list[str] = []
+        for attachment in list(attachments or []):
+            if not isinstance(attachment, dict):
+                continue
+            artifact_id = str(attachment.get("artifactId") or "").strip()
+            if artifact_id and artifact_id not in artifact_ids:
+                artifact_ids.append(artifact_id)
+        return artifact_ids
+    return []
+
+
 def _recovery_turn_label(prompt: str) -> str:
     """A short, single-line label of the interrupted turn for the status row."""
 
@@ -266,8 +292,9 @@ def _resume_interrupted_turn(
         summary["noInterruptedTurnCount"] += 1
         return
     prompt = _interrupted_turn_prompt(events, open_turn_id)
-    if not prompt:
-        # Nothing faithful to resubmit (e.g. an attachment-only turn); the
+    attachment_ids = _interrupted_turn_attachment_ids(events, open_turn_id)
+    if not prompt and not attachment_ids:
+        # Nothing faithful to resubmit (no prompt and no attachments); the
         # interrupted presentation stays and the user can resend manually.
         summary["noInterruptedTurnCount"] += 1
         return
@@ -297,6 +324,10 @@ def _resume_interrupted_turn(
         _RESUMED_TURN_KEYS.add(turn_key)
 
     turn_label = _recovery_turn_label(prompt)
+    if not turn_label and attachment_ids:
+        # Attachment-only turn: an empty text resubmit is valid (submit accepts
+        # attachments without content), the label just needs something visible.
+        turn_label = "[图片]"
     try:
         detail = s.submit_session_message(
             session_id,
@@ -304,6 +335,7 @@ def _resume_interrupted_turn(
             turn_mode="hot_restart_resume",
             write_intent=False,
             client_submission_id=f"resume:{open_turn_id}",
+            attachment_ids=attachment_ids or None,
             message_metadata={
                 "kind": "hot_restart_resume",
                 "recoverySource": "startup_sweep",

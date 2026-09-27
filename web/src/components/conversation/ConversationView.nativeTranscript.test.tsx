@@ -680,7 +680,7 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain("context_compression_failed_preserved");
   });
 
-  it("collapses a settled reasoning cell to a preview and unmounts its body", () => {
+  it("keeps reasoning cells collapsed while streaming and after settle, with a rolling summary", () => {
     const reasoning = (status: "running" | "completed"): ConversationMessage => ({
       id: `assistant-reasoning-${status}`,
       role: "assistant",
@@ -702,18 +702,24 @@ describe("ConversationView native Codex transcript surface", () => {
       }],
     });
 
+    // ZCode parity: live reasoning stays collapsed too, only the running title
+    // and the latest-sentence summary roll in the header.
     const live = renderConversation([reasoning("running")]);
-    expect(live).toContain('data-thought-expanded="true"');
-    expect(live).toContain('data-thought-scroll-body="true"');
+    expect(live).toContain('data-thought-expanded="false"');
+    expect(live).toContain("思考中");
+    expect(live).toContain('data-thought-streaming-summary="true"');
     expect(live).toContain("先确认这个函数的两条来源路径");
+    expect(live).not.toContain('data-thought-scroll-body="true"');
 
     const settled = renderConversation([reasoning("completed")]);
     expect(settled).toContain('data-thought-expanded="false"');
+    expect(settled).toContain("已思考");
     // Collapsed means the long body is not mounted at all: the finished thought
     // stops re-rendering its text on every transcript update.
     expect(settled).not.toContain('data-thought-scroll-body="true"');
-    // The one-line preview keeps the collapsed cell scannable.
-    expect(settled).toContain(styles.timelineThoughtInlinePreview);
+    // The latest-sentence summary keeps the collapsed lane scannable.
+    expect(settled).toContain('data-thought-streaming-summary="true"');
+    expect(settled).toContain("先确认这个函数的两条来源路径");
   });
 
   it("keeps a retry turn item out of the settled transcript", () => {
@@ -747,6 +753,73 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain("请求重试");
     expect(html).not.toContain(">model_retry<");
     expect(html).not.toContain("第 1/3 次");
+  });
+
+  it("adds the settled-turn work header only when a derivable span exists", () => {
+    const startMs = Date.parse("2026-09-11T07:00:00.000Z");
+    const base = {
+      id: "assistant-work-header",
+      role: "assistant" as const,
+      timestamp: "2026-09-11T07:00:00.000Z",
+      turnId: "turn-work-header",
+      status: "completed" as const,
+      turnItems: [
+        {
+          id: "tool-1-r1",
+          itemId: "tool-1",
+          version: 3 as const,
+          sessionId: "session-1",
+          turnId: "turn-work-header",
+          type: "tool_call" as const,
+          status: "completed" as const,
+          revision: 1,
+          sequence: 1,
+          callId: "call-1",
+          toolName: "terminal",
+          metadata: {
+            executionStartedAtEpochMs: startMs + 1_000,
+            durationMs: 120_000,
+          },
+        },
+        {
+          id: "answer-1-r1",
+          itemId: "answer-1",
+          version: 3 as const,
+          sessionId: "session-1",
+          turnId: "turn-work-header",
+          type: "agent_message" as const,
+          phase: "final_answer" as const,
+          status: "completed" as const,
+          revision: 1,
+          sequence: 2,
+          text: "已经完成。",
+        },
+      ],
+    };
+
+    const withWork = renderConversation([base]);
+    expect(withWork).toContain('data-testid="conversation-turn-work-header"');
+    expect(withWork).toContain("已工作 2 分 1 秒");
+    expect(withWork).toContain('data-turn-work-basis="turn_span"');
+    // Collapsed by default: no open attribute (hiding is UA behavior for
+    // details, so the body markup exists but starts collapsed).
+    expect(withWork).not.toMatch(/<details[^>]*\sopen[=\s>]/);
+
+    // Short turns stay quiet.
+    const short = renderConversation([{
+      ...base,
+      id: "assistant-work-header-short",
+      turnItems: base.turnItems.map((item) => (
+        item.type === "tool_call"
+          ? { ...item, id: "tool-short-r1", metadata: { executionStartedAtEpochMs: startMs, durationMs: 2_000 } }
+          : item
+      )),
+    }]);
+    expect(short).not.toContain('data-testid="conversation-turn-work-header"');
+
+    // In-flight turns stay quiet too.
+    const streaming = renderConversation([{ ...base, id: "assistant-work-header-live", status: "running" as const }]);
+    expect(streaming).not.toContain('data-testid="conversation-turn-work-header"');
   });
 
   it("offers a copy action on a settled assistant answer", () => {

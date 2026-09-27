@@ -7,6 +7,7 @@ import { ConversationToolActivity } from "./ConversationToolActivity";
 import styles from "./ConversationToolActivity.styles";
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
 import { createCodexTranscriptToolActivity } from "./conversationToolActivityModel";
+import { conversationSubagentColorBucket } from "./conversationSubagentColor";
 
 const activityCss = readFileSync(new URL("./ConversationToolActivity.css", import.meta.url), "utf8");
 
@@ -20,6 +21,12 @@ function toolCell(id: string, summary: string): CodexTranscriptCell {
     title: "code_symbol_tool",
     summary,
   };
+}
+
+function namedToolCell(id: string, rawToolName: string, summary = "已完成"): CodexTranscriptCell {
+  const cell = toolCell(id, summary);
+  cell.title = rawToolName;
+  return cell;
 }
 
 function openingTagContaining(html: string, marker: string) {
@@ -385,7 +392,7 @@ describe("ConversationToolActivity", () => {
     expect(styles.itemStatic).toContain("items-center");
   });
 
-  it("opens the current running tool detail directly by default", () => {
+  it("keeps the running tool row collapsed with a shimmering action word and a static icon", () => {
     const runningCell = toolCell("tool-running", "正在执行");
     runningCell.status = "running";
     runningCell.tone = "running";
@@ -401,7 +408,50 @@ describe("ConversationToolActivity", () => {
     expect(html).toContain('data-codex-transcript-cell-status="running"');
     expect(html).toContain('data-codex-tool-activity-state="running"');
     expect(html).not.toContain("正在运行工具");
-    expect(openingTagContaining(html, 'data-codex-tool-detail="true"')).toContain('open=""');
+    // Default collapsed: running rows no longer open themselves.
+    expect(openingTagContaining(html, 'data-codex-tool-detail="true"')).not.toContain("open");
+    // Running lives in the action word's shimmer, not a spinning icon.
+    expect(html).toContain('data-codex-tool-action-running="true"');
+    expect(html).toContain("actionLabelRunning");
+    expect(html).not.toContain("animate-spin");
+  });
+
+  it("carries failure semantics via a dashed status word with a hover tooltip, not a red blast", () => {
+    const failedCell = toolCell("tool-failed", "HTTP 406: https://elifesciences.org/articles/13810");
+    failedCell.status = "failed";
+    failedCell.tone = "error";
+
+    const html = renderToStaticMarkup(
+      <ConversationToolActivity
+        activity={createCodexTranscriptToolActivity([failedCell])}
+        language="zh"
+        renderToolDetails={() => null}
+      />,
+    );
+
+    // Status word keeps its color + dashed underline and reveals the error on hover.
+    expect(html).toContain('data-codex-tool-status-pill="true"');
+    expect(html).toContain('data-codex-tool-status-kind="failed"');
+    expect(html).toContain('title="HTTP 406: https://elifesciences.org/articles/13810"');
+    // The expanded body (SSR keeps it mounted) keeps the full error + a copy affordance.
+    expect(html).toContain('data-codex-tool-failure-copy="true"');
+    expect(html).toContain("复制错误详情");
+    // Leading icon stays muted (no red).
+    expect(html).toContain("itemIconFailed");
+    expect(styles.statusLabel).toContain("underline");
+    expect(styles.statusLabel).toContain("decoration-dashed");
+  });
+
+  it("encodes the running shimmer in CSS with a reduced-motion static fallback", () => {
+    expect(styles.actionLabelRunning).toContain("inline-block");
+    expect(activityCss).toContain("@keyframes vui-tool-activity-shimmer");
+    expect(activityCss).toContain(".vui-components-conversation-tool-activity.actionLabelRunning");
+    expect(activityCss).toContain("background-clip: text");
+    // Reduced motion: no sweep, static tinted word instead.
+    const shimmerIndex = activityCss.indexOf(".vui-components-conversation-tool-activity.actionLabelRunning");
+    const reducedBlock = activityCss.slice(activityCss.indexOf("prefers-reduced-motion", shimmerIndex));
+    expect(reducedBlock).toContain(".vui-components-conversation-tool-activity.actionLabelRunning");
+    expect(reducedBlock).toContain("animation: none");
   });
 
   it("uses a semantic code result as the row title without repeating the generic tool name", () => {
@@ -481,5 +531,133 @@ describe("ConversationToolActivity", () => {
     expect(html).not.toContain("web_fetch_tool");
     expect(html).toContain("lucide-file-search");
     expect(html).toContain("lucide-pencil-line");
+  });
+
+  it("wraps two distinct explore runs in one anchored category group (ZCode Explore)", () => {
+    const html = renderToStaticMarkup(
+      <ConversationToolActivity
+        activity={createCodexTranscriptToolActivity([
+          namedToolCell("read-cat-1", "read_file_tool"),
+          namedToolCell("grep-cat-1", "grep_search_tool"),
+        ])}
+        language="zh"
+        renderToolDetails={() => null}
+      />,
+    );
+
+    expect(html).toContain('data-codex-tool-activity-category-group="true"');
+    expect(html).toContain('data-codex-tool-category="explore"');
+    expect(html).toContain('data-conversation-part-key="tool-category-group:read-cat-1"');
+    expect(summaryContaining(html, "探索")).toContain("· 2 次");
+    // Both children stay visible (name-level rows/batches inside the category pass).
+    expect(html.match(/data-codex-tool-activity-item="true"/g)).toHaveLength(2);
+    // A single explore tool never gains a parent wrapper.
+    const single = renderToStaticMarkup(
+      <ConversationToolActivity
+        activity={createCodexTranscriptToolActivity([namedToolCell("read-solo", "read_file_tool")])}
+        language="zh"
+        renderToolDetails={() => null}
+      />,
+    );
+    expect(single).not.toContain('data-codex-tool-activity-category-group="true"');
+  });
+
+  it("keeps the category group anchored while more same-category children stream in", () => {
+    const render = (ids: string[]) => renderToStaticMarkup(
+      <ConversationToolActivity
+        activity={createCodexTranscriptToolActivity(ids.map((id) => namedToolCell(
+          id,
+          id.startsWith("grep") ? "grep_search_tool" : "read_file_tool",
+        )))}
+        language="zh"
+        renderToolDetails={() => null}
+      />,
+    );
+    const two = render(["read-grow-1", "grep-grow-1"]);
+    const three = render(["read-grow-1", "grep-grow-1", "read-grow-2"]);
+    const key = 'data-conversation-part-key="tool-category-group:read-grow-1"';
+    expect(two).toContain(key);
+    expect(three).toContain(key);
+    expect(three).toContain('data-codex-tool-activity-count="3"');
+  });
+
+  it("aggregates child states on the category row: running shimmers, failure summarizes", () => {
+    const runningChild = namedToolCell("grep-run-1", "grep_search_tool", "正在搜索");
+    runningChild.status = "running";
+    runningChild.tone = "running";
+    const runningHtml = renderToStaticMarkup(
+      <ConversationToolActivity
+        activity={createCodexTranscriptToolActivity([
+          namedToolCell("read-run-1", "read_file_tool"),
+          runningChild,
+        ])}
+        language="zh"
+        renderToolDetails={() => null}
+      />,
+    );
+    const groupSummary = summaryContaining(runningHtml, "探索");
+    expect(groupSummary).toContain('data-codex-tool-action-running="true"');
+    expect(groupSummary).toContain("actionLabelRunning");
+    expect(runningHtml).toContain('aria-live="polite"');
+
+    const failedCell = namedToolCell("grep-fail-1", "grep_search_tool", "HTTP 406: https://example.com/a");
+    failedCell.status = "failed";
+    failedCell.tone = "error";
+    const failedHtml = renderToStaticMarkup(
+      <ConversationToolActivity
+        activity={createCodexTranscriptToolActivity([
+          namedToolCell("read-fail-1", "read_file_tool"),
+          failedCell,
+        ])}
+        language="zh"
+        renderToolDetails={() => null}
+      />,
+    );
+    const failedSummary = summaryContaining(failedHtml, "探索");
+    expect(failedSummary).toContain("1 项需关注");
+    expect(failedSummary).toContain('data-codex-tool-status-kind="failed"');
+    expect(failedSummary).toContain('title="HTTP 406: https://example.com/a"');
+  });
+
+  it("renders the subagent spawn row with a stable token-derived colored name", () => {
+    const cell = namedToolCell("spawn-color-1", "spawn_agent_tool", "");
+    cell.toolArguments = { task_type: "research" };
+    const html = renderToStaticMarkup(
+      <ConversationToolActivity
+        activity={createCodexTranscriptToolActivity([cell])}
+        language="zh"
+        renderToolDetails={() => null}
+      />,
+    );
+
+    expect(html).toContain("派生代理");
+    expect(html).toContain('data-codex-tool-agent-name="true"');
+    // The agent name replaces the generic subject and carries its bucket accent.
+    expect(html).toContain(">research</span>");
+    const bucket = conversationSubagentColorBucket("research");
+    expect(html).toContain(
+      `--subagent-accent:hsl(from var(--accent-cool) calc(h + ${bucket * 45}deg) s l)`,
+    );
+    // Colors never become literals; the chip derives from the theme token.
+    expect(html).not.toMatch(/#[0-9a-fA-F]{3,8}[";]/);
+    expect(styles.agentNameChip).toContain("inline-flex");
+    expect(activityCss).toContain(".vui-components-conversation-tool-activity.agentNameChip");
+    expect(activityCss).toContain("var(--subagent-accent, var(--fg-tertiary))");
+    expect(activityCss).toContain("color-mix(in srgb, var(--subagent-accent, var(--fg-tertiary)) 14%, transparent)");
+  });
+
+  it("keeps category group chrome on the shared quiet-row contract", () => {
+    expect(styles.categoryGroupSummary).toContain("list-none");
+    expect(styles.categoryGroupSummary).toContain("[&::marker]:content-none");
+    expect(styles.categoryGroupSummary).toContain("items-center");
+    expect(styles.categoryGroupDetailsInner).toContain("pl-1");
+    expect(styles.categoryGroupDetails).not.toContain("border-l");
+    expect(styles.agentNameChip).not.toContain("rounded-full");
+    expect(activityCss).toContain(".vui-components-conversation-tool-activity.categoryGroup:not([open])");
+    expect(activityCss).toContain("> .vui-components-conversation-tool-activity.categoryGroupDetails");
+    expect(activityCss).toContain(".vui-components-conversation-tool-activity.categoryGroup[open]");
+    const groupAnimIndex = activityCss.indexOf(".vui-components-conversation-tool-activity.categoryGroup[open]");
+    const reducedBlock = activityCss.indexOf("prefers-reduced-motion", groupAnimIndex);
+    expect(reducedBlock).toBeGreaterThan(-1);
   });
 });

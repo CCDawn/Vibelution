@@ -83,6 +83,39 @@ describe("ConversationFollowupQueueBar", () => {
     expect(onUpdate).toHaveBeenCalledWith("q-1", "先不要改测试，只汇报改了哪些文件。");
   });
 
+  it("shows a system return in the queue without edit or steer controls", async () => {
+    const onRemove = vi.fn();
+    const onSteer = vi.fn();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <ConversationFollowupQueueBar
+          items={[{ id: "notice-1", text: "后台任务完成", kind: "task_notification", canSteer: false }]}
+          lang="zh"
+          editLabel="修改这条排队"
+          withdrawLabel="撤回这条排队"
+          steerLabel="立刻引导"
+          onUpdate={vi.fn()}
+          onRemove={onRemove}
+          onMove={vi.fn()}
+          onSteer={onSteer}
+        />,
+      );
+    });
+
+    expect(container?.textContent).toContain("后台");
+    expect(container?.textContent).toContain("后台任务完成");
+    expect(container?.querySelector('button[aria-label="修改这条排队"]')).toBeNull();
+    expect(container?.querySelector('button[aria-label="立刻引导"]')).toBeNull();
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('button[aria-label="撤回这条排队"]')?.click();
+    });
+    expect(onRemove).toHaveBeenCalledWith("notice-1");
+    expect(onSteer).not.toHaveBeenCalled();
+  });
+
   it("toggles pause and resume per queued item and weakens paused rows", async () => {
     const onTogglePause = vi.fn();
     container = document.createElement("div");

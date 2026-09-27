@@ -8,19 +8,14 @@ import type {
   ConversationViewProps,
 } from "../../components/conversation/conversationViewTypes";
 import { projectActiveTurnLayerMessage } from "../chatActiveTurnLayer";
+import type { ComposerImageAttachment } from "./chatComposerSubmitModel";
 import {
   useActiveTurnLayerForSession,
   useActiveTurnLayersStore,
 } from "./activeTurnLayersStore";
 
-export type ChatComposerImageAttachment = {
-  id: string;
-  filename: string;
-  previewUrl: string;
-  sizeBytes: number;
-  contentType: string;
-  kind?: "image" | "document";
-};
+/** Wire-safe projection of a composer attachment (no File/localPath across the bridge). */
+export type ChatComposerImageAttachment = Omit<ComposerImageAttachment, "file" | "localPath">;
 
 export type ChatConversationComposerBridgeLabels = {
   editMessageModeNotice: string;
@@ -109,6 +104,8 @@ export function mapChatComposerImageAttachments(
     sizeBytes: attachment.sizeBytes,
     contentType: attachment.contentType,
     kind: attachment.kind,
+    uploadStatus: attachment.uploadStatus,
+    artifactId: attachment.artifactId,
   }));
 }
 

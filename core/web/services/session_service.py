@@ -511,6 +511,11 @@ from core.web.services.session.turn_diagnostics import (
     _touch_chat_turn_work_run,
     _record_session_chat_review_candidate_event,
 )
+from core.web.services.session.message_curation import (
+    set_session_message_curation,
+    get_session_message_curation,
+    _record_session_message_curation_event,
+)
 from core.web.services.session.agent_runtime import (
     _agent_from_lookup,
     _recover_active_direct_session_agent,
@@ -588,13 +593,18 @@ from core.web.services.session.image_attachments import (
     _recent_image_attachment_missing_message,
     _record_image_attachment_capability_event,
     _build_llm_image_attachments,
+    _seed_history_messages_with_image_attachments,
     _record_session_attachment_event,
     _safe_attachment_log_summary,
 )
 from core.web.services.session.queued_turns import (
+    advance_session_branch_generation,
     enqueue_session_queued_turn,
+    enqueue_session_runtime_notice,
     list_session_queued_turns,
+    notify_parent_session_of_child_return,
     remove_session_queued_turn,
+    session_branch_generation,
     update_session_queued_turn,
     session_queued_turn_rows as _session_queued_turn_rows,
     drain_session_queued_turns as _drain_session_queued_turns,
@@ -698,6 +708,7 @@ from core.web.services.session.signals_format import (
     _latest_effective_user_message,
     _latest_effective_user_message_with_index,
     _latest_effective_user_messages,
+    _message_content_as_text,
     _latest_message_is_image_generation_artifact,
     _lightweight_chat_payload_decision,
     _looks_like_image_generation_success_text,
@@ -1297,6 +1308,10 @@ class SessionValidationError(ValueError):
 
 class SessionChatReviewCandidateExistsError(RuntimeError):
     """Raised when the session snapshot is already queued for chat review."""
+
+
+class SessionMessageCurationStateError(RuntimeError):
+    """Raised when an inline message curation decision conflicts with its recorded queue state."""
 
 
 @dataclass

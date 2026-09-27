@@ -118,14 +118,19 @@ export function shouldRenderCompactActiveTurnPlaceholder(input: {
   /** Native/package codex surface already paints process or answer — do not stack a status note. */
   hasCodexSurface?: boolean;
 }) {
+  // Defect ⑦b: the shell must survive the answer-streaming window. The first
+  // content flush publishes the batched reasoning trail and the answer in the
+  // same frame (hasFeedbackTimeline + showResponseBlock + the codex answer
+  // cell all flip true), one frame before the backend's `responding` status
+  // row — so suppressing on any of those retired the shell exactly when the
+  // responding stage should be observable, and the stage row could never
+  // render. The shell retires at settle (streaming/inFlight off) and still
+  // yields to genuinely richer in-flight surfaces: running tools and errors.
   return Boolean(
     input.role === "assistant"
     && (input.streaming || input.inFlight)
     && !input.turnErrorMessage
-    && !input.showResponseBlock
-    && !input.hasFeedbackTimeline
     && !input.hasActiveProcess
-    && !input.hasCodexSurface
   );
 }
 

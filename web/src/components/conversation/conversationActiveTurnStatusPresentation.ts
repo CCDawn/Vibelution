@@ -5,13 +5,14 @@ import type { SessionTurnItem } from "../../api/types";
 /** Keep a stage label on screen at least this long before switching (anti-flicker). */
 export const ACTIVE_TURN_STAGE_MIN_DWELL_MS = 700;
 
-export type ActiveTurnStageBarPhase = "sent" | "prepare" | "request" | "thinking";
+export type ActiveTurnStageBarPhase = "sent" | "prepare" | "request" | "thinking" | "respond";
 
 export const ACTIVE_TURN_STAGE_BAR_PHASES: readonly ActiveTurnStageBarPhase[] = [
   "sent",
   "prepare",
   "request",
   "thinking",
+  "respond",
 ] as const;
 
 export type ActiveTurnStatusMessageLike = {
@@ -51,6 +52,14 @@ export type ActiveTurnRetryProgress = {
   attempt: number;
   maxAttempts: number;
 };
+
+/**
+ * ZCode-aligned retry visibility: the first two short recoveries are
+ * indistinguishable from a normal load for the user, so they stay silent on
+ * the heartbeat. Only from the third attempt onward does the turn surface a
+ * visible "第 X/N 次重试" counter.
+ */
+export const MIN_VISIBLE_API_RETRY_ATTEMPT = 3;
 
 const RETRY_STAGE_NAMES = ["model_retry", "retrying"];
 
@@ -127,6 +136,22 @@ export function resolveActiveTurnRetryProgress(
   return null;
 }
 
+/**
+ * Retry progress worth showing on the heartbeat, or null while the current
+ * retry is still inside the silent first-attempts window. `null` progress
+ * (no attempt number known) stays silent too: an uncounted "retrying" line is
+ * exactly the noise this gate exists to remove.
+ */
+export function visibleActiveTurnRetryProgress(
+  progress: ActiveTurnRetryProgress | null | undefined,
+): ActiveTurnRetryProgress | null {
+  return progress && progress.attempt >= MIN_VISIBLE_API_RETRY_ATTEMPT ? progress : null;
+}
+
+function isRetryStageName(stage: string) {
+  return RETRY_STAGE_NAMES.includes(normalizeStage(stage));
+}
+
 export function resolveActiveTurnProgressStage(message: ActiveTurnStatusMessageLike): string {
   const items = [...(message.turnItems ?? [])]
     .sort((left, right) => left.sequence - right.sequence || left.revision - right.revision);
@@ -174,6 +199,12 @@ export function activeTurnStageBarPhase(stage: string): ActiveTurnStageBarPhase 
     case "reasoning":
     case "thinking":
       return "thinking";
+    // The backend emits a `responding` status row on the first answer delta;
+    // `assistant_response` is the legacy transport stage the live-output state
+    // keeps during answer streaming — both belong to the respond phase.
+    case "responding":
+    case "assistant_response":
+      return "respond";
     default:
       return "other";
   }
@@ -193,6 +224,8 @@ export function activeTurnStageBarPhaseLabel(
       return zh ? "请求" : "Request";
     case "thinking":
       return zh ? "思考" : "Think";
+    case "respond":
+      return zh ? "回答" : "Respond";
     default:
       return zh ? "处理" : "Work";
   }
@@ -229,6 +262,9 @@ export function activeTurnStageLabel(stage: string, lang: "zh" | "en" | string) 
     case "tooling":
       return zh ? "执行工具" : "Running tools";
     case "responding":
+    // Legacy transport stage for answer streaming (backend keeps it on the
+    // live-output state; the visible responding row drives the chip).
+    case "assistant_response":
       return zh ? "生成回答" : "Generating";
     case "model_failed":
       return zh ? "请求失败" : "Request failed";
@@ -298,11 +334,23 @@ export function formatActiveTurnHeartbeatText(
   lang: "zh" | "en" | string,
   retryProgress?: ActiveTurnRetryProgress | null,
 ) {
-  const label = activeTurnStageLabel(stage, lang);
-  const retrySuffix = retryProgress && retryProgress.attempt > 0
-    ? `${retryProgress.attempt}/${Math.max(retryProgress.attempt, retryProgress.maxAttempts)}`
-    : "";
-  const head = retrySuffix ? `${label} ${retrySuffix}` : label;
+  const zh = lang !== "en";
+  // Only counted retries from the third attempt onward earn a visible counter;
+  // the silent early attempts keep the plain request wording so the heartbeat
+  // does not advertise recoveries the user never needed to know about.
+  const visibleRetry = visibleActiveTurnRetryProgress(retryProgress ?? null);
+  let head: string;
+  if (visibleRetry) {
+    // Stable count only — backend pushes a point-in-time snapshot, never a
+    // per-second countdown, so no delay seconds are invented here.
+    head = zh
+      ? `第 ${visibleRetry.attempt}/${Math.max(visibleRetry.attempt, visibleRetry.maxAttempts)} 次重试`
+      : `Retrying (attempt ${visibleRetry.attempt}/${Math.max(visibleRetry.attempt, visibleRetry.maxAttempts)})`;
+  } else if (isRetryStageName(stage)) {
+    head = activeTurnStageLabel("model_request", lang);
+  } else {
+    head = activeTurnStageLabel(stage, lang);
+  }
   if (elapsedSeconds == null || !Number.isFinite(elapsedSeconds)) {
     return head;
   }
@@ -355,6 +403,27 @@ export function resolveActiveTurnDisconnectSeconds(input: {
     return 0;
   }
   return Math.max(0, Math.floor((input.nowMs - sinceMs) / 1000));
+}
+
+/**
+ * Cooldown after a manual reconnect click: the button stays disabled so a
+ * stuck transport cannot be hammered; the state flipping back to connected
+ * clears it earlier through the advisory unmounting.
+ */
+export const ACTIVE_TURN_RECONNECT_ACTION_COOLDOWN_MS = 2_000;
+
+/**
+ * Whether the disconnect advisory earns its manual "reconnect now" affordance:
+ * only a real reconnect loop (disconnectSeconds from
+ * `resolveActiveTurnDisconnectSeconds`) with the stream-owner callback wired
+ * through ActiveTurnStreamState. Without the callback there is nothing to
+ * invoke, so the chip stays informational.
+ */
+export function shouldShowActiveTurnReconnectAction(input: {
+  disconnectSeconds: number | null;
+  hasReconnectHandler: boolean;
+}): boolean {
+  return input.disconnectSeconds !== null && input.hasReconnectHandler;
 }
 
 /**

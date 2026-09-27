@@ -150,6 +150,71 @@ class _SessionTurnQueued(Exception):
         self.payload = dict(payload or {})
 
 
+def _active_session_turn_id_for_submit(service: Any, session_id: str) -> str:
+    """Best-effort active turn id the queued turn will wait behind (diagnostics only)."""
+
+    try:
+        controller = service._get_session_turn_control(session_id)
+    except Exception:
+        return ""
+    return str(getattr(controller, "turn_id", "") or "").strip()
+
+
+def _record_busy_session_turn_queued_events(
+    service: Any,
+    session_id: str,
+    *,
+    queued_turn_id: str,
+    queue_position: int,
+    queued_behind_turn_id: str,
+    message: str,
+    client_submission_id: str,
+) -> None:
+    """Make a busy-session queue acceptance visible (defect-① observability).
+
+    The queue semantics are unchanged: these are pure diagnostics plus one
+    projectable session lifecycle event, so a queued turn can never land
+    without a trace while the session is busy.
+    """
+
+    try:
+        content_preview = service.trim_lines(str(message or ""), max_lines=1)[:120]
+    except Exception:
+        content_preview = ""
+    fields: dict[str, Any] = {
+        "sessionId": session_id,
+        "turnId": queued_turn_id,
+        "queuePosition": queue_position,
+        "queuedBehindTurnId": queued_behind_turn_id,
+        "clientSubmissionId": client_submission_id,
+        "contentLength": len(str(message or "")),
+    }
+    if content_preview:
+        fields["contentPreview"] = content_preview
+    try:
+        service.record_runtime_scene_event(
+            "conversation",
+            "busy_turn_queued",
+            "conversation.submit.busy_turn_queued",
+            level="info",
+            outcome="queued",
+            message="A user turn was accepted into the session queue while another turn was still running.",
+            fields=fields,
+        )
+    except Exception:
+        pass
+    try:
+        service._record_session_turn_lifecycle_event(
+            session_id,
+            "busy_turn_queued",
+            turn_id=queued_turn_id,
+            outcome="queued",
+            fields=fields,
+        )
+    except Exception:
+        pass
+
+
 def _enqueue_busy_session_turn(
     service: Any,
     session_id: str,
@@ -248,11 +313,25 @@ def _enqueue_busy_session_turn(
         status="queued",
         client_submission_id=client_submission_id,
     )
+    # Queue facts ride in the response so the client can project "queued"
+    # instead of pretending the turn was sent (defect-① observability).
+    payload["queued"] = True
     payload["queuedTurnId"] = str(queued_row.get("id") or "")
     try:
         payload["queuePosition"] = int(queued_row.get("position") or 0)
     except (TypeError, ValueError):
         payload["queuePosition"] = 0
+    payload["queuedAt"] = str(queued_row.get("createdAt") or "")
+    payload["queuedBehindTurnId"] = _active_session_turn_id_for_submit(service, session_id)
+    _record_busy_session_turn_queued_events(
+        service,
+        session_id,
+        queued_turn_id=str(payload["queuedTurnId"]),
+        queue_position=int(payload["queuePosition"]),
+        queued_behind_turn_id=str(payload["queuedBehindTurnId"]),
+        message=message,
+        client_submission_id=client_submission_id,
+    )
     return payload
 
 

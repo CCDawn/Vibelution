@@ -19,6 +19,9 @@ const styles = {
 // Reserve two lines so every reasoning tier has the same option height.
   optionDescription: "min-h-[2.7em] line-clamp-2 whitespace-normal text-vui-xs leading-[1.35] text-[var(--fg-tertiary)]",  check: "mt-0.5 shrink-0 text-[var(--accent-cool)]",
   checkSlot: "mt-0.5 block size-3.5 shrink-0",
+  // Lifetime SFT curation tally for the current model; separated from the
+  // effort list by a hairline, same muted typography as option descriptions.
+  curationStatsRow: "mt-0.5 border-t border-[var(--vui-border-subtle)] px-2 pt-1.5 text-vui-xs leading-tight text-[var(--fg-tertiary)]",
 };
 
 export default styles;

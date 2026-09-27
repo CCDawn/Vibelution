@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../../app/browserTelemetry";
@@ -67,6 +67,9 @@ export function shouldDropSupersededEditDelta(
   return supersededEditDelta(protection, turnId, ledgerSeq);
 }
 
+/** Why a guarded stream was hard-closed by its owner (telemetry evidence). */
+export type SessionStreamCloseReason = "grace_timeout" | "manual_reconnect";
+
 export type UseSessionDetailStreamOptions = {
   activeSessionId: string | null | undefined;
   sessionStreamShouldConnect: boolean;
@@ -105,6 +108,8 @@ export function useSessionDetailStream({
 }: UseSessionDetailStreamOptions): {
   sessionStreamConnected: boolean;
   streamDisconnectedSinceMs: number | null;
+  /** Manual "reconnect now" affordance for the active-turn disconnect advisory. */
+  reconnectSessionStream: () => void;
 } {
   const [sessionStreamConnected, setSessionStreamConnected] = useState(false);
   // Sticky start of the current reconnect loop: set on the first transport
@@ -131,7 +136,7 @@ export function useSessionDetailStream({
   const graceCloseTimerRef = useRef<number | null>(null);
   const graceClosedSessionRef = useRef(false);
   const activeStreamRef = useRef<{ stream: SessionEventStream; sessionId: string } | null>(null);
-  const forceCloseStreamRef = useRef<(() => void) | null>(null);
+  const forceCloseStreamRef = useRef<((reason?: SessionStreamCloseReason) => void) | null>(null);
 
   useEffect(() => {
     const prev = prevShouldConnectRef.current;
@@ -282,7 +287,7 @@ export function useSessionDetailStream({
       });
     };
 
-    const forceCloseStream = () => {
+    const forceCloseStream = (reason: SessionStreamCloseReason = "grace_timeout") => {
       if (closeTelemetryFired || disposed) {
         return;
       }
@@ -300,7 +305,7 @@ export function useSessionDetailStream({
         fields: {
           sessionId: streamSessionId,
           readyState: stream.readyState,
-          reason: "grace_timeout",
+          reason,
         },
       });
       setStreamReconnectTick((tick) => tick + 1);
@@ -850,5 +855,31 @@ export function useSessionDetailStream({
     streamReconnectTick,
   ]);
 
-  return { sessionStreamConnected, streamDisconnectedSinceMs };
+  /**
+   * Manual hard reconnect for the disconnect advisory button: closes the live
+   * stream through the SAME owner path as the grace close (the tick bump
+   * re-runs this effect and re-acquires via the keep-warm registry — never a
+   * second connection) and requests one immediate authoritative refresh so a
+   * stuck auto-reconnect loop cannot hide server-side progress.
+   */
+  const reconnectSessionStream = useCallback(() => {
+    const streamSessionId = String(activeSessionId || "");
+    if (!streamSessionId || !forceCloseStreamRef.current) {
+      return;
+    }
+    postBrowserTelemetry({
+      phase: "session_stream",
+      eventCode: "browser.session_stream.manual_reconnect_requested",
+      message: "Manual session stream reconnect was requested from the disconnect advisory.",
+      level: "info",
+      fields: {
+        sessionId: streamSessionId,
+        pageInstanceId: getPageInstanceId(),
+      },
+    });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) });
+    forceCloseStreamRef.current("manual_reconnect");
+  }, [activeSessionId, queryClient]);
+
+  return { sessionStreamConnected, streamDisconnectedSinceMs, reconnectSessionStream };
 }

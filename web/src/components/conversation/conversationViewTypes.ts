@@ -27,6 +27,10 @@ export type ConversationComposerAttachment = {
   sizeBytes: number;
   contentType: string;
   kind?: "image" | "document";
+  /** Per-attachment upload lifecycle; undefined means not attempted yet. */
+  uploadStatus?: "pending" | "uploading" | "uploaded" | "failed";
+  /** Backend artifact id held by an already-uploaded chip (reused on resubmit). */
+  artifactId?: string;
 };
 
 export type ConversationLlmControl = {
@@ -161,6 +165,10 @@ export type ConversationViewProps = {
   onComposerChange: (value: string) => void;
   onAddComposerAttachments?: (files: FileList | File[]) => void;
   onRemoveComposerAttachment?: (attachmentId: string) => void;
+  /** Retry the upload of one failed attachment chip; never auto-sends the draft. */
+  onRetryComposerAttachment?: (attachmentId: string) => void;
+  /** Retry every failed attachment chip at once (composer error-row action). */
+  onRetryComposerAttachmentUploads?: () => void;
   onAddComposerReference?: (reference: SessionReferenceAttachment) => void;
   onRemoveComposerReference?: (referenceId: string) => void;
   onEditUserMessage?: (message: ConversationMessage) => void;

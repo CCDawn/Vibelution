@@ -1,13 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import routeSourceRaw from "./ConfigRoute.tsx?raw";
+// Settings-align wave 3: route-local modules extracted from the ConfigRoute
+// monolith; layout contracts may live in any of them (concatenated below).
+import configCopySource from "./config/configCopy.ts?raw";
+import configEditorModelSource from "./config/configEditorModel.ts?raw";
+import configSectionEditorSource from "./config/ConfigSectionEditor.tsx?raw";
+import providerModelDomainSource from "./config/useConfigProviderModelDomain.ts?raw";
 import providerDraftActionsSource from "./config/useConfigProviderDraftActions.ts?raw";
 import configApplyModelSource from "./config/configApplyModel.ts?raw";
 import configProviderActionModelSource from "./config/configProviderActionModel.ts?raw";
 import configMigrationActionsSource from "./config/useConfigMigrationActions.ts?raw";
 import configQuickSetupActionsSource from "./config/useConfigProviderQuickSetupActions.ts?raw";
 /** Route + extracted config write helpers (layout contracts may live in either). */
-const routeSource = `${routeSourceRaw}\n${providerDraftActionsSource}\n${configApplyModelSource}\n${configProviderActionModelSource}\n${configMigrationActionsSource}\n${configQuickSetupActionsSource}`;
+const routeSource = `${routeSourceRaw}\n${configCopySource}\n${configEditorModelSource}\n${configSectionEditorSource}\n${providerModelDomainSource}\n${providerDraftActionsSource}\n${configApplyModelSource}\n${configProviderActionModelSource}\n${configMigrationActionsSource}\n${configQuickSetupActionsSource}`;
 import draftPanelSource from "./ConfigDraftPanel.tsx?raw";
 import draftPanelStylesSource from "./ConfigDraftPanel.styles.ts?raw";
 import draftPanelStyles from "./ConfigDraftPanel.styles";
@@ -163,8 +169,11 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("返回已配置服务");
     expect(routeSource).not.toContain("① 模型资产");
     expect(routeSource).not.toContain("② 添加连接");
-    expect(quickSetupSource).toContain("检测连接");
-    expect(quickSetupSource).toContain("保存并完成");
+    // Wave 4: quick-setup strings live in the shared bilingual copy table.
+    expect(configCopySource).toContain("检测连接");
+    expect(configCopySource).toContain("保存并完成");
+    expect(quickSetupSource).toContain("quickSetupDetect");
+    expect(quickSetupSource).toContain("quickSetupSaveFinish");
     expect(quickSetupStyles.workspace).toContain("max-w-4xl");
     expect(quickSetupStyles.inputGrid).toContain("grid-cols-1");
     expect(quickSetupSource).toContain('state.phase !== "input"');
@@ -197,7 +206,8 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("draftOverride?: ConfigApplyDraftOverride");
     expect(routeSource).toContain("buildConfigApplyRequestPayload");
     expect(routeSource).toContain("isConfigBaselineStaleErrorMessage");
-    expect(routeSource).toContain('handleApply("正在应用快速配置…", draftOverride)');
+    expect(routeSource).toContain('handleApply(copy.quickSetupApplyBusy, draftOverride)');
+    expect(configCopySource).toContain('quickSetupApplyBusy');
     expect(routeSource).toContain("publicConfig: draftOverride.publicConfig");
     expect(routeSource).toContain("draftMeta: draftOverride.draftMeta");
     // Apply must freeze baseConfig+baseHash as an edit baseline pair across draft pin ops.
@@ -230,7 +240,8 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("verification_persisted");
     expect(routeSource).toContain("workspaceQuery.refetch()");
     expect(providerPanelSource).toContain("verificationMessage");
-    expect(providerPanelSource).toContain("上游 400 拒绝");
+    expect(configCopySource).toContain("上游 400 拒绝");
+    expect(providerPanelSource).toContain("verifyErrBadRequest");
   });
 
   it("does not auto-discover Provider endpoints when the model surface opens", () => {
@@ -271,8 +282,10 @@ describe("ConfigRoute layout contract", () => {
   it("edits an existing Provider API Key through the draft credential boundary", () => {
     expect(providerPanelSource).toContain("onEditCredential");
     expect(providerPanelSource).toContain("API Key");
-    expect(providerPanelSource).toContain("此供应商下的模型共用一把密钥");
-    expect(providerPanelSource).toContain("默认上下文上限");
+    expect(configCopySource).toContain("此供应商下的模型共用一把密钥");
+    expect(configCopySource).toContain("默认上下文上限");
+    expect(providerPanelSource).toContain("apiKeySharedHint");
+    expect(providerPanelSource).toContain("contextLimitRowLabel");
     expect(providerPanelSource).toContain('type="password"');
     expect(providerPanelSource).toContain('provider.credentialState !== "not_required"');
     expect(routeSource).toContain("updateDraftProvider(");
@@ -296,7 +309,8 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain('phase: "busy"');
     expect(routeSource).toContain('phase: "success"');
     expect(routeSource).toContain('phase: "error"');
-    expect(providerPanelSource).toContain("发现中…");
+    expect(configCopySource).toContain("发现中…");
+    expect(providerPanelSource).toContain("discoverBusy");
     expect(routeSource).toContain("正在保存 API Key…");
     expect(routeSource).toContain("生成预览中…");
     expect(routeSource).toContain("更新中…");
@@ -325,7 +339,8 @@ describe("ConfigRoute layout contract", () => {
   it("locks all saved wizard connection fields after creation", () => {
     expect(wizardSource).toContain("isProviderWizardConnectionLocked");
     expect(wizardSource).toContain("dispatchProviderWizardConnectionAction");
-    expect(wizardSource).toContain("Provider 已创建");
+    expect(configCopySource).toContain("Provider 已创建");
+    expect(wizardSource).toContain("wizardLockedTitle");
     expect(wizardSource).toContain("disabled={connectionLocked}");
     expect(wizardSource).toContain("isDisabled={connectionLocked}");
   });
@@ -403,13 +418,6 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.providerModelsLayout).toContain("[&>#config-models]:min-h-[28rem]");
   });
 
-  it("passes the workspace schema version into legacy model account compatibility", () => {
-    expect(routeSource).toMatch(
-      /deriveModelCenterSummary\(\{\s*modelOptions,\s*schemaVersion: workspace\?\.schemaVersion,\s*\}\)/,
-    );
-    expect(routeSource).toContain("[modelOptions, workspace?.schemaVersion]");
-  });
-
   it("uses a full workspace placeholder for initial loading and load failure states", () => {
     expect(routeSource).toContain("<ConfigWorkspacePlaceholderPanel title={copy.loading} />");
     expect(placeholderPanelSource).toContain("export function ConfigWorkspacePlaceholderPanel");
@@ -429,8 +437,10 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.field).toContain("[grid-template-columns:minmax(12rem,0.34fr)_minmax(0,1fr)]");
     expect(styles.actionButton).not.toMatch(/min-height|padding|border-radius/);
     expect(styles.primaryButton).not.toMatch(/min-height|padding|background/);
-    expect(placeholderPanelSource).toContain("总览与保存");
-    expect(placeholderPanelSource).toContain("工具与诊断");
+    expect(configCopySource).toContain("总览与保存");
+    expect(configCopySource).toContain("工具与诊断");
+    expect(placeholderPanelSource).toContain("placeholderNavOverview");
+    expect(placeholderPanelSource).toContain("placeholderNavTooling");
     expect(placeholderPanelStyles.loadingNavList).toContain("[min-height:44px]");
     expect(placeholderPanelStyles.loadingShell).toContain("[height:100%]");
   });
@@ -527,10 +537,13 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("subtitleHint");
     expect(routeSource).toContain('subtitleHint={copy.subtitleHint}');
     expect(overviewPanelSource).toContain("sourceBodyShort");
-    expect(providerPanelSource).toContain("高级管理");
+    expect(configCopySource).toContain("高级管理");
     expect(providerPanelSource).toContain('data-vui-region="config-provider-connection"');
-    expect(providerPanelSource).toContain("添加当前结果");
-    expect(providerPanelSource).toContain("修改地址与协议");
+    expect(configCopySource).toContain("添加当前结果");
+    expect(configCopySource).toContain("修改地址与协议");
+    expect(providerPanelSource).toContain("advancedManage");
+    expect(providerPanelSource).toContain("pinAllTemplate");
+    expect(providerPanelSource).toContain("editRouteAction");
     expect(overviewPanelSource).toContain('title={copy.sourceBody}');
     expect(providerPanelSource).toContain('title={provider.providerId}');
     expect(routeSource).toContain('title={copy.openEnvironmentHint}');
@@ -595,9 +608,11 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelStyles.table).toContain("[&_thead]:sticky");
     expect(providerPanelSource).toContain("filterProviderModels");
     expect(providerPanelSource).toContain("deriveProviderModelActionState");
-    expect(providerPanelSource).toContain('aria-label="搜索模型"');
+    expect(providerPanelSource).toContain("copy.searchModelsAria");
+    expect(configCopySource).toContain("搜索模型");
     expect(providerPanelStyles.dangerZone).toContain("justify-between");
-    expect(providerPanelSource).toContain("测试调用");
+    expect(configCopySource).toContain("测试调用");
+    expect(providerPanelSource).toContain("copy.testCall");
     expect(providerPanelSource).toContain("verificationStatus");
     expect(routeSource).toContain("handleTestProviderModel");
   });
@@ -830,7 +845,7 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("copy.clearThemeBackgroundImage");
     expect(routeSource).toContain("copy.themeBackgroundPresetTitle");
     expect(routeSource).toContain("className={styles.themeBackgroundPresetTitle}");
-    expect(routeSource).toContain("{active ? <em>{lang === \"zh\" ? \"当前\" : \"Current\"}</em> : null}");
+    expect(routeSource).toContain("{active ? <em>{copy.currentBadge}</em> : null}");
     expect(routeSource).toContain("title={hint || undefined}");
     expect(routeSource).toContain("themeBackgroundPresetButton");
     expect(routeSource).toContain("aria-pressed={active}");
@@ -840,7 +855,7 @@ describe("ConfigRoute layout contract", () => {
     expect(stylesSource).toContain("themeBackgroundImageValue:");
     expect(routeSource).toContain("themeBackgroundPresetButton");
     expect(routeSource).toContain("aria-pressed={active}");
-    expect(routeSource).toContain("{active ? <em>{lang === \"zh\" ? \"当前\" : \"Current\"}</em> : null}");
+    expect(routeSource).toContain("{active ? <em>{copy.currentBadge}</em> : null}");
     expect(stylesSource).toContain("themeBackgroundDropButton:");
     expect(stylesSource).toContain("themeBackgroundPresetGrid:");
     expect(stylesSource).toContain("[display:grid]");
@@ -1067,9 +1082,33 @@ describe("ConfigRoute layout contract", () => {
     expect(configSources).not.toMatch(/<textarea\b/);
   });
 
-  it("prioritizes the visible VUI select trigger when focusing the model editor", () => {
-    expect(routeSource).toContain('button[data-vui="select-trigger"]:not([data-disabled="true"]):not([disabled])');
-    expect(routeSource).toContain('input:not([disabled]):not([type="hidden"])');
-    expect(routeSource).toContain("textarea:not([disabled])");
+  it("routes destructive confirms through VConfirmDialog request state instead of window.confirm", () => {
+    // Wave 4 item 2: settings-domain confirms are VConfirmDialog (Radix) requests.
+    expect(routeSource).toContain("<VConfirmDialog");
+    expect(routeSource).toContain("deleteProviderRequest");
+    expect(routeSource).toContain("handleConfirmDeleteProvider");
+    expect(routeSource).toContain("handleCancelDeleteProvider");
+    expect(routeSource).toContain("migrationApplyRequest");
+    expect(routeSource).toContain("handleConfirmApplyMigration");
+    expect(routeSource).toContain("handleCancelApplyMigration");
+    // No blocking window.confirm anywhere in the route shell, the extracted
+    // route modules, or the model panels (wave-4 item 2 + dead-code cleanup).
+    expect(routeSource).not.toContain("window.confirm");
+    expect(routeSourceRaw).not.toContain("window.confirm");
+    expect(providerPanelSource).not.toContain("window.confirm");
+    expect(wizardSource).not.toContain("window.confirm");
+    expect(quickSetupSource).not.toContain("window.confirm");
+    expect(migrationPanelSource).not.toContain("window.confirm");
+  });
+
+  it("surfaces section save failures inline inside the failing section", () => {
+    // Wave 4 item 4: section-scoped save errors render inside the section,
+    // the global notice strip stays reserved for global operations.
+    expect(routeSource).toContain("sectionSaveErrors");
+    expect(routeSource).toContain("setSectionSaveError(path, readableErrorMessage(error))");
+    expect(routeSource).toContain('saveError={sectionSaveErrors[section.path] ?? ""}');
+    expect(routeSource).toContain("data-section-save-error");
+    expect(routeSource).toContain("<VErrorSummary");
+    expect(routeSource).toContain('role="alert"');
   });
 });

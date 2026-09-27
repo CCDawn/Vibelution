@@ -25,6 +25,9 @@ from core.web.routes.session_detail_models import SessionDetailResponse
 from core.web.routes.session_side_models import (
     SessionChatReviewCandidateResponse,
     SessionChildCreateResponse,
+    SessionMessageCurationPayload,
+    SessionMessageCurationResponse,
+    SessionMessageCurationStateResponse,
     SessionToolApprovalItem,
 )
 from core.web.routes.session_turn_models import (
@@ -35,6 +38,10 @@ from core.web.routes.session_turn_models import (
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 from core.web.services import session_service
 from core.web.services.session import document_attachments as session_document_attachments
+from core.web.services.session.image_attachments import (
+    LocalAttachmentReadError,
+    read_local_attachment_bytes,
+)
 from core.web.services.session.composer_example_commands import (
     get_composer_starter_commands,
 )
@@ -53,6 +60,7 @@ from core.web.services.session_service import (
     SESSION_USER_IMAGE_MAX_BYTES,
     SessionBusyError,
     SessionChatReviewCandidateExistsError,
+    SessionMessageCurationStateError,
     SessionNotFoundError,
     SessionValidationError,
     create_chat_review_candidate_from_session,
@@ -66,6 +74,7 @@ from core.web.services.session_service import (
     get_active_session_summary,
     get_session_detail,
     get_session_llm_options,
+    get_session_message_curation,
     list_child_sessions,
     list_sessions,
     list_session_queued_turns,
@@ -77,6 +86,7 @@ from core.web.services.session_service import (
     resolve_session_image_artifact,
     resolve_session_stream_initial_payload,
     select_chat_session,
+    set_session_message_curation,
     store_session_user_image_attachment,
     stream_session_events_async,
     submit_session_guidance,
@@ -161,6 +171,57 @@ async def _read_session_attachment_payload(session_id: str, request: Request) ->
             raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="Image attachment is too large.")
         chunks.append(bytes(chunk))
     return b"".join(chunks)
+
+
+async def _read_session_attachment_registration(request: Request) -> dict:
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = None
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid JSON attachment registration payload.",
+        )
+    return payload
+
+
+def _store_session_attachment_from_local_path(session_id: str, registration: dict) -> dict:
+    """Zero-copy registration: read the referenced local file in place.
+
+    The desktop shell resolves the real path of a drag/picker file so the
+    bytes never travel through the renderer. Every read failure maps to 4xx
+    so the client falls back to the binary upload transparently. The read
+    bytes go through the same sniffing/size/whitelist gates as the binary
+    upload, so storage behavior is identical.
+    """
+    local_path = str(registration.get("localPath") or "").strip()
+    filename = str(registration.get("filename") or "").strip()
+    content_type = str(registration.get("contentType") or "").strip()
+    try:
+        payload = read_local_attachment_bytes(local_path, max_bytes=SESSION_USER_IMAGE_MAX_BYTES)
+    except LocalAttachmentReadError as exc:
+        status_code = {
+            "not_found": status.HTTP_404_NOT_FOUND,
+            "too_large": status.HTTP_413_CONTENT_TOO_LARGE,
+        }.get(exc.reason, 422)
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    # Same routing as the binary upload: images are identified by content
+    # sniffing; anything else goes to the document store with its own
+    # extension/size/payload gates.
+    if session_service._sniff_image_extension(payload) or content_type.lower().startswith("image/"):
+        return store_session_user_image_attachment(
+            session_id,
+            payload,
+            filename=filename,
+            content_type=content_type,
+        )
+    return session_document_attachments.store_session_user_document_attachment(
+        session_id,
+        payload,
+        filename=filename,
+        content_type=content_type,
+    )
 
 
 def _new_client_submission_id() -> str:
@@ -630,6 +691,13 @@ async def session_upload_attachment(session_id: str, request: Request) -> dict:
     content_type = str(request.headers.get("content-type") or "").strip()
     filename = str(request.headers.get("x-vibelution-filename") or "").strip()
     try:
+        if content_type.lower().startswith("application/json"):
+            # Zero-copy registration variant: the desktop shell references a
+            # real local path and the backend reads the file in place. Any
+            # failure answers 4xx so the client falls back to the binary
+            # upload transparently.
+            registration = await _read_session_attachment_registration(request)
+            return _store_session_attachment_from_local_path(session_id, registration)
         payload = await _read_session_attachment_payload(session_id, request)
         # Images are identified by content sniffing; anything that does not
         # sniff as png/jpeg/webp goes to the document store, which enforces
@@ -925,3 +993,33 @@ def session_create_chat_review_candidate(session_id: str) -> dict:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except SessionValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post(
+    "/sessions/{session_id}/messages/{message_id}/curation",
+    status_code=status.HTTP_200_OK,
+    response_model=SessionMessageCurationResponse,
+    response_model_exclude_unset=True,
+)
+def session_set_message_curation(session_id: str, message_id: str, payload: SessionMessageCurationPayload) -> dict:
+    try:
+        return set_session_message_curation(session_id, message_id, action=payload.action)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionMessageCurationStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get(
+    "/sessions/{session_id}/curation",
+    status_code=status.HTTP_200_OK,
+    response_model=SessionMessageCurationStateResponse,
+    response_model_exclude_unset=True,
+)
+def session_message_curation_state(session_id: str) -> dict:
+    try:
+        return get_session_message_curation(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

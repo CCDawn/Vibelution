@@ -1010,7 +1010,7 @@ export function ChatCodingRouteWorkbench() {
     || activeSessionId
     || ""
   );
-  const { sessionStreamConnected, streamDisconnectedSinceMs } = useSessionDetailStream({
+  const { sessionStreamConnected, streamDisconnectedSinceMs, reconnectSessionStream } = useSessionDetailStream({
     activeSessionId,
     sessionStreamShouldConnect,
     queryClient,
@@ -1031,8 +1031,9 @@ export function ChatCodingRouteWorkbench() {
       streamConnected: streamDisconnectedSinceMs != null ? false : undefined,
       streamDisconnectedSinceMs,
       lastAssistantDeltaAtMs: lastAssistantDeltaAppliedAtRef.current[String(activeSessionId || "")],
+      reconnectSessionStream,
     }),
-    [streamDisconnectedSinceMs, activeSessionId, lastAssistantDeltaAppliedAtRef],
+    [streamDisconnectedSinceMs, activeSessionId, lastAssistantDeltaAppliedAtRef, reconnectSessionStream],
   );
   const chatLiveQueryPolicyInput = {
     chatPollingVisible,
@@ -1792,15 +1793,20 @@ export function ChatCodingRouteWorkbench() {
       return {};
     }
     return {
-      [sessionId]: rows.map((row) => ({
-        id: String(row.id || ""),
-        text: String(row.content || ""),
-        status: String(row.status || "queued"),
-        position: Number(row.position || 0),
-        attachmentCount: Array.isArray(row.attachments) ? row.attachments.length : 0,
-        lastError: String(row.lastError || ""),
-        canSteer: !(row.attachments?.length) && !(row.references?.length),
-      })),
+      [sessionId]: rows.map((row) => {
+        const kind = String(row.kind || "user");
+        const systemReturn = kind === "task_notification" || kind === "subagent_message";
+        return {
+          id: String(row.id || ""),
+          text: String(row.content || ""),
+          kind,
+          status: String(row.status || "queued"),
+          position: Number(row.position || 0),
+          attachmentCount: Array.isArray(row.attachments) ? row.attachments.length : 0,
+          lastError: String(row.lastError || ""),
+          canSteer: !systemReturn && !(row.attachments?.length) && !(row.references?.length),
+        };
+      }),
     };
   }, [detail?.id, detail?.queuedTurns]);
   const sessionToolApprovalRuntimeActive = runtimeHasChatTurnForSession(runtime, activeSessionId);
@@ -2330,6 +2336,8 @@ export function ChatCodingRouteWorkbench() {
     handleRuntimeStatusEnabledChange,
     handleAddComposerAttachments,
     handleRemoveComposerAttachment,
+    handleRetryComposerAttachmentUpload,
+    handleRetryComposerAttachmentUploads,
     handleAddComposerReference,
     handleRemoveComposerReference,
   } = useChatComposerSubmitActions({
@@ -3220,6 +3228,8 @@ export function ChatCodingRouteWorkbench() {
       onComposerChange: handleComposerChange,
       onAddComposerAttachments: handleAddComposerAttachments,
       onRemoveComposerAttachment: handleRemoveComposerAttachment,
+      onRetryComposerAttachment: handleRetryComposerAttachmentUpload,
+      onRetryComposerAttachmentUploads: handleRetryComposerAttachmentUploads,
       onAddComposerReference: handleAddComposerReference,
       onRemoveComposerReference: handleRemoveComposerReference,
       onEditUserMessage: handleEditUserMessage,
@@ -3295,6 +3305,8 @@ export function ChatCodingRouteWorkbench() {
       handleRegenerateAssistantMessage,
       handleRemoveComposerAttachment,
       handleRemoveComposerReference,
+      handleRetryComposerAttachmentUpload,
+      handleRetryComposerAttachmentUploads,
       handleRetryFailedTurn,
       handleRuntimeStatusEnabledChange,
       handleStopTurn,

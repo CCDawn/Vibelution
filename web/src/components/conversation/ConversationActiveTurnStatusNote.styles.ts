@@ -18,6 +18,12 @@ const styles = {
   ),
   label: cv("label", "sr-only"),
   advisory: cv("advisory", "shrink-0"),
+  // Manual reconnect affordance beside the disconnect chip: same row, fixed
+  // footprint so the flex-wrap body never squashes the control.
+  reconnectAction: cv("reconnectAction", "shrink-0"),
+  // Visible retry counter (attempt >= 3) only; the sweep itself lives in the
+  // global `.vui-shimmer-text` keyframes (design/base.css).
+  retryShimmer: cv("retryShimmer", "vui-shimmer-text"),
 } as const;
 
 export default styles;

@@ -27,9 +27,12 @@ import {
   isValidSplitUpstreamId,
   updateArtifactResolutionDraft,
 } from "./configMigrationResolutionLogic";
+import { type ConfigCopy, formatConfigCopy } from "./config/configCopy";
 import styles from "./ConfigModelMigrationPanel.styles";
 
 export type ConfigModelMigrationPanelProps = {
+  /** Bilingual copy table (wave 4). */
+  copy: ConfigCopy;
   schemaVersion: 1 | 2;
   preview: ConfigMigrationPreview | null;
   aliasUsageCount: number;
@@ -39,6 +42,7 @@ export type ConfigModelMigrationPanelProps = {
 };
 
 export function ConfigModelMigrationPanel({
+  copy,
   schemaVersion,
   preview,
   aliasUsageCount,
@@ -61,11 +65,11 @@ export function ConfigModelMigrationPanel({
   if (schemaVersion === 2) {
     return (
       <VSurface as="section" className={styles.migration} padding="none" data-migration-status={aliasUsageCount ? "aliases_in_use" : "aliases_clear"}>
-        <VPanelHeader eyebrow="Schema v2" title="兼容别名退出条件" actions={<VStatusChip tone={aliasUsageCount ? "warning" : "success"}>{aliasUsageCount} 个 live 引用</VStatusChip>} />
-        <VStateSurface tone={aliasUsageCount ? "unavailable" : "info"} title={aliasUsageCount ? "别名仍被使用" : "别名已满足退出条件"}>
+        <VPanelHeader eyebrow="Schema v2" title={copy.migrationAliasTitle} actions={<VStatusChip tone={aliasUsageCount ? "warning" : "success"}>{aliasUsageCount}{copy.migrationLiveReferenceUnit}</VStatusChip>} />
+        <VStateSurface tone={aliasUsageCount ? "unavailable" : "info"} title={aliasUsageCount ? copy.migrationAliasInUseTitle : copy.migrationAliasClearTitle}>
           {aliasUsageCount
-            ? "只有 live 引用归零后才可进入别名清理；本工作台不会提前提供删除动作。"
-            : "live 引用已经归零。别名删除仍属于后续受控清理，不在本次迁移中自动执行。"}
+            ? copy.migrationAliasInUseBody
+            : copy.migrationAliasClearBody}
         </VStateSurface>
       </VSurface>
     );
@@ -83,23 +87,23 @@ export function ConfigModelMigrationPanel({
     <VSurface as="section" className={styles.migration} padding="none" data-migration-status={preview?.status ?? "not_previewed"}>
       <VPanelHeader
         eyebrow="Schema v1 read-only inventory"
-        title="迁移到 Provider-first schema v2"
-        actions={<VStatusChip tone={preview?.status === "READY" ? "success" : "warning"}>{preview?.status ?? "尚未预览"}</VStatusChip>}
+        title={copy.migrationV2Title}
+        actions={<VStatusChip tone={preview?.status === "READY" ? "success" : "warning"}>{preview?.status ?? copy.migrationNotPreviewed}</VStatusChip>}
       />
       <p className={styles.critical} role="alert">
-        <AlertTriangle size={14} className="inline" /> 迁移会修改外部 operator config。Schema v1 库存保持只读，不能在此新增、更新或删除。
+        <AlertTriangle size={14} className="inline" /> {copy.migrationCritical}
       </p>
       <VStateSurface
         tone="unavailable"
         icon={<DatabaseBackup size={15} />}
-        title="为什么需要迁移"
+        title={copy.migrationWhyTitle}
         facts={preview ? [
-          { key: "providers", label: "Provider 分组", value: preview.providers.length },
-          { key: "live", label: "Live 引用", value: preview.referenceImpact.liveReferenceCount },
-          { key: "history", label: "历史引用", value: preview.referenceImpact.historicalReferenceCount },
+          { key: "providers", label: copy.migrationFactProviders, value: preview.providers.length },
+          { key: "live", label: copy.migrationFactLive, value: preview.referenceImpact.liveReferenceCount },
+          { key: "history", label: copy.migrationFactHistory, value: preview.referenceImpact.historicalReferenceCount },
         ] : []}
       >
-        v1 把连接、凭据与模型混在单条记录中；v2 使用 canonical providerId/modelRef。应用前会创建备份，失败时可按 migration ID 回滚。
+        {copy.migrationWhyBody}
       </VStateSurface>
 
       {preview ? (
@@ -119,11 +123,11 @@ export function ConfigModelMigrationPanel({
           </div>
           <div className={styles.tableScroll}>
             <VDenseTable
-              ariaLabel="v1 到 v2 modelRef 映射"
+              ariaLabel={copy.migrationMapAria}
               className={styles.table}
               rows={mappings}
               getRowKey={(row) => row.legacyModelId}
-              emptyText="预览未返回模型映射。"
+              emptyText={copy.migrationMapEmpty}
               columns={[
                 {
                   id: "old",
@@ -152,10 +156,10 @@ export function ConfigModelMigrationPanel({
           </div>
 
           {artifactWarnings.length ? (
-            <section className={styles.resolutionSection} aria-label="模型部署标识冲突裁决">
+            <section className={styles.resolutionSection} aria-label={copy.migrationResolutionAria}>
               <div className={styles.resolutionHeading}>
-                <strong><FileWarning size={15} className="inline" /> 模型部署标识需要显式裁决</strong>
-                <span className={styles.muted}>裁决只重新生成服务端预览，不会应用迁移。</span>
+                <strong><FileWarning size={15} className="inline" /> {copy.migrationResolutionHeading}</strong>
+                <span className={styles.muted}>{copy.migrationResolutionHint}</span>
               </div>
               <div className={styles.resolutionGrid}>
                 {resolutionDrafts.map((draft) => {
@@ -166,18 +170,18 @@ export function ConfigModelMigrationPanel({
                     <section key={draft.modelId} className={styles.resolutionCard} data-resolution-model-id={draft.modelId}>
                       <div className={styles.resolutionCardHeader}>
                         <strong>{draft.modelId}</strong>
-                        <VStatusChip tone="warning">离线未核验</VStatusChip>
+                        <VStatusChip tone="warning">{copy.migrationOfflineChip}</VStatusChip>
                       </div>
                       <p className={styles.resolutionWarning} role="status">
-                        verificationState: unverified_offline。请仅从服务端允许的裁决中选择。
+                        {copy.migrationOfflineWarning}
                       </p>
                       <VStringSelect
-                        ariaLabel={`${draft.modelId} 裁决方式`}
+                        ariaLabel={`${draft.modelId}${copy.migrationDecisionAriaSuffix}`}
                         value={draft.decision}
-                        placeholder="选择裁决方式"
+                        placeholder={copy.migrationDecisionPlaceholder}
                         options={[
-                          ...(preserveAllowed ? [{ value: "preserve_upstream_id", label: "保留现有 upstream ID" }] : []),
-                          ...(splitAllowed ? [{ value: "split_deployment_artifact", label: "拆分部署记录并指定 upstream ID" }] : []),
+                          ...(preserveAllowed ? [{ value: "preserve_upstream_id", label: copy.migrationPreserveLabel }] : []),
+                          ...(splitAllowed ? [{ value: "split_deployment_artifact", label: copy.migrationSplitLabel }] : []),
                         ]}
                         onValueChange={(decision) => {
                           setResolutionDrafts((current) => updateArtifactResolutionDraft(current, draft.modelId, {
@@ -193,13 +197,13 @@ export function ConfigModelMigrationPanel({
                             setResolutionDrafts((current) => updateArtifactResolutionDraft(current, draft.modelId, { preserveConfirmed }));
                           }}
                         >
-                          我确认保留此模型的现有 upstream ID
+                          {copy.migrationPreserveConfirm}
                         </VCheckbox>
                       ) : null}
                       {draft.decision === "split_deployment_artifact" && splitAllowed ? (
                         <div className={styles.resolutionFields}>
                           <VInput
-                            aria-label={`${draft.modelId} 新 upstream ID`}
+                            aria-label={`${draft.modelId}${copy.migrationNewUpstreamAriaSuffix}`}
                             value={draft.upstreamId}
                             placeholder="namespace/model-a"
                             aria-invalid={splitInvalid}
@@ -208,7 +212,7 @@ export function ConfigModelMigrationPanel({
                             }}
                           />
                           {splitInvalid ? (
-                            <p className={styles.resolutionError} role="alert">请输入非空且非路径型的 upstream ID。</p>
+                            <p className={styles.resolutionError} role="alert">{copy.migrationUpstreamInvalid}</p>
                           ) : null}
                         </div>
                       ) : null}
@@ -216,7 +220,7 @@ export function ConfigModelMigrationPanel({
                   );
                 })}
               </div>
-              <VActionGroup ariaLabel="冲突裁决预览" className={styles.resolutionActions}>
+              <VActionGroup ariaLabel={copy.migrationResolutionAria} className={styles.resolutionActions}>
                 <VButton
                   isDisabled={busy || !resolutions}
                   onPress={() => {
@@ -224,46 +228,46 @@ export function ConfigModelMigrationPanel({
                     onPreview(resolutions);
                   }}
                 >
-                  重新生成裁决预览
+                  {copy.migrationRegenerateResolutions}
                 </VButton>
               </VActionGroup>
             </section>
           ) : null}
           {credentialConflicts.length ? (
-            <VStateSurface tone="error" title="Credential 冲突阻止应用">
-              {credentialConflicts.length} 个凭据映射冲突必须先处理；界面不会显示 credential reference 目标或 secret。
+            <VStateSurface tone="error" title={copy.migrationCredentialBlockedTitle}>
+              {formatConfigCopy(copy.migrationCredentialBlockedTemplate, { count: credentialConflicts.length })}
             </VStateSurface>
           ) : null}
           {otherConflicts.length ? (
             <section className={styles.fact}>
-              <strong>未解决冲突</strong>
+              <strong>{copy.migrationUnresolvedHeading}</strong>
               <ul className={styles.conflictList}>
                 {otherConflicts.map((conflict, index) => (
-                  <li key={`${conflict.code}-${index}`}>{conflict.code} · {conflict.modelId || ("modelIds" in conflict ? conflict.modelIds?.join(", ") : "") || conflict.proposedProviderId || "全局"}</li>
+                  <li key={`${conflict.code}-${index}`}>{conflict.code} · {conflict.modelId || ("modelIds" in conflict ? conflict.modelIds?.join(", ") : "") || conflict.proposedProviderId || copy.migrationGlobalFallback}</li>
                 ))}
               </ul>
             </section>
           ) : artifactWarnings.length ? null : (
-            <VStateSurface tone="info" icon={<ShieldCheck size={15} />} title="预览无阻塞冲突">Apply 仍需最终 destructive impact 确认，不会在预览后自动执行。</VStateSurface>
+            <VStateSurface tone="info" icon={<ShieldCheck size={15} />} title={copy.migrationNoConflictsTitle}>{copy.migrationNoConflictsBody}</VStateSurface>
           )}
         </>
       ) : (
-        <VStateSurface tone="empty" title="先生成只读迁移预览">预览会列出 Provider 分组、old-to-new modelRef、live 引用与冲突。</VStateSurface>
+        <VStateSurface tone="empty" title={copy.migrationPreviewFirstTitle}>{copy.migrationPreviewFirstBody}</VStateSurface>
       )}
 
-      <VActionGroup ariaLabel="迁移操作" className={styles.actions}>
-        <VButton isDisabled={busy} onPress={() => onPreview([])}>生成迁移预览</VButton>
+      <VActionGroup ariaLabel={copy.migrationActionsAria} className={styles.actions}>
+        <VButton isDisabled={busy} onPress={() => onPreview([])}>{copy.migrationPreviewAction}</VButton>
         <VButton
           variant="danger"
           isDisabled={applyDisabled}
-          tooltip="应用迁移会修改外部 operator config。"
-          disabledReason={!preview ? "先生成预览" : preview.status !== "READY" ? "仍有未解决冲突" : busy ? "迁移操作正在进行" : undefined}
+          tooltip={copy.migrationApplyTooltip}
+          disabledReason={!preview ? copy.migrationNeedPreviewFirst : preview.status !== "READY" ? copy.migrationConflictsRemain : busy ? copy.migrationInProgress : undefined}
           onPress={() => {
             if (!preview || preview.status !== "READY") return;
             onApply(preview.previewId, preview.baseHash);
           }}
         >
-          应用迁移
+          {copy.migrationApplyAction}
         </VButton>
       </VActionGroup>
     </VSurface>

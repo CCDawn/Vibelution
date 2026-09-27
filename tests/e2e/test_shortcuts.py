@@ -14,9 +14,10 @@
 - 冲突：给「会话搜索」录 Ctrl+K（被「打开命令面板」默认 CmdOrCtrl+K 物理占用）→
   danger banner + 「抢占并绑定」按钮。
 
-已知产品缺陷（登记 e2e-playwright.md）：VDialog/ShadcnDialog 不透传 ``data-vui``，
-``global-command-palette`` / ``global-session-search`` 锚点不在 DOM；面板断言用
-``[data-testid="vui-command-palette"]``（VCommandPalette 自身 testid）。
+VDialog 锚点已透传（2026-09-25 修复 668cfa8c1）：面板打开后
+``[data-vui="global-command-palette"]`` / ``"global-session-search"`` 锚点在 DOM；
+面板打开断言直接钉强锚点 ``[data-vui="global-command-palette"]``，
+不依赖组件自身 testid。
 
 保留键黑名单含 CmdOrCtrl+Shift+j（DevTools），录新键选 Control+Shift+L。
 每个测试用例独立 browser context（conftest page fixture），localStorage 互不污染。
@@ -44,7 +45,7 @@ SHORTCUTS_URL_PATH = "/config"
 SHORTCUTS_URL_QUERY = "section=workbench-interface&page=workbench-shortcuts"
 PANEL = '[data-testid="shortcuts-panel"]'
 STORAGE_KEY = "vibelution.shortcuts.overrides"
-PALETTE_BODY = '[data-testid="vui-command-palette"]'
+PALETTE_BODY = '[data-vui="global-command-palette"]'
 
 
 def _row(page: Any, command_id: str) -> Any:
@@ -102,7 +103,7 @@ def test_record_new_binding_persists_and_opens_palette(page: Any, e2e_instance: 
     assert "CmdOrCtrl+Shift+l" in stored, f"localStorage 未写入新绑定: {stored!r}"
 
     # 任意页（静态中转页 /reset）按新键 → 命令面板打开。
-    # 注：VDialog/ShadcnDialog 不透传 data-vui（已登记产品缺陷），断言用面板自身 testid。
+    # 断言钉 VDialog 透传的 data-vui 强锚点（668cfa8c1 修复后锚点在 DOM）。
     page.goto(f"{e2e_instance.base_url}/reset", wait_until="domcontentloaded")
     page.wait_for_timeout(800)
     page.keyboard.press("Control+Shift+l")

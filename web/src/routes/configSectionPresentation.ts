@@ -334,6 +334,19 @@ const SECTION_PRESENTATION: Record<
 };
 
 const ZH_FIELD_COPY: Record<string, ConfigFieldPresentationCopy> = {
+  // Settings-align wave 3 completeness entries: labels are copied verbatim
+  // from the backend editor meta (config/editor_schema_data.py) and hints are
+  // intentionally omitted so they keep falling through to the backend hint —
+  // display stays identical while the copy-completeness SSOT test can hold.
+  "avatar.preset": { label: "终端形象预设" },
+  "context_compression.micro_compact_tool_whitelist": { label: "Micro Compact Tool Whitelist" },
+  "session_recovery.enabled": { label: "启用重启自动恢复" },
+  "session_recovery.max_auto_retries": { label: "自动重发上限" },
+  "user_profile.avatar_image_path": { label: "本地头像图片" },
+  "user_profile.avatar_preset": { label: "用户头像" },
+  "user_profile.bio": { label: "用户背景" },
+  "user_profile.display_name": { label: "用户显示名" },
+  "user_profile.preferences": { label: "用户偏好" },
   "ui.language": { label: "界面语言", hint: "切换工作台界面使用的语言。" },
   "ui.max_log_entries": { label: "界面日志保留条数", hint: "限制工作台内存中保留的日志条目数量。" },
   "ui.refresh_rate": { label: "界面刷新频率", hint: "控制终端工作台刷新状态的频率。" },

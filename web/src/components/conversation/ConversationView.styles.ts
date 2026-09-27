@@ -26,7 +26,9 @@ function cv(key: string, ...classNames: string[]) {
 const readableMessageText = "min-w-0 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]";
 const readableMarkdownMeasure = "max-w-full";
 const assistantMessageMeasure = "w-full max-w-full";
-const transcriptTurnRail = "w-full max-w-[830px] justify-self-center";
+// Single readable transcript measure: one cap for every transcript body and turn.
+const transcriptMeasure = "max-w-[830px]";
+const transcriptTurnRail = `w-full ${transcriptMeasure} justify-self-center`;
 const assistantTranscriptGrid = `grid min-w-0 ${transcriptTurnRail} grid-cols-[2rem_minmax(0,1fr)] items-start gap-x-3 max-[719px]:gap-x-2`;
 const answerOnlyProcessShell = cv(
   "answerOnlyProcessGroup",
@@ -109,7 +111,7 @@ const styles: Record<string, string> = {
   agentInboxToggle:
     `vui-components-conversationview agentInboxToggle min-w-0 ${vuiStateCoolInfoClass}`,
   agentInboxTurn:
-    `vui-components-conversationview agentInboxTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[34px_minmax(0,1fr)] gap-x-3 [&_.turnContent]:w-[min(100%,1360px)] [&_.turnContent]:p-0 [&_.turnContent]:border-l-0`,
+    `vui-components-conversationview agentInboxTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[34px_minmax(0,1fr)] gap-x-3 [&_.turnContent]:w-full [&_.turnContent]:p-0 [&_.turnContent]:border-l-0`,
   answerOnlyProcessDetails:
     "vui-components-conversationview answerOnlyProcessDetails min-w-0",
   answerOnlyProcessGroup: answerOnlyProcessShell,
@@ -285,6 +287,10 @@ backToBottomButton:
   // preview dialog, so it keeps a real tap area (56px) and a hover/focus hint.
   composerAttachmentChip:
     "vui-components-conversationview composerAttachmentChip group inline-flex min-w-0 w-fit max-w-full items-center gap-2.5 overflow-hidden rounded-[14px] border border-[color-mix(in_srgb,var(--vui-border-subtle)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] p-1.5 pr-2 transition-colors duration-150 hover:border-[color-mix(in_srgb,var(--border-strong)_72%,transparent)] hover:bg-[var(--vui-control-muted-hover)] focus-within:border-[var(--accent-cool)]",
+  // Failed upload keeps the chip in place but repaints it on the danger scale:
+  // red ring + faint error wash, with the retry icon button carrying the fix.
+  composerAttachmentChipFailed:
+    "vui-components-conversationview composerAttachmentChipFailed !border-[color-mix(in_srgb,var(--state-error)_45%,transparent)] !bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash-faint),transparent)] hover:!border-[color-mix(in_srgb,var(--state-error)_62%,transparent)] hover:!bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash-strong),transparent)] focus-within:!border-[var(--state-error)]",
   composerAttachmentCopy:
     "vui-components-conversationview composerAttachmentCopy grid min-w-0 gap-1 pr-1",
   composerAttachmentMeta:
@@ -295,6 +301,16 @@ backToBottomButton:
     "vui-components-conversationview composerAttachmentPreview shrink-0 cursor-zoom-in !h-14 !min-h-14 !w-14 !min-w-14 !overflow-hidden !rounded-[10px] !bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,var(--vui-control-muted))] !p-0 shadow-none hover:!bg-[var(--vui-control-muted-hover)] hover:!shadow-none focus-visible:!ring-offset-0 [&_[data-slot=vui-button-content]]:!size-full [&_[data-slot=vui-button-content]]:!max-w-none [&_[data-slot=vui-button-label]]:!block [&_[data-slot=vui-button-label]]:!size-full",
   composerAttachmentRemoveButton:
     "vui-components-conversationview composerAttachmentRemoveButton !h-6 !min-h-6 !w-6 !min-w-6 shrink-0 !rounded-full !p-0 text-[var(--fg-tertiary)] hover:!bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash-strong),var(--vui-control-muted-hover))] hover:!text-[var(--state-error)]",
+  // Per-chip retry: same compact icon-button footprint as remove, but on the
+  // danger scale so the fix reads as part of the failed state.
+  composerAttachmentRetryButton:
+    "vui-components-conversationview composerAttachmentRetryButton !h-6 !min-h-6 !w-6 !min-w-6 shrink-0 !rounded-full !p-0 text-[var(--state-error)] hover:!bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash-strong),transparent)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)] disabled:cursor-default disabled:opacity-55",
+  composerAttachmentStatusFailed:
+    "vui-components-conversationview composerAttachmentStatusFailed min-w-0 text-vui-2xs leading-none text-[var(--state-error)]",
+  composerAttachmentStatusUploading:
+    "vui-components-conversationview composerAttachmentStatusUploading inline-flex min-w-0 items-center gap-1 text-vui-2xs leading-none text-[var(--fg-tertiary)]",
+  composerAttachmentUploadingIcon:
+    "vui-components-conversationview composerAttachmentUploadingIcon shrink-0 animate-spin",
   composerAttachmentThumbFrame:
     "vui-components-conversationview composerAttachmentThumbFrame relative block size-full overflow-hidden rounded-[10px]",
   composerAttachmentThumb:
@@ -314,22 +330,10 @@ backToBottomButton:
     "vui-components-conversationview composerStopPendingFeedback min-w-0 max-w-[12rem] truncate text-vui-xs leading-tight text-[var(--fg-secondary)]",
   composerError:
     `vui-components-conversationview composerError min-w-0 ${vuiStateDangerSoftClass}`,
-  composerEditModeDescription:
-    "vui-components-conversationview composerEditModeDescription min-w-0 truncate text-vui-xs font-medium leading-tight text-[var(--fg-tertiary)]",
-  composerEditModeBar:
-    "vui-components-conversationview composerEditModeBar grid min-w-0 min-h-7 w-full max-w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_55%,transparent)] px-2 py-1 text-vui-xs leading-tight text-[var(--fg-secondary)]",
-  composerEditModeCancel:
-    "vui-components-conversationview composerEditModeCancel !inline-flex !h-6 !min-h-6 !w-fit !min-w-0 shrink-0 items-center justify-center !rounded-full !border !border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] !bg-[color-mix(in_srgb,var(--vui-control-muted)_55%,transparent)] !px-2 !py-0 text-vui-xs font-semibold leading-none !text-[var(--fg-secondary)] shadow-none hover:!border-[color-mix(in_srgb,var(--border-strong)_72%,transparent)] hover:!bg-[color-mix(in_srgb,var(--vui-surface-workspace)_14%,var(--vui-control-muted-hover))] hover:!text-[var(--fg-primary)]",
-  composerEditModeCopy:
-    "vui-components-conversationview composerEditModeCopy grid min-w-0 items-center gap-0.5",
-  composerEditModeIcon:
-    "vui-components-conversationview composerEditModeIcon min-w-0 shrink-0 text-[var(--fg-tertiary)]",
-  composerEditModeLabel:
-    "vui-components-conversationview composerEditModeLabel min-w-0 truncate font-semibold text-[var(--fg-secondary)]",
-  composerEditModePreview:
-    "vui-components-conversationview composerEditModePreview min-w-0 max-w-full truncate text-vui-xs leading-tight text-[var(--fg-tertiary)]",
-  composerEditModeWarning:
-    "vui-components-conversationview composerEditModeWarning min-w-0 whitespace-normal break-words text-vui-xs font-semibold leading-[1.45] text-[var(--state-warning)] [overflow-wrap:anywhere]",
+  // Retry-all action inside the error row: a quiet ghost button that inherits
+  // the danger row so the fix sits next to the failure it repairs.
+  composerErrorRetryButton:
+    "vui-components-conversationview composerErrorRetryButton !h-6 !min-h-6 shrink-0 gap-1 !rounded-full !px-2 text-vui-2xs font-semibold !text-[var(--state-error)] hover:!bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash-strong),transparent)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:inline-flex [&_[data-slot=vui-button-content]]:items-center [&_[data-slot=vui-button-content]]:gap-1",
   followupQueueTray:
     "vui-components-conversationview followupQueueTray mb-1 grid min-w-0 gap-0.5",
   followupQueueTrayBleed:
@@ -378,8 +382,6 @@ backToBottomButton:
     "vui-components-conversationview composerGuidance min-w-0",
   composerGuidanceIcon:
     "vui-components-conversationview composerGuidanceIcon min-w-0 shrink-0 text-[var(--fg-tertiary)]",
-  composerModeNotice: `vui-components-conversationview composerModeNotice min-w-0 ${vuiGlassPanelClass} p-2`,
-  composerModeNoticeIcon: `vui-components-conversationview composerModeNoticeIcon min-w-0 ${vuiGlassPanelClass} p-2 shrink-0 text-[var(--fg-tertiary)]`,
   composerReferenceChip:
     `vui-components-conversationview composerReferenceChip min-w-0 ${vuiControlPillClass}`,
   composerReferenceCopy:
@@ -450,8 +452,21 @@ backToBottomButton:
     "vui-components-conversationview codexTranscriptReasoningHeaderBody min-w-0 overflow-hidden text-left",
   codexTranscriptReasoningTitleRow:
     "vui-components-conversationview codexTranscriptReasoningTitleRow inline-flex min-w-0 max-w-full flex-nowrap items-center gap-x-2 overflow-hidden",
+  // Thought title keeps a fixed label so the rolling summary owns the leftover
+  // width instead of squeezing the status text into multiple lines.
+  codexTranscriptReasoningTitle:
+    "vui-components-conversationview codexTranscriptReasoningTitle shrink-0 whitespace-nowrap text-vui-xs font-normal leading-[1.4] text-[var(--fg-tertiary)]",
   codexTranscriptReasoningText:
     "vui-components-conversationview codexTranscriptReasoningText min-w-0 max-w-[min(100%,128ch)] whitespace-pre-wrap break-words [overflow-wrap:anywhere] border-0 bg-transparent p-0 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  // Collapsed thought summary: one nowrap line that hides overflow and rolls
+  // the newest words to the right edge; the mask only fades real overflow so
+  // short summaries keep clean edges.
+  thoughtStreamingSummary:
+    "vui-components-conversationview thoughtStreamingSummary min-w-0 flex-1 overflow-hidden whitespace-nowrap text-vui-xs leading-[1.4] text-[var(--fg-tertiary)]",
+  thoughtStreamingSummaryMasked:
+    "vui-components-conversationview thoughtStreamingSummaryMasked [mask-image:linear-gradient(to_right,transparent_0,black_12px,black_calc(100%_-_12px),transparent_100%)] [-webkit-mask-image:linear-gradient(to_right,transparent_0,black_12px,black_calc(100%_-_12px),transparent_100%)] [mask-repeat:no-repeat] [-webkit-mask-repeat:no-repeat] [mask-size:100%_100%] [-webkit-mask-size:100%_100%]",
+  thoughtStreamingSummaryText:
+    "vui-components-conversationview thoughtStreamingSummaryText inline-block min-w-max whitespace-nowrap",
   // User-facing progress narration: a lighter lane than thinking (no box chrome),
   // clamped while settled so long narration stays scannable.
   codexTranscriptProgressCell:
@@ -500,7 +515,7 @@ backToBottomButton:
   groupTranscriptBody:
     "vui-components-conversationview groupTranscriptBody min-w-0 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   groupTranscriptTurn:
-    `vui-components-conversationview groupTranscriptTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[34px_minmax(0,1fr)] gap-x-3 [&_.turnContent]:w-[min(100%,1360px)] [&_.turnContent]:p-0 [&_.turnContent]:border-l-0`,
+    `vui-components-conversationview groupTranscriptTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[34px_minmax(0,1fr)] gap-x-3 [&_.turnContent]:w-full [&_.turnContent]:p-0 [&_.turnContent]:border-l-0`,
   header:
     "vui-components-conversationview header min-w-0 flex flex-wrap items-center gap-1.5",
   headerControls:
@@ -527,7 +542,7 @@ backToBottomButton:
   imagePreviewOverlay: `vui-components-conversationview imagePreviewOverlay min-w-0 ${vuiGlassPanelClass} p-2`,
   imagePreviewToolbar: `vui-components-conversationview imagePreviewToolbar min-w-0 ${vuiGlassPanelClass} p-2 flex flex-wrap items-center gap-1.5`,
   inlineCode:
-    "vui-components-conversationview inlineCode min-w-0 rounded-[0.3rem] bg-[color-mix(in_srgb,var(--fg-primary)_var(--vui-alpha-wash-faint),transparent)] px-1 py-0.5 font-mono text-vui-xs text-[var(--fg-primary)] whitespace-normal break-words [box-decoration-break:clone]",
+    "vui-components-conversationview inlineCode min-w-0 rounded-[var(--vui-radius-chip)] bg-[color-mix(in_srgb,var(--fg-primary)_var(--vui-alpha-wash-faint),transparent)] px-1 py-0.5 font-mono text-vui-xs text-[var(--fg-primary)] whitespace-normal break-words [box-decoration-break:clone]",
   inlineLink:
     "vui-components-conversationview inlineLink min-w-0 text-[var(--accent-cool)] underline decoration-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line-strong),transparent)] underline-offset-2 hover:decoration-[var(--accent-cool)]",
   inlineStrong:
@@ -1177,7 +1192,7 @@ timeline:
   timelineVirtualRow:
     "vui-components-conversationview timelineVirtualRow min-w-0 [content-visibility:auto] [contain-intrinsic-size:auto_120px]",
   timelineAssistantTextCell:
-    "vui-components-conversationview timelineAssistantTextCell min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-w-[min(100%,1360px)]",
+    `vui-components-conversationview timelineAssistantTextCell min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] mx-auto ${transcriptMeasure}`,
   timelineCellDetailButton:
     "vui-components-conversationview timelineCellDetailButton min-w-0 inline-grid size-6 shrink-0 self-start place-items-center rounded-[var(--radius-control)] border border-transparent bg-transparent p-0 text-[var(--fg-tertiary)] hover:border-[var(--vui-border-subtle)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
   timelineCellHeader:
@@ -1255,6 +1270,22 @@ timeline:
   turnEditBadge: `vui-components-conversationview turnEditBadge min-w-0 ${vuiOpaqueRowClass} p-2 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full bg-[var(--vui-control-muted)] px-2 text-vui-xs font-semibold leading-none text-[var(--fg-secondary)]`,
   turnEditing:
     "vui-components-conversationview turnEditing min-w-0 [&_.userMessageBody]:border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--vui-border-subtle))] [&_.userMessageBody]:bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),var(--vui-surface-panel))] [&_.userMessageBody]:ring-1 [&_.userMessageBody]:ring-inset [&_.userMessageBody]:ring-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint),transparent)]",
+  turnInlineEditor:
+    "vui-components-conversationview turnInlineEditor grid min-w-0 max-w-full gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),var(--vui-surface-panel))] p-1.5 shadow-none",
+  turnInlineEditorActions:
+    "vui-components-conversationview turnInlineEditorActions flex min-w-0 flex-wrap items-center justify-end gap-1.5",
+  turnInlineEditorChip:
+    "vui-components-conversationview turnInlineEditorChip inline-flex h-5 min-w-0 max-w-full items-center gap-1 rounded-full border border-[color-mix(in_srgb,var(--vui-border-subtle)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_55%,transparent)] px-2 text-vui-2xs leading-none text-[var(--fg-secondary)]",
+  turnInlineEditorChipIcon:
+    "vui-components-conversationview turnInlineEditorChipIcon size-3 shrink-0 text-[var(--fg-tertiary)]",
+  turnInlineEditorChipName:
+    "vui-components-conversationview turnInlineEditorChipName min-w-0 truncate",
+  turnInlineEditorChipRow:
+    "vui-components-conversationview turnInlineEditorChipRow flex min-w-0 max-w-full flex-wrap items-center gap-1",
+  turnInlineEditorChipThumb:
+    "vui-components-conversationview turnInlineEditorChipThumb size-3.5 shrink-0 rounded-full object-cover",
+  turnInlineEditorInput:
+    "vui-components-conversationview turnInlineEditorInput !min-h-16 max-h-64 resize-none overflow-y-auto !py-1.5 leading-5",
   toolApprovalFallback:
     "toolApprovalFallback z-[6] min-w-0 w-full max-w-[min(44rem,100%)] shrink-0 justify-self-center px-2 pb-1.5 pt-0.5",
   turnError:
@@ -1319,6 +1350,18 @@ timeline:
     "vui-components-conversationview turnStatusNote min-w-0 inline-grid w-[min(100%,920px)] grid-cols-[auto_minmax(0,1fr)] items-start gap-2 border-l border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] bg-transparent py-1 pl-2.5 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   turnStatusText:
     "vui-components-conversationview turnStatusText min-w-0 max-w-[min(100%,128ch)] whitespace-normal [overflow-wrap:anywhere]",
+  // Settled-turn work header (ZCode AssistantHistoryStatus alignment): a thin
+  // rule with a collapsible 「已工作 N 分钟」 trigger at the turn tail.
+  turnWorkHeader:
+    "vui-components-conversationview turnWorkHeader w-fit min-w-0 max-w-full border-b border-[color-mix(in_srgb,var(--vui-border-subtle)_60%,transparent)] pb-2",
+  turnWorkHeaderSummary:
+    "vui-components-conversationview turnWorkHeaderSummary flex w-full list-none cursor-pointer items-center gap-1.5 py-0.5 text-left text-vui-sm text-[var(--fg-tertiary)] [&::-webkit-details-marker]:hidden [&::marker]:hidden [&::marker]:content-none hover:text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
+  turnWorkHeaderChevron:
+    "vui-components-conversationview turnWorkHeaderChevron shrink-0 text-[var(--fg-tertiary)] opacity-70 transition-transform motion-reduce:transition-none",
+  turnWorkHeaderLabel:
+    "vui-components-conversationview turnWorkHeaderLabel min-w-0 truncate",
+  turnWorkHeaderBody:
+    "vui-components-conversationview turnWorkHeaderBody min-w-0 pt-2 text-vui-xs leading-[var(--vui-line-readable)] text-[var(--fg-tertiary)]",
   updateLine: `vui-components-conversationview updateLine min-w-0 ${vuiOpaqueRowClass} p-2`,
   userAttachment:
     "vui-components-conversationview userAttachment min-w-0",

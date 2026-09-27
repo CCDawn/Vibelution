@@ -100,9 +100,38 @@ def test_strip_llm_protocol_artifacts_keeps_non_protocol_trailing_angle_brackets
     assert strip_llm_protocol_artifacts("click the <toolbar") == "click the <toolbar"
 
 
-def test_sanitize_assistant_visible_text_hides_unclosed_think_blocks():
-    assert sanitize_assistant_visible_text("<think>内部推理") == ""
+def test_sanitize_assistant_visible_text_removes_complete_think_blocks():
     assert sanitize_assistant_visible_text("<think>内部推理</think>可见") == "可见"
+    assert sanitize_assistant_visible_text("<thinking>内部推理</thinking>可见") == "可见"
+
+
+def test_sanitize_assistant_visible_text_mismatched_close_keeps_following_answer():
+    # Defect-④ family: a think block closed by a foreign tag ends at that
+    # close instead of swallowing every following answer character.
+    assert (
+        sanitize_assistant_visible_text("<think>内部推理</summary>这是可见答案")
+        == "这是可见答案"
+    )
+    assert sanitize_assistant_visible_text("<think></summary>可见答案") == "可见答案"
+    assert sanitize_assistant_visible_delta_text("<think>x</summary>答案") == "答案"
+
+
+def test_sanitize_assistant_visible_text_unclosed_think_follows_extractor_gate():
+    # Long unclosed body opening at the front: genuine truncated reasoning
+    # envelope, still hidden (conservative extractor thresholds).
+    long_body = "截断的真实思考内容。" * 30
+    assert sanitize_assistant_visible_text(f"<think>{long_body}") == ""
+    # Short unclosed body is prose, not an envelope: only the stray tag is
+    # dropped and the following text stays visible.
+    assert sanitize_assistant_visible_text("<think>内部推理") == "内部推理"
+    assert (
+        sanitize_assistant_visible_text("顺便看看 <think> 这个标签写法")
+        == "顺便看看  这个标签写法"
+    )
+    # Mid-text unclosed body beyond the conservative open-ratio gate is prose.
+    filler = "开头解释。" * 100
+    body = "截断的真实思考内容。" * 30
+    assert sanitize_assistant_visible_text(f"{filler}<think>{body}") == filler + body
 
 
 def test_sanitize_coerces_bytes_mapping_chunks_and_false_trim():

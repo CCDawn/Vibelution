@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   ACTIVE_TURN_NO_DELTA_STALL_AFTER_MS,
+  ACTIVE_TURN_RECONNECT_ACTION_COOLDOWN_MS,
+  MIN_VISIBLE_API_RETRY_ATTEMPT,
   activeTurnElapsedSeconds,
   activeTurnOptimisticStageSummary,
   activeTurnStageBarPhase,
@@ -14,6 +16,8 @@ import {
   resolveActiveTurnRetryProgress,
   resolveActiveTurnRouteFallback,
   resolveActiveTurnStallSeconds,
+  shouldShowActiveTurnReconnectAction,
+  visibleActiveTurnRetryProgress,
 } from "./conversationActiveTurnStatusPresentation";
 
 describe("conversationActiveTurnStatusPresentation", () => {
@@ -36,15 +40,25 @@ describe("conversationActiveTurnStatusPresentation", () => {
     expect(activeTurnElapsedSeconds("bad", Date.now())).toBeNull();
   });
 
-  it("maps prepare→thinking stage bar progression", () => {
+  it("maps prepare→thinking→respond stage bar progression", () => {
     expect(activeTurnStageBarPhase("user_submit")).toBe("sent");
     expect(activeTurnStageBarPhase("agent_prepare")).toBe("prepare");
     expect(activeTurnStageBarPhase("model_request")).toBe("request");
     expect(activeTurnStageBarPhase("model_thinking")).toBe("thinking");
     const bar = buildActiveTurnStageBarItems("model_thinking", "zh");
-    expect(bar.map((item) => item.label)).toEqual(["发送", "准备", "请求", "思考"]);
+    expect(bar.map((item) => item.label)).toEqual(["发送", "准备", "请求", "思考", "回答"]);
     expect(bar.find((item) => item.phase === "thinking")?.current).toBe(true);
     expect(bar.filter((item) => item.reached)).toHaveLength(4);
+  });
+
+  it("maps the responding answer stage onto the respond phase", () => {
+    expect(activeTurnStageBarPhase("responding")).toBe("respond");
+    expect(activeTurnStageBarPhase("assistant_response")).toBe("respond");
+    expect(activeTurnStageLabel("responding", "zh")).toBe("生成回答");
+    expect(activeTurnStageLabel("responding", "en")).toBe("Generating");
+    const bar = buildActiveTurnStageBarItems("responding", "zh");
+    expect(bar.find((item) => item.phase === "respond")?.current).toBe(true);
+    expect(bar.filter((item) => item.reached)).toHaveLength(5);
   });
 
   it("falls back to metadata.processStage then pending/running defaults", () => {
@@ -119,13 +133,33 @@ describe("conversationActiveTurnStatusPresentation", () => {
     })).toBeNull();
   });
 
-  it("formats retry heartbeat with attempt counts", () => {
+  it("keeps early retries silent and counts only from the third attempt", () => {
+    expect(MIN_VISIBLE_API_RETRY_ATTEMPT).toBe(3);
+    expect(visibleActiveTurnRetryProgress(null)).toBeNull();
+    expect(visibleActiveTurnRetryProgress({ attempt: 1, maxAttempts: 5 })).toBeNull();
+    expect(visibleActiveTurnRetryProgress({ attempt: 2, maxAttempts: 5 })).toBeNull();
+    expect(visibleActiveTurnRetryProgress({ attempt: 3, maxAttempts: 5 })).toEqual({
+      attempt: 3,
+      maxAttempts: 5,
+    });
+  });
+
+  it("formats retry heartbeats with the ZCode visibility rule", () => {
+    // Attempts 1-2 (and uncounted retries) stay silent: plain request wording.
     expect(formatActiveTurnHeartbeatText("model_retry", 12, "zh", { attempt: 2, maxAttempts: 5 }))
-      .toBe("请求重试 2/5 · 12s");
-    expect(formatActiveTurnHeartbeatText("model_retry", null, "en", { attempt: 3, maxAttempts: 5 }))
-      .toBe("Retrying request 3/5");
+      .toBe("请求模型 · 12s");
     expect(formatActiveTurnHeartbeatText("model_retry", 8, "zh"))
-      .toBe("请求重试 · 8s");
+      .toBe("请求模型 · 8s");
+    expect(formatActiveTurnHeartbeatText("retrying", null, "en"))
+      .toBe("Requesting model");
+    // From the third attempt the counter becomes visible, count only (no
+    // invented countdown), elapsed seconds keep the heartbeat convention.
+    expect(formatActiveTurnHeartbeatText("model_retry", null, "en", { attempt: 3, maxAttempts: 5 }))
+      .toBe("Retrying (attempt 3/5)");
+    expect(formatActiveTurnHeartbeatText("model_retry", 12, "zh", { attempt: 4, maxAttempts: 5 }))
+      .toBe("第 4/5 次重试 · 12s");
+    // Non-retry stages keep their own labels untouched.
+    expect(formatActiveTurnHeartbeatText("model_thinking", 12, "zh")).toBe("思考中 · 12s");
   });
 
   it("resolves disconnect seconds only while the stream is reconnecting", () => {
@@ -145,6 +179,18 @@ describe("conversationActiveTurnStatusPresentation", () => {
       streamDisconnectedSinceMs: nowMs + 5_000,
       nowMs,
     })).toBe(0);
+  });
+
+  it("gates the manual reconnect action on a real drop plus a wired handler", () => {
+    expect(ACTIVE_TURN_RECONNECT_ACTION_COOLDOWN_MS).toBe(2_000);
+    // Real reconnect loop + stream-owner callback: button shows.
+    expect(shouldShowActiveTurnReconnectAction({ disconnectSeconds: 0, hasReconnectHandler: true })).toBe(true);
+    expect(shouldShowActiveTurnReconnectAction({ disconnectSeconds: 42, hasReconnectHandler: true })).toBe(true);
+    // No wired callback (companion surfaces, supervised panels): chip stays informational.
+    expect(shouldShowActiveTurnReconnectAction({ disconnectSeconds: 42, hasReconnectHandler: false })).toBe(false);
+    // Healthy or unknown stream: no button even with a handler.
+    expect(shouldShowActiveTurnReconnectAction({ disconnectSeconds: null, hasReconnectHandler: true })).toBe(false);
+    expect(shouldShowActiveTurnReconnectAction({ disconnectSeconds: null, hasReconnectHandler: false })).toBe(false);
   });
 
   it("escalates the stall hint only past the no-delta threshold", () => {

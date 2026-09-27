@@ -19,6 +19,9 @@ export type ConfigSummary = {
     id: string;
     title: string;
     summary: string;
+    /** Settings navigation membership (settings-align wave 3 SSOT). */
+    group?: string;
+    page?: string;
   }>;
 };
 

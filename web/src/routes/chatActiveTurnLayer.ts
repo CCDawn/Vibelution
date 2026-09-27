@@ -116,7 +116,34 @@ export function mergeAssistantDeltaIntoActiveTurnLayer(
   const status: ActiveTurnLayerState["status"] = payload.done ? "completed" : "running";
   const turnItems = consolidateSessionTurnItemsV2(base?.turnItems, payload.turnItems);
   // Empty after merge: keep processStage on the layer; do not inject a status-only TurnItem.
-  if (payload.done && !hasVisibleActiveTurnProtocolContent({ turnItems })) return undefined;
+  if (payload.done && !hasVisibleActiveTurnProtocolContent({ turnItems })) {
+    // A terminal frame whose items were already reconciled into the canonical
+    // transcript must not delete the layer: the authoritative session_detail
+    // lands later through the throttled apply path (planQueuedSessionDetail),
+    // and deleting here reopens the 30-60ms+ projection gap this module's
+    // reconcile shell contract (see reconcileActiveTurnLayerItemsWithMessages)
+    // exists to close. Keep the overlay shell instead, mirroring the optimistic
+    // waiting shell. A done frame for a turn this store never held has nothing
+    // to preserve, so it still drops.
+    if (!base) {
+      return undefined;
+    }
+    return {
+      id: activeTurnMessageId(sessionId, turnId),
+      renderKey: base.renderKey || activeTurnRenderKey(sessionId),
+      clientSubmissionId: base.clientSubmissionId,
+      sessionId,
+      turnId,
+      updatedAt,
+      // Stay in-flight: the empty-shell projection gate renders only in-flight
+      // rows, and stream-level done is not authoritative until the canonical
+      // transcript settles the turn through the whole-layer path.
+      status: "running",
+      processStage: stage,
+      turnItems,
+      ledgerSeq: Math.max(base.ledgerSeq ?? 0, incomingLedgerSeq),
+    };
+  }
   return {
     id: activeTurnMessageId(sessionId, turnId),
     renderKey: previous?.renderKey || activeTurnRenderKey(sessionId),
@@ -323,6 +350,13 @@ export function isActiveTurnSettledByMessages(
  * The one ConversationView-facing projection of a live active-turn layer:
  * settled layers hide the streaming message (the canonical transcript is the
  * authority), everything else renders as the in-flight assistant message.
+ *
+ * This hide is the atomic settle handoff, not an early deletion: it fires only
+ * once the committed canonical answer is already inside the same `messages`
+ * window, so the canonical row replaces the overlay in one render pass. Overlay
+ * shells (including post-reconcile empty shells) therefore stay visible until
+ * this rule — or the authoritative-detail apply in useSessionDetailStream —
+ * retires them; nothing may delete the layer earlier.
  */
 export function projectActiveTurnLayerMessage(
   layer: ActiveTurnLayerState | undefined,

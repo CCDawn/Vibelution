@@ -83,14 +83,17 @@ describe("route style display contract", () => {
     expect(gitRouteSource).toContain("`${styles.commitPanel} ${styles.historyPanel}`");
     expect(gitRouteSource).toContain("`${styles.modelDefaultRow} ${styles.modelActionRow}`");
 
-    const configRouteSource = readFileSync(new URL("./ConfigRoute.tsx", import.meta.url), "utf-8");
-    expect(configRouteSource).toContain("`${styles.treeGrid} ${styles.configAdvancedGrid}`");
+    // Settings-align wave 3: ConfigSectionEditor (the only consumer of these
+    // composed classes) moved to config/ConfigSectionEditor.tsx; the contract
+    // follows the code (assertion text unchanged).
+    const configSectionEditorSource = readFileSync(new URL("./config/ConfigSectionEditor.tsx", import.meta.url), "utf-8");
+    expect(configSectionEditorSource).toContain("`${styles.treeGrid} ${styles.configAdvancedGrid}`");
     // Settings-align wave 1: plain fields render as VSettingsRow; the composed
     // grid-template card styles remain attached to the image cards. Wave 2's
     // layout unification made the background card full-width single-column
     // (no treeFieldHead/treeFieldValue pair), so it drops treeFieldCardView.
-    expect(configRouteSource).toContain("`${styles.treeFieldCard} ${styles.themeBackgroundImageCard}`");
-    expect(configRouteSource).toContain("`${styles.treeFieldCard} ${styles.treeFieldCardView} ${styles.avatarImageCard}`");
+    expect(configSectionEditorSource).toContain("`${styles.treeFieldCard} ${styles.themeBackgroundImageCard}`");
+    expect(configSectionEditorSource).toContain("`${styles.treeFieldCard} ${styles.treeFieldCardView} ${styles.avatarImageCard}`");
 
     expect(directSessionIndexItemSource).toContain("styles.sessionItem,");
     expect(directSessionIndexItemSource).toContain("bulkSelectionEnabled ? styles.sessionItemWithBulkSelect");

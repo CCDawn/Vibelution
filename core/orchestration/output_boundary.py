@@ -8,6 +8,8 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from core.llm.reasoning_extractor import strip_think_tag_reasoning
+
 
 _NAMED_PROTOCOL_TAGS = (
     "state",
@@ -167,20 +169,16 @@ def _coerce_name_tuple(value: Any) -> tuple[str, ...]:
 
 
 def _strip_think_blocks(text: str) -> str:
-    cleaned = re.sub(
-        r"<(?:think|thinking)\b[^>]*>[\s\S]*?</(?:think|thinking)\s*>",
-        "",
-        text or "",
-        flags=re.IGNORECASE,
+    # Aligned with the mismatch-safe core/llm/reasoning_extractor fix
+    # (defect ④ family): complete <think>…</think> blocks are always removed;
+    # a think block terminated by a foreign close tag (<think>…</summary>)
+    # ends at that close so the following answer text stays visible; an
+    # unclosed block is only swallowed under the conservative extractor
+    # thresholds, otherwise it is prose and only the stray tag is dropped.
+    cleaned = strip_think_tag_reasoning(text, lambda value: value)
+    return _strip_trailing_partial_protocol_tag(
+        cleaned, extra_prefixes=("thi", "think", "thinking")
     )
-    cleaned = re.sub(
-        r"<(?:think|thinking)\b[^>]*(?:>[\s\S]*)?$",
-        "",
-        cleaned,
-        flags=re.IGNORECASE,
-    )
-    cleaned = re.sub(r"</?(?:think|thinking)[^>]*>", "", cleaned, flags=re.IGNORECASE)
-    return _strip_trailing_partial_protocol_tag(cleaned, extra_prefixes=("thi", "think", "thinking"))
 
 
 def _strip_think_tags_keep_body(text: str) -> str:

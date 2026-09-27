@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
+  applyComposerAttachmentUploadOutcomes,
   buildFileReferencePayload,
   buildKnowledgeBaseReferencePayload,
   buildKnowledgeItemReferencePayload,
@@ -8,6 +9,9 @@ import {
   clearSessionDraftForSubmittedTurn,
   classifyComposerFiles,
   classifyComposerImageFiles,
+  composerUploadedArtifactIds,
+  failedComposerAttachmentUploads,
+  markComposerAttachmentsUploading,
   MAX_COMPOSER_DOCUMENT_BYTES,
   MAX_COMPOSER_IMAGE_BYTES,
   MESSAGE_REFERENCE_TITLE_MAX_CHARS,
@@ -15,10 +19,23 @@ import {
   mergeComposerAttachmentsWithRejections,
   mergeComposerImageAttachments,
   messageReferenceTitle,
+  needsComposerAttachmentUpload,
   resolveComposerSubmitGuard,
   restoreSubmittedDraftIfComposerStillEmpty,
   sessionReferenceId,
+  uploadComposerAttachmentsSettled,
+  type ComposerImageAttachment,
 } from "./chatComposerSubmitModel";
+
+const chatApiMocks = vi.hoisted(() => ({
+  registerSessionImageAttachmentFromPath: vi.fn(),
+  uploadSessionImageAttachment: vi.fn(),
+}));
+
+vi.mock("../../api/chat", () => ({
+  registerSessionImageAttachmentFromPath: chatApiMocks.registerSessionImageAttachmentFromPath,
+  uploadSessionImageAttachment: chatApiMocks.uploadSessionImageAttachment,
+}));
 
 describe("chatComposerSubmitModel", () => {
   it("classifies composer image files by type and size", () => {
@@ -100,6 +117,51 @@ describe("chatComposerSubmitModel", () => {
       ["notes.md", "document"],
     ]);
     expect(result.rejected).toEqual(["big.json", "binary.exe"]);
+  });
+
+  it("attaches resolved local paths to accepted image and document attachments", () => {
+    const image = new File([new Uint8Array([1])], "shot.png", { type: "image/png" });
+    const doc = new File([new Uint8Array([2])], "run.csv", { type: "text/csv" });
+    const result = classifyComposerFiles([image, doc], {
+      createObjectUrl: () => "blob:test",
+      nowMs: 2000,
+      randomId: () => "id",
+      resolveLocalPath: (file) => (file === image ? "C:\\pics\\shot.png" : null),
+    });
+    expect(result.accepted).toHaveLength(2);
+    expect(result.accepted[0]?.kind).toBe("image");
+    expect(result.accepted[0]?.localPath).toBe("C:\\pics\\shot.png");
+    expect(result.accepted[1]?.kind).toBe("document");
+    // Clipboard-style files resolve to null and keep the in-memory upload path.
+    expect(result.accepted[1]?.localPath).toBeUndefined();
+  });
+
+  it("keeps attachments without a local path when resolution is unavailable or fails", () => {
+    const image = new File([new Uint8Array([1])], "shot.png", { type: "image/png" });
+    const baseOptions = { createObjectUrl: () => "blob:test", nowMs: 2000, randomId: () => "id" };
+    expect(
+      classifyComposerImageFiles([image], baseOptions).accepted[0]?.localPath,
+    ).toBeUndefined();
+    expect(
+      classifyComposerImageFiles([image], {
+        ...baseOptions,
+        resolveLocalPath: () => "   ",
+      }).accepted[0]?.localPath,
+    ).toBeUndefined();
+    expect(
+      classifyComposerImageFiles([image], {
+        ...baseOptions,
+        resolveLocalPath: () => {
+          throw new Error("bridge failure");
+        },
+      }).accepted[0]?.localPath,
+    ).toBeUndefined();
+    expect(
+      classifyComposerImageFiles([image], {
+        ...baseOptions,
+        resolveLocalPath: () => "C:\\pics\\shot.png",
+      }).accepted[0]?.localPath,
+    ).toBe("C:\\pics\\shot.png");
   });
 
   it("merges composer attachments with per-kind caps", () => {
@@ -209,5 +271,90 @@ describe("chatComposerSubmitModel", () => {
   it("resolves session reference ids", () => {
     expect(sessionReferenceId({ referenceId: "session:abc", kind: "session", sessionId: "abc" })).toBe("session:abc");
     expect(sessionReferenceId({ kind: "session", sessionId: "abc" } as never)).toBe("abc");
+  });
+});
+
+describe("composer attachment upload statuses", () => {
+  const makeAttachment = (id: string, overrides: Partial<ComposerImageAttachment> = {}): ComposerImageAttachment => ({
+    id,
+    file: new File([new Uint8Array([1])], `${id}.png`, { type: "image/png" }),
+    filename: `${id}.png`,
+    previewUrl: `blob:${id}`,
+    sizeBytes: 1,
+    contentType: "image/png",
+    kind: "image",
+    ...overrides,
+  });
+
+  it("treats only uploaded chips with an artifact as reusable", () => {
+    expect(needsComposerAttachmentUpload(makeAttachment("a"))).toBe(true);
+    expect(needsComposerAttachmentUpload(makeAttachment("a", { uploadStatus: "failed" }))).toBe(true);
+    expect(needsComposerAttachmentUpload(makeAttachment("a", { uploadStatus: "uploaded" }))).toBe(true);
+    expect(needsComposerAttachmentUpload(makeAttachment("a", { uploadStatus: "uploaded", artifactId: "art-1" }))).toBe(false);
+  });
+
+  it("marks uploading, optionally restricted to the retry target ids", () => {
+    const tray = [
+      makeAttachment("keep", { uploadStatus: "uploaded", artifactId: "art-keep" }),
+      makeAttachment("failed", { uploadStatus: "failed" }),
+      makeAttachment("fresh"),
+    ];
+    const retryMarked = markComposerAttachmentsUploading(tray, new Set(["failed"]));
+    expect(retryMarked.map((attachment) => attachment.uploadStatus)).toEqual(
+      ["uploaded", "uploading", undefined],
+    );
+    expect(retryMarked[1]?.id).toBe("failed");
+    // Upload path marks every not-yet-uploaded chip.
+    const allMarked = markComposerAttachmentsUploading(tray);
+    expect(allMarked.map((attachment) => attachment.uploadStatus)).toEqual(
+      ["uploaded", "uploading", "uploading"],
+    );
+    // Already-uploading chips stay untouched (idempotent retry clicks).
+    const uploading = [makeAttachment("x", { uploadStatus: "uploading" })];
+    expect(markComposerAttachmentsUploading(uploading, new Set(["x"]))[0]?.uploadStatus).toBe("uploading");
+  });
+
+  it("lists failed chips as the retry surface", () => {
+    const tray = [
+      makeAttachment("ok", { uploadStatus: "uploaded", artifactId: "art-1" }),
+      makeAttachment("bad-1", { uploadStatus: "failed" }),
+      makeAttachment("bad-2", { uploadStatus: "failed" }),
+    ];
+    expect(failedComposerAttachmentUploads(tray).map((attachment) => attachment.id)).toEqual(["bad-1", "bad-2"]);
+  });
+
+  it("settles uploads per attachment instead of failing the whole batch", async () => {
+    chatApiMocks.uploadSessionImageAttachment.mockImplementation((_sessionId: string, init: { filename: string }) =>
+      init.filename === "bad.png"
+        ? Promise.reject(new Error("disk full"))
+        : Promise.resolve({ artifactId: `artifact-${init.filename}` }),
+    );
+    const tray = [makeAttachment("good"), makeAttachment("bad-2", { filename: "bad.png" })];
+    const outcomes = await uploadComposerAttachmentsSettled("session-1", tray);
+    expect(outcomes).toEqual([
+      { id: "good", status: "uploaded", artifactId: "artifact-good.png" },
+      { id: "bad-2", status: "failed", error: expect.any(Error) },
+    ]);
+  });
+
+  it("counts fulfilled uploads without an artifactId as failed", async () => {
+    chatApiMocks.uploadSessionImageAttachment.mockResolvedValue({ artifactId: "" });
+    const outcomes = await uploadComposerAttachmentsSettled("session-1", [makeAttachment("a")]);
+    expect(outcomes[0]?.status).toBe("failed");
+  });
+
+  it("applies outcomes back onto the tray and keeps uploaded ids in tray order", () => {
+    const tray = [
+      makeAttachment("a", { uploadStatus: "uploading" }),
+      makeAttachment("b", { uploadStatus: "uploaded", artifactId: "artifact-b" }),
+      makeAttachment("c", { uploadStatus: "uploading" }),
+    ];
+    const next = applyComposerAttachmentUploadOutcomes(tray, [
+      { id: "c", status: "uploaded", artifactId: "artifact-c" },
+      { id: "a", status: "failed", error: new Error("boom") },
+    ]);
+    expect(next.map((attachment) => attachment.uploadStatus)).toEqual(["failed", "uploaded", "uploaded"]);
+    expect(next[1]?.artifactId).toBe("artifact-b");
+    expect(composerUploadedArtifactIds(next)).toEqual(["artifact-b", "artifact-c"]);
   });
 });

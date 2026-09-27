@@ -3965,6 +3965,141 @@ def test_session_user_image_attachment_rejects_spoofed_image_payload(tmp_path, m
     assert response.status_code == 422
 
 
+_MINIMAL_PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+    b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4"
+    b"\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05"
+    b"\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+def test_session_attachment_zero_copy_registration_stores_local_image(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+
+    local_file = tmp_path / "zero-copy-src" / "sketch.png"
+    local_file.parent.mkdir(parents=True, exist_ok=True)
+    local_file.write_bytes(_MINIMAL_PNG_BYTES)
+
+    response = client.post(
+        "/api/sessions/session-live/attachments",
+        json={"localPath": str(local_file), "contentType": "image/png", "filename": "sketch.png"},
+    )
+
+    assert response.status_code == 201
+    attachment = response.json()
+    assert attachment["artifactId"]
+    assert attachment["filename"] == "sketch.png"
+    assert attachment["kind"] == "user_image"
+    assert attachment["status"] == "ready"
+    assert attachment["sizeBytes"] == len(_MINIMAL_PNG_BYTES)
+    stored_path = (
+        session_service._ensure_session_workspace("session-live")
+        / "artifacts"
+        / "images"
+        / attachment["artifactId"]
+    )
+    assert stored_path.read_bytes() == _MINIMAL_PNG_BYTES
+
+
+def test_session_attachment_zero_copy_registration_rejects_missing_local_path(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "core.web.routes.sessions.store_session_user_image_attachment",
+        lambda *_args, **_kwargs: pytest.fail("missing path should be rejected before storage"),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/attachments",
+        json={
+            "localPath": str(tmp_path / "missing.png"),
+            "contentType": "image/png",
+            "filename": "missing.png",
+        },
+    )
+
+    assert response.status_code == 404
+
+
+def test_session_attachment_zero_copy_registration_rejects_non_regular_file(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "core.web.routes.sessions.store_session_user_image_attachment",
+        lambda *_args, **_kwargs: pytest.fail("directory path should be rejected before storage"),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/attachments",
+        json={"localPath": str(tmp_path), "contentType": "image/png", "filename": "directory.png"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_session_attachment_zero_copy_registration_rejects_oversized_local_file(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("core.web.routes.sessions.SESSION_USER_IMAGE_MAX_BYTES", 16)
+    monkeypatch.setattr(
+        "core.web.routes.sessions.store_session_user_image_attachment",
+        lambda *_args, **_kwargs: pytest.fail("oversized local file should be rejected before storage"),
+    )
+
+    local_file = tmp_path / "big.png"
+    local_file.write_bytes(b"0123456789abcdef" * 4)
+
+    response = client.post(
+        "/api/sessions/session-live/attachments",
+        json={"localPath": str(local_file), "contentType": "image/png", "filename": "big.png"},
+    )
+
+    assert response.status_code == 413
+
+
+def test_session_attachment_zero_copy_registration_rejects_spoofed_image_payload(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    local_file = tmp_path / "spoof.png"
+    local_file.write_bytes(b"not really a png")
+
+    response = client.post(
+        "/api/sessions/session-live/attachments",
+        json={"localPath": str(local_file), "contentType": "image/png", "filename": "spoof.png"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_session_attachment_zero_copy_registration_routes_non_image_to_document_store(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+
+    local_file = tmp_path / "zero-copy-src" / "notes.txt"
+    local_file.parent.mkdir(parents=True, exist_ok=True)
+    local_file.write_bytes("hello zero copy".encode("utf-8"))
+
+    response = client.post(
+        "/api/sessions/session-live/attachments",
+        json={"localPath": str(local_file), "contentType": "text/plain", "filename": "notes.txt"},
+    )
+
+    assert response.status_code == 201
+    attachment = response.json()
+    assert attachment["kind"] == "user_document"
+    stored_path = (
+        session_service._ensure_session_workspace("session-live")
+        / "artifacts"
+        / "documents"
+        / attachment["artifactId"]
+    )
+    assert stored_path.read_bytes() == b"hello zero copy"
+
+
 def test_session_user_image_attachment_rejects_oversized_content_length_before_storage(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -7271,6 +7406,139 @@ def test_capture_session_ui_stream_surfaces_live_thought_as_model_thinking(tmp_p
     assert capture.thought == "先看最新日志，再判断是否真的卡住。"
     assert any(item["phase"] == "ui_progress_model_thinking" for item in lifecycle_events)
     assert any(item["phase"] == "llm_status_reasoning" for item in lifecycle_events)
+
+
+def test_capture_session_ui_stream_marks_first_answer_delta_as_responding(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    lifecycle_events: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_turn_lifecycle_event",
+        lambda session_id, phase, **kwargs: lifecycle_events.append(
+            {"session_id": session_id, "phase": phase, **kwargs}
+        ),
+    )
+    published: list[str] = []
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda session_id: published.append(session_id))
+    stub_ui = SimpleNamespace(
+        stream_thought=lambda *args, **kwargs: None,
+        clear_thought_stream=lambda *args, **kwargs: None,
+        stream_response=lambda *args, **kwargs: None,
+        clear_response_stream=lambda *args, **kwargs: None,
+        set_pet_mental_state=lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("core.ui.get_ui", lambda: stub_ui)
+
+    capture = session_service.SessionTurnCapture(session_id="session-live-answer", turn_id="turn-answer")
+    with session_service._capture_session_ui_stream("session-live-answer", capture):
+        # One flush-sized answer delta (>= 24 chars): the first answer content
+        # the live channel carries must move the visible stage to responding.
+        stub_ui.stream_response("这是首段正文答案，长度超过响应批处理的阈值，立即落盘。", done=False)
+
+    live_state = session_service._snapshot_session_live_output("session-live-answer")
+    assert live_state is not None
+    # Transport stage semantics stay untouched; the visible projection moves to
+    # responding through the status event below.
+    assert live_state.stage == "assistant_response"
+    assert live_state.content
+    assert any(
+        item.get("kind") == "status"
+        and item.get("name") == "responding"
+        and "正在生成回答" in str(item.get("resultPreview") or "")
+        for item in live_state.feedback_events
+    )
+    assert any(item["phase"] == "ui_progress_model_responding" for item in lifecycle_events)
+
+
+def test_capture_session_ui_stream_keeps_responding_stage_across_answer_flushes(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_turn_lifecycle_event",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+    stub_ui = SimpleNamespace(
+        stream_thought=lambda *args, **kwargs: None,
+        clear_thought_stream=lambda *args, **kwargs: None,
+        stream_response=lambda *args, **kwargs: None,
+        clear_response_stream=lambda *args, **kwargs: None,
+        set_pet_mental_state=lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("core.ui.get_ui", lambda: stub_ui)
+
+    capture = session_service.SessionTurnCapture(session_id="session-live-answer-2", turn_id="turn-answer-2")
+    with session_service._capture_session_ui_stream("session-live-answer-2", capture):
+        stub_ui.stream_response("第一段正文答案，长度超过响应批处理阈值，立即落盘。", done=False)
+        # Later flushes restamp the legacy transport stage; the responding
+        # status row must survive exactly once instead of degrading or
+        # stacking a new row per flush.
+        stub_ui.stream_response(
+            "第一段正文答案，长度超过响应批处理阈值，立即落盘。"
+            "第二段追加的正文内容同样超过批处理阈值长度，再次立即落盘。",
+            done=False,
+        )
+
+    live_state = session_service._snapshot_session_live_output("session-live-answer-2")
+    assert live_state is not None
+    assert live_state.stage == "assistant_response"
+    responding_events = [
+        item for item in live_state.feedback_events
+        if item.get("kind") == "status" and item.get("name") == "responding"
+    ]
+    assert len(responding_events) == 1
+
+
+def test_capture_session_ui_stream_emits_responding_mid_stream_via_progressive_deltas(tmp_path, monkeypatch):
+    """⑦b 真实写入路径回归：正文以渐进小 delta 走 text batcher（delta 快速投影），
+    首次过批阈值即发射 responding——必须发生在流中（终态回调之前），且每 turn
+    恰好一次。真实链路上 interim_text_delta 转发修复后，这也是 UI 可观测的时序。"""
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    lifecycle_events: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_turn_lifecycle_event",
+        lambda session_id, phase, **kwargs: lifecycle_events.append(
+            {"session_id": session_id, "phase": phase, **kwargs}
+        ),
+    )
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+    stub_ui = SimpleNamespace(
+        stream_thought=lambda *args, **kwargs: None,
+        clear_thought_stream=lambda *args, **kwargs: None,
+        stream_response=lambda *args, **kwargs: None,
+        clear_response_stream=lambda *args, **kwargs: None,
+        set_pet_mental_state=lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("core.ui.get_ui", lambda: stub_ui)
+
+    capture = session_service.SessionTurnCapture(session_id="session-live-answer-3", turn_id="turn-answer-3")
+
+    def responding_rows():
+        live_state = session_service._snapshot_session_live_output("session-live-answer-3")
+        if live_state is None:
+            return []
+        return [
+            item for item in live_state.feedback_events
+            if item.get("kind") == "status" and item.get("name") == "responding"
+        ]
+
+    with session_service._capture_session_ui_stream("session-live-answer-3", capture):
+        # 阈值以下的 delta 只进 batcher 缓冲，不发布、不触发 responding。
+        stub_ui.stream_response("短", done=False)
+        assert responding_rows() == []
+        # 累计跨过批阈值：首次 content 落盘必须在此刻（流中）发出 responding，
+        # 而不是等到终态回调。
+        stub_ui.stream_response("第一段正文内容足够长，直接跨过批处理刷新的长度阈值边界。", done=False)
+        assert len(responding_rows()) == 1
+        # 后续 flush 与终态权威正文（done=True 替换语义）都不得叠加新 responding。
+        stub_ui.stream_response("第二段正文内容同样足够长，再次跨过批处理刷新的长度阈值边界值。", done=False)
+        assert len(responding_rows()) == 1
+        stub_ui.stream_response("最终完整答案。", done=True)
+        assert len(responding_rows()) == 1
+
+    assert len(responding_rows()) == 1
+    assert any(item["phase"] == "ui_progress_model_responding" for item in lifecycle_events)
 
 
 def test_session_continuation_marks_server_side_model_wait_as_thinking(tmp_path, monkeypatch):

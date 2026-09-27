@@ -85,8 +85,12 @@ function renderConversation(
       previewUrl: string;
       sizeBytes: number;
       contentType: string;
+      uploadStatus?: "pending" | "uploading" | "uploaded" | "failed";
+      artifactId?: string;
     }>;
     onRemoveComposerAttachment?: (id: string) => void;
+    onRetryComposerAttachment?: (id: string) => void;
+    onRetryComposerAttachmentUploads?: () => void;
     composerReferences?: Array<{
       referenceId: string;
       kind: string;
@@ -176,6 +180,8 @@ function renderConversation(
         onOpenComposerContextDetail={options.onOpenComposerContextDetail}
         composerAttachments={options.composerAttachments}
         onRemoveComposerAttachment={options.onRemoveComposerAttachment}
+        onRetryComposerAttachment={options.onRetryComposerAttachment}
+        onRetryComposerAttachmentUploads={options.onRetryComposerAttachmentUploads}
         composerReferences={options.composerReferences}
         slashCommandSuggestions={options.slashCommandSuggestions}
         nextStateSignals={options.nextStateSignals}
@@ -218,6 +224,58 @@ describe("ConversationView VUI control contract", () => {
     expect(conversationViewSource).not.toMatch(/<textarea\b/);
     expect(conversationViewSource).toContain("primaryActionIsQueueSubmit");
     expect(conversationViewSource).toContain("ConversationFollowupQueueBar");
+  });
+});
+
+describe("ConversationView active-turn responding stage (defect 7b)", () => {
+  function statusTurnItem(code: string, sequence: number) {
+    return {
+      id: `active-item-${code}`,
+      itemId: `active-item-${code}`,
+      sessionId: "session-1",
+      turnId: "turn-current",
+      version: 3,
+      revision: 1,
+      sequence,
+      type: "status",
+      code,
+      title: code,
+      status: "running",
+    };
+  }
+
+  it("keeps the responding stage observable while the answer streams", () => {
+    const activeTurnLayerMessage = {
+      id: "session-1-message-active-turn-current",
+      role: "assistant",
+      timestamp: "2026-05-22T00:02:00Z",
+      turnId: "turn-current",
+      status: "running",
+      turnItems: [
+        statusTurnItem("thinking", 1),
+        statusTurnItem("responding", 2),
+        {
+          id: "active-item-answer",
+          itemId: "active-item-answer",
+          sessionId: "session-1",
+          turnId: "turn-current",
+          version: 3,
+          revision: 1,
+          sequence: 3,
+          type: "agent_message",
+          phase: "final_answer",
+          text: "## 流式中的回答",
+          status: "running",
+          terminal: false,
+        },
+      ],
+      metadata: {
+        kind: "session_active_turn_layer",
+        processStage: "assistant_response",
+      },
+    } as unknown as ConversationMessage;
+    const html = renderConversation([], { activeTurnMessage: activeTurnLayerMessage });
+    expect(html).toContain('data-active-turn-stage="responding"');
   });
 });
 
@@ -801,18 +859,33 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     expect(conversationViewSource).toContain("icon={");
     expect(conversationViewSource).toContain("<RefreshCw");
   });
-  it("keeps edit-mode composer chrome compact", () => {
-    expect(styles.composerEditModeBar).toContain("min-h-7");
-    expect(styles.composerEditModeBar).toContain("w-full");
-    expect(styles.composerEditModeBar).toContain("px-2");
-    expect(styles.composerEditModeBar).toContain("items-center");
-    expect(styles.composerEditModeBar).not.toContain("shadow-[var(--vui-shadow-hairline)]");
-    expect(styles.composerEditModeBar).not.toContain("accent-cool");
-    expect(styles.composerEditModeIcon).not.toContain("p-2");
-    expect(styles.composerEditModeCancel).toContain("!min-h-6");
-    expect(styles.composerEditModeDescription).toContain("truncate");
-    expect(styles.composerEditModePreview).toContain("truncate");
-    expect(styles.composerEditModeWarning).toContain("state-warning");
+  it("keeps inline edit chrome compact after the composer edit bar removal", () => {
+    // The composer bottom edit bar is gone: no orphaned keys may linger.
+    for (const orphan of [
+      "composerEditModeBar",
+      "composerEditModeCancel",
+      "composerEditModeCopy",
+      "composerEditModeIcon",
+      "composerEditModeLabel",
+      "composerEditModeDescription",
+      "composerEditModePreview",
+      "composerEditModeWarning",
+      "composerModeNotice",
+      "composerModeNoticeIcon",
+    ]) {
+      expect(conversationViewSource).not.toContain(`styles.${orphan}`);
+      expect(Object.keys(styles)).not.toContain(orphan);
+    }
+    // The row editor owns the edit surface now: accent-tinted shell, capped
+    // self-sizing input, and a labeled rerun submit that stays a pill.
+    expect(styles.turnInlineEditor).toContain("accent-cool");
+    expect(styles.turnInlineEditor).toContain("rounded-[var(--radius-control)]");
+    expect(styles.turnInlineEditorInput).toContain("max-h-64");
+    expect(styles.turnInlineEditorInput).toContain("resize-none");
+    expect(styles.turnInlineEditorInput).toContain("overflow-y-auto");
+    expect(styles.turnInlineEditorActions).toContain("justify-end");
+    expect(styles.turnInlineEditorChipRow).toContain("flex-wrap");
+    expect(styles.turnEditBadge).toContain("rounded-full");
     expect(styles.turnEditing).toContain("userMessageBody");
     expect(styles.turnEditing).not.toContain("vuiOpaqueRowClass");
     expect(styles.turnEditing).not.toMatch(/\bp-2\b/);
@@ -1179,9 +1252,9 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     expect(styles.markdownBody).toContain("max-w-full");
     expect(styles.responseSegment_answer).toContain("[&_.markdownBody]:max-w-[min(100%,128ch)]");
     expect(styles.assistantTurn).toContain("[&_.turnContent]:w-full");
-    expect(styles.agentInboxTurn).toContain("[&_.turnContent]:w-[min(100%,1360px)]");
-    expect(styles.groupTranscriptTurn).toContain("[&_.turnContent]:w-[min(100%,1360px)]");
-    expect(styles.timelineAssistantTextCell).toContain("max-w-[min(100%,1360px)]");
+    expect(styles.agentInboxTurn).toContain("[&_.turnContent]:w-full");
+    expect(styles.groupTranscriptTurn).toContain("[&_.turnContent]:w-full");
+    expect(styles.timelineAssistantTextCell).toContain("max-w-[830px]");
     expect(styles.codexTranscriptSurface).toContain("w-full");
     expect(styles.codexTranscriptSurface).toContain("max-w-full");
     expect(styles.codexTranscriptCellSummary).toContain("max-w-full");
@@ -1232,10 +1305,16 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     );
     expect(metaActionsBlock).toContain('data-conversation-hover-actions="1"');
     expect(metaActionsBlock).toContain('aria-label={t("copyAnswer")}');
+    expect(metaActionsBlock).toContain('aria-label={t("addToDataset")}');
+    expect(metaActionsBlock).toContain('aria-label={t("excludeFromDataset")}');
     expect(metaActionsBlock).toContain('aria-label={t("forkSessionFromMessage")}');
     expect(metaActionsBlock).toContain('aria-label={regeneratePending ? t("regeneratePending") : t("regenerateAnswer")}');
     expect(metaActionsBlock).toContain('aria-label={editUserMessageLabel ?? t("editMessage")}');
     expect(metaActionsBlock).toContain('aria-label={t("switchBranchVersionPrevious")}');
+    // Curation buttons share the copy gate and mark the decided side active.
+    expect(metaActionsBlock).toContain("messageCurationDecision === \"include\"");
+    expect(metaActionsBlock).toContain("messageCurationDecision === \"exclude\"");
+    expect(metaActionsBlock).toContain("styles.turnIconButtonActive");
     // Editing keeps the (active) edit affordance visible without hover.
     expect(metaActionsBlock).toContain("isEditingMessage ? styles.turnHoverActionsVisible : styles.turnHoverActions");
     // The failed-turn retry uses the hover-reveal variant too.
@@ -1272,6 +1351,9 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     ] as unknown as ConversationMessage[]);
     expect(html).toContain('data-conversation-hover-actions="1"');
     expect(html).toContain("lucide-copy");
+    // Settled assistant answers carry the SFT curation pair next to copy.
+    expect(html).toContain("lucide-list-plus");
+    expect(html).toContain("lucide-circle-minus");
   });
   it("renders composer session reference chips", () => {
     const html = renderConversation([], {
@@ -1817,12 +1899,16 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     );
 
     expect(html).toContain('aria-pressed="true"');
-    expect(html).toContain("disabled");
-    expect(html).toContain("Original prompt");
     expect(html).toContain("编辑消息");
+    // Inline edit: the row body is replaced by the editor, seeded with the
+    // original text; pending submit disables the input and the rerun action.
+    expect(html).toContain('data-conversation-inline-edit="1"');
+    expect(html).toContain("Original prompt");
+    expect(html).toContain("disabled");
+    expect(html).toContain('data-conversation-inline-edit-input="1"');
   });
 
-  it("renders edit mode as a visible composer status row with target preview and rerun action", () => {
+  it("swaps the edited row body for an inline editor and retires the composer edit bar", () => {
     const html = renderConversation(
       [
         {
@@ -1833,6 +1919,7 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
         },
       ],
       {
+        showComposer: true,
         editingMessageId: "message-user",
         composerModeNotice: "正在编辑最新一条用户消息；发送后会替换这条消息并重跑后续对话。",
         composerModeTargetPreview: "继续",
@@ -1843,19 +1930,76 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
       },
     );
 
-    expect(html).toContain("composerEditModeBar");
-    expect(html).toContain("composerEditModeLabel");
-    expect(html).toContain("编辑消息");
-    expect(html).toContain("aria-label=\"正在编辑最新一条用户消息；发送后会替换这条消息并重跑后续对话。\"");
-    expect(html).not.toContain("composerEditModeDescription");
-    expect(html).not.toContain("composerEditModePreview");
-    expect(html).not.toContain("当前内容：继续");
-    expect(html).toContain("composerEditModeCancel");
+    // The row carries the editor with the original text plus submit/cancel.
+    expect(html).toContain('data-conversation-inline-edit="1"');
+    expect(html).toContain("继续");
+    expect(html).toContain("取消编辑");
     expect(html).toContain("composerEditSubmitButton");
-    expect(html).toContain("保存并重跑");
-    expect(html).not.toContain("composerRoundButtonPrimary");
     expect(html).toMatch(/data-slot="vui-button-label"[^>]*>保存并重跑</);
-    expect(html).not.toContain("composerModeNoticeIcon");
+    // The composer bottom edit bar path is gone; the composer field steps
+    // aside while editing instead of hosting a second editor.
+    expect(html).not.toContain("composerEditModeBar");
+    expect(html).not.toContain("composerEditModeLabel");
+    expect(html).not.toContain("composerEditModeCancel");
+    expect(html).not.toContain('aria-label="发送消息"');
+    expect(html).not.toContain("composerRoundButtonPrimary");
+  });
+
+  it("shows original attachments and references as read-only chips inside the inline editor", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-user",
+          role: "user",
+          content: "看看这两份材料",
+          timestamp: "2026-05-22T00:00:00Z",
+          attachments: [
+            {
+              artifactId: "artifact-1",
+              filename: "run-01.csv",
+              url: "/files/run-01.csv",
+              imageUrl: "",
+              downloadUrl: "/files/run-01.csv",
+              contentType: "text/csv",
+              sizeBytes: 12,
+              kind: "user_document",
+              status: "ready",
+            },
+            {
+              artifactId: "artifact-2",
+              filename: "sketch.png",
+              url: "/files/sketch.png",
+              imageUrl: "/files/sketch.png",
+              downloadUrl: "/files/sketch.png",
+              contentType: "image/png",
+              sizeBytes: 20,
+              kind: "user_image",
+              status: "ready",
+            },
+          ],
+          references: [
+            {
+              referenceId: "session:ref-1",
+              kind: "session",
+              sessionId: "ref-1",
+              title: "顾云舒上下文",
+            },
+          ],
+        },
+      ],
+      {
+        editingMessageId: "message-user",
+        composerValue: "看看这两份材料",
+      },
+    );
+
+    expect(html).toContain('data-inline-edit-attachments="2"');
+    expect(html).toContain('data-inline-edit-references="1"');
+    expect(html).toContain("run-01.csv");
+    expect(html).toContain("sketch.png");
+    expect(html).toContain("顾云舒上下文");
+    // Read-only: no remove affordance inside the editor chips.
+    expect(html).not.toContain("移除");
   });
   it("does not render the mental-model option in the composer", () => {
     const html = renderConversation([]);
@@ -2291,5 +2435,112 @@ describe("conversation turn navigator contract", () => {
     expect(navigatorSource).toContain("CONVERSATION_TURN_NAV_MIN_TURNS");
     expect(navigatorSource).toContain("entries.length < CONVERSATION_TURN_NAV_MIN_TURNS");
     expect(navigatorSource).toContain('data-conversation-turn-navigator="1"');
+  });
+});
+
+describe("composer attachment upload status contract", () => {
+  const chipAttachments = [
+    {
+      id: "att-ok",
+      filename: "ok.png",
+      previewUrl: "blob:ok",
+      sizeBytes: 12,
+      contentType: "image/png",
+      uploadStatus: "uploaded" as const,
+      artifactId: "artifact-ok",
+    },
+    {
+      id: "att-bad",
+      filename: "bad.png",
+      previewUrl: "blob:bad",
+      sizeBytes: 12,
+      contentType: "image/png",
+      uploadStatus: "failed" as const,
+    },
+    {
+      id: "att-run",
+      filename: "run.png",
+      previewUrl: "blob:run",
+      sizeBytes: 12,
+      contentType: "image/png",
+      uploadStatus: "uploading" as const,
+    },
+  ];
+
+  it("paints only the failed chip with the danger variant plus a per-chip retry action", () => {
+    const html = renderConversation([], {
+      showComposer: true,
+      composerAttachments: chipAttachments,
+      onRemoveComposerAttachment: () => undefined,
+      onRetryComposerAttachment: () => undefined,
+    });
+    expect(html.match(/composerAttachmentChipFailed/g)?.length).toBe(1);
+    expect(html.match(/composerAttachmentRetryButton/g)?.length).toBe(1);
+    expect(html).toContain('aria-label="重试上传: bad.png"');
+    // The hint copy appears twice: the chip title and the failed status line.
+    expect(html.match(/上传失败，可重试/g)?.length).toBe(2);
+  });
+
+  it("shows the uploading spinner only on the uploading chip", () => {
+    const html = renderConversation([], {
+      showComposer: true,
+      composerAttachments: chipAttachments,
+    });
+    expect(html.match(/composerAttachmentUploadingIcon/g)?.length).toBe(1);
+    expect(html).toContain("上传中");
+  });
+
+  it("keeps healthy chips on the neutral style without retry affordances", () => {
+    const html = renderConversation([], {
+      showComposer: true,
+      composerAttachments: [chipAttachments[0]],
+      onRemoveComposerAttachment: () => undefined,
+      onRetryComposerAttachment: () => undefined,
+    });
+    expect(html).not.toContain("composerAttachmentChipFailed");
+    expect(html).not.toContain("composerAttachmentRetryButton");
+    expect(html).toContain("composerAttachmentRemoveButton");
+  });
+
+  it("adds the retry-all ghost action to the error row only while failed chips exist", () => {
+    const htmlWith = renderConversation([], {
+      showComposer: true,
+      composerError: "图片上传失败",
+      composerAttachments: chipAttachments,
+      onRetryComposerAttachmentUploads: () => undefined,
+    });
+    expect(htmlWith).toContain("composerErrorRetryButton");
+    expect(htmlWith).toContain("重试上传");
+    // role=alert keeps announcing the message itself.
+    expect(htmlWith).toMatch(/<p[^>]*role="alert"[^>]*>图片上传失败/);
+
+    const htmlWithoutHandler = renderConversation([], {
+      showComposer: true,
+      composerError: "图片上传失败",
+      composerAttachments: chipAttachments,
+    });
+    expect(htmlWithoutHandler).not.toContain("composerErrorRetryButton");
+
+    const htmlPlainError = renderConversation([], {
+      showComposer: true,
+      composerError: "Attachment limit reached",
+      composerAttachments: chipAttachments,
+    });
+    expect(htmlPlainError).not.toContain("composerErrorRetryButton");
+    // Unrelated composer errors keep the exact plain <p role="alert"> shape.
+    expect(htmlPlainError).toMatch(/<p[^>]*role="alert"[^>]*>Attachment limit reached<\/p>/);
+  });
+
+  it("keeps the failed-chip styles on the shared danger tokens", () => {
+    expect(styles.composerAttachmentChipFailed).toContain("var(--state-error)");
+    expect(styles.composerAttachmentRetryButton).toContain("var(--state-error)");
+    expect(styles.composerAttachmentStatusFailed).toContain("var(--state-error)");
+    expect(styles.composerAttachmentUploadingIcon).toContain("animate-spin");
+    expect(styles.composerErrorRetryButton).toContain("vui-components-conversationview composerErrorRetryButton");
+  });
+
+  it("wires the retry entry points through the route surface", () => {
+    expect(conversationViewSource).toContain("onRetryComposerAttachmentUploads");
+    expect(conversationViewSource).toContain("onRetryComposerAttachment(attachment.id)");
   });
 });

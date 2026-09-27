@@ -9,6 +9,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDot,
+  CircleMinus,
   CirclePlus,
   Copy,
   Cpu,
@@ -18,6 +19,7 @@ import {
   GitFork,
   ImagePlus,
   Link2,
+  ListPlus,
   LoaderCircle,
   MessageSquareText,
   Pencil,
@@ -32,13 +34,21 @@ import {
 } from "lucide-react";
 import React, { DragEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import type { ConversationMessage } from "../../api/types";
+import type {
+  ConversationAttachment,
+  ConversationMessage,
+  SessionMessageCurationAction,
+  SessionReferenceAttachment,
+} from "../../api/types";
 import type {
   AgentMessage,
   AgentMentalPart,
 } from "../../agent-thread/types";
 import { fetchJson } from "../../api/client";
+import { fetchSessionMessageCuration, isFetchJsonHttpError, setSessionMessageCuration } from "../../api/chat";
+import { queryKeys } from "../../api/queryKeys";
 import { VStateSurface } from "../../components/vui";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { ConversationImageArtifactView } from "./ConversationImageArtifactView";
@@ -130,12 +140,24 @@ import { buildMessageReferencePayload } from "../../routes/chat/chatComposerSubm
 import { deriveLatestTodoChecklist } from "./conversationTodoChecklistModel";
 import { ConversationTodoChecklist } from "./ConversationTodoChecklist";
 import {
+  applyOptimisticCuration,
+  buildMessageCurationMap,
+  resolveMessageCurationState,
+  type MessageCurationDecision,
+} from "./conversationMessageCuration";
+import {
   compactStreamingStatusPlaceholder,
   isInternalStreamingStatusStage,
   isNoFinalAnswerStatusContent,
   isStreamingStatusPlaceholderContent,
 } from "./conversationInternalStatus";
 import { ConversationActiveTurnStatusNote } from "./ConversationActiveTurnStatusNote";
+import {
+  formatConversationTurnWorkBreakdown,
+  formatConversationTurnWorkedFor,
+  resolveConversationTurnWorkSummary,
+  type ConversationTurnWorkSummary,
+} from "./conversationTurnWorkStatus";
 import {
   operationGroupsWithFeedbackStatusPlaceholder,
 } from "./conversationFeedbackStatusPresentation";
@@ -378,7 +400,11 @@ import {
   extractToolDisplayCommand,
   type CodexToolActivityPills,
 } from "./conversationToolPresentation";
-import { humanizeReasoningPreview } from "./conversationReasoningPreview";
+import {
+  isThoughtScrollAtBottom,
+  resolveThoughtStreamingSummary,
+  type ThoughtStreamingSummary,
+} from "./conversationThoughtSummary";
 import { VActionGroup, VButton, VNativeInput, VNativeTextarea } from "../vui";
 import styles from "./ConversationView.styles";
 
@@ -400,7 +426,10 @@ const TIMELINE_VIRTUAL_INITIAL_RECT = { width: 1280, height: 900 };
 const TIMELINE_ANCHOR_CORRECTION_MAX_FRAMES = 30;
 const TIMELINE_ANCHOR_CORRECTION_TOLERANCE_PX = 2;
 
-/** Height-capped thought body; sticks to bottom while streaming. */
+/**
+ * Height-capped thought body; sticks to bottom while streaming until the user
+ * scrolls away from the bottom, then pauses follow until they return.
+ */
 function ThoughtScrollBody({
   text,
   streaming,
@@ -411,6 +440,20 @@ function ThoughtScrollBody({
   className?: string;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // Starts true on every (re)mount so an expand or fresh stream follows the
+  // newest content; onScroll flips it off as soon as the user leaves the bottom.
+  const autoFollowBottomRef = useRef(true);
+  const handleScroll = useCallback(() => {
+    const node = scrollRef.current;
+    if (!node) {
+      return;
+    }
+    autoFollowBottomRef.current = isThoughtScrollAtBottom({
+      clientHeight: node.clientHeight,
+      scrollHeight: node.scrollHeight,
+      scrollTop: node.scrollTop,
+    });
+  }, []);
   useLayoutEffect(() => {
     if (!streaming) {
       return;
@@ -419,17 +462,73 @@ function ThoughtScrollBody({
     if (!node) {
       return;
     }
-    node.scrollTop = node.scrollHeight;
+    if (autoFollowBottomRef.current) {
+      node.scrollTop = node.scrollHeight;
+    }
   }, [streaming, text]);
   return (
     <div
       ref={scrollRef}
+      onScroll={handleScroll}
       className={[styles.thoughtScrollBody, className].filter(Boolean).join(" ")}
       data-thought-scroll-body="true"
       data-thought-scroll-streaming={streaming ? "true" : undefined}
     >
       <pre className={styles.codexTranscriptReasoningText}>{text}</pre>
     </div>
+  );
+}
+
+/**
+ * Collapsed thought summary: the latest thought sentence in one nowrap line.
+ * Overflow hides and the viewport is pushed to its end on every content or
+ * width change, so the newest words stay pinned at the right edge while older
+ * text rolls out to the left; a CSS mask fades both edges only once the line
+ * actually overflows.
+ */
+function ThoughtStreamingSummary({ text }: { text: string }) {
+  const viewportRef = useRef<HTMLSpanElement | null>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  const summary: ThoughtStreamingSummary | null = resolveThoughtStreamingSummary(text);
+  const summaryText = summary?.text ?? "";
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !summaryText) {
+      return;
+    }
+    const syncSummaryViewport = () => {
+      setOverflowing((current) => {
+        const next = viewport.scrollWidth > viewport.clientWidth + 1;
+        return current === next ? current : next;
+      });
+      viewport.scrollLeft = viewport.scrollWidth;
+    };
+    syncSummaryViewport();
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const resizeObserver = new ResizeObserver(syncSummaryViewport);
+    resizeObserver.observe(viewport);
+    return () => resizeObserver.disconnect();
+  }, [summaryText]);
+  if (!summary) {
+    return null;
+  }
+  return (
+    <>
+      <span className={styles.timelineCellSeparator} aria-hidden="true">·</span>
+      <span
+        ref={viewportRef}
+        className={[
+          styles.thoughtStreamingSummary,
+          overflowing ? styles.thoughtStreamingSummaryMasked : "",
+        ].filter(Boolean).join(" ")}
+        data-thought-streaming-summary="true"
+        data-thought-summary-mask={overflowing ? "both" : "none"}
+      >
+        <span className={styles.thoughtStreamingSummaryText}>{summary.text}</span>
+      </span>
+    </>
   );
 }
 
@@ -492,6 +591,50 @@ function progressTextExceedsClamp(text: string) {
   return lines > PROGRESS_CLAMP_LINES;
 }
 
+/**
+ * Settled-turn work header (ZCode AssistantHistoryStatus alignment): a thin
+ * bottom rule with a collapsible 「已工作 N 分钟」 trigger at the turn tail.
+ * Expanded, it shows only what the turn data can honestly back — tool call
+ * count and tool time when measurable (see conversationTurnWorkStatus.ts for
+ * the duration口径).
+ */
+const ConversationTurnWorkHeader = React.memo(function ConversationTurnWorkHeader({
+  summary,
+  lang,
+}: {
+  summary: ConversationTurnWorkSummary;
+  lang: "zh" | "en" | string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <details
+      className={styles.turnWorkHeader}
+      data-testid="conversation-turn-work-header"
+      data-turn-work-basis={summary.basis}
+      data-turn-work-duration-ms={summary.durationMs}
+      open={open}
+      onToggle={(event) => setOpen((event.target as HTMLDetailsElement).open)}
+    >
+      <summary
+        className={styles.turnWorkHeaderSummary}
+        aria-label={formatConversationTurnWorkedFor(summary, lang)}
+      >
+        <ChevronDown
+          size={14}
+          aria-hidden="true"
+          className={`${styles.turnWorkHeaderChevron} ${open ? "rotate-90" : "rotate-0"}`}
+        />
+        <span className={styles.turnWorkHeaderLabel}>
+          {formatConversationTurnWorkedFor(summary, lang)}
+        </span>
+      </summary>
+      <div className={styles.turnWorkHeaderBody}>
+        {formatConversationTurnWorkBreakdown(summary, lang)}
+      </div>
+    </details>
+  );
+});
+
 const ConversationTurnRow = React.memo(function ConversationTurnRow({
   renderTurn,
 }: ConversationTurnRowProps) {
@@ -528,6 +671,179 @@ function turnNavPreviewText(message: ConversationMessage | undefined): string {
     return String((message as { content?: string }).content ?? "");
   }
   return assistantFinalAnswerText(message);
+}
+
+type ConversationUserInlineEditorProps = {
+  lang: "zh" | "en";
+  value: string;
+  onValueChange: (value: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+  disabled: boolean;
+  pending: boolean;
+  submitLabel: string;
+  cancelLabel: string;
+  ariaLabel: string;
+  error: string;
+  attachments: ConversationAttachment[];
+  references: SessionReferenceAttachment[];
+  inputRef: React.RefObject<HTMLTextAreaElement | null>;
+};
+
+function inlineEditorAttachmentLabel(attachment: ConversationAttachment): string {
+  return String(attachment.filename || attachment.artifactId || "").trim();
+}
+
+function inlineEditorReferenceLabel(reference: SessionReferenceAttachment): string {
+  return String(
+    reference.title
+    || reference.filename
+    || (reference.quote || "").trim().slice(0, 80)
+    || reference.kind
+    || "",
+  ).trim();
+}
+
+/**
+ * ZCode-style inline edit (packages/ui v4 ConversationRowView): the edited user
+ * row swaps its content body for this editor in place. Text lives in the shared
+ * composer draft so submit/cancel ride the existing edit-resubmit pipeline;
+ * original attachments/references render as read-only chips (the edit-resubmit
+ * pipeline carries the original attachment artifacts over server-side).
+ */
+function ConversationUserInlineEditor({
+  lang,
+  value,
+  onValueChange,
+  onSubmit,
+  onCancel,
+  disabled,
+  pending,
+  submitLabel,
+  cancelLabel,
+  ariaLabel,
+  error,
+  attachments,
+  references,
+  inputRef,
+}: ConversationUserInlineEditorProps) {
+  // Auto-height within the max-height clamp: grow with the draft, scroll
+  // internally once the cap is hit. Re-runs per value change.
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (!el) {
+      return;
+    }
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [inputRef, value]);
+  const canSubmit = !disabled && !pending && Boolean(value.trim());
+  return (
+    <div
+      className={styles.turnInlineEditor}
+      data-conversation-inline-edit="1"
+    >
+      {attachments.length ? (
+        <div
+          className={styles.turnInlineEditorChipRow}
+          aria-label={lang === "zh" ? "原消息附件（保留）" : "Original attachments (kept)"}
+          data-inline-edit-attachments={String(attachments.length)}
+        >
+          {attachments.map((attachment, index) => {
+            const label = inlineEditorAttachmentLabel(attachment);
+            const thumbUrl = attachment.imageUrl || attachment.url;
+            const isImage = thumbUrl
+              && (String(attachment.contentType || "").startsWith("image/") || attachment.kind === "user_image");
+            return (
+              <span
+                key={`${attachment.artifactId}-${index}`}
+                className={styles.turnInlineEditorChip}
+                title={label}
+              >
+                {isImage ? (
+                  <img className={styles.turnInlineEditorChipThumb} src={thumbUrl} alt="" />
+                ) : (
+                  <FileText className={styles.turnInlineEditorChipIcon} aria-hidden="true" />
+                )}
+                <span className={styles.turnInlineEditorChipName}>{label}</span>
+              </span>
+            );
+          })}
+        </div>
+      ) : null}
+      {references.length ? (
+        <div
+          className={styles.turnInlineEditorChipRow}
+          aria-label={lang === "zh" ? "原消息引用（保留）" : "Original references (kept)"}
+          data-inline-edit-references={String(references.length)}
+        >
+          {references.map((reference, index) => {
+            const label = inlineEditorReferenceLabel(reference);
+            return (
+              <span
+                key={`${reference.referenceId || reference.title || ""}-${index}`}
+                className={styles.turnInlineEditorChip}
+                title={label}
+              >
+                <MessageSquareText className={styles.turnInlineEditorChipIcon} aria-hidden="true" />
+                <span className={styles.turnInlineEditorChipName}>{label}</span>
+              </span>
+            );
+          })}
+        </div>
+      ) : null}
+      <VNativeTextarea
+        ref={inputRef}
+        className={styles.turnInlineEditorInput}
+        value={value}
+        disabled={disabled || pending}
+        aria-label={ariaLabel}
+        data-conversation-inline-edit-input="1"
+        onChange={(event) => onValueChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            onCancel();
+            return;
+          }
+          if (shouldSubmitComposerOnKeydown({
+            key: event.key,
+            shiftKey: event.shiftKey,
+            ctrlKey: event.ctrlKey,
+            metaKey: event.metaKey,
+            altKey: event.altKey,
+            isComposing: event.nativeEvent.isComposing,
+          })) {
+            event.preventDefault();
+            if (canSubmit) {
+              onSubmit();
+            }
+          }
+        }}
+      />
+      {error ? <p className={styles.composerError} role="alert">{error}</p> : null}
+      <div className={styles.turnInlineEditorActions}>
+        <VButton
+          type="button"
+          onClick={onCancel}
+          isDisabled={pending}
+        >
+          {cancelLabel}
+        </VButton>
+        <VButton
+          type="button"
+          className={styles.composerEditSubmitButton}
+          onClick={onSubmit}
+          isDisabled={!canSubmit}
+          icon={pending
+            ? <LoaderCircle className={styles.statusSpinner} size={14} aria-hidden="true" />
+            : <RefreshCw size={14} aria-hidden="true" />}
+        >
+          {submitLabel}
+        </VButton>
+      </div>
+    </div>
+  );
 }
 
 // Memo gate: with stable prop references from the route (memoized conversation
@@ -613,6 +929,8 @@ export const ConversationView = React.memo(function ConversationView({
   onComposerChange,
   onAddComposerAttachments,
   onRemoveComposerAttachment,
+  onRetryComposerAttachment,
+  onRetryComposerAttachmentUploads,
   onAddComposerReference,
   onRemoveComposerReference,
   onEditUserMessage,
@@ -658,6 +976,7 @@ export const ConversationView = React.memo(function ConversationView({
   const toolApprovalConsumedRef = useRef(false);
   toolApprovalConsumedRef.current = false;
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const inlineEditInputRef = useRef<HTMLTextAreaElement | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const initializedSessionRef = useRef("");
   const pinnedLatestUserMessageIdRef = useRef("");
@@ -687,6 +1006,38 @@ export const ConversationView = React.memo(function ConversationView({
   const [computerUseSessionPending, setComputerUseSessionPending] = useState<Record<string, "confirm" | "cancel" | undefined>>({});
   const [copiedAnswerMessageId, setCopiedAnswerMessageId] = useState("");
   const copyAnswerFeedbackTimerRef = useRef<number | null>(null);
+  // In-chat SFT curation: server map + optimistic overlay for instant button
+  // feedback; a failed POST rolls the overlay entry back (ZCode like/dislike
+  // rollback pattern) and the 409 copy surfaces briefly on the button title.
+  const queryClient = useQueryClient();
+  const [curationOverrides, setCurationOverrides] = useState<Map<string, MessageCurationDecision>>(new Map());
+  const [curationFeedback, setCurationFeedback] = useState<{
+    messageId: string;
+    action: SessionMessageCurationAction;
+    message: string;
+  } | null>(null);
+  const curationFeedbackTimerRef = useRef<number | null>(null);
+  const messageCurationQuery = useQuery({
+    queryKey: queryKeys.sessionMessageCuration(sessionId),
+    queryFn: () => fetchSessionMessageCuration(sessionId),
+    enabled: Boolean(sessionId) && !companionMode,
+  });
+  const serverMessageCurationMap = useMemo(
+    () => buildMessageCurationMap(messageCurationQuery.data?.items ?? []),
+    [messageCurationQuery.data],
+  );
+  const messageCurationMap = useMemo(() => {
+    if (curationOverrides.size === 0) {
+      return serverMessageCurationMap;
+    }
+    return new Map([...serverMessageCurationMap, ...curationOverrides]);
+  }, [curationOverrides, serverMessageCurationMap]);
+
+  // A session switch must not inherit the previous session's optimistic writes.
+  useEffect(() => {
+    setCurationOverrides(new Map());
+    setCurationFeedback(null);
+  }, [sessionId]);
   /** Branch fork exit: dialog target message + copy scope (route executes the API call). */
   const [forkDialogMessage, setForkDialogMessage] = useState<ConversationMessage | null>(null);
   const [forkScope, setForkScope] = useState<ConversationForkScope>("visible_path");
@@ -873,7 +1224,6 @@ export const ConversationView = React.memo(function ConversationView({
   const userAvatarLabel = userAvatarSymbol(userAvatarPreset, userLabel);
   const {
     editModeActive: composerEditModeActive,
-    failureNote: composerEditFailureNote,
   } = resolveComposerEditMode({
     modeNotice: composerModeNotice,
     modeTargetPreview: composerModeTargetPreview,
@@ -1495,6 +1845,11 @@ export const ConversationView = React.memo(function ConversationView({
               : "";
             const userContentText = agentSections.userText;
             const hasActiveProcess = operationGroups.timeline.some((operation) => isRunningOperationStatus(operation.status));
+            // Defect ⑦b: the active-turn shell gate must not count decorative
+            // streaming operations (thought/mental/status rows) as active
+            // process — a mid-stream reasoning flush would otherwise retire the
+            // shell and hide the responding stage. Only running tools suppress.
+            const hasRunningToolOperation = operationGroups.tools.some((operation) => isRunningOperationStatus(operation.status));
             const hasFeedbackTimeline = agentSections.hasFeedbackTimeline;
             const showResponseBlock = shouldShowAgentResponseBlock(message, agentSections, hasFeedbackTimeline);
             const turnErrorMessage = isTurnErrorMessage(message);
@@ -1565,6 +1920,15 @@ export const ConversationView = React.memo(function ConversationView({
               && !assistantTurnIsStreaming(message)
               ? responseText.trim()
               : "";
+            // SFT curation actions share the copy affordance's gate and stay
+            // out of companion/inbox/group surfaces by contract.
+            const messageCurationGate = Boolean(copyableAnswerText)
+              && !companionMode
+              && !agentInboxMessage
+              && !groupTranscriptMessage;
+            const messageCurationDecision = messageCurationGate
+              ? resolveMessageCurationState(messageCurationMap, message.id)
+              : null;
             const canRegenerateAnswer = message.role === "assistant"
               && !turnErrorMessage
               && !assistantTurnIsStreaming(message)
@@ -1648,6 +2012,7 @@ export const ConversationView = React.memo(function ConversationView({
             // impossible to collapse (toggle flipped aria state but body stayed).
             const shouldForceResponseBodyVisible = isResponseStreaming;
             const isEditingMessage = userAuthoredMessage && message.id === editingMessageId;
+            const editingUserMessage = isEditingMessage && message.role === "user" ? message : null;
             const agentInboxExpanded = getExpansionState(message.id, "agentInbox", false);
             const agentInboxPreview = agentInboxMessage ? compactPreview(agentInboxSummary(message), 140) : "";
             const researchOrgChips = researchOrgMessageChips(message);
@@ -1733,7 +2098,7 @@ export const ConversationView = React.memo(function ConversationView({
             const showCompactActiveTurnPlaceholder = shouldRenderCompactActiveTurnPlaceholder(message, {
               showResponseBlock,
               hasFeedbackTimeline,
-              hasActiveProcess,
+              hasActiveProcess: hasRunningToolOperation,
               turnErrorMessage,
               // Avoid "状态" placeholder stacking above an already-visible codex process trail.
               hasCodexSurface: Boolean(displayPlan.shouldRenderCodexSurface),
@@ -1753,6 +2118,18 @@ export const ConversationView = React.memo(function ConversationView({
                 lang={lang}
                 statusLabel={lang === "zh" ? "状态" : "Status"}
               />
+            ) : null;
+            // Turn-tail work header: settled assistant turns only (companion,
+            // inbox and group-transcript shells stay minimal by contract).
+            const turnWorkSummary = message.role === "assistant"
+              && !companionMode
+              && !agentInboxMessage
+              && !groupTranscriptMessage
+              && !assistantTurnIsStreaming(message)
+              ? resolveConversationTurnWorkSummary(message)
+              : null;
+            const turnWorkHeaderNode = turnWorkSummary ? (
+              <ConversationTurnWorkHeader summary={turnWorkSummary} lang={lang} />
             ) : null;
             return (
               <AgentMessageTurnView
@@ -1830,6 +2207,44 @@ export const ConversationView = React.memo(function ConversationView({
                         aria-label={t("copyAnswer")}
                         isIconOnly
                         icon={copiedAnswerMessageId === message.id ? <Check size={14}/> : <Copy size={14}/>} />
+                    ) : null}
+                    {messageCurationGate ? (
+                      <>
+                        <VButton
+                          type="button"
+                          className={
+                            messageCurationDecision === "include"
+                              ? `${styles.turnIconButton} ${styles.turnIconButtonActive}`
+                              : styles.turnIconButton
+                          }
+                          aria-pressed={messageCurationDecision === "include"}
+                          onClick={() => handleCurateMessage(message.id, "include")}
+                          title={
+                            curationFeedback?.messageId === message.id && curationFeedback.action === "include" && curationFeedback.message
+                              ? curationFeedback.message
+                              : t("addToDataset")
+                          }
+                          aria-label={t("addToDataset")}
+                          isIconOnly
+                          icon={<ListPlus size={14}/>} />
+                        <VButton
+                          type="button"
+                          className={
+                            messageCurationDecision === "exclude"
+                              ? `${styles.turnIconButton} ${styles.turnIconButtonActive}`
+                              : styles.turnIconButton
+                          }
+                          aria-pressed={messageCurationDecision === "exclude"}
+                          onClick={() => handleCurateMessage(message.id, "exclude")}
+                          title={
+                            curationFeedback?.messageId === message.id && curationFeedback.action === "exclude" && curationFeedback.message
+                              ? curationFeedback.message
+                              : t("excludeFromDataset")
+                          }
+                          aria-label={t("excludeFromDataset")}
+                          isIconOnly
+                          icon={<CircleMinus size={14}/>} />
+                      </>
                     ) : null}
                     {canForkSessionFromMessage ? (
                       <VButton
@@ -1916,6 +2331,23 @@ export const ConversationView = React.memo(function ConversationView({
                         </div>
                       ) : null}
                     </section>
+                  ) : editingUserMessage ? (
+                    <ConversationUserInlineEditor
+                      lang={lang}
+                      value={composerValue}
+                      onValueChange={onComposerChange}
+                      onSubmit={handleSendAndFollowLatest}
+                      onCancel={() => onCancelComposerMode?.()}
+                      disabled={composerDisabled}
+                      pending={Boolean(editUserMessageDisabled)}
+                      submitLabel={submitLabel?.trim() || t("saveAndRerunMessage")}
+                      cancelLabel={cancelComposerModeLabel ?? t("cancelEditMessage")}
+                      ariaLabel={editUserMessageLabel ?? t("editMessage")}
+                      error={composerError ?? ""}
+                      attachments={editingUserMessage.attachments ?? []}
+                      references={editingUserMessage.references ?? []}
+                      inputRef={inlineEditInputRef}
+                    />
                   ) : showUserContent ? (
                     <AgentUserContentSectionView userContentSectionIds={agentRenderState.userContentSectionIds}>
                       {renderResponseText(userContentText)}
@@ -2015,6 +2447,7 @@ export const ConversationView = React.memo(function ConversationView({
                   ) : null}
 
                   {!answerOnlyProcessMode ? responseSectionNode : null}
+                  {turnWorkHeaderNode}
               </AgentMessageTurnView>
             );
                 }}
@@ -2719,17 +3152,27 @@ export const ConversationView = React.memo(function ConversationView({
 
   useEffect(() => {
     const focusSignal = String(editingMessageId || "").trim();
-    if (!focusSignal || focusSignal === lastComposerFocusSignalRef.current || composerDisabled) {
+    if (!focusSignal) {
+      // Reset so re-editing the same message after a cancel refocuses.
+      lastComposerFocusSignalRef.current = "";
+      return;
+    }
+    if (focusSignal === lastComposerFocusSignalRef.current || composerDisabled) {
       return;
     }
     lastComposerFocusSignalRef.current = focusSignal;
-    const input = composerInputRef.current;
-    if (!input) {
-      return;
-    }
-    input.focus();
-    const cursorPosition = input.value.length;
-    input.setSelectionRange(cursorPosition, cursorPosition);
+    // Inline edit lives in the timeline row, not the composer; the row editor
+    // mounts in this same commit, so focus it on the next frame.
+    const raf = window.requestAnimationFrame(() => {
+      const input = inlineEditInputRef.current;
+      if (!input) {
+        return;
+      }
+      input.focus();
+      const cursorPosition = input.value.length;
+      input.setSelectionRange(cursorPosition, cursorPosition);
+    });
+    return () => window.cancelAnimationFrame(raf);
   }, [composerDisabled, editingMessageId]);
 
   useEffect(() => {
@@ -3315,6 +3758,54 @@ export const ConversationView = React.memo(function ConversationView({
     }).catch(() => undefined);
   }
 
+  /** Bounded visible feedback for a rejected curation click (~3s on the title). */
+  function showCurationFeedback(messageId: string, action: SessionMessageCurationAction, message: string) {
+    setCurationFeedback({ messageId, action, message });
+    if (curationFeedbackTimerRef.current !== null) {
+      window.clearTimeout(curationFeedbackTimerRef.current);
+    }
+    curationFeedbackTimerRef.current = window.setTimeout(() => {
+      curationFeedbackTimerRef.current = null;
+      setCurationFeedback((current) => (current?.messageId === messageId ? null : current));
+    }, 3000);
+  }
+
+  function handleCurateMessage(messageId: string, action: SessionMessageCurationAction) {
+    if (!sessionId || resolveMessageCurationState(messageCurationMap, messageId) === action) {
+      return;
+    }
+    // Optimistic flip; the query invalidation restores server authority on
+    // success and the overlay entry is dropped again on failure (rollback).
+    setCurationOverrides((current) => applyOptimisticCuration(current, messageId, action));
+    void setSessionMessageCuration(sessionId, messageId, action)
+      .then(() => {
+        setCurationOverrides((current) => {
+          if (!current.has(messageId)) {
+            return current;
+          }
+          const next = new Map(current);
+          next.delete(messageId);
+          return next;
+        });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.sessionMessageCuration(sessionId) });
+      })
+      .catch((error) => {
+        setCurationOverrides((current) => {
+          if (!current.has(messageId)) {
+            return current;
+          }
+          const next = new Map(current);
+          next.delete(messageId);
+          return next;
+        });
+        showCurationFeedback(
+          messageId,
+          action,
+          isFetchJsonHttpError(error) && error.message ? error.message : t("curationActionFailed"),
+        );
+      });
+  }
+
   function renderCodexTranscriptCells(
     message: ConversationMessage,
     cells: CodexTranscriptCell[],
@@ -3669,10 +4160,11 @@ export const ConversationView = React.memo(function ConversationView({
   }
 
   /**
-   * Process-trail thought box (reasoning + commentary): shown in chrono order with
-   * tools, height-capped and scrollable while it streams. Once the segment settles
-   * the body collapses to a one-line preview, so a finished thought neither keeps
-   * covering the transcript nor keeps its text mounted.
+   * Collapsible thinking lane (ZCode reasoning parity): streaming and settled
+   * thoughts both stay collapsed until the user expands. The collapsed header
+   * keeps icon + status title plus a single-line horizontally rolling summary
+   * of the latest thought sentence; the expanded body is height-capped and
+   * bottom-following.
    */
   function renderCodexThoughtScrollCell(
     messageId: string,
@@ -3682,11 +4174,9 @@ export const ConversationView = React.memo(function ConversationView({
       text: string;
       status: CodexTranscriptCell["status"];
       tone: CodexTranscriptCell["tone"];
-      title: string;
       phase?: string;
       channel?: string;
       kind?: CodexTranscriptCell["kind"];
-      meta?: string;
     },
   ) {
     const fullText = String(input.text || "").trim();
@@ -3694,14 +4184,16 @@ export const ConversationView = React.memo(function ConversationView({
       return null;
     }
     const isLive = input.status === "running" || input.status === "pending";
-    // Open while live so the streamed text is readable; the default flips to
-    // collapsed on completion and the section refreshes to the inline preview.
-    // The section id comes from `reasoningExpansionSectionId`, which prefers
-    // sourceItemId: a stream update that rewrites cell.id keeps the same
-    // open/closed choice, and an explicit toggle always wins over the default.
-    const defaultExpanded = isLive;
+    // ZCode parity: streaming and completed reasoning default collapsed, so a
+    // live stream no longer unfolds over the transcript. The user's explicit
+    // toggle (explicit expansion state) still wins over the default; the
+    // section id comes from `reasoningExpansionSectionId`, which prefers
+    // sourceItemId so stream updates that rewrite cell.id keep the choice.
+    const defaultExpanded = false;
     const expanded = getExpansionState(messageId, input.sectionId, defaultExpanded);
-    const inlinePreview = expanded ? "" : humanizeReasoningPreview(fullText);
+    const thoughtTitle = isLive
+      ? (lang === "zh" ? "思考中" : "Thinking…")
+      : (lang === "zh" ? "已思考" : "Thought");
     const toneClassName = styles[`codexTranscriptCell_${input.tone}` as keyof typeof styles] ?? "";
     return (
       <section
@@ -3740,14 +4232,8 @@ export const ConversationView = React.memo(function ConversationView({
           </span>
           <span className={styles.codexTranscriptReasoningHeaderBody}>
             <span className={styles.codexTranscriptReasoningTitleRow}>
-              <span className={styles.codexTranscriptCellTitle}>{input.title}</span>
-              {input.meta ? <span className={styles.codexTranscriptCellMeta}>{input.meta}</span> : null}
-              {!expanded && inlinePreview ? (
-                <>
-                  <span className={styles.timelineCellSeparator} aria-hidden="true">·</span>
-                  <span className={styles.timelineThoughtInlinePreview}>{inlinePreview}</span>
-                </>
-              ) : null}
+              <span className={styles.codexTranscriptReasoningTitle}>{thoughtTitle}</span>
+              {!expanded ? <ThoughtStreamingSummary text={fullText} /> : null}
             </span>
           </span>
         </VButton>
@@ -3848,11 +4334,9 @@ export const ConversationView = React.memo(function ConversationView({
       text: fullText,
       status: cell.status,
       tone: cell.tone,
-      title: codexTranscriptCellTitle(cell) || (lang === "zh" ? "思考" : "Thinking"),
       phase: cell.phase,
       channel: cell.channel,
       kind: cell.kind,
-      meta: codexTranscriptCellMeta(cell) || undefined,
     });
   }
 
@@ -4293,15 +4777,17 @@ export const ConversationView = React.memo(function ConversationView({
     rowIdentity: AgentMessageTimelineRowIdentity,
     isActiveTimelineItem: boolean,
   ) {
-    // Live SSE: keep the body open while thought is running so streaming text is visible.
-    // Settled thoughts default collapsed; shouldRefreshConversationExpansionDefault auto-closes.
-    const inlinePreview = humanizeReasoningPreview(String(item.preview || item.text || ""));
-    const defaultExpanded = Boolean(item.defaultExpanded)
-      || item.status === "running"
-      || item.status === "pending";
+    // ZCode parity: streaming and settled thoughts both stay collapsed until the
+    // user expands; the collapsed header shows the running/settled title plus a
+    // single-line rolling summary of the latest thought sentence.
+    const isLive = item.status === "running" || item.status === "pending";
+    const defaultExpanded = false;
     const sectionId = `thought:${item.id}`;
     const expanded = getExpansionState(message.id, sectionId, defaultExpanded);
     const toggleLabel = expanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden");
+    const thoughtTitle = isLive
+      ? (lang === "zh" ? "思考中" : "Thinking…")
+      : (lang === "zh" ? "已思考" : "Thought");
     return (
       <section
         key={agentMessageTimelineItemRowKey(rowIdentity, item)}
@@ -4321,16 +4807,11 @@ export const ConversationView = React.memo(function ConversationView({
             toggleSection(message.id, sectionId, defaultExpanded);
           }}
         >
-          {isActiveTimelineItem && item.status === "running" ? <LoaderCircle className={styles.statusSpinner} size={14} /> : <BrainCircuit size={14} />}
+          {isActiveTimelineItem && isLive ? <LoaderCircle className={styles.statusSpinner} size={14} /> : <BrainCircuit size={14} />}
           <span className={styles.timelineCellBody}>
             <span className={`${styles.timelineCellTitleRow} ${styles.timelineCellCompactTitleRow}`}>
-              <span className={styles.timelineCellTitle}>{lang === "zh" ? "思考" : "Thinking"}</span>
-              {!expanded && inlinePreview ? (
-                <>
-                  <span className={styles.timelineCellSeparator} aria-hidden="true">·</span>
-                  <span className={styles.timelineThoughtInlinePreview}>{inlinePreview}</span>
-                </>
-              ) : null}
+              <span className={styles.codexTranscriptReasoningTitle}>{thoughtTitle}</span>
+              {!expanded ? <ThoughtStreamingSummary text={item.text} /> : null}
             </span>
           </span>
           {expanded ? <ChevronDown size={15} aria-hidden="true" /> : <ChevronRight size={15} aria-hidden="true" />}
@@ -4339,7 +4820,7 @@ export const ConversationView = React.memo(function ConversationView({
           <div className={styles.codexTranscriptReasoningTextButton}>
             <ThoughtScrollBody
               text={item.text}
-              streaming={item.status === "running" || item.status === "pending"}
+              streaming={isLive}
             />
           </div>
         ) : null}
@@ -5232,6 +5713,23 @@ export const ConversationView = React.memo(function ConversationView({
     return node !== null;
   }
 
+  // Shared so the queue bar stays visible while an inline edit hides the
+  // composer field (one edit UI lives in the row, the queue is session status).
+  const composerFollowupQueueBar = followupQueue.length ? (
+    <ConversationFollowupQueueBar
+      items={followupQueue}
+      lang={lang}
+      variant={composerVariant}
+      editLabel={t("editFollowupQueue")}
+      withdrawLabel={t("withdrawFollowupQueue")}
+      steerLabel={followupQueueSteerLabel ?? t("immediateSteer")}
+      onUpdate={onFollowupQueueUpdate ?? (() => undefined)}
+      onRemove={onFollowupQueueRemove ?? (() => undefined)}
+      onMove={onFollowupQueueMove ?? (() => undefined)}
+      onSteer={onFollowupQueueSteer}
+    />
+  ) : null;
+
   const composerActions = (
     <div className={styles.composerActionStack}>
       {resolvedActionMode === "stop" && composerPending ? (
@@ -5581,6 +6079,11 @@ export const ConversationView = React.memo(function ConversationView({
 
       {showComposer ? (
       <div className={composerVariant === "codex" ? styles.composerCodex : styles.composer}>
+        {/* Inline edit owns the row editor; the composer field steps aside and
+            only session status (the followup queue) keeps its slot here. */}
+        {editingMessageId ? (
+          composerFollowupQueueBar
+        ) : (
         <div
           className={
             composerDragActive
@@ -5592,54 +6095,34 @@ export const ConversationView = React.memo(function ConversationView({
           onDragLeave={handleComposerDragLeave}
           onDrop={handleComposerDrop}
         >
-          {composerError ? <p className={styles.composerError} role="alert">{composerError}</p> : null}
+          {/* Upload-failure repair: the error row grows a retry-all action only
+              while failed attachment chips exist, so unrelated composer errors
+              stay plain. */}
+          {composerError ? (
+            <p className={styles.composerError} role="alert">
+              {composerError}
+              {composerAttachments.some((attachment) => attachment.uploadStatus === "failed") && onRetryComposerAttachmentUploads ? (
+                <VButton
+                  className={styles.composerErrorRetryButton}
+                  variant="ghost"
+                  type="button"
+                  isDisabled={composerPending}
+                  onClick={onRetryComposerAttachmentUploads}
+                  title={t("retryUpload")}
+                >
+                  <RefreshCw size={12} aria-hidden="true" />
+                  <span>{t("retryUpload")}</span>
+                </VButton>
+              ) : null}
+            </p>
+          ) : null}
           {composerGuidance ? (
             <div className={styles.composerGuidance} role="status" aria-live="polite" data-composer-guidance>
               <span className={styles.composerGuidanceIcon} aria-hidden="true">i</span>
               <span>{composerGuidance}</span>
             </div>
           ) : null}
-          {followupQueue.length ? (
-            <ConversationFollowupQueueBar
-              items={followupQueue}
-              lang={lang}
-              variant={composerVariant}
-              editLabel={t("editFollowupQueue")}
-              withdrawLabel={t("withdrawFollowupQueue")}
-              steerLabel={followupQueueSteerLabel ?? t("immediateSteer")}
-              onUpdate={onFollowupQueueUpdate ?? (() => undefined)}
-              onRemove={onFollowupQueueRemove ?? (() => undefined)}
-              onMove={onFollowupQueueMove ?? (() => undefined)}
-              onSteer={onFollowupQueueSteer}
-            />
-          ) : null}
-          {composerModeNotice ? (
-            <div
-              className={styles.composerEditModeBar}
-              role="status"
-              title={composerModeNotice}
-              aria-label={composerModeNotice}
-            >
-              <span className={styles.composerEditModeIcon} aria-hidden="true">
-                <Pencil size={14} />
-              </span>
-              <span className={styles.composerEditModeCopy}>
-                <span className={styles.composerEditModeLabel}>{t("editMessage")}</span>
-                {composerEditFailureNote ? (
-                  <span className={styles.composerEditModeWarning}>{composerEditFailureNote}</span>
-                ) : null}
-              </span>
-              {onCancelComposerMode ? (
-                <VButton
-                  type="button"
-                  className={styles.composerEditModeCancel}
-                  onClick={onCancelComposerMode}
-                >
-                  {cancelComposerModeLabel ?? t("cancelEditMessage")}
-                </VButton>
-              ) : null}
-            </div>
-          ) : null}
+          {composerFollowupQueueBar}
           {composerAttachments.length ? (
             <div
               className={styles.composerAttachmentTray}
@@ -5650,8 +6133,18 @@ export const ConversationView = React.memo(function ConversationView({
                 const attachmentIsImage = isImageAttachment(attachment);
                 const previewLabel = t("composerAttachmentPreviewLabel").replace("{filename}", attachment.filename);
                 const sizeLabel = attachmentSizeLabel(attachment.sizeBytes);
+                const uploadFailed = attachment.uploadStatus === "failed";
+                const uploading = attachment.uploadStatus === "uploading";
                 return (
-                  <div key={attachment.id} className={styles.composerAttachmentChip} role="listitem">
+                  <div
+                    key={attachment.id}
+                    className={uploadFailed
+                      ? `${styles.composerAttachmentChip} ${styles.composerAttachmentChipFailed}`
+                      : styles.composerAttachmentChip}
+                    role="listitem"
+                    aria-invalid={uploadFailed || undefined}
+                    title={uploadFailed ? t("attachmentUploadFailedRetryHint") : undefined}
+                  >
                     {attachmentIsImage ? (
                       <VButton
                         className={styles.composerAttachmentPreview}
@@ -5680,10 +6173,31 @@ export const ConversationView = React.memo(function ConversationView({
                     )}
                     <span className={styles.composerAttachmentCopy}>
                       <span className={styles.composerAttachmentName} title={attachment.filename}>{attachment.filename}</span>
-                      {sizeLabel ? (
+                      {uploading ? (
+                        <span className={styles.composerAttachmentStatusUploading}>
+                          <LoaderCircle size={11} aria-hidden="true" className={styles.composerAttachmentUploadingIcon} />
+                          {t("attachmentUploading")}
+                        </span>
+                      ) : sizeLabel ? (
                         <span className={styles.composerAttachmentMeta}>{sizeLabel}</span>
                       ) : null}
+                      {uploadFailed ? (
+                        <span className={styles.composerAttachmentStatusFailed}>{t("attachmentUploadFailedRetryHint")}</span>
+                      ) : null}
                     </span>
+                    {uploadFailed && onRetryComposerAttachment ? (
+                      <VButton
+                        className={styles.composerAttachmentRetryButton}
+                        isIconOnly
+                        variant="ghost"
+                        type="button"
+                        onClick={() => onRetryComposerAttachment(attachment.id)}
+                        title={t("retryUpload")}
+                        aria-label={`${t("retryUpload")}: ${attachment.filename}`}
+                      >
+                        <RefreshCw size={13} aria-hidden="true" />
+                      </VButton>
+                    ) : null}
                     {onRemoveComposerAttachment ? (
                       <VButton
                         className={styles.composerAttachmentRemoveButton}
@@ -6048,6 +6562,7 @@ export const ConversationView = React.memo(function ConversationView({
             </div>
           </div>
         </div>
+        )}
         <VNativeInput
           ref={attachmentInputRef}
           className={styles.hiddenAttachmentInput}
