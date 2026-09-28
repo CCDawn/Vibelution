@@ -340,7 +340,10 @@ def resolve_validation_toolchain(checkout: Path | str) -> ValidationToolchain:
     checkout_sha256 = _requirements_sha256(checkout_requirements)
     integration_sha256 = _requirements_sha256(integration_requirements)
 
-    python_executable = venv_python(integration_root / ".venv").resolve()
+    # Keep the venv entry point itself: on macOS the venv `bin/python` is a
+    # symlink to the base interpreter, and resolving it would spawn the base
+    # interpreter without the venv's site-packages (no ruff/pytest).
+    python_executable = venv_python(integration_root / ".venv")
     if not python_executable.is_file():
         raise ValidationToolchainError(
             "validation_toolchain_missing",
