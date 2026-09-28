@@ -304,6 +304,40 @@ def test_new_binding_requires_canonical_city_and_creates_editable_life_draft(
         set_virtual_human_life_service_for_tests(None)
 
 
+def test_legacy_enabled_companion_can_complete_life_origin_without_reenable(tmp_path) -> None:
+    client, service = _client(tmp_path)
+    try:
+        legacy = service.set_binding("agent-a", enabled=True, expected_version=0)
+        assert legacy["locationSetupRequired"] is True
+        response = client.put(
+            "/api/agents/agent-a/plugins/virtual-human-life/binding",
+            json={"enabled": True, "expectedVersion": legacy["configVersion"], "config": {
+                "homeLocation": {"locationId": "CN-HANGZHOU"}, "lifeIdentityKind": "student",
+            }},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["enabled"] is True
+        assert response.json()["homeLocation"]["cityName"] == "杭州"
+        draft = service.life_world_projection("agent-a")["draft"]
+        updated = client.put(
+            "/api/agents/agent-a/plugins/virtual-human-life/life-world/draft",
+            json={"agentId": "agent-a", "draftId": draft["draftId"], "expectedRevision": draft["revision"],
+                  "idempotencyKey": "legacy-school-setup", "patch": {
+                      "identity": {"roleTitle": "杭州电子科技大学学生", "stage": "在读"},
+                      "affiliations": [{"name": "杭州电子科技大学", "role": "学生"}],
+                  }},
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["payload"]["affiliations"][0]["name"] == "杭州电子科技大学"
+        world = service.life_world_projection("agent-a")
+        assert world["setupState"] == "draft"
+        assert world["facts"]["identities"] == []
+        assert world["facts"]["accounts"] == []
+        assert service.binding_for("agent-a")["steward"]["enabled"] is False
+    finally:
+        set_virtual_human_life_service_for_tests(None)
+
+
 def test_binding_transition_hides_and_restores_only_the_companion_directory_entry(
     tmp_path,
     monkeypatch,

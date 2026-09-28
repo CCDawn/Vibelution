@@ -1,0 +1,8 @@
+{
+  "fixtures": [
+    {
+      "match": {},
+      "response": { "content": "ok (e2e-mock catch-all)" }
+    }
+  ]
+}

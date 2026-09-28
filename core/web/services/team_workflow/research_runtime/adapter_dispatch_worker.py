@@ -1298,6 +1298,7 @@ class AdapterDispatchWorker:
                             run.team_id,
                             RunStatus.RECONCILIATION_REQUIRED.value,
                             now_ms,
+                            active_node_id=run.active_node_id,
                             blocked_problem_json=problem_json,
                         )
                     else:

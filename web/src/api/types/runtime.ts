@@ -1205,6 +1205,17 @@ export type LauncherControlResponse = RuntimeControlResponse & {
   port?: number;
   controlPort?: number;
   url?: string;
+  shellStale?: boolean;
+};
+
+export type LauncherFreshness = {
+  current: boolean | null;
+  label: string;
+  runningShort?: string;
+  headShort?: string;
+  shellStale?: boolean;
+  shellReason?: string;
+  updateAvailable?: boolean;
 };
 
 export type WorkbenchWindowModeUpdateResponse = {

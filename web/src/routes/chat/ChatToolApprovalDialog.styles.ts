@@ -2,7 +2,7 @@ const styles = {
   actions:
     "min-w-0 flex shrink-0 flex-nowrap items-center justify-end gap-1 self-center",
   alwaysButton:
-    "!h-7 !min-h-7 border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--vui-border-subtle))] bg-[var(--vui-surface-row)] !px-2 !text-[11px] text-[var(--fg-primary)]",
+    "!h-7 !min-h-7 border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--vui-border-subtle))] bg-[var(--vui-surface-row)] !px-2 !text-vui-micro-11 text-[var(--fg-primary)]",
   body:
     "min-w-0 grid gap-0.5 [font-size:var(--vui-font-sm)] leading-snug text-[var(--fg-secondary)]",
   commandPreview:
@@ -12,7 +12,7 @@ const styles = {
   header:
     "min-w-0 flex flex-wrap items-center gap-1 text-[var(--fg-primary)]",
   headerTitle:
-    "text-[12px] font-semibold leading-none text-[var(--fg-primary)]",
+    "text-vui-2xs font-semibold leading-none text-[var(--fg-primary)]",
   hotkeys:
     "m-0 [font-size:10px] font-medium leading-none tracking-wide text-[var(--fg-tertiary)]",
   grantDescription:
@@ -22,7 +22,7 @@ const styles = {
   lead:
     "m-0 [font-size:11px] leading-snug text-[var(--fg-tertiary)]",
   noButton:
-    "!h-7 !min-h-7 border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] !px-2 !text-[11px] text-[var(--fg-secondary)]",
+    "!h-7 !min-h-7 border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] !px-2 !text-vui-micro-11 text-[var(--fg-secondary)]",
   overlay:
     "min-w-0 w-full",
   overlayInline:
@@ -30,13 +30,13 @@ const styles = {
   dialogInline:
     "min-w-0 w-full max-w-[min(44rem,100%)] !grid grid-cols-[22px_minmax(0,1fr)] items-center gap-x-2 gap-y-0.5 rounded-[var(--radius-control)] border border-[var(--vui-border-strong)] bg-[var(--vui-surface-panel)] px-2 py-1.5 text-[var(--fg-primary)] shadow-[var(--vui-shadow-hairline)] sm:grid-cols-[22px_minmax(0,1fr)_auto]",
   scopeBadge:
-    "rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-1.5 py-px text-[10px] font-semibold leading-none text-[var(--fg-tertiary)]",
+    "rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-1.5 py-px text-vui-micro-10 font-semibold leading-none text-[var(--fg-tertiary)]",
   toolList:
     "sr-only",
   toolItem:
     "min-w-0",
   yesButton:
-    "!h-7 !min-h-7 border-[color-mix(in_srgb,var(--state-warning)_40%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_14%,var(--vui-surface-row))] !px-2 !text-[11px] font-semibold text-[var(--fg-primary)]",
+    "!h-7 !min-h-7 border-[color-mix(in_srgb,var(--state-warning)_40%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_14%,var(--vui-surface-row))] !px-2 !text-vui-micro-11 font-semibold text-[var(--fg-primary)]",
   visuallyHidden:
     "sr-only",
 } as const;

@@ -1045,3 +1045,71 @@ def test_resubmit_acceptance_window_failure_survives_settlement_step_errors(tmp_
         assert settle_step_failures[0]["fields"]["failedStage"] == "user_message_journal"
     finally:
         _reset_seeded_session_runtime(session_id)
+
+
+def test_enqueue_busy_session_turn_response_and_events_carry_queue_facts(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Defect-① observability: a busy-session queue acceptance must answer with
+    queue facts and emit structured + projectable events instead of silently
+    returning 200."""
+    from core.web.services import agent_directory_service
+
+    session_id = "session-busy-queue"
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _seed_submittable_sessions(tmp_path, [session_id])
+    monkeypatch.setattr(
+        session_service, "_schedule_session_queued_turn_drain", lambda target: None
+    )
+
+    scene_events: list[dict] = []
+    lifecycle_events: list[tuple[str, str, dict]] = []
+
+    def capture_scene(component, phase, event_code, **kwargs):
+        scene_events.append({"phase": phase, "eventCode": event_code, **kwargs})
+        return {}
+
+    def capture_lifecycle(target_session_id, phase, *, turn_id="", outcome="", fields=None, **kwargs):
+        lifecycle_events.append((phase, turn_id, dict(fields or {})))
+
+    monkeypatch.setattr(session_service, "record_runtime_scene_event", capture_scene)
+    monkeypatch.setattr(
+        session_service, "_record_session_turn_lifecycle_event", capture_lifecycle
+    )
+
+    session_service._create_session_turn_control(session_id, turn_id="turn-active")
+    session_service._set_session_running(session_id, True, turn_id="turn-active")
+    try:
+        result = submit.submit_session_message_lightweight(
+            session_id,
+            "busy queue me",
+            mental_model_enabled=False,
+            client_submission_id="sub-busy-1",
+            queue_if_busy=True,
+        )
+    finally:
+        session_service._set_session_running(session_id, False, turn_id="turn-active")
+        session_service._clear_session_turn_control(session_id, turn_id="turn-active")
+        _reset_seeded_session_runtime(session_id)
+
+    assert result["accepted"] is True
+    assert result["status"] == "queued"
+    assert result["queued"] is True
+    assert result["queuedTurnId"]
+    assert result["queuePosition"] == 1
+    assert result["queuedAt"]
+    assert result["queuedBehindTurnId"] == "turn-active"
+
+    queued_scene_events = [event for event in scene_events if event["phase"] == "busy_turn_queued"]
+    assert queued_scene_events, "expected the busy-queue acceptance to be scene-logged"
+    assert queued_scene_events[0]["eventCode"] == "conversation.submit.busy_turn_queued"
+    assert queued_scene_events[0]["outcome"] == "queued"
+    assert queued_scene_events[0]["fields"]["queuePosition"] == 1
+    assert queued_scene_events[0]["fields"]["queuedBehindTurnId"] == "turn-active"
+    assert queued_scene_events[0]["fields"]["clientSubmissionId"] == "sub-busy-1"
+
+    assert lifecycle_events, "expected a projectable lifecycle event for the queued turn"
+    assert lifecycle_events[0][0] == "busy_turn_queued"
+    assert lifecycle_events[0][1] == result["queuedTurnId"]
+    assert lifecycle_events[0][2]["contentPreview"] == "busy queue me"

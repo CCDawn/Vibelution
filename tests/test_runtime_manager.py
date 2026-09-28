@@ -2344,6 +2344,18 @@ def test_run_forever_marks_runtime_stopping_then_finalizes_idle_before_exit(monk
     assert saved_states[-1]["workbench"]["phase"] == "steady"
 
 
+def test_exit_current_process_raises_instead_of_killing_pytest_process():
+    """回归守卫：pytest 进程内的 daemon 退出必须显式抛 SystemExit。
+
+    修复前是 os._exit 静默杀掉 pytest/xdist worker 且不留崩溃记录，整套
+    测试随控制器死等已死节点悬挂到死。
+    """
+    with pytest.raises(SystemExit) as exit_info:
+        daemon._exit_current_process(3)
+
+    assert exit_info.value.code == 3
+
+
 def test_reconcile_observation_keeps_daemon_running_true_and_preserves_stopping(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
 
@@ -3028,6 +3040,74 @@ def test_submit_command_defers_open_while_runtime_manager_is_stopping(tmp_path, 
     event = json.loads(events_path.read_text(encoding="utf-8").splitlines()[-1])
     assert event["type"] == "command_queue.open_deferred_until_shutdown_complete"
     assert event["payload"]["managerPid"] == 9912
+
+
+def test_build_command_records_content_addressed_args_hash():
+    """Every queued command records a canonical-JSON args hash: equal args
+    hash equal regardless of dict order; different args hash differently."""
+    command = command_queue.build_command("open_workbench", args={"reason": "b", "noBrowser": True}, requested_by="test")
+    twin = command_queue.build_command("open_workbench", args={"noBrowser": True, "reason": "b"}, requested_by="test")
+    different = command_queue.build_command("open_workbench", args={"reason": "a", "noBrowser": True}, requested_by="test")
+    no_args = command_queue.build_command("open_workbench")
+
+    assert command["argsHash"] == twin["argsHash"]
+    assert command["argsHash"] != different["argsHash"]
+    assert len(command["argsHash"]) == 16
+    assert no_args["argsHash"] == command_queue.command_args_hash({})
+    # The hash covers args only: identity and timestamps stay beside it.
+    assert command["requestedBy"] == "test"
+    assert command["args"] == {"reason": "b", "noBrowser": True}
+
+
+def test_has_recent_lifecycle_command_dedupes_on_matching_args_hash(tmp_path, monkeypatch):
+    """Content-strengthened dedup: a pending lifecycle command whose recorded
+    argsHash matches counts as recent even with unreadable timestamps, while
+    a different-args command in the same window does not content-join."""
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", tmp_path / "events.jsonl")
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+
+    matching_hash = command_queue.command_args_hash({"reason": "operator"})
+    stale_pending = {
+        "commandId": "cmd_pending",
+        "type": "close_workbench",
+        "argsHash": matching_hash,
+        "requestedBy": "test",
+        # Every time source unreadable: no claimedAt/startedAt/requestedAt.
+        "args": {"reason": "operator"},
+    }
+    (inbox_dir / "cmd_pending.json").write_text(json.dumps(stale_pending), encoding="utf-8")
+
+    # now far past every file timestamp: the time window alone is expired,
+    # so only the content join can report the identical pending intent.
+    now = datetime.now(timezone.utc) + timedelta(hours=1)
+    assert (
+        command_queue.has_recent_lifecycle_command(
+            grace_seconds=5.0, now=now, args_hash=matching_hash
+        )
+        is True
+    )
+    assert (
+        command_queue.has_recent_lifecycle_command(
+            grace_seconds=5.0,
+            now=now,
+            args_hash=command_queue.command_args_hash({"reason": "other"}),
+        )
+        is False
+    )
+    # Legacy time-window behavior is unchanged without content matching.
+    assert command_queue.has_recent_lifecycle_command(grace_seconds=5.0, now=now) is False
+
+    # Inside the window the plain time scan still reports any lifecycle file.
+    fresh_now = datetime.now(timezone.utc)
+    assert command_queue.has_recent_lifecycle_command(grace_seconds=5.0, now=fresh_now) is True
 
 
 def test_submit_command_ignores_stale_shutdown_state_from_previous_runtime_manager(tmp_path, monkeypatch):

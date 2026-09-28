@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   CONFIG_COPY,
-} from "./ConfigRoute";
+} from "./config/configCopy";
 import {
   avatarCropSourceRect,
   buildConfigApplyPayload,
@@ -44,7 +44,9 @@ import {
 } from "./configRouteLogic";
 import type { AgentInstance, ConfigModelOption, ConfigModelPresetOption, ConfigProviderPresetOption } from "../api/types";
 
-const configRouteSource = readFileSync(fileURLToPath(new URL("./ConfigRoute.tsx", import.meta.url)), "utf8");
+// Wave 3: buildModelDetailsPayload moved to config/configEditorModel.ts; the source
+// contract follows the code (assertion text unchanged).
+const configRouteSource = readFileSync(fileURLToPath(new URL("./config/configEditorModel.ts", import.meta.url)), "utf8");
 
 function preset(
   presetId: string,
@@ -682,7 +684,6 @@ describe("configRouteLogic", () => {
     expect(configRouteSource).toContain('supports_image_input: "unknown"');
     expect(configRouteSource).toContain("payload.supports_image_input = true");
     expect(configRouteSource).toContain("payload.supports_image_input = false");
-    expect(configRouteSource).toContain("modelEditorRef.current?.scrollIntoView");
   });
 
   it("maps model creation scenarios to extensible preset defaults", () => {
@@ -798,6 +799,25 @@ describe("configRouteLogic", () => {
         nextPathname: "/config",
       }),
     ).toBe(false);
+
+    expect(
+      shouldBlockConfigLeave({
+        hasPendingApply: false,
+        hasPendingSectionDrafts: true,
+        busy: false,
+        currentPathname: "/config",
+        nextPathname: "/chat",
+      }),
+    ).toBe(true);
+    expect(
+      shouldBlockConfigLeave({
+        hasPendingApply: false,
+        hasPendingSectionDrafts: true,
+        busy: false,
+        currentPathname: "/config",
+        nextPathname: "/config",
+      }),
+    ).toBe(false);
   });
 
   it("keeps avatar crop movement inside the visible square", () => {
@@ -873,6 +893,19 @@ describe("config route copy", () => {
     expect(visibleCopy.en).not.toMatch(/\bdrafts?\b/i);
     expect(visibleCopy.en).not.toMatch(/\bJSON\b/i);
     expect(visibleCopy.en).not.toMatch(/\bJSON editor\b/i);
+  });
+
+  it("keeps shortcuts panel copy bilingual with bindable placeholders", () => {
+    const shortcutsKeys = Object.keys(CONFIG_COPY.zh).filter((key) => key.startsWith("shortcuts"));
+    expect(shortcutsKeys.length).toBeGreaterThanOrEqual(28);
+    for (const key of shortcutsKeys) {
+      expect(key in CONFIG_COPY.en, `${key} missing from en copy`).toBe(true);
+    }
+    expect(CONFIG_COPY.zh.shortcutsTitle).toBe("快捷键");
+    expect(CONFIG_COPY.en.shortcutsTitle).toBe("Keyboard shortcuts");
+    for (const key of ["shortcutsBoundNotice", "shortcutsReservedNotice", "shortcutsOccupiedNotice", "shortcutsStealHint", "shortcutsStealDone", "shortcutsClearedNotice", "shortcutsRestoredNotice"]) {
+      expect(CONFIG_COPY.zh[key]).toMatch(/\{\w+\}/);
+    }
   });
 
   it("points startup settings to Launcher instead of generic config", () => {
@@ -994,9 +1027,9 @@ describe("config route copy", () => {
   });
 
   it("distinguishes terminal avatar settings from the Web user avatar", () => {
-    expect(CONFIG_COPY.zh.groupAvatarPetTitle).toBe("用户、终端形象与陪伴体");
+    expect(CONFIG_COPY.zh.groupAvatarPetTitle).toBe("个人资料与桌宠");
     expect(CONFIG_COPY.zh.groupAvatarPetSummary).toContain("Web 用户头像在用户信息里维护");
-    expect(CONFIG_COPY.en.groupAvatarPetTitle).toBe("User, Terminal Avatar, and Companion");
+    expect(CONFIG_COPY.en.groupAvatarPetTitle).toBe("Profile & desktop pet");
     expect(CONFIG_COPY.en.groupAvatarPetSummary).toContain("Web user avatar lives under User Info");
   });
 

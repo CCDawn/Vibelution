@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../../app/browserTelemetry";
@@ -7,6 +7,7 @@ import { queryKeys } from "../../api/queryKeys";
 import type { SessionDetail, SessionStreamEvent } from "../../api/types";
 import {
   isActiveTurnSettledByDetail,
+  reconcileActiveTurnLayerItemsWithMessages,
   setActiveTurnLayerForSession,
   type ActiveTurnLayerState,
 } from "../chatActiveTurnLayer";
@@ -24,6 +25,13 @@ import {
 } from "../chatStreamApplyController";
 import { createSessionAssistantDeltaScheduler } from "../sessionAssistantDeltaScheduler";
 import { chatStreamPerformanceNowMs, isBusyPhase } from "./chatCodingRouteViewModel";
+import { supersededEditDelta } from "./chatEditResubmitState";
+import {
+  createAssistantDeltaSeqGate,
+  createSessionStreamRecoveryController,
+  SESSION_STREAM_RECOVERY_MAX_ATTEMPTS,
+} from "../chatStreamProjectionGate";
+import { mergeSessionDetailMessageWindow } from "../chatSessionState";
 import {
   SESSION_STREAM_ERROR_REFRESH_MIN_INTERVAL_MS,
   SESSION_STREAM_MIN_APPLY_INTERVAL_MS,
@@ -34,6 +42,11 @@ import {
   createSessionEventStream as createDefaultSessionEventStream,
   type SessionEventStream,
 } from "./sessionEventStream";
+import {
+  acquireSessionStream,
+  releaseSessionStream,
+  SESSION_STREAM_WARM_MS,
+} from "./sessionStreamWarmRegistry";
 
 type DesktopConversationNotifier = {
   handleSessionDetail: (
@@ -45,6 +58,17 @@ type DesktopConversationNotifier = {
     options: { sessionTitle: string; viewedSessionId?: string },
   ) => void;
 };
+
+export function shouldDropSupersededEditDelta(
+  protection: SessionDetail["editResubmitProtection"],
+  turnId: string | undefined,
+  ledgerSeq?: number,
+): boolean {
+  return supersededEditDelta(protection, turnId, ledgerSeq);
+}
+
+/** Why a guarded stream was hard-closed by its owner (telemetry evidence). */
+export type SessionStreamCloseReason = "grace_timeout" | "manual_reconnect";
 
 export type UseSessionDetailStreamOptions = {
   activeSessionId: string | null | undefined;
@@ -63,8 +87,10 @@ export type UseSessionDetailStreamOptions = {
 };
 
 /**
- * Sole owner of the direct-session guarded event stream.
- * Do not open a second /api/sessions/:id/events connection elsewhere.
+ * Sole owner of the direct-session guarded event stream, through the module
+ * level keep-warm registry (sessionStreamWarmRegistry): unmount parks the
+ * stream instead of closing it. Do not open a second
+ * /api/sessions/:id/events connection elsewhere.
  */
 export function useSessionDetailStream({
   activeSessionId,
@@ -82,6 +108,8 @@ export function useSessionDetailStream({
 }: UseSessionDetailStreamOptions): {
   sessionStreamConnected: boolean;
   streamDisconnectedSinceMs: number | null;
+  /** Manual "reconnect now" affordance for the active-turn disconnect advisory. */
+  reconnectSessionStream: () => void;
 } {
   const [sessionStreamConnected, setSessionStreamConnected] = useState(false);
   // Sticky start of the current reconnect loop: set on the first transport
@@ -108,7 +136,7 @@ export function useSessionDetailStream({
   const graceCloseTimerRef = useRef<number | null>(null);
   const graceClosedSessionRef = useRef(false);
   const activeStreamRef = useRef<{ stream: SessionEventStream; sessionId: string } | null>(null);
-  const forceCloseStreamRef = useRef<(() => void) | null>(null);
+  const forceCloseStreamRef = useRef<((reason?: SessionStreamCloseReason) => void) | null>(null);
 
   useEffect(() => {
     const prev = prevShouldConnectRef.current;
@@ -184,6 +212,7 @@ export function useSessionDetailStream({
     let applyTimer: number | null = null;
     let lastAppliedAt = 0;
     let committedAssistantDeltaLayer: ActiveTurnLayerState | undefined = activeTurnLayersBySessionRef.current[streamSessionId];
+    let observedEditSubmissionId = "";
     const assistantDeltaScheduler = createSessionAssistantDeltaScheduler({
       nowMs: chatStreamPerformanceNowMs,
     });
@@ -212,12 +241,34 @@ export function useSessionDetailStream({
         ...collectBrowserPageSnapshot(),
       },
     });
-    const stream = createSessionEventStream(streamSessionId);
+    // Keep-warm acquire (pattern: zai-org/ZCode sessionDataLayer, Apache-2.0):
+    // remounting the same session within the warm window reuses the parked live
+    // connection instead of paying a cold reconnect + resync.
+    const acquired = acquireSessionStream(streamSessionId, createSessionEventStream);
+    const stream = acquired.stream;
+    const reacquiredWarm = acquired.reusedWarm;
+    const parkedLedgerSeq = acquired.parkedLedgerSeq;
     activeStreamRef.current = { stream, sessionId: streamSessionId };
     let closeTelemetryFired = false;
 
     const sessionStopIntentActive = () =>
       Boolean(queryClient.getQueryData<SessionDetail>(queryKeys.session(streamSessionId))?.stopRequested);
+
+    const syncEditResubmitGuard = () => {
+      const protection = queryClient.getQueryData<SessionDetail>(queryKeys.session(streamSessionId))?.editResubmitProtection;
+      const submissionId = String(protection?.clientSubmissionId || "").trim();
+      if (submissionId && submissionId !== observedEditSubmissionId) {
+        // A new edit replaces the local delta accumulator as well as the
+        // transcript tail; queued deltas from the superseded turn must not be
+        // appended to the new optimistic layer.
+        assistantDeltaScheduler.cancel();
+        committedAssistantDeltaLayer = undefined;
+        observedEditSubmissionId = submissionId;
+      } else if (!submissionId) {
+        observedEditSubmissionId = "";
+      }
+      return protection;
+    };
 
     const logStopFrozenDeltas = (droppedCount: number) => {
       if (sessionStreamStopFrozenLoggedRef.current[streamSessionId]) {
@@ -236,7 +287,7 @@ export function useSessionDetailStream({
       });
     };
 
-    const forceCloseStream = () => {
+    const forceCloseStream = (reason: SessionStreamCloseReason = "grace_timeout") => {
       if (closeTelemetryFired || disposed) {
         return;
       }
@@ -254,12 +305,53 @@ export function useSessionDetailStream({
         fields: {
           sessionId: streamSessionId,
           readyState: stream.readyState,
-          reason: "grace_timeout",
+          reason,
         },
       });
       setStreamReconnectTick((tick) => tick + 1);
     };
     forceCloseStreamRef.current = forceCloseStream;
+
+    // Projection invariants (pattern: zai-org/ZCode conversationProjectionStore,
+    // Apache-2.0): seq continuity gate before delta application + single-flight
+    // watermark recovery. The authoritative refetch after stream errors below
+    // stays as the coarse fallback path.
+    const sessionProjectionGate = createAssistantDeltaSeqGate();
+    const sessionStreamRecovery = createSessionStreamRecoveryController({
+      requestRecovery: ({ attempt }) => {
+        if (disposed) {
+          return;
+        }
+        void queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) });
+        // The reconnect re-baselines the gate through the stream open handler;
+        // once the backoff ladder is exhausted only the authoritative refetch
+        // keeps running so a flapping transport cannot loop reconnects.
+        if (attempt <= SESSION_STREAM_RECOVERY_MAX_ATTEMPTS) {
+          forceCloseStream();
+        }
+      },
+    });
+
+    if (reacquiredWarm) {
+      // The stream stayed open while this session was parked, so it may have
+      // reconnected or advanced without a mounted owner. Re-baseline the
+      // projection gates (the next frame applies like after a fresh open) and
+      // trigger one authoritative refresh when the parked watermark advanced
+      // over the cached detail, so the route re-enters on the latest state.
+      sessionProjectionGate.noteStreamReopened();
+      sessionStreamRecovery.noteStreamReopened();
+      if (parkedLedgerSeq > 0) {
+        const cachedLedgerSeq = Number(
+          queryClient.getQueryData<SessionDetail>(queryKeys.session(streamSessionId))?.ledgerSeq ?? 0,
+        );
+        if (parkedLedgerSeq > cachedLedgerSeq) {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) });
+        }
+      }
+      if (stream.readyState === 1) {
+        markStreamConnected();
+      }
+    }
 
     function logRejectedSessionStreamRoute(trace: SessionStreamProtocolTrace, message: string) {
       if (trace.rejectReason === "parse_error") {
@@ -299,7 +391,8 @@ export function useSessionDetailStream({
       if (!pendingDetail || disposed) {
         return;
       }
-      const detail = pendingDetail;
+      const detail = mergeSessionDetailMessageWindow(
+        queryClient.getQueryData<SessionDetail>(queryKeys.session(streamSessionId)), pendingDetail);
       const trace = pendingDetailTrace;
       pendingDetail = null;
       pendingDetailTrace = null;
@@ -339,6 +432,27 @@ export function useSessionDetailStream({
         setActiveTurnLayersBySession((current) =>
           setActiveTurnLayerForSession(current, streamSessionId, undefined)
         );
+        sessionProjectionGate.noteTurnBoundary();
+        return;
+      }
+      // Authoritative watermark advance: re-baselines the continuity gate and
+      // completes a pending watermark recovery once the snapshot reaches it.
+      const authoritativeLedgerSeq = Number(detail.ledgerSeq ?? 0);
+      if (Number.isFinite(authoritativeLedgerSeq) && authoritativeLedgerSeq > 0) {
+        sessionProjectionGate.noteAuthoritative(authoritativeLedgerSeq);
+        sessionStreamRecovery.noteAuthoritative(authoritativeLedgerSeq);
+      }
+      // Per-item overlay reconciliation (projection invariant c): overlay turn
+      // items the canonical transcript already commits are dropped at item
+      // granularity; whole-turn settlement above stays the coarse path.
+      if (activeLayer) {
+        const reconciledLayer = reconcileActiveTurnLayerItemsWithMessages(activeLayer, detail.messages);
+        if (reconciledLayer !== activeLayer) {
+          committedAssistantDeltaLayer = reconciledLayer;
+          setActiveTurnLayersBySession((current) =>
+            setActiveTurnLayerForSession(current, streamSessionId, reconciledLayer)
+          );
+        }
       }
     }
 
@@ -381,6 +495,7 @@ export function useSessionDetailStream({
     }
 
     function applyPendingAssistantDeltas(reason: "frame" | "close" | "final") {
+      syncEditResubmitGuard();
       if (assistantDeltaScheduler.pendingCount === 0 || disposed) {
         return;
       }
@@ -415,7 +530,24 @@ export function useSessionDetailStream({
         stats: sessionStreamApplyStatsRef.current[streamSessionId],
         applyStartedAtMs,
         nowMs: chatStreamPerformanceNowMs,
+        assistantDeltaSeqGate: (payload) => sessionProjectionGate.decide(payload),
       });
+      const drainHold = decision.hold;
+      if (drainHold) {
+        postBrowserTelemetry({
+          phase: "session_stream",
+          eventCode: "browser.session_stream.assistant_delta_gap_held",
+          message: "Session assistant delta frame was held by the projection continuity gate.",
+          level: "warning",
+          fields: {
+            sessionId: streamSessionId,
+            heldLedgerSeq: drainHold.heldLedgerSeq,
+            watermark: drainHold.watermark,
+            heldCount: drainHold.heldCount,
+          },
+        });
+        sessionStreamRecovery.request(drainHold.watermark);
+      }
       if (!decision.applied) {
         return;
       }
@@ -467,6 +599,11 @@ export function useSessionDetailStream({
       const stats = sessionStreamApplyStatsRef.current[streamSessionId] ?? { received: 0, applied: 0, dropped: 0 };
       stats.received += 1;
       sessionStreamApplyStatsRef.current[streamSessionId] = stats;
+      const editProtection = syncEditResubmitGuard();
+      if (shouldDropSupersededEditDelta(editProtection, payload.turnId, payload.ledgerSeq)) {
+        stats.dropped += 1;
+        return;
+      }
       if (sessionStopIntentActive()) {
         stats.dropped += 1;
         logStopFrozenDeltas(1);
@@ -511,6 +648,11 @@ export function useSessionDetailStream({
       if (!disposed) {
         markStreamConnected();
         sessionStreamErrorLoggedRef.current[streamSessionId] = false;
+        // A stream (re)open re-baselines the continuity gate: the first frame
+        // after the server resumes applies even when the ledger jumped during
+        // the outage, and any pending watermark recovery episode retires.
+        sessionProjectionGate.noteStreamReopened();
+        sessionStreamRecovery.noteStreamReopened();
         postBrowserTelemetry({
           phase: "session_stream",
           eventCode: "browser.session_stream.opened",
@@ -603,6 +745,13 @@ export function useSessionDetailStream({
         return;
       }
       markStreamConnected();
+      // session_initial carries the authoritative ledger watermark on every
+      // (re)connect; advance the gate so post-reconnect frames cannot lag it.
+      const initialLedgerSeq = Number(routed.payload.ledgerSeq ?? 0);
+      if (Number.isFinite(initialLedgerSeq) && initialLedgerSeq > 0) {
+        sessionProjectionGate.noteAuthoritative(initialLedgerSeq);
+        sessionStreamRecovery.noteAuthoritative(initialLedgerSeq);
+      }
       postBrowserTelemetry({
         phase: "session_stream",
         eventCode: "browser.session_stream.initial_received",
@@ -636,6 +785,8 @@ export function useSessionDetailStream({
         return;
       }
       markStreamConnected();
+      const editGuard = queryClient.getQueryData<SessionDetail>(queryKeys.session(streamSessionId))?.editResubmitProtection;
+      if (shouldDropSupersededEditDelta(editGuard, routed.payload.turnId, routed.payload.ledgerSeq)) return;
       desktopConversationNotifierRef.current.handleAssistantDelta(routed.payload, {
         sessionTitle: sessionTitleForNotificationsRef.current || streamSessionId,
         viewedSessionId: viewedSessionIdRef.current,
@@ -648,11 +799,16 @@ export function useSessionDetailStream({
     stream.addEventListener("assistant_delta", handleAssistantDelta as EventListener);
 
     return () => {
-      // Route/session switch: dispose synchronously BEFORE touching the UI. Any
-      // pending payload from the old stream must be discarded, never applied to
-      // the React Query cache or the active-turn layer. Cleanup also cancels the
-      // coalesce timer and the assistant-delta animation frame so no expensive
-      // main-thread work outlives the old guarded stream.
+      // Route/session switch or unmount: detach this effect's projection state
+      // synchronously BEFORE touching the UI. Any pending payload from the old
+      // effect must be discarded, never applied to the React Query cache or the
+      // active-turn layer. Cleanup cancels the coalesce timer and the
+      // assistant-delta animation frame so no expensive main-thread work
+      // outlives the old guarded stream. The stream itself is NOT closed here:
+      // keep-warm release parks it (open) for SESSION_STREAM_WARM_MS so a
+      // remount reuses the live connection; the registry's parked listeners
+      // only record the ledger watermark and the stream is hard-closed once
+      // the warm window expires.
       disposed = true;
       const readyStateBeforeClose = stream.readyState;
       if (applyTimer) {
@@ -666,6 +822,7 @@ export function useSessionDetailStream({
       pendingDetail = null;
       pendingDetailTrace = null;
       assistantDeltaScheduler.cancel();
+      sessionStreamRecovery.dispose();
       setSessionStreamConnected(false);
       if (activeStreamRef.current?.stream === stream) {
         activeStreamRef.current = null;
@@ -676,15 +833,16 @@ export function useSessionDetailStream({
       stream.removeEventListener("session_detail", handleSessionDetail as EventListener);
       stream.removeEventListener("session_initial", handleSessionInitial as EventListener);
       stream.removeEventListener("assistant_delta", handleAssistantDelta as EventListener);
-      stream.close();
+      releaseSessionStream(streamSessionId, stream);
       if (!closeTelemetryFired) {
         postBrowserTelemetry({
           phase: "session_stream",
-          eventCode: "browser.session_stream.closed",
-          message: "Session detail stream closed.",
+          eventCode: "browser.session_stream.parked",
+          message: "Session detail stream parked for reuse by the warm registry.",
           fields: {
             sessionId: streamSessionId,
             readyState: readyStateBeforeClose,
+            warmMs: SESSION_STREAM_WARM_MS,
           },
         });
       }
@@ -697,5 +855,31 @@ export function useSessionDetailStream({
     streamReconnectTick,
   ]);
 
-  return { sessionStreamConnected, streamDisconnectedSinceMs };
+  /**
+   * Manual hard reconnect for the disconnect advisory button: closes the live
+   * stream through the SAME owner path as the grace close (the tick bump
+   * re-runs this effect and re-acquires via the keep-warm registry — never a
+   * second connection) and requests one immediate authoritative refresh so a
+   * stuck auto-reconnect loop cannot hide server-side progress.
+   */
+  const reconnectSessionStream = useCallback(() => {
+    const streamSessionId = String(activeSessionId || "");
+    if (!streamSessionId || !forceCloseStreamRef.current) {
+      return;
+    }
+    postBrowserTelemetry({
+      phase: "session_stream",
+      eventCode: "browser.session_stream.manual_reconnect_requested",
+      message: "Manual session stream reconnect was requested from the disconnect advisory.",
+      level: "info",
+      fields: {
+        sessionId: streamSessionId,
+        pageInstanceId: getPageInstanceId(),
+      },
+    });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) });
+    forceCloseStreamRef.current("manual_reconnect");
+  }, [activeSessionId, queryClient]);
+
+  return { sessionStreamConnected, streamDisconnectedSinceMs, reconnectSessionStream };
 }

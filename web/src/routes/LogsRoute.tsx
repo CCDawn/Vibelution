@@ -44,6 +44,7 @@ import {
 import { VActionGroup, VButton, VConfirmDialog, VDenseOpsPage, VIconButton, VNativeButton, VNativeInput, VStateSurface, VStatusStrip, VSurface, VTabs, VTooltip } from "../components/vui";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { PaneHeightResizeHandle } from "../components/layout/PaneHeightResizeHandle";
+import { paneWidthCssVar } from "../components/layout/paneCssVariables";
 import {
   migrateLegacyNumericPanes,
   type PaneSpec,
@@ -345,6 +346,8 @@ export function LogsRoute() {
 
   const {
     layoutRef: workspaceRef,
+    registerSplitContainer: registerLogsContainer,
+    paneVariablesStyle: logPaneVariablesStyle,
     widths: logPaneWidths,
     draggingPaneId,
     startResize,
@@ -355,6 +358,8 @@ export function LogsRoute() {
     preserveMainMinWidth: 520,
   });
   const {
+    registerSplitContainer: registerLogsHeightContainer,
+    paneVariablesStyle: logPaneHeightVariablesStyle,
     heights: logPaneHeights,
     draggingPaneId: logHeightDraggingPaneId,
     startResize: startLogHeightResize,
@@ -612,10 +617,12 @@ export function LogsRoute() {
   const layoutStyle = useMemo(
     () =>
       ({
-        "--logs-sidebar-width": sidebarCollapsed ? "0px" : `${sidebarWidth}px`,
-        "--logs-right-rail-width": rightRailCollapsed ? "0px" : `${rightRailWidth}px`,
+        ...logPaneVariablesStyle,
+        // Collapse overrides the hook-owned pane variables in this subtree.
+        ...(sidebarCollapsed ? { [paneWidthCssVar("sidebar")]: "0px" } : null),
+        ...(rightRailCollapsed ? { [paneWidthCssVar("right")]: "0px" } : null),
       }) as CSSProperties,
-    [rightRailCollapsed, rightRailWidth, sidebarCollapsed, sidebarWidth],
+    [logPaneVariablesStyle, rightRailCollapsed, sidebarCollapsed],
   );
 
   async function handleCopy() {
@@ -849,7 +856,10 @@ export function LogsRoute() {
       )}
     >
       <div
-        ref={workspaceRef}
+        ref={(element) => {
+          workspaceRef.current = element;
+          registerLogsContainer(element);
+        }}
         className={styles.workspace}
         style={layoutStyle}
         data-vui-recipe="logs-workbench"
@@ -1107,10 +1117,9 @@ export function LogsRoute() {
                 })
               ) : contentQuery.data ? (
                 <div
+                  ref={registerLogsHeightContainer}
                   className={styles.logPreviewStack}
-                  style={{
-                    ["--logs-package-files-height" as string]: `${packageFilesHeight}px`,
-                  } as CSSProperties}
+                  style={logPaneHeightVariablesStyle}
                   data-vui-region="logs-preview-stack"
                 >
                   <section className={styles.packageFilesPanel} data-vui-region="logs-package-files">

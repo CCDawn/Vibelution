@@ -24,7 +24,7 @@ const styles = {
     "mt-1.5 flex min-w-0 items-center gap-1.5 text-[var(--fg-secondary)] [font-size:var(--vui-type-caption-size)] text-[var(--accent-warm)]",
   ),
   list: cv("list", "mt-1.5 grid min-w-0 list-none gap-1 p-0"),
-  item: cv("item", "flex min-w-0 items-center gap-2 [font-size:var(--vui-font-sm)] leading-snug"),
+  item: cv("item", "flex min-w-0 items-center gap-2 text-vui-sm leading-snug"),
   itemCompleted: cv("itemCompleted", "text-[var(--fg-tertiary)]"),
   itemActive: cv("itemActive", "text-[var(--fg-primary)]"),
   checkIcon: cv("checkIcon", "shrink-0 text-[var(--accent-cool)]"),

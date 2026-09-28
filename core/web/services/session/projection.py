@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
+from core.chat.turn_journal import EVENT_SESSION_RECOVERY_RESUMED
 from core.research.workflow.contracts.discussion_scope import (
     PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND,
 )
@@ -65,7 +66,7 @@ def list_sessions(
         return []
     s._sync_agent_directory_project_root()
     signature = (s._session_list_source_signature(), bool(include_hidden_internal))
-    if repair_collisions and s._repair_agent_direct_session_collisions(source_signature=signature):
+    if repair_collisions and s._repair_agent_direct_session_collisions():
         signature = (s._session_list_source_signature(), bool(include_hidden_internal))
     cached, should_build, waited_for_inflight = s._begin_session_list_cache_build(
         now=started_at,
@@ -389,23 +390,29 @@ def get_session_detail(
     # sibling agent read of a candidate child session.
     assert_candidate_session_read(conversation, requester)
 
-    from . import directory_bridge
-
-    directory_bridge.sync_conversation_record(conversation, touch_recency=False)
-
     with s._RUNNING_SESSIONS_LOCK:
         active_turn_id = str(s._SESSION_ACTIVE_TURN_IDS.get(normalized_session_id) or "").strip()
         session_running = normalized_session_id in s._RUNNING_SESSION_IDS
+    # Light running polls already have the live turn state in memory. Skip the
+    # directory write and follow-up persisted-state reload for that path while
+    # preserving idle recovery and full-detail behavior.
+    light_running_poll = not include_secondary_lists and session_running
+    if include_secondary_lists:
+        from . import directory_bridge
+
+        directory_bridge.sync_conversation_record(conversation, touch_recency=False)
+
     s._reconcile_stale_session_ledger(
         normalized_session_id,
         active_turn_id=active_turn_id if session_running else "",
         reason="detail_loaded_after_restart",
     )
-    conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id) or conversation
+    if not light_running_poll:
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id) or conversation
     target = s._load_conversation_detail_target(
         normalized_session_id,
         payload={"conversations": [conversation]},
-        repair=True,
+        repair=not light_running_poll,
         persist_session_row=True,
         agent_by_id=agent_by_id,
         lightweight=window_requested,
@@ -660,6 +667,23 @@ def _build_session_detail_from_summary(
     )
     detail = {
         **summary,
+        # Keep terminal outcome fields explicit on every detail projection.
+        # ``ready`` only describes the idle phase; notifications need the
+        # current turn's persisted outcome to distinguish success from stop.
+        "lastTurnStatus": summary.get("lastTurnStatus")
+        or str(
+            conversation.get("last_turn_status")
+            or conversation.get("lastTurnStatus")
+            or ""
+        ).strip().lower(),
+        "lastTurnTerminalTurnId": summary.get("lastTurnTerminalTurnId")
+        or str(
+            conversation.get("last_turn_terminal_turn_id")
+            or conversation.get("lastTurnTerminalTurnId")
+            or ""
+        ).strip(),
+        "terminalReason": summary.get("terminalReason")
+        or s._terminal_reason_from_conversation(conversation),
         "ledgerSeq": s._session_ledger_sequence(conversation["id"]),
         "activeTask": s._active_task_to_api(active_task),
         "defaultFileContext": default_file_context,
@@ -823,15 +847,9 @@ def _build_session_summary(
     session_kind = str(conversation.get("sessionKind") or "main").strip() or "main"
     task_title = str(conversation.get("taskTitle") or raw_title).strip() or raw_title
     display_agent_name = agent_display_name or raw_title
-    # Keep default placeholders ("新会话" / "New session") so create→rename UX is not
-    # prefilled with the Agent display name before the user can type a session title.
-    # Agent identity stays on agentDisplayName / icon, not the tab title field.
-    if session_kind == "child" or not s._is_default_empty_session_title(task_title):
-        display_title = task_title
-    elif agent_id:
-        display_title = display_agent_name
-    else:
-        display_title = task_title
+    # A new session keeps the placeholder label until the first turn generates a
+    # title. Agent identity stays on agentDisplayName / icon, not the tab title.
+    display_title = task_title
     session_id = str(conversation["id"]).strip()
     session_source_ref = s._source_authority_ref("session", session_id)
     session_projection_edit = s._projection_edit_contract("session", session_id)
@@ -1187,6 +1205,11 @@ def _normalize_conversation(
         "runtimeNotices": visible_runtime_notices,
         "queuedTurns": s._session_queued_turn_rows(raw),
         "lastTurnStatus": last_turn_status,
+        "lastTurnTerminalTurnId": str(
+            raw.get("last_turn_terminal_turn_id")
+            or raw.get("lastTurnTerminalTurnId")
+            or ""
+        ).strip(),
         "terminalReason": s._terminal_reason_from_conversation(raw),
         "lastTurnError": last_turn_error,
         "lastContextComposition": last_context_composition,
@@ -1365,6 +1388,20 @@ def _normalize_messages(
     timeline_lang = s.get_web_language() if include_timeline else ""
     normalized_start_index = max(1, int(source_start_index or 1))
     normalized_transcript_scope = s._normalize_session_detail_transcript_scope(transcript_scope)
+    # Startup-recovery supersede marks (display-only): turns whose interrupted
+    # partial was superseded by an auto-resume get metadata.recoverySuperseded
+    # so the display layer can drop the stale partial. The journal keeps both
+    # messages untouched and the model replay never passes through here.
+    recovery_superseded_turn_ids = {
+        turn_id
+        for raw_item in raw_items
+        if isinstance(raw_item, dict)
+        and str(raw_item.get("role") or "").strip().lower() == "assistant"
+        and isinstance(raw_item.get("metadata"), dict)
+        and str(raw_item["metadata"].get("kind") or "").strip() == EVENT_SESSION_RECOVERY_RESUMED
+        for turn_id in (str(raw_item["metadata"].get("recoveredTurnId") or "").strip(),)
+        if turn_id
+    }
     # Always compute per-turn hosts so tool-event air bubbles can be collapsed even
     # when timeline/transcript enrichment is disabled for a payload window.
     timeline_target_indices = s._assistant_timeline_target_indices(
@@ -1592,6 +1629,13 @@ def _normalize_messages(
             client_submission_id = client_submission_id_by_turn.get(turn_id, "")
             if client_submission_id:
                 metadata.setdefault("clientSubmissionId", client_submission_id)
+        if (
+            role == "assistant"
+            and turn_id
+            and turn_id in recovery_superseded_turn_ids
+            and metadata.get("interrupted") is True
+        ):
+            metadata["recoverySuperseded"] = True
         if isinstance(metadata, dict) and metadata:
             entry["metadata"] = dict(metadata)
             if role == "assistant" and str(metadata.get("kind") or "").strip() == "turn_error":

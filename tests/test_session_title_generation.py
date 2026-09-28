@@ -174,6 +174,43 @@ def test_maybe_schedule_session_title_generation_skips_ineligible():
     )
 
 
+def test_placeholder_title_retries_then_stops(monkeypatch):
+    created: list[dict] = []
+
+    class _FakeThread:
+        def __init__(self, *, target=None, args=(), name="", daemon=False):
+            created.append({"args": args})
+
+        def start(self):
+            return None
+
+    monkeypatch.setattr(title_generation.threading, "Thread", _FakeThread)
+    title_generation._TITLE_PLACEHOLDER_RETRIES.pop("session-retry", None)
+
+    for _ in range(title_generation.SESSION_TITLE_PLACEHOLDER_RETRY_LIMIT):
+        assert (
+            title_generation.maybe_schedule_session_title_generation(
+                "session-retry",
+                message="继续修标题",
+                message_source="raw",
+                had_previous_user_message=True,
+                title_still_placeholder=True,
+            )
+            is True
+        )
+    assert (
+        title_generation.maybe_schedule_session_title_generation(
+            "session-retry",
+            message="继续修标题",
+            message_source="raw",
+            had_previous_user_message=True,
+            title_still_placeholder=True,
+        )
+        is False
+    )
+    assert len(created) == title_generation.SESSION_TITLE_PLACEHOLDER_RETRY_LIMIT
+
+
 def test_maybe_schedule_session_title_generation_spawns_daemon_thread(monkeypatch):
     created: list[dict] = []
 
@@ -237,12 +274,14 @@ def test_submit_first_raw_message_schedules_title_generation(tmp_path, monkeypat
                 "message": "first user message",
                 "message_source": "raw",
                 "had_previous_user_message": False,
+                "title_still_placeholder": True,
             },
             {
                 "session": session_id,
                 "message": "second user message",
                 "message_source": "raw",
                 "had_previous_user_message": True,
+                "title_still_placeholder": True,
             },
         ]
     finally:
@@ -341,16 +380,20 @@ def test_generate_title_candidate_uses_bound_runtime_profile(monkeypatch):
         "get_llm_client",
         lambda *, profile_id=None, config=None: captured.update(profile_id=profile_id, config=config) or object(),
     )
-    monkeypatch.setattr(
-        title_generation,
-        "invoke_llm",
-        lambda client, messages, context=None, metadata=None: type("R", (), {"content": "标题：修复登录 bug"})(),
-    )
+    def _invoke(client, messages, context=None, metadata=None):
+        captured["session_id"] = getattr(context, "session_id", "")
+        captured["conversation_bound"] = getattr(context, "conversation_bound", None)
+        return type("R", (), {"content": "标题：修复登录 bug"})()
+
+    monkeypatch.setattr(title_generation, "invoke_llm", _invoke)
+    monkeypatch.setattr(title_generation, "_title_agent_id", lambda _session_id: "agent-a")
 
     assert title_generation._generate_title_candidate("session-a", "hi", "model-a") == "修复登录 bug"
     assert captured["model"] == "model-a"
     assert captured["profile_id"] == title_generation.SESSION_TITLE_PROFILE_ID
     assert captured["config"] is sentinel_config
+    assert captured["session_id"] == "session-a"
+    assert captured["conversation_bound"] is False
 
 
 def test_run_title_generation_records_failure_event(monkeypatch):

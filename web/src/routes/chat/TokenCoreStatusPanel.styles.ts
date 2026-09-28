@@ -21,7 +21,7 @@ const styles: Record<string, string> = {
   tokenStatusCopy:
     "vui-routes-chatcodingroute tokenStatusCopy grid min-w-0 self-center gap-0.5 overflow-visible text-center",
   tokenStatusLabel:
-    "vui-routes-chatcodingroute tokenStatusLabel block min-w-0 max-w-full truncate whitespace-nowrap text-[11px] font-semibold leading-none text-vui-fg-primary",
+    "vui-routes-chatcodingroute tokenStatusLabel block min-w-0 max-w-full truncate whitespace-nowrap text-vui-micro-11 font-semibold leading-none text-vui-fg-primary",
   tokenStatusMeta:
     "vui-routes-chatcodingroute tokenStatusMeta sr-only",
   tokenStatusMetric:
@@ -157,7 +157,7 @@ const styles: Record<string, string> = {
   tokenStatusRing:
     "vui-routes-chatcodingroute tokenStatusRing relative mx-auto size-[28px] shrink-0 rounded-full bg-[conic-gradient(var(--accent-cool)_calc(var(--token-status-value)*1%),var(--vui-border-subtle)_0)]",
   tokenStatusRingCore:
-    "vui-routes-chatcodingroute tokenStatusRingCore absolute inset-[3px] grid max-w-full place-items-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-[var(--vui-surface-panel)] px-0.5 text-center text-[10px] font-bold leading-none tabular-nums tracking-tight text-vui-fg-primary",
+    "vui-routes-chatcodingroute tokenStatusRingCore absolute inset-[3px] grid max-w-full place-items-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-[var(--vui-surface-panel)] px-0.5 text-center text-vui-micro-10 font-bold leading-none tabular-nums tracking-tight text-vui-fg-primary",
   tokenStatusVisualGrid:
     "vui-routes-chatcodingroute tokenStatusVisualGrid !grid w-full grid-cols-[repeat(4,minmax(0,1fr))] items-stretch justify-stretch gap-1.5 rounded-[var(--radius-control)]",
   tokenStatusTooltipSurface:
@@ -165,9 +165,9 @@ const styles: Record<string, string> = {
   tokenStatusTooltip:
     "vui-routes-chatcodingroute tokenStatusTooltip grid min-w-0 max-w-[14rem] gap-1 text-left",
   tokenStatusTooltipHead:
-    "vui-routes-chatcodingroute tokenStatusTooltipHead text-[10px] font-semibold uppercase tracking-wide text-[var(--fg-tertiary)]",
+    "vui-routes-chatcodingroute tokenStatusTooltipHead text-vui-micro-10 font-semibold uppercase tracking-wide text-[var(--fg-tertiary)]",
   tokenStatusTooltipLine:
-    "vui-routes-chatcodingroute tokenStatusTooltipLine min-w-0 break-words text-[11px] font-medium leading-snug text-vui-fg-primary tabular-nums",
+    "vui-routes-chatcodingroute tokenStatusTooltipLine min-w-0 break-words text-vui-micro-11 font-medium leading-snug text-vui-fg-primary tabular-nums",
 };
 
 export default styles;

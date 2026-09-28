@@ -6,9 +6,12 @@ import {
   isAgentInboxMessage,
   isCliAgentLifecycleMessage,
   isGroupRoomTranscriptMessage,
+  isHotRestartResumeMessage,
   isProviderFailureSummaryText,
+  isRecoverySupersededPartial,
   isRuntimeNoticeMessage,
   isRuntimeStatusContent,
+  isSessionRecoveryResumedMessage,
   isSteerGuidanceMessage,
   isTurnErrorMessage,
   researchOrgMessageChips,
@@ -48,6 +51,75 @@ describe("conversationMessagePredicates", () => {
       role: "assistant",
       content: "ordinary assistant output",
       metadata: { kind: "session_live_overlay" },
+    }))).toBe(false);
+  });
+
+  it("classifies session recovery resumed rows from metadata", () => {
+    const resumed = message({
+      role: "assistant",
+      content: "",
+      metadata: {
+        kind: "session_recovery_resumed",
+        attempt: 2,
+        turnLabel: "重构导出脚本",
+      },
+    });
+    expect(isSessionRecoveryResumedMessage(resumed)).toBe(true);
+    // The recovery row is a lifecycle-style status line, not a runtime notice:
+    // it must survive the runtime-notice filter.
+    expect(isRuntimeNoticeMessage(resumed)).toBe(false);
+    expect(isSessionRecoveryResumedMessage(message({
+      role: "assistant",
+      content: "ordinary assistant output",
+      metadata: { kind: "cli_agent_lifecycle" },
+    }))).toBe(false);
+    expect(isSessionRecoveryResumedMessage(message({
+      role: "user",
+      content: "not an assistant row",
+      metadata: { kind: "session_recovery_resumed" },
+    }))).toBe(false);
+  });
+
+  it("flags system-authored hot-restart resume user rows from metadata", () => {
+    expect(isHotRestartResumeMessage(message({
+      role: "user",
+      content: "E2E-MOCK-SLOW-V1 重启自动恢复",
+      metadata: { kind: "hot_restart_resume", recoveredTurnId: "turn-1" },
+    }))).toBe(true);
+    // The original (human-authored) row keeps the same text but no resume kind.
+    expect(isHotRestartResumeMessage(message({
+      role: "user",
+      content: "E2E-MOCK-SLOW-V1 重启自动恢复",
+      metadata: { kind: "journal_user_message" },
+    }))).toBe(false);
+    expect(isHotRestartResumeMessage(message({
+      role: "assistant",
+      content: "not a user row",
+      metadata: { kind: "hot_restart_resume" },
+    }))).toBe(false);
+  });
+
+  it("flags only interrupted partials that recovery superseded", () => {
+    expect(isRecoverySupersededPartial(message({
+      role: "assistant",
+      content: "half-streamed answer",
+      metadata: { interrupted: true, recoverySuperseded: true },
+    }))).toBe(true);
+    // Interrupted without supersession (recovery disabled or capped) stays visible.
+    expect(isRecoverySupersededPartial(message({
+      role: "assistant",
+      content: "half-streamed answer",
+      metadata: { interrupted: true },
+    }))).toBe(false);
+    expect(isRecoverySupersededPartial(message({
+      role: "assistant",
+      content: "half-streamed answer",
+      metadata: { recoverySuperseded: true },
+    }))).toBe(false);
+    expect(isRecoverySupersededPartial(message({
+      role: "user",
+      content: "never a partial",
+      metadata: { interrupted: true, recoverySuperseded: true },
     }))).toBe(false);
   });
 

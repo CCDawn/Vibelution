@@ -1,3 +1,4 @@
+// visual-token-escalation-exempt: xterm terminal theme — bare hex palette and fixed fontSize belong to the terminal color/font contract, not product UI tokens.
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { RotateCcw, SquareTerminal } from "lucide-react";

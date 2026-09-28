@@ -62,6 +62,11 @@ export {
   type VStringSelectProps,
 } from "./forms/VStringSelect";
 export { VTextarea, type VTextareaProps } from "./forms/VTextarea";
+export {
+  VSettingsGroupCard,
+  VSettingsRow,
+  type VSettingsRowProps,
+} from "./forms/VSettingsRow";
 export { VActionGroup, type VActionGroupProps } from "./layout/VActionGroup";
 export {
   VDenseRow,

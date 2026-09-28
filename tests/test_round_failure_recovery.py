@@ -293,3 +293,128 @@ def test_manual_recovery_redispatches_superseded_candidates(
         "candidate_ids": ["cand-a"],
     }
     assert record["failureId"] not in hypothesis_first_chain._MANUAL_RECOVERY_INFLIGHT
+
+
+# ---------------------------------------------------------------------------
+# legacy ledger compaction
+# ---------------------------------------------------------------------------
+
+
+def _legacy_wait_row(
+    *,
+    failure_id: str,
+    created_at: str,
+    selection_id: str = "selection-1",
+    meeting_ids: tuple[str, ...] = ("meeting-a", "meeting-b"),
+) -> dict[str, Any]:
+    """One pre-idempotence wait observation: one row per sweep tick."""
+
+    return {
+        "schemaVersion": hypothesis_rounds_service.FAILURE_SCHEMA_VERSION,
+        "recordKind": hypothesis_rounds_service.FAILURE_RECORD_KIND,
+        "failureId": failure_id,
+        "status": "blocked",
+        "failureCode": "fan_in_waiting_for_sibling_reviews",
+        "reason": "review fan-in is not ready",
+        "errorType": "",
+        "roundId": "",
+        "meetingRoundIds": list(meeting_ids),
+        "selectionId": selection_id,
+        "roundIndex": 2,
+        "questionId": "SCI-117",
+        "workflowRunId": "",
+        "scopeHash": "",
+        "retryHint": "wait",
+        "trigger": "auto_advance_sweep",
+        "context": {},
+        "createdAt": created_at,
+        "resolvedAt": "",
+        "resolvedByRoundId": "",
+    }
+
+
+def test_compact_collapses_duplicate_open_wait_rows(tmp_path, monkeypatch) -> None:
+    team_id = _team(tmp_path, monkeypatch)
+    path = hypothesis_rounds_service._failure_storage_path(team_id)
+    rows = [
+        # Three ticks of the same wait episode (identical scope key) ...
+        _legacy_wait_row(failure_id="hrfail-legacy-1", created_at="2026-09-10T01:00:00Z"),
+        _legacy_wait_row(failure_id="hrfail-legacy-2", created_at="2026-09-10T01:01:00Z"),
+        _legacy_wait_row(failure_id="hrfail-legacy-3", created_at="2026-09-10T01:02:00Z"),
+        # ... a different wait episode (different meeting set) stays open ...
+        _legacy_wait_row(
+            failure_id="hrfail-legacy-4",
+            created_at="2026-09-10T01:03:00Z",
+            meeting_ids=("meeting-c",),
+        ),
+        # ... and one real failed attempt trace.
+        {
+            **_legacy_wait_row(failure_id="hrfail-real-1", created_at="2026-09-10T00:59:00Z"),
+            "status": "failed",
+            "failureCode": "hypothesis_round_generation_error",
+        },
+    ]
+    for row in rows:
+        hypothesis_rounds_service._append_jsonl(path, row)
+
+    result = hypothesis_rounds_service.compact_hypothesis_round_failures(
+        team_id, min_size_bytes=0
+    )
+
+    assert result["compacted"] is True
+    assert result["droppedDuplicateWaitRows"] == 2
+    assert result["recordsAfter"] == 3
+    kept = hypothesis_rounds_service._read_jsonl(path)
+    kept_ids = {row["failureId"] for row in kept}
+    # Newest duplicate wins; distinct episode and the failed trace survive.
+    assert kept_ids == {"hrfail-legacy-3", "hrfail-legacy-4", "hrfail-real-1"}
+    newest = next(row for row in kept if row["failureId"] == "hrfail-legacy-3")
+    assert newest["resolvedAt"] == ""
+
+
+def test_compact_collapses_superseded_resolution_copies(tmp_path, monkeypatch) -> None:
+    team_id = _team(tmp_path, monkeypatch)
+    path = hypothesis_rounds_service._failure_storage_path(team_id)
+    original = _legacy_wait_row(failure_id="hrfail-fix-1", created_at="2026-09-10T01:00:00Z")
+    resolved_copy = {**original, "status": "resolved", "resolvedAt": "2026-09-10T02:00:00Z"}
+    for row in (original, resolved_copy):
+        hypothesis_rounds_service._append_jsonl(path, row)
+
+    result = hypothesis_rounds_service.compact_hypothesis_round_failures(
+        team_id, min_size_bytes=0
+    )
+    assert result["compacted"] is True
+    assert result["collapsedSupersededCopies"] == 1
+    kept = hypothesis_rounds_service._read_jsonl(path)
+    assert len(kept) == 1
+    assert kept[0]["failureId"] == "hrfail-fix-1"
+    assert kept[0]["status"] == "resolved"
+    assert kept[0]["resolvedAt"] == "2026-09-10T02:00:00Z"
+
+
+def test_compact_is_idempotent_and_threshold_gated(tmp_path, monkeypatch) -> None:
+    team_id = _team(tmp_path, monkeypatch)
+    path = hypothesis_rounds_service._failure_storage_path(team_id)
+    for index in range(3):
+        hypothesis_rounds_service._append_jsonl(
+            path,
+            _legacy_wait_row(
+                failure_id=f"hrfail-idem-{index}",
+                created_at=f"2026-09-10T01:0{index}:00Z",
+            ),
+        )
+
+    # Default threshold: the tiny fixture stays untouched.
+    assert hypothesis_rounds_service.compact_hypothesis_round_failures(team_id) == {
+        "compacted": False,
+        "reason": "below_threshold"
+    }
+    # After one real pass the ledger is duplicate-free: a second pass no-ops.
+    first = hypothesis_rounds_service.compact_hypothesis_round_failures(
+        team_id, min_size_bytes=0
+    )
+    assert first["compacted"] is True
+    second = hypothesis_rounds_service.compact_hypothesis_round_failures(
+        team_id, min_size_bytes=0
+    )
+    assert second == {"compacted": False, "reason": "no_duplicates", "records": 1}

@@ -43,7 +43,7 @@ const styles = {
   adapterCapabilityChips:
     "mt-1 flex min-w-0 flex-wrap gap-1 [&_em]:rounded-full [&_em]:border [&_em]:border-[color-mix(in_srgb,var(--state-warning)_40%,var(--vui-border-subtle))] [&_em]:bg-[color-mix(in_srgb,var(--state-warning)_10%,var(--vui-surface-panel))] [&_em]:px-2 [&_em]:py-0.5 [&_em]:[font-size:10px] [&_em]:font-semibold [&_em]:not-italic [&_em]:text-[var(--fg-primary)]",
   adapterBlockedHints:
-    "mt-1 text-[11px] leading-snug text-[var(--fg-tertiary)]",
+    "mt-1 text-vui-micro-11 leading-snug text-[var(--fg-tertiary)]",
   recommendation:
     "min-w-0 grid gap-1 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_6%,var(--vui-surface-row))] px-2.5 py-2 [font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [&_strong]:text-[var(--fg-primary)]",
   /** Single column — never leave a dead empty half of the form. */

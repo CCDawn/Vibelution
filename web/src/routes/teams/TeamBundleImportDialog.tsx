@@ -4,9 +4,10 @@
  */
 import { type ChangeEvent, type ReactNode } from "react";
 
-import { VButton, VDialog } from "../../components/vui";
+import { VButton, VDialog, VInput } from "../../components/vui";
 import type { TeamBundleImportReport } from "../../api/types";
 import type { TeamBundleImportState } from "./teamBundleImportLogic";
+import styles from "./TeamBundleImportDialog.styles";
 
 export type TeamBundleImportDialogCopy = {
   title: string;
@@ -114,13 +115,13 @@ export function TeamBundleImportDialog({
       description={copy.description}
       size="md"
     >
-      <div className="flex flex-col gap-3 text-[var(--vui-font-sm)]">
-        <label className="flex items-center gap-2">
+      <div className={styles.content}>
+        <label className={styles.fileLabel}>
           <span className="sr-only">{copy.selectFile}</span>
-          <input
+          <VInput
             type="file"
             accept=".json,application/json"
-            className="block w-full text-[var(--vui-font-xs)]"
+            className={styles.fileInput}
             disabled={busy}
             onChange={(event: ChangeEvent<HTMLInputElement>) => {
               const file = event.target.files?.[0];
@@ -133,30 +134,30 @@ export function TeamBundleImportDialog({
         </label>
 
         {state.phase === "error" ? (
-          <p role="alert" className="text-[var(--fg-danger,crimson)]">
+          <p role="alert" className={styles.error}>
             {copy.errorPrefix}: {state.errorMessage || "unknown"}
           </p>
         ) : null}
 
         {report ? (
-          <div className="flex flex-col gap-1.5" data-vui-region="team-bundle-preview">
+          <div className={styles.report} data-vui-region="team-bundle-preview">
             {teamBundlePreviewRows(report, copy).map((row) => (
               <div key={row.label}>
                 {row.label}: <span>{row.value || "—"}</span>
               </div>
             ))}
             {report.status === "pending" ? (
-              <p className="text-[var(--fg-secondary)]">{copy.schemaPendingHint}</p>
+              <p className={styles.secondaryText}>{copy.schemaPendingHint}</p>
             ) : null}
           </div>
         ) : state.phase === "idle" || state.phase === "parsing" ? (
-          <p className="text-[var(--fg-secondary)]">{copy.noReport}</p>
+          <p className={styles.secondaryText}>{copy.noReport}</p>
         ) : null}
 
         {state.phase === "done" ? <p role="status">{copy.done}</p> : null}
       </div>
 
-      <div className="mt-4 flex items-center justify-end gap-2">
+      <div className={styles.actions}>
         {state.phase === "done" || state.phase === "error" ? (
           <VButton type="button" variant="secondary" onPress={onClose}>
             {state.phase === "error" ? copy.retry : copy.close}

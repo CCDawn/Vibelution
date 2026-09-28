@@ -5,5 +5,5 @@
  */
 export const styles = {
   forkScopeField:
-    "vui-components-conversation forkScopeField mt-1 flex w-full flex-col gap-2 [font-size:var(--vui-font-sm)] text-[var(--fg-secondary)]",
+    "vui-components-conversation forkScopeField mt-1 flex w-full flex-col gap-2 text-vui-sm text-[var(--fg-secondary)]",
 };

@@ -12,7 +12,7 @@ const panelClass = [
   "max-[640px]:p-[18px]",
 ].join(" ");
 const kickerClass = "mb-2 mt-0 [font-size:var(--vui-font-sm)] font-bold text-vui-accent-cool";
-const titleClass = "m-0 text-[1.28rem] leading-[1.25] max-[640px]:text-xl";
+const titleClass = "m-0 text-vui-title leading-[1.25] max-[640px]:text-vui-title";
 const detailClass = "mb-0 mt-3 [font-size:var(--vui-font-chat)] leading-[1.55] text-vui-fg-secondary";
 const actionsClass = "mt-[18px] flex flex-wrap gap-2";
 const actionButtonClass = "min-w-24";

@@ -143,8 +143,10 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("reads the read-only memory overview endpoint through the shared query key", () => {
-    expect(workbenchQueriesSource).toContain("queryKeys.memoryOverview()");
-    expect(workbenchQueriesSource).toContain("fetchMemoryOverview<MemoryOverview>({ includeContent: true, signal })");
+    expect(workbenchQueriesSource).toContain("const overviewNeedsContent = isManageMemoryView(forcedView) || isLibraryMemoryView(forcedView)");
+    expect(workbenchQueriesSource).toContain("queryKeys.memoryOverview(overviewNeedsContent)");
+    expect(workbenchQueriesSource).toContain("fetchMemoryOverview<MemoryOverview>({ includeContent: overviewNeedsContent, signal })");
+    expect(workbenchQueriesSource).toContain("enabled: overviewNeedsContent");
     expect(memoryApiSource).toContain("/api/memory/overview");
     expect(routeSource).toContain("overviewQuery");
     expect(routeSource).toContain("queryKeys.memoryItemDetail(activeSection?.id ?? \"\", activeItem?.id ?? \"\")");
@@ -515,7 +517,7 @@ describe("MemoryRoute layout contract", () => {
     expect(graphViewPanelSource).not.toContain("styles.summaryCard");
     expect(graphViewPanelStyles.sourcePanel).not.toMatch(/bg-vui-surface-panel|bg-\[var\(--vui-surface-panel\)\]/);
     expect(graphViewPanelStyles.graphCanvasPanel).not.toContain("rounded-[var(--radius-panel)]");
-    expect(graphViewPanelStyles.graphCanvasPanel).toContain("--memory-graph-node-list-height");
+    expect(graphViewPanelStyles.graphCanvasPanel).toContain("--pane-h-graph-node-list");
     expect(graphViewPanelStyles.graphNodeListResizeHandle).not.toContain("cursor-row-resize");
     expect(graphViewPanelStyles).not.toHaveProperty("managementHeader");
   });

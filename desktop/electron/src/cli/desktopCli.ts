@@ -6,6 +6,13 @@ export type DesktopCliArgs = {
   openWorkbench: boolean;
   workbenchCloseCanary: boolean;
   lifecycleCommand: string;
+  /**
+   * Hidden presentation intent forwarded from `VibelutionLauncher.exe --hidden`
+   * via the desktop-entry bridge. Applies to branch instance workbench windows
+   * only: the window loads without show/focus so e2e lanes never steal desktop
+   * focus. Absent the flag the shell behavior is byte-for-byte unchanged.
+   */
+  hiddenPresentation: boolean;
 };
 
 /**
@@ -46,6 +53,7 @@ export function parseDesktopCliArgs(argv: string[]): DesktopCliArgs {
     smoke: false,
     openWorkbench: false,
     workbenchCloseCanary: false,
+    hiddenPresentation: false,
     lifecycleCommand: ""
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -75,6 +83,10 @@ export function parseDesktopCliArgs(argv: string[]): DesktopCliArgs {
     }
     if (item === "--workbench-close-canary") {
       result.workbenchCloseCanary = true;
+      continue;
+    }
+    if (item === "--hidden-presentation") {
+      result.hiddenPresentation = true;
       continue;
     }
     const lowered = String(item || "").trim().toLowerCase();

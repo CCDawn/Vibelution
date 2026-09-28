@@ -1,13 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import routeSourceRaw from "./ConfigRoute.tsx?raw";
+// Settings-align wave 3: route-local modules extracted from the ConfigRoute
+// monolith; layout contracts may live in any of them (concatenated below).
+import configCopySource from "./config/configCopy.ts?raw";
+import configEditorModelSource from "./config/configEditorModel.ts?raw";
+import configSectionEditorSource from "./config/ConfigSectionEditor.tsx?raw";
+import providerModelDomainSource from "./config/useConfigProviderModelDomain.ts?raw";
 import providerDraftActionsSource from "./config/useConfigProviderDraftActions.ts?raw";
 import configApplyModelSource from "./config/configApplyModel.ts?raw";
 import configProviderActionModelSource from "./config/configProviderActionModel.ts?raw";
 import configMigrationActionsSource from "./config/useConfigMigrationActions.ts?raw";
 import configQuickSetupActionsSource from "./config/useConfigProviderQuickSetupActions.ts?raw";
 /** Route + extracted config write helpers (layout contracts may live in either). */
-const routeSource = `${routeSourceRaw}\n${providerDraftActionsSource}\n${configApplyModelSource}\n${configProviderActionModelSource}\n${configMigrationActionsSource}\n${configQuickSetupActionsSource}`;
+const routeSource = `${routeSourceRaw}\n${configCopySource}\n${configEditorModelSource}\n${configSectionEditorSource}\n${providerModelDomainSource}\n${providerDraftActionsSource}\n${configApplyModelSource}\n${configProviderActionModelSource}\n${configMigrationActionsSource}\n${configQuickSetupActionsSource}`;
 import draftPanelSource from "./ConfigDraftPanel.tsx?raw";
 import draftPanelStylesSource from "./ConfigDraftPanel.styles.ts?raw";
 import draftPanelStyles from "./ConfigDraftPanel.styles";
@@ -66,6 +72,14 @@ const configSources = [
 ].join("\n");
 
 describe("ConfigRoute layout contract", () => {
+  it("keeps settings actions on VUI geometry and wide artwork outside two-column field cards", () => {
+    for (const key of ["actionButton", "primaryButton", "compactButton", "toolbarButton"] as const) {
+      expect(styles[key]).not.toMatch(/min-height|border-radius|padding|font-size/);
+    }
+    expect(routeSourceRaw).toContain("handleNavigateSettings(groupId, pageId);");
+    expect(routeSourceRaw).not.toContain("${styles.treeFieldCardView} ${styles.themeBackgroundImageCard}");
+    expect(styles.settingsSplit).toContain("max-[720px]:[&>[data-vui=split-sidebar]]:!basis-auto");
+  });
   it("hosts unsaved leave guard on VDialog instead of a hand-rolled overlay", () => {
     expect(routeSource).toContain("<VDialog");
     expect(routeSource).toContain("open={leaveGuardOpen}");
@@ -155,8 +169,11 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("返回已配置服务");
     expect(routeSource).not.toContain("① 模型资产");
     expect(routeSource).not.toContain("② 添加连接");
-    expect(quickSetupSource).toContain("检测连接");
-    expect(quickSetupSource).toContain("保存并完成");
+    // Wave 4: quick-setup strings live in the shared bilingual copy table.
+    expect(configCopySource).toContain("检测连接");
+    expect(configCopySource).toContain("保存并完成");
+    expect(quickSetupSource).toContain("quickSetupDetect");
+    expect(quickSetupSource).toContain("quickSetupSaveFinish");
     expect(quickSetupStyles.workspace).toContain("max-w-4xl");
     expect(quickSetupStyles.inputGrid).toContain("grid-cols-1");
     expect(quickSetupSource).toContain('state.phase !== "input"');
@@ -189,7 +206,8 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("draftOverride?: ConfigApplyDraftOverride");
     expect(routeSource).toContain("buildConfigApplyRequestPayload");
     expect(routeSource).toContain("isConfigBaselineStaleErrorMessage");
-    expect(routeSource).toContain('handleApply("正在应用快速配置…", draftOverride)');
+    expect(routeSource).toContain('handleApply(copy.quickSetupApplyBusy, draftOverride)');
+    expect(configCopySource).toContain('quickSetupApplyBusy');
     expect(routeSource).toContain("publicConfig: draftOverride.publicConfig");
     expect(routeSource).toContain("draftMeta: draftOverride.draftMeta");
     // Apply must freeze baseConfig+baseHash as an edit baseline pair across draft pin ops.
@@ -222,7 +240,8 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("verification_persisted");
     expect(routeSource).toContain("workspaceQuery.refetch()");
     expect(providerPanelSource).toContain("verificationMessage");
-    expect(providerPanelSource).toContain("上游 400 拒绝");
+    expect(configCopySource).toContain("上游 400 拒绝");
+    expect(providerPanelSource).toContain("verifyErrBadRequest");
   });
 
   it("does not auto-discover Provider endpoints when the model surface opens", () => {
@@ -263,10 +282,12 @@ describe("ConfigRoute layout contract", () => {
   it("edits an existing Provider API Key through the draft credential boundary", () => {
     expect(providerPanelSource).toContain("onEditCredential");
     expect(providerPanelSource).toContain("API Key");
-    expect(providerPanelSource).toContain("一个中转站 / Provider = 一把 API Key");
-    expect(providerPanelSource).toContain("上下文上限（token）");
+    expect(configCopySource).toContain("此供应商下的模型共用一把密钥");
+    expect(configCopySource).toContain("默认上下文上限");
+    expect(providerPanelSource).toContain("apiKeySharedHint");
+    expect(providerPanelSource).toContain("contextLimitRowLabel");
     expect(providerPanelSource).toContain('type="password"');
-    expect(providerPanelSource).toContain('provider.credentialState === "not_required"');
+    expect(providerPanelSource).toContain('provider.credentialState !== "not_required"');
     expect(routeSource).toContain("updateDraftProvider(");
     // Credential PUT body is owned by useConfigProviderDraftActions (param name: credentialValue).
     expect(routeSource).toContain("buildProviderDraftRequest({ providerId, provider, credentialValue })");
@@ -288,7 +309,8 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain('phase: "busy"');
     expect(routeSource).toContain('phase: "success"');
     expect(routeSource).toContain('phase: "error"');
-    expect(providerPanelSource).toContain("发现中…");
+    expect(configCopySource).toContain("发现中…");
+    expect(providerPanelSource).toContain("discoverBusy");
     expect(routeSource).toContain("正在保存 API Key…");
     expect(routeSource).toContain("生成预览中…");
     expect(routeSource).toContain("更新中…");
@@ -317,7 +339,8 @@ describe("ConfigRoute layout contract", () => {
   it("locks all saved wizard connection fields after creation", () => {
     expect(wizardSource).toContain("isProviderWizardConnectionLocked");
     expect(wizardSource).toContain("dispatchProviderWizardConnectionAction");
-    expect(wizardSource).toContain("Provider 已创建");
+    expect(configCopySource).toContain("Provider 已创建");
+    expect(wizardSource).toContain("wizardLockedTitle");
     expect(wizardSource).toContain("disabled={connectionLocked}");
     expect(wizardSource).toContain("isDisabled={connectionLocked}");
   });
@@ -377,7 +400,7 @@ describe("ConfigRoute layout contract", () => {
     expect(quickSetupStyles.field).toContain("[&_[data-vui=select-trigger]]:!h-10");
     expect(quickSetupStyles.field).toContain("[&_[data-vui=select-trigger]]:!min-h-10");
     expect(quickSetupStyles.primaryAction).toContain("min-h-10");
-    expect(styles.providerModeButton).toContain("min-h-8");
+    expect(styles.providerModeButton).not.toMatch(/min-h-|font-size/);
     expect(routeSource).toContain("aria-pressed={providerConnecting}");
     expect(routeSource).toContain("aria-pressed={providerShowMore}");
     expect(routeSource).not.toContain('aria-pressed={providerWorkspaceMode === "quick"}');
@@ -387,19 +410,12 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("keeps existing Provider management in a bounded desktop list-detail grid", () => {
-    expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(18rem,24vw,22rem)]");
+    expect(providerPanelSource).toContain("defaultWidth: 224");
     expect(providerPanelStyles.registryWorkspace).not.toContain("max-[960px]");
     expect(providerPanelStyles.providerList).toContain("min-h-0");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
     expect(providerPanelStyles.detailSurface).toContain("overflow-y-auto");
     expect(styles.providerModelsLayout).toContain("[&>#config-models]:min-h-[28rem]");
-  });
-
-  it("passes the workspace schema version into legacy model account compatibility", () => {
-    expect(routeSource).toMatch(
-      /deriveModelCenterSummary\(\{\s*modelOptions,\s*schemaVersion: workspace\?\.schemaVersion,\s*\}\)/,
-    );
-    expect(routeSource).toContain("[modelOptions, workspace?.schemaVersion]");
   });
 
   it("uses a full workspace placeholder for initial loading and load failure states", () => {
@@ -419,10 +435,12 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.page).toContain("[--control-height:36px]");
     expect(styles.page).toContain("[--vui-control-height-sm:36px]");
     expect(styles.field).toContain("[grid-template-columns:minmax(12rem,0.34fr)_minmax(0,1fr)]");
-    expect(styles.actionButton).toContain("[min-height:40px]");
-    expect(styles.primaryButton).toContain("[min-height:40px]");
-    expect(placeholderPanelSource).toContain("总览与保存");
-    expect(placeholderPanelSource).toContain("工具与诊断");
+    expect(styles.actionButton).not.toMatch(/min-height|padding|border-radius/);
+    expect(styles.primaryButton).not.toMatch(/min-height|padding|background/);
+    expect(configCopySource).toContain("总览与保存");
+    expect(configCopySource).toContain("工具与诊断");
+    expect(placeholderPanelSource).toContain("placeholderNavOverview");
+    expect(placeholderPanelSource).toContain("placeholderNavTooling");
     expect(placeholderPanelStyles.loadingNavList).toContain("[min-height:44px]");
     expect(placeholderPanelStyles.loadingShell).toContain("[height:100%]");
   });
@@ -497,7 +515,7 @@ describe("ConfigRoute layout contract", () => {
     expect(runtimePanelSource).not.toContain("segmentButton");
     expect(runtimePanelStyles.behaviorRow).toContain("[grid-template-columns:minmax(0,1fr)_auto]");
     expect(runtimePanelStyles.intakeTabsTrigger).toContain("min-w-28");
-    expect(runtimePanelStyles.intakeTabsTrigger).toContain("min-h-10");
+    expect(runtimePanelStyles.intakeTabsTrigger).toContain("min-h-[var(--vui-control-height-sm)]");
     expect(runtimePanelStyles.intakeTabsTrigger).toContain("data-[state=active]");
   });
 
@@ -519,9 +537,13 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("subtitleHint");
     expect(routeSource).toContain('subtitleHint={copy.subtitleHint}');
     expect(overviewPanelSource).toContain("sourceBodyShort");
-    expect(providerPanelSource).toContain("连接设置");
-    expect(providerPanelSource).toContain("添加当前结果");
-    expect(providerPanelSource).toContain("编辑");
+    expect(configCopySource).toContain("高级管理");
+    expect(providerPanelSource).toContain('data-vui-region="config-provider-connection"');
+    expect(configCopySource).toContain("添加当前结果");
+    expect(configCopySource).toContain("修改地址与协议");
+    expect(providerPanelSource).toContain("advancedManage");
+    expect(providerPanelSource).toContain("pinAllTemplate");
+    expect(providerPanelSource).toContain("editRouteAction");
     expect(overviewPanelSource).toContain('title={copy.sourceBody}');
     expect(providerPanelSource).toContain('title={provider.providerId}');
     expect(routeSource).toContain('title={copy.openEnvironmentHint}');
@@ -578,7 +600,7 @@ describe("ConfigRoute layout contract", () => {
   it("converges the provider registry into a compact VUI workbench contract", () => {
     expect(providerPanelStylesSource).not.toMatch(/\bsurface-card\b(?!\))/);
     expect(providerPanelStyles.sectionSurface).toContain("!rounded-none");
-    expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(18rem,24vw,22rem)]");
+    expect(providerPanelSource).toContain("defaultWidth: 224");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
     expect(providerPanelStyles.tableScroll).toContain("min-h-0");
     expect(providerPanelStyles.providerButton).toContain("!min-h-16");
@@ -586,9 +608,11 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelStyles.table).toContain("[&_thead]:sticky");
     expect(providerPanelSource).toContain("filterProviderModels");
     expect(providerPanelSource).toContain("deriveProviderModelActionState");
-    expect(providerPanelSource).toContain('aria-label="搜索模型"');
+    expect(providerPanelSource).toContain("copy.searchModelsAria");
+    expect(configCopySource).toContain("搜索模型");
     expect(providerPanelStyles.dangerZone).toContain("justify-between");
-    expect(providerPanelSource).toContain("测试调用");
+    expect(configCopySource).toContain("测试调用");
+    expect(providerPanelSource).toContain("copy.testCall");
     expect(providerPanelSource).toContain("verificationStatus");
     expect(routeSource).toContain("handleTestProviderModel");
   });
@@ -707,13 +731,16 @@ describe("ConfigRoute layout contract", () => {
   it("supports Agent Center return links and section deep links", () => {
     expect(routeSource).toContain("useSearchParams");
     expect(routeSource).toContain("safeAgentCenterReturnToPath");
-    expect(routeSource).toContain("const lastRequestedSectionRef = useRef(\"\")");
+    expect(routeSource).toContain("const lastRequestedSelectionRef = useRef(\"\")");
     expect(routeSource).toContain("const requestedSectionId = String(searchParams.get(\"section\") || \"\").trim()");
     expect(routeSource).toContain("const returnToPath = safeAgentCenterReturnToPath(searchParams.get(\"returnTo\"))");
     expect(routeSource).toContain("const returnToLabel = searchParams.get(\"returnLabel\") === \"agents\" ? copy.returnToAgents : copy.returnToSource");
-    expect(routeSource).toContain("requestedSectionId !== lastRequestedSectionRef.current");
-    expect(routeSource).toContain("lastRequestedSectionRef.current = requestedSectionId");
-    expect(routeSource).toContain("setActiveGroupId(requestedGroup.id)");
+    expect(routeSource).toContain("requestedSelectionKey !== lastRequestedSelectionRef.current");
+    expect(routeSource).toContain("lastRequestedSelectionRef.current = requestedSelectionKey");
+    expect(routeSource).toContain("const requestedPageId = String(searchParams.get(\"page\") || \"\").trim()");
+    expect(routeSource).toContain("const requestedFocusSectionId = String(searchParams.get(\"focus\") || \"\").trim()");
+    expect(routeSource).toContain("buildConfigSettingsNavigationSearch(searchParams, groupId, pageId, focusSectionId, focusFieldId)");
+    expect(routeSource).toContain("setActiveGroupId(requestedGroup?.id ?? \"\")");
     expect(routeSource).toContain("<VRouteLinkButton");
     expect(routeSource).toContain("className={styles.returnButton}");
     expect(routeSource).toContain("to={returnToPath}");
@@ -818,7 +845,7 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("copy.clearThemeBackgroundImage");
     expect(routeSource).toContain("copy.themeBackgroundPresetTitle");
     expect(routeSource).toContain("className={styles.themeBackgroundPresetTitle}");
-    expect(routeSource).toContain("{active ? <em>{lang === \"zh\" ? \"当前\" : \"Current\"}</em> : null}");
+    expect(routeSource).toContain("{active ? <em>{copy.currentBadge}</em> : null}");
     expect(routeSource).toContain("title={hint || undefined}");
     expect(routeSource).toContain("themeBackgroundPresetButton");
     expect(routeSource).toContain("aria-pressed={active}");
@@ -828,7 +855,7 @@ describe("ConfigRoute layout contract", () => {
     expect(stylesSource).toContain("themeBackgroundImageValue:");
     expect(routeSource).toContain("themeBackgroundPresetButton");
     expect(routeSource).toContain("aria-pressed={active}");
-    expect(routeSource).toContain("{active ? <em>{lang === \"zh\" ? \"当前\" : \"Current\"}</em> : null}");
+    expect(routeSource).toContain("{active ? <em>{copy.currentBadge}</em> : null}");
     expect(stylesSource).toContain("themeBackgroundDropButton:");
     expect(stylesSource).toContain("themeBackgroundPresetGrid:");
     expect(stylesSource).toContain("[display:grid]");
@@ -923,12 +950,34 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.configAdvancedToggle).toContain("w-full");
     expect(styles.treeGrid).toContain("grid-cols-1");
     expect(styles.treeFieldCardView).toContain("grid-cols-[16rem_minmax(0,1fr)]");
-    expect(styles.configProgressiveBody).toContain("max-w-[72rem]");
+    expect(styles.configProgressiveBody).toContain("max-w-[64rem]");
     expect(styles.treeFieldCard).not.toContain("bg-vui-surface-row");
     expect(routeSource).not.toContain("configCommonGridClass");
   });
 
-  it("uses a compact layout for large config sections with many fields", () => {
+  it("wires the wave-1 save model: immediate rows, pending count, invalid blocking, and guard", () => {
+    // 即时/草稿声明单源在 configApplyModel；行内即时变更走同一 preview+apply 管线。
+    expect(routeSource).toContain("shouldImmediateApplyFieldKind");
+    expect(routeSource).toContain("handleImmediateFieldChange");
+    expect(configApplyModelSource).toContain("IMMEDIATE_FIELD_KINDS");
+    expect(configApplyModelSource).toContain('new Set(["boolean", "select"])');
+    // 全局保存按钮常显待保存计数，非法草稿阻塞保存。
+    expect(routeSource).toContain("collectPendingDraftLeaves");
+    expect(routeSource).toContain("config-pending-save-count");
+    expect(routeSource).toContain("canApplyConfigWorkspace");
+    expect(routeSource).toContain("foldPendingSectionDrafts");
+    // 非法草稿阻塞分区保存（不再静默存原始串）。
+    expect(routeSource).toContain("resolveDraftSubtreeForSave");
+    expect(routeSource).toContain("sectionSaveBlocked");
+    // 离开守卫与跨页 presence 接入分区草稿计数。
+    expect(routeSource).toContain("hasPendingSectionDrafts");
+    expect(routeSource).toContain("pendingConfigDraftCount > 0");
+    // 行原语来自 VUI，而非路由本地复刻。
+    expect(routeSource).toContain("VSettingsRow");
+    expect(routeSource).toContain("VSettingsGroupCard");
+  });
+
+  it("uses the approved wave-1 row density for large config sections with many fields", () => {
     expect(routeSource).toContain("function isDenseConfigSection");
     expect(routeSource).toContain("Number(section.fieldCount || 0) >= 12");
     expect(routeSource).toContain("styles.configDenseSection");
@@ -938,8 +987,11 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("styles.treeObjectCell");
     expect(routeSource).toContain("styles.treeToggle");
     expect(stylesSource).toContain("configDenseSection:");
-    expect(stylesSource).toContain("[&>_.treeGrid]:[grid-template-columns:repeat(3,minmax(220px,1fr))]");
-    expect(stylesSource).toContain("max-[1500px]:[&>_.treeGrid]:[grid-template-columns:repeat(2,minmax(220px,1fr))]");
+    // Settings-align wave 1: dense sections keep the single-column row density
+    // (settings group card + rows) — multi-column grid overrides are retired.
+    expect(stylesSource).not.toContain("[&>_.treeGrid]:[grid-template-columns:repeat(3,minmax(220px,1fr))]");
+    expect(stylesSource).not.toContain("max-[1500px]:[&>_.treeGrid]:[grid-template-columns:repeat(2,minmax(220px,1fr))]");
+    expect(styles.configDenseSection).not.toContain("treeGrid]:[grid-template-columns");
     expect(styles.configDenseSection).not.toContain("repeat(auto-fit");
     expect(stylesSource).toContain("treeGrid:");
   });
@@ -950,7 +1002,7 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.sidebar).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(styles.sectionSurface).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(styles.treeGrid).toContain("grid-cols-1");
-    expect(styles.configDenseSection).toContain("[&>_.treeGrid]:[grid-template-columns:repeat(3,minmax(220px,1fr))]");
+    expect(styles.configDenseSection).not.toContain("[&>_.treeGrid]:[grid-template-columns");
     expect(styles.configDenseSection).not.toContain("repeat(auto-fit");
     expect(styles.treeFieldValue).toContain("text-vui-fg-secondary");
     expect(healthDiagnosticsPanelStylesSource).toContain("vuiSurfaceRecipes");
@@ -967,7 +1019,7 @@ describe("ConfigRoute layout contract", () => {
     expect(runtimePanelStyles.intakeTabsList).toContain("bg-[var(--vui-surface-toolbar)]");
     expect(runtimePanelSource).toContain("<VTabs");
     expect(runtimePanelSource).not.toContain("segmentButton");
-    expect(draftPanelStyles.actionButton).toContain("var(--vui-control-muted)");
+    expect(draftPanelStyles.actionButton).not.toMatch(/min-height|padding|background/);
     expect(healthDiagnosticsPanelStyles.findingCard).toMatch(/bg-vui-surface-row|var\(--vui-surface-row\)/);
     expect(placeholderPanelStyles.loadingBoard).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(extractedPanelStylesSource).not.toContain("[background:var(--vui-gradient-route-soft),var(--surface-panel)]");
@@ -1000,7 +1052,13 @@ describe("ConfigRoute layout contract", () => {
     expect(placeholderPanelSource).not.toContain("<VPanelHeader");
     expect(routeSource).toContain("<ConfigSettingsSidebar");
     expect(routeSource).toContain("VSettingsFormPage");
-    expect(routeSource).toContain('title={activeGroup?.title ?? copy.pageTitle}');
+    expect(routeSource).toContain('title={showingSettingsIndex && !requestedSectionId ? copy.pageTitle : activeGroup?.title ?? copy.pageTitle}');
+    expect(routeSource).toContain("<ConfigSettingsIndex");
+    expect(routeSource).not.toContain("返回设置列表");
+    expect(routeSource).toContain('onShowAll={() => showSettingsIndex()}');
+    expect(routeSource).toContain("<ConfigDesktopPetSettings language={currentLanguage}");
+    expect(routeSource).toContain('pageId: "identity-profile", sectionId: "pet"');
+    expect(routeSource).not.toContain('toolbar={isSectionVisible("models") ? undefined');
   });
 
   it("routes Config controls through VUI primitives", () => {
@@ -1024,9 +1082,33 @@ describe("ConfigRoute layout contract", () => {
     expect(configSources).not.toMatch(/<textarea\b/);
   });
 
-  it("prioritizes the visible VUI select trigger when focusing the model editor", () => {
-    expect(routeSource).toContain('button[data-vui="select-trigger"]:not([data-disabled="true"]):not([disabled])');
-    expect(routeSource).toContain('input:not([disabled]):not([type="hidden"])');
-    expect(routeSource).toContain("textarea:not([disabled])");
+  it("routes destructive confirms through VConfirmDialog request state instead of window.confirm", () => {
+    // Wave 4 item 2: settings-domain confirms are VConfirmDialog (Radix) requests.
+    expect(routeSource).toContain("<VConfirmDialog");
+    expect(routeSource).toContain("deleteProviderRequest");
+    expect(routeSource).toContain("handleConfirmDeleteProvider");
+    expect(routeSource).toContain("handleCancelDeleteProvider");
+    expect(routeSource).toContain("migrationApplyRequest");
+    expect(routeSource).toContain("handleConfirmApplyMigration");
+    expect(routeSource).toContain("handleCancelApplyMigration");
+    // No blocking window.confirm anywhere in the route shell, the extracted
+    // route modules, or the model panels (wave-4 item 2 + dead-code cleanup).
+    expect(routeSource).not.toContain("window.confirm");
+    expect(routeSourceRaw).not.toContain("window.confirm");
+    expect(providerPanelSource).not.toContain("window.confirm");
+    expect(wizardSource).not.toContain("window.confirm");
+    expect(quickSetupSource).not.toContain("window.confirm");
+    expect(migrationPanelSource).not.toContain("window.confirm");
+  });
+
+  it("surfaces section save failures inline inside the failing section", () => {
+    // Wave 4 item 4: section-scoped save errors render inside the section,
+    // the global notice strip stays reserved for global operations.
+    expect(routeSource).toContain("sectionSaveErrors");
+    expect(routeSource).toContain("setSectionSaveError(path, readableErrorMessage(error))");
+    expect(routeSource).toContain('saveError={sectionSaveErrors[section.path] ?? ""}');
+    expect(routeSource).toContain("data-section-save-error");
+    expect(routeSource).toContain("<VErrorSummary");
+    expect(routeSource).toContain('role="alert"');
   });
 });

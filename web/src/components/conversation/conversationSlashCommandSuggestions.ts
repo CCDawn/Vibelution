@@ -1,4 +1,5 @@
 import type { SkillLibraryItem } from "../../api/types";
+import { rankByScore, scoreMatch } from "./conversationFuzzyMatch";
 
 const MAX_SLASH_COMMAND_SUGGESTIONS = 8;
 
@@ -43,34 +44,41 @@ export function composerSlashCommandQuery(value: string): string {
   return token ? token.replace(/^\/+/, "").trim().toLowerCase() : "";
 }
 
-function matchesSlashQuery(haystack: string, query: string): boolean {
-  if (!query) {
-    return true;
-  }
-  return haystack.toLowerCase().includes(query);
+/**
+ * The composer query arrives with its leading slash stripped, so haystacks
+ * lead with the slashless command token too; without it the token's own "/"
+ * would push every command match down to the substring tier.
+ */
+function slashlessToken(value: string): string {
+  return String(value || "").replace(/^\/+/, "");
+}
+
+function skillHaystack(skill: SkillLibraryItem): string {
+  return [
+    slashlessToken(skill.command),
+    skill.command,
+    skill.name,
+    skill.directoryName,
+    skill.description,
+    ...(Array.isArray(skill.aliases) ? skill.aliases : []),
+  ]
+    .join(" ")
+    .toLowerCase();
 }
 
 function filterSortedSkills(
   skills: SkillLibraryItem[],
   query: string,
 ): SkillLibraryItem[] {
-  return [...skills]
-    .sort((left, right) => left.command.localeCompare(right.command))
-    .filter((skill) => {
-      if (!query) {
-        // Keep the legacy empty-query fast path: no haystack, no field demands
-        // beyond command (partial skill fixtures stay renderable).
-        return true;
-      }
-      const haystack = [
-        skill.command,
-        skill.name,
-        skill.directoryName,
-        skill.description,
-        ...(Array.isArray(skill.aliases) ? skill.aliases : []),
-      ].join(" ");
-      return matchesSlashQuery(haystack, query);
-    });
+  const alphabetical = [...skills].sort((left, right) => left.command.localeCompare(right.command));
+  if (!query) {
+    // Keep the legacy empty-query fast path: no haystack, no field demands
+    // beyond command (partial skill fixtures stay renderable).
+    return alphabetical;
+  }
+  // Tiered ranking (prefix > substring > non-CJK subsequence); equal tiers
+  // keep the alphabetical order above.
+  return rankByScore(alphabetical, query, skillHaystack);
 }
 
 export function filterSlashCommandSuggestions(
@@ -86,8 +94,9 @@ export function filterSlashCommandSuggestions(
 }
 
 /**
- * Builtin commands first (input order), then skills alphabetically; both are
- * filtered by the current leading-slash query and the merged list is capped.
+ * Candidates are ranked by tiered match score (see conversationFuzzyMatch);
+ * equal scores keep the legacy layout: builtins first in input order, then
+ * skills alphabetically. The merged list is capped after ranking.
  */
 export function mergeSlashCommandSuggestions(
   builtins: BuiltinSlashCommand[],
@@ -99,33 +108,54 @@ export function mergeSlashCommandSuggestions(
     return [];
   }
   const query = composerSlashCommandQuery(value);
-  const merged: SlashCommandSuggestion[] = [];
+  const ranked: Array<{ suggestion: SlashCommandSuggestion; score: number }> = [];
   for (const builtin of builtins) {
     if (!builtin?.command) {
       continue;
     }
-    const haystack = [builtin.command, ...builtin.aliases, builtin.description].join(" ");
-    if (!matchesSlashQuery(haystack, query)) {
+    const haystack = [
+      slashlessToken(builtin.command),
+      builtin.command,
+      ...builtin.aliases,
+      builtin.description,
+    ]
+      .join(" ")
+      .toLowerCase();
+    const score = scoreMatch(query, haystack);
+    if (!Number.isFinite(score)) {
       continue;
     }
-    merged.push({
-      key: `builtin:${builtin.id}`,
-      command: builtin.command,
-      description: builtin.description,
-      builtin: true,
-      builtinId: builtin.id,
+    ranked.push({
+      score,
+      suggestion: {
+        key: `builtin:${builtin.id}`,
+        command: builtin.command,
+        description: builtin.description,
+        builtin: true,
+        builtinId: builtin.id,
+      },
     });
   }
   for (const skill of filterSortedSkills(skills, query)) {
-    merged.push({
-      key: `skill:${skill.command}`,
-      command: skill.command,
-      description: skill.description?.trim() || skill.name || skill.directoryName,
-      builtin: false,
-      skill,
+    const score = scoreMatch(query, skillHaystack(skill));
+    if (!Number.isFinite(score)) {
+      continue;
+    }
+    ranked.push({
+      score,
+      suggestion: {
+        key: `skill:${skill.command}`,
+        command: skill.command,
+        description: skill.description?.trim() || skill.name || skill.directoryName,
+        builtin: false,
+        skill,
+      },
     });
   }
-  return merged.slice(0, Math.max(0, limit));
+  // Stable sort: equal scores keep the insertion order above (builtins first
+  // in input order, then skills alphabetically).
+  ranked.sort((left, right) => left.score - right.score);
+  return ranked.map((entry) => entry.suggestion).slice(0, Math.max(0, limit));
 }
 
 /** Cycles instead of clamping so ArrowDown/ArrowUp always reach every option. */

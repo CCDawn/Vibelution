@@ -2,6 +2,8 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { type ReactNode } from "react";
 
 import { cn } from "../../lib/cn";
+// Wave 5B dialog motion: keyframes + token-driven durations (see file header).
+import "./shadcnDialogMotion.css";
 
 export type ShadcnDialogSize = "sm" | "md" | "lg" | "xl";
 
@@ -23,6 +25,8 @@ export type ShadcnDialogProps = {
   /** Accessible label when title is not plain text. */
   "aria-label"?: string;
   onCloseAutoFocus?: (event: Event) => void;
+  /** Locator anchor override applied to the Content node; defaults to "dialog-content". */
+  "data-vui"?: string;
 };
 
 const sizeClassName: Record<ShadcnDialogSize, string> = {
@@ -51,6 +55,7 @@ export function ShadcnDialog({
   hideClose = false,
   "aria-label": ariaLabel,
   onCloseAutoFocus,
+  "data-vui": dataVui,
 }: ShadcnDialogProps) {
   const controlledOpen = open ?? isOpen;
 
@@ -66,13 +71,14 @@ export function ShadcnDialog({
           data-renderer="radix"
           className={cn(
             "fixed inset-0 z-[90]",
-            // shadcn-like dim: ink wash, light blur (no animate plugin dependency)
+            // shadcn-like dim: ink wash, light blur; enter/exit motion lives in
+            // shadcnDialogMotion.css (pure CSS keyframes, no animate plugin).
             "bg-[color-mix(in_srgb,var(--fg-primary)_28%,transparent)]",
             "backdrop-blur-[2px]",
           )}
         />
         <DialogPrimitive.Content
-          data-vui="dialog-content"
+          data-vui={dataVui ?? "dialog-content"}
           data-renderer="radix"
           aria-label={ariaLabel}
           onCloseAutoFocus={onCloseAutoFocus}
@@ -125,7 +131,7 @@ export function ShadcnDialog({
                 )}
                 aria-label="Close"
               >
-                <span aria-hidden="true" className="text-sm leading-none">
+                <span aria-hidden="true" className="text-vui-xs leading-none">
                   ×
                 </span>
               </DialogPrimitive.Close>

@@ -702,7 +702,7 @@ def _publish_staging_directory(staging: Path, release: Path) -> None:
 def _copy_staging_release(staging: Path, releases: Path, *, build_key: str) -> tuple[str, Path]:
     """Copy a verified staging release to an unreferenced immutable entry."""
     while True:
-        release_name = f"release-{build_key}-{uuid.uuid4().hex}"
+        release_name = f"release-{build_key[:16]}-{uuid.uuid4().hex[:12]}"
         release = releases / release_name
         if release.exists():
             continue
@@ -732,7 +732,9 @@ def _copy_staging_release(staging: Path, releases: Path, *, build_key: str) -> t
 def publish_staging_release(project_root: Path | str, staging: Path, *, build_key: str, build_inputs_value: dict[str, Any]) -> dict[str, Any]:
     root = Path(project_root).resolve()
     validate_staging_release(staging)
-    release_name = f"release-{build_key}"
+    # Keep publication paths shorter than stage-<uuid>. The full identity stays
+    # in provenance and is checked before reuse, including prefix collisions.
+    release_name = f"release-{build_key[:16]}"
     release = frontend_releases_dir(root) / release_name
     provenance = {
         "schemaVersion": BUILD_SCHEMA_VERSION,
@@ -747,7 +749,7 @@ def publish_staging_release(project_root: Path | str, staging: Path, *, build_ke
     if release.exists() and not _is_complete_release(release, build_key=build_key):
         # Preserve the damaged immutable entry for running readers; publish the
         # repaired bytes under a distinct release name before switching active.
-        release_name = f"release-{build_key}-{uuid.uuid4().hex}"
+        release_name = f"release-{build_key[:16]}-{uuid.uuid4().hex[:12]}"
         release = frontend_releases_dir(root) / release_name
     if release.exists():
         shutil.rmtree(staging)

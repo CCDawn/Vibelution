@@ -24,6 +24,45 @@ def empty_tool_result_replacement_state(*, char_limit: int = DEFAULT_TOOL_RESULT
     }
 
 
+TOOL_RESULT_PLACEHOLDER_HEADER = "[工具结果压缩引用]"
+
+
+def build_tool_result_placeholder(
+    *,
+    content: str,
+    session_id: str = "",
+    tool_call_id: str = "",
+    tool_name: str = "",
+    preview_limit: int = 800,
+) -> tuple[str, str, str]:
+    """Build the shared reference+preview placeholder for one tool result.
+
+    Returns ``(placeholder_content, reference, sha256)``. Both the full
+    compression replacement and the micro-compaction tier reuse this form so
+    the model sees one consistent placeholder shape; the original tool result
+    stays recoverable from the persisted conversation or turn journal by
+    ``tool_call_id``.
+    """
+
+    basis = str(content or "")
+    bounded_preview_limit = max(0, int(preview_limit or 0))
+    digest = hashlib.sha256(basis.encode("utf-8", errors="replace")).hexdigest()
+    reference = _replacement_reference(
+        session_id=session_id,
+        tool_call_id=tool_call_id,
+        digest=digest,
+    )
+    placeholder = _replacement_content(
+        reference=reference,
+        tool_call_id=tool_call_id,
+        tool_name=str(tool_name or "").strip(),
+        original_chars=len(basis),
+        digest=digest,
+        preview=_bounded_preview(basis, limit=bounded_preview_limit),
+    )
+    return placeholder, reference, digest
+
+
 def replace_large_tool_results_for_compression(
     messages: Iterable[Any],
     *,
@@ -229,6 +268,8 @@ def _bounded_preview(content: str, *, limit: int) -> str:
 
 __all__ = [
     "DEFAULT_TOOL_RESULT_REPLACEMENT_CHAR_LIMIT",
+    "TOOL_RESULT_PLACEHOLDER_HEADER",
+    "build_tool_result_placeholder",
     "empty_tool_result_replacement_state",
     "replace_large_tool_results_for_compression",
 ]

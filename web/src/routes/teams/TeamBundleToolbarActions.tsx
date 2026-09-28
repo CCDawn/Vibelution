@@ -12,6 +12,7 @@ import { VButton } from "../../components/vui";
 import { startUserAction } from "../../app/userActionTelemetry";
 import { TeamBundleImportDialog } from "./TeamBundleImportDialog";
 import { useTeamBundleImportActions } from "./useTeamBundleImportActions";
+import styles from "./TeamBundleToolbarActions.styles";
 
 export type TeamBundleToolbarActionsProps = {
   lang: "zh" | "en";
@@ -53,7 +54,7 @@ export function TeamBundleToolbarActions({ lang, selectedTeamId }: TeamBundleToo
 
   return (
     <>
-      <div className="flex items-center gap-1.5" data-vui-region="team-bundle-actions">
+      <div className={styles.actions} data-vui-region="team-bundle-actions">
         <VButton
           type="button"
           variant="ghost"

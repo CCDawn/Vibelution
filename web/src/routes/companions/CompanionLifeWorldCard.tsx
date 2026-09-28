@@ -13,7 +13,9 @@ import type {
   VirtualHumanLifeDraftPayload,
   VirtualHumanLifeWorldFacts,
 } from "../../api/types";
-import { VButton, VInput, VStatusChip } from "../../components/vui";
+import { VButton, VInput, VRouteLinkButton, VStatusChip } from "../../components/vui";
+import { agentCenterConfigRoute } from "../agentCenterRoutes";
+import { companionReturnTarget } from "./companionPresentation";
 import styles from "./CompanionLifeWorldCard.styles";
 
 type LifeDraftForm = {
@@ -204,6 +206,17 @@ export function CompanionLifeWorldCard({
           <VStatusChip tone="warning">{lang === "zh" ? "未建立" : "Not set"}</VStatusChip>
         </div>
         <p className={styles.lead}>{lang === "zh" ? "请先在 Agent 插件设置中选择居住城市和身份。" : "Choose a home city and identity in the Agent plugin settings first."}</p>
+        <VRouteLinkButton
+          to={agentCenterConfigRoute({
+            agentId: companion.agentId,
+            pane: "config",
+            returnTo: companionReturnTarget(companion),
+            returnLabel: companion.displayName,
+          })}
+          variant="secondary"
+        >
+          {lang === "zh" ? "补齐生活档案" : "Set up life profile"}
+        </VRouteLinkButton>
       </section>
     );
   }

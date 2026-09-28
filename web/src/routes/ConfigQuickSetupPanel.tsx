@@ -15,9 +15,12 @@ import {
   type ProviderQuickSetupState,
   type ProviderWizardState,
 } from "./configProviderLogic";
+import type { ConfigCopy } from "./config/configCopy";
 import styles from "./ConfigQuickSetupPanel.styles";
 
 export type ConfigQuickSetupPanelProps = {
+  /** Bilingual copy table (wave 4). */
+  copy: ConfigCopy;
   state: ProviderQuickSetupState;
   templates: ConfigProviderPresetOption[];
   credentialValue: string;
@@ -83,25 +86,26 @@ export function templateToProvider(template: ConfigProviderPresetOption): Provid
   };
 }
 
-function resultCopy(state: ProviderQuickSetupState) {
-  if (state.phase === "checking") return { title: "正在检测连接", tone: "loading" as const };
-  if (state.phase === "review") return { title: "确认生成的配置", tone: "info" as const };
-  if (state.phase === "saving") return { title: "正在保存配置", tone: "loading" as const };
-  if (state.phase === "success") return { title: "配置已保存", tone: "info" as const };
-  if (state.phase === "error") return { title: "需要处理后重试", tone: "error" as const };
-  return { title: "等待检测", tone: "empty" as const };
+function resultCopy(state: ProviderQuickSetupState, copy: ConfigCopy) {
+  if (state.phase === "checking") return { title: copy.quickSetupCheckingTitle, tone: "loading" as const };
+  if (state.phase === "review") return { title: copy.quickSetupReviewTitle, tone: "info" as const };
+  if (state.phase === "saving") return { title: copy.quickSetupSavingTitle, tone: "loading" as const };
+  if (state.phase === "success") return { title: copy.quickSetupSuccessTitle, tone: "info" as const };
+  if (state.phase === "error") return { title: copy.quickSetupErrorTitle, tone: "error" as const };
+  return { title: copy.quickSetupIdleTitle, tone: "empty" as const };
 }
 
-function phaseLabel(state: ProviderQuickSetupState): string {
-  if (state.phase === "checking") return "检测中";
-  if (state.phase === "review") return "待确认";
-  if (state.phase === "saving") return "保存中";
-  if (state.phase === "success") return "已完成";
-  if (state.phase === "error") return "需处理";
-  return "待输入";
+function phaseLabel(state: ProviderQuickSetupState, copy: ConfigCopy): string {
+  if (state.phase === "checking") return copy.quickSetupPhaseChecking;
+  if (state.phase === "review") return copy.quickSetupPhaseReview;
+  if (state.phase === "saving") return copy.quickSetupPhaseSaving;
+  if (state.phase === "success") return copy.quickSetupPhaseSuccess;
+  if (state.phase === "error") return copy.quickSetupPhaseError;
+  return copy.quickSetupPhaseIdle;
 }
 
 export function ConfigQuickSetupPanel({
+  copy,
   state,
   templates,
   credentialValue,
@@ -114,7 +118,7 @@ export function ConfigQuickSetupPanel({
   onReset,
   onConfigureAgent,
 }: ConfigQuickSetupPanelProps) {
-  const result = resultCopy(state);
+  const result = resultCopy(state, copy);
   const selectedTemplate = templates.find((template) => template.provider_preset_id === state.provider.templateId);
   const canDetect = Boolean(
     state.provider.templateId
@@ -130,34 +134,34 @@ export function ConfigQuickSetupPanel({
   const showDetectAction = state.phase === "input" || state.phase === "checking" || (state.phase === "error" && !retrySave);
   const showReviewActions = state.phase === "review" || state.phase === "saving" || retrySave;
   const detectLabel = state.phase === "checking"
-    ? "检测中…"
+    ? copy.quickSetupDetecting
     : state.phase === "error"
-      ? "重新检测"
-      : "检测连接";
+      ? copy.quickSetupRedetect
+      : copy.quickSetupDetect;
   const resultFacts = [
     { key: "provider", label: "Provider", value: state.provider.label || selectedTemplate?.label || "-" },
-    { key: "endpoint", label: "端点", value: state.provider.baseUrl || "-" },
-    { key: "protocol", label: "协议", value: state.provider.defaultProtocol || "-" },
-    { key: "models", label: "发现模型", value: state.discoveredModels.length },
+    { key: "endpoint", label: copy.quickSetupFactEndpoint, value: state.provider.baseUrl || "-" },
+    { key: "protocol", label: copy.quickSetupFactProtocol, value: state.provider.defaultProtocol || "-" },
+    { key: "models", label: copy.quickSetupFactModels, value: state.discoveredModels.length },
   ];
   const resultMessage = state.phase === "error"
-    ? state.errorMessage || "检测或保存未完成，请检查输入后重试。"
+    ? state.errorMessage || copy.quickSetupErrorFallback
     : state.phase === "review"
-      ? `推荐理由：${state.recommendationReason || "等待选择"}`
+      ? `${copy.quickSetupRecommendationPrefix}${state.recommendationReason || copy.quickSetupWaitingChoice}`
       : state.phase === "success"
-        ? "模型已保存，可在 Agent 配置中选择使用。"
-        : "保持当前页面，完成后会在这里显示结果。";
-  const credentialHint = "凭据只用于本次本地检测；确认前不会写入正式配置。";
+        ? copy.quickSetupSavedBody
+        : copy.quickSetupIdleBody;
+  const credentialHint = copy.quickSetupCredentialHint;
   const detectDisabledReason = disabled
-    ? "当前配置暂不可编辑。"
+    ? copy.quickSetupDisabledReason
     : !state.provider.templateId
-      ? "先选择服务商。"
+      ? copy.quickSetupPickProviderFirst
       : !state.provider.baseUrl.trim()
-        ? "先填写服务地址。"
+        ? copy.quickSetupFillBaseUrlFirst
       : state.provider.authKind !== "none" && !credentialValue.trim()
-        ? "先填写 API Key。"
+        ? copy.quickSetupFillKeyFirst
         : state.phase === "checking" || state.phase === "saving"
-          ? "当前检测或保存仍在进行。"
+          ? copy.quickSetupBusyReason
           : undefined;
 
   return (
@@ -165,19 +169,19 @@ export function ConfigQuickSetupPanel({
       className={styles.root}
       aria-labelledby="provider-quick-setup-title"
       eyebrow="Model connection"
-      title="连接一个模型服务"
-      tooltip="选择服务商并填写凭据，系统会自动发现模型并给出默认推荐。"
-      tooltipLabel="快速模型连接说明"
+      title={copy.quickSetupTitle}
+      tooltip={copy.quickSetupTooltip}
+      tooltipLabel={copy.quickSetupTooltipLabel}
     >
       <div className={styles.workspace}>
         {state.phase !== "success" ? <div className={styles.inputPanel}>
           <div className={styles.inputGrid}>
             <label className={styles.field}>
-              <span>选择服务商</span>
+              <span>{copy.quickSetupProviderLabel}</span>
               <VStringSelect
-                ariaLabel="选择服务商"
+                ariaLabel={copy.quickSetupProviderLabel}
                 value={state.provider.templateId}
-                placeholder="选择服务商或自定义服务"
+                placeholder={copy.quickSetupProviderPlaceholder}
                 isDisabled={disabled || state.phase === "checking" || state.phase === "saving"}
                 options={templates.map((template) => ({
                   value: template.provider_preset_id,
@@ -193,19 +197,19 @@ export function ConfigQuickSetupPanel({
 
             {selectedTemplate ? (
               <label className={styles.field}>
-                <span>服务地址</span>
+                <span>{copy.routeFieldBaseUrl}</span>
                 <VInput type="url" value={state.provider.baseUrl} disabled={disabled || state.phase === "checking" || state.phase === "saving"}
-                  placeholder="https://你的服务地址/v1"
+                  placeholder={copy.quickSetupBaseUrlPlaceholder}
                   onChange={(event) => onProviderChange({ ...state.provider, baseUrl: event.target.value })} />
               </label>
             ) : null}
 
             {state.provider.authKind === "none" ? (
               <div className={styles.field}>
-                <span>凭据</span>
+                <span>{copy.quickSetupCredentialLabel}</span>
                 <div className={styles.noCredential}>
                   <CheckCircle2 size={14} />
-                  无需凭据
+                  {copy.quickSetupNoCredential}
                 </div>
               </div>
             ) : (
@@ -217,7 +221,7 @@ export function ConfigQuickSetupPanel({
                     autoComplete="new-password"
                     value={credentialValue}
                     disabled={disabled || state.phase === "checking" || state.phase === "saving"}
-                    placeholder="仅用于本次本地配置请求"
+                    placeholder={copy.quickSetupKeyPlaceholder}
                     onChange={(event) => onCredentialChange(event.target.value)}
                   />
               </label>
@@ -229,7 +233,7 @@ export function ConfigQuickSetupPanel({
                 variant="primary"
                 icon={<Search size={14} />}
                 isDisabled={!canDetect}
-                title="自动检测服务端点、协议和模型目录，不会直接写入正式配置。"
+                title={copy.quickSetupDetectHint}
                 disabledReason={detectDisabledReason}
                 onPress={() => onDetect({ provider: state.provider, credentialValue })}
               >
@@ -239,14 +243,14 @@ export function ConfigQuickSetupPanel({
           </div>
 
           <details className={styles.advanced}>
-            <summary className={styles.advancedSummary}>高级参数</summary>
+            <summary className={styles.advancedSummary}>{copy.quickSetupAdvanced}</summary>
             <div className={styles.advancedGrid}>
               <label className={styles.field}>
-                <span>协议</span>
-                <VStringSelect ariaLabel="连接协议" value={state.provider.defaultProtocol}
+                <span>{copy.quickSetupProtocolLabel}</span>
+                <VStringSelect ariaLabel={copy.routeFieldProtocol} value={state.provider.defaultProtocol}
                   isDisabled={disabled || state.phase === "checking" || state.phase === "saving"}
                   options={[
-                    { value: "chat_completions", label: "OpenAI Chat Completions（兼容接口）" },
+                    { value: "chat_completions", label: copy.quickSetupChatCompletionsLabel },
                     { value: "responses", label: "OpenAI Responses" },
                     { value: "anthropic_messages", label: "Anthropic Messages" },
                     { value: "gemini_generate_content", label: "Gemini" },
@@ -255,10 +259,10 @@ export function ConfigQuickSetupPanel({
                     driver: protocol === "anthropic_messages" ? "anthropic" : protocol === "gemini_generate_content" ? "gemini" : "openai" })} />
               </label>
               <label className={styles.field}>
-                <span>认证方式</span>
-                <VStringSelect ariaLabel="认证方式" value={state.provider.authKind}
+                <span>{copy.quickSetupAuthMethodLabel}</span>
+                <VStringSelect ariaLabel={copy.quickSetupAuthMethodLabel} value={state.provider.authKind}
                   isDisabled={disabled || state.phase === "checking" || state.phase === "saving"}
-                  options={[{ value: "api_key", label: "API Key" }, { value: "none", label: "无需认证（仅限服务明确支持）" }]}
+                  options={[{ value: "api_key", label: "API Key" }, { value: "none", label: copy.quickSetupNoAuthLabel }]}
                   onValueChange={(authKind) => onProviderChange({ ...state.provider, authKind: authKind as ProviderAuthKind, credentialRef: authKind === "none" ? "none" : "" })} />
               </label>
             </div>
@@ -270,7 +274,7 @@ export function ConfigQuickSetupPanel({
             <div className={styles.resultHeader}>
               <h3 className={styles.resultTitle}>{result.title}</h3>
               <VStatusChip tone={state.phase === "error" ? "danger" : state.phase === "success" ? "success" : "accent"}>
-                {phaseLabel(state)}
+                {phaseLabel(state, copy)}
               </VStatusChip>
             </div>
             <VStateSurface
@@ -285,14 +289,14 @@ export function ConfigQuickSetupPanel({
             </VStateSurface>
 
             {state.phase === "success" && onConfigureAgent ? (
-              <VButton variant="primary" onPress={onConfigureAgent}>去配置 Agent</VButton>
+              <VButton variant="primary" onPress={onConfigureAgent}>{copy.quickSetupGoAgents}</VButton>
             ) : null}
             {showReviewActions ? (
               <div className={styles.reviewActions}>
                 <label className={styles.field}>
-                  <span>要添加的模型</span>
+                  <span>{copy.quickSetupModelToAdd}</span>
                   <VStringSelect
-                    ariaLabel="要添加的模型"
+                    ariaLabel={copy.quickSetupModelToAdd}
                     value={state.selectedModelRef}
                     isDisabled={state.phase === "saving" || retrySave}
                     options={state.discoveredModels.map((model) => ({
@@ -304,7 +308,7 @@ export function ConfigQuickSetupPanel({
                   />
                 </label>
                 <VButton variant="ghost" isDisabled={state.phase === "saving"} onPress={onReset}>
-                  重新检测
+                  {copy.quickSetupRedetect}
                 </VButton>
                 <VButton
                   variant="primary"
@@ -312,7 +316,7 @@ export function ConfigQuickSetupPanel({
                   isDisabled={!canConfirm}
                   onPress={onConfirm}
                 >
-                  {state.phase === "saving" ? "保存中…" : retrySave ? "重试保存" : "保存并完成"}
+                  {state.phase === "saving" ? copy.quickSetupSaving : retrySave ? copy.quickSetupRetrySave : copy.quickSetupSaveFinish}
                 </VButton>
               </div>
             ) : null}

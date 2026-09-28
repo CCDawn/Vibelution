@@ -135,6 +135,39 @@ def _effective_agent_tool_policy(policy: dict[str, Any], delegation_policy: dict
     return s._without_disabled_agent_tools(s._without_subagent_delegation_tools(policy, delegation_policy))
 
 
+def _without_personal_memory_write_tools(policy: dict[str, Any]) -> dict[str, Any]:
+    """Strip personal-memory write tools from an effective (runtime) tool policy.
+
+    Mirrors ``_without_disabled_agent_tools``: only the in-memory effective copy
+    is rewritten; the persisted agent record and agents.json stay untouched.
+    Covers the current tool names plus the legacy episodic aliases so historical
+    persisted policies cannot leak the removed tools back in.
+    """
+    s = _service()
+    blocked_tools = {
+        s.PERSONAL_MEMORY_APPEND_TOOL_NAME,
+        s.PERSONAL_MEMORY_SUPERSEDE_TOOL_NAME,
+        *s.LEGACY_PERSONAL_MEMORY_TOOL_RENAMES,
+    }
+    allowed = [name for name in s._tool_name_list(policy.get("allowedTools") or []) if name not in blocked_tools]
+    preferred = [name for name in s._tool_name_list(policy.get("preferredTools") or []) if name not in blocked_tools]
+    temporary_allowed = [
+        name for name in s._tool_name_list(policy.get("temporaryAllowedTools") or []) if name not in blocked_tools
+    ]
+    if (
+        allowed == s._tool_name_list(policy.get("allowedTools") or [])
+        and preferred == s._tool_name_list(policy.get("preferredTools") or [])
+        and temporary_allowed == s._tool_name_list(policy.get("temporaryAllowedTools") or [])
+    ):
+        return policy
+    return {
+        **policy,
+        "allowedTools": allowed,
+        "preferredTools": preferred,
+        "temporaryAllowedTools": temporary_allowed,
+    }
+
+
 def _ensure_fixed_role_tool_policy(
     state: dict[str, Any],
     agent: dict[str, Any],
@@ -870,6 +903,7 @@ def build_agent_policy_options(
         "memoryPolicies": [
             {
                 "policyId": policy_id,
+                "enabled": bool(policy.get("enabled", True)),
                 "agentCount": s._count_policy_refs(agents, "memoryPolicyId", policy_id),
                 "privateMemoryRoot": str(policy.get("privateMemoryRoot") or ""),
                 "readSharedGroupCount": len(list(policy.get("readSharedGroups") or [])),
@@ -945,6 +979,7 @@ def default_memory_policy(policy_id: str, agent_workspace_path: str) -> dict[str
     workspace_path = s._workspace_path_for_policy(str(agent_workspace_path or "").strip(), "")
     return {
         "policyId": str(policy_id or "").strip(),
+        "enabled": True,
         "privateMemoryRoot": f"{workspace_path}/memory" if workspace_path else "",
         "episodicEventsPath": f"{workspace_path}/events/episodic_events.jsonl" if workspace_path else "",
         "groupContextEventsPath": f"{workspace_path}/events/group_context_events.jsonl" if workspace_path else "",
@@ -1177,7 +1212,7 @@ def effective_agent_context_compression_policy(
     )
     # Window invariant: the trigger must stay below the window-derived hard
     # limit. When an explicit trigger (e.g. the 262,144-window Challenge Cup
-    # v3 values) is replayed on a smaller runtime window (qwen3.7-plus,
+    # contract values) is replayed on a smaller runtime window (qwen3.7-plus,
     # 131,072), trigger > effectiveTokenLimit means automatic compression can
     # never fire before the fail-closed context_budget_exhausted preflight
     # gate rejects the call — the continuation ladder then replays the same
@@ -1208,7 +1243,8 @@ def effective_agent_context_compression_policy(
             # trigger is missing or unreachable (at/above the effective hard
             # limit, which means automatic compression could never fire before
             # the provider's own input cap rejects the call). The derived
-            # values reuse the v3 reserved-output / safety-reserve contract.
+            # values reuse the current contract: window minus the capped
+            # model-output reserve, minus the fixed 13,000-token trigger pad.
             from core.web.services.team.challenge_cup_context_policy import (
                 challenge_cup_context_budget,
             )
@@ -1637,6 +1673,7 @@ def normalize_memory_policy(policy: dict[str, Any], policy_id: str, agent_worksp
     s = _service()
     payload = s.default_memory_policy(policy_id, agent_workspace_path)
     payload.update(policy if isinstance(policy, dict) else {})
+    payload["enabled"] = bool(payload.get("enabled", True))
     payload["policyId"] = str(policy_id or payload.get("policyId") or "").strip()
     workspace_path = s._workspace_path_for_policy(str(agent_workspace_path or "").strip(), str(payload.get("privateMemoryRoot") or ""))
     for key, suffix in (

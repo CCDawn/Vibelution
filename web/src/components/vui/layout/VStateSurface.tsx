@@ -80,10 +80,10 @@ const FACTS = "grid min-w-0 grid-cols-[repeat(auto-fit,minmax(8rem,1fr))] gap-1.
 /** Content-sized chips that wrap; no full-row empty floors. */
 const FACTS_COMPACT = "flex min-w-0 flex-wrap items-stretch gap-1.5";
 const FACT =
-  "grid min-w-0 gap-0.5 rounded-[7px] border border-[var(--vui-border-subtle)] " +
+  "grid min-w-0 gap-0.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] " +
   "bg-[color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)] px-2 py-1.5";
 const FACT_COMPACT =
-  "grid min-w-0 max-w-[min(100%,18rem)] gap-0 rounded-[7px] border border-[var(--vui-border-subtle)] " +
+  "grid min-w-0 max-w-[min(100%,18rem)] gap-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] " +
   "bg-[color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)] px-2 py-1 " +
   "grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-1.5 gap-y-0";
 const FACT_LABEL = "truncate [font-size:var(--vui-type-caption-size)] leading-[var(--vui-type-caption-line)] font-semibold uppercase text-[var(--fg-tertiary)]";

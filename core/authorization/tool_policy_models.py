@@ -54,6 +54,23 @@ class ToolDenyCode(str, Enum):
     APPROVAL_REQUIRED = "approval_required"
 
 
+# 审计规则标识（ruleId）最大长度：policyId 段按需截断，保证事件字段有界。
+MAX_RULE_ID_LENGTH = 120
+
+
+def compose_deny_rule_id(policy_id: str, code: ToolDenyCode, gate_id: str) -> str:
+    """Compose the stable audit ruleId for one deny rule: policyId + gate + code.
+
+    ``gate_id`` names the rule source that fired (for example
+    ``policy.allowedTools``), so the same deny code triggered by different
+    rules yields different ruleIds while staying deterministic per policy.
+    """
+
+    normalized_policy = str(policy_id or "").strip() or "policy-unresolved"
+    normalized_gate = str(gate_id or "").strip() or "rule.unspecified"
+    return f"{normalized_policy}:{normalized_gate}:{code.value}"[:MAX_RULE_ID_LENGTH]
+
+
 @dataclass(frozen=True, slots=True)
 class ToolPolicyV2:
     policy_id: str
@@ -123,12 +140,15 @@ class ToolDenyReason:
     code: ToolDenyCode
     phase: Literal["visibility", "execution"]
     message: str
+    gate_id: str = ""
+    rule_id: str = ""
 
     def public_projection(self) -> dict[str, str]:
         return {
             "code": self.code.value,
             "phase": self.phase,
             "message": self.message,
+            "ruleId": self.rule_id,
         }
 
 

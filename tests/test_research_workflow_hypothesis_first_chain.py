@@ -96,6 +96,18 @@ def _pin_hard_round_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(chain, "HARD_ROUND_LIMIT", 3)
 
 
+@pytest.fixture(autouse=True)
+def _pin_session_language(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Session detail reads ask for UI language on every message.
+
+    ``session_service.get_web_language`` initializes the operator config
+    from disk on each call. This file asserts meeting and chain decisions,
+    not UI language, and those reads cost several seconds on the slow tests.
+    """
+
+    monkeypatch.setattr(session_service, "get_web_language", lambda: "zh")
+
+
 _ROLES = ("coordinator", "researcher")
 _QUESTION_ID = "SCI-096"
 _CANDIDATE_IDS = ("hyp-a", "hyp-b", "hyp-c")

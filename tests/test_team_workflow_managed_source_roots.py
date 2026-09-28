@@ -657,3 +657,39 @@ def test_managed_root_budget_truncation_is_explicit(tmp_path, monkeypatch):
         },
     )
     assert response_plain["localWorkspaceScan"]["managedRoots"]["status"] == "not_configured"
+
+
+def test_parse_deeply_nested_json_is_blocked_not_fatal(tmp_path):
+    """json.loads 本身 RecursionError 的更深嵌套必须被隔离为 blocked，不击穿导入链。"""
+    deeper = tmp_path / "deeper.json"
+    deeper.write_text("[" * 20000 + "]" * 20000, encoding="utf-8")
+    result = local_parsing.parse_local_file(deeper)
+    assert result["status"] == "blocked"
+    assert result["blockedReason"] == "json_depth_exceeded"
+
+
+def test_parse_jsonl_deep_line_is_skipped_not_fatal(tmp_path):
+    payload = tmp_path / "rows.jsonl"
+    payload.write_text(
+        '{"ok": 1}\n' + "[" * 20000 + "]" * 20000 + '\n{"ok": 2}\n',
+        encoding="utf-8",
+    )
+    result = local_parsing.parse_local_file(payload)
+    assert result["status"] == "parsed"
+    assert result["meta"]["parseErrors"] == 1
+    locators = [b["locator"] for b in result["blocks"]]
+    assert "line:1" in locators and "line:3" in locators
+
+
+def test_parse_json_values_are_normalized_for_invisible_chars(tmp_path):
+    hidden = tmp_path / "hidden.json"
+    hidden.write_text(
+        '{"label": "reversed\u202eadmin\u202e", "pad": "a\u200bb"}',
+        encoding="utf-8",
+    )
+    result = local_parsing.parse_local_file(hidden)
+    assert result["status"] == "parsed"
+    joined = " ".join(block["text"] for block in result["blocks"])
+    assert "\u202e" not in joined and "\u202e" not in joined
+    assert "\u200b" not in joined and "\u200b" not in joined
+    assert any("rtl" in w or "zero_width" in w for w in result["warnings"])

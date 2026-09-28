@@ -1,4 +1,7 @@
 import "../design/route-css/config.tailwind.css";
+import { ConfigSettingsIndex } from "./ConfigSettingsIndex";
+import { ConfigDesktopPetSettings } from "./ConfigDesktopPetSettings";
+import { ConfigShortcutsPanel } from "./ConfigShortcutsPanel";
 
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -26,57 +29,31 @@ import {
 import { type BlockerFunction, useBlocker, useNavigate, useSearchParams } from "react-router-dom";
 
 import {
-  addDraftModel,
   applyConfigWorkspace,
-  checkDraftModelCapabilities,
-  deleteDraftModel,
-  discoverConfigModels,
   openConfigEnvironment,
   previewConfigDraft,
-  testConfigLlm,
-  updateDraftModel,
   uploadConfigAvatarImage,
   uploadConfigThemeBackgroundImage,
 } from "../api/config";
 import { queryKeys } from "../api/queryKeys";
 import {
-  ConfigEditorMeta,
   ConfigEditorSection,
-  ConfigCatalogModel,
-  ConfigDiscoveredModel,
   ConfigDraftMeta,
-  ConfigLlmTestResult,
-  ConfigModelOption,
-  ConfigMigrationArtifactResolution,
   ConfigMigrationPreview,
   ConfigWorkspace,
-  HealthDiagnostics,
 } from "../api/types";
 import {
   asRecord,
-  avatarCropSourceRect,
   clonePublicConfig,
   buildConfigApplyPayload,
   configInvalidationDomainsForApply,
-  defaultModelApiKeyEnv,
   deriveConfigEditorSyncState,
-  deriveModelCenterInventoryRows,
-  deriveModelCenterSummary,
-  countModelCenterHealthIssues,
   getString,
-  clampAvatarCropOffset,
-  groupProviderPresetsByVendor,
   hasPendingSecretChanges,
-  modelLibraryIdFromParts,
   pickEditableConfigView,
-  canDiscoverModelsForProvider,
   resolveConfigSectionUiStateOnSelect,
-  resolveImageInputCapabilityStatus,
   shouldBlockConfigLeave,
-  selectModelScenarioProviderPresetId,
   setValueAtConfigPath,
-  type ModelScenarioId,
-  uniqueModelLibraryId,
   type PublicConfigShape,
 } from "./configRouteLogic";
 import {
@@ -90,12 +67,16 @@ import {
   VButton,
   VActionGroup,
   VCheckbox,
+  VChip,
+  VConfirmDialog,
   VDialog,
   VInput,
   VPanelHeader,
   VRouteLinkButton,
   VSection,
   VSettingsFormPage,
+  VSettingsGroupCard,
+  VSettingsRow,
   VSplitWorkspace,
   VStatusChip,
   VStatusStrip,
@@ -116,8 +97,26 @@ import {
   buildConfigApplyRequestPayload,
   isConfigBaselineStaleErrorMessage,
   shouldImmediateApplyConfigPath,
+  shouldImmediateApplyFieldKind,
   type ConfigApplyDraftOverride,
+  type ImmediateFieldStatus,
 } from "./config/configApplyModel";
+import {
+  collectPendingDraftLeaves,
+  configValuesEqual,
+  deriveNumberStep,
+  fieldEditorDisplayText,
+  isToolNameListPath,
+  numberBounds,
+  resolveDraftSubtreeForSave,
+  stepNumberValue,
+  validateJsonText,
+  validateListText,
+  validateNumberText,
+  type JsonParseIssue,
+  type ListIssue,
+  type NumberIssue,
+} from "./config/configFieldEditorsModel";
 import { useConfigProviderDraftActions } from "./config/useConfigProviderDraftActions";
 import { useConfigProviderQuickSetupActions } from "./config/useConfigProviderQuickSetupActions";
 import { useConfigMigrationActions } from "./config/useConfigMigrationActions";
@@ -135,7 +134,21 @@ import {
   type ConfigSettingsGroupCopy,
   type ConfigSettingsGroupId,
 } from "./ConfigSettingsNavigation";
-import { buildConfigSettingsSearchIndex } from "./configSettingsSearch";
+import {
+  buildConfigSettingsNavigationSearch,
+  buildConfigSettingsSearchIndex,
+  resolveConfigSettingsFocus,
+} from "./configSettingsSearch";
+import {
+  consumeSettingsFocusIntent,
+  notifySettingsContentReady,
+  onSettingsContentReady,
+  readLastSettingsLocation,
+  resolveSettingsEntry,
+  subscribeSettingsFocus,
+  writeLastSettingsLocation,
+  type SettingsFocusTarget,
+} from "../app/settingsNavigation";
 import { ConfigWorkspacePlaceholderPanel } from "./ConfigWorkspacePlaceholderPanel";
 
 /** Heavy settings sections — keep off Config shell first paint (R2). */
@@ -183,2031 +196,42 @@ const CONFIG_SETTINGS_SIDEBAR_RESIZE = {
   minWidth: 220,
   maxWidth: 360,
 } as const;
+/** 已生效徽标的最短展示时长：apply 成功后基线立即对齐，徽标短暂驻留后再清除。 */
+const IMMEDIATE_APPLIED_BADGE_HOLD_MS = 4000;
 
-export type ConfigLanguage = "zh" | "en";
+import {
+  type ProviderRouteImpact,
+  type ProviderRoutePreview,
+} from "./config/useConfigProviderDraftActions";
+import { CONFIG_COPY, formatConfigCopy, type ConfigCopy, type ConfigLanguage } from "./config/configCopy";
+import {
+  type AvatarImageUploadResponse,
+  ConfigSectionEditor,
+} from "./config/ConfigSectionEditor";
+import {
+  defaultSectionUiState,
+  emptyDraftMeta,
+  fileToBase64,
+  formatJson,
+  getConfigValueAtPath,
+  getDraftLanguage,
+  providerDiscoveryFailureDetail,
+  providerDiscoveryFailureMessage,
+  readableErrorMessage,
+  type ConfigSectionUiState,
+} from "./config/configEditorModel";
+import { useConfigProviderModelDomain } from "./config/useConfigProviderModelDomain";
 type NoticeTone = "neutral" | "success" | "error";
-type ProviderDiscoveryFailureDetail = {
-  providerId: string;
-  reasonCode: string;
-  retryable: boolean;
-};
 
-type ProviderRouteImpact = {
-  modelRef?: string;
-  liveReferenceCount?: number;
-  historicalReferenceCount?: number;
-};
-
-type ProviderRoutePreview = {
-  providerId: string;
-  routeChanged: boolean;
-  routePreviewToken: string;
-  modelRefs: string[];
-  impactedRefs: ProviderRouteImpact[];
-  proposedProvider: Record<string, unknown>;
-};
-
-export type ProviderDraft = {
-  kind: string;
-  api: string;
-  api_key_env: string;
-  base_url: string;
-  compat_mode: string;
-  requires_api_key: boolean;
-  context_window: string;
-};
-
-export type ModelDetailsDraft = {
-  transport: string;
-  contract: string;
-  protocol: string;
-  compat: string;
-  reasoning_state_field: string;
-  strict_compatibility: boolean;
-  temperature: string;
-  max_output_tokens: string;
-  timeout: string;
-  connect_timeout: string;
-  streaming: boolean;
-  tool_calling_mode: string;
-  prompt_cache_mode: string;
-  prompt_cache_configured: boolean;
-  discovery_enabled: boolean;
-  supports_image_input: "unknown" | "supported" | "unsupported";
-};
-
-export type ModelEditorState = {
-  mode: "create" | "edit";
-  preset_id: string;
-  provider_template_id: string;
-  model_id: string;
-  label: string;
-  model: string;
-  api_key_env: string;
-  api_key: string;
-  clear_api_key: boolean;
-  provider: ProviderDraft;
-  details: ModelDetailsDraft;
-};
-
-type ConfigSectionUiState = {
-  expanded: boolean;
-  editing: boolean;
-  advancedExpanded: boolean;
-  expandedPaths: Record<string, boolean>;
-  draftValue?: unknown;
-};
-
-function defaultSectionUiState(sectionId = ""): ConfigSectionUiState {
-  return {
-    expanded: configSectionExpandedByDefault(sectionId),
-    editing: false,
-    advancedExpanded: false,
-    expandedPaths: {},
-  };
-}
-
-export const CONFIG_COPY = {
-  zh: {
-    pageTitle: "统一配置工作台",
-    subtitle: "结构化配置、模型资产与保存状态。启动设置在 Launcher 面板维护。",
-    subtitleHint: "启动设置在 Launcher 面板维护；结构化编辑、完整配置检查和最终保存仍收口到外部 operator config.toml。",
-    returnToAgents: "返回 Agent 配置",
-    returnToSource: "返回来源页",
-    loading: "正在加载统一配置工作区...",
-    loadFailed: "配置工作区加载失败",
-    migrationPreviewExpired: "预览已失效，请重新生成",
-    sourceTitle: "保存与生效",
-    sourceBody: "这里显示当前修改是否已经保存，以及哪些系统级设置需要重启后才会生效。",
-    sourceBodyShort: "保存状态、配置路径和外部环境入口。",
-    runtimeTitle: "进化审核方式",
-    runtimeBody: "手工操作适合逐步确认；自动审查会让进化任务直接进入审核流程。",
-    modelsTitle: "模型库",
-    modelsBody: "这里只管理模型资产：服务商、模型名、密钥状态、能力检测和连通性测试。每个 Agent 的具体模型选择请到 Agent 管理中维护。",
-    modelsBodyShort: "模型资产、密钥状态、能力检测和连通性。",
-    draftTitle: "高级配置检查",
-    draftBody: "检查整份当前配置；保存只写外部 operator config.toml。",
-    diagnosticsTitle: "诊断与保存",
-    diagnosticsBody: "同类问题按根因合并；先处理根因，再保存配置。",
-    configPath: "配置路径",
-    configStatus: "当前状态",
-    rawToml: "当前外部 config.toml",
-    rawTomlHint: "这里只读显示真实文件内容；修改并保存后会更新这里。",
-    syncedDraft: "已和外部 config.toml 一致",
-    unsavedDraft: "有未保存修改",
-    refresh: "重新读取",
-    validateDraft: "检查当前修改",
-    resetDraft: "还原编辑文本",
-    openEnvironment: "打开系统环境变量",
-    openEnvironmentHint: "会打开 Windows 系统窗口，方便你自己查看当前使用了哪些 key。",
-    openEnvironmentPending: "正在打开系统环境变量",
-    openEnvironmentOpened: "已打开系统环境变量窗口。",
-    saveConfig: "保存到外部配置",
-    applying: "保存中",
-    leaveGuardTitle: "还有未保存的设置",
-    leaveGuardBody: "本次修改还没有保存到外部 operator config.toml。离开前要保存吗？",
-    leaveGuardSave: "保存并离开",
-    leaveGuardSaving: "保存后离开中",
-    leaveGuardDiscard: "不保存离开",
-    leaveGuardCancel: "取消",
-    intakeMode: "默认审核方式",
-    groupOverviewSaveTitle: "总览与保存",
-    groupOverviewSaveSummary: "在一个页面查看保存状态、阻塞问题与建议动作，修复后直接保存。",
-    groupWorkbenchTitle: "界面与工作台",
-    groupWorkbenchSummary: "管理工作台行为、配色和背景；启动相关设置仍由 Launcher 维护。",
-    groupAvatarPetTitle: "用户、终端形象与陪伴体",
-    groupAvatarPetSummary: "统一设置显示名、终端形象与陪伴体；Web 用户头像在用户信息里维护，常用项直接展示，其余参数按需展开。",
-    groupModelingTitle: "模型库",
-    groupModelingSummary: "模型资产、服务商账号、密钥、能力检测和模型发现都在这里集中管理。",
-    groupRuntimeContextTitle: "上下文与分析",
-    groupRuntimeContextSummary: "全局上下文压缩放在主路径；分析数据目录仅在自定义存储时按需展开。",
-    groupToolingTitle: "工具与诊断",
-    groupToolingSummary: "日常联网与安全、健康诊断、日志追踪和高级维护分层管理。",
-    healthTitle: "健康诊断中心",
-    healthBody: "把会话入口、日志入口、最近信号、可清理建议和保护边界整理到同一个只读诊断面。",
-    healthLoading: "正在整理日志 Helper...",
-    healthEmpty: "当前没有可用日志 Helper。",
-    healthRefresh: "重新诊断",
-    healthPriority: "优先处理",
-    healthQuickActions: "快速入口",
-    healthEvidence: "证据",
-    healthRecommended: "建议",
-    healthRelatedFindings: "关联问题",
-    healthNoFindings: "当前没有阻塞或注意项。",
-    healthOpenLogs: "打开日志页",
-    healthOpenChat: "打开会话页",
-    healthOpenLauncher: "去 Launcher 维护",
-    healthOpen: "打开",
-    healthFiles: "文件",
-    healthDirs: "目录",
-    healthSessions: "会话",
-    healthBusy: "运行中",
-    healthFailed: "失败",
-    healthStale: "缺时间",
-    healthPhase: "阶段",
-    healthLatest: "最近信号",
-    healthUpdated: "更新时间",
-    healthSize: "体量",
-    healthProtected: "保护",
-    healthMaintenanceAvailable: "可从 Launcher 维护",
-    healthStatusOk: "正常",
-    healthStatusWarning: "注意",
-    healthStatusBlocked: "阻塞",
-    healthMissing: "暂无日志文件",
-    healthNotRecorded: "未记录",
-    settingsStatusTitle: "设置状态",
-    settingsNextStep: "下一步",
-    settingsCanSave: "可以保存",
-    settingsNeedsCheck: "先检查高级配置",
-    settingsSynced: "已同步",
-    settingsSections: "分区",
-    developerModeReadonly: "开发者模式",
-    developerModeControlled: "Launcher 控制",
-    developerModeEnabled: "已开启",
-    developerModeDisabled: "已关闭",
-    runtimeProfile: "运行档位",
-    defaultMode: "默认模式",
-    defaultRoute: "默认入口",
-    modelEditorCreate: "新增模型",
-    modelEditorEdit: "编辑模型",
-    modelCenterAccounts: "服务商账号",
-    modelCenterInventory: "模型库存",
-    modelCenterHealth: "状态",
-    modelCenterModels: "可选模型",
-    modelCenterCapabilityIssues: "需关注",
-    modelCenterActions: "操作",
-    modelCenterProtocol: "协议链路",
-    modelScenario: "新增方式",
-    modelScenarioChat: "通用对话模型",
-    modelScenarioRelay: "中转站模型",
-    modelScenarioImage: "图片工具模型",
-    modelScenarioLocal: "本地模型",
-    modelScenarioManual: "高级手填",
-    modelScenarioHint: "选择场景会自动套用最接近的模板；服务商、模型名和密钥仍可以在下方调整。",
-    preset: "厂商",
-    providerVendor: "厂商",
-    providerTemplate: "模板",
-    providerTemplatePlaceholder: "选择模板",
-    presetGroupOfficial: "官方供应商",
-    presetGroupRelay: "Relay Responses",
-    presetGroupOpenAiCompatible: "OpenAI 兼容 API",
-    presetGroupLocal: "本地模型",
-    customEntry: "手填",
-    autoValue: "自动生成",
-    modelId: "模型 ID",
-    label: "显示名",
-    modelName: "模型名",
-    discoverModels: "发现模型",
-    discoveryPending: "发现模型中",
-    discoveredModel: "发现结果",
-    discoveryEmpty: "没有发现可用模型",
-    discoveryFailed: "模型发现失败",
-    discoveryUnavailable: "当前服务商不支持自动发现，请手动填写模型名。",
-    providerKind: "服务商类型",
-    providerKeyEnv: "服务商默认变量",
-    modelKeyEnv: "模型唯一变量",
-    modelKeyInput: "API Key",
-    keyStorageHint: "填写后先进入本次修改；点击“保存到外部配置”时才会写入本机用户级环境变量。",
-    keyEnvAdvancedHint: "模型密钥变量名由模型 ID 唯一生成并只读展示；真正填写的是 API Key，保存时写入这个用户级环境变量。服务商默认变量仅作兼容来源展示，不作为新增密钥入口。",
-    deleteModelHint: "删除模型会同步清理该模型唯一绑定的环境密钥；Agent 与工具的模型选择请在各自管理页调整。",
-    deleteModelConfirm: "确认删除这个模型？这会清理它绑定的环境密钥，并从模型库移除该资产。",
-    baseUrl: "基础地址",
-    compatMode: "兼容模式",
-    providerApi: "Provider API",
-    modelProtocol: "模型协议",
-    modelCompat: "兼容策略对象",
-    contextWindow: "上下文窗口（必填，禁止默认）",
-    requiresApiKey: "需要 API Key",
-    imageInputSupport: "图像输入",
-    imageInputSupportUnknown: "未声明",
-    imageInputSupportSupported: "支持",
-    imageInputSupportUnsupported: "不支持",
-    transport: "传输协议",
-    contract: "交互契约",
-    reasoningStateField: "推理状态字段",
-    toolCallingMode: "工具调用",
-    promptCacheMode: "Prompt cache",
-    strictCompatibility: "严格兼容",
-    streaming: "流式",
-    discoveryEnabled: "发现能力",
-    temperature: "温度",
-    maxOutputTokens: "最大输出令牌数",
-    timeout: "超时（秒）",
-    connectTimeout: "连接超时（秒）",
-    clearSecret: "保存时同时清除这个环境变量里的密钥",
-    saveModel: "确认模型修改",
-    modelRequiredFieldsMissing: "请先填写模型名和基础地址。",
-    deleteModel: "删除模型",
-    cancelEditing: "清空表单",
-    modelTestSelect: "测试模型",
-    modelTestPlaceholder: "选择一个模型",
-    testSelectedLibraryModel: "测试选中模型",
-    modelTestRequired: "请先选择要测试的模型。",
-    checkSavedImageCapabilities: "检测已保存模型图像输入",
-    imageCapabilityCheckPending: "检测模型能力中",
-    imageCapabilityStatus: "图像能力",
-    imageInputStatusUnknown: "图像未检测",
-    imageInputStatusSupported: "支持图像输入",
-    imageInputStatusUnsupported: "不支持图像输入",
-    imageInputStatusFailed: "检测失败",
-    expandSection: "展开内容",
-    collapseSection: "收起内容",
-    keyConfigured: "已配置",
-    keyPending: "待写入",
-    keyClearPending: "待清除",
-    keyMissing: "缺失",
-    noBlocking: "当前没有阻塞问题。",
-    noWarnings: "当前没有警告。",
-    noSuggestions: "当前没有额外建议动作。",
-    blockingIssues: "阻塞问题",
-    warningSignals: "警告信号",
-    suggestedActions: "建议动作",
-    rootCauseMetric: "根因",
-    affectedReferenceMetric: "受影响引用",
-    warningMetric: "警告",
-    affectedReferences: "受影响的配置引用",
-    showAffectedReferences: "查看受影响引用",
-    repairProviderCredential: "设置 API Key",
-    editorDirtyHint: "编辑文本有未检查改动。先检查当前修改，再继续结构化编辑或测试。",
-    editorCleanHint: "当前结构化面板和编辑文本一致。",
-    editorRestoreHint: "放弃编辑文本里的未检查内容，并回到当前结构化面板。",
-    saveSourceHint: "当前修改还没写入外部 operator config.toml，保存成功后这里会刷新为最新文件状态。",
-    modelSavePending: "保存模型修改中",
-    modelSaveFailed: "模型修改未生效：",
-    modelEditorAdvancedTitle: "高级参数",
-    modelEditorAdvancedHint: "常用字段已经在上方，只有需要时再展开这里。",
-    testPending: "测试连接中",
-    testScopeDraft: "按当前修改测试",
-    testScopeSaved: "按已保存配置测试",
-    testRouteLabel: "测试路由",
-    testRuntimeLabel: "运行路径",
-    testKeyLabel: "API key",
-    testKeyNotRequired: "当前路由不要求",
-    testKeySourceLabel: "来源",
-    testCapabilityLabel: "能力",
-    validationPending: "检查修改中",
-    refreshPending: "重新读取中",
-    editSection: "编辑分区",
-    saveSection: "确认分区修改",
-    cancelSection: "取消编辑",
-    sectionSavePending: "保存分区修改中",
-    uploadAvatarImage: "上传本地图片",
-    clearAvatarImage: "清除图片",
-    avatarImageUploading: "上传头像图片中",
-    avatarImageUploadFailed: "头像图片上传失败：",
-    avatarImageCurrent: "当前头像",
-    avatarImageEmpty: "未设置头像图片",
-    avatarImageClickToUpload: "点击头像上传",
-    userProfileAvatarGroupTitle: "头像设置",
-    userProfileAvatarGroupHint: "头像预设和本地头像图片只影响前端展示，不会把图片内容传给模型。",
-    uploadThemeBackgroundImage: "上传背景图片",
-    clearThemeBackgroundImage: "清除背景图片",
-    themeBackgroundPresetTitle: "内置背景",
-    themeBackgroundImageUploading: "上传背景图片中",
-    themeBackgroundImageUploadFailed: "背景图片上传失败：",
-    avatarCropTitle: "裁剪头像",
-    avatarCropHint: "拖动图片调整位置，使用滑杆缩放；确认后会保存 1:1 裁剪结果。",
-    avatarCropZoom: "缩放",
-    avatarCropConfirm: "确认裁剪",
-    avatarCropCancel: "取消裁剪",
-    avatarCropPreview: "头像预览",
-    fieldCountLabel: "字段",
-    emptyValue: "空",
-    itemLabel: "条目",
-    yes: "是",
-    no: "否",
-  },
-  en: {
-    pageTitle: "Unified Config Workbench",
-    subtitle: "Structured config, model assets, and save state. Startup settings are maintained in Launcher.",
-    subtitleHint: "Startup settings are maintained in Launcher; structured editing, full-config checks, and final writes still converge on the external operator config.toml.",
-    returnToAgents: "Return to Agent config",
-    returnToSource: "Return to source page",
-    loading: "Loading unified config workspace...",
-    loadFailed: "Failed to load config workspace",
-    migrationPreviewExpired: "The migration preview expired. Generate a new preview.",
-    sourceTitle: "Save and Apply",
-    sourceBody: "Shows whether current changes are saved and which system-level settings take effect after restart.",
-    sourceBodyShort: "Save state, config path, and environment entry.",
-    runtimeTitle: "Evolution review mode",
-    runtimeBody: "Manual operation keeps each step under review; automatic review sends evolution tasks directly into the review flow.",
-    modelsTitle: "Model Library",
-    modelsBody: "This section manages model assets only: provider routes, model names, key state, capability checks, and connection tests. Edit each Agent's model choices in Agent management.",
-    modelsBodyShort: "Model assets, key state, capability checks, and connectivity.",
-    draftTitle: "Advanced Config Check",
-    draftBody: "Inspect the full current config. Saves write only external operator config.toml.",
-    diagnosticsTitle: "Diagnostics and Save",
-    diagnosticsBody: "Related issues are grouped by root cause. Fix the cause first, then save.",
-    configPath: "Config path",
-    configStatus: "Current status",
-    rawToml: "Current external config.toml",
-    rawTomlHint: "This is a read-only view of the real file. It refreshes after you save changes.",
-    syncedDraft: "Matches external config.toml",
-    unsavedDraft: "Unsaved changes",
-    refresh: "Reload",
-    validateDraft: "Check changes",
-    resetDraft: "Restore editor text",
-    openEnvironment: "Open system environment variables",
-    openEnvironmentHint: "Opens the Windows system dialog so you can inspect which keys are in use.",
-    openEnvironmentPending: "Opening system environment variables",
-    openEnvironmentOpened: "System environment variables window opened.",
-    saveConfig: "Save to external config",
-    applying: "Saving",
-    leaveGuardTitle: "Unsaved settings",
-    leaveGuardBody: "These changes have not been saved to the external operator config.toml. Save before leaving?",
-    leaveGuardSave: "Save and leave",
-    leaveGuardSaving: "Saving before leaving",
-    leaveGuardDiscard: "Leave without saving",
-    leaveGuardCancel: "Cancel",
-    intakeMode: "Default review mode",
-    groupOverviewSaveTitle: "Overview and Save",
-    groupOverviewSaveSummary: "Review save state, blockers, and suggested actions in one place, then save after fixes.",
-    groupWorkbenchTitle: "Workbench & Interface",
-    groupWorkbenchSummary: "Manage workbench behavior, colors, and background here. Startup settings remain in Launcher.",
-    groupAvatarPetTitle: "User, Terminal Avatar, and Companion",
-    groupAvatarPetSummary: "Set the display name, terminal avatar, and companion in one place. The Web user avatar lives under User Info, while advanced parameters remain on demand.",
-    groupModelingTitle: "Model Library",
-    groupModelingSummary: "Manage model assets, provider accounts, keys, capability checks, and discovery in one place.",
-    groupRuntimeContextTitle: "Context & Analysis",
-    groupRuntimeContextSummary: "Keep global context compression on the main path and expand analysis data directories only for custom storage layouts.",
-    groupToolingTitle: "Tooling and Diagnostics",
-    groupToolingSummary: "Layer everyday access, health diagnostics, logging, tracing, and advanced maintenance.",
-    healthTitle: "Health Diagnostics Center",
-    healthBody: "Organizes session entry points, log entry points, recent signals, cleanup hints, and protected boundaries in one read-only diagnostic surface.",
-    healthLoading: "Organizing log helpers...",
-    healthEmpty: "No log helpers are available right now.",
-    healthRefresh: "Run again",
-    healthPriority: "Top findings",
-    healthQuickActions: "Quick actions",
-    healthEvidence: "Evidence",
-    healthRecommended: "Recommendation",
-    healthRelatedFindings: "Related findings",
-    healthNoFindings: "No blocked or warning findings.",
-    healthOpenLogs: "Open logs",
-    healthOpenChat: "Open chat",
-    healthOpenLauncher: "Open Launcher",
-    healthOpen: "Open",
-    healthFiles: "files",
-    healthDirs: "dirs",
-    healthSessions: "sessions",
-    healthBusy: "busy",
-    healthFailed: "failed",
-    healthStale: "stale",
-    healthPhase: "phase",
-    healthLatest: "Latest signal",
-    healthUpdated: "Updated",
-    healthSize: "Size",
-    healthProtected: "Protected",
-    healthMaintenanceAvailable: "Launcher maintenance available",
-    healthStatusOk: "OK",
-    healthStatusWarning: "Attention",
-    healthStatusBlocked: "Blocked",
-    healthMissing: "No log files yet",
-    healthNotRecorded: "Not recorded",
-    settingsStatusTitle: "Settings status",
-    settingsNextStep: "Next step",
-    settingsCanSave: "Ready to save",
-    settingsNeedsCheck: "Check advanced config first",
-    settingsSynced: "Synced",
-    settingsSections: "Sections",
-    developerModeReadonly: "Developer mode",
-    developerModeControlled: "Launcher controlled",
-    developerModeEnabled: "Enabled",
-    developerModeDisabled: "Disabled",
-    runtimeProfile: "Runtime mode",
-    defaultMode: "Default mode",
-    defaultRoute: "Default route",
-    modelEditorCreate: "Create model",
-    modelEditorEdit: "Edit model",
-    modelCenterAccounts: "Provider accounts",
-    modelCenterInventory: "Model inventory",
-    modelCenterHealth: "Health",
-    modelCenterModels: "Selectable models",
-    modelCenterCapabilityIssues: "Attention",
-    modelCenterActions: "Actions",
-    modelCenterProtocol: "Protocol route",
-    modelScenario: "Add as",
-    modelScenarioChat: "General chat model",
-    modelScenarioRelay: "Relay model",
-    modelScenarioImage: "Image tool model",
-    modelScenarioLocal: "Local model",
-    modelScenarioManual: "Advanced manual",
-    modelScenarioHint: "The scenario picks the closest template. Provider, model name, and key can still be adjusted below.",
-    preset: "Vendor",
-    providerVendor: "Vendor",
-    providerTemplate: "Template",
-    providerTemplatePlaceholder: "Choose a template",
-    presetGroupOfficial: "Official providers",
-    presetGroupRelay: "Relay Responses",
-    presetGroupOpenAiCompatible: "OpenAI-compatible APIs",
-    presetGroupLocal: "Local models",
-    customEntry: "Manual",
-    autoValue: "Auto",
-    modelId: "Model ID",
-    label: "Label",
-    modelName: "Model",
-    discoverModels: "Discover models",
-    discoveryPending: "Discovering models",
-    discoveredModel: "Discovered model",
-    discoveryEmpty: "No models discovered",
-    discoveryFailed: "Model discovery failed",
-    discoveryUnavailable: "This provider does not support automatic discovery. Enter the model name manually.",
-    providerKind: "Provider kind",
-    providerKeyEnv: "Provider default variable",
-    modelKeyEnv: "Unique model variable",
-    modelKeyInput: "API key",
-    keyStorageHint: "This is staged first. It is written to the local user environment only when you save to the external config.",
-    keyEnvAdvancedHint: "The model key variable is uniquely generated from the model ID and shown read-only. Enter the API key value; saving writes it to this user environment variable. The provider default variable is compatibility-only display, not a new key entry point.",
-    deleteModelHint: "Deleting a model also clears the unique environment key bound to that model. Adjust Agent and tool model choices in their own management pages.",
-    deleteModelConfirm: "Delete this model? This clears its bound environment key and removes the asset from the model library.",
-    baseUrl: "Base URL",
-    compatMode: "Compat mode",
-    providerApi: "Provider API",
-    modelProtocol: "Model protocol",
-    modelCompat: "Compat policy object",
-    contextWindow: "Context window (required, no default)",
-    requiresApiKey: "Requires API key",
-    imageInputSupport: "Image input",
-    imageInputSupportUnknown: "Undeclared",
-    imageInputSupportSupported: "Supported",
-    imageInputSupportUnsupported: "Unsupported",
-    transport: "Transport",
-    contract: "Contract",
-    reasoningStateField: "Reasoning state field",
-    toolCallingMode: "Tool calling",
-    promptCacheMode: "Prompt cache",
-    strictCompatibility: "Strict compatibility",
-    streaming: "Streaming",
-    discoveryEnabled: "Discovery enabled",
-    temperature: "Temperature",
-    maxOutputTokens: "Max output tokens",
-    timeout: "Timeout (s)",
-    connectTimeout: "Connect timeout (s)",
-    clearSecret: "Also clear this environment key on save",
-    saveModel: "Confirm model changes",
-    modelRequiredFieldsMissing: "Enter the model name and base URL first.",
-    deleteModel: "Delete model",
-    cancelEditing: "Clear form",
-    modelTestSelect: "Test model",
-    modelTestPlaceholder: "Choose a model",
-    testSelectedLibraryModel: "Test selected model",
-    modelTestRequired: "Choose a model to test first.",
-    checkSavedImageCapabilities: "Check saved models image input",
-    imageCapabilityCheckPending: "Checking model capabilities",
-    imageCapabilityStatus: "Image capability",
-    imageInputStatusUnknown: "Image not checked",
-    imageInputStatusSupported: "Supports image input",
-    imageInputStatusUnsupported: "No image input",
-    imageInputStatusFailed: "Check failed",
-    expandSection: "Expand",
-    collapseSection: "Collapse",
-    keyConfigured: "configured",
-    keyPending: "pending",
-    keyClearPending: "clear pending",
-    keyMissing: "missing",
-    noBlocking: "No blocking issues right now.",
-    noWarnings: "No warnings right now.",
-    noSuggestions: "No extra suggested actions right now.",
-    blockingIssues: "Blocking issues",
-    warningSignals: "Warnings",
-    suggestedActions: "Suggested actions",
-    rootCauseMetric: "Root causes",
-    affectedReferenceMetric: "Affected references",
-    warningMetric: "Warnings",
-    affectedReferences: "Affected config references",
-    showAffectedReferences: "Show affected references",
-    repairProviderCredential: "Set API Key",
-    editorDirtyHint: "The editor text has unchecked changes. Check them before more structured edits or tests.",
-    editorCleanHint: "Structured controls and editor text are in sync.",
-    editorRestoreHint: "Discard unchecked editor text and return to the current structured panel.",
-    saveSourceHint: "Save to the external config to persist the current changes.",
-    modelSavePending: "Saving model changes",
-    modelSaveFailed: "Model changes were not applied:",
-    modelEditorAdvancedTitle: "Advanced parameters",
-    modelEditorAdvancedHint: "The common fields are above. Expand this only when needed.",
-    testPending: "Testing connection",
-    testScopeDraft: "Testing current changes",
-    testScopeSaved: "Testing saved config",
-    testRouteLabel: "Route",
-    testRuntimeLabel: "Runtime path",
-    testKeyLabel: "API key",
-    testKeyNotRequired: "not required for this route",
-    testKeySourceLabel: "source",
-    testCapabilityLabel: "Capability",
-    validationPending: "Checking changes",
-    refreshPending: "Reloading",
-    editSection: "Edit section",
-    saveSection: "Confirm section changes",
-    cancelSection: "Cancel editing",
-    sectionSavePending: "Saving section changes",
-    uploadAvatarImage: "Upload local image",
-    clearAvatarImage: "Clear image",
-    avatarImageUploading: "Uploading avatar image",
-    avatarImageUploadFailed: "Avatar image upload failed: ",
-    avatarImageCurrent: "Current avatar",
-    avatarImageEmpty: "No avatar image set",
-    avatarImageClickToUpload: "Click avatar to upload",
-    userProfileAvatarGroupTitle: "Avatar settings",
-    userProfileAvatarGroupHint: "The avatar preset and local avatar image affect frontend display only. Image content is not sent to the model.",
-    uploadThemeBackgroundImage: "Upload background image",
-    clearThemeBackgroundImage: "Clear background image",
-    themeBackgroundPresetTitle: "Built-in backgrounds",
-    themeBackgroundImageUploading: "Uploading background image",
-    themeBackgroundImageUploadFailed: "Background image upload failed: ",
-    avatarCropTitle: "Crop avatar",
-    avatarCropHint: "Drag the image to reposition it and use the slider to zoom. Confirm saves a 1:1 crop.",
-    avatarCropZoom: "Zoom",
-    avatarCropConfirm: "Confirm crop",
-    avatarCropCancel: "Cancel crop",
-    avatarCropPreview: "Avatar preview",
-    fieldCountLabel: "fields",
-    emptyValue: "Empty",
-    itemLabel: "Item",
-    yes: "Yes",
-    no: "No",
-  },
-} as const;
-
-export type ConfigCopy = Record<keyof (typeof CONFIG_COPY)["zh"], string>;
-
-function emptyDraftMeta(): ConfigDraftMeta {
-  return {
-    pending_api_keys: {},
-    pending_cleared_api_keys: [],
-  };
-}
-
-function emptyProviderDraft(): ProviderDraft {
-  return {
-    kind: "openai_compatible",
-    api: "",
-    api_key_env: "",
-    base_url: "",
-    compat_mode: "openai",
-    requires_api_key: true,
-    context_window: "",
-  };
-}
-
-function emptyModelDetailsDraft(): ModelDetailsDraft {
-  return {
-    transport: "chat_completions",
-    contract: "tool_chat",
-    protocol: "",
-    compat: "",
-    reasoning_state_field: "",
-    strict_compatibility: false,
-    temperature: "",
-    max_output_tokens: "",
-    timeout: "",
-    connect_timeout: "",
-    streaming: true,
-    tool_calling_mode: "auto",
-    prompt_cache_mode: "disabled",
-    prompt_cache_configured: false,
-    discovery_enabled: true,
-    supports_image_input: "unknown",
-  };
-}
-
-function emptyModelEditorState(): ModelEditorState {
-  return {
-    mode: "create",
-    preset_id: "",
-    provider_template_id: "",
-    model_id: "",
-    label: "",
-    model: "",
-    api_key_env: "",
-    api_key: "",
-    clear_api_key: false,
-    provider: emptyProviderDraft(),
-    details: emptyModelDetailsDraft(),
-  };
-}
-
-function formatJson(value: unknown): string {
-  return JSON.stringify(value, null, 2);
-}
-
-function readableErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function providerDiscoveryFailureDetail(error: unknown): ProviderDiscoveryFailureDetail | null {
-  const message = readableErrorMessage(error);
-  try {
-    const payload = JSON.parse(message) as { detail?: unknown };
-    const detail = asRecord(payload.detail);
-    if (detail.code !== "provider_discovery_failed" || !getString(detail.providerId) || !getString(detail.reasonCode)) {
-      return null;
-    }
-    return {
-      providerId: getString(detail.providerId),
-      reasonCode: getString(detail.reasonCode),
-      retryable: getBoolean(detail.retryable),
-    };
-  } catch {
-    return null;
-  }
-}
-
-function providerDiscoveryFailureMessage(detail: ProviderDiscoveryFailureDetail | null): string {
-  switch (detail?.reasonCode) {
-    case "credential_missing": return "未配置 API Key；请先保存该 Provider 的凭据。";
-    case "credential_rejected": return "API Key 被上游拒绝；请检查凭据后重试。";
-    case "endpoint_invalid": return "服务地址无效或不允许访问；请检查端点配置。";
-    case "network": return "无法连接到服务地址；请检查网络、局域网服务或端口。";
-    case "timeout": return "服务响应超时；可稍后重试。";
-    case "protocol_mismatch": return "该端点不支持当前模型发现协议；请改用兼容接口或手动填写模型。";
-    case "invalid_response": return "服务返回的模型目录格式不兼容；请检查 Provider 协议。";
-    case "rate_limited": return "上游暂时限流；请稍后重试。";
-    case "upstream_rejected": return "上游服务拒绝了模型目录请求；请检查服务状态或协议。";
-    default: return "该 Provider 的模型发现暂不可用；请检查连接后重试。";
-  }
-}
-
-function getBoolean(value: unknown, fallback = false): boolean {
-  return typeof value === "boolean" ? value : fallback;
-}
-
-function getDraftLanguage(config: PublicConfigShape | null, fallback: ConfigLanguage): ConfigLanguage {
-  const ui = asRecord(config?.ui);
-  return ui.language === "en" ? "en" : fallback;
-}
-
-function buildProviderDraft(providerInput: Record<string, unknown>): ProviderDraft {
-  return {
-    kind: getString(providerInput.kind),
-    api: getString(providerInput.api),
-    api_key_env: getString(providerInput.api_key_env),
-    base_url: getString(providerInput.base_url),
-    compat_mode: getString(providerInput.compat_mode) || "openai",
-    requires_api_key: getBoolean(providerInput.requires_api_key, true),
-    context_window: getString(providerInput.context_window),
-  };
-}
-
-function buildModelDetailsDraft(detailsInput: Record<string, unknown>): ModelDetailsDraft {
-  const promptCache = asRecord(detailsInput.prompt_cache);
-  const supportsImageInput =
-    typeof detailsInput.supports_image_input === "boolean"
-      ? detailsInput.supports_image_input
-        ? "supported"
-        : "unsupported"
-      : "unknown";
-  return {
-    transport: getString(detailsInput.transport) || "chat_completions",
-    contract: getString(detailsInput.contract) || "tool_chat",
-    protocol: getString(detailsInput.protocol),
-    compat: Object.keys(asRecord(detailsInput.compat)).length ? JSON.stringify(asRecord(detailsInput.compat), null, 2) : "",
-    reasoning_state_field: getString(detailsInput.reasoning_state_field),
-    strict_compatibility: getBoolean(detailsInput.strict_compatibility, false),
-    temperature: getString(detailsInput.temperature),
-    max_output_tokens: getString(detailsInput.max_output_tokens),
-    timeout: getString(detailsInput.timeout),
-    connect_timeout: getString(detailsInput.connect_timeout),
-    streaming: getBoolean(detailsInput.streaming, true),
-    tool_calling_mode: getString(detailsInput.tool_calling_mode) || "auto",
-    prompt_cache_mode: getString(promptCache.mode) || "disabled",
-    prompt_cache_configured: Boolean(promptCache.mode),
-    discovery_enabled: getBoolean(detailsInput.discovery_enabled, true),
-    supports_image_input: supportsImageInput,
-  };
-}
-
-function hydrateModelEditorFromOption(option: ConfigModelOption): ModelEditorState {
-  return {
-    mode: "edit",
-    preset_id: "",
-    provider_template_id: "",
-    model_id: option.model_id,
-    label: option.label,
-    model: option.model,
-    api_key_env: option.api_key_env,
-    api_key: "",
-    clear_api_key: false,
-    provider: buildProviderDraft(asRecord(option.provider)),
-    details: buildModelDetailsDraft(asRecord(option.details)),
-  };
-}
-
-function buildProviderPayload(draft: ProviderDraft): Record<string, unknown> {
-  const payload: Record<string, unknown> = {
-    kind: draft.kind.trim(),
-    api: draft.api.trim(),
-    api_key_env: draft.api_key_env.trim(),
-    base_url: draft.base_url.trim(),
-    compat_mode: draft.compat_mode.trim(),
-    requires_api_key: draft.requires_api_key,
-  };
-  // Empty means unconfigured — send null so backend clears schema defaults instead of inventing 32768.
-  const contextWindowRaw = draft.context_window.trim();
-  if (contextWindowRaw) {
-    const parsed = Number(contextWindowRaw);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      throw new Error("context_window must be a positive integer");
-    }
-    payload.context_window = Math.round(parsed);
-  } else {
-    payload.context_window = null;
-  }
-  return payload;
-}
-
-function parseModelCompatDraft(value: string): Record<string, unknown> | null {
-  const text = value.trim();
-  if (!text) {
-    return {};
-  }
-  const parsed = JSON.parse(text) as unknown;
-  return isPlainObject(parsed) ? parsed : null;
-}
-
-function buildModelDetailsPayload(draft: ModelDetailsDraft): Record<string, unknown> {
-  const payload: Record<string, unknown> = {
-    strict_compatibility: draft.strict_compatibility,
-    streaming: draft.streaming,
-    discovery_enabled: draft.discovery_enabled,
-  };
-  if (draft.transport.trim()) {
-    payload.transport = draft.transport.trim();
-  }
-  if (draft.contract.trim()) {
-    payload.contract = draft.contract.trim();
-  }
-  if (draft.protocol.trim()) {
-    payload.protocol = draft.protocol.trim();
-  }
-  const compat = parseModelCompatDraft(draft.compat);
-  if (!compat) {
-    throw new Error("compat must be a JSON object");
-  }
-  if (Object.keys(compat).length) {
-    payload.compat = compat;
-  }
-  if (draft.reasoning_state_field.trim()) {
-    payload.reasoning_state_field = draft.reasoning_state_field.trim();
-  }
-  if (draft.tool_calling_mode.trim()) {
-    payload.tool_calling_mode = draft.tool_calling_mode.trim();
-  }
-  if (draft.prompt_cache_configured || draft.prompt_cache_mode.trim() !== "disabled") {
-    payload.prompt_cache = { mode: draft.prompt_cache_mode.trim() };
-  }
-  if (draft.temperature.trim()) {
-    payload.temperature = Number(draft.temperature.trim());
-  }
-  if (draft.max_output_tokens.trim()) {
-    payload.max_output_tokens = Number(draft.max_output_tokens.trim());
-  }
-  if (draft.timeout.trim()) {
-    payload.timeout = Number(draft.timeout.trim());
-  }
-  if (draft.connect_timeout.trim()) {
-    payload.connect_timeout = Number(draft.connect_timeout.trim());
-  }
-  if (draft.supports_image_input === "supported") {
-    payload.supports_image_input = true;
-    payload.capability_status = "supported";
-    payload.capability_source = "manual";
-  } else if (draft.supports_image_input === "unsupported") {
-    payload.supports_image_input = false;
-    payload.capability_status = "unsupported";
-    payload.capability_source = "manual";
-  }
-  return payload;
-}
-
-function splitConfigPath(path: string): string[] {
-  return path.split(".").filter(Boolean);
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function isConfigObjectListValue(value: unknown, kind: ConfigEditorMeta["kind"] | undefined): value is Record<string, unknown>[] {
-  if (!Array.isArray(value)) {
-    return false;
-  }
-  if (kind === "object_list") {
-    return true;
-  }
-  if (kind === "string_list") {
-    return false;
-  }
-  return value.length > 0 && value.every((item) => isPlainObject(item));
-}
-
-function getConfigValueAtPath(root: unknown, path: string): unknown {
-  let current = root;
-  for (const token of splitConfigPath(path)) {
-    if (Array.isArray(current)) {
-      current = current[Number(token)];
-      continue;
-    }
-    if (isPlainObject(current)) {
-      current = current[token];
-      continue;
-    }
-    return undefined;
-  }
-  return current;
-}
-
-function humanizeConfigToken(token: string): string {
-  return token
-    .split("_")
-    .filter(Boolean)
-    .map((part) => (part.toUpperCase() === part ? part : `${part.charAt(0).toUpperCase()}${part.slice(1)}`))
-    .join(" ");
-}
-
-function configLabel(metaMap: Record<string, ConfigEditorMeta>, path: string, lang: ConfigLanguage): string {
-  return configSectionFieldCopy(path, lang)?.label
-    ?? metaMap[path]?.label
-    ?? humanizeConfigToken(splitConfigPath(path).at(-1) ?? path);
-}
-
-function configHint(metaMap: Record<string, ConfigEditorMeta>, path: string, lang: ConfigLanguage): string {
-  return configSectionFieldCopy(path, lang)?.hint ?? metaMap[path]?.hint ?? "";
-}
-
-function formatConfigDisplayValue(value: unknown, kind: ConfigEditorMeta["kind"] | undefined, copy: ConfigCopy): string {
-  if (kind === "secret") {
-    return getString(value) ? "******" : copy.emptyValue;
-  }
-  if (typeof value === "boolean") {
-    return value ? copy.yes : copy.no;
-  }
-  if (Array.isArray(value)) {
-    if (value.length === 0) {
-      return copy.emptyValue;
-    }
-    return value
-      .map((item) => (typeof item === "string" ? item : JSON.stringify(item)))
-      .join(", ");
-  }
-  if (value == null || value === "") {
-    return copy.emptyValue;
-  }
-  return String(value);
-}
-
-type ConfigSectionEditorProps = {
-  section: ConfigEditorSection;
-  value: unknown;
-  metaMap: Record<string, ConfigEditorMeta>;
-  lang: ConfigLanguage;
-  copy: ConfigCopy;
-  disabled: boolean;
-  uiState: ConfigSectionUiState;
-  onUiStateChange: (sectionId: string, nextState: ConfigSectionUiState) => void;
-  onSaveSection: (path: string, nextValue: unknown) => Promise<boolean>;
-  onAvatarImageUpload: (file: File) => Promise<AvatarImageUploadResponse | null>;
-  onThemeBackgroundImageUpload: (file: File) => Promise<AvatarImageUploadResponse | null>;
-};
-
-type AvatarImageUploadResponse = {
-  path: string;
-  url: string;
-  contentType: string;
-  sizeBytes: number;
-};
-
-type AvatarCropDraft = {
-  absolutePath: string;
-  fileName: string;
-  objectUrl: string;
-  imageWidth: number;
-  imageHeight: number;
-  zoom: number;
-  offsetX: number;
-  offsetY: number;
-};
-
-type AvatarCropDrag = {
-  pointerId: number;
-  startClientX: number;
-  startClientY: number;
-  startOffsetX: number;
-  startOffsetY: number;
-};
-
-const AVATAR_CROP_FRAME_SIZE = 320;
-const AVATAR_CROP_PREVIEW_SIZE = 112;
-const AVATAR_CROP_OUTPUT_SIZE = 512;
-
-function avatarImagePreviewUrl(value: unknown): string {
-  const path = getString(value).replace(/\\/g, "/").trim();
-  const prefix = "workspace/user_avatars/";
-  if (!path.startsWith(prefix)) {
-    return "";
-  }
-  const filename = path.slice(prefix.length);
-  if (!/^[A-Za-z0-9_.-]+$/.test(filename)) {
-    return "";
-  }
-  return `/api/config/avatar-image/${encodeURIComponent(filename)}`;
-}
-
-function avatarImageDisplayName(value: unknown, copy: ConfigCopy): string {
-  const path = getString(value).replace(/\\/g, "/").trim();
-  if (!path) {
-    return copy.avatarImageEmpty;
-  }
-  return path.split("/").filter(Boolean).at(-1) ?? path;
-}
-
-function themeBackgroundImagePreviewUrl(value: unknown): string {
-  const path = getString(value).replace(/\\/g, "/").trim();
-  const prefix = "theme_backgrounds/";
-  if (!path.startsWith(prefix)) {
-    return "";
-  }
-  const filename = path.slice(prefix.length);
-  if (!/^[A-Za-z0-9_.-]+$/.test(filename)) {
-    return "";
-  }
-  return `/api/config/theme-background-image/${encodeURIComponent(filename)}`;
-}
-
-function configEditorFieldKind(meta: ConfigEditorMeta | undefined): ConfigEditorMeta["kind"] | "background_image" {
-  return (meta?.kind ?? "text") as ConfigEditorMeta["kind"] | "background_image";
-}
-
-function isDenseConfigSection(section: ConfigEditorSection): boolean {
-  return Number(section.fieldCount || 0) >= 12;
-}
-
-function ConfigSectionEditor({
-  section,
-  value,
-  metaMap,
-  lang,
-  copy,
-  disabled,
-  uiState,
-  onUiStateChange,
-  onSaveSection,
-  onAvatarImageUpload,
-  onThemeBackgroundImageUpload,
-}: ConfigSectionEditorProps) {
-  const sectionExpanded = uiState.expanded;
-  const editing = uiState.editing;
-  const advancedExpanded = uiState.advancedExpanded;
-  const expandedPaths = uiState.expandedPaths;
-  const presentation = configSectionPresentation(section.id, lang);
-  const tierCounts = configSectionTierCounts(section.id, section.fieldCount);
-  const draftValue = editing ? (uiState.draftValue ?? value) : value;
-  const sectionClassName = [
-    styles.sectionSurface,
-    styles.configEditorSection,
-    isDenseConfigSection(section) && !presentation ? styles.configDenseSection : "",
-  ].filter(Boolean).join(" ");
-  const [uploadingImagePath, setUploadingImagePath] = useState("");
-  const [avatarCrop, setAvatarCrop] = useState<AvatarCropDraft | null>(null);
-  const [avatarCropError, setAvatarCropError] = useState("");
-  const avatarCropDragRef = useRef<AvatarCropDrag | null>(null);
-
-  useEffect(() => {
-    const objectUrl = avatarCrop?.objectUrl;
-    return () => {
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
-      }
-    };
-  }, [avatarCrop?.objectUrl]);
-
-  function updateSectionDraft(absolutePath: string, nextValue: unknown) {
-    const prefix = `${section.path}.`;
-    const relativePath = absolutePath === section.path ? "" : absolutePath.startsWith(prefix) ? absolutePath.slice(prefix.length) : absolutePath;
-    const currentDraft = editing ? draftValue : value;
-    onUiStateChange(section.id, {
-      ...uiState,
-      editing: true,
-      expanded: true,
-      draftValue: setValueAtConfigPath(currentDraft, relativePath, nextValue),
-    });
-  }
-
-  function toggleObjectPath(path: string) {
-    onUiStateChange(section.id, {
-      ...uiState,
-      expandedPaths: { ...expandedPaths, [path]: !expandedPaths[path] },
-    });
-  }
-
-  function clampAvatarCrop(next: AvatarCropDraft): AvatarCropDraft {
-    const offset = clampAvatarCropOffset({
-      imageWidth: next.imageWidth,
-      imageHeight: next.imageHeight,
-      frameSize: AVATAR_CROP_FRAME_SIZE,
-      zoom: next.zoom,
-      offsetX: next.offsetX,
-      offsetY: next.offsetY,
-    });
-    return { ...next, ...offset };
-  }
-
-  async function beginAvatarCrop(file: File, absolutePath: string) {
-    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
-      throw new Error("头像只支持 PNG、JPG 或 WebP 图片。");
-    }
-    const image = await loadImageForCrop(file);
-    setAvatarCropError("");
-    setAvatarCrop((current) => {
-      if (current?.objectUrl) {
-        URL.revokeObjectURL(current.objectUrl);
-      }
-      return clampAvatarCrop({
-        absolutePath,
-        fileName: file.name,
-        objectUrl: image.objectUrl,
-        imageWidth: image.width,
-        imageHeight: image.height,
-        zoom: 1,
-        offsetX: 0,
-        offsetY: 0,
-      });
-    });
-  }
-
-  async function confirmAvatarCrop() {
-    if (!avatarCrop) {
-      return;
-    }
-    setUploadingImagePath(avatarCrop.absolutePath);
-    try {
-      const croppedFile = await createCroppedAvatarFile(avatarCrop);
-      const result = await onAvatarImageUpload(croppedFile);
-      if (result?.path) {
-        updateSectionDraft(avatarCrop.absolutePath, result.path);
-        setAvatarCrop(null);
-      }
-    } catch (error) {
-      setAvatarCropError(readableErrorMessage(error));
-    } finally {
-      setUploadingImagePath("");
-    }
-  }
-
-  function cancelAvatarCrop() {
-    setAvatarCropError("");
-    setAvatarCrop(null);
-  }
-
-  async function handleSave() {
-    const ok = await onSaveSection(section.path, draftValue);
-    if (ok) {
-      onUiStateChange(section.id, {
-        ...uiState,
-        editing: false,
-        draftValue: undefined,
-      });
-    }
-  }
-
-  async function uploadThemeBackgroundFile(file: File, absolutePath: string) {
-    setUploadingImagePath(absolutePath);
-    try {
-      const uploaded = await onThemeBackgroundImageUpload(file);
-      if (uploaded) {
-        updateSectionDraft(absolutePath, uploaded.path);
-      }
-    } finally {
-      setUploadingImagePath("");
-    }
-  }
-
-  function themeBackgroundDisplayName(value: unknown): string {
-    const path = getString(value).replace(/\\/g, "/").trim();
-    if (!path) {
-      return copy.emptyValue;
-    }
-    return path.split("/").filter(Boolean).at(-1) ?? path;
-  }
-
-  function renderThemeBackgroundControl(fieldValue: unknown, absolutePath: string) {
-    const previewUrl = themeBackgroundImagePreviewUrl(fieldValue);
-    const imageUploading = uploadingImagePath === absolutePath;
-    const currentPath = getString(fieldValue).replace(/\\/g, "/").trim();
-    const presetOptions = metaMap[absolutePath]?.options ?? [];
-    return (
-      <div className={styles.themeBackgroundImageEditor}>
-        <div className={styles.themeBackgroundImageValue}>
-          <label
-            className={styles.themeBackgroundDropButton}
-            title={copy.uploadThemeBackgroundImage}
-            aria-label={copy.uploadThemeBackgroundImage}
-          >
-            {previewUrl ? (
-              <img src={previewUrl} alt="" className={styles.themeBackgroundImagePreview} />
-            ) : (
-              <span className={styles.themeBackgroundImagePlaceholder}>
-                <ImageIcon size={16} />
-              </span>
-            )}
-            <VInput
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              disabled={disabled || imageUploading}
-              onChange={async (event) => {
-                const file = event.currentTarget.files?.[0];
-                event.currentTarget.value = "";
-                if (!file) {
-                  return;
-                }
-                await uploadThemeBackgroundFile(file, absolutePath);
-              }}
-            />
-          </label>
-          <div className={styles.themeBackgroundImageMeta}>
-            <strong>{configLabel(metaMap, absolutePath, lang)}</strong>
-            <span>{themeBackgroundDisplayName(fieldValue)}</span>
-            <div className={styles.themeBackgroundImageActions}>
-              <label className={`${styles.actionButton} ${styles.compactButton} ${styles.fileUploadButton}`}>
-                <Upload size={14} />
-                {imageUploading ? copy.themeBackgroundImageUploading : copy.uploadThemeBackgroundImage}
-                <VInput
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp"
-                  disabled={disabled || imageUploading}
-                  onChange={async (event) => {
-                    const file = event.currentTarget.files?.[0];
-                    event.currentTarget.value = "";
-                    if (!file) {
-                      return;
-                    }
-                    await uploadThemeBackgroundFile(file, absolutePath);
-                  }}
-                />
-              </label>
-              {getString(fieldValue) ? (
-                <VButton
-                  type="button"
-                  className={`${styles.actionButton} ${styles.compactButton}`}
-                  isDisabled={disabled || imageUploading}
-                  onClick={() => updateSectionDraft(absolutePath, "")}
- icon={<X size={14} />}>
-                    {copy.clearThemeBackgroundImage}
-                  </VButton>
-              ) : null}
-            </div>
-          </div>
-        </div>
-        {presetOptions.length ? (
-          <div className={styles.themeBackgroundPresetPanel} aria-label={copy.themeBackgroundPresetTitle}>
-            <span className={styles.themeBackgroundPresetTitle}>{copy.themeBackgroundPresetTitle}</span>
-            <div className={styles.themeBackgroundPresetGrid}>
-              {presetOptions.map((option) => {
-                const optionPreviewUrl = themeBackgroundImagePreviewUrl(option.value);
-                const active = currentPath === option.value;
-                return (
-                  <VButton
-                    key={option.value}
-                    type="button"
-                    contentLayout="plain"
-                    className={styles.themeBackgroundPresetButton}
-                    data-active={active ? "true" : undefined}
-                    isDisabled={disabled || imageUploading}
-                    aria-pressed={active}
-                    title={option.label}
-                    onClick={() => updateSectionDraft(absolutePath, option.value)}
-                  >
-                    {optionPreviewUrl ? <img src={optionPreviewUrl} alt="" /> : <ImageIcon size={14} />}
-                    <span>{option.label}</span>
-                    {active ? <em>{lang === "zh" ? "当前" : "Current"}</em> : null}
-                  </VButton>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
-      </div>
-    );
-  }
-
-  function renderFieldView(fieldValue: unknown, absolutePath: string) {
-    const meta = metaMap[absolutePath];
-    const kind = configEditorFieldKind(meta);
-    if (kind === "background_image") {
-      const hint = configHint(metaMap, absolutePath, lang);
-      return (
-        <article
-          key={absolutePath}
-          className={`${styles.treeFieldCard} ${styles.treeFieldCardView} ${styles.themeBackgroundImageCard}`}
-          title={hint || undefined}
-        >
-          {renderThemeBackgroundControl(fieldValue, absolutePath)}
-        </article>
-      );
-    }
-    if (kind === "image") {
-      const previewUrl = avatarImagePreviewUrl(fieldValue);
-      const displayName = avatarImageDisplayName(fieldValue, copy);
-      return (
-        <article
-          key={absolutePath}
-          className={`${styles.treeFieldCard} ${styles.treeFieldCardView} ${styles.avatarImageCard}`}
-        >
-          <div className={styles.treeFieldHead}>
-            <span className={styles.treeFieldLabel}>{configLabel(metaMap, absolutePath, lang)}</span>
-          </div>
-          {configHint(metaMap, absolutePath, lang) ? <p className={styles.treeHint}>{configHint(metaMap, absolutePath, lang)}</p> : null}
-          <div className={styles.avatarImageValue}>
-            {previewUrl ? (
-              <img src={previewUrl} alt="" className={styles.avatarImagePreview} />
-            ) : (
-              <span className={styles.avatarImagePlaceholder}>
-                <ImageIcon size={16} />
-              </span>
-            )}
-            <div className={styles.avatarImageMeta}>
-              <strong>{previewUrl ? copy.avatarImageCurrent : copy.avatarImageEmpty}</strong>
-              <span>{displayName}</span>
-            </div>
-          </div>
-        </article>
-      );
-    }
-    return (
-      <article key={absolutePath} className={`${styles.treeFieldCard} ${styles.treeFieldCardView}`}>
-        <div className={styles.treeFieldHead}>
-          <span className={styles.treeFieldLabel}>{configLabel(metaMap, absolutePath, lang)}</span>
-        </div>
-        {configHint(metaMap, absolutePath, lang) ? <p className={styles.treeHint}>{configHint(metaMap, absolutePath, lang)}</p> : null}
-        <div className={styles.treeFieldValue}>{formatConfigDisplayValue(fieldValue, meta?.kind, copy)}</div>
-      </article>
-    );
-  }
-
-  function renderFieldEditor(fieldValue: unknown, absolutePath: string) {
-    const meta = metaMap[absolutePath];
-    const kind = configEditorFieldKind(meta);
-    const imageUploading = uploadingImagePath === absolutePath;
-    let control;
-
-    if (kind === "background_image") {
-      control = renderThemeBackgroundControl(fieldValue, absolutePath);
-    } else if (kind === "image") {
-      const previewUrl = avatarImagePreviewUrl(fieldValue);
-      const displayName = avatarImageDisplayName(fieldValue, copy);
-      const cropDraft = avatarCrop?.absolutePath === absolutePath ? avatarCrop : null;
-      const cropScale = cropDraft
-        ? (AVATAR_CROP_FRAME_SIZE / Math.min(cropDraft.imageWidth, cropDraft.imageHeight)) * cropDraft.zoom
-        : 1;
-      const cropImageStyle: CSSProperties | undefined = cropDraft
-        ? {
-            width: cropDraft.imageWidth * cropScale,
-            height: cropDraft.imageHeight * cropScale,
-            transform: `translate(calc(-50% + ${cropDraft.offsetX}px), calc(-50% + ${cropDraft.offsetY}px))`,
-          }
-        : undefined;
-      const cropPreviewRatio = AVATAR_CROP_PREVIEW_SIZE / AVATAR_CROP_FRAME_SIZE;
-      const cropPreviewImageStyle: CSSProperties | undefined = cropDraft
-        ? {
-            width: cropDraft.imageWidth * cropScale * cropPreviewRatio,
-            height: cropDraft.imageHeight * cropScale * cropPreviewRatio,
-            transform: `translate(calc(-50% + ${cropDraft.offsetX * cropPreviewRatio}px), calc(-50% + ${cropDraft.offsetY * cropPreviewRatio}px))`,
-          }
-        : undefined;
-      control = (
-        <div className={styles.avatarImageEditor}>
-          <div className={styles.avatarImageValue}>
-            <label
-              className={styles.avatarImageDropButton}
-              title={copy.avatarImageClickToUpload}
-              aria-label={copy.avatarImageClickToUpload}
-            >
-              {previewUrl ? (
-                <img src={previewUrl} alt="" className={styles.avatarImagePreview} />
-              ) : (
-                <span className={styles.avatarImagePlaceholder}>
-                  <ImageIcon size={16} />
-                </span>
-              )}
-              <span className={styles.avatarImageUploadCue}>
-                <Upload size={12} />
-              </span>
-              <VInput
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                disabled={disabled || imageUploading}
-                onChange={async (event) => {
-                  const file = event.currentTarget.files?.[0];
-                  event.currentTarget.value = "";
-                  if (!file) {
-                    return;
-                  }
-                  try {
-                    await beginAvatarCrop(file, absolutePath);
-                  } catch (error) {
-                    setAvatarCropError(readableErrorMessage(error));
-                  } finally {
-                    setUploadingImagePath("");
-                  }
-                }}
-              />
-            </label>
-            <div className={styles.avatarImageMeta}>
-              <strong>{configLabel(metaMap, absolutePath, lang)}</strong>
-              <span>{displayName}</span>
-            </div>
-          </div>
-          {cropDraft ? (
-            <div className={styles.avatarCropPanel}>
-              <div className={styles.avatarCropHeader}>
-                <div>
-                  <strong>{copy.avatarCropTitle}</strong>
-                  <p>{copy.avatarCropHint}</p>
-                </div>
-                <span>{copy.avatarCropPreview}</span>
-              </div>
-              <div className={styles.avatarCropWorkspace}>
-                <div
-                  className={styles.avatarCropFrame}
-                  onPointerDown={(event) => {
-                    event.currentTarget.setPointerCapture(event.pointerId);
-                    avatarCropDragRef.current = {
-                      pointerId: event.pointerId,
-                      startClientX: event.clientX,
-                      startClientY: event.clientY,
-                      startOffsetX: cropDraft.offsetX,
-                      startOffsetY: cropDraft.offsetY,
-                    };
-                  }}
-                  onPointerMove={(event) => {
-                    const drag = avatarCropDragRef.current;
-                    if (!drag || drag.pointerId !== event.pointerId) {
-                      return;
-                    }
-                    const next = clampAvatarCrop({
-                      ...cropDraft,
-                      offsetX: drag.startOffsetX + event.clientX - drag.startClientX,
-                      offsetY: drag.startOffsetY + event.clientY - drag.startClientY,
-                    });
-                    setAvatarCrop(next);
-                  }}
-                  onPointerUp={(event) => {
-                    if (avatarCropDragRef.current?.pointerId === event.pointerId) {
-                      avatarCropDragRef.current = null;
-                    }
-                  }}
-                  onPointerCancel={() => {
-                    avatarCropDragRef.current = null;
-                  }}
-                >
-                  <img src={cropDraft.objectUrl} alt="" className={styles.avatarCropImage} style={cropImageStyle} draggable={false} />
-                  <span className={styles.avatarCropMask} />
-                </div>
-                <div className={styles.avatarCropPreviewWrap}>
-                  <div className={styles.avatarCropPreview}>
-                    <img src={cropDraft.objectUrl} alt="" className={styles.avatarCropImage} style={cropPreviewImageStyle} draggable={false} />
-                  </div>
-                </div>
-              </div>
-              <label className={styles.avatarCropZoomField}>
-                <span>{copy.avatarCropZoom}</span>
-                <VInput
-                  type="range"
-                  min="1"
-                  max="3"
-                  step="0.01"
-                  value={cropDraft.zoom}
-                  onChange={(event) => {
-                    const zoom = Number(event.target.value);
-                    setAvatarCrop(clampAvatarCrop({ ...cropDraft, zoom }));
-                  }}
-                />
-              </label>
-              <div className={styles.avatarImageActions}>
-                <VButton
-                  type="button"
-                  className={`${styles.primaryButton} ${styles.compactButton}`}
-                  isDisabled={disabled || imageUploading}
-                  onClick={() => {
-                    void confirmAvatarCrop();
-                  }}
-
-                    icon={<Save size={14} />}
-                  >
-                    {imageUploading ? copy.avatarImageUploading : copy.avatarCropConfirm}
-                  </VButton>
-                <VButton
-                  type="button"
-                  className={`${styles.actionButton} ${styles.compactButton}`}
-                  isDisabled={disabled || imageUploading}
-                  onClick={cancelAvatarCrop}
- icon={<X size={14} />}>
-                  {copy.avatarCropCancel}
-                </VButton>
-              </div>
-            </div>
-          ) : null}
-          <div className={styles.avatarImageActions}>
-            <label className={`${styles.actionButton} ${styles.compactButton} ${styles.fileUploadButton}`}>
-              <Upload size={14} />
-              {cropDraft ? copy.uploadAvatarImage : imageUploading ? copy.avatarImageUploading : copy.uploadAvatarImage}
-              <VInput
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                disabled={disabled || imageUploading}
-                onChange={async (event) => {
-                  const file = event.currentTarget.files?.[0];
-                  event.currentTarget.value = "";
-                  if (!file) {
-                    return;
-                  }
-                  try {
-                    await beginAvatarCrop(file, absolutePath);
-                  } catch (error) {
-                    setAvatarCropError(readableErrorMessage(error));
-                  } finally {
-                    setUploadingImagePath("");
-                  }
-                }}
-              />
-            </label>
-            {getString(fieldValue) ? (
-              <VButton
-                type="button"
-                className={`${styles.actionButton} ${styles.compactButton}`}
-                isDisabled={disabled || imageUploading}
-                onClick={() => updateSectionDraft(absolutePath, "")}
- icon={<X size={14} />}>
-                  {copy.clearAvatarImage}
-                </VButton>
-            ) : null}
-          </div>
-          {avatarCropError ? <p className={styles.inlineError}>{avatarCropError}</p> : null}
-        </div>
-      );
-    } else if (kind === "boolean") {
-      control = (
-        <VCheckbox
-          className={styles.toggleField}
-          isSelected={Boolean(fieldValue)}
-          onChange={(isSelected) => updateSectionDraft(absolutePath, isSelected)}
-        >
-          {configLabel(metaMap, absolutePath, lang)}
-        </VCheckbox>
-      );
-    } else if (kind === "select") {
-      control = (
-        <label className={styles.field}>
-          <span>{configLabel(metaMap, absolutePath, lang)}</span>
-          <VStringSelect
-            ariaLabel={configLabel(metaMap, absolutePath, lang)}
-            value={getString(fieldValue)}
-            options={(meta?.options ?? []).map((option) => ({
-              value: option.value,
-              label: option.label,
-            }))}
-            onValueChange={(nextValue) => updateSectionDraft(absolutePath, nextValue)}
-          />
-        </label>
-      );
-    } else if (kind === "number") {
-      control = (
-        <label className={styles.field}>
-          <span>{configLabel(metaMap, absolutePath, lang)}</span>
-          <VInput
-            type="number"
-            step="any"
-            value={getString(fieldValue)}
-            onChange={(event) => {
-              const raw = event.target.value;
-              updateSectionDraft(absolutePath, raw === "" ? "" : Number(raw));
-            }}
-          />
-        </label>
-      );
-    } else if (kind === "string_list") {
-      control = (
-        <label className={styles.field}>
-          <span>{configLabel(metaMap, absolutePath, lang)}</span>
-          <VTextarea
-            minRows={Math.max(4, Array.isArray(fieldValue) ? fieldValue.length + 1 : 4)}
-            value={Array.isArray(fieldValue) ? fieldValue.join("\n") : getString(fieldValue)}
-            onChange={(event) =>
-              updateSectionDraft(
-                absolutePath,
-                event.target.value
-                  .split(/\r?\n/)
-                  .map((line) => line.trim())
-                  .filter(Boolean),
-              )
-            }
-          />
-        </label>
-      );
-    } else if (kind === "multiline") {
-      control = (
-        <label className={styles.field}>
-          <span>{configLabel(metaMap, absolutePath, lang)}</span>
-          <VTextarea
-            minRows={10}
-            value={getString(fieldValue)}
-            onChange={(event) => updateSectionDraft(absolutePath, event.target.value)}
-          />
-        </label>
-      );
-    } else if (kind === "json") {
-      control = (
-        <label className={styles.field}>
-          <span>{configLabel(metaMap, absolutePath, lang)}</span>
-          <VTextarea
-            minRows={6}
-            value={typeof fieldValue === "string" ? fieldValue : formatJson(fieldValue)}
-            onChange={(event) => {
-              const raw = event.target.value;
-              try {
-                updateSectionDraft(absolutePath, JSON.parse(raw));
-              } catch {
-                updateSectionDraft(absolutePath, raw);
-              }
-            }}
-          />
-        </label>
-      );
-    } else {
-      control = (
-        <label className={styles.field}>
-          <span>{configLabel(metaMap, absolutePath, lang)}</span>
-          <VInput
-            type={kind === "secret" ? "password" : "text"}
-            value={getString(fieldValue)}
-            onChange={(event) => updateSectionDraft(absolutePath, event.target.value)}
-          />
-        </label>
-      );
-    }
-
-    const hint = configHint(metaMap, absolutePath, lang);
-    const fieldCardClassName =
-      kind === "background_image"
-        ? `${styles.treeFieldCard} ${styles.treeFieldCardEdit} ${styles.themeBackgroundImageCard}`
-        : `${styles.treeFieldCard} ${styles.treeFieldCardEdit}`;
-
-    return (
-      <article key={absolutePath} className={fieldCardClassName} title={kind === "background_image" && hint ? hint : undefined}>
-        {control}
-        {kind !== "background_image" && hint ? <p className={styles.treeHint}>{hint}</p> : null}
-      </article>
-    );
-  }
-
-  function renderNestedBlock(absolutePath: string, count: number, children: ReactNode, titleOverride?: string) {
-    const expanded = Boolean(expandedPaths[absolutePath]);
-    return (
-      <div className={styles.treeObjectBlock}>
-        <VButton
-          type="button"
-          contentLayout="plain"
-          className={styles.treeToggle}
-          aria-expanded={expanded}
-          onClick={() => toggleObjectPath(absolutePath)}
-        >
-          <div className={styles.treeToggleLabel}>
-            <ChevronRight size={14} className={expanded ? styles.treeToggleIconExpanded : styles.treeToggleIcon} />
-            <div>
-              <p className={styles.cardTitle}>{titleOverride ?? configLabel(metaMap, absolutePath, lang)}</p>
-              {configHint(metaMap, absolutePath, lang) ? <p className={styles.treeHint}>{configHint(metaMap, absolutePath, lang)}</p> : null}
-            </div>
-          </div>
-          <VStatusChip tone="neutral">{count}</VStatusChip>
-        </VButton>
-        {expanded ? <div className={styles.treeBody}>{children}</div> : null}
-      </div>
-    );
-  }
-
-  function renderConfigField(childValue: unknown, childPath: string, mode: "view" | "edit") {
-    return mode === "edit" ? renderFieldEditor(childValue, childPath) : renderFieldView(childValue, childPath);
-  }
-
-  function renderUserProfileBody(nodeValue: Record<string, unknown>, absolutePath: string, mode: "view" | "edit") {
-    if (!presentation) {
-      return null;
-    }
-    const field = (key: string) => renderConfigField(nodeValue[key], `${absolutePath}.${key}`, mode);
-    return (
-      <div className={styles.userProfileLayout}>
-        <div className={styles.configTier}>
-          <div className={styles.configTierHeader}>
-            <div className={styles.configTierHeaderCopy}>
-              <strong>{presentation.commonTitle}</strong>
-              <span>{presentation.commonHint}</span>
-            </div>
-            <VStatusChip tone="neutral">{presentation.advancedCountLabel(tierCounts.common)}</VStatusChip>
-          </div>
-          <div className={styles.userProfilePrimaryGrid}>
-            <div className={styles.userProfileIdentityFields}>{field("display_name")}</div>
-            <div className={styles.userProfileAvatarGroup}>
-              <div className={styles.userProfileAvatarHeader}>
-                <strong>{copy.userProfileAvatarGroupTitle}</strong>
-                <span>{copy.userProfileAvatarGroupHint}</span>
-              </div>
-              <div className={styles.userProfileAvatarFields}>
-                {field("avatar_preset")}
-                {field("avatar_image_path")}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className={`${styles.configTier} ${styles.configAdvancedTier}`}>
-          <VButton
-            type="button"
-            contentLayout="plain"
-            className={styles.configAdvancedToggle}
-            aria-expanded={advancedExpanded}
-            onClick={() => {
-              onUiStateChange(section.id, {
-                ...uiState,
-                advancedExpanded: !advancedExpanded,
-              });
-            }}
-          >
-            <div className={styles.configTierHeaderCopy}>
-              <strong>{presentation.advancedTitle}</strong>
-              <span>{presentation.advancedHint}</span>
-            </div>
-            <div className={styles.configAdvancedToggleMeta}>
-              <VStatusChip tone="neutral">{presentation.advancedCountLabel(tierCounts.advanced)}</VStatusChip>
-              <ChevronRight
-                size={16}
-                className={advancedExpanded ? styles.treeToggleIconExpanded : styles.treeToggleIcon}
-              />
-            </div>
-          </VButton>
-          {advancedExpanded ? (
-            <div className={`${styles.configAdvancedBody} ${styles.userProfileAdvancedFields}`}>
-              {field("bio")}
-              {field("preferences")}
-            </div>
-          ) : null}
-        </div>
-      </div>
-    );
-  }
-
-  function renderObjectEntry(
-    [key, childValue]: [string, unknown],
-    absolutePath: string,
-    mode: "view" | "edit",
-  ) {
-    const childPath = `${absolutePath}.${key}`;
-    const childMetaKind = metaMap[childPath]?.kind;
-    const childIsObjectList = isConfigObjectListValue(childValue, childMetaKind);
-    const childIsObject = isPlainObject(childValue);
-    if (childIsObject || childIsObjectList) {
-      const childExpanded = Boolean(expandedPaths[childPath]);
-      return (
-        <div key={childPath} className={childExpanded ? styles.treeWide : styles.treeObjectCell}>
-          {renderNode(childValue, childPath, mode)}
-        </div>
-      );
-    }
-    return renderConfigField(childValue, childPath, mode);
-  }
-
-  function renderObjectBody(nodeValue: Record<string, unknown>, absolutePath: string, mode: "view" | "edit") {
-    const entries = Object.entries(nodeValue).filter(([key]) => {
-      if (absolutePath !== section.path) return true;
-      const childPath = `${absolutePath}.${key}`;
-      return Boolean(metaMap[childPath]);
-    });
-    if (!entries.length) {
-      return <p className={styles.helperText}>{copy.emptyValue}</p>;
-    }
-    if (absolutePath === "user_profile") {
-      return renderUserProfileBody(nodeValue, absolutePath, mode);
-    }
-    if (absolutePath === section.path && presentation) {
-      const commonEntries = entries.filter(([key]) => {
-        const childPath = `${absolutePath}.${key}`;
-        return isCommonConfigSectionEntry(section.id, childPath);
-      });
-      const advancedEntries = entries.filter(([key]) => {
-        const childPath = `${absolutePath}.${key}`;
-        return !isCommonConfigSectionEntry(section.id, childPath);
-      });
-      return (
-        <div
-          className={`${styles.configProgressiveBody} ${
-            presentation.layout === "compact_paths" ? styles.configCompactPathProgressiveBody : ""
-          } ${presentation.layout === "compact_paths" && advancedEntries.length > 0 ? styles.configCompactAdvancedProgressiveBody : ""}`}
-        >
-          <div className={styles.configTier}>
-            <div className={styles.configTierHeader}>
-              <div className={styles.configTierHeaderCopy}>
-                <strong>{presentation.commonTitle}</strong>
-                <span>{presentation.commonHint}</span>
-              </div>
-              <VStatusChip tone="neutral">{presentation.advancedCountLabel(tierCounts.common)}</VStatusChip>
-            </div>
-            <div
-              className={styles.treeGrid}
-            >
-              {commonEntries.map((entry) => renderObjectEntry(entry, absolutePath, mode))}
-            </div>
-          </div>
-
-          {advancedEntries.length > 0 ? (
-            <div className={`${styles.configTier} ${styles.configAdvancedTier}`}>
-              <VButton
-                type="button"
-                contentLayout="plain"
-                className={styles.configAdvancedToggle}
-                aria-expanded={advancedExpanded}
-                onClick={() => {
-                  onUiStateChange(section.id, {
-                    ...uiState,
-                    advancedExpanded: !advancedExpanded,
-                  });
-                }}
-              >
-                <div className={styles.configTierHeaderCopy}>
-                  <strong>{presentation.advancedTitle}</strong>
-                  <span>{presentation.advancedHint}</span>
-                </div>
-                <div className={styles.configAdvancedToggleMeta}>
-                  <VStatusChip tone="neutral">{presentation.advancedCountLabel(tierCounts.advanced)}</VStatusChip>
-                  <ChevronRight
-                    size={16}
-                    className={advancedExpanded ? styles.treeToggleIconExpanded : styles.treeToggleIcon}
-                  />
-                </div>
-              </VButton>
-              {advancedExpanded ? (
-                <div className={styles.configAdvancedBody}>
-                  <div className={`${styles.treeGrid} ${styles.configAdvancedGrid}`}>
-                    {advancedEntries.map((entry) => renderObjectEntry(entry, absolutePath, mode))}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      );
-    }
-    return (
-      <div className={styles.treeGrid}>
-        {entries.map((entry) => renderObjectEntry(entry, absolutePath, mode))}
-      </div>
-    );
-  }
-
-  function renderNode(nodeValue: unknown, absolutePath: string, mode: "view" | "edit", itemIndex?: number) {
-    const isRoot = absolutePath === section.path;
-    if (isConfigObjectListValue(nodeValue, metaMap[absolutePath]?.kind)) {
-      if (isRoot) {
-        return nodeValue.length ? (
-          <div className={styles.treeStack}>
-            {nodeValue.map((item, index) => (
-              <div key={`${absolutePath}.${index}`} className={styles.treeNestedBlock}>
-                <div className={styles.treeNestedHeader}>
-                  <strong>{`${copy.itemLabel} ${index + 1}`}</strong>
-                </div>
-                {renderObjectBody(item as Record<string, unknown>, `${absolutePath}.${index}`, mode)}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className={styles.helperText}>{copy.emptyValue}</p>
-        );
-      }
-
-      return renderNestedBlock(
-        absolutePath,
-        nodeValue.length,
-        nodeValue.length ? (
-          <div className={styles.treeStack}>
-            {nodeValue.map((item, index) => (
-              <div key={`${absolutePath}.${index}`} className={styles.treeNestedBlock}>
-                <div className={styles.treeNestedHeader}>
-                  <strong>{`${copy.itemLabel} ${index + 1}`}</strong>
-                </div>
-                {renderObjectBody(item as Record<string, unknown>, `${absolutePath}.${index}`, mode)}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className={styles.helperText}>{copy.emptyValue}</p>
-        ),
-      );
-    }
-
-    if (isPlainObject(nodeValue)) {
-      if (isRoot) {
-        return renderObjectBody(nodeValue, absolutePath, mode);
-      }
-      const label = itemIndex == null ? configLabel(metaMap, absolutePath, lang) : `${copy.itemLabel} ${itemIndex + 1}`;
-      return (
-        <>{renderNestedBlock(absolutePath, Object.keys(nodeValue).length, renderObjectBody(nodeValue, absolutePath, mode), label)}</>
-      );
-    }
-
-    return mode === "edit" ? renderFieldEditor(nodeValue, absolutePath) : renderFieldView(nodeValue, absolutePath);
-  }
-
-  return (
-    <VSurface as="section" id={`config-${section.id}`} className={sectionClassName} padding="none">
-      <div className={styles.sectionHeader}>
-        <div className={styles.sectionHeaderMain}>
-          <p className={styles.eyebrow}>{section.path}</p>
-          <h2 className={styles.sectionTitle}>{presentation?.sectionTitle ?? section.title}</h2>
-          <p className={styles.sectionText}>{presentation?.sectionSummary ?? section.summary}</p>
-        </div>
-        <div className={styles.sectionHeaderActions}>
-          <div className={styles.sectionToolbarGroup}>
-            <VButton
-              type="button"
-              className={`${styles.actionButton} ${styles.compactButton} ${styles.toolbarButton}`}
-              aria-expanded={sectionExpanded}
-              onClick={() => onUiStateChange(section.id, { ...uiState, expanded: !sectionExpanded })}
-
-                icon={<ChevronRight size={14} className={sectionExpanded ? styles.treeToggleIconExpanded : styles.treeToggleIcon}/>}
-              >
-                {sectionExpanded ? copy.collapseSection : copy.expandSection}
-              </VButton>
-          {editing ? (
-            <>
-              <VButton
-                type="button"
-                className={`${styles.primaryButton} ${styles.compactButton} ${styles.toolbarButton}`}
-                isDisabled={disabled}
-                onClick={handleSave}
- icon={<Save size={14} />}>
-                  {copy.saveSection}
-                </VButton>
-              <VButton
-                type="button"
-                className={`${styles.actionButton} ${styles.compactButton} ${styles.toolbarButton}`}
-                isDisabled={disabled}
-                onClick={() => {
-                  onUiStateChange(section.id, {
-                    ...uiState,
-                    expanded: true,
-                    editing: false,
-                    draftValue: undefined,
-                  });
-                }}
- icon={<RotateCcw size={14} />}>
-                  {copy.cancelSection}
-                </VButton>
-            </>
-          ) : (
-            <VButton
-              type="button"
-              className={`${styles.actionButton} ${styles.compactButton} ${styles.toolbarButton}`}
-              isDisabled={disabled}
-              onClick={() => {
-                onUiStateChange(section.id, {
-                  ...uiState,
-                  expanded: true,
-                  editing: true,
-                  draftValue: clonePublicConfig(value),
-                });
-              }}
- icon={<Pencil size={14} />}>
-                {copy.editSection}
-              </VButton>
-          )}
-          </div>
-        </div>
-      </div>
-      {sectionExpanded ? renderNode(editing ? draftValue : value, section.path, editing ? "edit" : "view") : null}
-    </VSurface>
-  );
-}
-
-async function fileToBase64(file: File): Promise<string> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    const chunk = bytes.subarray(index, index + chunkSize);
-    binary += String.fromCharCode(...chunk);
-  }
-  return btoa(binary);
-}
-
-function loadImageForCrop(file: File): Promise<{ objectUrl: string; width: number; height: number }> {
-  return new Promise((resolve, reject) => {
-    const objectUrl = URL.createObjectURL(file);
-    const image = new Image();
-    image.onload = () => {
-      resolve({ objectUrl, width: image.naturalWidth, height: image.naturalHeight });
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error("无法读取这张图片。"));
-    };
-    image.src = objectUrl;
-  });
-}
-
-function loadImageElement(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("无法读取裁剪后的图片。"));
-    image.src = src;
-  });
-}
-
-async function createCroppedAvatarFile(draft: AvatarCropDraft): Promise<File> {
-  const image = await loadImageElement(draft.objectUrl);
-  const canvas = document.createElement("canvas");
-  canvas.width = AVATAR_CROP_OUTPUT_SIZE;
-  canvas.height = AVATAR_CROP_OUTPUT_SIZE;
-  const context = canvas.getContext("2d");
-  if (!context) {
-    throw new Error("当前浏览器无法裁剪图片。");
-  }
-  const source = avatarCropSourceRect({
-    imageWidth: draft.imageWidth,
-    imageHeight: draft.imageHeight,
-    frameSize: AVATAR_CROP_FRAME_SIZE,
-    zoom: draft.zoom,
-    offsetX: draft.offsetX,
-    offsetY: draft.offsetY,
-  });
-  context.drawImage(
-    image,
-    source.sx,
-    source.sy,
-    source.size,
-    source.size,
-    0,
-    0,
-    AVATAR_CROP_OUTPUT_SIZE,
-    AVATAR_CROP_OUTPUT_SIZE,
-  );
-  const blob = await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((result) => {
-      if (result) {
-        resolve(result);
-        return;
-      }
-      reject(new Error("头像裁剪失败。"));
-    }, "image/png");
-  });
-  const stem = draft.fileName.replace(/\.[^.]+$/, "").replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "avatar";
-  return new File([blob], `${stem}-cropped.png`, { type: "image/png" });
-}
 
 export function ConfigRoute() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const contentViewportRef = useRef<HTMLDivElement | null>(null);
-  const modelEditorRef = useRef<HTMLDivElement | null>(null);
-  const lastRequestedSectionRef = useRef("");
+  const lastRequestedSelectionRef = useRef("");
+  const lastFocusedSelectionRef = useRef("");
+  const pendingFocusSectionRef = useRef("");
   const providerDraftRequestRef = useRef<{
     publicConfig: PublicConfigShape;
     draftMeta: ConfigDraftMeta;
@@ -2225,15 +249,6 @@ export function ConfigRoute() {
   const [jsonText, setJsonText] = useState("{}");
   const [notice, setNotice] = useState<{ tone: NoticeTone; text: string }>({ tone: "neutral", text: "" });
   const [busyAction, setBusyAction] = useState("");
-  const [modelEditor, setModelEditor] = useState<ModelEditorState>(emptyModelEditorState());
-  const [selectedModelTestId, setSelectedModelTestId] = useState("");
-  const [modelEditorError, setModelEditorError] = useState("");
-  const [modelDiscoveryError, setModelDiscoveryError] = useState("");
-  const [discoveredModels, setDiscoveredModels] = useState<ConfigDiscoveredModel[]>([]);
-  const [selectedDiscoveredModelId, setSelectedDiscoveredModelId] = useState("");
-  const [selectedProviderVendorId, setSelectedProviderVendorId] = useState("");
-  const [selectedProviderId, setSelectedProviderId] = useState("");
-  const [selectedProviderTab, setSelectedProviderTab] = useState<ConfigProviderRegistryTab>("connection");
   const [providerConnecting, setProviderConnecting] = useState(false);
   const [providerShowMore, setProviderShowMore] = useState(false);
   const [providerQuickSetupState, dispatchProviderQuickSetup] = useReducer(
@@ -2242,19 +257,26 @@ export function ConfigRoute() {
     initialProviderQuickSetupState,
   );
   const [providerQuickCredential, setProviderQuickCredential] = useState("");
-  const [providerWizardState, dispatchProviderWizard] = useReducer(providerWizardReducer, undefined, initialProviderWizardState);
   const [migrationPreview, setMigrationPreview] = useState<ConfigMigrationPreview | null>(null);
-  const [routePreview, setRoutePreview] = useState<ProviderRoutePreview | null>(null);
-  const [routeEditProviderId, setRouteEditProviderId] = useState("");
-  const [routeEditProvider, setRouteEditProvider] = useState<Record<string, unknown>>({});
-  const [providerCredentialEditId, setProviderCredentialEditId] = useState("");
-  const [providerCredentialValue, setProviderCredentialValue] = useState("");
-  const [providerActionError, setProviderActionError] = useState("");
-  const [providerActionFeedback, setProviderActionFeedback] = useState<ProviderActionFeedback>(null);
-  const [modelEditorExpanded, setModelEditorExpanded] = useState(false);
   const [activeGroupId, setActiveGroupId] = useState(() => searchParams.get("section") ?? "");
   const [activePageId, setActivePageId] = useState("");
+  // 导航意图（settingsNavigation）：搜索选中/命令面板跳转的落地目标；
+  // 等待分区内容 ready（onContentReady / 依赖变化）后一次性消费。
+  const [pendingIntentFocus, setPendingIntentFocus] = useState<{ sectionId: string; fieldId: string } | null>(null);
+  // 字段深链的瞬态高亮（~2s 后摘除）。
+  const [fieldHighlight, setFieldHighlight] = useState<{ path: string } | null>(null);
+  const fieldHighlightTimerRef = useRef(0);
+  // 分区内容 ready 脉冲：ConfigSectionEditor 经意图模块广播，触发落地重放。
+  const [settingsReadyToken, setSettingsReadyToken] = useState(0);
+  // 「上次停留分区」恢复每次挂载只尝试一次。
+  const lastLocationRestoreAttemptedRef = useRef(false);
   const [sectionUiState, setSectionUiState] = useState<Record<string, ConfigSectionUiState>>({});
+  // 即时类字段（boolean/select）的行徽标生命周期：waiting → applied|failed。
+  const [immediateFieldStatus, setImmediateFieldStatus] = useState<Record<string, ImmediateFieldStatus>>({});
+  const immediateStatusTimersRef = useRef<Record<string, number>>({});
+  // 分区保存失败的行内错误（wave 4）：按分区 path 记录，落在该分区内，
+  // 不再占用全局 notice strip（那里保留给 apply/上传等真正全局的操作）。
+  const [sectionSaveErrors, setSectionSaveErrors] = useState<Record<string, string>>({});
   // Atomic edit baseline: only rewritten on full workspace load/apply, never on draft pin/key/route ops.
   // Keeps baseConfig + baseHash paired so apply after pin does not 409 with "配置基线已过期".
   const editBaselineRef = useRef<{ baseConfig: PublicConfigShape | null; baseHash: string }>({
@@ -2285,13 +307,6 @@ export function ConfigRoute() {
     setDraftHash(workspace.hash);
     setJsonText(formatJson(pickEditableConfigView(workspace.publicConfig, workspace.editorSections)));
     setNotice({ tone, text: workspace.message || "" });
-    setModelEditor(emptyModelEditorState());
-    setSelectedModelTestId((current) =>
-      current && workspace.modelOptions.some((option) => option.model_id === current)
-        ? current
-        : workspace.modelOptions[0]?.model_id ?? "",
-    );
-    setModelEditorError("");
   }
 
   useEffect(() => {
@@ -2304,6 +319,10 @@ export function ConfigRoute() {
   const currentLanguage = getDraftLanguage(draftConfig, workspace?.language === "en" ? "en" : "zh");
   const copy = CONFIG_COPY[currentLanguage];
   const requestedSectionId = String(searchParams.get("section") || "").trim();
+  const requestedPageId = String(searchParams.get("page") || "").trim();
+  const requestedFocusSectionId = String(searchParams.get("focus") || "").trim();
+  const requestedFocusFieldId = String(searchParams.get("field") || "").trim();
+  const showingSettingsIndex = !requestedPageId && !requestedFocusSectionId;
   const returnToPath = safeAgentCenterReturnToPath(searchParams.get("returnTo"));
   const returnToLabel = searchParams.get("returnLabel") === "agents" ? copy.returnToAgents : copy.returnToSource;
   const formattedDraft = useMemo(
@@ -2311,10 +330,6 @@ export function ConfigRoute() {
     [draftConfig, workspace?.editorSections],
   );
   const hasUnsavedConfigChanges = Boolean(baseHash && draftHash && baseHash !== draftHash);
-  const configDraftPresenceDirty = hasUnsavedConfigChanges || hasPendingSecretChanges(draftMeta);
-  useEffect(() => {
-    publishConfigDraftPresence(configDraftPresenceDirty);
-  }, [configDraftPresenceDirty]);
   // First-run onboarding: auto-open the provider quick-setup panel once per
   // browser session while no model credential is configured (skippable, and
   // the settings entry stays available via "添加连接").
@@ -2343,12 +358,21 @@ export function ConfigRoute() {
     [currentLanguage, groupCopy, workspaceSections],
   );
   const settingsSearchDocuments = useMemo(
-    () => buildConfigSettingsSearchIndex({
+    () => [...buildConfigSettingsSearchIndex({
       groups: settingsGroups,
       editorSections: workspace?.editorSections ?? [],
       editorMeta: workspace?.editorMeta ?? {},
-    }),
-    [settingsGroups, workspace?.editorMeta, workspace?.editorSections],
+      configValues: draftConfig,
+      language: currentLanguage,
+    }), {
+      groupId: "avatar-pet" as const, pageId: "identity-profile", sectionId: "pet",
+      title: copy.searchPetTitle,
+      detail: copy.searchPetDetail,
+      haystack: copy.searchPetHaystack,
+      titleHaystack: copy.searchPetTitleHaystack,
+      valueHaystack: "",
+    }],
+    [currentLanguage, draftConfig, settingsGroups, workspace?.editorMeta, workspace?.editorSections],
   );
   const { group: activeGroup, page: activePage } = useMemo(
     () => resolveConfigSettingsSelection(settingsGroups, activeGroupId, activePageId),
@@ -2356,10 +380,9 @@ export function ConfigRoute() {
   );
   const editorSectionById = new Map(editorSections.map((section) => [section.id, section]));
   const activeEditorSections = (activePage?.memberSectionIds ?? [])
+    .filter((sectionId) => !requestedFocusSectionId || sectionId === requestedFocusSectionId)
     .map((sectionId) => editorSectionById.get(sectionId))
     .filter((section): section is ConfigEditorSection => Boolean(section) && section?.id !== "agent");
-  const modelOptions = workspace?.modelOptions ?? [];
-  const modelOptionsById = useMemo(() => new Map(modelOptions.map((option) => [option.model_id, option])), [modelOptions]);
   const providerPresetOptions = workspace?.providerPresetOptions ?? [];
   const providerRows = useMemo(
     () => deriveProviderRegistryRows(
@@ -2370,69 +393,6 @@ export function ConfigRoute() {
     ),
     [draftConfig, workspace?.modelCatalog, workspace?.providerOptions, workspace?.publicConfig],
   );
-  const liveReferenceCountByModelRef = useMemo(
-    () => Object.fromEntries(
-      (routePreview?.impactedRefs ?? [])
-        .filter((impact): impact is ProviderRouteImpact & { modelRef: string } => Boolean(impact.modelRef))
-        .map((impact) => [impact.modelRef, impact.liveReferenceCount ?? 0]),
-    ),
-    [routePreview],
-  );
-  const providerVendorGroups = useMemo(() => groupProviderPresetsByVendor(providerPresetOptions), [providerPresetOptions]);
-  const selectedProviderVendorTemplates = useMemo(
-    () => providerVendorGroups.find((group) => group.id === selectedProviderVendorId)?.templates ?? [],
-    [providerVendorGroups, selectedProviderVendorId],
-  );
-  const modelScenarioOptions = useMemo(
-    () =>
-      [
-        { id: "chat" as ModelScenarioId, label: copy.modelScenarioChat },
-        { id: "relay" as ModelScenarioId, label: copy.modelScenarioRelay },
-        { id: "image" as ModelScenarioId, label: copy.modelScenarioImage },
-        { id: "local" as ModelScenarioId, label: copy.modelScenarioLocal },
-        { id: "manual" as ModelScenarioId, label: copy.modelScenarioManual },
-      ],
-    [copy],
-  );
-  const modelCenterSummary = useMemo(
-    () =>
-      deriveModelCenterSummary({
-        modelOptions,
-        schemaVersion: workspace?.schemaVersion,
-      }),
-    [modelOptions, workspace?.schemaVersion],
-  );
-  const modelCenterRows = useMemo(() => deriveModelCenterInventoryRows(modelOptions), [modelOptions]);
-  useEffect(() => {
-    if (!modelOptions.length) {
-      if (selectedModelTestId) {
-        setSelectedModelTestId("");
-      }
-      return;
-    }
-    if (!selectedModelTestId || !modelOptionsById.has(selectedModelTestId)) {
-      setSelectedModelTestId(modelOptions[0]?.model_id ?? "");
-    }
-  }, [modelOptions, modelOptionsById, selectedModelTestId]);
-  const modelCapabilityIssueCount = countModelCenterHealthIssues(modelCenterRows);
-  const modelDiscoveryAvailable = canDiscoverModelsForProvider(modelEditor.provider);
-
-  useEffect(() => {
-    if (!providerRows.length) {
-      if (selectedProviderId) setSelectedProviderId("");
-      return;
-    }
-    if (!selectedProviderId || !providerRows.some((row) => row.providerId === selectedProviderId)) {
-      setSelectedProviderId(providerRows[0].providerId);
-    }
-  }, [providerRows, selectedProviderId]);
-
-  useEffect(() => {
-    if (providerCredentialEditId && providerCredentialEditId !== selectedProviderId) {
-      setProviderCredentialEditId("");
-      setProviderCredentialValue("");
-    }
-  }, [providerCredentialEditId, selectedProviderId]);
 
   useEffect(() => {
     if (!settingsGroups.length) {
@@ -2440,14 +400,30 @@ export function ConfigRoute() {
       setActivePageId("");
       return;
     }
-    const requestedGroup = settingsGroups.find((group) => group.id === requestedSectionId);
-    if (
-      requestedGroup
-      && requestedSectionId !== lastRequestedSectionRef.current
-    ) {
-      lastRequestedSectionRef.current = requestedSectionId;
-      setActiveGroupId(requestedGroup.id);
-      setActivePageId(requestedGroup.pages[0]?.id ?? "");
+    const requestedSelectionKey = `${requestedSectionId}:${requestedPageId}:${requestedFocusSectionId}`;
+    if (requestedSelectionKey !== lastRequestedSelectionRef.current) {
+      lastRequestedSelectionRef.current = requestedSelectionKey;
+      const requestedGroup = settingsGroups.find((group) => group.id === requestedSectionId)
+        ?? settingsGroups.find((group) => group.id === DEFAULT_CONFIG_SETTINGS_GROUP_ID)
+        ?? settingsGroups[0];
+      setActiveGroupId(requestedGroup?.id ?? "");
+      const requestedPage = requestedGroup?.pages.find((page) => page.id === requestedPageId);
+      setActivePageId(requestedPage?.id ?? requestedGroup?.pages[0]?.id ?? "");
+      const focusPage = requestedPage ?? requestedGroup?.pages[0];
+      if (requestedFocusSectionId && focusPage?.memberSectionIds.includes(requestedFocusSectionId)) {
+        setSectionUiState((current) => ({
+          ...current,
+          [requestedFocusSectionId]: requestedFocusFieldId
+            ? prepareSectionUiStateForFocus(current[requestedFocusSectionId], requestedFocusSectionId, requestedFocusFieldId)
+            : resolveConfigSectionUiStateOnSelect(
+              current[requestedFocusSectionId],
+              defaultSectionUiState(requestedFocusSectionId),
+            ),
+        }));
+        pendingFocusSectionRef.current = requestedFocusSectionId;
+      } else {
+        pendingFocusSectionRef.current = "";
+      }
       return;
     }
     const currentGroup = settingsGroups.find((group) => group.id === activeGroupId)
@@ -2459,7 +435,7 @@ export function ConfigRoute() {
     if (!currentGroup.pages.some((page) => page.id === activePageId)) {
       setActivePageId(currentGroup.pages[0]?.id ?? "");
     }
-  }, [activeGroupId, activePageId, requestedSectionId, settingsGroups]);
+  }, [activeGroupId, activePageId, requestedFocusSectionId, requestedPageId, requestedSectionId, settingsGroups]);
 
   const sectionMap = useMemo(() => {
     return new Map((workspace?.sections ?? []).map((section) => [section.id, section]));
@@ -2481,18 +457,98 @@ export function ConfigRoute() {
     canCheckCurrentChanges,
     canRestoreEditorText,
   } = editorSyncState;
-  const credentialProvider = providerRows.find((row) => row.providerId === providerCredentialEditId);
-  const modelEditorRequiredFieldsReady = Boolean(modelEditor.model.trim() && modelEditor.provider.base_url.trim());
-  const canSubmitModelEditor = !structuredActionsDisabled && modelEditorRequiredFieldsReady;
+
+  // Provider/model domain (models page state machine) — see hook header.
+  const {
+    selectedProviderId,
+    selectedProviderTab,
+    providerWizardState,
+    routePreview,
+    routeEditProviderId,
+    routeEditProvider,
+    providerCredentialEditId,
+    providerCredentialValue,
+    providerActionError,
+    providerActionFeedback,
+    credentialProvider,
+    liveReferenceCountByModelRef,
+    setSelectedProviderId,
+    setSelectedProviderTab,
+    setProviderCredentialEditId,
+    setProviderCredentialValue,
+    setRouteEditProviderId,
+    setRouteEditProvider,
+    setRoutePreview,
+    setProviderActionError,
+    setProviderActionFeedback,
+    dispatchProviderWizard,
+    persistImmediateDraft,
+    handleTestProviderModel,
+    handleCheckModelImageCapabilities,
+  } = useConfigProviderModelDomain({
+    workspaceQuery,
+    providerRows,
+    draftMeta,
+    baseHash,
+    structuredActionsDisabled,
+    setBusyAction,
+    setNotice,
+    markError,
+    requireDraft,
+    syncWorkspace,
+    readableErrorMessage,
+    handleApply,
+    providerDraftRequestRef,
+    copy,
+  });
+  // 全局待保存计数口径：各分区编辑态草稿里「草稿值≠当前分区值」的叶子字段数。
+  // 原始文本 kinds（json/number/string_list）先按 schema 解析再比较，"16000" 与
+  // 16000 不会误报；解析失败的叶子计入且 valid=false（阻塞全局保存）。即时类
+  // 字段（boolean/select，见 configApplyModel.shouldImmediateApplyFieldKind）
+  // 永不滞留草稿，不计入。
+  const pendingConfigDraftItems = useMemo(() => {
+    const items: Array<{ path: string; sectionId: string; valid: boolean }> = [];
+    if (!draftConfig) {
+      return items;
+    }
+    const metaAt = (path: string) => editorMeta[path];
+    for (const section of editorSections) {
+      const sectionState = sectionUiState[section.id];
+      if (!sectionState?.editing || sectionState.draftValue === undefined) {
+        continue;
+      }
+      const sectionValue = getConfigValueAtPath(draftConfig, section.path);
+      for (const leaf of collectPendingDraftLeaves({
+        draft: sectionState.draftValue,
+        committed: sectionValue,
+        path: section.path,
+        metaAt,
+      })) {
+        items.push({ ...leaf, sectionId: section.id });
+      }
+    }
+    return items;
+  }, [draftConfig, editorMeta, editorSections, sectionUiState]);
+  const pendingConfigDraftCount = pendingConfigDraftItems.length;
+  const hasInvalidConfigDraft = pendingConfigDraftItems.some((item) => !item.valid);
+  const canApplyConfigWorkspace =
+    !structuredActionsDisabled && !hasInvalidConfigDraft && (canSaveConfig || pendingConfigDraftCount > 0);
+  // 跨页 presence 广播：保持原有口径，接入分区草稿待保存计数。
+  const configDraftPresenceDirty =
+    hasUnsavedConfigChanges || hasPendingSecretChanges(draftMeta) || pendingConfigDraftCount > 0;
+  useEffect(() => {
+    publishConfigDraftPresence(configDraftPresenceDirty);
+  }, [configDraftPresenceDirty]);
   const shouldBlockLeave = useCallback<BlockerFunction>(
     ({ currentLocation, nextLocation }) =>
       shouldBlockConfigLeave({
         hasPendingApply,
+        hasPendingSectionDrafts: pendingConfigDraftCount > 0,
         busy: Boolean(busyAction),
         currentPathname: currentLocation.pathname,
         nextPathname: nextLocation.pathname,
       }),
-    [busyAction, hasPendingApply],
+    [busyAction, hasPendingApply, pendingConfigDraftCount],
   );
   const leaveBlocker = useBlocker(shouldBlockLeave);
   const leaveGuardOpen = leaveBlocker.state === "blocked";
@@ -2507,20 +563,290 @@ export function ConfigRoute() {
   }
 
   function isSectionVisible(sectionId: string): boolean {
-    return Boolean(activePage?.memberSectionIds.includes(sectionId));
+    return !showingSettingsIndex && (!requestedFocusSectionId || requestedFocusSectionId === sectionId)
+      && Boolean(activePage?.memberSectionIds.includes(sectionId));
   }
+
+  function navigateSettingsSelection(groupId: ConfigSettingsGroupId, pageId: string, focusSectionId?: string, focusFieldId?: string) {
+    pendingFocusSectionRef.current = focusSectionId ?? "";
+    navigate({ search: buildConfigSettingsNavigationSearch(searchParams, groupId, pageId, focusSectionId, focusFieldId) });
+  }
+
+  /** 字段/分区聚焦前的分区 UI 预备：展开分区、高级层与目标路径的祖先嵌套层。 */
+  function prepareSectionUiStateForFocus(
+    current: ConfigSectionUiState | undefined,
+    sectionId: string,
+    fieldId: string,
+  ): ConfigSectionUiState {
+    const base = resolveConfigSectionUiStateOnSelect(current, defaultSectionUiState(sectionId));
+    const ancestors: Record<string, boolean> = {};
+    const tokens = fieldId.split(".").filter(Boolean);
+    // 祖先对象键是分区路径下的绝对子路径（如 ui.workbench_theme）：跳过分区根本身与叶子本身。
+    for (let index = 2; index < tokens.length; index += 1) {
+      ancestors[tokens.slice(0, index).join(".")] = true;
+    }
+    return {
+      ...base,
+      expanded: true,
+      advancedExpanded: true,
+      expandedPaths: { ...base.expandedPaths, ...ancestors },
+    };
+  }
+
+  /** 字段深链落地：滚动到目标行并挂 ~2s 瞬态高亮环。 */
+  function triggerFieldHighlight(path: string) {
+    window.clearTimeout(fieldHighlightTimerRef.current);
+    setFieldHighlight({ path });
+    fieldHighlightTimerRef.current = window.setTimeout(() => setFieldHighlight(null), 2000);
+  }
+
+  /** 一次性聚焦尝试：分区级滚到分区顶，字段级滚到目标 VSettingsRow 行。 */
+  function tryFocusSettingsTarget(sectionId: string, fieldId: string): boolean {
+    const section = document.getElementById(`config-${sectionId}`);
+    if (!section) {
+      return false;
+    }
+    if (fieldId) {
+      const row = document.querySelector<HTMLElement>(`[data-testid="row-${fieldId}"]`);
+      if (!row) {
+        return false;
+      }
+      row.scrollIntoView({ behavior: "smooth", block: "center" });
+      triggerFieldHighlight(fieldId);
+      return true;
+    }
+    section.scrollIntoView({ behavior: "smooth", block: "start" });
+    section.focus({ preventScroll: true });
+    return true;
+  }
+
+  /**
+   * 意图模块的统一落地入口（搜索选中/命令面板/跨页跳转共用）。
+   * URL 只承载 section/page 导航状态；聚焦意图走意图模块（显式 URL 参数优先）。
+   */
+  function applySettingsFocusTarget(target: SettingsFocusTarget) {
+    const fieldId = (target.fieldId ?? "").trim();
+    let sectionId = (target.sectionId ?? "").trim();
+    let group = target.groupId ? settingsGroups.find((candidate) => candidate.id === target.groupId) : undefined;
+    if (!group && sectionId) {
+      for (const candidate of settingsGroups) {
+        const ownerPage = candidate.pages.find((item) => item.memberSectionIds.includes(sectionId));
+        if (ownerPage) {
+          group = candidate;
+          break;
+        }
+      }
+    }
+    if (!sectionId && fieldId) {
+      // 字段目标缺分区时按编辑器分区归属推导。
+      const owner = (workspace?.editorSections ?? []).find(
+        (section) => fieldId === section.path || fieldId.startsWith(`${section.path}.`),
+      );
+      sectionId = owner?.id ?? "";
+    }
+    const page = group?.pages.find((item) => item.id === target.pageId) ?? group?.pages[0];
+    if (group) {
+      setActiveGroupId(group.id);
+      setActivePageId(page?.id ?? "");
+    }
+    if (sectionId) {
+      setSectionUiState((current) => ({
+        ...current,
+        [sectionId]: fieldId
+          ? prepareSectionUiStateForFocus(current[sectionId], sectionId, fieldId)
+          : resolveConfigSectionUiStateOnSelect(current[sectionId], defaultSectionUiState(sectionId)),
+      }));
+      // 显式选择总是重新聚焦：清 dedup，允许同一目标重复落点。
+      lastFocusedSelectionRef.current = "";
+      setPendingIntentFocus({ sectionId, fieldId });
+    }
+    if (group) {
+      navigate({ search: buildConfigSettingsNavigationSearch(searchParams, group.id, page?.id ?? "") });
+    }
+  }
+
+  const applySettingsFocusTargetRef = useRef(applySettingsFocusTarget);
+  applySettingsFocusTargetRef.current = applySettingsFocusTarget;
+
+  // 已打开设置页的即时热切换：意图广播 → 落地（同时清掉暂存，避免下次挂载重复消费）。
+  useEffect(
+    () =>
+      subscribeSettingsFocus((target) => {
+        consumeSettingsFocusIntent();
+        applySettingsFocusTargetRef.current(target);
+      }),
+    [],
+  );
+
+  // 分区内容 ready 信号：落地执行器据此重放聚焦尝试。
+  useEffect(
+    () =>
+      onSettingsContentReady(() => {
+        setSettingsReadyToken((token) => token + 1);
+      }),
+    [],
+  );
+
+  useEffect(() => () => window.clearTimeout(fieldHighlightTimerRef.current), []);
+
+  // 落地执行器：意图/URL 聚焦目标等待内容 ready 后一次性滚动聚焦。
+  // ready 来源：意图模块脉冲（分区编辑器挂载/展开变化）+ 本 effect 依赖变化
+  // （工作区数据到达、页切换等）；DOM 仍缺失时挂 MutationObserver 事件驱动
+  // 等待（懒分区/特殊面板），替代旧的 60 帧 rAF 轮询。
+  useEffect(() => {
+    const intentTarget = pendingIntentFocus;
+    const focusSectionId = intentTarget?.sectionId || pendingFocusSectionRef.current || requestedFocusSectionId;
+    const focusDecision = resolveConfigSettingsFocus(
+      lastFocusedSelectionRef.current,
+      activeGroupId,
+      activePageId,
+      focusSectionId,
+    );
+    if (!focusSectionId) {
+      lastFocusedSelectionRef.current = focusDecision.nextKey;
+      return;
+    }
+    if (!isSectionVisible(focusSectionId)) {
+      // URL 跨页 focus 等待目标页可见是合法状态；URL pending 不残留（陈旧值遮蔽后续参数），
+      // 意图 pending 留存等可见后落地。
+      if (!intentTarget) {
+        pendingFocusSectionRef.current = "";
+      }
+      return;
+    }
+    if (!focusDecision.shouldFocus) {
+      if (intentTarget) {
+        setPendingIntentFocus(null);
+      } else {
+        pendingFocusSectionRef.current = "";
+      }
+      return;
+    }
+    const fieldTarget = intentTarget
+      ? (intentTarget.sectionId === focusSectionId ? intentTarget.fieldId : "")
+      : (requestedFocusSectionId === focusSectionId ? requestedFocusFieldId : "");
+    if (tryFocusSettingsTarget(focusSectionId, fieldTarget)) {
+      lastFocusedSelectionRef.current = focusDecision.nextKey;
+      pendingFocusSectionRef.current = "";
+      if (intentTarget) {
+        setPendingIntentFocus(null);
+      }
+      return;
+    }
+    if (intentTarget || pendingFocusSectionRef.current) {
+      // 内容未 ready：挂 MutationObserver 等待目标节点出现（事件驱动，不轮询）。
+      const viewport = contentViewportRef.current;
+      if (!viewport || typeof MutationObserver === "undefined") {
+        return;
+      }
+      const observer = new MutationObserver(() => {
+        if (tryFocusSettingsTarget(focusSectionId, fieldTarget)) {
+          observer.disconnect();
+          lastFocusedSelectionRef.current = focusDecision.nextKey;
+          pendingFocusSectionRef.current = "";
+          setPendingIntentFocus(null);
+        }
+      });
+      observer.observe(viewport, { childList: true, subtree: true });
+      return () => observer.disconnect();
+    }
+  }, [
+    pendingIntentFocus,
+    settingsReadyToken,
+    activeGroupId,
+    activePageId,
+    requestedFocusSectionId,
+    activePage?.id,
+    showingSettingsIndex,
+    workspace,
+    sectionUiState,
+  ]);
+
+  // 挂载入口裁决（每次挂载一次）：显式 URL > 意图 > 上次停留 > 默认。
+  // 默认分支不做事 = 保持现状（首次进入落在全部设置总览）。
+  useEffect(() => {
+    if (lastLocationRestoreAttemptedRef.current || !settingsGroups.length) {
+      return;
+    }
+    lastLocationRestoreAttemptedRef.current = true;
+    if (requestedSectionId || requestedPageId || requestedFocusSectionId || requestedFocusFieldId) {
+      // 显式 URL 入口：由既有 URL 流程处理，意图留存到下一次无参进入。
+      return;
+    }
+    const entry = resolveSettingsEntry({
+      urlGroupId: requestedSectionId,
+      urlPageId: requestedPageId,
+      urlSectionId: requestedFocusSectionId,
+      urlFieldId: requestedFocusFieldId,
+    });
+    if (entry.source === "intent") {
+      if (entry.groupId || entry.pageId || entry.sectionId || entry.fieldId) {
+        applySettingsFocusTarget({
+          groupId: entry.groupId,
+          pageId: entry.pageId,
+          sectionId: entry.sectionId,
+          fieldId: entry.fieldId,
+        });
+      }
+      return;
+    }
+    if (entry.source === "last" && entry.groupId) {
+      const group = settingsGroups.find((candidate) => candidate.id === entry.groupId);
+      if (!group) {
+        return;
+      }
+      const page = group.pages.find((candidate) => candidate.id === entry.pageId) ?? group.pages[0];
+      setActiveGroupId(group.id);
+      setActivePageId(page?.id ?? "");
+      // 与手点分组一致：落回该组的设置索引（?section=组，无 page/focus/field）。
+      const params = new URLSearchParams(searchParams);
+      params.set("section", group.id);
+      params.delete("page");
+      params.delete("focus");
+      params.delete("field");
+      navigate({ search: params.toString() }, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsGroups, requestedSectionId, requestedPageId, requestedFocusSectionId, requestedFocusFieldId]);
+
+  // 「上次停留分区」记忆：组/页确定后写入，下一次打开设置页默认停在该组。
+  useEffect(() => {
+    if (!activeGroupId || !activePageId) {
+      return;
+    }
+    writeLastSettingsLocation({ groupId: activeGroupId, pageId: activePageId });
+  }, [activeGroupId, activePageId]);
 
   function handleSelectGroup(groupId: ConfigSettingsGroupId) {
     const group = settingsGroups.find((candidate) => candidate.id === groupId);
-    setActiveGroupId(groupId);
-    setActivePageId(group?.pages[0]?.id ?? "");
-    contentViewportRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    const pageId = group?.pages[0]?.id ?? "";
+    handleNavigateSettings(groupId, pageId);
   }
 
-  function handleNavigateSettings(groupId: ConfigSettingsGroupId, pageId: string) {
+  function showSettingsIndex(groupId?: ConfigSettingsGroupId) {
+    const params = new URLSearchParams(searchParams);
+    params.delete("page"); params.delete("focus"); params.delete("field");
+    if (groupId) params.set("section", groupId);
+    else params.delete("section");
+    pendingFocusSectionRef.current = "";
+    setPendingIntentFocus(null);
+    navigate({ search: params.toString() });
+  }
+
+  function handleNavigateSettings(groupId: ConfigSettingsGroupId, pageId: string, sectionId?: string, fieldId?: string) {
     setActiveGroupId(groupId);
     setActivePageId(pageId);
     contentViewportRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    if (groupId === "avatar-pet" && sectionId === "pet") {
+      navigateSettingsSelection(groupId, pageId, sectionId);
+      return;
+    }
+    if (sectionId || fieldId) {
+      // 搜索选中等显式落点：经意图模块统一落地（分区/字段聚焦 + 瞬态高亮）。
+      applySettingsFocusTarget({ groupId, pageId, sectionId, fieldId });
+      return;
+    }
+    navigateSettingsSelection(groupId, pageId);
   }
 
   function handleSelectPage(pageId: string) {
@@ -2529,6 +855,7 @@ export function ConfigRoute() {
     for (const sectionId of page?.memberSectionIds ?? []) {
       updateSectionUiState(sectionId, resolveConfigSectionUiStateOnSelect(sectionUiState[sectionId], defaultSectionUiState(sectionId)));
     }
+    if (activeGroup?.id) navigateSettingsSelection(activeGroup.id, pageId);
     contentViewportRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -2542,6 +869,7 @@ export function ConfigRoute() {
     setSelectedProviderId(providerId);
     setSelectedProviderTab("connection");
     setProviderCredentialEditId(providerId);
+    navigateSettingsSelection("models-profiles", "model-connection", "models");
     setProviderCredentialValue("");
     setRouteEditProviderId("");
     setRouteEditProvider({});
@@ -2603,6 +931,9 @@ export function ConfigRoute() {
     handlePinProviderModels,
     handleUnpinProviderModel: unpinProviderModel,
     handleDeleteProvider,
+    deleteProviderRequest,
+    handleConfirmDeleteProvider,
+    handleCancelDeleteProvider,
     handleUpdateProviderCredential: updateProviderCredential,
     handleUpdateProviderContextWindow: updateProviderContextWindow,
     handleBeginProviderRouteEdit,
@@ -2613,6 +944,7 @@ export function ConfigRoute() {
     draftConfig,
     draftMeta,
     loadFailedMessage: copy.loadFailed,
+    copy,
     editBaselineRef,
     providerDraftRequestRef,
     activeWorkspace,
@@ -2622,7 +954,7 @@ export function ConfigRoute() {
     markError,
     readableErrorMessage,
     providerDiscoveryFailureDetail,
-    providerDiscoveryFailureMessage,
+    providerDiscoveryFailureMessage: (detail) => providerDiscoveryFailureMessage(detail, copy),
     setBusyAction,
     setProviderActionError,
     setProviderActionFeedback,
@@ -2642,6 +974,7 @@ export function ConfigRoute() {
     handleConfirmProviderQuickSetup,
   } = useConfigProviderQuickSetupActions({
     providerQuickSetupState,
+    copy,
     providerPresetOptions,
     providerDraftRequestRef,
     queryClient,
@@ -2668,71 +1001,6 @@ export function ConfigRoute() {
     }
   }
 
-  async function handleTestProviderModel(modelRef: string) {
-    if (structuredActionsDisabled) return;
-    setBusyAction(`正在测试 ${modelRef}…`);
-    setProviderActionError("");
-    setProviderActionFeedback({
-      kind: "discover",
-      providerId: modelRef.includes("/") ? modelRef.slice(0, modelRef.indexOf("/")) : selectedProviderId,
-      phase: "busy",
-      message: `正在真实调用测试 ${modelRef}…`,
-    });
-    try {
-      const result = await testConfigLlm({
-        publicConfig: requireDraft(),
-        draftMeta,
-        baseHash,
-        modelId: modelRef,
-        capability: "text",
-      });
-      const noticeText = formatTestNotice(result);
-      setNotice({ tone: result.ok ? "success" : "error", text: noticeText });
-      setProviderActionFeedback({
-        kind: "discover",
-        providerId: result.provider_id || (modelRef.includes("/") ? modelRef.slice(0, modelRef.indexOf("/")) : selectedProviderId),
-        phase: result.ok ? "success" : "error",
-        message: result.ok
-          ? `${modelRef} 可调用${result.verification_persisted ? "（已写入真实调用状态）" : ""}`
-          : `${modelRef} 调用失败：${result.message || result.verification_error_type || "unknown"}${
-              result.verification_http_status ? ` · HTTP ${result.verification_http_status}` : ""
-            }`,
-      });
-      // Reload catalog so「真实调用」column picks up persisted verification (draft or saved).
-      const refreshed = await workspaceQuery.refetch();
-      if (refreshed.data) {
-        syncWorkspace(refreshed.data, result.ok ? "success" : "error", { resetBase: false });
-        // Keep the test notice after syncWorkspace overwrites message from workspace.
-        setNotice({ tone: result.ok ? "success" : "error", text: noticeText });
-      }
-    } catch (error) {
-      const message = readableErrorMessage(error).slice(0, 480);
-      setProviderActionError(message);
-      setProviderActionFeedback({
-        kind: "discover",
-        providerId: modelRef.includes("/") ? modelRef.slice(0, modelRef.indexOf("/")) : selectedProviderId,
-        phase: "error",
-        message: `${modelRef} 测试请求失败：${message}`,
-      });
-      markError(error);
-    } finally {
-      setBusyAction("");
-    }
-  }
-
-  function snapshotDraftOverride(): ConfigApplyDraftOverride | undefined {
-    const snapshot = providerDraftRequestRef.current;
-    if (!snapshot) return undefined;
-    return {
-      publicConfig: snapshot.publicConfig,
-      draftMeta: snapshot.draftMeta,
-      baseHash: snapshot.baseHash,
-    };
-  }
-
-  async function persistImmediateDraft(pendingLabel: string): Promise<boolean> {
-    return handleApply(pendingLabel, snapshotDraftOverride());
-  }
 
   async function handleUpdateProviderCredential(providerId: string) {
     if (structuredActionsDisabled || !providerCredentialValue.trim()) return;
@@ -2758,9 +1026,13 @@ export function ConfigRoute() {
   const {
     handlePreviewMigration,
     handleApplyMigration,
+    migrationApplyRequest,
+    handleConfirmApplyMigration,
+    handleCancelApplyMigration,
   } = useConfigMigrationActions({
     migrationPreview,
     migrationPreviewExpiredMessage: copy.migrationPreviewExpired,
+    copy,
     workspaceQuery,
     queryClient,
     setBusyAction,
@@ -2784,7 +1056,12 @@ export function ConfigRoute() {
     }).publicConfig;
   }
 
-  async function previewDraft(nextConfig: PublicConfigShape, nextMeta: ConfigDraftMeta, pendingLabel: string) {
+  async function previewDraft(
+    nextConfig: PublicConfigShape,
+    nextMeta: ConfigDraftMeta,
+    pendingLabel: string,
+    onError: (error: unknown) => void = markError,
+  ) {
     setBusyAction(pendingLabel);
     try {
       const response = await previewConfigDraft({
@@ -2795,11 +1072,26 @@ export function ConfigRoute() {
       syncWorkspace(response, "success", { resetBase: false });
       return true;
     } catch (error) {
-      markError(error);
+      onError(error);
       return false;
     } finally {
       setBusyAction("");
     }
+  }
+
+  function setSectionSaveError(path: string, message: string) {
+    setSectionSaveErrors((current) => ({ ...current, [path]: message }));
+  }
+
+  function clearSectionSaveError(path: string) {
+    setSectionSaveErrors((current) => {
+      if (!(path in current)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[path];
+      return next;
+    });
   }
 
   async function reloadWorkspace() {
@@ -2828,6 +1120,29 @@ export function ConfigRoute() {
     }
   }
 
+  /**
+   * 把各分区编辑态草稿折叠进整份草稿（非法草稿分区跳过并标记 allValid=false）。
+   * 供全局「保存到外部配置」使用：分区草稿在显式保存前只存在于分区 UI 状态。
+   */
+  function foldPendingSectionDrafts(baseShape: PublicConfigShape): { config: PublicConfigShape; allValid: boolean } {
+    let next = clonePublicConfig(baseShape);
+    let allValid = true;
+    const metaAt = (path: string) => editorMeta[path];
+    for (const section of editorSections) {
+      const sectionState = sectionUiState[section.id];
+      if (!sectionState?.editing || sectionState.draftValue === undefined) {
+        continue;
+      }
+      const resolution = resolveDraftSubtreeForSave({ draft: sectionState.draftValue, path: section.path, metaAt });
+      if (!resolution.ok) {
+        allValid = false;
+        continue;
+      }
+      next = setValueAtConfigPath(next, section.path, resolution.value);
+    }
+    return { config: next, allValid };
+  }
+
   async function handleApply(
     pendingLabel: string = copy.applying,
     draftOverride?: ConfigApplyDraftOverride,
@@ -2841,8 +1156,25 @@ export function ConfigRoute() {
         throw new Error(copy.loadFailed);
       }
 
+      // 有分区草稿待保存时，把折叠后的草稿作为 apply 主体（同一保存+apply 管线，
+      // baseHash 乐观并发与过期降级重试保持不变）。
+      let effectiveOverride = draftOverride;
+      let foldedSectionDrafts = false;
+      if (!effectiveOverride && pendingConfigDraftCount > 0) {
+        const folded = foldPendingSectionDrafts(requireDraft());
+        if (!folded.allValid) {
+          throw new Error(copy.saveBlockedInvalid);
+        }
+        effectiveOverride = {
+          publicConfig: folded.config,
+          draftMeta,
+          baseHash: applyBaseHash,
+        };
+        foldedSectionDrafts = true;
+      }
+
       const payload = buildConfigApplyRequestPayload({
-        draftOverride,
+        draftOverride: effectiveOverride,
         draftConfig,
         draftMeta,
         applyBaseHash,
@@ -2870,6 +1202,17 @@ export function ConfigRoute() {
         });
       }
       syncWorkspace(response, "success");
+      if (foldedSectionDrafts) {
+        // 保存成功后清空所有分区编辑态（草稿已提交，徽标清除）。
+        setSectionUiState((current) =>
+          Object.fromEntries(
+            Object.entries(current).map(([sectionId, sectionState]) => [
+              sectionId,
+              { ...sectionState, editing: false, draftValue: undefined },
+            ]),
+          ),
+        );
+      }
       publishConfigDraftPresence(false);
       await invalidateWorkbenchQueries(payload.publicConfig);
       return true;
@@ -2882,7 +1225,7 @@ export function ConfigRoute() {
   }
 
   async function handleSaveAndLeave() {
-    if (leaveBlocker.state !== "blocked" || !canSaveConfig) {
+    if (leaveBlocker.state !== "blocked" || !canApplyConfigWorkspace) {
       return;
     }
     const proceed = leaveBlocker.proceed;
@@ -2933,19 +1276,95 @@ export function ConfigRoute() {
   }
 
   async function saveConfigSection(path: string, nextValue: unknown) {
+    clearSectionSaveError(path);
+    let updated: PublicConfigShape;
     try {
-      const updated = setValueAtConfigPath(requireDraft(), path, nextValue);
-      const previewed = await previewDraft(updated, draftMeta, copy.sectionSavePending);
-      if (!previewed) return false;
-      if (shouldImmediateApplyConfigPath(path)) {
-        return persistImmediateDraft(copy.applying);
-      }
-      return true;
+      updated = setValueAtConfigPath(requireDraft(), path, nextValue);
     } catch (error) {
-      markError(error);
+      // 分区级失败：行内呈现，不进全局 notice。
+      setSectionSaveError(path, readableErrorMessage(error));
       return false;
     }
+    const previewed = await previewDraft(updated, draftMeta, copy.sectionSavePending, (error) => {
+      setSectionSaveError(path, readableErrorMessage(error));
+    });
+    if (!previewed) return false;
+    if (shouldImmediateApplyConfigPath(path)) {
+      return persistImmediateDraft(copy.applying);
+    }
+    return true;
   }
+
+  function clearImmediateStatusTimer(path: string) {
+    const timer = immediateStatusTimersRef.current[path];
+    if (timer) {
+      window.clearTimeout(timer);
+      delete immediateStatusTimersRef.current[path];
+    }
+  }
+
+  /**
+   * 即时类字段（boolean/select）行内变更：走「保存分区草稿 previewConfigDraft +
+   * 自动 apply」同一管线（复用 baseHash 乐观并发与过期降级重试）。
+   * 行徽标：等待中 → 已生效（短暂驻留后清除）/ 未生效（失败不静默，notice 走 toast）。
+   */
+  async function handleImmediateFieldChange(path: string, nextValue: unknown) {
+    if (structuredActionsDisabled) {
+      return;
+    }
+    clearImmediateStatusTimer(path);
+    setImmediateFieldStatus((current) => ({ ...current, [path]: "waiting" }));
+    try {
+      const updated = setValueAtConfigPath(requireDraft(), path, nextValue);
+      const previewed = await previewDraft(updated, draftMeta, copy.applying);
+      if (!previewed) {
+        setImmediateFieldStatus((current) => ({ ...current, [path]: "failed" }));
+        return;
+      }
+      const applied = await persistImmediateDraft(copy.applying);
+      if (!applied) {
+        setImmediateFieldStatus((current) => ({ ...current, [path]: "failed" }));
+        return;
+      }
+      setImmediateFieldStatus((current) => ({ ...current, [path]: "applied" }));
+      immediateStatusTimersRef.current[path] = window.setTimeout(() => {
+        setImmediateFieldStatus((current) => {
+          if (current[path] !== "applied") {
+            return current;
+          }
+          const next = { ...current };
+          delete next[path];
+          return next;
+        });
+      }, IMMEDIATE_APPLIED_BADGE_HOLD_MS);
+    } catch {
+      setImmediateFieldStatus((current) => ({ ...current, [path]: "failed" }));
+    }
+  }
+
+  // 失败徽标的自动清理：该字段草稿值回到基线值（例如用户改回原值）时清除。
+  useEffect(() => {
+    setImmediateFieldStatus((current) => {
+      let changed = false;
+      const next: Record<string, ImmediateFieldStatus> = {};
+      for (const [path, status] of Object.entries(current)) {
+        if (status === "failed" && configValuesEqual(getConfigValueAtPath(draftConfig, path), getConfigValueAtPath(baseConfig, path))) {
+          changed = true;
+          continue;
+        }
+        next[path] = status;
+      }
+      return changed ? next : current;
+    });
+  }, [draftConfig, baseConfig]);
+
+  // 卸载时清理「已生效」徽标的驻留定时器。
+  useEffect(() => {
+    const timers = immediateStatusTimersRef.current;
+    return () => {
+      Object.values(timers).forEach((timer) => window.clearTimeout(timer));
+    };
+  }, []);
 
   async function handleAvatarImageUpload(file: File): Promise<AvatarImageUploadResponse | null> {
     setBusyAction(copy.avatarImageUploading);
@@ -2981,338 +1400,13 @@ export function ConfigRoute() {
     }
   }
 
-  function applyProviderTemplate(templateId: string) {
-    setModelEditorExpanded(true);
-    setModelEditorError("");
-    setModelDiscoveryError("");
-    setDiscoveredModels([]);
-    setSelectedDiscoveredModelId("");
-    const template = providerPresetOptions.find((item) => item.provider_preset_id === templateId);
-    if (!template) {
-      setModelEditor((current) => ({ ...current, provider_template_id: templateId }));
-      return;
-    }
-    const templateModel = asRecord(template.default_model);
-    const templateDetails = {
-      ...buildModelDetailsDraft(templateModel),
-      supports_image_input: "unknown" as const,
-    };
-    setSelectedProviderVendorId(template.vendor_id);
-    setModelEditor({
-      mode: "create",
-      preset_id: "",
-      provider_template_id: templateId,
-      model_id: "",
-      label: "",
-      model: "",
-      api_key_env: "",
-      api_key: "",
-      clear_api_key: false,
-      provider: buildProviderDraft(asRecord(template.provider)),
-      details: templateDetails,
-    });
-  }
-
-  function applyProviderVendor(vendorId: string) {
-    setSelectedProviderVendorId(vendorId);
-    const template = providerVendorGroups.find((group) => group.id === vendorId)?.templates[0];
-    if (template) {
-      applyProviderTemplate(template.provider_preset_id);
-      return;
-    }
-    setModelEditor((current) => ({ ...current, provider_template_id: "" }));
-  }
-
-  function applyModelScenario(scenario: ModelScenarioId) {
-    const templateId = selectModelScenarioProviderPresetId(scenario, providerPresetOptions);
-    if (templateId) {
-      applyProviderTemplate(templateId);
-      return;
-    }
-    setModelEditorExpanded(true);
-    setModelEditorError("");
-    setModelDiscoveryError("");
-    setDiscoveredModels([]);
-    setSelectedDiscoveredModelId("");
-    setSelectedProviderVendorId("");
-    setModelEditor({
-      ...emptyModelEditorState(),
-      provider: {
-        ...emptyProviderDraft(),
-        kind: scenario === "local" ? "local" : scenario === "relay" || scenario === "image" ? "relay" : "openai_compatible",
-      },
-      details: {
-        ...emptyModelDetailsDraft(),
-        streaming: scenario !== "image",
-        tool_calling_mode: scenario === "image" ? "disabled" : "auto",
-      },
-    });
-  }
-
-  function applyDiscoveredModel(model: ConfigDiscoveredModel) {
-    const modelName = model.id;
-    const nextLabel = model.label || modelName;
-    const existingIds = modelOptions.map((option) => option.model_id);
-    const nextModelId = modelLibraryIdFromParts(nextLabel, modelName);
-    const uniqueModelId = uniqueModelLibraryId(nextModelId, existingIds);
-    setSelectedDiscoveredModelId(modelName);
-    setModelEditor((current) => ({
-      ...current,
-      model_id: current.mode === "edit" ? current.model_id : uniqueModelId,
-      label: current.mode === "create" ? nextLabel : current.label.trim() || nextLabel,
-      model: modelName,
-      api_key_env: current.mode === "create" ? defaultModelApiKeyEnv(uniqueModelId) : current.api_key_env.trim() || defaultModelApiKeyEnv(uniqueModelId),
-      provider: {
-        ...current.provider,
-        context_window:
-          !current.provider.context_window.trim() && typeof model.contextWindow === "number"
-            ? String(model.contextWindow)
-            : current.provider.context_window,
-      },
-    }));
-  }
-
-  async function handleDiscoverModels() {
-    if (structuredActionsDisabled || !modelDiscoveryAvailable) {
-      if (!modelDiscoveryAvailable) {
-        setModelDiscoveryError(copy.discoveryUnavailable);
-      }
-      return;
-    }
-    setBusyAction(copy.discoveryPending);
-    setModelDiscoveryError("");
-    setDiscoveredModels([]);
-    try {
-      const discoveryModelId =
-        modelEditor.mode === "edit"
-          ? modelEditor.model_id
-          : modelEditor.model_id.trim() ||
-            uniqueModelLibraryId(modelLibraryIdFromParts(modelEditor.label || modelEditor.model, modelEditor.model), modelOptions.map((option) => option.model_id));
-      const discoveryApiKeyEnv = modelEditor.api_key_env.trim() || defaultModelApiKeyEnv(discoveryModelId);
-      const response = await discoverConfigModels({
-        publicConfig: requireDraft(),
-        draftMeta,
-        baseHash,
-        provider: buildProviderPayload(modelEditor.provider),
-        modelId: discoveryModelId,
-        apiKeyEnv: discoveryApiKeyEnv,
-        apiKey: modelEditor.api_key,
-      });
-      setDiscoveredModels(response.models);
-      if (response.models.length) {
-        applyDiscoveredModel(response.models[0]);
-      } else {
-        setModelDiscoveryError(copy.discoveryEmpty);
-      }
-    } catch (error) {
-      setModelDiscoveryError(markError(error));
-    } finally {
-      setBusyAction("");
-    }
-  }
-
-  async function handleSaveModel() {
-    if (structuredActionsDisabled) {
-      return;
-    }
-    if (!modelEditorRequiredFieldsReady) {
-      setModelEditorError(copy.modelRequiredFieldsMissing);
-      setModelEditorExpanded(true);
-      return;
-    }
-    setBusyAction(copy.modelSavePending);
-    setModelEditorError("");
-    try {
-      const resolvedModelId =
-        modelEditor.mode === "edit"
-          ? modelEditor.model_id
-          : modelEditor.model_id.trim() ||
-            uniqueModelLibraryId(modelLibraryIdFromParts(modelEditor.label || modelEditor.model, modelEditor.model), modelOptions.map((option) => option.model_id));
-      const resolvedApiKeyEnv = modelEditor.api_key_env.trim() || defaultModelApiKeyEnv(resolvedModelId);
-      const draftModelBody = {
-        publicConfig: requireDraft(),
-        draftMeta,
-        baseHash,
-        presetId: "",
-        modelId: resolvedModelId,
-        provider: buildProviderPayload(modelEditor.provider),
-        model: modelEditor.model,
-        label: modelEditor.label,
-        details: buildModelDetailsPayload(modelEditor.details),
-        apiKeyEnv: resolvedApiKeyEnv,
-        apiKey: modelEditor.api_key,
-        clearApiKey: modelEditor.clear_api_key,
-      };
-      const response = modelEditor.mode === "edit"
-        ? await updateDraftModel(draftModelBody)
-        : await addDraftModel(draftModelBody);
-      syncWorkspace(response, "success", { resetBase: false });
-      setModelEditorExpanded(false);
-    } catch (error) {
-      setModelEditorError(markError(error));
-      setModelEditorExpanded(true);
-    } finally {
-      setBusyAction("");
-    }
-  }
-
-  async function handleDeleteModel(modelId: string) {
-    if (structuredActionsDisabled) {
-      return;
-    }
-    if (typeof window !== "undefined" && !window.confirm(copy.deleteModelConfirm)) {
-      return;
-    }
-    setBusyAction(copy.modelSavePending);
-    try {
-      const response = await deleteDraftModel({
-        publicConfig: requireDraft(),
-        draftMeta,
-        baseHash,
-        modelId,
-      });
-      syncWorkspace(response, "success", { resetBase: false });
-    } catch (error) {
-      markError(error);
-    } finally {
-      setBusyAction("");
-    }
-  }
-
-  function focusModelEditor() {
-    window.setTimeout(() => {
-      modelEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      const firstFocusableControl = modelEditorRef.current?.querySelector<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement>(
-        [
-          'button[data-vui="select-trigger"]:not([data-disabled="true"]):not([disabled])',
-          'input:not([disabled]):not([type="hidden"])',
-          "textarea:not([disabled])",
-        ].join(", "),
-      );
-      firstFocusableControl?.focus({ preventScroll: true });
-    }, 0);
-  }
-
-  async function handleTestSelectedLibraryModel() {
-    if (structuredActionsDisabled) {
-      return;
-    }
-    if (!selectedModelTestId) {
-      setNotice({ tone: "error", text: copy.modelTestRequired });
-      return;
-    }
-    setBusyAction(copy.testPending);
-    try {
-      const result = await testConfigLlm({
-        publicConfig: requireDraft(),
-        draftMeta,
-        baseHash,
-        modelId: selectedModelTestId,
-      });
-      setNotice({
-        tone: result.ok ? "success" : "error",
-        text: formatTestNotice(result),
-      });
-    } catch (error) {
-      markError(error);
-    } finally {
-      setBusyAction("");
-    }
-  }
-
-  async function handleCheckModelImageCapabilities(modelIds: string[] = []) {
-    if (structuredActionsDisabled) {
-      return;
-    }
-    setBusyAction(copy.imageCapabilityCheckPending);
-    try {
-      const response = await checkDraftModelCapabilities({
-        publicConfig: requireDraft(),
-        draftMeta,
-        baseHash,
-        modelIds,
-      });
-      syncWorkspace(response, "success", { resetBase: false });
-    } catch (error) {
-      markError(error);
-    } finally {
-      setBusyAction("");
-    }
-  }
 
   function sectionTitle(sectionId: string, fallback: string) {
     return sectionMap.get(sectionId)?.title ?? fallback;
   }
 
-  function keyStateLabel(state: string) {
-    switch (state) {
-      case "pending":
-        return copy.keyPending;
-      case "clear_pending":
-        return copy.keyClearPending;
-      case "configured":
-        return copy.keyConfigured;
-      default:
-        return copy.keyMissing;
-    }
-  }
-
-  function testScopeLabel(scope: ConfigLlmTestResult["config_scope"]) {
-    return scope === "saved" ? copy.testScopeSaved : copy.testScopeDraft;
-  }
-
-  function formatTestKeyDetail(result: ConfigLlmTestResult) {
-    if (!result.requires_api_key) {
-      return `${copy.testKeyNotRequired}${result.api_key_source ? ` (${copy.testKeySourceLabel}: ${result.api_key_source})` : ""}`;
-    }
-    return result.api_key_source || "-";
-  }
-
-  function formatTestNotice(result: ConfigLlmTestResult) {
-    const detailParts = [
-      testScopeLabel(result.config_scope),
-      `${copy.testRouteLabel}: ${[result.provider_kind, result.base_url].filter(Boolean).join(" · ") || "-"}`,
-      `${copy.testRuntimeLabel}: ${[result.transport, result.contract].filter(Boolean).join(" · ") || "-"}`,
-      `${copy.testKeyLabel}: ${formatTestKeyDetail(result)}`,
-    ];
-    if (result.capability === "image_input") {
-      detailParts.push(`${copy.testCapabilityLabel}: ${imageInputStatusLabel(result)}`);
-    }
-    return `${result.model_id} / ${result.model}: ${result.message} [${detailParts.join(" | ")}]`;
-  }
-
-  function imageInputStatusFromResult(result: ConfigLlmTestResult): "supported" | "unsupported" | "unknown" {
-    return resolveImageInputCapabilityStatus({
-      supportsImageInput: result.supports_image_input,
-      capabilityStatus: result.capability_status,
-    });
-  }
-
-  function imageInputStatusLabel(
-    result: ConfigLlmTestResult | { status: "supported" | "unsupported" | "unknown" | "failed"; checkedAt?: string } | null | undefined,
-  ) {
-    const status = !result
-      ? "unknown"
-      : "ok" in result
-        ? imageInputStatusFromResult(result)
-        : result.status;
-    switch (status) {
-      case "supported":
-        return copy.imageInputStatusSupported;
-      case "unsupported":
-        return copy.imageInputStatusUnsupported;
-      case "failed":
-        return copy.imageInputStatusFailed;
-      default:
-        return copy.imageInputStatusUnknown;
-    }
-  }
-
   function intakeLabel(mode: string) {
-    if (mode === "auto") {
-      return currentLanguage === "en" ? "automatic review" : "自动审查";
-    }
-    return currentLanguage === "en" ? "manual operation" : "手工操作";
+    return mode === "auto" ? copy.intakeAuto : copy.intakeManual;
   }
 
   if (!draftConfig && workspaceQuery.isLoading) {
@@ -3359,8 +1453,9 @@ export function ConfigRoute() {
           <>
             <VButton
               type="button"
+              variant="primary"
               className={styles.primaryButton}
-              isDisabled={!canSaveConfig || Boolean(busyAction)}
+              isDisabled={!canApplyConfigWorkspace || Boolean(busyAction)}
               onClick={() => {
                 void handleSaveAndLeave();
               }}
@@ -3368,7 +1463,7 @@ export function ConfigRoute() {
             >
               {leaveGuardSaveLabel}
             </VButton>
-            <VButton type="button" className={styles.dangerButton} isDisabled={Boolean(busyAction)} onClick={handleDiscardAndLeave}>
+            <VButton type="button" variant="danger" className={styles.dangerButton} isDisabled={Boolean(busyAction)} onClick={handleDiscardAndLeave}>
               {copy.leaveGuardDiscard}
             </VButton>
             <VButton type="button" className={styles.actionButton} isDisabled={Boolean(busyAction)} onClick={handleCancelLeave}>
@@ -3379,6 +1474,38 @@ export function ConfigRoute() {
       >
         <p className={styles.helperText}>{sidebarApplyHint}</p>
       </VDialog>
+      <VConfirmDialog
+        open={Boolean(deleteProviderRequest)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) handleCancelDeleteProvider();
+        }}
+        tone="danger"
+        title={copy.confirmTitle}
+        description={deleteProviderRequest
+          ? formatConfigCopy(copy.actionDeleteProviderConfirm, { id: deleteProviderRequest.providerId })
+          : ""}
+        confirmLabel={copy.confirmAction}
+        cancelLabel={copy.cancel}
+        confirmPending={Boolean(busyAction)}
+        onConfirm={() => {
+          void handleConfirmDeleteProvider();
+        }}
+      />
+      <VConfirmDialog
+        open={Boolean(migrationApplyRequest)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) handleCancelApplyMigration();
+        }}
+        tone="danger"
+        title={copy.confirmTitle}
+        description={migrationApplyRequest ? <span className="whitespace-pre-line">{migrationApplyRequest.message}</span> : ""}
+        confirmLabel={copy.migrationApplyAction}
+        cancelLabel={copy.cancel}
+        confirmPending={Boolean(busyAction)}
+        onConfirm={() => {
+          void handleConfirmApplyMigration();
+        }}
+      />
       <VSplitWorkspace
         className={styles.settingsSplit}
         data-vui-region="config-settings-split"
@@ -3386,7 +1513,7 @@ export function ConfigRoute() {
           layoutId: CONFIG_SETTINGS_LAYOUT_ID,
           sidebar: CONFIG_SETTINGS_SIDEBAR_RESIZE,
           collapse: {
-            sidebar: { separatorLabel: "设置导航宽度", collapseLabel: "收起设置导航", expandLabel: "展开设置导航" },
+            sidebar: { separatorLabel: copy.navResizeSeparator, collapseLabel: copy.navCollapse, expandLabel: copy.navExpand },
           },
         }}
         sidebar={(
@@ -3395,9 +1522,10 @@ export function ConfigRoute() {
             title={copy.pageTitle}
             subtitle={copy.subtitle}
             subtitleHint={copy.subtitleHint}
-            statusLabel={hasPendingApply ? "有未保存修改" : "配置已保存"}
+            statusLabel={hasPendingApply ? copy.statusUnsaved : copy.statusSaved}
             groups={settingsGroups}
-            activeGroupId={activeGroup?.id ?? ""}
+            activeGroupId={showingSettingsIndex && !requestedSectionId ? "" : activeGroup?.id ?? ""}
+            onShowAll={() => showSettingsIndex()}
             onSelectGroup={handleSelectGroup}
             onNavigate={handleNavigateSettings}
             searchDocuments={settingsSearchDocuments}
@@ -3419,13 +1547,13 @@ export function ConfigRoute() {
         data-vui-region="config-settings-main"
         headerClassName={styles.configHeader}
         bodyClassName="!gap-0 !overflow-hidden !content-stretch"
-        title={activeGroup?.title ?? copy.pageTitle}
+        title={showingSettingsIndex && !requestedSectionId ? copy.pageTitle : activeGroup?.title ?? copy.pageTitle}
         actions={
           <div className={styles.configStatusActions}>
             {isSectionVisible("models") && workspace.schemaVersion === 2 ? (
-                <VActionGroup ariaLabel="模型连接操作">
+                <VActionGroup ariaLabel={copy.modelsActionsAria}>
                   <VButton
-                    title="选择服务商，填写连接信息，检测后选择模型并保存。"
+                    title={copy.addConnectionHint}
                     className={styles.providerModeButton}
                     aria-pressed={providerConnecting}
                     variant={providerConnecting ? "primary" : "secondary"}
@@ -3435,16 +1563,16 @@ export function ConfigRoute() {
                       setProviderConnecting(true);
                     }}
                   >
-                    添加连接
+                    {copy.addConnection}
                   </VButton>
                   <VButton
-                    title="模板向导、迁移与底层参数。"
+                    title={copy.advancedSettingsHint}
                     className={styles.providerModeButton}
                     aria-pressed={providerShowMore}
                     variant={providerShowMore ? "primary" : "ghost"}
                     onPress={() => { setProviderConnecting(false); setProviderShowMore((open) => !open); }}
                   >
-                    {providerShowMore ? "收起高级设置" : "高级设置"}
+                    {providerShowMore ? copy.collapseAdvancedSettings : copy.advancedSettings}
                   </VButton>
                 </VActionGroup>
             ) : null}
@@ -3458,11 +1586,21 @@ export function ConfigRoute() {
  icon={<RotateCcw size={14} />}>
                 {copy.refresh}
               </VButton>
+            {pendingConfigDraftCount > 0 ? (
+              <VChip
+                tone={hasInvalidConfigDraft ? "danger" : "warning"}
+                data-testid="config-pending-save-count"
+                title={hasInvalidConfigDraft ? copy.saveBlockedInvalid : undefined}
+              >
+                {pendingConfigDraftCount}{copy.settingsPendingCountUnit}
+              </VChip>
+            ) : null}
             <VButton
               type="button"
               variant="primary"
               className={styles.primaryButton}
-              isDisabled={!canSaveConfig || Boolean(busyAction)}
+              isDisabled={!canApplyConfigWorkspace}
+              title={!canApplyConfigWorkspace && hasInvalidConfigDraft ? copy.saveBlockedInvalid : undefined}
               onClick={() => {
                 void handleApply();
               }}
@@ -3471,7 +1609,7 @@ export function ConfigRoute() {
               </VButton>
           </div>
         }
-        toolbar={isSectionVisible("models") ? undefined : (
+        toolbar={isSectionVisible("overview") || (!showingSettingsIndex && !requestedFocusSectionId && (activeGroup?.pages.length ?? 0) > 1) ? (
           <div className={styles.configToolbar}>
             {isSectionVisible("overview") ? <VStatusStrip
               className={styles.configStatusMeta}
@@ -3492,16 +1630,28 @@ export function ConfigRoute() {
                 },
               ]}
             /> : null}
-            <ConfigSettingsPageTabs
+            {!showingSettingsIndex && !requestedFocusSectionId ? <ConfigSettingsPageTabs
               language={currentLanguage}
               group={activeGroup}
               activePageId={activePage?.id ?? ""}
               onSelectPage={handleSelectPage}
-            />
+            /> : null}
           </div>
-        )}
+        ) : undefined}
       >
         <div ref={contentViewportRef} className={styles.pageViewport} data-vui-region="config-settings-body">
+
+        {showingSettingsIndex ? <ConfigSettingsIndex
+          groups={requestedSectionId ? settingsGroups.filter((group) => group.id === activeGroup?.id) : settingsGroups}
+          sections={workspaceSections} language={currentLanguage} onNavigate={handleNavigateSettings}
+        /> : null}
+
+        {!showingSettingsIndex && activeGroup?.id === "avatar-pet"
+          && (!requestedFocusSectionId || requestedFocusSectionId === "pet") ? (
+          <VSettingsGroupCard>
+            <ConfigDesktopPetSettings language={currentLanguage} />
+          </VSettingsGroupCard>
+        ) : null}
 
         {notice.text ? (
           <div
@@ -3562,9 +1712,10 @@ export function ConfigRoute() {
                       variant="ghost"
                       onPress={() => setProviderConnecting(false)}
                     >
-                      返回已配置服务
+                      {copy.backToConfiguredProviders}
                     </VButton>
                     <ConfigQuickSetupPanel
+                      copy={copy}
                       state={providerQuickSetupState}
                       templates={providerPresetOptions}
                       credentialValue={providerQuickCredential}
@@ -3591,13 +1742,14 @@ export function ConfigRoute() {
                 ) : !providerShowMore ? (
                   <>
                 <ConfigProviderRegistryPanel
+                  copy={copy}
                   routeEditor={routeEditProviderId ? <>
                 {routeEditProviderId && !routePreview ? (
                   <VSurface as="section" padding="compact" tone="row" className={styles.providerRouteEditSurface}>
                     <VSection
-                    title="服务地址与协议"
+                    title={copy.routeEditSectionTitle}
                     actions={(
-                      <VActionGroup ariaLabel="Provider 路由编辑操作">
+                      <VActionGroup ariaLabel={copy.routeEditActionsAria}>
                         <VButton
                           isDisabled={Boolean(busyAction)}
                           onPress={() => {
@@ -3607,7 +1759,7 @@ export function ConfigRoute() {
                             setProviderActionFeedback(null);
                           }}
                         >
-                          取消
+                          {copy.cancel}
                         </VButton>
                         <VButton
                           variant="primary"
@@ -3617,15 +1769,15 @@ export function ConfigRoute() {
                           }}
                         >
                           {providerActionFeedback?.kind === "route" && providerActionFeedback.phase === "busy"
-                            ? "生成预览中…"
-                            : "预览替换影响"}
+                            ? copy.routePreviewPending
+                            : copy.routePreviewAction}
                         </VButton>
                       </VActionGroup>
                     )}
                     >
                     <div className={styles.providerRouteEditGrid}>
                       <label className={styles.providerRouteEditField}>
-                        <span>服务地址</span>
+                        <span>{copy.routeFieldBaseUrl}</span>
                         <VInput
                           value={getString(routeEditProvider.base_url)}
                           disabled={Boolean(busyAction)}
@@ -3633,7 +1785,7 @@ export function ConfigRoute() {
                         />
                       </label>
                       <label className={styles.providerRouteEditField}>
-                        <span>接口类型</span>
+                        <span>{copy.routeFieldDriver}</span>
                         <VStringSelect
                           ariaLabel="Provider route driver"
                           value={getString(routeEditProvider.driver)}
@@ -3643,7 +1795,7 @@ export function ConfigRoute() {
                         />
                       </label>
                       <label className={styles.providerRouteEditField}>
-                        <span>请求协议</span>
+                        <span>{copy.routeFieldProtocol}</span>
                         <VStringSelect
                           ariaLabel="Provider default wire protocol"
                           value={getString(asRecord(routeEditProvider.protocols).default)}
@@ -3661,7 +1813,7 @@ export function ConfigRoute() {
                       </label>
                     </div>
                     <p className={styles.providerRouteEditWarning} role="alert">
-                      保存前会检查哪些模型和 Agent 受到影响，请确认后再应用。
+                      {copy.routeEditWarning}
                     </p>
                     </VSection>
                   </VSurface>
@@ -3669,18 +1821,18 @@ export function ConfigRoute() {
                 {routePreview ? (
                   <VStateSurface
                     tone={routePreview.routeChanged ? "unavailable" : "info"}
-                    title={routePreview.routeChanged ? "确认连接修改" : "连接没有变化"}
+                    title={routePreview.routeChanged ? copy.routeConfirmChangedTitle : copy.routeConfirmUnchangedTitle}
                     facts={routePreview.impactedRefs.map((impact, index) => ({
                       key: impact.modelRef ?? String(index),
                       label: impact.modelRef ?? routePreview.modelRefs[index] ?? "modelRef",
-                      value: `${impact.liveReferenceCount ?? 0} 处引用`,
+                      value: `${impact.liveReferenceCount ?? 0}${copy.routeReferenceCountUnit}`,
                     }))}
                     actions={(
-                      <VActionGroup ariaLabel="Provider 路由替换确认">
+                      <VActionGroup ariaLabel={copy.routeConfirmActionsAria}>
                         <VButton onPress={() => {
                           setRoutePreview(null);
                           setProviderActionFeedback(null);
-                        }}>取消</VButton>
+                        }}>{copy.cancel}</VButton>
                         <VButton
                           variant="danger"
                           isDisabled={!routePreview.routeChanged || !routePreview.routePreviewToken || Boolean(busyAction)}
@@ -3689,13 +1841,13 @@ export function ConfigRoute() {
                           }}
                         >
                           {providerActionFeedback?.kind === "route" && providerActionFeedback.phase === "busy"
-                            ? "更新中…"
-                            : "确认并更新连接"}
+                            ? copy.routeApplyPending
+                            : copy.routeConfirmAction}
                         </VButton>
                       </VActionGroup>
                     )}
                   >
-                    以上模型和引用会使用新的连接设置。确认前请核对服务地址与协议。
+                    {copy.routeConfirmBody}
                   </VStateSurface>
                 ) : null}
                   </> : undefined}
@@ -3776,6 +1928,7 @@ export function ConfigRoute() {
                 {providerShowMore ? (
                   <>
                 <ConfigProviderWizard
+                  copy={copy}
                   state={providerWizardState}
                   templates={providerPresetOptions}
                   disabled={structuredActionsDisabled}
@@ -3792,6 +1945,7 @@ export function ConfigRoute() {
                   }}
                 />
                 {workspace.modelAliasUsage.totalLiveReferenceCount > 0 ? <ConfigModelMigrationPanel
+                  copy={copy}
                   schemaVersion={2}
                   preview={null}
                   aliasUsageCount={workspace.modelAliasUsage.totalLiveReferenceCount}
@@ -3804,6 +1958,7 @@ export function ConfigRoute() {
               </>
             ) : (
               <ConfigModelMigrationPanel
+                copy={copy}
                 schemaVersion={1}
                 preview={migrationPreview}
                 aliasUsageCount={workspace.modelAliasUsage.totalLiveReferenceCount}
@@ -3820,7 +1975,7 @@ export function ConfigRoute() {
           </div>
         ) : null}
 
-        {activePage?.id === "tooling-access" ? (
+        {!showingSettingsIndex && activePage?.id === "tooling-access" ? (
           <VSurface as="section" className={styles.toolingMetaPanel} padding="compact" tone="row">
             <VStatusStrip
               aria-label={copy.developerModeReadonly}
@@ -3846,6 +2001,13 @@ export function ConfigRoute() {
           </VSurface>
         ) : null}
 
+        {isSectionVisible("shortcuts") ? (
+          <VSection id="config-shortcuts" tabIndex={-1} title={copy.shortcutsTitle}
+            className={styles.sectionSurface} headerClassName={styles.sectionHeader}>
+            <ConfigShortcutsPanel lang={currentLanguage} copy={copy} />
+          </VSection>
+        ) : null}
+
         {isSectionVisible("health-diagnostics") ? (
           <>
             <ConfigFeatureDecisionPanel
@@ -3864,7 +2026,7 @@ export function ConfigRoute() {
           </>
         ) : null}
 
-        {workspace.schemaVersion === 2 && isSectionVisible("models") ? null : activeEditorSections.map((section) => (
+        {showingSettingsIndex || (workspace.schemaVersion === 2 && isSectionVisible("models")) ? null : activeEditorSections.map((section) => (
           <ConfigSectionEditor
             key={section.id}
             section={section}
@@ -3876,8 +2038,12 @@ export function ConfigRoute() {
             uiState={sectionUiState[section.id] ?? defaultSectionUiState(section.id)}
             onUiStateChange={updateSectionUiState}
             onSaveSection={saveConfigSection}
+            onImmediateFieldChange={handleImmediateFieldChange}
+            immediateFieldStatus={immediateFieldStatus}
             onAvatarImageUpload={handleAvatarImageUpload}
             onThemeBackgroundImageUpload={handleThemeBackgroundImageUpload}
+            highlightFieldPath={fieldHighlight?.path ?? ""}
+            saveError={sectionSaveErrors[section.path] ?? ""}
           />
         ))}
 

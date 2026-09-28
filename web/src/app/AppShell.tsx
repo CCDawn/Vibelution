@@ -3,13 +3,17 @@ import { lazy, Suspense, type CSSProperties, type MouseEvent as ReactMouseEvent,
 import { Link, Outlet, useLocation, useNavigate, useNavigationType } from "react-router-dom";
 import {
   ArrowLeft,
-  ChevronUp,
+  Check,
+  ChevronDown,
+  ChevronRight,
   LoaderCircle,
+  Menu,
   Moon,
   RefreshCw,
   Settings,
   SlidersHorizontal,
   Sun,
+  X,
 } from "lucide-react";
 
 import { fetchJson, setFetchJsonFailureReporter, type FetchJsonFailureReport } from "../api/client";
@@ -30,6 +34,14 @@ import {
   parseRuntimeControlBlockedDetail,
 } from "./workbenchLifecycleActions";
 import { useWorkbenchLifecycleActions } from "./useWorkbenchLifecycleActions";
+import {
+  readStoredUpdateBannerDismissedHead,
+  shouldShowUpdateBanner,
+  storeUpdateBannerDismissedHead,
+  updateBannerCopy,
+  updateBannerDismissLabel,
+  updateBannerRestartLabel,
+} from "./updateBanner";
 import { useShellI18n } from "../i18n/useShellI18n";
 import {
   collectBrowserMemorySnapshot,
@@ -286,7 +298,6 @@ type ConfigSummaryWithThemeBackground = ConfigSummary & {
 
 type WorkbenchShellStyle = CSSProperties & {
   "--workbench-theme-background-image"?: string;
-  "--shell-settings-dock-width"?: string;
 };
 
 type ThemeBackgroundReadability = "soft" | "standard" | "strong";
@@ -559,18 +570,6 @@ export function restartRequestUnconfirmedBody(lang: string): string {
     : "重启流程已经开始，但这个窗口还没有收到最终确认。工作台正在继续检查运行状态。";
 }
 
-/** Shorten long session/run ids for the active-work popover (full value stays on title). */
-export function formatActiveWorkRunId(runId: string | null | undefined): string {
-  const value = String(runId ?? "").trim();
-  if (!value) {
-    return "";
-  }
-  if (value.length <= 28) {
-    return value;
-  }
-  return `${value.slice(0, 12)}…${value.slice(-10)}`;
-}
-
 export function restartActiveWorkBlockedMessage(lang: string, activeWorkDetails: string): string {
   const details = activeWorkDetails.trim();
   if (lang === "en") {
@@ -682,7 +681,9 @@ export function AppShell() {
   const [lifecycleCommandId, setLifecycleCommandId] = useState("");
   const [lifecycleCancelPending, setLifecycleCancelPending] = useState(false);
   const [utilityOpen, setUtilityOpen] = useState(false);
-  const chatLeftPanelWidth = useShellStore((state) => state.chatPanelWidths.leftPanelWidth);
+  const [activeWorkOpen, setActiveWorkOpen] = useState(false);
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const desktopShell = useMemo(() => isElectronDesktopShell(), []);
   const [theme, setTheme] = useState(() => readStoredWorkbenchTheme());
   const [frontendVisible, setFrontendVisible] = useState(
@@ -693,6 +694,7 @@ export function AppShell() {
   );
   const [frontendRefreshRequested, setFrontendRefreshRequested] = useState(false);
   const [shellStartupDataReady, setShellStartupDataReady] = useState(false);
+  const [updateBannerDismissedHead, setUpdateBannerDismissedHead] = useState(readStoredUpdateBannerDismissedHead);
   const [returnNavigationStack, setReturnNavigationStack] = useState(() => readStoredReturnNavigationStack());
   const shutdownPromiseRef = useRef<Promise<void> | null>(null);
   const restartPromiseRef = useRef<Promise<void> | null>(null);
@@ -726,12 +728,11 @@ export function AppShell() {
   );
   const shellStyle = useMemo<WorkbenchShellStyle | undefined>(
     () => ({
-      "--shell-settings-dock-width": `${chatLeftPanelWidth}px`,
       ...(themeBackgroundImageUrl
         ? { "--workbench-theme-background-image": `url(${JSON.stringify(themeBackgroundImageUrl)})` }
         : {}),
     }),
-    [chatLeftPanelWidth, themeBackgroundImageUrl],
+    [themeBackgroundImageUrl],
   );
   const shellStartupWarmupActive = useStartupWarmup(shellStartupDataReady);
   const shellPollingVisible = frontendVisible || shellStartupWarmupActive;
@@ -819,6 +820,7 @@ export function AppShell() {
   const refreshFrontendLabel = lang === "en" ? "Refresh frontend" : "刷新前端";
   const settingsLabel = lang === "en" ? "Settings" : "设置";
   const settingsAndToolsLabel = lang === "en" ? "Settings and tools" : "设置与工具";
+  const activeConversationsLabel = lang === "en" ? "Active conversations" : "进行中的会话";
   const appearanceLabel = lang === "en" ? "Appearance" : "外观";
   const lightThemeLabel = lang === "en" ? "Light" : "浅色";
   const darkThemeLabel = lang === "en" ? "Dark" : "深色";
@@ -850,7 +852,14 @@ export function AppShell() {
     if (pathname.startsWith("/teams")) return t("navTeams");
     if (pathname.startsWith("/kernel")) return "Kernel";
     if (pathname.startsWith("/memory")) return t("navMemory");
+    if (pathname.startsWith("/agents/tools") || pathname.startsWith("/tools")) return t("navTools");
+    if (pathname.startsWith("/agents/skills") || pathname.startsWith("/skills")) return t("navSkills");
+    if (pathname.startsWith("/agents/prompts")) return t("navPrompts");
     if (pathname.startsWith("/agents")) return t("navAgents");
+    if (pathname.startsWith("/config")) return t("navConfig");
+    if (pathname.startsWith("/usage")) return t("navUsage");
+    if (pathname.startsWith("/logs")) return t("navLogs");
+    if (pathname.startsWith("/git")) return t("navGit");
     return t("appTitle");
   }, [location.pathname, t]);
   const handleReturnNavigation = useCallback(() => {
@@ -946,8 +955,41 @@ export function AppShell() {
     workbench,
   });
   const activeWorkIndicator = deriveActiveWorkIndicator(runtimeQuery.data, lang);
+  const activeWorkUnavailable = !runtimeQuery.data && (backendHealthQuery.isError || configQuery.isError || runtimeQuery.isError);
+  const activeWorkLoading = !runtimeQuery.data && !activeWorkUnavailable;
+  const activeWorkCountDisplay = activeWorkUnavailable ? "—" : activeWorkLoading ? "…" : String(activeWorkIndicator?.count ?? 0);
   // Human-readable only (no raw session ids). Used for shutdown/restart copy and aria, not native title.
   const activeWorkDetailsTitle = activeWorkIndicator?.items.map((item) => item.detail).join(" · ") ?? "";
+  // Update banner: main moved ahead of the running backend, so a restart is
+  // needed to apply the new code. Rides the existing 120s code-freshness poll
+  // (data is in its notifyOnChangeProps whitelist) — no extra ticker here.
+  const updateBannerVerdict = codeFreshnessQuery.data?.verdict ?? null;
+  const updateBannerDiskHead = codeFreshnessQuery.data?.backend.disk?.head ?? "";
+  const updateBannerVisible = shouldShowUpdateBanner({
+    verdict: updateBannerVerdict,
+    diskHead: updateBannerDiskHead,
+    dismissedHead: updateBannerDismissedHead,
+  });
+  const updateBannerText = updateBannerCopy(
+    lang,
+    updateBannerDiskHead,
+    updateBannerVerdict === "backend_and_frontend_behind",
+  );
+  const updateBannerRestartActionLabel = updateBannerRestartLabel(lang);
+  const updateBannerDismissActionLabel = updateBannerDismissLabel(lang);
+  const updateBannerRestartBlockedByWork = Boolean(activeWorkIndicator);
+  const updateBannerRestartDisabled =
+    updateBannerRestartBlockedByWork
+    || restartRequested
+    || shutdownRequested
+    || (shutdownOpen && !shutdownSettled);
+  const updateBannerRestartGuard = updateBannerRestartBlockedByWork
+    ? restartActiveWorkBlockedMessage(lang, activeWorkDetailsTitle)
+    : "";
+  const dismissUpdateBanner = useCallback(() => {
+    setUpdateBannerDismissedHead(updateBannerDiskHead);
+    storeUpdateBannerDismissedHead(updateBannerDiskHead);
+  }, [updateBannerDiskHead]);
   const clearRestartCompletionDismissTimer = useCallback(() => {
     if (restartCompletionDismissTimerRef.current === null) {
       return;
@@ -957,6 +999,16 @@ export function AppShell() {
   }, []);
   const closeUtilityMenu = useCallback(() => {
     setUtilityOpen(false);
+    setAppearanceOpen(false);
+    setMobileNavigationOpen(false);
+  }, []);
+  useEffect(() => {
+    closeUtilityMenu();
+    setActiveWorkOpen(false);
+  }, [location.key, closeUtilityMenu]);
+
+  const closeActiveWorkMenu = useCallback(() => {
+    setActiveWorkOpen(false);
   }, []);
 
   const frontendStateLabel = {
@@ -2272,19 +2324,139 @@ export function AppShell() {
         </div>
 
         <div className={styles.windowDragRegion} data-shell-group="window-drag-region" aria-hidden="true" />
-      </header>
-
-      <main className={styles.mainArea}>
-        <CompanionDesktopAttention />
-        <Outlet />
-      </main>
-
-      <div className={styles.settingsDock} data-shell-group="settings-dock">
+        {updateBannerVisible ? (
+          <VPopover
+            align="end"
+            side="bottom"
+            sideOffset={8}
+            aria-label={lang === "en" ? "Update notification" : "更新通知"}
+            contentClassName={styles.updateBannerPopover}
+            trigger={(
+              <VButton variant="ghost" contentLayout="plain" className={styles.activeWorkTrigger}
+                aria-label={lang === "en" ? "Update notification" : "更新通知"}
+                title={updateBannerText.title}>
+                <span className={styles.activeWorkTriggerContent}>
+                  {lang === "en" ? "Update available" : "有更新"}
+                  <ChevronDown size={12} aria-hidden="true" />
+                </span>
+              </VButton>
+            )}
+          >
+            <div className={styles.updateBanner} role="status" data-shell-group="update-banner">
+              <div className={styles.updateBannerCopy}>
+                <strong className={styles.updateBannerTitle}>{updateBannerText.title}</strong>
+                <span className={styles.updateBannerDetail}>{updateBannerText.detail}</span>
+              </div>
+              {updateBannerRestartGuard ? (
+                <span className={styles.updateBannerNote}>{updateBannerRestartGuard}</span>
+              ) : null}
+              <div className={styles.updateBannerActions}>
+                <VButton type="button" variant="secondary"
+                  className={styles.updateBannerRestartButton}
+                  onPress={beginRestart} isDisabled={updateBannerRestartDisabled}
+                  title={updateBannerRestartGuard || updateBannerRestartActionLabel}>
+                  {updateBannerRestartActionLabel}
+                </VButton>
+                <VButton type="button" variant="ghost" onPress={dismissUpdateBanner}
+                  title={updateBannerDismissActionLabel}>
+                  {lang === "en" ? "Dismiss" : "暂不提醒"}
+                </VButton>
+              </div>
+            </div>
+          </VPopover>
+        ) : null}
+        <div className={styles.activeWorkSlot} data-shell-group="active-work">
+          <VPopover
+            open={activeWorkOpen}
+            onOpenChange={(open) => {
+              setActiveWorkOpen(open);
+              if (open) closeUtilityMenu();
+            }}
+            align="end"
+            side="bottom"
+            sideOffset={8}
+            aria-label={activeConversationsLabel}
+            contentClassName={styles.activeWorkPopoverContent}
+            trigger={(
+              <VButton
+                type="button"
+                variant="ghost"
+                contentLayout="plain"
+                className={styles.activeWorkTrigger}
+                aria-expanded={activeWorkOpen}
+                aria-label={activeWorkUnavailable
+                  ? `${activeConversationsLabel}，${lang === "en" ? "unavailable" : "状态暂不可用"}`
+                  : activeWorkLoading
+                    ? `${activeConversationsLabel}，${lang === "en" ? "checking" : "正在检查"}`
+                    : `${activeConversationsLabel}，${activeWorkCountDisplay} ${t("activeWorkCountSuffix")}`}
+                aria-busy={activeWorkLoading}
+                title={activeConversationsLabel}
+                onPointerDownCapture={() => {
+                  // Let Radix finish closing the other popover before opening this one.
+                  if (utilityOpen) window.setTimeout(() => setActiveWorkOpen(true), 80);
+                  closeUtilityMenu();
+                }}
+              >
+                <span className={styles.activeWorkTriggerContent}>
+                  <span className={`${styles.activeWorkTriggerDot} ${systemToneToDotClass(activeWorkUnavailable ? "failed" : activeWorkIndicator ? "running" : "idle")}`} aria-hidden="true" />
+                  <span className={styles.activeWorkTriggerLabel}>{lang === "en" ? "Active" : "进行中"}</span>
+                  <strong>{activeWorkCountDisplay}</strong>
+                  <ChevronDown size={13} aria-hidden="true" />
+                </span>
+              </VButton>
+            )}
+          >
+            <section className={styles.activeWorkPanel} aria-label={activeConversationsLabel}>
+              <div className={styles.activeWorkDetailHeader}>
+                <strong>{activeConversationsLabel}</strong>
+                <span>{activeWorkUnavailable
+                  ? (lang === "en" ? "Unavailable" : "暂不可用")
+                  : activeWorkLoading
+                    ? (lang === "en" ? "Checking" : "正在检查")
+                    : `${activeWorkCountDisplay} ${t("activeWorkCountSuffix")}`}</span>
+              </div>
+              {activeWorkIndicator ? (
+                <ul className={styles.activeWorkDetailList}>
+                  {activeWorkIndicator.items.map((item) => {
+                    const detailAria = [item.label, statusLabel(item.status), item.summary].filter(Boolean).join(" · ");
+                    const detailCopy = (
+                      <div className={styles.activeWorkDetailCopy}>
+                        <div className={styles.activeWorkDetailTitle}><strong>{item.label}</strong></div>
+                        {item.summary ? <p title={item.fullSummary || item.summary}>{item.summary}</p> : null}
+                      </div>
+                    );
+                    return (
+                      <li key={`${item.kind}-${item.runId || item.status}`} className={styles.activeWorkDetailItem}>
+                        <span className={`${styles.activeWorkItemDot} ${systemToneToDotClass(item.tone)}`} aria-hidden="true" />
+                        {item.href ? <Link className={styles.activeWorkDetailLink} to={item.href} aria-label={detailAria} onClick={closeActiveWorkMenu}>{detailCopy}</Link> : detailCopy}
+                        <VStatusChip tone={systemToneToStatus(item.tone)} className={styles.activeWorkItemToneChip}>
+                          {statusLabel(item.status)}
+                        </VStatusChip>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : <p className={styles.activeWorkEmpty}>{activeWorkUnavailable
+                ? (lang === "en" ? "Unable to read active conversations." : "暂时无法读取进行中的会话。")
+                : activeWorkLoading
+                  ? (lang === "en" ? "Checking active conversations…" : "正在检查进行中的会话…")
+                  : (lang === "en" ? "No conversations are active." : "当前没有进行中的会话。")}</p>}
+            </section>
+          </VPopover>
+        </div>
+      <div className={styles.settingsSlot} data-shell-group="settings">
         <VPopover
           open={utilityOpen}
-          onOpenChange={setUtilityOpen}
-          align="start"
-          side="top"
+          onOpenChange={(open) => {
+            setUtilityOpen(open);
+            if (open) setActiveWorkOpen(false);
+            else {
+              setAppearanceOpen(false);
+              setMobileNavigationOpen(false);
+            }
+          }}
+          align="end"
+          side="bottom"
           sideOffset={10}
           aria-label={settingsAndToolsLabel}
           contentClassName={styles.settingsPopoverContent}
@@ -2298,14 +2470,13 @@ export function AppShell() {
               aria-expanded={utilityOpen}
               aria-label={settingsLabel}
               title={settingsLabel}
+              onPointerDownCapture={() => {
+                // Switching popovers should take one click, including on touch screens.
+                if (activeWorkOpen) window.setTimeout(() => setUtilityOpen(true), 80);
+                setActiveWorkOpen(false);
+              }}
             >
-              <span className={styles.settingsTriggerContent}>
-                <span className={styles.settingsTriggerIcon} aria-hidden="true">
-                  <Settings size={13} />
-                </span>
-                <span className={styles.settingsTriggerLabel}>{settingsLabel}</span>
-                <ChevronUp size={16} className={styles.settingsChevron} aria-hidden="true" />
-              </span>
+              <Settings size={17} aria-hidden="true" />
             </VButton>
           )}
         >
@@ -2325,7 +2496,22 @@ export function AppShell() {
               </span>
             </header>
 
-            <nav id="shell-mobile-route-menu" className={styles.mobileRouteMenu} aria-label={lang === "en" ? "Primary navigation" : "主导航"}>
+            <VButton
+              type="button"
+              variant="ghost"
+              contentLayout="plain"
+              className={styles.mobileRouteToggle}
+              aria-expanded={mobileNavigationOpen}
+              aria-controls="shell-mobile-route-menu"
+              onPress={() => setMobileNavigationOpen((open) => !open)}
+            >
+              <span className={styles.settingsRowContent}>
+                <Menu size={15} aria-hidden="true" />
+                <span className={styles.settingsRowLabel}>{lang === "en" ? "Navigation" : "导航"}</span>
+                <ChevronRight size={15} className={mobileNavigationOpen ? styles.settingsRowChevronOpen : styles.settingsRowChevron} aria-hidden="true" />
+              </span>
+            </VButton>
+            <nav id="shell-mobile-route-menu" className={mobileNavigationOpen ? `${styles.mobileRouteMenu} ${styles.mobileRouteMenuOpen}` : styles.mobileRouteMenu} aria-label={lang === "en" ? "Primary navigation" : "主导航"}>
               {chatEnabled ? (
                 <VRouteLinkButton
                   chrome="shell-nav"
@@ -2362,17 +2548,31 @@ export function AppShell() {
             </nav>
 
             <section className={styles.settingsSection} aria-label={appearanceLabel}>
-              <span className={styles.settingsSectionLabel}>{appearanceLabel}</span>
-              <div className={styles.settingsThemeChoices}>
+              <VButton
+                type="button"
+                variant="ghost"
+                contentLayout="plain"
+                className={styles.settingsActionButton}
+                aria-expanded={appearanceOpen}
+                onPress={() => setAppearanceOpen((open) => !open)}
+              >
+                <span className={styles.settingsRowContent}>
+                  {theme === "light" ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}
+                  <span className={styles.settingsRowLabel}>{appearanceLabel}</span>
+                  <span className={styles.settingsRowValue}>{theme === "light" ? lightThemeLabel : darkThemeLabel}</span>
+                  <ChevronRight size={15} className={appearanceOpen ? styles.settingsRowChevronOpen : styles.settingsRowChevron} aria-hidden="true" />
+                </span>
+              </VButton>
+              {appearanceOpen ? <div className={styles.settingsThemeChoices}>
                 <VButton
                   type="button"
                   variant="ghost"
                   className={theme === "light" ? `${styles.settingsChoiceButton} ${styles.settingsChoiceButtonActive}` : styles.settingsChoiceButton}
                   aria-pressed={theme === "light"}
                   icon={<Sun size={13} aria-hidden="true" />}
-                  onPress={() => selectTheme("light")}
+                  onPress={() => { selectTheme("light"); setAppearanceOpen(false); }}
                 >
-                  {lightThemeLabel}
+                  {lightThemeLabel}{theme === "light" ? <Check size={13} aria-hidden="true" /> : null}
                 </VButton>
                 <VButton
                   type="button"
@@ -2380,11 +2580,11 @@ export function AppShell() {
                   className={theme === "dark" ? `${styles.settingsChoiceButton} ${styles.settingsChoiceButtonActive}` : styles.settingsChoiceButton}
                   aria-pressed={theme === "dark"}
                   icon={<Moon size={13} aria-hidden="true" />}
-                  onPress={() => selectTheme("dark")}
+                  onPress={() => { selectTheme("dark"); setAppearanceOpen(false); }}
                 >
-                  {darkThemeLabel}
+                  {darkThemeLabel}{theme === "dark" ? <Check size={13} aria-hidden="true" /> : null}
                 </VButton>
-              </div>
+              </div> : null}
             </section>
 
             <div className={styles.settingsActionList}>
@@ -2395,7 +2595,7 @@ export function AppShell() {
                 onClick={closeUtilityMenu}
                 icon={<SlidersHorizontal size={15} aria-hidden="true" />}
               >
-                {lang === "en" ? "Workbench settings" : "工作台设置"}
+                {lang === "en" ? "All settings" : "全部设置"}
               </VRouteLinkButton>
               <VButton
                 type="button"
@@ -2409,36 +2609,6 @@ export function AppShell() {
               </VButton>
             </div>
 
-            {activeWorkIndicator ? (
-              <section className={styles.settingsActiveWork} aria-label={t("activeWorkDetails")}>
-                <div className={styles.activeWorkDetailHeader}>
-                  <strong>{t("activeWorkDetails")}</strong>
-                  <span>{activeWorkIndicator.count} {t("activeWorkCountSuffix")}</span>
-                </div>
-                <ul className={styles.activeWorkDetailList}>
-                  {activeWorkIndicator.items.map((item) => {
-                    const runIdDisplay = formatActiveWorkRunId(item.runId);
-                    const detailAria = [item.label, statusLabel(item.status), item.summary].filter(Boolean).join(" · ");
-                    const detailCopy = (
-                      <div className={styles.activeWorkDetailCopy}>
-                        <div className={styles.activeWorkDetailTitle}><strong>{item.label}</strong></div>
-                        {item.summary ? <p title={item.fullSummary || item.summary}>{item.summary}</p> : null}
-                        {runIdDisplay ? <code title={item.runId || undefined}>{runIdDisplay}</code> : null}
-                      </div>
-                    );
-                    return (
-                      <li key={`${item.kind}-${item.runId || item.status}`} className={styles.activeWorkDetailItem}>
-                        <VStatusChip tone={systemToneToStatus(item.tone)} className={styles.activeWorkItemToneChip}>
-                          {statusLabel(item.status)}
-                        </VStatusChip>
-                        {item.href ? <Link className={styles.activeWorkDetailLink} to={item.href} aria-label={detailAria} onClick={closeUtilityMenu}>{detailCopy}</Link> : detailCopy}
-                      </li>
-                    );
-                  })}
-                </ul>
-              </section>
-            ) : null}
-
             <Suspense fallback={null}>
               <LazyAppShellUtilityMenu
                 lang={lang}
@@ -2450,6 +2620,13 @@ export function AppShell() {
           </div>
         </VPopover>
       </div>
+      </header>
+
+      <main className={styles.mainArea}>
+        <CompanionDesktopAttention />
+        <Outlet />
+      </main>
+
     </div>
   );
 }

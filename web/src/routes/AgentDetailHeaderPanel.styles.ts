@@ -9,7 +9,7 @@ import {
 const styles = {
   detailHeaderFrame: `grid min-w-0 grid-rows-[auto_auto] border-b border-[var(--vui-border-subtle)] ${vuiWorkspaceFillClass}`,
   detailHeader:
-    "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-0 pb-3 [&_h2]:m-0 [&_h2]:min-w-0 [&_h2]:truncate [&_h2]:text-lg [&_h2]:font-semibold max-[680px]:grid-cols-1 max-[680px]:gap-2",
+    "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-0 pb-3 [&_h2]:m-0 [&_h2]:min-w-0 [&_h2]:truncate [&_h2]:text-vui-lg [&_h2]:font-semibold max-[680px]:grid-cols-1 max-[680px]:gap-2",
   detailIdentity: "flex min-w-0 items-center gap-3",
   detailIdentityCopy:
     "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0.5 [&_h2]:col-start-1 [&_h2]:row-start-2",

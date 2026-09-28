@@ -28,11 +28,21 @@ SCENE_RAW_TO_LAUNCHER = {
 }
 
 USAGE_GUIDANCE = [
-    "When diagnosing runtime issues or needing log evidence, start with agent_log_context before grep, read_file, or raw log expansion.",
-    "Read summary.json agent_brief and follow resolvedEvidenceRefs.absolutePath before opening timeline or stdout logs.",
-    "Use conversation_log_inspect_tool or agent_log_context with log_path only for a narrow deep read.",
-    "Resolve paths from activePaths; never assume logs live under the git checkout root after migration.",
+    "只读 firstRead 的四段：conclusion、evidencePaths、nextStep、doNotDo。然后停止。",
+    "只有 nextStep 点名的 evidencePaths.absolutePath 才可以打开；带 warning 的文件不要整篇读。",
+    "路径以 activePaths 为准。深读才传 log_path，而且文件必须已出现在 evidencePaths。",
 ]
+_MAX_FIRST_READ_EVIDENCE = 5
+_PACKAGE_FILE_NAMES = frozenset(
+    {
+        "summary.json",
+        "package_index.json",
+        "timeline.jsonl",
+        "lifecycle.jsonl",
+    }
+)
+_DO_NOT_SEARCH = "不要在读完 firstRead 之前搜索仓库或整篇打开 stdout。"
+_DO_NOT_READ_LARGE = "warning 为 do_not_read_full_file_use_scene_raw_or_tail 的文件不要整篇读。"
 
 
 def build_agent_log_context(
@@ -85,12 +95,18 @@ def build_agent_log_context(
         agent_brief=agent_brief,
         diagnostic_entrypoint=diagnostic_entrypoint,
     )
+    first_read = build_agent_first_read(
+        agent_brief,
+        resolved_evidence_refs,
+        session_requested=bool(normalized_session_id),
+    )
 
     return {
         "status": "ok",
         "schemaVersion": AGENT_LOG_CONTEXT_SCHEMA_VERSION,
         "tool": "agent_log_context",
         "mode": "context",
+        "firstRead": first_read,
         "inspectedAt": datetime.now(timezone.utc).isoformat(),
         "projectRoot": str(root),
         "activePaths": active_paths,
@@ -114,6 +130,138 @@ def build_agent_log_context(
         },
         "usageGuidance": list(USAGE_GUIDANCE),
     }
+
+
+def build_agent_first_read(
+    agent_brief: dict[str, Any] | None,
+    resolved_evidence_refs: list[dict[str, Any]] | None = None,
+    *,
+    session_requested: bool = False,
+) -> dict[str, Any]:
+    """Project one scene brief into the four fields every agent reads first."""
+
+    brief = agent_brief if isinstance(agent_brief, dict) else {}
+    evidence_refs = _first_read_evidence_refs(brief)
+    resolved_by_ref = _resolved_evidence_index(resolved_evidence_refs)
+    needs_action = bool(brief.get("needs_action"))
+    next_step = _first_read_next_step(
+        brief,
+        evidence_refs,
+        session_requested=session_requested,
+    )
+    return {
+        "conclusion": _first_read_conclusion(brief),
+        "evidencePaths": [
+            _first_read_evidence_path(ref, resolved_by_ref.get(ref))
+            for ref in evidence_refs
+        ],
+        "nextStep": next_step,
+        "doNotDo": _first_read_do_not_do(brief, needs_action=needs_action),
+    }
+
+
+def _first_read_conclusion(agent_brief: dict[str, Any]) -> str:
+    if not agent_brief:
+        return "没有当前运行现场。不要猜日志路径。"
+    status = str(agent_brief.get("diagnosis_status") or "").strip()
+    primary = str(agent_brief.get("primary_issue") or "").strip() or "none"
+    severity = str(agent_brief.get("severity") or "").strip()
+    if agent_brief.get("needs_action"):
+        issue = primary if primary != "none" else (status or "unknown")
+        level = f"（{severity}）" if severity else ""
+        return f"要处理。主问题是 {issue}{level}。"
+    if status == "policy_only":
+        if primary != "none":
+            return f"只是策略拦截：{primary}。不要当产品故障修。"
+        return "只是策略拦截。不要当产品故障修。"
+    if status == "resolved":
+        return "没有进行中的问题。历史错误已经恢复。"
+    return "没有进行中的问题。停在这里。"
+
+
+def _first_read_next_step(
+    agent_brief: dict[str, Any],
+    evidence_refs: list[str],
+    *,
+    session_requested: bool,
+) -> str:
+    if not agent_brief:
+        step = "停止。不要在仓库里搜日志。"
+    elif agent_brief.get("needs_action") and evidence_refs:
+        step = f"只打开 evidencePaths 里的 {evidence_refs[0]}。文件带 warning 时不要整篇读。"
+    elif agent_brief.get("needs_action"):
+        step = "证据路径为空。不要搜全仓，也不要打开原始日志。"
+    elif str(agent_brief.get("diagnosis_status") or "").strip() == "policy_only":
+        step = "确认这是预期策略后停止。不要打开原始日志。"
+    else:
+        step = "停止。不要打开原始日志。"
+    if session_requested:
+        step += " 要看这一轮会话时，只读 session.diagnosis.nextMinimalAction。"
+    return step
+
+
+def _first_read_do_not_do(agent_brief: dict[str, Any], *, needs_action: bool) -> list[str]:
+    bounds = (
+        "不要打开 evidencePaths 以外的文件。"
+        if needs_action
+        else "不要打开原始日志，包括 evidencePaths 里的文件。"
+    )
+    items = [_DO_NOT_SEARCH, bounds, _DO_NOT_READ_LARGE]
+    raw = agent_brief.get("do_not_do")
+    if isinstance(raw, list):
+        for item in raw:
+            text = str(item or "").strip()
+            if text and text not in items:
+                items.append(text)
+    return items[:4]
+
+
+def _first_read_evidence_refs(agent_brief: dict[str, Any]) -> list[str]:
+    refs: list[str] = []
+    raw = agent_brief.get("evidence_refs")
+    if isinstance(raw, list):
+        for item in raw:
+            _append_unique_ref(refs, str(item or ""))
+    named = [ref for ref in refs if not _is_package_ref(ref)]
+    chosen = named or [ref for ref in refs if ref]
+    return chosen[:_MAX_FIRST_READ_EVIDENCE]
+
+
+def _is_package_ref(ref: str) -> bool:
+    return _ref_name(ref) in _PACKAGE_FILE_NAMES
+
+
+def _ref_name(ref: str) -> str:
+    normalized = str(ref or "").strip().replace("\\", "/")
+    return normalized.rsplit("/", 1)[-1]
+
+
+def _resolved_evidence_index(
+    resolved_evidence_refs: list[dict[str, Any]] | None,
+) -> dict[str, dict[str, Any]]:
+    index: dict[str, dict[str, Any]] = {}
+    for item in resolved_evidence_refs or []:
+        if not isinstance(item, dict):
+            continue
+        ref = str(item.get("ref") or "").strip()
+        if ref and ref not in index:
+            index[ref] = item
+    return index
+
+
+def _first_read_evidence_path(ref: str, resolved: dict[str, Any] | None) -> dict[str, Any]:
+    entry: dict[str, Any] = {"ref": ref}
+    if not isinstance(resolved, dict) or not resolved:
+        return entry
+    absolute_path = str(resolved.get("absolutePath") or "")
+    if absolute_path:
+        entry["absolutePath"] = absolute_path
+    if "exists" in resolved:
+        entry["exists"] = bool(resolved.get("exists"))
+    warning = str(resolved.get("warning") or "").strip()
+    if warning:
+        entry["warning"] = warning
+    return entry
 
 
 def _load_json_object(path: Path) -> dict[str, Any]:

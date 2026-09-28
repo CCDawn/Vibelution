@@ -37,6 +37,14 @@
 # 影响面
 .\.venv\Scripts\python.exe tests\select_tests.py --from-git main --commands-only
 
+# 开工简报（矩阵域定位+测试命令、claim 冲突预检、修复历史、文档指引）
+.\.venv\Scripts\python.exe scripts\task_brief.py --task "<一句话任务>" --files <目标文件>
+# 并行会话态势（谁在干什么/main 能否合入：--check-merge --files <目标文件>）
+.\.venv\Scripts\python.exe scripts\agent_session_status.py
+# 修复知识库（defect/erratum/recipe；收口时值得跨会话记住的结论留一条）
+.\.venv\Scripts\python.exe scripts\fix_ledger.py record --category <defect|erratum|recipe> --severity <high|medium|low> --symptom "<症状>" --root-cause "<根因>" --lesson "<要点>"
+.\.venv\Scripts\python.exe scripts\fix_ledger.py query --keyword <词>
+
 # pytest 聚焦
 .\.venv\Scripts\python.exe -m pytest tests\test_TARGET.py -q
 
@@ -68,7 +76,7 @@ node web/node_modules/typescript/bin/tsc -b web/tsconfig.json --pretty false
 # 只对返回的 workbenchUrl 探 /api/health。:8000 无监听只说明默认口空，不能当工作台未启动。
 # 实开口权威：env → .runtime/launcher/ports.json → config.toml backend_port（默认 8000）。
 # —— 日志诊断（统一入口；细则见 docs/guides/agent-log-routing.md）——
-# 1) 所有 Agent 第一步：路径 + 当前 scene + agent_brief（可选 session/turn）
+# 1) 所有 Agent 第一步：只读入口 JSON 的 firstRead（结论、证据路径、下一步、不要做的事）
 .\.venv\Scripts\python.exe scripts\agent_log_context.py --project "<ROOT>"
 .\.venv\Scripts\python.exe scripts\agent_log_context.py --project "<ROOT>" --session-id ID --turn-id TID
 # 2) 本机环境医生（venv / hooks / 关键模块）

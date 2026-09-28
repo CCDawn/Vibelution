@@ -73,7 +73,7 @@ export const ShadcnCheckbox = forwardRef<HTMLInputElement, ShadcnCheckboxProps>(
     return (
       <label
         className={[
-          "inline-flex min-w-0 items-center gap-2 rounded-[var(--radius-control)] text-sm text-vui-fg-secondary",
+          "inline-flex min-w-0 items-center gap-2 rounded-[var(--radius-control)] text-vui-xs text-vui-fg-secondary",
           hasLabel
             ? `${vuiControlMinHeightClass(density)} px-1`
             : "size-8 justify-center",
@@ -116,7 +116,7 @@ export const ShadcnCheckbox = forwardRef<HTMLInputElement, ShadcnCheckboxProps>(
               data-slot="checkbox-indicator"
               aria-hidden="true"
               className={[
-                "pointer-events-none grid size-5 place-items-center rounded-[6px] border",
+                "pointer-events-none grid size-5 place-items-center rounded-[var(--radius-control)] border",
                 "border-[var(--vui-border-strong)] bg-[var(--vui-surface-panel)] text-[var(--vui-surface-base)]",
                 "shadow-[inset_0_1px_0_color-mix(in_srgb,var(--vui-surface-panel)_70%,transparent)]",
                 "transition-[background-color,border-color,box-shadow] duration-150 motion-reduce:transition-none",

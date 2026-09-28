@@ -33,7 +33,7 @@ const styles: Record<string, string> = {
   cacheDetailTooltip:
     "vui-routes-chatcodingroute cacheDetailTooltip grid min-w-0 max-w-[15rem] gap-1 text-left",
   cacheDetailTooltipLine:
-    "vui-routes-chatcodingroute cacheDetailTooltipLine min-w-0 break-words text-[11px] font-medium leading-snug text-vui-fg-primary tabular-nums",
+    "vui-routes-chatcodingroute cacheDetailTooltipLine min-w-0 break-words text-vui-micro-11 font-medium leading-snug text-vui-fg-primary tabular-nums",
   cacheDetailCloseButton: `vui-routes-chatcodingroute cacheDetailCloseButton min-w-0 ${vuiGlassPanelClass} p-2 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55`,
   // Dialog shell on VDialog content: viewport max-h (see components/layout/dialogHeightPolicy.ts).
   cacheDetailDialog: `vui-routes-chatcodingroute cacheDetailDialog min-w-0 w-[min(1120px,calc(100vw_-_44px))] max-h-[min(860px,calc(100dvh_-_52px))]`,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -12,6 +13,7 @@ from typing import Any
 from uuid import uuid4
 
 from core.infrastructure.atomic_io import atomic_write_json
+from core.infrastructure.canonical_json import canonical_json
 
 from .constants import (
     DEFAULT_COMMAND_WAIT_SECONDS,
@@ -57,10 +59,25 @@ def _command_timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
+def command_args_hash(args: dict[str, Any] | None) -> str:
+    """Stable content hash over the command args (canonical JSON).
+
+    Recorded on every queued command so dedup and audit can join on *what*
+    was requested, not only on the time window.  Args are hashed verbatim:
+    they carry the request body, while identity and timestamps live beside
+    the hash and never enter it.  Equal args always produce the same hash,
+    independent of dict insertion order.
+    """
+    return hashlib.sha256(
+        canonical_json(dict(args or {})).encode("utf-8")
+    ).hexdigest()[:16]
+
+
 def build_command(command_type: str, *, args: dict[str, Any] | None = None, requested_by: str = "unknown") -> dict[str, Any]:
     return {
         "commandId": f"cmd_{_command_timestamp()}_{uuid4().hex[:8]}",
         "type": str(command_type or "").strip(),
+        "argsHash": command_args_hash(args),
         "requestedBy": str(requested_by or "unknown").strip() or "unknown",
         "requestedAt": datetime.now(timezone.utc).isoformat(),
         "args": args or {},
@@ -249,15 +266,37 @@ def _complete_satisfied_pending_close_commands() -> None:
         _complete_recovered_satisfied_close_workbench(path, command)
 
 
-def has_recent_lifecycle_command(*, grace_seconds: float, now: datetime | None = None) -> bool:
+def has_recent_lifecycle_command(
+    *,
+    grace_seconds: float,
+    now: datetime | None = None,
+    args_hash: str | None = None,
+) -> bool:
+    """Time-window dedup over pending lifecycle commands.
+
+    A pending lifecycle command whose claim/start/request time (or file
+    mtime fallback) sits inside ``grace_seconds`` counts as recent.  With
+    ``args_hash`` the dedup is content-strengthened: a pending command whose
+    recorded ``argsHash`` matches counts as recent even when every
+    timestamp on the file is unreadable — a still-pending identical request
+    is by definition an in-flight intent, so the caller joins it instead of
+    enqueuing a second copy.  Queue scheduling (claim/defer/complete) is
+    untouched either way.
+    """
     ensure_runtime_manager_dirs()
     current = now or datetime.now(timezone.utc)
     age_limit = max(0.0, float(grace_seconds))
     for directory in (PROCESSING_DIR, INBOX_DIR):
         for path in sorted(directory.glob("*.json")):
             command = _load_command_file(path)
-            if str(command.get("type") or "").strip() not in LIFECYCLE_COMMAND_TYPES:
+            command_type = str(command.get("type") or "").strip()
+            if command_type not in LIFECYCLE_COMMAND_TYPES:
                 continue
+            if (
+                args_hash is not None
+                and str(command.get("argsHash") or "").strip() == args_hash
+            ):
+                return True
             for key in ("claimedAt", "startedAt", "requestedAt"):
                 parsed = _parse_datetime(str(command.get(key) or ""))
                 if parsed is not None and (current - parsed).total_seconds() <= age_limit:

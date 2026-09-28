@@ -38,7 +38,7 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain('data-shell-group="brand"');
     expect(shellSource).toContain('data-shell-group="navigation"');
     expect(shellSource).toContain('data-shell-group="window-drag-region"');
-    expect(shellSource).toContain('data-shell-group="settings-dock"');
+    expect(shellSource).toContain('data-shell-group="settings"');
     expect(shellSource).not.toContain('data-shell-group="system-actions"');
     expect(shellSource).not.toContain('data-shell-group="tool-actions"');
     // 方案A: the nav container is flattened — only the active tab keeps a pill.
@@ -55,11 +55,11 @@ describe("AppShell layout contract", () => {
       shellSource.indexOf("</header>"),
     );
     expect(titleBar).not.toContain("RefreshCw");
-    expect(titleBar).not.toContain("Settings");
+    expect(titleBar).toContain("<Settings size={17}");
     expect(titleBar).not.toContain("statusSummaryChip");
     expect(titleBar).toContain("windowDragRegion");
-    expect(styles.settingsTrigger).toContain("!w-full");
-    expect(styles.settingsTrigger).toContain("!rounded-none");
+    expect(styles.settingsTrigger).toContain("!size-8");
+    expect(styles.settingsTrigger).toContain("!rounded-md");
   });
 
   it("keeps desktop primary navigation labels at their intrinsic readable width", () => {
@@ -128,16 +128,17 @@ describe("AppShell layout contract", () => {
     expect(shellSource).not.toContain("rightStatusCards.map((item) => (\n                <span key={item.id} className={styles.statusBadge}>");
   });
 
-  it("keeps the global shell top bar and settings dock compact", () => {
+  it("keeps the global shell top bar and settings trigger compact", () => {
     expect(styles.statusSummaryDot).toBeTypeOf("string");
     expect(styles.returnButton).toBeTypeOf("string");
     expect(shellStyles).toContain("--shell-topbar-height: 40px");
-    expect(shellStyles).toContain("--shell-settings-dock-height: 56px");
+    expect(shellStyles).not.toContain("--shell-settings-dock-height");
     expect(shellStyles).toContain("env(titlebar-area-width");
-    expect(styles.settingsPopoverContent).toContain("w-[min(292px,calc(100vw-20px))]");
-    expect(styles.settingsPopoverContent).toContain("max-h-[min(520px,calc(100dvh-96px))]");
-    expect(styles.settingsTrigger).toContain("!h-full");
-    expect(styles.settingsTrigger).toContain("!w-full");
+    expect(styles.settingsPopoverContent).toContain("w-[min(350px,calc(100vw-20px))]");
+    expect(styles.settingsPopoverContent).toContain("max-h-[min(650px,calc(100dvh-90px))]");
+    expect(styles.settingsActionList).toContain("grid-cols-1");
+    expect(styles.settingsTrigger).toContain("!min-h-8");
+    expect(styles.settingsTrigger).toContain("!size-8");
     expect(shellSource).toContain("VStatusChip");
     expect(shellSource).toContain("systemToneToStatus");
     expect(shellSource).toContain("systemToneToDotClass");
@@ -156,7 +157,7 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("max-width: 100%");
     expect(shellStyles).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
     expect(shellStyles).toContain("grid-template-columns: 36px minmax(0, 1fr)");
-    expect(shellStyles).toContain("@media (max-width: 700px)");
+    expect(shellStyles).toContain("@media (max-width: 639px)");
     expect(shellStyles).toContain("cursor: pointer");
 
     const compactDesktopBlock = shellStyles.slice(
@@ -201,7 +202,7 @@ describe("AppShell layout contract", () => {
       }
     }
     expect(styles.activeWorkDetailHeader).toContain("border-b");
-    expect(styles.activeWorkDetailHeader).toContain("text-[var(--accent-cool)]");
+    expect(styles.activeWorkDetailHeader).toContain("text-[var(--fg-primary)]");
   });
 
   it("routes card-like shell controls through shared quiet hover tokens", () => {
@@ -215,7 +216,6 @@ describe("AppShell layout contract", () => {
       styles.utilityButton,
       styles.utilityFileButton,
       utilityMenuStyles.utilityButton,
-      utilityMenuStyles.gitSummaryRow,
     ];
 
     for (const value of shellControlStyles) {
@@ -252,18 +252,19 @@ describe("AppShell layout contract", () => {
     expect(launcherShellSource).toContain("}, [lang, theme, launcherWindowTitle])");
   });
 
-  it("keeps the unified title bar visible and exposes settings across the full left dock row", () => {
+  it("keeps the unified title bar visible and exposes a compact settings trigger on the title bar", () => {
     expect(shellSource).toContain("useShellStore");
     expect(shellSource).not.toContain("topBarMode");
     expect(shellSource).not.toContain("setTopBarMode");
     expect(shellSource).not.toContain("topBarRestoreButton");
     expect(shellStyles).not.toContain("data-topbar-mode");
-    expect(shellSource).toContain('"--shell-settings-dock-width": `${chatLeftPanelWidth}px`');
-    expect(shellSource).toContain('side="top"');
-    expect(shellSource).toContain('align="start"');
-    expect(styles.settingsTrigger).toContain("!w-full");
-    expect(styles.settingsTrigger).toContain("!rounded-none");
-    expect(shellStyles).toContain("width: min(var(--shell-settings-dock-width), 100vw)");
+    expect(shellSource).not.toContain("--shell-settings-dock-width");
+    expect(shellSource).toContain('side="bottom"');
+    expect(shellSource).toContain('align="end"');
+    expect(styles.settingsTrigger).toContain("!size-8");
+    expect(styles.settingsTrigger).toContain("!rounded-md");
+    expect(shellStyles).not.toContain(".settingsDock");
+    expect(shellSource).toContain("[location.key, closeUtilityMenu]");
   });
 
   it("exposes a shell-level semantic return action without visible helper copy", () => {
@@ -278,13 +279,11 @@ describe("AppShell layout contract", () => {
     expect(shellSource).not.toContain("returnNavigationHelper");
   });
 
-  it("keeps the global shell background in the layered starfield treatment", () => {
-    expect(shellStyles).toContain("--shell-star-color");
-    expect(shellStyles).toContain("--shell-star-faint");
-    expect(shellStyles).toContain("--shell-nebula-cool");
-    expect(shellStyles).toContain(".shell::before");
-    expect(shellStyles).toContain(".shell::after");
-    expect(shellStyles).toContain("radial-gradient(circle at 8% 18%");
+  it("keeps the default shell on a flat canvas and custom images optional", () => {
+    expect(shellStyles).toContain("background: var(--vui-surface-base)");
+    expect(shellStyles).not.toContain("--shell-star-color");
+    expect(shellStyles).not.toContain(".shell::before");
+    expect(shellStyles).not.toContain("radial-gradient(circle at 8% 18%");
     expect(shellSource).toContain("configThemeBackgroundImageUrl(configQuery.data)");
     expect(shellSource).toContain("configThemeBackgroundReadability(");
     expect(shellSource).toContain('data-theme-background={themeBackgroundImageUrl ? "custom" : "default"}');
@@ -355,13 +354,13 @@ describe("AppShell layout contract", () => {
     expect(primaryNav).not.toContain('to="/tools"');
     expect(primaryNav).not.toContain('to="/agents/tools"');
     expect(primaryNav).not.toContain('to="/git"');
-    expect(shellSource).toContain("settingsDock");
+    expect(shellSource).toContain("settingsSlot");
     expect(shellSource).toContain("settingsTriggerOpen");
     expect(shellSource).toContain("aria-expanded={utilityOpen}");
     expect(shellSource).toContain("<VPopover");
     expect(shellSource).toContain("contentClassName={styles.settingsPopoverContent}");
-    expect(shellSource).toContain('side="top"');
-    expect(shellSource).toContain('align="start"');
+    expect(shellSource).toContain('side="bottom"');
+    expect(shellSource).toContain('align="end"');
     expect(shellSource).toContain("selectTheme(\"light\")");
     expect(shellSource).toContain("selectTheme(\"dark\")");
     expect(shellSource).toContain("LazyAppShellUtilityMenu");
@@ -419,7 +418,7 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("isShellPrimaryNavActive");
     expect(shellSource).not.toContain("<NavLink");
     expect(shellSource).toContain('to="/config"');
-    expect(shellSource).toContain("<Settings size={13}");
+    expect(shellSource).toContain("<Settings size={17}");
     expect(utilityMenuSource).toContain("requiresAttention");
     expect(utilityMenuSource).toContain("gitStatusLevel");
     expect(utilityMenuSource).not.toContain("gitSignalGrid");
@@ -437,74 +436,83 @@ describe("AppShell layout contract", () => {
     expect(utilityMenuStyles.utilityPanel).toBeTypeOf("string");
     expect(utilityMenuStyles.utilityButtonGrid).toBeTypeOf("string");
     expect(utilityMenuStyles.gitSummaryRow).toBeTypeOf("string");
-    expect(utilityMenuStyles.gitSummaryBranch).toBeTypeOf("string");
+    expect(utilityMenuStyles.gitStatusChip).toBeTypeOf("string");
     expect(shellStyles).toContain(".settingsPopoverBody .utilityButtonGrid");
-    expect(shellStyles).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
+    const settingsUtilityGrid = shellStyles.slice(
+      shellStyles.indexOf(":where(.vui-app-appshell).settingsPopoverBody .utilityButtonGrid"),
+      shellStyles.indexOf(":where(.vui-app-appshell).settingsPopoverBody .utilityPanel"),
+    );
+    expect(settingsUtilityGrid).toContain("grid-template-columns: minmax(0, 1fr)");
+    expect(settingsUtilityGrid).not.toContain("repeat(2");
     expect(shellStyles).toContain(".settingsPopoverBody .utilityPanel");
-    expect(shellStyles).toContain("grid-template-columns: minmax(0, 1fr)");
     expect(shellStyles).not.toContain("minmax(5.5rem, 1fr)");
     expect(utilityMenuStylesSource).toContain("gitSummaryRow");
+    expect(utilityMenuSource.match(/to="\/git"/g)).toHaveLength(1);
     expect(utilityMenuStylesSource).not.toContain("utilityFileButton");
     expect(utilityMenuStylesSource).not.toContain("gitMetricStrip");
     expect(utilityMenuStylesSource).not.toContain("gitSignalGrid");
   });
 
-  it("keeps active work details inside the settings panel", () => {
-    expect(shellSource).toContain("settingsActiveWork");
+  it("moves active work details into a title-bar popover", () => {
+    expect(shellSource).not.toContain("settingsActiveWork");
     expect(shellSource).toContain("activeWorkIndicator.items.map");
     expect(shellSource).toContain("<Link className={styles.activeWorkDetailLink} to={item.href}");
-    expect(shellSource).not.toContain("contentClassName={styles.activeWorkPopoverContent}");
+    expect(shellSource).toContain("contentClassName={styles.activeWorkPopoverContent}");
+    expect(shellSource).toContain('data-shell-group="active-work"');
     expect(shellSource).not.toContain('data-vui="active-work-popover"');
     expect(shellSource).not.toContain("className={styles.activeWorkSummary}");
     expect(shellSource).not.toContain("[&:hover_.activeWorkDetailPanel]:visible");
-    // Native title stays human-readable; task details live in settings.
+    // Native title stays human-readable; task details live in the clicked popover.
     expect(shellSource).not.toContain("title={activeWorkDetailsTitle}");
-    expect(shellSource).toContain("formatActiveWorkRunId");
+    expect(shellSource).not.toContain("formatActiveWorkRunId");
     expect(shellSource).not.toContain("activeWorkChipAriaLabel");
 
-    expect(styles.settingsActiveWork).toBeTypeOf("string");
+    expect(styles.activeWorkPanel).toBeTypeOf("string");
     expect(styles.activeWorkDetailItem).toBeTypeOf("string");
     expect(styles.activeWorkDetailLink).toContain("block");
     expect(styles.activeWorkDetailLink).toContain("focus-visible:ring-2");
   });
 
-  it("bounds active work details inside the settings popover", () => {
+  it("bounds active work details inside their own popover", () => {
     expect(shellSource).not.toContain("activeWorkInlineDetails");
     expect(shellSource).not.toContain("activeWorkInlineItem");
-    expect(styles.settingsPopoverContent).toContain("overflow-y-auto");
-    expect(shellStyles).toContain(".settingsActiveWork .activeWorkDetailList");
-    expect(shellStyles).toContain("max-height: min(210px, 30vh)");
-    expect(styles.activeWorkDetailCopy).toContain("[&_p]:line-clamp-2");
+    expect(styles.activeWorkPopoverContent).toContain("overflow-y-auto");
+    expect(styles.activeWorkPopoverContent).toContain("w-[min(370px,calc(100vw-20px))]");
+    expect(shellStyles).toContain("max-height: min(330px, 45vh)");
+    expect(styles.activeWorkDetailCopy).toContain("[&_p]:truncate");
     expect(styles.activeWorkDetailList).not.toContain("max-h-");
     expect(shellStyles).not.toContain("activeWorkChip:hover .activeWorkInlineDetails");
     expect(shellStyles).not.toContain("activeWorkInlineItem");
   });
 
-  it("keeps active work out of the unified title bar", () => {
+  it("keeps active work in the title bar without swallowing the drag region", () => {
     const titleBar = shellSource.slice(
       shellSource.indexOf('<header className={styles.topBar}>'),
       shellSource.indexOf("</header>"),
     );
-    expect(titleBar).not.toContain("activeWorkIndicator");
-    expect(titleBar).not.toContain("activeWorkSlot");
-    expect(shellSource).not.toContain('data-active-work-slot');
+    expect(titleBar).toContain("activeWorkIndicator");
+    expect(titleBar).toContain("activeWorkSlot");
+    expect(titleBar).toContain('data-shell-group="active-work"');
+    expect(titleBar.indexOf('data-shell-group="window-drag-region"')).toBeLessThan(titleBar.indexOf('data-shell-group="active-work"'));
+    expect(shellSource).toContain('当前没有进行中的会话。');
+    expect(shellSource).toContain('activeWorkUnavailable ? "—"');
   });
 
   it("keeps active work compact without nested cards or horizontal overflow", () => {
-    expect(shellSource).toContain("className={styles.settingsActiveWork}");
+    expect(shellSource).toContain("className={styles.activeWorkPanel}");
     expect(shellStyles).toContain("overflow-x: hidden");
     expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkDetailHeader");
-    expect(shellStyles).toContain("padding: 0 2px 2px");
+    expect(shellStyles).toContain("padding: 6px 8px 9px");
     expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkDetailList");
     expect(shellStyles).toContain("padding: 0");
     expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkDetailCopy");
     expect(shellStyles).toContain("background: transparent");
     expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkDetailTitle");
-    expect(shellStyles).toContain("grid-template-columns: minmax(0, 1fr) max-content");
-    expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkDetailCopy code");
+    expect(shellStyles).toContain("grid-template-columns: 7px minmax(0, 1fr) max-content");
+    expect(shellStyles).toContain("border: 0");
     expect(shellStyles).toContain("text-overflow: ellipsis");
 
-    expect(styles.settingsPopoverContent).toContain("calc(100dvh-96px)");
+    expect(styles.activeWorkPopoverContent).toContain("calc(100dvh-70px)");
   });
 
   it("uses one shared page instance id and stops periodic memory sampling while hidden", () => {
@@ -591,6 +599,59 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("browser.user_action.force_shutdown_requested");
     expect(shellSource).toContain("browser.user_action.force_shutdown_unconfirmed");
     expect(shellSource).not.toContain("lifecycleMenuRef");
+    // The update banner restart rides the same dormant shell lifecycle path
+    // (beginRestart -> requestLifecycle) — never a direct restart API call.
+    expect(shellSource).toContain("onPress={beginRestart}");
+  });
+
+  it("surfaces a dismissible update banner only when the backend is behind disk HEAD", () => {
+    expect(shellSource).toContain('from "./updateBanner"');
+    expect(shellSource).toContain("shouldShowUpdateBanner");
+    expect(shellSource).toContain("readStoredUpdateBannerDismissedHead");
+    expect(shellSource).toContain("storeUpdateBannerDismissedHead");
+    // Only backend-stale verdicts prompt; frontend-only stays on refresh-frontend.
+    expect(shellSource).toContain("updateBannerVerdict === \"backend_and_frontend_behind\"");
+
+    // Notification is a collapsed top-bar popover, never a workspace row.
+    const bannerRegion = shellSource.slice(
+      shellSource.indexOf("{updateBannerVisible ?"),
+      shellSource.indexOf('data-shell-group="active-work"'),
+    );
+    expect(shellSource.indexOf("{updateBannerVisible ?")).toBeLessThan(shellSource.lastIndexOf("</header>"));
+    expect(bannerRegion).toContain("<VPopover");
+    expect(bannerRegion).not.toContain("defaultOpen");
+    expect(bannerRegion).toContain('role="status"');
+    expect(bannerRegion).toContain("updateBannerVisible ?");
+    expect(bannerRegion).toContain("onPress={beginRestart}");
+    expect(bannerRegion).toContain("isDisabled={updateBannerRestartDisabled}");
+    expect(bannerRegion).toContain("{updateBannerRestartGuard}");
+    // Active-work guard copy is the existing shell guard message, not new copy.
+    expect(shellSource).toContain("updateBannerRestartGuard = updateBannerRestartBlockedByWork");
+    expect(shellSource).toContain("? restartActiveWorkBlockedMessage(lang, activeWorkDetailsTitle)");
+    expect(bannerRegion).toContain("onPress={dismissUpdateBanner}");
+    expect(bannerRegion).not.toContain("/api/runtime/");
+
+    // Dismissal is keyed to the disk HEAD commit, so a new commit re-prompts.
+    expect(shellSource).toContain("dismissedHead: updateBannerDismissedHead");
+    expect(shellSource).toContain("diskHead: updateBannerDiskHead");
+
+    // Active work keeps the restart action from even trying: guard copy surfaces.
+    expect(shellSource).toContain("updateBannerRestartBlockedByWork = Boolean(activeWorkIndicator)");
+
+    expect(shellSource).not.toContain("UPDATE_BANNER_MAIN_AREA_STYLE");
+    expect(shellSource).not.toContain("UPDATE_BANNER_SHELL_GRID_ROWS");
+    expect(shellSource).toContain('<main className={styles.mainArea}>');
+
+    // It rides the whitelisted code-freshness poll — no per-second ticker.
+    expect(shellSource).not.toContain("setClockNow");
+    expect(shellSource).not.toMatch(/updateBanner[\s\S]{0,200}setInterval/);
+
+    expect(styles.updateBanner).not.toContain("mt-[var(--shell-topbar-height)]");
+    expect(styles.updateBannerPopover).toContain("overflow-y-auto");
+    expect(styles.updateBanner).not.toMatch(/rounded-\[\d/);
+    expect(styles.updateBannerTitle).toContain("[font-size:var(--vui-font-sm)]");
+    expect(styles.updateBannerRestartButton).toBeTypeOf("string");
+    expect(styles.updateBannerNote).toContain("whitespace-pre-line");
   });
 
   it("lets lifecycle wait overlays be cancelled without stopping active work", () => {
@@ -644,7 +705,7 @@ describe("AppShell layout contract", () => {
   });
 
   it("keeps the global shell usable on narrow screens", () => {
-    expect(styles.settingsTriggerLabel).toBeTypeOf("string");
+    expect(styles.settingsSlot).toContain("shrink-0");
     expect(styles.statusBadgeLabel).toBeTypeOf("string");
     expect(styles.nav).not.toContain("max-[639px]");
     expect(styles.mobileNav).not.toContain("max-[639px]");
@@ -656,16 +717,18 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("shellMobileNavClass");
     expect(shellSource).toContain("closeUtilityMenu");
     expect(shellSource).toContain('to="/companions"');
-    expect(shellStyles).toContain("@media (max-width: 700px)");
-    expect(shellStyles).toContain("padding-bottom: var(--shell-settings-dock-height)");
-    expect(shellStyles).toContain("width: 100vw");
+    expect(shellStyles).toContain("@media (max-width: 639px)");
+    expect(shellStyles).not.toContain("padding-bottom: var(--shell-settings-dock-height)");
+    expect(shellSource).not.toContain('data-shell-group="settings-dock"');
     const mobileShellBlock = shellStyles.slice(shellStyles.indexOf("@media (max-width: 639px)"));
     expect(mobileShellBlock).toContain(":where(.vui-app-appshell).topBar .nav");
     expect(mobileShellBlock).toContain(":where(.vui-app-appshell).topBar .mobileNav");
     expect(mobileShellBlock).toContain(":where(.vui-app-appshell).settingsPopoverBody .mobileRouteMenu");
     expect(mobileShellBlock).toMatch(/\.topBar \.nav\s*\{\s*display: none;/);
     expect(mobileShellBlock).toMatch(/\.topBar \.mobileNav\s*\{\s*display: flex;/);
-    expect(mobileShellBlock).toMatch(/\.settingsPopoverBody \.mobileRouteMenu\s*\{\s*display: grid;/);
+    expect(mobileShellBlock).toMatch(/\.settingsPopoverBody \.mobileRouteToggle\s*\{\s*display: flex;/);
+    expect(mobileShellBlock).toMatch(/\.settingsPopoverBody \.mobileRouteMenu\s*\{\s*display: none;/);
+    expect(mobileShellBlock).toMatch(/\.settingsPopoverBody \.mobileRouteMenuOpen\s*\{\s*display: grid;/);
   });
 
   it("themes the managed app window chrome to match the light-first shell", () => {

@@ -78,6 +78,25 @@ def _load_agent(agent_id: str) -> dict[str, Any]:
     return agent
 
 
+def _require_memory_policy_enabled(agent: dict[str, Any]) -> None:
+    """Write-side gate for the per-agent memory switch (memoryPolicy.enabled).
+
+    Service-level on purpose: both the personal-memory tools and any direct
+    service caller go through here. Disabling stops writes only; existing
+    episodes are never deleted or migrated.
+    """
+    s = _service()
+    agent_id = str(agent.get("agentId") or "").strip()
+    if not agent_id:
+        return
+    policy = s.resolve_memory_policy_for_agent(agent_id)
+    if not bool(policy.get("enabled", True)):
+        raise s.AgentDirectoryError(
+            f"Personal memory is disabled for agent {agent_id} (memoryPolicy.enabled=false); "
+            "episodic memory writes are blocked."
+        )
+
+
 def _is_current(item: dict[str, Any]) -> bool:
     return str(item.get("validUntil") or "").strip() == ""
 
@@ -93,6 +112,7 @@ def append_episodic_event(
     """Append one private episode. Hot path: JSONL only, no LLM."""
     s = _service()
     agent = _load_agent(agent_id)
+    _require_memory_policy_enabled(agent)
     normalized_text = s.trim_lines(str(text or ""), max_lines=MAX_TEXT_LINES)
     if not normalized_text:
         raise s.AgentDirectoryError("Episodic event text is required.")
@@ -127,6 +147,7 @@ def supersede_episodic_event(
     """Invalidate one episode in place. Does not delete the JSONL line."""
     s = _service()
     agent = _load_agent(agent_id)
+    _require_memory_policy_enabled(agent)
     normalized_episode_id = str(episode_id or "").strip()
     if not normalized_episode_id:
         raise s.AgentEpisodicEventNotFoundError("Episodic event id is required.")

@@ -1325,6 +1325,12 @@ def test_runtime_scene_agent_brief_names_the_primary_cluster_not_the_first_signa
     assert brief["primary_issue"] == "browser.page.error"
     assert brief["active_cluster_count"] == issue_state["activeClusterCount"]
     assert brief["severity_cluster_count"] == 2
+    assert "browser.page.error" in brief["first_read"]["conclusion"]
+    assert brief["next_minimal_action"] == brief["first_read"]["nextStep"]
+    assert "先读 logs/runtime_scenes" not in brief["next_minimal_action"]
+    evidence_refs = {item["ref"] for item in brief["first_read"]["evidencePaths"]}
+    assert "raw/browser.telemetry.log" in evidence_refs
+    assert "summary.json" not in evidence_refs
 
 
 def test_runtime_scene_busy_command_is_actionable_policy_not_active_failure(tmp_path, monkeypatch):

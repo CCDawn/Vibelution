@@ -6,10 +6,15 @@ import {
   findConversationIndexAtOffset,
   isTimelineNearBottom,
   recordConversationRowHeight,
+  reconcileFollowingBeforeContentStick,
   resolveConversationVirtualRange,
   resolveTimelineFollowState,
   shouldKeepFollowingLatestOnProcessToggle,
   shouldStickTimelineToBottomOnContentResize,
+  timelineKeyboardScrollIntent,
+  timelineTouchScrollIntent,
+  timelineWheelScrollIntent,
+  freshTimelineUserScrollIntent,
 } from "./conversationTimelineFollowState";
 
 describe("conversation timeline follow state", () => {
@@ -67,6 +72,88 @@ describe("conversation timeline follow state", () => {
 
     expect(state.isAtBottom).toBe(true);
     expect(state.shouldFollowLatest).toBe(true);
+  });
+
+  it("does not let a programmatic snap resume follow", () => {
+    const state = resolveTimelineFollowState({
+      scrollHeight: 1200,
+      clientHeight: 500,
+      scrollTop: 700,
+      previousScrollTop: 200,
+      wasFollowingLatest: false,
+      scrollSource: "programmatic",
+    });
+
+    expect(state.isAtBottom).toBe(true);
+    expect(state.shouldFollowLatest).toBe(false);
+  });
+
+  it("releases follow when an upward wheel is already recorded, even while still at the bottom", () => {
+    const state = resolveTimelineFollowState({
+      scrollHeight: 1200,
+      clientHeight: 500,
+      scrollTop: 700,
+      previousScrollTop: 700,
+      wasFollowingLatest: true,
+      userScrollIntent: "awayFromBottom",
+    });
+
+    expect(state.isAtBottom).toBe(true);
+    expect(state.shouldFollowLatest).toBe(false);
+  });
+
+  it("keeps follow when layout measurement moves scrollTop without a user gesture", () => {
+    const state = resolveTimelineFollowState({
+      scrollHeight: 1200,
+      clientHeight: 500,
+      scrollTop: 400,
+      previousScrollTop: 650,
+      wasFollowingLatest: true,
+      scrollSource: "layout",
+    });
+
+    expect(state.shouldFollowLatest).toBe(true);
+  });
+
+  it("lets an upward wheel beat a content commit that still thinks we are following", () => {
+    expect(timelineWheelScrollIntent(-12)).toBe("awayFromBottom");
+    expect(timelineWheelScrollIntent(8)).toBe("towardBottom");
+    expect(timelineTouchScrollIntent(100, 140)).toBe("awayFromBottom");
+    expect(timelineKeyboardScrollIntent({
+      key: "ArrowUp",
+      shiftKey: false,
+      editableTarget: true,
+    })).toBe("none");
+    expect(freshTimelineUserScrollIntent("awayFromBottom", 0, 2_000)).toBe("none");
+    expect(reconcileFollowingBeforeContentStick({
+      following: true,
+      isAtBottom: true,
+      userScrollIntent: "awayFromBottom",
+      scrollTop: 700,
+      lastObservedScrollTop: 700,
+    })).toBe(false);
+    expect(reconcileFollowingBeforeContentStick({
+      following: true,
+      isAtBottom: false,
+      userScrollIntent: "none",
+      scrollTop: 640,
+      lastObservedScrollTop: 700,
+    })).toBe(true);
+    expect(reconcileFollowingBeforeContentStick({
+      following: true,
+      isAtBottom: false,
+      userScrollIntent: "unknown",
+      scrollTop: 400,
+      lastObservedScrollTop: 700,
+    })).toBe(false);
+  });
+
+  it("does not stick to the bottom while the timeline width is still settling", () => {
+    expect(shouldStickTimelineToBottomOnContentResize({
+      autoScrollToLatest: true,
+      followingLatest: true,
+      contentWidthChanging: true,
+    })).toBe(false);
   });
 
   it("sticks to bottom on content resize only while following latest", () => {

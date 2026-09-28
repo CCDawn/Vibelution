@@ -6,7 +6,7 @@ import {
 const styles = {
   configGroup: "grid min-w-0 grid-cols-[10rem_minmax(0,1fr)] content-start gap-6 border-t border-vui-border-subtle pt-5",
   groupFields: "grid min-w-0 content-start gap-4",
-  groupTitle: "m-0 text-base font-semibold text-vui-fg-primary",
+  groupTitle: "m-0 text-vui-md font-semibold text-vui-fg-primary",
   configEditor: "grid min-w-0 gap-5 p-5 border border-vui-border-subtle bg-vui-surface-panel",
   panelHeader: "flex [align-items:center] [justify-content:space-between] [gap:8px] min-w-0 [&_div]:min-w-0",
   contextualHintRow: "inline-flex min-w-0 items-center gap-1.5",

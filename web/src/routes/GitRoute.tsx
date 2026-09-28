@@ -66,6 +66,7 @@ import {
   migrateLegacyNumericPane,
   type PaneSpec,
 } from "../components/layout/paneLayoutPersistence";
+import { paneWidthCssVar } from "../components/layout/paneCssVariables";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { gitRouteStyles as styles } from "./GitRoute.styles";
@@ -239,6 +240,8 @@ export function GitRoute() {
   }, []);
   const {
     layoutRef: gitLayoutRef,
+    registerSplitContainer: registerGitContainer,
+    paneVariablesStyle: gitPaneVariablesStyle,
     widths: gitPaneWidths,
     draggingPaneId: gitDraggingPaneId,
     startResize: startGitPaneResize,
@@ -516,9 +519,10 @@ export function GitRoute() {
   const workspaceStyle = useMemo(
     () =>
       ({
-        "--git-change-panel-width": changePanelCollapsed ? "0px" : `${changePanelWidth}px`,
+        ...gitPaneVariablesStyle,
+        ...(changePanelCollapsed ? { [paneWidthCssVar("change-panel")]: "0px" } : null),
       }) as CSSProperties,
-    [changePanelCollapsed, changePanelWidth],
+    [changePanelCollapsed, gitPaneVariablesStyle],
   );
   const resizeChangePanelLabel = lang === "zh" ? "调整变更列表宽度" : "Resize changed files";
 
@@ -666,7 +670,10 @@ export function GitRoute() {
       ) : null}
 
       <div
-        ref={gitLayoutRef}
+        ref={(element) => {
+          gitLayoutRef.current = element;
+          registerGitContainer(element);
+        }}
         className={noChangedFiles ? `${styles.workspace} ${styles.workspaceOverview}` : styles.workspace}
         style={workspaceStyle}
         data-vui-recipe="git-workbench"

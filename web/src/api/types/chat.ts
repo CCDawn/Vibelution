@@ -46,6 +46,7 @@ export type SessionSummary = {
   };
   readOnly?: boolean;
   lastTurnStatus?: string;
+  lastTurnTerminalTurnId?: string;
   /** Canonical turn terminal reason: success | failed_runtime | needs_continue | ... */
   terminalReason?: string;
   sessionKind?: "main" | "child" | string;
@@ -116,6 +117,42 @@ export type SessionLlmOptions = {
   currentModelId: string;
   currentReasoningEffort: string;
   model: SessionLlmModelOption | null;
+};
+
+/** In-conversation SFT dataset curation decision for one assistant answer. */
+export type SessionMessageCurationAction = "include" | "exclude";
+
+export type SessionMessageCurationItem = {
+  messageId: string;
+  action: SessionMessageCurationAction;
+  modelId: string;
+  candidateId: string;
+  decidedAt: string;
+};
+
+export type SessionMessageCurationCountsByModel = {
+  modelId: string;
+  included: number;
+  excluded: number;
+};
+
+export type SessionMessageCurationResponse = {
+  sessionId: string;
+  captureEnabled: boolean;
+  items: SessionMessageCurationItem[];
+  countsByModel: SessionMessageCurationCountsByModel[];
+};
+
+export type SessionMessageCurationMutationResponse = {
+  sessionId: string;
+  messageId: string;
+  action: SessionMessageCurationAction;
+  status: "included" | "excluded";
+  candidateId: string;
+  caseId: string;
+  modelId: string;
+  datasetName: string;
+  summary: string;
 };
 
 export type SessionAgentPromptSnapshot = {
@@ -632,8 +669,8 @@ export type MentalStateSnapshot = {
 
 export type SessionReferenceAttachment = {
   referenceId?: string;
-  /** `session` is the legacy kind; knowledge/file kinds resolve at submit time. */
-  kind: "session" | "knowledge_item" | "knowledge_base" | "file" | string;
+  /** `session` is the legacy kind; knowledge/file/message kinds resolve at submit time. */
+  kind: "session" | "knowledge_item" | "knowledge_base" | "file" | "message" | string;
   sessionId?: string;
   title?: string;
   agentId?: string;
@@ -648,6 +685,10 @@ export type SessionReferenceAttachment = {
   /** file references point at a previously uploaded session artifact */
   artifactId?: string;
   filename?: string;
+  /** message references quote one timeline message from a source session */
+  sourceSessionId?: string;
+  sourceMessageId?: string;
+  quote?: string;
 };
 
 type ConversationMessageBase = {
@@ -718,7 +759,13 @@ export type ConversationAttachment = {
 export type SessionQueuedTurn = {
   id: string;
   position: number;
-  /** `queued` waits for the running turn to settle; `blocked` needs an edit to retry. */
+  /** `user` is a typed follow-up. `task_notification` and `subagent_message` are system returns. */
+  kind?: string;
+  /**
+   * `queued` waits for the running turn to settle; `paused` holds the row out
+   * of draining until resumed (resume re-queues it at the tail); `blocked`
+   * needs an edit to retry.
+   */
   status: string;
   content: string;
   attachments?: Array<{
@@ -1008,6 +1055,17 @@ export type SessionDetail = SessionSummary & {
    * Never set by the API; cleared when a real detail/select payload arrives.
    */
   provisionalTranscript?: boolean;
+  /** Client-only guard while an edit-resubmit replaces the active tail. */
+  editResubmitProtection?: {
+    targetMessageId: string;
+    clientSubmissionId: string;
+    baseLedgerSeq?: number;
+    supersededTurnId?: string;
+    supersededTurnIds?: string[];
+    targetMessageIndex?: number;
+    phase?: "pending" | "accepted" | "rolled_back";
+    acceptedLedgerSeq?: number;
+  } | null;
   /**
    * Select handoff (``Prefer: respond-async``): summary/control fields only,
    * empty ``messages``. The windowed GET/SSE stays the transcript authority,

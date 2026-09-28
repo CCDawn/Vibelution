@@ -702,6 +702,36 @@ def _run_supervised_worktree_thread(run_id: str, options: dict[str, Any]) -> Non
         if final_snapshot:
             final_snapshot = _auto_cleanup_failed_candidate(final_snapshot)
             _persist_snapshot(final_snapshot, active_run_id="")
+        _append_judge_quality_snapshot(run_id, final_snapshot)
+
+
+def _append_judge_quality_snapshot(run_id: str, final_snapshot: dict[str, Any] | None) -> None:
+    """每轮监督 run 终态后追加一条评审质量快照（尽力而为，永不影响运行）。
+
+    紧凑快照写入 ``evaluation/judge_quality`` 台账：终态身份 + kappa/上界/
+    分模式分数统计。全量面板按需从 run 存储复算，台账负责跨时间积累。
+    """
+    try:
+        from core.web.services.supervised_judge_quality_service import (
+            build_supervised_judge_quality_report,
+        )
+        from core.web.services.evaluation_quality_ledger import append_quality_ledger
+
+        panel = build_supervised_judge_quality_report(limit=200)
+        payload = {
+            "schemaVersion": 1,
+            "triggerRunId": str(run_id),
+            "triggerStatus": str((final_snapshot or {}).get("status") or ""),
+            "triggerOutcome": str((final_snapshot or {}).get("outcome") or ""),
+            "totalRuns": panel.get("totalRuns"),
+            "agreementPairs": panel.get("agreementPairs"),
+            "kappa": panel.get("kappa"),
+            "falseAutoApproveUpperBounds": panel.get("falseAutoApproveUpperBounds"),
+            "scoreStatsByMode": panel.get("scoreStatsByMode"),
+        }
+        append_quality_ledger("judge_quality", payload)
+    except Exception:
+        return
 
 
 def _execute_flow(
@@ -767,6 +797,7 @@ def _execute_flow(
         _raise_if_run_cancelled(snapshot)
         snapshot["judgeRubric"] = judge_rubric
         snapshot["judgeConversationSessionId"] = _evaluation_conversation_session_id(judge_rubric)
+        _record_rubric_shadow_version(run_id, judge_rubric)
         if str(judge_rubric.get("status") or "").strip().lower() != "success":
             raise SupervisedWorktreeRunValidationError(
                 str(judge_rubric.get("reason") or "Judge 未能生成有效任务 rubric。")
@@ -864,6 +895,9 @@ def _execute_flow(
                 "workflowStepId": "improve",
                 "conversationSessionId": str(snapshot.get("baselineConversationSessionId") or ""),
                 "progressCallback": _workflow_progress_callback(snapshot, "baseline", "improve"),
+                "timeoutSeconds": _bundle_self_edit_timeout_budget(root, str(options["bundleName"])),
+                # 自改在候选 worktree 中进行，但会话 journal 属于主项目。
+                "projectRoot": str(root),
             },
         )
         _raise_if_run_cancelled(snapshot)
@@ -938,6 +972,9 @@ def _execute_flow(
                 "cleanRoom": True,
                 "candidateVariant": snapshot["candidateWorktree"].get("variant"),
                 "progressCallback": _workflow_progress_callback(snapshot, "baseline_rerun", "rerun_eval"),
+                # 复跑会话的 turn journal 落在主项目 workspace；repo_root 是
+                # 候选 worktree，journal 解析必须用主根（否则零工具轨迹）。
+                "journalProjectRoot": str(root),
             },
         )
         _raise_if_run_cancelled(snapshot)
@@ -1641,6 +1678,9 @@ def _real_evaluation_runner(project_root: Path, bundle_name: str, role: str, con
             clean_room=bool(context.get("cleanRoom")),
             progress_callback=progress_callback,
             cancel_checker=cancel_checker,
+            journal_project_root=Path(
+                str(context.get("journalProjectRoot") or "").strip() or project_root
+            ),
         )
         if role == "baseline_rerun":
             candidate_variant = (
@@ -2003,9 +2043,36 @@ def _candidate_self_edit_correction_prompt(
     )
 
 
+def _bundle_self_edit_timeout_budget(root: Path, bundle_name: str) -> int:
+    """自改预算：bundle 声明值与 900 秒保底取大者。
+
+    real 自改会话历史硬编码 900 秒，真实 Agent 在大仓库里读码-补丁-验证
+    常超预算被 candidate_modify_timeout 收口（swte-28e3980425ef 实弹定案：
+    Agent 已产出真实 diff 仍被 900 秒截断）。bundle 可通过
+    default_timeout_seconds 声明更高预算；缺省或声明更低时保持 900 保底。
+    """
+    try:
+        bundle = load_supervised_bundle(
+            bundle_name, project_root=_storage_project_root_arg(root)
+        )
+    except Exception:
+        return 900
+    declared = int(bundle.get("default_timeout_seconds") or 0)
+    return max(900, declared)
+
+
+def _real_self_edit_timeout(context: dict[str, Any]) -> int:
+    """Resolve the real self-edit turn budget from the flow-provided context."""
+    try:
+        provided = int(context.get("timeoutSeconds") or 0)
+    except (TypeError, ValueError):
+        provided = 0
+    return max(900, provided)
+
+
 def _real_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str, Any]) -> dict[str, Any]:
     started = _now_iso()
-    timeout_seconds = 900
+    timeout_seconds = _real_self_edit_timeout(context)
     cancel_checker = context.get("cancelChecker") if callable(context.get("cancelChecker")) else None
     progress_callback = context.get("progressCallback") if callable(context.get("progressCallback")) else None
     options = context.get("options") if isinstance(context.get("options"), dict) else {}
@@ -2037,6 +2104,9 @@ def _real_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str
             conversation_session_id=session_id or None,
             progress_callback=progress_callback,
             cancel_checker=cancel_checker,
+            journal_project_root=Path(
+                str(context.get("projectRoot") or "").strip() or worktree_path
+            ),
         )
         return _preserve_candidate_modifier_conversation_terminal(result)
 
@@ -2221,6 +2291,50 @@ def _ensure_bundle_available_in_candidate(project_root: Path, *, candidate_path:
     shutil.copy2(source, target)
 
 
+def _record_rubric_shadow_version(run_id: str, judge_rubric: dict[str, Any]) -> None:
+    """Rubric 冻结时登记 shadow 版本（尽力而为，永不影响运行）。
+
+    评估器版本化地基：每轮冻结的 rubric 进 append-only 台账，后续晋升/
+    对比（shadow→active）由治理证据驱动；记录失败只降级不阻断。
+    """
+    try:
+        from core.web.services.supervised_rubric_version_store import (
+            record_rubric_version,
+        )
+
+        record_rubric_version(
+            {
+                key: value
+                for key, value in judge_rubric.items()
+                if key not in {"status", "reason", "conversationSessionId"}
+            },
+            source=str(run_id),
+            rubric_hash=str(judge_rubric.get("rubricHash") or ""),
+        )
+    except Exception:
+        return
+
+
+def _dimension_guidance_hint() -> str:
+    """从评审者质量台账取最新维度引导 hint（缺省返回空串）。"""
+    try:
+        from core.web.services.evaluation_quality_ledger import read_quality_ledger
+        from core.research.competition.dimension_guidance import (
+            build_dimension_guidance,
+        )
+
+        records = read_quality_ledger("reviewer_diagnostic_reward", limit=1)
+        if not records:
+            return ""
+        reward = (records[-1].get("diagnosticReward") or {})
+        by_dimension = reward.get("score_by_dimension") or {}
+        if not isinstance(by_dimension, dict) or not by_dimension:
+            return ""
+        return build_dimension_guidance(by_dimension).guidance_hint
+    except Exception:
+        return ""
+
+
 def _build_reflection(
     snapshot: dict[str, Any],
     baseline: dict[str, Any],
@@ -2237,6 +2351,7 @@ def _build_reflection(
     self_origin = snapshot.get("selfEvolutionOrigin") if isinstance(snapshot.get("selfEvolutionOrigin"), dict) else {}
     requested_goal = str(self_origin.get("goal") or "").strip()
     if isinstance(baseline_judgment, dict) and baseline_judgment:
+        guidance_hint = _dimension_guidance_hint()
         return {
             "summary": (
                 f"Judge 基线评分 {baseline_judgment.get('score')}；"
@@ -2251,7 +2366,8 @@ def _build_reflection(
                     if isinstance(snapshot.get("taskContract"), dict)
                     else {}
                 ),
-            ),
+            )
+            + (f"\n\n{guidance_hint}" if guidance_hint else ""),
         }
     goal_section = ""
     if requested_goal:

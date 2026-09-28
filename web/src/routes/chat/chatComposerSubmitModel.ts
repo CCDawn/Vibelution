@@ -1,6 +1,9 @@
 import type { DragEvent } from "react";
 
-import { uploadSessionImageAttachment as postSessionImageAttachment } from "../../api/chat";
+import {
+  registerSessionImageAttachmentFromPath,
+  uploadSessionImageAttachment as postSessionImageAttachment,
+} from "../../api/chat";
 import type {
   SessionReferenceAttachment,
   SessionSummary,
@@ -33,6 +36,13 @@ export { COMPOSER_IMAGE_ACCEPT_TYPES, COMPOSER_DOCUMENT_ACCEPT_EXTENSIONS };
 
 export type ComposerAttachmentKind = "image" | "document";
 
+/**
+ * Per-attachment upload lifecycle. Undefined stays the "not attempted yet"
+ * pending state so older persisted trays and every existing call site remain
+ * compatible; "uploaded" chips hold their backend artifactId for reuse.
+ */
+export type ComposerAttachmentUploadStatus = "pending" | "uploading" | "uploaded" | "failed";
+
 export type ComposerImageAttachment = {
   id: string;
   file: File;
@@ -41,7 +51,116 @@ export type ComposerImageAttachment = {
   sizeBytes: number;
   contentType: string;
   kind: ComposerAttachmentKind;
+  /**
+   * Resolved local absolute path (desktop shell only). When present, the
+   * submit upload registers the path for zero-copy backend read instead of
+   * POSTing the file bytes; clipboard screenshots never carry one.
+   */
+  localPath?: string;
+  uploadStatus?: ComposerAttachmentUploadStatus;
+  /** Backend artifact id from a successful upload; reused on resubmit. */
+  artifactId?: string;
 };
+
+/** One settled upload attempt from {@link uploadComposerAttachmentsSettled}. */
+export type ComposerAttachmentUploadOutcome =
+  | { id: string; status: "uploaded"; artifactId: string }
+  | { id: string; status: "failed"; error: unknown };
+
+/** An attachment still needs an upload unless a previous attempt produced its artifact. */
+export function needsComposerAttachmentUpload(attachment: ComposerImageAttachment): boolean {
+  return !(attachment.uploadStatus === "uploaded" && Boolean(attachment.artifactId));
+}
+
+/** Failed chips are the retry surface: the tray keeps them until a retry lands. */
+export function failedComposerAttachmentUploads(
+  attachments: readonly ComposerImageAttachment[],
+): ComposerImageAttachment[] {
+  return attachments.filter((attachment) => attachment.uploadStatus === "failed");
+}
+
+/**
+ * Flip not-yet-uploaded chips to "uploading"; uploaded ones stay reusable.
+ * `onlyAttachmentIds` restricts the flip to a retry's target subset so chips
+ * outside the attempt keep their state.
+ */
+export function markComposerAttachmentsUploading(
+  attachments: readonly ComposerImageAttachment[],
+  onlyAttachmentIds?: ReadonlySet<string>,
+): ComposerImageAttachment[] {
+  let changed = false;
+  const next = attachments.map((attachment) => {
+    if (!needsComposerAttachmentUpload(attachment) || attachment.uploadStatus === "uploading") {
+      return attachment;
+    }
+    if (onlyAttachmentIds && !onlyAttachmentIds.has(attachment.id)) {
+      return attachment;
+    }
+    changed = true;
+    return { ...attachment, uploadStatus: "uploading" as const };
+  });
+  return changed ? next : [...attachments];
+}
+
+/**
+ * Upload every attachment that still needs it and settle per attachment
+ * (Promise.allSettled semantics): one rejection no longer discards the
+ * successes, which keep their artifactId for the retry/resubmit path.
+ */
+export async function uploadComposerAttachmentsSettled(
+  sessionId: string,
+  attachments: readonly ComposerImageAttachment[],
+): Promise<ComposerAttachmentUploadOutcome[]> {
+  const settled = await Promise.allSettled(
+    attachments.map((attachment) => uploadSessionImageAttachment(sessionId, attachment)),
+  );
+  return settled.map((result, index) => {
+    const attachment = attachments[index];
+    if (!attachment) {
+      return { id: "", status: "failed" as const, error: new Error("attachment missing for upload outcome") };
+    }
+    if (result.status === "fulfilled" && result.value.artifactId) {
+      return { id: attachment.id, status: "uploaded" as const, artifactId: result.value.artifactId };
+    }
+    return {
+      id: attachment.id,
+      status: "failed" as const,
+      error: result.status === "rejected" ? result.reason : new Error("attachment upload returned no artifactId"),
+    };
+  });
+}
+
+/** Write per-attachment outcomes back onto a tray array (pure; also used for local math). */
+export function applyComposerAttachmentUploadOutcomes(
+  attachments: readonly ComposerImageAttachment[],
+  outcomes: readonly ComposerAttachmentUploadOutcome[],
+): ComposerImageAttachment[] {
+  if (!outcomes.length) {
+    return [...attachments];
+  }
+  const outcomeById = new Map(outcomes.map((outcome) => [outcome.id, outcome]));
+  let changed = false;
+  const next = attachments.map((attachment) => {
+    const outcome = outcomeById.get(attachment.id);
+    if (!outcome) {
+      return attachment;
+    }
+    changed = true;
+    return outcome.status === "uploaded"
+      ? { ...attachment, uploadStatus: "uploaded" as const, artifactId: outcome.artifactId }
+      : { ...attachment, uploadStatus: "failed" as const };
+  });
+  return changed ? next : [...attachments];
+}
+
+/** Uploaded artifact ids in tray order — the mutation's attachmentIds payload. */
+export function composerUploadedArtifactIds(
+  attachments: readonly ComposerImageAttachment[],
+): string[] {
+  return attachments
+    .filter((attachment) => attachment.uploadStatus === "uploaded" && attachment.artifactId)
+    .map((attachment) => attachment.artifactId as string);
+}
 
 export type ComposerSubmitGuardReason = "composer_disabled" | "empty_content" | "";
 
@@ -134,6 +253,40 @@ export function buildKnowledgeItemReferencePayload(
   };
 }
 
+/** Chip title default: the quote's first 60 characters on a single line. */
+export const MESSAGE_REFERENCE_TITLE_MAX_CHARS = 60;
+
+export function messageReferenceTitle(quote: string): string {
+  const singleLine = String(quote ?? "").replace(/\s+/g, " ").trim();
+  return singleLine.slice(0, MESSAGE_REFERENCE_TITLE_MAX_CHARS);
+}
+
+/**
+ * Structured quote of one timeline message (kind "message"). The backend
+ * validates message existence, sanitizes fences, and caps the quote at 12000
+ * characters; the frontend only guarantees identity and a single-line title.
+ */
+export function buildMessageReferencePayload(input: {
+  sourceSessionId: string;
+  sourceMessageId: string;
+  quote: string;
+  title?: string;
+}): SessionReferenceAttachment {
+  const sourceSessionId = String(input.sourceSessionId || "").trim();
+  const sourceMessageId = String(input.sourceMessageId || "").trim();
+  const quote = String(input.quote || "").replace(/\r\n/g, "\n").trim();
+  const title = String(input.title || "").trim() || messageReferenceTitle(quote);
+  return {
+    referenceId: `message:${sourceMessageId}`,
+    kind: "message",
+    sourceSessionId,
+    sourceMessageId,
+    quote,
+    title,
+    createdAt: new Date().toISOString(),
+  };
+}
+
 export function startSessionReferenceDrag(
   event: DragEvent<HTMLElement>,
   reference: SessionReferenceAttachment,
@@ -188,11 +341,42 @@ export function removeSessionImageAttachment(
 }
 
 export async function uploadSessionImageAttachment(sessionId: string, attachment: ComposerImageAttachment) {
+  if (attachment.localPath) {
+    try {
+      return await registerSessionImageAttachmentFromPath(sessionId, {
+        localPath: attachment.localPath,
+        contentType: attachment.contentType,
+        filename: attachment.filename,
+      });
+    } catch {
+      // Zero-copy registration failed (missing path, non-file, oversize or
+      // unsupported content): fall back to the binary upload transparently.
+    }
+  }
   return postSessionImageAttachment(sessionId, {
     contentType: attachment.contentType,
     filename: attachment.filename,
     body: attachment.file,
   });
+}
+
+/** Optional desktop hook that maps a File to its local absolute path (null when unavailable). */
+export type ComposerLocalPathResolver = (file: File) => string | null;
+
+function composerLocalPathFields(
+  file: File,
+  resolveLocalPath?: ComposerLocalPathResolver,
+): { localPath?: string } {
+  if (!resolveLocalPath) {
+    return {};
+  }
+  try {
+    const resolved = resolveLocalPath(file);
+    const normalized = typeof resolved === "string" ? resolved.trim() : "";
+    return normalized.length > 0 ? { localPath: normalized } : {};
+  } catch {
+    return {};
+  }
 }
 
 export function classifyComposerImageFiles(
@@ -201,6 +385,7 @@ export function classifyComposerImageFiles(
     createObjectUrl?: (file: File) => string;
     nowMs?: number;
     randomId?: () => string;
+    resolveLocalPath?: ComposerLocalPathResolver;
   } = {},
 ) {
   const createObjectUrl = options.createObjectUrl ?? ((file: File) => URL.createObjectURL(file));
@@ -226,6 +411,7 @@ export function classifyComposerImageFiles(
       sizeBytes: file.size,
       contentType: file.type,
       kind: "image",
+      ...composerLocalPathFields(file, options.resolveLocalPath),
     });
   }
   return { accepted, rejected };
@@ -237,6 +423,7 @@ export function classifyComposerFiles(
     createObjectUrl?: (file: File) => string;
     nowMs?: number;
     randomId?: () => string;
+    resolveLocalPath?: ComposerLocalPathResolver;
   } = {},
 ) {
   const createObjectUrl = options.createObjectUrl ?? ((file: File) => URL.createObjectURL(file));
@@ -258,6 +445,7 @@ export function classifyComposerFiles(
         sizeBytes: file.size,
         contentType: file.type,
         kind: "image",
+        ...composerLocalPathFields(file, options.resolveLocalPath),
       });
       continue;
     }
@@ -274,6 +462,7 @@ export function classifyComposerFiles(
         sizeBytes: file.size,
         contentType: file.type || "application/octet-stream",
         kind: "document",
+        ...composerLocalPathFields(file, options.resolveLocalPath),
       });
       continue;
     }
@@ -299,26 +488,40 @@ export function mergeComposerAttachments(
     maxDocuments?: number;
   } = {},
 ) {
+  return mergeComposerAttachmentsWithRejections(existing, incoming, options).attachments;
+}
+
+export function mergeComposerAttachmentsWithRejections(
+  existing: ComposerImageAttachment[],
+  incoming: ComposerImageAttachment[],
+  options: {
+    maxTotal?: number;
+    maxImages?: number;
+    maxDocuments?: number;
+  } = {},
+) {
   const maxTotal = options.maxTotal ?? MAX_COMPOSER_IMAGE_ATTACHMENTS + MAX_COMPOSER_DOCUMENT_ATTACHMENTS;
-  const merged = [...existing, ...incoming].slice(0, maxTotal);
-  const imageCount = merged.filter((item) => item.kind !== "document").length;
-  const overflow = Math.max(0, imageCount - (options.maxImages ?? MAX_COMPOSER_IMAGE_ATTACHMENTS));
-  if (!overflow) {
-    return merged;
-  }
-  // Drop the newest image attachments that break the per-kind cap, keeping
-  // every document regardless of order.
-  let imagesToDrop = overflow;
+  const maxImages = options.maxImages ?? MAX_COMPOSER_IMAGE_ATTACHMENTS;
+  const maxDocuments = options.maxDocuments ?? MAX_COMPOSER_DOCUMENT_ATTACHMENTS;
+  let imageCount = 0;
+  let documentCount = 0;
+  const rejected: ComposerImageAttachment[] = [];
   const kept: ComposerImageAttachment[] = [];
-  for (let index = merged.length - 1; index >= 0; index -= 1) {
-    const item = merged[index];
-    if (item.kind !== "document" && imagesToDrop > 0) {
-      imagesToDrop -= 1;
+  for (const item of [...existing, ...incoming]) {
+    const atTotalLimit = kept.length >= maxTotal;
+    const atKindLimit = item.kind === "document" ? documentCount >= maxDocuments : imageCount >= maxImages;
+    if (atTotalLimit || atKindLimit) {
+      rejected.push(item);
       continue;
     }
-    kept.unshift(item);
+    kept.push(item);
+    if (item.kind === "document") {
+      documentCount += 1;
+    } else {
+      imageCount += 1;
+    }
   }
-  return kept;
+  return { attachments: kept, rejected };
 }
 
 export function resolveComposerSubmitGuard(options: {
@@ -364,10 +567,13 @@ export function promptSuggestionToggleStorageKey(sessionId: string): string {
 }
 
 export function readStoredPromptSuggestionToggle(sessionId: string): boolean {
-  if (typeof window === "undefined" || !String(sessionId || "").trim()) {
+  if (!String(sessionId || "").trim()) {
     return false;
   }
-  return window.localStorage.getItem(promptSuggestionToggleStorageKey(sessionId)) === "true";
+  if (typeof window === "undefined") {
+    return true;
+  }
+  return window.localStorage.getItem(promptSuggestionToggleStorageKey(sessionId)) !== "false";
 }
 
 export function writeStoredPromptSuggestionToggle(sessionId: string, enabled: boolean) {

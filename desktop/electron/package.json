@@ -5,7 +5,8 @@
   "type": "module",
   "main": "dist/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json && npm run build:preload",
+    "build": "tsc -p tsconfig.json && npm run build:preload && npm run build:job",
+    "build:job": "node scripts/buildWorkbenchJob.js",
     "build:preload": "esbuild src/preload.ts --bundle --platform=node --format=cjs --outfile=dist/preload.cjs --external:electron",
     "write:provenance": "node dist/scripts/writePackageProvenance.js --workspace-root ../.. --output package-provenance.json",
     "package:dir": "npm run build && npm run write:provenance && electron-builder --config electron-builder.json --dir",

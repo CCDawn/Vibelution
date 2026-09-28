@@ -69,77 +69,77 @@ export function resolveNodeStatusVisual(status: WorkflowNodeRunStatus): NodeStat
         statusLabel: STATUS_LABEL_ZH.ready,
         icon: "circle",
         toneClass: "bg-[var(--vui-surface-panel)] text-[var(--fg-secondary)]",
-        borderClass: "border-[color-mix(in_srgb,var(--accent-cool)_32%,var(--vui-border-subtle))]",
+        borderClass: "border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--vui-border-subtle))]",
         ringClass: "",
         textClass: "text-[var(--fg-secondary)]",
         accentBarClass: "bg-[color-mix(in_srgb,var(--accent-cool)_55%,transparent)]",
         badgeClass:
-          "border-[color-mix(in_srgb,var(--accent-cool)_30%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_7%,transparent)] text-[var(--accent-cool)]",
+          "border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),transparent)] text-[var(--accent-cool)]",
       };
     case "running":
       return {
         status,
         statusLabel: STATUS_LABEL_ZH.running,
         icon: "play",
-        toneClass: "bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-panel))] text-[var(--accent-cool)]",
+        toneClass: "bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash),var(--vui-surface-panel))] text-[var(--accent-cool)]",
         borderClass: "border-[color-mix(in_srgb,var(--accent-cool)_60%,var(--vui-border-subtle))]",
-        ringClass: "ring-2 ring-[color-mix(in_srgb,var(--accent-cool)_35%,transparent)]",
+        ringClass: "ring-2 ring-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),transparent)]",
         textClass: "text-[var(--accent-cool)]",
         accentBarClass: "bg-[var(--accent-cool)]",
         badgeClass:
-          "border-[color-mix(in_srgb,var(--accent-cool)_38%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_12%,transparent)] text-[var(--accent-cool)]",
+          "border-[color-mix(in_srgb,var(--accent-cool)_38%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-strong),transparent)] text-[var(--accent-cool)]",
       };
     case "waiting_human":
       return {
         status,
         statusLabel: STATUS_LABEL_ZH.waiting_human,
         icon: "user",
-        toneClass: "bg-[color-mix(in_srgb,var(--state-warning)_10%,var(--vui-surface-panel))] text-[var(--state-warning)]",
+        toneClass: "bg-[color-mix(in_srgb,var(--state-warning)_var(--vui-alpha-wash),var(--vui-surface-panel))] text-[var(--state-warning)]",
         borderClass: "border-[color-mix(in_srgb,var(--state-warning)_48%,var(--vui-border-subtle))]",
-        ringClass: "ring-2 ring-[color-mix(in_srgb,var(--state-warning)_28%,transparent)]",
+        ringClass: "ring-2 ring-[color-mix(in_srgb,var(--state-warning)_var(--vui-alpha-tint-strong),transparent)]",
         textClass: "text-[var(--state-warning)]",
         accentBarClass: "bg-[var(--state-warning)]",
         badgeClass:
-          "border-[color-mix(in_srgb,var(--state-warning)_38%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_12%,transparent)] text-[var(--state-warning)]",
+          "border-[color-mix(in_srgb,var(--state-warning)_38%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_var(--vui-alpha-wash-strong),transparent)] text-[var(--state-warning)]",
       };
     case "succeeded":
       return {
         status,
         statusLabel: STATUS_LABEL_ZH.succeeded,
         icon: "check",
-        toneClass: "bg-[color-mix(in_srgb,var(--state-success)_9%,var(--vui-surface-panel))] text-[var(--state-success)]",
+        toneClass: "bg-[color-mix(in_srgb,var(--state-success)_var(--vui-alpha-wash),var(--vui-surface-panel))] text-[var(--state-success)]",
         borderClass: "border-[color-mix(in_srgb,var(--state-success)_48%,var(--vui-border-subtle))]",
         ringClass: "",
         textClass: "text-[var(--state-success)]",
         accentBarClass: "bg-[var(--state-success)]",
         badgeClass:
-          "border-[color-mix(in_srgb,var(--state-success)_36%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-success)_12%,transparent)] text-[var(--state-success)]",
+          "border-[color-mix(in_srgb,var(--state-success)_var(--vui-alpha-line),var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-success)_var(--vui-alpha-wash-strong),transparent)] text-[var(--state-success)]",
       };
     case "failed":
       return {
         status,
         statusLabel: STATUS_LABEL_ZH.failed,
         icon: "x",
-        toneClass: "bg-[color-mix(in_srgb,var(--state-error)_8%,var(--vui-surface-panel))] text-[var(--state-error)]",
+        toneClass: "bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash-faint),var(--vui-surface-panel))] text-[var(--state-error)]",
         borderClass: "border-[color-mix(in_srgb,var(--state-error)_48%,var(--vui-border-subtle))]",
         ringClass: "",
         textClass: "text-[var(--state-error)]",
         accentBarClass: "bg-[var(--state-error)]",
         badgeClass:
-          "border-[color-mix(in_srgb,var(--state-error)_36%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_10%,transparent)] text-[var(--state-error)]",
+          "border-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash),transparent)] text-[var(--state-error)]",
       };
     case "blocked":
       return {
         status,
         statusLabel: STATUS_LABEL_ZH.blocked,
         icon: "ban",
-        toneClass: "bg-[color-mix(in_srgb,var(--state-error)_6%,var(--vui-surface-panel))] text-[var(--state-error)]",
-        borderClass: "border-[color-mix(in_srgb,var(--state-warning)_40%,var(--state-error))]",
-        ringClass: "ring-1 ring-[color-mix(in_srgb,var(--state-error)_25%,transparent)]",
+        toneClass: "bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash-faint),var(--vui-surface-panel))] text-[var(--state-error)]",
+        borderClass: "border-[color-mix(in_srgb,var(--state-warning)_var(--vui-alpha-line-strong),var(--state-error))]",
+        ringClass: "ring-1 ring-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-tint),transparent)]",
         textClass: "text-[var(--state-error)]",
         accentBarClass: "bg-[var(--state-error)]",
         badgeClass:
-          "border-[color-mix(in_srgb,var(--state-error)_36%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_10%,transparent)] text-[var(--state-error)]",
+          "border-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash),transparent)] text-[var(--state-error)]",
       };
     case "skipped":
       return {

@@ -2,7 +2,7 @@ import { Database, RefreshCw, RotateCcw } from "lucide-react";
 
 import { LazyJsonCodeMirror } from "../components/editor/LazyJsonCodeMirror";
 import { VButton, VSection } from "../components/vui";
-import type { ConfigCopy } from "./ConfigRoute";
+import type { ConfigCopy } from "./config/configCopy";
 import styles from "./ConfigDraftPanel.styles";
 
 type ConfigDraftPanelProps = {

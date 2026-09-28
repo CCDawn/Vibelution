@@ -13,6 +13,7 @@ import {
   fetchEvolutionWorkbench,
   fetchEvolutionWorkspaceSnapshot,
   postEvolutionWorktreeRunAction,
+  EVOLUTION_WORKBENCH_POLL_INTERVAL_MS,
 } from "../api/evolution";
 import { queryKeys } from "../api/queryKeys";
 import {
@@ -90,7 +91,8 @@ export function SupervisedReviewRoute() {
   const workbenchQuery = useQuery({
     queryKey: queryKeys.evolutionWorkbench(),
     queryFn: () => fetchEvolutionWorkbench<EvolutionWorkbench>(),
-    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
+    // workbench 全量载荷（含 dataset catalog）低频刷新；高频运行态来自 workspace-snapshot。
+    refetchInterval: resolvePollingInterval(pageVisible, EVOLUTION_WORKBENCH_POLL_INTERVAL_MS),
     refetchIntervalInBackground: false,
   });
   const workspaceSnapshotQuery = useQuery({
@@ -247,6 +249,12 @@ export function SupervisedReviewRoute() {
     setSelectedCandidateIds((current) => current.filter((candidateId) => visiblePendingSet.has(candidateId)));
   }, [visiblePendingIds]);
 
+  // 表单必须跟随服务端内容而不只是 id：filter=all 下对同一样本提交决定、
+  // 或轮询期间该样本的建议/复审在服务端被更新时，id 不变但内容已变，
+  // 只挂 id 会让用户基于过期值编辑并静默覆盖较新的判定。
+  const detailReviewerNote = detailCandidate?.reviewerNote;
+  const detailSuggestedDecision = detailCandidate?.reviewProfile?.suggestedDecision;
+  const detailReviewDecision = detailCandidate?.reviewDecision;
   useEffect(() => {
     if (!detailCandidate) {
       setDraftDecision("positive");
@@ -263,7 +271,8 @@ export function SupervisedReviewRoute() {
     setErrorType(detailCandidate.reviewDecision.errorType || "");
     setCorrectPrinciple(detailCandidate.reviewDecision.correctPrinciple || "");
     setIdealBehavior(detailCandidate.reviewDecision.idealBehavior || "");
-  }, [detailCandidate?.candidateId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 字段级依赖：仅当服务端侧的判定输入变化时重置表单
+  }, [detailCandidate?.candidateId, detailReviewerNote, detailSuggestedDecision, detailReviewDecision]);
 
   const decisionError = decisionMutation.error?.message ?? "";
   const bulkError = bulkDeleteMutation.error?.message ?? "";

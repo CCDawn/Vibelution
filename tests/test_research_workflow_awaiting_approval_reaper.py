@@ -307,6 +307,10 @@ def test_recovery_loop_hook_drives_the_reaper(monkeypatch) -> None:
             WorkflowRuntime._reap_awaiting_approval_best_effort
         )
 
+        _compact_hypothesis_round_failures_best_effort = (
+            WorkflowRuntime._compact_hypothesis_round_failures_best_effort
+        )
+
     def fake_reap(**_kwargs) -> dict:
         calls.append("reaper")
         return {"status": "ok"}
@@ -329,6 +333,10 @@ def test_reaper_hook_isolates_failures(monkeypatch) -> None:
 
         _reap_awaiting_approval_best_effort = (
             WorkflowRuntime._reap_awaiting_approval_best_effort
+        )
+
+        _compact_hypothesis_round_failures_best_effort = (
+            WorkflowRuntime._compact_hypothesis_round_failures_best_effort
         )
 
     def boom(**_kwargs) -> dict:

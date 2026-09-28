@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 """First-turn session title generation (best-effort background task).
 
-Claim scope: after the first real user message of an ordinary chat session,
-propose one short title with the session's dialogue model and CAS-write it only
-while the session still shows a placeholder title. Manual rename always wins.
+Claim scope: after a real user message of an ordinary chat session, propose one
+short title with the session's dialogue model and CAS-write it only while the
+session still shows a placeholder title. The first message always tries once.
+If that attempt fails and the title is still a placeholder, later user messages
+may retry a few times. Manual rename always wins.
 No transcript, journal, worker, or projection authority changes here.
 """
 
@@ -21,6 +23,11 @@ from core.llm.agent_runtime import config_for_agent_llm_model
 SESSION_TITLE_PROFILE_ID = "__session_title__"
 SESSION_TITLE_MAX_CHARS = 60
 SESSION_TITLE_INPUT_MAX_CHARS = 1200
+# Extra tries after the first message, only while the title is still a placeholder.
+SESSION_TITLE_PLACEHOLDER_RETRY_LIMIT = 3
+
+_TITLE_RETRY_LOCK = threading.Lock()
+_TITLE_PLACEHOLDER_RETRIES: dict[str, int] = {}
 
 DEFAULT_SESSION_TITLE_PROMPT = """你是会话标题生成器。根据用户的第一条消息，为这次对话生成一个简洁标题。
 
@@ -113,7 +120,11 @@ def _generate_title_candidate(session_id: str, message: str, model_id: str) -> s
         context=LLMInvocationContext(
             surface="web_session_title",
             run_kind="tool_assistant_task",
-            agent_id="session_title_service",
+            # Provider extra_headers such as ``{session_id}`` resolve from this
+            # identity. Leaving it empty drops the header and OpenCode Go
+            # rejects the title call.
+            session_id=str(session_id or "").strip(),
+            agent_id=_title_agent_id(session_id),
             llm_slot="summary",
             model_id=str(model_id or "").strip(),
             cache_scope="session_title",
@@ -127,6 +138,33 @@ def _generate_title_candidate(session_id: str, message: str, model_id: str) -> s
         },
     )
     return clean_generated_session_title(getattr(response, "content", ""))
+
+
+def _title_agent_id(session_id: str) -> str:
+    """Best-effort agent id for header templates. Never blocks title generation."""
+
+    normalized = str(session_id or "").strip()
+    if not normalized:
+        return ""
+    try:
+        service = _service()
+        conversation = service.load_session_chat_state(service.PROJECT_ROOT, normalized)
+    except (OSError, RuntimeError, TypeError, ValueError, AttributeError):
+        return ""
+    if not isinstance(conversation, dict):
+        return ""
+    return str(
+        conversation.get("agent_id") or conversation.get("agentId") or ""
+    ).strip()
+
+
+def _reserve_placeholder_title_retry(session_id: str) -> bool:
+    with _TITLE_RETRY_LOCK:
+        used = _TITLE_PLACEHOLDER_RETRIES.get(session_id, 0)
+        if used >= SESSION_TITLE_PLACEHOLDER_RETRY_LIMIT:
+            return False
+        _TITLE_PLACEHOLDER_RETRIES[session_id] = used + 1
+        return True
 
 
 def generate_session_title_now(session_id: str, message: str) -> str:
@@ -192,14 +230,18 @@ def maybe_schedule_session_title_generation(
     message: str,
     message_source: str = "",
     had_previous_user_message: bool = False,
+    title_still_placeholder: bool = False,
 ) -> bool:
-    """Schedule one background title generation for a first real user message.
+    """Schedule one background title generation for a real user message.
 
-    Cheap admission checks only; the authoritative placeholder/child/manual-rename
-    checks run again inside :func:`apply_generated_session_title`.
+    The first raw message always schedules. Later messages schedule only while
+    the title is still a placeholder, and only up to
+    ``SESSION_TITLE_PLACEHOLDER_RETRY_LIMIT`` extra attempts. The authoritative
+    placeholder/child/manual-rename checks run again inside
+    :func:`apply_generated_session_title`.
     """
 
-    if bool(had_previous_user_message):
+    if bool(had_previous_user_message) and not bool(title_still_placeholder):
         return False
     normalized_source = str(message_source or "").strip() or "raw"
     if normalized_source != "raw":
@@ -209,6 +251,10 @@ def maybe_schedule_session_title_generation(
         return False
     conversation_id = str(session_id or "").strip()
     if not conversation_id:
+        return False
+    if bool(had_previous_user_message) and not _reserve_placeholder_title_retry(
+        conversation_id
+    ):
         return False
     thread = threading.Thread(
         target=_run_title_generation,

@@ -46,7 +46,8 @@
         "agent_messages_consume_all_tool",
         "knowledge_base_acl_grant_tool",
         "github_project_library_search_tool",
-        "github_project_library_clone_tool"
+        "github_project_library_clone_tool",
+        "todo_write"
       ],
       "expected_preferred_tools": [
         "exec_command",

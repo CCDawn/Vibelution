@@ -52,7 +52,7 @@ export function WorkflowDecisionNode(props: NodeProps) {
       portSides={portSides}
       title={workflowNodeTooltip({ label, status, attempt })}
       badge={
-        <span className="inline-flex items-center gap-0.5 rounded-md border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--fg-secondary)]">
+        <span className="inline-flex items-center gap-0.5 rounded-md border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-1.5 py-0.5 [font-size:var(--vui-font-canvas-xs)] font-semibold text-[var(--fg-secondary)]">
           <GitBranch className="h-3 w-3" aria-hidden />
           分支
         </span>

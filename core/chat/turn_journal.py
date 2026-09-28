@@ -35,6 +35,11 @@ EVENT_TOOL_RESULT = "tool_result"
 EVENT_CLI_TASK_SENT = "cli_task_sent"
 EVENT_CLI_TASK_RESULT = "cli_task_result"
 EVENT_CLI_SESSION_LIFECYCLE = "cli_session_lifecycle"
+# Startup recovery status line (session startup sweep). Journaled against the
+# synthetic turn id "session-recovery:{original_turn_id}" — never a real turn —
+# so the post-terminal guard cannot trip and the status row does not coalesce
+# into any real turn's assistant bubble.
+EVENT_SESSION_RECOVERY_RESUMED = "session_recovery_resumed"
 EVENT_TURN_COMPLETED = "turn_completed"
 EVENT_TURN_FAILED = "turn_failed"
 EVENT_TURN_INTERRUPTED = "turn_interrupted"
@@ -63,6 +68,7 @@ MODEL_VISIBLE_EVENT_TYPES = {
     EVENT_CLI_TASK_SENT,
     EVENT_CLI_TASK_RESULT,
     EVENT_CLI_SESSION_LIFECYCLE,
+    EVENT_SESSION_RECOVERY_RESUMED,
     EVENT_TURN_INTERRUPTED,
     EVENT_COMPACTION_CHECKPOINT,
 }
@@ -97,6 +103,227 @@ class TurnJournalPostTerminalWriteError(ValueError):
     the late write and recording telemetry instead of failing the turn again;
     ``isinstance(exc, ValueError)`` remains true for existing classifiers.
     """
+
+
+class TurnJournalIllegalTransitionError(TurnJournalPostTerminalWriteError):
+    """Raised when an append is rejected by the transition table.
+
+    Duplicate terminals always raise. Other illegal classes only raise when
+    ``VIBELUTION_TURN_TRANSITION_GUARD=enforce``; otherwise they emit a shadow
+    record and the write proceeds. The error subclasses the post-terminal
+    write error so callers that already drop late writes keep that handling.
+    ``isinstance(exc, ValueError)`` still holds for existing classifiers.
+    """
+
+
+# ---------------------------------------------------------------------------
+# Turn event transition table (declarative, shadow-first).
+#
+# Design borrowed from ZCode's turn-machine ``canTransitionTo`` table
+# (github.com/zai-org/ZCode, apps/zcode-cli/packages/core/src/agent/
+# turn-machine.ts, Apache-2.0): one declarative mapping answers "may this
+# event category follow the turn's current state?" instead of scattered
+# if-checks. Only the design is borrowed; no code is shared.
+#
+# Vibelution turns have no runtime state object: their state is *replayed*
+# from the journal event stream of one turn_id. Event types are classified
+# into phases below, and each abstract turn state declares which phases may
+# legally arrive next. The table supplements — never replaces — the existing
+# post-terminal model-visible write guard (POST_TERMINAL_MODEL_EVENT_TYPES /
+# TurnJournalPostTerminalWriteError), which keeps its exact semantics.
+#
+# Phase rationale (why each category is legal where it is):
+# - lifecycle (turn_started): opens the turn, exactly once. A second one is a
+#   submit race; after a terminal it is a stale writer.
+# - input (user_message): the user fact that triggers the turn. Production
+#   writers always precede it with a scaffold — turn_started (normal submit)
+#   or a branch_rebase marker (edit/regenerate resubmit creates the new turn
+#   without turn_started) — but pristine input stays legal until the shadow
+#   window proves it never occurs.
+# - context (turn_context): durable context-assembly snapshot written by the
+#   worker once the turn is being prepared. Legal before output (proactive
+#   turns carry no user_message) and at pristine (legacy writers).
+# - model_stream (assistant_partial, assistant_delta_committed): volatile
+#   live-streaming breadcrumbs; only meaningful for an open turn.
+# - model_item (assistant_item_committed, assistant_message): committed model
+#   output items; legal for open turns and for scaffold-free projections
+#   (chat-room round transcript sync, child-session, seed writers).
+# - tool (tool_call_started, tool_result, cli_task_sent, cli_task_result,
+#   cli_session_lifecycle): tool/CLI lifecycle; only meaningful for an open turn.
+# - maintenance (compaction_checkpoint, context_compression_attempt): context
+#   maintenance decisions; legal for open turns and scaffold-free projections
+#   (chat-room rounds journal these under synthetic round ids).
+# - terminal (turn_completed, turn_failed, turn_interrupted): settles the
+#   turn, exactly once. A second terminal is the classic double-settle race.
+# - out_of_band (llm_resilience, branch_rebase, internal_turn_trigger, and any
+#   unknown type): diagnostics and markers that never participate in the turn
+#   state machine. llm_resilience is documented to never trip the post-terminal
+#   guard, branch_rebase markers legitimately reference already-settled turns
+#   (head_select), and unknown types must stay forward-compatible with newer
+#   writers.
+# ---------------------------------------------------------------------------
+
+TURN_PHASE_LIFECYCLE = "lifecycle"
+TURN_PHASE_INPUT = "input"
+TURN_PHASE_CONTEXT = "context"
+TURN_PHASE_MODEL_STREAM = "model_stream"
+TURN_PHASE_MODEL_ITEM = "model_item"
+TURN_PHASE_TOOL = "tool"
+TURN_PHASE_MAINTENANCE = "maintenance"
+TURN_PHASE_TERMINAL = "terminal"
+TURN_PHASE_OUT_OF_BAND = "out_of_band"
+
+# Proactive admission marker written right after turn_started by
+# core.web.services.session.proactive (never model-visible, not a named
+# constant there to avoid a reverse import).
+_EVENT_INTERNAL_TURN_TRIGGER = "internal_turn_trigger"
+
+TURN_EVENT_PHASES: dict[str, str] = {
+    EVENT_TURN_STARTED: TURN_PHASE_LIFECYCLE,
+    EVENT_USER_MESSAGE: TURN_PHASE_INPUT,
+    EVENT_TURN_CONTEXT: TURN_PHASE_CONTEXT,
+    EVENT_ASSISTANT_PARTIAL: TURN_PHASE_MODEL_STREAM,
+    EVENT_ASSISTANT_DELTA_COMMITTED: TURN_PHASE_MODEL_STREAM,
+    EVENT_ASSISTANT_ITEM_COMMITTED: TURN_PHASE_MODEL_ITEM,
+    EVENT_ASSISTANT_MESSAGE: TURN_PHASE_MODEL_ITEM,
+    EVENT_TOOL_CALL_STARTED: TURN_PHASE_TOOL,
+    EVENT_TOOL_RESULT: TURN_PHASE_TOOL,
+    EVENT_CLI_TASK_SENT: TURN_PHASE_TOOL,
+    EVENT_CLI_TASK_RESULT: TURN_PHASE_TOOL,
+    EVENT_CLI_SESSION_LIFECYCLE: TURN_PHASE_TOOL,
+    EVENT_COMPACTION_CHECKPOINT: TURN_PHASE_MAINTENANCE,
+    EVENT_COMPRESSION_ATTEMPT: TURN_PHASE_MAINTENANCE,
+    EVENT_TURN_COMPLETED: TURN_PHASE_TERMINAL,
+    EVENT_TURN_FAILED: TURN_PHASE_TERMINAL,
+    EVENT_TURN_INTERRUPTED: TURN_PHASE_TERMINAL,
+    EVENT_LLM_RESILIENCE: TURN_PHASE_OUT_OF_BAND,
+    EVENT_BRANCH_REBASE: TURN_PHASE_OUT_OF_BAND,
+    EVENT_SESSION_RECOVERY_RESUMED: TURN_PHASE_OUT_OF_BAND,
+    _EVENT_INTERNAL_TURN_TRIGGER: TURN_PHASE_OUT_OF_BAND,
+}
+
+# Abstract turn states, derived from the journal events already recorded for
+# the turn (see turn_transition_state_from_summary).
+TURN_STATE_PRISTINE = "pristine"
+TURN_STATE_OPEN = "open"
+TURN_STATE_TERMINAL = "terminal"
+
+# state -> event phases that may legally follow. Everything absent from a
+# state's set is illegal there; the reason strings in
+# classify_turn_event_transition explain each refusal.
+TURN_EVENT_TRANSITIONS: dict[str, frozenset[str]] = {
+    # Nothing journaled yet for this turn. Beyond the openers, three phases
+    # stay legal on evidence from replaying real journals (shadow-first:
+    # strictness only where the data supports it):
+    # - model_item: chat-room round transcript sync and child-session
+    #   projections deliberately append committed assistant output under a
+    #   synthetic turn id (f"chat-room-{round_id}") with no scaffold;
+    # - maintenance: chat-room rounds journal compression decisions against
+    #   those same synthetic ids before any output exists;
+    # - context: legacy writers (pre-Aug-2025 journals) occasionally wrote
+    #   turn_context as the turn's first event.
+    # Still illegal here, and real anomalies when they occur: a terminal with
+    # zero prior events, orphaned live-stream deltas, and orphaned tool calls.
+    TURN_STATE_PRISTINE: frozenset(
+        {
+            TURN_PHASE_LIFECYCLE,
+            TURN_PHASE_INPUT,
+            TURN_PHASE_CONTEXT,
+            TURN_PHASE_MODEL_ITEM,
+            TURN_PHASE_MAINTENANCE,
+            TURN_PHASE_OUT_OF_BAND,
+        }
+    ),
+    # Open turn: everything except a second lifecycle start (one turn_started
+    # per turn; the normal submit path already guards this).
+    TURN_STATE_OPEN: frozenset(
+        {
+            TURN_PHASE_INPUT,
+            TURN_PHASE_CONTEXT,
+            TURN_PHASE_MODEL_STREAM,
+            TURN_PHASE_MODEL_ITEM,
+            TURN_PHASE_TOOL,
+            TURN_PHASE_MAINTENANCE,
+            TURN_PHASE_TERMINAL,
+            TURN_PHASE_OUT_OF_BAND,
+        }
+    ),
+    # Settled turn: only out-of-band diagnostics/markers may follow
+    # (llm_resilience post-terminal immunity, head_select markers naming this
+    # turn). Duplicate terminals and lifecycle/output writes after the terminal
+    # are the common disorders this row exists to surface — replaying real
+    # journals caught genuine double-settles here (turn_interrupted after
+    # turn_completed, turn_failed after turn_interrupted).
+    TURN_STATE_TERMINAL: frozenset({TURN_PHASE_OUT_OF_BAND}),
+}
+
+# Shadow by default for every illegal class except a second terminal.
+# Replays of real journals only showed duplicate terminals (turn_interrupted
+# after turn_completed, turn_failed after turn_interrupted), so that class is
+# rejected on the write path. VIBELUTION_TURN_TRANSITION_GUARD=enforce
+# (or 1/true/yes/on) turns the rest of the table into the same hard gate.
+TURN_TRANSITION_GUARD_ENV = "VIBELUTION_TURN_TRANSITION_GUARD"
+TURN_TRANSITION_GUARD_SHADOW = "shadow"
+TURN_TRANSITION_GUARD_ENFORCE = "enforce"
+_TURN_TRANSITION_GUARD_ENFORCE_VALUES = {"enforce", "hard", "1", "true", "yes", "on"}
+
+_TURN_TRANSITION_CACHE_LOCK = threading.Lock()
+# 进程内 per-turn 迁移状态摘要缓存（key: journal path ->
+# ({turn_id: (event_count, has_turn_started, terminal_type)}, mtime_ns, size)）
+# 与 terminal 集合缓存同一套签名失效策略：只做加速，不替代文件锁。
+_TURN_TRANSITION_CACHE: dict = {}
+
+_TURN_TRANSITION_HOOK_LOCK = threading.Lock()
+_TURN_TRANSITION_HOOK: Any = None
+
+
+def transition_rejection_is_hard(summary: tuple[int, bool, str], event_type: str) -> bool:
+    """Whether this illegal append must be dropped instead of shadowed.
+
+    Duplicate terminals are always hard: they were the only disorder in a
+    replay of the live journals, and a second settle rewrites the turn's
+    outcome. Every other illegal class stays shadow until the env flag asks
+    for full enforcement.
+    """
+
+    if turn_transition_guard_mode() == TURN_TRANSITION_GUARD_ENFORCE:
+        return True
+    return (
+        turn_transition_state_from_summary(summary) == TURN_STATE_TERMINAL
+        and turn_event_phase(str(event_type or "").strip()) == TURN_PHASE_TERMINAL
+    )
+
+
+def turn_transition_guard_mode() -> str:
+    """Current guard mode ("shadow" unless the env hard-gate flag is set)."""
+
+    raw = os.environ.get(TURN_TRANSITION_GUARD_ENV, "").strip().lower()
+    return (
+        TURN_TRANSITION_GUARD_ENFORCE
+        if raw in _TURN_TRANSITION_GUARD_ENFORCE_VALUES
+        else TURN_TRANSITION_GUARD_SHADOW
+    )
+
+
+def set_turn_transition_guard_hook(hook: Any) -> None:
+    """Register the telemetry sink invoked for transition-table violations.
+
+    The hook receives one bounded dict per violating append (no payloads, no
+    user content). It is called after the append's file lock is released and
+    must never raise; core/chat has no scene-service dependency, so the web
+    session layer registers a ``record_runtime_scene_event`` forwarder here.
+    Pass ``None`` to unregister.
+    """
+
+    global _TURN_TRANSITION_HOOK
+    with _TURN_TRANSITION_HOOK_LOCK:
+        _TURN_TRANSITION_HOOK = hook
+
+
+def turn_event_phase(event_type: str) -> str:
+    """Phase of a journal event type; unknown types are out-of-band."""
+
+    return TURN_EVENT_PHASES.get(str(event_type or "").strip(), TURN_PHASE_OUT_OF_BAND)
 
 
 _LATEST_PREVIEW_PARSED_EVENT_TYPES = {
@@ -306,6 +533,8 @@ def append_turn_event(
     normalized_session_id = str(session_id or "").strip()
     normalized_turn_id = str(turn_id or "").strip()
     normalized_event_type = str(event_type or "").strip()
+    transition_violation: dict[str, Any] | None = None
+    hard_rejection: dict[str, Any] | None = None
     with _journal_thread_lock(path):
         with _journal_file_lock(path):
             if (
@@ -315,42 +544,81 @@ def append_turn_event(
                 raise TurnJournalPostTerminalWriteError(
                     f"Cannot append {normalized_event_type} after terminal event for turn {normalized_turn_id}."
                 )
-            sequence = _next_sequence(path)
-            event = TurnJournalEvent(
-                schema_version=SCHEMA_VERSION,
-                event_id=f"{_safe_event_token(normalized_turn_id or normalized_session_id)}-{sequence:06d}-{uuid4().hex[:8]}",
-                session_id=normalized_session_id,
-                turn_id=normalized_turn_id,
-                sequence=sequence,
-                event_type=normalized_event_type,
-                status=str(status or "").strip(),
-                timestamp=str(timestamp or "").strip() or _now_timestamp(),
-                source=str(source or "").strip(),
-                payload=dict(payload or {}),
-                parent_event_id=str(parent_event_id or "").strip(),
-                visible_in_model=bool(visible_in_model),
-                projection_kind=str(projection_kind or "").strip(),
-                provider_role=str(provider_role or "").strip(),
-                tool_call_id=str(tool_call_id or "").strip(),
-                correlation_id=str(correlation_id or "").strip(),
-                source_kind=str(source_kind or "").strip(),
-            )
-            encoded = (
-                json.dumps(event.to_dict(), ensure_ascii=False, separators=(",", ":")) + "\n"
-            ).encode("utf-8")
-            with path.open("ab") as handle:
-                handle.write(encoded)
-                handle.flush()
-                if (
-                    normalized_event_type not in VOLATILE_MODEL_EVENT_TYPES
-                    and normalized_event_type not in DEFERRED_FSYNC_EVENT_TYPES
-                ):
-                    os.fsync(handle.fileno())
-            _remember_sequence(path, sequence)
-            if normalized_event_type in TERMINAL_EVENTS:
-                _remember_terminal_turn_id(path, normalized_turn_id)
-            else:
-                _refresh_terminal_cache_signature(path)
+            # Declarative transition table (supplements, never replaces, the
+            # post-terminal guard above). Duplicate terminals are dropped here.
+            # Other illegal moves stay shadow unless the env hard gate is on:
+            # the hook sees them and the write proceeds. A hard rejection is
+            # raised only after this lock is released, so the telemetry hook
+            # never runs while the journal file is locked.
+            if normalized_turn_id:
+                summary = _cached_turn_transition_summary(path, normalized_turn_id)
+                legal, reason = classify_turn_event_transition(summary, normalized_event_type)
+                if not legal:
+                    hard = transition_rejection_is_hard(summary, normalized_event_type)
+                    record = {
+                        "schema": "turn_transition_guard.v1",
+                        "mode": TURN_TRANSITION_GUARD_ENFORCE if hard else TURN_TRANSITION_GUARD_SHADOW,
+                        "sessionId": normalized_session_id,
+                        "turnId": normalized_turn_id,
+                        "eventType": normalized_event_type,
+                        "phase": turn_event_phase(normalized_event_type),
+                        "priorEventCount": summary[0],
+                        "priorHasTurnStarted": summary[1],
+                        "priorTerminalType": summary[2],
+                        "reason": reason,
+                    }
+                    if hard:
+                        hard_rejection = record
+                    else:
+                        transition_violation = record
+            if hard_rejection is None:
+                sequence = _next_sequence(path)
+                event = TurnJournalEvent(
+                    schema_version=SCHEMA_VERSION,
+                    event_id=f"{_safe_event_token(normalized_turn_id or normalized_session_id)}-{sequence:06d}-{uuid4().hex[:8]}",
+                    session_id=normalized_session_id,
+                    turn_id=normalized_turn_id,
+                    sequence=sequence,
+                    event_type=normalized_event_type,
+                    status=str(status or "").strip(),
+                    timestamp=str(timestamp or "").strip() or _now_timestamp(),
+                    source=str(source or "").strip(),
+                    payload=dict(payload or {}),
+                    parent_event_id=str(parent_event_id or "").strip(),
+                    visible_in_model=bool(visible_in_model),
+                    projection_kind=str(projection_kind or "").strip(),
+                    provider_role=str(provider_role or "").strip(),
+                    tool_call_id=str(tool_call_id or "").strip(),
+                    correlation_id=str(correlation_id or "").strip(),
+                    source_kind=str(source_kind or "").strip(),
+                )
+                encoded = (
+                    json.dumps(event.to_dict(), ensure_ascii=False, separators=(",", ":")) + "\n"
+                ).encode("utf-8")
+                with path.open("ab") as handle:
+                    handle.write(encoded)
+                    handle.flush()
+                    if (
+                        normalized_event_type not in VOLATILE_MODEL_EVENT_TYPES
+                        and normalized_event_type not in DEFERRED_FSYNC_EVENT_TYPES
+                    ):
+                        os.fsync(handle.fileno())
+                _remember_sequence(path, sequence)
+                if normalized_event_type in TERMINAL_EVENTS:
+                    _remember_terminal_turn_id(path, normalized_turn_id)
+                else:
+                    _refresh_terminal_cache_signature(path)
+                _remember_turn_transition_summary(path, normalized_turn_id, normalized_event_type)
+    if hard_rejection is not None:
+        _emit_turn_transition_violation(hard_rejection)
+        raise TurnJournalIllegalTransitionError(
+            f"Illegal turn transition for turn {normalized_turn_id}: "
+            f"{normalized_event_type} -> {hard_rejection['reason']}."
+        )
+    if transition_violation is not None:
+        # Emitted after the file lock is released: the hook may be a heavy
+        # scene-service sink and must never run under the journal lock.
+        _emit_turn_transition_violation(transition_violation)
     return event
 
 
@@ -458,6 +726,176 @@ def _refresh_terminal_cache_signature(path: Path) -> None:
         cached = _TERMINAL_SET_CACHE.get(key)
         if cached is not None:
             _TERMINAL_SET_CACHE[key] = (cached[0], mtime_ns, size)
+
+
+def _fold_turn_transition_summary(summary: list, event_type: str) -> None:
+    """Fold one event into a mutable ``[count, has_turn_started, terminal]``."""
+
+    summary[0] += 1
+    if event_type == EVENT_TURN_STARTED:
+        summary[1] = True
+    if event_type in TERMINAL_EVENTS:
+        summary[2] = event_type
+
+
+def _scan_turn_transition_summaries(path: Path) -> dict[str, tuple[int, bool, str]]:
+    """Scan the journal once and summarize every turn's transition state."""
+
+    summaries: dict[str, list] = {}
+    try:
+        with path.open(encoding="utf-8") as handle:
+            for line in handle:
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    parsed = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                event = TurnJournalEvent.from_dict(parsed)
+                if event is None:
+                    continue
+                turn_id = str(event.turn_id or "").strip()
+                if not turn_id:
+                    continue
+                summary = summaries.get(turn_id)
+                if summary is None:
+                    summary = [0, False, ""]
+                    summaries[turn_id] = summary
+                _fold_turn_transition_summary(summary, event.event_type)
+    except OSError:
+        return {}
+    return {
+        turn_id: (summary[0], summary[1], summary[2])
+        for turn_id, summary in summaries.items()
+    }
+
+
+def _cached_turn_transition_summary(
+    path: Path,
+    turn_id: str,
+) -> tuple[int, bool, str]:
+    """Per-turn ``(event_count, has_turn_started, terminal_type)`` summary.
+
+    Signature-keyed like the terminal-id cache: the caller holds the journal
+    file lock, so a signature mismatch can only mean a foreign append landed
+    since the last lookup; the fallback is a full rescan, never a guess.
+    """
+
+    if not turn_id or not path.exists():
+        return (0, False, "")
+    key = _sequence_cache_key(path)
+    mtime_ns, size = _sequence_file_signature(path)
+    with _TURN_TRANSITION_CACHE_LOCK:
+        cached = _TURN_TRANSITION_CACHE.get(key)
+        if cached is not None and cached[1] == mtime_ns and cached[2] == size:
+            return cached[0].get(turn_id, (0, False, ""))
+    summaries = _scan_turn_transition_summaries(path)
+    with _TURN_TRANSITION_CACHE_LOCK:
+        _TURN_TRANSITION_CACHE[key] = (summaries, mtime_ns, size)
+    return summaries.get(turn_id, (0, False, ""))
+
+
+def _remember_turn_transition_summary(path: Path, turn_id: str, event_type: str) -> None:
+    """Fold the just-appended event into the cached per-turn summary.
+
+    Mirrors ``_remember_terminal_turn_id``: the cache entry (if any) predates
+    this append, so patch the turn's summary and store the post-append file
+    signature. The caller holds the journal file lock, so no foreign append
+    can interleave.
+    """
+
+    if not turn_id:
+        return
+    key = _sequence_cache_key(path)
+    mtime_ns, size = _sequence_file_signature(path)
+    with _TURN_TRANSITION_CACHE_LOCK:
+        cached = _TURN_TRANSITION_CACHE.get(key)
+        base = dict(cached[0]) if cached is not None else {}
+        summary = list(base.get(turn_id, (0, False, "")))
+        _fold_turn_transition_summary(summary, event_type)
+        base[turn_id] = (summary[0], summary[1], summary[2])
+        _TURN_TRANSITION_CACHE[key] = (base, mtime_ns, size)
+
+
+def turn_transition_state_from_summary(summary: tuple[int, bool, str]) -> str:
+    """Map a per-turn summary onto its abstract transition-table state."""
+
+    event_count, _has_turn_started, terminal_type = summary
+    if event_count <= 0:
+        return TURN_STATE_PRISTINE
+    if terminal_type:
+        return TURN_STATE_TERMINAL
+    return TURN_STATE_OPEN
+
+
+def turn_transition_state_from_event_types(event_types: Iterable[str]) -> str:
+    """Abstract turn state for a list of already-journaled event types."""
+
+    summary: list = [0, False, ""]
+    for event_type in event_types or []:
+        _fold_turn_transition_summary(summary, str(event_type or "").strip())
+    return turn_transition_state_from_summary((summary[0], summary[1], summary[2]))
+
+
+def classify_turn_event_transition(
+    summary: tuple[int, bool, str],
+    next_event_type: str,
+) -> tuple[bool, str]:
+    """Classify one hypothetical append against the transition table.
+
+    Returns ``(legal, reason)``; ``reason`` is empty when legal and names the
+    disorder when not, so telemetry (and eventually the hard gate) can explain
+    every refusal.
+    """
+
+    normalized = str(next_event_type or "").strip()
+    state = turn_transition_state_from_summary(summary)
+    phase = turn_event_phase(normalized)
+    if phase in TURN_EVENT_TRANSITIONS.get(state, frozenset()):
+        return True, ""
+    event_count, _has_turn_started, terminal_type = summary
+    if state == TURN_STATE_PRISTINE:
+        reason = f"{phase} event before any turn scaffold for this turn"
+    elif state == TURN_STATE_OPEN:
+        reason = "duplicate turn_started for an already-open turn"
+    elif phase == TURN_PHASE_TERMINAL:
+        reason = f"duplicate terminal event; turn already settled with {terminal_type}"
+    else:
+        reason = f"{phase} event after terminal {terminal_type}"
+    return False, reason
+
+
+def evaluate_turn_event_transition(
+    prior_event_types: Iterable[str],
+    next_event_type: str,
+) -> tuple[str, bool, str]:
+    """Evaluate one hypothetical append against the transition table.
+
+    Convenience over ``turn_transition_state_from_event_types`` +
+    ``classify_turn_event_transition`` for callers holding an event list
+    instead of a cached summary. Returns ``(state, legal, reason)``.
+    """
+
+    summary_list: list = [0, False, ""]
+    for event_type in prior_event_types or []:
+        _fold_turn_transition_summary(summary_list, str(event_type or "").strip())
+    summary = (summary_list[0], summary_list[1], summary_list[2])
+    legal, reason = classify_turn_event_transition(summary, next_event_type)
+    return turn_transition_state_from_summary(summary), legal, reason
+
+
+def _emit_turn_transition_violation(record: dict[str, Any]) -> None:
+    """Best-effort telemetry for one violating append; never raises."""
+
+    with _TURN_TRANSITION_HOOK_LOCK:
+        hook = _TURN_TRANSITION_HOOK
+    if hook is None:
+        return
+    try:
+        hook(record)
+    except Exception:  # noqa: BLE001 - telemetry must never fail the append
+        pass
 
 
 _TURN_EVENTS_PREFIX_CACHE: dict[str, dict[str, Any]] = {}
@@ -763,6 +1201,11 @@ def rewrite_turn_events(project_root: Path, session_id: str, events: Iterable[Tu
                 except OSError:
                     return
                 _forget_sequence(path)
+                # The rewrite shrank the file: a stale events-prefix cache
+                # would replay the pre-rewrite prefix once later appends push
+                # the size past the cached one (the load path cannot tell
+                # "append-only growth" from "rewrite-then-extend").
+                _forget_turn_events_prefix(str(path))
                 # Dropping the file must not reissue cursors clients already saw.
                 _write_sequence_watermark(path, previous_sequence)
                 return
@@ -783,6 +1226,9 @@ def rewrite_turn_events(project_root: Path, session_id: str, events: Iterable[Tu
                 os.replace(tmp_path, path)
                 _fsync_directory(path.parent)
                 _forget_sequence(path)
+                # Same staleness hazard as the unlink branch above: the file
+                # shrank, so the events-prefix cache must go.
+                _forget_turn_events_prefix(str(path))
                 _write_sequence_watermark(path, max(previous_sequence, retained_sequence))
             except OSError:
                 try:
@@ -1712,6 +2158,10 @@ def _model_visible_messages_from_events(event_list: list[TurnJournalEvent]) -> l
             lifecycle_message = _lifecycle_message_from_event(event)
             if _message_has_visible_payload(lifecycle_message):
                 messages.append(lifecycle_message)
+        elif event.event_type == EVENT_SESSION_RECOVERY_RESUMED:
+            recovery_message = _session_recovery_resumed_message_from_event(event)
+            if _message_has_visible_payload(recovery_message):
+                messages.append(recovery_message)
         elif event.event_type in TERMINAL_EVENTS:
             terminal_turn_ids.add(turn_id)
             usage = payload.get("llmUsage") or payload.get("llm_usage")
@@ -2335,6 +2785,45 @@ def _lifecycle_message_from_event(event: TurnJournalEvent) -> dict[str, Any]:
     }
 
 
+def _session_recovery_resumed_message_from_event(event: TurnJournalEvent) -> dict[str, Any]:
+    """Project a startup-recovery status line into a visible assistant message.
+
+    Mirrors ``_lifecycle_message_from_event``: the journal payload is the
+    authority, the projection only reshapes it. Downstream message
+    normalization derives ``turnItems`` from the content, so the row survives
+    the timeline's ``hasVisibleTurnData`` filter exactly like other assistant
+    messages.
+    """
+
+    payload = dict(event.payload or {})
+    recovery = dict(payload.get("recovery") or payload)
+    content = str(recovery.get("content") or "").strip()
+    if not content:
+        return {}
+    metadata: dict[str, Any] = {
+        "kind": EVENT_SESSION_RECOVERY_RESUMED,
+        "turnId": event.turn_id,
+        "eventId": event.event_id,
+    }
+    for key in ("attempt", "turnLabel", "recoveredTurnId", "resumedTurnId"):
+        value = recovery.get(key)
+        if value is None:
+            continue
+        if key == "attempt":
+            try:
+                metadata[key] = max(0, int(value))
+            except (TypeError, ValueError):
+                continue
+        else:
+            metadata[key] = str(value).strip()
+    return {
+        "role": "assistant",
+        "content": content,
+        "timestamp": event.timestamp,
+        "metadata": metadata,
+    }
+
+
 def _event_tool_call_id(event: TurnJournalEvent) -> str:
     if event.tool_call_id:
         return event.tool_call_id
@@ -2715,6 +3204,7 @@ __all__ = [
     "EVENT_CLI_SESSION_LIFECYCLE",
     "EVENT_CLI_TASK_SENT",
     "EVENT_CLI_TASK_RESULT",
+    "EVENT_SESSION_RECOVERY_RESUMED",
     "EVENT_COMPACTION_CHECKPOINT",
     "EVENT_COMPRESSION_ATTEMPT",
     "MODEL_VISIBLE_EVENT_TYPES",

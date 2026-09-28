@@ -6,6 +6,13 @@ import type {
   SessionSummary,
   Team,
 } from "../api/types";
+import {
+  areConversationSummariesEquivalent,
+  areIndexEntryValuesEquivalent,
+  conversationSummaryIdentityKey,
+  stabilizeConversationSummaries,
+  stabilizeIndexEntries,
+} from "./sessionIndexReferenceStabilization";
 import { isChildSession, sessionListTitle } from "./DirectSessionIndexItem";
 
 export type ConversationIndexGroupKey =
@@ -710,6 +717,15 @@ export function conversationGroupLabel(groupKey: ConversationIndexGroupKey, lang
   return labels[groupKey][lang];
 }
 
+export type ConversationIndexModel = {
+  filteredConversations: ConversationSummary[];
+  filteredStandaloneGroupConversations: ConversationSummary[];
+  filteredTeams: ConversationIndexTeam[];
+  groupedConversations: ConversationIndexGroup[];
+  rawSessionsById: Map<string, SessionSummary>;
+  searchHasTerm: boolean;
+};
+
 type BuildConversationIndexModelOptions = {
   agents?: AgentInstance[];
   conversations: ConversationSummary[] | undefined;
@@ -722,7 +738,7 @@ type BuildConversationIndexModelOptions = {
   teams: Team[];
 };
 
-export function buildConversationIndexModel({
+function computeConversationIndexModel({
   agents = [],
   conversations,
   lang,
@@ -732,7 +748,7 @@ export function buildConversationIndexModel({
   sessionFilter,
   sessionsById,
   teams,
-}: BuildConversationIndexModelOptions) {
+}: BuildConversationIndexModelOptions): ConversationIndexModel {
   const term = sessionFilter.trim().toLowerCase();
   const rawSessionsById = new Map((rawSessions ?? []).map((session) => [session.id, session]));
   const mergedConversations = mergeVisibleAgentsIntoConversations(
@@ -894,6 +910,162 @@ export function buildConversationIndexModel({
     rawSessionsById,
     searchHasTerm: Boolean(term),
   };
+}
+
+function conversationIndexTeamIdentityKey(team: ConversationIndexTeam): string {
+  return String(team.teamId || team.name || "").trim().toLowerCase();
+}
+
+function stabilizeConversationIndexTeams(
+  previous: readonly ConversationIndexTeam[] | undefined,
+  next: readonly ConversationIndexTeam[],
+): ConversationIndexTeam[] {
+  return stabilizeIndexEntries(previous, next, conversationIndexTeamIdentityKey, areIndexEntryValuesEquivalent);
+}
+
+function stabilizeConversationIndexGroups(
+  previous: ConversationIndexGroup[],
+  next: ConversationIndexGroup[],
+): ConversationIndexGroup[] {
+  if (previous.length === 0 || next.length === 0) {
+    return next;
+  }
+  const previousByGroupKey = new Map(previous.map((group) => [group.groupKey, group] as const));
+  let identical = previous.length === next.length;
+  const stabilized = next.map((group, index) => {
+    const previousGroup = previousByGroupKey.get(group.groupKey);
+    if (!previousGroup) {
+      identical = false;
+      return group;
+    }
+    // Group items are drawn from the same pool as `filteredConversations`, so
+    // stabilizing against the previous group's items reuses the exact previous
+    // entry references and keeps both output fields consistent.
+    const items = stabilizeConversationSummaries(previousGroup.items, group.items);
+    const scalarsUnchanged =
+      previousGroup.label === group.label
+      && previousGroup.teamId === group.teamId
+      && previousGroup.groupKind === group.groupKind;
+    if (scalarsUnchanged && items === previousGroup.items) {
+      if (identical && previous[index] !== previousGroup) {
+        identical = false;
+      }
+      return previousGroup;
+    }
+    identical = false;
+    return { ...group, items };
+  });
+  return identical ? previous : stabilized;
+}
+
+function areRawSessionsByIdEquivalent(
+  previous: Map<string, SessionSummary>,
+  next: Map<string, SessionSummary>,
+): boolean {
+  if (previous === next) {
+    return true;
+  }
+  if (previous.size !== next.size) {
+    return false;
+  }
+  for (const [sessionId, session] of next) {
+    if (previous.get(sessionId) !== session) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Reuse the previous model's array/entry references wherever the freshly
+ * computed model is structurally equivalent, so identity-keyed memoization
+ * downstream short-circuits while a genuinely changed entry (and its container
+ * chain) still rotates. Unconsumed-but-compared fields (e.g. activity
+ * timestamps) also rotate their entry: conservative correctness first.
+ */
+function stabilizeConversationIndexModel(
+  previous: ConversationIndexModel,
+  next: ConversationIndexModel,
+): ConversationIndexModel {
+  return {
+    filteredConversations: stabilizeConversationSummaries(previous.filteredConversations, next.filteredConversations),
+    filteredStandaloneGroupConversations: stabilizeConversationSummaries(
+      previous.filteredStandaloneGroupConversations,
+      next.filteredStandaloneGroupConversations,
+    ),
+    filteredTeams: stabilizeConversationIndexTeams(previous.filteredTeams, next.filteredTeams),
+    groupedConversations: stabilizeConversationIndexGroups(previous.groupedConversations, next.groupedConversations),
+    rawSessionsById: areRawSessionsByIdEquivalent(previous.rawSessionsById, next.rawSessionsById)
+      ? previous.rawSessionsById
+      : next.rawSessionsById,
+    searchHasTerm: next.searchHasTerm,
+  };
+}
+
+type ConversationIndexModelOptionsSnapshot = {
+  agents: AgentInstance[] | undefined;
+  conversations: ConversationSummary[] | undefined;
+  lang: "zh" | "en";
+  linkedTeamRoomIds: Set<string>;
+  rawSessions: SessionSummary[] | undefined;
+  rightIndexSessions: SessionSummary[];
+  sessionFilter: string;
+  sessionsById: Map<string, SessionSummary>;
+  teams: Team[];
+};
+
+function conversationIndexModelOptionsSnapshot(
+  options: BuildConversationIndexModelOptions,
+): ConversationIndexModelOptionsSnapshot {
+  return {
+    agents: options.agents,
+    conversations: options.conversations,
+    lang: options.lang,
+    linkedTeamRoomIds: options.linkedTeamRoomIds,
+    rawSessions: options.rawSessions,
+    rightIndexSessions: options.rightIndexSessions,
+    sessionFilter: options.sessionFilter,
+    sessionsById: options.sessionsById,
+    teams: options.teams,
+  };
+}
+
+function areConversationIndexModelOptionsIdentical(
+  left: ConversationIndexModelOptionsSnapshot,
+  right: ConversationIndexModelOptionsSnapshot,
+): boolean {
+  return left.agents === right.agents
+    && left.conversations === right.conversations
+    && left.lang === right.lang
+    && left.linkedTeamRoomIds === right.linkedTeamRoomIds
+    && left.rawSessions === right.rawSessions
+    && left.rightIndexSessions === right.rightIndexSessions
+    && left.sessionFilter === right.sessionFilter
+    && left.sessionsById === right.sessionsById
+    && left.teams === right.teams;
+}
+
+// Single-consumer cache (the chat workbench rail model). Holding the most
+// recent options/model pair is enough: stabilization itself is content-based,
+// so it still applies whenever inputs changed references but not content.
+let lastConversationIndexModel: {
+  options: ConversationIndexModelOptionsSnapshot;
+  model: ConversationIndexModel;
+} | undefined;
+
+export function resetConversationIndexModelStabilizationForTests() {
+  lastConversationIndexModel = undefined;
+}
+
+export function buildConversationIndexModel(options: BuildConversationIndexModelOptions): ConversationIndexModel {
+  const last = lastConversationIndexModel;
+  if (last && areConversationIndexModelOptionsIdentical(last.options, conversationIndexModelOptionsSnapshot(options))) {
+    return last.model;
+  }
+  const computed = computeConversationIndexModel(options);
+  const model = last ? stabilizeConversationIndexModel(last.model, computed) : computed;
+  lastConversationIndexModel = { options: conversationIndexModelOptionsSnapshot(options), model };
+  return model;
 }
 
 export function useConversationIndexModel(options: BuildConversationIndexModelOptions) {

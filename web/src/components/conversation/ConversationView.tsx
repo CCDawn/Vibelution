@@ -9,6 +9,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDot,
+  CircleMinus,
   CirclePlus,
   Copy,
   Cpu,
@@ -18,9 +19,11 @@ import {
   GitFork,
   ImagePlus,
   Link2,
+  ListPlus,
   LoaderCircle,
   MessageSquareText,
   Pencil,
+  Quote,
   RefreshCw,
   Square,
   X,
@@ -30,20 +33,42 @@ import {
   Wrench,
 } from "lucide-react";
 import React, { DragEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import type { ConversationMessage } from "../../api/types";
+import type {
+  ConversationAttachment,
+  ConversationMessage,
+  SessionMessageCurationAction,
+  SessionReferenceAttachment,
+} from "../../api/types";
 import type {
   AgentMessage,
   AgentMentalPart,
 } from "../../agent-thread/types";
 import { fetchJson } from "../../api/client";
+import { fetchSessionMessageCuration, isFetchJsonHttpError, setSessionMessageCuration } from "../../api/chat";
+import { queryKeys } from "../../api/queryKeys";
 import { VStateSurface } from "../../components/vui";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { ConversationImageArtifactView } from "./ConversationImageArtifactView";
 import type { ConversationImagePreviewRequest } from "./ConversationImagePreviewDialog";
 import { ConversationForkSessionDialog } from "./ConversationForkSessionDialog";
 import { ConversationStreamingResponseContent } from "./ConversationStreamingResponseContent";
+import { ConversationSelectionQuoteMenu } from "./ConversationSelectionQuoteMenu";
+import {
+  buildQuotedDraftText,
+  extractConversationSelectionSnapshot,
+  resolveSelectionQuoteMenuPosition,
+  type ConversationSelectionMenuPosition,
+} from "./conversationTextSelection";
 import { ConversationTranscriptLoadingState } from "./ConversationTranscriptLoadingState";
+import { ConversationTurnNavigator } from "./ConversationTurnNavigator";
+import {
+  buildConversationTurnNavDirectory,
+  resolveConversationTurnNavCurrentIndex,
+  type ConversationTurnNavEntry,
+} from "./conversationTurnNavigation";
 import { ConversationTurnAvatarContent } from "./ConversationTurnAvatarContent";
 import { attachmentSizeLabel, isImageAttachment } from "./attachmentPresentation";
 import {
@@ -63,7 +88,6 @@ import {
   type MentalStateLabels,
 } from "./conversationMentalState";
 import { AgentMessageTurnView } from "./AgentMessageTurnView";
-import { AgentResponseSectionView } from "./AgentResponseSectionView";
 import { AgentUserContentSectionView } from "./AgentUserContentSectionView";
 
 /** T1: dialog/context chrome load only when opened — keep transcript path leaner. */
@@ -112,8 +136,15 @@ import {
   assistantTurnIsStreaming,
   hasTerminalCanonicalTurnOutcome,
 } from "../../routes/chatTurnProtocol";
+import { buildMessageReferencePayload } from "../../routes/chat/chatComposerSubmitModel";
 import { deriveLatestTodoChecklist } from "./conversationTodoChecklistModel";
 import { ConversationTodoChecklist } from "./ConversationTodoChecklist";
+import {
+  applyOptimisticCuration,
+  buildMessageCurationMap,
+  resolveMessageCurationState,
+  type MessageCurationDecision,
+} from "./conversationMessageCuration";
 import {
   compactStreamingStatusPlaceholder,
   isInternalStreamingStatusStage,
@@ -121,6 +152,12 @@ import {
   isStreamingStatusPlaceholderContent,
 } from "./conversationInternalStatus";
 import { ConversationActiveTurnStatusNote } from "./ConversationActiveTurnStatusNote";
+import {
+  formatConversationTurnWorkBreakdown,
+  formatConversationTurnWorkedFor,
+  resolveConversationTurnWorkSummary,
+  type ConversationTurnWorkSummary,
+} from "./conversationTurnWorkStatus";
 import {
   operationGroupsWithFeedbackStatusPlaceholder,
 } from "./conversationFeedbackStatusPresentation";
@@ -209,6 +246,7 @@ import {
   isAgentInboxMessage,
   isCliAgentLifecycleMessage,
   isGroupRoomTranscriptMessage,
+  isSessionRecoveryResumedMessage,
   isSteerGuidanceMessage,
   isTurnErrorMessage,
   researchOrgMessageChips,
@@ -217,9 +255,6 @@ import {
   type AgentMessageSectionState,
 } from "./agentMessageSections";
 import {
-  INITIAL_VISIBLE_MESSAGE_COUNT,
-  nextVisibleMessageLimit,
-  resolveVisibleMessageCount,
   shouldLoadEarlierConversationMessages,
   shouldPreferServerEarlierLoad,
   TIMELINE_HISTORY_LOAD_THRESHOLD_PX,
@@ -249,12 +284,19 @@ import {
   buildTimelineScrollSignal,
 } from "./conversationTimelineScrollSignals";
 import {
+  CONVERSATION_VIRTUAL_ROW_ESTIMATE_PX,
+  freshTimelineUserScrollIntent,
   isTimelineNearBottom,
-  recordConversationRowHeight,
-  resolveConversationVirtualRange,
+  reconcileFollowingBeforeContentStick,
   resolveTimelineFollowState,
   shouldKeepFollowingLatestOnProcessToggle,
   shouldStickTimelineToBottomOnContentResize,
+  TIMELINE_CONTENT_WIDTH_RESIZE_SETTLE_MS,
+  timelineKeyboardScrollIntent,
+  timelineTouchScrollIntent,
+  timelineWheelScrollIntent,
+  type TimelineScrollSource,
+  type TimelineUserScrollIntent,
 } from "./conversationTimelineFollowState";
 import {
   peekSessionTimelineScroll,
@@ -297,6 +339,8 @@ import {
   cliAgentLifecycleDetail,
   cliAgentLifecycleLabel,
   groupRoomTranscriptLabel,
+  sessionRecoveryResumedDetail,
+  sessionRecoveryResumedLabel,
 } from "./conversationSpecialMessagePresentation";
 import { projectedConversationMessageIds } from "./conversationMessageIdentity";
 import { shouldCompactConversationTurnHeader } from "./conversationTurnHeaderCompaction";
@@ -344,6 +388,7 @@ import {
   resolveComposerEditMode,
   resolveComposerGuidanceUi,
   resolveComposerPrimaryActionFlags,
+  shouldStopComposerOnEscape,
 } from "./conversationComposerActionModel";
 import { conversationOperationIconKind } from "./conversationOperationIconModel";
 import { getCachedResponseSegments as getCachedResponseSegmentsFromCache } from "./conversationResponseSegmentCache";
@@ -355,7 +400,11 @@ import {
   extractToolDisplayCommand,
   type CodexToolActivityPills,
 } from "./conversationToolPresentation";
-import { humanizeReasoningPreview } from "./conversationReasoningPreview";
+import {
+  isThoughtScrollAtBottom,
+  resolveThoughtStreamingSummary,
+  type ThoughtStreamingSummary,
+} from "./conversationThoughtSummary";
 import { VActionGroup, VButton, VNativeInput, VNativeTextarea } from "../vui";
 import styles from "./ConversationView.styles";
 
@@ -364,8 +413,23 @@ const INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT = 36;
 const RESPONSE_PARSE_CACHE_LIMIT = 80;
 const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
 const EMPTY_SECTION_EXPANSION: Record<string, boolean> = {};
+// Virtual timeline (react-virtual): rows rendered beyond the measured viewport
+// per direction, vertical rhythm matching the timelineContent grid gap, the
+// scroll container's top padding (py-4) before the virtual host, and a
+// generous SSR/first-paint rect so server-rendered windows stay deterministic.
+const TIMELINE_VIRTUAL_OVERSCAN = 8;
+const TIMELINE_VIRTUAL_ROW_GAP_PX = 10;
+const TIMELINE_VIRTUAL_SCROLL_MARGIN_PX = 16;
+const TIMELINE_VIRTUAL_INITIAL_RECT = { width: 1280, height: 900 };
+// Prepend anchor correction: bounded frames for measurements to land before
+// the viewport position is declared final (2px tolerance = subpixel jitter).
+const TIMELINE_ANCHOR_CORRECTION_MAX_FRAMES = 30;
+const TIMELINE_ANCHOR_CORRECTION_TOLERANCE_PX = 2;
 
-/** Height-capped thought body; sticks to bottom while streaming. */
+/**
+ * Height-capped thought body; sticks to bottom while streaming until the user
+ * scrolls away from the bottom, then pauses follow until they return.
+ */
 function ThoughtScrollBody({
   text,
   streaming,
@@ -376,6 +440,20 @@ function ThoughtScrollBody({
   className?: string;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // Starts true on every (re)mount so an expand or fresh stream follows the
+  // newest content; onScroll flips it off as soon as the user leaves the bottom.
+  const autoFollowBottomRef = useRef(true);
+  const handleScroll = useCallback(() => {
+    const node = scrollRef.current;
+    if (!node) {
+      return;
+    }
+    autoFollowBottomRef.current = isThoughtScrollAtBottom({
+      clientHeight: node.clientHeight,
+      scrollHeight: node.scrollHeight,
+      scrollTop: node.scrollTop,
+    });
+  }, []);
   useLayoutEffect(() => {
     if (!streaming) {
       return;
@@ -384,17 +462,73 @@ function ThoughtScrollBody({
     if (!node) {
       return;
     }
-    node.scrollTop = node.scrollHeight;
+    if (autoFollowBottomRef.current) {
+      node.scrollTop = node.scrollHeight;
+    }
   }, [streaming, text]);
   return (
     <div
       ref={scrollRef}
+      onScroll={handleScroll}
       className={[styles.thoughtScrollBody, className].filter(Boolean).join(" ")}
       data-thought-scroll-body="true"
       data-thought-scroll-streaming={streaming ? "true" : undefined}
     >
       <pre className={styles.codexTranscriptReasoningText}>{text}</pre>
     </div>
+  );
+}
+
+/**
+ * Collapsed thought summary: the latest thought sentence in one nowrap line.
+ * Overflow hides and the viewport is pushed to its end on every content or
+ * width change, so the newest words stay pinned at the right edge while older
+ * text rolls out to the left; a CSS mask fades both edges only once the line
+ * actually overflows.
+ */
+function ThoughtStreamingSummary({ text }: { text: string }) {
+  const viewportRef = useRef<HTMLSpanElement | null>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  const summary: ThoughtStreamingSummary | null = resolveThoughtStreamingSummary(text);
+  const summaryText = summary?.text ?? "";
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !summaryText) {
+      return;
+    }
+    const syncSummaryViewport = () => {
+      setOverflowing((current) => {
+        const next = viewport.scrollWidth > viewport.clientWidth + 1;
+        return current === next ? current : next;
+      });
+      viewport.scrollLeft = viewport.scrollWidth;
+    };
+    syncSummaryViewport();
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const resizeObserver = new ResizeObserver(syncSummaryViewport);
+    resizeObserver.observe(viewport);
+    return () => resizeObserver.disconnect();
+  }, [summaryText]);
+  if (!summary) {
+    return null;
+  }
+  return (
+    <>
+      <span className={styles.timelineCellSeparator} aria-hidden="true">·</span>
+      <span
+        ref={viewportRef}
+        className={[
+          styles.thoughtStreamingSummary,
+          overflowing ? styles.thoughtStreamingSummaryMasked : "",
+        ].filter(Boolean).join(" ")}
+        data-thought-streaming-summary="true"
+        data-thought-summary-mask={overflowing ? "both" : "none"}
+      >
+        <span className={styles.thoughtStreamingSummaryText}>{summary.text}</span>
+      </span>
+    </>
   );
 }
 
@@ -457,6 +591,50 @@ function progressTextExceedsClamp(text: string) {
   return lines > PROGRESS_CLAMP_LINES;
 }
 
+/**
+ * Settled-turn work header (ZCode AssistantHistoryStatus alignment): a thin
+ * bottom rule with a collapsible 「已工作 N 分钟」 trigger at the turn tail.
+ * Expanded, it shows only what the turn data can honestly back — tool call
+ * count and tool time when measurable (see conversationTurnWorkStatus.ts for
+ * the duration口径).
+ */
+const ConversationTurnWorkHeader = React.memo(function ConversationTurnWorkHeader({
+  summary,
+  lang,
+}: {
+  summary: ConversationTurnWorkSummary;
+  lang: "zh" | "en" | string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <details
+      className={styles.turnWorkHeader}
+      data-testid="conversation-turn-work-header"
+      data-turn-work-basis={summary.basis}
+      data-turn-work-duration-ms={summary.durationMs}
+      open={open}
+      onToggle={(event) => setOpen((event.target as HTMLDetailsElement).open)}
+    >
+      <summary
+        className={styles.turnWorkHeaderSummary}
+        aria-label={formatConversationTurnWorkedFor(summary, lang)}
+      >
+        <ChevronDown
+          size={14}
+          aria-hidden="true"
+          className={`${styles.turnWorkHeaderChevron} ${open ? "rotate-90" : "rotate-0"}`}
+        />
+        <span className={styles.turnWorkHeaderLabel}>
+          {formatConversationTurnWorkedFor(summary, lang)}
+        </span>
+      </summary>
+      <div className={styles.turnWorkHeaderBody}>
+        {formatConversationTurnWorkBreakdown(summary, lang)}
+      </div>
+    </details>
+  );
+});
+
 const ConversationTurnRow = React.memo(function ConversationTurnRow({
   renderTurn,
 }: ConversationTurnRowProps) {
@@ -484,7 +662,195 @@ async function copyTextToClipboard(text: string) {
   }
 }
 
-export function ConversationView({
+/** Turn navigator label source: the user's prompt, else the assistant answer. */
+function turnNavPreviewText(message: ConversationMessage | undefined): string {
+  if (!message) {
+    return "";
+  }
+  if (message.role === "user") {
+    return String((message as { content?: string }).content ?? "");
+  }
+  return assistantFinalAnswerText(message);
+}
+
+type ConversationUserInlineEditorProps = {
+  lang: "zh" | "en";
+  value: string;
+  onValueChange: (value: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+  disabled: boolean;
+  pending: boolean;
+  submitLabel: string;
+  cancelLabel: string;
+  ariaLabel: string;
+  error: string;
+  attachments: ConversationAttachment[];
+  references: SessionReferenceAttachment[];
+  inputRef: React.RefObject<HTMLTextAreaElement | null>;
+};
+
+function inlineEditorAttachmentLabel(attachment: ConversationAttachment): string {
+  return String(attachment.filename || attachment.artifactId || "").trim();
+}
+
+function inlineEditorReferenceLabel(reference: SessionReferenceAttachment): string {
+  return String(
+    reference.title
+    || reference.filename
+    || (reference.quote || "").trim().slice(0, 80)
+    || reference.kind
+    || "",
+  ).trim();
+}
+
+/**
+ * ZCode-style inline edit (packages/ui v4 ConversationRowView): the edited user
+ * row swaps its content body for this editor in place. Text lives in the shared
+ * composer draft so submit/cancel ride the existing edit-resubmit pipeline;
+ * original attachments/references render as read-only chips (the edit-resubmit
+ * pipeline carries the original attachment artifacts over server-side).
+ */
+function ConversationUserInlineEditor({
+  lang,
+  value,
+  onValueChange,
+  onSubmit,
+  onCancel,
+  disabled,
+  pending,
+  submitLabel,
+  cancelLabel,
+  ariaLabel,
+  error,
+  attachments,
+  references,
+  inputRef,
+}: ConversationUserInlineEditorProps) {
+  // Auto-height within the max-height clamp: grow with the draft, scroll
+  // internally once the cap is hit. Re-runs per value change.
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (!el) {
+      return;
+    }
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [inputRef, value]);
+  const canSubmit = !disabled && !pending && Boolean(value.trim());
+  return (
+    <div
+      className={styles.turnInlineEditor}
+      data-conversation-inline-edit="1"
+    >
+      {attachments.length ? (
+        <div
+          className={styles.turnInlineEditorChipRow}
+          aria-label={lang === "zh" ? "原消息附件（保留）" : "Original attachments (kept)"}
+          data-inline-edit-attachments={String(attachments.length)}
+        >
+          {attachments.map((attachment, index) => {
+            const label = inlineEditorAttachmentLabel(attachment);
+            const thumbUrl = attachment.imageUrl || attachment.url;
+            const isImage = thumbUrl
+              && (String(attachment.contentType || "").startsWith("image/") || attachment.kind === "user_image");
+            return (
+              <span
+                key={`${attachment.artifactId}-${index}`}
+                className={styles.turnInlineEditorChip}
+                title={label}
+              >
+                {isImage ? (
+                  <img className={styles.turnInlineEditorChipThumb} src={thumbUrl} alt="" />
+                ) : (
+                  <FileText className={styles.turnInlineEditorChipIcon} aria-hidden="true" />
+                )}
+                <span className={styles.turnInlineEditorChipName}>{label}</span>
+              </span>
+            );
+          })}
+        </div>
+      ) : null}
+      {references.length ? (
+        <div
+          className={styles.turnInlineEditorChipRow}
+          aria-label={lang === "zh" ? "原消息引用（保留）" : "Original references (kept)"}
+          data-inline-edit-references={String(references.length)}
+        >
+          {references.map((reference, index) => {
+            const label = inlineEditorReferenceLabel(reference);
+            return (
+              <span
+                key={`${reference.referenceId || reference.title || ""}-${index}`}
+                className={styles.turnInlineEditorChip}
+                title={label}
+              >
+                <MessageSquareText className={styles.turnInlineEditorChipIcon} aria-hidden="true" />
+                <span className={styles.turnInlineEditorChipName}>{label}</span>
+              </span>
+            );
+          })}
+        </div>
+      ) : null}
+      <VNativeTextarea
+        ref={inputRef}
+        className={styles.turnInlineEditorInput}
+        value={value}
+        disabled={disabled || pending}
+        aria-label={ariaLabel}
+        data-conversation-inline-edit-input="1"
+        onChange={(event) => onValueChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            onCancel();
+            return;
+          }
+          if (shouldSubmitComposerOnKeydown({
+            key: event.key,
+            shiftKey: event.shiftKey,
+            ctrlKey: event.ctrlKey,
+            metaKey: event.metaKey,
+            altKey: event.altKey,
+            isComposing: event.nativeEvent.isComposing,
+          })) {
+            event.preventDefault();
+            if (canSubmit) {
+              onSubmit();
+            }
+          }
+        }}
+      />
+      {error ? <p className={styles.composerError} role="alert">{error}</p> : null}
+      <div className={styles.turnInlineEditorActions}>
+        <VButton
+          type="button"
+          onClick={onCancel}
+          isDisabled={pending}
+        >
+          {cancelLabel}
+        </VButton>
+        <VButton
+          type="button"
+          className={styles.composerEditSubmitButton}
+          onClick={onSubmit}
+          isDisabled={!canSubmit}
+          icon={pending
+            ? <LoaderCircle className={styles.statusSpinner} size={14} aria-hidden="true" />
+            : <RefreshCw size={14} aria-hidden="true" />}
+        >
+          {submitLabel}
+        </VButton>
+      </div>
+    </div>
+  );
+}
+
+// Memo gate: with stable prop references from the route (memoized conversation
+// model + composer bridge) unrelated parent re-renders stop here. Streaming
+// frames still re-render this component because the active-turn message prop
+// changes per committed frame.
+export const ConversationView = React.memo(function ConversationView({
   sessionId,
   title,
   phase,
@@ -563,6 +929,8 @@ export function ConversationView({
   onComposerChange,
   onAddComposerAttachments,
   onRemoveComposerAttachment,
+  onRetryComposerAttachment,
+  onRetryComposerAttachmentUploads,
   onAddComposerReference,
   onRemoveComposerReference,
   onEditUserMessage,
@@ -596,16 +964,30 @@ export function ConversationView({
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const timelineContentRef = useRef<HTMLDivElement | null>(null);
   const historyScrollAnchorRef = useRef<TimelineScrollRowKeyAnchor | null>(null);
+  /** Active prepend anchor while correction frames converge (see layout effect below). */
+  const historyAnchorCorrectingRef = useRef<{
+    anchor: TimelineScrollRowKeyAnchor;
+    /** Message count at capture; correction starts once the prepend commits. */
+    startLength: number;
+    attempts: number;
+    fallbackDone: boolean;
+  } | null>(null);
   /** Ensures a pending tool approval mounts under at most one tool activity per render. */
   const toolApprovalConsumedRef = useRef(false);
   toolApprovalConsumedRef.current = false;
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const inlineEditInputRef = useRef<HTMLTextAreaElement | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const initializedSessionRef = useRef("");
   const pinnedLatestUserMessageIdRef = useRef("");
   const atBottomRef = useRef(true);
   const followLatestRef = useRef(true);
   const lastTimelineScrollTopRef = useRef(0);
+  const userScrollIntentRef = useRef<TimelineUserScrollIntent>("none");
+  const userScrollIntentAtRef = useRef(0);
+  const ignoreNextProgrammaticFollowRef = useRef(false);
+  const lastTimelineContentWidthRef = useRef(0);
+  const contentWidthChangingUntilRef = useRef(0);
   const streamingScrollFrameRef = useRef<number | null>(null);
   const autoScrollToLatestRef = useRef(autoScrollToLatest);
   autoScrollToLatestRef.current = autoScrollToLatest;
@@ -619,28 +1001,177 @@ export function ConversationView({
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [previewImage, setPreviewImage] = useState<ConversationImagePreviewRequest | null>(null);
   const [composerDragActive, setComposerDragActive] = useState(false);
-  const [visibleMessageLimit, setVisibleMessageLimit] = useState(INITIAL_VISIBLE_MESSAGE_COUNT);
-  const [timelineVirtualMetrics, setTimelineVirtualMetrics] = useState({
-    scrollTop: 0,
-    viewportHeight: 720,
-  });
-  /** D2+: measured row heights by conversation row key. */
-  const timelineRowHeightCacheRef = useRef<Map<string, number>>(new Map());
-  const timelineRowResizeObserversRef = useRef<Map<string, ResizeObserver>>(new Map());
-  const timelineRowNodesRef = useRef<Map<string, HTMLDivElement>>(new Map());
-  /** Stable per-row ref callbacks so React does not null→node thrash ResizeObservers each render. */
-  const timelineVirtualRowRefCallbacksRef = useRef<Map<string, (node: HTMLDivElement | null) => void>>(new Map());
-  const timelineHeightBumpFrameRef = useRef<number | null>(null);
   const streamingPaintMetricsRef = useRef({ streamingMessageCount: 0, renderedTextLength: 0 });
-  const [timelineRowHeightVersion, setTimelineRowHeightVersion] = useState(0);
   const [computerUseSessionResults, setComputerUseSessionResults] = useState<Record<string, ComputerUseResult>>({});
   const [computerUseSessionPending, setComputerUseSessionPending] = useState<Record<string, "confirm" | "cancel" | undefined>>({});
   const [copiedAnswerMessageId, setCopiedAnswerMessageId] = useState("");
   const copyAnswerFeedbackTimerRef = useRef<number | null>(null);
+  // In-chat SFT curation: server map + optimistic overlay for instant button
+  // feedback; a failed POST rolls the overlay entry back (ZCode like/dislike
+  // rollback pattern) and the 409 copy surfaces briefly on the button title.
+  const queryClient = useQueryClient();
+  const [curationOverrides, setCurationOverrides] = useState<Map<string, MessageCurationDecision>>(new Map());
+  const [curationFeedback, setCurationFeedback] = useState<{
+    messageId: string;
+    action: SessionMessageCurationAction;
+    message: string;
+  } | null>(null);
+  const curationFeedbackTimerRef = useRef<number | null>(null);
+  const messageCurationQuery = useQuery({
+    queryKey: queryKeys.sessionMessageCuration(sessionId),
+    queryFn: () => fetchSessionMessageCuration(sessionId),
+    enabled: Boolean(sessionId) && !companionMode,
+  });
+  const serverMessageCurationMap = useMemo(
+    () => buildMessageCurationMap(messageCurationQuery.data?.items ?? []),
+    [messageCurationQuery.data],
+  );
+  const messageCurationMap = useMemo(() => {
+    if (curationOverrides.size === 0) {
+      return serverMessageCurationMap;
+    }
+    return new Map([...serverMessageCurationMap, ...curationOverrides]);
+  }, [curationOverrides, serverMessageCurationMap]);
+
+  // A session switch must not inherit the previous session's optimistic writes.
+  useEffect(() => {
+    setCurationOverrides(new Map());
+    setCurationFeedback(null);
+  }, [sessionId]);
   /** Branch fork exit: dialog target message + copy scope (route executes the API call). */
   const [forkDialogMessage, setForkDialogMessage] = useState<ConversationMessage | null>(null);
   const [forkScope, setForkScope] = useState<ConversationForkScope>("visible_path");
   const [forkPending, setForkPending] = useState(false);
+  // Text-selection quote menu (zai-org/ZCode useTextSelection pattern,
+  // Apache-2.0): snapshot of the selected text plus a container-local anchor.
+  const timelineAreaRef = useRef<HTMLDivElement | null>(null);
+  const selectionQuoteDismissedTextRef = useRef<string | null>(null);
+  const selectionQuoteTextRef = useRef("");
+  const [selectionQuoteMenu, setSelectionQuoteMenu] = useState<{
+    text: string;
+    position: ConversationSelectionMenuPosition;
+    sourceMessageId: string;
+  } | null>(null);
+  // Selection quote lifecycle: document-level selectionchange + mouseup/keyup,
+  // rAF-coalesced. The menu opens only for a non-empty selection fully inside
+  // the timeline (never the composer), and closes on collapse, timeline
+  // scroll, outside mousedown, or Escape (Escape also arms a dismiss guard so
+  // keyup cannot immediately re-open the same selection).
+  useEffect(() => {
+    let frame: number | null = null;
+    const evaluateSelection = () => {
+      frame = null;
+      const timelineArea = timelineAreaRef.current;
+      const snapshot = extractConversationSelectionSnapshot(window.getSelection(), timelineRef.current);
+      if (!snapshot || !timelineArea) {
+        selectionQuoteDismissedTextRef.current = null;
+        selectionQuoteTextRef.current = "";
+        setSelectionQuoteMenu(null);
+        return;
+      }
+      selectionQuoteTextRef.current = snapshot.text;
+      if (selectionQuoteDismissedTextRef.current !== null) {
+        // Escape dismissed this selection; a genuinely different selection
+        // (new text) re-arms the menu, the same one stays dismissed.
+        if (snapshot.text === selectionQuoteDismissedTextRef.current) {
+          return;
+        }
+        selectionQuoteDismissedTextRef.current = null;
+      }
+      setSelectionQuoteMenu({
+        text: snapshot.text,
+        sourceMessageId: snapshot.sourceMessageId,
+        position: resolveSelectionQuoteMenuPosition(
+          snapshot.rect,
+          timelineArea.getBoundingClientRect(),
+        ),
+      });
+    };
+    const scheduleEvaluation = () => {
+      if (frame !== null) {
+        return;
+      }
+      frame = requestAnimationFrame(evaluateSelection);
+    };
+    const handleDocumentMouseDown = (event: MouseEvent) => {
+      // Mousedown inside the menu belongs to an action click, not a dismissal.
+      if (event.target instanceof Element && event.target.closest("[data-conversation-selection-menu]")) {
+        return;
+      }
+      selectionQuoteDismissedTextRef.current = null;
+      setSelectionQuoteMenu(null);
+    };
+    const handleDocumentKeydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        selectionQuoteDismissedTextRef.current = selectionQuoteTextRef.current;
+        setSelectionQuoteMenu(null);
+      }
+    };
+    const handleTimelineScroll = () => {
+      setSelectionQuoteMenu(null);
+    };
+    const timeline = timelineRef.current;
+    document.addEventListener("selectionchange", scheduleEvaluation);
+    document.addEventListener("mouseup", scheduleEvaluation);
+    document.addEventListener("keyup", scheduleEvaluation);
+    document.addEventListener("keydown", handleDocumentKeydown);
+    document.addEventListener("mousedown", handleDocumentMouseDown);
+    timeline?.addEventListener("scroll", handleTimelineScroll);
+    return () => {
+      if (frame !== null) {
+        cancelAnimationFrame(frame);
+      }
+      document.removeEventListener("selectionchange", scheduleEvaluation);
+      document.removeEventListener("mouseup", scheduleEvaluation);
+      document.removeEventListener("keyup", scheduleEvaluation);
+      document.removeEventListener("keydown", handleDocumentKeydown);
+      document.removeEventListener("mousedown", handleDocumentMouseDown);
+      timeline?.removeEventListener("scroll", handleTimelineScroll);
+    };
+  }, []);
+  const handleSelectionQuoteToComposer = useCallback(() => {
+    if (!selectionQuoteMenu) {
+      return;
+    }
+    onComposerChange(buildQuotedDraftText(composerValue, selectionQuoteMenu.text));
+    setSelectionQuoteMenu(null);
+    selectionQuoteDismissedTextRef.current = null;
+    // Park focus and the caret at the end of the appended quote.
+    requestAnimationFrame(() => {
+      const input = composerInputRef.current;
+      if (!input) {
+        return;
+      }
+      input.focus();
+      const end = input.value.length;
+      input.setSelectionRange(end, end);
+    });
+  }, [composerValue, onComposerChange, selectionQuoteMenu]);
+  const handleSelectionCopy = useCallback(() => {
+    if (!selectionQuoteMenu) {
+      return;
+    }
+    void copyTextToClipboard(selectionQuoteMenu.text);
+    setSelectionQuoteMenu(null);
+  }, [selectionQuoteMenu]);
+  /**
+   * Structured quote: attaches the selection as a `message` reference chip
+   * (contract: referenceId `message:{sourceMessageId}` + source session/
+   * message ids + quote + single-line title). Only offered when the selection
+   * anchor lives inside a message row.
+   */
+  const handleSelectionReferenceToComposer = useCallback(() => {
+    if (!selectionQuoteMenu?.sourceMessageId || !onAddComposerReference) {
+      return;
+    }
+    onAddComposerReference(buildMessageReferencePayload({
+      sourceSessionId: sessionId,
+      sourceMessageId: selectionQuoteMenu.sourceMessageId,
+      quote: selectionQuoteMenu.text,
+    }));
+    setSelectionQuoteMenu(null);
+    selectionQuoteDismissedTextRef.current = null;
+  }, [onAddComposerReference, selectionQuoteMenu, sessionId]);
   const resolvedActionMode = resolveComposerActionMode(composerActionMode);
   const composerPromptSuggestion = useComposerPromptSuggestion(
     {
@@ -693,7 +1224,6 @@ export function ConversationView({
   const userAvatarLabel = userAvatarSymbol(userAvatarPreset, userLabel);
   const {
     editModeActive: composerEditModeActive,
-    failureNote: composerEditFailureNote,
   } = resolveComposerEditMode({
     modeNotice: composerModeNotice,
     modeTargetPreview: composerModeTargetPreview,
@@ -1040,16 +1570,13 @@ export function ConversationView({
       && Boolean(assistantFinalAnswerText(message).trim())
     ));
   }, [displayMessages, turnError]);
-  const visibleMessageCount = resolveVisibleMessageCount({
-    displayMessageCount: displayMessages.length,
-    visibleLimit: visibleMessageLimit,
-  });
+  // Full-history virtualization renders every local message; the old client
+  // window (first 12 / +12 / soft cap 72) is gone, so there is no locally
+  // hidden history left — only the server earlier-load signal below.
+  const visibleMessageCount = displayMessages.length;
   const hiddenRenderedMessageCount = displayMessages.length - visibleMessageCount;
   const hiddenHistorySignalCount = hiddenRenderedMessageCount + (hasEarlierMessages ? 1 : 0);
-  const timelineMessages = useMemo(
-    () => displayMessages.slice(displayMessages.length - visibleMessageCount),
-    [displayMessages, visibleMessageCount],
-  );
+  const timelineMessages = displayMessages;
   const activeAgentMessageTimelineProjection = useMemo(
     () => projectAgentMessageTimelineMessages({ timelineMessages, activeTurnMessage, companionMode }),
     [activeTurnMessage, companionMode, timelineMessages],
@@ -1084,36 +1611,850 @@ export function ConversationView({
   const activeAgentMessages = activeAgentMessageTimelineProjection.agentMessages;
   const streamingTimelineMessages = activeAgentMessageTimelineProjection.streamingMessages;
   const activeTimelineRowIdentities = activeAgentMessageTimelineProjection.rowIdentities;
-  const timelineMeasuredHeights = useMemo(() => {
-    return activeTimelineRowIdentities.map((identity) => {
-      const measured = timelineRowHeightCacheRef.current.get(identity.rowKey);
-      return measured && measured > 0 ? measured : 0;
-    });
-  }, [activeTimelineRowIdentities, timelineRowHeightVersion]);
-  const timelineVirtualRange = useMemo(
-    () => resolveConversationVirtualRange({
-      itemCount: activeTimelineMessages.length,
-      scrollTop: timelineVirtualMetrics.scrollTop,
-      viewportHeight: timelineVirtualMetrics.viewportHeight,
-      followingLatest: followLatestRef.current,
-      heights: timelineMeasuredHeights,
-    }),
-    [
-      activeTimelineMessages.length,
-      timelineVirtualMetrics.scrollTop,
-      timelineVirtualMetrics.viewportHeight,
-      isAtBottom,
-      timelineMeasuredHeights,
-    ],
+  const getTimelineScrollElement = useCallback(() => timelineRef.current, []);
+  /**
+   * Live-tail partition (zai-org/ZCode ConversationTimeline pattern,
+   * Apache-2.0): the trailing run of in-flight turn rows renders OUTSIDE the
+   * virtualized history window, so per-frame tail growth never reslices the
+   * virtual range. A session executes one turn at a time, so this is normally
+   * a single row.
+   */
+  const timelineLiveTailStartIndex = useMemo(() => {
+    let index = activeTimelineMessages.length;
+    while (index > 0) {
+      const message = activeTimelineMessages[index - 1];
+      if (!assistantTurnIsStreaming(message) && !assistantTurnIsInFlight(message)) {
+        break;
+      }
+      index -= 1;
+    }
+    return index;
+  }, [activeTimelineMessages]);
+  const timelineHistoryMessages = useMemo(
+    () => activeTimelineMessages.slice(0, timelineLiveTailStartIndex),
+    [activeTimelineMessages, timelineLiveTailStartIndex],
   );
-  const virtualTimelineMessages = useMemo(
-    () => activeTimelineMessages.slice(timelineVirtualRange.start, timelineVirtualRange.end),
-    [activeTimelineMessages, timelineVirtualRange.end, timelineVirtualRange.start],
+  const timelineLiveTailMessages = useMemo(
+    () => activeTimelineMessages.slice(timelineLiveTailStartIndex),
+    [activeTimelineMessages, timelineLiveTailStartIndex],
   );
-  const virtualTimelineRowIdentities = useMemo(
-    () => activeTimelineRowIdentities.slice(timelineVirtualRange.start, timelineVirtualRange.end),
-    [activeTimelineRowIdentities, timelineVirtualRange.end, timelineVirtualRange.start],
+  const timelineHistoryRowKeys = useMemo(
+    () => activeTimelineRowIdentities.map((identity) => identity.rowKey),
+    [activeTimelineRowIdentities],
   );
+  // Turn navigation directory (minimap rail): one entry per conversation
+  // turn, derived from the same row identities the virtualizer keys on.
+  const timelineTurnNavEntries = useMemo(
+    () => buildConversationTurnNavDirectory(
+      activeTimelineRowIdentities.map((identity, index) => ({
+        rowKey: identity.rowKey,
+        previewText: turnNavPreviewText(activeTimelineMessages[index]),
+      })),
+      {
+        fallbackLabel: lang === "zh"
+          ? (turnNumber: number) => `第 ${turnNumber} 轮`
+          : (turnNumber: number) => `Turn ${turnNumber}`,
+      },
+    ),
+    [activeTimelineRowIdentities, activeTimelineMessages, lang],
+  );
+  // react-virtual keeps measured sizes in an item-size cache keyed by the
+  // stable row keys from getItemKey, so measured heights survive index shifts
+  // (prepend/load-earlier) without a hand-rolled cache.
+  const timelineVirtualizer = useVirtualizer({
+    count: timelineHistoryMessages.length,
+    getScrollElement: getTimelineScrollElement,
+    estimateSize: () => CONVERSATION_VIRTUAL_ROW_ESTIMATE_PX,
+    getItemKey: (index) => timelineHistoryRowKeys[index] ?? `timeline-row-${index}`,
+    overscan: TIMELINE_VIRTUAL_OVERSCAN,
+    gap: TIMELINE_VIRTUAL_ROW_GAP_PX,
+    scrollMargin: TIMELINE_VIRTUAL_SCROLL_MARGIN_PX,
+    initialRect: { width: TIMELINE_VIRTUAL_INITIAL_RECT.width, height: TIMELINE_VIRTUAL_INITIAL_RECT.height },
+    useAnimationFrameWithResizeObserver: true,
+  });
+  const measureTimelineVirtualRow = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (node) {
+        timelineVirtualizer.measureElement(node);
+      }
+    },
+    [timelineVirtualizer],
+  );
+  /**
+   * One render plan for both blocks: measured virtual rows inside the history
+   * host (virtualStartPx set) plus the in-flight live-tail rows after it
+   * (virtualStartPx null, static flow). The plan is rebuilt every render from
+   * the virtualizer snapshot so scroll/measure notifications stay live.
+   */
+  const timelineRowPlan: Array<{ index: number; virtualStartPx: number | null }> = [];
+  for (const virtualItem of timelineVirtualizer.getVirtualItems()) {
+    timelineRowPlan.push({ index: virtualItem.index, virtualStartPx: virtualItem.start });
+  }
+  for (let tailOffset = 0; tailOffset < timelineLiveTailMessages.length; tailOffset += 1) {
+    timelineRowPlan.push({ index: timelineLiveTailStartIndex + tailOffset, virtualStartPx: null });
+  }
+  // Minimap current-turn highlight: rebuilt every render like the row plan so
+  // scroll notifications stay live (virtual history + static live tail).
+  const timelineTurnNavCurrentIndex = resolveConversationTurnNavCurrentIndex({
+    entries: timelineTurnNavEntries,
+    historyRowCount: timelineLiveTailStartIndex,
+    historyTotalSize: timelineVirtualizer.getTotalSize(),
+    scrollOffset: timelineVirtualizer.scrollOffset ?? 0,
+    viewportHeight: timelineVirtualizer.scrollRect?.height ?? 0,
+    rowIndexAtOffset: (offset) => {
+      const item = timelineVirtualizer.getVirtualItemForOffset(offset);
+      return item ? item.index : null;
+    },
+  });
+
+  function renderTimelineRow(rowPlan: { index: number; virtualStartPx: number | null }) {
+              const index = rowPlan.index;
+              const message = activeTimelineMessages[index];
+              if (!message) {
+                return null;
+              }
+              const rowIdentity = activeTimelineRowIdentities[index];
+              const rowKey = rowIdentity?.rowKey ?? message.id;
+              return (
+              <div
+                key={rowKey}
+                ref={rowPlan.virtualStartPx === null ? undefined : measureTimelineVirtualRow}
+                {...(rowPlan.virtualStartPx === null
+                  ? {}
+                  : {
+                    "data-index": index,
+                    style: {
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${rowPlan.virtualStartPx}px)`,
+                    },
+                  })}
+                className={styles.timelineVirtualRow}
+                data-conversation-virtual-row={rowKey}
+                // Kept in sync with CONVERSATION_SELECTION_MESSAGE_ATTRIBUTE
+                // (selection-quote reference wiring is covered by its tests).
+                data-conversation-message-id={message.id}
+              >
+              <ConversationTurnRow
+                message={message}
+                previousMessage={activeTimelineMessages[index - 1]}
+                agentMessage={agentMessagesByMessageId.get(message.id)}
+                agentRenderState={agentRenderStatesByMessageId.get(message.id)}
+                previousAgentRenderState={
+                  activeTimelineMessages[index - 1]
+                    ? agentRenderStatesByMessageId.get(activeTimelineMessages[index - 1].id)
+                    : undefined
+                }
+                codexTranscriptCells={agentCodexSurfacesByMessageId.get(message.id)?.cells}
+                rowIdentity={rowIdentity}
+                defaultResponseExpanded={defaultExpandedResponseIds.has(message.id)}
+                latestUserMessageId={latestUserMessageId}
+                editingMessageId={editingMessageId}
+                editUserMessageLabel={editUserMessageLabel}
+                editUserMessageDisabled={editUserMessageDisabled}
+                composerPlaceholder={composerPlaceholder}
+                answerOnlyProcessMode={answerOnlyProcessMode}
+                showMentalSnapshots={showMentalSnapshots}
+                lang={lang}
+                assistantLabel={assistantLabel}
+                assistantAvatarImageUrl={assistantAvatarImageUrl}
+                assistantAvatarFallback={assistantAvatarFallback}
+                userLabel={userLabel}
+                userAvatarLabel={userAvatarLabel}
+                userAvatarImageUrl={userAvatarImageUrl}
+                operationLabels={operationLabels}
+                resolveTurnAvatar={resolveTurnAvatar}
+                onEditUserMessage={onEditUserMessage}
+                onRegenerateAssistantMessage={onRegenerateAssistantMessage}
+                onSwitchMessageVersion={onSwitchMessageVersion}
+                branchVersionSwitchDisabled={branchVersionSwitchDisabled}
+                regenerableAssistantMessageId={regenerableAssistantMessageId}
+                regenerateDisabled={regenerateDisabled}
+                regeneratePending={regeneratePending}
+                sectionExpansionForMessage={sectionExpansion[message.id] ?? EMPTY_SECTION_EXPANSION}
+                computerUseStateForMessage={buildComputerUseStateForMessage(
+                  message,
+                  computerUseSessionResults,
+                  computerUseSessionPending,
+                )}
+                imageArtifactUrlsBeforeMessage={imageArtifactUrlsBeforeMessage.get(message.id)}
+                renderTurn={() => {
+            const rowIdentity = activeTimelineRowIdentities[index];
+            // The global companion typing affordance is the entire in-flight
+            // shell; do not leave an empty speaker/avatar row beside it.
+            if (companionTypingMessage?.id === message.id) {
+              return null;
+            }
+            if (isCliAgentLifecycleMessage(message)) {
+              const detail = cliAgentLifecycleDetail(message);
+              return (
+                <article
+                  key={rowIdentity?.rowKey ?? message.id}
+                  className={styles.cliAgentLifecycleTurn}
+                  data-conversation-row-key={rowIdentity?.rowKey ?? message.id}
+                >
+                  <span className={styles.cliAgentLifecycleIcon} aria-hidden="true">
+                    <TerminalSquare size={14} />
+                  </span>
+                  <span className={styles.cliAgentLifecycleText}>
+                    {cliAgentLifecycleLabel(message, lang)}
+                  </span>
+                  {detail ? <code className={styles.cliAgentLifecycleMeta}>{detail}</code> : null}
+                  {message.timestamp ? (
+                    <span className={styles.cliAgentLifecycleTime}>{formatTimestamp(message.timestamp)}</span>
+                  ) : null}
+                </article>
+              );
+            }
+            if (isSessionRecoveryResumedMessage(message)) {
+              const detail = sessionRecoveryResumedDetail(message, lang);
+              return (
+                <article
+                  key={rowIdentity?.rowKey ?? message.id}
+                  className={styles.cliAgentLifecycleTurn}
+                  data-conversation-row-key={rowIdentity?.rowKey ?? message.id}
+                >
+                  <span className={styles.cliAgentLifecycleIcon} aria-hidden="true">
+                    <RefreshCw size={14} />
+                  </span>
+                  <span className={styles.cliAgentLifecycleText}>
+                    {sessionRecoveryResumedLabel(message, lang)}
+                  </span>
+                  {detail ? <code className={styles.cliAgentLifecycleMeta}>{detail}</code> : null}
+                  {message.timestamp ? (
+                    <span className={styles.cliAgentLifecycleTime}>{formatTimestamp(message.timestamp)}</span>
+                  ) : null}
+                </article>
+              );
+            }
+            const agentMessage = agentMessagesByMessageId.get(message.id);
+            if (!agentMessage) {
+              return null;
+            }
+            const baseOperationGroups = agentOperationGroupsByMessageId.get(agentMessage.id)
+              ?? buildAgentMessageOperationGroups(agentMessage, operationLabels);
+            const operationGroups = operationGroupsWithFeedbackStatusPlaceholder(baseOperationGroups, message, lang);
+            const agentRenderState = agentRenderStatesByMessageId.get(message.id) ?? buildAgentMessageRenderState(agentMessage);
+            const agentSections = agentRenderState.sectionState;
+            const processSections = agentRenderState.processSections;
+            const responseText = agentSections.answerText;
+            const noFinalAnswerStatusText = isNoFinalAnswerStatusContent(responseText)
+              ? responseText.trim()
+              : "";
+            const userContentText = agentSections.userText;
+            const hasActiveProcess = operationGroups.timeline.some((operation) => isRunningOperationStatus(operation.status));
+            // Defect ⑦b: the active-turn shell gate must not count decorative
+            // streaming operations (thought/mental/status rows) as active
+            // process — a mid-stream reasoning flush would otherwise retire the
+            // shell and hide the responding stage. Only running tools suppress.
+            const hasRunningToolOperation = operationGroups.tools.some((operation) => isRunningOperationStatus(operation.status));
+            const hasFeedbackTimeline = agentSections.hasFeedbackTimeline;
+            const showResponseBlock = shouldShowAgentResponseBlock(message, agentSections, hasFeedbackTimeline);
+            const turnErrorMessage = isTurnErrorMessage(message);
+            const imageArtifact = imageArtifactForMessage(message);
+            const agentInboxMessage = isAgentInboxMessage(message);
+            const groupTranscriptMessage = isGroupRoomTranscriptMessage(message);
+            const previousMessage = activeTimelineMessages[index - 1];
+            const previousAgentRenderState = previousMessage
+              ? agentRenderStatesByMessageId.get(previousMessage.id)
+              : undefined;
+            const compactTurnHeader = shouldCompactConversationTurnHeader(
+              previousMessage,
+              message,
+              previousAgentRenderState?.sectionState,
+              agentSections,
+            );
+            const codexTranscriptSurface = agentCodexSurfacesByMessageId.get(agentMessage.id);
+            const codexTranscriptCells = codexTranscriptSurface?.cells ?? [];
+            // Phase C: display plan picks package_cells vs legacy; single track for final answer.
+            const displayPlanSeed = resolveAssistantDisplayPlan({
+              message,
+              surface: codexTranscriptSurface,
+            });
+            const shouldRenderLegacyTurnError = Boolean(
+              turnErrorMessage && !displayPlanSeed.suppressProjectedError,
+            );
+            // Failure-turn presentation: human-readable errorType chip and a
+            // budget-directed recovery action instead of raw codes.
+            const turnErrorTypeLabelKey = shouldRenderLegacyTurnError
+              ? resolveTurnErrorTypeLabelKey(resolveConversationTurnErrorType(message))
+              : "";
+            const turnErrorRecoveryAction = shouldRenderLegacyTurnError
+              ? resolveConversationTurnErrorRecoveryAction(message)
+              : "";
+            const timelineOptions = {
+              lang,
+              // The assistant body always comes from the canonical cell surface.
+              // Do not manufacture a second answer row in the process timeline.
+              includeAssistantText: false,
+            };
+            const agentMessageTimelineItems = buildAgentMessageTimelineItems(
+              agentMessage,
+              operationGroups.timeline,
+              timelineOptions,
+            );
+            const hasAgentMessageTimeline =
+              message.role === "assistant"
+              && hasFeedbackTimeline
+              && !turnErrorMessage
+              && !agentInboxMessage
+              && !groupTranscriptMessage
+              && agentMessageTimelineItems.length > 0;
+            const displayPlan = resolveAssistantDisplayPlan({
+              message,
+              surface: codexTranscriptSurface,
+            });
+            const timelineRendersAssistantText = false;
+            const showUserContent = agentSections.hasUserContent;
+            const steerGuidanceMessage = isSteerGuidanceMessage(message);
+            const userAuthoredMessage = message.role === "user" && !agentInboxMessage;
+            const isStreamingStatusPlaceholder = assistantTurnIsStreaming(message)
+              && showResponseBlock
+              && answerOnlyProcessMode
+              && isStreamingStatusPlaceholderContent(responseText);
+            const isResponseStreaming = assistantTurnIsStreaming(message) && showResponseBlock && !isStreamingStatusPlaceholder;
+            const copyableAnswerText = message.role === "assistant"
+              && !turnErrorMessage
+              && !assistantTurnIsStreaming(message)
+              ? responseText.trim()
+              : "";
+            // SFT curation actions share the copy affordance's gate and stay
+            // out of companion/inbox/group surfaces by contract.
+            const messageCurationGate = Boolean(copyableAnswerText)
+              && !companionMode
+              && !agentInboxMessage
+              && !groupTranscriptMessage;
+            const messageCurationDecision = messageCurationGate
+              ? resolveMessageCurationState(messageCurationMap, message.id)
+              : null;
+            const canRegenerateAnswer = message.role === "assistant"
+              && !turnErrorMessage
+              && !assistantTurnIsStreaming(message)
+              && Boolean(onRegenerateAssistantMessage)
+              // Any settled answer on a branch can regenerate; messages without
+              // a journal node id keep the legacy latest-only fallback.
+              && (Boolean(message.nodeId) || message.id === regenerableAssistantMessageId);
+            // A settled failed turn offers in-place recovery: retry reruns the
+            // turn's original user message through the same branch-aware
+            // regenerate pipeline as the regenerate action. Without a journal
+            // node id only the legacy latest-turn fallback remains, so the
+            // entry is hidden for older untargetable failures.
+            const canRetryFailedTurnMessage = message.role === "assistant"
+              && turnErrorMessage
+              && !assistantTurnIsStreaming(message)
+              && !agentInboxMessage
+              && !groupTranscriptMessage
+              && Boolean(onRegenerateAssistantMessage)
+              && (Boolean(message.nodeId) || message.id === regenerableAssistantMessageId);
+            const branchInfo = message.branch;
+            const siblingNodeIds = Array.isArray(branchInfo?.siblingNodeIds)
+              ? branchInfo.siblingNodeIds.filter((value): value is string => Boolean(value))
+              : [];
+            const siblingCount = Math.max(
+              Number(branchInfo?.siblingCount ?? 0) || 0,
+              siblingNodeIds.length,
+            );
+            const siblingIndex = Number(branchInfo?.siblingIndex ?? 0) || 0;
+            const currentNodeId = String(message.nodeId || "").trim();
+            // Fork exit: any settled journal node (user or assistant) can seed a
+            // new session; companion/private/group surfaces stay out of scope.
+            const canForkSessionFromMessage = Boolean(onForkSessionFromNode)
+              && !companionMode
+              && !agentInboxMessage
+              && !groupTranscriptMessage
+              && !assistantTurnIsStreaming(message)
+              && Boolean(currentNodeId);
+            const showVersionSwitcher = Boolean(onSwitchMessageVersion)
+              && siblingCount > 1
+              && siblingNodeIds.length > 1
+              && siblingIndex >= 1
+              && siblingIndex <= siblingNodeIds.length
+              && Boolean(currentNodeId)
+              && siblingNodeIds.includes(currentNodeId);
+            const versionSwitchDisabled = Boolean(branchVersionSwitchDisabled);
+            const previousSiblingNodeId = siblingIndex > 1 ? siblingNodeIds[siblingIndex - 2] : "";
+            const nextSiblingNodeId = siblingIndex < siblingNodeIds.length
+              ? siblingNodeIds[siblingIndex]
+              : "";
+            const showResponseSpinner = isResponseStreaming && !hasActiveProcess;
+            const defaultResponseExpanded = assistantTurnIsStreaming(message) || defaultExpandedResponseIds.has(message.id);
+            const responseExpanded = getExpansionState(message.id, "response", defaultResponseExpanded);
+            const responseSegments = showResponseBlock && !isStreamingStatusPlaceholder && !isResponseStreaming
+              ? getCachedResponseSegments(responseText)
+              : [];
+            const codexTranscriptNode = (
+              displayPlan.shouldRenderCodexSurface
+              && !agentInboxMessage
+              && !groupTranscriptMessage
+            )
+              ? renderCodexTranscriptCells(message, codexTranscriptCells, rowIdentity, companionMode)
+              : null;
+            // Todo checklist card: client-derived from the latest journaled
+            // todo_write call in this turn (no extra SSE event). Companion and
+            // private-message surfaces stay minimal by contract.
+            const todoChecklistSnapshot = message.role === "assistant"
+              && !companionMode
+              && !agentInboxMessage
+              && !groupTranscriptMessage
+              ? deriveLatestTodoChecklist(message.turnItems)
+              : undefined;
+            const todoChecklistNode = todoChecklistSnapshot ? (
+              <ConversationTodoChecklist
+                snapshot={todoChecklistSnapshot}
+                lang={lang}
+                turnSettled={hasTerminalCanonicalTurnOutcome(message)}
+              />
+            ) : null;
+            // Only force the answer body open while tokens are still streaming.
+            // Tying this to defaultResponseExpanded made the last few answers
+            // impossible to collapse (toggle flipped aria state but body stayed).
+            const shouldForceResponseBodyVisible = isResponseStreaming;
+            const isEditingMessage = userAuthoredMessage && message.id === editingMessageId;
+            const editingUserMessage = isEditingMessage && message.role === "user" ? message : null;
+            const agentInboxExpanded = getExpansionState(message.id, "agentInbox", false);
+            const agentInboxPreview = agentInboxMessage ? compactPreview(agentInboxSummary(message), 140) : "";
+            const researchOrgChips = researchOrgMessageChips(message);
+            const contextNode = !companionMode && (agentRenderState.contextSections?.length ?? 0) > 0 ? (
+              <React.Suspense fallback={null}>
+                <AgentContextSectionsView sections={agentRenderState.contextSections} lang={lang} />
+              </React.Suspense>
+            ) : null;
+            const turnClassName = [
+              // Hover-reveal anchor: per-message action buttons fade in only
+              // while the pointer (or keyboard focus) is on this row.
+              "group",
+              groupTranscriptMessage
+                ? styles.groupTranscriptTurn
+                : message.role === "assistant"
+                  ? styles.assistantTurn
+                  : agentInboxMessage
+                  ? styles.agentInboxTurn
+                  : styles.userTurn,
+              turnErrorMessage ? styles.turnErrorTurn : "",
+              compactTurnHeader ? styles.assistantTurnContinuation : "",
+              isEditingMessage ? styles.turnEditing : "",
+            ].filter(Boolean).join(" ");
+            const speakerLabel = groupTranscriptMessage
+              ? groupRoomTranscriptLabel(message)
+              : message.role === "assistant"
+                ? assistantLabel
+                : agentInboxMessage
+                  ? agentInboxSourceLabel(message)
+                  : userLabel;
+            const editDisabled = Boolean(editUserMessageDisabled);
+            const processTone = operationCollectionTone(operationGroups.timeline);
+            const processDefaultExpanded = processTone === "running";
+            const renderAgentProcessDetails = (defaultExpandedOverride?: boolean) => (
+              <>
+                {renderOperationGroup(
+                  message.id,
+                  "thought",
+                  operationGroups.thoughts,
+                  defaultExpandedOverride ?? assistantTurnIsStreaming(message),
+                )}
+                {renderAgentMentalPanel(
+                  message.id,
+                  latestAgentMentalPart(processSections),
+                  defaultExpandedOverride,
+                  assistantTurnIsStreaming(message) && operationGroups.tools.length === 0 && !agentSections.hasResponseBlock,
+                )}
+                {renderOperationGroup(
+                  message.id,
+                  "tools",
+                  operationGroups.tools,
+                  defaultExpandedOverride ?? shouldExpandToolGroupByDefault(message, operationGroups.tools),
+                )}
+              </>
+            );
+            const renderProcessDetails = () => {
+              if (hasAgentMessageTimeline) {
+                return renderAgentMessageTimeline(message, agentMessageTimelineItems, rowIdentity, agentRenderState.processSectionIds);
+              }
+              if (hasFeedbackTimeline) {
+                return renderFeedbackTimelineDetails(message.id, operationGroups.timeline);
+              }
+              return renderAgentProcessDetails(true);
+            };
+            // One assistant turn has one display source: its local turnItems cell surface.
+            const responseSectionNode = null;
+            // The fallback process rail is only useful while a future producer has
+            // not emitted a canonical cell yet. It never receives assistant text.
+            const processNode = companionMode || displayPlan.suppressProjectedProcess
+              ? null
+              : displayPlan.renderMode === "turn_items"
+                ? null
+                : hasAgentMessageTimeline
+                  ? renderAgentMessageTimeline(message, agentMessageTimelineItems, rowIdentity, agentRenderState.processSectionIds)
+                  : hasFeedbackTimeline
+                    ? renderFeedbackTimelineGroup(
+                      message.id,
+                      operationGroups.timeline,
+                      false,
+                      agentRenderState.processSectionIds,
+                    )
+                    : null;
+            const showCompactActiveTurnPlaceholder = shouldRenderCompactActiveTurnPlaceholder(message, {
+              showResponseBlock,
+              hasFeedbackTimeline,
+              hasActiveProcess: hasRunningToolOperation,
+              turnErrorMessage,
+              // Avoid "状态" placeholder stacking above an already-visible codex process trail.
+              hasCodexSurface: Boolean(displayPlan.shouldRenderCodexSurface),
+            });
+            // Prefer compact active-turn note over projected turnStatus for in-flight shells.
+            const turnStatusNode = !companionMode && !showCompactActiveTurnPlaceholder
+              && !displayPlan.suppressProjectedTurnStatus
+              && noFinalAnswerStatusText ? (
+              <div className={styles.turnStatusNote} role="status" aria-live="polite">
+                <span className={styles.turnStatusLabel}>{lang === "zh" ? "状态" : "Status"}</span>
+                <span className={styles.turnStatusText}>{noFinalAnswerStatusText}</span>
+              </div>
+            ) : null;
+            const compactActiveTurnPlaceholderNode = !companionMode && showCompactActiveTurnPlaceholder ? (
+              <ConversationActiveTurnStatusNote
+                message={message}
+                lang={lang}
+                statusLabel={lang === "zh" ? "状态" : "Status"}
+              />
+            ) : null;
+            // Turn-tail work header: settled assistant turns only (companion,
+            // inbox and group-transcript shells stay minimal by contract).
+            const turnWorkSummary = message.role === "assistant"
+              && !companionMode
+              && !agentInboxMessage
+              && !groupTranscriptMessage
+              && !assistantTurnIsStreaming(message)
+              ? resolveConversationTurnWorkSummary(message)
+              : null;
+            const turnWorkHeaderNode = turnWorkSummary ? (
+              <ConversationTurnWorkHeader summary={turnWorkSummary} lang={lang} />
+            ) : null;
+            return (
+              <AgentMessageTurnView
+                key={rowIdentity.rowKey}
+                rowKey={rowIdentity.rowKey}
+                messageKey={rowIdentity.messageKey}
+                agentMessageId={agentMessage.id}
+                sectionCount={agentSections.sectionCount}
+                sectionKinds={agentRenderState.sectionKinds}
+                className={turnClassName}
+                compactHeader={false}
+                avatar={
+                  <ConversationTurnAvatarContent
+                    content={resolveMessageTurnAvatar(message, {
+                      resolveTurnAvatar,
+                      assistantAvatarImageUrl,
+                      assistantAvatarFallback,
+                      assistantLabel,
+                      userAvatarImageUrl,
+                      userAvatarLabel,
+                      agentInboxMessage,
+                      groupTranscriptMessage,
+                    })}
+                  />
+                }
+                speakerLabel={speakerLabel}
+                identityAccessory={
+                  isEditingMessage
+                    ? <span className={styles.turnEditBadge}>{t("editMessage")}</span>
+                    : steerGuidanceMessage
+                      ? <span className={styles.turnEditBadge}>{resolvedSafeGuidanceLabel}</span>
+                      : null
+                }
+                metaActions={
+                  <>
+                    {message.timestamp ? <span>{formatTimestamp(message.timestamp)}</span> : null}
+                    <span
+                      className={isEditingMessage ? styles.turnHoverActionsVisible : styles.turnHoverActions}
+                      data-conversation-hover-actions="1"
+                    >
+                    {showVersionSwitcher ? (
+                      <VActionGroup
+                        ariaLabel={t("branchVersionLabel")}
+                        className={styles.turnVersionSwitcher}
+                      >
+                        <VButton
+                          type="button"
+                          className={styles.turnIconButton}
+                          onClick={() => onSwitchMessageVersion?.(message, previousSiblingNodeId)}
+                          isDisabled={versionSwitchDisabled || !previousSiblingNodeId}
+                          title={t("switchBranchVersionPrevious")}
+                          aria-label={t("switchBranchVersionPrevious")}
+                          isIconOnly
+                          icon={<ChevronLeft size={14}/>} />
+                        <span className={styles.turnVersionLabel} aria-live="polite">
+                          {`${siblingIndex}/${siblingCount}`}
+                        </span>
+                        <VButton
+                          type="button"
+                          className={styles.turnIconButton}
+                          onClick={() => onSwitchMessageVersion?.(message, nextSiblingNodeId)}
+                          isDisabled={versionSwitchDisabled || !nextSiblingNodeId}
+                          title={t("switchBranchVersionNext")}
+                          aria-label={t("switchBranchVersionNext")}
+                          isIconOnly
+                          icon={<ChevronRight size={14}/>} />
+                      </VActionGroup>
+                    ) : null}
+                    {copyableAnswerText ? (
+                      <VButton
+                        type="button"
+                        className={styles.turnIconButton}
+                        onClick={() => handleCopyAnswer(message.id, copyableAnswerText)}
+                        title={t("copyAnswer")}
+                        aria-label={t("copyAnswer")}
+                        isIconOnly
+                        icon={copiedAnswerMessageId === message.id ? <Check size={14}/> : <Copy size={14}/>} />
+                    ) : null}
+                    {messageCurationGate ? (
+                      <>
+                        <VButton
+                          type="button"
+                          className={
+                            messageCurationDecision === "include"
+                              ? `${styles.turnIconButton} ${styles.turnIconButtonActive}`
+                              : styles.turnIconButton
+                          }
+                          aria-pressed={messageCurationDecision === "include"}
+                          onClick={() => handleCurateMessage(message.id, "include")}
+                          title={
+                            curationFeedback?.messageId === message.id && curationFeedback.action === "include" && curationFeedback.message
+                              ? curationFeedback.message
+                              : t("addToDataset")
+                          }
+                          aria-label={t("addToDataset")}
+                          isIconOnly
+                          icon={<ListPlus size={14}/>} />
+                        <VButton
+                          type="button"
+                          className={
+                            messageCurationDecision === "exclude"
+                              ? `${styles.turnIconButton} ${styles.turnIconButtonActive}`
+                              : styles.turnIconButton
+                          }
+                          aria-pressed={messageCurationDecision === "exclude"}
+                          onClick={() => handleCurateMessage(message.id, "exclude")}
+                          title={
+                            curationFeedback?.messageId === message.id && curationFeedback.action === "exclude" && curationFeedback.message
+                              ? curationFeedback.message
+                              : t("excludeFromDataset")
+                          }
+                          aria-label={t("excludeFromDataset")}
+                          isIconOnly
+                          icon={<CircleMinus size={14}/>} />
+                      </>
+                    ) : null}
+                    {canForkSessionFromMessage ? (
+                      <VButton
+                        type="button"
+                        className={styles.turnIconButton}
+                        onClick={() => {
+                          setForkScope("visible_path");
+                          setForkDialogMessage(message);
+                        }}
+                        isDisabled={versionSwitchDisabled}
+                        title={t("forkSessionFromMessage")}
+                        aria-label={t("forkSessionFromMessage")}
+                        isIconOnly
+                        icon={<GitFork size={14}/>} />
+                    ) : null}
+                    {canRegenerateAnswer ? (
+                      <VButton
+                        type="button"
+                        className={styles.turnIconButton}
+                        onClick={() => onRegenerateAssistantMessage?.(message)}
+                        isDisabled={regenerateDisabled}
+                        isPending={regeneratePending}
+                        title={regeneratePending ? t("regeneratePending") : t("regenerateAnswer")}
+                        aria-label={regeneratePending ? t("regeneratePending") : t("regenerateAnswer")}
+                        isIconOnly
+                        icon={<RefreshCw size={14}/>} />
+                    ) : null}
+                    {userAuthoredMessage && !steerGuidanceMessage && onEditUserMessage ? (
+                      <VButton
+                        type="button"
+                        className={
+                          isEditingMessage
+                            ? `${styles.turnIconButton} ${styles.turnIconButtonActive}`
+                            : styles.turnIconButton
+                        }
+                        onClick={() => onEditUserMessage(message)}
+                        isDisabled={editDisabled}
+                        aria-pressed={isEditingMessage}
+                        title={editDisabled ? composerPlaceholder : editUserMessageLabel ?? t("editMessage")}
+                        aria-label={editUserMessageLabel ?? t("editMessage")}
+                        isIconOnly
+                        icon={<Pencil size={14}/>} />
+                    ) : null}
+                    </span>
+                  </>
+                }
+              >
+
+                  <span
+                    hidden
+                    data-codex-transcript-cell-count={codexTranscriptCells.length}
+                    data-codex-transcript-surface-mode={codexTranscriptSurface?.mode ?? "empty"}
+                    data-codex-transcript-native-primary={displayPlan.nativePrimary ? "true" : "false"}
+                    data-assistant-render-mode={displayPlan.renderMode}
+                    data-assistant-has-turn-item-package={displayPlan.hasTurnItemPackage ? "true" : "false"}
+                    data-codex-transcript-projection-gap-reason={codexTranscriptSurface?.projectionGap?.reason ?? ""}
+                    data-codex-transcript-projection-gap-projected-cell-count={codexTranscriptSurface?.projectionGap?.projectedCellCount ?? 0}
+                  />
+                  {agentInboxMessage ? (
+                    <section className={styles.agentInboxSection}>
+                      {researchOrgChips.length > 0 ? (
+                        <div className={styles.researchOrgChipRow} aria-label={lang === "zh" ? "科研组织消息标签" : "Research organization message labels"}>
+                          {researchOrgChips.map((chip) => (
+                            <span
+                              key={chip.key}
+                              className={`${styles.researchOrgChip} ${styles[`researchOrgChip_${chip.tone}`]}`}
+                            >
+                              {chip.label}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                      <VButton
+                        type="button"
+                        className={styles.agentInboxToggle}
+                        aria-expanded={agentInboxExpanded}
+                        onClick={() => toggleSection(message.id, "agentInbox", false)}
+                        title={agentInboxExpanded ? (lang === "zh" ? "折叠私信内容" : "Collapse private message") : (lang === "zh" ? "展开私信内容" : "Expand private message")}
+                        icon={agentInboxExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}><span>{lang === "zh" ? "私信内容" : "Private message"}</span>
+                        {agentInboxPreview ? <span className={styles.agentInboxPreview}>{agentInboxPreview}</span> : null}</VButton>
+                      {agentInboxExpanded ? (
+                        <div className={styles.agentInboxMessageBody}>
+                          {renderResponseText(assistantFinalAnswerText(message))}
+                        </div>
+                      ) : null}
+                    </section>
+                  ) : editingUserMessage ? (
+                    <ConversationUserInlineEditor
+                      lang={lang}
+                      value={composerValue}
+                      onValueChange={onComposerChange}
+                      onSubmit={handleSendAndFollowLatest}
+                      onCancel={() => onCancelComposerMode?.()}
+                      disabled={composerDisabled}
+                      pending={Boolean(editUserMessageDisabled)}
+                      submitLabel={submitLabel?.trim() || t("saveAndRerunMessage")}
+                      cancelLabel={cancelComposerModeLabel ?? t("cancelEditMessage")}
+                      ariaLabel={editUserMessageLabel ?? t("editMessage")}
+                      error={composerError ?? ""}
+                      attachments={editingUserMessage.attachments ?? []}
+                      references={editingUserMessage.references ?? []}
+                      inputRef={inlineEditInputRef}
+                    />
+                  ) : showUserContent ? (
+                    <AgentUserContentSectionView userContentSectionIds={agentRenderState.userContentSectionIds}>
+                      {renderResponseText(userContentText)}
+                    </AgentUserContentSectionView>
+                  ) : null}
+                  {groupTranscriptMessage ? (
+                    <div className={styles.groupTranscriptBody}>{renderResponseText(assistantFinalAnswerText(message))}</div>
+                  ) : null}
+                  {contextNode}
+
+                  {/*
+                    Codex-aligned order: process / tools first, then final answer surface.
+                    - renderCodexTranscriptCells already does processCells → finalCells inside.
+                    - When tools only exist on feedback/timeline (alongside), processNode must
+                      still precede codexTranscriptNode so the answer is not above the tools.
+                  */}
+                  {/* Checklist overview sits above the process trail: it is a
+                      progress summary, not a second process row. */}
+                  {todoChecklistNode}
+                  {processNode}
+                  {compactActiveTurnPlaceholderNode}
+                  {codexTranscriptNode}
+                  {turnStatusNode}
+                  {shouldRenderLegacyTurnError ? (
+                    <div className={styles.turnErrorNotice} role="status" aria-live="polite">
+                      <div className={styles.turnErrorNoticeIcon} aria-hidden="true">
+                        <TerminalSquare size={15} />
+                      </div>
+                      <div className={styles.turnErrorNoticeBody}>
+                        <div className={styles.turnErrorNoticeMeta}>
+                          <span>{lang === "zh" ? "运行提示" : "Runtime notice"}</span>
+                          {turnErrorTypeLabelKey ? (
+                            <span title={resolveConversationTurnErrorType(message)}>{t(turnErrorTypeLabelKey)}</span>
+                          ) : null}
+                        </div>
+                        <div className={styles.turnErrorNoticeText}>{renderResponseText(assistantFinalAnswerText(message))}</div>
+                        {buildConversationTurnErrorReasonRows(message, lang).length > 0 ? (
+                          <details className={styles.turnErrorDiagnostics}>
+                            <summary className={styles.turnErrorDiagnosticsSummary}>
+                              {lang === "zh" ? "诊断详情" : "Diagnostics"}
+                            </summary>
+                            <dl className={styles.turnErrorReasonList}>
+                              {buildConversationTurnErrorReasonRows(message, lang).map((row) => (
+                                <div key={`${row.label}-${row.value}`} className={styles.turnErrorReasonRow}>
+                                  <dt>{row.label}</dt>
+                                  <dd>{row.value}</dd>
+                                </div>
+                              ))}
+                            </dl>
+                          </details>
+                        ) : null}
+                        {turnErrorRecoveryAction === "compress_context" && onOpenComposerContextDetail ? (
+                          <div className={styles.turnErrorActions}>
+                            <VButton
+                              type="button"
+                              contentLayout="plain"
+                              className={styles.turnErrorRetryButton}
+                              onClick={onOpenComposerContextDetail}
+                              title={t("turnErrorActionCompressContextTitle")}
+                              aria-label={t("turnErrorActionCompressContext")}
+                            >
+                              <Gauge size={12}/>
+                              <span>{t("turnErrorActionCompressContext")}</span>
+                            </VButton>
+                          </div>
+                        ) : null}
+                        {canRetryFailedTurnMessage ? (
+                          <div
+                            className={styles.turnErrorActionsHover}
+                            data-conversation-hover-actions="1"
+                          >
+                            <VButton
+                              type="button"
+                              contentLayout="plain"
+                              className={styles.turnErrorRetryButton}
+                              onClick={() => onRegenerateAssistantMessage?.(message)}
+                              isDisabled={regenerateDisabled}
+                              isPending={regeneratePending}
+                              title={regeneratePending ? t("retryFailedTurnPending") : t("retryFailedTurn")}
+                              aria-label={regeneratePending ? t("retryFailedTurnPending") : t("retryFailedTurn")}
+                            >
+                              <RefreshCw size={12}/>
+                              <span>{t("retryFailedTurn")}</span>
+                            </VButton>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
+                  {answerOnlyProcessMode ? responseSectionNode : null}
+                  {imageArtifact ? (
+                    <ConversationImageArtifactView
+                      artifact={imageArtifact}
+                      lang={lang}
+                      onPreviewImage={openImagePreview}
+                    />
+                  ) : null}
+
+                  {!answerOnlyProcessMode ? responseSectionNode : null}
+                  {turnWorkHeaderNode}
+              </AgentMessageTurnView>
+            );
+                }}
+              />
+              </div>
+              );
+  }
   const activeConversationMessagesById = useMemo(() => {
     const messagesById = new Map<string, ConversationMessage>();
     for (const message of activeTimelineMessages) {
@@ -1293,12 +2634,61 @@ export function ConversationView({
     return compactConversationPreview(value, maxLength);
   }
 
-  function openImagePreview(image: ConversationImagePreviewRequest) {
+  // Stable identities: the markdown renderer is content-memoized, so a fresh
+  // renderImage closure per render would force a full re-parse of every block.
+  const openImagePreview = useCallback((image: ConversationImagePreviewRequest) => {
     setPreviewImage(image);
-  }
+  }, []);
 
   function closeImagePreview() {
     setPreviewImage(null);
+  }
+
+  function rememberUserScrollIntent(intent: TimelineUserScrollIntent) {
+    if (intent === "none") {
+      return;
+    }
+    userScrollIntentRef.current = intent;
+    userScrollIntentAtRef.current = performance.now();
+  }
+
+  function currentUserScrollIntent() {
+    return freshTimelineUserScrollIntent(
+      userScrollIntentRef.current,
+      userScrollIntentAtRef.current,
+      performance.now(),
+    );
+  }
+
+  function contentWidthIsChanging() {
+    return performance.now() < contentWidthChangingUntilRef.current;
+  }
+
+  function noteTimelineContentWidth(width: number) {
+    if (!Number.isFinite(width) || width <= 0) {
+      return;
+    }
+    const previous = lastTimelineContentWidthRef.current;
+    if (previous > 0 && width !== previous) {
+      contentWidthChangingUntilRef.current = performance.now() + TIMELINE_CONTENT_WIDTH_RESIZE_SETTLE_MS;
+    }
+    lastTimelineContentWidthRef.current = width;
+  }
+
+  function reconcileFollowBeforeStick(timeline: HTMLDivElement) {
+    const next = reconcileFollowingBeforeContentStick({
+      following: followLatestRef.current,
+      isAtBottom: isTimelineNearBottom({
+        scrollHeight: timeline.scrollHeight,
+        clientHeight: timeline.clientHeight,
+        scrollTop: timeline.scrollTop,
+      }),
+      userScrollIntent: currentUserScrollIntent(),
+      scrollTop: timeline.scrollTop,
+      lastObservedScrollTop: lastTimelineScrollTopRef.current,
+    });
+    followLatestRef.current = next;
+    return next;
   }
 
   function scrollTimelineToBottom(
@@ -1306,6 +2696,7 @@ export function ConversationView({
     options: { followLatest?: boolean; behavior?: ScrollBehavior } = {},
   ) {
     const wasAtBottom = atBottomRef.current;
+    ignoreNextProgrammaticFollowRef.current = true;
     if (options.behavior) {
       timeline.scrollTo({ top: timeline.scrollHeight, behavior: options.behavior });
     } else {
@@ -1322,6 +2713,13 @@ export function ConversationView({
   }
 
   function scheduleTimelineScrollToBottom() {
+    const timeline = timelineRef.current;
+    if (contentWidthIsChanging()) {
+      return;
+    }
+    if (timeline && !reconcileFollowBeforeStick(timeline)) {
+      return;
+    }
     if (streamingScrollFrameRef.current !== null) {
       return;
     }
@@ -1340,6 +2738,8 @@ export function ConversationView({
    * Do this before onSubmit so optimistic user + active-turn paint under followLatest.
    */
   function pinFollowLatestForSubmit() {
+    userScrollIntentRef.current = "none";
+    userScrollIntentAtRef.current = 0;
     followLatestRef.current = true;
     atBottomRef.current = true;
     setIsAtBottom(true);
@@ -1392,10 +2792,6 @@ export function ConversationView({
           scrollTimelineToBottom(timeline);
         }
         lastTimelineScrollTopRef.current = timeline.scrollTop;
-        setTimelineVirtualMetrics((current) => ({
-          scrollTop: timeline.scrollTop,
-          viewportHeight: timeline.clientHeight || current.viewportHeight,
-        }));
       };
     }
     // Reading history: pin the summary so expand/collapse does not yank the viewport.
@@ -1408,10 +2804,6 @@ export function ConversationView({
     return () => {
       restoreConversationProcessScrollAnchor(timeline, summary, anchor);
       lastTimelineScrollTopRef.current = timeline.scrollTop;
-      setTimelineVirtualMetrics((current) => ({
-        scrollTop: timeline.scrollTop,
-        viewportHeight: timeline.clientHeight || current.viewportHeight,
-      }));
     };
   }, []);
 
@@ -1424,22 +2816,14 @@ export function ConversationView({
       return undefined;
     }
     const observer = new ResizeObserver(() => {
+      noteTimelineContentWidth(timeline.clientWidth);
       if (shouldStickTimelineToBottomOnContentResize({
         autoScrollToLatest: autoScrollToLatestRef.current,
         followingLatest: followLatestRef.current,
+        contentWidthChanging: contentWidthIsChanging(),
       })) {
         scheduleTimelineScrollToBottom();
       }
-      setTimelineVirtualMetrics((current) => {
-        const next = {
-          scrollTop: timeline.scrollTop,
-          viewportHeight: timeline.clientHeight || current.viewportHeight,
-        };
-        if (next.scrollTop === current.scrollTop && next.viewportHeight === current.viewportHeight) {
-          return current;
-        }
-        return next;
-      });
     });
     observer.observe(timeline);
     const content = timelineContentRef.current;
@@ -1449,103 +2833,6 @@ export function ConversationView({
     return () => observer.disconnect();
   }, [sessionId, activeTimelineMessages.length > 0]);
 
-  useEffect(() => {
-    timelineRowHeightCacheRef.current.clear();
-    for (const observer of timelineRowResizeObserversRef.current.values()) {
-      observer.disconnect();
-    }
-    timelineRowResizeObserversRef.current.clear();
-    timelineRowNodesRef.current.clear();
-    timelineVirtualRowRefCallbacksRef.current.clear();
-    setTimelineRowHeightVersion((version) => version + 1);
-  }, [sessionId]);
-
-  const scheduleTimelineHeightVersionBump = useCallback(() => {
-    if (timelineHeightBumpFrameRef.current !== null) {
-      return;
-    }
-    timelineHeightBumpFrameRef.current = window.requestAnimationFrame(() => {
-      timelineHeightBumpFrameRef.current = null;
-      setTimelineRowHeightVersion((version) => version + 1);
-      // Row measure can change scrollHeight without resizing the scroll container box.
-      // While following latest, re-pin so expand/stream growth stays on the tail.
-      if (shouldStickTimelineToBottomOnContentResize({
-        autoScrollToLatest: autoScrollToLatestRef.current,
-        followingLatest: followLatestRef.current,
-      })) {
-        scheduleTimelineScrollToBottom();
-      }
-    });
-  }, []);
-
-  const bindTimelineVirtualRow = useCallback((rowKey: string, node: HTMLDivElement | null) => {
-    const key = String(rowKey || "").trim();
-    if (!key) {
-      return;
-    }
-    if (!node) {
-      const previous = timelineRowResizeObserversRef.current.get(key);
-      if (previous) {
-        previous.disconnect();
-        timelineRowResizeObserversRef.current.delete(key);
-      }
-      timelineRowNodesRef.current.delete(key);
-      return;
-    }
-    // Inline ref callbacks change identity every render; React then does null→node.
-    // Skip rebind when we already observe this exact node to avoid measure thrash.
-    if (
-      timelineRowNodesRef.current.get(key) === node
-      && timelineRowResizeObserversRef.current.has(key)
-    ) {
-      return;
-    }
-    const previous = timelineRowResizeObserversRef.current.get(key);
-    if (previous) {
-      previous.disconnect();
-      timelineRowResizeObserversRef.current.delete(key);
-    }
-    if (typeof ResizeObserver === "undefined") {
-      timelineRowNodesRef.current.set(key, node);
-      return;
-    }
-    const publish = (height: number) => {
-      // Following latest: spinner / subpixel reflow often jitters 2–6px; ignore that noise.
-      const minDeltaPx = followLatestRef.current ? 8 : 2;
-      if (recordConversationRowHeight(timelineRowHeightCacheRef.current, key, height, { minDeltaPx })) {
-        scheduleTimelineHeightVersionBump();
-      }
-    };
-    publish(node.getBoundingClientRect().height);
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      const height = entry?.borderBoxSize?.[0]?.blockSize
-        ?? entry?.contentRect?.height
-        ?? node.getBoundingClientRect().height;
-      publish(height);
-    });
-    observer.observe(node);
-    timelineRowResizeObserversRef.current.set(key, observer);
-    timelineRowNodesRef.current.set(key, node);
-  }, [scheduleTimelineHeightVersionBump]);
-  const bindTimelineVirtualRowLatestRef = useRef(bindTimelineVirtualRow);
-  bindTimelineVirtualRowLatestRef.current = bindTimelineVirtualRow;
-
-  const timelineVirtualRowRef = useCallback((rowKey: string) => {
-    const key = String(rowKey || "").trim();
-    if (!key) {
-      return (_node: HTMLDivElement | null) => undefined;
-    }
-    const existing = timelineVirtualRowRefCallbacksRef.current.get(key);
-    if (existing) {
-      return existing;
-    }
-    const callback = (node: HTMLDivElement | null) => {
-      bindTimelineVirtualRowLatestRef.current(key, node);
-    };
-    timelineVirtualRowRefCallbacksRef.current.set(key, callback);
-    return callback;
-  }, []);
 
   useEffect(() => () => {
     if (copyAnswerFeedbackTimerRef.current !== null) {
@@ -1554,18 +2841,61 @@ export function ConversationView({
   }, []);
 
   useLayoutEffect(() => {
-    const anchor = historyScrollAnchorRef.current;
-    if (!anchor) {
+    const pending = historyAnchorCorrectingRef.current;
+    if (!pending || !pending.anchor) {
       return;
     }
-    historyScrollAnchorRef.current = null;
-    if (restoreTimelineRowKeyAnchor(timelineRef.current, anchor)) {
-      atBottomRef.current = false;
-      followLatestRef.current = false;
-      lastTimelineScrollTopRef.current = timelineRef.current?.scrollTop ?? 0;
-      setIsAtBottom(false);
+    const timeline = timelineRef.current;
+    if (!timeline) {
+      return;
     }
-  }, [activeTimelineMessages.length, visibleMessageLimit]);
+    if (activeTimelineMessages.length === pending.startLength) {
+      // Capture done, prepend not committed yet: keep the anchor pending.
+      return;
+    }
+    if (!pending.fallbackDone) {
+      // First pass after the prepend: exact row-key restore when the anchor
+      // row is mounted, scrollHeight-delta fallback otherwise (the fallback
+      // drifts by the estimate error of all prepended rows; the correction
+      // frames below eliminate that residual).
+      pending.fallbackDone = true;
+      if (restoreTimelineRowKeyAnchor(timeline, pending.anchor)) {
+        atBottomRef.current = false;
+        followLatestRef.current = false;
+        lastTimelineScrollTopRef.current = timeline.scrollTop;
+        setIsAtBottom(false);
+      }
+      return;
+    }
+    // Correction frames: re-run until the anchor row is mounted at its captured
+    // viewport offset. Measurements streaming in after the prepend keep
+    // re-rendering this effect, so the residual estimate error converges to
+    // zero within a couple of frames instead of shipping a visible jump.
+    const rootTop = timeline.getBoundingClientRect().top;
+    let anchorRow: Element | null = null;
+    for (const row of timeline.querySelectorAll("[data-conversation-row-key]")) {
+      if (row.getAttribute("data-conversation-row-key") === pending.anchor.rowKey) {
+        anchorRow = row;
+        break;
+      }
+    }
+    if (!anchorRow) {
+      pending.attempts += 1;
+      if (pending.attempts > TIMELINE_ANCHOR_CORRECTION_MAX_FRAMES) {
+        historyAnchorCorrectingRef.current = null;
+        historyScrollAnchorRef.current = null;
+      }
+      return;
+    }
+    const drift = anchorRow.getBoundingClientRect().top - rootTop - pending.anchor.offsetTop;
+    if (Math.abs(drift) <= TIMELINE_ANCHOR_CORRECTION_TOLERANCE_PX) {
+      historyAnchorCorrectingRef.current = null;
+      historyScrollAnchorRef.current = null;
+      return;
+    }
+    timeline.scrollTop += drift;
+    lastTimelineScrollTopRef.current = timeline.scrollTop;
+  });
 
   useLayoutEffect(() => {
     const timeline = timelineRef.current;
@@ -1583,10 +2913,6 @@ export function ConversationView({
         atBottomRef.current = false;
         setIsAtBottom(false);
         lastTimelineScrollTopRef.current = restored.scrollTop;
-        setTimelineVirtualMetrics({
-          scrollTop: restored.scrollTop,
-          viewportHeight: timeline.clientHeight || 720,
-        });
         // Sticky→full hydrate and virtual row measure can grow height after first paint.
         window.requestAnimationFrame(() => {
           const nextTimeline = timelineRef.current;
@@ -1615,9 +2941,10 @@ export function ConversationView({
     if (!autoScrollToLatest) {
       return;
     }
-    // Content growth while still near the bottom re-enables follow even if a prior
-    // expand briefly suspended it.
-    if (
+    const userScrollIntent = currentUserScrollIntent();
+    if (userScrollIntent === "awayFromBottom") {
+      followLatestRef.current = false;
+    } else if (
       !followLatestRef.current
       && isTimelineNearBottom({
         scrollHeight: timeline.scrollHeight,
@@ -1625,6 +2952,8 @@ export function ConversationView({
         scrollTop: timeline.scrollTop,
       })
     ) {
+      // Content growth while still near the bottom re-enables follow even if a prior
+      // expand briefly suspended it. An upward wheel recorded before this commit wins.
       followLatestRef.current = true;
       atBottomRef.current = true;
       setIsAtBottom(true);
@@ -1677,9 +3006,83 @@ export function ConversationView({
   useEffect(() => {
     const timeline = timelineRef.current;
     if (!timeline) {
+      return undefined;
+    }
+    const wheelTargetConsumesScroll = (target: EventTarget | null, deltaY: number) => {
+      if (!(target instanceof HTMLElement) || target === timeline) {
+        return false;
+      }
+      let node: HTMLElement | null = target;
+      while (node && node !== timeline) {
+        if (
+          node instanceof HTMLInputElement
+          || node instanceof HTMLTextAreaElement
+          || node.isContentEditable
+        ) {
+          return true;
+        }
+        const overflowY = window.getComputedStyle(node).overflowY;
+        if (
+          (overflowY === "auto" || overflowY === "scroll")
+          && node.scrollHeight > node.clientHeight + 1
+        ) {
+          if (deltaY < 0 && node.scrollTop > 0) {
+            return true;
+          }
+          if (deltaY > 0 && node.scrollTop + node.clientHeight < node.scrollHeight - 1) {
+            return true;
+          }
+        }
+        node = node.parentElement;
+      }
+      return false;
+    };
+    const onWheel = (event: WheelEvent) => {
+      if (wheelTargetConsumesScroll(event.target, event.deltaY)) {
+        return;
+      }
+      rememberUserScrollIntent(timelineWheelScrollIntent(event.deltaY));
+    };
+    let lastTouchY = 0;
+    const onTouchStart = (event: TouchEvent) => {
+      lastTouchY = event.touches[0]?.clientY ?? lastTouchY;
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      const nextY = event.touches[0]?.clientY ?? lastTouchY;
+      rememberUserScrollIntent(timelineTouchScrollIntent(lastTouchY, nextY));
+      lastTouchY = nextY;
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      const editableTarget = target instanceof HTMLElement && (
+        target.isContentEditable
+        || target.tagName === "INPUT"
+        || target.tagName === "TEXTAREA"
+      );
+      rememberUserScrollIntent(timelineKeyboardScrollIntent({
+        key: event.key,
+        shiftKey: event.shiftKey,
+        editableTarget,
+      }));
+    };
+    timeline.addEventListener("wheel", onWheel, { passive: true });
+    timeline.addEventListener("touchstart", onTouchStart, { passive: true });
+    timeline.addEventListener("touchmove", onTouchMove, { passive: true });
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      timeline.removeEventListener("wheel", onWheel);
+      timeline.removeEventListener("touchstart", onTouchStart);
+      timeline.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [sessionId]);
+
+  useEffect(() => {
+    const timeline = timelineRef.current;
+    if (!timeline) {
       return;
     }
-    const handleScroll = () => {
+    const handleScroll = (consumeProgrammatic = true) => {
       const previousScrollTop = lastTimelineScrollTopRef.current;
       if (shouldLoadEarlierConversationMessages({
         clientHeight: timeline.clientHeight,
@@ -1691,30 +3094,34 @@ export function ConversationView({
       })) {
         revealEarlierTimelineMessages();
       }
+      const programmaticFollow = consumeProgrammatic && ignoreNextProgrammaticFollowRef.current;
+      if (consumeProgrammatic) {
+        ignoreNextProgrammaticFollowRef.current = false;
+      }
+      const scrollSource: TimelineScrollSource = programmaticFollow ? "programmatic" : "user";
       const nextState = resolveTimelineFollowState({
         scrollHeight: timeline.scrollHeight,
         clientHeight: timeline.clientHeight,
         scrollTop: timeline.scrollTop,
         previousScrollTop,
         wasFollowingLatest: followLatestRef.current,
+        scrollSource,
+        userScrollIntent: currentUserScrollIntent(),
       });
       lastTimelineScrollTopRef.current = timeline.scrollTop;
       atBottomRef.current = nextState.isAtBottom;
       followLatestRef.current = nextState.shouldFollowLatest;
       setIsAtBottom(nextState.isAtBottom);
-      setTimelineVirtualMetrics({
-        scrollTop: timeline.scrollTop,
-        viewportHeight: timeline.clientHeight || 720,
-      });
       rememberSessionTimelineScroll(sessionId, {
         scrollTop: timeline.scrollTop,
         followingLatest: nextState.shouldFollowLatest,
       });
     };
-    handleScroll();
-    timeline.addEventListener("scroll", handleScroll);
+    const onTimelineScroll = () => handleScroll(true);
+    handleScroll(false);
+    timeline.addEventListener("scroll", onTimelineScroll);
     return () => {
-      timeline.removeEventListener("scroll", handleScroll);
+      timeline.removeEventListener("scroll", onTimelineScroll);
       rememberSessionTimelineScroll(sessionId, {
         scrollTop: lastTimelineScrollTopRef.current,
         followingLatest: followLatestRef.current,
@@ -1745,17 +3152,27 @@ export function ConversationView({
 
   useEffect(() => {
     const focusSignal = String(editingMessageId || "").trim();
-    if (!focusSignal || focusSignal === lastComposerFocusSignalRef.current || composerDisabled) {
+    if (!focusSignal) {
+      // Reset so re-editing the same message after a cancel refocuses.
+      lastComposerFocusSignalRef.current = "";
+      return;
+    }
+    if (focusSignal === lastComposerFocusSignalRef.current || composerDisabled) {
       return;
     }
     lastComposerFocusSignalRef.current = focusSignal;
-    const input = composerInputRef.current;
-    if (!input) {
-      return;
-    }
-    input.focus();
-    const cursorPosition = input.value.length;
-    input.setSelectionRange(cursorPosition, cursorPosition);
+    // Inline edit lives in the timeline row, not the composer; the row editor
+    // mounts in this same commit, so focus it on the next frame.
+    const raf = window.requestAnimationFrame(() => {
+      const input = inlineEditInputRef.current;
+      if (!input) {
+        return;
+      }
+      input.focus();
+      const cursorPosition = input.value.length;
+      input.setSelectionRange(cursorPosition, cursorPosition);
+    });
+    return () => window.cancelAnimationFrame(raf);
   }, [composerDisabled, editingMessageId]);
 
   useEffect(() => {
@@ -1787,8 +3204,8 @@ export function ConversationView({
   }, [composerDisabled, composerFocusSignal, onComposerFocusRequestSettled]);
 
   useEffect(() => {
-    setVisibleMessageLimit(INITIAL_VISIBLE_MESSAGE_COUNT);
     historyScrollAnchorRef.current = null;
+    historyAnchorCorrectingRef.current = null;
     defaultExpansionRef.current = {};
     responseSegmentCacheRef.current.clear();
     setSectionExpansion({});
@@ -1914,6 +3331,24 @@ export function ConversationView({
     scrollTimelineToBottom(timeline, { followLatest: true, behavior: "smooth" });
   }
 
+  /**
+   * Minimap jump: virtualized history rows go through the virtualizer's
+   * scrollToIndex; the live tail (last entry) just pins to the bottom.
+   * Reduced motion falls back to instant jumps.
+   */
+  function handleTurnNavigate(entry: ConversationTurnNavEntry) {
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    const behavior: ScrollBehavior = reducedMotion ? "auto" : "smooth";
+    if (entry.anchorRowIndex < timelineLiveTailStartIndex) {
+      timelineVirtualizer.scrollToIndex(entry.anchorRowIndex, { behavior, align: "start" });
+      return;
+    }
+    const timeline = timelineRef.current;
+    if (timeline) {
+      scrollTimelineToBottom(timeline, { followLatest: false, behavior });
+    }
+  }
+
   function revealEarlierTimelineMessages() {
     const preferServerEarlier = shouldPreferServerEarlierLoad({
       visibleMessageCount,
@@ -1921,32 +3356,26 @@ export function ConversationView({
       hasEarlierMessages: Boolean(hasEarlierMessages),
       earlierMessagesLoading: Boolean(earlierMessagesLoading),
     });
-    if (preferServerEarlier && onLoadEarlierMessages) {
-      // U5: once the local window is large, prefer server pages over only growing DOM.
-      preserveCurrentExpansionDefaults();
-      historyScrollAnchorRef.current = captureTimelineRowKeyAnchor(timelineRef.current);
-      atBottomRef.current = false;
-      followLatestRef.current = false;
-      setIsAtBottom(false);
-      setVisibleMessageLimit((current) => nextVisibleMessageLimit({
-        currentLimit: current,
-        displayMessageCount: Math.max(displayMessages.length, current + 1),
-      }));
-      onLoadEarlierMessages();
-      return;
-    }
-    if (visibleMessageCount >= displayMessages.length) {
+    if (!preferServerEarlier || !onLoadEarlierMessages) {
+      // U5 with full-history virtualization: every local message is already
+      // rendered (visibleMessageCount === displayMessages.length), so there is
+      // no client window left to expand — earlier history is server pages only.
       return;
     }
     preserveCurrentExpansionDefaults();
     historyScrollAnchorRef.current = captureTimelineRowKeyAnchor(timelineRef.current);
+    historyAnchorCorrectingRef.current = historyScrollAnchorRef.current
+      ? {
+        anchor: historyScrollAnchorRef.current,
+        startLength: activeTimelineMessages.length,
+        attempts: 0,
+        fallbackDone: false,
+      }
+      : null;
     atBottomRef.current = false;
     followLatestRef.current = false;
     setIsAtBottom(false);
-    setVisibleMessageLimit((current) => nextVisibleMessageLimit({
-      currentLimit: current,
-      displayMessageCount: displayMessages.length,
-    }));
+    onLoadEarlierMessages();
   }
 
   function preserveCurrentExpansionDefaults() {
@@ -2329,6 +3758,54 @@ export function ConversationView({
     }).catch(() => undefined);
   }
 
+  /** Bounded visible feedback for a rejected curation click (~3s on the title). */
+  function showCurationFeedback(messageId: string, action: SessionMessageCurationAction, message: string) {
+    setCurationFeedback({ messageId, action, message });
+    if (curationFeedbackTimerRef.current !== null) {
+      window.clearTimeout(curationFeedbackTimerRef.current);
+    }
+    curationFeedbackTimerRef.current = window.setTimeout(() => {
+      curationFeedbackTimerRef.current = null;
+      setCurationFeedback((current) => (current?.messageId === messageId ? null : current));
+    }, 3000);
+  }
+
+  function handleCurateMessage(messageId: string, action: SessionMessageCurationAction) {
+    if (!sessionId || resolveMessageCurationState(messageCurationMap, messageId) === action) {
+      return;
+    }
+    // Optimistic flip; the query invalidation restores server authority on
+    // success and the overlay entry is dropped again on failure (rollback).
+    setCurationOverrides((current) => applyOptimisticCuration(current, messageId, action));
+    void setSessionMessageCuration(sessionId, messageId, action)
+      .then(() => {
+        setCurationOverrides((current) => {
+          if (!current.has(messageId)) {
+            return current;
+          }
+          const next = new Map(current);
+          next.delete(messageId);
+          return next;
+        });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.sessionMessageCuration(sessionId) });
+      })
+      .catch((error) => {
+        setCurationOverrides((current) => {
+          if (!current.has(messageId)) {
+            return current;
+          }
+          const next = new Map(current);
+          next.delete(messageId);
+          return next;
+        });
+        showCurationFeedback(
+          messageId,
+          action,
+          isFetchJsonHttpError(error) && error.message ? error.message : t("curationActionFailed"),
+        );
+      });
+  }
+
   function renderCodexTranscriptCells(
     message: ConversationMessage,
     cells: CodexTranscriptCell[],
@@ -2484,7 +3961,11 @@ export function ConversationView({
           data-codex-transcript-cell-phase={cell.phase ?? ""}
           data-conversation-part-key={cell.id}
         >
-          {assistantTurnIsStreaming(message) ? renderStreamingResponseText(text) : renderResponseText(text, imageArtifactUrlsBeforeMessage.get(message.id))}
+          {renderAssistantTranscriptResponseText(
+            text,
+            assistantTurnIsStreaming(message),
+            imageArtifactUrlsBeforeMessage.get(message.id),
+          )}
         </section>
       );
     }
@@ -2679,10 +4160,11 @@ export function ConversationView({
   }
 
   /**
-   * Process-trail thought box (reasoning + commentary): shown in chrono order with
-   * tools, height-capped and scrollable while it streams. Once the segment settles
-   * the body collapses to a one-line preview, so a finished thought neither keeps
-   * covering the transcript nor keeps its text mounted.
+   * Collapsible thinking lane (ZCode reasoning parity): streaming and settled
+   * thoughts both stay collapsed until the user expands. The collapsed header
+   * keeps icon + status title plus a single-line horizontally rolling summary
+   * of the latest thought sentence; the expanded body is height-capped and
+   * bottom-following.
    */
   function renderCodexThoughtScrollCell(
     messageId: string,
@@ -2692,11 +4174,9 @@ export function ConversationView({
       text: string;
       status: CodexTranscriptCell["status"];
       tone: CodexTranscriptCell["tone"];
-      title: string;
       phase?: string;
       channel?: string;
       kind?: CodexTranscriptCell["kind"];
-      meta?: string;
     },
   ) {
     const fullText = String(input.text || "").trim();
@@ -2704,14 +4184,16 @@ export function ConversationView({
       return null;
     }
     const isLive = input.status === "running" || input.status === "pending";
-    // Open while live so the streamed text is readable; the default flips to
-    // collapsed on completion and the section refreshes to the inline preview.
-    // The section id comes from `reasoningExpansionSectionId`, which prefers
-    // sourceItemId: a stream update that rewrites cell.id keeps the same
-    // open/closed choice, and an explicit toggle always wins over the default.
-    const defaultExpanded = isLive;
+    // ZCode parity: streaming and completed reasoning default collapsed, so a
+    // live stream no longer unfolds over the transcript. The user's explicit
+    // toggle (explicit expansion state) still wins over the default; the
+    // section id comes from `reasoningExpansionSectionId`, which prefers
+    // sourceItemId so stream updates that rewrite cell.id keep the choice.
+    const defaultExpanded = false;
     const expanded = getExpansionState(messageId, input.sectionId, defaultExpanded);
-    const inlinePreview = expanded ? "" : humanizeReasoningPreview(fullText);
+    const thoughtTitle = isLive
+      ? (lang === "zh" ? "思考中" : "Thinking…")
+      : (lang === "zh" ? "已思考" : "Thought");
     const toneClassName = styles[`codexTranscriptCell_${input.tone}` as keyof typeof styles] ?? "";
     return (
       <section
@@ -2750,14 +4232,8 @@ export function ConversationView({
           </span>
           <span className={styles.codexTranscriptReasoningHeaderBody}>
             <span className={styles.codexTranscriptReasoningTitleRow}>
-              <span className={styles.codexTranscriptCellTitle}>{input.title}</span>
-              {input.meta ? <span className={styles.codexTranscriptCellMeta}>{input.meta}</span> : null}
-              {!expanded && inlinePreview ? (
-                <>
-                  <span className={styles.timelineCellSeparator} aria-hidden="true">·</span>
-                  <span className={styles.timelineThoughtInlinePreview}>{inlinePreview}</span>
-                </>
-              ) : null}
+              <span className={styles.codexTranscriptReasoningTitle}>{thoughtTitle}</span>
+              {!expanded ? <ThoughtStreamingSummary text={fullText} /> : null}
             </span>
           </span>
         </VButton>
@@ -2858,11 +4334,9 @@ export function ConversationView({
       text: fullText,
       status: cell.status,
       tone: cell.tone,
-      title: codexTranscriptCellTitle(cell) || (lang === "zh" ? "思考" : "Thinking"),
       phase: cell.phase,
       channel: cell.channel,
       kind: cell.kind,
-      meta: codexTranscriptCellMeta(cell) || undefined,
     });
   }
 
@@ -3303,15 +4777,17 @@ export function ConversationView({
     rowIdentity: AgentMessageTimelineRowIdentity,
     isActiveTimelineItem: boolean,
   ) {
-    // Live SSE: keep the body open while thought is running so streaming text is visible.
-    // Settled thoughts default collapsed; shouldRefreshConversationExpansionDefault auto-closes.
-    const inlinePreview = humanizeReasoningPreview(String(item.preview || item.text || ""));
-    const defaultExpanded = Boolean(item.defaultExpanded)
-      || item.status === "running"
-      || item.status === "pending";
+    // ZCode parity: streaming and settled thoughts both stay collapsed until the
+    // user expands; the collapsed header shows the running/settled title plus a
+    // single-line rolling summary of the latest thought sentence.
+    const isLive = item.status === "running" || item.status === "pending";
+    const defaultExpanded = false;
     const sectionId = `thought:${item.id}`;
     const expanded = getExpansionState(message.id, sectionId, defaultExpanded);
     const toggleLabel = expanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden");
+    const thoughtTitle = isLive
+      ? (lang === "zh" ? "思考中" : "Thinking…")
+      : (lang === "zh" ? "已思考" : "Thought");
     return (
       <section
         key={agentMessageTimelineItemRowKey(rowIdentity, item)}
@@ -3331,16 +4807,11 @@ export function ConversationView({
             toggleSection(message.id, sectionId, defaultExpanded);
           }}
         >
-          {isActiveTimelineItem && item.status === "running" ? <LoaderCircle className={styles.statusSpinner} size={14} /> : <BrainCircuit size={14} />}
+          {isActiveTimelineItem && isLive ? <LoaderCircle className={styles.statusSpinner} size={14} /> : <BrainCircuit size={14} />}
           <span className={styles.timelineCellBody}>
             <span className={`${styles.timelineCellTitleRow} ${styles.timelineCellCompactTitleRow}`}>
-              <span className={styles.timelineCellTitle}>{lang === "zh" ? "思考" : "Thinking"}</span>
-              {!expanded && inlinePreview ? (
-                <>
-                  <span className={styles.timelineCellSeparator} aria-hidden="true">·</span>
-                  <span className={styles.timelineThoughtInlinePreview}>{inlinePreview}</span>
-                </>
-              ) : null}
+              <span className={styles.codexTranscriptReasoningTitle}>{thoughtTitle}</span>
+              {!expanded ? <ThoughtStreamingSummary text={item.text} /> : null}
             </span>
           </span>
           {expanded ? <ChevronDown size={15} aria-hidden="true" /> : <ChevronRight size={15} aria-hidden="true" />}
@@ -3349,7 +4820,7 @@ export function ConversationView({
           <div className={styles.codexTranscriptReasoningTextButton}>
             <ThoughtScrollBody
               text={item.text}
-              streaming={item.status === "running" || item.status === "pending"}
+              streaming={isLive}
             />
           </div>
         ) : null}
@@ -4170,18 +5641,29 @@ export function ConversationView({
     );
   }
 
-  function renderStreamingResponseText(content: string) {
+  function renderAssistantTranscriptResponseText(
+    content: string,
+    isStreaming: boolean,
+    duplicateImageUrls?: Set<string>,
+  ) {
     if (!content) {
       return null;
     }
+    // One component type across streaming and settled: the Codex transcript
+    // cell keeps its markdown subtree mounted on the streaming→settled flip
+    // (settled text re-routes through the shared stable renderer instead of
+    // swapping to a different renderer component).
     return (
       <ConversationStreamingResponseContent
         content={content}
+        isStreaming={isStreaming}
+        duplicateImageUrls={duplicateImageUrls}
+        renderImage={renderMarkdownImage}
       />
     );
   }
 
-  function renderMarkdownImage(alt: string, url: string, duplicateImageUrls?: Set<string>) {
+  const renderMarkdownImage = useCallback((alt: string, url: string, duplicateImageUrls?: Set<string>) => {
     if (!isLikelyConversationImageUrl(url)) {
       return (
         <a className={styles.markdownImageLink} href={url}>
@@ -4225,14 +5707,41 @@ export function ConversationView({
         </figcaption>
       </figure>
     );
-  }
+  }, [lang, openImagePreview]);
 
   function isNonNullNode<T>(node: T | null): node is T {
     return node !== null;
   }
 
+  // Shared so the queue bar stays visible while an inline edit hides the
+  // composer field (one edit UI lives in the row, the queue is session status).
+  const composerFollowupQueueBar = followupQueue.length ? (
+    <ConversationFollowupQueueBar
+      items={followupQueue}
+      lang={lang}
+      variant={composerVariant}
+      editLabel={t("editFollowupQueue")}
+      withdrawLabel={t("withdrawFollowupQueue")}
+      steerLabel={followupQueueSteerLabel ?? t("immediateSteer")}
+      onUpdate={onFollowupQueueUpdate ?? (() => undefined)}
+      onRemove={onFollowupQueueRemove ?? (() => undefined)}
+      onMove={onFollowupQueueMove ?? (() => undefined)}
+      onSteer={onFollowupQueueSteer}
+    />
+  ) : null;
+
   const composerActions = (
     <div className={styles.composerActionStack}>
+      {resolvedActionMode === "stop" && composerPending ? (
+        <span
+          className={styles.composerStopPendingFeedback}
+          role="status"
+          aria-live="polite"
+          data-testid="composer-stop-pending-feedback"
+        >
+          {resolvedPendingLabel}
+        </span>
+      ) : null}
       {!runningGuidanceActionsEnabled || showQueuePrimary ? (
         <VButton
           className={primaryActionClassName}
@@ -4372,7 +5881,7 @@ export function ConversationView({
         </div>
       ) : null}
 
-      <div className={styles.timelineArea}>
+      <div ref={timelineAreaRef} className={styles.timelineArea}>
       <div ref={timelineRef} className={styles.timeline}>
         {displayMessages.length === 0 && !activeTurnMessage ? (
           transcriptPending ? (
@@ -4419,627 +5928,20 @@ export function ConversationView({
           )
         ) : (
           <div ref={timelineContentRef} className={styles.timelineContent}>
-            {timelineVirtualRange.topSpacerPx > 0 ? (
-              <div
-                aria-hidden="true"
-                className={styles.timelineVirtualSpacer}
-                style={{ height: timelineVirtualRange.topSpacerPx }}
-              />
-            ) : null}
-            {virtualTimelineMessages.map((message, virtualIndex) => {
-              const index = timelineVirtualRange.start + virtualIndex;
-              const rowIdentity = virtualTimelineRowIdentities[virtualIndex] ?? activeTimelineRowIdentities[index];
-              const rowKey = rowIdentity?.rowKey ?? message.id;
-              return (
-              <div
-                key={rowKey}
-                ref={timelineVirtualRowRef(rowKey)}
-                className={styles.timelineVirtualRow}
-                data-conversation-virtual-row={rowKey}
-              >
-              <ConversationTurnRow
-                message={message}
-                previousMessage={activeTimelineMessages[index - 1]}
-                agentMessage={agentMessagesByMessageId.get(message.id)}
-                agentRenderState={agentRenderStatesByMessageId.get(message.id)}
-                previousAgentRenderState={
-                  activeTimelineMessages[index - 1]
-                    ? agentRenderStatesByMessageId.get(activeTimelineMessages[index - 1].id)
-                    : undefined
-                }
-                codexTranscriptCells={agentCodexSurfacesByMessageId.get(message.id)?.cells}
-                rowIdentity={rowIdentity}
-                defaultResponseExpanded={defaultExpandedResponseIds.has(message.id)}
-                latestUserMessageId={latestUserMessageId}
-                editingMessageId={editingMessageId}
-                editUserMessageLabel={editUserMessageLabel}
-                editUserMessageDisabled={editUserMessageDisabled}
-                composerPlaceholder={composerPlaceholder}
-                answerOnlyProcessMode={answerOnlyProcessMode}
-                showMentalSnapshots={showMentalSnapshots}
-                lang={lang}
-                assistantLabel={assistantLabel}
-                assistantAvatarImageUrl={assistantAvatarImageUrl}
-                assistantAvatarFallback={assistantAvatarFallback}
-                userLabel={userLabel}
-                userAvatarLabel={userAvatarLabel}
-                userAvatarImageUrl={userAvatarImageUrl}
-                operationLabels={operationLabels}
-                resolveTurnAvatar={resolveTurnAvatar}
-                onEditUserMessage={onEditUserMessage}
-                onRegenerateAssistantMessage={onRegenerateAssistantMessage}
-                onSwitchMessageVersion={onSwitchMessageVersion}
-                branchVersionSwitchDisabled={branchVersionSwitchDisabled}
-                regenerableAssistantMessageId={regenerableAssistantMessageId}
-                regenerateDisabled={regenerateDisabled}
-                regeneratePending={regeneratePending}
-                sectionExpansionForMessage={sectionExpansion[message.id] ?? EMPTY_SECTION_EXPANSION}
-                computerUseStateForMessage={buildComputerUseStateForMessage(
-                  message,
-                  computerUseSessionResults,
-                  computerUseSessionPending,
-                )}
-                imageArtifactUrlsBeforeMessage={imageArtifactUrlsBeforeMessage.get(message.id)}
-                renderTurn={() => {
-            const rowIdentity = activeTimelineRowIdentities[index];
-            // The global companion typing affordance is the entire in-flight
-            // shell; do not leave an empty speaker/avatar row beside it.
-            if (companionTypingMessage?.id === message.id) {
-              return null;
-            }
-            if (isCliAgentLifecycleMessage(message)) {
-              const detail = cliAgentLifecycleDetail(message);
-              return (
-                <article
-                  key={rowIdentity?.rowKey ?? message.id}
-                  className={styles.cliAgentLifecycleTurn}
-                  data-conversation-row-key={rowIdentity?.rowKey ?? message.id}
-                >
-                  <span className={styles.cliAgentLifecycleIcon} aria-hidden="true">
-                    <TerminalSquare size={14} />
-                  </span>
-                  <span className={styles.cliAgentLifecycleText}>
-                    {cliAgentLifecycleLabel(message, lang)}
-                  </span>
-                  {detail ? <code className={styles.cliAgentLifecycleMeta}>{detail}</code> : null}
-                  {message.timestamp ? (
-                    <span className={styles.cliAgentLifecycleTime}>{formatTimestamp(message.timestamp)}</span>
-                  ) : null}
-                </article>
-              );
-            }
-            const agentMessage = agentMessagesByMessageId.get(message.id);
-            if (!agentMessage) {
-              return null;
-            }
-            const baseOperationGroups = agentOperationGroupsByMessageId.get(agentMessage.id)
-              ?? buildAgentMessageOperationGroups(agentMessage, operationLabels);
-            const operationGroups = operationGroupsWithFeedbackStatusPlaceholder(baseOperationGroups, message, lang);
-            const agentRenderState = agentRenderStatesByMessageId.get(message.id) ?? buildAgentMessageRenderState(agentMessage);
-            const agentSections = agentRenderState.sectionState;
-            const processSections = agentRenderState.processSections;
-            const responseText = agentSections.answerText;
-            const noFinalAnswerStatusText = isNoFinalAnswerStatusContent(responseText)
-              ? responseText.trim()
-              : "";
-            const userContentText = agentSections.userText;
-            const hasActiveProcess = operationGroups.timeline.some((operation) => isRunningOperationStatus(operation.status));
-            const hasFeedbackTimeline = agentSections.hasFeedbackTimeline;
-            const showResponseBlock = shouldShowAgentResponseBlock(message, agentSections, hasFeedbackTimeline);
-            const turnErrorMessage = isTurnErrorMessage(message);
-            const imageArtifact = imageArtifactForMessage(message);
-            const agentInboxMessage = isAgentInboxMessage(message);
-            const groupTranscriptMessage = isGroupRoomTranscriptMessage(message);
-            const previousMessage = activeTimelineMessages[index - 1];
-            const previousAgentRenderState = previousMessage
-              ? agentRenderStatesByMessageId.get(previousMessage.id)
-              : undefined;
-            const compactTurnHeader = shouldCompactConversationTurnHeader(
-              previousMessage,
-              message,
-              previousAgentRenderState?.sectionState,
-              agentSections,
-            );
-            const codexTranscriptSurface = agentCodexSurfacesByMessageId.get(agentMessage.id);
-            const codexTranscriptCells = codexTranscriptSurface?.cells ?? [];
-            // Phase C: display plan picks package_cells vs legacy; single track for final answer.
-            const displayPlanSeed = resolveAssistantDisplayPlan({
-              message,
-              surface: codexTranscriptSurface,
-            });
-            const shouldRenderLegacyTurnError = Boolean(
-              turnErrorMessage && !displayPlanSeed.suppressProjectedError,
-            );
-            // Failure-turn presentation: human-readable errorType chip and a
-            // budget-directed recovery action instead of raw codes.
-            const turnErrorTypeLabelKey = shouldRenderLegacyTurnError
-              ? resolveTurnErrorTypeLabelKey(resolveConversationTurnErrorType(message))
-              : "";
-            const turnErrorRecoveryAction = shouldRenderLegacyTurnError
-              ? resolveConversationTurnErrorRecoveryAction(message)
-              : "";
-            const timelineOptions = {
-              lang,
-              // The assistant body always comes from the canonical cell surface.
-              // Do not manufacture a second answer row in the process timeline.
-              includeAssistantText: false,
-            };
-            const agentMessageTimelineItems = buildAgentMessageTimelineItems(
-              agentMessage,
-              operationGroups.timeline,
-              timelineOptions,
-            );
-            const hasAgentMessageTimeline =
-              message.role === "assistant"
-              && hasFeedbackTimeline
-              && !turnErrorMessage
-              && !agentInboxMessage
-              && !groupTranscriptMessage
-              && agentMessageTimelineItems.length > 0;
-            const displayPlan = resolveAssistantDisplayPlan({
-              message,
-              surface: codexTranscriptSurface,
-            });
-            const timelineRendersAssistantText = false;
-            const showUserContent = agentSections.hasUserContent;
-            const steerGuidanceMessage = isSteerGuidanceMessage(message);
-            const userAuthoredMessage = message.role === "user" && !agentInboxMessage;
-            const isStreamingStatusPlaceholder = assistantTurnIsStreaming(message)
-              && showResponseBlock
-              && answerOnlyProcessMode
-              && isStreamingStatusPlaceholderContent(responseText);
-            const isResponseStreaming = assistantTurnIsStreaming(message) && showResponseBlock && !isStreamingStatusPlaceholder;
-            const copyableAnswerText = message.role === "assistant"
-              && !turnErrorMessage
-              && !assistantTurnIsStreaming(message)
-              ? responseText.trim()
-              : "";
-            const canRegenerateAnswer = message.role === "assistant"
-              && !turnErrorMessage
-              && !assistantTurnIsStreaming(message)
-              && Boolean(onRegenerateAssistantMessage)
-              // Any settled answer on a branch can regenerate; messages without
-              // a journal node id keep the legacy latest-only fallback.
-              && (Boolean(message.nodeId) || message.id === regenerableAssistantMessageId);
-            // A settled failed turn offers in-place recovery: retry reruns the
-            // turn's original user message through the same branch-aware
-            // regenerate pipeline as the regenerate action. Without a journal
-            // node id only the legacy latest-turn fallback remains, so the
-            // entry is hidden for older untargetable failures.
-            const canRetryFailedTurnMessage = message.role === "assistant"
-              && turnErrorMessage
-              && !assistantTurnIsStreaming(message)
-              && !agentInboxMessage
-              && !groupTranscriptMessage
-              && Boolean(onRegenerateAssistantMessage)
-              && (Boolean(message.nodeId) || message.id === regenerableAssistantMessageId);
-            const branchInfo = message.branch;
-            const siblingNodeIds = Array.isArray(branchInfo?.siblingNodeIds)
-              ? branchInfo.siblingNodeIds.filter((value): value is string => Boolean(value))
-              : [];
-            const siblingCount = Math.max(
-              Number(branchInfo?.siblingCount ?? 0) || 0,
-              siblingNodeIds.length,
-            );
-            const siblingIndex = Number(branchInfo?.siblingIndex ?? 0) || 0;
-            const currentNodeId = String(message.nodeId || "").trim();
-            // Fork exit: any settled journal node (user or assistant) can seed a
-            // new session; companion/private/group surfaces stay out of scope.
-            const canForkSessionFromMessage = Boolean(onForkSessionFromNode)
-              && !companionMode
-              && !agentInboxMessage
-              && !groupTranscriptMessage
-              && !assistantTurnIsStreaming(message)
-              && Boolean(currentNodeId);
-            const showVersionSwitcher = Boolean(onSwitchMessageVersion)
-              && siblingCount > 1
-              && siblingNodeIds.length > 1
-              && siblingIndex >= 1
-              && siblingIndex <= siblingNodeIds.length
-              && Boolean(currentNodeId)
-              && siblingNodeIds.includes(currentNodeId);
-            const versionSwitchDisabled = Boolean(branchVersionSwitchDisabled);
-            const previousSiblingNodeId = siblingIndex > 1 ? siblingNodeIds[siblingIndex - 2] : "";
-            const nextSiblingNodeId = siblingIndex < siblingNodeIds.length
-              ? siblingNodeIds[siblingIndex]
-              : "";
-            const showResponseSpinner = isResponseStreaming && !hasActiveProcess;
-            const defaultResponseExpanded = assistantTurnIsStreaming(message) || defaultExpandedResponseIds.has(message.id);
-            const responseExpanded = getExpansionState(message.id, "response", defaultResponseExpanded);
-            const responseSegments = showResponseBlock && !isStreamingStatusPlaceholder && !isResponseStreaming
-              ? getCachedResponseSegments(responseText)
-              : [];
-            const codexTranscriptNode = (
-              displayPlan.shouldRenderCodexSurface
-              && !agentInboxMessage
-              && !groupTranscriptMessage
-            )
-              ? renderCodexTranscriptCells(message, codexTranscriptCells, rowIdentity, companionMode)
-              : null;
-            // Todo checklist card: client-derived from the latest journaled
-            // todo_write call in this turn (no extra SSE event). Companion and
-            // private-message surfaces stay minimal by contract.
-            const todoChecklistSnapshot = message.role === "assistant"
-              && !companionMode
-              && !agentInboxMessage
-              && !groupTranscriptMessage
-              ? deriveLatestTodoChecklist(message.turnItems)
-              : undefined;
-            const todoChecklistNode = todoChecklistSnapshot ? (
-              <ConversationTodoChecklist
-                snapshot={todoChecklistSnapshot}
-                lang={lang}
-                turnSettled={hasTerminalCanonicalTurnOutcome(message)}
-              />
-            ) : null;
-            // Only force the answer body open while tokens are still streaming.
-            // Tying this to defaultResponseExpanded made the last few answers
-            // impossible to collapse (toggle flipped aria state but body stayed).
-            const shouldForceResponseBodyVisible = isResponseStreaming;
-            const isEditingMessage = userAuthoredMessage && message.id === editingMessageId;
-            const agentInboxExpanded = getExpansionState(message.id, "agentInbox", false);
-            const agentInboxPreview = agentInboxMessage ? compactPreview(agentInboxSummary(message), 140) : "";
-            const researchOrgChips = researchOrgMessageChips(message);
-            const contextNode = !companionMode && (agentRenderState.contextSections?.length ?? 0) > 0 ? (
-              <React.Suspense fallback={null}>
-                <AgentContextSectionsView sections={agentRenderState.contextSections} lang={lang} />
-              </React.Suspense>
-            ) : null;
-            const turnClassName = [
-              groupTranscriptMessage
-                ? styles.groupTranscriptTurn
-                : message.role === "assistant"
-                  ? styles.assistantTurn
-                  : agentInboxMessage
-                  ? styles.agentInboxTurn
-                  : styles.userTurn,
-              turnErrorMessage ? styles.turnErrorTurn : "",
-              compactTurnHeader ? styles.assistantTurnContinuation : "",
-              isEditingMessage ? styles.turnEditing : "",
-            ].filter(Boolean).join(" ");
-            const speakerLabel = groupTranscriptMessage
-              ? groupRoomTranscriptLabel(message)
-              : message.role === "assistant"
-                ? assistantLabel
-                : agentInboxMessage
-                  ? agentInboxSourceLabel(message)
-                  : userLabel;
-            const editDisabled = Boolean(editUserMessageDisabled);
-            const processTone = operationCollectionTone(operationGroups.timeline);
-            const processDefaultExpanded = processTone === "running";
-            const renderAgentProcessDetails = (defaultExpandedOverride?: boolean) => (
-              <>
-                {renderOperationGroup(
-                  message.id,
-                  "thought",
-                  operationGroups.thoughts,
-                  defaultExpandedOverride ?? assistantTurnIsStreaming(message),
-                )}
-                {renderAgentMentalPanel(
-                  message.id,
-                  latestAgentMentalPart(processSections),
-                  defaultExpandedOverride,
-                  assistantTurnIsStreaming(message) && operationGroups.tools.length === 0 && !agentSections.hasResponseBlock,
-                )}
-                {renderOperationGroup(
-                  message.id,
-                  "tools",
-                  operationGroups.tools,
-                  defaultExpandedOverride ?? shouldExpandToolGroupByDefault(message, operationGroups.tools),
-                )}
-              </>
-            );
-            const renderProcessDetails = () => {
-              if (hasAgentMessageTimeline) {
-                return renderAgentMessageTimeline(message, agentMessageTimelineItems, rowIdentity, agentRenderState.processSectionIds);
-              }
-              if (hasFeedbackTimeline) {
-                return renderFeedbackTimelineDetails(message.id, operationGroups.timeline);
-              }
-              return renderAgentProcessDetails(true);
-            };
-            // One assistant turn has one display source: its local turnItems cell surface.
-            const responseSectionNode = null;
-            // The fallback process rail is only useful while a future producer has
-            // not emitted a canonical cell yet. It never receives assistant text.
-            const processNode = companionMode || displayPlan.suppressProjectedProcess
-              ? null
-              : displayPlan.renderMode === "turn_items"
-                ? null
-                : hasAgentMessageTimeline
-                  ? renderAgentMessageTimeline(message, agentMessageTimelineItems, rowIdentity, agentRenderState.processSectionIds)
-                  : hasFeedbackTimeline
-                    ? renderFeedbackTimelineGroup(
-                      message.id,
-                      operationGroups.timeline,
-                      false,
-                      agentRenderState.processSectionIds,
-                    )
-                    : null;
-            const showCompactActiveTurnPlaceholder = shouldRenderCompactActiveTurnPlaceholder(message, {
-              showResponseBlock,
-              hasFeedbackTimeline,
-              hasActiveProcess,
-              turnErrorMessage,
-              // Avoid "状态" placeholder stacking above an already-visible codex process trail.
-              hasCodexSurface: Boolean(displayPlan.shouldRenderCodexSurface),
-            });
-            // Prefer compact active-turn note over projected turnStatus for in-flight shells.
-            const turnStatusNode = !companionMode && !showCompactActiveTurnPlaceholder
-              && !displayPlan.suppressProjectedTurnStatus
-              && noFinalAnswerStatusText ? (
-              <div className={styles.turnStatusNote} role="status" aria-live="polite">
-                <span className={styles.turnStatusLabel}>{lang === "zh" ? "状态" : "Status"}</span>
-                <span className={styles.turnStatusText}>{noFinalAnswerStatusText}</span>
-              </div>
-            ) : null;
-            const compactActiveTurnPlaceholderNode = !companionMode && showCompactActiveTurnPlaceholder ? (
-              <ConversationActiveTurnStatusNote
-                message={message}
-                lang={lang}
-                statusLabel={lang === "zh" ? "状态" : "Status"}
-              />
-            ) : null;
-            return (
-              <AgentMessageTurnView
-                key={rowIdentity.rowKey}
-                rowKey={rowIdentity.rowKey}
-                messageKey={rowIdentity.messageKey}
-                agentMessageId={agentMessage.id}
-                sectionCount={agentSections.sectionCount}
-                sectionKinds={agentRenderState.sectionKinds}
-                className={turnClassName}
-                compactHeader={false}
-                avatar={
-                  <ConversationTurnAvatarContent
-                    content={resolveMessageTurnAvatar(message, {
-                      resolveTurnAvatar,
-                      assistantAvatarImageUrl,
-                      assistantAvatarFallback,
-                      assistantLabel,
-                      userAvatarImageUrl,
-                      userAvatarLabel,
-                      agentInboxMessage,
-                      groupTranscriptMessage,
-                    })}
-                  />
-                }
-                speakerLabel={speakerLabel}
-                identityAccessory={
-                  isEditingMessage
-                    ? <span className={styles.turnEditBadge}>{t("editMessage")}</span>
-                    : steerGuidanceMessage
-                      ? <span className={styles.turnEditBadge}>{resolvedSafeGuidanceLabel}</span>
-                      : null
-                }
-                metaActions={
-                  <>
-                    {message.timestamp ? <span>{formatTimestamp(message.timestamp)}</span> : null}
-                    {showVersionSwitcher ? (
-                      <VActionGroup
-                        ariaLabel={t("branchVersionLabel")}
-                        className={styles.turnVersionSwitcher}
-                      >
-                        <VButton
-                          type="button"
-                          className={styles.turnIconButton}
-                          onClick={() => onSwitchMessageVersion?.(message, previousSiblingNodeId)}
-                          isDisabled={versionSwitchDisabled || !previousSiblingNodeId}
-                          title={t("switchBranchVersionPrevious")}
-                          aria-label={t("switchBranchVersionPrevious")}
-                          isIconOnly
-                          icon={<ChevronLeft size={14}/>} />
-                        <span className={styles.turnVersionLabel} aria-live="polite">
-                          {`${siblingIndex}/${siblingCount}`}
-                        </span>
-                        <VButton
-                          type="button"
-                          className={styles.turnIconButton}
-                          onClick={() => onSwitchMessageVersion?.(message, nextSiblingNodeId)}
-                          isDisabled={versionSwitchDisabled || !nextSiblingNodeId}
-                          title={t("switchBranchVersionNext")}
-                          aria-label={t("switchBranchVersionNext")}
-                          isIconOnly
-                          icon={<ChevronRight size={14}/>} />
-                      </VActionGroup>
-                    ) : null}
-                    {copyableAnswerText ? (
-                      <VButton
-                        type="button"
-                        className={styles.turnIconButton}
-                        onClick={() => handleCopyAnswer(message.id, copyableAnswerText)}
-                        title={t("copyAnswer")}
-                        aria-label={t("copyAnswer")}
-                        isIconOnly
-                        icon={copiedAnswerMessageId === message.id ? <Check size={14}/> : <Copy size={14}/>} />
-                    ) : null}
-                    {canForkSessionFromMessage ? (
-                      <VButton
-                        type="button"
-                        className={styles.turnIconButton}
-                        onClick={() => {
-                          setForkScope("visible_path");
-                          setForkDialogMessage(message);
-                        }}
-                        isDisabled={versionSwitchDisabled}
-                        title={t("forkSessionFromMessage")}
-                        aria-label={t("forkSessionFromMessage")}
-                        isIconOnly
-                        icon={<GitFork size={14}/>} />
-                    ) : null}
-                    {canRegenerateAnswer ? (
-                      <VButton
-                        type="button"
-                        className={styles.turnIconButton}
-                        onClick={() => onRegenerateAssistantMessage?.(message)}
-                        isDisabled={regenerateDisabled}
-                        isPending={regeneratePending}
-                        title={regeneratePending ? t("regeneratePending") : t("regenerateAnswer")}
-                        aria-label={regeneratePending ? t("regeneratePending") : t("regenerateAnswer")}
-                        isIconOnly
-                        icon={<RefreshCw size={14}/>} />
-                    ) : null}
-                    {userAuthoredMessage && !steerGuidanceMessage && onEditUserMessage ? (
-                      <VButton
-                        type="button"
-                        className={
-                          isEditingMessage
-                            ? `${styles.turnIconButton} ${styles.turnIconButtonActive}`
-                            : styles.turnIconButton
-                        }
-                        onClick={() => onEditUserMessage(message)}
-                        isDisabled={editDisabled}
-                        aria-pressed={isEditingMessage}
-                        title={editDisabled ? composerPlaceholder : editUserMessageLabel ?? t("editMessage")}
-                        aria-label={editUserMessageLabel ?? t("editMessage")}
-                        isIconOnly
-                        icon={<Pencil size={14}/>} />
-                    ) : null}
-                  </>
-                }
-              >
-
-                  <span
-                    hidden
-                    data-codex-transcript-cell-count={codexTranscriptCells.length}
-                    data-codex-transcript-surface-mode={codexTranscriptSurface?.mode ?? "empty"}
-                    data-codex-transcript-native-primary={displayPlan.nativePrimary ? "true" : "false"}
-                    data-assistant-render-mode={displayPlan.renderMode}
-                    data-assistant-has-turn-item-package={displayPlan.hasTurnItemPackage ? "true" : "false"}
-                    data-codex-transcript-projection-gap-reason={codexTranscriptSurface?.projectionGap?.reason ?? ""}
-                    data-codex-transcript-projection-gap-projected-cell-count={codexTranscriptSurface?.projectionGap?.projectedCellCount ?? 0}
-                  />
-                  {agentInboxMessage ? (
-                    <section className={styles.agentInboxSection}>
-                      {researchOrgChips.length > 0 ? (
-                        <div className={styles.researchOrgChipRow} aria-label={lang === "zh" ? "科研组织消息标签" : "Research organization message labels"}>
-                          {researchOrgChips.map((chip) => (
-                            <span
-                              key={chip.key}
-                              className={`${styles.researchOrgChip} ${styles[`researchOrgChip_${chip.tone}`]}`}
-                            >
-                              {chip.label}
-                            </span>
-                          ))}
-                        </div>
-                      ) : null}
-                      <VButton
-                        type="button"
-                        className={styles.agentInboxToggle}
-                        aria-expanded={agentInboxExpanded}
-                        onClick={() => toggleSection(message.id, "agentInbox", false)}
-                        title={agentInboxExpanded ? (lang === "zh" ? "折叠私信内容" : "Collapse private message") : (lang === "zh" ? "展开私信内容" : "Expand private message")}
-                        icon={agentInboxExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}><span>{lang === "zh" ? "私信内容" : "Private message"}</span>
-                        {agentInboxPreview ? <span className={styles.agentInboxPreview}>{agentInboxPreview}</span> : null}</VButton>
-                      {agentInboxExpanded ? (
-                        <div className={styles.agentInboxMessageBody}>
-                          {renderResponseText(assistantFinalAnswerText(message))}
-                        </div>
-                      ) : null}
-                    </section>
-                  ) : showUserContent ? (
-                    <AgentUserContentSectionView userContentSectionIds={agentRenderState.userContentSectionIds}>
-                      {renderResponseText(userContentText)}
-                    </AgentUserContentSectionView>
-                  ) : null}
-                  {groupTranscriptMessage ? (
-                    <div className={styles.groupTranscriptBody}>{renderResponseText(assistantFinalAnswerText(message))}</div>
-                  ) : null}
-                  {contextNode}
-
-                  {/*
-                    Codex-aligned order: process / tools first, then final answer surface.
-                    - renderCodexTranscriptCells already does processCells → finalCells inside.
-                    - When tools only exist on feedback/timeline (alongside), processNode must
-                      still precede codexTranscriptNode so the answer is not above the tools.
-                  */}
-                  {/* Checklist overview sits above the process trail: it is a
-                      progress summary, not a second process row. */}
-                  {todoChecklistNode}
-                  {processNode}
-                  {compactActiveTurnPlaceholderNode}
-                  {codexTranscriptNode}
-                  {turnStatusNode}
-                  {shouldRenderLegacyTurnError ? (
-                    <div className={styles.turnErrorNotice} role="status" aria-live="polite">
-                      <div className={styles.turnErrorNoticeIcon} aria-hidden="true">
-                        <TerminalSquare size={15} />
-                      </div>
-                      <div className={styles.turnErrorNoticeBody}>
-                        <div className={styles.turnErrorNoticeMeta}>
-                          <span>{lang === "zh" ? "运行提示" : "Runtime notice"}</span>
-                          {turnErrorTypeLabelKey ? (
-                            <span title={resolveConversationTurnErrorType(message)}>{t(turnErrorTypeLabelKey)}</span>
-                          ) : null}
-                        </div>
-                        <div className={styles.turnErrorNoticeText}>{renderResponseText(assistantFinalAnswerText(message))}</div>
-                        {buildConversationTurnErrorReasonRows(message, lang).length > 0 ? (
-                          <details className={styles.turnErrorDiagnostics}>
-                            <summary className={styles.turnErrorDiagnosticsSummary}>
-                              {lang === "zh" ? "诊断详情" : "Diagnostics"}
-                            </summary>
-                            <dl className={styles.turnErrorReasonList}>
-                              {buildConversationTurnErrorReasonRows(message, lang).map((row) => (
-                                <div key={`${row.label}-${row.value}`} className={styles.turnErrorReasonRow}>
-                                  <dt>{row.label}</dt>
-                                  <dd>{row.value}</dd>
-                                </div>
-                              ))}
-                            </dl>
-                          </details>
-                        ) : null}
-                        {turnErrorRecoveryAction === "compress_context" && onOpenComposerContextDetail ? (
-                          <div className={styles.turnErrorActions}>
-                            <VButton
-                              type="button"
-                              contentLayout="plain"
-                              className={styles.turnErrorRetryButton}
-                              onClick={onOpenComposerContextDetail}
-                              title={t("turnErrorActionCompressContextTitle")}
-                              aria-label={t("turnErrorActionCompressContext")}
-                            >
-                              <Gauge size={12}/>
-                              <span>{t("turnErrorActionCompressContext")}</span>
-                            </VButton>
-                          </div>
-                        ) : null}
-                        {canRetryFailedTurnMessage ? (
-                          <div className={styles.turnErrorActions}>
-                            <VButton
-                              type="button"
-                              contentLayout="plain"
-                              className={styles.turnErrorRetryButton}
-                              onClick={() => onRegenerateAssistantMessage?.(message)}
-                              isDisabled={regenerateDisabled}
-                              isPending={regeneratePending}
-                              title={regeneratePending ? t("retryFailedTurnPending") : t("retryFailedTurn")}
-                              aria-label={regeneratePending ? t("retryFailedTurnPending") : t("retryFailedTurn")}
-                            >
-                              <RefreshCw size={12}/>
-                              <span>{t("retryFailedTurn")}</span>
-                            </VButton>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  ) : null}
-                  {answerOnlyProcessMode ? responseSectionNode : null}
-                  {imageArtifact ? (
-                    <ConversationImageArtifactView
-                      artifact={imageArtifact}
-                      lang={lang}
-                      onPreviewImage={openImagePreview}
-                    />
-                  ) : null}
-
-                  {!answerOnlyProcessMode ? responseSectionNode : null}
-              </AgentMessageTurnView>
-            );
-                }}
-              />
-              </div>
-              );
-            })}
+            <div
+              data-conversation-virtual-host="1"
+              style={{
+                height: timelineVirtualizer.getTotalSize(),
+                position: "relative",
+              }}
+            >
+            {timelineRowPlan
+              .filter((row) => row.virtualStartPx !== null)
+              .map((rowPlan) => renderTimelineRow(rowPlan))}
+            </div>
+            {timelineRowPlan
+              .filter((row) => row.virtualStartPx === null)
+              .map((rowPlan) => renderTimelineRow(rowPlan))}
             {companionTypingMessage ? (
               <div
                 className={styles.companionTypingTurn}
@@ -5072,13 +5974,6 @@ export function ConversationView({
                   />
                 </div>
               </div>
-            ) : null}
-            {timelineVirtualRange.bottomSpacerPx > 0 ? (
-              <div
-                aria-hidden="true"
-                className={styles.timelineVirtualSpacer}
-                style={{ height: timelineVirtualRange.bottomSpacerPx }}
-              />
             ) : null}
             {turnError?.message && !hasVisibleTurnErrorMessage && !turnErrorSupersededByFinalAnswer ? (
               <div className={styles.turnError} role="status" aria-live="polite">
@@ -5141,6 +6036,20 @@ export function ConversationView({
         )}
       </div>
 
+{selectionQuoteMenu ? (
+        <ConversationSelectionQuoteMenu
+          position={selectionQuoteMenu.position}
+          quoteLabel={lang === "zh" ? "引用到输入框" : "Quote to composer"}
+          referenceLabel={lang === "zh" ? "作为引用" : "As reference"}
+          copyLabel={lang === "zh" ? "复制" : "Copy"}
+          onQuote={handleSelectionQuoteToComposer}
+          onReference={selectionQuoteMenu.sourceMessageId && onAddComposerReference
+            ? handleSelectionReferenceToComposer
+            : undefined}
+          onCopy={handleSelectionCopy}
+        />
+      ) : null}
+
 {!isAtBottom ? (
         <VButton
           type="button"
@@ -5152,7 +6061,15 @@ export function ConversationView({
         >
           <ArrowDown size={16} />
         </VButton>
-      ) : null}      </div>
+      ) : null}
+
+      <ConversationTurnNavigator
+        entries={timelineTurnNavEntries}
+        currentIndex={timelineTurnNavCurrentIndex}
+        ariaLabel={lang === "zh" ? "会话轮次导航" : "Turn navigation"}
+        onNavigate={handleTurnNavigate}
+      />
+      </div>
 
       {toolApproval && !toolApprovalConsumedRef.current ? (
         <div className={styles.toolApprovalFallback} data-codex-tool-approval-fallback="true">
@@ -5162,6 +6079,11 @@ export function ConversationView({
 
       {showComposer ? (
       <div className={composerVariant === "codex" ? styles.composerCodex : styles.composer}>
+        {/* Inline edit owns the row editor; the composer field steps aside and
+            only session status (the followup queue) keeps its slot here. */}
+        {editingMessageId ? (
+          composerFollowupQueueBar
+        ) : (
         <div
           className={
             composerDragActive
@@ -5173,54 +6095,34 @@ export function ConversationView({
           onDragLeave={handleComposerDragLeave}
           onDrop={handleComposerDrop}
         >
-          {composerError ? <p className={styles.composerError}>{composerError}</p> : null}
+          {/* Upload-failure repair: the error row grows a retry-all action only
+              while failed attachment chips exist, so unrelated composer errors
+              stay plain. */}
+          {composerError ? (
+            <p className={styles.composerError} role="alert">
+              {composerError}
+              {composerAttachments.some((attachment) => attachment.uploadStatus === "failed") && onRetryComposerAttachmentUploads ? (
+                <VButton
+                  className={styles.composerErrorRetryButton}
+                  variant="ghost"
+                  type="button"
+                  isDisabled={composerPending}
+                  onClick={onRetryComposerAttachmentUploads}
+                  title={t("retryUpload")}
+                >
+                  <RefreshCw size={12} aria-hidden="true" />
+                  <span>{t("retryUpload")}</span>
+                </VButton>
+              ) : null}
+            </p>
+          ) : null}
           {composerGuidance ? (
             <div className={styles.composerGuidance} role="status" aria-live="polite" data-composer-guidance>
               <span className={styles.composerGuidanceIcon} aria-hidden="true">i</span>
               <span>{composerGuidance}</span>
             </div>
           ) : null}
-          {followupQueue.length ? (
-            <ConversationFollowupQueueBar
-              items={followupQueue}
-              lang={lang}
-              variant={composerVariant}
-              editLabel={t("editFollowupQueue")}
-              withdrawLabel={t("withdrawFollowupQueue")}
-              steerLabel={followupQueueSteerLabel ?? t("immediateSteer")}
-              onUpdate={onFollowupQueueUpdate ?? (() => undefined)}
-              onRemove={onFollowupQueueRemove ?? (() => undefined)}
-              onMove={onFollowupQueueMove ?? (() => undefined)}
-              onSteer={onFollowupQueueSteer}
-            />
-          ) : null}
-          {composerModeNotice ? (
-            <div
-              className={styles.composerEditModeBar}
-              role="status"
-              title={composerModeNotice}
-              aria-label={composerModeNotice}
-            >
-              <span className={styles.composerEditModeIcon} aria-hidden="true">
-                <Pencil size={14} />
-              </span>
-              <span className={styles.composerEditModeCopy}>
-                <span className={styles.composerEditModeLabel}>{t("editMessage")}</span>
-                {composerEditFailureNote ? (
-                  <span className={styles.composerEditModeWarning}>{composerEditFailureNote}</span>
-                ) : null}
-              </span>
-              {onCancelComposerMode ? (
-                <VButton
-                  type="button"
-                  className={styles.composerEditModeCancel}
-                  onClick={onCancelComposerMode}
-                >
-                  {cancelComposerModeLabel ?? t("cancelEditMessage")}
-                </VButton>
-              ) : null}
-            </div>
-          ) : null}
+          {composerFollowupQueueBar}
           {composerAttachments.length ? (
             <div
               className={styles.composerAttachmentTray}
@@ -5231,8 +6133,18 @@ export function ConversationView({
                 const attachmentIsImage = isImageAttachment(attachment);
                 const previewLabel = t("composerAttachmentPreviewLabel").replace("{filename}", attachment.filename);
                 const sizeLabel = attachmentSizeLabel(attachment.sizeBytes);
+                const uploadFailed = attachment.uploadStatus === "failed";
+                const uploading = attachment.uploadStatus === "uploading";
                 return (
-                  <div key={attachment.id} className={styles.composerAttachmentChip} role="listitem">
+                  <div
+                    key={attachment.id}
+                    className={uploadFailed
+                      ? `${styles.composerAttachmentChip} ${styles.composerAttachmentChipFailed}`
+                      : styles.composerAttachmentChip}
+                    role="listitem"
+                    aria-invalid={uploadFailed || undefined}
+                    title={uploadFailed ? t("attachmentUploadFailedRetryHint") : undefined}
+                  >
                     {attachmentIsImage ? (
                       <VButton
                         className={styles.composerAttachmentPreview}
@@ -5261,10 +6173,31 @@ export function ConversationView({
                     )}
                     <span className={styles.composerAttachmentCopy}>
                       <span className={styles.composerAttachmentName} title={attachment.filename}>{attachment.filename}</span>
-                      {sizeLabel ? (
+                      {uploading ? (
+                        <span className={styles.composerAttachmentStatusUploading}>
+                          <LoaderCircle size={11} aria-hidden="true" className={styles.composerAttachmentUploadingIcon} />
+                          {t("attachmentUploading")}
+                        </span>
+                      ) : sizeLabel ? (
                         <span className={styles.composerAttachmentMeta}>{sizeLabel}</span>
                       ) : null}
+                      {uploadFailed ? (
+                        <span className={styles.composerAttachmentStatusFailed}>{t("attachmentUploadFailedRetryHint")}</span>
+                      ) : null}
                     </span>
+                    {uploadFailed && onRetryComposerAttachment ? (
+                      <VButton
+                        className={styles.composerAttachmentRetryButton}
+                        isIconOnly
+                        variant="ghost"
+                        type="button"
+                        onClick={() => onRetryComposerAttachment(attachment.id)}
+                        title={t("retryUpload")}
+                        aria-label={`${t("retryUpload")}: ${attachment.filename}`}
+                      >
+                        <RefreshCw size={13} aria-hidden="true" />
+                      </VButton>
+                    ) : null}
                     {onRemoveComposerAttachment ? (
                       <VButton
                         className={styles.composerAttachmentRemoveButton}
@@ -5299,11 +6232,19 @@ export function ConversationView({
                     ? t("composerReferenceKindKnowledgeItem")
                     : kind === "file"
                       ? t("composerReferenceKindFile")
-                      : t("composerReferenceKindSession");
+                      : kind === "message"
+                        ? t("composerReferenceKindMessage")
+                        : t("composerReferenceKindSession");
                 return (
                   <div key={`${kind}:${referenceId}`} className={styles.composerReferenceChip} role="listitem">
                     <span className={styles.composerReferenceIcon} aria-hidden="true">
-                      {kind === "knowledge_base" || kind === "knowledge_item" ? <BookOpen size={13} /> : kind === "file" ? <FileText size={13} /> : <Link2 size={13} />}
+                      {kind === "knowledge_base" || kind === "knowledge_item"
+                        ? <BookOpen size={13} />
+                        : kind === "file"
+                          ? <FileText size={13} />
+                          : kind === "message"
+                            ? <Quote size={13} />
+                            : <Link2 size={13} />}
                     </span>
                     <span className={styles.composerReferenceCopy}>
                       <strong title={title}>{title}</strong>
@@ -5539,6 +6480,25 @@ export function ConversationView({
                   return;
                 }
               }
+              // Yield-aware Esc→stop: ghost/slash/typeahead branches above
+              // return when they consume Escape; this fallback only fires when
+              // the key is still unclaimed and a turn is running. Repeats are
+              // deduped downstream by the sessionStopping stop guard.
+              if (
+                shouldStopComposerOnEscape({
+                  key: event.key,
+                  defaultPrevented: event.defaultPrevented,
+                  composing: event.nativeEvent.isComposing,
+                  actionMode: resolvedActionMode,
+                  hasStopHandler: Boolean(onStop),
+                  ghostVisible: Boolean(composerPromptSuggestion.ghost),
+                  slashSuggestionsOpen: showSlashSuggestions,
+                  referenceTypeaheadOpen: showReferenceSuggestions,
+                })
+              ) {
+                event.preventDefault();
+                onStop?.();
+              }
               if (
                 shouldSubmitComposerOnKeydown({
                   key: event.key,
@@ -5602,6 +6562,7 @@ export function ConversationView({
             </div>
           </div>
         </div>
+        )}
         <VNativeInput
           ref={attachmentInputRef}
           className={styles.hiddenAttachmentInput}
@@ -5654,4 +6615,4 @@ export function ConversationView({
       />
     </div>
   );
-}
+});

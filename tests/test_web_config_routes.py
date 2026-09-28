@@ -1047,6 +1047,7 @@ def test_config_workspace_exposes_editor_schema_without_launcher_owned_startup_s
     assert sections_by_id["health-diagnostics"]["title"] == "健康诊断"
     assert any(section["id"] == "overview" for section in payload["sections"])
     assert any(section["id"] == "shell" for section in payload["sections"])
+    assert any(section["id"] == "shortcuts" for section in payload["sections"])
 
 
 def test_user_avatar_editor_hint_describes_config_adjacent_storage():

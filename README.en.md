@@ -4,12 +4,11 @@
 <p align="center">Native multi-agent setup · Agent communication · Team collaboration · Self and supervised evolution · Virtual characters</p>
 
 <p align="center">
-  <a href="README.md">中文</a> · English<br>
-  <a href="#native-multi-agent-setup">Build agents</a> · <a href="#agent-communication">Communication</a> · <a href="#team-collaboration">Teams</a> · <a href="#self-evolution-and-supervised-evolution">Evolution</a> · <a href="#virtual-characters">Virtual characters</a> · <a href="#get-started">Get started</a>
+  <a href="README.md">中文</a> · English
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/Code-MIT-38bdae?style=flat-square" alt="Code license: MIT"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/CCDawn/Vibelution?style=flat-square" alt="MIT License"></a>
   <a href="docs/guides/install-windows.md"><img src="https://img.shields.io/badge/Desktop-Windows-4979e8?style=flat-square" alt="Windows desktop workbench"></a>
   <a href="https://github.com/CCDawn/Vibelution/issues"><img src="https://img.shields.io/badge/Feedback-welcome-f2b36d?style=flat-square" alt="Feedback welcome"></a>
 </p>
@@ -29,6 +28,19 @@ From research teams to long-term character interactions, five capabilities form 
 | **Team collaboration** | Assign roles, connect tasks and human checkpoints, and use the research canvas for source collection, knowledge organization, hypothesis review, and experiment design |
 | **Self and supervised evolution** | Inspect, modify, and validate against an explicit objective, or evaluate improvements with datasets and baseline-versus-candidate comparisons |
 | **Virtual characters** | Bind character life capabilities to agents, including schedules, emotions, diaries, long-term memory, and proactive messages |
+
+## Contents
+
+- [Watch a research team at work](#watch-a-research-team-at-work)
+- [Native multi-agent setup](#native-multi-agent-setup)
+- [Agent communication](#agent-communication)
+- [Team collaboration](#team-collaboration)
+- [Self-evolution and supervised evolution](#self-evolution-and-supervised-evolution)
+- [Virtual characters](#virtual-characters)
+- [Models, tools, and the research environment](#models-tools-and-the-research-environment)
+- [Get started](#get-started)
+- [Related projects](#related-projects)
+- [Documentation and contributing](#documentation-and-contributing)
 
 ## Watch a research team at work
 
@@ -178,6 +190,13 @@ On macOS or Linux, follow the platform guides ([macOS](docs/guides/install-macos
 [Windows installation](docs/guides/install-windows.md) · [macOS installation](docs/guides/install-macos.md) · [Linux installation](docs/guides/install-linux.md) · [Development and contributing](CONTRIBUTING.md) · [Linux deployment reference](docs/ops/linux-bootstrap.md)
 
 The workbench runs locally, using models you configure. Cloud model requests are sent to the selected provider and may incur fees; credentials and runtime configuration live outside the repository.
+
+## Related projects
+
+- [briefbound-skills](https://github.com/CCDawn/briefbound-skills) — Briefbound Agent Skills
+- [Codex-Dynamic-Skin](https://github.com/CCDawn/Codex-Dynamic-Skin) — Codex dynamic wallpaper and themes
+- [harmony-codex](https://github.com/CCDawn/harmony-codex) — operate Codex Desktop from a HarmonyOS phone
+- [pc-touchpad](https://github.com/CCDawn/pc-touchpad) — HarmonyOS phone as a Windows touchpad
 
 ## Documentation and contributing
 

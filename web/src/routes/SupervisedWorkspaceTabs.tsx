@@ -51,6 +51,11 @@ function supervisedFlowHint(view: SupervisedWorkspaceView, t: (key: TranslationK
   return t("supervisedFlowReviewHint");
 }
 
+export function supervisedStageTabTitle(label: string, status?: string) {
+  const shortStatus = String(status || "").trim();
+  return shortStatus ? `${label} · ${shortStatus}` : label;
+}
+
 export function SupervisedWorkspaceTabs({
   activeView,
   activeWorkflowStepId,
@@ -74,7 +79,7 @@ export function SupervisedWorkspaceTabs({
       className={styles.flowTabsRootClass}
       listClassName={styles.flowTabsClass}
       triggerClassName={styles.flowTabClass}
-      aria-label={t("navSupervisedEvolution")}
+      aria-label={t("supervisedRunStage")}
       value={activeStepKey}
       onValueChange={(value) => {
         const step = WORKFLOW_STEPS.find((item) => item.key === value);
@@ -86,22 +91,19 @@ export function SupervisedWorkspaceTabs({
         const label = supervisedFlowLabel(step.view, t);
         const hint = supervisedFlowHint(step.view, t);
         const summary = summaries[step.key];
-        const tabDescription = [label, summary?.status, summary?.detail]
-          .filter(Boolean)
-          .join(" ");
+        const tabDescription = supervisedStageTabTitle(label, summary?.status);
         return {
           id: step.key,
-          title: tabDescription,
+          title: [tabDescription, hint].filter(Boolean).join(" — "),
           label: (
             <>
               <span data-step-index className={styles.stepIndexClass}>{index + 1}</span>
               <span className={styles.stepBodyClass}>
                 <span className={styles.stepLabelClass}>{label}</span>
                 <span className={styles.stepHintClass}>{hint}</span>
-                {summary ? (
+                {summary?.status ? (
                   <span className={styles.stepMetaClass}>
                     <span className={styles.stepMetaItemClass}>{summary.status}</span>
-                    {summary.detail ? <span className={styles.stepMetaItemClass}>{summary.detail}</span> : null}
                   </span>
                 ) : null}
               </span>

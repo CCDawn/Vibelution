@@ -182,3 +182,143 @@ def test_ensure_agent_workspace_only_creates_missing_directories(tmp_path, monke
 
     assert mkdir_calls == [missing]
     assert missing.is_dir()
+
+
+def test_memory_policy_normalize_defaults_enabled_and_keeps_explicit_false(
+    tmp_path, monkeypatch
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Memory Switch Agent"
+    )
+
+    legacy_policy = agent_directory_service.resolve_memory_policy_for_agent(
+        agent["agentId"]
+    )
+    assert legacy_policy["enabled"] is True
+
+    normalized = agent_directory_service.normalize_memory_policy(
+        {"readSharedGroups": ["project"]},
+        "memory-custom",
+        "workspace/agents/agent-x",
+    )
+    assert normalized["enabled"] is True
+    assert normalized["readSharedGroups"] == ["project"]
+
+    assert (
+        agent_directory_service.normalize_memory_policy(
+            {"enabled": 0}, "memory-custom", "workspace/agents/agent-x"
+        )["enabled"]
+        is False
+    )
+    assert (
+        agent_directory_service.normalize_memory_policy(
+            {"enabled": 1}, "memory-custom", "workspace/agents/agent-x"
+        )["enabled"]
+        is True
+    )
+
+
+def test_active_agent_runtime_strips_personal_memory_write_tools_when_disabled(
+    tmp_path, monkeypatch
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Memory Off Agent"
+    )
+    agent_id = agent["agentId"]
+
+    with agent_directory_service.active_agent_runtime(agent_id) as runtime:
+        allowed = runtime["toolPolicy"]["allowedTools"]
+        assert "append_personal_memory_tool" in allowed
+        assert "supersede_personal_memory_tool" in allowed
+
+    agent_directory_service.update_agent_instance(
+        agent_id, memory_policy={"enabled": False}
+    )
+
+    with agent_directory_service.active_agent_runtime(agent_id) as runtime:
+        allowed = runtime["toolPolicy"]["allowedTools"]
+        preferred = runtime["toolPolicy"]["preferredTools"]
+        for name in (
+            "append_personal_memory_tool",
+            "supersede_personal_memory_tool",
+            "append_episodic_memory_tool",
+            "supersede_episodic_memory_tool",
+        ):
+            assert name not in allowed
+            assert name not in preferred
+        assert runtime["memoryPolicy"]["enabled"] is False
+
+    persisted = agent_directory_service.get_agent(agent_id)
+    assert "append_personal_memory_tool" in persisted["toolPolicy"]["allowedTools"]
+    assert persisted["memoryPolicy"]["enabled"] is False
+
+
+def test_runtime_context_block_skips_personal_memory_section_when_disabled(
+    tmp_path, monkeypatch
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Memory Context Agent"
+    )
+    agent_id = agent["agentId"]
+
+    enabled_block = agent_directory_service.build_agent_runtime_context_block(agent_id)
+    assert "## 个人记忆" in enabled_block
+
+    agent_directory_service.update_agent_instance(
+        agent_id, memory_policy={"enabled": False}
+    )
+    read_calls: list[str] = []
+    real_list = agent_directory_service.list_current_episodic_events
+
+    def tracked_list_episodes(tracked_agent_id, **kwargs):
+        read_calls.append(str(tracked_agent_id))
+        return real_list(tracked_agent_id, **kwargs)
+
+    monkeypatch.setattr(
+        agent_directory_service, "list_current_episodic_events", tracked_list_episodes
+    )
+    disabled_block = agent_directory_service.build_agent_runtime_context_block(agent_id)
+    assert "## 个人记忆" not in disabled_block
+    assert read_calls == []
+
+
+def test_team_knowledge_access_lines_cache_hits_and_invalidates_on_agent_update(
+    tmp_path, monkeypatch
+):
+    """访问行解析缓存：同状态重复构建零重读；agent 记录更新后立即失效。"""
+
+    from core.web.services import chat_room_service, team_knowledge_service, team_service
+    from core.web.services.agent_directory import projections as agent_directory_projections
+
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
+    for module in (agent_directory_service, chat_room_service, team_service, team_knowledge_service):
+        monkeypatch.setattr(module, "PROJECT_ROOT", tmp_path)
+    agent_directory_projections._reset_team_knowledge_access_cache()
+
+    agent = agent_directory_service.create_agent_instance(display_name="Cache Probe Agent")
+    agent_id = agent["agentId"]
+
+    overview_calls: list[str] = []
+    real_overview = team_knowledge_service.list_knowledge_overview
+
+    def counting_overview(*args, **kwargs):
+        overview_calls.append(str(kwargs.get("agent_id") or ""))
+        return real_overview(*args, **kwargs)
+
+    monkeypatch.setattr(team_knowledge_service, "list_knowledge_overview", counting_overview)
+
+    first_block = agent_directory_service.build_agent_runtime_context_block(agent_id)
+    assert "未配置可读知识库" in first_block
+    assert overview_calls == [agent_id]
+
+    second_block = agent_directory_service.build_agent_runtime_context_block(agent_id)
+    assert overview_calls == [agent_id]
+    assert second_block == first_block
+
+    agent_directory_service.update_agent_instance(agent_id, memory_policy={"enabled": False})
+    third_block = agent_directory_service.build_agent_runtime_context_block(agent_id)
+    assert overview_calls == [agent_id, agent_id]
+    assert "未配置可读知识库" in third_block

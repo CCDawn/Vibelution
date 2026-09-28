@@ -326,6 +326,39 @@ def bulk_discard_chat_review_candidates(
     return payload
 
 
+def get_chat_curation_model_stats(*, project_root: Path | None = None) -> dict[str, Any]:
+    """Aggregate per-model curation counts from decided chat review items.
+
+    Counts are per conversation turn (not per candidate) so overlapping
+    windows do not multiply a model's footprint: each decided item contributes
+    one count per turn whose metadata records an ``llm_model_id`` bucket
+    (missing ids roll into the empty-string bucket). Sorted by total volume
+    descending, then model id for stability.
+    """
+
+    root = (project_root or PROJECT_ROOT).resolve()
+    paths = resolve_chat_dataset_paths(project_root=root)
+    stats: dict[str, dict[str, int]] = {}
+    for item in list_review_items(paths.review_queue_path):
+        status = _status(item)
+        if status not in {"positive", "negative"}:
+            continue
+        bucket_key = "included" if status == "positive" else "excluded"
+        segment = item.get("segment") if isinstance(item.get("segment"), dict) else {}
+        for raw_turn in list(segment.get("conversation_turns") or []):
+            if not isinstance(raw_turn, dict):
+                continue
+            turn_metadata = raw_turn.get("metadata") if isinstance(raw_turn.get("metadata"), dict) else {}
+            model_id = str(turn_metadata.get("llm_model_id") or "").strip()
+            row = stats.setdefault(model_id, {"modelId": model_id, "included": 0, "excluded": 0})
+            row[bucket_key] += 1
+    models = sorted(
+        stats.values(),
+        key=lambda row: (-(row["included"] + row["excluded"]), row["modelId"]),
+    )
+    return {"models": models}
+
+
 def _get_pending_candidate(candidate_id: str, *, project_root: Path) -> dict[str, Any]:
     paths = resolve_chat_dataset_paths(project_root=project_root)
     item = get_review_item(str(candidate_id or "").strip(), paths.review_queue_path)
@@ -603,6 +636,7 @@ __all__ = [
     "ChatReviewDecisionValidationError",
     "approve_chat_review_candidate",
     "bulk_discard_chat_review_candidates",
+    "get_chat_curation_model_stats",
     "get_chat_review_candidate",
     "get_chat_review_queue",
     "reject_chat_review_candidate",

@@ -6,6 +6,7 @@ import copy
 import hashlib
 import json
 import os
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -1271,15 +1272,75 @@ def _legacy_v1_public_payload(public_config: dict | None) -> bool:
         return False
 
 
+# load_public_config 进程内签名缓存：
+# - 热路径（get_web_language 等）每请求调用 1-4 次，全量读盘 + tomllib 解析 +
+#   规范化 + legacy capability 升级检查占大头；按 (path, mtime_ns, size) 签名
+#   命中时直接返回深拷贝，签名变化或 stat 失败才重读重解析。
+# - 默认路径的命中还会跳过 ensure_global_config_initialized。那一步会建目录、
+#   补 example、并检查薄 starter，不能放在每次会话读取前面。文件缺失或签名
+#   未命中时仍先初始化，再按初始化后的签名读取。
+# - key 里含 allow_legacy_v1：显式传参与 None 自动推导的结果不同，分区缓存。
+# - upgrade_legacy_capability_cache_if_needed 幂等且只写 catalog 旁路文件，
+#   只在 cache miss 时执行一次即可；写入本身不改 config 文件签名。
+# - 返回值始终是独立深拷贝：调用方直接改动不影响缓存与其他调用方。
+_PUBLIC_CONFIG_CACHE_LOCK = threading.RLock()
+_PUBLIC_CONFIG_CACHE: dict[tuple[str, int, int, bool | None], dict[str, Any]] = {}
+_PUBLIC_CONFIG_CACHE_LIMIT = 8
+
+
+def _reset_public_config_cache() -> None:
+    """测试专用：清空 load_public_config 的签名缓存。"""
+
+    with _PUBLIC_CONFIG_CACHE_LOCK:
+        _PUBLIC_CONFIG_CACHE.clear()
+
+
+def _public_config_file_signature(config_path: Path) -> tuple[str, int, int] | None:
+    try:
+        stat = config_path.stat()
+    except OSError:
+        return None
+    return (str(config_path), int(stat.st_mtime_ns), int(stat.st_size))
+
+
+def _cached_public_config(resolved: Path, allow_legacy_v1: bool | None) -> dict[str, Any] | None:
+    signature = _public_config_file_signature(resolved)
+    if signature is None:
+        return None
+    cache_key = (signature[0], signature[1], signature[2], allow_legacy_v1)
+    with _PUBLIC_CONFIG_CACHE_LOCK:
+        cached = _PUBLIC_CONFIG_CACHE.get(cache_key)
+    if cached is None:
+        return None
+    return copy.deepcopy(cached)
+
+
 def load_public_config(config_path: Path | None = None, *, allow_legacy_v1: bool | None = None) -> dict:
+    if config_path is None:
+        cached = _cached_public_config(Path(CONFIG_PATH).expanduser().resolve(), allow_legacy_v1)
+        if cached is not None:
+            return cached
     resolved = _resolve_public_config_path(config_path)
+    signature = _public_config_file_signature(resolved)
+    cache_key: tuple[str, int, int, bool | None] | None = None
+    if signature is not None:
+        cache_key = (signature[0], signature[1], signature[2], allow_legacy_v1)
+        cached = _cached_public_config(resolved, allow_legacy_v1)
+        if cached is not None:
+            return cached
     raw = _load_raw_public_config(resolved)
     upgrade_legacy_capability_cache_if_needed(raw, config_path=resolved)
     if allow_legacy_v1 is None:
         allow_legacy_v1 = _legacy_v1_public_payload(raw)
-    return strip_runtime_model_capability_fields(
+    payload = strip_runtime_model_capability_fields(
         _canonicalize_public_config(raw, allow_legacy_v1=bool(allow_legacy_v1))
     )
+    if cache_key is not None:
+        with _PUBLIC_CONFIG_CACHE_LOCK:
+            _PUBLIC_CONFIG_CACHE[cache_key] = copy.deepcopy(payload)
+            while len(_PUBLIC_CONFIG_CACHE) > _PUBLIC_CONFIG_CACHE_LIMIT:
+                _PUBLIC_CONFIG_CACHE.pop(next(iter(_PUBLIC_CONFIG_CACHE)))
+    return payload
 
 
 def build_effective_config(public_config: dict) -> AppConfig:

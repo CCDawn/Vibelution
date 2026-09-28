@@ -35,13 +35,13 @@ export type AgentFilterRailProps = {
 };
 
 const GROUP_BUTTON_BASE =
-  "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 w-full min-h-[34px] px-[9px] py-[6px] rounded-none border-0 border-b border-[var(--vui-border-hairline)] bg-transparent text-[var(--fg-secondary)] text-left transition-[background,color,border-color] duration-150 hover:bg-[var(--vui-surface-row-hover)] hover:text-[var(--fg-primary)]";
+  "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 w-full min-h-[var(--vui-control-height-md)] px-[9px] py-[6px] rounded-none border-0 border-b border-[var(--vui-border-hairline)] bg-transparent text-[var(--fg-secondary)] text-left transition-[background,color,border-color] duration-150 hover:bg-[var(--vui-surface-row-hover)] hover:text-[var(--fg-primary)]";
 
 const GROUP_BUTTON_ACTIVE =
   "border-l-2 border-l-[var(--accent-warm)] bg-[color-mix(in_srgb,var(--accent-warm)_9%,transparent)] text-[var(--fg-primary)]";
 
 const STATUS_BUTTON_BASE =
-  "inline-flex min-w-0 flex-1 items-center justify-between gap-2 min-h-[30px] px-2.5 rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-transparent text-[var(--fg-secondary)] text-[0.76rem] font-bold transition-[background,color,border-color] duration-150 hover:border-[var(--border-strong)] hover:bg-[var(--vui-surface-row-hover)] hover:text-[var(--fg-primary)]";
+  "inline-flex min-w-0 flex-1 items-center justify-between gap-2 min-h-[var(--vui-control-height-sm)] px-2.5 rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-transparent text-[var(--fg-secondary)] text-vui-2xs font-bold transition-[background,color,border-color] duration-150 hover:border-[var(--border-strong)] hover:bg-[var(--vui-surface-row-hover)] hover:text-[var(--fg-primary)]";
 
 const STATUS_BUTTON_ACTIVE =
   "border-[color-mix(in_srgb,var(--fg-primary)_18%,var(--border-soft))] bg-[var(--vui-control-muted)] text-[var(--fg-primary)]";
@@ -50,13 +50,13 @@ const GROUP_LABEL =
   "inline-flex items-center gap-2 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap";
 
 const COUNT_BADGE =
-  "inline-flex min-h-5 min-w-5 items-center justify-center rounded-[6px] bg-[var(--vui-control-muted)] px-1 text-[0.72rem] font-bold not-italic text-[var(--fg-secondary)]";
+  "inline-flex min-h-5 min-w-5 items-center justify-center rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-1 text-vui-2xs font-bold not-italic text-[var(--fg-secondary)]";
 
 const HEALTH_BADGE =
-  "inline-flex items-center justify-center gap-1 min-w-[22px] min-h-[22px] px-[7px] rounded-full text-[0.72rem] not-italic bg-[color-mix(in_srgb,var(--accent-warm)_12%,transparent)] text-[var(--accent-warm-2)]";
+  "inline-flex items-center justify-center gap-1 min-w-[22px] min-h-[22px] px-[7px] rounded-full text-vui-2xs not-italic bg-[color-mix(in_srgb,var(--accent-warm)_12%,transparent)] text-[var(--accent-warm-2)]";
 
 const DETAILS_SUMMARY =
-  "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 min-h-[30px] px-2.5 rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-transparent text-[var(--fg-secondary)] text-[0.76rem] font-bold cursor-pointer list-none [&::-webkit-details-marker]:hidden hover:border-[var(--border-strong)] hover:bg-[var(--vui-surface-row-hover)] hover:text-[var(--fg-primary)]";
+  "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 min-h-[var(--vui-control-height-sm)] px-2.5 rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-transparent text-[var(--fg-secondary)] text-vui-2xs font-bold cursor-pointer list-none [&::-webkit-details-marker]:hidden hover:border-[var(--border-strong)] hover:bg-[var(--vui-surface-row-hover)] hover:text-[var(--fg-primary)]";
 
 function FilterSection({
   section,
@@ -69,7 +69,7 @@ function FilterSection({
 }) {
   return (
     <section data-vui-product="agent-filter-section" className="grid gap-[5px] min-w-0">
-      <p className="m-0 px-0.5 text-[var(--fg-tertiary)] text-[0.6rem] font-bold tracking-[0.08em] leading-[1.2] uppercase">
+      <p className="m-0 px-0.5 text-[var(--fg-tertiary)] text-vui-micro-10 font-bold tracking-[0.08em] leading-[1.2] uppercase">
         {section.label}
       </p>
       <div className="grid min-w-0">
@@ -151,7 +151,7 @@ export function AgentFilterRail({
           placeholder={searchPlaceholder}
           onChange={(event) => onSearchChange(event.target.value)}
           aria-label={searchPlaceholder}
-          className="min-w-0 w-full !border-0 !bg-transparent !px-0 !shadow-none outline-0 text-[var(--fg-primary)] text-[0.82rem] font-[inherit]"
+          className="min-w-0 w-full !border-0 !bg-transparent !px-0 !shadow-none outline-0 text-[var(--fg-primary)] text-vui-micro-13 font-[inherit]"
         />
       </label>
 

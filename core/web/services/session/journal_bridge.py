@@ -21,7 +21,10 @@ from core.chat.conversation_ledger import (
     load_conversation_events,
 )
 from core.chat.session_catalog import notify_session_catalog_dirty
-from core.chat.turn_journal import TERMINAL_EVENTS
+from core.chat.turn_journal import (
+    TERMINAL_EVENTS,
+    set_turn_transition_guard_hook,
+)
 
 from ..runtime_scene_service import record_runtime_scene_event
 
@@ -37,7 +40,9 @@ _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION = threading.Condition(
     _SESSION_CONVERSATION_EVENTS_CACHE_LOCK
 )
 _SESSION_CONVERSATION_EVENTS_CACHE: dict[str, dict[str, Any]] = {}
-_SESSION_CONVERSATION_EVENTS_INFLIGHT: dict[str, object] = {}
+_SESSION_CONVERSATION_EVENTS_INFLIGHT: dict[str, tuple[object, float]] = {}
+_SESSION_EVENTS_INFLIGHT_STALE_SECONDS = 30.0
+_SESSION_EVENTS_INFLIGHT_POLL_SECONDS = 5.0
 
 
 def _perf_counter() -> float:
@@ -122,7 +127,14 @@ def load_session_conversation_events_cached(
     *,
     project_root: Path | None = None,
 ) -> list[Any]:
-    """Load ledger events with signature cache + single-flight inflight wait."""
+    """Load ledger events with signature cache + single-flight inflight wait.
+
+    Inflight slots carry a start timestamp and waiters take over a slot that
+    exceeded ``_SESSION_EVENTS_INFLIGHT_STALE_SECONDS`` — a stuck or leaked
+    owner (load hanging on AV/file-lock, or a BaseException escaping the
+    ``except Exception`` cleanup) otherwise blocks every ledger read of that
+    session forever. Mirrors the stale-takeover protection in list_cache.
+    """
 
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
@@ -141,21 +153,26 @@ def load_session_conversation_events_cached(
             if cached and cached.get("signature") == signature:
                 cached["last_access"] = now
                 return list(cached.get("events") or ())
-            if cache_key not in _SESSION_CONVERSATION_EVENTS_INFLIGHT:
-                _SESSION_CONVERSATION_EVENTS_INFLIGHT[cache_key] = owner
+            inflight = _SESSION_CONVERSATION_EVENTS_INFLIGHT.get(cache_key)
+            if inflight is None or (now - inflight[1]) >= _SESSION_EVENTS_INFLIGHT_STALE_SECONDS:
+                _SESSION_CONVERSATION_EVENTS_INFLIGHT[cache_key] = (owner, now)
                 break
-            _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION.wait()
+            _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION.wait(timeout=_SESSION_EVENTS_INFLIGHT_POLL_SECONDS)
 
     try:
         events = list(load_conversation_events(root, normalized_session_id) or [])
-    except Exception:
+    except BaseException:
+        # BaseException：KeyboardInterrupt/SystemExit 也必须释放槽位，
+        # 否则该会话的所有后续读都在 wait() 上永久阻塞。
         with _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION:
-            if _SESSION_CONVERSATION_EVENTS_INFLIGHT.get(cache_key) is owner:
+            inflight = _SESSION_CONVERSATION_EVENTS_INFLIGHT.get(cache_key)
+            if inflight is not None and inflight[0] is owner:
                 _SESSION_CONVERSATION_EVENTS_INFLIGHT.pop(cache_key, None)
             _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION.notify_all()
         raise
     with _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION:
-        if _SESSION_CONVERSATION_EVENTS_INFLIGHT.get(cache_key) is owner:
+        inflight = _SESSION_CONVERSATION_EVENTS_INFLIGHT.get(cache_key)
+        if inflight is not None and inflight[0] is owner:
             _SESSION_CONVERSATION_EVENTS_CACHE[cache_key] = {
                 "signature": signature,
                 "events": tuple(events),
@@ -298,3 +315,57 @@ _invalidate_session_conversation_events_cache = invalidate_session_conversation_
 _load_session_conversation_events_cached = load_session_conversation_events_cached
 _session_ledger_sequence = session_ledger_sequence
 _append_session_conversation_event = append_session_conversation_event
+
+
+def _record_turn_transition_guard_scene_event(record: dict[str, Any]) -> None:
+    """Forward one transition-table violation into the runtime scene log.
+
+    Sink for the shadow-first turn transition guard: keeps the disorder visible
+    (same funnel as ``chat.capture.write_dropped``) without intercepting the
+    write. The record is already bounded and payload-free; only identity,
+    category, and reason fields are re-bounded here for the scene log.
+    """
+
+    try:
+        mode = str(record.get("mode") or "shadow").strip()
+        record_runtime_scene_event(
+            "conversation",
+            "turn_transition_guard",
+            "conversation.turn.transition_violation",
+            level="warning",
+            outcome="discarded" if mode == "enforce" else "observed",
+            message="Turn journal event failed the declarative transition table.",
+            fields={
+                "guardMode": mode,
+                "sessionId": str(record.get("sessionId") or "")[:80],
+                "turnId": str(record.get("turnId") or "")[:80],
+                "eventType": str(record.get("eventType") or "")[:80],
+                "phase": str(record.get("phase") or "")[:40],
+                "priorEventCount": max(0, int(record.get("priorEventCount") or 0)),
+                "priorHasTurnStarted": bool(record.get("priorHasTurnStarted")),
+                "priorTerminalType": str(record.get("priorTerminalType") or "")[:40],
+                "reason": str(record.get("reason") or "")[:200],
+            },
+        )
+    except Exception:
+        pass
+
+
+_register_turn_transition_guard_hook_done = False
+
+
+def _register_turn_transition_guard_hook() -> None:
+    global _register_turn_transition_guard_hook_done
+    if _register_turn_transition_guard_hook_done:
+        return
+    _register_turn_transition_guard_hook_done = True
+    try:
+        set_turn_transition_guard_hook(_record_turn_transition_guard_scene_event)
+    except Exception:
+        _register_turn_transition_guard_hook_done = False
+
+
+# The session services are the production append path for the turn journal;
+# register the shadow guard's telemetry sink once at import so even the first
+# append of a process reports violations. Idempotent and best-effort.
+_register_turn_transition_guard_hook()

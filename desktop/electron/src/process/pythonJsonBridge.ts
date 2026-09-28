@@ -452,6 +452,26 @@ export function invalidPythonJsonBridgePayload(
   return new PythonJsonBridgeError("invalid_payload", `${failureLabel} ${detail}`, { cause });
 }
 
+export function pythonJsonBridgeFailureMessage(raw: string, stderr = "", fallback: string): string {
+  const text = raw.trim();
+  if (text) {
+    try {
+      const parsed = JSON.parse(text) as { message?: unknown };
+      const message = typeof parsed.message === "string" ? parsed.message.trim() : "";
+      if (message) {
+        return message;
+      }
+    } catch {
+      // Non-JSON stdout falls through to stderr or the exit-code fallback.
+    }
+  }
+  const detail = stderr.trim();
+  if (detail) {
+    return detail.length > 800 ? detail.slice(-800) : detail;
+  }
+  return fallback;
+}
+
 export function parsePythonJsonBridgePayload<T>(raw: string, failureLabel: string): T {
   try {
     return JSON.parse(raw) as T;
@@ -519,6 +539,7 @@ export async function runPythonJsonBridge(input: {
 
   return await new Promise((resolveOutput, reject) => {
     const chunks: Buffer[] = [];
+    let stderrText = "";
     let total = 0;
     let settled = false;
     let terminating = false;
@@ -604,8 +625,16 @@ export async function runPythonJsonBridge(input: {
       }
       chunks.push(chunk);
     });
-    child.stderr?.on("data", () => {
-      // Drain stderr so stdio pipes cannot deadlock; detailed logs stay in Python log files.
+    child.stderr?.on("data", (chunk: Buffer) => {
+      // Drain stderr so stdio pipes cannot deadlock. Keep a short tail for the
+      // launcher row when the process exits without a JSON message.
+      if (stderrText.length >= 800) {
+        return;
+      }
+      stderrText += chunk.toString("utf8");
+      if (stderrText.length > 800) {
+        stderrText = stderrText.slice(-800);
+      }
     });
     child.once("error", (error: Error) => {
       if (terminating) {
@@ -629,8 +658,10 @@ export async function runPythonJsonBridge(input: {
         return;
       }
       if (code !== 0) {
+        const raw = Buffer.concat(chunks).toString("utf8");
+        const fallback = `${input.failureLabel} exited with code ${code ?? "unknown"}`;
         rejectOnce(
-          bridgeFailure(input, "nonzero_exit", `${input.failureLabel} exited with code ${code ?? "unknown"}`)
+          bridgeFailure(input, "nonzero_exit", pythonJsonBridgeFailureMessage(raw, stderrText, fallback))
         );
         return;
       }

@@ -32,4 +32,65 @@
   --color-vui-accent-warm: var(--accent-warm);
   --radius-vui-control: var(--radius-control);
   --radius-vui-panel: var(--radius-panel);
+  /* Text utility ladder: exposes the tokens.css size ladder as text-vui-* utilities.
+     Product UI must use these; built-in text-sm/text-xs/text-base or arbitrary
+     text-[13px] values are design-system defects (see designs/primitives/type-scale.md). */
+  --text-vui-micro-9: var(--vui-font-micro-9);
+  --text-vui-micro-10: var(--vui-font-micro-10);
+  --text-vui-micro-11: var(--vui-font-micro-11);
+  --text-vui-2xs: var(--vui-font-2xs);
+  --text-vui-micro-13: var(--vui-font-micro-13);
+  --text-vui-xs: var(--vui-font-xs);
+  --text-vui-sm: var(--vui-font-sm);
+  --text-vui-md: var(--vui-font-md);
+  --text-vui-chat: var(--vui-font-chat);
+  --text-vui-lg: var(--vui-font-lg);
+  --text-vui-title: var(--vui-font-title);
+  --text-vui-xl: var(--vui-font-xl);
+
+  /*
+   * P0-a native-slot takeover (approved preview contract, 2026-09; guard:
+   * themeSlotTakeoverContract.test.ts). The built-in Tailwind font-size slots
+   * are retargeted onto the vui ladder so off-system class names still resolve
+   * inside the design system:
+   *   text-xs    -> var(--vui-font-2xs)    12px -> 12px (zero drift)
+   *   text-sm    -> var(--vui-font-xs)      14px -> 14px (zero drift)
+   *   text-base  -> var(--vui-font-md)      16px -> 16px (zero drift)
+   *   text-lg    -> var(--vui-font-lg)      18px -> 18px (zero drift)
+   *   text-xl    -> var(--vui-font-title)   20px -> 19px (nearest slot; the
+   *                                            only shift, -1px)
+   * Native line-heights are unitless ratios, so they rescale with the
+   * retargeted size (only text-xl: 28px -> 26.6px, ratio 1.4 unchanged).
+   * text-2xl/3xl keep native values (no vui counterpart, 0 usages). Mapping
+   * decided in the approved A/B preview (web/preview/token-takeover). Slot
+   * redefinition pattern borrowed from zai-org/ZCode
+   * packages/ui/src/styles.css:143-151 (Apache-2.0).
+   */
+  --text-xs: var(--vui-font-2xs);
+  --text-sm: var(--vui-font-xs);
+  --text-base: var(--vui-font-md);
+  --text-lg: var(--vui-font-lg);
+  --text-xl: var(--vui-font-title);
+
+  /*
+   * P0-a radius-slot takeover (zero-drift slots only; same approved preview):
+   *   rounded-lg -> 8px  via --radius-control  (8px = 8px, zero drift)
+   *   rounded-xl -> 12px via --vui-radius-panel-soft (12px = 12px, zero drift)
+   * rounded/rounded-md/rounded-2xl keep native values: tokens.css has no
+   * 4/6/16px vui slot and retargeting them would shift +4/+2/-4px (preview
+   * analysis). Both target variables are theme-stable: --radius-control is
+   * declared once at :root; the light theme re-declares
+   * --vui-radius-panel-soft to the same 12px.
+   */
+  --radius-lg: var(--radius-control);
+  --radius-xl: var(--vui-radius-panel-soft);
+
+  /*
+   * Motion ease slots (Wave 5B). The v4 --ease-* namespace generates the
+   * ease-vui / ease-vui-out utility classes; values live in tokens.css so the
+   * route-css lazy chunks and every Tailwind entry resolve them at runtime.
+   * Guard: motionTokens.test.ts (does not touch the locked slots above).
+   */
+  --ease-vui: var(--vui-ease);
+  --ease-vui-out: var(--vui-ease-out-quart);
 }

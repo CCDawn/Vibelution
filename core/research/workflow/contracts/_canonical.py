@@ -1,23 +1,16 @@
-"""Shared canonical helpers for research workflow contracts."""
+"""Shared canonical helpers for research workflow contracts.
+
+The implementation lives in :mod:`core.infrastructure.canonical_json` so
+non-ledger surfaces (agent kernel content-addressed keys, runtime-manager
+command args hashes) reuse the identical canonical form; this module keeps
+the ledger contract's historical import path stable.
+"""
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Mapping
 from typing import Any
 
+from core.infrastructure.canonical_json import canonical_json, sha256_hex
 
-def canonical_json(payload: Mapping[str, Any]) -> str:
-    """Canonical JSON: UTF-8, sorted object keys, no extra whitespace."""
-    return json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-
-
-def sha256_hex(payload: Mapping[str, Any]) -> str:
-    """Stable content hash over canonical JSON."""
-    return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+__all__ = ["canonical_json", "sha256_hex"]

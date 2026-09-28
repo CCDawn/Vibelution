@@ -2,7 +2,7 @@ import { Database } from "lucide-react";
 
 import type { ConfigWorkspace } from "../api/types";
 import { VSection } from "../components/vui";
-import type { ConfigCopy } from "./ConfigRoute";
+import type { ConfigCopy } from "./config/configCopy";
 import styles from "./ConfigOverviewPanel.styles";
 
 type ConfigOverviewPanelProps = {

@@ -2766,7 +2766,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamStageCardSource).not.toContain("title={title}");
     expect(teamStageCardSource).toContain("ACTION_ROW");
     expect(teamStageCardSource).toContain("ACTION_BUTTON");
-    expect(teamStageCardSource).toContain("text-[0.72rem]");
+    expect(teamStageCardSource).toContain("text-vui-2xs");
     expect(teamSourcePaginationSource).toContain("select-none");
     expect(teamSourcePaginationSource).toContain("whitespace-nowrap");
     expect(teamSourcePaginationSource).not.toContain("writing-mode:vertical");
@@ -3279,7 +3279,7 @@ describe("TeamsRoute layout contract", () => {
       expect(className).toContain("[background-image:linear-gradient(to_right");
       expect(className).toContain("linear-gradient(to_bottom");
       expect(className).toContain("[background-size:40px_40px]");
-      expect(className).toContain("var(--vui-border-subtle)_24%");
+      expect(className).toContain("var(--vui-border-subtle)_var(--vui-alpha-tint)");
       expect(className).not.toContain("vui-gradient-route-soft");
     }
   });

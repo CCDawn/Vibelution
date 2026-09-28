@@ -63,6 +63,7 @@ import {
 } from "../components/vui/product/agent-management";
 import { VButton } from "../components/vui";
 import { safeReturnToPath } from "../app/navigationReturn";
+import { requestSettingsFocus } from "../app/settingsNavigation";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { mergeAgentsRouteCopyWithDictionary } from "../i18n/mergeAgentsWorkbenchCopy";
 import { useShellI18n } from "../i18n/useShellI18n";
@@ -719,7 +720,7 @@ export function AgentsRoute() {
           returnLabel: "agents",
           returnTo: selectedAgentReturnRoute,
         })
-      : "/config?section=models-profiles",
+      : "/config",
     [selectedAgent?.agentId, selectedAgentReturnRoute],
   );
   const selectedAgentContextConfigRoute = useMemo(
@@ -730,7 +731,7 @@ export function AgentsRoute() {
           returnLabel: "agents",
           returnTo: selectedAgentReturnRoute,
         })
-      : "/config?section=runtime-context",
+      : "/config",
     [selectedAgent?.agentId, selectedAgentReturnRoute],
   );
   const selectedAgentMemoryConfigRoute = useMemo(
@@ -1820,7 +1821,8 @@ export function AgentsRoute() {
       ? `${group.id === "setup:inbox" ? copy.statusReminderShort : copy.healthIssueShort} ${group.healthCount}`
       : undefined;
 
-  const filterSections: AgentFilterSectionView[] = groupedFilters.map((section) => ({
+  // Pure display projection of groupedFilters; memoized to stay off the per-keystroke path.
+  const filterSections: AgentFilterSectionView[] = useMemo(() => groupedFilters.map((section) => ({
     id: section.id,
     label: section.label,
     groups: section.groups.map((group) => {
@@ -1846,9 +1848,9 @@ export function AgentsRoute() {
         healthLabel: filterHealthLabel(group),
       };
     }),
-  }));
+  })), [copy, groupedFilters, lang]);
 
-  const advancedFilterSections: AgentFilterSectionView[] = advancedGroupedFilters.map((section) => ({
+  const advancedFilterSections: AgentFilterSectionView[] = useMemo(() => advancedGroupedFilters.map((section) => ({
     id: section.id,
     label: section.label,
     groups: section.groups.map((group) => {
@@ -1870,47 +1872,53 @@ export function AgentsRoute() {
         healthLabel: filterHealthLabel(group),
       };
     }),
-  }));
+  })), [advancedGroupedFilters, copy, lang]);
 
-  const agentRowLookup = new Map<string, AgentConfigWorkspaceAgent>();
-  const denseColumns: AgentDenseColumn[] = visibleAgentColumns.map((column) => ({
-    id: column.id,
-    label: column.label,
-    description: column.description,
-    count: column.agents.length,
-    rows: column.agents.map((agent) => {
-      agentRowLookup.set(agent.agentId, agent);
-      const display = agentDisplayInfo(agent, lang);
-      const modelDisplay = agentDialogueModelDisplay(agent, lang);
-      return {
-        id: agent.agentId,
-        name: display.name,
-        roleLabel: display.functionLabel,
-        roleTone: display.tone,
-        avatarUrl: agent.avatarImageUrl,
-        avatarInitials: avatarInitials(agent.agentCode, display.name),
-        modelLabel: modelDisplay.label,
-        modelDetail: modelDisplay.detail,
-        promptLabel: promptTemplateDisplayName(agent.promptTemplate, agent.promptTemplateId, lang),
-        runtimeLabel: runtimeStatusLabel(agent, lang),
-        runtimeTone: runtimeStatusTone(agent),
-        modes: uniqueModes(agent).slice(0, 3).map((mode) => modeLabel(mode, lang)),
-        issueLabel: issueLabel(agent.health, lang),
-        issueTone: issueTone(agent.health),
-        issueSummary: issueSummary(agent.health, lang),
-        active: selectedAgent?.agentId === agent.agentId,
-        bulkSelected: selectedBulkAgentIds.has(agent.agentId),
-        selectLabel: `${copy.bulkSelected}: ${display.name}`,
-      };
-    }),
-  }));
+  // Dense list rows rebuild per render today (~8 display computations per agent);
+  // memoize once per column/selection change and build the row lookup inside the
+  // same pass so both stay in sync without a map-building side effect in render.
+  const { denseColumns, agentRowLookup } = useMemo(() => {
+    const lookup = new Map<string, AgentConfigWorkspaceAgent>();
+    const columns: AgentDenseColumn[] = visibleAgentColumns.map((column) => ({
+      id: column.id,
+      label: column.label,
+      description: column.description,
+      count: column.agents.length,
+      rows: column.agents.map((agent) => {
+        lookup.set(agent.agentId, agent);
+        const display = agentDisplayInfo(agent, lang);
+        const modelDisplay = agentDialogueModelDisplay(agent, lang);
+        return {
+          id: agent.agentId,
+          name: display.name,
+          roleLabel: display.functionLabel,
+          roleTone: display.tone,
+          avatarUrl: agent.avatarImageUrl,
+          avatarInitials: avatarInitials(agent.agentCode, display.name),
+          modelLabel: modelDisplay.label,
+          modelDetail: modelDisplay.detail,
+          promptLabel: promptTemplateDisplayName(agent.promptTemplate, agent.promptTemplateId, lang),
+          runtimeLabel: runtimeStatusLabel(agent, lang),
+          runtimeTone: runtimeStatusTone(agent),
+          modes: uniqueModes(agent).slice(0, 3).map((mode) => modeLabel(mode, lang)),
+          issueLabel: issueLabel(agent.health, lang),
+          issueTone: issueTone(agent.health),
+          issueSummary: issueSummary(agent.health, lang),
+          active: selectedAgent?.agentId === agent.agentId,
+          bulkSelected: selectedBulkAgentIds.has(agent.agentId),
+          selectLabel: `${copy.bulkSelected}: ${display.name}`,
+        };
+      }),
+    }));
+    return { denseColumns: columns, agentRowLookup: lookup };
+  }, [copy, lang, selectedAgent?.agentId, selectedBulkAgentIds, visibleAgentColumns]);
 
-  const selectedAgentOverviewPanel: {
+  const selectedAgentOverviewPanel = useMemo<{
     facts: AgentOverviewFact[];
     territory: AgentOverviewTerritory;
     modeMembership: AgentOverviewModeMembership;
     policies: AgentOverviewPanelPolicy[];
-  } | null = selectedAgent ? (() => {
+  } | null>(() => selectedAgent ? (() => {
     const selectedModelDisplay = agentDialogueModelDisplay(selectedAgent, lang);
     const normalizedBindings = normalizeAgentLlmBindings(selectedAgent.llmBindings);
     const facts: AgentOverviewFact[] = [
@@ -2033,13 +2041,13 @@ export function AgentsRoute() {
         },
       ],
     };
-  })() : null;
+  })() : null, [copy, lang, llmSlots, selectedAgent, selectedAgentRequiresPersona, selectedAgentRequiresTask]);
 
-  const selectedAgentReferencesPanel: {
+  const selectedAgentReferencesPanel = useMemo<{
     chatRoomSummary: string;
     chatRooms: AgentReferenceRoomView[];
     references: AgentReferenceItemView[];
-  } | null = selectedAgent ? (() => {
+  } | null>(() => selectedAgent ? (() => {
     const chatRooms: AgentReferenceRoomView[] = (workspace?.chatRooms ?? []).map((room) => {
       const selected = room.agentIds.includes(selectedAgent.agentId);
       return {
@@ -2067,9 +2075,9 @@ export function AgentsRoute() {
       chatRooms,
       references,
     };
-  })() : null;
+  })() : null, [lang, selectedAgent, workspace?.chatRooms]);
 
-  const overviewOperations = selectedAgent ? {
+  const overviewOperations = useMemo(() => selectedAgent ? {
     copy: {
       currentFocus: copy.runtimeFocus,
       recentActivity: copy.activityTimeline,
@@ -2113,9 +2121,22 @@ export function AgentsRoute() {
     onOpenActivity: () => setActivePane("activity"),
     onOpenConfig: () => setActivePane("config"),
     onOpenSession: runtimeFocusSessionId ? () => openAgentSession(runtimeFocusSessionId) : undefined,
-  } : null;
+  } : null, [
+    activityTimeline,
+    agentMessagesQuery.isError,
+    agentMessagesQuery.isPending,
+    agentRunsQuery.isError,
+    agentRunsQuery.isPending,
+    agentRuntimeEvidenceQuery.isError,
+    agentRuntimeEvidenceQuery.isPending,
+    copy,
+    lang,
+    runtimeFocusEvidence,
+    runtimeFocusSessionId,
+    selectedAgent,
+  ]);
 
-  const overviewResources = selectedAgent ? {
+  const overviewResources = useMemo(() => selectedAgent ? {
     title: lang === "zh" ? "关联资源" : "Related resources",
     emptyLabel: lang === "zh" ? "暂无可直接打开的关联资源。" : "No related resource can be opened yet.",
     openLabel: lang === "zh" ? "打开" : "Open",
@@ -2154,9 +2175,18 @@ export function AgentsRoute() {
     onOpenRoute: (route: string) => {
       void navigate(route);
     },
-  } : null;
+  } : null, [
+    configDraft.promptTemplateId,
+    copy,
+    lang,
+    selectedAgent,
+    selectedAgentMemoryConfigRoute,
+    selectedAgentPromptConfigRoute,
+    selectedAgentReferencesPanel,
+    selectedAgentToolConfigRoute,
+  ]);
 
-  const focusedOverview: AgentFocusedOverviewPanelProps | null = selectedAgent ? (() => {
+  const focusedOverview = useMemo<AgentFocusedOverviewPanelProps | null>(() => selectedAgent ? (() => {
     const runs = agentRunsQuery.data?.runs ?? [];
     const latestRun = runs.reduce<(typeof runs)[number] | null>((latest, run) => {
       if (!latest) return run;
@@ -2255,9 +2285,20 @@ export function AgentsRoute() {
       onOpenConfig: () => setActivePane("config"),
       onOpenActivity: () => setActivePane("activity"),
     };
-  })() : null;
+  })() : null, [
+    agentRunsQuery.data,
+    effectiveConfigurationFields,
+    lang,
+    managementBrief,
+    overviewOperations,
+    selectedAgent,
+    selectedAgentOverviewPanel,
+    selectedTeamRelations,
+    workspace?.memoryPolicies,
+    workspace?.toolPolicies,
+  ]);
 
-  const selectedAgentDetailContent: AgentSelectedDetailContentPanelProps | null = selectedAgent ? {
+  const selectedAgentDetailContent = useMemo<AgentSelectedDetailContentPanelProps | null>(() => selectedAgent ? {
     activePane,
     preferOpsSection: (selectedAgent.health?.length ?? 0) > 0,
     header: {
@@ -2366,9 +2407,25 @@ export function AgentsRoute() {
           ),
         }),
         onContextCompressionChange: updateContextCompressionDraft,
-        onOpenModelConfig: () => navigate(selectedAgentModelConfigRoute),
+        onOpenModelConfig: () => {
+          if (selectedAgent?.agentId) {
+            navigate(selectedAgentModelConfigRoute);
+            return;
+          }
+          // 全局设置入口：经意图模块聚焦模型连接组（settingsNavigation 统一收口，
+          // 不再拼 /config?section= URL）。
+          requestSettingsFocus({ groupId: "models-profiles" });
+          navigate("/config");
+        },
         onOpenPromptConfig: () => navigate(selectedAgentPromptConfigRoute),
-        onOpenContextConfig: () => navigate(selectedAgentContextConfigRoute),
+        onOpenContextConfig: () => {
+          if (selectedAgent?.agentId) {
+            navigate(selectedAgentContextConfigRoute);
+            return;
+          }
+          requestSettingsFocus({ groupId: "runtime-context" });
+          navigate("/config");
+        },
         onReset: () => setConfigDraft(draftFromAgent(selectedAgent)),
         onSave: saveAgentConfig,
       },
@@ -2638,7 +2695,101 @@ export function AgentsRoute() {
         onSave: saveRuntimePolicy,
       },
     },
-  } : null;
+  } : null, [
+    // Dependency note: every non-module identifier referenced inside this view
+    // model is listed; per-render closures (save/handler fns) only read values
+    // that are already listed, so freezing them inside the memo is safe.
+    activePane,
+    agentMessagesQuery.data,
+    agentMessagesQuery.isPending,
+    agentRunsQuery.data,
+    agentRunsQuery.isPending,
+    activityTimeline,
+    avatarEditorOpen,
+    avatarOptionsQuery.data,
+    avatarOptionsQuery.isPending,
+    bulkPromptTemplateOptions,
+    canArchiveAgent,
+    canPurgeAgent,
+    canResetAgent,
+    canSaveConfig,
+    canSaveMembership,
+    canSaveMemoryPolicy,
+    canSavePersona,
+    canSaveRuntimePolicy,
+    canSaveTask,
+    configChangesQuery.data,
+    configChangesQuery.isPending,
+    configDirty,
+    configDraft,
+    configDraftPresenceDirty,
+    // save/discard draft handlers read the active draft id inside their guards.
+    activeConfigDraftId,
+    consumeMessageMutation.isPending,
+    consumeMessageMutation.variables,
+    contextCompressionPolicyLine,
+    copy,
+    coreConfigLlmSlots,
+    coreConfigMemoryPolicyOptions,
+    coreConfigToolPolicyOptions,
+    coreConfigToolPolicyTooltip,
+    delegationPolicyDraft,
+    focusedMessageId,
+    focusedOverview,
+    inspectorOpen,
+    lang,
+    managementBrief,
+    membershipDraft,
+    membershipDirty,
+    memoryGroupOptions,
+    memoryPolicyDraft,
+    memoryPolicyDirty,
+    notice,
+    overviewOperations,
+    overviewResources,
+    panes,
+    promoteAgentModelMutation.isPending,
+    promoteAgentModelMutation.variables,
+    resetOptions,
+    resettingAgentIds,
+    resolveToolGovernanceMutation.isPending,
+    resolveToolGovernanceMutation.variables,
+    runtimeFocusEvidence,
+    runtimeFocusSessionId,
+    runtimePolicyDirty,
+    selectedAgent,
+    selectedAgentArchivePending,
+    selectedAgentConfigDraftDiscardPending,
+    selectedAgentConfigDraftSavePending,
+    selectedAgentConfigPending,
+    selectedAgentContextConfigRoute,
+    selectedAgentConsumeAllPending,
+    selectedAgentInboxPendingCount,
+    selectedAgentMembershipPending,
+    selectedAgentMemoryConfigRoute,
+    selectedAgentMemoryPolicyPending,
+    selectedAgentModelConfigRoute,
+    selectedAgentPromptConfigRoute,
+    selectedAgentProtected,
+    selectedAgentPurgePending,
+    selectedAgentReferencesPanel,
+    selectedAgentRequiresPersona,
+    selectedAgentRequiresTask,
+    selectedAgentRequiresTeamMembership,
+    selectedAgentResetPending,
+    selectedAgentRuntimePolicyPending,
+    selectedAgentTaskPending,
+    selectedAgentAvatarUpdatePending,
+    selectedAgentAvatarUploadPending,
+    selectedAgentToolConfigRoute,
+    supervisionPolicyDraft,
+    taskDraft,
+    taskDirty,
+    toolBundles,
+    workspace?.agentModelChoices,
+    workspace?.modeBindings,
+    workspace?.operatorConfigHash,
+  ]);
 
   return (
     // Domain shell: list-detail recipe lives in AgentWorkspaceLayoutPanel.

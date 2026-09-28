@@ -10,6 +10,7 @@ from starlette.responses import StreamingResponse
 from core.web.routes.evolution_models import (
     ChatReviewActionPayload,
     ChatReviewBulkDeletePayload,
+    EvolutionChatCurationModelStatsResponse,
     EvolutionChatReviewCandidateResponse,
     EvolutionChatReviewQueueResponse,
     EvolutionCommandStatusResponse,
@@ -19,6 +20,8 @@ from core.web.routes.evolution_models import (
     EvolutionOverviewResponse,
     EvolutionProposalResponse,
     EvolutionRunResponse,
+    EvolutionJudgeQualityResponse,
+    EvolutionRubricPromotionResponse,
     EvolutionSelfWorkspaceSnapshotResponse,
     EvolutionWorkspaceSnapshotResponse,
     ProposalBulkDeletePayload,
@@ -42,12 +45,14 @@ from core.web.services.chat_review_service import (
     ChatReviewDecisionValidationError,
     approve_chat_review_candidate,
     bulk_discard_chat_review_candidates,
+    get_chat_curation_model_stats,
     get_chat_review_candidate,
     get_chat_review_queue,
     reject_chat_review_candidate,
     submit_chat_review_decision,
 )
 from core.web.services.evolution_service import (
+    PROJECT_ROOT as EVOLUTION_PROJECT_ROOT,
     EvolutionProposalDeleteBlockedError,
     EvolutionProposalEditBlockedError,
     EvolutionProposalNotFoundError,
@@ -64,6 +69,7 @@ from core.web.services.evolution_service import (
     bulk_delete_proposals,
     update_proposal,
 )
+from core.web.services.evolution_promotion_lane import build_current_baseline_promotion
 from core.web.services.evolution_runtime_projection_service import build_workspace_runtime_projection
 from core.web.services.prompt_reflection_service import (
     PromptReflectionError,
@@ -242,6 +248,10 @@ def evolution_workspace_snapshot(includeSelf: bool = False) -> dict:
         supervised_active_run=supervised_runtime_active_run,
         self_worktree_active_run=self_worktree_active_run,
         self_observation_active_run=self_observation_active_run,
+        current_baseline=timed(
+            "current_baseline",
+            lambda: build_current_baseline_promotion(EVOLUTION_PROJECT_ROOT),
+        ),
     )
     payload = {
         "overview": dashboard["overview"],
@@ -445,6 +455,15 @@ def evolution_chat_review(includeDetails: bool = False) -> dict:
 
 
 @router.get(
+    "/chat-review/model-curation-stats",
+    response_model=EvolutionChatCurationModelStatsResponse,
+    response_model_exclude_unset=True,
+)
+def evolution_chat_curation_model_stats() -> dict:
+    return get_chat_curation_model_stats()
+
+
+@router.get(
     "/evolution/chat-review/{candidate_id}",
     response_model=EvolutionChatReviewCandidateResponse,
     response_model_exclude_unset=True,
@@ -582,6 +601,52 @@ def evolution_run_command_status(command_id: str) -> dict:
 )
 def evolution_worktree_runs() -> list[dict]:
     return list_supervised_worktree_runs()
+
+
+@router.get(
+    "/evolution/judge-quality",
+    response_model=EvolutionJudgeQualityResponse,
+    response_model_exclude_unset=True,
+)
+def evolution_judge_quality() -> dict:
+    """Longitudinal judge-vs-approval quality panel (read-only, recomputable)."""
+    from core.web.services.supervised_judge_quality_service import (
+        build_supervised_judge_quality_report,
+    )
+
+    return build_supervised_judge_quality_report()
+
+
+@router.get(
+    "/evolution/rubric-promotion-gate",
+    response_model=EvolutionRubricPromotionResponse,
+    response_model_exclude_unset=True,
+)
+def evolution_rubric_promotion_gate() -> dict:
+    """Evaluate the shadow→active rubric promotion gate (read-only)."""
+    from core.web.services.supervised_rubric_promotion_service import (
+        evaluate_rubric_promotion,
+    )
+
+    return evaluate_rubric_promotion()
+
+
+@router.post(
+    "/evolution/rubric-promotion-gate/promote",
+    response_model=EvolutionRubricPromotionResponse,
+    response_model_exclude_unset=True,
+)
+def evolution_rubric_promotion_promote() -> dict:
+    """Promote the pending shadow rubric; the frozen gate must pass first."""
+    from core.web.services.supervised_rubric_promotion_service import (
+        RubricPromotionBlockedError,
+        promote_rubric_if_eligible,
+    )
+
+    try:
+        return promote_rubric_if_eligible()
+    except RubricPromotionBlockedError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get(

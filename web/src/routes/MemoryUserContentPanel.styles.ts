@@ -45,9 +45,9 @@ const styles = {
   metaWrap:
     "metaWrap min-w-0 max-w-full [overflow-wrap:anywhere] break-all [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   code:
-    "code block max-h-24 overflow-auto whitespace-pre-wrap break-all rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-overlay)_88%,black)] px-2 py-1 font-mono text-[11px] leading-relaxed text-[var(--fg-primary)]",
+    "code block max-h-24 overflow-auto whitespace-pre-wrap break-all rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-overlay)_88%,black)] px-2 py-1 font-mono text-vui-micro-11 leading-relaxed text-[var(--fg-primary)]",
   pre:
-    "pre min-w-0 overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-overlay)_88%,black)] px-2 py-2 font-mono text-[11px] leading-relaxed text-[var(--fg-primary)]",
+    "pre min-w-0 overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-overlay)_88%,black)] px-2 py-2 font-mono text-vui-micro-11 leading-relaxed text-[var(--fg-primary)]",
   previewList:
     "previewList min-w-0 grid max-h-28 content-start gap-1 overflow-auto [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)]",
 } as const;

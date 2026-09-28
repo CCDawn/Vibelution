@@ -14,9 +14,25 @@ from typing import Any
 
 KERNEL_STORE_VERSION = 1
 
+# Process-wide index snapshot cache.  ``service._store()`` constructs a fresh
+# KernelJsonlStore per call, so a per-instance cache would never hit; the
+# cache is shared across instances and keyed by resolved index file path.
+# Each entry pairs the file signature a snapshot was validated against
+# ((st_mtime_ns, st_size)) with the parsed index dict itself.
+_INDEX_CACHE: dict[str, tuple[tuple[int, int], dict[str, Any]]] = {}
+_INDEX_CACHE_LOCK = threading.Lock()
+
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _index_signature(path: Path) -> tuple[int, int] | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return (stat.st_mtime_ns, stat.st_size)
 
 
 class KernelJsonlStore:
@@ -69,8 +85,36 @@ class KernelJsonlStore:
         return rows[-bounded:]
 
     def load_index(self) -> dict[str, Any]:
-        if not self.index_path.exists():
-            return _default_index()
+        """Return the materialized index snapshot, cached by file signature.
+
+        Cache contract (save-side takeover): on a signature hit the cached
+        dict is returned shared, not copied.  Read paths must treat the
+        returned snapshot as read-only and copy leaves before exposing them
+        (all current kernel readers do: ``dict(...)`` / ``list(...)`` at the
+        boundary).  The kernel runtime loop is the only in-place mutator, it
+        runs under its own lock, and it refreshes the cache through
+        save_index, so the shared snapshot keeps tracking the persisted
+        file.  Callers that mutate the snapshot without saving back own the
+        resulting staleness.
+        """
+
+        cache_key = str(self.index_path)
+        signature = _index_signature(self.index_path)
+        if signature is not None:
+            with _INDEX_CACHE_LOCK:
+                cached = _INDEX_CACHE.get(cache_key)
+            if cached is not None and cached[0] == signature:
+                return cached[1]
+        # Stat before read: a concurrent atomic replace can only make the
+        # recorded signature older than the content (next load re-parses),
+        # never serve a stale snapshot under a fresh signature.
+        index = self._parse_index_file()
+        if signature is not None:
+            with _INDEX_CACHE_LOCK:
+                _INDEX_CACHE[cache_key] = (signature, index)
+        return index
+
+    def _parse_index_file(self) -> dict[str, Any]:
         try:
             payload = json.loads(self.index_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -82,7 +126,11 @@ class KernelJsonlStore:
         return index
 
     def save_index(self, payload: dict[str, Any]) -> dict[str, Any]:
-        index = deepcopy(payload)
+        # Shallow top-level copy: normalization below must not leak into the
+        # caller's dict, but nested values are serialized synchronously by
+        # the only writer thread (under its own lock), so a full deepcopy of
+        # an unboundedly growing index is pure write amplification.
+        index = dict(payload)
         index["version"] = KERNEL_STORE_VERSION
         index["updatedAt"] = utc_now_iso()
         index.setdefault("eventsById", {})
@@ -98,12 +146,20 @@ class KernelJsonlStore:
         fd, temp_path = tempfile.mkstemp(prefix=f".{self.index_path.name}.", dir=str(self.index_path.parent))
         try:
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-                json.dump(index, handle, ensure_ascii=False, indent=2, sort_keys=True)
+                # Compact separators: the index is machine-read only
+                # (json.loads), and pretty-printing a many-MB snapshot
+                # multiplies the per-event write cost.  Key order stays
+                # deterministic via sort_keys.
+                json.dump(index, handle, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
                 handle.write("\n")
             os.replace(temp_path, self.index_path)
         finally:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
+        signature = _index_signature(self.index_path)
+        if signature is not None:
+            with _INDEX_CACHE_LOCK:
+                _INDEX_CACHE[str(self.index_path)] = (signature, index)
         return index
 
 

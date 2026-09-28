@@ -89,9 +89,9 @@ def create_agent_from_catalog_request(
     )
 
     session = session_service.create_chat_session(
-        title=normalized_display_name,
-        # The Agent display name is a chat display default, not an operator title:
-        # the first user turn may replace it with a generated title.
+        # A new session starts from the shared placeholder label; the first user
+        # turn generates the real title. The Agent display name stays in the
+        # Agent directory metadata, never as the session title.
         title_source="placeholder",
         llm_bindings=normalized_llm_bindings,
         created_by=source,
@@ -101,6 +101,16 @@ def create_agent_from_catalog_request(
     agent = get_agent(agent_id) if agent_id else None
     if not agent:
         raise AgentDirectoryError("Agent was not created for the direct session.")
+
+    # The session layer names the auto-created Agent from the placeholder
+    # session id. Land the requested display name as the Agent identity here;
+    # creation-time naming keeps the "responsibility" source (same as
+    # create_agent_instance), so this is not a post-hoc user rename.
+    agent = update_agent_instance(
+        agent_id,
+        display_name=normalized_display_name,
+        metadata={"displayNameSource": "responsibility"},
+    )
 
     if normalized_metadata:
         agent = update_agent_instance(agent_id, metadata=normalized_metadata)

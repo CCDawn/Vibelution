@@ -15,7 +15,9 @@ import agentMessageRenderStateSource from "./agentMessageRenderState.ts?raw";
 import conversationViewStylesModuleSource from "./ConversationView.styles.ts?raw";
 import conversationOperationDetailsSource from "./ConversationOperationDetails.tsx?raw";
 import conversationStreamingResponseContentSource from "./ConversationStreamingResponseContent.tsx?raw";
+import conversationStreamingResponseContentStyles from "./ConversationStreamingResponseContent.styles";
 import conversationTurnAvatarContentSource from "./ConversationTurnAvatarContent.tsx?raw";
+import navigatorSource from "./ConversationTurnNavigator.tsx?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import conversationInlineMarkdownSource from "./conversationInlineMarkdown.tsx?raw";
 import { ConversationView } from "./ConversationView";
@@ -24,6 +26,10 @@ import { shouldShowNextStateSignalInConversation } from "./conversationNextState
 import { isAgentInboxMessage } from "./conversationMessagePredicates";
 
 describe("composer leading control contract", () => {
+  it("announces composer errors without moving focus", () => {
+    const html = renderConversation([], { showComposer: true, composerError: "Attachment limit reached" });
+    expect(html).toMatch(/<p[^>]*role="alert"[^>]*>Attachment limit reached<\/p>/);
+  });
   it("lets Chat replace the legacy image button without changing other routes", () => {
     expect(conversationViewSource).toContain("composerLeadingControl ?? (");
     expect(conversationViewSource).toContain("attachmentInputRef.current?.click()");
@@ -79,8 +85,12 @@ function renderConversation(
       previewUrl: string;
       sizeBytes: number;
       contentType: string;
+      uploadStatus?: "pending" | "uploading" | "uploaded" | "failed";
+      artifactId?: string;
     }>;
     onRemoveComposerAttachment?: (id: string) => void;
+    onRetryComposerAttachment?: (id: string) => void;
+    onRetryComposerAttachmentUploads?: () => void;
     composerReferences?: Array<{
       referenceId: string;
       kind: string;
@@ -92,7 +102,9 @@ function renderConversation(
     composerPlaceholder?: string;
     composerActionMode?: "send" | "stop";
     composerActionDisabled?: boolean;
+    composerPending?: boolean;
     submitLabel?: string;
+    stopPendingLabel?: string;
     composerError?: string;
     composerGuidance?: string;
     followupQueue?: Array<{ id: string; text: string }>;
@@ -155,8 +167,9 @@ function renderConversation(
         composerDisabled={options.composerDisabled ?? false}
         composerActionMode={options.composerActionMode}
         composerActionDisabled={options.composerActionDisabled}
-        composerPending={false}
+        composerPending={options.composerPending ?? false}
         submitLabel={options.submitLabel}
+        stopPendingLabel={options.stopPendingLabel}
         composerError={options.composerError}
         composerGuidance={options.composerGuidance}
         followupQueue={options.followupQueue}
@@ -167,6 +180,8 @@ function renderConversation(
         onOpenComposerContextDetail={options.onOpenComposerContextDetail}
         composerAttachments={options.composerAttachments}
         onRemoveComposerAttachment={options.onRemoveComposerAttachment}
+        onRetryComposerAttachment={options.onRetryComposerAttachment}
+        onRetryComposerAttachmentUploads={options.onRetryComposerAttachmentUploads}
         composerReferences={options.composerReferences}
         slashCommandSuggestions={options.slashCommandSuggestions}
         nextStateSignals={options.nextStateSignals}
@@ -209,6 +224,71 @@ describe("ConversationView VUI control contract", () => {
     expect(conversationViewSource).not.toMatch(/<textarea\b/);
     expect(conversationViewSource).toContain("primaryActionIsQueueSubmit");
     expect(conversationViewSource).toContain("ConversationFollowupQueueBar");
+  });
+});
+
+describe("ConversationView active-turn responding stage (defect 7b)", () => {
+  function statusTurnItem(code: string, sequence: number) {
+    return {
+      id: `active-item-${code}`,
+      itemId: `active-item-${code}`,
+      sessionId: "session-1",
+      turnId: "turn-current",
+      version: 3,
+      revision: 1,
+      sequence,
+      type: "status",
+      code,
+      title: code,
+      status: "running",
+    };
+  }
+
+  it("keeps the responding stage observable while the answer streams", () => {
+    const activeTurnLayerMessage = {
+      id: "session-1-message-active-turn-current",
+      role: "assistant",
+      timestamp: "2026-05-22T00:02:00Z",
+      turnId: "turn-current",
+      status: "running",
+      turnItems: [
+        statusTurnItem("thinking", 1),
+        statusTurnItem("responding", 2),
+        {
+          id: "active-item-answer",
+          itemId: "active-item-answer",
+          sessionId: "session-1",
+          turnId: "turn-current",
+          version: 3,
+          revision: 1,
+          sequence: 3,
+          type: "agent_message",
+          phase: "final_answer",
+          text: "## 流式中的回答",
+          status: "running",
+          terminal: false,
+        },
+      ],
+      metadata: {
+        kind: "session_active_turn_layer",
+        processStage: "assistant_response",
+      },
+    } as unknown as ConversationMessage;
+    const html = renderConversation([], { activeTurnMessage: activeTurnLayerMessage });
+    expect(html).toContain('data-active-turn-stage="responding"');
+  });
+});
+
+describe("ConversationView stop feedback", () => {
+  it("shows a visible stopping label while the stop action is pending", () => {
+    const html = renderConversation([], {
+      showComposer: true,
+      composerActionMode: "stop",
+      composerPending: true,
+      stopPendingLabel: "正在停止…",
+    });
+    expect(html).toContain('data-testid="composer-stop-pending-feedback"');
+    expect(html).toContain("正在停止…");
   });
 });
 
@@ -302,6 +382,61 @@ describe("ConversationView failed-turn error presentation", () => {
   });
 });
 
+describe("ConversationView session recovery presentation", () => {
+  function recoveryResumedFixture(metadata: Record<string, unknown>) {
+    return {
+      id: "assistant-resumed",
+      role: "assistant",
+      content: "已从重启中恢复，继续执行",
+      timestamp: "2026-09-25T08:00:00Z",
+      turnId: "turn-recovered",
+      turnItems: [
+        {
+          id: "assistant-resumed-item",
+          itemId: "assistant-resumed-item",
+          sessionId: "session-1",
+          turnId: "turn-recovered",
+          version: 3,
+          revision: 1,
+          sequence: 1,
+          type: "agent_message",
+          phase: "final_answer",
+          text: "已从重启中恢复，继续执行",
+          status: "completed",
+          terminal: true,
+        },
+      ],
+      metadata: { kind: "session_recovery_resumed", ...metadata },
+    } as unknown as ConversationMessage;
+  }
+
+  it("renders an in-stream recovery status row with attempt and turn meta", () => {
+    const html = renderConversation([
+      recoveryResumedFixture({ attempt: 2, turnLabel: "重构导出脚本" }),
+    ]);
+    expect(semanticArticleClassCount(html, "cliAgentLifecycleTurn")).toBe(1);
+    expect(html).toContain("已从重启中恢复，继续执行");
+    expect(html).toContain("重构导出脚本");
+    expect(html).toContain("自动重试 2");
+  });
+
+  it("hides interrupted partials once recovery supersedes them", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-partial",
+        role: "assistant",
+        content: "half-streamed answer before the restart",
+        timestamp: "2026-09-25T07:59:00Z",
+        turnId: "turn-recovered",
+        metadata: { interrupted: true, recoverySuperseded: true },
+      } as unknown as ConversationMessage,
+      recoveryResumedFixture({ turnLabel: "重构导出脚本" }),
+    ]);
+    expect(html).not.toContain("half-streamed answer before the restart");
+    expect(html).toContain("已从重启中恢复，继续执行");
+  });
+});
+
 describe("ConversationView compact active-turn status rails", () => {
   it("does not force-OR compact placeholder over process/feedback gates", () => {
     expect(conversationViewSource).not.toContain("Force Thinking/waiting when in-flight with no visible paint");
@@ -384,7 +519,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(styles.timelineArea).toContain("flex-1");
     expect(styles.timelineArea).toContain("min-h-0");
     const timelineAreaSource = conversationViewSource.slice(
-      conversationViewSource.indexOf("<div className={styles.timelineArea}>"),
+      conversationViewSource.indexOf('<div ref={timelineAreaRef} className={styles.timelineArea}>'),
       conversationViewSource.indexOf("{toolApproval && !toolApprovalConsumedRef.current"),
     );
     expect(timelineAreaSource).toContain("styles.backToBottomButton");
@@ -431,10 +566,10 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(styles.timelineCellPreview).toContain("whitespace-normal");
     expect(styles.timelineCellPreview).toContain("[overflow-wrap:anywhere]");
     expect(styles.timelineCellPreview).toContain("line-clamp-2");
-    expect(styles.timelineCellPreview).toContain("[font-size:var(--vui-font-sm)]");
-    expect(styles.timelineCellPreview).not.toContain("[font-size:var(--vui-font-xs)]");
+    expect(styles.timelineCellPreview).toContain("text-vui-sm");
+    expect(styles.timelineCellPreview).not.toContain("text-vui-xs");
     // Codex-aligned tool chrome keeps titles muted/small; pills own the primary action label.
-    expect(styles.timelineCellTitle).toContain("[font-size:var(--vui-font-xs)]");
+    expect(styles.timelineCellTitle).toContain("text-vui-xs");
     expect(styles.timelineCellTitle).toContain("font-normal");
     expect(styles.operationItem).not.toContain("860px");
     expect(styles.operationItem).toContain("w-[min(100%,72ch)]");
@@ -602,7 +737,7 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     expect(styles.assistantTurnContinuation).not.toContain("[&_.turnMeta]:hidden");
     expect(conversationViewSource).toContain("compactHeader={false}");
     expect(conversationViewSource).not.toContain("compactTurnHeader\n                    ? null");
-    expect(styles.turnContent).toContain("gap-[5px]");
+    expect(styles.turnContent).toContain("gap-2");
     expect(styles.turnMeta).toContain("inline-flex");
     expect(styles.turnSpeaker).toContain("truncate");
     expect(styles.turnAvatarImage).toContain("object-cover");
@@ -613,29 +748,14 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     expect(styles.userMessageBody).toContain("justify-self-end");
     expect(styles.userMessageBody).toContain("w-fit");
     expect(styles.userMessageBody).toContain("max-w-full");
-    expect(styles.userMessageBody).toContain("rounded-[16px]");
-    expect(styles.userMessageBody).toContain("border-0");
+    expect(styles.userMessageBody).toContain("rounded-xl");
+    expect(styles.userMessageBody).toContain("border-[var(--vui-border-subtle)]");
     expect(styles.userMessageBody).toContain("bg-[var(--vui-control-muted)]");
-    expect(styles.userMessageBody).toContain("px-3");
-    expect(styles.userMessageBody).toContain("py-2");
+    expect(styles.userMessageBody).toContain("px-4");
+    expect(styles.userMessageBody).toContain("py-3");
     expect(styles.userMessageBody).toContain("shadow-none");
     expect(styles.userMessageBody).toContain("text-left");
 
-    expect(styles.responseSection).toContain("w-full");
-    expect(styles.responseSection).toContain("max-w-full");
-    expect(styles.responseSection).not.toContain("justify-self-stretch");
-    expect(styles.responseSection).toContain("border-l");
-    expect(styles.responseSection).toContain("bg-transparent");
-    expect(styles.responseSection).not.toContain("bg-[var(--vui-surface-chat-panel)]");
-    expect(styles.responseSection).not.toContain("rounded-[var(--radius-panel)]");
-    expect(styles.responseSection).not.toContain("white)");
-    expect(styles.responseSection).toContain("pl-2.5");
-    expect(styles.responseSection).toContain("shadow-none");
-    expect(styles.responseBody).toContain("border-0");
-    expect(styles.responseBody).toContain("bg-transparent");
-    expect(styles.responseBody).toContain("pl-5");
-    expect(styles.responseBody).toContain("shadow-none");
-    expect(styles.responseBody).not.toContain("bg-[color-mix(in_srgb,var(--surface-panel)_66%,transparent)]");
 
     expect(styles.answerOnlyProcessGroup).toContain("w-full");
     expect(styles.answerOnlyProcessGroup).toContain("max-w-full");
@@ -647,12 +767,10 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
   it("keeps visible message shell styles as named Tailwind slices", () => {
     expect(conversationViewStylesModuleSource).toContain("const conversationViewScope");
     expect(conversationViewStylesModuleSource).toContain("const readableMessageText");
-    expect(conversationViewStylesModuleSource).toContain("const assistantResponseSection");
-    expect(conversationViewStylesModuleSource).toContain("const assistantResponseBody");
     expect(conversationViewStylesModuleSource).toContain("const answerOnlyProcessShell");
     expect(conversationViewStylesModuleSource).toContain("const userMessageBubble");
-    expect(conversationViewStylesModuleSource).toContain("responseSection: assistantResponseSection");
-    expect(conversationViewStylesModuleSource).toContain("responseBody: assistantResponseBody");
+    expect(conversationViewStylesModuleSource).not.toContain("assistantResponseSection");
+    expect(conversationViewStylesModuleSource).not.toContain("assistantResponseBody");
     expect(conversationViewStylesModuleSource).toContain("answerOnlyProcessGroup: answerOnlyProcessShell");
     expect(conversationViewStylesModuleSource).toContain("userMessageBody: userMessageBubble");
   });
@@ -675,18 +793,18 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     expect(conversationViewStylesModuleSource).toContain("composerRoundButton: composerRoundActionButton");
     expect(conversationViewStylesModuleSource).toContain("composerRoundButtonPrimary: composerPrimaryActionButton");
     expect(conversationViewStylesModuleSource).toContain("sendButton: composerSendActionButton");
-    expect(styles.attachButton).toContain("focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)]");
+    expect(styles.attachButton).toContain("focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),transparent)]");
     expect(styles.attachButton).toContain("active:bg-[color-mix(in_srgb,var(--vui-surface-workspace)_18%,var(--vui-control-muted-hover))]");
     expect(styles.attachButton).toContain("disabled:hover:bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)]");
     expect(styles.composerRoundButton).toContain("border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)]");
     expect(styles.composerRoundButton).toContain("hover:bg-[color-mix(in_srgb,var(--vui-surface-workspace)_14%,var(--vui-control-muted-hover))]");
-    expect(styles.composerRoundButton).toContain("active:border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))]");
-    expect(styles.composerRoundButtonPrimary).toContain("!border-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]");
+    expect(styles.composerRoundButton).toContain("active:border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint),var(--vui-border-subtle))]");
+    expect(styles.composerRoundButtonPrimary).toContain("!border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line-strong),transparent)]");
     expect(styles.composerRoundButtonPrimary).toContain("hover:!bg-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-control-muted-hover))]");
-    expect(styles.composerRoundButtonPrimary).toContain("active:!bg-[color-mix(in_srgb,var(--accent-cool)_22%,var(--vui-surface-row))]");
+    expect(styles.composerRoundButtonPrimary).toContain("active:!bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint),var(--vui-surface-row))]");
     expect(styles.sendButton).toContain("focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)]");
-    expect(styles.stopButton).toContain("!border-[color-mix(in_srgb,var(--state-error)_34%,transparent)]");
-    expect(styles.stopButton).toContain("hover:!bg-[color-mix(in_srgb,var(--state-error)_14%,var(--vui-control-muted-hover))]");
+    expect(styles.stopButton).toContain("!border-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)]");
+    expect(styles.stopButton).toContain("hover:!bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash-strong),var(--vui-control-muted-hover))]");
     expect(styles.stopButton).toContain("active:!bg-[color-mix(in_srgb,var(--state-error)_18%,var(--vui-surface-row))]");
     expect(styles.composerAttachmentTray).toContain("flex flex-wrap");
     expect(styles.composerAttachmentTray).toContain("gap-2");
@@ -741,28 +859,43 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     expect(conversationViewSource).toContain("icon={");
     expect(conversationViewSource).toContain("<RefreshCw");
   });
-  it("keeps edit-mode composer chrome compact", () => {
-    expect(styles.composerEditModeBar).toContain("min-h-7");
-    expect(styles.composerEditModeBar).toContain("w-full");
-    expect(styles.composerEditModeBar).toContain("px-2");
-    expect(styles.composerEditModeBar).toContain("items-center");
-    expect(styles.composerEditModeBar).not.toContain("shadow-[var(--vui-shadow-hairline)]");
-    expect(styles.composerEditModeBar).not.toContain("accent-cool");
-    expect(styles.composerEditModeIcon).not.toContain("p-2");
-    expect(styles.composerEditModeCancel).toContain("!min-h-6");
-    expect(styles.composerEditModeDescription).toContain("truncate");
-    expect(styles.composerEditModePreview).toContain("truncate");
-    expect(styles.composerEditModeWarning).toContain("state-warning");
+  it("keeps inline edit chrome compact after the composer edit bar removal", () => {
+    // The composer bottom edit bar is gone: no orphaned keys may linger.
+    for (const orphan of [
+      "composerEditModeBar",
+      "composerEditModeCancel",
+      "composerEditModeCopy",
+      "composerEditModeIcon",
+      "composerEditModeLabel",
+      "composerEditModeDescription",
+      "composerEditModePreview",
+      "composerEditModeWarning",
+      "composerModeNotice",
+      "composerModeNoticeIcon",
+    ]) {
+      expect(conversationViewSource).not.toContain(`styles.${orphan}`);
+      expect(Object.keys(styles)).not.toContain(orphan);
+    }
+    // The row editor owns the edit surface now: accent-tinted shell, capped
+    // self-sizing input, and a labeled rerun submit that stays a pill.
+    expect(styles.turnInlineEditor).toContain("accent-cool");
+    expect(styles.turnInlineEditor).toContain("rounded-[var(--radius-control)]");
+    expect(styles.turnInlineEditorInput).toContain("max-h-64");
+    expect(styles.turnInlineEditorInput).toContain("resize-none");
+    expect(styles.turnInlineEditorInput).toContain("overflow-y-auto");
+    expect(styles.turnInlineEditorActions).toContain("justify-end");
+    expect(styles.turnInlineEditorChipRow).toContain("flex-wrap");
+    expect(styles.turnEditBadge).toContain("rounded-full");
     expect(styles.turnEditing).toContain("userMessageBody");
     expect(styles.turnEditing).not.toContain("vuiOpaqueRowClass");
     expect(styles.turnEditing).not.toMatch(/\bp-2\b/);
   });
 
   it("uses shared readable scale tokens for dense conversation text", () => {
-    expect(conversationViewStylesSource).toContain("var(--vui-font-xs)");
-    expect(conversationViewStylesSource).toContain("var(--vui-font-sm)");
-    expect(conversationViewStylesSource).toContain("var(--vui-font-md)");
-    expect(conversationViewStylesSource).toContain("var(--vui-font-chat)");
+    expect(conversationViewStylesSource).toContain("text-vui-xs");
+    expect(conversationViewStylesSource).toContain("text-vui-sm");
+    expect(conversationViewStylesSource).toContain("text-vui-md");
+    expect(conversationViewStylesSource).toContain("text-vui-chat");
     expect(conversationViewStylesSource).not.toMatch(/font-size:\s*0\.(?:6\d|7[0-7])rem/);
   });
   it("caches response segmentation while delegating markdown rendering to the shared renderer", () => {
@@ -784,6 +917,21 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     expect(conversationViewSource).toContain("? getCachedResponseSegments(responseText)");
     expect(conversationViewSource).toContain("const prewarmMessages = timelineMessages");
     expect(conversationViewSource).toContain("window.setTimeout(prewarmNext, 48)");
+  });
+
+  it("renders the codex assistant cell through one component type across streaming and settled", () => {
+    // Settle must not swap renderer component types: the transcript cell
+    // keeps ConversationStreamingResponseContent mounted and the streaming
+    // decision travels as the isStreaming prop instead.
+    expect(conversationViewSource).toContain("function renderAssistantTranscriptResponseText(");
+    expect(conversationViewSource).toContain("isStreaming={isStreaming}");
+    expect(conversationViewSource).toContain(
+      "renderAssistantTranscriptResponseText(\n            text,\n            assistantTurnIsStreaming(message),",
+    );
+    expect(conversationViewSource).not.toContain("renderStreamingResponseText");
+    expect(conversationViewSource).not.toMatch(
+      /assistantTurnIsStreaming\(message\)\s*\?\s*render\w+ResponseText/,
+    );
   });
 
   it("keeps tool detail expansion work off collapsed renders", () => {
@@ -886,28 +1034,30 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     expect(conversationViewSource).toContain("initializedSessionRef.current !== sessionId");
   });
 
-  it("keeps virtual-row ResizeObservers and streaming paint free of per-render thrash", () => {
-    expect(conversationViewSource).toContain("timelineVirtualRowRefCallbacksRef");
-    expect(conversationViewSource).toContain("timelineRowNodesRef");
+  it("keeps react-virtual measurement and streaming paint free of per-render thrash", () => {
+    // react-virtual owns row measurement: stable keys feed its item-size cache,
+    // and row refs delegate to measureElement (rAF-batched ResizeObserver).
+    expect(conversationViewSource).toContain("useVirtualizer({");
+    expect(conversationViewSource).toContain("getItemKey: (index) => timelineHistoryRowKeys[index]");
+    expect(conversationViewSource).toContain("measureTimelineVirtualRow");
+    expect(conversationViewSource).toContain("useAnimationFrameWithResizeObserver: true");
+    expect(conversationViewSource).not.toContain("timelineRowResizeObserversRef");
+    expect(conversationViewSource).not.toContain("scheduleTimelineHeightVersionBump");
     expect(conversationViewSource).toContain("streamingPaintMetricsRef");
-    expect(conversationViewSource).toContain("followLatestRef.current ? 8 : 2");
     // ChatGPT/Claude: send always re-pins stick-to-bottom even after user scrolled up.
     expect(conversationViewSource).toContain("function pinFollowLatestForSubmit");
     expect(conversationViewSource).toContain("function handleSendAndFollowLatest");
     expect(conversationViewSource).toContain("handleSendAndFollowLatest()");
-    expect(conversationViewSource).toContain("ref={timelineVirtualRowRef(rowKey)}");
+    expect(conversationViewSource).toContain("ref={rowPlan.virtualStartPx === null ? undefined : measureTimelineVirtualRow}");
     expect(conversationViewSource).toContain("timelineContentRef");
     expect(conversationViewSource).toContain("styles.timelineContent");
-    // Height bumps re-pin only while following latest (coalesced rAF; content host RO is primary).
-    expect(conversationViewSource).toMatch(
-      /scheduleTimelineHeightVersionBump[\s\S]*?setTimelineRowHeightVersion/,
+    // Content-host ResizeObserver still re-pins only while following latest.
+    const contentRoBlock = conversationViewSource.slice(
+      conversationViewSource.indexOf("// Stick-to-bottom: re-pin when timeline viewport or content height changes"),
+      conversationViewSource.indexOf("}, [sessionId, activeTimelineMessages.length > 0]);"),
     );
-    const bumpBlock = conversationViewSource.slice(
-      conversationViewSource.indexOf("const scheduleTimelineHeightVersionBump"),
-      conversationViewSource.indexOf("const bindTimelineVirtualRow"),
-    );
-    expect(bumpBlock).toContain("shouldStickTimelineToBottomOnContentResize");
-    expect(bumpBlock).toContain("scheduleTimelineScrollToBottom()");
+    expect(contentRoBlock).toContain("shouldStickTimelineToBottomOnContentResize");
+    expect(contentRoBlock).toContain("scheduleTimelineScrollToBottom()");
     expect(conversationViewSource).toContain("pinnedLatestUserMessageIdRef");
     expect(conversationViewSource).toContain("latestUserChanged");
     // Paint effect must not depend on Map/array identities that change every render.
@@ -918,6 +1068,22 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     expect(paintBlock).toContain("streamingTimelineScrollSignal");
     expect(paintBlock).not.toContain("agentRenderStatesByMessageId");
     expect(paintBlock).not.toContain("streamingTimelineMessages");
+  });
+
+  it("virtualizes the whole history and renders the running turn as an independent live tail", () => {
+    // No client message window: every local message is renderable.
+    expect(conversationViewSource).toContain("const visibleMessageCount = displayMessages.length;");
+    expect(conversationViewSource).not.toContain("INITIAL_VISIBLE_MESSAGE_COUNT");
+    expect(conversationViewSource).not.toContain("nextVisibleMessageLimit");
+    // Trailing in-flight rows leave the virtual window as the live-tail block.
+    expect(conversationViewSource).toContain("const timelineLiveTailStartIndex = useMemo");
+    expect(conversationViewSource).toContain("!assistantTurnIsStreaming(message) && !assistantTurnIsInFlight(message)");
+    expect(conversationViewSource).toContain("timelineLiveTailMessages.length");
+    expect(conversationViewSource).toContain('data-conversation-virtual-host="1"');
+    // Follow/anchor semantics keep the production contracts.
+    expect(conversationViewSource).toContain("resolveTimelineFollowState({");
+    expect(conversationViewSource).toContain("captureTimelineRowKeyAnchor(timelineRef.current)");
+    expect(conversationViewSource).toContain("restoreTimelineRowKeyAnchor(timeline, pending.anchor)");
   });it("colors operation rows from each operation status instead of the operation kind", () => {
     expect(conversationViewSource).toContain("function operationStatusToneClassName(operation: AgentMessageOperation)");
     expect(conversationViewSource).toContain("operationStatusTone(operation)");
@@ -1003,7 +1169,7 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     expect(conversationViewSource).toContain("handleScroll");
     expect(conversationViewSource).toContain("revealEarlierTimelineMessages()");
     expect(conversationViewSource).toContain("captureTimelineRowKeyAnchor(timelineRef.current)");
-    expect(conversationViewSource).toContain("restoreTimelineRowKeyAnchor(timelineRef.current, anchor)");
+    expect(conversationViewSource).toContain("restoreTimelineRowKeyAnchor(timeline, pending.anchor)");
     expect(conversationViewSource).not.toContain("function showEarlierMessages()");
     expect(conversationViewSource).not.toContain("onClick={showEarlierMessages}");
     expect(conversationViewSource).not.toContain("setAllMessagesVisible(true)");
@@ -1086,13 +1252,108 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     expect(styles.markdownBody).toContain("max-w-full");
     expect(styles.responseSegment_answer).toContain("[&_.markdownBody]:max-w-[min(100%,128ch)]");
     expect(styles.assistantTurn).toContain("[&_.turnContent]:w-full");
-    expect(styles.agentInboxTurn).toContain("[&_.turnContent]:w-[min(100%,1360px)]");
-    expect(styles.groupTranscriptTurn).toContain("[&_.turnContent]:w-[min(100%,1360px)]");
-    expect(styles.timelineAssistantTextCell).toContain("max-w-[min(100%,1360px)]");
+    expect(styles.agentInboxTurn).toContain("[&_.turnContent]:w-full");
+    expect(styles.groupTranscriptTurn).toContain("[&_.turnContent]:w-full");
+    expect(styles.timelineAssistantTextCell).toContain("max-w-[830px]");
     expect(styles.codexTranscriptSurface).toContain("w-full");
     expect(styles.codexTranscriptSurface).toContain("max-w-full");
     expect(styles.codexTranscriptCellSummary).toContain("max-w-full");
     expect(styles.messageBody).not.toContain("max-w-[min(100%,128ch)]");
+  });
+
+  it("keeps off-screen code blocks cheap with content-visibility", () => {
+    // zai-org/ZCode code-block treatment (Apache-2.0): skip off-screen
+    // code-block paint while keeping a stable intrinsic size so virtualized
+    // row measurement does not thrash.
+    expect(styles.responseSegmentPre).toContain("[content-visibility:auto]");
+    expect(styles.responseSegmentPre).toContain("[contain-intrinsic-size:auto_200px]");
+    expect(conversationStreamingResponseContentStyles.responseSegmentPre).toContain(
+      "[content-visibility:auto]",
+    );
+    expect(conversationStreamingResponseContentStyles.responseSegmentPre).toContain(
+      "[contain-intrinsic-size:auto_200px]",
+    );
+  });
+
+  it("reveals per-message action buttons on hover while keeping them reachable", () => {
+    // zai-org/ZCode ConversationRowView treatment (Apache-2.0): opacity
+    // transition + group-hover reveal, focus-within for keyboard reachability,
+    // and always-visible on touch (hover:none) with reduced-motion safety.
+    for (const hoverClass of [styles.turnHoverActions, styles.turnErrorActionsHover]) {
+      expect(hoverClass).toContain("opacity-0");
+      expect(hoverClass).toContain("group-hover:opacity-100");
+      expect(hoverClass).toContain("focus-within:opacity-100");
+      expect(hoverClass).toContain("[@media(hover:none)]:opacity-100");
+      expect(hoverClass).toContain("transition-opacity");
+      expect(hoverClass).toContain("motion-reduce:transition-none");
+    }
+    // The hover reveal needs a group anchor on the row container.
+    expect(conversationViewSource).toContain('// Hover-reveal anchor: per-message action buttons fade in only');
+    const turnClassNameStart = conversationViewSource.indexOf("const turnClassName = [");
+    const turnClassNameBlock = conversationViewSource.slice(
+      turnClassNameStart,
+      conversationViewSource.indexOf('].filter(Boolean).join(" ");', turnClassNameStart),
+    );
+    expect(turnClassNameBlock).toContain('"group",');
+    expect(turnClassNameBlock.indexOf("// Hover-reveal anchor")).toBeGreaterThan(-1);
+    // The meta action buttons (version switch, copy, fork, regenerate, edit)
+    // stay in the DOM inside one hover-reveal container; the timestamp stays
+    // outside it.
+    const metaActionsBlock = conversationViewSource.slice(
+      conversationViewSource.indexOf("metaActions={"),
+      conversationViewSource.indexOf("}</span>\n                  </>\n                }"),
+    );
+    expect(metaActionsBlock).toContain('data-conversation-hover-actions="1"');
+    expect(metaActionsBlock).toContain('aria-label={t("copyAnswer")}');
+    expect(metaActionsBlock).toContain('aria-label={t("addToDataset")}');
+    expect(metaActionsBlock).toContain('aria-label={t("excludeFromDataset")}');
+    expect(metaActionsBlock).toContain('aria-label={t("forkSessionFromMessage")}');
+    expect(metaActionsBlock).toContain('aria-label={regeneratePending ? t("regeneratePending") : t("regenerateAnswer")}');
+    expect(metaActionsBlock).toContain('aria-label={editUserMessageLabel ?? t("editMessage")}');
+    expect(metaActionsBlock).toContain('aria-label={t("switchBranchVersionPrevious")}');
+    // Curation buttons share the copy gate and mark the decided side active.
+    expect(metaActionsBlock).toContain("messageCurationDecision === \"include\"");
+    expect(metaActionsBlock).toContain("messageCurationDecision === \"exclude\"");
+    expect(metaActionsBlock).toContain("styles.turnIconButtonActive");
+    // Editing keeps the (active) edit affordance visible without hover.
+    expect(metaActionsBlock).toContain("isEditingMessage ? styles.turnHoverActionsVisible : styles.turnHoverActions");
+    // The failed-turn retry uses the hover-reveal variant too.
+    expect(conversationViewSource).toContain("className={styles.turnErrorActionsHover}");
+  });
+
+  it("keeps message actions in the DOM inside the hover container when rendered", () => {
+    const html = renderConversation([
+      {
+        id: "message-assistant-1",
+        role: "assistant",
+        content: "答案正文",
+        timestamp: "2026-05-22T00:01:00Z",
+        turnId: "turn-1",
+        status: "completed",
+        nodeId: "node-assistant-1",
+        turnItems: [
+          {
+            id: "message-assistant-1-item-answer",
+            itemId: "message-assistant-1-item-answer",
+            sessionId: "session-1",
+            turnId: "turn-1",
+            version: 3,
+            revision: 1,
+            sequence: 1,
+            type: "agent_message",
+            phase: "final_answer",
+            text: "答案正文",
+            status: "completed",
+            terminal: true,
+          },
+        ],
+      },
+    ] as unknown as ConversationMessage[]);
+    expect(html).toContain('data-conversation-hover-actions="1"');
+    expect(html).toContain("lucide-copy");
+    // Settled assistant answers carry the SFT curation pair next to copy.
+    expect(html).toContain("lucide-list-plus");
+    expect(html).toContain("lucide-circle-minus");
   });
   it("renders composer session reference chips", () => {
     const html = renderConversation([], {
@@ -1638,12 +1899,16 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     );
 
     expect(html).toContain('aria-pressed="true"');
-    expect(html).toContain("disabled");
-    expect(html).toContain("Original prompt");
     expect(html).toContain("编辑消息");
+    // Inline edit: the row body is replaced by the editor, seeded with the
+    // original text; pending submit disables the input and the rerun action.
+    expect(html).toContain('data-conversation-inline-edit="1"');
+    expect(html).toContain("Original prompt");
+    expect(html).toContain("disabled");
+    expect(html).toContain('data-conversation-inline-edit-input="1"');
   });
 
-  it("renders edit mode as a visible composer status row with target preview and rerun action", () => {
+  it("swaps the edited row body for an inline editor and retires the composer edit bar", () => {
     const html = renderConversation(
       [
         {
@@ -1654,6 +1919,7 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
         },
       ],
       {
+        showComposer: true,
         editingMessageId: "message-user",
         composerModeNotice: "正在编辑最新一条用户消息；发送后会替换这条消息并重跑后续对话。",
         composerModeTargetPreview: "继续",
@@ -1664,19 +1930,76 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
       },
     );
 
-    expect(html).toContain("composerEditModeBar");
-    expect(html).toContain("composerEditModeLabel");
-    expect(html).toContain("编辑消息");
-    expect(html).toContain("aria-label=\"正在编辑最新一条用户消息；发送后会替换这条消息并重跑后续对话。\"");
-    expect(html).not.toContain("composerEditModeDescription");
-    expect(html).not.toContain("composerEditModePreview");
-    expect(html).not.toContain("当前内容：继续");
-    expect(html).toContain("composerEditModeCancel");
+    // The row carries the editor with the original text plus submit/cancel.
+    expect(html).toContain('data-conversation-inline-edit="1"');
+    expect(html).toContain("继续");
+    expect(html).toContain("取消编辑");
     expect(html).toContain("composerEditSubmitButton");
-    expect(html).toContain("保存并重跑");
-    expect(html).not.toContain("composerRoundButtonPrimary");
     expect(html).toMatch(/data-slot="vui-button-label"[^>]*>保存并重跑</);
-    expect(html).not.toContain("composerModeNoticeIcon");
+    // The composer bottom edit bar path is gone; the composer field steps
+    // aside while editing instead of hosting a second editor.
+    expect(html).not.toContain("composerEditModeBar");
+    expect(html).not.toContain("composerEditModeLabel");
+    expect(html).not.toContain("composerEditModeCancel");
+    expect(html).not.toContain('aria-label="发送消息"');
+    expect(html).not.toContain("composerRoundButtonPrimary");
+  });
+
+  it("shows original attachments and references as read-only chips inside the inline editor", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-user",
+          role: "user",
+          content: "看看这两份材料",
+          timestamp: "2026-05-22T00:00:00Z",
+          attachments: [
+            {
+              artifactId: "artifact-1",
+              filename: "run-01.csv",
+              url: "/files/run-01.csv",
+              imageUrl: "",
+              downloadUrl: "/files/run-01.csv",
+              contentType: "text/csv",
+              sizeBytes: 12,
+              kind: "user_document",
+              status: "ready",
+            },
+            {
+              artifactId: "artifact-2",
+              filename: "sketch.png",
+              url: "/files/sketch.png",
+              imageUrl: "/files/sketch.png",
+              downloadUrl: "/files/sketch.png",
+              contentType: "image/png",
+              sizeBytes: 20,
+              kind: "user_image",
+              status: "ready",
+            },
+          ],
+          references: [
+            {
+              referenceId: "session:ref-1",
+              kind: "session",
+              sessionId: "ref-1",
+              title: "顾云舒上下文",
+            },
+          ],
+        },
+      ],
+      {
+        editingMessageId: "message-user",
+        composerValue: "看看这两份材料",
+      },
+    );
+
+    expect(html).toContain('data-inline-edit-attachments="2"');
+    expect(html).toContain('data-inline-edit-references="1"');
+    expect(html).toContain("run-01.csv");
+    expect(html).toContain("sketch.png");
+    expect(html).toContain("顾云舒上下文");
+    // Read-only: no remove affordance inside the editor chips.
+    expect(html).not.toContain("移除");
   });
   it("does not render the mental-model option in the composer", () => {
     const html = renderConversation([]);
@@ -2097,5 +2420,127 @@ describe("ConversationView historical failed turn retry", () => {
     );
 
     expect(html).not.toContain("重试此轮");
+  });
+});
+
+describe("conversation turn navigator contract", () => {
+  it("mounts the minimap rail with the six-turn gate and live-tail-aware navigation", () => {
+    // ConversationView wires the navigator to the same row plan the
+    // virtualizer renders, and keeps the gate in the navigator module.
+    expect(conversationViewSource).toContain('from "./ConversationTurnNavigator"');
+    expect(conversationViewSource).toContain("buildConversationTurnNavDirectory");
+    expect(conversationViewSource).toContain("resolveConversationTurnNavCurrentIndex");
+    expect(conversationViewSource).toContain("<ConversationTurnNavigator");
+    expect(conversationViewSource).toContain("scrollToIndex(entry.anchorRowIndex");
+    expect(navigatorSource).toContain("CONVERSATION_TURN_NAV_MIN_TURNS");
+    expect(navigatorSource).toContain("entries.length < CONVERSATION_TURN_NAV_MIN_TURNS");
+    expect(navigatorSource).toContain('data-conversation-turn-navigator="1"');
+  });
+});
+
+describe("composer attachment upload status contract", () => {
+  const chipAttachments = [
+    {
+      id: "att-ok",
+      filename: "ok.png",
+      previewUrl: "blob:ok",
+      sizeBytes: 12,
+      contentType: "image/png",
+      uploadStatus: "uploaded" as const,
+      artifactId: "artifact-ok",
+    },
+    {
+      id: "att-bad",
+      filename: "bad.png",
+      previewUrl: "blob:bad",
+      sizeBytes: 12,
+      contentType: "image/png",
+      uploadStatus: "failed" as const,
+    },
+    {
+      id: "att-run",
+      filename: "run.png",
+      previewUrl: "blob:run",
+      sizeBytes: 12,
+      contentType: "image/png",
+      uploadStatus: "uploading" as const,
+    },
+  ];
+
+  it("paints only the failed chip with the danger variant plus a per-chip retry action", () => {
+    const html = renderConversation([], {
+      showComposer: true,
+      composerAttachments: chipAttachments,
+      onRemoveComposerAttachment: () => undefined,
+      onRetryComposerAttachment: () => undefined,
+    });
+    expect(html.match(/composerAttachmentChipFailed/g)?.length).toBe(1);
+    expect(html.match(/composerAttachmentRetryButton/g)?.length).toBe(1);
+    expect(html).toContain('aria-label="重试上传: bad.png"');
+    // The hint copy appears twice: the chip title and the failed status line.
+    expect(html.match(/上传失败，可重试/g)?.length).toBe(2);
+  });
+
+  it("shows the uploading spinner only on the uploading chip", () => {
+    const html = renderConversation([], {
+      showComposer: true,
+      composerAttachments: chipAttachments,
+    });
+    expect(html.match(/composerAttachmentUploadingIcon/g)?.length).toBe(1);
+    expect(html).toContain("上传中");
+  });
+
+  it("keeps healthy chips on the neutral style without retry affordances", () => {
+    const html = renderConversation([], {
+      showComposer: true,
+      composerAttachments: [chipAttachments[0]],
+      onRemoveComposerAttachment: () => undefined,
+      onRetryComposerAttachment: () => undefined,
+    });
+    expect(html).not.toContain("composerAttachmentChipFailed");
+    expect(html).not.toContain("composerAttachmentRetryButton");
+    expect(html).toContain("composerAttachmentRemoveButton");
+  });
+
+  it("adds the retry-all ghost action to the error row only while failed chips exist", () => {
+    const htmlWith = renderConversation([], {
+      showComposer: true,
+      composerError: "图片上传失败",
+      composerAttachments: chipAttachments,
+      onRetryComposerAttachmentUploads: () => undefined,
+    });
+    expect(htmlWith).toContain("composerErrorRetryButton");
+    expect(htmlWith).toContain("重试上传");
+    // role=alert keeps announcing the message itself.
+    expect(htmlWith).toMatch(/<p[^>]*role="alert"[^>]*>图片上传失败/);
+
+    const htmlWithoutHandler = renderConversation([], {
+      showComposer: true,
+      composerError: "图片上传失败",
+      composerAttachments: chipAttachments,
+    });
+    expect(htmlWithoutHandler).not.toContain("composerErrorRetryButton");
+
+    const htmlPlainError = renderConversation([], {
+      showComposer: true,
+      composerError: "Attachment limit reached",
+      composerAttachments: chipAttachments,
+    });
+    expect(htmlPlainError).not.toContain("composerErrorRetryButton");
+    // Unrelated composer errors keep the exact plain <p role="alert"> shape.
+    expect(htmlPlainError).toMatch(/<p[^>]*role="alert"[^>]*>Attachment limit reached<\/p>/);
+  });
+
+  it("keeps the failed-chip styles on the shared danger tokens", () => {
+    expect(styles.composerAttachmentChipFailed).toContain("var(--state-error)");
+    expect(styles.composerAttachmentRetryButton).toContain("var(--state-error)");
+    expect(styles.composerAttachmentStatusFailed).toContain("var(--state-error)");
+    expect(styles.composerAttachmentUploadingIcon).toContain("animate-spin");
+    expect(styles.composerErrorRetryButton).toContain("vui-components-conversationview composerErrorRetryButton");
+  });
+
+  it("wires the retry entry points through the route surface", () => {
+    expect(conversationViewSource).toContain("onRetryComposerAttachmentUploads");
+    expect(conversationViewSource).toContain("onRetryComposerAttachment(attachment.id)");
   });
 });

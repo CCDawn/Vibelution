@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chat stream core runtime scene</title>
+    <script>
+      window.__consoleErrors = [];
+      (function () {
+        var originalError = console.error.bind(console);
+        console.error = function () {
+          var errors = window.__consoleErrors;
+          if (errors) errors.push("console.error: " + Array.from(arguments).map(String).join(" "));
+          originalError.apply(null, arguments);
+        };
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="runtime-root"></div>
+    <script type="module" src="/src/runtime/main-runtime.tsx"></script>
+  </body>
+</html>

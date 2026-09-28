@@ -17,6 +17,7 @@ const sections: ConfigSummary["sections"] = [
   { id: "overview", title: "配置源", summary: "配置状态" },
   { id: "diagnostics", title: "诊断", summary: "保存前诊断" },
   { id: "shell", title: "工作台默认项", summary: "工作台行为" },
+  { id: "shortcuts", title: "快捷键", summary: "全局快捷键" },
   { id: "ui", title: "界面", summary: "界面显示" },
   { id: "user-profile", title: "用户信息", summary: "用户资料" },
   { id: "avatar", title: "终端形象", summary: "终端形象" },
@@ -62,6 +63,7 @@ describe("ConfigSettingsNavigation", () => {
     ]);
     expect(groups.find((group) => group.id === "workbench-interface")?.pages).toEqual([
       expect.objectContaining({ id: "workbench-interface", memberSectionIds: ["shell", "ui"] }),
+      expect.objectContaining({ id: "workbench-shortcuts", memberSectionIds: ["shortcuts"] }),
     ]);
     expect(groups.find((group) => group.id === "avatar-pet")?.pages).toEqual([
       expect.objectContaining({ id: "identity-profile", memberSectionIds: ["user-profile", "avatar", "pet"] }),
@@ -80,17 +82,17 @@ describe("ConfigSettingsNavigation", () => {
 
   it("omits redundant page tabs when a settings group has one combined page", () => {
     const groups = buildConfigSettingsGroups(sections, groupCopy, "zh");
-    const workbenchGroup = groups.find((group) => group.id === "workbench-interface") ?? null;
-    const markup = renderToStaticMarkup(
+    const modelsGroup = groups.find((group) => group.id === "models-profiles") ?? null;
+    const modelsMarkup = renderToStaticMarkup(
       <ConfigSettingsPageTabs
         language="zh"
-        group={workbenchGroup}
-        activePageId="workbench-interface"
+        group={modelsGroup}
+        activePageId="model-connection"
         onSelectPage={() => undefined}
       />,
     );
 
-    expect(markup).toBe("");
+    expect(modelsMarkup).toBe("");
 
     const runtimeGroup = groups.find((group) => group.id === "runtime-context") ?? null;
     const runtimeMarkup = renderToStaticMarkup(
@@ -104,18 +106,6 @@ describe("ConfigSettingsNavigation", () => {
 
     expect(runtimeMarkup).toBe("");
 
-    const profileGroup = groups.find((group) => group.id === "avatar-pet") ?? null;
-    const profileMarkup = renderToStaticMarkup(
-      <ConfigSettingsPageTabs
-        language="zh"
-        group={profileGroup}
-        activePageId="identity-profile"
-        onSelectPage={() => undefined}
-      />,
-    );
-
-    expect(profileMarkup).toBe("");
-
     const overviewGroup = groups.find((group) => group.id === "overview-apply") ?? null;
     const overviewMarkup = renderToStaticMarkup(
       <ConfigSettingsPageTabs
@@ -127,6 +117,23 @@ describe("ConfigSettingsNavigation", () => {
     );
 
     expect(overviewMarkup).toBe("");
+  });
+
+  it("shows page tabs with the shortcuts page when the workbench group has two pages", () => {
+    const groups = buildConfigSettingsGroups(sections, groupCopy, "zh");
+    const workbenchGroup = groups.find((group) => group.id === "workbench-interface") ?? null;
+    const markup = renderToStaticMarkup(
+      <ConfigSettingsPageTabs
+        language="zh"
+        group={workbenchGroup}
+        activePageId="workbench-shortcuts"
+        onSelectPage={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("工作台与界面");
+    expect(markup).toContain("快捷键");
+    expect(markup).toContain('aria-current="page"');
   });
 
   it("falls back to the requested group's first page", () => {
@@ -174,8 +181,9 @@ describe("ConfigSettingsNavigation", () => {
     expect(sidebarMarkup).toContain("搜索设置");
     expect(sidebarMarkup).toContain('data-vui="contextual-hint"');
     expect(sidebarMarkup).not.toContain('title="配置按使用场景分组，修改后统一保存"');
-    // VButton loads its tooltip renderer lazily, so SSR correctly renders the
-    // accessible button fallback rather than a Radix tooltip trigger.
+    // Navigation uses native titles so pointer entry cannot remount the click target.
+    expect(componentSource).toContain("title={group.summary}");
+    expect(componentSource).not.toContain("tooltip={group.summary}");
     expect(sidebarMarkup.match(/data-vui="button"/g)?.length ?? 0).toBe(groups.length);
     expect(sidebarMarkup).toMatch(/aria-pressed="true"[^>]*><span>工具与诊断<\/span>/);
     expect(tabsMarkup).toContain("日常工具");
@@ -185,8 +193,8 @@ describe("ConfigSettingsNavigation", () => {
     expect(tabsMarkup).not.toContain("原始配置");
     expect(tabsMarkup).toContain('aria-current="page"');
     expect(tabsMarkup.match(/data-vui="button"/g)?.length ?? 0).toBe(activeGroup?.pages.length ?? 0);
-    expect(styles.groupButton).toContain("min-h-11");
-    expect(styles.pageButton).toContain("min-h-10");
+    expect(styles.groupButton).toContain("!min-h-9");
+    expect(styles.pageButton).not.toContain("min-h-10");
     expect(styles.sidebar).toContain("w-full");
     expect(styles.pageTabs).toContain("overflow-x-auto");
     expect(componentSource).not.toContain(["@heroui", "react"].join("/"));

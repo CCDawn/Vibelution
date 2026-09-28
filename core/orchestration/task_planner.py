@@ -15,7 +15,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, ClassVar, Dict, List, Mapping, Optional
 
-from core.prompt_manager.task_analyzer import TaskStatus
+from core.prompt_manager.task_analyzer import TaskStatus, atomic_dump_json
 
 
 _TASK_STORAGE_OVERRIDE: ContextVar[str] = ContextVar("vibelution_task_storage_override", default="")
@@ -388,22 +388,18 @@ class TaskManager:
 
     def _save_tasks(self) -> None:
         fpath = self._tasks_path
-        fpath.parent.mkdir(parents=True, exist_ok=True)
         now = datetime.now().isoformat()
         if not self._created_at:
             self._created_at = now
-        with open(fpath, "w", encoding="utf-8") as f:
-            json.dump(
-                {
-                    "goal": self._goal,
-                    "tasks": self._light_tasks,
-                    "created_at": self._created_at,
-                    "updated_at": now,
-                },
-                f,
-                ensure_ascii=False,
-                indent=2,
-            )
+        atomic_dump_json(
+            fpath,
+            {
+                "goal": self._goal,
+                "tasks": self._light_tasks,
+                "created_at": self._created_at,
+                "updated_at": now,
+            },
+        )
 
     def _normalize_light_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
         data = _as_mapping(task)

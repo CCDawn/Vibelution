@@ -12,7 +12,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import tempfile
 import threading
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -100,22 +99,9 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
 
 
 def _append_jsonl(path: Path, record: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    existing = path.read_text(encoding="utf-8") if path.exists() else ""
-    line = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
-    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(existing)
-            handle.write(line)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary_name, path)
-    finally:
-        if os.path.exists(temporary_name):
-            os.unlink(temporary_name)
+    from core.web.services.team_workflow.storage_durability import append_record
 
-
+    append_record(path, record)
 def _resolve_scope(payload: Mapping[str, Any]) -> dict[str, str]:
     identity: dict[str, str] = {}
     for field in _SCOPE_FIELDS:

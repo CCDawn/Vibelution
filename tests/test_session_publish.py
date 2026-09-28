@@ -40,6 +40,41 @@ def _event_codes(service: _FakeSessionService) -> list[str]:
     return [code for code, _fields in service.lifecycle]
 
 
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_stream_compacts_only_after_dequeue_and_resends_after_reconnect(monkeypatch, asynchronous):
+    item = {"version": 3, "id": "a", "itemId": "a", "sessionId": "s", "turnId": "t", "type": "agent_message", "text": "hello"}
+    event = {"type": "assistant_delta", "sessionId": "s", "turnId": "t", "turnItems": [item], "done": False}
+
+    class Service(_FakeSessionService):
+        def _register_session_stream_subscriber(self, session_id, subscriber):
+            subscriber.put_nowait(event)
+            subscriber.put_nowait(event)
+
+    monkeypatch.setattr(publish, "_service", lambda: Service())
+
+    def payload(encoded):
+        return json.loads(encoded.split("data: ", 1)[1])
+
+    async def run_async():
+        for _ in range(2):
+            stream = publish.stream_session_events_async("s", initial="light")
+            await anext(stream)
+            assert payload(await anext(stream))["turnItems"] == [item]
+            assert payload(await anext(stream))["turnItems"] == []
+            await stream.aclose()
+
+    if asynchronous:
+        asyncio.run(run_async())
+    else:
+        for _ in range(2):
+            stream = publish.stream_session_events("s", initial="light")
+            next(stream)
+            assert payload(next(stream))["turnItems"] == [item]
+            assert payload(next(stream))["turnItems"] == []
+            stream.close()
+    assert event["turnItems"] == [item]
+
+
 def test_sync_session_stream_open_and_close_share_one_connection_id(monkeypatch) -> None:
     service = _FakeSessionService()
     monkeypatch.setattr(publish, "_service", lambda: service)

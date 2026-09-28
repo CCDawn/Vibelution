@@ -7,6 +7,7 @@
 
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -45,8 +46,15 @@ class Storage:
         """
         try:
             self._ensure_directory()
-            with open(self.save_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            target = Path(self.save_path)
+            fd, temp_path = tempfile.mkstemp(prefix=f".{target.name}.", dir=str(target.parent))
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                os.replace(temp_path, target)
+            finally:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
             return True
         except Exception as e:
             from core.logging import debug as _debug_logger

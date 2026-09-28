@@ -72,6 +72,7 @@ export const TeamWorkflowSourceQualityStatusPanel = createLazyNamedTeamPanel(loa
 // Research process-canvas inspector leaves (panel=-driven + node-driven).
 export const ChallengeQuestionDetailPanel = createLazyNamedTeamPanel(loadTeamResearchWorkflowPanels, "ChallengeQuestionDetailPanel");
 export const ChallengeMvpProgressPanel = createLazyNamedTeamPanel(loadTeamResearchWorkflowPanels, "ChallengeMvpProgressPanel");
+export const DigestApprovalQueuePanel = createLazyNamedTeamPanel(loadTeamResearchWorkflowPanels, "DigestApprovalQueuePanel");
 export const EvidenceGraphView = createLazyNamedTeamPanel(loadTeamResearchWorkflowPanels, "EvidenceGraphView");
 export const HypothesisFirstNodeInspector = createLazyNamedTeamPanel(loadTeamResearchWorkflowPanels, "HypothesisFirstNodeInspector");
 export const HypothesisLeaderboardPanel = createLazyNamedTeamPanel(loadTeamResearchWorkflowPanels, "HypothesisLeaderboardPanel");

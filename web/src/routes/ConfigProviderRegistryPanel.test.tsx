@@ -11,7 +11,13 @@ import {
   ProviderModelsTab,
   type ConfigProviderRegistryPanelProps,
 } from "./ConfigProviderRegistryPanel";
-import panelSource from "./ConfigProviderRegistryPanel.tsx?raw";
+import panelSourceRaw from "./ConfigProviderRegistryPanel.tsx?raw";
+import configCopyRaw from "./config/configCopy.ts?raw";
+import { CONFIG_COPY } from "./config/configCopy";
+
+/** Panel source + shared bilingual copy table (wave 4): UI strings live in configCopy. */
+const panelSource = `${panelSourceRaw}
+${configCopyRaw}`;
 import panelStyles from "./ConfigProviderRegistryPanel.styles";
 import type { ProviderModelFilter, ProviderRegistryRow } from "./configProviderLogic";
 
@@ -58,6 +64,7 @@ function panelProps(
   overrides: Record<string, unknown> = {},
 ): ConfigProviderRegistryPanelProps {
   return {
+    copy: CONFIG_COPY.zh,
     rows: [provider(models)],
     selectedProviderId: "relay_a",
     selectedTab: "models",
@@ -96,6 +103,7 @@ function renderModels(
 ) {
   return renderToStaticMarkup(
     <ProviderModelsTab
+      copy={CONFIG_COPY.zh}
       provider={provider(models)}
       disabled={false}
       modelQuery={options.query ?? ""}
@@ -123,7 +131,7 @@ async function renderModelDetails(models: ConfigCatalogModel[], options: {liveRe
   document.body.appendChild(container);
   const root = createRoot(container);
   mountedRoots.push(root);
-  await act(async () => root.render(<ProviderModelsTab provider={provider(models)} disabled={false}
+  await act(async () => root.render(<ProviderModelsTab copy={CONFIG_COPY.zh} provider={provider(models)} disabled={false}
     modelQuery="" modelFilter="all" liveReferenceCountByModelRef={options.liveReferences ?? {}}
     onQueryChange={() => {}} onFilterChange={() => {}} onPin={() => {}} onUnpin={() => {}}
     onTestModel={options.onTestModel ?? (() => {})} onProbeImageInput={() => {}} imageCapabilityBusy={options.imageCapabilityBusy} />));
@@ -138,7 +146,7 @@ describe("ConfigProviderRegistryPanel", () => {
     ["auth_failed", "API Key"], ["network", "网络"], ["timeout", "服务负载"],
     ["rate_limited", "额度"], ["service_unavailable", "切换服务"], ["not_found", "模型名称"],
   ])("gives an actionable recovery hint for %s", (kind, hint) => {
-    expect(modelTestRecoveryHint(kind)).toContain(hint);
+    expect(modelTestRecoveryHint(kind, CONFIG_COPY.zh)).toContain(hint);
   });
   it("adds only discovered models matching the current search", async () => {
     const models = [model("alpha", "observed"), model("beta", "observed")];
@@ -147,7 +155,7 @@ describe("ConfigProviderRegistryPanel", () => {
     document.body.appendChild(container);
     const root = createRoot(container);
     mountedRoots.push(root);
-    await act(async () => root.render(<ProviderModelsTab provider={provider(models)} disabled={false}
+    await act(async () => root.render(<ProviderModelsTab copy={CONFIG_COPY.zh} provider={provider(models)} disabled={false}
       modelQuery="alpha" modelFilter="discovered" liveReferenceCountByModelRef={{}}
       onQueryChange={() => {}} onFilterChange={() => {}} onPin={onPin} onUnpin={() => {}}
       onTestModel={() => {}} onProbeImageInput={() => {}} />));
@@ -157,7 +165,7 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(onPin).toHaveBeenCalledWith("relay_a", [models[0]]);
   });
 
-  it("keeps address editing in the same service dialog", async () => {
+  it("edits connection and context directly in the selected supplier page", async () => {
     const onSaveContextWindow = vi.fn();
     const onEditRoute = vi.fn();
     const container = document.createElement("div");
@@ -165,16 +173,18 @@ describe("ConfigProviderRegistryPanel", () => {
     const root = createRoot(container);
     mountedRoots.push(root);
     await act(async () => root.render(<ConfigProviderRegistryPanel {...panelProps([], { onSaveContextWindow, onEditRoute })} />));
-    await act(async () => container.querySelector<HTMLButtonElement>('[data-provider-action="edit-asset"]')!.click());
-    const dialog = document.body.querySelector('[role="dialog"]');
-    expect(dialog?.textContent).toContain("编辑服务 · Relay A");
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    const connection = container.querySelector('[data-vui-region="config-provider-connection"]');
+    expect(connection?.textContent).toContain("https://relay.example/v1");
     expect(container.querySelector('[data-vui="split-aside"]')).toBeNull();
-    const save = Array.from(dialog!.querySelectorAll("button")).find((button) => button.textContent?.includes("保存上下文窗口"));
+    const save = Array.from(connection!.querySelectorAll("button")).find((button) => button.textContent?.includes("保存上下文窗口"));
     await act(async () => save!.click());
     expect(onSaveContextWindow).toHaveBeenCalledWith("relay_a", 128000);
-    await act(async () => dialog!.querySelector<HTMLButtonElement>('[data-provider-action="route"]')!.click());
+    await act(async () => connection!.querySelector<HTMLButtonElement>('[data-provider-action="route"]')!.click());
     expect(onEditRoute).toHaveBeenCalledWith("relay_a");
-    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-provider-action="edit-asset"]')!.click());
+    expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain("高级管理 · Relay A");
   });
 
   it("renders a searchable model toolbar with status counts", () => {
@@ -253,7 +263,8 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(markup).not.toContain("验证推理 low / high");
     expect(panelSource).toContain("testConfigLlm(");
     expect(panelSource).toContain('capability: "reasoning_effort"');
-    expect(panelSource).toContain("一期探测仅验证 low/high");
+    expect(configCopyRaw).toContain("一期探测仅验证 low/high");
+    expect(panelSource).toContain("reasoningProbeHint");
   });
 
   it("shows operator-declared reasoning contract without requiring probe", async () => {
@@ -314,13 +325,13 @@ describe("ConfigProviderRegistryPanel", () => {
 
   it("fills the desktop workspace with large Provider rows and a bottom danger zone", () => {
     expect(panelStyles.sectionSurface).toContain("h-full");
-    expect(panelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(18rem,24vw,22rem)]");
+    expect(panelSource).toContain("defaultWidth: 224");
     expect(panelStyles.providerList).toContain("min-h-0");
     expect(panelStyles.providerButton).toContain("!min-h-16");
     expect(panelStyles.providerLabel).toContain("whitespace-normal");
     expect(panelStyles.providerLabel).toContain("break-words");
     expect(panelStyles.inspectorPanel).toContain("max-h-[72vh]");
-    expect(panelStyles.detailBody).toContain("min-h-0");
+    expect(panelStyles.modelsColumn).toContain("overflow-y-auto");
     expect(panelSource).toContain('data-provider-action="edit-asset"');
     expect(panelSource).toContain('data-provider-danger-zone="true"');
     expect(panelSource).toContain("openInspector");
@@ -342,23 +353,30 @@ describe("ConfigProviderRegistryPanel", () => {
   });
 
   it("offers a preview-first merge only for an exact-contract duplicate", () => {
-    expect(panelSource).toContain("合并重复 Provider（高级）");
-    expect(panelSource).toContain("日常中转站不需要");
+    expect(configCopyRaw).toContain("合并重复 Provider（高级）");
+    expect(configCopyRaw).toContain("日常中转站不需要");
+    expect(panelSource).toContain("mergeSectionTitle");
+    expect(panelSource).toContain("mergeSectionMeta");
     expect(panelSource).toContain("previewProviderMerge(");
     expect(panelSource).toContain("applyProviderMerge(");
     expect(panelSource).toContain("confirmed: true");
   });
 
-  it("keeps API Key and context window in a focused service configuration dialog", () => {
-    expect(panelSource).toContain("一个中转站 / Provider = 一把 API Key");
-    expect(panelSource).toContain("上下文上限（token）");
+  it("keeps API Key and context window in setting rows above the model list", () => {
+    expect(configCopyRaw).toContain("此供应商下的模型共用一把密钥");
+    expect(configCopyRaw).toContain("默认上下文上限");
+    expect(panelSource).toContain("apiKeySharedHint");
+    expect(panelSource).toContain("contextLimitRowLabel");
     expect(panelSource).toContain("<VDialog");
-    expect(panelSource).toContain("保存上下文窗口");
+    expect(configCopyRaw).toContain("保存上下文窗口");
+    expect(panelSource).toContain("saveContextWindow");
     expect(panelSource).toContain("config-asset-inspector");
     const markup = renderToStaticMarkup(
       <ConfigProviderRegistryPanel {...panelProps([])} />,
     );
-    expect(markup).toContain("连接设置");
+    expect(markup).toContain("更新 API Key");
+    expect(markup).toContain('data-vui="settings-row"');
+    expect(markup.indexOf('config-provider-connection')).toBeLessThan(markup.indexOf('data-provider-tab="models"'));
     expect(markup).toContain("已配置服务");
   });
 
@@ -442,14 +460,16 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(errorMarkup).toContain("API Key 更新失败");
   });
   it("keeps the latest safe discovery failure on the selected Provider diagnostics", () => {
-    expect(panelSource).toContain("最近失败原因");
-    expect(panelSource).toContain("请求超时");
+    expect(configCopyRaw).toContain("最近失败原因");
+    expect(configCopyRaw).toContain("请求超时");
+    expect(panelSource).toContain("factLastFailure");
+    expect(panelSource).toContain("discoveryErrTimeout");
     expect(panelSource).toContain("function DiagnosticsTab");
     const timedOut = { ...provider([]), status: "discovery_failed" as const, lastErrorType: "timeout" };
     const markup = renderToStaticMarkup(
       <ConfigProviderRegistryPanel {...panelProps([], { rows: [timedOut] })} />,
     );
     expect(markup).toContain("discovery_failed");
-    expect(markup).toContain("连接设置");
+    expect(markup).toContain("修改地址与协议");
   });
 });

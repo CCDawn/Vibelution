@@ -1,0 +1,397 @@
+html,
+body,
+#root {
+  height: auto;
+  min-height: 100%;
+  overflow: auto;
+}
+
+.page {
+  box-sizing: border-box;
+  min-height: 100dvh;
+  padding: 28px 24px 40px;
+  background: var(--vui-surface-base);
+  color: var(--fg-primary);
+}
+
+.intro {
+  max-width: 760px;
+  margin: 0 auto 22px;
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  letter-spacing: 0.04em;
+}
+
+.intro h1 {
+  margin: 0;
+  font-size: var(--vui-font-title);
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.intro p,
+.footnote {
+  margin: 8px 0 0;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-sm);
+  line-height: 1.55;
+}
+
+.compare {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.compare h2 {
+  margin: 0 0 8px;
+  font-size: var(--vui-font-sm);
+  font-weight: 650;
+  color: var(--fg-secondary);
+}
+
+.compare section,
+.bench,
+.chrome,
+.rail,
+.thread {
+  min-width: 0;
+}
+
+.chrome {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-rows: 40px minmax(420px, 1fr);
+  overflow: hidden;
+  min-height: 560px;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: var(--radius-panel);
+  color: var(--fg-primary);
+}
+
+.chrome::before,
+.chrome::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.is-current .chrome {
+  background:
+    radial-gradient(ellipse at 52% -18%, color-mix(in srgb, var(--accent-warm) 8%, transparent) 0 18%, transparent 52%),
+    radial-gradient(circle at 16% 18%, color-mix(in srgb, var(--accent-cool) 9%, transparent) 0 11%, transparent 34%),
+    radial-gradient(circle at 82% 8%, color-mix(in srgb, var(--fg-tertiary) 8%, transparent) 0 9%, transparent 31%),
+    var(--vui-surface-base);
+}
+
+.is-current .chrome::before {
+  opacity: 0.28;
+  background-image:
+    radial-gradient(circle at 8% 18%, color-mix(in srgb, var(--accent-warm) 20%, transparent) 0 1px, transparent 1.6px),
+    radial-gradient(circle at 38% 28%, color-mix(in srgb, var(--fg-primary) 16%, transparent) 0 1px, transparent 1.5px),
+    radial-gradient(circle at 82% 64%, color-mix(in srgb, var(--fg-primary) 12%, transparent) 0 1px, transparent 1.5px);
+  background-size: 180px 140px, 220px 180px, 200px 220px;
+}
+
+.is-current .chrome::after {
+  opacity: 0.2;
+  background: radial-gradient(ellipse at 50% 102%, color-mix(in srgb, var(--accent-warm) 16%, transparent), transparent 42%);
+}
+
+.is-proposed .chrome {
+  background: var(--vui-surface-base);
+}
+
+.is-proposed .chrome::before,
+.is-proposed .chrome::after {
+  content: none;
+}
+
+.topbar,
+.body,
+.thread,
+.composer,
+.turn {
+  position: relative;
+  z-index: 1;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 10px;
+}
+
+.topbar nav {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+}
+
+.nav,
+.status,
+.session,
+.thought,
+.answer,
+.composer textarea,
+.composer button {
+  font: inherit;
+}
+
+.nav {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-sm);
+  font-weight: 650;
+}
+
+.is-current .nav.is-active {
+  border-color: color-mix(in srgb, var(--accent-cool) 45%, var(--vui-border-subtle));
+  background: color-mix(in srgb, var(--accent-cool) 16%, var(--vui-surface-row));
+  color: var(--accent-cool);
+}
+
+.is-proposed .nav.is-active {
+  background: var(--bg-active);
+  color: var(--fg-primary);
+}
+
+.status {
+  flex: none;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+.is-current .status {
+  padding: 3px 8px;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--vui-surface-row);
+}
+
+.body {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  border-top: 1px solid var(--vui-border-subtle);
+}
+
+.rail {
+  min-width: 0;
+  padding: 12px;
+  overflow: auto;
+  background: var(--vui-surface-rail);
+}
+
+.is-current .rail {
+  border-right: 1px solid var(--vui-border-subtle);
+}
+
+.rail-label {
+  margin: 0 0 8px;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+.session {
+  display: grid;
+  gap: 2px;
+  margin-top: 6px;
+  padding: 8px;
+  border-radius: var(--radius-control);
+}
+
+.session strong {
+  font-size: var(--vui-font-sm);
+  font-weight: 650;
+}
+
+.session span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+.is-current .session {
+  border: 1px solid var(--vui-border-subtle);
+  background: var(--vui-surface-panel);
+}
+
+.is-current .session.is-active {
+  border-color: color-mix(in srgb, var(--accent-cool) 45%, var(--vui-border-subtle));
+  color: var(--accent-cool);
+}
+
+.is-proposed .session.is-active {
+  background: var(--bg-active);
+}
+
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  padding: 16px 16px 12px;
+  background: var(--vui-surface-chat);
+}
+
+.turn {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.turn p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.is-user {
+  align-self: end;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.is-current .is-user p,
+.is-proposed .is-user p {
+  max-width: 16rem;
+  padding: 8px 10px;
+  border-radius: var(--radius-control);
+  background: var(--vui-surface-row);
+  font-size: var(--vui-font-sm);
+  line-height: 1.5;
+}
+
+.is-current .is-user p {
+  border: 1px solid var(--vui-border-subtle);
+}
+
+.thought {
+  margin-bottom: 8px;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.45;
+}
+
+.is-current .thought {
+  padding: 8px 10px;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--vui-surface-row) 55%, transparent);
+}
+
+.is-current .answer {
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--vui-border-strong) 72%, transparent);
+  border-radius: var(--radius-panel);
+  background: var(--vui-surface-chat-panel);
+}
+
+.answer p {
+  font-size: var(--vui-font-chat, 17px);
+  line-height: 1.6;
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+  min-width: 0;
+  margin-top: auto;
+}
+
+.composer textarea {
+  width: 100%;
+  min-width: 0;
+  resize: none;
+  padding: 10px 12px;
+  border: 1px solid var(--vui-border-strong);
+  border-radius: var(--radius-panel);
+  background: var(--vui-surface-workspace);
+  color: var(--fg-primary);
+  font-size: var(--vui-font-sm);
+  line-height: 1.45;
+}
+
+.composer button {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--accent-cool);
+  color: white;
+  font-size: var(--vui-font-sm);
+  font-weight: 650;
+}
+
+.is-current .composer button {
+  border: 1px solid color-mix(in srgb, var(--accent-cool-2) 70%, white);
+  background: color-mix(in srgb, var(--accent-cool) 82%, var(--accent-warm));
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.footnote {
+  max-width: 760px;
+  margin: 16px auto 0;
+}
+
+@media (max-width: 860px) {
+  .page {
+    padding: 20px 14px 32px;
+  }
+
+  .compare {
+    grid-template-columns: 1fr;
+  }
+
+  .body {
+    grid-template-columns: 1fr;
+  }
+
+  .rail {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    overflow: auto;
+  }
+
+  .rail-label {
+    margin: 0;
+  }
+
+  .session {
+    min-width: 132px;
+    margin-top: 0;
+  }
+
+  .is-current .rail {
+    border-right: 0;
+    border-bottom: 1px solid var(--vui-border-subtle);
+  }
+}

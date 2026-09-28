@@ -1293,3 +1293,37 @@ def test_approval_timeout_message_declares_terminal_rejection(monkeypatch):
     assert "终态拒绝" in outcome.message
     assert "禁止以相同参数重试" in outcome.message
     assert "结束回合" in outcome.message
+
+
+def test_non_approval_denial_in_approval_flow_carries_rule_id_and_reason(monkeypatch):
+    """审批协商之外的授权拒绝返回可审计结构：gateId=code，决策规则带 ruleId+reasonCode。"""
+
+    _runtime(monkeypatch)
+    _install(("web_search_tool", "on_request", "network"))
+    context = tool_authorization_service.current_execution_authorization()
+    assert context is not None
+    context.deny_rules = (
+        ("unassigned_tool", "not_assigned", "tool-agent-a:policy.allowedTools:not_assigned"),
+    )
+
+    denied = tool_authorization_service.authorize_tool_execution(
+        tool_name="unassigned_tool",
+        tool_call_id="call-auditable",
+    )
+
+    assert denied.allowed is False
+    assert denied.code == "tool_not_executable"
+    assert denied.reason_code == "not_assigned"
+    assert denied.rule_id == "tool-agent-a:policy.allowedTools:not_assigned"
+
+    # 审批链工具被正常协商放行时，结果不携带决策级 deny 规则（规则不适用）。
+    _install(("web_search_tool", "never", "network"))
+    allowed = tool_authorization_service.authorize_tool_execution(
+        tool_name="web_search_tool",
+        tool_call_id="call-allowed",
+        tool_args={"query": "ok"},
+    )
+
+    assert allowed.allowed is True
+    assert allowed.rule_id == ""
+    assert allowed.reason_code == ""

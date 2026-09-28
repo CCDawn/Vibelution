@@ -31,8 +31,13 @@ def cancelled(activity, ready, tmp_path, monkeypatch):
         layers if layers.nodeOverrides else AgentBindingLayers(
             workflowDefaults={"experiment_planner": "original-planner"}))
     campaign = rounds.prepare_round(*activity, expected_version=campaign.revision, command_key="first")
+    # update_run_status is a full-replacement settlement: the cancel keeps
+    # the node the run was cancelled at, exactly like the production
+    # cancel_run command does (recover_round re-checks that pointer).
+    cancelled_at_node = ledger.get_run(campaign.activeRunId).active_node_id
     ledger.submit(lambda uow: uow.repository.update_run_status(
-        campaign.activeRunId, activity[0], "cancelled", 100), force_flush=True).result()
+        campaign.activeRunId, activity[0], "cancelled", 100,
+        active_node_id=cancelled_at_node), force_flush=True).result()
     try:
         yield campaign, ledger
     finally:
@@ -119,8 +124,11 @@ def test_recovery_replays_orphan_successor_after_campaign_write_failure(activity
 def test_repeated_recovery_accumulates_history(activity, cancelled):
     campaign, ledger = cancelled
     first = recover(activity, campaign)
+    # Full-replacement cancel: keep the cancelled-at node like production.
+    first_cancelled_at_node = ledger.get_run(first.activeRunId).active_node_id
     ledger.submit(lambda uow: uow.repository.update_run_status(
-        first.activeRunId, activity[0], "cancelled", 200), force_flush=True).result()
+        first.activeRunId, activity[0], "cancelled", 200,
+        active_node_id=first_cancelled_at_node), force_flush=True).result()
     second = recover(activity, first, "recover-again")
     assert second.rounds[0].previousRunIds == (campaign.activeRunId, first.activeRunId)
     assert second.rounds[0].ordinal == 1

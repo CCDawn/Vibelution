@@ -57,7 +57,7 @@ describe("virtual-human native Chat reuse", () => {
 
   it("keeps one guarded session-stream owner and removes person/session pickers in companion mode", () => {
     expect(streamSource).toContain("createSessionEventStream = createDefaultSessionEventStream");
-    expect(streamSource).toContain("const stream = createSessionEventStream(streamSessionId);");
+    expect(streamSource).toContain("const acquired = acquireSessionStream(streamSessionId, createSessionEventStream);");
     expect(sessionEventStreamSource).toContain("consumeGuardedEventStream(");
     expect(sessionEventStreamSource).not.toContain("new EventSource");
     expect(lobbySource).not.toContain("EventSource");
@@ -96,7 +96,8 @@ describe("virtual-human native Chat reuse", () => {
     expect(attentionSource).toContain("listVirtualHumanCompanionActivity");
     expect(attentionSource).toContain("companionAgentId: companion.agentId");
     expect(attentionSource).toContain('completionIdentity: String(activity.activityStamp || "").trim()');
-    expect(attentionSource).toContain("refetchIntervalInBackground: Boolean(desktopBridge)");
+    expect(attentionSource).toContain("resolveCompanionActivityRefetchInterval");
+    expect(attentionSource).toContain("refetchIntervalInBackground: false");
     expect(attentionSource).toContain("openCompanionSession(");
     expect(lobbySource).toContain("isSessionActivitySeen(");
     expect(lobbySource).toContain("markSessionActivitySeen(");

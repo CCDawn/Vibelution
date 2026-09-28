@@ -1,0 +1,99 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "E2E-MOCK-429-V1",
+        "sequenceIndex": 0
+      },
+      "response": {
+        "error": {
+          "message": "Too many requests",
+          "type": "rate_limit_error",
+          "code": "rate_limit_exceeded"
+        },
+        "status": 429,
+        "retryAfter": 1
+      }
+    },
+    {
+      "match": {
+        "userMessage": "E2E-MOCK-429-V1",
+        "sequenceIndex": 1
+      },
+      "response": {
+        "reasoning": "上次被限流，这次重试成功。",
+        "content": "429 重试链路存活：这是重试后的成功回复。"
+      }
+    },
+    {
+      "match": {
+        "userMessage": "E2E-MOCK-400-V1",
+        "sequenceIndex": 0
+      },
+      "response": {
+        "error": {
+          "message": "Invalid parameter: messages",
+          "type": "invalid_request_error"
+        },
+        "status": 400
+      }
+    },
+    {
+      "match": {
+        "userMessage": "E2E-MOCK-400-V1",
+        "sequenceIndex": 1
+      },
+      "response": {
+        "content": "400 网关抖动重试后成功。"
+      }
+    },
+    {
+      "match": {
+        "userMessage": "E2E-MOCK-MALFORMED-V1"
+      },
+      "response": {
+        "content": "this text will never be seen"
+      },
+      "chaos": {
+        "malformedRate": 1
+      }
+    },
+    {
+      "match": {
+        "userMessage": "E2E-MOCK-DROP-V1"
+      },
+      "response": {
+        "content": "012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+      },
+      "streamingProfile": {
+        "ttft": 50,
+        "tps": 8,
+        "jitter": 0
+      },
+      "truncateAfterChunks": 3
+    },
+    {
+      "match": {
+        "userMessage": "E2E-MOCK-STALL-V1"
+      },
+      "response": {
+        "reasoning": "迟迟不出的思考。",
+        "content": "stall 恢复后的最终回复。"
+      },
+      "streamingProfile": {
+        "ttft": 8000,
+        "tps": 10,
+        "jitter": 0
+      }
+    },
+    {
+      "match": {
+        "userMessage": "E2E-MOCK-LEAK-V1"
+      },
+      "response": {
+        "reasoning": "<think>协议格式泄漏样例：思考字段里混入 think 标签与工具信封。",
+        "content": "<think>未闭合的思考标签泄漏</think>\n[TOOL_CALL: write_file {\"path\": \"x\"}]\n<summary>内部摘要信封泄漏</summary>\n正文仍然可读。"
+      }
+    }
+  ]
+}

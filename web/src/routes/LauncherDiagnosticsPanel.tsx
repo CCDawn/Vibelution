@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 
 import { PaneHeightResizeHandle } from "../components/layout/PaneHeightResizeHandle";
 import { PersistedHeightListShell } from "../components/layout/PersistedHeightListShell";
+import { paneHeightCssVar } from "../components/layout/paneCssVariables";
 import type { PaneHeightSpec } from "../components/layout/paneHeightPersistence";
 import { usePersistedPaneHeight } from "../components/layout/usePersistedPaneHeight";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
@@ -133,6 +134,8 @@ export function LauncherDiagnosticsPanel({
   onReattachSupervisor,
 }: LauncherDiagnosticsPanelProps) {
   const {
+    registerSplitContainer: registerDiagnosticsContainer,
+    paneVariablesStyle: diagnosticsVariablesStyle,
     heights: diagnosticsHeights,
     draggingPaneId: diagnosticsHeightDraggingPaneId,
     startResize: startDiagnosticsHeightResize,
@@ -144,7 +147,8 @@ export function LauncherDiagnosticsPanel({
   const diagnosticsBodyHeight =
     diagnosticsHeights["diagnostics-body"] ?? LAUNCHER_DIAGNOSTICS_BODY_PANE.defaultHeight;
   const diagnosticsBodyStyle = {
-    height: `${diagnosticsBodyHeight}px`,
+    ...diagnosticsVariablesStyle,
+    height: `var(${paneHeightCssVar("diagnostics-body")})`,
   } as CSSProperties;
 
   return (
@@ -154,6 +158,7 @@ export function LauncherDiagnosticsPanel({
         <strong>{copy.diagnosticsCollapsedHint}</strong>
       </summary>
       <div
+        ref={registerDiagnosticsContainer}
         className={styles.diagnosticsBody}
         style={diagnosticsBodyStyle}
         data-vui-region="launcher-diagnostics-body"

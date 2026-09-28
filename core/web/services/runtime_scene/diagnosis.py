@@ -204,7 +204,7 @@ def _runtime_scene_agent_brief(diagnosis: dict[str, Any]) -> dict[str, Any]:
         diagnosis_status = "active_issue"
         needs_action = True
         actionability = "fix_required"
-        do_not_do = ["do not ignore active clusters without checking their evidence paths"]
+        do_not_do = ["不要忽略仍在发生的问题簇，但只按 evidencePaths 检查。"]
         primary_issue = primary_cluster_issue or s._runtime_scene_agent_brief_issue(
             first_signal, fallback=diagnosis_status
         )
@@ -212,7 +212,7 @@ def _runtime_scene_agent_brief(diagnosis: dict[str, Any]) -> dict[str, Any]:
         diagnosis_status = "policy_only"
         needs_action = False
         actionability = "policy_acknowledge_only"
-        do_not_do = ["do not treat expected policy blocks as product/runtime bugs"]
+        do_not_do = ["不要把预期内的策略拦截当成产品故障。"]
         primary_issue = primary_cluster_issue or s._runtime_scene_agent_brief_issue(
             first_signal, fallback=diagnosis_status
         )
@@ -220,16 +220,16 @@ def _runtime_scene_agent_brief(diagnosis: dict[str, Any]) -> dict[str, Any]:
         diagnosis_status = "resolved"
         needs_action = False
         actionability = "no_action_needed"
-        do_not_do = ["do not keep chasing historical recovered errors as active blockers"]
+        do_not_do = ["不要把已经恢复的历史错误当成当前阻塞。"]
         primary_issue = "none"
     else:
         diagnosis_status = "healthy"
         needs_action = False
         actionability = "no_action_needed"
-        do_not_do = ["do not open raw logs unless a new signal appears"]
+        do_not_do = ["没有新的问题信号时不要打开原始日志。"]
         primary_issue = "none"
 
-    return {
+    brief = {
         "diagnosis_status": diagnosis_status,
         "needs_action": needs_action,
         "actionability": actionability,
@@ -239,11 +239,16 @@ def _runtime_scene_agent_brief(diagnosis: dict[str, Any]) -> dict[str, Any]:
         "severity_cluster_count": severity_active_count,
         "policy_cluster_count": policy_count,
         "historical_cluster_count": historical_count,
-        "next_minimal_action": str(diagnosis.get("agentNextStep") or "read summary.json first"),
         "evidence_refs": evidence_paths[:5],
         "work_run_focus": s._runtime_scene_agent_work_run_focus(work_run_summary),
         "do_not_do": do_not_do,
     }
+    from core.diagnostics.agent_log_context import build_agent_first_read
+
+    first_read = build_agent_first_read(brief)
+    brief["next_minimal_action"] = first_read["nextStep"]
+    brief["first_read"] = first_read
+    return brief
 
 
 def _runtime_scene_primary_issue_from_cluster(issue_state: dict[str, Any]) -> str:

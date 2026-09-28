@@ -195,12 +195,32 @@ class EvolutionChatReviewCandidateResponse(EvolutionJsonResponse):
     status: str | None = None
 
 
+class EvolutionChatCurationModelStatsResponse(EvolutionJsonResponse):
+    models: list[dict[str, Any]] | None = None
+
+
 class EvolutionDeletedResponse(EvolutionJsonResponse):
     deleted: bool | None = None
     deletedCount: int | None = None
     sessionIds: list[str] | None = None
     candidateIds: list[str] | None = None
     txnIds: list[str] | None = None
+
+
+class EvolutionJudgeQualityResponse(EvolutionJsonResponse):
+    schemaVersion: int | None = None
+    totalRuns: int | None = None
+    agreementPairs: int | None = None
+    kappa: dict[str, Any] | None = None
+    scoreStatsByMode: dict[str, Any] | None = None
+
+
+class EvolutionRubricPromotionResponse(EvolutionJsonResponse):
+    schemaVersion: int | None = None
+    eligible: bool | None = None
+    candidateVersionId: str | None = None
+    checks: list[dict[str, Any]] | None = None
+    promoted: dict[str, Any] | None = None
 
 
 class PromptReflectionGeneratePayload(BaseModel):

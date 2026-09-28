@@ -80,7 +80,7 @@ export function VTabs({
             title={item.title}
             className={cn(
               "inline-flex min-w-0 max-w-full items-center justify-center gap-1.5 rounded-[calc(var(--radius-control)-2px)]",
-              "px-2.5 font-semibold text-[var(--fg-secondary)] outline-none transition-colors duration-150",
+              "px-2.5 font-semibold text-[var(--fg-secondary)] outline-none transition-colors duration-150 motion-reduce:transition-none",
               "hover:text-[var(--fg-primary)]",
               "focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_45%,transparent)]",
               "data-[state=active]:bg-[var(--vui-surface-panel)] data-[state=active]:text-[var(--fg-primary)]",

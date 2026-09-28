@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionDetail, SessionReferenceAttachment } from "../../api/types";
+import { queryKeys } from "../../api/queryKeys";
 import type { TranslationKey } from "../../i18n/dictionary";
 import type { ChatEditTarget } from "../chatComposerState";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
@@ -21,22 +22,25 @@ const apiMocks = vi.hoisted(() => ({
     contentType: "image/png",
     sizeBytes: 5,
   })),
+  submitSessionMessage: vi.fn(),
   editResubmitSessionMessage: vi.fn(async (_sessionId: string, _payload: unknown) => ({
     id: "session-1",
+    activeTurnId: "accepted-edit-turn",
     currentPhase: "running",
     status: "running",
     messages: [],
     updatedAt: "2026-09-15T02:00:00Z",
   })),
+  stopSessionTurn: vi.fn(async () => ({ id: "session-1", currentPhase: "stopping" })),
 }));
 
 vi.mock("../../api/chat", () => ({
   editResubmitSessionMessage: apiMocks.editResubmitSessionMessage,
   querySessions: vi.fn(),
   regenerateSessionMessage: vi.fn(),
-  stopSessionTurn: vi.fn(),
+  stopSessionTurn: apiMocks.stopSessionTurn,
   submitSessionGuidance: vi.fn(),
-  submitSessionMessage: vi.fn(),
+  submitSessionMessage: apiMocks.submitSessionMessage,
   switchSessionHead: vi.fn(),
   uploadSessionImageAttachment: apiMocks.uploadSessionImageAttachment,
 }));
@@ -71,7 +75,16 @@ const imageAttachment: ComposerImageAttachment = {
   contentType: "image/png",
 };
 
-function Harness({ queryClient }: { queryClient: QueryClient }) {
+function Harness({ queryClient, sessionBusy = false, activeTurnId = "turn-1", activeSessionId = "session-1", targetAttachments, trayImages, withEditTarget = true }: {
+  queryClient: QueryClient;
+  sessionBusy?: boolean;
+  activeTurnId?: string;
+  activeSessionId?: string;
+  targetAttachments?: Array<Record<string, unknown>>;
+  trayImages?: ComposerImageAttachment[];
+  /** False exercises the direct-submit path instead of edit-resubmit. */
+  withEditTarget?: boolean;
+}) {
   const chatWorkspaceCache = useRef(createChatWorkspaceCache(queryClient)).current;
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
   const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>({
@@ -79,20 +92,25 @@ function Harness({ queryClient }: { queryClient: QueryClient }) {
   });
   const [sessionComposerErrors, setSessionComposerErrors] = useState<Record<string, string>>({});
   const [sessionImageAttachments, setSessionImageAttachments] = useState<Record<string, ComposerImageAttachment[]>>({
-    "session-1": [imageAttachment],
+    "session-1": trayImages ?? [imageAttachment],
   });
   const [sessionReferenceAttachments, setSessionReferenceAttachments] =
     useState<Record<string, SessionReferenceAttachment[]>>({});
   const [sessionImageUploadPending, setSessionImageUploadPending] = useState<Record<string, boolean>>({});
-  const [sessionEditTargets, setSessionEditTargets] = useState<Record<string, ChatEditTarget>>({
-    "session-1": editTarget,
-  });
+  const [sessionEditTargets, setSessionEditTargets] = useState<Record<string, ChatEditTarget>>(
+    withEditTarget ? { "session-1": editTarget } : {},
+  );
   const [activeTurnLayersBySession, setActiveTurnLayersBySession] = useState({});
   const detailRef = useRef({
     id: "session-1",
-    messages: [{ id: "user-1", role: "user", content: "原始内容" }],
+    messages: [{
+      id: "user-1",
+      role: "user",
+      content: "原始内容",
+      ...(targetAttachments?.length ? { attachments: targetAttachments } : {}),
+    }],
   } as SessionDetail);
-  const activeEditTarget = sessionEditTargets["session-1"] ?? null;
+  const activeEditTarget = sessionEditTargets[activeSessionId] ?? null;
   const describeError = (error: unknown, fallback: string) => (
     error instanceof Error ? error.message : fallback
   );
@@ -125,21 +143,21 @@ function Harness({ queryClient }: { queryClient: QueryClient }) {
     setSessionImageUploadPending,
     setSessionEditTargets,
     imageUploadInFlightRef,
-    activeSessionId: "session-1",
-    activeDraftEffective: sessionDrafts["session-1"] ?? "",
-    activeImageAttachments: sessionImageAttachments["session-1"] ?? [],
+    activeSessionId,
+    activeDraftEffective: sessionDrafts[activeSessionId] ?? "",
+    activeImageAttachments: sessionImageAttachments[activeSessionId] ?? [],
     activeReferenceAttachments: [],
     mentalModelEnabledForNextTurn: false,
     runtimeStatusEnabledForNextTurn: false,
     resolvedEditTarget: activeEditTarget,
     activeEditTarget,
     composerDisabled: false,
-    sessionBusy: false,
+    sessionBusy,
     sessionStopping: false,
     activePhase: "ready",
     activeAgentImageInputUnsupported: false,
     activeImageInputModelId: "model-1",
-    activeTurnId: "turn-1",
+    activeTurnId,
     detail: detailRef.current,
     setMentalModelEnabledForNextTurn: () => undefined,
     setRuntimeStatusEnabledForNextTurn: () => undefined,
@@ -148,18 +166,50 @@ function Harness({ queryClient }: { queryClient: QueryClient }) {
   return (
     <div>
       <output data-testid="images">
-        {JSON.stringify((sessionImageAttachments["session-1"] ?? []).map((attachment) => attachment.id))}
+        {JSON.stringify((sessionImageAttachments[activeSessionId] ?? []).map((attachment) => attachment.id))}
+      </output>
+      <output data-testid="images-detail">
+        {JSON.stringify((sessionImageAttachments[activeSessionId] ?? []).map((attachment) => ({
+          id: attachment.id,
+          uploadStatus: attachment.uploadStatus ?? null,
+          artifactId: attachment.artifactId ?? null,
+        })))}
       </output>
       <output data-testid="edit-target">
-        {JSON.stringify(sessionEditTargets["session-1"] ?? null)}
+        {JSON.stringify(sessionEditTargets[activeSessionId] ?? null)}
       </output>
-      <output data-testid="draft">{sessionDrafts["session-1"] ?? ""}</output>
+      <output data-testid="draft">{sessionDrafts[activeSessionId] ?? ""}</output>
       <output data-testid="upload-pending">
-        {JSON.stringify(Boolean(sessionImageUploadPending["session-1"]))}
+        {JSON.stringify(Boolean(sessionImageUploadPending[activeSessionId]))}
       </output>
-      <output data-testid="error">{sessionComposerErrors["session-1"] ?? ""}</output>
+      <output data-testid="error">{sessionComposerErrors[activeSessionId] ?? ""}</output>
       <button type="button" data-testid="submit" onClick={() => actions.handleSubmitTurn()}>
         submit
+      </button>
+      <button type="button" data-testid="stop" onClick={() => actions.handleStopTurn()}>
+        stop
+      </button>
+      <button
+        type="button"
+        data-testid="retry-all"
+        onClick={() => actions.handleRetryComposerAttachmentUploads()}
+      >
+        retry-all
+      </button>
+      <button
+        type="button"
+        data-testid="retry-one"
+        disabled={!(sessionImageAttachments[activeSessionId] ?? []).some((attachment) => attachment.uploadStatus === "failed")}
+        onClick={() => {
+          const failedId = (sessionImageAttachments[activeSessionId] ?? []).find(
+            (attachment) => attachment.uploadStatus === "failed",
+          )?.id;
+          if (failedId) {
+            actions.handleRetryComposerAttachmentUpload(failedId);
+          }
+        }}
+      >
+        retry-one
       </button>
     </div>
   );
@@ -180,11 +230,30 @@ describe("useChatComposerSubmit edit-resubmit attachments", () => {
     container = null;
     apiMocks.uploadSessionImageAttachment.mockClear();
     apiMocks.editResubmitSessionMessage.mockClear();
+    apiMocks.stopSessionTurn.mockClear();
   });
 
   it("uploads the pending image and sends it with the edited message, then clears the tray", async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1",
+      title: "Session",
+      status: "running",
+      taskSummary: "",
+      lastActive: "",
+      updatedAt: "",
+      currentPhase: "running",
+      defaultFileContext: "",
+      previewTabs: [],
+      activePreviewPath: "",
+      changedFiles: [],
+      readFiles: [],
+      messages: [{ id: "user-1", role: "user", content: "原始内容" }],
+      stopRequested: false,
+      stopRequestedAt: "",
+      stopReason: "",
     });
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -222,5 +291,479 @@ describe("useChatComposerSubmit edit-resubmit attachments", () => {
     expect(container?.querySelector('[data-testid="draft"]')?.textContent).toBe("");
     expect(container?.querySelector('[data-testid="upload-pending"]')?.textContent).toBe("false");
     expect(container?.querySelector('[data-testid="error"]')?.textContent).toBe("");
+  });
+
+  it("carries the target message's original attachments before new uploads", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1",
+      title: "Session",
+      status: "running",
+      taskSummary: "",
+      lastActive: "",
+      updatedAt: "",
+      currentPhase: "running",
+      defaultFileContext: "",
+      previewTabs: [],
+      activePreviewPath: "",
+      changedFiles: [],
+      readFiles: [],
+      messages: [{
+        id: "user-1",
+        role: "user",
+        content: "原始内容",
+        attachments: [
+          { artifactId: "artifact-orig-2", filename: "notes.csv" },
+          { artifactId: "artifact-orig-1", filename: "sketch.png" },
+        ],
+      }],
+      stopRequested: false,
+      stopRequestedAt: "",
+      stopReason: "",
+    });
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <QueryClientProvider client={queryClient}>
+          <Harness
+            queryClient={queryClient}
+            targetAttachments={[
+              { artifactId: "artifact-orig-2", filename: "notes.csv" },
+              { artifactId: "artifact-orig-1", filename: "sketch.png" },
+            ]}
+          />
+        </QueryClientProvider>,
+      );
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
+    });
+    for (let round = 0; round < 6; round += 1) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+
+    expect(apiMocks.uploadSessionImageAttachment).toHaveBeenCalledTimes(1);
+    expect(apiMocks.editResubmitSessionMessage).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        messageId: "user-1",
+        content: "编辑后的内容",
+        // Originals ride along in ledger order; the fresh upload appends.
+        attachmentIds: ["artifact-orig-2", "artifact-orig-1", "artifact-edit-1"],
+      }),
+    );
+  });
+
+  it("carries original attachments even when the edit uploads nothing new", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1",
+      title: "Session",
+      status: "running",
+      taskSummary: "",
+      lastActive: "",
+      updatedAt: "",
+      currentPhase: "running",
+      defaultFileContext: "",
+      previewTabs: [],
+      activePreviewPath: "",
+      changedFiles: [],
+      readFiles: [],
+      messages: [{
+        id: "user-1",
+        role: "user",
+        content: "原始内容",
+        attachments: [{ artifactId: "artifact-orig-1", filename: "sketch.png" }],
+      }],
+      stopRequested: false,
+      stopRequestedAt: "",
+      stopReason: "",
+    });
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <QueryClientProvider client={queryClient}>
+          <Harness
+            queryClient={queryClient}
+            targetAttachments={[{ artifactId: "artifact-orig-1", filename: "sketch.png" }]}
+            trayImages={[]}
+          />
+        </QueryClientProvider>,
+      );
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
+    });
+    for (let round = 0; round < 6; round += 1) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+
+    // No pending composer uploads: the tray image must not upload, but the
+    // original artifact still re-attaches so the resubmit keeps it.
+    expect(apiMocks.uploadSessionImageAttachment).not.toHaveBeenCalled();
+    expect(apiMocks.editResubmitSessionMessage).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        messageId: "user-1",
+        content: "编辑后的内容",
+        attachmentIds: ["artifact-orig-1"],
+      }),
+    );
+  });
+
+  it("keeps the stop identity while edit attachments are still uploading", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    let resolveUpload: ((value: { artifactId: string }) => void) | undefined;
+    apiMocks.uploadSessionImageAttachment.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveUpload = resolve;
+    }));
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <QueryClientProvider client={queryClient}>
+          <Harness queryClient={queryClient} sessionBusy activeTurnId="" />
+        </QueryClientProvider>,
+      );
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="stop"]')?.click();
+    });
+    expect(apiMocks.editResubmitSessionMessage).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveUpload?.({ artifactId: "artifact-edit-1" });
+      await Promise.resolve();
+    });
+    for (let round = 0; round < 6; round += 1) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+
+    expect(apiMocks.editResubmitSessionMessage).toHaveBeenCalledTimes(1);
+    expect(apiMocks.editResubmitSessionMessage.mock.calls[0]?.[1]).toEqual(expect.objectContaining({
+      clientSubmissionId: expect.any(String),
+    }));
+    expect((await import("../../api/chat")).stopSessionTurn).toHaveBeenCalledWith(
+      "session-1",
+      "accepted-edit-turn",
+    );
+  });
+
+  it("restores the pre-stop detail after upload failure across a session switch and keeps the next turn independent", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1",
+      title: "Session",
+      status: "running",
+      taskSummary: "",
+      lastActive: "",
+      updatedAt: "",
+      currentPhase: "running",
+      defaultFileContext: "",
+      previewTabs: [],
+      activePreviewPath: "",
+      changedFiles: [],
+      readFiles: [],
+      messages: [{ id: "user-1", role: "user", content: "原始内容" }],
+      stopRequested: false,
+      stopRequestedAt: "",
+      stopReason: "",
+    });
+    let rejectUpload: ((reason?: unknown) => void) | undefined;
+    apiMocks.uploadSessionImageAttachment.mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      rejectUpload = reject;
+    }));
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <QueryClientProvider client={queryClient}>
+          <Harness queryClient={queryClient} sessionBusy activeTurnId="" />
+        </QueryClientProvider>,
+      );
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
+      await Promise.resolve();
+      container?.querySelector<HTMLButtonElement>('[data-testid="stop"]')?.click();
+    });
+    expect(queryClient.getQueryData<SessionDetail>(queryKeys.session("session-1"))?.stopRequested).toBe(true);
+
+    await act(async () => {
+      root?.render(
+        <QueryClientProvider client={queryClient}>
+          <Harness queryClient={queryClient} activeSessionId="session-2" sessionBusy activeTurnId="" />
+        </QueryClientProvider>,
+      );
+      await Promise.resolve();
+    });
+    await act(async () => {
+      rejectUpload?.(new Error("upload failed"));
+      await Promise.resolve();
+    });
+    for (let round = 0; round < 6; round += 1) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+
+    const restored = queryClient.getQueryData<SessionDetail>(queryKeys.session("session-1"));
+    expect(restored?.stopRequested).toBe(false);
+    expect(restored?.currentPhase).toBe("running");
+    expect(apiMocks.stopSessionTurn).not.toHaveBeenCalled();
+
+    await act(async () => {
+      root?.render(
+        <QueryClientProvider client={queryClient}>
+          <Harness queryClient={queryClient} activeSessionId="session-1" sessionBusy={false} activeTurnId="turn-next" />
+        </QueryClientProvider>,
+      );
+    });
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
+    });
+    for (let round = 0; round < 6; round += 1) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+    expect(apiMocks.editResubmitSessionMessage).toHaveBeenCalledTimes(1);
+    expect(apiMocks.stopSessionTurn).not.toHaveBeenCalled();
+  });
+});
+
+describe("useChatComposerSubmit attachment upload failure states and retry", () => {
+  const failedImage: ComposerImageAttachment = {
+    ...imageAttachment,
+    id: "image-good",
+    filename: "good.png",
+    previewUrl: "blob:image-good",
+  };
+  const badImage: ComposerImageAttachment = {
+    ...imageAttachment,
+    id: "image-bad",
+    filename: "bad.png",
+    previewUrl: "blob:image-bad",
+  };
+
+  let root: Root | null = null;
+  let container: HTMLDivElement | null = null;
+
+  const flush = async () => {
+    for (let round = 0; round < 8; round += 1) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+  };
+
+  const mount = async (ui: React.ReactElement, queryClient: QueryClient) => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <QueryClientProvider client={queryClient}>
+          {ui}
+        </QueryClientProvider>,
+      );
+    });
+  };
+
+  afterEach(async () => {
+    if (root) {
+      await act(async () => {
+        root?.unmount();
+      });
+    }
+    container?.remove();
+    root = null;
+    container = null;
+    apiMocks.uploadSessionImageAttachment.mockReset();
+    apiMocks.submitSessionMessage.mockReset();
+    apiMocks.editResubmitSessionMessage.mockClear();
+    apiMocks.stopSessionTurn.mockClear();
+  });
+
+  const acceptedResponse = {
+    id: "session-1",
+    activeTurnId: "accepted-turn-1",
+    currentPhase: "running",
+    status: "running",
+    messages: [],
+    updatedAt: "2026-09-26T00:00:00Z",
+  };
+
+  it("marks failed chips per attachment on submit, keeps uploaded artifacts, and retry repairs without auto-send", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    apiMocks.uploadSessionImageAttachment.mockImplementation((_sessionId: string, init: { filename: string }) =>
+      init.filename === "bad.png"
+        ? Promise.reject(new Error("disk full"))
+        : Promise.resolve({ artifactId: "artifact-good" }),
+    );
+    apiMocks.submitSessionMessage.mockResolvedValue(acceptedResponse);
+    await mount(
+      <Harness queryClient={queryClient} withEditTarget={false} trayImages={[failedImage, badImage]} />,
+      queryClient,
+    );
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
+    });
+    await flush();
+
+    // One rejection no longer aborts into a blank tray: the good chip keeps
+    // its artifact, the bad chip flips to the retryable failed state.
+    expect(JSON.parse(container?.querySelector('[data-testid="images-detail"]')?.textContent ?? "[]")).toEqual([
+      { id: "image-good", uploadStatus: "uploaded", artifactId: "artifact-good" },
+      { id: "image-bad", uploadStatus: "failed", artifactId: null },
+    ]);
+    expect(container?.querySelector('[data-testid="error"]')?.textContent).toBe("disk full");
+    expect(container?.querySelector('[data-testid="upload-pending"]')?.textContent).toBe("false");
+    // The draft is restored for a confirmed manual resubmit; no message POST.
+    expect(container?.querySelector('[data-testid="draft"]')?.textContent).toBe("编辑后的内容");
+    expect(apiMocks.submitSessionMessage).not.toHaveBeenCalled();
+
+    // Retry-all re-uploads only the failed chip; still no auto-send.
+    apiMocks.uploadSessionImageAttachment.mockResolvedValue({ artifactId: "artifact-bad" });
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="retry-all"]')?.click();
+    });
+    await flush();
+
+    // Initial attempt: good + bad. Retry: bad only — the uploaded chip is
+    // never re-uploaded.
+    expect(apiMocks.uploadSessionImageAttachment).toHaveBeenCalledTimes(3);
+    const goodUploadCalls = apiMocks.uploadSessionImageAttachment.mock.calls.filter((call) => {
+      const init = call[1] as { filename?: string };
+      return init?.filename === "good.png";
+    });
+    expect(goodUploadCalls).toHaveLength(1);
+    const lastUploadCall = apiMocks.uploadSessionImageAttachment.mock.calls.at(-1);
+    expect(((lastUploadCall?.[1] as { filename?: string }) ?? {}).filename).toBe("bad.png");
+    expect(JSON.parse(container?.querySelector('[data-testid="images-detail"]')?.textContent ?? "[]")).toEqual([
+      { id: "image-good", uploadStatus: "uploaded", artifactId: "artifact-good" },
+      { id: "image-bad", uploadStatus: "uploaded", artifactId: "artifact-bad" },
+    ]);
+    expect(container?.querySelector('[data-testid="error"]')?.textContent).toBe("");
+    expect(apiMocks.submitSessionMessage).not.toHaveBeenCalled();
+
+    // Confirmed resubmit reuses both artifacts: zero new uploads.
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
+    });
+    await flush();
+
+    expect(apiMocks.uploadSessionImageAttachment).toHaveBeenCalledTimes(3);
+    expect(apiMocks.submitSessionMessage).toHaveBeenCalledTimes(1);
+    expect(apiMocks.submitSessionMessage.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({ attachmentIds: ["artifact-good", "artifact-bad"] }),
+    );
+    expect(container?.querySelector('[data-testid="images"]')?.textContent).toBe("[]");
+  });
+
+  it("supports edit-resubmit: per-chip retry re-uploads only the failed chip and never sends by itself", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1",
+      title: "Session",
+      status: "ready",
+      taskSummary: "",
+      lastActive: "",
+      updatedAt: "",
+      currentPhase: "ready",
+      defaultFileContext: "",
+      previewTabs: [],
+      activePreviewPath: "",
+      changedFiles: [],
+      readFiles: [],
+      messages: [{ id: "user-1", role: "user", content: "原始内容" }],
+      stopRequested: false,
+      stopRequestedAt: "",
+      stopReason: "",
+    });
+    const keptChip: ComposerImageAttachment = {
+      ...failedImage,
+      id: "image-kept",
+      uploadStatus: "uploaded",
+      artifactId: "artifact-kept",
+    };
+    apiMocks.uploadSessionImageAttachment.mockRejectedValue(new Error("offline"));
+    await mount(
+      <Harness queryClient={queryClient} trayImages={[keptChip, { ...badImage, uploadStatus: "failed" }]} />,
+      queryClient,
+    );
+
+    // Edit-resubmit with a failing upload keeps the tray statuses and fails.
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
+    });
+    await flush();
+
+    expect(apiMocks.editResubmitSessionMessage).not.toHaveBeenCalled();
+    expect(JSON.parse(container?.querySelector('[data-testid="images-detail"]')?.textContent ?? "[]")).toEqual([
+      { id: "image-kept", uploadStatus: "uploaded", artifactId: "artifact-kept" },
+      { id: "image-bad", uploadStatus: "failed", artifactId: null },
+    ]);
+
+    // Single-chip retry: only the failed chip uploads; the kept artifact is
+    // reused later without a re-upload.
+    apiMocks.uploadSessionImageAttachment.mockResolvedValue({ artifactId: "artifact-bad" });
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="retry-one"]')?.click();
+    });
+    await flush();
+
+    expect(apiMocks.uploadSessionImageAttachment).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(container?.querySelector('[data-testid="images-detail"]')?.textContent ?? "[]")).toEqual([
+      { id: "image-kept", uploadStatus: "uploaded", artifactId: "artifact-kept" },
+      { id: "image-bad", uploadStatus: "uploaded", artifactId: "artifact-bad" },
+    ]);
+    expect(apiMocks.editResubmitSessionMessage).not.toHaveBeenCalled();
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
+    });
+    await flush();
+
+    expect(apiMocks.uploadSessionImageAttachment).toHaveBeenCalledTimes(2);
+    expect(apiMocks.editResubmitSessionMessage).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        attachmentIds: ["artifact-kept", "artifact-bad"],
+      }),
+    );
   });
 });

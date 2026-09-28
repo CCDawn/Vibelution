@@ -27,6 +27,18 @@ _STUB_INVOCATION_INPUT_TOKENS = 24_000
 _STUB_INVOCATION_OUTPUT_TOKENS = 2_000
 _STUB_INVOCATION_STARTED_AT_MS = 1_750_000_000_000
 
+# Deterministic fetched source text served by the web_fetch patch. Extraction
+# writeback entries quote ``_DETERMINISTIC_FETCHED_SENTENCE`` verbatim from it
+# so the quote-anchor audit sees a real anchor in the fetched blocks.
+_DETERMINISTIC_FETCHED_SENTENCE = (
+    "Spike patterns carry measurable information under controlled observations."
+)
+_DETERMINISTIC_FETCHED_TEXT = (
+    "T5.1 deterministic fetched source text. "
+    + _DETERMINISTIC_FETCHED_SENTENCE
+    + " This block exists so the stub can quote it verbatim."
+)
+
 
 def install_fast_stage_writeback_llm_stub(monkeypatch: Any) -> dict[str, Any]:
     """Monkeypatch LLM outcome helpers; return a mutable call counter."""
@@ -42,6 +54,7 @@ def install_fast_stage_writeback_llm_stub(monkeypatch: Any) -> dict[str, Any]:
         "claim_evidence_errors": 0,
         "receipts_attached": 0,
         "provider_calls": 0,
+        "fetch_calls": 0,
     }
 
     def _invoke(
@@ -132,6 +145,22 @@ def install_fast_stage_writeback_llm_stub(monkeypatch: Any) -> dict[str, Any]:
         research_search_backends,
         "collect_provider_results",
         _deterministic_provider_payload,
+    )
+
+    def _deterministic_web_fetch(
+        url: str, max_chars: int = 8000, prompt: str = ""
+    ) -> str:
+        # Receipt prefix/shape must match what
+        # source_collection/extraction_fetch_text accepts from web_fetch_tool.
+        counters["fetch_calls"] += 1
+        return f"[网页内容] {url}\n\n{_DETERMINISTIC_FETCHED_TEXT}"
+
+    from tools import web_search_tool as _web_search_tool_module
+
+    monkeypatch.setattr(
+        _web_search_tool_module,
+        "web_fetch",
+        _deterministic_web_fetch,
     )
     monkeypatch.setattr(
         "core.web.services.session.tool_approvals.authorize_or_wait",
@@ -253,6 +282,22 @@ def _outcome_for_messages(
                     },
                 )
             )
+        if str(binding.get("stageId") or "").strip().lower() == "extraction":
+            # Production extractors fetch source text before quoting it; the
+            # quote-anchor audit hard-rejects entries without a verbatim
+            # anchor, so the stub must leave real fetch receipts in the turn
+            # journal (served by the deterministic web_fetch patch).
+            for index, url in enumerate(
+                _extraction_fetch_urls(binding), start=1
+            ):
+                calls.append(
+                    CanonicalToolCall(
+                        identity=identity,
+                        call_id=f"call-fetch-{binding['taskId']}-{index}",
+                        name="web_fetch_tool",
+                        arguments={"url": url, "max_chars": 4000},
+                    )
+                )
         calls.append(
             CanonicalToolCall(
                 identity=identity,
@@ -295,6 +340,41 @@ def _outcome_for_messages(
             "任务完成。in summary the stage writeback finished successfully."
         ),
     )
+
+
+def _registered_evidence_ref_ids(team_id: str) -> list[str]:
+    """Canonical claimEvidenceId values of the cards this stub registered."""
+
+    from core.infrastructure.path_containment import PROJECT_ROOT
+    from core.research.evidence import ClaimEvidenceStore
+    from core.web.services import team_service
+
+    root = PROJECT_ROOT or team_service.PROJECT_ROOT
+    store = ClaimEvidenceStore(root)
+    refs: list[str] = []
+    for card in store.list(team_id):
+        claim_id = str(card.get("claimId") or "")
+        evidence_id = str(card.get("claimEvidenceId") or "").strip()
+        if claim_id.startswith("claim-t518-") and evidence_id:
+            refs.append(evidence_id)
+    return refs
+
+
+def _extraction_fetch_urls(binding: dict[str, str]) -> list[str]:
+    """Candidate locators the extraction stub fetches before quoting."""
+
+    team_id = str(binding.get("teamId") or "").strip()
+    run_id = str(binding.get("runId") or "").strip()
+    urls: list[str] = []
+    for candidate in _candidates_for_run(team_id, run_id)[:3]:
+        url = str(
+            candidate.get("sourceUrl")
+            or candidate.get("sourceRef")
+            or ""
+        ).strip()
+        if url:
+            urls.append(url)
+    return urls
 
 
 def _stage_already_writeback_completed(binding: dict[str, str]) -> bool:
@@ -715,13 +795,10 @@ def _result_for_stage(
                 or candidate.get("sourceRef")
                 or f"https://doi.org/10.0000/t518-extract-{index}"
             )
-            # The extraction writeback contract requires a verbatim quote
-            # anchor from the stored candidate summary whenever that summary
-            # is non-empty; the stub mirrors the production agent contract by
-            # copying a bounded slice of the summary verbatim instead of
-            # inventing one.
-            stored_summary = str(candidate.get("summary") or "").strip()
-            verbatim_quote = stored_summary[:160]
+            # The stub fetches source text via the deterministic web_fetch
+            # patch, so each entry can anchor a verbatim quote from that
+            # fetched text (evidence_ready) instead of claiming an abstract
+            # it never fetched.
             entry: dict[str, Any] = {
                 "candidateId": candidate_id,
                 "title": str(
@@ -734,10 +811,10 @@ def _result_for_stage(
                 "retrieved_at": "2026-08-26T00:00:00Z",
                 "fact": claim_text,
                 "relation": "supports",
-                "verification_status": "full_text_checked",
                 "decision": "keep",
                 "status": "extracted",
                 "summary": f"Extracted claim {index} for T5.1 gate.",
+                "evidenceStatus": "evidence_ready",
                 "keyFindings": [
                     {
                         "finding": claim_text,
@@ -745,24 +822,19 @@ def _result_for_stage(
                         "citationLocator": {"page": str(index)},
                         "sourceRef": source_ref,
                         "evidenceRef": f"page:{index}",
+                        "quote": _DETERMINISTIC_FETCHED_SENTENCE,
+                        "verification_status": "full_text_checked",
                     }
                 ],
                 "evidenceRefs": [
-                    {"type": "page", "page": str(index), "sourceRef": source_ref}
-                ],
-            }
-            if verbatim_quote:
-                entry["evidenceStatus"] = "verified_abstract"
-                entry["keyFindings"][0]["quote"] = verbatim_quote
-                entry["evidenceRefs"].append(
+                    {"type": "page", "page": str(index), "sourceRef": source_ref},
                     {
                         "type": "quote",
-                        "id": f"abstract-quote-{index}",
-                        "quote": verbatim_quote,
-                    }
-                )
-            else:
-                entry["evidenceStatus"] = "missing_evidence_anchor"
+                        "id": f"fetched-quote-{index}",
+                        "quote": _DETERMINISTIC_FETCHED_SENTENCE,
+                    },
+                ],
+            }
             extractions.append(entry)
         return {
             "candidateExtractions": extractions,
@@ -777,23 +849,27 @@ def _result_for_stage(
             for item in candidates
             if str(item.get("candidateId") or "").strip()
         ][:3]
+        # Graph edges must reference canonical claimEvidenceId values from the
+        # cards this stub registered at extraction time; invented refs like
+        # "candidate:<id>" fail the relation reference validation.
+        evidence_ref_ids = _registered_evidence_ref_ids(team_id)
         edges: list[dict[str, Any]] = []
-        if len(node_ids) >= 2:
+        if len(node_ids) >= 2 and evidence_ref_ids:
             edges.append(
                 {
                     "from": node_ids[0],
                     "to": node_ids[1],
                     "relation": "supports",
-                    "evidenceRefs": [f"candidate:{node_ids[0]}"],
+                    "evidenceRefs": [evidence_ref_ids[0]],
                 }
             )
-        if len(node_ids) >= 3:
+        if len(node_ids) >= 3 and len(evidence_ref_ids) >= 2:
             edges.append(
                 {
                     "from": node_ids[2],
                     "to": node_ids[0],
-                    "relation": "contradicts",
-                    "evidenceRefs": [f"candidate:{node_ids[2]}"],
+                    "relation": "challenges",
+                    "evidenceRefs": [evidence_ref_ids[1]],
                 }
             )
         return {
@@ -801,9 +877,9 @@ def _result_for_stage(
                 "nodes": [{"id": node_id} for node_id in node_ids],
                 "edges": edges,
                 "missingLinks": [{"reason": "coverage_gap", "from": "open_question"}],
-                "evidenceGaps": ["Need stronger multi-lab replication."],
+                "evidenceGaps": [{"description": "Need stronger multi-lab replication."}],
                 "counterEvidenceRefs": [
-                    f"candidate:{node_ids[-1]}" if node_ids else "candidate:none"
+                    {"evidenceRef": evidence_ref_ids[-1]} if evidence_ref_ids else {}
                 ],
             }
         }

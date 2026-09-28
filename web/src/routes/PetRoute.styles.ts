@@ -12,12 +12,12 @@ const bodyClass =
 
 const surfaceClass = `min-w-0 ${vuiFlatPanelClass}`;
 const avatarPanelClass = `inline-flex max-w-full min-w-0 items-center gap-[7px] rounded-[var(--radius-control)] ${vuiOpaqueRowClass} px-2 py-1.5`;
-const avatarOrbClass = "grid h-[34px] w-[34px] place-items-center rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--accent-warm)_18%,transparent)] font-[var(--font-body)] text-base font-bold text-[var(--accent-warm-2)]";
+const avatarOrbClass = "grid h-[34px] w-[34px] place-items-center rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--accent-warm)_18%,transparent)] font-[var(--font-body)] text-vui-md font-bold text-[var(--accent-warm-2)]";
 const avatarMetaClass = "m-0 max-w-[110px] truncate [font-size:var(--vui-font-xs)] text-vui-fg-secondary";
 const metricGridClass = "grid min-w-0 grid-cols-4 gap-1.5 max-[860px]:grid-cols-2 max-[640px]:grid-cols-1";
 const metricCardClass = `${surfaceClass} grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-2 p-[9px]`;
 const metricLabelClass = "min-w-0 truncate [font-size:var(--vui-font-xs)] text-vui-fg-secondary";
-const metricValueClass = "min-w-0 truncate text-[0.9rem] text-vui-fg-primary";
+const metricValueClass = "min-w-0 truncate text-vui-xs text-vui-fg-primary";
 const statusGridClass = "grid min-w-0 grid-cols-3 items-start gap-1.5 max-[860px]:grid-cols-2 max-[640px]:grid-cols-1";
 const cardClass = `${surfaceClass} p-[9px]`;
 const cardTitleClass = "m-0 mb-[3px] [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-vui-fg-tertiary";

@@ -2005,6 +2005,15 @@ def _sanitize_message_content(role: str, content: Any) -> str:
     return s.sanitize_assistant_visible_text(text)
 
 
+def _sanitize_message_delta_content(role: str, content: Any) -> str:
+    """Sanitize one streamed assistant delta without trimming token whitespace."""
+    s = _service()
+    text = str(content or "")
+    if str(role or "").strip().lower() != "assistant":
+        return text
+    return s.sanitize_assistant_visible_delta_text(text)
+
+
 def _sanitize_thought_delta_text(text: Any) -> str:
     s = _service()
     return s.sanitize_assistant_thought_delta_text(text)
@@ -2356,6 +2365,10 @@ def _set_session_running(
         return
     # A settled turn releases the next queued user turn (Codex thread/queue parity).
     s._schedule_session_queued_turn_drain(session_id)
+    try:
+        s.notify_parent_session_of_child_return(session_id, turn_id=turn_id)
+    except (OSError, ValueError, TypeError, RuntimeError, s.SessionNotFoundError, s.SessionValidationError):
+        return
 
 
 def _set_session_waiting_live_output(session_id: str, *, turn_id: str = "") -> None:
@@ -2664,6 +2677,7 @@ def _append_session_branch_rebase_event(
         projection_kind="session_branch_rebase",
         parent_event_id=from_event_id,
     )
+    s.advance_session_branch_generation(session_id, publish=False)
     return from_event_id
 
 

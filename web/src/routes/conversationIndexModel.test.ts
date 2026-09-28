@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import type { AgentInstance, ConversationSummary, SessionSummary, Team } from "../api/types";
 import {
   agentToConversationSummary,
   buildConversationIndexModel,
+  resetConversationIndexModelStabilizationForTests,
   classifyConversation,
   conversationGroupLabel,
   DEFAULT_COLLAPSED_CONVERSATION_GROUPS,
@@ -692,5 +693,106 @@ describe("conversationIndexModel", () => {
     expect(isRepresentedInAgentSessionTabs(session({ agentId: "agent-1", sessionKind: "main" }))).toBe(true);
     expect(isRepresentedInAgentSessionTabs(session({ agentId: "agent-1", sessionKind: "child" }))).toBe(true);
     expect(isRepresentedInAgentSessionTabs(session({ agentId: "", sessionKind: "main" }))).toBe(false);
+  });
+});
+
+describe("buildConversationIndexModel reference stabilization", () => {
+  beforeEach(() => {
+    resetConversationIndexModelStabilizationForTests();
+  });
+
+  function stableUserIndexOptions() {
+    const userConversation = conversation();
+    const userSession = session();
+    const otherConversation = conversation({
+      conversationId: "session-2",
+      directSessionId: "session-2",
+      conversationIndexKind: "system_entry",
+      conversationIndexVisibility: "user_visible",
+    });
+    const otherSession = session({ id: "session-2" });
+    const conversations = [userConversation, otherConversation];
+    const rightIndexSessions = [userSession, otherSession];
+    const sessionsById = new Map([
+      [userSession.id, userSession],
+      [otherSession.id, otherSession],
+    ]);
+    return {
+      agents: [] as AgentInstance[],
+      conversations,
+      lang: "zh" as const,
+      linkedTeamRoomIds: new Set<string>(),
+      rawSessions: rightIndexSessions,
+      rightIndexSessions,
+      sessionFilter: "",
+      sessionsById,
+      teams: [] as Team[],
+    };
+  }
+
+  it("returns the identical model object when called twice with the same input references", () => {
+    const options = stableUserIndexOptions();
+    const first = buildConversationIndexModel(options);
+    const second = buildConversationIndexModel(options);
+    expect(second).toBe(first);
+    expect(second.filteredConversations).toBe(first.filteredConversations);
+    expect(second.groupedConversations).toBe(first.groupedConversations);
+  });
+
+  it("reuses output references when inputs are new arrays with equivalent content", () => {
+    const first = buildConversationIndexModel(stableUserIndexOptions());
+    const second = buildConversationIndexModel({
+      ...stableUserIndexOptions(),
+      teams: [team({ teamId: "research-team", name: "科研团队", members: [], memberCount: 0 })],
+    });
+    const third = buildConversationIndexModel({
+      ...stableUserIndexOptions(),
+      teams: [team({ teamId: "research-team", name: "科研团队", members: [], memberCount: 0 })],
+    });
+    expect(third.filteredConversations).toBe(second.filteredConversations);
+    expect(third.filteredConversations[0]).toBe(second.filteredConversations[0]);
+    expect(third.filteredStandaloneGroupConversations).toBe(second.filteredStandaloneGroupConversations);
+    expect(third.filteredTeams).toBe(second.filteredTeams);
+    expect(third.filteredTeams[0]).toBe(second.filteredTeams[0]);
+    expect(third.groupedConversations).toBe(second.groupedConversations);
+    expect(third.groupedConversations[0]).toBe(second.groupedConversations[0]);
+    expect(third.groupedConversations[0]?.items).toBe(second.groupedConversations[0]?.items);
+    // The first run only seeds the stabilization pool; content assertions hold.
+    expect(first.groupedConversations.length).toBeGreaterThan(0);
+  });
+
+  it("rotates only the changed conversation, its group, and its group items array", () => {
+    buildConversationIndexModel(stableUserIndexOptions());
+    const before = buildConversationIndexModel(stableUserIndexOptions());
+    const renamed = session({ title: "改名后的用户会话" });
+    const otherSession = session({ id: "session-2" });
+    const after = buildConversationIndexModel({
+      ...stableUserIndexOptions(),
+      conversations: [
+        conversation({ title: "改名后的用户会话" }),
+        conversation({
+          conversationId: "session-2",
+          directSessionId: "session-2",
+          conversationIndexKind: "system_entry",
+          conversationIndexVisibility: "user_visible",
+        }),
+      ],
+      rightIndexSessions: [renamed, otherSession],
+      rawSessions: [renamed, otherSession],
+    });
+
+    expect(after.filteredConversations).not.toBe(before.filteredConversations);
+    expect(after.filteredConversations[0]).not.toBe(before.filteredConversations[0]);
+    expect(after.filteredConversations[0]?.title).toBe("改名后的用户会话");
+    expect(after.filteredConversations[1]).toBe(before.filteredConversations[1]);
+    expect(after.groupedConversations).not.toBe(before.groupedConversations);
+    const beforeUserGroup = before.groupedConversations.find((group) => group.groupKey === "user");
+    const afterUserGroup = after.groupedConversations.find((group) => group.groupKey === "user");
+    const beforeOtherGroup = before.groupedConversations.find((group) => group.groupKey === "other");
+    const afterOtherGroup = after.groupedConversations.find((group) => group.groupKey === "other");
+    expect(afterUserGroup).not.toBe(beforeUserGroup);
+    expect(afterUserGroup?.items[0]).not.toBe(beforeUserGroup?.items[0]);
+    expect(afterOtherGroup).toBe(beforeOtherGroup);
+    expect(afterOtherGroup?.items).toBe(beforeOtherGroup?.items);
   });
 });

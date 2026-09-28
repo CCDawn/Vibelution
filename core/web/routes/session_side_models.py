@@ -8,6 +8,8 @@ optional fields stay absent instead of being filled with empty defaults.
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -31,3 +33,32 @@ class SessionChatReviewCandidateResponse(BaseModel):
 
     candidateId: str = ""
     sessionId: str = ""
+
+
+class SessionMessageCurationPayload(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    action: str = ""
+
+
+class SessionMessageCurationResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    sessionId: str = ""
+    messageId: str = ""
+    action: str = ""
+    status: str = ""
+    candidateId: str = ""
+    caseId: str = ""
+    modelId: str = ""
+    datasetName: str = ""
+    summary: str = ""
+
+
+class SessionMessageCurationStateResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    sessionId: str = ""
+    captureEnabled: bool = False
+    items: list[dict[str, Any]] = []
+    countsByModel: list[dict[str, Any]] = []

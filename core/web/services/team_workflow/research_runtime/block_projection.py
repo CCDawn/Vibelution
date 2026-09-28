@@ -79,6 +79,7 @@ def mark_run_reconciliation_required(
         run.team_id,
         RunStatus.RECONCILIATION_REQUIRED.value,
         now_ms,
+        active_node_id=run.active_node_id,
         blocked_problem_json=problem_json,
     )
     sequence = uow.repository.advance_last_sequence(run_id, 1, now_ms)

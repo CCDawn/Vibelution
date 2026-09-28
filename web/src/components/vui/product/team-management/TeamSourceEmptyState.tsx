@@ -23,7 +23,7 @@ const PANEL =
 const VISUAL =
   "grid size-10 place-items-center rounded-[10px] bg-[var(--vui-control-muted)] text-[var(--fg-secondary)] shadow-[inset_0_0_0_1px_var(--vui-border-subtle)]";
 const COPY = "grid max-w-sm min-w-0 justify-items-center gap-1";
-const TITLE = "min-w-0 text-[0.86rem] font-[680] leading-tight tracking-[-0.008em] text-[var(--fg-primary)]";
+const TITLE = "min-w-0 text-vui-xs font-[680] leading-tight tracking-[-0.008em] text-[var(--fg-primary)]";
 const DESCRIPTION = "min-w-0 [font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--fg-tertiary)]";
 const FACTS = "flex min-w-0 max-w-xl flex-wrap items-center justify-center gap-x-4 gap-y-1.5";
 const FACT =

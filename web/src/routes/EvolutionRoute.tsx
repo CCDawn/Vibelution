@@ -11,6 +11,7 @@ import {
   fetchEvolutionWorkspaceSnapshot,
   fetchSelfEvolutionWorkspaceSnapshot,
   fetchSelfObservationRun,
+  EVOLUTION_WORKBENCH_POLL_INTERVAL_MS,
 } from "../api/evolution";
 import { queryKeys } from "../api/queryKeys";
 import {
@@ -49,6 +50,7 @@ import {
 } from "../components/layout/paneHeightPersistence";
 import { usePersistedPaneHeight } from "../components/layout/usePersistedPaneHeight";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
+import { paneHeightCssVar, paneWidthCssVar } from "../components/layout/paneCssVariables";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import {
   VButton,
@@ -62,6 +64,7 @@ import {
 import { useAppI18n } from "../i18n/useAppI18n";
 import { useShellStore } from "../store/shellStore";
 import { SupervisedApprovalDecisionPanel } from "./SupervisedApprovalDecisionPanel";
+import { EvolutionBaselinePromotionStrip } from "./evolution/EvolutionBaselinePromotionStrip";
 import { useEvolutionProposalMutations } from "./evolution/useEvolutionProposalMutations";
 import { useEvolutionRunMutations } from "./evolution/useEvolutionRunMutations";
 import { useSupervisedRunDetail } from "./evolution/useSupervisedRunDetail";
@@ -139,6 +142,8 @@ import {
 } from "./supervisedWorktreeReview";
 import {
   isLiveSupervisedRunStatus,
+  isSupervisedStartLocked,
+  isSupervisedRuntimeActivationBusy,
   parseRunStreamSnapshot,
   selectRunSnapshotWithRunId,
   selectSupervisedRunMonitorSource,
@@ -328,6 +333,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   }, []);
   const {
     layoutRef: evolutionLayoutRef,
+    registerSplitContainer: registerEvolutionContainer,
+    paneVariablesStyle: evolutionPaneVariablesStyle,
     widths: evolutionPaneWidths,
     draggingPaneId: evolutionDraggingPaneId,
     startResize: startEvolutionPaneResize,
@@ -348,6 +355,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     EVOLUTION_LIVE_IO_HEIGHT_KEY,
   );
   const {
+    registerSplitContainer: registerEvolutionHeightContainer,
+    paneVariablesStyle: evolutionHeightVariablesStyle,
     heights: evolutionPaneHeights,
     draggingPaneId: evolutionHeightDraggingPaneId,
     startResize: startEvolutionHeightResize,
@@ -409,7 +418,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const workbenchCatalogQuery = useQuery({
     queryKey: queryKeys.evolutionWorkbench(),
     queryFn: () => fetchEvolutionWorkbench<EvolutionWorkbench>(),
-    refetchInterval: resolvePollingInterval(pageVisible, 15_000),
+    // workbench 全量载荷（含 dataset catalog）低频刷新；高频运行态来自 workspace-snapshot
+    // 内嵌的无 catalog workbench 投影，run 启动等变更仍会即时失效本查询。
+    refetchInterval: resolvePollingInterval(pageVisible, EVOLUTION_WORKBENCH_POLL_INTERVAL_MS),
     refetchIntervalInBackground: false,
     enabled: supervisedTrackQueriesEnabled,
   });
@@ -618,12 +629,25 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     && ["queued", "running", "paused", "stopping"].includes(String((activeWorktreeRun ?? selfWorktreeRun)?.status || "").toLowerCase()),
   );
   const supervisedStartSubmitting = startWorktreeRunMutation.isPending || isLocalSupervisedStartPlaceholder(liveActiveRun);
-  const supervisedPrimaryRunning = runLocked || worktreeRunLocked;
+  const activationLocked = isSupervisedRuntimeActivationBusy(
+    reviewCandidateWorktree?.runtimeActivation?.status
+    ?? selfWorktreeRun?.runtimeActivation?.status,
+  );
+  const startLocked = isSupervisedStartLocked({
+    liveStatus: runningRun?.status,
+    worktreeStatus: (activeWorktreeRun ?? selfWorktreeRun)?.status,
+    activationStatus: reviewCandidateWorktree?.runtimeActivation?.status
+      ?? selfWorktreeRun?.runtimeActivation?.status,
+    submitting: supervisedStartSubmitting,
+  });
+  const supervisedPrimaryRunning = runLocked || worktreeRunLocked || activationLocked;
   const supervisedStartButtonLabel = supervisedStartSubmitting
     ? (lang === "zh" ? "提交中" : "Submitting")
-    : supervisedPrimaryRunning
-      ? (lang === "zh" ? "监督运行中" : "Supervised running")
-      : t("startSupervisedRun");
+    : activationLocked
+      ? (lang === "zh" ? "激活中" : "Activating")
+      : supervisedPrimaryRunning
+        ? (lang === "zh" ? "监督运行中" : "Supervised running")
+        : t("startSupervisedRun");
   const monitoredCaseTranscript = monitoredRun?.currentCaseIo?.transcript ?? [];
   const monitoredCaseConversationMessages = monitoredRun?.currentCaseIo?.conversationMessages ?? [];
   const monitoredCaseTraceItems = useMemo(
@@ -909,7 +933,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       : null;
     return {
       status: statusLabel(step.status),
-      detail: step.livePreview || step.summary || (lang === "zh" ? "等待实时输出" : "Waiting for live output"),
+      detail: step.current
+        ? (lang === "zh" ? "进行中" : "In progress")
+        : statusLabel(step.status),
       count: scoreDelta !== null
         ? `Δ ${scoreDelta}`
         : score !== null
@@ -1259,17 +1285,15 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const availableBundles = workbenchControl?.bundles ?? [];
   const selectedBundleExists = availableBundles.some((item) => item.name === bundleNameInput);
   const datasetLimitError = supervisedDatasetLimitError(sourceKind, datasetLimitInput);
-  const supervisedStartDisabledReason = datasetLimitError || (runLocked || worktreeRunLocked
-    ? t("runningLockHint")
+  const supervisedStartDisabledReason = datasetLimitError || (startLocked
+    ? (activationLocked ? t("supervisedActivationLockHint") : t("runningLockHint"))
     : !workbenchControl
       ? (lang === "zh" ? "监督运行控制暂不可用。" : "Supervised run controls are unavailable.")
-      : startWorktreeRunMutation.isPending
-        ? (lang === "zh" ? "监督运行正在启动。" : "The supervised run is starting.")
-        : sourceKind === "dataset" && !datasetName
-          ? (lang === "zh" ? "先选择数据集。" : "Choose a dataset first.")
-          : sourceKind === "bundle" && !selectedBundleExists
-            ? (lang === "zh" ? "先选择有效的评测包。" : "Choose a valid evaluation bundle first.")
-            : undefined);
+      : sourceKind === "dataset" && !datasetName
+        ? (lang === "zh" ? "先选择数据集。" : "Choose a dataset first.")
+        : sourceKind === "bundle" && !selectedBundleExists
+          ? (lang === "zh" ? "先选择有效的评测包。" : "Choose a valid evaluation bundle first.")
+          : undefined);
   const supervisedMembersHint = supervisedMembersSource === "current_config"
     ? (lang === "zh" ? "当前 Agent 配置；启动后锁定为本轮绑定。" : "Current Agent config; a run locks its own bindings after start.")
     : undefined;
@@ -1344,10 +1368,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       memberCountText={`${configuredSupervisedAgentCount} / ${SUPERVISED_RUN_MEMBER_ROLES.length}`}
       startDisabled={
         Boolean(datasetLimitError) ||
-        runLocked
-        || worktreeRunLocked
+        startLocked
         || !workbenchControl
-        || startWorktreeRunMutation.isPending
         || (sourceKind === "dataset" && !datasetName)
         || (sourceKind === "bundle" && !selectedBundleExists)
       }
@@ -1680,29 +1702,41 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     : libraryFilteredEmpty
       ? t("noProposalMatches")
       : t("chooseProposalDetail");
+  // Collapse-only styles: widths/heights themselves come from the hook-owned
+  // --pane-w-* / --pane-h-* variables on the registered split container.
   const runsWorkspaceStyle = useMemo(
     () =>
       ({
-        "--evolution-runs-queue-width": runsQueueCollapsed ? "0px" : `${runsQueueWidth}px`,
+        ...(runsQueueCollapsed ? { [paneWidthCssVar("runs-queue")]: "0px" } : null),
       }) as CSSProperties,
-    [runsQueueCollapsed, runsQueueWidth],
+    [runsQueueCollapsed],
   );
   const libraryWorkspaceStyle = useMemo(
     () =>
       ({
-        "--evolution-library-list-width": libraryListCollapsed ? "0px" : `${libraryListWidth}px`,
+        ...(libraryListCollapsed ? { [paneWidthCssVar("library-list")]: "0px" } : null),
       }) as CSSProperties,
-    [libraryListCollapsed, libraryListWidth],
+    [libraryListCollapsed],
   );
   const liveWorkspaceStyle = useMemo(
     () =>
       ({
-        "--evolution-live-launch-width": liveLaunchCollapsed ? "0px" : `${liveLaunchWidth}px`,
-        "--evolution-live-run-width": liveRunCollapsed ? "0px" : `${liveRunWidth}px`,
-        "--evolution-live-io-height": `${liveIoHeight}px`,
+        ...(liveLaunchCollapsed ? { [paneWidthCssVar("live-launch")]: "0px" } : null),
+        ...(liveRunCollapsed ? { [paneWidthCssVar("live-run")]: "0px" } : null),
+        "--evolution-live-io-height": `var(${paneHeightCssVar("live-io")})`,
       }) as CSSProperties,
-    [liveIoHeight, liveLaunchCollapsed, liveLaunchWidth, liveRunCollapsed, liveRunWidth],
+    [liveLaunchCollapsed, liveRunCollapsed],
   );
+  // display:contents wrapper: hosts the hook drag variables (and both
+  // registrations) without adding a box between the page body and its branches.
+  const evolutionVariablesStyle = useMemo(
+    () => ({ ...evolutionPaneVariablesStyle, ...evolutionHeightVariablesStyle }) as CSSProperties,
+    [evolutionHeightVariablesStyle, evolutionPaneVariablesStyle],
+  );
+  const registerEvolutionVariablesContainer = useCallback((element: HTMLDivElement | null) => {
+    registerEvolutionContainer(element);
+    registerEvolutionHeightContainer(element);
+  }, [registerEvolutionContainer, registerEvolutionHeightContainer]);
   const resizeLiveLaunchLabel = lang === "zh" ? "调整启动卡片宽度" : "Resize launch card";
   const resizeLiveRunLabel = lang === "zh" ? "调整当前任务卡片宽度" : "Resize active run card";
   const resizeLiveIoLabel = lang === "zh" ? "调整 CASE 输出高度" : "Resize case output height";
@@ -2239,6 +2273,16 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           : null
       }
     >
+      <div
+        ref={registerEvolutionVariablesContainer}
+        style={evolutionVariablesStyle}
+        className="contents"
+      >
+      <EvolutionBaselinePromotionStrip
+        lang={lang}
+        t={t}
+        promotion={workspaceSnapshot?.evolutionRuntime?.currentBaseline}
+      />
       {activeTrack === "self" ? (
         <EvolutionSelfTrackBoundary
           lang={lang}
@@ -2399,10 +2443,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   onMentalModelModeChange={setSupervisedMentalModelMode}
                   startDisabled={
                     Boolean(datasetLimitError) ||
-                    runLocked
-                    || worktreeRunLocked
+                    startLocked
                     || !workbenchControl
-                    || startWorktreeRunMutation.isPending
                     || (sourceKind === "dataset" && !datasetName)
                     || (sourceKind === "bundle" && !selectedBundleExists)
                   }
@@ -2417,8 +2459,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   mentalModeFollowLabel={t("supervisedMentalModeFollow")}
                   mentalModeEnabledLabel={t("supervisedMentalModeEnabled")}
                   mentalModeDisabledLabel={t("supervisedMentalModeDisabled")}
-                  runningLockHint={t("runningLockHint")}
-                  showRunningLock={runLocked || worktreeRunLocked}
+                  runningLockHint={activationLocked ? t("supervisedActivationLockHint") : t("runningLockHint")}
+                  showRunningLock={runLocked || worktreeRunLocked || activationLocked}
                   controlError={datasetLimitError || supervisedControlError}
                   onStart={() => startWorktreeRunMutation.mutate()}
                 />
@@ -2769,6 +2811,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           formatAvailableActions={formatAvailableActions}
         />
       ) : null}
+      </div>
     </VTrackWorkbenchPage>
   );
 }

@@ -10,7 +10,10 @@ from contextvars import ContextVar
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
+from typing import Any
 import subprocess
+import sys
+import tempfile
 import threading
 import time
 
@@ -1086,7 +1089,28 @@ def _spawn_managed_launcher_shutdown() -> None:
         )
 
 
+def _record_pytest_hard_exit_skip(kind: str) -> None:
+    current_test = os.environ.get("PYTEST_CURRENT_TEST", "")
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    try:
+        log_path = Path(tempfile.gettempdir()) / "vibelution_pytest_hard_exit_skips.log"
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(
+                f"{time.strftime('%Y-%m-%dT%H:%M:%S')} worker={worker} kind={kind} test={current_test}\n"
+            )
+    except OSError:
+        pass
+
+
 def _schedule_local_backend_exit(delay_seconds: float = 0.35) -> None:
+    # 测试在进程内（TestClient）触达 shutdown 接受路径时，os._exit 会当场杀掉
+    # pytest/xdist worker，控制器随即死等已死节点、整套悬挂。判据只看本进程
+    # 是否加载过 pytest（子进程不继承），真产品进程与测试拉起的后端子进程
+    # 仍走原硬退出语义。
+    if "pytest" in sys.modules:
+        _record_pytest_hard_exit_skip("runtime_service.local_backend_exit")
+        return
+
     def _exit_later() -> None:
         time.sleep(max(0.0, float(delay_seconds)))
         os._exit(0)
@@ -2795,7 +2819,14 @@ def _context_compression_summary(runtime_state: dict, context_usage: dict[str, i
 
     persisted = runtime_state.get("context_compression")
     persisted = persisted if isinstance(persisted, dict) else {}
-    ledger_compression = _active_session_context_compression_projection(active_session)
+    # One journal snapshot load per summary: the compression projection and
+    # the cache telemetry join share the same events list.
+    session_events = _active_session_conversation_events(active_session)
+    ledger_compression = (
+        context_compression_projection(session_events)
+        if session_events is not None
+        else {}
+    )
     if ledger_compression.get("compressionCount"):
         persisted = {
             **persisted,
@@ -2852,7 +2883,7 @@ def _context_compression_summary(runtime_state: dict, context_usage: dict[str, i
     if policy_source == "agent":
         policy_source = "agent_custom"
 
-    return {
+    summary = {
         "enabled": enabled,
         "source": "conversation_ledger" if ledger_compression.get("compressionCount") else "runtime_state",
         "policyMode": str((policy_payload or {}).get("mode") or "inherit").strip() or "inherit",
@@ -2877,18 +2908,68 @@ def _context_compression_summary(runtime_state: dict, context_usage: dict[str, i
         },
         "updatedAt": str(persisted.get("updatedAt") or runtime_state.get("updated_at") or "").strip(),
     }
+    cache_telemetry = _active_session_cache_telemetry(
+        active_session, session_events, ledger_compression
+    )
+    if cache_telemetry:
+        summary["cacheTelemetry"] = cache_telemetry
+    return summary
 
 
-def _active_session_context_compression_projection(active_session: dict | None) -> dict[str, object]:
+def _active_session_conversation_events(active_session: dict | None) -> list[Any] | None:
+    """Journal snapshot for the active session, or ``None`` when unavailable."""
+
+    if not isinstance(active_session, dict):
+        return None
+    session_id = str(active_session.get("id") or active_session.get("sessionId") or "").strip()
+    if not session_id:
+        return None
+    try:
+        return load_session_conversation_events_snapshot(session_id)
+    except Exception:
+        return None
+
+
+def _active_session_cache_telemetry(
+    active_session: dict | None,
+    session_events: list[Any] | None,
+    ledger_compression: dict | None = None,
+) -> dict[str, object]:
+    """Bounded compression x cache telemetry for the session summary surface.
+
+    Read-only join between compression checkpoints (conversation ledger) and
+    usage rows (usage ledger); see ``core.chat.context_compression_telemetry``.
+    Reuses the summary's already-loaded ``session_events`` so the join adds no
+    second journal load, and runs only for sessions that already have ledger
+    compressions so the usage-ledger read stays off the poll path for sessions
+    that never compressed.  Any failure degrades to omitting the field; the
+    summary must never fail because telemetry failed.
+    """
+
+    if session_events is None:
+        return {}
+    if not isinstance(ledger_compression, dict) or not ledger_compression.get("compressionCount"):
+        return {}
     if not isinstance(active_session, dict):
         return {}
     session_id = str(active_session.get("id") or active_session.get("sessionId") or "").strip()
     if not session_id:
         return {}
     try:
-        return context_compression_projection(load_session_conversation_events_snapshot(session_id))
+        from core.chat.context_compression_telemetry import (
+            build_compression_cache_telemetry,
+            load_session_usage_rows,
+        )
+
+        usage_rows = load_session_usage_rows(PROJECT_ROOT, session_id)
+        telemetry = build_compression_cache_telemetry(session_events, usage_rows, session_id=session_id)
     except Exception:
         return {}
+    if not isinstance(telemetry, dict):
+        return {}
+    # The per-compression ``compressions`` list is unbounded; the summary
+    # surface carries only the bounded aggregates.
+    return {key: value for key, value in telemetry.items() if key != "compressions"}
 
 
 def _active_session_context_compression_policy(

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from core.infrastructure import developer_sandbox
+from core.infrastructure.canonical_json import sha256_hex
 from core.web.services import agent_directory_service, session_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 
@@ -77,54 +78,63 @@ def handle_kernel_event(payload: dict[str, Any]) -> dict[str, Any]:
                 "proposals": _outcome_proposals(index, outcome),
             }
 
-        persist_each_transition = not trace_only
-        _persist_event(store, index, event, persist_index=persist_each_transition)
-        task = _create_task(event)
-        _persist_task_transition(store, index, task, "queued", persist_index=persist_each_transition)
-        _persist_task_transition(store, index, task, "running", persist_index=persist_each_transition)
-        execution = _create_execution(task, event)
-        _persist_execution_transition(store, index, execution, "created", persist_index=persist_each_transition)
-        _persist_execution_transition(store, index, execution, "running", persist_index=persist_each_transition)
+        # Index write batching: every transition below is already durable as
+        # a complete row in its JSONL stream (events/tasks/executions/
+        # outcomes/proposals), and index.json is a materialized projection of
+        # those streams (readModel truthSource=TaskLedger; the timeline read
+        # path already treats stream rows as primary with the index as
+        # fallback).  So the crash-safe boundary is one final-consistent
+        # index write per event instead of one per transition.  The finally
+        # also lands the last in-memory state when delivery or a transition
+        # raises mid-loop.
+        try:
+            _persist_event(store, index, event, persist_index=False)
+            task = _create_task(event)
+            _persist_task_transition(store, index, task, "queued", persist_index=False)
+            _persist_task_transition(store, index, task, "running", persist_index=False)
+            execution = _create_execution(task, event)
+            _persist_execution_transition(store, index, execution, "created", persist_index=False)
+            _persist_execution_transition(store, index, execution, "running", persist_index=False)
 
-        deliveries = [] if trace_only else _deliver_event_to_recipients(event, task)
-        failed_deliveries = [item for item in deliveries if str(item.get("status") or "") != "delivered"]
-        if trace_only:
-            outcome_status = "succeeded"
-            result_summary = "Kernel trace event recorded without recipient delivery."
-            final_task_status = "succeeded"
-            final_execution_status = "succeeded"
-        elif failed_deliveries:
-            outcome_status = "blocked"
-            result_summary = f"Kernel event delivered partially; {len(failed_deliveries)} recipient(s) blocked."
-            final_task_status = "blocked"
-            final_execution_status = "blocked"
-        else:
-            outcome_status = "succeeded"
-            result_summary = f"Kernel event delivered to {len(deliveries)} recipient(s)."
-            final_task_status = "succeeded"
-            final_execution_status = "succeeded"
+            deliveries = [] if trace_only else _deliver_event_to_recipients(event, task)
+            failed_deliveries = [item for item in deliveries if str(item.get("status") or "") != "delivered"]
+            if trace_only:
+                outcome_status = "succeeded"
+                result_summary = "Kernel trace event recorded without recipient delivery."
+                final_task_status = "succeeded"
+                final_execution_status = "succeeded"
+            elif failed_deliveries:
+                outcome_status = "blocked"
+                result_summary = f"Kernel event delivered partially; {len(failed_deliveries)} recipient(s) blocked."
+                final_task_status = "blocked"
+                final_execution_status = "blocked"
+            else:
+                outcome_status = "succeeded"
+                result_summary = f"Kernel event delivered to {len(deliveries)} recipient(s)."
+                final_task_status = "succeeded"
+                final_execution_status = "succeeded"
 
-        _persist_execution_transition(
-            store,
-            index,
-            execution,
-            final_execution_status,
-            deliveries=deliveries,
-            persist_index=persist_each_transition,
-        )
-        outcome = _create_outcome(task, execution, event, status=outcome_status, result_summary=result_summary, deliveries=deliveries)
-        _persist_outcome(store, index, outcome, persist_index=persist_each_transition)
-        task["workRunId"] = execution["workRunId"]
-        task["outcomeId"] = outcome["outcomeId"]
-        _persist_task_transition(store, index, task, final_task_status, persist_index=persist_each_transition)
-        proposals = _create_proposal_stubs_from_outcome(
-            store,
-            index,
-            event,
-            outcome,
-            persist_index=persist_each_transition,
-        )
-        if trace_only:
+            _persist_execution_transition(
+                store,
+                index,
+                execution,
+                final_execution_status,
+                deliveries=deliveries,
+                persist_index=False,
+            )
+            outcome = _create_outcome(task, execution, event, status=outcome_status, result_summary=result_summary, deliveries=deliveries)
+            _persist_outcome(store, index, outcome, persist_index=False)
+            task["workRunId"] = execution["workRunId"]
+            task["outcomeId"] = outcome["outcomeId"]
+            _persist_task_transition(store, index, task, final_task_status, persist_index=False)
+            proposals = _create_proposal_stubs_from_outcome(
+                store,
+                index,
+                event,
+                outcome,
+                persist_index=False,
+            )
+        finally:
             store.save_index(index)
         _record_kernel_scene_event(
             "kernel.event.completed",
@@ -1202,17 +1212,66 @@ def _new_id(prefix: str) -> str:
     return f"{prefix}-{timestamp}-{digest}"
 
 
+# Content-addressed default idempotency key version.  Bumped (v1 ``kernel-``
+# -> v2 ``kernel-v2-``) when the key recipe changed from a dict-order
+# sensitive ``repr`` hash to canonical JSON, so persisted v1 index entries
+# can never be mistaken for v2 lookups.
+_IDEMPOTENCY_KEY_VERSION = "kernel-v2"
+
+# Transient envelope fields callers sometimes embed inside a semantic
+# payload.  They describe when/which delivery attempt it is, not what the
+# event says, so they are pruned before the content hash; retries of the
+# same semantic event keep the same key even when these markers differ.
+_TRANSIENT_PAYLOAD_KEYS = frozenset(
+    {
+        "createdAt",
+        "updatedAt",
+        "eventId",
+        "timestamp",
+        "requestedAt",
+        "sentAt",
+        "occurredAt",
+    }
+)
+
+
+def _prune_transient_payload_fields(value: Any) -> Any:
+    """Recursively drop transient envelope keys from the keying payload."""
+    if isinstance(value, dict):
+        return {
+            key: _prune_transient_payload_fields(item)
+            for key, item in value.items()
+            if str(key) not in _TRANSIENT_PAYLOAD_KEYS
+        }
+    if isinstance(value, list):
+        return [_prune_transient_payload_fields(item) for item in value]
+    return value
+
+
 def _default_idempotency_key(*, sender_agent_id: str, recipients: list[str], semantic_payload: dict[str, Any]) -> str:
-    digest = hashlib.sha256(
-        repr(
-            {
-                "senderAgentId": sender_agent_id,
-                "recipients": recipients,
-                "semanticPayload": semantic_payload,
-            }
-        ).encode("utf-8", errors="replace")
-    ).hexdigest()[:24]
-    return f"kernel-{digest}"
+    """Content-addressed default idempotency key (v2).
+
+    Canonical JSON (sorted object keys, no whitespace) replaces the old
+    dict-insertion-order sensitive ``repr`` hash: equal semantic content now
+    hashes equal no matter how the caller built its payload dict.  The
+    delivery target list is deduped and sorted — recipients are a set for
+    keying purposes — while lists inside the semantic payload keep their
+    order, because list position is content there.  Transient envelope
+    fields (createdAt/eventId-class markers callers may embed) are pruned
+    before hashing so a retry of the same semantic event does not miss.
+    The ``kernel-v2`` prefix keeps new keys from colliding with legacy
+    ``kernel-`` entries already persisted in the taskIdsByIdempotencyKey
+    index.
+    """
+    digest = sha256_hex(
+        {
+            "keyVersion": 2,
+            "senderAgentId": sender_agent_id,
+            "recipients": sorted({str(item) for item in recipients}),
+            "semanticPayload": _prune_transient_payload_fields(semantic_payload),
+        }
+    )
+    return f"{_IDEMPOTENCY_KEY_VERSION}-{digest[:24]}"
 
 
 def _required_id(value: Any, *, label: str) -> str:

@@ -30,7 +30,7 @@ const styles = {
   recordPanel:
     `grid min-h-0 min-w-0 max-w-full content-start gap-3 overflow-auto ${panelSurface} p-2 max-[980px]:overflow-y-visible max-[980px]:overflow-x-hidden`,
   panelHeader:
-    "flex min-w-0 max-w-full flex-wrap items-center justify-between gap-1.5 [&>div]:min-w-0 [&_h2]:m-0 [&_h2]:min-w-0 [&_h2]:overflow-hidden [&_h2]:text-ellipsis [&_h2]:whitespace-nowrap [&_h2]:text-[0.9rem] [&_h2]:leading-tight [&_h2]:text-vui-fg-primary",
+    "flex min-w-0 max-w-full flex-wrap items-center justify-between gap-1.5 [&>div]:min-w-0 [&_h2]:m-0 [&_h2]:min-w-0 [&_h2]:overflow-hidden [&_h2]:text-ellipsis [&_h2]:whitespace-nowrap [&_h2]:text-vui-xs [&_h2]:leading-tight [&_h2]:text-vui-fg-primary",
   panelEyebrow:
     "m-0 mb-0.5 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap [font-size:var(--vui-font-xs)] uppercase tracking-[0.06em] text-vui-fg-tertiary",
   countPill:
@@ -38,7 +38,7 @@ const styles = {
   sourceGrid:
     "grid min-w-0 max-w-full grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-2 max-[520px]:grid-cols-1",
   sourceTile:
-    `grid min-h-[50px] min-w-0 max-w-full gap-0.5 ${rowSurface} px-2 py-1.5 [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[0.9rem] [&_strong]:leading-tight [&_strong]:text-vui-fg-primary`,
+    `grid min-h-[50px] min-w-0 max-w-full gap-0.5 ${rowSurface} px-2 py-1.5 [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-vui-xs [&_strong]:leading-tight [&_strong]:text-vui-fg-primary`,
   sourceTileObserved:
     "border-[color-mix(in_srgb,var(--state-success)_30%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_8%,var(--vui-surface-row))]",
   sourceTileEstimated:

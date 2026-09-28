@@ -133,7 +133,7 @@ def test_publish_switches_only_after_complete_staging_release(monkeypatch: pytes
 
     assert result["rebuilt"] is True
     active = json.loads(frontend_build.active_release_path(tmp_path).read_text(encoding="utf-8"))
-    assert active["release"] == f"release-{result['buildKey']}"
+    assert active["release"] == f"release-{result['buildKey'][:16]}"
     active_dist = frontend_build.resolve_active_frontend_dist(tmp_path)
     assert (active_dist / "assets" / "app.js").read_text(encoding="utf-8") == "new"
     assert frontend_build.inspect_frontend_build(tmp_path)["current"] is True
@@ -170,7 +170,7 @@ def test_publish_retries_transient_directory_sharing_violation(monkeypatch: pyte
     release = frontend_build.frontend_releases_dir(tmp_path) / active["release"]
     assert attempts == 3
     assert (release / "assets" / "app.js").read_text(encoding="utf-8") == "new"
-    assert active["release"] == f"release-{result['buildKey']}"
+    assert active["release"] == f"release-{result['buildKey'][:16]}"
     assert sleep_delays == [0.05, 0.1]
     assert max(sleep_delays) <= 0.25
     assert replacement_calls[-1][1] == frontend_build.active_release_path(tmp_path)
@@ -199,11 +199,35 @@ def test_publish_permission_timeout_copies_verified_release_before_activating(mo
     active = json.loads(frontend_build.active_release_path(tmp_path).read_text(encoding="utf-8"))
     copied_release = frontend_build.frontend_releases_dir(tmp_path) / active["release"]
     assert active["release"] == copied_release.name
-    assert active["release"].startswith(f"release-{result['buildKey']}-")
+    assert active["release"].startswith(f"release-{result['buildKey'][:16]}-")
     assert (copied_release / "assets" / "app.js").read_text(encoding="utf-8") == "new"
     assert frontend_build._is_complete_release(copied_release, build_key=result["buildKey"])
     assert not any(path.name.startswith("stage-") for path in frontend_build.frontend_releases_dir(tmp_path).iterdir())
     assert sleep_delays == []
+
+
+def test_publish_release_names_fit_the_staging_path_budget(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    monkeypatch.setattr(frontend_build, "_run_checked", _successful_runner)
+    monkeypatch.setattr(frontend_build, "FRONTEND_PUBLISH_RETRY_TIMEOUT_SECONDS", 0.0)
+    original_replace = frontend_build.os.replace
+    original_copytree = frontend_build.shutil.copytree
+
+    def sharing_violation(source, destination):
+        if Path(source).name.startswith("stage-"):
+            raise PermissionError("sharing violation")
+        return original_replace(source, destination)
+
+    def bounded_copy(source, destination, *args, **kwargs):
+        # Assets that fit in staging must not exceed MAX_PATH during fallback.
+        assert len(Path(destination).name) <= len(Path(source).name)
+        return original_copytree(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(frontend_build.os, "replace", sharing_violation)
+    monkeypatch.setattr(frontend_build.shutil, "copytree", bounded_copy)
+    result = frontend_build.ensure_frontend_build(tmp_path)
+    assert frontend_build._is_complete_release(Path(result["dist"]), build_key=result["buildKey"])
 
 
 def test_publish_copy_failure_keeps_previous_active_release_and_cleans_partial_target(
@@ -409,7 +433,7 @@ def test_damaged_matching_release_is_not_reactivated(monkeypatch: pytest.MonkeyP
     _write_project(tmp_path)
     _stub_build_identity(monkeypatch)
     key = frontend_build.compute_build_key(frontend_build.build_inputs(tmp_path))
-    damaged = _release(tmp_path, f"release-{key}", key=key)
+    damaged = _release(tmp_path, f"release-{key[:16]}", key=key)
     (damaged / "assets" / "app.js").unlink()
     _activate(tmp_path, damaged.name, key=key)
     monkeypatch.setattr(frontend_build, "_run_checked", _successful_runner)
@@ -418,9 +442,25 @@ def test_damaged_matching_release_is_not_reactivated(monkeypatch: pytest.MonkeyP
 
     active = json.loads(frontend_build.active_release_path(tmp_path).read_text(encoding="utf-8"))
     assert active["release"] != damaged.name
-    assert active["release"].startswith(f"release-{key}-")
+    assert active["release"].startswith(f"release-{key[:16]}-")
     assert damaged.is_dir()
     assert (frontend_build.resolve_active_frontend_dist(tmp_path) / "assets" / "app.js").read_text(encoding="utf-8") == "new"
+
+
+def test_release_prefix_collision_preserves_existing_bytes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    key = frontend_build.compute_build_key(frontend_build.build_inputs(tmp_path))
+    other_key = key[:16] + ("0" if key[16] != "0" else "1") + key[17:]
+    existing = _release(tmp_path, f"release-{key[:16]}", key=other_key)
+    _activate(tmp_path, existing.name, key=other_key)
+    monkeypatch.setattr(frontend_build, "_run_checked", _successful_runner)
+
+    result = frontend_build.ensure_frontend_build(tmp_path)
+
+    assert Path(result["dist"]) != existing
+    assert (existing / "assets" / "app.js").read_text(encoding="utf-8") == "old"
+    assert frontend_build._is_complete_release(Path(result["dist"]), build_key=key)
 
 
 def test_source_change_during_build_does_not_publish_mixed_release(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

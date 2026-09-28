@@ -1,9 +1,25 @@
 import { describe, expect, it } from "vitest";
+import type { AgentPluginBinding } from "../../api/types";
+import { lifeOriginNeedsSetup } from "./AgentVirtualHumanPluginPanel";
 
 import panelSource from "./AgentVirtualHumanPluginPanel.tsx?raw";
 import detailSource from "../AgentSelectedDetailContentPanel.tsx?raw";
 
 describe("Agent virtual-human plugin settings", () => {
+  it("allows legacy enabled Companions to choose a missing origin without disabling", () => {
+    expect(lifeOriginNeedsSetup({ enabled: true, homeLocation: null, lifeWorld: { setupState: "missing" } } as AgentPluginBinding)).toBe(true);
+    expect(lifeOriginNeedsSetup(null)).toBe(true);
+    expect(panelSource).not.toContain('homeLocationId: "CN-SHANGHAI"');
+    expect(panelSource).toContain("pending || originLocked || locationsQuery.isPending");
+    expect(panelSource).toContain("isDisabled={originNeedsSetup && enableBlocked}");
+    expect(panelSource).toContain("isDisabled={!enabled && enableBlocked}");
+  });
+
+  it("preserves selected draft anchors and confirmed life facts", () => {
+    expect(lifeOriginNeedsSetup({ enabled: true, homeLocation: { locationId: "CN-HANGZHOU" }, lifeWorld: { setupState: "draft" } } as AgentPluginBinding)).toBe(false);
+    expect(lifeOriginNeedsSetup({ enabled: false, lifeWorld: { setupState: "ready" } } as AgentPluginBinding)).toBe(false);
+  });
+
   it("keeps the binding Agent-scoped and revision-bound", () => {
     expect(panelSource).toContain("listAgentPlugins(agentId)");
     expect(panelSource).toContain("listVirtualHumanLocations");

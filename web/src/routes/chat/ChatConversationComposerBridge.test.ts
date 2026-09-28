@@ -68,7 +68,7 @@ describe("ChatConversationComposerBridge", () => {
 
     expect(state.actionMode).toBe("stop");
     expect(state.pending).toBe(true);
-    expect(state.actionDisabled).toBe(false);
+    expect(state.actionDisabled).toBe(true);
     expect(state.placeholder).toBe("");
   });
 
@@ -135,7 +135,7 @@ describe("ChatConversationComposerBridge", () => {
     expect(state.placeholder).toBe("message");
   });
 
-  it("returns to send as soon as a stop is requested so the next message can be queued", () => {
+  it("keeps the stop affordance visible while the server confirms the stop", () => {
     const pendingState = buildConversationComposerBridgeState({
       ...emptyStateInput(),
       sessionBusy: true,
@@ -145,7 +145,7 @@ describe("ChatConversationComposerBridge", () => {
     });
     expect(pendingState.actionMode).toBe("stop");
     expect(pendingState.pending).toBe(true);
-    expect(pendingState.actionDisabled).toBe(false);
+    expect(pendingState.actionDisabled).toBe(true);
 
     const stoppingState = buildConversationComposerBridgeState({
       ...emptyStateInput(),
@@ -154,9 +154,9 @@ describe("ChatConversationComposerBridge", () => {
       sessionStopping: true,
       value: "hello",
     });
-    expect(stoppingState.actionMode).toBe("send");
-    expect(stoppingState.pending).toBe(false);
-    expect(stoppingState.actionDisabled).toBe(false);
+    expect(stoppingState.actionMode).toBe("stop");
+    expect(stoppingState.pending).toBe(true);
+    expect(stoppingState.actionDisabled).toBe(true);
     expect(stoppingState.placeholder).toBe("message");
 
     const stoppingEmptyState = buildConversationComposerBridgeState({
@@ -165,8 +165,20 @@ describe("ChatConversationComposerBridge", () => {
       sessionStopping: true,
       value: "",
     });
-    expect(stoppingEmptyState.actionMode).toBe("send");
+    expect(stoppingEmptyState.actionMode).toBe("stop");
+    expect(stoppingEmptyState.pending).toBe(true);
     expect(stoppingEmptyState.actionDisabled).toBe(true);
+
+    const recoveredState = buildConversationComposerBridgeState({
+      ...emptyStateInput(),
+      sessionBusy: false,
+      sessionStopping: false,
+      stopPending: false,
+      value: "retry after stop failure",
+    });
+    expect(recoveredState.actionMode).toBe("send");
+    expect(recoveredState.pending).toBe(false);
+    expect(recoveredState.actionDisabled).toBe(false);
   });
 
   it("disables the composer while submit is pending during a busy session", () => {

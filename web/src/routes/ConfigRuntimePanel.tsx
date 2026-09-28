@@ -1,7 +1,7 @@
 import { SlidersHorizontal } from "lucide-react";
 
 import { VSection, VTabs } from "../components/vui";
-import type { ConfigCopy } from "./ConfigRoute";
+import type { ConfigCopy } from "./config/configCopy";
 import styles from "./ConfigRuntimePanel.styles";
 
 type ConfigRuntimePanelProps = {

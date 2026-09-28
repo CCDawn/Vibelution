@@ -378,6 +378,14 @@ export class ElectronWindowProvider {
     instanceId: string;
     url: string;
     title?: string;
+    /**
+     * Hidden presentation (e2e lanes): load the workbench URL but skip
+     * restore/show/focus so tests never steal the user's desktop focus. The
+     * window still exists with a live renderer, so CDP can attach and the
+     * instance registry still observes an open window. Default (undefined or
+     * true) keeps the historical always-present behavior.
+     */
+    present?: boolean;
   }): Promise<ManagedWindowState> {
     const instanceId = String(input.instanceId || "").trim();
     const title = String(input.title || "").trim();
@@ -421,7 +429,9 @@ export class ElectronWindowProvider {
       }
     }
 
-    presentElectronWindow(window);
+    if (input.present !== false) {
+      presentElectronWindow(window);
+    }
     if (typeof window.setTitle === "function" && title) {
       window.setTitle(title);
     }
@@ -565,8 +575,8 @@ export class ElectronWindowProvider {
     return this.workbenchCloseInFlight;
   }
 
-  instanceWindowStates(): Array<{ instanceId: string; open: boolean; rendererProcessId: number }> {
-    const states: Array<{ instanceId: string; open: boolean; rendererProcessId: number }> = [];
+  instanceWindowStates(): Array<{ instanceId: string; open: boolean; rendererProcessId: number; url: string }> {
+    const states: Array<{ instanceId: string; open: boolean; rendererProcessId: number; url: string }> = [];
     for (const [instanceId, entry] of this.instanceWindows) {
       const window = entry.window;
       if (!window || window.isDestroyed() || !entry.readyUrl) {
@@ -575,6 +585,7 @@ export class ElectronWindowProvider {
       states.push({
         instanceId,
         open: true,
+        url: entry.readyUrl,
         rendererProcessId: window.webContents.getOSProcessId()
       });
     }

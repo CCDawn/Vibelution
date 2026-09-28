@@ -41,7 +41,7 @@ const BAR_BASE =
   "border-[color:var(--source-step-border,var(--border-soft))] bg-[color:var(--source-workbench-panel)] shadow-[var(--vui-elevation-1)]";
 
 const TITLE_STRONG =
-  "text-[0.82rem] text-[var(--fg-primary)] min-w-0 overflow-hidden text-ellipsis whitespace-nowrap";
+  "text-vui-micro-13 text-[var(--fg-primary)] min-w-0 overflow-hidden text-ellipsis whitespace-nowrap";
 
 const RIGHT_CLUSTER =
   "flex min-w-0 flex-1 flex-wrap items-center gap-2";
@@ -51,7 +51,7 @@ const STEPS_ROW =
   "border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-0.5 [scrollbar-width:thin]";
 
 const STEP_CHIP =
-  "inline-flex shrink-0 items-center gap-1 rounded-[6px] border border-transparent px-1.5 py-1 text-[0.62rem] font-[720] " +
+  "inline-flex shrink-0 items-center gap-1 rounded-[var(--radius-control)] border border-transparent px-1.5 py-1 text-vui-micro-10 font-[720] " +
   "bg-transparent text-[var(--fg-tertiary)] transition-[background-color,color,box-shadow] duration-150";
 
 const STEP_CHIP_SELECTED =
@@ -65,14 +65,14 @@ const STEP_TITLE = "whitespace-nowrap font-[760]";
 
 const STATS_GRID = "flex min-w-0 flex-wrap items-center gap-2";
 const STAT_PILL =
-  "inline-flex min-h-[24px] items-center gap-1 whitespace-nowrap text-[0.64rem] font-[680] text-[var(--fg-tertiary)]";
+  "inline-flex min-h-[24px] items-center gap-1 whitespace-nowrap text-vui-micro-10 font-[680] text-[var(--fg-tertiary)]";
 const STAT_PILL_ACCENT =
   "text-[var(--fg-secondary)]";
 const STAT_PILL_DANGER =
   "text-[var(--state-danger)]";
 const STAT_PILL_BUTTON =
-  "cursor-pointer rounded-[6px] px-1.5 hover:bg-[var(--vui-control-muted-hover)] focus-visible:outline-none focus-visible:shadow-[var(--vui-shadow-focus)]";
-const STAT_VALUE = "flex-none text-[0.78rem] font-[820] text-[var(--fg-primary)]";
+  "cursor-pointer rounded-[var(--radius-control)] px-1.5 hover:bg-[var(--vui-control-muted-hover)] focus-visible:outline-none focus-visible:shadow-[var(--vui-shadow-focus)]";
+const STAT_VALUE = "flex-none text-vui-2xs font-[820] text-[var(--fg-primary)]";
 
 function statusTooltip(status: ReactNode): string | undefined {
   if (typeof status === "string" || typeof status === "number") {

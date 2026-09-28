@@ -43,7 +43,7 @@ export function WorkflowHumanGateNode(props: NodeProps) {
       })}
       badge={
         <>
-          <span className="inline-flex items-center gap-0.5 rounded-full border border-[color-mix(in_srgb,var(--state-warning)_35%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_8%,transparent)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--state-warning)]">
+          <span className="inline-flex items-center gap-0.5 rounded-full border border-[color-mix(in_srgb,var(--state-warning)_35%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_8%,transparent)] px-1.5 py-0.5 [font-size:var(--vui-font-canvas-xs)] font-semibold text-[var(--state-warning)]">
             <UserCheck className="h-3 w-3" aria-hidden />
             人工
           </span>

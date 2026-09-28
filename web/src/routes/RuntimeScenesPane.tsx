@@ -34,6 +34,7 @@ import {
   migrateLegacyNumericPane,
   type PaneSpec,
 } from "../components/layout/paneLayoutPersistence";
+import { paneWidthCssVar } from "../components/layout/paneCssVariables";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { VButton, VIconButton, VNativeInput, VTabs } from "../components/vui";
@@ -891,6 +892,8 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
   }, []);
   const {
     layoutRef,
+    registerSplitContainer: registerRuntimeScenesContainer,
+    paneVariablesStyle: runtimeScenesPaneVariablesStyle,
     widths: runtimeScenesPaneWidths,
     draggingPaneId,
     startResize,
@@ -1187,9 +1190,10 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
   const layoutStyle = useMemo(
     () =>
       ({
-        "--logs-sidebar-width": sidebarCollapsed ? "0px" : `${sidebarWidth}px`,
+        ...runtimeScenesPaneVariablesStyle,
+        ...(sidebarCollapsed ? { [paneWidthCssVar("sidebar")]: "0px" } : null),
       }) as CSSProperties,
-    [sidebarCollapsed, sidebarWidth],
+    [runtimeScenesPaneVariablesStyle, sidebarCollapsed],
   );
 
   function handleResizeStart(event: PointerEvent<any>) {
@@ -1430,7 +1434,10 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
 
   return (
     <div
-      ref={layoutRef}
+      ref={(element) => {
+        layoutRef.current = element;
+        registerRuntimeScenesContainer(element);
+      }}
       className={styles.resizableLayout}
       style={layoutStyle}
       data-vui-layout-id={RUNTIME_SCENES_LAYOUT_ID}

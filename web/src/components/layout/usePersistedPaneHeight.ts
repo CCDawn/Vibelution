@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
@@ -18,6 +19,7 @@ import {
   type PaneHeightMap,
   type PaneHeightSpec,
 } from "./paneHeightPersistence";
+import { paneHeightCssVar, paneHeightVariablesStyle } from "./paneCssVariables";
 import { attachAxisResizeSession } from "./attachAxisResizeSession";
 import {
   resolvePaneHeightFromKeyboardKey,
@@ -38,6 +40,14 @@ export type UsePersistedPaneHeightOptions = {
 
 export type UsePersistedPaneHeightResult = {
   layoutRef: RefObject<HTMLDivElement | null>;
+  /**
+   * Ref callback registering the container that hosts `--pane-h-*` drag
+   * variables. Spread `paneVariablesStyle` on the same element so render-time
+   * values and drag-time direct writes stay in sync.
+   */
+  registerSplitContainer: (element: HTMLDivElement | null) => void;
+  /** Render-time `--pane-h-<paneId>` variables; spread on the registered container. */
+  paneVariablesStyle: CSSProperties;
   heights: PaneHeightMap;
   draggingPaneId: string | null;
   setPaneHeight: (paneId: string, height: number) => void;
@@ -83,9 +93,17 @@ export function usePersistedPaneHeight({
   panes,
 }: UsePersistedPaneHeightOptions): UsePersistedPaneHeightResult {
   const layoutRef = useRef<HTMLDivElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const specs = useMemo(() => paneSpecMap(panes), [panes]);
   const [heights, setHeights] = useState<PaneHeightMap>(() => resolveInitialHeights(layoutId, panes));
   const [drag, setDrag] = useState<DragState | null>(null);
+  const registerSplitContainer = useCallback((element: HTMLDivElement | null) => {
+    containerRef.current = element;
+  }, []);
+  const paneVariablesStyle = useMemo(
+    () => paneHeightVariablesStyle(panes, heights),
+    [panes, heights],
+  );
 
   useEffect(() => {
     setHeights(resolveInitialHeights(layoutId, panes));
@@ -120,6 +138,12 @@ export function usePersistedPaneHeight({
       const direction = options?.direction ?? 1;
       const startY = event.clientY;
       const startHeight = heights[paneId] ?? spec.defaultHeight;
+      const container = containerRef.current;
+      const cssVar = paneHeightCssVar(paneId);
+      // Same Wave 5B drag discipline as the width hook: moves stay out of
+      // React state (rAF-coalesced, direct CSS variable writes on the
+      // registered container); pointerup commits state once.
+      let latestHeight = startHeight;
       setDrag({
         paneId,
         direction,
@@ -128,20 +152,18 @@ export function usePersistedPaneHeight({
       });
       attachAxisResizeSession({
         cursor: "row-resize",
+        rafThrottle: true,
         onMove: (moveEvent) => {
           const delta = (moveEvent.clientY - startY) * direction;
-          const nextHeight = clampPaneHeight(startHeight + delta, spec.minHeight, spec.maxHeight);
-          setHeights((current) => (
-            current[paneId] === nextHeight
-              ? current
-              : { ...current, [paneId]: nextHeight }
-          ));
+          latestHeight = clampPaneHeight(startHeight + delta, spec.minHeight, spec.maxHeight);
+          container?.style.setProperty(cssVar, `${latestHeight}px`);
         },
         onEnd: () => {
           setDrag(null);
           setHeights((current) => {
-            writePaneHeights(layoutId, current);
-            return current;
+            const next = { ...current, [paneId]: latestHeight };
+            writePaneHeights(layoutId, next);
+            return next;
           });
         },
       });
@@ -173,6 +195,8 @@ export function usePersistedPaneHeight({
 
   return {
     layoutRef,
+    registerSplitContainer,
+    paneVariablesStyle,
     heights,
     draggingPaneId: drag?.paneId ?? null,
     setPaneHeight,

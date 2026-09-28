@@ -4,6 +4,8 @@ import React, {
   type CSSProperties,
   type ReactNode,
   useId,
+  useEffect,
+  useRef,
 } from "react";
 
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
@@ -223,6 +225,13 @@ export function ConversationProcessDisclosure({
     mounted,
   } = useConversationProcessDisclosureMotion(running, onUserToggle);
   const contentId = useId();
+  const contentRef = useRef<HTMLDivElement>(null);
+  const summaryRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!expanded && contentRef.current?.contains(document.activeElement)) {
+      summaryRef.current?.focus({ preventScroll: true });
+    }
+  }, [expanded]);
   const label = processLabel(cells, language, messageOrder, turnStreaming);
   const toggleLabel = language === "zh"
     ? "展开或收起处理记录"
@@ -243,6 +252,7 @@ export function ConversationProcessDisclosure({
       open={mounted || turnStreaming}
     >
       <summary
+        ref={summaryRef}
         className={styles.summary}
         aria-controls={contentId}
         aria-expanded={expanded}
@@ -258,12 +268,14 @@ export function ConversationProcessDisclosure({
       </summary>
       {shouldRenderContent ? (
         <div
+          ref={contentRef}
           id={contentId}
           className={[
             styles.contentMotion,
             expanded ? styles.contentMotionExpanded : styles.contentMotionCollapsed,
           ].join(" ")}
           aria-hidden={!expanded}
+          inert={!expanded}
           onTransitionEnd={handleContentTransitionEnd}
         >
           <div className={styles.contentClip}>

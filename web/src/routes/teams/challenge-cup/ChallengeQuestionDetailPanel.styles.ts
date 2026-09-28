@@ -97,7 +97,7 @@ const styles: Record<string, string> = {
   registerDialog: "grid gap-3 text-[var(--fg-primary)]",
   registerFields: "grid grid-cols-1 gap-2 sm:grid-cols-2",
   registerPreview:
-    "break-all rounded bg-[var(--vui-surface-inset)] px-2 py-1.5 font-mono text-[10px] text-[var(--fg-secondary)]",
+    "break-all rounded bg-[var(--vui-surface-inset)] px-2 py-1.5 font-mono text-vui-micro-10 text-[var(--fg-secondary)]",
   registerHint: "m-0 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]",
   registerResult:
     "grid gap-2 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-inset)] p-3",
@@ -111,7 +111,7 @@ const styles: Record<string, string> = {
   state:
     "grid min-h-60 content-center justify-items-start gap-2.5 [&_span]:text-[var(--fg-secondary)] [&_code]:wrap-anywhere [&_code]:[font-size:var(--vui-font-2xs)] [&_code]:text-[var(--fg-secondary)]",
   techDetails:
-    "grid max-w-full gap-1 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)] [&>summary]:w-fit [&>summary]:cursor-pointer [&_code]:wrap-anywhere [&_code]:text-[10px] [&_code]:text-[var(--fg-secondary)]",
+    "grid max-w-full gap-1 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)] [&>summary]:w-fit [&>summary]:cursor-pointer [&_code]:wrap-anywhere [&_code]:text-vui-micro-10 [&_code]:text-[var(--fg-secondary)]",
 };
 
 export default styles;

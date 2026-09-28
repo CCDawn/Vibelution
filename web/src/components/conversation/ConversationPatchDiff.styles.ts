@@ -5,7 +5,7 @@ const styles = {
     `${scope} root grid min-w-0 max-w-full overflow-hidden rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)]`,
   file: `${scope} file min-w-0 max-w-full [&:not(:first-child)]:border-t [&:not(:first-child)]:border-[var(--vui-border-subtle)]`,
   fileHeader:
-    `${scope} fileHeader flex min-w-0 max-w-full items-baseline gap-x-2 bg-[var(--vui-surface-raised)] px-3 py-1.5 [font-size:var(--vui-font-xs)]`,
+    `${scope} fileHeader flex min-w-0 max-w-full items-baseline gap-x-2 bg-[var(--vui-surface-raised)] px-3 py-1.5 text-vui-xs`,
   filePath:
     `${scope} filePath min-w-0 max-w-full truncate font-[var(--font-mono)] text-[var(--fg-secondary)]`,
   fileOp:
@@ -16,7 +16,7 @@ const styles = {
     `${scope} diffStat ml-auto shrink-0 tabular-nums text-[var(--fg-tertiary)]`,
   diffStatAdd: `${scope} diffStatAdd text-[var(--state-success)]`,
   diffStatDel: `${scope} diffStatDel text-[var(--state-error)]`,
-  lines: `${scope} lines m-0 min-w-0 max-w-full py-1 font-[var(--font-mono)] [font-size:var(--vui-font-xs)] leading-[1.55]`,
+  lines: `${scope} lines m-0 min-w-0 max-w-full py-1 font-[var(--font-mono)] text-vui-xs leading-[1.55]`,
   line: `${scope} line grid min-w-0 max-w-full grid-cols-[auto_auto_minmax(0,1fr)] gap-x-2 px-3 [overflow-wrap:anywhere]`,
   lineNumber:
     `${scope} lineNumber shrink-0 select-none text-right tabular-nums text-[color-mix(in_srgb,var(--fg-tertiary)_62%,transparent)]`,
@@ -33,7 +33,7 @@ const styles = {
   line_del_sign: `${scope} lineSignDel text-[var(--state-error)]`,
   overflow: `${scope} overflow border-t border-[var(--vui-border-subtle)]`,
   overflowSummary:
-    `${scope} overflowSummary flex w-full list-none cursor-pointer items-center gap-x-1.5 px-3 py-1.5 text-left [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)] [&::-webkit-details-marker]:hidden [&::marker]:hidden [&::marker]:content-none hover:text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]`,
+    `${scope} overflowSummary flex w-full list-none cursor-pointer items-center gap-x-1.5 px-3 py-1.5 text-left text-vui-xs text-[var(--fg-tertiary)] [&::-webkit-details-marker]:hidden [&::marker]:hidden [&::marker]:content-none hover:text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]`,
   truncated:
     `${scope} truncated border-t border-[var(--vui-border-subtle)] px-3 py-1.5 text-[var(--fg-tertiary)]`,
 } as const;

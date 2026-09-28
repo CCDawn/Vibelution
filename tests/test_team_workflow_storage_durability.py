@@ -153,3 +153,408 @@ def test_evidence_trail_cache_serves_repeated_reads_and_invalidates(tmp_path: Pa
     # Store changed -> recompute.
     chain.candidate_evidence_trail("t", "SCI-001")
     assert list_calls["count"] == 2
+
+
+# ---------------------------------------------------------------------------
+# true-append primitives: parity, torn-line tolerance, compaction races
+# ---------------------------------------------------------------------------
+
+
+def test_append_record_output_is_byte_identical_to_whole_file_append(tmp_path: Path) -> None:
+    """The locked true append must produce exactly the old algorithm's bytes."""
+    from core.web.services.team_workflow.storage_durability import append_record
+
+    records = [
+        {"b": 1, "a": "plain"},
+        {"unicode": "会议纪要·候选假说", "n": 2},
+        {"nested": {"z": [1, 2, {"k": "v"}], "y": None}},
+        {},
+    ]
+    new_store = tmp_path / "new.jsonl"
+    old_store = tmp_path / "old.jsonl"
+    for record in records:
+        append_record(new_store, record)
+        # The previous whole-file algorithm, verbatim.
+        import json as _json
+        import os as _os
+        import tempfile as _tempfile
+
+        line = _json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+        existing = old_store.read_text(encoding="utf-8") if old_store.exists() else ""
+        fd, name = _tempfile.mkstemp(prefix=".old.", suffix=".tmp", dir=tmp_path)
+        with _os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(existing)
+            handle.write(line)
+        _os.replace(name, old_store)
+    assert new_store.read_bytes() == old_store.read_bytes()
+
+
+def test_append_record_scales_with_line_not_file(tmp_path: Path) -> None:
+    """Appending to a multi-megabyte store must not rewrite the file.
+
+    The whole-file append rewrote the store per record; the true append
+    must complete 2000 appends against a 5 MB store in a bounded time that
+    a rewrite-per-append could not meet (5 MB x 2000 rewrites >> budget).
+    """
+    from core.web.services.team_workflow.storage_durability import append_record
+
+    store = tmp_path / "big.jsonl"
+    filler = {"pad": "x" * 512}
+    for _ in range(10_000):  # ~5 MB
+        append_record(store, filler)
+    size_before = store.stat().st_size
+    assert size_before > 4_000_000
+
+    import time as _time
+
+    started = _time.monotonic()
+    for index in range(2_000):
+        append_record(store, {"i": index})
+    elapsed = _time.monotonic() - started
+    # 2000 O(line) appends with fsync land well under 30s; 2000 whole-file
+    # rewrites of a 5 MB store would need minutes of pure IO.
+    assert elapsed < 30.0
+    assert store.stat().st_size > size_before
+    records = read_jsonl_tolerant(store)
+    assert len(records) == 12_000
+
+
+def test_torn_trailing_line_survives_appends_and_quarantine(tmp_path: Path) -> None:
+    """A crash-torn last line quarantines on read; later appends stay healthy."""
+    from core.web.services.team_workflow.storage_durability import append_record
+
+    store = tmp_path / "torn.jsonl"
+    append_record(store, {"ok": 1})
+    with open(store, "a", encoding="utf-8") as handle:
+        handle.write('{"torn": "trunc')  # no newline, invalid JSON tail
+
+    records = read_jsonl_tolerant(store)
+    assert records == [{"ok": 1}]
+    append_record(store, {"ok": 2})
+    records = read_jsonl_tolerant(store)
+    assert records == [{"ok": 1}, {"ok": 2}]
+
+
+def test_transform_records_does_not_lose_racing_append(tmp_path: Path) -> None:
+    """Compaction via transform_records cannot drop a concurrent append."""
+    from core.web.services.team_workflow.storage_durability import (
+        append_record,
+        transform_records,
+    )
+
+    store = tmp_path / "race.jsonl"
+    for index in range(50):
+        append_record(store, {"i": index})
+    worker = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            _WORKER_SCRIPT.format(
+                root=str(Path(__file__).resolve().parents[1]),
+                store=str(store),
+                count=20,
+                worker=99,
+            ),
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    # Dedupe-compaction in a tight loop while the racer appends.  Each
+    # transform locks read+rewrite, so a racer record either landed before
+    # a read (kept by the identity transform) or appends after a rewrite
+    # (kept on disk).  Losing rows is structurally impossible.
+    import time as _time
+
+    deadline = _time.monotonic() + 5.0
+    while worker.poll() is None and _time.monotonic() < deadline:
+        transform_records(store, lambda rows: rows)
+        _time.sleep(0.01)
+    _, stderr = worker.communicate(timeout=60)
+    assert worker.returncode == 0, stderr.decode("utf-8", "replace")
+
+    records = read_jsonl_tolerant(store)
+    racer_indexes = sorted(
+        r["index"] for r in records if r.get("worker") == 99
+    )
+    assert racer_indexes == list(range(20))
+
+
+# ---------------------------------------------------------------------------
+# stat-validated read cache
+# ---------------------------------------------------------------------------
+
+
+def test_read_jsonl_cached_serves_hits_and_invalidates_on_write(tmp_path: Path) -> None:
+    from core.web.services.team_workflow import storage_durability as sd
+
+    store = tmp_path / "cache.jsonl"
+    sd.append_record(store, {"i": 1})
+
+    parses = []
+    real_tolerant = sd.read_jsonl_tolerant
+
+    def counting_tolerant(path):
+        parses.append(path)
+        return real_tolerant(path)
+
+    monkey_patched = counting_tolerant
+    original = sd.read_jsonl_tolerant
+    sd.read_jsonl_tolerant = monkey_patched
+    try:
+        assert sd.read_jsonl_cached(store) == [{"i": 1}]
+        assert sd.read_jsonl_cached(store) == [{"i": 1}]
+        assert sd.read_jsonl_cached(store) == [{"i": 1}]
+        assert len(parses) == 1, "repeat reads must be served from the cache"
+        sd.append_record(store, {"i": 2})
+        assert sd.read_jsonl_cached(store) == [{"i": 1}, {"i": 2}]
+        assert len(parses) == 2, "a write must invalidate eagerly"
+    finally:
+        sd.read_jsonl_tolerant = original
+
+
+def test_read_jsonl_cached_invalidates_on_foreign_process_append(tmp_path: Path) -> None:
+    """An append from another process invalidates via the stat check."""
+    from core.web.services.team_workflow import storage_durability as sd
+
+    store = tmp_path / "foreign.jsonl"
+    sd.append_record(store, {"i": 1})
+    assert sd.read_jsonl_cached(store) == [{"i": 1}]
+
+    worker = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            _WORKER_SCRIPT.format(
+                root=str(Path(__file__).resolve().parents[1]),
+                store=str(store),
+                count=5,
+                worker=7,
+            ),
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    _, stderr = worker.communicate(timeout=60)
+    assert worker.returncode == 0, stderr.decode("utf-8", "replace")
+
+    records = sd.read_jsonl_cached(store)
+    assert len(records) == 6
+    assert sum(1 for r in records if r.get("worker") == 7) == 5
+
+
+def test_read_jsonl_cached_quarantine_rewrite_stays_consistent(tmp_path: Path) -> None:
+    """A torn line quarantines through the cache without stale hits."""
+    from core.web.services.team_workflow import storage_durability as sd
+
+    store = tmp_path / "tq.jsonl"
+    sd.append_record(store, {"ok": 1})
+    assert sd.read_jsonl_cached(store) == [{"ok": 1}]
+    with open(store, "a", encoding="utf-8") as handle:
+        handle.write('{"torn":')
+    assert sd.read_jsonl_cached(store) == [{"ok": 1}]
+    sd.append_record(store, {"ok": 2})
+    assert sd.read_jsonl_cached(store) == [{"ok": 1}, {"ok": 2}]
+
+
+# ---------------------------------------------------------------------------
+# crash injection matrix: fsync / replace / truncation / raise failures
+#
+# Each row injects one real crash mode into one write primitive and asserts
+# the same invariants: the failure surfaces as an exception (never a silent
+# success), whatever bytes the crash left behind are either whole lines or
+# quarantined torn lines on the next tolerant read, previously-acked records
+# survive, no .tmp residue leaks, and the inter-process lock is never wedged.
+# ---------------------------------------------------------------------------
+
+
+class _FailAfter:
+    """Callable replacing a real os/json function; raises from call N on."""
+
+    def __init__(self, real, error: Exception, *, fail_from: int = 1):
+        self._real = real
+        self._error = error
+        self._fail_from = fail_from
+        self.calls = 0
+
+    def __call__(self, *args, **kwargs):
+        self.calls += 1
+        if self.calls >= self._fail_from:
+            raise self._error
+        return self._real(*args, **kwargs)
+
+
+def _assert_whole_lines(records: list[dict]) -> None:
+    """A crashed store must still parse: the tolerant reader returned dicts."""
+    assert all(isinstance(record, dict) for record in records)
+
+
+def test_crash_matrix_fsync_failure_mid_append(tmp_path: Path, monkeypatch) -> None:
+    """os.fsync raising in append_record surfaces the error; the in-flight
+    line may or may not be visible (durability was never acknowledged) but
+    previously-acked lines survive and the store keeps working."""
+    import os as os_module
+
+    from core.web.services.team_workflow import storage_durability as sd
+
+    store = tmp_path / "fsync-append.jsonl"
+    append_jsonl_locked(store, {"i": 1})
+    injected = _FailAfter(os_module.fsync, OSError("device power lost (injected)"))
+    monkeypatch.setattr(sd.os, "fsync", injected)
+
+    import pytest
+
+    with pytest.raises(OSError, match="injected"):
+        append_jsonl_locked(store, {"i": 2})
+    assert injected.calls == 1
+    monkeypatch.undo()
+
+    records = read_jsonl_tolerant(store)
+    _assert_whole_lines(records)
+    assert records[0] == {"i": 1}
+    assert len(records) in (1, 2)
+    append_jsonl_locked(store, {"recovered": True})
+    assert read_jsonl_tolerant(store)[-1] == {"recovered": True}
+
+
+def test_crash_matrix_fsync_failure_mid_rewrite(tmp_path: Path, monkeypatch) -> None:
+    """os.fsync raising inside rewrite_records leaves the store untouched."""
+    import os as os_module
+
+    from core.web.services.team_workflow import storage_durability as sd
+
+    store = tmp_path / "fsync-rewrite.jsonl"
+    append_jsonl_locked(store, {"i": 1})
+    append_jsonl_locked(store, {"i": 2})
+    monkeypatch.setattr(
+        sd.os, "fsync", _FailAfter(os_module.fsync, OSError("device power lost (injected)"))
+    )
+
+    import pytest
+
+    with pytest.raises(OSError, match="injected"):
+        sd.rewrite_records(store, [{"i": 1}, {"i": 2}, {"i": 3}])
+    monkeypatch.undo()
+
+    records = read_jsonl_tolerant(store)
+    assert [r.get("i") for r in records] == [1, 2]
+    assert not list(tmp_path.glob(".*.tmp")), "failed rewrite must not leak temp files"
+
+
+def test_crash_matrix_replace_failure_mid_rewrite(tmp_path: Path, monkeypatch) -> None:
+    """os.replace raising leaves the previous store content authoritative."""
+    import os as os_module
+
+    from core.web.services.team_workflow import storage_durability as sd
+
+    store = tmp_path / "replace.jsonl"
+    append_jsonl_locked(store, {"i": 1})
+    real_replace = os_module.replace
+
+    def failing_replace(src, dst):
+        if str(dst) == str(store):
+            raise OSError("replace interrupted (injected)")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(sd.os, "replace", failing_replace)
+
+    import pytest
+
+    with pytest.raises(OSError, match="injected"):
+        sd.rewrite_records(store, [{"i": 9}])
+    monkeypatch.undo()
+
+    records = read_jsonl_tolerant(store)
+    assert [r.get("i") for r in records] == [1]
+    assert not list(tmp_path.glob(".*.tmp"))
+
+
+def test_crash_matrix_truncated_write_handle_mid_append(tmp_path: Path, monkeypatch) -> None:
+    """A handle dying mid-line (crash between write and fsync) leaves one
+    torn line; the next read quarantines it and later appends stay healthy."""
+    import builtins
+
+    from core.web.services.team_workflow import storage_durability as sd
+
+    store = tmp_path / "truncated.jsonl"
+    append_jsonl_locked(store, {"i": 1})
+    real_open = builtins.open
+
+    def truncating_open(*args, **kwargs):
+        handle = real_open(*args, **kwargs)
+        mode = kwargs.get("mode") or (args[1] if len(args) > 1 else "")
+        if mode == "a":
+            real_write = handle.write
+
+            def truncated_write(data):
+                real_write(data[: len(data) // 3])
+                raise ValueError("handle died mid-line (injected)")
+
+            handle.write = truncated_write  # type: ignore[method-assign]
+        return handle
+
+    monkeypatch.setattr(sd, "open", truncating_open, raising=False)
+
+    import pytest
+
+    with pytest.raises(ValueError, match="injected"):
+        append_jsonl_locked(store, {"i": 2})
+    monkeypatch.undo()
+
+    # Torn in-flight line quarantines; the acked record survives; appends work.
+    records = read_jsonl_tolerant(store)
+    assert records == [{"i": 1}]
+    append_jsonl_locked(store, {"i": 3})
+    assert read_jsonl_tolerant(store) == [{"i": 1}, {"i": 3}]
+
+
+def test_crash_matrix_raise_between_lines_mid_rewrite(tmp_path: Path, monkeypatch) -> None:
+    """A raise between record writes leaves the store byte-identical."""
+    import json as json_module
+
+    from core.web.services.team_workflow import storage_durability as sd
+
+    store = tmp_path / "between.jsonl"
+    append_jsonl_locked(store, {"i": 1})
+    append_jsonl_locked(store, {"i": 2})
+    real_dump = json_module.dumps
+    injected = _FailAfter(real_dump, RuntimeError("writer killed between lines (injected)"), fail_from=2)
+    monkeypatch.setattr(sd.json, "dumps", injected)
+
+    import pytest
+
+    with pytest.raises(RuntimeError, match="injected"):
+        sd.rewrite_records(store, [{"i": 1}, {"i": 2}, {"i": 3}])
+    assert injected.calls == 2
+    monkeypatch.undo()
+
+    records = read_jsonl_tolerant(store)
+    assert [r.get("i") for r in records] == [1, 2]
+    assert not list(tmp_path.glob(".*.tmp"))
+
+
+def test_crash_matrix_crash_under_lock_releases_the_lock(tmp_path: Path, monkeypatch) -> None:
+    """A crash inside the locked section never wedges the lock file: the OS
+    releases it when the crashed writer's handle closes, so the next writer
+    acquires it cleanly."""
+    import os as os_module
+
+    from core.web.services.team_workflow import storage_durability as sd
+
+    store = tmp_path / "lock.jsonl"
+    append_jsonl_locked(store, {"i": 1})
+    monkeypatch.setattr(
+        sd.os, "fsync", _FailAfter(os_module.fsync, OSError("crash under lock (injected)"))
+    )
+
+    import pytest
+
+    with pytest.raises(OSError, match="injected"):
+        append_jsonl_locked(store, {"i": 2})
+    monkeypatch.undo()
+
+    # The in-flight line was fully written+flushed before the fsync crash.
+    records = read_jsonl_tolerant(store)
+    assert [r.get("i") for r in records] == [1, 2]
+    # The lock released with the crashed writer: a plain append succeeds.
+    append_jsonl_locked(store, {"i": 3})
+    assert [r.get("i") for r in read_jsonl_tolerant(store)] == [1, 2, 3]

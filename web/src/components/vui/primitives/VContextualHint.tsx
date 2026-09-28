@@ -26,7 +26,7 @@ export function VContextualHint({
         data-vui="contextual-hint"
         aria-label={label}
         className={[
-          "inline-flex size-[18px] min-h-[18px] min-w-[18px] shrink-0 items-center justify-center !rounded-[4px] border-0 bg-transparent p-0 text-[color-mix(in_srgb,var(--fg-tertiary)_72%,transparent)] transition-[color,background] duration-150 hover:bg-vui-control-muted hover:text-vui-fg-secondary focus-visible:outline-none focus-visible:bg-vui-control-muted focus-visible:text-vui-fg-primary focus-visible:shadow-[var(--vui-shadow-focus)]",
+          "inline-flex size-[18px] min-h-[18px] min-w-[18px] shrink-0 items-center justify-center !rounded-[4px] border-0 bg-transparent p-0 text-[color-mix(in_srgb,var(--fg-tertiary)_72%,transparent)] transition-[color,background] duration-150 motion-reduce:transition-none hover:bg-vui-control-muted hover:text-vui-fg-secondary focus-visible:outline-none focus-visible:bg-vui-control-muted focus-visible:text-vui-fg-primary focus-visible:shadow-[var(--vui-shadow-focus)]",
           className,
         ]
           .filter(Boolean)

@@ -50,6 +50,7 @@ export type OrchestratedLifecycleResult = {
   requestId?: string;
   message?: string;
   code?: string;
+  shellStale?: boolean;
   retryAfterMs?: number;
   activeWorkRuns?: unknown[];
 };
@@ -132,6 +133,7 @@ function isLauncherApiPath(path: string): boolean {
     "workbench-close-transactions",
     "desktop-actions",
     "desktop-sessions",
+    "restart-latest-shell",
   ]);
   return allowed.has(firstSegment);
 }
@@ -222,6 +224,7 @@ export function createLauncherIpcHost(input: {
   orchestrateLifecycle?: (operation: string, payload: LauncherIpcInvokePayload) => Promise<OrchestratedLifecycleResult>;
   orchestrateBranchInstance?: (operation: string, payload: LauncherIpcInvokePayload) => Promise<OrchestratedBranchInstanceResult>;
   orchestrateLauncherApi?: (path: string, payload: LauncherIpcInvokePayload) => Promise<unknown>;
+  restartLatestShell?: () => Promise<OrchestratedLifecycleResult>;
   resolveLocalStatus?: () => unknown;
   resolveLocalBranchInstances?: () => unknown;
   fetchImpl?: typeof fetch;
@@ -245,6 +248,16 @@ export function createLauncherIpcHost(input: {
         );
       }
       const apiRoute = launcherApiRoute(normalized.path);
+      if (apiRoute === "restart-latest-shell" && input.restartLatestShell) {
+        try {
+          return { ok: true, payload: await input.restartLatestShell() };
+        } catch (error: unknown) {
+          return launcherIpcError(
+            LAUNCHER_IPC_LIFECYCLE_ERROR,
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+      }
       if (LIFECYCLE_PATHS.has(apiRoute) && input.orchestrateLifecycle) {
         const operation = lifecycleOperationOf(apiRoute);
         try {

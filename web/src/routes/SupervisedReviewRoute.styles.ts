@@ -10,15 +10,15 @@ const reviewRowSurfaceSoft = vuiOpaqueRowClass;
 const reviewControlSurface =
   "rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-control-muted transition hover:border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] hover:bg-vui-control-muted-hover";
 const reviewControlButton =
-  `inline-flex min-h-8 min-w-0 w-fit max-w-full items-center justify-center gap-2 px-2.5 text-[13px] font-semibold leading-tight text-vui-fg-primary no-underline disabled:cursor-not-allowed disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0 ${reviewControlSurface}`;
+  `inline-flex min-h-8 min-w-0 w-fit max-w-full items-center justify-center gap-2 px-2.5 text-vui-micro-13 font-semibold leading-tight text-vui-fg-primary no-underline disabled:cursor-not-allowed disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0 ${reviewControlSurface}`;
 const reviewControlButtonActive =
   "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] text-[var(--accent-warm-2)]";
 const reviewPrimaryActionButton =
-  "inline-flex min-h-8 min-w-0 w-fit max-w-full items-center justify-center gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_30%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_16%,var(--vui-control-muted))] px-2.5 text-[13px] font-semibold leading-tight text-[var(--accent-warm-2)] no-underline transition disabled:cursor-not-allowed disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0";
+  "inline-flex min-h-8 min-w-0 w-fit max-w-full items-center justify-center gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_30%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_16%,var(--vui-control-muted))] px-2.5 text-vui-micro-13 font-semibold leading-tight text-[var(--accent-warm-2)] no-underline transition disabled:cursor-not-allowed disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0";
 const reviewFormLabel =
-  "block [&_span]:mb-1 [&_span]:block [&_span]:text-xs [&_span]:uppercase [&_span]:tracking-[0.08em] [&_span]:text-[var(--fg-tertiary)]";
+  "block [&_span]:mb-1 [&_span]:block [&_span]:text-vui-xs [&_span]:uppercase [&_span]:tracking-[0.08em] [&_span]:text-[var(--fg-tertiary)]";
 const reviewInputTargets =
-  "[&_input]:min-h-[34px] [&_input]:w-full [&_input]:rounded-[var(--radius-control)] [&_input]:border [&_input]:border-vui-border-subtle [&_input]:bg-vui-control-muted [&_input]:px-3 [&_input]:font-[inherit] [&_input]:text-vui-fg-primary [&_input]:outline-none [&_input::placeholder]:text-vui-fg-tertiary [&_select]:min-h-[34px] [&_select]:w-full [&_select]:rounded-[var(--radius-control)] [&_select]:border [&_select]:border-vui-border-subtle [&_select]:bg-vui-control-muted [&_select]:px-3 [&_select]:font-[inherit] [&_select]:text-vui-fg-primary [&_select]:outline-none";
+  "[&_input]:min-h-[var(--vui-control-height-md)] [&_input]:w-full [&_input]:rounded-[var(--radius-control)] [&_input]:border [&_input]:border-vui-border-subtle [&_input]:bg-vui-control-muted [&_input]:px-3 [&_input]:font-[inherit] [&_input]:text-vui-fg-primary [&_input]:outline-none [&_input::placeholder]:text-vui-fg-tertiary [&_select]:min-h-[var(--vui-control-height-md)] [&_select]:w-full [&_select]:rounded-[var(--radius-control)] [&_select]:border [&_select]:border-vui-border-subtle [&_select]:bg-vui-control-muted [&_select]:px-3 [&_select]:font-[inherit] [&_select]:text-vui-fg-primary [&_select]:outline-none";
 const reviewTextAreaTargets =
   "[&_textarea]:min-h-[84px] [&_textarea]:w-full [&_textarea]:resize-y [&_textarea]:rounded-[var(--radius-control)] [&_textarea]:border [&_textarea]:border-vui-border-subtle [&_textarea]:bg-vui-control-muted [&_textarea]:p-2.5 [&_textarea]:font-[inherit] [&_textarea]:text-vui-fg-primary [&_textarea]:outline-none [&_textarea::placeholder]:text-vui-fg-tertiary";
 const reviewFormField = [reviewFormLabel, reviewInputTargets].join(" ");
@@ -41,7 +41,7 @@ const styles = {
   summaryCard:
     `grid min-h-7 min-w-0 grid-cols-[auto_minmax(0,1fr)] items-baseline gap-1.5 px-2 py-1 ${reviewRowSurfaceSoft} [&_span]:whitespace-nowrap [&_span]:[font-size:var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:[font-size:var(--vui-font-xs)]`,
   lifecyclePanel:
-    `flex min-h-[34px] min-w-0 items-center justify-between gap-2 px-2 py-1.5 max-[980px]:flex-col max-[980px]:items-start ${reviewRowSurfaceSoft}`,
+    `flex min-h-[var(--vui-control-height-md)] min-w-0 items-center justify-between gap-2 px-2 py-1.5 max-[980px]:flex-col max-[980px]:items-start ${reviewRowSurfaceSoft}`,
   lifecyclePills: "flex flex-wrap justify-end gap-2 max-[980px]:justify-start",
   // Recipe owns resize (layoutId); keep min/fill/overflow only. Fallback grid for non-resize paths.
   workspace:
@@ -56,13 +56,13 @@ const styles = {
   panelHeader: "flex min-w-0 items-start justify-between gap-3.5",
   detailHeader: "flex min-w-0 items-start justify-between gap-3.5 max-[520px]:flex-col",
   sectionHeader: "flex min-w-0 items-start justify-between gap-3.5 max-[520px]:flex-col",
-  sectionTitle: "m-0 text-base font-bold leading-snug",
-  detailTitle: "m-0 text-base font-bold leading-snug",
+  sectionTitle: "m-0 text-vui-md font-bold leading-snug",
+  detailTitle: "m-0 text-vui-md font-bold leading-snug",
   detailLead: "m-0 mt-1.5 leading-snug text-[var(--fg-secondary)]",
   secondaryPill:
-    "inline-flex min-h-6 items-center justify-center rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-control-muted px-2 text-xs font-semibold text-vui-fg-secondary",
+    "inline-flex min-h-6 items-center justify-center rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-control-muted px-2 text-vui-xs font-semibold text-vui-fg-secondary",
   statusBadge:
-    "inline-flex min-h-6 items-center justify-center rounded-[var(--radius-control)] border border-transparent px-2 text-xs font-semibold",
+    "inline-flex min-h-6 items-center justify-center rounded-[var(--radius-control)] border border-transparent px-2 text-vui-xs font-semibold",
   statusPending:
     "border-[color-mix(in_srgb,var(--fg-tertiary)_20%,transparent)] bg-[color-mix(in_srgb,var(--fg-tertiary)_12%,transparent)] text-[var(--accent-warm-2)]",
   statusPositive:
@@ -90,17 +90,17 @@ const styles = {
   primaryAction: reviewPrimaryActionButton,
   secondaryAction: reviewControlButton,
   compactAction:
-    `inline-flex min-h-7 min-w-0 w-fit max-w-full items-center justify-center gap-1.5 overflow-hidden whitespace-nowrap px-2 text-[11px] font-semibold text-vui-fg-primary no-underline disabled:cursor-not-allowed disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-label]]:truncate ${reviewControlSurface}`,
+    `inline-flex min-h-7 min-w-0 w-fit max-w-full items-center justify-center gap-1.5 overflow-hidden whitespace-nowrap px-2 text-vui-micro-11 font-semibold text-vui-fg-primary no-underline disabled:cursor-not-allowed disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-label]]:truncate ${reviewControlSurface}`,
   dangerAction:
     "border-[color-mix(in_srgb,var(--state-error)_34%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   searchField:
-    "flex min-h-[34px] items-center gap-2 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-control-muted px-2.5 text-vui-fg-secondary [&_input]:w-full [&_input]:border-0 [&_input]:bg-transparent [&_input]:font-[inherit] [&_input]:text-vui-fg-primary [&_input]:outline-none [&_input::placeholder]:text-vui-fg-tertiary",
-  queueMeta: "flex items-center justify-between gap-2.5 text-[13px] text-[var(--fg-tertiary)]",
+    "flex min-h-[var(--vui-control-height-md)] items-center gap-2 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-control-muted px-2.5 text-vui-fg-secondary [&_input]:w-full [&_input]:border-0 [&_input]:bg-transparent [&_input]:font-[inherit] [&_input]:text-vui-fg-primary [&_input]:outline-none [&_input::placeholder]:text-vui-fg-tertiary",
+  queueMeta: "flex items-center justify-between gap-2.5 text-vui-micro-13 text-[var(--fg-tertiary)]",
   queueBulkZone: "grid min-w-0 max-w-full gap-1.5 overflow-hidden",
   bulkToolbar:
     `grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 px-2 py-1.5 max-[520px]:grid-cols-1 ${reviewRowSurfaceSoft}`,
   bulkCounter:
-    "flex min-w-[70px] items-baseline justify-start gap-2 text-xs text-[var(--fg-secondary)] [&_strong]:text-base [&_strong]:text-[var(--fg-primary)]",
+    "flex min-w-[70px] items-baseline justify-start gap-2 text-vui-xs text-[var(--fg-secondary)] [&_strong]:text-vui-md [&_strong]:text-[var(--fg-primary)]",
   bulkActions: "flex min-w-0 flex-wrap items-center justify-end gap-1.5 max-[520px]:justify-start",
   queueList: "flex min-h-0 max-w-full flex-col gap-1.5 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-gutter:stable] max-[980px]:max-h-none",
   queueItem:
@@ -112,8 +112,8 @@ const styles = {
   queueHeadline: "my-1.5 min-w-0 break-words leading-normal text-[var(--fg-secondary)]",
   signalRow: "flex min-w-0 flex-wrap items-center justify-start gap-2.5",
   signalPill:
-    "inline-flex min-h-6 max-w-full min-w-0 items-center justify-center truncate rounded-[var(--radius-control)] bg-vui-control-muted px-2 text-xs font-semibold text-vui-fg-secondary",
-  queueFooter: "flex flex-wrap items-center justify-between gap-2.5 text-xs text-[var(--fg-tertiary)]",
+    "inline-flex min-h-6 max-w-full min-w-0 items-center justify-center truncate rounded-[var(--radius-control)] bg-vui-control-muted px-2 text-vui-xs font-semibold text-vui-fg-secondary",
+  queueFooter: "flex flex-wrap items-center justify-between gap-2.5 text-vui-xs text-[var(--fg-tertiary)]",
   selectionButton:
     "inline-flex h-7 w-7 flex-none items-center justify-center rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-control-muted p-0 text-vui-fg-tertiary disabled:cursor-not-allowed disabled:opacity-55",
   selectionButtonActive:
@@ -123,15 +123,15 @@ const styles = {
   signalColumns: "grid grid-cols-2 gap-2 max-[980px]:grid-cols-1",
   formGrid: "grid grid-cols-2 gap-2 max-[980px]:grid-cols-1",
   factCard:
-    `min-w-0 px-2.5 py-2 ${reviewRowSurfaceSoft} [&_span]:mb-1 [&_span]:block [&_span]:text-xs [&_span]:uppercase [&_span]:tracking-[0.08em] [&_span]:text-vui-fg-tertiary [&_strong]:block [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:leading-normal`,
+    `min-w-0 px-2.5 py-2 ${reviewRowSurfaceSoft} [&_span]:mb-1 [&_span]:block [&_span]:text-vui-xs [&_span]:uppercase [&_span]:tracking-[0.08em] [&_span]:text-vui-fg-tertiary [&_strong]:block [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:leading-normal`,
   metricCard:
-    `min-w-0 px-2.5 py-2 ${reviewRowSurfaceSoft} [&_span]:mb-1 [&_span]:block [&_span]:text-xs [&_span]:uppercase [&_span]:tracking-[0.08em] [&_span]:text-vui-fg-tertiary [&_strong]:block [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:leading-normal [&_p]:m-0 [&_p]:mt-1 [&_p]:leading-snug [&_p]:text-vui-fg-secondary`,
+    `min-w-0 px-2.5 py-2 ${reviewRowSurfaceSoft} [&_span]:mb-1 [&_span]:block [&_span]:text-vui-xs [&_span]:uppercase [&_span]:tracking-[0.08em] [&_span]:text-vui-fg-tertiary [&_strong]:block [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:leading-normal [&_p]:m-0 [&_p]:mt-1 [&_p]:leading-snug [&_p]:text-vui-fg-secondary`,
   signalSection:
-    `min-w-0 px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-[0.95rem] [&_h3]:font-bold [&_ul]:m-0 [&_ul]:pl-[18px] [&_ul]:leading-relaxed [&_ul]:text-vui-fg-secondary`,
+    `min-w-0 px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-vui-sm [&_h3]:font-bold [&_ul]:m-0 [&_ul]:pl-[18px] [&_ul]:leading-relaxed [&_ul]:text-vui-fg-secondary`,
   detailSection:
-    `min-w-0 px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-[0.95rem] [&_h3]:font-bold`,
+    `min-w-0 px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-vui-sm [&_h3]:font-bold`,
   decisionSection:
-    `grid min-w-0 gap-2 border-[color-mix(in_srgb,var(--accent-warm)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_6%,var(--vui-surface-row))] px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-[0.95rem] [&_h3]:font-bold`,
+    `grid min-w-0 gap-2 border-[color-mix(in_srgb,var(--accent-warm)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_6%,var(--vui-surface-row))] px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-vui-sm [&_h3]:font-bold`,
   transcriptSection:
     `min-w-0 px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_summary]:cursor-pointer [&_summary]:font-semibold`,
   evidenceList: "flex max-h-[clamp(168px,28vh,280px)] min-h-0 flex-col gap-1.5 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-gutter:stable]",

@@ -5,6 +5,7 @@ import {
   LAUNCHER_API_JSON_BRIDGE_MAX_BYTES,
   createPythonOwnedProcessTreeTerminator,
   parsePythonJsonBridgePayload,
+  pythonJsonBridgeFailureMessage,
   PythonJsonBridgeError,
   runPythonJsonBridge,
 } from "../src/process/pythonJsonBridge.js";
@@ -396,6 +397,30 @@ describe("runPythonJsonBridge", () => {
         killPolicy: "child",
       })
     ).rejects.toMatchObject({ code: "nonzero_exit" });
+  });
+
+  it("surfaces a JSON failure message from a nonzero exit", async () => {
+    const { spawnImpl } = fakeSpawnWithOutput(JSON.stringify({
+      schemaVersion: 1,
+      ok: false,
+      message: "EBUSY workbench_job.node",
+    }), 1);
+    await expect(
+      runPythonJsonBridge({
+        pythonPath: "python",
+        args: ["--action", "ensure-latest-launcher"],
+        cwd: "C:/repo",
+        spawnImpl,
+        failureLabel: "latest launcher ensure",
+        timeoutMs: 5_000,
+        killPolicy: "child",
+      })
+    ).rejects.toThrow("EBUSY workbench_job.node");
+  });
+
+  it("keeps a stderr tail when a nonzero exit has no JSON message", () => {
+    expect(pythonJsonBridgeFailureMessage("", "copyfile EBUSY", "exited with code 1")).toBe("copyfile EBUSY");
+    expect(pythonJsonBridgeFailureMessage("not-json", "", "exited with code 1")).toBe("exited with code 1");
   });
 
   it("classifies nonzero exit and malformed JSON", async () => {

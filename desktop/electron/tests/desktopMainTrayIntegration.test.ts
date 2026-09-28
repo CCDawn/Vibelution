@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 const mainSource = readFileSync(fileURLToPath(new URL("../src/main.ts", import.meta.url)), "utf8");
 
 describe("Electron main tray integration", () => {
-  it("keeps the desktop pet closed on workbench startup and opens it only from the tray action", () => {
+  it("keeps the desktop pet closed on workbench startup and exposes settings control", () => {
     const workbenchOpenStart = mainSource.indexOf("async function openWorkbenchAtCurrentLauncherUrl");
     const workbenchOpenEnd = mainSource.indexOf("\nasync function ", workbenchOpenStart + 1);
     const workbenchOpenSource = mainSource.slice(workbenchOpenStart, workbenchOpenEnd);
@@ -16,15 +16,15 @@ describe("Electron main tray integration", () => {
     const trayStart = mainSource.indexOf("desktopTray = createDesktopTray(paths,");
     const trayEnd = mainSource.indexOf("startPeriodicShellFreshnessWatch", trayStart);
     const traySource = mainSource.slice(trayStart, trayEnd);
-    expect(traySource).toContain("openPet:");
-    expect(traySource).toContain("windowProvider?.openPet(url)");
+    expect(traySource).not.toContain("openPet:");
+    expect(mainSource).toContain("IPC_CHANNELS.controlDesktopPet");
+    expect(mainSource).toContain("petSettingsOrigin(event.senderFrame.url, identity.role)");
   });
 
   it("routes tray actions through launcher control without direct main-workbench restart menu paths", () => {
     expect(mainSource).toContain('from "./tray/desktopTray.js"');
     expect(mainSource).toContain("desktopTray = createDesktopTray(paths,");
-    expect(mainSource).toContain("openPet:");
-    expect(mainSource).toContain("windowProvider?.openPet(url)");
+    expect(mainSource).not.toContain("openPet:");
     expect(mainSource).toContain("listInstances:");
     expect(mainSource).toContain("restartLauncher:");
     expect(mainSource).toContain("runTrayRestartLauncher");

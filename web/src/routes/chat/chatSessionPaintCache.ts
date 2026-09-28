@@ -14,6 +14,7 @@
 import type { ConversationMessage, SessionDetail } from "../../api/types";
 import { forgetSessionTimelineScroll } from "../../components/conversation/conversationSessionScrollMemory";
 import { mergeSessionDetailMessageWindow } from "../chatSessionState";
+import { mergeEditResubmitDetail } from "./chatEditResubmitState";
 
 const MAX_LAST_GOOD_SESSIONS = 12;
 const lastGoodBySessionId = new Map<string, SessionDetail>();
@@ -87,20 +88,13 @@ export function mergeStickySessionDetailPaint(
     return { ...live, provisionalTranscript: undefined };
   }
   // Prefer full window merge when both sides carry messageWindow metadata.
-  if (sticky.messageWindow && live.messageWindow) {
-    return {
-      ...mergeSessionDetailMessageWindow(sticky, live),
-      provisionalTranscript: undefined,
-    };
-  }
-  const messages = mergeMessageLists(sticky.messages, live.messages);
-  return {
-    ...sticky,
-    ...live,
-    messages,
+  return mergeEditResubmitDetail(sticky, live, (before, incoming) => ({
+    ...(before?.messageWindow && incoming.messageWindow
+      ? mergeSessionDetailMessageWindow(before, incoming)
+      : { ...before, ...incoming, messages: mergeMessageLists(before?.messages, incoming.messages),
+          messageWindow: incoming.messageWindow ?? before?.messageWindow }),
     provisionalTranscript: undefined,
-    messageWindow: live.messageWindow ?? sticky.messageWindow,
-  };
+  }));
 }
 
 /** Store a hydrated detail for instant re-paint on tab return. */

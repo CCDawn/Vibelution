@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from core.web.services import pet_activity_service
+import pytest
 
+from core.web.services import pet_activity_service
 
 NOW = datetime(2026, 9, 8, 2, 0, tzinfo=timezone.utc)
 
@@ -123,3 +124,45 @@ def test_pet_activity_returns_idle_when_no_visible_activity(monkeypatch):
     assert payload["activeCount"] == 0
     assert payload["attentionCount"] == 0
     assert payload["sessions"] == []
+
+
+@pytest.mark.parametrize("status", ["paused", "paused_limit", "stopped_by_user", "cancelled", "needs_continue", "superseded"])
+def test_interrupted_turns_never_celebrate(status):
+    assert pet_activity_service._resolve_tone(
+        _session("s", status=status), runtime_running=False, needs_approval=False, now=NOW,
+    ) == "idle"
+
+
+def test_live_turn_overrides_previous_failure():
+    assert pet_activity_service._resolve_tone(
+        _session("s", status="failed_runtime"), runtime_running=True, needs_approval=False, now=NOW,
+    ) == "running"
+
+
+def test_ready_uses_actual_last_turn_outcome():
+    session = _session("s", status="ready")
+    session["lastTurnStatus"] = "completed"
+    assert pet_activity_service._resolve_tone(session, runtime_running=False, needs_approval=False, now=NOW) == "completed"
+    session["lastTurnStatus"] = "ready"
+    assert pet_activity_service._resolve_tone(session, runtime_running=False, needs_approval=False, now=NOW) == "completed"
+    session["lastTurnStatus"] = "stopped_by_user"
+    assert pet_activity_service._resolve_tone(session, runtime_running=False, needs_approval=False, now=NOW) == "idle"
+
+
+def test_historical_errors_stay_accessible_without_masking_live_work(monkeypatch):
+    sessions = [_session("old", status="failed_runtime", updated_at=NOW - timedelta(days=6)),
+                _session("live", status="running")]
+    monkeypatch.setattr(pet_activity_service, "list_sessions", lambda: sessions)
+    monkeypatch.setattr(pet_activity_service, "load_chat_turn_work_run_summary", lambda: {"activeItems": []})
+    monkeypatch.setattr(pet_activity_service, "list_tool_approval_requests", lambda *_a, **_k: [])
+    result = pet_activity_service.get_pet_activity(now=NOW)
+    assert result["aggregateTone"] == "running"
+    assert result["attentionCount"] == 0
+    assert [row["sessionId"] for row in result["sessions"]] == ["live", "old"]
+    sessions.pop()
+    assert pet_activity_service.get_pet_activity(now=NOW)["aggregateTone"] == "idle"
+
+
+def test_legacy_local_timestamps_use_session_timebase():
+    local_time = NOW.astimezone().replace(tzinfo=None)
+    assert pet_activity_service._parse_timestamp(local_time.isoformat()) == NOW

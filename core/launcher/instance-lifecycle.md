@@ -70,7 +70,7 @@ Python `_instance_lifecycle_state` 与 Electron `projectInstanceLifecycle`（`de
 
 工作台进程执行目标树的 `scripts/web_workbench.py`（`Path(__file__).parent.parent` 进 `sys.path`），源码来自该 worktree。
 
-stop / force-stop：先 terminate 登记的 `spawnPid` / `backendPid` / `backendLaunchPid`，再等待端口释放。禁止 `taskkill.exe`。扫描式进程表收割与 Windows Job Object **未做**（独立评审后再议，不是本文件的产品默认）。
+stop / force-stop：先请求后端自己收尾。后端拒绝且不是强制停止时保持原进程。否则结束该实例的 Windows Job（`TerminateJobObject`），再等待端口释放。Job 带 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`，桌面壳崩溃、最后一个句柄被系统关闭时，组里剩下的后端和子进程一起退出。禁止 `taskkill.exe`，也不做全机进程表扫描。显式 `CREATE_BREAKAWAY_FROM_JOB` 只留给必须比壳活得更久的桌面刷新助手；普通子进程不能脱离。
 
 Electron 编排窗口时，Python **不得** 再 `open_isolated_workbench_window` / `close_isolated_workbench_window`（避免双关窗）。窗口由 Electron 在 HTTP READY 之后打开、在 stop 时关闭。
 

@@ -98,7 +98,8 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
       options.setPersonaDraft(options.personaDraftFromAgent(agent));
       options.draftSyncSourceRef.current = options.draftSyncSourceFromAgent(options.getWorkspace(), agent);
       options.setNotice({ tone: "success", text: options.copy.personaUpdateSuccess });
-      void options.chatWorkspaceCache.afterAgentWorkspaceChanged();
+      // Persona is a single-agent display field: precise refresh, no ["agents"] prefix.
+      void options.chatWorkspaceCache.afterAgentDisplaySaved(agent.agentId);
     },
     onError: (error) => {
       options.setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
@@ -118,7 +119,8 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
       options.setTaskDraft(options.taskDraftFromAgent(agent));
       options.draftSyncSourceRef.current = options.draftSyncSourceFromAgent(options.getWorkspace(), agent);
       options.setNotice({ tone: "success", text: options.copy.taskUpdateSuccess });
-      void options.chatWorkspaceCache.afterAgentWorkspaceChanged();
+      // Task profile is a single-agent display field: precise refresh.
+      void options.chatWorkspaceCache.afterAgentDisplaySaved(agent.agentId);
     },
     onError: (error) => {
       options.setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
@@ -237,6 +239,7 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
       options.reconcileResetDirectSession(result.resetSummary);
       options.setNotice({ tone: "success", text: options.copy.resetAgentSuccess });
       options.setResetOptions(options.DEFAULT_AGENT_RESET_OPTIONS);
+      // Reset is structural: runtime state, inbox and bound sessions change.
       void options.chatWorkspaceCache.afterAgentWorkspaceChanged();
       if (result.resetSummary.resetDirectSession) {
         if (previousDirectSessionId) {
@@ -272,7 +275,8 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
         (current) => options.updatedAgentWorkspaceCache(current, agent),
       );
       options.setNotice({ tone: "success", text: options.copy.avatarUpdateSuccess });
-      void options.chatWorkspaceCache.afterAgentWorkspaceChanged();
+      // Avatar only changes display projections; keep runs/inbox queries warm.
+      void options.chatWorkspaceCache.afterAgentDisplaySaved(agent.agentId);
     },
     onError: (error) => {
       options.setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
@@ -294,7 +298,8 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
       );
       options.setNotice({ tone: "success", text: options.copy.avatarUpdateSuccess });
       void queryClient.invalidateQueries({ queryKey: ["agent-avatar-options"] });
-      void options.chatWorkspaceCache.afterAgentWorkspaceChanged();
+      // Uploaded avatar is display-layer; the avatar-options list refreshes above.
+      void options.chatWorkspaceCache.afterAgentDisplaySaved(agent.agentId);
     },
     onError: (error) => {
       options.setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
@@ -319,7 +324,9 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
         tone: "success",
         text: options.lang === "zh" ? "已保存 Agent 使用位置" : "Saved Agent mode membership",
       });
-      void options.chatWorkspaceCache.afterAgentWorkspaceChanged();
+      // Membership reshapes the shared mode-slot collection: wider than display
+      // saves (mode bindings), still far narrower than the ["agents"] prefix.
+      void options.chatWorkspaceCache.afterAgentMembershipSaved(variables.agentId);
     },
     onError: (error) => {
       options.setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
@@ -348,7 +355,8 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
         tone: "success",
         text: options.lang === "zh" ? `已保存 ${options.agentLabel(agent)} 的工具能力` : `Saved tool permissions for ${options.agentLabel(agent)}`,
       });
-      void options.chatWorkspaceCache.afterAgentWorkspaceChanged();
+      // Tool policy is a single-agent capability display field: precise refresh.
+      void options.chatWorkspaceCache.afterAgentDisplaySaved(agent.agentId);
     },
     onError: (error) => {
       options.setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
@@ -370,13 +378,14 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
         reason: payload.draft.reason,
         applyMode: payload.draft.applyMode,
       }),
-    onSuccess: (request) => {
+    onSuccess: (request, variables) => {
       options.setNotice({
         tone: "success",
         text: `${options.copy.toolGovernanceSuccess}: ${options.governanceStatusLabel(request.status, options.lang)}`,
       });
       options.setToolGovernanceDraft(options.toolGovernanceDraftFromAgent(options.getSelectedAgent()));
-      void options.chatWorkspaceCache.afterAgentWorkspaceChanged();
+      // A governance request only changes the agent's request list/workspace.
+      void options.chatWorkspaceCache.afterAgentDisplaySaved(variables.agentId);
     },
     onError: (error) => {
       options.setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
@@ -386,9 +395,10 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
   const resolveToolGovernanceMutation = useMutation({
     mutationFn: (payload: { agentId: string; requestId: string; decision: "approve" | "reject" }) =>
       resolveAgentCenterToolGovernanceRequest(payload.agentId, payload.requestId, payload.decision),
-    onSuccess: () => {
+    onSuccess: (_result, variables) => {
       options.setNotice({ tone: "success", text: options.copy.toolGovernanceResolved });
-      void options.chatWorkspaceCache.afterAgentWorkspaceChanged();
+      // Resolution updates requests / applied policy on one agent only.
+      void options.chatWorkspaceCache.afterAgentDisplaySaved(variables.agentId);
     },
     onError: (error) => {
       options.setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
@@ -401,6 +411,7 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
         memoryPolicy: {
           ...options.defaultMemoryPolicy(payload.basePolicy?.policyId || ""),
           ...(payload.basePolicy ?? {}),
+          enabled: payload.draft.enabled,
           readSharedGroups: options.sortedIds(payload.draft.readSharedGroups),
           writeSharedGroups: options.sortedIds(payload.draft.writeSharedGroups),
           readKnowledgeBaseIds: options.sortedIds(payload.draft.readKnowledgeBaseIds),
@@ -418,7 +429,8 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
         tone: "success",
         text: options.lang === "zh" ? `已保存 ${options.agentLabel(agent)} 的记忆设置` : `Saved memory policy for ${options.agentLabel(agent)}`,
       });
-      void options.chatWorkspaceCache.afterAgentWorkspaceChanged();
+      // Memory policy is a single-agent policy field: precise refresh.
+      void options.chatWorkspaceCache.afterAgentDisplaySaved(agent.agentId);
     },
     onError: (error) => {
       options.setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
@@ -455,7 +467,8 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
         tone: "success",
         text: options.lang === "zh" ? `已保存 ${options.agentLabel(agent)} 的运行策略` : `Saved runtime policy for ${options.agentLabel(agent)}`,
       });
-      void options.chatWorkspaceCache.afterAgentWorkspaceChanged();
+      // Runtime policy is single-agent; runs refetch separately below.
+      void options.chatWorkspaceCache.afterAgentDisplaySaved(agent.agentId);
       void queryClient.invalidateQueries({ queryKey: queryKeys.agentRuns(agent.agentId) });
     },
     onError: (error) => {
@@ -475,7 +488,8 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
         text: options.lang === "zh" ? "已标记消息为已处理" : "Marked message as consumed",
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.agentMessages(variables.agentId, "pending") });
-      void options.chatWorkspaceCache.afterAgentWorkspaceChanged();
+      // Consuming one inbox message only changes that agent's pending counters.
+      void options.chatWorkspaceCache.afterAgentDisplaySaved(variables.agentId);
     },
     onError: (error) => {
       options.setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
@@ -499,7 +513,8 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
         text: options.lang === "zh" ? `已处理 ${result.consumedCount} 条 Inbox 消息` : `Consumed ${result.consumedCount} inbox messages`,
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.agentMessages(result.agentId || variables.agentId, "pending") });
-      void options.chatWorkspaceCache.afterAgentWorkspaceChanged();
+      // Bulk consume is still one agent's inbox: precise refresh.
+      void options.chatWorkspaceCache.afterAgentDisplaySaved(result.agentId || variables.agentId);
     },
     onError: (error) => {
       options.setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });

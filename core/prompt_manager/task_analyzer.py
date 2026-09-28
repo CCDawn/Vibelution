@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import json
 import re
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
@@ -24,6 +25,20 @@ from datetime import datetime
 from enum import Enum
 
 from core.chat.chat_result_contract import verification_from_tool_record
+
+
+def atomic_dump_json(filepath: Path | str, data: Dict[str, Any]) -> None:
+    """json 原子落盘：先写同目录临时文件再 os.replace，崩溃不留半写文件。"""
+    path = Path(filepath)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, ensure_ascii=False, indent=2)
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 
 
 # ============================================================================
@@ -451,8 +466,7 @@ class TaskAnalyzer:
             "records": [self._record_to_dict(r) for r in report.task_records],
         }
 
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        atomic_dump_json(filepath, data)
 
         return str(filepath)
 
@@ -655,8 +669,7 @@ class TaskAnalyzer:
             "recommendations": report.recommendations,
         }
 
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        atomic_dump_json(filepath, data)
 
         return str(filepath)
 

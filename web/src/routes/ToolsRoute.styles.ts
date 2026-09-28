@@ -364,7 +364,7 @@ const styles = {
   statusDot:
     "statusDot min-w-0 inline-block h-2 w-2 rounded-full bg-current",
   toolStatusChip:
-    "toolStatusChip !min-h-5 max-w-[4.5rem] shrink-0 truncate !px-1.5 !text-[10px]",
+    "toolStatusChip !min-h-5 max-w-[4.5rem] shrink-0 truncate !px-1.5 !text-vui-micro-10",
   status_active:
     `status_active min-w-0 ${vuiStateSelectedRowClass}`,
   status_allowed:
@@ -470,11 +470,11 @@ const styles = {
   toolPermissionMeta:
     "toolPermissionMeta text-vui-fg-secondary [&_em]:not-italic min-w-0 flex flex-wrap items-center gap-1.5",
   toolPermissionRow:
-    "toolPermissionRow min-w-0 max-w-full rounded-[7px] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] !bg-[var(--vui-surface-row)] !grid grid-cols-1 min-[1600px]:grid-cols-[minmax(0,1fr)_12rem] items-center gap-3 px-3 py-3 max-[640px]:grid-cols-[1fr]",
+    "toolPermissionRow min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] !bg-[var(--vui-surface-row)] !grid grid-cols-1 min-[1600px]:grid-cols-[minmax(0,1fr)_12rem] items-center gap-3 px-3 py-3 max-[640px]:grid-cols-[1fr]",
   ts:
     "ts min-w-0",
   workspace:
-    `workspace min-w-0 max-w-full grid h-full min-h-0 gap-[7px] p-[7px] !grid grid-cols-[minmax(0,var(--tools-left-panel-width))_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:grid-rows-[minmax(220px,42vh)_minmax(420px,1fr)] max-[760px]:overflow-y-auto max-[760px]:overflow-x-hidden ${vuiWorkspaceFillClass}`,
+    `workspace min-w-0 max-w-full grid h-full min-h-0 gap-[7px] p-[7px] !grid grid-cols-[minmax(0,var(--pane-w-left))_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:grid-rows-[minmax(220px,42vh)_minmax(420px,1fr)] max-[760px]:overflow-y-auto max-[760px]:overflow-x-hidden ${vuiWorkspaceFillClass}`,
   workspaceScopePanel:
     `workspaceScopePanel min-w-0 max-w-full ${vuiOpaqueRowClass} !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[5px] px-2 py-[5px] [font-size:var(--vui-font-xs)] max-[720px]:grid-cols-[1fr]`,
 } as const;

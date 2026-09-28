@@ -29,7 +29,7 @@
 | [route.md](route.md) | 任务类型 → READ / EDIT / TEST / 禁止 | ~78 | 续接且任务类型/触面未变 |
 | [ownership.md](ownership.md) | 路径 ownership | ~122 | 只读；或 owner 已由 route 唯一确定 |
 | [loop.md](loop.md) | 分级、命令、验证与合入；对用户汇报见根 `AGENTS.md` §5 | ~148 | 未到验证/收束；FAST_PATCH 只看 §1+§3 |
-| [agent-log-routing.md](agent-log-routing.md) | **统一日志入口** `agent_log_context` | ~84 | 非 Bug/回归/卡住/运行不一致 |
+| [agent-log-routing.md](agent-log-routing.md) | **统一日志入口** `firstRead` 四段 | ~52 | 非 Bug/回归/卡住/运行不一致 |
 | [playbook.md](playbook.md) | 系统边界 + 红线速查 + SSOT | ~105 | standards § 已覆盖当前疑问 |
 | [agent-dev-roi-backlog.md](agent-dev-roi-backlog.md) | **便利度 ROI 改造清单**（P0–P3） | ~138 | 非 ROI/便利度认领任务 |
 | [button-selection.md](button-selection.md) | **按钮选型** V / VNative / 禁止裸 button | ~76 | 不改按钮/表单提交控件 |

@@ -3,6 +3,13 @@ import { describe, expect, it } from "vitest";
 import source from "./CompanionLifeWorldCard.tsx?raw";
 
 describe("CompanionLifeWorldCard", () => {
+  it("links missing life profiles to the existing Agent settings with a Companion return route", () => {
+    expect(source).toContain("VRouteLinkButton");
+    expect(source).toContain("agentCenterConfigRoute({");
+    expect(source).toContain("agentId: companion.agentId");
+    expect(source).toContain("returnTo: companionReturnTarget(companion)");
+    expect(source).toContain("补齐生活档案");
+  });
   it("edits and confirms the Agent-scoped structured life draft", () => {
     expect(source).toContain("updateVirtualHumanLifeDraft");
     expect(source).toContain("confirmVirtualHumanLifeWorld");

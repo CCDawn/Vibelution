@@ -24,6 +24,8 @@ client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_tok
 TYPED_SIDE_ROUTES = {
     "session_child_sessions",
     "session_create_child_session",
+    "session_message_curation_state",
+    "session_set_message_curation",
     "session_tool_approvals",
     "session_resolve_tool_approval",
     "session_create_chat_review_candidate",

@@ -11,6 +11,7 @@ import runtimeTypesSource from "./types/runtime.ts?raw";
 import sharedTypesSource from "./types/shared.ts?raw";
 import teamsTypesSource from "./types/teams.ts?raw";
 import virtualHumanLifeTypesSource from "./types/virtualHumanLife.ts?raw";
+import teamBundlesTypesSource from "./types/teamBundles.ts?raw";
 
 const expectedBarrel = [
   'export * from "./types/shared";',
@@ -24,6 +25,7 @@ const expectedBarrel = [
   'export * from "./types/config";',
   'export * from "./types/hypothesisFirst";',
   'export * from "./types/virtualHumanLife";',
+  'export * from "./types/teamBundles";',
 ].join("\n");
 
 const domainSources = [
@@ -37,6 +39,7 @@ const domainSources = [
   sharedTypesSource,
   teamsTypesSource,
   virtualHumanLifeTypesSource,
+  teamBundlesTypesSource,
 ];
 
 describe("api type domain modules", () => {

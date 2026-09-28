@@ -1,12 +1,28 @@
 const TIMELINE_BOTTOM_THRESHOLD_PX = 32;
 const TIMELINE_UPWARD_SCROLL_THRESHOLD_PX = 2;
 
+/** Wheel/touch intent stays valid until the matching scroll event can land. */
+export const TIMELINE_USER_SCROLL_INTENT_TTL_MS = 1200;
+/** Ignore follow changes for the scroll event caused by our own scrollTop write. */
+export const TIMELINE_LAYOUT_SCROLL_GUARD_MS = 250;
+/** Width resize remeasures many rows across frames; do not chase scrollTop per row. */
+export const TIMELINE_CONTENT_WIDTH_RESIZE_SETTLE_MS = 120;
+
+export type TimelineScrollSource = "user" | "programmatic" | "layout";
+
+/** Direction captured before the scroll event, which arrives one frame later. */
+export type TimelineUserScrollIntent = "none" | "awayFromBottom" | "towardBottom" | "unknown";
+
 export type TimelineFollowStateInput = {
   scrollHeight: number;
   clientHeight: number;
   scrollTop: number;
   previousScrollTop: number;
   wasFollowingLatest: boolean;
+  /** Defaults to user so a scrollbar drag still releases follow. */
+  scrollSource?: TimelineScrollSource;
+  /** Fresh wheel/touch/keyboard direction. Away-from-bottom wins over geometry. */
+  userScrollIntent?: TimelineUserScrollIntent;
 };
 
 export type TimelineFollowState = {
@@ -21,14 +37,103 @@ export function isTimelineNearBottom(
   return scrollHeight - scrollTop - clientHeight <= thresholdPx;
 }
 
+export function timelineWheelScrollIntent(deltaY: number): TimelineUserScrollIntent {
+  if (!Number.isFinite(deltaY) || deltaY === 0) {
+    return "none";
+  }
+  return deltaY < 0 ? "awayFromBottom" : "towardBottom";
+}
+
+/** Finger moving down reads earlier content, so the viewport should move up. */
+export function timelineTouchScrollIntent(
+  previousClientY: number,
+  nextClientY: number,
+): TimelineUserScrollIntent {
+  if (!Number.isFinite(previousClientY) || !Number.isFinite(nextClientY) || previousClientY === nextClientY) {
+    return "none";
+  }
+  return nextClientY > previousClientY ? "awayFromBottom" : "towardBottom";
+}
+
+export function timelineKeyboardScrollIntent(input: {
+  key: string;
+  shiftKey: boolean;
+  editableTarget: boolean;
+}): TimelineUserScrollIntent {
+  if (input.editableTarget) {
+    return "none";
+  }
+  if (input.key === "ArrowUp" || input.key === "PageUp" || input.key === "Home") {
+    return "awayFromBottom";
+  }
+  if (input.key === "ArrowDown" || input.key === "PageDown" || input.key === "End") {
+    return "towardBottom";
+  }
+  if (input.key === " ") {
+    return input.shiftKey ? "awayFromBottom" : "towardBottom";
+  }
+  return "none";
+}
+
+export function freshTimelineUserScrollIntent(
+  intent: TimelineUserScrollIntent,
+  notedAtMs: number,
+  nowMs: number,
+): TimelineUserScrollIntent {
+  if (intent === "none" || !Number.isFinite(notedAtMs) || !Number.isFinite(nowMs)) {
+    return "none";
+  }
+  if (nowMs - notedAtMs > TIMELINE_USER_SCROLL_INTENT_TTL_MS) {
+    return "none";
+  }
+  return intent;
+}
+
+/**
+ * Content commits can stick to the bottom before the scroll event arrives.
+ * An upward wheel in that gap must win; layout scrollTop jitter must not.
+ */
+export function reconcileFollowingBeforeContentStick(input: {
+  following: boolean;
+  isAtBottom: boolean;
+  userScrollIntent?: TimelineUserScrollIntent;
+  scrollTop: number;
+  lastObservedScrollTop: number;
+  scrollEpsilonPx?: number;
+}): boolean {
+  const intent = input.userScrollIntent ?? "unknown";
+  if (intent === "awayFromBottom") {
+    return false;
+  }
+  if (intent === "none") {
+    return input.following;
+  }
+  if (input.isAtBottom) {
+    return true;
+  }
+  const epsilon = input.scrollEpsilonPx ?? TIMELINE_UPWARD_SCROLL_THRESHOLD_PX;
+  if (input.scrollTop < input.lastObservedScrollTop - epsilon) {
+    return false;
+  }
+  return input.following;
+}
+
 export function resolveTimelineFollowState({
   scrollHeight,
   clientHeight,
   scrollTop,
   previousScrollTop,
   wasFollowingLatest,
+  scrollSource = "user",
+  userScrollIntent = "none",
 }: TimelineFollowStateInput): TimelineFollowState {
   const isAtBottom = isTimelineNearBottom({ scrollHeight, clientHeight, scrollTop });
+  if (userScrollIntent === "awayFromBottom") {
+    return { isAtBottom, shouldFollowLatest: false };
+  }
+  if (scrollSource !== "user") {
+    return { isAtBottom, shouldFollowLatest: wasFollowingLatest };
+  }
   if (isAtBottom) {
     return { isAtBottom: true, shouldFollowLatest: true };
   }
@@ -46,7 +151,12 @@ export function resolveTimelineFollowState({
 export function shouldStickTimelineToBottomOnContentResize(input: {
   autoScrollToLatest: boolean;
   followingLatest: boolean;
+  /** Width resize remeasures rows across frames; chasing scrollTop jitters the list. */
+  contentWidthChanging?: boolean;
 }): boolean {
+  if (input.contentWidthChanging) {
+    return false;
+  }
   return Boolean(input.autoScrollToLatest && input.followingLatest);
 }
 

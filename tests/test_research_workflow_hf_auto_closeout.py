@@ -648,6 +648,9 @@ def test_auto_redrive_fenced_review_meeting_dispatches_once(
 
     # Simulate the ledger state a real redrive leaves behind: a newer
     # attempt (number 2) now owns the dispatch identity.
+    # A real redrive supersedes the fenced attempt (the fence verdict is
+    # ``superseded`` — it does not count toward the dispatch backoff window)
+    # and opens attempt 2 bound to the fresh meeting.
     chain._append_review_dispatch_attempt_state(
         _TEAM_ID,
         question_id=_QUESTION_ID,
@@ -656,6 +659,7 @@ def test_auto_redrive_fenced_review_meeting_dispatches_once(
         candidate_id="cand-redrive-a",
         round_index=1,
         lifecycle="failed",
+        outcome="superseded",
     )
     chain._append_review_dispatch_attempt_state(
         _TEAM_ID,
@@ -665,6 +669,7 @@ def test_auto_redrive_fenced_review_meeting_dispatches_once(
         candidate_id="cand-redrive-a",
         round_index=1,
         lifecycle="queued",
+        meeting_round_id="meeting-fenced-review-r2",
     )
     monkeypatch.setattr(
         meeting_rounds,
@@ -788,6 +793,9 @@ def test_auto_redrive_skips_dead_silent_and_capped_meetings(
     assert dispatched == []
 
     # Attempt cap: HARD_ROUND_LIMIT attempts for the identity stop the hop.
+    # Each hop supersedes the previous attempt (fence verdicts do not count
+    # toward the dispatch backoff window) and requeues bound to the same
+    # meeting, so the cap — not supersession — is what stops the final hop.
     for attempt_number in range(2, chain.HARD_ROUND_LIMIT + 1):
         chain._append_review_dispatch_attempt_state(
             _TEAM_ID,
@@ -797,6 +805,7 @@ def test_auto_redrive_skips_dead_silent_and_capped_meetings(
             candidate_id="cand-silent-a",
             round_index=1,
             lifecycle="failed",
+            outcome="superseded",
         )
         chain._append_review_dispatch_attempt_state(
             _TEAM_ID,
@@ -806,6 +815,7 @@ def test_auto_redrive_skips_dead_silent_and_capped_meetings(
             candidate_id="cand-silent-a",
             round_index=1,
             lifecycle="queued",
+            meeting_round_id="meeting-fenced-silent",
         )
     monkeypatch.setattr(
         meeting_rounds,

@@ -14,6 +14,9 @@ import type {
   SessionDetail,
   SessionGuidanceMode,
   SessionLlmOptions,
+  SessionMessageCurationAction,
+  SessionMessageCurationMutationResponse,
+  SessionMessageCurationResponse,
   SessionQueryResponse,
   SessionQueuedTurn,
   SessionSummary,
@@ -279,6 +282,34 @@ export function fetchSessionLlmOptions(sessionId: string): Promise<SessionLlmOpt
   );
 }
 
+export function fetchSessionMessageCuration(sessionId: string): Promise<SessionMessageCurationResponse> {
+  return fetchJson<SessionMessageCurationResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/curation`,
+  );
+}
+
+/**
+ * Includes/excludes one settled assistant answer in the SFT dataset.
+ * A 409 means the answer already lives in the other side's dataset; the
+ * server-authored Chinese copy rides on `FetchJsonHttpError.message`.
+ */
+export function setSessionMessageCuration(
+  sessionId: string,
+  messageId: string,
+  action: SessionMessageCurationAction,
+): Promise<SessionMessageCurationMutationResponse> {
+  return fetchJson<SessionMessageCurationMutationResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/curation`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ action }),
+    },
+  );
+}
+
 export type SessionPromptSuggestionResponse = {
   sessionId: string;
   turnId: string;
@@ -360,6 +391,40 @@ export function uploadSessionImageAttachment(
   );
 }
 
+export type SessionAttachmentPathRegistration = {
+  localPath: string;
+  contentType?: string;
+  filename: string;
+};
+
+/**
+ * Zero-copy registration upload for desktop local files.
+ *
+ * The desktop shell resolves the real local path; the backend reads the file
+ * in place and stores it, so the bytes never travel through the renderer.
+ * Distinguished from the binary upload by the JSON content type. Any 4xx
+ * lets the caller fall back to the binary upload transparently.
+ */
+export function registerSessionImageAttachmentFromPath(
+  sessionId: string,
+  init: SessionAttachmentPathRegistration,
+): Promise<ConversationAttachment> {
+  return fetchJson<ConversationAttachment>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/attachments`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        localPath: init.localPath,
+        contentType: init.contentType || "application/octet-stream",
+        filename: init.filename,
+      }),
+    },
+  );
+}
+
 export function submitSessionMessage(
   sessionId: string,
   payload: {
@@ -401,7 +466,7 @@ export function listSessionQueuedTurns(sessionId: string): Promise<SessionQueued
 export function updateSessionQueuedTurn(
   sessionId: string,
   queuedTurnId: string,
-  payload: { content?: string; position?: number },
+  payload: { content?: string; position?: number; status?: "paused" | "queued" },
 ): Promise<SessionQueuedTurn[]> {
   return fetchJson<{ queuedTurns?: SessionQueuedTurn[] }>(
     `/api/sessions/${encodeURIComponent(sessionId)}/queued-turns/${encodeURIComponent(queuedTurnId)}`,

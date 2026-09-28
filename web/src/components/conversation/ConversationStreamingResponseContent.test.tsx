@@ -59,19 +59,26 @@ describe("ConversationStreamingResponseContent", () => {
     expect(html).toContain("<table");
   });
 
-  it("keeps the Codex stream controller while rendering through the shared markdown renderer", async () => {
+  it("keeps the Codex stream controller with a light-parsed live tail and static stable zone", async () => {
     const source = await import("./ConversationStreamingResponseContent.tsx?raw").then((module) => module.default);
 
     expect(source).toContain('from "./codexStreamController"');
     expect(source).toContain("createCodexStreamController");
+    // Stable zone keeps the full lazy react-markdown pipeline.
     expect(source).toContain('from "./LazyConversationMarkdownRenderer"');
     expect(source).toContain("<LazyConversationMarkdownRenderer");
-    expect(source).not.toContain('from "./ConversationMarkdownRenderer"');
     expect(source).toContain("streamProjection.stableText");
     expect(source).toContain("streamProjection.liveText");
     expect(source).toContain("StreamingStableMarkdown");
+    // Live tail is the dual-mode light pipeline: repair + line-level blocks,
+    // never a second full markdown engine in the streaming component.
+    expect(source).toContain('from "./streamingIncompleteMarkdown"');
+    expect(source).toContain("repairIncompleteMarkdown");
+    expect(source).toContain("parseStreamingMarkdownBlocks");
+    expect(source).toContain("<StreamingLiveMarkdownBlocks");
     expect(source).toContain("data-streaming-live-tail");
-    expect(source).not.toContain("parseStreamingMarkdownBlocks");
+    expect(source).not.toContain("from \"react-markdown\"");
+    expect(source).not.toContain("remarkGfm");
     expect(source).not.toContain("StableStreamingMarkdownBlocks");
     expect(source).not.toContain("blocks.map((block, index) => renderBlock(block, index))");
   });
@@ -89,6 +96,39 @@ describe("ConversationStreamingResponseContent", () => {
     expect(html).toContain("data-streaming-live-tail=\"1\"");
     expect(html).toContain("未完成的尾");
     expect(html).toContain("完成的段落");
+  });
+
+  it("caps the streaming live code tail so an unclosed fence cannot grow the render unbounded", async () => {
+    const { ConversationStreamingResponseContent } = await import("./ConversationStreamingResponseContent");
+    // An unclosed fence keeps its whole (growing) block in the live tail; the
+    // live block must still paint only the newest lines every frame.
+    const codeLines = Array.from({ length: 100 }, (_, index) => `代码行 ${String(index + 1).padStart(3, "0")}`);
+    const html = renderToStaticMarkup(
+      <ConversationStreamingResponseContent content={["```text", ...codeLines].join("\n")} classNames={classNames} />,
+    );
+
+    expect(html).toContain('data-streaming-live-tail="1"');
+    expect(html).toContain("…已流入 40 行");
+    expect(html).toContain("代码行 100");
+    expect(html).not.toContain("代码行 001");
+  });
+
+  it("caps the streaming live table while rows keep flowing in", async () => {
+    const { ConversationStreamingResponseContent } = await import("./ConversationStreamingResponseContent");
+    const rows = Array.from({ length: 30 }, (_, index) => `| 行 ${String(index + 1).padStart(2, "0")} | 值 |`);
+    const html = renderToStaticMarkup(
+      <ConversationStreamingResponseContent
+        content={["| 项目 | 状态 |", "| --- | --- |", ...rows, "", "段落尾巴"].join("\n")}
+        classNames={classNames}
+      />,
+    );
+
+    expect(html).toContain('data-streaming-live-tail="1"');
+    expect(html).toContain("+10 行流入中");
+    expect(html).toContain("行 01");
+    expect(html).toContain("行 20");
+    expect(html).not.toContain("行 21");
+    expect(html).toContain("段落尾巴");
   });
 
   it("keeps streaming text bounded for long tokens while preserving the table width override", () => {

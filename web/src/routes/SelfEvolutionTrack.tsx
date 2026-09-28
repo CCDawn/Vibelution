@@ -52,6 +52,7 @@ import {
   migrateLegacyNumericPane,
   type PaneSpec,
 } from "../components/layout/paneLayoutPersistence";
+import { paneWidthCssVar } from "../components/layout/paneCssVariables";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import {
@@ -79,16 +80,21 @@ import { SelfEvolutionAutonomousLoopPanel } from "./SelfEvolutionAutonomousLoopP
 import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 
 type SelfEvolutionDynamicVariable =
-  | "--self-sidebar-width"
-  | "--self-vital-progress";
+  | "--self-vital-progress"
+  | "--pane-w-sidebar";
 
 type SelfEvolutionDynamicStyle = CSSProperties & Partial<Record<SelfEvolutionDynamicVariable, string>>;
 type SelfObservationInputMode = "prompt" | "blank";
 
-function workspaceLayoutStyle(sidebarCollapsed: boolean, sidebarWidth: number): SelfEvolutionDynamicStyle {
+function workspaceLayoutStyle(
+  sidebarCollapsed: boolean,
+  paneVariablesStyle: CSSProperties,
+): SelfEvolutionDynamicStyle {
   return {
-    "--self-sidebar-width": sidebarCollapsed ? "0px" : `${sidebarWidth}px`,
-  };
+    ...paneVariablesStyle,
+    // Collapse overrides the hook-owned pane variable in this subtree.
+    ...(sidebarCollapsed ? { [paneWidthCssVar("sidebar")]: "0px" } : null),
+  } as SelfEvolutionDynamicStyle;
 }
 
 function petVitalFillStyle(value: number): SelfEvolutionDynamicStyle {
@@ -779,6 +785,8 @@ export function SelfEvolutionTrack({
   }, []);
   const {
     layoutRef: selfLayoutRef,
+    registerSplitContainer: registerSelfContainer,
+    paneVariablesStyle: selfPaneVariablesStyle,
     widths: selfPaneWidths,
     draggingPaneId: selfDraggingPaneId,
     startResize: startSelfPaneResize,
@@ -1567,9 +1575,12 @@ export function SelfEvolutionTrack({
         <div className={styles.trackBody}>
           <div className={styles.trackBodyContent}>
             <div
-              ref={selfLayoutRef}
+              ref={(element) => {
+                selfLayoutRef.current = element;
+                registerSelfContainer(element);
+              }}
               className={styles.workspaceLayout}
-              style={workspaceLayoutStyle(sidebarCollapsed, sidebarWidth)}
+              style={workspaceLayoutStyle(sidebarCollapsed, selfPaneVariablesStyle)}
               data-vui-recipe="evolution-self-workbench"
               data-vui-layout-id={SELF_LAYOUT_ID}
             >

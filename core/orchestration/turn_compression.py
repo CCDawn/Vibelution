@@ -12,6 +12,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 
 from core.infrastructure.feature_gate import resolve_feature_decision
 from core.infrastructure.state import AgentState, get_state_manager
+from core.orchestration import llm_summary_breaker
 from core.orchestration.agent_modes import AgentMode
 from core.orchestration.agent_runtime_bindings import (
     _as_mapping,
@@ -484,6 +485,55 @@ def compress_turn_messages(
         or _context_compression_trigger_source(combined_reason)
     )
     use_llm = level in (CompressionLevel.DEEP, CompressionLevel.EMERGENCY)
+
+    # LLM summary failure breaker: repeated consecutive LLM summary failures
+    # degrade *automatic* full compression to the rule-based summary, audibly
+    # (see core/orchestration/llm_summary_breaker.py). Manual / provider-limit
+    # compression requests are never intercepted -- their LLM attempts can
+    # still succeed, which resets the counter and releases the breaker.
+    # Micro-compaction makes no LLM call and is unaffected.
+    breaker_threshold = _coerce_nonnegative_int(
+        getattr(
+            config.context_compression,
+            "llm_summary_failure_breaker_threshold",
+            llm_summary_breaker.DEFAULT_LLM_SUMMARY_FAILURE_BREAKER_THRESHOLD,
+        ),
+        default=llm_summary_breaker.DEFAULT_LLM_SUMMARY_FAILURE_BREAKER_THRESHOLD,
+    )
+    if use_llm and llm_summary_breaker.is_open(session_id, agent_id):
+        breaker_failures = llm_summary_breaker.consecutive_failures(session_id, agent_id)
+        if resolved_trigger_source == "auto":
+            recorder(
+                "runtime",
+                "agent.context_compression.llm_summary_degraded",
+                message=(
+                    "Automatic full compression degraded to the rule-based summary: "
+                    "LLM summary breaker is open."
+                ),
+                level="warning",
+                outcome="degraded",
+                fields={
+                    "agentId": agent_id,
+                    "sessionId": session_id,
+                    "turnId": turn_id,
+                    "iteration": iteration,
+                    "triggerSource": resolved_trigger_source,
+                    "guardReason": llm_summary_breaker.BREAKER_GUARD_REASON,
+                    "consecutiveFailures": breaker_failures,
+                    "threshold": breaker_threshold,
+                    "fallbackType": "rule_based_breaker_open",
+                },
+            )
+            try:
+                ui.add_log(
+                    f"[压缩] LLM 摘要连败熔断生效，本次自动压缩改用规则摘要"
+                    f"（连败 {breaker_failures} 次，成功一次后自动恢复）",
+                    "WARN",
+                )
+            except Exception:
+                pass
+            use_llm = False
+        # manual / provider_limit: fall through with the LLM attempt intact.
     messages_for_compression = messages
     tool_result_replacement_state: Dict[str, Any] = {"replacements": []}
     try:
@@ -514,6 +564,17 @@ def compress_turn_messages(
     # Retention baseline: compression must never create a new unresolved call
     # or a new orphan tool result (strict provider validator stays fail-closed).
     before_pairing = _tool_call_pairing_snapshot(messages_for_compression)
+    summary_reporter = None
+    if use_llm:
+        summary_reporter = llm_summary_breaker.SummaryBreakerReporter(
+            session_id=session_id,
+            agent_id=agent_id,
+            turn_id=turn_id,
+            iteration=iteration,
+            threshold=breaker_threshold,
+            trigger_source=resolved_trigger_source,
+            recorder=recorder,
+        )
     compressed, summary = token_compressor.compress(
         messages_for_compression,
         max_chars=comp_config.summary_max_chars,
@@ -521,6 +582,7 @@ def compress_turn_messages(
         keep_count=keep_ai_messages,
         preserve_errors=comp_config.preserve_errors,
         use_llm_summary=use_llm,
+        llm_summary_reporter=summary_reporter,
     )
     replacement_summary = _format_tool_result_replacement_summary(tool_result_replacement_state)
     if replacement_summary:

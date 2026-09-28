@@ -40,10 +40,10 @@ export const TEAM_STAGE_TONE_STYLE: Record<TeamStageTone, CSSProperties> = {
 };
 
 const CARD_BASE =
-  "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center content-center gap-3 overflow-hidden rounded-[var(--vui-radius-soft)] border p-2.5 text-left text-[0.72rem] font-[740] cursor-pointer " +
+  "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center content-center gap-3 overflow-hidden rounded-[var(--vui-radius-soft)] border p-2.5 text-left text-vui-2xs font-[740] cursor-pointer " +
   "border-[color:var(--source-step-border,var(--border-soft))] text-[color:var(--source-step-fg,var(--fg-muted))] " +
   "bg-[color:var(--source-workbench-card)] shadow-[var(--vui-elevation-1)] " +
-  "transition-[border-color,box-shadow,background-color] duration-150 ease-[var(--vui-ease)] " +
+  "transition-[border-color,box-shadow,background-color] duration-150 ease-vui " +
   "hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:shadow-[var(--vui-elevation-2)] " +
   "focus-visible:outline-none focus-visible:shadow-[var(--vui-shadow-focus),var(--vui-elevation-2)] focus-visible:border-[var(--border-strong)]";
 
@@ -52,12 +52,12 @@ const CARD_SELECTED =
 
 const HEADER = "flex min-w-0 items-center gap-2";
 const STEP_INDEX =
-  "flex h-[22px] min-w-[26px] items-center justify-center rounded-[6px] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] text-[0.62rem] font-[820] text-[var(--fg-secondary)]";
+  "flex h-[22px] min-w-[26px] items-center justify-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] text-vui-micro-10 font-[820] text-[var(--fg-secondary)]";
 const STATUS_BADGE =
-  "max-w-[58%] text-[0.64rem] font-[720] text-[color:var(--source-step-fg,var(--fg-muted))]";
+  "max-w-[58%] text-vui-micro-10 font-[720] text-[color:var(--source-step-fg,var(--fg-muted))]";
 const BODY = "flex min-w-0 items-center";
 const ACTION_BUTTON =
-  "[&_[data-vui=native-button]]:w-fit [&_[data-vui=native-button]]:max-w-full [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:text-[0.66rem] [&_[data-vui=native-button]]:font-[840] [&_[data-vui=native-button]]:whitespace-nowrap";
+  "[&_[data-vui=native-button]]:w-fit [&_[data-vui=native-button]]:max-w-full [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:text-vui-micro-11 [&_[data-vui=native-button]]:font-[840] [&_[data-vui=native-button]]:whitespace-nowrap";
 const ACTION_ROW =
   `flex flex-none items-center justify-end gap-1.5 ${ACTION_BUTTON}`;
 const TEXT_TRUNCATE = "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap";
@@ -136,7 +136,7 @@ export function TeamStageCard({
           <strong className={STEP_INDEX}>
             {String(index + 1).padStart(2, "0")}
           </strong>
-          <b className={`text-[0.86rem] text-[var(--fg-primary)] ${TEXT_TRUNCATE}`}>{label}</b>
+          <b className={`text-vui-xs text-[var(--fg-primary)] ${TEXT_TRUNCATE}`}>{label}</b>
           <span
             data-slot="stage-status"
             className={`${STATUS_BADGE} ${TEXT_TRUNCATE}`}

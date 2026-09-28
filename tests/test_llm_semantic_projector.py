@@ -11,6 +11,8 @@ from core.llm.semantic_messages import (
     ToolCallPart,
     ToolResultPart,
 )
+from core.llm.provider_replay_state import OpaqueReplayItem, ProviderReplayState
+from core.llm.protocols import WireProtocol
 from core.llm.semantic_projector import (
     SemanticProjectionError,
     SemanticProjectionInput,
@@ -27,7 +29,7 @@ def _scope() -> InvocationScope:
     )
 
 
-def _project(messages, tools=()):
+def _project(messages, tools=(), replay_state=None):
     return project_semantic_request(
         SemanticProjectionInput(
             messages=tuple(messages),
@@ -35,6 +37,7 @@ def _project(messages, tools=()):
             scope=_scope(),
             settings=SemanticGenerationSettings(max_output_tokens=256),
             tool_to_schema=lambda tool: tool,
+            replay_state=replay_state,
         )
     )
 
@@ -80,6 +83,14 @@ def test_projector_preserves_images_cache_hints_replay_references_and_tool_schem
                 "reasoning_replay_item_id": "reasoning-1",
             },
         ],
+        replay_state=ProviderReplayState(
+            issuer="test",
+            provider_id="provider-1",
+            endpoint_fingerprint="fingerprint-1",
+            model_id="model-1",
+            wire_protocol=WireProtocol.RESPONSES,
+            opaque_items=(OpaqueReplayItem(item_id="reasoning-1", payload=b'{"type":"reasoning","id":"reasoning-1"}'),),
+        ),
         tools=(
             {
                 "type": "function",

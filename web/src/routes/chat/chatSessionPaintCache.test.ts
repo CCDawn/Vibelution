@@ -16,6 +16,7 @@ import {
   shouldShowStickyTranscriptPending,
   touchSessionKeepAlive,
 } from "./chatSessionPaintCache";
+import { applyOptimisticEditResubmit } from "../chatSessionState";
 
 function detail(id: string, messages: number, provisional = false): SessionDetail {
   return {
@@ -126,6 +127,22 @@ describe("chatSessionPaintCache", () => {
       detail: detail("s1", 2, false),
     });
     expect(paint?.messages?.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it("keeps a pending edit tail hidden when a stale no-window detail arrives after a session switch", () => {
+    const original = detail("s1", 4);
+    const optimistic = applyOptimisticEditResubmit(original, {
+      messageId: "s1-m0",
+      content: "改写后的第一问",
+      clientSubmissionId: "submission-edit-switch",
+    });
+    rememberSessionDetailPaint(optimistic);
+    const paint = resolveStickySessionDetailPaint({
+      activeSessionId: "s1",
+      detail: original,
+    });
+    expect(paint?.messages).toHaveLength(1);
+    expect(paint?.messages[0]?.content).toBe("改写后的第一问");
   });
 
   it("does not treat sticky messages as transcript-pending", () => {

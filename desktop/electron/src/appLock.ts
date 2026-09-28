@@ -11,6 +11,12 @@ export type SingleInstanceLifecycleEnvelope = {
   kind: "vibelution-single-instance";
   projectRoot: string;
   openWorkbench: boolean;
+  /**
+   * Hidden presentation for branch instance workbench windows (e2e lanes).
+   * Traveling inside the envelope (not env) is what lets an already-running
+   * shared shell honor a per-request hidden intent.
+   */
+  hiddenPresentation: boolean;
   lifecycle: {
     command: string;
     provenance: SingleInstanceLifecycleProvenance;
@@ -23,6 +29,7 @@ export type SingleInstanceLifecycleEnvelope = {
 export type SingleInstanceLifecycleEnvelopeInput = {
   projectRoot?: string;
   openWorkbench?: boolean;
+  hiddenPresentation?: boolean;
   lifecycleCommand?: string;
   lifecycleSource?: string;
   lifecycleReason?: string;
@@ -32,7 +39,7 @@ export type SingleInstanceLifecycleEnvelopeInput = {
 
 export type SecondInstanceIntent =
   | { action: "handle_deep_link"; rawUrl: string }
-  | { action: "apply_project"; projectRoot: string; lifecycleCommand: string }
+  | { action: "apply_project"; projectRoot: string; lifecycleCommand: string; hiddenPresentation: boolean }
   | { action: "lifecycle"; command: string }
   | { action: "open_workbench" }
   | { action: "focus_existing_shell" };
@@ -40,6 +47,7 @@ export type SecondInstanceIntent =
 export type SingleInstanceCliIntent = {
   projectRoot: string;
   openWorkbench: boolean;
+  hiddenPresentation: boolean;
   lifecycleCommand: string;
 };
 
@@ -76,6 +84,7 @@ export function createSingleInstanceEnvelope(
     kind: "vibelution-single-instance",
     projectRoot: String(input.projectRoot || "").trim(),
     openWorkbench: input.openWorkbench === true,
+    hiddenPresentation: input.hiddenPresentation === true,
     lifecycle: {
       command,
       provenance: explicitlyForwarded ? "forwarded" : "operator",
@@ -95,11 +104,12 @@ export function createSingleInstanceEnvelope(
  */
 export function resolveSingleInstanceCliIntent(value: unknown): SingleInstanceCliIntent {
   if (!isSingleInstanceEnvelope(value)) {
-    return { projectRoot: "", openWorkbench: false, lifecycleCommand: "" };
+    return { projectRoot: "", openWorkbench: false, hiddenPresentation: false, lifecycleCommand: "" };
   }
   return {
     projectRoot: typeof value.projectRoot === "string" ? value.projectRoot.trim() : "",
     openWorkbench: value.openWorkbench === true,
+    hiddenPresentation: value.hiddenPresentation === true,
     lifecycleCommand: value.lifecycle.command.trim().toLowerCase()
   };
 }
@@ -162,6 +172,7 @@ export function resolveSecondInstanceIntent(input: {
   deepLinkUrl?: string;
   projectRoot?: string;
   openWorkbench?: boolean;
+  hiddenPresentation?: boolean;
   lifecycleCommand?: string;
 }): SecondInstanceIntent {
   const deepLinkUrl = String(input.deepLinkUrl || "").trim();
@@ -174,7 +185,8 @@ export function resolveSecondInstanceIntent(input: {
     return {
       action: "apply_project",
       projectRoot,
-      lifecycleCommand: lifecycleCommand === "open" ? "" : lifecycleCommand
+      lifecycleCommand: lifecycleCommand === "open" ? "" : lifecycleCommand,
+      hiddenPresentation: input.hiddenPresentation === true
     };
   }
   if (lifecycleCommand === "open") {

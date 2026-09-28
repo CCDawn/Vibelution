@@ -1,6 +1,7 @@
 import { ConversationMessage, SessionDetail, SessionMessageWindow, SessionReferenceAttachment, SessionStreamEvent, SessionSummary } from "../api/types";
 import { isRunningPhase } from "./chat/chatCodingRouteViewModel";
 import { hasTerminalCanonicalTurnOutcome } from "./chatTurnProtocol";
+import { editMessageIndex, editMessageTurnId, mergeEditResubmitDetail } from "./chat/chatEditResubmitState";
 
 export type OptimisticUserMessageInput = {
   sessionId: string;
@@ -235,14 +236,14 @@ export type OptimisticEditResubmitInput = {
   messageId: string;
   content: string;
   clientSubmissionId?: string;
+  supersededTurnId?: string;
 };
 
 /**
  * Branch-mode edit-resubmit: immediately rewrite the target user message and
- * mark the session running, but keep the rest of the timeline in place. The
- * server answers with a rebased snapshot whose authoritative window replaces
- * the superseded tail, so the client never truncates locally. Callers should
- * snapshot the previous detail for rollback.
+ * hide the superseded tail. The marker prevents stale detail/SSE/paint merges
+ * from resurrecting that tail until the server acknowledges the new branch.
+ * Callers should snapshot the previous detail for rollback.
  */
 export function applyOptimisticEditResubmit(
   detail: SessionDetail | undefined,
@@ -287,12 +288,22 @@ export function applyOptimisticEditResubmit(
     nextTarget.references = target.references;
   }
 
-  const nextMessages = [...messages];
+  const nextMessages = messages.slice(0, targetIndex + 1);
   nextMessages[targetIndex] = nextTarget;
+  const protection = {
+    targetMessageId: messageId,
+    clientSubmissionId,
+    baseLedgerSeq: Number(detail.ledgerSeq ?? 0) || undefined,
+    phase: "pending" as const,
+    targetMessageIndex: Number.isFinite(editMessageIndex(target)) ? editMessageIndex(target) : undefined,
+    supersededTurnIds: [...new Set(messages.slice(targetIndex).map(editMessageTurnId).filter(Boolean))],
+    ...(input.supersededTurnId ? { supersededTurnId: input.supersededTurnId } : {}),
+  };
 
   return markSessionDetailRunning({
     ...detail,
     messages: nextMessages,
+    editResubmitProtection: protection,
     updatedAt: new Date().toISOString(),
   });
 }
@@ -477,10 +488,8 @@ export function mergeSessionDetailMessageWindow(
   previous: SessionDetail | undefined,
   next: SessionDetail,
 ): SessionDetail {
-  return preserveSessionDetailStopIntent(
-    previous,
-    mergeSessionDetailMessageWindowInner(previous, next),
-  );
+  return mergeEditResubmitDetail(previous, next, (before, incoming) =>
+    preserveSessionDetailStopIntent(before, mergeSessionDetailMessageWindowInner(before, incoming)));
 }
 
 /**

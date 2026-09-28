@@ -171,7 +171,7 @@ const styles = {
   rawFileTabs:
     "rawFileTabs min-w-0",
   resizableLayout:
-    "resizableLayout min-w-0 max-w-full grid h-full min-h-0 gap-2 p-2 !grid grid-cols-[var(--logs-sidebar-width)_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[900px]:grid-cols-[minmax(0,1fr)] max-[900px]:grid-rows-[max-content_minmax(0,1fr)]",
+    "resizableLayout min-w-0 max-w-full grid h-full min-h-0 gap-2 p-2 !grid grid-cols-[var(--pane-w-sidebar)_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[900px]:grid-cols-[minmax(0,1fr)] max-[900px]:grid-rows-[max-content_minmax(0,1fr)]",
   // Shared PaneCollapseHandle owns the visual rule (Wave 4C+).
   resizeHandle:
     "resizeHandle min-w-0",

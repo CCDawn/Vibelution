@@ -197,3 +197,47 @@ def test_claim_without_starting_rows_keeps_single_claim_publish(tmp_path, publis
     assert claimed is not None
     assert claimed["id"] == "turn-1"
     assert published_sessions == [SESSION_ID]
+
+
+def test_claim_skips_paused_rows(tmp_path, published_sessions):
+    # A paused head row holds its place but never claims; drain takes the next
+    # "queued" row behind it.
+    _seed_conversation(
+        tmp_path,
+        [
+            _turn_row("turn-paused", status="paused"),
+            _turn_row("turn-next", status="queued"),
+        ],
+    )
+
+    claimed = queued_turns._claim_next_queued_turn(SESSION_ID)
+
+    assert claimed is not None
+    assert claimed["id"] == "turn-next"
+    rows = _persisted_rows(tmp_path)
+    assert [(row["id"], row["status"]) for row in rows] == [
+        ("turn-paused", "paused"),
+        ("turn-next", "starting"),
+    ]
+    assert published_sessions == [SESSION_ID]
+
+
+def test_all_paused_queue_claims_nothing(tmp_path, published_sessions):
+    _seed_conversation(
+        tmp_path,
+        [
+            _turn_row("turn-a", status="paused"),
+            _turn_row("turn-b", status="paused"),
+        ],
+    )
+
+    claimed = queued_turns._claim_next_queued_turn(SESSION_ID)
+
+    assert claimed is None
+    rows = _persisted_rows(tmp_path)
+    assert [(row["id"], row["status"]) for row in rows] == [
+        ("turn-a", "paused"),
+        ("turn-b", "paused"),
+    ]
+    # Nothing changed, so there is nothing to publish.
+    assert published_sessions == []

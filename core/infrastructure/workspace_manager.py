@@ -22,6 +22,7 @@ Workspace Manager - 统一工作区管理
 import os
 import json
 import sqlite3
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
@@ -67,6 +68,21 @@ def _resolve_workspace_root(project_root: Optional[Path] = None) -> Path:
         from config.paths import resolve_workspace_home
 
         return resolve_workspace_home()
+
+
+def _atomic_write_json(path: Path, data: Dict[str, Any], *, newline: bool = False) -> None:
+    """json 原子落盘：先写同目录临时文件再 os.replace，崩溃不留半写文件。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, ensure_ascii=False, indent=2)
+            if newline:
+                handle.write("\n")
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 
 
 def sys_path_iter():
@@ -601,8 +617,7 @@ class WorkspaceManager:
     def write_memory_index(self, data: Dict[str, Any]) -> bool:
         """写入轻量级索引"""
         try:
-            with open(self.memory_index, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            _atomic_write_json(self.memory_index, data)
             return True
         except Exception as e:
             from core.logging import debug as _debug_logger
@@ -668,10 +683,7 @@ class WorkspaceManager:
         """写入科研流程画布配置。"""
         try:
             path = self.get_research_flow_canvas_path()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-                f.write("\n")
+            _atomic_write_json(path, data, newline=True)
             return True
         except Exception as e:
             from core.logging import debug as _debug_logger
@@ -692,10 +704,7 @@ class WorkspaceManager:
         """写入科研组织图配置。"""
         try:
             path = self.get_research_organization_path()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-                f.write("\n")
+            _atomic_write_json(path, data, newline=True)
             return True
         except Exception as e:
             from core.logging import debug as _debug_logger

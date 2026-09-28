@@ -116,3 +116,72 @@ pre {
 :where(button:disabled, input:disabled, textarea:disabled, select:disabled) {
   cursor: not-allowed;
 }
+
+/*
+ * Global reduced-motion fallback (Wave 5B, standard degradation block).
+ * Collapses every transition/animation to effectively zero length so
+ * prefers-reduced-motion users never see non-essential movement, including in
+ * route-css chunks that ship no local motion-reduce pairing. Durations stay at
+ * 0.01ms (not none) so transition events still fire for state-driven logic.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * Text sweep for counted API retries (`.vui-shimmer-text`).
+ *
+ * ZCode-aligned semantics: a retry that is quietly recovered within the first
+ * two attempts never paints; from the third attempt the visible counter text
+ * carries this single low-contrast sweep. Peak tone is the secondary foreground
+ * (a running secondary status must not hit the pure primary text peak), the
+ * moving valley is a transparent mix of the same token so every theme inherits
+ * the gradient from its own foreground.
+ */
+.vui-shimmer-text {
+  display: inline-block;
+  background: var(--vui-gradient-shimmer-text);
+  background-size: 300% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: vui-shimmer-text-flow 4s linear infinite;
+  will-change: background-position;
+}
+
+@keyframes vui-shimmer-text-flow {
+  0% {
+    background-position: 100% 0;
+  }
+
+  50% {
+    background-position: 0% 0;
+  }
+
+  100% {
+    background-position: 0% 0;
+  }
+}
+
+/*
+ * Reduced motion: drop the sweep entirely and restore a solid, readable
+ * foreground. The global reduce block above only shortens animations; without
+ * this pairing the frozen gradient would strand part of the label at the
+ * valley alpha.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .vui-shimmer-text {
+    animation: none;
+    background: none;
+    color: var(--vui-shimmer-strong);
+    -webkit-text-fill-color: currentcolor;
+  }
+}

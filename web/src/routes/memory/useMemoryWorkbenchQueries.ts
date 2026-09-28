@@ -120,11 +120,23 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
     selectedGraphNodeId,
   } = options;
 
+  // Overview payload serves two tiers. Ops views (overview/effective/manage/
+  // sources/cleanup) and the library browse render item content; knowledge,
+  // graph, personal/agents and team views never read sections content, so they
+  // must not keep polling the full-content payload every 30s. The flag lives in
+  // the queryKey (separate cache entries), so entering a content view fetches
+  // the content variant immediately; non-content views skip the query entirely.
+  const overviewNeedsContent = isManageMemoryView(forcedView) || isLibraryMemoryView(forcedView);
   const overviewQuery = useQuery({
-    queryKey: queryKeys.memoryOverview(),
-    queryFn: ({ signal }) => fetchMemoryOverview<MemoryOverview>({ includeContent: true, signal }),
+    queryKey: queryKeys.memoryOverview(overviewNeedsContent),
+    queryFn: ({ signal }) => fetchMemoryOverview<MemoryOverview>({ includeContent: overviewNeedsContent, signal }),
     refetchInterval: resolvePollingInterval(pageVisible, 30_000),
     refetchIntervalInBackground: false,
+    // Cache-first remount: within one poll cycle reuse the cached payload and let
+    // polling refresh silently; keep the heavy content variant around 10min.
+    staleTime: 30_000,
+    gcTime: 600_000,
+    enabled: overviewNeedsContent,
   });
   const projectMemoryUpdatesQuery = useQuery({
     queryKey: queryKeys.agentProjectMemoryUpdates(memoryProposalStatusFilter, "", 100),
@@ -136,6 +148,7 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
       }),
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
     refetchIntervalInBackground: false,
+    staleTime: 45_000,
     enabled: forcedView === "overview",
   });
   const memoryUsageContractQuery = useQuery({
@@ -143,6 +156,7 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
     queryFn: ({ signal }) => fetchMemoryUsageContract<MemoryUsageContractPayload>({ signal }),
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
     refetchIntervalInBackground: false,
+    staleTime: 60_000,
     enabled: forcedView === "knowledge",
   });
   const agentsQuery = useQuery({
@@ -151,6 +165,7 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
     enabled: isPersonalMemoryView(forcedView) || isTeamMemoryView(forcedView) || forcedView === "graph" || isManageMemoryView(forcedView),
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
     refetchIntervalInBackground: false,
+    staleTime: 60_000,
   });
   const agentMemoryInventoryQuery = useQuery({
     queryKey: ["memory", "agents", "inventory"],
@@ -158,6 +173,7 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
     enabled: isPersonalMemoryView(forcedView),
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
     refetchIntervalInBackground: false,
+    staleTime: 45_000,
   });
 
   const knowledgeActorAgents = agentsQuery.data ?? [];
@@ -181,6 +197,10 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
       }),
     enabled: isPersonalMemoryView(forcedView) && Boolean(selectedAgentMemoryAgentId),
     refetchInterval: false,
+    // Heavy includeContent payload with no polling: serve cache instantly on
+    // remount and keep it parked for 15min instead of the 5min default GC.
+    staleTime: 60_000,
+    gcTime: 900_000,
   });
   const knowledgeDashboardSnapshotQuery = useQuery({
     queryKey: queryKeys.knowledgeDashboardSnapshot(fallbackKnowledgeActorAgentId),
@@ -194,6 +214,9 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
       }),
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
     refetchIntervalInBackground: false,
+    // Large aggregated payload: cache-first remount + extended GC.
+    staleTime: 45_000,
+    gcTime: 600_000,
     enabled: (isTeamMemoryView(forcedView) || isManageMemoryView(forcedView)) && Boolean(fallbackKnowledgeActorAgentId),
   });
   const memoryKnowledgeGraphQuery = useQuery({
@@ -207,6 +230,7 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
       }),
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
     refetchIntervalInBackground: false,
+    staleTime: 60_000,
     enabled: forcedView === "graph" && Boolean(fallbackKnowledgeActorAgentId),
   });
   const memoryKnowledgeGraphNodeDetailQuery = useQuery({
@@ -218,6 +242,8 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
         signal,
       }),
     refetchInterval: false,
+    // Detail node payload is on-demand and heavy-ish; keep cache warm briefly.
+    staleTime: 60_000,
     enabled: forcedView === "graph" && Boolean(selectedGraphNodeId) && Boolean(fallbackKnowledgeActorAgentId),
   });
   const githubProjectLibraryQuery = useQuery({
@@ -225,6 +251,7 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
     queryFn: ({ signal }) => fetchGithubProjectLibrary<GithubProjectLibraryPayload>({ signal }),
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
     refetchIntervalInBackground: false,
+    staleTime: 60_000,
     enabled: isLibraryMemoryView(forcedView),
   });
 
@@ -287,6 +314,7 @@ export function useMemoryKnowledgeQueries(options: UseMemoryKnowledgeQueriesOpti
     enabled: isTeamMemoryView(forcedView) && Boolean(activeKnowledgeBaseForItems) && Boolean(activeKnowledgeActorAgentId),
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
     refetchIntervalInBackground: false,
+    staleTime: 45_000,
   });
   const knowledgeSearchQuery = useQuery({
     queryKey: queryKeys.knowledgeSearch(
@@ -319,6 +347,7 @@ export function useMemoryKnowledgeQueries(options: UseMemoryKnowledgeQueriesOpti
     enabled: forcedView === "knowledge" && Boolean(activeKnowledgeActorAgentId),
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
     refetchIntervalInBackground: false,
+    staleTime: 60_000,
   });
   const knowledgeRagRetrieveQuery = useQuery({
     queryKey: queryKeys.knowledgeRagRetrieve(
@@ -361,6 +390,7 @@ export function useMemoryKnowledgeQueries(options: UseMemoryKnowledgeQueriesOpti
     enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems) && Boolean(activeKnowledgeActorAgentId),
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
     refetchIntervalInBackground: false,
+    staleTime: 45_000,
   });
   const permissionAuditQuery = useQuery({
     queryKey: queryKeys.knowledgePermissionAudit(activeKnowledgeActorAgentId),
@@ -372,6 +402,7 @@ export function useMemoryKnowledgeQueries(options: UseMemoryKnowledgeQueriesOpti
     enabled: forcedView === "knowledge" && Boolean(activeKnowledgeActorAgentId),
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
     refetchIntervalInBackground: false,
+    staleTime: 60_000,
   });
   const governanceTasksQuery = useQuery({
     queryKey: queryKeys.knowledgeGovernanceTasks(activeKnowledgeActorAgentId, "open"),
@@ -384,6 +415,7 @@ export function useMemoryKnowledgeQueries(options: UseMemoryKnowledgeQueriesOpti
     enabled: forcedView === "knowledge" && Boolean(activeKnowledgeActorAgentId),
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
     refetchIntervalInBackground: false,
+    staleTime: 45_000,
   });
   const ingestionAdaptersQuery = useQuery({
     queryKey: queryKeys.knowledgeIngestionAdapters(),
@@ -423,6 +455,7 @@ export function useMemoryKnowledgeQueries(options: UseMemoryKnowledgeQueriesOpti
     enabled: forcedView === "knowledge" && Boolean(activeSourceOwnerId) && Boolean(activeKnowledgeActorAgentId),
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
     refetchIntervalInBackground: false,
+    staleTime: 45_000,
   });
   const centralSourcesQuery = useQuery({
     queryKey: queryKeys.knowledgeCentralSources(activeKnowledgeActorAgentId, sourceOwnerType, activeSourceOwnerId),
@@ -436,6 +469,7 @@ export function useMemoryKnowledgeQueries(options: UseMemoryKnowledgeQueriesOpti
     enabled: forcedView === "knowledge" && Boolean(activeSourceOwnerId) && Boolean(activeKnowledgeActorAgentId),
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
     refetchIntervalInBackground: false,
+    staleTime: 60_000,
   });
   return {
     knowledgeItemsQuery,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
 
@@ -21,6 +22,28 @@ PROMPT_PACK_FILES = (
 )
 LEGACY_FOLLOWUP_PROMPT_FILE = "12_companion_followup_delivery.md"
 MAX_PROMPT_PACK_CHARS = 12_000
+
+
+def proactive_turn_orientation(trigger: Mapping[str, object] | None) -> str:
+    """Put native-attempt identity before optional, truncatable life-state data.
+
+    The caller resolves the attempt by the current native Turn id. Never infer
+    a proactive turn merely from an empty user message or from session history.
+    """
+    if not trigger:
+        return ""
+    continuation = str(trigger.get("deliveryKind") or "") in {"followup", "burst_continuation"}
+    purpose = (
+        "本轮是你上一条回复的自然延续；接着尚未说完的内容，不重复上一条，也不假装用户刚回复。"
+        if continuation
+        else "本轮是你根据生活事件主动联系用户；从自己的近况或有依据的共同话题自然开口。"
+    )
+    return (
+        "## Companion Turn Origin: internal_proactive\n"
+        "本轮没有新的用户消息。空输入只是内部触发占位，不代表用户发了空消息或误触发送。"
+        "不要把历史最后一句当作刚收到的新消息，不询问用户是否发空了，不解释内部触发机制。\n"
+        + purpose + "\n\n"
+    )
 
 
 @lru_cache(maxsize=1)
@@ -49,4 +72,5 @@ __all__ = [
     "PROMPT_PACK_FILES",
     "load_legacy_followup_prompt",
     "load_prompt_pack",
+    "proactive_turn_orientation",
 ]

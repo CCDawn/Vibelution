@@ -341,6 +341,7 @@ export type AgentProjectMemoryUpdateProposal = {
 
 export type MemoryPolicy = {
   policyId: string;
+  enabled: boolean;
   privateMemoryRoot: string;
   episodicEventsPath: string;
   groupContextEventsPath: string;

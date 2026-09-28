@@ -734,12 +734,9 @@ def _summary_from_directory_row(
     raw_title = str(row.get("title") or "").strip()
     session_kind = str(row.get("sessionKind") or "main").strip() or "main"
     agent_display_name = str((agent or {}).get("displayName") or "").strip()
-    if session_kind == "child" or not s._is_default_empty_session_title(raw_title):
-        display_title = raw_title
-    elif agent_id:
-        display_title = agent_display_name or raw_title
-    else:
-        display_title = raw_title
+    # A new session keeps the placeholder label; Agent identity stays on
+    # agentDisplayName, never on the session title.
+    display_title = raw_title
     parent_session_id = str(row.get("parentSessionId") or "").strip()
     child_session_ids = list(row.get("childSessionIds") or [])
     agent_status = s._session_agent_status_payload(

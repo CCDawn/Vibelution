@@ -2,7 +2,7 @@ import "../design/route-css/workbench-secondary.tailwind.css";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, CheckCircle2, CheckSquare, CircleSlash, FlaskConical, Power, RefreshCw, Search, Square, Trash2, Wrench } from "lucide-react";
-import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { listAgentSummaries, updateAgentToolPolicy, validateAgentToolPolicy } from "../api/agents";
@@ -58,6 +58,7 @@ import {
   migrateLegacyNumericPane,
   type PaneSpec,
 } from "../components/layout/paneLayoutPersistence";
+import { paneWidthCssVar } from "../components/layout/paneCssVariables";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { ToolsRouteAgentScopePanel } from "./ToolsRouteAgentScopePanel";
@@ -875,6 +876,8 @@ export function ToolsRoute() {
   }, []);
   const {
     layoutRef: toolsLayoutRef,
+    registerSplitContainer: registerToolsContainer,
+    paneVariablesStyle: toolsPaneVariablesStyle,
     widths: toolsPaneWidths,
     draggingPaneId: toolsDraggingPaneId,
     startResize: startToolsPaneResize,
@@ -892,6 +895,12 @@ export function ToolsRoute() {
     kind: "bulk-delete" | "delete-one";
     toolId?: string;
     toolName?: string;
+  }>(null);
+  const [toolPolicyConfirm, setToolPolicyConfirm] = useState<null | {
+    agent: AgentInstance;
+    draft: AgentToolPolicyDraft;
+    basePolicy: ToolPolicy | undefined;
+    preview: AgentToolPolicyConfiguration;
   }>(null);
   const [notice, setNotice] = useState<{ tone: "neutral" | "success" | "error"; text: string }>({
     tone: "neutral",
@@ -1019,6 +1028,8 @@ export function ToolsRoute() {
     [activeAgents, requestedAgentId],
   );
   const activePolicyAgent = activeAgents.find((agent) => agent.agentId === activePolicyAgentId) ?? activeAgents[0] ?? null;
+  const activePolicyAgentRef = useRef<AgentInstance | null>(activePolicyAgent);
+  activePolicyAgentRef.current = activePolicyAgent;
   const activePolicy = toolPolicyForAgent(activePolicyAgent);
   const activePolicyMode = activeTool && activePolicyAgent ? toolPolicyMode(activePolicy, activeTool) : "inherited";
   const editablePolicyTools = useMemo(() => {
@@ -1245,7 +1256,7 @@ export function ToolsRoute() {
   });
 
   const updateToolPolicyMutation = useMutation({
-    mutationFn: async (payload: { agent: AgentInstance; draft: AgentToolPolicyDraft; basePolicy: ToolPolicy | undefined }) => {
+    mutationFn: async (payload: { agent: AgentInstance; draft: AgentToolPolicyDraft; basePolicy: ToolPolicy | undefined; confirmed?: boolean; expectedPreviewFingerprint?: string }) => {
       const toolPolicy = {
         ...defaultToolPolicy(payload.basePolicy?.policyId || "default"),
         ...(payload.basePolicy ?? {}),
@@ -1260,9 +1271,14 @@ export function ToolsRoute() {
       if (!preview.validation.valid) {
         throw new Error(preview.validation.errors.join("; "));
       }
-      const confirmed = !preview.confirmation.required || window.confirm(preview.confirmation.summary);
-      if (!confirmed) {
-        throw new Error(lang === "zh" ? "已取消高影响工具策略变更。" : "High-impact ToolPolicy change cancelled.");
+      if (preview.confirmation.required && (!payload.confirmed || payload.expectedPreviewFingerprint !== preview.policyFingerprint)) {
+        setToolPolicyConfirm({
+          agent: payload.agent,
+          draft: payload.draft,
+          basePolicy: payload.basePolicy,
+          preview,
+        });
+        return null;
       }
       return updateAgentToolPolicy(payload.agent.agentId, {
         toolPolicy,
@@ -1271,12 +1287,20 @@ export function ToolsRoute() {
         confirmed: preview.confirmation.required,
       });
     },
-    onSuccess: (configuration) => {
-      const agent = { ...activePolicyAgent, ...configuration.agent, toolPolicy: configuration.currentPolicy } as AgentInstance;
+    onSuccess: (configuration, variables) => {
+      if (!configuration) {
+        return;
+      }
+      const agent = { ...variables.agent, ...configuration.agent, toolPolicy: configuration.currentPolicy } as AgentInstance;
       queryClient.setQueryData<AgentInstance[] | undefined>(
         queryKeys.agents(),
         (current) => current?.map((item) => item.agentId === agent.agentId ? { ...item, ...agent } : item),
       );
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tools() });
+      if (activePolicyAgentRef.current?.agentId !== agent.agentId) {
+        return;
+      }
       setToolPolicyDraft(toolPolicyDraftFromAgent(agent));
       setToolPolicyPreview(configuration);
       setNotice({
@@ -1285,8 +1309,6 @@ export function ToolsRoute() {
           ? `已保存 ${agent.displayName || agent.agentId} 的工具能力`
           : `Saved tool permissions for ${agent.displayName || agent.agentId}`,
       });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.tools() });
     },
     onError: (error) => {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
@@ -1390,9 +1412,10 @@ export function ToolsRoute() {
   const workspaceStyle = useMemo(
     () =>
       ({
-        "--tools-left-panel-width": leftPanelCollapsed ? "0px" : `${leftPanelWidth}px`,
+        ...toolsPaneVariablesStyle,
+        ...(leftPanelCollapsed ? { [paneWidthCssVar("left")]: "0px" } : null),
       }) as CSSProperties,
-    [leftPanelCollapsed, leftPanelWidth],
+    [leftPanelCollapsed, toolsPaneVariablesStyle],
   );
   const resizeLeftPanelLabel = lang === "zh" ? "调整工具列表宽度" : "Resize tool list";
 
@@ -1705,7 +1728,10 @@ export function ToolsRoute() {
       />
 
       <div
-        ref={toolsLayoutRef}
+        ref={(element) => {
+          toolsLayoutRef.current = element;
+          registerToolsContainer(element);
+        }}
         className={styles.workspace}
         style={workspaceStyle}
         data-vui-recipe="tools-workbench"
@@ -2499,6 +2525,35 @@ export function ToolsRoute() {
           } else if (pending?.kind === "delete-one" && pending.toolId) {
             deleteMutation.mutate(pending.toolId);
           }
+        }}
+      />
+      <VConfirmDialog
+        open={Boolean(toolPolicyConfirm)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setToolPolicyConfirm(null);
+          }
+        }}
+        title={lang === "zh" ? "确认工具能力变更" : "Confirm tool permission changes"}
+        description={toolPolicyConfirm ? (lang === "zh"
+          ? `该变更会影响 ${toolPolicyConfirm.agent.displayName || toolPolicyConfirm.agent.agentId} 后续回合的工具可见性与执行权限。${toolPolicyConfirm.preview.confirmation.summary}`
+          : `This changes tool visibility and execution permissions for subsequent turns of ${toolPolicyConfirm.agent.displayName || toolPolicyConfirm.agent.agentId}. ${toolPolicyConfirm.preview.confirmation.summary}`) : undefined}
+        confirmLabel={lang === "zh" ? "确认保存" : "Confirm and save"}
+        cancelLabel={lang === "zh" ? "取消" : "Cancel"}
+        confirmPending={updateToolPolicyMutation.isPending}
+        onConfirm={() => {
+          const pending = toolPolicyConfirm;
+          if (!pending) {
+            return;
+          }
+          setToolPolicyConfirm(null);
+          updateToolPolicyMutation.mutate({
+            agent: pending.agent,
+            draft: pending.draft,
+            basePolicy: pending.basePolicy,
+            confirmed: true,
+            expectedPreviewFingerprint: pending.preview.policyFingerprint,
+          });
         }}
       />
     </VDenseOpsPage>

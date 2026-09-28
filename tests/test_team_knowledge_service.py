@@ -2507,3 +2507,107 @@ def test_get_or_create_team_knowledge_base_treats_legacy_missing_status_as_activ
 
     assert reused["created"] is False
     assert reused["knowledgeBase"]["knowledgeBaseId"] == existing["knowledgeBaseId"]
+
+
+def test_concurrent_grants_both_survive(knowledge_env):
+    """锁内重读回归：两个线程并发 ensure 不同 steward，后写不得覆盖先写。"""
+    import threading
+
+    team_id = knowledge_env["team"]["teamId"]
+    outsider_id = knowledge_env["outsider"]["agentId"]
+    member_id = knowledge_env["member"]["agentId"]
+
+    barrier = threading.Barrier(2)
+    original = team_knowledge_service._source_governance_for_owner
+
+    def slow_read(owner):
+        # 放大锁外读的竞态窗口：修复前该读发生在 _LOCK 之外
+        barrier.wait(timeout=5)
+        return original(owner)
+
+    results: list[dict] = []
+    errors: list[BaseException] = []
+
+    def grant(agent_id: str) -> None:
+        try:
+            results.append(team_knowledge_service.ensure_owner_source_review_grant("team", team_id, agent_id))
+        except BaseException as exc:  # noqa: BLE001 - 收集失败用于断言
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=grant, args=(outsider_id,)),
+        threading.Thread(target=grant, args=(member_id,)),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert not errors
+    final = team_knowledge_service._source_governance_for_owner(
+        team_knowledge_service._require_owner_context("team", team_id)
+    )
+    stewards = set(final.get("localStewardAgentIds") or [])
+    assert {outsider_id, member_id} <= stewards
+
+
+def test_runtime_context_block_team_knowledge_access_cache_and_invalidation(
+    knowledge_env, monkeypatch
+):
+    """访问行解析缓存：同状态零重读；KB 新建/授权/agent 更新均正确失效。"""
+
+    from core.web.services.agent_directory import projections as agent_directory_projections
+
+    agent_directory_projections._reset_team_knowledge_access_cache()
+    lead_id = knowledge_env["lead"]["agentId"]
+    member_id = knowledge_env["member"]["agentId"]
+    outsider_id = knowledge_env["outsider"]["agentId"]
+    base_id = knowledge_env["base"]["knowledgeBaseId"]
+
+    overview_calls: list[str] = []
+    real_overview = team_knowledge_service.list_knowledge_overview
+
+    def counting_overview(*args, **kwargs):
+        overview_calls.append(str(kwargs.get("agent_id") or ""))
+        return real_overview(*args, **kwargs)
+
+    monkeypatch.setattr(team_knowledge_service, "list_knowledge_overview", counting_overview)
+
+    first_block = agent_directory_service.build_agent_runtime_context_block(member_id)
+    assert base_id in first_block
+    assert overview_calls == [member_id]
+
+    second_block = agent_directory_service.build_agent_runtime_context_block(member_id)
+    assert overview_calls == [member_id]
+    assert second_block == first_block
+
+    outsider_before = agent_directory_service.build_agent_runtime_context_block(outsider_id)
+    assert "未配置可读知识库" in outsider_before
+    assert overview_calls == [member_id, outsider_id]
+
+    # 权限变化：outsider 获得 read grant → 缓存失效，下一次渲染看到新权限。
+    team_knowledge_service.grant_knowledge_base_access(
+        base_id,
+        outsider_id,
+        permissions=["read"],
+        actor_agent_id=lead_id,
+    )
+    outsider_after = agent_directory_service.build_agent_runtime_context_block(outsider_id)
+    assert overview_calls.count(outsider_id) == 2
+    assert "未配置可读知识库" not in outsider_after
+    assert base_id in outsider_after
+
+    # KB 新建：存储文件集 stat 变化 → member 缓存失效，渲染包含新库。
+    second_base = team_knowledge_service.create_knowledge_base(
+        knowledge_env["team"]["teamId"],
+        name="Second Shared Base",
+        actor_agent_id=lead_id,
+    )
+    member_after_create = agent_directory_service.build_agent_runtime_context_block(member_id)
+    assert overview_calls.count(member_id) == 2
+    assert str(second_base["knowledgeBaseId"]) in member_after_create
+
+    # agent 记录/memoryPolicy 更新：注册表 stat 变化 → 缓存失效重解析。
+    agent_directory_service.update_agent_instance(member_id, memory_policy={"enabled": True})
+    agent_directory_service.build_agent_runtime_context_block(member_id)
+    assert overview_calls.count(member_id) == 3

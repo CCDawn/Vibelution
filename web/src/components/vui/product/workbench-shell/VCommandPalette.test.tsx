@@ -91,6 +91,57 @@ describe("VCommandPalette", () => {
     expect(list[0].onRun).not.toHaveBeenCalled();
   });
 
+  it("supports a matchQuery override for scope-prefixed queries", async () => {
+    const list = items();
+    // matchQuery=""：server 已过滤的挂载（如 # 会话模式）按传入顺序原样列出，
+    // 显示 query（含 # 前缀）不参与本地匹配。
+    await act(async () => {
+      root.render(
+        <VCommandPalette
+          open
+          onOpenChange={() => {}}
+          items={list}
+          matchQuery=""
+          labels={{ searchPlaceholder: "搜索", emptyTitle: "无匹配", hint: "hint" }}
+        />,
+      );
+    });
+    const input = await vi.waitFor(() => {
+      const found = document.querySelector("input");
+      expect(found).not.toBeNull();
+      return found as HTMLInputElement;
+    });
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )?.set;
+    await act(async () => {
+      setter?.call(input, "#nothing-matches-this");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain("SCI-001");
+    });
+    expect(document.body.textContent).toContain("SCI-096");
+
+    // matchQuery 提供去前缀文本时，本地匹配按它打分而不是显示 query。
+    await act(async () => {
+      root.render(
+        <VCommandPalette
+          open
+          onOpenChange={() => {}}
+          items={list}
+          matchQuery="neurons"
+          labels={{ searchPlaceholder: "搜索", emptyTitle: "无匹配", hint: "hint" }}
+        />,
+      );
+    });
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain("SCI-096");
+    });
+    expect(document.body.textContent).not.toContain("SCI-001");
+  });
+
   it("shows the empty state for unmatched queries", async () => {
     act(() => {
       root.render(
@@ -118,5 +169,43 @@ describe("VCommandPalette", () => {
     await vi.waitFor(() => {
       expect(document.body.textContent).toContain("没有匹配项");
     });
+  });
+
+  it("keeps keyboard selections rendered beyond the former result cap", async () => {
+    const list = Array.from({ length: 40 }, (_, index) => ({
+      id: String(index), group: "Tasks", label: `Task ${index}`, onRun: vi.fn(),
+    }));
+    await act(async () => root.render(
+      <VCommandPalette open onOpenChange={() => {}} items={list} maxVisible={7}
+        labels={{ searchPlaceholder: "Search", emptyTitle: "Empty", hint: "hint" }} />,
+    ));
+    const input = document.querySelector("input")!;
+    for (let index = 0; index < 35; index += 1) {
+      await act(async () => input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+      expect(document.querySelector('[data-active="true"]')?.textContent).toBe(`Task ${index + 1}`);
+    }
+    await act(async () => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(list[35].onRun).toHaveBeenCalledOnce();
+  });
+
+  it("runs the focused row and clamps selection when results shrink", async () => {
+    const list = items();
+    const render = (next: typeof list) => root.render(
+      <VCommandPalette open onOpenChange={() => {}} items={next}
+        labels={{ searchPlaceholder: "Search", emptyTitle: "Empty", hint: "hint" }} />,
+    );
+    await act(async () => render(list));
+    const row = document.querySelector<HTMLElement>('[data-index="2"]')!;
+    await act(async () => row.focus());
+    await act(async () => row.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(list[2].onRun).toHaveBeenCalledOnce();
+    await act(async () => row.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true })));
+    expect(document.activeElement?.getAttribute("data-index")).toBe("1");
+    await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(list[1].onRun).toHaveBeenCalledOnce();
+    await act(async () => render(list.slice(0, 1)));
+    expect(document.querySelector('[data-active="true"]')?.textContent).toContain(list[0].label);
+    await act(async () => document.querySelector("input")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(list[0].onRun).toHaveBeenCalledOnce();
   });
 });

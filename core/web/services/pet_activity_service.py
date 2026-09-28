@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import re
+from datetime import datetime, timezone
 from typing import Any
 
+from .session.timebase import parse_timestamp_utc
 from .session.tool_approvals import list_tool_approval_requests
 from .session_service import list_sessions, load_chat_turn_work_run_summary
-
 
 _ERROR_STATUSES = {
     "error",
@@ -40,24 +40,9 @@ _RUNNING_STATUSES = {
     "starting",
     "stopping",
 }
-_TERMINAL_STATUSES = {
-    "ready",
-    "idle",
-    "completed",
-    "done",
-    "success",
-    "succeeded",
-    "needs_continue",
-    "paused",
-    "paused_limit",
-    "stopped",
-    "stopped_by_user",
-    "cancelled",
-    "canceled",
-    "superseded",
-}
-_PULSE_TERMINAL_STATUSES = _TERMINAL_STATUSES - {"ready", "idle"}
+_SUCCESS_STATUSES = {"ready", "completed", "done", "success", "succeeded"}
 _COMPLETION_PULSE_SECONDS = 15.0
+_ERROR_ATTENTION_SECONDS = 300.0
 _TONE_PRIORITY = {"approval": 0, "error": 1, "running": 2, "completed": 3, "idle": 4}
 
 
@@ -113,19 +98,28 @@ def get_pet_activity(*, now: datetime | None = None) -> dict[str, Any]:
             }
         )
 
+    def needs_attention(row: dict[str, Any]) -> bool:
+        if row["tone"] == "approval":
+            return True
+        age = observed_at.timestamp() - float(row["_updatedSort"])
+        return row["tone"] == "error" and 0 <= age <= _ERROR_ATTENTION_SECONDS
+
     rows.sort(key=lambda item: float(item["_updatedSort"]), reverse=True)
-    rows.sort(key=lambda item: _TONE_PRIORITY[str(item["tone"])])
+    rows.sort(key=lambda item: 4 if item["tone"] == "error" and not needs_attention(item)
+              else _TONE_PRIORITY[str(item["tone"])])
+    attention_count = sum(1 for row in rows if needs_attention(row))
+    current_rows = [row for row in rows if row["tone"] != "error" or needs_attention(row)]
     for row in rows:
         row.pop("_updatedSort", None)
 
-    aggregate_tone = str(rows[0]["tone"]) if rows else "idle"
-    animation_state = _aggregate_animation_state(aggregate_tone, rows)
+    aggregate_tone = str(current_rows[0]["tone"]) if current_rows else "idle"
+    animation_state = _aggregate_animation_state(aggregate_tone, current_rows)
     return {
         "schemaVersion": 1,
         "aggregateTone": aggregate_tone,
         "animationState": animation_state,
         "activeCount": sum(1 for row in rows if row["tone"] in {"approval", "running"}),
-        "attentionCount": sum(1 for row in rows if row["tone"] in {"approval", "error"}),
+        "attentionCount": attention_count,
         "generatedAt": observed_at.isoformat(),
         "sessions": rows,
     }
@@ -141,17 +135,20 @@ def _resolve_tone(
     if needs_approval:
         return "approval"
     candidates = _status_candidates(session)
-    if any(value in _ERROR_STATUSES for value in candidates):
-        return "error"
     # This summary reconciles stale chat-turn work runs before returning them,
     # so a remaining active item is the live authority when the persisted
     # Session projection still says ready from the previous turn.
     if runtime_running:
         return "running"
-    if any(value in _RUNNING_STATUSES for value in candidates):
-        return "running"
     primary = candidates[0] if candidates else ""
-    if primary in _PULSE_TERMINAL_STATUSES and _is_recent(session, now=now):
+    # A settled ready/idle projection carries its outcome in lastTurnStatus.
+    if primary in {"ready", "idle"}:
+        primary = str(session.get("lastTurnStatus") or session.get("terminalReason") or "idle").strip().lower()
+    if primary in _ERROR_STATUSES:
+        return "error"
+    if primary in _RUNNING_STATUSES:
+        return "running"
+    if primary in _SUCCESS_STATUSES and _is_recent(session, now=now):
         return "completed"
     return "idle"
 
@@ -217,14 +214,7 @@ def _is_recent(session: dict[str, Any], *, now: datetime) -> bool:
 
 
 def _parse_timestamp(value: Any) -> datetime | None:
-    raw = str(value or "").strip()
-    if not raw:
-        return None
-    try:
-        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return _as_utc(parsed)
+    return parse_timestamp_utc(value)
 
 
 def _as_utc(value: datetime) -> datetime:

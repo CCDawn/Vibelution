@@ -1829,6 +1829,19 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                 }
                 if history_seed_profile == "full":
                     context_assembly_kwargs["recent_message_limit"] = None
+                    # Micro-compaction tier seed decision: only project old
+                    # whitelisted tool results when the history alone already
+                    # sits at or above the agent's micro trigger line (the
+                    # full model input is strictly larger). Read-time only.
+                    micro_assembly_kwargs_provider = getattr(
+                        runtime_agent, "micro_compact_assembly_kwargs", None
+                    )
+                    if callable(micro_assembly_kwargs_provider):
+                        micro_assembly_kwargs = micro_assembly_kwargs_provider(
+                            seedable_history_messages
+                        )
+                        if micro_assembly_kwargs:
+                            context_assembly_kwargs.update(micro_assembly_kwargs)
                 context_assembly = s.assemble_conversation_context(
                     seedable_history_messages,
                     **context_assembly_kwargs,
@@ -2149,6 +2162,16 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                     },
                 )
                 s._set_session_live_context_composition(session_id, context_composition, turn_id=turn_id)
+                # History image rebuild: retained-window user turns with image
+                # attachments go out as multimodal content blocks so the model
+                # can see prior-turn images. Runs after ledger windowing and
+                # compaction (images follow the text history lifecycle) and
+                # after every char/token telemetry snapshot above.
+                history_messages = s._seed_history_messages_with_image_attachments(
+                    session_id,
+                    history_messages,
+                    agent_instance=agent_instance or historical_agent,
+                )
                 # Context composition is already available through live output and the
                 # conversation journal.  A durable WorkRun rewrite here blocks the
                 # imminent model request and is immediately superseded by model_request.

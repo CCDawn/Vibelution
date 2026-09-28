@@ -7,6 +7,7 @@ the current checkout's shell is relaunched.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import shutil
@@ -401,6 +402,7 @@ def schedule_desktop_shell_refresh(
     project_root: Path | str = PROJECT_ROOT,
     python_executable: str | None = None,
     force: bool = False,
+    shell_kind: str = "",
 ) -> dict[str, Any]:
     """Start a detached helper that rebuilds the shell after ``wait_pid`` exits."""
 
@@ -442,6 +444,11 @@ def schedule_desktop_shell_refresh(
     lifecycle = str(then_lifecycle or "").strip().lower()
     if lifecycle:
         args.extend(["--then-lifecycle", lifecycle])
+    kind = str(shell_kind or "").strip().lower()
+    if kind:
+        args.extend(["--shell-kind", kind])
+    # The refresh helper must outlive the desktop shell. Workbench jobs allow
+    # explicit breakaway and nothing else, so this flag is the only exit.
     flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
     kwargs = no_window_subprocess_kwargs(creationflags=flags)
     try:
@@ -479,6 +486,7 @@ def run_desktop_shell_refresh(
     then_lifecycle: str = "",
     project_root: Path | str = PROJECT_ROOT,
     wait_timeout_seconds: float = 180.0,
+    shell_kind: str = "",
 ) -> dict[str, Any]:
     """Wait for the old shell to exit, rebuild from checkout, then relaunch."""
 
@@ -487,7 +495,30 @@ def run_desktop_shell_refresh(
         _append_refresh_log(root, "refresh.started", wait_pid=int(wait_pid), then_lifecycle=str(then_lifecycle or ""))
         if int(wait_pid) > 0:
             _wait_for_pid_exit(int(wait_pid), timeout_seconds=wait_timeout_seconds)
+        kind = str(shell_kind or "").strip().lower()
         try:
+            if kind == "unpackaged":
+                rebuilt = ensure_unpackaged_electron(root)
+                launched = launch_desktop_shell(
+                    project_root=root,
+                    then_lifecycle=then_lifecycle,
+                    open_workbench=True,
+                    prefer="unpackaged",
+                )
+                clear_desktop_shell_refresh_failure(root)
+                _append_refresh_log(
+                    root,
+                    "refresh.finished",
+                    wait_pid=int(wait_pid),
+                    helper_launch_pid=int(launched.get("pid") or 0),
+                )
+                return {
+                    "schemaVersion": 1,
+                    "refreshed": True,
+                    "kind": "unpackaged",
+                    "rebuild": rebuilt,
+                    "launch": launched,
+                }
             rebuilt = rebuild_desktop_shell(project_root=root)
         except Exception as exc:
             detail = str(exc)
@@ -690,6 +721,7 @@ def _desktop_shell_electron_args(
     slot_root: Path | None,
     open_workbench: bool,
     lifecycle: str,
+    hidden_presentation: bool = False,
 ) -> list[str]:
     args = [executable, *prefix, "--workspace", str(shell_root), "--local-debugging"]
     if slot_root is not None:
@@ -698,6 +730,11 @@ def _desktop_shell_electron_args(
         args.append("--open-workbench")
     if lifecycle:
         args.append(lifecycle)
+    if hidden_presentation:
+        # Branch instance workbench windows load without show/focus (e2e
+        # lanes); the argv switch is the transport into the already-running
+        # shared shell, where env vars of this spawn would never reach it.
+        args.append("--hidden-presentation")
     return args
 
 
@@ -706,14 +743,40 @@ def resolve_desktop_shell_launch(
     *,
     then_lifecycle: str = "",
     open_workbench: bool = False,
+    hidden_presentation: bool = False,
+    prefer: str = "",
 ) -> dict[str, Any]:
     """Choose the current checkout's Electron main: packaged if current, else unpackaged."""
 
     shell_root, slot_root = resolve_desktop_shell_launch_roots(project_root)
     lifecycle = str(then_lifecycle or "").strip().lower()
+    if str(prefer or "").strip().lower() == "unpackaged":
+        unpackaged = ensure_unpackaged_electron(shell_root)
+        electron_bin = unpackaged_electron_executable(shell_root)
+        main_js = unpackaged_main_js(shell_root)
+        if electron_bin is None or not main_js.is_file():
+            raise RuntimeError("checkout Electron main is not launchable after ensure")
+        args = _desktop_shell_electron_args(
+            str(electron_bin),
+            [str(main_js)],
+            shell_root=shell_root,
+            slot_root=slot_root,
+            open_workbench=open_workbench,
+            lifecycle=lifecycle,
+            hidden_presentation=hidden_presentation,
+        )
+        return {
+            "schemaVersion": 1,
+            "kind": "unpackaged",
+            "args": args,
+            "cwd": str(shell_root),
+            "reason": str(unpackaged.get("reason") or "current"),
+            "currentElectronTree": str(unpackaged.get("currentElectronTree") or ""),
+            "rebuilt": bool(unpackaged.get("rebuilt")),
+        }
     # A live main owns freshness and guarded relaunch. Rebuilding here first
     # consumes its `rebuilt` signal and leaves old main code running indefinitely.
-    if slot_root is None and lifecycle in {"start", "restart", "rebuild-and-start"}:
+    if lifecycle in {"start", "restart", "rebuild-and-start"}:
         from core.launcher.desktop_shell_owner import _identity_status, read_desktop_shell_owner
 
         owner = read_desktop_shell_owner(shell_root)
@@ -726,7 +789,8 @@ def resolve_desktop_shell_launch(
                 "schemaVersion": 1, "kind": "unpackaged", "reason": "forward_to_live_shell",
                 "cwd": str(shell_root), "rebuilt": False,
                 "args": _desktop_shell_electron_args(str(electron_bin), [str(main_js)],
-                    shell_root=shell_root, slot_root=None, open_workbench=open_workbench, lifecycle=lifecycle),
+                    shell_root=shell_root, slot_root=slot_root, open_workbench=open_workbench,
+                    lifecycle=lifecycle, hidden_presentation=hidden_presentation),
             }
     packaged_status = inspect_desktop_shell(shell_root)
     if not packaged_status.get("stale") and packaged_status.get("reason") == "current":
@@ -737,6 +801,7 @@ def resolve_desktop_shell_launch(
             slot_root=slot_root,
             open_workbench=open_workbench,
             lifecycle=lifecycle,
+            hidden_presentation=hidden_presentation,
         )
         return {
             "schemaVersion": 1,
@@ -758,6 +823,7 @@ def resolve_desktop_shell_launch(
         slot_root=slot_root,
         open_workbench=open_workbench,
         lifecycle=lifecycle,
+        hidden_presentation=hidden_presentation,
     )
     return {
         "schemaVersion": 1,
@@ -775,6 +841,8 @@ def launch_desktop_shell(
     project_root: Path | str = PROJECT_ROOT,
     then_lifecycle: str = "",
     open_workbench: bool = False,
+    hidden_presentation: bool = False,
+    prefer: str = "",
 ) -> dict[str, Any]:
     """Start Electron main for the current checkout without hiding the GUI."""
 
@@ -782,6 +850,8 @@ def launch_desktop_shell(
         project_root,
         then_lifecycle=then_lifecycle,
         open_workbench=open_workbench,
+        hidden_presentation=hidden_presentation,
+        prefer=prefer,
     )
     process = _spawn_visible_electron(list(spec["args"]), cwd=Path(str(spec["cwd"])))
     return {
@@ -871,26 +941,121 @@ def _electron_sources_newer_than(project_root: Path, artifact: Path) -> bool:
     return False
 
 
-def _rebuild_unpackaged_electron(project_root: Path) -> dict[str, Any]:
-    electron_dir = project_root / ELECTRON_PACKAGE_DIR
-    node_command = _node_command()
-    npm_cli = _npm_cli_script_for_node(node_command)
-    command = [node_command, npm_cli, "run", "build"]
-    result = subprocess.run(
-        command,
-        cwd=str(electron_dir),
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-        **no_window_subprocess_kwargs(),
+class UnpackagedElectronPublishBusy(RuntimeError):
+    """The live shell still has dist open, so the staged build was not published."""
+
+
+def _sharing_violation(exc: BaseException) -> bool:
+    if not isinstance(exc, OSError):
+        return False
+    winerror = getattr(exc, "winerror", None)
+    if winerror in {5, 32, 33}:
+        return True
+    text_busy = getattr(errno, "ETXTBSY", None)
+    return exc.errno in {errno.EBUSY, errno.EACCES, errno.EPERM, text_busy}
+
+
+def _rename_dir(src: Path, dest: Path) -> None:
+    os.rename(src, dest)
+
+
+def _publish_staged_electron_dist(stage: Path, dist: Path) -> None:
+    """Swap a finished stage into dist. A locked live dist is left untouched."""
+
+    if not (stage / "main.js").is_file():
+        raise RuntimeError(f"staged Electron build is missing main.js: {stage}")
+    parent = dist.parent
+    incoming = parent / ".dist-incoming"
+    previous = parent / ".dist-previous"
+    if incoming.exists():
+        shutil.rmtree(incoming)
+    if previous.exists():
+        shutil.rmtree(previous)
+    shutil.copytree(stage, incoming)
+    busy = UnpackagedElectronPublishBusy(
+        "桌面壳正在使用 workbench_job.node，这次没有替换正在运行的壳，也没有改动已经装好的 dist。"
     )
-    if int(result.returncode or 0) != 0:
-        detail = (result.stderr or result.stdout or "").strip().replace("\r", "")[-800:]
-        _append_refresh_log(project_root, "unpackaged.build.failed", exit_code=int(result.returncode or 0), detail=detail)
-        raise RuntimeError(f"checkout Electron main build failed with exit code {result.returncode}: {detail}")
+    try:
+        if dist.exists():
+            try:
+                _rename_dir(dist, previous)
+            except OSError as exc:
+                shutil.rmtree(incoming, ignore_errors=True)
+                if _sharing_violation(exc):
+                    raise busy from exc
+                raise
+        try:
+            _rename_dir(incoming, dist)
+        except OSError as exc:
+            if previous.exists() and not dist.exists():
+                _rename_dir(previous, dist)
+            shutil.rmtree(incoming, ignore_errors=True)
+            if _sharing_violation(exc):
+                raise busy from exc
+            raise
+    finally:
+        if previous.exists() and dist.exists():
+            shutil.rmtree(previous, ignore_errors=True)
+
+
+def _rebuild_unpackaged_electron(project_root: Path) -> dict[str, Any]:
+    """Build Electron main beside dist, then publish only after the stage is complete."""
+
+    electron_dir = project_root / ELECTRON_PACKAGE_DIR
+    stage = electron_dir / ".build-stage"
+    if stage.exists():
+        shutil.rmtree(stage)
+    stage.mkdir(parents=True)
+    node_command = _node_command()
+    env = os.environ.copy()
+    env["VIBELUTION_ELECTRON_DIST"] = str(stage)
+    commands = [
+        [
+            node_command,
+            str(electron_dir / "node_modules" / "typescript" / "lib" / "tsc.js"),
+            "-p",
+            "tsconfig.json",
+            "--outDir",
+            str(stage),
+        ],
+        [
+            node_command,
+            str(electron_dir / "node_modules" / "esbuild" / "bin" / "esbuild"),
+            "src/preload.ts",
+            "--bundle",
+            "--platform=node",
+            "--format=cjs",
+            f"--outfile={stage / 'preload.cjs'}",
+            "--external:electron",
+        ],
+        [node_command, str(electron_dir / "scripts" / "buildWorkbenchJob.js")],
+    ]
+    try:
+        for command in commands:
+            result = subprocess.run(
+                command,
+                cwd=str(electron_dir),
+                env=env,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+                **no_window_subprocess_kwargs(),
+            )
+            if int(result.returncode or 0) != 0:
+                detail = (result.stderr or result.stdout or "").strip().replace("\r", "")[-800:]
+                _append_refresh_log(
+                    project_root,
+                    "unpackaged.build.failed",
+                    exit_code=int(result.returncode or 0),
+                    detail=detail,
+                )
+                raise RuntimeError(f"checkout Electron main build failed with exit code {result.returncode}: {detail}")
+        _publish_staged_electron_dist(stage, electron_dir / "dist")
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
     main_js = unpackaged_main_js(project_root)
     if not main_js.is_file():
         raise RuntimeError(f"checkout Electron main was not produced: {main_js}")

@@ -1,0 +1,46 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "E2E-MOCK-MARKDOWN-V1"
+      },
+      "response": {
+        "reasoning": "先判断用户意图：需要一份 markdown 结构样例。再组织标题、列表与代码块，确保渲染器能吃到标题、列表与代码块三种形态。",
+        "content": "## E2E 冒烟回复\n\n这是 **mock LLM** 的正文，用于喂渲染器：\n\n- 第一条要点\n- 第二条要点，含 `inline code`\n\n```python\nprint(\"hello from aimock\")\nprint(\"line two for pacing\")\nprint(\"line three for pacing\")\n```\n\n以上即全部内容，用于验证阶段推进与渲染。"
+      },
+      "streamingProfile": {
+        "ttft": 300,
+        "tps": 8,
+        "jitter": 0
+      }
+    },
+    {
+      "match": {
+        "userMessage": "E2E-MOCK-MULTITURN-V1",
+        "turnIndex": 0
+      },
+      "response": {
+        "reasoning": "第一轮：做自我介绍。",
+        "content": "第一轮回复：我是 e2e-mock 提供的模拟模型。"
+      }
+    },
+    {
+      "match": {
+        "userMessage": "E2E-MOCK-MULTITURN-V1",
+        "turnIndex": 1
+      },
+      "response": {
+        "reasoning": "第二轮：用户重复了同一句话，说明在验证上下文记忆。",
+        "content": "第二轮回复：我记得你上一轮问过同样的问题。"
+      }
+    },
+    {
+      "match": {
+        "userMessage": "E2E-MOCK-PLAIN-V1"
+      },
+      "response": {
+        "content": "plain reply without reasoning"
+      }
+    }
+  ]
+}

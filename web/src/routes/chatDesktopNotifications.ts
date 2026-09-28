@@ -200,7 +200,9 @@ function messageTurnId(message: ConversationMessage | undefined): string {
 }
 
 function detailTurnId(detail: SessionDetail, latest: ConversationMessage | undefined): string {
-  return normalizeNotificationText(detail.lastTurnError?.turnId) || messageTurnId(latest);
+  return normalizeNotificationText(detail.lastTurnTerminalTurnId)
+    || normalizeNotificationText(detail.lastTurnError?.turnId)
+    || messageTurnId(latest);
 }
 
 export function parseConversationNotificationOpenPayload(raw: unknown): ConversationNotificationOpenPayload | null {
@@ -414,17 +416,35 @@ export function createDesktopConversationNotifier(
       const busy = isBusyPhase(phase);
       const terminalPhase = terminalPhaseForValue(
         detail.terminalReason,
+        detail.lastTurnStatus,
         detail.currentPhase,
         detail.status,
       );
       const wasBusy = lastBusyBySession.get(sessionId) ?? false;
       lastBusyBySession.set(sessionId, busy);
       const pendingTurnId = pendingStreamTurnBySession.get(sessionId);
-      if (busy || !terminalPhase || !(wasBusy || pendingTurnId || pendingSummaryTerminalBySession.has(sessionId))) {
-        return;
-      }
       const latest = latestAssistantTurnMessage(detail);
       const turnId = detailTurnId(detail, latest);
+      // A stopped turn is terminal even when the first observed detail is
+      // already idle and no busy/delta transition was sampled. Remember its
+      // normal notification key so late assistant events for this turn cannot
+      // reopen it after a later turn completes.
+      if (terminalPhase === "stopped_by_user" && turnId) {
+        remember(`${sessionId}:${turnId}`);
+        pendingStreamTurnBySession.delete(sessionId);
+        pendingSummaryTerminalBySession.delete(sessionId);
+        return;
+      }
+      // `ready` is only the idle phase. It is not a turn outcome, so never
+      // emit a completion notification from a bare running -> ready transition.
+      if (
+        busy
+        || !terminalPhase
+        || terminalPhase === "ready"
+        || !(wasBusy || pendingTurnId || pendingSummaryTerminalBySession.has(sessionId))
+      ) {
+        return;
+      }
       if (!turnId || (pendingTurnId && pendingTurnId !== turnId)) {
         return;
       }
@@ -454,9 +474,9 @@ export function createDesktopConversationNotifier(
         const busy = isBusyPhase(session.currentPhase || session.status);
         const terminalPhase = terminalPhaseForValue(
           session.terminalReason,
+          session.lastTurnStatus,
           session.currentPhase,
           session.status,
-          session.lastTurnStatus,
         );
         const completionIdentity = normalizeNotificationText(session.completionIdentity);
         const suppressWhenFocused = companionAgentId
@@ -465,7 +485,11 @@ export function createDesktopConversationNotifier(
         if (companionAgentId && completionIdentity && terminalPhase) {
           const previousIdentity = lastCompanionCompletionBySession.get(sessionId);
           lastCompanionCompletionBySession.set(sessionId, completionIdentity);
-          if (previousIdentity && previousIdentity !== completionIdentity) {
+          if (
+            previousIdentity
+            && previousIdentity !== completionIdentity
+            && terminalPhase !== "stopped_by_user"
+          ) {
             emitSessionCompletion({
               sessionId,
               turnId: completionIdentity,

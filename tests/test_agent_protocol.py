@@ -5638,8 +5638,10 @@ class TestLocalProviderBootstrap:
 
         derived = agent._init_model_discovery()
 
-        assert derived == 131072
-        assert agent._effective_max_token_limit == 131072
+        # Versioned contract: hard = window - min(model max output, 20,480),
+        # never the retired half-window derivation.
+        assert derived == 241_664
+        assert agent._effective_max_token_limit == 241_664
         assert agent.config.context_compression.max_token_limit == 16000
 
     def test_think_and_act_auto_compresses_at_standard_context_threshold(self, monkeypatch):

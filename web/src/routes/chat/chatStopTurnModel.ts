@@ -26,6 +26,12 @@ export type StopTurnOptimisticContext = {
 
 export type DeferredStopIntent = StopTurnOptimisticContext & {
   sessionId: string;
+  clientSubmissionId?: string;
+  /**
+   * Filled by the mutation-cache listener when the acceptance arrives while
+   * another session's stop request is still in flight.
+   */
+  acceptedTurnId?: string;
 };
 
 export function resolveStopOptimisticTarget(

@@ -16,10 +16,36 @@
     <div id="root"></div>
     <script>
       (() => {
+        // Pre-bundle theme bootstrap (anti flash-of-wrong-theme). Pattern after
+        // zai-org/ZCode `packages/web/index.html` (Apache-2.0): read the same
+        // storage key as web/src/app/themePreference.ts (vibelution.workbench.theme,
+        // default "light"), resolve data-theme, and paint the body canvas BEFORE
+        // the deferred module bundle runs — the inline script executes
+        // synchronously during HTML parsing, so the first paint already carries
+        // the user's theme instead of flashing the opposite canvas.
+        let theme = "light";
         try {
-          const theme = localStorage.getItem("vibelution.workbench.theme");
-          if (theme === "dark" || theme === "light") {
-            document.documentElement.setAttribute("data-theme", theme);
+          const stored = localStorage.getItem("vibelution.workbench.theme");
+          if (stored === "dark" || stored === "light") {
+            theme = stored;
+          }
+        } catch {
+        }
+        // Same attribute AppShell/themePreference re-apply after mount; setting
+        // the same value twice is a no-op.
+        document.documentElement.setAttribute("data-theme", theme);
+        try {
+          // Matches base.css `body { background: var(--bg-canvas) }`; the
+          // fallback hexes are the exact [data-theme] token values, so the
+          // pre-CSS paint is identical to the post-CSS canvas. The desktop-pet
+          // window must keep a transparent body (desktop-pet.tailwind.css), so
+          // it opts out.
+          if (window.location.pathname !== "/desktop-pet") {
+            document.body.style.backgroundColor = `var(--bg-canvas, ${theme === "dark" ? "#0f1115" : "#f7f8fa"})`;
+          }
+          const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+          if (themeColorMeta) {
+            themeColorMeta.setAttribute("content", theme === "dark" ? "#0f1115" : "#f7f8fa");
           }
         } catch {
         }

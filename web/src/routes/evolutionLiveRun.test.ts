@@ -5,6 +5,7 @@ import {
   isCompletedEvolutionRunCommandFailure,
   isCompletedEvolutionRunCommandSuccess,
   isEvolutionRunCommandAccepted,
+  isSupervisedStartLocked,
   parseRunStreamSnapshot,
   requireEvolutionRunSnapshot,
   selectRunSnapshotWithRunId,
@@ -40,6 +41,17 @@ describe("evolutionLiveRun", () => {
 
   it("falls back to the local live run while active-run query is empty", () => {
     expect(selectSupervisedRunStreamTarget(null, run("run-1", "paused"))?.runId).toBe("run-1");
+  });
+
+  it("locks a new supervised start while a run is live or Launcher is activating", () => {
+    expect(isSupervisedStartLocked({ liveStatus: "running" })).toBe(true);
+    expect(isSupervisedStartLocked({ worktreeStatus: "paused" })).toBe(true);
+    expect(isSupervisedStartLocked({ activationStatus: "activating" })).toBe(true);
+    expect(isSupervisedStartLocked({ activationStatus: "activation_verifying" })).toBe(true);
+    expect(isSupervisedStartLocked({ activationStatus: "rollback_activating" })).toBe(true);
+    expect(isSupervisedStartLocked({ submitting: true })).toBe(true);
+    expect(isSupervisedStartLocked({ liveStatus: "done", worktreeStatus: "done", activationStatus: "applied" })).toBe(false);
+    expect(isSupervisedStartLocked({ liveStatus: "done", activationStatus: "activation_failed" })).toBe(false);
   });
 
   it("prefers the live worktree workflow over a legacy active-run projection", () => {

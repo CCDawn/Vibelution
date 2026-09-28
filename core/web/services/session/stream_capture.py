@@ -193,6 +193,7 @@ class SessionTurnCapture:
     _last_recorded_thought_text: str = ""
     _last_committed_thought_sequence: int = 0
     _pending_related_thought_sequence: int = 0
+    _evicted_thought_events: list[dict[str, Any]] = field(default_factory=list)
     _tool_loop_call_count: int = 0
     _tool_loop_failure_count: int = 0
     _tool_loop_last_failure: str = ""
@@ -340,9 +341,13 @@ class SessionTurnCapture:
     def uncommitted_thought_events(self) -> list[dict[str, Any]]:
         s = _service()
         with self._lock:
+            candidates = sorted(
+                [*self.feedback_events, *self._evicted_thought_events],
+                key=lambda event: s._coerce_nonnegative_int(event.get("sequence")),
+            )
             return [
                 dict(event)
-                for event in self.feedback_events
+                for event in candidates
                 if event.get("kind") == "thought"
                 and s._coerce_nonnegative_int(event.get("sequence")) > self._last_committed_thought_sequence
             ]
@@ -687,7 +692,16 @@ class SessionTurnCapture:
             }
             self.feedback_events.append(entry)
             if len(self.feedback_events) > 120:
-                self.feedback_events = self.feedback_events[-120:]
+                evicted, kept = self.feedback_events[:-120], self.feedback_events[-120:]
+                # 被上限逐出的未提交 thought 段移入旁路列表：uncommitted 消费端
+                # 只扫主列表，不保留的话一轮内 120 条上限就会把 durably 捕获的
+                # 推理段静默丢掉（journal 里永不落盘）。
+                if evicted:
+                    self._evicted_thought_events.extend(
+                        event for event in evicted if event.get("kind") == "thought"
+                    )
+                    del self._evicted_thought_events[:-120]
+                self.feedback_events = kept
             return sequence
 
     def _append_tool_feedback_event(self, tool_call: dict[str, Any], *, related_thought_sequence: int = 0) -> None:
@@ -1785,8 +1799,12 @@ def _ensure_session_ui_capture_hooks(ui: Any) -> None:
             session_id = str(context.get("sessionId") or "").strip()
             if not isinstance(capture, SessionTurnCapture) or not session_id:
                 return
-            cleaned = s._sanitize_message_content("assistant", text)
-            if cleaned:
+            cleaned = (
+                s._sanitize_message_content("assistant", text)
+                if done
+                else s._sanitize_message_delta_content("assistant", text)
+            )
+            if cleaned or done:
                 # Worker liveness heartbeat (throttled inside the helper): a
                 # long response stream otherwise leaves the work-run updatedAt
                 # frozen at the last tool result and can trip the stale sweep.
@@ -1797,13 +1815,10 @@ def _ensure_session_ui_capture_hooks(ui: Any) -> None:
                 )
                 capture.close_latest_thought_boundary()
                 previous = str(capture.content or "")
-                if done:
-                    next_content = cleaned
-                elif previous and cleaned.startswith(previous):
-                    next_content = cleaned
-                else:
-                    next_content = f"{previous}{cleaned}" if previous else cleaned
-                capture.note_content(next_content)
+                next_content = cleaned if done else f"{previous}{cleaned}" if previous else cleaned
+                # Stream callbacks provide deltas until the terminal callback,
+                # which provides the authoritative complete response.
+                capture.content = next_content
                 batcher = context.get("textBatcher")
                 if isinstance(batcher, _SessionUiCaptureTextBatcher):
                     batcher.note_response(next_content, done=done)

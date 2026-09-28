@@ -6834,15 +6834,37 @@ def test_v2_scope_lock_serializes_cross_process_claim_and_side_effect(
     overlap = tmp_path / "side-effect-overlap.txt"
     start = tmp_path / "start.txt"
     worker_script = f"""
+import os
 import sys
 import time
 from pathlib import Path
 
+# 隔离必须对子进程独立成立：conftest 对 resolve_workspace_home 的进程内
+# monkeypatch 不会随 subprocess 继承，而 chain.PROJECT_ROOT 只覆盖链账本路径。
+# 若不把 DATA_HOME 指到 tmp，formal_workspace_path 会在 tmp 缺 project
+# identity 时回退到真实 operator workspace（Documents\\Vibelution\\data），
+# 两个 worker 会与活产品后端在真实目录里做锁竞争并解析真实 runtime-scene
+# lifecycle 日志——实测随产品活动强度在 15s 到 30s+ 之间漂移，撞上
+# communicate(timeout=30) 变成环境敏感的假红。
+os.environ["VIBELUTION_DATA_HOME"] = {str(tmp_path)!r}
 sys.path.insert(0, {root!r})
 from core.web.services.team_workflow.research_runtime import hypothesis_first_chain as chain
 from core.web.services import team_service
 from core.web.services.team_workflow.research_runtime import hypothesis_first_state_v2
+import core.infrastructure.developer_sandbox as _developer_sandbox
 
+_developer_sandbox.resolve_workspace_home = (
+    lambda *args, **kwargs: Path({str(tmp_path)!r}) / "workspace"
+)
+# runtime-scene 事件根不走 DATA_HOME，而是 session_service.PROJECT_ROOT +
+# 活跃项目存储解析；不补丁时 worker 的 scene 写入与 manifest 刷新会落在
+# 共享真实目录，全量并发下所有 worker 在同一全局 timeline 上排队刷新，
+# 命令收尾（claim 已写、result 未写）被拖过 communicate(timeout=30)。
+from core.web.services import session_service as _session_service
+import core.web.services.runtime_scene.record as _scene_record
+
+_session_service.PROJECT_ROOT = Path({str(tmp_path)!r})
+_scene_record.PROJECT_ROOT = Path({str(tmp_path)!r})
 chain.PROJECT_ROOT = Path({str(tmp_path)!r})
 claim = Path({str(claim)!r})
 active = Path({str(active)!r})

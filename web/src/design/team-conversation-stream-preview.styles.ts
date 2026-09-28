@@ -18,7 +18,7 @@ export const teamConversationStreamPreviewStyles = {
   topicAuthor: "tcs-topic-author",
   note: "tcs-note",
   roundHairline:
-    "vui-design-team-conversation-stream roundHairline flex min-w-0 items-center gap-2 py-2 text-[10px] font-semibold tracking-wide text-[var(--fg-tertiary)] before:h-px before:flex-1 before:bg-[var(--vui-border-subtle)] after:h-px after:flex-1 after:bg-[var(--vui-border-subtle)]",
+    "vui-design-team-conversation-stream roundHairline flex min-w-0 items-center gap-2 py-2 text-vui-micro-10 font-semibold tracking-wide text-[var(--fg-tertiary)] before:h-px before:flex-1 before:bg-[var(--vui-border-subtle)] after:h-px after:flex-1 after:bg-[var(--vui-border-subtle)]",
   streamList: "vui-design-team-conversation-stream streamList grid min-w-0 content-start gap-0",
   streamCluster: "vui-design-team-conversation-stream streamCluster grid min-w-0 content-start gap-1 pt-4 first:pt-0",
   streamRow: "tcs-stream-row",
@@ -33,12 +33,12 @@ export const teamConversationStreamPreviewStyles = {
     "vui-design-team-conversation-stream streamBody m-0 min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
   streamBodyClamp:
     "vui-design-team-conversation-stream streamBodyClamp m-0 min-w-0 overflow-hidden [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:8]",
-  streamToggle: "vui-design-team-conversation-stream streamToggle mt-0.5 !h-auto !min-h-0 !justify-start !border-0 !bg-transparent !p-0 !text-[11px] !font-semibold !text-[var(--accent-cool)] !shadow-none hover:!bg-transparent",
+  streamToggle: "vui-design-team-conversation-stream streamToggle mt-0.5 !h-auto !min-h-0 !justify-start !border-0 !bg-transparent !p-0 !text-vui-micro-11 !font-semibold !text-[var(--accent-cool)] !shadow-none hover:!bg-transparent",
   processDisclosure:
-    "vui-design-team-conversation-stream processDisclosure mt-1 min-w-0 text-[11px] leading-snug text-[var(--fg-tertiary)] [&_summary]:cursor-pointer [&_summary]:list-none [&_summary]:font-medium [&_summary::-webkit-details-marker]:hidden",
-  processDetail: "vui-design-team-conversation-stream processDetail m-0 mt-1 text-[11px] leading-snug text-[var(--fg-tertiary)]",
-  pendingLine: "vui-design-team-conversation-stream pendingLine m-0 text-[11px] text-[var(--fg-tertiary)]",
+    "vui-design-team-conversation-stream processDisclosure mt-1 min-w-0 text-vui-micro-11 leading-snug text-[var(--fg-tertiary)] [&_summary]:cursor-pointer [&_summary]:list-none [&_summary]:font-medium [&_summary::-webkit-details-marker]:hidden",
+  processDetail: "vui-design-team-conversation-stream processDetail m-0 mt-1 text-vui-micro-11 leading-snug text-[var(--fg-tertiary)]",
+  pendingLine: "vui-design-team-conversation-stream pendingLine m-0 text-vui-micro-11 text-[var(--fg-tertiary)]",
   digest: `vui-design-team-conversation-stream digest min-w-0 ${vuiGlassPanelClass} mt-3 grid gap-1.5 p-2`,
-  digestTitle: "vui-design-team-conversation-stream digestTitle m-0 text-[11px] font-semibold text-[var(--fg-primary)]",
-  digestList: "vui-design-team-conversation-stream digestList m-0 grid list-disc gap-1 pl-4 text-[12px] leading-snug text-[var(--fg-secondary)]",
+  digestTitle: "vui-design-team-conversation-stream digestTitle m-0 text-vui-micro-11 font-semibold text-[var(--fg-primary)]",
+  digestList: "vui-design-team-conversation-stream digestList m-0 grid list-disc gap-1 pl-4 text-vui-2xs leading-snug text-[var(--fg-secondary)]",
 } as const;

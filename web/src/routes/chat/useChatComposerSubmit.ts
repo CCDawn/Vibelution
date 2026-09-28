@@ -1,4 +1,5 @@
 import { useMutation, type QueryClient, type UseMutationResult } from "@tanstack/react-query";
+import type { MutationCacheNotifyEvent } from "@tanstack/query-core";
 import {
   useCallback,
   useEffect,
@@ -19,6 +20,7 @@ import {
   switchSessionHead,
   updateSessionQueuedTurn,
 } from "../../api/chat";
+import { resolveLocalFilePath } from "../../api/desktopPlatform";
 import { submitVirtualHumanConversationMessage } from "../../api/virtualHumanLife";
 import { queryKeys } from "../../api/queryKeys";
 import type {
@@ -62,26 +64,34 @@ import {
 import {
   MAX_COMPOSER_DOCUMENT_ATTACHMENTS,
   MAX_COMPOSER_IMAGE_ATTACHMENTS,
+  applyComposerAttachmentUploadOutcomes,
   classifyComposerFiles,
   clearSessionDraftForSubmittedTurn,
   clearSessionImageAttachments,
   clearSessionReferenceAttachments,
+  composerUploadedArtifactIds,
   encodeUtf8Base64,
-  mergeComposerAttachments,
+  failedComposerAttachmentUploads,
+  markComposerAttachmentsUploading,
+  mergeComposerAttachmentsWithRejections,
+  needsComposerAttachmentUpload,
   optimisticTurnIdForSubmission,
-  removeSessionImageAttachment,
   resolveComposerSubmitGuard,
   restoreSubmittedDraftIfComposerStillEmpty,
   sessionReferenceId,
+  uploadComposerAttachmentsSettled,
   uploadSessionImageAttachment,
   writeStoredMentalModelToggle,
   writeStoredRuntimeStatusToggle,
+  type ComposerAttachmentUploadOutcome,
   type ComposerImageAttachment,
 } from "./chatComposerSubmitModel";
 import { loadTurnStatusTailConfig } from "./turnStatusTailModel";
+import { removeStoredSessionDraft, scheduleSessionDraftSave } from "./chatDraftPersistence";
 import { type ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
 import { startUserAction, type UserActionTracker } from "../../app/userActionTelemetry";
+import { isEditAcknowledged, rollbackEditResubmit } from "./chatEditResubmitState";
 import {
   resolveSessionStopTurnId,
   resolveStopOptimisticTarget,
@@ -108,11 +118,90 @@ export type SubmitTurnVariables = {
 type ChatSubmitAcceptedResponse = SessionTurnAcceptedResponse & {
   queued?: boolean;
   queueSequence?: number;
+  /** Server timestamp for when the turn entered the session queue. */
+  queuedAt?: string;
+  /** Active turn id this queued turn waits behind (observability only). */
+  queuedBehindTurnId?: string;
 };
+
+type ComposerAttachmentUploadFailure = Extract<ComposerAttachmentUploadOutcome, { status: "failed" }>;
+
+function isFailedUploadOutcome(outcome: ComposerAttachmentUploadOutcome): outcome is ComposerAttachmentUploadFailure {
+  return outcome.status === "failed";
+}
+
+/**
+ * A queued turn waiting this long without starting is surfaced to the user:
+ * the drain depends on the running turn settling, so a stuck (ghost-running)
+ * turn would otherwise leave the message queued forever with zero feedback
+ * (defect ①).
+ */
+export const QUEUED_TURN_STUCK_HINT_MS = 90_000;
+const QUEUED_TURN_STUCK_CHECK_INTERVAL_MS = 15_000;
+
+/** Queued rows that have waited beyond ``thresholdMs`` and are still waiting. */
+export function queuedTurnsWaitingBeyondMs(
+  rows: SessionQueuedTurn[] | undefined,
+  nowMs: number,
+  thresholdMs: number = QUEUED_TURN_STUCK_HINT_MS,
+): SessionQueuedTurn[] {
+  const list = Array.isArray(rows) ? rows : [];
+  return list.filter((row) => {
+    if (String(row.status || "queued") !== "queued") {
+      return false;
+    }
+    const createdAtMs = Date.parse(String(row.createdAt || ""));
+    if (!Number.isFinite(createdAtMs)) {
+      return false;
+    }
+    return nowMs - createdAtMs >= thresholdMs;
+  });
+}
 
 type ChatSubmitMutationContext = {
   telemetry: UserActionTracker;
 };
+
+type QueuedTurnWithdrawSnapshot = {
+  row: SessionQueuedTurn;
+  index: number;
+};
+
+/**
+ * Rollback for an optimistically withdrawn queued turn: re-insert the row at
+ * its pre-intent slot into the CURRENT rows instead of wholesale-restoring the
+ * snapshot, so authoritative rows that landed while the DELETE was in flight
+ * (a reorder, pause or steer rebase) are not clobbered. Mirrors
+ * restoreOptimisticallyArchivedAgent in useChatAgentArchiveQueue.
+ */
+function restoreQueuedTurnIntoRows(rows: SessionQueuedTurn[], snapshot: QueuedTurnWithdrawSnapshot): SessionQueuedTurn[] {
+  if (rows.some((row) => row.id === snapshot.row.id)) {
+    return rows;
+  }
+  const next = [...rows];
+  next.splice(Math.max(0, Math.min(snapshot.index, next.length)), 0, snapshot.row);
+  return next;
+}
+
+/**
+ * Rollback for an optimistically reordered queue: recover the pre-drag order
+ * while keeping current membership — rows authoritative state removed while
+ * the PATCH was in flight stay removed, and rows added in the meantime stay
+ * (at the tail).
+ */
+function restoreQueuedTurnOrder(previousRows: SessionQueuedTurn[], currentRows: SessionQueuedTurn[]): SessionQueuedTurn[] {
+  const previousIds = new Set(previousRows.map((row) => row.id));
+  const appended = currentRows.filter((row) => !previousIds.has(row.id));
+  const restored = previousRows.filter((row) => currentRows.some((current) => current.id === row.id));
+  if (
+    !appended.length
+    && restored.length === currentRows.length
+    && restored.every((row, index) => currentRows[index]?.id === row.id)
+  ) {
+    return currentRows;
+  }
+  return [...restored, ...appended];
+}
 
 export type EditResubmitVariables = {
   sessionId: string;
@@ -125,6 +214,43 @@ export type EditResubmitVariables = {
   turnStatusTail?: ReturnType<typeof loadTurnStatusTailConfig>;
   attachmentIds?: string[];
 };
+
+/**
+ * The edit-resubmit API rebuilds the target message's attachments from the
+ * submitted ids alone, so the original artifacts must ride along with any new
+ * composer uploads; a text-only edit would otherwise silently strip them.
+ * Artifact ids resolve server-side against the session ledger metadata, so the
+ * already-stored originals reattach without a re-upload.
+ */
+export function resolveEditCarryOverAttachmentIds(
+  detail: SessionDetail | undefined,
+  messageId: string,
+): string[] {
+  if (!detail) {
+    return [];
+  }
+  const normalizedMessageId = String(messageId || "").trim();
+  if (!normalizedMessageId) {
+    return [];
+  }
+  const target = (detail.messages ?? []).find(
+    (message) => String(message.id || "").trim() === normalizedMessageId,
+  );
+  if (!target || target.role !== "user") {
+    return [];
+  }
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const attachment of target.attachments ?? []) {
+    const artifactId = String(attachment.artifactId || "").trim();
+    if (!artifactId || seen.has(artifactId)) {
+      continue;
+    }
+    seen.add(artifactId);
+    ids.push(artifactId);
+  }
+  return ids;
+}
 
 export type RegenerateVariables = {
   sessionId: string;
@@ -157,7 +283,13 @@ export type ChatComposerTurnMutations = {
   sessionGuidanceMutation: UseMutationResult<
     SessionDetail,
     Error,
-    { sessionId: string; content: string; mode: SessionGuidanceMode },
+    {
+      sessionId: string;
+      content: string;
+      mode: SessionGuidanceMode;
+      /** Set by queue steer: keep this row out of the paint until its DELETE rebases. */
+      steeredQueuedTurnId?: string;
+    },
     unknown
   >;
 };
@@ -337,16 +469,50 @@ export function useChatComposerTurnMutations({
       setSessionImageAttachments((current) => clearSessionImageAttachments(current, variables.sessionId));
       setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, variables.sessionId));
       const acceptedTurnId = String(acceptedTurn.turnId || "").trim();
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detailState) => {
-        const acceptedDetail = markSessionDetailRunning(
-          markOptimisticUserMessageAccepted(detailState, variables, acceptedTurn.turnId),
-        );
-        return acceptedTurnId && acceptedDetail
-          ? { ...acceptedDetail, activeTurnId: acceptedTurnId }
-          : acceptedDetail;
-      });
+      // A queued acceptance must be projected as "queued", never as
+      // "sent/running": the turn did not start, it joined the session queue.
+      const isQueuedAcceptance = Boolean(
+        acceptedTurn.queued || String(acceptedTurn.queuedTurnId || "").trim(),
+      );
+      if (isQueuedAcceptance) {
+        const queuedTurnId = String(acceptedTurn.queuedTurnId || "").trim();
+        if (queuedTurnId) {
+          // Optimistic queue projection: the row lands in the follow-up queue
+          // bar immediately (from the response's queue facts); the
+          // listSessionQueuedTurns rebase below refreshes the authoritative rows.
+          const queuedAt = acceptedTurn.queuedAt || acceptedTurn.acceptedAt || new Date().toISOString();
+          queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detailState) => {
+            if (!detailState) {
+              return detailState;
+            }
+            const rows = detailState.queuedTurns ?? [];
+            if (rows.some((row) => row.id === queuedTurnId)) {
+              return detailState;
+            }
+            const optimisticQueuedRow: SessionQueuedTurn = {
+              id: queuedTurnId,
+              position: acceptedTurn.queuePosition ?? rows.length + 1,
+              status: "queued",
+              content: variables.content,
+              clientSubmissionId: variables.clientSubmissionId,
+              createdAt: queuedAt,
+              updatedAt: queuedAt,
+            };
+            return { ...detailState, queuedTurns: [...rows, optimisticQueuedRow] };
+          });
+        }
+      } else {
+        queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detailState) => {
+          const acceptedDetail = markSessionDetailRunning(
+            markOptimisticUserMessageAccepted(detailState, variables, acceptedTurn.turnId),
+          );
+          return acceptedTurnId && acceptedDetail
+            ? { ...acceptedDetail, activeTurnId: acceptedTurnId }
+            : acceptedDetail;
+        });
+      }
       setActiveTurnLayersBySession((current) =>
-        acceptedTurn.queued || variables.queuedBehindActiveTurn
+        isQueuedAcceptance
           ? current
           : setActiveTurnLayerForSession(
           current,
@@ -462,7 +628,8 @@ export function useChatComposerTurnMutations({
           }),
         )
       );
-      // Immediate truncate + rewrite (ChatGPT/Claude edit UX); snapshot for rollback.
+      // Immediately hide the superseded tail; the edit marker blocks stale
+      // detail/SSE/paint merges until the authoritative branch arrives.
       queryClient.setQueryData<SessionDetail>(sessionKey, (detailState) =>
         applyOptimisticEditResubmit(detailState, {
           messageId: variables.messageId,
@@ -476,6 +643,9 @@ export function useChatComposerTurnMutations({
       return { previousDetail, telemetry };
     },
     onSuccess: (nextDetail, variables, context) => {
+      const currentDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(variables.sessionId));
+      if (currentDetail?.editResubmitProtection
+        && currentDetail.editResubmitProtection.clientSubmissionId !== variables.clientSubmissionId) return;
       context?.telemetry?.succeeded({
         sessionId: variables.sessionId,
         messageId: variables.messageId,
@@ -489,6 +659,7 @@ export function useChatComposerTurnMutations({
         ...current,
         [variables.sessionId]: "",
       }));
+      removeStoredSessionDraft(variables.sessionId);
       setSessionImageAttachments((current) => clearSessionImageAttachments(current, variables.sessionId));
       setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, variables.sessionId));
       setSessionEditTargets((current) => {
@@ -496,9 +667,31 @@ export function useChatComposerTurnMutations({
         return remaining;
       });
       syncSessionDetail(nextDetail);
-      const acceptedTurnId = latestUserTurnId(nextDetail);
+      // The HTTP response can arrive after SSE has already painted the
+      // accepted turn.  Read the merged cache after sync instead of using the
+      // response snapshot: a late running snapshot must not rebuild a fresh
+      // layer over terminal/output that belongs to this submission.
+      const syncedDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(variables.sessionId)) ?? nextDetail;
+      const acceptedTurnId = latestUserTurnId(syncedDetail) || latestUserTurnId(nextDetail);
       setActiveTurnLayersBySession((current) => {
-        if (!acceptedTurnId || !isBusyPhase(nextDetail.currentPhase || nextDetail.status)) {
+        const existing = current[variables.sessionId];
+        const sameSubmission = existing?.clientSubmissionId === variables.clientSubmissionId;
+        // Stream-created layers intentionally do not always carry the client
+        // submission id.  Once the canonical user message exposes its turn,
+        // the turn id is the second ownership key for the same edit.
+        const sameAcceptedTurn = Boolean(existing && acceptedTurnId && existing.turnId === acceptedTurnId);
+        const existingHasOutput = Boolean(existing && existing.ledgerSeq > 0 && existing.turnItems.length > 0);
+        const preservePaintedLayer = Boolean(
+          existing
+          && (sameSubmission || sameAcceptedTurn)
+          && (
+            existing.status === "completed"
+            || existing.status === "failed"
+            || (existingHasOutput && (!acceptedTurnId || existing.turnId === acceptedTurnId))
+          ),
+        );
+        if (preservePaintedLayer) return current;
+        if (!acceptedTurnId || !isBusyPhase(syncedDetail.currentPhase || syncedDetail.status)) {
           return setActiveTurnLayerForSession(current, variables.sessionId, undefined);
         }
         return setActiveTurnLayerForSession(
@@ -522,9 +715,14 @@ export function useChatComposerTurnMutations({
       const previousDetail = context && typeof context === "object" && "previousDetail" in context
         ? (context as { previousDetail?: SessionDetail }).previousDetail
         : undefined;
-      if (previousDetail) {
-        queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), previousDetail);
-      } else {
+      const currentDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(variables.sessionId));
+      const guard = currentDetail?.editResubmitProtection;
+      if (isEditAcknowledged(currentDetail, variables.clientSubmissionId)
+        || (guard && (guard.clientSubmissionId !== variables.clientSubmissionId || guard.phase === "accepted"))) return;
+      if (previousDetail && guard) {
+        queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (current) =>
+          rollbackEditResubmit(current, previousDetail, variables.clientSubmissionId));
+      } else if (!currentDetail) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.session(variables.sessionId), exact: true });
       }
       setActiveTurnLayersBySession((current) =>
@@ -778,6 +976,7 @@ export function useChatComposerTurnMutations({
         sessionId: string;
         content: string;
         mode: SessionGuidanceMode;
+        steeredQueuedTurnId?: string;
       },
     ) =>
       submitSessionGuidance(sessionId, { content, mode }),
@@ -801,7 +1000,23 @@ export function useChatComposerTurnMutations({
         ...current,
         [variables.sessionId]: "",
       }));
+      removeStoredSessionDraft(variables.sessionId);
       syncSessionDetail(nextDetail);
+      if (variables.steeredQueuedTurnId) {
+        // Optimistic steer: the row left the cache before the POST, but this
+        // response snapshot still carries it because the queue DELETE has not
+        // run yet; keep it out of the paint until the DELETE rebases.
+        queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detailState) =>
+          detailState
+            ? {
+              ...detailState,
+              queuedTurns: (detailState.queuedTurns ?? []).filter(
+                (row) => row.id !== variables.steeredQueuedTurnId,
+              ),
+            }
+            : detailState,
+        );
+      }
       void chatWorkspaceCache.afterSessionChanged({ sessionId: variables.sessionId });
     },
     onError: (error, variables, context) => {
@@ -867,6 +1082,12 @@ export type UseChatComposerSubmitActionsResult = {
   handleRuntimeStatusEnabledChange: (enabled: boolean) => void;
   handleAddComposerAttachments: (files: FileList | File[]) => void;
   handleRemoveComposerAttachment: (attachmentId: string) => void;
+  /** Re-upload one failed attachment chip; never auto-sends the draft. */
+  handleRetryComposerAttachmentUpload: (attachmentId: string) => void;
+  /** Re-upload every failed attachment chip of the active session at once. */
+  handleRetryComposerAttachmentUploads: () => void;
+  /** Session-keyed retry core (tests and advanced callers). */
+  retryComposerAttachmentUploads: (sessionId: string, onlyAttachmentId?: string) => Promise<void>;
   handleAddComposerReference: (reference: SessionReferenceAttachment) => void;
   handleRemoveComposerReference: (referenceId: string) => void;
   handleSubmitTurn: () => void;
@@ -876,6 +1097,7 @@ export type UseChatComposerSubmitActionsResult = {
   handleFollowupQueueRemove: (id: string) => void;
   handleFollowupQueueMove: (fromIndex: number, toIndex: number) => void;
   handleFollowupQueueSteer: (id: string) => void;
+  handleFollowupQueueTogglePause: (id: string, paused: boolean) => void;
   handleEditUserMessage: (message: ConversationMessage) => void;
   handleCancelEditMessage: () => void;
   handleRegenerateAssistantMessage: (message: ConversationMessage) => void;
@@ -924,8 +1146,81 @@ export function useChatComposerSubmitActions({
   setRuntimeStatusEnabledForNextTurn,
   companionAgentId,
 }: UseChatComposerSubmitActionsOptions): UseChatComposerSubmitActionsResult {
-  const pendingStopAfterAcceptRef = useRef<DeferredStopIntent | null>(null);
-  const previousSessionRef = useRef(activeSessionId);
+  const pendingStopAfterAcceptRef = useRef<Map<string, DeferredStopIntent>>(new Map());
+  // Uploading attachments happens before React Query creates the submit/edit
+  // mutation. Keep the same submission identity visible to Stop during that
+  // gap so a stop requested before upload completion can still match the late
+  // mutation acceptance, even after switching sessions.
+  const pendingUploadSubmissionRef = useRef<Map<string, string>>(new Map());
+  // Per-id optimistic queue intents (mirrors pendingAgentIds in
+  // useChatAgentArchiveQueue): a second click on a row whose withdraw is still
+  // in flight must not re-send the DELETE, while different rows stay free to
+  // race in parallel.
+  const pendingQueueWithdrawalIdsRef = useRef<Set<string>>(new Set());
+  // Defect-① observability: a queued turn whose drain never fires (ghost
+  // running marker) would sit silently forever. Surface one composer hint per
+  // row once its wait exceeds the threshold; forget a row when it leaves the
+  // queue so a re-queued row can be hinted again.
+  const queuedStuckHintedIdsRef = useRef<Set<string>>(new Set());
+  const activeQueuedTurns = detail?.queuedTurns;
+  useEffect(() => {
+    const sessionId = activeSessionId;
+    if (!sessionId) {
+      return;
+    }
+    const surfaceStuckHints = () => {
+      const rows = activeQueuedTurns ?? [];
+      const aliveIds = new Set(rows.map((row) => row.id));
+      for (const hinted of [...queuedStuckHintedIdsRef.current]) {
+        if (!aliveIds.has(hinted)) {
+          queuedStuckHintedIdsRef.current.delete(hinted);
+        }
+      }
+      const firstStuck = queuedTurnsWaitingBeyondMs(rows, Date.now())[0];
+      if (!firstStuck || queuedStuckHintedIdsRef.current.has(firstStuck.id)) {
+        return;
+      }
+      queuedStuckHintedIdsRef.current.add(firstStuck.id);
+      const waitedSeconds = Math.max(
+        1,
+        Math.round((Date.now() - Date.parse(String(firstStuck.createdAt || ""))) / 1000),
+      );
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [sessionId]:
+          lang === "zh"
+            ? `有排队消息等待超过 ${waitedSeconds} 秒仍未开始，当前轮可能卡住了。可停止当前轮让队列立即发送，或撤回后重发。`
+            : `A queued message has waited over ${waitedSeconds} seconds without starting; the current turn may be stuck. Stop the current turn to send the queue now, or withdraw it and resend.`,
+      }));
+    };
+    surfaceStuckHints();
+    const timer = window.setInterval(surfaceStuckHints, QUEUED_TURN_STUCK_CHECK_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [activeSessionId, lang, activeQueuedTurns, setSessionComposerErrors]);
+  const restorePendingStopAfterUploadFailure = useCallback((sessionId: string) => {
+    const pendingStop = pendingStopAfterAcceptRef.current.get(sessionId);
+    if (pendingStop?.stoppingAt) {
+      queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (current) => {
+        if (!current) {
+          return current;
+        }
+        return clearSessionDetailStopping(current, {
+          requestedAt: pendingStop.stoppingAt!,
+          previous: pendingStop.previousDetail,
+        });
+      });
+    }
+    pendingStopAfterAcceptRef.current.delete(sessionId);
+  }, [queryClient]);
+  const attachmentSnapshotRef = useRef<{ sessionId: string | null | undefined; attachments: ComposerImageAttachment[] }>({
+    sessionId: activeSessionId,
+    attachments: activeImageAttachments,
+  });
+  const lastAttachmentInputRef = useRef(activeImageAttachments);
+  if (attachmentSnapshotRef.current.sessionId !== activeSessionId || lastAttachmentInputRef.current !== activeImageAttachments) {
+    lastAttachmentInputRef.current = activeImageAttachments;
+    attachmentSnapshotRef.current = { sessionId: activeSessionId, attachments: activeImageAttachments };
+  }
 
   const handleComposerChange = useCallback((value: string) => {
     if (!activeSessionId) {
@@ -935,6 +1230,8 @@ export function useChatComposerSubmitActions({
       ...current,
       [activeSessionId]: value,
     }));
+    // Debounced localStorage persistence: drafts survive a reload/restart.
+    scheduleSessionDraftSave(activeSessionId, value);
     setSessionComposerErrors((current) => ({
       ...current,
       [activeSessionId]: "",
@@ -955,7 +1252,12 @@ export function useChatComposerSubmitActions({
     if (!activeSessionId) {
       return;
     }
-    const { accepted: classifiedAccepted, rejected } = classifyComposerFiles(files);
+    // Desktop shell resolves drag/picker files back to their local paths so the
+    // submit upload can register them zero-copy; clipboard screenshots and web
+    // browsers resolve to null and keep the in-memory upload path.
+    const { accepted: classifiedAccepted, rejected } = classifyComposerFiles(files, {
+      resolveLocalPath: resolveLocalFilePath,
+    });
     if (!classifiedAccepted.length && !rejected.length) {
       return;
     }
@@ -964,35 +1266,56 @@ export function useChatComposerSubmitActions({
     const accepted = activeAgentImageInputUnsupported
       ? classifiedAccepted.filter((attachment) => attachment.kind !== "image")
       : classifiedAccepted;
-    const effectiveRejected = activeAgentImageInputUnsupported
-      ? [
-          ...rejected,
-          ...classifiedAccepted
-            .filter((attachment) => attachment.kind === "image")
-            .map((attachment) => attachment.filename),
-        ]
-      : rejected;
+    const unsupportedImageNames = activeAgentImageInputUnsupported
+      ? classifiedAccepted.filter((attachment) => attachment.kind === "image").map((attachment) => attachment.filename)
+      : [];
+    if (activeAgentImageInputUnsupported) {
+      classifiedAccepted
+        .filter((attachment) => attachment.kind === "image")
+        .forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
+    }
+    let capacityRejected: ComposerImageAttachment[] = [];
     if (accepted.length) {
+      const attachmentSnapshot = attachmentSnapshotRef.current.sessionId === activeSessionId
+        ? attachmentSnapshotRef.current.attachments
+        : activeImageAttachments;
+      const mergePreview = mergeComposerAttachmentsWithRejections(attachmentSnapshot, accepted, {
+        maxTotal: MAX_COMPOSER_IMAGE_ATTACHMENTS + MAX_COMPOSER_DOCUMENT_ATTACHMENTS,
+        maxImages: MAX_COMPOSER_IMAGE_ATTACHMENTS,
+        maxDocuments: MAX_COMPOSER_DOCUMENT_ATTACHMENTS,
+      });
+      capacityRejected = mergePreview.rejected;
+      capacityRejected.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
+      attachmentSnapshotRef.current = { sessionId: activeSessionId, attachments: mergePreview.attachments };
       setSessionImageAttachments((current) => {
-        const existing = current[activeSessionId] ?? [];
         return {
           ...current,
-          [activeSessionId]: mergeComposerAttachments(existing, accepted, {
-            maxTotal: MAX_COMPOSER_IMAGE_ATTACHMENTS + MAX_COMPOSER_DOCUMENT_ATTACHMENTS,
-            maxImages: MAX_COMPOSER_IMAGE_ATTACHMENTS,
-            maxDocuments: MAX_COMPOSER_DOCUMENT_ATTACHMENTS,
-          }),
+          [activeSessionId]: mergePreview.attachments,
         };
       });
     }
+    const rejectedMessages = [
+      rejected.length
+        ? (lang === "zh" ? `格式或大小不支持：${rejected.join("、")}` : `type or size is unsupported: ${rejected.join(", ")}`)
+        : "",
+      unsupportedImageNames.length
+        ? (lang === "zh" ? `当前模型不支持图片：${unsupportedImageNames.join("、")}` : `images are unsupported by this model: ${unsupportedImageNames.join(", ")}`)
+        : "",
+      capacityRejected.length
+        ? (lang === "zh"
+          ? `数量超出上限：${capacityRejected.map((attachment) => attachment.filename).join("、")}`
+          : `attachment limit exceeded: ${capacityRejected.map((attachment) => attachment.filename).join(", ")}`)
+        : "",
+    ].filter(Boolean);
     setSessionComposerErrors((current) => ({
       ...current,
-      [activeSessionId]: effectiveRejected.length
-        ? (lang === "zh" ? "部分附件格式或大小不支持。" : "Some attachments were rejected by type or size.")
+      [activeSessionId]: rejectedMessages.length
+        ? (lang === "zh" ? `部分附件未添加（${rejectedMessages.join("；")}）` : `Some attachments were rejected (${rejectedMessages.join("; ")})`)
         : "",
     }));
   }, [
     activeAgentImageInputUnsupported,
+    activeImageAttachments,
     activeSessionId,
     lang,
     sessionBusy,
@@ -1004,8 +1327,134 @@ export function useChatComposerSubmitActions({
     if (!activeSessionId) {
       return;
     }
-    setSessionImageAttachments((current) => removeSessionImageAttachment(current, activeSessionId, attachmentId));
-  }, [activeSessionId, setSessionImageAttachments]);
+    const attachmentSnapshot = attachmentSnapshotRef.current.sessionId === activeSessionId
+      ? attachmentSnapshotRef.current.attachments
+      : activeImageAttachments;
+    const nextAttachments = attachmentSnapshot.filter((attachment) => attachment.id !== attachmentId);
+    if (nextAttachments.length === attachmentSnapshot.length) {
+      return;
+    }
+    const removed = attachmentSnapshot.find((attachment) => attachment.id === attachmentId);
+    if (removed) {
+      URL.revokeObjectURL(removed.previewUrl);
+    }
+    attachmentSnapshotRef.current = { sessionId: activeSessionId, attachments: nextAttachments };
+    setSessionImageAttachments((current) => ({
+      ...current,
+      [activeSessionId]: nextAttachments,
+    }));
+  }, [activeImageAttachments, activeSessionId, setSessionImageAttachments]);
+
+  // Upload-repair entry for failed attachment chips: re-uploads only the
+  // failed subset (or one chip), respects the same per-session in-flight guard
+  // as submit, and never auto-sends — the restored draft waits for the user.
+  const retryComposerAttachmentUploads = useCallback(async (sessionId: string, onlyAttachmentId?: string) => {
+    if (!sessionId || imageUploadInFlightRef.current[sessionId]) {
+      return;
+    }
+    const tray = activeImageAttachments;
+    const targets = failedComposerAttachmentUploads(tray).filter(
+      (attachment) => !onlyAttachmentId || attachment.id === onlyAttachmentId,
+    );
+    if (!targets.length) {
+      return;
+    }
+    imageUploadInFlightRef.current[sessionId] = true;
+    setSessionImageUploadPending((current) => ({
+      ...current,
+      [sessionId]: true,
+    }));
+    setSessionImageAttachments((current) => ({
+      ...current,
+      [sessionId]: markComposerAttachmentsUploading(
+        current[sessionId] ?? [],
+        new Set(targets.map((attachment) => attachment.id)),
+      ),
+    }));
+    postSubmitTelemetry(
+      "browser.chat_submit.upload_retry_started",
+      "Composer attachment upload retry started.",
+      sessionId,
+      { attachmentCount: targets.length },
+    );
+    try {
+      const outcomes = await uploadComposerAttachmentsSettled(sessionId, targets);
+      setSessionImageAttachments((current) => ({
+        ...current,
+        [sessionId]: applyComposerAttachmentUploadOutcomes(current[sessionId] ?? [], outcomes),
+      }));
+      const failedOutcomes = outcomes.filter(isFailedUploadOutcome);
+      const remainingFailedChips = failedComposerAttachmentUploads(
+        applyComposerAttachmentUploadOutcomes(tray, outcomes),
+      ).length;
+      if (failedOutcomes.length) {
+        postSubmitTelemetry(
+          "browser.chat_submit.upload_retry_failed",
+          "Composer attachment upload retry finished with failures.",
+          sessionId,
+          {
+            attachmentCount: targets.length,
+            uploadedAttachmentCount: targets.length - failedOutcomes.length,
+            error: failedOutcomes[0]?.error,
+          },
+          "error",
+        );
+        setSessionComposerErrors((current) => ({
+          ...current,
+          [sessionId]: describeError(
+            failedOutcomes[0]?.error,
+            lang === "zh" ? "图片上传失败" : "Image upload failed",
+          ),
+        }));
+      } else {
+        postSubmitTelemetry(
+          "browser.chat_submit.upload_retry_succeeded",
+          "Composer attachment upload retry succeeded.",
+          sessionId,
+          {
+            attachmentCount: targets.length,
+            uploadedAttachmentCount: targets.length,
+          },
+        );
+        if (remainingFailedChips === 0) {
+          // The upload-failure hint must not outlive its chips; unrelated
+          // errors were already replaced by the submit failure branch.
+          setSessionComposerErrors((current) => ({
+            ...current,
+            [sessionId]: "",
+          }));
+        }
+      }
+    } finally {
+      imageUploadInFlightRef.current[sessionId] = false;
+      setSessionImageUploadPending((current) => ({
+        ...current,
+        [sessionId]: false,
+      }));
+    }
+  }, [
+    activeImageAttachments,
+    describeError,
+    imageUploadInFlightRef,
+    lang,
+    setSessionComposerErrors,
+    setSessionImageAttachments,
+    setSessionImageUploadPending,
+  ]);
+
+  const handleRetryComposerAttachmentUploads = useCallback(() => {
+    if (!activeSessionId) {
+      return;
+    }
+    void retryComposerAttachmentUploads(activeSessionId);
+  }, [activeSessionId, retryComposerAttachmentUploads]);
+
+  const handleRetryComposerAttachmentUpload = useCallback((attachmentId: string) => {
+    if (!activeSessionId) {
+      return;
+    }
+    void retryComposerAttachmentUploads(activeSessionId, attachmentId);
+  }, [activeSessionId, retryComposerAttachmentUploads]);
 
   const handleAddComposerReference = useCallback((reference: SessionReferenceAttachment) => {
     if (!activeSessionId) {
@@ -1100,11 +1549,14 @@ export function useChatComposerSubmitActions({
       return;
     }
     imageUploadInFlightRef.current[sessionId] = true;
+    pendingUploadSubmissionRef.current.set(sessionId, clientSubmissionId);
     setSessionImageUploadPending((current) => ({
       ...current,
       [sessionId]: true,
     }));
     setSessionDrafts((current) => clearSessionDraftForSubmittedTurn(current, sessionId));
+    // The submitted draft must not resurrect from localStorage after a reload.
+    removeStoredSessionDraft(sessionId);
     setSessionComposerErrors((current) => ({
       ...current,
       [sessionId]: "",
@@ -1129,7 +1581,53 @@ export function useChatComposerSubmitActions({
           },
         );
       }
-      const uploaded = await Promise.all(attachments.map((attachment) => uploadSessionImageAttachment(sessionId, attachment)));
+      // Per-attachment settle: successes keep their artifactId (reused on
+      // resubmit), failures flip their chip to the retryable failed state
+      // instead of discarding the whole batch.
+      const needUpload = attachments.filter(needsComposerAttachmentUpload);
+      let outcomes: ComposerAttachmentUploadOutcome[] = [];
+      if (needUpload.length) {
+        setSessionImageAttachments((current) => ({
+          ...current,
+          [sessionId]: markComposerAttachmentsUploading(current[sessionId] ?? []),
+        }));
+        outcomes = await uploadComposerAttachmentsSettled(sessionId, needUpload);
+        setSessionImageAttachments((current) => ({
+          ...current,
+          [sessionId]: applyComposerAttachmentUploadOutcomes(current[sessionId] ?? [], outcomes),
+        }));
+      }
+      const failedOutcomes = outcomes.filter(isFailedUploadOutcome);
+      if (failedOutcomes.length) {
+        const firstFailure = failedOutcomes[0];
+        postSubmitTelemetry(
+          "browser.chat_submit.upload_failed",
+          "Direct chat submit image upload failed before message POST.",
+          sessionId,
+          {
+            content,
+            attachmentCount: attachments.length,
+            uploadedAttachmentCount: attachments.length - failedOutcomes.length,
+            referenceCount: references.length,
+            mentalModelEnabled,
+            clientSubmissionId,
+            error: firstFailure.error,
+          },
+          "error",
+        );
+        setSessionComposerErrors((current) => ({
+          ...current,
+          [sessionId]: describeError(firstFailure.error, lang === "zh" ? "图片上传失败" : "Image upload failed"),
+        }));
+        if (content || references.length) {
+          queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+            removeOptimisticUserMessage(detailState, { sessionId, content, references, clientSubmissionId }),
+          );
+          setSessionDrafts((current) => restoreSubmittedDraftIfComposerStillEmpty(current, sessionId, content));
+        }
+        restorePendingStopAfterUploadFailure(sessionId);
+        return;
+      }
       if (attachments.length) {
         postSubmitTelemetry(
           "browser.chat_submit.upload_succeeded",
@@ -1138,13 +1636,16 @@ export function useChatComposerSubmitActions({
           {
             content,
             attachmentCount: attachments.length,
-            uploadedAttachmentCount: uploaded.length,
+            uploadedAttachmentCount: attachments.length,
             referenceCount: references.length,
             mentalModelEnabled,
             clientSubmissionId,
           },
         );
       }
+      const uploadedAttachmentIds = composerUploadedArtifactIds(
+        applyComposerAttachmentUploadOutcomes(attachments, outcomes),
+      );
       postSubmitTelemetry(
         "browser.chat_submit.submit_mutate_requested",
         "Direct chat submit mutation was requested.",
@@ -1152,7 +1653,7 @@ export function useChatComposerSubmitActions({
         {
           content,
           attachmentCount: attachments.length,
-          uploadedAttachmentCount: uploaded.length,
+          uploadedAttachmentCount: uploadedAttachmentIds.length,
           referenceCount: references.length,
           mentalModelEnabled,
           clientSubmissionId,
@@ -1165,12 +1666,14 @@ export function useChatComposerSubmitActions({
         mentalModelEnabled,
         runtimeStatusEnabled,
         turnStatusTail: loadTurnStatusTailConfig(sessionId),
-        attachmentIds: uploaded.map((attachment) => attachment.artifactId).filter(Boolean),
+        attachmentIds: uploadedAttachmentIds,
         references,
         requestStartedAtMs: chatStreamPerformanceNowMs(),
         queuedBehindActiveTurn,
       });
     } catch (error) {
+      // Defense net only: attachment uploads settle per attachment above, so
+      // this keeps any unexpected throw on the same failure semantics.
       postSubmitTelemetry(
         "browser.chat_submit.upload_failed",
         "Direct chat submit image upload failed before message POST.",
@@ -1195,7 +1698,11 @@ export function useChatComposerSubmitActions({
         );
         setSessionDrafts((current) => restoreSubmittedDraftIfComposerStillEmpty(current, sessionId, content));
       }
+      restorePendingStopAfterUploadFailure(sessionId);
     } finally {
+      if (pendingUploadSubmissionRef.current.get(sessionId) === clientSubmissionId) {
+        pendingUploadSubmissionRef.current.delete(sessionId);
+      }
       imageUploadInFlightRef.current[sessionId] = false;
       setSessionImageUploadPending((current) => ({
         ...current,
@@ -1207,6 +1714,7 @@ export function useChatComposerSubmitActions({
     imageUploadInFlightRef,
     lang,
     queryClient,
+    restorePendingStopAfterUploadFailure,
     setSessionComposerErrors,
     setSessionDrafts,
     setSessionImageUploadPending,
@@ -1232,35 +1740,101 @@ export function useChatComposerSubmitActions({
     if (!sessionId || !content) {
       return;
     }
+    // Optimistic edit (same pending-intent style as withdraw): the new text
+    // paints at save time while status/pause metadata stay untouched; the
+    // PATCH response rebases the authoritative rows and a failure restores
+    // the pre-edit text without clobbering fields that moved meanwhile.
+    const rowsAtIntent = queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId))?.queuedTurns ?? [];
+    const snapshotRow = rowsAtIntent.find((row) => row.id === id);
+    if (snapshotRow) {
+      queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+        detailState
+          ? {
+            ...detailState,
+            queuedTurns: (detailState.queuedTurns ?? []).map((row) =>
+              row.id === id ? { ...row, content } : row,
+            ),
+          }
+          : detailState,
+      );
+    }
     void updateSessionQueuedTurn(sessionId, id, { content })
       .then((rows) => syncQueuedTurnsIntoDetail(sessionId, rows))
-      .catch((error) => reportQueuedTurnError(
-        sessionId,
-        error,
-        lang === "zh" ? "修改排队消息失败" : "Failed to update the queued message",
-      ));
-  }, [activeSessionId, lang, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
+      .catch((error) => {
+        if (snapshotRow) {
+          queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) => {
+            if (!detailState) {
+              return detailState;
+            }
+            let reverted = false;
+            const queuedTurns = (detailState.queuedTurns ?? []).map((row) => {
+              // Roll back only this intent: a row edited again while the
+              // failed PATCH was in flight keeps its newer text.
+              if (row.id !== id || row.content !== content) {
+                return row;
+              }
+              reverted = true;
+              return { ...row, content: snapshotRow.content };
+            });
+            return reverted ? { ...detailState, queuedTurns } : detailState;
+          });
+        }
+        reportQueuedTurnError(
+          sessionId,
+          error,
+          lang === "zh" ? "修改排队消息失败" : "Failed to update the queued message",
+        );
+      });
+  }, [activeSessionId, lang, queryClient, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
 
   const handleFollowupQueueRemove = useCallback((id: string) => {
     const sessionId = activeSessionId;
-    if (!sessionId) {
+    if (!sessionId || pendingQueueWithdrawalIdsRef.current.has(id)) {
       return;
     }
+    // Optimistic withdraw (ZCode pending-intent style): the row leaves the bar
+    // at click time; the DELETE response only rebases the authoritative rows.
+    const rowsAtIntent = queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId))?.queuedTurns ?? [];
+    const snapshotIndex = rowsAtIntent.findIndex((row) => row.id === id);
+    const snapshotRow = snapshotIndex >= 0 ? rowsAtIntent[snapshotIndex] : undefined;
+    if (!snapshotRow) {
+      return;
+    }
+    pendingQueueWithdrawalIdsRef.current.add(id);
+    queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+      detailState
+        ? { ...detailState, queuedTurns: (detailState.queuedTurns ?? []).filter((row) => row.id !== id) }
+        : detailState,
+    );
     void removeSessionQueuedTurn(sessionId, id)
       .then((rows) => syncQueuedTurnsIntoDetail(sessionId, rows))
-      .catch((error) => reportQueuedTurnError(
-        sessionId,
-        error,
-        lang === "zh" ? "撤回排队消息失败" : "Failed to withdraw the queued message",
-      ));
-  }, [activeSessionId, lang, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
+      .catch((error) => {
+        // Roll back only this intent; authoritative rows that landed meanwhile stay.
+        queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+          detailState
+            ? {
+              ...detailState,
+              queuedTurns: restoreQueuedTurnIntoRows(detailState.queuedTurns ?? [], { row: snapshotRow, index: snapshotIndex }),
+            }
+            : detailState,
+        );
+        reportQueuedTurnError(
+          sessionId,
+          error,
+          lang === "zh" ? "撤回排队消息失败" : "Failed to withdraw the queued message",
+        );
+      })
+      .finally(() => {
+        pendingQueueWithdrawalIdsRef.current.delete(id);
+      });
+  }, [activeSessionId, lang, queryClient, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
 
   // Steering sends one queued item into the running turn as safe guidance and
   // then withdraws it from the server queue; items carrying attachments or
   // references stay queued because guidance cannot carry them.
   const handleFollowupQueueSteer = useCallback((id: string) => {
     const sessionId = activeSessionId;
-    if (!sessionId) {
+    if (!sessionId || pendingQueueWithdrawalIdsRef.current.has(id)) {
       return;
     }
     const item = (sessionFollowupQueues[sessionId] ?? []).find((entry) => entry.id === id);
@@ -1276,18 +1850,64 @@ export function useChatComposerSubmitActions({
       }));
       return;
     }
-    void (async () => {
-      try {
-        await sessionGuidanceMutation.mutateAsync({ sessionId, content: item.text, mode: "safe" });
-        const rows = await removeSessionQueuedTurn(sessionId, id);
-        syncQueuedTurnsIntoDetail(sessionId, rows);
-      } catch {
-        // The item stays queued; the guidance mutation already surfaced its error.
+    // Optimistic steer (same pending-intent style as withdraw): the row leaves
+    // the bar at click time; guidance + DELETE converge the authoritative rows
+    // and either failure rolls the row back into its pre-intent slot. The
+    // shared pending set also drops a second click while this steer is still
+    // in flight.
+    const rowsAtIntent = queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId))?.queuedTurns ?? [];
+    const snapshotIndex = rowsAtIntent.findIndex((row) => row.id === id);
+    const snapshotRow = snapshotIndex >= 0 ? rowsAtIntent[snapshotIndex] : undefined;
+    const restoreSteeredRow = () => {
+      if (!snapshotRow) {
+        return;
       }
-    })();
+      queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+        detailState
+          ? {
+            ...detailState,
+            queuedTurns: restoreQueuedTurnIntoRows(detailState.queuedTurns ?? [], { row: snapshotRow, index: snapshotIndex }),
+          }
+          : detailState,
+      );
+    };
+    pendingQueueWithdrawalIdsRef.current.add(id);
+    if (snapshotRow) {
+      queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+        detailState
+          ? { ...detailState, queuedTurns: (detailState.queuedTurns ?? []).filter((row) => row.id !== id) }
+          : detailState,
+      );
+    }
+    let guidanceAccepted = false;
+    void sessionGuidanceMutation
+      .mutateAsync({ sessionId, content: item.text, mode: "safe", steeredQueuedTurnId: id })
+      .then(() => {
+        guidanceAccepted = true;
+        return removeSessionQueuedTurn(sessionId, id);
+      })
+      .then((rows) => syncQueuedTurnsIntoDetail(sessionId, rows))
+      .catch((error) => {
+        // Roll back only this intent; authoritative rows that landed meanwhile
+        // stay. The guidance mutation surfaces its own copy on its failure, so
+        // only the withdraw step reports here.
+        restoreSteeredRow();
+        if (guidanceAccepted) {
+          reportQueuedTurnError(
+            sessionId,
+            error,
+            lang === "zh" ? "立即引导排队消息失败" : "Failed to steer the queued message",
+          );
+        }
+      })
+      .finally(() => {
+        pendingQueueWithdrawalIdsRef.current.delete(id);
+      });
   }, [
     activeSessionId,
     lang,
+    queryClient,
+    reportQueuedTurnError,
     sessionFollowupQueues,
     sessionGuidanceMutation,
     setSessionComposerErrors,
@@ -1302,14 +1922,49 @@ export function useChatComposerSubmitActions({
     if (!sessionId || fromIndex === toIndex || !from || !target) {
       return;
     }
+    // Optimistic reorder (ZCode pending-intent style): the row lands at its
+    // target slot at drop time; the PATCH response rebases the authoritative
+    // rows and a failure rolls back to the pre-drag order.
+    const rowsAtIntent = rows;
+    const optimisticRows = [...rowsAtIntent];
+    optimisticRows.splice(fromIndex, 1);
+    optimisticRows.splice(toIndex, 0, from);
+    queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+      detailState ? { ...detailState, queuedTurns: optimisticRows } : detailState,
+    );
     void updateSessionQueuedTurn(sessionId, from.id, { position: target.position })
       .then((next) => syncQueuedTurnsIntoDetail(sessionId, next))
+      .catch((error) => {
+        queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+          detailState
+            ? { ...detailState, queuedTurns: restoreQueuedTurnOrder(rowsAtIntent, detailState.queuedTurns ?? []) }
+            : detailState,
+        );
+        reportQueuedTurnError(
+          sessionId,
+          error,
+          lang === "zh" ? "调整排队顺序失败" : "Failed to reorder the queue",
+        );
+      });
+  }, [activeSessionId, detail?.queuedTurns, lang, queryClient, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
+
+  // Pausing holds one row out of draining (the server skips paused rows);
+  // resuming re-queues it at the tail, mirroring the server semantics.
+  const handleFollowupQueueTogglePause = useCallback((id: string, paused: boolean) => {
+    const sessionId = activeSessionId;
+    if (!sessionId) {
+      return;
+    }
+    void updateSessionQueuedTurn(sessionId, id, { status: paused ? "paused" : "queued" })
+      .then((rows) => syncQueuedTurnsIntoDetail(sessionId, rows))
       .catch((error) => reportQueuedTurnError(
         sessionId,
         error,
-        lang === "zh" ? "调整排队顺序失败" : "Failed to reorder the queue",
+        paused
+          ? (lang === "zh" ? "暂停排队消息失败" : "Failed to pause the queued message")
+          : (lang === "zh" ? "恢复排队消息失败" : "Failed to resume the queued message"),
       ));
-  }, [activeSessionId, detail?.queuedTurns, lang, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
+  }, [activeSessionId, lang, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
 
   const handleSubmitTurn = useCallback(() => {
     if (!activeSessionId) {
@@ -1467,29 +2122,62 @@ export function useChatComposerSubmitActions({
       );
       const editTarget = resolvedEditTarget;
       const editAttachments = activeImageAttachments;
+      const carriedAttachmentIds = resolveEditCarryOverAttachmentIds(detail, editTarget.messageId);
       void (async () => {
         if (editAttachments.length && imageUploadInFlightRef.current[activeSessionId]) {
           return;
         }
-        let attachmentIds: string[] = [];
+        let uploadedAttachmentIds: string[] = [];
         if (editAttachments.length) {
           imageUploadInFlightRef.current[activeSessionId] = true;
+          pendingUploadSubmissionRef.current.set(activeSessionId, clientSubmissionId);
           setSessionImageUploadPending((current) => ({
             ...current,
             [activeSessionId]: true,
           }));
           try {
-            const uploaded = await Promise.all(
-              editAttachments.map((attachment) => uploadSessionImageAttachment(activeSessionId, attachment)),
+            // Same per-attachment settle as the direct submit: chips that
+            // already carry an artifactId ride along without a re-upload, and
+            // failures stay in the tray as retryable failed chips.
+            let outcomes: ComposerAttachmentUploadOutcome[] = [];
+            const needUpload = editAttachments.filter(needsComposerAttachmentUpload);
+            if (needUpload.length) {
+              setSessionImageAttachments((current) => ({
+                ...current,
+                [activeSessionId]: markComposerAttachmentsUploading(current[activeSessionId] ?? []),
+              }));
+              outcomes = await uploadComposerAttachmentsSettled(activeSessionId, needUpload);
+              setSessionImageAttachments((current) => ({
+                ...current,
+                [activeSessionId]: applyComposerAttachmentUploadOutcomes(current[activeSessionId] ?? [], outcomes),
+              }));
+            }
+            const failedOutcomes = outcomes.filter(isFailedUploadOutcome);
+            if (failedOutcomes.length) {
+              setSessionComposerErrors((current) => ({
+                ...current,
+                [activeSessionId]: describeError(
+                  failedOutcomes[0].error,
+                  lang === "zh" ? "图片上传失败" : "Image upload failed",
+                ),
+              }));
+              restorePendingStopAfterUploadFailure(activeSessionId);
+              return;
+            }
+            uploadedAttachmentIds = composerUploadedArtifactIds(
+              applyComposerAttachmentUploadOutcomes(editAttachments, outcomes),
             );
-            attachmentIds = uploaded.map((attachment) => attachment.artifactId).filter(Boolean);
           } catch (error) {
             setSessionComposerErrors((current) => ({
               ...current,
               [activeSessionId]: describeError(error, lang === "zh" ? "图片上传失败" : "Image upload failed"),
             }));
+            restorePendingStopAfterUploadFailure(activeSessionId);
             return;
           } finally {
+            if (pendingUploadSubmissionRef.current.get(activeSessionId) === clientSubmissionId) {
+              pendingUploadSubmissionRef.current.delete(activeSessionId);
+            }
             imageUploadInFlightRef.current[activeSessionId] = false;
             setSessionImageUploadPending((current) => ({
               ...current,
@@ -1503,7 +2191,7 @@ export function useChatComposerSubmitActions({
           ...(editTarget.nodeId ? { baseMessageId: editTarget.nodeId } : {}),
           clientSubmissionId,
           content,
-          attachmentIds,
+          attachmentIds: [...carriedAttachmentIds, ...uploadedAttachmentIds],
           mentalModelEnabled: mentalModelEnabledForNextTurn,
           runtimeStatusEnabled: runtimeStatusEnabledForNextTurn,
           turnStatusTail: loadTurnStatusTailConfig(activeSessionId),
@@ -1536,6 +2224,7 @@ export function useChatComposerSubmitActions({
     lang,
     mentalModelEnabledForNextTurn,
     runtimeStatusEnabledForNextTurn,
+    restorePendingStopAfterUploadFailure,
     resolvedEditTarget,
     sessionBusy,
     sessionFollowupQueues,
@@ -1739,10 +2428,22 @@ export function useChatComposerSubmitActions({
       if (optimisticDetail) {
         queryClient.setQueryData(sessionKey, optimisticDetail);
       }
-      pendingStopAfterAcceptRef.current = { sessionId: activeSessionId, previousDetail, stoppingAt };
+      const pendingSubmissionId = submitTurnMutation.isPending
+        && submitTurnMutation.variables?.sessionId === activeSessionId
+        ? submitTurnMutation.variables.clientSubmissionId
+        : editResubmitMutation.isPending
+          && editResubmitMutation.variables?.sessionId === activeSessionId
+          ? editResubmitMutation.variables.clientSubmissionId
+          : pendingUploadSubmissionRef.current.get(activeSessionId);
+      pendingStopAfterAcceptRef.current.set(activeSessionId, {
+        sessionId: activeSessionId,
+        previousDetail,
+        stoppingAt,
+        clientSubmissionId: pendingSubmissionId,
+      });
       return;
     }
-    pendingStopAfterAcceptRef.current = null;
+    pendingStopAfterAcceptRef.current.delete(activeSessionId);
     stopTurnMutation.mutate({
       sessionId: activeSessionId,
       turnId,
@@ -1761,17 +2462,117 @@ export function useChatComposerSubmitActions({
     submitTurnMutation.variables?.sessionId,
   ]);
 
+  // Mutation observers only expose the most recently submitted mutation. A
+  // late acceptance from session A can therefore disappear behind a newer
+  // submission in session B. Subscribe to the cache so every mutation keeps
+  // its own submission identity until the deferred stop is dispatched.
   useEffect(() => {
-    const pendingStop = pendingStopAfterAcceptRef.current;
-    if (!activeSessionId || pendingStop?.sessionId !== activeSessionId) {
-      return;
+    const unsubscribe = queryClient.getMutationCache().subscribe((event: MutationCacheNotifyEvent) => {
+      if (event.type !== "updated") return;
+      const { mutation } = event;
+      const variables = mutation.state.variables as {
+        sessionId?: unknown;
+        clientSubmissionId?: unknown;
+        messageId?: unknown;
+      } | undefined;
+      const sessionId = typeof variables?.sessionId === "string" ? variables.sessionId : "";
+      const clientSubmissionId = typeof variables?.clientSubmissionId === "string"
+        ? variables.clientSubmissionId
+        : "";
+      if (!sessionId || !clientSubmissionId) return;
+      const pendingStop = pendingStopAfterAcceptRef.current.get(sessionId);
+      if (!pendingStop || pendingStop.clientSubmissionId !== clientSubmissionId) return;
+
+      if (mutation.state.status === "error") {
+        pendingStopAfterAcceptRef.current.delete(sessionId);
+        return;
+      }
+      if (mutation.state.status !== "success") return;
+
+      const data = mutation.state.data as {
+        sessionId?: unknown;
+        turnId?: unknown;
+      } | SessionDetail | undefined;
+      const acceptedTurnId = variables?.messageId
+        ? resolveSessionStopTurnId(data as SessionDetail | undefined, "")
+        : data && typeof data === "object" && "turnId" in data
+          ? String(data.turnId || "").trim()
+          : "";
+      if (!acceptedTurnId) return;
+
+      if (stopTurnMutation.isPending) {
+        pendingStop.acceptedTurnId = acceptedTurnId;
+        return;
+      }
+      pendingStopAfterAcceptRef.current.delete(sessionId);
+      stopTurnMutation.mutate({
+        sessionId,
+        turnId: acceptedTurnId,
+        deferredStop: {
+          previousDetail: pendingStop.previousDetail,
+          stoppingAt: pendingStop.stoppingAt,
+        },
+      });
+    });
+    return unsubscribe;
+  }, [queryClient, stopTurnMutation]);
+
+  useEffect(() => {
+    const acceptedSubmit = submitTurnMutation.data;
+    const submitVariables = submitTurnMutation.variables;
+    const acceptedEdit = editResubmitMutation.data;
+    const editVariables = editResubmitMutation.variables;
+
+    for (const [sessionId, pendingStop] of pendingStopAfterAcceptRef.current) {
+      if (!pendingStop.clientSubmissionId) continue;
+      const submitMatches = acceptedSubmit?.sessionId === sessionId
+        && acceptedSubmit.clientSubmissionId === pendingStop.clientSubmissionId;
+      const editMatches = editVariables?.sessionId === sessionId
+        && editVariables.clientSubmissionId === pendingStop.clientSubmissionId
+        && !editResubmitMutation.isPending
+        && !editResubmitMutation.error
+        && Boolean(acceptedEdit);
+      const acceptedTurnId = pendingStop.acceptedTurnId || (submitMatches
+        ? String(acceptedSubmit?.turnId || "").trim()
+        : editMatches
+          ? resolveSessionStopTurnId(acceptedEdit, "")
+          : "");
+      if (acceptedTurnId && !stopTurnMutation.isPending) {
+        pendingStopAfterAcceptRef.current.delete(sessionId);
+        stopTurnMutation.mutate({
+          sessionId,
+          turnId: acceptedTurnId,
+          deferredStop: {
+            previousDetail: pendingStop.previousDetail,
+            stoppingAt: pendingStop.stoppingAt,
+          },
+        });
+        return;
+      }
+      const submitFailed = submitVariables?.sessionId === sessionId
+        && submitVariables.clientSubmissionId === pendingStop.clientSubmissionId
+        && !submitTurnMutation.isPending
+        && Boolean(submitTurnMutation.error)
+        && !submitMatches;
+      const editFailed = editVariables?.sessionId === sessionId
+        && editVariables.clientSubmissionId === pendingStop.clientSubmissionId
+        && !editResubmitMutation.isPending
+        && Boolean(editResubmitMutation.error)
+        && !editMatches;
+      if (submitFailed || editFailed) {
+        pendingStopAfterAcceptRef.current.delete(sessionId);
+      }
     }
+
+    if (!activeSessionId) return;
+    const pendingStop = pendingStopAfterAcceptRef.current.get(activeSessionId);
+    if (!pendingStop || pendingStop.clientSubmissionId) return;
     const submitPending = Boolean(
       (submitTurnMutation.isPending && submitTurnMutation.variables?.sessionId === activeSessionId)
       || (editResubmitMutation.isPending && editResubmitMutation.variables?.sessionId === activeSessionId)
     );
     if (!sessionBusy && !submitPending) {
-      pendingStopAfterAcceptRef.current = null;
+      pendingStopAfterAcceptRef.current.delete(activeSessionId);
       return;
     }
     if (stopTurnMutation.isPending && stopTurnMutation.variables?.sessionId === activeSessionId) {
@@ -1781,7 +2582,7 @@ export function useChatComposerSubmitActions({
     if (!turnId) {
       return;
     }
-    pendingStopAfterAcceptRef.current = null;
+    pendingStopAfterAcceptRef.current.delete(activeSessionId);
     stopTurnMutation.mutate({
       sessionId: activeSessionId,
       turnId,
@@ -1799,6 +2600,12 @@ export function useChatComposerSubmitActions({
     sessionBusy,
     stopTurnMutation,
     submitTurnMutation.isPending,
+    submitTurnMutation.data,
+    submitTurnMutation.error,
+    submitTurnMutation.variables,
+    editResubmitMutation.data,
+    editResubmitMutation.error,
+    editResubmitMutation.variables,
     submitTurnMutation.variables?.sessionId,
   ]);
 
@@ -1817,15 +2624,9 @@ export function useChatComposerSubmitActions({
     });
   }, [activeDraftEffective, activeSessionId, sessionBusy, sessionGuidanceMutation, sessionStopping]);
 
-  // The server drains the queue when a turn settles, so the composer only keeps
-  // the deferred-stop intent scoped to the active session.
-  useEffect(() => {
-    if (previousSessionRef.current === activeSessionId) {
-      return;
-    }
-    previousSessionRef.current = activeSessionId;
-    pendingStopAfterAcceptRef.current = null;
-  }, [activeSessionId]);
+  // Deferred stop intents remain keyed by session while the user moves between
+  // sessions. A late submit acceptance is matched by submission identity and
+  // stopped immediately, without being applied to a newer turn.
 
   return {
     handleComposerChange,
@@ -1833,6 +2634,9 @@ export function useChatComposerSubmitActions({
     handleRuntimeStatusEnabledChange,
     handleAddComposerAttachments,
     handleRemoveComposerAttachment,
+    handleRetryComposerAttachmentUpload,
+    handleRetryComposerAttachmentUploads,
+    retryComposerAttachmentUploads,
     handleAddComposerReference,
     handleRemoveComposerReference,
     handleSubmitTurn,
@@ -1842,6 +2646,7 @@ export function useChatComposerSubmitActions({
     handleFollowupQueueRemove,
     handleFollowupQueueMove,
     handleFollowupQueueSteer,
+    handleFollowupQueueTogglePause,
     handleEditUserMessage,
     handleCancelEditMessage,
     handleRegenerateAssistantMessage,

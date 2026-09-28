@@ -60,5 +60,13 @@ describe("ChatComposerPlusMenu contract", () => {
     expect(source).toContain("knowledgeReferenceOptions");
     expect(source).toContain("onAddKnowledgeReference");
     expect(source).not.toContain('accept="image/png,image/jpeg,image/webp"');
+    // Reference pickers rank candidates with the shared tiered matcher.
+    expect(source).toContain("conversationFuzzyMatch");
+    expect(source).toContain("rankByScore(");
+  });
+
+  it("keeps reference pickers as native button lists", () => {
+    expect(source).not.toContain('role="listbox"');
+    expect(source).not.toContain('role="option"');
   });
 });

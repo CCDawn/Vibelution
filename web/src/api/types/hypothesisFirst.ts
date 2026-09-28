@@ -1138,3 +1138,43 @@ export type HypothesisRoundFailureRetryResponse = {
   questionId?: string;
   meetingRoundId?: string;
 };
+
+
+export type PendingDigestApprovalItem = {
+  meetingRoundId: string;
+  meetingType: string;
+  questionId: string;
+  digestContentHash: string;
+  digestSummary: string;
+  proposedCandidateCount: number;
+  riskCount: number;
+  startedAt: string;
+  ageSeconds: number;
+  ttlOverdue: boolean;
+  ttlMessage: string;
+};
+
+export type PendingDigestApprovalsResponse = {
+  items: PendingDigestApprovalItem[];
+  count: number;
+  fetchedAtMs: number;
+};
+
+export type BatchDigestApproveItem = {
+  meetingRoundId: string;
+  expectedDigestContentHash: string;
+};
+
+export type BatchDigestApproveItemResult = {
+  meetingRoundId: string;
+  status: "approved" | "failed";
+  errorType: string;
+  error: string;
+};
+
+export type BatchDigestApproveResponse = {
+  results: BatchDigestApproveItemResult[];
+  approvedCount: number;
+  failedCount: number;
+  closedBy: string;
+};

@@ -112,3 +112,5 @@ def test_build_workspace_runtime_projection_indexes_self_worktree_and_observatio
     assert projection["byKind"]["self_observation"]["workflowSteps"][0]["id"] == "self_observation"
     assert projection["byKind"]["self_observation"]["primaryConversationSessionId"] == "session-observe"
     assert projection["byKind"]["self_observation"]["trajectoryPreview"][-1]["summary"] == "第二条观察"
+    assert projection["promotionLane"] == "git_expected_head"
+    assert projection["currentBaseline"] == {}

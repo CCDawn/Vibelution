@@ -88,6 +88,8 @@ describe("conversationOperationPresentation", () => {
       turnErrorMessage: false,
       hasCodexSurface: false,
     })).toBe(false);
+    // Defect 7b: a feedback timeline alone (batched reasoning trail published
+    // with the first content flush) no longer retires the in-flight shell.
     expect(shouldRenderCompactActiveTurnPlaceholder({
       role: "assistant",
       streaming: true,
@@ -96,7 +98,7 @@ describe("conversationOperationPresentation", () => {
       hasActiveProcess: false,
       turnErrorMessage: false,
       hasCodexSurface: false,
-    })).toBe(false);
+    })).toBe(true);
     expect(shouldRenderCompactActiveTurnPlaceholder({
       role: "user",
       streaming: true,
@@ -105,6 +107,57 @@ describe("conversationOperationPresentation", () => {
       hasActiveProcess: false,
       turnErrorMessage: false,
     })).toBe(false);
+  });
+
+  it("keeps the shell through the answer-streaming window (defect 7b)", () => {
+    // Visible answer text alone must not retire the shell: the first content
+    // flush lands a frame before the backend's responding status row, and the
+    // responding stage has to stay observable while the answer streams.
+    expect(shouldRenderCompactActiveTurnPlaceholder({
+      role: "assistant",
+      streaming: true,
+      showResponseBlock: true,
+      hasFeedbackTimeline: false,
+      hasActiveProcess: false,
+      turnErrorMessage: false,
+    })).toBe(true);
+    // Other gating conjuncts still retire the shell.
+    expect(shouldRenderCompactActiveTurnPlaceholder({
+      role: "assistant",
+      streaming: true,
+      showResponseBlock: true,
+      hasFeedbackTimeline: false,
+      hasActiveProcess: false,
+      turnErrorMessage: true,
+    })).toBe(false);
+    expect(shouldRenderCompactActiveTurnPlaceholder({
+      role: "assistant",
+      streaming: true,
+      showResponseBlock: true,
+      hasFeedbackTimeline: true,
+      hasActiveProcess: true,
+      turnErrorMessage: false,
+    })).toBe(false);
+    expect(shouldRenderCompactActiveTurnPlaceholder({
+      role: "assistant",
+      streaming: false,
+      inFlight: false,
+      showResponseBlock: true,
+      hasFeedbackTimeline: false,
+      hasActiveProcess: false,
+      turnErrorMessage: false,
+    })).toBe(false);
+    // The native codex answer cell alone (streaming answer, no richer surfaces)
+    // does not retire the shell either.
+    expect(shouldRenderCompactActiveTurnPlaceholder({
+      role: "assistant",
+      streaming: true,
+      showResponseBlock: true,
+      hasFeedbackTimeline: false,
+      hasActiveProcess: false,
+      turnErrorMessage: false,
+      hasCodexSurface: true,
+    })).toBe(true);
   });
 
   it("shows compact placeholder for optimistic pending + empty turnItems (inFlight)", () => {

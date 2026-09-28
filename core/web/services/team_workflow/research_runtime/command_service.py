@@ -1645,6 +1645,10 @@ class WorkflowCommandService:
             request.team_id,
             RunStatus.CANCELLED.value,
             now_ms,
+            # Cancellation is an audit settlement: it keeps the node the run
+            # was cancelled at (recover_round re-checks it), unlike success
+            # and dispatch-failure settlements which clear the pointer.
+            active_node_id=str(run.active_node_id or ""),
             completion_kind="cancelled",
             terminal_reason=str(request.payload.get("reason") or "operator cancelled"),
         )
@@ -2023,6 +2027,7 @@ class WorkflowCommandService:
                 request.team_id,
                 target_status.value,
                 now_ms,
+                active_node_id=str(run.active_node_id or ""),
                 blocked_problem_json=(
                     json.dumps(landing_problem, ensure_ascii=False)
                     if landing_problem is not None
@@ -2142,6 +2147,7 @@ class WorkflowCommandService:
                     child.team_id,
                     child_target.value,
                     now_ms,
+                    active_node_id=str(child.active_node_id or ""),
                     blocked_problem_json=None,
                 )
             child_payload = {

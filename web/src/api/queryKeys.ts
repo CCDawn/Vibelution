@@ -1,4 +1,5 @@
 export const queryKeys = {
+  digestApprovals: (teamId: string) => ["teams", teamId, "hypothesis-first", "digest-approvals"] as const,
   challengePhaseBoundary: (teamId: string) => ["teams", teamId, "challenge-phase-boundary"] as const,
   runtimeSummary: () => ["runtime", "summary"] as const,
   petActivity: () => ["pet", "activity"] as const,
@@ -6,6 +7,7 @@ export const queryKeys = {
   usageSummary: (scope = "global", sessionId = "", agentId = "", provider = "", model = "") =>
     ["usage", "summary", scope, sessionId, agentId, provider, model] as const,
   launcherStatus: () => ["launcher", "status"] as const,
+  launcherFreshness: () => ["launcher", "freshness"] as const,
   launcherState: () => ["launcher", "state"] as const,
   launcherBranchInstances: (cleanupMetadata = false) =>
     ["launcher", "branch-instances", cleanupMetadata] as const,
@@ -53,6 +55,7 @@ export const queryKeys = {
   groupExpandedSession: (id: string) => ["sessions", id, "group-expanded"] as const,
   sessionToolApprovals: (id: string) => ["sessions", id, "tool-approvals"] as const,
   sessionLlmOptions: (id: string) => ["sessions", id, "llm-options"] as const,
+  sessionMessageCuration: (id: string) => ["sessions", id, "message-curation"] as const,
   sessionChildSessions: (id: string) => ["sessions", id, "child-sessions"] as const,
   chatRooms: () => ["chat-rooms"] as const,
   chatRoom: (id: string) => ["chat-rooms", id] as const,
@@ -137,7 +140,12 @@ export const queryKeys = {
   dataProcessingCollectionAssignments: (id: string) => ["data-processing", "runs", id, "collection-assignments"] as const,
   fileContent: (path: string) => ["files", "content", path] as const,
   // Memory workbench — web/src/api/memory.ts / /api/memory/*
-  memoryOverview: () => ["memory", "overview"] as const,
+  // memoryOverview() stays the prefix form so broad invalidations reach every
+  // variant; pass the includeContent flag for a specific cache entry.
+  memoryOverview: (includeContent?: boolean) =>
+    includeContent === undefined
+      ? (["memory", "overview"] as const)
+      : (["memory", "overview", includeContent] as const),
   githubProjectLibrary: () => ["memory", "github-projects"] as const,
   memoryItemDetails: () => ["memory", "item-detail"] as const,
   memoryItemDetail: (sectionId: string, itemId: string) => ["memory", "item-detail", sectionId, itemId] as const,
@@ -189,6 +197,7 @@ export const queryKeys = {
   evolutionSelfWorkspaceSnapshot: () => ["evolution", "self", "workspace-snapshot"] as const,
   evolutionSelfObservationRun: (runId: string) => ["evolution", "self", "observation-runs", runId] as const,
   evolutionChatReview: () => ["evolution", "chat-review"] as const,
+  chatReviewModelCurationStats: () => ["chat-review", "model-curation-stats"] as const,
   evolutionChatReviewCandidate: (candidateId: string) => ["evolution", "chat-review", candidateId] as const,
   evolutionSelfAudit: () => ["evolution", "self", "audit"] as const,
   petSummary: () => ["pet", "summary"] as const,

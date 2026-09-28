@@ -141,8 +141,8 @@ def inspect_conversation_logs(
         "inspections": inspections,
         "summary": _aggregate_inspections(inspections),
         "usageGuidance": [
-            "Use this tool before grep/read_file when reviewing conversation JSONL or a runtime scene package.",
-            "Read raw log lines only after this summary identifies a narrow path and line range.",
+            "只有 firstRead.evidencePaths 点名该文件后才做这次深读。",
+            "不要执行 shell，也不要返回整段日志正文。",
         ],
     }
 

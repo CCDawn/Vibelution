@@ -1,4 +1,4 @@
-import { lazy, Suspense, type ComponentProps } from "react";
+import { lazy, Suspense, useMemo, type ComponentProps } from "react";
 
 import type {
   FileContent,
@@ -21,6 +21,12 @@ const ChatFilePreviewPanel = lazy(() =>
 );
 
 type ConversationBridgeProps = Omit<ComponentProps<typeof ChatConversationComposerBridge>, "fallback">;
+
+/**
+ * Stable empty context value: an inline `{}` default would re-create the
+ * provider value on every panel render and re-render every context consumer.
+ */
+const EMPTY_ACTIVE_TURN_STREAM_STATE: ActiveTurnStreamState = {};
 
 type ChatSessionWorkspacePanelProps = {
   activeCliAgentRunAvailable: boolean;
@@ -91,9 +97,46 @@ export function ChatSessionWorkspacePanel({
   transientErrorMessage,
   workspaceActiveTab,
 }: ChatSessionWorkspacePanelProps) {
-  const conversationLoadingFallback = (
-    <ConversationWorkspaceLoadingShell label={loadingSessionLabel} />
+  // Stable ReactNode/object identities so the memoized
+  // ChatConversationComposerBridge below only re-renders when content changes.
+  const conversationLoadingFallback = useMemo(
+    () => (<ConversationWorkspaceLoadingShell label={loadingSessionLabel} />),
+    [loadingSessionLabel],
   );
+  const approvalSurface = useMemo(() => (toolApproval
+    ? {
+      toolName: toolApproval.toolName,
+      content: (
+        <div
+          key={toolApproval.requestId || toolApproval.toolName || "tool-approval"}
+          data-chat-tool-approval-host="composer"
+          data-chat-tool-approval-request={toolApproval.requestId || undefined}
+        >
+          <ChatToolApprovalDialog
+            lang={lang}
+            pending={toolApproval.pending}
+            rawTitle={toolApproval.rawTitle}
+            riskLabel={toolApproval.riskLabel}
+            scopeLabel={toolApproval.scopeLabel}
+            toolLabels={toolApproval.toolLabels}
+            actionPreview={toolApproval.actionPreview}
+            sessionGrantScope={toolApproval.sessionGrantScope}
+            toolName={toolApproval.toolName}
+            variant="banner"
+            onApprove={onApproveToolApproval}
+            onApproveForSession={onApproveToolForSession}
+            onReject={onRejectToolApproval}
+          />
+        </div>
+      ),
+    }
+    : null), [
+    lang,
+    onApproveToolApproval,
+    onApproveToolForSession,
+    onRejectToolApproval,
+    toolApproval,
+  ]);
 
   if (!activeSessionId && !sessionsPending) {
     return <VStateSurface className={styles.emptyConversationSurface} tone="empty" title={noSessionsLabel} />;
@@ -121,35 +164,6 @@ export function ChatSessionWorkspacePanel({
     // Composer-adjacent only: ConversationView mounts the card just above the input
     // (toolApprovalFallback). Do not stick to the column top or re-attach into process rows.
     // Key by requestId so SSE/poll re-renders update props instead of remounting the dialog.
-    const approvalSurface = toolApproval
-      ? {
-          toolName: toolApproval.toolName,
-          content: (
-            <div
-              key={toolApproval.requestId || toolApproval.toolName || "tool-approval"}
-              data-chat-tool-approval-host="composer"
-              data-chat-tool-approval-request={toolApproval.requestId || undefined}
-            >
-              <ChatToolApprovalDialog
-                lang={lang}
-                pending={toolApproval.pending}
-                rawTitle={toolApproval.rawTitle}
-                riskLabel={toolApproval.riskLabel}
-                scopeLabel={toolApproval.scopeLabel}
-                toolLabels={toolApproval.toolLabels}
-                actionPreview={toolApproval.actionPreview}
-                sessionGrantScope={toolApproval.sessionGrantScope}
-                toolName={toolApproval.toolName}
-                variant="banner"
-                onApprove={onApproveToolApproval}
-                onApproveForSession={onApproveToolForSession}
-                onReject={onRejectToolApproval}
-              />
-            </div>
-          ),
-        }
-      : null;
-
     return (
       <div className={conversationFocused ? `${styles.conversationShell} ${styles.conversationFrameFocus}` : styles.conversationShell}>
         <div className={styles.conversationFrame}>
@@ -169,7 +183,7 @@ export function ChatSessionWorkspacePanel({
               className={styles.conversationKeepAlivePane}
               data-session-conversation={conversation.sessionId}
             >
-              <ActiveTurnStreamStateContext.Provider value={activeTurnStreamState ?? {}}>
+              <ActiveTurnStreamStateContext.Provider value={activeTurnStreamState ?? EMPTY_ACTIVE_TURN_STREAM_STATE}>
                 <ChatConversationComposerBridge
                   {...conversation}
                   toolApproval={approvalSurface}

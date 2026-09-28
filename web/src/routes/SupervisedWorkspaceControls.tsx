@@ -95,14 +95,17 @@ export function SupervisedWorkspaceControls({
 
   return (
     <div className={styles.controlsShellClass}>
-      <div className={styles.flowRegionClass}>
-        <SupervisedWorkspaceTabs
-          activeView={activeView}
-          activeWorkflowStepId={activeWorkflowStepId}
-          onWorkflowStepSelect={onWorkflowStepSelect}
-          summaries={tabSummaries}
-        />
-      </div>
+      {onWorkflowStepSelect ? (
+        <div className={styles.flowRegionClass}>
+          <span className={styles.controlLabelClass}>{t("supervisedRunStage")}</span>
+          <SupervisedWorkspaceTabs
+            activeView={activeView}
+            activeWorkflowStepId={activeWorkflowStepId}
+            onWorkflowStepSelect={onWorkflowStepSelect}
+            summaries={tabSummaries}
+          />
+        </div>
+      ) : null}
 
       <div className={styles.modeRegionClass}>
         <div className={styles.intakeControlClass}>

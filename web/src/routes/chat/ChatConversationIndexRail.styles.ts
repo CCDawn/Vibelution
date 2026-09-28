@@ -33,13 +33,13 @@ const styles: Record<string, string> = {
   agentIndexNameLine:
     "vui-routes-chatcodingroute agentIndexNameLine !flex min-w-0 max-w-full items-center gap-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-tight [color:var(--fg-primary)] [&_em]:shrink-0 [&_span]:min-w-0 [&_span]:truncate",
   agentIndexOpenButton:
-    "vui-routes-chatcodingroute agentIndexOpenButton min-w-0 !grid !h-auto !min-h-[34px] !w-full max-w-full grid-cols-[30px_minmax(0,1fr)] items-center justify-start gap-1.5 overflow-hidden rounded-[var(--radius-control)] border border-transparent bg-transparent px-1 py-0.5 text-left [font-size:var(--vui-font-xs)] font-semibold leading-tight [color:var(--fg-secondary)] shadow-none hover:border-[color-mix(in_srgb,var(--accent-cool)_26%,var(--vui-border-subtle))] hover:bg-[color-mix(in_srgb,var(--accent-cool)_7%,var(--vui-surface-row))] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+    "vui-routes-chatcodingroute agentIndexOpenButton min-w-0 !grid !h-auto !min-h-[var(--vui-control-height-md)] !w-full max-w-full grid-cols-[30px_minmax(0,1fr)] items-center justify-start gap-1.5 overflow-hidden rounded-[var(--radius-control)] border border-transparent bg-transparent px-1 py-0.5 text-left [font-size:var(--vui-font-xs)] font-semibold leading-tight [color:var(--fg-secondary)] shadow-none hover:border-[color-mix(in_srgb,var(--accent-cool)_26%,var(--vui-border-subtle))] hover:bg-[color-mix(in_srgb,var(--accent-cool)_7%,var(--vui-surface-row))] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   agentIndexRoster:
     `vui-routes-chatcodingroute agentIndexRoster min-w-0 ${vuiStateCoolInfoClass}`,
   agentIndexStatus:
-    "vui-routes-chatcodingroute agentIndexStatus inline-flex min-w-0 max-w-[72px] justify-self-end overflow-hidden text-ellipsis whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-[var(--accent-cool)]",
+    "vui-routes-chatcodingroute agentIndexStatus inline-flex min-w-0 max-w-[72px] justify-self-end overflow-hidden text-ellipsis whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] px-1.5 py-0.5 text-vui-micro-10 font-semibold leading-none text-[var(--accent-cool)]",
   agentModelLine:
-    "vui-routes-chatcodingroute agentModelLine block min-w-0 truncate text-[10px] font-medium leading-tight text-[var(--fg-tertiary)]",
+    "vui-routes-chatcodingroute agentModelLine block min-w-0 truncate text-vui-micro-10 font-medium leading-tight text-[var(--fg-tertiary)]",
   agentModelTag:
     "vui-routes-chatcodingroute agentModelTag inline-flex min-h-[18px] min-w-0 max-w-[96px] shrink items-center gap-0.5 overflow-hidden rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_7%,transparent)] px-1.5 py-0 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--accent-cool)] [&_span]:min-w-0 [&_span]:truncate [&_svg]:shrink-0",
   agentOptionMeta:
@@ -47,7 +47,7 @@ const styles: Record<string, string> = {
   conversationIndexLayout:
     "vui-routes-chatcodingroute conversationIndexLayout grid h-full min-h-0 grid-rows-[minmax(0,1fr)]",
   conversationIndexPanelBody:
-    "vui-routes-chatcodingroute conversationIndexPanelBody !pb-[var(--shell-settings-dock-height)] !overflow-hidden !pr-0 ![scrollbar-gutter:auto]",
+    "vui-routes-chatcodingroute conversationIndexPanelBody !overflow-hidden !pr-0 ![scrollbar-gutter:auto]",
   conversationIndexScrollRegion:
     "vui-routes-chatcodingroute conversationIndexScrollRegion min-h-0 overflow-y-auto pr-1 [scrollbar-gutter:stable]",
   createGroupButton:
@@ -69,7 +69,7 @@ const styles: Record<string, string> = {
   panelBody:
     "vui-routes-chatcodingroute panelBody min-w-0 h-full p-2 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] min-h-0 overflow-auto [scrollbar-gutter:stable]",
   railActionButton:
-    "vui-routes-chatcodingroute railActionButton !size-[30px] !h-[30px] !min-h-[30px] !w-[30px] !min-w-[30px] rounded-[var(--radius-control)] !border-0 !bg-transparent p-0 [color:var(--fg-secondary)] shadow-none hover:!bg-[var(--vui-control-muted-hover)] hover:[color:var(--fg-primary)] focus-visible:!bg-[var(--vui-control-muted-hover)]",
+    "vui-routes-chatcodingroute railActionButton !size-[var(--vui-control-height-sm)] !h-[var(--vui-control-height-sm)] !min-h-[var(--vui-control-height-sm)] !w-[var(--vui-control-height-sm)] !min-w-[var(--vui-control-height-sm)] rounded-[var(--radius-control)] !border-0 !bg-transparent p-0 [color:var(--fg-secondary)] shadow-none hover:!bg-[var(--vui-control-muted-hover)] hover:[color:var(--fg-primary)] focus-visible:!bg-[var(--vui-control-muted-hover)]",
   railGroupHeader:
     "vui-routes-chatcodingroute railGroupHeader grid min-w-0 gap-1",
   railOverlay:

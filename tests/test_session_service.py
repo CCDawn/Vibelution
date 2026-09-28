@@ -901,8 +901,10 @@ def test_session_llm_retry_recovery_replaces_running_retry_status(monkeypatch, t
         session_service._set_session_running("session-live", False, turn_id="turn-retry")
 
     assert recovered is not None
-    assert len(recovered.feedback_events) == 1
-    assert recovered.feedback_events[0]["name"] == "model_retry"
+    # Retry/recovery copy carries its own stage (`model_retry`), so it must not
+    # be mistaken for a first answer delta (defect ⑦b emits `responding` only
+    # for answer-shaped content writes, not for status copy).
+    assert [item["name"] for item in recovered.feedback_events] == ["model_retry"]
     assert recovered.feedback_events[0]["status"] == "recovered"
     assert "error" not in recovered.feedback_events[0]
     assert recovered.content == "recovered answer"
@@ -1264,6 +1266,14 @@ def test_interrupted_snapshot_finalizes_running_feedback_events(monkeypatch, tmp
     events = load_conversation_events(tmp_path, "session-live")
     assistant_event = next(event for event in events if event.event_type == EVENT_ASSISTANT_MESSAGE)
     assert assistant_event.status == "stopped"
+    stored = next(
+        conversation
+        for conversation in load_chat_state(tmp_path).get("conversations", [])
+        if conversation.get("conversation_id") == "session-live"
+    )
+    assert stored is not None
+    assert stored["last_turn_status"] == "ready"
+    assert stored["last_turn_terminal_reason"] == "stopped_by_user"
     assert [event["status"] for event in assistant_event.payload["feedbackEvents"]] == [
         "done",
         "done",

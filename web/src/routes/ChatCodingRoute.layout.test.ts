@@ -56,6 +56,7 @@ import chatSubmitTelemetrySource from "./chat/chatSubmitTelemetry.ts?raw";
 import chatComposerSubmitModelSource from "./chat/chatComposerSubmitModel.ts?raw";
 import chatComposerSubmitHookSource from "./chat/useChatComposerSubmit.ts?raw";
 import chatActiveTurnLayerSource from "./chatActiveTurnLayer.ts?raw";
+import activeTurnLayersStoreSource from "./chat/activeTurnLayersStore.tsx?raw";
 import chatStreamApplyControllerSource from "./chatStreamApplyController.ts?raw";
 import terminalPanelSource from "./chat/CliAgentRunTerminalPanel.tsx?raw";
 import conversationIndexModelSource from "./conversationIndexModel.ts?raw";
@@ -81,6 +82,7 @@ import tokenCoreStatusPanelStyles from "./chat/TokenCoreStatusPanel.styles";
 /** Workbench shell + catalog queries hook (R01c F1) + Phase F2/F3 extract modules. */
 const routeSource = [
   chatCodingRouteWorkbenchSource,
+  activeTurnLayersStoreSource,
   chatWorkbenchCatalogQueriesSource,
   chatToolApprovalBridgeSource,
   chatComposerBridgeStateSource,
@@ -397,14 +399,16 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationStyles.sendButton).not.toContain("-translate-y");
     expect(conversationStyles.attachButton).toMatch(/bg-\[|!bg-\[|var\(--vui-surface/);
     expect(conversationStyles.attachButton).toContain("active:bg-[color-mix(in_srgb,var(--vui-surface-workspace)_18%,var(--vui-control-muted-hover))]");
-    expect(conversationStyles.stopButton).toContain("!border-[color-mix(in_srgb,var(--state-error)_34%,transparent)]");
+    expect(conversationStyles.stopButton).toContain("!border-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)]");
     expect(conversationStyles.stopButton).toContain("!text-[var(--state-error)]");
 
-    expect(conversationStyles.userCard).toMatch(/bg-\[|!bg-\[|var\(--vui-surface/);
+    expect(conversationStyles.userCard).toContain("bg-transparent");
+    expect(conversationStyles.userCard).not.toContain("accent-cool");
     expect(conversationStyles.userCard).not.toContain("bg-[var(--surface-panel-strong)]");
 
-    expect(directSessionIndexItemStyles.sessionItemActive).toContain("!bg-[color-mix(in_srgb,var(--accent-cool)_10%");
-    expect(directSessionIndexItemStyles.sessionItemActive).toContain("data-[selected=true]:!bg-[color-mix(in_srgb,var(--accent-cool)_10%");
+    expect(directSessionIndexItemStyles.sessionItemActive).toContain("!bg-[var(--bg-active)]");
+    expect(directSessionIndexItemStyles.sessionItemActive).toContain("data-[selected=true]:!bg-[var(--bg-active)]");
+    expect(directSessionIndexItemStyles.sessionItemActive).not.toContain("accent-cool");
     expect(directSessionIndexItemStyles.sessionItemActive).not.toContain("shadow-[var(--vui-shadow-inset-accent)]");
     expect(routeStyles.sessionItemActive).not.toContain("linear-gradient");
     expect(routeStyles.sessionItemActive).not.toContain("shadow-lg");
@@ -586,7 +590,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatConversationComposerBridgeSource).toContain("composerValue={composer.value}");
     expect(chatConversationComposerBridgeSource).toContain("composerAttachments={composer.attachments}");
     expect(routeAndComposerSource).toContain("conversationConstants");
-    expect(chatSessionWorkspacePanelSource).toContain("const conversationLoadingFallback = (");
+    expect(chatSessionWorkspacePanelSource).toContain("const conversationLoadingFallback = useMemo(");
     expect(chatSessionWorkspacePanelSource).toContain("fallback={conversationLoadingFallback}");
     expect(routeSource).not.toContain("fallback={<div className={styles.emptySurface}>{t(\"loadingSession\")}</div>}");
     expect(routeSource).not.toContain("<div className={styles.emptySurface}>{t(\"loadingSession\")}</div>");
@@ -598,7 +602,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("buildConversationComposerBridgeState({");
     expect(routeSource).toContain("const composerDisabled = conversationComposer.disabled");
     expect(routeSource).toContain("<ChatSessionWorkspacePanel");
-    expect(routeSource).toContain("conversation={detail ? {");
+    expect(routeSource).toContain("const conversationModel = useMemo(");
+    expect(routeSource).toContain("conversation={conversationModel}");
     expect(routeSource).toContain("composer: companionConversationComposer");
     expect(chatSessionWorkspacePanelSource).toContain("<ChatConversationComposerBridge");
     expect(chatSessionWorkspacePanelSource).toContain("composer={conversation.composer}");
@@ -625,13 +630,18 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("keeps live assistant output in an active turn layer outside committed session messages", () => {
     expect(routeSource).toContain("activeTurnLayersBySession");
-    expect(routeSource).toContain("Object.entries(activeTurnLayersBySession).forEach");
+    expect(routeSource).toContain("Object.entries(activeTurnLayersBySessionRef.current).forEach");
     expect(routeSource).toContain("runningSessionIds.add(sessionId)");
     expect(routeSource).toContain("activeStatusSource: paintedActiveTurn?.ledgerSeq ? \"assistant_delta\" : \"optimistic_submit\"");
-    expect(routeSource).toContain("activeTurnMessage,");
+    // The streaming message is projected from the store inside the bridge: the
+    // per-frame subscriber ends there, not at the whole workbench.
+    expect(chatConversationComposerBridgeSource).toContain("useActiveTurnLayerForSession");
+    expect(chatConversationComposerBridgeSource).toContain("projectActiveTurnLayerMessage(streamedActiveTurnLayer, messages)");
+    expect(chatConversationComposerBridgeSource).toContain("activeTurnMessage={streamedActiveTurnMessage}");
     expect(routeAndStreamSource).toContain("planAppliedAssistantDeltaDrain");
     expect(chatStreamApplyControllerSource).toContain("mergeAssistantDeltaIntoActiveTurnLayer");
     expect(routeSource).toContain("isActiveTurnSettledByDetail");
+    expect(routeSource).toContain("isActiveTurnSettledByMessages");
     expect(routeSource).not.toContain("mergeLiveAssistantMessagesIntoSessionDetail");
     expect(routeSource).not.toContain("setLiveAssistantMessagesBySession");
   });
@@ -867,7 +877,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatSurfaceCss).toContain("var(--vui-font-xs)");
     expect(chatSurfaceCss).toContain("var(--vui-font-sm)");
     expect(chatSurfaceCss).toContain("var(--vui-font-md)");
-    expect(conversationCssSource).toContain("var(--vui-font-chat)");
+    expect(conversationCssSource).toContain("text-vui-chat");
     expect(chatSurfaceCss).not.toMatch(/font-size:\s*0\.(?:6\d|7[0-7])rem/);
   });
 
@@ -1115,10 +1125,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.tokenStatusCopy).toContain("overflow-visible");
     expect(routeStyles.tokenStatusCopy).toContain("self-center");
     expect(routeStyles.tokenStatusLabel).toContain("whitespace-nowrap");
-    expect(routeStyles.tokenStatusLabel).toContain("text-[11px]");
+    expect(routeStyles.tokenStatusLabel).toContain("text-vui-micro-11");
     expect(routeStyles.tokenStatusMeta).toContain("sr-only");
     expect(routeStyles.tokenStatusRing).toContain("size-[28px]");
-    expect(routeStyles.tokenStatusRingCore).toContain("text-[10px]");
+    expect(routeStyles.tokenStatusRingCore).toContain("text-vui-micro-10");
     expect(routeStyles.tokenStatusRingCore).toContain("max-w-full");
     expect(routeStyles.tokenStatusRingCore).toContain("overflow-hidden");
     expect(routeStyles.tokenStatusRingCore).toContain("text-ellipsis");
@@ -1179,7 +1189,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(editMutateBlock).toContain("turnId: optimisticTurnIdForSubmission(\"edit\", variables.sessionId, createdAt)");
     expect(editMutateBlock).toContain("applyOptimisticEditResubmit");
     expect(editMutateBlock).toContain("previousDetail");
-    expect(editSuccessBlock).toContain("const acceptedTurnId = latestUserTurnId(nextDetail)");
+    expect(editSuccessBlock).toContain("const acceptedTurnId = latestUserTurnId(syncedDetail)");
     expect(editSuccessBlock).toContain("setActiveTurnLayersBySession((current) =>");
     expect(editSuccessBlock).toContain("turnId: acceptedTurnId");
     expect(editSuccessBlock).toContain("setActiveTurnLayerForSession(current, variables.sessionId, undefined)");
@@ -1680,10 +1690,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const rawSessionDetail = resolveActiveSessionDetailForUi");
     expect(routeSource).toContain("const detail = useStableSessionDetailPaint({");
     expect(routeSource).toContain("detail: rawSessionDetail");
-    expect(routeSource).toContain("const activeTurnLayer = activeSessionId ? activeTurnLayersBySession[activeSessionId] : undefined");
-    expect(routeSource).toContain("const activeTurnSettledByDetail = isActiveTurnSettledByDetail(activeTurnLayer, detail)");
-    expect(routeSource).toContain("const activeTurnMessage = useMemo(");
-    expect(routeSource).toContain("activeTurnSettledByDetail ? undefined : activeTurnLayerToConversationMessage(activeTurnLayer)");
+    expect(routeSource).toContain("const activeTurnSessionKey = activeSessionId ?? \"\"");
+    expect(routeSource).toContain("const activeTurnSettledByDetail = useActiveTurnLayersSignalFlag(useCallback((layers) => {");
+    expect(routeSource).toContain("return isActiveTurnSettledByMessages(layers[activeTurnSessionKey], detail?.messages);");
+    expect(routeSource).toContain("const terminalIndexRefreshKey = useActiveTurnLayersSignal(useCallback((layers) => {");
     expect(routeSource).toContain("setActiveTurnLayerForSession(current, activeSessionId, undefined)");
     expect(routeSource).toContain('eventCode: "browser.session_stream.active_layer_reconciled"');
     expect(routeSource).toContain('source: "session_detail_query"');
@@ -2128,7 +2138,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndStreamSource).toContain("setActiveTurnLayerForSession(current, streamSessionId, decision.nextCommittedLayer)");
     expect(chatStreamApplyControllerSource).toContain("mergeAssistantDeltaIntoActiveTurnLayer(pendingLayer, entry.payload)");
     expect(routeAndStreamSource).toContain("isActiveTurnSettledByDetail(activeLayer, detail)");
-    expect(routeSource).toContain("activeTurnMessage,");
+    expect(chatConversationComposerBridgeSource).toContain("projectActiveTurnLayerMessage(streamedActiveTurnLayer, messages)");
     expect(routeAndHelpersSource).toContain("function isStaleLedgerUpdate(currentSeq: unknown, incomingSeq: unknown)");
     expect(routeAndStreamSource).not.toContain("function mergeLiveAssistantMessagesIntoSessionDetail(");
     expect(routeAndStreamSource).not.toContain("kind: \"session_live_overlay\"");
@@ -2142,7 +2152,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndStreamSource).toContain("let assistantDeltaApplyFrame: number | null = null");
     expect(routeAndStreamSource).toContain("function applyPendingAssistantDeltas(reason: \"frame\" | \"close\" | \"final\")");
     expect(routeAndStreamSource).toContain("assistantDeltaScheduler.drain(reason, { frameScheduledAtMs: scheduledAtMs })");
-    expect(chatStreamApplyControllerSource).toContain("for (const entry of input.drain.entries)");
+    expect(chatStreamApplyControllerSource).toContain("const entry = entries[entryIndex];");
+    expect(chatStreamApplyControllerSource).toContain("assistantDeltaSeqGate");
     expect(routeAndStreamSource).toContain("function scheduleAssistantDeltaFrame()");
     expect(routeAndStreamSource).toContain("window.requestAnimationFrame");
     expect(routeAndStreamSource).toContain("window.cancelAnimationFrame");
@@ -2157,7 +2168,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndStreamSource).toContain("stream.removeEventListener(\"session_initial\", handleSessionInitial as EventListener)");
     expect(routeAndStreamSource).toContain("stream.removeEventListener(\"assistant_delta\", handleAssistantDelta as EventListener)");
     expect(routeAndStreamSource).toContain("queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) })");
-    expect(routeAndStreamSource).toContain("const stream = createSessionEventStream(streamSessionId)");
+    expect(routeAndStreamSource).toContain("const acquired = acquireSessionStream(streamSessionId, createSessionEventStream)");
     expect(routeAndStreamSource).not.toContain("/events?initial=light");
     expect(routeAndStreamSource).not.toContain("let pendingAssistantDeltaDetail: SessionDetail | undefined");
     expect(routeAndStreamSource).not.toContain("pendingAssistantDeltaDetail = mergeAssistantDeltaIntoSessionDetail");
@@ -2225,12 +2236,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("lastAssistantDeltaAppliedAtRef");
     expect(routeSource).toContain("const handleConversationStreamingFramePaint = useCallback");
     expect(routeSource).toContain("browser.conversation_stream.frame_painted");
-    expect(routeSource).toContain("activeTurnLayersBySessionRef.current = activeTurnLayersBySession;");
-    expect(routeSource).not.toContain([
-      "useEffect(() => {",
-      "    activeTurnLayersBySessionRef.current = activeTurnLayersBySession;",
-      "  }, [activeTurnLayersBySession]);",
-    ].join("\n"));
+    // The store keeps its read-through ref current synchronously on commit;
+    // there is no render-time ref sync left in the workbench.
+    expect(routeSource).toContain("const { setActiveTurnLayersBySession, activeTurnLayersBySessionRef } = activeTurnLayersStore;");
+    expect(routeSource).not.toContain("activeTurnLayersBySessionRef.current = activeTurnLayersBySession;");
     expect(routeSource).toContain("const paintedActiveTurn = activeTurnLayersBySessionRef.current[sessionId]");
     expect(routeSource).toContain("turnId: paintedActiveTurn?.turnId ?? \"\"");
     expect(routeSource).toContain("paintedAtMs");
@@ -2295,7 +2304,7 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("keeps active chat streams stable during direct session route switches", () => {
     const sessionStreamEffectSource = routeAndStreamSource.slice(
-      routeAndStreamSource.indexOf("const stream = createSessionEventStream(streamSessionId);"),
+      routeAndStreamSource.indexOf("const acquired = acquireSessionStream(streamSessionId, createSessionEventStream);"),
       routeAndStreamSource.length,
     );
 
@@ -2515,7 +2524,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.panelState).not.toContain("bg-");
     expect(routeStyles.panelState).not.toContain("shadow");
     expect(routeStyles.railTop).toContain("flex");
-    expect(routeStyles.railActionButton).toContain("!size-[30px]");
+    expect(routeStyles.railActionButton).toContain("!size-[var(--vui-control-height-sm)]");
     expect(routeStyles.railActionButton).toContain("!border-0");
     expect(routeAndIndexRailSource).toContain("<VCommandPalette");
     expect(directSessionIndexItemStyles.sessionItem).not.toContain("shadow-[var(--vui-elevation-panel)]");
@@ -3108,7 +3117,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.conversationGroup).toBeTypeOf("string");
     expect(routeStyles.conversationGroupHeader).toBeTypeOf("string");
     expect(routeStyles.conversationGroupList).toBeTypeOf("string");
-    expect(routeStyles.conversationGroupHeader).toContain("min-h-[34px]");
+    expect(routeStyles.conversationGroupHeader).toContain("min-h-[var(--vui-control-height-md)]");
     expect(routeStyles.conversationGroupHeader).toContain("grid-cols-[14px_minmax(0,1fr)_auto]");
     expect(routeStyles.conversationGroupHeader).toContain("bg-transparent");
     expect(routeStyles.conversationGroupList).toContain("gap-1");
@@ -3152,14 +3161,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndIndexRailSource).toContain('aria-keyshortcuts="Control+K Meta+K"');
     expect(routeAndIndexRailSource).toContain("<VCommandPalette");
     expect(routeStyles.railTop).toContain("gap-1");
-    expect(routeStyles.railActionButton).toContain("!size-[30px]");
+    expect(routeStyles.railActionButton).toContain("!size-[var(--vui-control-height-sm)]");
     expect(routeStyles.railActionButton).toContain("!border-0");
     expect(routeStyles.railActionButton).toContain("!bg-transparent");
     expect(routeStyles.conversationIndexPanelBody).toContain("!overflow-hidden");
     expect(routeStyles.conversationIndexPanelBody).toContain("!pr-0");
     expect(routeStyles.conversationIndexPanelBody).toContain("![scrollbar-gutter:auto]");
     expect(routeStyles.conversationIndexLayout).toContain("grid-rows-[minmax(0,1fr)]");
-    expect(routeStyles.conversationIndexPanelBody).toContain("!pb-[var(--shell-settings-dock-height)]");
+    expect(routeStyles.conversationIndexPanelBody).not.toContain("--shell-settings-dock-height");
     expect(conversationIndexRailSource).not.toContain("systemEntryGroup");
     expect(routeStyles.conversationIndexScrollRegion).toContain("overflow-y-auto");
     expect(routeAndIndexRailSource).toContain("styles.conversationIndexPanelBody");
@@ -3176,7 +3185,7 @@ describe("ChatCodingRoute layout contract", () => {
   it("uses one lightweight Tailwind grammar for conversation index sections and rows", () => {
     expect(conversationIndexSectionStyles.conversationGroupHeader).toContain("[&_svg]:transition-transform");
     expect(conversationIndexSectionStyles.conversationGroupHeader).toContain("aria-expanded=true");
-    expect(conversationIndexSectionStyles.conversationGroupHeader).toContain("min-h-[34px]");
+    expect(conversationIndexSectionStyles.conversationGroupHeader).toContain("min-h-[var(--vui-control-height-md)]");
     expect(conversationIndexSectionStyles.conversationGroupHeader).toContain("[&_strong]:tabular-nums");
     expect(conversationIndexSectionStyles.conversationGroupHeader).toContain("[border:0]");
     expect(conversationIndexSectionStyles.conversationGroupHeader).not.toContain("[&_strong]:rounded-full");
@@ -3185,7 +3194,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(directSessionIndexItemStyles.sessionItem).toContain("overflow-hidden");
     expect(directSessionIndexItemStyles.sessionItem).toMatch(/border border-vui-border-subtle|border border-\[var\(--vui-border-subtle\)\]/);
     expect(directSessionIndexItemStyles.sessionItem).toMatch(/!bg-vui-surface-row|!bg-\[var\(--vui-surface-row\)\]/);
-    expect(directSessionIndexItemStyles.sessionItemActive).toContain("!bg-[color-mix(in_srgb,var(--accent-cool)_10%");
+    expect(directSessionIndexItemStyles.sessionItemActive).toContain("!bg-[var(--bg-active)]");
+    expect(directSessionIndexItemStyles.sessionItemActive).not.toContain("accent-cool");
     expect(directSessionIndexItemStyles.sessionItemActive).not.toContain("shadow-[var(--vui-shadow-inset-accent)]");
     expect(directSessionIndexItemStyles.conversationAvatar).toContain("h-8");
     expect(directSessionIndexItemStyles.sessionItemMain).toContain("min-h-[60px]");
@@ -3572,7 +3582,7 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("requests authoritative session refresh when the session stream errors", () => {
     const sessionStreamStart = routeAndStreamSource.indexOf(
-      "const stream = createSessionEventStream(streamSessionId)",
+      "const acquired = acquireSessionStream(streamSessionId, createSessionEventStream)",
     );
     const onErrorStart = routeAndStreamSource.indexOf("stream.onerror = () => {", sessionStreamStart);
     const onErrorEnd = routeAndStreamSource.indexOf("function handleSessionDetail", onErrorStart);

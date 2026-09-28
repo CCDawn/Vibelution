@@ -116,6 +116,7 @@ import {
   readLauncherStateFile,
   spawnWorkbenchBackend
 } from "./process/workbenchBackend.js";
+import { terminateTrackedWorkbenchJob } from "./process/workbenchJob.js";
 import { waitForBackendHealthy } from "./process/workbenchBackendHealth.js";
 import {
   inspectWorkbenchServingVersion,
@@ -163,6 +164,7 @@ import {
   decidePackagedDesktopShellRefresh,
   decidePeriodicDesktopShellRefresh,
   inspectDesktopShell,
+  inspectUnpackagedShell,
   scheduleDesktopShellRefresh,
   ensureLatestLauncher,
   shouldDeferWorkbenchOpenUntilLifecycleStart,
@@ -227,6 +229,7 @@ import type { ManagedWindowState } from "./windows/windowProviderTypes.js";
 import { createLauncherWindow } from "./windows/launcherWindow.js";
 import { createWorkbenchWindow } from "./windows/workbenchWindow.js";
 import { createPetWindow, isDesktopPetWindowUrl } from "./windows/petWindow.js";
+import { createPetSettingsControl, petSettingsOrigin } from "./windows/petSettingsControl.js";
 import { PET_WINDOW_HEIGHT, PET_WINDOW_WIDTH } from "./windows/petWindowBounds.js";
 import {
   beginDesktopPetWindowDrag,
@@ -359,6 +362,7 @@ const desktopLifecycleLaunchMetadata = parseDesktopLifecycleLaunchMetadata(deskt
 const singleInstanceEnvelope = createSingleInstanceEnvelope({
   projectRoot: desktopCliArgs.projectRoot,
   openWorkbench: desktopCliArgs.openWorkbench,
+  hiddenPresentation: desktopCliArgs.hiddenPresentation,
   lifecycleCommand: desktopLifecycleLaunchMetadata.command,
   lifecycleSource: desktopLifecycleLaunchMetadata.source,
   lifecycleReason: desktopLifecycleLaunchMetadata.reason,
@@ -1895,7 +1899,7 @@ async function packagedDesktopShellIsStale(): Promise<boolean> {
 
 async function scheduleCurrentDesktopShellRefresh(
   thenLifecycle: string,
-  options: { force?: boolean } = {}
+  options: { force?: boolean; shellKind?: "packaged" | "unpackaged" } = {}
 ): Promise<void> {
   const pythonPath = desktopPythonPath();
   if (!pythonPath) {
@@ -1907,7 +1911,8 @@ async function scheduleCurrentDesktopShellRefresh(
     pythonPath,
     waitPid: process.pid,
     thenLifecycle,
-    force: options.force === true
+    force: options.force === true,
+    shellKind: options.shellKind
   });
   if (!scheduled.scheduled || scheduled.helperPid <= 0) {
     const reason = scheduled.reason ? ` (${scheduled.reason})` : "";
@@ -2477,6 +2482,42 @@ async function stopAllManagedRuntimeTrees(): Promise<void> {
   }
 }
 
+async function restartLauncherToLatestBuild(): Promise<OrchestratedLifecycleResult> {
+  if (shellRefreshInFlight) {
+    return {
+      schemaVersion: 1,
+      accepted: false,
+      operation: "restart-latest-shell",
+      message: "桌面壳已经在更新，请稍候。"
+    };
+  }
+  shellRefreshInFlight = true;
+  try {
+    try {
+      await bestEffortStopIsolatedInstancesForShutdown("stop isolated instances before latest launcher restart");
+    } catch (error: unknown) {
+      console.warn(error instanceof Error ? error.message : String(error));
+    }
+    await scheduleCurrentDesktopShellRefresh("open", {
+      force: true,
+      shellKind: app.isPackaged ? "packaged" : "unpackaged"
+    });
+  } catch (error: unknown) {
+    shellRefreshInFlight = false;
+    throw error;
+  }
+  shutdownApproved = true;
+  setTimeout(() => {
+    app.exit(0);
+  }, 250);
+  return {
+    schemaVersion: 1,
+    accepted: true,
+    operation: "restart-latest-shell",
+    message: "正在退出并启动最新 Launcher。"
+  };
+}
+
 async function exitAndRelaunchLauncherShell(options: { forceShellRefresh?: boolean } = {}): Promise<void> {
   const forceRefresh = options.forceShellRefresh === true;
   let stale = false;
@@ -2945,6 +2986,16 @@ ipcMain.handle(IPC_CHANNELS.focusWorkbenchWindow, async (event) => {
   return await windowProvider?.focusWorkbench();
 });
 
+const controlPetFromSettings = createPetSettingsControl(() => windowProvider);
+ipcMain.handle(IPC_CHANNELS.controlDesktopPet, async (event, open: unknown) => {
+  const instances = windowProvider?.instanceWindowStates() ?? [];
+  assertTrustedIpcSender(event, [...trustedIpcOrigins(), ...instances.filter(item => item.open).map(item => new URL(item.url).origin)]);
+  if (event.senderFrame !== event.sender.mainFrame) throw new Error("Blocked pet settings subframe");
+  const identity = identifyDebugWindow(event.sender.getOSProcessId(), windowProvider?.snapshot() ?? null, instances);
+  const origin = petSettingsOrigin(event.senderFrame.url, identity.role);
+  return controlPetFromSettings(origin, open);
+});
+
 ipcMain.handle(IPC_CHANNELS.openConversationFromPet, async (event, rawSessionId: unknown) => {
   assertDesktopPetIpcSender(event);
   const sessionId = String(rawSessionId || "").trim();
@@ -3067,25 +3118,28 @@ async function orchestrateLauncherLifecycle(
     || supervisedOperation === "restart"
     || supervisedOperation === "rebuild-and-start";
   let frontendReleaseChanged = false;
-  let unpackagedElectronRebuilt = false;
+  let shellStale = false;
 
-  if (startsWorkbench && !app.isPackaged) {
-    // This is deliberately before every reuse decision.  The Python bridge owns
-    // the content-addressed release lock, staging validation and atomic pointer
-    // publication, while this Electron process owns the lifecycle decision.
-    const latest = await ensureLatestLauncher({
-      workspaceRoot: paths.workspaceRoot,
-      pythonPath
-    });
-    frontendReleaseChanged = latest.frontend?.skipped !== true;
-    unpackagedElectronRebuilt = latest.electron?.rebuilt === true;
-  } else if (startsWorkbench) {
+  if (startsWorkbench) {
+    // Opening a workbench prepares that checkout's frontend. Rebuilding the
+    // desktop shell here used to overwrite workbench_job.node while this
+    // process still had it loaded, and the start died before the backend.
     const frontend = await ensureFrontendRelease({
       workspaceRoot: paths.workspaceRoot,
       pythonPath
     });
-    // Missing freshness fields must not authorize a stale backend reuse.
     frontendReleaseChanged = !frontend.skipped;
+    if (!app.isPackaged) {
+      try {
+        const shell = await inspectUnpackagedShell({
+          workspaceRoot: paths.workspaceRoot,
+          pythonPath
+        });
+        shellStale = shell.stale && shell.reason !== "missing_binary";
+      } catch (error: unknown) {
+        console.warn(error instanceof Error ? error.message : String(error));
+      }
+    }
   }
 
   let lifecycleOperation: WorkbenchLifecycleOperation = operation as WorkbenchLifecycleOperation;
@@ -3120,7 +3174,7 @@ async function orchestrateLauncherLifecycle(
   const intentLease = begunIntent.lease;
   if (supervisedOperation === "start" && windowProvider !== null) {
     const packagedShellStale = app.isPackaged && await packagedDesktopShellIsStale();
-    const servingVersion = !frontendReleaseChanged && !unpackagedElectronRebuilt && !packagedShellStale
+    const servingVersion = !frontendReleaseChanged && !packagedShellStale
       ? await inspectWorkbenchServingVersion({ workspaceRoot: paths.workspaceRoot })
       : { ok: false, reason: "release_or_shell_changed" };
     if (!servingVersion.ok && servingVersion.reason !== "release_or_shell_changed") {
@@ -3128,7 +3182,6 @@ async function orchestrateLauncherLifecycle(
     }
     if (
       !frontendReleaseChanged
-      && !unpackagedElectronRebuilt
       && !packagedShellStale
       && servingVersion.ok
       && await mainLineBackendIsReusable(paths.workspaceRoot)
@@ -3154,7 +3207,8 @@ async function orchestrateLauncherLifecycle(
         // same shape for every accepted main-line result.
         commandId: randomUUID(),
         ...(forceAuthorization ? { requestId: forceAuthorization.requestId } : {}),
-        message: "已打开工作台窗口。"
+        ...(shellStale ? { shellStale: true } : {}),
+        message: workbenchOpenedMessage(shellStale)
       };
     }
     // A reachable but non-reusable backend may be serving an older immutable
@@ -3251,19 +3305,6 @@ async function orchestrateLauncherLifecycle(
   if (lease === null || !launcherLifecycleSupervisor.isCurrent(lease)) {
     return supersededLifecycleResult(operation, result.commandId);
   }
-  if (result.accepted && unpackagedElectronRebuilt) {
-    // The current process executed an old compiled Electron main.  Its backend
-    // has now been safely refreshed, so relaunch the shell before any window is
-    // opened from the stale process.  A rejected restart never reaches here.
-    app.relaunch();
-    shutdownApproved = true;
-    app.exit(0);
-    return {
-      ...result,
-      message: "已准备最新 Launcher，正在重新打开工作台。",
-      ...(forceAuthorization ? { requestId: forceAuthorization.requestId } : {})
-    };
-  }
   if (
     result.accepted
     && (lifecycleOperation === "start" || lifecycleOperation === "restart" || lifecycleOperation === "rebuild-and-start")
@@ -3301,10 +3342,21 @@ async function orchestrateLauncherLifecycle(
       });
     }
   }
+  const shellNote = shellStale && result.accepted ? SHELL_STALE_NOTE : "";
   return {
     ...result,
+    ...(shellStale && result.accepted ? { shellStale: true } : {}),
+    ...(shellNote
+      ? { message: result.message ? `${result.message} ${shellNote}` : shellNote }
+      : {}),
     ...(forceAuthorization ? { requestId: forceAuthorization.requestId } : {})
   };
+}
+
+const SHELL_STALE_NOTE = "桌面壳仍是旧版本，刷新桌面壳后才会换上桌面代码。";
+
+function workbenchOpenedMessage(shellStale: boolean): string {
+  return shellStale ? `已打开工作台窗口。${SHELL_STALE_NOTE}` : "已打开工作台窗口。";
 }
 
 function normalizeSupervisedLifecycleOperation(operation: string): SupervisedLifecycleOperation {
@@ -3784,6 +3836,9 @@ async function runIsolatedRegistryMutation(input: {
         if (spawnPid <= 0) {
           return;
         }
+        if (await terminateTrackedWorkbenchJob(target.projectRoot)) {
+          return;
+        }
         if (!spawnIdentity) {
           throw new Error(`isolated workbench backend process identity could not be captured for pid ${spawnPid}`);
         }
@@ -3945,10 +4000,12 @@ async function orchestrateBranchInstanceLifecycle(
     throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to orchestrate branch instances");
   }
   const body = payload.init?.body;
-  const instanceId =
-    typeof body === "object" && body !== null
-      ? String((body as Record<string, unknown>).instanceId ?? "").trim()
-      : "";
+  const bodyRecord = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : null;
+  const instanceId = bodyRecord ? String(bodyRecord.instanceId ?? "").trim() : "";
+  // Hidden presentation travels on the payload body: the isolated-start
+  // supervisor must open this instance's window without show/focus when the
+  // start request (e.g. `launcher --hidden`) carried the intent.
+  const hiddenPresentation = bodyRecord?.hiddenPresentation === true;
   if (!instanceId) {
     throw new Error("branch instance id is required");
   }
@@ -4026,7 +4083,11 @@ async function orchestrateBranchInstanceLifecycle(
           if (provider === null) {
             throw new Error("window provider is unavailable");
           }
-          await provider.openOrFocusInstanceWorkbench({ instanceId, url });
+          await provider.openOrFocusInstanceWorkbench({
+            instanceId,
+            url,
+            ...(hiddenPresentation ? { present: false } : {})
+          });
         },
         closeWindowIfSuperseded: async () => {
           await closeWindowIfSupersededByClosedIntent(instanceId);
@@ -4389,6 +4450,7 @@ function resolveLauncherIpcHost() {
         scheduleLauncherStatusCliRefresh();
       }
     },
+    restartLatestShell: () => restartLauncherToLatestBuild(),
     orchestrateLauncherApi: async (path, payload) => {
       const result = await orchestrateLauncherApi(path, payload);
       if (String(payload.init?.method ?? "GET").toUpperCase() !== "GET") {
@@ -4452,8 +4514,10 @@ async function requestOpenWorkbenchFromSecondInstance(): Promise<void> {
 async function applyPendingProjectSlot(
   projectRoot: string,
   lifecycleCommand = "",
-  provenance: LauncherLifecycleProvenance = "operator"
+  provenance: LauncherLifecycleProvenance = "operator",
+  options: { hiddenPresentation?: boolean } = {}
 ): Promise<void> {
+  const hiddenPresentation = options.hiddenPresentation === true;
   const wanted = projectRoot.trim();
   if (!wanted) {
     return;
@@ -4507,7 +4571,10 @@ async function applyPendingProjectSlot(
           path: `branch-instances/${plan.operation}`,
           init: {
             method: "POST",
-            body: { instanceId: plan.instanceId }
+            body: {
+              instanceId: plan.instanceId,
+              ...(hiddenPresentation ? { hiddenPresentation: true } : {})
+            }
           }
         });
       }
@@ -4534,7 +4601,11 @@ async function applyPendingProjectSlot(
       throw new Error(`工作区已匹配但没有可打开的地址：${plan.instanceId}`);
     }
     if (windowAction === "instance") {
-      await provider.openOrFocusInstanceWorkbench({ instanceId: plan.instanceId, url });
+      await provider.openOrFocusInstanceWorkbench({
+        instanceId: plan.instanceId,
+        url,
+        ...(hiddenPresentation ? { present: false } : {})
+      });
       return;
     }
     currentWorkbenchUrl = url;
@@ -4611,16 +4682,6 @@ app.whenReady()
       openLauncher: () => {
         void windowProvider?.openLauncher().catch((error: unknown) => {
           console.warn(error instanceof Error ? error.message : String(error));
-        });
-      },
-      openPet: () => {
-        const url = currentWorkbenchUrl || launcherBootstrap?.workbenchUrl;
-        if (!url) {
-          console.warn("Desktop pet window unavailable: Workbench URL is not ready.");
-          return;
-        }
-        void windowProvider?.openPet(url).catch((error: unknown) => {
-          console.warn(`Desktop pet window unavailable: ${error instanceof Error ? error.message : String(error)}`);
         });
       },
       listInstances: async () => {
@@ -4707,7 +4768,9 @@ app.whenReady()
       return;
     }
     if (pendingProjectRoot) {
-      await applyPendingProjectSlot(pendingProjectRoot, firstLifecycle, desktopLifecycleProvenance);
+      await applyPendingProjectSlot(pendingProjectRoot, firstLifecycle, desktopLifecycleProvenance, {
+        hiddenPresentation: desktopCliArgs.hiddenPresentation
+      });
     } else if (firstLifecycle && firstLifecycle !== "status" && windowProvider !== null) {
       if (firstLifecycle === "open") {
         pendingOpenWorkbenchRequest = false;
@@ -4755,6 +4818,7 @@ app.on("second-instance", (_event, argv, _workingDirectory, additionalData) => {
     deepLinkUrl: findVibelutionDeepLinkArg(argv) ?? "",
     projectRoot: secondCli.projectRoot,
     openWorkbench: secondCli.openWorkbench,
+    hiddenPresentation: secondCli.hiddenPresentation,
     lifecycleCommand: secondCli.lifecycleCommand
   });
   if (intent.action === "handle_deep_link") {
@@ -4762,7 +4826,9 @@ app.on("second-instance", (_event, argv, _workingDirectory, additionalData) => {
     return;
   }
   if (intent.action === "apply_project") {
-    void applyPendingProjectSlot(intent.projectRoot, intent.lifecycleCommand, secondInstanceProvenance);
+    void applyPendingProjectSlot(intent.projectRoot, intent.lifecycleCommand, secondInstanceProvenance, {
+      hiddenPresentation: intent.hiddenPresentation
+    });
     return;
   }
   if (intent.action === "lifecycle") {

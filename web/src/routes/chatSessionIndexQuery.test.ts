@@ -15,7 +15,7 @@ import {
   updateAgentSessionSummaryCaches,
   updateSessionSummaryCaches,
 } from "./chatSessionIndexQuery";
-import { renameSessionInSummaries } from "./chatSessionState";
+import { mergeSessionDetailIntoSummaries, renameSessionInSummaries } from "./chatSessionState";
 import { pinSessionCreatePreserve, isSessionCreatePreserved, resetSessionCreatePreservesForTests } from "./sessionCreatePreserve";
 import { isSessionDeleteTombstoned, resetSessionDeleteTombstonesForTests } from "./sessionDeleteTombstone";
 
@@ -247,5 +247,99 @@ describe("chatSessionIndexQuery cache helpers", () => {
     expect(isSessionCreatePreserved("session-ghost")).toBe(false);
     resetSessionDeleteTombstonesForTests();
     resetSessionCreatePreservesForTests();
+  });
+});
+
+describe("chatSessionIndexQuery reference stabilization", () => {
+  it("keeps cache values reference-identical when a folded detail changes no summary content", () => {
+    const queryClient = new QueryClient();
+    const stable = { ...session("session-a", "Alpha"), agentId: "agent-a" };
+    const other = session("session-b", "Beta");
+    queryClient.setQueryData(queryKeys.sessions(), [stable, other]);
+    queryClient.setQueryData(queryKeys.sessionQuery("", 50), {
+      pages: [page([stable, other], "", 2)],
+      pageParams: [""],
+    });
+    const flatBefore = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions());
+    const paginatedBefore = queryClient.getQueryData(queryKeys.sessionQuery("", 50));
+
+    // Stream snapshot applies rebuild the target object through
+    // mergeSessionDetailIntoSummaries even when nothing visible changed.
+    updateSessionSummaryCaches(queryClient, (sessions) =>
+      mergeSessionDetailIntoSummaries(sessions, detail({ id: "session-a" })),
+    );
+
+    expect(queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions())).toBe(flatBefore);
+    expect(queryClient.getQueryData(queryKeys.sessionQuery("", 50))).toBe(paginatedBefore);
+  });
+
+  it("rotates only the changed session, its page, and the data container", () => {
+    const queryClient = new QueryClient();
+    const alpha = session("session-a", "Alpha");
+    const beta = session("session-b", "Beta");
+    const gamma = session("session-c", "Gamma");
+    queryClient.setQueryData(queryKeys.sessionQuery("", 50), {
+      pages: [page([alpha], "1", 3), page([beta, gamma], "", 3)],
+      pageParams: ["", "1"],
+    });
+    const before = queryClient.getQueryData<{ pages: SessionQueryResponse[] }>(queryKeys.sessionQuery("", 50));
+
+    updateSessionSummaryCaches(queryClient, (sessions) =>
+      (sessions ?? []).map((item) => (item.id === "session-b" ? { ...item, title: "Beta renamed" } : item)),
+    );
+
+    const after = queryClient.getQueryData<{ pages: SessionQueryResponse[] }>(queryKeys.sessionQuery("", 50));
+    expect(after).toBeTruthy();
+    expect(after).not.toBe(before);
+    expect(after?.pages[0]).toBe(before?.pages[0]);
+    expect(after?.pages[1]).not.toBe(before?.pages[1]);
+    expect(after?.pages[0]?.items[0]).toBe(alpha);
+    expect(after?.pages[1]?.items[0]).not.toBe(beta);
+    expect(after?.pages[1]?.items[0]?.title).toBe("Beta renamed");
+    expect(after?.pages[1]?.items[1]).toBe(gamma);
+  });
+
+  it("keeps paginated data reference-stable when a refetched payload carries the same content", () => {
+    const queryClient = new QueryClient();
+    const alpha = session("session-a", "Alpha");
+    queryClient.setQueryData(queryKeys.sessionQuery("", 50), {
+      pages: [page([alpha], "", 1)],
+      pageParams: [""],
+    });
+    const before = queryClient.getQueryData(queryKeys.sessionQuery("", 50));
+
+    updateSessionSummaryCaches(queryClient, (sessions) => (sessions ?? []).map((item) => ({ ...item })));
+
+    expect(queryClient.getQueryData(queryKeys.sessionQuery("", 50))).toBe(before);
+  });
+
+  it("keeps the Agent cache object reference-stable when reconcile folds an equivalent detail", () => {
+    const queryClient = new QueryClient();
+    const agentKey = ["sessions", "agent", "agent-a"] as const;
+    queryClient.setQueryData(agentKey, page([{ ...session("session-a", "Alpha"), agentId: "agent-a" }], "", 1));
+    const before = queryClient.getQueryData(agentKey);
+
+    reconcileAgentSessionDetailCache(queryClient, detail({ id: "session-a" }));
+
+    expect(queryClient.getQueryData(agentKey)).toBe(before);
+  });
+
+  it("rotates the reconciled Agent cache when the detail changes a summary field", () => {
+    const queryClient = new QueryClient();
+    const agentKey = ["sessions", "agent", "agent-a"] as const;
+    const sibling = session("session-b", "Beta");
+    queryClient.setQueryData(agentKey, page([
+      { ...session("session-a", "Alpha"), agentId: "agent-a" },
+      sibling,
+    ], "", 2));
+    const before = queryClient.getQueryData<SessionQueryResponse>(agentKey);
+
+    reconcileAgentSessionDetailCache(queryClient, detail({ id: "session-a", taskSummary: "新的摘要" }));
+
+    const after = queryClient.getQueryData<SessionQueryResponse>(agentKey);
+    expect(after).not.toBe(before);
+    expect(after?.items[0]).not.toBe(before?.items[0]);
+    expect(after?.items[0]?.taskSummary).toBe("新的摘要");
+    expect(after?.items[1]).toBe(sibling);
   });
 });

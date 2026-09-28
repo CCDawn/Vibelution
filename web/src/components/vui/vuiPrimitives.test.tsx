@@ -123,7 +123,7 @@ describe("VUI foundation primitives", () => {
     expect(markup).toContain('data-vui="chip"');
     expect(markup).toContain('aria-label="Refresh"');
     expect(markup).toContain("mimo-v2.5");
-    expect(chipMarkup).toContain("rounded-[6px]");
+    expect(chipMarkup).toContain("rounded-[var(--radius-control)]");
     expect(chipMarkup).not.toContain("rounded-full");
     expect(chipMarkup).not.toContain("var(--accent-cool)");
   });

@@ -288,7 +288,7 @@ describe("chat hand-test substitute: CLI terminal lifecycle", () => {
 
 describe("chat hand-test substitute: stream ownership + apply", () => {
   it("keeps sole session/group stream owners and route wiring", () => {
-    expect(sessionStreamSource).toContain("createSessionEventStream(streamSessionId)");
+    expect(sessionStreamSource).toContain("acquireSessionStream(streamSessionId, createSessionEventStream)");
     expect(sessionStreamSource).not.toContain("new EventSource(`/api/sessions/");
     expect(sessionStreamSource).not.toContain("/events?initial=light");
     expect(groupStreamSource).toContain("consumeChatRoomEventStream");

@@ -23,6 +23,7 @@ from scripts.evolution_harness import (
 )
 
 from .session_service import (
+    SessionBusyError,
     create_supervised_agent_session,
     get_session_detail,  # noqa: F401 - retained as the no-full-detail test seam
     get_session_turn_completion_snapshot,
@@ -31,7 +32,24 @@ from .session_service import (
 )
 
 CONVERSATION_HARNESS_CANCEL_GRACE_SECONDS = 8.0
-CONVERSATION_HARNESS_MAX_CONTINUATIONS = 3
+CONVERSATION_HARNESS_MAX_CONTINUATIONS = 8
+# 结构化单发场景（Judge 评分、独立审批）保持紧上限；基线/自改/复跑等
+# 执行型场景的 agent 常以 needs_continue 分段完成大量工作，历史上 3 次
+# 上限会在产出真实补丁后把复跑判死（swte-3458aa8712c6：4 个 turn 全部
+# needs_continue 撞上限）。执行型场景的总量仍受每 turn 超时预算约束。
+_SINGLE_SHOT_CONTINUATION_SCENARIOS = frozenset(
+    {
+        "supervised_judge_evaluation",
+        "supervised_independent_approval",
+    }
+)
+_SINGLE_SHOT_MAX_CONTINUATIONS = 3
+
+
+def _max_continuations_for_scenario(scenario: str) -> int:
+    if str(scenario or "").strip() in _SINGLE_SHOT_CONTINUATION_SCENARIOS:
+        return _SINGLE_SHOT_MAX_CONTINUATIONS
+    return CONVERSATION_HARNESS_MAX_CONTINUATIONS
 _CONVERSATION_HARNESS_TRANSCRIPT_LIMIT = 8
 _CONVERSATION_HARNESS_TOOL_TRACE_LIMIT = 12
 _CONVERSATION_HARNESS_TOOL_TRACE_ITEM_LIMIT = 20
@@ -137,6 +155,42 @@ def _evolution_transaction_closed(summary: dict[str, Any] | None) -> bool:
     )
 
 
+_SUBMIT_BUSY_RETRY_ATTEMPTS = 6
+_SUBMIT_BUSY_RETRY_INTERVAL_SECONDS = 5.0
+
+
+def _submit_continuation_with_busy_retry(
+    session_id: str,
+    continuation_prompt: str,
+    *,
+    mental_model_enabled: bool | None,
+    message_metadata: dict[str, Any],
+) -> dict[str, Any]:
+    """Submit a continuation turn, tolerating a busy session with bounded retries.
+
+    ``needs_continue`` 会触发产品的自动续跑；harness 自己的手工续跑提交可能
+    与其撞车吃到 SessionBusyError（swte-e997ff8c7691 实弹定案）。忙碌时等待
+    重试而非立刻判失败；其他异常原样抛出。
+    """
+    last_exc: Exception | None = None
+    for _ in range(_SUBMIT_BUSY_RETRY_ATTEMPTS):
+        try:
+            return submit_session_message(
+                session_id,
+                continuation_prompt,
+                mental_model_enabled=mental_model_enabled,
+                message_metadata=message_metadata,
+                message_source="supervised_evolution",
+                include_started_turn_id=True,
+                lightweight_response=True,
+            )
+        except SessionBusyError as exc:
+            last_exc = exc
+            time.sleep(_SUBMIT_BUSY_RETRY_INTERVAL_SECONDS)
+    assert last_exc is not None
+    raise last_exc
+
+
 def run_supervised_conversation_harness(
     *,
     repo_root: Path,
@@ -156,9 +210,15 @@ def run_supervised_conversation_harness(
     clean_room: bool = False,
     progress_callback: Any = None,
     cancel_checker: Any = None,
+    journal_project_root: Path | None = None,
 ) -> HarnessResult:
     del mode, post_restart_observe_seconds, keep_worktree, max_steps
     started_at = _now_timestamp()
+    # 会话的 turn journal 落在「创建会话的主项目」workspace 下；当 repo_root
+    # 是候选 worktree 时（自改/复跑），按 worktree 根解析会落到另一个实例
+    # 而读不到 journal，证据包会变成零工具轨迹、Judge 只能按缺证判罚
+    # （swte-38cfc2b63358 定案）。journal 解析一律使用主项目根。
+    journal_root = Path(journal_project_root) if journal_project_root else repo_root
     binding = dict(agent_binding or {}) if isinstance(agent_binding, dict) else {}
     agent_id = str(binding.get("agentId") or "").strip()
     role = str(binding.get("role") or binding.get("supervisedRole") or "").strip()
@@ -359,7 +419,7 @@ def run_supervised_conversation_harness(
                 latest_detail,
                 assistant_text=latest_output,
                 restart_expected=expect_restart,
-                repo_root=repo_root,
+                repo_root=journal_root,
             )
             if _evolution_transaction_closed(continuation_summary):
                 latest_output = _closed_transaction_assistant_text(
@@ -399,13 +459,13 @@ def run_supervised_conversation_harness(
         if (
             last_status == "needs_continue"
             and not cancel_requested
-            and continuation_count < CONVERSATION_HARNESS_MAX_CONTINUATIONS
+            and continuation_count < _max_continuations_for_scenario(scenario)
             and time.monotonic() < deadline
         ):
             continuation_count += 1
             continuation_prompt = _supervised_continuation_prompt(role=role, scenario=scenario)
             try:
-                accepted = submit_session_message(
+                accepted = _submit_continuation_with_busy_retry(
                     session_id,
                     continuation_prompt,
                     mental_model_enabled=mental_model_enabled,
@@ -419,9 +479,6 @@ def run_supervised_conversation_harness(
                         "mentalModelMode": normalized_mental_mode,
                         "workspaceOverride": normalized_workspace_override,
                     },
-                    message_source="supervised_evolution",
-                    include_started_turn_id=True,
-                    lightweight_response=True,
                 )
                 turn_id = str(accepted.get("turnId") or accepted.get("startedTurnId") or "").strip()
                 if turn_id:
@@ -479,7 +536,7 @@ def run_supervised_conversation_harness(
                 latest_detail,
                 assistant_text=assistant_text,
                 restart_expected=expect_restart,
-                repo_root=repo_root,
+                repo_root=journal_root,
             )
             if callable(progress_callback):
                 progress_callback(
@@ -533,7 +590,7 @@ def run_supervised_conversation_harness(
                 latest_detail,
                 assistant_text=assistant_text,
                 restart_expected=expect_restart,
-                repo_root=repo_root,
+                repo_root=journal_root,
             )
             return _conversation_harness_result(
                 run_id=run_id,
@@ -561,7 +618,7 @@ def run_supervised_conversation_harness(
         latest_detail,
         assistant_text=assistant_text,
         restart_expected=expect_restart,
-        repo_root=repo_root,
+        repo_root=journal_root,
     )
     last_status = str(
         latest_completion_snapshot.get("terminalStatus")

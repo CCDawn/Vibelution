@@ -49,6 +49,7 @@ import type { AgentArchiveResponse } from "../agentWorkspaceCache";
 import { prefetchConversationView } from "../../components/conversation/prefetchConversationView";
 import type { ActiveTurnStreamState } from "../../components/conversation/activeTurnStreamState";
 import type { ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
+import { FollowupQueueTogglePauseContext } from "../../components/conversation/ConversationFollowupQueueBar";
 import { queryKeys } from "../../api/queryKeys";
 import {
   AgentInstance,
@@ -69,6 +70,7 @@ import {
   ConversationMessage,
   ToolCall,
   VirtualHumanCompanion,
+  AgentPermissionPreset,
 } from "../../api/types";
 import type { ConversationStreamingFramePaintMetrics } from "../../components/conversation/conversationStreamingMetrics";
 import type { ConversationForkScope } from "../../components/conversation/conversationViewTypes";
@@ -131,15 +133,20 @@ import {
 } from "../conversationIndexModel";
 import {
   activeTurnTerminalRefreshKey,
-  activeTurnLayerToConversationMessage,
   activeTurnLayerTextLength,
   isActiveTurnSettledByDetail,
+  isActiveTurnSettledByMessages,
   selectFirstUnpaintedRunningTool,
   setActiveTurnLayerForSession,
   toolStartToFirstPaintMs,
   runningToolPaintKeys,
-  type ActiveTurnLayerState,
 } from "../chatActiveTurnLayer";
+import {
+  ActiveTurnLayersStoreProvider,
+  createActiveTurnLayersStore,
+  useActiveTurnLayersSignal,
+  useActiveTurnLayersSignalFlag,
+} from "./activeTurnLayersStore";
 import {
   isChildSession,
 } from "../DirectSessionIndexItem";
@@ -281,6 +288,7 @@ import {
   cliAgentRunTabId,
 } from "./cliAgentRunModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
+import { readStoredSessionDrafts, removeStoredSessionDraft } from "./chatDraftPersistence";
 import {
   buildFileReferencePayload,
   buildKnowledgeBaseReferencePayload,
@@ -346,6 +354,13 @@ const ChatGroupCenterSurface = lazy(() =>
 const ChatFileWorkspaceTabs = lazy(() =>
   import("./ChatFileWorkspaceTabs").then((module) => ({ default: module.ChatFileWorkspaceTabs })),
 );
+
+/**
+ * Module-level shared default so `changedFiles: detail.changedFiles ?? []` in
+ * the memoized conversation model keeps a stable reference across renders
+ * (a fresh `[]` per render would defeat the ConversationView memo gate).
+ */
+const EMPTY_SESSION_CHANGED_FILES: string[] = [];
 
 /**
  * Stable session-detail placeholder for the active-session detail query.
@@ -566,7 +581,7 @@ export function ChatCodingRouteWorkbench() {
   const setActiveTab = useChatWorkbenchStore((state) => state.setActiveTab);
   const [sessionFilter, setSessionFilter] = useState("");
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
-  const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>({});
+  const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>(() => readStoredSessionDrafts());
   const [sessionComposerErrors, setSessionComposerErrors] = useState<Record<string, string>>({});
   const composerFocusSequenceRef = useRef(0);
   const [composerFocusRequest, setComposerFocusRequest] = useState({ sessionId: "", signal: "" });
@@ -604,7 +619,12 @@ export function ChatCodingRouteWorkbench() {
     agentContextMenu,
     setAgentContextMenu,
   } = useChatWorkbenchContextMenus();
-  const [activeTurnLayersBySession, setActiveTurnLayersBySession] = useState<Record<string, ActiveTurnLayerState>>({});
+  // Active-turn layers live in an external store instead of component state:
+  // assistant delta frames commit multiple times per second, and only the
+  // ConversationView bridge subscribes per frame (see activeTurnLayersStore).
+  // The workbench itself re-renders only on the primitive signals below.
+  const activeTurnLayersStore = useMemo(() => createActiveTurnLayersStore(), []);
+  const { setActiveTurnLayersBySession, activeTurnLayersBySessionRef } = activeTurnLayersStore;
 
   useEffect(() => {
     editingSessionIdRef.current = editingSessionId;
@@ -657,12 +677,10 @@ export function ChatCodingRouteWorkbench() {
   const [expandedGroupMessageIds, setExpandedGroupMessageIds] = useState<string[]>([]);
   const lastConversationStreamingFrameTelemetryAtRef = useRef<Record<string, number>>({});
   const lastAssistantDeltaAppliedAtRef = useRef<Record<string, number>>({});
-  const activeTurnLayersBySessionRef = useRef<Record<string, ActiveTurnLayerState>>({});
   // ConversationView reports its committed frame from a child effect. React
-  // runs that effect before this parent's effects, so effect-based ref syncing
-  // leaves paint telemetry one render behind. Keep the read-through ref current
-  // during render so a newly-started tool is measured on its first painted frame.
-  activeTurnLayersBySessionRef.current = activeTurnLayersBySession;
+  // runs that effect before this parent's effects, so the paint handler must
+  // read the freshest committed layers; the store keeps its read-through ref
+  // current synchronously on every commit (no render-time sync needed).
   const paintedRunningToolIdsBySessionRef = useRef<Record<string, string[]>>({});
   const firstPaintedRunningToolAtBySessionRef = useRef<Record<string, Record<string, number>>>({});
   const terminalIndexRefreshKeysBySessionRef = useRef<Record<string, string>>({});
@@ -992,7 +1010,7 @@ export function ChatCodingRouteWorkbench() {
     || activeSessionId
     || ""
   );
-  const { sessionStreamConnected, streamDisconnectedSinceMs } = useSessionDetailStream({
+  const { sessionStreamConnected, streamDisconnectedSinceMs, reconnectSessionStream } = useSessionDetailStream({
     activeSessionId,
     sessionStreamShouldConnect,
     queryClient,
@@ -1013,8 +1031,9 @@ export function ChatCodingRouteWorkbench() {
       streamConnected: streamDisconnectedSinceMs != null ? false : undefined,
       streamDisconnectedSinceMs,
       lastAssistantDeltaAtMs: lastAssistantDeltaAppliedAtRef.current[String(activeSessionId || "")],
+      reconnectSessionStream,
     }),
-    [streamDisconnectedSinceMs, activeSessionId, lastAssistantDeltaAppliedAtRef],
+    [streamDisconnectedSinceMs, activeSessionId, lastAssistantDeltaAppliedAtRef, reconnectSessionStream],
   );
   const chatLiveQueryPolicyInput = {
     chatPollingVisible,
@@ -1114,6 +1133,7 @@ export function ChatCodingRouteWorkbench() {
         const { [normalizedSessionId]: _removed, ...remaining } = current;
         return remaining;
       });
+      removeStoredSessionDraft(normalizedSessionId);
       setSessionImageAttachments((current) => clearSessionImageAttachments(current, normalizedSessionId));
       setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, normalizedSessionId));
       delete imageUploadInFlightRef.current[normalizedSessionId];
@@ -1773,15 +1793,20 @@ export function ChatCodingRouteWorkbench() {
       return {};
     }
     return {
-      [sessionId]: rows.map((row) => ({
-        id: String(row.id || ""),
-        text: String(row.content || ""),
-        status: String(row.status || "queued"),
-        position: Number(row.position || 0),
-        attachmentCount: Array.isArray(row.attachments) ? row.attachments.length : 0,
-        lastError: String(row.lastError || ""),
-        canSteer: !(row.attachments?.length) && !(row.references?.length),
-      })),
+      [sessionId]: rows.map((row) => {
+        const kind = String(row.kind || "user");
+        const systemReturn = kind === "task_notification" || kind === "subagent_message";
+        return {
+          id: String(row.id || ""),
+          text: String(row.content || ""),
+          kind,
+          status: String(row.status || "queued"),
+          position: Number(row.position || 0),
+          attachmentCount: Array.isArray(row.attachments) ? row.attachments.length : 0,
+          lastError: String(row.lastError || ""),
+          canSteer: !systemReturn && !(row.attachments?.length) && !(row.references?.length),
+        };
+      }),
     };
   }, [detail?.id, detail?.queuedTurns]);
   const sessionToolApprovalRuntimeActive = runtimeHasChatTurnForSession(runtime, activeSessionId);
@@ -1816,13 +1841,34 @@ export function ChatCodingRouteWorkbench() {
     detail?.messageWindow?.nextBeforeMessageIndex,
     loadEarlierSessionMessagesMutation,
   ]);
-  const activeTurnLayer = activeSessionId ? activeTurnLayersBySession[activeSessionId] : undefined;
-  const activeTurnSettledByDetail = isActiveTurnSettledByDetail(activeTurnLayer, detail);
-  const terminalIndexRefreshKey = activeTurnTerminalRefreshKey(activeTurnLayer, detail);
-  const activeTurnMessage = useMemo(
-    () => activeTurnSettledByDetail ? undefined : activeTurnLayerToConversationMessage(activeTurnLayer),
-    [activeTurnLayer, activeTurnSettledByDetail],
-  );
+  // Primitive-signal subscriptions: streaming frames commit into the store
+  // without re-rendering this component; these selectors re-render the
+  // workbench only when a derived value (settle flag, terminal refresh key,
+  // running-session key) actually changes.
+  const activeTurnSessionKey = activeSessionId ?? "";
+  const activeTurnSettledByDetail = useActiveTurnLayersSignalFlag(useCallback((layers) => {
+    return isActiveTurnSettledByMessages(layers[activeTurnSessionKey], detail?.messages);
+  }, [activeTurnSessionKey, detail?.messages]));
+  const terminalIndexRefreshKey = useActiveTurnLayersSignal(useCallback((layers) => {
+    return activeTurnTerminalRefreshKey(layers[activeTurnSessionKey], detail);
+  }, [activeTurnSessionKey, detail]));
+  const activeTurnRunningSessionKey = useActiveTurnLayersSignal(useCallback((layers) => {
+    const runningSessionIds: string[] = [];
+    Object.entries(layers).forEach(([sessionId, layer]) => {
+      if (layer.status === "pending" || layer.status === "running") {
+        runningSessionIds.push(sessionId);
+      }
+    });
+    runningSessionIds.sort();
+    return runningSessionIds.join("|");
+  }, []));
+  // The bridge input only needs the active session's turn id; subscribing to
+  // the primitive id (not the whole layer) keeps per-frame commits from
+  // re-rendering the workbench while the turn id itself still updates once
+  // per turn.
+  const activeTurnIdSignal = useActiveTurnLayersSignal(useCallback((layers) => {
+    return layers[activeTurnSessionKey]?.turnId ?? "";
+  }, [activeTurnSessionKey]));
   useEffect(() => {
     if (!activeSessionId || !terminalIndexRefreshKey) {
       return;
@@ -1841,10 +1887,14 @@ export function ChatCodingRouteWorkbench() {
     ]);
   }, [activeSessionId, queryClient, terminalIndexRefreshKey]);
   useEffect(() => {
-    if (!activeSessionId || !activeTurnLayer || !activeTurnSettledByDetail || !detail) {
+    if (!activeSessionId || !activeTurnSettledByDetail || !detail) {
       return;
     }
-    const settledTurnId = activeTurnLayer.turnId;
+    const settledLayer = activeTurnLayersBySessionRef.current[activeSessionId];
+    if (!settledLayer) {
+      return;
+    }
+    const settledTurnId = settledLayer.turnId;
     void queryClient.refetchQueries({
       queryKey: queryKeys.session(activeSessionId),
       exact: true,
@@ -1877,7 +1927,7 @@ export function ChatCodingRouteWorkbench() {
         ledgerSeq: detail.ledgerSeq ?? 0,
       },
     });
-  }, [activeSessionId, activeTurnLayer, activeTurnSettledByDetail, detail, queryClient]);
+  }, [activeSessionId, activeTurnSettledByDetail, detail, queryClient, setActiveTurnLayersBySession, activeTurnLayersBySessionRef]);
   const handleConversationStreamingFramePaint = useCallback((metrics: ConversationStreamingFramePaintMetrics) => {
     const sessionId = String(metrics.sessionId || "").trim();
     if (!sessionId || sessionId !== activeSessionId) {
@@ -2138,15 +2188,17 @@ export function ChatCodingRouteWorkbench() {
     resolveSessionToolApprovalMutation,
     resolveToolApprovalMutation,
   });
+  // Rebuilt only when the running-session key changes (a status transition),
+  // not on every committed streaming frame; reads the store's latest snapshot.
   const runtimeRunningSessionIds = useMemo(() => {
     const runningSessionIds = new Set(runtimeChatTurnSessionIds);
-    Object.entries(activeTurnLayersBySession).forEach(([sessionId, layer]) => {
+    Object.entries(activeTurnLayersBySessionRef.current).forEach(([sessionId, layer]) => {
       if (layer.status === "pending" || layer.status === "running") {
         runningSessionIds.add(sessionId);
       }
     });
     return [...runningSessionIds];
-  }, [activeTurnLayersBySession, runtimeChatTurnSessionIds]);
+  }, [activeTurnLayersBySessionRef, activeTurnRunningSessionKey, runtimeChatTurnSessionIds]);
   const {
     activeDraft,
     activeFollowupQueue,
@@ -2189,20 +2241,23 @@ export function ChatCodingRouteWorkbench() {
     activeTurnSettledByDetail,
   });
   const companionComposerDisabled = composerDisabled || (companionMode && !companionTransportAgentId);
-  const companionConversationComposer = companionMode
-    ? {
-      ...conversationComposer,
-      actionDisabled: companionComposerDisabled
-        || submitPending
-        || !conversationComposer.value.trim(),
-      actionMode: "send" as const,
-      attachmentInputDisabled: companionComposerDisabled
-        || sessionBusy
-        || conversationComposer.attachmentInputDisabled,
-      disabled: companionComposerDisabled,
-      pending: submitPending,
-    }
-    : conversationComposer;
+  const companionConversationComposer = useMemo(
+    () => (companionMode
+      ? {
+        ...conversationComposer,
+        actionDisabled: companionComposerDisabled
+          || submitPending
+          || !conversationComposer.value.trim(),
+        actionMode: "send" as const,
+        attachmentInputDisabled: companionComposerDisabled
+          || sessionBusy
+          || conversationComposer.attachmentInputDisabled,
+        disabled: companionComposerDisabled,
+        pending: submitPending,
+      }
+      : conversationComposer),
+    [companionComposerDisabled, companionMode, conversationComposer, sessionBusy, submitPending],
+  );
   const activeAgentDisplay = detail
     ? sessionAgentDisplayInfo(detail, activeSessionAgent, lang, resolveModelLabel)
     : { name: "Agent", functionLabel: "", tone: "chat" as const, meta: "" };
@@ -2270,6 +2325,7 @@ export function ChatCodingRouteWorkbench() {
     handleFollowupQueueRemove,
     handleFollowupQueueMove,
     handleFollowupQueueSteer,
+    handleFollowupQueueTogglePause,
     handleEditUserMessage,
     handleCancelEditMessage,
     handleRegenerateAssistantMessage,
@@ -2280,6 +2336,8 @@ export function ChatCodingRouteWorkbench() {
     handleRuntimeStatusEnabledChange,
     handleAddComposerAttachments,
     handleRemoveComposerAttachment,
+    handleRetryComposerAttachmentUpload,
+    handleRetryComposerAttachmentUploads,
     handleAddComposerReference,
     handleRemoveComposerReference,
   } = useChatComposerSubmitActions({
@@ -2315,7 +2373,7 @@ export function ChatCodingRouteWorkbench() {
     activeAgentImageInputUnsupported,
     activeImageInputModelId,
     latestUserMessageId,
-    activeTurnId: activeTurnLayer?.turnId,
+    activeTurnId: activeTurnIdSignal || undefined,
     detail,
     setMentalModelEnabledForNextTurn,
     setRuntimeStatusEnabledForNextTurn,
@@ -3042,7 +3100,247 @@ export function ChatCodingRouteWorkbench() {
     </ChatConversationIndexPanelContent>
   );
 
+  // Conversation surface model, memoized so unrelated workbench renders (rails,
+  // dialogs, composer state) do not re-render ConversationView: the memo gate
+  // lives on ConversationView and needs stable prop references. The streaming
+  // activeTurnMessage is intentionally NOT part of this model — it is
+  // projected from the active-turn layer store inside
+  // ChatConversationComposerBridge, the single per-frame subscriber.
+  const conversationModel = useMemo(
+    () => (detail ? {
+      sessionId: activeSessionId ?? detail.id,
+      title: detail.title,
+      phase: detail.currentPhase,
+      messages: detail.messages,
+      transcriptPending: sessionTranscriptPending,
+      hasEarlierMessages: Boolean(detail.messageWindow?.hasEarlier),
+      earlierMessagesLoading: loadEarlierSessionMessagesMutation.isPending,
+      onStreamingFramePaint: handleConversationStreamingFramePaint,
+      assistantDisplayName: activeAgentDisplayName,
+      assistantAvatarImageUrl: activeAgentAvatarImageUrl,
+      assistantAvatarFallback: activeAgentAvatarFallback,
+      resolveTurnAvatar: resolveConversationTurnAvatar,
+      userDisplayName: resolveChatUserDisplayName(runtime?.userName),
+      userAvatarPreset: runtime?.userProfile?.avatarPreset,
+      userAvatarImageUrl: runtime?.userProfile?.avatarImageUrl,
+      taskSummary: currentTaskSummary,
+      changedFiles: detail.changedFiles ?? EMPTY_SESSION_CHANGED_FILES,
+      defaultFileContext: detail.defaultFileContext,
+      showHeader: false,
+      showSessionOverview: false,
+      companionMode: verifiedCompanionMode,
+      // Historical mental snapshots are conversation evidence; next-turn toggle only affects submit.
+      showMentalSnapshots: !verifiedCompanionMode,
+      promptSuggestionEnabled: activePromptSuggestionEnabled,
+      composerFocusSignal:
+        composerFocusRequest.sessionId === activeSessionId
+          ? composerFocusRequest.signal
+          : "",
+      onComposerFocusRequestSettled: settleSessionComposerFocusRequest,
+      composer: companionConversationComposer,
+      composerLeadingControl: verifiedCompanionMode ? undefined : (
+        <ChatComposerPlusMenu
+          lang={lang}
+          attachmentDisabled={companionConversationComposer.attachmentInputDisabled}
+          onAddAttachments={handleAddComposerAttachments}
+          sessionReferences={composerSessionReferenceOptions}
+          onAddSessionReference={handleAddComposerReference}
+          knowledgeReferenceOptions={composerKnowledgeReferenceOptions}
+          onAddKnowledgeReference={handleAddComposerReference}
+          labels={{
+            composerAttachFiles: t("composerAttachFiles"),
+            composerReferenceKnowledgeFiles: t("composerReferenceKnowledgeFiles"),
+            composerReferenceKnowledgeUnavailable: t("composerReferenceKnowledgeUnavailable"),
+            composerReferenceKnowledgeTitle: t("composerReferenceKnowledgeTitle"),
+            composerReferenceKnowledgeDescription: t("composerReferenceKnowledgeDescription"),
+            composerReferenceKnowledgeSearch: t("composerReferenceKnowledgeSearch"),
+            composerReferenceKnowledgeEmpty: t("composerReferenceKnowledgeEmpty"),
+          }}
+          mentalModelEnabled={mentalModelEnabledForNextTurn}
+          runtimeStatusEnabled={runtimeStatusEnabledForNextTurn}
+          promptSuggestionEnabled={activePromptSuggestionEnabled}
+          capabilityDisabled={!activeSessionId}
+          onMentalModelEnabledChange={handleMentalModelEnabledChange}
+          onRuntimeStatusEnabledChange={handleRuntimeStatusEnabledChange}
+          onPromptSuggestionEnabledChange={handlePromptSuggestionEnabledChange}
+          directSession={agentDirectSessionMismatch && agentPrimaryDirectSessionId ? {
+            id: agentPrimaryDirectSessionId,
+            label: sessionBindingMismatchLine,
+            onOpen: () => handleOpenDirectSession(agentPrimaryDirectSessionId),
+            onPrefetch: () => handlePrefetchDirectSession(agentPrimaryDirectSessionId),
+          } : null}
+          group={standardGroupRoomActive && activeGroupRoom ? {
+            title: activeGroupRoom.title,
+            onManage: () => setGroupManageDialogOpen(true),
+            teamId: activeGroupTeamOwned ? activeGroupTeam?.teamId : undefined,
+            onOpenTeam: activeGroupTeamOwned && activeGroupTeam
+              ? () => navigate(teamWorkspaceRoute(activeGroupTeam.teamId))
+              : undefined,
+          } : null}
+        />
+      ),
+      permissionControl: !verifiedCompanionMode && activeSessionAgent ? {
+        value: activeSessionAgent.permissionPreset || "request_approval",
+        disabled: (
+          agentPermissionPresetMutation.isPending
+          || activeSessionAgent.configSchemaVersion < 2
+          || activeSessionAgent.configRevision < 1
+          || !activeSessionAgent.configHash
+        ),
+        pending: (
+          agentPermissionPresetMutation.isPending
+          && agentPermissionPresetMutation.variables?.agentId === activeSessionAgent.agentId
+        ),
+        agentName: activeAgentDisplayName,
+        onChange: (permissionPreset: AgentPermissionPreset) => {
+          if (
+            !activeSessionId
+            || agentPermissionPresetMutation.isPending
+            || activeSessionAgent.configSchemaVersion < 2
+            || activeSessionAgent.configRevision < 1
+            || !activeSessionAgent.configHash
+          ) {
+            return;
+          }
+          agentPermissionPresetMutation.mutate({
+            agentId: activeSessionAgent.agentId,
+            sessionId: activeSessionId,
+            permissionPreset,
+            expectedConfigRevision: activeSessionAgent.configRevision,
+          });
+        },
+      } : undefined,
+      llmControl: verifiedCompanionMode ? undefined : sessionLlmControl,
+      composerContextRing: verifiedCompanionMode ? null : composerContextRing,
+      onOpenComposerContextDetail: !verifiedCompanionMode && cacheDetailAvailable ? openCacheDetail : undefined,
+      onCreateSession: !verifiedCompanionMode && selectedChatAgent ? () => handleCreateAgentSession(selectedChatAgent) : undefined,
+      slashCommandSuggestions: verifiedCompanionMode ? [] : slashCommandSuggestions,
+      composerReferenceOptions: verifiedCompanionMode ? [] : composerKnowledgeReferenceOptions,
+      cancelComposerModeLabel: t("cancelEditMessage"),
+      turnError: detail.lastTurnError,
+      stopLabel: t("stop"),
+      stopPendingLabel: t("stopPending"),
+      safeGuidanceLabel: t("safeGuidance"),
+      safeGuidancePendingLabel: t("safeGuidancePending"),
+      interruptGuidanceLabel: t("interruptGuidance"),
+      interruptGuidancePendingLabel: t("interruptGuidancePending"),
+      editUserMessageLabel: t("editAndResendMessage"),
+      onComposerChange: handleComposerChange,
+      onAddComposerAttachments: handleAddComposerAttachments,
+      onRemoveComposerAttachment: handleRemoveComposerAttachment,
+      onRetryComposerAttachment: handleRetryComposerAttachmentUpload,
+      onRetryComposerAttachmentUploads: handleRetryComposerAttachmentUploads,
+      onAddComposerReference: handleAddComposerReference,
+      onRemoveComposerReference: handleRemoveComposerReference,
+      onEditUserMessage: handleEditUserMessage,
+      onRegenerateAssistantMessage: handleRegenerateAssistantMessage,
+      onSwitchMessageVersion: handleSwitchMessageVersion,
+      onForkSessionFromNode: verifiedCompanionMode ? undefined : handleForkSessionFromNode,
+      branchVersionSwitchDisabled: (
+        sessionBusy
+        || (switchHeadMutation.isPending
+          && switchHeadMutation.variables?.sessionId === activeSessionId)
+      ),
+      regenerableAssistantMessageId,
+      regenerateDisabled: sessionBusy || regenerateMutation.isPending,
+      regeneratePending: (
+        regenerateMutation.isPending
+        && regenerateMutation.variables?.sessionId === activeSessionId
+      ),
+      onRetryTurn: handleRetryFailedTurn,
+      retryTurnDisabled: sessionBusy || regenerateMutation.isPending,
+      retryTurnPending: (
+        regenerateMutation.isPending
+        && regenerateMutation.variables?.sessionId === activeSessionId
+      ),
+      onCancelComposerMode: resolvedEditTarget ? handleCancelEditMessage : undefined,
+      onLoadEarlierMessages: handleLoadEarlierSessionMessages,
+      onSubmit: handleSubmitTurn,
+      onStop: handleStopTurn,
+      onSafeGuidance: () => handleSubmitGuidance("safe"),
+      onInterruptGuidance: () => handleSubmitGuidance("interrupt"),
+      onFollowupQueueUpdate: handleFollowupQueueUpdate,
+      onFollowupQueueRemove: handleFollowupQueueRemove,
+      onFollowupQueueMove: handleFollowupQueueMove,
+      onFollowupQueueSteer: handleFollowupQueueSteer,
+      followupQueueSteerLabel: t("immediateSteer"),
+    } : null),
+    [
+      activeAgentAvatarFallback,
+      activeAgentAvatarImageUrl,
+      activeAgentDisplayName,
+      activeGroupRoom,
+      activeGroupTeam,
+      activeGroupTeamOwned,
+      activePromptSuggestionEnabled,
+      activeSessionAgent,
+      activeSessionId,
+      agentDirectSessionMismatch,
+      agentPermissionPresetMutation,
+      agentPrimaryDirectSessionId,
+      cacheDetailAvailable,
+      composerContextRing,
+      composerFocusRequest,
+      composerKnowledgeReferenceOptions,
+      composerSessionReferenceOptions,
+      currentTaskSummary,
+      detail,
+      handleAddComposerAttachments,
+      handleAddComposerReference,
+      handleCancelEditMessage,
+      handleComposerChange,
+      handleConversationStreamingFramePaint,
+      handleCreateAgentSession,
+      handleEditUserMessage,
+      handleFollowupQueueMove,
+      handleFollowupQueueRemove,
+      handleFollowupQueueSteer,
+      handleFollowupQueueUpdate,
+      handleForkSessionFromNode,
+      handleLoadEarlierSessionMessages,
+      handleMentalModelEnabledChange,
+      handleOpenDirectSession,
+      handlePrefetchDirectSession,
+      handlePromptSuggestionEnabledChange,
+      handleRegenerateAssistantMessage,
+      handleRemoveComposerAttachment,
+      handleRemoveComposerReference,
+      handleRetryComposerAttachmentUpload,
+      handleRetryComposerAttachmentUploads,
+      handleRetryFailedTurn,
+      handleRuntimeStatusEnabledChange,
+      handleStopTurn,
+      handleSubmitGuidance,
+      handleSubmitTurn,
+      handleSwitchMessageVersion,
+      lang,
+      loadEarlierSessionMessagesMutation,
+      mentalModelEnabledForNextTurn,
+      navigate,
+      openCacheDetail,
+      regenerateMutation,
+      regenerableAssistantMessageId,
+      resolvedEditTarget,
+      resolveConversationTurnAvatar,
+      runtime,
+      selectedChatAgent,
+      sessionBusy,
+      sessionLlmControl,
+      sessionBindingMismatchLine,
+      sessionTranscriptPending,
+      setGroupManageDialogOpen,
+      settleSessionComposerFocusRequest,
+      slashCommandSuggestions,
+      standardGroupRoomActive,
+      switchHeadMutation,
+      t,
+      verifiedCompanionMode,
+      companionConversationComposer,
+    ],
+  );
+
   return (
+    <ActiveTurnLayersStoreProvider store={activeTurnLayersStore}>
     <ChatSessionWorkbenchShell
       layoutRef={layoutRef}
       className={chatLayoutClassName}
@@ -3311,6 +3609,7 @@ export function ChatCodingRouteWorkbench() {
             />
             )}
             sessionWorkspace={(
+            <FollowupQueueTogglePauseContext.Provider value={handleFollowupQueueTogglePause}>
             <ChatSessionWorkspacePanel
               activeCliAgentRunAvailable={Boolean(activeCliAgentRun)}
               activeCliAgentRunId={activeCliAgentRunId}
@@ -3318,163 +3617,7 @@ export function ChatCodingRouteWorkbench() {
               activeTurnStreamState={activeTurnStreamState}
               blockingErrorMessage={sessionDetailErrorMessage}
               cliAgentRunEmptyLabel={lang === "zh" ? "这个 CLI 工具页还没有可显示的运行记录。" : "This CLI tool page has no run to display."}
-              conversation={detail ? {
-                sessionId: activeSessionId ?? detail.id,
-                title: detail.title,
-                phase: detail.currentPhase,
-                messages: detail.messages,
-                activeTurnMessage,
-                transcriptPending: sessionTranscriptPending,
-                hasEarlierMessages: Boolean(detail.messageWindow?.hasEarlier),
-                earlierMessagesLoading: loadEarlierSessionMessagesMutation.isPending,
-                onStreamingFramePaint: handleConversationStreamingFramePaint,
-                assistantDisplayName: activeAgentDisplayName,
-                assistantAvatarImageUrl: activeAgentAvatarImageUrl,
-                assistantAvatarFallback: activeAgentAvatarFallback,
-                resolveTurnAvatar: resolveConversationTurnAvatar,
-                userDisplayName: resolveChatUserDisplayName(runtime?.userName),
-                userAvatarPreset: runtime?.userProfile?.avatarPreset,
-                userAvatarImageUrl: runtime?.userProfile?.avatarImageUrl,
-                taskSummary: currentTaskSummary,
-                changedFiles: detail.changedFiles ?? [],
-                defaultFileContext: detail.defaultFileContext,
-                showHeader: false,
-                showSessionOverview: false,
-                companionMode: verifiedCompanionMode,
-                // Historical mental snapshots are conversation evidence; next-turn toggle only affects submit.
-                showMentalSnapshots: !verifiedCompanionMode,
-                promptSuggestionEnabled: activePromptSuggestionEnabled,
-                composerFocusSignal:
-                  composerFocusRequest.sessionId === activeSessionId
-                    ? composerFocusRequest.signal
-                    : "",
-                onComposerFocusRequestSettled: settleSessionComposerFocusRequest,
-                composer: companionConversationComposer,
-                composerLeadingControl: verifiedCompanionMode ? undefined : (
-                  <ChatComposerPlusMenu
-                    lang={lang}
-                    attachmentDisabled={companionConversationComposer.attachmentInputDisabled}
-                    onAddAttachments={handleAddComposerAttachments}
-                    sessionReferences={composerSessionReferenceOptions}
-                    onAddSessionReference={handleAddComposerReference}
-                    knowledgeReferenceOptions={composerKnowledgeReferenceOptions}
-                    onAddKnowledgeReference={handleAddComposerReference}
-                    labels={{
-                      composerAttachFiles: t("composerAttachFiles"),
-                      composerReferenceKnowledgeFiles: t("composerReferenceKnowledgeFiles"),
-                      composerReferenceKnowledgeUnavailable: t("composerReferenceKnowledgeUnavailable"),
-                      composerReferenceKnowledgeTitle: t("composerReferenceKnowledgeTitle"),
-                      composerReferenceKnowledgeDescription: t("composerReferenceKnowledgeDescription"),
-                      composerReferenceKnowledgeSearch: t("composerReferenceKnowledgeSearch"),
-                      composerReferenceKnowledgeEmpty: t("composerReferenceKnowledgeEmpty"),
-                    }}
-                    mentalModelEnabled={mentalModelEnabledForNextTurn}
-                    runtimeStatusEnabled={runtimeStatusEnabledForNextTurn}
-                    promptSuggestionEnabled={activePromptSuggestionEnabled}
-                    capabilityDisabled={!activeSessionId}
-                    onMentalModelEnabledChange={handleMentalModelEnabledChange}
-                    onRuntimeStatusEnabledChange={handleRuntimeStatusEnabledChange}
-                    onPromptSuggestionEnabledChange={handlePromptSuggestionEnabledChange}
-                    directSession={agentDirectSessionMismatch && agentPrimaryDirectSessionId ? {
-                      id: agentPrimaryDirectSessionId,
-                      label: sessionBindingMismatchLine,
-                      onOpen: () => handleOpenDirectSession(agentPrimaryDirectSessionId),
-                      onPrefetch: () => handlePrefetchDirectSession(agentPrimaryDirectSessionId),
-                    } : null}
-                    group={standardGroupRoomActive && activeGroupRoom ? {
-                      title: activeGroupRoom.title,
-                      onManage: () => setGroupManageDialogOpen(true),
-                      teamId: activeGroupTeamOwned ? activeGroupTeam?.teamId : undefined,
-                      onOpenTeam: activeGroupTeamOwned && activeGroupTeam
-                        ? () => navigate(teamWorkspaceRoute(activeGroupTeam.teamId))
-                        : undefined,
-                    } : null}
-                  />
-                ),
-                permissionControl: !verifiedCompanionMode && activeSessionAgent ? {
-                  value: activeSessionAgent.permissionPreset || "request_approval",
-                  disabled: (
-                    agentPermissionPresetMutation.isPending
-                    || activeSessionAgent.configSchemaVersion < 2
-                    || activeSessionAgent.configRevision < 1
-                    || !activeSessionAgent.configHash
-                  ),
-                  pending: (
-                    agentPermissionPresetMutation.isPending
-                    && agentPermissionPresetMutation.variables?.agentId === activeSessionAgent.agentId
-                  ),
-                  agentName: activeAgentDisplayName,
-                  onChange: (permissionPreset) => {
-                    if (
-                      !activeSessionId
-                      || agentPermissionPresetMutation.isPending
-                      || activeSessionAgent.configSchemaVersion < 2
-                      || activeSessionAgent.configRevision < 1
-                      || !activeSessionAgent.configHash
-                    ) {
-                      return;
-                    }
-                    agentPermissionPresetMutation.mutate({
-                      agentId: activeSessionAgent.agentId,
-                      sessionId: activeSessionId,
-                      permissionPreset,
-                      expectedConfigRevision: activeSessionAgent.configRevision,
-                    });
-                  },
-                } : undefined,
-                llmControl: verifiedCompanionMode ? undefined : sessionLlmControl,
-                composerContextRing: verifiedCompanionMode ? null : composerContextRing,
-                onOpenComposerContextDetail: !verifiedCompanionMode && cacheDetailAvailable ? openCacheDetail : undefined,
-                onCreateSession: !verifiedCompanionMode && selectedChatAgent ? () => handleCreateAgentSession(selectedChatAgent) : undefined,
-                slashCommandSuggestions: verifiedCompanionMode ? [] : slashCommandSuggestions,
-                composerReferenceOptions: verifiedCompanionMode ? [] : composerKnowledgeReferenceOptions,
-                cancelComposerModeLabel: t("cancelEditMessage"),
-                turnError: detail.lastTurnError,
-                stopLabel: t("stop"),
-                stopPendingLabel: t("stopPending"),
-                safeGuidanceLabel: t("safeGuidance"),
-                safeGuidancePendingLabel: t("safeGuidancePending"),
-                interruptGuidanceLabel: t("interruptGuidance"),
-                interruptGuidancePendingLabel: t("interruptGuidancePending"),
-                editUserMessageLabel: t("editAndResendMessage"),
-                onComposerChange: handleComposerChange,
-                onAddComposerAttachments: handleAddComposerAttachments,
-                onRemoveComposerAttachment: handleRemoveComposerAttachment,
-                onAddComposerReference: handleAddComposerReference,
-                onRemoveComposerReference: handleRemoveComposerReference,
-                onEditUserMessage: handleEditUserMessage,
-                onRegenerateAssistantMessage: handleRegenerateAssistantMessage,
-                onSwitchMessageVersion: handleSwitchMessageVersion,
-                onForkSessionFromNode: verifiedCompanionMode ? undefined : handleForkSessionFromNode,
-                branchVersionSwitchDisabled: (
-                  sessionBusy
-                  || (switchHeadMutation.isPending
-                    && switchHeadMutation.variables?.sessionId === activeSessionId)
-                ),
-                regenerableAssistantMessageId,
-                regenerateDisabled: sessionBusy || regenerateMutation.isPending,
-                regeneratePending: (
-                  regenerateMutation.isPending
-                  && regenerateMutation.variables?.sessionId === activeSessionId
-                ),
-                onRetryTurn: handleRetryFailedTurn,
-                retryTurnDisabled: sessionBusy || regenerateMutation.isPending,
-                retryTurnPending: (
-                  regenerateMutation.isPending
-                  && regenerateMutation.variables?.sessionId === activeSessionId
-                ),
-                onCancelComposerMode: resolvedEditTarget ? handleCancelEditMessage : undefined,
-                onLoadEarlierMessages: handleLoadEarlierSessionMessages,
-                onSubmit: handleSubmitTurn,
-                onStop: handleStopTurn,
-                onSafeGuidance: () => handleSubmitGuidance("safe"),
-                onInterruptGuidance: () => handleSubmitGuidance("interrupt"),
-                onFollowupQueueUpdate: handleFollowupQueueUpdate,
-                onFollowupQueueRemove: handleFollowupQueueRemove,
-                onFollowupQueueMove: handleFollowupQueueMove,
-                onFollowupQueueSteer: handleFollowupQueueSteer,
-                followupQueueSteerLabel: t("immediateSteer"),
-              } : null}
+              conversation={conversationModel}
               conversationFocused={statusRailCollapsed}
               filePreview={{
                 changed: fileContentQuery.data ? changedFiles.has(fileContentQuery.data.path) : false,
@@ -3498,6 +3641,7 @@ export function ChatCodingRouteWorkbench() {
               onApproveToolForSession={handleApproveToolForSession}
               onRejectToolApproval={handleRejectToolApproval}
             />
+            </FollowupQueueTogglePauseContext.Provider>
             )}
           />
         )}
@@ -3725,5 +3869,6 @@ export function ChatCodingRouteWorkbench() {
         onConfirm={confirmPendingWorkbenchAction}
       />
     </ChatSessionWorkbenchShell>
+    </ActiveTurnLayersStoreProvider>
   );
 }

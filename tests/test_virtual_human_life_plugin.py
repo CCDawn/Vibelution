@@ -590,6 +590,50 @@ def test_disable_invalidates_revision_without_deleting_life_data(
     assert service.snapshot("agent-a")["state"] == before
 
 
+@pytest.mark.parametrize("delivery_kind", ["proactive", "followup", "burst_continuation"])
+def test_proactive_turn_origin_survives_state_truncation_and_matches_only_current_turn(
+    service: VirtualHumanLifeService, delivery_kind: str,
+) -> None:
+    from core.prompt_manager.assembly_contract import PromptDecision, PromptSegment
+    from core.prompt_manager.assembly_resolver import PromptAssemblyContext, PromptSectionResolver
+
+    service.set_binding("agent-a", enabled=True, expected_version=0)
+    service.store.append_jsonl("agent-a", "proactive/deliveries.jsonl", {
+        "turnId": "proactive-current", "status": "delivering", "triggerId": "trigger-a",
+        "deliveryKind": delivery_kind,
+    })
+    segment = service.build_prompt_segments(
+        "agent-a", session_id="session-agent-a", run_id="proactive-current",
+    )[1]
+    assert segment["block"].startswith("## Companion Turn Origin: internal_proactive")
+    assert "本轮没有新的用户消息" in segment["block"][:500]
+    if delivery_kind in {"followup", "burst_continuation"}:
+        assert "上一条回复的自然延续" in segment["block"][:500]
+    else:
+        assert "根据生活事件主动联系用户" in segment["block"][:500]
+
+    # Exercise the real budget resolver without changing native assembly policy.
+    oversized = PromptSegment.from_internal_dict({**segment, "block": segment["block"] + "生活经历" * 8_000})
+    result = PromptSectionResolver().resolve([oversized], PromptAssemblyContext(context_window=20_000))
+    selected = result.segments[0]
+    assert selected.decision == PromptDecision.TRUNCATED
+    assert "本轮没有新的用户消息" in selected.content
+    assert "不询问用户是否发空了" in selected.content
+
+    other = service.build_prompt_segments("agent-a", run_id="another-user-turn")[1]
+    assert "## Companion Turn Origin" not in other["block"]
+    assert service.build_prompt_segments("agent-b", run_id="proactive-current") == []
+
+
+def test_reserved_proactive_attempt_does_not_mark_a_turn_as_admitted(service: VirtualHumanLifeService) -> None:
+    service.set_binding("agent-a", enabled=True, expected_version=0)
+    service.store.append_jsonl("agent-a", "proactive/deliveries.jsonl", {
+        "turnId": "not-admitted", "status": "reserved", "deliveryKind": "proactive",
+    })
+    state = service.build_prompt_segments("agent-a", run_id="not-admitted")[1]
+    assert "## Companion Turn Origin" not in state["block"]
+
+
 def test_prompt_and_tool_bundle_require_enabled_binding_and_policy_intersection(
     service: VirtualHumanLifeService,
 ) -> None:
@@ -606,6 +650,7 @@ def test_prompt_and_tool_bundle_require_enabled_binding_and_policy_intersection(
     assert segments[1]["trust"] == "derived_runtime"
     assert "agent-a" not in segments[0]["block"]
     assert 'action="record_reply"' in segments[0]["block"]
+    assert "本轮没有新的用户输入" in segments[0]["block"]
 
     visible = service.filter_tool_names(
         "agent-a",
@@ -1220,6 +1265,62 @@ def test_proactive_reconciliation_promotes_only_a_persisted_assistant_receipt(
     assert recovered["status"] == "delivered"
     assert recovered["receiptEventId"] == "event-assistant-recovered"
     assert service.proactive_usage("agent-a", "2026-08-27")["delivered"] == 1
+
+
+def test_in_flight_assistant_receipt_keeps_native_turn_current(tmp_path: Path) -> None:
+    """A journaled assistant item must not fence the turn before it is closed."""
+
+    from core.chat.turn_journal import EVENT_TURN_INTERRUPTED, append_turn_event
+
+    agent = _active_agent("agent-a")
+    persisted_receipts: dict[str, dict[str, str]] = {}
+    service = VirtualHumanLifeService(
+        project_root=tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        proactive_submitter=lambda **_payload: {
+            "accepted": True,
+            "turnId": "turn-still-open",
+        },
+        delivery_receipt_resolver=lambda _agent_id, attempt: persisted_receipts.get(
+            str(attempt.get("deliveryToken") or "")
+        ),
+        now_provider=lambda: datetime(2026, 8, 27, 9, 0, tzinfo=timezone.utc),
+    )
+    binding = service.set_binding("agent-a", enabled=True, expected_version=0)
+    attempt = service.request_proactive_message("agent-a", reason="写完回复再收口")
+    persisted_receipts[attempt["deliveryToken"]] = {
+        "receiptEventId": "event-assistant-visible",
+        "persistedAt": "2026-08-27T09:05:00+00:00",
+    }
+
+    assert service.proactive_turn_is_current(
+        agent_id="agent-a",
+        binding_revision=int(binding["bindingRevision"]),
+        delivery_token=attempt["deliveryToken"],
+    ) is True
+    open_attempt = service.proactive_attempt("agent-a", attempt["deliveryToken"])
+    assert open_attempt["status"] == "delivered"
+
+    append_turn_event(
+        tmp_path,
+        str(open_attempt["sessionId"]),
+        str(open_attempt["turnId"]),
+        EVENT_TURN_INTERRUPTED,
+        status="cancelled",
+        payload={"reason": "test_close"},
+        source="test",
+    )
+    assert service.proactive_turn_is_current(
+        agent_id="agent-a",
+        binding_revision=int(binding["bindingRevision"]),
+        delivery_token=attempt["deliveryToken"],
+    ) is False
 
 
 def test_archive_revision_fence_cancels_attempt_and_can_roll_back(

@@ -37,12 +37,12 @@ export function AgentPageHeader({
     >
       <div className="grid min-w-0 gap-0.5">
         {!repeatsTitle ? (
-          <span className="truncate text-[0.64rem] font-semibold uppercase tracking-[0.06em] text-vui-fg-tertiary">
+          <span className="truncate text-vui-micro-10 font-semibold uppercase tracking-[0.06em] text-vui-fg-tertiary">
             {eyebrow}
           </span>
         ) : null}
         <div className="flex min-w-0 items-center gap-1.5">
-          <h1 className="m-0 truncate text-[0.95rem] font-bold leading-tight text-vui-fg-primary">
+          <h1 className="m-0 truncate text-vui-sm font-bold leading-tight text-vui-fg-primary">
             {title}
           </h1>
           {tooltip ? (

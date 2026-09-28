@@ -29,7 +29,7 @@ describe("Electron main startup sequence", () => {
     );
     const pendingProjectIndex = source.indexOf("if (pendingProjectRoot)");
     const applySlotIndex = source.indexOf(
-      "await applyPendingProjectSlot(pendingProjectRoot, firstLifecycle, desktopLifecycleProvenance)"
+      "await applyPendingProjectSlot(pendingProjectRoot, firstLifecycle, desktopLifecycleProvenance, {"
     );
     const noProjectLifecycleIndex = source.indexOf(
       'else if (firstLifecycle && firstLifecycle !== "status" && windowProvider !== null)'
@@ -45,7 +45,7 @@ describe("Electron main startup sequence", () => {
     expect(noProjectLifecycleIndex).toBeGreaterThan(applySlotIndex);
     expect(noProjectHandleIndex).toBeGreaterThan(noProjectLifecycleIndex);
     expect(source.slice(pendingProjectIndex, noProjectHandleIndex)).toContain(
-      "await applyPendingProjectSlot(pendingProjectRoot, firstLifecycle, desktopLifecycleProvenance)"
+      "await applyPendingProjectSlot(pendingProjectRoot, firstLifecycle, desktopLifecycleProvenance, {"
     );
     expect(source.slice(pendingProjectIndex, noProjectHandleIndex)).toContain(
       "} else if (firstLifecycle && firstLifecycle !== \"status\" && windowProvider !== null)"
@@ -55,5 +55,49 @@ describe("Electron main startup sequence", () => {
     );
     expect(source).toContain("if (deferWorkbenchOpen)");
     expect(source).toContain('else if (!desktopCliArgs.workbenchCloseCanary && !desktopCliArgs.projectRoot)');
+  });
+});
+
+describe("hidden presentation forwarding", () => {
+  const readMainSource = () => readFileSync(mainSourcePath, "utf8");
+
+  it("forwards the CLI hidden flag into the first-launch project slot apply", () => {
+    const source = readMainSource();
+    const pendingProjectIndex = source.indexOf("if (pendingProjectRoot)");
+    const applyCallIndex = source.indexOf(
+      "await applyPendingProjectSlot(pendingProjectRoot, firstLifecycle, desktopLifecycleProvenance, {"
+    );
+    expect(pendingProjectIndex).toBeGreaterThan(0);
+    expect(applyCallIndex).toBeGreaterThan(pendingProjectIndex);
+    expect(source.slice(applyCallIndex, applyCallIndex + 200)).toContain(
+      "hiddenPresentation: desktopCliArgs.hiddenPresentation"
+    );
+  });
+
+  it("carries hidden presentation on second-instance apply_project intents", () => {
+    const source = readMainSource();
+    expect(source).toContain("hiddenPresentation: secondCli.hiddenPresentation");
+    expect(source).toContain("hiddenPresentation: intent.hiddenPresentation");
+  });
+
+  it("marks the branch-instance isolated start request and instance window as hidden on demand", () => {
+    const source = readMainSource();
+    const parseIndex = source.indexOf("const hiddenPresentation = bodyRecord?.hiddenPresentation === true;");
+    const providerCallIndex = source.indexOf(
+      "await provider.openOrFocusInstanceWorkbench({"
+    );
+    expect(parseIndex).toBeGreaterThan(0);
+    expect(providerCallIndex).toBeGreaterThan(parseIndex);
+    expect(source.slice(providerCallIndex, providerCallIndex + 200)).toContain(
+      "...(hiddenPresentation ? { present: false } : {})"
+    );
+  });
+
+  it("gates every provider present:false call site behind the hidden intent", () => {
+    const source = readMainSource();
+    const occurrences = source.split("present: false").length - 1;
+    const gated = source.split("...(hiddenPresentation ? { present: false } : {})").length - 1;
+    expect(occurrences).toBeGreaterThan(0);
+    expect(gated).toBe(occurrences);
   });
 });

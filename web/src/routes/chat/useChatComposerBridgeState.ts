@@ -31,6 +31,15 @@ import {
 } from "./chatRoutePresentation";
 import { latestVisibleTurnErrorMessage } from "./chatSessionDetailHelpers";
 
+/**
+ * Module-level shared defaults: `lookup ?? []` with a fresh literal would hand
+ * the memoized `conversationComposer` a new reference on every render and
+ * defeat the ConversationView memo gate downstream.
+ */
+const EMPTY_FOLLOWUP_QUEUE: ComposerQueueItem[] = [];
+const EMPTY_IMAGE_ATTACHMENTS: ComposerImageAttachment[] = [];
+const EMPTY_REFERENCE_ATTACHMENTS: SessionReferenceAttachment[] = [];
+
 export interface UseChatComposerBridgeStateParams {
   activeSessionId: string | null;
   sessionDrafts: Record<string, string>;
@@ -109,7 +118,7 @@ export function useChatComposerBridgeState({
   activeTurnSettledByDetail,
 }: UseChatComposerBridgeStateParams): ChatComposerBridgeStateResult {
   const activeDraft = activeSessionId ? sessionDrafts[activeSessionId] ?? "" : "";
-  const activeFollowupQueue = activeSessionId ? sessionFollowupQueues[activeSessionId] ?? [] : [];
+  const activeFollowupQueue = activeSessionId ? sessionFollowupQueues[activeSessionId] ?? EMPTY_FOLLOWUP_QUEUE : EMPTY_FOLLOWUP_QUEUE;
   const activeComposerRawError = activeSessionId ? sessionComposerErrors[activeSessionId] ?? "" : "";
   const activeLatestTurnErrorMessage = useMemo(
     () => latestVisibleTurnErrorMessage(detail?.messages),
@@ -123,8 +132,8 @@ export function useChatComposerBridgeState({
     ? ""
     : activeComposerRawError;
   const activeEditTarget = activeSessionId ? sessionEditTargets[activeSessionId] ?? null : null;
-  const activeImageAttachments = activeSessionId ? sessionImageAttachments[activeSessionId] ?? [] : [];
-  const activeReferenceAttachments = activeSessionId ? sessionReferenceAttachments[activeSessionId] ?? [] : [];
+  const activeImageAttachments = activeSessionId ? sessionImageAttachments[activeSessionId] ?? EMPTY_IMAGE_ATTACHMENTS : EMPTY_IMAGE_ATTACHMENTS;
+  const activeReferenceAttachments = activeSessionId ? sessionReferenceAttachments[activeSessionId] ?? EMPTY_REFERENCE_ATTACHMENTS : EMPTY_REFERENCE_ATTACHMENTS;
   const activeImageUploadPending = activeSessionId ? Boolean(sessionImageUploadPending[activeSessionId]) : false;
   const activeAgentId = detail?.agentId || "";
   const activeSessionAgent = activeAgentId ? (agents ?? []).find((agent) => agent.agentId === activeAgentId) : undefined;

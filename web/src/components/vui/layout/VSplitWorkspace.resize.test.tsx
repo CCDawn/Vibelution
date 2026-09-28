@@ -30,6 +30,9 @@ describe("VSplitWorkspace resizable", () => {
     expect(html).toContain('data-vui-layout-id="skills"');
     expect(html).toContain('role="separator"');
     expect(html).toContain("调整左侧栏宽度");
+    // Wave 5B: container hosts hook-owned width variables; panes consume them.
+    expect(html).toContain("--pane-w-sidebar:320px");
+    expect(html).toContain("width:var(--pane-w-sidebar)");
     expect(html).toContain("list");
     expect(html).toContain("detail");
   });

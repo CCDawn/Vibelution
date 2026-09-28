@@ -9,6 +9,9 @@ Late-bound facade keeps monkeypatches stable.
 from __future__ import annotations
 
 import copy
+import json
+import os
+import threading
 import time
 from collections.abc import Iterable
 from contextlib import contextmanager
@@ -49,6 +52,98 @@ def _format_personal_episodes_context(episodes: list[dict[str, Any]]) -> list[st
 
 _TEAM_KNOWLEDGE_ACCESS_MAX_IDS = 12
 
+# agent → 四类可访问 KB id 的进程内解析缓存：
+# - 现状是每回合（群聊 ×N agent）一次 list_knowledge_overview，对每个
+#   owner×base 全量读 items/proposals/batches JSONL，而结果只渲染 ≤12 个 ID。
+# - 失效签名 = (memoryPolicy 知识库授权字段 JSON) + (agent 注册表文件 stat)
+#   + (teams.json stat) + (team knowledge 存储层文件集 stat 遍历)。
+#   agent 记录/memoryPolicy/ steward 角色变化 → 注册表 stat；KB 新建/ACL/
+#   权限与存储内容变化 → knowledge_bases.json 等 stat；成员/角色变化 →
+#   teams.json stat。全部只 stat 不读内容。
+# - 签名不可靠（stat/遍历异常、遍历超限）时绕过缓存走实时查询，不缓存失败
+#   结果，保持只读渲染路径的失败开放语义。
+_TEAM_KNOWLEDGE_ACCESS_CACHE_LOCK = threading.RLock()
+_TEAM_KNOWLEDGE_ACCESS_CACHE: dict[str, tuple[tuple[object, ...], dict[str, list[str]]]] = {}
+_TEAM_KNOWLEDGE_ACCESS_CACHE_LIMIT = 256
+_TEAM_KNOWLEDGE_STORAGE_FILENAMES = frozenset(
+    {
+        "knowledge_bases.json",
+        "items.jsonl",
+        "refinement_proposals.jsonl",
+        "batches.jsonl",
+    }
+)
+_TEAM_KNOWLEDGE_WALK_ENTRY_LIMIT = 4096
+
+
+def _reset_team_knowledge_access_cache() -> None:
+    """测试专用：清空团队知识访问解析缓存。"""
+
+    with _TEAM_KNOWLEDGE_ACCESS_CACHE_LOCK:
+        _TEAM_KNOWLEDGE_ACCESS_CACHE.clear()
+
+
+def _path_stat_signature(path: Path) -> tuple[str, bool, int, int]:
+    try:
+        stat = path.stat()
+    except OSError:
+        return (str(path), False, 0, 0)
+    return (str(path), True, int(stat.st_mtime_ns), int(stat.st_size))
+
+
+def _team_knowledge_storage_signature() -> tuple[object, ...] | None:
+    """Stat-only signature over the knowledge store, teams index and agent registry.
+
+    只 stat 不读内容、不触发 seeded 播种复制：teams index 路径用
+    ``sandboxed_workspace_path``（seed=False 语义）重建，与 ``_teams_index_path``
+    解析结果一致但无写副作用。
+    """
+
+    try:
+        from core.infrastructure import developer_sandbox
+        from core.web.services import agent_directory_service, team_knowledge_service, team_service
+
+        parts: list[tuple[object, ...]] = []
+        root = team_knowledge_service._route_team_knowledge_workspace_path(seed=False)
+        parts.append(("root", str(root)))
+        visited = 0
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames.sort()
+            for name in sorted(filenames):
+                visited += 1
+                if visited > _TEAM_KNOWLEDGE_WALK_ENTRY_LIMIT:
+                    return None
+                if name in _TEAM_KNOWLEDGE_STORAGE_FILENAMES:
+                    parts.append(("file", *_path_stat_signature(Path(dirpath) / name)))
+        project_root = Path(team_service.PROJECT_ROOT).resolve()
+        teams_index = developer_sandbox.sandboxed_workspace_path(project_root, "teams") / "teams.json"
+        parts.append(("teamsIndex", *_path_stat_signature(teams_index)))
+        parts.append(("agentRegistry", *_path_stat_signature(agent_directory_service.registry_path())))
+        return tuple(parts)
+    except Exception:
+        return None
+
+
+def _team_knowledge_access_cache_signature(
+    agent_id: str,
+    memory_policy: dict[str, Any] | None,
+) -> tuple[object, ...] | None:
+    policy = memory_policy if isinstance(memory_policy, dict) else {}
+    policy_fields: dict[str, Any] = {
+        action: [str(item or "").strip() for item in list(policy.get(f"{action}KnowledgeBaseIds") or [])]
+        for action in ("read", "propose", "review", "rate")
+    }
+    policy_fields["enabled"] = bool(policy.get("enabled", True))
+    try:
+        policy_json = json.dumps(policy_fields, sort_keys=True, ensure_ascii=True)
+    except (TypeError, ValueError):
+        return None
+    storage_signature = _team_knowledge_storage_signature()
+    if storage_signature is None:
+        return None
+    return ("v1", policy_json, storage_signature)
+
+
 # 提示词消费者会把这里的 knowledge_base_id 原样传给 knowledge 工具，而服务端按
 # 精确 ID 解析；空策略绝不渲染形如 ID 的占位串（历史占位 "team-membership" 会被
 # agent 照抄进 knowledge_ingestion_tool 并触发 TeamKnowledgeNotFoundError）。
@@ -75,21 +170,35 @@ def _format_knowledge_base_id_list(values: list[str]) -> str:
     return text
 
 
-def _resolve_agent_knowledge_base_ids_by_action(agent_id: str) -> dict[str, list[str]]:
+def _resolve_agent_knowledge_base_ids_by_action(
+    agent_id: str,
+    memory_policy: dict[str, Any] | None = None,
+) -> dict[str, list[str]]:
     """Resolve real knowledge base ids the agent can read/propose/review/rate."""
 
     resolved: dict[str, list[str]] = {"read": [], "propose": [], "review": [], "rate": []}
-    if not agent_id:
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
         return resolved
+    signature = _team_knowledge_access_cache_signature(normalized_agent_id, memory_policy)
+    if signature is not None:
+        with _TEAM_KNOWLEDGE_ACCESS_CACHE_LOCK:
+            entry = _TEAM_KNOWLEDGE_ACCESS_CACHE.get(normalized_agent_id)
+        if entry is not None and entry[0] == signature:
+            return {action: list(items) for action, items in entry[1].items()}
     try:
         from core.web.services import team_knowledge_service
 
         # 投影是只读渲染路径：必须以 sync_roots=False 跳过 _sync_roots，否则
         # 它会把 chat_room/agent_directory/team 服务的全局 PROJECT_ROOT 改写成
         # team_knowledge 的根，劫持调用方（群聊轮次、会话 journal）已解析的根。
-        overview = team_knowledge_service.list_knowledge_overview(agent_id=agent_id, sync_roots=False)
+        overview = team_knowledge_service.list_knowledge_overview(
+            agent_id=normalized_agent_id,
+            sync_roots=False,
+        )
     except Exception:
         # 投影渲染必须失败开放：查询异常时退回指引文本，不阻塞提示词构建。
+        # 失败结果不进缓存：签名不变的下一次调用仍走实时查询自愈。
         return resolved
     for base in list(overview.get("knowledgeBases") or []):
         if not isinstance(base, dict):
@@ -101,6 +210,11 @@ def _resolve_agent_knowledge_base_ids_by_action(agent_id: str) -> dict[str, list
         for action in resolved:
             if permissions.get(f"can{action.capitalize()}"):
                 resolved[action].append(scoped_id)
+    if signature is not None:
+        with _TEAM_KNOWLEDGE_ACCESS_CACHE_LOCK:
+            _TEAM_KNOWLEDGE_ACCESS_CACHE[normalized_agent_id] = (signature, copy.deepcopy(resolved))
+            while len(_TEAM_KNOWLEDGE_ACCESS_CACHE) > _TEAM_KNOWLEDGE_ACCESS_CACHE_LIMIT:
+                _TEAM_KNOWLEDGE_ACCESS_CACHE.pop(next(iter(_TEAM_KNOWLEDGE_ACCESS_CACHE)))
     return resolved
 
 
@@ -115,7 +229,7 @@ def _team_knowledge_access_lines(agent_id: str, memory_policy: dict[str, Any]) -
     }
     resolved: dict[str, list[str]] = {}
     if any(not items for items in policy_ids.values()):
-        resolved = _resolve_agent_knowledge_base_ids_by_action(agent_id)
+        resolved = _resolve_agent_knowledge_base_ids_by_action(agent_id, memory_policy)
     lines = ["TeamKnowledgeAccess:"]
     for action in ("read", "propose", "review", "rate"):
         values = policy_ids[action] or resolved.get(action) or []
@@ -155,18 +269,22 @@ def build_agent_runtime_context_block(
             prompt_eligible_only=True,
         )
     )
-    from . import episodic_memory as episodic_memory_mod
-
-    episodes = (
-        list(episodic_events_snapshot)
-        if episodic_events_snapshot is not None
-        else s.list_current_episodic_events(agent_id, limit=episodic_memory_mod.PROMPT_LIST_LIMIT)
-    )
     memory_policy = (
         dict(memory_policy_snapshot)
         if isinstance(memory_policy_snapshot, dict)
         else s.resolve_memory_policy_for_agent(agent_id)
     )
+    from . import episodic_memory as episodic_memory_mod
+
+    if bool(memory_policy.get("enabled", True)):
+        episodes = (
+            list(episodic_events_snapshot)
+            if episodic_events_snapshot is not None
+            else s.list_current_episodic_events(agent_id, limit=episodic_memory_mod.PROMPT_LIST_LIMIT)
+        )
+    else:
+        # 记忆开关关闭：与个人记忆零接触——既不读 episodic JSONL，也不注入该段。
+        episodes = []
     tool_policy = (
         agent.get("toolPolicy")
         if isinstance(agent.get("toolPolicy"), dict)
@@ -206,7 +324,8 @@ def build_agent_runtime_context_block(
     task_lines = s._format_task_profile_context(agent.get("taskProfile"))
     if task_lines:
         lines.extend(task_lines)
-    lines.extend(_format_personal_episodes_context(episodes))
+    if bool(memory_policy.get("enabled", True)):
+        lines.extend(_format_personal_episodes_context(episodes))
     if events:
         lines.append("GroupContextEvents:")
         for event in events[-limit:]:
@@ -796,6 +915,9 @@ def active_agent_runtime(
         if isinstance(agent_snapshot.get("memoryPolicy"), dict)
         else s.resolve_memory_policy_for_agent(agent_id)
     )
+    if not bool(memory_policy.get("enabled", True)):
+        # 生效层摘除：只改本回合运行时副本，绝不回写持久化 agent 记录。
+        tool_policy = s._without_personal_memory_write_tools(tool_policy)
     supervision_policy = (
         s.normalize_supervision_policy(metadata.get("supervisionPolicy"))
         if agent_snapshot

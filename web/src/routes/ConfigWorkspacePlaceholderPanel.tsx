@@ -1,18 +1,29 @@
 import { VRouteHeader, VSurface } from "../components/vui";
+import { CONFIG_COPY, type ConfigCopy } from "./config/configCopy";
 import styles from "./ConfigWorkspacePlaceholderPanel.styles";
 
 type ConfigWorkspacePlaceholderPanelProps = {
   title: string;
   subtitle?: string;
   tone?: "loading" | "error";
+  /** Bilingual copy table (wave 4); defaults to zh for standalone loading shells. */
+  copy?: ConfigCopy;
 };
 
 export function ConfigWorkspacePlaceholderPanel({
   title,
   subtitle,
   tone = "loading",
+  copy = CONFIG_COPY.zh,
 }: ConfigWorkspacePlaceholderPanelProps) {
-  const navLabels = ["总览与保存", "界面与高级配置", "用户与形象", "模型库", "运行时与上下文", "工具与诊断"];
+  const navLabels = [
+    copy.placeholderNavOverview,
+    copy.placeholderNavInterface,
+    copy.placeholderNavProfile,
+    copy.placeholderNavModels,
+    copy.placeholderNavRuntime,
+    copy.placeholderNavTooling,
+  ];
   const matrixLabels = ["operator config", "providers", "models", "runtime"];
   return (
     <VSurface as="div" className={`${styles.loadingShell} ${tone === "error" ? styles.loadingShellError : ""}`} padding="none">

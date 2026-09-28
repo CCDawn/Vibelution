@@ -108,11 +108,22 @@ export function deriveProviderMergeCandidate(
 
 export type ProviderModelFilter = "all" | "pinned" | "discovered" | "unavailable";
 
+/** Copy templates for provider model action labels (subset of ConfigCopy, wave 4). */
+export type ProviderModelActionLabels = {
+  actionPinDisabledReason: string;
+  actionPinHint: string;
+  actionPinLabel: string;
+  actionUnpinLabel: string;
+  actionInUseLabel: string;
+  actionUnavailableLabel: string;
+  actionUnpinnableLabel: string;
+};
+
 export type ProviderModelActionState =
-  | { kind: "pin"; label: "固定到配置"; disabled: boolean; reason: string }
-  | { kind: "unpin"; label: "取消固定"; disabled: boolean; reason: string }
-  | { kind: "in_use"; label: "使用中"; referenceCount: number }
-  | { kind: "unavailable"; label: "不可用" | "不可固定" };
+  | { kind: "pin"; label: string; disabled: boolean; reason: string }
+  | { kind: "unpin"; label: string; disabled: boolean; reason: string }
+  | { kind: "in_use"; label: string; referenceCount: number }
+  | { kind: "unavailable"; label: string };
 
 const PROVIDER_MODEL_AVAILABILITY_GROUPS: Record<Exclude<ProviderModelFilter, "all">, ReadonlySet<string>> = {
   pinned: new Set(["pinned", "missing_remote"]),
@@ -207,7 +218,17 @@ export type ProviderSetupChecklistItem = {
 };
 
 /** Compact next-step checklist for manage workspace (not full audit surface). */
-export function buildProviderSetupChecklist(provider: ProviderRegistryRow): ProviderSetupChecklistItem[] {
+export type ProviderSetupChecklistLabels = {
+  checklistCredentialLabel: string;
+  checklistConnectionLabel: string;
+  checklistPinLabel: string;
+  checklistReasoningLabel: string;
+};
+
+export function buildProviderSetupChecklist(
+  provider: ProviderRegistryRow,
+  labels: ProviderSetupChecklistLabels,
+): ProviderSetupChecklistItem[] {
   const credentialOk = provider.credentialState === "configured" || provider.credentialState === "not_required";
   const connectionOk = provider.status === "reachable" || provider.status === "configured";
   const hasPinned = provider.pinnedCount > 0;
@@ -217,12 +238,12 @@ export function buildProviderSetupChecklist(provider: ProviderRegistryRow): Prov
       && Boolean(model.reasoningEffortValues?.length),
   );
   return [
-    { id: "credential", label: "API Key / 凭据已就绪", done: credentialOk },
-    { id: "connection", label: "连接可达或已配置", done: connectionOk },
-    { id: "pin", label: "至少固定 1 个对话模型", done: hasPinned },
+    { id: "credential", label: labels.checklistCredentialLabel, done: credentialOk },
+    { id: "connection", label: labels.checklistConnectionLabel, done: connectionOk },
+    { id: "pin", label: labels.checklistPinLabel, done: hasPinned },
     {
       id: "reasoning",
-      label: "（可选）为已固定模型声明思考深度",
+      label: labels.checklistReasoningLabel,
       done: !hasPinned || pinnedWithReasoning,
       optional: true,
     },
@@ -581,34 +602,35 @@ export function deriveProviderModelActionState(
   model: ConfigCatalogModel,
   liveReferenceCount: number,
   disabled: boolean,
+  labels: ProviderModelActionLabels,
 ): ProviderModelActionState {
   if (model.availability === "disabled") {
-    return { kind: "unavailable", label: "不可用" };
+    return { kind: "unavailable", label: labels.actionUnavailableLabel };
   }
   if (canPinProviderModel(model)) {
     return {
       kind: "pin",
-      label: "固定到配置",
+      label: labels.actionPinLabel,
       disabled,
       reason: disabled
-        ? "当前配置操作不可用"
-        : "固定后写入模型库，保存配置即可在 Agent 中选用",
+        ? labels.actionPinDisabledReason
+        : labels.actionPinHint,
     };
   }
   if (!canUnpinProviderModel(row, model)) {
     return {
       kind: "unavailable",
-      label: "不可固定",
+      label: labels.actionUnpinnableLabel,
     };
   }
   if (liveReferenceCount > 0) {
-    return { kind: "in_use", label: "使用中", referenceCount: liveReferenceCount };
+    return { kind: "in_use", label: labels.actionInUseLabel, referenceCount: liveReferenceCount };
   }
   return {
     kind: "unpin",
-    label: "取消固定",
+    label: labels.actionUnpinLabel,
     disabled,
-    reason: disabled ? "当前配置操作不可用" : "",
+    reason: disabled ? labels.actionPinDisabledReason : "",
   };
 }
 

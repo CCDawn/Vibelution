@@ -91,7 +91,7 @@ describe("browser telemetry", () => {
     expect(payload.fields.clientOccurredAt).not.toBe("spoofed");
   });
 
-  it("summarizes page content without copying main text into telemetry fields", () => {
+  it("summarizes page content without reading main text into telemetry fields", () => {
     vi.stubGlobal("window", {
       location: {
         href: "http://127.0.0.1:8000/chat",
@@ -103,11 +103,13 @@ describe("browser telemetry", () => {
         hash: "",
       },
     });
+    const queriedSelectors: string[] = [];
     vi.stubGlobal("document", {
       title: "Vibelution 工作台",
       readyState: "complete",
       visibilityState: "visible",
       querySelector: (selector: string) => {
+        queriedSelectors.push(selector);
         if (selector === "[data-browser-role], [data-shell]") {
           return {
             dataset: {
@@ -143,9 +145,10 @@ describe("browser telemetry", () => {
       activeNavHref: "/chat",
       activeNavText: "对话",
       heading: "当前会话",
-      mainTextLength: expect.any(Number),
     });
+    expect(snapshot).not.toHaveProperty("mainTextLength");
     expect(snapshot).not.toHaveProperty("mainTextPreview");
+    expect(queriedSelectors).not.toContain("main");
     expect(JSON.stringify(snapshot)).not.toContain("用户对话正文");
   });
 

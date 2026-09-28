@@ -62,7 +62,7 @@ describe("ConversationActiveTurnStatusNote canonical turn items", () => {
     expect(html).not.toContain("aria-label=");
   });
 
-  it("derives the visible retry heartbeat from a retry item", () => {
+  it("keeps the first two retries silent on the heartbeat", () => {
     const html = renderToStaticMarkup(
       <ConversationActiveTurnStatusNote
         lang="zh"
@@ -87,10 +87,44 @@ describe("ConversationActiveTurnStatusNote canonical turn items", () => {
       />,
     );
 
-    expect(html).toContain("data-active-turn-stage=\"model_retry\"");
-    expect(html).toContain("请求重试 2/5");
-    expect(html).not.toContain("data-stage-phase");
-    expect(html).not.toContain("stageDot");
+    expect(html).toContain('data-active-turn-stage="model_retry"');
+    // Early retries read as a plain request: no counter, no retry copy.
+    expect(html).toContain("请求模型");
+    expect(html).not.toContain("请求重试");
+    expect(html).not.toContain("2/5");
+    expect(html).not.toContain("data-active-turn-retry-attempt=");
+    expect(html).not.toContain("vui-shimmer-text");
+  });
+
+  it("shows the counted retry with shimmer from the third attempt", () => {
+    const html = renderToStaticMarkup(
+      <ConversationActiveTurnStatusNote
+        lang="zh"
+        message={{
+          timestamp: new Date().toISOString(),
+          turnItems: [{
+            id: "retry-3-r1",
+            itemId: "retry-3",
+            version: 3,
+            sessionId: "session-1",
+            turnId: "turn-1",
+            type: "retry",
+            status: "running",
+            revision: 1,
+            sequence: 1,
+            attempt: 3,
+            targetItemId: "request-1",
+            reason: "模型连接正在重试...\n第 3/5 次；原因：server_error。",
+            metadata: { maxAttempts: 5 },
+          }],
+        }}
+      />,
+    );
+
+    expect(html).toContain('data-active-turn-stage="model_retry"');
+    expect(html).toContain("第 3/5 次重试");
+    expect(html).toContain('data-active-turn-retry-attempt="3"');
+    expect(html).toContain("vui-shimmer-text");
   });
 });
 
@@ -199,5 +233,67 @@ describe("ConversationActiveTurnStatusNote stream advisories", () => {
     });
 
     expect(html).toContain(dictionaryChat.en.chatStreamDisconnectedReconnecting);
+  });
+});
+
+describe("ConversationActiveTurnStatusNote manual reconnect action", () => {
+  const disconnectedState = (): ActiveTurnStreamState => ({
+    streamConnected: false,
+    streamDisconnectedSinceMs: Date.now() - 7_000,
+    lastAssistantDeltaAtMs: Date.now() - 1_000,
+    reconnectSessionStream: () => {},
+  });
+
+  it("renders the small ghost reconnect button beside the disconnect chip", () => {
+    const html = renderNote({ streamState: disconnectedState() });
+
+    expect(html).toContain('data-testid="active-turn-reconnect"');
+    expect(html).toContain('aria-label="重新连接"');
+    expect(html).toContain('data-variant="ghost"');
+    expect(html).toContain('data-density="compact"');
+    expect(html).toContain(">重新连接</span>");
+    expect(html).not.toContain('data-active-turn-reconnect-pending="true"');
+  });
+
+  it("uses the English label for en", () => {
+    const html = renderNote({ lang: "en", streamState: disconnectedState() });
+
+    expect(html).toContain('aria-label="Reconnect"');
+    expect(html).toContain(">Reconnect</span>");
+  });
+
+  it("hides the button while the stream is healthy", () => {
+    const html = renderNote({
+      streamState: {
+        streamConnected: true,
+        lastAssistantDeltaAtMs: Date.now() - 1_000,
+        reconnectSessionStream: () => {},
+      },
+    });
+
+    expect(html).not.toContain('data-testid="active-turn-reconnect"');
+  });
+
+  it("hides the button when no reconnect handler is wired", () => {
+    const { reconnectSessionStream: _omitted, ...stateWithoutHandler } = disconnectedState();
+    const html = renderNote({ streamState: stateWithoutHandler });
+
+    expect(html).toContain('data-testid="active-turn-disconnected"');
+    expect(html).not.toContain('data-testid="active-turn-reconnect"');
+  });
+
+  it("never renders the button in companion mode", () => {
+    const html = renderNote({
+      companionMode: true,
+      message: {
+        timestamp: new Date(Date.now() - 120_000).toISOString(),
+        status: "running",
+        turnItems: [],
+      },
+      streamState: disconnectedState(),
+    });
+
+    expect(html).not.toContain('data-testid="active-turn-reconnect"');
+    expect(html).not.toContain('data-testid="active-turn-disconnected"');
   });
 });

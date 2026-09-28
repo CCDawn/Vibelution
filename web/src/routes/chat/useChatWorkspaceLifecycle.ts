@@ -28,6 +28,7 @@ import { startUserAction } from "../../app/userActionTelemetry";
 import type {
   AgentInstance,
   ChatRoomDetail,
+  ChatRoomParticipant,
   ChatRoomRoundAcceptedResponse,
   SessionChatReviewCandidateResponse,
   SessionDeleteResponse,
@@ -62,6 +63,11 @@ import {
 } from "../sessionCreatePreserve";
 import { clearSessionDeleteTombstone, markSessionDeleteTombstone } from "../sessionDeleteTombstone";
 import { createTempSessionId } from "../sessionOptimisticIds";
+import {
+  createTempRoomId,
+  insertTempGroupRoomConversation,
+  removeTempGroupRoomConversations,
+} from "../groupRoomOptimisticIds";
 import {
   chatAgentSessionStorage,
   forgetAgentLastSession,
@@ -146,7 +152,11 @@ export type UseChatWorkspaceLifecycleResult = {
     ChatRoomDetail,
     Error,
     { title: string; agentIds: string[]; mode: string; purpose: string },
-    { routeSelectionAtRequest: ChatRouteSelection }
+    {
+      routeSelectionAtRequest: ChatRouteSelection;
+      tempRoomId: string;
+      telemetry: ReturnType<typeof startUserAction>;
+    }
   >;
   startGroupRoundMutation: UseMutationResult<
     ChatRoomRoundAcceptedResponse,
@@ -278,8 +288,9 @@ export function useChatWorkspaceLifecycle({
       const agents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents()) ?? [];
       const agentRow = agents.find((item) => String(item.agentId || "").trim() === normalizedAgentId);
       const agentDisplayName = String(agentRow?.displayName || agentRow?.agentCode || "").trim();
-      // Match backend: prefer Agent display name so tabs are identifiable immediately.
-      const title = agentDisplayName || defaultNewSessionTitle(lang);
+      // Match backend: a new session starts from the placeholder label; the
+      // first user turn generates the real title.
+      const title = defaultNewSessionTitle(lang);
       const optimisticDetail: SessionDetail = {
         id: tempSessionId,
         title,
@@ -550,21 +561,99 @@ export function useChatWorkspaceLifecycle({
       { title, agentIds, mode, purpose }: { title: string; agentIds: string[]; mode: string; purpose: string },
     ) =>
       createChatRoom({ title, agentIds, mode, purpose }),
-    onMutate: (variables) => {
+    onMutate: ({ title, agentIds, mode, purpose }) => {
       const telemetry = startUserAction("group_room_create", {
-        agentCount: variables.agentIds.length,
-        mode: variables.mode,
+        agentCount: agentIds.length,
+        mode,
       });
-      return {
-        routeSelectionAtRequest: routeSelectionRef.current,
-        telemetry,
+      const routeSelectionAtRequest = routeSelectionRef.current;
+      // T0: mint a local temp room shell immediately (same skeleton as session
+      // create). The real id arrives on success; the UI paints the room shell
+      // instead of waiting on the POST round-trip.
+      const tempRoomId = createTempRoomId();
+      const nowIso = new Date().toISOString();
+      const agents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents()) ?? [];
+      const normalizedAgentIds = agentIds
+        .map((agentId) => String(agentId || "").trim())
+        .filter(Boolean);
+      const optimisticRoom: ChatRoomDetail = {
+        roomId: tempRoomId,
+        title,
+        mode,
+        purpose,
+        config: {},
+        participants: normalizedAgentIds.map((agentId): ChatRoomParticipant => {
+          const agentRow = agents.find((item) => String(item.agentId || "").trim() === agentId);
+          return {
+            participantId: agentId,
+            kind: "session_agent",
+            agentId,
+            agentCode: String(agentRow?.agentCode || "").trim(),
+            // Server-assigned direct sessions are unknown until the response.
+            sessionId: "",
+            title: String(agentRow?.displayName || agentRow?.agentCode || agentId).trim(),
+            enabled: true,
+            status: "ready",
+          };
+        }),
+        rounds: [],
+        status: "ready",
+        activeRoundId: "",
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        availableModes: [],
+        availablePurposes: [],
       };
+      // Do not await cancelQueries — waiting freezes tab switching while catalog
+      // lists settle, same as createSessionMutation.
+      void queryClient.cancelQueries({ queryKey: queryKeys.conversations() });
+      setSessionComposerErrors((current) => ({
+        ...current,
+        __sessions__: "",
+      }));
+      setRightIndexPanel("members");
+      setSessionFilter("");
+      // Cache first, then switch route — the room surface reads the cache on entry.
+      queryClient.setQueryData(queryKeys.chatRoom(tempRoomId), optimisticRoom);
+      insertTempGroupRoomConversation(queryClient, {
+        conversationId: tempRoomId,
+        type: "group_room",
+        title,
+        roomId: tempRoomId,
+        status: "ready",
+        summary: "",
+        updatedAt: nowIso,
+        workspacePath: "",
+        participantCount: normalizedAgentIds.length,
+        mode,
+      });
+      // The temp id enters the URL immediately; the route is the single authority.
+      chatRoute.openRoom(tempRoomId);
+      return { routeSelectionAtRequest, tempRoomId, telemetry };
     },
     onSuccess: (room, _variables, context) => {
+      const tempRoomId = String(context?.tempRoomId || "").trim();
+      // Seed real id cache BEFORE the route swaps so the UI never paints a hard loading shell.
+      queryClient.setQueryData(queryKeys.chatRoom(room.roomId), room);
+      // Compare-and-swap: only replace temp → real while the user still views
+      // the temp room. A user who already left keeps their page; cache only.
+      const stillOnTemp = tempRoomId
+        ? chatRoute.replaceIfStillViewing(
+            { kind: "room", roomId: tempRoomId },
+            { kind: "room", roomId: room.roomId },
+          )
+        : false;
       context?.telemetry?.succeeded({
         roomId: room.roomId,
         participantCount: room.participants?.length ?? 0,
+        tempRoomId,
+        routeReplacedFromTemp: stillOnTemp,
       });
+      if (tempRoomId) {
+        // Drop the temp shell after the real id is active/cached.
+        queryClient.removeQueries({ queryKey: queryKeys.chatRoom(tempRoomId), exact: true });
+        removeTempGroupRoomConversations(queryClient);
+      }
       setGroupComposerOpen(false);
       setGroupTitleDraft("");
       setGroupModeDraft("round_robin");
@@ -576,16 +665,22 @@ export function useChatWorkspaceLifecycle({
         __sessions__: "",
       }));
       setRightIndexPanel("members");
-      queryClient.setQueryData(queryKeys.chatRoom(room.roomId), room);
-      // Enter the new room only while the user still views the request-start route.
-      chatRoute.replaceIfStillViewing(
-        context?.routeSelectionAtRequest ?? { kind: "bare" },
-        { kind: "room", roomId: room.roomId },
-      );
       void chatWorkspaceCache.afterChatRoomChanged(room.roomId);
     },
     onError: (error, _variables, context) => {
       context?.telemetry?.failed(error);
+      const tempRoomId = String(context?.tempRoomId || "").trim();
+      if (tempRoomId) {
+        // Roll the optimistic shell back; only leave the temp room while the
+        // user still views it (same compare-and-swap as success). Composer
+        // drafts stay intact so the operator can retry create.
+        chatRoute.replaceIfStillViewing(
+          { kind: "room", roomId: tempRoomId },
+          context?.routeSelectionAtRequest ?? { kind: "bare" },
+        );
+        queryClient.removeQueries({ queryKey: queryKeys.chatRoom(tempRoomId), exact: true });
+        removeTempGroupRoomConversations(queryClient);
+      }
       setSessionComposerErrors((current) => ({
         ...current,
         __sessions__: describeError(

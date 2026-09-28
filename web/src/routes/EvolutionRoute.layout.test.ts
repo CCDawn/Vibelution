@@ -188,6 +188,15 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).not.toContain("`/api/evolution/runs/${runId}`");
   });
 
+  it("polls the workbench catalog at low frequency while runtime data stays on snapshots", () => {
+    expect(evolutionApiSource).toContain("export const EVOLUTION_WORKBENCH_POLL_INTERVAL_MS = 60_000");
+    expect(routeSource).toContain("EVOLUTION_WORKBENCH_POLL_INTERVAL_MS");
+    expect(routeSource).not.toMatch(/evolutionWorkbench\(\)[\s\S]{0,400}refetchInterval: resolvePollingInterval\(pageVisible, (8_000|15_000)\)/);
+    expect(routeSource).toContain(
+      "refetchInterval: resolvePollingInterval(pageVisible, EVOLUTION_WORKBENCH_POLL_INTERVAL_MS)",
+    );
+  });
+
   it("merges supervised datasets and bundles into one source picker", () => {
     expect(routeSource).toContain("workbenchCatalogQuery");
     expect(routeSource).toContain("queryKeys.evolutionWorkbench()");
@@ -277,7 +286,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(runRecordsPanelSource).not.toContain('title={selectedRun.outcomeSemantics.runtimeExplanation}');
     expect(runRecordsPanelSource).not.toContain('title={selectedRun.riskReasons.join(" / ")}');
     expect(supervisedLibraryViewSource).toContain("proposalDetail.supervised.riskReasons.join");
-    expect(evolutionDictionarySource).toContain('supervisedFlowRunsHint: "同一改良 Agent 提建议并改候选"');
+    expect(evolutionDictionarySource).toContain('supervisedFlowRunsHint: "本轮候选改动"');
     expect(coreDictionarySource).toContain('decision: "治理结论"');
     expect(coreDictionarySource).toContain('diagnosis: "治理结论说明"');
     expect(coreDictionarySource).not.toContain('retrySupervisedRun: "重跑失败项"');
@@ -794,6 +803,15 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("monitoredRun.runId === supervisedWorkflowRun.runId");
   });
 
+  it("projects the single git expected_head promotion lane on the workbench", () => {
+    expect(evolutionTypesSource).toContain("export type EvolutionBaselinePromotion");
+    expect(evolutionTypesSource).toContain("promotionLane: \"git_expected_head\"");
+    expect(evolutionTypesSource).toContain("currentBaseline: EvolutionBaselinePromotion");
+    expect(routeSource).toContain("EvolutionBaselinePromotionStrip");
+    expect(routeSource).toContain("workspaceSnapshot?.evolutionRuntime?.currentBaseline");
+    expect(evolutionDictionarySource).toContain("promotionLane:");
+  });
+
   it("keeps supervised closed-loop review in a dedicated ledger projection", () => {
     expect(evolutionTypesSource).toContain("export type EvolutionClosedLoopRecord");
     expect(evolutionTypesSource).toContain("export type EvolutionClosedLoopRoleSession");
@@ -873,7 +891,7 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("keeps the supervised live console as a dense desktop split before narrow layouts", () => {
-    expect(routeStyles.overviewGrid).toContain("grid-cols-[var(--evolution-live-launch-width,440px)");
+    expect(routeStyles.overviewGrid).toContain("grid-cols-[var(--pane-w-live-launch,440px)");
     expect(routeStyles.overviewGrid).toContain("[grid-template-rows:minmax(0,_1fr)]");
     expect(routeStyles.overviewGrid).not.toContain("grid-template-areas");
     expect(routeStyles.overviewGrid).not.toContain("--evolution-overview-areas");
@@ -901,8 +919,8 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("uses denser supervised launch and member panels at narrow workbench widths", () => {
-    expect(routeStyles.overviewGrid).toContain("var(--evolution-live-launch-width,440px)");
-    expect(routeStyles.overviewGrid).toContain("var(--evolution-live-run-width,380px)");
+    expect(routeStyles.overviewGrid).toContain("var(--pane-w-live-launch,440px)");
+    expect(routeStyles.overviewGrid).toContain("var(--pane-w-live-run,380px)");
     expect(routeStyles.supervisedRunConsole).toContain("[container-type:inline-size]");
     expect(routeStyles.supervisedRunConsoleGrid).toContain("[@container(min-width:560px)]:[grid-template-columns:minmax(0,_1.08fr)_minmax(214px,_0.72fr)]");
     expect(routeStyles.supervisedRunConsoleGrid).toContain("[@container(min-width:560px)]:[align-items:start]");

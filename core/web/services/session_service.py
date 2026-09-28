@@ -110,6 +110,7 @@ from core.mental_model_flags import mental_model_enabled_override
 from core.orchestration.output_boundary import (
     sanitize_assistant_thought_delta_text,
     sanitize_assistant_thought_text,
+    sanitize_assistant_visible_delta_text,
     sanitize_assistant_visible_text,
 )
 from core.orchestration.cache_diagnostics import compact_repeated_metadata_text
@@ -510,6 +511,11 @@ from core.web.services.session.turn_diagnostics import (
     _touch_chat_turn_work_run,
     _record_session_chat_review_candidate_event,
 )
+from core.web.services.session.message_curation import (
+    set_session_message_curation,
+    get_session_message_curation,
+    _record_session_message_curation_event,
+)
 from core.web.services.session.agent_runtime import (
     _agent_from_lookup,
     _recover_active_direct_session_agent,
@@ -587,13 +593,18 @@ from core.web.services.session.image_attachments import (
     _recent_image_attachment_missing_message,
     _record_image_attachment_capability_event,
     _build_llm_image_attachments,
+    _seed_history_messages_with_image_attachments,
     _record_session_attachment_event,
     _safe_attachment_log_summary,
 )
 from core.web.services.session.queued_turns import (
+    advance_session_branch_generation,
     enqueue_session_queued_turn,
+    enqueue_session_runtime_notice,
     list_session_queued_turns,
+    notify_parent_session_of_child_return,
     remove_session_queued_turn,
+    session_branch_generation,
     update_session_queued_turn,
     session_queued_turn_rows as _session_queued_turn_rows,
     drain_session_queued_turns as _drain_session_queued_turns,
@@ -697,6 +708,7 @@ from core.web.services.session.signals_format import (
     _latest_effective_user_message,
     _latest_effective_user_message_with_index,
     _latest_effective_user_messages,
+    _message_content_as_text,
     _latest_message_is_image_generation_artifact,
     _lightweight_chat_payload_decision,
     _looks_like_image_generation_success_text,
@@ -889,6 +901,7 @@ from core.web.services.session.runtime_glue import (
     _root_session_id_for_conversations,
     _sandbox_terminal_result_facts,
     _sanitize_message_content,
+    _sanitize_message_delta_content,
     _sanitize_thought_delta_text,
     _sanitize_thought_text,
     _select_existing_active_task_for_update,
@@ -1179,6 +1192,20 @@ _SESSION_WORKSPACE_SAFE_CHARS = re.compile(r"[^A-Za-z0-9_.-]+")
 _SESSION_IMAGE_ARTIFACT_SAFE_CHARS = re.compile(r"^[A-Za-z0-9_.-]+$")
 _SESSION_WORKSPACE_SUBDIRS = ("artifacts", "tmp", "mental_model", "notes", "logs", "memory")
 _SESSION_INDEX_EVENT_DEDUPE_LOCK = threading.Lock()
+
+
+def _claim_index_event_key_once(collection: set, key: tuple, *, cap: int = 4096) -> bool:
+    """进程级一次性事件去重；集合有界（超限整体重置，最坏重放一次事件）。"""
+
+    with _SESSION_INDEX_EVENT_DEDUPE_LOCK:
+        if key in collection:
+            return False
+        if len(collection) >= cap:
+            collection.clear()
+        collection.add(key)
+        return True
+
+
 _SESSION_MISSING_INDEX_EVENT_KEYS: set[tuple[str, str, str, str, str]] = set()
 _SESSION_MISSING_INDEX_BATCH_EVENT_KEYS: set[tuple[Any, ...]] = set()
 _AGENT_DIRECTORY_INDEX_EVENT_KEYS: set[tuple[str, str, str]] = set()
@@ -1281,6 +1308,10 @@ class SessionValidationError(ValueError):
 
 class SessionChatReviewCandidateExistsError(RuntimeError):
     """Raised when the session snapshot is already queued for chat review."""
+
+
+class SessionMessageCurationStateError(RuntimeError):
+    """Raised when an inline message curation decision conflicts with its recorded queue state."""
 
 
 @dataclass

@@ -10,6 +10,8 @@ const styles = {
   editorActions: "flex [justify-content:flex-end] [gap:6px] min-w-0",
   inlineAdd: `grid [grid-template-columns:minmax(0,_1fr)_auto] [gap:6px] min-w-0 [&_input]:min-w-0 [&_input]:[min-height:32px] [&_input]:[border-radius:var(--radius-control)] [&_input]:[font:inherit] [&_input]:[font-size:var(--vui-font-xs)] [&_input]:[width:100%] [&_input]:[padding:0_8px] [&_input]:[border:1px_solid_var(--vui-border-subtle)] [&_input]:!${vuiWorkspaceFillClass} [&_input]:[color:var(--fg-primary)] [&_[data-vui=\\\"button\\\"]]:[white-space:nowrap]`,
   memoryPolicyGrid: "grid [grid-template-columns:repeat(2,_minmax(0,_1fr))] [gap:7px] min-w-0 [&_section]:grid [&_section]:[align-content:start] [&_section]:[gap:6px] [&_section]:min-w-0 [&_section]:[padding:8px] [&_section]:[border:1px_solid_color-mix(in_srgb,_var(--vui-border-subtle)_76%,_transparent)] [&_section]:[border-radius:var(--radius-control)] [&_section]:!bg-[var(--vui-surface-row)] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] max-[860px]:[grid-template-columns:1fr]",
+  memoryEnabledSection: "grid [gap:6px] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)]",
+  toggleGrid: "grid [gap:6px] max-[860px]:[grid-template-columns:1fr]",
   panelEyebrow: "[margin:0_0_1px] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [letter-spacing:0.07em] [text-transform:uppercase]",
   panelHeader: "flex [align-items:flex-start] [justify-content:space-between] [gap:8px] min-w-0 [&_div]:min-w-0",
   policyIdTrigger: "[border-radius:6px] focus-visible:[outline:2px_solid_var(--accent-cool)] focus-visible:[outline-offset:2px]",

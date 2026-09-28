@@ -18,6 +18,7 @@
 | `ChallengeTokenUsageStrip` | [product/challenge-token-usage.md](./product/challenge-token-usage.md#challengetokenusagestrip) |
 | `ChallengeRealBatchControlPanel` | [product/challenge-real-batch.md](./product/challenge-real-batch.md#challengerealbatchcontrolpanel) |
 | `ResearchAnomalyInboxPanel` | [product/research-anomaly-inbox.md](./product/research-anomaly-inbox.md#researchanomalyinboxpanel) |
+| `DigestApprovalQueuePanel` | [product/digest-approval-queue.md](./product/digest-approval-queue.md#digestapprovalqueuepanel) |
 | `ResearchAnomalyInboxExtendCta` | [product/research-anomaly-inbox.md](./product/research-anomaly-inbox.md#researchanomalyinboxextendcta) |
 | `ResearchWorkflowRecoveryPanel` | [product/research-recovery-panel.md](./product/research-recovery-panel.md#researchworkflowrecoverypanel) |
 | `ResearchWorkflowRecoveryEntry` | [product/research-recovery-panel.md](./product/research-recovery-panel.md#researchworkflowrecoveryentry) |
@@ -26,6 +27,7 @@
 | 会话起点卡 | [product/conversation-starter-cards.md](./product/conversation-starter-cards.md#会话起点卡) |
 | 内置斜杠命令 | [product/conversation-starter-cards.md](./product/conversation-starter-cards.md#内置斜杠命令) |
 | ConversationForkSessionDialog | [product/conversation.md](./product/conversation.md#conversationforksessiondialog) |
+| `ConversationMarkdownCodeBlock` | [product/conversation.md](./product/conversation.md#conversationmarkdowncodeblock) |
 
 ## Primitives
 
@@ -58,6 +60,8 @@
 | `VStringSelect` | [forms/controls.md](./forms/controls.md#vstringselect) |
 | `VCheckbox` | [forms/controls.md](./forms/controls.md#vcheckbox) |
 | `VFieldRow` | [forms/controls.md](./forms/controls.md#vfieldrow) |
+| `VSettingsRow` | [forms/settings-rows.md](./forms/settings-rows.md#vsettingsrow) |
+| `VSettingsGroupCard` | [forms/settings-rows.md](./forms/settings-rows.md#vsettingsgroupcard) |
 
 ## Layout — page recipes
 
@@ -121,7 +125,10 @@
 | `ConversationTodoChecklist` | [product/conversation.md](./product/conversation.md#conversationtodochecklist) |
 | `ConversationFollowupQueueBar` | [product/conversation.md](./product/conversation.md#conversationfollowupqueuebar) |
 | `ConversationMessageVersionSwitcher` | [product/conversation.md](./product/conversation.md#conversationmessageversionswitcher) |
+| 用户消息折叠（`AgentUserContentSectionView`） | [product/conversation.md](./product/conversation.md#agentusercontentsectionview-用户消息折叠) |
 | Composer 引用候选（@ type-ahead） | [product/conversation.md](./product/conversation.md#composer-引用候选-type-ahead) |
+| Composer 图片附件上传失败态与重试 | [product/conversation.md](./product/conversation.md#composer-图片附件上传失败态与重试) |
+| 流式行内渲染统一（live tail 与 settled 同源） | [product/conversation.md](./product/conversation.md#流式行内渲染统一live-tail-与-settled-同源) |
 
 ## Product — virtual-human companion
 

@@ -15,7 +15,7 @@ const styles = {
   graphCanvasFallback:
     "graphCanvasFallback min-w-0 grid min-h-0 gap-2 p-2",
   graphCanvasPanel:
-    "graphCanvasPanel grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto_var(--memory-graph-node-list-height,168px)] gap-0 overflow-hidden",
+    "graphCanvasPanel grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto_var(--pane-h-graph-node-list,168px)] gap-0 overflow-hidden",
   graphCanvasToolbar:
     "graphCanvasToolbar min-w-0 flex flex-wrap items-center justify-between gap-1.5 px-1 py-0.5 [&>div]:min-w-0 [&_strong]:break-words",
   graphClearFocusButton:
@@ -36,7 +36,7 @@ const styles = {
   graphMetricToolbar:
     "graphMetricToolbar min-w-0 shrink-0 border-0 bg-transparent px-0 py-0",
   graphCanvasInner:
-    "graphCanvasInner grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto_var(--memory-graph-node-list-height,168px)] gap-0 overflow-hidden",
+    "graphCanvasInner grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto_var(--pane-h-graph-node-list,168px)] gap-0 overflow-hidden",
   graphInspectorHost:
     "graphInspectorHost min-h-0 min-w-0 overflow-hidden border-0 bg-transparent shadow-none",
   graphInspectorInner:

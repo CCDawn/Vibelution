@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 
 from fastapi.testclient import TestClient
 
 from core.agent_kernel import service as agent_kernel_service
+from core.agent_kernel.store import KERNEL_STORE_VERSION
 from core.infrastructure import developer_sandbox
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
@@ -148,6 +150,98 @@ def test_kernel_event_idempotency_reuses_existing_terminal_task(tmp_path, monkey
 
     tasks = client.get("/api/kernel/tasks").json()["tasks"]
     assert [task["taskId"] for task in tasks] == [first_payload["task"]["taskId"]]
+
+
+def _default_key_event(agent_id: str, *, payload: dict, recipients: list[str] | None = None) -> dict:
+    return {
+        "sender": {"type": "user", "id": "user"},
+        "recipientAgentIds": recipients if recipients is not None else [agent_id],
+        "semanticType": "agent.message",
+        "payload": payload,
+        "wakeTarget": False,
+    }
+
+
+def test_kernel_default_idempotency_key_is_dict_order_insensitive(tmp_path, monkeypatch):
+    """The v2 content-addressed default key hashes canonical JSON: the same
+    semantic content must reuse one task regardless of payload dict order."""
+    _isolate_kernel(tmp_path, monkeypatch)
+    agent = _create_agent()
+    client = _client()
+
+    first = client.post(
+        "/api/kernel/events",
+        json=_default_key_event(agent["agentId"], payload={"content": "hello", "goal": "hello", "meta": {"b": 2, "a": 1}}),
+    )
+    reordered = client.post(
+        "/api/kernel/events",
+        json=_default_key_event(agent["agentId"], payload={"meta": {"a": 1, "b": 2}, "goal": "hello", "content": "hello"}),
+    )
+
+    assert first.status_code == 202
+    assert reordered.status_code == 202
+    assert reordered.json()["reused"] is True
+    assert reordered.json()["task"]["taskId"] == first.json()["task"]["taskId"]
+
+
+def test_kernel_default_idempotency_key_prunes_transient_fields_and_sorts_recipients(tmp_path, monkeypatch):
+    """Delivery-attempt markers (createdAt/eventId class) never change the
+    key, and the recipient list is keyed as a set, not as an ordered list."""
+    _isolate_kernel(tmp_path, monkeypatch)
+    agent_a = _create_agent("Kernel Alpha")
+    agent_b = agent_directory_service.create_agent_instance(
+        display_name="Kernel Beta", direct_session_id="session-beta"
+    )
+    client = _client()
+
+    base = _default_key_event(
+        agent_a,
+        payload={"content": "hello", "createdAt": "2026-01-01T00:00:00Z", "eventId": "event-first"},
+        recipients=[agent_a["agentId"], agent_b["agentId"]],
+    )
+    retry = {
+        **_default_key_event(
+            agent_a,
+            payload={"eventId": "event-second", "content": "hello", "createdAt": "2026-02-02T00:00:00Z"},
+            recipients=[agent_b["agentId"], agent_a["agentId"]],
+        ),
+        # Same semantic event retried under a different envelope eventId.
+        "eventId": "event-envelope-retry",
+    }
+
+    first = client.post("/api/kernel/events", json=base)
+    second = client.post("/api/kernel/events", json=retry)
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert second.json()["reused"] is True
+    assert second.json()["task"]["taskId"] == first.json()["task"]["taskId"]
+
+
+def test_kernel_default_idempotency_key_is_versioned_and_content_sensitive(tmp_path, monkeypatch):
+    """New keys carry the kernel-v2 prefix so persisted legacy kernel- index
+    entries can never collide, and changed content still gets a new task."""
+    import json as _json
+
+    _project_root, data_home = _isolate_kernel(tmp_path, monkeypatch)
+    agent = _create_agent()
+    client = _client()
+
+    first = client.post(
+        "/api/kernel/events",
+        json=_default_key_event(agent["agentId"], payload={"content": "first message"}),
+    ).json()
+    changed = client.post(
+        "/api/kernel/events",
+        json=_default_key_event(agent["agentId"], payload={"content": "second message"}),
+    ).json()
+
+    index = _json.loads((data_home / "workspace" / "agent_kernel" / "index.json").read_text(encoding="utf-8"))
+    keys = list(index["taskIdsByIdempotencyKey"])
+    assert len(keys) == 2
+    assert all(key.startswith("kernel-v2-") for key in keys)
+    assert changed["reused"] is False
+    assert changed["task"]["taskId"] != first["task"]["taskId"]
 
 
 def test_kernel_task_list_returns_latest_tasks_first_after_limit(tmp_path, monkeypatch):
@@ -318,3 +412,153 @@ def test_kernel_index_materializes_taskledger_truth(tmp_path, monkeypatch):
     assert task["status"] == "succeeded"
     assert task["outcomeId"] == payload["outcome"]["outcomeId"]
     assert index["taskIdsByIdempotencyKey"]["index-key"] == payload["task"]["taskId"]
+
+
+def test_kernel_non_trace_event_writes_index_once_per_event(tmp_path, monkeypatch):
+    """Batched persistence: one final-consistent index write per event, not
+    one per transition (each transition is already durable in its JSONL
+    stream row; index.json is a materialized projection)."""
+    _project_root, data_home = _isolate_kernel(tmp_path, monkeypatch)
+    agent = _create_agent()
+    client = _client()
+
+    original_save = agent_kernel_service.KernelJsonlStore.save_index
+    save_calls: list[int] = []
+    original_replace = os.replace
+    index_replaces: list[str] = []
+
+    def counting_save(store, index):
+        save_calls.append(1)
+        return original_save(store, index)
+
+    def counting_replace(src, dst, *args, **kwargs):
+        if os.path.basename(str(dst)) == "index.json":
+            index_replaces.append(str(dst))
+        return original_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(agent_kernel_service.KernelJsonlStore, "save_index", counting_save)
+    monkeypatch.setattr(os, "replace", counting_replace)
+
+    first = client.post("/api/kernel/events", json=_kernel_event(agent["agentId"], idempotency_key="single-save-1"))
+    assert first.status_code == 202
+    assert first.json()["reused"] is False
+    assert len(save_calls) == 1
+    assert len(index_replaces) == 1
+
+    second = client.post("/api/kernel/events", json=_kernel_event(agent["agentId"], idempotency_key="single-save-2"))
+    assert second.status_code == 202
+    assert len(save_calls) == 2
+    assert len(index_replaces) == 2
+
+    index = json.loads((data_home / "workspace" / "agent_kernel" / "index.json").read_text(encoding="utf-8"))
+    assert index["tasksById"][first.json()["task"]["taskId"]]["status"] == "succeeded"
+    assert index["tasksById"][second.json()["task"]["taskId"]]["status"] == "succeeded"
+    assert index["taskIdsByIdempotencyKey"]["single-save-2"] == second.json()["task"]["taskId"]
+
+
+def _count_parse_index_calls(monkeypatch) -> list[int]:
+    original_parse = agent_kernel_service.KernelJsonlStore._parse_index_file
+    parse_calls: list[int] = []
+
+    def counting_parse(store_self):
+        parse_calls.append(1)
+        return original_parse(store_self)
+
+    monkeypatch.setattr(agent_kernel_service.KernelJsonlStore, "_parse_index_file", counting_parse)
+    return parse_calls
+
+
+def test_kernel_store_index_cache_hits_without_reparse(tmp_path, monkeypatch):
+    """(mtime_ns, size) signature cache: repeated loads skip re-parsing, the
+    save path refreshes the cache (save-side takeover), and an external file
+    rewrite invalidates by signature."""
+    root = tmp_path / "kernel-root"
+    root.mkdir()
+    store = agent_kernel_service.KernelJsonlStore(root)
+    store.save_index({"eventsById": {"event-1": {"eventId": "event-1"}}, "recentEventIds": ["event-1"]})
+
+    parse_calls = _count_parse_index_calls(monkeypatch)
+
+    first = store.load_index()
+    assert parse_calls == []
+    assert first["eventsById"] == {"event-1": {"eventId": "event-1"}}
+
+    second = store.load_index()
+    assert parse_calls == []
+    assert second is first  # shared snapshot returned on signature hit
+
+    # save_index refreshes the cache: still no reparse, fresh content.
+    store.save_index({"eventsById": {"event-2": {"eventId": "event-2"}}})
+    third = store.load_index()
+    assert parse_calls == []
+    assert third is not first
+    assert third["eventsById"] == {"event-2": {"eventId": "event-2"}}
+
+    # External rewrite (bypassing save_index) changes the signature: reparse.
+    (root / "index.json").write_text(json.dumps({"eventsById": {"event-3": {"eventId": "event-3"}}}), encoding="utf-8")
+    fourth = store.load_index()
+    assert len(parse_calls) == 1
+    assert fourth["eventsById"] == {"event-3": {"eventId": "event-3"}}
+
+
+def test_kernel_store_loads_legacy_pretty_printed_index(tmp_path):
+    """Older indent=2 index files keep loading, and missing newer keys fall
+    back to defaults (backward-compatible merge)."""
+    root = tmp_path / "kernel-root"
+    root.mkdir()
+    legacy = {
+        "version": 1,
+        "updatedAt": "2026-01-01T00:00:00+00:00",
+        "eventsById": {"event-legacy": {"eventId": "event-legacy", "status": "accepted"}},
+        "tasksById": {"task-legacy": {"taskId": "task-legacy", "status": "succeeded"}},
+        "taskIdsByIdempotencyKey": {"legacy-key": "task-legacy"},
+    }
+    (root / "index.json").write_text(json.dumps(legacy, indent=2, sort_keys=True), encoding="utf-8")
+
+    index = agent_kernel_service.KernelJsonlStore(root).load_index()
+
+    assert index["eventsById"]["event-legacy"]["status"] == "accepted"
+    assert index["tasksById"]["task-legacy"]["status"] == "succeeded"
+    assert index["taskIdsByIdempotencyKey"]["legacy-key"] == "task-legacy"
+    assert index["executionsById"] == {}
+    assert index["outcomesById"] == {}
+    assert index["recentEventIds"] == []
+    assert index["recentTaskIds"] == []
+
+
+def test_kernel_store_save_load_round_trip_is_content_equal(tmp_path):
+    """save -> on-disk bytes -> parse round-trips the content, the caller's
+    payload dict is not mutated by save normalization, and the on-disk layout
+    is compact one-line JSON."""
+    root = tmp_path / "kernel-root"
+    root.mkdir()
+    store = agent_kernel_service.KernelJsonlStore(root)
+    payload = {
+        "eventsById": {"event-1": {"eventId": "event-1", "status": "accepted", "metadata": {"a": 1}}},
+        "tasksById": {"task-1": {"taskId": "task-1", "status": "queued"}},
+        "taskIdsByIdempotencyKey": {"key-1": "task-1"},
+        "outcomesById": {"outcome-1": {"outcomeId": "outcome-1", "deliveries": [{"targetAgentId": "agent-a"}]}},
+        "proposalIdsByOutcomeId": {"outcome-1": ["proposal-1"]},
+        "proposalsById": {"proposal-1": {"proposalId": "proposal-1", "status": "queued"}},
+        "recentEventIds": ["event-1"],
+        "recentTaskIds": ["task-1"],
+    }
+    snapshot_before = json.loads(json.dumps(payload))
+
+    saved = store.save_index(payload)
+
+    assert saved["version"] == KERNEL_STORE_VERSION
+    assert saved["updatedAt"]
+    reparsed = store._parse_index_file()  # bypasses the cache: honest disk round trip
+    assert reparsed == saved
+    assert json.loads(json.dumps(payload)) == snapshot_before  # caller dict untouched
+    assert "version" not in payload and "updatedAt" not in payload
+    # A default key missing from the payload is filled on the saved copy, not
+    # injected back into the caller's dict.
+    assert "executionsById" not in payload
+    assert saved["executionsById"] == {}
+    assert reparsed["executionsById"] == {}
+
+    raw = (root / "index.json").read_text(encoding="utf-8")
+    assert raw.endswith("\n")
+    assert len(raw.splitlines()) == 1  # compact: whole snapshot on one line

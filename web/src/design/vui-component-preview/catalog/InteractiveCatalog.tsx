@@ -28,7 +28,7 @@ export function InteractiveCatalog() {
         <VRouteLinkButton to="/agents">打开</VRouteLinkButton>
       </VuiPreviewCard>
       <VuiPreviewCard name="VNativeButton">
-        <VNativeButton className="border border-vui-border-subtle bg-vui-control-muted px-3 py-1.5 text-sm font-semibold text-vui-fg-primary">确认</VNativeButton>
+        <VNativeButton className="border border-vui-border-subtle bg-vui-control-muted px-3 py-1.5 text-vui-xs font-semibold text-vui-fg-primary">确认</VNativeButton>
       </VuiPreviewCard>
       <VuiPreviewCard name="VTooltip">
         <VTooltip content="知识包">
@@ -47,7 +47,7 @@ export function InteractiveCatalog() {
       </VuiPreviewCard>
       <VuiPreviewCard name="VPopover">
         <VPopover aria-label="筛选" trigger={<VButton variant="secondary">筛选</VButton>}>
-          <VNativeButton className="px-2 py-1 text-sm text-vui-fg-primary">已验证</VNativeButton>
+          <VNativeButton className="px-2 py-1 text-vui-xs text-vui-fg-primary">已验证</VNativeButton>
         </VPopover>
       </VuiPreviewCard>
       <VuiPreviewCard name="VDialog">

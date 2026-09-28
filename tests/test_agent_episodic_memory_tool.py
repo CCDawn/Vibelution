@@ -302,3 +302,22 @@ def test_custom_policy_rewrites_legacy_personal_memory_tool_names():
     projected = agent_directory_service._with_session_terminal_protocol_defaults(agent, policy)
     assert projected["allowedTools"] == ["grep_search_tool", "append_personal_memory_tool"]
     assert projected["preferredTools"] == ["append_personal_memory_tool"]
+
+
+def test_append_tool_reports_readable_error_when_memory_policy_disabled(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Episode Blocked")
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {"agentId": agent["agentId"], "sessionId": "session-live"},
+    )
+    agent_directory_service.update_agent_instance(agent["agentId"], memory_policy={"enabled": False})
+
+    result = json.loads(append_personal_memory_tool(text="should be blocked"))
+
+    assert result["ok"] is False
+    assert result["status"] == "failed"
+    assert result["error"] == "AgentDirectoryError"
+    assert "memoryPolicy.enabled" in result["message"]
+    assert agent_directory_service.list_current_episodic_events(agent["agentId"]) == []
