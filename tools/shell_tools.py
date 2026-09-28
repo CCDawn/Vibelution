@@ -58,6 +58,27 @@ import platform
 
 from core.infrastructure.event_bus import get_event_bus, EventNames
 from core.logging import debug as _debug_logger
+
+
+def _ledger_pre_write(abs_path) -> None:
+    """写前镜像检查点（fail-open）：账本任何失败都不影响写工具本身。"""
+    try:
+        from core.chat import file_change_ledger
+
+        file_change_ledger.capture_pre_write(abs_path)
+    except Exception:
+        pass
+
+
+def _ledger_post_write(abs_path) -> None:
+    """写后快照检查点（fail-open），供轮级改动投影与 rewind 分类使用。"""
+    try:
+        from core.chat import file_change_ledger
+
+        file_change_ledger.capture_post_write(abs_path)
+    except Exception:
+        pass
+
 # ============================================================================
 # 文件 Glob 搜索
 # ============================================================================
@@ -1969,10 +1990,12 @@ def create_file(
         os.makedirs(parent_dir, exist_ok=True)
 
     try:
+        _ledger_pre_write(abs_path)
         with open(abs_path, 'w', encoding='utf-8') as f:
             f.write(content)
 
         if os.path.exists(abs_path):
+            _ledger_post_write(abs_path)
             file_size = os.path.getsize(abs_path)
             line_count = content.count('\n') + 1 if content else 0
 
@@ -2075,8 +2098,10 @@ def edit_file(
 
         new_content = old_content.replace(search_string, replace_string, 1)
 
+        _ledger_pre_write(str(abs_path))
         with open(abs_path, 'w', encoding='utf-8') as f:
             f.write(new_content)
+        _ledger_post_write(str(abs_path))
 
         result = [
             "=" * 50,

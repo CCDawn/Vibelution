@@ -215,6 +215,7 @@ from .session.live_output import (
 )
 from .session.branch_head import switch_session_head
 from .session.fork_session import FORK_SCOPES, fork_session_from_node
+from .session.rewind import apply_session_rewind, preview_session_rewind
 from .session import journal_bridge as _journal_bridge
 from .session.submit import (
     _accepted_session_turn_payload,
@@ -416,6 +417,7 @@ from core.web.services.session.conversation_index import (
     _conversation_agent_for_context_limit,
     _find_conversation_entry,
     _new_conversation_id,
+    _normalize_forked_from_metadata,
     _make_empty_conversation,
     _record_agent_directory_conversation_index_event,
     _record_agent_direct_session_collision_repaired_event,
@@ -1304,6 +1306,18 @@ class SessionBusyError(RuntimeError):
 
 class SessionValidationError(ValueError):
     """Raised when an incoming session turn payload is invalid."""
+
+
+class SessionRewindConflictError(RuntimeError):
+    """Raised when a strict rewind hits files classified unsafe.
+
+    ``unsafe_files`` carries the per-file preview classification so the
+    client can render the exact reason without a second preview round-trip.
+    """
+
+    def __init__(self, message: str, *, unsafe_files: list | None = None):
+        super().__init__(message)
+        self.unsafe_files = list(unsafe_files or [])
 
 
 class SessionChatReviewCandidateExistsError(RuntimeError):

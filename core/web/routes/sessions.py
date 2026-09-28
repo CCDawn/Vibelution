@@ -22,6 +22,11 @@ from core.web.routes.session_catalog_models import (
     SessionQueryResponse,
 )
 from core.web.routes.session_detail_models import SessionDetailResponse
+from core.web.routes.session_rewind_models import (
+    SessionRewindApplyPayload,
+    SessionRewindApplyResponse,
+    SessionRewindPreviewResponse,
+)
 from core.web.routes.session_side_models import (
     SessionChatReviewCandidateResponse,
     SessionChildCreateResponse,
@@ -62,6 +67,7 @@ from core.web.services.session_service import (
     SessionChatReviewCandidateExistsError,
     SessionMessageCurationStateError,
     SessionNotFoundError,
+    SessionRewindConflictError,
     SessionValidationError,
     create_chat_review_candidate_from_session,
     create_chat_session,
@@ -96,6 +102,8 @@ from core.web.services.session_service import (
     update_chat_session,
     update_chat_session_title,
     update_session_reasoning_effort,
+    preview_session_rewind,
+    apply_session_rewind,
 )
 
 router = APIRouter(tags=["sessions"])
@@ -903,6 +911,52 @@ def session_fork_from_node(session_id: str, payload: SessionForkPayload) -> dict
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except SessionValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get(
+    "/sessions/{session_id}/rewind/{turn_id}",
+    response_model=SessionRewindPreviewResponse,
+    response_model_exclude_unset=True,
+)
+def session_rewind_preview(session_id: str, turn_id: str) -> dict:
+    try:
+        preview = preview_session_rewind(session_id, turn_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if preview is None:
+        raise HTTPException(
+            status_code=404,
+            detail="该轮次没有可回退的文件检查点。",
+        )
+    return preview
+
+
+@router.post(
+    "/sessions/{session_id}/rewind",
+    response_model=SessionRewindApplyResponse,
+    response_model_exclude_unset=True,
+)
+def session_rewind_apply(session_id: str, payload: SessionRewindApplyPayload) -> dict:
+    try:
+        return apply_session_rewind(
+            session_id,
+            payload.turnId,
+            force=payload.force,
+        )
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except SessionRewindConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(exc),
+                "unsafeFiles": list(exc.unsafe_files),
+            },
+        ) from exc
 
 
 @router.post(
