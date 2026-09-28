@@ -37,6 +37,26 @@ from pathlib import Path
 from typing import Tuple, Optional, List, Dict, Any
 
 
+def _ledger_pre_write(abs_path) -> None:
+    """写前镜像检查点（fail-open）：账本任何失败都不影响写工具本身。"""
+    try:
+        from core.chat import file_change_ledger
+
+        file_change_ledger.capture_pre_write(abs_path)
+    except Exception:
+        pass
+
+
+def _ledger_post_write(abs_path) -> None:
+    """写后快照检查点（fail-open），供轮级改动投影与 rewind 分类使用。"""
+    try:
+        from core.chat import file_change_ledger
+
+        file_change_ledger.capture_post_write(abs_path)
+    except Exception:
+        pass
+
+
 # ============================================================================
 # 配置
 # ============================================================================
@@ -764,8 +784,10 @@ def apply_diff_edit(file_path: str, diff_text: str, allow_fuzzy: bool = False) -
         )
 
     try:
+        _ledger_pre_write(str(path))
         with open(path, 'w', encoding='utf-8', newline='') as f:
             f.write(new_content)
+        _ledger_post_write(str(path))
     except Exception as e:
         return f"[编辑] 错误: 无法写入文件 - {e}"
 
@@ -950,11 +972,13 @@ def apply_patch_edit(patch_text: str, cwd: str = ".") -> str:
         for action, path, content in planned:
             originals[path] = path.read_bytes() if path.exists() else None
             applied.append(path)
+            _ledger_pre_write(str(path))
             if action == "delete":
                 path.unlink()
             else:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(content or "", encoding="utf-8", newline="")
+            _ledger_post_write(str(path))
     except Exception as exc:
         rollback_errors = []
         for path in reversed(applied):

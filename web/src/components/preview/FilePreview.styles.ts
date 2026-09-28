@@ -3,10 +3,10 @@ import {
 } from "../../design/vuiSurfaceRecipes";
 
 const surfaceClass = "grid h-full min-h-0 grid-rows-[auto_1fr_auto]";
-const headerClass = "flex items-start justify-between gap-4 border-b border-vui-border-soft px-5 pb-3.5 pt-4";
-const headerCopyClass = "min-w-0";
+const headerClass = "flex flex-wrap items-start justify-between gap-4 border-b border-vui-border-soft px-5 pb-3.5 pt-4";
+const headerCopyClass = "min-w-0 max-w-full";
 const eyebrowClass = "m-0 mb-1 [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-vui-fg-tertiary";
-const fileNameClass = "m-0 font-[var(--font-body)] text-vui-md font-bold text-vui-fg-primary";
+const fileNameClass = "m-0 break-all font-[var(--font-body)] text-vui-md font-bold text-vui-fg-primary";
 const filePathClass = "m-0 mt-2 break-all text-vui-fg-secondary";
 const metaBlockClass = "flex flex-wrap justify-end gap-2";
 const pillClass = "inline-flex items-center rounded-[var(--radius-control)] px-2.5 py-1.5 [font-size:var(--vui-font-xs)]";
@@ -22,6 +22,7 @@ const editorWrapClass = [
   "[&_.cm-scroller]:overflow-auto",
   "[&_.cm-content]:min-h-full [&_.cm-gutter]:min-h-full",
 ].join(" ");
+const htmlFrameClass = "h-full min-h-0 w-full border-0 bg-white";
 const plainFallbackClass = "m-0 h-full min-h-0 overflow-auto whitespace-pre-wrap break-words bg-[var(--vui-surface-panel)] px-4 py-3.5 font-[var(--font-mono)] [font-size:var(--vui-font-xs)] leading-[1.55] text-vui-fg-primary";
 const footnoteClass = "m-0 border-t border-vui-border-soft px-5 pb-3.5 pt-2.5 [font-size:var(--vui-font-xs)] text-vui-fg-tertiary";
 
@@ -40,6 +41,7 @@ const styles = {
   previewModeButtonClass,
   previewModeButtonActiveClass,
   editorWrapClass,
+  htmlFrameClass,
   plainFallbackClass,
   footnoteClass,
 } as const;
