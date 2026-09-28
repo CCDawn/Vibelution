@@ -484,6 +484,7 @@ def test_backend_health_probe_treats_connection_reset_as_unhealthy(monkeypatch):
     assert workbench_controller._is_backend_healthy("http://127.0.0.1:8000") is False
 
 
+@pytest.mark.skipif(os.name != "nt", reason="listener precheck in _is_backend_healthy is Windows-only")
 def test_backend_health_probe_skips_http_when_port_has_no_listener(monkeypatch):
     monkeypatch.setattr(workbench_controller, "_listening_pid_for_port_win32", lambda _port: 0)
     monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda _port: False)
@@ -605,6 +606,7 @@ def test_launcher_command_uses_python_adapter_on_posix(monkeypatch, tmp_path):
     ]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="monkeypatches os.name=nt; pathlib still dispatches PosixPath on macOS")
 def test_launcher_command_uses_python_no_console_adapter_on_windows(monkeypatch, tmp_path):
     launcher_path = tmp_path / "vibelution_launcher.py"
     python_exe = tmp_path / "python.exe"
@@ -641,6 +643,7 @@ def test_focus_workbench_uses_non_destructive_internal_focus(monkeypatch):
     assert calls == [{"action": "internal-focus", "no_browser": False}]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="monkeypatches os.name=nt; pathlib still dispatches PosixPath on macOS")
 def test_python_launcher_adapter_prefers_pythonw_for_background_services(tmp_path, monkeypatch):
     import importlib.util
 
@@ -6730,6 +6733,7 @@ def test_run_launcher_action_falls_back_to_configured_port_when_explicit_env_inv
     assert captured["kwargs"]["env"]["VIBELUTION_PORT"] == "9101"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="monkeypatches os.name=nt; pathlib still dispatches PosixPath on macOS")
 def test_run_launcher_action_uses_python_adapter_without_detached_process(
     monkeypatch, no_active_electron_desktop_session
 ):
@@ -6772,6 +6776,7 @@ def test_run_launcher_action_uses_python_adapter_without_detached_process(
     assert startupinfo.wShowWindow == 0
 
 
+@pytest.mark.skipif(os.name != "nt", reason="monkeypatches os.name=nt; pathlib still dispatches PosixPath on macOS")
 def test_run_launcher_action_events_report_hidden_waitable_launch(monkeypatch, no_active_electron_desktop_session):
     events: list[tuple[str, dict]] = []
 
@@ -6807,6 +6812,7 @@ def test_run_launcher_action_events_report_hidden_waitable_launch(monkeypatch, n
     assert "DETACHED_PROCESS" not in completed["creationFlagNames"]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="monkeypatches os.name=nt; pathlib still dispatches PosixPath on macOS")
 def test_run_launcher_action_cancelable_path_remains_waitable_on_windows(
     monkeypatch, no_active_electron_desktop_session
 ):
