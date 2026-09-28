@@ -1,0 +1,219 @@
+{
+  "shots": [
+    {
+      "name": "01-base-14",
+      "url": "http://127.0.0.1:5247/preview/font-scale/index.html?base=14",
+      "base": 14
+    },
+    {
+      "name": "02-base-16",
+      "url": "http://127.0.0.1:5247/preview/font-scale/index.html",
+      "base": 16
+    },
+    {
+      "name": "03-base-17",
+      "url": "http://127.0.0.1:5247/preview/font-scale/index.html?base=17",
+      "base": 17
+    },
+    {
+      "name": "04-base-18",
+      "url": "http://127.0.0.1:5247/preview/font-scale/index.html?base=18",
+      "base": 18
+    },
+    {
+      "name": "05-ab-16-vs-18",
+      "url": "http://127.0.0.1:5247/preview/font-scale/index.html?base=18&mode=ab",
+      "base": 18
+    },
+    {
+      "name": "06-dark-18",
+      "url": "http://127.0.0.1:5247/preview/font-scale/index.html?base=18&theme=dark",
+      "base": 18
+    }
+  ],
+  "asserts": [
+    {
+      "ok": true,
+      "text": "01-base-14: data-font-base=14 (want 14)"
+    },
+    {
+      "ok": true,
+      "text": "01-base-14: settings-label = 13px"
+    },
+    {
+      "ok": true,
+      "text": "01-base-14: chat-body = 15px"
+    },
+    {
+      "ok": true,
+      "text": "01-base-14: ladder-md = 14px"
+    },
+    {
+      "ok": true,
+      "text": "01-base-14: canvas-title stays 15px"
+    },
+    {
+      "ok": true,
+      "text": "01-base-14: pet-status stays 11px"
+    },
+    {
+      "ok": true,
+      "text": "01-base-14: terminal-line stays 13px"
+    },
+    {
+      "ok": true,
+      "text": "02-base-16: data-font-base=16 (want 16)"
+    },
+    {
+      "ok": true,
+      "text": "02-base-16: settings-label = 15px"
+    },
+    {
+      "ok": true,
+      "text": "02-base-16: chat-body = 17px"
+    },
+    {
+      "ok": true,
+      "text": "02-base-16: ladder-md = 16px"
+    },
+    {
+      "ok": true,
+      "text": "02-base-16: canvas-title stays 15px"
+    },
+    {
+      "ok": true,
+      "text": "02-base-16: pet-status stays 11px"
+    },
+    {
+      "ok": true,
+      "text": "02-base-16: terminal-line stays 13px"
+    },
+    {
+      "ok": true,
+      "text": "03-base-17: data-font-base=17 (want 17)"
+    },
+    {
+      "ok": true,
+      "text": "03-base-17: settings-label = 16px"
+    },
+    {
+      "ok": true,
+      "text": "03-base-17: chat-body = 18px"
+    },
+    {
+      "ok": true,
+      "text": "03-base-17: ladder-md = 17px"
+    },
+    {
+      "ok": true,
+      "text": "03-base-17: canvas-title stays 15px"
+    },
+    {
+      "ok": true,
+      "text": "03-base-17: pet-status stays 11px"
+    },
+    {
+      "ok": true,
+      "text": "03-base-17: terminal-line stays 13px"
+    },
+    {
+      "ok": true,
+      "text": "04-base-18: data-font-base=18 (want 18)"
+    },
+    {
+      "ok": true,
+      "text": "04-base-18: settings-label = 17px"
+    },
+    {
+      "ok": true,
+      "text": "04-base-18: chat-body = 19px"
+    },
+    {
+      "ok": true,
+      "text": "04-base-18: ladder-md = 18px"
+    },
+    {
+      "ok": true,
+      "text": "04-base-18: canvas-title stays 15px"
+    },
+    {
+      "ok": true,
+      "text": "04-base-18: pet-status stays 11px"
+    },
+    {
+      "ok": true,
+      "text": "04-base-18: terminal-line stays 13px"
+    },
+    {
+      "ok": true,
+      "text": "05-ab-16-vs-18: data-font-base=18 (want 18)"
+    },
+    {
+      "ok": true,
+      "text": "05-ab-16-vs-18: AB settings-label = [15.0, 17.0] (want 15/17)"
+    },
+    {
+      "ok": true,
+      "text": "05-ab-16-vs-18: AB chat-body = [17.0, 19.0] (want 17/19)"
+    },
+    {
+      "ok": true,
+      "text": "05-ab-16-vs-18: AB canvas-title = [15.0, 15.0] (both 15px)"
+    },
+    {
+      "ok": true,
+      "text": "05-ab-16-vs-18: AB pet-status = [11.0, 11.0] (both 11px)"
+    },
+    {
+      "ok": true,
+      "text": "06-dark-18: data-font-base=18 (want 18)"
+    },
+    {
+      "ok": true,
+      "text": "06-dark-18: settings-label = 17px"
+    },
+    {
+      "ok": true,
+      "text": "06-dark-18: chat-body = 19px"
+    },
+    {
+      "ok": true,
+      "text": "06-dark-18: ladder-md = 18px"
+    },
+    {
+      "ok": true,
+      "text": "06-dark-18: canvas-title stays 15px"
+    },
+    {
+      "ok": true,
+      "text": "06-dark-18: pet-status stays 11px"
+    },
+    {
+      "ok": true,
+      "text": "06-dark-18: terminal-line stays 13px"
+    },
+    {
+      "ok": true,
+      "text": "06-dark-18: data-theme=dark"
+    },
+    {
+      "ok": true,
+      "text": "interaction: quick-14 → base=14"
+    },
+    {
+      "ok": true,
+      "text": "interaction: +2 steps → base=16"
+    },
+    {
+      "ok": true,
+      "text": "interaction: input 99 clamps to 18"
+    },
+    {
+      "ok": true,
+      "text": "interaction: input 5 clamps to 14"
+    }
+  ],
+  "consoleErrors": [],
+  "pageErrors": [],
+  "ok": true
+}

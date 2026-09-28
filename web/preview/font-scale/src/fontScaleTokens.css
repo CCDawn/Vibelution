@@ -1,0 +1,57 @@
+/*
+ * 单一字号派生字阶 —— 预览本地 tokens 副本（唯一改写点）。
+ *
+ * 机制（ZCode FontSizeInput 模式）：整条主字阶由单一基准变量 --vui-font-base
+ * （1rem = 16px = md 档）加固定 px 偏移派生：第 N 档 = calc(base ± N px)。
+ * base=16 时逐档与生产 tokens.css 的现值零漂移（md=16/xs=14/sm=15/chat=17/
+ * lg=18/title=19/2xs=12/xl=22/micro-9..13=9..13）。
+ *
+ * 改写范围只有主字阶 12 档；画布子阶梯（--vui-font-canvas-*，9–15px 固定）、
+ * 桌宠（--vui-pet-* 固定 px）、xterm 终端（13px）是声明式固定密度轴，
+ * 不参与派生，仍由生产 tokens.css 原样提供——切基准时纹丝不动。
+ *
+ * 生产集成时将以同一公式改造生产 tokens.css（rem 计价形态可保持等价：
+ * calc(var(--vui-font-base) - 0.25rem) ≡ 本文件的 px 形态，root 16px 下逐 px 相等）。
+ */
+:root {
+  --vui-font-base: 1rem; /* = md = 16px @ root 16；运行时由预览应用按档位改写为 Npx */
+
+  /* 微字档（负偏移，随基准同向缩放） */
+  --vui-font-micro-9: calc(var(--vui-font-base) - 7px); /* 9 @16 — micro meta, badge/eyebrow only, rare */
+  --vui-font-micro-10: calc(var(--vui-font-base) - 6px); /* 10 @16 — micro meta */
+  --vui-font-micro-11: calc(var(--vui-font-base) - 5px); /* 11 @16 — micro meta */
+  --vui-font-2xs: calc(var(--vui-font-base) - 4px); /* 12 @16 — dense meta, rare */
+  --vui-font-micro-13: calc(var(--vui-font-base) - 3px); /* 13 @16 — micro meta / label */
+
+  /* 控件/正文带 */
+  --vui-font-xs: calc(var(--vui-font-base) - 2px); /* 14 @16 — caption / chip / toolbar */
+  --vui-font-sm: calc(var(--vui-font-base) - 1px); /* 15 @16 — control / list secondary */
+  --vui-font-md: var(--vui-font-base); /* 16 @16 — body default（基准本身） */
+
+  /* 阅读强调带（正偏移） */
+  --vui-font-chat: calc(var(--vui-font-base) + 1px); /* 17 @16 — conversation readable */
+  --vui-font-lg: calc(var(--vui-font-base) + 2px); /* 18 @16 — emphasis body / empty states */
+  --vui-font-title: calc(var(--vui-font-base) + 3px); /* 19 @16 — section / route title */
+  --vui-font-xl: calc(var(--vui-font-base) + 6px); /* 22 @16 — page title（例外刻度：不逐档 +1） */
+}
+
+/*
+ * A/B 分栏作用域类：custom property 的 calc(var(--vui-font-base)) 在「声明元素」
+ * 处求值，后代内联改 --vui-font-base 不会重算 :root 已解析的档位值（后代继承的
+ * 是已算完的值）。因此每个分栏元素要用本类把整条派生梯重声明一遍，与元素上的
+ * 内联 base 同处求值。档位公式与 ：root 块逐字相同。
+ */
+.font-scale-scope {
+  --vui-font-micro-9: calc(var(--vui-font-base) - 7px);
+  --vui-font-micro-10: calc(var(--vui-font-base) - 6px);
+  --vui-font-micro-11: calc(var(--vui-font-base) - 5px);
+  --vui-font-2xs: calc(var(--vui-font-base) - 4px);
+  --vui-font-micro-13: calc(var(--vui-font-base) - 3px);
+  --vui-font-xs: calc(var(--vui-font-base) - 2px);
+  --vui-font-sm: calc(var(--vui-font-base) - 1px);
+  --vui-font-md: var(--vui-font-base);
+  --vui-font-chat: calc(var(--vui-font-base) + 1px);
+  --vui-font-lg: calc(var(--vui-font-base) + 2px);
+  --vui-font-title: calc(var(--vui-font-base) + 3px);
+  --vui-font-xl: calc(var(--vui-font-base) + 6px);
+}

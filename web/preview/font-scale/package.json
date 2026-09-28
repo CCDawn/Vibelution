@@ -1,0 +1,12 @@
+{
+  "name": "@vibelution/preview-font-scale",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Isolated preview for the single-base derived font scale: one --vui-font-base variable drives the whole main type ladder via calc offsets, with canvas/pet/terminal as declared fixed-density exceptions. Read-only imports of web/src VUI components; no production files touched, not in the production router/build.",
+  "scripts": {
+    "dev": "vite --config vite.config.ts",
+    "selftest": "node scripts/logic-selftest.mjs",
+    "capture": "python scripts/capture_screens.py"
+  }
+}
