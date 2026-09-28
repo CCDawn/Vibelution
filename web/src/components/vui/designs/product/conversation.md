@@ -487,6 +487,87 @@ Settled 消息里 fenced 代码块的头部三件套（对齐 ZCode CodeBlockHea
 - 不新建通用 CodeBlock primitive；本块是 conversation product 组合，头部控件复用 `VNativeButton`。
 - 代码卡边框/圆角复用宿主 `responseSegmentPre`，禁止第二套卡片壳或平行样式 map。
 
+## Markdown 工作区文件链接
+
+### 功能
+Settled 会话 markdown 里的工作区文件链接升级为可操作目标：链接分类器（`conversationMarkdownLinkTargets`）把 href + 会话工作区根分成 external（http/https/mailto，行为不变）、workspace-file（可归一化为绝对路径的文件路径）、other（保持原有惰性锚点）。workspace-file 链接主点击经桌面桥 `openPath` 用系统默认程序打开；桥不可用或 shell 失败时降级为复制路径 + 行内轻提示（约 2.4s 自动消退）。右键弹「打开方式」上下文菜单（`VDropdownMenu` anchored 模式）：打开（系统默认）/ 在文件夹中显示（`showItemInFolder`）/ 复制路径；每个动作失败都落到同一条复制降级。菜单文案组件内双语（`zh ? … : …`）。
+
+### 适用范围
+- **适用**：`ConversationMarkdownRenderer`（settled 路径）渲染的 `<a>`；调用方传入 `workspaceRoot` 时激活。
+- **不适用**：流式 live tail（settled 后自然升级）；无 `workspaceRoot` 的调用（全部走旧锚点行为，语义零变化）；非文件形态（`#anchor`、`?query`、无扩展名目录、纯数字尾巴如 `v1.2`、未知 scheme）一律保持 other。
+
+### 使用方式
+```tsx
+// 生产：ConversationMarkdownRenderer 的 a() 覆写内部构造；调用方只需多传两个可选 prop。
+<LazyConversationMarkdownRenderer content={text} workspaceRoot={sessionWorkspaceRoot} language={lang} />
+```
+
+| Prop / 槽位 | 说明 | 设计注意 |
+| --- | --- | --- |
+| workspaceRoot | 会话工作区根（调用方给定） | 缺省不激活任何新行为；`/` 前缀按工作区根相对解析 |
+| language | 菜单/提示文案语言 | 组件内双语，文案不经 dictionaryChat |
+| path | 分类器输出的规范绝对路径 | 分隔符与盘符风格随 root；percent 解码后落盘 |
+
+### 非职责
+- 不做文件预览、不读文件内容；打开/显示/复制全部委托桌面桥。
+- 不改 external 链接语义（新窗口/window.open 分流归 Electron 壳）。
+- 不承担剪贴板权限 UI；复制失败静默。
+
+### 视觉与状态
+- 链接本体复用宿主 `inlineLink` 样式，仅附加 cursor + focus-visible ring（`--accent-cool` 混合）；`title` 为完整路径。
+- 降级提示行内 `role="status"`、`--fg-tertiary` 最浅文字色，自动消退不打断阅读。
+- 上下文菜单直接消费 `VDropdownMenu` 自带壳，本组件只出 items 与锚点坐标。
+
+### 实现落点
+- 分类器（纯）：`web/src/components/conversation/conversationMarkdownLinkTargets.ts`
+- 桥动作封装：`web/src/components/conversation/conversationMarkdownWorkspaceFileActions.ts`
+- 组件：`web/src/components/conversation/conversationMarkdownWorkspaceFileLink.tsx` + `.styles.ts`
+- 渲染分流：`web/src/components/conversation/ConversationMarkdownRenderer.tsx`（`a()` 覆写）
+
+### 反冗余
+- 不新建第二套文件链接/路径菜单；动作行复用 `VDropdownMenu` item，不直连 shadcn renderer。
+- 分类与动作分层：分类器纯函数零副作用，桥探测只读同一 `vibelutionLauncher` 全局，禁止第二通道。
+
+## Mermaid 代码块
+
+### 功能
+Settled ```mermaid fence 的显式渲染块：平时就是明文 + 语言标签 + 「渲染」按钮（流式与历史零成本）；点击后才动态 import mermaid（独立 lazy chunk）并渲染 SVG（状态机 idle → loading → ready(svg) / failed）。预算守卫：源码 >20000 字符或 >600 行永不进渲染器，直接明文 + 提示（无按钮）；渲染失败降级回明文并附一句解析错误。SVG 视口 `max-h` + 滚动，`role="img"`。
+
+### 适用范围
+- **适用**：`ConversationMarkdownRenderer`（settled 路径）里 language 为 `mermaid` 的 fenced 代码块。
+- **不适用**：流式 live tail（settled 前就是普通代码块）；`mermaidish` 等非精确 language 标签；行内 code。
+
+### 使用方式
+```tsx
+// 生产：ConversationMarkdownRenderer 的 pre() 覆写按 language 分流，不直接对外使用。
+<pre language="mermaid" → <ConversationMarkdownMermaidBlock code preClassName language />
+```
+
+| Prop / 槽位 | 说明 | 设计注意 |
+| --- | --- | --- |
+| code | fence 源码 | 组件内 trim；预算按 trim 后计 |
+| preClassName | 宿主 `responseSegmentPre` | 明文态边框/圆角归宿主，头部只做附加 |
+| language | 提示文案语言 | 组件内双语 |
+
+### 非职责
+- 不自动渲染（不跟随流式/可见性）；点击是唯一渲染入口。
+- 不持久化渲染状态；重挂载回到 idle。
+- 不做 SVG 的二次缩放控件或导出。
+
+### 视觉与状态
+- 头部复用 `conversationMarkdownCodeBlockStyles` 的 header/language/actions/button，语言标签固定 `mermaid`，读作同一卡片家族。
+- loading/failed 是 header 与明文之间的一条状态行（spinner + 文案 / 失败原因截断 200 字符），`role="status"`。
+- ready 态 `markdownMermaidCanvas`：`max-h-[420px] overflow-auto`，SVG 居中限宽；`data-mermaid-state` 作测试锚点。
+
+### 实现落点
+- 预算 + 懒加载器（纯）：`web/src/components/conversation/conversationMarkdownMermaid.ts`
+- 组件：`web/src/components/conversation/conversationMarkdownMermaidBlock.tsx` + `.styles.ts`
+- 分流：`web/src/components/conversation/ConversationMarkdownRenderer.tsx`（`pre()` 覆写）
+
+### 反冗余
+- mermaid 只经 `loadMermaidRenderer` 单例入口初始化（startOnLoad=false、securityLevel=strict），禁止第二处 import。
+- 头部样式复用代码块既有切片，禁止第二套头部样式 map。
+
 ## 轮次导航 rail 悬停预览
 
 ### 功能
