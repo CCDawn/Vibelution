@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import re
 import secrets
 from dataclasses import dataclass
 from urllib.parse import urlparse
@@ -23,6 +24,24 @@ _SOURCE_ONLY_GET_PATH_PREFIXES = (
     "/api/agents/avatar-image/",
     "/api/config/avatar-image/",
     "/api/config/theme-background-image/",
+)
+# Session artifact GETs need the same browser-native treatment (timeline
+# <img> elements and no-token download navigation), but the artifacts route
+# also serves document attachments (text/PDF). Only image-extension artifact
+# ids are exempt; document artifacts and every mutating method keep the token
+# gate. Safety audit of the exempt surface (core/web/routes/sessions.py ->
+# session_image_artifact -> resolve_session_image_artifact): the artifact id
+# must be a bare filename matching the route's safe-chars allowlist with an
+# image extension, the session workspace is resolved and confined under the
+# sandboxed sessions root, and the target must resolve inside
+# <workspace>/artifacts/images as an existing regular file, so the exemption
+# only ever serves image bytes from controlled storage. The extension set is
+# pinned to session_service._SESSION_IMAGE_ARTIFACT_CONTENT_TYPES by a unit
+# test (tests/test_web_control_custom_ports.py).
+_SESSION_ARTIFACT_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
+_SESSION_ARTIFACT_IMAGE_PATH_RE = re.compile(
+    r"/api/sessions/[^/]+/artifacts/[A-Za-z0-9_.-]+(?:%s)\Z"
+    % "|".join(re.escape(extension) for extension in _SESSION_ARTIFACT_IMAGE_EXTENSIONS)
 )
 CONTROL_TOKEN_ENV = "VIBELUTION_WEB_CONTROL_TOKEN"
 TRUSTED_WEB_HOSTS_ENV = "VIBELUTION_TRUSTED_WEB_HOSTS"
@@ -101,7 +120,11 @@ def validate_control_request(request: Request) -> ControlGuardError | None:
 
 def _is_source_only_get_path(path: str) -> bool:
     normalized = str(path or "")
-    return normalized.startswith(_SOURCE_ONLY_GET_PATH_PREFIXES)
+    if normalized.startswith(_SOURCE_ONLY_GET_PATH_PREFIXES):
+        return True
+    # Narrow session-artifact gate: image-extension artifact ids only
+    # (documents and multi-segment or traversal-shaped paths fail closed).
+    return _SESSION_ARTIFACT_IMAGE_PATH_RE.fullmatch(normalized) is not None
 
 
 class WebControlGuardMiddleware(BaseHTTPMiddleware):

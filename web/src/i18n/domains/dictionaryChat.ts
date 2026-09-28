@@ -1,4 +1,4 @@
-/** Route/domain dictionary slice: chat (146 keys). */
+/** Route/domain dictionary slice: chat (190 keys). */
 export const dictionaryChat = {
   zh: {
     navChat: "对话",
@@ -163,6 +163,7 @@ export const dictionaryChat = {
     attachmentUploading: "上传中",
     attachmentUploadFailedRetryHint: "上传失败，可重试",
     retryUpload: "重试上传",
+    composerPastedTextAttachmentNotice: "粘贴的长文本已转为附件：{filename}",
     composerReferenceTrayLabel: "待发送引用",
     composerReferenceRemove: "移除引用",
     composerReferenceKindSession: "会话引用",
@@ -354,6 +355,7 @@ export const dictionaryChat = {
     attachmentUploading: "Uploading",
     attachmentUploadFailedRetryHint: "Upload failed, retry available",
     retryUpload: "Retry upload",
+    composerPastedTextAttachmentNotice: "Long pasted text converted to an attachment: {filename}",
     composerReferenceTrayLabel: "References to send",
     composerReferenceRemove: "Remove reference",
     composerReferenceKindSession: "Session reference",

@@ -323,6 +323,8 @@ import {
   hasComposerImageDragPayload,
   hasComposerSessionReferenceDragPayload,
 } from "./conversationComposerDropPayload";
+import { extractComposerPastedTextOverflow } from "./conversationComposerPastePayload";
+import { renderConversationInlineMarkdown } from "./conversationInlineMarkdown";
 import {
   composerAttachmentAcceptAttribute,
   isComposerAttachableFile,
@@ -415,6 +417,19 @@ import {
 } from "./conversationThoughtSummary";
 import { VActionGroup, VButton, VNativeInput, VNativeTextarea } from "../vui";
 import styles from "./ConversationView.styles";
+
+// Group-transcript rows are chat lines, not documents: they render through the
+// shared pure inline renderer (code/link/strong only) with the ConversationView
+// styles as the single visual source, while answer bodies keep the full
+// markdown renderer.
+const groupTranscriptInlineClassNames = {
+  inlineCode: styles.inlineCode,
+  inlineLink: styles.inlineLink,
+  inlineStrong: styles.inlineStrong,
+};
+
+// How long the "long paste became an attachment" status row stays visible.
+const COMPOSER_PASTE_NOTICE_VISIBLE_MS = 8000;
 
 const DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT = 3;
 const INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT = 36;
@@ -1517,6 +1532,9 @@ export const ConversationView = React.memo(function ConversationView({
   // "@fragment" from the draft.
   const [composerReferenceCaret, setComposerReferenceCaret] = useState(0);
   const [composerComposing, setComposerComposing] = useState(false);
+  // Oversized plain-text pastes convert into a document attachment; this status
+  // row is the light notice (auto-dismisses, never steals focus from the draft).
+  const [composerPasteNotice, setComposerPasteNotice] = useState("");
   const [referenceDismissedAtValue, setReferenceDismissedAtValue] = useState<string | null>(null);
   const [referenceActiveIndex, setReferenceActiveIndex] = useState(-1);
   const activeReferenceToken: ReferenceTypeaheadToken | null = useMemo(
@@ -1541,6 +1559,16 @@ export const ConversationView = React.memo(function ConversationView({
     ? (referenceActiveIndex >= 0 && referenceActiveIndex < referenceSuggestions.length ? referenceActiveIndex : 0)
     : -1;
   const referenceSuggestionListId = `conversation-${sessionId}-reference-suggestions`;
+  useEffect(() => {
+    if (!composerPasteNotice) {
+      return;
+    }
+    const timer = window.setTimeout(
+      () => setComposerPasteNotice(""),
+      COMPOSER_PASTE_NOTICE_VISIBLE_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [composerPasteNotice]);
   function syncComposerReferenceCaret(element: HTMLTextAreaElement | null) {
     setComposerReferenceCaret(element ? element.selectionStart ?? element.value.length : 0);
   }
@@ -2645,7 +2673,9 @@ export const ConversationView = React.memo(function ConversationView({
                     </AgentUserContentSectionView>
                   ) : null}
                   {groupTranscriptMessage ? (
-                    <div className={styles.groupTranscriptBody}>{renderResponseText(assistantFinalAnswerText(message))}</div>
+                    <div className={styles.groupTranscriptBody}>
+                      {renderConversationInlineMarkdown(assistantFinalAnswerText(message), groupTranscriptInlineClassNames)}
+                    </div>
                   ) : null}
                   {contextNode}
 
@@ -6425,6 +6455,12 @@ export const ConversationView = React.memo(function ConversationView({
               <span>{composerGuidance}</span>
             </div>
           ) : null}
+          {composerPasteNotice ? (
+            <div className={styles.composerGuidance} role="status" aria-live="polite" data-composer-paste-notice="true">
+              <span className={styles.composerGuidanceIcon} aria-hidden="true">i</span>
+              <span>{composerPasteNotice}</span>
+            </div>
+          ) : null}
           {composerFollowupQueueBar}
           {composerAttachments.length ? (
             <div
@@ -6711,11 +6747,22 @@ export const ConversationView = React.memo(function ConversationView({
                 return;
               }
               const files = Array.from(event.clipboardData.files || []).filter((file) => isComposerAttachableFile(file));
-              if (!files.length) {
+              if (files.length) {
+                event.preventDefault();
+                onAddComposerAttachments(files);
                 return;
               }
-              event.preventDefault();
-              onAddComposerAttachments(files);
+              // ZCode parity: an oversized plain-text paste silently becomes a
+              // document attachment instead of flooding the draft; the attachment
+              // chip plus the status row carry the notice.
+              const pastedTextOverflow = extractComposerPastedTextOverflow(event.clipboardData);
+              if (pastedTextOverflow) {
+                event.preventDefault();
+                onAddComposerAttachments([pastedTextOverflow]);
+                setComposerPasteNotice(
+                  t("composerPastedTextAttachmentNotice").replace("{filename}", pastedTextOverflow.name),
+                );
+              }
             }}
             onKeyDown={(event) => {
               if (
