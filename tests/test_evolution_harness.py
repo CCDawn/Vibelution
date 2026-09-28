@@ -314,6 +314,7 @@ def test_build_agent_command_for_test_mode():
     assert "agent.py" in cmd
 
 
+@pytest.mark.skipif(os.name != "nt", reason="asserts CREATE_NO_WINDOW propagation, which the POSIX branch never sets")
 def test_evolution_harness_run_git_hides_console_windows_on_windows(monkeypatch, tmp_path: Path):
     calls = []
     resolved_git = str(tmp_path / "Git" / "mingw64" / "bin" / "git.exe")
@@ -400,7 +401,13 @@ def test_should_copy_untracked_file_rejects_unsafe_snapshot_paths():
     assert not should_copy_untracked_file("\ufeffworkspace/evaluation/bundles/case.json")
     assert not should_copy_untracked_file('".codex/edge-profile-memory-cdp/Default/Cache/file')
     assert not should_copy_untracked_file("../outside.py")
-    assert not should_copy_untracked_file("C:/tmp/outside.py")
+    assert not should_copy_untracked_file("/tmp/outside.py")
+    if os.name == "nt":
+        assert not should_copy_untracked_file("C:/tmp/outside.py")
+    else:
+        # On POSIX a drive-letter path is not absolute; it stays a harmless
+        # in-repo relative path, so the filter accepts it.
+        assert should_copy_untracked_file("C:/tmp/outside.py")
 
 
 def test_build_agent_command_for_single_turn_prompt():
@@ -1112,8 +1119,15 @@ def test_effective_returncode_classifies_idle_chat_ui_when_primary_returncode_wa
     assert "未开账" not in reason
 
 
+def _repo_venv_python(repo_root: Path) -> Path:
+    """Host-layout venv entry point (Scripts/python.exe on Windows)."""
+    if os.name == "nt":
+        return repo_root / ".venv" / "Scripts" / "python.exe"
+    return repo_root / ".venv" / "bin" / "python"
+
+
 def test_resolve_python_executable_prefers_usable_repo_venv(monkeypatch, tmp_path: Path):
-    python_path = tmp_path / ".venv" / "Scripts" / "python.exe"
+    python_path = _repo_venv_python(tmp_path)
     python_path.parent.mkdir(parents=True)
     python_path.write_text("", encoding="utf-8")
     monkeypatch.setattr("scripts.evolution_harness.is_python_executable_usable", lambda path: path == python_path)
@@ -1124,7 +1138,7 @@ def test_resolve_python_executable_prefers_usable_repo_venv(monkeypatch, tmp_pat
 
 
 def test_resolve_python_executable_falls_back_when_repo_venv_is_broken(monkeypatch, tmp_path: Path):
-    python_path = tmp_path / ".venv" / "Scripts" / "python.exe"
+    python_path = _repo_venv_python(tmp_path)
     python_path.parent.mkdir(parents=True)
     python_path.write_text("", encoding="utf-8")
     monkeypatch.setattr("scripts.evolution_harness.is_python_executable_usable", lambda path: False)
@@ -1221,7 +1235,7 @@ def test_create_harness_config_overrides_runtime_section(
 def test_mirror_venv_into_worktree_copies_venv_without_junction(monkeypatch, tmp_path: Path):
     repo_root = tmp_path / "repo"
     worktree = tmp_path / "worktree"
-    source_python = repo_root / ".venv" / "Scripts" / "python.exe"
+    source_python = _repo_venv_python(repo_root)
     source_python.parent.mkdir(parents=True)
     source_python.write_text("python", encoding="utf-8")
     source_package = repo_root / ".venv" / "Lib" / "site-packages" / "annotated_types"
@@ -1231,7 +1245,7 @@ def test_mirror_venv_into_worktree_copies_venv_without_junction(monkeypatch, tmp
 
     mirror_venv_into_worktree(repo_root, worktree)
 
-    assert (worktree / ".venv" / "Scripts" / "python.exe").exists()
+    assert _repo_venv_python(worktree).exists()
     assert (worktree / ".venv" / "Lib" / "site-packages" / "annotated_types").exists()
 
 
@@ -1264,7 +1278,7 @@ def test_mirror_venv_into_worktree_rebuilds_when_copied_venv_is_unusable(monkeyp
 def test_mirror_venv_into_worktree_copies_python_fallback(monkeypatch, tmp_path: Path):
     repo_root = tmp_path / "repo"
     worktree = tmp_path / "worktree"
-    source_python = repo_root / ".venv" / "Scripts" / "python.exe"
+    source_python = _repo_venv_python(repo_root)
     source_python.parent.mkdir(parents=True)
     source_python.write_text("python", encoding="utf-8")
     worktree.mkdir()
@@ -1274,7 +1288,7 @@ def test_mirror_venv_into_worktree_copies_python_fallback(monkeypatch, tmp_path:
 
     mirror_venv_into_worktree(repo_root, worktree)
 
-    assert (worktree / ".venv" / "Scripts" / "python.exe").exists()
+    assert _repo_venv_python(worktree).exists()
 
 
 def test_mirror_venv_into_worktree_builds_synthetic_venv_when_source_missing(monkeypatch, tmp_path: Path):
