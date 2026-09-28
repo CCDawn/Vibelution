@@ -524,8 +524,8 @@ def test_commit_gate_defers_behavior_tests_to_closeout(
         (
             "node web/node_modules/vitest/vitest.mjs run src/example.test.ts --root web",
             "web-test",
-            ["node", "web/node_modules/vitest/vitest.mjs", "run"],
-            "",
+            ["node", "node_modules/vitest/vitest.mjs", "run"],
+            "web",
         ),
         (
             "npm --prefix web run build",
@@ -760,7 +760,7 @@ def test_closeout_web_contract_commands_match_matrix_shape_and_exist() -> None:
     for command in gate.CLOSEOUT_WEB_CONTRACT_COMMANDS:
         spec = gate.parse_allowed_command(command, gate.PROJECT_ROOT)
         assert spec.kind == "web-test"
-        assert spec.cwd == gate.PROJECT_ROOT
+        assert spec.cwd == gate.PROJECT_ROOT / "web"
         assert shape(command) in matrix_shapes
         for token in command.split()[3:-2]:
             assert (gate.PROJECT_ROOT / "web" / token).is_file()
