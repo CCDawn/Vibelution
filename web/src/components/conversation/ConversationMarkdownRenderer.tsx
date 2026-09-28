@@ -5,7 +5,10 @@ import remarkGfm from "remark-gfm";
 
 import { VNativeButton } from "../vui";
 import { formattedCodeBlockContent } from "./conversationFormattedCodeBlock";
+import { classifyConversationMarkdownLinkTarget } from "./conversationMarkdownLinkTargets";
+import { ConversationMarkdownMermaidBlock } from "./conversationMarkdownMermaidBlock";
 import { safeConversationMarkdownUrl } from "./conversationMarkdownUrl";
+import { ConversationMarkdownWorkspaceFileLink } from "./conversationMarkdownWorkspaceFileLink";
 import type { ConversationMarkdownClassNames } from "./conversationMarkdownTypes";
 import {
   CODE_BLOCK_MAX_VISIBLE_LINES,
@@ -27,6 +30,14 @@ export type ConversationMarkdownRendererProps = {
   classNames?: ConversationMarkdownClassNames;
   duplicateImageUrls?: Set<string>;
   renderImage?: (alt: string, url: string, duplicateImageUrls?: Set<string>) => React.ReactNode;
+  /**
+   * Session workspace root provided by the caller; enables workspace-file
+   * markdown links (open / reveal / copy via the desktop bridge). Absent keeps
+   * the legacy anchor behavior for every href.
+   */
+  workspaceRoot?: string;
+  /** Bilingual chrome text for workspace-file menus and mermaid blocks. */
+  language?: "zh" | "en";
 };
 
 const markdownPlugins = [remarkGfm];
@@ -43,6 +54,8 @@ export const ConversationMarkdownRenderer = React.memo(function ConversationMark
   classNames = conversationMarkdownRendererStyles,
   duplicateImageUrls,
   renderImage,
+  workspaceRoot,
+  language = "zh",
 }: ConversationMarkdownRendererProps) {
   const normalized = normalizeConversationMarkdown(content);
   if (!normalized.trim()) {
@@ -54,7 +67,7 @@ export const ConversationMarkdownRenderer = React.memo(function ConversationMark
       <ReactMarkdown
         remarkPlugins={markdownPlugins}
         skipHtml
-        components={markdownComponents(classNames, duplicateImageUrls, renderImage)}
+        components={markdownComponents(classNames, duplicateImageUrls, renderImage, workspaceRoot, language)}
       >
         {normalized}
       </ReactMarkdown>
@@ -128,10 +141,28 @@ function markdownComponents(
   classNames: ConversationMarkdownClassNames,
   duplicateImageUrls?: Set<string>,
   renderImage?: (alt: string, url: string, duplicateImageUrls?: Set<string>) => React.ReactNode,
+  workspaceRoot?: string,
+  language: "zh" | "en" = "zh",
 ) {
   return {
     a({ href, children }: ComponentPropsWithoutRef<"a">) {
-      const safeHref = safeConversationMarkdownUrl(href ?? "");
+      const rawHref = href ?? "";
+      // Workspace-file links resolve against the caller-provided session
+      // workspace root and open through the desktop bridge; without a root the
+      // classifier keeps them "other" and the legacy anchor behavior applies.
+      const target = classifyConversationMarkdownLinkTarget(rawHref, workspaceRoot);
+      if (target.kind === "workspace-file") {
+        return (
+          <ConversationMarkdownWorkspaceFileLink
+            path={target.absolutePath}
+            className={classNames.inlineLink}
+            language={language}
+          >
+            {children}
+          </ConversationMarkdownWorkspaceFileLink>
+        );
+      }
+      const safeHref = safeConversationMarkdownUrl(rawHref);
       if (!safeHref) {
         return <>{children}</>;
       }
@@ -183,9 +214,19 @@ function markdownComponents(
     },
     pre({ children }: ComponentPropsWithoutRef<"pre">) {
       const codeBlock = markdownCodeBlockChildren(children);
+      const languageLabel = markdownCodeBlockLanguage(codeBlock);
+      if ((languageLabel ?? "").trim().toLowerCase() === "mermaid") {
+        return (
+          <ConversationMarkdownMermaidBlock
+            code={markdownCodeBlockText(codeBlock)}
+            preClassName={classNames.responseSegmentPre}
+            language={language}
+          />
+        );
+      }
       return (
         <ConversationMarkdownCodeBlock
-          language={markdownCodeBlockLanguage(codeBlock)}
+          language={languageLabel}
           text={markdownCodeBlockText(codeBlock)}
           preClassName={classNames.responseSegmentPre}
           code={codeBlock}

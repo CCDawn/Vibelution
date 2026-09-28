@@ -55,6 +55,19 @@ export const BUNDLE_BUDGETS = [
     maxBytes: 320 * 1024,
   },
   {
+    // Conversation ```mermaid diagrams: mermaid is dynamically imported on the
+    // explicit render action only, and its heavy exclusive dependency families
+    // are pinned to named codeSplitting groups (mermaid with maxSize splitting,
+    // mermaid-elk / mermaid-cytoscape / mermaid-graph / mermaid-vendor) so no
+    // single lazy chunk can balloon and none of it touches the main/renderer
+    // chunks. Smaller exclusive deps (katex/d3 glue) split naturally and stay
+    // under the generic rule. This entry must stay before the generic "route
+    // or feature chunks" rule because budget matching is first-match.
+    name: "known lazy mermaid chunks",
+    pattern: /^mermaid(?:-[\w-]+)?\.js$/,
+    maxBytes: 2000 * 1024,
+  },
+  {
     // ELK layout engine worker asset (elkjs lib/elk-worker.min.js), emitted
     // by Vite as a separate worker chunk. Loaded on demand only when the
     // workflow canvas first runs a layout. Must stay before the generic
