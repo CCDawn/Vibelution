@@ -2047,6 +2047,11 @@ def test_keeps_non_proactor_or_non_windows_disconnects_visible(monkeypatch):
     ) is False
 
 def test_runtime_shutdown_queues_runtime_manager_when_state_exists(tmp_path, monkeypatch):
+    # Import before the os.name=nt patch below: core.web.routes.runtime
+    # builds a module-level Path, which would dispatch WindowsPath (and
+    # raise on POSIX) if imported while the patch is active.
+    import core.web.routes.runtime  # noqa: F401
+
     script_path = tmp_path / "vibelution_launcher.ps1"
     script_path.write_text("Write-Host managed\n", encoding="utf-8")
     state_path = tmp_path / "state.json"
