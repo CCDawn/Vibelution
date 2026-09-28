@@ -126,7 +126,7 @@ const styles = {
   datasetCatalogEmpty:
     "[grid-column:1_/_-1] [margin:0] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [line-height:1.35] [overflow-wrap:anywhere]",
   datasetCatalogFilterButton: [
-    "[min-height:25px] !px-[7px] !py-0 [border:1px_solid_var(--border-soft)] [border-radius:999px]",
+    "[min-height:25px] !px-2 !py-0 [border:1px_solid_var(--border-soft)] [border-radius:999px]",
     "[background:var(--vui-surface-row)] [color:var(--fg-secondary)] [font-size:var(--vui-font-xs)] [white-space:nowrap]",
     "data-[state=active]:border-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-line),var(--border-soft))]",
     "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-wash-strong),var(--vui-surface-row))]",
@@ -293,7 +293,7 @@ const styles = {
   // Soft track switcher — VTabs list chrome; selected state uses data-[state=active].
   trackTabs: "inline-grid w-fit max-w-full min-w-0 gap-0",
   trackTabsList:
-    "inline-flex min-w-0 max-w-full items-center gap-0.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-[3px]",
+    "inline-flex min-w-0 max-w-full items-center gap-0.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-1",
   trackTabsTrigger:
     "min-h-[26px] rounded-full border border-transparent px-2 font-bold text-[var(--fg-secondary)] shadow-none " +
     "data-[state=active]:border-[var(--vui-border-subtle)] data-[state=active]:bg-[var(--vui-surface-base)] " +

@@ -20,7 +20,7 @@ const styles = {
   groupBubbleRowPending: "vui-routes-chatcodingroute groupBubbleRowPending min-w-0",
   groupStreamIdentity:
     "vui-routes-chatcodingroute groupStreamIdentity flex min-w-0 flex-nowrap items-center gap-2.5",
-  groupStreamCopy: "vui-routes-chatcodingroute groupStreamCopy grid min-w-0 gap-0.5 pl-[46px]",
+  groupStreamCopy: "vui-routes-chatcodingroute groupStreamCopy grid min-w-0 gap-0.5 pl-11",
   groupStreamCluster:
     "vui-routes-chatcodingroute groupStreamCluster grid min-w-0 content-start gap-1 pt-3 first:pt-0",
   groupStreamName:

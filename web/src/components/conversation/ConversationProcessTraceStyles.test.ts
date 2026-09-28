@@ -46,7 +46,7 @@ describe("conversation process trace styles", () => {
     expect(styles.timelineCommandRow).toContain("bg-transparent");
     expect(styles.timelineCommandRow).toContain("grid-cols-[15px_minmax(0,1fr)]");
     expect(styles.timelineCommandRow).not.toContain("_max-content");
-    expect(styles.timelineCommandRow).toContain("py-[0.35rem]");
+    expect(styles.timelineCommandRow).toContain("py-1");
     expect(styles.timelineCommandRow).toContain("text-vui-xs");
     expect(styles.timelineCommandRow).toContain("text-[var(--fg-tertiary)]");
     expect(styles.timelineCommandRow).toContain("border-0");

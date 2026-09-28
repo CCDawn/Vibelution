@@ -226,6 +226,8 @@ import {
   ConversationToolActivityPills,
   toolActivityAriaTitle,
 } from "./ConversationToolActivityPills";
+import { ConversationFileDeliveries } from "./ConversationFileDeliveries";
+import { fileDeliveryFollowupDraft } from "./conversationFileDeliveryModel";
 import { ConversationPatchDiff } from "./ConversationPatchDiff";
 import { conversationToolPatchText } from "./conversationPatchModel";
 import {
@@ -1030,7 +1032,6 @@ export const ConversationView = React.memo(function ConversationView({
   userAvatarPreset,
   userAvatarImageUrl,
   taskSummary,
-  changedFiles = [],
   defaultFileContext,
   summaryItems,
   stats,
@@ -4189,16 +4190,15 @@ export const ConversationView = React.memo(function ConversationView({
             {renderTimelineNodes(finalCells, { attachToolApproval: false })}
           </div>
         ) : null}
-        {!isCompanionMode && changedFiles.length > 0 ? (
-          <div
-            className={styles.codexTurnChangeBadge}
-            data-codex-turn-change-badge="true"
-            title={changedFiles.slice(0, 12).join("\n")}
-          >
-            {lang === "zh"
-              ? `${changedFiles.length} 个文件已更改`
-              : `${changedFiles.length} file${changedFiles.length === 1 ? "" : "s"} changed`}
-          </div>
+        {!isCompanionMode ? (
+          <ConversationFileDeliveries
+            cells={cells}
+            language={lang === "en" ? "en" : "zh"}
+            onContinue={showComposer && !composerDisabled ? (path) => {
+              onComposerChange(fileDeliveryFollowupDraft(composerValue, path, lang === "en" ? "en" : "zh"));
+              requestAnimationFrame(() => composerInputRef.current?.focus());
+            } : undefined}
+          />
         ) : null}
       </div>
     );

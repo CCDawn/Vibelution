@@ -4,7 +4,7 @@ const styles = {
   surfaceStructured: "content-start",
   panel: [
     "w-[min(360px,100%)] rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-glass",
-    "px-[18px] py-4 text-vui-fg-primary shadow-none backdrop-blur-md",
+    "px-4 py-4 text-vui-fg-primary shadow-none backdrop-blur-md",
   ].join(" "),
   structuredPanel: [
     "grid min-h-[min(540px,calc(100dvh_-_120px))] w-full gap-3 overflow-auto rounded-[var(--radius-panel)] md:overflow-hidden",

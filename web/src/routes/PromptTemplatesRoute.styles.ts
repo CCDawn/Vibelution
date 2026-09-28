@@ -7,15 +7,15 @@ const routeClass = "grid h-full min-h-0 min-w-0 grid-rows-[auto_auto_minmax(0,1f
 const headerClass = "hidden";
 const headerActionsClass = "inline-flex min-w-0 items-center justify-end gap-1.5";
 const controlButtonClass =
-  "inline-flex min-h-[26px] w-fit max-w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_72%,transparent)] px-2 py-[3px] [font-size:var(--vui-font-xs)] text-vui-fg-secondary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:bg-[var(--vui-control-muted-hover)] hover:text-vui-fg-primary disabled:opacity-55";
+  "inline-flex min-h-[26px] w-fit max-w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_72%,transparent)] px-2 py-1 [font-size:var(--vui-font-xs)] text-vui-fg-secondary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:bg-[var(--vui-control-muted-hover)] hover:text-vui-fg-primary disabled:opacity-55";
 const fieldSurfaceClass =
   `rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] !${vuiWorkspaceFillClass}`;
 const rowButtonSurfaceClass =
-  `block !h-auto w-full ${vuiOpaqueRowClass} px-[9px] py-2 text-left text-vui-fg-primary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:!bg-[var(--vui-surface-row)]`;
+  `block !h-auto w-full ${vuiOpaqueRowClass} px-2 py-2 text-left text-vui-fg-primary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:!bg-[var(--vui-surface-row)]`;
 const pillSurfaceClass =
   `inline-flex min-h-5 max-w-full items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--vui-border-soft)_74%,transparent)] ${vuiOpaqueRowClass} px-1.5 [font-size:var(--vui-font-xs)]`;
 const refreshButtonClass = `${controlButtonClass} h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] p-0`;
-const returnButtonClass = `${controlButtonClass} gap-[5px] text-[var(--accent-cool)] no-underline`;
+const returnButtonClass = `${controlButtonClass} gap-1 text-[var(--accent-cool)] no-underline`;
 const workspaceClass = "grid h-full min-h-0 min-w-0 grid-cols-[clamp(280px,26vw,440px)_minmax(0,1fr)] gap-4 overflow-hidden px-4 pb-4 pt-3 max-[980px]:grid-cols-1 max-[980px]:content-start max-[980px]:overflow-auto";
 const panelBaseClass = "grid h-full min-h-0 min-w-0 content-start gap-2 overflow-hidden";
 const listPanelClass = `${panelBaseClass} grid-rows-[auto_auto_auto_auto_minmax(0,1fr)] max-[980px]:max-h-[44vh]`;
@@ -27,9 +27,9 @@ const panelTitleClass = "m-0 font-[var(--font-display)] text-vui-md leading-[1.2
 const panelDescriptionClass = "m-0 mt-0.5 [font-size:var(--vui-font-xs)] leading-[1.28] text-vui-fg-secondary";
 const searchBoxClass = `flex min-h-8 items-center gap-2 ${fieldSurfaceClass} px-2 text-vui-fg-tertiary`;
 const searchInputClass = "min-w-0 w-full border-0 bg-transparent text-vui-fg-primary outline-0";
-const filterRowClass = "flex flex-wrap gap-[5px]";
+const filterRowClass = "flex flex-wrap gap-1";
 const filterTabsClass = "inline-grid w-fit max-w-full min-w-0 gap-0";
-const filterTabsListClass = "inline-flex min-w-0 max-w-full flex-wrap items-center gap-[5px] border-0 bg-transparent p-0";
+const filterTabsListClass = "inline-flex min-w-0 max-w-full flex-wrap items-center gap-1 border-0 bg-transparent p-0";
 const filterTabsTriggerClass =
   `${controlButtonClass} ` +
   "data-[state=active]:border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] " +
@@ -40,20 +40,20 @@ const filterButtonClass = controlButtonClass;
 const filterButtonActiveClass = `${filterButtonClass} border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_14%,transparent)] text-[var(--accent-warm-2)]`;
 const primaryButtonClass = `${controlButtonClass} border-[color-mix(in_srgb,var(--accent-warm)_34%,var(--border-soft))] text-[var(--accent-warm-2)]`;
 const secondaryButtonClass = controlButtonClass;
-const bulkActionBarClass = "flex min-w-0 max-w-full flex-wrap items-center gap-[5px]";
+const bulkActionBarClass = "flex min-w-0 max-w-full flex-wrap items-center gap-1";
 const bulkSummaryClass = "inline-flex min-h-[26px] min-w-0 shrink-0 items-center gap-1.5 whitespace-nowrap [font-size:var(--vui-font-xs)] text-vui-fg-secondary";
 const bulkSummaryTitleClass = "text-vui-fg-primary";
 const bulkSelectFieldClass = "flex min-h-[26px] min-w-0 max-w-full flex-[1_1_118px] items-center gap-1.5 [font-size:var(--vui-font-xs)] text-vui-fg-secondary";
 const bulkSelectClass = `min-h-[26px] min-w-0 max-w-full flex-[1_1_88px] ${fieldSurfaceClass} font-inherit text-vui-fg-primary`;
 const templateListClass = "grid min-h-0 content-start gap-1.5 overflow-auto pr-1";
-const selectableRowClass = "grid min-w-0 grid-cols-[28px_minmax(0,1fr)] items-center gap-[5px]";
+const selectableRowClass = "grid min-w-0 grid-cols-[28px_minmax(0,1fr)] items-center gap-1";
 const selectableRowLinkedClass = "rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--accent-cool)_5%,transparent)]";
 const rowSelectClass = `grid h-9 w-7 cursor-pointer place-items-center ${fieldSurfaceClass} text-vui-fg-secondary hover:border-[var(--border-strong)] hover:text-[var(--accent-warm-2)]`;
 const linkedBorderClass = "border-[color-mix(in_srgb,var(--accent-cool)_44%,var(--border-soft))]";
 const hiddenCheckboxClass = "pointer-events-none absolute h-px w-px opacity-0";
 const templateButtonBaseClass = [
   rowButtonSurfaceClass,
-  "!grid !justify-stretch !justify-items-start !text-left gap-[5px]",
+  "!grid !justify-stretch !justify-items-start !text-left gap-1",
 ].join(" ");
 const templateButtonActiveClass = "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[var(--vui-surface-row-hover)] shadow-[var(--vui-shadow-inset-accent)]";
 const templateMainClass = "grid min-w-0 gap-0.5 [&_*]:min-w-0 [&>strong]:line-clamp-2 [&>strong]:break-words [&>small]:truncate";
@@ -63,10 +63,10 @@ const categoryPillClass = `${pillSurfaceClass} text-[var(--accent-cool-2)]`;
 const editorHeaderClass = "min-[1400px]:col-span-full flex min-w-0 items-start justify-between gap-3";
 const sourceDetailsClass = "min-[1400px]:col-span-full min-w-0 [&>summary]:cursor-pointer [&>summary]:py-1 [&>summary]:text-vui-fg-secondary";
 const editorMetaClass = "grid grid-cols-3 gap-1.5 max-[980px]:grid-cols-1";
-const detailRowClass = "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-2 gap-y-0 border-0 border-b border-[color-mix(in_srgb,var(--border-soft)_62%,transparent)] bg-transparent px-0 py-[5px] last:border-b-0";
+const detailRowClass = "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-2 gap-y-0 border-0 border-b border-[color-mix(in_srgb,var(--border-soft)_62%,transparent)] bg-transparent px-0 py-1 last:border-b-0";
 const detailLabelClass = "[font-size:var(--vui-font-xs)] text-vui-fg-tertiary";
 const detailValueClass = "min-w-0 truncate [font-size:var(--vui-font-xs)] text-vui-fg-primary";
-const fieldClass = "grid min-w-0 gap-[5px]";
+const fieldClass = "grid min-w-0 gap-1";
 const fieldLabelClass = "[font-size:var(--vui-font-xs)] font-bold text-vui-fg-tertiary";
 const fieldInputClass = `min-h-8 w-full min-w-0 ${fieldSurfaceClass} px-2 text-vui-fg-primary`;
 const nameFieldClass = "min-[1400px]:col-span-full self-start";
@@ -79,7 +79,7 @@ const cardTitleClass = "m-0 font-[var(--font-display)] text-vui-sm text-vui-fg-p
 const helperTextClass = "m-0 [font-size:var(--vui-font-xs)] leading-[1.3] text-vui-fg-secondary";
 const defaultPreviewSummaryClass = "cursor-pointer list-item py-1 [&>h3]:inline [&>span]:ml-2";
 const detailCardHelperClass = `${helperTextClass} max-h-[20rem] overflow-auto whitespace-pre-wrap break-words`;
-const agentRowsClass = "grid max-h-[140px] gap-[5px] overflow-auto";
+const agentRowsClass = "grid max-h-[140px] gap-1 overflow-auto";
 const agentItemClass = `grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-2.5 gap-y-1 ${vuiOpaqueRowClass} px-2 py-1.5 [&_*]:min-w-0`;
 const agentItemLinkedClass = "border-[color-mix(in_srgb,var(--accent-cool)_46%,var(--border-soft))] bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-row))]";
 const agentNameClass = "truncate";

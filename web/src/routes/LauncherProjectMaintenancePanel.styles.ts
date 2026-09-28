@@ -10,28 +10,28 @@ const primaryControl =
 
 const styles = {
   // Wave 6F: height from PersistedHeightListShell, not fixed max-h.
-  cleanupConsole: `grid min-h-0 min-w-0 gap-1.5 overflow-auto ${rowSurface} p-[7px] [scrollbar-gutter:stable]`,
+  cleanupConsole: `grid min-h-0 min-w-0 gap-1.5 overflow-auto ${rowSurface} p-2 [scrollbar-gutter:stable]`,
   cleanupConsoleResizeHandle:
     "cleanupConsoleResizeHandle",
   cleanupMetrics: "flex min-w-0 flex-wrap items-center gap-1.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_span]:text-[var(--fg-tertiary)] [&_strong]:text-[var(--fg-primary)] max-[620px]:grid max-[620px]:grid-cols-[minmax(0,1fr)]",
-  cleanupPlan: "grid min-w-0 gap-[3px] rounded-md border border-[color-mix(in_srgb,var(--state-warning)_34%,var(--border-soft))] bg-[color-mix(in_srgb,var(--state-warning)_6%,var(--vui-surface-row))] p-1.5 [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)] [&_small]:min-w-0 [&_small]:truncate [&_small]:[font-size:var(--vui-font-xs)] [&_small]:text-[var(--fg-secondary)] [&_li]:min-w-0 [&_li]:truncate [&_li]:[font-size:var(--vui-font-xs)] [&_li]:text-[var(--fg-secondary)] [&_ul]:m-0 [&_ul]:grid [&_ul]:min-w-0 [&_ul]:gap-0.5 [&_ul]:pl-4",
+  cleanupPlan: "grid min-w-0 gap-1 rounded-md border border-[color-mix(in_srgb,var(--state-warning)_34%,var(--border-soft))] bg-[color-mix(in_srgb,var(--state-warning)_6%,var(--vui-surface-row))] p-1.5 [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)] [&_small]:min-w-0 [&_small]:truncate [&_small]:[font-size:var(--vui-font-xs)] [&_small]:text-[var(--fg-secondary)] [&_li]:min-w-0 [&_li]:truncate [&_li]:[font-size:var(--vui-font-xs)] [&_li]:text-[var(--fg-secondary)] [&_ul]:m-0 [&_ul]:grid [&_ul]:min-w-0 [&_ul]:gap-0.5 [&_ul]:pl-4",
   developerGrid: "grid min-h-0 min-w-0 grid-cols-[clamp(120px,14vw,160px)_minmax(0,1fr)_clamp(240px,22vw,360px)] gap-1.5 max-[1200px]:grid-cols-[minmax(0,1fr)]",
-  developerNoise: `grid min-h-0 min-w-0 gap-1.5 overflow-hidden ${rowSurface} p-[7px]`,
+  developerNoise: `grid min-h-0 min-w-0 gap-1.5 overflow-hidden ${rowSurface} p-2`,
   developerNoiseHeader: "flex min-w-0 items-center justify-between gap-2 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_span]:text-[var(--fg-tertiary)]",
   developerPanel: `mx-2 mt-1.5 grid min-h-0 min-w-0 max-w-full gap-1.5 overflow-hidden ${panelSurface} px-2 py-1.5 data-[enabled=true]:border-[color-mix(in_srgb,var(--state-warning)_42%,transparent)]`,
   developerPanelHeader: "flex min-w-0 items-center justify-between gap-2 max-[860px]:flex-col max-[860px]:items-start [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)]",
-  developerStatus: `grid min-w-0 content-start gap-1 ${rowSurface} p-[7px] data-[tone=warning]:border-[color-mix(in_srgb,var(--state-warning)_42%,transparent)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary [&_small]:min-w-0 [&_small]:truncate [&_small]:[font-size:var(--vui-font-xs)] [&_small]:text-vui-fg-secondary`,
+  developerStatus: `grid min-w-0 content-start gap-1 ${rowSurface} p-2 data-[tone=warning]:border-[color-mix(in_srgb,var(--state-warning)_42%,transparent)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary [&_small]:min-w-0 [&_small]:truncate [&_small]:[font-size:var(--vui-font-xs)] [&_small]:text-vui-fg-secondary`,
   iconButton: primaryControl,
-  noiseItem: "grid min-w-0 gap-0.5 rounded-md border border-[color-mix(in_srgb,var(--border-soft)_72%,transparent)] px-1.5 py-[5px] data-[protected=true]:opacity-80 [&_span]:min-w-0 [&_span]:truncate [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-[var(--fg-secondary)] [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)] [&_small]:min-w-0 [&_small]:truncate [&_small]:[font-size:var(--vui-font-xs)] [&_small]:text-[var(--fg-secondary)]",
+  noiseItem: "grid min-w-0 gap-0.5 rounded-md border border-[color-mix(in_srgb,var(--border-soft)_72%,transparent)] px-1.5 py-1 data-[protected=true]:opacity-80 [&_span]:min-w-0 [&_span]:truncate [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-[var(--fg-secondary)] [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)] [&_small]:min-w-0 [&_small]:truncate [&_small]:[font-size:var(--vui-font-xs)] [&_small]:text-[var(--fg-secondary)]",
   // Wave 6G: height from PersistedHeightListShell, not fixed max-h.
-  noiseItemGrid: "grid min-h-0 min-w-0 grid-cols-4 gap-[5px] overflow-auto pr-0.5 [scrollbar-gutter:stable] max-[860px]:grid-cols-[minmax(0,1fr)]",
+  noiseItemGrid: "grid min-h-0 min-w-0 grid-cols-4 gap-1 overflow-auto pr-0.5 [scrollbar-gutter:stable] max-[860px]:grid-cols-[minmax(0,1fr)]",
   noiseItemGridResizeHandle:
     "noiseItemGridResizeHandle",
   panelEyebrow: "m-0 [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-[var(--fg-tertiary)]",
   primaryButton: primaryControl,
   segmentedControl: `inline-flex min-w-0 max-w-full flex-wrap items-center gap-0.5 ${vuiOpaqueRowClass} p-0.5 max-[860px]:justify-self-start`,
   segmentedTrigger: [
-    "min-h-[25px] !rounded-[calc(var(--radius-control)-2px)] !border-0 !bg-transparent !px-[7px] !py-[3px]",
+    "min-h-[25px] !rounded-[calc(var(--radius-control)-2px)] !border-0 !bg-transparent !px-2 !py-1",
     "[font-size:var(--vui-font-xs)] leading-none text-[var(--fg-secondary)]",
     "data-[state=active]:!bg-[color-mix(in_srgb,var(--accent-primary)_11%,var(--vui-surface-panel))]",
     "data-[state=active]:!text-[var(--fg-primary)] data-[state=active]:shadow-none",

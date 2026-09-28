@@ -186,7 +186,7 @@ describe("SupervisedReviewRoute layout contract", () => {
   it("keeps review empty states compact enough for the first viewport", () => {
     expect(routeSource).toContain("className={styles.emptyState}");
     expect(routeStylesSource).toContain("min-h-[82px]");
-    expect(routeStylesSource).toContain("px-[11px] py-[9px]");
+    expect(routeStylesSource).toContain("px-3 py-2");
     expect(routeStylesSource).not.toContain("min-h-[118px]");
   });
 

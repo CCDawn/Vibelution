@@ -50,7 +50,7 @@ export type AgentDenseListProps = {
 };
 
 const PILL_BASE =
-  "inline-flex items-center justify-center min-h-[22px] px-[7px] border rounded-full [font-size:var(--vui-font-xs)] font-bold not-italic whitespace-nowrap";
+  "inline-flex items-center justify-center min-h-[22px] px-2 border rounded-full [font-size:var(--vui-font-xs)] font-bold not-italic whitespace-nowrap";
 
 const ROLE_TAG_BASE =
   "inline-flex min-h-[18px] max-w-full items-center justify-self-start overflow-hidden text-ellipsis whitespace-nowrap px-0.5 [font-size:var(--vui-font-xs)] font-[600] not-italic leading-none text-[var(--fg-secondary)]";
@@ -186,7 +186,7 @@ export function AgentDenseList({
             "grid content-start gap-1.5 min-w-0",
             index === 0
               ? ""
-              : "pt-[7px] border-t border-[color-mix(in_srgb,var(--border-soft)_76%,transparent)]",
+              : "pt-2 border-t border-[color-mix(in_srgb,var(--border-soft)_76%,transparent)]",
           ]
             .filter(Boolean)
             .join(" ")}

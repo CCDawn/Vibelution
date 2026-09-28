@@ -3,7 +3,7 @@ import { vuiFlatPanelClass } from "../design/vuiSurfaceRecipes";
 const panelSurface = `${vuiFlatPanelClass}`;
 const rowSurfaceMuted = "rounded-md border border-vui-border-subtle bg-vui-surface-row";
 const styles = {
-  panel: `mx-2 mt-1.5 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${panelSurface} px-2 py-[7px]`,
+  panel: `mx-2 mt-1.5 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${panelSurface} px-2 py-2`,
   panelBody: "flex min-h-0 min-w-0 flex-1 flex-col",
   panelHeader:
     "flex min-h-0 min-w-0 flex-wrap items-center justify-between gap-2 border-b border-[var(--border-soft)] pb-1.5",

@@ -26,7 +26,7 @@ const reviewTextAreaField = [reviewFormLabel, reviewTextAreaTargets].join(" ");
 
 const styles = {
   page:
-    "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_auto_minmax(0,1fr)] gap-1.5 overflow-hidden overflow-x-hidden px-2 py-1.5 pb-2.5 text-[var(--fg-primary)] max-[980px]:overflow-y-auto max-[980px]:overflow-x-hidden max-[980px]:pb-[18px]",
+    "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_auto_minmax(0,1fr)] gap-1.5 overflow-hidden overflow-x-hidden px-2 py-1.5 pb-2.5 text-[var(--fg-primary)] max-[980px]:overflow-y-auto max-[980px]:overflow-x-hidden max-[980px]:pb-4",
   header:
     "min-w-0 border-transparent !bg-transparent !shadow-none !backdrop-blur-none",
   toolbarStack: "grid min-w-0 shrink-0 gap-1.5",
@@ -49,10 +49,10 @@ const styles = {
   // Placement-only residual for layout gate; recipe uses VSplitWorkspace handles.
   resizeHandle: "max-[980px]:hidden",
   queuePanel:
-    `grid min-h-0 min-w-0 max-w-full grid-rows-[auto_auto_auto_auto_minmax(0,1fr)] gap-2 overflow-hidden p-[9px] max-[980px]:max-h-[min(620px,72vh)] max-[980px]:overflow-hidden ${reviewPanelSurface}`,
+    `grid min-h-0 min-w-0 max-w-full grid-rows-[auto_auto_auto_auto_minmax(0,1fr)] gap-2 overflow-hidden p-2 max-[980px]:max-h-[min(620px,72vh)] max-[980px]:overflow-hidden ${reviewPanelSurface}`,
   paneCollapsed: "overflow-hidden p-0 invisible",
   detailPanel:
-    `flex min-h-0 min-w-0 max-w-full flex-col gap-2.5 overflow-y-auto overflow-x-hidden p-[9px] max-[980px]:overflow-y-visible max-[980px]:overflow-x-hidden ${reviewPanelSurface}`,
+    `flex min-h-0 min-w-0 max-w-full flex-col gap-2.5 overflow-y-auto overflow-x-hidden p-2 max-[980px]:overflow-y-visible max-[980px]:overflow-x-hidden ${reviewPanelSurface}`,
   panelHeader: "flex min-w-0 items-start justify-between gap-3.5",
   detailHeader: "flex min-w-0 items-start justify-between gap-3.5 max-[520px]:flex-col",
   sectionHeader: "flex min-w-0 items-start justify-between gap-3.5 max-[520px]:flex-col",
@@ -104,7 +104,7 @@ const styles = {
   bulkActions: "flex min-w-0 flex-wrap items-center justify-end gap-1.5 max-[520px]:justify-start",
   queueList: "flex min-h-0 max-w-full flex-col gap-1.5 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-gutter:stable] max-[980px]:max-h-none",
   queueItem:
-    `w-full cursor-pointer px-2.5 py-[9px] text-left text-inherit transition hover:border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] hover:!bg-[var(--vui-surface-row-hover)] ${reviewRowSurface}`,
+    `w-full cursor-pointer px-2.5 py-2 text-left text-inherit transition hover:border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] hover:!bg-[var(--vui-surface-row-hover)] ${reviewRowSurface}`,
   queueItemActive:
     "border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,var(--vui-surface-row))]",
   queueItemTop: "flex items-center justify-between gap-2.5",
@@ -127,19 +127,19 @@ const styles = {
   metricCard:
     `min-w-0 px-2.5 py-2 ${reviewRowSurfaceSoft} [&_span]:mb-1 [&_span]:block [&_span]:text-vui-xs [&_span]:uppercase [&_span]:tracking-[0.08em] [&_span]:text-vui-fg-tertiary [&_strong]:block [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:leading-normal [&_p]:m-0 [&_p]:mt-1 [&_p]:leading-snug [&_p]:text-vui-fg-secondary`,
   signalSection:
-    `min-w-0 px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-vui-sm [&_h3]:font-bold [&_ul]:m-0 [&_ul]:pl-[18px] [&_ul]:leading-relaxed [&_ul]:text-vui-fg-secondary`,
+    `min-w-0 px-2.5 py-2 ${reviewRowSurfaceSoft} [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-vui-sm [&_h3]:font-bold [&_ul]:m-0 [&_ul]:pl-4 [&_ul]:leading-relaxed [&_ul]:text-vui-fg-secondary`,
   detailSection:
-    `min-w-0 px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-vui-sm [&_h3]:font-bold`,
+    `min-w-0 px-2.5 py-2 ${reviewRowSurfaceSoft} [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-vui-sm [&_h3]:font-bold`,
   decisionSection:
-    `grid min-w-0 gap-2 border-[color-mix(in_srgb,var(--accent-warm)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_6%,var(--vui-surface-row))] px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-vui-sm [&_h3]:font-bold`,
+    `grid min-w-0 gap-2 border-[color-mix(in_srgb,var(--accent-warm)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_6%,var(--vui-surface-row))] px-2.5 py-2 ${reviewRowSurfaceSoft} [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-vui-sm [&_h3]:font-bold`,
   transcriptSection:
-    `min-w-0 px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_summary]:cursor-pointer [&_summary]:font-semibold`,
+    `min-w-0 px-2.5 py-2 ${reviewRowSurfaceSoft} [&_summary]:cursor-pointer [&_summary]:font-semibold`,
   evidenceList: "flex max-h-[clamp(168px,28vh,280px)] min-h-0 flex-col gap-1.5 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-gutter:stable]",
   transcriptList: "flex max-h-[clamp(220px,36vh,420px)] min-h-0 flex-col gap-1.5 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-gutter:stable]",
   evidenceCard:
-    `min-w-0 px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_p]:m-0 [&_p]:mt-2 [&_p]:whitespace-pre-wrap [&_p]:break-words [&_p]:leading-normal`,
+    `min-w-0 px-2.5 py-2 ${reviewRowSurfaceSoft} [&_p]:m-0 [&_p]:mt-2 [&_p]:whitespace-pre-wrap [&_p]:break-words [&_p]:leading-normal`,
   transcriptCard:
-    `min-w-0 px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_p]:m-0 [&_p]:mt-2 [&_p]:whitespace-pre-wrap [&_p]:break-words [&_p]:leading-normal`,
+    `min-w-0 px-2.5 py-2 ${reviewRowSurfaceSoft} [&_p]:m-0 [&_p]:mt-2 [&_p]:whitespace-pre-wrap [&_p]:break-words [&_p]:leading-normal`,
   evidenceTop:
     "grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] items-center gap-2.5 [&_span]:min-w-0 [&_span]:truncate [&_span]:text-right max-[520px]:grid-cols-1 max-[520px]:items-start max-[520px]:[&_span]:text-left",
   formField: reviewFormField,
@@ -153,7 +153,7 @@ const styles = {
   metaRow:
     "grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] items-start gap-2.5 text-[var(--fg-secondary)] [&_span]:min-w-0 [&_span]:break-all [&_span]:text-right max-[520px]:grid-cols-1 max-[520px]:[&_span]:text-left",
   emptyState:
-    "flex min-h-[82px] flex-col justify-center gap-1 rounded-[var(--radius-panel)] border border-dashed border-[var(--border-strong)] px-[11px] py-[9px] text-[var(--fg-secondary)] [&_h3]:m-0 [&_h3]:text-[var(--fg-primary)]",
+    "flex min-h-[82px] flex-col justify-center gap-1 rounded-[var(--radius-panel)] border border-dashed border-[var(--border-strong)] px-3 py-2 text-[var(--fg-secondary)] [&_h3]:m-0 [&_h3]:text-[var(--fg-primary)]",
   spin: "animate-spin",
 } as const;
 

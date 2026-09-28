@@ -40,7 +40,7 @@ const styles = {
     "workflowMeta min-w-0 flex flex-wrap items-center gap-1.5",
   workflowPanel: `workflowPanel min-w-0 ${vuiFlatPanelClass} p-2`,
   workflowSourceQualityStats:
-    "workflowSourceQualityStats min-w-0 grid gap-2 !grid grid-cols-[repeat(5,minmax(72px,1fr))] gap-[5px]",
+    "workflowSourceQualityStats min-w-0 grid gap-2 !grid grid-cols-[repeat(5,minmax(72px,1fr))] gap-1",
   workflowStageActive:
     `workflowStageActive min-w-0 ${vuiStateSelectedRowClass}`,
   workflowStageList:

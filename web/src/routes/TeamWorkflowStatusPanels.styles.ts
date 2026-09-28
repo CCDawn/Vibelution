@@ -45,14 +45,14 @@ const styles = {
     "workflowModelEvidenceStats min-w-0 grid gap-2 !grid grid-cols-[repeat(auto-fit,minmax(118px,1fr))] gap-1.5",
   workflowPaperNoteChunkPanel: `workflowPaperNoteChunkPanel min-w-0 ${vuiFlatPanelClass} p-2`,
   workflowPaperNoteChunkPlans:
-    "workflowPaperNoteChunkPlans min-w-0 !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[5px] max-[760px]:grid-cols-[minmax(0,1fr)] [&_span]:min-w-0 [&_span]:grid [&_span]:gap-0.5 [&_small]:min-w-0 [&_small]:break-words [&_small]:[overflow-wrap:anywhere] [&_strong]:min-w-0 [&_strong]:truncate",
+    "workflowPaperNoteChunkPlans min-w-0 !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-1 max-[760px]:grid-cols-[minmax(0,1fr)] [&_span]:min-w-0 [&_span]:grid [&_span]:gap-0.5 [&_small]:min-w-0 [&_small]:break-words [&_small]:[overflow-wrap:anywhere] [&_strong]:min-w-0 [&_strong]:truncate",
   workflowPaperNoteChunkStats:
-    "workflowPaperNoteChunkStats min-w-0 grid gap-2 !grid grid-cols-[repeat(4,minmax(86px,1fr))] gap-[5px] max-[760px]:grid-cols-[minmax(0,1fr)] [&_span]:min-w-0 [&_span]:break-words",
+    "workflowPaperNoteChunkStats min-w-0 grid gap-2 !grid grid-cols-[repeat(4,minmax(86px,1fr))] gap-1 max-[760px]:grid-cols-[minmax(0,1fr)] [&_span]:min-w-0 [&_span]:break-words",
   workflowSourceQualityPanel: `workflowSourceQualityPanel min-w-0 ${vuiFlatPanelClass} p-2`,
   workflowSourceQualityQueue:
-    "workflowSourceQualityQueue min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[5px] max-[760px]:grid-cols-[minmax(0,1fr)] [&_span]:min-w-0 [&_span]:grid [&_span]:gap-0.5 [&_small]:min-w-0 [&_small]:break-words [&_strong]:min-w-0 [&_strong]:truncate",
+    "workflowSourceQualityQueue min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-1 max-[760px]:grid-cols-[minmax(0,1fr)] [&_span]:min-w-0 [&_span]:grid [&_span]:gap-0.5 [&_small]:min-w-0 [&_small]:break-words [&_strong]:min-w-0 [&_strong]:truncate",
   workflowSourceQualityStats:
-    "workflowSourceQualityStats min-w-0 grid gap-2 !grid grid-cols-[repeat(5,minmax(72px,1fr))] gap-[5px] max-[760px]:grid-cols-[minmax(0,1fr)] [&_span]:min-w-0 [&_span]:break-words",
+    "workflowSourceQualityStats min-w-0 grid gap-2 !grid grid-cols-[repeat(5,minmax(72px,1fr))] gap-1 max-[760px]:grid-cols-[minmax(0,1fr)] [&_span]:min-w-0 [&_span]:break-words",
   workflowTag:
     "workflowTag min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 truncate rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   workflowTagDanger:

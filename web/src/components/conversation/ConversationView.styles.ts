@@ -438,7 +438,7 @@ backToBottomButton:
   codexTranscriptCompactErrorSummary:
     "vui-components-conversationview codexTranscriptCompactErrorSummary min-w-0 flex-1 whitespace-normal break-words text-vui-xs leading-[var(--vui-line-tight)] text-[var(--fg-tertiary)] [overflow-wrap:anywhere]",
   codexTranscriptCellIcon:
-    "vui-components-conversationview codexTranscriptCellIcon mt-[0.15rem] grid size-4 shrink-0 place-items-center text-[var(--fg-tertiary)]",
+    "vui-components-conversationview codexTranscriptCellIcon mt-1 grid size-4 shrink-0 place-items-center text-[var(--fg-tertiary)]",
   codexTranscriptCellMeta:
     "vui-components-conversationview codexTranscriptCellMeta inline-flex min-w-0 shrink-0 align-baseline whitespace-nowrap text-vui-xs leading-[var(--vui-line-tight)] text-[var(--fg-tertiary)]",
   codexTranscriptCellSummary:
@@ -461,7 +461,7 @@ backToBottomButton:
   codexTranscriptCell_warning:
     "vui-components-conversationview codexTranscriptCell_warning text-[var(--state-warning)] [&_.codexTranscriptCellIcon]:text-[var(--state-warning)] [&_.codexTranscriptCellMeta]:text-[var(--state-warning)] [&_.codexTranscriptCellTitle]:text-[var(--state-warning)]",
   codexTranscriptProcessCell:
-    "vui-components-conversationview codexTranscriptProcessCell grid grid-cols-[15px_minmax(0,1fr)] items-start gap-x-2 gap-y-0.5 border-0 bg-transparent py-[0.2rem] text-vui-xs leading-[1.45] text-[var(--fg-tertiary)]",
+    "vui-components-conversationview codexTranscriptProcessCell grid grid-cols-[15px_minmax(0,1fr)] items-start gap-x-2 gap-y-0.5 border-0 bg-transparent py-1 text-vui-xs leading-[1.45] text-[var(--fg-tertiary)]",
   codexTranscriptReasoningCell:
     "vui-components-conversationview codexTranscriptReasoningCell min-w-0 grid min-h-0 content-start gap-1 border-0 bg-transparent py-1 text-vui-sm leading-[var(--vui-line-readable)]",
   // Native thought header: icon + title only (no collapse chevron column).
@@ -1110,7 +1110,7 @@ backToBottomButton:
   responseToggle:
     "vui-components-conversationview responseToggle min-w-0 !grid !h-auto !w-full grid-cols-[auto_auto_minmax(0,1fr)] !items-center !justify-start gap-x-1.5 !border-0 !bg-transparent !p-0 !text-left text-[var(--fg-secondary)] !shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   rolloutTraceDot:
-    "vui-components-conversationview rolloutTraceDot mt-[0.45rem] size-1.5 shrink-0 rounded-full bg-current opacity-70",
+    "vui-components-conversationview rolloutTraceDot mt-2 size-1.5 shrink-0 rounded-full bg-current opacity-70",
   rolloutTraceItem:
     "vui-components-conversationview rolloutTraceItem min-w-0 flex items-start gap-1.5 text-vui-xs leading-[1.35] text-[var(--fg-tertiary)]",
   rolloutTraceItem_completed:
@@ -1189,7 +1189,7 @@ backToBottomButton:
   surface:
     "vui-components-conversationview surface relative flex h-full max-h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-strong)_var(--vui-alpha-veil),transparent)] bg-[var(--vui-surface-chat)] shadow-none",
   surfaceCompact:
-    "vui-components-conversationview surfaceCompact rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-strong)_70%,transparent)] bg-[var(--vui-surface-chat)] [&_.timeline]:bg-[var(--vui-surface-chat)] [&_.timeline]:pt-[9px] [&_.timeline]:pb-[11px] [&_.composer]:gap-[7px] [&_.composer]:px-2.5 [&_.composer]:pt-1.5 [&_.composer]:pb-2",
+    "vui-components-conversationview surfaceCompact rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-strong)_70%,transparent)] bg-[var(--vui-surface-chat)] [&_.timeline]:bg-[var(--vui-surface-chat)] [&_.timeline]:pt-2 [&_.timeline]:pb-3 [&_.composer]:gap-2 [&_.composer]:px-2.5 [&_.composer]:pt-1.5 [&_.composer]:pb-2",
   thoughtMetaPill:
     "vui-components-conversationview thoughtMetaPill min-w-0 flex flex-wrap items-center gap-1.5 inline-flex min-h-6 w-fit max-w-full justify-center rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-vui-xs font-semibold leading-none text-[var(--fg-secondary)]",
   thoughtMetaRow: `vui-components-conversationview thoughtMetaRow min-w-0 flex flex-wrap items-center gap-1.5 ${vuiOpaqueRowClass} p-2`,
@@ -1239,7 +1239,7 @@ timeline:
   timelineCommandList:
     "vui-components-conversationview timelineCommandList min-w-0 grid min-h-0 content-start gap-0 border-0 py-1 my-0.5 max-h-[min(18rem,42vh)] overflow-y-auto overflow-x-hidden [scrollbar-width:thin]",
   timelineCommandRow:
-    "vui-components-conversationview timelineCommandRow min-w-0 grid grid-cols-[15px_minmax(0,1fr)] items-start gap-x-2 gap-y-0.5 border-0 bg-transparent py-[0.35rem] text-vui-xs leading-[1.45] text-[var(--fg-tertiary)]",
+    "vui-components-conversationview timelineCommandRow min-w-0 grid grid-cols-[15px_minmax(0,1fr)] items-start gap-x-2 gap-y-0.5 border-0 bg-transparent py-1 text-vui-xs leading-[1.45] text-[var(--fg-tertiary)]",
   timelineHistoryButton:
     "vui-components-conversationview timelineHistoryButton min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-vui-xs font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   timelineHistoryGate:
