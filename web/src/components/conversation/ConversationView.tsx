@@ -1665,7 +1665,7 @@ export const ConversationView = React.memo(function ConversationView({
     count: timelineHistoryMessages.length,
     getScrollElement: getTimelineScrollElement,
     estimateSize: () => CONVERSATION_VIRTUAL_ROW_ESTIMATE_PX,
-    getItemKey: (index) => timelineHistoryRowKeys[index] ?? `timeline-row-${index}`,
+    getItemKey: (index: number) => timelineHistoryRowKeys[index] ?? `timeline-row-${index}`,
     overscan: TIMELINE_VIRTUAL_OVERSCAN,
     gap: TIMELINE_VIRTUAL_ROW_GAP_PX,
     scrollMargin: TIMELINE_VIRTUAL_SCROLL_MARGIN_PX,
