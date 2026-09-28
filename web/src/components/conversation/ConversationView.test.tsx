@@ -1038,7 +1038,9 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     // react-virtual owns row measurement: stable keys feed its item-size cache,
     // and row refs delegate to measureElement (rAF-batched ResizeObserver).
     expect(conversationViewSource).toContain("useVirtualizer({");
-    expect(conversationViewSource).toContain("getItemKey: (index) => timelineHistoryRowKeys[index]");
+    expect(conversationViewSource).toContain(
+      "getItemKey: (index) => timelineHistoryRowKeys[index] ?? `timeline-row-${index}`",
+    );
     expect(conversationViewSource).toContain("measureTimelineVirtualRow");
     expect(conversationViewSource).toContain("useAnimationFrameWithResizeObserver: true");
     expect(conversationViewSource).not.toContain("timelineRowResizeObserversRef");
