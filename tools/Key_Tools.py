@@ -2223,6 +2223,10 @@ def _build_key_tools() -> List[BaseTool]:
 
         Returns:
             JSON 格式的发送结果，含 messageId、targetSessionId、wakeStatus。
+            historyStatus: appended=正文已落目标会话；pending=结果未知；
+            deferred=延后；rejected=永久失败。目标正忙时不打断对方
+            (skipped_busy + deferred)，正文由空闲唤醒在对方当前轮结束后
+            落会话历史。
         """
         return _agent_message_impl(
             content=content,

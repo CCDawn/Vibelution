@@ -615,13 +615,56 @@ def _deliver_event_to_recipients(event: dict[str, Any], task: dict[str, Any]) ->
                     wake_status = str((delivery.get("wake") or {}).get("wakeStatus") or "").strip()
                     turn_id = str((delivery.get("wake") or {}).get("turnId") or "").strip()
                     # Body lands on session via submit_session_message during wake.
-                    if wake_status in {"started", "started_consume_failed", "skipped_busy"}:
-                        delivery["historyStatus"] = "appended" if wake_status == "started" else "pending"
+                    # ADR 0002 (amended 2026-09-28): historyStatus is one of
+                    # appended | pending | deferred | rejected.
+                    if wake_status in {"started", "started_consume_failed"}:
+                        # started_consume_failed: submit_session_message already
+                        # landed the body before consume failed.
+                        delivery["historyStatus"] = "appended"
                         delivery["historyMessageId"] = inbox_message_id
                     elif wake_status == "skipped_busy":
+                        # Target session is running: never mutate its history
+                        # mid-turn and keep the pending row so the idle drain
+                        # wakes it after release. For summary-only session-SSOT
+                        # rows, promote the row to the full body so the drain
+                        # wake lands the body verbatim (ADR 0002 amended
+                        # 2026-09-28). The body itself lands with that drain
+                        # turn, so the receipt stays deferred here.
+                        if session_ssot and resolved_target_session:
+                            try:
+                                agent_directory_service.promote_agent_inbox_message_body(
+                                    target_agent_id,
+                                    inbox_message_id,
+                                    content=content,
+                                )
+                            except Exception as promote_exc:
+                                record_runtime_scene_event(
+                                    "agent_kernel",
+                                    "runtime",
+                                    "kernel.delivery.busy_promote_failed",
+                                    message="kernel.delivery.busy_promote_failed",
+                                    level="warning",
+                                    outcome="drain_wakes_with_summary",
+                                    fields={
+                                        "messageId": inbox_message_id,
+                                        "targetAgentId": target_agent_id,
+                                        "targetSessionId": resolved_target_session,
+                                        "error": type(promote_exc).__name__,
+                                    },
+                                )
                         delivery["historyStatus"] = "deferred"
+                    elif wake_status == "skipped_in_flight":
+                        # Another wake for the same message is in flight and will
+                        # land the body; appending here would double-land it.
+                        delivery["historyStatus"] = "deferred"
+                    elif wake_status.startswith("skipped"):
+                        # Permanent skip reasons (invalid session, owner mismatch,
+                        # policy, archived/missing agent, no direct session).
+                        delivery["historyStatus"] = "rejected"
                     else:
-                        delivery["historyStatus"] = "rejected" if wake_status.startswith("skipped") else "pending"
+                        # failed / unknown: whether the body landed is unknown;
+                        # do not append here to avoid double-landing.
+                        delivery["historyStatus"] = "pending"
                     if turn_id:
                         delivery["historyMessageId"] = delivery.get("historyMessageId") or inbox_message_id
                 except Exception as wake_exc:

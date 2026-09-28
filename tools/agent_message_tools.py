@@ -48,6 +48,11 @@ def agent_message_tool(
     Returns:
         JSON with ok/status, messageId, targetSessionId, targetAgentId, wakeStatus,
         historyStatus, inboxStatus, and delivery details.
+
+        historyStatus: appended = 正文已落目标会话历史；pending = 落库结果未知
+        (唤醒异常)；deferred = 延后 (目标会话正忙、同消息在途唤醒等，正文由
+        空闲唤醒在其当前轮结束后落会话历史)；rejected = 永久失败未落库。
+        目标会话正忙时不打断对方 (wakeStatus=skipped_busy + historyStatus=deferred)。
     """
 
     try:
@@ -300,7 +305,7 @@ def agent_message_tool(
                 "targetAgentId": target_agent_id,
                 "targetAgentCode": target_agent_payload.get("agentCode") or "",
                 "targetSessionId": resolved_target_session,
-                "historyStatus": "appended" if sent and bool(wake_target) else ("recorded" if sent else "rejected"),
+                "historyStatus": str(delivery.get("historyStatus") or "").strip() or ("appended" if sent and bool(wake_target) else ("recorded" if sent else "rejected")),
                 "inboxStatus": "recorded" if sent else "failed",
                 "wakeStatus": wake_status,
                 "reason": delivery.get("reason") or "",
@@ -532,6 +537,8 @@ def _flatten_kernel_delivery(
         "messageId": message_id,
         "targetAgentId": str(delivery.get("targetAgentId") or target_agent_id or "").strip(),
         "targetSessionId": resolved_target_session_id,
+        "historyStatus": str(delivery.get("historyStatus") or "").strip(),
+        "historyMessageId": str(delivery.get("historyMessageId") or "").strip(),
         "wakeRequested": bool(wake.get("wakeRequested", wake_target)),
         "wakeStatus": str(wake.get("wakeStatus") or ("not_requested" if not wake_target else "")).strip(),
         "turnId": str(wake.get("turnId") or "").strip(),
@@ -644,7 +651,7 @@ def _try_send_same_team_message(
         "targetAgentId": target_agent_id,
         "targetAgentCode": target_agent.get("agentCode") or "",
         "targetSessionId": resolved_target_session,
-        "historyStatus": "appended" if sent and bool(wake_target) else ("recorded" if sent else "rejected"),
+        "historyStatus": str(delivery.get("historyStatus") or "").strip() or ("appended" if sent and bool(wake_target) else ("recorded" if sent else "rejected")),
         "inboxStatus": "recorded" if sent else "failed",
         "wakeStatus": wake_status,
         "reason": delivery.get("reason") or "",

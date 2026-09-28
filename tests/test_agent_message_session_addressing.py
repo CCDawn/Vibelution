@@ -556,3 +556,463 @@ def test_wake_prefers_persisted_target_session(monkeypatch) -> None:
     assert delivery["targetSessionId"] == "session-collab-tab"
     assert delivery["wakeStatus"] in {"started", "succeeded", "ok"} or calls
     assert calls and calls[0][0] == "session-collab-tab"
+
+
+# ---------------------------------------------------------------------------
+# Kernel delivery historyStatus contract (ADR 0002 amended 2026-09-28):
+# appended | pending | deferred | rejected; skipped_busy lands the full body on
+# the busy session without waking and consumes the inbox row afterwards.
+# ---------------------------------------------------------------------------
+
+
+def _kernel_delivery_event(**overrides) -> dict:
+    event = {
+        "eventId": "evt-deliv-1",
+        "recipients": ["agent-target"],
+        "senderAgentId": "agent-source",
+        "correlationId": "thread-deliv-1",
+        "semanticPayload": {"semanticType": "agent.message", "payload": {"content": "full body"}},
+        "deliveryPolicy": {"wakeTarget": True},
+        "metadata": {"targetSessionId": "session-target"},
+    }
+    event.update(overrides)
+    return event
+
+
+def _kernel_delivery_task() -> dict:
+    return {"taskId": "task-deliv-1", "goal": "deliver"}
+
+
+def _patch_kernel_delivery(
+    monkeypatch,
+    *,
+    wake: dict | None = None,
+    wake_raises: Exception | None = None,
+    append_result: dict | None = None,
+    inbox_row: dict | None = None,
+    promote_raises: Exception | None = None,
+) -> SimpleNamespace:
+    from core.agent_kernel import service as kernel_service
+    import core.web.services.agent_directory_service as ads
+    from core.web.services import session_service
+
+    calls = SimpleNamespace(wake=[], append=[], consume=[], inbox=[], promote=[], scenes=[])
+
+    monkeypatch.setattr(kernel_service, "_ensure_agent_directory_root", lambda: None)
+    monkeypatch.setattr(kernel_service, "_ensure_session_root", lambda: None)
+    monkeypatch.setattr(
+        kernel_service,
+        "record_runtime_scene_event",
+        lambda *a, **k: calls.scenes.append({"args": a, "kwargs": k}),
+    )
+
+    def fake_write_inbox(agent_id, **kwargs):
+        calls.inbox.append({"agentId": agent_id, **kwargs})
+        if inbox_row is not None:
+            return dict(inbox_row)
+        return {"messageId": "agentmsg-k1", "targetSessionId": kwargs.get("target_session_id") or ""}
+
+    monkeypatch.setattr(ads, "write_agent_inbox_message", fake_write_inbox)
+
+    if promote_raises is not None:
+        def fake_promote(*a, **k):
+            calls.promote.append({"args": a, "kwargs": k})
+            raise promote_raises
+    else:
+        def fake_promote(*a, **k):
+            calls.promote.append({"args": a, "kwargs": k})
+            return {}
+
+    monkeypatch.setattr(ads, "promote_agent_inbox_message_body", fake_promote)
+
+    def fake_consume(*a, **k):
+        calls.consume.append({"args": a, "kwargs": k})
+        return {}
+
+    monkeypatch.setattr(ads, "consume_agent_inbox_message", fake_consume)
+
+    if wake_raises is not None:
+        def fake_wake(message):
+            calls.wake.append(dict(message))
+            raise wake_raises
+    else:
+        def fake_wake(message):
+            calls.wake.append(dict(message))
+            merged = {
+                "wakeRequested": True,
+                "messageId": "agentmsg-k1",
+                "targetAgentId": "agent-target",
+                "targetSessionId": "session-target",
+                "turnId": "",
+                "reason": "",
+            }
+            merged.update(wake or {})
+            return merged
+
+    monkeypatch.setattr(session_service, "wake_agent_for_inbox_message", fake_wake)
+
+    def fake_append(**kwargs):
+        calls.append.append(dict(kwargs))
+        if append_result is not None:
+            return dict(append_result)
+        return {"historyStatus": "appended", "historyMessageId": str(kwargs.get("message_id") or "")}
+
+    monkeypatch.setattr(kernel_service, "_append_collab_body_to_session", fake_append)
+    return calls
+
+
+@pytest.mark.parametrize(
+    "wake_status,expected_history_status",
+    [
+        ("started", "appended"),
+        ("started_consume_failed", "appended"),
+        ("skipped_busy", "deferred"),
+        ("skipped_in_flight", "deferred"),
+        ("skipped_invalid_session", "rejected"),
+        ("skipped_policy_blocked", "rejected"),
+        ("failed", "pending"),
+    ],
+)
+def test_kernel_wake_status_maps_to_history_status(monkeypatch, wake_status, expected_history_status) -> None:
+    from core.agent_kernel import service as kernel_service
+
+    calls = _patch_kernel_delivery(monkeypatch, wake={"wakeStatus": wake_status, "turnId": "turn-9"})
+    deliveries = kernel_service._deliver_event_to_recipients(
+        _kernel_delivery_event(), _kernel_delivery_task()
+    )
+    assert len(deliveries) == 1
+    delivery = deliveries[0]
+    assert delivery["historyStatus"] == expected_history_status
+    if wake_status != "skipped_busy":
+        assert delivery["historyMessageId"] == "agentmsg-k1"
+    # Only the wake path persists the body for these statuses; the kernel must
+    # not double-land it through the busy/SSOT landing helper.
+    assert calls.append == []
+
+
+def test_kernel_skipped_busy_promotes_row_body_without_touching_session(monkeypatch) -> None:
+    from core.agent_kernel import service as kernel_service
+
+    calls = _patch_kernel_delivery(monkeypatch, wake={"wakeStatus": "skipped_busy", "reason": "session running"})
+    deliveries = kernel_service._deliver_event_to_recipients(
+        _kernel_delivery_event(), _kernel_delivery_task()
+    )
+    delivery = deliveries[0]
+    assert delivery["historyStatus"] == "deferred"
+    # Summary-only SSOT row is promoted to the full body so the idle drain
+    # lands it verbatim after the busy session releases.
+    assert len(calls.promote) == 1
+    assert calls.promote[0]["args"][0] == "agent-target"
+    assert calls.promote[0]["args"][1] == "agentmsg-k1"
+    assert calls.promote[0]["kwargs"] == {"content": "full body"}
+    # The busy session must not be mutated mid-turn, and the pending row must
+    # survive to drive the drain wake.
+    assert calls.append == []
+    assert calls.consume == []
+
+
+def test_kernel_skipped_busy_promote_failure_still_defers(monkeypatch) -> None:
+    from core.agent_kernel import service as kernel_service
+
+    calls = _patch_kernel_delivery(
+        monkeypatch,
+        wake={"wakeStatus": "skipped_busy"},
+        promote_raises=RuntimeError("promote boom"),
+    )
+    deliveries = kernel_service._deliver_event_to_recipients(
+        _kernel_delivery_event(), _kernel_delivery_task()
+    )
+    assert deliveries[0]["historyStatus"] == "deferred"
+    assert len(calls.promote) == 1
+    promote_scenes = [
+        scene for scene in calls.scenes
+        if "busy_promote_failed" in str(scene["kwargs"].get("message", ""))
+    ]
+    assert promote_scenes and promote_scenes[0]["kwargs"].get("outcome") == "drain_wakes_with_summary"
+
+
+def test_kernel_skipped_busy_without_session_skips_promote(monkeypatch) -> None:
+    from core.agent_kernel import service as kernel_service
+
+    event = _kernel_delivery_event()
+    event["metadata"] = {}
+    calls = _patch_kernel_delivery(
+        monkeypatch,
+        wake={"wakeStatus": "skipped_busy", "targetSessionId": ""},
+        inbox_row={"messageId": "agentmsg-k1"},
+    )
+    deliveries = kernel_service._deliver_event_to_recipients(event, _kernel_delivery_task())
+    assert deliveries[0]["historyStatus"] == "deferred"
+    # Non-SSOT rows already carry the full body; nothing to promote.
+    assert calls.promote == []
+    assert calls.append == []
+    assert calls.consume == []
+
+
+def test_kernel_wake_exception_maps_to_pending(monkeypatch) -> None:
+    from core.agent_kernel import service as kernel_service
+
+    calls = _patch_kernel_delivery(monkeypatch, wake_raises=RuntimeError("wake boom"))
+    deliveries = kernel_service._deliver_event_to_recipients(
+        _kernel_delivery_event(), _kernel_delivery_task()
+    )
+    delivery = deliveries[0]
+    assert delivery["wake"]["wakeStatus"] == "failed"
+    assert delivery["historyStatus"] == "pending"
+    assert calls.append == []
+
+
+def test_kernel_no_wake_lands_body_on_session_ssot(monkeypatch) -> None:
+    from core.agent_kernel import service as kernel_service
+
+    calls = _patch_kernel_delivery(
+        monkeypatch,
+        append_result={"historyStatus": "appended", "historyMessageId": "agentmsg-k1"},
+    )
+    event = _kernel_delivery_event(deliveryPolicy={"wakeTarget": False})
+    deliveries = kernel_service._deliver_event_to_recipients(event, _kernel_delivery_task())
+    delivery = deliveries[0]
+    assert delivery["historyStatus"] == "appended"
+    assert delivery["historyMessageId"] == "agentmsg-k1"
+    assert len(calls.append) == 1
+    assert calls.append[0]["content"] == "full body"
+    assert calls.wake == []
+
+
+# ---------------------------------------------------------------------------
+# Tool-level receipt: flat historyStatus must mirror the kernel authority.
+# ---------------------------------------------------------------------------
+
+
+def test_agent_message_tool_flat_history_status_follows_kernel(monkeypatch) -> None:
+    import core.web.services.agent_directory_service as ads
+    import core.web.services.session_service as session_service
+
+    monkeypatch.setattr(ads, "current_agent_runtime", lambda: {"agentId": "agent-source", "sessionId": "session-source"})
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda *args, **kwargs: {"id": "session-target", "agentId": "agent-source"},
+    )
+    monkeypatch.setattr(
+        ads,
+        "list_agents",
+        lambda include_archived=False: [
+            {"agentId": "agent-source", "agentCode": "A001", "displayName": "Source", "directSessionId": "session-source"},
+        ],
+    )
+    monkeypatch.setattr(
+        ads,
+        "get_agent",
+        lambda agent_id, include_archived=False: {
+            "agentId": agent_id,
+            "agentCode": "A001",
+            "displayName": "Source",
+            "directSessionId": "session-source",
+            "metadata": {},
+        },
+    )
+
+    def fake_submit(**kwargs):
+        return {
+            "outcome": {
+                "deliveries": [
+                    {
+                        "targetAgentId": "agent-source",
+                        "status": "delivered",
+                        "inboxMessageId": "agentmsg-flat-1",
+                        "targetSessionId": "session-target",
+                        "historyStatus": "deferred",
+                        "historyMessageId": "",
+                        "wake": {
+                            "wakeRequested": True,
+                            "wakeStatus": "skipped_in_flight",
+                            "messageId": "agentmsg-flat-1",
+                            "targetSessionId": "session-target",
+                            "turnId": "",
+                            "reason": "duplicate wake in flight",
+                        },
+                    }
+                ]
+            },
+            "event": {"eventId": "evt-flat-1", "idempotencyKey": "k-flat"},
+            "task": {"taskId": "task-flat-1"},
+            "execution": {"workRunId": "run-flat-1"},
+            "adapter": {"adapterVersion": "1", "eventId": "evt-flat-1", "idempotencyKey": "k-flat"},
+            "reused": False,
+        }
+
+    monkeypatch.setattr("core.agent_kernel.adapters.submit_agent_message_event", fake_submit)
+    monkeypatch.setattr(agent_message_tools, "_try_send_research_org_message", lambda **kwargs: None)
+    monkeypatch.setattr(agent_message_tools, "_record_agent_message_tool_event", lambda *a, **k: None)
+
+    result = json.loads(
+        agent_message_tools.agent_message_tool(
+            content="in-flight follow-up",
+            target_session="session-target",
+            summary="follow-up",
+        )
+    )
+    assert result["ok"] is True
+    assert result["wakeStatus"] == "skipped_in_flight"
+    # Kernel authority wins over the legacy sent+wake guess.
+    assert result["historyStatus"] == "deferred"
+    assert result["delivery"]["historyStatus"] == "deferred"
+
+
+def test_agent_message_tool_flat_history_status_legacy_fallback(monkeypatch) -> None:
+    import core.web.services.agent_directory_service as ads
+    import core.web.services.session_service as session_service
+
+    monkeypatch.setattr(ads, "current_agent_runtime", lambda: {"agentId": "agent-source", "sessionId": "session-source"})
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda *args, **kwargs: {"id": "session-target", "agentId": "agent-source"},
+    )
+    monkeypatch.setattr(
+        ads,
+        "list_agents",
+        lambda include_archived=False: [
+            {"agentId": "agent-source", "agentCode": "A001", "displayName": "Source", "directSessionId": "session-source"},
+        ],
+    )
+    monkeypatch.setattr(
+        ads,
+        "get_agent",
+        lambda agent_id, include_archived=False: {
+            "agentId": agent_id,
+            "agentCode": "A001",
+            "displayName": "Source",
+            "directSessionId": "session-source",
+            "metadata": {},
+        },
+    )
+
+    def fake_submit(**kwargs):
+        return {
+            "outcome": {
+                "deliveries": [
+                    {
+                        # Legacy kernel shape: no historyStatus passthrough.
+                        "targetAgentId": "agent-source",
+                        "status": "delivered",
+                        "inboxMessageId": "agentmsg-legacy-1",
+                        "targetSessionId": "session-target",
+                        "wake": {
+                            "wakeRequested": True,
+                            "wakeStatus": "started",
+                            "messageId": "agentmsg-legacy-1",
+                            "targetSessionId": "session-target",
+                            "turnId": "turn-legacy",
+                            "reason": "",
+                        },
+                    }
+                ]
+            },
+            "event": {"eventId": "evt-legacy-1", "idempotencyKey": "k-legacy"},
+            "task": {"taskId": "task-legacy-1"},
+            "execution": {"workRunId": "run-legacy-1"},
+            "adapter": {"adapterVersion": "1", "eventId": "evt-legacy-1", "idempotencyKey": "k-legacy"},
+            "reused": False,
+        }
+
+    monkeypatch.setattr("core.agent_kernel.adapters.submit_agent_message_event", fake_submit)
+    monkeypatch.setattr(agent_message_tools, "_try_send_research_org_message", lambda **kwargs: None)
+    monkeypatch.setattr(agent_message_tools, "_record_agent_message_tool_event", lambda *a, **k: None)
+
+    result = json.loads(
+        agent_message_tools.agent_message_tool(
+            content="legacy kernel",
+            target_session="session-target",
+            summary="legacy",
+        )
+    )
+    assert result["ok"] is True
+    assert result["historyStatus"] == "appended"
+
+
+def test_agent_message_tool_same_team_flat_history_status_follows_kernel(monkeypatch) -> None:
+    import core.web.services.agent_directory_service as ads
+    from core.web.services import session_service, team_service
+
+    monkeypatch.setattr(ads, "current_agent_runtime", lambda: {"agentId": "agent-source", "sessionId": "session-source"})
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda *args, **kwargs: {"id": "session-target", "agentId": "agent-target"},
+    )
+    monkeypatch.setattr(
+        ads,
+        "list_agents",
+        lambda include_archived=False: [
+            {"agentId": "agent-source", "agentCode": "A001", "displayName": "Source", "directSessionId": "session-source"},
+            {"agentId": "agent-target", "agentCode": "A002", "displayName": "Target", "directSessionId": "session-target"},
+        ],
+    )
+    monkeypatch.setattr(
+        ads,
+        "get_agent",
+        lambda agent_id, include_archived=False: {
+            "agentId": agent_id,
+            "agentCode": "A002" if agent_id == "agent-target" else "A001",
+            "displayName": "Target" if agent_id == "agent-target" else "Source",
+            "directSessionId": "session-target" if agent_id == "agent-target" else "session-source",
+            "metadata": {},
+        },
+    )
+    monkeypatch.setattr(
+        team_service,
+        "shared_active_team_for_agents",
+        lambda source_agent_id, target_agent_id: {"teamId": "team-alpha", "name": "Alpha"},
+    )
+    monkeypatch.setattr(
+        team_service,
+        "record_team_member_message",
+        lambda team_id, **kwargs: {"teamId": team_id, **kwargs},
+    )
+
+    def fake_submit(**kwargs):
+        return {
+            "outcome": {
+                "deliveries": [
+                    {
+                        "targetAgentId": "agent-target",
+                        "status": "delivered",
+                        "inboxMessageId": "agentmsg-team-busy-1",
+                        "targetSessionId": "session-target",
+                        "historyStatus": "deferred",
+                        "historyMessageId": "",
+                        "wake": {
+                            "wakeRequested": True,
+                            "wakeStatus": "skipped_busy",
+                            "messageId": "agentmsg-team-busy-1",
+                            "targetSessionId": "session-target",
+                            "turnId": "",
+                            "reason": "session running",
+                        },
+                    }
+                ]
+            },
+            "event": {"eventId": "evt-team-busy-1", "idempotencyKey": "k-team-busy"},
+            "task": {"taskId": "task-team-busy-1"},
+            "execution": {"workRunId": "run-team-busy-1"},
+            "adapter": {"adapterVersion": "1", "eventId": "evt-team-busy-1", "idempotencyKey": "k-team-busy"},
+            "reused": False,
+        }
+
+    monkeypatch.setattr("core.agent_kernel.adapters.submit_agent_message_event", fake_submit)
+    monkeypatch.setattr(agent_message_tools, "_try_send_research_org_message", lambda **kwargs: None)
+    monkeypatch.setattr(agent_message_tools, "_record_agent_message_tool_event", lambda *a, **k: None)
+
+    result = json.loads(
+        agent_message_tools.agent_message_tool(
+            content="busy teammate handoff",
+            target_session="session-target",
+            summary="handoff",
+        )
+    )
+    assert result["ok"] is True
+    assert result["route"] == "same_team"
+    assert result["wakeStatus"] == "skipped_busy"
+    assert result["historyStatus"] == "deferred"
