@@ -52,6 +52,7 @@ import {
   markSessionDetailStopping,
   markSessionSummaryRunning,
   removeOptimisticUserMessage,
+  type OptimisticUserMessageInput,
 } from "../chatSessionState";
 import { updateSessionSummaryCaches } from "../chatSessionIndexQuery";
 import type { ChatEditTarget } from "../chatComposerState";
@@ -101,6 +102,37 @@ import {
 } from "./chatStopTurnModel";
 
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
+
+/**
+ * Intentional optimistic-row removals must bypass the session detail query's
+ * ``structuralSharing``. React Query runs ``query.options.structuralSharing``
+ * on every data write (``Query.setData``, manual ``setQueryData`` included),
+ * and the workbench registers its windowed UNION merge there
+ * (``sessionDetailStructuralSharing``), so a removal updater is undone before
+ * it lands: the merge resurrects the optimistic row from the previous data and
+ * the row sticks on the timeline forever (multi-file upload allSettled blocked
+ * batch residue). Updates survive that merge (same-id messages: later write
+ * wins; top-level fields favor ``next``) — only message-array removals die.
+ * Write through ``query.setState`` (which skips ``replaceData``) so removals
+ * get replace semantics while every other write keeps merge semantics.
+ */
+function removeOptimisticUserMessageFromCache(
+  queryClient: QueryClient,
+  sessionId: string,
+  input: OptimisticUserMessageInput,
+): void {
+  const query = queryClient
+    .getQueryCache()
+    .find<SessionDetail>({ queryKey: queryKeys.session(sessionId), exact: true });
+  if (!query) {
+    return;
+  }
+  const next = removeOptimisticUserMessage(query.state.data, input);
+  if (next === query.state.data) {
+    return;
+  }
+  query.setState({ data: next, dataUpdatedAt: Date.now() });
+}
 
 export type SubmitTurnVariables = {
   sessionId: string;
@@ -561,9 +593,7 @@ export function useChatComposerTurnMutations({
         },
         "error",
       );
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detailState) =>
-        removeOptimisticUserMessage(detailState, variables),
-      );
+      removeOptimisticUserMessageFromCache(queryClient, variables.sessionId, variables);
       if (!variables.queuedBehindActiveTurn) {
         setActiveTurnLayersBySession((current) =>
           setActiveTurnLayerForSession(current, variables.sessionId, undefined)
@@ -1620,9 +1650,7 @@ export function useChatComposerSubmitActions({
           [sessionId]: describeError(firstFailure.error, lang === "zh" ? "图片上传失败" : "Image upload failed"),
         }));
         if (content || references.length) {
-          queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
-            removeOptimisticUserMessage(detailState, { sessionId, content, references, clientSubmissionId }),
-          );
+          removeOptimisticUserMessageFromCache(queryClient, sessionId, { sessionId, content, references, clientSubmissionId });
           setSessionDrafts((current) => restoreSubmittedDraftIfComposerStillEmpty(current, sessionId, content));
         }
         restorePendingStopAfterUploadFailure(sessionId);
@@ -1693,9 +1721,7 @@ export function useChatComposerSubmitActions({
         [sessionId]: describeError(error, lang === "zh" ? "图片上传失败" : "Image upload failed"),
       }));
       if (content || references.length) {
-        queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
-          removeOptimisticUserMessage(detailState, { sessionId, content, references, clientSubmissionId }),
-        );
+        removeOptimisticUserMessageFromCache(queryClient, sessionId, { sessionId, content, references, clientSubmissionId });
         setSessionDrafts((current) => restoreSubmittedDraftIfComposerStillEmpty(current, sessionId, content));
       }
       restorePendingStopAfterUploadFailure(sessionId);
