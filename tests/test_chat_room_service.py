@@ -173,6 +173,30 @@ def _isolate_chat_room_kernel(tmp_path, monkeypatch):
     data_home = tmp_path / "operator-data"
     work_runs_root = tmp_path / "work_runs"
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
+    # The host's live config may select providers whose credentials this
+    # machine has not exported; agent-runtime binding validation raises before
+    # the mocked _invoke_llm runs. Export a dummy key for every LLM key env
+    # var the configured providers can resolve so the suite does not depend
+    # on host credentials (chat-room LLM calls are always mocked here).
+    try:
+        _env_targets = []
+        for _provider in session_service.get_config().llm.providers.values():
+            _credential_ref = str(getattr(_provider, "credential_ref", "") or "")
+            if _credential_ref.startswith("env:"):
+                _env_targets.append(_credential_ref[len("env:"):].strip())
+            _provider_key_env = str(getattr(_provider, "api_key_env", "") or "").strip()
+            if _provider_key_env:
+                _env_targets.append(_provider_key_env)
+            from config.models import get_provider_api_key_env
+
+            _canonical_env = get_provider_api_key_env(str(getattr(_provider, "kind", "") or ""))
+            if _canonical_env:
+                _env_targets.append(_canonical_env)
+        for _env_var in dict.fromkeys(_env_targets):
+            if _env_var:
+                monkeypatch.setenv(_env_var, "chat-room-test-key")
+    except Exception:
+        pass
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
