@@ -50,7 +50,7 @@ export type AgentDenseListProps = {
 };
 
 const PILL_BASE =
-  "inline-flex items-center justify-center min-h-[22px] px-[7px] border rounded-full [font-size:var(--vui-font-xs)] font-bold not-italic whitespace-nowrap";
+  "inline-flex items-center justify-center min-h-[22px] px-2 border rounded-full [font-size:var(--vui-font-xs)] font-bold not-italic whitespace-nowrap";
 
 const ROLE_TAG_BASE =
   "inline-flex min-h-[18px] max-w-full items-center justify-self-start overflow-hidden text-ellipsis whitespace-nowrap px-0.5 [font-size:var(--vui-font-xs)] font-[600] not-italic leading-none text-[var(--fg-secondary)]";
@@ -183,16 +183,16 @@ export function AgentDenseList({
           key={column.id}
           aria-label={typeof column.label === "string" ? column.label : undefined}
           className={[
-            "grid content-start gap-[6px] min-w-0",
+            "grid content-start gap-1.5 min-w-0",
             index === 0
               ? ""
-              : "pt-[7px] border-t border-[color-mix(in_srgb,var(--border-soft)_76%,transparent)]",
+              : "pt-2 border-t border-[color-mix(in_srgb,var(--border-soft)_76%,transparent)]",
           ]
             .filter(Boolean)
             .join(" ")}
         >
           <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 min-w-0 px-1 pb-0.5">
-            <div className="flex items-center gap-[6px] min-w-0" title={column.description}>
+            <div className="flex items-center gap-1.5 min-w-0" title={column.description}>
               <strong className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--fg-primary)] text-vui-micro-13 font-extrabold">
                 {column.label}
               </strong>

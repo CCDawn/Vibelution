@@ -28,7 +28,7 @@ const styles = {
   itemDetails: cx("itemDetails", "w-full max-w-full min-w-0"),
   itemSummary: cx(
     "itemSummary",
-    "flex w-full max-w-full min-w-0 list-none cursor-pointer items-center gap-x-2 py-[0.28rem] text-left [&::-webkit-details-marker]:hidden [&::marker]:hidden [&::marker]:content-none focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
+    "flex w-full max-w-full min-w-0 list-none cursor-pointer items-center gap-x-2 py-1 text-left [&::-webkit-details-marker]:hidden [&::marker]:hidden [&::marker]:content-none focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
   ),
   // Static (no-toggle) tool row: same single-line chrome as the expandable
   // summary, minus the pointer affordance. The flex row is load-bearing -
@@ -36,7 +36,7 @@ const styles = {
   // plain block wrapper drops the icon onto its own line above the subject.
   itemStatic: cx(
     "itemStatic",
-    "flex w-full max-w-full min-w-0 items-center gap-x-2 py-[0.28rem]",
+    "flex w-full max-w-full min-w-0 items-center gap-x-2 py-1",
   ),
   itemChevron: cx(
     "itemChevron",
@@ -49,7 +49,7 @@ const styles = {
   batch: cx("batch", "w-full max-w-full min-w-0"),
   batchSummary: cx(
     "batchSummary",
-    "flex w-full max-w-full min-w-0 list-none cursor-pointer items-center gap-x-2 py-[0.28rem] text-left [&::-webkit-details-marker]:hidden [&::marker]:hidden [&::marker]:content-none focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
+    "flex w-full max-w-full min-w-0 list-none cursor-pointer items-center gap-x-2 py-1 text-left [&::-webkit-details-marker]:hidden [&::marker]:hidden [&::marker]:content-none focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
   ),
   batchCount: cx(
     "batchCount",
@@ -66,7 +66,7 @@ const styles = {
   categoryGroup: cx("categoryGroup", "w-full max-w-full min-w-0"),
   categoryGroupSummary: cx(
     "categoryGroupSummary",
-    "flex w-full max-w-full min-w-0 list-none cursor-pointer items-center gap-x-2 py-[0.28rem] text-left [&::-webkit-details-marker]:hidden [&::marker]:hidden [&::marker]:content-none focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
+    "flex w-full max-w-full min-w-0 list-none cursor-pointer items-center gap-x-2 py-1 text-left [&::-webkit-details-marker]:hidden [&::marker]:hidden [&::marker]:content-none focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
   ),
   categoryGroupDetails: cx("categoryGroupDetails", "min-w-0"),
   categoryGroupDetailsInner: cx("categoryGroupDetailsInner", "grid min-w-0 gap-0 pl-1"),

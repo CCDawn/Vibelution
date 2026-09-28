@@ -16,7 +16,7 @@ const styles = {
   search: "w-full",
   list: "grid min-h-0 min-w-0 gap-2 overflow-y-auto overflow-x-hidden pr-0.5",
   group: "grid min-w-0 gap-1",
-  groupHeader: `!sticky !top-0 !z-[1] !flex !min-h-8 !w-full !min-w-0 !items-center !justify-between !gap-2 !rounded-[8px] !border !border-transparent ${vuiFlatPanelClass} !px-2 !py-1 !text-left !shadow-none hover:!border-[var(--vui-border-subtle)] hover:!bg-[var(--vui-control-muted)] [&_[data-slot=vui-button-content]]:!flex [&_[data-slot=vui-button-content]]:!w-full [&_[data-slot=vui-button-content]]:!items-center [&_[data-slot=vui-button-content]]:!justify-between`,
+  groupHeader: `!sticky !top-0 !z-[1] !flex !min-h-8 !w-full !min-w-0 !items-center !justify-between !gap-2 !rounded-lg !border !border-transparent ${vuiFlatPanelClass} !px-2 !py-1 !text-left !shadow-none hover:!border-[var(--vui-border-subtle)] hover:!bg-[var(--vui-control-muted)] [&_[data-slot=vui-button-content]]:!flex [&_[data-slot=vui-button-content]]:!w-full [&_[data-slot=vui-button-content]]:!items-center [&_[data-slot=vui-button-content]]:!justify-between`,
   groupTitle: "flex min-w-0 items-center gap-1.5 [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)]",
   groupChevron: "shrink-0 text-[var(--fg-tertiary)]",
   groupCount: "font-normal text-[var(--fg-tertiary)]",

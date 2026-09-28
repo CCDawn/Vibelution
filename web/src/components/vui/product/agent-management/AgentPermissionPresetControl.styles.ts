@@ -11,11 +11,11 @@ const styles = {
   triggerChevron:
     "size-3.5 shrink-0 opacity-70 transition-transform duration-150 data-[open=true]:rotate-180",
   menu:
-    `grid w-[min(360px,calc(100vw-16px))] gap-0.5 overflow-y-auto overscroll-contain rounded-[12px] border border-[var(--vui-border-subtle)] ${vuiFlatPanelClass} p-1 shadow-[0_14px_36px_color-mix(in_srgb,var(--fg-primary)_14%,transparent),var(--vui-shadow-soft)]`,
+    `grid w-[min(360px,calc(100vw-16px))] gap-0.5 overflow-y-auto overscroll-contain rounded-xl border border-[var(--vui-border-subtle)] ${vuiFlatPanelClass} p-1 shadow-[0_14px_36px_color-mix(in_srgb,var(--fg-primary)_14%,transparent),var(--vui-shadow-soft)]`,
   menuHeader:
     "flex items-center justify-between gap-3 px-2 py-1 [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)]",
   option:
-    "!grid !h-auto !min-h-12 !w-full !grid-cols-[1rem_minmax(0,1fr)_0.875rem] !items-start !gap-x-2 !rounded-[8px] !border-0 !bg-transparent !px-2 !py-2 !text-left !shadow-none hover:!bg-[var(--vui-control-muted)] data-[selected=true]:!bg-[color-mix(in_srgb,var(--accent-cool)_12%,transparent)] data-[preset=full_access]:[&_svg]:text-[var(--state-warning)]",
+    "!grid !h-auto !min-h-12 !w-full !grid-cols-[1rem_minmax(0,1fr)_0.875rem] !items-start !gap-x-2 !rounded-lg !border-0 !bg-transparent !px-2 !py-2 !text-left !shadow-none hover:!bg-[var(--vui-control-muted)] data-[selected=true]:!bg-[color-mix(in_srgb,var(--accent-cool)_12%,transparent)] data-[preset=full_access]:[&_svg]:text-[var(--state-warning)]",
   optionIcon: "mt-0.5 size-4 shrink-0 text-[var(--fg-tertiary)]",
   optionCopy: "grid min-w-0 gap-0.5",
   optionLabel: "[font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)]",

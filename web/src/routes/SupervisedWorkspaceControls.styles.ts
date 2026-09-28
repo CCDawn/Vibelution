@@ -4,8 +4,8 @@ const controlsShellClass =
   "grid w-fit max-w-full min-w-0 shrink-0 grid-cols-[max-content_auto] items-center gap-2 justify-self-end max-[900px]:grid-cols-1 max-[900px]:justify-items-end max-[900px]:w-fit";
 const flowRegionClass = "inline-flex min-w-0 w-fit max-w-full shrink-0 items-center gap-1";
 const modeRegionClass = "min-w-0 w-fit shrink-0 justify-self-end max-[900px]:justify-self-end";
-const intakeControlClass = "inline-flex min-h-[var(--vui-control-height-md)] max-w-full flex-none items-center gap-1 whitespace-nowrap rounded-full border border-vui-border-soft bg-vui-surface-panel p-[3px]";
-const controlLabelClass = "py-0 pl-[7px] pr-[5px] [font-size:var(--vui-font-xs)] text-vui-fg-secondary max-[760px]:hidden";
+const intakeControlClass = "inline-flex min-h-[var(--vui-control-height-md)] max-w-full flex-none items-center gap-1 whitespace-nowrap rounded-full border border-vui-border-soft bg-vui-surface-panel p-1";
+const controlLabelClass = "py-0 pl-2 pr-1 [font-size:var(--vui-font-xs)] text-vui-fg-secondary max-[760px]:hidden";
 const intakeTabsClass = "inline-grid w-fit max-w-full min-w-0 gap-0";
 const intakeTabsListClass = "inline-flex gap-1 border-0 bg-transparent p-0";
 const intakeTabsTriggerClass = [

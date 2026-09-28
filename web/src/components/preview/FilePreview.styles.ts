@@ -3,7 +3,7 @@ import {
 } from "../../design/vuiSurfaceRecipes";
 
 const surfaceClass = "grid h-full min-h-0 grid-rows-[auto_1fr_auto]";
-const headerClass = "flex items-start justify-between gap-4 border-b border-vui-border-soft px-5 pb-3.5 pt-[18px]";
+const headerClass = "flex items-start justify-between gap-4 border-b border-vui-border-soft px-5 pb-3.5 pt-4";
 const headerCopyClass = "min-w-0";
 const eyebrowClass = "m-0 mb-1 [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-vui-fg-tertiary";
 const fileNameClass = "m-0 font-[var(--font-body)] text-vui-md font-bold text-vui-fg-primary";
@@ -12,8 +12,8 @@ const metaBlockClass = "flex flex-wrap justify-end gap-2";
 const pillClass = "inline-flex items-center rounded-[var(--radius-control)] px-2.5 py-1.5 [font-size:var(--vui-font-xs)]";
 const changedPillClass = `${pillClass} border border-[color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_12%,transparent)] text-[var(--accent-warm-2)]`;
 const sourcePillClass = `${pillClass} border border-[color-mix(in_srgb,var(--accent-cool)_18%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] text-vui-fg-secondary`;
-const previewModeGroupClass = `inline-flex items-center gap-1 ${vuiOpaqueRowClass} p-[3px]`;
-const previewModeButtonClass = "min-h-[26px] border-0 bg-transparent px-2 py-[3px] [font-size:var(--vui-font-xs)] font-[inherit] text-vui-fg-secondary shadow-none";
+const previewModeGroupClass = `inline-flex items-center gap-1 ${vuiOpaqueRowClass} p-1`;
+const previewModeButtonClass = "min-h-[26px] border-0 bg-transparent px-2 py-1 [font-size:var(--vui-font-xs)] font-[inherit] text-vui-fg-secondary shadow-none";
 const previewModeButtonActiveClass = "bg-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-surface-panel))] text-vui-fg-primary";
 const editorWrapClass = [
   "grid min-h-0 overflow-hidden",

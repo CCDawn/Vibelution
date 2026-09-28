@@ -34,7 +34,7 @@ export const ShadcnInput = forwardRef<HTMLInputElement, ShadcnInputProps>(functi
   const isRange = inputType === "range";
   const controlClass = isBox
     ? [
-        "h-4 w-4 min-w-4 rounded-[4px] border border-vui-border-subtle",
+        "h-4 w-4 min-w-4 rounded border border-vui-border-subtle",
         "bg-[var(--vui-surface-panel)] text-[var(--fg-primary)] shadow-none",
         "accent-[var(--fg-primary)]",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_45%,transparent)]",

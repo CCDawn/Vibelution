@@ -10,7 +10,7 @@ const rowSurface =
 const rowSurfaceHover =
   "hover:border-[color-mix(in_srgb,var(--vui-border-soft)_88%,transparent)] hover:!bg-[var(--vui-surface-row-hover)]";
 const mutedControl =
-  "inline-flex h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_var(--vui-alpha-veil),transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_72%,transparent)] px-[9px] py-1.5 [font-size:var(--vui-font-xs)] text-vui-fg-secondary hover:border-[color-mix(in_srgb,var(--border-strong)_var(--vui-alpha-veil),transparent)] hover:bg-[color-mix(in_srgb,var(--vui-control-muted-hover)_82%,transparent)] hover:text-vui-fg-primary disabled:cursor-default disabled:opacity-55";
+  "inline-flex h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_var(--vui-alpha-veil),transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_72%,transparent)] px-2 py-1.5 [font-size:var(--vui-font-xs)] text-vui-fg-secondary hover:border-[color-mix(in_srgb,var(--border-strong)_var(--vui-alpha-veil),transparent)] hover:bg-[color-mix(in_srgb,var(--vui-control-muted-hover)_82%,transparent)] hover:text-vui-fg-primary disabled:cursor-default disabled:opacity-55";
 
 export const gitRouteStyles = {
   route:
@@ -48,7 +48,7 @@ export const gitRouteStyles = {
   situationList: "grid min-h-0 content-start gap-2.5 overflow-auto pr-1",
   worktreeList: "grid min-h-0 content-start gap-2.5 overflow-auto pr-1",
   worktreeItem:
-    `grid w-full min-w-0 cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-start gap-2 ${rowSurface} px-[9px] py-2 text-left text-inherit ${rowSurfaceHover} max-[520px]:grid-cols-[minmax(0,1fr)] [&_div]:grid [&_div]:min-w-0 [&_div]:gap-0.5 [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_code]:shrink-0 [&_code]:whitespace-nowrap [&_code]:font-mono [&_code]:[font-size:var(--vui-font-xs)] [&_code]:text-[var(--accent-warm-2)]`,
+    `grid w-full min-w-0 cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-start gap-2 ${rowSurface} px-2 py-2 text-left text-inherit ${rowSurfaceHover} max-[520px]:grid-cols-[minmax(0,1fr)] [&_div]:grid [&_div]:min-w-0 [&_div]:gap-0.5 [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_code]:shrink-0 [&_code]:whitespace-nowrap [&_code]:font-mono [&_code]:[font-size:var(--vui-font-xs)] [&_code]:text-[var(--accent-warm-2)]`,
   historyPanel:
     "grid-rows-[auto_minmax(0,1fr)] max-[1200px]:[.workspaceOverview_&]:col-start-2 max-[1200px]:[.workspaceOverview_&]:row-[1/span_2] max-[1200px]:[.workspaceOverview_&]:grid-cols-1 max-[1200px]:[.workspaceOverview_&]:grid-rows-[auto_minmax(0,1fr)] max-[860px]:[.workspaceOverview_&]:col-auto max-[860px]:[.workspaceOverview_&]:row-auto",
   paneCollapsed: "overflow-hidden p-0 invisible",
@@ -71,9 +71,9 @@ export const gitRouteStyles = {
   fileList: "grid min-h-0 content-start gap-1.5 overflow-auto pr-1",
   commitList: "grid min-h-0 content-start gap-2.5 overflow-auto pr-1",
   fileButton:
-    `grid w-full grid-cols-[22px_34px_minmax(0,1fr)] items-start gap-1.5 ${rowSurface} p-[6px] text-left text-vui-fg-primary ${rowSurfaceHover}`,
+    `grid w-full grid-cols-[22px_34px_minmax(0,1fr)] items-start gap-1.5 ${rowSurface} p-1.5 text-left text-vui-fg-primary ${rowSurfaceHover}`,
   fileButtonActive:
-    "grid w-full grid-cols-[22px_34px_minmax(0,1fr)] items-start gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-tint-strong),transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-wash),var(--vui-surface-row))] p-[6px] text-left text-vui-fg-primary shadow-[var(--vui-shadow-inset-accent)]",
+    "grid w-full grid-cols-[22px_34px_minmax(0,1fr)] items-start gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-tint-strong),transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-wash),var(--vui-surface-row))] p-1.5 text-left text-vui-fg-primary shadow-[var(--vui-shadow-inset-accent)]",
   fileButtonSelected:
     "border-[color-mix(in_srgb,var(--state-success)_var(--vui-alpha-line),transparent)] bg-[color-mix(in_srgb,var(--state-success)_var(--vui-alpha-wash-faint),var(--vui-surface-row))]",
   fileStatus: "font-mono [font-size:var(--vui-font-xs)] text-[var(--accent-warm-2)]",
@@ -82,7 +82,7 @@ export const gitRouteStyles = {
   fileCopyButton:
     "grid min-w-0 gap-1 border-0 bg-transparent p-0 text-left text-inherit [&_strong]:block [&_strong]:min-w-0 [&_strong]:max-w-full [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap",
   filePathText: "m-0 overflow-hidden text-ellipsis whitespace-nowrap [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)]",
-  fileBadgeRow: "flex min-h-5 flex-wrap gap-[5px]",
+  fileBadgeRow: "flex min-h-5 flex-wrap gap-1",
   fileBadgeActive:
     "inline-flex min-h-[19px] items-center rounded-full border border-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-tint-strong),transparent)] px-1.5 [font-size:var(--vui-font-xs)] leading-none text-[var(--accent-warm-2)]",
   fileBadgeSelected:
@@ -91,7 +91,7 @@ export const gitRouteStyles = {
   objectDetailPanel:
     "min-h-0 min-w-0 max-[1200px]:[.workspaceOverview_&]:col-start-1 max-[1200px]:[.workspaceOverview_&]:row-start-2 max-[860px]:[.workspaceOverview_&]:col-auto max-[860px]:[.workspaceOverview_&]:row-auto",
   emptyPreview:
-    `grid h-full content-start justify-items-start gap-[7px] ${panelSurface} p-3.5 text-vui-fg-secondary [&_p]:m-0 [&_p]:[font-size:var(--vui-font-xs)] [&_p]:leading-tight [&_p]:text-vui-fg-secondary [&_strong]:text-vui-md [&_strong]:text-vui-fg-primary [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:text-[var(--accent-cool)]`,
+    `grid h-full content-start justify-items-start gap-2 ${panelSurface} p-3.5 text-vui-fg-secondary [&_p]:m-0 [&_p]:[font-size:var(--vui-font-xs)] [&_p]:leading-tight [&_p]:text-vui-fg-secondary [&_strong]:text-vui-md [&_strong]:text-vui-fg-primary [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:text-[var(--accent-cool)]`,
   emptyState: "m-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)]",
   // Single-column card with readable vertical rhythm: roomy padding, clear
   // inter-card gap (commitList), and distinct header / title / author rows.
@@ -105,7 +105,7 @@ export const gitRouteStyles = {
     `border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line-strong),transparent)] ${vuiStateSelectedRowFillClass} shadow-[var(--vui-shadow-inset-accent)]`,
   manualCommitPanel:
     "grid min-h-0 max-h-[min(100%,calc(100dvh-178px))] content-start gap-2 overflow-auto border-b border-[var(--border-soft)] pb-2 max-[1200px]:row-span-2 max-[1200px]:border-b-0 max-[1200px]:border-r max-[1200px]:pb-0 max-[1200px]:pr-3 max-[860px]:row-auto max-[860px]:max-h-none max-[860px]:overflow-visible max-[860px]:border-b max-[860px]:border-r-0 max-[860px]:pb-3 max-[860px]:pr-0",
-  commitScopeBox: `grid gap-2 ${rowSurface} p-[9px]`,
+  commitScopeBox: `grid gap-2 ${rowSurface} p-2`,
   scopeHeader:
     "flex items-start justify-between gap-2.5 [&_div]:grid [&_div]:min-w-0 [&_div]:gap-1 [&_div>span]:m-0 [&_div>span]:[font-size:var(--vui-font-xs)] [&_div>span]:leading-snug [&_div>span]:text-[var(--fg-tertiary)] [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-vui-xs [&_strong]:text-[var(--fg-primary)]",
   scopeReady:
@@ -116,9 +116,9 @@ export const gitRouteStyles = {
   scopeEmpty: "m-0 [font-size:var(--vui-font-xs)] leading-snug text-[var(--fg-tertiary)]",
   scopeMore: "m-0 [font-size:var(--vui-font-xs)] leading-snug text-[var(--fg-tertiary)]",
   scopeWarning:
-    "grid gap-1 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--state-warning)_var(--vui-alpha-line),transparent)] bg-[color-mix(in_srgb,var(--state-warning)_var(--vui-alpha-wash),transparent)] p-[9px] [&_p]:m-0 [&_p]:[font-size:var(--vui-font-xs)] [&_p]:leading-snug [&_p]:text-[var(--fg-tertiary)] [&_span]:m-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-snug [&_span]:text-[var(--fg-tertiary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--state-warning)]",
+    "grid gap-1 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--state-warning)_var(--vui-alpha-line),transparent)] bg-[color-mix(in_srgb,var(--state-warning)_var(--vui-alpha-wash),transparent)] p-2 [&_p]:m-0 [&_p]:[font-size:var(--vui-font-xs)] [&_p]:leading-snug [&_p]:text-[var(--fg-tertiary)] [&_span]:m-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-snug [&_span]:text-[var(--fg-tertiary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--state-warning)]",
   messageField:
-    "grid gap-[7px] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_select]:min-h-[var(--vui-control-height-md)] [&_select]:w-full [&_select]:rounded-[var(--radius-control)] [&_select]:border [&_select]:border-[color-mix(in_srgb,var(--vui-border-subtle)_var(--vui-alpha-veil),transparent)] [&_select]:bg-[color-mix(in_srgb,var(--vui-control-muted)_var(--vui-alpha-veil),transparent)] [&_select]:px-[9px] [&_select]:py-2 [&_select]:leading-snug [&_select]:text-vui-fg-primary [&_select:focus]:border-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-line-strong),transparent)] [&_select:focus]:outline-none [&_textarea]:min-h-24 [&_textarea]:w-full [&_textarea]:resize-y [&_textarea]:rounded-[var(--radius-control)] [&_textarea]:border [&_textarea]:border-[color-mix(in_srgb,var(--vui-border-subtle)_var(--vui-alpha-veil),transparent)] [&_textarea]:bg-[color-mix(in_srgb,var(--vui-control-muted)_var(--vui-alpha-veil),transparent)] [&_textarea]:px-[9px] [&_textarea]:py-2 [&_textarea]:leading-snug [&_textarea]:text-vui-fg-primary [&_textarea:focus]:border-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-line-strong),transparent)] [&_textarea:focus]:outline-none",
+    "grid gap-2 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_select]:min-h-[var(--vui-control-height-md)] [&_select]:w-full [&_select]:rounded-[var(--radius-control)] [&_select]:border [&_select]:border-[color-mix(in_srgb,var(--vui-border-subtle)_var(--vui-alpha-veil),transparent)] [&_select]:bg-[color-mix(in_srgb,var(--vui-control-muted)_var(--vui-alpha-veil),transparent)] [&_select]:px-2 [&_select]:py-2 [&_select]:leading-snug [&_select]:text-vui-fg-primary [&_select:focus]:border-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-line-strong),transparent)] [&_select:focus]:outline-none [&_textarea]:min-h-24 [&_textarea]:w-full [&_textarea]:resize-y [&_textarea]:rounded-[var(--radius-control)] [&_textarea]:border [&_textarea]:border-[color-mix(in_srgb,var(--vui-border-subtle)_var(--vui-alpha-veil),transparent)] [&_textarea]:bg-[color-mix(in_srgb,var(--vui-control-muted)_var(--vui-alpha-veil),transparent)] [&_textarea]:px-2 [&_textarea]:py-2 [&_textarea]:leading-snug [&_textarea]:text-vui-fg-primary [&_textarea:focus]:border-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-line-strong),transparent)] [&_textarea:focus]:outline-none",
   promptTemplateField: "[&_textarea]:min-h-[86px] [&_textarea]:font-mono [&_textarea]:[font-size:var(--vui-font-xs)]",
   modelDefaultRow:
     "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)]",
@@ -128,11 +128,11 @@ export const gitRouteStyles = {
   secondaryButton:
     mutedControl,
   primaryButton:
-    "h-[var(--vui-control-height-sm)] border-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-line),transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_16%,var(--vui-control-muted))] px-[9px] py-1.5 [font-size:var(--vui-font-xs)] text-[var(--accent-warm-2)] hover:border-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] hover:bg-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-tint),var(--vui-control-muted))] disabled:cursor-default disabled:opacity-55",
+    "h-[var(--vui-control-height-sm)] border-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-line),transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_16%,var(--vui-control-muted))] px-2 py-1.5 [font-size:var(--vui-font-xs)] text-[var(--accent-warm-2)] hover:border-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] hover:bg-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-tint),var(--vui-control-muted))] disabled:cursor-default disabled:opacity-55",
   commitNotice: "m-0 [font-size:var(--vui-font-xs)] leading-snug text-[var(--state-success)]",
   commitNoticeError: "m-0 [font-size:var(--vui-font-xs)] leading-snug text-[var(--state-error)]",
   commitBlockReason: "m-0 [font-size:var(--vui-font-xs)] leading-snug text-[var(--accent-warm-2)]",
   commitReady: "m-0 [font-size:var(--vui-font-xs)] leading-snug text-[var(--state-success)]",
   commitHeader:
-    "mb-0.5 flex w-full min-w-0 items-center justify-between gap-2 leading-tight [&_code]:shrink-0 [&_code]:font-mono [&_code]:[font-size:var(--vui-font-xs)] [&_code]:[color:var(--accent-warm-2)] [&_span]:inline-flex [&_span]:min-w-0 [&_span]:shrink-0 [&_span]:items-center [&_span]:gap-[5px] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-tight [&_span]:[color:var(--fg-tertiary)]",
+    "mb-0.5 flex w-full min-w-0 items-center justify-between gap-2 leading-tight [&_code]:shrink-0 [&_code]:font-mono [&_code]:[font-size:var(--vui-font-xs)] [&_code]:[color:var(--accent-warm-2)] [&_span]:inline-flex [&_span]:min-w-0 [&_span]:shrink-0 [&_span]:items-center [&_span]:gap-1 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-tight [&_span]:[color:var(--fg-tertiary)]",
 } as const;

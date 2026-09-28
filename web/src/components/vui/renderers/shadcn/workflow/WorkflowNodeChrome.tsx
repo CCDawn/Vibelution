@@ -275,7 +275,7 @@ export function WorkflowNodeChrome({
       className={cn(
         "relative h-full w-full border outline-none transition duration-150",
         spacious
-          ? "flex items-center overflow-visible rounded-2xl bg-[var(--vui-surface-panel)] py-0 pr-4 pl-3 shadow-[var(--vui-elevation-2)] hover:-translate-y-px"
+          ? "flex items-center overflow-visible rounded-xl bg-[var(--vui-surface-panel)] py-0 pr-4 pl-3 shadow-[var(--vui-elevation-2)] hover:-translate-y-px"
           : "flex flex-col justify-between overflow-hidden rounded-[10px] bg-[var(--vui-surface-panel)] px-2.5 py-2 shadow-[var(--vui-elevation-1)]",
         visual.borderClass,
         spacious ? "text-[var(--fg-primary)]" : visual.toneClass,

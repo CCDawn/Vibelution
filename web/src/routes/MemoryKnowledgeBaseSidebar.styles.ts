@@ -20,7 +20,7 @@ const styles = {
   panelHeader:
     "panelHeader min-w-0 flex flex-wrap items-center gap-1.5 px-1 py-0.5",
   sourceButton:
-    `sourceButton min-w-0 ${vuiControlQuietClass} !grid grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-2 min-h-10 px-[7px] py-[5px]`,
+    `sourceButton min-w-0 ${vuiControlQuietClass} !grid grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-2 min-h-10 px-2 py-1`,
   sourceButtonActive:
     `sourceButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
   sourceCopy:

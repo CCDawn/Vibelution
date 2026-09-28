@@ -83,7 +83,7 @@ export function WorkflowStageRegionNode(props: NodeProps) {
   return (
     <div
       className={cn(
-        "h-full w-full select-none rounded-2xl border",
+        "h-full w-full select-none rounded-xl border",
         (tone === "idle" || tone === "done") ? "border-dashed" : "",
         STAGE_FILL[tone] ?? STAGE_FILL_IDLE,
         STAGE_BORDER[tone] ?? STAGE_BORDER_IDLE,

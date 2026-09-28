@@ -23,7 +23,7 @@ const styles = {
   row: "flex min-h-7 items-center justify-between gap-3 text-vui-2xs [&_b]:font-medium [&_b]:tabular-nums",
   name: "min-w-0 flex-1 break-words text-left",
   detailRow: `${quietButton} !flex !min-h-[var(--vui-control-height-sm)] !h-auto !w-full !items-center !gap-1.5 !px-0 !py-1 !text-vui-2xs [&_b]:font-medium [&_b]:tabular-nums [&_svg]:shrink-0 [&_svg]:text-[var(--fg-tertiary)]`,
-  expanded: "pb-2.5 pl-[19px] text-vui-micro-10 text-[var(--fg-secondary)]",
+  expanded: "pb-2.5 pl-5 text-vui-micro-10 text-[var(--fg-secondary)]",
   segment: "flex items-baseline justify-between gap-2 py-1 tabular-nums",
   preview:
     "mb-2 mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-[var(--vui-control-muted)] p-2 text-vui-micro-10 leading-relaxed",

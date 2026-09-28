@@ -523,8 +523,8 @@ describe("ToolsRoute layout contract", () => {
   it("keeps the Agent policy draft summary in a four-column grid", () => {
     expect(routeSource).toContain("styles.policyDraftSummary");
     expect(styles.policyDraftSummary).toContain("grid-cols-[repeat(4,minmax(0,1fr))]");
-    expect(styles.policyDraftSummary).toContain("gap-[5px]");
-    expect(styles.policyDraftSummary).toContain("py-[5px]");
+    expect(styles.policyDraftSummary).toContain("gap-1");
+    expect(styles.policyDraftSummary).toContain("py-1");
     expectBackgroundAwareHairlineSurface(styles.policyDraftSummary);
     expect(styles.policyDraftSummary).toContain("max-[900px]:grid-cols-[repeat(2,minmax(0,1fr))]");
     expect(styles.policyDraftSummary).toContain("max-[520px]:grid-cols-[1fr]");

@@ -388,7 +388,7 @@ describe("VUI foundation primitives", () => {
     expect(rendererSource).toContain("@radix-ui/react-tooltip");
     expect(hintMarkup).toContain('data-vui="contextual-hint"');
     expect(hintMarkup).toContain('aria-label="Card details"');
-    expect(hintMarkup).toContain("!rounded-[4px]");
+    expect(hintMarkup).toContain("!rounded");
     expect(hintMarkup).toContain("border-0");
     expect(hintMarkup).toContain('stroke-width="1.4"');
   });

@@ -16,7 +16,7 @@ const styles = {
   item:
     `${scope} item grid min-w-0 grid-cols-[0.875rem_minmax(0,1fr)] items-start gap-x-1.5 text-vui-xs leading-[1.5]`,
   marker:
-    `${scope} marker mt-[0.12rem] inline-grid size-3.5 shrink-0 place-items-center`,
+    `${scope} marker mt-0 inline-grid size-3.5 shrink-0 place-items-center`,
   label:
     `${scope} label min-w-0 [overflow-wrap:anywhere] text-[var(--fg-secondary)]`,
   marker_completed:

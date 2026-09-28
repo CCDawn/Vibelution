@@ -52,9 +52,9 @@ const styles = {
   statusPillVisible:
     "statusPillVisible min-w-0",
   subnav:
-    "subnav min-w-0 inline-flex w-fit max-w-full items-center justify-self-start gap-[3px] overflow-x-auto overflow-y-hidden p-[3px] rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)]",
+    "subnav min-w-0 inline-flex w-fit max-w-full items-center justify-self-start gap-1 overflow-x-auto overflow-y-hidden p-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)]",
   subnavLink:
-    "subnavLink min-w-0 inline-flex shrink-0 items-center justify-center min-h-[24px] w-fit min-w-[74px] max-w-[9.5rem] px-[9px] rounded-[var(--radius-control)] [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] font-[700] no-underline whitespace-nowrap hover:text-[var(--fg-primary)] hover:bg-[var(--vui-control-muted-hover)]",
+    "subnavLink min-w-0 inline-flex shrink-0 items-center justify-center min-h-[24px] w-fit min-w-[74px] max-w-[9.5rem] px-2 rounded-[var(--radius-control)] [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] font-[700] no-underline whitespace-nowrap hover:text-[var(--fg-primary)] hover:bg-[var(--vui-control-muted-hover)]",
   subnavLinkActive:
     `subnavLinkActive min-w-0 ${vuiStateSelectedRowClass}`,
   viewStack:

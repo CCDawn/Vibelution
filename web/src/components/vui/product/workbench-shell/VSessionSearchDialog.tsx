@@ -70,7 +70,7 @@ function HighlightedText({ text, needle }: { text: string; needle: string }) {
     parts.push(
       <mark
         key={key += 1}
-        className="rounded-[2px] bg-[var(--vui-surface-inset)] px-[1px] text-inherit"
+        className="rounded-sm bg-[var(--vui-surface-inset)] px-0 text-inherit"
       >
         {text.slice(index, index + normalized.length)}
       </mark>,
@@ -184,7 +184,7 @@ export function VSessionSearchDialog({
                   data-active={active ? "true" : "false"}
                   aria-pressed={item.active ? "true" : "false"}
                   className={
-                    "mt-[2px] grid w-full gap-[2px] rounded-[var(--vui-radius-control)] border border-transparent px-2 py-[6px] text-left " +
+                    "mt-0.5 grid w-full gap-0.5 rounded-[var(--vui-radius-control)] border border-transparent px-2 py-1.5 text-left " +
                     "data-[active=true]:border-[var(--vui-border)] data-[active=true]:bg-[var(--vui-surface-inset)]"
                   }
                   onMouseEnter={() => setActiveIndex(index)}

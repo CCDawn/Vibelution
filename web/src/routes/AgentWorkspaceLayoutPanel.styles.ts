@@ -25,7 +25,7 @@ const styles = {
     "hidden min-w-0 items-center border-b border-[color-mix(in_srgb,var(--vui-border-subtle)_80%,transparent)] bg-[var(--vui-surface-workspace)] px-2 py-1.5 max-[680px]:flex",
   inspector: `grid h-full min-h-0 min-w-0 overflow-hidden border-l border-[color-mix(in_srgb,var(--vui-border-subtle)_80%,transparent)] ${vuiRailFillClass} ${panelReset} [&_[data-vui-product=agent-workspace-panel]]:p-0 max-[1180px]:shadow-[-18px_0_40px_rgba(0,0,0,0.18)]`,
   inspectorBackdrop:
-    "pointer-events-none absolute inset-0 z-30 hidden border-0 bg-black/20 opacity-0 max-[1180px]:block max-[1180px]:pointer-events-auto max-[1180px]:opacity-100",
+    "pointer-events-none absolute inset-0 z-30 hidden border-0 bg-vui-scrim-soft opacity-0 max-[1180px]:block max-[1180px]:pointer-events-auto max-[1180px]:opacity-100",
   // Placement-only residual for layout gate compatibility.
   inspectorResizeHandle: "max-[1180px]:hidden",
   workspaceWithInspector:

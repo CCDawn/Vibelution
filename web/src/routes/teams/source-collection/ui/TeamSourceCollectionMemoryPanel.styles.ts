@@ -13,7 +13,7 @@ const styles = {
   workflowIngestionBoundary:
     "workflowIngestionBoundary min-w-0",
   workflowSourceQualityStats:
-    "workflowSourceQualityStats min-w-0 grid gap-2 !grid grid-cols-[repeat(auto-fit,minmax(min(100%,96px),1fr))] gap-[5px]",
+    "workflowSourceQualityStats min-w-0 grid gap-2 !grid grid-cols-[repeat(auto-fit,minmax(min(100%,96px),1fr))] gap-1",
 } as const;
 
 export default styles;

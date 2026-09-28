@@ -6,12 +6,12 @@ const styles: Record<string, string> = {
   heading:
     "flex items-start justify-between gap-2.5 [&>div]:grid [&>div]:gap-0.5 [&_h3]:[font-size:var(--vui-font-md)] [&_p]:[font-size:var(--vui-font-2xs)] [&_p]:text-[var(--fg-secondary)]",
   headingActions: "flex shrink-0 flex-wrap items-center justify-end gap-2",
-  candidateList: "grid gap-[9px]",
+  candidateList: "grid gap-2",
   candidateCard:
     "grid gap-2 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-card)] p-3 data-[selected=true]:border-[var(--accent-cool)]",
   candidateTopline: "flex items-start justify-between gap-2.5",
   candidateLabel:
-    "grid min-w-0 flex-1 gap-[3px] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:leading-[1.4] [&_small]:[font-size:var(--vui-font-2xs)] [&_small]:text-[var(--fg-secondary)]",
+    "grid min-w-0 flex-1 gap-1 [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:leading-[1.4] [&_small]:[font-size:var(--vui-font-2xs)] [&_small]:text-[var(--fg-secondary)]",
   candidateDisclosure: "shrink-0 self-start",
   candidateDetail:
     "grid gap-2 pl-0 [&>p]:m-0 [&>p]:[font-size:var(--vui-font-2xs)] [&>p]:leading-[1.45] [&>p]:text-[var(--fg-secondary)]",
@@ -29,7 +29,7 @@ const styles: Record<string, string> = {
   hint: "m-0 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]",
   candidateDisabledReason: "m-0 [font-size:var(--vui-font-2xs)] text-[var(--state-warning)]",
   trailToggle:
-    "cursor-pointer rounded-[var(--vui-radius-control)] border border-[var(--vui-border-subtle)] px-2 py-[2px] text-[var(--fg-secondary)] [font-size:var(--vui-font-2xs)] hover:border-[var(--vui-border)]",
+    "cursor-pointer rounded-[var(--vui-radius-control)] border border-[var(--vui-border-subtle)] px-2 py-0.5 text-[var(--fg-secondary)] [font-size:var(--vui-font-2xs)] hover:border-[var(--vui-border)]",
   evidenceTrail:
     "grid gap-2 rounded-[var(--vui-radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-inset)] p-2",
   trailList: "m-0 grid list-none gap-2 p-0",

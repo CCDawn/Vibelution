@@ -18,14 +18,13 @@
       }
     },
     "arbitraryRadius": {
-      "total": 23,
+      "total": 16,
       "files": {
         "components/conversation/ConversationTodoChecklist.styles.ts": 1,
         "components/conversation/ConversationTranscriptLoadingState.styles.ts": 1,
         "components/conversation/ConversationView.styles.ts": 8,
-        "routes/AgentModelPicker.styles.ts": 3,
-        "routes/companions/CompanionChatRails.styles.ts": 6,
-        "routes/companions/CompanionLifeWorldCard.styles.ts": 1,
+        "routes/AgentModelPicker.styles.ts": 2,
+        "routes/companions/CompanionChatRails.styles.ts": 1,
         "routes/companions/companions.styles.ts": 2,
         "routes/SelfEvolutionTrack.styles.ts": 1
       }

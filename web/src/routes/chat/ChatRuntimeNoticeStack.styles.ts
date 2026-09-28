@@ -10,7 +10,7 @@ const styles = {
   list:
     "min-w-0 grid content-start gap-1.5",
   summaryItem: "min-w-0",
-  notice: `min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] ${vuiFlatPanelClass} px-2 py-1.5 shadow-none !grid grid-cols-[16px_minmax(0,1fr)] items-start gap-[7px]`,
+  notice: `min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] ${vuiFlatPanelClass} px-2 py-1.5 shadow-none !grid grid-cols-[16px_minmax(0,1fr)] items-start gap-2`,
   body:
     "min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   label:

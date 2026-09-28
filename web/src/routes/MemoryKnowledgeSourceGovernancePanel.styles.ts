@@ -11,7 +11,7 @@ import {
 
 const styles = {
   collapsedFormButton:
-    `collapsedFormButton min-w-0 ${vuiControlQuietClass} grid gap-1 [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full hidden !grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-[7px] min-h-[42px] max-h-[92px]`,
+    `collapsedFormButton min-w-0 ${vuiControlQuietClass} grid gap-1 [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full hidden !grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 min-h-[42px] max-h-[92px]`,
   countPill:
     `countPill min-w-0 ${vuiControlPillClass}`,
   detailActionButton:

@@ -24,9 +24,9 @@ import {
 } from "../design/vuiSurfaceRecipes";
 
 const panelSurface =
-  `${vuiOpaquePanelClass} p-[7px]`;
+  `${vuiOpaquePanelClass} p-2`;
 const quietPanelSurface =
-  `${vuiOpaquePanelClass} p-[6px]`;
+  `${vuiOpaquePanelClass} p-1.5`;
 const rowSurface =
   `${vuiOpaqueRowClass}`;
 const warmRowSurface =
@@ -62,12 +62,12 @@ const styles = {
   agentScopeBar:
     `agentScopeBar min-w-0 flex flex-wrap items-center gap-1.5 ${vuiStateCoolInfoClass}`,
   bulkActionBar:
-    `bulkActionBar min-w-0 max-w-full flex flex-wrap items-center gap-[5px] ${vuiOpaqueRowClass} p-[5px]`,
+    `bulkActionBar min-w-0 max-w-full flex flex-wrap items-center gap-1 ${vuiOpaqueRowClass} p-1`,
   bulkPolicyActions:
     "bulkPolicyActions min-w-0 flex flex-wrap items-center gap-1.5",
   bulkPolicyToolRow: `bulkPolicyToolRow min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateWarmSoftClass}`,
   bulkSummary:
-    `bulkSummary inline-flex w-fit max-w-full shrink-0 items-center gap-1.5 whitespace-nowrap ${vuiOpaqueRowClass} px-2 py-[4px] [font-size:var(--vui-font-xs)]`,
+    `bulkSummary inline-flex w-fit max-w-full shrink-0 items-center gap-1.5 whitespace-nowrap ${vuiOpaqueRowClass} px-2 py-1 [font-size:var(--vui-font-xs)]`,
   controlStrip:
     "controlStrip min-w-0 flex flex-wrap items-center gap-1.5",
   contextualHint:
@@ -83,7 +83,7 @@ const styles = {
   dependencyHealthPanel:
     `dependencyHealthPanel min-w-0 max-w-full ${vuiOpaquePanelClass} p-2`,
   detailActions:
-    "detailActions min-w-0 flex flex-wrap items-center gap-1 border-t border-[color:color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] pt-[7px]",
+    "detailActions min-w-0 flex flex-wrap items-center gap-1 border-t border-[color:color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] pt-2",
   detailHeader:
     "detailHeader min-w-0 flex flex-wrap items-start justify-between gap-2",
   detailPanel:
@@ -97,11 +97,11 @@ const styles = {
   filterButtonActive:
     `filterButtonActive min-w-0 ${activeTone}`,
   filterRow:
-    `filterRow min-w-0 flex flex-wrap items-center gap-1 ${vuiOpaqueRowClass} p-[5px]`,
+    `filterRow min-w-0 flex flex-wrap items-center gap-1 ${vuiOpaqueRowClass} p-1`,
   header:
     "hidden",
   image2ModelControls:
-    "image2ModelControls min-w-0 grid grid-cols-[minmax(12rem,0.9fr)_minmax(0,1.1fr)] items-end gap-[7px] max-[820px]:grid-cols-[1fr]",
+    "image2ModelControls min-w-0 grid grid-cols-[minmax(12rem,0.9fr)_minmax(0,1.1fr)] items-end gap-2 max-[820px]:grid-cols-[1fr]",
   image2ModelPanel:
     `image2ModelPanel min-w-0 max-w-full ${panelSurface}`,
   image2ModelSelect:
@@ -111,7 +111,7 @@ const styles = {
   listPanel:
     `listPanel min-w-0 max-w-full ${panelSurface} ${scrollStack} max-[760px]:max-h-[42vh]`,
   metaGrid:
-    "metaGrid min-w-0 grid gap-[5px] grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))]",
+    "metaGrid min-w-0 grid gap-1 grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))]",
   metaGridWide:
     "metaGridWide min-w-0 sm:col-span-2",
   notice:
@@ -127,13 +127,13 @@ const styles = {
   panelHeader:
     "panelHeader min-w-0 flex flex-wrap items-start justify-between gap-2",
   permissionSummaryCards:
-    "permissionSummaryCards min-w-0 grid gap-[5px] grid-cols-[repeat(auto-fit,minmax(7rem,1fr))]",
+    "permissionSummaryCards min-w-0 grid gap-1 grid-cols-[repeat(auto-fit,minmax(7rem,1fr))]",
   permissionSummaryGrid:
-    "permissionSummaryGrid min-w-0 grid gap-[5px] grid-cols-[minmax(0,1fr)]",
+    "permissionSummaryGrid min-w-0 grid gap-1 grid-cols-[minmax(0,1fr)]",
   policyDraftPanel:
     "policyDraftPanel min-w-0 max-w-full grid gap-4 border-t border-vui-border-subtle pt-4",
   policyDraftSummary:
-    `policyDraftSummary min-w-0 max-w-full ${rowSurface} px-2 py-[5px] !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[5px] [font-size:var(--vui-font-xs)] max-[900px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[520px]:grid-cols-[1fr]`,
+    `policyDraftSummary min-w-0 max-w-full ${rowSurface} px-2 py-1 !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-1 [font-size:var(--vui-font-xs)] max-[900px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[520px]:grid-cols-[1fr]`,
   policyHint:
     "policyHint min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   policyMeta:
@@ -199,9 +199,9 @@ const styles = {
   primaryButton:
     `primaryButton min-w-0 ${buttonBase} ${activeTone}`,
   readinessCard:
-    `readinessCard min-w-0 max-w-full ${quietPanelSurface} px-2 py-[5px]`,
+    `readinessCard min-w-0 max-w-full ${quietPanelSurface} px-2 py-1`,
   readinessPanel:
-    `readinessPanel min-w-0 max-w-full ${panelSurface} !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[5px] max-[980px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[520px]:grid-cols-[1fr]`,
+    `readinessPanel min-w-0 max-w-full ${panelSurface} !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-1 max-[980px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[520px]:grid-cols-[1fr]`,
   readiness_active:
     `readiness_active min-w-0 ${vuiStateSelectedRowClass}`,
   readiness_allowed:
@@ -263,7 +263,7 @@ const styles = {
   resultCard:
     `resultCard min-w-0 max-w-full ${quietPanelSurface}`,
   resultSummaryGrid:
-    `resultSummaryGrid min-w-0 max-w-full ${quietPanelSurface} grid gap-[5px] grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))]`,
+    `resultSummaryGrid min-w-0 max-w-full ${quietPanelSurface} grid gap-1 grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))]`,
   result_attention:
     "result_attention min-w-0",
   result_ok:
@@ -283,7 +283,7 @@ const styles = {
   scopeStats:
     "scopeStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   searchBox:
-    `searchBox min-w-0 max-w-full ${quietPanelSurface} grid grid-cols-[auto_minmax(0,1fr)] items-center gap-[6px] px-2 py-[5px]`,
+    `searchBox min-w-0 max-w-full ${quietPanelSurface} grid grid-cols-[auto_minmax(0,1fr)] items-center gap-1.5 px-2 py-1`,
   secondaryButton:
     `secondaryButton min-w-0 ${buttonBase}`,
   // Host carries blocked-active danger tint so allowed/inherited keep cool selection.
@@ -302,7 +302,7 @@ const styles = {
     "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] " +
     "data-[state=active]:text-[var(--accent-cool)]",
   selectableToolRow:
-    `selectableToolRow min-w-0 max-w-full ${warmRowSurface} p-[4px] !grid grid-cols-[28px_minmax(0,1fr)] items-center gap-[5px]`,
+    `selectableToolRow min-w-0 max-w-full ${warmRowSurface} p-1 !grid grid-cols-[28px_minmax(0,1fr)] items-center gap-1`,
   sourcePill:
     `sourcePill min-w-0 ${pillBase}`,
   stateBadge:
@@ -420,7 +420,7 @@ const styles = {
   status_warning:
     `status_warning min-w-0 ${vuiStateWarningSoftClass}`,
   summaryCard:
-    `summaryCard min-w-0 max-w-full ${vuiOpaqueRowClass} !grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-[5px] min-h-[26px] px-2 py-[3px]`,
+    `summaryCard min-w-0 max-w-full ${vuiOpaqueRowClass} !grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-1 min-h-[26px] px-2 py-1`,
   summaryGrid:
     "summaryGrid min-w-0 grid gap-2 flex-1 grid-cols-[repeat(auto-fit,minmax(6.5rem,1fr))]",
   testArgs:
@@ -428,13 +428,13 @@ const styles = {
   testPanel:
     `testPanel min-w-0 max-w-full ${vuiOpaquePanelClass} p-2`,
   toolAgentFitPanel:
-    `toolAgentFitPanel min-w-0 max-w-full rounded-[var(--radius-panel)] ${vuiStateCoolInfoClass} p-[7px] text-[var(--accent-cool)] !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-[7px] max-[640px]:grid-cols-[1fr]`,
+    `toolAgentFitPanel min-w-0 max-w-full rounded-[var(--radius-panel)] ${vuiStateCoolInfoClass} p-2 text-[var(--accent-cool)] !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 max-[640px]:grid-cols-[1fr]`,
   toolBadges:
     "toolBadges min-w-0 flex flex-wrap items-center gap-1",
   toolBundleApplyActions:
     "toolBundleApplyActions min-w-0 flex flex-wrap items-center justify-end gap-1 max-[640px]:justify-start",
   toolBundleApplyBar:
-    "toolBundleApplyBar min-w-0 max-w-full flex flex-wrap items-center gap-1.5 rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_5%,transparent)] p-[7px] !grid grid-cols-[minmax(12rem,0.85fr)_minmax(0,1fr)_auto] max-[860px]:grid-cols-[1fr]",
+    "toolBundleApplyBar min-w-0 max-w-full flex flex-wrap items-center gap-1.5 rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_5%,transparent)] p-2 !grid grid-cols-[minmax(12rem,0.85fr)_minmax(0,1fr)_auto] max-[860px]:grid-cols-[1fr]",
   toolBundleApplyCard:
     "toolBundleApplyCard min-w-0 rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_7%,transparent)] p-2 text-[var(--accent-warm)]",
   toolBundleApplyGrid:
@@ -442,23 +442,23 @@ const styles = {
   toolBundleGroup:
     "toolBundleGroup min-w-0 max-w-full border-b border-vui-border-subtle bg-transparent py-3",
   toolBundleHeader:
-    "toolBundleHeader min-w-0 flex flex-wrap items-center justify-between gap-1 px-1 pb-[3px] [font-size:var(--vui-font-xs)]",
+    "toolBundleHeader min-w-0 flex flex-wrap items-center justify-between gap-1 px-1 pb-1 [font-size:var(--vui-font-xs)]",
   toolBundleTitle:
     "inline-flex items-center gap-1.5",
   toolBundleItems:
     "toolBundleItems min-w-0 grid min-h-0 content-start gap-1 overflow-auto",
   toolBundleSelect:
-    "toolBundleSelect min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full !grid grid-cols-[auto_minmax(0,1fr)] items-center gap-[7px]",
+    "toolBundleSelect min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full !grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2",
   toolBundleSummary:
-    "toolBundleSummary min-w-0 max-w-full truncate rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_5%,transparent)] px-2 py-[5px] text-[var(--fg-secondary)]",
+    "toolBundleSummary min-w-0 max-w-full truncate rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_5%,transparent)] px-2 py-1 text-[var(--fg-secondary)]",
   toolButton:
     `toolButton min-w-0 !grid !h-auto min-h-[var(--vui-control-height-sm)] w-full max-w-full grid-cols-[auto_minmax(0,1fr)] items-center justify-start gap-3 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-left text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 ${vuiStateWarmSoftClass}`,
   toolButtonActive:
     `toolButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
   toolCopy:
-    "toolCopy grid min-w-0 gap-[1px] text-left [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [&>strong]:line-clamp-2 [&>strong]:break-words [&>span]:truncate",
+    "toolCopy grid min-w-0 gap-0 text-left [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [&>strong]:line-clamp-2 [&>strong]:break-words [&>span]:truncate",
   toolDetailPanel:
-    "toolDetailPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_7%,transparent)] p-[7px] text-[var(--accent-warm)] grid min-h-0 content-start gap-[7px] overflow-auto",
+    "toolDetailPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_7%,transparent)] p-2 text-[var(--accent-warm)] grid min-h-0 content-start gap-2 overflow-auto",
   toolList:
     "toolList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   toolPermissionGroup:
@@ -474,9 +474,9 @@ const styles = {
   ts:
     "ts min-w-0",
   workspace:
-    `workspace min-w-0 max-w-full grid h-full min-h-0 gap-[7px] p-[7px] !grid grid-cols-[minmax(0,var(--pane-w-left))_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:grid-rows-[minmax(220px,42vh)_minmax(420px,1fr)] max-[760px]:overflow-y-auto max-[760px]:overflow-x-hidden ${vuiWorkspaceFillClass}`,
+    `workspace min-w-0 max-w-full grid h-full min-h-0 gap-2 p-2 !grid grid-cols-[minmax(0,var(--pane-w-left))_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:grid-rows-[minmax(220px,42vh)_minmax(420px,1fr)] max-[760px]:overflow-y-auto max-[760px]:overflow-x-hidden ${vuiWorkspaceFillClass}`,
   workspaceScopePanel:
-    `workspaceScopePanel min-w-0 max-w-full ${vuiOpaqueRowClass} !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[5px] px-2 py-[5px] [font-size:var(--vui-font-xs)] max-[720px]:grid-cols-[1fr]`,
+    `workspaceScopePanel min-w-0 max-w-full ${vuiOpaqueRowClass} !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-1 px-2 py-1 [font-size:var(--vui-font-xs)] max-[720px]:grid-cols-[1fr]`,
 } as const;
 
 export default styles;

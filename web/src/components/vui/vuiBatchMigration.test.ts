@@ -556,7 +556,7 @@ describe("VUI batch migration", () => {
 
     expect(source).toContain("templateButtonBaseClass");
     expect(source).toContain("!h-auto");
-    expect(source).toContain("!grid !justify-stretch !justify-items-start !text-left gap-[5px]");
+    expect(source).toContain("!grid !justify-stretch !justify-items-start !text-left gap-1");
     expect(source).not.toContain("[&_[data-slot=vui-button-label]]:grid");
   });
 
