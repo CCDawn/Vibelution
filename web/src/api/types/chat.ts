@@ -829,6 +829,69 @@ export type SessionBulkDeleteResponse = {
   durationMs?: number;
 };
 
+/** Safety classification of one checkpointed file in a turn rewind plan. */
+export type SessionRewindFileClassification =
+  | "safe"
+  | "checkpoint_missing"
+  | "external_modified"
+  | "not_in_checkpoint"
+  | "ignored"
+  | string;
+
+/** What applying the rewind will do to one file. */
+export type SessionRewindFileAction = "restore" | "delete" | "none" | string;
+
+export type SessionRewindFileState = "created" | "modified" | "deleted" | "unchanged" | string;
+
+export type SessionRewindFileItem = {
+  path: string;
+  action: SessionRewindFileAction;
+  classification: SessionRewindFileClassification;
+  state: SessionRewindFileState;
+  currentExists: boolean;
+  currentSize: number;
+};
+
+/** Read-only whole-turn rewind plan (`GET /api/sessions/{id}/rewind/{turnId}`). */
+export type SessionRewindPreviewResponse = {
+  sessionId: string;
+  turnId: string;
+  files: SessionRewindFileItem[];
+  canApply: boolean;
+  capabilityNote: string;
+};
+
+export type SessionRewindApplyPayload = {
+  turnId: string;
+  force?: boolean;
+};
+
+export type SessionRewindAppliedFile = {
+  path: string;
+  action?: SessionRewindFileAction;
+};
+
+export type SessionRewindSkippedFile = {
+  path: string;
+  classification?: SessionRewindFileClassification;
+};
+
+/** Whole-turn rewind result (`POST /api/sessions/{id}/rewind`), idempotent on replay. */
+export type SessionRewindApplyResponse = {
+  sessionId: string;
+  turnId: string;
+  status: string;
+  alreadyApplied: boolean;
+  applied: SessionRewindAppliedFile[];
+  skipped: SessionRewindSkippedFile[];
+};
+
+/** One file named by the 409 conflict `detail.unsafeFiles` payload. */
+export type SessionRewindUnsafeFile = {
+  path: string;
+  classification?: SessionRewindFileClassification;
+};
+
 export type SessionTurnErrorRetry = {
   attempt: number;
   maxAttempts: number;

@@ -441,6 +441,54 @@ composer 图片附件的上传生命周期与失败恢复：每个 chip 携带 `
 - 复用 `VConfirmDialog` + `VSelect`，不新建 `V*` 导出组件。
 - 危险确认走 `VConfirmDialog` danger tone；本弹窗非破坏性（源会话只读），保持 neutral。
 
+## ConversationFileRewindDialog
+
+### 功能
+整轮回退弹窗：把某一轮写入的项目文件恢复到该轮开始前的状态。打开时拉取服务端逐文件预览（分类徽标 + 将执行的动作 + 当前大小），默认 strict 应用整批；服务端 409 时列出被拒文件明细并提供「仍恢复安全文件」force 次按钮；成功与幂等重放都以计数反馈。服务端是唯一安全权威，弹窗只做呈现与转发。
+
+### 适用范围
+- **适用**：直连会话时间线里带磁盘检查点（`metadata.changedFiles` 非空）的已完成助手轮，从「本轮文件」面板头部入口进入。
+- **不适用**：Companion 私聊、群聊 transcript、流式中的轮次、没有 `sessionId`/`turnId` 锚点的渲染（入口直接隐藏）。
+
+### 使用方式
+
+```tsx
+<ConversationFileRewindDialog
+  open={rewindOpen}
+  sessionId={sessionId}
+  turnId={turnId}
+  language={language}
+  onOpenChange={setRewindOpen}
+/>
+```
+
+| 槽位 | 说明 | 设计注意 |
+| --- | --- | --- |
+| 入口 | 面板头部 `VButton` ghost「回退本轮文件」 | 仅 `changedFiles?.length && sessionId && turnId` 齐备时显示 |
+| 预览列表 | 逐文件行：路径 + `VChip` 分类 + 动作说明 + 当前大小 | 分类文案用人话（`external_modified` → 「写入后被其他程序修改」） |
+| 说明行 | 服务端 `capabilityNote` 原文 | 有值才显示 |
+| 确认/force | strict 主按钮；409 后出现 force 次按钮 | pending 时禁用关闭；结果反馈替换动作区 |
+| 结果反馈 | `已恢复 N 个文件；跳过 M 个。` 或幂等重放说明 | alreadyApplied 不显示伪造计数 |
+
+### 非职责
+- 不做逐文件勾选回退（服务端只支持整轮语义 + force）。
+- 不做回退后的会话刷新与缓存失效（接线层职责）。
+- 不内嵌 diff 预览（面板已有「本轮补丁」弹窗）。
+
+### 视觉与状态
+- 加载：`role="status"` 预览加载文案；404 等失败给一行人话错误 + 「重试」。
+- 分类徽标 tone：safe→success、checkpoint_missing→warning、external_modified→danger、其余 neutral。
+- 应用中：确认/force 按钮 `isPending`，取消禁用；结果出现后仅剩「关闭」。
+
+### 实现落点
+- 弹窗：`web/src/components/conversation/ConversationFileRewindDialog.tsx`
+- 入口与渲染：「本轮文件」面板 `web/src/components/conversation/ConversationFileDeliveries.tsx`
+- API：`web/src/api/chat.ts` `previewSessionTurnRewind` / `applySessionTurnRewind` / `sessionRewindUnsafeFilesFromError`
+
+### 反冗余
+- 复用 `VDialog`/`VButton`/`VChip`，不新建 `V*` primitive。
+- 不与 `ConversationForkSessionDialog`（分叉出口）共享状态或入口。
+
 ## ConversationMarkdownCodeBlock
 
 ### 功能

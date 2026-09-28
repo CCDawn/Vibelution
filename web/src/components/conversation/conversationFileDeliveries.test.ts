@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
 import { buildCodexTranscriptCells } from "./codexTranscriptCells";
-import { collectConversationFileDeliveries, fileDeliveryFollowupDraft } from "./conversationFileDeliveryModel";
+import {
+  collectConversationFileDeliveries,
+  fileDeliveryFollowupDraft,
+  mergeConversationFileDeliveries,
+  type ConversationChangedFileSummary,
+} from "./conversationFileDeliveryModel";
 
 function cell(id: string, name: string, args: Record<string, unknown>, status: "completed" | "failed" | "running" = "completed"): CodexTranscriptCell {
   return { id, messageId: "turn1", kind: "tool_call", status, tone: "neutral", toolLifecycleModel: {
@@ -77,5 +82,71 @@ describe("turn file deliveries", () => {
   });
   it("preserves the existing draft, safely quotes paths, and never auto-submits", () => {
     expect(fileDeliveryFollowupDraft("保留这句", "a\n.html", "zh")).toBe('保留这句\n\n请继续修改文件 "a\\n.html"：');
+  });
+});
+
+describe("changedFiles merge", () => {
+  const write = cell("a", "write_file_tool", { file_path: "C:\\proj\\web\\src\\a.ts", content: "export const a = 1;" });
+
+  it("falls back to the transcript extraction with zero drift when no summary exists", () => {
+    for (const changedFiles of [undefined, null, [], [{ path: "  " }]] as Array<ConversationChangedFileSummary[] | null | undefined>) {
+      expect(mergeConversationFileDeliveries([write], changedFiles)).toEqual(collectConversationFileDeliveries([write]));
+    }
+  });
+
+  it("lets the disk-truth summary drive rows, states and +/- counts, aligned by path", () => {
+    const changedFiles: ConversationChangedFileSummary[] = [
+      { path: "web/src/a.ts", additions: 12, deletions: 3, state: "modified" },
+      { path: "notes/new.md", additions: 5, deletions: 0, state: "created" },
+      { path: "old/removed.txt", additions: 0, deletions: 9, state: "deleted" },
+    ];
+    const { files, patches } = mergeConversationFileDeliveries([write], changedFiles);
+    // Windows absolute tool path aligned onto the project-relative summary;
+    // matched rows keep the transcript display path so content viewing works.
+    expect(files.map((file) => file.path)).toEqual(["C:\\proj\\web\\src\\a.ts", "notes/new.md", "old/removed.txt"]);
+    expect(files[0]).toMatchObject({ path: "C:\\proj\\web\\src\\a.ts", content: "export const a = 1;", deleted: false, additions: 12, deletions: 3, state: "modified" });
+    expect(files[1]).toMatchObject({ path: "notes/new.md", content: undefined, deleted: false, state: "created" });
+    expect(files[2]).toMatchObject({ path: "old/removed.txt", deleted: true, content: undefined, deletions: 9 });
+    // Patches stay transcript-owned.
+    expect(patches).toEqual(collectConversationFileDeliveries([write]).patches);
+  });
+
+  it("keeps transcript-only rows appended and never double-consumes one match", () => {
+    const extra = cell("b", "write_file_tool", { file_path: "unmanaged.log", content: "log" });
+    const changedFiles: ConversationChangedFileSummary[] = [
+      { path: "web/src/a.ts", additions: 1, deletions: 0, state: "modified" },
+      { path: "other/on-disk.ts", additions: 2, deletions: 1, state: "created" },
+    ];
+    const { files } = mergeConversationFileDeliveries([write, extra], changedFiles);
+    expect(files.map((file) => file.path)).toEqual(["C:\\proj\\web\\src\\a.ts", "other/on-disk.ts", "unmanaged.log"]);
+    expect(files[0]).toMatchObject({ additions: 1, deletions: 0, state: "modified", content: "export const a = 1;" });
+    expect(files[1]).toMatchObject({ path: "other/on-disk.ts", content: undefined, state: "created" });
+    expect(files[2]).toMatchObject({ path: "unmanaged.log", content: "log" });
+    expect(files[2].additions).toBeUndefined();
+    expect(files[2].state).toBeUndefined();
+  });
+
+  it("keeps view content on a summary-modified file but drops it once disk says deleted", () => {
+    const modified = mergeConversationFileDeliveries(
+      [write],
+      [{ path: "web/src/a.ts", additions: 1, deletions: 1, state: "modified" }],
+    ).files[0];
+    expect(modified.content).toBe("export const a = 1;");
+    const deleted = mergeConversationFileDeliveries(
+      [write],
+      [{ path: "web/src/a.ts", additions: 0, deletions: 2, state: "deleted" }],
+    ).files[0];
+    expect(deleted.deleted).toBe(true);
+    expect(deleted.content).toBeUndefined();
+  });
+
+  it("builds canonical operation cells through the shared projection", () => {
+    const cells = buildCodexTranscriptCells({
+      id: "turn1", role: "assistant", createdAt: "2026-09-29T00:00:00Z", streaming: false,
+      source: { kind: "conversation-message", id: "turn1" }, parts: [],
+    }, { operations: [] });
+    expect(mergeConversationFileDeliveries(cells, [{ path: "only/on-disk.txt", state: "created" }]).files).toEqual([
+      { path: "only/on-disk.txt", content: undefined, deleted: false, additions: undefined, deletions: undefined, state: "created" },
+    ]);
   });
 });

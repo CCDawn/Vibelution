@@ -1,31 +1,63 @@
 import { lazy, Suspense, useMemo, useState } from "react";
 import { FileText } from "lucide-react";
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
-import { collectConversationFileDeliveries, type ConversationFileDelivery } from "./conversationFileDeliveryModel";
+import {
+  mergeConversationFileDeliveries,
+  type ConversationChangedFileSummary,
+  type ConversationFileDeliveryView,
+} from "./conversationFileDeliveryModel";
+import { ConversationFileRewindDialog } from "./ConversationFileRewindDialog";
 import { ConversationPatchDiff } from "./ConversationPatchDiff";
 import { VButton, VDialog, VSurface } from "../vui";
 import styles from "./ConversationFileDeliveries.styles";
 
 const FilePreview = lazy(() => import("../preview/FilePreview").then((module) => ({ default: module.FilePreview })));
 
-export function ConversationFileDeliveries({ cells, language, onContinue }: {
+const STATE_PRESENTATION: Record<string, { zh: string; en: string }> = {
+  created: { zh: "新建", en: "New" },
+  modified: { zh: "修改", en: "Modified" },
+};
+
+export function ConversationFileDeliveries({ cells, language, onContinue, changedFiles, sessionId, turnId }: {
   cells: readonly CodexTranscriptCell[];
   language: "zh" | "en";
   onContinue?: (path: string) => void;
+  /** Disk-truth per-turn summary (`metadata.changedFiles`); absent → transcript extraction only. */
+  changedFiles?: readonly ConversationChangedFileSummary[];
+  /** Session/turn anchors for the rewind flow; both required to expose the entry. */
+  sessionId?: string;
+  turnId?: string;
 }) {
-  const { files, patches } = useMemo(() => collectConversationFileDeliveries(cells), [cells]);
+  const { files, patches } = useMemo(() => mergeConversationFileDeliveries(cells, changedFiles), [cells, changedFiles]);
   const [selected, setSelected] = useState<string | null>(null);
   const [showDiff, setShowDiff] = useState(false);
-  const file: ConversationFileDelivery | undefined = files.find((entry) => entry.path === selected);
+  const [rewindOpen, setRewindOpen] = useState(false);
+  const file: ConversationFileDeliveryView | undefined = files.find((entry) => entry.path === selected);
+  const rewindAvailable = Boolean(sessionId && turnId && changedFiles?.length);
   const zh = language === "zh";
   if (!files.length) return null;
   return (
     <section className={styles.root} aria-label={zh ? "本轮文件" : "Files from this turn"} data-conversation-file-deliveries="true">
-      <p className={styles.caption}>{zh ? `本轮文件 · ${files.length}` : `Files from this turn · ${files.length}`}</p>
+      <div className={styles.header}>
+        <p className={styles.caption}>{zh ? `本轮文件 · ${files.length}` : `Files from this turn · ${files.length}`}</p>
+        {rewindAvailable ? (
+          <VButton variant="ghost" onPress={() => setRewindOpen(true)}>{zh ? "回退本轮文件" : "Rewind files"}</VButton>
+        ) : null}
+      </div>
       {files.map((entry) => (
         <VSurface key={entry.path} tone="card" className={styles.card}>
           <FileText size={16} aria-hidden="true" />
           <span className={styles.path} title={entry.path}>{entry.path}</span>
+          {entry.additions != null || entry.deletions != null ? (
+            <span className={styles.diffStat}>{`+${entry.additions ?? 0} −${entry.deletions ?? 0}`}</span>
+          ) : null}
+          {!entry.deleted && entry.state ? (
+            <span className={styles.caption}>
+              {zh
+                ? (STATE_PRESENTATION[entry.state] ?? STATE_PRESENTATION.modified).zh
+                : (STATE_PRESENTATION[entry.state] ?? STATE_PRESENTATION.modified).en}
+            </span>
+          ) : null}
           {entry.deleted ? <span className={styles.caption}>{zh ? "已删除" : "Deleted"}</span> : (
             <div className={styles.actions}>
               {entry.content !== undefined ? <VButton onPress={() => setSelected(entry.path)}>{zh ? "查看内容" : "View content"}</VButton> : null}
@@ -35,6 +67,15 @@ export function ConversationFileDeliveries({ cells, language, onContinue }: {
         </VSurface>
       ))}
       {patches.length ? <VButton variant="ghost" onPress={() => setShowDiff(true)}>{zh ? "查看本轮补丁" : "View this turn’s patches"}</VButton> : null}
+      {sessionId && turnId && changedFiles?.length ? (
+        <ConversationFileRewindDialog
+          open={rewindOpen}
+          sessionId={sessionId}
+          turnId={turnId}
+          language={language}
+          onOpenChange={setRewindOpen}
+        />
+      ) : null}
       {file?.content !== undefined ? <VDialog data-vui="conversation-file-dialog" open onOpenChange={(open) => { if (!open) setSelected(null); }} title={file.path}
         description={zh ? "本轮写入内容；不代表磁盘上的最新文件。" : "Content written in this turn; not the latest file on disk."}
         size="xl" className={styles.dialog} contentClassName={styles.dialogContent}

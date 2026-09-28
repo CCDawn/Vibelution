@@ -1,4 +1,4 @@
-import { fetchJson } from "./client";
+import { fetchJson, isFetchJsonHttpError } from "./client";
 import type {
   ChatRoomDetail,
   ChatRoomMode,
@@ -19,6 +19,10 @@ import type {
   SessionMessageCurationResponse,
   SessionQueryResponse,
   SessionQueuedTurn,
+  SessionRewindApplyPayload,
+  SessionRewindApplyResponse,
+  SessionRewindPreviewResponse,
+  SessionRewindUnsafeFile,
   SessionSummary,
   SessionToolApprovalRequest,
   SessionTurnAcceptedResponse,
@@ -605,6 +609,69 @@ export function submitSessionGuidance(
       body: JSON.stringify(payload),
     },
   );
+}
+
+// Whole-turn file rewind over the file-change ledger: preview is read-only,
+// apply is a strict batch restore with an explicit force escape hatch. The
+// server stays the only safety authority — the client never pre-filters files.
+export function previewSessionTurnRewind(
+  sessionId: string,
+  turnId: string,
+): Promise<SessionRewindPreviewResponse> {
+  return fetchJson<SessionRewindPreviewResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/rewind/${encodeURIComponent(turnId)}`,
+  );
+}
+
+export function applySessionTurnRewind(
+  sessionId: string,
+  payload: SessionRewindApplyPayload,
+): Promise<SessionRewindApplyResponse> {
+  return fetchJson<SessionRewindApplyResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/rewind`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ turnId: payload.turnId, force: payload.force ?? false }),
+    },
+  );
+}
+
+/**
+ * Extracts `detail.unsafeFiles` from a strict rewind 409 conflict. Tolerates
+ * both body shapes (`{detail: {unsafeFiles}}` and flat `unsafeFiles`) and
+ * string-only entries; returns [] for every other failure.
+ */
+export function sessionRewindUnsafeFilesFromError(error: unknown): SessionRewindUnsafeFile[] {
+  if (!isFetchJsonHttpError(error)) return [];
+  const payload: unknown = error.details;
+  if (!payload || typeof payload !== "object") return [];
+  const candidates: unknown[] = [payload];
+  const detail = (payload as { detail?: unknown }).detail;
+  if (detail && typeof detail === "object") {
+    candidates.unshift(detail);
+  }
+  for (const candidate of candidates) {
+    const rawFiles = (candidate as { unsafeFiles?: unknown }).unsafeFiles;
+    if (!Array.isArray(rawFiles)) continue;
+    const files: SessionRewindUnsafeFile[] = [];
+    for (const raw of rawFiles) {
+      if (typeof raw === "string") {
+        if (raw.trim()) files.push({ path: raw });
+        continue;
+      }
+      const entry = raw as { path?: unknown; classification?: unknown };
+      if (typeof entry?.path !== "string" || !entry.path.trim()) continue;
+      files.push({
+        path: entry.path,
+        classification: typeof entry.classification === "string" ? entry.classification : undefined,
+      });
+    }
+    if (files.length) return files;
+  }
+  return [];
 }
 
 export function listChatRoomModes(): Promise<ChatRoomMode[]> {
