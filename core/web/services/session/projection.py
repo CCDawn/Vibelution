@@ -639,6 +639,7 @@ def _build_session_detail_from_summary(
         )
     if not detail_messages:
         detail_messages = s._normalize_messages(conversation["id"], conversation.get("messages") or [])
+    detail_messages = _stamp_forked_from_on_first_message(detail_messages, conversation)
     usage_messages = stat_messages or detail_messages
     runtime_metrics = s._session_runtime_metrics(conversation, usage_messages)
     context_usage = runtime_metrics["contextUsage"]
@@ -1235,6 +1236,9 @@ def _normalize_conversation(
         "parentSessionId": parent_session_id,
         "rootSessionId": root_session_id,
         "childSessionIds": child_session_ids,
+        # Fork provenance for the message-level fork projection on session
+        # detail; {} for ordinary sessions keeps every other consumer unchanged.
+        "forkedFrom": s._normalize_forked_from_metadata(raw.get("forkedFrom")) or {},
         "activeChildSessionId": active_child_session_id,
         "taskTitle": task_title,
         "handoffContext": handoff_context,
@@ -1374,6 +1378,36 @@ def _coalesce_assistant_messages_by_turn(messages: list[dict[str, Any]]) -> list
     return result
 
 
+def _stamp_forked_from_on_first_message(
+    detail_messages: list[dict[str, Any]],
+    conversation: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Surface fork provenance on the first detail message's metadata.
+
+    Forked sessions carry ``conversation["forkedFrom"]``; the transcript UI
+    reads ``metadata.forkedFromSessionId``. Ordinary sessions have no
+    ``forkedFrom`` and every message is returned untouched.
+    """
+
+    forked_from = conversation.get("forkedFrom")
+    forked_from_session_id = (
+        str(forked_from.get("sessionId") or "").strip()
+        if isinstance(forked_from, dict)
+        else ""
+    )
+    if not forked_from_session_id or not detail_messages:
+        return detail_messages
+    first = detail_messages[0]
+    if not isinstance(first, dict):
+        return detail_messages
+    stamped = dict(first)
+    stamped["metadata"] = {
+        **(dict(first.get("metadata")) if isinstance(first.get("metadata"), dict) else {}),
+        "forkedFromSessionId": forked_from_session_id,
+    }
+    return [stamped, *list(detail_messages[1:])]
+
+
 def _normalize_messages(
     conversation_id: str,
     items: Any,
@@ -1384,6 +1418,7 @@ def _normalize_messages(
 ) -> list[dict[str, Any]]:
     s = _service()
     ledger_events_by_turn: dict[str, list[dict[str, Any]]] | None = None
+    file_changes_by_turn: dict[str, list[dict[str, Any]]] | None = None
     raw_items = list(items or [])
     timeline_lang = s.get_web_language() if include_timeline else ""
     normalized_start_index = max(1, int(source_start_index or 1))
@@ -1629,6 +1664,26 @@ def _normalize_messages(
             client_submission_id = client_submission_id_by_turn.get(turn_id, "")
             if client_submission_id:
                 metadata.setdefault("clientSubmissionId", client_submission_id)
+            # Turn-level file-change summary from the write-tool checkpoint
+            # ledger (read-only projection; never written here). Only turns
+            # with ledgered changes gain the key, so sessions without
+            # checkpoints keep byte-identical message metadata.
+            if file_changes_by_turn is None:
+                file_changes_by_turn = {}
+            if turn_id not in file_changes_by_turn:
+                try:
+                    from core.chat import file_change_ledger
+
+                    file_changes_by_turn[turn_id] = file_change_ledger.turn_file_changes(
+                        s.PROJECT_ROOT,
+                        conversation_id,
+                        turn_id,
+                    )
+                except Exception:
+                    file_changes_by_turn[turn_id] = []
+            turn_changed_files = file_changes_by_turn.get(turn_id) or []
+            if turn_changed_files:
+                metadata["changedFiles"] = turn_changed_files
         if (
             role == "assistant"
             and turn_id

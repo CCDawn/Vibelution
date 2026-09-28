@@ -6,7 +6,9 @@ import { assertTrustedIpcSender } from "../src/security/ipcSenderValidation.js";
 import { resolveLauncherWindowUrl, resolveWorkbenchUrl } from "../src/windows/windowUrlResolver.js";
 import {
   ElectronWindowProvider,
+  shouldCancelWorkbenchForeignNavigation,
   shouldCancelWorkbenchInPageNavigation,
+  shouldRouteWorkbenchNavigationExternally,
   type ElectronWindowLike,
   type ElectronWindowOpenDecision,
   type ElectronWindowOpenHandler
@@ -1271,6 +1273,159 @@ describe("Launcher new-window requests", () => {
   });
 });
 
+describe("external window-open routing", () => {
+  function workbenchHarness(openExternalUrl: (url: string) => void) {
+    const workbenchWindow = new FakeWindow(42, "", 4242);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8002", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => workbenchWindow,
+      openExternalUrl
+    });
+    return { provider, workbenchWindow };
+  }
+
+  it("opens http window.open requests in the system browser while denying the popup", async () => {
+    const openedExternally: string[] = [];
+    const { provider, workbenchWindow } = workbenchHarness((url) => {
+      openedExternally.push(url);
+    });
+    await provider.openOrFocusWorkbench("http://127.0.0.1:8002/");
+
+    expect(workbenchWindow.openRequest("https://example.com/docs")).toEqual({ action: "deny" });
+    await vi.waitFor(() => expect(openedExternally).toEqual(["https://example.com/docs"]));
+    expect(workbenchWindow.openRequest("http://example.com/a?b=c")).toEqual({ action: "deny" });
+    await vi.waitFor(() => expect(openedExternally).toHaveLength(2));
+  });
+
+  it("routes mailto window.open requests to the system handler", async () => {
+    const openedExternally: string[] = [];
+    const { provider, workbenchWindow } = workbenchHarness((url) => {
+      openedExternally.push(url);
+    });
+    await provider.openOrFocusWorkbench("http://127.0.0.1:8002/");
+
+    expect(workbenchWindow.openRequest("mailto:support@example.com")).toEqual({ action: "deny" });
+    await vi.waitFor(() => expect(openedExternally).toEqual(["mailto:support@example.com"]));
+  });
+
+  it("keeps denying non-openable window.open requests without external side effects", async () => {
+    const openedExternally: string[] = [];
+    const { provider, workbenchWindow } = workbenchHarness((url) => {
+      openedExternally.push(url);
+    });
+    await provider.openOrFocusWorkbench("http://127.0.0.1:8002/");
+
+    expect(workbenchWindow.openRequest("file:///C:/Windows/System32/calc.exe")).toEqual({ action: "deny" });
+    expect(workbenchWindow.openRequest("javascript:alert(1)")).toEqual({ action: "deny" });
+    expect(workbenchWindow.openRequest("vibelncher://settings")).toEqual({ action: "deny" });
+    expect(workbenchWindow.openRequest("not a url")).toEqual({ action: "deny" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(openedExternally).toEqual([]);
+  });
+
+  it("also routes external window.open requests coming from the launcher window", async () => {
+    const openedExternally: string[] = [];
+    const launcherWindow = new FakeWindow(7, "http://127.0.0.1:8765/launcher", 7070);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: () => launcherWindow,
+      createWorkbenchWindow: (url) => new FakeWindow(42, url, 4242),
+      openExternalUrl: (url) => {
+        openedExternally.push(url);
+      }
+    });
+    await provider.openLauncher();
+
+    expect(launcherWindow.openRequest("https://example.com/open")).toEqual({ action: "deny" });
+    await vi.waitFor(() => expect(openedExternally).toEqual(["https://example.com/open"]));
+    expect(launcherWindow.openRequest("javascript:alert(1)")).toEqual({ action: "deny" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(openedExternally).toHaveLength(1);
+  });
+
+  it("survives an openExternalUrl implementation that throws synchronously", async () => {
+    const { provider, workbenchWindow } = workbenchHarness(() => {
+      throw new Error("shell exploded");
+    });
+    await provider.openOrFocusWorkbench("http://127.0.0.1:8002/");
+
+    expect(() => workbenchWindow.openRequest("https://example.com/docs")).not.toThrow();
+    expect(workbenchWindow.openRequest("https://example.com/docs")).toEqual({ action: "deny" });
+  });
+
+  it("routes cross-origin http will-navigate to the system browser and cancels in-window navigation", async () => {
+    const openedExternally: string[] = [];
+    const { provider, workbenchWindow } = workbenchHarness((url) => {
+      openedExternally.push(url);
+    });
+    await provider.openOrFocusWorkbench("http://127.0.0.1:8002/");
+    workbenchWindow.loadURL("http://127.0.0.1:8002/");
+
+    const prevented: boolean[] = [];
+    workbenchWindow.emit("webContents:will-navigate", { preventDefault: () => prevented.push(true) }, "https://example.com/docs");
+    expect(prevented).toEqual([true]);
+    await vi.waitFor(() => expect(openedExternally).toEqual(["https://example.com/docs"]));
+
+    openedExternally.length = 0;
+    workbenchWindow.emit("webContents:will-navigate", { preventDefault: () => prevented.push(true) }, "file:///C:/Windows/System32/calc.exe");
+    expect(prevented).toEqual([true, true]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(openedExternally).toEqual([]);
+  });
+
+  it("keeps same-origin will-navigate under the existing in-page navigation policy", async () => {
+    const openedExternally: string[] = [];
+    const { provider, workbenchWindow } = workbenchHarness((url) => {
+      openedExternally.push(url);
+    });
+    await provider.openOrFocusWorkbench("http://127.0.0.1:8002/");
+    workbenchWindow.loadURL("http://127.0.0.1:8002/");
+
+    let preventCount = 0;
+    workbenchWindow.emit("webContents:will-navigate", { preventDefault: () => {
+      preventCount += 1;
+    } }, "http://127.0.0.1:8002/teams");
+    expect(preventCount).toBe(1);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(openedExternally).toEqual([]);
+  });
+});
+
+describe("shouldRouteWorkbenchNavigationExternally", () => {
+  const workbenchOrigin = "http://127.0.0.1:8002";
+
+  it("routes openable external origins", () => {
+    expect(shouldRouteWorkbenchNavigationExternally({ workbenchOrigin, nextUrl: "https://example.com/docs" })).toBe(true);
+    expect(shouldRouteWorkbenchNavigationExternally({ workbenchOrigin, nextUrl: "http://example.com/a" })).toBe(true);
+    expect(shouldRouteWorkbenchNavigationExternally({ workbenchOrigin, nextUrl: "mailto:support@example.com" })).toBe(true);
+  });
+
+  it("keeps same-origin and non-openable navigations inside the existing policy", () => {
+    expect(shouldRouteWorkbenchNavigationExternally({ workbenchOrigin, nextUrl: "http://127.0.0.1:8002/teams" })).toBe(false);
+    expect(shouldRouteWorkbenchNavigationExternally({ workbenchOrigin, nextUrl: "http://127.0.0.1:9002/teams" })).toBe(true);
+    expect(shouldRouteWorkbenchNavigationExternally({ workbenchOrigin, nextUrl: "file:///C:/a.pdf" })).toBe(false);
+    expect(shouldRouteWorkbenchNavigationExternally({ workbenchOrigin, nextUrl: "javascript:alert(1)" })).toBe(false);
+    expect(shouldRouteWorkbenchNavigationExternally({ workbenchOrigin, nextUrl: "not a url" })).toBe(false);
+    expect(shouldRouteWorkbenchNavigationExternally({ workbenchOrigin, nextUrl: "" })).toBe(false);
+  });
+});
+
+describe("shouldCancelWorkbenchForeignNavigation", () => {
+  const workbenchOrigin = "http://127.0.0.1:8002";
+
+  it("cancels non-openable foreign-origin navigations such as file: and custom protocols", () => {
+    expect(shouldCancelWorkbenchForeignNavigation({ workbenchOrigin, nextUrl: "file:///C:/a.pdf" })).toBe(true);
+    expect(shouldCancelWorkbenchForeignNavigation({ workbenchOrigin, nextUrl: "vibelncher://settings" })).toBe(true);
+    expect(shouldCancelWorkbenchForeignNavigation({ workbenchOrigin, nextUrl: "about:blank" })).toBe(true);
+  });
+
+  it("leaves openable URLs to the external routing and same-origin/unparseable targets to the legacy policy", () => {
+    expect(shouldCancelWorkbenchForeignNavigation({ workbenchOrigin, nextUrl: "https://example.com/docs" })).toBe(false);
+    expect(shouldCancelWorkbenchForeignNavigation({ workbenchOrigin, nextUrl: "http://127.0.0.1:8002/teams" })).toBe(false);
+    expect(shouldCancelWorkbenchForeignNavigation({ workbenchOrigin, nextUrl: "not a url" })).toBe(false);
+    expect(shouldCancelWorkbenchForeignNavigation({ workbenchOrigin, nextUrl: "" })).toBe(false);
+  });
+});
+
 describe("Electron URL policy", () => {
   it("allows local HTTP URLs from the expected origin", () => {
     expect(assertLocalHttpUrl("http://127.0.0.1:8765/launcher", "http://127.0.0.1:8765")).toBe(
@@ -1348,8 +1503,11 @@ describe("IPC channels", () => {
       "moveDesktopPetWindowDrag",
       "notifyConversationCompleted",
       "openConversationFromPet",
+      "openExternalUrl",
+      "openPath",
       "refreshLauncherState",
-      "requestDesktopShellExit"
+      "requestDesktopShellExit",
+      "showItemInFolder"
     ]);
   });
 

@@ -36,6 +36,7 @@ live outside the shell.
 | Mental-state rows | `conversationMentalState.ts` |
 | Composer shortcuts / slash commands | `composerShortcuts.ts`, `conversationSlashCommandSuggestions.ts` |
 | Image artifacts / preview dialog | `ConversationImageArtifactView.tsx`, `ConversationImagePreviewDialog.tsx` |
+| Turn file deliveries / recorded patches | `ConversationFileDeliveries.tsx`, `conversationFileDeliveryModel.ts`; successful native tool calls only, no session-level changed-file attribution. Content is a turn snapshot, patches are ordered operations rather than a net filesystem diff. HTML uses the shared static sandbox preview. |
 | Turn avatar / header compaction | `conversationTurnAvatar.ts`, `ConversationTurnAvatarContent.tsx` |
 | Agent thread bridge / projection hooks | `useAgentThread.ts`, `useAgentMessageTimelineProjection.ts` |
 | Prefetch (idle warm, no mount) | `prefetchConversationView.ts`, `LazyConversationView.tsx` |

@@ -1,6 +1,7 @@
 import type { DesktopPaths } from "../paths.js";
 import { isLauncherAppUrl, launcherAppOriginFor } from "../protocol/launcherAppProtocol.js";
 import { assertLocalHttpUrl } from "../security/urlPolicy.js";
+import { isExternalOpenableUrl } from "../security/externalOpenPolicy.js";
 import { desktopPetWindowUrl } from "./petWindow.js";
 import { closedWindowState, type ElectronWindowRole, type ManagedWindowState } from "./windowProviderTypes.js";
 
@@ -71,6 +72,7 @@ export type ElectronWindowProviderOptions = {
   onWorkbenchCloseRequest?: () => void | Promise<void>;
   onWorkbenchClosed?: () => void | Promise<void>;
   onWorkbenchOpenRequest?: () => void | Promise<void>;
+  openExternalUrl?: (url: string) => void | Promise<void>;
   onInstanceCloseRequest?: (instanceId: string) => void | Promise<void>;
   onWorkbenchFocusAttentionClear?: () => void;
   onOsSessionEnd?: (event: "query-session-end" | "session-end", role: ElectronWindowRole) => void;
@@ -134,6 +136,7 @@ export class ElectronWindowProvider {
   private readonly onWorkbenchCloseRequest: () => void | Promise<void>;
   private readonly onWorkbenchClosed: () => void | Promise<void>;
   private readonly onWorkbenchOpenRequest: () => void | Promise<void>;
+  private readonly openExternalUrl: (url: string) => void | Promise<void>;
   private readonly onInstanceCloseRequest: (instanceId: string) => void | Promise<void>;
   private readonly onWorkbenchFocusAttentionClear: () => void;
   private readonly onOsSessionEnd: (event: "query-session-end" | "session-end", role: ElectronWindowRole) => void;
@@ -176,6 +179,7 @@ export class ElectronWindowProvider {
     this.onWorkbenchOpenRequest = options.onWorkbenchOpenRequest ?? (async () => {
       await this.openOrFocusWorkbench();
     });
+    this.openExternalUrl = options.openExternalUrl ?? (() => undefined);
     this.onInstanceCloseRequest = options.onInstanceCloseRequest ?? (() => undefined);
     this.onWorkbenchFocusAttentionClear = options.onWorkbenchFocusAttentionClear ?? (() => undefined);
     this.onOsSessionEnd = options.onOsSessionEnd ?? (() => undefined);
@@ -768,11 +772,22 @@ export class ElectronWindowProvider {
     window.webContents.on("render-process-gone", () => role !== "pet" && void this.reportState(this.stateFor(role)));
     if (role === "workbench") {
       window.webContents.on("will-navigate", (event, url) => {
+        const nextUrl = String(url ?? "");
+        const workbenchOrigin = new URL(this.workbenchUrl).origin;
+        if (shouldRouteWorkbenchNavigationExternally({ workbenchOrigin, nextUrl })) {
+          preventWindowClose(event);
+          this.openExternalInSystemBrowser(nextUrl);
+          return;
+        }
+        if (shouldCancelWorkbenchForeignNavigation({ workbenchOrigin, nextUrl })) {
+          preventWindowClose(event);
+          return;
+        }
         if (
           shouldCancelWorkbenchInPageNavigation({
             readyUrl: this.workbenchReadyUrl,
             currentUrl: window.webContents.getURL(),
-            nextUrl: String(url ?? ""),
+            nextUrl
           })
         ) {
           preventWindowClose(event);
@@ -869,6 +884,10 @@ export class ElectronWindowProvider {
     window.webContents.setWindowOpenHandler((details) => {
       if (isManagedWorkbenchUrl(details.url, workbenchOrigin)) {
         void Promise.resolve(this.onWorkbenchOpenRequest()).catch(() => undefined);
+        return { action: "deny" };
+      }
+      if (isExternalOpenableUrl(details.url)) {
+        this.openExternalInSystemBrowser(details.url);
       }
       return { action: "deny" };
     });
@@ -882,9 +901,24 @@ export class ElectronWindowProvider {
     window.webContents.setWindowOpenHandler((details) => {
       if (isManagedWorkbenchUrl(details.url, workbenchOrigin)) {
         void Promise.resolve(this.onWorkbenchOpenRequest()).catch(() => undefined);
+        return { action: "deny" };
+      }
+      if (isExternalOpenableUrl(details.url)) {
+        this.openExternalInSystemBrowser(details.url);
       }
       return { action: "deny" };
     });
+  }
+
+  /**
+   * Hand an http/https/mailto URL to the operating system browser. The
+   * injected `openExternalUrl` is invoked defensively: a synchronous throw or
+   * rejection must never escape into the window-open handler callback.
+   */
+  private openExternalInSystemBrowser(url: string): void {
+    void Promise.resolve()
+      .then(() => this.openExternalUrl(url))
+      .catch(() => undefined);
   }
 
   private reportLeftoverWorkbenchIfPresent(): void {
@@ -1019,6 +1053,47 @@ function missingWindowFactory(role: ElectronWindowRole): ElectronWindowFactory {
   return () => {
     throw new Error(`missing ${role} window factory`);
   };
+}
+
+/**
+ * Whether a workbench main-frame navigation must leave the app instead of
+ * moving the window: an openable external URL (http/https/mailto) whose origin
+ * differs from the workbench origin is routed to the system browser, and the
+ * in-window navigation is cancelled so the product shell is never navigated
+ * away. Same-origin and non-openable URLs stay with the existing policy.
+ */
+export function shouldRouteWorkbenchNavigationExternally(options: {
+  workbenchOrigin: string;
+  nextUrl: string;
+}): boolean {
+  if (!isExternalOpenableUrl(options.nextUrl)) {
+    return false;
+  }
+  try {
+    return new URL(options.nextUrl).origin !== options.workbenchOrigin;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether a non-openable workbench navigation must be cancelled outright:
+ * file:, about:, custom app protocols and other schemes whose origin differs
+ * from the workbench must never replace the product document. Unparseable
+ * targets keep the legacy behavior (Chromium rejects them anyway).
+ */
+export function shouldCancelWorkbenchForeignNavigation(options: {
+  workbenchOrigin: string;
+  nextUrl: string;
+}): boolean {
+  if (isExternalOpenableUrl(options.nextUrl)) {
+    return false;
+  }
+  try {
+    return new URL(options.nextUrl).origin !== options.workbenchOrigin;
+  } catch {
+    return false;
+  }
 }
 
 export function shouldCancelWorkbenchInPageNavigation(options: {
