@@ -10,6 +10,7 @@ import {
   VButton,
   VChip,
   VContextualHint,
+  VHoverCard,
   VIconButton,
   VNativeButton,
   VPanel,
@@ -391,5 +392,49 @@ describe("VUI foundation primitives", () => {
     expect(hintMarkup).toContain("!rounded");
     expect(hintMarkup).toContain("border-0");
     expect(hintMarkup).toContain('stroke-width="1.4"');
+  });
+
+  it("renders hover card trigger through the supported Radix/shadcn wrapper structure", () => {
+    const markup = renderToStaticMarkup(
+      <VHoverCard content={<p>Turn preview</p>} open>
+        <button type="button">Hover</button>
+      </VHoverCard>,
+    );
+
+    expect(markup).toContain('data-slot="hover-card-trigger"');
+    expect(markup).toMatch(/<button(?=[^>]*data-slot="hover-card-trigger")[^>]*>Hover<\/button>/);
+    expect(markup).toContain('data-renderer="radix"');
+  });
+
+  it("keeps idle hover card overlays unmounted until hover intent", () => {
+    const markup = renderToStaticMarkup(
+      <VHoverCard content="Should not mount before intent">
+        <button type="button">Hover</button>
+      </VHoverCard>,
+    );
+
+    expect(markup).toContain('data-slot="hover-card-trigger"');
+    expect(markup).not.toContain("Should not mount before intent");
+    expect(markup).not.toContain('data-vui="hover-card-content"');
+  });
+
+  it("renders hover card content through the bounded shadcn renderer", () => {
+    const rendererSource = readFileSync(
+      resolve(import.meta.dirname, "renderers/shadcn/ShadcnHoverCard.tsx"),
+      "utf8",
+    );
+    const primitiveSource = readFileSync(
+      resolve(import.meta.dirname, "primitives/VHoverCard.tsx"),
+      "utf8",
+    );
+
+    expect(rendererSource).toContain("@radix-ui/react-hover-card");
+    expect(rendererSource).toContain('data-vui="hover-card-content"');
+    expect(rendererSource).toContain("max-w-80");
+    expect(rendererSource).toContain("max-w-[min(26rem,calc(100vw-1.5rem))]");
+    expect(rendererSource).toContain("shadow-[var(--vui-elevation-overlay)]");
+    // Dense-list safety: same intent-mount discipline as ShadcnTooltip.
+    expect(rendererSource).toContain("setOverlayMounted(true)");
+    expect(primitiveSource).toContain("ShadcnHoverCard");
   });
 });
